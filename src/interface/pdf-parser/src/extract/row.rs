@@ -8,6 +8,10 @@ pub struct RawRow {
     pub jockey: Option<String>,
     pub trainer: Option<String>,
     pub time_str: Option<String>,
+    /// `〃` appears in the time column when the horse finished in the same time as the previous
+    /// finisher. The numeric time itself is omitted, so callers should fall back to inheriting
+    /// the previous result's `time_seconds`.
+    pub time_inherits: bool,
     pub margin: Option<String>,
     pub odds: Option<f64>,
     pub horse_weight: Option<u32>,
@@ -187,13 +191,22 @@ pub fn parse_chunk(chunk: &[String]) -> RawRow {
         }
     }
 
-    // Margin keywords or short numeric on the time line trailing part.
-    let margin_keywords = ["ハナ", "アタマ", "クビ", "〃"];
+    // Margin keywords. `〃` is NOT a margin — it appears in the time column for same-time horses
+    // and is handled separately via `time_inherits`.
+    let margin_keywords = ["ハナ", "アタマ", "クビ"];
     for line in chunk.iter() {
         if let Some(kw) = margin_keywords.iter().find(|kw| line.contains(*kw)) {
             row.margin = Some(kw.to_string());
             break;
         }
+    }
+
+    // Time inheritance marker: a line that is exactly `〃` means "same time as the previous
+    // finisher". The numeric time is omitted in the source PDF.
+    if row.time_str.is_none()
+        && chunk.iter().any(|l| l.trim() == "〃")
+    {
+        row.time_inherits = true;
     }
 
     // Odds: scan lines after the result-table anchor (whichever of body weight / time appears).

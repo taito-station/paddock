@@ -70,6 +70,7 @@ fn build_race_from_block(lines: &[String]) -> Result<Option<Race>> {
     let mut results = Vec::with_capacity(chunks.len());
     let mut finisher_count: u32 = 0;
     let mut valid_chunk_idx: u32 = 0;
+    let mut previous_time: Option<TimeSeconds> = None;
     for chunk in chunks.iter() {
         let raw = row::parse_chunk(chunk);
         let gate_num = match raw.gate.and_then(|n| GateNum::try_from(n).ok()) {
@@ -113,7 +114,17 @@ fn build_race_from_block(lines: &[String]) -> Result<Option<Race>> {
         let time_seconds = raw
             .time_str
             .as_deref()
-            .and_then(|s| TimeSeconds::try_from_mss_str(s).ok());
+            .and_then(|s| TimeSeconds::try_from_mss_str(s).ok())
+            .or_else(|| {
+                if raw.time_inherits {
+                    previous_time
+                } else {
+                    None
+                }
+            });
+        if let Some(t) = time_seconds {
+            previous_time = Some(t);
+        }
 
         results.push(HorseResult {
             finishing_position,
