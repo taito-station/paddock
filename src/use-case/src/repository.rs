@@ -46,6 +46,7 @@ pub struct HorseStatsRow {
     pub by_distance_band: Vec<GroupStat>,
     pub by_gate_group: Vec<GroupStat>,
     pub by_track_condition: Vec<GroupStat>,
+    pub by_popularity_band: Vec<GroupStat>,
     pub overall: GroupStat,
 }
 

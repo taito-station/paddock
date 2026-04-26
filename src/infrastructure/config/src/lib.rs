@@ -17,6 +17,8 @@ pub struct Config {
     pub paddock_pdfs_dir: String,
     #[serde(default = "default_log_filter")]
     pub paddock_log: String,
+    #[serde(default = "default_parser")]
+    pub paddock_parser: String,
 }
 
 fn default_db_url() -> String {
@@ -29,6 +31,10 @@ fn default_pdfs_dir() -> String {
 
 fn default_log_filter() -> String {
     "info".to_string()
+}
+
+fn default_parser() -> String {
+    "mutool".to_string()
 }
 
 impl Config {

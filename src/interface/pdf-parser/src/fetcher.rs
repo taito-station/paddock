@@ -13,7 +13,9 @@ impl PdfFetcher for UreqFetcher {
             .call()
             .map_err(|e| Error::Fetch(e.to_string()))?;
         let mut buf = Vec::new();
-        resp.into_reader().read_to_end(&mut buf).map_err(Error::Io)?;
+        resp.into_reader()
+            .read_to_end(&mut buf)
+            .map_err(Error::Io)?;
         Ok(buf)
     }
 }

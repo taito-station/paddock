@@ -44,6 +44,7 @@ fn print_horse(s: &HorseStatsRow) {
     print_section("距離帯", &s.by_distance_band);
     print_section("枠順", &s.by_gate_group);
     print_section("馬場状態", &s.by_track_condition);
+    print_section("人気帯", &s.by_popularity_band);
 }
 
 fn print_course(s: &CourseStatsRow) {
