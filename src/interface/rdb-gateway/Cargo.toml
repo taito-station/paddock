@@ -1,0 +1,12 @@
+[package]
+name = "rdb-gateway"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+chrono           = { workspace = true }
+paddock-domain   = { workspace = true }
+paddock-use-case = { workspace = true }
+sqlx             = { workspace = true }
+thiserror        = { workspace = true }
+tokio            = { workspace = true }

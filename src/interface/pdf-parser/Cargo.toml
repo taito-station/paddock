@@ -1,0 +1,12 @@
+[package]
+name = "pdf-parser"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+chrono           = { workspace = true }
+paddock-domain   = { workspace = true }
+paddock-use-case = { workspace = true }
+regex            = { workspace = true }
+thiserror        = { workspace = true }
+ureq             = { workspace = true }
