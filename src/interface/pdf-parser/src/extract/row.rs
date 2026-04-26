@@ -14,31 +14,38 @@ pub struct RawRow {
     pub weight_change: Option<i32>,
 }
 
-/// Detect a "gate horse_num" row-start line. Several variants:
-///   "5 9"                             — pure pair
-///   "815"                             — glued (gate=8, horse=15)
-///   "812�インジケーター牡5芦53"       — gate-horse glued with name
+/// Detect a "gate horse_num" row-start line. Two distinct shapes:
+///   "5 9"                             — gate + space + 1-2 digit horse_num
+///   "815"                             — gate glued with 2-digit horse_num (no space)
+///   "812�インジケーター牡5芦53"       — gate-horse glued with name (still 2-digit horse)
 ///   "5 5 �イプシロンナンバー..."        — spaced gate-horse plus name on same line
-/// Reject lines that look like body-weight rows (e.g. "518± 0...") or odds (e.g. "1．7"):
-/// the next character after the captured horse_num must not be another digit or a sign.
+/// Single-digit-no-space (e.g. "55" = weight 55kg, "52" = apprentice weight) is rejected because
+/// it cannot be distinguished from a real gate-horse pair without forcing the unspaced form to
+/// always be 2-digit horse_num.
+/// Also reject when the trailing character looks like body-weight or odds context.
 pub fn parse_gate_horse_line(line: &str) -> Option<(u32, u32)> {
     let trimmed = line.trim();
-    let re = Regex::new(r"^([1-8])\s?(\d{1,2})(.?)").unwrap();
+    let re = Regex::new(r"^(?:([1-8])\s+(\d{1,2})|([1-8])(\d{2}))(.?)").unwrap();
     let c = re.captures(trimmed)?;
-    let g: u32 = c[1].parse().ok()?;
-    let h: u32 = c[2].parse().ok()?;
+    let (g, h): (u32, u32) = if let Some(g1) = c.get(1) {
+        (g1.as_str().parse().ok()?, c.get(2)?.as_str().parse().ok()?)
+    } else {
+        (
+            c.get(3)?.as_str().parse().ok()?,
+            c.get(4)?.as_str().parse().ok()?,
+        )
+    };
     if !(1..=18).contains(&h) {
         return None;
     }
-    if let Some(next) = c.get(3).map(|m| m.as_str()).and_then(|s| s.chars().next()) {
-        if next.is_ascii_digit()
+    if let Some(next) = c.get(5).map(|m| m.as_str()).and_then(|s| s.chars().next())
+        && (next.is_ascii_digit()
             || matches!(
                 next,
                 '±' | '＋' | '－' | '+' | '-' | '―' | '．' | '.' | '：' | ':' | '、' | ','
-            )
-        {
-            return None;
-        }
+            ))
+    {
+        return None;
     }
     Some((g, h))
 }
@@ -135,23 +142,34 @@ pub fn parse_chunk(chunk: &[String]) -> RawRow {
         row.horse_name = Some(cleaned);
     }
 
-    // Time: looking for "M:SS.f" or "M：SS．f" pattern, anywhere in chunk.
-    let time_re = Regex::new(r"(\d{1,2}[:：]\d{1,2}[.．]\d{1,2})").unwrap();
-    for line in chunk.iter() {
+    // Time: "M:SS.f" / "M：SS．f". Race times are 1-9 minutes, 2-digit seconds, 1-digit frac.
+    // The 1-digit minutes constraint prevents "61：11．6" from matching as 61 minutes
+    // when the body-weight delta and time are jammed together (e.g. "B 478－61：11．6").
+    let time_re = Regex::new(r"([1-9])[:：](\d{2})[.．](\d)").unwrap();
+    let mut time_match_in_line: Option<(usize, usize, usize)> = None; // (chunk_idx, start, end)
+    for (i, line) in chunk.iter().enumerate() {
         if let Some(c) = time_re.captures(line) {
-            row.time_str = Some(c[1].to_string());
+            let m = c.get(1).unwrap();
+            let end = c.get(3).unwrap().end();
+            row.time_str = Some(format!("{}:{}.{}", &c[1], &c[2], &c[3]));
+            time_match_in_line = Some((i, m.start(), end));
             break;
         }
     }
 
     // Horse body weight (3-digit) and weight change ([＋−±―] N) on a single line — e.g.
-    //   "B 478－61：11．6"  →  478, -6
+    //   "B 478－61：11．6"  →  478, -6   (split out the time first; parse "B 478－6" only)
     //   "474± 01：13．1 クビ" →  474,  0
     //   "490－6 （競走除外）" →  490, -6
     let body_re =
-        Regex::new(r"(?P<bw>\d{3})\s*(?P<sign>[＋＋\+\-－±―])\s*(?P<delta>\d{1,3})").unwrap();
-    for line in chunk.iter() {
-        if let Some(c) = body_re.captures(line) {
+        Regex::new(r"(?P<bw>\d{3})\s*(?P<sign>[＋＋\+\-－±―])\s*(?P<delta>\d{1,2})").unwrap();
+    let mut body_pos: Option<usize> = None;
+    for (i, line) in chunk.iter().enumerate() {
+        let scan_target: &str = match time_match_in_line {
+            Some((ti, pos, _)) if ti == i => &line[..pos],
+            _ => line.as_str(),
+        };
+        if let Some(c) = body_re.captures(scan_target) {
             row.horse_weight = c.name("bw").and_then(|m| m.as_str().parse().ok());
             let sign = c.name("sign").unwrap().as_str();
             let delta: i32 = c
@@ -164,6 +182,7 @@ pub fn parse_chunk(chunk: &[String]) -> RawRow {
                 "±" | "―" => 0,
                 _ => 0,
             });
+            body_pos = Some(i);
             break;
         }
     }
@@ -177,27 +196,29 @@ pub fn parse_chunk(chunk: &[String]) -> RawRow {
         }
     }
 
-    // Odds: scan lines after the time for fragments like "1．" / "7"  → 1.7
-    //                                                or "192．" / "5"  → 192.5
-    if let Some(time_pos) = chunk.iter().position(|l| {
-        Regex::new(r"\d{1,2}[:：]\d{1,2}[.．]\d{1,2}")
-            .unwrap()
-            .is_match(l)
-    }) {
-        let tail = &chunk[time_pos.saturating_add(1)..];
+    // Odds: scan lines after the result-table anchor (whichever of body weight / time appears).
+    // Same-tied horses ("〃") have no time line, so anchor to body weight in that case.
+    let anchor_pos = match (time_match_in_line, body_pos) {
+        (Some((ti, ..)), Some(bi)) => Some(ti.max(bi)),
+        (Some((ti, ..)), None) => Some(ti),
+        (None, Some(bi)) => Some(bi),
+        (None, None) => None,
+    };
+    if let Some(pos) = anchor_pos {
+        let tail = &chunk[pos.saturating_add(1)..];
         row.odds = parse_odds_fragments(tail);
-        // Sometimes odds appear on the same line as the time.
-        if row.odds.is_none() {
-            row.odds = parse_inline_odds(&chunk[time_pos]);
+        if row.odds.is_none()
+            && let Some((ti, _, time_end)) = time_match_in_line
+            && ti == pos
+        {
+            let after_time = &chunk[ti][time_end..];
+            row.odds = parse_inline_odds(after_time);
         }
     }
 
     // Jockey name: try the line(s) just before the body-weight line.
     // Skip any apprentice marker (▲ △ ☆ ◇).
-    if let Some(bw_pos) = chunk
-        .iter()
-        .position(|l| Regex::new(r"\d{3}\s*[＋＋\+\-－±―]").unwrap().is_match(l))
-    {
+    if let Some(bw_pos) = body_pos {
         if let Some(j) = guess_jockey(&chunk[..bw_pos]) {
             row.jockey = Some(j);
         }
@@ -210,20 +231,27 @@ pub fn parse_chunk(chunk: &[String]) -> RawRow {
 }
 
 fn parse_odds_fragments(tail: &[String]) -> Option<f64> {
+    let inline_re = Regex::new(r"^\s*(\d{1,4})[.．](\d{1,2})").unwrap();
     let int_re = Regex::new(r"^\s*(\d{1,4})[.．]\s*$").unwrap();
     let frac_re = Regex::new(r"^\s*(\d{1,2})").unwrap();
     let mut int_part: Option<u32> = None;
     for line in tail.iter() {
         let trimmed = line.trim();
+        if let Some(c) = inline_re.captures(trimmed) {
+            let ip: u32 = c[1].parse().ok()?;
+            let frac_str = c.get(2)?.as_str();
+            let frac: u32 = frac_str.parse().ok()?;
+            return Some(ip as f64 + (frac as f64) / 10f64.powi(frac_str.len() as i32));
+        }
         if let Some(c) = int_re.captures(trimmed) {
             int_part = c[1].parse().ok();
             continue;
         }
-        if let Some(ip) = int_part {
-            if let Some(c) = frac_re.captures(trimmed) {
-                let frac: u32 = c[1].parse().ok()?;
-                return Some(ip as f64 + (frac as f64) / 10f64.powi(c[1].len() as i32));
-            }
+        if let Some(ip) = int_part
+            && let Some(c) = frac_re.captures(trimmed)
+        {
+            let frac: u32 = c[1].parse().ok()?;
+            return Some(ip as f64 + (frac as f64) / 10f64.powi(c[1].len() as i32));
         }
     }
     None
