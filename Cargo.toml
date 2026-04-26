@@ -1,0 +1,29 @@
+[workspace]
+resolver = "3"
+members = [
+    "src/apps/parse-pdf",
+    "src/apps/analyze",
+]
+
+[workspace.dependencies]
+anyhow             = { version = "1.0.*" }
+chrono             = { version = "0.4.*", features = ["serde"] }
+clap               = { version = "4.5.*", features = ["derive"] }
+dotenvy            = { version = "0.15.*" }
+envy               = { version = "0.4.*" }
+regex              = { version = "1.11.*" }
+serde              = { version = "1.0.*", features = ["derive"] }
+sqlx               = { version = "0.8.*", features = ["runtime-tokio", "tls-native-tls", "sqlite", "chrono", "migrate"] }
+strum_macros       = { version = "0.27.*" }
+thiserror          = { version = "2.0.*" }
+tokio              = { version = "1.*", features = ["macros", "rt-multi-thread", "fs"] }
+tracing            = { version = "0.1.*" }
+tracing-log        = { version = "0.2.*" }
+tracing-subscriber = { version = "0.3.*", features = ["env-filter"] }
+ureq               = { version = "2.*", default-features = false, features = ["tls"] }
+
+paddock-domain     = { path = "src/domain" }
+paddock-use-case   = { path = "src/use-case" }
+paddock-config     = { path = "src/infrastructure/config" }
+pdf-parser         = { path = "src/interface/pdf-parser" }
+rdb-gateway        = { path = "src/interface/rdb-gateway" }

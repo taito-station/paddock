@@ -1,0 +1,19 @@
+[package]
+name = "analyze"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "paddock-analyze"
+path = "src/bin.rs"
+
+[dependencies]
+anyhow             = { workspace = true }
+clap               = { workspace = true }
+paddock-config     = { workspace = true }
+paddock-domain     = { workspace = true }
+paddock-use-case   = { workspace = true }
+rdb-gateway        = { workspace = true }
+tokio              = { workspace = true }
+tracing            = { workspace = true }
+tracing-subscriber = { workspace = true }
