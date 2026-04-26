@@ -4,7 +4,7 @@ mod row;
 use chrono::NaiveDate;
 use paddock_domain::{
     FinishingPosition, GateNum, HorseName, HorseNum, HorseResult, JockeyName, Race, RaceId,
-    TimeSeconds, TrainerName,
+    ResultStatus, TimeSeconds, TrainerName,
 };
 
 use crate::error::{Error, Result};
@@ -90,13 +90,11 @@ fn build_race_from_block(lines: &[String]) -> Result<Option<Race>> {
             None => continue,
         };
 
-        let scratched = chunk
-            .iter()
-            .any(|l| l.contains("競走除外") || l.contains("出走取消"));
+        let status = chunk_status(chunk);
         let beyond_finishers = field_size.is_some_and(|n| valid_chunk_idx >= n);
         valid_chunk_idx += 1;
 
-        let finishing_position = if scratched || beyond_finishers {
+        let finishing_position = if status != ResultStatus::Finished || beyond_finishers {
             None
         } else {
             finisher_count += 1;
@@ -128,6 +126,7 @@ fn build_race_from_block(lines: &[String]) -> Result<Option<Race>> {
 
         results.push(HorseResult {
             finishing_position,
+            status,
             gate_num,
             horse_num,
             horse_name,
@@ -157,6 +156,22 @@ fn build_race_from_block(lines: &[String]) -> Result<Option<Race>> {
         results,
     };
     Ok(Some(race))
+}
+
+/// Detect terminating-status keywords inside a horse chunk.
+fn chunk_status(chunk: &[String]) -> ResultStatus {
+    for line in chunk {
+        if line.contains("競走除外") {
+            return ResultStatus::Scratched;
+        }
+        if line.contains("出走取消") {
+            return ResultStatus::Cancelled;
+        }
+        if line.contains("競走中止") {
+            return ResultStatus::DidNotFinish;
+        }
+    }
+    ResultStatus::Finished
 }
 
 #[allow(dead_code)]

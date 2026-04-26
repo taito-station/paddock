@@ -45,12 +45,13 @@ pub async fn save_race(pool: &SqlitePool, race: &Race) -> Result<()> {
         sqlx::query(
             r#"
             INSERT INTO results
-                (race_id, finishing_position, gate_num, horse_num, horse_name,
+                (race_id, finishing_position, status, gate_num, horse_num, horse_name,
                  jockey, trainer, time_seconds, margin, odds, horse_weight, weight_change,
                  weight_carried, popularity)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
             ON CONFLICT(race_id, horse_num) DO UPDATE SET
                 finishing_position = excluded.finishing_position,
+                status = excluded.status,
                 gate_num = excluded.gate_num,
                 horse_name = excluded.horse_name,
                 jockey = excluded.jockey,
@@ -66,6 +67,7 @@ pub async fn save_race(pool: &SqlitePool, race: &Race) -> Result<()> {
         )
         .bind(race.race_id.value())
         .bind(r.finishing_position.as_ref().map(|p| p.value() as i64))
+        .bind(r.status.as_str())
         .bind(r.gate_num.value() as i64)
         .bind(r.horse_num.value() as i64)
         .bind(r.horse_name.value())

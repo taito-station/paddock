@@ -1,4 +1,4 @@
-use paddock_domain::{FinishingPosition, Race};
+use paddock_domain::{FinishingPosition, Race, ResultStatus};
 use paddock_use_case::Result as UcResult;
 use paddock_use_case::pdf_parser::PdfParser;
 use pdf_ocr::{OcrExtractor, OcrPageRows, OcrRow};
@@ -74,8 +74,10 @@ fn apply_ocr(races: &mut [Race], pages: &[OcrPageRows]) {
         }
 
         for (i, result) in race.results.iter_mut().enumerate() {
-            // finishing_position: replace with OCR value when sane.
+            // finishing_position: replace with OCR value when sane. Never assign to a horse that
+            // didn't actually run (Scratched / Cancelled / DidNotFinish).
             if positions_sane
+                && result.status == ResultStatus::Finished
                 && let Some(pos) = suggested_positions[i]
                 && let Ok(fp) = FinishingPosition::try_from(pos)
             {
