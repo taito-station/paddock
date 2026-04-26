@@ -1,13 +1,12 @@
 mod header;
 mod row;
 
-use chrono::NaiveDate;
 use paddock_domain::{
     FinishingPosition, GateNum, HorseName, HorseNum, HorseResult, JockeyName, Race, RaceId,
-    TimeSeconds, TrainerName,
+    ResultStatus, TimeSeconds, TrainerName,
 };
 
-use crate::error::{Error, Result};
+use crate::error::Result;
 
 pub use header::RaceHeader;
 pub use row::RawRow;
@@ -70,6 +69,7 @@ fn build_race_from_block(lines: &[String]) -> Result<Option<Race>> {
     let mut results = Vec::with_capacity(chunks.len());
     let mut finisher_count: u32 = 0;
     let mut valid_chunk_idx: u32 = 0;
+    let mut previous_time: Option<TimeSeconds> = None;
     for chunk in chunks.iter() {
         let raw = row::parse_chunk(chunk);
         let gate_num = match raw.gate.and_then(|n| GateNum::try_from(n).ok()) {
@@ -89,13 +89,11 @@ fn build_race_from_block(lines: &[String]) -> Result<Option<Race>> {
             None => continue,
         };
 
-        let scratched = chunk
-            .iter()
-            .any(|l| l.contains("競走除外") || l.contains("出走取消"));
+        let status = chunk_status(chunk);
         let beyond_finishers = field_size.is_some_and(|n| valid_chunk_idx >= n);
         valid_chunk_idx += 1;
 
-        let finishing_position = if scratched || beyond_finishers {
+        let finishing_position = if status != ResultStatus::Finished || beyond_finishers {
             None
         } else {
             finisher_count += 1;
@@ -113,10 +111,19 @@ fn build_race_from_block(lines: &[String]) -> Result<Option<Race>> {
         let time_seconds = raw
             .time_str
             .as_deref()
-            .and_then(|s| TimeSeconds::try_from_mss_str(s).ok());
+            .and_then(|s| TimeSeconds::try_from_mss_str(s).ok())
+            .or(if raw.time_inherits {
+                previous_time
+            } else {
+                None
+            });
+        if let Some(t) = time_seconds {
+            previous_time = Some(t);
+        }
 
         results.push(HorseResult {
             finishing_position,
+            status,
             gate_num,
             horse_num,
             horse_name,
@@ -127,6 +134,8 @@ fn build_race_from_block(lines: &[String]) -> Result<Option<Race>> {
             odds: raw.odds,
             horse_weight: raw.horse_weight,
             weight_change: raw.weight_change,
+            weight_carried: None,
+            popularity: None,
         });
     }
 
@@ -146,8 +155,59 @@ fn build_race_from_block(lines: &[String]) -> Result<Option<Race>> {
     Ok(Some(race))
 }
 
-#[allow(dead_code)]
-fn naive_date(year: i32, month: u32, day: u32) -> Result<NaiveDate> {
-    NaiveDate::from_ymd_opt(year, month, day)
-        .ok_or_else(|| Error::Parse(format!("invalid date {year}-{month}-{day}")))
+/// Detect terminating-status keywords inside a horse chunk.
+fn chunk_status(chunk: &[String]) -> ResultStatus {
+    for line in chunk {
+        if line.contains("競走除外") {
+            return ResultStatus::Scratched;
+        }
+        if line.contains("出走取消") {
+            return ResultStatus::Cancelled;
+        }
+        if line.contains("競走中止") {
+            return ResultStatus::DidNotFinish;
+        }
+    }
+    ResultStatus::Finished
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn s(v: &str) -> String {
+        v.to_string()
+    }
+
+    #[test]
+    fn chunk_status_finished_by_default() {
+        let chunk = vec![
+            s("5 9"),
+            s("ロードトライデント牡3栗"),
+            s("B 478－61：11．6"),
+        ];
+        assert_eq!(chunk_status(&chunk), ResultStatus::Finished);
+    }
+
+    #[test]
+    fn chunk_status_scratched_keyword() {
+        let chunk = vec![
+            s("7 13"),
+            s("マーゴットリック牡3黒鹿"),
+            s("490－6 （競走除外）"),
+        ];
+        assert_eq!(chunk_status(&chunk), ResultStatus::Scratched);
+    }
+
+    #[test]
+    fn chunk_status_cancelled_keyword() {
+        let chunk = vec![s("1 1"), s("テスト馬"), s("（出走取消）")];
+        assert_eq!(chunk_status(&chunk), ResultStatus::Cancelled);
+    }
+
+    #[test]
+    fn chunk_status_did_not_finish_keyword() {
+        let chunk = vec![s("2 3"), s("テスト馬"), s("（競走中止）")];
+        assert_eq!(chunk_status(&chunk), ResultStatus::DidNotFinish);
+    }
 }

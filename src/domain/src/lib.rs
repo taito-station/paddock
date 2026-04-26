@@ -5,7 +5,7 @@ pub mod string;
 
 pub use error::{Error, Result};
 pub use horse_result::{
-    FinishingPosition, GateNum, HorseName, HorseNum, HorseResult, JockeyName, TimeSeconds,
-    TrainerName,
+    FinishingPosition, GateNum, HorseName, HorseNum, HorseResult, JockeyName, ResultStatus,
+    TimeSeconds, TrainerName,
 };
 pub use race::{Race, RaceId, Surface, TrackCondition, Venue, Weather};

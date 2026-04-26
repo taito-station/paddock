@@ -1,12 +1,23 @@
 use anyhow::Context;
 use paddock_config::Config;
 use paddock_use_case::Interactor;
-use pdf_parser::{MutoolParser, UreqFetcher};
+use paddock_use_case::dto::pdf::ingest::IngestPdfResponse;
+use pdf_parser::{HybridParser, MutoolParser, UreqFetcher};
 use rdb_gateway::{SqliteRepository, pool};
 use tracing_subscriber::{EnvFilter, fmt};
 
-pub struct App {
-    pub interactor: Interactor<SqliteRepository, MutoolParser, UreqFetcher>,
+pub enum App {
+    Mutool(Interactor<SqliteRepository, MutoolParser, UreqFetcher>),
+    Hybrid(Interactor<SqliteRepository, HybridParser, UreqFetcher>),
+}
+
+impl App {
+    pub async fn ingest_pdf(&self, source: &str) -> paddock_use_case::Result<IngestPdfResponse> {
+        match self {
+            App::Mutool(i) => i.ingest_pdf(source).await,
+            App::Hybrid(i) => i.ingest_pdf(source).await,
+        }
+    }
 }
 
 pub async fn build_app() -> anyhow::Result<App> {
@@ -25,8 +36,11 @@ pub async fn build_app() -> anyhow::Result<App> {
         .context("connect SQLite pool")?;
     pool::migrate(&pool).await.context("apply migrations")?;
     let repo = SqliteRepository::new(pool);
-    let interactor = Interactor::new(repo, MutoolParser, UreqFetcher);
-    Ok(App { interactor })
+    let app = match config.paddock_parser.as_str() {
+        "hybrid" => App::Hybrid(Interactor::new(repo, HybridParser::new(), UreqFetcher)),
+        _ => App::Mutool(Interactor::new(repo, MutoolParser, UreqFetcher)),
+    };
+    Ok(app)
 }
 
 fn ensure_data_dir(database_url: &str) -> anyhow::Result<()> {

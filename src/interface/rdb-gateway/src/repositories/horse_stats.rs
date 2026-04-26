@@ -32,6 +32,8 @@ pub async fn horse_stats(pool: &SqlitePool, name: &HorseName) -> Result<HorseSta
     )
     .await?;
 
+    let by_popularity_band = group_by_popularity_band(pool, n).await?;
+
     let overall = overall_stat(pool, n).await?;
 
     Ok(HorseStatsRow {
@@ -40,6 +42,7 @@ pub async fn horse_stats(pool: &SqlitePool, name: &HorseName) -> Result<HorseSta
         by_distance_band,
         by_gate_group,
         by_track_condition,
+        by_popularity_band,
         overall,
     })
 }
@@ -121,6 +124,39 @@ async fn group_by_distance_band(pool: &SqlitePool, horse_name: &str) -> Result<V
             INNER JOIN races ON races.race_id = results.race_id
             WHERE results.horse_name = $1
               AND results.finishing_position IS NOT NULL
+              AND {predicate}
+            "#
+        );
+        let row: (i64, i64, i64) = sqlx::query_as(&q).bind(horse_name).fetch_one(pool).await?;
+        stats.push(GroupStat {
+            label: label.to_string(),
+            starts: row.0 as u32,
+            wins: row.1 as u32,
+            places: row.2 as u32,
+        });
+    }
+    Ok(stats)
+}
+
+async fn group_by_popularity_band(pool: &SqlitePool, horse_name: &str) -> Result<Vec<GroupStat>> {
+    let bands: &[(&str, &str)] = &[
+        ("1人気", "popularity = 1"),
+        ("2-5人気", "popularity BETWEEN 2 AND 5"),
+        ("6-10人気", "popularity BETWEEN 6 AND 10"),
+        ("11人気-", "popularity >= 11"),
+    ];
+    let mut stats = Vec::with_capacity(bands.len());
+    for (label, predicate) in bands {
+        let q = format!(
+            r#"
+            SELECT
+                COUNT(*) AS starts,
+                SUM(CASE WHEN finishing_position = 1 THEN 1 ELSE 0 END) AS wins,
+                SUM(CASE WHEN finishing_position IN (1,2) THEN 1 ELSE 0 END) AS places
+            FROM results
+            WHERE horse_name = $1
+              AND finishing_position IS NOT NULL
+              AND popularity IS NOT NULL
               AND {predicate}
             "#
         );

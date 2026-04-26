@@ -7,7 +7,7 @@ use clap::Parser;
 async fn main() -> anyhow::Result<()> {
     let args = cli::Cli::parse();
     let app = setup::build_app().await?;
-    let response = app.interactor.ingest_pdf(&args.source).await?;
+    let response = app.ingest_pdf(&args.source).await?;
     println!(
         "ingested: {} race(s), {} horse result(s) from {}",
         response.races_saved, response.horses_saved, args.source

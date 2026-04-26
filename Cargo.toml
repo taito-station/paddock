@@ -16,6 +16,7 @@ serde              = { version = "1.0.*", features = ["derive"] }
 sqlx               = { version = "0.8.*", features = ["runtime-tokio", "tls-native-tls", "sqlite", "chrono", "migrate"] }
 strum_macros       = { version = "0.27.*" }
 thiserror          = { version = "2.0.*" }
+tempfile           = { version = "3.*" }
 tokio              = { version = "1.*", features = ["macros", "rt-multi-thread", "fs"] }
 tracing            = { version = "0.1.*" }
 tracing-log        = { version = "0.2.*" }
@@ -25,5 +26,6 @@ ureq               = { version = "2.*", default-features = false, features = ["t
 paddock-domain     = { path = "src/domain" }
 paddock-use-case   = { path = "src/use-case" }
 paddock-config     = { path = "src/infrastructure/config" }
+pdf-ocr            = { path = "src/interface/pdf-ocr" }
 pdf-parser         = { path = "src/interface/pdf-parser" }
 rdb-gateway        = { path = "src/interface/rdb-gateway" }

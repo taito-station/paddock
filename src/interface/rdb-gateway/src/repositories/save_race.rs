@@ -45,11 +45,13 @@ pub async fn save_race(pool: &SqlitePool, race: &Race) -> Result<()> {
         sqlx::query(
             r#"
             INSERT INTO results
-                (race_id, finishing_position, gate_num, horse_num, horse_name,
-                 jockey, trainer, time_seconds, margin, odds, horse_weight, weight_change)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                (race_id, finishing_position, status, gate_num, horse_num, horse_name,
+                 jockey, trainer, time_seconds, margin, odds, horse_weight, weight_change,
+                 weight_carried, popularity)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
             ON CONFLICT(race_id, horse_num) DO UPDATE SET
                 finishing_position = excluded.finishing_position,
+                status = excluded.status,
                 gate_num = excluded.gate_num,
                 horse_name = excluded.horse_name,
                 jockey = excluded.jockey,
@@ -58,11 +60,14 @@ pub async fn save_race(pool: &SqlitePool, race: &Race) -> Result<()> {
                 margin = excluded.margin,
                 odds = excluded.odds,
                 horse_weight = excluded.horse_weight,
-                weight_change = excluded.weight_change
+                weight_change = excluded.weight_change,
+                weight_carried = excluded.weight_carried,
+                popularity = excluded.popularity
             "#,
         )
         .bind(race.race_id.value())
         .bind(r.finishing_position.as_ref().map(|p| p.value() as i64))
+        .bind(r.status.to_string())
         .bind(r.gate_num.value() as i64)
         .bind(r.horse_num.value() as i64)
         .bind(r.horse_name.value())
@@ -73,6 +78,8 @@ pub async fn save_race(pool: &SqlitePool, race: &Race) -> Result<()> {
         .bind(r.odds)
         .bind(r.horse_weight.map(|w| w as i64))
         .bind(r.weight_change.map(|w| w as i64))
+        .bind(r.weight_carried)
+        .bind(r.popularity.map(|p| p as i64))
         .execute(&mut *tx)
         .await?;
     }

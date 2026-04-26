@@ -1117,14 +1117,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "pdf-ocr"
+version = "0.1.0"
+dependencies = [
+ "tempfile",
+ "thiserror",
+ "tracing",
+]
+
+[[package]]
 name = "pdf-parser"
 version = "0.1.0"
 dependencies = [
  "chrono",
  "paddock-domain",
  "paddock-use-case",
+ "pdf-ocr",
  "regex",
  "thiserror",
+ "tracing",
  "ureq",
 ]
 
