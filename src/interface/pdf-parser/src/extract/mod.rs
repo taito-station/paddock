@@ -127,6 +127,8 @@ fn build_race_from_block(lines: &[String]) -> Result<Option<Race>> {
             odds: raw.odds,
             horse_weight: raw.horse_weight,
             weight_change: raw.weight_change,
+            weight_carried: None,
+            popularity: None,
         });
     }
 

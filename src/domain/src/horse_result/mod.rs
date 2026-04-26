@@ -27,4 +27,6 @@ pub struct HorseResult {
     pub odds: Option<f64>,
     pub horse_weight: Option<u32>,
     pub weight_change: Option<i32>,
+    pub weight_carried: Option<f64>,
+    pub popularity: Option<u32>,
 }
