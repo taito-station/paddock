@@ -67,7 +67,7 @@ pub async fn save_race(pool: &SqlitePool, race: &Race) -> Result<()> {
         )
         .bind(race.race_id.value())
         .bind(r.finishing_position.as_ref().map(|p| p.value() as i64))
-        .bind(r.status.as_str())
+        .bind(r.status.to_string())
         .bind(r.gate_num.value() as i64)
         .bind(r.horse_num.value() as i64)
         .bind(r.horse_name.value())

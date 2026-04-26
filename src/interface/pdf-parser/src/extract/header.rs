@@ -79,15 +79,15 @@ pub fn parse_header(lines: &[String]) -> Result<Option<RaceHeader>> {
         {
             surface = Surface::try_from(c.name("s").unwrap().as_str()).ok();
         }
-        if distance.is_none() {
-            if let Some(d) = parse_distance(line) {
-                distance = Some(d);
-            }
+        if distance.is_none()
+            && let Some(d) = parse_distance(line)
+        {
+            distance = Some(d);
         }
-        if track_condition.is_none() {
-            if let Some(c) = condition_re.captures(line.trim()) {
-                track_condition = TrackCondition::try_from(c.get(1).unwrap().as_str()).ok();
-            }
+        if track_condition.is_none()
+            && let Some(c) = condition_re.captures(line.trim())
+        {
+            track_condition = TrackCondition::try_from(c.get(1).unwrap().as_str()).ok();
         }
     }
 
@@ -133,7 +133,7 @@ fn parse_distance(line: &str) -> Option<u32> {
         .chars()
         .filter(|c| c.is_ascii_digit() || *c == '，' || *c == ',')
         .collect();
-    let normalized = only_digits.replace('，', "").replace(',', "");
+    let normalized = only_digits.replace(['，', ','], "");
     if normalized.is_empty() {
         return None;
     }

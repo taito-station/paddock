@@ -89,6 +89,12 @@ cargo run -p analyze -- jockey "ルメール"
 - 環境変数 `PADDOCK_DB_URL` で接続先を上書き可能（例: `sqlite://./other.db?mode=rwc`）
 - DB を作り直したい場合は `data/paddock.db` を消してから取り込み直し
 
+### マイグレーション注意
+
+`results.status` カラム (migration `20260427000002`) は `NOT NULL DEFAULT 'finished'`。
+既存 DB に当てると過去レコードは全て `finished` になるため、競走除外馬が混在していた場合は誤情報になる。
+status 情報を正確に取り直すには対象 PDF を再 ingest する（同じ `race_id` の UPSERT で全フィールドが上書きされる）。
+
 ## 開発
 
 ワークスペース全体ビルド:
