@@ -168,27 +168,59 @@ pub fn parse_chunk(chunk: &[String]) -> RawRow {
     let body_re =
         Regex::new(r"(?P<bw>\d{3})\s*(?P<sign>[＋＋\+\-－±―])\s*(?P<delta>\d{1,2})").unwrap();
     let mut body_pos: Option<usize> = None;
+    let mut body_caps: Option<(u32, i32)> = None;
     for (i, line) in chunk.iter().enumerate() {
         let scan_target: &str = match time_match_in_line {
             Some((ti, pos, _)) if ti == i => &line[..pos],
             _ => line.as_str(),
         };
         if let Some(c) = body_re.captures(scan_target) {
-            row.horse_weight = c.name("bw").and_then(|m| m.as_str().parse().ok());
+            let bw: u32 = c.name("bw").and_then(|m| m.as_str().parse().ok()).unwrap_or(0);
             let sign = c.name("sign").unwrap().as_str();
             let delta: i32 = c
                 .name("delta")
                 .and_then(|m| m.as_str().parse().ok())
                 .unwrap_or(0);
-            row.weight_change = Some(match sign {
-                "＋" | "+" => delta,
-                "−" | "－" | "-" => -delta,
-                "±" | "―" => 0,
-                _ => 0,
-            });
+            body_caps = Some((bw, signed_delta(sign, delta)));
             body_pos = Some(i);
             break;
         }
+    }
+    // Fallback: weight on its own line, sign on the next line (e.g. "488\n―1：57．9").
+    // The next line's leading sign — typically `―` or `±` for "no change" — collides
+    // visually with the time's leading minute digit, so we don't try to read a delta value;
+    // we just take the sign and let `signed_delta` decide (`―`/`±` → 0).
+    if body_pos.is_none() {
+        let weight_only_re = Regex::new(r"^\s*(?P<bw>\d{3})\s*$").unwrap();
+        let sign_re = Regex::new(r"^\s*(?P<sign>[＋＋\+\-－±―])\s*(?P<delta>\d{1,2})?").unwrap();
+        for i in 0..chunk.len().saturating_sub(1) {
+            let Some(wc) = weight_only_re.captures(chunk[i].trim()) else {
+                continue;
+            };
+            let Some(sc) = sign_re.captures(&chunk[i + 1]) else {
+                continue;
+            };
+            let bw: u32 = wc["bw"].parse().unwrap_or(0);
+            let sign = sc.name("sign").unwrap().as_str();
+            // For ＋/－ the next-line digit IS the delta when no time follows on the same line;
+            // when a time DOES follow on the same line, that digit is the time's minutes and
+            // the actual delta is unknowable from text alone — we conservatively assume 0.
+            let next_has_time = matches!(time_match_in_line, Some((ti, _, _)) if ti == i + 1);
+            let delta: i32 = if next_has_time {
+                0
+            } else {
+                sc.name("delta")
+                    .and_then(|m| m.as_str().parse().ok())
+                    .unwrap_or(0)
+            };
+            body_caps = Some((bw, signed_delta(sign, delta)));
+            body_pos = Some(i);
+            break;
+        }
+    }
+    if let Some((bw, change)) = body_caps {
+        row.horse_weight = Some(bw);
+        row.weight_change = Some(change);
     }
 
     // Margin keywords. `〃` is NOT a margin — it appears in the time column for same-time horses
@@ -241,6 +273,15 @@ pub fn parse_chunk(chunk: &[String]) -> RawRow {
     }
 
     row
+}
+
+fn signed_delta(sign: &str, delta: i32) -> i32 {
+    match sign {
+        "＋" | "+" => delta,
+        "−" | "－" | "-" => -delta,
+        "±" | "―" => 0,
+        _ => 0,
+    }
 }
 
 fn parse_odds_fragments(tail: &[String]) -> Option<f64> {
