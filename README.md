@@ -38,8 +38,10 @@ cargo run -p parse-pdf -- https://www.jra.go.jp/datafile/seiseki/report/2026/202
 
 ローカルファイルから:
 ```bash
-cargo run -p parse-pdf -- pdfs/2026-3nakayama6.pdf
+cargo run -p parse-pdf -- pdfs/inbox/2026-3nakayama6.pdf
 ```
+
+`pdfs/inbox/` 配下のファイルを引数にした場合、取り込みが成功した PDF は `pdfs/done/` へ自動的に移動される（未取り込みファイルが一目で分かるようにするため）。`samples/` などインボックス外のパスは移動されない。
 
 ### パーサーモード切替
 
