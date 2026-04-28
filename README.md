@@ -38,8 +38,16 @@ cargo run -p parse-pdf -- https://www.jra.go.jp/datafile/seiseki/report/2026/202
 
 ローカルファイルから:
 ```bash
-cargo run -p parse-pdf -- pdfs/2026-3nakayama6.pdf
+cargo run -p parse-pdf -- pdfs/inbox/2026-3nakayama6.pdf
 ```
+
+複数ファイルを並列で取り込む（既定は CPU コア数まで同時実行）:
+```bash
+cargo run -p parse-pdf -- pdfs/inbox/*.pdf
+cargo run -p parse-pdf -- -j 4 pdfs/inbox/*.pdf   # 並列度を明示
+```
+
+`pdfs/inbox/` 配下のファイルを引数にした場合、取り込みが成功した PDF は `pdfs/done/` へ自動的に移動される（未取り込みファイルが一目で分かるようにするため）。`samples/` などインボックス外のパスは移動されない。複数ファイル指定時、1 件でも失敗があれば終了コードが非 0 になる（成功分の取り込みと移動は維持される）。
 
 ### パーサーモード切替
 
