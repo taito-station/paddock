@@ -4,10 +4,11 @@ use crate::interactor::Interactor;
 use crate::pdf_fetcher::PdfFetcher;
 use crate::pdf_parser::PdfParser;
 use crate::repository::Repository;
+use crate::util::is_http_url;
 
 impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
     pub async fn ingest_pdf(&self, source: &str) -> Result<IngestPdfResponse> {
-        let bytes = if source.starts_with("http://") || source.starts_with("https://") {
+        let bytes = if is_http_url(source) {
             self.pdf_fetcher.fetch(source)?
         } else {
             std::fs::read(source).map_err(|e| {

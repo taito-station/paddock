@@ -4,6 +4,7 @@ pub mod interactor;
 pub mod pdf_fetcher;
 pub mod pdf_parser;
 pub mod repository;
+pub mod util;
 
 pub use error::{Error, Result};
 pub use interactor::Interactor;
