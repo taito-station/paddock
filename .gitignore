@@ -3,6 +3,6 @@
 /data/*.db-journal
 /data/*.db-wal
 /data/*.db-shm
-/pdfs/*.pdf
+/pdfs/**/*.pdf
 .DS_Store
 .env
