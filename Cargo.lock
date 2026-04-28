@@ -1111,6 +1111,7 @@ dependencies = [
  "paddock-use-case",
  "pdf-parser",
  "rdb-gateway",
+ "tempfile",
  "tokio",
  "tracing",
  "tracing-subscriber",
