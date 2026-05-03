@@ -62,10 +62,12 @@ cargo run -p parse-pdf -- -j 4 pdfs/inbox/*.pdf   # 並列度を明示
 
 ```bash
 RUST_LOG=info cargo run -p parse-pdf -- pdfs/inbox/2026-3nakayama6.pdf
-# INFO ingest{source=pdfs/inbox/2026-3nakayama6.pdf}: ocr starting race_count=12
-# INFO ingest{source=pdfs/inbox/2026-3nakayama6.pdf}: ocr extracted, applying merge pages=12 elapsed_ms=15234
+# INFO ingest{source=pdfs/inbox/2026-3nakayama6.pdf}: ocr starting race_count=12 bytes=696311
+# INFO ingest{source=pdfs/inbox/2026-3nakayama6.pdf}: ocr extracted, applying merge pages=7 elapsed_ms=55114
 # INFO ingest{source=pdfs/inbox/2026-3nakayama6.pdf}: ocr merge complete
 ```
+
+JRA PDF は複数レースを 1 ページに収める形式があるため `pages` は `race_count` と一致しないことが多い。
 
 取り込み後の確認:
 ```bash

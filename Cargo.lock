@@ -1069,7 +1069,6 @@ dependencies = [
  "chrono",
  "paddock-domain",
  "thiserror",
- "tracing",
 ]
 
 [[package]]
