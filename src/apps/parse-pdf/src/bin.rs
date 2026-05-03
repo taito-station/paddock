@@ -9,6 +9,7 @@ use clap::Parser;
 use paddock_use_case::dto::pdf::ingest::IngestPdfResponse;
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
+use tracing::Instrument;
 
 const INBOX_DIR: &str = "pdfs/inbox";
 const DONE_DIR: &str = "pdfs/done";
@@ -29,11 +30,15 @@ async fn main() -> anyhow::Result<()> {
             .acquire_owned()
             .await
             .context("acquire semaphore permit")?;
-        joinset.spawn(async move {
-            let _permit = permit;
-            let result = app.ingest_pdf(&source).await;
-            (source, result)
-        });
+        let span = tracing::info_span!("ingest", source = %source);
+        joinset.spawn(
+            async move {
+                let _permit = permit;
+                let result = app.ingest_pdf(&source).await;
+                (source, result)
+            }
+            .instrument(span),
+        );
     }
 
     let mut succeeded = 0usize;
