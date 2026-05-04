@@ -13,6 +13,7 @@ clap               = { workspace = true }
 paddock-config     = { workspace = true }
 paddock-domain     = { workspace = true }
 paddock-use-case   = { workspace = true }
+pdf-ocr            = { workspace = true }
 pdf-parser         = { workspace = true }
 rdb-gateway        = { workspace = true }
 tokio              = { workspace = true }

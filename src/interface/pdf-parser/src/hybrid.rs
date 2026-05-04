@@ -30,11 +30,21 @@ impl Default for HybridParser {
 impl PdfParser for HybridParser {
     fn parse(&self, bytes: &[u8]) -> UcResult<Vec<Race>> {
         let mut races = self.mutool.parse(bytes)?;
-        // OCR is best-effort: a failure should not block the mutool path.
-        match self.ocr.extract(bytes) {
-            Ok(pages) => apply_ocr(&mut races, &pages),
-            Err(err) => tracing::warn!(error = %err, "ocr extract failed, skipping merge"),
-        }
+        tracing::info!(
+            race_count = races.len(),
+            bytes = bytes.len(),
+            "ocr starting"
+        );
+        let start = std::time::Instant::now();
+        let pages = self.ocr.extract(bytes).map_err(crate::error::Error::from)?;
+        let elapsed_ms = start.elapsed().as_millis() as u64;
+        tracing::info!(
+            pages = pages.len(),
+            elapsed_ms,
+            "ocr extracted, applying merge"
+        );
+        apply_ocr(&mut races, &pages);
+        tracing::info!("ocr merge complete");
         Ok(races)
     }
 }

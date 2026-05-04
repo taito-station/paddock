@@ -10,6 +10,8 @@ pub enum Error {
     Fetch(String),
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
+    #[error("ocr error: {0}")]
+    Ocr(#[from] pdf_ocr::Error),
     #[error("domain error: {0}")]
     Domain(#[from] paddock_domain::Error),
 }

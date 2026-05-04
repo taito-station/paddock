@@ -1109,6 +1109,7 @@ dependencies = [
  "paddock-config",
  "paddock-domain",
  "paddock-use-case",
+ "pdf-ocr",
  "pdf-parser",
  "rdb-gateway",
  "tokio",
