@@ -3,6 +3,49 @@ use std::process::Command;
 
 use crate::error::{Error, Result};
 
+/// Verify that the `tesseract` binary is available and that the requested language pack
+/// (typically `"jpn"`) is installed. Intended to be called once at startup so the program
+/// fails fast with a clear message instead of warning per-PDF later.
+pub fn ensure_available(lang: &str) -> Result<()> {
+    let version = Command::new("tesseract")
+        .arg("--version")
+        .output()
+        .map_err(|e| {
+            Error::Tesseract(format!(
+                "tesseract binary not found: {e} (install via `brew install tesseract` on macOS)"
+            ))
+        })?;
+    if !version.status.success() {
+        return Err(Error::Tesseract(format!(
+            "tesseract --version exited with {}",
+            version.status
+        )));
+    }
+    let langs = Command::new("tesseract")
+        .arg("--list-langs")
+        .output()
+        .map_err(|e| Error::Tesseract(format!("tesseract --list-langs failed: {e}")))?;
+    if !langs.status.success() {
+        return Err(Error::Tesseract(format!(
+            "tesseract --list-langs exited with {}",
+            langs.status
+        )));
+    }
+    // tesseract prints the language list on stdout, but older builds emit it on stderr —
+    // scan both streams to be safe.
+    let combined = format!(
+        "{}\n{}",
+        String::from_utf8_lossy(&langs.stdout),
+        String::from_utf8_lossy(&langs.stderr)
+    );
+    if !combined.lines().any(|l| l.trim() == lang) {
+        return Err(Error::Tesseract(format!(
+            "tesseract language pack '{lang}' not found (install via `brew install tesseract-lang` on macOS)"
+        )));
+    }
+    Ok(())
+}
+
 /// One token from tesseract's TSV output (one word at given page coordinates).
 #[derive(Debug, Clone)]
 pub struct OcrToken {

@@ -1,24 +1,11 @@
 use anyhow::Context;
 use paddock_config::Config;
 use paddock_use_case::Interactor;
-use paddock_use_case::dto::pdf::ingest::IngestPdfResponse;
-use pdf_parser::{HybridParser, MutoolParser, UreqFetcher};
+use pdf_parser::{HybridParser, UreqFetcher};
 use rdb_gateway::{SqliteRepository, pool};
 use tracing_subscriber::{EnvFilter, fmt};
 
-pub enum App {
-    Mutool(Interactor<SqliteRepository, MutoolParser, UreqFetcher>),
-    Hybrid(Interactor<SqliteRepository, HybridParser, UreqFetcher>),
-}
-
-impl App {
-    pub async fn ingest_pdf(&self, source: &str) -> paddock_use_case::Result<IngestPdfResponse> {
-        match self {
-            App::Mutool(i) => i.ingest_pdf(source).await,
-            App::Hybrid(i) => i.ingest_pdf(source).await,
-        }
-    }
-}
+pub type App = Interactor<SqliteRepository, HybridParser, UreqFetcher>;
 
 pub async fn build_app() -> anyhow::Result<App> {
     let config = Config::from_env().context("load config")?;
@@ -29,6 +16,8 @@ pub async fn build_app() -> anyhow::Result<App> {
         )
         .try_init();
 
+    pdf_ocr::ensure_available("jpn").context("tesseract preflight")?;
+
     ensure_data_dir(&config.paddock_db_url)?;
 
     let pool = pool::connect(&config.paddock_db_url)
@@ -36,11 +25,7 @@ pub async fn build_app() -> anyhow::Result<App> {
         .context("connect SQLite pool")?;
     pool::migrate(&pool).await.context("apply migrations")?;
     let repo = SqliteRepository::new(pool);
-    let app = match config.paddock_parser.as_str() {
-        "hybrid" => App::Hybrid(Interactor::new(repo, HybridParser::new(), UreqFetcher)),
-        _ => App::Mutool(Interactor::new(repo, MutoolParser, UreqFetcher)),
-    };
-    Ok(app)
+    Ok(Interactor::new(repo, HybridParser::new(), UreqFetcher))
 }
 
 fn ensure_data_dir(database_url: &str) -> anyhow::Result<()> {
