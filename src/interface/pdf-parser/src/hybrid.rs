@@ -36,27 +36,15 @@ impl PdfParser for HybridParser {
             "ocr starting"
         );
         let start = std::time::Instant::now();
-        // OCR is best-effort: a failure should not block the mutool path.
-        match self.ocr.extract(bytes) {
-            Ok(pages) => {
-                let elapsed_ms = start.elapsed().as_millis() as u64;
-                tracing::info!(
-                    pages = pages.len(),
-                    elapsed_ms,
-                    "ocr extracted, applying merge"
-                );
-                apply_ocr(&mut races, &pages);
-                tracing::info!("ocr merge complete");
-            }
-            Err(err) => {
-                let elapsed_ms = start.elapsed().as_millis() as u64;
-                tracing::warn!(
-                    error = %err,
-                    elapsed_ms,
-                    "ocr extract failed, skipping merge (mutool data preserved)"
-                );
-            }
-        }
+        let pages = self.ocr.extract(bytes).map_err(crate::error::Error::from)?;
+        let elapsed_ms = start.elapsed().as_millis() as u64;
+        tracing::info!(
+            pages = pages.len(),
+            elapsed_ms,
+            "ocr extracted, applying merge"
+        );
+        apply_ocr(&mut races, &pages);
+        tracing::info!("ocr merge complete");
         Ok(races)
     }
 }

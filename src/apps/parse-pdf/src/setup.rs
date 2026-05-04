@@ -16,6 +16,8 @@ pub async fn build_app() -> anyhow::Result<App> {
         )
         .try_init();
 
+    pdf_ocr::ensure_available("jpn").context("tesseract preflight")?;
+
     ensure_data_dir(&config.paddock_db_url)?;
 
     let pool = pool::connect(&config.paddock_db_url)
