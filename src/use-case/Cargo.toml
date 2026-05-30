@@ -7,3 +7,6 @@ edition = "2024"
 chrono         = { workspace = true }
 paddock-domain = { workspace = true }
 thiserror      = { workspace = true }
+
+[dev-dependencies]
+tokio          = { workspace = true }
