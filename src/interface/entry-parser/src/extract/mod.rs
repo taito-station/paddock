@@ -135,11 +135,7 @@ fn find_race_origins(lines: &[FlatLine]) -> Vec<RaceOrigin> {
             }
         })
         .collect();
-    origins.sort_by(|a, b| {
-        a.page
-            .cmp(&b.page)
-            .then(a.col_x.partial_cmp(&b.col_x).unwrap())
-    });
+    origins.sort_by(|a, b| a.page.cmp(&b.page).then(a.col_x.total_cmp(&b.col_x)));
     origins
 }
 
@@ -196,7 +192,7 @@ fn parse_column(lines: &[&FlatLine], origin: &RaceOrigin) -> Result<Option<RaceC
     );
     let race_id = RaceId::try_from(race_id_str)?;
 
-    let raw_entries = extract_entries(&entry_lines, cx);
+    let raw_entries = extract_entries(&entry_lines, lines, cx);
     let mut entries = Vec::with_capacity(raw_entries.len());
     for raw in raw_entries {
         // A single malformed row should not abort the whole PDF: skip it (with a warning)
@@ -302,7 +298,14 @@ fn extract_surface(lines: &[&FlatLine]) -> Option<Surface> {
 
 // ── horse entry extractor ─────────────────────────────────────────────────────
 
-fn extract_entries(lines: &[&FlatLine], col_x: f64) -> Vec<RawEntry> {
+/// `entry_lines` are the rows below the header (names / numbers / jockeys).
+/// `column_lines` is the whole column: gate-color markers are scanned from it because the
+/// gate-1 marker physically sits at the header/​body boundary and would otherwise be cut off.
+fn extract_entries(
+    entry_lines: &[&FlatLine],
+    column_lines: &[&FlatLine],
+    col_x: f64,
+) -> Vec<RawEntry> {
     // Classify lines by their x-offset from the column origin.
     // offset = line.x - col_x
 
@@ -319,17 +322,22 @@ fn extract_entries(lines: &[&FlatLine], col_x: f64) -> Vec<RawEntry> {
     // Jockey fragments: size ≈ 10, offset ∈ [148, 230]
     let mut jockey_fragments: Vec<(f64, f64, String)> = Vec::new(); // (y, x, text)
 
-    for l in lines {
+    // Gate-color markers are scanned over the whole column (the gate-1 marker can sit just
+    // above the header cut-off). The GATE_COLORS match is highly specific, so header noise
+    // does not leak in.
+    for l in column_lines {
         let off = l.x - col_x;
-
-        // Gate color (白/黒/赤/青/黄/緑/橙/桃).
         if GATE_SIZE.contains(&l.size)
             && GATE_OFFSET.contains(&off)
             && let Some(&(_, gate)) = GATE_COLORS.iter().find(|(s, _)| *s == l.text.trim())
         {
             gate_events.push((l.y, gate));
-            continue;
         }
+    }
+
+    // Names / numbers / jockeys are scanned over the body rows only.
+    for l in entry_lines {
+        let off = l.x - col_x;
 
         // Horse num: digit 1–18 in the number column.
         if ROW_SIZE.contains(&l.size)
@@ -354,8 +362,8 @@ fn extract_entries(lines: &[&FlatLine], col_x: f64) -> Vec<RawEntry> {
         }
     }
 
-    gate_events.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
-    horse_num_events.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+    gate_events.sort_by(|a, b| a.0.total_cmp(&b.0));
+    horse_num_events.sort_by(|a, b| a.0.total_cmp(&b.0));
 
     // Consolidate split glyphs into one logical line each.
     let horse_names = group_by_y(&name_fragments, NAME_BUCKET);
@@ -372,13 +380,15 @@ fn extract_entries(lines: &[&FlatLine], col_x: f64) -> Vec<RawEntry> {
             continue;
         };
 
-        // Gate = latest gate event at or above this row.
+        // Gate = latest gate-color marker at or above this row. A real horse row always sits
+        // below its gate marker, so a miss means the row is noise: skip it rather than
+        // fabricating a (wrong) gate number that would silently pollute the data.
         let boundary_y = name_y.max(num_y);
-        let gate_num = gate_events
-            .iter()
-            .rfind(|(gy, _)| *gy <= boundary_y + 5.0)
-            .map(|(_, g)| *g)
-            .unwrap_or(1);
+        let Some(&(_, gate_num)) = gate_events.iter().rfind(|(gy, _)| *gy <= boundary_y + 5.0)
+        else {
+            tracing::warn!(name = %horse_name, "no gate marker above row, skipping entry");
+            continue;
+        };
 
         let jockey = nearest(&jockey_map, *name_y, JOCKEY_TOLERANCE).map(|(_, t)| t.clone());
 
@@ -398,12 +408,7 @@ fn nearest<T>(items: &[(f64, T)], target: f64, tolerance: f64) -> Option<&(f64, 
     items
         .iter()
         .filter(|(y, _)| (*y - target).abs() <= tolerance)
-        .min_by(|a, b| {
-            (a.0 - target)
-                .abs()
-                .partial_cmp(&(b.0 - target).abs())
-                .unwrap()
-        })
+        .min_by(|a, b| (a.0 - target).abs().total_cmp(&(b.0 - target).abs()))
 }
 
 /// Group `(y, x, text)` fragments: snap y to the nearest `bucket` units, then
@@ -416,7 +421,7 @@ fn group_by_y(fragments: &[(f64, f64, String)], bucket: f64) -> Vec<(f64, String
 
     // Collect raw y values
     let mut ys: Vec<f64> = fragments.iter().map(|(y, _, _)| *y).collect();
-    ys.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    ys.sort_by(|a, b| a.total_cmp(b));
     ys.dedup_by(|a, b| (*a - *b).abs() <= bucket);
 
     let mut groups: Vec<(f64, String)> = ys
@@ -427,14 +432,14 @@ fn group_by_y(fragments: &[(f64, f64, String)], bucket: f64) -> Vec<(f64, String
                 .filter(|(y, _, _)| (*y - gy).abs() <= bucket)
                 .map(|(_, x, t)| (*x, t.as_str()))
                 .collect();
-            parts.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+            parts.sort_by(|a, b| a.0.total_cmp(&b.0));
             let text = parts.into_iter().map(|(_, t)| t).collect::<String>();
             (gy, text)
         })
         .filter(|(_, t)| !t.is_empty())
         .collect();
 
-    groups.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+    groups.sort_by(|a, b| a.0.total_cmp(&b.0));
     groups
 }
 
@@ -529,5 +534,71 @@ mod tests {
         let result = group_by_y(&frags, 3.0);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].1, "ノーチ");
+    }
+
+    #[test]
+    fn nearest_picks_closest_within_tolerance() {
+        let items = vec![(10.0, "a"), (20.0, "b"), (35.0, "c")];
+        assert_eq!(nearest(&items, 12.0, 25.0).map(|(_, t)| *t), Some("a"));
+        assert_eq!(nearest(&items, 22.0, 25.0).map(|(_, t)| *t), Some("b"));
+    }
+
+    #[test]
+    fn nearest_returns_none_when_all_out_of_tolerance() {
+        let items = vec![(10.0, "a"), (20.0, "b")];
+        assert_eq!(nearest(&items, 100.0, 5.0), None);
+    }
+
+    fn line(page: usize, x: f64, y: f64, size: f64, text: &str) -> FlatLine {
+        FlatLine {
+            page,
+            x,
+            y,
+            size,
+            text: text.into(),
+        }
+    }
+
+    #[test]
+    fn find_race_origins_detects_columns_sorted_by_x() {
+        let lines = vec![
+            line(0, 325.0, 76.0, 19.0, "2"),
+            line(0, 36.0, 76.0, 19.0, "1"),
+            line(0, 49.0, 151.0, 11.0, "1"), // horse-num glyph, not a race origin
+            line(0, 36.0, 200.0, 19.0, "99"), // too-large number, out of y band anyway
+        ];
+        let origins = find_race_origins(&lines);
+        let nums: Vec<u32> = origins.iter().map(|o| o.race_num).collect();
+        assert_eq!(nums, vec![1, 2], "should detect 2 columns sorted by col_x");
+        assert_eq!(origins[0].col_x, 36.0);
+        assert_eq!(origins[1].col_x, 325.0);
+    }
+
+    #[test]
+    fn extract_entries_binds_name_num_gate_jockey() {
+        let col_x = 36.0;
+        let lines = vec![
+            line(0, 35.0, 130.0, 8.0, "白"),          // gate marker (gate 1)
+            line(0, 69.0, 138.0, 11.0, "テストウマ"), // horse name (offset 33)
+            line(0, 49.0, 151.0, 11.0, "1"),          // horse num (offset 13)
+            line(0, 196.0, 137.0, 10.0, "騎手太郎"),  // jockey (offset 160)
+        ];
+        let refs: Vec<&FlatLine> = lines.iter().collect();
+        let entries = extract_entries(&refs, &refs, col_x);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].gate_num, 1);
+        assert_eq!(entries[0].horse_num, 1);
+        assert_eq!(entries[0].horse_name, "テストウマ");
+        assert_eq!(entries[0].jockey.as_deref(), Some("騎手太郎"));
+    }
+
+    #[test]
+    fn extract_entries_skips_name_without_nearby_number() {
+        let col_x = 36.0;
+        // A stray non-ASCII label in the name column with no horse number near it
+        // (mirrors the "発走" post-time label) must not become an entry.
+        let lines = vec![line(0, 69.0, 500.0, 11.0, "発走")];
+        let refs: Vec<&FlatLine> = lines.iter().collect();
+        assert!(extract_entries(&refs, &refs, col_x).is_empty());
     }
 }

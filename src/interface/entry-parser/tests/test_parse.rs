@@ -2,7 +2,10 @@ use entry_parser::MutoolEntryParser;
 use paddock_domain::{Surface, Venue};
 use paddock_use_case::entry_parser::EntryParser;
 
-const SAMPLE: &[u8] = include_bytes!("../../../../pdfs/entries/done/20260419-03nakayama08.pdf");
+// Committed under samples/ (the `pdfs/` tree is gitignored, so a fixture there would not
+// survive a fresh clone / CI). Mirrors the existing pdf-parser test which uses
+// samples/2026-3nakayama6.pdf.
+const SAMPLE: &[u8] = include_bytes!("../../../../samples/2026-3nakayama8-entries.pdf");
 
 #[test]
 fn parses_sample_entry_pdf_into_twelve_race_cards() {
