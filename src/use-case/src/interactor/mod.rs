@@ -1,4 +1,5 @@
 pub mod course;
+pub mod entry;
 pub mod horse;
 pub mod jockey;
 pub mod pdf;

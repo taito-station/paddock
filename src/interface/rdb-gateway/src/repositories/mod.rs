@@ -2,8 +2,9 @@ mod course_stats;
 mod horse_stats;
 mod jockey_stats;
 mod save_race;
+mod save_race_card;
 
-use paddock_domain::{HorseName, JockeyName, Race, RaceId, Surface, Venue};
+use paddock_domain::{HorseName, JockeyName, Race, RaceCard, RaceId, Surface, Venue};
 use paddock_use_case::Result as UcResult;
 use paddock_use_case::repository::{CourseStatsRow, HorseStatsRow, JockeyStatsRow, Repository};
 
@@ -64,5 +65,11 @@ impl Repository for SqliteRepository {
             .await
             .map_err(crate::Error::from)?;
         Ok(row.is_some())
+    }
+
+    async fn save_race_card(&self, card: &RaceCard) -> UcResult<()> {
+        save_race_card::save_race_card(&self.pool, card)
+            .await
+            .map_err(Into::into)
     }
 }

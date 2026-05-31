@@ -128,6 +128,24 @@ cargo fmt
 cargo clippy --all-targets
 ```
 
+## 出馬表を取り込む
+
+JRA 出馬表 PDF（`N回VENUE日出馬表.pdf`）から枠番・馬番・馬名・騎手を取り込む。
+
+```bash
+cargo run -p parse-entries -- pdfs/entries/inbox/20260419-03nakayama08.pdf
+# ingested: 12 race card(s), 162 horse entry/entries from ...
+# moved: pdfs/entries/inbox/... -> pdfs/entries/done/...
+```
+
+`pdfs/entries/inbox/` に置いた PDF は取り込み成功後に `pdfs/entries/done/` へ自動移動する。
+
+取り込み後の確認:
+```bash
+sqlite3 data/paddock.db "SELECT race_id, venue, race_num, distance, surface FROM race_cards ORDER BY race_num;"
+sqlite3 data/paddock.db "SELECT gate_num, horse_num, horse_name, jockey FROM horse_entries WHERE race_id='2026-3-nakayama-8-1R' ORDER BY horse_num;"
+```
+
 ## アーキテクチャ
 
 クリーンアーキテクチャに準拠した workspace 構成。
@@ -141,15 +159,17 @@ cargo clippy --all-targets
 ```
 src/
 ├── domain/                   コアエンティティ＋値オブジェクト
-├── use-case/                 Repository / PdfParser トレイト＋Interactor
+├── use-case/                 Repository / PdfParser / EntryParser トレイト
 ├── interface/
-│   ├── pdf-parser/           mutool サブプロセスで PDF→Race 構造体（HybridParser も同梱）
-│   ├── pdf-ocr/              tesseract サブプロセスで PDF→OCR 行（着順以外の補完用）
+│   ├── pdf-parser/           mutool + OCR ハイブリッドで PDF→Race（成績）
+│   ├── pdf-ocr/              tesseract サブプロセスで PDF→OCR 行
+│   ├── entry-parser/         mutool stext.json で PDF→RaceCard（出馬表）
 │   └── rdb-gateway/          sqlx-sqlite で Repository 実装
 ├── infrastructure/
 │   └── config/               環境変数から Config を構築
 └── apps/
-    ├── parse-pdf/            CLI バイナリ: PDF 取り込み
+    ├── parse-pdf/            CLI バイナリ: 成績 PDF 取り込み
+    ├── parse-entries/        CLI バイナリ: 出馬表 PDF 取り込み
     └── analyze/              CLI バイナリ: horse / course / jockey
 ```
 
