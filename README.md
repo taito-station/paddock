@@ -38,16 +38,16 @@ cargo run -p parse-pdf -- https://www.jra.go.jp/datafile/seiseki/report/2026/202
 
 ローカルファイルから:
 ```bash
-cargo run -p parse-pdf -- pdfs/inbox/2026-3nakayama6.pdf
+cargo run -p parse-pdf -- pdfs/results/inbox/2026-3nakayama6.pdf
 ```
 
 複数ファイルを並列で取り込む（既定は CPU コア数まで同時実行）:
 ```bash
-cargo run -p parse-pdf -- pdfs/inbox/*.pdf
-cargo run -p parse-pdf -- -j 4 pdfs/inbox/*.pdf   # 並列度を明示
+cargo run -p parse-pdf -- pdfs/results/inbox/*.pdf
+cargo run -p parse-pdf -- -j 4 pdfs/results/inbox/*.pdf   # 並列度を明示
 ```
 
-`pdfs/inbox/` 配下のファイルを引数にした場合、取り込みが成功した PDF は `pdfs/done/` へ自動的に移動される（未取り込みファイルが一目で分かるようにするため）。`samples/` などインボックス外のパスは移動されない。複数ファイル指定時、1 件でも失敗があれば終了コードが非 0 になる（成功分の取り込みと移動は維持される）。
+`pdfs/results/inbox/` 配下のファイルを引数にした場合、取り込みが成功した PDF は `pdfs/results/done/` へ自動的に移動される（未取り込みファイルが一目で分かるようにするため）。`samples/` などインボックス外のパスは移動されない。複数ファイル指定時、1 件でも失敗があれば終了コードが非 0 になる（成功分の取り込みと移動は維持される）。
 
 ### 抽出ロジック
 
@@ -61,10 +61,10 @@ cargo run -p parse-pdf -- -j 4 pdfs/inbox/*.pdf   # 並列度を明示
 進捗は `RUST_LOG=info` で OCR 開始・終了・所要時間が source 別に表示される:
 
 ```bash
-RUST_LOG=info cargo run -p parse-pdf -- pdfs/inbox/2026-3nakayama6.pdf
-# INFO ingest{source=pdfs/inbox/2026-3nakayama6.pdf}: ocr starting race_count=12 bytes=696311
-# INFO ingest{source=pdfs/inbox/2026-3nakayama6.pdf}: ocr extracted, applying merge pages=7 elapsed_ms=55114
-# INFO ingest{source=pdfs/inbox/2026-3nakayama6.pdf}: ocr merge complete
+RUST_LOG=info cargo run -p parse-pdf -- pdfs/results/inbox/2026-3nakayama6.pdf
+# INFO ingest{source=pdfs/results/inbox/2026-3nakayama6.pdf}: ocr starting race_count=12 bytes=696311
+# INFO ingest{source=pdfs/results/inbox/2026-3nakayama6.pdf}: ocr extracted, applying merge pages=7 elapsed_ms=55114
+# INFO ingest{source=pdfs/results/inbox/2026-3nakayama6.pdf}: ocr merge complete
 ```
 
 JRA PDF は複数レースを 1 ページに収める形式があるため `pages` は `race_count` と一致しないことが多い。
@@ -128,6 +128,24 @@ cargo fmt
 cargo clippy --all-targets
 ```
 
+## 出馬表を取り込む
+
+JRA 出馬表 PDF（`N回VENUE日出馬表.pdf`）から枠番・馬番・馬名・騎手を取り込む。
+
+```bash
+cargo run -p parse-entries -- pdfs/entries/inbox/20260419-03nakayama08.pdf
+# ingested: 12 race card(s), 162 horse entry/entries from ...
+# moved: pdfs/entries/inbox/... -> pdfs/entries/done/...
+```
+
+`pdfs/entries/inbox/` に置いた PDF は取り込み成功後に `pdfs/entries/done/` へ自動移動する。
+
+取り込み後の確認:
+```bash
+sqlite3 data/paddock.db "SELECT race_id, venue, race_num, distance, surface FROM race_cards ORDER BY race_num;"
+sqlite3 data/paddock.db "SELECT gate_num, horse_num, horse_name, jockey FROM horse_entries WHERE race_id='2026-3-nakayama-8-1R' ORDER BY horse_num;"
+```
+
 ## アーキテクチャ
 
 クリーンアーキテクチャに準拠した workspace 構成。
@@ -141,15 +159,17 @@ cargo clippy --all-targets
 ```
 src/
 ├── domain/                   コアエンティティ＋値オブジェクト
-├── use-case/                 Repository / PdfParser トレイト＋Interactor
+├── use-case/                 Repository / PdfParser / EntryParser トレイト
 ├── interface/
-│   ├── pdf-parser/           mutool サブプロセスで PDF→Race 構造体（HybridParser も同梱）
-│   ├── pdf-ocr/              tesseract サブプロセスで PDF→OCR 行（着順以外の補完用）
+│   ├── pdf-parser/           mutool + OCR ハイブリッドで PDF→Race（成績）
+│   ├── pdf-ocr/              tesseract サブプロセスで PDF→OCR 行
+│   ├── entry-parser/         mutool stext.json で PDF→RaceCard（出馬表）
 │   └── rdb-gateway/          sqlx-sqlite で Repository 実装
 ├── infrastructure/
 │   └── config/               環境変数から Config を構築
 └── apps/
-    ├── parse-pdf/            CLI バイナリ: PDF 取り込み
+    ├── parse-pdf/            CLI バイナリ: 成績 PDF 取り込み
+    ├── parse-entries/        CLI バイナリ: 出馬表 PDF 取り込み
     └── analyze/              CLI バイナリ: horse / course / jockey
 ```
 
