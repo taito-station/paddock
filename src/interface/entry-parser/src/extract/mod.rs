@@ -336,11 +336,11 @@ fn extract_entries(
     // concatenated by x (like names) before parsing.
     let mut num_fragments: Vec<(f64, f64, String)> = Vec::new(); // (y, x, digits)
 
-    // Name fragments: size ≈ 11, offset ∈ [25, 160], at least one non-ASCII char
-    // Group by (y rounded to nearest 2) to consolidate split chars on the same line.
+    // Name fragments: ROW_SIZE, offset in NAME_OFFSET (25..150), at least one non-ASCII char.
+    // Grouped by y later to consolidate split chars on the same line.
     let mut name_fragments: Vec<(f64, f64, String)> = Vec::new(); // (y, x, text)
 
-    // Jockey fragments: size ≈ 10, offset ∈ [148, 230]
+    // Jockey fragments: JOCKEY_SIZE, offset in JOCKEY_OFFSET (155..=235).
     let mut jockey_fragments: Vec<(f64, f64, String)> = Vec::new(); // (y, x, text)
 
     // Gate-color markers are scanned over the whole column (the gate-1 marker can sit just
