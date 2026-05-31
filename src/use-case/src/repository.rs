@@ -1,6 +1,6 @@
 use core::future::Future;
 
-use paddock_domain::{HorseName, JockeyName, Race, RaceId, Surface, Venue};
+use paddock_domain::{HorseName, JockeyName, Race, RaceCard, RaceId, Surface, Venue};
 
 use crate::error::Result;
 
@@ -86,4 +86,6 @@ pub trait Repository: Send + Sync {
     fn count_races(&self) -> impl Future<Output = Result<u64>> + Send;
 
     fn race_exists(&self, race_id: &RaceId) -> impl Future<Output = Result<bool>> + Send;
+
+    fn save_race_card(&self, card: &RaceCard) -> impl Future<Output = Result<()>> + Send;
 }

@@ -6,10 +6,9 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use clap::Parser;
-use paddock_use_case::dto::pdf::ingest::IngestPdfResponse;
+use paddock_use_case::dto::entry::ingest::IngestEntryResponse;
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
-use tracing::Instrument;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -18,7 +17,7 @@ async fn main() -> anyhow::Result<()> {
     let app = Arc::new(setup::build_app().await?);
     let total = args.sources.len();
     let semaphore = Arc::new(Semaphore::new(parallel));
-    let mut joinset: JoinSet<(String, paddock_use_case::Result<IngestPdfResponse>)> =
+    let mut joinset: JoinSet<(String, paddock_use_case::Result<IngestEntryResponse>)> =
         JoinSet::new();
 
     for source in args.sources {
@@ -27,15 +26,11 @@ async fn main() -> anyhow::Result<()> {
             .acquire_owned()
             .await
             .context("acquire semaphore permit")?;
-        let span = tracing::info_span!("ingest", source = %source);
-        joinset.spawn(
-            async move {
-                let _permit = permit;
-                let result = app.ingest_pdf(&source).await;
-                (source, result)
-            }
-            .instrument(span),
-        );
+        joinset.spawn(async move {
+            let _permit = permit;
+            let result = app.ingest_entry_pdf(&source).await;
+            (source, result)
+        });
     }
 
     let mut succeeded = 0usize;
@@ -45,8 +40,8 @@ async fn main() -> anyhow::Result<()> {
         match result {
             Ok(response) => {
                 println!(
-                    "ingested: {} race(s), {} horse result(s) from {}",
-                    response.races_saved, response.horses_saved, source
+                    "ingested: {} race card(s), {} horse entry/entries from {}",
+                    response.cards_saved, response.entries_saved, source
                 );
                 match move_to_done_if_inbox(&source) {
                     Ok(Some(dest)) => println!("moved: {} -> {}", source, dest.display()),
@@ -81,8 +76,7 @@ fn resolve_parallel(requested: Option<usize>) -> usize {
 }
 
 /// Move a successfully ingested file from `<root>/pdfs/<kind>/inbox/<file>` to
-/// `<root>/pdfs/<kind>/done/<file>`. Detection is based on src's parent directory chain,
-/// so it works regardless of CWD and across PDF kinds (results, entries, ...).
+/// `<root>/pdfs/<kind>/done/<file>`.
 fn move_to_done_if_inbox(source: &str) -> anyhow::Result<Option<PathBuf>> {
     if source.starts_with("http://") || source.starts_with("https://") {
         return Ok(None);
