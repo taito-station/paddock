@@ -215,6 +215,20 @@ fn parse_column(lines: &[&FlatLine], origin: &RaceOrigin) -> Result<Option<RaceC
                 continue;
             }
         };
+        // Guard against a heuristic mis-bind producing two rows with the same horse number:
+        // `save_race_card` keys on `(race_id, horse_num)`, so a duplicate would silently
+        // overwrite the earlier entry. Surface it with a warning and keep the first.
+        if entries
+            .iter()
+            .any(|e: &HorseEntry| e.horse_num == horse_num)
+        {
+            tracing::warn!(
+                horse_num = horse_num.value(),
+                name = %horse_name,
+                "duplicate horse number in race card, skipping entry"
+            );
+            continue;
+        }
         let jockey = raw
             .jockey
             .filter(|j| !j.is_empty())
@@ -265,6 +279,11 @@ fn extract_meeting(lines: &[&FlatLine]) -> Option<(i32, u32, Venue, u32)> {
 /// Extract distance from text like `1，200` (fullwidth comma) or `1,200`.
 fn extract_distance(lines: &[&FlatLine]) -> Option<u32> {
     for l in lines {
+        // Skip the compact meeting header ("2026年3中山8") so a year like 2026 — which falls in
+        // the 800..=4000 distance band — is never mistaken for the distance.
+        if l.text.contains('年') {
+            continue;
+        }
         let digits: String = l
             .text
             .chars()
@@ -309,11 +328,13 @@ fn extract_entries(
     // Classify lines by their x-offset from the column origin.
     // offset = line.x - col_x
 
-    // Gate color markers: single kanji, size ≈ 8, offset ∈ [-10, 12]
+    // Gate color markers: single kanji, size ≈ 8, offset ∈ [-5, 12] (see GATE_OFFSET)
     let mut gate_events: Vec<(f64, u32)> = Vec::new(); // (y, gate_num)
 
-    // Horse nums: size ≈ 11, offset ∈ [5, 28], digit 1–18
-    let mut horse_num_events: Vec<(f64, u32)> = Vec::new(); // (y, num)
+    // Horse-number digit fragments. A two-digit number (e.g. 16) is sometimes emitted as two
+    // separate glyphs ("1" + "6") at the same y, so digits are collected as fragments and
+    // concatenated by x (like names) before parsing.
+    let mut num_fragments: Vec<(f64, f64, String)> = Vec::new(); // (y, x, digits)
 
     // Name fragments: size ≈ 11, offset ∈ [25, 160], at least one non-ASCII char
     // Group by (y rounded to nearest 2) to consolidate split chars on the same line.
@@ -339,13 +360,15 @@ fn extract_entries(
     for l in entry_lines {
         let off = l.x - col_x;
 
-        // Horse num: digit 1–18 in the number column.
+        // Horse-number digit(s) in the number column. Collected as fragments and combined
+        // later, so a split two-digit number ("1"+"6") is recovered as 16.
+        let trimmed = l.text.trim();
         if ROW_SIZE.contains(&l.size)
             && HORSE_NUM_OFFSET.contains(&off)
-            && let Ok(n) = l.text.trim().parse::<u32>()
-            && (1..=18).contains(&n)
+            && !trimmed.is_empty()
+            && trimmed.chars().all(|c| c.is_ascii_digit())
         {
-            horse_num_events.push((l.y, n));
+            num_fragments.push((l.y, l.x, trimmed.to_string()));
             continue;
         }
 
@@ -363,11 +386,20 @@ fn extract_entries(
     }
 
     gate_events.sort_by(|a, b| a.0.total_cmp(&b.0));
-    horse_num_events.sort_by(|a, b| a.0.total_cmp(&b.0));
 
     // Consolidate split glyphs into one logical line each.
     let horse_names = group_by_y(&name_fragments, NAME_BUCKET);
     let jockey_map = group_by_y(&jockey_fragments, JOCKEY_BUCKET);
+    // Combine split digit glyphs into a single number per row, then keep valid 1–18 values.
+    let horse_num_events: Vec<(f64, u32)> = group_by_y(&num_fragments, NAME_BUCKET)
+        .into_iter()
+        .filter_map(|(y, s)| {
+            s.parse::<u32>()
+                .ok()
+                .filter(|n| (1..=18).contains(n))
+                .map(|n| (y, n))
+        })
+        .collect();
 
     // Anchor on horse names (the essential field) and bind each to the nearest horse number
     // by y. This makes each row independent, so a single missing/extra glyph no longer
@@ -600,5 +632,23 @@ mod tests {
         let lines = vec![line(0, 69.0, 500.0, 11.0, "発走")];
         let refs: Vec<&FlatLine> = lines.iter().collect();
         assert!(extract_entries(&refs, &refs, col_x).is_empty());
+    }
+
+    #[test]
+    fn extract_entries_combines_split_two_digit_number() {
+        let col_x = 36.0;
+        // A two-digit horse number can be emitted as two glyphs ("1" + "6") at the same y.
+        // They must combine to 16 rather than binding the name to a stray "1".
+        let lines = vec![
+            line(0, 35.0, 760.0, 8.0, "桃"), // gate marker (gate 8)
+            line(0, 69.0, 769.0, 11.0, "レディトゥアタック"), // name
+            line(0, 49.0, 781.0, 11.0, "1"), // tens digit
+            line(0, 57.0, 781.0, 11.0, "6"), // ones digit
+        ];
+        let refs: Vec<&FlatLine> = lines.iter().collect();
+        let entries = extract_entries(&refs, &refs, col_x);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].horse_num, 16);
+        assert_eq!(entries[0].horse_name, "レディトゥアタック");
     }
 }
