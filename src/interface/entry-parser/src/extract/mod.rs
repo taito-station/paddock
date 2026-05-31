@@ -1,10 +1,44 @@
 mod stext;
 
-use paddock_domain::{GateNum, HorseEntry, HorseName, HorseNum, JockeyName, RaceCard, RaceId, Surface, Venue};
+use std::sync::LazyLock;
+
+use paddock_domain::{
+    GateNum, HorseEntry, HorseName, HorseNum, JockeyName, RaceCard, RaceId, Surface, Venue,
+};
 use regex::Regex;
 
 use crate::error::{Error, Result};
 use stext::StextDoc;
+
+// ── layout thresholds ───────────────────────────────────────────────────────
+// The JRA race-card PDF packs 4 races per page. Within a race column, fields are
+// identified by font size and x-offset from the column origin (the large race-number
+// glyph). These constants capture the empirically observed bands.
+
+/// Race-number glyph size used to locate each race column.
+const RACE_NUM_MIN_SIZE: f64 = 17.0;
+/// Gate-color kanji (白/黒/…) font-size band and x-offset band.
+const GATE_SIZE: std::ops::RangeInclusive<f64> = 7.0..=9.5;
+const GATE_OFFSET: std::ops::RangeInclusive<f64> = -5.0..=12.0;
+/// Horse-number / horse-name font-size band (GI full-field races shrink to size 9).
+const ROW_SIZE: std::ops::RangeInclusive<f64> = 8.5..=12.5;
+const HORSE_NUM_OFFSET: std::ops::RangeInclusive<f64> = 5.0..=28.0;
+/// Horse names start at offset ≈33 and end well before the jockey column (≈160).
+/// The 150 upper bound also excludes the "発走" (post-time) label at offset ≈154.
+const NAME_OFFSET: std::ops::Range<f64> = 25.0..150.0;
+/// Jockey font-size band and x-offset band.
+const JOCKEY_SIZE: std::ops::RangeInclusive<f64> = 9.0..=11.5;
+const JOCKEY_OFFSET: std::ops::RangeInclusive<f64> = 155.0..=235.0;
+
+/// A horse number sits ≈13 units below its name; the row pitch is ≈47. A tolerance
+/// between those two keeps each number bound to its own name and avoids stealing a
+/// neighbouring row's name when one is missing.
+const NAME_NUM_TOLERANCE: f64 = 25.0;
+/// Jockey text sits almost level with the horse name.
+const JOCKEY_TOLERANCE: f64 = 12.0;
+/// y-bucket sizes for consolidating split glyphs onto a single logical line.
+const NAME_BUCKET: f64 = 3.0;
+const JOCKEY_BUCKET: f64 = 8.0;
 
 /// A flattened text line with its page index.
 struct FlatLine {
@@ -53,9 +87,7 @@ pub fn parse_stext(json: &str) -> Result<Vec<RaceCard>> {
         let col_lines: Vec<&FlatLine> = all_lines
             .iter()
             .filter(|l| {
-                l.page == origin.page
-                    && l.x >= origin.col_x - 20.0
-                    && l.x <= origin.col_x + 290.0
+                l.page == origin.page && l.x >= origin.col_x - 20.0 && l.x <= origin.col_x + 290.0
             })
             .collect();
 
@@ -89,7 +121,7 @@ fn flatten(doc: &StextDoc) -> Vec<FlatLine> {
 fn find_race_origins(lines: &[FlatLine]) -> Vec<RaceOrigin> {
     let mut origins: Vec<RaceOrigin> = lines
         .iter()
-        .filter(|l| l.size >= 17.0 && l.y >= 55.0 && l.y <= 110.0)
+        .filter(|l| l.size >= RACE_NUM_MIN_SIZE && l.y >= 55.0 && l.y <= 110.0)
         .filter_map(|l| {
             let n: u32 = l.text.trim().parse().ok()?;
             if (1..=12).contains(&n) {
@@ -114,38 +146,79 @@ fn find_race_origins(lines: &[FlatLine]) -> Vec<RaceOrigin> {
 fn parse_column(lines: &[&FlatLine], origin: &RaceOrigin) -> Result<Option<RaceCard>> {
     let cx = origin.col_x;
 
-    // --- header (y < origin.race_num_y + 60) ---
+    // --- header (y < race-number glyph y + 60) ---
     let header_end_y = lines
         .iter()
-        .find(|l| l.size >= 17.0 && (l.x - cx).abs() < 5.0)
+        .find(|l| l.size >= RACE_NUM_MIN_SIZE && (l.x - cx).abs() < 5.0)
         .map(|l| l.y + 60.0)
         .unwrap_or(140.0);
 
-    let header_lines: Vec<&FlatLine> = lines.iter().copied().filter(|l| l.y < header_end_y).collect();
-    let entry_lines: Vec<&FlatLine> = lines.iter().copied().filter(|l| l.y >= header_end_y).collect();
+    let header_lines: Vec<&FlatLine> = lines
+        .iter()
+        .copied()
+        .filter(|l| l.y < header_end_y)
+        .collect();
+    let entry_lines: Vec<&FlatLine> = lines
+        .iter()
+        .copied()
+        .filter(|l| l.y >= header_end_y)
+        .collect();
 
-    let (year, round, venue, day) = match extract_meeting(&header_lines) {
-        Some(v) => v,
-        None => return Ok(None),
+    let Some((year, round, venue, day)) = extract_meeting(&header_lines) else {
+        tracing::warn!(
+            race_num = origin.race_num,
+            "race-card meeting header not parsed, skipping"
+        );
+        return Ok(None);
     };
-    let distance = match extract_distance(&header_lines) {
-        Some(v) => v,
-        None => return Ok(None),
+    let Some(distance) = extract_distance(&header_lines) else {
+        tracing::warn!(
+            race_num = origin.race_num,
+            "race-card distance not parsed, skipping"
+        );
+        return Ok(None);
     };
-    let surface = match extract_surface(&header_lines) {
-        Some(v) => v,
-        None => return Ok(None),
+    let Some(surface) = extract_surface(&header_lines) else {
+        tracing::warn!(
+            race_num = origin.race_num,
+            "race-card surface not parsed, skipping"
+        );
+        return Ok(None);
     };
 
-    let race_id_str = format!("{}-{}-{}-{}-{}R", year, round, venue.as_slug(), day, origin.race_num);
+    let race_id_str = format!(
+        "{}-{}-{}-{}-{}R",
+        year,
+        round,
+        venue.as_slug(),
+        day,
+        origin.race_num
+    );
     let race_id = RaceId::try_from(race_id_str)?;
 
     let raw_entries = extract_entries(&entry_lines, cx);
     let mut entries = Vec::with_capacity(raw_entries.len());
     for raw in raw_entries {
-        let gate_num = GateNum::try_from(raw.gate_num)?;
-        let horse_num = HorseNum::try_from(raw.horse_num)?;
-        let horse_name = HorseName::try_from(raw.horse_name.as_str())?;
+        // A single malformed row should not abort the whole PDF: skip it (with a warning)
+        // so the remaining races/entries still get ingested.
+        let (Ok(gate_num), Ok(horse_num)) = (
+            GateNum::try_from(raw.gate_num),
+            HorseNum::try_from(raw.horse_num),
+        ) else {
+            tracing::warn!(
+                gate = raw.gate_num,
+                horse_num = raw.horse_num,
+                "invalid gate/horse number, skipping entry"
+            );
+            continue;
+        };
+        let horse_name = match HorseName::try_from(raw.horse_name.as_str()) {
+            Ok(n) => n,
+            Err(e) => {
+                tracing::warn!(name = %raw.horse_name, "invalid horse name ({e}), skipping entry");
+                continue;
+            }
+        };
         let jockey = raw
             .jockey
             .filter(|j| !j.is_empty())
@@ -172,14 +245,17 @@ fn parse_column(lines: &[&FlatLine], origin: &RaceOrigin) -> Result<Option<RaceC
 
 // ── header field extractors ───────────────────────────────────────────────────
 
-/// Extract `（year, round, venue, day）` from the compact header text `2026年3中山8`.
-fn extract_meeting(lines: &[&FlatLine]) -> Option<(i32, u32, Venue, u32)> {
-    let re = Regex::new(
+static MEETING_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
         r"(?P<y>\d{4})年(?P<r>\d+)(?P<v>札幌|函館|福島|新潟|東京|中山|中京|京都|阪神|小倉)(?P<d>\d+)",
     )
-    .unwrap();
+    .unwrap()
+});
+
+/// Extract `（year, round, venue, day）` from the compact header text `2026年3中山8`.
+fn extract_meeting(lines: &[&FlatLine]) -> Option<(i32, u32, Venue, u32)> {
     for l in lines {
-        if let Some(cap) = re.captures(&l.text) {
+        if let Some(cap) = MEETING_RE.captures(&l.text) {
             let year: i32 = cap.name("y")?.as_str().parse().ok()?;
             let round: u32 = cap.name("r")?.as_str().parse().ok()?;
             let venue = Venue::try_from(cap.name("v")?.as_str()).ok()?;
@@ -202,10 +278,10 @@ fn extract_distance(lines: &[&FlatLine]) -> Option<u32> {
         if normalized.is_empty() {
             continue;
         }
-        if let Ok(n) = normalized.parse::<u32>() {
-            if (800..=4000).contains(&n) {
-                return Some(n);
-            }
+        if let Ok(n) = normalized.parse::<u32>()
+            && (800..=4000).contains(&n)
+        {
+            return Some(n);
         }
     }
     None
@@ -246,72 +322,65 @@ fn extract_entries(lines: &[&FlatLine], col_x: f64) -> Vec<RawEntry> {
     for l in lines {
         let off = l.x - col_x;
 
-        // Gate color (白/黒/赤/青/黄/緑/橙/桃), size ≈ 7–9, offset ≈ -5..12
-        if l.size >= 7.0 && l.size <= 9.5 && (-5.0..=12.0).contains(&off) {
-            if let Some(&(_, gate)) = GATE_COLORS.iter().find(|(s, _)| *s == l.text.trim()) {
-                gate_events.push((l.y, gate));
-                continue;
-            }
+        // Gate color (白/黒/赤/青/黄/緑/橙/桃).
+        if GATE_SIZE.contains(&l.size)
+            && GATE_OFFSET.contains(&off)
+            && let Some(&(_, gate)) = GATE_COLORS.iter().find(|(s, _)| *s == l.text.trim())
+        {
+            gate_events.push((l.y, gate));
+            continue;
         }
 
-        // Horse num: size ≈ 9–11 (GI full-field races use size=9), offset ∈ [5, 28], digit 1–18
-        if l.size >= 8.5 && l.size <= 12.5 && (5.0..=28.0).contains(&off) {
-            if let Ok(n) = l.text.trim().parse::<u32>() {
-                if (1..=18).contains(&n) {
-                    horse_num_events.push((l.y, n));
-                    continue;
-                }
-            }
+        // Horse num: digit 1–18 in the number column.
+        if ROW_SIZE.contains(&l.size)
+            && HORSE_NUM_OFFSET.contains(&off)
+            && let Ok(n) = l.text.trim().parse::<u32>()
+            && (1..=18).contains(&n)
+        {
+            horse_num_events.push((l.y, n));
+            continue;
         }
 
-        // Name fragment: size ≈ 9–11 (GI uses size=9), offset ∈ [25, 155), non-ASCII present.
-        // Horse names start at offset ≈33–34; jockeys start at offset ≈160.
-        // The [25, 155) bound keeps them separate. Gate-related text ("発走" etc.) is
-        // at size ≤ 8 and thus excluded.
-        if l.size >= 8.5 && l.size <= 12.5 && (25.0..155.0).contains(&off) {
-            if l.text.chars().any(|c| !c.is_ascii()) {
-                name_fragments.push((l.y, l.x, l.text.clone()));
-                continue;
-            }
+        // Name fragment: non-ASCII text in the name column. The NAME_OFFSET upper bound
+        // keeps jockey text (which starts ≈160) out; gate text ("発走" etc.) is size ≤ 8.
+        if ROW_SIZE.contains(&l.size) && NAME_OFFSET.contains(&off) && !l.text.is_ascii() {
+            name_fragments.push((l.y, l.x, l.text.clone()));
+            continue;
         }
 
-        // Jockey: any size 9–11, offset ∈ [155, 235]
-        if l.size >= 9.0 && l.size <= 11.5 && (155.0..=235.0).contains(&off) {
-            if l.text.chars().any(|c| !c.is_ascii()) {
-                jockey_fragments.push((l.y, l.x, l.text.clone()));
-            }
+        // Jockey fragment.
+        if JOCKEY_SIZE.contains(&l.size) && JOCKEY_OFFSET.contains(&off) && !l.text.is_ascii() {
+            jockey_fragments.push((l.y, l.x, l.text.clone()));
         }
     }
 
     gate_events.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
     horse_num_events.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
 
-    // Build horse names: group name_fragments by y (bucket to nearest 3 units)
-    // then concatenate fragments sorted by x.
-    let horse_names = group_by_y(&name_fragments, 3.0);
+    // Consolidate split glyphs into one logical line each.
+    let horse_names = group_by_y(&name_fragments, NAME_BUCKET);
+    let jockey_map = group_by_y(&jockey_fragments, JOCKEY_BUCKET);
 
-    // Build jockey names similarly.
-    let jockey_map = group_by_y(&jockey_fragments, 8.0);
+    // Anchor on horse names (the essential field) and bind each to the nearest horse number
+    // by y. This makes each row independent, so a single missing/extra glyph no longer
+    // cascades into a name↔number misalignment across the whole column.
+    let mut entries = Vec::with_capacity(horse_names.len());
+    for (name_y, horse_name) in &horse_names {
+        let Some(&(num_y, horse_num_val)) = nearest(&horse_num_events, *name_y, NAME_NUM_TOLERANCE)
+        else {
+            tracing::warn!(name = %horse_name, "no horse number near name, skipping entry");
+            continue;
+        };
 
-    // Match names to horse nums sequentially by y-rank (i-th name ↔ i-th num).
-    let n = horse_names.len().min(horse_num_events.len());
-    let mut entries = Vec::with_capacity(n);
-
-    for i in 0..n {
-        let (name_y, horse_name) = &horse_names[i];
-        let (num_y, horse_num_val) = horse_num_events[i];
-
-        // Gate = latest gate event at y ≤ max(name_y, num_y)
+        // Gate = latest gate event at or above this row.
         let boundary_y = name_y.max(num_y);
         let gate_num = gate_events
             .iter()
-            .filter(|(gy, _)| *gy <= boundary_y + 5.0)
-            .last()
+            .rfind(|(gy, _)| *gy <= boundary_y + 5.0)
             .map(|(_, g)| *g)
             .unwrap_or(1);
 
-        // Jockey: look for jockey_map entry whose y is within ±10 of name_y
-        let jockey = find_jockey(&jockey_map, *name_y, 12.0);
+        let jockey = nearest(&jockey_map, *name_y, JOCKEY_TOLERANCE).map(|(_, t)| t.clone());
 
         entries.push(RawEntry {
             gate_num,
@@ -322,6 +391,19 @@ fn extract_entries(lines: &[&FlatLine], col_x: f64) -> Vec<RawEntry> {
     }
 
     entries
+}
+
+/// Return the element whose `y` (the `.0` field) is closest to `target`, within `tolerance`.
+fn nearest<T>(items: &[(f64, T)], target: f64, tolerance: f64) -> Option<&(f64, T)> {
+    items
+        .iter()
+        .filter(|(y, _)| (*y - target).abs() <= tolerance)
+        .min_by(|a, b| {
+            (a.0 - target)
+                .abs()
+                .partial_cmp(&(b.0 - target).abs())
+                .unwrap()
+        })
 }
 
 /// Group `(y, x, text)` fragments: snap y to the nearest `bucket` units, then
@@ -356,18 +438,6 @@ fn group_by_y(fragments: &[(f64, f64, String)], bucket: f64) -> Vec<(f64, String
     groups
 }
 
-fn find_jockey(map: &[(f64, String)], name_y: f64, tolerance: f64) -> Option<String> {
-    map.iter()
-        .filter(|(jy, _)| (*jy - name_y).abs() <= tolerance)
-        .min_by(|a, b| {
-            (a.0 - name_y)
-                .abs()
-                .partial_cmp(&(b.0 - name_y).abs())
-                .unwrap()
-        })
-        .map(|(_, t)| t.clone())
-}
-
 // ── unit tests ────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -382,35 +452,65 @@ mod tests {
 
     #[test]
     fn extract_distance_fullwidth_comma() {
-        let lines = vec![FlatLine { page: 0, x: 229.0, y: 49.0, size: 6.0, text: "1，800".into() }];
+        let lines = vec![FlatLine {
+            page: 0,
+            x: 229.0,
+            y: 49.0,
+            size: 6.0,
+            text: "1，800".into(),
+        }];
         let refs: Vec<&FlatLine> = lines.iter().collect();
         assert_eq!(extract_distance(&refs), Some(1800));
     }
 
     #[test]
     fn extract_distance_ascii_comma() {
-        let lines = vec![FlatLine { page: 0, x: 229.0, y: 49.0, size: 6.0, text: "1,200".into() }];
+        let lines = vec![FlatLine {
+            page: 0,
+            x: 229.0,
+            y: 49.0,
+            size: 6.0,
+            text: "1,200".into(),
+        }];
         let refs: Vec<&FlatLine> = lines.iter().collect();
         assert_eq!(extract_distance(&refs), Some(1200));
     }
 
     #[test]
     fn extract_surface_dirt() {
-        let lines = vec![FlatLine { page: 0, x: 234.0, y: 56.0, size: 6.0, text: "（ダート".into() }];
+        let lines = vec![FlatLine {
+            page: 0,
+            x: 234.0,
+            y: 56.0,
+            size: 6.0,
+            text: "（ダート".into(),
+        }];
         let refs: Vec<&FlatLine> = lines.iter().collect();
         assert_eq!(extract_surface(&refs), Some(Surface::Dirt));
     }
 
     #[test]
     fn extract_surface_turf() {
-        let lines = vec![FlatLine { page: 0, x: 1106.0, y: 56.0, size: 6.0, text: "（芝".into() }];
+        let lines = vec![FlatLine {
+            page: 0,
+            x: 1106.0,
+            y: 56.0,
+            size: 6.0,
+            text: "（芝".into(),
+        }];
         let refs: Vec<&FlatLine> = lines.iter().collect();
         assert_eq!(extract_surface(&refs), Some(Surface::Turf));
     }
 
     #[test]
     fn extract_meeting_compact_header() {
-        let lines = vec![FlatLine { page: 0, x: 30.0, y: 49.0, size: 5.0, text: "2026年3中山8".into() }];
+        let lines = vec![FlatLine {
+            page: 0,
+            x: 30.0,
+            y: 49.0,
+            size: 5.0,
+            text: "2026年3中山8".into(),
+        }];
         let refs: Vec<&FlatLine> = lines.iter().collect();
         let (year, round, venue, day) = extract_meeting(&refs).expect("should parse");
         assert_eq!(year, 2026);

@@ -6,23 +6,24 @@ use crate::error::{Error, Result};
 /// Run `mutool draw -F stext.json` against the given PDF bytes and return the JSON output.
 /// stext.json preserves x/y bbox per text line, which is required to handle the multi-column
 /// race-card layout (4 races per page, with odd/even horse-num split into sub-columns).
+///
+/// Temp files are created via the `tempfile` crate so that (a) names are guaranteed unique even
+/// when several PDFs are ingested in parallel, and (b) they are removed on drop even if an early
+/// return occurs.
 pub fn extract_stext_json(bytes: &[u8]) -> Result<String> {
-    let dir = std::env::temp_dir();
-    let pid = std::process::id();
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    let pdf_path = dir.join(format!("paddock-entry-{pid}-{nanos}.pdf"));
-    let out_path = dir.join(format!("paddock-entry-{pid}-{nanos}.json"));
-    {
-        let mut f = std::fs::File::create(&pdf_path)?;
-        f.write_all(bytes)?;
-    }
-    let result = run_mutool(&pdf_path, &out_path);
-    let _ = std::fs::remove_file(&pdf_path);
-    let _ = std::fs::remove_file(&out_path);
-    result
+    let mut pdf = tempfile::Builder::new()
+        .prefix("paddock-entry-")
+        .suffix(".pdf")
+        .tempfile()?;
+    pdf.write_all(bytes)?;
+    pdf.flush()?;
+
+    let out = tempfile::Builder::new()
+        .prefix("paddock-entry-")
+        .suffix(".json")
+        .tempfile()?;
+
+    run_mutool(pdf.path(), out.path())
 }
 
 fn run_mutool(pdf_path: &std::path::Path, out_path: &std::path::Path) -> Result<String> {

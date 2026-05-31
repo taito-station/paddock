@@ -2,14 +2,18 @@ use entry_parser::MutoolEntryParser;
 use paddock_domain::{Surface, Venue};
 use paddock_use_case::entry_parser::EntryParser;
 
-const SAMPLE: &[u8] =
-    include_bytes!("../../../../pdfs/entries/done/20260419-03nakayama08.pdf");
+const SAMPLE: &[u8] = include_bytes!("../../../../pdfs/entries/done/20260419-03nakayama08.pdf");
 
 #[test]
 fn parses_sample_entry_pdf_into_twelve_race_cards() {
     let parser = MutoolEntryParser;
     let cards = parser.parse(SAMPLE).expect("parse sample entry pdf");
-    assert_eq!(cards.len(), 12, "expected 12 race cards, got {}", cards.len());
+    assert_eq!(
+        cards.len(),
+        12,
+        "expected 12 race cards, got {}",
+        cards.len()
+    );
 }
 
 #[test]

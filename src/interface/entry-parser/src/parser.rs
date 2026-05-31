@@ -1,6 +1,6 @@
 use paddock_domain::RaceCard;
-use paddock_use_case::entry_parser::EntryParser;
 use paddock_use_case::Result as UcResult;
+use paddock_use_case::entry_parser::EntryParser;
 
 use crate::extract;
 use crate::mutool;
