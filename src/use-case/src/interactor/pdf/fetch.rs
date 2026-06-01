@@ -11,11 +11,12 @@ use crate::pdf_fetcher::PdfFetcher;
 use crate::pdf_parser::PdfParser;
 use crate::repository::{FetchRecord, Repository};
 
-/// Upper bounds used only to guarantee the discovery loop terminates even if every
-/// request errors (a 404 normally stops enumeration well before these). JRA meetings
-/// never exceed these in practice.
-const ROUND_CAP: u32 = 6;
-const DAY_CAP: u32 = 12;
+/// Runaway guards for the discovery loop. Set a little above the real JRA maxima
+/// (~6 rounds / ~12 days per meeting) so a legitimate meeting always stops at its 404
+/// boundary first; reaching a cap therefore signals an anomaly (or an error storm) and
+/// is logged as a possible truncation rather than silently dropping data.
+const ROUND_CAP: u32 = 8;
+const DAY_CAP: u32 = 14;
 
 impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
     /// Fetch a single JRA meeting-day result PDF, parse it, and store the
@@ -106,6 +107,7 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
                 None => (1..=ROUND_CAP).collect(),
             };
 
+            let mut hit_round_boundary = false;
             for round in rounds {
                 let days: Vec<u32> = match range.day {
                     Some(d) => vec![d],
@@ -113,6 +115,7 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
                 };
 
                 let mut round_exists = true;
+                let mut hit_day_boundary = false;
                 for day in days {
                     let spec = MeetingSpec {
                         year: range.year,
@@ -145,6 +148,7 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
                                 if is_first_day && range.round.is_none() {
                                     round_exists = false;
                                 }
+                                hit_day_boundary = true;
                                 break;
                             }
                         },
@@ -156,10 +160,37 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
                     }
                 }
 
+                // The day loop is meant to stop at a 404 boundary. If it instead ran out
+                // at DAY_CAP (no boundary seen) while the range was open-ended, the meeting
+                // may have more days than the guard allows — surface it rather than silently
+                // truncating.
+                if range.day.is_none() && !hit_day_boundary {
+                    tracing::warn!(
+                        year = range.year,
+                        %venue,
+                        round,
+                        day_cap = DAY_CAP,
+                        "day cap reached without a 404 boundary; results may be truncated"
+                    );
+                }
+
                 // Round未指定で「この回が存在しない」と分かったら、以降の回も無い。
                 if range.round.is_none() && !round_exists {
+                    hit_round_boundary = true;
                     break;
                 }
+            }
+
+            // Round enumeration normally stops at an absent round (the boundary). If it
+            // instead ran out at ROUND_CAP, the venue may hold more rounds than the guard
+            // allows — surface it rather than silently truncating.
+            if range.round.is_none() && !hit_round_boundary {
+                tracing::warn!(
+                    year = range.year,
+                    %venue,
+                    round_cap = ROUND_CAP,
+                    "round cap reached without an absent-round boundary; more rounds may exist"
+                );
             }
         }
 
