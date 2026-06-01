@@ -23,6 +23,12 @@ impl paddock_use_case::pdf_fetcher::PdfFetcher for UnusedFetcher {
             "analyze bin does not fetch PDFs".into(),
         ))
     }
+
+    fn fetch_if_exists(&self, _url: &str) -> paddock_use_case::Result<Option<Vec<u8>>> {
+        Err(paddock_use_case::Error::InvalidArgument(
+            "analyze bin does not fetch PDFs".into(),
+        ))
+    }
 }
 
 pub struct App {

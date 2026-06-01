@@ -12,4 +12,6 @@ pub use interactor::Interactor;
 pub use interactor::entry::EntryInteractor;
 pub use pdf_fetcher::PdfFetcher;
 pub use pdf_parser::PdfParser;
-pub use repository::{CourseStatsRow, GroupStat, HorseStatsRow, JockeyStatsRow, Repository};
+pub use repository::{
+    CourseStatsRow, FetchRecord, GroupStat, HorseStatsRow, JockeyStatsRow, Repository,
+};
