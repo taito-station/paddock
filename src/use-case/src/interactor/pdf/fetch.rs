@@ -53,6 +53,7 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
                 url: url.clone(),
                 races_saved: races_saved as u32,
                 horses_saved: horses_saved as u32,
+                fetched_at: chrono::Utc::now(),
             })
             .await?;
 

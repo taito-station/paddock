@@ -1,4 +1,3 @@
-use chrono::Utc;
 use paddock_use_case::FetchRecord;
 use sqlx::SqlitePool;
 
@@ -29,7 +28,7 @@ pub async fn record(pool: &SqlitePool, record: &FetchRecord) -> Result<()> {
     .bind(&record.url)
     .bind(record.races_saved as i64)
     .bind(record.horses_saved as i64)
-    .bind(Utc::now().to_rfc3339())
+    .bind(record.fetched_at.to_rfc3339())
     .execute(pool)
     .await?;
     Ok(())

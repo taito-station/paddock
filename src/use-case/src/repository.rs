@@ -1,5 +1,6 @@
 use core::future::Future;
 
+use chrono::{DateTime, Utc};
 use paddock_domain::{HorseName, JockeyName, Race, RaceCard, RaceId, Surface, Venue};
 
 use crate::error::Result;
@@ -74,6 +75,9 @@ pub struct FetchRecord {
     pub url: String,
     pub races_saved: u32,
     pub horses_saved: u32,
+    /// When the fetch+ingest happened. Set by the use-case layer so the gateway
+    /// stays free of clock side effects (and tests can control it).
+    pub fetched_at: DateTime<Utc>,
 }
 
 pub trait Repository: Send + Sync {
