@@ -166,6 +166,9 @@ async fn ingests_and_records_history_when_new() {
     let recorded = interactor.repository.recorded.lock().unwrap();
     assert_eq!(recorded.len(), 1);
     assert_eq!(recorded[0].source_key, "2026-3-nakayama-6");
+    // fetched_at is set by the use-case layer (not the gateway), so it is present
+    // on the record handed to the repository.
+    assert!(recorded[0].fetched_at <= chrono::Utc::now());
 }
 
 #[tokio::test]
