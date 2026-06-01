@@ -27,6 +27,23 @@ pub enum Venue {
 }
 
 impl Venue {
+    /// All 10 JRA venues, in the conventional course-code order. Used to enumerate
+    /// every venue when a range fetch omits `--venue`.
+    pub fn all() -> [Venue; 10] {
+        [
+            Venue::Sapporo,
+            Venue::Hakodate,
+            Venue::Fukushima,
+            Venue::Niigata,
+            Venue::Tokyo,
+            Venue::Nakayama,
+            Venue::Chukyo,
+            Venue::Kyoto,
+            Venue::Hanshin,
+            Venue::Kokura,
+        ]
+    }
+
     pub fn as_jp(&self) -> &'static str {
         match self {
             Venue::Sapporo => "札幌",

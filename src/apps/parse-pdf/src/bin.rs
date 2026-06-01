@@ -4,10 +4,12 @@ mod setup;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use std::time::Duration;
+
 use anyhow::Context;
 use clap::Parser;
 use paddock_domain::Venue;
-use paddock_use_case::dto::pdf::fetch::{FetchMeetingOutcome, MeetingSpec};
+use paddock_use_case::dto::pdf::fetch::{FetchMeetingOutcome, MeetingRange, MeetingSpec};
 use paddock_use_case::dto::pdf::ingest::IngestPdfResponse;
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
@@ -86,20 +88,76 @@ async fn run_ingest(app: Arc<setup::App>, args: IngestArgs) -> anyhow::Result<()
 }
 
 async fn run_fetch(app: Arc<setup::App>, args: FetchArgs) -> anyhow::Result<()> {
-    let venue = Venue::try_from(args.venue.as_str())
-        .with_context(|| format!("invalid venue: {}", args.venue))?;
-    let spec = MeetingSpec {
+    // Progressive omission: a narrower field requires every broader one.
+    if args.day.is_some() && args.round.is_none() {
+        anyhow::bail!("--day requires --round (and --venue)");
+    }
+    if args.round.is_some() && args.venue.is_none() {
+        anyhow::bail!("--round requires --venue");
+    }
+
+    let venue = match &args.venue {
+        Some(v) => {
+            Some(Venue::try_from(v.as_str()).with_context(|| format!("invalid venue: {v}"))?)
+        }
+        None => None,
+    };
+
+    // All four fields present → single meeting (preserves the original behavior).
+    if let (Some(venue), Some(round), Some(day)) = (venue, args.round, args.day) {
+        return run_fetch_single(app, args.year, venue, round, day, args.force).await;
+    }
+
+    // Otherwise → range fetch with a summary.
+    let range = MeetingRange {
         year: args.year,
-        round: args.round,
         venue,
+        round: args.round,
         day: args.day,
+    };
+    let interval = Duration::from_secs_f64(args.interval.max(0.0));
+    let span = tracing::info_span!("fetch_range", year = args.year);
+    let summary = app
+        .fetch_meeting_range(&range, args.force, interval)
+        .instrument(span)
+        .await?;
+
+    println!(
+        "done: {} ingested, {} skipped, {} not-found, {} failed ({} race(s), {} horse result(s))",
+        summary.ingested,
+        summary.skipped,
+        summary.not_found,
+        summary.failed,
+        summary.races_saved,
+        summary.horses_saved,
+    );
+    if !summary.failures.is_empty() {
+        eprintln!("failures:");
+        for (key, err) in &summary.failures {
+            eprintln!("  {key}: {err}");
+        }
+        anyhow::bail!("{} meeting(s) failed", summary.failed);
+    }
+    Ok(())
+}
+
+async fn run_fetch_single(
+    app: Arc<setup::App>,
+    year: i32,
+    venue: Venue,
+    round: u32,
+    day: u32,
+    force: bool,
+) -> anyhow::Result<()> {
+    let spec = MeetingSpec {
+        year,
+        round,
+        venue,
+        day,
     };
 
     let span = tracing::info_span!("fetch", source_key = %spec.source_key());
-    let response = app
-        .fetch_meeting(&spec, args.force)
-        .instrument(span)
-        .await?;
+    let response = app.fetch_meeting(&spec, force).instrument(span).await?;
 
     match response.outcome {
         FetchMeetingOutcome::Ingested {
