@@ -255,6 +255,31 @@ impl PdfFetcher for ExistingUrlsFetcher {
     }
 }
 
+/// Fetcher whose `fetch_if_exists` always errors (e.g. a network failure), used to verify
+/// that range fetch counts failures and keeps going rather than aborting.
+struct ErrorOnDayFetcher {
+    /// Day numbers (within round 1) that should error; others 404.
+    error_days: HashSet<u32>,
+}
+
+impl PdfFetcher for ErrorOnDayFetcher {
+    fn fetch(&self, _url: &str) -> Result<Vec<u8>> {
+        unimplemented!("range fetch uses fetch_if_exists")
+    }
+    fn fetch_if_exists(&self, url: &str) -> Result<Option<Vec<u8>>> {
+        // URLs end with `...-1nakayama{day}.pdf`; error on configured days, else 404.
+        let errors = self
+            .error_days
+            .iter()
+            .any(|d| url.ends_with(&format!("1nakayama{d}.pdf")));
+        if errors {
+            Err(Error::Internal("simulated network failure".into()))
+        } else {
+            Ok(None)
+        }
+    }
+}
+
 /// Repository whose fetch-history is a fixed set of source keys.
 #[derive(Default)]
 struct HistoryRepo {
@@ -476,4 +501,40 @@ async fn fully_specified_range_is_one_meeting() {
     assert_eq!(summary.ingested, 1);
     assert_eq!(summary.not_found, 0);
     assert_eq!(summary.skipped, 0);
+}
+
+#[tokio::test]
+async fn errors_are_counted_and_do_not_abort_the_range() {
+    // Round 1, days 1-2 error (network failure); day 3 is 404 and stops the round.
+    let interactor = Interactor::new(
+        HistoryRepo::default(),
+        OneRaceParser,
+        ErrorOnDayFetcher {
+            error_days: [1, 2].into_iter().collect(),
+        },
+    );
+
+    let range = MeetingRange {
+        year: 2026,
+        venue: Some(Venue::Nakayama),
+        round: Some(1),
+        day: None,
+    };
+    let summary = interactor
+        .fetch_meeting_range(&range, false, Duration::ZERO)
+        .await
+        .unwrap();
+
+    assert_eq!(summary.failed, 2, "both erroring days are counted");
+    assert_eq!(summary.failures.len(), 2);
+    assert_eq!(summary.ingested, 0);
+    assert_eq!(summary.not_found, 1); // day 3 stops the round
+    // Enumeration continued past the errors to find the 404 boundary.
+    assert!(
+        summary
+            .failures
+            .iter()
+            .all(|(key, _)| key.contains("nakayama")),
+        "failures carry the meeting source_key"
+    );
 }
