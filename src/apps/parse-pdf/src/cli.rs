@@ -21,11 +21,14 @@ pub enum Command {
     /// Ingest PDFs from local paths or http(s) URLs (the default action).
     Ingest(IngestArgs),
 
-    /// Fetch a JRA meeting-day result PDF and ingest it.
+    /// Fetch JRA meeting-day result PDF(s) and ingest them.
     ///
-    /// The PDF is parsed in memory and never written to disk; only a
-    /// fetch-history row is kept. Already-ingested meetings are skipped
-    /// unless `--force` is given.
+    /// Specify a single day with `--year --venue --round --day`, or widen the
+    /// range by omitting trailing fields: drop `--day` for the whole round,
+    /// `--round` for the whole venue, `--venue` for the entire year.
+    ///
+    /// PDFs are parsed in memory and never written to disk; only fetch-history
+    /// rows are kept. Already-ingested meetings are skipped unless `--force`.
     Fetch(FetchArgs),
 }
 
@@ -47,16 +50,21 @@ pub struct FetchArgs {
     pub year: i32,
 
     /// Venue, Japanese name or slug (e.g. "中山" or "nakayama").
+    /// Omit to fetch every venue in the year.
     #[arg(long)]
-    pub venue: String,
+    pub venue: Option<String>,
 
-    /// Meeting round (開催回), e.g. 3.
+    /// Meeting round (開催回), e.g. 3. Omit to fetch every round of the venue.
     #[arg(long)]
-    pub round: u32,
+    pub round: Option<u32>,
 
-    /// Meeting day (日次), e.g. 6.
+    /// Meeting day (日次), e.g. 6. Omit to fetch every day of the round.
     #[arg(long)]
-    pub day: u32,
+    pub day: Option<u32>,
+
+    /// Seconds to wait between JRA requests during a range fetch (default 1.0).
+    #[arg(long, default_value_t = 1.0)]
+    pub interval: f64,
 
     /// Re-fetch and re-ingest even if the meeting is already in fetch history.
     #[arg(long)]
