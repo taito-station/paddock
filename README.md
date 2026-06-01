@@ -49,6 +49,21 @@ cargo run -p parse-pdf -- -j 4 pdfs/results/inbox/*.pdf   # 並列度を明示
 
 `pdfs/results/inbox/` 配下のファイルを引数にした場合、取り込みが成功した PDF は `pdfs/results/done/` へ自動的に移動される（未取り込みファイルが一目で分かるようにするため）。`samples/` などインボックス外のパスは移動されない。複数ファイル指定時、1 件でも失敗があれば終了コードが非 0 になる（成功分の取り込みと移動は維持される）。
 
+なお、明示的に `ingest` サブコマンドを書いても同じ動作になる（`cargo run -p parse-pdf -- ingest pdfs/inbox/*.pdf`）。引数なしの従来呼び出しはデフォルトで `ingest` として扱われる。
+
+### 開催指定で JRA から自動取得（fetch）
+
+完全な URL を組み立てなくても、**年・競馬場・開催回・日次**を指定すれば該当開催の成績 PDF を JRA から取得して取り込める。
+
+```bash
+cargo run -p parse-pdf -- fetch --year 2026 --venue nakayama --round 3 --day 6
+cargo run -p parse-pdf -- fetch --year 2026 --venue 中山 --round 3 --day 6   # 競馬場は日本語名でも可
+```
+
+- 取得した PDF は `https://www.jra.go.jp/datafile/seiseki/report/{年}/{年}-{回}{競馬場}{日}.pdf` から取得し、**メモリ上でパース → DB 保存**する（ローカルには保存しない）。
+- 取り込みに成功した開催は `fetch_history` テーブルに記録され、同じ開催を再指定しても**取得・取り込みをスキップ**する（排他制御）。再取得したい場合は `--force` を付ける。
+- 指定した開催の PDF がまだ公開されていない（HTTP 404）場合は `not found` として終了コード非 0 になり、履歴には記録されない（公開後に再取得できる）。
+
 ### 抽出ロジック
 
 抽出は常に **mutool テキスト抽出 + OCR 補完** のハイブリッド方式で動作する（モード切替なし）。

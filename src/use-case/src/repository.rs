@@ -1,5 +1,6 @@
 use core::future::Future;
 
+use chrono::{DateTime, Utc};
 use paddock_domain::{HorseName, JockeyName, Race, RaceCard, RaceId, Surface, Venue};
 
 use crate::error::Result;
@@ -66,6 +67,19 @@ pub struct JockeyStatsRow {
     pub by_gate_group: Vec<GroupStat>,
 }
 
+/// A successful fetch+ingest of a JRA meeting-day PDF, persisted so the same
+/// meeting is not re-fetched on a later run (exclusive control).
+#[derive(Debug, Clone)]
+pub struct FetchRecord {
+    pub source_key: String,
+    pub url: String,
+    pub races_saved: u32,
+    pub horses_saved: u32,
+    /// When the fetch+ingest happened. Set by the use-case layer so the gateway
+    /// stays free of clock side effects (and tests can control it).
+    pub fetched_at: DateTime<Utc>,
+}
+
 pub trait Repository: Send + Sync {
     fn save_race(&self, race: &Race) -> impl Future<Output = Result<()>> + Send;
 
@@ -86,6 +100,13 @@ pub trait Repository: Send + Sync {
     fn count_races(&self) -> impl Future<Output = Result<u64>> + Send;
 
     fn race_exists(&self, race_id: &RaceId) -> impl Future<Output = Result<bool>> + Send;
+
+    /// Whether a meeting-day source key has already been ingested.
+    fn fetch_history_contains(&self, source_key: &str)
+    -> impl Future<Output = Result<bool>> + Send;
+
+    /// Record a successful meeting-day fetch+ingest in the history table.
+    fn record_fetch(&self, record: &FetchRecord) -> impl Future<Output = Result<()>> + Send;
 
     fn save_race_card(&self, card: &RaceCard) -> impl Future<Output = Result<()>> + Send;
 }

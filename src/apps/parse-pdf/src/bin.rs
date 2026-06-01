@@ -6,16 +6,28 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use clap::Parser;
+use paddock_domain::Venue;
+use paddock_use_case::dto::pdf::fetch::{FetchMeetingOutcome, MeetingSpec};
 use paddock_use_case::dto::pdf::ingest::IngestPdfResponse;
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 use tracing::Instrument;
 
+use cli::{Cli, Command, FetchArgs, IngestArgs};
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let args = cli::Cli::parse();
-    let parallel = resolve_parallel(args.parallel);
+    let cli = Cli::parse();
     let app = Arc::new(setup::build_app().await?);
+
+    match cli.command.unwrap_or(Command::Ingest(cli.ingest)) {
+        Command::Ingest(args) => run_ingest(app, args).await,
+        Command::Fetch(args) => run_fetch(app, args).await,
+    }
+}
+
+async fn run_ingest(app: Arc<setup::App>, args: IngestArgs) -> anyhow::Result<()> {
+    let parallel = resolve_parallel(args.parallel);
     let total = args.sources.len();
     let semaphore = Arc::new(Semaphore::new(parallel));
     let mut joinset: JoinSet<(String, paddock_use_case::Result<IngestPdfResponse>)> =
@@ -69,6 +81,45 @@ async fn main() -> anyhow::Result<()> {
 
     if failed > 0 {
         anyhow::bail!("{failed} of {total} files failed");
+    }
+    Ok(())
+}
+
+async fn run_fetch(app: Arc<setup::App>, args: FetchArgs) -> anyhow::Result<()> {
+    let venue = Venue::try_from(args.venue.as_str())
+        .with_context(|| format!("invalid venue: {}", args.venue))?;
+    let spec = MeetingSpec {
+        year: args.year,
+        round: args.round,
+        venue,
+        day: args.day,
+    };
+
+    let span = tracing::info_span!("fetch", source_key = %spec.source_key());
+    let response = app
+        .fetch_meeting(&spec, args.force)
+        .instrument(span)
+        .await?;
+
+    match response.outcome {
+        FetchMeetingOutcome::Ingested {
+            races_saved,
+            horses_saved,
+        } => {
+            println!(
+                "ingested: {races_saved} race(s), {horses_saved} horse result(s) from {}",
+                response.url
+            );
+        }
+        FetchMeetingOutcome::Skipped => {
+            println!(
+                "skipped: {} already ingested (use --force to re-fetch)",
+                response.source_key
+            );
+        }
+        FetchMeetingOutcome::NotFound => {
+            anyhow::bail!("not found: {} (HTTP 404)", response.url);
+        }
     }
     Ok(())
 }
