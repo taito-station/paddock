@@ -366,6 +366,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "entry-parser"
+version = "0.1.0"
+dependencies = [
+ "paddock-domain",
+ "paddock-use-case",
+ "regex",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tracing",
+]
+
+[[package]]
 name = "envy"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1070,6 +1084,7 @@ dependencies = [
  "paddock-domain",
  "thiserror",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -1099,6 +1114,22 @@ dependencies = [
  "redox_syscall 0.5.18",
  "smallvec",
  "windows-link",
+]
+
+[[package]]
+name = "parse-entries"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "entry-parser",
+ "paddock-config",
+ "paddock-use-case",
+ "rdb-gateway",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "ureq",
 ]
 
 [[package]]

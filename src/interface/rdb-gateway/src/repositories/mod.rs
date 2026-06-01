@@ -3,8 +3,9 @@ mod fetch_history;
 mod horse_stats;
 mod jockey_stats;
 mod save_race;
+mod save_race_card;
 
-use paddock_domain::{HorseName, JockeyName, Race, RaceId, Surface, Venue};
+use paddock_domain::{HorseName, JockeyName, Race, RaceCard, RaceId, Surface, Venue};
 use paddock_use_case::Result as UcResult;
 use paddock_use_case::repository::{
     CourseStatsRow, FetchRecord, HorseStatsRow, JockeyStatsRow, Repository,
@@ -77,6 +78,12 @@ impl Repository for SqliteRepository {
 
     async fn record_fetch(&self, record: &FetchRecord) -> UcResult<()> {
         fetch_history::record(&self.pool, record)
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn save_race_card(&self, card: &RaceCard) -> UcResult<()> {
+        save_race_card::save_race_card(&self.pool, card)
             .await
             .map_err(Into::into)
     }

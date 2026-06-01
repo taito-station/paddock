@@ -1,6 +1,6 @@
 use core::future::Future;
 
-use paddock_domain::{HorseName, JockeyName, Race, RaceId, Surface, Venue};
+use paddock_domain::{HorseName, JockeyName, Race, RaceCard, RaceId, Surface, Venue};
 
 use crate::error::Result;
 
@@ -98,11 +98,11 @@ pub trait Repository: Send + Sync {
     fn race_exists(&self, race_id: &RaceId) -> impl Future<Output = Result<bool>> + Send;
 
     /// Whether a meeting-day source key has already been ingested.
-    fn fetch_history_contains(
-        &self,
-        source_key: &str,
-    ) -> impl Future<Output = Result<bool>> + Send;
+    fn fetch_history_contains(&self, source_key: &str)
+    -> impl Future<Output = Result<bool>> + Send;
 
     /// Record a successful meeting-day fetch+ingest in the history table.
     fn record_fetch(&self, record: &FetchRecord) -> impl Future<Output = Result<()>> + Send;
+
+    fn save_race_card(&self, card: &RaceCard) -> impl Future<Output = Result<()>> + Send;
 }
