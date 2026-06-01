@@ -7,7 +7,7 @@ use std::sync::Mutex;
 
 use chrono::NaiveDate;
 use paddock_domain::horse_result::{FinishingPosition, GateNum, HorseName, HorseNum, ResultStatus};
-use paddock_domain::{HorseResult, JockeyName, Race, RaceId, Surface, Venue};
+use paddock_domain::{HorseResult, JockeyName, Race, RaceCard, RaceId, Surface, Venue};
 use paddock_use_case::dto::pdf::fetch::{FetchMeetingOutcome, MeetingSpec};
 use paddock_use_case::pdf_fetcher::PdfFetcher;
 use paddock_use_case::pdf_parser::PdfParser;
@@ -96,6 +96,9 @@ impl Repository for MockRepo {
     async fn record_fetch(&self, record: &FetchRecord) -> Result<()> {
         self.recorded.lock().unwrap().push(record.clone());
         Ok(())
+    }
+    async fn save_race_card(&self, _card: &RaceCard) -> Result<()> {
+        Err(Error::NotFound("unused".into()))
     }
 }
 
@@ -202,10 +205,7 @@ async fn force_refetches_even_when_in_history() {
 
     let resp = interactor.fetch_meeting(&spec(), true).await.unwrap();
 
-    assert!(matches!(
-        resp.outcome,
-        FetchMeetingOutcome::Ingested { .. }
-    ));
+    assert!(matches!(resp.outcome, FetchMeetingOutcome::Ingested { .. }));
     assert_eq!(*interactor.pdf_fetcher.calls.lock().unwrap(), 1);
 }
 

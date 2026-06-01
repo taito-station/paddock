@@ -42,7 +42,10 @@ impl MeetingSpec {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FetchMeetingOutcome {
     /// Fetched and ingested; carries saved counts.
-    Ingested { races_saved: usize, horses_saved: usize },
+    Ingested {
+        races_saved: usize,
+        horses_saved: usize,
+    },
     /// Already in fetch history; skipped without fetching.
     Skipped,
     /// The PDF does not exist (HTTP 404) — e.g. not published yet.
