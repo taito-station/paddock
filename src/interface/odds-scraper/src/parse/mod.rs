@@ -117,14 +117,14 @@ fn parse_place_band(raw: &str) -> Result<Option<PlaceOdds>> {
         .collect();
     match parts.as_slice() {
         [single] => match parse_odds(single)? {
-            Some(v) => Ok(Some(PlaceOdds::new(v, v)?)),
+            Some(v) => Ok(Some(PlaceOdds::try_from((v, v))?)),
             None => Ok(None),
         },
         [low, high] => {
             let (Some(low), Some(high)) = (parse_odds(low)?, parse_odds(high)?) else {
                 return Ok(None);
             };
-            Ok(Some(PlaceOdds::new(low, high)?))
+            Ok(Some(PlaceOdds::try_from((low, high))?))
         }
         _ => {
             tracing::warn!(cell = %raw, "unexpected 複勝 band format; skipping");
