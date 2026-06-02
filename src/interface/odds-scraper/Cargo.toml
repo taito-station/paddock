@@ -1,0 +1,12 @@
+[package]
+name = "odds-scraper"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+paddock-domain   = { workspace = true }
+paddock-use-case = { workspace = true }
+scraper          = { workspace = true }
+thiserror        = { workspace = true }
+tracing          = { workspace = true }
+ureq             = { workspace = true }
