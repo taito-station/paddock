@@ -87,9 +87,7 @@ impl UreqOddsScraper {
             .send_form(&[("cname", cname)])
             .map_err(|e| Error::Fetch(e.to_string()))?;
         let mut body = String::new();
-        resp.into_reader()
-            .read_to_string(&mut body)
-            .map_err(Error::Io)?;
+        resp.into_reader().read_to_string(&mut body)?;
         Ok(body)
     }
 }
@@ -119,11 +117,27 @@ fn extract_cname_tokens(menu_html: &str) -> Vec<(String, String)> {
     tokens
 }
 
-/// Normalise a JRA bet-type label for matching: kanji numerals used in the
-/// `三連*` labels are folded to the ASCII digits JRA also uses (`3連*`), so a
-/// single comparison covers both notations.
+/// Normalise a JRA bet-type label for matching: kanji `三` and any full-width
+/// digits used in the `三連*` / `３連*` labels are folded to ASCII digits, so a
+/// single comparison covers JRA's mixed notations.
 fn normalize_label(s: &str) -> String {
-    s.replace('三', "3").replace('１', "1").replace('２', "2")
+    s.chars()
+        .map(|c| match c {
+            '三' => '3',
+            '０'..='９' => char::from(b'0' + (c as u32 - '０' as u32) as u8),
+            other => other,
+        })
+        .collect()
+}
+
+/// Resolve the cname navigation token for a bet type from the menu tokens,
+/// matching on the (numeral-folded) Japanese label. Pure: unit-testable.
+fn match_token(tokens: &[(String, String)], bet: BetType) -> Option<String> {
+    let target = normalize_label(bet.as_ja());
+    tokens
+        .iter()
+        .find(|(label, _)| normalize_label(label).contains(&target))
+        .map(|(_, cname)| cname.clone())
 }
 
 impl OddsScraper for UreqOddsScraper {
@@ -136,14 +150,16 @@ impl OddsScraper for UreqOddsScraper {
         let menu = self.post_cname(race_id.value())?;
         let tokens = extract_cname_tokens(&menu);
 
-        // Match a bet type by its Japanese label (BetType::as_ja), numeral-folded.
-        let find = |bet: BetType| -> Option<String> {
-            let target = normalize_label(bet.as_ja());
-            tokens
-                .iter()
-                .find(|(label, _)| normalize_label(label).contains(&target))
-                .map(|(_, cname)| cname.clone())
-        };
+        // Fail loudly rather than returning empty odds: no tokens means the
+        // menu navigation did not resolve (wrong entry token / layout change),
+        // which is a different condition from an open race with empty pools.
+        if tokens.is_empty() {
+            return Err(Error::Fetch(format!(
+                "no odds-menu navigation tokens found for race {race_id}; \
+                 live JRA navigation is unverified (see ADR 0001)"
+            ))
+            .into());
+        }
 
         let fetch = |cname: Option<String>| -> Result<Option<String>> {
             match cname {
@@ -153,11 +169,11 @@ impl OddsScraper for UreqOddsScraper {
         };
 
         let pages = OddsPages {
-            win_place: fetch(find(BetType::Win))?,
-            quinella: fetch(find(BetType::Quinella))?,
-            exacta: fetch(find(BetType::Exacta))?,
-            trio: fetch(find(BetType::Trio))?,
-            trifecta: fetch(find(BetType::Trifecta))?,
+            win_place: fetch(match_token(&tokens, BetType::Win))?,
+            quinella: fetch(match_token(&tokens, BetType::Quinella))?,
+            exacta: fetch(match_token(&tokens, BetType::Exacta))?,
+            trio: fetch(match_token(&tokens, BetType::Trio))?,
+            trifecta: fetch(match_token(&tokens, BetType::Trifecta))?,
         };
 
         Ok(assemble(race_id.clone(), &pages)?)
@@ -201,8 +217,26 @@ mod tests {
     }
 
     #[test]
-    fn normalize_label_folds_kanji_numerals() {
+    fn normalize_label_folds_kanji_and_fullwidth_numerals() {
         assert_eq!(normalize_label("三連複"), "3連複");
-        assert_eq!(normalize_label("3連単"), "3連単");
+        assert_eq!(normalize_label("３連単"), "3連単"); // full-width digit
+        assert_eq!(normalize_label("3連単"), "3連単"); // already ASCII
+    }
+
+    #[test]
+    fn match_token_resolves_each_bet_type_label() {
+        let tokens = extract_cname_tokens(MENU);
+        // 単勝/複勝 share the "単勝・複勝" menu entry.
+        assert_eq!(match_token(&tokens, BetType::Win).as_deref(), Some("pwTAN001"));
+        assert_eq!(
+            match_token(&tokens, BetType::Quinella).as_deref(),
+            Some("pwUMR002")
+        );
+        // 三連複 (as_ja) matches the menu's "3連複" via numeral folding.
+        assert_eq!(match_token(&tokens, BetType::Trio).as_deref(), Some("pwSF004"));
+        assert_eq!(
+            match_token(&tokens, BetType::Trifecta).as_deref(),
+            Some("pwST005")
+        );
     }
 }
