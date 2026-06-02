@@ -41,9 +41,10 @@ pub struct PlaceOdds {
     pub high: OddsValue,
 }
 
-impl PlaceOdds {
+impl TryFrom<(OddsValue, OddsValue)> for PlaceOdds {
+    type Error = Error;
     /// Build a place-odds band, rejecting an inverted `low > high` range.
-    pub fn new(low: OddsValue, high: OddsValue) -> Result<Self> {
+    fn try_from((low, high): (OddsValue, OddsValue)) -> Result<Self> {
         if low.value() > high.value() {
             return Err(Error::OutOfRange(format!(
                 "PlaceOdds low ({}) must be <= high ({})",

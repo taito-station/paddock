@@ -121,7 +121,7 @@ fn combination_keys_reject_duplicate_horses() {
 fn place_band_rejects_inverted_range() {
     let low = OddsValue::try_from(2.0).unwrap();
     let high = OddsValue::try_from(1.0).unwrap();
-    assert!(PlaceOdds::new(low, high).is_err());
+    assert!(PlaceOdds::try_from((low, high)).is_err());
 }
 
 #[test]
