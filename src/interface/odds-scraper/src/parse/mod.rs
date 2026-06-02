@@ -81,7 +81,11 @@ pub fn parse_win_place(
         let Some(num_cell) = row.select(&num_sel).next() else {
             continue;
         };
-        let horse = parse_horse_num(&text_of(num_cell))?;
+        // A `td.num` cell whose content is not a horse number is not a data row
+        // (e.g. a label/subtotal row); skip it rather than failing the parse.
+        let Ok(horse) = parse_horse_num(&text_of(num_cell)) else {
+            continue;
+        };
 
         if let Some(tan) = row.select(&tan_sel).next()
             && let Some(odds) = parse_odds(&text_of(tan))?
@@ -100,22 +104,32 @@ pub fn parse_win_place(
 }
 
 /// Parse a 複勝 band cell such as `1.5 - 2.0`. A single figure is treated as a
-/// degenerate band (`low == high`).
+/// degenerate band (`low == high`). An unexpected shape (3+ figures) is logged
+/// and skipped rather than silently truncated.
 fn parse_place_band(raw: &str) -> Result<Option<PlaceOdds>> {
-    let normalized = raw.replace(['－', '―', '−', '〜', '~'], "-");
-    let parts: Vec<&str> = normalized.split('-').map(str::trim).collect();
+    let normalized = raw
+        .replace(['－', '―', '−', '〜', '~'], "-")
+        .replace('　', " ");
+    let parts: Vec<&str> = normalized
+        .split('-')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .collect();
     match parts.as_slice() {
         [single] => match parse_odds(single)? {
             Some(v) => Ok(Some(PlaceOdds::new(v, v)?)),
             None => Ok(None),
         },
-        [low, high, ..] => {
+        [low, high] => {
             let (Some(low), Some(high)) = (parse_odds(low)?, parse_odds(high)?) else {
                 return Ok(None);
             };
             Ok(Some(PlaceOdds::new(low, high)?))
         }
-        [] => Ok(None),
+        _ => {
+            tracing::warn!(cell = %raw, "unexpected 複勝 band format; skipping");
+            Ok(None)
+        }
     }
 }
 
@@ -161,7 +175,7 @@ fn expect_len(horses: &[HorseNum], n: usize, bet: &str) -> Result<()> {
 pub fn parse_quinella(html: &str) -> Result<HashMap<Pair, OddsValue>> {
     parse_combo_rows(html, |h| {
         expect_len(h, 2, "quinella")?;
-        Pair::new(h[0], h[1]).map_err(Error::from)
+        Pair::try_from((h[0], h[1])).map_err(Error::from)
     })
 }
 
@@ -169,7 +183,7 @@ pub fn parse_quinella(html: &str) -> Result<HashMap<Pair, OddsValue>> {
 pub fn parse_exacta(html: &str) -> Result<HashMap<OrderedPair, OddsValue>> {
     parse_combo_rows(html, |h| {
         expect_len(h, 2, "exacta")?;
-        OrderedPair::new(h[0], h[1]).map_err(Error::from)
+        OrderedPair::try_from((h[0], h[1])).map_err(Error::from)
     })
 }
 
@@ -177,7 +191,7 @@ pub fn parse_exacta(html: &str) -> Result<HashMap<OrderedPair, OddsValue>> {
 pub fn parse_trio(html: &str) -> Result<HashMap<Triple, OddsValue>> {
     parse_combo_rows(html, |h| {
         expect_len(h, 3, "trio")?;
-        Triple::new(h[0], h[1], h[2]).map_err(Error::from)
+        Triple::try_from((h[0], h[1], h[2])).map_err(Error::from)
     })
 }
 
@@ -185,6 +199,6 @@ pub fn parse_trio(html: &str) -> Result<HashMap<Triple, OddsValue>> {
 pub fn parse_trifecta(html: &str) -> Result<HashMap<OrderedTriple, OddsValue>> {
     parse_combo_rows(html, |h| {
         expect_len(h, 3, "trifecta")?;
-        OrderedTriple::new(h[0], h[1], h[2]).map_err(Error::from)
+        OrderedTriple::try_from((h[0], h[1], h[2])).map_err(Error::from)
     })
 }
