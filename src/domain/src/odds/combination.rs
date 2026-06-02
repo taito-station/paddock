@@ -7,7 +7,14 @@ use crate::horse_result::HorseNum;
 pub struct Pair(HorseNum, HorseNum);
 
 impl Pair {
-    pub fn new(a: HorseNum, b: HorseNum) -> Result<Self> {
+    pub fn as_tuple(&self) -> (HorseNum, HorseNum) {
+        (self.0, self.1)
+    }
+}
+
+impl TryFrom<(HorseNum, HorseNum)> for Pair {
+    type Error = Error;
+    fn try_from((a, b): (HorseNum, HorseNum)) -> Result<Self> {
         if a == b {
             return Err(Error::InvalidFormat(format!(
                 "Pair requires distinct horses, got {} twice",
@@ -17,10 +24,6 @@ impl Pair {
         let (lo, hi) = if a.value() <= b.value() { (a, b) } else { (b, a) };
         Ok(Self(lo, hi))
     }
-
-    pub fn as_tuple(&self) -> (HorseNum, HorseNum) {
-        (self.0, self.1)
-    }
 }
 
 /// An ordered pair of distinct horses (馬単 key): first place, then second.
@@ -28,7 +31,14 @@ impl Pair {
 pub struct OrderedPair(HorseNum, HorseNum);
 
 impl OrderedPair {
-    pub fn new(first: HorseNum, second: HorseNum) -> Result<Self> {
+    pub fn as_tuple(&self) -> (HorseNum, HorseNum) {
+        (self.0, self.1)
+    }
+}
+
+impl TryFrom<(HorseNum, HorseNum)> for OrderedPair {
+    type Error = Error;
+    fn try_from((first, second): (HorseNum, HorseNum)) -> Result<Self> {
         if first == second {
             return Err(Error::InvalidFormat(format!(
                 "OrderedPair requires distinct horses, got {} twice",
@@ -37,10 +47,6 @@ impl OrderedPair {
         }
         Ok(Self(first, second))
     }
-
-    pub fn as_tuple(&self) -> (HorseNum, HorseNum) {
-        (self.0, self.1)
-    }
 }
 
 /// An unordered triple of distinct horses (三連複 key). Stored sorted ascending.
@@ -48,7 +54,14 @@ impl OrderedPair {
 pub struct Triple(HorseNum, HorseNum, HorseNum);
 
 impl Triple {
-    pub fn new(a: HorseNum, b: HorseNum, c: HorseNum) -> Result<Self> {
+    pub fn as_tuple(&self) -> (HorseNum, HorseNum, HorseNum) {
+        (self.0, self.1, self.2)
+    }
+}
+
+impl TryFrom<(HorseNum, HorseNum, HorseNum)> for Triple {
+    type Error = Error;
+    fn try_from((a, b, c): (HorseNum, HorseNum, HorseNum)) -> Result<Self> {
         let mut sorted = [a, b, c];
         sorted.sort_by_key(|h| h.value());
         if sorted[0] == sorted[1] || sorted[1] == sorted[2] {
@@ -58,10 +71,6 @@ impl Triple {
         }
         Ok(Self(sorted[0], sorted[1], sorted[2]))
     }
-
-    pub fn as_tuple(&self) -> (HorseNum, HorseNum, HorseNum) {
-        (self.0, self.1, self.2)
-    }
 }
 
 /// An ordered triple of distinct horses (三連単 key): 1st, 2nd, 3rd.
@@ -69,16 +78,19 @@ impl Triple {
 pub struct OrderedTriple(HorseNum, HorseNum, HorseNum);
 
 impl OrderedTriple {
-    pub fn new(first: HorseNum, second: HorseNum, third: HorseNum) -> Result<Self> {
+    pub fn as_tuple(&self) -> (HorseNum, HorseNum, HorseNum) {
+        (self.0, self.1, self.2)
+    }
+}
+
+impl TryFrom<(HorseNum, HorseNum, HorseNum)> for OrderedTriple {
+    type Error = Error;
+    fn try_from((first, second, third): (HorseNum, HorseNum, HorseNum)) -> Result<Self> {
         if first == second || first == third || second == third {
             return Err(Error::InvalidFormat(
                 "OrderedTriple requires three distinct horses".to_string(),
             ));
         }
         Ok(Self(first, second, third))
-    }
-
-    pub fn as_tuple(&self) -> (HorseNum, HorseNum, HorseNum) {
-        (self.0, self.1, self.2)
     }
 }

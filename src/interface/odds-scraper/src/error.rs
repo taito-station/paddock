@@ -16,6 +16,15 @@ pub type Result<A> = std::result::Result<A, Error>;
 
 impl From<Error> for paddock_use_case::Error {
     fn from(value: Error) -> Self {
-        paddock_use_case::Error::Internal(value.to_string())
+        match &value {
+            // Malformed odds HTML / out-of-range values are input problems.
+            Error::Parse(_) | Error::Domain(_) => {
+                paddock_use_case::Error::InvalidArgument(value.to_string())
+            }
+            // Network / IO failures are infrastructure problems.
+            Error::Fetch(_) | Error::Io(_) => {
+                paddock_use_case::Error::Internal(value.to_string())
+            }
+        }
     }
 }

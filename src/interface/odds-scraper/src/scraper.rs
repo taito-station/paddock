@@ -15,7 +15,7 @@
 
 use std::io::Read;
 
-use paddock_domain::{RaceId, RaceOdds};
+use paddock_domain::{BetType, RaceId, RaceOdds};
 use paddock_use_case::Result as UcResult;
 use paddock_use_case::odds_scraper::OddsScraper;
 use scraper::{Html, Selector};
@@ -104,9 +104,12 @@ fn extract_cname_tokens(menu_html: &str) -> Vec<(String, String)> {
         let Some(onclick) = link.value().attr("onclick") else {
             continue;
         };
+        // doAction('/JRADB/accessO.html', '<cname>') — splitting the remainder
+        // on the quote char yields ["", ", ", "<cname>", ")"], so the token is
+        // the 3rd segment (index 2), not the separator at index 1.
         let Some(cname) = onclick
             .split_once("accessO.html")
-            .and_then(|(_, rest)| rest.split('\'').nth(1))
+            .and_then(|(_, rest)| rest.split('\'').nth(2))
         else {
             continue;
         };
@@ -116,18 +119,29 @@ fn extract_cname_tokens(menu_html: &str) -> Vec<(String, String)> {
     tokens
 }
 
+/// Normalise a JRA bet-type label for matching: kanji numerals used in the
+/// `三連*` labels are folded to the ASCII digits JRA also uses (`3連*`), so a
+/// single comparison covers both notations.
+fn normalize_label(s: &str) -> String {
+    s.replace('三', "3").replace('１', "1").replace('２', "2")
+}
+
 impl OddsScraper for UreqOddsScraper {
     fn scrape(&self, race_id: &RaceId) -> UcResult<RaceOdds> {
-        // The caller supplies the race's odds-menu token as the RaceId value.
-        // Fetch the menu, then follow each bet type's cname link.
+        // NOTE: JRA has no race-id → odds URL mapping. This best-effort live
+        // path treats the RaceId value as the odds-menu navigation token,
+        // fetches the menu, then follows each bet type's cname link. The token
+        // convention is unverified against a live race day (see ADR 0001).
         tracing::debug!(race_id = %race_id, "scraping JRA odds");
         let menu = self.post_cname(race_id.value())?;
         let tokens = extract_cname_tokens(&menu);
 
-        let find = |ja: &str| -> Option<String> {
+        // Match a bet type by its Japanese label (BetType::as_ja), numeral-folded.
+        let find = |bet: BetType| -> Option<String> {
+            let target = normalize_label(bet.as_ja());
             tokens
                 .iter()
-                .find(|(label, _)| label.contains(ja))
+                .find(|(label, _)| normalize_label(label).contains(&target))
                 .map(|(_, cname)| cname.clone())
         };
 
@@ -139,13 +153,56 @@ impl OddsScraper for UreqOddsScraper {
         };
 
         let pages = OddsPages {
-            win_place: fetch(find("単勝"))?,
-            quinella: fetch(find("馬連"))?,
-            exacta: fetch(find("馬単"))?,
-            trio: fetch(find("3連複").or_else(|| find("三連複")))?,
-            trifecta: fetch(find("3連単").or_else(|| find("三連単")))?,
+            win_place: fetch(find(BetType::Win))?,
+            quinella: fetch(find(BetType::Quinella))?,
+            exacta: fetch(find(BetType::Exacta))?,
+            trio: fetch(find(BetType::Trio))?,
+            trifecta: fetch(find(BetType::Trifecta))?,
         };
 
         Ok(assemble(race_id.clone(), &pages)?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Representative odds-menu markup: each bet type is a doAction link whose
+    // second argument is the cname navigation token.
+    const MENU: &str = r##"
+        <ul>
+          <li><a onclick="return doAction('/JRADB/accessO.html', 'pwTAN001')">単勝・複勝</a></li>
+          <li><a onclick="return doAction('/JRADB/accessO.html', 'pwUMR002')">馬連</a></li>
+          <li><a onclick="return doAction('/JRADB/accessO.html','pwUMT003')">馬単</a></li>
+          <li><a onclick="return doAction('/JRADB/accessO.html', 'pwSF004')">3連複</a></li>
+          <li><a onclick="return doAction('/JRADB/accessO.html', 'pwST005')">3連単</a></li>
+          <li><a href="#">オッズトップ</a></li>
+        </ul>
+    "##;
+
+    #[test]
+    fn extracts_cname_token_not_the_separator() {
+        let tokens = extract_cname_tokens(MENU);
+        // The bug we guard against: returning the "," separator instead of token.
+        assert!(tokens.iter().all(|(_, cname)| cname.starts_with("pw")));
+        let win = tokens
+            .iter()
+            .find(|(label, _)| label.contains("単勝"))
+            .map(|(_, c)| c.as_str());
+        assert_eq!(win, Some("pwTAN001"));
+    }
+
+    #[test]
+    fn skips_links_without_doaction() {
+        let tokens = extract_cname_tokens(MENU);
+        // The plain "オッズトップ" anchor has no onclick and is excluded.
+        assert_eq!(tokens.len(), 5);
+    }
+
+    #[test]
+    fn normalize_label_folds_kanji_numerals() {
+        assert_eq!(normalize_label("三連複"), "3連複");
+        assert_eq!(normalize_label("3連単"), "3連単");
     }
 }
