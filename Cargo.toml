@@ -4,6 +4,9 @@ members = [
     "src/apps/parse-pdf",
     "src/apps/parse-entries",
     "src/apps/analyze",
+    # Standalone library crate: not yet consumed by any binary, so it is listed
+    # explicitly to stay part of the workspace build/test graph.
+    "src/interface/odds-scraper",
 ]
 
 [workspace.dependencies]
@@ -13,6 +16,7 @@ clap               = { version = "4.5.*", features = ["derive"] }
 dotenvy            = { version = "0.15.*" }
 envy               = { version = "0.4.*" }
 regex              = { version = "1.11.*" }
+scraper            = { version = "0.20.*" }
 serde              = { version = "1.0.*", features = ["derive"] }
 serde_json         = { version = "1.0.*" }
 sqlx               = { version = "0.8.*", features = ["runtime-tokio", "tls-native-tls", "sqlite", "chrono", "migrate"] }
@@ -31,4 +35,5 @@ paddock-config     = { path = "src/infrastructure/config" }
 entry-parser       = { path = "src/interface/entry-parser" }
 pdf-ocr            = { path = "src/interface/pdf-ocr" }
 pdf-parser         = { path = "src/interface/pdf-parser" }
+odds-scraper       = { path = "src/interface/odds-scraper" }
 rdb-gateway        = { path = "src/interface/rdb-gateway" }
