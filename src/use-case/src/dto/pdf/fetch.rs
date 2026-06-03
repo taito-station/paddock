@@ -58,3 +58,27 @@ pub struct FetchMeetingResponse {
     pub url: String,
     pub outcome: FetchMeetingOutcome,
 }
+
+/// A range of JRA meeting days to fetch. Omitting a field widens the range:
+/// no `day` = every day of the round, no `round` = every round of the venue,
+/// no `venue` = every venue in the year. `year` is always required.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MeetingRange {
+    pub year: i32,
+    pub venue: Option<Venue>,
+    pub round: Option<u32>,
+    pub day: Option<u32>,
+}
+
+/// Aggregate result of a range fetch.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FetchRangeSummary {
+    pub ingested: usize,
+    pub skipped: usize,
+    pub not_found: usize,
+    pub failed: usize,
+    pub races_saved: usize,
+    pub horses_saved: usize,
+    /// (source_key, error message) for each meeting that errored mid-range.
+    pub failures: Vec<(String, String)>,
+}
