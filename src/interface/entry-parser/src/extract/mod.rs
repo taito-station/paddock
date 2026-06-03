@@ -489,7 +489,7 @@ mod tests {
 
     #[test]
     fn extract_distance_fullwidth_comma() {
-        let lines = vec![FlatLine {
+        let lines = [FlatLine {
             page: 0,
             x: 229.0,
             y: 49.0,
@@ -502,7 +502,7 @@ mod tests {
 
     #[test]
     fn extract_distance_ascii_comma() {
-        let lines = vec![FlatLine {
+        let lines = [FlatLine {
             page: 0,
             x: 229.0,
             y: 49.0,
@@ -515,7 +515,7 @@ mod tests {
 
     #[test]
     fn extract_surface_dirt() {
-        let lines = vec![FlatLine {
+        let lines = [FlatLine {
             page: 0,
             x: 234.0,
             y: 56.0,
@@ -528,7 +528,7 @@ mod tests {
 
     #[test]
     fn extract_surface_turf() {
-        let lines = vec![FlatLine {
+        let lines = [FlatLine {
             page: 0,
             x: 1106.0,
             y: 56.0,
@@ -541,7 +541,7 @@ mod tests {
 
     #[test]
     fn extract_meeting_compact_header() {
-        let lines = vec![FlatLine {
+        let lines = [FlatLine {
             page: 0,
             x: 30.0,
             y: 49.0,
@@ -558,7 +558,7 @@ mod tests {
 
     #[test]
     fn group_by_y_concatenates_name_chars() {
-        let frags = vec![
+        let frags = [
             (138.0, 69.0, "ノ".to_string()),
             (138.0, 94.0, "ー".to_string()),
             (138.5, 120.0, "チ".to_string()),
@@ -570,14 +570,14 @@ mod tests {
 
     #[test]
     fn nearest_picks_closest_within_tolerance() {
-        let items = vec![(10.0, "a"), (20.0, "b"), (35.0, "c")];
+        let items = [(10.0, "a"), (20.0, "b"), (35.0, "c")];
         assert_eq!(nearest(&items, 12.0, 25.0).map(|(_, t)| *t), Some("a"));
         assert_eq!(nearest(&items, 22.0, 25.0).map(|(_, t)| *t), Some("b"));
     }
 
     #[test]
     fn nearest_returns_none_when_all_out_of_tolerance() {
-        let items = vec![(10.0, "a"), (20.0, "b")];
+        let items = [(10.0, "a"), (20.0, "b")];
         assert_eq!(nearest(&items, 100.0, 5.0), None);
     }
 
@@ -593,7 +593,7 @@ mod tests {
 
     #[test]
     fn find_race_origins_detects_columns_sorted_by_x() {
-        let lines = vec![
+        let lines = [
             line(0, 325.0, 76.0, 19.0, "2"),
             line(0, 36.0, 76.0, 19.0, "1"),
             line(0, 49.0, 151.0, 11.0, "1"), // horse-num glyph, not a race origin
@@ -609,7 +609,7 @@ mod tests {
     #[test]
     fn extract_entries_binds_name_num_gate_jockey() {
         let col_x = 36.0;
-        let lines = vec![
+        let lines = [
             line(0, 35.0, 130.0, 8.0, "白"),          // gate marker (gate 1)
             line(0, 69.0, 138.0, 11.0, "テストウマ"), // horse name (offset 33)
             line(0, 49.0, 151.0, 11.0, "1"),          // horse num (offset 13)
@@ -629,7 +629,7 @@ mod tests {
         let col_x = 36.0;
         // A stray non-ASCII label in the name column with no horse number near it
         // (mirrors the "発走" post-time label) must not become an entry.
-        let lines = vec![line(0, 69.0, 500.0, 11.0, "発走")];
+        let lines = [line(0, 69.0, 500.0, 11.0, "発走")];
         let refs: Vec<&FlatLine> = lines.iter().collect();
         assert!(extract_entries(&refs, &refs, col_x).is_empty());
     }
@@ -639,7 +639,7 @@ mod tests {
         let col_x = 36.0;
         // A two-digit horse number can be emitted as two glyphs ("1" + "6") at the same y.
         // They must combine to 16 rather than binding the name to a stray "1".
-        let lines = vec![
+        let lines = [
             line(0, 35.0, 760.0, 8.0, "桃"), // gate marker (gate 8)
             line(0, 69.0, 769.0, 11.0, "レディトゥアタック"), // name
             line(0, 49.0, 781.0, 11.0, "1"), // tens digit
