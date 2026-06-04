@@ -27,9 +27,11 @@ paddock-predict --date <YYYY-MM-DD> --budget <金額>
 | コード | 意味 |
 |--------|------|
 | 0 | 正常終了（開催なし日付を含む） |
-| 1 | DB 接続エラー / 実行中の DB I/O・クエリエラー / 不正な引数 |
+| 1 | DB 接続エラー / 実行中の DB I/O・クエリエラー |
+| 2 | 引数パースエラー（`--date` / `--budget` の形式不正等） |
 
-「開催なし日付」は異常ではないため exit code 0 とし、案内メッセージは **stdout** に出力する。
+- 「開催なし日付」は異常ではないため exit code 0 とし、案内メッセージは **stdout** に出力する。
+- 引数の形式不正（不正な日付・非数値の budget 等）は clap が自動で stderr にエラーを出力し **exit code 2** で終了する（既存 `analyze` バイナリと同じ `clap::Parser` 構成のため）。exit 1 はアプリ内部の DB エラーに限定する。
 
 ---
 
@@ -111,7 +113,8 @@ $ paddock-predict --date 2026-06-01 --budget 10000
 P&L:       +¥3,300
 ```
 
-`P&L = 総払戻 − 総賭け金`（= 最終残高 − 初期予算 と常に一致する）。
+`P&L = 総払戻 − 総賭け金`（= 最終残高 − 初期予算 と常に一致する）。  
+ここで「総賭け金」は **実際に budget から減算した確定額の累計**であり、推奨額そのものではない（残高ガードや端数切り捨て後の額）。確定額を積算する限り上記の恒等式は常に成立する。
 
 ---
 
@@ -137,13 +140,14 @@ src/apps/predict/
 ```rust
 struct SessionState {
     budget: u64,        // 現在残高（円）— 残高ガードにより常に 0 以上
-    total_bet: u64,     // 累計賭け金
+    total_bet: u64,     // 累計賭け金（実際に budget から減算した確定額の累計）
     total_payout: u64,  // 累計払い戻し
 }
 ```
 
 - CLI の `--budget`（`u64`）をそのまま初期 `budget` に代入するため型変換は不要
 - 賭け金は残高ガードにより `budget` を超えないため、`budget -= bet` で桁あふれ（underflow）は発生しない
+- `total_bet` は推奨額ではなく **実際に確定して budget から引いた額**を加算する（端数・ガード適用後の額）
 - セッション状態はアプリ層でのみ管理し、Domain / Use-Case 層には持ち込まない
 
 ### 依存関係と呼び出し責務
@@ -160,6 +164,7 @@ src/apps/predict
 
 - **確率推定・レース一覧・オッズ取得**（IO を伴う）は **Use-Case の Interactor 経由**で呼ぶ
 - **`select_bets`**（IO なしの純粋関数）は **App 層（`session.rs`）が `paddock-domain` から直接呼ぶ**。Use-Case にラッパーを置かない（薄い委譲を増やさないため）
+  - 実シグネチャは全引数が参照: `select_bets(probabilities: &[HorseProbability], race_odds: &RaceOdds, config: &BettingConfig) -> Vec<BettingRecommendation>`。呼び出しは `select_bets(&probs, &odds, &BettingConfig::default())`
 
 ### DI 構築（setup.rs）
 
@@ -186,22 +191,28 @@ fn find_race_odds(
 ) -> impl Future<Output = Result<Option<RaceOdds>>> + Send;
 ```
 
+### `Option<RaceOdds>` を返すことについて
+
+Domain には既に `RaceOdds::empty()` / `RaceOdds::is_empty()` があり、`select_bets` は空の `RaceOdds` に対して空 Vec を返す。  
+それでも `find_race_odds` の戻り値を `Option` にするのは、**「オッズ未取得（`None`）」と「取得済みだが対象馬券が空（`empty`）」を区別するため**。前者はスキップ推奨を表示し、後者は推奨なしとして通常フローを進める。
+
 ### `Race` を返すことについて
 
 `Race` は `results: Vec<HorseResult>` を持つが、予想フェーズ（レース確定前）では `results` は空である。  
 レースヘッダ表示に必要なのは `venue` / `surface` / `distance` / `race_num` のみで、これらは `Race` に含まれる。  
-`results` が空である以上 over-fetching は実害がないため、専用 DTO は定義せず `Race` をそのまま返す。
+`find_races_by_date` の SQL は **`results` を JOIN せず常に空 Vec で返す**（予想用途では結果は不要）。over-fetching は発生しないため専用 DTO は定義せず `Race` をそのまま返す。
 
 ### RDB 実装
 
 | テーブル | SQL の概要 |
 |---------|-----------|
-| `races` | `WHERE date = $1 ORDER BY race_num ASC` |
+| `races` | `WHERE date = $1 ORDER BY race_num ASC`（`results` は読み込まない） |
 | `race_odds`（**本 Issue では未存在**、後述） | `WHERE race_id = $1 LIMIT 1` |
 
 > **オッズ永続化のスコープ外注意**: 現状リポジトリに `race_odds` テーブルのマイグレーションは存在せず、`odds-scraper` もオンデマンド取得のみで永続化していない。  
 > `race_odds` テーブルの追加とスクレイパーによる永続化は **別 Issue のスコープ**とする。  
-> 本 Issue では `find_race_odds` が **常に `None` を返す実装でも成立する**よう、オッズ未取得時のフロー（次節）を必ずハンドリングする。
+> 本 Issue では `find_race_odds` が **常に `None` を返す実装でも成立する**よう、オッズ未取得時のフロー（次節）を必ずハンドリングする。  
+> このため、オッズ・推奨を前提とするテスト（TC-10 / TC-12 / TC-15 / TC-16）は `race_odds` テーブル追加までモックまたは手動 INSERT を前提とする（[テストケース](../../tests/cli-test-cases/predict-command.md)の共通前提を参照）。
 
 ---
 
@@ -239,10 +250,18 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
 
 ---
 
-## Kelly 値の表示
+## Kelly 値の表示と推奨額の算出
 
-`BettingRecommendation.kelly_fraction` は 0.0〜1.0 の小数。表示時は `kelly_fraction * 100` で百分率に変換し `Kelly=15%` のように表示する。  
-推奨額は `floor(budget * kelly_fraction)`（円未満切り捨て）で算出する。
+`BettingRecommendation.kelly_fraction` は 0.0〜1.0 の小数。表示時は `kelly_fraction * 100` で百分率に変換し `Kelly=15%` のように表示する。
+
+推奨額は以下の手順で算出する（**比例縮小方式**）:
+
+1. 各買い目の素の推奨額を `raw_i = floor(budget * kelly_fraction_i)` で求める
+2. `Σ raw_i ≤ budget` ならそのまま推奨額とする
+3. `Σ raw_i > budget` の場合、合計が残高に収まるよう全推奨額を比例スケールする  
+   `推奨額_i = floor(budget * kelly_fraction_i * (budget / Σ raw_i))`
+
+`kelly_cap = 0.25` のため買い目が 4 本以上あると `Σ kelly_fraction` が 1.0 を超えうる。比例縮小により Kelly の相対比率を保ったまま推奨額合計を残高以内に収め、`y` 選択が残高ガードで弾かれ続ける事態を防ぐ。
 
 ---
 
