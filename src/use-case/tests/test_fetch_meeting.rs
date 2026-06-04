@@ -100,6 +100,9 @@ impl Repository for MockRepo {
     async fn save_race_card(&self, _card: &RaceCard) -> Result<()> {
         Err(Error::NotFound("unused".into()))
     }
+    async fn find_race_card(&self, _race_id: &RaceId) -> Result<Option<RaceCard>> {
+        Err(Error::NotFound("unused".into()))
+    }
 }
 
 fn sample_race() -> Race {
@@ -319,6 +322,9 @@ impl Repository for HistoryRepo {
         Ok(())
     }
     async fn save_race_card(&self, _card: &RaceCard) -> Result<()> {
+        Err(Error::NotFound("unused".into()))
+    }
+    async fn find_race_card(&self, _race_id: &RaceId) -> Result<Option<RaceCard>> {
         Err(Error::NotFound("unused".into()))
     }
 }

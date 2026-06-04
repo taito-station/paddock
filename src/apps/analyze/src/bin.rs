@@ -2,7 +2,7 @@ mod cli;
 mod setup;
 
 use clap::Parser;
-use paddock_domain::{HorseName, JockeyName, Surface, Venue};
+use paddock_domain::{HorseName, HorseProbability, JockeyName, RaceId, Surface, Venue};
 use paddock_use_case::repository::{CourseStatsRow, GroupStat, HorseStatsRow, JockeyStatsRow};
 
 #[tokio::main]
@@ -30,6 +30,11 @@ async fn main() -> anyhow::Result<()> {
             let j = JockeyName::try_from(name.as_str())?;
             let stats = app.interactor.jockey_stats(&j).await?;
             print_jockey(&stats);
+        }
+        cli::Command::Predict { race_id } => {
+            let rid = RaceId::try_from(race_id.as_str())?;
+            let probs = app.interactor.predict_race(&rid).await?;
+            print_predict(&probs);
         }
     }
 
@@ -59,6 +64,25 @@ fn print_jockey(s: &JockeyStatsRow) {
     print_section("全体", std::slice::from_ref(&s.overall));
     print_section("芝/ダート", &s.by_surface);
     print_section("枠順", &s.by_gate_group);
+}
+
+fn print_predict(probs: &[HorseProbability]) {
+    // 全角文字は端末上で 2 カラム分の幅を占めるため、{:<16} の文字数パディングでは
+    // 列がずれる場合がある。unicode-width 対応は今後の改善課題。
+    println!(
+        "{:<4} {:<16} {:>8} {:>8} {:>8}",
+        "馬番", "馬名", "勝率", "連対率", "複勝率"
+    );
+    for p in probs {
+        println!(
+            "{:>4} {:<16} {:>7.1}% {:>7.1}% {:>7.1}%",
+            p.horse_num.value(),
+            p.horse_name.value(),
+            p.win_prob * 100.0,
+            p.place_prob * 100.0,
+            p.show_prob * 100.0,
+        );
+    }
 }
 
 fn print_section(title: &str, rows: &[GroupStat]) {
