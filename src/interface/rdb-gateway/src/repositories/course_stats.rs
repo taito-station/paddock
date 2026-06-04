@@ -22,7 +22,8 @@ pub async fn course_stats(
             SELECT
                 COUNT(*) AS starts,
                 SUM(CASE WHEN results.finishing_position = 1 THEN 1 ELSE 0 END) AS wins,
-                SUM(CASE WHEN results.finishing_position IN (1,2) THEN 1 ELSE 0 END) AS places
+                SUM(CASE WHEN results.finishing_position IN (1,2) THEN 1 ELSE 0 END) AS places,
+                SUM(CASE WHEN results.finishing_position IN (1,2,3) THEN 1 ELSE 0 END) AS shows
             FROM results
             INNER JOIN races ON races.race_id = results.race_id
             WHERE races.venue = $1
@@ -32,7 +33,7 @@ pub async fn course_stats(
               AND {predicate}
             "#
         );
-        let row: (i64, i64, i64) = sqlx::query_as(&q)
+        let row: (i64, i64, i64, i64) = sqlx::query_as(&q)
             .bind(venue.as_jp())
             .bind(distance as i64)
             .bind(surface.as_str())
@@ -43,6 +44,7 @@ pub async fn course_stats(
             starts: row.0 as u32,
             wins: row.1 as u32,
             places: row.2 as u32,
+            shows: row.3 as u32,
         });
     }
     Ok(CourseStatsRow {

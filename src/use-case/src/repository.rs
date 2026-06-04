@@ -11,6 +11,7 @@ pub struct GroupStat {
     pub starts: u32,
     pub wins: u32,
     pub places: u32,
+    pub shows: u32,
 }
 
 impl GroupStat {
@@ -20,6 +21,7 @@ impl GroupStat {
             starts: 0,
             wins: 0,
             places: 0,
+            shows: 0,
         }
     }
 
@@ -36,6 +38,14 @@ impl GroupStat {
             0.0
         } else {
             self.places as f64 / self.starts as f64
+        }
+    }
+
+    pub fn show_rate(&self) -> f64 {
+        if self.starts == 0 {
+            0.0
+        } else {
+            self.shows as f64 / self.starts as f64
         }
     }
 }
@@ -109,4 +119,9 @@ pub trait Repository: Send + Sync {
     fn record_fetch(&self, record: &FetchRecord) -> impl Future<Output = Result<()>> + Send;
 
     fn save_race_card(&self, card: &RaceCard) -> impl Future<Output = Result<()>> + Send;
+
+    fn find_race_card(
+        &self,
+        race_id: &RaceId,
+    ) -> impl Future<Output = Result<Option<RaceCard>>> + Send;
 }

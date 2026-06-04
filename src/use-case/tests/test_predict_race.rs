@@ -1,0 +1,190 @@
+//! Unit tests for predict_race interactor.
+//!
+//! Uses in-memory mocks for all repositories to test label resolution,
+//! probability normalization, and the not-found error path.
+
+use paddock_domain::horse_result::{GateNum, HorseName, HorseNum};
+use paddock_domain::{HorseEntry, JockeyName, Race, RaceCard, RaceId, Surface, Venue};
+use paddock_use_case::repository::{
+    CourseStatsRow, FetchRecord, GroupStat, HorseStatsRow, JockeyStatsRow, Repository,
+};
+use paddock_use_case::{Error, Interactor, Result};
+
+// --- helpers ----------------------------------------------------------------
+
+fn make_group(label: &str, starts: u32, wins: u32, places: u32, shows: u32) -> GroupStat {
+    GroupStat {
+        label: label.to_string(),
+        starts,
+        wins,
+        places,
+        shows,
+    }
+}
+
+fn make_race_card(race_id: &str) -> RaceCard {
+    RaceCard {
+        race_id: RaceId::try_from(race_id).unwrap(),
+        venue: Venue::Tokyo,
+        round: 1,
+        day: 1,
+        race_num: 1,
+        surface: Surface::Turf,
+        distance: 2000,
+        entries: vec![
+            HorseEntry {
+                gate_num: GateNum::try_from(1u32).unwrap(),
+                horse_num: HorseNum::try_from(1u32).unwrap(),
+                horse_name: HorseName::try_from("ウマA").unwrap(),
+                jockey: None,
+            },
+            HorseEntry {
+                gate_num: GateNum::try_from(5u32).unwrap(),
+                horse_num: HorseNum::try_from(2u32).unwrap(),
+                horse_name: HorseName::try_from("ウマB").unwrap(),
+                jockey: None,
+            },
+        ],
+    }
+}
+
+fn horse_stats_with_surface_win(win_rate: f64) -> HorseStatsRow {
+    let starts = 10;
+    let wins = (win_rate * starts as f64).round() as u32;
+    HorseStatsRow {
+        horse_name: "".to_string(),
+        by_surface: vec![
+            make_group("芝", starts, wins, wins + 1, wins + 2),
+            make_group("ダート", 5, 0, 0, 0),
+        ],
+        by_distance_band: vec![
+            make_group("〜1400m", 0, 0, 0, 0),
+            make_group("1500〜1800m", 0, 0, 0, 0),
+            make_group("1900〜2200m", starts, wins, wins + 1, wins + 2),
+            make_group("2300m〜", 0, 0, 0, 0),
+        ],
+        by_gate_group: vec![],
+        by_track_condition: vec![],
+        by_popularity_band: vec![],
+        overall: make_group("全体", starts, wins, wins + 1, wins + 2),
+    }
+}
+
+fn course_stats_with_gate(inner_win: u32, middle_win: u32) -> CourseStatsRow {
+    CourseStatsRow {
+        venue: "東京".to_string(),
+        distance: 2000,
+        surface: "turf".to_string(),
+        by_gate_group: vec![
+            make_group("Inner (1-3)", 20, inner_win, inner_win + 2, inner_win + 4),
+            make_group("Middle (4-6)", 20, middle_win, middle_win + 2, middle_win + 4),
+            make_group("Outer (7-8)", 20, 1, 3, 5),
+        ],
+    }
+}
+
+// --- mock repository --------------------------------------------------------
+
+struct MockRepo {
+    card: Option<RaceCard>,
+}
+
+impl Repository for MockRepo {
+    async fn save_race(&self, _: &Race) -> Result<()> {
+        unimplemented!()
+    }
+    async fn horse_stats(&self, name: &HorseName) -> Result<HorseStatsRow> {
+        let win_rate = if name.value() == "ウマA" { 0.2 } else { 0.1 };
+        Ok(horse_stats_with_surface_win(win_rate))
+    }
+    async fn course_stats(&self, _: Venue, _: u32, _: Surface) -> Result<CourseStatsRow> {
+        Ok(course_stats_with_gate(4, 2))
+    }
+    async fn jockey_stats(&self, _: &JockeyName) -> Result<JockeyStatsRow> {
+        unimplemented!()
+    }
+    async fn count_races(&self) -> Result<u64> {
+        Ok(0)
+    }
+    async fn race_exists(&self, _: &RaceId) -> Result<bool> {
+        Ok(false)
+    }
+    async fn fetch_history_contains(&self, _: &str) -> Result<bool> {
+        Ok(false)
+    }
+    async fn record_fetch(&self, _: &FetchRecord) -> Result<()> {
+        unimplemented!()
+    }
+    async fn save_race_card(&self, _: &RaceCard) -> Result<()> {
+        unimplemented!()
+    }
+    async fn find_race_card(&self, _: &RaceId) -> Result<Option<RaceCard>> {
+        Ok(self.card.clone())
+    }
+}
+
+struct NullParser;
+impl paddock_use_case::PdfParser for NullParser {
+    fn parse(&self, _: &[u8]) -> Result<Vec<Race>> {
+        unimplemented!()
+    }
+}
+
+struct NullFetcher;
+impl paddock_use_case::PdfFetcher for NullFetcher {
+    fn fetch(&self, _: &str) -> Result<Vec<u8>> {
+        unimplemented!()
+    }
+    fn fetch_if_exists(&self, _: &str) -> Result<Option<Vec<u8>>> {
+        unimplemented!()
+    }
+}
+
+fn interactor(card: Option<RaceCard>) -> Interactor<MockRepo, NullParser, NullFetcher> {
+    Interactor::new(MockRepo { card }, NullParser, NullFetcher)
+}
+
+// --- tests ------------------------------------------------------------------
+
+#[tokio::test]
+async fn predict_race_returns_not_found_when_card_missing() {
+    let app = interactor(None);
+    let race_id = RaceId::try_from("2026-1-tokyo-1-R1").unwrap();
+    let err = app.predict_race(&race_id).await.unwrap_err();
+    assert!(matches!(err, Error::NotFound(_)));
+}
+
+#[tokio::test]
+async fn predict_race_probabilities_sum_to_one() {
+    let card = make_race_card("2026-1-tokyo-1-R1");
+    let app = interactor(Some(card));
+    let race_id = RaceId::try_from("2026-1-tokyo-1-R1").unwrap();
+    let probs = app.predict_race(&race_id).await.unwrap();
+
+    assert_eq!(probs.len(), 2);
+
+    let win_total: f64 = probs.iter().map(|p| p.win_prob).sum();
+    let place_total: f64 = probs.iter().map(|p| p.place_prob).sum();
+    let show_total: f64 = probs.iter().map(|p| p.show_prob).sum();
+    assert!((win_total - 1.0).abs() < 1e-10, "win sum={win_total}");
+    assert!((place_total - 1.0).abs() < 1e-10, "place sum={place_total}");
+    assert!((show_total - 1.0).abs() < 1e-10, "show sum={show_total}");
+}
+
+#[tokio::test]
+async fn predict_race_higher_stats_horse_gets_higher_win_prob() {
+    // ウマA（枠番1=Inner, win_rate=0.2）と ウマB（枠番5=Middle, win_rate=0.1）で、
+    // course_stats は inner_win=4 > middle_win=2 と設定。
+    // 馬スタッツ差 + コース枠番差の両方がウマA有利に働く複合テスト（意図的）。
+    let card = make_race_card("2026-1-tokyo-1-R1");
+    let app = interactor(Some(card));
+    let race_id = RaceId::try_from("2026-1-tokyo-1-R1").unwrap();
+    let probs = app.predict_race(&race_id).await.unwrap();
+
+    let uma_a = probs.iter().find(|p| p.horse_name.value() == "ウマA").unwrap();
+    let uma_b = probs.iter().find(|p| p.horse_name.value() == "ウマB").unwrap();
+    assert!(
+        uma_a.win_prob > uma_b.win_prob,
+        "ウマA(win_rate=0.2, Inner gate) should outrank ウマB(win_rate=0.1, Middle gate)"
+    );
+}

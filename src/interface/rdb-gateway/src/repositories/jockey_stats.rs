@@ -7,12 +7,13 @@ use crate::error::Result;
 pub async fn jockey_stats(pool: &SqlitePool, name: &JockeyName) -> Result<JockeyStatsRow> {
     let n = name.value();
 
-    let overall: (i64, i64, i64) = sqlx::query_as(
+    let overall: (i64, i64, i64, i64) = sqlx::query_as(
         r#"
         SELECT
             COUNT(*) AS starts,
             SUM(CASE WHEN finishing_position = 1 THEN 1 ELSE 0 END) AS wins,
-            SUM(CASE WHEN finishing_position IN (1,2) THEN 1 ELSE 0 END) AS places
+            SUM(CASE WHEN finishing_position IN (1,2) THEN 1 ELSE 0 END) AS places,
+            SUM(CASE WHEN finishing_position IN (1,2,3) THEN 1 ELSE 0 END) AS shows
         FROM results
         WHERE jockey = $1 AND finishing_position IS NOT NULL
         "#,
@@ -31,6 +32,7 @@ pub async fn jockey_stats(pool: &SqlitePool, name: &JockeyName) -> Result<Jockey
             starts: overall.0 as u32,
             wins: overall.1 as u32,
             places: overall.2 as u32,
+            shows: overall.3 as u32,
         },
         by_surface,
         by_gate_group,
@@ -41,12 +43,13 @@ async fn group_by_surface(pool: &SqlitePool, jockey: &str) -> Result<Vec<GroupSt
     let keys: &[(&str, &str)] = &[("turf", "芝"), ("dirt", "ダート")];
     let mut stats = Vec::with_capacity(keys.len());
     for (key, label) in keys {
-        let row: (i64, i64, i64) = sqlx::query_as(
+        let row: (i64, i64, i64, i64) = sqlx::query_as(
             r#"
             SELECT
                 COUNT(*) AS starts,
                 SUM(CASE WHEN results.finishing_position = 1 THEN 1 ELSE 0 END) AS wins,
-                SUM(CASE WHEN results.finishing_position IN (1,2) THEN 1 ELSE 0 END) AS places
+                SUM(CASE WHEN results.finishing_position IN (1,2) THEN 1 ELSE 0 END) AS places,
+                SUM(CASE WHEN results.finishing_position IN (1,2,3) THEN 1 ELSE 0 END) AS shows
             FROM results
             INNER JOIN races ON races.race_id = results.race_id
             WHERE results.jockey = $1
@@ -63,6 +66,7 @@ async fn group_by_surface(pool: &SqlitePool, jockey: &str) -> Result<Vec<GroupSt
             starts: row.0 as u32,
             wins: row.1 as u32,
             places: row.2 as u32,
+            shows: row.3 as u32,
         });
     }
     Ok(stats)
@@ -81,19 +85,21 @@ async fn group_by_gate(pool: &SqlitePool, jockey: &str) -> Result<Vec<GroupStat>
             SELECT
                 COUNT(*) AS starts,
                 SUM(CASE WHEN finishing_position = 1 THEN 1 ELSE 0 END) AS wins,
-                SUM(CASE WHEN finishing_position IN (1,2) THEN 1 ELSE 0 END) AS places
+                SUM(CASE WHEN finishing_position IN (1,2) THEN 1 ELSE 0 END) AS places,
+                SUM(CASE WHEN finishing_position IN (1,2,3) THEN 1 ELSE 0 END) AS shows
             FROM results
             WHERE jockey = $1
               AND finishing_position IS NOT NULL
               AND {predicate}
             "#
         );
-        let row: (i64, i64, i64) = sqlx::query_as(&q).bind(jockey).fetch_one(pool).await?;
+        let row: (i64, i64, i64, i64) = sqlx::query_as(&q).bind(jockey).fetch_one(pool).await?;
         stats.push(GroupStat {
             label: label.to_string(),
             starts: row.0 as u32,
             wins: row.1 as u32,
             places: row.2 as u32,
+            shows: row.3 as u32,
         });
     }
     Ok(stats)
