@@ -7,10 +7,7 @@ pub mod race;
 pub mod race_card;
 pub mod string;
 
-pub use betting::{
-    harville_exacta, harville_quinella, harville_trifecta, harville_trio, kelly_fraction,
-    select_bets, BetCombination, BettingConfig, BettingRecommendation,
-};
+pub use betting::{select_bets, BetCombination, BettingConfig, BettingRecommendation};
 pub use error::{Error, Result};
 pub use horse_result::{
     FinishingPosition, GateNum, HorseName, HorseNum, HorseResult, JockeyName, ResultStatus,
