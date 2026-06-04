@@ -41,7 +41,7 @@ pub struct BettingRecommendation {
     pub probability: f64,
     /// Gross payout multiplier. `ev = probability * odds`.
     /// - 単勝/馬連/馬単/三連複/三連単: JRA が公表するオッズそのまま
-    /// - 複勝（`BetCombination::Place`）: オッズ幅 `(low..high)` の中央値を代入
+    /// - 複勝（`BetCombination::Place`）: オッズ幅の算術平均 `(low + high) / 2.0` を代入
     pub odds: f64,
     pub ev: f64,
     pub kelly_fraction: f64,
@@ -231,11 +231,11 @@ fn priority(c: &BetCombination) -> u8 {
 
 /// P(a→b): Harville conditional probability that b finishes 2nd given a wins.
 ///
-/// Returns `0.0` when `win_a + win_b >= 1.0`. This is a conservative guard consistent
-/// with `harville_trifecta`: when the combined probability of two horses equals or
-/// exceeds 1.0, the Harville conditional probability would be ill-defined.
+/// Returns `0.0` when `win_a >= 1.0` (denominator `1 - win_a` would be zero or negative).
+/// Unlike `harville_trifecta`, the guard here only checks `win_a` because `win_b`
+/// does not appear in the denominator.
 pub(crate) fn harville_exacta(win_a: f64, win_b: f64) -> f64 {
-    if win_a + win_b >= 1.0 {
+    if win_a >= 1.0 {
         return 0.0;
     }
     let denom = (1.0 - win_a).max(MIN_DENOMINATOR);
@@ -277,8 +277,12 @@ pub(crate) fn harville_trio(win_a: f64, win_b: f64, win_c: f64) -> f64 {
 ///
 /// `gross_odds` is the JRA payout multiplier (e.g. 3.5 means ¥350 back on ¥100).
 /// Net odds b = gross_odds - 1.0 (gross → net 変換). EV = p * gross_odds; EV > 1.0 が期待値プラス。
+/// Returns `0.0` when `gross_odds <= 1.0` (no net profit possible, avoids zero division).
 pub(crate) fn kelly_fraction(p: f64, gross_odds: f64, kelly_cap: f64) -> f64 {
     let b = gross_odds - 1.0;
+    if b <= 0.0 {
+        return 0.0;
+    }
     let q = 1.0 - p;
     let f = (p * b - q) / b;
     f.max(0.0).min(kelly_cap)
@@ -450,11 +454,16 @@ mod tests {
     }
 
     #[test]
-    fn harville_exacta_returns_zero_when_sum_exhausts_probability() {
-        // win_a + win_b >= 1.0 → guard returns 0.0
-        assert_eq!(harville_exacta(1.0, 0.0), 0.0);
-        assert_eq!(harville_exacta(0.6, 0.5), 0.0);
-        assert_eq!(harville_exacta(0.5, 0.5), 0.0);
+    fn harville_exacta_returns_zero_when_first_horse_wins_with_certainty() {
+        // win_a >= 1.0 → denominator (1-win_a) <= 0 → guard returns 0.0
+        assert_eq!(harville_exacta(1.0, 0.3), 0.0);
+    }
+
+    #[test]
+    fn harville_exacta_valid_when_only_win_a_is_below_one() {
+        // win_a + win_b can exceed 1.0 as long as win_a < 1.0 (denominator is positive)
+        let result = harville_exacta(0.6, 0.5);
+        assert!(result > 0.0, "expected positive probability, got {result}");
     }
 
     #[test]
