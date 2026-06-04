@@ -62,10 +62,10 @@ impl Default for BettingConfig {
 }
 ```
 
-**フィールドの有効範囲（前提条件）:**
-- `ev_threshold`: `> 0.0`。`≥ 1.0` のとき EV フィルタ通過後の kelly_fraction > 0 が保証される
-- `kelly_cap`: `(0.0, 1.0]`。0 以下を設定すると全候補の kelly_fraction が 0 になる
-- バリデーション実装は呼び出し側の責任とし、Domain 関数内では前提違反をパニックさせない
+**フィールドの推奨範囲と挙動:**
+- `ev_threshold`: 推奨 `> 0.0`。`≥ 1.0` のとき EV フィルタ通過後の kelly_fraction > 0 が保証される
+- `kelly_cap`: 推奨 `(0.0, 1.0]`。`kelly_fraction` は資金割合を表すため 1.0 超は全資金を超える賭けを意味し非現実的。0 以下を設定すると全候補の kelly_fraction が 0 になる
+- バリデーション実装は呼び出し側の責任とし、Domain 関数内では前提違反をパニックさせない（不正値を渡した場合、関数は破壊的ではないが有用性のない結果を返す）
 
 ### BetCombination
 
@@ -159,7 +159,7 @@ fn priority(c: &BetCombination) -> u8 {
 ```
 
 `sort_by_key(|r| (priority(&r.combination), OrderedFloat(-r.ev)))` で安定ソートする（**sort_key の値が小さいほど先に表示される**）。  
-`OrderedFloat` は `ordered-float` クレート（`use ordered_float::OrderedFloat`）を使用する。
+`OrderedFloat` は `ordered-float` クレート（`use ordered_float::OrderedFloat`）を使用する。`ev` フィールドは `f64` のまま保持し、ソート時のみ `OrderedFloat` でラップする（`BettingRecommendation` 構造体の変更は不要）。
 
 ---
 
