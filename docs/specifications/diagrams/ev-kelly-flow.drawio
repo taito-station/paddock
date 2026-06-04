@@ -31,7 +31,7 @@
         </mxCell>
 
         <!-- 単勝/複勝 -->
-        <mxCell id="7" value="単勝・複勝&#xa;P = win_prob / show_prob" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;" vertex="1" parent="1">
+        <mxCell id="7" value="単勝: P = win_prob&#xa;複勝: P = show_prob" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;" vertex="1" parent="1">
           <mxGeometry x="100" y="320" width="180" height="50" as="geometry" />
         </mxCell>
 
