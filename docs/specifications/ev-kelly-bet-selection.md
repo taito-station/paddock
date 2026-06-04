@@ -101,7 +101,7 @@ pub struct BettingRecommendation {
 |-------|----------|
 | 単勝 | `win_prob[i]` |
 | 複勝 | `show_prob[i]` |
-| 馬連 `{a,b}` | `win[a]·win[b]/(1−win[a]) + win[a]·win[b]/(1−win[b])` （= 馬単 a→b + 馬単 b→a） |
+| 馬連 `{a,b}` | `win[a]·win[b]/(1−win[a]) + win[b]·win[a]/(1−win[b])` （= 馬単 a→b + 馬単 b→a） |
 | 馬単 `a→b` | `win[a]·win[b]/(1−win[a])` |
 | 三連複 `{a,b,c}` | 全 6 順列 `(i,j,k)` の三連単確率 `P(i→j→k)` の合計（各 `{a,b,c}` の 6 通りの順列について三連単確率を計算して合算） |
 | 三連単 `a→b→c` | `win[a]·win[b]/(1−win[a])·win[c]/(1−win[a]−win[b])` |
@@ -130,12 +130,13 @@ EV ≤ 閾値の組み合わせは候補から除外する（strict greater-than
 
 ```
 b = odds − 1.0      # net odds (JRA オッズはグロス=払い戻し倍率のため 1 を引いてネット倍率に変換)
+                    # 複勝の場合 odds = (place_odds.low + place_odds.high) / 2.0 を使用
 q = 1.0 − p         # 外れ確率
 f = (p × b − q) / b
 kelly_fraction = clamp(f, 0.0, kelly_cap)
 ```
 
-`f` が負の場合は 0.0 にクランプ（賭けない）。
+EV フィルタ通過後（EV > ev_threshold）は数学的に `f > 0` が保証されるため、通常の候補では clamp による 0.0 打ち切りは発生しない。
 
 ### 5. 優先度マッピング
 
@@ -152,7 +153,8 @@ fn priority(c: &BetCombination) -> u8 {
 }
 ```
 
-`sort_by_key(|r| (priority(&r.combination), OrderedFloat(-r.ev)))` で安定ソートする。
+`sort_by_key(|r| (priority(&r.combination), OrderedFloat(-r.ev)))` で安定ソートする。  
+`OrderedFloat` は `ordered-float` クレート（`use ordered_float::OrderedFloat`）を使用する。
 
 ---
 
@@ -170,5 +172,6 @@ Domain 層に純粋関数として実装し、IO・状態なし。
 ## 制約・注意事項
 
 - Harville 公式はあくまで近似。オッズの市場効率を考慮しないため、EV > 1.0 が実際のプラス期待値を保証しない
-- 三連複は C(n,3) 通り（18 頭で 816 組み合わせ）、三連単は P(n,3) 通り（18 頭で 4896 組み合わせ）であり、どちらも O(n³)。なお三連複の計算では各組み合わせについて 6 順列の三連単確率を合算するため、実際の積算回数は三連単と同等（最大 4896 回）になる。プロファイリング未実施のため、問題が生じた場合は上位 N 頭に絞るプルーニングを検討する。EV フィルタ後の推奨数が膨大にならないよう閾値設定が重要
-- `kelly_cap` のデフォルト 0.25 はフル Kelly の計算値が 25% を超える場合に 25% で打ち切るキャップ（保守的な上限設定）
+- 三連複は C(n,3) 通り（18 頭で 816 組み合わせ）、三連単は P(n,3) 通り（18 頭で 4896 組み合わせ）であり、どちらも O(n³)。なお三連複の計算では各組み合わせについて 6 順列の三連単確率を合算するため、実際の積算回数は三連単と同等（最大 4896 回）になる。プロファイリング未実施のため、問題が生じた場合は上位 N 頭（目安: 上位 8〜10 頭）に絞るプルーニングを検討する。EV フィルタ後の推奨数が膨大にならないよう閾値設定が重要
+- `kelly_cap` のデフォルト 0.25 は Kelly 計算値をそのまま使用し、計算値が kelly_cap を超える場合のみ kelly_cap で打ち切る上限キャップ（kelly_cap 以下の計算値は縮小しない）
+- `ev-kelly-flow.drawio` がマスター。SVG は drawio から生成した GitHub インライン表示用ファイルとして維持する

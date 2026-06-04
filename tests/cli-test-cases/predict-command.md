@@ -68,7 +68,7 @@
 | 前提 | DB に race_card / スタッツ / オッズが存在し、EV > 1.0 の買い目が少なくとも 1 つある。BettingConfig::default()（ev_threshold=1.0, kelly_cap=0.25）を使用 |
 | コマンド | `paddock-analyze predict <有効な race_id>` |
 | 期待結果 | 確率表に加えて「買い目推奨」セクションが表示される |
-| 確認ポイント | 表示される全買い目の `ev = probability × odds` が `ev_threshold (1.0)` を超えていること / 馬連が先頭付近に表示される（優先度順） / kelly_fraction が `0.0 ≤ kelly_fraction ≤ kelly_cap (0.25)` の範囲内（境界値 0.0 および 0.25 は正常） |
+| 確認ポイント | 表示される全買い目の `ev = probability × odds` が `ev_threshold (1.0)` を超えていること / 馬連の推奨が馬単・三連複・単勝・複勝・三連単の推奨よりも先に表示される（優先度順） / EV フィルタ通過後は kelly_fraction > 0 かつ ≤ kelly_cap (0.25) であること |
 
 ### TC-07: EV が全買い目で閾値未満のレース
 
