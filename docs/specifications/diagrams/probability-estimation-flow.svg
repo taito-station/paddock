@@ -1,0 +1,99 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="860" viewBox="0 0 900 860" font-family="sans-serif" font-size="13">
+  <!-- 着順確率推定フロー -->
+
+  <!-- 凡例 -->
+  <text x="10" y="20" font-size="11" fill="#666">■ 入力  ■ 処理  ■ 判定  ■ 出力</text>
+
+  <!-- START -->
+  <rect x="370" y="30" width="160" height="40" rx="20" fill="#f5f5f5" stroke="#666" stroke-width="1.5"/>
+  <text x="450" y="55" text-anchor="middle" font-weight="bold" fill="#333">START</text>
+
+  <!-- Arrow: START → RaceCard -->
+  <line x1="450" y1="70" x2="450" y2="100" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- RaceCard -->
+  <rect x="290" y="100" width="320" height="55" rx="8" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1.5"/>
+  <text x="450" y="121" text-anchor="middle" font-weight="bold" fill="#333">RaceCard</text>
+  <text x="450" y="138" text-anchor="middle" font-size="11" fill="#444">race_id / venue / distance / surface / entries</text>
+  <text x="450" y="151" text-anchor="middle" font-size="11" fill="#444">(HorseEntry のリスト)</text>
+
+  <!-- Arrow: RaceCard → Loop -->
+  <line x1="450" y1="155" x2="450" y2="195" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- ループ判定ダイヤ -->
+  <polygon points="450,195 570,235 450,275 330,235" fill="#fff2cc" stroke="#d6b656" stroke-width="1.5"/>
+  <text x="450" y="230" text-anchor="middle" font-size="12" fill="#333">各 HorseEntry</text>
+  <text x="450" y="247" text-anchor="middle" font-size="12" fill="#333">をループ</text>
+
+  <!-- Arrows: Loop → 3 stats boxes (fan out) -->
+  <line x1="330" y1="235" x2="130" y2="320" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="450" y1="275" x2="450" y2="320" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="570" y1="235" x2="770" y2="320" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- course_stats -->
+  <rect x="20" y="320" width="220" height="60" rx="8" fill="#e1d5e7" stroke="#9673a6" stroke-width="1.5"/>
+  <text x="130" y="342" text-anchor="middle" font-weight="bold" fill="#333">course_stats</text>
+  <text x="130" y="358" text-anchor="middle" font-size="11" fill="#444">venue × distance × surface</text>
+  <text x="130" y="372" text-anchor="middle" font-size="11" fill="#444">→ 枠順別 勝/連/複勝率</text>
+
+  <!-- horse_stats -->
+  <rect x="340" y="320" width="220" height="60" rx="8" fill="#e1d5e7" stroke="#9673a6" stroke-width="1.5"/>
+  <text x="450" y="342" text-anchor="middle" font-weight="bold" fill="#333">horse_stats</text>
+  <text x="450" y="358" text-anchor="middle" font-size="11" fill="#444">surface / distance band</text>
+  <text x="450" y="372" text-anchor="middle" font-size="11" fill="#444">/ gate group 別 勝/連/複勝率</text>
+
+  <!-- jockey_stats -->
+  <rect x="660" y="320" width="220" height="60" rx="8" fill="#e1d5e7" stroke="#9673a6" stroke-width="1.5"/>
+  <text x="770" y="342" text-anchor="middle" font-weight="bold" fill="#333">jockey_stats (任意)</text>
+  <text x="770" y="358" text-anchor="middle" font-size="11" fill="#444">surface 別 勝/連/複勝率</text>
+  <text x="770" y="372" text-anchor="middle" font-size="11" fill="#444">※騎手なし → スキップ</text>
+
+  <!-- Arrows: Stats → Score -->
+  <line x1="130" y1="380" x2="380" y2="460" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="450" y1="380" x2="450" y2="460" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="770" y1="380" x2="520" y2="460" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- スコア計算 -->
+  <rect x="310" y="460" width="280" height="80" rx="8" fill="#e1d5e7" stroke="#9673a6" stroke-width="1.5"/>
+  <text x="450" y="482" text-anchor="middle" font-weight="bold" fill="#333">生スコア計算</text>
+  <text x="450" y="499" text-anchor="middle" font-size="11" fill="#444">score = Σ(重み × rate)</text>
+  <text x="450" y="515" text-anchor="middle" font-size="11" fill="#444">勝率 / 連対率 / 複勝率 を各々計算</text>
+  <text x="450" y="531" text-anchor="middle" font-size="10" fill="#666">(course×2 + horse_surface + horse_dist + jockey) / 6</text>
+
+  <!-- Arrow: Score → Check -->
+  <line x1="450" y1="540" x2="450" y2="580" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- 全エントリ完了？ -->
+  <polygon points="450,580 580,620 450,660 320,620" fill="#fff2cc" stroke="#d6b656" stroke-width="1.5"/>
+  <text x="450" y="614" text-anchor="middle" font-size="12" fill="#333">全エントリ</text>
+  <text x="450" y="630" text-anchor="middle" font-size="12" fill="#333">完了？</text>
+
+  <!-- Loop back (NO) -->
+  <path d="M320,620 Q200,620 200,235 Q200,235 330,235" fill="none" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)" stroke-dasharray="5,3"/>
+  <text x="175" y="430" text-anchor="middle" font-size="11" fill="#555">NO</text>
+
+  <!-- Arrow: YES → Normalize -->
+  <line x1="450" y1="660" x2="450" y2="700" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="464" y="685" font-size="11" fill="#555">YES</text>
+
+  <!-- 正規化 -->
+  <rect x="300" y="700" width="300" height="60" rx="8" fill="#d5e8d4" stroke="#82b366" stroke-width="1.5"/>
+  <text x="450" y="722" text-anchor="middle" font-weight="bold" fill="#333">レース内正規化</text>
+  <text x="450" y="740" text-anchor="middle" font-size="11" fill="#444">prob = score_i / Σ(score_j)</text>
+  <text x="450" y="756" text-anchor="middle" font-size="11" fill="#444">勝率 / 連対率 / 複勝率 それぞれ正規化</text>
+
+  <!-- Arrow: Normalize → Output -->
+  <line x1="450" y1="760" x2="450" y2="800" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- 出力 -->
+  <rect x="270" y="800" width="360" height="50" rx="8" fill="#d5e8d4" stroke="#82b366" stroke-width="1.5"/>
+  <text x="450" y="820" text-anchor="middle" font-weight="bold" fill="#333">Vec&lt;HorseProbability&gt; を返す</text>
+  <text x="450" y="840" text-anchor="middle" font-size="11" fill="#444">horse_num / horse_name / win_prob / place_prob / show_prob</text>
+
+  <!-- arrowhead marker -->
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#333"/>
+    </marker>
+  </defs>
+</svg>
