@@ -21,7 +21,11 @@ impl TryFrom<(HorseNum, HorseNum)> for Pair {
                 a.value()
             )));
         }
-        let (lo, hi) = if a.value() <= b.value() { (a, b) } else { (b, a) };
+        let (lo, hi) = if a.value() <= b.value() {
+            (a, b)
+        } else {
+            (b, a)
+        };
         Ok(Self(lo, hi))
     }
 }

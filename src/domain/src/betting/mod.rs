@@ -70,7 +70,14 @@ pub fn select_bets(
     for (&horse, &ov) in &race_odds.win {
         if let Some(hp) = prob_map.get(&horse) {
             let o = ov.value();
-            push_if_positive(&mut recs, BetCombination::Win(horse), hp.win_prob, o, config.ev_threshold, config);
+            push_if_positive(
+                &mut recs,
+                BetCombination::Win(horse),
+                hp.win_prob,
+                o,
+                config.ev_threshold,
+                config,
+            );
         }
     }
 
@@ -80,7 +87,14 @@ pub fn select_bets(
             // place_prob は「2 着以内確率」（連対率）であり、複勝計算では使わない。
             // 未確定幅 (low..high) の中央値を期待値計算の代表値とする。
             let o = (place_ov.low.value() + place_ov.high.value()) / 2.0;
-            push_if_positive(&mut recs, BetCombination::Place(horse), hp.show_prob, o, config.ev_threshold, config);
+            push_if_positive(
+                &mut recs,
+                BetCombination::Place(horse),
+                hp.show_prob,
+                o,
+                config.ev_threshold,
+                config,
+            );
         }
     }
 
@@ -89,7 +103,14 @@ pub fn select_bets(
         if let (Some(ha), Some(hb)) = (prob_map.get(&a), prob_map.get(&b)) {
             let p = harville_quinella(ha.win_prob, hb.win_prob);
             let o = ov.value();
-            push_if_positive(&mut recs, BetCombination::Quinella(pair), p, o, config.ev_threshold, config);
+            push_if_positive(
+                &mut recs,
+                BetCombination::Quinella(pair),
+                p,
+                o,
+                config.ev_threshold,
+                config,
+            );
         }
     }
 
@@ -98,39 +119,82 @@ pub fn select_bets(
         if let (Some(ha), Some(hb)) = (prob_map.get(&a), prob_map.get(&b)) {
             let p = harville_exacta(ha.win_prob, hb.win_prob);
             let o = ov.value();
-            push_if_positive(&mut recs, BetCombination::Exacta(pair), p, o, config.ev_threshold, config);
+            push_if_positive(
+                &mut recs,
+                BetCombination::Exacta(pair),
+                p,
+                o,
+                config.ev_threshold,
+                config,
+            );
         }
     }
 
     for (&triple, &ov) in &race_odds.trio {
         let (a, b, c) = triple.as_tuple();
-        if let (Some(ha), Some(hb), Some(hc)) = (prob_map.get(&a), prob_map.get(&b), prob_map.get(&c)) {
+        if let (Some(ha), Some(hb), Some(hc)) =
+            (prob_map.get(&a), prob_map.get(&b), prob_map.get(&c))
+        {
             let p = harville_trio(ha.win_prob, hb.win_prob, hc.win_prob);
             let o = ov.value();
-            push_if_positive(&mut recs, BetCombination::Trio(triple), p, o, config.ev_threshold, config);
+            push_if_positive(
+                &mut recs,
+                BetCombination::Trio(triple),
+                p,
+                o,
+                config.ev_threshold,
+                config,
+            );
         }
     }
 
     for (&triple, &ov) in &race_odds.trifecta {
         let (a, b, c) = triple.as_tuple();
-        if let (Some(ha), Some(hb), Some(hc)) = (prob_map.get(&a), prob_map.get(&b), prob_map.get(&c)) {
+        if let (Some(ha), Some(hb), Some(hc)) =
+            (prob_map.get(&a), prob_map.get(&b), prob_map.get(&c))
+        {
             let p = harville_trifecta(ha.win_prob, hb.win_prob, hc.win_prob);
             let o = ov.value();
-            push_if_positive(&mut recs, BetCombination::Trifecta(triple), p, o, config.trifecta_ev_threshold, config);
+            push_if_positive(
+                &mut recs,
+                BetCombination::Trifecta(triple),
+                p,
+                o,
+                config.trifecta_ev_threshold,
+                config,
+            );
         }
     }
 
-    recs.sort_by_key(|r| (priority(&r.combination), OrderedFloat(-r.ev), combination_ord_key(&r.combination)));
+    recs.sort_by_key(|r| {
+        (
+            priority(&r.combination),
+            OrderedFloat(-r.ev),
+            combination_ord_key(&r.combination),
+        )
+    });
     recs
 }
 
 fn combination_ord_key(c: &BetCombination) -> (u32, u32, u32) {
     match c {
         BetCombination::Win(h) | BetCombination::Place(h) => (h.value(), 0, 0),
-        BetCombination::Quinella(p) => { let (a, b) = p.as_tuple(); (a.value(), b.value(), 0) }
-        BetCombination::Exacta(p) => { let (a, b) = p.as_tuple(); (a.value(), b.value(), 0) }
-        BetCombination::Trio(t) => { let (a, b, c) = t.as_tuple(); (a.value(), b.value(), c.value()) }
-        BetCombination::Trifecta(t) => { let (a, b, c) = t.as_tuple(); (a.value(), b.value(), c.value()) }
+        BetCombination::Quinella(p) => {
+            let (a, b) = p.as_tuple();
+            (a.value(), b.value(), 0)
+        }
+        BetCombination::Exacta(p) => {
+            let (a, b) = p.as_tuple();
+            (a.value(), b.value(), 0)
+        }
+        BetCombination::Trio(t) => {
+            let (a, b, c) = t.as_tuple();
+            (a.value(), b.value(), c.value())
+        }
+        BetCombination::Trifecta(t) => {
+            let (a, b, c) = t.as_tuple();
+            (a.value(), b.value(), c.value())
+        }
     }
 }
 
@@ -167,9 +231,10 @@ fn priority(c: &BetCombination) -> u8 {
 
 /// P(a→b): Harville conditional probability that b finishes 2nd given a wins.
 ///
-/// Returns `0.0` when `win_a + win_b >= 1.0`: the first horse leaving no probability
-/// mass for others to finish behind the second horse would produce an invalid result.
-pub fn harville_exacta(win_a: f64, win_b: f64) -> f64 {
+/// Returns `0.0` when `win_a + win_b >= 1.0`. This is a conservative guard consistent
+/// with `harville_trifecta`: when the combined probability of two horses equals or
+/// exceeds 1.0, the Harville conditional probability would be ill-defined.
+pub(crate) fn harville_exacta(win_a: f64, win_b: f64) -> f64 {
     if win_a + win_b >= 1.0 {
         return 0.0;
     }
@@ -178,7 +243,7 @@ pub fn harville_exacta(win_a: f64, win_b: f64) -> f64 {
 }
 
 /// P(quinella {a,b}) = P(a→b) + P(b→a).
-pub fn harville_quinella(win_a: f64, win_b: f64) -> f64 {
+pub(crate) fn harville_quinella(win_a: f64, win_b: f64) -> f64 {
     harville_exacta(win_a, win_b) + harville_exacta(win_b, win_a)
 }
 
@@ -187,17 +252,19 @@ pub fn harville_quinella(win_a: f64, win_b: f64) -> f64 {
 /// Precondition: `win_a + win_b < 1.0`. Returns `0.0` when this is violated
 /// to avoid a negative denominator being clamped to MIN_DENOMINATOR, which
 /// would produce an unrealistically large probability.
-pub fn harville_trifecta(win_a: f64, win_b: f64, win_c: f64) -> f64 {
+pub(crate) fn harville_trifecta(win_a: f64, win_b: f64, win_c: f64) -> f64 {
     if win_a + win_b >= 1.0 {
         return 0.0;
     }
     let denom_a = (1.0 - win_a).max(MIN_DENOMINATOR);
+    // The guard ensures 1-win_a-win_b > 0, but min-clamp is kept for floating-point safety
+    // when win_a+win_b is very close to 1.0.
     let denom_ab = (1.0 - win_a - win_b).max(MIN_DENOMINATOR);
-    win_a * win_b / denom_a * win_c / denom_ab
+    win_a * (win_b / denom_a) * (win_c / denom_ab)
 }
 
 /// P(trio {a,b,c}) = sum of all 6 ordered permutations as trifecta probabilities.
-pub fn harville_trio(win_a: f64, win_b: f64, win_c: f64) -> f64 {
+pub(crate) fn harville_trio(win_a: f64, win_b: f64, win_c: f64) -> f64 {
     harville_trifecta(win_a, win_b, win_c)
         + harville_trifecta(win_a, win_c, win_b)
         + harville_trifecta(win_b, win_a, win_c)
@@ -210,7 +277,7 @@ pub fn harville_trio(win_a: f64, win_b: f64, win_c: f64) -> f64 {
 ///
 /// `gross_odds` is the JRA payout multiplier (e.g. 3.5 means ¥350 back on ¥100).
 /// Net odds b = gross_odds - 1.0 (gross → net 変換). EV = p * gross_odds; EV > 1.0 が期待値プラス。
-pub fn kelly_fraction(p: f64, gross_odds: f64, kelly_cap: f64) -> f64 {
+pub(crate) fn kelly_fraction(p: f64, gross_odds: f64, kelly_cap: f64) -> f64 {
     let b = gross_odds - 1.0;
     let q = 1.0 - p;
     let f = (p * b - q) / b;
@@ -297,27 +364,22 @@ mod tests {
     fn trifecta_uses_higher_threshold() {
         // harville_trifecta(0.4, 0.35, 0.2) ≈ 0.4 * 0.35/0.6 * 0.2/0.25 ≈ 0.187
         // EV ≈ 0.187 * 8.0 ≈ 1.5 → above ev_threshold(1.0) but below trifecta_ev_threshold(2.0)
-        let probs = vec![
-            prob(1, 0.4, 0.6),
-            prob(2, 0.35, 0.55),
-            prob(3, 0.2, 0.4),
-        ];
+        let probs = vec![prob(1, 0.4, 0.6), prob(2, 0.35, 0.55), prob(3, 0.2, 0.4)];
         let (a, b, c) = (horse(1), horse(2), horse(3));
         let triple = OrderedTriple::try_from((a, b, c)).unwrap();
         let mut race_odds = RaceOdds::empty(make_race_id());
         race_odds.trifecta.insert(triple, odds(8.0));
 
         let result = select_bets(&probs, &race_odds, &BettingConfig::default());
-        assert!(result.is_empty(), "trifecta with EV < 2.0 should be excluded");
+        assert!(
+            result.is_empty(),
+            "trifecta with EV < 2.0 should be excluded"
+        );
     }
 
     #[test]
     fn trifecta_above_trifecta_threshold_is_included() {
-        let probs = vec![
-            prob(1, 0.4, 0.6),
-            prob(2, 0.35, 0.55),
-            prob(3, 0.2, 0.4),
-        ];
+        let probs = vec![prob(1, 0.4, 0.6), prob(2, 0.35, 0.55), prob(3, 0.2, 0.4)];
         let (a, b, c) = (horse(1), horse(2), horse(3));
         let triple = OrderedTriple::try_from((a, b, c)).unwrap();
         let mut race_odds = RaceOdds::empty(make_race_id());
@@ -335,7 +397,11 @@ mod tests {
         let mut race_odds = RaceOdds::empty(make_race_id());
         race_odds.win.insert(horse(1), odds(2.0));
 
-        let config = BettingConfig { ev_threshold: 1.0, trifecta_ev_threshold: 2.0, kelly_cap: 0.25 };
+        let config = BettingConfig {
+            ev_threshold: 1.0,
+            trifecta_ev_threshold: 2.0,
+            kelly_cap: 0.25,
+        };
         let result = select_bets(&probs, &race_odds, &config);
         assert!(!result.is_empty());
         assert!(result[0].kelly_fraction <= 0.25);
@@ -346,12 +412,20 @@ mod tests {
         let probs = vec![prob(1, 0.5, 0.7), prob(2, 0.3, 0.55)];
         let pair = Pair::try_from((horse(1), horse(2))).unwrap();
         let mut race_odds = RaceOdds::empty(make_race_id());
-        race_odds.win.insert(horse(1), odds(2.5));  // EV = 0.5*2.5 = 1.25
+        race_odds.win.insert(horse(1), odds(2.5)); // EV = 0.5*2.5 = 1.25
         race_odds.quinella.insert(pair, odds(5.0));
 
         let result = select_bets(&probs, &race_odds, &BettingConfig::default());
-        assert!(result.iter().any(|r| matches!(r.combination, BetCombination::Quinella(_))));
-        assert!(result.iter().any(|r| matches!(r.combination, BetCombination::Win(_))));
+        assert!(
+            result
+                .iter()
+                .any(|r| matches!(r.combination, BetCombination::Quinella(_)))
+        );
+        assert!(
+            result
+                .iter()
+                .any(|r| matches!(r.combination, BetCombination::Win(_)))
+        );
         assert!(matches!(result[0].combination, BetCombination::Quinella(_)));
     }
 
@@ -405,7 +479,10 @@ mod tests {
         // (e.g. wb+wa = 0.5+0.4 = 0.9 < 1.0 is ok; but wc=0.05 combos are fine)
         let trio = harville_trio(0.5, 0.4, 0.05);
         assert!(trio >= 0.0);
-        assert!(trio <= 1.0, "trio probability should not exceed 1.0, got {trio}");
+        assert!(
+            trio <= 1.0,
+            "trio probability should not exceed 1.0, got {trio}"
+        );
     }
 
     #[test]
