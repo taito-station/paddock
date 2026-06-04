@@ -52,7 +52,7 @@
 | 項目 | 内容 |
 |------|------|
 | 前提 | races テーブルには存在するが race_card_entries が未保存の race_id |
-| テスト準備 | `paddock-parse-pdf` で race を保存した後、`paddock-parse-entries` は実行しない（race_card_entries テーブルを空のままにする） |
+| テスト準備 | `paddock-parse-pdf` で race を保存した後、`paddock-parse-entries` は実行しない。または `race_card_entries` テーブルにデータが存在しない race_id を用意する |
 | コマンド | `paddock-analyze predict <race_id>` |
 | 期待結果 | `race card not found` 等のエラーが stderr に表示される |
 | 確認ポイント | 空の結果セットが返らず、`race card not found` に相当するエラーメッセージが stderr に表示されること / exit code が 1 であること |
