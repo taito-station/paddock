@@ -48,12 +48,13 @@ pub async fn horse_stats(pool: &SqlitePool, name: &HorseName) -> Result<HorseSta
 }
 
 async fn overall_stat(pool: &SqlitePool, horse_name: &str) -> Result<GroupStat> {
-    let row: (i64, i64, i64) = sqlx::query_as(
+    let row: (i64, i64, i64, i64) = sqlx::query_as(
         r#"
         SELECT
             COUNT(*) AS starts,
             SUM(CASE WHEN finishing_position = 1 THEN 1 ELSE 0 END) AS wins,
-            SUM(CASE WHEN finishing_position IN (1,2) THEN 1 ELSE 0 END) AS places
+            SUM(CASE WHEN finishing_position IN (1,2) THEN 1 ELSE 0 END) AS places,
+            SUM(CASE WHEN finishing_position IN (1,2,3) THEN 1 ELSE 0 END) AS shows
         FROM results
         WHERE horse_name = $1 AND finishing_position IS NOT NULL
         "#,
@@ -66,6 +67,7 @@ async fn overall_stat(pool: &SqlitePool, horse_name: &str) -> Result<GroupStat> 
         starts: row.0 as u32,
         wins: row.1 as u32,
         places: row.2 as u32,
+        shows: row.3 as u32,
     })
 }
 
@@ -82,7 +84,8 @@ async fn group_by(
             SELECT
                 COUNT(*) AS starts,
                 SUM(CASE WHEN results.finishing_position = 1 THEN 1 ELSE 0 END) AS wins,
-                SUM(CASE WHEN results.finishing_position IN (1,2) THEN 1 ELSE 0 END) AS places
+                SUM(CASE WHEN results.finishing_position IN (1,2) THEN 1 ELSE 0 END) AS places,
+                SUM(CASE WHEN results.finishing_position IN (1,2,3) THEN 1 ELSE 0 END) AS shows
             FROM results
             INNER JOIN races ON races.race_id = results.race_id
             WHERE results.horse_name = $1
@@ -90,7 +93,7 @@ async fn group_by(
               AND {column} = ?2
             "#
         );
-        let row: (i64, i64, i64) = sqlx::query_as(&q)
+        let row: (i64, i64, i64, i64) = sqlx::query_as(&q)
             .bind(horse_name)
             .bind(*key)
             .fetch_one(pool)
@@ -100,6 +103,7 @@ async fn group_by(
             starts: row.0 as u32,
             wins: row.1 as u32,
             places: row.2 as u32,
+            shows: row.3 as u32,
         });
     }
     Ok(stats)
@@ -119,7 +123,8 @@ async fn group_by_distance_band(pool: &SqlitePool, horse_name: &str) -> Result<V
             SELECT
                 COUNT(*) AS starts,
                 SUM(CASE WHEN results.finishing_position = 1 THEN 1 ELSE 0 END) AS wins,
-                SUM(CASE WHEN results.finishing_position IN (1,2) THEN 1 ELSE 0 END) AS places
+                SUM(CASE WHEN results.finishing_position IN (1,2) THEN 1 ELSE 0 END) AS places,
+                SUM(CASE WHEN results.finishing_position IN (1,2,3) THEN 1 ELSE 0 END) AS shows
             FROM results
             INNER JOIN races ON races.race_id = results.race_id
             WHERE results.horse_name = $1
@@ -127,12 +132,14 @@ async fn group_by_distance_band(pool: &SqlitePool, horse_name: &str) -> Result<V
               AND {predicate}
             "#
         );
-        let row: (i64, i64, i64) = sqlx::query_as(&q).bind(horse_name).fetch_one(pool).await?;
+        let row: (i64, i64, i64, i64) =
+            sqlx::query_as(&q).bind(horse_name).fetch_one(pool).await?;
         stats.push(GroupStat {
             label: label.to_string(),
             starts: row.0 as u32,
             wins: row.1 as u32,
             places: row.2 as u32,
+            shows: row.3 as u32,
         });
     }
     Ok(stats)
@@ -152,7 +159,8 @@ async fn group_by_popularity_band(pool: &SqlitePool, horse_name: &str) -> Result
             SELECT
                 COUNT(*) AS starts,
                 SUM(CASE WHEN finishing_position = 1 THEN 1 ELSE 0 END) AS wins,
-                SUM(CASE WHEN finishing_position IN (1,2) THEN 1 ELSE 0 END) AS places
+                SUM(CASE WHEN finishing_position IN (1,2) THEN 1 ELSE 0 END) AS places,
+                SUM(CASE WHEN finishing_position IN (1,2,3) THEN 1 ELSE 0 END) AS shows
             FROM results
             WHERE horse_name = $1
               AND finishing_position IS NOT NULL
@@ -160,12 +168,14 @@ async fn group_by_popularity_band(pool: &SqlitePool, horse_name: &str) -> Result
               AND {predicate}
             "#
         );
-        let row: (i64, i64, i64) = sqlx::query_as(&q).bind(horse_name).fetch_one(pool).await?;
+        let row: (i64, i64, i64, i64) =
+            sqlx::query_as(&q).bind(horse_name).fetch_one(pool).await?;
         stats.push(GroupStat {
             label: label.to_string(),
             starts: row.0 as u32,
             wins: row.1 as u32,
             places: row.2 as u32,
+            shows: row.3 as u32,
         });
     }
     Ok(stats)
@@ -184,19 +194,22 @@ async fn group_by_gate(pool: &SqlitePool, horse_name: &str) -> Result<Vec<GroupS
             SELECT
                 COUNT(*) AS starts,
                 SUM(CASE WHEN results.finishing_position = 1 THEN 1 ELSE 0 END) AS wins,
-                SUM(CASE WHEN results.finishing_position IN (1,2) THEN 1 ELSE 0 END) AS places
+                SUM(CASE WHEN results.finishing_position IN (1,2) THEN 1 ELSE 0 END) AS places,
+                SUM(CASE WHEN results.finishing_position IN (1,2,3) THEN 1 ELSE 0 END) AS shows
             FROM results
             WHERE results.horse_name = $1
               AND results.finishing_position IS NOT NULL
               AND {predicate}
             "#
         );
-        let row: (i64, i64, i64) = sqlx::query_as(&q).bind(horse_name).fetch_one(pool).await?;
+        let row: (i64, i64, i64, i64) =
+            sqlx::query_as(&q).bind(horse_name).fetch_one(pool).await?;
         stats.push(GroupStat {
             label: label.to_string(),
             starts: row.0 as u32,
             wins: row.1 as u32,
             places: row.2 as u32,
+            shows: row.3 as u32,
         });
     }
     Ok(stats)

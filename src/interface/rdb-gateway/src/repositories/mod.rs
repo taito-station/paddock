@@ -1,5 +1,6 @@
 mod course_stats;
 mod fetch_history;
+mod find_race_card;
 mod horse_stats;
 mod jockey_stats;
 mod save_race;
@@ -84,6 +85,12 @@ impl Repository for SqliteRepository {
 
     async fn save_race_card(&self, card: &RaceCard) -> UcResult<()> {
         save_race_card::save_race_card(&self.pool, card)
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn find_race_card(&self, race_id: &RaceId) -> UcResult<Option<RaceCard>> {
+        find_race_card::find_race_card(&self.pool, race_id)
             .await
             .map_err(Into::into)
     }
