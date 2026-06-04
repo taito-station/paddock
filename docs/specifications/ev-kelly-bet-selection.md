@@ -39,7 +39,7 @@ Kelly 基準で賭け額を決定する。
 | 戻り値 | `Vec<BettingRecommendation>` | EV 閾値を超えた買い目一覧（優先度順） |
 
 優先度: **馬連 > 馬単 > 三連複 > 単勝 > 複勝 > 三連単**  
-三連単は `EV > trifecta_ev_threshold` を満たした場合のみ候補に追加され、常に最後尾（優先度 5）に表示される。  
+三連単は `EV > trifecta_ev_threshold` を満たした場合のみ候補に追加され、常に最後尾に表示される。  
 同一馬券種内は EV 降順でソートする。
 
 ---
@@ -61,6 +61,11 @@ impl Default for BettingConfig {
     }
 }
 ```
+
+**フィールドの有効範囲（前提条件）:**
+- `ev_threshold`: `> 0.0`。`≥ 1.0` のとき EV フィルタ通過後の kelly_fraction > 0 が保証される
+- `kelly_cap`: `(0.0, 1.0]`。0 以下を設定すると全候補の kelly_fraction が 0 になる
+- バリデーション実装は呼び出し側の責任とし、Domain 関数内では前提違反をパニックさせない
 
 ### BetCombination
 
@@ -136,7 +141,7 @@ f = (p × b − q) / b
 kelly_fraction = clamp(f, 0.0, kelly_cap)
 ```
 
-EV フィルタ通過後（EV > ev_threshold）は数学的に `f > 0` が保証されるため、通常の候補では clamp による 0.0 打ち切りは発生しない。
+**`ev_threshold ≥ 1.0` のとき**、EV フィルタ通過後（EV > ev_threshold）は数学的に `f > 0` が保証されるため、デフォルト設定では clamp による 0.0 打ち切りは発生しない（`ev_threshold < 1.0` に設定した場合は f ≤ 0 が発生しうる）。
 
 ### 5. 優先度マッピング
 
@@ -153,7 +158,7 @@ fn priority(c: &BetCombination) -> u8 {
 }
 ```
 
-`sort_by_key(|r| (priority(&r.combination), OrderedFloat(-r.ev)))` で安定ソートする。  
+`sort_by_key(|r| (priority(&r.combination), OrderedFloat(-r.ev)))` で安定ソートする（**sort_key の値が小さいほど先に表示される**）。  
 `OrderedFloat` は `ordered-float` クレート（`use ordered_float::OrderedFloat`）を使用する。
 
 ---
@@ -164,8 +169,9 @@ fn priority(c: &BetCombination) -> u8 {
 |------|------|
 | 型定義・関数 | `src/domain/src/betting/mod.rs` |
 | Domain lib re-export | `src/domain/src/lib.rs` |
+| 依存クレート追加 | `src/domain/Cargo.toml` に `ordered-float` を追加 |
 
-Domain 層に純粋関数として実装し、IO・状態なし。
+Domain 層に純粋関数として実装し、IO・状態なし。`PlaceOdds` 型（`low: OddsValue`, `high: OddsValue`）は既存の `src/domain/src/odds/odds_value.rs` を参照する。
 
 ---
 
