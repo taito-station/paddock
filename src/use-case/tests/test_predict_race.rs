@@ -173,6 +173,9 @@ async fn predict_race_probabilities_sum_to_one() {
 
 #[tokio::test]
 async fn predict_race_higher_stats_horse_gets_higher_win_prob() {
+    // ウマA（枠番1=Inner, win_rate=0.2）と ウマB（枠番5=Middle, win_rate=0.1）で、
+    // course_stats は inner_win=4 > middle_win=2 と設定。
+    // 馬スタッツ差 + コース枠番差の両方がウマA有利に働く複合テスト（意図的）。
     let card = make_race_card("2026-1-tokyo-1-R1");
     let app = interactor(Some(card));
     let race_id = RaceId::try_from("2026-1-tokyo-1-R1").unwrap();
@@ -182,6 +185,6 @@ async fn predict_race_higher_stats_horse_gets_higher_win_prob() {
     let uma_b = probs.iter().find(|p| p.horse_name.value() == "ウマB").unwrap();
     assert!(
         uma_a.win_prob > uma_b.win_prob,
-        "ウマA(win_rate=0.2) should outrank ウマB(win_rate=0.1)"
+        "ウマA(win_rate=0.2, Inner gate) should outrank ウマB(win_rate=0.1, Middle gate)"
     );
 }

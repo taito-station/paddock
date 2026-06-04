@@ -93,7 +93,11 @@ fn gate_group_label(gate_num: u32) -> &'static str {
     }
 }
 
-// ラベルは horse_stats.rs の group_by_distance_band の SQL BETWEEN 範囲と一致させる
+// ラベルは group_by_distance_band の SQL ラベルと完全一致させる。
+// SQL は BETWEEN 1500 AND 1800 / BETWEEN 1900 AND 2200 のため、
+// 境界付近（1401-1499m, 1801-1899m）は DB のどのバケツにも入らない。
+// ただし JRA の実際の距離は 1400m・1600m・1800m・2000m・2200m・2400m 等の
+// 離散値のみで、1401-1499m のようなレースは存在しないため実用上の問題はない。
 fn distance_band_label(distance: u32) -> &'static str {
     match distance {
         0..=1400 => "〜1400m",

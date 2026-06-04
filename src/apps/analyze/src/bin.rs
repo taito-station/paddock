@@ -67,6 +67,8 @@ fn print_jockey(s: &JockeyStatsRow) {
 }
 
 fn print_predict(probs: &[HorseProbability]) {
+    // 全角文字は端末上で 2 カラム分の幅を占めるため、{:<16} の文字数パディングでは
+    // 列がずれる場合がある。unicode-width 対応は今後の改善課題。
     println!(
         "{:<4} {:<16} {:>8} {:>8} {:>8}",
         "馬番", "馬名", "勝率", "連対率", "複勝率"
