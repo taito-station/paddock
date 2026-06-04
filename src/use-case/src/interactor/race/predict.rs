@@ -16,12 +16,14 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
             .await?
             .ok_or_else(|| Error::NotFound(format!("race card: {}", race_id.value())))?;
 
+        // コース統計は全馬共通なのでループ外で 1 回だけ取得する
+        let course = self
+            .repository
+            .course_stats(card.venue, card.distance, card.surface)
+            .await?;
+
         let mut entry_factors: Vec<(HorseEntry, HorseFactors)> = Vec::new();
         for entry in &card.entries {
-            let course = self
-                .repository
-                .course_stats(card.venue, card.distance, card.surface)
-                .await?;
             let horse = self.repository.horse_stats(&entry.horse_name).await?;
             let jockey = match &entry.jockey {
                 Some(j) => Some(self.repository.jockey_stats(j).await?),
@@ -38,6 +40,8 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
             entry_factors.push((entry.clone(), factors));
         }
 
+        // win / place / show はそれぞれ独立に正規化するため、
+        // win_prob ≤ place_prob ≤ show_prob の単調性は保証されない（設計上の既知制約）
         Ok(paddock_domain::prediction::estimate_probabilities(&entry_factors))
     }
 }
@@ -89,6 +93,7 @@ fn gate_group_label(gate_num: u32) -> &'static str {
     }
 }
 
+// ラベルは horse_stats.rs の group_by_distance_band の SQL BETWEEN 範囲と一致させる
 fn distance_band_label(distance: u32) -> &'static str {
     match distance {
         0..=1400 => "〜1400m",

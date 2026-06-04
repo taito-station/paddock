@@ -28,7 +28,7 @@ pub async fn find_race_card(pool: &SqlitePool, race_id: &RaceId) -> Result<Optio
         ORDER BY horse_num
         "#,
     )
-    .bind(&race_id_str)
+    .bind(race_id.value())
     .fetch_all(pool)
     .await?;
 
