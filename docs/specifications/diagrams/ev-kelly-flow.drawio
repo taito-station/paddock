@@ -92,7 +92,7 @@
         </mxCell>
 
         <!-- Kelly計算 -->
-        <mxCell id="21" value="Kelly 計算&#xa;f = (p × b − q) / b&#xa;b = odds − 1, q = 1 − p&#xa;fraction = clamp(f, 0.0, kelly_cap)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;fontSize=11;" vertex="1" parent="1">
+        <mxCell id="21" value="Kelly 計算&#xa;f = (p × b − q) / b&#xa;b = odds − 1 (グロス→ネット変換), q = 1 − p&#xa;kelly_fraction = clamp(f, 0.0, kelly_cap)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;fontSize=11;" vertex="1" parent="1">
           <mxGeometry x="410" y="670" width="300" height="70" as="geometry" />
         </mxCell>
 
@@ -101,7 +101,7 @@
         </mxCell>
 
         <!-- 優先度ソート -->
-        <mxCell id="23" value="優先度ソート&#xa;馬連 &gt; 馬単 &gt; 三連複 &gt; 単勝 &gt; 複勝&#xa;(三連単は EV &gt; trifecta_ev_threshold のみ)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;fontSize=11;" vertex="1" parent="1">
+        <mxCell id="23" value="優先度ソート&#xa;馬連 &gt; 馬単 &gt; 三連複 &gt; 単勝 &gt; 複勝 &gt; 三連単（最後尾）&#xa;三連単は EV &gt; trifecta_ev_threshold のみ候補" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;fontSize=11;" vertex="1" parent="1">
           <mxGeometry x="400" y="800" width="320" height="65" as="geometry" />
         </mxCell>
 
