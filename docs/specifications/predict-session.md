@@ -1,6 +1,6 @@
 # predict バイナリ: 対話型レーシングセッション
 
-Issue #13
+[Issue #13](https://github.com/taito-station/paddock/issues/13)
 
 ## 概要
 
@@ -26,8 +26,10 @@ paddock-predict --date <YYYY-MM-DD> --budget <金額>
 
 | コード | 意味 |
 |--------|------|
-| 0 | 正常終了 |
-| 1 | DB 接続エラー / 不正な引数 |
+| 0 | 正常終了（開催なし日付を含む） |
+| 1 | DB 接続エラー / 実行中の DB I/O・クエリエラー / 不正な引数 |
+
+「開催なし日付」は異常ではないため exit code 0 とし、案内メッセージは **stdout** に出力する。
 
 ---
 
@@ -67,6 +69,14 @@ $ paddock-predict --date 2026-06-01 --budget 10000
 残高: ¥11,400
 ```
 
+選択肢の意味:
+
+| キー | 意味 | 動作 |
+|------|------|------|
+| `y` | 推奨通り購入 | Kelly 配分で算出した推奨額をそのまま確定する |
+| `e` | 金額を編集 | 各買い目の金額を対話入力する（`0` 入力でその買い目をスキップ） |
+| `s` | スキップ | このレースは購入せず賭け金 ¥0 で次へ進む |
+
 ### e（編集）モード
 
 ```
@@ -82,6 +92,15 @@ $ paddock-predict --date 2026-06-01 --budget 10000
 
 金額に `0` を入力するとその買い目をスキップ。
 
+### 残高ガード
+
+賭け金（`y` の推奨額合計、または `e` の入力額合計）が **現在残高を超える場合は確定できない**。
+
+- `y`: 推奨額合計 > 残高 のとき、その旨を表示して `e`（編集）または `s`（スキップ）に誘導する
+- `e`: 各買い目の入力時点で「残り賭け可能額」を表示し、累計が残高を超える入力は再入力を促す
+
+これにより残高は常に 0 以上に保たれる（後述の `SessionState` を `u64` で表現できる根拠）。
+
 ### 一日集計
 
 ```
@@ -91,6 +110,8 @@ $ paddock-predict --date 2026-06-01 --budget 10000
 最終残高:  ¥13,300
 P&L:       +¥3,300
 ```
+
+`P&L = 総払戻 − 総賭け金`（= 最終残高 − 初期予算 と常に一致する）。
 
 ---
 
@@ -115,23 +136,35 @@ src/apps/predict/
 
 ```rust
 struct SessionState {
-    budget: i64,       // 現在残高（円）
-    total_bet: i64,    // 累計賭け金
-    total_payout: i64, // 累計払い戻し
+    budget: u64,        // 現在残高（円）— 残高ガードにより常に 0 以上
+    total_bet: u64,     // 累計賭け金
+    total_payout: u64,  // 累計払い戻し
 }
 ```
 
-セッション状態はアプリ層でのみ管理し、Domain / Use-Case 層には持ち込まない。
+- CLI の `--budget`（`u64`）をそのまま初期 `budget` に代入するため型変換は不要
+- 賭け金は残高ガードにより `budget` を超えないため、`budget -= bet` で桁あふれ（underflow）は発生しない
+- セッション状態はアプリ層でのみ管理し、Domain / Use-Case 層には持ち込まない
 
-### 依存関係
+### 依存関係と呼び出し責務
 
 ```
 src/apps/predict
-    → paddock-use-case  (Interactor)
-    → paddock-domain    (select_bets / estimate_probabilities — 純粋関数)
-    → rdb-gateway       (Repository 実装)
+    → paddock-use-case  (Interactor 経由: predict_race / races_by_date / race_odds)
+    → paddock-domain    (App 層が直接呼ぶ純粋関数: select_bets)
+    → rdb-gateway       (Repository 実装を Interactor に注入)
     → paddock-config    (環境変数)
 ```
+
+呼び出し責務を明確化する:
+
+- **確率推定・レース一覧・オッズ取得**（IO を伴う）は **Use-Case の Interactor 経由**で呼ぶ
+- **`select_bets`**（IO なしの純粋関数）は **App 層（`session.rs`）が `paddock-domain` から直接呼ぶ**。Use-Case にラッパーを置かない（薄い委譲を増やさないため）
+
+### DI 構築（setup.rs）
+
+既存の `Interactor` は `Interactor<R: Repository, P: PdfParser, F: PdfFetcher>` の 3 ジェネリクスを持つ。  
+`paddock-predict` は PDF 解析・取得を使わないため、`analyze` バイナリと同様に **`UnusedParser` / `UnusedFetcher`（no-op 実装）を注入**して `Interactor` を構築する。
 
 ---
 
@@ -153,30 +186,38 @@ fn find_race_odds(
 ) -> impl Future<Output = Result<Option<RaceOdds>>> + Send;
 ```
 
+### `Race` を返すことについて
+
+`Race` は `results: Vec<HorseResult>` を持つが、予想フェーズ（レース確定前）では `results` は空である。  
+レースヘッダ表示に必要なのは `venue` / `surface` / `distance` / `race_num` のみで、これらは `Race` に含まれる。  
+`results` が空である以上 over-fetching は実害がないため、専用 DTO は定義せず `Race` をそのまま返す。
+
 ### RDB 実装
 
 | テーブル | SQL の概要 |
 |---------|-----------|
 | `races` | `WHERE date = $1 ORDER BY race_num ASC` |
-| `race_odds`（新規または既存） | `WHERE race_id = $1 LIMIT 1` |
+| `race_odds`（**本 Issue では未存在**、後述） | `WHERE race_id = $1 LIMIT 1` |
 
-> **前提**: オッズは `paddock-odds-scraper`（Interface 層）が `race_odds` テーブルに保存済みであること。  
-> オッズ未取得レースは `find_race_odds` が `None` を返し、「オッズ未取得」旨を表示してスキップ推奨とする。
+> **オッズ永続化のスコープ外注意**: 現状リポジトリに `race_odds` テーブルのマイグレーションは存在せず、`odds-scraper` もオンデマンド取得のみで永続化していない。  
+> `race_odds` テーブルの追加とスクレイパーによる永続化は **別 Issue のスコープ**とする。  
+> 本 Issue では `find_race_odds` が **常に `None` を返す実装でも成立する**よう、オッズ未取得時のフロー（次節）を必ずハンドリングする。
 
 ---
 
 ## 新規 Use-Case インタラクターメソッド
 
-`src/use-case/src/interactor/` 配下に以下を追加する（または既存ファイルに追記）。
+`src/use-case/src/interactor/race/` 配下に以下を追加する。  
+いずれも既存 `Interactor<R, P, F>` のメソッドとして `impl` ブロックに追加する（ジェネリクス束縛は既存と同一）。
 
 ```rust
 // interactor/race/races_by_date.rs
-impl<R: Repository> Interactor<R> {
+impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
     pub async fn races_by_date(&self, date: NaiveDate) -> Result<Vec<Race>> { ... }
 }
 
 // interactor/race/race_odds.rs
-impl<R: Repository> Interactor<R> {
+impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
     pub async fn race_odds(&self, race_id: &RaceId) -> Result<Option<RaceOdds>> { ... }
 }
 ```
@@ -185,13 +226,23 @@ impl<R: Repository> Interactor<R> {
 
 ---
 
-## オッズなし時の動作
+## オッズ未取得時の動作
 
-`find_race_odds` が `None` を返した場合:
+`find_race_odds` が `None` を返した場合、EV を計算できず買い目推奨を生成できない。  
+このため `select_bets` は呼ばず、以下のフローとする:
 
-1. 「オッズ未取得 — スキップ推奨」を表示する
-2. `select_bets` には空の `RaceOdds` を渡す（推奨なしとなる）
-3. ユーザーが `s` を選択してスキップできる
+1. 「オッズ未取得 — このレースはスキップします」を表示する
+2. **`[s]`（スキップ）のみ**を受け付ける（`y` / `e` は提示しない）
+3. 賭け金 ¥0 で次のレースへ進む
+
+> 推奨が空の状態で `y` / `e` を提示すると「買えるのに買えない」混乱を招くため、オッズ未取得レースは選択肢をスキップのみに限定する。
+
+---
+
+## Kelly 値の表示
+
+`BettingRecommendation.kelly_fraction` は 0.0〜1.0 の小数。表示時は `kelly_fraction * 100` で百分率に変換し `Kelly=15%` のように表示する。  
+推奨額は `floor(budget * kelly_fraction)`（円未満切り捨て）で算出する。
 
 ---
 
