@@ -8,6 +8,7 @@ pub struct RateTriple {
     pub show: f64,
 }
 
+#[derive(Debug, Clone)]
 pub struct HorseFactors {
     pub course_gate: RateTriple,
     pub horse_surface: RateTriple,
@@ -53,8 +54,10 @@ pub fn estimate_probabilities(entries: &[(HorseEntry, HorseFactors)]) -> Vec<Hor
         .collect()
 }
 
+const COURSE_GATE_WEIGHT: f64 = 2.0;
+
 fn raw_score(factors: &HorseFactors, rate: fn(&RateTriple) -> f64) -> f64 {
-    2.0 * rate(&factors.course_gate)
+    COURSE_GATE_WEIGHT * rate(&factors.course_gate)
         + rate(&factors.horse_surface)
         + rate(&factors.horse_distance)
         + factors.jockey_surface.map(|rt| rate(&rt)).unwrap_or(0.0)
@@ -62,7 +65,7 @@ fn raw_score(factors: &HorseFactors, rate: fn(&RateTriple) -> f64) -> f64 {
 
 fn normalize(scores: &[f64], fallback: f64) -> Vec<f64> {
     let total: f64 = scores.iter().sum();
-    if total == 0.0 {
+    if total <= 0.0 {
         vec![fallback; scores.len()]
     } else {
         scores.iter().map(|s| s / total).collect()
