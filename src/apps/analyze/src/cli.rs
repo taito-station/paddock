@@ -32,4 +32,9 @@ pub enum Command {
         /// Jockey name (Japanese, exact match).
         name: String,
     },
+    /// Predict win/place/show probabilities for each horse in a race.
+    Predict {
+        /// Race ID (例: 2026060412R02).
+        race_id: String,
+    },
 }

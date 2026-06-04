@@ -14,6 +14,7 @@ pub use interactor::entry::EntryInteractor;
 pub use odds_scraper::OddsScraper;
 pub use pdf_fetcher::PdfFetcher;
 pub use pdf_parser::PdfParser;
+pub use paddock_domain::{HorseFactors, HorseProbability, RateTriple};
 pub use repository::{
     CourseStatsRow, FetchRecord, GroupStat, HorseStatsRow, JockeyStatsRow, Repository,
 };

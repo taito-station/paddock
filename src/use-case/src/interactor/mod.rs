@@ -3,6 +3,7 @@ pub mod entry;
 pub mod horse;
 pub mod jockey;
 pub mod pdf;
+pub mod race;
 
 use crate::pdf_fetcher::PdfFetcher;
 use crate::pdf_parser::PdfParser;
