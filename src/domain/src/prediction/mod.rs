@@ -33,9 +33,18 @@ pub fn estimate_probabilities(entries: &[(HorseEntry, HorseFactors)]) -> Vec<Hor
     let n = entries.len();
     let uniform = 1.0 / n as f64;
 
-    let win_scores: Vec<f64> = entries.iter().map(|(_, f)| raw_score(f, |r| r.win)).collect();
-    let place_scores: Vec<f64> = entries.iter().map(|(_, f)| raw_score(f, |r| r.place)).collect();
-    let show_scores: Vec<f64> = entries.iter().map(|(_, f)| raw_score(f, |r| r.show)).collect();
+    let win_scores: Vec<f64> = entries
+        .iter()
+        .map(|(_, f)| raw_score(f, |r| r.win))
+        .collect();
+    let place_scores: Vec<f64> = entries
+        .iter()
+        .map(|(_, f)| raw_score(f, |r| r.place))
+        .collect();
+    let show_scores: Vec<f64> = entries
+        .iter()
+        .map(|(_, f)| raw_score(f, |r| r.show))
+        .collect();
 
     let win_probs = normalize(&win_scores, uniform);
     let place_probs = normalize(&place_scores, uniform);
@@ -124,18 +133,42 @@ mod tests {
             (
                 make_entry(1, "ウマA"),
                 HorseFactors {
-                    course_gate: RateTriple { win: 0.2, place: 0.4, show: 0.6 },
-                    horse_surface: RateTriple { win: 0.1, place: 0.2, show: 0.3 },
-                    horse_distance: RateTriple { win: 0.15, place: 0.3, show: 0.45 },
+                    course_gate: RateTriple {
+                        win: 0.2,
+                        place: 0.4,
+                        show: 0.6,
+                    },
+                    horse_surface: RateTriple {
+                        win: 0.1,
+                        place: 0.2,
+                        show: 0.3,
+                    },
+                    horse_distance: RateTriple {
+                        win: 0.15,
+                        place: 0.3,
+                        show: 0.45,
+                    },
                     jockey_surface: None,
                 },
             ),
             (
                 make_entry(2, "ウマB"),
                 HorseFactors {
-                    course_gate: RateTriple { win: 0.1, place: 0.2, show: 0.3 },
-                    horse_surface: RateTriple { win: 0.05, place: 0.1, show: 0.15 },
-                    horse_distance: RateTriple { win: 0.08, place: 0.16, show: 0.24 },
+                    course_gate: RateTriple {
+                        win: 0.1,
+                        place: 0.2,
+                        show: 0.3,
+                    },
+                    horse_surface: RateTriple {
+                        win: 0.05,
+                        place: 0.1,
+                        show: 0.15,
+                    },
+                    horse_distance: RateTriple {
+                        win: 0.08,
+                        place: 0.16,
+                        show: 0.24,
+                    },
                     jockey_surface: None,
                 },
             ),
@@ -153,13 +186,25 @@ mod tests {
     #[test]
     fn jockey_none_uses_zero() {
         let with_jockey = HorseFactors {
-            course_gate: RateTriple { win: 0.2, place: 0.4, show: 0.6 },
+            course_gate: RateTriple {
+                win: 0.2,
+                place: 0.4,
+                show: 0.6,
+            },
             horse_surface: RateTriple::default(),
             horse_distance: RateTriple::default(),
-            jockey_surface: Some(RateTriple { win: 0.1, place: 0.2, show: 0.3 }),
+            jockey_surface: Some(RateTriple {
+                win: 0.1,
+                place: 0.2,
+                show: 0.3,
+            }),
         };
         let without_jockey = HorseFactors {
-            course_gate: RateTriple { win: 0.2, place: 0.4, show: 0.6 },
+            course_gate: RateTriple {
+                win: 0.2,
+                place: 0.4,
+                show: 0.6,
+            },
             horse_surface: RateTriple::default(),
             horse_distance: RateTriple::default(),
             jockey_surface: None,
@@ -169,7 +214,10 @@ mod tests {
         // jockey なし → jockey_surface_rate = 0.0 として加算
         // score_without = 2.0 * 0.2 + 0.0 + 0.0 + 0.0 = 0.4
         let expected = COURSE_GATE_WEIGHT * 0.2;
-        assert!((score_without - expected).abs() < 1e-10, "score_without={score_without}");
+        assert!(
+            (score_without - expected).abs() < 1e-10,
+            "score_without={score_without}"
+        );
         assert!(score_with > score_without);
     }
 }
