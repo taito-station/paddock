@@ -32,6 +32,8 @@ pub async fn find_race_card(pool: &SqlitePool, race_id: &RaceId) -> Result<Optio
     .fetch_all(pool)
     .await?;
 
+    // DB 値を再パースして domain 型バリデーションを通す（入力の race_id をそのまま使わない理由:
+    // DB 値と入力が一致することを明示的に保証するため）
     let race_id = RaceId::try_from(race_id_str.as_str())?;
     let venue = Venue::try_from(venue_str.as_str())?;
     let surface = Surface::try_from(surface_str.as_str())?;
