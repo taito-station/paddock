@@ -118,11 +118,11 @@
   <text x="450" y="893" text-anchor="middle" font-size="11" fill="#444">combination / probability / odds / ev / kelly_fraction</text>
 
   <!-- Harville 補足ボックス -->
-  <rect x="20" y="500" width="255" height="100" rx="8" fill="#fff9e6" stroke="#d6b656" stroke-width="1" stroke-dasharray="4,2"/>
+  <rect x="20" y="500" width="300" height="110" rx="8" fill="#fff9e6" stroke="#d6b656" stroke-width="1" stroke-dasharray="4,2"/>
   <text x="30" y="518" font-size="11" font-weight="bold" fill="#555">Harville 公式（参考）</text>
-  <text x="30" y="535" font-size="10" fill="#666">馬連(a,b): win[a]·win[b]·(1/(1-win[a])+1/(1-win[b]))</text>
+  <text x="30" y="535" font-size="10" fill="#666">馬連(a,b): win[a]·win[b]/(1-win[a]) + win[b]·win[a]/(1-win[b])</text>
   <text x="30" y="550" font-size="10" fill="#666">馬単(a→b): win[a]·win[b]/(1-win[a])</text>
   <text x="30" y="565" font-size="10" fill="#666">三連単(a→b→c):</text>
-  <text x="40" y="580" font-size="10" fill="#666">win[a]·win[b]/(1-win[a])</text>
-  <text x="40" y="595" font-size="10" fill="#666">·win[c]/(1-win[a]-win[b])</text>
+  <text x="40" y="580" font-size="10" fill="#666">win[a] · win[b]/(1-win[a]) · win[c]/(1-win[a]-win[b])</text>
+  <text x="30" y="598" font-size="10" fill="#666">三連複{a,b,c}: Σ P(i→j→k) over all 6 permutations</text>
 </svg>
