@@ -166,6 +166,10 @@ mod tests {
         };
         let score_with = raw_score(&with_jockey, |r| r.win);
         let score_without = raw_score(&without_jockey, |r| r.win);
+        // jockey なし → jockey_surface_rate = 0.0 として加算
+        // score_without = 2.0 * 0.2 + 0.0 + 0.0 + 0.0 = 0.4
+        let expected = COURSE_GATE_WEIGHT * 0.2;
+        assert!((score_without - expected).abs() < 1e-10, "score_without={score_without}");
         assert!(score_with > score_without);
     }
 }

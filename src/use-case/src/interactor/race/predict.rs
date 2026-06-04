@@ -85,6 +85,7 @@ fn surface_label(surface: Surface) -> &'static str {
     }
 }
 
+// GateNum は 1..=8 でバリデーション済みなので _ は常に 7-8 にのみ該当する
 fn gate_group_label(gate_num: u32) -> &'static str {
     match gate_num {
         1..=3 => "Inner (1-3)",
@@ -93,16 +94,18 @@ fn gate_group_label(gate_num: u32) -> &'static str {
     }
 }
 
-// ラベルは group_by_distance_band の SQL ラベルと完全一致させる。
-// SQL は BETWEEN 1500 AND 1800 / BETWEEN 1900 AND 2200 のため、
-// 境界付近（1401-1499m, 1801-1899m）は DB のどのバケツにも入らない。
-// ただし JRA の実際の距離は 1400m・1600m・1800m・2000m・2200m・2400m 等の
-// 離散値のみで、1401-1499m のようなレースは存在しないため実用上の問題はない。
+// ラベルは group_by_distance_band の SQL ラベル文字列と完全一致させる。
+// `<= 1800` / `<= 2200` と上限を基準にすることで、SQL の BETWEEN 境界と
+// 実装の意図を揃える。JRA 実レース距離は 1400m・1600m・1800m・2000m・2200m・
+// 2400m 等の離散値のみで、1401〜1499m のようなレースは存在しない。
 fn distance_band_label(distance: u32) -> &'static str {
-    match distance {
-        0..=1400 => "〜1400m",
-        1401..=1800 => "1500〜1800m",
-        1801..=2200 => "1900〜2200m",
-        _ => "2300m〜",
+    if distance <= 1400 {
+        "〜1400m"
+    } else if distance <= 1800 {
+        "1500〜1800m"
+    } else if distance <= 2200 {
+        "1900〜2200m"
+    } else {
+        "2300m〜"
     }
 }
