@@ -39,8 +39,9 @@ pub enum BetCombination {
 pub struct BettingRecommendation {
     pub combination: BetCombination,
     pub probability: f64,
-    /// Gross payout multiplier (JRA 表示オッズ). ev = probability * odds.
-    /// 複勝（BetCombination::Place）の場合はオッズ幅 (low..high) の中央値。
+    /// Gross payout multiplier. `ev = probability * odds`.
+    /// - 単勝/馬連/馬単/三連複/三連単: JRA が公表するオッズそのまま
+    /// - 複勝（`BetCombination::Place`）: オッズ幅 `(low..high)` の中央値を代入
     pub odds: f64,
     pub ev: f64,
     pub kelly_fraction: f64,
@@ -53,6 +54,9 @@ pub struct BettingRecommendation {
 /// all other bet types require `ev > ev_threshold` (strict greater-than; ev = threshold is excluded).
 /// When two recommendations share the same priority and EV, they are ordered by horse numbers
 /// for deterministic output.
+///
+/// Note: `Place` (複勝) uses `HorseProbability::show_prob` (3着以内確率) as the probability estimate.
+/// `place_prob` (2着以内確率) is not used for any bet type in this function.
 pub fn select_bets(
     probabilities: &[HorseProbability],
     race_odds: &RaceOdds,
@@ -163,9 +167,10 @@ fn priority(c: &BetCombination) -> u8 {
 
 /// P(a→b): Harville conditional probability that b finishes 2nd given a wins.
 ///
-/// Returns `0.0` when `win_a >= 1.0` (horse A certain to win leaves no room for B).
+/// Returns `0.0` when `win_a + win_b >= 1.0`: the first horse leaving no probability
+/// mass for others to finish behind the second horse would produce an invalid result.
 pub fn harville_exacta(win_a: f64, win_b: f64) -> f64 {
-    if win_a >= 1.0 {
+    if win_a + win_b >= 1.0 {
         return 0.0;
     }
     let denom = (1.0 - win_a).max(MIN_DENOMINATOR);
@@ -242,7 +247,9 @@ mod tests {
             horse_num: horse(horse_num),
             horse_name: HorseName::try_from(format!("ウマ{horse_num}")).unwrap(),
             win_prob: win,
-            place_prob: (win + show) / 2.0,
+            // place_prob（2着以内確率）は select_bets で使わない。
+            // 0.0 にしておくことで誤って参照された場合に EV が0になりすぐ気づける。
+            place_prob: 0.0,
             show_prob: show,
         }
     }
@@ -369,9 +376,11 @@ mod tests {
     }
 
     #[test]
-    fn harville_exacta_returns_zero_when_first_horse_certain_to_win() {
-        // win_a = 1.0 → guard returns 0.0 (no room for b to finish 2nd)
-        assert_eq!(harville_exacta(1.0, 0.3), 0.0);
+    fn harville_exacta_returns_zero_when_sum_exhausts_probability() {
+        // win_a + win_b >= 1.0 → guard returns 0.0
+        assert_eq!(harville_exacta(1.0, 0.0), 0.0);
+        assert_eq!(harville_exacta(0.6, 0.5), 0.0);
+        assert_eq!(harville_exacta(0.5, 0.5), 0.0);
     }
 
     #[test]
@@ -388,6 +397,15 @@ mod tests {
         // win_a + win_b >= 1.0 → guard returns 0.0 instead of clamped huge value
         assert_eq!(harville_trifecta(0.6, 0.5, 0.1), 0.0);
         assert_eq!(harville_trifecta(1.0, 0.0, 0.0), 0.0);
+    }
+
+    #[test]
+    fn harville_trio_with_near_unit_sum_returns_finite_value() {
+        // wa+wb+wc = 0.95; some permutations will trigger trifecta guard
+        // (e.g. wb+wa = 0.5+0.4 = 0.9 < 1.0 is ok; but wc=0.05 combos are fine)
+        let trio = harville_trio(0.5, 0.4, 0.05);
+        assert!(trio >= 0.0);
+        assert!(trio <= 1.0, "trio probability should not exceed 1.0, got {trio}");
     }
 
     #[test]
