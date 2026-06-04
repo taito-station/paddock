@@ -102,7 +102,7 @@
 
   <!-- select_bets -->
   <rect x="250" y="735" width="460" height="56" rx="8" fill="#e1d5e7" stroke="#9673a6" stroke-width="1.5"/>
-  <text x="480" y="755" text-anchor="middle" font-weight="bold" fill="#333">select_bets(probs, odds, BettingConfig::default())</text>
+  <text x="480" y="755" text-anchor="middle" font-weight="bold" fill="#333">select_bets(&amp;probs, &amp;odds, &amp;BettingConfig::default())</text>
   <text x="480" y="772" text-anchor="middle" font-size="11" fill="#444">→ Vec&lt;BettingRecommendation&gt;</text>
   <text x="480" y="786" text-anchor="middle" font-size="10" fill="#666">（App 層が paddock-domain を直接呼ぶ）</text>
   <line x1="480" y1="791" x2="480" y2="818" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
@@ -131,7 +131,7 @@
   <rect x="290" y="1020" width="380" height="76" rx="8" fill="#d5e8d4" stroke="#82b366" stroke-width="1.5"/>
   <text x="480" y="1040" text-anchor="middle" font-weight="bold" fill="#333">賭け金を確定（残高ガード）</text>
   <text x="480" y="1058" text-anchor="middle" font-size="11" fill="#444">y=推奨額 / e=入力額</text>
-  <text x="480" y="1074" text-anchor="middle" font-size="10" fill="#666">合計 &gt; 残高 なら再入力/編集へ</text>
+  <text x="480" y="1074" text-anchor="middle" font-size="10" fill="#666">合計 &gt; 残高 なら編集/スキップへ</text>
   <text x="480" y="1089" text-anchor="middle" font-size="11" fill="#444">budget -= bet</text>
   <line x1="480" y1="1096" x2="480" y2="1123" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
 
