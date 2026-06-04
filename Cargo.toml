@@ -11,6 +11,7 @@ members = [
 
 [workspace.dependencies]
 anyhow             = { version = "1.0.*" }
+ordered-float      = { version = "4.*" }
 chrono             = { version = "0.4.*", features = ["serde"] }
 clap               = { version = "4.5.*", features = ["derive"] }
 dotenvy            = { version = "0.15.*" }
