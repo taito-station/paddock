@@ -27,7 +27,7 @@
 | 前提 | 出走馬のうち 1 頭以上の過去成績が 0 件、他の馬にはスタッツあり |
 | コマンド | `paddock-analyze predict <対象 race_id>` |
 | 期待結果 | エラーにならず全馬の確率が表示される |
-| 確認ポイント | スタッツなし馬のスコアは 0 → win_prob / place_prob / show_prob は 0.0% と表示 / **全馬を含む** win_prob 合計が ≒ 1.0（スコアゼロ馬は分子 0 のため合計に影響しない） |
+| 確認ポイント | スタッツなし馬の win_prob / place_prob / show_prob は 0.0% と表示 / **全馬を含む** win_prob 合計が ≒ 1.0（スコアゼロ馬は win_prob=0 で正規化の分母に含まれるため総和は 1.0 になる） |
 
 ## TC-03b: 全馬スタッツ件数ゼロ（均等フォールバック）
 
@@ -55,4 +55,4 @@
 | テスト準備 | `paddock-ingest-pdf` 等で race を保存後、race_card_entries テーブルへの挿入 (`paddock-parse-entries`) を実行しない状態を作る |
 | コマンド | `paddock-analyze predict <race_id>` |
 | 期待結果 | `race card not found` 等のエラーが stderr に表示される |
-| 確認ポイント | 空の結果セットが返らず、明示的なエラーになること / TC-02 とエラーメッセージが同一でも構わないが、内部的に `find_race_card` が返す `not found` を通過していること |
+| 確認ポイント | 空の結果セットが返らず、`race card not found` に相当するエラーメッセージが stderr に表示されること / exit code が 1 であること |

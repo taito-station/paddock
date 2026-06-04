@@ -58,8 +58,8 @@
   <!-- jockey_stats -->
   <rect x="660" y="320" width="220" height="60" rx="8" fill="#e1d5e7" stroke="#9673a6" stroke-width="1.5"/>
   <text x="770" y="342" text-anchor="middle" font-weight="bold" fill="#333">jockey_stats (任意)</text>
-  <text x="770" y="358" text-anchor="middle" font-size="11" fill="#444">surface 別 勝/連/複勝率</text>
-  <text x="770" y="372" text-anchor="middle" font-size="11" fill="#444">※騎手なし → スキップ</text>
+  <text x="770" y="358" text-anchor="middle" font-size="11" fill="#444">overall/surface/gate 別 (3パターン)</text>
+  <text x="770" y="372" text-anchor="middle" font-size="11" fill="#444">スコアには surface 別のみ使用</text>
 
   <!-- Arrows: Stats → Score -->
   <line x1="130" y1="380" x2="380" y2="460" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
