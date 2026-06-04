@@ -50,6 +50,8 @@ pub async fn find_race_card(pool: &SqlitePool, race_id: &RaceId) -> Result<Optio
         });
     }
 
+    // round / day / race_num / distance は save_race_card で書き込み済みの値を
+    // as キャストで戻す。書き込み側でバリデーション済みなのでサイレント wrap は起きない。
     Ok(Some(RaceCard {
         race_id,
         venue,

@@ -33,6 +33,7 @@ pub enum Command {
         name: String,
     },
     /// Predict win/place/show probabilities for each horse in a race.
+    /// Note: win <= place <= show monotonicity is NOT guaranteed (independent normalization).
     Predict {
         /// Race ID (例: 2026060412R02).
         race_id: String,

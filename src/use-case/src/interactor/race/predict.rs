@@ -25,7 +25,9 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
         let mut entry_factors: Vec<(HorseEntry, HorseFactors)> = Vec::new();
         for entry in &card.entries {
             let horse = self.repository.horse_stats(&entry.horse_name).await?;
-            let jockey = match &entry.jockey {
+            // jockey が None の馬は jockey_surface_rate = 0.0 として計算され、
+        // jockey 情報がある馬と比べてスコアが相対的に低くなる（既知制約）
+        let jockey = match &entry.jockey {
                 Some(j) => Some(self.repository.jockey_stats(j).await?),
                 None => None,
             };
