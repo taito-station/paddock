@@ -40,6 +40,7 @@ pub struct BettingRecommendation {
     pub combination: BetCombination,
     pub probability: f64,
     /// Gross payout multiplier (JRA 表示オッズ). ev = probability * odds.
+    /// 複勝（BetCombination::Place）の場合はオッズ幅 (low..high) の中央値。
     pub odds: f64,
     pub ev: f64,
     pub kelly_fraction: f64,
@@ -49,7 +50,9 @@ pub struct BettingRecommendation {
 ///
 /// Priority (sort key): Quinella(0) > Exacta(1) > Trio(2) > Win(3) > Place(4) > Trifecta(5).
 /// Smaller sort key = earlier in the result. Trifecta requires `ev > trifecta_ev_threshold`;
-/// all other bet types require `ev > ev_threshold`.
+/// all other bet types require `ev > ev_threshold` (strict greater-than; ev = threshold is excluded).
+/// When two recommendations share the same priority and EV, they are ordered by horse numbers
+/// for deterministic output.
 pub fn select_bets(
     probabilities: &[HorseProbability],
     race_odds: &RaceOdds,
@@ -69,7 +72,8 @@ pub fn select_bets(
 
     for (&horse, place_ov) in &race_odds.place {
         if let Some(hp) = prob_map.get(&horse) {
-            // JRA 複勝は 3 着以内（show_prob）を使用。
+            // JRA 複勝は「3 着以内入線」に相当するため show_prob（3 着以内確率）を使用する。
+            // place_prob は「2 着以内確率」（連対率）であり、複勝計算では使わない。
             // 未確定幅 (low..high) の中央値を期待値計算の代表値とする。
             let o = (place_ov.low.value() + place_ov.high.value()) / 2.0;
             push_if_positive(&mut recs, BetCombination::Place(horse), hp.show_prob, o, config.ev_threshold, config);
@@ -112,8 +116,18 @@ pub fn select_bets(
         }
     }
 
-    recs.sort_by_key(|r| (priority(&r.combination), OrderedFloat(-r.ev)));
+    recs.sort_by_key(|r| (priority(&r.combination), OrderedFloat(-r.ev), combination_ord_key(&r.combination)));
     recs
+}
+
+fn combination_ord_key(c: &BetCombination) -> (u32, u32, u32) {
+    match c {
+        BetCombination::Win(h) | BetCombination::Place(h) => (h.value(), 0, 0),
+        BetCombination::Quinella(p) => { let (a, b) = p.as_tuple(); (a.value(), b.value(), 0) }
+        BetCombination::Exacta(p) => { let (a, b) = p.as_tuple(); (a.value(), b.value(), 0) }
+        BetCombination::Trio(t) => { let (a, b, c) = t.as_tuple(); (a.value(), b.value(), c.value()) }
+        BetCombination::Trifecta(t) => { let (a, b, c) = t.as_tuple(); (a.value(), b.value(), c.value()) }
+    }
 }
 
 fn push_if_positive(
@@ -148,7 +162,12 @@ fn priority(c: &BetCombination) -> u8 {
 }
 
 /// P(a→b): Harville conditional probability that b finishes 2nd given a wins.
+///
+/// Returns `0.0` when `win_a >= 1.0` (horse A certain to win leaves no room for B).
 pub fn harville_exacta(win_a: f64, win_b: f64) -> f64 {
+    if win_a >= 1.0 {
+        return 0.0;
+    }
     let denom = (1.0 - win_a).max(MIN_DENOMINATOR);
     win_a * win_b / denom
 }
@@ -350,10 +369,9 @@ mod tests {
     }
 
     #[test]
-    fn harville_exacta_clamps_denominator_at_win_prob_one() {
-        // win_a = 1.0 → denom = max(0.0, 1e-6) = 1e-6; result is finite but large
-        let result = harville_exacta(1.0, 0.0);
-        assert!(result.is_finite());
+    fn harville_exacta_returns_zero_when_first_horse_certain_to_win() {
+        // win_a = 1.0 → guard returns 0.0 (no room for b to finish 2nd)
+        assert_eq!(harville_exacta(1.0, 0.3), 0.0);
     }
 
     #[test]
