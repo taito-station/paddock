@@ -193,7 +193,7 @@ fn find_race_odds(
 
 ### `Option<RaceOdds>` を返すことについて
 
-Domain には既に `RaceOdds::empty()` / `RaceOdds::is_empty()` があり、`select_bets` は空の `RaceOdds` に対して空 Vec を返す。  
+Domain には既に `RaceOdds::empty(race_id)` / `RaceOdds::is_empty()` があり、`select_bets` は空の `RaceOdds` に対して空 Vec を返す。  
 それでも `find_race_odds` の戻り値を `Option` にするのは、**「オッズ未取得（`None`）」と「取得済みだが対象馬券が空（`empty`）」を区別するため**。前者はスキップ推奨を表示し、後者は推奨なしとして通常フローを進める。
 
 ### `Race` を返すことについて
@@ -254,14 +254,16 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
 
 `BettingRecommendation.kelly_fraction` は 0.0〜1.0 の小数。表示時は `kelly_fraction * 100` で百分率に変換し `Kelly=15%` のように表示する。
 
-推奨額は以下の手順で算出する（**比例縮小方式**）:
+推奨額は以下の手順で算出する（**比例縮小方式**）。**丸め前の実数合計を分母**に使うことで `Σ 推奨額 ≤ budget` を厳密に保証する:
 
-1. 各買い目の素の推奨額を `raw_i = floor(budget * kelly_fraction_i)` で求める
-2. `Σ raw_i ≤ budget` ならそのまま推奨額とする
-3. `Σ raw_i > budget` の場合、合計が残高に収まるよう全推奨額を比例スケールする  
-   `推奨額_i = floor(budget * kelly_fraction_i * (budget / Σ raw_i))`
+1. 各買い目の素の推奨額（実数、丸めない）を `raw_i = budget * kelly_fraction_i` で求める
+2. `Σ raw_i ≤ budget` なら `推奨額_i = floor(raw_i)` とする
+3. `Σ raw_i > budget` の場合、`推奨額_i = floor(raw_i * budget / Σ raw_i)`（= `floor(budget * kelly_fraction_i / Σ kelly_fraction)`）とする
 
-`kelly_cap = 0.25` のため買い目が 4 本以上あると `Σ kelly_fraction` が 1.0 を超えうる。比例縮小により Kelly の相対比率を保ったまま推奨額合計を残高以内に収め、`y` 選択が残高ガードで弾かれ続ける事態を防ぐ。
+手順 3 では各項を `floor` で切り捨てるため `Σ 推奨額 ≤ Σ(raw_i * budget / Σ raw_i) = budget` が常に成立する。  
+> ⚠️ 分母には必ず **丸め前の実数** `Σ raw_i` を使うこと。`floor` 済みの値（`Σ floor(raw_i)`）を分母にすると丸め残差でスケール後も合計が `budget` を超えうる。
+
+`kelly_cap = 0.25` のため、買い目が増えて `Σ kelly_fraction` が 1.0 を超える（概ね 5 本以上）と素の推奨額合計が残高を超える。比例縮小により Kelly の相対比率を保ったまま推奨額合計を残高以内に収め、`y` 選択が残高ガードで弾かれ続ける事態を防ぐ。
 
 ---
 
