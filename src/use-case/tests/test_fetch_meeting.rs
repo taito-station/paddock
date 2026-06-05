@@ -103,6 +103,14 @@ impl Repository for MockRepo {
     async fn find_race_card(&self, _race_id: &RaceId) -> Result<Option<RaceCard>> {
         Err(Error::NotFound("unused".into()))
     }
+
+    async fn find_races_by_date(&self, _date: chrono::NaiveDate) -> Result<Vec<Race>> {
+        Ok(Vec::new())
+    }
+
+    async fn find_race_odds(&self, _race_id: &RaceId) -> Result<Option<paddock_domain::RaceOdds>> {
+        Ok(None)
+    }
 }
 
 fn sample_race() -> Race {
@@ -326,6 +334,14 @@ impl Repository for HistoryRepo {
     }
     async fn find_race_card(&self, _race_id: &RaceId) -> Result<Option<RaceCard>> {
         Err(Error::NotFound("unused".into()))
+    }
+
+    async fn find_races_by_date(&self, _date: chrono::NaiveDate) -> Result<Vec<Race>> {
+        Ok(Vec::new())
+    }
+
+    async fn find_race_odds(&self, _race_id: &RaceId) -> Result<Option<paddock_domain::RaceOdds>> {
+        Ok(None)
     }
 }
 
