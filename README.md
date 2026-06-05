@@ -127,6 +127,22 @@ cargo run -p analyze -- jockey "ルメール"
 - Middle: 4〜6 枠
 - Outer: 7〜8 枠
 
+## 予想セッション（対話）
+
+1 日分のレースを順番に処理し、買い目推奨を確認しながら賭け金と払い戻しを記録する対話型 CLI。
+
+```bash
+cargo run -p predict -- --date 2026-06-01 --budget 10000
+```
+
+- 各レースで確率表と買い目推奨（期待値・Kelly 配分）を表示する。
+- `[y=推奨通り / e=編集 / s=スキップ]` で購入方法を選び、レース後に実際の払い戻し額を入力する。
+- 推奨額は Kelly 配分を比例縮小方式で算出し、合計が残高を超えないよう収める。
+- オッズ未取得（`race_odds` 未整備）のレースはスキップのみ受け付ける。
+- 出馬表（`race_cards`）が取り込み済みであることが前提（「出馬表を取り込む」を参照）。
+
+> オッズの永続化（`race_odds` テーブル）は別 Issue で対応予定。現状はオッズ未取得として扱われる。
+
 ## DB
 
 - 既定パス: `data/paddock.db`
@@ -200,7 +216,8 @@ src/
 └── apps/
     ├── parse-pdf/            CLI バイナリ: 成績 PDF 取り込み
     ├── parse-entries/        CLI バイナリ: 出馬表 PDF 取り込み
-    └── analyze/              CLI バイナリ: horse / course / jockey
+    ├── analyze/              CLI バイナリ: horse / course / jockey
+    └── predict/              CLI バイナリ: 予想セッション（対話）
 ```
 
 ## 既知の制約
