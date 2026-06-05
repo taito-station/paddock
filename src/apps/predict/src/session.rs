@@ -62,12 +62,15 @@ async fn run_race(app: &App, race: &Race, state: &mut SessionState) -> anyhow::R
     );
     println!("残高: ¥{}", state.budget);
 
+    // 出馬表未登録（NotFound）はそのレースのみスキップ。
+    // DB 障害等（Internal）はセッション継続不能なため伝播して中断する。
     let probs = match app.interactor.predict_race(&race.race_id).await {
         Ok(p) => p,
-        Err(e) => {
-            println!("確率推定をスキップします（{e}）");
+        Err(paddock_use_case::Error::NotFound(msg)) => {
+            println!("出馬表が見つかりません（{msg}）。スキップします。");
             return Ok(());
         }
+        Err(e) => return Err(e.into()),
     };
 
     println!();
@@ -77,7 +80,7 @@ async fn run_race(app: &App, race: &Race, state: &mut SessionState) -> anyhow::R
     let Some(odds) = app.interactor.race_odds(&race.race_id).await? else {
         println!();
         println!("オッズ未取得 — このレースはスキップします");
-        let _ = read_line("[s=スキップ] > ")?;
+        let _ = read_line("Enter で次のレースへ > ")?;
         return Ok(());
     };
 
@@ -131,7 +134,7 @@ async fn run_race(app: &App, race: &Race, state: &mut SessionState) -> anyhow::R
     state.budget += payout;
     state.total_payout += payout;
 
-    let pnl = payout as i64 - bet as i64;
+    let pnl = payout as i128 - bet as i128;
     println!(
         "  賭け金: ¥{}  払戻: ¥{}  ({})",
         bet,
@@ -154,13 +157,25 @@ fn recommended_amounts(budget: u64, kelly_fractions: &[f64]) -> Vec<u64> {
     let budget_f = budget as f64;
     let raws: Vec<f64> = kelly_fractions.iter().map(|k| budget_f * k).collect();
     let sum: f64 = raws.iter().sum();
-    if sum <= budget_f {
+    let mut amounts: Vec<u64> = if sum <= budget_f {
         raws.iter().map(|r| r.floor() as u64).collect()
     } else {
         raws.iter()
             .map(|r| (r * budget_f / sum).floor() as u64)
             .collect()
+    };
+
+    // 浮動小数の丸め誤差に対する最終防御: 合計が budget を超える場合は
+    // 末尾の買い目から削り、u64 として確実に budget 以内へ収める。
+    let mut total: u64 = amounts.iter().sum();
+    let mut i = amounts.len();
+    while total > budget && i > 0 {
+        i -= 1;
+        let cut = (total - budget).min(amounts[i]);
+        amounts[i] -= cut;
+        total -= cut;
     }
+    amounts
 }
 
 fn read_edited_amounts(
@@ -196,7 +211,7 @@ fn print_summary(state: &SessionState) {
     println!("総賭け金:  ¥{}", state.total_bet);
     println!("総払戻:    ¥{}", state.total_payout);
     println!("最終残高:  ¥{}", state.budget);
-    let pnl = state.total_payout as i64 - state.total_bet as i64;
+    let pnl = state.total_payout as i128 - state.total_bet as i128;
     println!("P&L:       {}", format_signed(pnl));
 }
 
@@ -247,11 +262,11 @@ fn surface_jp(s: Surface) -> &'static str {
     }
 }
 
-fn format_signed(v: i64) -> String {
+fn format_signed(v: i128) -> String {
     if v >= 0 {
         format!("+¥{v}")
     } else {
-        format!("-¥{}", v.abs())
+        format!("-¥{}", -v)
     }
 }
 
@@ -332,6 +347,16 @@ mod tests {
     #[test]
     fn empty_returns_empty() {
         assert!(recommended_amounts(10000, &[]).is_empty());
+    }
+
+    #[test]
+    fn extreme_budget_never_exceeds() {
+        // 非現実的な巨大予算でも float 丸め誤差を最終クランプで吸収し
+        // u64 として budget を超えないこと
+        let budget = u64::MAX / 2;
+        let amounts = recommended_amounts(budget, &[0.25, 0.25, 0.25, 0.25, 0.25]);
+        let total: u128 = amounts.iter().map(|&a| a as u128).sum();
+        assert!(total <= budget as u128, "total {total} must be <= budget");
     }
 
     #[test]
