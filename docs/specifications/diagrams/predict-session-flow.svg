@@ -1,0 +1,183 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1010" height="1700" viewBox="0 0 1010 1700" font-family="sans-serif" font-size="13">
+  <!-- predict 対話セッションフロー (drawio: predict-session-flow.drawio と同期) -->
+
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#333"/>
+    </marker>
+  </defs>
+
+  <!-- 凡例 -->
+  <rect x="10" y="8" width="12" height="12" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1"/>
+  <text x="25" y="19" font-size="11" fill="#333">ユーザー入力/表示</text>
+  <rect x="145" y="8" width="12" height="12" fill="#e1d5e7" stroke="#9673a6" stroke-width="1"/>
+  <text x="160" y="19" font-size="11" fill="#333">処理/DB</text>
+  <rect x="220" y="8" width="12" height="12" fill="#fff2cc" stroke="#d6b656" stroke-width="1"/>
+  <text x="235" y="19" font-size="11" fill="#333">判定</text>
+  <rect x="275" y="8" width="12" height="12" fill="#d5e8d4" stroke="#82b366" stroke-width="1"/>
+  <text x="290" y="19" font-size="11" fill="#333">正常系</text>
+  <rect x="340" y="8" width="12" height="12" fill="#f8cecc" stroke="#b85450" stroke-width="1"/>
+  <text x="355" y="19" font-size="11" fill="#333">スキップ/終了</text>
+
+  <!-- START -->
+  <rect x="330" y="38" width="300" height="45" rx="22" fill="#f5f5f5" stroke="#666" stroke-width="1.5"/>
+  <text x="480" y="58" text-anchor="middle" font-weight="bold" fill="#333">START</text>
+  <text x="480" y="74" text-anchor="middle" font-size="11" fill="#555">predict --date D --budget B</text>
+  <line x1="480" y1="83" x2="480" y2="110" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- find_races_by_date -->
+  <rect x="290" y="110" width="380" height="48" rx="8" fill="#e1d5e7" stroke="#9673a6" stroke-width="1.5"/>
+  <text x="480" y="131" text-anchor="middle" font-weight="bold" fill="#333">find_races_by_date(D)</text>
+  <text x="480" y="149" text-anchor="middle" font-size="11" fill="#444">→ races: Vec&lt;Race&gt;（race_num 昇順）</text>
+  <line x1="480" y1="158" x2="480" y2="185" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- Diamond: races.is_empty? -->
+  <polygon points="480,185 620,232 480,279 340,232" fill="#fff2cc" stroke="#d6b656" stroke-width="1.5"/>
+  <text x="480" y="237" text-anchor="middle" font-size="11" font-weight="bold" fill="#333">races.is_empty()？</text>
+
+  <!-- YES → no-races box -->
+  <line x1="620" y1="232" x2="720" y2="232" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="666" y="224" text-anchor="middle" font-size="11" fill="#b85450">YES</text>
+  <rect x="720" y="207" width="230" height="50" rx="8" fill="#f8cecc" stroke="#b85450" stroke-width="1.5"/>
+  <text x="835" y="226" text-anchor="middle" font-size="11" fill="#333">「この日の開催はありません」</text>
+  <text x="835" y="244" text-anchor="middle" font-size="11" fill="#333">stdout に表示して終了 (exit 0)</text>
+
+  <!-- NO → loop start -->
+  <line x1="480" y1="279" x2="480" y2="308" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="490" y="300" font-size="11" fill="#2a7a2a">NO</text>
+
+  <!-- 次のレースを取り出す -->
+  <rect x="295" y="308" width="370" height="42" rx="8" fill="#d5e8d4" stroke="#82b366" stroke-width="1.5"/>
+  <text x="480" y="325" text-anchor="middle" font-weight="bold" fill="#333">次のレースを取り出す</text>
+  <text x="480" y="341" text-anchor="middle" font-size="11" fill="#444">race: Race（race_num 昇順）</text>
+  <line x1="480" y1="350" x2="480" y2="377" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- レースヘッダ表示 -->
+  <rect x="295" y="377" width="370" height="42" rx="8" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1.5"/>
+  <text x="480" y="395" text-anchor="middle" font-weight="bold" fill="#333">レースヘッダ表示</text>
+  <text x="480" y="411" text-anchor="middle" font-size="11" fill="#444">「レースN: 場所 距離 / 残高: ¥B」</text>
+
+  <!-- header → parallel split -->
+  <line x1="480" y1="419" x2="480" y2="440" stroke="#333" stroke-width="1.5"/>
+  <line x1="220" y1="440" x2="740" y2="440" stroke="#333" stroke-width="1.5"/>
+  <line x1="220" y1="440" x2="220" y2="457" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="740" y1="440" x2="740" y2="457" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- predict_race -->
+  <rect x="80" y="457" width="280" height="48" rx="8" fill="#e1d5e7" stroke="#9673a6" stroke-width="1.5"/>
+  <text x="220" y="477" text-anchor="middle" font-weight="bold" fill="#333">predict_race(race_id)</text>
+  <text x="220" y="495" text-anchor="middle" font-size="11" fill="#444">→ Vec&lt;HorseProbability&gt;</text>
+  <!-- find_race_odds -->
+  <rect x="600" y="457" width="280" height="48" rx="8" fill="#e1d5e7" stroke="#9673a6" stroke-width="1.5"/>
+  <text x="740" y="477" text-anchor="middle" font-weight="bold" fill="#333">find_race_odds(race_id)</text>
+  <text x="740" y="495" text-anchor="middle" font-size="11" fill="#444">→ Option&lt;RaceOdds&gt;</text>
+
+  <!-- both → prob table -->
+  <line x1="220" y1="505" x2="220" y2="520" stroke="#333" stroke-width="1.5"/>
+  <line x1="740" y1="505" x2="740" y2="520" stroke="#333" stroke-width="1.5"/>
+  <line x1="220" y1="520" x2="740" y2="520" stroke="#333" stroke-width="1.5"/>
+  <line x1="480" y1="520" x2="480" y2="537" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- 確率テーブル表示 -->
+  <rect x="270" y="537" width="420" height="48" rx="8" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1.5"/>
+  <text x="480" y="558" text-anchor="middle" font-weight="bold" fill="#333">確率テーブル表示</text>
+  <text x="480" y="576" text-anchor="middle" font-size="11" fill="#444">馬番・馬名・勝率・連対率・複勝率</text>
+  <line x1="480" y1="585" x2="480" y2="612" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- Diamond: odds is Some? -->
+  <polygon points="480,612 620,659 480,706 340,659" fill="#fff2cc" stroke="#d6b656" stroke-width="1.5"/>
+  <text x="480" y="654" text-anchor="middle" font-size="11" font-weight="bold" fill="#333">RaceOdds は</text>
+  <text x="480" y="671" text-anchor="middle" font-size="11" font-weight="bold" fill="#333">Some？</text>
+
+  <!-- None → skip-only box (right), does NOT call select_bets -->
+  <line x1="620" y1="659" x2="720" y2="659" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="666" y="651" text-anchor="middle" font-size="11" fill="#b85450">None</text>
+  <rect x="720" y="632" width="250" height="54" rx="8" fill="#f8cecc" stroke="#b85450" stroke-width="1.5"/>
+  <text x="845" y="652" text-anchor="middle" font-size="11" fill="#333">「オッズ未取得 — スキップします」</text>
+  <text x="845" y="670" text-anchor="middle" font-size="11" fill="#333">[s] のみ受付 / bet=0 / 払戻なし</text>
+
+  <!-- Some → select_bets -->
+  <line x1="480" y1="706" x2="480" y2="735" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="490" y="727" font-size="11" fill="#2a7a2a">Some</text>
+
+  <!-- select_bets -->
+  <rect x="250" y="735" width="460" height="56" rx="8" fill="#e1d5e7" stroke="#9673a6" stroke-width="1.5"/>
+  <text x="480" y="755" text-anchor="middle" font-weight="bold" fill="#333">select_bets(&amp;probs, &amp;odds, &amp;BettingConfig::default())</text>
+  <text x="480" y="772" text-anchor="middle" font-size="11" fill="#444">→ Vec&lt;BettingRecommendation&gt;</text>
+  <text x="480" y="786" text-anchor="middle" font-size="10" fill="#666">（App 層が paddock-domain を直接呼ぶ）</text>
+  <line x1="480" y1="791" x2="480" y2="818" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- 買い目推奨を表示 -->
+  <rect x="270" y="818" width="420" height="48" rx="8" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1.5"/>
+  <text x="480" y="839" text-anchor="middle" font-weight="bold" fill="#333">買い目推奨を表示</text>
+  <text x="480" y="857" text-anchor="middle" font-size="11" fill="#444">推奨なし → 「EV閾値を超える買い目なし」</text>
+  <line x1="480" y1="866" x2="480" y2="893" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- Diamond: [y/e/s] -->
+  <polygon points="480,893 645,943 480,993 315,943" fill="#fff2cc" stroke="#d6b656" stroke-width="1.5"/>
+  <text x="480" y="936" text-anchor="middle" font-size="12" font-weight="bold" fill="#333">[y] 推奨通り</text>
+  <text x="480" y="954" text-anchor="middle" font-size="12" font-weight="bold" fill="#333">[e] 編集 / [s] スキップ</text>
+
+  <!-- s → skip box (right) -->
+  <line x1="645" y1="943" x2="745" y2="943" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="695" y="934" text-anchor="middle" font-size="11" fill="#b85450">s</text>
+  <rect x="745" y="918" width="185" height="50" rx="8" fill="#f8cecc" stroke="#b85450" stroke-width="1.5"/>
+  <text x="837" y="937" text-anchor="middle" font-size="11" fill="#333">スキップ</text>
+  <text x="837" y="955" text-anchor="middle" font-size="11" fill="#444">bet=0 / 払戻なし</text>
+
+  <!-- y/e → 賭け金確定 -->
+  <line x1="480" y1="993" x2="480" y2="1020" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="492" y="1013" font-size="11" fill="#2a7a2a">y / e</text>
+  <rect x="290" y="1020" width="380" height="76" rx="8" fill="#d5e8d4" stroke="#82b366" stroke-width="1.5"/>
+  <text x="480" y="1040" text-anchor="middle" font-weight="bold" fill="#333">賭け金を確定（残高ガード）</text>
+  <text x="480" y="1058" text-anchor="middle" font-size="11" fill="#444">y=推奨額 / e=入力額</text>
+  <text x="480" y="1074" text-anchor="middle" font-size="10" fill="#666">合計 &gt; 残高 なら編集/スキップへ</text>
+  <text x="480" y="1089" text-anchor="middle" font-size="11" fill="#444">budget -= bet</text>
+  <line x1="480" y1="1096" x2="480" y2="1123" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- 払い戻し入力 + 残高更新 -->
+  <rect x="270" y="1123" width="420" height="66" rx="8" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1.5"/>
+  <text x="480" y="1143" text-anchor="middle" font-weight="bold" fill="#333">レース後: 実際の払い戻し額を入力</text>
+  <text x="480" y="1160" text-anchor="middle" font-size="11" fill="#444">（Enter のみ → payout=0）</text>
+  <text x="480" y="1177" text-anchor="middle" font-size="11" fill="#444">budget += payout / 残高・損益を表示</text>
+  <line x1="480" y1="1189" x2="480" y2="1216" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- Diamond: 次レースあり? -->
+  <polygon points="480,1216 630,1263 480,1310 330,1263" fill="#fff2cc" stroke="#d6b656" stroke-width="1.5"/>
+  <text x="480" y="1268" text-anchor="middle" font-size="11" font-weight="bold" fill="#333">次のレースあり？</text>
+
+  <!-- s box → 次レース判定 (merge from right) -->
+  <line x1="837" y1="968" x2="837" y2="1263" stroke="#333" stroke-width="1.5"/>
+  <line x1="837" y1="1263" x2="630" y2="1263" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <!-- None skip box → 次レース判定 (far right merge) -->
+  <line x1="970" y1="659" x2="985" y2="659" stroke="#333" stroke-width="1.5"/>
+  <line x1="985" y1="659" x2="985" y2="1263" stroke="#333" stroke-width="1.5"/>
+  <line x1="985" y1="1263" x2="837" y2="1263" stroke="#333" stroke-width="1.5"/>
+
+  <!-- YES → loop back (left) -->
+  <line x1="330" y1="1263" x2="90" y2="1263" stroke="#333" stroke-width="1.5"/>
+  <text x="208" y="1255" text-anchor="middle" font-size="11" fill="#2a7a2a">YES</text>
+  <line x1="90" y1="1263" x2="90" y2="329" stroke="#333" stroke-width="1.5"/>
+  <line x1="90" y1="329" x2="295" y2="329" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- NO → 集計 -->
+  <line x1="480" y1="1310" x2="480" y2="1337" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="490" y="1330" font-size="11" fill="#b85450">NO</text>
+
+  <!-- 一日集計表示 -->
+  <rect x="270" y="1337" width="420" height="60" rx="8" fill="#d5e8d4" stroke="#82b366" stroke-width="1.5"/>
+  <text x="480" y="1357" text-anchor="middle" font-weight="bold" fill="#333">一日集計を表示</text>
+  <text x="480" y="1374" text-anchor="middle" font-size="11" fill="#444">総賭け金 / 総払戻 / 最終残高 / P&amp;L</text>
+  <text x="480" y="1389" text-anchor="middle" font-size="10" fill="#666">P&amp;L = 総払戻 − 総賭け金</text>
+  <line x1="480" y1="1397" x2="480" y2="1424" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- END -->
+  <rect x="390" y="1424" width="180" height="42" rx="21" fill="#f5f5f5" stroke="#666" stroke-width="1.5"/>
+  <text x="480" y="1450" text-anchor="middle" font-weight="bold" fill="#333">END</text>
+
+  <!-- no-races path to END -->
+  <line x1="835" y1="257" x2="835" y2="600" stroke="#b85450" stroke-width="1" stroke-dasharray="4,3"/>
+  <line x1="835" y1="600" x2="1000" y2="600" stroke="#b85450" stroke-width="1" stroke-dasharray="4,3"/>
+  <line x1="1000" y1="600" x2="1000" y2="1445" stroke="#b85450" stroke-width="1" stroke-dasharray="4,3"/>
+  <line x1="1000" y1="1445" x2="570" y2="1445" stroke="#b85450" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrow)"/>
+</svg>
