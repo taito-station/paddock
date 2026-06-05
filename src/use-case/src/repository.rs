@@ -1,7 +1,7 @@
 use core::future::Future;
 
-use chrono::{DateTime, Utc};
-use paddock_domain::{HorseName, JockeyName, Race, RaceCard, RaceId, Surface, Venue};
+use chrono::{DateTime, NaiveDate, Utc};
+use paddock_domain::{HorseName, JockeyName, Race, RaceCard, RaceId, RaceOdds, Surface, Venue};
 
 use crate::error::Result;
 
@@ -124,4 +124,17 @@ pub trait Repository: Send + Sync {
         &self,
         race_id: &RaceId,
     ) -> impl Future<Output = Result<Option<RaceCard>>> + Send;
+
+    /// 指定日に開催されるレース一覧を race_num 昇順で返す。
+    /// 予想用途のため `results` は読み込まず空 Vec で返す。
+    fn find_races_by_date(
+        &self,
+        date: NaiveDate,
+    ) -> impl Future<Output = Result<Vec<Race>>> + Send;
+
+    /// race_id に対応するオッズを返す。未取得の場合は `None`。
+    fn find_race_odds(
+        &self,
+        race_id: &RaceId,
+    ) -> impl Future<Output = Result<Option<RaceOdds>>> + Send;
 }
