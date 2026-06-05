@@ -121,6 +121,14 @@ impl Repository for MockRepo {
     async fn find_race_card(&self, _: &RaceId) -> Result<Option<RaceCard>> {
         Ok(self.card.clone())
     }
+
+    async fn find_races_by_date(&self, _: chrono::NaiveDate) -> Result<Vec<Race>> {
+        Ok(Vec::new())
+    }
+
+    async fn find_race_odds(&self, _: &RaceId) -> Result<Option<paddock_domain::RaceOdds>> {
+        Ok(None)
+    }
 }
 
 struct NullParser;
