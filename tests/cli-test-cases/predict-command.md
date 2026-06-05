@@ -101,7 +101,7 @@
 
 ## predict 対話セッションテストケース（Issue #13）
 
-> **共通前提**: 特記なき限り `samples/2026-3nakayama6.pdf` を取り込んだ DB 状態を基準とする。取り込みにより `races` テーブル（`find_races_by_date` の対象）と `race_card` の両方にレコードが入る。
+> **共通前提**: 特記なき限り `samples/2026-3nakayama6.pdf` を取り込んだ DB 状態を基準とする。取り込みにより `races` テーブル（`find_races_by_date` の対象）にレコードが入る。`race_card`（出馬表）は別経路の取り込みまたは手動 INSERT が必要な場合がある（基準サンプルが結果系 PDF の場合、同一取り込みでは race_card が埋まらないため）。
 > オッズが必要なケースは、対象 race_id の `race_odds` を保存済みとする（`race_odds` テーブル追加前は手動 INSERT またはモックで代替）。
 > 「買い目推奨あり」を要求するケース（TC-12 等）では、`select_bets` の EV 閾値（馬連等 1.0 / 三連単 2.0、strict `>`）を超える推奨が必要本数だけ出るオッズ・確率データを用意する（手動 INSERT したオッズで EV を調整する）。
 
