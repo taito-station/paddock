@@ -152,6 +152,8 @@ pub async fn save_race_outcome(
     .execute(&mut *tx)
     .await?;
 
+    // 買い目はレース確定と同時に記録されるため、created_at はそのレース確定時刻
+    // （= session.updated_at）を用いる。
     let created_at = session.updated_at.to_rfc3339();
     for bet in bets {
         sqlx::query(
