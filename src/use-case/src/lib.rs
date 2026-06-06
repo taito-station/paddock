@@ -12,9 +12,10 @@ pub use error::{Error, Result};
 pub use interactor::Interactor;
 pub use interactor::entry::EntryInteractor;
 pub use odds_scraper::OddsScraper;
+pub use paddock_domain::{HorseFactors, HorseProbability, RateTriple};
 pub use pdf_fetcher::PdfFetcher;
 pub use pdf_parser::PdfParser;
-pub use paddock_domain::{HorseFactors, HorseProbability, RateTriple};
 pub use repository::{
-    CourseStatsRow, FetchRecord, GroupStat, HorseStatsRow, JockeyStatsRow, Repository,
+    CourseStatsRow, FetchRecord, GroupStat, HorseStatsRow, JockeyStatsRow, PredictBetRecord,
+    PredictSessionRecord, Repository,
 };
