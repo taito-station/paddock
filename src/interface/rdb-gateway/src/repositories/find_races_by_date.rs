@@ -23,6 +23,8 @@ struct RaceRow {
 /// 出馬表由来の `race_cards` も対象にする。両者を race_id で UNION し、`races` に
 /// 既にある（=結果取り込み済み）レースは track_condition / weather を持つそちらを優先、
 /// `race_cards` 側は当該レースが `races` に無いときのみ採用する。
+/// race_id は開催（年・回・場・日）を内包し開催日が一意なので、除外サブクエリは
+/// 日付で絞らず race_id だけで判定する（万一 races 側の date がズレていても重複しない）。
 ///
 /// 予想フェーズで使うため `results`（着順）は読み込まず空 Vec で返す。
 /// `WHERE date = $1` で絞り込むため、各行の date は引数 `date` と一致する。
@@ -40,7 +42,7 @@ pub async fn find_races_by_date(pool: &SqlitePool, date: NaiveDate) -> Result<Ve
                surface, distance, NULL AS track_condition, NULL AS weather
         FROM race_cards
         WHERE date = $1
-          AND race_id NOT IN (SELECT race_id FROM races WHERE date = $1)
+          AND race_id NOT IN (SELECT race_id FROM races)
         ORDER BY race_num ASC
         "#,
     )

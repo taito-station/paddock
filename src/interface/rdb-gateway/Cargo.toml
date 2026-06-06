@@ -17,3 +17,7 @@ tempfile         = { workspace = true }
 [[test]]
 name = "test_predict_persistence"
 path = "tests/test_predict_persistence.rs"
+
+[[test]]
+name = "test_find_races_by_date"
+path = "tests/test_find_races_by_date.rs"
