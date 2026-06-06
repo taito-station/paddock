@@ -8,6 +8,10 @@ use clap::Parser;
 async fn main() -> anyhow::Result<()> {
     let args = cli::Cli::parse();
     let app = setup::build_app().await?;
-    session::run_session(&app, args.date, args.budget).await?;
+    if args.summary {
+        session::print_session_summary(&app, args.date).await?;
+    } else {
+        session::run_session(&app, args.date, args.budget, args.resume).await?;
+    }
     Ok(())
 }
