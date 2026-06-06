@@ -179,10 +179,11 @@ async fn run_race(
 
     println!();
     println!(">>> レース後 — 買い目ごとに払戻を入力 <<<");
-    let mut payouts = Vec::with_capacity(bet_amounts.len());
+    // 賭け金 > 0 の買い目だけを対象に払戻を入力し、その場でレコード化する
+    // （stake==0 の判定はこの 1 箇所に集約）。
+    let mut bet_records = Vec::new();
     for (rec, &stake) in recs.iter().zip(&bet_amounts) {
         if stake == 0 {
-            payouts.push(0);
             continue;
         }
         let payout = read_u64(
@@ -193,10 +194,8 @@ async fn run_race(
             ),
             true,
         )?;
-        payouts.push(payout);
+        bet_records.push(make_bet_record(&race.race_id, rec, stake, payout));
     }
-
-    let bet_records = build_bet_records(&race.race_id, &recs, &bet_amounts, &payouts);
     let race_payout: u64 = bet_records.iter().map(|b| b.payout).sum();
     session.balance += race_payout;
     session.total_payout += race_payout;
@@ -262,34 +261,22 @@ pub async fn print_session_summary(app: &App, date: NaiveDate) -> anyhow::Result
     Ok(())
 }
 
-/// 確定した賭け金・払戻から DB 保存用の買い目レコードを組み立てる純関数。
-///
-/// `recs` / `stakes` / `payouts` は同じ並び（`select_bets` の順）。`stake == 0`
-/// （編集で見送り）の買い目は記録しない。対話 I/O から切り離してあるので、
-/// 残高・回収率に直結するフィールドのマッピングを単体テストで担保できる。
-fn build_bet_records(
+/// 1 件の買い目を DB 保存用レコードに変換する純関数。馬券種ラベル・組み合わせコード・
+/// 各フィールド（残高・回収率に直結）のマッピングを対話 I/O から切り離して単体テストできる。
+fn make_bet_record(
     race_id: &RaceId,
-    recs: &[BettingRecommendation],
-    stakes: &[u64],
-    payouts: &[u64],
-) -> Vec<PredictBetRecord> {
-    recs.iter()
-        .zip(stakes)
-        .zip(payouts)
-        .filter_map(|((rec, &stake), &payout)| {
-            if stake == 0 {
-                return None;
-            }
-            Some(PredictBetRecord {
-                race_id: race_id.clone(),
-                bet_type: rec.combination.type_label().to_string(),
-                combination: rec.combination.combination_code(),
-                stake,
-                payout,
-                ev: rec.ev,
-            })
-        })
-        .collect()
+    rec: &BettingRecommendation,
+    stake: u64,
+    payout: u64,
+) -> PredictBetRecord {
+    PredictBetRecord {
+        race_id: race_id.clone(),
+        bet_type: rec.combination.type_label().to_string(),
+        combination: rec.combination.combination_code(),
+        stake,
+        payout,
+        ev: rec.ev,
+    }
 }
 
 /// Kelly 比例縮小方式で各買い目の推奨額を算出する。
@@ -455,7 +442,7 @@ fn read_u64(prompt: &str, allow_empty_as_zero: bool) -> anyhow::Result<u64> {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_bet_records, recommended_amounts};
+    use super::{make_bet_record, recommended_amounts};
     use paddock_domain::horse_result::HorseNum;
     use paddock_domain::{BetCombination, BettingRecommendation, RaceId};
 
@@ -474,31 +461,22 @@ mod tests {
     }
 
     #[test]
-    fn build_bet_records_skips_zero_stake_and_maps_fields() {
+    fn make_bet_record_maps_fields() {
         let race_id = RaceId::try_from("2026-3-nakayama-8-1R").unwrap();
-        let recs = vec![
-            rec(BetCombination::Win(horse(3)), 1.5),
-            rec(BetCombination::Place(horse(7)), 1.2), // stake 0 → 記録しない
-            rec(BetCombination::Win(horse(5)), 1.8),
-        ];
-        let stakes = vec![1000u64, 0, 500];
-        let payouts = vec![0u64, 999, 2500];
 
-        let records = build_bet_records(&race_id, &recs, &stakes, &payouts);
+        let win = make_bet_record(&race_id, &rec(BetCombination::Win(horse(3)), 1.5), 1000, 0);
+        assert_eq!(win.bet_type, "win");
+        assert_eq!(win.combination, "3");
+        assert_eq!(win.stake, 1000);
+        assert_eq!(win.payout, 0);
+        assert!((win.ev - 1.5).abs() < 1e-10);
+        assert_eq!(win.race_id.value(), "2026-3-nakayama-8-1R");
 
-        assert_eq!(records.len(), 2, "stake==0 の買い目は除外される");
-        assert_eq!(records[0].bet_type, "win");
-        assert_eq!(records[0].combination, "3");
-        assert_eq!(records[0].stake, 1000);
-        assert_eq!(records[0].payout, 0);
-        assert!((records[0].ev - 1.5).abs() < 1e-10);
-        assert_eq!(records[1].combination, "5");
-        assert_eq!(records[1].stake, 500);
-        assert_eq!(records[1].payout, 2500);
-        assert_eq!(records[1].race_id.value(), "2026-3-nakayama-8-1R");
-        // 回収率の元になる合計が払戻の総和と一致する
-        let total_payout: u64 = records.iter().map(|b| b.payout).sum();
-        assert_eq!(total_payout, 2500);
+        let place = make_bet_record(&race_id, &rec(BetCombination::Place(horse(7)), 1.2), 500, 2500);
+        assert_eq!(place.bet_type, "place");
+        assert_eq!(place.combination, "7");
+        assert_eq!(place.stake, 500);
+        assert_eq!(place.payout, 2500);
     }
 
     #[test]
