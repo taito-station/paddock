@@ -90,6 +90,34 @@ pub struct FetchRecord {
     pub fetched_at: DateTime<Utc>,
 }
 
+/// 予想セッション 1 件（1 開催日 = 1 セッション）。途中離脱後の `--resume` と
+/// 収支サマリ `--summary` のために永続化する。`created_at`/`updated_at` は use-case 層が
+/// 時刻を注入し、gateway を時計から独立に保つ（[`FetchRecord`] と同じ流儀）。
+#[derive(Debug, Clone)]
+pub struct PredictSessionRecord {
+    pub date: NaiveDate,
+    pub budget: u64,
+    pub balance: u64,
+    pub total_bet: u64,
+    pub total_payout: u64,
+    pub completed: bool,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// セッション内で実際に購入した買い目 1 件。払戻は買い目ごと（per-bet）に記録する。
+#[derive(Debug, Clone)]
+pub struct PredictBetRecord {
+    pub race_id: RaceId,
+    /// 馬券種ラベル（`BetCombination::type_label`）。
+    pub bet_type: String,
+    /// 組み合わせコード（`BetCombination::combination_code`）。
+    pub combination: String,
+    pub stake: u64,
+    pub payout: u64,
+    pub ev: f64,
+}
+
 pub trait Repository: Send + Sync {
     fn save_race(&self, race: &Race) -> impl Future<Output = Result<()>> + Send;
 
@@ -137,4 +165,34 @@ pub trait Repository: Send + Sync {
         &self,
         race_id: &RaceId,
     ) -> impl Future<Output = Result<Option<RaceOdds>>> + Send;
+
+    /// 指定日の予想セッションを返す。未作成なら `None`。
+    fn find_predict_session(
+        &self,
+        date: NaiveDate,
+    ) -> impl Future<Output = Result<Option<PredictSessionRecord>>> + Send;
+
+    /// 指定日のセッションで購入済みの買い目を bet_id 昇順で返す。
+    /// `--summary` の明細表示と `--resume` の処理済みレース判定に使う。
+    fn find_predict_bets(
+        &self,
+        date: NaiveDate,
+    ) -> impl Future<Output = Result<Vec<PredictBetRecord>>> + Send;
+
+    /// 予想セッションのヘッダ（残高・累計・completed）を upsert する。
+    /// 新規開始時の作成と、全レース処理後の完了マークに使う。
+    fn save_predict_session(
+        &self,
+        session: &PredictSessionRecord,
+    ) -> impl Future<Output = Result<()>> + Send;
+
+    /// 1 レース分の確定結果を 1 トランザクションで保存する。
+    /// セッション行を upsert（残高・累計・completed・updated_at を更新）し、
+    /// その race の買い目 `bets` を追記する。
+    fn save_race_outcome(
+        &self,
+        session: &PredictSessionRecord,
+        race_id: &RaceId,
+        bets: &[PredictBetRecord],
+    ) -> impl Future<Output = Result<()>> + Send;
 }

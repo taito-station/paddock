@@ -35,6 +35,45 @@ pub enum BetCombination {
     Trifecta(OrderedTriple),
 }
 
+impl BetCombination {
+    /// 馬券種を表す安定した小文字ラベル（DB 保存・分析用）。
+    pub fn type_label(&self) -> &'static str {
+        match self {
+            BetCombination::Win(_) => "win",
+            BetCombination::Place(_) => "place",
+            BetCombination::Quinella(_) => "quinella",
+            BetCombination::Exacta(_) => "exacta",
+            BetCombination::Trio(_) => "trio",
+            BetCombination::Trifecta(_) => "trifecta",
+        }
+    }
+
+    /// 組み合わせを表す文字列コード（DB 保存・表示用）。
+    /// 無順（馬連/三連複）は `-` 区切りで昇順、順序付き（馬単/三連単）は `>` 区切り。
+    /// 例: 単勝 `"3"` / 馬連 `"1-5"` / 馬単 `"1>5"` / 三連複 `"1-3-5"` / 三連単 `"1>3>5"`。
+    pub fn combination_code(&self) -> String {
+        match self {
+            BetCombination::Win(h) | BetCombination::Place(h) => h.value().to_string(),
+            BetCombination::Quinella(p) => {
+                let (a, b) = p.as_tuple();
+                format!("{}-{}", a.value(), b.value())
+            }
+            BetCombination::Exacta(p) => {
+                let (a, b) = p.as_tuple();
+                format!("{}>{}", a.value(), b.value())
+            }
+            BetCombination::Trio(t) => {
+                let (a, b, c) = t.as_tuple();
+                format!("{}-{}-{}", a.value(), b.value(), c.value())
+            }
+            BetCombination::Trifecta(t) => {
+                let (a, b, c) = t.as_tuple();
+                format!("{}>{}>{}", a.value(), b.value(), c.value())
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct BettingRecommendation {
     pub combination: BetCombination,
@@ -525,5 +564,36 @@ mod tests {
     fn kelly_fraction_respects_cap() {
         let kf = kelly_fraction(0.95, 2.0, 0.25);
         assert_eq!(kf, 0.25);
+    }
+
+    #[test]
+    fn bet_combination_encodes_type_and_code() {
+        let win = BetCombination::Win(horse(3));
+        assert_eq!(win.type_label(), "win");
+        assert_eq!(win.combination_code(), "3");
+
+        let place = BetCombination::Place(horse(7));
+        assert_eq!(place.type_label(), "place");
+        assert_eq!(place.combination_code(), "7");
+
+        let quinella = BetCombination::Quinella(Pair::try_from((horse(5), horse(1))).unwrap());
+        assert_eq!(quinella.type_label(), "quinella");
+        // Pair は昇順に正規化されるため "1-5"
+        assert_eq!(quinella.combination_code(), "1-5");
+
+        let exacta = BetCombination::Exacta(OrderedPair::try_from((horse(1), horse(5))).unwrap());
+        assert_eq!(exacta.type_label(), "exacta");
+        assert_eq!(exacta.combination_code(), "1>5");
+
+        let trio = BetCombination::Trio(Triple::try_from((horse(3), horse(1), horse(5))).unwrap());
+        assert_eq!(trio.type_label(), "trio");
+        // Triple は昇順に正規化されるため "1-3-5"
+        assert_eq!(trio.combination_code(), "1-3-5");
+
+        let trifecta = BetCombination::Trifecta(
+            OrderedTriple::try_from((horse(1), horse(3), horse(5))).unwrap(),
+        );
+        assert_eq!(trifecta.type_label(), "trifecta");
+        assert_eq!(trifecta.combination_code(), "1>3>5");
     }
 }

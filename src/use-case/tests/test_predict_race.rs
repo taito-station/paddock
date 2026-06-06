@@ -129,6 +129,36 @@ impl Repository for MockRepo {
     async fn find_race_odds(&self, _: &RaceId) -> Result<Option<paddock_domain::RaceOdds>> {
         Ok(None)
     }
+
+    async fn find_predict_session(
+        &self,
+        _: chrono::NaiveDate,
+    ) -> Result<Option<paddock_use_case::repository::PredictSessionRecord>> {
+        Ok(None)
+    }
+
+    async fn find_predict_bets(
+        &self,
+        _: chrono::NaiveDate,
+    ) -> Result<Vec<paddock_use_case::repository::PredictBetRecord>> {
+        Ok(Vec::new())
+    }
+
+    async fn save_predict_session(
+        &self,
+        _: &paddock_use_case::repository::PredictSessionRecord,
+    ) -> Result<()> {
+        unimplemented!()
+    }
+
+    async fn save_race_outcome(
+        &self,
+        _: &paddock_use_case::repository::PredictSessionRecord,
+        _: &RaceId,
+        _: &[paddock_use_case::repository::PredictBetRecord],
+    ) -> Result<()> {
+        unimplemented!()
+    }
 }
 
 struct NullParser;

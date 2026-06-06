@@ -1,57 +1,105 @@
+use std::collections::HashSet;
 use std::io::{self, Write};
 
-use chrono::NaiveDate;
+use chrono::{NaiveDate, Utc};
 use paddock_domain::{
-    BetCombination, BettingConfig, BettingRecommendation, HorseProbability, Race, Surface,
+    BetCombination, BettingConfig, BettingRecommendation, HorseProbability, Race, RaceId, Surface,
     select_bets,
 };
+use paddock_use_case::{PredictBetRecord, PredictSessionRecord};
 
 use crate::setup::App;
 
-/// セッション中の残高・累計（App 層のみで管理。残高ガードにより budget は常に 0 以上）。
-struct SessionState {
-    budget: u64,
-    total_bet: u64,
-    total_payout: u64,
-}
-
-impl SessionState {
-    fn new(budget: u64) -> Self {
-        Self {
-            budget,
-            total_bet: 0,
-            total_payout: 0,
-        }
-    }
-}
-
 /// 1 日分のレースを順番に処理する対話セッション。
-pub async fn run_session(app: &App, date: NaiveDate, budget: u64) -> anyhow::Result<()> {
+///
+/// 新規開始時は `budget` 必須でセッションを作成し、レース確定ごとに DB へ保存する。
+/// `resume` が true なら保存済みセッションの残高から再開し、処理済みレースをスキップする。
+pub async fn run_session(
+    app: &App,
+    date: NaiveDate,
+    budget: Option<u64>,
+    resume: bool,
+) -> anyhow::Result<()> {
     let races = app.interactor.races_by_date(date).await?;
     if races.is_empty() {
         println!("この日の開催はありません: {}", date.format("%Y-%m-%d"));
         return Ok(());
     }
 
-    println!(
-        "=== {} 開催 — {} レース ===",
-        date.format("%Y-%m-%d"),
-        races.len()
-    );
-    println!("初期予算: ¥{budget}");
+    let existing = app.interactor.find_predict_session(date).await?;
+    let date_str = date.format("%Y-%m-%d").to_string();
 
-    let mut state = SessionState::new(budget);
+    let (mut session, processed): (PredictSessionRecord, HashSet<String>) = if resume {
+        let Some(session) = existing else {
+            anyhow::bail!(
+                "{date_str} のセッションがありません。新規開始は --resume なしで実行してください。"
+            );
+        };
+        if session.completed {
+            println!("{date_str} のセッションは完了済みです。集計は --summary を使ってください。");
+            return Ok(());
+        }
+        if budget.is_some() {
+            println!("注意: --resume では --budget は無視され、保存済み予算を使います。");
+        }
+        let bets = app.interactor.find_predict_bets(date).await?;
+        let processed: HashSet<String> =
+            bets.iter().map(|b| b.race_id.value().to_string()).collect();
+        println!(
+            "=== {date_str} 再開 — 残高 ¥{} / 処理済み {} レース ===",
+            session.balance,
+            processed.len()
+        );
+        (session, processed)
+    } else {
+        if existing.is_some() {
+            anyhow::bail!(
+                "{date_str} のセッションは既に存在します。続きは --resume、集計は --summary を使ってください。"
+            );
+        }
+        let Some(budget) = budget else {
+            anyhow::bail!("新規セッションには --budget が必要です（例: --budget 10000）。");
+        };
+        let now = Utc::now();
+        let session = PredictSessionRecord {
+            date,
+            budget,
+            balance: budget,
+            total_bet: 0,
+            total_payout: 0,
+            completed: false,
+            created_at: now,
+            updated_at: now,
+        };
+        // 全レースをスキップしても再開できるよう、開始時点でヘッダを保存する。
+        app.interactor.save_predict_session(&session).await?;
+        println!("=== {date_str} 開催 — {} レース ===", races.len());
+        println!("初期予算: ¥{budget}");
+        (session, HashSet::new())
+    };
+
     for race in &races {
-        run_race(app, race, &mut state).await?;
+        if processed.contains(race.race_id.value()) {
+            continue;
+        }
+        run_race(app, race, &mut session).await?;
     }
 
+    session.completed = true;
+    session.updated_at = Utc::now();
+    app.interactor.save_predict_session(&session).await?;
+
     println!();
-    println!("=== {} 終了 ===", date.format("%Y-%m-%d"));
-    print_summary(&state);
+    println!("=== {date_str} 終了 ===");
+    print_totals(&session);
     Ok(())
 }
 
-async fn run_race(app: &App, race: &Race, state: &mut SessionState) -> anyhow::Result<()> {
+async fn run_race(
+    app: &App,
+    race: &Race,
+    session: &mut PredictSessionRecord,
+) -> anyhow::Result<()> {
     println!();
     println!(
         "--- レース {}: {} {} {}m ---",
@@ -60,7 +108,7 @@ async fn run_race(app: &App, race: &Race, state: &mut SessionState) -> anyhow::R
         surface_jp(race.surface),
         race.distance
     );
-    println!("残高: ¥{}", state.budget);
+    println!("残高: ¥{}", session.balance);
 
     // 出馬表未登録（NotFound）はそのレースのみスキップ。
     // DB 障害等（Internal）はセッション継続不能なため伝播して中断する。
@@ -86,7 +134,7 @@ async fn run_race(app: &App, race: &Race, state: &mut SessionState) -> anyhow::R
 
     let recs = select_bets(&probs, &odds, &BettingConfig::default());
     let kelly_fractions: Vec<f64> = recs.iter().map(|r| r.kelly_fraction).collect();
-    let suggested = recommended_amounts(state.budget, &kelly_fractions);
+    let suggested = recommended_amounts(session.balance, &kelly_fractions);
 
     println!();
     println!("【買い目推奨】");
@@ -107,7 +155,7 @@ async fn run_race(app: &App, race: &Race, state: &mut SessionState) -> anyhow::R
     let bet_amounts: Vec<u64> = match read_choice()? {
         's' => return Ok(()),
         'y' => suggested.clone(),
-        'e' => read_edited_amounts(&recs, &suggested, state.budget)?,
+        'e' => read_edited_amounts(&recs, &suggested, session.balance)?,
         _ => unreachable!("read_choice returns only y/e/s"),
     };
 
@@ -117,33 +165,118 @@ async fn run_race(app: &App, race: &Race, state: &mut SessionState) -> anyhow::R
         return Ok(());
     }
     // 残高ガード（y の比例縮小・e の入力チェックで保証されるが二重防御）
-    if bet > state.budget {
+    if bet > session.balance {
         println!(
             "賭け金合計 ¥{} が残高 ¥{} を超えるためスキップします",
-            bet, state.budget
+            bet, session.balance
         );
         return Ok(());
     }
 
-    state.budget -= bet;
-    state.total_bet += bet;
+    // 賭け金を先に差し引き、買い目ごとに払戻を入力する（per-bet 記録）。
+    session.balance -= bet;
+    session.total_bet += bet;
 
     println!();
-    println!(">>> レース後 <<<");
-    let payout = read_u64("実際の払い戻し額を入力 (なし: Enter のみ) > ", true)?;
-    state.budget += payout;
-    state.total_payout += payout;
+    println!(">>> レース後 — 買い目ごとに払戻を入力 <<<");
+    // 賭け金 > 0 の買い目だけを対象に払戻を入力し、その場でレコード化する
+    // （stake==0 の判定はこの 1 箇所に集約）。
+    let mut bet_records = Vec::new();
+    for (rec, &stake) in recs.iter().zip(&bet_amounts) {
+        if stake == 0 {
+            continue;
+        }
+        let payout = read_u64(
+            &format!(
+                "  {} 賭け¥{} の払戻 (なし: Enter) > ",
+                format_combination(&rec.combination),
+                stake
+            ),
+            true,
+        )?;
+        bet_records.push(make_bet_record(&race.race_id, rec, stake, payout));
+    }
+    let race_payout: u64 = bet_records.iter().map(|b| b.payout).sum();
+    session.balance += race_payout;
+    session.total_payout += race_payout;
 
-    let pnl = payout as i128 - bet as i128;
+    // セッション更新＋このレースの買い目を 1 トランザクションで保存する。
+    session.updated_at = Utc::now();
+    app.interactor
+        .save_race_outcome(session, &race.race_id, &bet_records)
+        .await?;
+
+    let pnl = race_payout as i128 - bet as i128;
     println!(
         "  賭け金: ¥{}  払戻: ¥{}  ({})",
         bet,
-        payout,
+        race_payout,
         format_signed(pnl)
     );
-    println!("残高: ¥{}", state.budget);
+    println!("残高: ¥{}", session.balance);
 
     Ok(())
+}
+
+/// 同日セッションの収支サマリと買い目明細を表示する（--summary、読み取り専用）。
+pub async fn print_session_summary(app: &App, date: NaiveDate) -> anyhow::Result<()> {
+    let date_str = date.format("%Y-%m-%d").to_string();
+    let Some(session) = app.interactor.find_predict_session(date).await? else {
+        println!("{date_str} のセッションはありません。");
+        return Ok(());
+    };
+
+    println!(
+        "=== {date_str} セッション収支{} ===",
+        if session.completed {
+            ""
+        } else {
+            "（未完了）"
+        }
+    );
+    println!("開始予算: ¥{}", session.budget);
+    println!("現在残高: ¥{}", session.balance);
+    print_totals(&session);
+
+    let bets = app.interactor.find_predict_bets(date).await?;
+    if !bets.is_empty() {
+        println!();
+        println!("【買い目明細】");
+        println!(
+            "{:<22} {:<10} {:<10} {:>8} {:>8} {:>6}",
+            "レース", "馬券種", "組合せ", "賭け金", "払戻", "EV"
+        );
+        for b in &bets {
+            println!(
+                "{:<22} {:<10} {:<10} {:>7}円 {:>7}円 {:>6.2}",
+                b.race_id.value(),
+                b.bet_type,
+                b.combination,
+                b.stake,
+                b.payout,
+                b.ev,
+            );
+        }
+    }
+    Ok(())
+}
+
+/// 1 件の買い目を DB 保存用レコードに変換する純関数。馬券種ラベル・組み合わせコード・
+/// 各フィールド（残高・回収率に直結）のマッピングを対話 I/O から切り離して単体テストできる。
+fn make_bet_record(
+    race_id: &RaceId,
+    rec: &BettingRecommendation,
+    stake: u64,
+    payout: u64,
+) -> PredictBetRecord {
+    PredictBetRecord {
+        race_id: race_id.clone(),
+        bet_type: rec.combination.type_label().to_string(),
+        combination: rec.combination.combination_code(),
+        stake,
+        payout,
+        ev: rec.ev,
+    }
 }
 
 /// Kelly 比例縮小方式で各買い目の推奨額を算出する。
@@ -198,21 +331,23 @@ fn read_edited_amounts(
         }
         let total: u64 = amounts.iter().sum();
         if total > budget {
-            println!(
-                "合計 ¥{total} が残高 ¥{budget} を超えています。入力し直してください。"
-            );
+            println!("合計 ¥{total} が残高 ¥{budget} を超えています。入力し直してください。");
             continue;
         }
         return Ok(amounts);
     }
 }
 
-fn print_summary(state: &SessionState) {
-    println!("総賭け金:  ¥{}", state.total_bet);
-    println!("総払戻:    ¥{}", state.total_payout);
-    println!("最終残高:  ¥{}", state.budget);
-    let pnl = state.total_payout as i128 - state.total_bet as i128;
-    println!("P&L:       {}", format_signed(pnl));
+fn print_totals(session: &PredictSessionRecord) {
+    println!("総賭け金: ¥{}", session.total_bet);
+    println!("総払戻:   ¥{}", session.total_payout);
+    println!("最終残高: ¥{}", session.balance);
+    let pnl = session.total_payout as i128 - session.total_bet as i128;
+    println!("P&L:      {}", format_signed(pnl));
+    if session.total_bet > 0 {
+        let roi = session.total_payout as f64 / session.total_bet as f64 * 100.0;
+        println!("回収率:   {roi:.1}%");
+    }
 }
 
 fn print_probs(probs: &[HorseProbability]) {
@@ -307,7 +442,42 @@ fn read_u64(prompt: &str, allow_empty_as_zero: bool) -> anyhow::Result<u64> {
 
 #[cfg(test)]
 mod tests {
-    use super::recommended_amounts;
+    use super::{make_bet_record, recommended_amounts};
+    use paddock_domain::horse_result::HorseNum;
+    use paddock_domain::{BetCombination, BettingRecommendation, RaceId};
+
+    fn rec(combination: BetCombination, ev: f64) -> BettingRecommendation {
+        BettingRecommendation {
+            combination,
+            probability: 0.0,
+            odds: 0.0,
+            ev,
+            kelly_fraction: 0.0,
+        }
+    }
+
+    fn horse(n: u32) -> HorseNum {
+        HorseNum::try_from(n).unwrap()
+    }
+
+    #[test]
+    fn make_bet_record_maps_fields() {
+        let race_id = RaceId::try_from("2026-3-nakayama-8-1R").unwrap();
+
+        let win = make_bet_record(&race_id, &rec(BetCombination::Win(horse(3)), 1.5), 1000, 0);
+        assert_eq!(win.bet_type, "win");
+        assert_eq!(win.combination, "3");
+        assert_eq!(win.stake, 1000);
+        assert_eq!(win.payout, 0);
+        assert!((win.ev - 1.5).abs() < 1e-10);
+        assert_eq!(win.race_id.value(), "2026-3-nakayama-8-1R");
+
+        let place = make_bet_record(&race_id, &rec(BetCombination::Place(horse(7)), 1.2), 500, 2500);
+        assert_eq!(place.bet_type, "place");
+        assert_eq!(place.combination, "7");
+        assert_eq!(place.stake, 500);
+        assert_eq!(place.payout, 2500);
+    }
 
     #[test]
     fn within_budget_keeps_floor() {

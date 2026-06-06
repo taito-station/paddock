@@ -8,6 +8,9 @@ pub enum Error {
     Migrate(#[from] sqlx::migrate::MigrateError),
     #[error("domain error: {0}")]
     Domain(#[from] paddock_domain::Error),
+    /// 永続化された値（日時・日付文字列など）が想定形式でないとき。
+    #[error("data error: {0}")]
+    Data(String),
 }
 
 pub type Result<A> = std::result::Result<A, Error>;
