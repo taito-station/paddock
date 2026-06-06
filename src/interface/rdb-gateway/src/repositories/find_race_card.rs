@@ -61,7 +61,7 @@ pub async fn find_race_card(pool: &SqlitePool, race_id: &RaceId) -> Result<Optio
     let race_id = RaceId::try_from(race_id_str.as_str())?;
     let venue = Venue::try_from(venue_str.as_str())?;
     let surface = Surface::try_from(surface_str.as_str())?;
-    // date 列は migration 20260606000001 で追加。新規取り込みは必ず設定するが、
+    // date 列は migration 20260606000003 で追加。新規取り込みは必ず設定するが、
     // 旧データで成績にも紐づかず backfill されなかった行は NULL になり得るため明示エラーにする。
     let date_str = date_str.ok_or_else(|| {
         Error::Data(format!(
