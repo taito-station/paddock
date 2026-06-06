@@ -1604,6 +1604,7 @@ dependencies = [
  "paddock-domain",
  "paddock-use-case",
  "sqlx",
+ "tempfile",
  "thiserror",
  "tokio",
 ]

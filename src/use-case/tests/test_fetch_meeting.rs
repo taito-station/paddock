@@ -111,6 +111,36 @@ impl Repository for MockRepo {
     async fn find_race_odds(&self, _race_id: &RaceId) -> Result<Option<paddock_domain::RaceOdds>> {
         Ok(None)
     }
+
+    async fn find_predict_session(
+        &self,
+        _date: chrono::NaiveDate,
+    ) -> Result<Option<paddock_use_case::repository::PredictSessionRecord>> {
+        Ok(None)
+    }
+
+    async fn find_predict_bets(
+        &self,
+        _date: chrono::NaiveDate,
+    ) -> Result<Vec<paddock_use_case::repository::PredictBetRecord>> {
+        Ok(Vec::new())
+    }
+
+    async fn save_predict_session(
+        &self,
+        _session: &paddock_use_case::repository::PredictSessionRecord,
+    ) -> Result<()> {
+        unimplemented!()
+    }
+
+    async fn save_race_outcome(
+        &self,
+        _session: &paddock_use_case::repository::PredictSessionRecord,
+        _race_id: &RaceId,
+        _bets: &[paddock_use_case::repository::PredictBetRecord],
+    ) -> Result<()> {
+        unimplemented!()
+    }
 }
 
 fn sample_race() -> Race {
@@ -342,6 +372,36 @@ impl Repository for HistoryRepo {
 
     async fn find_race_odds(&self, _race_id: &RaceId) -> Result<Option<paddock_domain::RaceOdds>> {
         Ok(None)
+    }
+
+    async fn find_predict_session(
+        &self,
+        _date: chrono::NaiveDate,
+    ) -> Result<Option<paddock_use_case::repository::PredictSessionRecord>> {
+        Ok(None)
+    }
+
+    async fn find_predict_bets(
+        &self,
+        _date: chrono::NaiveDate,
+    ) -> Result<Vec<paddock_use_case::repository::PredictBetRecord>> {
+        Ok(Vec::new())
+    }
+
+    async fn save_predict_session(
+        &self,
+        _session: &paddock_use_case::repository::PredictSessionRecord,
+    ) -> Result<()> {
+        unimplemented!()
+    }
+
+    async fn save_race_outcome(
+        &self,
+        _session: &paddock_use_case::repository::PredictSessionRecord,
+        _race_id: &RaceId,
+        _bets: &[paddock_use_case::repository::PredictBetRecord],
+    ) -> Result<()> {
+        unimplemented!()
     }
 }
 

@@ -10,3 +10,10 @@ paddock-use-case = { workspace = true }
 sqlx             = { workspace = true }
 thiserror        = { workspace = true }
 tokio            = { workspace = true }
+
+[dev-dependencies]
+tempfile         = { workspace = true }
+
+[[test]]
+name = "test_predict_persistence"
+path = "tests/test_predict_persistence.rs"

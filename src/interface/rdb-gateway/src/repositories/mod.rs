@@ -5,6 +5,7 @@ mod find_race_odds;
 mod find_races_by_date;
 mod horse_stats;
 mod jockey_stats;
+mod predict_session;
 mod save_race;
 mod save_race_card;
 
@@ -12,7 +13,8 @@ use chrono::NaiveDate;
 use paddock_domain::{HorseName, JockeyName, Race, RaceCard, RaceId, RaceOdds, Surface, Venue};
 use paddock_use_case::Result as UcResult;
 use paddock_use_case::repository::{
-    CourseStatsRow, FetchRecord, HorseStatsRow, JockeyStatsRow, Repository,
+    CourseStatsRow, FetchRecord, HorseStatsRow, JockeyStatsRow, PredictBetRecord,
+    PredictSessionRecord, Repository,
 };
 
 use crate::pool::SqlitePool;
@@ -106,6 +108,38 @@ impl Repository for SqliteRepository {
 
     async fn find_race_odds(&self, race_id: &RaceId) -> UcResult<Option<RaceOdds>> {
         find_race_odds::find_race_odds(&self.pool, race_id)
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn find_predict_session(
+        &self,
+        date: NaiveDate,
+    ) -> UcResult<Option<PredictSessionRecord>> {
+        predict_session::find_predict_session(&self.pool, date)
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn find_predict_bets(&self, date: NaiveDate) -> UcResult<Vec<PredictBetRecord>> {
+        predict_session::find_predict_bets(&self.pool, date)
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn save_predict_session(&self, session: &PredictSessionRecord) -> UcResult<()> {
+        predict_session::save_predict_session(&self.pool, session)
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn save_race_outcome(
+        &self,
+        session: &PredictSessionRecord,
+        race_id: &RaceId,
+        bets: &[PredictBetRecord],
+    ) -> UcResult<()> {
+        predict_session::save_race_outcome(&self.pool, session, race_id, bets)
             .await
             .map_err(Into::into)
     }
