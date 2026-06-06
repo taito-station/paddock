@@ -25,6 +25,7 @@ fn make_group(label: &str, starts: u32, wins: u32, places: u32, shows: u32) -> G
 fn make_race_card(race_id: &str) -> RaceCard {
     RaceCard {
         race_id: RaceId::try_from(race_id).unwrap(),
+        date: chrono::NaiveDate::from_ymd_opt(2026, 1, 1).unwrap(),
         venue: Venue::Tokyo,
         round: 1,
         day: 1,
@@ -77,7 +78,13 @@ fn course_stats_with_gate(inner_win: u32, middle_win: u32) -> CourseStatsRow {
         surface: "turf".to_string(),
         by_gate_group: vec![
             make_group("Inner (1-3)", 20, inner_win, inner_win + 2, inner_win + 4),
-            make_group("Middle (4-6)", 20, middle_win, middle_win + 2, middle_win + 4),
+            make_group(
+                "Middle (4-6)",
+                20,
+                middle_win,
+                middle_win + 2,
+                middle_win + 4,
+            ),
             make_group("Outer (7-8)", 20, 1, 3, 5),
         ],
     }
@@ -219,8 +226,14 @@ async fn predict_race_higher_stats_horse_gets_higher_win_prob() {
     let race_id = RaceId::try_from("2026-1-tokyo-1-R1").unwrap();
     let probs = app.predict_race(&race_id).await.unwrap();
 
-    let uma_a = probs.iter().find(|p| p.horse_name.value() == "ウマA").unwrap();
-    let uma_b = probs.iter().find(|p| p.horse_name.value() == "ウマB").unwrap();
+    let uma_a = probs
+        .iter()
+        .find(|p| p.horse_name.value() == "ウマA")
+        .unwrap();
+    let uma_b = probs
+        .iter()
+        .find(|p| p.horse_name.value() == "ウマB")
+        .unwrap();
     assert!(
         uma_a.win_prob > uma_b.win_prob,
         "ウマA(win_rate=0.2, Inner gate) should outrank ウマB(win_rate=0.1, Middle gate)"

@@ -2,6 +2,7 @@ mod stext;
 
 use std::sync::LazyLock;
 
+use chrono::NaiveDate;
 use paddock_domain::{
     GateNum, HorseEntry, HorseName, HorseNum, JockeyName, RaceCard, RaceId, Surface, Venue,
 };
@@ -75,7 +76,7 @@ const GATE_COLORS: &[(&str, u32)] = &[
     ("桃", 8),
 ];
 
-pub fn parse_stext(json: &str) -> Result<Vec<RaceCard>> {
+pub fn parse_stext(json: &str, date: NaiveDate) -> Result<Vec<RaceCard>> {
     let doc: StextDoc =
         serde_json::from_str(json).map_err(|e| Error::Parse(format!("stext.json: {e}")))?;
 
@@ -91,7 +92,7 @@ pub fn parse_stext(json: &str) -> Result<Vec<RaceCard>> {
             })
             .collect();
 
-        if let Some(card) = parse_column(&col_lines, origin)? {
+        if let Some(card) = parse_column(&col_lines, origin, date)? {
             cards.push(card);
         }
     }
@@ -139,7 +140,11 @@ fn find_race_origins(lines: &[FlatLine]) -> Vec<RaceOrigin> {
     origins
 }
 
-fn parse_column(lines: &[&FlatLine], origin: &RaceOrigin) -> Result<Option<RaceCard>> {
+fn parse_column(
+    lines: &[&FlatLine],
+    origin: &RaceOrigin,
+    date: NaiveDate,
+) -> Result<Option<RaceCard>> {
     let cx = origin.col_x;
 
     // --- header (y < race-number glyph y + 60) ---
@@ -243,6 +248,7 @@ fn parse_column(lines: &[&FlatLine], origin: &RaceOrigin) -> Result<Option<RaceC
 
     Ok(Some(RaceCard {
         race_id,
+        date,
         venue,
         round,
         day,

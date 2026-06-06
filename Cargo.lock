@@ -437,6 +437,7 @@ dependencies = [
 name = "entry-parser"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "paddock-domain",
  "paddock-use-case",
  "regex",
