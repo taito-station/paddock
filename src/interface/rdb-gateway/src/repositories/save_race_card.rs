@@ -8,9 +8,10 @@ pub async fn save_race_card(pool: &SqlitePool, card: &RaceCard) -> Result<()> {
 
     sqlx::query(
         r#"
-        INSERT INTO race_cards (race_id, venue, round, day, race_num, surface, distance)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        INSERT INTO race_cards (race_id, date, venue, round, day, race_num, surface, distance)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         ON CONFLICT(race_id) DO UPDATE SET
+            date     = excluded.date,
             venue    = excluded.venue,
             round    = excluded.round,
             day      = excluded.day,
@@ -20,6 +21,7 @@ pub async fn save_race_card(pool: &SqlitePool, card: &RaceCard) -> Result<()> {
         "#,
     )
     .bind(card.race_id.value())
+    .bind(card.date.format("%Y-%m-%d").to_string())
     .bind(card.venue.as_jp())
     .bind(card.round as i64)
     .bind(card.day as i64)
