@@ -77,13 +77,7 @@ fn course_stats_with_gate(inner_win: u32, middle_win: u32) -> CourseStatsRow {
         surface: "turf".to_string(),
         by_gate_group: vec![
             make_group("Inner (1-3)", 20, inner_win, inner_win + 2, inner_win + 4),
-            make_group(
-                "Middle (4-6)",
-                20,
-                middle_win,
-                middle_win + 2,
-                middle_win + 4,
-            ),
+            make_group("Middle (4-6)", 20, middle_win, middle_win + 2, middle_win + 4),
             make_group("Outer (7-8)", 20, 1, 3, 5),
         ],
     }
@@ -225,14 +219,8 @@ async fn predict_race_higher_stats_horse_gets_higher_win_prob() {
     let race_id = RaceId::try_from("2026-1-tokyo-1-R1").unwrap();
     let probs = app.predict_race(&race_id).await.unwrap();
 
-    let uma_a = probs
-        .iter()
-        .find(|p| p.horse_name.value() == "ウマA")
-        .unwrap();
-    let uma_b = probs
-        .iter()
-        .find(|p| p.horse_name.value() == "ウマB")
-        .unwrap();
+    let uma_a = probs.iter().find(|p| p.horse_name.value() == "ウマA").unwrap();
+    let uma_b = probs.iter().find(|p| p.horse_name.value() == "ウマB").unwrap();
     assert!(
         uma_a.win_prob > uma_b.win_prob,
         "ウマA(win_rate=0.2, Inner gate) should outrank ウマB(win_rate=0.1, Middle gate)"

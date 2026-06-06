@@ -12,5 +12,6 @@ CREATE TABLE predict_bets (
     created_at   TEXT NOT NULL
 );
 
-CREATE INDEX idx_predict_bets_session_date ON predict_bets(session_date);
-CREATE INDEX idx_predict_bets_race         ON predict_bets(session_date, race_id);
+-- 複合インデックスの先頭カラムが session_date なので、session_date 単独検索
+-- （find_predict_bets）もこれ 1 本でカバーできる。
+CREATE INDEX idx_predict_bets_race ON predict_bets(session_date, race_id);

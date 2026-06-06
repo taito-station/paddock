@@ -155,8 +155,10 @@ pub trait Repository: Send + Sync {
 
     /// 指定日に開催されるレース一覧を race_num 昇順で返す。
     /// 予想用途のため `results` は読み込まず空 Vec で返す。
-    fn find_races_by_date(&self, date: NaiveDate)
-    -> impl Future<Output = Result<Vec<Race>>> + Send;
+    fn find_races_by_date(
+        &self,
+        date: NaiveDate,
+    ) -> impl Future<Output = Result<Vec<Race>>> + Send;
 
     /// race_id に対応するオッズを返す。未取得の場合は `None`。
     fn find_race_odds(
