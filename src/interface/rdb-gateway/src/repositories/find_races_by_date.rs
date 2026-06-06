@@ -42,7 +42,7 @@ pub async fn find_races_by_date(pool: &SqlitePool, date: NaiveDate) -> Result<Ve
                surface, distance, NULL AS track_condition, NULL AS weather
         FROM race_cards
         WHERE date = $1
-          AND race_id NOT IN (SELECT race_id FROM races)
+          AND NOT EXISTS (SELECT 1 FROM races WHERE races.race_id = race_cards.race_id)
         ORDER BY race_num ASC
         "#,
     )

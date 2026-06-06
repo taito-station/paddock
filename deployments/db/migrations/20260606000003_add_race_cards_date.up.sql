@@ -12,3 +12,6 @@ SET date = (
     WHERE r.race_id = race_cards.race_id
 )
 WHERE date IS NULL;
+
+-- find_races_by_date は race_cards を date で絞り込むため索引を張る（races(date) と同方針）。
+CREATE INDEX idx_race_cards_date ON race_cards(date);
