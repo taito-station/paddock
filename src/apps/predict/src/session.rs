@@ -3,7 +3,7 @@ use std::io::{self, Write};
 
 use chrono::{NaiveDate, Utc};
 use paddock_domain::{
-    BetCombination, BettingConfig, BettingRecommendation, HorseProbability, Race, Surface,
+    BetCombination, BettingConfig, BettingRecommendation, HorseProbability, Race, RaceId, Surface,
     select_bets,
 };
 use paddock_use_case::{PredictBetRecord, PredictSessionRecord};
@@ -42,7 +42,7 @@ pub async fn run_session(
         if budget.is_some() {
             println!("注意: --resume では --budget は無視され、保存済み予算を使います。");
         }
-        let bets = app.interactor.predict_bets(date).await?;
+        let bets = app.interactor.find_predict_bets(date).await?;
         let processed: HashSet<String> =
             bets.iter().map(|b| b.race_id.value().to_string()).collect();
         println!(
@@ -179,10 +179,10 @@ async fn run_race(
 
     println!();
     println!(">>> レース後 — 買い目ごとに払戻を入力 <<<");
-    let mut bet_records = Vec::new();
-    let mut race_payout = 0u64;
+    let mut payouts = Vec::with_capacity(bet_amounts.len());
     for (rec, &stake) in recs.iter().zip(&bet_amounts) {
         if stake == 0 {
+            payouts.push(0);
             continue;
         }
         let payout = read_u64(
@@ -193,18 +193,13 @@ async fn run_race(
             ),
             true,
         )?;
-        session.balance += payout;
-        session.total_payout += payout;
-        race_payout += payout;
-        bet_records.push(PredictBetRecord {
-            race_id: race.race_id.clone(),
-            bet_type: rec.combination.type_label().to_string(),
-            combination: rec.combination.combination_code(),
-            stake,
-            payout,
-            ev: rec.ev,
-        });
+        payouts.push(payout);
     }
+
+    let bet_records = build_bet_records(&race.race_id, &recs, &bet_amounts, &payouts);
+    let race_payout: u64 = bet_records.iter().map(|b| b.payout).sum();
+    session.balance += race_payout;
+    session.total_payout += race_payout;
 
     // セッション更新＋このレースの買い目を 1 トランザクションで保存する。
     session.updated_at = Utc::now();
@@ -244,7 +239,7 @@ pub async fn print_session_summary(app: &App, date: NaiveDate) -> anyhow::Result
     println!("現在残高: ¥{}", session.balance);
     print_totals(&session);
 
-    let bets = app.interactor.predict_bets(date).await?;
+    let bets = app.interactor.find_predict_bets(date).await?;
     if !bets.is_empty() {
         println!();
         println!("【買い目明細】");
@@ -265,6 +260,36 @@ pub async fn print_session_summary(app: &App, date: NaiveDate) -> anyhow::Result
         }
     }
     Ok(())
+}
+
+/// 確定した賭け金・払戻から DB 保存用の買い目レコードを組み立てる純関数。
+///
+/// `recs` / `stakes` / `payouts` は同じ並び（`select_bets` の順）。`stake == 0`
+/// （編集で見送り）の買い目は記録しない。対話 I/O から切り離してあるので、
+/// 残高・回収率に直結するフィールドのマッピングを単体テストで担保できる。
+fn build_bet_records(
+    race_id: &RaceId,
+    recs: &[BettingRecommendation],
+    stakes: &[u64],
+    payouts: &[u64],
+) -> Vec<PredictBetRecord> {
+    recs.iter()
+        .zip(stakes)
+        .zip(payouts)
+        .filter_map(|((rec, &stake), &payout)| {
+            if stake == 0 {
+                return None;
+            }
+            Some(PredictBetRecord {
+                race_id: race_id.clone(),
+                bet_type: rec.combination.type_label().to_string(),
+                combination: rec.combination.combination_code(),
+                stake,
+                payout,
+                ev: rec.ev,
+            })
+        })
+        .collect()
 }
 
 /// Kelly 比例縮小方式で各買い目の推奨額を算出する。
@@ -430,7 +455,51 @@ fn read_u64(prompt: &str, allow_empty_as_zero: bool) -> anyhow::Result<u64> {
 
 #[cfg(test)]
 mod tests {
-    use super::recommended_amounts;
+    use super::{build_bet_records, recommended_amounts};
+    use paddock_domain::horse_result::HorseNum;
+    use paddock_domain::{BetCombination, BettingRecommendation, RaceId};
+
+    fn rec(combination: BetCombination, ev: f64) -> BettingRecommendation {
+        BettingRecommendation {
+            combination,
+            probability: 0.0,
+            odds: 0.0,
+            ev,
+            kelly_fraction: 0.0,
+        }
+    }
+
+    fn horse(n: u32) -> HorseNum {
+        HorseNum::try_from(n).unwrap()
+    }
+
+    #[test]
+    fn build_bet_records_skips_zero_stake_and_maps_fields() {
+        let race_id = RaceId::try_from("2026-3-nakayama-8-1R").unwrap();
+        let recs = vec![
+            rec(BetCombination::Win(horse(3)), 1.5),
+            rec(BetCombination::Place(horse(7)), 1.2), // stake 0 → 記録しない
+            rec(BetCombination::Win(horse(5)), 1.8),
+        ];
+        let stakes = vec![1000u64, 0, 500];
+        let payouts = vec![0u64, 999, 2500];
+
+        let records = build_bet_records(&race_id, &recs, &stakes, &payouts);
+
+        assert_eq!(records.len(), 2, "stake==0 の買い目は除外される");
+        assert_eq!(records[0].bet_type, "win");
+        assert_eq!(records[0].combination, "3");
+        assert_eq!(records[0].stake, 1000);
+        assert_eq!(records[0].payout, 0);
+        assert!((records[0].ev - 1.5).abs() < 1e-10);
+        assert_eq!(records[1].combination, "5");
+        assert_eq!(records[1].stake, 500);
+        assert_eq!(records[1].payout, 2500);
+        assert_eq!(records[1].race_id.value(), "2026-3-nakayama-8-1R");
+        // 回収率の元になる合計が払戻の総和と一致する
+        let total_payout: u64 = records.iter().map(|b| b.payout).sum();
+        assert_eq!(total_payout, 2500);
+    }
 
     #[test]
     fn within_budget_keeps_floor() {

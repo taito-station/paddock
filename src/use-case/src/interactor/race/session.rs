@@ -17,7 +17,7 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
     }
 
     /// 指定日のセッションで購入済みの買い目を取得する。
-    pub async fn predict_bets(&self, date: NaiveDate) -> Result<Vec<PredictBetRecord>> {
+    pub async fn find_predict_bets(&self, date: NaiveDate) -> Result<Vec<PredictBetRecord>> {
         self.repository.find_predict_bets(date).await
     }
 

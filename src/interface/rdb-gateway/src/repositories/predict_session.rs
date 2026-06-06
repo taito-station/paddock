@@ -8,6 +8,12 @@ use crate::error::{Error, Result};
 /// `predict_sessions` の 1 行（取得用）。
 type SessionRow = (String, i64, i64, i64, i64, i64, String, String);
 
+/// 日付を DB キー文字列に整形する単一ソース。`predict_sessions.date` と
+/// `predict_bets.session_date` の突き合わせはこの形式に依存するため必ずここを通す。
+fn date_key(date: NaiveDate) -> String {
+    date.format("%Y-%m-%d").to_string()
+}
+
 const SESSION_COLUMNS: &str =
     "date, budget, balance, total_bet, total_payout, completed, created_at, updated_at";
 
@@ -25,6 +31,10 @@ const UPSERT_SESSION_SQL: &str = r#"
 "#;
 
 /// `UPSERT_SESSION_SQL` に session の各値をバインドする。
+///
+/// 金額（円）は `u64` だが SQLite INTEGER は `i64`。賭け金は現実的に `i64::MAX` に
+/// 達しないためキャストで安全。仮に超えても `as i64` でサイレントに負値化するだけで
+/// DB は受理する点に留意（ドメイン上は起き得ない）。
 fn bind_session<'q>(
     query: sqlx::query::Query<'q, sqlx::Sqlite, sqlx::sqlite::SqliteArguments<'q>>,
     date_str: &'q str,
@@ -47,7 +57,7 @@ pub async fn find_predict_session(
     pool: &SqlitePool,
     date: NaiveDate,
 ) -> Result<Option<PredictSessionRecord>> {
-    let date_str = date.format("%Y-%m-%d").to_string();
+    let date_str = date_key(date);
     let row: Option<SessionRow> = sqlx::query_as(&format!(
         "SELECT {SESSION_COLUMNS} FROM predict_sessions WHERE date = $1"
     ))
@@ -77,7 +87,7 @@ pub async fn find_predict_bets(
     pool: &SqlitePool,
     date: NaiveDate,
 ) -> Result<Vec<PredictBetRecord>> {
-    let date_str = date.format("%Y-%m-%d").to_string();
+    let date_str = date_key(date);
     let rows: Vec<(String, String, String, i64, i64, f64)> = sqlx::query_as(
         r#"
         SELECT race_id, bet_type, combination, stake, payout, ev
@@ -105,8 +115,11 @@ pub async fn find_predict_bets(
 }
 
 /// セッションのヘッダのみを upsert する（新規作成・完了マーク用）。
+///
+/// 新規セッションは必ずこの関数で先にヘッダを作成してから `save_race_outcome` を呼ぶ前提。
+/// `created_at` は `ON CONFLICT DO UPDATE` の対象外なので、初回作成時の値が保持される。
 pub async fn save_predict_session(pool: &SqlitePool, session: &PredictSessionRecord) -> Result<()> {
-    let date_str = session.date.format("%Y-%m-%d").to_string();
+    let date_str = date_key(session.date);
     bind_session(
         sqlx::query(UPSERT_SESSION_SQL),
         &date_str,
@@ -126,7 +139,7 @@ pub async fn save_race_outcome(
     race_id: &RaceId,
     bets: &[PredictBetRecord],
 ) -> Result<()> {
-    let date_str = session.date.format("%Y-%m-%d").to_string();
+    let date_str = date_key(session.date);
     let mut tx = pool.begin().await?;
 
     bind_session(
