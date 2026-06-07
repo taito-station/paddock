@@ -209,7 +209,8 @@ pub fn simulate(input: &SimInput) -> Result<SimReport> {
                 if has_probs {
                     // 上位 3 着の順列は結果空間を MECE に分割し、全券種の的中可否は上位 3 着で
                     // 確定する。よって harville による各順列確率は 4 着以降を周辺化済みの確率として
-                    // そのまま EV・的中確率に積算できる（win_probs が全頭・総和 1 のとき総和も 1）。
+                    // そのまま EV・的中確率に積算できる。なお harville は上位 2 頭の単勝確率和が
+                    // 1 以上の順列を 0 とするため、確率総和は（全頭・総和 1 入力でも）1 以下になりうる。
                     let prob = harville_trifecta(win_of(first), win_of(second), win_of(third));
                     ev_sum += prob * payout as f64;
                     if payout > 0 {
@@ -229,6 +230,14 @@ pub fn simulate(input: &SimInput) -> Result<SimReport> {
                 return Err(Error::InvalidFormat(
                     "main finish requires three distinct horses".to_string(),
                 ));
+            }
+            for finisher in [a, b, c] {
+                if !field.contains(&finisher) {
+                    return Err(Error::InvalidFormat(format!(
+                        "main finish horse {} is not in the field",
+                        finisher.value()
+                    )));
+                }
             }
             let payout = payout_of(&input.bets, (a, b, c), runners);
             Some(to_outcome(a, b, c, payout))
@@ -427,6 +436,17 @@ mod tests {
             field: field(6),
             bets: vec![],
             main: Some((h(1), h(1), h(2))),
+            win_probs: None,
+        };
+        assert!(simulate(&input).is_err());
+    }
+
+    #[test]
+    fn main_horse_outside_field_errors() {
+        let input = SimInput {
+            field: field(6),
+            bets: vec![],
+            main: Some((h(1), h(2), h(9))), // 9 番は 6 頭立てに居ない
             win_probs: None,
         };
         assert!(simulate(&input).is_err());
