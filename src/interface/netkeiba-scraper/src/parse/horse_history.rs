@@ -29,7 +29,11 @@ const MIN_CELLS: usize = 29;
 /// 馬個別成績ページ (`horse/result/<id>/`) のHTMLから JRA 平地の近走を抽出する。
 ///
 /// 障害・地方・海外の行はスキップする（race_id リンクが無い=海外、場コードが JRA 外=地方、
-/// 距離が `障…`=障害）。競走中止・取消・除外は着順なし＋`status` 付きで保持する。
+/// 距離が `障…`=障害）。競走中止（着順 `中`）は馬番等が揃うため着順なし＋`status` 付きで
+/// 保持するが、出走取消・除外で馬番/枠/距離など必須セルを欠く行はスキップする。
+///
+/// 列レイアウト変更などで全データ行が落ちると無言で空 Vec になり原因が見えにくいため、
+/// データ行があったのに 1 件も抽出できなかった場合は warn を出す。
 pub fn parse_horse_history(html: &str) -> Result<Vec<HorsePastRun>> {
     let doc = Html::parse_document(html);
     let table = doc
@@ -50,14 +54,23 @@ pub fn parse_horse_history(html: &str) -> Result<Vec<HorsePastRun>> {
     let a_race_sel = sel("a[href*=\"/race/\"]")?;
 
     let mut runs = Vec::new();
+    let mut data_rows = 0usize;
     for row in table.select(&tr_sel) {
         let cells: Vec<ElementRef> = row.select(&td_sel).collect();
         if cells.len() < MIN_CELLS {
             continue; // ヘッダ行（th のみ）や壊れた行
         }
+        data_rows += 1;
         if let Some(run) = parse_row(&cells, &a_race_sel, &horse_name) {
             runs.push(run);
         }
+    }
+    if data_rows > 0 && runs.is_empty() {
+        tracing::warn!(
+            horse = %horse_name,
+            data_rows,
+            "no rows extracted from horse history (列レイアウト変更の可能性)"
+        );
     }
     Ok(runs)
 }

@@ -28,6 +28,9 @@ struct RaceRow {
 ///
 /// 予想フェーズで使うため `results`（着順）は読み込まず空 Vec で返す。
 /// `WHERE date = $1` で絞り込むため、各行の date は引数 `date` と一致する。
+///
+/// netkeiba 近走由来の合成レース（`source='netkeiba'`、過去日付の `nk-<id>`）は
+/// 予想対象ではないため `source = 'pdf'` で除外する（混入すると予想候補として現れてしまう）。
 pub async fn find_races_by_date(pool: &SqlitePool, date: NaiveDate) -> Result<Vec<Race>> {
     let date_str = date.format("%Y-%m-%d").to_string();
 
@@ -37,6 +40,7 @@ pub async fn find_races_by_date(pool: &SqlitePool, date: NaiveDate) -> Result<Ve
                surface, distance, track_condition, weather
         FROM races
         WHERE date = $1
+          AND source = 'pdf'
         UNION ALL
         SELECT race_id, venue, round, day, race_num,
                surface, distance, NULL AS track_condition, NULL AS weather

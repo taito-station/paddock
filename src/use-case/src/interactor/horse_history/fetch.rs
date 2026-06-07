@@ -63,7 +63,8 @@ impl<R: Repository, S: NetkeibaScraper> HorseHistoryInteractor<R, S> {
             }
         }
 
-        // 3. 合成レースごとに upsert。
+        // 3. 合成レースごとに upsert。DB エラーは系統的障害とみなし fail-fast で中断する
+        //    （途中まで保存され得るが upsert は非削除・冪等なので再実行で回復する）。
         let mut races_saved = 0;
         let mut results_saved = 0;
         for race in races.values() {
