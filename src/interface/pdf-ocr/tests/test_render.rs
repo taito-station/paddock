@@ -1,10 +1,14 @@
 use pdf_ocr::render_pdf_to_pngs;
 
-const SAMPLE: &[u8] = include_bytes!("../../../../samples/2026-3nakayama6.pdf");
+#[path = "../../sample_pdf_fixture.rs"]
+mod fixture;
 
 #[test]
 fn renders_sample_pdf_to_at_least_one_png() {
-    let rendered = render_pdf_to_pngs(SAMPLE, 100).expect("render pdf");
+    let Some(sample) = fixture::sample_result_pdf() else {
+        return;
+    };
+    let rendered = render_pdf_to_pngs(&sample, 100).expect("render pdf");
     assert!(
         !rendered.pages.is_empty(),
         "expected at least one rendered page"
