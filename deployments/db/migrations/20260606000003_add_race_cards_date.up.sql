@@ -13,5 +13,5 @@ SET date = (
 )
 WHERE date IS NULL;
 
--- find_races_by_date は race_cards を date で絞り込むため索引を張る（races(date) と同方針）。
+-- find_races_by_date は race_cards を date で絞り込むため索引を張る。
 CREATE INDEX idx_race_cards_date ON race_cards(date);
