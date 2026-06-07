@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use ordered_float::OrderedFloat;
 
 use crate::horse_result::HorseNum;
-use crate::odds::{OrderedPair, OrderedTriple, Pair, RaceOdds, Triple};
+use crate::odds::{BetType, OrderedPair, OrderedTriple, Pair, RaceOdds, Triple};
 use crate::prediction::HorseProbability;
 
 const MIN_DENOMINATOR: f64 = 1e-6;
@@ -30,18 +30,33 @@ pub enum BetCombination {
     Win(HorseNum),
     Place(HorseNum),
     Quinella(Pair),
+    Wide(Pair),
     Exacta(OrderedPair),
     Trio(Triple),
     Trifecta(OrderedTriple),
 }
 
 impl BetCombination {
+    /// この買い目の券種。
+    pub fn bet_type(&self) -> BetType {
+        match self {
+            BetCombination::Win(_) => BetType::Win,
+            BetCombination::Place(_) => BetType::Place,
+            BetCombination::Quinella(_) => BetType::Quinella,
+            BetCombination::Wide(_) => BetType::Wide,
+            BetCombination::Exacta(_) => BetType::Exacta,
+            BetCombination::Trio(_) => BetType::Trio,
+            BetCombination::Trifecta(_) => BetType::Trifecta,
+        }
+    }
+
     /// 馬券種を表す安定した小文字ラベル（DB 保存・分析用）。
     pub fn type_label(&self) -> &'static str {
         match self {
             BetCombination::Win(_) => "win",
             BetCombination::Place(_) => "place",
             BetCombination::Quinella(_) => "quinella",
+            BetCombination::Wide(_) => "wide",
             BetCombination::Exacta(_) => "exacta",
             BetCombination::Trio(_) => "trio",
             BetCombination::Trifecta(_) => "trifecta",
@@ -54,7 +69,7 @@ impl BetCombination {
     pub fn combination_code(&self) -> String {
         match self {
             BetCombination::Win(h) | BetCombination::Place(h) => h.value().to_string(),
-            BetCombination::Quinella(p) => {
+            BetCombination::Quinella(p) | BetCombination::Wide(p) => {
                 let (a, b) = p.as_tuple();
                 format!("{}-{}", a.value(), b.value())
             }
@@ -218,7 +233,7 @@ pub fn select_bets(
 fn combination_ord_key(c: &BetCombination) -> (u32, u32, u32) {
     match c {
         BetCombination::Win(h) | BetCombination::Place(h) => (h.value(), 0, 0),
-        BetCombination::Quinella(p) => {
+        BetCombination::Quinella(p) | BetCombination::Wide(p) => {
             let (a, b) = p.as_tuple();
             (a.value(), b.value(), 0)
         }
@@ -265,6 +280,8 @@ fn priority(c: &BetCombination) -> u8 {
         BetCombination::Win(_) => 3,
         BetCombination::Place(_) => 4,
         BetCombination::Trifecta(_) => 5,
+        // Wide は select_bets では生成しない（収支シミュレータ専用）。網羅性のため末尾に置く。
+        BetCombination::Wide(_) => 6,
     }
 }
 

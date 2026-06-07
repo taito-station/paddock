@@ -6,6 +6,10 @@ members = [
     "src/apps/analyze",
     "src/apps/predict",
     "src/apps/fetch-history",
+    "src/apps/simulate",
+    # Standalone library crate: not yet consumed by any binary, so it is listed
+    # explicitly to stay part of the workspace build/test graph.
+    "src/interface/odds-scraper",
 ]
 
 [workspace.dependencies]
