@@ -58,7 +58,8 @@ fn load_result_pdf() -> Option<Vec<u8>> {
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    let tmp = path.with_extension("pdf.tmp");
+    // tmp 名にプロセス ID を付けて、別テストバイナリの同時 DL でも衝突しないようにする。
+    let tmp = path.with_extension(format!("pdf.{}.tmp", std::process::id()));
     if std::fs::write(&tmp, &buf).is_ok() {
         let _ = std::fs::rename(&tmp, &path);
     }
