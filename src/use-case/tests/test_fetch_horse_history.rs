@@ -225,3 +225,33 @@ async fn skips_failing_horse_and_continues() {
     assert_eq!(resp.races_saved, 1);
     assert_eq!(resp.results_saved, 1);
 }
+
+#[tokio::test]
+async fn dedups_same_race_and_horse_num() {
+    // 異常 HTML 等で同一馬が同一レース・同一馬番の行を 2 つ返しても 1 行に集約する。
+    let scraper = FakeScraper {
+        shutuba: HashMap::new(),
+        histories: HashMap::from([(
+            "DUP".to_string(),
+            vec![
+                past_run("rDup", "ウマ", 4, 1),
+                past_run("rDup", "ウマ", 4, 1),
+            ],
+        )]),
+        failing: HashSet::new(),
+    };
+    let interactor = HorseHistoryInteractor::new(RecordingRepo::default(), scraper);
+
+    let resp = interactor
+        .fetch_and_store(&[], &["DUP".to_string()])
+        .await
+        .expect("fetch_and_store");
+
+    assert_eq!(resp.races_saved, 1);
+    assert_eq!(
+        resp.results_saved, 1,
+        "同一 (race_id, horse_num) は 1 行に集約"
+    );
+    let upserted = interactor.repository.upserted.lock().unwrap();
+    assert_eq!(upserted[0].results.len(), 1);
+}

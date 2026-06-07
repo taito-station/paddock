@@ -49,8 +49,9 @@ pub struct HorsePastRun {
 ///
 /// Implementations (Interface layer) own the HTTP fetch, EUC-JP decoding and HTML
 /// parsing; the use-case layer depends only on this trait. Methods are synchronous
-/// (ureq) and embed an inter-request delay out of courtesy to netkeiba; the
-/// interactor wraps calls in `spawn_blocking`.
+/// (ureq) and embed an inter-request delay out of courtesy to netkeiba. The
+/// interactor is a single-shot CLI flow that calls these sequentially, so the
+/// blocking I/O runs directly on the runtime thread (no `spawn_blocking`).
 pub trait NetkeibaScraper: Send + Sync {
     /// 出馬表 (`race/shutuba.html`) から出走各馬の `horse_id` を馬番順に取得する。
     fn fetch_shutuba(&self, netkeiba_race_id: &str) -> Result<Vec<RunnerRef>>;
