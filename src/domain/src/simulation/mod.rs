@@ -9,7 +9,6 @@ use std::collections::HashMap;
 use crate::betting::{BetCombination, harville_trifecta};
 use crate::error::{Error, Result};
 use crate::horse_result::HorseNum;
-use crate::prediction::HorseProbability;
 
 /// 上位 3 着の馬番（1 着, 2 着, 3 着）。
 pub type Finish = (HorseNum, HorseNum, HorseNum);
@@ -33,8 +32,12 @@ pub struct SimInput {
     pub bets: Vec<PlacedBet>,
     /// 本線（着目したい着順）。指定時はその収支も併せて出す。
     pub main: Option<Finish>,
-    /// 各馬の単勝確率。与えられた場合のみ EV 等を算出する。
-    pub win_probs: Option<Vec<HorseProbability>>,
+    /// 各馬の単勝確率（馬番→確率）。指定時のみ EV 等を算出する。
+    ///
+    /// 前提: `field` 全頭分を与え、総和を概ね 1 とすること。未指定の馬は確率 0 と
+    /// みなし、列挙着順の確率を正規化しないため、部分指定や総和≠1 のときは
+    /// EV・的中確率・期待回収率が過小評価される。
+    pub win_probs: Option<HashMap<HorseNum, f64>>,
 }
 
 /// ある着順における収支。
@@ -66,10 +69,10 @@ pub struct SimReport {
     pub total_count: u64,
     /// 1 つ以上の買い目が的中する着順の通り数。
     pub hit_count: u64,
-    /// 最大払戻となる着順（ベストケース）。
+    /// 最大払戻となる着順（ベストケース）。払戻が同点のときは列挙順で最初の着順。
     pub best: Outcome,
     /// 的中する着順のうち最小払戻のもの。`pnl < 0` なら「当たっても赤字」。
-    /// 的中する着順が 1 つも無いときは `None`。
+    /// 払戻が同点のときは列挙順で最初の着順。的中する着順が 1 つも無いときは `None`。
     pub worst_hit: Option<Outcome>,
     /// 本線（入力で指定された着順）の収支。未指定なら `None`。
     pub main: Option<Outcome>,
@@ -151,16 +154,13 @@ pub fn simulate(input: &SimInput) -> Result<SimReport> {
 
     let total_stake: u64 = input.bets.iter().map(|b| b.stake).sum();
 
-    // EV 用の単勝確率マップ（指定時のみ）。
-    let win_map: Option<HashMap<u32, f64>> = input.win_probs.as_ref().map(|ps| {
-        ps.iter()
-            .map(|p| (p.horse_num.value(), p.win_prob))
-            .collect()
-    });
+    // EV 用の単勝確率ルックアップ（指定時のみ）。
+    let has_probs = input.win_probs.is_some();
     let win_of = |h: HorseNum| -> f64 {
-        win_map
+        input
+            .win_probs
             .as_ref()
-            .and_then(|m| m.get(&h.value()).copied())
+            .and_then(|m| m.get(&h).copied())
             .unwrap_or(0.0)
     };
 
@@ -204,7 +204,7 @@ pub fn simulate(input: &SimInput) -> Result<SimReport> {
                     best = Some(to_outcome(first, second, third, payout));
                 }
 
-                if win_map.is_some() {
+                if has_probs {
                     let prob = harville_trifecta(win_of(first), win_of(second), win_of(third));
                     ev_sum += prob * payout as f64;
                     if payout > 0 {
@@ -231,15 +231,19 @@ pub fn simulate(input: &SimInput) -> Result<SimReport> {
         None => None,
     };
 
-    let ev = win_map.as_ref().map(|_| EvReport {
-        ev: ev_sum,
-        roi: if total_stake > 0 {
-            ev_sum / total_stake as f64
-        } else {
-            0.0
-        },
-        hit_prob,
-    });
+    let ev = if has_probs {
+        Some(EvReport {
+            ev: ev_sum,
+            roi: if total_stake > 0 {
+                ev_sum / total_stake as f64
+            } else {
+                0.0
+            },
+            hit_prob,
+        })
+    } else {
+        None
+    };
 
     Ok(SimReport {
         total_stake,
@@ -255,7 +259,6 @@ pub fn simulate(input: &SimInput) -> Result<SimReport> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::horse_result::HorseName;
     use crate::odds::{Pair, Triple};
 
     fn h(n: u32) -> HorseNum {
@@ -271,16 +274,6 @@ mod tests {
             combination,
             stake,
             odds,
-        }
-    }
-
-    fn prob(n: u32, win: f64) -> HorseProbability {
-        HorseProbability {
-            horse_num: h(n),
-            horse_name: HorseName::try_from(format!("ウマ{n}")).unwrap(),
-            win_prob: win,
-            place_prob: 0.0,
-            show_prob: 0.0,
         }
     }
 
@@ -390,7 +383,7 @@ mod tests {
             field: field(3),
             bets: vec![bet(BetCombination::Win(h(1)), 1000, 2.0)],
             main: None,
-            win_probs: Some(vec![prob(1, 0.5), prob(2, 0.3), prob(3, 0.2)]),
+            win_probs: Some(HashMap::from([(h(1), 0.5), (h(2), 0.3), (h(3), 0.2)])),
         };
         let r = simulate(&input).unwrap();
         let ev = r.ev.unwrap();
@@ -407,6 +400,28 @@ mod tests {
             field: field(2),
             bets: vec![],
             main: None,
+            win_probs: None,
+        };
+        assert!(simulate(&input).is_err());
+    }
+
+    #[test]
+    fn duplicate_field_errors() {
+        let input = SimInput {
+            field: vec![h(1), h(2), h(2)],
+            bets: vec![],
+            main: None,
+            win_probs: None,
+        };
+        assert!(simulate(&input).is_err());
+    }
+
+    #[test]
+    fn main_with_duplicate_horses_errors() {
+        let input = SimInput {
+            field: field(6),
+            bets: vec![],
+            main: Some((h(1), h(1), h(2))),
             win_probs: None,
         };
         assert!(simulate(&input).is_err());

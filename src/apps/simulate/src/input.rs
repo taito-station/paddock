@@ -4,8 +4,8 @@ use std::collections::HashMap;
 
 use anyhow::{Result, anyhow, bail};
 use paddock_domain::{
-    BetCombination, BetType, Finish, HorseName, HorseNum, HorseProbability, OrderedPair,
-    OrderedTriple, Pair, PlacedBet, SimInput, Triple,
+    BetCombination, BetType, Finish, HorseNum, OrderedPair, OrderedTriple, Pair, PlacedBet,
+    SimInput, Triple,
 };
 use serde::Deserialize;
 
@@ -135,6 +135,13 @@ pub fn to_sim_input(json: InputJson, main_override: Option<&str>) -> Result<SimI
         .iter()
         .map(|b| {
             let kind = BetType::try_from(b.kind.as_str())?;
+            if !b.odds.is_finite() || b.odds < 1.0 {
+                bail!(
+                    "オッズは 1.0 以上の有限値で指定してください（{} odds={}）",
+                    b.kind,
+                    b.odds
+                );
+            }
             Ok(PlacedBet {
                 combination: build_combination(kind, &b.horses)?,
                 stake: b.stake,
@@ -153,20 +160,14 @@ pub fn to_sim_input(json: InputJson, main_override: Option<&str>) -> Result<SimI
 
     let win_probs = match json.win_probs {
         Some(map) => {
-            let mut ps = Vec::with_capacity(map.len());
+            let mut probs = HashMap::with_capacity(map.len());
             for (num, prob) in map {
                 let n: u32 = num
                     .parse()
                     .map_err(|e| anyhow!("win_probs のキー '{num}' は馬番ではありません: {e}"))?;
-                ps.push(HorseProbability {
-                    horse_num: horse(n)?,
-                    horse_name: HorseName::try_from(num.clone()).map_err(|e| anyhow!(e))?,
-                    win_prob: prob,
-                    place_prob: 0.0,
-                    show_prob: 0.0,
-                });
+                probs.insert(horse(n)?, prob);
             }
-            Some(ps)
+            Some(probs)
         }
         None => None,
     };
@@ -216,5 +217,30 @@ mod tests {
         let raw = r#"{ "runners": 6, "bets": [{"type":"win","horses":[1,2],"stake":100,"odds":2.0}] }"#;
         let json: InputJson = serde_json::from_str(raw).unwrap();
         assert!(to_sim_input(json, None).is_err());
+    }
+
+    #[test]
+    fn win_probs_are_converted() {
+        let raw = r#"{ "runners": 6, "bets": [], "win_probs": {"1":0.5,"5":0.3} }"#;
+        let json: InputJson = serde_json::from_str(raw).unwrap();
+        let sim = to_sim_input(json, None).unwrap();
+        let probs = sim.win_probs.unwrap();
+        assert_eq!(probs.len(), 2);
+        assert_eq!(probs.get(&HorseNum::try_from(1).unwrap()).copied(), Some(0.5));
+        assert_eq!(probs.get(&HorseNum::try_from(5).unwrap()).copied(), Some(0.3));
+    }
+
+    #[test]
+    fn invalid_odds_errors() {
+        let raw = r#"{ "runners": 6, "bets": [{"type":"win","horses":[1],"stake":100,"odds":0.5}] }"#;
+        let json: InputJson = serde_json::from_str(raw).unwrap();
+        assert!(to_sim_input(json, None).is_err());
+    }
+
+    #[test]
+    fn parse_finish_rejects_bad_input() {
+        assert!(parse_finish("1-2").is_err()); // 要素不足
+        assert!(parse_finish("1-2-x").is_err()); // 非数値
+        assert!(parse_finish("1-2-3").is_ok());
     }
 }

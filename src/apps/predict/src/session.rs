@@ -375,6 +375,10 @@ fn format_combination(c: &BetCombination) -> String {
             let (a, b) = p.as_tuple();
             format!("馬連 {}-{}", a.value(), b.value())
         }
+        BetCombination::Wide(p) => {
+            let (a, b) = p.as_tuple();
+            format!("ワイド {}-{}", a.value(), b.value())
+        }
         BetCombination::Exacta(p) => {
             let (a, b) = p.as_tuple();
             format!("馬単 {}→{}", a.value(), b.value())

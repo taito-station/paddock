@@ -24,7 +24,8 @@ pub struct RaceOdds {
     pub place: HashMap<HorseNum, PlaceOdds>,
     /// 馬連
     pub quinella: HashMap<Pair, OddsValue>,
-    /// ワイド (low..high band per pair)
+    /// ワイド (low..high band per pair)。オッズスクレイパが populate する想定
+    /// (#25)。収支シミュレータは買い目ごとの確定オッズを使うため本フィールドは参照しない。
     pub wide: HashMap<Pair, PlaceOdds>,
     /// 馬単
     pub exacta: HashMap<OrderedPair, OddsValue>,

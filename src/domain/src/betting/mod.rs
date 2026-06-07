@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use ordered_float::OrderedFloat;
 
 use crate::horse_result::HorseNum;
-use crate::odds::{OrderedPair, OrderedTriple, Pair, RaceOdds, Triple};
+use crate::odds::{BetType, OrderedPair, OrderedTriple, Pair, RaceOdds, Triple};
 use crate::prediction::HorseProbability;
 
 const MIN_DENOMINATOR: f64 = 1e-6;
@@ -37,6 +37,19 @@ pub enum BetCombination {
 }
 
 impl BetCombination {
+    /// この買い目の券種。
+    pub fn bet_type(&self) -> BetType {
+        match self {
+            BetCombination::Win(_) => BetType::Win,
+            BetCombination::Place(_) => BetType::Place,
+            BetCombination::Quinella(_) => BetType::Quinella,
+            BetCombination::Wide(_) => BetType::Wide,
+            BetCombination::Exacta(_) => BetType::Exacta,
+            BetCombination::Trio(_) => BetType::Trio,
+            BetCombination::Trifecta(_) => BetType::Trifecta,
+        }
+    }
+
     /// 馬券種を表す安定した小文字ラベル（DB 保存・分析用）。
     pub fn type_label(&self) -> &'static str {
         match self {

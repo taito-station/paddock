@@ -5,7 +5,7 @@ use std::io::Read;
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use paddock_domain::{BetType, Finish, SimInput, SimReport, simulate};
+use paddock_domain::{Finish, SimInput, SimReport, simulate};
 
 fn main() -> Result<()> {
     let args = cli::Cli::parse();
@@ -53,11 +53,9 @@ fn print_report(sim: &SimInput, r: &SimReport) {
     println!();
     println!("[買い目]");
     for b in &sim.bets {
-        let ja = BetType::try_from(b.combination.type_label())
-            .map(|t| t.as_ja())
-            .unwrap_or("?");
         println!(
-            "  {ja} {}  ¥{} @ {:.1}倍",
+            "  {} {}  ¥{} @ {:.1}倍",
+            b.combination.bet_type().as_ja(),
             b.combination.combination_code(),
             b.stake,
             b.odds
