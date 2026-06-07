@@ -10,8 +10,8 @@ pub mod string;
 pub use betting::{BetCombination, BettingConfig, BettingRecommendation, select_bets};
 pub use error::{Error, Result};
 pub use horse_result::{
-    FinishingPosition, GateNum, HorseName, HorseNum, HorseResult, JockeyName, ResultStatus,
-    TimeSeconds, TrainerName,
+    FinishingPosition, GateNum, HorseId, HorseName, HorseNum, HorseResult, JockeyName,
+    ResultStatus, TimeSeconds, TrainerName,
 };
 pub use odds::{BetType, OddsValue, OrderedPair, OrderedTriple, Pair, PlaceOdds, RaceOdds, Triple};
 pub use prediction::{HorseFactors, HorseProbability, RateTriple, estimate_probabilities};

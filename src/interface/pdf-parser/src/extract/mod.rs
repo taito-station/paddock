@@ -139,6 +139,7 @@ fn build_race_from_block(lines: &[String], jockeys: &JockeyIndex) -> Result<Opti
             gate_num,
             horse_num,
             horse_name,
+            horse_id: None,
             jockey,
             trainer,
             time_seconds,
