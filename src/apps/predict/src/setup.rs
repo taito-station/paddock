@@ -1,6 +1,7 @@
 use anyhow::Context;
+use odds_scraper::UreqOddsScraper;
 use paddock_config::Config;
-use paddock_use_case::Interactor;
+use paddock_use_case::{Interactor, OddsInteractor};
 use rdb_gateway::{SqliteRepository, pool};
 use tracing_subscriber::{EnvFilter, fmt};
 
@@ -33,6 +34,8 @@ impl paddock_use_case::pdf_fetcher::PdfFetcher for UnusedFetcher {
 
 pub struct App {
     pub interactor: Interactor<SqliteRepository, UnusedParser, UnusedFetcher>,
+    /// オッズはオンデマンドにライブスクレイプする（DB 永続化なし、ADR 0001/0005）。
+    pub odds: OddsInteractor<UreqOddsScraper>,
 }
 
 pub async fn build_app() -> anyhow::Result<App> {
@@ -50,5 +53,6 @@ pub async fn build_app() -> anyhow::Result<App> {
     pool::migrate(&pool).await.context("apply migrations")?;
     let repo = SqliteRepository::new(pool);
     let interactor = Interactor::new(repo, UnusedParser, UnusedFetcher);
-    Ok(App { interactor })
+    let odds = OddsInteractor::new(UreqOddsScraper::new());
+    Ok(App { interactor, odds })
 }
