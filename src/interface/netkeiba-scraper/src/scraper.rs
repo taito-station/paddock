@@ -49,12 +49,19 @@ fn fetch_decoded(url: &str) -> Result<String> {
     resp.into_reader()
         .read_to_end(&mut bytes)
         .map_err(|e| Error::Fetch(format!("read body {url}: {e}")))?;
-    let (decoded, _, _) = encoding_rs::EUC_JP.decode(&bytes);
+    // ureq は 4xx/5xx を Err(Status) にするためここに来るのは 2xx/3xx のみ。
+    // それでもメンテ画面など別エンコーディングが返ると文字化けで後段の table 不検出に
+    // 化けて原因が見えにくいので、EUC-JP として解釈できないバイトがあれば警告する。
+    let (decoded, _, had_errors) = encoding_rs::EUC_JP.decode(&bytes);
+    if had_errors {
+        tracing::warn!(url, "response was not valid EUC-JP; parsing may fail");
+    }
     Ok(decoded.into_owned())
 }
 
 impl NetkeibaScraper for UreqNetkeibaScraper {
     fn fetch_shutuba(&self, netkeiba_race_id: &str) -> UcResult<Vec<RunnerRef>> {
+        std::thread::sleep(self.delay);
         let url = format!("{SHUTUBA_URL}?race_id={netkeiba_race_id}");
         tracing::debug!(race_id = %netkeiba_race_id, "fetching netkeiba shutuba");
         let html = fetch_decoded(&url)?;

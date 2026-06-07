@@ -22,7 +22,16 @@ impl<R: Repository, S: NetkeibaScraper> HorseHistoryInteractor<R, S> {
         let mut targets: Vec<HorseId> = Vec::new();
         let mut seen: HashSet<String> = HashSet::new();
         for race_id in race_ids {
-            for runner in self.scraper.fetch_shutuba(race_id)? {
+            // 出馬表 1 件の失敗で全体を止めず、warn してスキップ（個別馬の失敗と同じ扱い）。
+            // 他 race_id と --horse-id 直接指定分の取り込みを救済する。
+            let runners = match self.scraper.fetch_shutuba(race_id) {
+                Ok(runners) => runners,
+                Err(e) => {
+                    tracing::warn!(race_id, error = %e, "出馬表取得に失敗、スキップ");
+                    continue;
+                }
+            };
+            for runner in runners {
                 if seen.insert(runner.horse_id.value().to_string()) {
                     targets.push(runner.horse_id);
                 }

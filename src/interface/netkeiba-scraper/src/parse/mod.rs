@@ -42,3 +42,26 @@ pub(crate) fn cell_text(s: &str) -> Option<String> {
     let t = t.split_whitespace().collect::<Vec<_>>().join(" ");
     if t.is_empty() { None } else { Some(t) }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn venue_maps_jra_codes_and_rejects_others() {
+        // JRA10場（先頭は year4桁、5〜6桁目が場コード）。
+        assert_eq!(venue_from_race_id("202401020411"), Some(Venue::Sapporo)); // 01
+        assert_eq!(venue_from_race_id("202405030211"), Some(Venue::Tokyo)); // 05
+        assert_eq!(venue_from_race_id("202409010101"), Some(Venue::Hanshin)); // 09
+        assert_eq!(venue_from_race_id("202410010101"), Some(Venue::Kokura)); // 10
+        // 地方（大井=44 等 JRA 外コード）・短すぎる ID は None でスキップ。
+        assert_eq!(venue_from_race_id("202444010101"), None);
+        assert_eq!(venue_from_race_id("2024"), None);
+    }
+
+    #[test]
+    fn round_day_racenum_splits_id() {
+        // 2024 05 03 02 11 → round=3, day=2, race=11
+        assert_eq!(round_day_racenum("202405030211"), Some((3, 2, 11)));
+    }
+}

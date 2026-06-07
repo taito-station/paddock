@@ -8,6 +8,7 @@ use crate::error::Result;
 /// [`super::save_race::save_race`] と異なり `DELETE FROM results` を行わない。これにより、
 /// 同じ過去レースを走った複数馬の近走を別々の run で追記しても互いを消さずに集約できる。
 /// `source` は races/results とも `'netkeiba'` 固定、`results.horse_id` も保存する。
+/// `(race_id, horse_num)` 衝突時は後勝ちで全列上書きする（再取得＝最新値で更新する想定）。
 pub async fn upsert_history_race(pool: &SqlitePool, race: &Race) -> Result<()> {
     let mut tx = pool.begin().await?;
 
