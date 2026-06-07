@@ -121,6 +121,11 @@ pub struct PredictBetRecord {
 pub trait Repository: Send + Sync {
     fn save_race(&self, race: &Race) -> impl Future<Output = Result<()>> + Send;
 
+    /// netkeiba 由来の近走を 1 レース分 upsert する（`source='netkeiba'`）。
+    /// [`save_race`] と違い `results` を DELETE しないため、同一過去レースを走った別馬を
+    /// 別 run で追記でき、複数馬の近走が同じレースに集約されても消し合わない。
+    fn upsert_history_race(&self, race: &Race) -> impl Future<Output = Result<()>> + Send;
+
     fn horse_stats(&self, name: &HorseName) -> impl Future<Output = Result<HorseStatsRow>> + Send;
 
     fn course_stats(
@@ -155,10 +160,8 @@ pub trait Repository: Send + Sync {
 
     /// 指定日に開催されるレース一覧を race_num 昇順で返す。
     /// 予想用途のため `results` は読み込まず空 Vec で返す。
-    fn find_races_by_date(
-        &self,
-        date: NaiveDate,
-    ) -> impl Future<Output = Result<Vec<Race>>> + Send;
+    fn find_races_by_date(&self, date: NaiveDate)
+    -> impl Future<Output = Result<Vec<Race>>> + Send;
 
     /// race_id に対応するオッズを返す。未取得の場合は `None`。
     fn find_race_odds(

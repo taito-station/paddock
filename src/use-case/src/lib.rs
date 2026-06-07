@@ -8,10 +8,12 @@ pub mod pdf_fetcher;
 pub mod pdf_parser;
 pub mod repository;
 
+pub use dto::horse_history::fetch::FetchHorseHistoryResponse;
 pub use entry_parser::EntryParser;
 pub use error::{Error, Result};
 pub use interactor::Interactor;
 pub use interactor::entry::EntryInteractor;
+pub use interactor::horse_history::HorseHistoryInteractor;
 pub use netkeiba_scraper::{HorsePastRun, NetkeibaScraper, RunnerRef};
 pub use odds_scraper::OddsScraper;
 pub use paddock_domain::{HorseFactors, HorseProbability, RateTriple};
