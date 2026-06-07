@@ -1,5 +1,6 @@
 mod finishing_position;
 mod gate_num;
+mod horse_id;
 mod horse_name;
 mod horse_num;
 mod jockey_name;
@@ -9,6 +10,7 @@ mod trainer_name;
 
 pub use finishing_position::FinishingPosition;
 pub use gate_num::GateNum;
+pub use horse_id::HorseId;
 pub use horse_name::HorseName;
 pub use horse_num::HorseNum;
 pub use jockey_name::JockeyName;
@@ -23,6 +25,8 @@ pub struct HorseResult {
     pub gate_num: GateNum,
     pub horse_num: HorseNum,
     pub horse_name: HorseName,
+    /// netkeiba 由来の馬 ID（PDF 取り込み時は `None`）。同名馬の切り分け・近走の出典追跡に使う。
+    pub horse_id: Option<HorseId>,
     pub jockey: Option<JockeyName>,
     pub trainer: Option<TrainerName>,
     pub time_seconds: Option<TimeSeconds>,

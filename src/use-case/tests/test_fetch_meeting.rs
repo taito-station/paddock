@@ -161,6 +161,7 @@ fn sample_race() -> Race {
             gate_num: GateNum::try_from(1u32).unwrap(),
             horse_num: HorseNum::try_from(1u32).unwrap(),
             horse_name: HorseName::try_from("テストウマ").unwrap(),
+            horse_id: None,
             jockey: None,
             trainer: None,
             time_seconds: None,
