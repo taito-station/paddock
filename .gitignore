@@ -9,3 +9,6 @@
 
 # create-pr スキルの一時 PR 本文 (コミット対象外)
 docs/temp/
+
+# Claude Code のエージェント用一時 worktree
+.claude/worktrees/
