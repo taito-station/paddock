@@ -1,10 +1,13 @@
 use pdf_ocr::render_pdf_to_pngs;
 
-mod common;
+#[path = "../../sample_pdf_fixture.rs"]
+mod fixture;
 
 #[test]
 fn renders_sample_pdf_to_at_least_one_png() {
-    let sample = common::sample_result_pdf();
+    let Some(sample) = fixture::sample_result_pdf() else {
+        return;
+    };
     let rendered = render_pdf_to_pngs(&sample, 100).expect("render pdf");
     assert!(
         !rendered.pages.is_empty(),

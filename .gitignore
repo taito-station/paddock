@@ -6,6 +6,8 @@
 /pdfs/**/*.pdf
 # JRA 著作物の PDF はリポジトリに含めない（テストはローカル優先 / 結果PDFは不在時DL）
 /samples/*.pdf
+# DL fallback のキャッシュ書き込み中間ファイル
+/samples/*.tmp
 .DS_Store
 .env
 

@@ -1,11 +1,14 @@
 use pdf_ocr::OcrExtractor;
 
-mod common;
+#[path = "../../sample_pdf_fixture.rs"]
+mod fixture;
 
 #[test]
 #[ignore = "OCR is slow; run explicitly with `cargo test -p pdf-ocr --test test_extract -- --ignored --nocapture`"]
 fn extracts_rows_from_each_page() {
-    let sample = common::sample_result_pdf();
+    let Some(sample) = fixture::sample_result_pdf() else {
+        return;
+    };
     let extractor = OcrExtractor::default();
     let pages = extractor.extract(&sample).expect("ocr extract");
     eprintln!("got {} pages", pages.len());

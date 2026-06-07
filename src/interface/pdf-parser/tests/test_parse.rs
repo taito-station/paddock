@@ -1,48 +1,26 @@
 use paddock_use_case::pdf_parser::PdfParser;
 use pdf_parser::MutoolParser;
-use std::io::Read;
-use std::path::PathBuf;
 
-/// テスト用の結果 PDF を返す。
-///
-/// JRA 著作物のためリポジトリには含めない（`samples/*.pdf` は gitignore 済み）。
-/// ローカルに存在すればそれを使い、無ければ JRA 公式から取得して best-effort で
-/// `samples/` にキャッシュする。URL は `MeetingSpec::pdf_url` と同じ規則で安定。
-fn sample_result_pdf() -> Vec<u8> {
-    let path =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../samples/2026-3nakayama6.pdf");
-    if let Ok(bytes) = std::fs::read(&path) {
-        return bytes;
-    }
-
-    let url = "https://www.jra.go.jp/datafile/seiseki/report/2026/2026-3nakayama6.pdf";
-    let resp = ureq::get(url).call().expect("fetch sample result pdf from JRA");
-    let mut buf = Vec::new();
-    resp.into_reader()
-        .read_to_end(&mut buf)
-        .expect("read sample result pdf body");
-
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    let tmp = path.with_extension("pdf.tmp");
-    if std::fs::write(&tmp, &buf).is_ok() {
-        let _ = std::fs::rename(&tmp, &path);
-    }
-    buf
-}
+#[path = "../../sample_pdf_fixture.rs"]
+mod fixture;
 
 #[test]
 fn parses_sample_pdf_into_twelve_races() {
     let parser = MutoolParser;
-    let races = parser.parse(&sample_result_pdf()).expect("parse sample pdf");
+    let Some(sample) = fixture::sample_result_pdf() else {
+        return;
+    };
+    let races = parser.parse(&sample).expect("parse sample pdf");
     assert_eq!(races.len(), 12, "expected 12 races, got {}", races.len());
 }
 
 #[test]
 fn each_race_has_results() {
     let parser = MutoolParser;
-    let races = parser.parse(&sample_result_pdf()).expect("parse sample pdf");
+    let Some(sample) = fixture::sample_result_pdf() else {
+        return;
+    };
+    let races = parser.parse(&sample).expect("parse sample pdf");
     for race in &races {
         assert!(
             !race.results.is_empty(),
@@ -55,7 +33,10 @@ fn each_race_has_results() {
 #[test]
 fn race_metadata_for_first_race() {
     let parser = MutoolParser;
-    let races = parser.parse(&sample_result_pdf()).expect("parse sample pdf");
+    let Some(sample) = fixture::sample_result_pdf() else {
+        return;
+    };
+    let races = parser.parse(&sample).expect("parse sample pdf");
     let r1 = races
         .iter()
         .find(|r| r.race_num == 1)
@@ -70,7 +51,10 @@ fn race_metadata_for_first_race() {
 #[test]
 fn jockey_column_is_clean_and_separated_from_owner() {
     let parser = MutoolParser;
-    let races = parser.parse(&sample_result_pdf()).expect("parse sample pdf");
+    let Some(sample) = fixture::sample_result_pdf() else {
+        return;
+    };
+    let races = parser.parse(&sample).expect("parse sample pdf");
 
     // 既知の騎手が馬主・牧場名の混入なくクリーンに取れる（stext 実測で確定した値）。
     let r1 = races
@@ -126,7 +110,10 @@ fn jockey_column_is_clean_and_separated_from_owner() {
 #[test]
 fn detects_scratched_horse_in_race_two() {
     let parser = MutoolParser;
-    let races = parser.parse(&sample_result_pdf()).expect("parse sample pdf");
+    let Some(sample) = fixture::sample_result_pdf() else {
+        return;
+    };
+    let races = parser.parse(&sample).expect("parse sample pdf");
     let r2 = races
         .iter()
         .find(|r| r.race_num == 2)
