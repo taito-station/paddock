@@ -87,7 +87,8 @@ fn is_hit(c: &BetCombination, finish: Finish, runners: usize) -> bool {
     let in_top3 = |h: HorseNum| h == first || h == second || h == third;
     match c {
         BetCombination::Win(h) => *h == first,
-        // 複勝: 出走 7 頭以下は 2 着以内、8 頭以上は 3 着以内（JRA ルール）。
+        // 複勝: JRA では出走 5 頭以上で発売され、5〜7 頭は 2 着以内・8 頭以上は 3 着以内。
+        // 入力の買い目は実際に成立したものを前提とするため、4 頭以下の特別扱いはしない。
         BetCombination::Place(h) => {
             if runners <= 7 {
                 in_top2(*h)
@@ -206,6 +207,9 @@ pub fn simulate(input: &SimInput) -> Result<SimReport> {
                 }
 
                 if has_probs {
+                    // 上位 3 着の順列は結果空間を MECE に分割し、全券種の的中可否は上位 3 着で
+                    // 確定する。よって harville による各順列確率は 4 着以降を周辺化済みの確率として
+                    // そのまま EV・的中確率に積算できる（win_probs が全頭・総和 1 のとき総和も 1）。
                     let prob = harville_trifecta(win_of(first), win_of(second), win_of(third));
                     ev_sum += prob * payout as f64;
                     if payout > 0 {
