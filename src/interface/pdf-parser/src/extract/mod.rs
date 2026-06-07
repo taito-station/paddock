@@ -1,4 +1,5 @@
 mod header;
+pub mod jockey_stext;
 mod row;
 
 use paddock_domain::{
@@ -9,13 +10,17 @@ use paddock_domain::{
 use crate::error::Result;
 
 pub use header::RaceHeader;
+pub use jockey_stext::JockeyIndex;
 pub use row::RawRow;
 
-pub fn parse_text(text: &str) -> Result<Vec<Race>> {
+/// 騎手は stext 座標ベースの `jockeys`（race_num→horse_num→名前）で確定する。
+/// `jockeys` が空（stext 抽出失敗）または該当馬が無い場合は、各行の既存ヒューリスティックに
+/// フォールバックする（現行挙動から後退させない）。
+pub fn parse_text(text: &str, jockeys: &JockeyIndex) -> Result<Vec<Race>> {
     let blocks = split_into_race_blocks(text);
     let mut races = Vec::with_capacity(blocks.len());
     for block in blocks {
-        if let Some(race) = build_race_from_block(&block)? {
+        if let Some(race) = build_race_from_block(&block, jockeys)? {
             races.push(race);
         }
     }
@@ -47,7 +52,7 @@ fn split_into_race_blocks(text: &str) -> Vec<Vec<String>> {
     blocks
 }
 
-fn build_race_from_block(lines: &[String]) -> Result<Option<Race>> {
+fn build_race_from_block(lines: &[String], jockeys: &JockeyIndex) -> Result<Option<Race>> {
     let header = match header::parse_header(lines)? {
         Some(h) => h,
         None => return Ok(None),
@@ -100,10 +105,17 @@ fn build_race_from_block(lines: &[String]) -> Result<Option<Race>> {
             Some(FinishingPosition::try_from(finisher_count)?)
         };
 
-        let jockey = raw
-            .jockey
-            .as_deref()
-            .and_then(|s| JockeyName::try_from(s).ok());
+        // 騎手は stext 座標ベースの索引（race_num, horse_num）を優先し、
+        // 無い場合のみ既存のテキストヒューリスティックにフォールバックする。
+        let jockey = jockeys
+            .get(&header.race_num)
+            .and_then(|m| m.get(&horse_num.value()))
+            .and_then(|s| JockeyName::try_from(s.as_str()).ok())
+            .or_else(|| {
+                raw.jockey
+                    .as_deref()
+                    .and_then(|s| JockeyName::try_from(s).ok())
+            });
         let trainer = raw
             .trainer
             .as_deref()
