@@ -15,7 +15,12 @@ impl<O: OddsScraper> OddsInteractor<O> {
     /// 止めない（`select_bets` を呼ばず安全に次レースへ進める設計、predict-session.md 参照）。
     pub async fn race_odds(&self, race_id: &RaceId) -> Result<Option<RaceOdds>> {
         match self.scraper.scrape(race_id) {
-            Ok(odds) if odds.is_empty() => Ok(None),
+            Ok(odds) if odds.is_empty() => {
+                // 取得は成功したが全馬券種が空（未公開）。スクレイプ失敗（warn）と
+                // 区別できるよう debug で記録し、運用時に原因を切り分けられるようにする。
+                tracing::debug!(race_id = %race_id, "オッズ取得成功だが全馬券種が空（未公開）、スキップ");
+                Ok(None)
+            }
             Ok(odds) => Ok(Some(odds)),
             Err(e) => {
                 tracing::warn!(race_id = %race_id, error = %e, "オッズ取得に失敗、スキップ");
