@@ -80,8 +80,9 @@ pub struct SimReport {
     pub ev: Option<EvReport>,
 }
 
-/// 買い目 `c` が着順 (first, second, third) で的中するか。`runners` は出走頭数。
-fn is_hit(c: &BetCombination, first: HorseNum, second: HorseNum, third: HorseNum, runners: usize) -> bool {
+/// 買い目 `c` が着順 `finish` (1着,2着,3着) で的中するか。`runners` は出走頭数。
+fn is_hit(c: &BetCombination, finish: Finish, runners: usize) -> bool {
+    let (first, second, third) = finish;
     let in_top2 = |h: HorseNum| h == first || h == second;
     let in_top3 = |h: HorseNum| h == first || h == second || h == third;
     match c {
@@ -122,10 +123,10 @@ fn is_hit(c: &BetCombination, first: HorseNum, second: HorseNum, third: HorseNum
     }
 }
 
-/// 着順 (first, second, third) における全買い目の払戻合計（円、端数は円未満切り捨て）。
-fn payout_of(bets: &[PlacedBet], first: HorseNum, second: HorseNum, third: HorseNum, runners: usize) -> u64 {
+/// 着順 `finish` における全買い目の払戻合計（円、端数は円未満切り捨て）。
+fn payout_of(bets: &[PlacedBet], finish: Finish, runners: usize) -> u64 {
     bets.iter()
-        .filter(|b| is_hit(&b.combination, first, second, third, runners))
+        .filter(|b| is_hit(&b.combination, finish, runners))
         .map(|b| (b.stake as f64 * b.odds).floor() as u64)
         .sum()
 }
@@ -188,7 +189,7 @@ pub fn simulate(input: &SimInput) -> Result<SimReport> {
                 }
                 let (first, second, third) = (field[i], field[j], field[k]);
                 total_count += 1;
-                let payout = payout_of(&input.bets, first, second, third, runners);
+                let payout = payout_of(&input.bets, (first, second, third), runners);
 
                 if payout > 0 {
                     hit_count += 1;
@@ -225,7 +226,7 @@ pub fn simulate(input: &SimInput) -> Result<SimReport> {
                     "main finish requires three distinct horses".to_string(),
                 ));
             }
-            let payout = payout_of(&input.bets, a, b, c, runners);
+            let payout = payout_of(&input.bets, (a, b, c), runners);
             Some(to_outcome(a, b, c, payout))
         }
         None => None,
@@ -279,18 +280,18 @@ mod tests {
 
     #[test]
     fn win_hit_rule() {
-        assert!(is_hit(&BetCombination::Win(h(3)), h(3), h(1), h(2), 10));
-        assert!(!is_hit(&BetCombination::Win(h(3)), h(1), h(3), h(2), 10));
+        assert!(is_hit(&BetCombination::Win(h(3)), (h(3), h(1), h(2)), 10));
+        assert!(!is_hit(&BetCombination::Win(h(3)), (h(1), h(3), h(2)), 10));
     }
 
     #[test]
     fn place_rule_depends_on_field_size() {
         let c = BetCombination::Place(h(3));
         // 8 頭立て: 3 着以内で的中。
-        assert!(is_hit(&c, h(1), h(2), h(3), 8));
+        assert!(is_hit(&c, (h(1), h(2), h(3)), 8));
         // 7 頭立て: 3 着では的中しない（2 着以内のみ）。
-        assert!(!is_hit(&c, h(1), h(2), h(3), 7));
-        assert!(is_hit(&c, h(1), h(3), h(2), 7));
+        assert!(!is_hit(&c, (h(1), h(2), h(3)), 7));
+        assert!(is_hit(&c, (h(1), h(3), h(2)), 7));
     }
 
     #[test]
@@ -298,11 +299,11 @@ mod tests {
         let q = BetCombination::Quinella(Pair::try_from((h(1), h(5))).unwrap());
         let w = BetCombination::Wide(Pair::try_from((h(1), h(5))).unwrap());
         // 1-5 が 1・2 着: 馬連もワイドも的中。
-        assert!(is_hit(&q, h(5), h(1), h(2), 12));
-        assert!(is_hit(&w, h(5), h(1), h(2), 12));
+        assert!(is_hit(&q, (h(5), h(1), h(2)), 12));
+        assert!(is_hit(&w, (h(5), h(1), h(2)), 12));
         // 1 が 1 着・5 が 3 着: 馬連は外れ、ワイドは的中。
-        assert!(!is_hit(&q, h(1), h(2), h(5), 12));
-        assert!(is_hit(&w, h(1), h(2), h(5), 12));
+        assert!(!is_hit(&q, (h(1), h(2), h(5)), 12));
+        assert!(is_hit(&w, (h(1), h(2), h(5)), 12));
     }
 
     #[test]
@@ -311,12 +312,12 @@ mod tests {
         let t = BetCombination::Trio(Triple::try_from((h(1), h(5), h(8))).unwrap());
         let tf =
             BetCombination::Trifecta(crate::odds::OrderedTriple::try_from((h(1), h(5), h(8))).unwrap());
-        assert!(is_hit(&e, h(1), h(5), h(2), 12));
-        assert!(!is_hit(&e, h(5), h(1), h(2), 12)); // 順序違いは外れ
-        assert!(is_hit(&t, h(8), h(1), h(5), 12)); // 順不同で 3 着以内
-        assert!(!is_hit(&t, h(1), h(5), h(2), 12));
-        assert!(is_hit(&tf, h(1), h(5), h(8), 12));
-        assert!(!is_hit(&tf, h(1), h(8), h(5), 12)); // 順序違いは外れ
+        assert!(is_hit(&e, (h(1), h(5), h(2)), 12));
+        assert!(!is_hit(&e, (h(5), h(1), h(2)), 12)); // 順序違いは外れ
+        assert!(is_hit(&t, (h(8), h(1), h(5)), 12)); // 順不同で 3 着以内
+        assert!(!is_hit(&t, (h(1), h(5), h(2)), 12));
+        assert!(is_hit(&tf, (h(1), h(5), h(8)), 12));
+        assert!(!is_hit(&tf, (h(1), h(8), h(5)), 12)); // 順序違いは外れ
     }
 
     #[test]

@@ -134,7 +134,8 @@ pub fn to_sim_input(json: InputJson, main_override: Option<&str>) -> Result<SimI
         .bets
         .iter()
         .map(|b| {
-            let kind = BetType::try_from(b.kind.as_str())?;
+            let kind = BetType::try_from(b.kind.as_str())
+                .map_err(|e| anyhow!("未知の券種 '{}': {e}", b.kind))?;
             if !b.odds.is_finite() || b.odds < 1.0 {
                 bail!(
                     "オッズは 1.0 以上の有限値で指定してください（{} odds={}）",
