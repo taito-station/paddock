@@ -1338,6 +1338,8 @@ dependencies = [
  "paddock-use-case",
  "pdf-ocr",
  "regex",
+ "serde",
+ "serde_json",
  "thiserror",
  "tracing",
  "ureq",
