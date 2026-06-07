@@ -21,6 +21,7 @@ impl<R: Repository, S: NetkeibaScraper> HorseHistoryInteractor<R, S> {
         // 1. 取得対象の horse_id を集める（出馬表→各馬 + 直接指定）。出現順を保ち重複排除。
         let mut targets: Vec<HorseId> = Vec::new();
         let mut seen: HashSet<String> = HashSet::new();
+        let mut shutuba_failed = 0;
         for race_id in race_ids {
             // 出馬表 1 件の失敗で全体を止めず、warn してスキップ（個別馬の失敗と同じ扱い）。
             // 他 race_id と --horse-id 直接指定分の取り込みを救済する。
@@ -28,6 +29,7 @@ impl<R: Repository, S: NetkeibaScraper> HorseHistoryInteractor<R, S> {
                 Ok(runners) => runners,
                 Err(e) => {
                     tracing::warn!(race_id, error = %e, "出馬表取得に失敗、スキップ");
+                    shutuba_failed += 1;
                     continue;
                 }
             };
@@ -76,6 +78,7 @@ impl<R: Repository, S: NetkeibaScraper> HorseHistoryInteractor<R, S> {
         Ok(FetchHorseHistoryResponse {
             horses_fetched,
             horses_failed,
+            shutuba_failed,
             races_saved,
             results_saved,
         })
