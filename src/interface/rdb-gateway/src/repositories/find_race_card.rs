@@ -1,12 +1,27 @@
-use paddock_domain::{GateNum, HorseEntry, HorseName, HorseNum, JockeyName, RaceCard, RaceId, Surface, Venue};
+use chrono::NaiveDate;
+use paddock_domain::{
+    GateNum, HorseEntry, HorseName, HorseNum, JockeyName, RaceCard, RaceId, Surface, Venue,
+};
 use sqlx::SqlitePool;
 
-use crate::error::Result;
+use crate::error::{Error, Result};
+
+#[derive(sqlx::FromRow)]
+struct CardRow {
+    race_id: String,
+    date: Option<String>,
+    venue: String,
+    round: i64,
+    day: i64,
+    race_num: i64,
+    surface: String,
+    distance: i64,
+}
 
 pub async fn find_race_card(pool: &SqlitePool, race_id: &RaceId) -> Result<Option<RaceCard>> {
-    let card_row: Option<(String, String, i64, i64, i64, String, i64)> = sqlx::query_as(
+    let card_row: Option<CardRow> = sqlx::query_as(
         r#"
-        SELECT race_id, venue, round, day, race_num, surface, distance
+        SELECT race_id, date, venue, round, day, race_num, surface, distance
         FROM race_cards
         WHERE race_id = $1
         "#,
@@ -15,10 +30,19 @@ pub async fn find_race_card(pool: &SqlitePool, race_id: &RaceId) -> Result<Optio
     .fetch_optional(pool)
     .await?;
 
-    let Some((race_id_str, venue_str, round, day, race_num, surface_str, distance)) = card_row
-    else {
+    let Some(row) = card_row else {
         return Ok(None);
     };
+    let CardRow {
+        race_id: race_id_str,
+        date: date_str,
+        venue: venue_str,
+        round,
+        day,
+        race_num,
+        surface: surface_str,
+        distance,
+    } = row;
 
     let entry_rows: Vec<(i64, i64, String, Option<String>)> = sqlx::query_as(
         r#"
@@ -37,6 +61,16 @@ pub async fn find_race_card(pool: &SqlitePool, race_id: &RaceId) -> Result<Optio
     let race_id = RaceId::try_from(race_id_str.as_str())?;
     let venue = Venue::try_from(venue_str.as_str())?;
     let surface = Surface::try_from(surface_str.as_str())?;
+    // date 列は migration 20260606000003 で追加。新規取り込みは必ず設定するが、
+    // 旧データで成績にも紐づかず backfill されなかった行は NULL になり得るため明示エラーにする。
+    let date_str = date_str.ok_or_else(|| {
+        Error::Data(format!(
+            "race_card {} の date が未設定です",
+            race_id.value()
+        ))
+    })?;
+    let date = NaiveDate::parse_from_str(&date_str, "%Y-%m-%d")
+        .map_err(|e| Error::Data(format!("race_card date '{date_str}' のパースに失敗: {e}")))?;
 
     let mut entries = Vec::with_capacity(entry_rows.len());
     for (gate_num, horse_num, horse_name, jockey) in entry_rows {
@@ -54,6 +88,7 @@ pub async fn find_race_card(pool: &SqlitePool, race_id: &RaceId) -> Result<Optio
     // as キャストで戻す。書き込み側でバリデーション済みなのでサイレント wrap は起きない。
     Ok(Some(RaceCard {
         race_id,
+        date,
         venue,
         round: round as u32,
         day: day as u32,

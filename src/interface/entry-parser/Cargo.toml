@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 paddock-domain    = { workspace = true }
 paddock-use-case  = { workspace = true }
+chrono            = { workspace = true }
 regex             = { workspace = true }
 serde             = { workspace = true }
 serde_json        = { workspace = true }

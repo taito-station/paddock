@@ -1,3 +1,4 @@
+use chrono::NaiveDate;
 use entry_parser::MutoolEntryParser;
 use paddock_domain::{Surface, Venue};
 use paddock_use_case::entry_parser::EntryParser;
@@ -7,10 +8,18 @@ use paddock_use_case::entry_parser::EntryParser;
 // samples/2026-3nakayama6.pdf.
 const SAMPLE: &[u8] = include_bytes!("../../../../samples/2026-3nakayama8-entries.pdf");
 
+// The entry PDF has no date text; the caller supplies it (derived from the source
+// filename). This sample meeting (3 回中山 8 日) ran on 2026-04-19.
+fn sample_date() -> NaiveDate {
+    NaiveDate::from_ymd_opt(2026, 4, 19).unwrap()
+}
+
 #[test]
 fn parses_sample_entry_pdf_into_twelve_race_cards() {
     let parser = MutoolEntryParser;
-    let cards = parser.parse(SAMPLE).expect("parse sample entry pdf");
+    let cards = parser
+        .parse(SAMPLE, sample_date())
+        .expect("parse sample entry pdf");
     assert_eq!(
         cards.len(),
         12,
@@ -22,7 +31,7 @@ fn parses_sample_entry_pdf_into_twelve_race_cards() {
 #[test]
 fn each_race_card_has_entries() {
     let parser = MutoolEntryParser;
-    let cards = parser.parse(SAMPLE).expect("parse");
+    let cards = parser.parse(SAMPLE, sample_date()).expect("parse");
     for card in &cards {
         assert!(
             !card.entries.is_empty(),
@@ -35,11 +44,12 @@ fn each_race_card_has_entries() {
 #[test]
 fn race1_metadata() {
     let parser = MutoolEntryParser;
-    let cards = parser.parse(SAMPLE).expect("parse");
+    let cards = parser.parse(SAMPLE, sample_date()).expect("parse");
     let r1 = cards
         .iter()
         .find(|c| c.race_num == 1)
         .expect("race 1 not found");
+    assert_eq!(r1.date, sample_date());
     assert_eq!(r1.distance, 1800);
     assert_eq!(r1.surface, Surface::Dirt);
     assert_eq!(r1.venue, Venue::Nakayama);
@@ -51,7 +61,7 @@ fn race1_metadata() {
 #[test]
 fn race11_has_eighteen_entries() {
     let parser = MutoolEntryParser;
-    let cards = parser.parse(SAMPLE).expect("parse");
+    let cards = parser.parse(SAMPLE, sample_date()).expect("parse");
     let r11 = cards
         .iter()
         .find(|c| c.race_num == 11)
@@ -63,7 +73,7 @@ fn race11_has_eighteen_entries() {
 #[test]
 fn race1_horse_names_and_jockeys() {
     let parser = MutoolEntryParser;
-    let cards = parser.parse(SAMPLE).expect("parse");
+    let cards = parser.parse(SAMPLE, sample_date()).expect("parse");
     let r1 = cards
         .iter()
         .find(|c| c.race_num == 1)

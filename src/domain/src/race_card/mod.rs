@@ -1,3 +1,5 @@
+use chrono::NaiveDate;
+
 use crate::horse_result::{GateNum, HorseName, HorseNum, JockeyName};
 use crate::race::{RaceId, Surface, Venue};
 
@@ -6,6 +8,9 @@ use crate::race::{RaceId, Surface, Venue};
 #[derive(Debug, Clone)]
 pub struct RaceCard {
     pub race_id: RaceId,
+    /// 開催日。出馬表 PDF には日付テキストが無いため、取り込み元ファイル名の
+    /// `YYYYMMDD` から導出してセットする（use-case 層の ingest で設定）。
+    pub date: NaiveDate,
     pub venue: Venue,
     pub round: u32,
     pub day: u32,
