@@ -2,11 +2,24 @@ use chrono::NaiveDate;
 use entry_parser::MutoolEntryParser;
 use paddock_domain::{Surface, Venue};
 use paddock_use_case::entry_parser::EntryParser;
+use std::path::PathBuf;
 
-// Committed under samples/ (the `pdfs/` tree is gitignored, so a fixture there would not
-// survive a fresh clone / CI). Mirrors the existing pdf-parser test which uses
-// samples/2026-3nakayama6.pdf.
-const SAMPLE: &[u8] = include_bytes!("../../../../samples/2026-3nakayama8-entries.pdf");
+/// テスト用の出馬表 PDF を返す。
+///
+/// JRA 著作物のためリポジトリには含めない（`samples/*.pdf` は gitignore 済み）。
+/// 出馬表 PDF は結果 PDF と違い安定した公開 URL が無いため、ローカルに存在すれば
+/// それを使い、無ければ取得せずスキップする（`None` を返す）。
+fn sample_entry_pdf() -> Option<Vec<u8>> {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../samples/2026-3nakayama8-entries.pdf");
+    match std::fs::read(&path) {
+        Ok(bytes) => Some(bytes),
+        Err(_) => {
+            eprintln!("skip: entry sample PDF が不在のためスキップ ({})", path.display());
+            None
+        }
+    }
+}
 
 // The entry PDF has no date text; the caller supplies it (derived from the source
 // filename). This sample meeting (3 回中山 8 日) ran on 2026-04-19.
@@ -17,8 +30,11 @@ fn sample_date() -> NaiveDate {
 #[test]
 fn parses_sample_entry_pdf_into_twelve_race_cards() {
     let parser = MutoolEntryParser;
+    let Some(sample) = sample_entry_pdf() else {
+        return;
+    };
     let cards = parser
-        .parse(SAMPLE, sample_date())
+        .parse(&sample, sample_date())
         .expect("parse sample entry pdf");
     assert_eq!(
         cards.len(),
@@ -31,7 +47,10 @@ fn parses_sample_entry_pdf_into_twelve_race_cards() {
 #[test]
 fn each_race_card_has_entries() {
     let parser = MutoolEntryParser;
-    let cards = parser.parse(SAMPLE, sample_date()).expect("parse");
+    let Some(sample) = sample_entry_pdf() else {
+        return;
+    };
+    let cards = parser.parse(&sample, sample_date()).expect("parse");
     for card in &cards {
         assert!(
             !card.entries.is_empty(),
@@ -44,7 +63,10 @@ fn each_race_card_has_entries() {
 #[test]
 fn race1_metadata() {
     let parser = MutoolEntryParser;
-    let cards = parser.parse(SAMPLE, sample_date()).expect("parse");
+    let Some(sample) = sample_entry_pdf() else {
+        return;
+    };
+    let cards = parser.parse(&sample, sample_date()).expect("parse");
     let r1 = cards
         .iter()
         .find(|c| c.race_num == 1)
@@ -61,7 +83,10 @@ fn race1_metadata() {
 #[test]
 fn race11_has_eighteen_entries() {
     let parser = MutoolEntryParser;
-    let cards = parser.parse(SAMPLE, sample_date()).expect("parse");
+    let Some(sample) = sample_entry_pdf() else {
+        return;
+    };
+    let cards = parser.parse(&sample, sample_date()).expect("parse");
     let r11 = cards
         .iter()
         .find(|c| c.race_num == 11)
@@ -73,7 +98,10 @@ fn race11_has_eighteen_entries() {
 #[test]
 fn race1_horse_names_and_jockeys() {
     let parser = MutoolEntryParser;
-    let cards = parser.parse(SAMPLE, sample_date()).expect("parse");
+    let Some(sample) = sample_entry_pdf() else {
+        return;
+    };
+    let cards = parser.parse(&sample, sample_date()).expect("parse");
     let r1 = cards
         .iter()
         .find(|c| c.race_num == 1)

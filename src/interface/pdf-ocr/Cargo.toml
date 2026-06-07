@@ -7,3 +7,7 @@ edition = "2024"
 tempfile  = { workspace = true }
 thiserror = { workspace = true }
 tracing   = { workspace = true }
+
+[dev-dependencies]
+# 不在時に JRA からサンプル PDF を取得する fallback 用（本体 fetcher と同じ ureq）
+ureq = { workspace = true }
