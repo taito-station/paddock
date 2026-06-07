@@ -111,10 +111,6 @@ impl Repository for MockRepo {
         Ok(Vec::new())
     }
 
-    async fn find_race_odds(&self, _race_id: &RaceId) -> Result<Option<paddock_domain::RaceOdds>> {
-        Ok(None)
-    }
-
     async fn find_predict_session(
         &self,
         _date: chrono::NaiveDate,
@@ -375,10 +371,6 @@ impl Repository for HistoryRepo {
 
     async fn find_races_by_date(&self, _date: chrono::NaiveDate) -> Result<Vec<Race>> {
         Ok(Vec::new())
-    }
-
-    async fn find_race_odds(&self, _race_id: &RaceId) -> Result<Option<paddock_domain::RaceOdds>> {
-        Ok(None)
     }
 
     async fn find_predict_session(

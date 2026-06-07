@@ -1559,6 +1559,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "clap",
+ "odds-scraper",
  "paddock-config",
  "paddock-domain",
  "paddock-use-case",

@@ -135,9 +135,6 @@ impl Repository for RecordingRepo {
     async fn find_races_by_date(&self, _date: NaiveDate) -> Result<Vec<Race>> {
         unimplemented!()
     }
-    async fn find_race_odds(&self, _race_id: &RaceId) -> Result<Option<paddock_domain::RaceOdds>> {
-        unimplemented!()
-    }
     async fn find_predict_session(&self, _date: NaiveDate) -> Result<Option<PredictSessionRecord>> {
         unimplemented!()
     }

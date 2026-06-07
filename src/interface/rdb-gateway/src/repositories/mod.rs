@@ -1,7 +1,6 @@
 mod course_stats;
 mod fetch_history;
 mod find_race_card;
-mod find_race_odds;
 mod find_races_by_date;
 mod horse_stats;
 mod jockey_stats;
@@ -11,7 +10,7 @@ mod save_race_card;
 mod upsert_history_race;
 
 use chrono::NaiveDate;
-use paddock_domain::{HorseName, JockeyName, Race, RaceCard, RaceId, RaceOdds, Surface, Venue};
+use paddock_domain::{HorseName, JockeyName, Race, RaceCard, RaceId, Surface, Venue};
 use paddock_use_case::Result as UcResult;
 use paddock_use_case::repository::{
     CourseStatsRow, FetchRecord, HorseStatsRow, JockeyStatsRow, PredictBetRecord,
@@ -109,12 +108,6 @@ impl Repository for SqliteRepository {
 
     async fn find_races_by_date(&self, date: NaiveDate) -> UcResult<Vec<Race>> {
         find_races_by_date::find_races_by_date(&self.pool, date)
-            .await
-            .map_err(Into::into)
-    }
-
-    async fn find_race_odds(&self, race_id: &RaceId) -> UcResult<Option<RaceOdds>> {
-        find_race_odds::find_race_odds(&self.pool, race_id)
             .await
             .map_err(Into::into)
     }

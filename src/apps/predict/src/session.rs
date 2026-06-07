@@ -124,8 +124,9 @@ async fn run_race(
     println!();
     print_probs(&probs);
 
-    // オッズ未取得（None）はスキップのみ受付（select_bets は呼ばない）
-    let Some(odds) = app.interactor.race_odds(&race.race_id).await? else {
+    // オッズ未取得（None）はスキップのみ受付（select_bets は呼ばない）。
+    // OddsInteractor が都度ライブスクレイプし、取得失敗・未公開は None に畳む。
+    let Some(odds) = app.odds.race_odds(&race.race_id).await? else {
         println!();
         println!("オッズ未取得 — このレースはスキップします");
         let _ = read_line("Enter で次のレースへ > ")?;
@@ -476,7 +477,12 @@ mod tests {
         assert!((win.ev - 1.5).abs() < 1e-10);
         assert_eq!(win.race_id.value(), "2026-3-nakayama-8-1R");
 
-        let place = make_bet_record(&race_id, &rec(BetCombination::Place(horse(7)), 1.2), 500, 2500);
+        let place = make_bet_record(
+            &race_id,
+            &rec(BetCombination::Place(horse(7)), 1.2),
+            500,
+            2500,
+        );
         assert_eq!(place.bet_type, "place");
         assert_eq!(place.combination, "7");
         assert_eq!(place.stake, 500);
