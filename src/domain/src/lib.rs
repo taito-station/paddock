@@ -17,5 +17,5 @@ pub use horse_result::{
 pub use odds::{BetType, OddsValue, OrderedPair, OrderedTriple, Pair, PlaceOdds, RaceOdds, Triple};
 pub use prediction::{HorseFactors, HorseProbability, RateTriple, estimate_probabilities};
 pub use race::{Race, RaceId, Surface, TrackCondition, Venue, Weather};
-pub use simulation::{EvReport, Finish, Outcome, PlacedBet, SimInput, SimReport, simulate};
 pub use race_card::{HorseEntry, RaceCard};
+pub use simulation::{EvReport, Finish, Outcome, PlacedBet, SimInput, SimReport, simulate};

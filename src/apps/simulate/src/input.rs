@@ -166,7 +166,14 @@ pub fn to_sim_input(json: InputJson, main_override: Option<&str>) -> Result<SimI
                 let n: u32 = num
                     .parse()
                     .map_err(|e| anyhow!("win_probs のキー '{num}' は馬番ではありません: {e}"))?;
-                probs.insert(horse(n)?, prob);
+                let hn = horse(n)?;
+                if !field.contains(&hn) {
+                    bail!("win_probs のキー {n} は field（出走馬）に存在しません");
+                }
+                if !prob.is_finite() || !(0.0..=1.0).contains(&prob) {
+                    bail!("win_probs[{n}] は 0.0〜1.0 の有限値で指定してください（{prob}）");
+                }
+                probs.insert(hn, prob);
             }
             Some(probs)
         }
@@ -243,5 +250,19 @@ mod tests {
         assert!(parse_finish("1-2").is_err()); // 要素不足
         assert!(parse_finish("1-2-x").is_err()); // 非数値
         assert!(parse_finish("1-2-3").is_ok());
+    }
+
+    #[test]
+    fn win_prob_out_of_range_errors() {
+        let raw = r#"{ "runners": 6, "bets": [], "win_probs": {"1":1.5} }"#;
+        let json: InputJson = serde_json::from_str(raw).unwrap();
+        assert!(to_sim_input(json, None).is_err());
+    }
+
+    #[test]
+    fn win_prob_key_outside_field_errors() {
+        let raw = r#"{ "runners": 6, "bets": [], "win_probs": {"9":0.3} }"#;
+        let json: InputJson = serde_json::from_str(raw).unwrap();
+        assert!(to_sim_input(json, None).is_err());
     }
 }
