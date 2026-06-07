@@ -136,10 +136,6 @@ impl Repository for MockRepo {
         Ok(Vec::new())
     }
 
-    async fn find_race_odds(&self, _: &RaceId) -> Result<Option<paddock_domain::RaceOdds>> {
-        Ok(None)
-    }
-
     async fn find_predict_session(
         &self,
         _: chrono::NaiveDate,

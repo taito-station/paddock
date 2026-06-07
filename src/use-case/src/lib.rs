@@ -14,6 +14,7 @@ pub use error::{Error, Result};
 pub use interactor::Interactor;
 pub use interactor::entry::EntryInteractor;
 pub use interactor::horse_history::HorseHistoryInteractor;
+pub use interactor::odds::OddsInteractor;
 pub use netkeiba_scraper::{HorsePastRun, NetkeibaScraper, RunnerRef};
 pub use odds_scraper::OddsScraper;
 pub use paddock_domain::{HorseFactors, HorseProbability, RateTriple};
