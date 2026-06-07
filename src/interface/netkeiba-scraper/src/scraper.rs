@@ -16,18 +16,27 @@ use crate::parse;
 const SHUTUBA_URL: &str = "https://race.netkeiba.com/race/shutuba.html";
 const HORSE_RESULT_URL: &str = "https://db.netkeiba.com/horse/result";
 const DEFAULT_DELAY: Duration = Duration::from_millis(1000);
+// ハングした接続で CLI が無限に止まらないよう接続/読取にタイムアウトを設ける。
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+const READ_TIMEOUT: Duration = Duration::from_secs(30);
 // netkeiba は素の ureq UA を弾くことがあるためブラウザ風 UA を送る。
 const USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 \
      (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
 
 /// netkeiba スクレイパ（`ureq` 同期）。馬個別成績の取得ごとに [`Self::delay`] だけ待つ。
 pub struct UreqNetkeibaScraper {
+    agent: ureq::Agent,
     delay: Duration,
 }
 
 impl Default for UreqNetkeibaScraper {
     fn default() -> Self {
+        let agent = ureq::AgentBuilder::new()
+            .timeout_connect(CONNECT_TIMEOUT)
+            .timeout_read(READ_TIMEOUT)
+            .build();
         Self {
+            agent,
             delay: DEFAULT_DELAY,
         }
     }
@@ -40,8 +49,9 @@ impl UreqNetkeibaScraper {
 }
 
 /// URL を GET し、EUC-JP のレスポンスボディを UTF-8 へデコードして返す。
-fn fetch_decoded(url: &str) -> Result<String> {
-    let resp = ureq::get(url)
+fn fetch_decoded(agent: &ureq::Agent, url: &str) -> Result<String> {
+    let resp = agent
+        .get(url)
         .set("User-Agent", USER_AGENT)
         .call()
         .map_err(|e| Error::Fetch(format!("GET {url}: {e}")))?;
@@ -64,7 +74,7 @@ impl NetkeibaScraper for UreqNetkeibaScraper {
         std::thread::sleep(self.delay);
         let url = format!("{SHUTUBA_URL}?race_id={netkeiba_race_id}");
         tracing::debug!(race_id = %netkeiba_race_id, "fetching netkeiba shutuba");
-        let html = fetch_decoded(&url)?;
+        let html = fetch_decoded(&self.agent, &url)?;
         Ok(parse::parse_shutuba(&html)?)
     }
 
@@ -72,7 +82,7 @@ impl NetkeibaScraper for UreqNetkeibaScraper {
         std::thread::sleep(self.delay);
         let url = format!("{HORSE_RESULT_URL}/{}/", horse_id.value());
         tracing::debug!(horse_id = %horse_id, "fetching netkeiba horse history");
-        let html = fetch_decoded(&url)?;
+        let html = fetch_decoded(&self.agent, &url)?;
         Ok(parse::parse_horse_history(&html)?)
     }
 }
