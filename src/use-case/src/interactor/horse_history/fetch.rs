@@ -84,6 +84,8 @@ impl<R: Repository, S: NetkeibaScraper> HorseHistoryInteractor<R, S> {
 
 /// 近走 1 走を該当馬の `HorseResult` として、合成 race_id `nk-<id>` の `Race` に積む。
 /// 同一レース・同一馬番の重複は無視（DB の `UNIQUE(race_id, horse_num)` と整合）。
+/// レースレベル属性（date/venue/surface 等）は最初に積んだ馬の値を採用（先勝ち）。
+/// 同一レースなら全馬で一致するため差異は生じない。
 fn accumulate(
     races: &mut HashMap<String, Race>,
     horse_id: &HorseId,
