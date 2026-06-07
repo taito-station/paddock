@@ -8,6 +8,7 @@ members = [
     # Standalone library crate: not yet consumed by any binary, so it is listed
     # explicitly to stay part of the workspace build/test graph.
     "src/interface/odds-scraper",
+    "src/interface/netkeiba-scraper",
 ]
 
 [workspace.dependencies]
@@ -16,6 +17,7 @@ ordered-float      = { version = "4.*" }
 chrono             = { version = "0.4.*", features = ["serde"] }
 clap               = { version = "4.5.*", features = ["derive"] }
 dotenvy            = { version = "0.15.*" }
+encoding_rs        = { version = "0.8.*" }
 envy               = { version = "0.4.*" }
 regex              = { version = "1.11.*" }
 scraper            = { version = "0.20.*" }
@@ -38,4 +40,5 @@ entry-parser       = { path = "src/interface/entry-parser" }
 pdf-ocr            = { path = "src/interface/pdf-ocr" }
 pdf-parser         = { path = "src/interface/pdf-parser" }
 odds-scraper       = { path = "src/interface/odds-scraper" }
+netkeiba-scraper   = { path = "src/interface/netkeiba-scraper" }
 rdb-gateway        = { path = "src/interface/rdb-gateway" }
