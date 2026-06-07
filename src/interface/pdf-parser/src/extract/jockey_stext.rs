@@ -62,14 +62,20 @@ struct Tok {
 const COL_SPLIT_X: f64 = 420.0;
 /// レース番号グリフの font サイズ帯（見出しの大きい数字）。
 const RACE_NUM_SIZE: std::ops::RangeInclusive<f64> = 12.5..=15.5;
-/// 騎手・馬名は size 6-7、馬主は size 5。この閾値で馬主以降を除外する。
-const NAME_SIZE_MIN: f64 = 6.0;
+/// 名前トークン（騎手・馬名）の font サイズ下限。左列の馬主は size 5 だが、**右列の馬主は
+/// size 6** のためサイズだけでは騎手/馬主を分離できない（分離は x 帯 = JOCKEY_OFFSET_HI で行う）。
+/// ここでは斤量列の小さい数字や地方・牧場（size 3-4）を落とす二次ガード。font サイズの端数
+/// （5.98 等）でも騎手を取りこぼさないよう 5.5 をしきい値にする。
+const NAME_SIZE_MIN: f64 = 5.5;
 /// 馬番グリフの x 帯（左列 / 右列）。枠番(~20/431)は含めない。
 const HN_X_LEFT: std::ops::RangeInclusive<f64> = 24.0..=34.0;
 const HN_X_RIGHT: std::ops::RangeInclusive<f64> = 435.0..=445.0;
-/// 騎手列の x 帯（馬番グリフ x からの相対オフセット）。馬主(オフセット~166)の手前まで。
+/// 騎手列の x 帯（馬番グリフ x からの相対オフセット）。
+/// 実測（samples/2026-3nakayama6.pdf）では騎手 2 文字目が最大オフセット ~157、馬主先頭が
+/// ~165-166。**右列の馬主は size 6 で size 分離が効かないため、この x 上限が騎手/馬主の唯一の
+/// 確実な境界**。両者の間（~161）で切る。
 const JOCKEY_OFFSET_LO: f64 = 118.0;
-const JOCKEY_OFFSET_HI: f64 = 165.0;
+const JOCKEY_OFFSET_HI: f64 = 161.0;
 /// 同一行とみなす y 許容。
 const ROW_Y_TOL: f64 = 3.0;
 
@@ -78,9 +84,16 @@ fn is_reduction_marker(c: char) -> bool {
     matches!(c, '▲' | '△' | '☆' | '★' | '◇' | '◆')
 }
 
-/// 騎手名の右端で打ち切るマーカー（馬主セクション開始・フォント欠落の置換文字など）。
+/// 騎手名トークンの右端で打ち切るマーカー。`氏`（馬主氏名マーカー）と全角空白は馬主
+/// セクションの開始を表す。C1 制御文字（U+0080..=U+009F）と置換文字 U+FFFD はフォント欠落
+/// グリフで、騎手 2 文字目に連結することがあるため同様に打ち切る。
 fn is_stop_marker(c: char) -> bool {
     matches!(c, '\u{0080}'..='\u{009F}') || c == '\u{FFFD}' || c == '氏' || c == '\u{3000}'
+}
+
+/// 半角・全角いずれかの数字か。
+fn is_digit_char(c: char) -> bool {
+    c.is_ascii_digit() || ('０'..='９').contains(&c)
 }
 
 fn side_of(x: f64) -> u8 {
@@ -110,6 +123,16 @@ pub fn parse_jockeys(stext_json: &str) -> JockeyIndex {
                 .or_insert(jockey);
         }
     }
+    // レイアウト定数は実測ハードコードのため、開催場・年度差でレイアウトが変わると
+    // 0 件に退行しうる。トークンはあるのに 1 件も取れなかった場合は気づけるようログする
+    // （取り込み自体は既存ヒューリスティックのフォールバックで継続する）。
+    let total: usize = index.values().map(|m| m.len()).sum();
+    if total == 0 && !toks.is_empty() {
+        tracing::debug!(
+            tokens = toks.len(),
+            "stext からの騎手抽出が 0 件。座標レイアウトが想定と異なる可能性"
+        );
+    }
     index
 }
 
@@ -132,17 +155,27 @@ fn flatten(doc: &StextDoc) -> Vec<Tok> {
 }
 
 /// レース番号（見出しの size≈14 数字グリフ）から `(page, side) -> race_num` を作る。
+///
+/// 万一同じ `(page, side)` にサイズ帯該当の数字が複数あった場合は、**最上段（最小 y）**を
+/// 見出しとして採用する（本文中の大きい数字の誤検出に対する保険）。
 fn race_numbers(toks: &[Tok]) -> HashMap<(usize, u8), u32> {
-    let mut map = HashMap::new();
+    // (page, side) -> (header_y, race_num)
+    let mut map: HashMap<(usize, u8), (f64, u32)> = HashMap::new();
     for t in toks {
         if RACE_NUM_SIZE.contains(&t.size)
             && let Ok(n) = t.text.trim().parse::<u32>()
             && (1..=12).contains(&n)
         {
-            map.insert((t.page, side_of(t.x)), n);
+            let key = (t.page, side_of(t.x));
+            match map.get(&key) {
+                Some(&(y, _)) if y <= t.y => {}
+                _ => {
+                    map.insert(key, (t.y, n));
+                }
+            }
         }
     }
-    map
+    map.into_iter().map(|(k, (_, n))| (k, n)).collect()
 }
 
 /// 馬番グリフ（馬番 x 帯・size≥6・1..=18 の数字）を行アンカーとして集める。
@@ -192,8 +225,8 @@ fn jockey_for(toks: &[Tok], page: usize, row_y: f64, hn_x: f64) -> Option<String
     let mut name = String::new();
     for (_, text) in parts {
         let part = clean_part(text);
-        // 純数字（斤量・減量数値）パートは騎手名ではないので取り込まない。
-        if part.is_empty() || part.chars().all(|c| c.is_ascii_digit()) {
+        // 純数字（斤量・減量数値。半角/全角とも）パートは騎手名ではないので取り込まない。
+        if part.is_empty() || part.chars().all(is_digit_char) {
             continue;
         }
         name.push_str(&part);
@@ -290,6 +323,26 @@ mod tests {
         assert_eq!(
             idx.get(&2).and_then(|m| m.get(&3)).map(String::as_str),
             Some("横山和生")
+        );
+    }
+
+    #[test]
+    fn excludes_right_column_size6_owner_surname() {
+        // 右列の馬主サーネームは **size 6**（左列の size 5 と異なる）ため、サイズでは
+        // 騎手と分離できない。馬番からのオフセット（馬主先頭 ~165）が JOCKEY_OFFSET_HI を
+        // 超えることで x 帯境界として除外されること（実 PDF の `横山典弘秋元` 再発防止）。
+        let json = doc_json(&[
+            (627.0, 67.0, 14.0, "2"),
+            (439.0, 131.0, 6.0, "6"),
+            (568.0, 131.0, 6.0, "横山"), // 騎手 part1 (offset 129)
+            (589.0, 131.0, 6.0, "典弘"), // 騎手 part2 (offset 150)
+            (604.0, 131.0, 6.0, "秋元"), // 馬主サーネーム size6 (offset 165) → 除外
+            (624.0, 131.0, 6.0, "竜弥氏"), // 馬主 (offset 185) → 除外
+        ]);
+        let idx = parse_jockeys(&json);
+        assert_eq!(
+            idx.get(&2).and_then(|m| m.get(&6)).map(String::as_str),
+            Some("横山典弘")
         );
     }
 
