@@ -70,6 +70,9 @@ impl Repository for MockRepo {
         *self.saved.lock().unwrap() += 1;
         Ok(())
     }
+    async fn upsert_history_race(&self, _race: &Race) -> Result<()> {
+        Ok(())
+    }
     async fn horse_stats(&self, _name: &HorseName) -> Result<HorseStatsRow> {
         Err(Error::NotFound("unused".into()))
     }
@@ -161,6 +164,7 @@ fn sample_race() -> Race {
             gate_num: GateNum::try_from(1u32).unwrap(),
             horse_num: HorseNum::try_from(1u32).unwrap(),
             horse_name: HorseName::try_from("テストウマ").unwrap(),
+            horse_id: None,
             jockey: None,
             trainer: None,
             time_seconds: None,
@@ -331,6 +335,9 @@ struct HistoryRepo {
 impl Repository for HistoryRepo {
     async fn save_race(&self, _race: &Race) -> Result<()> {
         *self.saved.lock().unwrap() += 1;
+        Ok(())
+    }
+    async fn upsert_history_race(&self, _race: &Race) -> Result<()> {
         Ok(())
     }
     async fn horse_stats(&self, _name: &HorseName) -> Result<HorseStatsRow> {

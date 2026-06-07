@@ -100,6 +100,9 @@ impl Repository for MockRepo {
     async fn save_race(&self, _: &Race) -> Result<()> {
         unimplemented!()
     }
+    async fn upsert_history_race(&self, _: &Race) -> Result<()> {
+        unimplemented!()
+    }
     async fn horse_stats(&self, name: &HorseName) -> Result<HorseStatsRow> {
         let win_rate = if name.value() == "ウマA" { 0.2 } else { 0.1 };
         Ok(horse_stats_with_surface_win(win_rate))
