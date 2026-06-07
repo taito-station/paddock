@@ -30,6 +30,7 @@ pub enum BetCombination {
     Win(HorseNum),
     Place(HorseNum),
     Quinella(Pair),
+    Wide(Pair),
     Exacta(OrderedPair),
     Trio(Triple),
     Trifecta(OrderedTriple),
@@ -42,6 +43,7 @@ impl BetCombination {
             BetCombination::Win(_) => "win",
             BetCombination::Place(_) => "place",
             BetCombination::Quinella(_) => "quinella",
+            BetCombination::Wide(_) => "wide",
             BetCombination::Exacta(_) => "exacta",
             BetCombination::Trio(_) => "trio",
             BetCombination::Trifecta(_) => "trifecta",
@@ -54,7 +56,7 @@ impl BetCombination {
     pub fn combination_code(&self) -> String {
         match self {
             BetCombination::Win(h) | BetCombination::Place(h) => h.value().to_string(),
-            BetCombination::Quinella(p) => {
+            BetCombination::Quinella(p) | BetCombination::Wide(p) => {
                 let (a, b) = p.as_tuple();
                 format!("{}-{}", a.value(), b.value())
             }
@@ -218,7 +220,7 @@ pub fn select_bets(
 fn combination_ord_key(c: &BetCombination) -> (u32, u32, u32) {
     match c {
         BetCombination::Win(h) | BetCombination::Place(h) => (h.value(), 0, 0),
-        BetCombination::Quinella(p) => {
+        BetCombination::Quinella(p) | BetCombination::Wide(p) => {
             let (a, b) = p.as_tuple();
             (a.value(), b.value(), 0)
         }
@@ -265,6 +267,8 @@ fn priority(c: &BetCombination) -> u8 {
         BetCombination::Win(_) => 3,
         BetCombination::Place(_) => 4,
         BetCombination::Trifecta(_) => 5,
+        // Wide は select_bets では生成しない（収支シミュレータ専用）。網羅性のため末尾に置く。
+        BetCombination::Wide(_) => 6,
     }
 }
 

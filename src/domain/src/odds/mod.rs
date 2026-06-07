@@ -24,6 +24,8 @@ pub struct RaceOdds {
     pub place: HashMap<HorseNum, PlaceOdds>,
     /// 馬連
     pub quinella: HashMap<Pair, OddsValue>,
+    /// ワイド (low..high band per pair)
+    pub wide: HashMap<Pair, PlaceOdds>,
     /// 馬単
     pub exacta: HashMap<OrderedPair, OddsValue>,
     /// 三連複
@@ -40,6 +42,7 @@ impl RaceOdds {
             win: HashMap::new(),
             place: HashMap::new(),
             quinella: HashMap::new(),
+            wide: HashMap::new(),
             exacta: HashMap::new(),
             trio: HashMap::new(),
             trifecta: HashMap::new(),
@@ -51,6 +54,7 @@ impl RaceOdds {
         self.win.is_empty()
             && self.place.is_empty()
             && self.quinella.is_empty()
+            && self.wide.is_empty()
             && self.exacta.is_empty()
             && self.trio.is_empty()
             && self.trifecta.is_empty()
