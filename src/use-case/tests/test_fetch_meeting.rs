@@ -70,6 +70,9 @@ impl Repository for MockRepo {
         *self.saved.lock().unwrap() += 1;
         Ok(())
     }
+    async fn upsert_history_race(&self, _race: &Race) -> Result<()> {
+        Ok(())
+    }
     async fn horse_stats(&self, _name: &HorseName) -> Result<HorseStatsRow> {
         Err(Error::NotFound("unused".into()))
     }
@@ -332,6 +335,9 @@ struct HistoryRepo {
 impl Repository for HistoryRepo {
     async fn save_race(&self, _race: &Race) -> Result<()> {
         *self.saved.lock().unwrap() += 1;
+        Ok(())
+    }
+    async fn upsert_history_race(&self, _race: &Race) -> Result<()> {
         Ok(())
     }
     async fn horse_stats(&self, _name: &HorseName) -> Result<HorseStatsRow> {

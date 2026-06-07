@@ -8,6 +8,7 @@ mod jockey_stats;
 mod predict_session;
 mod save_race;
 mod save_race_card;
+mod upsert_history_race;
 
 use chrono::NaiveDate;
 use paddock_domain::{HorseName, JockeyName, Race, RaceCard, RaceId, RaceOdds, Surface, Venue};
@@ -32,6 +33,12 @@ impl SqliteRepository {
 impl Repository for SqliteRepository {
     async fn save_race(&self, race: &Race) -> UcResult<()> {
         save_race::save_race(&self.pool, race)
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn upsert_history_race(&self, race: &Race) -> UcResult<()> {
+        upsert_history_race::upsert_history_race(&self.pool, race)
             .await
             .map_err(Into::into)
     }
