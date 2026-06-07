@@ -12,13 +12,18 @@ pub struct MutoolParser;
 
 impl PdfParser for MutoolParser {
     fn parse(&self, bytes: &[u8]) -> UcResult<Vec<Race>> {
-        let text = mutool_extract(bytes).map_err(paddock_use_case::Error::from)?;
-        let races = extract::parse_text(&text).map_err(paddock_use_case::Error::from)?;
+        let (text, stext) = mutool_extract(bytes).map_err(paddock_use_case::Error::from)?;
+        // 騎手列は stext.json の座標 + font サイズから抽出する。stext が取れなくても
+        // （空文字列）騎手は各行のヒューリスティックにフォールバックして取り込みは継続する。
+        let jockeys = extract::jockey_stext::parse_jockeys(&stext);
+        let races = extract::parse_text(&text, &jockeys).map_err(paddock_use_case::Error::from)?;
         Ok(races)
     }
 }
 
-fn mutool_extract(bytes: &[u8]) -> Result<String> {
+/// PDF を一時ファイルに書き出し、`-F text`（構造）と `-F stext.json`（座標つき、騎手抽出用）の
+/// 2 形式を取得して返す。stext.json は best-effort（失敗時は空文字列）。
+fn mutool_extract(bytes: &[u8]) -> Result<(String, String)> {
     // mutool does not reliably accept PDF input on stdin, so write to a temp file.
     let dir = std::env::temp_dir();
     let pid = std::process::id();
@@ -31,14 +36,15 @@ fn mutool_extract(bytes: &[u8]) -> Result<String> {
         let mut f = std::fs::File::create(&pdf_path)?;
         f.write_all(bytes)?;
     }
-    let result = run_mutool(&pdf_path);
+    let text = run_mutool(&pdf_path, "text");
+    let stext = run_mutool(&pdf_path, "stext.json").unwrap_or_default();
     let _ = std::fs::remove_file(&pdf_path);
-    result
+    Ok((text?, stext))
 }
 
-fn run_mutool(pdf_path: &std::path::Path) -> Result<String> {
+fn run_mutool(pdf_path: &std::path::Path, format: &str) -> Result<String> {
     let output = Command::new("mutool")
-        .args(["draw", "-q", "-F", "text"])
+        .args(["draw", "-q", "-F", format])
         .arg(pdf_path)
         .output()
         .map_err(|e| {

@@ -1,11 +1,16 @@
 macro_rules! define_string {
     ($name:ident, max = $max:expr) => {
-        $crate::string::define_string!(@build $name, min = 1, max = $max);
+        $crate::string::define_string!(@build $name, min = 1, max = $max, normalize = |v: String| v);
     };
     ($name:ident, min = $min:expr, max = $max:expr) => {
-        $crate::string::define_string!(@build $name, min = $min, max = $max);
+        $crate::string::define_string!(@build $name, min = $min, max = $max, normalize = |v: String| v);
     };
-    (@build $name:ident, min = $min:expr, max = $max:expr) => {
+    // 取り込み時と検索時で同一表現にそろえたい型は normalize フックを指定する
+    // （length / control 検証の前に value へ適用される）。
+    ($name:ident, max = $max:expr, normalize = $norm:expr) => {
+        $crate::string::define_string!(@build $name, min = 1, max = $max, normalize = $norm);
+    };
+    (@build $name:ident, min = $min:expr, max = $max:expr, normalize = $norm:expr) => {
         #[derive(Debug, Clone, PartialEq, Eq, Hash)]
         pub struct $name {
             value: String,
@@ -21,6 +26,7 @@ macro_rules! define_string {
         impl ::core::convert::TryFrom<String> for $name {
             type Error = $crate::error::Error;
             fn try_from(value: String) -> ::core::result::Result<Self, Self::Error> {
+                let value = ($norm)(value);
                 let len = value.chars().count();
                 if !($min..=$max).contains(&len) {
                     return Err($crate::error::Error::InvalidLengthRange(format!(
