@@ -85,10 +85,11 @@ fn is_reduction_marker(c: char) -> bool {
 }
 
 /// 騎手名トークンの右端で打ち切るマーカー。`氏`（馬主氏名マーカー）と全角空白は馬主
-/// セクションの開始を表す。C1 制御文字（U+0080..=U+009F）と置換文字 U+FFFD はフォント欠落
-/// グリフで、騎手 2 文字目に連結することがあるため同様に打ち切る。
+/// セクションの開始を表す。制御文字（C0/C1）と置換文字 U+FFFD はフォント欠落グリフで、
+/// 騎手 2 文字目に連結することがあるため同様に打ち切る（ここで除去しないと `JockeyName`
+/// の制御文字検査で名前全体が弾かれフォールバックに落ちる）。
 fn is_stop_marker(c: char) -> bool {
-    matches!(c, '\u{0080}'..='\u{009F}') || c == '\u{FFFD}' || c == '氏' || c == '\u{3000}'
+    c.is_control() || c == '\u{FFFD}' || c == '氏' || c == '\u{3000}'
 }
 
 /// 半角・全角いずれかの数字か。
@@ -105,7 +106,14 @@ fn side_of(x: f64) -> u8 {
 pub fn parse_jockeys(stext_json: &str) -> JockeyIndex {
     let doc: StextDoc = match serde_json::from_str(stext_json) {
         Ok(d) => d,
-        Err(_) => return JockeyIndex::new(),
+        Err(e) => {
+            // 空文字列（mutool 失敗）は best-effort なので静かに、非空なら JSON 破損として
+            // ログする（レイアウト退行=0件ログ と切り分けられるように）。
+            if !stext_json.is_empty() {
+                tracing::debug!(error = %e, "stext.json のパースに失敗。騎手はフォールバック抽出");
+            }
+            return JockeyIndex::new();
+        }
     };
     let toks = flatten(&doc);
     let col_race = race_numbers(&toks);
@@ -343,6 +351,24 @@ mod tests {
         assert_eq!(
             idx.get(&2).and_then(|m| m.get(&6)).map(String::as_str),
             Some("横山典弘")
+        );
+    }
+
+    #[test]
+    fn excludes_owner_for_two_digit_right_column_horse_num() {
+        // 2 桁馬番は馬番グリフ x がわずかに左（実測 ~438）。馬主(~604, 馬番からのオフセット
+        // 166)が騎手帯に入らないこと（馬番 x の桁数差でも境界が保たれることの確認）。
+        let json = doc_json(&[
+            (627.0, 67.0, 14.0, "2"),
+            (438.0, 131.0, 6.0, "12"),
+            (567.0, 131.0, 6.0, "三浦"),
+            (588.0, 131.0, 6.0, "皇成"),
+            (604.0, 131.0, 6.0, "ゴドルフィン"), // 馬主 (offset 166) → 除外
+        ]);
+        let idx = parse_jockeys(&json);
+        assert_eq!(
+            idx.get(&2).and_then(|m| m.get(&12)).map(String::as_str),
+            Some("三浦皇成")
         );
     }
 
