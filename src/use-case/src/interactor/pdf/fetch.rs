@@ -3,20 +3,14 @@ use std::time::Duration;
 use paddock_domain::Venue;
 
 use crate::dto::pdf::fetch::{
-    FetchMeetingOutcome, FetchMeetingResponse, FetchRangeSummary, MeetingRange, MeetingSpec,
+    DAY_CAP, FetchMeetingOutcome, FetchMeetingResponse, FetchRangeSummary, MeetingRange,
+    MeetingSpec, ROUND_CAP,
 };
 use crate::error::Result;
 use crate::interactor::Interactor;
 use crate::pdf_fetcher::PdfFetcher;
 use crate::pdf_parser::PdfParser;
 use crate::repository::{FetchRecord, Repository};
-
-/// Runaway guards for the discovery loop. Set a little above the real JRA maxima
-/// (~6 rounds / ~12 days per meeting) so a legitimate meeting always stops at its 404
-/// boundary first; reaching a cap therefore signals an anomaly (or an error storm) and
-/// is logged as a possible truncation rather than silently dropping data.
-const ROUND_CAP: u32 = 8;
-const DAY_CAP: u32 = 14;
 
 impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
     /// Fetch a single JRA meeting-day result PDF, parse it, and store the

@@ -62,9 +62,17 @@ pub struct FetchArgs {
     #[arg(long)]
     pub day: Option<u32>,
 
-    /// Seconds to wait between JRA requests during a range fetch (default 1.0).
+    /// Seconds to wait between JRA requests during a *sequential* (`--parallel 1`)
+    /// range fetch (default 1.0). Ignored when fetching in parallel.
     #[arg(long, default_value_t = 1.0)]
     pub interval: f64,
+
+    /// Max meetings fetched concurrently during a range fetch (default: number of
+    /// CPU cores). `--parallel 1` keeps the sequential 404-boundary discovery and
+    /// honors `--interval`; higher values enumerate the whole candidate grid and
+    /// fetch in parallel (no inter-request wait).
+    #[arg(short = 'j', long)]
+    pub parallel: Option<usize>,
 
     /// Re-fetch and re-ingest even if the meeting is already in fetch history.
     #[arg(long)]
