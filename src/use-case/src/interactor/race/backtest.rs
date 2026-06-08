@@ -63,6 +63,9 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
                     None => None,
                 };
                 // 前走フォーム（#31）。cutoff = race.date でレース当日以降をリークさせない。
+                // horse_stats/jockey_stats と同じく馬ごとの逐次クエリ（N+1）になるが、as_of/cutoff が
+                // レース日ごとに変わる walk-forward の性質上バッチ化できないため、オフライン評価用途
+                // として許容する（#30 で受容済みの方針と同じ）。
                 let recent_form = self.recent_form_for(&r.horse_name, race.date).await?;
                 let factors = build_factors(
                     &entry,

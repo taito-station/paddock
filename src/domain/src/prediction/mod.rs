@@ -139,12 +139,16 @@ pub fn recent_form_score(
     }
 
     // 前走人気乖離: 人気順位より好走（着順が人気順位より小さい）で加点、凡走で減点。
+    // 着順なし（中止・失格・取消で finishing_position = None）の前走は乖離を測れないため、
+    // この signal を落として残りの signal（体重・間隔）で評価する。
     if let (Some(pop), Some(pos)) = (prev.popularity, prev.finishing_position.map(|p| p.value())) {
         let gap = pop as f64 - pos as f64; // >0: 人気以上の好走
         signals.push((0.5 + gap * POP_GAP_K).clamp(0.0, 1.0));
     }
 
     // 前走間隔: 中2週(14)〜2ヶ月(60)を最適(1.0)、連闘(<14)/長休(>120)を逓減。
+    // 本番経路では find_recent_runs が `races.date < before` で前走のみ返すため days は常に正。
+    // `days > 0` は異常データ（同日/未来の前走）に対する防御で、その場合は間隔 signal を落とす。
     let days = (race_date - prev_date).num_days();
     if days > 0 {
         signals.push(interval_form(days));
@@ -157,13 +161,13 @@ pub fn recent_form_score(
     }
 }
 
-/// 前走間隔（日数）→ `[0,1]` の台形マップ。
+/// 前走間隔（日数）→ `[0,1]` の台形マップ。区分は離散で、境界に小さな段差がある（heuristic）。
 fn interval_form(days: i64) -> f64 {
     match days {
         d if d <= 7 => 0.3,                                  // 連闘・中1週未満
-        d if d < 14 => 0.3 + 0.7 * (d - 7) as f64 / 7.0,     // 7→14 で 0.3→1.0
-        d if d <= 60 => 1.0,                                 // 最適帯
-        d if d <= 120 => 1.0 - 0.5 * (d - 60) as f64 / 60.0, // 60→120 で 1.0→0.5
+        d if d < 14 => 0.3 + 0.7 * (d - 7) as f64 / 7.0,     // 8〜13 日: 0.3→0.9 にランプ
+        d if d <= 60 => 1.0,                                 // 中2週〜2ヶ月: 最適帯
+        d if d <= 120 => 1.0 - 0.5 * (d - 60) as f64 / 60.0, // 60→120 日で 1.0→0.5
         _ => 0.5,                                            // 長期休み明け（不確実）
     }
 }
@@ -507,6 +511,17 @@ mod tests {
         assert!((optimal.unwrap() - 1.0).abs() < 1e-9);
         assert!((rento.unwrap() - 0.3).abs() < 1e-9);
         assert!((layoff.unwrap() - 0.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn recent_form_drops_popularity_signal_when_no_finish() {
+        // 着順なし（中止・失格等で finishing_position = None）の前走は、人気が取れていても
+        // 人気乖離 signal を落とし、体重変化(0.9: Δ=2)と間隔(1.0: 30日)のみで算出 → 平均 0.95。
+        let d = ymd(2026, 5, 1);
+        let pd = ymd(2026, 4, 1);
+        let f = recent_form_score(&prev_result(Some(2), Some(3), None), pd, d).unwrap();
+        let weight_sig = 1.0 - 2.0 / WEIGHT_CHANGE_CAP; // 0.9
+        assert!((f - (weight_sig + 1.0) / 2.0).abs() < 1e-9, "form={f}");
     }
 
     #[test]
