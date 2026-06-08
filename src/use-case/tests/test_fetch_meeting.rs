@@ -134,6 +134,15 @@ impl Repository for MockRepo {
         Ok(Vec::new())
     }
 
+    async fn find_recent_runs(
+        &self,
+        _name: &HorseName,
+        _before: NaiveDate,
+        _limit: u32,
+    ) -> Result<Vec<(NaiveDate, HorseResult)>> {
+        Ok(Vec::new())
+    }
+
     async fn find_predict_session(
         &self,
         _date: chrono::NaiveDate,
@@ -416,6 +425,15 @@ impl Repository for HistoryRepo {
         _from: NaiveDate,
         _to: NaiveDate,
     ) -> Result<Vec<Race>> {
+        Ok(Vec::new())
+    }
+
+    async fn find_recent_runs(
+        &self,
+        _name: &HorseName,
+        _before: NaiveDate,
+        _limit: u32,
+    ) -> Result<Vec<(NaiveDate, HorseResult)>> {
         Ok(Vec::new())
     }
 

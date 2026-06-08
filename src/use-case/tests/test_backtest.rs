@@ -127,6 +127,15 @@ impl Repository for MockRepo {
         Ok(self.races.clone())
     }
 
+    async fn find_recent_runs(
+        &self,
+        _name: &HorseName,
+        _before: NaiveDate,
+        _limit: u32,
+    ) -> Result<Vec<(NaiveDate, HorseResult)>> {
+        Ok(Vec::new())
+    }
+
     async fn horse_stats(
         &self,
         name: &HorseName,

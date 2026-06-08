@@ -10,7 +10,7 @@ use std::sync::Mutex;
 
 use chrono::NaiveDate;
 use paddock_domain::horse_result::{FinishingPosition, GateNum, HorseName, HorseNum, ResultStatus};
-use paddock_domain::{HorseId, JockeyName, Race, RaceCard, RaceId, Surface, Venue};
+use paddock_domain::{HorseId, HorseResult, JockeyName, Race, RaceCard, RaceId, Surface, Venue};
 use paddock_use_case::netkeiba_scraper::{HorsePastRun, NetkeibaScraper, RunnerRef};
 use paddock_use_case::repository::{
     CourseStatsRow, FetchRecord, HorseStatsRow, JockeyStatsRow, PredictBetRecord,
@@ -169,6 +169,14 @@ impl Repository for RecordingRepo {
         _from: NaiveDate,
         _to: NaiveDate,
     ) -> Result<Vec<Race>> {
+        unimplemented!()
+    }
+    async fn find_recent_runs(
+        &self,
+        _name: &HorseName,
+        _before: NaiveDate,
+        _limit: u32,
+    ) -> Result<Vec<(NaiveDate, HorseResult)>> {
         unimplemented!()
     }
     async fn find_predict_session(&self, _date: NaiveDate) -> Result<Option<PredictSessionRecord>> {

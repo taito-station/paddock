@@ -125,6 +125,14 @@ impl Repository for RecordingRepo {
     async fn save_race(&self, _race: &Race) -> Result<()> {
         unimplemented!()
     }
+    async fn find_recent_runs(
+        &self,
+        _name: &HorseName,
+        _before: NaiveDate,
+        _limit: u32,
+    ) -> Result<Vec<(NaiveDate, paddock_domain::horse_result::HorseResult)>> {
+        unimplemented!()
+    }
     async fn upsert_history_race(&self, _race: &Race) -> Result<()> {
         unimplemented!()
     }

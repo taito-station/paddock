@@ -164,6 +164,15 @@ impl Repository for MockRepo {
         Ok(Vec::new())
     }
 
+    async fn find_recent_runs(
+        &self,
+        _name: &HorseName,
+        _before: chrono::NaiveDate,
+        _limit: u32,
+    ) -> Result<Vec<(chrono::NaiveDate, paddock_domain::HorseResult)>> {
+        Ok(Vec::new())
+    }
+
     async fn find_predict_session(
         &self,
         _: chrono::NaiveDate,
