@@ -35,6 +35,11 @@ Issue #30 対応。DB に蓄積された過去の `races`/`results` に対して
 
 CLI: `paddock-analyze backtest --from YYYY-MM-DD --to YYYY-MM-DD`
 
+`--from` / `--to` は `String` で受け取り、`main` 内で `NaiveDate::parse_from_str(_, "%Y-%m-%d")` で
+手動パースする（既存 `predict <race_id>` が `String` 受け→`RaceId::try_from` する流儀に合わせる）。
+パース失敗は `anyhow` エラーとして stderr に出力し exit code 1 で終了する（clap の型パーサに任せると
+exit code 2 になり既存コマンドと不揃いになるため、手動パースで統一する）。
+
 ## 出力
 
 `BacktestReport`（`paddock_domain::backtest`）。
@@ -61,6 +66,10 @@ CLI: `paddock-analyze backtest --from YYYY-MM-DD --to YYYY-MM-DD`
 レースのみを対象とする。出馬表 (`race_cards`) ではなく `results` を使うため、出馬表が無い過去レースも
 評価できる。`from > to` のときは結果が空集合になり、評価レース数 0 で正常終了する（期間の前後関係を
 特別扱いするバリデーションは設けない）。
+
+粒度: `find_finished_races_between` は「着順ありの `results` 行を 1 件以上含むレース」を返す（レース単位の
+フィルタ）。個々の馬の `finishing_position` が `None`（除外・失格等）であることは許容し、馬単位の欠落は
+ステップ 3 で扱う。
 
 ### ステップ 2: レースごとの予測再現（リーク防止）
 
@@ -236,6 +245,11 @@ LogLoss (win)       : 0.2841
   バックテスト結果にもそのまま反映される。バックテストはそれらの改善 (#32) の効果測定に使う。
 - 想定回収率は単勝（トップ選好馬への 100 円固定賭け）のみを対象とする。EV/Kelly 配分（ADR 0003）を
   反映した回収率評価は将来の拡張とする。
+- 回収率は `results.odds`（レース確定後の単勝確定オッズ）ベースで、本番 predict が買い目を決める時点の
+  締切前取得オッズとは別物。確定オッズで後知恵的に賭けた場合の概算であり、EV/Kelly の予想時点前提とは
+  乖離しうる点に注意する。
+- 統計・突合は `horse_name` 文字列一致をキーにするため、同名異馬の混同は backtest でも本番 predict と
+  同様に残る（`results.horse_id` による厳密な同定は本 issue では使わない）。
 - Brier / LogLoss は全馬エントリ単位の二値較正のため、出走頭数分布に依存する（多頭数レースほど y=0 側の
   サンプルが増える）。#31/#32 の before/after を比較する際は、対象期間の頭数構成が大きく変わらない前提で
   相対比較する（絶対値の期間横断比較には注意）。
