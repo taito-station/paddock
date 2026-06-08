@@ -26,6 +26,11 @@ pub(crate) async fn delete_absent_horse_nums(
     race_id: &str,
     horse_nums: &[i64],
 ) -> Result<(), sqlx::Error> {
+    // `table` は SQL に直接埋め込むため、既知のリテラルのみ許す（呼び出し側契約の二重防御）。
+    debug_assert!(
+        matches!(table, "results" | "horse_entries"),
+        "table must be a known literal, got {table:?}"
+    );
     if horse_nums.is_empty() {
         return Ok(());
     }

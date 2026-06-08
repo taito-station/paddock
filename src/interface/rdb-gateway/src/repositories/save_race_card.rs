@@ -35,7 +35,8 @@ pub async fn save_race_card(pool: &SqlitePool, card: &RaceCard) -> Result<()> {
 
     // 破壊的な全消し DELETE はしない。fetch-card(netkeiba) と parse-entries(pdf) が同じ
     // race_id を書きうるため、全消しは一方の取り込みを消す危険がある。ON CONFLICT 更新に任せ、
-    // 今回の出走集合に無い馬番だけを後段で掃除する。
+    // 今回の出走集合に無い馬番だけを後段で掃除する。掃除は source 非依存なので、各経路は
+    // その race の出走全頭（full field）を渡す前提（部分集合を書くと他経路ぶんを消しうる）。
     for entry in &card.entries {
         sqlx::query(
             r#"

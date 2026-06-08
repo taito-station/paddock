@@ -142,6 +142,24 @@ async fn reingest_removes_only_absent_horse_nums() {
 }
 
 #[tokio::test]
+async fn reingest_with_empty_results_keeps_existing_rows() {
+    let (repo, _dir) = fresh_repo().await;
+    let rid = "2026-3-nakayama-8-1R";
+    repo.save_race(&race(rid, vec![result(1, "ウマA"), result(2, "ウマB")]))
+        .await
+        .unwrap();
+
+    // 劣化パース等で results が空のレースを再取り込みしても、既存行は消さない（全消し防御）。
+    repo.save_race(&race(rid, vec![])).await.unwrap();
+
+    assert_eq!(
+        result_horse_nums(&repo, rid).await,
+        vec![1, 2],
+        "空 results の再取り込みで既存行を消さない"
+    );
+}
+
+#[tokio::test]
 async fn save_race_card_reingest_removes_only_absent_entries() {
     let (repo, _dir) = fresh_repo().await;
     let rid = "2026-3-nakayama-8-1R";

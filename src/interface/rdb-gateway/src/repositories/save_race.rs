@@ -38,8 +38,9 @@ pub async fn save_race(pool: &SqlitePool, race: &Race) -> Result<()> {
     .execute(&mut *tx)
     .await?;
 
-    // 破壊的な全消し DELETE はしない。ON CONFLICT(race_id, horse_num) DO UPDATE で pdf が権威を
-    // 持つ列のみ更新し、SET に含めない horse_id（#60 で backfill する値）と source は温存する。
+    // 破壊的な全消し DELETE はしない。pdf が権威を持つ列は ON CONFLICT(race_id, horse_num)
+    // DO UPDATE で更新し、INSERT 列にも UPDATE SET にも含めない horse_id（#60 で backfill する値）
+    // と source は再取り込みでも温存する。
     for r in &race.results {
         sqlx::query(
             r#"
