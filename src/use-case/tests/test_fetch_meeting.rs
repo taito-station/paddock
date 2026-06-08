@@ -112,6 +112,12 @@ impl Repository for MockRepo {
     async fn save_race_card(&self, _card: &RaceCard) -> Result<()> {
         Err(Error::NotFound("unused".into()))
     }
+    async fn save_race_odds(
+        &self,
+        _record: &paddock_use_case::repository::RaceOddsRecord,
+    ) -> Result<()> {
+        Err(Error::NotFound("unused".into()))
+    }
     async fn find_race_card(&self, _race_id: &RaceId) -> Result<Option<RaceCard>> {
         Err(Error::NotFound("unused".into()))
     }
@@ -398,6 +404,12 @@ impl Repository for HistoryRepo {
         Ok(())
     }
     async fn save_race_card(&self, _card: &RaceCard) -> Result<()> {
+        Err(Error::NotFound("unused".into()))
+    }
+    async fn save_race_odds(
+        &self,
+        _record: &paddock_use_case::repository::RaceOddsRecord,
+    ) -> Result<()> {
         Err(Error::NotFound("unused".into()))
     }
     async fn find_race_card(&self, _race_id: &RaceId) -> Result<Option<RaceCard>> {

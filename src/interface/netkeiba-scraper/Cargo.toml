@@ -8,7 +8,9 @@ paddock-domain   = { workspace = true }
 paddock-use-case = { workspace = true }
 chrono           = { workspace = true }
 encoding_rs      = { workspace = true }
+regex            = { workspace = true }
 scraper          = { workspace = true }
+serde_json       = { workspace = true }
 thiserror        = { workspace = true }
 tracing          = { workspace = true }
 ureq             = { workspace = true }

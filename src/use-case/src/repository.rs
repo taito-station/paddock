@@ -105,6 +105,29 @@ pub struct PredictSessionRecord {
     pub updated_at: DateTime<Utc>,
 }
 
+/// `race_odds` テーブルへ保存する 1 行分のオッズ。ドメインの [`RaceOdds`] は
+/// popularity / fetched_at を持てないため、永続化専用の入力型として use-case 層に定義する。
+#[derive(Debug, Clone)]
+pub struct OddsRow {
+    /// 馬券種ラベル（単勝なら `"win"`）。
+    pub bet_type: String,
+    /// 組み合わせキー（単勝なら馬番文字列）。
+    pub combination_key: String,
+    pub odds: f64,
+    /// 複勝のような下限/上限を持つ馬券種の上限値。単勝は `None`。
+    pub odds_high: Option<f64>,
+    pub popularity: Option<u32>,
+}
+
+/// 1 レース分のオッズ取得結果。取得時刻 `fetched_at` は use-case 層で注入し、
+/// gateway を時計から独立に保つ（[`FetchRecord`] と同じ流儀）。
+#[derive(Debug, Clone)]
+pub struct RaceOddsRecord {
+    pub race_id: RaceId,
+    pub fetched_at: DateTime<Utc>,
+    pub rows: Vec<OddsRow>,
+}
+
 /// セッション内で実際に購入した買い目 1 件。払戻は買い目ごと（per-bet）に記録する。
 #[derive(Debug, Clone)]
 pub struct PredictBetRecord {
@@ -181,6 +204,10 @@ pub trait Repository: Send + Sync {
     fn record_fetch(&self, record: &FetchRecord) -> impl Future<Output = Result<()>> + Send;
 
     fn save_race_card(&self, card: &RaceCard) -> impl Future<Output = Result<()>> + Send;
+
+    /// 1 レース分のオッズ（行単位）を upsert する。`race_odds` の主キー
+    /// `(race_id, bet_type, combination_key)` で衝突した行は最新値で更新する。
+    fn save_race_odds(&self, record: &RaceOddsRecord) -> impl Future<Output = Result<()>> + Send;
 
     fn find_race_card(
         &self,

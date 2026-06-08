@@ -1,3 +1,4 @@
+pub mod card;
 pub mod course;
 pub mod entry;
 pub mod horse;
