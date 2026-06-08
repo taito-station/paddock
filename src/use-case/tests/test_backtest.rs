@@ -182,6 +182,12 @@ impl Repository for MockRepo {
     async fn save_race_card(&self, _: &RaceCard) -> Result<()> {
         unimplemented!()
     }
+    async fn save_race_odds(
+        &self,
+        _: &paddock_use_case::repository::RaceOddsRecord,
+    ) -> Result<()> {
+        unimplemented!()
+    }
     async fn find_race_card(&self, _: &RaceId) -> Result<Option<RaceCard>> {
         unimplemented!()
     }

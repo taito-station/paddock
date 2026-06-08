@@ -85,6 +85,20 @@ impl NetkeibaScraper for FakeScraper {
             .cloned()
             .unwrap_or_default())
     }
+
+    fn fetch_card(
+        &self,
+        _race_id: &str,
+    ) -> Result<paddock_use_case::netkeiba_scraper::FetchedCard> {
+        unimplemented!()
+    }
+
+    fn fetch_win_odds(
+        &self,
+        _race_id: &str,
+    ) -> Result<Vec<paddock_use_case::netkeiba_scraper::FetchedWinOdds>> {
+        unimplemented!()
+    }
 }
 
 #[derive(Default)]
@@ -136,6 +150,12 @@ impl Repository for RecordingRepo {
         unimplemented!()
     }
     async fn save_race_card(&self, _card: &RaceCard) -> Result<()> {
+        unimplemented!()
+    }
+    async fn save_race_odds(
+        &self,
+        _record: &paddock_use_case::repository::RaceOddsRecord,
+    ) -> Result<()> {
         unimplemented!()
     }
     async fn find_race_card(&self, _race_id: &RaceId) -> Result<Option<RaceCard>> {

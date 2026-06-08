@@ -59,6 +59,23 @@ impl Venue {
         }
     }
 
+    /// JRA 場コード（"01".."10"）を返す。netkeiba 12 桁 race_id の 5〜6 桁目に対応し、
+    /// `parse::venue_from_race_id` の逆変換にあたる（netkeiba race_id 組み立て用）。
+    pub fn as_code(&self) -> &'static str {
+        match self {
+            Venue::Sapporo => "01",
+            Venue::Hakodate => "02",
+            Venue::Fukushima => "03",
+            Venue::Niigata => "04",
+            Venue::Tokyo => "05",
+            Venue::Nakayama => "06",
+            Venue::Chukyo => "07",
+            Venue::Kyoto => "08",
+            Venue::Hanshin => "09",
+            Venue::Kokura => "10",
+        }
+    }
+
     pub fn as_slug(&self) -> &'static str {
         match self {
             Venue::Sapporo => "sapporo",

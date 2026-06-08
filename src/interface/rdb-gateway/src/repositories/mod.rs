@@ -8,6 +8,7 @@ mod jockey_stats;
 mod predict_session;
 mod save_race;
 mod save_race_card;
+mod save_race_odds;
 mod sql;
 mod upsert_history_race;
 
@@ -16,7 +17,7 @@ use paddock_domain::{HorseName, JockeyName, Race, RaceCard, RaceId, Surface, Ven
 use paddock_use_case::Result as UcResult;
 use paddock_use_case::repository::{
     CourseStatsRow, FetchRecord, HorseStatsRow, JockeyStatsRow, PredictBetRecord,
-    PredictSessionRecord, Repository,
+    PredictSessionRecord, RaceOddsRecord, Repository,
 };
 
 use crate::pool::SqlitePool;
@@ -107,6 +108,12 @@ impl Repository for SqliteRepository {
 
     async fn save_race_card(&self, card: &RaceCard) -> UcResult<()> {
         save_race_card::save_race_card(&self.pool, card)
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn save_race_odds(&self, record: &RaceOddsRecord) -> UcResult<()> {
+        save_race_odds::save_race_odds(&self.pool, record)
             .await
             .map_err(Into::into)
     }

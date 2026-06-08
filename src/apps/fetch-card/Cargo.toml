@@ -1,0 +1,21 @@
+[package]
+name = "fetch-card"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "paddock-fetch-card"
+path = "src/bin.rs"
+
+[dependencies]
+anyhow             = { workspace = true }
+chrono             = { workspace = true }
+clap               = { workspace = true }
+netkeiba-scraper   = { workspace = true }
+paddock-config     = { workspace = true }
+paddock-domain     = { workspace = true }
+paddock-use-case   = { workspace = true }
+rdb-gateway        = { workspace = true }
+tokio              = { workspace = true }
+tracing            = { workspace = true }
+tracing-subscriber = { workspace = true }

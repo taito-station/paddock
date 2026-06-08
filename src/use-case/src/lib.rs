@@ -2,6 +2,7 @@ pub mod dto;
 pub mod entry_parser;
 pub mod error;
 pub mod interactor;
+pub mod netkeiba_race_id;
 pub mod netkeiba_scraper;
 pub mod odds_scraper;
 pub mod pdf_fetcher;
@@ -14,13 +15,17 @@ pub use error::{Error, Result};
 pub use interactor::Interactor;
 pub use interactor::entry::EntryInteractor;
 pub use interactor::horse_history::HorseHistoryInteractor;
+pub use interactor::card::CardInteractor;
 pub use interactor::odds::OddsInteractor;
-pub use netkeiba_scraper::{HorsePastRun, NetkeibaScraper, RunnerRef};
+pub use netkeiba_race_id::{build_race_ids, paddock_race_id_from_netkeiba};
+pub use netkeiba_scraper::{
+    FetchedCard, FetchedEntry, FetchedWinOdds, HorsePastRun, NetkeibaScraper, RunnerRef,
+};
 pub use odds_scraper::OddsScraper;
 pub use paddock_domain::{HorseFactors, HorseProbability, RateTriple};
 pub use pdf_fetcher::PdfFetcher;
 pub use pdf_parser::PdfParser;
 pub use repository::{
-    CourseStatsRow, FetchRecord, GroupStat, HorseStatsRow, JockeyStatsRow, PredictBetRecord,
-    PredictSessionRecord, Repository,
+    CourseStatsRow, FetchRecord, GroupStat, HorseStatsRow, JockeyStatsRow, OddsRow,
+    PredictBetRecord, PredictSessionRecord, RaceOddsRecord, Repository,
 };

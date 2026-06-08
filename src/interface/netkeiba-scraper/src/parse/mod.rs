@@ -1,9 +1,13 @@
 //! 純粋なHTMLパース層（ネットワーク無し）。出馬表と馬個別成績を fixture で網羅テストする。
 
+mod card;
 mod horse_history;
+mod odds;
 mod shutuba;
 
+pub use card::parse_card;
 pub use horse_history::parse_horse_history;
+pub use odds::parse_win_odds;
 pub use shutuba::parse_shutuba;
 
 use paddock_domain::Venue;
