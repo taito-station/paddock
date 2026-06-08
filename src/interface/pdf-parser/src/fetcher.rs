@@ -18,8 +18,13 @@ impl PdfFetcher for UreqFetcher {
     fn fetch_if_exists(&self, url: &str) -> UcResult<Option<Vec<u8>>> {
         match ureq::get(url).call() {
             Ok(resp) => Ok(Some(read_body(resp)?)),
-            // 404 means the meeting PDF is not published (yet); treat as absent.
-            Err(ureq::Error::Status(404, _)) => Ok(None),
+            // A meeting PDF that does not exist is reported as absent so range
+            // enumeration can stop / skip instead of erroring. JRA's seiseki
+            // directory answers a missing report with 403 (not just 404): a
+            // not-yet-published day returns 404, while a never-existing
+            // (round/day past the meeting, or a non-running venue) returns 403.
+            // Both mean "no PDF here", so treat them alike.
+            Err(ureq::Error::Status(403 | 404, _)) => Ok(None),
             Err(e) => Err(Error::Fetch(e.to_string()).into()),
         }
     }
