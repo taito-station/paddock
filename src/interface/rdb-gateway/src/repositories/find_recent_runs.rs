@@ -15,7 +15,9 @@ struct RecentRow {
 
 /// 指定馬の `before` より前の成績を date 降順で最大 `limit` 件取得する（前走フォーム #31 用）。
 /// `races.date < before` でバックテスト時のリークを防ぐ。pdf/netkeiba 双方の成績を対象とする
-/// （実際の前走を取りたいため source は絞らない）。
+/// （実際の前走を取りたいため source は絞らない）。同一馬の同一実レースが pdf と netkeiba で同日
+/// 二重登録されうるため、`race_id` 降順を第 2 ソートキーにして `LIMIT 1` の選択を決定的にする
+/// （非決定だと前走フォームが run ごとにブレる）。
 pub async fn find_recent_runs(
     pool: &SqlitePool,
     name: &HorseName,
@@ -38,7 +40,7 @@ pub async fn find_recent_runs(
         INNER JOIN races ON races.race_id = results.race_id
         WHERE results.horse_name = $1
           AND races.date < $2
-        ORDER BY races.date DESC
+        ORDER BY races.date DESC, results.race_id DESC
         LIMIT $3
         "#,
     )

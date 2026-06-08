@@ -106,3 +106,31 @@ async fn find_recent_runs_respects_cutoff_order_and_limit() {
         .unwrap();
     assert!(none.is_empty(), "当日含む以前は前走なし");
 }
+
+#[tokio::test]
+async fn find_recent_runs_is_deterministic_on_same_date_ties() {
+    // 同一馬の同一日に 2 走（pdf と netkeiba の二重登録を模す。race_id 違い）。
+    // race_id 降順タイブレークにより LIMIT 1 の選択が決定的になること。
+    let (repo, _dir) = fresh_repo().await;
+    repo.save_race(&race_run("aaa-low", ymd(2026, 2, 10), "ウマY", 8, 9, 0))
+        .await
+        .unwrap();
+    repo.save_race(&race_run("zzz-high", ymd(2026, 2, 10), "ウマY", 1, 1, 0))
+        .await
+        .unwrap();
+
+    let name = HorseName::try_from("ウマY").unwrap();
+    // race_id 降順 → "zzz-high" が先頭で安定。
+    for _ in 0..3 {
+        let runs = repo
+            .find_recent_runs(&name, ymd(2026, 3, 1), 1)
+            .await
+            .unwrap();
+        assert_eq!(runs.len(), 1);
+        assert_eq!(
+            runs[0].1.finishing_position.map(|p| p.value()),
+            Some(1),
+            "race_id 降順タイブレークで zzz-high(1着) が決定的に選ばれる"
+        );
+    }
+}
