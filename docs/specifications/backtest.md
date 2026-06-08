@@ -8,6 +8,8 @@ Issue #30 対応。DB に蓄積された過去の `races`/`results` に対して
 
 ![バックテスト評価フロー](diagrams/backtest-flow.svg)
 
+> 図は `diagrams/backtest-flow.drawio` を正本とし、`.svg` はその描画（編集時は両者を揃える）。
+
 期間 (`from`〜`to`) を受け取り、その期間に確定済みの各レースについて「**そのレース日より前**の
 成績だけ」で確率推定を再現し（walk-forward／リーク防止）、実着順と突合して指標レポートを返す。
 
@@ -55,8 +57,10 @@ CLI: `paddock-analyze backtest --from YYYY-MM-DD --to YYYY-MM-DD`
 ### ステップ 1: 評価レースの取得
 
 `Repository::find_finished_races_between(from, to)` で期間内の確定済みレースを `results` 付きで取得する。
-`source='pdf'` かつ `finishing_position IS NOT NULL` を含むレースのみを対象とする。出馬表
-(`race_cards`) ではなく `results` を使うため、出馬表が無い過去レースも評価できる。
+`races.source='pdf'`（既存 `find_races_by_date` と同じ列）かつ `finishing_position IS NOT NULL` を含む
+レースのみを対象とする。出馬表 (`race_cards`) ではなく `results` を使うため、出馬表が無い過去レースも
+評価できる。`from > to` のときは結果が空集合になり、評価レース数 0 で正常終了する（期間の前後関係を
+特別扱いするバリデーションは設けない）。
 
 ### ステップ 2: レースごとの予測再現（リーク防止）
 
@@ -89,6 +93,20 @@ CLI: `paddock-analyze backtest --from YYYY-MM-DD --to YYYY-MM-DD`
 | 想定回収率 | Σ payout / Σ stake。各レース 100 円をトップ選好馬の単勝に賭け、1 着なら `payout = odds×100`、他は 0。`results.odds` が取れたレースのみ母数 |
 | Brier (win) | `mean((win_prob − y)²)`、y=1 if 1 着。全馬エントリ単位 |
 | LogLoss (win) | `−mean(y·ln p + (1−y)·ln(1−p))`。`p` は `[ε, 1−ε]` にクランプして `ln(0)` を回避（ε=1e-15） |
+
+> **的中率の母数と本命固定について**: 連対・複勝の的中率も「`win_prob` 最大のトップ選好馬」が
+> 2/3 着以内に入ったかで測る（`place_prob`/`show_prob` 最大馬ではない）。これは「単勝本命を軸に、
+> その馬が連対・複勝で保険的中したか」を見る評価方針で、同一の馬を母数にするため
+> `単勝的中率 ≤ 連対的中率 ≤ 複勝的中率` の包含関係が常に成立する。`place_prob`/`show_prob` 自体の
+> 較正は Brier/LogLoss（下記）で測る。評価レース数（`races_evaluated`）は、エントリが 1 頭以上あり
+> トップ選好馬を決定できたレース数（突合できなかったレースは母数から除外）。
+
+> **Brier/LogLoss の確率モデル前提**: `win_prob` はレース内で Σ=1.0 に正規化された「各馬が 1 着になる
+> 周辺確率」（probability-estimation.md）。本指標は各馬の単勝的中を**独立な二値事象**とみなし、その
+> 周辺確率の較正（calibration）を全馬エントリ単位で測る。レース全体の同時分布に対する多クラス
+> LogLoss（`−ln p_winner`）ではない点に注意（#31/#32 の before/after 比較では同一定義で一貫して
+> 比較できれば足りるため、解釈の容易な二値較正を採る）。スタッツ希薄でスコア 0 → `win_prob=0` の馬
+> （ADR 0002 の既知制約）が実際に勝った場合、ε クランプにより LogLoss が大きく効く。
 
 ---
 
@@ -145,7 +163,10 @@ pub async fn backtest(&self, from: NaiveDate, to: NaiveDate) -> Result<BacktestR
    `estimate_probabilities` を再現
 3. `RaceEvaluation` を構築し、`paddock_domain::backtest::evaluate` で集計
 
-`build_factors` は `predict.rs` と共有する（`pub(crate)` 化）。
+`build_factors` は `predict.rs` と共有する（`pub(crate)` 化）。共有するのは「取得済みの stats 行
+（`CourseStatsRow`/`HorseStatsRow`/`JockeyStatsRow`）から `HorseFactors` を組み立てる純粋な変換」だけで、
+`build_factors` 自体は `as_of` に依存しない。stats の取得呼び出し（`as_of` を `None`/`Some(D)` で出し分ける
+部分）は predict と backtest の各 interactor 側に残る。
 
 ### Use-Case Repository（トレイト変更）
 
@@ -180,14 +201,25 @@ Brier (win)         : 0.0712
 LogLoss (win)       : 0.2841
 ```
 
+`results.odds` がどのレースでも取れず回収率の母数が 0 の場合は、NaN を出さず母数 0 を明示する:
+```
+想定回収率          : —  (母数 0 レース)
+```
+評価対象レースが 0 件（期間に確定レースなし／`from > to`）の場合は、各指標を計算せず
+「評価対象レースなし」を表示して正常終了する。
+
 ---
 
 ## 既知の制約
 
-- `results.odds` が未取り込みのレースが多い場合、回収率の母数（`payout_races`）が小さくなる。
-  的中率・Brier・LogLoss は全評価レースで算出される。
-- 評価対象は `source='pdf'` の確定レースのみ。netkeiba 由来の近走（`source='netkeiba'`）は評価
-  対象から除外するが、as-of 統計の集計母数には（過去日付の成績として）含まれうる。
+- `results.odds` は単勝倍率（払戻 = `odds × 賭け金`、元本込み。回収率 100% がトントン）。`results.odds`
+  が未取り込みのレースが多い場合、回収率の母数（`payout_races`）が小さくなる。的中率・Brier・LogLoss は
+  全評価レースで算出される。
+- 想定回収率は JRA 実払戻の端数処理（100 円あたり 10 円未満切り捨て）を行わない概算。
+- 評価対象は `races.source='pdf'` の確定レースのみ。netkeiba 由来の近走（`source='netkeiba'`）は評価
+  対象から除外するが、as-of 統計の集計母数には（過去日付の成績として）含まれうる。同一馬・同一実レースが
+  pdf と netkeiba の両方で取り込まれている場合は二重計上され統計を歪めうる（確率推定側と共通の既存課題で、
+  本 issue では対処しない）。
 - 確率推定側の既知制約（単調性非保証・騎手なしペナルティ・スタッツ希薄馬のゼロスコア, ADR 0002）は
   バックテスト結果にもそのまま反映される。バックテストはそれらの改善 (#32) の効果測定に使う。
 - 想定回収率は単勝（トップ選好馬への 100 円固定賭け）のみを対象とする。EV/Kelly 配分（ADR 0003）を

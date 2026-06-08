@@ -35,7 +35,7 @@
         <mxCell id="10" edge="1" source="7" target="9" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
 
         <!-- リーク防止: as-of 統計 -->
-        <mxCell id="11" value="as_of = Some(D) で統計取得&#xa;course_stats / horse_stats / jockey_stats&#xa;★ races.date &lt; D のみ集計 (リーク防止)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontStyle=1;fontSize=11;" vertex="1" parent="1">
+        <mxCell id="11" value="as_of = Some(D) で統計取得&#xa;course_stats / horse_stats / jockey_stats&#xa;★ races.date &lt; D のみ集計 (同日 D も除外・リーク防止)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontStyle=1;fontSize=11;" vertex="1" parent="1">
           <mxGeometry x="410" y="500" width="320" height="70" as="geometry" />
         </mxCell>
         <mxCell id="12" edge="1" source="9" target="11" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
