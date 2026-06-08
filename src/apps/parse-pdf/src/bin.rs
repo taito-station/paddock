@@ -239,27 +239,37 @@ async fn run_fetch_range_parallel(
     let mut summary = FetchRangeSummary::default();
     while let Some(joined) = joinset.join_next().await {
         let (key, result) = joined?;
-        match result {
-            Ok(resp) => match resp.outcome {
-                FetchMeetingOutcome::Ingested {
-                    races_saved,
-                    horses_saved,
-                } => {
-                    summary.ingested += 1;
-                    summary.races_saved += races_saved;
-                    summary.horses_saved += horses_saved;
-                }
-                FetchMeetingOutcome::Skipped => summary.skipped += 1,
-                FetchMeetingOutcome::NotFound => summary.not_found += 1,
-            },
-            Err(e) => {
-                summary.failed += 1;
-                summary.failures.push((key, e.to_string()));
-            }
-        }
+        accumulate_outcome(&mut summary, key, result);
     }
 
     Ok(summary)
+}
+
+/// Fold one meeting fetch result into the running range summary. Kept pure (no
+/// IO / no concurrency) so the parallel aggregation can be unit-tested directly.
+fn accumulate_outcome(
+    summary: &mut FetchRangeSummary,
+    key: String,
+    result: paddock_use_case::Result<FetchMeetingResponse>,
+) {
+    match result {
+        Ok(resp) => match resp.outcome {
+            FetchMeetingOutcome::Ingested {
+                races_saved,
+                horses_saved,
+            } => {
+                summary.ingested += 1;
+                summary.races_saved += races_saved;
+                summary.horses_saved += horses_saved;
+            }
+            FetchMeetingOutcome::Skipped => summary.skipped += 1,
+            FetchMeetingOutcome::NotFound => summary.not_found += 1,
+        },
+        Err(e) => {
+            summary.failed += 1;
+            summary.failures.push((key, e.to_string()));
+        }
+    }
 }
 
 fn resolve_parallel(requested: Option<usize>) -> usize {
@@ -304,4 +314,60 @@ fn move_to_done_if_inbox(source: &str) -> anyhow::Result<Option<PathBuf>> {
     std::fs::rename(&canonical_src, &dest)
         .with_context(|| format!("rename {} -> {}", canonical_src.display(), dest.display()))?;
     Ok(Some(dest))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn resp(key: &str, outcome: FetchMeetingOutcome) -> FetchMeetingResponse {
+        FetchMeetingResponse {
+            source_key: key.to_string(),
+            url: format!("https://example/{key}.pdf"),
+            outcome,
+        }
+    }
+
+    #[test]
+    fn accumulate_outcome_folds_each_variant() {
+        let mut s = FetchRangeSummary::default();
+
+        accumulate_outcome(
+            &mut s,
+            "k1".into(),
+            Ok(resp(
+                "k1",
+                FetchMeetingOutcome::Ingested {
+                    races_saved: 12,
+                    horses_saved: 200,
+                },
+            )),
+        );
+        accumulate_outcome(
+            &mut s,
+            "k2".into(),
+            Ok(resp("k2", FetchMeetingOutcome::Skipped)),
+        );
+        accumulate_outcome(
+            &mut s,
+            "k3".into(),
+            Ok(resp("k3", FetchMeetingOutcome::NotFound)),
+        );
+        accumulate_outcome(
+            &mut s,
+            "k4".into(),
+            Err(paddock_use_case::Error::Internal("boom".into())),
+        );
+
+        assert_eq!(s.ingested, 1);
+        assert_eq!(s.races_saved, 12);
+        assert_eq!(s.horses_saved, 200);
+        assert_eq!(s.skipped, 1);
+        assert_eq!(s.not_found, 1);
+        assert_eq!(s.failed, 1);
+        // failed meetings retain their key + error so run_fetch can list them.
+        assert_eq!(s.failures.len(), 1);
+        assert_eq!(s.failures[0].0, "k4");
+        assert!(s.failures[0].1.contains("boom"));
+    }
 }

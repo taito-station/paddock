@@ -1,9 +1,10 @@
 use paddock_domain::Venue;
 
-/// Runaway guards for meeting enumeration. Set a little above the real JRA maxima
-/// (~6 rounds / ~12 days per meeting) so a legitimate meeting always falls inside.
-/// The sequential range fetch uses these as 404-boundary backstops; the parallel
-/// fetch enumerates the whole grid up to these caps (absent days simply 404).
+/// Upper bounds for meeting-day enumeration, set a little above the real JRA
+/// maxima (~6 rounds / ~12 days per meeting). The sequential range fetch uses
+/// them as backstops for its 404/403-boundary discovery; the parallel fetch
+/// enumerates the full grid up to these caps, where absent days resolve to
+/// 403/404 and are counted as not-found.
 pub const ROUND_CAP: u32 = 8;
 pub const DAY_CAP: u32 = 14;
 
@@ -185,7 +186,10 @@ mod tests {
             day: None,
         };
         let specs = range.candidate_specs();
-        assert_eq!(specs.len() as u32, 10 * ROUND_CAP * DAY_CAP);
+        assert_eq!(
+            specs.len() as u32,
+            Venue::all().len() as u32 * ROUND_CAP * DAY_CAP
+        );
         for venue in Venue::all() {
             assert!(specs.iter().any(|s| s.venue == venue));
         }
