@@ -5,6 +5,8 @@ use sqlx::SqlitePool;
 
 use crate::error::Result;
 
+use super::sql::date_lt_pred;
+
 /// `as_of = Some(d)` のとき `races.date < d` を付与する（バックテストのリーク防止）。
 /// course_stats は既に `races` を JOIN しているため述語追加のみでよい。
 pub async fn course_stats(
@@ -15,11 +17,7 @@ pub async fn course_stats(
     as_of: Option<NaiveDate>,
 ) -> Result<CourseStatsRow> {
     let cutoff = as_of.map(|d| d.format("%Y-%m-%d").to_string());
-    let date = if cutoff.is_some() {
-        "AND races.date < ?4"
-    } else {
-        ""
-    };
+    let date = date_lt_pred(cutoff.as_deref(), "?4");
     let groups: &[(&str, &str)] = &[
         ("Inner (1-3)", "results.gate_num BETWEEN 1 AND 3"),
         ("Middle (4-6)", "results.gate_num BETWEEN 4 AND 6"),

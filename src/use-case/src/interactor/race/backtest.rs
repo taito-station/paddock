@@ -14,6 +14,11 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
     /// 指定期間 `[from, to]` の確定済みレースに対して確率推定を再現し、予測と実着順を突合した
     /// バックテストレポートを返す。各レース日 D の統計は `as_of = Some(D)`（`races.date < D`）で
     /// 取得するため、評価対象レース当日・以降の結果はリークしない（walk-forward）。
+    ///
+    /// 性能: 統計取得は馬ごとに `horse_stats`/`jockey_stats` を逐次呼ぶ N+1 になる。`as_of` が
+    /// レース日ごとに変わる walk-forward の性質上、馬名でまたいでバッチ化できないため許容する
+    /// （オフライン評価用途で実行頻度が低い）。レース取得自体の N+1 は
+    /// [`Repository::find_finished_races_between`] が 2 クエリで回避済み。
     pub async fn backtest(&self, from: NaiveDate, to: NaiveDate) -> Result<BacktestReport> {
         let races = self
             .repository
@@ -22,6 +27,8 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
 
         let mut evaluations: Vec<RaceEvaluation> = Vec::with_capacity(races.len());
         for race in &races {
+            // find_finished_races_between は results を 1 件以上含むレースのみ返す契約だが、
+            // 念のための安全弁（results 空なら評価できないのでスキップ）。
             if race.results.is_empty() {
                 continue;
             }
@@ -58,11 +65,15 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
             }
 
             let probs = paddock_domain::prediction::estimate_probabilities(&entry_factors);
+            // entry_factors が非空なら estimate_probabilities は非空を返すため、理論上到達しない
+            // 安全弁（空なら集計に寄与しないのでスキップ）。
             if probs.is_empty() {
                 continue;
             }
 
             // 馬番 → (着順, 単勝オッズ) の突合表。
+            // 同着 1 着（稀）の場合は複数馬の win_outcomes が true になるが、的中率はトップ選好馬の
+            // 着順のみで判定するため二重計上されない。Brier/LogLoss も破綻しない。
             let by_num: HashMap<u32, (Option<u32>, Option<f64>)> = race
                 .results
                 .iter()

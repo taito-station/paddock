@@ -5,6 +5,8 @@ use sqlx::SqlitePool;
 
 use crate::error::Result;
 
+use super::sql::date_lt_pred;
+
 /// `as_of = Some(d)` のとき各サブクエリに `races.date < d` を付与する（バックテストのリーク防止）。
 /// overall / 枠順別は `FROM results` 単独のため `INNER JOIN races` を足す（`results.race_id` は
 /// `NOT NULL REFERENCES races` なので行数は不変、`as_of = None` の結果は従来と一致）。
@@ -29,7 +31,7 @@ pub async fn jockey_stats(
           AND results.finishing_position IS NOT NULL
           {date}
         "#,
-        date = date_pred(cutoff.as_deref(), "?2"),
+        date = date_lt_pred(cutoff.as_deref(), "?2"),
     );
     let mut overall_query = sqlx::query_as(&overall_q).bind(n);
     if let Some(d) = &cutoff {
@@ -54,14 +56,6 @@ pub async fn jockey_stats(
     })
 }
 
-fn date_pred(cutoff: Option<&str>, placeholder: &str) -> String {
-    if cutoff.is_some() {
-        format!("AND races.date < {placeholder}")
-    } else {
-        String::new()
-    }
-}
-
 async fn group_by_surface(
     pool: &SqlitePool,
     jockey: &str,
@@ -84,7 +78,7 @@ async fn group_by_surface(
               AND races.surface = ?2
               {date}
             "#,
-            date = date_pred(cutoff, "?3"),
+            date = date_lt_pred(cutoff, "?3"),
         );
         let mut query = sqlx::query_as(&q).bind(jockey).bind(*key);
         if let Some(d) = cutoff {
@@ -128,7 +122,7 @@ async fn group_by_gate(
               AND {predicate}
               {date}
             "#,
-            date = date_pred(cutoff, "?2"),
+            date = date_lt_pred(cutoff, "?2"),
         );
         let mut query = sqlx::query_as(&q).bind(jockey);
         if let Some(d) = cutoff {

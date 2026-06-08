@@ -71,7 +71,7 @@ pub async fn find_finished_races_between(
               WHERE results.race_id = races.race_id
                 AND results.finishing_position IS NOT NULL
           )
-        ORDER BY date ASC, race_num ASC
+        ORDER BY date ASC, race_num ASC, race_id ASC
         "#,
     )
     .bind(&from_str)

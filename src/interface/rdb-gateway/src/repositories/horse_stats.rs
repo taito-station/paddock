@@ -5,6 +5,8 @@ use sqlx::SqlitePool;
 
 use crate::error::Result;
 
+use super::sql::date_lt_pred;
+
 /// `as_of = Some(d)` のとき各サブクエリに `races.date < d` を付与し、その日付より前の成績のみを
 /// 集計する（バックテストのリーク防止）。`results.race_id` は `NOT NULL REFERENCES races` のため、
 /// `INNER JOIN races` を無条件に足しても行数は変わらず、`as_of = None`（全期間）の結果は従来と一致する。
@@ -58,16 +60,6 @@ pub async fn horse_stats(
     })
 }
 
-/// `races.date < ?N` の述語片を返す（`as_of` が無ければ空文字）。日付値はプレースホルダで
-/// バインドするため、ここでは文字列連結に値を含めない。
-fn date_pred(cutoff: Option<&str>, placeholder: &str) -> String {
-    if cutoff.is_some() {
-        format!("AND races.date < {placeholder}")
-    } else {
-        String::new()
-    }
-}
-
 async fn overall_stat(
     pool: &SqlitePool,
     horse_name: &str,
@@ -86,7 +78,7 @@ async fn overall_stat(
           AND results.finishing_position IS NOT NULL
           {date}
         "#,
-        date = date_pred(cutoff, "?2"),
+        date = date_lt_pred(cutoff, "?2"),
     );
     let mut query = sqlx::query_as(&q).bind(horse_name);
     if let Some(d) = cutoff {
@@ -125,7 +117,7 @@ async fn group_by(
               AND {column} = ?2
               {date}
             "#,
-            date = date_pred(cutoff, "?3"),
+            date = date_lt_pred(cutoff, "?3"),
         );
         let mut query = sqlx::query_as(&q).bind(horse_name).bind(*key);
         if let Some(d) = cutoff {
@@ -170,7 +162,7 @@ async fn group_by_distance_band(
               AND {predicate}
               {date}
             "#,
-            date = date_pred(cutoff, "?2"),
+            date = date_lt_pred(cutoff, "?2"),
         );
         let mut query = sqlx::query_as(&q).bind(horse_name);
         if let Some(d) = cutoff {
@@ -216,7 +208,7 @@ async fn group_by_popularity_band(
               AND results.{predicate}
               {date}
             "#,
-            date = date_pred(cutoff, "?2"),
+            date = date_lt_pred(cutoff, "?2"),
         );
         let mut query = sqlx::query_as(&q).bind(horse_name);
         if let Some(d) = cutoff {
@@ -260,7 +252,7 @@ async fn group_by_gate(
               AND {predicate}
               {date}
             "#,
-            date = date_pred(cutoff, "?2"),
+            date = date_lt_pred(cutoff, "?2"),
         );
         let mut query = sqlx::query_as(&q).bind(horse_name);
         if let Some(d) = cutoff {

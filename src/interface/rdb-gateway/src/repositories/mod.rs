@@ -7,6 +7,7 @@ mod horse_stats;
 mod jockey_stats;
 mod predict_session;
 mod save_race;
+mod sql;
 mod save_race_card;
 mod upsert_history_race;
 
