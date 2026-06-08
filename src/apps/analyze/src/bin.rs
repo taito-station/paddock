@@ -1,8 +1,11 @@
 mod cli;
 mod setup;
 
+use chrono::NaiveDate;
 use clap::Parser;
-use paddock_domain::{HorseName, HorseProbability, JockeyName, RaceId, Surface, Venue};
+use paddock_domain::{
+    BacktestReport, HorseName, HorseProbability, JockeyName, RaceId, Surface, Venue,
+};
 use paddock_use_case::repository::{CourseStatsRow, GroupStat, HorseStatsRow, JockeyStatsRow};
 
 #[tokio::main]
@@ -36,9 +39,20 @@ async fn main() -> anyhow::Result<()> {
             let probs = app.interactor.predict_race(&rid).await?;
             print_predict(&probs);
         }
+        cli::Command::Backtest { from, to } => {
+            let from = parse_date(&from)?;
+            let to = parse_date(&to)?;
+            let report = app.interactor.backtest(from, to).await?;
+            print_backtest(from, to, &report);
+        }
     }
 
     Ok(())
+}
+
+fn parse_date(s: &str) -> anyhow::Result<NaiveDate> {
+    NaiveDate::parse_from_str(s, "%Y-%m-%d")
+        .map_err(|e| anyhow::anyhow!("invalid date '{s}' (expected YYYY-MM-DD): {e}"))
 }
 
 fn print_horse(s: &HorseStatsRow) {
@@ -83,6 +97,29 @@ fn print_predict(probs: &[HorseProbability]) {
             p.show_prob * 100.0,
         );
     }
+}
+
+fn print_backtest(from: NaiveDate, to: NaiveDate, r: &BacktestReport) {
+    println!("# バックテスト {from} 〜 {to}");
+    if r.races_evaluated == 0 {
+        println!("評価対象レースなし");
+        return;
+    }
+    println!("{:<20}: {}", "評価レース数", r.races_evaluated);
+    println!("{:<20}: {:>5.1}%", "単勝的中率", r.win_hit_rate * 100.0);
+    println!("{:<20}: {:>5.1}%", "連対的中率", r.place_hit_rate * 100.0);
+    println!("{:<20}: {:>5.1}%", "複勝的中率", r.show_hit_rate * 100.0);
+    match r.payout_rate {
+        Some(rate) => println!(
+            "{:<20}: {:>5.1}%  (母数 {} レース)",
+            "想定回収率",
+            rate * 100.0,
+            r.payout_races
+        ),
+        None => println!("{:<20}: —  (母数 0 レース)", "想定回収率"),
+    }
+    println!("{:<20}: {:>7.4}", "Brier (win)", r.brier);
+    println!("{:<20}: {:>7.4}", "LogLoss (win)", r.log_loss);
 }
 
 fn print_section(title: &str, rows: &[GroupStat]) {

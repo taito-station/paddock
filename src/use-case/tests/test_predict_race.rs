@@ -103,14 +103,28 @@ impl Repository for MockRepo {
     async fn upsert_history_race(&self, _: &Race) -> Result<()> {
         unimplemented!()
     }
-    async fn horse_stats(&self, name: &HorseName) -> Result<HorseStatsRow> {
+    async fn horse_stats(
+        &self,
+        name: &HorseName,
+        _as_of: Option<chrono::NaiveDate>,
+    ) -> Result<HorseStatsRow> {
         let win_rate = if name.value() == "ウマA" { 0.2 } else { 0.1 };
         Ok(horse_stats_with_surface_win(win_rate))
     }
-    async fn course_stats(&self, _: Venue, _: u32, _: Surface) -> Result<CourseStatsRow> {
+    async fn course_stats(
+        &self,
+        _: Venue,
+        _: u32,
+        _: Surface,
+        _as_of: Option<chrono::NaiveDate>,
+    ) -> Result<CourseStatsRow> {
         Ok(course_stats_with_gate(4, 2))
     }
-    async fn jockey_stats(&self, _: &JockeyName) -> Result<JockeyStatsRow> {
+    async fn jockey_stats(
+        &self,
+        _: &JockeyName,
+        _as_of: Option<chrono::NaiveDate>,
+    ) -> Result<JockeyStatsRow> {
         unimplemented!()
     }
     async fn count_races(&self) -> Result<u64> {
@@ -133,6 +147,14 @@ impl Repository for MockRepo {
     }
 
     async fn find_races_by_date(&self, _: chrono::NaiveDate) -> Result<Vec<Race>> {
+        Ok(Vec::new())
+    }
+
+    async fn find_finished_races_between(
+        &self,
+        _from: chrono::NaiveDate,
+        _to: chrono::NaiveDate,
+    ) -> Result<Vec<Race>> {
         Ok(Vec::new())
     }
 

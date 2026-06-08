@@ -13,6 +13,8 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
         distance: u32,
         surface: Surface,
     ) -> Result<CourseStatsRow> {
-        self.repository.course_stats(venue, distance, surface).await
+        self.repository
+            .course_stats(venue, distance, surface, None)
+            .await
     }
 }

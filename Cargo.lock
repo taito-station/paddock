@@ -35,6 +35,7 @@ name = "analyze"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "clap",
  "paddock-config",
  "paddock-domain",

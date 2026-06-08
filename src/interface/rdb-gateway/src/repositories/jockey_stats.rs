@@ -1,29 +1,44 @@
+use chrono::NaiveDate;
 use paddock_domain::JockeyName;
 use paddock_use_case::repository::{GroupStat, JockeyStatsRow};
 use sqlx::SqlitePool;
 
 use crate::error::Result;
 
-pub async fn jockey_stats(pool: &SqlitePool, name: &JockeyName) -> Result<JockeyStatsRow> {
+/// `as_of = Some(d)` のとき各サブクエリに `races.date < d` を付与する（バックテストのリーク防止）。
+/// overall / 枠順別は `FROM results` 単独のため `INNER JOIN races` を足す（`results.race_id` は
+/// `NOT NULL REFERENCES races` なので行数は不変、`as_of = None` の結果は従来と一致）。
+pub async fn jockey_stats(
+    pool: &SqlitePool,
+    name: &JockeyName,
+    as_of: Option<NaiveDate>,
+) -> Result<JockeyStatsRow> {
     let n = name.value();
+    let cutoff = as_of.map(|d| d.format("%Y-%m-%d").to_string());
 
-    let overall: (i64, i64, i64, i64) = sqlx::query_as(
+    let overall_q = format!(
         r#"
         SELECT
             COUNT(*) AS starts,
-            SUM(CASE WHEN finishing_position = 1 THEN 1 ELSE 0 END) AS wins,
-            SUM(CASE WHEN finishing_position IN (1,2) THEN 1 ELSE 0 END) AS places,
-            SUM(CASE WHEN finishing_position IN (1,2,3) THEN 1 ELSE 0 END) AS shows
+            SUM(CASE WHEN results.finishing_position = 1 THEN 1 ELSE 0 END) AS wins,
+            SUM(CASE WHEN results.finishing_position IN (1,2) THEN 1 ELSE 0 END) AS places,
+            SUM(CASE WHEN results.finishing_position IN (1,2,3) THEN 1 ELSE 0 END) AS shows
         FROM results
-        WHERE jockey = $1 AND finishing_position IS NOT NULL
+        INNER JOIN races ON races.race_id = results.race_id
+        WHERE results.jockey = $1
+          AND results.finishing_position IS NOT NULL
+          {date}
         "#,
-    )
-    .bind(n)
-    .fetch_one(pool)
-    .await?;
+        date = date_pred(cutoff.as_deref(), "?2"),
+    );
+    let mut overall_query = sqlx::query_as(&overall_q).bind(n);
+    if let Some(d) = &cutoff {
+        overall_query = overall_query.bind(d);
+    }
+    let overall: (i64, i64, i64, i64) = overall_query.fetch_one(pool).await?;
 
-    let by_surface = group_by_surface(pool, n).await?;
-    let by_gate_group = group_by_gate(pool, n).await?;
+    let by_surface = group_by_surface(pool, n, cutoff.as_deref()).await?;
+    let by_gate_group = group_by_gate(pool, n, cutoff.as_deref()).await?;
 
     Ok(JockeyStatsRow {
         jockey_name: n.to_string(),
@@ -39,11 +54,23 @@ pub async fn jockey_stats(pool: &SqlitePool, name: &JockeyName) -> Result<Jockey
     })
 }
 
-async fn group_by_surface(pool: &SqlitePool, jockey: &str) -> Result<Vec<GroupStat>> {
+fn date_pred(cutoff: Option<&str>, placeholder: &str) -> String {
+    if cutoff.is_some() {
+        format!("AND races.date < {placeholder}")
+    } else {
+        String::new()
+    }
+}
+
+async fn group_by_surface(
+    pool: &SqlitePool,
+    jockey: &str,
+    cutoff: Option<&str>,
+) -> Result<Vec<GroupStat>> {
     let keys: &[(&str, &str)] = &[("turf", "芝"), ("dirt", "ダート")];
     let mut stats = Vec::with_capacity(keys.len());
     for (key, label) in keys {
-        let row: (i64, i64, i64, i64) = sqlx::query_as(
+        let q = format!(
             r#"
             SELECT
                 COUNT(*) AS starts,
@@ -54,13 +81,16 @@ async fn group_by_surface(pool: &SqlitePool, jockey: &str) -> Result<Vec<GroupSt
             INNER JOIN races ON races.race_id = results.race_id
             WHERE results.jockey = $1
               AND results.finishing_position IS NOT NULL
-              AND races.surface = $2
+              AND races.surface = ?2
+              {date}
             "#,
-        )
-        .bind(jockey)
-        .bind(*key)
-        .fetch_one(pool)
-        .await?;
+            date = date_pred(cutoff, "?3"),
+        );
+        let mut query = sqlx::query_as(&q).bind(jockey).bind(*key);
+        if let Some(d) = cutoff {
+            query = query.bind(d);
+        }
+        let row: (i64, i64, i64, i64) = query.fetch_one(pool).await?;
         stats.push(GroupStat {
             label: label.to_string(),
             starts: row.0 as u32,
@@ -72,11 +102,15 @@ async fn group_by_surface(pool: &SqlitePool, jockey: &str) -> Result<Vec<GroupSt
     Ok(stats)
 }
 
-async fn group_by_gate(pool: &SqlitePool, jockey: &str) -> Result<Vec<GroupStat>> {
+async fn group_by_gate(
+    pool: &SqlitePool,
+    jockey: &str,
+    cutoff: Option<&str>,
+) -> Result<Vec<GroupStat>> {
     let groups: &[(&str, &str)] = &[
-        ("Inner (1-3)", "gate_num BETWEEN 1 AND 3"),
-        ("Middle (4-6)", "gate_num BETWEEN 4 AND 6"),
-        ("Outer (7-8)", "gate_num BETWEEN 7 AND 8"),
+        ("Inner (1-3)", "results.gate_num BETWEEN 1 AND 3"),
+        ("Middle (4-6)", "results.gate_num BETWEEN 4 AND 6"),
+        ("Outer (7-8)", "results.gate_num BETWEEN 7 AND 8"),
     ];
     let mut stats = Vec::with_capacity(groups.len());
     for (label, predicate) in groups {
@@ -84,16 +118,23 @@ async fn group_by_gate(pool: &SqlitePool, jockey: &str) -> Result<Vec<GroupStat>
             r#"
             SELECT
                 COUNT(*) AS starts,
-                SUM(CASE WHEN finishing_position = 1 THEN 1 ELSE 0 END) AS wins,
-                SUM(CASE WHEN finishing_position IN (1,2) THEN 1 ELSE 0 END) AS places,
-                SUM(CASE WHEN finishing_position IN (1,2,3) THEN 1 ELSE 0 END) AS shows
+                SUM(CASE WHEN results.finishing_position = 1 THEN 1 ELSE 0 END) AS wins,
+                SUM(CASE WHEN results.finishing_position IN (1,2) THEN 1 ELSE 0 END) AS places,
+                SUM(CASE WHEN results.finishing_position IN (1,2,3) THEN 1 ELSE 0 END) AS shows
             FROM results
-            WHERE jockey = $1
-              AND finishing_position IS NOT NULL
+            INNER JOIN races ON races.race_id = results.race_id
+            WHERE results.jockey = $1
+              AND results.finishing_position IS NOT NULL
               AND {predicate}
-            "#
+              {date}
+            "#,
+            date = date_pred(cutoff, "?2"),
         );
-        let row: (i64, i64, i64, i64) = sqlx::query_as(&q).bind(jockey).fetch_one(pool).await?;
+        let mut query = sqlx::query_as(&q).bind(jockey);
+        if let Some(d) = cutoff {
+            query = query.bind(d);
+        }
+        let row: (i64, i64, i64, i64) = query.fetch_one(pool).await?;
         stats.push(GroupStat {
             label: label.to_string(),
             starts: row.0 as u32,

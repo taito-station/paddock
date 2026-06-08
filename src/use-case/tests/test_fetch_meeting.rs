@@ -73,7 +73,11 @@ impl Repository for MockRepo {
     async fn upsert_history_race(&self, _race: &Race) -> Result<()> {
         Ok(())
     }
-    async fn horse_stats(&self, _name: &HorseName) -> Result<HorseStatsRow> {
+    async fn horse_stats(
+        &self,
+        _name: &HorseName,
+        _as_of: Option<NaiveDate>,
+    ) -> Result<HorseStatsRow> {
         Err(Error::NotFound("unused".into()))
     }
     async fn course_stats(
@@ -81,10 +85,15 @@ impl Repository for MockRepo {
         _venue: Venue,
         _distance: u32,
         _surface: Surface,
+        _as_of: Option<NaiveDate>,
     ) -> Result<CourseStatsRow> {
         Err(Error::NotFound("unused".into()))
     }
-    async fn jockey_stats(&self, _name: &JockeyName) -> Result<JockeyStatsRow> {
+    async fn jockey_stats(
+        &self,
+        _name: &JockeyName,
+        _as_of: Option<NaiveDate>,
+    ) -> Result<JockeyStatsRow> {
         Err(Error::NotFound("unused".into()))
     }
     async fn count_races(&self) -> Result<u64> {
@@ -108,6 +117,14 @@ impl Repository for MockRepo {
     }
 
     async fn find_races_by_date(&self, _date: chrono::NaiveDate) -> Result<Vec<Race>> {
+        Ok(Vec::new())
+    }
+
+    async fn find_finished_races_between(
+        &self,
+        _from: NaiveDate,
+        _to: NaiveDate,
+    ) -> Result<Vec<Race>> {
         Ok(Vec::new())
     }
 
@@ -336,7 +353,11 @@ impl Repository for HistoryRepo {
     async fn upsert_history_race(&self, _race: &Race) -> Result<()> {
         Ok(())
     }
-    async fn horse_stats(&self, _name: &HorseName) -> Result<HorseStatsRow> {
+    async fn horse_stats(
+        &self,
+        _name: &HorseName,
+        _as_of: Option<NaiveDate>,
+    ) -> Result<HorseStatsRow> {
         Err(Error::NotFound("unused".into()))
     }
     async fn course_stats(
@@ -344,10 +365,15 @@ impl Repository for HistoryRepo {
         _venue: Venue,
         _distance: u32,
         _surface: Surface,
+        _as_of: Option<NaiveDate>,
     ) -> Result<CourseStatsRow> {
         Err(Error::NotFound("unused".into()))
     }
-    async fn jockey_stats(&self, _name: &JockeyName) -> Result<JockeyStatsRow> {
+    async fn jockey_stats(
+        &self,
+        _name: &JockeyName,
+        _as_of: Option<NaiveDate>,
+    ) -> Result<JockeyStatsRow> {
         Err(Error::NotFound("unused".into()))
     }
     async fn count_races(&self) -> Result<u64> {
@@ -370,6 +396,14 @@ impl Repository for HistoryRepo {
     }
 
     async fn find_races_by_date(&self, _date: chrono::NaiveDate) -> Result<Vec<Race>> {
+        Ok(Vec::new())
+    }
+
+    async fn find_finished_races_between(
+        &self,
+        _from: NaiveDate,
+        _to: NaiveDate,
+    ) -> Result<Vec<Race>> {
         Ok(Vec::new())
     }
 

@@ -19,16 +19,16 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
         // コース統計は全馬共通なのでループ外で 1 回だけ取得する
         let course = self
             .repository
-            .course_stats(card.venue, card.distance, card.surface)
+            .course_stats(card.venue, card.distance, card.surface, None)
             .await?;
 
         let mut entry_factors: Vec<(HorseEntry, HorseFactors)> = Vec::new();
         for entry in &card.entries {
-            let horse = self.repository.horse_stats(&entry.horse_name).await?;
+            let horse = self.repository.horse_stats(&entry.horse_name, None).await?;
             // jockey が None の馬は jockey_surface_rate = 0.0 として計算され、
         // jockey 情報がある馬と比べてスコアが相対的に低くなる（既知制約）
         let jockey = match &entry.jockey {
-                Some(j) => Some(self.repository.jockey_stats(j).await?),
+                Some(j) => Some(self.repository.jockey_stats(j, None).await?),
                 None => None,
             };
             let factors = build_factors(
@@ -48,7 +48,9 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
     }
 }
 
-fn build_factors(
+/// 取得済みの stats 行から `HorseFactors` を組み立てる純粋変換。`as_of` には依存しないため、
+/// 本番 predict（全期間統計）とバックテスト（as-of 統計）の両方から共有する。
+pub(crate) fn build_factors(
     entry: &HorseEntry,
     course: &CourseStatsRow,
     horse: &HorseStatsRow,

@@ -9,6 +9,7 @@ path = "src/bin.rs"
 
 [dependencies]
 anyhow             = { workspace = true }
+chrono             = { workspace = true }
 clap               = { workspace = true }
 paddock-config     = { workspace = true }
 paddock-domain     = { workspace = true }
