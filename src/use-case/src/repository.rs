@@ -1,7 +1,7 @@
 use core::future::Future;
 
 use chrono::{DateTime, NaiveDate, Utc};
-use paddock_domain::{HorseName, JockeyName, Race, RaceCard, RaceId, Surface, Venue};
+use paddock_domain::{HorseName, HorseResult, JockeyName, Race, RaceCard, RaceId, Surface, Venue};
 
 use crate::error::Result;
 
@@ -158,6 +158,16 @@ pub trait Repository: Send + Sync {
         from: NaiveDate,
         to: NaiveDate,
     ) -> impl Future<Output = Result<Vec<Race>>> + Send;
+
+    /// 指定馬の `before` より前（`races.date < before`）の成績を date 降順で最大 `limit` 件返す。
+    /// 各要素は `(開催日, 成績)`。前走フォーム特徴量（#31）の算出に使う。`before` 制約により
+    /// バックステスト時のリークを防ぐ。pdf/netkeiba 双方の成績を対象とする（実際の前走）。
+    fn find_recent_runs(
+        &self,
+        name: &HorseName,
+        before: NaiveDate,
+        limit: u32,
+    ) -> impl Future<Output = Result<Vec<(NaiveDate, HorseResult)>>> + Send;
 
     fn count_races(&self) -> impl Future<Output = Result<u64>> + Send;
 

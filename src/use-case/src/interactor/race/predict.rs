@@ -1,4 +1,7 @@
-use paddock_domain::{HorseEntry, HorseFactors, HorseProbability, RaceId, RateTriple, Surface};
+use chrono::NaiveDate;
+use paddock_domain::{
+    HorseEntry, HorseFactors, HorseName, HorseProbability, RaceId, RateTriple, Surface,
+};
 
 use crate::error::{Error, Result};
 use crate::interactor::Interactor;
@@ -29,6 +32,8 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
                 Some(j) => Some(self.repository.jockey_stats(j, None).await?),
                 None => None,
             };
+            // 前走フォーム（#31）。前走は出馬表日より前の成績から取る（card.date が cutoff）。
+            let recent_form = self.recent_form_for(&entry.horse_name, card.date).await?;
             let factors = build_factors(
                 entry,
                 &course,
@@ -36,6 +41,7 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
                 jockey.as_ref(),
                 card.surface,
                 card.distance,
+                recent_form,
             );
             entry_factors.push((entry.clone(), factors));
         }
@@ -46,10 +52,24 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
             &entry_factors,
         ))
     }
+
+    /// 指定馬の前走（`before` より前の直近 1 走）から前走フォーム [0,1] を算出する。前走が無い／
+    /// 有効な signal が無い場合は `None`。predict と backtest で共有する（#31）。
+    pub(crate) async fn recent_form_for(
+        &self,
+        name: &HorseName,
+        before: NaiveDate,
+    ) -> Result<Option<f64>> {
+        let runs = self.repository.find_recent_runs(name, before, 1).await?;
+        Ok(runs
+            .first()
+            .and_then(|(d, r)| paddock_domain::prediction::recent_form_score(r, *d, before)))
+    }
 }
 
-/// 取得済みの stats 行から `HorseFactors` を組み立てる純粋変換。`as_of` には依存しないため、
-/// 本番 predict（全期間統計）とバックテスト（as-of 統計）の両方から共有する。
+/// 取得済みの stats 行と前走フォームから `HorseFactors` を組み立てる純粋変換。`as_of` には
+/// 依存しないため、本番 predict（全期間統計）とバックテスト（as-of 統計）の両方から共有する。
+/// `recent_form` は呼び出し側が前走から算出して渡す（#31）。
 pub(crate) fn build_factors(
     entry: &HorseEntry,
     course: &CourseStatsRow,
@@ -57,6 +77,7 @@ pub(crate) fn build_factors(
     jockey: Option<&JockeyStatsRow>,
     surface: Surface,
     distance: u32,
+    recent_form: Option<f64>,
 ) -> HorseFactors {
     let gate_label = gate_group_label(entry.gate_num.value());
     let surf_label = surface_label(surface);
@@ -67,6 +88,7 @@ pub(crate) fn build_factors(
         horse_surface: stat_to_triple(&horse.by_surface, surf_label),
         horse_distance: stat_to_triple(&horse.by_distance_band, dist_label),
         jockey_surface: jockey.map(|j| stat_to_triple(&j.by_surface, surf_label)),
+        recent_form,
     }
 }
 

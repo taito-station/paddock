@@ -3,6 +3,7 @@ mod fetch_history;
 mod find_finished_races_between;
 mod find_race_card;
 mod find_races_by_date;
+mod find_recent_runs;
 mod horse_stats;
 mod jockey_stats;
 mod predict_session;
@@ -12,7 +13,7 @@ mod sql;
 mod upsert_history_race;
 
 use chrono::NaiveDate;
-use paddock_domain::{HorseName, JockeyName, Race, RaceCard, RaceId, Surface, Venue};
+use paddock_domain::{HorseName, HorseResult, JockeyName, Race, RaceCard, RaceId, Surface, Venue};
 use paddock_use_case::Result as UcResult;
 use paddock_use_case::repository::{
     CourseStatsRow, FetchRecord, HorseStatsRow, JockeyStatsRow, PredictBetRecord,
@@ -129,6 +130,17 @@ impl Repository for SqliteRepository {
         to: NaiveDate,
     ) -> UcResult<Vec<Race>> {
         find_finished_races_between::find_finished_races_between(&self.pool, from, to)
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn find_recent_runs(
+        &self,
+        name: &HorseName,
+        before: NaiveDate,
+        limit: u32,
+    ) -> UcResult<Vec<(NaiveDate, HorseResult)>> {
+        find_recent_runs::find_recent_runs(&self.pool, name, before, limit)
             .await
             .map_err(Into::into)
     }

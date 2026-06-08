@@ -71,7 +71,7 @@
   <text x="450" y="482" text-anchor="middle" font-weight="bold" fill="#333">生スコア計算</text>
   <text x="450" y="499" text-anchor="middle" font-size="11" fill="#444">score = Σ(重み × rate)</text>
   <text x="450" y="515" text-anchor="middle" font-size="11" fill="#444">勝率 / 連対率 / 複勝率 を各々計算</text>
-  <text x="450" y="531" text-anchor="middle" font-size="10" fill="#666">course_gate(×2) + horse_surface + horse_dist + jockey_surface</text>
+  <text x="450" y="531" text-anchor="middle" font-size="10" fill="#666">course_gate(×2) + horse_surface + horse_dist + jockey + 0.25×前走フォーム</text>
 
   <!-- Arrow: Score → Check -->
   <line x1="450" y1="540" x2="450" y2="580" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
