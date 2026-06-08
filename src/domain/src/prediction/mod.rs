@@ -1,4 +1,6 @@
-use crate::horse_result::{HorseName, HorseNum};
+use chrono::NaiveDate;
+
+use crate::horse_result::{HorseName, HorseNum, HorseResult};
 use crate::race_card::HorseEntry;
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -14,6 +16,9 @@ pub struct HorseFactors {
     pub horse_surface: RateTriple,
     pub horse_distance: RateTriple,
     pub jockey_surface: Option<RateTriple>,
+    /// 前走フォーム [0,1]（0.5=中立）。前走が無い／有効な signal が無い馬は `None`。
+    /// win/place/show に同値で寄与する（フォームは方向に依らず全体を底上げ／押し下げる）。
+    pub recent_form: Option<f64>,
 }
 
 #[derive(Debug, Clone)]
@@ -74,10 +79,14 @@ const COURSE_GATE_WEIGHT: f64 = 2.0;
 const SURFACE_WEIGHT: f64 = 1.0;
 const DISTANCE_WEIGHT: f64 = 1.0;
 const JOCKEY_WEIGHT: f64 = 1.0;
+/// 前走フォーム項の重み。#30 バックテストで検証して決定（ADR 0009）。
+const FORM_WEIGHT: f64 = 0.25;
 
-/// 存在する factor の**重み付き平均**を返す。騎手未登録馬は jockey 項と重み（`JOCKEY_WEIGHT`）を
-/// 母数から除外して評価するため、欠落項（旧実装の `+0.0`）で不当に減点されない。全馬が騎手あり
-/// （または全馬なし）のときは定数除算となり、レース内正規化後の相対順位は変わらない。
+/// 存在する factor の**重み付き平均**を返す。騎手未登録馬・前走なし馬はその項と重みを母数から
+/// 除外して評価するため、欠落項で不当に減点されない（ADR 0007/0008）。全馬が同条件のときは
+/// 定数除算となり、レース内正規化後の相対順位は変わらない。
+///
+/// `recent_form` はスカラー（[0,1]、0.5=中立）で win/place/show に同値で寄与する。
 fn raw_score(factors: &HorseFactors, rate: fn(&RateTriple) -> f64) -> f64 {
     let mut weighted = COURSE_GATE_WEIGHT * rate(&factors.course_gate)
         + SURFACE_WEIGHT * rate(&factors.horse_surface)
@@ -86,6 +95,10 @@ fn raw_score(factors: &HorseFactors, rate: fn(&RateTriple) -> f64) -> f64 {
     if let Some(jockey) = factors.jockey_surface {
         weighted += JOCKEY_WEIGHT * rate(&jockey);
         weight += JOCKEY_WEIGHT;
+    }
+    if let Some(form) = factors.recent_form {
+        weighted += FORM_WEIGHT * form;
+        weight += FORM_WEIGHT;
     }
     weighted / weight
 }
@@ -105,11 +118,89 @@ fn normalize_to_sum(scores: &[f64], target: f64) -> Vec<f64> {
         .collect()
 }
 
+/// 馬体重変化がこの kg を超えると不安定として最低評価（0）にする。
+const WEIGHT_CHANGE_CAP: f64 = 20.0;
+/// 前走の人気順位と着順の差 1 つあたりのスコア寄与。
+const POP_GAP_K: f64 = 0.08;
+
+/// 直近 1 走（`prev`、その開催日 `prev_date`）と対象レース日 `race_date` から「前走フォーム」
+/// スコア `[0,1]`（0.5=中立）を算出する。利用できる sub-signal（馬体重変化・前走人気乖離・前走間隔）の
+/// 平均を返す。有効な signal が 1 つも無い場合は `None`（前走情報が乏しい→スコアに寄与させない）。
+pub fn recent_form_score(
+    prev: &HorseResult,
+    prev_date: NaiveDate,
+    race_date: NaiveDate,
+) -> Option<f64> {
+    let mut signals: Vec<f64> = Vec::new();
+
+    // 馬体重変化: |Δkg| が小さいほど安定＝良。CAP 超で 0。
+    if let Some(dw) = prev.weight_change {
+        signals.push(1.0 - (dw.unsigned_abs() as f64 / WEIGHT_CHANGE_CAP).min(1.0));
+    }
+
+    // 前走人気乖離: 人気順位より好走（着順が人気順位より小さい）で加点、凡走で減点。
+    if let (Some(pop), Some(pos)) = (prev.popularity, prev.finishing_position.map(|p| p.value())) {
+        let gap = pop as f64 - pos as f64; // >0: 人気以上の好走
+        signals.push((0.5 + gap * POP_GAP_K).clamp(0.0, 1.0));
+    }
+
+    // 前走間隔: 中2週(14)〜2ヶ月(60)を最適(1.0)、連闘(<14)/長休(>120)を逓減。
+    let days = (race_date - prev_date).num_days();
+    if days > 0 {
+        signals.push(interval_form(days));
+    }
+
+    if signals.is_empty() {
+        None
+    } else {
+        Some(signals.iter().sum::<f64>() / signals.len() as f64)
+    }
+}
+
+/// 前走間隔（日数）→ `[0,1]` の台形マップ。
+fn interval_form(days: i64) -> f64 {
+    match days {
+        d if d <= 7 => 0.3,                                  // 連闘・中1週未満
+        d if d < 14 => 0.3 + 0.7 * (d - 7) as f64 / 7.0,     // 7→14 で 0.3→1.0
+        d if d <= 60 => 1.0,                                 // 最適帯
+        d if d <= 120 => 1.0 - 0.5 * (d - 60) as f64 / 60.0, // 60→120 で 1.0→0.5
+        _ => 0.5,                                            // 長期休み明け（不確実）
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::horse_result::{HorseName, HorseNum};
+    use crate::horse_result::{FinishingPosition, GateNum, HorseName, HorseNum, ResultStatus};
     use crate::race_card::HorseEntry;
+
+    fn ymd(y: i32, m: u32, d: u32) -> NaiveDate {
+        NaiveDate::from_ymd_opt(y, m, d).unwrap()
+    }
+
+    fn prev_result(
+        weight_change: Option<i32>,
+        popularity: Option<u32>,
+        finish: Option<u32>,
+    ) -> HorseResult {
+        HorseResult {
+            finishing_position: finish.map(|p| FinishingPosition::try_from(p).unwrap()),
+            status: ResultStatus::Finished,
+            gate_num: GateNum::try_from(1u32).unwrap(),
+            horse_num: HorseNum::try_from(1u32).unwrap(),
+            horse_name: HorseName::try_from("ウマ").unwrap(),
+            horse_id: None,
+            jockey: None,
+            trainer: None,
+            time_seconds: None,
+            margin: None,
+            odds: None,
+            horse_weight: None,
+            weight_change,
+            weight_carried: None,
+            popularity,
+        }
+    }
 
     fn make_entry(horse_num: u32, horse_name: &str) -> HorseEntry {
         HorseEntry {
@@ -126,6 +217,7 @@ mod tests {
             horse_surface: RateTriple::default(),
             horse_distance: RateTriple::default(),
             jockey_surface: None,
+            recent_form: None,
         }
     }
 
@@ -177,6 +269,7 @@ mod tests {
                         show: 0.45,
                     },
                     jockey_surface: None,
+                    recent_form: None,
                 },
             ),
             (
@@ -198,6 +291,7 @@ mod tests {
                         show: 0.24,
                     },
                     jockey_surface: None,
+                    recent_form: None,
                 },
             ),
         ];
@@ -228,6 +322,7 @@ mod tests {
             horse_surface: triple,
             horse_distance: triple,
             jockey_surface: None,
+            recent_form: None,
         };
         // 6 頭立て・全馬同一スコア → win=1/6, place=2/6, show=3/6（いずれも 1.0 未満で無クランプ）。
         let entries: Vec<_> = (1..=6)
@@ -259,6 +354,7 @@ mod tests {
             horse_surface: RateTriple::default(),
             horse_distance: RateTriple::default(),
             jockey_surface: None,
+            recent_form: None,
         };
         let b = HorseFactors {
             course_gate: RateTriple {
@@ -269,6 +365,7 @@ mod tests {
             horse_surface: RateTriple::default(),
             horse_distance: RateTriple::default(),
             jockey_surface: None,
+            recent_form: None,
         };
         let entries = vec![(make_entry(1, "ウマA"), a), (make_entry(2, "ウマB"), b)];
         let probs = estimate_probabilities(&entries);
@@ -295,6 +392,7 @@ mod tests {
             horse_surface: RateTriple::default(),
             horse_distance: RateTriple::default(),
             jockey_surface: None,
+            recent_form: None,
         };
         let entries = vec![
             (make_entry(1, "ウマA"), win_only(0.3)),
@@ -334,12 +432,14 @@ mod tests {
             horse_surface: base,
             horse_distance: base,
             jockey_surface: Some(base),
+            recent_form: None,
         };
         let without_jockey = HorseFactors {
             course_gate: base,
             horse_surface: base,
             horse_distance: base,
             jockey_surface: None,
+            recent_form: None,
         };
         let s_with = raw_score(&with_equal_jockey, |r| r.win);
         let s_without = raw_score(&without_jockey, |r| r.win);
@@ -360,9 +460,87 @@ mod tests {
         };
         let weak = HorseFactors {
             jockey_surface: Some(RateTriple::default()),
+            recent_form: None,
             ..with_equal_jockey
         };
         assert!(raw_score(&strong, |r| r.win) > s_without);
         assert!(raw_score(&weak, |r| r.win) < s_without);
+    }
+
+    #[test]
+    fn recent_form_none_when_no_signals() {
+        // 体重変化・人気・着順すべて欠損、かつ前走間隔も非正（同日）→ signal 無し → None。
+        let prev = prev_result(None, None, None);
+        assert!(recent_form_score(&prev, ymd(2026, 5, 1), ymd(2026, 5, 1)).is_none());
+    }
+
+    #[test]
+    fn recent_form_weight_change_smaller_is_better() {
+        let d = ymd(2026, 5, 1);
+        let pd = ymd(2026, 4, 1); // 30 日前（最適帯 1.0）
+        // 体重変化のみで比較するため人気・着順は欠損。
+        let stable = recent_form_score(&prev_result(Some(2), None, None), pd, d).unwrap();
+        let swingy = recent_form_score(&prev_result(Some(18), None, None), pd, d).unwrap();
+        assert!(stable > swingy, "stable={stable}, swingy={swingy}");
+        // CAP(20kg) 超は体重 signal が 0。間隔 signal(1.0) との平均なので 0.5。
+        let huge = recent_form_score(&prev_result(Some(40), None, None), pd, d).unwrap();
+        assert!((huge - 0.5).abs() < 1e-9, "huge={huge}");
+    }
+
+    #[test]
+    fn recent_form_popularity_gap() {
+        let d = ymd(2026, 5, 1);
+        let pd = ymd(2026, 4, 1);
+        // 5 番人気で 2 着（人気以上に好走）→ 加点。1 番人気で 8 着（凡走）→ 減点。
+        let over = recent_form_score(&prev_result(None, Some(5), Some(2)), pd, d).unwrap();
+        let under = recent_form_score(&prev_result(None, Some(1), Some(8)), pd, d).unwrap();
+        assert!(over > under, "over={over}, under={under}");
+    }
+
+    #[test]
+    fn recent_form_interval_band() {
+        // 最適帯(30日)=1.0、連闘(3日)=0.3、長休(200日)=0.5。間隔のみ（他欠損）。
+        let base = ymd(2026, 5, 1);
+        let optimal = recent_form_score(&prev_result(None, None, None), ymd(2026, 4, 1), base);
+        let rento = recent_form_score(&prev_result(None, None, None), ymd(2026, 4, 28), base);
+        let layoff = recent_form_score(&prev_result(None, None, None), ymd(2025, 10, 13), base);
+        assert!((optimal.unwrap() - 1.0).abs() < 1e-9);
+        assert!((rento.unwrap() - 0.3).abs() < 1e-9);
+        assert!((layoff.unwrap() - 0.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn recent_form_in_unit_range() {
+        // 全 signal が揃ったケースでも [0,1]。
+        let d = ymd(2026, 5, 1);
+        let pd = ymd(2026, 4, 10);
+        let f = recent_form_score(&prev_result(Some(-4), Some(3), Some(1)), pd, d).unwrap();
+        assert!((0.0..=1.0).contains(&f), "form={f}");
+    }
+
+    #[test]
+    fn recent_form_keeps_monotonicity_in_estimate() {
+        // recent_form を持つ馬・持たない馬が混在しても単調性は保たれる。
+        let mut f_with = zero_factors();
+        f_with.course_gate = RateTriple {
+            win: 0.3,
+            place: 0.4,
+            show: 0.5,
+        };
+        f_with.recent_form = Some(0.9);
+        let mut f_without = zero_factors();
+        f_without.course_gate = RateTriple {
+            win: 0.2,
+            place: 0.3,
+            show: 0.4,
+        };
+        let entries = vec![
+            (make_entry(1, "ウマA"), f_with),
+            (make_entry(2, "ウマB"), f_without),
+        ];
+        let probs = estimate_probabilities(&entries);
+        for p in &probs {
+            assert!(p.win_prob <= p.place_prob && p.place_prob <= p.show_prob);
+        }
     }
 }

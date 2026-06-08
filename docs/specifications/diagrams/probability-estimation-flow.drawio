@@ -58,7 +58,7 @@
         </mxCell>
 
         <!-- スコア計算 -->
-        <mxCell id="13" value="生スコア計算&#xa;score = Σ(weight × rate)&#xa;&#xa;勝率 / 連対率 / 複勝率 を各々計算" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontStyle=1;fontSize=11;" vertex="1" parent="1">
+        <mxCell id="13" value="生スコア計算&#xa;score = Σ(weight × rate)&#xa;course_gate(×2)+surface+dist+jockey+0.25×前走フォーム&#xa;勝率 / 連対率 / 複勝率 を各々計算" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontStyle=1;fontSize=11;" vertex="1" parent="1">
           <mxGeometry x="430" y="440" width="280" height="70" as="geometry" />
         </mxCell>
 
