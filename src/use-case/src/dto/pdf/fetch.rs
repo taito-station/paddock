@@ -5,8 +5,8 @@ use paddock_domain::Venue;
 /// them as backstops for its 404/403-boundary discovery; the parallel fetch
 /// enumerates the full grid up to these caps, where absent days resolve to
 /// 403/404 and are counted as not-found.
-pub const ROUND_CAP: u32 = 8;
-pub const DAY_CAP: u32 = 14;
+pub(crate) const ROUND_CAP: u32 = 8;
+pub(crate) const DAY_CAP: u32 = 14;
 
 /// A single JRA meeting day, identifying exactly one result PDF.
 ///
@@ -56,7 +56,8 @@ pub enum FetchMeetingOutcome {
     },
     /// Already in fetch history; skipped without fetching.
     Skipped,
-    /// The PDF does not exist (HTTP 404) — e.g. not published yet.
+    /// The PDF does not exist (HTTP 403 or 404) — e.g. not published yet, or past
+    /// the meeting's real round/day range.
     NotFound,
 }
 
@@ -84,9 +85,9 @@ impl MeetingRange {
     /// A field that is `Some` pins that axis; a `None` field is expanded over its
     /// full domain (`Venue::all()` for venue, `1..=ROUND_CAP` / `1..=DAY_CAP` for
     /// round / day). The caps comfortably exceed real JRA maxima, so non-existent
-    /// combinations are included and simply resolve to 404 (counted as not-found)
-    /// rather than being pruned — the parallel path trades a few cheap 404 probes
-    /// for dropping the sequential 404-boundary bookkeeping.
+    /// combinations are included and simply resolve to 403/404 (counted as not-found)
+    /// rather than being pruned — the parallel path trades a few cheap 403/404 probes
+    /// for dropping the sequential boundary bookkeeping.
     pub fn candidate_specs(&self) -> Vec<MeetingSpec> {
         let venues: Vec<Venue> = match self.venue {
             Some(v) => vec![v],

@@ -118,6 +118,11 @@ async fn run_fetch(app: Arc<setup::App>, args: FetchArgs) -> anyhow::Result<()> 
     };
 
     let parallel = resolve_parallel(args.parallel);
+    if parallel > 1 && args.interval != 1.0 {
+        eprintln!(
+            "note: --interval is ignored when fetching in parallel; use -j 1 for sequential pacing"
+        );
+    }
     let summary = if parallel > 1 {
         run_fetch_range_parallel(app, range, args.force, parallel).await?
     } else {
@@ -183,7 +188,7 @@ async fn run_fetch_single(
             );
         }
         FetchMeetingOutcome::NotFound => {
-            anyhow::bail!("not found: {} (HTTP 404)", response.url);
+            anyhow::bail!("not found: {} (no PDF; HTTP 403/404)", response.url);
         }
     }
     Ok(())
@@ -192,8 +197,12 @@ async fn run_fetch_single(
 /// Range fetch, parallelized. Unlike the sequential `fetch_meeting_range`, this
 /// enumerates the whole candidate grid (`range.candidate_specs()`) and fetches up
 /// to `parallel` meetings at once, reusing `fetch_meeting` so each ingested meeting
-/// is still recorded in `fetch_history`. Discovery 404s are cheap and counted as
-/// not-found; already-ingested meetings short-circuit as skipped (no network).
+/// is still recorded in `fetch_history`. Discovery 403/404s are cheap and counted
+/// as not-found; already-ingested meetings short-circuit as skipped (no network).
+///
+/// Unlike the sequential path it emits no truncation warning when a meeting reaches
+/// `ROUND_CAP`/`DAY_CAP`; the caps sit above real JRA maxima, so the grid is expected
+/// to cover every published day.
 ///
 /// Concurrency mirrors `run_ingest` (owned-permit `Semaphore` + `JoinSet`).
 async fn run_fetch_range_parallel(
@@ -207,7 +216,9 @@ async fn run_fetch_range_parallel(
     // cores oversubscribes the CPU (parallel × cores threads) and erases the win, so
     // we pin OCR to one thread per process here — N processes × 1 thread fills the
     // cores cleanly. tesseract inherits this (its Command is not env_clear'd).
-    // SAFETY: set before any worker task is spawned; no other thread reads env yet.
+    // SAFETY: although the tokio runtime is multi-threaded, nothing else in this
+    // process reads or writes the environment, and these sets run before the
+    // OCR-spawning worker tasks start, so no observer races these writes.
     unsafe {
         std::env::set_var("OMP_THREAD_LIMIT", "1");
         std::env::set_var("OMP_NUM_THREADS", "1");
