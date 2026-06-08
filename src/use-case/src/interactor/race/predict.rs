@@ -1,6 +1,4 @@
-use paddock_domain::{
-    HorseEntry, HorseFactors, HorseProbability, RaceId, RateTriple, Surface,
-};
+use paddock_domain::{HorseEntry, HorseFactors, HorseProbability, RaceId, RateTriple, Surface};
 
 use crate::error::{Error, Result};
 use crate::interactor::Interactor;
@@ -25,9 +23,9 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
         let mut entry_factors: Vec<(HorseEntry, HorseFactors)> = Vec::new();
         for entry in &card.entries {
             let horse = self.repository.horse_stats(&entry.horse_name, None).await?;
-            // jockey が None の馬は jockey_surface_rate = 0.0 として計算され、
-        // jockey 情報がある馬と比べてスコアが相対的に低くなる（既知制約）
-        let jockey = match &entry.jockey {
+            // jockey が None の馬は jockey 項を母数から除外して重み付き平均で評価され、欠落で
+            // 不当に減点されない（ADR 0007）。
+            let jockey = match &entry.jockey {
                 Some(j) => Some(self.repository.jockey_stats(j, None).await?),
                 None => None,
             };
@@ -42,9 +40,11 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
             entry_factors.push((entry.clone(), factors));
         }
 
-        // win / place / show はそれぞれ独立に正規化するため、
-        // win_prob ≤ place_prob ≤ show_prob の単調性は保証されない（設計上の既知制約）
-        Ok(paddock_domain::prediction::estimate_probabilities(&entry_factors))
+        // estimate_probabilities が win→1.0 / place→2.0 / show→3.0 正規化 + 累積 max 単調化を行い、
+        // win_prob ≤ place_prob ≤ show_prob を保証する（ADR 0007）。
+        Ok(paddock_domain::prediction::estimate_probabilities(
+            &entry_factors,
+        ))
     }
 }
 

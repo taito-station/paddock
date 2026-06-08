@@ -221,7 +221,7 @@ async fn predict_race_returns_not_found_when_card_missing() {
 }
 
 #[tokio::test]
-async fn predict_race_probabilities_sum_to_one() {
+async fn predict_race_win_sums_to_one_and_monotone() {
     let card = make_race_card("2026-1-tokyo-1-R1");
     let app = interactor(Some(card));
     let race_id = RaceId::try_from("2026-1-tokyo-1-R1").unwrap();
@@ -229,12 +229,19 @@ async fn predict_race_probabilities_sum_to_one() {
 
     assert_eq!(probs.len(), 2);
 
+    // win は 1 着＝1 ポジションなので合計 ≒ 1.0。place(→2.0)/show(→3.0) は 2 頭立てでは
+    // 上限 1.0 クランプが効くため、各値の範囲と単調性を確認する（ADR 0007）。
     let win_total: f64 = probs.iter().map(|p| p.win_prob).sum();
-    let place_total: f64 = probs.iter().map(|p| p.place_prob).sum();
-    let show_total: f64 = probs.iter().map(|p| p.show_prob).sum();
     assert!((win_total - 1.0).abs() < 1e-10, "win sum={win_total}");
-    assert!((place_total - 1.0).abs() < 1e-10, "place sum={place_total}");
-    assert!((show_total - 1.0).abs() < 1e-10, "show sum={show_total}");
+    for p in &probs {
+        assert!((0.0..=1.0).contains(&p.win_prob));
+        assert!((0.0..=1.0).contains(&p.place_prob));
+        assert!((0.0..=1.0).contains(&p.show_prob));
+        assert!(
+            p.win_prob <= p.place_prob && p.place_prob <= p.show_prob,
+            "non-monotonic: {p:?}"
+        );
+    }
 }
 
 #[tokio::test]
