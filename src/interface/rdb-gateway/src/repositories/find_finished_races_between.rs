@@ -24,7 +24,7 @@ struct RaceRow {
 }
 
 #[derive(sqlx::FromRow)]
-struct ResultRow {
+pub(crate) struct ResultRow {
     race_id: String,
     finishing_position: Option<i64>,
     status: String,
@@ -143,7 +143,7 @@ pub async fn find_finished_races_between(
     Ok(races)
 }
 
-fn row_to_result(row: ResultRow) -> Result<HorseResult> {
+pub(crate) fn row_to_result(row: ResultRow) -> Result<HorseResult> {
     let finishing_position = row
         .finishing_position
         .map(|p| FinishingPosition::try_from(p as u32))
