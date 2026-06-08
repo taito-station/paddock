@@ -118,6 +118,9 @@ async fn run_fetch(app: Arc<setup::App>, args: FetchArgs) -> anyhow::Result<()> 
     };
 
     let parallel = resolve_parallel(args.parallel);
+    // Warn when the user appears to have set a non-default --interval that the
+    // parallel path will ignore. We compare against the clap default (1.0) as a
+    // proxy for "explicitly set" — passing exactly --interval 1 is treated as default.
     if parallel > 1 && args.interval != 1.0 {
         eprintln!(
             "note: --interval is ignored when fetching in parallel; use -j 1 for sequential pacing"

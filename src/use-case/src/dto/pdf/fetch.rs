@@ -86,8 +86,9 @@ impl MeetingRange {
     /// full domain (`Venue::all()` for venue, `1..=ROUND_CAP` / `1..=DAY_CAP` for
     /// round / day). The caps comfortably exceed real JRA maxima, so non-existent
     /// combinations are included and simply resolve to 403/404 (counted as not-found)
-    /// rather than being pruned — the parallel path trades a few cheap 403/404 probes
-    /// for dropping the sequential boundary bookkeeping.
+    /// rather than being pruned. The grid can be large — up to
+    /// `venues × ROUND_CAP × DAY_CAP` (≈1120 for a whole year) — but the extra
+    /// probes are cheap GETs, traded for dropping the sequential boundary bookkeeping.
     pub fn candidate_specs(&self) -> Vec<MeetingSpec> {
         let venues: Vec<Venue> = match self.venue {
             Some(v) => vec![v],
