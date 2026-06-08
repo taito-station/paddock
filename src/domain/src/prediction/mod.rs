@@ -30,9 +30,6 @@ pub fn estimate_probabilities(entries: &[(HorseEntry, HorseFactors)]) -> Vec<Hor
         return Vec::new();
     }
 
-    let n = entries.len();
-    let uniform = 1.0 / n as f64;
-
     let win_scores: Vec<f64> = entries
         .iter()
         .map(|(_, f)| raw_score(f, |r| r.win))
@@ -46,9 +43,18 @@ pub fn estimate_probabilities(entries: &[(HorseEntry, HorseFactors)]) -> Vec<Hor
         .map(|(_, f)| raw_score(f, |r| r.show))
         .collect();
 
-    let win_probs = normalize(&win_scores, uniform);
-    let place_probs = normalize(&place_scores, uniform);
-    let show_probs = normalize(&show_scores, uniform);
+    // win は 1 着（1 ポジション）、place は 2 着以内（2 ポジション）、show は 3 着以内（3 ポジション）
+    // に相当するため、レース内合計をそれぞれ 1.0 / 2.0 / 3.0 へ正規化する。各馬は確率上限 1.0。
+    let win_probs = normalize_to_sum(&win_scores, 1.0);
+    let mut place_probs = normalize_to_sum(&place_scores, 2.0);
+    let mut show_probs = normalize_to_sum(&show_scores, 3.0);
+
+    // 馬ごとに累積 max で単調化し win_prob ≤ place_prob ≤ show_prob を保証する。
+    // win/place/show を別レートから独立に正規化するため、稀に逆転しうるのを後処理で是正する。
+    for i in 0..entries.len() {
+        place_probs[i] = place_probs[i].max(win_probs[i]).min(1.0);
+        show_probs[i] = show_probs[i].max(place_probs[i]).min(1.0);
+    }
 
     entries
         .iter()
@@ -64,21 +70,38 @@ pub fn estimate_probabilities(entries: &[(HorseEntry, HorseFactors)]) -> Vec<Hor
 }
 
 const COURSE_GATE_WEIGHT: f64 = 2.0;
+const SURFACE_WEIGHT: f64 = 1.0;
+const DISTANCE_WEIGHT: f64 = 1.0;
+const JOCKEY_WEIGHT: f64 = 1.0;
 
+/// 存在する factor の**重み付き平均**を返す。騎手未登録馬は jockey 項と重み（`JOCKEY_WEIGHT`）を
+/// 母数から除外して評価するため、欠落項（旧実装の `+0.0`）で不当に減点されない。全馬が騎手あり
+/// （または全馬なし）のときは定数除算となり、レース内正規化後の相対順位は変わらない。
 fn raw_score(factors: &HorseFactors, rate: fn(&RateTriple) -> f64) -> f64 {
-    COURSE_GATE_WEIGHT * rate(&factors.course_gate)
-        + rate(&factors.horse_surface)
-        + rate(&factors.horse_distance)
-        + factors.jockey_surface.map(|rt| rate(&rt)).unwrap_or(0.0)
+    let mut weighted = COURSE_GATE_WEIGHT * rate(&factors.course_gate)
+        + SURFACE_WEIGHT * rate(&factors.horse_surface)
+        + DISTANCE_WEIGHT * rate(&factors.horse_distance);
+    let mut weight = COURSE_GATE_WEIGHT + SURFACE_WEIGHT + DISTANCE_WEIGHT;
+    if let Some(jockey) = factors.jockey_surface {
+        weighted += JOCKEY_WEIGHT * rate(&jockey);
+        weight += JOCKEY_WEIGHT;
+    }
+    weighted / weight
 }
 
-fn normalize(scores: &[f64], fallback: f64) -> Vec<f64> {
+/// スコアをレース内合計が `target` になるよう正規化し、各値を確率として `[0, 1]` にクランプする。
+/// 全スコアが 0（出走馬全員のスタッツ未蓄積）の場合は均等フォールバック `target / n`（上限 1.0）。
+fn normalize_to_sum(scores: &[f64], target: f64) -> Vec<f64> {
+    let n = scores.len();
     let total: f64 = scores.iter().sum();
     if total <= 0.0 {
-        vec![fallback; scores.len()]
-    } else {
-        scores.iter().map(|s| s / total).collect()
+        let each = (target / n as f64).min(1.0);
+        return vec![each; n];
     }
+    scores
+        .iter()
+        .map(|s| (s / total * target).min(1.0))
+        .collect()
 }
 
 #[cfg(test)]
@@ -120,15 +143,19 @@ mod tests {
         ];
         let probs = estimate_probabilities(&entries);
         assert_eq!(probs.len(), 3);
+        // win=1/3, place=2/3, show=3/3=1.0（3 頭立てなら全馬が複勝圏）。すべて単調。
         for p in &probs {
             assert!((p.win_prob - 1.0 / 3.0).abs() < 1e-10);
+            assert!((p.place_prob - 2.0 / 3.0).abs() < 1e-10);
+            assert!((p.show_prob - 1.0).abs() < 1e-10);
+            assert!(p.win_prob <= p.place_prob && p.place_prob <= p.show_prob);
         }
-        let total: f64 = probs.iter().map(|p| p.win_prob).sum();
-        assert!((total - 1.0).abs() < 1e-10);
+        let win_total: f64 = probs.iter().map(|p| p.win_prob).sum();
+        assert!((win_total - 1.0).abs() < 1e-10);
     }
 
     #[test]
-    fn normalizes_to_one() {
+    fn normalizes_to_target_sums() {
         let entries = vec![
             (
                 make_entry(1, "ウマA"),
@@ -175,49 +202,127 @@ mod tests {
         ];
         let probs = estimate_probabilities(&entries);
         assert_eq!(probs.len(), 2);
+        // win は 1 着＝1 ポジションなので合計 ≒ 1.0。place/show は小頭数だと上限 1.0 クランプで
+        // 合計が 2/3 を下回りうるため、ここでは各値が [0,1] かつ単調であることを確認する。
+        let win_total: f64 = probs.iter().map(|p| p.win_prob).sum();
+        assert!((win_total - 1.0).abs() < 1e-10);
+        for p in &probs {
+            assert!((0.0..=1.0).contains(&p.win_prob));
+            assert!((0.0..=1.0).contains(&p.place_prob));
+            assert!((0.0..=1.0).contains(&p.show_prob));
+            assert!(p.win_prob <= p.place_prob && p.place_prob <= p.show_prob);
+        }
+    }
+
+    /// 上限クランプが起きない十分大きい均等フィールドでは place 合計 ≒ 2.0、show 合計 ≒ 3.0。
+    #[test]
+    fn place_show_sum_to_two_and_three_in_even_field() {
+        let triple = RateTriple {
+            win: 0.1,
+            place: 0.2,
+            show: 0.3,
+        };
+        let factors = HorseFactors {
+            course_gate: triple,
+            horse_surface: triple,
+            horse_distance: triple,
+            jockey_surface: None,
+        };
+        // 6 頭立て・全馬同一スコア → win=1/6, place=2/6, show=3/6（いずれも 1.0 未満で無クランプ）。
+        let entries: Vec<_> = (1..=6)
+            .map(|i| (make_entry(i, &format!("ウマ{i}")), factors.clone()))
+            .collect();
+        let probs = estimate_probabilities(&entries);
         let win_total: f64 = probs.iter().map(|p| p.win_prob).sum();
         let place_total: f64 = probs.iter().map(|p| p.place_prob).sum();
         let show_total: f64 = probs.iter().map(|p| p.show_prob).sum();
-        assert!((win_total - 1.0).abs() < 1e-10);
-        assert!((place_total - 1.0).abs() < 1e-10);
-        assert!((show_total - 1.0).abs() < 1e-10);
+        assert!((win_total - 1.0).abs() < 1e-9, "win_total={win_total}");
+        assert!(
+            (place_total - 2.0).abs() < 1e-9,
+            "place_total={place_total}"
+        );
+        assert!((show_total - 3.0).abs() < 1e-9, "show_total={show_total}");
     }
 
+    /// win レートが高く place/show レートが相対的に低い馬でも、後処理の累積 max で
+    /// win ≤ place ≤ show が必ず成立する。
     #[test]
-    fn jockey_none_uses_zero() {
-        let with_jockey = HorseFactors {
+    fn monotonicity_guaranteed_even_with_inverted_rates() {
+        // ウマA: win 偏重（place/show が win より低い不自然なレート）。ウマB: 逆。
+        let a = HorseFactors {
             course_gate: RateTriple {
-                win: 0.2,
-                place: 0.4,
-                show: 0.6,
-            },
-            horse_surface: RateTriple::default(),
-            horse_distance: RateTriple::default(),
-            jockey_surface: Some(RateTriple {
-                win: 0.1,
-                place: 0.2,
-                show: 0.3,
-            }),
-        };
-        let without_jockey = HorseFactors {
-            course_gate: RateTriple {
-                win: 0.2,
-                place: 0.4,
-                show: 0.6,
+                win: 0.9,
+                place: 0.1,
+                show: 0.1,
             },
             horse_surface: RateTriple::default(),
             horse_distance: RateTriple::default(),
             jockey_surface: None,
         };
-        let score_with = raw_score(&with_jockey, |r| r.win);
-        let score_without = raw_score(&without_jockey, |r| r.win);
-        // jockey なし → jockey_surface_rate = 0.0 として加算
-        // score_without = 2.0 * 0.2 + 0.0 + 0.0 + 0.0 = 0.4
-        let expected = COURSE_GATE_WEIGHT * 0.2;
+        let b = HorseFactors {
+            course_gate: RateTriple {
+                win: 0.1,
+                place: 0.9,
+                show: 0.9,
+            },
+            horse_surface: RateTriple::default(),
+            horse_distance: RateTriple::default(),
+            jockey_surface: None,
+        };
+        let entries = vec![(make_entry(1, "ウマA"), a), (make_entry(2, "ウマB"), b)];
+        let probs = estimate_probabilities(&entries);
+        for p in &probs {
+            assert!(
+                p.win_prob <= p.place_prob && p.place_prob <= p.show_prob,
+                "non-monotonic: {p:?}"
+            );
+        }
+    }
+
+    /// 騎手なし馬が欠落項で不当に減点されないこと（重み付き平均）。レートが全 factor で等しいなら
+    /// 騎手の有無でスコアは変わらず、騎手項は「平均からの差」としてのみ効く。
+    #[test]
+    fn jockey_none_not_penalized() {
+        let base = RateTriple {
+            win: 0.2,
+            place: 0.4,
+            show: 0.6,
+        };
+        // 騎手レートが他 factor と等しい → 平均不変 → スコアは騎手なしと一致（減点なし）。
+        let with_equal_jockey = HorseFactors {
+            course_gate: base,
+            horse_surface: base,
+            horse_distance: base,
+            jockey_surface: Some(base),
+        };
+        let without_jockey = HorseFactors {
+            course_gate: base,
+            horse_surface: base,
+            horse_distance: base,
+            jockey_surface: None,
+        };
+        let s_with = raw_score(&with_equal_jockey, |r| r.win);
+        let s_without = raw_score(&without_jockey, |r| r.win);
         assert!(
-            (score_without - expected).abs() < 1e-10,
-            "score_without={score_without}"
+            (s_with - s_without).abs() < 1e-10,
+            "騎手なしが減点されている: with={s_with}, without={s_without}"
         );
-        assert!(score_with > score_without);
+        assert!((s_without - 0.2).abs() < 1e-10);
+
+        // 強い騎手（高レート）は加点、弱い騎手（低レート）は減点として正しく効く。
+        let strong = HorseFactors {
+            jockey_surface: Some(RateTriple {
+                win: 0.5,
+                place: 0.5,
+                show: 0.5,
+            }),
+            ..with_equal_jockey.clone()
+        };
+        let weak = HorseFactors {
+            jockey_surface: Some(RateTriple::default()),
+            ..with_equal_jockey
+        };
+        assert!(raw_score(&strong, |r| r.win) > s_without);
+        assert!(raw_score(&weak, |r| r.win) < s_without);
     }
 }

@@ -94,7 +94,7 @@
         </mxCell>
 
         <!-- 正規化 -->
-        <mxCell id="20" value="レース内正規化&#xa;prob = score / Σ(all scores)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;fontSize=11;" vertex="1" parent="1">
+        <mxCell id="20" value="top-k 正規化 + 単調化&#xa;win→1.0 / place→2.0 / show→3.0&#xa;各馬 1.0 上限 + 累積 max" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;fontSize=11;" vertex="1" parent="1">
           <mxGeometry x="450" y="670" width="240" height="60" as="geometry" />
         </mxCell>
 
