@@ -83,6 +83,14 @@ CLI: `paddock-analyze backtest --from YYYY-MM-DD --to YYYY-MM-DD`
 - トップ選好馬の `odds`（`results.odds`、回収率に使用。`None` ならそのレースは回収率の母数外）
 - 全馬の `(win_prob, 1着か否か)` ペア（Brier / LogLoss に使用）
 
+トップ選好馬の決定と着順欠落の扱い:
+
+- **タイブレーク**: `win_prob` が同値の馬が複数（全馬均等フォールバック等）のときは **馬番昇順で最小** の
+  馬をトップ選好馬とし、的中率・回収率を決定論的に再現可能にする。
+- **着順欠落**: トップ選好馬の `finishing_position` が `None`（除外・失格・取消等で着順なし）の場合は
+  **非的中（外れ）扱い**。回収率では `payout = 0`（賭けは成立したとみなし、`odds` があれば stake 母数に
+  含める）。Brier / LogLoss の `y` も「1 着でない＝0」として扱う。
+
 ### ステップ 4: 指標集計
 
 | 指標 | 定義 |
@@ -178,8 +186,12 @@ pub async fn backtest(&self, from: NaiveDate, to: NaiveDate) -> Result<BacktestR
 ### Interface (rdb-gateway)
 
 - `horse_stats` / `course_stats` / `jockey_stats` クエリに、`as_of = Some(d)` のとき `races.date < $d`
-  を付与。`results` 単独で集計しているクエリ（overall / popularity）には `INNER JOIN races` を足す。
-  日付はプレースホルダでバインドし、SQL 文字列連結はしない。
+  を付与。`races` を JOIN していない `FROM results` 単独のサブクエリ（horse の overall / popularity /
+  枠順グループ、jockey の overall / 枠順グループ）には `INNER JOIN races` を足す。`by_surface` /
+  `by_distance_band` / course の枠順グループは既に `races` を JOIN 済みのため述語追加のみでよい。日付は
+  プレースホルダでバインドし、SQL 文字列連結はしない。スコアリングに直接使うのは course 枠順・horse 芝ダ・
+  horse 距離帯・jockey 芝ダだが、`as_of` を 1 つのメソッドに通す単一コードパスを保つため、同メソッドが
+  返す全サブ統計に一貫して日付カットオフを掛ける（一部だけ未カットオフの内部不整合を作らない）。
 - `find_finished_races_between` を新設し、`races`（`source='pdf'`）と `results` を JOIN して期間内の
   確定レースを results 付きで取得する。
 
@@ -224,5 +236,9 @@ LogLoss (win)       : 0.2841
   バックテスト結果にもそのまま反映される。バックテストはそれらの改善 (#32) の効果測定に使う。
 - 想定回収率は単勝（トップ選好馬への 100 円固定賭け）のみを対象とする。EV/Kelly 配分（ADR 0003）を
   反映した回収率評価は将来の拡張とする。
+- Brier / LogLoss は全馬エントリ単位の二値較正のため、出走頭数分布に依存する（多頭数レースほど y=0 側の
+  サンプルが増える）。#31/#32 の before/after を比較する際は、対象期間の頭数構成が大きく変わらない前提で
+  相対比較する（絶対値の期間横断比較には注意）。
 - as-of カットオフは `races.date`（開催日）に依存する。同一開催日内のレース順序（R 番号）までは
-  考慮せず、同日レースは相互に統計へ寄与しない（D 当日を一律除外）。
+  考慮せず、同日レースは相互に統計へ寄与しない（D 当日を一律除外）。これはリーク回避を優先した意図的な
+  割り切りで、本番 predict（`as_of=None`・全期間）とはこの点だけ条件が非対称になる。

@@ -34,8 +34,10 @@
 1. **既存 stats メソッドに `as_of: Option<NaiveDate>` を通す単一コードパス方式**を取る。
    `Repository::horse_stats` / `course_stats` / `jockey_stats` に `as_of` 引数を追加し、
    - `Some(d)` のとき各集計 SQL に `races.date < $d` を付与する（D 当日も除外し未来リークを断つ）。
-     `results` 単独で集計しているクエリ (overall / popularity) は `INNER JOIN races` を足して
-     日付で絞る。
+     `races` を JOIN していない `FROM results` 単独のクエリ（horse の overall / popularity / 枠順、
+     jockey の overall / 枠順）は `INNER JOIN races` を足して日付で絞る。`by_surface` / `by_distance_band` /
+     course 枠順は既に `races` を JOIN 済み。`as_of` を 1 メソッドに通す単一コードパスを保つため、その
+     メソッドが返す全サブ統計に一貫してカットオフを掛ける。
    - 本番 predict (`predict_race`) と analyze の horse/course/jockey コマンドは `None` を渡し、
      従来どおり全期間集計のまま（後方互換・コードパス重複なし）。
 2. **過去レース取得用に `Repository::find_finished_races_between(from, to)` を新設**する。
