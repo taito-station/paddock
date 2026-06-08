@@ -1,0 +1,93 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="1120" viewBox="0 0 900 1120" font-family="sans-serif" font-size="13">
+  <!-- バックテスト評価フロー -->
+
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#333"/>
+    </marker>
+  </defs>
+
+  <!-- 凡例 -->
+  <rect x="10" y="8" width="12" height="12" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1"/>
+  <text x="25" y="19" font-size="11" fill="#333">入力</text>
+  <rect x="65" y="8" width="12" height="12" fill="#e1d5e7" stroke="#9673a6" stroke-width="1"/>
+  <text x="80" y="19" font-size="11" fill="#333">処理</text>
+  <rect x="120" y="8" width="12" height="12" fill="#fff2cc" stroke="#d6b656" stroke-width="1"/>
+  <text x="135" y="19" font-size="11" fill="#333">判定</text>
+  <rect x="175" y="8" width="12" height="12" fill="#d5e8d4" stroke="#82b366" stroke-width="1"/>
+  <text x="190" y="19" font-size="11" fill="#333">出力</text>
+  <rect x="230" y="8" width="12" height="12" fill="#f8cecc" stroke="#b85450" stroke-width="1"/>
+  <text x="245" y="19" font-size="11" fill="#333">リーク防止</text>
+
+  <!-- START -->
+  <rect x="370" y="35" width="160" height="40" rx="20" fill="#f5f5f5" stroke="#666" stroke-width="1.5"/>
+  <text x="450" y="60" text-anchor="middle" font-weight="bold" fill="#333">START</text>
+  <line x1="450" y1="75" x2="450" y2="100" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- 入力 -->
+  <rect x="300" y="100" width="300" height="50" rx="8" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1.5"/>
+  <text x="450" y="121" text-anchor="middle" font-weight="bold" fill="#333">入力</text>
+  <text x="450" y="138" text-anchor="middle" font-size="11" fill="#444">期間 from / to (NaiveDate)</text>
+  <line x1="450" y1="150" x2="450" y2="180" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- find_finished_races_between -->
+  <rect x="265" y="180" width="370" height="62" rx="8" fill="#e1d5e7" stroke="#9673a6" stroke-width="1.5"/>
+  <text x="450" y="202" text-anchor="middle" font-weight="bold" fill="#333">find_finished_races_between(from, to)</text>
+  <text x="450" y="220" text-anchor="middle" font-size="11" fill="#444">source='pdf' / finishing_position あり</text>
+  <text x="450" y="235" text-anchor="middle" font-size="11" fill="#444">(results 付き)</text>
+  <line x1="450" y1="242" x2="450" y2="272" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- 各レースループ (rhombus) -->
+  <polygon points="450,272 600,312 450,352 300,312" fill="#fff2cc" stroke="#d6b656" stroke-width="1.5"/>
+  <text x="450" y="316" text-anchor="middle" font-size="12" fill="#333">各レース(日付 D)をループ</text>
+  <line x1="450" y1="352" x2="450" y2="382" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- HorseEntry 復元 -->
+  <rect x="255" y="382" width="390" height="52" rx="8" fill="#e1d5e7" stroke="#9673a6" stroke-width="1.5"/>
+  <text x="450" y="404" text-anchor="middle" font-weight="bold" fill="#333">results から HorseEntry 復元</text>
+  <text x="450" y="421" text-anchor="middle" font-size="11" fill="#444">gate_num / horse_num / horse_name / jockey</text>
+  <line x1="450" y1="434" x2="450" y2="464" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- as-of 統計 (リーク防止・赤) -->
+  <rect x="245" y="464" width="410" height="72" rx="8" fill="#f8cecc" stroke="#b85450" stroke-width="1.5"/>
+  <text x="450" y="486" text-anchor="middle" font-weight="bold" fill="#333">as_of = Some(D) で統計取得</text>
+  <text x="450" y="503" text-anchor="middle" font-size="11" fill="#444">course_stats / horse_stats / jockey_stats</text>
+  <text x="450" y="520" text-anchor="middle" font-size="11" fill="#a33">★ races.date &lt; D のみ集計 (リーク防止)</text>
+  <line x1="450" y1="536" x2="450" y2="566" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- build_factors + estimate -->
+  <rect x="255" y="566" width="390" height="52" rx="8" fill="#e1d5e7" stroke="#9673a6" stroke-width="1.5"/>
+  <text x="450" y="588" text-anchor="middle" font-weight="bold" fill="#333">build_factors → estimate_probabilities</text>
+  <text x="450" y="605" text-anchor="middle" font-size="11" fill="#444">predict と同一ロジックを再現</text>
+  <line x1="450" y1="618" x2="450" y2="648" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- 突合 -->
+  <rect x="255" y="648" width="390" height="52" rx="8" fill="#e1d5e7" stroke="#9673a6" stroke-width="1.5"/>
+  <text x="450" y="670" text-anchor="middle" font-weight="bold" fill="#333">予測と実着順 (finishing_position) を突合</text>
+  <text x="450" y="687" text-anchor="middle" font-size="11" fill="#444">的中フラグ / win_prob / odds を蓄積</text>
+  <line x1="450" y1="700" x2="450" y2="730" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- 全レース完了? (rhombus) -->
+  <polygon points="450,730 600,770 450,810 300,770" fill="#fff2cc" stroke="#d6b656" stroke-width="1.5"/>
+  <text x="450" y="774" text-anchor="middle" font-size="12" fill="#333">全レース完了？</text>
+
+  <!-- loop back (左) -->
+  <polyline points="300,770 180,770 180,312 300,312" fill="none" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="186" y="545" font-size="11" fill="#555">次のレース</text>
+
+  <!-- YES → 集計 -->
+  <line x1="450" y1="810" x2="450" y2="850" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="462" y="833" font-size="11" fill="#555">YES</text>
+
+  <!-- 集計 (緑) -->
+  <rect x="300" y="850" width="300" height="72" rx="8" fill="#d5e8d4" stroke="#82b366" stroke-width="1.5"/>
+  <text x="450" y="872" text-anchor="middle" font-weight="bold" fill="#333">指標集計</text>
+  <text x="450" y="889" text-anchor="middle" font-size="11" fill="#444">的中率(単勝/連対/複勝) / 想定回収率</text>
+  <text x="450" y="906" text-anchor="middle" font-size="11" fill="#444">Brier / LogLoss</text>
+  <line x1="450" y1="922" x2="450" y2="952" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- 出力 (緑) -->
+  <rect x="320" y="952" width="260" height="52" rx="8" fill="#d5e8d4" stroke="#82b366" stroke-width="1.5"/>
+  <text x="450" y="974" text-anchor="middle" font-weight="bold" fill="#333">BacktestReport を出力</text>
+  <text x="450" y="991" text-anchor="middle" font-size="11" fill="#444">評価レース数 / 各指標</text>
+</svg>
