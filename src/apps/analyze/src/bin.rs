@@ -120,6 +120,10 @@ fn print_backtest(from: NaiveDate, to: NaiveDate, r: &BacktestReport) {
     }
     println!("{:<20}: {:>7.4}", "Brier (win)", r.brier);
     println!("{:<20}: {:>7.4}", "LogLoss (win)", r.log_loss);
+    println!();
+    println!(
+        "※ 想定回収率は「トップ選好馬の単勝に毎レース 100 円」固定の参考値（本番の EV/Kelly 買い目とは別戦略）。"
+    );
 }
 
 fn print_section(title: &str, rows: &[GroupStat]) {

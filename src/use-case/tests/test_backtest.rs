@@ -73,6 +73,27 @@ fn result(horse_num: u32, gate: u32, horse: &str, finish: u32, odds: Option<f64>
     }
 }
 
+/// 出走取消・競走除外（着順なし・status 指定）の馬。
+fn non_starter(horse_num: u32, gate: u32, horse: &str, status: ResultStatus) -> HorseResult {
+    HorseResult {
+        finishing_position: None,
+        status,
+        gate_num: GateNum::try_from(gate).unwrap(),
+        horse_num: HorseNum::try_from(horse_num).unwrap(),
+        horse_name: HorseName::try_from(horse).unwrap(),
+        horse_id: None,
+        jockey: None,
+        trainer: None,
+        time_seconds: None,
+        margin: None,
+        odds: None,
+        horse_weight: None,
+        weight_change: None,
+        weight_carried: None,
+        popularity: None,
+    }
+}
+
 fn finished_race() -> Race {
     Race {
         race_id: RaceId::try_from("2026-1-nakayama-1-1R").unwrap(),
@@ -111,8 +132,13 @@ impl Repository for MockRepo {
         name: &HorseName,
         _as_of: Option<NaiveDate>,
     ) -> Result<HorseStatsRow> {
-        // ウマA を高スタッツにしてトップ選好馬にする。
-        let win_rate = if name.value() == "ウマA" { 0.3 } else { 0.05 };
+        // ウマA を高スタッツでトップ選好馬に。ウマS は最高スタッツだが（テストで）出走取消なので
+        // 除外され、確率推定の母集合に入らないことを検証する。
+        let win_rate = match name.value() {
+            "ウマA" => 0.3,
+            "ウマS" => 0.9,
+            _ => 0.05,
+        };
         Ok(horse_stats_with_surface_win(win_rate))
     }
 
@@ -239,4 +265,39 @@ async fn backtest_empty_when_no_races() {
     let report = app.backtest(d(2026, 1, 1), d(2026, 1, 31)).await.unwrap();
     assert_eq!(report.races_evaluated, 0);
     assert!(report.payout_rate.is_none());
+}
+
+#[tokio::test]
+async fn backtest_excludes_scratched_and_cancelled_horses() {
+    // ウマS は最高スタッツ(0.9)だが出走取消、ウマC は競走除外。両者が母集合に混入すると
+    // ウマS がトップ選好馬になり着順なし → 単勝的中率 0 になってしまう。除外されていれば
+    // 発走馬の中で最高スタッツの ウマA(1 着)がトップ選好馬となり単勝的中率 1.0 になる。
+    let race = Race {
+        race_id: RaceId::try_from("2026-1-nakayama-1-2R").unwrap(),
+        date: NaiveDate::from_ymd_opt(2026, 1, 10).unwrap(),
+        venue: Venue::Nakayama,
+        round: 1,
+        day: 1,
+        race_num: 2,
+        surface: Surface::Turf,
+        distance: 2000,
+        track_condition: None,
+        weather: None,
+        results: vec![
+            result(1, 1, "ウマA", 1, Some(4.0)),
+            result(2, 5, "ウマB", 2, None),
+            non_starter(3, 2, "ウマS", ResultStatus::Cancelled),
+            non_starter(4, 3, "ウマC", ResultStatus::Scratched),
+        ],
+    };
+    let app = interactor(vec![race]);
+    let report = app.backtest(d(2026, 1, 1), d(2026, 1, 31)).await.unwrap();
+
+    assert_eq!(report.races_evaluated, 1);
+    // 非出走馬が除外され、発走馬の最高スタッツ ウマA が 1 着 → 単勝的中
+    assert!(
+        (report.win_hit_rate - 1.0).abs() < 1e-9,
+        "出走取消・競走除外が母集合に混入している (win_hit_rate={})",
+        report.win_hit_rate
+    );
 }

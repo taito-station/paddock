@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 
 use chrono::NaiveDate;
-use paddock_domain::{BacktestReport, HorseEntry, HorseFactors, RaceEvaluation, evaluate};
+use paddock_domain::{
+    BacktestReport, HorseEntry, HorseFactors, HorseResult, RaceEvaluation, ResultStatus, evaluate,
+};
 
 use crate::error::Result;
 use crate::interactor::Interactor;
@@ -27,9 +29,16 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
 
         let mut evaluations: Vec<RaceEvaluation> = Vec::with_capacity(races.len());
         for race in &races {
-            // find_finished_races_between は results を 1 件以上含むレースのみ返す契約だが、
-            // 念のための安全弁（results 空なら評価できないのでスキップ）。
-            if race.results.is_empty() {
+            // 実際に発走した馬のみを評価対象（出走頭数）にする。出走取消・競走除外は本番 predict の
+            // 出馬表にも載らないため、確率推定の母集合に含めると正規化分母が水増しされ確率が歪む。
+            // 競走中止(DidNotFinish)は発走済みなので母集合に含め、非的中(着順なし)として扱う。
+            let starters: Vec<&HorseResult> = race
+                .results
+                .iter()
+                .filter(|r| !matches!(r.status, ResultStatus::Scratched | ResultStatus::Cancelled))
+                .collect();
+            // 発走馬が居なければ評価できないのでスキップ。
+            if starters.is_empty() {
                 continue;
             }
             let as_of = Some(race.date);
@@ -41,7 +50,7 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
                 .await?;
 
             let mut entry_factors: Vec<(HorseEntry, HorseFactors)> = Vec::new();
-            for r in &race.results {
+            for r in &starters {
                 let entry = HorseEntry {
                     gate_num: r.gate_num,
                     horse_num: r.horse_num,
@@ -71,11 +80,10 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
                 continue;
             }
 
-            // 馬番 → (着順, 単勝オッズ) の突合表。
+            // 馬番 → (着順, 単勝オッズ) の突合表。entry_factors と同じ発走馬集合(starters)から作る。
             // 同着 1 着（稀）の場合は複数馬の win_outcomes が true になるが、的中率はトップ選好馬の
             // 着順のみで判定するため二重計上されない。Brier/LogLoss も破綻しない。
-            let by_num: HashMap<u32, (Option<u32>, Option<f64>)> = race
-                .results
+            let by_num: HashMap<u32, (Option<u32>, Option<f64>)> = starters
                 .iter()
                 .map(|r| {
                     (

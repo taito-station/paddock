@@ -129,6 +129,8 @@ pub fn evaluate(races: &[RaceEvaluation]) -> BacktestReport {
         let c = outcome_count as f64;
         (brier_sum / c, log_loss_sum / c)
     } else {
+        // 全レースの win_outcomes が空のときのみ到達する防御的デフォルト。use-case 層は
+        // 発走馬の居ないレースをスキップするため、非空 races では実際には通らない。
         (0.0, 0.0)
     };
 
