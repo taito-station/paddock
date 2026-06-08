@@ -95,7 +95,8 @@ place_prob_i = min(1, max(win_prob_i,   place_prob_i))
 show_prob_i  = min(1, max(place_prob_i, show_prob_i))
 ```
 
-> 小頭数（n < 3）では上限クランプにより place/show の合計が 2.0 / 3.0 を下回りうる（確率の上限を優先）。
+> win 列は各馬のシェア ≤ 1 のため上限クランプは発生せず合計は厳密に 1.0。place/show は小頭数
+> （n < 3）で上限クランプにより合計が 2.0 / 3.0 を下回りうる（確率の上限を優先）。
 > 例: 3 頭立ては全馬が複勝圏なので show_prob = 1.0。
 
 **フォールバック条件:**
@@ -212,4 +213,6 @@ paddock-analyze predict <race_id>
 - `win_prob ≤ place_prob ≤ show_prob` の単調性は **保証される**（top-k 正規化 + 累積 max 単調化, ADR 0007）。
   place/show は 2/3 着以内の実確率として扱える（複勝 EV もこの値を使用）
 - 小頭数では上限クランプにより place/show の合計が 2.0 / 3.0 を下回る（確率の上限を優先）
+- 全馬スタッツ皆無の均等フォールバック時は place/show が高め（小頭数では show=1.0）に出るため、
+  複勝 EV（`show_prob` 使用）がオッズ次第で買い目を誘発しうる。情報ゼロ時の買い目抑制は将来課題
 - 確率の絶対値より**レース内の相対的な傾向**を見るための参考値として使うこと

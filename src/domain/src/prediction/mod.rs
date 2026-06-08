@@ -50,8 +50,9 @@ pub fn estimate_probabilities(entries: &[(HorseEntry, HorseFactors)]) -> Vec<Hor
     let mut show_probs = normalize_to_sum(&show_scores, 3.0);
 
     // 馬ごとに累積 max で単調化し win_prob ≤ place_prob ≤ show_prob を保証する。
-    // win/place/show を別レートから独立に正規化するため、稀に逆転しうるのを後処理で是正する。
-    for i in 0..entries.len() {
+    // win/place/show は別レートから独立に正規化するため、レート比率次第で正規化後に逆転が
+    // 残りうる。これを後処理で常に是正する。
+    for i in 0..place_probs.len() {
         place_probs[i] = place_probs[i].max(win_probs[i]).min(1.0);
         show_probs[i] = show_probs[i].max(place_probs[i]).min(1.0);
     }
@@ -155,7 +156,7 @@ mod tests {
     }
 
     #[test]
-    fn normalizes_to_target_sums() {
+    fn win_sums_to_one_and_values_monotone_small_field() {
         let entries = vec![
             (
                 make_entry(1, "ウマA"),
@@ -277,6 +278,45 @@ mod tests {
                 "non-monotonic: {p:?}"
             );
         }
+    }
+
+    /// 列ごとに独立してフォールバック判定するため、一部の列だけ合計 0 になりうる
+    /// （例: 全馬 place=show=0 だが win>0）。合計 0 の列は均等フォールバック（place→min(2/n,1)、
+    /// show→min(3/n,1)）になり、累積 max により win ≤ place ≤ show は保たれる。
+    #[test]
+    fn monotonic_when_only_some_columns_are_all_zero() {
+        // win レートのみ非ゼロ、place/show レートは全馬 0。
+        let win_only = |w: f64| HorseFactors {
+            course_gate: RateTriple {
+                win: w,
+                place: 0.0,
+                show: 0.0,
+            },
+            horse_surface: RateTriple::default(),
+            horse_distance: RateTriple::default(),
+            jockey_surface: None,
+        };
+        let entries = vec![
+            (make_entry(1, "ウマA"), win_only(0.3)),
+            (make_entry(2, "ウマB"), win_only(0.1)),
+        ];
+        let probs = estimate_probabilities(&entries);
+        for p in &probs {
+            assert!(
+                p.win_prob <= p.place_prob && p.place_prob <= p.show_prob,
+                "non-monotonic: {p:?}"
+            );
+            assert!((0.0..=1.0).contains(&p.place_prob));
+            assert!((0.0..=1.0).contains(&p.show_prob));
+        }
+        // 2 頭立てでは place/show 列が合計 0 → 均等フォールバックで min(2/2,1)=min(3/2,1)=1.0。
+        for p in &probs {
+            assert!((p.place_prob - 1.0).abs() < 1e-10);
+            assert!((p.show_prob - 1.0).abs() < 1e-10);
+        }
+        // win 列は非ゼロなので通常正規化（合計 1.0）。
+        let win_total: f64 = probs.iter().map(|p| p.win_prob).sum();
+        assert!((win_total - 1.0).abs() < 1e-10);
     }
 
     /// 騎手なし馬が欠落項で不当に減点されないこと（重み付き平均）。レートが全 factor で等しいなら
