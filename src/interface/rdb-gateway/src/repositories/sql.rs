@@ -11,3 +11,33 @@ pub(crate) fn date_lt_pred(cutoff: Option<&str>, placeholder: &str) -> String {
         String::new()
     }
 }
+
+/// 再取り込み時に、今回の出走集合 `horse_nums` に含まれない馬番の行だけを `table` から削除する。
+///
+/// 破壊的な全消し（`DELETE ... WHERE race_id = ?`）の代替。出走中の馬は `ON CONFLICT` 更新で
+/// 残しつつ、取消・除外で今回いなくなった馬番の残骸だけを掃除する。`horse_nums` が空のときは
+/// 何もしない（劣化パースで全行を消さないための防御）。
+///
+/// `table` はリテラル（`"results"` / `"horse_entries"`）のみを渡す前提で `format!` に埋め込む。
+/// race_id・馬番は必ずプレースホルダでバインドする（SQL インジェクション安全）。
+pub(crate) async fn delete_absent_horse_nums(
+    conn: &mut sqlx::SqliteConnection,
+    table: &str,
+    race_id: &str,
+    horse_nums: &[i64],
+) -> Result<(), sqlx::Error> {
+    if horse_nums.is_empty() {
+        return Ok(());
+    }
+    let placeholders = std::iter::repeat_n("?", horse_nums.len())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let sql =
+        format!("DELETE FROM {table} WHERE race_id = ? AND horse_num NOT IN ({placeholders})");
+    let mut q = sqlx::query(&sql).bind(race_id);
+    for n in horse_nums {
+        q = q.bind(n);
+    }
+    q.execute(conn).await?;
+    Ok(())
+}

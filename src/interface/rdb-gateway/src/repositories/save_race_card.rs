@@ -3,6 +3,8 @@ use sqlx::SqlitePool;
 
 use crate::error::Result;
 
+use super::sql::delete_absent_horse_nums;
+
 pub async fn save_race_card(pool: &SqlitePool, card: &RaceCard) -> Result<()> {
     let mut tx = pool.begin().await?;
 
@@ -31,11 +33,9 @@ pub async fn save_race_card(pool: &SqlitePool, card: &RaceCard) -> Result<()> {
     .execute(&mut *tx)
     .await?;
 
-    sqlx::query("DELETE FROM horse_entries WHERE race_id = $1")
-        .bind(card.race_id.value())
-        .execute(&mut *tx)
-        .await?;
-
+    // 破壊的な全消し DELETE はしない。fetch-card(netkeiba) と parse-entries(pdf) が同じ
+    // race_id を書きうるため、全消しは一方の取り込みを消す危険がある。ON CONFLICT 更新に任せ、
+    // 今回の出走集合に無い馬番だけを後段で掃除する。
     for entry in &card.entries {
         sqlx::query(
             r#"
@@ -55,6 +55,14 @@ pub async fn save_race_card(pool: &SqlitePool, card: &RaceCard) -> Result<()> {
         .execute(&mut *tx)
         .await?;
     }
+
+    // 今回の出走集合に無い馬番（取消等で消えた行）だけを掃除する。
+    let horse_nums: Vec<i64> = card
+        .entries
+        .iter()
+        .map(|e| e.horse_num.value() as i64)
+        .collect();
+    delete_absent_horse_nums(&mut tx, "horse_entries", card.race_id.value(), &horse_nums).await?;
 
     tx.commit().await?;
     Ok(())
