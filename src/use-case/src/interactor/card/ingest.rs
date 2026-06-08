@@ -29,6 +29,8 @@ impl<R: Repository, S: NetkeibaScraper> CardInteractor<R, S> {
         force: bool,
     ) -> Result<IngestCardResponse> {
         let source_key = format!("netkeiba-card:{netkeiba_id}");
+        // 1 回の取り込みの時刻。カード履歴とオッズで同じ値を使い、両者の fetched_at を揃える。
+        let now = Utc::now();
 
         // 1. カード: 取得済みかつ !force ならスキップ。そうでなければ取得・保存して履歴を記録。
         let already = self.repo.fetch_history_contains(&source_key).await?;
@@ -68,7 +70,7 @@ impl<R: Repository, S: NetkeibaScraper> CardInteractor<R, S> {
                     url: format!("netkeiba:shutuba:{netkeiba_id}"),
                     races_saved: 1,
                     horses_saved: entries_saved as u32,
-                    fetched_at: Utc::now(),
+                    fetched_at: now,
                 })
                 .await?;
             card_saved = true;
@@ -95,7 +97,7 @@ impl<R: Repository, S: NetkeibaScraper> CardInteractor<R, S> {
             self.repo
                 .save_race_odds(&RaceOddsRecord {
                     race_id,
-                    fetched_at: Utc::now(),
+                    fetched_at: now,
                     rows,
                 })
                 .await?;

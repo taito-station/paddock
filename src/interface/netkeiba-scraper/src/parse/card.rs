@@ -101,6 +101,9 @@ fn extract_date(doc: &Html, expected_year: i32) -> Result<NaiveDate> {
     if let Some(date) = title.as_deref().and_then(|t| date_in(t, expected_year)) {
         return Ok(date);
     }
+    // title から取れなかった = 想定レイアウト外。本文には近走等の別日付が混ざり得るため、
+    // フォールバック採用を warn で可視化する（誤抽出の調査の手掛かりにする）。
+    tracing::warn!("開催日を <title> から取得できず本文テキストへフォールバックします");
     let body = doc.root_element().text().collect::<String>();
     date_in(&body, expected_year)
         .ok_or_else(|| Error::Parse("開催日(YYYY年M月D日)が見つかりません".to_string()))
