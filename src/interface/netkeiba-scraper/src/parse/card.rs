@@ -43,7 +43,7 @@ pub fn parse_card(html: &str, netkeiba_race_id: &str) -> Result<FetchedCard> {
     let doc = Html::parse_document(html);
 
     let (surface, distance) = extract_surface_distance(&doc)?;
-    let date = extract_date(html, year)?;
+    let date = extract_date(&doc, year)?;
     let entries = extract_entries(&doc)?;
 
     Ok(FetchedCard {
@@ -88,14 +88,28 @@ fn extract_surface_distance(doc: &Html) -> Result<(Surface, u32)> {
     Ok((surface, distance))
 }
 
-/// HTML から `YYYY年M月D日` の開催日を読み取る。
+/// `YYYY年M月D日` の開催日を読み取る。
 ///
-/// 出馬表 HTML には広告・近走リンク等で別の日付が混在し得るため、まず race_id 由来の
-/// `expected_year` と一致する最初の日付を採る。年一致が無い場合のみ最初の日付に
-/// フォールバックする（年表記が省略される将来のレイアウト変更への保険）。
-fn extract_date(html: &str, expected_year: i32) -> Result<NaiveDate> {
+/// `<title>`（"… | YYYY年M月D日 <場>NNR …" 形式のレース正規情報）を最優先で見る。
+/// 本文の近走欄・広告に同型の日付が混在し得るため、信頼できる title へスコープを絞る。
+/// title から取れない場合のみ文書全体テキストへフォールバックし、いずれも
+/// `expected_year` 一致を優先する（同年が無ければ最初の妥当な日付）。
+fn extract_date(doc: &Html, expected_year: i32) -> Result<NaiveDate> {
+    let title = sel("title")
+        .ok()
+        .and_then(|s| doc.select(&s).next().map(|t| t.text().collect::<String>()));
+    if let Some(date) = title.as_deref().and_then(|t| date_in(t, expected_year)) {
+        return Ok(date);
+    }
+    let body = doc.root_element().text().collect::<String>();
+    date_in(&body, expected_year)
+        .ok_or_else(|| Error::Parse("開催日(YYYY年M月D日)が見つかりません".to_string()))
+}
+
+/// テキストから `YYYY年M月D日` を拾う。`expected_year` 一致を優先し、無ければ最初の妥当な日付。
+fn date_in(text: &str, expected_year: i32) -> Option<NaiveDate> {
     let mut first: Option<NaiveDate> = None;
-    for caps in DATE_RE.captures_iter(html) {
+    for caps in DATE_RE.captures_iter(text) {
         let (Ok(y), Ok(m), Ok(d)) = (
             caps[1].parse::<i32>(),
             caps[2].parse::<u32>(),
@@ -107,11 +121,11 @@ fn extract_date(html: &str, expected_year: i32) -> Result<NaiveDate> {
             continue;
         };
         if y == expected_year {
-            return Ok(date);
+            return Some(date);
         }
         first.get_or_insert(date);
     }
-    first.ok_or_else(|| Error::Parse("開催日(YYYY年M月D日)が見つかりません".to_string()))
+    first
 }
 
 /// 出馬表テーブルの各行から枠番・馬番・馬名・騎手を抽出する。

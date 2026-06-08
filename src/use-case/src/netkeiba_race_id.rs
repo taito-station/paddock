@@ -34,14 +34,15 @@ pub fn build_race_ids(
     Ok((netkeiba, race_id))
 }
 
-/// 開催回・日次・R の値域を検証する。0 や非現実値（R は 1..=12）を弾き、
-/// `2026-3-tokyo-0-11R` のような壊れた RaceId を黙って通さない。
+/// 開催回・日次・R の値域を検証する。0 や非現実値を弾き、`2026-3-tokyo-0-11R` の
+/// ような壊れた RaceId や、打ち間違い（`--round 99` 等）で存在しないページを取りに
+/// 行くのを早期に防ぐ。上限は JRA の現実値域に余裕を見たもの。
 fn validate_parts(round: u32, day: u32, race_num: u32) -> Result<()> {
-    if round < 1 {
-        return Err(Error::InvalidArgument(format!("開催回は 1 以上: {round}")));
+    if !(1..=6).contains(&round) {
+        return Err(Error::InvalidArgument(format!("開催回は 1〜6: {round}")));
     }
-    if day < 1 {
-        return Err(Error::InvalidArgument(format!("開催日次は 1 以上: {day}")));
+    if !(1..=12).contains(&day) {
+        return Err(Error::InvalidArgument(format!("開催日次は 1〜12: {day}")));
     }
     if !(1..=12).contains(&race_num) {
         return Err(Error::InvalidArgument(format!(

@@ -42,9 +42,8 @@ pub fn parse_win_odds(json: &str) -> Result<Vec<FetchedWinOdds>> {
         let Ok(horse_num) = HorseNum::try_from(num) else {
             continue;
         };
-        let arr = match value.as_array() {
-            Some(a) => a,
-            None => continue,
+        let Some(arr) = value.as_array() else {
+            continue;
         };
         // index0 = オッズ, index2 = 人気。レース前は "---.-" 等でパース不能 → スキップ。
         let Some(odds) = arr.first().and_then(|v| v.as_str()).and_then(|s| s.parse::<f64>().ok())
