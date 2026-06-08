@@ -3,6 +3,8 @@ use sqlx::SqlitePool;
 
 use crate::error::Result;
 
+use super::sql::delete_absent_horse_nums;
+
 pub async fn save_race(pool: &SqlitePool, race: &Race) -> Result<()> {
     let mut tx = pool.begin().await?;
 
@@ -36,11 +38,9 @@ pub async fn save_race(pool: &SqlitePool, race: &Race) -> Result<()> {
     .execute(&mut *tx)
     .await?;
 
-    sqlx::query("DELETE FROM results WHERE race_id = $1")
-        .bind(race.race_id.value())
-        .execute(&mut *tx)
-        .await?;
-
+    // 破壊的な全消し DELETE はしない。pdf が権威を持つ列は ON CONFLICT(race_id, horse_num)
+    // DO UPDATE で更新し、INSERT 列にも UPDATE SET にも含めない horse_id（#60 で backfill する値）
+    // と source は再取り込みでも温存する。
     for r in &race.results {
         sqlx::query(
             r#"
@@ -83,6 +83,14 @@ pub async fn save_race(pool: &SqlitePool, race: &Race) -> Result<()> {
         .execute(&mut *tx)
         .await?;
     }
+
+    // 今回の出走集合に無い馬番（取消・除外で消えた行）だけを掃除する。
+    let horse_nums: Vec<i64> = race
+        .results
+        .iter()
+        .map(|r| r.horse_num.value() as i64)
+        .collect();
+    delete_absent_horse_nums(&mut tx, "results", race.race_id.value(), &horse_nums).await?;
 
     tx.commit().await?;
     Ok(())
