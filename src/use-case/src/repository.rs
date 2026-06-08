@@ -1,9 +1,12 @@
 use core::future::Future;
 
 use chrono::{DateTime, NaiveDate, Utc};
-use paddock_domain::{HorseName, HorseResult, JockeyName, Race, RaceCard, RaceId, Surface, Venue};
+use paddock_domain::{
+    HorseId, HorseName, HorseResult, JockeyName, Race, RaceCard, RaceId, Surface, Venue,
+};
 
 use crate::error::Result;
+use crate::netkeiba_scraper::HorsePastRun;
 
 #[derive(Debug, Clone)]
 pub struct GroupStat {
@@ -144,10 +147,14 @@ pub struct PredictBetRecord {
 pub trait Repository: Send + Sync {
     fn save_race(&self, race: &Race) -> impl Future<Output = Result<()>> + Send;
 
-    /// netkeiba 由来の近走を 1 レース分 upsert する（`source='netkeiba'`）。
-    /// [`save_race`] と違い `results` を DELETE しないため、同一過去レースを走った別馬を
-    /// 別 run で追記でき、複数馬の近走が同じレースに集約されても消し合わない。
-    fn upsert_history_race(&self, race: &Race) -> impl Future<Output = Result<()>> + Send;
+    /// netkeiba 由来の近走を horse 単位で `horses` / `horse_past_runs` に upsert する。
+    /// pdf 確定成績(`results`)とは別テーブルに保存することで、集計の二重計上・フィールド
+    /// バイアス（#58/#59）を構造的に防ぐ。`runs` が空のときは何もしない。
+    fn upsert_horse_history(
+        &self,
+        horse_id: &HorseId,
+        runs: &[HorsePastRun],
+    ) -> impl Future<Output = Result<()>> + Send;
 
     /// 馬の各種成績統計を返す。`as_of = Some(d)` のとき `races.date < d` の成績のみを集計する
     /// （バックテストのリーク防止。本番予想は `None` で全期間集計）。

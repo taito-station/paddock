@@ -70,7 +70,11 @@ impl Repository for MockRepo {
         *self.saved.lock().unwrap() += 1;
         Ok(())
     }
-    async fn upsert_history_race(&self, _race: &Race) -> Result<()> {
+    async fn upsert_horse_history(
+        &self,
+        _horse_id: &paddock_domain::HorseId,
+        _runs: &[paddock_use_case::HorsePastRun],
+    ) -> Result<()> {
         Ok(())
     }
     async fn horse_stats(
@@ -365,7 +369,11 @@ impl Repository for HistoryRepo {
         *self.saved.lock().unwrap() += 1;
         Ok(())
     }
-    async fn upsert_history_race(&self, _race: &Race) -> Result<()> {
+    async fn upsert_horse_history(
+        &self,
+        _horse_id: &paddock_domain::HorseId,
+        _runs: &[paddock_use_case::HorsePastRun],
+    ) -> Result<()> {
         Ok(())
     }
     async fn horse_stats(

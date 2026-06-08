@@ -14,8 +14,8 @@ async fn main() -> anyhow::Result<()> {
     let resp = app.fetch_and_store(&args.race_ids, &args.horse_ids).await?;
 
     println!(
-        "取得: {} 頭（失敗 {} 頭） / 保存: {} レース・{} 近走",
-        resp.horses_fetched, resp.horses_failed, resp.races_saved, resp.results_saved
+        "取得: {} 頭（失敗 {} 頭） / 保存: {} 近走",
+        resp.horses_fetched, resp.horses_failed, resp.runs_saved
     );
     if resp.shutuba_failed > 0 {
         // 出馬表取得失敗はその出走馬が丸ごと欠落するため、件数を明示する。

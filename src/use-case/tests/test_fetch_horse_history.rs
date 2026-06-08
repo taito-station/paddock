@@ -1,9 +1,9 @@
 //! Offline tests for the netkeiba horse-history ingest interactor.
 //!
 //! netkeiba is unreachable from CI, so the scraper and repository are mocked.
-//! These cover the core aggregation: multiple runners that share a past race are
-//! merged into one synthetic race, per-horse fetch failures are skipped, and
-//! duplicate (race, horse_num) rows are de-duplicated.
+//! These cover the core flow: each target horse's runs are upserted per-horse
+//! (no cross-horse synthetic-race merge), per-horse fetch failures are skipped,
+//! and duplicate netkeiba_race_id rows for one horse are de-duplicated.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
@@ -103,12 +103,16 @@ impl NetkeibaScraper for FakeScraper {
 
 #[derive(Default)]
 struct RecordingRepo {
-    upserted: Mutex<Vec<Race>>,
+    /// upsert_horse_history の呼び出しを (horse_id, runs) で記録する。
+    upserted: Mutex<Vec<(String, Vec<HorsePastRun>)>>,
 }
 
 impl Repository for RecordingRepo {
-    async fn upsert_history_race(&self, race: &Race) -> Result<()> {
-        self.upserted.lock().unwrap().push(race.clone());
+    async fn upsert_horse_history(&self, horse_id: &HorseId, runs: &[HorsePastRun]) -> Result<()> {
+        self.upserted
+            .lock()
+            .unwrap()
+            .push((horse_id.value().to_string(), runs.to_vec()));
         Ok(())
     }
     async fn save_race(&self, _race: &Race) -> Result<()> {
@@ -201,9 +205,9 @@ impl Repository for RecordingRepo {
 // --- tests ---------------------------------------------------------------
 
 #[tokio::test]
-async fn merges_shared_past_race_across_runners() {
-    // 出馬表 R には H1,H2 が出走。両馬は過去レース rA を共に走った（馬番 3 と 5）。
-    // それぞれ固有の過去レース(rB, rC)も持つ。
+async fn stores_each_horse_runs_separately() {
+    // 出馬表 R に H1,H2 が出走。両馬は過去レース rA を共に走り、固有レース(rB,rC)も持つ。
+    // 旧実装の「合成レースへの馬横断集約」は廃止し、各馬の近走を別々に保存する。
     let scraper = FakeScraper {
         shutuba: HashMap::from([("R".to_string(), vec!["H1".to_string(), "H2".to_string()])]),
         histories: HashMap::from([
@@ -233,17 +237,16 @@ async fn merges_shared_past_race_across_runners() {
 
     assert_eq!(resp.horses_fetched, 2);
     assert_eq!(resp.horses_failed, 0);
-    assert_eq!(resp.races_saved, 3, "rA/rB/rC の 3 レース");
-    assert_eq!(resp.results_saved, 4, "rA に 2 頭 + rB,rC に各 1 頭");
+    assert_eq!(resp.runs_saved, 4, "H1:2 + H2:2 走");
 
-    let upserted = interactor.repository.upserted.lock().unwrap();
-    let shared = upserted
+    let calls = interactor.repository.upserted.lock().unwrap();
+    assert_eq!(calls.len(), 2, "馬ごとに 1 回 upsert");
+    let by_horse: HashMap<&str, usize> = calls
         .iter()
-        .find(|r| r.race_id.value() == "nk-rA")
-        .expect("合成 race_id nk-rA");
-    assert_eq!(shared.results.len(), 2, "rA は 2 頭が合流");
-    // horse_id が各結果に保存されている。
-    assert!(shared.results.iter().all(|r| r.horse_id.is_some()));
+        .map(|(id, runs)| (id.as_str(), runs.len()))
+        .collect();
+    assert_eq!(by_horse.get("H1"), Some(&2));
+    assert_eq!(by_horse.get("H2"), Some(&2));
 }
 
 #[tokio::test]
@@ -263,13 +266,12 @@ async fn skips_failing_horse_and_continues() {
 
     assert_eq!(resp.horses_fetched, 1);
     assert_eq!(resp.horses_failed, 1);
-    assert_eq!(resp.races_saved, 1);
-    assert_eq!(resp.results_saved, 1);
+    assert_eq!(resp.runs_saved, 1);
 }
 
 #[tokio::test]
-async fn dedups_same_race_and_horse_num() {
-    // 異常 HTML 等で同一馬が同一レース・同一馬番の行を 2 つ返しても 1 行に集約する。
+async fn dedups_same_netkeiba_race() {
+    // 異常 HTML 等で同一馬が同一過去レースの行を 2 つ返しても 1 走に集約する。
     let scraper = FakeScraper {
         shutuba: HashMap::new(),
         histories: HashMap::from([(
@@ -288,11 +290,9 @@ async fn dedups_same_race_and_horse_num() {
         .await
         .expect("fetch_and_store");
 
-    assert_eq!(resp.races_saved, 1);
-    assert_eq!(
-        resp.results_saved, 1,
-        "同一 (race_id, horse_num) は 1 行に集約"
-    );
-    let upserted = interactor.repository.upserted.lock().unwrap();
-    assert_eq!(upserted[0].results.len(), 1);
+    assert_eq!(resp.horses_fetched, 1);
+    assert_eq!(resp.runs_saved, 1, "同一 netkeiba_race_id は 1 走に集約");
+    let calls = interactor.repository.upserted.lock().unwrap();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].1.len(), 1);
 }
