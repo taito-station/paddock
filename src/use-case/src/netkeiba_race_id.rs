@@ -20,6 +20,7 @@ pub fn build_race_ids(
     day: u32,
     race_num: u32,
 ) -> Result<(String, RaceId)> {
+    validate_parts(round, day, race_num)?;
     let netkeiba = format!(
         "{:04}{}{:02}{:02}{:02}",
         year,
@@ -31,6 +32,23 @@ pub fn build_race_ids(
     let paddock_str = format!("{year}-{round}-{}-{day}-{race_num}R", venue.as_slug());
     let race_id = RaceId::try_from(paddock_str)?;
     Ok((netkeiba, race_id))
+}
+
+/// 開催回・日次・R の値域を検証する。0 や非現実値（R は 1..=12）を弾き、
+/// `2026-3-tokyo-0-11R` のような壊れた RaceId を黙って通さない。
+fn validate_parts(round: u32, day: u32, race_num: u32) -> Result<()> {
+    if round < 1 {
+        return Err(Error::InvalidArgument(format!("開催回は 1 以上: {round}")));
+    }
+    if day < 1 {
+        return Err(Error::InvalidArgument(format!("開催日次は 1 以上: {day}")));
+    }
+    if !(1..=12).contains(&race_num) {
+        return Err(Error::InvalidArgument(format!(
+            "レース番号は 1〜12: {race_num}"
+        )));
+    }
+    Ok(())
 }
 
 /// netkeiba 12 桁 race_id を paddock RaceId に変換する。
@@ -52,7 +70,7 @@ fn parse_netkeiba_race_id(id: &str) -> Result<(u32, Venue, u32, u32, u32)> {
     let year: u32 = id[0..4]
         .parse()
         .map_err(|_| Error::InvalidArgument(format!("invalid year in race_id: {id}")))?;
-    let venue = venue_from_code(&id[4..6])
+    let venue = Venue::from_code(&id[4..6])
         .ok_or_else(|| Error::InvalidArgument(format!("JRA 外の場コードです: {id}")))?;
     let round: u32 = id[6..8]
         .parse()
@@ -64,23 +82,6 @@ fn parse_netkeiba_race_id(id: &str) -> Result<(u32, Venue, u32, u32, u32)> {
         .parse()
         .map_err(|_| Error::InvalidArgument(format!("invalid race_num in race_id: {id}")))?;
     Ok((year, venue, round, day, race_num))
-}
-
-fn venue_from_code(code: &str) -> Option<Venue> {
-    let venue = match code {
-        "01" => Venue::Sapporo,
-        "02" => Venue::Hakodate,
-        "03" => Venue::Fukushima,
-        "04" => Venue::Niigata,
-        "05" => Venue::Tokyo,
-        "06" => Venue::Nakayama,
-        "07" => Venue::Chukyo,
-        "08" => Venue::Kyoto,
-        "09" => Venue::Hanshin,
-        "10" => Venue::Kokura,
-        _ => return None,
-    };
-    Some(venue)
 }
 
 #[cfg(test)]
@@ -122,5 +123,16 @@ mod tests {
         let (netkeiba, expected) = build_race_ids(2026, Venue::Hanshin, 2, 4, 8).unwrap();
         let back = paddock_race_id_from_netkeiba(&netkeiba).unwrap();
         assert_eq!(back.value(), expected.value());
+    }
+
+    #[test]
+    fn rejects_out_of_range_parts() {
+        // 回 0・日次 0・R 0/13 は壊れた RaceId（例 2026-3-tokyo-0-11R）を生むため弾く。
+        assert!(build_race_ids(2026, Venue::Tokyo, 0, 2, 11).is_err());
+        assert!(build_race_ids(2026, Venue::Tokyo, 3, 0, 11).is_err());
+        assert!(build_race_ids(2026, Venue::Tokyo, 3, 2, 0).is_err());
+        assert!(build_race_ids(2026, Venue::Tokyo, 3, 2, 13).is_err());
+        // netkeiba 12 桁経由でも day=00 を弾く。
+        assert!(paddock_race_id_from_netkeiba("202605030011").is_err());
     }
 }

@@ -17,8 +17,6 @@ pub struct IngestCardResponse {
     pub odds_saved: usize,
 }
 
-const SHUTUBA_URL: &str = "https://race.netkeiba.com/race/shutuba.html";
-
 impl<R: Repository, S: NetkeibaScraper> CardInteractor<R, S> {
     /// netkeiba の出馬表と単勝オッズを取得し、`race_cards`/`horse_entries`/`race_odds` に保存する。
     ///
@@ -65,7 +63,9 @@ impl<R: Repository, S: NetkeibaScraper> CardInteractor<R, S> {
             self.repo
                 .record_fetch(&FetchRecord {
                     source_key,
-                    url: format!("{SHUTUBA_URL}?race_id={netkeiba_id}"),
+                    // 取得元の論理識別子。具体的な HTTP URL の組み立ては interface 層
+                    // (scraper) の責務なので、use-case はここで netkeiba の URL 形式を持たない。
+                    url: format!("netkeiba:shutuba:{netkeiba_id}"),
                     races_saved: 1,
                     horses_saved: entries_saved as u32,
                     fetched_at: Utc::now(),
@@ -84,6 +84,8 @@ impl<R: Repository, S: NetkeibaScraper> CardInteractor<R, S> {
                 .into_iter()
                 .map(|w| OddsRow {
                     bet_type: "win".to_string(),
+                    // 単勝の combination_key は素の馬番文字列("1".."18")。組合せ券種(#38)は
+                    // 別途キー規約(昇順連結等)を定義する。ゼロ詰めはしない。
                     combination_key: w.horse_num.value().to_string(),
                     odds: w.odds,
                     odds_high: None,

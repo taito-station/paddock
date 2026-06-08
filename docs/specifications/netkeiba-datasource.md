@@ -175,6 +175,16 @@ paddock-fetch-card --year 2026 --venue 東京 --round 3 --day 2 --race 11
 
 ---
 
+## 留意（既知の前提）
+
+- **騎手名は netkeiba の略称表記**（例「戸崎圭」）で保存する。JRA PDF 由来の正式名（「戸崎圭太」）とは
+  表記が異なるため、クロスソースで騎手成績(`jockey_stats`)を突き合わせる際は取りこぼし得る。
+  netkeiba 内では整合する。正規化が必要になれば別 Issue で扱う。
+- `RaceCard.venue`/`round`/`day`/`race_num` は race_id 由来、`surface`/`distance`/`date` は HTML 由来で、
+  両者の整合チェックは行わない（誤った race_id を渡した場合の検出は本仕様のスコープ外）。
+
+---
+
 ## 関連
 
 - ADR: [0008 netkeiba を当日データソースに採用](../adr/0008-netkeiba-same-day-datasource.md)

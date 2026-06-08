@@ -1,3 +1,5 @@
+use std::sync::LazyLock;
+
 use chrono::NaiveDate;
 use paddock_domain::{GateNum, HorseName, HorseNum, JockeyName, Surface};
 use paddock_use_case::netkeiba_scraper::{FetchedCard, FetchedEntry};
@@ -6,6 +8,14 @@ use scraper::{ElementRef, Html, Selector};
 
 use super::{cell_text, round_day_racenum, venue_from_race_id};
 use crate::error::{Error, Result};
+
+/// `芝1600m` 等から馬場と距離を取る正規表現（呼び出しごとの再コンパイルを避け static 化）。
+static SURFACE_DISTANCE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"([芝ダ障])\s*(\d{3,4})m").expect("valid surface/distance regex"));
+
+/// `YYYY年M月D日` の開催日表記を取る正規表現。
+static DATE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(\d{4})年(\d{1,2})月(\d{1,2})日").expect("valid date regex"));
 
 /// 出馬表 (`race/shutuba.html`) のHTMLから当日のレースカード（メタ + 全出走馬）を抽出する。
 ///
@@ -24,10 +34,16 @@ pub fn parse_card(html: &str, netkeiba_race_id: &str) -> Result<FetchedCard> {
         ))
     })?;
 
+    // race_id 先頭 4 桁が開催年。開催日の照合に使う。
+    let year: i32 = netkeiba_race_id
+        .get(0..4)
+        .and_then(|s| s.parse().ok())
+        .ok_or_else(|| Error::Parse(format!("race_id から年を読めません: {netkeiba_race_id}")))?;
+
     let doc = Html::parse_document(html);
 
     let (surface, distance) = extract_surface_distance(&doc)?;
-    let date = extract_date(html)?;
+    let date = extract_date(html, year)?;
     let entries = extract_entries(&doc)?;
 
     Ok(FetchedCard {
@@ -52,9 +68,7 @@ fn extract_surface_distance(doc: &Html) -> Result<(Surface, u32)> {
         .map(|e| e.text().collect::<String>())
         .ok_or_else(|| Error::Parse("RaceData01 が見つかりません".to_string()))?;
 
-    let re = Regex::new(r"([芝ダ障])\s*(\d{3,4})m")
-        .map_err(|e| Error::Parse(format!("invalid surface/distance regex: {e}")))?;
-    let caps = re
+    let caps = SURFACE_DISTANCE_RE
         .captures(&text)
         .ok_or_else(|| Error::Parse(format!("芝/ダ/距離を読めません: {text:?}")))?;
 
@@ -74,18 +88,30 @@ fn extract_surface_distance(doc: &Html) -> Result<(Surface, u32)> {
     Ok((surface, distance))
 }
 
-/// HTML 全体から最初の `YYYY年M月D日` を開催日として読み取る。
-fn extract_date(html: &str) -> Result<NaiveDate> {
-    let re = Regex::new(r"(\d{4})年(\d{1,2})月(\d{1,2})日")
-        .map_err(|e| Error::Parse(format!("invalid date regex: {e}")))?;
-    let caps = re
-        .captures(html)
-        .ok_or_else(|| Error::Parse("開催日(YYYY年M月D日)が見つかりません".to_string()))?;
-    let y: i32 = caps[1].parse().map_err(|_| Error::Parse("invalid year".into()))?;
-    let m: u32 = caps[2].parse().map_err(|_| Error::Parse("invalid month".into()))?;
-    let d: u32 = caps[3].parse().map_err(|_| Error::Parse("invalid day".into()))?;
-    NaiveDate::from_ymd_opt(y, m, d)
-        .ok_or_else(|| Error::Parse(format!("不正な開催日: {y}-{m}-{d}")))
+/// HTML から `YYYY年M月D日` の開催日を読み取る。
+///
+/// 出馬表 HTML には広告・近走リンク等で別の日付が混在し得るため、まず race_id 由来の
+/// `expected_year` と一致する最初の日付を採る。年一致が無い場合のみ最初の日付に
+/// フォールバックする（年表記が省略される将来のレイアウト変更への保険）。
+fn extract_date(html: &str, expected_year: i32) -> Result<NaiveDate> {
+    let mut first: Option<NaiveDate> = None;
+    for caps in DATE_RE.captures_iter(html) {
+        let (Ok(y), Ok(m), Ok(d)) = (
+            caps[1].parse::<i32>(),
+            caps[2].parse::<u32>(),
+            caps[3].parse::<u32>(),
+        ) else {
+            continue;
+        };
+        let Some(date) = NaiveDate::from_ymd_opt(y, m, d) else {
+            continue;
+        };
+        if y == expected_year {
+            return Ok(date);
+        }
+        first.get_or_insert(date);
+    }
+    first.ok_or_else(|| Error::Parse("開催日(YYYY年M月D日)が見つかりません".to_string()))
 }
 
 /// 出馬表テーブルの各行から枠番・馬番・馬名・騎手を抽出する。

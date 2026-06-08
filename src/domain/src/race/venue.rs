@@ -76,6 +76,25 @@ impl Venue {
         }
     }
 
+    /// JRA 場コード（"01".."10"）から Venue を引く（[`Venue::as_code`] の逆）。
+    /// JRA 外（地方=30番台〜・海外）のコードは `None`。netkeiba 12 桁 race_id の
+    /// 5〜6 桁目の解釈に用いる、場コード↔Venue 対応の単一の正本。
+    pub fn from_code(code: &str) -> Option<Venue> {
+        Some(match code {
+            "01" => Venue::Sapporo,
+            "02" => Venue::Hakodate,
+            "03" => Venue::Fukushima,
+            "04" => Venue::Niigata,
+            "05" => Venue::Tokyo,
+            "06" => Venue::Nakayama,
+            "07" => Venue::Chukyo,
+            "08" => Venue::Kyoto,
+            "09" => Venue::Hanshin,
+            "10" => Venue::Kokura,
+            _ => return None,
+        })
+    }
+
     pub fn as_slug(&self) -> &'static str {
         match self {
             Venue::Sapporo => "sapporo",

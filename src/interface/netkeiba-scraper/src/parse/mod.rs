@@ -15,21 +15,7 @@ use paddock_domain::Venue;
 /// netkeiba の 12 桁 race_id から JRA 場コード(5〜6 桁目)を Venue に変換する。
 /// JRA は 01〜10。地方(30 番台〜)・海外はここで `None` となり、呼び出し側で行スキップ。
 pub(crate) fn venue_from_race_id(race_id: &str) -> Option<Venue> {
-    let code = race_id.get(4..6)?;
-    let venue = match code {
-        "01" => Venue::Sapporo,
-        "02" => Venue::Hakodate,
-        "03" => Venue::Fukushima,
-        "04" => Venue::Niigata,
-        "05" => Venue::Tokyo,
-        "06" => Venue::Nakayama,
-        "07" => Venue::Chukyo,
-        "08" => Venue::Kyoto,
-        "09" => Venue::Hanshin,
-        "10" => Venue::Kokura,
-        _ => return None,
-    };
-    Some(venue)
+    Venue::from_code(race_id.get(4..6)?)
 }
 
 /// race_id の 7〜8 桁目=開催回, 9〜10 桁目=開催日次, 11〜12 桁目=R を u32 で取り出す。

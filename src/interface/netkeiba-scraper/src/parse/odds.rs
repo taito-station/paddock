@@ -12,6 +12,18 @@ pub fn parse_win_odds(json: &str) -> Result<Vec<FetchedWinOdds>> {
     let root: Value =
         serde_json::from_str(json).map_err(|e| Error::Parse(format!("invalid odds JSON: {e}")))?;
 
+    // 正常時は status="result"。それ以外（API エラー）はレース前の未掲載と区別して
+    // エラーにする（未掲載は status="result" のまま odds が空で返るため別物）。
+    if let Some(status) = root
+        .get("status")
+        .and_then(|s| s.as_str())
+        .filter(|&s| s != "result")
+    {
+        return Err(Error::Parse(format!(
+            "odds API が result 以外を返しました: status={status}"
+        )));
+    }
+
     // data.odds["1"] が単勝のオッズ表。未掲載（レース前）なら空 Vec で返す。
     let Some(win_map) = root
         .get("data")
