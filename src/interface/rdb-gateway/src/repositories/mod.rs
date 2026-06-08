@@ -1,5 +1,6 @@
 mod course_stats;
 mod fetch_history;
+mod find_finished_races_between;
 mod find_race_card;
 mod find_races_by_date;
 mod horse_stats;
@@ -7,6 +8,7 @@ mod jockey_stats;
 mod predict_session;
 mod save_race;
 mod save_race_card;
+mod sql;
 mod upsert_history_race;
 
 use chrono::NaiveDate;
@@ -42,8 +44,12 @@ impl Repository for SqliteRepository {
             .map_err(Into::into)
     }
 
-    async fn horse_stats(&self, name: &HorseName) -> UcResult<HorseStatsRow> {
-        horse_stats::horse_stats(&self.pool, name)
+    async fn horse_stats(
+        &self,
+        name: &HorseName,
+        as_of: Option<NaiveDate>,
+    ) -> UcResult<HorseStatsRow> {
+        horse_stats::horse_stats(&self.pool, name, as_of)
             .await
             .map_err(Into::into)
     }
@@ -53,14 +59,19 @@ impl Repository for SqliteRepository {
         venue: Venue,
         distance: u32,
         surface: Surface,
+        as_of: Option<NaiveDate>,
     ) -> UcResult<CourseStatsRow> {
-        course_stats::course_stats(&self.pool, venue, distance, surface)
+        course_stats::course_stats(&self.pool, venue, distance, surface, as_of)
             .await
             .map_err(Into::into)
     }
 
-    async fn jockey_stats(&self, name: &JockeyName) -> UcResult<JockeyStatsRow> {
-        jockey_stats::jockey_stats(&self.pool, name)
+    async fn jockey_stats(
+        &self,
+        name: &JockeyName,
+        as_of: Option<NaiveDate>,
+    ) -> UcResult<JockeyStatsRow> {
+        jockey_stats::jockey_stats(&self.pool, name, as_of)
             .await
             .map_err(Into::into)
     }
@@ -108,6 +119,16 @@ impl Repository for SqliteRepository {
 
     async fn find_races_by_date(&self, date: NaiveDate) -> UcResult<Vec<Race>> {
         find_races_by_date::find_races_by_date(&self.pool, date)
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn find_finished_races_between(
+        &self,
+        from: NaiveDate,
+        to: NaiveDate,
+    ) -> UcResult<Vec<Race>> {
+        find_finished_races_between::find_finished_races_between(&self.pool, from, to)
             .await
             .map_err(Into::into)
     }

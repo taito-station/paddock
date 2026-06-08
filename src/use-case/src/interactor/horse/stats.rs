@@ -8,6 +8,6 @@ use crate::repository::{HorseStatsRow, Repository};
 
 impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
     pub async fn horse_stats(&self, name: &HorseName) -> Result<HorseStatsRow> {
-        self.repository.horse_stats(name).await
+        self.repository.horse_stats(name, None).await
     }
 }

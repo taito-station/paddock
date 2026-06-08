@@ -38,4 +38,15 @@ pub enum Command {
         /// Race ID (例: 2026060412R02).
         race_id: String,
     },
+    /// Backtest the prediction logic over finished races in a date range.
+    /// Reproduces probability estimation with as-of stats (no leakage) and reports
+    /// hit rate / expected payout rate / Brier / LogLoss.
+    Backtest {
+        /// 開始日 YYYY-MM-DD（含む）。
+        #[arg(long)]
+        from: String,
+        /// 終了日 YYYY-MM-DD（含む）。
+        #[arg(long)]
+        to: String,
+    },
 }

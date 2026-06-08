@@ -1,15 +1,23 @@
+use chrono::NaiveDate;
 use paddock_domain::{Surface, Venue};
 use paddock_use_case::repository::{CourseStatsRow, GroupStat};
 use sqlx::SqlitePool;
 
 use crate::error::Result;
 
+use super::sql::date_lt_pred;
+
+/// `as_of = Some(d)` のとき `races.date < d` を付与する（バックテストのリーク防止）。
+/// course_stats は既に `races` を JOIN しているため述語追加のみでよい。
 pub async fn course_stats(
     pool: &SqlitePool,
     venue: Venue,
     distance: u32,
     surface: Surface,
+    as_of: Option<NaiveDate>,
 ) -> Result<CourseStatsRow> {
+    let cutoff = as_of.map(|d| d.format("%Y-%m-%d").to_string());
+    let date = date_lt_pred(cutoff.as_deref(), "?4");
     let groups: &[(&str, &str)] = &[
         ("Inner (1-3)", "results.gate_num BETWEEN 1 AND 3"),
         ("Middle (4-6)", "results.gate_num BETWEEN 4 AND 6"),
@@ -31,14 +39,17 @@ pub async fn course_stats(
               AND races.surface = $3
               AND results.finishing_position IS NOT NULL
               AND {predicate}
+              {date}
             "#
         );
-        let row: (i64, i64, i64, i64) = sqlx::query_as(&q)
+        let mut query = sqlx::query_as(&q)
             .bind(venue.as_jp())
             .bind(distance as i64)
-            .bind(surface.as_str())
-            .fetch_one(pool)
-            .await?;
+            .bind(surface.as_str());
+        if let Some(d) = &cutoff {
+            query = query.bind(d);
+        }
+        let row: (i64, i64, i64, i64) = query.fetch_one(pool).await?;
         by_gate_group.push(GroupStat {
             label: label.to_string(),
             starts: row.0 as u32,

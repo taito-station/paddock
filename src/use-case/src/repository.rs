@@ -126,19 +126,38 @@ pub trait Repository: Send + Sync {
     /// 別 run で追記でき、複数馬の近走が同じレースに集約されても消し合わない。
     fn upsert_history_race(&self, race: &Race) -> impl Future<Output = Result<()>> + Send;
 
-    fn horse_stats(&self, name: &HorseName) -> impl Future<Output = Result<HorseStatsRow>> + Send;
+    /// 馬の各種成績統計を返す。`as_of = Some(d)` のとき `races.date < d` の成績のみを集計する
+    /// （バックテストのリーク防止。本番予想は `None` で全期間集計）。
+    fn horse_stats(
+        &self,
+        name: &HorseName,
+        as_of: Option<NaiveDate>,
+    ) -> impl Future<Output = Result<HorseStatsRow>> + Send;
 
+    /// コース（場×距離×馬場）の枠順別統計を返す。`as_of` の意味は [`Repository::horse_stats`] と同じ。
     fn course_stats(
         &self,
         venue: Venue,
         distance: u32,
         surface: Surface,
+        as_of: Option<NaiveDate>,
     ) -> impl Future<Output = Result<CourseStatsRow>> + Send;
 
+    /// 騎手の各種成績統計を返す。`as_of` の意味は [`Repository::horse_stats`] と同じ。
     fn jockey_stats(
         &self,
         name: &JockeyName,
+        as_of: Option<NaiveDate>,
     ) -> impl Future<Output = Result<JockeyStatsRow>> + Send;
+
+    /// 指定期間 `[from, to]`（両端含む）の確定済みレースを `results` 付きで race_num 昇順に返す。
+    /// `races.source='pdf'` かつ着順ありの `results` を 1 件以上含むレースのみを対象とする
+    /// （バックテストの評価対象取得用）。`from > to` のときは空 Vec を返す。
+    fn find_finished_races_between(
+        &self,
+        from: NaiveDate,
+        to: NaiveDate,
+    ) -> impl Future<Output = Result<Vec<Race>>> + Send;
 
     fn count_races(&self) -> impl Future<Output = Result<u64>> + Send;
 

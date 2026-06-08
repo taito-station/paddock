@@ -100,7 +100,11 @@ impl Repository for RecordingRepo {
     async fn save_race(&self, _race: &Race) -> Result<()> {
         unimplemented!()
     }
-    async fn horse_stats(&self, _name: &HorseName) -> Result<HorseStatsRow> {
+    async fn horse_stats(
+        &self,
+        _name: &HorseName,
+        _as_of: Option<NaiveDate>,
+    ) -> Result<HorseStatsRow> {
         unimplemented!()
     }
     async fn course_stats(
@@ -108,10 +112,15 @@ impl Repository for RecordingRepo {
         _venue: Venue,
         _distance: u32,
         _surface: Surface,
+        _as_of: Option<NaiveDate>,
     ) -> Result<CourseStatsRow> {
         unimplemented!()
     }
-    async fn jockey_stats(&self, _name: &JockeyName) -> Result<JockeyStatsRow> {
+    async fn jockey_stats(
+        &self,
+        _name: &JockeyName,
+        _as_of: Option<NaiveDate>,
+    ) -> Result<JockeyStatsRow> {
         unimplemented!()
     }
     async fn count_races(&self) -> Result<u64> {
@@ -133,6 +142,13 @@ impl Repository for RecordingRepo {
         unimplemented!()
     }
     async fn find_races_by_date(&self, _date: NaiveDate) -> Result<Vec<Race>> {
+        unimplemented!()
+    }
+    async fn find_finished_races_between(
+        &self,
+        _from: NaiveDate,
+        _to: NaiveDate,
+    ) -> Result<Vec<Race>> {
         unimplemented!()
     }
     async fn find_predict_session(&self, _date: NaiveDate) -> Result<Option<PredictSessionRecord>> {
