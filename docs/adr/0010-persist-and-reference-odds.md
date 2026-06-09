@@ -48,7 +48,10 @@
 `find_race_odds` も全券種を読み戻すようになった。これにより resume・cache-hit 時も exotic 推奨が
 出る。`combination_key` 規約はドメイン型（`Pair`/`OrderedPair`/`Triple`/`OrderedTriple`）の
 `to_key`/`from_key` を単一情報源とする（昇順 `-` 連結、順序付きは `>` 連結）。スキーマ（汎用
-`bet_type`/`combination_key`）はマイグレーション再設計なしでそのまま受けられた。
+`bet_type`/`combination_key`）はマイグレーション再設計なしでそのまま受けられた。`find_race_odds` は
+SQL の `bet_type` フィルタを撤廃して全行を読むが、`BetType` で解釈できない未知ラベルの行は
+読み飛ばす（撤廃前の「未知は無視」挙動を維持し、将来券種を書く新版 → 旧版で読む過渡期でも
+predict/backtest を止めない）。
 
 ## 関連
 - ADR 0001（JRA オッズスクレイパー実装, #10）

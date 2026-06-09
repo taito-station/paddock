@@ -223,5 +223,21 @@ mod tests {
         assert!(Pair::from_key("1-x").is_err()); // 非数値
         assert!(Pair::from_key("1-19").is_err()); // 馬番範囲外
         assert!(Pair::from_key("1-1").is_err()); // 同一馬
+        assert!(Pair::from_key("1-").is_err()); // 末尾空トークン
+        assert!(Pair::from_key("-2").is_err()); // 先頭空トークン
+        assert!(Pair::from_key("").is_err()); // 空文字列
+        assert!(Triple::from_key("1--3").is_err()); // 中間空トークン
+    }
+
+    #[test]
+    fn ordered_from_key_rejects_invalid() {
+        assert!(OrderedPair::from_key("1").is_err()); // トークン不足
+        assert!(OrderedPair::from_key("1>2>3").is_err()); // トークン過多
+        assert!(OrderedPair::from_key("1>1").is_err()); // 同一馬
+        assert!(OrderedPair::from_key("1>19").is_err()); // 馬番範囲外
+        assert!(OrderedPair::from_key("1>").is_err()); // 空トークン
+        assert!(OrderedTriple::from_key("1>2").is_err()); // トークン不足
+        assert!(OrderedTriple::from_key("1>2>2").is_err()); // 同一馬
+        assert!(OrderedTriple::from_key("1>x>3").is_err()); // 非数値
     }
 }

@@ -203,6 +203,31 @@ async fn place_row_with_null_odds_high_is_data_error() {
 }
 
 #[tokio::test]
+async fn unknown_bet_type_row_is_skipped_not_errored() {
+    let (repo, _dir) = fresh_repo().await;
+    save_sample(&repo).await; // win/place を投入
+    // 将来券種を書く新版を模した未知 bet_type 行を直接 INSERT する。
+    sqlx::query(
+        "INSERT INTO race_odds (race_id, bet_type, combination_key, odds, odds_high, popularity, fetched_at) \
+         VALUES ($1, 'win5', '1-2-3-4-5', 100.0, NULL, NULL, $2)",
+    )
+    .bind(race_id().value())
+    .bind(fetched_at().to_rfc3339())
+    .execute(&repo.pool)
+    .await
+    .unwrap();
+
+    // 未知行はエラーにせず読み飛ばし、既知の win/place は通常どおり復元される。
+    let odds = repo
+        .find_race_odds(&race_id(), None)
+        .await
+        .unwrap()
+        .expect("既知券種があるので Some");
+    assert_eq!(odds.win.len(), 2);
+    assert_eq!(odds.place.len(), 2);
+}
+
+#[tokio::test]
 async fn as_of_filters_on_fetched_at_date() {
     let (repo, _dir) = fresh_repo().await;
     save_sample(&repo).await; // fetched_at = 2026-04-19

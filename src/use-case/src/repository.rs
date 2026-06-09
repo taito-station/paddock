@@ -2,8 +2,8 @@ use core::future::Future;
 
 use chrono::{DateTime, NaiveDate, Utc};
 use paddock_domain::{
-    HorseId, HorseName, HorseResult, JockeyName, OrderedPair, OrderedTriple, Pair, Race, RaceCard,
-    RaceId, RaceOdds, Surface, Triple, Venue,
+    BetType, HorseId, HorseName, HorseResult, JockeyName, OrderedPair, OrderedTriple, Pair, Race,
+    RaceCard, RaceId, RaceOdds, Surface, Triple, Venue,
 };
 
 use crate::error::Result;
@@ -127,7 +127,7 @@ impl OddsRow {
     /// 単勝 1 行。`combination_key` は素の馬番文字列（"1".."18"、ゼロ詰めしない）。
     pub fn win(horse_num: u32, odds: f64, popularity: Option<u32>) -> Self {
         Self {
-            bet_type: "win".to_string(),
+            bet_type: BetType::Win.to_string(),
             combination_key: horse_num.to_string(),
             odds,
             odds_high: None,
@@ -139,7 +139,7 @@ impl OddsRow {
     /// `combination_key` は素の馬番文字列（単勝と同じ規約）。
     pub fn place(horse_num: u32, low: f64, high: f64, popularity: Option<u32>) -> Self {
         Self {
-            bet_type: "place".to_string(),
+            bet_type: BetType::Place.to_string(),
             combination_key: horse_num.to_string(),
             odds: low,
             odds_high: Some(high),
@@ -148,12 +148,13 @@ impl OddsRow {
     }
 
     // 組合せ券種(#38)。いずれもライブスクレイプ由来で人気を持たないため popularity は None。
-    // combination_key の規約はドメインの `to_key()` を単一情報源とする（"1-2" / "1>2" 等）。
+    // bet_type ラベルは `BetType` の Display(snake_case)、combination_key はドメインの `to_key()` を
+    // 単一情報源とする（"1-2" / "1>2" 等）。find_race_odds 側も同じ enum で復元する。
 
     /// 馬連 1 行。キーは昇順 `Pair`（`"1-2"`）。
     pub fn quinella(pair: Pair, odds: f64) -> Self {
         Self {
-            bet_type: "quinella".to_string(),
+            bet_type: BetType::Quinella.to_string(),
             combination_key: pair.to_key(),
             odds,
             odds_high: None,
@@ -164,7 +165,7 @@ impl OddsRow {
     /// ワイド 1 行。複勝と同じく幅 odds（`odds`=下限・`odds_high`=上限）。キーは昇順 `Pair`。
     pub fn wide(pair: Pair, low: f64, high: f64) -> Self {
         Self {
-            bet_type: "wide".to_string(),
+            bet_type: BetType::Wide.to_string(),
             combination_key: pair.to_key(),
             odds: low,
             odds_high: Some(high),
@@ -175,7 +176,7 @@ impl OddsRow {
     /// 馬単 1 行。キーは順序付き `OrderedPair`（`"1>2"`）。
     pub fn exacta(pair: OrderedPair, odds: f64) -> Self {
         Self {
-            bet_type: "exacta".to_string(),
+            bet_type: BetType::Exacta.to_string(),
             combination_key: pair.to_key(),
             odds,
             odds_high: None,
@@ -186,7 +187,7 @@ impl OddsRow {
     /// 三連複 1 行。キーは昇順 `Triple`（`"1-2-3"`）。
     pub fn trio(triple: Triple, odds: f64) -> Self {
         Self {
-            bet_type: "trio".to_string(),
+            bet_type: BetType::Trio.to_string(),
             combination_key: triple.to_key(),
             odds,
             odds_high: None,
@@ -197,7 +198,7 @@ impl OddsRow {
     /// 三連単 1 行。キーは順序付き `OrderedTriple`（`"1>2>3"`）。
     pub fn trifecta(triple: OrderedTriple, odds: f64) -> Self {
         Self {
-            bet_type: "trifecta".to_string(),
+            bet_type: BetType::Trifecta.to_string(),
             combination_key: triple.to_key(),
             odds,
             odds_high: None,

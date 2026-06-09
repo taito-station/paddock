@@ -56,7 +56,14 @@ impl<O: OddsScraper, R: Repository> OddsInteractor<O, R> {
     /// （下限=odds, 上限=odds_high）。スクレイプ由来は人気を持たないため popularity は None。
     /// 保存失敗は予想フローを止めず warn ログのみ（次回参照時に取り直せる）。
     async fn persist_all(&self, race_id: &RaceId, odds: &RaceOdds) {
-        let mut rows: Vec<OddsRow> = Vec::new();
+        let capacity = odds.win.len()
+            + odds.place.len()
+            + odds.quinella.len()
+            + odds.wide.len()
+            + odds.exacta.len()
+            + odds.trio.len()
+            + odds.trifecta.len();
+        let mut rows: Vec<OddsRow> = Vec::with_capacity(capacity);
         for (horse, ov) in &odds.win {
             rows.push(OddsRow::win(horse.value(), ov.value(), None));
         }

@@ -1,6 +1,7 @@
 use chrono::NaiveDate;
 use paddock_domain::{
-    HorseNum, OddsValue, OrderedPair, OrderedTriple, Pair, PlaceOdds, RaceId, RaceOdds, Triple,
+    BetType, HorseNum, OddsValue, OrderedPair, OrderedTriple, Pair, PlaceOdds, RaceId, RaceOdds,
+    Triple,
 };
 use sqlx::SqlitePool;
 
@@ -53,39 +54,40 @@ pub async fn find_race_odds(
 
     let mut odds = RaceOdds::empty(race_id.clone());
     for row in rows {
-        match row.bet_type.as_str() {
-            "win" => {
+        // bet_type は `BetType`(Display=snake_case)で書かれる。未知ラベルの行は読み飛ばす:
+        // SQL の bet_type フィルタを撤廃した(#38)ため、将来の券種追加を書く新版 → 旧版で読む
+        // 過渡期でも predict/backtest 全体を止めない（撤廃前の「未知は無視」挙動を維持する）。
+        let Ok(bet_type) = BetType::try_from(row.bet_type.as_str()) else {
+            continue;
+        };
+        match bet_type {
+            BetType::Win => {
                 let horse_num = parse_horse_num(race_id, &row.combination_key)?;
                 odds.win.insert(horse_num, OddsValue::try_from(row.odds)?);
             }
-            "place" => {
+            BetType::Place => {
                 let horse_num = parse_horse_num(race_id, &row.combination_key)?;
                 odds.place.insert(horse_num, parse_band(race_id, &row)?);
             }
-            "quinella" => {
+            BetType::Quinella => {
                 let pair = parse_key(race_id, &row, Pair::from_key)?;
                 odds.quinella.insert(pair, OddsValue::try_from(row.odds)?);
             }
-            "wide" => {
+            BetType::Wide => {
                 let pair = parse_key(race_id, &row, Pair::from_key)?;
                 odds.wide.insert(pair, parse_band(race_id, &row)?);
             }
-            "exacta" => {
+            BetType::Exacta => {
                 let pair = parse_key(race_id, &row, OrderedPair::from_key)?;
                 odds.exacta.insert(pair, OddsValue::try_from(row.odds)?);
             }
-            "trio" => {
+            BetType::Trio => {
                 let triple = parse_key(race_id, &row, Triple::from_key)?;
                 odds.trio.insert(triple, OddsValue::try_from(row.odds)?);
             }
-            "trifecta" => {
+            BetType::Trifecta => {
                 let triple = parse_key(race_id, &row, OrderedTriple::from_key)?;
                 odds.trifecta.insert(triple, OddsValue::try_from(row.odds)?);
-            }
-            other => {
-                return Err(Error::Data(format!(
-                    "race_odds に想定外の bet_type '{other}' があります"
-                )));
             }
         }
     }
