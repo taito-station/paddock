@@ -18,7 +18,9 @@ pub async fn save_race_odds(pool: &SqlitePool, record: &RaceOddsRecord) -> Resul
             ON CONFLICT(race_id, bet_type, combination_key) DO UPDATE SET
                 odds       = excluded.odds,
                 odds_high  = excluded.odds_high,
-                popularity = excluded.popularity,
+                -- 人気はスクレイプ経路(predict)では取れず NULL になる。既存の人気付き値を
+                -- NULL で潰さないよう、新値が NULL のときは既存値を残す（odds は常に最新で上書き）。
+                popularity = COALESCE(excluded.popularity, race_odds.popularity),
                 fetched_at = excluded.fetched_at
             "#,
         )

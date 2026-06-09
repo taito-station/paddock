@@ -16,7 +16,9 @@ struct OddsRow {
 ///
 /// `as_of = Some(d)` のとき `date(fetched_at) <= d` のスナップショットに限定する
 /// （backtest の当時オッズ参照、リーク防止）。`None` は時刻制約なし（predict の最新参照）。
-/// 単勝・複勝いずれの行も無ければ `None`。組合せ券種(#38)は対象外。
+/// `fetched_at` は常に UTC(RFC3339)で保存されるため、`date(fetched_at)` も UTC 日付で比較する。
+/// 単勝・複勝いずれの行も無ければ `None`。返す `RaceOdds` は win/place のみ充填し、
+/// 組合せ券種(quinella/exacta/trio/trifecta)のマップは常に空（#38 で別途対応）。
 pub async fn find_race_odds(
     pool: &SqlitePool,
     race_id: &RaceId,

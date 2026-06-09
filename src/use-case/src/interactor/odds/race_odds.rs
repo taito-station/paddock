@@ -21,6 +21,9 @@ impl<O: OddsScraper, R: Repository> OddsInteractor<O, R> {
     /// 止めない（`select_bets` を呼ばず安全に次レースへ進める設計、predict-session.md 参照）。
     pub async fn race_odds(&self, race_id: &RaceId) -> Result<Option<RaceOdds>> {
         // 1. 保存済み(単勝・複勝)があれば再スクレイプせずに返す。
+        //    cache-hit 判定は「全馬券種が空でない」= win/place のいずれかが保存済み。netkeiba・JRA とも
+        //    単勝と複勝は同一レスポンスで揃うため、通常は両方そろって保存される。exotic は保存しないので
+        //    cache-hit 時は推奨に出ない（#38 まで、ADR 0010 の「影響」参照）。
         if let Some(saved) = self.repository.find_race_odds(race_id, None).await?
             && !saved.is_empty()
         {

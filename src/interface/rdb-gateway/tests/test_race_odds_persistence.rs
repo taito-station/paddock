@@ -97,6 +97,71 @@ async fn returns_none_when_absent() {
 }
 
 #[tokio::test]
+async fn upsert_keeps_existing_popularity_when_new_is_null() {
+    let (repo, _dir) = fresh_repo().await;
+    // 1) fetch-card 相当: 人気付きで保存。
+    repo.save_race_odds(&RaceOddsRecord {
+        race_id: race_id(),
+        fetched_at: fetched_at(),
+        rows: vec![OddsRow {
+            bet_type: "win".to_string(),
+            combination_key: "1".to_string(),
+            odds: 3.5,
+            odds_high: None,
+            popularity: Some(2),
+        }],
+    })
+    .await
+    .unwrap();
+    // 2) predict 相当: 同じキーを人気 None で再保存。odds は更新、人気は維持されるべき。
+    repo.save_race_odds(&RaceOddsRecord {
+        race_id: race_id(),
+        fetched_at: fetched_at(),
+        rows: vec![OddsRow {
+            bet_type: "win".to_string(),
+            combination_key: "1".to_string(),
+            odds: 4.0,
+            odds_high: None,
+            popularity: None,
+        }],
+    })
+    .await
+    .unwrap();
+
+    let (odds, popularity): (f64, Option<i64>) = sqlx::query_as(
+        "SELECT odds, popularity FROM race_odds \
+         WHERE race_id = $1 AND bet_type = 'win' AND combination_key = '1'",
+    )
+    .bind(race_id().value())
+    .fetch_one(&repo.pool)
+    .await
+    .unwrap();
+    assert!((odds - 4.0).abs() < 1e-9, "odds は最新で上書きされる");
+    assert_eq!(popularity, Some(2), "人気は NULL で上書きされず維持される");
+}
+
+#[tokio::test]
+async fn place_row_with_null_odds_high_is_data_error() {
+    let (repo, _dir) = fresh_repo().await;
+    // 保存側の不整合（複勝なのに odds_high が NULL）を直接 INSERT で再現し、
+    // find_race_odds が幅 odds を組めず Error を返す防御経路を担保する。
+    sqlx::query(
+        "INSERT INTO race_odds (race_id, bet_type, combination_key, odds, odds_high, popularity, fetched_at) \
+         VALUES ($1, 'place', '1', 1.5, NULL, NULL, $2)",
+    )
+    .bind(race_id().value())
+    .bind(fetched_at().to_rfc3339())
+    .execute(&repo.pool)
+    .await
+    .unwrap();
+
+    assert!(
+        repo.find_race_odds(&race_id(), None).await.is_err(),
+        "複勝の odds_high が NULL なら Error を返す"
+    );
+}
+
+#[tokio::test]
 async fn as_of_filters_on_fetched_at_date() {
     let (repo, _dir) = fresh_repo().await;
     save_sample(&repo).await; // fetched_at = 2026-04-19
