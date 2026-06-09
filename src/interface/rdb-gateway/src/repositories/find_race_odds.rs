@@ -27,9 +27,10 @@ pub async fn find_race_odds(
     // as_of は NULL 許容バインドで「制約なし」と「日付以前」を 1 クエリに統一する。
     // 主キー先頭 race_id で対象は 1 レース分（高々十数行）に絞られるため、`date(fetched_at)` が
     // インデックス非対応（sargable でない）でも実害はない。
-    // backtest の as_of は JST 開催日 `race.date`、`fetched_at` は UTC。UTC は JST より遅れるため
-    // レース当日以前に取得したオッズの `date(fetched_at)` は必ず race.date 以下に収まり、当時オッズを
-    // 取りこぼさない（未来オッズのリーク防止側にのみ効く）。
+    // backtest の as_of は JST 開催日 `race.date`、`fetched_at` は UTC 取得時刻。両者の TZ は一致
+    // しないため日付境界は厳密でない: レース後の深夜取得（翌 UTC 日付）は as_of から漏れて当時オッズを
+    // 取りこぼし得るし、当日レース時間帯の取得は同日付で通過する。fetch-card/predict はレース前に
+    // 走らせる運用前提なので実害は小さく、粗いリーク防止として許容する。
     let as_of_str = as_of.map(|d| d.format("%Y-%m-%d").to_string());
     let rows: Vec<OddsRow> = sqlx::query_as(
         r#"

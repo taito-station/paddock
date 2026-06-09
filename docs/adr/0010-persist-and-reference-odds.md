@@ -39,6 +39,8 @@
 - 保存済み win+place を参照する resume・再実行では exotic 推奨が出ない（exotic は #38 で永続化されるまで cache-miss 時のフルスクレイプ回のみ）。
 - スクレイプ由来の保存行は人気(`popularity`)を持たない（netkeiba の fetch-card 経由のみ人気が入る）。`popularity` は NULL 許容なので問題ない。
 - backtest の回収率は、当時オッズが保存されたレースでは PDF 確定単勝ではなく当時オッズ基準になる（より現実的）。
+- read-through の cache-hit 判定は「保存済み win/place が空でない」。単勝のみ保存された回（複勝未公開時など）は cache-hit して複勝を取り直さない。netkeiba/JRA は単複を同一レスポンスで返すため通常は両方そろうが、片側保存のエッジでは複勝が埋まらないことを許容する（必要になれば「両方そろうまで cache-miss 扱い」に強化する）。
+- backtest の当時オッズ参照は `date(fetched_at)`(UTC) と `race.date`(JST 開催日) の粗い日付比較。TZ 境界（レース後の深夜取得は取りこぼし、当日内取得は同日付で通過）は厳密でないが、fetch-card/predict をレース前に走らせる運用前提で実害は小さい。
 
 ## 関連
 - ADR 0001（JRA オッズスクレイパー実装, #10）
