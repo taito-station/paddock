@@ -219,11 +219,14 @@ async fn run_fetch_range_parallel(
     force: bool,
     parallel: usize,
 ) -> anyhow::Result<FetchRangeSummary> {
-    // This path always runs with `parallel > 1` over a multi-candidate grid, so pin
-    // OCR to one thread per process unconditionally.
-    pin_ocr_to_single_thread();
-
     let specs = range.candidate_specs();
+    // Mirror run_ingest on the same predicate: pin OCR to one thread per process when
+    // several meetings OCR concurrently. The grid is normally multi-candidate, but
+    // guarding on its size keeps both fetch and ingest paths consistent.
+    if should_pin_ocr(parallel, specs.len()) {
+        pin_ocr_to_single_thread();
+    }
+
     let semaphore = Arc::new(Semaphore::new(parallel));
     let mut joinset: JoinSet<(String, paddock_use_case::Result<FetchMeetingResponse>)> =
         JoinSet::new();
@@ -301,7 +304,7 @@ fn should_pin_ocr(parallel: usize, count: usize) -> bool {
 /// Pin OCR (tesseract/OpenMP) to one thread per process via env vars. tesseract
 /// inherits these (its Command is not env_clear'd), so one thread per process fills
 /// the cores cleanly (N processes × 1 thread). Guard the call with [`should_pin_ocr`]
-/// so a lone PDF/meeting keeps all cores.
+/// so a lone PDF/meeting keeps all cores. Idempotent — safe to call from either path.
 ///
 /// SAFETY: although the tokio runtime is multi-threaded, nothing else in this process
 /// reads or writes the environment, and callers MUST invoke this before spawning the
@@ -357,6 +360,7 @@ mod tests {
     #[test]
     fn should_pin_ocr_only_when_parallel_and_multiple() {
         assert!(should_pin_ocr(4, 8)); // parallel batch → pin
+        assert!(should_pin_ocr(2, 2)); // threshold boundary (both just over 1)
         assert!(!should_pin_ocr(1, 8)); // `-j 1` sequential → keep all cores
         assert!(!should_pin_ocr(4, 1)); // single PDF → keep all cores
         assert!(!should_pin_ocr(1, 1));
