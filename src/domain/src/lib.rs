@@ -2,6 +2,7 @@ pub mod backtest;
 pub mod betting;
 pub mod error;
 pub mod horse_result;
+mod normalize;
 pub mod odds;
 pub mod prediction;
 pub mod race;

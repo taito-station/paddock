@@ -80,6 +80,12 @@ impl Repository for MockRepo {
     async fn backfill_results_horse_ids(&self) -> Result<u64> {
         Ok(0)
     }
+    async fn find_matching_horse_names(&self, _query: &str, _limit: u32) -> Result<Vec<String>> {
+        unimplemented!()
+    }
+    async fn find_matching_jockey_names(&self, _query: &str, _limit: u32) -> Result<Vec<String>> {
+        unimplemented!()
+    }
     async fn horse_stats(
         &self,
         _name: &HorseName,
@@ -381,6 +387,12 @@ impl Repository for HistoryRepo {
     }
     async fn backfill_results_horse_ids(&self) -> Result<u64> {
         Ok(0)
+    }
+    async fn find_matching_horse_names(&self, _query: &str, _limit: u32) -> Result<Vec<String>> {
+        unimplemented!()
+    }
+    async fn find_matching_jockey_names(&self, _query: &str, _limit: u32) -> Result<Vec<String>> {
+        unimplemented!()
     }
     async fn horse_stats(
         &self,

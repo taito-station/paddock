@@ -161,6 +161,21 @@ pub trait Repository: Send + Sync {
     /// 上書きしない（冪等）。埋めた行数を返す。
     fn backfill_results_horse_ids(&self) -> impl Future<Output = Result<u64>> + Send;
 
+    /// `analyze` の部分一致検索用。`results` に `query` を中間一致（`LIKE '%query%'`）する
+    /// 馬名を重複排除して名前昇順で最大 `limit` 件返す。`query` は呼び出し側で正規化済みとする。
+    fn find_matching_horse_names(
+        &self,
+        query: &str,
+        limit: u32,
+    ) -> impl Future<Output = Result<Vec<String>>> + Send;
+
+    /// 騎手名版（[`Repository::find_matching_horse_names`] と同方針）。
+    fn find_matching_jockey_names(
+        &self,
+        query: &str,
+        limit: u32,
+    ) -> impl Future<Output = Result<Vec<String>>> + Send;
+
     /// 馬の各種成績統計を返す。`as_of = Some(d)` のとき `races.date < d` の成績のみを集計する
     /// （バックテストのリーク防止。本番予想は `None` で全期間集計）。
     fn horse_stats(

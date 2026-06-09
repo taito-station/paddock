@@ -8,6 +8,9 @@ use paddock_domain::{
 };
 use paddock_use_case::repository::{CourseStatsRow, GroupStat, HorseStatsRow, JockeyStatsRow};
 
+/// 部分一致候補の表示上限。これを超える場合も先頭から打ち切って提示する。
+const CANDIDATE_LIMIT: u32 = 20;
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args = cli::Cli::parse();
@@ -15,9 +18,24 @@ async fn main() -> anyhow::Result<()> {
 
     match args.command {
         cli::Command::Horse { name } => {
-            let h = HorseName::try_from(name.as_str())?;
-            let stats = app.interactor.horse_stats(&h).await?;
-            print_horse(&stats);
+            // 入力を正規化（半角カナ→全角等）してから results を中間一致で検索する。
+            let query = HorseName::try_from(name.as_str())?;
+            // 打ち切りを検出するため上限 +1 件取得する。
+            let mut candidates = app
+                .interactor
+                .find_horse_candidates(query.value(), CANDIDATE_LIMIT + 1)
+                .await?;
+            let truncated = candidates.len() as u32 > CANDIDATE_LIMIT;
+            candidates.truncate(CANDIDATE_LIMIT as usize);
+            match candidates.as_slice() {
+                [] => println!("該当する馬が見つかりません: {name}"),
+                [one] => {
+                    let h = HorseName::try_from(one.as_str())?;
+                    let stats = app.interactor.horse_stats(&h).await?;
+                    print_horse(&stats);
+                }
+                many => print_candidates("馬", &name, many, truncated),
+            }
         }
         cli::Command::Course {
             venue,
@@ -30,9 +48,22 @@ async fn main() -> anyhow::Result<()> {
             print_course(&stats);
         }
         cli::Command::Jockey { name } => {
-            let j = JockeyName::try_from(name.as_str())?;
-            let stats = app.interactor.jockey_stats(&j).await?;
-            print_jockey(&stats);
+            let query = JockeyName::try_from(name.as_str())?;
+            let mut candidates = app
+                .interactor
+                .find_jockey_candidates(query.value(), CANDIDATE_LIMIT + 1)
+                .await?;
+            let truncated = candidates.len() as u32 > CANDIDATE_LIMIT;
+            candidates.truncate(CANDIDATE_LIMIT as usize);
+            match candidates.as_slice() {
+                [] => println!("該当する騎手が見つかりません: {name}"),
+                [one] => {
+                    let j = JockeyName::try_from(one.as_str())?;
+                    let stats = app.interactor.jockey_stats(&j).await?;
+                    print_jockey(&stats);
+                }
+                many => print_candidates("騎手", &name, many, truncated),
+            }
         }
         cli::Command::Predict { race_id } => {
             let rid = RaceId::try_from(race_id.as_str())?;
@@ -53,6 +84,20 @@ async fn main() -> anyhow::Result<()> {
 fn parse_date(s: &str) -> anyhow::Result<NaiveDate> {
     NaiveDate::parse_from_str(s, "%Y-%m-%d")
         .map_err(|e| anyhow::anyhow!("invalid date '{s}' (expected YYYY-MM-DD): {e}"))
+}
+
+/// 候補が複数ある場合に一覧を提示して終了する（ユーザーが絞り込んで再実行）。
+/// `truncated` が true のとき、表示件数を超える候補がある旨を示す。
+fn print_candidates(kind: &str, query: &str, names: &[String], truncated: bool) {
+    let count = if truncated {
+        format!("{} 件以上", names.len())
+    } else {
+        format!("{} 件", names.len())
+    };
+    println!("「{query}」に一致する{kind}が {count} あります。絞り込んで再実行してください:");
+    for n in names {
+        println!("  - {n}");
+    }
 }
 
 fn print_horse(s: &HorseStatsRow) {
