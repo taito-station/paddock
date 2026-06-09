@@ -32,6 +32,11 @@ async fn main() -> anyhow::Result<()> {
 async fn run_ingest(app: Arc<setup::App>, args: IngestArgs) -> anyhow::Result<()> {
     let parallel = resolve_parallel(args.parallel);
     let total = args.sources.len();
+    // Pin OCR to one thread per process when several PDFs OCR concurrently, mirroring
+    // the fetch path. Must run before spawning the worker tasks below (see SAFETY).
+    if should_pin_ocr(parallel, total) {
+        pin_ocr_to_single_thread();
+    }
     let semaphore = Arc::new(Semaphore::new(parallel));
     let mut joinset: JoinSet<(String, paddock_use_case::Result<IngestPdfResponse>)> =
         JoinSet::new();
@@ -214,20 +219,14 @@ async fn run_fetch_range_parallel(
     force: bool,
     parallel: usize,
 ) -> anyhow::Result<FetchRangeSummary> {
-    // Each meeting's OCR shells out to tesseract, which spins up OpenMP threads by
-    // default. With `parallel` meetings in flight, letting every tesseract grab all
-    // cores oversubscribes the CPU (parallel × cores threads) and erases the win, so
-    // we pin OCR to one thread per process here — N processes × 1 thread fills the
-    // cores cleanly. tesseract inherits this (its Command is not env_clear'd).
-    // SAFETY: although the tokio runtime is multi-threaded, nothing else in this
-    // process reads or writes the environment, and these sets run before the
-    // OCR-spawning worker tasks start, so no observer races these writes.
-    unsafe {
-        std::env::set_var("OMP_THREAD_LIMIT", "1");
-        std::env::set_var("OMP_NUM_THREADS", "1");
+    let specs = range.candidate_specs();
+    // Mirror run_ingest on the same predicate: pin OCR to one thread per process when
+    // several meetings OCR concurrently. The grid is normally multi-candidate, but
+    // guarding on its size keeps both fetch and ingest paths consistent.
+    if should_pin_ocr(parallel, specs.len()) {
+        pin_ocr_to_single_thread();
     }
 
-    let specs = range.candidate_specs();
     let semaphore = Arc::new(Semaphore::new(parallel));
     let mut joinset: JoinSet<(String, paddock_use_case::Result<FetchMeetingResponse>)> =
         JoinSet::new();
@@ -293,6 +292,31 @@ fn resolve_parallel(requested: Option<usize>) -> usize {
         .max(1)
 }
 
+/// Whether to pin OCR to one thread per process for this batch. We pin only when
+/// several items actually OCR concurrently (`parallel > 1 && count > 1`): with N
+/// tesseracts each grabbing all cores the CPU is oversubscribed (parallel × cores
+/// threads). A lone item (`parse-pdf one.pdf`) or a sequential run (`-j 1`) has no
+/// contention, so it keeps all cores.
+fn should_pin_ocr(parallel: usize, count: usize) -> bool {
+    parallel > 1 && count > 1
+}
+
+/// Pin OCR (tesseract/OpenMP) to one thread per process via env vars. tesseract
+/// inherits these (its Command is not env_clear'd), so one thread per process fills
+/// the cores cleanly (N processes × 1 thread). Guard the call with [`should_pin_ocr`]
+/// so a lone PDF/meeting keeps all cores. Idempotent: re-setting the same values is a
+/// no-op (fetch and ingest are exclusive subcommands, so it runs at most once per run).
+///
+/// SAFETY: although the tokio runtime is multi-threaded, nothing else in this process
+/// reads or writes the environment, and callers MUST invoke this before spawning the
+/// OCR worker tasks, so no observer races these writes.
+fn pin_ocr_to_single_thread() {
+    unsafe {
+        std::env::set_var("OMP_THREAD_LIMIT", "1");
+        std::env::set_var("OMP_NUM_THREADS", "1");
+    }
+}
+
 /// Move a successfully ingested file from `<root>/pdfs/<kind>/inbox/<file>` to
 /// `<root>/pdfs/<kind>/done/<file>`. Detection is based on src's parent directory chain,
 /// so it works regardless of CWD and across PDF kinds (results, entries, ...).
@@ -333,6 +357,17 @@ fn move_to_done_if_inbox(source: &str) -> anyhow::Result<Option<PathBuf>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn should_pin_ocr_only_when_parallel_and_multiple() {
+        assert!(should_pin_ocr(4, 8)); // parallel batch → pin
+        assert!(should_pin_ocr(2, 2)); // threshold boundary (both just over 1)
+        assert!(!should_pin_ocr(1, 8)); // `-j 1` sequential → keep all cores
+        assert!(!should_pin_ocr(4, 1)); // single PDF → keep all cores
+        assert!(!should_pin_ocr(2, 1)); // one item at threshold parallelism
+        assert!(!should_pin_ocr(1, 2)); // sequential at threshold count
+        assert!(!should_pin_ocr(1, 1));
+    }
 
     fn resp(key: &str, outcome: FetchMeetingOutcome) -> FetchMeetingResponse {
         FetchMeetingResponse {
