@@ -11,7 +11,8 @@ use chrono::NaiveDate;
 use paddock_domain::horse_result::{GateNum, HorseName, HorseNum};
 use paddock_domain::{JockeyName, Race, RaceCard, RaceId, Surface, Venue};
 use paddock_use_case::netkeiba_scraper::{
-    FetchedCard, FetchedEntry, FetchedWinOdds, HorsePastRun, NetkeibaScraper, RunnerRef,
+    FetchedCard, FetchedEntry, FetchedOdds, FetchedPlaceOdds, FetchedWinOdds, HorsePastRun,
+    NetkeibaScraper, RunnerRef,
 };
 use paddock_use_case::repository::{
     CourseStatsRow, FetchRecord, HorseStatsRow, JockeyStatsRow, PredictBetRecord,
@@ -24,8 +25,10 @@ const NK_ID: &str = "202605030211";
 // --- fakes ---------------------------------------------------------------
 
 struct FakeScraper {
-    /// fetch_win_odds が返す単勝オッズ（空ならレース前=未確定を模す）。
+    /// fetch_win_place_odds が返す単勝オッズ（空ならレース前=未確定を模す）。
     win: Vec<FetchedWinOdds>,
+    /// fetch_win_place_odds が返す複勝オッズ。
+    place: Vec<FetchedPlaceOdds>,
     /// fetch_card が呼ばれた回数。
     card_fetches: Mutex<usize>,
 }
@@ -34,8 +37,14 @@ impl FakeScraper {
     fn new(win: Vec<FetchedWinOdds>) -> Self {
         Self {
             win,
+            place: Vec::new(),
             card_fetches: Mutex::new(0),
         }
+    }
+
+    fn with_place(mut self, place: Vec<FetchedPlaceOdds>) -> Self {
+        self.place = place;
+        self
     }
 }
 
@@ -52,6 +61,15 @@ fn win_odds(num: u32, odds: f64, pop: u32) -> FetchedWinOdds {
     FetchedWinOdds {
         horse_num: HorseNum::try_from(num).unwrap(),
         odds,
+        popularity: Some(pop),
+    }
+}
+
+fn place_odds(num: u32, low: f64, high: f64, pop: u32) -> FetchedPlaceOdds {
+    FetchedPlaceOdds {
+        horse_num: HorseNum::try_from(num).unwrap(),
+        odds_low: low,
+        odds_high: high,
         popularity: Some(pop),
     }
 }
@@ -82,8 +100,11 @@ impl NetkeibaScraper for FakeScraper {
             ],
         })
     }
-    fn fetch_win_odds(&self, _race_id: &str) -> Result<Vec<FetchedWinOdds>> {
-        Ok(self.win.clone())
+    fn fetch_win_place_odds(&self, _race_id: &str) -> Result<FetchedOdds> {
+        Ok(FetchedOdds {
+            win: self.win.clone(),
+            place: self.place.clone(),
+        })
     }
 }
 
@@ -181,6 +202,13 @@ impl Repository for RecordingRepo {
     async fn find_race_card(&self, _race_id: &RaceId) -> Result<Option<RaceCard>> {
         unimplemented!()
     }
+    async fn find_race_odds(
+        &self,
+        _race_id: &RaceId,
+        _as_of: Option<NaiveDate>,
+    ) -> Result<Option<paddock_domain::RaceOdds>> {
+        unimplemented!()
+    }
     async fn find_races_by_date(&self, _date: NaiveDate) -> Result<Vec<Race>> {
         unimplemented!()
     }
@@ -232,6 +260,29 @@ async fn fresh_run_saves_card_and_odds() {
     assert_eq!(odds.len(), 1);
     assert_eq!(odds[0].rows.len(), 2);
     assert!(odds[0].rows.iter().all(|r| r.bet_type == "win"));
+}
+
+#[tokio::test]
+async fn saves_win_and_place_odds_in_one_record() {
+    // 単勝 2 行 + 複勝 2 行を 1 レコードにまとめて保存する。複勝は幅 odds（low=odds, high=odds_high）。
+    let scraper = FakeScraper::new(vec![win_odds(1, 7.9, 3), win_odds(2, 2.9, 1)])
+        .with_place(vec![place_odds(1, 2.6, 4.1, 3), place_odds(2, 1.3, 1.5, 1)]);
+    let interactor = CardInteractor::new(RecordingRepo::with_already(false), scraper);
+
+    let resp = interactor.ingest(NK_ID, race_id(), false).await.unwrap();
+
+    assert_eq!(resp.odds_saved, 4, "単勝 2 + 複勝 2");
+    let odds = interactor.repo.saved_odds.lock().unwrap();
+    assert_eq!(odds.len(), 1, "win/place は 1 レコードにまとめる");
+    let rows = &odds[0].rows;
+    assert_eq!(rows.iter().filter(|r| r.bet_type == "win").count(), 2);
+    let place: Vec<_> = rows.iter().filter(|r| r.bet_type == "place").collect();
+    assert_eq!(place.len(), 2);
+    // 馬番 1 の複勝: odds=2.6(low), odds_high=4.1(high)。
+    let p1 = place.iter().find(|r| r.combination_key == "1").unwrap();
+    assert!((p1.odds - 2.6).abs() < 1e-9);
+    assert_eq!(p1.odds_high, Some(4.1));
+    assert_eq!(p1.popularity, Some(3));
 }
 
 #[tokio::test]

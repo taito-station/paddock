@@ -13,7 +13,7 @@ pub struct IngestCardResponse {
     pub card_saved: bool,
     /// 保存した出走馬数（カードをスキップした場合は 0）。
     pub entries_saved: usize,
-    /// 保存した単勝オッズ件数（レース前で未確定なら 0）。
+    /// 保存したオッズ行数（単勝+複勝。レース前で未確定なら 0）。
     pub odds_saved: usize,
 }
 
@@ -77,23 +77,22 @@ impl<R: Repository, S: NetkeibaScraper> CardInteractor<R, S> {
         }
 
         // 2. オッズ: 常に取得。確定前で空なら保存をスキップ（後で再実行して取り直す想定）。
-        let win = self.scraper.fetch_win_odds(netkeiba_id)?;
-        let odds_saved = win.len();
-        if win.is_empty() {
-            tracing::info!(%netkeiba_id, "win odds not available yet, skipping odds save");
+        //    netkeiba は単勝と複勝を 1 レスポンスで返すため一括取得し、両方を 1 レコードに詰める。
+        let odds = self.scraper.fetch_win_place_odds(netkeiba_id)?;
+        let odds_saved = odds.win.len() + odds.place.len();
+        if odds.win.is_empty() && odds.place.is_empty() {
+            tracing::info!(%netkeiba_id, "win/place odds not available yet, skipping odds save");
         } else {
-            let rows: Vec<OddsRow> = win
-                .into_iter()
-                .map(|w| OddsRow {
-                    bet_type: "win".to_string(),
-                    // 単勝の combination_key は素の馬番文字列("1".."18")。組合せ券種(#38)は
-                    // 別途キー規約(昇順連結等)を定義する。ゼロ詰めはしない。
-                    combination_key: w.horse_num.value().to_string(),
-                    odds: w.odds,
-                    odds_high: None,
-                    popularity: w.popularity,
-                })
-                .collect();
+            // 組合せ券種(#38)は別途キー規約(昇順連結等)を定義する。
+            let mut rows: Vec<OddsRow> = Vec::with_capacity(odds_saved);
+            rows.extend(
+                odds.win
+                    .iter()
+                    .map(|w| OddsRow::win(w.horse_num.value(), w.odds, w.popularity)),
+            );
+            rows.extend(odds.place.iter().map(|p| {
+                OddsRow::place(p.horse_num.value(), p.odds_low, p.odds_high, p.popularity)
+            }));
             self.repo
                 .save_race_odds(&RaceOddsRecord {
                     race_id,

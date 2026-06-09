@@ -162,6 +162,14 @@ impl Repository for MockRepo {
         Ok(self.card.clone())
     }
 
+    async fn find_race_odds(
+        &self,
+        _: &RaceId,
+        _: Option<chrono::NaiveDate>,
+    ) -> Result<Option<paddock_domain::RaceOdds>> {
+        unimplemented!()
+    }
+
     async fn find_races_by_date(&self, _: chrono::NaiveDate) -> Result<Vec<Race>> {
         Ok(Vec::new())
     }

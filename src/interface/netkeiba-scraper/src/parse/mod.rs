@@ -7,7 +7,7 @@ mod shutuba;
 
 pub use card::parse_card;
 pub use horse_history::parse_horse_history;
-pub use odds::parse_win_odds;
+pub use odds::parse_win_place_odds;
 pub use shutuba::parse_shutuba;
 
 use paddock_domain::Venue;

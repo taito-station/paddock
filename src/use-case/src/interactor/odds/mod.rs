@@ -1,19 +1,22 @@
 pub mod race_odds;
 
 use crate::odds_scraper::OddsScraper;
+use crate::repository::Repository;
 
-/// レースのオッズを `OddsScraper` から都度取得するユースケース。
+/// レースのオッズを「保存済み(race_odds)参照 → 無ければライブスクレイプして保存」で取得する
+/// read-through なユースケース。
 ///
-/// `#10`(ADR 0001) の方針どおりキャッシュ・永続化を持たず、呼び出しごとに
-/// ライブスクレイプする。Repository を必要としないため `HorseHistoryInteractor`
-/// と同じく専用 interactor として切り出し、メイン `Interactor<R, P, F>` に
-/// `OddsScraper` ジェネリクスを波及させない（ADR 0001 決定 #4 を踏襲）。
-pub struct OddsInteractor<O: OddsScraper> {
+/// ADR 0001/0005 は当初オッズの永続化を持たない設計だったが、予想の再現性と当時オッズでの
+/// バックテストのため #51(ADR 0010) で永続化参照へ切り替えた。保存・再参照は単勝・複勝に限る
+/// （組合せ券種の永続化は #38）。`OddsScraper`/`Repository` を必要とするため、メイン
+/// `Interactor<R, P, F>` には波及させず専用 interactor として切り出している。
+pub struct OddsInteractor<O: OddsScraper, R: Repository> {
     pub scraper: O,
+    pub repository: R,
 }
 
-impl<O: OddsScraper> OddsInteractor<O> {
-    pub fn new(scraper: O) -> Self {
-        Self { scraper }
+impl<O: OddsScraper, R: Repository> OddsInteractor<O, R> {
+    pub fn new(scraper: O, repository: R) -> Self {
+        Self { scraper, repository }
     }
 }
