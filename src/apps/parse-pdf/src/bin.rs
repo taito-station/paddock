@@ -32,6 +32,11 @@ async fn main() -> anyhow::Result<()> {
 async fn run_ingest(app: Arc<setup::App>, args: IngestArgs) -> anyhow::Result<()> {
     let parallel = resolve_parallel(args.parallel);
     let total = args.sources.len();
+    // Several PDFs OCR in parallel → pin to one thread per process, mirroring the
+    // fetch path. A lone PDF keeps all cores (`parse-pdf one.pdf`), so don't pin it.
+    if parallel > 1 && total > 1 {
+        pin_ocr_to_single_thread();
+    }
     let semaphore = Arc::new(Semaphore::new(parallel));
     let mut joinset: JoinSet<(String, paddock_use_case::Result<IngestPdfResponse>)> =
         JoinSet::new();
@@ -214,18 +219,9 @@ async fn run_fetch_range_parallel(
     force: bool,
     parallel: usize,
 ) -> anyhow::Result<FetchRangeSummary> {
-    // Each meeting's OCR shells out to tesseract, which spins up OpenMP threads by
-    // default. With `parallel` meetings in flight, letting every tesseract grab all
-    // cores oversubscribes the CPU (parallel × cores threads) and erases the win, so
-    // we pin OCR to one thread per process here — N processes × 1 thread fills the
-    // cores cleanly. tesseract inherits this (its Command is not env_clear'd).
-    // SAFETY: although the tokio runtime is multi-threaded, nothing else in this
-    // process reads or writes the environment, and these sets run before the
-    // OCR-spawning worker tasks start, so no observer races these writes.
-    unsafe {
-        std::env::set_var("OMP_THREAD_LIMIT", "1");
-        std::env::set_var("OMP_NUM_THREADS", "1");
-    }
+    // This path always runs with `parallel > 1` over a multi-candidate grid, so pin
+    // OCR to one thread per process unconditionally.
+    pin_ocr_to_single_thread();
 
     let specs = range.candidate_specs();
     let semaphore = Arc::new(Semaphore::new(parallel));
@@ -291,6 +287,22 @@ fn resolve_parallel(requested: Option<usize>) -> usize {
         .or_else(|| std::thread::available_parallelism().ok().map(|n| n.get()))
         .unwrap_or(4)
         .max(1)
+}
+
+/// Pin OCR (tesseract/OpenMP) to one thread per process. With N meetings/PDFs OCR'ing
+/// in parallel, letting every tesseract grab all cores oversubscribes the CPU
+/// (parallel × cores threads) and erases the win; one thread per process fills the
+/// cores cleanly (N processes × 1 thread). tesseract inherits this (its Command is not
+/// env_clear'd). Callers must guard this so a lone PDF/meeting keeps all cores.
+///
+/// SAFETY: although the tokio runtime is multi-threaded, nothing else in this process
+/// reads or writes the environment, and callers invoke this before the OCR-spawning
+/// worker tasks start, so no observer races these writes.
+fn pin_ocr_to_single_thread() {
+    unsafe {
+        std::env::set_var("OMP_THREAD_LIMIT", "1");
+        std::env::set_var("OMP_NUM_THREADS", "1");
+    }
 }
 
 /// Move a successfully ingested file from `<root>/pdfs/<kind>/inbox/<file>` to
