@@ -142,6 +142,8 @@ pub(crate) fn build_factors(
     }
 }
 
+/// 一致なし・出走 0 件は 0 レートに畳む。`starts == 0` は `GroupStat` の rate メソッドが
+/// 0.0 を返すため、`stat_to_triple_opt` 導入前（label 一致のみで変換）と挙動同値。
 fn stat_to_triple(groups: &[GroupStat], label: &str) -> RateTriple {
     stat_to_triple_opt(groups, label).unwrap_or_default()
 }

@@ -71,3 +71,43 @@ pub enum Command {
 fn parse_track_condition(s: &str) -> Result<TrackCondition, String> {
     TrackCondition::try_from(s).map_err(|e| e.to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use super::{Cli, Command};
+    use paddock_domain::TrackCondition;
+
+    /// `--track-condition` が value_parser 経由で enum に解決されること（略記含む）。
+    #[test]
+    fn predict_parses_track_condition_including_abbreviation() {
+        let cli = Cli::try_parse_from([
+            "paddock-analyze",
+            "predict",
+            "2026-1-tokyo-1-R1",
+            "--track-condition",
+            "稍",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Predict {
+                track_condition, ..
+            } => assert_eq!(track_condition, Some(TrackCondition::Good)),
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    /// 不正値は実行前に usage エラーとして弾かれること。
+    #[test]
+    fn predict_rejects_unknown_track_condition() {
+        let result = Cli::try_parse_from([
+            "paddock-analyze",
+            "predict",
+            "2026-1-tokyo-1-R1",
+            "--track-condition",
+            "泥",
+        ]);
+        assert!(result.is_err());
+    }
+}

@@ -100,7 +100,7 @@ struct MockRepo {
     card: Option<RaceCard>,
     odds: Option<paddock_domain::RaceOdds>,
     /// 馬名 → by_track_condition スタッツ（#73 のテスト用。未登録馬は空 = 馬場実績なし）。
-    tc: HashMap<String, Vec<GroupStat>>,
+    track_condition_stats: HashMap<String, Vec<GroupStat>>,
 }
 
 impl Repository for MockRepo {
@@ -130,7 +130,11 @@ impl Repository for MockRepo {
     ) -> Result<HorseStatsRow> {
         let win_rate = if name.value() == "ウマA" { 0.2 } else { 0.1 };
         let mut row = horse_stats_with_surface_win(win_rate);
-        row.by_track_condition = self.tc.get(name.value()).cloned().unwrap_or_default();
+        row.by_track_condition = self
+            .track_condition_stats
+            .get(name.value())
+            .cloned()
+            .unwrap_or_default();
         Ok(row)
     }
     async fn course_stats(
@@ -253,7 +257,7 @@ fn interactor(card: Option<RaceCard>) -> Interactor<MockRepo, NullParser, NullFe
         MockRepo {
             card,
             odds: None,
-            tc: HashMap::new(),
+            track_condition_stats: HashMap::new(),
         },
         NullParser,
         NullFetcher,
@@ -268,7 +272,7 @@ fn interactor_with_odds(
         MockRepo {
             card,
             odds: Some(odds),
-            tc: HashMap::new(),
+            track_condition_stats: HashMap::new(),
         },
         NullParser,
         NullFetcher,
@@ -277,13 +281,13 @@ fn interactor_with_odds(
 
 fn interactor_with_tc(
     card: Option<RaceCard>,
-    tc: HashMap<String, Vec<GroupStat>>,
+    track_condition_stats: HashMap<String, Vec<GroupStat>>,
 ) -> Interactor<MockRepo, NullParser, NullFetcher> {
     Interactor::new(
         MockRepo {
             card,
             odds: None,
-            tc,
+            track_condition_stats,
         },
         NullParser,
         NullFetcher,
@@ -407,6 +411,9 @@ async fn predict_race_track_condition_zero_starts_treated_as_missing() {
         .await
         .unwrap();
 
+    // zip は短い方で打ち切られるため、空 vec 同士の空振り pass を先に弾く。
+    assert_eq!(with_zero.len(), 2);
+    assert_eq!(with_zero.len(), with_empty.len());
     for (a, b) in with_zero.iter().zip(&with_empty) {
         assert!((a.win_prob - b.win_prob).abs() < 1e-12, "{a:?} vs {b:?}");
         assert!((a.place_prob - b.place_prob).abs() < 1e-12);

@@ -571,8 +571,6 @@ mod tests {
         };
         let weak = HorseFactors {
             jockey_surface: Some(RateTriple::default()),
-            horse_track_condition: None,
-            recent_form: None,
             ..with_equal_jockey
         };
         assert!(raw_score(&strong, |r| r.win) > s_without);

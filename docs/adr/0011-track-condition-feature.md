@@ -37,7 +37,8 @@
      `race.track_condition` は構造的に None（`races` へ値が入るのは成績取り込み後）のため、
      DB 値は使えない。DB に値がある場合（再実行等）は空入力でデフォルト採用、`-` で不明を明示。
    - analyze CLI: `predict --track-condition 良|稍重|重|不良`（任意、稍/不 の略記可）で手入力。
-     未指定は項なし。
+     未指定は項なし（DB に確定値があってもフォールバックしない。CLI は明示入力のみとし、
+     暗黙のデータ参照で結果が変わらないようにする）。
 
 4. **`TRACK_CONDITION_WEIGHT = 1.0` をバックテストで決定**する（下記）。他の RateTriple 項
    （SURFACE/DISTANCE/JOCKEY = 1.0）と同重みで、概念的にも一貫する。
