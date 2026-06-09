@@ -32,9 +32,9 @@ async fn main() -> anyhow::Result<()> {
 async fn run_ingest(app: Arc<setup::App>, args: IngestArgs) -> anyhow::Result<()> {
     let parallel = resolve_parallel(args.parallel);
     let total = args.sources.len();
-    // Several PDFs OCR in parallel → pin to one thread per process, mirroring the
-    // fetch path. A lone PDF keeps all cores (`parse-pdf one.pdf`), so don't pin it.
-    if parallel > 1 && total > 1 {
+    // Pin OCR to one thread per process when several PDFs OCR concurrently, mirroring
+    // the fetch path. Must run before spawning the worker tasks below (see SAFETY).
+    if should_pin_ocr(parallel, total) {
         pin_ocr_to_single_thread();
     }
     let semaphore = Arc::new(Semaphore::new(parallel));
@@ -289,15 +289,23 @@ fn resolve_parallel(requested: Option<usize>) -> usize {
         .max(1)
 }
 
-/// Pin OCR (tesseract/OpenMP) to one thread per process. With N meetings/PDFs OCR'ing
-/// in parallel, letting every tesseract grab all cores oversubscribes the CPU
-/// (parallel × cores threads) and erases the win; one thread per process fills the
-/// cores cleanly (N processes × 1 thread). tesseract inherits this (its Command is not
-/// env_clear'd). Callers must guard this so a lone PDF/meeting keeps all cores.
+/// Whether to pin OCR to one thread per process for this batch. We pin only when
+/// several items actually OCR concurrently (`parallel > 1 && count > 1`): with N
+/// tesseracts each grabbing all cores the CPU is oversubscribed (parallel × cores
+/// threads). A lone item (`parse-pdf one.pdf`) or a sequential run (`-j 1`) has no
+/// contention, so it keeps all cores.
+fn should_pin_ocr(parallel: usize, count: usize) -> bool {
+    parallel > 1 && count > 1
+}
+
+/// Pin OCR (tesseract/OpenMP) to one thread per process via env vars. tesseract
+/// inherits these (its Command is not env_clear'd), so one thread per process fills
+/// the cores cleanly (N processes × 1 thread). Guard the call with [`should_pin_ocr`]
+/// so a lone PDF/meeting keeps all cores.
 ///
 /// SAFETY: although the tokio runtime is multi-threaded, nothing else in this process
-/// reads or writes the environment, and callers invoke this before the OCR-spawning
-/// worker tasks start, so no observer races these writes.
+/// reads or writes the environment, and callers MUST invoke this before spawning the
+/// OCR worker tasks, so no observer races these writes.
 fn pin_ocr_to_single_thread() {
     unsafe {
         std::env::set_var("OMP_THREAD_LIMIT", "1");
@@ -345,6 +353,14 @@ fn move_to_done_if_inbox(source: &str) -> anyhow::Result<Option<PathBuf>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn should_pin_ocr_only_when_parallel_and_multiple() {
+        assert!(should_pin_ocr(4, 8)); // parallel batch → pin
+        assert!(!should_pin_ocr(1, 8)); // `-j 1` sequential → keep all cores
+        assert!(!should_pin_ocr(4, 1)); // single PDF → keep all cores
+        assert!(!should_pin_ocr(1, 1));
+    }
 
     fn resp(key: &str, outcome: FetchMeetingOutcome) -> FetchMeetingResponse {
         FetchMeetingResponse {
