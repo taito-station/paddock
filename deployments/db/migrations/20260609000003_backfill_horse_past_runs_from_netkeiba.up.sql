@@ -20,6 +20,8 @@ INSERT OR IGNORE INTO horse_past_runs (
     weight_change, weight_carried, popularity)
 SELECT
     r.horse_id, ra.race_id,
+    -- 実データの netkeiba race_id は旧 accumulate が必ず 'nk-<12桁>' で書くため substr で復元する。
+    -- ELSE は保険（canonical 形式が紛れていた場合はそのまま保持し、NOT NULL を満たす）。
     CASE WHEN ra.race_id LIKE 'nk-%' THEN substr(ra.race_id, 4) ELSE ra.race_id END,
     ra.date, ra.venue, ra.round, ra.day, ra.race_num,
     ra.surface, ra.distance, ra.track_condition,
@@ -31,6 +33,8 @@ INNER JOIN races ra ON ra.race_id = r.race_id
 WHERE ra.source = 'netkeiba'
   AND r.horse_id IS NOT NULL;
 
--- 移送済み netkeiba 行を除去（results を先に、次に races）。
+-- 移送済み netkeiba 行を除去。results を明示的に先に消すのは、FK 強制が無効な文脈でも
+-- 取りこぼさないため（pool は foreign_keys=ON だが、sqlite3 CLI 直叩き等では既定 OFF）。
+-- FK 有効時は races 削除の ON DELETE CASCADE と重複するが無害。
 DELETE FROM results WHERE race_id IN (SELECT race_id FROM races WHERE source = 'netkeiba');
 DELETE FROM races WHERE source = 'netkeiba';
