@@ -122,6 +122,31 @@ pub struct OddsRow {
     pub popularity: Option<u32>,
 }
 
+impl OddsRow {
+    /// 単勝 1 行。`combination_key` は素の馬番文字列（"1".."18"、ゼロ詰めしない）。
+    pub fn win(horse_num: u32, odds: f64, popularity: Option<u32>) -> Self {
+        Self {
+            bet_type: "win".to_string(),
+            combination_key: horse_num.to_string(),
+            odds,
+            odds_high: None,
+            popularity,
+        }
+    }
+
+    /// 複勝 1 行。幅 odds を `odds`=下限・`odds_high`=上限 に詰める。
+    /// `combination_key` は素の馬番文字列（単勝と同じ規約）。
+    pub fn place(horse_num: u32, low: f64, high: f64, popularity: Option<u32>) -> Self {
+        Self {
+            bet_type: "place".to_string(),
+            combination_key: horse_num.to_string(),
+            odds: low,
+            odds_high: Some(high),
+            popularity,
+        }
+    }
+}
+
 /// 1 レース分のオッズ取得結果。取得時刻 `fetched_at` は use-case 層で注入し、
 /// gateway を時計から独立に保つ（[`FetchRecord`] と同じ流儀）。
 #[derive(Debug, Clone)]

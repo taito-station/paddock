@@ -25,6 +25,11 @@ pub async fn find_race_odds(
     as_of: Option<NaiveDate>,
 ) -> Result<Option<RaceOdds>> {
     // as_of は NULL 許容バインドで「制約なし」と「日付以前」を 1 クエリに統一する。
+    // 主キー先頭 race_id で対象は 1 レース分（高々十数行）に絞られるため、`date(fetched_at)` が
+    // インデックス非対応（sargable でない）でも実害はない。
+    // backtest の as_of は JST 開催日 `race.date`、`fetched_at` は UTC。UTC は JST より遅れるため
+    // レース当日以前に取得したオッズの `date(fetched_at)` は必ず race.date 以下に収まり、当時オッズを
+    // 取りこぼさない（未来オッズのリーク防止側にのみ効く）。
     let as_of_str = as_of.map(|d| d.format("%Y-%m-%d").to_string());
     let rows: Vec<OddsRow> = sqlx::query_as(
         r#"
@@ -62,8 +67,15 @@ pub async fn find_race_odds(
                 })?;
                 let low = OddsValue::try_from(row.odds)?;
                 let high = OddsValue::try_from(high)?;
-                odds.place
-                    .insert(horse_num, PlaceOdds::try_from((low, high))?);
+                // low > high 等の保存側不整合は odds_high NULL と同様に race_id/horse 付きで報告する。
+                let band = PlaceOdds::try_from((low, high)).map_err(|e| {
+                    Error::Data(format!(
+                        "race_odds place 行 (race_id={}, horse={}) の複勝幅が不正です: {e}",
+                        race_id.value(),
+                        horse_num.value()
+                    ))
+                })?;
+                odds.place.insert(horse_num, band);
             }
             // IN 句で絞っているため通常到達しない。将来 bet_type 追加時の取りこぼし防止に明示。
             other => {

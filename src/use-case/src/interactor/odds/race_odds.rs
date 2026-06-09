@@ -58,22 +58,15 @@ impl<O: OddsScraper, R: Repository> OddsInteractor<O, R> {
     async fn persist_win_place(&self, race_id: &RaceId, odds: &RaceOdds) {
         let mut rows: Vec<OddsRow> = Vec::with_capacity(odds.win.len() + odds.place.len());
         for (horse, ov) in &odds.win {
-            rows.push(OddsRow {
-                bet_type: "win".to_string(),
-                combination_key: horse.value().to_string(),
-                odds: ov.value(),
-                odds_high: None,
-                popularity: None,
-            });
+            rows.push(OddsRow::win(horse.value(), ov.value(), None));
         }
         for (horse, place) in &odds.place {
-            rows.push(OddsRow {
-                bet_type: "place".to_string(),
-                combination_key: horse.value().to_string(),
-                odds: place.low.value(),
-                odds_high: Some(place.high.value()),
-                popularity: None,
-            });
+            rows.push(OddsRow::place(
+                horse.value(),
+                place.low.value(),
+                place.high.value(),
+                None,
+            ));
         }
         if rows.is_empty() {
             return;

@@ -83,23 +83,15 @@ impl<R: Repository, S: NetkeibaScraper> CardInteractor<R, S> {
         if odds.win.is_empty() && odds.place.is_empty() {
             tracing::info!(%netkeiba_id, "win/place odds not available yet, skipping odds save");
         } else {
-            // 単勝・複勝とも combination_key は素の馬番文字列("1".."18")。組合せ券種(#38)は
-            // 別途キー規約(昇順連結等)を定義する。ゼロ詰めはしない。
+            // 組合せ券種(#38)は別途キー規約(昇順連結等)を定義する。
             let mut rows: Vec<OddsRow> = Vec::with_capacity(odds_saved);
-            rows.extend(odds.win.iter().map(|w| OddsRow {
-                bet_type: "win".to_string(),
-                combination_key: w.horse_num.value().to_string(),
-                odds: w.odds,
-                odds_high: None,
-                popularity: w.popularity,
-            }));
-            // 複勝は幅 odds。下限を `odds`、上限を `odds_high` に入れる。
-            rows.extend(odds.place.iter().map(|p| OddsRow {
-                bet_type: "place".to_string(),
-                combination_key: p.horse_num.value().to_string(),
-                odds: p.odds_low,
-                odds_high: Some(p.odds_high),
-                popularity: p.popularity,
+            rows.extend(
+                odds.win
+                    .iter()
+                    .map(|w| OddsRow::win(w.horse_num.value(), w.odds, w.popularity)),
+            );
+            rows.extend(odds.place.iter().map(|p| {
+                OddsRow::place(p.horse_num.value(), p.odds_low, p.odds_high, p.popularity)
             }));
             self.repo
                 .save_race_odds(&RaceOddsRecord {
