@@ -658,6 +658,24 @@ mod tests {
     }
 
     #[test]
+    fn band_functions_only_emit_declared_labels() {
+        // band 関数の戻り値は必ず出力順定義の定数配列に含まれること。片方だけ変更したときの
+        // 同期ずれ（セグメントが無言でドロップされる）をコンパイル時でなくテストで検出する。
+        for pop in [None, Some(0u32), Some(1), Some(3), Some(6), Some(9), Some(18), Some(100)] {
+            assert!(
+                POPULARITY_BANDS.contains(&popularity_band(pop)),
+                "popularity_band({pop:?}) が POPULARITY_BANDS に無い"
+            );
+        }
+        for n in [0usize, 8, 9, 10, 12, 15, 16, 30] {
+            assert!(
+                FIELD_SIZE_BANDS.contains(&field_size_band(n)),
+                "field_size_band({n}) が FIELD_SIZE_BANDS に無い"
+            );
+        }
+    }
+
+    #[test]
     fn popularity_segments_group_entries_in_band_order() {
         let races = vec![RaceEvaluation {
             horses: vec![
