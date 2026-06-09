@@ -43,6 +43,10 @@ pub enum Command {
         /// ブレンドする（#72）。
         #[arg(long)]
         blend_alpha: Option<f64>,
+        /// 当日の馬場状態（良/稍重/重/不良）。指定すると各馬の馬場状態別成績を factor に
+        /// 加える（#73）。出馬表 PDF に馬場状態は無いため手で渡す。未指定なら馬場項なし。
+        #[arg(long)]
+        track_condition: Option<String>,
     },
     /// Backtest the prediction logic over finished races in a date range.
     /// Reproduces probability estimation with as-of stats (no leakage) and reports

@@ -8,7 +8,7 @@ use paddock_domain::{
 
 use crate::error::Result;
 use crate::interactor::Interactor;
-use crate::interactor::race::predict::build_factors;
+use crate::interactor::race::predict::{RaceContext, build_factors};
 use crate::pdf_fetcher::PdfFetcher;
 use crate::pdf_parser::PdfParser;
 use crate::repository::Repository;
@@ -59,10 +59,7 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
             // 回収率は実際に賭けられる「当時オッズ」で評価したい。race_odds に当該レース当日
             // 以前(date(fetched_at) <= race.date)のスナップショットがあれば使い、無ければ
             // PDF 確定成績の単勝にフォールバックする（#51）。
-            let market = self
-                .repository
-                .find_race_odds(&race.race_id, as_of)
-                .await?;
+            let market = self.repository.find_race_odds(&race.race_id, as_of).await?;
 
             // コース統計は全馬共通なのでループ外で 1 回だけ取得する（predict と同じ）。
             let course = self
@@ -93,8 +90,11 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
                     &course,
                     &horse,
                     jockey.as_ref(),
-                    race.surface,
-                    race.distance,
+                    &RaceContext {
+                        surface: race.surface,
+                        distance: race.distance,
+                        track_condition: race.track_condition,
+                    },
                     recent_form,
                 );
                 entry_factors.push((entry, factors));

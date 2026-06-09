@@ -18,6 +18,9 @@ pub struct HorseFactors {
     pub horse_surface: RateTriple,
     pub horse_distance: RateTriple,
     pub jockey_surface: Option<RateTriple>,
+    /// 馬場状態（良/稍重/重/不良）別の馬成績（#73）。対象レースの馬場状態が未確定、または
+    /// 該当馬場での出走実績が無い馬は `None`（項と重みを母数から除外、ADR 0007 の欠落項扱い）。
+    pub horse_track_condition: Option<RateTriple>,
     /// 前走フォーム [0,1]（0.5=中立）。前走が無い／有効な signal が無い馬は `None`。
     /// win/place/show に同値で寄与する（フォームは方向に依らず全体を底上げ／押し下げる）。
     pub recent_form: Option<f64>,
@@ -163,6 +166,9 @@ const COURSE_GATE_WEIGHT: f64 = 2.0;
 const SURFACE_WEIGHT: f64 = 1.0;
 const DISTANCE_WEIGHT: f64 = 1.0;
 const JOCKEY_WEIGHT: f64 = 1.0;
+/// 馬場状態（track_condition）項の重み。#73 バックテスト（0.25/0.5/1.0/1.5/2.0 を比較）で
+/// 1.0 が的中率・回収率のピークだったため採用（ADR 0011）。
+const TRACK_CONDITION_WEIGHT: f64 = 1.0;
 /// 前走フォーム項の重み。#30 バックテストで検証して決定（ADR 0009）。
 const FORM_WEIGHT: f64 = 0.25;
 
@@ -179,6 +185,10 @@ fn raw_score(factors: &HorseFactors, rate: fn(&RateTriple) -> f64) -> f64 {
     if let Some(jockey) = factors.jockey_surface {
         weighted += JOCKEY_WEIGHT * rate(&jockey);
         weight += JOCKEY_WEIGHT;
+    }
+    if let Some(tc) = factors.horse_track_condition {
+        weighted += TRACK_CONDITION_WEIGHT * rate(&tc);
+        weight += TRACK_CONDITION_WEIGHT;
     }
     if let Some(form) = factors.recent_form {
         weighted += FORM_WEIGHT * form;
@@ -309,6 +319,7 @@ mod tests {
             horse_surface: RateTriple::default(),
             horse_distance: RateTriple::default(),
             jockey_surface: None,
+            horse_track_condition: None,
             recent_form: None,
         }
     }
@@ -361,6 +372,7 @@ mod tests {
                         show: 0.45,
                     },
                     jockey_surface: None,
+                    horse_track_condition: None,
                     recent_form: None,
                 },
             ),
@@ -383,6 +395,7 @@ mod tests {
                         show: 0.24,
                     },
                     jockey_surface: None,
+                    horse_track_condition: None,
                     recent_form: None,
                 },
             ),
@@ -414,6 +427,7 @@ mod tests {
             horse_surface: triple,
             horse_distance: triple,
             jockey_surface: None,
+            horse_track_condition: None,
             recent_form: None,
         };
         // 6 頭立て・全馬同一スコア → win=1/6, place=2/6, show=3/6（いずれも 1.0 未満で無クランプ）。
@@ -446,6 +460,7 @@ mod tests {
             horse_surface: RateTriple::default(),
             horse_distance: RateTriple::default(),
             jockey_surface: None,
+            horse_track_condition: None,
             recent_form: None,
         };
         let b = HorseFactors {
@@ -457,6 +472,7 @@ mod tests {
             horse_surface: RateTriple::default(),
             horse_distance: RateTriple::default(),
             jockey_surface: None,
+            horse_track_condition: None,
             recent_form: None,
         };
         let entries = vec![(make_entry(1, "ウマA"), a), (make_entry(2, "ウマB"), b)];
@@ -484,6 +500,7 @@ mod tests {
             horse_surface: RateTriple::default(),
             horse_distance: RateTriple::default(),
             jockey_surface: None,
+            horse_track_condition: None,
             recent_form: None,
         };
         let entries = vec![
@@ -524,6 +541,7 @@ mod tests {
             horse_surface: base,
             horse_distance: base,
             jockey_surface: Some(base),
+            horse_track_condition: None,
             recent_form: None,
         };
         let without_jockey = HorseFactors {
@@ -531,6 +549,7 @@ mod tests {
             horse_surface: base,
             horse_distance: base,
             jockey_surface: None,
+            horse_track_condition: None,
             recent_form: None,
         };
         let s_with = raw_score(&with_equal_jockey, |r| r.win);
@@ -552,11 +571,127 @@ mod tests {
         };
         let weak = HorseFactors {
             jockey_surface: Some(RateTriple::default()),
+            horse_track_condition: None,
             recent_form: None,
             ..with_equal_jockey
         };
         assert!(raw_score(&strong, |r| r.win) > s_without);
         assert!(raw_score(&weak, |r| r.win) < s_without);
+    }
+
+    /// 馬場状態項（#73）が欠落項で不当に減点されないこと（重み付き平均、ADR 0007 の流儀）。
+    /// レートが全 factor で等しいなら馬場項の有無でスコアは変わらず、「平均からの差」としてのみ効く。
+    #[test]
+    fn track_condition_none_not_penalized() {
+        let base = RateTriple {
+            win: 0.2,
+            place: 0.4,
+            show: 0.6,
+        };
+        let with_equal_tc = HorseFactors {
+            course_gate: base,
+            horse_surface: base,
+            horse_distance: base,
+            jockey_surface: None,
+            horse_track_condition: Some(base),
+            recent_form: None,
+        };
+        let without_tc = HorseFactors {
+            horse_track_condition: None,
+            ..with_equal_tc.clone()
+        };
+        let s_with = raw_score(&with_equal_tc, |r| r.win);
+        let s_without = raw_score(&without_tc, |r| r.win);
+        assert!(
+            (s_with - s_without).abs() < 1e-10,
+            "馬場実績なしが減点されている: with={s_with}, without={s_without}"
+        );
+        assert!((s_without - 0.2).abs() < 1e-10);
+
+        // 道悪巧者（高レート）は加点、苦手（低レート）は減点として正しく効く。
+        let strong = HorseFactors {
+            horse_track_condition: Some(RateTriple {
+                win: 0.5,
+                place: 0.5,
+                show: 0.5,
+            }),
+            ..with_equal_tc.clone()
+        };
+        let weak = HorseFactors {
+            horse_track_condition: Some(RateTriple::default()),
+            ..with_equal_tc
+        };
+        assert!(raw_score(&strong, |r| r.win) > s_without);
+        assert!(raw_score(&weak, |r| r.win) < s_without);
+    }
+
+    /// 馬場状態項を含む場合でも win ≤ place ≤ show の単調性が維持されること（#73）。
+    #[test]
+    fn track_condition_keeps_monotonicity_in_estimate() {
+        let entries = vec![
+            (
+                make_entry(1, "ウマA"),
+                HorseFactors {
+                    course_gate: RateTriple {
+                        win: 0.3,
+                        place: 0.5,
+                        show: 0.7,
+                    },
+                    horse_surface: RateTriple {
+                        win: 0.2,
+                        place: 0.4,
+                        show: 0.6,
+                    },
+                    horse_distance: RateTriple {
+                        win: 0.1,
+                        place: 0.3,
+                        show: 0.5,
+                    },
+                    jockey_surface: None,
+                    // win 偏重の不自然な馬場レートでも単調化が是正する。
+                    horse_track_condition: Some(RateTriple {
+                        win: 0.9,
+                        place: 0.1,
+                        show: 0.1,
+                    }),
+                    recent_form: None,
+                },
+            ),
+            (
+                make_entry(2, "ウマB"),
+                HorseFactors {
+                    course_gate: RateTriple {
+                        win: 0.1,
+                        place: 0.2,
+                        show: 0.3,
+                    },
+                    horse_surface: RateTriple {
+                        win: 0.1,
+                        place: 0.2,
+                        show: 0.3,
+                    },
+                    horse_distance: RateTriple {
+                        win: 0.1,
+                        place: 0.2,
+                        show: 0.3,
+                    },
+                    jockey_surface: None,
+                    horse_track_condition: None,
+                    recent_form: None,
+                },
+            ),
+        ];
+        let probs = estimate_probabilities(&entries);
+        for p in &probs {
+            assert!(
+                p.win_prob <= p.place_prob + 1e-10 && p.place_prob <= p.show_prob + 1e-10,
+                "単調性違反: {} win={} place={} show={}",
+                p.horse_name.value(),
+                p.win_prob,
+                p.place_prob,
+                p.show_prob
+            );
+        }
     }
 
     fn prob(num: u32, win: f64, place: f64, show: f64) -> HorseProbability {
@@ -629,7 +764,10 @@ mod tests {
         let probs = vec![prob(1, 0.4, 0.45, 0.5), prob(2, 0.6, 0.62, 0.7)];
         let out = blend_with_market_win(&probs, &odds_map(&[(1, 1.2), (2, 6.0)]), 0.2);
         for p in &out {
-            assert!(p.win_prob <= p.place_prob && p.place_prob <= p.show_prob, "{p:?}");
+            assert!(
+                p.win_prob <= p.place_prob && p.place_prob <= p.show_prob,
+                "{p:?}"
+            );
             assert!((0.0..=1.0).contains(&p.win_prob));
             assert!((0.0..=1.0).contains(&p.show_prob));
         }

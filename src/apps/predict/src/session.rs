@@ -120,7 +120,7 @@ async fn run_race(
     // DB 障害等（Internal）はセッション継続不能なため伝播して中断する。
     let probs = match app
         .interactor
-        .predict_race(&race.race_id, MARKET_BLEND_ALPHA)
+        .predict_race(&race.race_id, MARKET_BLEND_ALPHA, race.track_condition)
         .await
     {
         Ok(p) => p,

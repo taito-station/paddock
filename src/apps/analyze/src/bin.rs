@@ -5,7 +5,7 @@ use chrono::NaiveDate;
 use clap::Parser;
 use paddock_domain::{
     BacktestReport, FieldSizeSegment, HorseName, HorseProbability, JockeyName, PopularitySegment,
-    RaceId, ReliabilityBin, Surface, Venue,
+    RaceId, ReliabilityBin, Surface, TrackCondition, Venue,
 };
 use paddock_use_case::repository::{CourseStatsRow, GroupStat, HorseStatsRow, JockeyStatsRow};
 
@@ -69,10 +69,18 @@ async fn main() -> anyhow::Result<()> {
         cli::Command::Predict {
             race_id,
             blend_alpha,
+            track_condition,
         } => {
             let blend_alpha = validate_blend_alpha(blend_alpha)?;
             let rid = RaceId::try_from(race_id.as_str())?;
-            let probs = app.interactor.predict_race(&rid, blend_alpha).await?;
+            let track_condition = track_condition
+                .as_deref()
+                .map(TrackCondition::try_from)
+                .transpose()?;
+            let probs = app
+                .interactor
+                .predict_race(&rid, blend_alpha, track_condition)
+                .await?;
             print_predict(&probs);
         }
         cli::Command::Backtest {
