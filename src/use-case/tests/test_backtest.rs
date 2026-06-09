@@ -391,6 +391,29 @@ async fn backtest_blend_flips_top_pick_to_market_favorite() {
 }
 
 #[tokio::test]
+async fn backtest_blend_uses_partial_race_odds_as_is() {
+    // race_odds.win に勝ち馬 ウマB のみ（部分カバレッジ）。win が非空なので results.odds へは
+    // フォールバックせず race_odds をそのまま使い、domain の部分カバレッジ処理（カバー馬に市場重みが
+    // 乗る既知挙動）で本命が ウマB に動き 1 着的中する。full-coverage 前提の既知挙動を固定するテスト。
+    let race = blend_race();
+    let mut odds = HashMap::new();
+    let mut o = RaceOdds::empty(RaceId::try_from(race.race_id.value()).unwrap());
+    o.win
+        .insert(HorseNum::try_from(2u32).unwrap(), OddsValue::try_from(1.2).unwrap());
+    odds.insert(race.race_id.value().to_string(), o);
+
+    let report = interactor_with_odds(vec![race], odds)
+        .backtest(d(2026, 1, 1), d(2026, 1, 31), Some(0.2))
+        .await
+        .unwrap();
+    assert!(
+        (report.win_hit_rate - 1.0).abs() < 1e-9,
+        "partial race_odds win_hit={}",
+        report.win_hit_rate
+    );
+}
+
+#[tokio::test]
 async fn backtest_blend_falls_back_to_results_odds_when_no_snapshot() {
     // race_odds スナップショット無し → PDF 確定成績の単勝(ウマB=1.2)で代替し、市場のみ(α=0)で
     // 本命が ウマB に動き 1 着的中する。
