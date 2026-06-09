@@ -39,3 +39,47 @@ impl TryFrom<&str> for TrackCondition {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::TrackCondition;
+
+    #[test]
+    fn try_from_accepts_canonical_and_abbreviated_labels() {
+        assert_eq!(
+            TrackCondition::try_from("良").unwrap(),
+            TrackCondition::Firm
+        );
+        assert_eq!(
+            TrackCondition::try_from("稍重").unwrap(),
+            TrackCondition::Good
+        );
+        assert_eq!(
+            TrackCondition::try_from("稍").unwrap(),
+            TrackCondition::Good
+        );
+        assert_eq!(
+            TrackCondition::try_from("重").unwrap(),
+            TrackCondition::Yielding
+        );
+        assert_eq!(
+            TrackCondition::try_from("不良").unwrap(),
+            TrackCondition::Soft
+        );
+        assert_eq!(
+            TrackCondition::try_from("不").unwrap(),
+            TrackCondition::Soft
+        );
+        // 前後空白は無視される。
+        assert_eq!(
+            TrackCondition::try_from(" 良 ").unwrap(),
+            TrackCondition::Firm
+        );
+    }
+
+    #[test]
+    fn try_from_rejects_unknown_label() {
+        assert!(TrackCondition::try_from("泥").is_err());
+        assert!(TrackCondition::try_from("").is_err());
+    }
+}

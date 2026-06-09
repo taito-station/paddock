@@ -4,7 +4,7 @@ use std::io::{self, Write};
 use chrono::{NaiveDate, Utc};
 use paddock_domain::{
     BetCombination, BettingConfig, BettingRecommendation, HorseProbability, Race, RaceId, Surface,
-    select_bets,
+    TrackCondition, select_bets,
 };
 use paddock_use_case::{PredictBetRecord, PredictSessionRecord};
 
@@ -116,11 +116,16 @@ async fn run_race(
     );
     println!("残高: ¥{}", session.balance);
 
+    // 当日の馬場状態（#73）。未確定レースの race.track_condition は構造的に None
+    //（races へ入るのは成績取り込み後）のため、レース毎に対話入力で受け取る。
+    // DB に値があれば（再実行等）デフォルトとして空入力で採用する。
+    let track_condition = read_track_condition(race.track_condition)?;
+
     // 出馬表未登録（NotFound）はそのレースのみスキップ。
     // DB 障害等（Internal）はセッション継続不能なため伝播して中断する。
     let probs = match app
         .interactor
-        .predict_race(&race.race_id, MARKET_BLEND_ALPHA, race.track_condition)
+        .predict_race(&race.race_id, MARKET_BLEND_ALPHA, track_condition)
         .await
     {
         Ok(p) => p,
@@ -437,6 +442,25 @@ fn read_choice() -> anyhow::Result<char> {
             "e" | "E" => return Ok('e'),
             "s" | "S" => return Ok('s'),
             _ => println!("y / e / s のいずれかを入力してください。"),
+        }
+    }
+}
+
+/// 当日の馬場状態を読み取る（#73）。空入力は `default`（DB 値があればそれ、無ければ None=
+/// 馬場項なし）を採用し、不正入力は再プロンプト。「稍」「不」の略記も受け付ける。
+fn read_track_condition(default: Option<TrackCondition>) -> anyhow::Result<Option<TrackCondition>> {
+    let prompt = match default {
+        Some(tc) => format!("馬場状態 [良/稍重/重/不良, 空={tc}] > "),
+        None => "馬場状態 [良/稍重/重/不良, 空=不明] > ".to_string(),
+    };
+    loop {
+        let s = read_line(&prompt)?;
+        if s.is_empty() {
+            return Ok(default);
+        }
+        match TrackCondition::try_from(s.as_str()) {
+            Ok(tc) => return Ok(Some(tc)),
+            Err(_) => println!("良 / 稍重 / 重 / 不良 のいずれか（または空）を入力してください。"),
         }
     }
 }
