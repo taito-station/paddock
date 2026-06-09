@@ -59,8 +59,9 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
         // win_prob ≤ place_prob ≤ show_prob を保証する（ADR 0007）。
         let probs = paddock_domain::prediction::estimate_probabilities(&entry_factors);
 
-        // 市場オッズ（単勝）ブレンド（#72）。α 指定時のみ当日オッズの最新スナップショットを取得。
-        let probs = match blend_alpha {
+        // 市場オッズ（単勝）ブレンド（#72）。α<1.0 のときのみ最新オッズスナップショットを取得する
+        // （α>=1.0・非有限はブレンド無効なので DB クエリを省く）。
+        let probs = match blend_alpha.filter(|a| a.is_finite() && *a < 1.0) {
             Some(alpha) => {
                 let market = self.repository.find_race_odds(race_id, None).await?;
                 match market {

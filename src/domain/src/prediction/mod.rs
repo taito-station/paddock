@@ -92,6 +92,10 @@ pub fn blend_with_market_win(
     market_win_odds: &HashMap<HorseNum, f64>,
     alpha: f64,
 ) -> Vec<HorseProbability> {
+    // 非有限な α（NaN 等）は no-op 扱い（呼び出し側で検証済みだが防御的に弾く）。
+    if !alpha.is_finite() {
+        return probs.to_vec();
+    }
     let alpha = alpha.clamp(0.0, 1.0);
     if probs.is_empty() || market_win_odds.is_empty() || alpha >= 1.0 {
         return probs.to_vec();
@@ -118,6 +122,7 @@ pub fn blend_with_market_win(
         .collect();
 
     // 部分カバレッジや凸結合のドリフトを吸収して win 合計を 1.0 へ戻す。
+    // `min(1.0)` は w ≤ total（全要素非負）より数学的には恒等だが、浮動小数点の保険として残す。
     let total: f64 = blended.iter().sum();
     let win_probs: Vec<f64> = if total > 0.0 {
         blended.iter().map(|w| (w / total).min(1.0)).collect()
