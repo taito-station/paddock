@@ -447,10 +447,11 @@ fn read_choice() -> anyhow::Result<char> {
 }
 
 /// 当日の馬場状態を読み取る（#73）。空入力は `default`（DB 値があればそれ、無ければ None=
-/// 馬場項なし）を採用し、不正入力は再プロンプト。「稍」「不」の略記も受け付ける。
+/// 馬場項なし）を採用し、`-` は不明（None）を明示する。不正入力は再プロンプト。
+/// 「稍」「不」の略記も受け付ける。
 fn read_track_condition(default: Option<TrackCondition>) -> anyhow::Result<Option<TrackCondition>> {
     let prompt = match default {
-        Some(tc) => format!("馬場状態 [良/稍重/重/不良, 空={tc}] > "),
+        Some(tc) => format!("馬場状態 [良/稍重/重/不良, 空={tc}, -=不明] > "),
         None => "馬場状態 [良/稍重/重/不良, 空=不明] > ".to_string(),
     };
     loop {
@@ -458,9 +459,14 @@ fn read_track_condition(default: Option<TrackCondition>) -> anyhow::Result<Optio
         if s.is_empty() {
             return Ok(default);
         }
+        if s == "-" {
+            return Ok(None);
+        }
         match TrackCondition::try_from(s.as_str()) {
             Ok(tc) => return Ok(Some(tc)),
-            Err(_) => println!("良 / 稍重 / 重 / 不良 のいずれか（または空）を入力してください。"),
+            Err(_) => println!(
+                "良 / 稍重 / 重 / 不良（稍・不 の略記可）、空、または - を入力してください。"
+            ),
         }
     }
 }

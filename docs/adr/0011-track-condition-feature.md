@@ -13,8 +13,8 @@
 - 馬場状態は `RateTriple`（win/place/show レート）として既存のレート加重平均にそのまま乗る
   （ADR 0009 のスカラー特徴量とは異なり、構造変換は不要）。
 - 評価対象レースの馬場状態の入手経路が経路ごとに異なる: backtest は `Race.track_condition`（DB 確定値）、
-  予想セッションは当日レコードの `race.track_condition`、analyze CLI の `predict` は出馬表 PDF に
-  馬場状態が無いため**手入力**が要る。
+  予想セッションと analyze CLI の `predict` は出馬表 PDF に馬場状態が無く、未確定レースの
+  `races.track_condition` も構造的に NULL（値が入るのは成績取り込み後）のため**手入力**が要る。
 - 欠落の 2 系統（レースの馬場状態が未確定 / その馬場での出走実績が無い馬）をどう扱うか。
 
 ## 決定
@@ -31,9 +31,13 @@
 
 3. **馬場状態の受け渡し**: `predict_race(race_id, blend_alpha, track_condition)` に引数を追加。
    - backtest: `race.track_condition`（DB 確定値）を渡す。予想時点（発走直前）には公表済みの情報
-     なのでリークではない。
-   - 予想セッション（`apps/predict`）: 当日レースレコードの `race.track_condition` を渡す。
-   - analyze CLI: `predict --track-condition 良|稍重|重|不良`（任意）で手入力。未指定は項なし。
+     なのでリークではない。ただし本番セッションは発走前の手入力見込み値になりうるため、馬場が
+     日中に変化するケースでは backtest（確定値）の改善幅が本番よりやや楽観的になりうる。
+   - 予想セッション（`apps/predict`）: **レース毎に対話入力**で受け取る。未確定レースの
+     `race.track_condition` は構造的に None（`races` へ値が入るのは成績取り込み後）のため、
+     DB 値は使えない。DB に値がある場合（再実行等）は空入力でデフォルト採用、`-` で不明を明示。
+   - analyze CLI: `predict --track-condition 良|稍重|重|不良`（任意、稍/不 の略記可）で手入力。
+     未指定は項なし。
 
 4. **`TRACK_CONDITION_WEIGHT = 1.0` をバックテストで決定**する（下記）。他の RateTriple 項
    （SURFACE/DISTANCE/JOCKEY = 1.0）と同重みで、概念的にも一貫する。

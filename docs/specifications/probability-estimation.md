@@ -87,7 +87,8 @@ raw_score =
 > レースの馬場状態が未確定（backtest: DB に無い / predict: `--track-condition` 未指定）のとき、または
 > その馬場での出走実績が無い（グループ不在・出走 0 件）馬は `None`。重み 1.0 はバックテストで決定
 > （ADR 0011）。出馬表 PDF に馬場状態は無いため、predict 経路では呼び出し側が当日の値を渡す
-> （予想セッションは当日レースレコードの `track_condition`、analyze CLI は `--track-condition`）。
+> （予想セッションはレース毎の対話入力＝DB 値があれば空入力でデフォルト採用、analyze CLI は
+> `--track-condition`）。
 
 ### ステップ 3: レース内正規化（top-k）+ 単調化
 
