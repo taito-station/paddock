@@ -60,6 +60,12 @@ pub async fn find_race_odds(
         // 一方、既知 bet_type の combination_key/幅 odds の不正は読み飛ばさず、下の parse_key/
         // parse_band が `Error::Data` で停止させる（保存側バグの早期検知）。
         let Ok(bet_type) = BetType::try_from(row.bet_type.as_str()) else {
+            // サイレントに落とすと「なぜ exotic が出ないか」の調査が困難なので debug で残す。
+            tracing::debug!(
+                race_id = race_id.value(),
+                bet_type = row.bet_type,
+                "race_odds の未知 bet_type 行を読み飛ばした"
+            );
             continue;
         };
         match bet_type {

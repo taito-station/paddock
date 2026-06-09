@@ -208,6 +208,7 @@ async fn unknown_bet_type_row_is_skipped_not_errored() {
     save_sample(&repo).await; // win/place を投入
     // 将来券種を書く新版を模した未知 bet_type 行を直接 INSERT する。ラベルは BetType が将来
     // 拡張されても衝突しないダミーにする（実在馬券名を使うと拡張時にテストが意図せず壊れる）。
+    // combination_key はラベルが未知の時点で評価されず skip されるので、内容は問わない。
     sqlx::query(
         "INSERT INTO race_odds (race_id, bet_type, combination_key, odds, odds_high, popularity, fetched_at) \
          VALUES ($1, '__unknown__', '1-2-3-4-5', 100.0, NULL, NULL, $2)",

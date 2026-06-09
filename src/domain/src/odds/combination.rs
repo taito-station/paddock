@@ -144,6 +144,9 @@ impl TryFrom<(HorseNum, HorseNum, HorseNum)> for OrderedTriple {
 }
 
 /// 永続化キーの 1 トークンを馬番としてパースする。`to_key`/`from_key` 専用。
+/// `to_key` が吐く正規キー（符号・ゼロ詰めなしの 1..=18）との往復閉路を前提とし、外部からの
+/// 手書きキーを想定した厳格パーサではない（`u32::parse` は `"+1"`/`"007"` も受理する。範囲外は
+/// 後段の `HorseNum::try_from` が弾く）。
 fn parse_num(token: &str) -> Result<HorseNum> {
     let num: u32 = token
         .parse()
