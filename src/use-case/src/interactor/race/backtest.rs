@@ -134,11 +134,16 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
                 .copied()
                 .unwrap_or((None, None));
             // 当時オッズ（単勝）を優先し、無ければ PDF 確定成績の単勝にフォールバック。
-            let top_pick_odds = market
+            // どちらを採用したかは集計に影響するため debug ログに残す（運用時の検証用）。
+            let market_win = market
                 .as_ref()
                 .and_then(|m| m.win.get(&top.horse_num))
-                .map(|o| o.value())
-                .or(pdf_top_pick_odds);
+                .map(|o| o.value());
+            match market_win {
+                Some(_) => tracing::debug!(race_id = %race.race_id, "backtest: 当時オッズ(単勝)を採用"),
+                None => tracing::debug!(race_id = %race.race_id, "backtest: 当時オッズ無し、PDF 単勝にフォールバック"),
+            }
+            let top_pick_odds = market_win.or(pdf_top_pick_odds);
 
             evaluations.push(RaceEvaluation {
                 win_outcomes,

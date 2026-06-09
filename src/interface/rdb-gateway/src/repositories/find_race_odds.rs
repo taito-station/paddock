@@ -89,6 +89,8 @@ pub async fn find_race_odds(
     Ok(Some(odds))
 }
 
+/// `combination_key` を素の馬番（"1".."18"）としてパースする。win/place の単一馬番キー専用で、
+/// 組合せ券種(#38)の "1-2" 等のキーには別パーサが要る（本関数は `IN ('win','place')` で絞った後に呼ぶ）。
 fn parse_horse_num(race_id: &RaceId, key: &str) -> Result<HorseNum> {
     let num: u32 = key.parse().map_err(|_| {
         Error::Data(format!(
