@@ -110,7 +110,8 @@ pub struct ReliabilityBin {
     pub count: u32,
     /// ビン内の平均予測確率（`count == 0` のとき 0）。
     pub mean_predicted: f64,
-    /// ビン内の実測勝率（`count == 0` のとき 0）。完全校正なら `mean_predicted` に一致。
+    /// ビン内の実測勝率（`count == 0` のとき 0）。`count > 0` のビンで完全校正なら
+    /// `mean_predicted` に一致する。
     pub observed_rate: f64,
 }
 
@@ -161,9 +162,10 @@ pub struct BacktestReport {
     pub payout_rate: Option<f64>,
     /// 回収率の母数（オッズが取得できたレース数）。
     pub payout_races: u32,
-    /// Brier スコア（win, 小さいほど良い）。`win_calibration().brier` と同値。
+    /// Brier スコア（win, 小さいほど良い）。単勝の校正だけは既存互換で平坦フィールドに保持し、
+    /// 連対/複勝は `place_calibration`/`show_calibration` に持たせる。母数（全馬エントリ）0 のとき 0。
     pub brier: f64,
-    /// 対数損失（win, 小さいほど良い）。`win_calibration().log_loss` と同値。
+    /// 対数損失（win, 小さいほど良い）。母数 0 のとき 0。
     pub log_loss: f64,
     /// 連対（2 着以内）確率の校正。
     pub place_calibration: CalibrationMetrics,
@@ -222,6 +224,7 @@ fn calibration(pairs: &[(f64, bool)]) -> CalibrationMetrics {
 /// `(予測確率, 実現したか)` を等幅 `bins` ビンに分け、各ビンの平均予測と実測率を返す。
 /// 確率は `[0,1]` にクランプし、上端 `1.0` は最終ビンに含める。空ビンも `count = 0` で返す。
 fn reliability(pairs: &[(f64, bool)], bins: usize) -> Vec<ReliabilityBin> {
+    debug_assert!(bins > 0, "reliability requires at least one bin");
     let width = 1.0 / bins as f64;
     let mut sum_pred = vec![0.0f64; bins];
     let mut hits = vec![0u32; bins];
@@ -229,7 +232,9 @@ fn reliability(pairs: &[(f64, bool)], bins: usize) -> Vec<ReliabilityBin> {
 
     for &(prob, hit) in pairs {
         let p = prob.clamp(0.0, 1.0);
-        let idx = ((p / width) as usize).min(bins - 1); // p == 1.0 を最終ビンへ
+        // p == 1.0 を最終ビンへ。境界値（例 0.3）は浮動小数点誤差で隣接ビンに入りうるが、
+        // reliability の概観用途では許容する。
+        let idx = ((p / width) as usize).min(bins - 1);
         sum_pred[idx] += p;
         if hit {
             hits[idx] += 1;
@@ -293,10 +298,8 @@ fn popularity_segments(races: &[RaceEvaluation]) -> Vec<PopularitySegment> {
     POPULARITY_BANDS
         .iter()
         .filter_map(|&label| {
+            // バケットは `or_default().push()` でしか作られないため、キーがあれば必ず非空。
             let horses = buckets.get(label)?;
-            if horses.is_empty() {
-                return None;
-            }
             let entries = horses.len() as u32;
             let pairs: Vec<(f64, bool)> = horses.iter().map(|h| (h.win_prob, h.won())).collect();
             let mean_win_prob =
@@ -327,10 +330,8 @@ fn field_size_segments(races: &[RaceEvaluation]) -> Vec<FieldSizeSegment> {
     FIELD_SIZE_BANDS
         .iter()
         .filter_map(|&label| {
+            // バケットは `or_default().push()` でしか作られないため、キーがあれば必ず非空。
             let group = buckets.get(label)?;
-            if group.is_empty() {
-                return None;
-            }
             let races_n = group.len() as f64;
             let mut win_hits = 0u32;
             let mut place_hits = 0u32;
