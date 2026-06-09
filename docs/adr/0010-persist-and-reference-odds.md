@@ -42,6 +42,19 @@
 - read-through の cache-hit 判定は「保存済み win/place が空でない」。単勝のみ保存された回（複勝未公開時など）は cache-hit して複勝を取り直さない。netkeiba/JRA は単複を同一レスポンスで返すため通常は両方そろうが、片側保存のエッジでは複勝が埋まらないことを許容する（必要になれば「両方そろうまで cache-miss 扱い」に強化する）。
 - backtest の当時オッズ参照は `date(fetched_at)`(UTC) と `race.date`(JST 開催日) の粗い日付比較。TZ 境界（レース後の深夜取得は取りこぼし、当日内取得は同日付で通過）は厳密でないが、fetch-card/predict をレース前に走らせる運用前提で実害は小さい。
 
+## 後日談（#38 で更新）
+本 ADR の決定 5 と「影響」の win+place 限定は **#38 で解消**した。`OddsInteractor` は
+スクレイプで得た**全券種**（馬連・ワイド・馬単・3連複・3連単を含む）を `race_odds` に保存し、
+`find_race_odds` も全券種を読み戻すようになった。これにより resume・cache-hit 時も exotic 推奨が
+出る。`combination_key` 規約はドメイン型（`Pair`/`OrderedPair`/`Triple`/`OrderedTriple`）の
+`to_key`/`from_key` を単一情報源とする（昇順 `-` 連結、順序付きは `>` 連結）。スキーマ（汎用
+`bet_type`/`combination_key`）はマイグレーション再設計なしでそのまま受けられた。`find_race_odds` は
+SQL の `bet_type` フィルタを撤廃して全行を読むが、`BetType` で解釈できない未知ラベルの行は
+読み飛ばす（撤廃前の「未知は無視」挙動を維持し、将来券種を書く新版 → 旧版で読む過渡期でも
+predict/backtest を止めない）。なお組合せ券種は 1 レースで行数が増える（三連単は最大
+18×17×16 = 4896 通り）が、`find_race_odds` は PK 先頭 `race_id` で 1 レースに絞って読むため
+許容範囲とする。
+
 ## 関連
 - ADR 0001（JRA オッズスクレイパー実装, #10）
 - ADR 0005（predict にオッズを結線, #25）— 本 ADR が案B を限定的に復活させる

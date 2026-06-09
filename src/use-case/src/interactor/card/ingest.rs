@@ -83,7 +83,8 @@ impl<R: Repository, S: NetkeibaScraper> CardInteractor<R, S> {
         if odds.win.is_empty() && odds.place.is_empty() {
             tracing::info!(%netkeiba_id, "win/place odds not available yet, skipping odds save");
         } else {
-            // 組合せ券種(#38)は別途キー規約(昇順連結等)を定義する。
+            // netkeiba fetch-card は type=1（単勝・複勝）のみ取得する。組合せ券種は JRA odds-scraper
+            // 経路（OddsInteractor）で取得・永続化する（#38、キー規約は各ドメイン型の to_key）。
             let mut rows: Vec<OddsRow> = Vec::with_capacity(odds_saved);
             rows.extend(
                 odds.win

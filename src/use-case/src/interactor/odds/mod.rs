@@ -7,9 +7,9 @@ use crate::repository::Repository;
 /// read-through なユースケース。
 ///
 /// ADR 0001/0005 は当初オッズの永続化を持たない設計だったが、予想の再現性と当時オッズでの
-/// バックテストのため #51(ADR 0010) で永続化参照へ切り替えた。保存・再参照は単勝・複勝に限る
-/// （組合せ券種の永続化は #38）。`OddsScraper`/`Repository` を必要とするため、メイン
-/// `Interactor<R, P, F>` には波及させず専用 interactor として切り出している。
+/// バックテストのため #51(ADR 0010) で永続化参照へ切り替えた。当初は単勝・複勝に限っていたが
+/// #38 で組合せ券種(馬連・ワイド・馬単・3連複・3連単)も保存・再参照する。`OddsScraper`/`Repository`
+/// を必要とするため、メイン `Interactor<R, P, F>` には波及させず専用 interactor として切り出している。
 pub struct OddsInteractor<O: OddsScraper, R: Repository> {
     pub scraper: O,
     pub repository: R,

@@ -1,8 +1,8 @@
 //! `race_odds` の保存(save_race_odds)→読み出し(find_race_odds)を実 SQLite で往復検証する。
-//! 単勝・複勝の復元と、backtest 用の `as_of`（`date(fetched_at) <= d`）境界を担保する。
+//! 単勝・複勝・組合せ券種(#38)の復元と、backtest 用の `as_of`（`date(fetched_at) <= d`）境界を担保する。
 
 use chrono::{DateTime, NaiveDate, TimeZone, Utc};
-use paddock_domain::{HorseNum, RaceId};
+use paddock_domain::{HorseNum, OrderedPair, OrderedTriple, Pair, RaceId, Triple};
 use paddock_use_case::repository::{OddsRow, RaceOddsRecord, Repository};
 use rdb_gateway::{SqliteRepository, pool};
 
@@ -90,6 +90,47 @@ async fn round_trips_win_and_place() {
 }
 
 #[tokio::test]
+async fn round_trips_all_combination_bet_types() {
+    let (repo, _dir) = fresh_repo().await;
+    let pair = Pair::try_from((horse(1), horse(2))).unwrap();
+    let opair = OrderedPair::try_from((horse(3), horse(1))).unwrap();
+    let triple = Triple::try_from((horse(1), horse(2), horse(3))).unwrap();
+    let otriple = OrderedTriple::try_from((horse(5), horse(2), horse(7))).unwrap();
+
+    repo.save_race_odds(&RaceOddsRecord {
+        race_id: race_id(),
+        fetched_at: fetched_at(),
+        rows: vec![
+            OddsRow::quinella(pair, 12.4),
+            OddsRow::wide(pair, 3.1, 4.8),
+            OddsRow::exacta(opair, 25.0),
+            OddsRow::trio(triple, 88.0),
+            OddsRow::trifecta(otriple, 410.0),
+        ],
+    })
+    .await
+    .unwrap();
+
+    let odds = repo
+        .find_race_odds(&race_id(), None)
+        .await
+        .unwrap()
+        .expect("保存済みオッズが読めること");
+
+    // 馬連: 単一値、キーは昇順 Pair で復元。
+    assert!((odds.quinella.get(&pair).unwrap().value() - 12.4).abs() < 1e-9);
+    // ワイド: 複勝同様の幅 odds で復元。
+    let w = odds.wide.get(&pair).unwrap();
+    assert!((w.low.value() - 3.1).abs() < 1e-9 && (w.high.value() - 4.8).abs() < 1e-9);
+    // 馬単: 順序が保持される（3>1 として復元）。
+    assert!((odds.exacta.get(&opair).unwrap().value() - 25.0).abs() < 1e-9);
+    // 三連複: 昇順 Triple。
+    assert!((odds.trio.get(&triple).unwrap().value() - 88.0).abs() < 1e-9);
+    // 三連単: 順序保持の OrderedTriple。
+    assert!((odds.trifecta.get(&otriple).unwrap().value() - 410.0).abs() < 1e-9);
+}
+
+#[tokio::test]
 async fn returns_none_when_absent() {
     let (repo, _dir) = fresh_repo().await;
     let other = RaceId::try_from("2026-3-nakayama-8-9R").unwrap();
@@ -158,6 +199,86 @@ async fn place_row_with_null_odds_high_is_data_error() {
     assert!(
         repo.find_race_odds(&race_id(), None).await.is_err(),
         "複勝の odds_high が NULL なら Error を返す"
+    );
+}
+
+#[tokio::test]
+async fn unknown_bet_type_row_is_skipped_not_errored() {
+    let (repo, _dir) = fresh_repo().await;
+    save_sample(&repo).await; // win/place を投入
+    // 将来券種を書く新版を模した未知 bet_type 行を直接 INSERT する。ラベルは BetType が将来
+    // 拡張されても衝突しないダミーにする（実在馬券名を使うと拡張時にテストが意図せず壊れる）。
+    // combination_key はラベルが未知の時点で評価されず skip されるので、内容は問わない。
+    sqlx::query(
+        "INSERT INTO race_odds (race_id, bet_type, combination_key, odds, odds_high, popularity, fetched_at) \
+         VALUES ($1, '__unknown__', '1-2-3-4-5', 100.0, NULL, NULL, $2)",
+    )
+    .bind(race_id().value())
+    .bind(fetched_at().to_rfc3339())
+    .execute(&repo.pool)
+    .await
+    .unwrap();
+
+    // 未知行はエラーにせず読み飛ばし、既知の win/place は通常どおり復元される。
+    let odds = repo
+        .find_race_odds(&race_id(), None)
+        .await
+        .unwrap()
+        .expect("既知券種があるので Some");
+    assert_eq!(odds.win.len(), 2);
+    assert_eq!(odds.place.len(), 2);
+}
+
+#[tokio::test]
+async fn wide_row_with_null_odds_high_is_data_error() {
+    let (repo, _dir) = fresh_repo().await;
+    // ワイドは複勝同様の幅 odds。odds_high NULL は保存側不整合なので、place 同様に
+    // 同一経路(parse_band)で Error になることを担保する。
+    sqlx::query(
+        "INSERT INTO race_odds (race_id, bet_type, combination_key, odds, odds_high, popularity, fetched_at) \
+         VALUES ($1, 'wide', '1-2', 3.1, NULL, NULL, $2)",
+    )
+    .bind(race_id().value())
+    .bind(fetched_at().to_rfc3339())
+    .execute(&repo.pool)
+    .await
+    .unwrap();
+
+    assert!(
+        repo.find_race_odds(&race_id(), None).await.is_err(),
+        "ワイドの odds_high が NULL なら Error を返す"
+    );
+}
+
+#[tokio::test]
+async fn as_of_filters_combination_rows() {
+    let (repo, _dir) = fresh_repo().await;
+    // 組合せ券種行にも as_of(date(fetched_at)<=d) のリーク防止境界が効くことを担保する。
+    let pair = Pair::try_from((horse(1), horse(2))).unwrap();
+    repo.save_race_odds(&RaceOddsRecord {
+        race_id: race_id(),
+        fetched_at: fetched_at(), // 2026-04-19
+        rows: vec![OddsRow::quinella(pair, 12.4)],
+    })
+    .await
+    .unwrap();
+
+    let same_day = NaiveDate::from_ymd_opt(2026, 4, 19).unwrap();
+    assert!(
+        repo.find_race_odds(&race_id(), Some(same_day))
+            .await
+            .unwrap()
+            .is_some_and(|o| o.quinella.contains_key(&pair)),
+        "同日 as_of では当時オッズとして馬連が参照できる"
+    );
+
+    let day_before = NaiveDate::from_ymd_opt(2026, 4, 18).unwrap();
+    assert!(
+        repo.find_race_odds(&race_id(), Some(day_before))
+            .await
+            .unwrap()
+            .is_none(),
+        "as_of より後に取得された組合せ券種はリーク防止で除外される"
     );
 }
 
