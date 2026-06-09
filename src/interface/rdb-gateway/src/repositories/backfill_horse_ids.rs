@@ -7,7 +7,8 @@ use crate::error::Result;
 ///
 /// - `COUNT(*) = 1` 条件で**一意一致のみ**採用（同名別馬＝複数一致は NULL 据え置き）。
 /// - `horse_id IS NULL` 限定なので冪等（既存値は上書きしない）。
-/// - `results` は #59 以降 pdf 確定成績専用なので source 絞り込みは不要。
+/// - `results` は #59 以降 pdf 確定成績専用だが、その前提が崩れても netkeiba 由来行へ
+///   誤って backfill しないよう `source = 'pdf'` を明示する（防御）。
 pub async fn backfill_results_horse_ids(pool: &SqlitePool) -> Result<u64> {
     let affected = sqlx::query(
         r#"
@@ -16,6 +17,7 @@ pub async fn backfill_results_horse_ids(pool: &SqlitePool) -> Result<u64> {
             SELECT h.horse_id FROM horses h WHERE h.horse_name = results.horse_name
         )
         WHERE results.horse_id IS NULL
+          AND results.source = 'pdf'
           AND (
               SELECT COUNT(*) FROM horses h WHERE h.horse_name = results.horse_name
           ) = 1

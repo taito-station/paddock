@@ -110,6 +110,30 @@ async fn backfills_only_unique_name_matches() {
 }
 
 #[tokio::test]
+async fn fills_multiple_rows_and_returns_total_count() {
+    let (repo, _dir) = fresh_repo().await;
+    insert_horse(&repo, "2019100001", "ウマA").await;
+    insert_horse(&repo, "2019100002", "ウマB").await;
+    repo.save_race(&pdf_race("2026-3-tokyo-2-1R", 1, "ウマA"))
+        .await
+        .unwrap();
+    repo.save_race(&pdf_race("2026-3-tokyo-2-2R", 2, "ウマB"))
+        .await
+        .unwrap();
+
+    let filled = repo.backfill_results_horse_ids().await.unwrap();
+    assert_eq!(filled, 2, "一意一致が複数 → rows_affected は合計");
+    assert_eq!(
+        horse_id_of(&repo, "2026-3-tokyo-2-1R").await.as_deref(),
+        Some("2019100001")
+    );
+    assert_eq!(
+        horse_id_of(&repo, "2026-3-tokyo-2-2R").await.as_deref(),
+        Some("2019100002")
+    );
+}
+
+#[tokio::test]
 async fn idempotent_and_preserves_existing() {
     let (repo, _dir) = fresh_repo().await;
     insert_horse(&repo, "2019104567", "ウマユニーク").await;
