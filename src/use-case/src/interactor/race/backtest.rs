@@ -2,7 +2,8 @@ use std::collections::HashMap;
 
 use chrono::NaiveDate;
 use paddock_domain::{
-    BacktestReport, HorseEntry, HorseFactors, HorseResult, RaceEvaluation, ResultStatus, evaluate,
+    BacktestReport, HorseEntry, HorseFactors, HorseOutcome, HorseResult, RaceEvaluation,
+    ResultStatus, evaluate,
 };
 
 use crate::error::Result;
@@ -11,6 +12,9 @@ use crate::interactor::race::predict::build_factors;
 use crate::pdf_fetcher::PdfFetcher;
 use crate::pdf_parser::PdfParser;
 use crate::repository::Repository;
+
+/// 馬番から引く発走馬の実績: `(着順, 単勝オッズ, 人気)`。いずれも欠落しうるので `Option`。
+type StarterFacts = (Option<u32>, Option<f64>, Option<u32>);
 
 impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
     /// 指定期間 `[from, to]` の確定済みレースに対して確率推定を再現し、予測と実着順を突合した
@@ -94,25 +98,38 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
                 continue;
             }
 
-            // 馬番 → (着順, 単勝オッズ) の突合表。entry_factors と同じ発走馬集合(starters)から作る。
-            // 同着 1 着（稀）の場合は複数馬の win_outcomes が true になるが、的中率はトップ選好馬の
+            // 馬番 → (着順, 単勝オッズ, 人気) の突合表。entry_factors と同じ発走馬集合(starters)から作る。
+            // 同着 1 着（稀）の場合は複数馬の won フラグが true になるが、的中率はトップ選好馬の
             // 着順のみで判定するため二重計上されない。Brier/LogLoss も破綻しない。
-            let by_num: HashMap<u32, (Option<u32>, Option<f64>)> = starters
+            let by_num: HashMap<u32, StarterFacts> = starters
                 .iter()
                 .map(|r| {
                     (
                         r.horse_num.value(),
-                        (r.finishing_position.map(|p| p.value()), r.odds),
+                        (
+                            r.finishing_position.map(|p| p.value()),
+                            r.odds,
+                            r.popularity,
+                        ),
                     )
                 })
                 .collect();
 
-            // 全馬の (win_prob, 1 着か) を蓄積（Brier / LogLoss 用）。
-            let win_outcomes: Vec<(f64, bool)> = probs
+            // 全馬の予測確率と実着・人気を蓄積（校正指標・reliability・セグメント用）。
+            let horses: Vec<HorseOutcome> = probs
                 .iter()
                 .map(|p| {
-                    let won = by_num.get(&p.horse_num.value()).and_then(|(pos, _)| *pos) == Some(1);
-                    (p.win_prob, won)
+                    let (finishing_position, popularity) = by_num
+                        .get(&p.horse_num.value())
+                        .map(|(pos, _, pop)| (*pos, *pop))
+                        .unwrap_or((None, None));
+                    HorseOutcome {
+                        win_prob: p.win_prob,
+                        place_prob: p.place_prob,
+                        show_prob: p.show_prob,
+                        finishing_position,
+                        popularity,
+                    }
                 })
                 .collect();
 
@@ -131,7 +148,7 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
                 .expect("probs is non-empty");
             let (top_pick_position, pdf_top_pick_odds) = by_num
                 .get(&top.horse_num.value())
-                .copied()
+                .map(|(pos, odds, _)| (*pos, *odds))
                 .unwrap_or((None, None));
             // 当時オッズ（単勝）を優先し、無ければ PDF 確定成績の単勝にフォールバック。
             let market_win = market
@@ -154,7 +171,7 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
             }
 
             evaluations.push(RaceEvaluation {
-                win_outcomes,
+                horses,
                 top_pick_position,
                 top_pick_odds,
             });

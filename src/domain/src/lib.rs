@@ -10,7 +10,10 @@ pub mod race_card;
 pub mod simulation;
 pub mod string;
 
-pub use backtest::{BacktestReport, RaceEvaluation, evaluate};
+pub use backtest::{
+    BacktestReport, CalibrationMetrics, FieldSizeSegment, HorseOutcome, PopularitySegment,
+    RaceEvaluation, ReliabilityBin, evaluate,
+};
 pub use betting::{BetCombination, BettingConfig, BettingRecommendation, select_bets};
 pub use error::{Error, Result};
 pub use horse_result::{
