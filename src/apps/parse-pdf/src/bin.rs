@@ -304,7 +304,8 @@ fn should_pin_ocr(parallel: usize, count: usize) -> bool {
 /// Pin OCR (tesseract/OpenMP) to one thread per process via env vars. tesseract
 /// inherits these (its Command is not env_clear'd), so one thread per process fills
 /// the cores cleanly (N processes × 1 thread). Guard the call with [`should_pin_ocr`]
-/// so a lone PDF/meeting keeps all cores. Idempotent — safe to call from either path.
+/// so a lone PDF/meeting keeps all cores. Idempotent: re-setting the same values is a
+/// no-op (fetch and ingest are exclusive subcommands, so it runs at most once per run).
 ///
 /// SAFETY: although the tokio runtime is multi-threaded, nothing else in this process
 /// reads or writes the environment, and callers MUST invoke this before spawning the
@@ -363,6 +364,8 @@ mod tests {
         assert!(should_pin_ocr(2, 2)); // threshold boundary (both just over 1)
         assert!(!should_pin_ocr(1, 8)); // `-j 1` sequential → keep all cores
         assert!(!should_pin_ocr(4, 1)); // single PDF → keep all cores
+        assert!(!should_pin_ocr(2, 1)); // one item at threshold parallelism
+        assert!(!should_pin_ocr(1, 2)); // sequential at threshold count
         assert!(!should_pin_ocr(1, 1));
     }
 
