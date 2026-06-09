@@ -77,6 +77,9 @@ impl Repository for MockRepo {
     ) -> Result<()> {
         Ok(())
     }
+    async fn backfill_results_horse_ids(&self) -> Result<u64> {
+        Ok(0)
+    }
     async fn horse_stats(
         &self,
         _name: &HorseName,
@@ -375,6 +378,9 @@ impl Repository for HistoryRepo {
         _runs: &[paddock_use_case::HorsePastRun],
     ) -> Result<()> {
         Ok(())
+    }
+    async fn backfill_results_horse_ids(&self) -> Result<u64> {
+        Ok(0)
     }
     async fn horse_stats(
         &self,

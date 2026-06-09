@@ -1,3 +1,4 @@
+mod backfill_horse_ids;
 mod course_stats;
 mod fetch_history;
 mod find_finished_races_between;
@@ -48,6 +49,12 @@ impl Repository for SqliteRepository {
         runs: &[paddock_use_case::HorsePastRun],
     ) -> UcResult<()> {
         horse_history::upsert_horse_history(&self.pool, horse_id, runs)
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn backfill_results_horse_ids(&self) -> UcResult<u64> {
+        backfill_horse_ids::backfill_results_horse_ids(&self.pool)
             .await
             .map_err(Into::into)
     }

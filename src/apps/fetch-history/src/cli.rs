@@ -13,4 +13,8 @@ pub struct Cli {
     /// 出馬表をバイパスして近走を取得する horse_id（複数可）。race_id と併用可。
     #[arg(long = "horse-id")]
     pub horse_ids: Vec<String>,
+
+    /// 取得後の pdf 成績行 horse_id backfill を抑制する（既定は自動実行）。
+    #[arg(long = "no-backfill")]
+    pub no_backfill: bool,
 }

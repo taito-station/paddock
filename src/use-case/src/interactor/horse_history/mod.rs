@@ -16,4 +16,10 @@ impl<R: Repository, S: NetkeibaScraper> HorseHistoryInteractor<R, S> {
             scraper,
         }
     }
+
+    /// `horses` マスタを元に pdf 成績行の horse_id を backfill し、埋めた行数を返す。
+    /// 近走取得（[`Self::fetch_and_store`]）で horses が更新された直後に呼ぶ想定。
+    pub async fn backfill_horse_ids(&self) -> crate::error::Result<u64> {
+        self.repository.backfill_results_horse_ids().await
+    }
 }
