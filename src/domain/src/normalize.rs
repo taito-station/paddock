@@ -29,7 +29,9 @@ pub(crate) fn normalize_name(value: String) -> String {
             continue;
         }
 
-        // 半角カタカナ → 全角。後続が濁点/半濁点なら合成して 1 文字にする。
+        // 半角カタカナ → 全角。後続が半角濁点/半濁点なら合成して 1 文字にする。
+        // （合成は「半角基底＋半角濁点」のみ。JRA/netkeiba 由来は全て半角 or 全て全角で、
+        //   「全角基底＋半角濁点」のような混在入力は想定しない。）
         if let Some(base) = halfwidth_kana_to_fullwidth(c) {
             match chars.get(i + 1).copied() {
                 Some('ﾞ') => {
@@ -200,6 +202,15 @@ mod tests {
     fn idempotent_on_already_normalized() {
         for s in ["イクイノックス", "C.ルメール", "ダイワスカーレット"] {
             assert_eq!(normalize_name(s.into()), s);
+        }
+    }
+
+    #[test]
+    fn normalize_is_idempotent_roundtrip() {
+        // 正規化結果を再正規化しても不変（取り込みと検索で表現が揺れない保証）。
+        for s in ["ｶﾞ", "ﾀﾞｲﾜｽｶｰﾚｯﾄ", "Ｃ．ルメール", " イクイノックス "] {
+            let once = normalize_name(s.to_string());
+            assert_eq!(normalize_name(once.clone()), once);
         }
     }
 

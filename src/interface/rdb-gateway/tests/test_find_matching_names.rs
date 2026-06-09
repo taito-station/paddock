@@ -107,9 +107,28 @@ async fn horse_no_match_is_empty_and_limit_applies() {
             .unwrap()
             .is_empty()
     );
-    // limit=1 で 1 件に打ち切り。
+    // limit=1 で 1 件に打ち切り。ORDER BY で昇順先頭が残る。
     let one = repo.find_matching_horse_names("ダイワ", 1).await.unwrap();
-    assert_eq!(one.len(), 1);
+    assert_eq!(one, vec!["ダイワスカーレット"]);
+}
+
+#[tokio::test]
+async fn like_wildcards_in_query_are_escaped() {
+    let (repo, _dir) = fresh_repo().await;
+    seed(&repo).await;
+    // `_`/`%` はワイルドカードでなくリテラル扱い → 馬名に含まれないので該当なし。
+    assert!(
+        repo.find_matching_horse_names("_", 20)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        repo.find_matching_horse_names("%", 20)
+            .await
+            .unwrap()
+            .is_empty()
+    );
 }
 
 #[tokio::test]
