@@ -22,7 +22,8 @@ pub use horse_result::{
 };
 pub use odds::{BetType, OddsValue, OrderedPair, OrderedTriple, Pair, PlaceOdds, RaceOdds, Triple};
 pub use prediction::{
-    HorseFactors, HorseProbability, RateTriple, estimate_probabilities, recent_form_score,
+    HorseFactors, HorseProbability, RateTriple, blend_with_market_win, estimate_probabilities,
+    recent_form_score,
 };
 pub use race::{Race, RaceId, Surface, TrackCondition, Venue, Weather};
 pub use race_card::{HorseEntry, RaceCard};

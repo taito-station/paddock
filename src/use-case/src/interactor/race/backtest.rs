@@ -25,7 +25,16 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
     /// レース日ごとに変わる walk-forward の性質上、馬名でまたいでバッチ化できないため許容する
     /// （オフライン評価用途で実行頻度が低い）。レース取得自体の N+1 は
     /// [`Repository::find_finished_races_between`] が 2 クエリで回避済み。
-    pub async fn backtest(&self, from: NaiveDate, to: NaiveDate) -> Result<BacktestReport> {
+    ///
+    /// `blend_alpha = Some(α)` のとき、確率推定の出力を当時の市場オッズ（単勝, `as_of` 制約付き）の
+    /// implied 確率と α（モデル重み）でブレンドする（#72）。`None` はモデルのみ。ブレンドは
+    /// トップ選好馬・校正集計の前に適用するため、評価はブレンド後の win で行われる。
+    pub async fn backtest(
+        &self,
+        from: NaiveDate,
+        to: NaiveDate,
+        blend_alpha: Option<f64>,
+    ) -> Result<BacktestReport> {
         let races = self
             .repository
             .find_finished_races_between(from, to)
@@ -92,6 +101,31 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
             }
 
             let probs = paddock_domain::prediction::estimate_probabilities(&entry_factors);
+            // 市場オッズ（単勝）ブレンド（#72）。α 指定時のみ適用し、以降のトップ選好馬・校正集計は
+            // すべてブレンド後の win で行う。市場 win は当時 race_odds を優先し、無ければ PDF 確定
+            // 成績の単勝（results.odds, 確定＝クローズ前後のオッズで結果はリークしない）で代替する。
+            // 過去レースは race_odds スナップショットが無いことが多いため、この代替で評価可能になる。
+            // 注意: ここで使う市場 win は回収率評価の top_pick_odds と同一ソースのため、ブレンド有効時
+            // の回収率は構造的に楽観側へ寄る（probability-estimation.md 注 2）。α>=1.0 は domain 側で
+            // no-op になる（predict 経路のような取得短絡は不要、market は既に取得済み）。
+            let probs = match blend_alpha {
+                Some(alpha) => {
+                    // race_odds.win が非空ならそれを使い、完全に空のときのみ results.odds へ代替する。
+                    // race_odds の win は scraper が全頭分まとめて書くため部分カバレッジは想定しないが、
+                    // 仮に部分的でも results.odds へは切り替えない（blend は full coverage 前提、
+                    // probability-estimation.md 参照）。
+                    let market_win: HashMap<_, _> =
+                        match market.as_ref().filter(|o| !o.win.is_empty()) {
+                            Some(o) => o.win.iter().map(|(num, ov)| (*num, ov.value())).collect(),
+                            None => starters
+                                .iter()
+                                .filter_map(|r| r.odds.map(|o| (r.horse_num, o)))
+                                .collect(),
+                        };
+                    paddock_domain::prediction::blend_with_market_win(&probs, &market_win, alpha)
+                }
+                None => probs,
+            };
             // entry_factors が非空なら estimate_probabilities は非空を返すため、理論上到達しない
             // 安全弁（空なら集計に寄与しないのでスキップ）。
             if probs.is_empty() {

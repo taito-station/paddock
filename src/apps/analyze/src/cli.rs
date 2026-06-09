@@ -38,6 +38,11 @@ pub enum Command {
     Predict {
         /// Race ID (例: 2026060412R02).
         race_id: String,
+        /// 市場オッズ(単勝)ブレンドのモデル重み α [0,1]。未指定でモデルのみ、
+        /// 指定すると最新オッズスナップショット(時刻制約なし)の implied 確率と (1-α) で
+        /// ブレンドする（#72）。
+        #[arg(long)]
+        blend_alpha: Option<f64>,
     },
     /// Backtest the prediction logic over finished races in a date range.
     /// Reproduces probability estimation with as-of stats (no leakage) and reports
@@ -49,5 +54,9 @@ pub enum Command {
         /// 終了日 YYYY-MM-DD（含む）。
         #[arg(long)]
         to: String,
+        /// 市場オッズ(単勝)ブレンドのモデル重み α [0,1]。未指定でモデルのみ、
+        /// 指定すると当時オッズの implied 確率と (1-α) でブレンドする（#72）。
+        #[arg(long)]
+        blend_alpha: Option<f64>,
     },
 }

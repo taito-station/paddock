@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use chrono::NaiveDate;
 use paddock_domain::{
     HorseEntry, HorseFactors, HorseName, HorseProbability, RaceId, RateTriple, Surface,
@@ -10,7 +12,14 @@ use crate::pdf_parser::PdfParser;
 use crate::repository::{CourseStatsRow, GroupStat, HorseStatsRow, JockeyStatsRow, Repository};
 
 impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
-    pub async fn predict_race(&self, race_id: &RaceId) -> Result<Vec<HorseProbability>> {
+    /// 出馬表から各馬の win/place/show 確率を推定する。`blend_alpha = Some(α)` のとき、
+    /// 当日の市場オッズ（単勝, `find_race_odds(.., None)` の最新スナップショット）の implied 確率と
+    /// α（モデル重み）でブレンドする（#72）。`None` はモデルのみ（市場オッズを取得しない）。
+    pub async fn predict_race(
+        &self,
+        race_id: &RaceId,
+        blend_alpha: Option<f64>,
+    ) -> Result<Vec<HorseProbability>> {
         let card = self
             .repository
             .find_race_card(race_id)
@@ -48,9 +57,30 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
 
         // estimate_probabilities が win→1.0 / place→2.0 / show→3.0 正規化 + 累積 max 単調化を行い、
         // win_prob ≤ place_prob ≤ show_prob を保証する（ADR 0007）。
-        Ok(paddock_domain::prediction::estimate_probabilities(
-            &entry_factors,
-        ))
+        let probs = paddock_domain::prediction::estimate_probabilities(&entry_factors);
+
+        // 市場オッズ（単勝）ブレンド（#72）。α<1.0 のときのみ最新オッズスナップショットを取得する
+        // （α>=1.0・非有限はブレンド無効なので DB クエリを省く）。
+        let probs = match blend_alpha.filter(|a| a.is_finite() && *a < 1.0) {
+            Some(alpha) => {
+                let market = self.repository.find_race_odds(race_id, None).await?;
+                match market {
+                    Some(odds) => {
+                        let market_win: HashMap<_, _> =
+                            odds.win.iter().map(|(num, o)| (*num, o.value())).collect();
+                        paddock_domain::prediction::blend_with_market_win(
+                            &probs,
+                            &market_win,
+                            alpha,
+                        )
+                    }
+                    None => probs,
+                }
+            }
+            None => probs,
+        };
+
+        Ok(probs)
     }
 
     /// 指定馬の前走（`before` より前の直近 1 走）から前走フォーム [0,1] を算出する。前走が無い／

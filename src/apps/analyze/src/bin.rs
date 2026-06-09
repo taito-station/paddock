@@ -66,15 +66,24 @@ async fn main() -> anyhow::Result<()> {
                 many => print_candidates("騎手", &name, many, truncated),
             }
         }
-        cli::Command::Predict { race_id } => {
+        cli::Command::Predict {
+            race_id,
+            blend_alpha,
+        } => {
+            let blend_alpha = validate_blend_alpha(blend_alpha)?;
             let rid = RaceId::try_from(race_id.as_str())?;
-            let probs = app.interactor.predict_race(&rid).await?;
+            let probs = app.interactor.predict_race(&rid, blend_alpha).await?;
             print_predict(&probs);
         }
-        cli::Command::Backtest { from, to } => {
+        cli::Command::Backtest {
+            from,
+            to,
+            blend_alpha,
+        } => {
+            let blend_alpha = validate_blend_alpha(blend_alpha)?;
             let from = parse_date(&from)?;
             let to = parse_date(&to)?;
-            let report = app.interactor.backtest(from, to).await?;
+            let report = app.interactor.backtest(from, to, blend_alpha).await?;
             print_backtest(from, to, &report);
         }
     }
@@ -85,6 +94,16 @@ async fn main() -> anyhow::Result<()> {
 fn parse_date(s: &str) -> anyhow::Result<NaiveDate> {
     NaiveDate::parse_from_str(s, "%Y-%m-%d")
         .map_err(|e| anyhow::anyhow!("invalid date '{s}' (expected YYYY-MM-DD): {e}"))
+}
+
+/// `--blend-alpha` を検証する。未指定はそのまま `None`、指定時は `[0,1]` のみ許可。
+fn validate_blend_alpha(alpha: Option<f64>) -> anyhow::Result<Option<f64>> {
+    if let Some(a) = alpha
+        && !((0.0..=1.0).contains(&a))
+    {
+        anyhow::bail!("--blend-alpha must be within [0, 1], got {a}");
+    }
+    Ok(alpha)
 }
 
 /// 候補が複数ある場合に一覧を提示して終了する（ユーザーが絞り込んで再実行）。

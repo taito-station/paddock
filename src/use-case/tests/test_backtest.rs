@@ -299,7 +299,7 @@ fn d(y: i32, m: u32, day: u32) -> NaiveDate {
 #[tokio::test]
 async fn backtest_aggregates_top_pick_and_payout() {
     let app = interactor(vec![finished_race()]);
-    let report = app.backtest(d(2026, 1, 1), d(2026, 1, 31)).await.unwrap();
+    let report = app.backtest(d(2026, 1, 1), d(2026, 1, 31), None).await.unwrap();
 
     assert_eq!(report.races_evaluated, 1);
     // トップ選好馬は高スタッツの ウマA(1 着) → 単勝・連対・複勝すべて的中
@@ -324,7 +324,7 @@ async fn backtest_prefers_market_odds_over_pdf() {
         win_only_odds(race.race_id.value(), 1, 7.0),
     );
     let app = interactor_with_odds(vec![race], odds);
-    let report = app.backtest(d(2026, 1, 1), d(2026, 1, 31)).await.unwrap();
+    let report = app.backtest(d(2026, 1, 1), d(2026, 1, 31), None).await.unwrap();
 
     assert_eq!(report.payout_races, 1);
     // トップ選好馬 ウマA(1 着) を当時オッズ 7.0 で計上 → 回収率 7.0（PDF の 4.0 ではない）
@@ -335,10 +335,103 @@ async fn backtest_prefers_market_odds_over_pdf() {
     );
 }
 
+/// モデルは高スタッツの ウマA を本命にするが、ウマA は 2 着で、低スタッツの ウマB(市場の
+/// 圧倒的人気)が 1 着のレース。ブレンドで本命が市場人気の ウマB に動くことを検証する。
+fn blend_race() -> Race {
+    Race {
+        race_id: RaceId::try_from("2026-1-nakayama-1-2R").unwrap(),
+        date: NaiveDate::from_ymd_opt(2026, 1, 10).unwrap(),
+        venue: Venue::Nakayama,
+        round: 1,
+        day: 1,
+        race_num: 2,
+        surface: Surface::Turf,
+        distance: 2000,
+        track_condition: None,
+        weather: None,
+        results: vec![
+            result(1, 1, "ウマA", 2, Some(9.0)), // 高スタッツ・2 着・人気薄
+            result(2, 5, "ウマB", 1, Some(1.2)), // 低スタッツ・1 着・圧倒的人気
+        ],
+    }
+}
+
+#[tokio::test]
+async fn backtest_blend_flips_top_pick_to_market_favorite() {
+    // モデルのみ: 本命 ウマA は 2 着 → 単勝的中 0。
+    let model_only = interactor(vec![blend_race()])
+        .backtest(d(2026, 1, 1), d(2026, 1, 31), None)
+        .await
+        .unwrap();
+    assert!(
+        model_only.win_hit_rate.abs() < 1e-9,
+        "model-only win_hit={}",
+        model_only.win_hit_rate
+    );
+
+    // 当時 race_odds(ウマB=1.2 で圧倒的人気)とブレンド(α=0.2)→ 本命が ウマB に動き 1 着的中。
+    let race = blend_race();
+    let mut odds = HashMap::new();
+    let mut o = RaceOdds::empty(RaceId::try_from(race.race_id.value()).unwrap());
+    o.win
+        .insert(HorseNum::try_from(1u32).unwrap(), OddsValue::try_from(9.0).unwrap());
+    o.win
+        .insert(HorseNum::try_from(2u32).unwrap(), OddsValue::try_from(1.2).unwrap());
+    odds.insert(race.race_id.value().to_string(), o);
+
+    let blended = interactor_with_odds(vec![race], odds)
+        .backtest(d(2026, 1, 1), d(2026, 1, 31), Some(0.2))
+        .await
+        .unwrap();
+    assert!(
+        (blended.win_hit_rate - 1.0).abs() < 1e-9,
+        "blended win_hit={}",
+        blended.win_hit_rate
+    );
+}
+
+#[tokio::test]
+async fn backtest_blend_uses_partial_race_odds_as_is() {
+    // race_odds.win に勝ち馬 ウマB のみ（部分カバレッジ）。win が非空なので results.odds へは
+    // フォールバックせず race_odds をそのまま使い、domain の部分カバレッジ処理（カバー馬に市場重みが
+    // 乗る既知挙動）で本命が ウマB に動き 1 着的中する。full-coverage 前提の既知挙動を固定するテスト。
+    let race = blend_race();
+    let mut odds = HashMap::new();
+    let mut o = RaceOdds::empty(RaceId::try_from(race.race_id.value()).unwrap());
+    o.win
+        .insert(HorseNum::try_from(2u32).unwrap(), OddsValue::try_from(1.2).unwrap());
+    odds.insert(race.race_id.value().to_string(), o);
+
+    let report = interactor_with_odds(vec![race], odds)
+        .backtest(d(2026, 1, 1), d(2026, 1, 31), Some(0.2))
+        .await
+        .unwrap();
+    assert!(
+        (report.win_hit_rate - 1.0).abs() < 1e-9,
+        "partial race_odds win_hit={}",
+        report.win_hit_rate
+    );
+}
+
+#[tokio::test]
+async fn backtest_blend_falls_back_to_results_odds_when_no_snapshot() {
+    // race_odds スナップショット無し → PDF 確定成績の単勝(ウマB=1.2)で代替し、市場のみ(α=0)で
+    // 本命が ウマB に動き 1 着的中する。
+    let blended = interactor(vec![blend_race()])
+        .backtest(d(2026, 1, 1), d(2026, 1, 31), Some(0.0))
+        .await
+        .unwrap();
+    assert!(
+        (blended.win_hit_rate - 1.0).abs() < 1e-9,
+        "fallback blended win_hit={}",
+        blended.win_hit_rate
+    );
+}
+
 #[tokio::test]
 async fn backtest_empty_when_no_races() {
     let app = interactor(Vec::new());
-    let report = app.backtest(d(2026, 1, 1), d(2026, 1, 31)).await.unwrap();
+    let report = app.backtest(d(2026, 1, 1), d(2026, 1, 31), None).await.unwrap();
     assert_eq!(report.races_evaluated, 0);
     assert!(report.payout_rate.is_none());
 }
@@ -367,7 +460,7 @@ async fn backtest_excludes_scratched_and_cancelled_horses() {
         ],
     };
     let app = interactor(vec![race]);
-    let report = app.backtest(d(2026, 1, 1), d(2026, 1, 31)).await.unwrap();
+    let report = app.backtest(d(2026, 1, 1), d(2026, 1, 31), None).await.unwrap();
 
     assert_eq!(report.races_evaluated, 1);
     // 非出走馬が除外され、発走馬の最高スタッツ ウマA が 1 着 → 単勝的中

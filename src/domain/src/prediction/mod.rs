@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use chrono::NaiveDate;
 
 use crate::horse_result::{HorseName, HorseNum, HorseResult};
@@ -71,6 +73,88 @@ pub fn estimate_probabilities(entries: &[(HorseEntry, HorseFactors)]) -> Vec<Hor
             win_prob: win_probs[i],
             place_prob: place_probs[i],
             show_prob: show_probs[i],
+        })
+        .collect()
+}
+
+/// 単勝確率を市場オッズ（単勝）の implied 確率とブレンドする（#72）。
+///
+/// `market_win_odds` は馬番→単勝確定オッズ（払戻倍率, ≥1.0）。各馬の implied 確率
+/// `1/odds` をレース内で合計 1.0 に正規化（控除率＝オーバーラウンドを除去）し、モデルの
+/// `win_prob` と `alpha`（モデル重み, `1-alpha` が市場重み）で線形ブレンドする。`alpha >= 1.0`
+/// またはオッズが空のときはモデル確率をそのまま返す（no-op）。オッズの無い馬はブレンド時点では
+/// モデル値を保つ（最後の win 合計 1.0 再正規化で全体と同じ係数でスケールはされる）。
+///
+/// ブレンドで win が動くため、最後に win 合計を 1.0 へ再正規化し、`place`/`show` は
+/// `win ≤ place ≤ show` を保つよう累積 max で再是正する（v1 は win のみブレンド対象で
+/// place/show のレートはモデル値を踏襲する）。
+///
+/// 前提・既知の割り切り（v1）:
+/// - **(ほぼ)全頭のオッズが揃っていることを前提**とする。implied の正規化母数はオッズを持つ馬
+///   のみの合計なので、一部の馬しかオッズが無い部分カバレッジでは市場重み `(1-α)` がカバー済みの
+///   少数馬に偏って乗り、過大評価になりうる。実運用の単勝オッズは全頭分そろうため通常は問題ない。
+/// - place/show は単調再是正のみで、**場内合計（2.0/3.0）は再正規化しない**ため、ブレンド後は
+///   その合計が崩れうる。place/show の精密なブレンドは将来課題。
+pub fn blend_with_market_win(
+    probs: &[HorseProbability],
+    market_win_odds: &HashMap<HorseNum, f64>,
+    alpha: f64,
+) -> Vec<HorseProbability> {
+    // 非有限な α（NaN 等）は no-op 扱い（呼び出し側で検証済みだが防御的に弾く）。
+    if !alpha.is_finite() {
+        return probs.to_vec();
+    }
+    let alpha = alpha.clamp(0.0, 1.0);
+    if probs.is_empty() || market_win_odds.is_empty() || alpha >= 1.0 {
+        return probs.to_vec();
+    }
+
+    // 市場 implied 確率: 1/odds を合計 1.0 に正規化（オッズのある馬のみが母数）。
+    // 単勝オッズ（払戻倍率）は ≥1.0。型検証を経ていない生の f64（backtest が results.odds から渡す
+    // 経路）に異常値が混じっても弾けるよう doc 契約どおり `>= 1.0` でフィルタする。OddsValue 由来の
+    // 経路では常に満たすが、フォールバック経路のための防御。
+    let implied: HashMap<HorseNum, f64> = market_win_odds
+        .iter()
+        .filter(|&(_, &odds)| odds.is_finite() && odds >= 1.0)
+        .map(|(&num, &odds)| (num, 1.0 / odds))
+        .collect();
+    let overround: f64 = implied.values().sum();
+    if overround <= 0.0 {
+        return probs.to_vec();
+    }
+
+    // モデル win と市場 implied をブレンド（オッズの無い馬はモデル値のまま）。
+    let blended: Vec<f64> = probs
+        .iter()
+        .map(|p| match implied.get(&p.horse_num) {
+            Some(&imp) => alpha * p.win_prob + (1.0 - alpha) * (imp / overround),
+            None => p.win_prob,
+        })
+        .collect();
+
+    // 部分カバレッジや凸結合のドリフトを吸収して win 合計を 1.0 へ戻す。
+    // `min(1.0)` は w ≤ total（全要素非負）より数学的には恒等だが、浮動小数点の保険として残す。
+    let total: f64 = blended.iter().sum();
+    let win_probs: Vec<f64> = if total > 0.0 {
+        blended.iter().map(|w| (w / total).min(1.0)).collect()
+    } else {
+        blended
+    };
+
+    probs
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            let win = win_probs[i];
+            let place = p.place_prob.max(win).min(1.0);
+            let show = p.show_prob.max(place).min(1.0);
+            HorseProbability {
+                horse_num: p.horse_num,
+                horse_name: p.horse_name.clone(),
+                win_prob: win,
+                place_prob: place,
+                show_prob: show,
+            }
         })
         .collect()
 }
@@ -180,6 +264,10 @@ mod tests {
 
     fn ymd(y: i32, m: u32, d: u32) -> NaiveDate {
         NaiveDate::from_ymd_opt(y, m, d).unwrap()
+    }
+
+    fn approx(a: f64, b: f64) {
+        assert!((a - b).abs() < 1e-9, "expected {b}, got {a}");
     }
 
     fn prev_result(
@@ -469,6 +557,111 @@ mod tests {
         };
         assert!(raw_score(&strong, |r| r.win) > s_without);
         assert!(raw_score(&weak, |r| r.win) < s_without);
+    }
+
+    fn prob(num: u32, win: f64, place: f64, show: f64) -> HorseProbability {
+        HorseProbability {
+            horse_num: HorseNum::try_from(num).unwrap(),
+            horse_name: HorseName::try_from(format!("ウマ{num}")).unwrap(),
+            win_prob: win,
+            place_prob: place,
+            show_prob: show,
+        }
+    }
+
+    fn odds_map(pairs: &[(u32, f64)]) -> HashMap<HorseNum, f64> {
+        pairs
+            .iter()
+            .map(|&(n, o)| (HorseNum::try_from(n).unwrap(), o))
+            .collect()
+    }
+
+    #[test]
+    fn blend_alpha_one_is_noop() {
+        let probs = vec![prob(1, 0.6, 0.7, 0.8), prob(2, 0.4, 0.5, 0.6)];
+        let out = blend_with_market_win(&probs, &odds_map(&[(1, 2.0), (2, 2.0)]), 1.0);
+        for (a, b) in probs.iter().zip(&out) {
+            approx(a.win_prob, b.win_prob);
+            approx(a.place_prob, b.place_prob);
+            approx(a.show_prob, b.show_prob);
+        }
+    }
+
+    #[test]
+    fn blend_empty_market_is_noop() {
+        let probs = vec![prob(1, 0.6, 0.7, 0.8), prob(2, 0.4, 0.5, 0.6)];
+        let out = blend_with_market_win(&probs, &HashMap::new(), 0.5);
+        assert_eq!(out.len(), 2);
+        approx(out[0].win_prob, 0.6);
+        approx(out[1].win_prob, 0.4);
+    }
+
+    #[test]
+    fn blend_removes_overround_and_mixes() {
+        // モデル win = [0.5, 0.5]、オッズ [1.5, 3.0]。
+        // implied = [0.6667, 0.3333], overround=1.0 → market_prob = [0.6667, 0.3333]
+        // （このオッズは控除率0なので偶然 overround=1.0）。α=0.5 →
+        // blended = [0.5*0.5+0.5*0.6667, 0.5*0.5+0.5*0.3333] = [0.5833, 0.4167]、合計1.0。
+        let probs = vec![prob(1, 0.5, 0.6, 0.7), prob(2, 0.5, 0.6, 0.7)];
+        let out = blend_with_market_win(&probs, &odds_map(&[(1, 1.5), (2, 3.0)]), 0.5);
+        let m1 = (1.0 / 1.5) / (1.0 / 1.5 + 1.0 / 3.0);
+        approx(out[0].win_prob, 0.5 * 0.5 + 0.5 * m1);
+        approx(out[1].win_prob, 1.0 - out[0].win_prob);
+        let total: f64 = out.iter().map(|p| p.win_prob).sum();
+        approx(total, 1.0);
+    }
+
+    #[test]
+    fn blend_normalizes_when_overround_above_one() {
+        // 控除率あり: オッズ [1.5, 1.5] → implied=[0.667,0.667] overround=1.333 → market=[0.5,0.5]。
+        let probs = vec![prob(1, 0.7, 0.8, 0.9), prob(2, 0.3, 0.4, 0.5)];
+        let out = blend_with_market_win(&probs, &odds_map(&[(1, 1.5), (2, 1.5)]), 0.5);
+        // market = [0.5,0.5]、blended=[0.6,0.4]、合計1.0。
+        approx(out[0].win_prob, 0.6);
+        approx(out[1].win_prob, 0.4);
+        let total: f64 = out.iter().map(|p| p.win_prob).sum();
+        approx(total, 1.0);
+    }
+
+    #[test]
+    fn blend_keeps_monotonicity_and_unit_range() {
+        // 市場が favorite の win を model.place 超へ押し上げても win ≤ place ≤ show を保つ。
+        let probs = vec![prob(1, 0.4, 0.45, 0.5), prob(2, 0.6, 0.62, 0.7)];
+        let out = blend_with_market_win(&probs, &odds_map(&[(1, 1.2), (2, 6.0)]), 0.2);
+        for p in &out {
+            assert!(p.win_prob <= p.place_prob && p.place_prob <= p.show_prob, "{p:?}");
+            assert!((0.0..=1.0).contains(&p.win_prob));
+            assert!((0.0..=1.0).contains(&p.show_prob));
+        }
+    }
+
+    #[test]
+    fn blend_non_finite_alpha_is_noop() {
+        // 非有限 α（NaN）は防御的に no-op（CLI で弾く前提だがドメイン単体でも保証）。
+        let probs = vec![prob(1, 0.6, 0.7, 0.8), prob(2, 0.4, 0.5, 0.6)];
+        let out = blend_with_market_win(&probs, &odds_map(&[(1, 2.0), (2, 2.0)]), f64::NAN);
+        approx(out[0].win_prob, 0.6);
+        approx(out[1].win_prob, 0.4);
+    }
+
+    #[test]
+    fn blend_noop_when_all_odds_nonpositive() {
+        // 全オッズが 0/負（型検証を経ない生 f64 経路の異常値）→ implied 空 → overround 0 → no-op。
+        let probs = vec![prob(1, 0.6, 0.7, 0.8), prob(2, 0.4, 0.5, 0.6)];
+        let out = blend_with_market_win(&probs, &odds_map(&[(1, 0.0), (2, -1.0)]), 0.5);
+        approx(out[0].win_prob, 0.6);
+        approx(out[1].win_prob, 0.4);
+    }
+
+    #[test]
+    fn blend_partial_coverage_keeps_model_for_missing_and_renormalizes() {
+        // 馬2 はオッズ無し → モデル値を保ちつつ全体は合計1.0へ再正規化。
+        let probs = vec![prob(1, 0.5, 0.6, 0.7), prob(2, 0.5, 0.6, 0.7)];
+        let out = blend_with_market_win(&probs, &odds_map(&[(1, 1.1)]), 0.5);
+        let total: f64 = out.iter().map(|p| p.win_prob).sum();
+        approx(total, 1.0);
+        // 馬1 は超 favorite オッズなので blend で win が上がる。
+        assert!(out[0].win_prob > out[1].win_prob);
     }
 
     #[test]
