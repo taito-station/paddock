@@ -41,7 +41,12 @@ async fn main() -> anyhow::Result<()> {
 fn max_rps_to_interval(max_rps: Option<f64>) -> anyhow::Result<Option<Duration>> {
     match max_rps {
         Some(rps) if rps.is_finite() && rps > 0.0 => {
-            Ok(Some(Duration::from_secs_f64(1.0 / rps)))
+            // `try_from_secs_f64` (not `from_secs_f64`) so an absurdly small rate,
+            // whose interval 1/rps overflows Duration's range, errors out instead
+            // of panicking.
+            Duration::try_from_secs_f64(1.0 / rps)
+                .map(Some)
+                .map_err(|_| anyhow::anyhow!("--max-rps is too small to represent: {rps}"))
         }
         Some(rps) => anyhow::bail!("--max-rps must be a positive number, got {rps}"),
         None => Ok(None),
@@ -390,6 +395,8 @@ mod tests {
         assert!(max_rps_to_interval(Some(0.0)).is_err());
         assert!(max_rps_to_interval(Some(-1.0)).is_err());
         assert!(max_rps_to_interval(Some(f64::INFINITY)).is_err());
+        // A positive-but-absurdly-small rate overflows Duration → error, not panic.
+        assert!(max_rps_to_interval(Some(1e-20)).is_err());
     }
 
     #[test]

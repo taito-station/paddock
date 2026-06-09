@@ -35,7 +35,10 @@ impl RateGate {
     ///
     /// The wait is a blocking `thread::sleep`, matching the fetcher's existing
     /// blocking ureq/OCR pattern (the parallel range fetch bounds concurrency by
-    /// CPU cores, so worker threads already block during fetch).
+    /// CPU cores, so worker threads already block during fetch). This assumes
+    /// in-flight fetches stay around the CPU-core count (the current `Semaphore`
+    /// bound); pushing concurrency far beyond that would park many runtime threads
+    /// here and should instead move to `spawn_blocking` / async sleep.
     fn wait(&self) {
         let Some(min) = self.min_interval else {
             return;
