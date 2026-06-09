@@ -82,7 +82,8 @@ pub fn estimate_probabilities(entries: &[(HorseEntry, HorseFactors)]) -> Vec<Hor
 /// `market_win_odds` は馬番→単勝確定オッズ（払戻倍率, ≥1.0）。各馬の implied 確率
 /// `1/odds` をレース内で合計 1.0 に正規化（控除率＝オーバーラウンドを除去）し、モデルの
 /// `win_prob` と `alpha`（モデル重み, `1-alpha` が市場重み）で線形ブレンドする。`alpha >= 1.0`
-/// またはオッズが空のときはモデル確率をそのまま返す（no-op）。オッズの無い馬はモデル値を保つ。
+/// またはオッズが空のときはモデル確率をそのまま返す（no-op）。オッズの無い馬はブレンド時点では
+/// モデル値を保つ（最後の win 合計 1.0 再正規化で全体と同じ係数でスケールはされる）。
 ///
 /// ブレンドで win が動くため、最後に win 合計を 1.0 へ再正規化し、`place`/`show` は
 /// `win ≤ place ≤ show` を保つよう累積 max で再是正する（v1 は win のみブレンド対象で
@@ -611,8 +612,7 @@ mod tests {
 
     #[test]
     fn blend_normalizes_when_overround_above_one() {
-        // 控除率あり: オッズ [2.0, 2.0] → implied=[0.5,0.5] overround=1.0。
-        // オッズ [1.5, 1.5] → implied=[0.667,0.667] overround=1.333 → market=[0.5,0.5]。
+        // 控除率あり: オッズ [1.5, 1.5] → implied=[0.667,0.667] overround=1.333 → market=[0.5,0.5]。
         let probs = vec![prob(1, 0.7, 0.8, 0.9), prob(2, 0.3, 0.4, 0.5)];
         let out = blend_with_market_win(&probs, &odds_map(&[(1, 1.5), (2, 1.5)]), 0.5);
         // market = [0.5,0.5]、blended=[0.6,0.4]、合計1.0。
@@ -632,6 +632,24 @@ mod tests {
             assert!((0.0..=1.0).contains(&p.win_prob));
             assert!((0.0..=1.0).contains(&p.show_prob));
         }
+    }
+
+    #[test]
+    fn blend_non_finite_alpha_is_noop() {
+        // 非有限 α（NaN）は防御的に no-op（CLI で弾く前提だがドメイン単体でも保証）。
+        let probs = vec![prob(1, 0.6, 0.7, 0.8), prob(2, 0.4, 0.5, 0.6)];
+        let out = blend_with_market_win(&probs, &odds_map(&[(1, 2.0), (2, 2.0)]), f64::NAN);
+        approx(out[0].win_prob, 0.6);
+        approx(out[1].win_prob, 0.4);
+    }
+
+    #[test]
+    fn blend_noop_when_all_odds_nonpositive() {
+        // 全オッズが 0/負（型検証を経ない生 f64 経路の異常値）→ implied 空 → overround 0 → no-op。
+        let probs = vec![prob(1, 0.6, 0.7, 0.8), prob(2, 0.4, 0.5, 0.6)];
+        let out = blend_with_market_win(&probs, &odds_map(&[(1, 0.0), (2, -1.0)]), 0.5);
+        approx(out[0].win_prob, 0.6);
+        approx(out[1].win_prob, 0.4);
     }
 
     #[test]

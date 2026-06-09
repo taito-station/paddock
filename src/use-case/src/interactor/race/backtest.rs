@@ -110,6 +110,10 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
             // no-op になる（predict 経路のような取得短絡は不要、market は既に取得済み）。
             let probs = match blend_alpha {
                 Some(alpha) => {
+                    // race_odds.win が非空ならそれを使い、完全に空のときのみ results.odds へ代替する。
+                    // race_odds の win は scraper が全頭分まとめて書くため部分カバレッジは想定しないが、
+                    // 仮に部分的でも results.odds へは切り替えない（blend は full coverage 前提、
+                    // probability-estimation.md 参照）。
                     let market_win: HashMap<_, _> =
                         match market.as_ref().filter(|o| !o.win.is_empty()) {
                             Some(o) => o.win.iter().map(|(num, ov)| (*num, ov.value())).collect(),
