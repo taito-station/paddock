@@ -57,6 +57,8 @@ pub async fn find_race_odds(
         // bet_type は `BetType`(Display=snake_case)で書かれる。未知ラベルの行は読み飛ばす:
         // SQL の bet_type フィルタを撤廃した(#38)ため、将来の券種追加を書く新版 → 旧版で読む
         // 過渡期でも predict/backtest 全体を止めない（撤廃前の「未知は無視」挙動を維持する）。
+        // 一方、既知 bet_type の combination_key/幅 odds の不正は読み飛ばさず、下の parse_key/
+        // parse_band が `Error::Data` で停止させる（保存側バグの早期検知）。
         let Ok(bet_type) = BetType::try_from(row.bet_type.as_str()) else {
             continue;
         };

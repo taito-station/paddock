@@ -206,10 +206,11 @@ async fn place_row_with_null_odds_high_is_data_error() {
 async fn unknown_bet_type_row_is_skipped_not_errored() {
     let (repo, _dir) = fresh_repo().await;
     save_sample(&repo).await; // win/place を投入
-    // 将来券種を書く新版を模した未知 bet_type 行を直接 INSERT する。
+    // 将来券種を書く新版を模した未知 bet_type 行を直接 INSERT する。ラベルは BetType が将来
+    // 拡張されても衝突しないダミーにする（実在馬券名を使うと拡張時にテストが意図せず壊れる）。
     sqlx::query(
         "INSERT INTO race_odds (race_id, bet_type, combination_key, odds, odds_high, popularity, fetched_at) \
-         VALUES ($1, 'win5', '1-2-3-4-5', 100.0, NULL, NULL, $2)",
+         VALUES ($1, '__unknown__', '1-2-3-4-5', 100.0, NULL, NULL, $2)",
     )
     .bind(race_id().value())
     .bind(fetched_at().to_rfc3339())
@@ -225,6 +226,59 @@ async fn unknown_bet_type_row_is_skipped_not_errored() {
         .expect("既知券種があるので Some");
     assert_eq!(odds.win.len(), 2);
     assert_eq!(odds.place.len(), 2);
+}
+
+#[tokio::test]
+async fn wide_row_with_null_odds_high_is_data_error() {
+    let (repo, _dir) = fresh_repo().await;
+    // ワイドは複勝同様の幅 odds。odds_high NULL は保存側不整合なので、place 同様に
+    // 同一経路(parse_band)で Error になることを担保する。
+    sqlx::query(
+        "INSERT INTO race_odds (race_id, bet_type, combination_key, odds, odds_high, popularity, fetched_at) \
+         VALUES ($1, 'wide', '1-2', 3.1, NULL, NULL, $2)",
+    )
+    .bind(race_id().value())
+    .bind(fetched_at().to_rfc3339())
+    .execute(&repo.pool)
+    .await
+    .unwrap();
+
+    assert!(
+        repo.find_race_odds(&race_id(), None).await.is_err(),
+        "ワイドの odds_high が NULL なら Error を返す"
+    );
+}
+
+#[tokio::test]
+async fn as_of_filters_combination_rows() {
+    let (repo, _dir) = fresh_repo().await;
+    // 組合せ券種行にも as_of(date(fetched_at)<=d) のリーク防止境界が効くことを担保する。
+    let pair = Pair::try_from((horse(1), horse(2))).unwrap();
+    repo.save_race_odds(&RaceOddsRecord {
+        race_id: race_id(),
+        fetched_at: fetched_at(), // 2026-04-19
+        rows: vec![OddsRow::quinella(pair, 12.4)],
+    })
+    .await
+    .unwrap();
+
+    let same_day = NaiveDate::from_ymd_opt(2026, 4, 19).unwrap();
+    assert!(
+        repo.find_race_odds(&race_id(), Some(same_day))
+            .await
+            .unwrap()
+            .is_some_and(|o| o.quinella.contains_key(&pair)),
+        "同日 as_of では当時オッズとして馬連が参照できる"
+    );
+
+    let day_before = NaiveDate::from_ymd_opt(2026, 4, 18).unwrap();
+    assert!(
+        repo.find_race_odds(&race_id(), Some(day_before))
+            .await
+            .unwrap()
+            .is_none(),
+        "as_of より後に取得された組合せ券種はリーク防止で除外される"
+    );
 }
 
 #[tokio::test]

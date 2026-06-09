@@ -147,9 +147,7 @@ impl OddsRow {
         }
     }
 
-    // 組合せ券種(#38)。いずれもライブスクレイプ由来で人気を持たないため popularity は None。
-    // bet_type ラベルは `BetType` の Display(snake_case)、combination_key はドメインの `to_key()` を
-    // 単一情報源とする（"1-2" / "1>2" 等）。find_race_odds 側も同じ enum で復元する。
+    // 組合せ券種(#38)はライブスクレイプ由来で人気を持たないため popularity は None 固定。
 
     /// 馬連 1 行。キーは昇順 `Pair`（`"1-2"`）。
     pub fn quinella(pair: Pair, odds: f64) -> Self {
