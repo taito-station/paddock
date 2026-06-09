@@ -115,6 +115,9 @@ impl Repository for RecordingRepo {
             .push((horse_id.value().to_string(), runs.to_vec()));
         Ok(())
     }
+    async fn backfill_results_horse_ids(&self) -> Result<u64> {
+        Ok(0)
+    }
     async fn save_race(&self, _race: &Race) -> Result<()> {
         unimplemented!()
     }

@@ -17,6 +17,13 @@ async fn main() -> anyhow::Result<()> {
         "取得: {} 頭（失敗 {} 頭） / 保存: {} 近走",
         resp.horses_fetched, resp.horses_failed, resp.runs_saved
     );
+
+    // 取得で horses マスタが更新された直後に、pdf 成績行の horse_id を埋める（馬名一意一致）。
+    if !args.no_backfill {
+        let filled = app.backfill_horse_ids().await?;
+        println!("horse_id 紐付け: {filled} 行");
+    }
+
     if resp.shutuba_failed > 0 {
         // 出馬表取得失敗はその出走馬が丸ごと欠落するため、件数を明示する。
         eprintln!(

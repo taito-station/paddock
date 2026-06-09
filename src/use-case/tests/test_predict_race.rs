@@ -107,6 +107,9 @@ impl Repository for MockRepo {
     ) -> Result<()> {
         unimplemented!()
     }
+    async fn backfill_results_horse_ids(&self) -> Result<u64> {
+        unimplemented!()
+    }
     async fn horse_stats(
         &self,
         name: &HorseName,

@@ -156,6 +156,11 @@ pub trait Repository: Send + Sync {
         runs: &[HorsePastRun],
     ) -> impl Future<Output = Result<()>> + Send;
 
+    /// `horses` マスタに馬名がちょうど 1 件一致する pdf 成績行（`results.horse_id IS NULL`）へ
+    /// horse_id を backfill する。同名別馬（複数一致）・不一致は NULL のまま残し、既存値は
+    /// 上書きしない（冪等）。埋めた行数を返す。
+    fn backfill_results_horse_ids(&self) -> impl Future<Output = Result<u64>> + Send;
+
     /// 馬の各種成績統計を返す。`as_of = Some(d)` のとき `races.date < d` の成績のみを集計する
     /// （バックテストのリーク防止。本番予想は `None` で全期間集計）。
     fn horse_stats(
