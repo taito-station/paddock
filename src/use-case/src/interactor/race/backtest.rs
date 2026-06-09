@@ -43,6 +43,14 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
             }
             let as_of = Some(race.date);
 
+            // 回収率は実際に賭けられる「当時オッズ」で評価したい。race_odds に当該レース当日
+            // 以前(date(fetched_at) <= race.date)のスナップショットがあれば使い、無ければ
+            // PDF 確定成績の単勝にフォールバックする（#51）。
+            let market = self
+                .repository
+                .find_race_odds(&race.race_id, as_of)
+                .await?;
+
             // コース統計は全馬共通なのでループ外で 1 回だけ取得する（predict と同じ）。
             let course = self
                 .repository
@@ -121,10 +129,16 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
                     }
                 })
                 .expect("probs is non-empty");
-            let (top_pick_position, top_pick_odds) = by_num
+            let (top_pick_position, pdf_top_pick_odds) = by_num
                 .get(&top.horse_num.value())
                 .copied()
                 .unwrap_or((None, None));
+            // 当時オッズ（単勝）を優先し、無ければ PDF 確定成績の単勝にフォールバック。
+            let top_pick_odds = market
+                .as_ref()
+                .and_then(|m| m.win.get(&top.horse_num))
+                .map(|o| o.value())
+                .or(pdf_top_pick_odds);
 
             evaluations.push(RaceEvaluation {
                 win_outcomes,

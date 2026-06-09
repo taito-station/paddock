@@ -3,9 +3,13 @@
 //! in-memory モックで、確定レース 1 件に対しトップ選好馬の選択・的中突合・想定回収率が
 //! 期待どおり集計されることを確認する（指標計算自体は domain 側で単体テスト済み）。
 
+use std::collections::HashMap;
+
 use chrono::NaiveDate;
 use paddock_domain::horse_result::{FinishingPosition, GateNum, HorseName, HorseNum, ResultStatus};
-use paddock_domain::{HorseResult, JockeyName, Race, RaceCard, RaceId, Surface, Venue};
+use paddock_domain::{
+    HorseResult, JockeyName, OddsValue, Race, RaceCard, RaceId, RaceOdds, Surface, Venue,
+};
 use paddock_use_case::repository::{
     CourseStatsRow, FetchRecord, GroupStat, HorseStatsRow, JockeyStatsRow, Repository,
 };
@@ -116,6 +120,8 @@ fn finished_race() -> Race {
 
 struct MockRepo {
     races: Vec<Race>,
+    /// race_id 値 → 保存済みオッズ。backtest の「当時オッズ参照」を模す。
+    race_odds: HashMap<String, RaceOdds>,
 }
 
 impl Repository for MockRepo {
@@ -210,6 +216,13 @@ impl Repository for MockRepo {
     async fn find_race_card(&self, _: &RaceId) -> Result<Option<RaceCard>> {
         unimplemented!()
     }
+    async fn find_race_odds(
+        &self,
+        race_id: &RaceId,
+        _as_of: Option<NaiveDate>,
+    ) -> Result<Option<RaceOdds>> {
+        Ok(self.race_odds.get(race_id.value()).cloned())
+    }
     async fn find_races_by_date(&self, _: NaiveDate) -> Result<Vec<Race>> {
         unimplemented!()
     }
@@ -259,7 +272,24 @@ impl paddock_use_case::PdfFetcher for NullFetcher {
 }
 
 fn interactor(races: Vec<Race>) -> Interactor<MockRepo, NullParser, NullFetcher> {
-    Interactor::new(MockRepo { races }, NullParser, NullFetcher)
+    interactor_with_odds(races, HashMap::new())
+}
+
+fn interactor_with_odds(
+    races: Vec<Race>,
+    race_odds: HashMap<String, RaceOdds>,
+) -> Interactor<MockRepo, NullParser, NullFetcher> {
+    Interactor::new(MockRepo { races, race_odds }, NullParser, NullFetcher)
+}
+
+/// 1 頭分の単勝オッズだけを持つ RaceOdds を作る（当時オッズ参照テスト用）。
+fn win_only_odds(race_id: &str, horse_num: u32, odds: f64) -> RaceOdds {
+    let mut o = RaceOdds::empty(RaceId::try_from(race_id).unwrap());
+    o.win.insert(
+        HorseNum::try_from(horse_num).unwrap(),
+        OddsValue::try_from(odds).unwrap(),
+    );
+    o
 }
 
 fn d(y: i32, m: u32, day: u32) -> NaiveDate {
@@ -282,6 +312,27 @@ async fn backtest_aggregates_top_pick_and_payout() {
     // キャリブレーション指標は有限・非負
     assert!(report.brier.is_finite() && report.brier >= 0.0);
     assert!(report.log_loss.is_finite() && report.log_loss >= 0.0);
+}
+
+#[tokio::test]
+async fn backtest_prefers_market_odds_over_pdf() {
+    // race_odds に当時オッズ（単勝 7.0）があれば PDF 成績の単勝(4.0)よりそちらを採用する(#51)。
+    let race = finished_race();
+    let mut odds = HashMap::new();
+    odds.insert(
+        race.race_id.value().to_string(),
+        win_only_odds(race.race_id.value(), 1, 7.0),
+    );
+    let app = interactor_with_odds(vec![race], odds);
+    let report = app.backtest(d(2026, 1, 1), d(2026, 1, 31)).await.unwrap();
+
+    assert_eq!(report.payout_races, 1);
+    // トップ選好馬 ウマA(1 着) を当時オッズ 7.0 で計上 → 回収率 7.0（PDF の 4.0 ではない）
+    assert!(
+        (report.payout_rate.unwrap() - 7.0).abs() < 1e-9,
+        "当時オッズが使われていない (payout_rate={:?})",
+        report.payout_rate
+    );
 }
 
 #[tokio::test]

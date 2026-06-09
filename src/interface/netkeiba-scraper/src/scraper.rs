@@ -9,7 +9,7 @@ use std::time::Duration;
 use paddock_domain::HorseId;
 use paddock_use_case::Result as UcResult;
 use paddock_use_case::netkeiba_scraper::{
-    FetchedCard, FetchedWinOdds, HorsePastRun, NetkeibaScraper, RunnerRef,
+    FetchedCard, FetchedOdds, HorsePastRun, NetkeibaScraper, RunnerRef,
 };
 
 use crate::error::{Error, Result};
@@ -120,14 +120,15 @@ impl NetkeibaScraper for UreqNetkeibaScraper {
         Ok(parse::parse_card(&html, netkeiba_race_id)?)
     }
 
-    fn fetch_win_odds(&self, netkeiba_race_id: &str) -> UcResult<Vec<FetchedWinOdds>> {
+    fn fetch_win_place_odds(&self, netkeiba_race_id: &str) -> UcResult<FetchedOdds> {
         std::thread::sleep(self.delay);
+        // type=1 のレスポンスに単勝(odds["1"])と複勝(odds["2"])が同梱されるため 1 回の GET で両方取る。
         let url = format!(
             "{WIN_ODDS_URL}?race_id={netkeiba_race_id}&type=1&action=update"
         );
-        tracing::debug!(race_id = %netkeiba_race_id, "fetching netkeiba win odds");
+        tracing::debug!(race_id = %netkeiba_race_id, "fetching netkeiba win/place odds");
         // オッズ API は UTF-8 JSON。EUC-JP デコードしない。
         let json = fetch_utf8(&self.agent, &url)?;
-        Ok(parse::parse_win_odds(&json)?)
+        Ok(parse::parse_win_place_odds(&json)?)
     }
 }

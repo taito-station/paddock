@@ -135,6 +135,14 @@ impl Repository for MockRepo {
         Err(Error::NotFound("unused".into()))
     }
 
+    async fn find_race_odds(
+        &self,
+        _race_id: &RaceId,
+        _as_of: Option<NaiveDate>,
+    ) -> Result<Option<paddock_domain::RaceOdds>> {
+        Err(Error::NotFound("unused".into()))
+    }
+
     async fn find_races_by_date(&self, _date: chrono::NaiveDate) -> Result<Vec<Race>> {
         Ok(Vec::new())
     }
@@ -439,6 +447,14 @@ impl Repository for HistoryRepo {
         Err(Error::NotFound("unused".into()))
     }
     async fn find_race_card(&self, _race_id: &RaceId) -> Result<Option<RaceCard>> {
+        Err(Error::NotFound("unused".into()))
+    }
+
+    async fn find_race_odds(
+        &self,
+        _race_id: &RaceId,
+        _as_of: Option<NaiveDate>,
+    ) -> Result<Option<paddock_domain::RaceOdds>> {
         Err(Error::NotFound("unused".into()))
     }
 

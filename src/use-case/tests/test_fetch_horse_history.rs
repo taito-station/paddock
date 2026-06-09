@@ -93,10 +93,10 @@ impl NetkeibaScraper for FakeScraper {
         unimplemented!()
     }
 
-    fn fetch_win_odds(
+    fn fetch_win_place_odds(
         &self,
         _race_id: &str,
-    ) -> Result<Vec<paddock_use_case::netkeiba_scraper::FetchedWinOdds>> {
+    ) -> Result<paddock_use_case::netkeiba_scraper::FetchedOdds> {
         unimplemented!()
     }
 }
@@ -172,6 +172,13 @@ impl Repository for RecordingRepo {
         unimplemented!()
     }
     async fn find_race_card(&self, _race_id: &RaceId) -> Result<Option<RaceCard>> {
+        unimplemented!()
+    }
+    async fn find_race_odds(
+        &self,
+        _race_id: &RaceId,
+        _as_of: Option<NaiveDate>,
+    ) -> Result<Option<paddock_domain::RaceOdds>> {
         unimplemented!()
     }
     async fn find_races_by_date(&self, _date: NaiveDate) -> Result<Vec<Race>> {

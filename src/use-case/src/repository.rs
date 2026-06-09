@@ -2,7 +2,7 @@ use core::future::Future;
 
 use chrono::{DateTime, NaiveDate, Utc};
 use paddock_domain::{
-    HorseId, HorseName, HorseResult, JockeyName, Race, RaceCard, RaceId, Surface, Venue,
+    HorseId, HorseName, HorseResult, JockeyName, Race, RaceCard, RaceId, RaceOdds, Surface, Venue,
 };
 
 use crate::error::Result;
@@ -235,6 +235,16 @@ pub trait Repository: Send + Sync {
     /// 1 レース分のオッズ（行単位）を upsert する。`race_odds` の主キー
     /// `(race_id, bet_type, combination_key)` で衝突した行は最新値で更新する。
     fn save_race_odds(&self, record: &RaceOddsRecord) -> impl Future<Output = Result<()>> + Send;
+
+    /// `race_odds` に保存済みの単勝・複勝を読み出してドメインの [`RaceOdds`] に再構成する。
+    /// `as_of = Some(d)` のとき `date(fetched_at) <= d` のスナップショットのみ対象とする
+    /// （backtest の当時オッズ参照用、リーク防止）。`None` は時刻制約なし（predict の最新参照用）。
+    /// 単勝・複勝いずれの行も無ければ `None` を返す（組合せ券種は #38 で別途対応）。
+    fn find_race_odds(
+        &self,
+        race_id: &RaceId,
+        as_of: Option<NaiveDate>,
+    ) -> impl Future<Output = Result<Option<RaceOdds>>> + Send;
 
     fn find_race_card(
         &self,

@@ -4,6 +4,7 @@ mod fetch_history;
 mod find_finished_races_between;
 mod find_matching_names;
 mod find_race_card;
+mod find_race_odds;
 mod find_races_by_date;
 mod find_recent_runs;
 mod horse_history;
@@ -17,7 +18,7 @@ mod sql;
 
 use chrono::NaiveDate;
 use paddock_domain::{
-    HorseId, HorseName, HorseResult, JockeyName, Race, RaceCard, RaceId, Surface, Venue,
+    HorseId, HorseName, HorseResult, JockeyName, Race, RaceCard, RaceId, RaceOdds, Surface, Venue,
 };
 use paddock_use_case::Result as UcResult;
 use paddock_use_case::repository::{
@@ -147,6 +148,16 @@ impl Repository for SqliteRepository {
 
     async fn find_race_card(&self, race_id: &RaceId) -> UcResult<Option<RaceCard>> {
         find_race_card::find_race_card(&self.pool, race_id)
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn find_race_odds(
+        &self,
+        race_id: &RaceId,
+        as_of: Option<NaiveDate>,
+    ) -> UcResult<Option<RaceOdds>> {
+        find_race_odds::find_race_odds(&self.pool, race_id, as_of)
             .await
             .map_err(Into::into)
     }

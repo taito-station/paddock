@@ -75,6 +75,26 @@ pub struct FetchedWinOdds {
     pub popularity: Option<u32>,
 }
 
+/// 複勝オッズ 1 頭分。netkeiba は複勝を下限〜上限の幅で公表するため両端を持つ。
+/// レース前でオッズ未確定の馬はパース層で除外済み。
+#[derive(Debug, Clone, PartialEq)]
+pub struct FetchedPlaceOdds {
+    pub horse_num: HorseNum,
+    pub odds_low: f64,
+    pub odds_high: f64,
+    pub popularity: Option<u32>,
+}
+
+/// 単勝・複勝オッズをまとめた取得結果。
+///
+/// netkeiba のオッズ API は 1 レスポンスに単勝(`data.odds["1"]`)と複勝(`data.odds["2"]`)を
+/// 同梱するため、1 回の取得で両方を得る。確定前はそれぞれ空になり得る。
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct FetchedOdds {
+    pub win: Vec<FetchedWinOdds>,
+    pub place: Vec<FetchedPlaceOdds>,
+}
+
 /// Port for fetching netkeiba pages used to fill in same-day runners' recent form.
 ///
 /// Implementations (Interface layer) own the HTTP fetch, EUC-JP decoding and HTML
@@ -92,7 +112,7 @@ pub trait NetkeibaScraper: Send + Sync {
     /// 出馬表 (`race/shutuba.html`) から当日のレースカード（メタ + 全出走馬）を取得する。
     fn fetch_card(&self, netkeiba_race_id: &str) -> Result<FetchedCard>;
 
-    /// 単勝オッズ API から各馬の単勝オッズ・人気を取得する。
-    /// レース前でオッズ未確定の行はスキップされ、確定前は空 Vec を返し得る。
-    fn fetch_win_odds(&self, netkeiba_race_id: &str) -> Result<Vec<FetchedWinOdds>>;
+    /// 単勝・複勝オッズ API から各馬の単勝・複勝オッズと人気を取得する。
+    /// レース前でオッズ未確定の行はスキップされ、確定前は空の `FetchedOdds` を返し得る。
+    fn fetch_win_place_odds(&self, netkeiba_race_id: &str) -> Result<FetchedOdds>;
 }
