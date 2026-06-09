@@ -74,6 +74,15 @@ pub struct FetchArgs {
     #[arg(short = 'j', long)]
     pub parallel: Option<usize>,
 
+    /// Optional global cap on outbound JRA requests, in requests/second, shared
+    /// across every fetch (sequential and parallel alike). Unset = no cap (the
+    /// default). It spaces only real network GETs — `fetch_history` skips are not
+    /// throttled — so its main use is bounding the parallel path's peak rate. With
+    /// `-j 1` it still applies and stacks with `--interval` (the larger wait wins).
+    /// E.g. `--max-rps 2` keeps JRA hits to at most ~2/sec.
+    #[arg(long)]
+    pub max_rps: Option<f64>,
+
     /// Re-fetch and re-ingest even if the meeting is already in fetch history.
     #[arg(long)]
     pub force: bool,

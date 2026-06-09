@@ -21,11 +21,35 @@ use cli::{Cli, Command, FetchArgs, IngestArgs};
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
-    let app = Arc::new(setup::build_app().await?);
+
+    // The fetch rate cap is baked into the shared fetcher at build time, so read
+    // it from the Fetch args (if any) before wiring the app.
+    let fetch_min_interval = match &cli.command {
+        Some(Command::Fetch(args)) => max_rps_to_interval(args.max_rps)?,
+        _ => None,
+    };
+    let app = Arc::new(setup::build_app(fetch_min_interval).await?);
 
     match cli.command.unwrap_or(Command::Ingest(cli.ingest)) {
         Command::Ingest(args) => run_ingest(app, args).await,
         Command::Fetch(args) => run_fetch(app, args).await,
+    }
+}
+
+/// Convert a `--max-rps` requests/second cap into the minimum spacing between
+/// requests. `None`/non-positive rps means no cap.
+fn max_rps_to_interval(max_rps: Option<f64>) -> anyhow::Result<Option<Duration>> {
+    match max_rps {
+        Some(rps) if rps.is_finite() && rps > 0.0 => {
+            // `try_from_secs_f64` (not `from_secs_f64`) so an absurdly small rate,
+            // whose interval 1/rps overflows Duration's range, errors out instead
+            // of panicking.
+            Duration::try_from_secs_f64(1.0 / rps)
+                .map(Some)
+                .map_err(|_| anyhow::anyhow!("--max-rps is too small to represent: {rps}"))
+        }
+        Some(rps) => anyhow::bail!("--max-rps must be a positive number, got {rps}"),
+        None => Ok(None),
     }
 }
 
@@ -357,6 +381,23 @@ fn move_to_done_if_inbox(source: &str) -> anyhow::Result<Option<PathBuf>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn max_rps_to_interval_maps_rate_to_spacing() {
+        // 2 req/s → 500ms between requests.
+        assert_eq!(
+            max_rps_to_interval(Some(2.0)).unwrap(),
+            Some(Duration::from_millis(500))
+        );
+        // Unset → no cap.
+        assert_eq!(max_rps_to_interval(None).unwrap(), None);
+        // Non-positive / non-finite are rejected.
+        assert!(max_rps_to_interval(Some(0.0)).is_err());
+        assert!(max_rps_to_interval(Some(-1.0)).is_err());
+        assert!(max_rps_to_interval(Some(f64::INFINITY)).is_err());
+        // A positive-but-absurdly-small rate overflows Duration → error, not panic.
+        assert!(max_rps_to_interval(Some(1e-20)).is_err());
+    }
 
     #[test]
     fn should_pin_ocr_only_when_parallel_and_multiple() {
