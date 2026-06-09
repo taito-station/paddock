@@ -87,6 +87,13 @@ pub fn estimate_probabilities(entries: &[(HorseEntry, HorseFactors)]) -> Vec<Hor
 /// ブレンドで win が動くため、最後に win 合計を 1.0 へ再正規化し、`place`/`show` は
 /// `win ≤ place ≤ show` を保つよう累積 max で再是正する（v1 は win のみブレンド対象で
 /// place/show のレートはモデル値を踏襲する）。
+///
+/// 前提・既知の割り切り（v1）:
+/// - **(ほぼ)全頭のオッズが揃っていることを前提**とする。implied の正規化母数はオッズを持つ馬
+///   のみの合計なので、一部の馬しかオッズが無い部分カバレッジでは市場重み `(1-α)` がカバー済みの
+///   少数馬に偏って乗り、過大評価になりうる。実運用の単勝オッズは全頭分そろうため通常は問題ない。
+/// - place/show は単調再是正のみで、**場内合計（2.0/3.0）は再正規化しない**ため、ブレンド後は
+///   その合計が崩れうる。place/show の精密なブレンドは将来課題。
 pub fn blend_with_market_win(
     probs: &[HorseProbability],
     market_win_odds: &HashMap<HorseNum, f64>,
@@ -102,6 +109,8 @@ pub fn blend_with_market_win(
     }
 
     // 市場 implied 確率: 1/odds を合計 1.0 に正規化（オッズのある馬のみが母数）。
+    // is_finite/正値フィルタは、型検証を経ていない生の f64（backtest が results.odds から渡す経路）
+    // への防御。OddsValue 由来の経路では常に有効だが、フォールバック経路のために残す。
     let implied: HashMap<HorseNum, f64> = market_win_odds
         .iter()
         .filter(|&(_, &odds)| odds.is_finite() && odds > 0.0)

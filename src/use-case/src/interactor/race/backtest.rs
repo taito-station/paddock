@@ -105,6 +105,9 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
             // すべてブレンド後の win で行う。市場 win は当時 race_odds を優先し、無ければ PDF 確定
             // 成績の単勝（results.odds, 確定＝クローズ前後のオッズで結果はリークしない）で代替する。
             // 過去レースは race_odds スナップショットが無いことが多いため、この代替で評価可能になる。
+            // 注意: ここで使う市場 win は回収率評価の top_pick_odds と同一ソースのため、ブレンド有効時
+            // の回収率は構造的に楽観側へ寄る（probability-estimation.md 注 2）。α>=1.0 は domain 側で
+            // no-op になる（predict 経路のような取得短絡は不要、market は既に取得済み）。
             let probs = match blend_alpha {
                 Some(alpha) => {
                     let market_win: HashMap<_, _> =
