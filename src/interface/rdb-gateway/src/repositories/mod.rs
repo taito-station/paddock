@@ -2,6 +2,7 @@ mod backfill_horse_ids;
 mod course_stats;
 mod fetch_history;
 mod find_finished_races_between;
+mod find_matching_names;
 mod find_race_card;
 mod find_races_by_date;
 mod find_recent_runs;
@@ -55,6 +56,18 @@ impl Repository for SqliteRepository {
 
     async fn backfill_results_horse_ids(&self) -> UcResult<u64> {
         backfill_horse_ids::backfill_results_horse_ids(&self.pool)
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn find_matching_horse_names(&self, query: &str, limit: u32) -> UcResult<Vec<String>> {
+        find_matching_names::find_matching_horse_names(&self.pool, query, limit)
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn find_matching_jockey_names(&self, query: &str, limit: u32) -> UcResult<Vec<String>> {
+        find_matching_names::find_matching_jockey_names(&self.pool, query, limit)
             .await
             .map_err(Into::into)
     }
