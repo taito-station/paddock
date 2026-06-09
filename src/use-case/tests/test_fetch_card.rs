@@ -133,7 +133,11 @@ impl Repository for RecordingRepo {
     ) -> Result<Vec<(NaiveDate, paddock_domain::horse_result::HorseResult)>> {
         unimplemented!()
     }
-    async fn upsert_history_race(&self, _race: &Race) -> Result<()> {
+    async fn upsert_horse_history(
+        &self,
+        _horse_id: &paddock_domain::HorseId,
+        _runs: &[paddock_use_case::HorsePastRun],
+    ) -> Result<()> {
         unimplemented!()
     }
     async fn horse_stats(
@@ -230,7 +234,11 @@ async fn skips_card_when_already_fetched_but_still_saves_odds() {
 
     assert!(!resp.card_saved, "取得済みなのでカードはスキップ");
     assert_eq!(resp.entries_saved, 0);
-    assert_eq!(*interactor.scraper.card_fetches.lock().unwrap(), 0, "fetch_card は呼ばれない");
+    assert_eq!(
+        *interactor.scraper.card_fetches.lock().unwrap(),
+        0,
+        "fetch_card は呼ばれない"
+    );
     assert!(interactor.repo.saved_cards.lock().unwrap().is_empty());
     assert!(interactor.repo.fetch_records.lock().unwrap().is_empty());
     // オッズは変動するため取得済みでも常に保存する。

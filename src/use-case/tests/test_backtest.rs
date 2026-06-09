@@ -173,7 +173,11 @@ impl Repository for MockRepo {
     async fn save_race(&self, _: &Race) -> Result<()> {
         unimplemented!()
     }
-    async fn upsert_history_race(&self, _: &Race) -> Result<()> {
+    async fn upsert_horse_history(
+        &self,
+        _: &paddock_domain::HorseId,
+        _: &[paddock_use_case::HorsePastRun],
+    ) -> Result<()> {
         unimplemented!()
     }
     async fn count_races(&self) -> Result<u64> {
@@ -191,10 +195,7 @@ impl Repository for MockRepo {
     async fn save_race_card(&self, _: &RaceCard) -> Result<()> {
         unimplemented!()
     }
-    async fn save_race_odds(
-        &self,
-        _: &paddock_use_case::repository::RaceOddsRecord,
-    ) -> Result<()> {
+    async fn save_race_odds(&self, _: &paddock_use_case::repository::RaceOddsRecord) -> Result<()> {
         unimplemented!()
     }
     async fn find_race_card(&self, _: &RaceId) -> Result<Option<RaceCard>> {
