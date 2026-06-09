@@ -20,7 +20,8 @@ INSERT OR IGNORE INTO horse_past_runs (
     weight_change, weight_carried, popularity)
 SELECT
     r.horse_id, ra.race_id,
-    -- 実データの netkeiba race_id は旧 accumulate が必ず 'nk-<12桁>' で書くため substr で復元する。
+    -- 実データの netkeiba race_id は旧 accumulate が必ず 'nk-<12桁>' で書くため、
+    -- substr(race_id, 4)（'nk-' は 3 文字なので 4 文字目以降）で 12 桁を復元する。
     -- ELSE は保険（canonical 形式が紛れていた場合はそのまま保持し、NOT NULL を満たす）。
     CASE WHEN ra.race_id LIKE 'nk-%' THEN substr(ra.race_id, 4) ELSE ra.race_id END,
     ra.date, ra.venue, ra.round, ra.day, ra.race_num,
