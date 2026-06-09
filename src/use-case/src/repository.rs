@@ -2,7 +2,8 @@ use core::future::Future;
 
 use chrono::{DateTime, NaiveDate, Utc};
 use paddock_domain::{
-    HorseId, HorseName, HorseResult, JockeyName, Race, RaceCard, RaceId, RaceOdds, Surface, Venue,
+    HorseId, HorseName, HorseResult, JockeyName, OrderedPair, OrderedTriple, Pair, Race, RaceCard,
+    RaceId, RaceOdds, Surface, Triple, Venue,
 };
 
 use crate::error::Result;
@@ -145,6 +146,64 @@ impl OddsRow {
             popularity,
         }
     }
+
+    // 組合せ券種(#38)。いずれもライブスクレイプ由来で人気を持たないため popularity は None。
+    // combination_key の規約はドメインの `to_key()` を単一情報源とする（"1-2" / "1>2" 等）。
+
+    /// 馬連 1 行。キーは昇順 `Pair`（`"1-2"`）。
+    pub fn quinella(pair: Pair, odds: f64) -> Self {
+        Self {
+            bet_type: "quinella".to_string(),
+            combination_key: pair.to_key(),
+            odds,
+            odds_high: None,
+            popularity: None,
+        }
+    }
+
+    /// ワイド 1 行。複勝と同じく幅 odds（`odds`=下限・`odds_high`=上限）。キーは昇順 `Pair`。
+    pub fn wide(pair: Pair, low: f64, high: f64) -> Self {
+        Self {
+            bet_type: "wide".to_string(),
+            combination_key: pair.to_key(),
+            odds: low,
+            odds_high: Some(high),
+            popularity: None,
+        }
+    }
+
+    /// 馬単 1 行。キーは順序付き `OrderedPair`（`"1>2"`）。
+    pub fn exacta(pair: OrderedPair, odds: f64) -> Self {
+        Self {
+            bet_type: "exacta".to_string(),
+            combination_key: pair.to_key(),
+            odds,
+            odds_high: None,
+            popularity: None,
+        }
+    }
+
+    /// 三連複 1 行。キーは昇順 `Triple`（`"1-2-3"`）。
+    pub fn trio(triple: Triple, odds: f64) -> Self {
+        Self {
+            bet_type: "trio".to_string(),
+            combination_key: triple.to_key(),
+            odds,
+            odds_high: None,
+            popularity: None,
+        }
+    }
+
+    /// 三連単 1 行。キーは順序付き `OrderedTriple`（`"1>2>3"`）。
+    pub fn trifecta(triple: OrderedTriple, odds: f64) -> Self {
+        Self {
+            bet_type: "trifecta".to_string(),
+            combination_key: triple.to_key(),
+            odds,
+            odds_high: None,
+            popularity: None,
+        }
+    }
 }
 
 /// 1 レース分のオッズ取得結果。取得時刻 `fetched_at` は use-case 層で注入し、
@@ -261,10 +320,10 @@ pub trait Repository: Send + Sync {
     /// `(race_id, bet_type, combination_key)` で衝突した行は最新値で更新する。
     fn save_race_odds(&self, record: &RaceOddsRecord) -> impl Future<Output = Result<()>> + Send;
 
-    /// `race_odds` に保存済みの単勝・複勝を読み出してドメインの [`RaceOdds`] に再構成する。
+    /// `race_odds` に保存済みのオッズを全券種読み出してドメインの [`RaceOdds`] に再構成する。
     /// `as_of = Some(d)` のとき `date(fetched_at) <= d` のスナップショットのみ対象とする
     /// （backtest の当時オッズ参照用、リーク防止）。`None` は時刻制約なし（predict の最新参照用）。
-    /// 単勝・複勝いずれの行も無ければ `None` を返す（組合せ券種は #38 で別途対応）。
+    /// いずれの券種の行も無ければ `None` を返す。
     fn find_race_odds(
         &self,
         race_id: &RaceId,

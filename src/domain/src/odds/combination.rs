@@ -10,6 +10,17 @@ impl Pair {
     pub fn as_tuple(&self) -> (HorseNum, HorseNum) {
         (self.0, self.1)
     }
+
+    /// 永続化キー: 昇順の馬番を `-` で連結する（例 `"1-2"`）。馬連・ワイド共通。
+    pub fn to_key(&self) -> String {
+        format!("{}-{}", self.0.value(), self.1.value())
+    }
+
+    /// `"1-2"` 形式のキーをパースする。順序は [`TryFrom`] が昇順に正規化する。
+    pub fn from_key(key: &str) -> Result<Self> {
+        let (a, b) = parse_two(key, '-')?;
+        Self::try_from((a, b))
+    }
 }
 
 impl TryFrom<(HorseNum, HorseNum)> for Pair {
@@ -38,6 +49,17 @@ impl OrderedPair {
     pub fn as_tuple(&self) -> (HorseNum, HorseNum) {
         (self.0, self.1)
     }
+
+    /// 永続化キー: 着順どおりの馬番を `>` で連結する（例 `"1>2"`）。
+    pub fn to_key(&self) -> String {
+        format!("{}>{}", self.0.value(), self.1.value())
+    }
+
+    /// `"1>2"` 形式のキーをパースする。`>` の左が 1 着、右が 2 着。
+    pub fn from_key(key: &str) -> Result<Self> {
+        let (a, b) = parse_two(key, '>')?;
+        Self::try_from((a, b))
+    }
 }
 
 impl TryFrom<(HorseNum, HorseNum)> for OrderedPair {
@@ -60,6 +82,17 @@ pub struct Triple(HorseNum, HorseNum, HorseNum);
 impl Triple {
     pub fn as_tuple(&self) -> (HorseNum, HorseNum, HorseNum) {
         (self.0, self.1, self.2)
+    }
+
+    /// 永続化キー: 昇順の馬番を `-` で連結する（例 `"1-2-3"`）。
+    pub fn to_key(&self) -> String {
+        format!("{}-{}-{}", self.0.value(), self.1.value(), self.2.value())
+    }
+
+    /// `"1-2-3"` 形式のキーをパースする。順序は [`TryFrom`] が昇順に正規化する。
+    pub fn from_key(key: &str) -> Result<Self> {
+        let (a, b, c) = parse_three(key, '-')?;
+        Self::try_from((a, b, c))
     }
 }
 
@@ -85,6 +118,17 @@ impl OrderedTriple {
     pub fn as_tuple(&self) -> (HorseNum, HorseNum, HorseNum) {
         (self.0, self.1, self.2)
     }
+
+    /// 永続化キー: 着順どおりの馬番を `>` で連結する（例 `"1>2>3"`）。
+    pub fn to_key(&self) -> String {
+        format!("{}>{}>{}", self.0.value(), self.1.value(), self.2.value())
+    }
+
+    /// `"1>2>3"` 形式のキーをパースする。`>` の左から 1 着・2 着・3 着。
+    pub fn from_key(key: &str) -> Result<Self> {
+        let (a, b, c) = parse_three(key, '>')?;
+        Self::try_from((a, b, c))
+    }
 }
 
 impl TryFrom<(HorseNum, HorseNum, HorseNum)> for OrderedTriple {
@@ -96,5 +140,88 @@ impl TryFrom<(HorseNum, HorseNum, HorseNum)> for OrderedTriple {
             ));
         }
         Ok(Self(first, second, third))
+    }
+}
+
+/// 永続化キーの 1 トークンを馬番としてパースする。`to_key`/`from_key` 専用。
+fn parse_num(token: &str) -> Result<HorseNum> {
+    let num: u32 = token
+        .parse()
+        .map_err(|_| Error::InvalidFormat(format!("組合せキーの馬番 '{token}' が不正です")))?;
+    HorseNum::try_from(num)
+}
+
+/// `sep` 区切りで 2 馬番を取り出す。トークン数が 2 でなければエラー。
+fn parse_two(key: &str, sep: char) -> Result<(HorseNum, HorseNum)> {
+    let parts: Vec<&str> = key.split(sep).collect();
+    if parts.len() != 2 {
+        return Err(Error::InvalidFormat(format!(
+            "組合せキー '{key}' は '{sep}' 区切りの 2 馬番である必要があります"
+        )));
+    }
+    Ok((parse_num(parts[0])?, parse_num(parts[1])?))
+}
+
+/// `sep` 区切りで 3 馬番を取り出す。トークン数が 3 でなければエラー。
+fn parse_three(key: &str, sep: char) -> Result<(HorseNum, HorseNum, HorseNum)> {
+    let parts: Vec<&str> = key.split(sep).collect();
+    if parts.len() != 3 {
+        return Err(Error::InvalidFormat(format!(
+            "組合せキー '{key}' は '{sep}' 区切りの 3 馬番である必要があります"
+        )));
+    }
+    Ok((parse_num(parts[0])?, parse_num(parts[1])?, parse_num(parts[2])?))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn h(n: u32) -> HorseNum {
+        HorseNum::try_from(n).unwrap()
+    }
+
+    #[test]
+    fn pair_key_roundtrip_and_normalizes_order() {
+        let p = Pair::try_from((h(2), h(1))).unwrap();
+        assert_eq!(p.to_key(), "1-2"); // 昇順正規化
+        assert_eq!(Pair::from_key("1-2").unwrap(), p);
+        assert_eq!(Pair::from_key("2-1").unwrap(), p); // 入力順は問わない
+    }
+
+    #[test]
+    fn ordered_pair_key_preserves_order() {
+        let op = OrderedPair::try_from((h(3), h(1))).unwrap();
+        assert_eq!(op.to_key(), "3>1");
+        assert_eq!(OrderedPair::from_key("3>1").unwrap(), op);
+        assert_ne!(
+            OrderedPair::from_key("1>3").unwrap(),
+            op,
+            "順序が異なれば別キー"
+        );
+    }
+
+    #[test]
+    fn triple_key_roundtrip_and_normalizes_order() {
+        let t = Triple::try_from((h(5), h(1), h(3))).unwrap();
+        assert_eq!(t.to_key(), "1-3-5");
+        assert_eq!(Triple::from_key("5-1-3").unwrap(), t);
+    }
+
+    #[test]
+    fn ordered_triple_key_preserves_order() {
+        let ot = OrderedTriple::try_from((h(7), h(2), h(9))).unwrap();
+        assert_eq!(ot.to_key(), "7>2>9");
+        assert_eq!(OrderedTriple::from_key("7>2>9").unwrap(), ot);
+    }
+
+    #[test]
+    fn from_key_rejects_wrong_arity_and_bad_nums() {
+        assert!(Pair::from_key("1").is_err()); // トークン不足
+        assert!(Pair::from_key("1-2-3").is_err()); // トークン過多
+        assert!(Triple::from_key("1-2").is_err());
+        assert!(Pair::from_key("1-x").is_err()); // 非数値
+        assert!(Pair::from_key("1-19").is_err()); // 馬番範囲外
+        assert!(Pair::from_key("1-1").is_err()); // 同一馬
     }
 }

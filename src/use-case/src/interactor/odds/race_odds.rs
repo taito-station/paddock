@@ -20,10 +20,9 @@ impl<O: OddsScraper, R: Repository> OddsInteractor<O, R> {
     /// いずれも予想フロー側ではスキップ扱いになり、1 レースの取得失敗でセッション全体を
     /// 止めない（`select_bets` を呼ばず安全に次レースへ進める設計、predict-session.md 参照）。
     pub async fn race_odds(&self, race_id: &RaceId) -> Result<Option<RaceOdds>> {
-        // 1. 保存済み(単勝・複勝)があれば再スクレイプせずに返す。
-        //    cache-hit 判定は「全馬券種が空でない」= win/place のいずれかが保存済み。netkeiba・JRA とも
-        //    単勝と複勝は同一レスポンスで揃うため、通常は両方そろって保存される。wide/exotic(馬連等)は
-        //    保存しないので cache-hit 時は推奨に出ない（#38 まで、ADR 0010 の「影響」参照）。
+        // 1. 保存済みがあれば再スクレイプせずに返す。
+        //    cache-hit 判定は「いずれかの馬券種が保存済み」(= `!is_empty()`)。#38 で組合せ券種も
+        //    保存・読み戻すようになったため、cache-hit 時も exotic を含むフルのオッズを返す。
         //    find_race_odds は行が無ければ None を返すため `!is_empty()` は実質二重ガード（防御目的）。
         if let Some(saved) = self.repository.find_race_odds(race_id, None).await?
             && !saved.is_empty()
@@ -41,9 +40,9 @@ impl<O: OddsScraper, R: Repository> OddsInteractor<O, R> {
                 Ok(None)
             }
             Ok(odds) => {
-                // 取得できた単勝・複勝を永続化（組合せ券種は #38）。保存失敗は予想を止めず warn のみ。
-                self.persist_win_place(race_id, &odds).await;
-                // exotic を含むフルのオッズはその回の買い目にそのまま使う。
+                // 取得できた全券種を永続化（#38）。保存失敗は予想を止めず warn のみ。
+                self.persist_all(race_id, &odds).await;
+                // フルのオッズはその回の買い目にそのまま使う。
                 Ok(Some(odds))
             }
             Err(e) => {
@@ -53,11 +52,11 @@ impl<O: OddsScraper, R: Repository> OddsInteractor<O, R> {
         }
     }
 
-    /// スクレイプで得たオッズのうち単勝・複勝を `race_odds` に保存する。複勝は幅 odds
+    /// スクレイプで得た全券種のオッズを `race_odds` に保存する。複勝・ワイドは幅 odds
     /// （下限=odds, 上限=odds_high）。スクレイプ由来は人気を持たないため popularity は None。
     /// 保存失敗は予想フローを止めず warn ログのみ（次回参照時に取り直せる）。
-    async fn persist_win_place(&self, race_id: &RaceId, odds: &RaceOdds) {
-        let mut rows: Vec<OddsRow> = Vec::with_capacity(odds.win.len() + odds.place.len());
+    async fn persist_all(&self, race_id: &RaceId, odds: &RaceOdds) {
+        let mut rows: Vec<OddsRow> = Vec::new();
         for (horse, ov) in &odds.win {
             rows.push(OddsRow::win(horse.value(), ov.value(), None));
         }
@@ -68,6 +67,21 @@ impl<O: OddsScraper, R: Repository> OddsInteractor<O, R> {
                 place.high.value(),
                 None,
             ));
+        }
+        for (pair, ov) in &odds.quinella {
+            rows.push(OddsRow::quinella(*pair, ov.value()));
+        }
+        for (pair, band) in &odds.wide {
+            rows.push(OddsRow::wide(*pair, band.low.value(), band.high.value()));
+        }
+        for (pair, ov) in &odds.exacta {
+            rows.push(OddsRow::exacta(*pair, ov.value()));
+        }
+        for (triple, ov) in &odds.trio {
+            rows.push(OddsRow::trio(*triple, ov.value()));
+        }
+        for (triple, ov) in &odds.trifecta {
+            rows.push(OddsRow::trifecta(*triple, ov.value()));
         }
         if rows.is_empty() {
             return;
@@ -89,8 +103,8 @@ mod tests {
 
     use chrono::NaiveDate;
     use paddock_domain::{
-        HorseName, HorseNum, HorseResult, JockeyName, OddsValue, PlaceOdds, Race, RaceCard, RaceId,
-        RaceOdds, Surface, Venue,
+        HorseName, HorseNum, HorseResult, JockeyName, OddsValue, OrderedPair, OrderedTriple, Pair,
+        PlaceOdds, Race, RaceCard, RaceId, RaceOdds, Surface, Triple, Venue,
     };
 
     use crate::error::{Error, Result};
@@ -299,6 +313,50 @@ mod tests {
         assert_eq!(place.len(), 1);
         assert!((place[0].odds - 1.5).abs() < 1e-9);
         assert_eq!(place[0].odds_high, Some(2.0));
+    }
+
+    fn odds_all_types(race_id: RaceId) -> RaceOdds {
+        let mut odds = odds_win_place(race_id);
+        let h = |n: u32| HorseNum::try_from(n).unwrap();
+        let ov = |v: f64| OddsValue::try_from(v).unwrap();
+        odds.quinella
+            .insert(Pair::try_from((h(1), h(2))).unwrap(), ov(12.4));
+        odds.wide.insert(
+            Pair::try_from((h(1), h(2))).unwrap(),
+            PlaceOdds::try_from((ov(3.1), ov(4.8))).unwrap(),
+        );
+        odds.exacta
+            .insert(OrderedPair::try_from((h(2), h(1))).unwrap(), ov(25.0));
+        odds.trio
+            .insert(Triple::try_from((h(1), h(2), h(3))).unwrap(), ov(88.0));
+        odds.trifecta.insert(
+            OrderedTriple::try_from((h(3), h(1), h(2))).unwrap(),
+            ov(410.0),
+        );
+        odds
+    }
+
+    #[tokio::test]
+    async fn persists_all_bet_types_when_scraped() {
+        // #38: スクレイプで得た組合せ券種も含め全券種を保存する。
+        let scraper = FakeScraper::new(|rid| Ok(odds_all_types(rid.clone())));
+        let interactor = OddsInteractor::new(scraper, FakeRepo::default());
+
+        interactor.race_odds(&race_id()).await.unwrap();
+
+        let saved = interactor.repository.saved.lock().unwrap();
+        let rows = &saved[0].rows;
+        let count = |bt: &str| rows.iter().filter(|r| r.bet_type == bt).count();
+        for bt in ["win", "place", "quinella", "wide", "exacta", "trio", "trifecta"] {
+            assert_eq!(count(bt), 1, "{bt} が 1 行保存されること");
+        }
+        // ワイドは複勝同様に幅 odds（odds_high 付き）で保存される。
+        let wide = rows.iter().find(|r| r.bet_type == "wide").unwrap();
+        assert_eq!(wide.combination_key, "1-2");
+        assert_eq!(wide.odds_high, Some(4.8));
+        // 馬単はキーの順序を保持（2>1）。
+        let exacta = rows.iter().find(|r| r.bet_type == "exacta").unwrap();
+        assert_eq!(exacta.combination_key, "2>1");
     }
 
     #[tokio::test]

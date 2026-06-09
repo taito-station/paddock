@@ -1,8 +1,8 @@
 //! `race_odds` の保存(save_race_odds)→読み出し(find_race_odds)を実 SQLite で往復検証する。
-//! 単勝・複勝の復元と、backtest 用の `as_of`（`date(fetched_at) <= d`）境界を担保する。
+//! 単勝・複勝・組合せ券種(#38)の復元と、backtest 用の `as_of`（`date(fetched_at) <= d`）境界を担保する。
 
 use chrono::{DateTime, NaiveDate, TimeZone, Utc};
-use paddock_domain::{HorseNum, RaceId};
+use paddock_domain::{HorseNum, OrderedPair, OrderedTriple, Pair, RaceId, Triple};
 use paddock_use_case::repository::{OddsRow, RaceOddsRecord, Repository};
 use rdb_gateway::{SqliteRepository, pool};
 
@@ -87,6 +87,47 @@ async fn round_trips_win_and_place() {
     let p1 = odds.place.get(&horse(1)).unwrap();
     assert!((p1.low.value() - 1.5).abs() < 1e-9);
     assert!((p1.high.value() - 2.0).abs() < 1e-9);
+}
+
+#[tokio::test]
+async fn round_trips_all_combination_bet_types() {
+    let (repo, _dir) = fresh_repo().await;
+    let pair = Pair::try_from((horse(1), horse(2))).unwrap();
+    let opair = OrderedPair::try_from((horse(3), horse(1))).unwrap();
+    let triple = Triple::try_from((horse(1), horse(2), horse(3))).unwrap();
+    let otriple = OrderedTriple::try_from((horse(5), horse(2), horse(7))).unwrap();
+
+    repo.save_race_odds(&RaceOddsRecord {
+        race_id: race_id(),
+        fetched_at: fetched_at(),
+        rows: vec![
+            OddsRow::quinella(pair, 12.4),
+            OddsRow::wide(pair, 3.1, 4.8),
+            OddsRow::exacta(opair, 25.0),
+            OddsRow::trio(triple, 88.0),
+            OddsRow::trifecta(otriple, 410.0),
+        ],
+    })
+    .await
+    .unwrap();
+
+    let odds = repo
+        .find_race_odds(&race_id(), None)
+        .await
+        .unwrap()
+        .expect("保存済みオッズが読めること");
+
+    // 馬連: 単一値、キーは昇順 Pair で復元。
+    assert!((odds.quinella.get(&pair).unwrap().value() - 12.4).abs() < 1e-9);
+    // ワイド: 複勝同様の幅 odds で復元。
+    let w = odds.wide.get(&pair).unwrap();
+    assert!((w.low.value() - 3.1).abs() < 1e-9 && (w.high.value() - 4.8).abs() < 1e-9);
+    // 馬単: 順序が保持される（3>1 として復元）。
+    assert!((odds.exacta.get(&opair).unwrap().value() - 25.0).abs() < 1e-9);
+    // 三連複: 昇順 Triple。
+    assert!((odds.trio.get(&triple).unwrap().value() - 88.0).abs() < 1e-9);
+    // 三連単: 順序保持の OrderedTriple。
+    assert!((odds.trifecta.get(&otriple).unwrap().value() - 410.0).abs() < 1e-9);
 }
 
 #[tokio::test]

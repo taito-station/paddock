@@ -1,5 +1,7 @@
 use chrono::NaiveDate;
-use paddock_domain::{HorseNum, OddsValue, PlaceOdds, RaceId, RaceOdds};
+use paddock_domain::{
+    HorseNum, OddsValue, OrderedPair, OrderedTriple, Pair, PlaceOdds, RaceId, RaceOdds, Triple,
+};
 use sqlx::SqlitePool;
 
 use crate::error::{Error, Result};
@@ -12,13 +14,13 @@ struct OddsRow {
     odds_high: Option<f64>,
 }
 
-/// `race_odds` の単勝・複勝行を読み出してドメイン [`RaceOdds`] に再構成する。
+/// `race_odds` の全券種行を読み出してドメイン [`RaceOdds`] に再構成する（#38）。
 ///
 /// `as_of = Some(d)` のとき `date(fetched_at) <= d` のスナップショットに限定する
 /// （backtest の当時オッズ参照、リーク防止）。`None` は時刻制約なし（predict の最新参照）。
 /// `fetched_at` は常に UTC(RFC3339)で保存されるため、`date(fetched_at)` も UTC 日付で比較する。
-/// 単勝・複勝いずれの行も無ければ `None`。返す `RaceOdds` は win/place のみ充填し、
-/// 組合せ券種(quinella/exacta/trio/trifecta)のマップは常に空（#38 で別途対応）。
+/// いずれの券種の行も無ければ `None`。combination_key はドメインの `from_key()` でパースし、
+/// 単勝・複勝の単一馬番キーは [`parse_horse_num`] で扱う。
 pub async fn find_race_odds(
     pool: &SqlitePool,
     race_id: &RaceId,
@@ -37,7 +39,6 @@ pub async fn find_race_odds(
         SELECT bet_type, combination_key, odds, odds_high
         FROM race_odds
         WHERE race_id = $1
-            AND bet_type IN ('win', 'place')
             AND ($2 IS NULL OR date(fetched_at) <= $2)
         "#,
     )
@@ -52,33 +53,35 @@ pub async fn find_race_odds(
 
     let mut odds = RaceOdds::empty(race_id.clone());
     for row in rows {
-        let horse_num = parse_horse_num(race_id, &row.combination_key)?;
         match row.bet_type.as_str() {
             "win" => {
+                let horse_num = parse_horse_num(race_id, &row.combination_key)?;
                 odds.win.insert(horse_num, OddsValue::try_from(row.odds)?);
             }
             "place" => {
-                // 複勝は幅 odds。odds=下限、odds_high=上限。上限欠落は保存側の不整合なのでエラーにする。
-                let high = row.odds_high.ok_or_else(|| {
-                    Error::Data(format!(
-                        "race_odds place 行 (race_id={}, horse={}) の odds_high が NULL です",
-                        race_id.value(),
-                        horse_num.value()
-                    ))
-                })?;
-                let low = OddsValue::try_from(row.odds)?;
-                let high = OddsValue::try_from(high)?;
-                // low > high 等の保存側不整合は odds_high NULL と同様に race_id/horse 付きで報告する。
-                let band = PlaceOdds::try_from((low, high)).map_err(|e| {
-                    Error::Data(format!(
-                        "race_odds place 行 (race_id={}, horse={}) の複勝幅が不正です: {e}",
-                        race_id.value(),
-                        horse_num.value()
-                    ))
-                })?;
-                odds.place.insert(horse_num, band);
+                let horse_num = parse_horse_num(race_id, &row.combination_key)?;
+                odds.place.insert(horse_num, parse_band(race_id, &row)?);
             }
-            // IN 句で絞っているため通常到達しない。将来 bet_type 追加時の取りこぼし防止に明示。
+            "quinella" => {
+                let pair = parse_key(race_id, &row, Pair::from_key)?;
+                odds.quinella.insert(pair, OddsValue::try_from(row.odds)?);
+            }
+            "wide" => {
+                let pair = parse_key(race_id, &row, Pair::from_key)?;
+                odds.wide.insert(pair, parse_band(race_id, &row)?);
+            }
+            "exacta" => {
+                let pair = parse_key(race_id, &row, OrderedPair::from_key)?;
+                odds.exacta.insert(pair, OddsValue::try_from(row.odds)?);
+            }
+            "trio" => {
+                let triple = parse_key(race_id, &row, Triple::from_key)?;
+                odds.trio.insert(triple, OddsValue::try_from(row.odds)?);
+            }
+            "trifecta" => {
+                let triple = parse_key(race_id, &row, OrderedTriple::from_key)?;
+                odds.trifecta.insert(triple, OddsValue::try_from(row.odds)?);
+            }
             other => {
                 return Err(Error::Data(format!(
                     "race_odds に想定外の bet_type '{other}' があります"
@@ -89,8 +92,8 @@ pub async fn find_race_odds(
     Ok(Some(odds))
 }
 
-/// `combination_key` を素の馬番（"1".."18"）としてパースする。win/place の単一馬番キー専用で、
-/// 組合せ券種(#38)の "1-2" 等のキーには別パーサが要る（本関数は `IN ('win','place')` で絞った後に呼ぶ）。
+/// `combination_key` を素の馬番（"1".."18"）としてパースする。win/place の単一馬番キー専用。
+/// 組合せ券種の "1-2" 等のキーは各ドメイン型の `from_key`（[`parse_key`] 経由）で扱う。
 fn parse_horse_num(race_id: &RaceId, key: &str) -> Result<HorseNum> {
     let num: u32 = key.parse().map_err(|_| {
         Error::Data(format!(
@@ -99,4 +102,44 @@ fn parse_horse_num(race_id: &RaceId, key: &str) -> Result<HorseNum> {
         ))
     })?;
     Ok(HorseNum::try_from(num)?)
+}
+
+/// 組合せ券種の `combination_key` をドメイン型の `from_key` でパースする。保存側の不整合は
+/// race_id/key 付きで [`Error::Data`] に包んで報告する。
+fn parse_key<T>(
+    race_id: &RaceId,
+    row: &OddsRow,
+    from_key: impl Fn(&str) -> paddock_domain::Result<T>,
+) -> Result<T> {
+    from_key(&row.combination_key).map_err(|e| {
+        Error::Data(format!(
+            "race_odds {} 行 (race_id={}) の combination_key '{}' が不正です: {e}",
+            row.bet_type,
+            race_id.value(),
+            row.combination_key
+        ))
+    })
+}
+
+/// 幅 odds（複勝・ワイド）を復元する。`odds`=下限・`odds_high`=上限。上限欠落・low>high は
+/// 保存側の不整合なので race_id/key 付きでエラーにする。
+fn parse_band(race_id: &RaceId, row: &OddsRow) -> Result<PlaceOdds> {
+    let high = row.odds_high.ok_or_else(|| {
+        Error::Data(format!(
+            "race_odds {} 行 (race_id={}, key={}) の odds_high が NULL です",
+            row.bet_type,
+            race_id.value(),
+            row.combination_key
+        ))
+    })?;
+    let low = OddsValue::try_from(row.odds)?;
+    let high = OddsValue::try_from(high)?;
+    PlaceOdds::try_from((low, high)).map_err(|e| {
+        Error::Data(format!(
+            "race_odds {} 行 (race_id={}, key={}) の幅 odds が不正です: {e}",
+            row.bet_type,
+            race_id.value(),
+            row.combination_key
+        ))
+    })
 }
