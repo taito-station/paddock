@@ -33,7 +33,11 @@ Issue #30 対応。DB に蓄積された過去の `races`/`results` に対して
 | `from` | `NaiveDate` | 評価期間の開始日（含む） |
 | `to` | `NaiveDate` | 評価期間の終了日（含む） |
 
-CLI: `paddock-analyze backtest --from YYYY-MM-DD --to YYYY-MM-DD`
+CLI: `paddock-analyze backtest --from YYYY-MM-DD --to YYYY-MM-DD [--blend-alpha <α>]`
+
+`--blend-alpha <α>`（任意, [0,1]）を渡すと確率推定を市場オッズ(単勝)の implied 確率と
+α（モデル重み）でブレンドして評価する（#72）。当時 `race_odds` が無い過去レースは PDF 確定
+成績の単勝で代替する。詳細・α スイープ結果は `probability-estimation.md` のステップ 4 を参照。
 
 `--from` / `--to` は `String` で受け取り、`main` 内で `NaiveDate::parse_from_str(_, "%Y-%m-%d")` で
 手動パースする（既存 `predict <race_id>` が `String` 受け→`RaceId::try_from` する流儀に合わせる）。

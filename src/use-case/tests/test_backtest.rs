@@ -299,7 +299,7 @@ fn d(y: i32, m: u32, day: u32) -> NaiveDate {
 #[tokio::test]
 async fn backtest_aggregates_top_pick_and_payout() {
     let app = interactor(vec![finished_race()]);
-    let report = app.backtest(d(2026, 1, 1), d(2026, 1, 31)).await.unwrap();
+    let report = app.backtest(d(2026, 1, 1), d(2026, 1, 31), None).await.unwrap();
 
     assert_eq!(report.races_evaluated, 1);
     // トップ選好馬は高スタッツの ウマA(1 着) → 単勝・連対・複勝すべて的中
@@ -324,7 +324,7 @@ async fn backtest_prefers_market_odds_over_pdf() {
         win_only_odds(race.race_id.value(), 1, 7.0),
     );
     let app = interactor_with_odds(vec![race], odds);
-    let report = app.backtest(d(2026, 1, 1), d(2026, 1, 31)).await.unwrap();
+    let report = app.backtest(d(2026, 1, 1), d(2026, 1, 31), None).await.unwrap();
 
     assert_eq!(report.payout_races, 1);
     // トップ選好馬 ウマA(1 着) を当時オッズ 7.0 で計上 → 回収率 7.0（PDF の 4.0 ではない）
@@ -338,7 +338,7 @@ async fn backtest_prefers_market_odds_over_pdf() {
 #[tokio::test]
 async fn backtest_empty_when_no_races() {
     let app = interactor(Vec::new());
-    let report = app.backtest(d(2026, 1, 1), d(2026, 1, 31)).await.unwrap();
+    let report = app.backtest(d(2026, 1, 1), d(2026, 1, 31), None).await.unwrap();
     assert_eq!(report.races_evaluated, 0);
     assert!(report.payout_rate.is_none());
 }
@@ -367,7 +367,7 @@ async fn backtest_excludes_scratched_and_cancelled_horses() {
         ],
     };
     let app = interactor(vec![race]);
-    let report = app.backtest(d(2026, 1, 1), d(2026, 1, 31)).await.unwrap();
+    let report = app.backtest(d(2026, 1, 1), d(2026, 1, 31), None).await.unwrap();
 
     assert_eq!(report.races_evaluated, 1);
     // 非出走馬が除外され、発走馬の最高スタッツ ウマA が 1 着 → 単勝的中

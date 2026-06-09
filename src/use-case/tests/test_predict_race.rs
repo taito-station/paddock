@@ -94,6 +94,7 @@ fn course_stats_with_gate(inner_win: u32, middle_win: u32) -> CourseStatsRow {
 
 struct MockRepo {
     card: Option<RaceCard>,
+    odds: Option<paddock_domain::RaceOdds>,
 }
 
 impl Repository for MockRepo {
@@ -167,7 +168,7 @@ impl Repository for MockRepo {
         _: &RaceId,
         _: Option<chrono::NaiveDate>,
     ) -> Result<Option<paddock_domain::RaceOdds>> {
-        unimplemented!()
+        Ok(self.odds.clone())
     }
 
     async fn find_races_by_date(&self, _: chrono::NaiveDate) -> Result<Vec<Race>> {
@@ -240,7 +241,21 @@ impl paddock_use_case::PdfFetcher for NullFetcher {
 }
 
 fn interactor(card: Option<RaceCard>) -> Interactor<MockRepo, NullParser, NullFetcher> {
-    Interactor::new(MockRepo { card }, NullParser, NullFetcher)
+    Interactor::new(MockRepo { card, odds: None }, NullParser, NullFetcher)
+}
+
+fn interactor_with_odds(
+    card: Option<RaceCard>,
+    odds: paddock_domain::RaceOdds,
+) -> Interactor<MockRepo, NullParser, NullFetcher> {
+    Interactor::new(
+        MockRepo {
+            card,
+            odds: Some(odds),
+        },
+        NullParser,
+        NullFetcher,
+    )
 }
 
 // --- tests ------------------------------------------------------------------
@@ -249,7 +264,7 @@ fn interactor(card: Option<RaceCard>) -> Interactor<MockRepo, NullParser, NullFe
 async fn predict_race_returns_not_found_when_card_missing() {
     let app = interactor(None);
     let race_id = RaceId::try_from("2026-1-tokyo-1-R1").unwrap();
-    let err = app.predict_race(&race_id).await.unwrap_err();
+    let err = app.predict_race(&race_id, None).await.unwrap_err();
     assert!(matches!(err, Error::NotFound(_)));
 }
 
@@ -258,7 +273,7 @@ async fn predict_race_win_sums_to_one_and_monotone() {
     let card = make_race_card("2026-1-tokyo-1-R1");
     let app = interactor(Some(card));
     let race_id = RaceId::try_from("2026-1-tokyo-1-R1").unwrap();
-    let probs = app.predict_race(&race_id).await.unwrap();
+    let probs = app.predict_race(&race_id, None).await.unwrap();
 
     assert_eq!(probs.len(), 2);
 
@@ -285,7 +300,7 @@ async fn predict_race_higher_stats_horse_gets_higher_win_prob() {
     let card = make_race_card("2026-1-tokyo-1-R1");
     let app = interactor(Some(card));
     let race_id = RaceId::try_from("2026-1-tokyo-1-R1").unwrap();
-    let probs = app.predict_race(&race_id).await.unwrap();
+    let probs = app.predict_race(&race_id, None).await.unwrap();
 
     let uma_a = probs
         .iter()
@@ -299,4 +314,52 @@ async fn predict_race_higher_stats_horse_gets_higher_win_prob() {
         uma_a.win_prob > uma_b.win_prob,
         "ウマA(win_rate=0.2, Inner gate) should outrank ウマB(win_rate=0.1, Middle gate)"
     );
+}
+
+#[tokio::test]
+async fn predict_race_blends_market_odds_when_alpha_given() {
+    // モデルは ウマA 有利だが、市場は ウマB を圧倒的人気（低オッズ）にする。
+    // α=0.3（市場重み 0.7）でブレンドすると ウマB の win_prob がモデルのみより上がる。
+    let race_id_str = "2026-1-tokyo-1-R1";
+    let card = make_race_card(race_id_str);
+    let mut odds = paddock_domain::RaceOdds::empty(RaceId::try_from(race_id_str).unwrap());
+    odds.win.insert(
+        HorseNum::try_from(1u32).unwrap(),
+        paddock_domain::OddsValue::try_from(8.0).unwrap(), // ウマA: 人気薄
+    );
+    odds.win.insert(
+        HorseNum::try_from(2u32).unwrap(),
+        paddock_domain::OddsValue::try_from(1.3).unwrap(), // ウマB: 圧倒的人気
+    );
+    let race_id = RaceId::try_from(race_id_str).unwrap();
+
+    let model_only = interactor(Some(card.clone()))
+        .predict_race(&race_id, None)
+        .await
+        .unwrap();
+    let blended = interactor_with_odds(Some(card), odds)
+        .predict_race(&race_id, Some(0.3))
+        .await
+        .unwrap();
+
+    let b_model = model_only
+        .iter()
+        .find(|p| p.horse_name.value() == "ウマB")
+        .unwrap()
+        .win_prob;
+    let b_blend = blended
+        .iter()
+        .find(|p| p.horse_name.value() == "ウマB")
+        .unwrap()
+        .win_prob;
+    assert!(
+        b_blend > b_model,
+        "市場で圧倒的人気の ウマB はブレンドで win_prob が上がるはず: model={b_model}, blend={b_blend}"
+    );
+    // ブレンド後も win 合計 ≒ 1.0 と単調性を維持。
+    let win_total: f64 = blended.iter().map(|p| p.win_prob).sum();
+    assert!((win_total - 1.0).abs() < 1e-9, "win sum={win_total}");
+    for p in &blended {
+        assert!(p.win_prob <= p.place_prob && p.place_prob <= p.show_prob, "{p:?}");
+    }
 }

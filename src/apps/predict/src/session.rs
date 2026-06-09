@@ -10,6 +10,12 @@ use paddock_use_case::{PredictBetRecord, PredictSessionRecord};
 
 use crate::setup::App;
 
+/// 本番予想で使う市場オッズ(単勝)ブレンドのモデル重み α（#72）。`None` はモデルのみ。
+/// backtest（2026-03〜05, 144R）の α スイープで、的中率・回収率が最良かつ校正も
+/// 市場のみに近い α=0.3（市場重み 0.7）を採用。市場オッズが無いレースは自動でモデルのみに
+/// フォールバックする。詳細は docs/specifications/probability-estimation.md。
+const MARKET_BLEND_ALPHA: Option<f64> = Some(0.3);
+
 /// 1 日分のレースを順番に処理する対話セッション。
 ///
 /// 新規開始時は `budget` 必須でセッションを作成し、レース確定ごとに DB へ保存する。
@@ -112,7 +118,11 @@ async fn run_race(
 
     // 出馬表未登録（NotFound）はそのレースのみスキップ。
     // DB 障害等（Internal）はセッション継続不能なため伝播して中断する。
-    let probs = match app.interactor.predict_race(&race.race_id).await {
+    let probs = match app
+        .interactor
+        .predict_race(&race.race_id, MARKET_BLEND_ALPHA)
+        .await
+    {
         Ok(p) => p,
         Err(paddock_use_case::Error::NotFound(msg)) => {
             println!("出馬表が見つかりません（{msg}）。スキップします。");
