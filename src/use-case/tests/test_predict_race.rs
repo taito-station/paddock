@@ -279,7 +279,7 @@ fn interactor_with_odds(
     )
 }
 
-fn interactor_with_tc(
+fn interactor_with_tc_stats(
     card: Option<RaceCard>,
     track_condition_stats: HashMap<String, Vec<GroupStat>>,
 ) -> Interactor<MockRepo, NullParser, NullFetcher> {
@@ -361,11 +361,11 @@ async fn predict_race_track_condition_lifts_horse_with_strong_record() {
     let tc: HashMap<String, Vec<GroupStat>> =
         HashMap::from([("ウマB".to_string(), vec![make_group("良", 10, 8, 9, 10)])]);
 
-    let without = interactor_with_tc(Some(card.clone()), tc.clone())
+    let without = interactor_with_tc_stats(Some(card.clone()), tc.clone())
         .predict_race(&race_id, None, None)
         .await
         .unwrap();
-    let with_tc = interactor_with_tc(Some(card), tc)
+    let with_tc = interactor_with_tc_stats(Some(card), tc)
         .predict_race(&race_id, None, Some(TrackCondition::Firm))
         .await
         .unwrap();
@@ -402,11 +402,11 @@ async fn predict_race_track_condition_zero_starts_treated_as_missing() {
     let zero_starts: HashMap<String, Vec<GroupStat>> =
         HashMap::from([("ウマA".to_string(), vec![make_group("良", 0, 0, 0, 0)])]);
 
-    let with_zero = interactor_with_tc(Some(card.clone()), zero_starts)
+    let with_zero = interactor_with_tc_stats(Some(card.clone()), zero_starts)
         .predict_race(&race_id, None, Some(TrackCondition::Firm))
         .await
         .unwrap();
-    let with_empty = interactor_with_tc(Some(card), HashMap::new())
+    let with_empty = interactor_with_tc_stats(Some(card), HashMap::new())
         .predict_race(&race_id, None, Some(TrackCondition::Firm))
         .await
         .unwrap();

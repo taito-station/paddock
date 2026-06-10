@@ -150,6 +150,7 @@ fn stat_to_triple(groups: &[GroupStat], label: &str) -> RateTriple {
 
 /// label 一致の GroupStat を RateTriple へ変換する。一致なし・出走 0 件は `None` を返し、
 /// 呼び出し側が「実績なし」を 0 レートと区別できるようにする（#73）。
+/// 前提: groups 内で label は一意（rdb-gateway の `group_by` が固定キーごとに 1 行生成する）。
 fn stat_to_triple_opt(groups: &[GroupStat], label: &str) -> Option<RateTriple> {
     groups
         .iter()

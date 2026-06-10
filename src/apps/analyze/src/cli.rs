@@ -98,16 +98,17 @@ mod tests {
         }
     }
 
-    /// 不正値は実行前に usage エラーとして弾かれること。
+    /// 不正値は実行前に usage エラー（value_parser での値検証）として弾かれること。
     #[test]
     fn predict_rejects_unknown_track_condition() {
-        let result = Cli::try_parse_from([
+        let err = Cli::try_parse_from([
             "paddock-analyze",
             "predict",
             "2026-1-tokyo-1-R1",
             "--track-condition",
             "泥",
-        ]);
-        assert!(result.is_err());
+        ])
+        .unwrap_err();
+        assert_eq!(err.kind(), clap::error::ErrorKind::ValueValidation);
     }
 }
