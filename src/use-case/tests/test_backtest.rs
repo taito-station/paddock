@@ -8,7 +8,8 @@ use std::collections::HashMap;
 use chrono::NaiveDate;
 use paddock_domain::horse_result::{FinishingPosition, GateNum, HorseName, HorseNum, ResultStatus};
 use paddock_domain::{
-    HorseResult, JockeyName, OddsValue, Race, RaceCard, RaceId, RaceOdds, Surface, Venue,
+    HorseResult, JockeyName, OddsValue, Race, RaceCard, RaceId, RaceOdds, Surface, TrackCondition,
+    Venue,
 };
 use paddock_use_case::repository::{
     CourseStatsRow, FetchRecord, GroupStat, HorseStatsRow, JockeyStatsRow, Repository,
@@ -154,7 +155,13 @@ impl Repository for MockRepo {
             "ウマS" => 0.9,
             _ => 0.05,
         };
-        Ok(horse_stats_with_surface_win(win_rate))
+        let mut row = horse_stats_with_surface_win(win_rate);
+        // ウマB のみ不良馬場の好成績を持たせる（#73 の配線テスト用）。レースの
+        // track_condition が None の既存テストでは馬場項が使われないため影響しない。
+        if name.value() == "ウマB" {
+            row.by_track_condition = vec![make_group("不良", 10, 10)];
+        }
+        Ok(row)
     }
 
     async fn course_stats(
@@ -299,7 +306,10 @@ fn d(y: i32, m: u32, day: u32) -> NaiveDate {
 #[tokio::test]
 async fn backtest_aggregates_top_pick_and_payout() {
     let app = interactor(vec![finished_race()]);
-    let report = app.backtest(d(2026, 1, 1), d(2026, 1, 31), None).await.unwrap();
+    let report = app
+        .backtest(d(2026, 1, 1), d(2026, 1, 31), None)
+        .await
+        .unwrap();
 
     assert_eq!(report.races_evaluated, 1);
     // トップ選好馬は高スタッツの ウマA(1 着) → 単勝・連対・複勝すべて的中
@@ -324,7 +334,10 @@ async fn backtest_prefers_market_odds_over_pdf() {
         win_only_odds(race.race_id.value(), 1, 7.0),
     );
     let app = interactor_with_odds(vec![race], odds);
-    let report = app.backtest(d(2026, 1, 1), d(2026, 1, 31), None).await.unwrap();
+    let report = app
+        .backtest(d(2026, 1, 1), d(2026, 1, 31), None)
+        .await
+        .unwrap();
 
     assert_eq!(report.payout_races, 1);
     // トップ選好馬 ウマA(1 着) を当時オッズ 7.0 で計上 → 回収率 7.0（PDF の 4.0 ではない）
@@ -356,6 +369,53 @@ fn blend_race() -> Race {
     }
 }
 
+/// モデルは高スタッツの ウマA を本命にするが、不良馬場のレースでは道悪巧者の ウマB
+/// （`by_track_condition` の不良 10 戦 10 勝）が本命に入れ替わるレース（#73 の配線検証用）。
+fn soft_track_race(track_condition: Option<TrackCondition>) -> Race {
+    Race {
+        race_id: RaceId::try_from("2026-1-nakayama-1-3R").unwrap(),
+        date: NaiveDate::from_ymd_opt(2026, 1, 10).unwrap(),
+        venue: Venue::Nakayama,
+        round: 1,
+        day: 1,
+        race_num: 3,
+        surface: Surface::Turf,
+        distance: 2000,
+        track_condition,
+        weather: None,
+        results: vec![
+            result(1, 1, "ウマA", 2, Some(9.0)), // 高スタッツ・2 着
+            result(2, 5, "ウマB", 1, Some(5.0)), // 低スタッツだが道悪巧者・1 着
+        ],
+    }
+}
+
+#[tokio::test]
+async fn backtest_wires_race_track_condition_into_factors() {
+    // 馬場状態なし: 本命は高スタッツの ウマA(2 着) → 単勝的中 0。
+    let without_tc = interactor(vec![soft_track_race(None)])
+        .backtest(d(2026, 1, 1), d(2026, 1, 31), None)
+        .await
+        .unwrap();
+    assert!(
+        without_tc.win_hit_rate.abs() < 1e-9,
+        "track_condition なしで本命が動いている (win_hit={})",
+        without_tc.win_hit_rate
+    );
+
+    // 不良馬場: race.track_condition が build_factors へ配線され、道悪巧者の
+    // ウマB(1 着)へ本命が入れ替わる → 単勝的中 1。
+    let with_tc = interactor(vec![soft_track_race(Some(TrackCondition::Soft))])
+        .backtest(d(2026, 1, 1), d(2026, 1, 31), None)
+        .await
+        .unwrap();
+    assert!(
+        (with_tc.win_hit_rate - 1.0).abs() < 1e-9,
+        "race.track_condition が factor に配線されていない (win_hit={})",
+        with_tc.win_hit_rate
+    );
+}
+
 #[tokio::test]
 async fn backtest_blend_flips_top_pick_to_market_favorite() {
     // モデルのみ: 本命 ウマA は 2 着 → 単勝的中 0。
@@ -373,10 +433,14 @@ async fn backtest_blend_flips_top_pick_to_market_favorite() {
     let race = blend_race();
     let mut odds = HashMap::new();
     let mut o = RaceOdds::empty(RaceId::try_from(race.race_id.value()).unwrap());
-    o.win
-        .insert(HorseNum::try_from(1u32).unwrap(), OddsValue::try_from(9.0).unwrap());
-    o.win
-        .insert(HorseNum::try_from(2u32).unwrap(), OddsValue::try_from(1.2).unwrap());
+    o.win.insert(
+        HorseNum::try_from(1u32).unwrap(),
+        OddsValue::try_from(9.0).unwrap(),
+    );
+    o.win.insert(
+        HorseNum::try_from(2u32).unwrap(),
+        OddsValue::try_from(1.2).unwrap(),
+    );
     odds.insert(race.race_id.value().to_string(), o);
 
     let blended = interactor_with_odds(vec![race], odds)
@@ -398,8 +462,10 @@ async fn backtest_blend_uses_partial_race_odds_as_is() {
     let race = blend_race();
     let mut odds = HashMap::new();
     let mut o = RaceOdds::empty(RaceId::try_from(race.race_id.value()).unwrap());
-    o.win
-        .insert(HorseNum::try_from(2u32).unwrap(), OddsValue::try_from(1.2).unwrap());
+    o.win.insert(
+        HorseNum::try_from(2u32).unwrap(),
+        OddsValue::try_from(1.2).unwrap(),
+    );
     odds.insert(race.race_id.value().to_string(), o);
 
     let report = interactor_with_odds(vec![race], odds)
@@ -431,7 +497,10 @@ async fn backtest_blend_falls_back_to_results_odds_when_no_snapshot() {
 #[tokio::test]
 async fn backtest_empty_when_no_races() {
     let app = interactor(Vec::new());
-    let report = app.backtest(d(2026, 1, 1), d(2026, 1, 31), None).await.unwrap();
+    let report = app
+        .backtest(d(2026, 1, 1), d(2026, 1, 31), None)
+        .await
+        .unwrap();
     assert_eq!(report.races_evaluated, 0);
     assert!(report.payout_rate.is_none());
 }
@@ -460,7 +529,10 @@ async fn backtest_excludes_scratched_and_cancelled_horses() {
         ],
     };
     let app = interactor(vec![race]);
-    let report = app.backtest(d(2026, 1, 1), d(2026, 1, 31), None).await.unwrap();
+    let report = app
+        .backtest(d(2026, 1, 1), d(2026, 1, 31), None)
+        .await
+        .unwrap();
 
     assert_eq!(report.races_evaluated, 1);
     // 非出走馬が除外され、発走馬の最高スタッツ ウマA が 1 着 → 単勝的中

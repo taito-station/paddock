@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use chrono::NaiveDate;
 use paddock_domain::{
     HorseEntry, HorseFactors, HorseName, HorseProbability, RaceId, RateTriple, Surface,
+    TrackCondition,
 };
 
 use crate::error::{Error, Result};
@@ -15,10 +16,13 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
     /// 出馬表から各馬の win/place/show 確率を推定する。`blend_alpha = Some(α)` のとき、
     /// 当日の市場オッズ（単勝, `find_race_odds(.., None)` の最新スナップショット）の implied 確率と
     /// α（モデル重み）でブレンドする（#72）。`None` はモデルのみ（市場オッズを取得しない）。
+    /// `track_condition = Some(..)` のとき、各馬の馬場状態別成績を factor に加える（#73）。
+    /// 出馬表 PDF に馬場状態は無いため、呼び出し側が当日の値を渡す（未確定なら `None`）。
     pub async fn predict_race(
         &self,
         race_id: &RaceId,
         blend_alpha: Option<f64>,
+        track_condition: Option<TrackCondition>,
     ) -> Result<Vec<HorseProbability>> {
         let card = self
             .repository
@@ -32,6 +36,11 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
             .course_stats(card.venue, card.distance, card.surface, None)
             .await?;
 
+        let race_ctx = RaceContext {
+            surface: card.surface,
+            distance: card.distance,
+            track_condition,
+        };
         let mut entry_factors: Vec<(HorseEntry, HorseFactors)> = Vec::new();
         for entry in &card.entries {
             let horse = self.repository.horse_stats(&entry.horse_name, None).await?;
@@ -48,8 +57,7 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
                 &course,
                 &horse,
                 jockey.as_ref(),
-                card.surface,
-                card.distance,
+                &race_ctx,
                 recent_form,
             );
             entry_factors.push((entry.clone(), factors));
@@ -97,6 +105,14 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
     }
 }
 
+/// `build_factors` に渡すレース側の条件（全馬共通）。
+pub(crate) struct RaceContext {
+    pub surface: Surface,
+    pub distance: u32,
+    /// 評価対象レースの馬場状態（#73）。未確定なら `None`（馬場項なし）。
+    pub track_condition: Option<TrackCondition>,
+}
+
 /// 取得済みの stats 行と前走フォームから `HorseFactors` を組み立てる純粋変換。`as_of` には
 /// 依存しないため、本番 predict（全期間統計）とバックテスト（as-of 統計）の両方から共有する。
 /// `recent_form` は呼び出し側が前走から算出して渡す（#31）。
@@ -105,33 +121,46 @@ pub(crate) fn build_factors(
     course: &CourseStatsRow,
     horse: &HorseStatsRow,
     jockey: Option<&JockeyStatsRow>,
-    surface: Surface,
-    distance: u32,
+    race: &RaceContext,
     recent_form: Option<f64>,
 ) -> HorseFactors {
     let gate_label = gate_group_label(entry.gate_num.value());
-    let surf_label = surface_label(surface);
-    let dist_label = distance_band_label(distance);
+    let surf_label = surface_label(race.surface);
+    let dist_label = distance_band_label(race.distance);
 
     HorseFactors {
         course_gate: stat_to_triple(&course.by_gate_group, gate_label),
         horse_surface: stat_to_triple(&horse.by_surface, surf_label),
         horse_distance: stat_to_triple(&horse.by_distance_band, dist_label),
         jockey_surface: jockey.map(|j| stat_to_triple(&j.by_surface, surf_label)),
+        // 馬場状態が未確定のレース・該当馬場での出走実績が無い馬は None（項と重みを母数から
+        // 除外、ADR 0007 の欠落項扱い）。0 埋め（stat_to_triple）にすると実績なしが減点に
+        // なるため、ここは Option で区別する（#73）。
+        horse_track_condition: race
+            .track_condition
+            .and_then(|tc| stat_to_triple_opt(&horse.by_track_condition, tc.as_str())),
         recent_form,
     }
 }
 
+/// 一致なし・出走 0 件は 0 レートに畳む。`starts == 0` は `GroupStat` の rate メソッドが
+/// 0.0 を返すため、`stat_to_triple_opt` 導入前（label 一致のみで変換）と挙動同値。
 fn stat_to_triple(groups: &[GroupStat], label: &str) -> RateTriple {
+    stat_to_triple_opt(groups, label).unwrap_or_default()
+}
+
+/// label 一致の GroupStat を RateTriple へ変換する。一致なし・出走 0 件は `None` を返し、
+/// 呼び出し側が「実績なし」を 0 レートと区別できるようにする（#73）。
+/// 前提: groups 内で label は一意（rdb-gateway の `group_by` が固定キーごとに 1 行生成する）。
+fn stat_to_triple_opt(groups: &[GroupStat], label: &str) -> Option<RateTriple> {
     groups
         .iter()
-        .find(|g| g.label == label)
+        .find(|g| g.label == label && g.starts > 0)
         .map(|g| RateTriple {
             win: g.win_rate(),
             place: g.place_rate(),
             show: g.show_rate(),
         })
-        .unwrap_or_default()
 }
 
 fn surface_label(surface: Surface) -> &'static str {

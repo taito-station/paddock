@@ -3,8 +3,12 @@
 //! Uses in-memory mocks for all repositories to test label resolution,
 //! probability normalization, and the not-found error path.
 
+use std::collections::HashMap;
+
 use paddock_domain::horse_result::{GateNum, HorseName, HorseNum};
-use paddock_domain::{HorseEntry, JockeyName, Race, RaceCard, RaceId, Surface, Venue};
+use paddock_domain::{
+    HorseEntry, JockeyName, Race, RaceCard, RaceId, Surface, TrackCondition, Venue,
+};
 use paddock_use_case::repository::{
     CourseStatsRow, FetchRecord, GroupStat, HorseStatsRow, JockeyStatsRow, Repository,
 };
@@ -95,6 +99,8 @@ fn course_stats_with_gate(inner_win: u32, middle_win: u32) -> CourseStatsRow {
 struct MockRepo {
     card: Option<RaceCard>,
     odds: Option<paddock_domain::RaceOdds>,
+    /// 馬名 → by_track_condition スタッツ（#73 のテスト用。未登録馬は空 = 馬場実績なし）。
+    track_condition_stats: HashMap<String, Vec<GroupStat>>,
 }
 
 impl Repository for MockRepo {
@@ -123,7 +129,13 @@ impl Repository for MockRepo {
         _as_of: Option<chrono::NaiveDate>,
     ) -> Result<HorseStatsRow> {
         let win_rate = if name.value() == "ウマA" { 0.2 } else { 0.1 };
-        Ok(horse_stats_with_surface_win(win_rate))
+        let mut row = horse_stats_with_surface_win(win_rate);
+        row.by_track_condition = self
+            .track_condition_stats
+            .get(name.value())
+            .cloned()
+            .unwrap_or_default();
+        Ok(row)
     }
     async fn course_stats(
         &self,
@@ -241,7 +253,15 @@ impl paddock_use_case::PdfFetcher for NullFetcher {
 }
 
 fn interactor(card: Option<RaceCard>) -> Interactor<MockRepo, NullParser, NullFetcher> {
-    Interactor::new(MockRepo { card, odds: None }, NullParser, NullFetcher)
+    Interactor::new(
+        MockRepo {
+            card,
+            odds: None,
+            track_condition_stats: HashMap::new(),
+        },
+        NullParser,
+        NullFetcher,
+    )
 }
 
 fn interactor_with_odds(
@@ -252,6 +272,22 @@ fn interactor_with_odds(
         MockRepo {
             card,
             odds: Some(odds),
+            track_condition_stats: HashMap::new(),
+        },
+        NullParser,
+        NullFetcher,
+    )
+}
+
+fn interactor_with_tc_stats(
+    card: Option<RaceCard>,
+    track_condition_stats: HashMap<String, Vec<GroupStat>>,
+) -> Interactor<MockRepo, NullParser, NullFetcher> {
+    Interactor::new(
+        MockRepo {
+            card,
+            odds: None,
+            track_condition_stats,
         },
         NullParser,
         NullFetcher,
@@ -264,7 +300,7 @@ fn interactor_with_odds(
 async fn predict_race_returns_not_found_when_card_missing() {
     let app = interactor(None);
     let race_id = RaceId::try_from("2026-1-tokyo-1-R1").unwrap();
-    let err = app.predict_race(&race_id, None).await.unwrap_err();
+    let err = app.predict_race(&race_id, None, None).await.unwrap_err();
     assert!(matches!(err, Error::NotFound(_)));
 }
 
@@ -273,7 +309,7 @@ async fn predict_race_win_sums_to_one_and_monotone() {
     let card = make_race_card("2026-1-tokyo-1-R1");
     let app = interactor(Some(card));
     let race_id = RaceId::try_from("2026-1-tokyo-1-R1").unwrap();
-    let probs = app.predict_race(&race_id, None).await.unwrap();
+    let probs = app.predict_race(&race_id, None, None).await.unwrap();
 
     assert_eq!(probs.len(), 2);
 
@@ -300,7 +336,7 @@ async fn predict_race_higher_stats_horse_gets_higher_win_prob() {
     let card = make_race_card("2026-1-tokyo-1-R1");
     let app = interactor(Some(card));
     let race_id = RaceId::try_from("2026-1-tokyo-1-R1").unwrap();
-    let probs = app.predict_race(&race_id, None).await.unwrap();
+    let probs = app.predict_race(&race_id, None, None).await.unwrap();
 
     let uma_a = probs
         .iter()
@@ -314,6 +350,75 @@ async fn predict_race_higher_stats_horse_gets_higher_win_prob() {
         uma_a.win_prob > uma_b.win_prob,
         "ウマA(win_rate=0.2, Inner gate) should outrank ウマB(win_rate=0.1, Middle gate)"
     );
+}
+
+#[tokio::test]
+async fn predict_race_track_condition_lifts_horse_with_strong_record() {
+    // ウマB だけ「良」での好成績を持つ。track_condition 未指定では馬場項は使われず、
+    // Some(良) を渡すと ウマB の win_prob が上がり、相対的に ウマA は下がる（#73）。
+    let card = make_race_card("2026-1-tokyo-1-R1");
+    let race_id = RaceId::try_from("2026-1-tokyo-1-R1").unwrap();
+    let tc: HashMap<String, Vec<GroupStat>> =
+        HashMap::from([("ウマB".to_string(), vec![make_group("良", 10, 8, 9, 10)])]);
+
+    let without = interactor_with_tc_stats(Some(card.clone()), tc.clone())
+        .predict_race(&race_id, None, None)
+        .await
+        .unwrap();
+    let with_tc = interactor_with_tc_stats(Some(card), tc)
+        .predict_race(&race_id, None, Some(TrackCondition::Firm))
+        .await
+        .unwrap();
+
+    let win_of = |probs: &[paddock_domain::HorseProbability], name: &str| {
+        probs
+            .iter()
+            .find(|p| p.horse_name.value() == name)
+            .unwrap()
+            .win_prob
+    };
+    assert!(
+        win_of(&with_tc, "ウマB") > win_of(&without, "ウマB"),
+        "良馬場巧者の ウマB は馬場項で win_prob が上がるはず: without={}, with={}",
+        win_of(&without, "ウマB"),
+        win_of(&with_tc, "ウマB")
+    );
+    assert!(win_of(&with_tc, "ウマA") < win_of(&without, "ウマA"));
+    // 馬場項を加えても単調性を維持。
+    for p in &with_tc {
+        assert!(
+            p.win_prob <= p.place_prob && p.place_prob <= p.show_prob,
+            "{p:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn predict_race_track_condition_zero_starts_treated_as_missing() {
+    // 「良」のグループはあるが出走 0 件 → 実績なしとして項ごと母数から除外され、
+    // by_track_condition が空の場合と完全に一致する（0 レート扱いで減点しない、#73）。
+    let card = make_race_card("2026-1-tokyo-1-R1");
+    let race_id = RaceId::try_from("2026-1-tokyo-1-R1").unwrap();
+    let zero_starts: HashMap<String, Vec<GroupStat>> =
+        HashMap::from([("ウマA".to_string(), vec![make_group("良", 0, 0, 0, 0)])]);
+
+    let with_zero = interactor_with_tc_stats(Some(card.clone()), zero_starts)
+        .predict_race(&race_id, None, Some(TrackCondition::Firm))
+        .await
+        .unwrap();
+    let with_empty = interactor_with_tc_stats(Some(card), HashMap::new())
+        .predict_race(&race_id, None, Some(TrackCondition::Firm))
+        .await
+        .unwrap();
+
+    // zip は短い方で打ち切られるため、空 vec 同士の空振り pass を先に弾く。
+    assert_eq!(with_zero.len(), 2);
+    assert_eq!(with_zero.len(), with_empty.len());
+    for (a, b) in with_zero.iter().zip(&with_empty) {
+        assert!((a.win_prob - b.win_prob).abs() < 1e-12, "{a:?} vs {b:?}");
+        assert!((a.place_prob - b.place_prob).abs() < 1e-12);
+        assert!((a.show_prob - b.show_prob).abs() < 1e-12);
+    }
 }
 
 #[tokio::test]
@@ -334,11 +439,11 @@ async fn predict_race_blends_market_odds_when_alpha_given() {
     let race_id = RaceId::try_from(race_id_str).unwrap();
 
     let model_only = interactor(Some(card.clone()))
-        .predict_race(&race_id, None)
+        .predict_race(&race_id, None, None)
         .await
         .unwrap();
     let blended = interactor_with_odds(Some(card), odds)
-        .predict_race(&race_id, Some(0.3))
+        .predict_race(&race_id, Some(0.3), None)
         .await
         .unwrap();
 
@@ -360,6 +465,9 @@ async fn predict_race_blends_market_odds_when_alpha_given() {
     let win_total: f64 = blended.iter().map(|p| p.win_prob).sum();
     assert!((win_total - 1.0).abs() < 1e-9, "win sum={win_total}");
     for p in &blended {
-        assert!(p.win_prob <= p.place_prob && p.place_prob <= p.show_prob, "{p:?}");
+        assert!(
+            p.win_prob <= p.place_prob && p.place_prob <= p.show_prob,
+            "{p:?}"
+        );
     }
 }

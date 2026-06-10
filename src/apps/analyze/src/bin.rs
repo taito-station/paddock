@@ -69,10 +69,14 @@ async fn main() -> anyhow::Result<()> {
         cli::Command::Predict {
             race_id,
             blend_alpha,
+            track_condition,
         } => {
             let blend_alpha = validate_blend_alpha(blend_alpha)?;
             let rid = RaceId::try_from(race_id.as_str())?;
-            let probs = app.interactor.predict_race(&rid, blend_alpha).await?;
+            let probs = app
+                .interactor
+                .predict_race(&rid, blend_alpha, track_condition)
+                .await?;
             print_predict(&probs);
         }
         cli::Command::Backtest {
@@ -211,7 +215,10 @@ fn print_backtest(from: NaiveDate, to: NaiveDate, r: &BacktestReport) {
 /// 単勝の reliability 曲線（予測確率帯ごとの平均予測 vs 実測勝率）。空ビンは省略する。
 fn print_reliability(bins: &[ReliabilityBin]) {
     println!("## reliability 曲線（単勝・予測確率帯ごと）");
-    println!("{:<10} {:>6} {:>10} {:>10}", "確率帯", "件数", "平均予測", "実測勝率");
+    println!(
+        "{:<10} {:>6} {:>10} {:>10}",
+        "確率帯", "件数", "平均予測", "実測勝率"
+    );
     for b in bins {
         if b.count == 0 {
             continue;
