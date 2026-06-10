@@ -7,10 +7,11 @@ use std::collections::HashMap;
 
 use paddock_domain::horse_result::{GateNum, HorseName, HorseNum};
 use paddock_domain::{
-    HorseEntry, JockeyName, Race, RaceCard, RaceId, Surface, TrackCondition, Venue,
+    HorseEntry, JockeyName, Race, RaceCard, RaceId, Surface, TrackCondition, TrainerName, Venue,
 };
 use paddock_use_case::repository::{
     CourseStatsRow, FetchRecord, GroupStat, HorseStatsRow, JockeyStatsRow, Repository,
+    TrainerStatsRow,
 };
 use paddock_use_case::{Error, Interactor, Result};
 
@@ -42,12 +43,14 @@ fn make_race_card(race_id: &str) -> RaceCard {
                 horse_num: HorseNum::try_from(1u32).unwrap(),
                 horse_name: HorseName::try_from("ウマA").unwrap(),
                 jockey: None,
+                trainer: None,
             },
             HorseEntry {
                 gate_num: GateNum::try_from(5u32).unwrap(),
                 horse_num: HorseNum::try_from(2u32).unwrap(),
                 horse_name: HorseName::try_from("ウマB").unwrap(),
                 jockey: None,
+                trainer: None,
             },
         ],
     }
@@ -101,6 +104,8 @@ struct MockRepo {
     odds: Option<paddock_domain::RaceOdds>,
     /// 馬名 → by_track_condition スタッツ（#73 のテスト用。未登録馬は空 = 馬場実績なし）。
     track_condition_stats: HashMap<String, Vec<GroupStat>>,
+    /// 調教師名 → by_surface スタッツ（#74 のテスト用。未登録は空 = 実績なし）。
+    trainer_surface_stats: HashMap<String, Vec<GroupStat>>,
 }
 
 impl Repository for MockRepo {
@@ -121,6 +126,9 @@ impl Repository for MockRepo {
         unimplemented!()
     }
     async fn find_matching_jockey_names(&self, _query: &str, _limit: u32) -> Result<Vec<String>> {
+        unimplemented!()
+    }
+    async fn find_matching_trainer_names(&self, _query: &str, _limit: u32) -> Result<Vec<String>> {
         unimplemented!()
     }
     async fn horse_stats(
@@ -152,6 +160,22 @@ impl Repository for MockRepo {
         _as_of: Option<chrono::NaiveDate>,
     ) -> Result<JockeyStatsRow> {
         unimplemented!()
+    }
+    async fn trainer_stats(
+        &self,
+        name: &TrainerName,
+        _as_of: Option<chrono::NaiveDate>,
+    ) -> Result<TrainerStatsRow> {
+        Ok(TrainerStatsRow {
+            trainer_name: name.value().to_string(),
+            overall: make_group("全体", 0, 0, 0, 0),
+            by_surface: self
+                .trainer_surface_stats
+                .get(name.value())
+                .cloned()
+                .unwrap_or_default(),
+            by_gate_group: vec![],
+        })
     }
     async fn count_races(&self) -> Result<u64> {
         Ok(0)
@@ -258,6 +282,7 @@ fn interactor(card: Option<RaceCard>) -> Interactor<MockRepo, NullParser, NullFe
             card,
             odds: None,
             track_condition_stats: HashMap::new(),
+            trainer_surface_stats: HashMap::new(),
         },
         NullParser,
         NullFetcher,
@@ -273,6 +298,7 @@ fn interactor_with_odds(
             card,
             odds: Some(odds),
             track_condition_stats: HashMap::new(),
+            trainer_surface_stats: HashMap::new(),
         },
         NullParser,
         NullFetcher,
@@ -288,6 +314,23 @@ fn interactor_with_tc_stats(
             card,
             odds: None,
             track_condition_stats,
+            trainer_surface_stats: HashMap::new(),
+        },
+        NullParser,
+        NullFetcher,
+    )
+}
+
+fn interactor_with_trainer_stats(
+    card: Option<RaceCard>,
+    trainer_surface_stats: HashMap<String, Vec<GroupStat>>,
+) -> Interactor<MockRepo, NullParser, NullFetcher> {
+    Interactor::new(
+        MockRepo {
+            card,
+            odds: None,
+            track_condition_stats: HashMap::new(),
+            trainer_surface_stats,
         },
         NullParser,
         NullFetcher,
@@ -469,5 +512,71 @@ async fn predict_race_blends_market_odds_when_alpha_given() {
             p.win_prob <= p.place_prob && p.place_prob <= p.show_prob,
             "{p:?}"
         );
+    }
+}
+
+#[tokio::test]
+async fn predict_race_trainer_lifts_horse_with_strong_record() {
+    // ウマB だけ調教師（出馬表由来の entry.trainer）に芝の好成績を持たせる。trainer 統計が
+    // 無い場合（実績なし）と比べて ウマB の win_prob が上がり、ウマA は相対的に下がる（#74）。
+    let race_id = "2026-1-tokyo-1-R1";
+    let mut card = make_race_card(race_id);
+    card.entries[1].trainer = Some(TrainerName::try_from("名伯楽").unwrap());
+    let rid = RaceId::try_from(race_id).unwrap();
+    let tr: HashMap<String, Vec<GroupStat>> =
+        HashMap::from([("名伯楽".to_string(), vec![make_group("芝", 10, 8, 9, 10)])]);
+
+    let without = interactor_with_trainer_stats(Some(card.clone()), HashMap::new())
+        .predict_race(&rid, None, None)
+        .await
+        .unwrap();
+    let with_tr = interactor_with_trainer_stats(Some(card), tr)
+        .predict_race(&rid, None, None)
+        .await
+        .unwrap();
+
+    let win_of = |probs: &[paddock_domain::HorseProbability], name: &str| {
+        probs
+            .iter()
+            .find(|p| p.horse_name.value() == name)
+            .unwrap()
+            .win_prob
+    };
+    assert!(
+        win_of(&with_tr, "ウマB") > win_of(&without, "ウマB"),
+        "強い調教師の ウマB は trainer 項で win_prob が上がるはず: without={}, with={}",
+        win_of(&without, "ウマB"),
+        win_of(&with_tr, "ウマB")
+    );
+    assert!(win_of(&with_tr, "ウマA") < win_of(&without, "ウマA"));
+    for p in &with_tr {
+        assert!(
+            p.win_prob <= p.place_prob && p.place_prob <= p.show_prob,
+            "{p:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn predict_race_trainer_absent_not_penalized() {
+    // 出馬表に調教師が無い（entry.trainer=None）馬は trainer 項なし。trainer_surface_stats を
+    // 渡しても entry.trainer=None なら無視され、trainer 統計を一切持たない場合と一致する（#74）。
+    let race_id = "2026-1-tokyo-1-R1";
+    let rid = RaceId::try_from(race_id).unwrap();
+    let baseline = interactor(Some(make_race_card(race_id)))
+        .predict_race(&rid, None, None)
+        .await
+        .unwrap();
+    let tr: HashMap<String, Vec<GroupStat>> =
+        HashMap::from([("名伯楽".to_string(), vec![make_group("芝", 10, 8, 9, 10)])]);
+    let with_stats = interactor_with_trainer_stats(Some(make_race_card(race_id)), tr)
+        .predict_race(&rid, None, None)
+        .await
+        .unwrap();
+
+    assert_eq!(baseline.len(), 2);
+    assert_eq!(baseline.len(), with_stats.len());
+    for (a, b) in baseline.iter().zip(&with_stats) {
+        assert!((a.win_prob - b.win_prob).abs() < 1e-12, "{a:?} vs {b:?}");
     }
 }

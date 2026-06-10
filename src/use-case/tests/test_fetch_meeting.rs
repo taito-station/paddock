@@ -7,12 +7,14 @@ use std::sync::Mutex;
 
 use chrono::NaiveDate;
 use paddock_domain::horse_result::{FinishingPosition, GateNum, HorseName, HorseNum, ResultStatus};
-use paddock_domain::{HorseResult, JockeyName, Race, RaceCard, RaceId, Surface, Venue};
+use paddock_domain::{
+    HorseResult, JockeyName, Race, RaceCard, RaceId, Surface, TrainerName, Venue,
+};
 use paddock_use_case::dto::pdf::fetch::{FetchMeetingOutcome, MeetingSpec};
 use paddock_use_case::pdf_fetcher::PdfFetcher;
 use paddock_use_case::pdf_parser::PdfParser;
 use paddock_use_case::repository::{
-    CourseStatsRow, FetchRecord, HorseStatsRow, JockeyStatsRow, Repository,
+    CourseStatsRow, FetchRecord, HorseStatsRow, JockeyStatsRow, Repository, TrainerStatsRow,
 };
 use paddock_use_case::{Error, Interactor, Result};
 
@@ -86,6 +88,9 @@ impl Repository for MockRepo {
     async fn find_matching_jockey_names(&self, _query: &str, _limit: u32) -> Result<Vec<String>> {
         unimplemented!()
     }
+    async fn find_matching_trainer_names(&self, _query: &str, _limit: u32) -> Result<Vec<String>> {
+        unimplemented!()
+    }
     async fn horse_stats(
         &self,
         _name: &HorseName,
@@ -107,6 +112,13 @@ impl Repository for MockRepo {
         _name: &JockeyName,
         _as_of: Option<NaiveDate>,
     ) -> Result<JockeyStatsRow> {
+        Err(Error::NotFound("unused".into()))
+    }
+    async fn trainer_stats(
+        &self,
+        _name: &TrainerName,
+        _as_of: Option<NaiveDate>,
+    ) -> Result<TrainerStatsRow> {
         Err(Error::NotFound("unused".into()))
     }
     async fn count_races(&self) -> Result<u64> {
@@ -402,6 +414,9 @@ impl Repository for HistoryRepo {
     async fn find_matching_jockey_names(&self, _query: &str, _limit: u32) -> Result<Vec<String>> {
         unimplemented!()
     }
+    async fn find_matching_trainer_names(&self, _query: &str, _limit: u32) -> Result<Vec<String>> {
+        unimplemented!()
+    }
     async fn horse_stats(
         &self,
         _name: &HorseName,
@@ -423,6 +438,13 @@ impl Repository for HistoryRepo {
         _name: &JockeyName,
         _as_of: Option<NaiveDate>,
     ) -> Result<JockeyStatsRow> {
+        Err(Error::NotFound("unused".into()))
+    }
+    async fn trainer_stats(
+        &self,
+        _name: &TrainerName,
+        _as_of: Option<NaiveDate>,
+    ) -> Result<TrainerStatsRow> {
         Err(Error::NotFound("unused".into()))
     }
     async fn count_races(&self) -> Result<u64> {

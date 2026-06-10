@@ -10,7 +10,9 @@ use crate::error::{Error, Result};
 use crate::interactor::Interactor;
 use crate::pdf_fetcher::PdfFetcher;
 use crate::pdf_parser::PdfParser;
-use crate::repository::{CourseStatsRow, GroupStat, HorseStatsRow, JockeyStatsRow, Repository};
+use crate::repository::{
+    CourseStatsRow, GroupStat, HorseStatsRow, JockeyStatsRow, Repository, TrainerStatsRow,
+};
 
 impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
     /// 出馬表から各馬の win/place/show 確率を推定する。`blend_alpha = Some(α)` のとき、
@@ -50,6 +52,12 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
                 Some(j) => Some(self.repository.jockey_stats(j, None).await?),
                 None => None,
             };
+            // 調教師統計（#74）。netkeiba 出馬表由来の entry.trainer から引く。PDF 経路で
+            // 取り込んだレースは entry.trainer=None のため項なし（ADR 0007 で減点しない）。
+            let trainer = match &entry.trainer {
+                Some(t) => Some(self.repository.trainer_stats(t, None).await?),
+                None => None,
+            };
             // 前走フォーム（#31）。前走は出馬表日より前の成績から取る（card.date が cutoff）。
             let recent_form = self.recent_form_for(&entry.horse_name, card.date).await?;
             let factors = build_factors(
@@ -57,6 +65,7 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
                 &course,
                 &horse,
                 jockey.as_ref(),
+                trainer.as_ref(),
                 &race_ctx,
                 recent_form,
             );
@@ -121,6 +130,7 @@ pub(crate) fn build_factors(
     course: &CourseStatsRow,
     horse: &HorseStatsRow,
     jockey: Option<&JockeyStatsRow>,
+    trainer: Option<&TrainerStatsRow>,
     race: &RaceContext,
     recent_form: Option<f64>,
 ) -> HorseFactors {
@@ -133,6 +143,9 @@ pub(crate) fn build_factors(
         horse_surface: stat_to_triple(&horse.by_surface, surf_label),
         horse_distance: stat_to_triple(&horse.by_distance_band, dist_label),
         jockey_surface: jockey.map(|j| stat_to_triple(&j.by_surface, surf_label)),
+        // 調教師が欠落、または当該 surface 実績が無い馬は None（項と重みを母数から除外、#74）。
+        // jockey と異なり stat_to_triple_opt を使い「実績なし」を 0 レートと区別する（ADR 0011 流儀）。
+        trainer_surface: trainer.and_then(|t| stat_to_triple_opt(&t.by_surface, surf_label)),
         // 馬場状態が未確定のレース・該当馬場での出走実績が無い馬は None（項と重みを母数から
         // 除外、ADR 0007 の欠落項扱い）。0 埋め（stat_to_triple）にすると実績なしが減点に
         // なるため、ここは Option で区別する（#73）。

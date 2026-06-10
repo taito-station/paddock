@@ -9,10 +9,11 @@ use chrono::NaiveDate;
 use paddock_domain::horse_result::{FinishingPosition, GateNum, HorseName, HorseNum, ResultStatus};
 use paddock_domain::{
     HorseResult, JockeyName, OddsValue, Race, RaceCard, RaceId, RaceOdds, Surface, TrackCondition,
-    Venue,
+    TrainerName, Venue,
 };
 use paddock_use_case::repository::{
     CourseStatsRow, FetchRecord, GroupStat, HorseStatsRow, JockeyStatsRow, Repository,
+    TrainerStatsRow,
 };
 use paddock_use_case::{Interactor, Result};
 
@@ -182,6 +183,25 @@ impl Repository for MockRepo {
         unimplemented!()
     }
 
+    async fn trainer_stats(
+        &self,
+        name: &TrainerName,
+        _as_of: Option<NaiveDate>,
+    ) -> Result<TrainerStatsRow> {
+        // 「名伯楽」だけ芝で全勝（#74 の配線テスト用）。それ以外は実績なし（by_surface 空）。
+        let by_surface = if name.value() == "名伯楽" {
+            vec![make_group("芝", 10, 10)]
+        } else {
+            vec![]
+        };
+        Ok(TrainerStatsRow {
+            trainer_name: name.value().to_string(),
+            overall: make_group("全体", 0, 0),
+            by_surface,
+            by_gate_group: vec![],
+        })
+    }
+
     // --- 以下は backtest では未使用 ---
     async fn save_race(&self, _: &Race) -> Result<()> {
         unimplemented!()
@@ -200,6 +220,9 @@ impl Repository for MockRepo {
         unimplemented!()
     }
     async fn find_matching_jockey_names(&self, _query: &str, _limit: u32) -> Result<Vec<String>> {
+        unimplemented!()
+    }
+    async fn find_matching_trainer_names(&self, _query: &str, _limit: u32) -> Result<Vec<String>> {
         unimplemented!()
     }
     async fn count_races(&self) -> Result<u64> {
@@ -413,6 +436,58 @@ async fn backtest_wires_race_track_condition_into_factors() {
         (with_tc.win_hit_rate - 1.0).abs() < 1e-9,
         "race.track_condition が factor に配線されていない (win_hit={})",
         with_tc.win_hit_rate
+    );
+}
+
+/// モデルは高スタッツの ウマA を本命にするが、ウマB に名伯楽（mock の trainer_stats が芝 10 戦
+/// 10 勝を返す）を付けると本命が ウマB に入れ替わるレース（#74 の配線検証用）。trainer は
+/// results.trainer（当該レース確定値）から引く。
+fn trainer_race(b_trainer: Option<&str>) -> Race {
+    let mut b = result(2, 5, "ウマB", 1, Some(5.0)); // 低スタッツだが名伯楽・1 着
+    if let Some(t) = b_trainer {
+        b.trainer = Some(TrainerName::try_from(t).unwrap());
+    }
+    Race {
+        race_id: RaceId::try_from("2026-1-nakayama-1-4R").unwrap(),
+        date: NaiveDate::from_ymd_opt(2026, 1, 10).unwrap(),
+        venue: Venue::Nakayama,
+        round: 1,
+        day: 1,
+        race_num: 4,
+        surface: Surface::Turf,
+        distance: 2000,
+        track_condition: None,
+        weather: None,
+        results: vec![
+            result(1, 1, "ウマA", 2, Some(9.0)), // 高スタッツ・2 着
+            b,
+        ],
+    }
+}
+
+#[tokio::test]
+async fn backtest_wires_result_trainer_into_factors() {
+    // 調教師なし: 本命は高スタッツの ウマA(2 着) → 単勝的中 0。
+    let without = interactor(vec![trainer_race(None)])
+        .backtest(d(2026, 1, 1), d(2026, 1, 31), None)
+        .await
+        .unwrap();
+    assert!(
+        without.win_hit_rate.abs() < 1e-9,
+        "trainer なしで本命が動いている (win_hit={})",
+        without.win_hit_rate
+    );
+
+    // 名伯楽: results.trainer が build_factors へ配線され、ウマB(1 着)へ本命が入れ替わる
+    // → 単勝的中 1。
+    let with_tr = interactor(vec![trainer_race(Some("名伯楽"))])
+        .backtest(d(2026, 1, 1), d(2026, 1, 31), None)
+        .await
+        .unwrap();
+    assert!(
+        (with_tr.win_hit_rate - 1.0).abs() < 1e-9,
+        "results.trainer が factor に配線されていない (win_hit={})",
+        with_tr.win_hit_rate
     );
 }
 

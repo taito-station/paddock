@@ -59,3 +59,26 @@ pub async fn find_matching_jockey_names(
     .await?;
     Ok(rows.into_iter().map(|r| r.0).collect())
 }
+
+/// 調教師名版（[`find_matching_horse_names`] と同方針）。`results.trainer` が NULL の行は除外する。
+pub async fn find_matching_trainer_names(
+    pool: &SqlitePool,
+    query: &str,
+    limit: u32,
+) -> Result<Vec<String>> {
+    let rows: Vec<(String,)> = sqlx::query_as(
+        r#"
+        SELECT DISTINCT trainer
+        FROM results
+        WHERE trainer IS NOT NULL
+          AND trainer LIKE '%' || ? || '%' ESCAPE '\'
+        ORDER BY trainer
+        LIMIT ?
+        "#,
+    )
+    .bind(escape_like(query))
+    .bind(limit as i64)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.into_iter().map(|r| r.0).collect())
+}

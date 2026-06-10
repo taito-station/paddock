@@ -7,6 +7,7 @@ pub mod jockey;
 pub mod odds;
 pub mod pdf;
 pub mod race;
+pub mod trainer;
 
 use crate::pdf_fetcher::PdfFetcher;
 use crate::pdf_parser::PdfParser;

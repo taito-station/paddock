@@ -1,7 +1,7 @@
 use std::sync::LazyLock;
 
 use chrono::NaiveDate;
-use paddock_domain::{GateNum, HorseName, HorseNum, JockeyName, Surface};
+use paddock_domain::{GateNum, HorseName, HorseNum, JockeyName, Surface, TrainerName};
 use paddock_use_case::netkeiba_scraper::{FetchedCard, FetchedEntry};
 use regex::Regex;
 use scraper::{ElementRef, Html, Selector};
@@ -23,11 +23,8 @@ static DATE_RE: LazyLock<Regex> =
 /// `div.RaceData01` のテキスト、開催日は HTML 全体の `YYYY年M月D日` 表記から取る。
 /// 各行（`tr.HorseList`）から枠番・馬番・馬名・騎手を読む（馬名は静的 HTML に含まれる）。
 pub fn parse_card(html: &str, netkeiba_race_id: &str) -> Result<FetchedCard> {
-    let venue = venue_from_race_id(netkeiba_race_id).ok_or_else(|| {
-        Error::Parse(format!(
-            "JRA 外もしくは不正な race_id: {netkeiba_race_id}"
-        ))
-    })?;
+    let venue = venue_from_race_id(netkeiba_race_id)
+        .ok_or_else(|| Error::Parse(format!("JRA 外もしくは不正な race_id: {netkeiba_race_id}")))?;
     let (round, day, race_num) = round_day_racenum(netkeiba_race_id).ok_or_else(|| {
         Error::Parse(format!(
             "race_id から回/日/R を読めません: {netkeiba_race_id}"
@@ -76,9 +73,7 @@ fn extract_surface_distance(doc: &Html) -> Result<(Surface, u32)> {
         "芝" => Surface::Turf,
         "ダ" => Surface::Dirt,
         "障" => {
-            return Err(Error::Parse(
-                "障害レースは対応外です".to_string(),
-            ));
+            return Err(Error::Parse("障害レースは対応外です".to_string()));
         }
         other => return Err(Error::Parse(format!("unknown surface marker: {other}"))),
     };
@@ -138,6 +133,7 @@ fn extract_entries(doc: &Html) -> Result<Vec<FetchedEntry>> {
     let umaban_sel = sel("td[class^=\"Umaban\"]")?;
     let horse_link_sel = sel("td.HorseInfo a[href*=\"/horse/\"]")?;
     let jockey_sel = sel("td.Jockey a")?;
+    let trainer_sel = sel("td.Trainer a")?;
 
     let mut entries = Vec::new();
     for row in doc.select(&row_sel) {
@@ -163,12 +159,14 @@ fn extract_entries(doc: &Html) -> Result<Vec<FetchedEntry>> {
             continue;
         };
         let jockey = extract_jockey(&row, &jockey_sel);
+        let trainer = extract_trainer(&row, &trainer_sel);
 
         entries.push(FetchedEntry {
             gate_num,
             horse_num,
             horse_name,
             jockey,
+            trainer,
         });
     }
 
@@ -196,6 +194,15 @@ fn extract_jockey(row: &ElementRef, sel: &Selector) -> Option<JockeyName> {
         .attr("title")
         .and_then(cell_text)
         .and_then(|n| JockeyName::try_from(n).ok())
+}
+
+/// `td.Trainer a` の `title` 属性から調教師名を取る（#74）。取れなければ None。
+fn extract_trainer(row: &ElementRef, sel: &Selector) -> Option<TrainerName> {
+    let link = row.select(sel).next()?;
+    link.value()
+        .attr("title")
+        .and_then(cell_text)
+        .and_then(|n| TrainerName::try_from(n).ok())
 }
 
 fn sel(s: &str) -> Result<Selector> {

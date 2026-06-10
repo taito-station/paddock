@@ -3,7 +3,7 @@ use core::future::Future;
 use chrono::{DateTime, NaiveDate, Utc};
 use paddock_domain::{
     BetType, HorseId, HorseName, HorseResult, JockeyName, OrderedPair, OrderedTriple, Pair, Race,
-    RaceCard, RaceId, RaceOdds, Surface, Triple, Venue,
+    RaceCard, RaceId, RaceOdds, Surface, TrainerName, Triple, Venue,
 };
 
 use crate::error::Result;
@@ -76,6 +76,14 @@ pub struct CourseStatsRow {
 #[derive(Debug, Clone)]
 pub struct JockeyStatsRow {
     pub jockey_name: String,
+    pub overall: GroupStat,
+    pub by_surface: Vec<GroupStat>,
+    pub by_gate_group: Vec<GroupStat>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TrainerStatsRow {
+    pub trainer_name: String,
     pub overall: GroupStat,
     pub by_surface: Vec<GroupStat>,
     pub by_gate_group: Vec<GroupStat>,
@@ -259,6 +267,13 @@ pub trait Repository: Send + Sync {
         limit: u32,
     ) -> impl Future<Output = Result<Vec<String>>> + Send;
 
+    /// 調教師名版（[`Repository::find_matching_horse_names`] と同方針）。
+    fn find_matching_trainer_names(
+        &self,
+        query: &str,
+        limit: u32,
+    ) -> impl Future<Output = Result<Vec<String>>> + Send;
+
     /// 馬の各種成績統計を返す。`as_of = Some(d)` のとき `races.date < d` の成績のみを集計する
     /// （バックテストのリーク防止。本番予想は `None` で全期間集計）。
     fn horse_stats(
@@ -282,6 +297,13 @@ pub trait Repository: Send + Sync {
         name: &JockeyName,
         as_of: Option<NaiveDate>,
     ) -> impl Future<Output = Result<JockeyStatsRow>> + Send;
+
+    /// 調教師の各種成績統計を返す。`as_of` の意味は [`Repository::horse_stats`] と同じ。
+    fn trainer_stats(
+        &self,
+        name: &TrainerName,
+        as_of: Option<NaiveDate>,
+    ) -> impl Future<Output = Result<TrainerStatsRow>> + Send;
 
     /// 指定期間 `[from, to]`（両端含む）の確定済みレースを `results` 付きで race_num 昇順に返す。
     /// `races.source='pdf'` かつ着順ありの `results` を 1 件以上含むレースのみを対象とする

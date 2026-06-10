@@ -40,12 +40,15 @@ pub async fn save_race_card(pool: &SqlitePool, card: &RaceCard) -> Result<()> {
     for entry in &card.entries {
         sqlx::query(
             r#"
-            INSERT INTO horse_entries (race_id, gate_num, horse_num, horse_name, jockey)
-            VALUES ($1, $2, $3, $4, $5)
+            INSERT INTO horse_entries (race_id, gate_num, horse_num, horse_name, jockey, trainer)
+            VALUES ($1, $2, $3, $4, $5, $6)
             ON CONFLICT(race_id, horse_num) DO UPDATE SET
                 gate_num   = excluded.gate_num,
                 horse_name = excluded.horse_name,
-                jockey     = excluded.jockey
+                jockey     = excluded.jockey,
+                -- trainer は netkeiba 経路のみが埋める（PDF 経路は NULL）。新値が NULL のときは
+                -- 既存値を保持し、後続の PDF 取り込みが netkeiba の trainer を消さないようにする（#74）。
+                trainer    = COALESCE(excluded.trainer, horse_entries.trainer)
             "#,
         )
         .bind(card.race_id.value())
@@ -53,6 +56,7 @@ pub async fn save_race_card(pool: &SqlitePool, card: &RaceCard) -> Result<()> {
         .bind(entry.horse_num.value() as i64)
         .bind(entry.horse_name.value())
         .bind(entry.jockey.as_ref().map(|j| j.value().to_string()))
+        .bind(entry.trainer.as_ref().map(|t| t.value().to_string()))
         .execute(&mut *tx)
         .await?;
     }

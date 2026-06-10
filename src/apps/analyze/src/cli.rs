@@ -33,6 +33,11 @@ pub enum Command {
         /// Jockey name (Japanese, exact match).
         name: String,
     },
+    /// Stats for a trainer (overall, by surface, by gate group).
+    Trainer {
+        /// Trainer name (Japanese, exact match).
+        name: String,
+    },
     /// Predict win/place/show probabilities for each horse in a race.
     /// win <= place <= show monotonicity is guaranteed; place/show are top-2 / top-3 probabilities
     /// (normalized to sum 2.0 / 3.0 across the field, then monotonized). See ADR 0007.

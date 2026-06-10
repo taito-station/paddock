@@ -243,6 +243,8 @@ fn parse_column(
             horse_num,
             horse_name,
             jockey,
+            // 出馬表 PDF パーサは調教師欄に未対応のため常に None（#74、別 Issue で対応予定）。
+            trainer: None,
         });
     }
 
