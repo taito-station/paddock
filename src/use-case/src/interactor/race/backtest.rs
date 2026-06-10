@@ -67,6 +67,11 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
                 .course_stats(race.venue, race.distance, race.surface, as_of)
                 .await?;
 
+            let race_ctx = RaceContext {
+                surface: race.surface,
+                distance: race.distance,
+                track_condition: race.track_condition,
+            };
             let mut entry_factors: Vec<(HorseEntry, HorseFactors)> = Vec::new();
             for r in &starters {
                 let entry = HorseEntry {
@@ -90,11 +95,7 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
                     &course,
                     &horse,
                     jockey.as_ref(),
-                    &RaceContext {
-                        surface: race.surface,
-                        distance: race.distance,
-                        track_condition: race.track_condition,
-                    },
+                    &race_ctx,
                     recent_form,
                 );
                 entry_factors.push((entry, factors));

@@ -459,7 +459,8 @@ fn read_track_condition(default: Option<TrackCondition>) -> anyhow::Result<Optio
         if s.is_empty() {
             return Ok(default);
         }
-        if s == "-" {
+        // IME 入力を考慮して全角ハイフン・長音も不明扱いで受ける。
+        if matches!(s.as_str(), "-" | "－" | "ー") {
             return Ok(None);
         }
         match TrackCondition::try_from(s.as_str()) {
