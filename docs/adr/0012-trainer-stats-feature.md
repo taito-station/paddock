@@ -57,6 +57,9 @@
   trainer_stats の集計母数は `results.trainer` 依存のため、それだけでは統計が出ない点に注意。
 - `save_race_card` の COALESCE 追加で、netkeiba→PDF の取り込み順でも trainer が保持される。
 - 単調性（`win ≤ place ≤ show`, ADR 0007）は保持される。
+- `trainer_surface` は実績なしを `None`（母数除外）とするが、既存の `jockey_surface` は旧仕様の
+  0 埋め（実績なし=0レートで減点側）を踏襲しており、同じ `Option<RateTriple>` 項ながら欠落扱いが
+  非対称。jockey 等の 0 埋めを `None` 除外へ統一するかは #81 で別途検討する。
 
 ## 関連
 - ADR 0007（欠落項の母数除外）/ ADR 0011（実績なし≠全敗の区別, #73）/ ADR 0009（Optional 項追加の前例）
