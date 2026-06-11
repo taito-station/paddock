@@ -44,8 +44,10 @@ const NAME_NUM_TOLERANCE: f64 = 25.0;
 /// Jockey text sits almost level with the horse name.
 const JOCKEY_TOLERANCE: f64 = 12.0;
 /// The trainer sits one band *below* its horse name (≈+20 in dense GI columns, ≈+29 in
-/// regular ones). The row pitch (≈33 dense / ≈47 regular) keeps this window clear of the
-/// next row's trainer, so each name binds to the trainer directly beneath it.
+/// regular ones). The upper bound (38) stays under the smallest row pitch (≈33 dense / ≈47
+/// regular)'s next-trainer distance (≈+53 / +76) and above the previous row's (negative), so
+/// the window holds only the trainer directly beneath each name. A row whose own trainer is
+/// missing therefore yields `None` rather than stealing a neighbour's (binding is non-consuming).
 const TRAINER_NAME_DY: std::ops::RangeInclusive<f64> = 8.0..=38.0;
 /// y-bucket sizes for consolidating split glyphs onto a single logical line.
 const NAME_BUCKET: f64 = 3.0;
@@ -345,6 +347,7 @@ fn extract_surface(lines: &[&FlatLine]) -> Option<Surface> {
 /// Trainer name + affiliation group `（小野次郎・美浦）`. Capturing the run up to the first
 /// fullwidth middle-dot `・` yields the (full) trainer name and, crucially, distinguishes a
 /// trainer cell from the owner cell (`増田雄一氏`, `合同会社…`), which has no `（…・`.
+/// One trainer group is emitted per cell in the JRA PDF, so taking the first match is correct.
 static TRAINER_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"（([^（）・]+)・").unwrap());
 
 /// `entry_lines` are the rows below the header (names / numbers / jockeys).
@@ -423,6 +426,7 @@ fn extract_entries(
         // (but is narrower than) the jockey's — the size band is what separates the two.
         if TRAINER_SIZE.contains(&l.size) && TRAINER_OFFSET.contains(&off) && !l.text.is_ascii() {
             trainer_fragments.push((l.y, l.x, l.text.clone()));
+            continue;
         }
     }
 
@@ -766,5 +770,30 @@ mod tests {
         let entries = extract_entries(&refs, &refs, col_x);
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].trainer, None, "owner cell must not be read as a trainer");
+    }
+
+    #[test]
+    fn extract_entries_missing_trainer_yields_none_not_neighbour() {
+        let col_x = 36.0;
+        // Two horses where only the first has a trainer line. Because TRAINER_NAME_DY stays
+        // under the row pitch, the second horse must bind None rather than steal horse 1's
+        // trainer (binding is non-consuming, so this guards the dy-window invariant).
+        let lines = [
+            line(0, 35.0, 128.0, 8.0, "白"),       // gate 1
+            line(0, 69.0, 138.0, 11.0, "ウマエー"), // name 1
+            line(0, 49.0, 151.0, 11.0, "1"),       // num 1
+            line(0, 192.0, 167.0, 6.0, "（小野"),   // trainer 1
+            line(0, 220.0, 167.0, 6.0, "次郎・"),
+            line(0, 35.0, 175.0, 8.0, "黒"),       // gate 2
+            line(0, 69.0, 185.0, 11.0, "ウマビー"), // name 2 (no trainer line)
+            line(0, 49.0, 198.0, 11.0, "2"),       // num 2
+        ];
+        let refs: Vec<&FlatLine> = lines.iter().collect();
+        let entries = extract_entries(&refs, &refs, col_x);
+        assert_eq!(entries.len(), 2);
+        let h1 = entries.iter().find(|e| e.horse_num == 1).expect("horse 1");
+        let h2 = entries.iter().find(|e| e.horse_num == 2).expect("horse 2");
+        assert_eq!(h1.trainer.as_deref(), Some("小野次郎"));
+        assert_eq!(h2.trainer, None, "must not steal the neighbour's trainer");
     }
 }
