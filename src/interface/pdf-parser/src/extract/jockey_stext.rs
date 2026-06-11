@@ -494,6 +494,23 @@ mod tests {
     }
 
     #[test]
+    fn jockey_strips_latin_from_mixed_token() {
+        // name_token 集約により、騎手側でも混在トークン（ラテン略号＋漢字）からラテン部を
+        // 落として漢字名だけを残す（trainer 側と対称の挙動を固定する）。
+        let json = doc_json(&[
+            (216.0, 116.0, 14.0, "1"),
+            (27.0, 191.0, 6.0, "6"),
+            (156.0, 191.0, 6.0, "RC田辺"), // 混在トークン → RC 除去
+            (177.0, 191.0, 6.0, "裕信"),
+        ]);
+        let idx = parse_jockeys(&json);
+        assert_eq!(
+            idx.get(&1).and_then(|m| m.get(&6)).map(String::as_str),
+            Some("田辺裕信")
+        );
+    }
+
+    #[test]
     fn extracts_trainer_and_excludes_jockey_owner_and_farm() {
         // 左列実測レイアウト: 馬番6 / 騎手(size6,x156-177) / 馬主(size5,x193) /
         // 調教師(size4,x236姓+x250名) / 牧場(size4,x263)。調教師だけを姓名連結で取る。
