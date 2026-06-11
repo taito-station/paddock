@@ -29,20 +29,25 @@
 
 4. **CLI に `trainer` サブコマンド追加**（`jockey` 同型）。
 
-## 重みの決定（測定保留）
+## 重みの決定（測定保留 → 一部充足・本格再検証は別 Issue）
 
-本来 jockey/track_condition と同様に backtest で重みを検証するが、**現状 `results.trainer`・
+本来 jockey/track_condition と同様に backtest で重みを検証するが、配線当初は **`results.trainer`・
 `horse_past_runs.trainer` がいずれも空**（結果 PDF パーサが trainer を抽出しておらず、netkeiba
 過去走にも trainer 列が無い）。よって backtest では trainer 項が一切発火せず、重みを変えても
-結果は不変（before = after, 2026-03-28〜05-31, 144 レース）:
+結果は不変だった（before = after, 2026-03-28〜05-31, 144 レース）:
 
 | TRAINER_WEIGHT | 単勝 | 連対 | 複勝 | 回収率 |
 |---|---|---|---|---|
 | 0.0 | 13.2% | 19.4% | 33.3% | 69.1% |
 | 1.0 | 13.2% | 19.4% | 33.3% | 69.1% |
 
-母数が空のため測定不可。同種の RateTriple 項である `jockey_surface` と同じ **1.0** を採用する
-（過適合リスク低・概念的に一貫）。**母数充足後に backtest で再検証すること**。
+**更新（#82）**: 結果 PDF からの trainer 抽出を stext 座標方式で実装し（`results.trainer` を
+jockey と同じ経路で充足できるようにした）、`results.trainer` 列に調教師フルネームが入るように
+なった。ただし過去に取り込んだ結果 PDF の大半（558/566 レースぶん）が手元に残っておらず、
+再取込できたのは手元の 8 レースぶんのみ。**母数が薄く backtest の TRAINER_WEIGHT 再検証は統計的に
+不十分**なため、本 ADR では引き続き同種 RateTriple 項 `jockey_surface` と同じ **1.0** を据え置く
+（過適合リスク低・概念的に一貫）。**全レースの母数充足（結果データ再取得）と backtest 再検証は
+別 Issue に切り出す**。
 
 ## 理由
 - jockey を完全踏襲して実装でき、欠落の Option 除外も ADR 0007/0011 と一貫する。
