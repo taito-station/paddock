@@ -1,7 +1,7 @@
 use chrono::NaiveDate;
 use paddock_domain::{
     FinishingPosition, GateNum, HorseId, HorseName, HorseNum, JockeyName, ResultStatus, Surface,
-    TimeSeconds, TrackCondition, Venue,
+    TimeSeconds, TrackCondition, TrainerName, Venue,
 };
 
 use crate::error::Result;
@@ -45,13 +45,14 @@ pub struct HorsePastRun {
     pub popularity: Option<u32>,
 }
 
-/// 出馬表 1 頭分の登録情報（枠・馬番・馬名・騎手）。当日の `RaceCard` を組むための最小集合。
+/// 出馬表 1 頭分の登録情報（枠・馬番・馬名・騎手・調教師）。当日の `RaceCard` を組むための最小集合。
 #[derive(Debug, Clone, PartialEq)]
 pub struct FetchedEntry {
     pub gate_num: GateNum,
     pub horse_num: HorseNum,
     pub horse_name: HorseName,
     pub jockey: Option<JockeyName>,
+    pub trainer: Option<TrainerName>,
 }
 
 /// 出馬表ページ 1 件のパース結果。レースメタ（日付/場/距離 等）と全出走馬を持つ。

@@ -1,6 +1,6 @@
 use chrono::NaiveDate;
 
-use crate::horse_result::{GateNum, HorseName, HorseNum, JockeyName};
+use crate::horse_result::{GateNum, HorseName, HorseNum, JockeyName, TrainerName};
 use crate::race::{RaceId, Surface, Venue};
 
 /// A single race's entry sheet (出馬表). Static pre-race information used as input for
@@ -28,4 +28,7 @@ pub struct HorseEntry {
     pub horse_num: HorseNum,
     pub horse_name: HorseName,
     pub jockey: Option<JockeyName>,
+    /// 調教師（#74）。netkeiba 出馬表から取得。出馬表 PDF パーサは未対応のため、
+    /// PDF 経路で取り込んだレースは `None`（確率推定で trainer 項なし）。
+    pub trainer: Option<TrainerName>,
 }

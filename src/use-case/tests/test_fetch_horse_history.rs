@@ -10,11 +10,13 @@ use std::sync::Mutex;
 
 use chrono::NaiveDate;
 use paddock_domain::horse_result::{FinishingPosition, GateNum, HorseName, HorseNum, ResultStatus};
-use paddock_domain::{HorseId, HorseResult, JockeyName, Race, RaceCard, RaceId, Surface, Venue};
+use paddock_domain::{
+    HorseId, HorseResult, JockeyName, Race, RaceCard, RaceId, Surface, TrainerName, Venue,
+};
 use paddock_use_case::netkeiba_scraper::{HorsePastRun, NetkeibaScraper, RunnerRef};
 use paddock_use_case::repository::{
     CourseStatsRow, FetchRecord, HorseStatsRow, JockeyStatsRow, PredictBetRecord,
-    PredictSessionRecord, Repository,
+    PredictSessionRecord, Repository, TrainerStatsRow,
 };
 use paddock_use_case::{Error, HorseHistoryInteractor, Result};
 
@@ -124,6 +126,9 @@ impl Repository for RecordingRepo {
     async fn find_matching_jockey_names(&self, _query: &str, _limit: u32) -> Result<Vec<String>> {
         unimplemented!()
     }
+    async fn find_matching_trainer_names(&self, _query: &str, _limit: u32) -> Result<Vec<String>> {
+        unimplemented!()
+    }
     async fn save_race(&self, _race: &Race) -> Result<()> {
         unimplemented!()
     }
@@ -148,6 +153,13 @@ impl Repository for RecordingRepo {
         _name: &JockeyName,
         _as_of: Option<NaiveDate>,
     ) -> Result<JockeyStatsRow> {
+        unimplemented!()
+    }
+    async fn trainer_stats(
+        &self,
+        _name: &TrainerName,
+        _as_of: Option<NaiveDate>,
+    ) -> Result<TrainerStatsRow> {
         unimplemented!()
     }
     async fn count_races(&self) -> Result<u64> {

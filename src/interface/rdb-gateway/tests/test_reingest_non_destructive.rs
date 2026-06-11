@@ -6,7 +6,7 @@
 use chrono::NaiveDate;
 use paddock_domain::{
     FinishingPosition, GateNum, HorseEntry, HorseName, HorseNum, HorseResult, Race, RaceCard,
-    RaceId, ResultStatus, Surface, Venue,
+    RaceId, ResultStatus, Surface, TrainerName, Venue,
 };
 use paddock_use_case::repository::Repository;
 use rdb_gateway::{SqliteRepository, pool};
@@ -168,6 +168,7 @@ async fn save_race_card_reingest_removes_only_absent_entries() {
         horse_num: HorseNum::try_from(n).unwrap(),
         horse_name: HorseName::try_from(format!("ウマ{n}")).unwrap(),
         jockey: None,
+        trainer: None,
     };
     let card = |entries: Vec<HorseEntry>| RaceCard {
         race_id: RaceId::try_from(rid).unwrap(),
@@ -196,4 +197,46 @@ async fn save_race_card_reingest_removes_only_absent_entries() {
     let mut nums: Vec<u32> = loaded.entries.iter().map(|e| e.horse_num.value()).collect();
     nums.sort_unstable();
     assert_eq!(nums, vec![1, 3], "出走取消の 2 番だけが掃除される");
+}
+
+#[tokio::test]
+async fn save_race_card_coalesce_keeps_trainer_from_netkeiba() {
+    // trainer は netkeiba 経路のみが埋める。PDF 経路（trainer=None）が後から同じ race_id を
+    // 書いても、COALESCE により netkeiba が入れた trainer が消えないことを検証する（#74）。
+    let (repo, _dir) = fresh_repo().await;
+    let rid = "2026-3-nakayama-8-2R";
+    let make_card = |trainer: Option<&str>| RaceCard {
+        race_id: RaceId::try_from(rid).unwrap(),
+        date: d(),
+        venue: Venue::Nakayama,
+        round: 3,
+        day: 8,
+        race_num: 2,
+        surface: Surface::Turf,
+        distance: 1800,
+        entries: vec![HorseEntry {
+            gate_num: GateNum::try_from(1u32).unwrap(),
+            horse_num: HorseNum::try_from(1u32).unwrap(),
+            horse_name: HorseName::try_from("ウマA").unwrap(),
+            jockey: None,
+            trainer: trainer.map(|t| TrainerName::try_from(t).unwrap()),
+        }],
+    };
+
+    // netkeiba 経路（trainer あり）→ PDF 経路（trainer None）の順で上書きする。
+    repo.save_race_card(&make_card(Some("田中博")))
+        .await
+        .unwrap();
+    repo.save_race_card(&make_card(None)).await.unwrap();
+
+    let loaded = repo
+        .find_race_card(&RaceId::try_from(rid).unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        loaded.entries[0].trainer.as_ref().map(|t| t.value()),
+        Some("田中博"),
+        "PDF 経路の None が netkeiba の trainer を消してはいけない（COALESCE）"
+    );
 }

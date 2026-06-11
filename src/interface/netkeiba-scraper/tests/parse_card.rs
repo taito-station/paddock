@@ -25,10 +25,9 @@ fn parses_card_meta_and_entries() {
     assert_eq!(first.gate_num.value(), 1);
     assert_eq!(first.horse_num.value(), 1);
     assert_eq!(first.horse_name.value(), "レーベンスティール");
-    assert_eq!(
-        first.jockey.as_ref().map(|j| j.value()),
-        Some("戸崎圭")
-    );
+    assert_eq!(first.jockey.as_ref().map(|j| j.value()), Some("戸崎圭"));
+    // 調教師（#74）。td.Trainer の title 属性から抽出する。
+    assert_eq!(first.trainer.as_ref().map(|t| t.value()), Some("田中博"));
 
     // 馬番が 1..=17 で漏れなく並ぶ。
     let nums: Vec<u32> = card.entries.iter().map(|e| e.horse_num.value()).collect();

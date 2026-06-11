@@ -111,7 +111,7 @@ mod tests {
     use chrono::NaiveDate;
     use paddock_domain::{
         HorseName, HorseNum, HorseResult, JockeyName, OddsValue, OrderedPair, OrderedTriple, Pair,
-        PlaceOdds, Race, RaceCard, RaceId, RaceOdds, Surface, Triple, Venue,
+        PlaceOdds, Race, RaceCard, RaceId, RaceOdds, Surface, TrainerName, Triple, Venue,
     };
 
     use crate::error::{Error, Result};
@@ -119,7 +119,7 @@ mod tests {
     use crate::odds_scraper::OddsScraper;
     use crate::repository::{
         CourseStatsRow, FetchRecord, HorseStatsRow, JockeyStatsRow, PredictBetRecord,
-        PredictSessionRecord, RaceOddsRecord, Repository,
+        PredictSessionRecord, RaceOddsRecord, Repository, TrainerStatsRow,
     };
 
     /// テスト用の OddsScraper。scrape の戻り値を差し替えつつ呼び出し回数を数える。
@@ -183,6 +183,9 @@ mod tests {
         async fn find_matching_jockey_names(&self, _: &str, _: u32) -> Result<Vec<String>> {
             unimplemented!()
         }
+        async fn find_matching_trainer_names(&self, _: &str, _: u32) -> Result<Vec<String>> {
+            unimplemented!()
+        }
         async fn horse_stats(&self, _: &HorseName, _: Option<NaiveDate>) -> Result<HorseStatsRow> {
             unimplemented!()
         }
@@ -200,6 +203,13 @@ mod tests {
             _: &JockeyName,
             _: Option<NaiveDate>,
         ) -> Result<JockeyStatsRow> {
+            unimplemented!()
+        }
+        async fn trainer_stats(
+            &self,
+            _: &TrainerName,
+            _: Option<NaiveDate>,
+        ) -> Result<TrainerStatsRow> {
             unimplemented!()
         }
         async fn find_finished_races_between(
@@ -238,10 +248,7 @@ mod tests {
         async fn find_races_by_date(&self, _: NaiveDate) -> Result<Vec<Race>> {
             unimplemented!()
         }
-        async fn find_predict_session(
-            &self,
-            _: NaiveDate,
-        ) -> Result<Option<PredictSessionRecord>> {
+        async fn find_predict_session(&self, _: NaiveDate) -> Result<Option<PredictSessionRecord>> {
             unimplemented!()
         }
         async fn find_predict_bets(&self, _: NaiveDate) -> Result<Vec<PredictBetRecord>> {
@@ -354,7 +361,9 @@ mod tests {
         let saved = interactor.repository.saved.lock().unwrap();
         let rows = &saved[0].rows;
         let count = |bt: &str| rows.iter().filter(|r| r.bet_type == bt).count();
-        for bt in ["win", "place", "quinella", "wide", "exacta", "trio", "trifecta"] {
+        for bt in [
+            "win", "place", "quinella", "wide", "exacta", "trio", "trifecta",
+        ] {
             assert_eq!(count(bt), 1, "{bt} が 1 行保存されること");
         }
         // ワイドは複勝同様に幅 odds（odds_high 付き）で保存される。

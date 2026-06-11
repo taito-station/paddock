@@ -5,9 +5,11 @@ use chrono::NaiveDate;
 use clap::Parser;
 use paddock_domain::{
     BacktestReport, FieldSizeSegment, HorseName, HorseProbability, JockeyName, PopularitySegment,
-    RaceId, ReliabilityBin, Surface, Venue,
+    RaceId, ReliabilityBin, Surface, TrainerName, Venue,
 };
-use paddock_use_case::repository::{CourseStatsRow, GroupStat, HorseStatsRow, JockeyStatsRow};
+use paddock_use_case::repository::{
+    CourseStatsRow, GroupStat, HorseStatsRow, JockeyStatsRow, TrainerStatsRow,
+};
 
 /// 部分一致候補の表示上限。これを超える場合も先頭から打ち切って提示する。
 const CANDIDATE_LIMIT: u32 = 20;
@@ -64,6 +66,24 @@ async fn main() -> anyhow::Result<()> {
                     print_jockey(&stats);
                 }
                 many => print_candidates("騎手", &name, many, truncated),
+            }
+        }
+        cli::Command::Trainer { name } => {
+            let query = TrainerName::try_from(name.as_str())?;
+            let mut candidates = app
+                .interactor
+                .find_trainer_candidates(query.value(), CANDIDATE_LIMIT + 1)
+                .await?;
+            let truncated = candidates.len() as u32 > CANDIDATE_LIMIT;
+            candidates.truncate(CANDIDATE_LIMIT as usize);
+            match candidates.as_slice() {
+                [] => println!("該当する調教師が見つかりません: {name}"),
+                [one] => {
+                    let t = TrainerName::try_from(one.as_str())?;
+                    let stats = app.interactor.trainer_stats(&t).await?;
+                    print_trainer(&stats);
+                }
+                many => print_candidates("調教師", &name, many, truncated),
             }
         }
         cli::Command::Predict {
@@ -143,6 +163,14 @@ fn print_course(s: &CourseStatsRow) {
 
 fn print_jockey(s: &JockeyStatsRow) {
     println!("# 騎手 {}", s.jockey_name);
+    println!();
+    print_section("全体", std::slice::from_ref(&s.overall));
+    print_section("芝/ダート", &s.by_surface);
+    print_section("枠順", &s.by_gate_group);
+}
+
+fn print_trainer(s: &TrainerStatsRow) {
+    println!("# 調教師 {}", s.trainer_name);
     println!();
     print_section("全体", std::slice::from_ref(&s.overall));
     print_section("芝/ダート", &s.by_surface);

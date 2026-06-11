@@ -1,10 +1,14 @@
 use chrono::NaiveDate;
 use paddock_domain::{
-    GateNum, HorseEntry, HorseName, HorseNum, JockeyName, RaceCard, RaceId, Surface, Venue,
+    GateNum, HorseEntry, HorseName, HorseNum, JockeyName, RaceCard, RaceId, Surface, TrainerName,
+    Venue,
 };
 use sqlx::SqlitePool;
 
 use crate::error::{Error, Result};
+
+/// horse_entries の 1 行（gate_num, horse_num, horse_name, jockey, trainer）。
+type EntryRow = (i64, i64, String, Option<String>, Option<String>);
 
 #[derive(sqlx::FromRow)]
 struct CardRow {
@@ -44,9 +48,9 @@ pub async fn find_race_card(pool: &SqlitePool, race_id: &RaceId) -> Result<Optio
         distance,
     } = row;
 
-    let entry_rows: Vec<(i64, i64, String, Option<String>)> = sqlx::query_as(
+    let entry_rows: Vec<EntryRow> = sqlx::query_as(
         r#"
-        SELECT gate_num, horse_num, horse_name, jockey
+        SELECT gate_num, horse_num, horse_name, jockey, trainer
         FROM horse_entries
         WHERE race_id = $1
         ORDER BY horse_num
@@ -73,13 +77,16 @@ pub async fn find_race_card(pool: &SqlitePool, race_id: &RaceId) -> Result<Optio
         .map_err(|e| Error::Data(format!("race_card date '{date_str}' のパースに失敗: {e}")))?;
 
     let mut entries = Vec::with_capacity(entry_rows.len());
-    for (gate_num, horse_num, horse_name, jockey) in entry_rows {
+    for (gate_num, horse_num, horse_name, jockey, trainer) in entry_rows {
         entries.push(HorseEntry {
             gate_num: GateNum::try_from(gate_num as u32)?,
             horse_num: HorseNum::try_from(horse_num as u32)?,
             horse_name: HorseName::try_from(horse_name.as_str())?,
             jockey: jockey
                 .map(|j| JockeyName::try_from(j.as_str()))
+                .transpose()?,
+            trainer: trainer
+                .map(|t| TrainerName::try_from(t.as_str()))
                 .transpose()?,
         });
     }

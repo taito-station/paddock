@@ -79,10 +79,17 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
                     horse_num: r.horse_num,
                     horse_name: r.horse_name.clone(),
                     jockey: r.jockey.clone(),
+                    trainer: r.trainer.clone(),
                 };
                 let horse = self.repository.horse_stats(&r.horse_name, as_of).await?;
                 let jockey = match &r.jockey {
                     Some(j) => Some(self.repository.jockey_stats(j, as_of).await?),
+                    None => None,
+                };
+                // 調教師統計（#74）。results 由来の r.trainer（当該レース確定値）から as_of で引き、
+                // walk-forward のリークを防ぐ。trainer 欠落馬は項なし（ADR 0007）。
+                let trainer = match &r.trainer {
+                    Some(t) => Some(self.repository.trainer_stats(t, as_of).await?),
                     None => None,
                 };
                 // 前走フォーム（#31）。cutoff = race.date でレース当日以降をリークさせない。
@@ -95,6 +102,7 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
                     &course,
                     &horse,
                     jockey.as_ref(),
+                    trainer.as_ref(),
                     &race_ctx,
                     recent_form,
                 );

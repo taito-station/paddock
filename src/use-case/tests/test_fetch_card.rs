@@ -9,14 +9,14 @@ use std::sync::Mutex;
 
 use chrono::NaiveDate;
 use paddock_domain::horse_result::{GateNum, HorseName, HorseNum};
-use paddock_domain::{JockeyName, Race, RaceCard, RaceId, Surface, Venue};
+use paddock_domain::{JockeyName, Race, RaceCard, RaceId, Surface, TrainerName, Venue};
 use paddock_use_case::netkeiba_scraper::{
     FetchedCard, FetchedEntry, FetchedOdds, FetchedPlaceOdds, FetchedWinOdds, HorsePastRun,
     NetkeibaScraper, RunnerRef,
 };
 use paddock_use_case::repository::{
     CourseStatsRow, FetchRecord, HorseStatsRow, JockeyStatsRow, PredictBetRecord,
-    PredictSessionRecord, RaceOddsRecord, Repository,
+    PredictSessionRecord, RaceOddsRecord, Repository, TrainerStatsRow,
 };
 use paddock_use_case::{CardInteractor, Result};
 
@@ -48,12 +48,13 @@ impl FakeScraper {
     }
 }
 
-fn entry(gate: u32, num: u32, name: &str, jockey: &str) -> FetchedEntry {
+fn entry(gate: u32, num: u32, name: &str, jockey: &str, trainer: &str) -> FetchedEntry {
     FetchedEntry {
         gate_num: GateNum::try_from(gate).unwrap(),
         horse_num: HorseNum::try_from(num).unwrap(),
         horse_name: HorseName::try_from(name).unwrap(),
         jockey: Some(JockeyName::try_from(jockey).unwrap()),
+        trainer: Some(TrainerName::try_from(trainer).unwrap()),
     }
 }
 
@@ -95,8 +96,8 @@ impl NetkeibaScraper for FakeScraper {
             surface: Surface::Turf,
             distance: 1600,
             entries: vec![
-                entry(1, 1, "ウマエー", "戸崎圭"),
-                entry(2, 2, "ウマビー", "武豊"),
+                entry(1, 1, "ウマエー", "戸崎圭", "藤沢和"),
+                entry(2, 2, "ウマビー", "武豊", "友道康"),
             ],
         })
     }
@@ -170,6 +171,9 @@ impl Repository for RecordingRepo {
     async fn find_matching_jockey_names(&self, _query: &str, _limit: u32) -> Result<Vec<String>> {
         unimplemented!()
     }
+    async fn find_matching_trainer_names(&self, _query: &str, _limit: u32) -> Result<Vec<String>> {
+        unimplemented!()
+    }
     async fn horse_stats(
         &self,
         _name: &HorseName,
@@ -191,6 +195,13 @@ impl Repository for RecordingRepo {
         _name: &JockeyName,
         _as_of: Option<NaiveDate>,
     ) -> Result<JockeyStatsRow> {
+        unimplemented!()
+    }
+    async fn trainer_stats(
+        &self,
+        _name: &TrainerName,
+        _as_of: Option<NaiveDate>,
+    ) -> Result<TrainerStatsRow> {
         unimplemented!()
     }
     async fn count_races(&self) -> Result<u64> {

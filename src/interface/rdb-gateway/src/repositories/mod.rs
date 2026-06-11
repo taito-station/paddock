@@ -15,15 +15,17 @@ mod save_race;
 mod save_race_card;
 mod save_race_odds;
 mod sql;
+mod trainer_stats;
 
 use chrono::NaiveDate;
 use paddock_domain::{
-    HorseId, HorseName, HorseResult, JockeyName, Race, RaceCard, RaceId, RaceOdds, Surface, Venue,
+    HorseId, HorseName, HorseResult, JockeyName, Race, RaceCard, RaceId, RaceOdds, Surface,
+    TrainerName, Venue,
 };
 use paddock_use_case::Result as UcResult;
 use paddock_use_case::repository::{
     CourseStatsRow, FetchRecord, HorseStatsRow, JockeyStatsRow, PredictBetRecord,
-    PredictSessionRecord, RaceOddsRecord, Repository,
+    PredictSessionRecord, RaceOddsRecord, Repository, TrainerStatsRow,
 };
 
 use crate::pool::SqlitePool;
@@ -73,6 +75,12 @@ impl Repository for SqliteRepository {
             .map_err(Into::into)
     }
 
+    async fn find_matching_trainer_names(&self, query: &str, limit: u32) -> UcResult<Vec<String>> {
+        find_matching_names::find_matching_trainer_names(&self.pool, query, limit)
+            .await
+            .map_err(Into::into)
+    }
+
     async fn horse_stats(
         &self,
         name: &HorseName,
@@ -101,6 +109,16 @@ impl Repository for SqliteRepository {
         as_of: Option<NaiveDate>,
     ) -> UcResult<JockeyStatsRow> {
         jockey_stats::jockey_stats(&self.pool, name, as_of)
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn trainer_stats(
+        &self,
+        name: &TrainerName,
+        as_of: Option<NaiveDate>,
+    ) -> UcResult<TrainerStatsRow> {
+        trainer_stats::trainer_stats(&self.pool, name, as_of)
             .await
             .map_err(Into::into)
     }
