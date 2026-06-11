@@ -120,3 +120,34 @@ fn race1_horse_names_and_jockeys() {
         jockey.value()
     );
 }
+
+#[test]
+fn race1_trainers_extracted_for_every_entry() {
+    let parser = MutoolEntryParser;
+    let Some(sample) = sample_entry_pdf() else {
+        return;
+    };
+    let cards = parser.parse(&sample, sample_date()).expect("parse");
+    let r1 = cards
+        .iter()
+        .find(|c| c.race_num == 1)
+        .expect("race 1 not found");
+
+    // The PDF prints the full trainer name `（小野次郎・美浦）`; we keep it verbatim (#83).
+    let h1 = r1
+        .entries
+        .iter()
+        .find(|e| e.horse_num.value() == 1)
+        .expect("horse 1 not found");
+    let trainer = h1.trainer.as_ref().expect("trainer missing for horse 1");
+    assert_eq!(trainer.value(), "小野次郎");
+
+    // Every entry in the race must bind a trainer (no row left unmatched).
+    for e in &r1.entries {
+        assert!(
+            e.trainer.is_some(),
+            "horse {} has no trainer",
+            e.horse_num.value()
+        );
+    }
+}

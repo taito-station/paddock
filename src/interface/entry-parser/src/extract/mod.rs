@@ -4,7 +4,8 @@ use std::sync::LazyLock;
 
 use chrono::NaiveDate;
 use paddock_domain::{
-    GateNum, HorseEntry, HorseName, HorseNum, JockeyName, RaceCard, RaceId, Surface, Venue,
+    GateNum, HorseEntry, HorseName, HorseNum, JockeyName, RaceCard, RaceId, Surface, TrainerName,
+    Venue,
 };
 use regex::Regex;
 
@@ -30,6 +31,11 @@ const NAME_OFFSET: std::ops::Range<f64> = 25.0..150.0;
 /// Jockey font-size band and x-offset band.
 const JOCKEY_SIZE: std::ops::RangeInclusive<f64> = 9.0..=11.5;
 const JOCKEY_OFFSET: std::ops::RangeInclusive<f64> = 155.0..=235.0;
+/// Trainer font-size band and x-offset band. The trainer sits in a parenthesised group
+/// `（<name>・<美浦|栗東>）` below the jockey, rendered smaller (size 5–6) than the jockey
+/// (size 9–11). The offset band overlaps the jockey's, so the size band is what separates them.
+const TRAINER_SIZE: std::ops::RangeInclusive<f64> = 4.5..=6.5;
+const TRAINER_OFFSET: std::ops::RangeInclusive<f64> = 150.0..=215.0;
 
 /// A horse number sits ≈13 units below its name; the row pitch is ≈47. A tolerance
 /// between those two keeps each number bound to its own name and avoids stealing a
@@ -37,9 +43,14 @@ const JOCKEY_OFFSET: std::ops::RangeInclusive<f64> = 155.0..=235.0;
 const NAME_NUM_TOLERANCE: f64 = 25.0;
 /// Jockey text sits almost level with the horse name.
 const JOCKEY_TOLERANCE: f64 = 12.0;
+/// The trainer sits one band *below* its horse name (≈+20 in dense GI columns, ≈+29 in
+/// regular ones). The row pitch (≈33 dense / ≈47 regular) keeps this window clear of the
+/// next row's trainer, so each name binds to the trainer directly beneath it.
+const TRAINER_NAME_DY: std::ops::RangeInclusive<f64> = 8.0..=38.0;
 /// y-bucket sizes for consolidating split glyphs onto a single logical line.
 const NAME_BUCKET: f64 = 3.0;
 const JOCKEY_BUCKET: f64 = 8.0;
+const TRAINER_BUCKET: f64 = 4.0;
 
 /// A flattened text line with its page index.
 struct FlatLine {
@@ -63,6 +74,7 @@ struct RawEntry {
     horse_num: u32,
     horse_name: String,
     jockey: Option<String>,
+    trainer: Option<String>,
 }
 
 const GATE_COLORS: &[(&str, u32)] = &[
@@ -238,13 +250,18 @@ fn parse_column(
             .jockey
             .filter(|j| !j.is_empty())
             .and_then(|j| JockeyName::try_from(j.as_str()).ok());
+        // 調教師は出馬表 PDF からフル名で抽出する（#83）。netkeiba 経路は略名のため形式差が
+        // あるが、本経路は jockey と同じく PDF 表記をそのまま採用する（不一致は #82 で集約）。
+        let trainer = raw
+            .trainer
+            .filter(|t| !t.is_empty())
+            .and_then(|t| TrainerName::try_from(t.as_str()).ok());
         entries.push(HorseEntry {
             gate_num,
             horse_num,
             horse_name,
             jockey,
-            // 出馬表 PDF パーサは調教師欄に未対応のため常に None（#74、別 Issue で対応予定）。
-            trainer: None,
+            trainer,
         });
     }
 
@@ -325,6 +342,11 @@ fn extract_surface(lines: &[&FlatLine]) -> Option<Surface> {
 
 // ── horse entry extractor ─────────────────────────────────────────────────────
 
+/// Trainer name + affiliation group `（小野次郎・美浦）`. Capturing the run up to the first
+/// fullwidth middle-dot `・` yields the (full) trainer name and, crucially, distinguishes a
+/// trainer cell from the owner cell (`増田雄一氏`, `合同会社…`), which has no `（…・`.
+static TRAINER_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"（([^（）・]+)・").unwrap());
+
 /// `entry_lines` are the rows below the header (names / numbers / jockeys).
 /// `column_lines` is the whole column: gate-color markers are scanned from it because the
 /// gate-1 marker physically sits at the header/​body boundary and would otherwise be cut off.
@@ -350,6 +372,10 @@ fn extract_entries(
 
     // Jockey fragments: JOCKEY_SIZE, offset in JOCKEY_OFFSET (155..=235).
     let mut jockey_fragments: Vec<(f64, f64, String)> = Vec::new(); // (y, x, text)
+
+    // Trainer fragments: TRAINER_SIZE, offset in TRAINER_OFFSET. The parenthesised group is
+    // reassembled per row and parsed with TRAINER_RE below (owner cells are filtered out there).
+    let mut trainer_fragments: Vec<(f64, f64, String)> = Vec::new(); // (y, x, text)
 
     // Gate-color markers are scanned over the whole column (the gate-1 marker can sit just
     // above the header cut-off). The GATE_COLORS match is highly specific, so header noise
@@ -390,6 +416,12 @@ fn extract_entries(
         // Jockey fragment.
         if JOCKEY_SIZE.contains(&l.size) && JOCKEY_OFFSET.contains(&off) && !l.text.is_ascii() {
             jockey_fragments.push((l.y, l.x, l.text.clone()));
+            continue;
+        }
+
+        // Trainer fragment (smaller font than the jockey, same offset band).
+        if TRAINER_SIZE.contains(&l.size) && TRAINER_OFFSET.contains(&off) && !l.text.is_ascii() {
+            trainer_fragments.push((l.y, l.x, l.text.clone()));
         }
     }
 
@@ -398,6 +430,15 @@ fn extract_entries(
     // Consolidate split glyphs into one logical line each.
     let horse_names = group_by_y(&name_fragments, NAME_BUCKET);
     let jockey_map = group_by_y(&jockey_fragments, JOCKEY_BUCKET);
+    // Reassemble each trainer row and keep only those matching `（<name>・` (drops owner cells).
+    let trainer_events: Vec<(f64, String)> = group_by_y(&trainer_fragments, TRAINER_BUCKET)
+        .into_iter()
+        .filter_map(|(y, text)| {
+            TRAINER_RE
+                .captures(&text)
+                .map(|c| (y, c[1].trim().to_string()))
+        })
+        .collect();
     // Combine split digit glyphs into a single number per row, then keep valid 1–18 values.
     let horse_num_events: Vec<(f64, u32)> = group_by_y(&num_fragments, NAME_BUCKET)
         .into_iter()
@@ -432,11 +473,20 @@ fn extract_entries(
 
         let jockey = nearest(&jockey_map, *name_y, JOCKEY_TOLERANCE).map(|(_, t)| t.clone());
 
+        // The trainer sits below its name (positive dy), so it cannot be matched at the same
+        // level like the jockey. Pick the trainer in the dy window closest to the name.
+        let trainer = trainer_events
+            .iter()
+            .filter(|(ty, _)| TRAINER_NAME_DY.contains(&(ty - name_y)))
+            .min_by(|a, b| (a.0 - name_y).abs().total_cmp(&(b.0 - name_y).abs()))
+            .map(|(_, t)| t.clone());
+
         entries.push(RawEntry {
             gate_num,
             horse_num: horse_num_val,
             horse_name: horse_name.clone(),
             jockey,
+            trainer,
         });
     }
 
@@ -630,6 +680,7 @@ mod tests {
         assert_eq!(entries[0].horse_num, 1);
         assert_eq!(entries[0].horse_name, "テストウマ");
         assert_eq!(entries[0].jockey.as_deref(), Some("騎手太郎"));
+        assert_eq!(entries[0].trainer, None, "no trainer line present");
     }
 
     #[test]
@@ -658,5 +709,40 @@ mod tests {
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].horse_num, 16);
         assert_eq!(entries[0].horse_name, "レディトゥアタック");
+    }
+
+    #[test]
+    fn trainer_re_parses_full_name() {
+        let caps = TRAINER_RE.captures("（吉岡辰弥・栗東）").expect("should match");
+        assert_eq!(&caps[1], "吉岡辰弥");
+    }
+
+    #[test]
+    fn trainer_re_rejects_owner_cells() {
+        // Owner cells lack the `（…・` shape and must not be mistaken for a trainer.
+        assert!(TRAINER_RE.captures("増田雄一氏").is_none());
+        assert!(TRAINER_RE.captures("合同会社小林英一ホールディングス").is_none());
+    }
+
+    #[test]
+    fn extract_entries_binds_trainer_below_name() {
+        let col_x = 36.0;
+        let lines = [
+            line(0, 35.0, 130.0, 8.0, "白"),          // gate marker (gate 1)
+            line(0, 69.0, 138.0, 11.0, "テストウマ"), // horse name
+            line(0, 49.0, 151.0, 11.0, "1"),          // horse num
+            line(0, 196.0, 137.0, 10.0, "騎手太郎"),  // jockey (level with name)
+            // Trainer group one band below the name (dy ≈ +29), split into fragments
+            // exactly as the JRA PDF emits them.
+            line(0, 192.0, 167.0, 6.0, "（小野"),
+            line(0, 220.0, 167.0, 6.0, "次郎・"),
+            line(0, 237.0, 167.0, 5.0, "美浦"),
+            line(0, 249.0, 167.0, 6.0, "）"),
+        ];
+        let refs: Vec<&FlatLine> = lines.iter().collect();
+        let entries = extract_entries(&refs, &refs, col_x);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].jockey.as_deref(), Some("騎手太郎"));
+        assert_eq!(entries[0].trainer.as_deref(), Some("小野次郎"));
     }
 }
