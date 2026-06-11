@@ -132,7 +132,7 @@ fn trainer_column_is_clean_and_populated() {
     // 調教師がレース全体でおおむね埋まること（母数充足の最低保証。出走取消等で一部 None は許容）。
     let filled = r1.results.iter().filter(|r| r.trainer.is_some()).count();
     assert!(
-        filled >= r1.results.len() * 8 / 10,
+        filled * 10 >= r1.results.len() * 8, // 8 割以上（整数除算の切り捨てを避ける）
         "race 1: trainer 充足 {filled}/{} が想定より少ない",
         r1.results.len()
     );

@@ -22,8 +22,9 @@ use serde::Deserialize;
 /// `JockeyName::try_from` 側が行う）。
 pub type JockeyIndex = HashMap<u32, HashMap<u32, String>>;
 
-/// `race_num -> (horse_num -> 調教師名)`。素の抽出文字列（width 正規化は
-/// `TrainerName::try_from` 側が行う）。
+/// `race_num -> (horse_num -> 調教師名)`。素の抽出文字列。`TrainerName` は `JockeyName` と
+/// 異なり width 正規化フックを持たない（`define_string!(TrainerName, max=30)`）ため、抽出した
+/// 文字列がそのまま検証・保存される。結果 PDF の調教師はフルネームの漢字表記で width 揺れは無い。
 pub type TrainerIndex = HashMap<u32, HashMap<u32, String>>;
 
 #[derive(Deserialize)]
@@ -89,6 +90,11 @@ const JOCKEY_OFFSET_HI: f64 = 161.0;
 /// 実測（結果 PDF）では調教師は姓 offset ~207-209・名 offset ~223-228 で、馬主(~166-185)より右・
 /// 牧場(~236+)より左に位置する。font サイズは**左列 4 / 右列 5** と列で異なるため帯で受ける
 /// （jockey・馬主の size 6 は size 上限で除外）。x 帯が主たる分離、size 帯は二次ガード。
+///
+/// 既知の制約: HI(230) と牧場列(~236) の間は約 6 単位しか空かない（jockey/馬主境界 HI=161 と
+/// 同様に x 帯が唯一の境界）。牧場名は仮名混じり地名（新ひだか/様似 等）で size でも除外できない
+/// ため、開催場・年度差で x が数単位ずれると牧場 1 トークン目が混入しうる。レイアウト退行時は
+/// `parse_trainers` の 0 件ログと統合テスト（既知調教師の完全一致）で気づく前提。
 const TRAINER_OFFSET_LO: f64 = 195.0;
 const TRAINER_OFFSET_HI: f64 = 230.0;
 const TRAINER_SIZE: std::ops::RangeInclusive<f64> = 3.0..=5.5;
@@ -321,10 +327,14 @@ fn trainer_for(toks: &[Tok], page: usize, row_y: f64, hn_x: f64) -> Option<Strin
 
     let mut name = String::new();
     for (_, text) in parts {
-        let part = clean_part(text);
-        // 調教師名は漢字。純 ASCII パート（純数字や、レコード標示 `RC` 等のラテン略号が
-        // 帯に紛れることがある）は名前ではないので取り込まない。
-        if part.is_empty() || part.is_ascii() {
+        // 調教師名は漢字のみ。純数字（斤量）やレコード標示 `RC` 等のラテン略号が帯に紛れる
+        // ことがあるため、ASCII 英数字は文字単位で除去する（別トークンでも `RC武藤` のような
+        // 混在トークンでも確実に落とせる）。残りが空なら取り込まない。
+        let part: String = clean_part(text)
+            .chars()
+            .filter(|c| !c.is_ascii_alphanumeric())
+            .collect();
+        if part.is_empty() {
             continue;
         }
         name.push_str(&part);
@@ -531,6 +541,24 @@ mod tests {
             (224.0, 169.0, 5.0, "RC"),    // レコード標示 (offset 197) → 除外
             (233.0, 169.0, 4.0, "武藤"),  // 調教師 姓
             (250.0, 169.0, 4.0, "善則"),  // 調教師 名
+        ]);
+        let idx = parse_trainers(&json);
+        assert_eq!(
+            idx.get(&1).and_then(|m| m.get(&8)).map(String::as_str),
+            Some("武藤善則")
+        );
+    }
+
+    #[test]
+    fn trainer_strips_latin_from_mixed_token() {
+        // レコード標示 `RC` が調教師姓と同一トークンに連結された場合でも、ASCII 英数字を
+        // 文字単位で落として漢字名だけを残す（別トークンに分かれない PDF への保険）。
+        let json = doc_json(&[
+            (216.0, 116.0, 14.0, "1"),
+            (27.0, 169.0, 6.0, "8"),
+            (156.0, 169.0, 6.0, "武藤"), // 騎手
+            (233.0, 169.0, 4.0, "RC武藤"), // 調教師 姓に RC が連結 (offset 206)
+            (250.0, 169.0, 4.0, "善則"),   // 調教師 名
         ]);
         let idx = parse_trainers(&json);
         assert_eq!(
