@@ -153,6 +153,14 @@ fn trainer_column_is_clean_and_populated() {
                 "trainer '{v}' に牧場名が混入 (race {})",
                 race.race_num
             );
+            // 調教師名は漢字のみ。牧場列(x 帯のすぐ右)が混入すると仮名混じり地名
+            // （新ひだか/ノーザンファーム 等）が紛れるため、平仮名・片仮名の不在で検知する。
+            assert!(
+                !v.chars()
+                    .any(|c| ('\u{3040}'..='\u{30FF}').contains(&c)),
+                "trainer '{v}' に仮名が混入（牧場名混入の疑い） (race {})",
+                race.race_num
+            );
             assert!(
                 !v.chars().any(|c| c.is_ascii_alphanumeric()),
                 "trainer '{v}' に ASCII 英数字が混入 (レコード標示 RC・純数字等) (race {})",
