@@ -108,6 +108,61 @@ fn jockey_column_is_clean_and_separated_from_owner() {
 }
 
 #[test]
+fn trainer_column_is_clean_and_populated() {
+    let parser = MutoolParser;
+    let Some(sample) = fixture::sample_result_pdf() else {
+        return;
+    };
+    let races = parser.parse(&sample).expect("parse sample pdf");
+
+    // 既知の調教師がフルネームでクリーンに取れる（stext 実測で確定。jockey と同じ馬で対応）。
+    let r1 = races
+        .iter()
+        .find(|r| r.race_num == 1)
+        .expect("race 1 not found");
+    let trainer_of = |hn: u32| -> Option<String> {
+        r1.results
+            .iter()
+            .find(|res| res.horse_num.value() == hn)
+            .and_then(|res| res.trainer.as_ref().map(|t| t.value().to_string()))
+    };
+    assert_eq!(trainer_of(9).as_deref(), Some("千葉直人")); // ロードトライデント
+    assert_eq!(trainer_of(6).as_deref(), Some("松永康利")); // ニンジャトットリ
+
+    // 調教師がレース全体でおおむね埋まること（母数充足の最低保証。出走取消等で一部 None は許容）。
+    let filled = r1.results.iter().filter(|r| r.trainer.is_some()).count();
+    assert!(
+        filled >= r1.results.len() * 8 / 10,
+        "race 1: trainer 充足 {filled}/{} が想定より少ない",
+        r1.results.len()
+    );
+
+    // 全レース・全行で馬主(氏)/置換文字/牧場フラグメント/純数字が調教師に混入しない。
+    for race in &races {
+        for res in &race.results {
+            let Some(t) = &res.trainer else { continue };
+            let v = t.value();
+            assert!(
+                !v.chars().any(|c| matches!(c, '氏' | '\u{FFFD}')),
+                "trainer '{v}' に馬主/置換文字が混入 (race {}, horse {})",
+                race.race_num,
+                res.horse_num.value()
+            );
+            assert!(
+                !v.contains("牧場") && !v.contains("ファーム"),
+                "trainer '{v}' に牧場名が混入 (race {})",
+                race.race_num
+            );
+            assert!(
+                !v.chars().any(|c| c.is_ascii_alphanumeric()),
+                "trainer '{v}' に ASCII 英数字が混入 (レコード標示 RC・純数字等) (race {})",
+                race.race_num
+            );
+        }
+    }
+}
+
+#[test]
 fn detects_scratched_horse_in_race_two() {
     let parser = MutoolParser;
     let Some(sample) = fixture::sample_result_pdf() else {
