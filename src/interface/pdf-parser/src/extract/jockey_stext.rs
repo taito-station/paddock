@@ -327,12 +327,12 @@ fn trainer_for(toks: &[Tok], page: usize, row_y: f64, hn_x: f64) -> Option<Strin
 
     let mut name = String::new();
     for (_, text) in parts {
-        // 調教師名は漢字のみ。純数字（斤量）やレコード標示 `RC` 等のラテン略号が帯に紛れる
-        // ことがあるため、ASCII 英数字は文字単位で除去する（別トークンでも `RC武藤` のような
-        // 混在トークンでも確実に落とせる）。残りが空なら取り込まない。
+        // 調教師名は漢字（非 ASCII）のみ。斤量の数字（半角・全角とも）やレコード標示 `RC` 等の
+        // ラテン略号・記号が帯に紛れることがあるため、ASCII 文字と全角数字を文字単位で除去する
+        // （別トークンでも `RC武藤` のような混在トークンでも確実に落とせる）。残りが空なら捨てる。
         let part: String = clean_part(text)
             .chars()
-            .filter(|c| !c.is_ascii_alphanumeric())
+            .filter(|c| !c.is_ascii() && !is_digit_char(*c))
             .collect();
         if part.is_empty() {
             continue;
@@ -564,6 +564,24 @@ mod tests {
         assert_eq!(
             idx.get(&1).and_then(|m| m.get(&8)).map(String::as_str),
             Some("武藤善則")
+        );
+    }
+
+    #[test]
+    fn trainer_excludes_fullwidth_weight_digits() {
+        // 斤量等の全角数字（５５）が調教師帯に紛れても名前にしない（jockey と同じ数字ガード）。
+        let json = doc_json(&[
+            (216.0, 116.0, 14.0, "1"),
+            (27.0, 169.0, 6.0, "8"),
+            (156.0, 169.0, 6.0, "武藤"),
+            (230.0, 169.0, 4.0, "５５"), // 全角数字 (offset 203) → 除外
+            (236.0, 169.0, 4.0, "中川"), // 調教師 姓
+            (250.0, 169.0, 4.0, "公成"), // 調教師 名
+        ]);
+        let idx = parse_trainers(&json);
+        assert_eq!(
+            idx.get(&1).and_then(|m| m.get(&8)).map(String::as_str),
+            Some("中川公成")
         );
     }
 
