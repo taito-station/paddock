@@ -221,7 +221,7 @@ async fn race_condition_upsert_overwrites_same_race() {
     )
     .await
     .unwrap();
-    // 同一レースを再入力（重→上書き）。行は増えず値だけ更新される。
+    // 同一レースを再入力（良→重 で上書き）。行は増えず値だけ更新される。
     repo.save_predict_race_condition(
         date(),
         &cond("2026-3-nakayama-8-1R", Some(TrackCondition::Yielding)),

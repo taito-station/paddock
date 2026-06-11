@@ -48,7 +48,8 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
         self.repository.find_predict_race_conditions(date).await
     }
 
-    /// 1 レース分の馬場入力を記録する。記録時刻は use-case 層で注入する。
+    /// 1 レース分の馬場入力を記録する。記録時刻 `Utc::now()` はこの use-case 層で注入し、
+    /// gateway を時計から独立に保つ（時刻注入の境界は本メソッド）。
     pub async fn save_predict_race_condition(
         &self,
         date: NaiveDate,
