@@ -1,4 +1,5 @@
-//! 成績 PDF の騎手列を `mutool draw -F stext.json`（x/y 座標 + font サイズ付き）から抽出する。
+//! 成績 PDF の騎手列・調教師列を `mutool draw -F stext.json`（x/y 座標 + font サイズ付き）から
+//! 抽出する。騎手は `parse_jockeys`、調教師は `parse_trainers`（x 帯・size 帯のみ差し替え）。
 //!
 //! プレーンテキスト（`-F text`）は列の x 座標と font サイズを失い、騎手名の 2 文字目と隣の
 //! 馬主名が区切り無しで 1 行に連結してしまう（例 `裕信本山`）。stext.json には座標とサイズが
@@ -20,6 +21,11 @@ use serde::Deserialize;
 /// `race_num -> (horse_num -> 騎手名)`。騎手名は素の抽出文字列（width 正規化は
 /// `JockeyName::try_from` 側が行う）。
 pub type JockeyIndex = HashMap<u32, HashMap<u32, String>>;
+
+/// `race_num -> (horse_num -> 調教師名)`。素の抽出文字列。`TrainerName` は `JockeyName` と
+/// 異なり width 正規化フックを持たない（`define_string!(TrainerName, max=30)`）ため、抽出した
+/// 文字列がそのまま検証・保存される。結果 PDF の調教師はフルネームの漢字表記で width 揺れは無い。
+pub type TrainerIndex = HashMap<u32, HashMap<u32, String>>;
 
 #[derive(Deserialize)]
 struct StextDoc {
@@ -80,6 +86,18 @@ const HN_X_RIGHT: std::ops::RangeInclusive<f64> = 435.0..=445.0;
 /// 確実な境界**。両者の間（~161）で切る。
 const JOCKEY_OFFSET_LO: f64 = 118.0;
 const JOCKEY_OFFSET_HI: f64 = 161.0;
+/// 調教師列の x 帯（馬番グリフ x からの相対オフセット）と font サイズ帯。
+/// 実測（結果 PDF）では調教師は姓 offset ~207-209・名 offset ~223-228 で、馬主(~166-185)より右・
+/// 牧場(~236+)より左に位置する。font サイズは**左列 4 / 右列 5** と列で異なるため帯で受ける
+/// （jockey・馬主の size 6 は size 上限で除外）。x 帯が主たる分離、size 帯は二次ガード。
+///
+/// 既知の制約: HI(230) と牧場列(~236) の間は約 6 単位しか空かない（jockey/馬主境界 HI=161 と
+/// 同様に x 帯が唯一の境界）。牧場名は仮名混じり地名（新ひだか/様似 等）で size でも除外できない
+/// ため、開催場・年度差で x が数単位ずれると牧場 1 トークン目が混入しうる。レイアウト退行時は
+/// `parse_trainers` の 0 件ログと統合テスト（既知調教師の完全一致）で気づく前提。
+const TRAINER_OFFSET_LO: f64 = 195.0;
+const TRAINER_OFFSET_HI: f64 = 230.0;
+const TRAINER_SIZE: std::ops::RangeInclusive<f64> = 3.0..=5.5;
 /// 同一行とみなす y 許容。
 const ROW_Y_TOL: f64 = 3.0;
 
@@ -236,9 +254,80 @@ fn jockey_for(toks: &[Tok], page: usize, row_y: f64, hn_x: f64) -> Option<String
 
     let mut name = String::new();
     for (_, text) in parts {
-        let part = clean_part(text);
-        // 純数字（斤量・減量数値。半角/全角とも）パートは騎手名ではないので取り込まない。
-        if part.is_empty() || part.chars().all(is_digit_char) {
+        let part = name_token(text);
+        if part.is_empty() {
+            continue;
+        }
+        name.push_str(&part);
+    }
+    let name = name.trim().to_string();
+    if name.is_empty() {
+        return None;
+    }
+    Some(name)
+}
+
+/// stext.json から調教師インデックスを構築する。`parse_jockeys` と同構造で、x 帯と
+/// size 帯のみ調教師用に差し替える。パース失敗時は空（呼び出し側で trainer なし扱い）。
+pub fn parse_trainers(stext_json: &str) -> TrainerIndex {
+    let doc: StextDoc = match serde_json::from_str(stext_json) {
+        Ok(d) => d,
+        Err(e) => {
+            if !stext_json.is_empty() {
+                tracing::debug!(error = %e, "stext.json のパースに失敗。調教師は未取得");
+            }
+            return TrainerIndex::new();
+        }
+    };
+    let toks = flatten(&doc);
+    let col_race = race_numbers(&toks);
+
+    let mut index: TrainerIndex = HashMap::new();
+    for (page, side, row_y, horse_num, hn_x) in horse_rows(&toks) {
+        let Some(&race_num) = col_race.get(&(page, side)) else {
+            continue;
+        };
+        if let Some(trainer) = trainer_for(&toks, page, row_y, hn_x) {
+            index
+                .entry(race_num)
+                .or_default()
+                .entry(horse_num)
+                .or_insert(trainer);
+        }
+    }
+    let total: usize = index.values().map(|m| m.len()).sum();
+    if total == 0 && !toks.is_empty() {
+        tracing::debug!(
+            tokens = toks.len(),
+            "stext からの調教師抽出が 0 件。座標レイアウトが想定と異なる可能性"
+        );
+    }
+    index
+}
+
+/// 馬番アンカーと同じ行（y 近傍）の調教師列トークンを連結して調教師名を作る。
+/// `jockey_for` と同型だが、x 帯（`TRAINER_OFFSET_*`）と size 帯（`TRAINER_SIZE`）を使う。
+fn trainer_for(toks: &[Tok], page: usize, row_y: f64, hn_x: f64) -> Option<String> {
+    let lo = hn_x + TRAINER_OFFSET_LO;
+    let hi = hn_x + TRAINER_OFFSET_HI;
+
+    let mut parts: Vec<(f64, &str)> = toks
+        .iter()
+        .filter(|t| {
+            t.page == page
+                && TRAINER_SIZE.contains(&t.size)
+                && (t.y - row_y).abs() <= ROW_Y_TOL
+                && lo <= t.x
+                && t.x <= hi
+        })
+        .map(|t| (t.x, t.text.as_str()))
+        .collect();
+    parts.sort_by(|a, b| a.0.total_cmp(&b.0));
+
+    let mut name = String::new();
+    for (_, text) in parts {
+        let part = name_token(text);
+        if part.is_empty() {
             continue;
         }
         name.push_str(&part);
@@ -263,6 +352,17 @@ fn clean_part(text: &str) -> String {
         out.push(c);
     }
     out
+}
+
+/// 騎手・調教師名トークンの正規化（jockey/trainer 共通）。`clean_part` で減量印・馬主マーカーを
+/// 処理したうえで、名前に含まれない ASCII 文字（ラテン略号 `RC`・記号）と数字を文字単位で落とす。
+/// フィルタは「ASCII を全除去（半角数字もここで落ちる）＋全角数字を追加除去」で、残るのは非 ASCII
+/// かつ非数字、すなわち漢字・仮名のみ。`RC武藤` のような混在トークンでもラテン部分だけ除去できる。
+fn name_token(text: &str) -> String {
+    clean_part(text)
+        .chars()
+        .filter(|c| !c.is_ascii() && !is_digit_char(*c))
+        .collect()
 }
 
 #[cfg(test)]
@@ -390,6 +490,137 @@ mod tests {
         assert_eq!(
             idx.get(&1).and_then(|m| m.get(&5)).map(String::as_str),
             Some("岩田望来")
+        );
+    }
+
+    #[test]
+    fn jockey_strips_latin_from_mixed_token() {
+        // name_token 集約により、騎手側でも混在トークン（ラテン略号＋漢字）からラテン部を
+        // 落として漢字名だけを残す（trainer 側と対称の挙動を固定する）。
+        let json = doc_json(&[
+            (216.0, 116.0, 14.0, "1"),
+            (27.0, 191.0, 6.0, "6"),
+            (156.0, 191.0, 6.0, "RC田辺"), // 混在トークン → RC 除去
+            (177.0, 191.0, 6.0, "裕信"),
+        ]);
+        let idx = parse_jockeys(&json);
+        assert_eq!(
+            idx.get(&1).and_then(|m| m.get(&6)).map(String::as_str),
+            Some("田辺裕信")
+        );
+    }
+
+    #[test]
+    fn extracts_trainer_and_excludes_jockey_owner_and_farm() {
+        // 左列実測レイアウト: 馬番6 / 騎手(size6,x156-177) / 馬主(size5,x193) /
+        // 調教師(size4,x236姓+x250名) / 牧場(size4,x263)。調教師だけを姓名連結で取る。
+        let json = doc_json(&[
+            (216.0, 116.0, 14.0, "1"),
+            (27.0, 191.0, 6.0, "6"),
+            (156.0, 191.0, 6.0, "田辺"),   // 騎手: size6 で trainer 帯外
+            (177.0, 191.0, 6.0, "裕信"),   // 騎手
+            (193.0, 191.0, 5.0, "本山"),   // 馬主: offset ~166 で TRAINER_OFFSET_LO 未満
+            (236.0, 191.0, 4.0, "千葉"),   // 調教師 姓 (offset 209)
+            (250.0, 191.0, 4.0, "直人"),   // 調教師 名 (offset 223)
+            (263.0, 191.0, 4.0, "新ひだか"), // 牧場: offset 236 で TRAINER_OFFSET_HI 超
+        ]);
+        let idx = parse_trainers(&json);
+        assert_eq!(
+            idx.get(&1).and_then(|m| m.get(&6)).map(String::as_str),
+            Some("千葉直人")
+        );
+    }
+
+    #[test]
+    fn right_column_trainer_uses_relative_offset() {
+        // 右列（hn_x≈438）でも馬番からの相対オフセットで調教師を取る。右列は size5。
+        let json = doc_json(&[
+            (627.0, 67.0, 14.0, "2"),
+            (438.0, 142.0, 6.0, "11"),
+            (567.0, 142.0, 6.0, "横山"),     // 騎手
+            (588.0, 142.0, 6.0, "和生"),     // 騎手
+            (604.0, 142.0, 6.0, "秋元"),     // 馬主(size6) → 帯外
+            (647.0, 142.0, 5.0, "中川"),     // 調教師 姓 (offset 209)
+            (661.0, 142.0, 5.0, "公成"),     // 調教師 名 (offset 223)
+            (675.0, 142.0, 4.0, "様似"),     // 牧場 (offset 237) → 帯外
+        ]);
+        let idx = parse_trainers(&json);
+        assert_eq!(
+            idx.get(&2).and_then(|m| m.get(&11)).map(String::as_str),
+            Some("中川公成")
+        );
+    }
+
+    #[test]
+    fn trainer_excludes_record_marker_latin_token() {
+        // レコード標示 `RC`（実 PDF で調教師帯に紛れた）が調教師名に混入しないこと。
+        let json = doc_json(&[
+            (216.0, 116.0, 14.0, "1"),
+            (27.0, 169.0, 6.0, "8"),
+            (156.0, 169.0, 6.0, "武藤"),  // 騎手
+            (184.0, 169.0, 6.0, "雅"),    // 騎手
+            (224.0, 169.0, 5.0, "RC"),    // レコード標示 (offset 197) → 除外
+            (233.0, 169.0, 4.0, "武藤"),  // 調教師 姓
+            (250.0, 169.0, 4.0, "善則"),  // 調教師 名
+        ]);
+        let idx = parse_trainers(&json);
+        assert_eq!(
+            idx.get(&1).and_then(|m| m.get(&8)).map(String::as_str),
+            Some("武藤善則")
+        );
+    }
+
+    #[test]
+    fn trainer_strips_latin_from_mixed_token() {
+        // レコード標示 `RC` が調教師姓と同一トークンに連結された場合でも、ASCII 英数字を
+        // 文字単位で落として漢字名だけを残す（別トークンに分かれない PDF への保険）。
+        let json = doc_json(&[
+            (216.0, 116.0, 14.0, "1"),
+            (27.0, 169.0, 6.0, "8"),
+            (156.0, 169.0, 6.0, "武藤"), // 騎手
+            (233.0, 169.0, 4.0, "RC武藤"), // 調教師 姓に RC が連結 (offset 206)
+            (250.0, 169.0, 4.0, "善則"),   // 調教師 名
+        ]);
+        let idx = parse_trainers(&json);
+        assert_eq!(
+            idx.get(&1).and_then(|m| m.get(&8)).map(String::as_str),
+            Some("武藤善則")
+        );
+    }
+
+    #[test]
+    fn trainer_excludes_fullwidth_weight_digits() {
+        // 斤量等の全角数字（５５）が調教師帯に紛れても名前にしない（jockey と同じ数字ガード）。
+        let json = doc_json(&[
+            (216.0, 116.0, 14.0, "1"),
+            (27.0, 169.0, 6.0, "8"),
+            (156.0, 169.0, 6.0, "武藤"),
+            (230.0, 169.0, 4.0, "５５"), // 全角数字 (offset 203) → 除外
+            (236.0, 169.0, 4.0, "中川"), // 調教師 姓
+            (250.0, 169.0, 4.0, "公成"), // 調教師 名
+        ]);
+        let idx = parse_trainers(&json);
+        assert_eq!(
+            idx.get(&1).and_then(|m| m.get(&8)).map(String::as_str),
+            Some("中川公成")
+        );
+    }
+
+    #[test]
+    fn trainer_single_token_full_name() {
+        // フルネームが 1 トークンで来るケース（実測 `加藤士津八` 等）。
+        let json = doc_json(&[
+            (627.0, 67.0, 14.0, "2"),
+            (438.0, 131.0, 6.0, "13"),
+            (567.0, 131.0, 6.0, "戸崎"),
+            (588.0, 131.0, 6.0, "圭太"),
+            (645.0, 131.0, 5.0, "加藤士津八"), // 調教師 (offset 207, 単一トークン)
+            (675.0, 131.0, 4.0, "新ひだか"),
+        ]);
+        let idx = parse_trainers(&json);
+        assert_eq!(
+            idx.get(&2).and_then(|m| m.get(&13)).map(String::as_str),
+            Some("加藤士津八")
         );
     }
 }

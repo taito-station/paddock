@@ -13,10 +13,12 @@ pub struct MutoolParser;
 impl PdfParser for MutoolParser {
     fn parse(&self, bytes: &[u8]) -> UcResult<Vec<Race>> {
         let (text, stext) = mutool_extract(bytes).map_err(paddock_use_case::Error::from)?;
-        // 騎手列は stext.json の座標 + font サイズから抽出する。stext が取れなくても
-        // （空文字列）騎手は各行のヒューリスティックにフォールバックして取り込みは継続する。
+        // 騎手列・調教師列は stext.json の座標 + font サイズから抽出する。stext が取れなくても
+        // （空文字列）各行のヒューリスティックにフォールバックして取り込みは継続する。
         let jockeys = extract::jockey_stext::parse_jockeys(&stext);
-        let races = extract::parse_text(&text, &jockeys).map_err(paddock_use_case::Error::from)?;
+        let trainers = extract::jockey_stext::parse_trainers(&stext);
+        let races = extract::parse_text(&text, &jockeys, &trainers)
+            .map_err(paddock_use_case::Error::from)?;
         Ok(races)
     }
 }
