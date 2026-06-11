@@ -142,6 +142,18 @@ fn race1_trainers_extracted_for_every_entry() {
     let trainer = h1.trainer.as_ref().expect("trainer missing for horse 1");
     assert_eq!(trainer.value(), "小野次郎");
 
+    // A second horse guards against a whole-column off-by-one bind (e.g. trainers shifted
+    // by one row, or the jockey column being read as the trainer).
+    let h_satsuki = r1
+        .entries
+        .iter()
+        .find(|e| e.horse_name.value() == "サツキジュエル")
+        .expect("サツキジュエル not found");
+    assert_eq!(
+        h_satsuki.trainer.as_ref().expect("trainer missing").value(),
+        "石栗龍彦"
+    );
+
     // Every entry in the race must bind a trainer (no row left unmatched).
     for e in &r1.entries {
         assert!(

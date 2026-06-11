@@ -419,7 +419,8 @@ fn extract_entries(
             continue;
         }
 
-        // Trainer fragment (smaller font than the jockey, same offset band).
+        // Trainer fragment: smaller font than the jockey, in an offset band that overlaps
+        // (but is narrower than) the jockey's — the size band is what separates the two.
         if TRAINER_SIZE.contains(&l.size) && TRAINER_OFFSET.contains(&off) && !l.text.is_ascii() {
             trainer_fragments.push((l.y, l.x, l.text.clone()));
         }
@@ -474,7 +475,9 @@ fn extract_entries(
         let jockey = nearest(&jockey_map, *name_y, JOCKEY_TOLERANCE).map(|(_, t)| t.clone());
 
         // The trainer sits below its name (positive dy), so it cannot be matched at the same
-        // level like the jockey. Pick the trainer in the dy window closest to the name.
+        // level like the jockey. The `nearest` helper uses a symmetric tolerance around the
+        // target and so cannot express "below only"; instead pick the trainer whose dy falls
+        // in the (positive) TRAINER_NAME_DY window and is closest to the name.
         let trainer = trainer_events
             .iter()
             .filter(|(ty, _)| TRAINER_NAME_DY.contains(&(ty - name_y)))
@@ -744,5 +747,24 @@ mod tests {
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].jockey.as_deref(), Some("騎手太郎"));
         assert_eq!(entries[0].trainer.as_deref(), Some("小野次郎"));
+    }
+
+    #[test]
+    fn extract_entries_ignores_owner_cell_in_trainer_band() {
+        let col_x = 36.0;
+        // The owner cell (`増田雄一氏`) lands in the same size/offset band as the trainer but
+        // lacks the `（…・` shape, so it must be filtered out and leave trainer = None — even
+        // when it passes through the full fragment-band + reassembly path (not just the regex).
+        let lines = [
+            line(0, 35.0, 130.0, 8.0, "白"),          // gate marker (gate 1)
+            line(0, 69.0, 138.0, 11.0, "テストウマ"), // horse name
+            line(0, 49.0, 151.0, 11.0, "1"),          // horse num
+            line(0, 205.0, 167.0, 6.0, "増田"),       // owner fragment (trainer band, no （…・)
+            line(0, 229.0, 167.0, 6.0, "雄一氏"),     // owner fragment
+        ];
+        let refs: Vec<&FlatLine> = lines.iter().collect();
+        let entries = extract_entries(&refs, &refs, col_x);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].trainer, None, "owner cell must not be read as a trainer");
     }
 }
