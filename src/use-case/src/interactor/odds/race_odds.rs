@@ -108,7 +108,7 @@ impl<O: OddsScraper, R: Repository> OddsInteractor<O, R> {
 mod tests {
     use std::sync::Mutex;
 
-    use chrono::NaiveDate;
+    use chrono::{DateTime, NaiveDate, Utc};
     use paddock_domain::{
         HorseName, HorseNum, HorseResult, JockeyName, OddsValue, OrderedPair, OrderedTriple, Pair,
         PlaceOdds, Race, RaceCard, RaceId, RaceOdds, Surface, TrainerName, Triple, Venue,
@@ -119,7 +119,8 @@ mod tests {
     use crate::odds_scraper::OddsScraper;
     use crate::repository::{
         CourseStatsRow, FetchRecord, HorseStatsRow, JockeyStatsRow, PredictBetRecord,
-        PredictSessionRecord, RaceOddsRecord, Repository, TrainerStatsRow,
+        PredictRaceConditionRecord, PredictSessionRecord, RaceOddsRecord, Repository,
+        TrainerStatsRow,
     };
 
     /// テスト用の OddsScraper。scrape の戻り値を差し替えつつ呼び出し回数を数える。
@@ -262,6 +263,20 @@ mod tests {
             _: &PredictSessionRecord,
             _: &RaceId,
             _: &[PredictBetRecord],
+        ) -> Result<()> {
+            unimplemented!()
+        }
+        async fn find_predict_race_conditions(
+            &self,
+            _: NaiveDate,
+        ) -> Result<Vec<PredictRaceConditionRecord>> {
+            unimplemented!()
+        }
+        async fn save_predict_race_condition(
+            &self,
+            _: NaiveDate,
+            _: &PredictRaceConditionRecord,
+            _: DateTime<Utc>,
         ) -> Result<()> {
             unimplemented!()
         }

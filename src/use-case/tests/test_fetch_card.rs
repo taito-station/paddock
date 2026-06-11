@@ -247,6 +247,20 @@ impl Repository for RecordingRepo {
     ) -> Result<()> {
         unimplemented!()
     }
+    async fn find_predict_race_conditions(
+        &self,
+        _: chrono::NaiveDate,
+    ) -> Result<Vec<paddock_use_case::repository::PredictRaceConditionRecord>> {
+        unimplemented!()
+    }
+    async fn save_predict_race_condition(
+        &self,
+        _: chrono::NaiveDate,
+        _: &paddock_use_case::repository::PredictRaceConditionRecord,
+        _: chrono::DateTime<chrono::Utc>,
+    ) -> Result<()> {
+        unimplemented!()
+    }
 }
 
 fn race_id() -> RaceId {

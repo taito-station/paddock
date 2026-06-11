@@ -27,5 +27,5 @@ pub use pdf_fetcher::PdfFetcher;
 pub use pdf_parser::PdfParser;
 pub use repository::{
     CourseStatsRow, FetchRecord, GroupStat, HorseStatsRow, JockeyStatsRow, OddsRow,
-    PredictBetRecord, PredictSessionRecord, RaceOddsRecord, Repository,
+    PredictBetRecord, PredictRaceConditionRecord, PredictSessionRecord, RaceOddsRecord, Repository,
 };

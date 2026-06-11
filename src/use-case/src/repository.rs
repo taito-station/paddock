@@ -3,7 +3,7 @@ use core::future::Future;
 use chrono::{DateTime, NaiveDate, Utc};
 use paddock_domain::{
     BetType, HorseId, HorseName, HorseResult, JockeyName, OrderedPair, OrderedTriple, Pair, Race,
-    RaceCard, RaceId, RaceOdds, Surface, TrainerName, Triple, Venue,
+    RaceCard, RaceId, RaceOdds, Surface, TrackCondition, TrainerName, Triple, Venue,
 };
 
 use crate::error::Result;
@@ -235,6 +235,15 @@ pub struct PredictBetRecord {
     pub ev: f64,
 }
 
+/// 予想セッションで 1 レースの冒頭に対話入力した馬場状態（#80）。レース単位で記録し、
+/// 「どの馬場前提で予想したか」を再現・監査できるようにする。`track_condition` が `None` は
+/// 「不明として入力した」ことを表す（レコードの存在自体が「入力済み」を意味する）。
+#[derive(Debug, Clone)]
+pub struct PredictRaceConditionRecord {
+    pub race_id: RaceId,
+    pub track_condition: Option<TrackCondition>,
+}
+
 pub trait Repository: Send + Sync {
     fn save_race(&self, race: &Race) -> impl Future<Output = Result<()>> + Send;
 
@@ -389,5 +398,24 @@ pub trait Repository: Send + Sync {
         session: &PredictSessionRecord,
         race_id: &RaceId,
         bets: &[PredictBetRecord],
+    ) -> impl Future<Output = Result<()>> + Send;
+
+    /// 指定日のセッションで記録済みの馬場入力を返す（`--resume` 時のデフォルト提示用）。
+    /// `track_condition` が `None` の行は「不明として入力済み」を表す。
+    fn find_predict_race_conditions(
+        &self,
+        date: NaiveDate,
+    ) -> impl Future<Output = Result<Vec<PredictRaceConditionRecord>>> + Send;
+
+    /// 1 レース分の馬場入力を upsert する。買い目の有無に依存せず入力直後に記録するため、
+    /// セッション更新（`save_race_outcome`）とは独立に呼ぶ。`date` はセッション
+    /// （`predict_sessions.date`）への FK キーで、レコード本体（`race_id`/`track_condition`）
+    /// とは別管理とする。`recorded_at` は use-case 層が注入し gateway を時計から独立に保つ
+    /// （[`FetchRecord`] と同じ流儀）。
+    fn save_predict_race_condition(
+        &self,
+        date: NaiveDate,
+        record: &PredictRaceConditionRecord,
+        recorded_at: DateTime<Utc>,
     ) -> impl Future<Output = Result<()>> + Send;
 }
