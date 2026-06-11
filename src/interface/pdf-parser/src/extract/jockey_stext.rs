@@ -254,9 +254,8 @@ fn jockey_for(toks: &[Tok], page: usize, row_y: f64, hn_x: f64) -> Option<String
 
     let mut name = String::new();
     for (_, text) in parts {
-        let part = clean_part(text);
-        // 純数字（斤量・減量数値。半角/全角とも）パートは騎手名ではないので取り込まない。
-        if part.is_empty() || part.chars().all(is_digit_char) {
+        let part = name_token(text);
+        if part.is_empty() {
             continue;
         }
         name.push_str(&part);
@@ -327,13 +326,7 @@ fn trainer_for(toks: &[Tok], page: usize, row_y: f64, hn_x: f64) -> Option<Strin
 
     let mut name = String::new();
     for (_, text) in parts {
-        // 調教師名は漢字（非 ASCII）のみ。斤量の数字（半角・全角とも）やレコード標示 `RC` 等の
-        // ラテン略号・記号が帯に紛れることがあるため、ASCII 文字と全角数字を文字単位で除去する
-        // （別トークンでも `RC武藤` のような混在トークンでも確実に落とせる）。残りが空なら捨てる。
-        let part: String = clean_part(text)
-            .chars()
-            .filter(|c| !c.is_ascii() && !is_digit_char(*c))
-            .collect();
+        let part = name_token(text);
         if part.is_empty() {
             continue;
         }
@@ -359,6 +352,17 @@ fn clean_part(text: &str) -> String {
         out.push(c);
     }
     out
+}
+
+/// 騎手・調教師名トークンの正規化（jockey/trainer 共通）。`clean_part` で減量印・馬主マーカーを
+/// 処理したうえで、名前に含まれない ASCII 文字（ラテン略号 `RC`・記号）と数字（半角・全角の
+/// 斤量等）を文字単位で落とす。名は漢字（非 ASCII・非数字）のみ残る。`RC武藤` のような混在
+/// トークンでもラテン部分だけ除去できる。
+fn name_token(text: &str) -> String {
+    clean_part(text)
+        .chars()
+        .filter(|c| !c.is_ascii() && !is_digit_char(*c))
+        .collect()
 }
 
 #[cfg(test)]
