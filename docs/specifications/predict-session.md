@@ -267,6 +267,56 @@ impl<O: OddsScraper> OddsInteractor<O> {
 
 ---
 
+## 馬場状態の永続化（Issue #80 / ADR 0013）
+
+各レース冒頭で対話入力した馬場状態（良/稍重/重/不良）を**レース単位で永続化**し、「どの馬場前提で
+確率・買い目を出したか」を事後に再現・監査できるようにする。未確定レースの `races.track_condition`
+は構造的に NULL のため、セッション入力を別テーブルに残す。
+
+### テーブル `predict_race_conditions`
+
+| カラム | 型 | 意味 |
+|--------|-----|------|
+| `session_date` | TEXT | `predict_sessions(date)` への FK（`ON DELETE CASCADE`） |
+| `race_id` | TEXT | レース ID（`session_date` と複合 PK） |
+| `track_condition` | TEXT (NULL 可) | 良/稍重/重/不良。**NULL = 不明として入力済み** |
+| `created_at` / `updated_at` | TEXT | RFC3339。upsert で `created_at` は初回値を保持 |
+
+**行の存在 = そのレースで入力済み**。未入力（行なし）と「不明として入力済み（`track_condition`
+が NULL）」を区別する。
+
+### 保存タイミング
+
+`read_track_condition` の**直後**（確率推定・オッズ取得より前）に `save_predict_race_condition` で
+upsert する。これにより出馬表未登録（NotFound）・オッズ未取得・スキップのレースでも入力値が残る。
+セッションヘッダの更新（`save_race_outcome`）とは独立に書き込む。
+
+### `--resume` 時のデフォルト提示
+
+レース冒頭のデフォルト値は純関数 `resolve_track_condition_default` が優先順に決める:
+
+1. **このセッションで記録済みの値**（resume）— `None`（不明として記録）も維持しフォールバックしない
+2. **同一セッション内の直前レースの入力値** — 未記録のレースのみ。自動適用せずデフォルト提示に留める
+   （芝/ダ・日中の馬場変化があるため）
+3. **`races.track_condition`** の確定値（通常 None）
+
+入力 UX は #73 のまま（空入力でデフォルト採用、`-`/`－`/`ー` で不明を明示、稍/不 の略記可）。
+
+### Repository / Interactor メソッド
+
+```rust
+// Repository トレイト
+fn find_predict_race_conditions(&self, date: NaiveDate)
+    -> impl Future<Output = Result<Vec<PredictRaceConditionRecord>>> + Send;
+fn save_predict_race_condition(
+    &self, date: NaiveDate, record: &PredictRaceConditionRecord, recorded_at: DateTime<Utc>,
+) -> impl Future<Output = Result<()>> + Send;
+```
+
+記録時刻 `recorded_at` は use-case 層で注入し、gateway を時計から独立に保つ（`FetchRecord` と同流儀）。
+
+---
+
 ## Kelly 値の表示と推奨額の算出
 
 `BettingRecommendation.kelly_fraction` は 0.0〜1.0 の小数。表示時は `kelly_fraction * 100` で百分率に変換し `Kelly=15%` のように表示する。
@@ -286,4 +336,5 @@ impl<O: OddsScraper> OddsInteractor<O> {
 
 ## ADR
 
-[ADR-0004](../adr/0004-predict-session-binary.md)
+- [ADR-0004](../adr/0004-predict-session-binary.md) — 予想セッションバイナリ
+- [ADR-0013](../adr/0013-persist-track-condition.md) — 馬場入力の永続化（Issue #80）

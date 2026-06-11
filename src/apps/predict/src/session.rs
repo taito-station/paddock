@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::io::{self, Write};
 
 use chrono::{NaiveDate, Utc};
@@ -84,11 +84,22 @@ pub async fn run_session(
         (session, HashSet::new())
     };
 
+    // 記録済みの馬場入力をロードし、resume 時のデフォルト提示に使う（新規セッションでは空）。
+    // 同一セッション内では直前レースの入力を引き継いでデフォルト提示する（自動適用はしない）。
+    let recorded: HashMap<String, Option<TrackCondition>> = app
+        .interactor
+        .find_predict_race_conditions(date)
+        .await?
+        .into_iter()
+        .map(|r| (r.race_id.value().to_string(), r.track_condition))
+        .collect();
+    let mut last_input: Option<TrackCondition> = None;
+
     for race in &races {
         if processed.contains(race.race_id.value()) {
             continue;
         }
-        run_race(app, race, &mut session).await?;
+        run_race(app, race, &mut session, &recorded, &mut last_input).await?;
     }
 
     session.completed = true;
@@ -105,6 +116,8 @@ async fn run_race(
     app: &App,
     race: &Race,
     session: &mut PredictSessionRecord,
+    recorded: &HashMap<String, Option<TrackCondition>>,
+    last_input: &mut Option<TrackCondition>,
 ) -> anyhow::Result<()> {
     println!();
     println!(
@@ -118,8 +131,19 @@ async fn run_race(
 
     // 当日の馬場状態（#73）。未確定レースの race.track_condition は構造的に None
     //（races へ入るのは成績取り込み後）のため、レース毎に対話入力で受け取る。
-    // DB に値があれば（再実行等）デフォルトとして空入力で採用する。
-    let track_condition = read_track_condition(race.track_condition)?;
+    // デフォルトは「このセッションで記録済みの値（resume）→ 直前レースの入力 →
+    // races の確定値」の優先順で決め、空入力で採用する（#80）。
+    let default = resolve_track_condition_default(
+        recorded.get(race.race_id.value()).copied(),
+        *last_input,
+        race.track_condition,
+    );
+    let track_condition = read_track_condition(default)?;
+    // 入力値は買い目の有無に依存せず必ず記録し、「どの馬場前提で予想したか」を再現可能にする（#80）。
+    *last_input = track_condition;
+    app.interactor
+        .save_predict_race_condition(session.date, &race.race_id, track_condition)
+        .await?;
 
     // 出馬表未登録（NotFound）はそのレースのみスキップ。
     // DB 障害等（Internal）はセッション継続不能なため伝播して中断する。
@@ -446,6 +470,24 @@ fn read_choice() -> anyhow::Result<char> {
     }
 }
 
+/// レース冒頭の馬場入力デフォルトを決める純関数（#80）。優先順は
+/// 「このセッションで記録済みの値 → 同一セッション内の直前レース入力 → races の確定値」。
+///
+/// `recorded` はセッション記録テーブルの引き当て結果。`Some(stored)` はこのレースを既に
+/// 入力済み（`stored` が `None` でも「不明として入力済み」を意味する）で、resume 時は
+/// この値を最優先する。未記録（`None`）のときのみ直前入力 `last_input`、無ければ確定値
+/// `official` にフォールバックする。
+fn resolve_track_condition_default(
+    recorded: Option<Option<TrackCondition>>,
+    last_input: Option<TrackCondition>,
+    official: Option<TrackCondition>,
+) -> Option<TrackCondition> {
+    match recorded {
+        Some(stored) => stored,
+        None => last_input.or(official),
+    }
+}
+
 /// 当日の馬場状態を読み取る（#73）。空入力は `default`（DB 値があればそれ、無ければ None=
 /// 馬場項なし）を採用し、`-` は不明（None）を明示する。不正入力は再プロンプト。
 /// 「稍」「不」の略記も受け付ける。
@@ -488,9 +530,9 @@ fn read_u64(prompt: &str, allow_empty_as_zero: bool) -> anyhow::Result<u64> {
 
 #[cfg(test)]
 mod tests {
-    use super::{make_bet_record, recommended_amounts};
+    use super::{make_bet_record, recommended_amounts, resolve_track_condition_default};
     use paddock_domain::horse_result::HorseNum;
-    use paddock_domain::{BetCombination, BettingRecommendation, RaceId};
+    use paddock_domain::{BetCombination, BettingRecommendation, RaceId, TrackCondition};
 
     fn rec(combination: BetCombination, ev: f64) -> BettingRecommendation {
         BettingRecommendation {
@@ -584,5 +626,51 @@ mod tests {
     fn zero_budget_returns_zeros() {
         let amounts = recommended_amounts(0, &[0.25, 0.1]);
         assert_eq!(amounts, vec![0, 0]);
+    }
+
+    #[test]
+    fn track_default_prefers_recorded_value_on_resume() {
+        // 記録済み（resume）の値は直前入力・確定値より優先される。
+        let d = resolve_track_condition_default(
+            Some(Some(TrackCondition::Good)),
+            Some(TrackCondition::Firm),
+            Some(TrackCondition::Soft),
+        );
+        assert_eq!(d, Some(TrackCondition::Good));
+    }
+
+    #[test]
+    fn track_default_recorded_unknown_stays_none() {
+        // 「不明として記録済み」(Some(None)) は None を維持し、フォールバックしない。
+        let d = resolve_track_condition_default(
+            Some(None),
+            Some(TrackCondition::Firm),
+            Some(TrackCondition::Soft),
+        );
+        assert_eq!(d, None);
+    }
+
+    #[test]
+    fn track_default_falls_back_to_last_input_when_unrecorded() {
+        // 未記録なら同一セッション内の直前入力を確定値より優先してデフォルト提示する。
+        let d = resolve_track_condition_default(
+            None,
+            Some(TrackCondition::Yielding),
+            Some(TrackCondition::Firm),
+        );
+        assert_eq!(d, Some(TrackCondition::Yielding));
+    }
+
+    #[test]
+    fn track_default_falls_back_to_official_when_no_input() {
+        // 未記録かつ直前入力も無ければ races の確定値を使う。
+        let d = resolve_track_condition_default(None, None, Some(TrackCondition::Firm));
+        assert_eq!(d, Some(TrackCondition::Firm));
+    }
+
+    #[test]
+    fn track_default_all_none_is_none() {
+        let d = resolve_track_condition_default(None, None, None);
+        assert_eq!(d, None);
     }
 }

@@ -205,6 +205,20 @@ impl Repository for MockRepo {
     ) -> Result<()> {
         unimplemented!()
     }
+    async fn find_predict_race_conditions(
+        &self,
+        _: chrono::NaiveDate,
+    ) -> Result<Vec<paddock_use_case::repository::PredictRaceConditionRecord>> {
+        unimplemented!()
+    }
+    async fn save_predict_race_condition(
+        &self,
+        _: chrono::NaiveDate,
+        _: &paddock_use_case::repository::PredictRaceConditionRecord,
+        _: chrono::DateTime<chrono::Utc>,
+    ) -> Result<()> {
+        unimplemented!()
+    }
 }
 
 fn sample_race() -> Race {
@@ -527,6 +541,20 @@ impl Repository for HistoryRepo {
         _session: &paddock_use_case::repository::PredictSessionRecord,
         _race_id: &RaceId,
         _bets: &[paddock_use_case::repository::PredictBetRecord],
+    ) -> Result<()> {
+        unimplemented!()
+    }
+    async fn find_predict_race_conditions(
+        &self,
+        _: chrono::NaiveDate,
+    ) -> Result<Vec<paddock_use_case::repository::PredictRaceConditionRecord>> {
+        unimplemented!()
+    }
+    async fn save_predict_race_condition(
+        &self,
+        _: chrono::NaiveDate,
+        _: &paddock_use_case::repository::PredictRaceConditionRecord,
+        _: chrono::DateTime<chrono::Utc>,
     ) -> Result<()> {
         unimplemented!()
     }

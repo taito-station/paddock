@@ -3,8 +3,10 @@
 //! payout/bets の保存・復元はこの結合テストで担保する。
 
 use chrono::{NaiveDate, Utc};
-use paddock_domain::RaceId;
-use paddock_use_case::repository::{PredictBetRecord, PredictSessionRecord, Repository};
+use paddock_domain::{RaceId, TrackCondition};
+use paddock_use_case::repository::{
+    PredictBetRecord, PredictRaceConditionRecord, PredictSessionRecord, Repository,
+};
 use rdb_gateway::{SqliteRepository, pool};
 
 async fn fresh_repo() -> (SqliteRepository, tempfile::TempDir) {
@@ -147,4 +149,88 @@ async fn completed_flag_and_multi_race_append() {
     assert!(loaded.completed);
     assert_eq!(loaded.total_bet, 1_800);
     assert_eq!(loaded.total_payout, 1_200);
+}
+
+/// セッションヘッダを先に作る（predict_race_conditions.session_date の FK 充足）。
+async fn seed_session(repo: &SqliteRepository) {
+    let now = Utc::now();
+    repo.save_predict_session(&PredictSessionRecord {
+        date: date(),
+        budget: 10_000,
+        balance: 10_000,
+        total_bet: 0,
+        total_payout: 0,
+        completed: false,
+        created_at: now,
+        updated_at: now,
+    })
+    .await
+    .unwrap();
+}
+
+fn cond(race: &str, tc: Option<TrackCondition>) -> PredictRaceConditionRecord {
+    PredictRaceConditionRecord {
+        race_id: RaceId::try_from(race).unwrap(),
+        track_condition: tc,
+    }
+}
+
+#[tokio::test]
+async fn race_condition_round_trips_value_and_unknown() {
+    let (repo, _dir) = fresh_repo().await;
+    seed_session(&repo).await;
+    assert!(
+        repo.find_predict_race_conditions(date())
+            .await
+            .unwrap()
+            .is_empty()
+    );
+
+    let now = Utc::now();
+    // 値あり（稍重）と「不明として記録」(None) を別レースで保存する。
+    repo.save_predict_race_condition(
+        date(),
+        &cond("2026-3-nakayama-8-1R", Some(TrackCondition::Good)),
+        now,
+    )
+    .await
+    .unwrap();
+    repo.save_predict_race_condition(date(), &cond("2026-3-nakayama-8-2R", None), now)
+        .await
+        .unwrap();
+
+    let loaded = repo.find_predict_race_conditions(date()).await.unwrap();
+    // race_id 昇順で返る。
+    assert_eq!(loaded.len(), 2);
+    assert_eq!(loaded[0].race_id.value(), "2026-3-nakayama-8-1R");
+    assert_eq!(loaded[0].track_condition, Some(TrackCondition::Good));
+    assert_eq!(loaded[1].race_id.value(), "2026-3-nakayama-8-2R");
+    assert_eq!(loaded[1].track_condition, None);
+}
+
+#[tokio::test]
+async fn race_condition_upsert_overwrites_same_race() {
+    let (repo, _dir) = fresh_repo().await;
+    seed_session(&repo).await;
+    let now = Utc::now();
+
+    repo.save_predict_race_condition(
+        date(),
+        &cond("2026-3-nakayama-8-1R", Some(TrackCondition::Firm)),
+        now,
+    )
+    .await
+    .unwrap();
+    // 同一レースを再入力（重→上書き）。行は増えず値だけ更新される。
+    repo.save_predict_race_condition(
+        date(),
+        &cond("2026-3-nakayama-8-1R", Some(TrackCondition::Yielding)),
+        Utc::now(),
+    )
+    .await
+    .unwrap();
+
+    let loaded = repo.find_predict_race_conditions(date()).await.unwrap();
+    assert_eq!(loaded.len(), 1);
+    assert_eq!(loaded[0].track_condition, Some(TrackCondition::Yielding));
 }

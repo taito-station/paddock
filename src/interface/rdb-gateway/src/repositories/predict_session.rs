@@ -1,6 +1,8 @@
 use chrono::{DateTime, NaiveDate, Utc};
-use paddock_domain::RaceId;
-use paddock_use_case::repository::{PredictBetRecord, PredictSessionRecord};
+use paddock_domain::{RaceId, TrackCondition};
+use paddock_use_case::repository::{
+    PredictBetRecord, PredictRaceConditionRecord, PredictSessionRecord,
+};
 use sqlx::SqlitePool;
 
 use crate::error::{Error, Result};
@@ -176,6 +178,72 @@ pub async fn save_race_outcome(
     }
 
     tx.commit().await?;
+    Ok(())
+}
+
+/// 指定日のセッションで記録済みの馬場入力を race_id 昇順で返す（`--resume` のデフォルト提示用）。
+/// `track_condition` 列が NULL の行は「不明として入力済み」を表し `None` で返す。
+pub async fn find_predict_race_conditions(
+    pool: &SqlitePool,
+    date: NaiveDate,
+) -> Result<Vec<PredictRaceConditionRecord>> {
+    let date_str = date_key(date);
+    let rows: Vec<(String, Option<String>)> = sqlx::query_as(
+        r#"
+        SELECT race_id, track_condition
+        FROM predict_race_conditions
+        WHERE session_date = $1
+        ORDER BY race_id ASC
+        "#,
+    )
+    .bind(&date_str)
+    .fetch_all(pool)
+    .await?;
+
+    let mut records = Vec::with_capacity(rows.len());
+    for (race_id, track_condition) in rows {
+        let track_condition = match track_condition {
+            Some(s) => Some(TrackCondition::try_from(s.as_str()).map_err(|e| {
+                Error::Data(format!("predict_race_conditions.track_condition {s:?}: {e}"))
+            })?),
+            None => None,
+        };
+        records.push(PredictRaceConditionRecord {
+            race_id: RaceId::try_from(race_id.as_str())?,
+            track_condition,
+        });
+    }
+    Ok(records)
+}
+
+/// 1 レース分の馬場入力を upsert する。`(session_date, race_id)` で衝突した行は
+/// `track_condition` と `updated_at` を更新し、`created_at` は初回値を保持する。
+pub async fn save_predict_race_condition(
+    pool: &SqlitePool,
+    date: NaiveDate,
+    record: &PredictRaceConditionRecord,
+    recorded_at: DateTime<Utc>,
+) -> Result<()> {
+    let date_str = date_key(date);
+    let track_condition = record.track_condition.map(|tc| tc.as_str().to_string());
+    let ts = recorded_at.to_rfc3339();
+    sqlx::query(
+        r#"
+        INSERT INTO predict_race_conditions
+            (session_date, race_id, track_condition, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT(session_date, race_id) DO UPDATE SET
+            track_condition = excluded.track_condition,
+            updated_at      = excluded.updated_at
+        "#,
+    )
+    .bind(&date_str)
+    .bind(record.race_id.value())
+    .bind(track_condition)
+    .bind(&ts)
+    .bind(&ts)
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
