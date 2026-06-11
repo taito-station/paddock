@@ -139,11 +139,15 @@ async fn run_race(
         race.track_condition,
     );
     let track_condition = read_track_condition(default)?;
-    // 入力値は買い目の有無に依存せず必ず記録し、「どの馬場前提で予想したか」を再現可能にする（#80）。
     *last_input = track_condition;
-    app.interactor
-        .save_predict_race_condition(session.date, &race.race_id, track_condition)
-        .await?;
+    // 入力値は買い目の有無に依存せず記録し、「どの馬場前提で予想したか」を再現可能にする（#80）。
+    // ただし resume 等で記録済みと同値なら、updated_at の無駄な更新（監査ノイズ）と
+    // 冗長な書き込みを避けて保存を省く。
+    if recorded.get(race.race_id.value()).copied() != Some(track_condition) {
+        app.interactor
+            .save_predict_race_condition(session.date, &race.race_id, track_condition)
+            .await?;
+    }
 
     // 出馬表未登録（NotFound）はそのレースのみスキップ。
     // DB 障害等（Internal）はセッション継続不能なため伝播して中断する。

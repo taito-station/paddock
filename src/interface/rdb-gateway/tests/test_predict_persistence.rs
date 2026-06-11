@@ -234,3 +234,49 @@ async fn race_condition_upsert_overwrites_same_race() {
     assert_eq!(loaded.len(), 1);
     assert_eq!(loaded[0].track_condition, Some(TrackCondition::Yielding));
 }
+
+#[tokio::test]
+async fn race_condition_save_requires_existing_session_fk() {
+    let (repo, _dir) = fresh_repo().await;
+    // セッションヘッダ未作成のまま保存すると FK 制約（session_date → predict_sessions）違反で
+    // エラーになる。FK が有効（foreign_keys pragma + 制約宣言）であることの回帰検知。
+    let res = repo
+        .save_predict_race_condition(
+            date(),
+            &cond("2026-3-nakayama-8-1R", Some(TrackCondition::Firm)),
+            Utc::now(),
+        )
+        .await;
+    assert!(res.is_err(), "セッション無しでの保存は FK 制約で失敗するはず");
+}
+
+#[tokio::test]
+async fn race_condition_upsert_preserves_created_at_and_advances_updated_at() {
+    let (repo, _dir) = fresh_repo().await;
+    seed_session(&repo).await;
+
+    let t1 = Utc::now();
+    let t2 = t1 + chrono::Duration::seconds(60);
+    let race = "2026-3-nakayama-8-1R";
+    repo.save_predict_race_condition(date(), &cond(race, Some(TrackCondition::Firm)), t1)
+        .await
+        .unwrap();
+    repo.save_predict_race_condition(date(), &cond(race, Some(TrackCondition::Yielding)), t2)
+        .await
+        .unwrap();
+
+    // 上書き時、created_at は初回値を保持し updated_at のみ更新されることを raw SQL で確認する。
+    // PredictRaceConditionRecord は時刻を保持しないため find 経由では検証できない。
+    let (created_at, updated_at): (String, String) = sqlx::query_as(
+        "SELECT created_at, updated_at FROM predict_race_conditions \
+         WHERE session_date = $1 AND race_id = $2",
+    )
+    .bind(date().format("%Y-%m-%d").to_string())
+    .bind(race)
+    .fetch_one(&repo.pool)
+    .await
+    .unwrap();
+
+    assert_eq!(created_at, t1.to_rfc3339(), "created_at は初回値を保持する");
+    assert_eq!(updated_at, t2.to_rfc3339(), "updated_at は最新の保存時刻に更新される");
+}

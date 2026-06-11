@@ -408,8 +408,10 @@ pub trait Repository: Send + Sync {
     ) -> impl Future<Output = Result<Vec<PredictRaceConditionRecord>>> + Send;
 
     /// 1 レース分の馬場入力を upsert する。買い目の有無に依存せず入力直後に記録するため、
-    /// セッション更新（`save_race_outcome`）とは独立に呼ぶ。`recorded_at` は use-case 層が
-    /// 注入し gateway を時計から独立に保つ（[`FetchRecord`] と同じ流儀）。
+    /// セッション更新（`save_race_outcome`）とは独立に呼ぶ。`date` はセッション
+    /// （`predict_sessions.date`）への FK キーで、レコード本体（`race_id`/`track_condition`）
+    /// とは別管理とする。`recorded_at` は use-case 層が注入し gateway を時計から独立に保つ
+    /// （[`FetchRecord`] と同じ流儀）。
     fn save_predict_race_condition(
         &self,
         date: NaiveDate,
