@@ -37,7 +37,7 @@ pub(crate) fn group_stat_from_row(label: &str, row: (i64, i64, i64, i64)) -> Gro
     }
 }
 
-/// `[STATS_AGG_SELECT] WHERE ...` のクエリに `binds`（$1..）と任意の `cutoff`（末尾）を
+/// `[STATS_AGG_SELECT] WHERE ...` のクエリに `binds`（?1..）と任意の `cutoff`（末尾）を
 /// 順にバインドして 1 行の集計 tuple を取得する。`cutoff` は `date_lt_pred` のプレースホルダに対応。
 async fn fetch_agg(
     pool: &SqlitePool,

@@ -18,6 +18,9 @@ pub async fn course_stats(
     as_of: Option<NaiveDate>,
 ) -> Result<CourseStatsRow> {
     let cutoff = as_of.map(|d| d.format("%Y-%m-%d").to_string());
+    // course は venue/distance/surface の多列バインド（distance は整数）で `entity_stats`/`fetch_agg`
+    // の単一文字列値パターンに乗らないため、共通定数（STATS_AGG_SELECT/GATE_GROUPS）のみ使い
+    // バインドは手書きする。
     let date = date_lt_pred(cutoff.as_deref(), "?4");
     let mut by_gate_group = Vec::with_capacity(GATE_GROUPS.len());
     for (label, predicate) in GATE_GROUPS {
