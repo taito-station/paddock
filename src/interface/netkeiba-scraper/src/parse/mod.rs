@@ -3,11 +3,13 @@
 mod card;
 mod horse_history;
 mod odds;
+mod result;
 mod shutuba;
 
 pub use card::parse_card;
 pub use horse_history::parse_horse_history;
 pub use odds::parse_win_place_odds;
+pub use result::parse_race_result;
 pub use shutuba::parse_shutuba;
 
 use paddock_domain::Venue;

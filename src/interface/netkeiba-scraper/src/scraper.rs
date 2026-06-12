@@ -16,6 +16,7 @@ use crate::error::{Error, Result};
 use crate::parse;
 
 const SHUTUBA_URL: &str = "https://race.netkeiba.com/race/shutuba.html";
+const RACE_RESULT_URL: &str = "https://race.netkeiba.com/race/result.html";
 const HORSE_RESULT_URL: &str = "https://db.netkeiba.com/horse/result";
 const WIN_ODDS_URL: &str = "https://race.netkeiba.com/api/api_get_jra_odds.html";
 const DEFAULT_DELAY: Duration = Duration::from_millis(1000);
@@ -56,6 +57,20 @@ impl UreqNetkeibaScraper {
             delay,
             ..Self::default()
         }
+    }
+
+    /// レース結果ページ (`race/result.html`) から確定成績（着順・騎手略名・調教師略名等）を取得する。
+    /// 既存 `results` を netkeiba 由来の clean な値で更新する用途（`fetch-results` アプリ）。
+    /// `NetkeibaScraper` トレイトには載せず、結果再取込フロー専用の inherent メソッドとする。
+    pub fn fetch_race_result(
+        &self,
+        netkeiba_race_id: &str,
+    ) -> UcResult<Vec<paddock_use_case::netkeiba_scraper::ResultRow>> {
+        std::thread::sleep(self.delay);
+        let url = format!("{RACE_RESULT_URL}?race_id={netkeiba_race_id}");
+        tracing::debug!(race_id = %netkeiba_race_id, "fetching netkeiba race result");
+        let html = fetch_decoded(&self.agent, &url)?;
+        Ok(parse::parse_race_result(&html, netkeiba_race_id)?)
     }
 }
 

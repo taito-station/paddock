@@ -16,6 +16,7 @@ mod save_race_card;
 mod save_race_odds;
 mod sql;
 mod trainer_stats;
+mod update_results;
 
 use chrono::{DateTime, NaiveDate, Utc};
 use paddock_domain::{
@@ -37,6 +38,18 @@ pub struct SqliteRepository {
 impl SqliteRepository {
     pub fn new(pool: SqlitePool) -> Self {
         Self { pool }
+    }
+
+    /// netkeiba 結果由来の clean な成績で既存 `results` 行を更新する（`fetch-results` 用）。
+    /// `Repository` トレイトには載せず、結果再取込フロー専用の inherent メソッドとする。
+    pub async fn update_results(
+        &self,
+        race_id: &RaceId,
+        rows: &[paddock_use_case::netkeiba_scraper::ResultRow],
+    ) -> UcResult<u64> {
+        update_results::update_results(&self.pool, race_id, rows)
+            .await
+            .map_err(Into::into)
     }
 }
 

@@ -163,7 +163,8 @@ fn parse_surface_distance(raw: &str) -> Option<(Surface, u32)> {
 }
 
 /// 着順セルを (着順, status) に変換。数字なら完走、"中/取/除/失" は異常終了として着順なし。
-fn parse_finish(raw: &str) -> (Option<FinishingPosition>, ResultStatus) {
+/// 結果ページパーサ（`result.rs`）でも同形の着順表記を扱うため共有する。
+pub(crate) fn parse_finish(raw: &str) -> (Option<FinishingPosition>, ResultStatus) {
     let digits: String = raw.chars().take_while(char::is_ascii_digit).collect();
     if let Some(pos) = digits
         .parse::<u32>()
@@ -184,7 +185,8 @@ fn parse_finish(raw: &str) -> (Option<FinishingPosition>, ResultStatus) {
 }
 
 /// 馬体重セル "464(0)" / "486(+4)" を (体重, 増減) に分解。"計不" 等は `(None, None)`。
-fn parse_weight(raw: &str) -> (Option<u32>, Option<i32>) {
+/// 結果ページパーサ（`result.rs`）と共有する。
+pub(crate) fn parse_weight(raw: &str) -> (Option<u32>, Option<i32>) {
     let Some((w, rest)) = raw.split_once('(') else {
         return (None, None);
     };

@@ -7,6 +7,7 @@ members = [
     "src/apps/predict",
     "src/apps/fetch-history",
     "src/apps/fetch-card",
+    "src/apps/fetch-results",
     "src/apps/simulate",
     # Standalone library crate: not yet consumed by any binary, so it is listed
     # explicitly to stay part of the workspace build/test graph.
