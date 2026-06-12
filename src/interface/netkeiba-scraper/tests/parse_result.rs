@@ -59,6 +59,12 @@ fn winner_has_clean_jockey_and_trainer_abbrev() {
     assert_eq!(winner.trainer.as_ref().map(|t| t.value()), Some("宮地"));
     assert_eq!(winner.popularity, Some(6));
     assert_eq!(winner.odds, Some(22.7));
+    // 走破タイム（先頭の td.Time）が拾えていること（列順変化で別 td.Time を拾う回帰の検知）。
+    assert_eq!(
+        winner.time_seconds.map(|t| t.value()),
+        Some(114.9), // 1:54.9
+        "走破タイム 1:54.9 = 114.9 秒"
+    );
 }
 
 #[test]

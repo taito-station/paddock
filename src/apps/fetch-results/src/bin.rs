@@ -34,9 +34,17 @@ async fn main() -> anyhow::Result<()> {
                 continue;
             }
         };
-        match scraper.fetch_race_result(&netkeiba_id) {
-            Ok(rows) => {
-                let n = repo.update_results(&race.race_id, &rows).await?;
+        let rows = match scraper.fetch_race_result(&netkeiba_id) {
+            Ok(rows) => rows,
+            Err(e) => {
+                failed += 1;
+                tracing::warn!(race = %race.race_id, netkeiba = %netkeiba_id, "結果取得失敗: {e}");
+                continue;
+            }
+        };
+        // DB 更新失敗も取得失敗と同様に当該レースのみ skip し、バッチ完走性を揃える。
+        match repo.update_results(&race.race_id, &rows).await {
+            Ok(n) => {
                 updated_total += n;
                 ok += 1;
                 // 取得頭数と実更新行数の乖離（horse_num 不一致・レース未取込）を可視化する。
@@ -51,7 +59,7 @@ async fn main() -> anyhow::Result<()> {
             }
             Err(e) => {
                 failed += 1;
-                tracing::warn!(race = %race.race_id, netkeiba = %netkeiba_id, "結果取得失敗: {e}");
+                tracing::warn!(race = %race.race_id, "results 更新失敗: {e}");
             }
         }
         if (i + 1) % 20 == 0 || i + 1 == total {
