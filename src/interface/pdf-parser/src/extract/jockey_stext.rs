@@ -1,5 +1,6 @@
 //! 成績 PDF の騎手列・調教師列を `mutool draw -F stext.json`（x/y 座標 + font サイズ付き）から
-//! 抽出する。騎手は `parse_jockeys`、調教師は `parse_trainers`（x 帯・size 帯のみ差し替え）。
+//! 抽出する。共通骨格 `parse_column`/`column_for` に対し、騎手は `parse_jockeys`、調教師は
+//! `parse_trainers` が x 帯・size 帯（とログ文言）のみ差し替えて渡す。
 //!
 //! プレーンテキスト（`-F text`）は列の x 座標と font サイズを失い、騎手名の 2 文字目と隣の
 //! 馬主名が区切り無しで 1 行に連結してしまう（例 `裕信本山`）。stext.json には座標とサイズが
@@ -129,7 +130,7 @@ fn side_of(x: f64) -> u8 {
 ///
 /// - `parse_err_msg`: JSON パース失敗時の debug ログ本文（空文字列入力時は静かに無視）。
 /// - `empty_msg`: トークンはあるのに 0 件だった場合（レイアウト退行の疑い）の debug ログ本文。
-/// - `extract`: 馬番アンカー行（page, row_y, hn_x）から 1 件の名前を取り出す列抽出関数。
+/// - `extract`: トークン列と馬番アンカー行（toks, page, row_y, hn_x）から 1 件の名前を取り出す列抽出関数。
 fn parse_column(
     stext_json: &str,
     parse_err_msg: &str,
