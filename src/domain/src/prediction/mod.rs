@@ -176,8 +176,10 @@ const COURSE_GATE_WEIGHT: f64 = 2.0;
 const SURFACE_WEIGHT: f64 = 1.0;
 const DISTANCE_WEIGHT: f64 = 1.0;
 const JOCKEY_WEIGHT: f64 = 1.0;
-/// 調教師（trainer）項の重み。現状 trainer 母数（results.trainer）が未充足で backtest 測定
-/// 不可のため、同種の jockey 項と同じ 1.0 を採用（過適合リスク低、ADR 0012）。母数充足後に再検証。
+/// 調教師（trainer）項の重み。#87 で母数（results.trainer）を充足し backtest（0.0/0.5/1.0/2.0 を
+/// 比較, 2026-03-28〜05-31 / 144 レース, #81 後ロジック）で再検証した。項を有効化すると校正が改善
+/// （0.0→0.5 で LogLoss 単勝 0.60→0.40、Brier 系は小幅）。0.5/1.0/2.0 は拮抗で、1.0 が LogLoss 単勝・
+/// Brier 複勝で最良（Brier 単勝のみ 2.0 が僅差だが小標本ゆえ過適合回避で 1.0）。jockey と同値（ADR 0012）。
 const TRAINER_WEIGHT: f64 = 1.0;
 /// 馬場状態（track_condition）項の重み。#73 バックテスト（0.25/0.5/1.0/1.5/2.0 を比較）で
 /// 1.0 が的中率・回収率のピークだったため採用（ADR 0011）。
