@@ -4,6 +4,36 @@ use paddock_domain::ResultStatus;
 const FIXTURE: &str = include_str!("fixtures/race_result.html");
 const RACE_ID: &str = "202606030801";
 
+// 非完走（取消）行を含む最小の結果テーブル。fixture は全馬完走のため status 異常系をここで網羅する。
+const NON_FINISHER_HTML: &str = r#"
+<table id="All_Result_Table"><tbody>
+  <tr>
+    <td class="Result_Num"><div class="Rank">1</div></td>
+    <td class="Num Txt_C">5</td>
+    <td class="Jockey">武豊</td>
+    <td class="Trainer"><a title="友道">栗東 友道</a></td>
+  </tr>
+  <tr>
+    <td class="Result_Num"><div class="Rank">取</div></td>
+    <td class="Num Txt_C">3</td>
+    <td class="Jockey">川田</td>
+    <td class="Trainer"><a title="中内田">栗東 中内田</a></td>
+  </tr>
+</tbody></table>"#;
+
+#[test]
+fn non_finisher_has_no_position_and_status() {
+    let rows = parse_race_result(NON_FINISHER_HTML, RACE_ID).expect("parse");
+    assert_eq!(rows.len(), 2);
+    let cancelled = rows.iter().find(|r| r.horse_num.value() == 3).expect("馬番3");
+    assert_eq!(cancelled.status, ResultStatus::Cancelled);
+    assert_eq!(cancelled.finishing_position, None);
+    assert_eq!(cancelled.trainer.as_ref().map(|t| t.value()), Some("中内田"));
+    let finisher = rows.iter().find(|r| r.horse_num.value() == 5).expect("馬番5");
+    assert_eq!(finisher.status, ResultStatus::Finished);
+    assert_eq!(finisher.finishing_position.map(|p| p.value()), Some(1));
+}
+
 // fixture は 2026 3回中山8日1R の結果（12 頭, 全馬完走）。
 #[test]
 fn parses_all_finishers() {

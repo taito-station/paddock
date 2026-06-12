@@ -24,13 +24,30 @@ async fn main() -> anyhow::Result<()> {
     let mut updated_total = 0u64;
     for (i, race) in races.iter().enumerate() {
         let year = race.date.year() as u32;
-        let (netkeiba_id, _) =
-            build_race_ids(year, race.venue, race.round, race.day, race.race_num)?;
+        // race_id 導出に失敗しても当該レースだけスキップしてバッチは継続する（fetch 失敗と同様）。
+        let netkeiba_id = match build_race_ids(year, race.venue, race.round, race.day, race.race_num)
+        {
+            Ok((id, _)) => id,
+            Err(e) => {
+                failed += 1;
+                tracing::warn!(race = %race.race_id, "netkeiba race_id 導出失敗、スキップ: {e}");
+                continue;
+            }
+        };
         match scraper.fetch_race_result(&netkeiba_id) {
             Ok(rows) => {
                 let n = repo.update_results(&race.race_id, &rows).await?;
                 updated_total += n;
                 ok += 1;
+                // 取得頭数と実更新行数の乖離（horse_num 不一致・レース未取込）を可視化する。
+                if (n as usize) < rows.len() {
+                    tracing::warn!(
+                        race = %race.race_id,
+                        fetched = rows.len(),
+                        updated = n,
+                        "一部の馬番が既存 results に一致せず未更新"
+                    );
+                }
             }
             Err(e) => {
                 failed += 1;
