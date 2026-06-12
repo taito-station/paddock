@@ -1,12 +1,13 @@
 use chrono::NaiveDate;
 use paddock_domain::{Surface, Venue};
-use paddock_use_case::repository::{CourseStatsRow, GroupStat};
+use paddock_use_case::repository::CourseStatsRow;
 use sqlx::SqlitePool;
 
 use crate::error::Result;
 
-use super::sql::date_lt_pred;
+use super::sql::{GATE_GROUPS, STATS_AGG_SELECT, date_lt_pred, group_stat_from_row};
 
+/// コース（場×距離×馬場）の枠順別成績を返す。集計本体・枠順グループは stats 共通ヘルパを使う（#85）。
 /// `as_of = Some(d)` のとき `races.date < d` を付与する（バックテストのリーク防止）。
 /// course_stats は既に `races` を JOIN しているため述語追加のみでよい。
 pub async fn course_stats(
@@ -18,29 +19,12 @@ pub async fn course_stats(
 ) -> Result<CourseStatsRow> {
     let cutoff = as_of.map(|d| d.format("%Y-%m-%d").to_string());
     let date = date_lt_pred(cutoff.as_deref(), "?4");
-    let groups: &[(&str, &str)] = &[
-        ("Inner (1-3)", "results.gate_num BETWEEN 1 AND 3"),
-        ("Middle (4-6)", "results.gate_num BETWEEN 4 AND 6"),
-        ("Outer (7-8)", "results.gate_num BETWEEN 7 AND 8"),
-    ];
-    let mut by_gate_group = Vec::with_capacity(groups.len());
-    for (label, predicate) in groups {
+    let mut by_gate_group = Vec::with_capacity(GATE_GROUPS.len());
+    for (label, predicate) in GATE_GROUPS {
         let q = format!(
-            r#"
-            SELECT
-                COUNT(*) AS starts,
-                SUM(CASE WHEN results.finishing_position = 1 THEN 1 ELSE 0 END) AS wins,
-                SUM(CASE WHEN results.finishing_position IN (1,2) THEN 1 ELSE 0 END) AS places,
-                SUM(CASE WHEN results.finishing_position IN (1,2,3) THEN 1 ELSE 0 END) AS shows
-            FROM results
-            INNER JOIN races ON races.race_id = results.race_id
-            WHERE races.venue = $1
-              AND races.distance = $2
-              AND races.surface = $3
-              AND results.finishing_position IS NOT NULL
-              AND {predicate}
-              {date}
-            "#
+            "{STATS_AGG_SELECT} WHERE races.venue = ?1 AND races.distance = ?2 \
+             AND races.surface = ?3 AND results.finishing_position IS NOT NULL \
+             AND {predicate} {date}"
         );
         let mut query = sqlx::query_as(&q)
             .bind(venue.as_jp())
@@ -50,13 +34,7 @@ pub async fn course_stats(
             query = query.bind(d);
         }
         let row: (i64, i64, i64, i64) = query.fetch_one(pool).await?;
-        by_gate_group.push(GroupStat {
-            label: label.to_string(),
-            starts: row.0 as u32,
-            wins: row.1 as u32,
-            places: row.2 as u32,
-            shows: row.3 as u32,
-        });
+        by_gate_group.push(group_stat_from_row(label, row));
     }
     Ok(CourseStatsRow {
         venue: venue.as_jp().to_string(),
