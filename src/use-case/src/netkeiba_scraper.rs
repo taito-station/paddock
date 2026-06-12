@@ -45,6 +45,26 @@ pub struct HorsePastRun {
     pub popularity: Option<u32>,
 }
 
+/// netkeiba レース結果ページ (`race/result.html`) 1 頭分の確定成績。
+///
+/// `results` テーブルの既存行（PDF 由来）を netkeiba 由来の clean な値で**更新**するための入力型。
+/// jockey/trainer は netkeiba の略名表記で、出馬表(entry)経路と同一表記のため predict の join が
+/// 噛み合う（PDF フルネーム/馬主混入の不整合を解消）。`horse_num` を更新キーとする。
+#[derive(Debug, Clone, PartialEq)]
+pub struct ResultRow {
+    pub horse_num: HorseNum,
+    pub finishing_position: Option<FinishingPosition>,
+    pub status: ResultStatus,
+    pub jockey: Option<JockeyName>,
+    pub trainer: Option<TrainerName>,
+    pub time_seconds: Option<TimeSeconds>,
+    pub odds: Option<f64>,
+    pub horse_weight: Option<u32>,
+    pub weight_change: Option<i32>,
+    pub weight_carried: Option<f64>,
+    pub popularity: Option<u32>,
+}
+
 /// 出馬表 1 頭分の登録情報（枠・馬番・馬名・騎手・調教師）。当日の `RaceCard` を組むための最小集合。
 #[derive(Debug, Clone, PartialEq)]
 pub struct FetchedEntry {
