@@ -269,7 +269,7 @@ fn horse_rows(toks: &[Tok]) -> Vec<(usize, u8, f64, u32, f64)> {
 /// 連結 → トリム、という骨格は両者で共通。
 ///
 /// - 騎手: `JOCKEY_OFFSET_LO/HI` + `size >= NAME_SIZE_MIN`（サイズ上限なし）。
-/// - 調教師: `TRAINER_OFFSET_LO/HI` + `TRAINER_SIZE`（jockey・馬主の size 6 を上限で除外）。
+/// - 調教師: `TRAINER_OFFSET_LO/HI` + `TRAINER_SIZE`（上限 5.5 で jockey・馬主の size 6 を除外）。
 fn column_for(
     toks: &[Tok],
     page: usize,
