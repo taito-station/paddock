@@ -398,8 +398,9 @@ mod tests {
             trainer_surface: None,
             recent_form: None,
         };
+        // assert_eq! は NaN（0/0 のゼロ除算）でも 0.0 と不一致で失敗するため NaN 回避も兼ねる。
         let s = raw_score(&none_factors, |r| r.win);
-        assert!(s.is_finite() && s == 0.0, "score must be finite 0.0, got {s}");
+        assert_eq!(s, 0.0, "all-None must score finite 0.0, got {s}");
 
         // estimate_probabilities は全スコア 0 → 均等フォールバック（2 頭なら win=0.5）。
         let entries = vec![
