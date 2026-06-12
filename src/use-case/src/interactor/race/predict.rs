@@ -138,28 +138,21 @@ pub(crate) fn build_factors(
     let surf_label = surface_label(race.surface);
     let dist_label = distance_band_label(race.distance);
 
+    // 全 factor で「実績なし」を None（母数除外）に統一する（#81/ADR 0014）。一致なし・出走 0 件は
+    // stat_to_triple_opt が None を返し、0 レート（＝全敗）と区別される。jockey/trainer は
+    // 騎手・調教師欠落（and_then の外側 None）と「実績なし」（内側 None）を二段で畳む。
     HorseFactors {
-        course_gate: stat_to_triple(&course.by_gate_group, gate_label),
-        horse_surface: stat_to_triple(&horse.by_surface, surf_label),
-        horse_distance: stat_to_triple(&horse.by_distance_band, dist_label),
-        jockey_surface: jockey.map(|j| stat_to_triple(&j.by_surface, surf_label)),
-        // 調教師が欠落、または当該 surface 実績が無い馬は None（項と重みを母数から除外、#74）。
-        // jockey と異なり stat_to_triple_opt を使い「実績なし」を 0 レートと区別する（ADR 0011 流儀）。
+        course_gate: stat_to_triple_opt(&course.by_gate_group, gate_label),
+        horse_surface: stat_to_triple_opt(&horse.by_surface, surf_label),
+        horse_distance: stat_to_triple_opt(&horse.by_distance_band, dist_label),
+        jockey_surface: jockey.and_then(|j| stat_to_triple_opt(&j.by_surface, surf_label)),
         trainer_surface: trainer.and_then(|t| stat_to_triple_opt(&t.by_surface, surf_label)),
-        // 馬場状態が未確定のレース・該当馬場での出走実績が無い馬は None（項と重みを母数から
-        // 除外、ADR 0007 の欠落項扱い）。0 埋め（stat_to_triple）にすると実績なしが減点に
-        // なるため、ここは Option で区別する（#73）。
+        // 馬場状態が未確定のレース・該当馬場での出走実績が無い馬は None（#73）。
         horse_track_condition: race
             .track_condition
             .and_then(|tc| stat_to_triple_opt(&horse.by_track_condition, tc.as_str())),
         recent_form,
     }
-}
-
-/// 一致なし・出走 0 件は 0 レートに畳む。`starts == 0` は `GroupStat` の rate メソッドが
-/// 0.0 を返すため、`stat_to_triple_opt` 導入前（label 一致のみで変換）と挙動同値。
-fn stat_to_triple(groups: &[GroupStat], label: &str) -> RateTriple {
-    stat_to_triple_opt(groups, label).unwrap_or_default()
 }
 
 /// label 一致の GroupStat を RateTriple へ変換する。一致なし・出走 0 件は `None` を返し、
