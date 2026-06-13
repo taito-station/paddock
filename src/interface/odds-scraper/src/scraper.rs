@@ -90,7 +90,9 @@ impl UreqOddsScraper {
         // 「stream did not contain valid UTF-8」で失敗する。生バイトで受けてから
         // EUC-JP デコードする（netkeiba-scraper::fetch_decoded と同じ方針）。
         let mut bytes = Vec::new();
-        resp.into_reader().read_to_end(&mut bytes)?;
+        resp.into_reader()
+            .read_to_end(&mut bytes)
+            .map_err(|e| Error::Fetch(format!("read odds body (cname={cname}): {e}")))?;
         Ok(decode_euc_jp(&bytes))
     }
 }
@@ -245,6 +247,14 @@ mod tests {
         // バイト列は UTF-8 として不正であること（=旧経路が壊れていた条件）を確認する。
         assert!(std::str::from_utf8(&euc).is_err());
         assert_eq!(decode_euc_jp(&euc), "単勝・複勝オッズ");
+    }
+
+    #[test]
+    fn decode_euc_jp_is_lossy_for_invalid_bytes() {
+        // メンテ画面等で EUC-JP として解釈できないバイトが来ても panic せず、
+        // 置換文字へ lossy デコードする（had_errors=true の warn 経路）。
+        let decoded = decode_euc_jp(&[0x80]);
+        assert!(decoded.contains('\u{FFFD}'));
     }
 
     #[test]
