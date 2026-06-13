@@ -86,10 +86,23 @@ impl UreqOddsScraper {
         let resp = ureq::post(&self.endpoint)
             .send_form(&[("cname", cname)])
             .map_err(|e| Error::Fetch(e.to_string()))?;
-        let mut body = String::new();
-        resp.into_reader().read_to_string(&mut body)?;
-        Ok(body)
+        // JRA は本文を EUC-JP で返すため、UTF-8 前提の read_to_string では
+        // 「stream did not contain valid UTF-8」で失敗する。生バイトで受けてから
+        // EUC-JP デコードする（netkeiba-scraper::fetch_decoded と同じ方針）。
+        let mut bytes = Vec::new();
+        resp.into_reader().read_to_end(&mut bytes)?;
+        Ok(decode_euc_jp(&bytes))
     }
+}
+
+/// JRA のレスポンスボディ（EUC-JP）を文字列へデコードする。メンテ画面など別エンコーディングが
+/// 混じると後段の token/table 不検出に化けて原因が見えにくいので、解釈できないバイトがあれば警告する。
+fn decode_euc_jp(bytes: &[u8]) -> String {
+    let (decoded, _, had_errors) = encoding_rs::EUC_JP.decode(bytes);
+    if had_errors {
+        tracing::warn!("odds response was not valid EUC-JP; parsing may fail");
+    }
+    decoded.into_owned()
 }
 
 /// Extract `cname` tokens from an odds menu page, keyed by the Japanese bet
@@ -224,16 +237,33 @@ mod tests {
     }
 
     #[test]
+    fn decodes_euc_jp_body_without_utf8_error() {
+        // 回帰ガード: JRA は EUC-JP を返すため、UTF-8 前提だと
+        // 「stream did not contain valid UTF-8」で失敗していた（#104）。
+        let (euc, _, had_errors) = encoding_rs::EUC_JP.encode("単勝・複勝オッズ");
+        assert!(!had_errors, "test fixture must be encodable as EUC-JP");
+        // バイト列は UTF-8 として不正であること（=旧経路が壊れていた条件）を確認する。
+        assert!(std::str::from_utf8(&euc).is_err());
+        assert_eq!(decode_euc_jp(&euc), "単勝・複勝オッズ");
+    }
+
+    #[test]
     fn match_token_resolves_each_bet_type_label() {
         let tokens = extract_cname_tokens(MENU);
         // 単勝/複勝 share the "単勝・複勝" menu entry.
-        assert_eq!(match_token(&tokens, BetType::Win).as_deref(), Some("pwTAN001"));
+        assert_eq!(
+            match_token(&tokens, BetType::Win).as_deref(),
+            Some("pwTAN001")
+        );
         assert_eq!(
             match_token(&tokens, BetType::Quinella).as_deref(),
             Some("pwUMR002")
         );
         // 三連複 (as_ja) matches the menu's "3連複" via numeral folding.
-        assert_eq!(match_token(&tokens, BetType::Trio).as_deref(), Some("pwSF004"));
+        assert_eq!(
+            match_token(&tokens, BetType::Trio).as_deref(),
+            Some("pwSF004")
+        );
         assert_eq!(
             match_token(&tokens, BetType::Trifecta).as_deref(),
             Some("pwST005")

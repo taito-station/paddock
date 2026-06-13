@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 paddock-domain   = { workspace = true }
 paddock-use-case = { workspace = true }
+encoding_rs      = { workspace = true }
 scraper          = { workspace = true }
 thiserror        = { workspace = true }
 tracing          = { workspace = true }
