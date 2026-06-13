@@ -501,6 +501,8 @@ fn parse_margin_lengths(s: &str) -> Option<f64> {
         return Some(0.0);
     }
     if t.contains("大差") {
+        // クランプ点と同じ定数を返し、「大差」を必ず競争力差の最大（margin_form で mag=1.0）に揃える。
+        // 片方だけ調整すると意図がずれるため二役であることを明示。
         return Some(MARGIN_CAP_LENGTHS);
     }
     if t.contains("ハナ") {
