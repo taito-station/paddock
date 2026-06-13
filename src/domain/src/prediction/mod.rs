@@ -278,7 +278,12 @@ pub struct DatedCounts {
 /// （`Σ w·wins / Σ w·starts` 等）と総出走数を `FactorStat` で返す（#75 Phase B）。直近走ほど
 /// 重みが大きく、半減期 `half_life_days` 日で寄与が半分になる。`as_of` 以降の日付はリーク防止の
 /// ため無視する（呼び出し側が as_of で絞るが二重防御）。有効な重み付き出走が無ければ `None`。
-/// `FactorStat.starts` は縮約の信頼度に使うため時間重みを掛けない素の総出走数を返す。
+///
+/// `FactorStat.starts` は時間重みを掛けない素の総出走数を返す。recency と shrinkage を併用すると
+/// 縮約はこの素の starts を信頼度 k に使う（＝減衰で薄れた古い実績も母数に満額カウント）。この
+/// 非対称は割り切りで、併用経路は backtest（CLI 両指定）でのみ到達し本番 predict では走らない
+/// （`production()` は recency 無効）。recency を将来採用する際は減衰後の実効標本数での縮約を
+/// 再検討する（ADR 0016）。
 pub fn apply_recency_weight(
     runs: &[DatedCounts],
     as_of: NaiveDate,
@@ -1100,6 +1105,19 @@ mod tests {
         assert!(sparse_win > 0.0 && sparse_win.is_finite(), "sparse_win={sparse_win}");
         // ただし強い馬よりは低い（順位は保つ）。
         assert!(probs[0].win_prob > sparse_win);
+    }
+
+    /// 本番 predict（`predict_race`）が使う `production()` の設定を固定する回帰ガード。
+    /// 縮約 m を取り違えたり recency を誤って有効化すると CI で検知する（#75/ADR 0016）。
+    #[test]
+    fn production_config_is_shrinkage_m10_and_recency_off() {
+        let c = EstimationConfig::production();
+        assert_eq!(
+            c.shrinkage.expect("production は縮約 on").pseudo_count,
+            RECOMMENDED_SHRINKAGE_M
+        );
+        assert!((RECOMMENDED_SHRINKAGE_M - 10.0).abs() < 1e-12);
+        assert!(c.recency.is_none(), "recency は backtest 評価で無効採用（ADR 0016）");
     }
 
     // ---- リーセンシー重み付け（#75 Phase B） ----

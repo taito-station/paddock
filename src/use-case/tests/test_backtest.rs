@@ -8,12 +8,12 @@ use std::collections::HashMap;
 use chrono::NaiveDate;
 use paddock_domain::horse_result::{FinishingPosition, GateNum, HorseName, HorseNum, ResultStatus};
 use paddock_domain::{
-    EstimationConfig, HorseResult, JockeyName, OddsValue, Race, RaceCard, RaceId, RaceOdds, Surface,
-    TrackCondition, TrainerName, Venue,
+    DatedCounts, EstimationConfig, HorseResult, JockeyName, OddsValue, Race, RaceCard, RaceId,
+    RaceOdds, RecencyConfig, Surface, TrackCondition, TrainerName, Venue,
 };
 use paddock_use_case::repository::{
-    CourseStatsRow, FetchRecord, GroupStat, HorseStatsRow, JockeyStatsRow, Repository,
-    TrainerStatsRow,
+    CourseStatsRow, FetchRecord, GroupStat, HorseRecencyStats, HorseStatsRow, JockeyStatsRow,
+    RecencySeries, Repository, TrainerStatsRow,
 };
 use paddock_use_case::{Interactor, Result};
 
@@ -163,6 +163,37 @@ impl Repository for MockRepo {
             row.by_track_condition = vec![make_group("不良", 10, 10)];
         }
         Ok(row)
+    }
+
+    async fn horse_recency(
+        &self,
+        name: &HorseName,
+        _as_of: Option<NaiveDate>,
+    ) -> Result<HorseRecencyStats> {
+        // ウマB のみ直近の芝・距離帯で好成績（recency 配線テスト用, #75 Phase B）。recency 有効時
+        // のみ参照され、ウマA は空＝当該 factor None（集計から recency へ差し替わることを検証する）。
+        if name.value() == "ウマB" {
+            let run = DatedCounts {
+                date: d(2026, 1, 5),
+                starts: 3,
+                wins: 3,
+                places: 3,
+                shows: 3,
+            };
+            Ok(HorseRecencyStats {
+                by_surface: vec![RecencySeries {
+                    label: "芝".to_string(),
+                    runs: vec![run],
+                }],
+                by_distance_band: vec![RecencySeries {
+                    label: "1900〜2200m".to_string(),
+                    runs: vec![run],
+                }],
+                by_track_condition: vec![],
+            })
+        } else {
+            Ok(HorseRecencyStats::default())
+        }
     }
 
     async fn course_stats(
@@ -450,6 +481,39 @@ async fn backtest_wires_race_track_condition_into_factors() {
         (with_tc.win_hit_rate - 1.0).abs() < 1e-9,
         "race.track_condition が factor に配線されていない (win_hit={})",
         with_tc.win_hit_rate
+    );
+}
+
+#[tokio::test]
+async fn backtest_wires_recency_into_horse_factors() {
+    // recency なし: 本命は高スタッツの ウマA(2 着) → 単勝的中 0（集計レート経路）。
+    let off = interactor(vec![soft_track_race(None)])
+        .backtest(d(2026, 1, 1), d(2026, 1, 31), None, EstimationConfig::default())
+        .await
+        .unwrap();
+    assert!(
+        off.win_hit_rate.abs() < 1e-9,
+        "recency off で本命が動いている (win_hit={})",
+        off.win_hit_rate
+    );
+
+    // recency あり: ウマB の直近 芝・距離帯の好成績が horse_recency 経由で
+    // build_factors に配線され、本命が ウマB(1 着)へ入れ替わる → 単勝的中 1。
+    // ラベル不一致や系列取得漏れがあれば recency factor が None になり off と同じ 0 のままになる。
+    let cfg = EstimationConfig {
+        shrinkage: None,
+        recency: Some(RecencyConfig {
+            half_life_days: 30.0,
+        }),
+    };
+    let on = interactor(vec![soft_track_race(None)])
+        .backtest(d(2026, 1, 1), d(2026, 1, 31), None, cfg)
+        .await
+        .unwrap();
+    assert!(
+        (on.win_hit_rate - 1.0).abs() < 1e-9,
+        "recency が horse factor に配線されていない (win_hit={})",
+        on.win_hit_rate
     );
 }
 

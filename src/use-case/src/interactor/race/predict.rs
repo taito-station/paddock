@@ -44,7 +44,8 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
             distance: card.distance,
             track_condition,
         };
-        // 本番 predict の確率推定設定（#75: ベイズ縮約 m=10、採用後は recency も含む）。
+        // 本番 predict の確率推定設定（#75: ベイズ縮約 m=10 を採用。recency は backtest 評価で
+        // 改善が出ず無効のまま＝production() は recency: None。下の horse_recency も取得しない）。
         let config = paddock_domain::EstimationConfig::production();
         let mut entry_factors: Vec<(HorseEntry, HorseFactors)> = Vec::new();
         for entry in &card.entries {
