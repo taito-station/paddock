@@ -289,6 +289,12 @@ pub fn apply_recency_weight(
     as_of: NaiveDate,
     half_life_days: f64,
 ) -> Option<FactorStat> {
+    // 呼び出し側（CLI `--recency-half-life`）が有限の正数を保証する。万一 0・負・非有限が来ても
+    // `0.5^(±inf)` 等で全重み 0 → None に倒れ NaN は出さないが、契約違反は debug ビルドで検出する。
+    debug_assert!(
+        half_life_days.is_finite() && half_life_days > 0.0,
+        "half_life_days must be finite and positive, got {half_life_days}"
+    );
     let mut w_starts = 0.0;
     let mut w_wins = 0.0;
     let mut w_places = 0.0;
