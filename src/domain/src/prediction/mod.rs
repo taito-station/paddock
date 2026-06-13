@@ -406,6 +406,9 @@ fn normalize_to_sum(scores: &[f64], target: f64) -> Vec<f64> {
 const WEIGHT_CHANGE_CAP: f64 = 20.0;
 /// 前走の人気順位と着順の差 1 つあたりのスコア寄与。
 const POP_GAP_K: f64 = 0.08;
+/// 前走着差（馬身）がこの値以上で競争力差を最大とみなすクランプ点（大差勝ち・大敗の上限, #76）。
+/// 暫定値。backtest（main との before/after 比較）で寄与を確認して調整する。
+const MARGIN_CAP_LENGTHS: f64 = 5.0;
 
 /// 直近 1 走（`prev`、その開催日 `prev_date`）と対象レース日 `race_date` から「前走フォーム」
 /// スコア `[0,1]`（0.5=中立）を算出する。利用できる sub-signal（馬体重変化・前走人気乖離・前走間隔）の
@@ -438,6 +441,15 @@ pub fn recent_form_score(
         signals.push(interval_form(days));
     }
 
+    // 前走着差: 圧勝＝強い／大敗＝弱い（#76）。着順なし（中止・失格・取消）や着差文字列が
+    // 解釈不能・空の前走はこの signal を落とし、残りの signal で評価する（欠落フォールバック）。
+    if let (Some(pos), Some(len)) = (
+        prev.finishing_position.map(|p| p.value()),
+        prev.margin.as_deref().and_then(parse_margin_lengths),
+    ) {
+        signals.push(margin_form(pos, len));
+    }
+
     if signals.is_empty() {
         None
     } else {
@@ -454,6 +466,69 @@ fn interval_form(days: i64) -> f64 {
         d if d <= 120 => 1.0 - 0.5 * (d - 60) as f64 / 60.0, // 60→120 日で 1.0→0.5
         _ => 0.5,                                            // 長期休み明け（不確実）
     }
+}
+
+/// 前走着差（馬身）と前走着順から「前走の競争力」シグナル `[0,1]`（0.5=中立）を作る（#76）。
+/// 勝ち（1 着）は着差が大きいほど圧勝＝強い（0.5→1.0）、負けは前を行く馬への着差が大きいほど
+/// 大敗＝弱い（0.5→0.0）。JRA/netkeiba の着差はその馬と「直前に入線した馬」との局所差であり
+/// 1 着馬からの累積差ではない。負け馬の評価はこの局所差を流用する割り切り（heuristic）で、
+/// 寄与の要否は backtest（main との before/after 比較）で判定する。
+fn margin_form(position: u32, margin_lengths: f64) -> f64 {
+    let mag = (margin_lengths / MARGIN_CAP_LENGTHS).clamp(0.0, 1.0);
+    if position == 1 {
+        0.5 + 0.5 * mag
+    } else {
+        0.5 - 0.5 * mag
+    }
+}
+
+/// 前走着差文字列を馬身（length）に変換する（#76）。複数出典の表記を吸収する:
+/// キーワード（`ハナ`/`アタマ`/`クビ`/`大差`/`同着`）、分数（`3/4`・整数+分数 `1.1/4`）、
+/// 小数・整数（`0.6`/`2`）。解釈できない・空文字・負値は `None`（signal を母数から除外）。
+fn parse_margin_lengths(s: &str) -> Option<f64> {
+    let t = s.trim();
+    if t.is_empty() {
+        return None;
+    }
+    // キーワード表記。PDF パーサはハナ/アタマ/クビのみ、netkeiba は大差・同着も返す。
+    // 馬身換算は JRA の慣行値（ハナ<アタマ<クビ）に倣う近似。
+    if t.contains("同着") {
+        return Some(0.0);
+    }
+    if t.contains("大差") {
+        return Some(MARGIN_CAP_LENGTHS);
+    }
+    if t.contains("ハナ") {
+        return Some(0.05);
+    }
+    if t.contains("アタマ") {
+        return Some(0.10);
+    }
+    if t.contains("クビ") {
+        return Some(0.25);
+    }
+    // 分数表記。`/` を含むとき、`.` があれば整数部+分数部（`1.1/4` = 1 + 1/4）、無ければ分数のみ。
+    if t.contains('/') {
+        if let Some(dot) = t.find('.') {
+            let whole: f64 = t[..dot].trim().parse().ok()?;
+            let frac = parse_fraction(&t[dot + 1..])?;
+            return Some(whole + frac);
+        }
+        return parse_fraction(t);
+    }
+    // 小数・整数（`0.6` / `2` / `1.0`）。負値・非有限は弾く。
+    t.parse::<f64>().ok().filter(|v| v.is_finite() && *v >= 0.0)
+}
+
+/// `A/B` 形式の分数文字列を解釈する。パース不能・分母 0 は `None`。
+fn parse_fraction(s: &str) -> Option<f64> {
+    let (num, den) = s.split_once('/')?;
+    let num: f64 = num.trim().parse().ok()?;
+    let den: f64 = den.trim().parse().ok()?;
+    if den == 0.0 {
+        return None;
+    }
+    Some(num / den)
 }
 
 #[cfg(test)]
@@ -1352,6 +1427,79 @@ mod tests {
         let pd = ymd(2026, 4, 10);
         let f = recent_form_score(&prev_result(Some(-4), Some(3), Some(1)), pd, d).unwrap();
         assert!((0.0..=1.0).contains(&f), "form={f}");
+    }
+
+    #[test]
+    fn parse_margin_keywords() {
+        approx(parse_margin_lengths("ハナ").unwrap(), 0.05);
+        approx(parse_margin_lengths("アタマ").unwrap(), 0.10);
+        approx(parse_margin_lengths("クビ").unwrap(), 0.25);
+        approx(parse_margin_lengths("同着").unwrap(), 0.0);
+        approx(parse_margin_lengths("大差").unwrap(), MARGIN_CAP_LENGTHS);
+    }
+
+    #[test]
+    fn parse_margin_fractions_and_decimals() {
+        approx(parse_margin_lengths("1/2").unwrap(), 0.5);
+        approx(parse_margin_lengths("3/4").unwrap(), 0.75);
+        approx(parse_margin_lengths("1.1/4").unwrap(), 1.25); // 整数1 + 分数1/4
+        approx(parse_margin_lengths("2.1/2").unwrap(), 2.5);
+        approx(parse_margin_lengths("0.6").unwrap(), 0.6); // netkeiba 形式の小数
+        approx(parse_margin_lengths("2").unwrap(), 2.0);
+        approx(parse_margin_lengths(" 1.0 ").unwrap(), 1.0); // 前後空白を許容
+    }
+
+    #[test]
+    fn parse_margin_invalid_is_none() {
+        for s in ["", "   ", "-", "1/0", "abc", "-1.0"] {
+            assert!(parse_margin_lengths(s).is_none(), "expected None for {s:?}");
+        }
+    }
+
+    #[test]
+    fn margin_form_win_rewards_dominance() {
+        // 圧勝(大差)=1.0、僅差勝ち(0.05馬身)≈0.5 をわずかに上回る。
+        let dominant = margin_form(1, MARGIN_CAP_LENGTHS);
+        let narrow = margin_form(1, 0.05);
+        approx(dominant, 1.0);
+        assert!(narrow > 0.5 && narrow < 0.55, "narrow={narrow}");
+        assert!(dominant > narrow);
+    }
+
+    #[test]
+    fn margin_form_loss_penalizes_blowout() {
+        // 大敗(大差)=0.0、接戦負け(0.05馬身)≈0.5 をわずかに下回る。
+        let blown = margin_form(5, MARGIN_CAP_LENGTHS);
+        let close = margin_form(2, 0.05);
+        approx(blown, 0.0);
+        assert!(close < 0.5 && close > 0.45, "close={close}");
+        assert!(blown < close);
+    }
+
+    #[test]
+    fn recent_form_includes_margin_signal() {
+        // 着差以外を欠損させ間隔(30日=1.0)＋着差のみで評価。圧勝(大差勝ち)が大敗を上回る。
+        let d = ymd(2026, 5, 1);
+        let pd = ymd(2026, 4, 1);
+        let mut winner = prev_result(None, None, Some(1));
+        winner.margin = Some("大差".to_string());
+        let mut loser = prev_result(None, None, Some(10));
+        loser.margin = Some("大差".to_string());
+        let wf = recent_form_score(&winner, pd, d).unwrap();
+        let lf = recent_form_score(&loser, pd, d).unwrap();
+        approx(wf, 1.0); // (間隔1.0 + 着差1.0)/2
+        approx(lf, 0.5); // (間隔1.0 + 着差0.0)/2
+        assert!(wf > lf);
+    }
+
+    #[test]
+    fn recent_form_drops_margin_signal_when_unparseable() {
+        // 着差が解釈不能なら margin signal を落とし、間隔(30日)のみ → 1.0。
+        let d = ymd(2026, 5, 1);
+        let pd = ymd(2026, 4, 1);
+        let mut prev = prev_result(None, None, Some(3));
+        prev.margin = Some("???".to_string());
+        approx(recent_form_score(&prev, pd, d).unwrap(), 1.0);
     }
 
     #[test]
