@@ -73,6 +73,24 @@ pub struct CourseStatsRow {
     pub by_gate_group: Vec<GroupStat>,
 }
 
+/// recency 重み付け（#75 Phase B）用に、あるカテゴリの 1 ラベルぶんの日付付き成績系列。
+/// `runs` は `races.date < as_of` の各開催日のカウント（同一日複数走は 1 要素にまとめる）。
+#[derive(Debug, Clone, Default)]
+pub struct RecencySeries {
+    pub label: String,
+    pub runs: Vec<paddock_domain::DatedCounts>,
+}
+
+/// 馬の成績を recency 重み付け用に「カテゴリ × ラベル別の日付付き系列」で返す（#75 Phase B）。
+/// 集計済み [`HorseStatsRow`] と違い各開催日のカウントを保持し、domain 側で時間減衰を掛ける。
+/// recency 無効時は取得しない（mock・既定実装は空）。
+#[derive(Debug, Clone, Default)]
+pub struct HorseRecencyStats {
+    pub by_surface: Vec<RecencySeries>,
+    pub by_distance_band: Vec<RecencySeries>,
+    pub by_track_condition: Vec<RecencySeries>,
+}
+
 #[derive(Debug, Clone)]
 pub struct JockeyStatsRow {
     pub jockey_name: String,
@@ -290,6 +308,18 @@ pub trait Repository: Send + Sync {
         name: &HorseName,
         as_of: Option<NaiveDate>,
     ) -> impl Future<Output = Result<HorseStatsRow>> + Send;
+
+    /// recency 重み付け（#75 Phase B）用に、馬の成績を「カテゴリ × ラベル別の日付付き系列」で返す。
+    /// `as_of` の意味は [`Repository::horse_stats`] と同じ（`races.date < as_of`）。既定実装は空を返す
+    /// （recency 無効時の本番経路・テスト mock はこの既定で十分。日付付き集計が要るのは
+    /// rdb-gateway のみがオーバーライドする）。
+    fn horse_recency(
+        &self,
+        _name: &HorseName,
+        _as_of: Option<NaiveDate>,
+    ) -> impl Future<Output = Result<HorseRecencyStats>> + Send {
+        async { Ok(HorseRecencyStats::default()) }
+    }
 
     /// コース（場×距離×馬場）の枠順別統計を返す。`as_of` の意味は [`Repository::horse_stats`] と同じ。
     fn course_stats(

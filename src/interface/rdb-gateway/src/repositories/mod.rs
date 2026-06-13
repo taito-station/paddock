@@ -25,7 +25,7 @@ use paddock_domain::{
 };
 use paddock_use_case::Result as UcResult;
 use paddock_use_case::repository::{
-    CourseStatsRow, FetchRecord, HorseStatsRow, JockeyStatsRow, PredictBetRecord,
+    CourseStatsRow, FetchRecord, HorseRecencyStats, HorseStatsRow, JockeyStatsRow, PredictBetRecord,
     PredictRaceConditionRecord, PredictSessionRecord, RaceOddsRecord, Repository, TrainerStatsRow,
 };
 
@@ -100,6 +100,16 @@ impl Repository for SqliteRepository {
         as_of: Option<NaiveDate>,
     ) -> UcResult<HorseStatsRow> {
         horse_stats::horse_stats(&self.pool, name, as_of)
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn horse_recency(
+        &self,
+        name: &HorseName,
+        as_of: Option<NaiveDate>,
+    ) -> UcResult<HorseRecencyStats> {
+        horse_stats::horse_recency(&self.pool, name, as_of)
             .await
             .map_err(Into::into)
     }

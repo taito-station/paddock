@@ -264,6 +264,57 @@ fn shrink_rate(rate: f64, starts: u32, prior: f64, pseudo_count: f64) -> f64 {
     (k * rate + pseudo_count * prior) / (k + pseudo_count)
 }
 
+/// 日付付きの 1 日分（または同一日複数走）の成績カウント（リーセンシー重み付け用, #75 Phase B）。
+#[derive(Debug, Clone, Copy)]
+pub struct DatedCounts {
+    pub date: NaiveDate,
+    pub starts: u32,
+    pub wins: u32,
+    pub places: u32,
+    pub shows: u32,
+}
+
+/// 日付付き成績系列に時間減衰 `w = 0.5^((as_of − date)/half_life)` を掛け、時間重み付きレート
+/// （`Σ w·wins / Σ w·starts` 等）と総出走数を `FactorStat` で返す（#75 Phase B）。直近走ほど
+/// 重みが大きく、半減期 `half_life_days` 日で寄与が半分になる。`as_of` 以降の日付はリーク防止の
+/// ため無視する（呼び出し側が as_of で絞るが二重防御）。有効な重み付き出走が無ければ `None`。
+/// `FactorStat.starts` は縮約の信頼度に使うため時間重みを掛けない素の総出走数を返す。
+pub fn apply_recency_weight(
+    runs: &[DatedCounts],
+    as_of: NaiveDate,
+    half_life_days: f64,
+) -> Option<FactorStat> {
+    let mut w_starts = 0.0;
+    let mut w_wins = 0.0;
+    let mut w_places = 0.0;
+    let mut w_shows = 0.0;
+    let mut total_starts: u32 = 0;
+    for r in runs {
+        let days_ago = (as_of - r.date).num_days();
+        // as_of 当日・以降はリークになるため寄与させない（< as_of のみ）。
+        if days_ago <= 0 {
+            continue;
+        }
+        let w = 0.5_f64.powf(days_ago as f64 / half_life_days);
+        w_starts += w * r.starts as f64;
+        w_wins += w * r.wins as f64;
+        w_places += w * r.places as f64;
+        w_shows += w * r.shows as f64;
+        total_starts += r.starts;
+    }
+    if w_starts <= 0.0 {
+        return None;
+    }
+    Some(FactorStat {
+        rate: RateTriple {
+            win: w_wins / w_starts,
+            place: w_places / w_starts,
+            show: w_shows / w_starts,
+        },
+        starts: total_starts,
+    })
+}
+
 /// 1 つの factor の寄与レートを返す。`config.shrinkage` が `Some` のときはベイズ縮約を適用し、
 /// `None` のときは生レート（現行挙動）。`rate` セレクタは win/place/show のいずれかを取り出す。
 fn factor_value(fs: &FactorStat, rate: fn(&RateTriple) -> f64, config: &EstimationConfig) -> f64 {
@@ -1049,6 +1100,63 @@ mod tests {
         assert!(sparse_win > 0.0 && sparse_win.is_finite(), "sparse_win={sparse_win}");
         // ただし強い馬よりは低い（順位は保つ）。
         assert!(probs[0].win_prob > sparse_win);
+    }
+
+    // ---- リーセンシー重み付け（#75 Phase B） ----
+
+    fn dc(date: NaiveDate, starts: u32, wins: u32) -> DatedCounts {
+        DatedCounts {
+            date,
+            starts,
+            wins,
+            places: wins,
+            shows: wins,
+        }
+    }
+
+    #[test]
+    fn recency_empty_or_all_future_is_none() {
+        let as_of = NaiveDate::from_ymd_opt(2026, 6, 1).unwrap();
+        assert!(apply_recency_weight(&[], as_of, 30.0).is_none());
+        // as_of 当日・以降のみ → 全て無視され None（リーク防止）。
+        let future = [
+            dc(as_of, 1, 1),
+            dc(NaiveDate::from_ymd_opt(2026, 6, 2).unwrap(), 1, 1),
+        ];
+        assert!(apply_recency_weight(&future, as_of, 30.0).is_none());
+    }
+
+    #[test]
+    fn recency_weights_recent_runs_higher() {
+        let as_of = NaiveDate::from_ymd_opt(2026, 6, 1).unwrap();
+        // 直近 1 走で勝ち、半減期 1 つ前（30 日前）に負け。重みは直近が 2 倍なので
+        // 重み付き勝率は単純平均 0.5 より高くなる。
+        let runs = [
+            dc(NaiveDate::from_ymd_opt(2026, 5, 2).unwrap(), 1, 0), // 30 日前: 着外
+            dc(NaiveDate::from_ymd_opt(2026, 5, 31).unwrap(), 1, 1), // 1 日前: 勝ち
+        ];
+        let fs = apply_recency_weight(&runs, as_of, 30.0).expect("some");
+        assert!(fs.rate.win > 0.5, "直近の勝ちが重く効くべき: {}", fs.rate.win);
+        // 総出走数は時間重みを掛けない素の値。
+        assert_eq!(fs.starts, 2);
+    }
+
+    #[test]
+    fn recency_half_life_halves_weight() {
+        let as_of = NaiveDate::from_ymd_opt(2026, 6, 1).unwrap();
+        // half_life=30 日。直近(1 日前)勝ち1走 + 30 日前負け1走の重み比 ≈ 2:1。
+        // 期待勝率 = w_recent / (w_recent + w_old)。
+        let recent = (as_of - NaiveDate::from_ymd_opt(2026, 5, 31).unwrap()).num_days() as f64;
+        let old = (as_of - NaiveDate::from_ymd_opt(2026, 5, 2).unwrap()).num_days() as f64;
+        let w_recent = 0.5_f64.powf(recent / 30.0);
+        let w_old = 0.5_f64.powf(old / 30.0);
+        let expected = w_recent / (w_recent + w_old);
+        let runs = [
+            dc(NaiveDate::from_ymd_opt(2026, 5, 2).unwrap(), 1, 0),
+            dc(NaiveDate::from_ymd_opt(2026, 5, 31).unwrap(), 1, 1),
+        ];
+        let fs = apply_recency_weight(&runs, as_of, 30.0).expect("some");
+        assert!((fs.rate.win - expected).abs() < 1e-12, "win={} expected={expected}", fs.rate.win);
     }
 
     fn prob(num: u32, win: f64, place: f64, show: f64) -> HorseProbability {

@@ -2,8 +2,8 @@ use std::collections::HashMap;
 
 use chrono::NaiveDate;
 use paddock_domain::{
-    FactorStat, HorseEntry, HorseFactors, HorseName, HorseProbability, RaceId, RateTriple, Surface,
-    TrackCondition,
+    EstimationConfig, FactorStat, HorseEntry, HorseFactors, HorseName, HorseProbability, RaceId,
+    RateTriple, Surface, TrackCondition,
 };
 
 use crate::error::{Error, Result};
@@ -11,7 +11,8 @@ use crate::interactor::Interactor;
 use crate::pdf_fetcher::PdfFetcher;
 use crate::pdf_parser::PdfParser;
 use crate::repository::{
-    CourseStatsRow, GroupStat, HorseStatsRow, JockeyStatsRow, Repository, TrainerStatsRow,
+    CourseStatsRow, GroupStat, HorseRecencyStats, HorseStatsRow, JockeyStatsRow, RecencySeries,
+    Repository, TrainerStatsRow,
 };
 
 impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
@@ -43,9 +44,16 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
             distance: card.distance,
             track_condition,
         };
+        // 本番 predict の確率推定設定（#75: ベイズ縮約 m=10、採用後は recency も含む）。
+        let config = paddock_domain::EstimationConfig::production();
         let mut entry_factors: Vec<(HorseEntry, HorseFactors)> = Vec::new();
         for entry in &card.entries {
             let horse = self.repository.horse_stats(&entry.horse_name, None).await?;
+            // recency 有効時のみ日付付き系列を取得する（#75 Phase B）。基準日は出馬表日。
+            let recency = match config.recency {
+                Some(_) => Some(self.repository.horse_recency(&entry.horse_name, None).await?),
+                None => None,
+            };
             // jockey が None の馬は jockey 項を母数から除外して重み付き平均で評価され、欠落で
             // 不当に減点されない（ADR 0007）。
             let jockey = match &entry.jockey {
@@ -68,6 +76,9 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
                 trainer.as_ref(),
                 &race_ctx,
                 recent_form,
+                recency.as_ref(),
+                card.date,
+                &config,
             );
             entry_factors.push((entry.clone(), factors));
         }
@@ -75,10 +86,8 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
         // estimate_probabilities が win→1.0 / place→2.0 / show→3.0 正規化 + 累積 max 単調化を行い、
         // win_prob ≤ place_prob ≤ show_prob を保証する（ADR 0007）。本番経路は #75 で採用した
         // ベイズ縮約（m=10）を有効にし、少データ馬の過信（win_prob=0 を含む）を緩和する。
-        let probs = paddock_domain::prediction::estimate_probabilities_with_config(
-            &entry_factors,
-            &paddock_domain::EstimationConfig::production(),
-        );
+        let probs =
+            paddock_domain::prediction::estimate_probabilities_with_config(&entry_factors, &config);
 
         // 市場オッズ（単勝）ブレンド（#72）。α<1.0 のときのみ最新オッズスナップショットを取得する
         // （α>=1.0・非有限はブレンド無効なので DB クエリを省く）。
@@ -126,9 +135,15 @@ pub(crate) struct RaceContext {
     pub track_condition: Option<TrackCondition>,
 }
 
-/// 取得済みの stats 行と前走フォームから `HorseFactors` を組み立てる純粋変換。`as_of` には
-/// 依存しないため、本番 predict（全期間統計）とバックテスト（as-of 統計）の両方から共有する。
-/// `recent_form` は呼び出し側が前走から算出して渡す（#31）。
+/// 取得済みの stats 行と前走フォームから `HorseFactors` を組み立てる純粋変換。本番 predict
+/// （全期間統計）とバックテスト（as-of 統計）の両方から共有する。`recent_form` は呼び出し側が
+/// 前走から算出して渡す（#31）。
+///
+/// `config.recency = Some(rc)` かつ `recency` が渡されたとき、馬自身の 3 factor（芝ダ・距離帯・
+/// 馬場状態）は集計レートの代わりに日付付き系列を時間減衰した recency 重み付きレートで評価する
+/// （#75 Phase B）。`as_of_date` は減衰の基準日（predict は出馬表日、backtest はレース日）。
+/// course/jockey/trainer は従来の集計レートのまま。
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn build_factors(
     entry: &HorseEntry,
     course: &CourseStatsRow,
@@ -137,26 +152,60 @@ pub(crate) fn build_factors(
     trainer: Option<&TrainerStatsRow>,
     race: &RaceContext,
     recent_form: Option<f64>,
+    recency: Option<&HorseRecencyStats>,
+    as_of_date: NaiveDate,
+    config: &EstimationConfig,
 ) -> HorseFactors {
     let gate_label = gate_group_label(entry.gate_num.value());
     let surf_label = surface_label(race.surface);
     let dist_label = distance_band_label(race.distance);
+
+    // recency 有効時は horse 系 factor を日付系列の時間減衰で評価する。無効時・系列なしは集計レート。
+    let recency_cfg = config.recency.zip(recency);
+    let horse_surface = match recency_cfg {
+        Some((rc, r)) => recency_factor(&r.by_surface, surf_label, as_of_date, rc.half_life_days),
+        None => stat_to_triple_opt(&horse.by_surface, surf_label),
+    };
+    let horse_distance = match recency_cfg {
+        Some((rc, r)) => {
+            recency_factor(&r.by_distance_band, dist_label, as_of_date, rc.half_life_days)
+        }
+        None => stat_to_triple_opt(&horse.by_distance_band, dist_label),
+    };
+    let horse_track_condition = race.track_condition.and_then(|tc| match recency_cfg {
+        Some((rc, r)) => {
+            recency_factor(&r.by_track_condition, tc.as_str(), as_of_date, rc.half_life_days)
+        }
+        None => stat_to_triple_opt(&horse.by_track_condition, tc.as_str()),
+    });
 
     // 全 factor で「実績なし」を None（母数除外）に統一する（#81/ADR 0014）。一致なし・出走 0 件は
     // stat_to_triple_opt が None を返し、0 レート（＝全敗）と区別される。jockey/trainer は
     // 騎手・調教師欠落（and_then の外側 None）と「実績なし」（内側 None）を二段で畳む。
     HorseFactors {
         course_gate: stat_to_triple_opt(&course.by_gate_group, gate_label),
-        horse_surface: stat_to_triple_opt(&horse.by_surface, surf_label),
-        horse_distance: stat_to_triple_opt(&horse.by_distance_band, dist_label),
+        horse_surface,
+        horse_distance,
         jockey_surface: jockey.and_then(|j| stat_to_triple_opt(&j.by_surface, surf_label)),
         trainer_surface: trainer.and_then(|t| stat_to_triple_opt(&t.by_surface, surf_label)),
         // 馬場状態が未確定のレース・該当馬場での出走実績が無い馬は None（#73）。
-        horse_track_condition: race
-            .track_condition
-            .and_then(|tc| stat_to_triple_opt(&horse.by_track_condition, tc.as_str())),
+        horse_track_condition,
         recent_form,
     }
+}
+
+/// recency 系列からラベル一致の日付系列を取り、時間減衰した重み付きレート（[`FactorStat`]）を返す。
+/// ラベル不一致・有効な過去走なしは `None`（集計経路の「実績なし＝母数除外」と同じ扱い）。
+fn recency_factor(
+    series: &[RecencySeries],
+    label: &str,
+    as_of: NaiveDate,
+    half_life_days: f64,
+) -> Option<FactorStat> {
+    series
+        .iter()
+        .find(|s| s.label == label)
+        .and_then(|s| paddock_domain::apply_recency_weight(&s.runs, as_of, half_life_days))
 }
 
 /// label 一致の GroupStat を `FactorStat`（レート + 出走数）へ変換する。一致なし・出走 0 件は

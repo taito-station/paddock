@@ -86,6 +86,11 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
                     trainer: r.trainer.clone(),
                 };
                 let horse = self.repository.horse_stats(&r.horse_name, as_of).await?;
+                // recency 有効時のみ日付付き系列を取得する（#75 Phase B）。基準日・cutoff はレース日。
+                let recency = match config.recency {
+                    Some(_) => Some(self.repository.horse_recency(&r.horse_name, as_of).await?),
+                    None => None,
+                };
                 let jockey = match &r.jockey {
                     Some(j) => Some(self.repository.jockey_stats(j, as_of).await?),
                     None => None,
@@ -109,6 +114,9 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
                     trainer.as_ref(),
                     &race_ctx,
                     recent_form,
+                    recency.as_ref(),
+                    race.date,
+                    &config,
                 );
                 entry_factors.push((entry, factors));
             }
