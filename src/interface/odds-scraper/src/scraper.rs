@@ -93,16 +93,20 @@ impl UreqOddsScraper {
         resp.into_reader()
             .read_to_end(&mut bytes)
             .map_err(|e| Error::Fetch(format!("read odds body (cname={cname}): {e}")))?;
-        Ok(decode_euc_jp(&bytes))
+        Ok(decode_euc_jp(&bytes, cname))
     }
 }
 
 /// JRA のレスポンスボディ（EUC-JP）を文字列へデコードする。メンテ画面など別エンコーディングが
-/// 混じると後段の token/table 不検出に化けて原因が見えにくいので、解釈できないバイトがあれば警告する。
-fn decode_euc_jp(bytes: &[u8]) -> String {
+/// 混じると後段の token/table 不検出に化けて原因が見えにくいので、解釈できないバイトがあれば
+/// どのページ（`cname`）で起きたかを添えて警告する。
+fn decode_euc_jp(bytes: &[u8], cname: &str) -> String {
     let (decoded, _, had_errors) = encoding_rs::EUC_JP.decode(bytes);
     if had_errors {
-        tracing::warn!("odds response was not valid EUC-JP; parsing may fail");
+        tracing::warn!(
+            cname,
+            "odds response was not valid EUC-JP; parsing may fail"
+        );
     }
     decoded.into_owned()
 }
@@ -246,14 +250,14 @@ mod tests {
         assert!(!had_errors, "test fixture must be encodable as EUC-JP");
         // バイト列は UTF-8 として不正であること（=旧経路が壊れていた条件）を確認する。
         assert!(std::str::from_utf8(&euc).is_err());
-        assert_eq!(decode_euc_jp(&euc), "単勝・複勝オッズ");
+        assert_eq!(decode_euc_jp(&euc, "pwTAN001"), "単勝・複勝オッズ");
     }
 
     #[test]
     fn decode_euc_jp_is_lossy_for_invalid_bytes() {
         // メンテ画面等で EUC-JP として解釈できないバイトが来ても panic せず、
         // 置換文字へ lossy デコードする（had_errors=true の warn 経路）。
-        let decoded = decode_euc_jp(&[0x80]);
+        let decoded = decode_euc_jp(&[0x80], "pwTAN001");
         assert!(decoded.contains('\u{FFFD}'));
     }
 
