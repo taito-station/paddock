@@ -102,6 +102,25 @@ raw_score =
 > まだ発火しない。母数充足（結果 PDF / netkeiba 過去走の trainer 抽出）は別 Issue。出馬表 PDF パーサの
 > trainer 抽出も別 Issue（PDF 経路は当面 `trainer=None`）。
 
+### ステップ 2.5: ベイズ縮約（#75, ADR 0016）
+
+各 factor のレートを母集団 prior（出走頭数 ~14 由来の基準率: win=1/14, place=2/14, show=3/14）へ
+出走数 `k` に応じて縮約する:
+
+```
+smoothed = (k · rate + m · prior) / (k + m)        // m = 擬似カウント
+```
+
+`k≫m` で生レート、`k=0` で prior、その間を単調に補間する。少データ馬（新馬・復帰馬）の極端な
+レート＝過信（`win_prob=0` を含む, ADR 0002）を緩和する。`m` は `EstimationConfig.shrinkage` で
+切り替え可能で、backtest（2026-03-28〜05-31 / 144R）で m=10 が単勝 Brier/LogLoss・連対で最良
+（単勝的中 9.7→13.2%）だったため**本番 predict は m=10 を既定**とする（ADR 0016）。
+
+> **リーセンシー重み付け（recency, #75 Phase B）** も `EstimationConfig.recency` /
+> `--recency-half-life` で切り替え可能（馬の芝ダ・距離帯・馬場状態を `0.5^(days_ago/half_life)` で
+> 時間減衰集計）。ただし backtest で改善が確認できず（前走フォーム #31 が直近を既に捕捉・カテゴリ別
+> 出走数が疎）、**デフォルトは無効**。機構は将来評価のため残す（ADR 0016）。
+
 ### ステップ 3: レース内正規化（top-k）+ 単調化
 
 各列を「着以内ポジション数」に対応する合計へ正規化し、各馬を確率として 1.0 で上限クランプする。

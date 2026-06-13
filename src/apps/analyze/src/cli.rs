@@ -69,6 +69,16 @@ pub enum Command {
         /// 指定すると当時オッズの implied 確率と (1-α) でブレンドする（#72）。
         #[arg(long)]
         blend_alpha: Option<f64>,
+        /// ベイズ縮約の擬似カウント m（#75）。指定すると各 factor のレートを母集団 prior へ
+        /// `(k·rate + m·prior)/(k + m)` で縮約する。未指定は縮約なし（現行挙動）。
+        /// パラメータスイープ（5/10/20/50 等）で校正改善を比較するために使う。
+        #[arg(long)]
+        shrinkage_m: Option<f64>,
+        /// リーセンシー重み付けの半減期（日, #75 Phase B）。指定すると馬の芝ダ・距離帯・馬場状態
+        /// factor を直近成績ほど重く `0.5^(days_ago/half_life)` で時間減衰集計する。未指定は減衰なし。
+        /// スイープ（30/60/90 等）で校正改善を比較する。
+        #[arg(long)]
+        recency_half_life: Option<f64>,
     },
 }
 

@@ -8,12 +8,12 @@ use std::collections::HashMap;
 use chrono::NaiveDate;
 use paddock_domain::horse_result::{FinishingPosition, GateNum, HorseName, HorseNum, ResultStatus};
 use paddock_domain::{
-    HorseResult, JockeyName, OddsValue, Race, RaceCard, RaceId, RaceOdds, Surface, TrackCondition,
-    TrainerName, Venue,
+    DatedCounts, EstimationConfig, HorseResult, JockeyName, OddsValue, Race, RaceCard, RaceId,
+    RaceOdds, RecencyConfig, Surface, TrackCondition, TrainerName, Venue,
 };
 use paddock_use_case::repository::{
-    CourseStatsRow, FetchRecord, GroupStat, HorseStatsRow, JockeyStatsRow, Repository,
-    TrainerStatsRow,
+    CourseStatsRow, FetchRecord, GroupStat, HorseRecencyStats, HorseStatsRow, JockeyStatsRow,
+    RecencySeries, Repository, TrainerStatsRow,
 };
 use paddock_use_case::{Interactor, Result};
 
@@ -163,6 +163,37 @@ impl Repository for MockRepo {
             row.by_track_condition = vec![make_group("不良", 10, 10)];
         }
         Ok(row)
+    }
+
+    async fn horse_recency(
+        &self,
+        name: &HorseName,
+        _as_of: Option<NaiveDate>,
+    ) -> Result<HorseRecencyStats> {
+        // ウマB のみ直近の芝・距離帯で好成績（recency 配線テスト用, #75 Phase B）。recency 有効時
+        // のみ参照され、ウマA は空＝当該 factor None（集計から recency へ差し替わることを検証する）。
+        if name.value() == "ウマB" {
+            let run = DatedCounts {
+                date: d(2026, 1, 5),
+                starts: 3,
+                wins: 3,
+                places: 3,
+                shows: 3,
+            };
+            Ok(HorseRecencyStats {
+                by_surface: vec![RecencySeries {
+                    label: "芝".to_string(),
+                    runs: vec![run],
+                }],
+                by_distance_band: vec![RecencySeries {
+                    label: "1900〜2200m".to_string(),
+                    runs: vec![run],
+                }],
+                by_track_condition: vec![],
+            })
+        } else {
+            Ok(HorseRecencyStats::default())
+        }
     }
 
     async fn course_stats(
@@ -344,7 +375,7 @@ fn d(y: i32, m: u32, day: u32) -> NaiveDate {
 async fn backtest_aggregates_top_pick_and_payout() {
     let app = interactor(vec![finished_race()]);
     let report = app
-        .backtest(d(2026, 1, 1), d(2026, 1, 31), None)
+        .backtest(d(2026, 1, 1), d(2026, 1, 31), None, EstimationConfig::default())
         .await
         .unwrap();
 
@@ -372,7 +403,7 @@ async fn backtest_prefers_market_odds_over_pdf() {
     );
     let app = interactor_with_odds(vec![race], odds);
     let report = app
-        .backtest(d(2026, 1, 1), d(2026, 1, 31), None)
+        .backtest(d(2026, 1, 1), d(2026, 1, 31), None, EstimationConfig::default())
         .await
         .unwrap();
 
@@ -431,7 +462,7 @@ fn soft_track_race(track_condition: Option<TrackCondition>) -> Race {
 async fn backtest_wires_race_track_condition_into_factors() {
     // 馬場状態なし: 本命は高スタッツの ウマA(2 着) → 単勝的中 0。
     let without_tc = interactor(vec![soft_track_race(None)])
-        .backtest(d(2026, 1, 1), d(2026, 1, 31), None)
+        .backtest(d(2026, 1, 1), d(2026, 1, 31), None, EstimationConfig::default())
         .await
         .unwrap();
     assert!(
@@ -443,13 +474,46 @@ async fn backtest_wires_race_track_condition_into_factors() {
     // 不良馬場: race.track_condition が build_factors へ配線され、道悪巧者の
     // ウマB(1 着)へ本命が入れ替わる → 単勝的中 1。
     let with_tc = interactor(vec![soft_track_race(Some(TrackCondition::Soft))])
-        .backtest(d(2026, 1, 1), d(2026, 1, 31), None)
+        .backtest(d(2026, 1, 1), d(2026, 1, 31), None, EstimationConfig::default())
         .await
         .unwrap();
     assert!(
         (with_tc.win_hit_rate - 1.0).abs() < 1e-9,
         "race.track_condition が factor に配線されていない (win_hit={})",
         with_tc.win_hit_rate
+    );
+}
+
+#[tokio::test]
+async fn backtest_wires_recency_into_horse_factors() {
+    // recency なし: 本命は高スタッツの ウマA(2 着) → 単勝的中 0（集計レート経路）。
+    let off = interactor(vec![soft_track_race(None)])
+        .backtest(d(2026, 1, 1), d(2026, 1, 31), None, EstimationConfig::default())
+        .await
+        .unwrap();
+    assert!(
+        off.win_hit_rate.abs() < 1e-9,
+        "recency off で本命が動いている (win_hit={})",
+        off.win_hit_rate
+    );
+
+    // recency あり: ウマB の直近 芝・距離帯の好成績が horse_recency 経由で
+    // build_factors に配線され、本命が ウマB(1 着)へ入れ替わる → 単勝的中 1。
+    // ラベル不一致や系列取得漏れがあれば recency factor が None になり off と同じ 0 のままになる。
+    let cfg = EstimationConfig {
+        shrinkage: None,
+        recency: Some(RecencyConfig {
+            half_life_days: 30.0,
+        }),
+    };
+    let on = interactor(vec![soft_track_race(None)])
+        .backtest(d(2026, 1, 1), d(2026, 1, 31), None, cfg)
+        .await
+        .unwrap();
+    assert!(
+        (on.win_hit_rate - 1.0).abs() < 1e-9,
+        "recency が horse factor に配線されていない (win_hit={})",
+        on.win_hit_rate
     );
 }
 
@@ -483,7 +547,7 @@ fn trainer_race(b_trainer: Option<&str>) -> Race {
 async fn backtest_wires_result_trainer_into_factors() {
     // 調教師なし: 本命は高スタッツの ウマA(2 着) → 単勝的中 0。
     let without = interactor(vec![trainer_race(None)])
-        .backtest(d(2026, 1, 1), d(2026, 1, 31), None)
+        .backtest(d(2026, 1, 1), d(2026, 1, 31), None, EstimationConfig::default())
         .await
         .unwrap();
     assert!(
@@ -495,7 +559,7 @@ async fn backtest_wires_result_trainer_into_factors() {
     // 名伯楽: results.trainer が build_factors へ配線され、ウマB(1 着)へ本命が入れ替わる
     // → 単勝的中 1。
     let with_tr = interactor(vec![trainer_race(Some("名伯楽"))])
-        .backtest(d(2026, 1, 1), d(2026, 1, 31), None)
+        .backtest(d(2026, 1, 1), d(2026, 1, 31), None, EstimationConfig::default())
         .await
         .unwrap();
     assert!(
@@ -509,7 +573,7 @@ async fn backtest_wires_result_trainer_into_factors() {
 async fn backtest_blend_flips_top_pick_to_market_favorite() {
     // モデルのみ: 本命 ウマA は 2 着 → 単勝的中 0。
     let model_only = interactor(vec![blend_race()])
-        .backtest(d(2026, 1, 1), d(2026, 1, 31), None)
+        .backtest(d(2026, 1, 1), d(2026, 1, 31), None, EstimationConfig::default())
         .await
         .unwrap();
     assert!(
@@ -533,7 +597,7 @@ async fn backtest_blend_flips_top_pick_to_market_favorite() {
     odds.insert(race.race_id.value().to_string(), o);
 
     let blended = interactor_with_odds(vec![race], odds)
-        .backtest(d(2026, 1, 1), d(2026, 1, 31), Some(0.2))
+        .backtest(d(2026, 1, 1), d(2026, 1, 31), Some(0.2), EstimationConfig::default())
         .await
         .unwrap();
     assert!(
@@ -558,7 +622,7 @@ async fn backtest_blend_uses_partial_race_odds_as_is() {
     odds.insert(race.race_id.value().to_string(), o);
 
     let report = interactor_with_odds(vec![race], odds)
-        .backtest(d(2026, 1, 1), d(2026, 1, 31), Some(0.2))
+        .backtest(d(2026, 1, 1), d(2026, 1, 31), Some(0.2), EstimationConfig::default())
         .await
         .unwrap();
     assert!(
@@ -573,7 +637,7 @@ async fn backtest_blend_falls_back_to_results_odds_when_no_snapshot() {
     // race_odds スナップショット無し → PDF 確定成績の単勝(ウマB=1.2)で代替し、市場のみ(α=0)で
     // 本命が ウマB に動き 1 着的中する。
     let blended = interactor(vec![blend_race()])
-        .backtest(d(2026, 1, 1), d(2026, 1, 31), Some(0.0))
+        .backtest(d(2026, 1, 1), d(2026, 1, 31), Some(0.0), EstimationConfig::default())
         .await
         .unwrap();
     assert!(
@@ -587,7 +651,7 @@ async fn backtest_blend_falls_back_to_results_odds_when_no_snapshot() {
 async fn backtest_empty_when_no_races() {
     let app = interactor(Vec::new());
     let report = app
-        .backtest(d(2026, 1, 1), d(2026, 1, 31), None)
+        .backtest(d(2026, 1, 1), d(2026, 1, 31), None, EstimationConfig::default())
         .await
         .unwrap();
     assert_eq!(report.races_evaluated, 0);
@@ -619,7 +683,7 @@ async fn backtest_excludes_scratched_and_cancelled_horses() {
     };
     let app = interactor(vec![race]);
     let report = app
-        .backtest(d(2026, 1, 1), d(2026, 1, 31), None)
+        .backtest(d(2026, 1, 1), d(2026, 1, 31), None, EstimationConfig::default())
         .await
         .unwrap();
 

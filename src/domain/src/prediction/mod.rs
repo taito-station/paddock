@@ -12,25 +12,75 @@ pub struct RateTriple {
     pub show: f64,
 }
 
+/// 1 つの factor のレート（win/place/show）と、その算出母数となった出走数（#75）。
+/// `starts` はベイズ縮約（少データほど prior へ寄せる）で信頼度の重みに使う。
+#[derive(Debug, Clone, Copy)]
+pub struct FactorStat {
+    pub rate: RateTriple,
+    pub starts: u32,
+}
+
+/// ベイズ縮約（shrinkage, #75）の設定。出走数 `k` が少ない factor のレートを母集団平均
+/// `PRIOR_RATE` へ `smoothed = (k·rate + m·prior)/(k + m)` で寄せ、少データ馬の過信
+/// （`win_prob=0` を含む, ADR 0002）を緩和する。`pseudo_count = m` は擬似標本数。
+#[derive(Debug, Clone, Copy)]
+pub struct ShrinkageConfig {
+    pub pseudo_count: f64,
+}
+
+/// リーセンシー重み付け（recency, #75）の設定。直近成績に時間減衰
+/// `w = 0.5^(days_ago/half_life)` を掛けて集計する（Phase B で使用）。
+#[derive(Debug, Clone, Copy)]
+pub struct RecencyConfig {
+    pub half_life_days: f64,
+}
+
+/// 確率推定の挙動切替（#75）。いずれも `None` が現行挙動（縮約・減衰なし）で、`Default` も同様。
+/// backtest が CLI から組み立てて before/after を比較し、採用値を predict のデフォルトに反映する。
+#[derive(Debug, Clone, Copy, Default)]
+pub struct EstimationConfig {
+    pub shrinkage: Option<ShrinkageConfig>,
+    pub recency: Option<RecencyConfig>,
+}
+
+/// 本番 predict が採用するベイズ縮約の擬似カウント（#75）。backtest（2026-03-28〜05-31 / 144R,
+/// #81 後ロジック）で m∈{off,5,10,20,50} を比較し、m=10 が単勝 Brier/LogLoss・連対で最良、
+/// 的中率も改善（off 比 単勝 LogLoss 0.272→0.251、単勝的中 9.7→13.2%）だったため採用。
+/// m=50 は過縮約で劣化。
+pub const RECOMMENDED_SHRINKAGE_M: f64 = 10.0;
+
+impl EstimationConfig {
+    /// 本番 predict 経路のデフォルト設定（#75 で backtest 検証して採用した値）。
+    /// backtest の `--shrinkage-m` 未指定（= `Default`, 縮約 off）とは別で、こちらは縮約 on。
+    pub fn production() -> Self {
+        Self {
+            shrinkage: Some(ShrinkageConfig {
+                pseudo_count: RECOMMENDED_SHRINKAGE_M,
+            }),
+            recency: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct HorseFactors {
     /// コース（場×距離×馬場）の枠順別成績。当該コース×枠区分の出走実績が無い馬は `None`
     /// （項と重みを母数から除外、ADR 0007/0014 の欠落項扱い）。
-    pub course_gate: Option<RateTriple>,
+    pub course_gate: Option<FactorStat>,
     /// 馬の芝ダ別成績。当該 surface での出走実績が無い馬（新馬等）は `None`（母数除外、#81）。
-    pub horse_surface: Option<RateTriple>,
+    pub horse_surface: Option<FactorStat>,
     /// 馬の距離帯別成績。当該距離帯での出走実績が無い馬（初距離等）は `None`（母数除外、#81）。
-    pub horse_distance: Option<RateTriple>,
+    pub horse_distance: Option<FactorStat>,
     /// 騎手の芝ダ別成績。騎手未登録、または当該 surface での騎乗実績が無い馬は `None`
     /// （母数除外、#81 で 0 埋めから統一）。
-    pub jockey_surface: Option<RateTriple>,
+    pub jockey_surface: Option<FactorStat>,
     /// 調教師の芝ダ別成績（#74）。調教師が欠落、または当該 surface での実績が無い馬は `None`
     /// （項と重みを母数から除外、ADR 0007 の欠落項扱い）。netkeiba 出馬表からのみ取得するため、
     /// PDF 経路で取り込んだレースは常に `None`。
-    pub trainer_surface: Option<RateTriple>,
+    pub trainer_surface: Option<FactorStat>,
     /// 馬場状態（良/稍重/重/不良）別の馬成績（#73）。対象レースの馬場状態が未確定、または
     /// 該当馬場での出走実績が無い馬は `None`（項と重みを母数から除外、ADR 0007 の欠落項扱い）。
-    pub horse_track_condition: Option<RateTriple>,
+    pub horse_track_condition: Option<FactorStat>,
     /// 前走フォーム [0,1]（0.5=中立）。前走が無い／有効な signal が無い馬は `None`。
     /// win/place/show に同値で寄与する（フォームは方向に依らず全体を底上げ／押し下げる）。
     pub recent_form: Option<f64>,
@@ -45,22 +95,32 @@ pub struct HorseProbability {
     pub show_prob: f64,
 }
 
+/// 現行挙動（縮約・減衰なし）で確率推定する。既存呼び出し・テスト互換のため signature を保つ。
 pub fn estimate_probabilities(entries: &[(HorseEntry, HorseFactors)]) -> Vec<HorseProbability> {
+    estimate_probabilities_with_config(entries, &EstimationConfig::default())
+}
+
+/// `config` でベイズ縮約・リーセンシーの有効化を切り替えて確率推定する（#75）。
+/// `EstimationConfig::default()`（両方 `None`）は [`estimate_probabilities`] と同一挙動。
+pub fn estimate_probabilities_with_config(
+    entries: &[(HorseEntry, HorseFactors)],
+    config: &EstimationConfig,
+) -> Vec<HorseProbability> {
     if entries.is_empty() {
         return Vec::new();
     }
 
     let win_scores: Vec<f64> = entries
         .iter()
-        .map(|(_, f)| raw_score(f, |r| r.win))
+        .map(|(_, f)| raw_score(f, |r| r.win, config))
         .collect();
     let place_scores: Vec<f64> = entries
         .iter()
-        .map(|(_, f)| raw_score(f, |r| r.place))
+        .map(|(_, f)| raw_score(f, |r| r.place, config))
         .collect();
     let show_scores: Vec<f64> = entries
         .iter()
-        .map(|(_, f)| raw_score(f, |r| r.show))
+        .map(|(_, f)| raw_score(f, |r| r.show, config))
         .collect();
 
     // win は 1 着（1 ポジション）、place は 2 着以内（2 ポジション）、show は 3 着以内（3 ポジション）
@@ -187,6 +247,96 @@ const TRACK_CONDITION_WEIGHT: f64 = 1.0;
 /// 前走フォーム項の重み。#30 バックテストで検証して決定（ADR 0009）。
 const FORM_WEIGHT: f64 = 0.25;
 
+/// ベイズ縮約（#75）の母集団 prior レート。出走頭数の代表値（≒14 頭）から導く解析的な基準率
+/// （win=1/14, place=2/14, show=3/14）で、「平均的な 1 頭が 1 着/2 着内/3 着内に入る確率」に相当する。
+/// 実績の薄い factor のレートをこの prior へ寄せる。クエリ不要でリークが無い最小実装。将来は
+/// results 全体の実測ベースレートへ差し替え可能（backtest で要否を再検証）。
+const PRIOR_RATE: RateTriple = RateTriple {
+    win: 1.0 / 14.0,
+    place: 2.0 / 14.0,
+    show: 3.0 / 14.0,
+};
+
+/// ベイズ縮約: 出走数 `starts`(=k) の少ない factor のレートを prior へ寄せる（#75）。
+/// `smoothed = (k·rate + m·prior) / (k + m)`。k≫m で ≈rate、k=0 で =prior、単調に補間する。
+fn shrink_rate(rate: f64, starts: u32, prior: f64, pseudo_count: f64) -> f64 {
+    let k = starts as f64;
+    (k * rate + pseudo_count * prior) / (k + pseudo_count)
+}
+
+/// 日付付きの 1 日分（または同一日複数走）の成績カウント（リーセンシー重み付け用, #75 Phase B）。
+#[derive(Debug, Clone, Copy)]
+pub struct DatedCounts {
+    pub date: NaiveDate,
+    pub starts: u32,
+    pub wins: u32,
+    pub places: u32,
+    pub shows: u32,
+}
+
+/// 日付付き成績系列に時間減衰 `w = 0.5^((as_of − date)/half_life)` を掛け、時間重み付きレート
+/// （`Σ w·wins / Σ w·starts` 等）と総出走数を `FactorStat` で返す（#75 Phase B）。直近走ほど
+/// 重みが大きく、半減期 `half_life_days` 日で寄与が半分になる。`as_of` 以降の日付はリーク防止の
+/// ため無視する（呼び出し側が as_of で絞るが二重防御）。有効な重み付き出走が無ければ `None`。
+///
+/// `FactorStat.starts` は時間重みを掛けない素の総出走数を返す。recency と shrinkage を併用すると
+/// 縮約はこの素の starts を信頼度 k に使う（＝減衰で薄れた古い実績も母数に満額カウント）。この
+/// 非対称は割り切りで、併用経路は backtest（CLI 両指定）でのみ到達し本番 predict では走らない
+/// （`production()` は recency 無効）。recency を将来採用する際は減衰後の実効標本数での縮約を
+/// 再検討する（ADR 0016）。
+pub fn apply_recency_weight(
+    runs: &[DatedCounts],
+    as_of: NaiveDate,
+    half_life_days: f64,
+) -> Option<FactorStat> {
+    // 呼び出し側（CLI `--recency-half-life`）が有限の正数を保証する。万一 0・負・非有限が来ても
+    // `0.5^(±inf)` 等で全重み 0 → None に倒れ NaN は出さないが、契約違反は debug ビルドで検出する。
+    debug_assert!(
+        half_life_days.is_finite() && half_life_days > 0.0,
+        "half_life_days must be finite and positive, got {half_life_days}"
+    );
+    let mut w_starts = 0.0;
+    let mut w_wins = 0.0;
+    let mut w_places = 0.0;
+    let mut w_shows = 0.0;
+    let mut total_starts: u32 = 0;
+    for r in runs {
+        let days_ago = (as_of - r.date).num_days();
+        // as_of 当日・以降はリークになるため寄与させない（< as_of のみ）。
+        if days_ago <= 0 {
+            continue;
+        }
+        let w = 0.5_f64.powf(days_ago as f64 / half_life_days);
+        w_starts += w * r.starts as f64;
+        w_wins += w * r.wins as f64;
+        w_places += w * r.places as f64;
+        w_shows += w * r.shows as f64;
+        // 実データでは 1 頭の生涯出走数は高々数十だが、契約外の入力でも安全側に倒す。
+        total_starts = total_starts.saturating_add(r.starts);
+    }
+    if w_starts <= 0.0 {
+        return None;
+    }
+    Some(FactorStat {
+        rate: RateTriple {
+            win: w_wins / w_starts,
+            place: w_places / w_starts,
+            show: w_shows / w_starts,
+        },
+        starts: total_starts,
+    })
+}
+
+/// 1 つの factor の寄与レートを返す。`config.shrinkage` が `Some` のときはベイズ縮約を適用し、
+/// `None` のときは生レート（現行挙動）。`rate` セレクタは win/place/show のいずれかを取り出す。
+fn factor_value(fs: &FactorStat, rate: fn(&RateTriple) -> f64, config: &EstimationConfig) -> f64 {
+    let raw = rate(&fs.rate);
+    match config.shrinkage {
+        Some(s) => shrink_rate(raw, fs.starts, rate(&PRIOR_RATE), s.pseudo_count),
+        None => raw,
+    }
+}
+
 /// 存在する factor の**重み付き平均**を返す。実績の無い項（出走実績なし・騎手未登録・前走なし等）は
 /// その項と重みを母数から除外して評価するため、欠落で不当に減点されない（ADR 0007/0014）。
 /// 「実績なし」を 0 レート（＝全敗）と同一視しない方針を全 factor に統一する（#81）。全馬が同条件の
@@ -196,31 +346,35 @@ const FORM_WEIGHT: f64 = 0.25;
 /// `normalize_to_sum` の全 0 フォールバックで均等確率に畳まれる。
 ///
 /// `recent_form` はスカラー（[0,1]、0.5=中立）で win/place/show に同値で寄与する。
-fn raw_score(factors: &HorseFactors, rate: fn(&RateTriple) -> f64) -> f64 {
+fn raw_score(
+    factors: &HorseFactors,
+    rate: fn(&RateTriple) -> f64,
+    config: &EstimationConfig,
+) -> f64 {
     let mut weighted = 0.0;
     let mut weight = 0.0;
     if let Some(course_gate) = factors.course_gate {
-        weighted += COURSE_GATE_WEIGHT * rate(&course_gate);
+        weighted += COURSE_GATE_WEIGHT * factor_value(&course_gate, rate, config);
         weight += COURSE_GATE_WEIGHT;
     }
     if let Some(surface) = factors.horse_surface {
-        weighted += SURFACE_WEIGHT * rate(&surface);
+        weighted += SURFACE_WEIGHT * factor_value(&surface, rate, config);
         weight += SURFACE_WEIGHT;
     }
     if let Some(distance) = factors.horse_distance {
-        weighted += DISTANCE_WEIGHT * rate(&distance);
+        weighted += DISTANCE_WEIGHT * factor_value(&distance, rate, config);
         weight += DISTANCE_WEIGHT;
     }
     if let Some(jockey) = factors.jockey_surface {
-        weighted += JOCKEY_WEIGHT * rate(&jockey);
+        weighted += JOCKEY_WEIGHT * factor_value(&jockey, rate, config);
         weight += JOCKEY_WEIGHT;
     }
     if let Some(trainer) = factors.trainer_surface {
-        weighted += TRAINER_WEIGHT * rate(&trainer);
+        weighted += TRAINER_WEIGHT * factor_value(&trainer, rate, config);
         weight += TRAINER_WEIGHT;
     }
     if let Some(tc) = factors.horse_track_condition {
-        weighted += TRACK_CONDITION_WEIGHT * rate(&tc);
+        weighted += TRACK_CONDITION_WEIGHT * factor_value(&tc, rate, config);
         weight += TRACK_CONDITION_WEIGHT;
     }
     if let Some(form) = factors.recent_form {
@@ -350,11 +504,17 @@ mod tests {
         }
     }
 
+    /// テスト用: レートを `FactorStat`（出走数 10）に包む。ベイズ縮約 off（`EstimationConfig::default`）
+    /// の挙動不変テストでは `starts` の値は結果に影響しない。縮約挙動のテストでは starts を明示する。
+    fn fs(rate: RateTriple) -> FactorStat {
+        FactorStat { rate, starts: 10 }
+    }
+
     fn zero_factors() -> HorseFactors {
         HorseFactors {
-            course_gate: Some(RateTriple::default()),
-            horse_surface: Some(RateTriple::default()),
-            horse_distance: Some(RateTriple::default()),
+            course_gate: Some(fs(RateTriple::default())),
+            horse_surface: Some(fs(RateTriple::default())),
+            horse_distance: Some(fs(RateTriple::default())),
             jockey_surface: None,
             horse_track_condition: None,
             trainer_surface: None,
@@ -401,7 +561,7 @@ mod tests {
             recent_form: None,
         };
         // assert_eq! は NaN（0/0 のゼロ除算）でも 0.0 と不一致で失敗するため NaN 回避も兼ねる。
-        let s = raw_score(&none_factors, |r| r.win);
+        let s = raw_score(&none_factors, |r| r.win, &EstimationConfig::default());
         assert_eq!(s, 0.0, "all-None must score finite 0.0, got {s}");
 
         // estimate_probabilities は全スコア 0 → 均等フォールバック（2 頭なら win=0.5）。
@@ -427,9 +587,9 @@ mod tests {
         };
         // horse_surface の実績なし → None（母数除外）。残り course_gate/distance の平均 0.2 を維持。
         let excluded = HorseFactors {
-            course_gate: Some(base),
+            course_gate: Some(fs(base)),
             horse_surface: None,
-            horse_distance: Some(base),
+            horse_distance: Some(fs(base)),
             jockey_surface: None,
             horse_track_condition: None,
             trainer_surface: None,
@@ -437,11 +597,11 @@ mod tests {
         };
         // 旧挙動相当: horse_surface=Some(0-rate) は母数に残り平均を押し下げる（＝減点）。
         let zero_filled = HorseFactors {
-            horse_surface: Some(RateTriple::default()),
+            horse_surface: Some(fs(RateTriple::default())),
             ..excluded.clone()
         };
-        let s_excluded = raw_score(&excluded, |r| r.win);
-        let s_zero = raw_score(&zero_filled, |r| r.win);
+        let s_excluded = raw_score(&excluded, |r| r.win, &EstimationConfig::default());
+        let s_zero = raw_score(&zero_filled, |r| r.win, &EstimationConfig::default());
         assert!((s_excluded - 0.2).abs() < 1e-10, "excluded={s_excluded}");
         assert!(
             s_excluded > s_zero,
@@ -455,21 +615,21 @@ mod tests {
             (
                 make_entry(1, "ウマA"),
                 HorseFactors {
-                    course_gate: Some(RateTriple {
+                    course_gate: Some(fs(RateTriple {
                         win: 0.2,
                         place: 0.4,
                         show: 0.6,
-                    }),
-                    horse_surface: Some(RateTriple {
+                    })),
+                    horse_surface: Some(fs(RateTriple {
                         win: 0.1,
                         place: 0.2,
                         show: 0.3,
-                    }),
-                    horse_distance: Some(RateTriple {
+                    })),
+                    horse_distance: Some(fs(RateTriple {
                         win: 0.15,
                         place: 0.3,
                         show: 0.45,
-                    }),
+                    })),
                     jockey_surface: None,
                     horse_track_condition: None,
                     trainer_surface: None,
@@ -479,21 +639,21 @@ mod tests {
             (
                 make_entry(2, "ウマB"),
                 HorseFactors {
-                    course_gate: Some(RateTriple {
+                    course_gate: Some(fs(RateTriple {
                         win: 0.1,
                         place: 0.2,
                         show: 0.3,
-                    }),
-                    horse_surface: Some(RateTriple {
+                    })),
+                    horse_surface: Some(fs(RateTriple {
                         win: 0.05,
                         place: 0.1,
                         show: 0.15,
-                    }),
-                    horse_distance: Some(RateTriple {
+                    })),
+                    horse_distance: Some(fs(RateTriple {
                         win: 0.08,
                         place: 0.16,
                         show: 0.24,
-                    }),
+                    })),
                     jockey_surface: None,
                     horse_track_condition: None,
                     trainer_surface: None,
@@ -524,9 +684,9 @@ mod tests {
             show: 0.3,
         };
         let factors = HorseFactors {
-            course_gate: Some(triple),
-            horse_surface: Some(triple),
-            horse_distance: Some(triple),
+            course_gate: Some(fs(triple)),
+            horse_surface: Some(fs(triple)),
+            horse_distance: Some(fs(triple)),
             jockey_surface: None,
             horse_track_condition: None,
             trainer_surface: None,
@@ -554,26 +714,26 @@ mod tests {
     fn monotonicity_guaranteed_even_with_inverted_rates() {
         // ウマA: win 偏重（place/show が win より低い不自然なレート）。ウマB: 逆。
         let a = HorseFactors {
-            course_gate: Some(RateTriple {
+            course_gate: Some(fs(RateTriple {
                 win: 0.9,
                 place: 0.1,
                 show: 0.1,
-            }),
-            horse_surface: Some(RateTriple::default()),
-            horse_distance: Some(RateTriple::default()),
+            })),
+            horse_surface: Some(fs(RateTriple::default())),
+            horse_distance: Some(fs(RateTriple::default())),
             jockey_surface: None,
             horse_track_condition: None,
             trainer_surface: None,
             recent_form: None,
         };
         let b = HorseFactors {
-            course_gate: Some(RateTriple {
+            course_gate: Some(fs(RateTriple {
                 win: 0.1,
                 place: 0.9,
                 show: 0.9,
-            }),
-            horse_surface: Some(RateTriple::default()),
-            horse_distance: Some(RateTriple::default()),
+            })),
+            horse_surface: Some(fs(RateTriple::default())),
+            horse_distance: Some(fs(RateTriple::default())),
             jockey_surface: None,
             horse_track_condition: None,
             trainer_surface: None,
@@ -596,13 +756,13 @@ mod tests {
     fn monotonic_when_only_some_columns_are_all_zero() {
         // win レートのみ非ゼロ、place/show レートは全馬 0。
         let win_only = |w: f64| HorseFactors {
-            course_gate: Some(RateTriple {
+            course_gate: Some(fs(RateTriple {
                 win: w,
                 place: 0.0,
                 show: 0.0,
-            }),
-            horse_surface: Some(RateTriple::default()),
-            horse_distance: Some(RateTriple::default()),
+            })),
+            horse_surface: Some(fs(RateTriple::default())),
+            horse_distance: Some(fs(RateTriple::default())),
             jockey_surface: None,
             horse_track_condition: None,
             trainer_surface: None,
@@ -642,25 +802,25 @@ mod tests {
         };
         // 騎手レートが他 factor と等しい → 平均不変 → スコアは騎手なしと一致（減点なし）。
         let with_equal_jockey = HorseFactors {
-            course_gate: Some(base),
-            horse_surface: Some(base),
-            horse_distance: Some(base),
-            jockey_surface: Some(base),
+            course_gate: Some(fs(base)),
+            horse_surface: Some(fs(base)),
+            horse_distance: Some(fs(base)),
+            jockey_surface: Some(fs(base)),
             horse_track_condition: None,
             trainer_surface: None,
             recent_form: None,
         };
         let without_jockey = HorseFactors {
-            course_gate: Some(base),
-            horse_surface: Some(base),
-            horse_distance: Some(base),
+            course_gate: Some(fs(base)),
+            horse_surface: Some(fs(base)),
+            horse_distance: Some(fs(base)),
             jockey_surface: None,
             horse_track_condition: None,
             trainer_surface: None,
             recent_form: None,
         };
-        let s_with = raw_score(&with_equal_jockey, |r| r.win);
-        let s_without = raw_score(&without_jockey, |r| r.win);
+        let s_with = raw_score(&with_equal_jockey, |r| r.win, &EstimationConfig::default());
+        let s_without = raw_score(&without_jockey, |r| r.win, &EstimationConfig::default());
         assert!(
             (s_with - s_without).abs() < 1e-10,
             "騎手なしが減点されている: with={s_with}, without={s_without}"
@@ -669,19 +829,19 @@ mod tests {
 
         // 強い騎手（高レート）は加点、弱い騎手（低レート）は減点として正しく効く。
         let strong = HorseFactors {
-            jockey_surface: Some(RateTriple {
+            jockey_surface: Some(fs(RateTriple {
                 win: 0.5,
                 place: 0.5,
                 show: 0.5,
-            }),
+            })),
             ..with_equal_jockey.clone()
         };
         let weak = HorseFactors {
-            jockey_surface: Some(RateTriple::default()),
+            jockey_surface: Some(fs(RateTriple::default())),
             ..with_equal_jockey
         };
-        assert!(raw_score(&strong, |r| r.win) > s_without);
-        assert!(raw_score(&weak, |r| r.win) < s_without);
+        assert!(raw_score(&strong, |r| r.win, &EstimationConfig::default()) > s_without);
+        assert!(raw_score(&weak, |r| r.win, &EstimationConfig::default()) < s_without);
     }
 
     /// 馬場状態項（#73）が欠落項で不当に減点されないこと（重み付き平均、ADR 0007 の流儀）。
@@ -694,11 +854,11 @@ mod tests {
             show: 0.6,
         };
         let with_equal_tc = HorseFactors {
-            course_gate: Some(base),
-            horse_surface: Some(base),
-            horse_distance: Some(base),
+            course_gate: Some(fs(base)),
+            horse_surface: Some(fs(base)),
+            horse_distance: Some(fs(base)),
             jockey_surface: None,
-            horse_track_condition: Some(base),
+            horse_track_condition: Some(fs(base)),
             trainer_surface: None,
             recent_form: None,
         };
@@ -706,8 +866,8 @@ mod tests {
             horse_track_condition: None,
             ..with_equal_tc.clone()
         };
-        let s_with = raw_score(&with_equal_tc, |r| r.win);
-        let s_without = raw_score(&without_tc, |r| r.win);
+        let s_with = raw_score(&with_equal_tc, |r| r.win, &EstimationConfig::default());
+        let s_without = raw_score(&without_tc, |r| r.win, &EstimationConfig::default());
         assert!(
             (s_with - s_without).abs() < 1e-10,
             "馬場実績なしが減点されている: with={s_with}, without={s_without}"
@@ -716,19 +876,19 @@ mod tests {
 
         // 道悪巧者（高レート）は加点、苦手（低レート）は減点として正しく効く。
         let strong = HorseFactors {
-            horse_track_condition: Some(RateTriple {
+            horse_track_condition: Some(fs(RateTriple {
                 win: 0.5,
                 place: 0.5,
                 show: 0.5,
-            }),
+            })),
             ..with_equal_tc.clone()
         };
         let weak = HorseFactors {
-            horse_track_condition: Some(RateTriple::default()),
+            horse_track_condition: Some(fs(RateTriple::default())),
             ..with_equal_tc
         };
-        assert!(raw_score(&strong, |r| r.win) > s_without);
-        assert!(raw_score(&weak, |r| r.win) < s_without);
+        assert!(raw_score(&strong, |r| r.win, &EstimationConfig::default()) > s_without);
+        assert!(raw_score(&weak, |r| r.win, &EstimationConfig::default()) < s_without);
     }
 
     /// 馬場状態項を含む場合でも win ≤ place ≤ show の単調性が維持されること（#73）。
@@ -738,28 +898,28 @@ mod tests {
             (
                 make_entry(1, "ウマA"),
                 HorseFactors {
-                    course_gate: Some(RateTriple {
+                    course_gate: Some(fs(RateTriple {
                         win: 0.3,
                         place: 0.5,
                         show: 0.7,
-                    }),
-                    horse_surface: Some(RateTriple {
+                    })),
+                    horse_surface: Some(fs(RateTriple {
                         win: 0.2,
                         place: 0.4,
                         show: 0.6,
-                    }),
-                    horse_distance: Some(RateTriple {
+                    })),
+                    horse_distance: Some(fs(RateTriple {
                         win: 0.1,
                         place: 0.3,
                         show: 0.5,
-                    }),
+                    })),
                     jockey_surface: None,
                     // win 偏重の不自然な馬場レートでも単調化が是正する。
-                    horse_track_condition: Some(RateTriple {
+                    horse_track_condition: Some(fs(RateTriple {
                         win: 0.9,
                         place: 0.1,
                         show: 0.1,
-                    }),
+                    })),
                     trainer_surface: None,
                     recent_form: None,
                 },
@@ -767,21 +927,21 @@ mod tests {
             (
                 make_entry(2, "ウマB"),
                 HorseFactors {
-                    course_gate: Some(RateTriple {
+                    course_gate: Some(fs(RateTriple {
                         win: 0.1,
                         place: 0.2,
                         show: 0.3,
-                    }),
-                    horse_surface: Some(RateTriple {
+                    })),
+                    horse_surface: Some(fs(RateTriple {
                         win: 0.1,
                         place: 0.2,
                         show: 0.3,
-                    }),
-                    horse_distance: Some(RateTriple {
+                    })),
+                    horse_distance: Some(fs(RateTriple {
                         win: 0.1,
                         place: 0.2,
                         show: 0.3,
-                    }),
+                    })),
                     jockey_surface: None,
                     horse_track_condition: None,
                     trainer_surface: None,
@@ -812,11 +972,11 @@ mod tests {
             show: 0.6,
         };
         let with_equal_trainer = HorseFactors {
-            course_gate: Some(base),
-            horse_surface: Some(base),
-            horse_distance: Some(base),
+            course_gate: Some(fs(base)),
+            horse_surface: Some(fs(base)),
+            horse_distance: Some(fs(base)),
             jockey_surface: None,
-            trainer_surface: Some(base),
+            trainer_surface: Some(fs(base)),
             horse_track_condition: None,
             recent_form: None,
         };
@@ -824,8 +984,8 @@ mod tests {
             trainer_surface: None,
             ..with_equal_trainer.clone()
         };
-        let s_with = raw_score(&with_equal_trainer, |r| r.win);
-        let s_without = raw_score(&without_trainer, |r| r.win);
+        let s_with = raw_score(&with_equal_trainer, |r| r.win, &EstimationConfig::default());
+        let s_without = raw_score(&without_trainer, |r| r.win, &EstimationConfig::default());
         assert!(
             (s_with - s_without).abs() < 1e-10,
             "調教師実績なしが減点されている: with={s_with}, without={s_without}"
@@ -834,19 +994,194 @@ mod tests {
 
         // 名伯楽（高レート）は加点、苦手（低レート）は減点として正しく効く。
         let strong = HorseFactors {
-            trainer_surface: Some(RateTriple {
+            trainer_surface: Some(fs(RateTriple {
                 win: 0.5,
                 place: 0.5,
                 show: 0.5,
-            }),
+            })),
             ..with_equal_trainer.clone()
         };
         let weak = HorseFactors {
-            trainer_surface: Some(RateTriple::default()),
+            trainer_surface: Some(fs(RateTriple::default())),
             ..with_equal_trainer
         };
-        assert!(raw_score(&strong, |r| r.win) > s_without);
-        assert!(raw_score(&weak, |r| r.win) < s_without);
+        assert!(raw_score(&strong, |r| r.win, &EstimationConfig::default()) > s_without);
+        assert!(raw_score(&weak, |r| r.win, &EstimationConfig::default()) < s_without);
+    }
+
+    // ---- ベイズ縮約（#75） ----
+
+    fn shrink_cfg(m: f64) -> EstimationConfig {
+        EstimationConfig {
+            shrinkage: Some(ShrinkageConfig { pseudo_count: m }),
+            recency: None,
+        }
+    }
+
+    #[test]
+    fn shrink_rate_endpoints_and_monotonic() {
+        let prior = 0.1;
+        let m = 10.0;
+        // k=0（実績ゼロ相当）は完全に prior。
+        assert!((shrink_rate(0.9, 0, prior, m) - prior).abs() < 1e-12);
+        // k≫m は ≈ 生レート（縮約がほぼ効かない）。
+        assert!((shrink_rate(0.9, 100_000, prior, m) - 0.9).abs() < 1e-3);
+        // k=m なら生レートと prior のちょうど中点。
+        assert!((shrink_rate(0.9, 10, prior, m) - (0.9 + prior) / 2.0).abs() < 1e-12);
+        // starts が増えるほど生レートへ単調に近づく（prior より高いレートで単調増加）。
+        let s1 = shrink_rate(0.9, 1, prior, m);
+        let s5 = shrink_rate(0.9, 5, prior, m);
+        let s20 = shrink_rate(0.9, 20, prior, m);
+        assert!(prior < s1 && s1 < s5 && s5 < s20 && s20 < 0.9);
+    }
+
+    /// 少データ（starts 小）の高レート factor は縮約で prior 側へ強く引かれ、
+    /// 同じレートでも大データ（starts 大）より低いスコアになる。
+    #[test]
+    fn shrinkage_pulls_low_sample_toward_prior() {
+        let high_rate = RateTriple {
+            win: 0.8,
+            place: 0.8,
+            show: 0.8,
+        };
+        let few = HorseFactors {
+            course_gate: Some(FactorStat {
+                rate: high_rate,
+                starts: 1,
+            }),
+            horse_surface: None,
+            horse_distance: None,
+            jockey_surface: None,
+            trainer_surface: None,
+            horse_track_condition: None,
+            recent_form: None,
+        };
+        let many = HorseFactors {
+            course_gate: Some(FactorStat {
+                rate: high_rate,
+                starts: 200,
+            }),
+            ..few.clone()
+        };
+        let cfg = shrink_cfg(10.0);
+        let s_few = raw_score(&few, |r| r.win, &cfg);
+        let s_many = raw_score(&many, |r| r.win, &cfg);
+        // prior(=1/14≈0.071) < 少データ < 多データ < 生レート(0.8)。
+        assert!(PRIOR_RATE.win < s_few && s_few < s_many && s_many < 0.8);
+        // 縮約 off では starts に依らず生レートのまま（挙動不変の確認）。
+        let off = EstimationConfig::default();
+        assert!((raw_score(&few, |r| r.win, &off) - 0.8).abs() < 1e-12);
+        assert!((raw_score(&many, |r| r.win, &off) - 0.8).abs() < 1e-12);
+    }
+
+    /// 少データ馬が他の有力馬と同居しても、縮約により win_prob が 0 へ振り切れず
+    /// 正値を保つ（ADR 0002 の `win_prob=0` 緩和）。
+    #[test]
+    fn shrinkage_keeps_low_sample_horse_above_zero() {
+        // 1 頭は実績豊富で高レート、もう 1 頭は少データ（starts=1）で低レート。
+        let strong = HorseFactors {
+            course_gate: Some(FactorStat {
+                rate: RateTriple {
+                    win: 0.6,
+                    place: 0.6,
+                    show: 0.6,
+                },
+                starts: 100,
+            }),
+            horse_surface: None,
+            horse_distance: None,
+            jockey_surface: None,
+            trainer_surface: None,
+            horse_track_condition: None,
+            recent_form: None,
+        };
+        let sparse = HorseFactors {
+            course_gate: Some(FactorStat {
+                rate: RateTriple::default(),
+                starts: 1,
+            }),
+            ..strong.clone()
+        };
+        let entries = vec![
+            (make_entry(1, "ウマ強"), strong),
+            (make_entry(2, "ウマ薄"), sparse),
+        ];
+        let probs = estimate_probabilities_with_config(&entries, &shrink_cfg(10.0));
+        let sparse_win = probs[1].win_prob;
+        // 縮約により prior 方向へ持ち上がり、0 より大きい有限値になる。
+        assert!(sparse_win > 0.0 && sparse_win.is_finite(), "sparse_win={sparse_win}");
+        // ただし強い馬よりは低い（順位は保つ）。
+        assert!(probs[0].win_prob > sparse_win);
+    }
+
+    /// 本番 predict（`predict_race`）が使う `production()` の設定を固定する回帰ガード。
+    /// 縮約 m を取り違えたり recency を誤って有効化すると CI で検知する（#75/ADR 0016）。
+    #[test]
+    fn production_config_is_shrinkage_m10_and_recency_off() {
+        let c = EstimationConfig::production();
+        assert_eq!(
+            c.shrinkage.expect("production は縮約 on").pseudo_count,
+            RECOMMENDED_SHRINKAGE_M
+        );
+        assert!((RECOMMENDED_SHRINKAGE_M - 10.0).abs() < 1e-12);
+        assert!(c.recency.is_none(), "recency は backtest 評価で無効採用（ADR 0016）");
+    }
+
+    // ---- リーセンシー重み付け（#75 Phase B） ----
+
+    fn dc(date: NaiveDate, starts: u32, wins: u32) -> DatedCounts {
+        DatedCounts {
+            date,
+            starts,
+            wins,
+            places: wins,
+            shows: wins,
+        }
+    }
+
+    #[test]
+    fn recency_empty_or_all_future_is_none() {
+        let as_of = NaiveDate::from_ymd_opt(2026, 6, 1).unwrap();
+        assert!(apply_recency_weight(&[], as_of, 30.0).is_none());
+        // as_of 当日・以降のみ → 全て無視され None（リーク防止）。
+        let future = [
+            dc(as_of, 1, 1),
+            dc(NaiveDate::from_ymd_opt(2026, 6, 2).unwrap(), 1, 1),
+        ];
+        assert!(apply_recency_weight(&future, as_of, 30.0).is_none());
+    }
+
+    #[test]
+    fn recency_weights_recent_runs_higher() {
+        let as_of = NaiveDate::from_ymd_opt(2026, 6, 1).unwrap();
+        // 直近 1 走で勝ち、半減期 1 つ前（30 日前）に負け。重みは直近が 2 倍なので
+        // 重み付き勝率は単純平均 0.5 より高くなる。
+        let runs = [
+            dc(NaiveDate::from_ymd_opt(2026, 5, 2).unwrap(), 1, 0), // 30 日前: 着外
+            dc(NaiveDate::from_ymd_opt(2026, 5, 31).unwrap(), 1, 1), // 1 日前: 勝ち
+        ];
+        let fs = apply_recency_weight(&runs, as_of, 30.0).expect("some");
+        assert!(fs.rate.win > 0.5, "直近の勝ちが重く効くべき: {}", fs.rate.win);
+        // 総出走数は時間重みを掛けない素の値。
+        assert_eq!(fs.starts, 2);
+    }
+
+    #[test]
+    fn recency_half_life_halves_weight() {
+        let as_of = NaiveDate::from_ymd_opt(2026, 6, 1).unwrap();
+        // half_life=30 日。直近(1 日前)勝ち1走 + 30 日前負け1走の重み比 ≈ 2:1。
+        // 期待勝率 = w_recent / (w_recent + w_old)。
+        let recent = (as_of - NaiveDate::from_ymd_opt(2026, 5, 31).unwrap()).num_days() as f64;
+        let old = (as_of - NaiveDate::from_ymd_opt(2026, 5, 2).unwrap()).num_days() as f64;
+        let w_recent = 0.5_f64.powf(recent / 30.0);
+        let w_old = 0.5_f64.powf(old / 30.0);
+        let expected = w_recent / (w_recent + w_old);
+        let runs = [
+            dc(NaiveDate::from_ymd_opt(2026, 5, 2).unwrap(), 1, 0),
+            dc(NaiveDate::from_ymd_opt(2026, 5, 31).unwrap(), 1, 1),
+        ];
+        let fs = apply_recency_weight(&runs, as_of, 30.0).expect("some");
+        assert!((fs.rate.win - expected).abs() < 1e-12, "win={} expected={expected}", fs.rate.win);
     }
 
     fn prob(num: u32, win: f64, place: f64, show: f64) -> HorseProbability {
@@ -1023,18 +1358,18 @@ mod tests {
     fn recent_form_keeps_monotonicity_in_estimate() {
         // recent_form を持つ馬・持たない馬が混在しても単調性は保たれる。
         let mut f_with = zero_factors();
-        f_with.course_gate = Some(RateTriple {
+        f_with.course_gate = Some(fs(RateTriple {
             win: 0.3,
             place: 0.4,
             show: 0.5,
-        });
+        }));
         f_with.recent_form = Some(0.9);
         let mut f_without = zero_factors();
-        f_without.course_gate = Some(RateTriple {
+        f_without.course_gate = Some(fs(RateTriple {
             win: 0.2,
             place: 0.3,
             show: 0.4,
-        });
+        }));
         let entries = vec![
             (make_entry(1, "ウマA"), f_with),
             (make_entry(2, "ウマB"), f_without),

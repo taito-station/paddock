@@ -2,8 +2,8 @@ use std::collections::HashMap;
 
 use chrono::NaiveDate;
 use paddock_domain::{
-    BacktestReport, HorseEntry, HorseFactors, HorseOutcome, HorseResult, RaceEvaluation,
-    ResultStatus, evaluate,
+    BacktestReport, EstimationConfig, HorseEntry, HorseFactors, HorseOutcome, HorseResult,
+    RaceEvaluation, ResultStatus, evaluate,
 };
 
 use crate::error::Result;
@@ -29,11 +29,15 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
     /// `blend_alpha = Some(α)` のとき、確率推定の出力を当時の市場オッズ（単勝, `as_of` 制約付き）の
     /// implied 確率と α（モデル重み）でブレンドする（#72）。`None` はモデルのみ。ブレンドは
     /// トップ選好馬・校正集計の前に適用するため、評価はブレンド後の win で行われる。
+    ///
+    /// `config` でベイズ縮約・リーセンシー（#75）の有効化を切り替える。`EstimationConfig::default()`
+    /// は現行挙動（縮約・減衰なし）。パラメータスイープによる before/after 比較に使う。
     pub async fn backtest(
         &self,
         from: NaiveDate,
         to: NaiveDate,
         blend_alpha: Option<f64>,
+        config: EstimationConfig,
     ) -> Result<BacktestReport> {
         let races = self
             .repository
@@ -82,6 +86,11 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
                     trainer: r.trainer.clone(),
                 };
                 let horse = self.repository.horse_stats(&r.horse_name, as_of).await?;
+                // recency 有効時のみ日付付き系列を取得する（#75 Phase B）。基準日・cutoff はレース日。
+                let recency = match config.recency {
+                    Some(_) => Some(self.repository.horse_recency(&r.horse_name, as_of).await?),
+                    None => None,
+                };
                 let jockey = match &r.jockey {
                     Some(j) => Some(self.repository.jockey_stats(j, as_of).await?),
                     None => None,
@@ -105,11 +114,15 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
                     trainer.as_ref(),
                     &race_ctx,
                     recent_form,
+                    recency.as_ref(),
+                    race.date,
+                    &config,
                 );
                 entry_factors.push((entry, factors));
             }
 
-            let probs = paddock_domain::prediction::estimate_probabilities(&entry_factors);
+            let probs =
+                paddock_domain::prediction::estimate_probabilities_with_config(&entry_factors, &config);
             // 市場オッズ（単勝）ブレンド（#72）。α 指定時のみ適用し、以降のトップ選好馬・校正集計は
             // すべてブレンド後の win で行う。市場 win は当時 race_odds を優先し、無ければ PDF 確定
             // 成績の単勝（results.odds, 確定＝クローズ前後のオッズで結果はリークしない）で代替する。

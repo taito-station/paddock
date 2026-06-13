@@ -4,8 +4,9 @@ mod setup;
 use chrono::NaiveDate;
 use clap::Parser;
 use paddock_domain::{
-    BacktestReport, FieldSizeSegment, HorseName, HorseProbability, JockeyName, PopularitySegment,
-    RaceId, ReliabilityBin, Surface, TrainerName, Venue,
+    BacktestReport, EstimationConfig, FieldSizeSegment, HorseName, HorseProbability, JockeyName,
+    PopularitySegment, RaceId, RecencyConfig, ReliabilityBin, ShrinkageConfig, Surface, TrainerName,
+    Venue,
 };
 use paddock_use_case::repository::{
     CourseStatsRow, GroupStat, HorseStatsRow, JockeyStatsRow, TrainerStatsRow,
@@ -103,11 +104,14 @@ async fn main() -> anyhow::Result<()> {
             from,
             to,
             blend_alpha,
+            shrinkage_m,
+            recency_half_life,
         } => {
             let blend_alpha = validate_blend_alpha(blend_alpha)?;
+            let config = build_estimation_config(shrinkage_m, recency_half_life)?;
             let from = parse_date(&from)?;
             let to = parse_date(&to)?;
-            let report = app.interactor.backtest(from, to, blend_alpha).await?;
+            let report = app.interactor.backtest(from, to, blend_alpha, config).await?;
             print_backtest(from, to, &report);
         }
     }
@@ -128,6 +132,34 @@ fn validate_blend_alpha(alpha: Option<f64>) -> anyhow::Result<Option<f64>> {
         anyhow::bail!("--blend-alpha must be within [0, 1], got {a}");
     }
     Ok(alpha)
+}
+
+/// backtest 用の確率推定設定（#75）を CLI フラグから組み立てる。未指定フラグは現行挙動。
+/// `--shrinkage-m` / `--recency-half-life` とも指定時は有限の正数のみ許可
+/// （0 や負値はゼロ除算・無意味なため）。
+fn build_estimation_config(
+    shrinkage_m: Option<f64>,
+    recency_half_life: Option<f64>,
+) -> anyhow::Result<EstimationConfig> {
+    let shrinkage = match shrinkage_m {
+        Some(m) => {
+            if !(m.is_finite() && m > 0.0) {
+                anyhow::bail!("--shrinkage-m must be a finite positive number, got {m}");
+            }
+            Some(ShrinkageConfig { pseudo_count: m })
+        }
+        None => None,
+    };
+    let recency = match recency_half_life {
+        Some(h) => {
+            if !(h.is_finite() && h > 0.0) {
+                anyhow::bail!("--recency-half-life must be a finite positive number, got {h}");
+            }
+            Some(RecencyConfig { half_life_days: h })
+        }
+        None => None,
+    };
+    Ok(EstimationConfig { shrinkage, recency })
 }
 
 /// 候補が複数ある場合に一覧を提示して終了する（ユーザーが絞り込んで再実行）。
