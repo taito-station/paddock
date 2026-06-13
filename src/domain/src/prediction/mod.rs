@@ -473,6 +473,11 @@ fn interval_form(days: i64) -> f64 {
 /// 大敗＝弱い（0.5→0.0）。JRA/netkeiba の着差はその馬と「直前に入線した馬」との局所差であり
 /// 1 着馬からの累積差ではない。負け馬の評価はこの局所差を流用する割り切り（heuristic）で、
 /// 寄与の要否は backtest（main との before/after 比較）で判定する。
+///
+/// 非対称性の注意: JRA PDF 経路では勝ち馬の着差列はブランクで margin=None になる（パーサが
+/// タイム直後の通過順位を着差として弾く）。そのため PDF 由来データでは `position == 1`（加点）
+/// ブランチは実質不活性で、本シグナルは主に「大敗の負け馬を減点」する向きに効く。勝ち馬の加点は
+/// 着差を持つ netkeiba 履歴の取り込み後に機能する。
 fn margin_form(position: u32, margin_lengths: f64) -> f64 {
     let mag = (margin_lengths / MARGIN_CAP_LENGTHS).clamp(0.0, 1.0);
     if position == 1 {
@@ -1451,7 +1456,11 @@ mod tests {
 
     #[test]
     fn parse_margin_invalid_is_none() {
-        for s in ["", "   ", "-", "1/0", "abc", "-1.0"] {
+        // 空・記号のみ・分母0・非数値・負値に加え、整数+分数の分母0（1.1/0）・分子非数値（abc/2）・
+        // 整数部欠落の先頭ドット（.5/2）も None に倒す。
+        for s in [
+            "", "   ", "-", "1/0", "abc", "-1.0", "1.1/0", "abc/2", ".5/2",
+        ] {
             assert!(parse_margin_lengths(s).is_none(), "expected None for {s:?}");
         }
     }

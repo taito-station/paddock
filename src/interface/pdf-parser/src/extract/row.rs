@@ -40,8 +40,10 @@ static SIGN_DELTA_RE: LazyLock<Regex> =
 /// 着差（margin）の数値・分数表記。タイム直後の先頭トークンにのみ適用する。整数（`2`）/分数（`3/4`）/
 /// 整数+分数（`1.1/4`）を許容し、トークン直後が空白か行末のときだけ採る（通過順位 `3-3-2-2` の先頭桁を
 /// 誤って拾わないため）。全角の区切り `．`/`／` も受ける（後段で半角へ正規化）。
+/// 整数部は 1 桁のみ。JRA の数値着差は最大 9 馬身でそれ以上は「大差」表記（キーワード側で拾う）になる
+/// ため、2 桁トークン（通過順位 `10-9-8-8` の先頭 `10` 等）を着差と誤認しないよう 1 桁に絞る。
 static MARGIN_NUM_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^[\s\u{3000}]*(\d{1,2}(?:[.．]\d[/／]\d)?|\d[/／]\d)(?:[\s\u{3000}]|$)").unwrap()
+    Regex::new(r"^[\s\u{3000}]*(\d(?:[.．]\d[/／]\d)?|\d[/／]\d)(?:[\s\u{3000}]|$)").unwrap()
 });
 static ODDS_INLINE_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^\s*(\d{1,4})[.．](\d{1,2})").unwrap());
@@ -297,6 +299,10 @@ fn extract_margin(
     time_match_in_line: Option<(usize, usize, usize)>,
     row: &mut RawRow,
 ) {
+    // Keyword scan runs over the whole chunk (the `〃` layout puts the margin on its own line),
+    // so a horse name that happens to contain a keyword could be misread. The added 大差/同着 are
+    // kanji and never appear in (katakana) JRA horse names, so they are collision-safe; ハナ/アタマ/
+    // クビ keep the pre-existing (low-risk) behavior.
     const MARGIN_KEYWORDS: [&str; 5] = ["ハナ", "アタマ", "クビ", "大差", "同着"];
     for line in chunk.iter() {
         if let Some(kw) = MARGIN_KEYWORDS.iter().find(|kw| line.contains(*kw)) {
@@ -304,7 +310,9 @@ fn extract_margin(
             return;
         }
     }
-    // No keyword: try the numeric/fractional margin right after the time.
+    // No keyword: try the numeric/fractional margin right after the time. Same-time horses ("〃")
+    // have no numeric time, so `time_match_in_line` is None and a numeric margin on that row is not
+    // captured (their margin is usually a keyword, handled above). Known minor gap.
     if let Some((ti, _, end)) = time_match_in_line
         && let Some(c) = MARGIN_NUM_RE.captures(&chunk[ti][end..])
     {
@@ -612,16 +620,26 @@ mod tests {
     }
 
     #[test]
-    fn margin_keyword_ozasa() {
+    fn margin_keyword_big_diff_and_dead_heat() {
         // 大差・同着のキーワードも拾う。
         let big = parse_chunk(&[s("3 4"), s("ウマ牡4鹿57"), s("474± 01：13．1 大差")]);
         assert_eq!(big.margin.as_deref(), Some("大差"));
+        let dead_heat = parse_chunk(&[s("3 4"), s("ウマ牡4鹿57"), s("474± 01：13．1 同着")]);
+        assert_eq!(dead_heat.margin.as_deref(), Some("同着"));
     }
 
     #[test]
     fn margin_skips_passing_order_for_winner() {
         // 勝ち馬は着差ブランクで、タイム直後が通過順位 "3-3-2-2"。先頭桁 "3" を着差と誤認しない。
         let chunk = vec![s("3 4"), s("ウマ牡4鹿57"), s("474± 01：13．1 3-3-2-2")];
+        let row = parse_chunk(&chunk);
+        assert_eq!(row.margin, None);
+    }
+
+    #[test]
+    fn margin_skips_two_digit_passing_order() {
+        // 2桁始まりの通過順位 "10-9-8-8" の先頭 "10" を着差と誤認しない（整数部は1桁に限定）。
+        let chunk = vec![s("3 4"), s("ウマ牡4鹿57"), s("474± 01：13．1 10-9-8-8")];
         let row = parse_chunk(&chunk);
         assert_eq!(row.margin, None);
     }
