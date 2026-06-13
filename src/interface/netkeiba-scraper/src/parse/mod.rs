@@ -8,7 +8,10 @@ mod shutuba;
 
 pub use card::parse_card;
 pub use horse_history::parse_horse_history;
-pub use odds::parse_win_place_odds;
+pub use odds::{
+    parse_exacta_odds, parse_quinella_odds, parse_trifecta_odds, parse_trio_odds,
+    parse_win_place_odds,
+};
 pub use result::parse_race_result;
 pub use shutuba::parse_shutuba;
 

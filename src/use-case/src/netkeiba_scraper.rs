@@ -1,7 +1,8 @@
 use chrono::NaiveDate;
 use paddock_domain::{
-    FinishingPosition, GateNum, HorseId, HorseName, HorseNum, JockeyName, ResultStatus, Surface,
-    TimeSeconds, TrackCondition, TrainerName, Venue,
+    FinishingPosition, GateNum, HorseId, HorseName, HorseNum, JockeyName, OrderedPair,
+    OrderedTriple, Pair, ResultStatus, Surface, TimeSeconds, TrackCondition, Triple, TrainerName,
+    Venue,
 };
 
 use crate::error::Result;
@@ -116,6 +117,32 @@ pub struct FetchedOdds {
     pub place: Vec<FetchedPlaceOdds>,
 }
 
+/// 組合せ券種オッズ 1 点。netkeiba のオッズ API（type=4/6/7/8）由来で、組合せ（ドメインの
+/// `Pair`/`OrderedPair`/`Triple`/`OrderedTriple`）に確定オッズと人気を紐付ける。レース前で
+/// 未確定（`---.-`）の行はパース層で除外済み。
+#[derive(Debug, Clone, PartialEq)]
+pub struct FetchedComboOdds<K> {
+    pub combination: K,
+    pub odds: f64,
+    /// API は組合せ券種にも人気を返すため取り込むが、現状の永続化（`OddsRow`）は組合せ券種の
+    /// 人気を保存しないため後段では未使用。将来 race_odds に人気を残す際に使えるよう保持する。
+    pub popularity: Option<u32>,
+}
+
+/// 馬連・馬単・三連複・三連単のオッズ取得結果（#102）。各券種は独立に空になり得る
+/// （未公開・確定前）。netkeiba は券種ごとに別 API（type=4/6/7/8）なので個別取得して束ねる。
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct FetchedExoticOdds {
+    /// 馬連（無順序ペア）
+    pub quinella: Vec<FetchedComboOdds<Pair>>,
+    /// 馬単（順序付きペア）
+    pub exacta: Vec<FetchedComboOdds<OrderedPair>>,
+    /// 三連複（無順序トリプル）
+    pub trio: Vec<FetchedComboOdds<Triple>>,
+    /// 三連単（順序付きトリプル）
+    pub trifecta: Vec<FetchedComboOdds<OrderedTriple>>,
+}
+
 /// Port for fetching netkeiba pages used to fill in same-day runners' recent form.
 ///
 /// Implementations (Interface layer) own the HTTP fetch, EUC-JP decoding and HTML
@@ -136,4 +163,11 @@ pub trait NetkeibaScraper: Send + Sync {
     /// 単勝・複勝オッズ API から各馬の単勝・複勝オッズと人気を取得する。
     /// レース前でオッズ未確定の行はスキップされ、確定前は空の `FetchedOdds` を返し得る。
     fn fetch_win_place_odds(&self, netkeiba_race_id: &str) -> Result<FetchedOdds>;
+
+    /// 馬連・馬単・三連複・三連単オッズ API（type=4/6/7/8）から組合せ券種オッズを取得する（#102）。
+    /// レース前で未確定の行はスキップされ、確定前は空になり得る。既定実装は空を返す
+    /// （組合せ券種を取得しないスクレイパ実装・テスト用フェイクとの後方互換）。
+    fn fetch_exotic_odds(&self, _netkeiba_race_id: &str) -> Result<FetchedExoticOdds> {
+        Ok(FetchedExoticOdds::default())
+    }
 }

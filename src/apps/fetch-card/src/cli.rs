@@ -5,7 +5,7 @@ use paddock_use_case::{build_race_ids, paddock_race_id_from_netkeiba};
 #[derive(Debug, Parser)]
 #[command(
     name = "paddock-fetch-card",
-    about = "netkeiba から当日の出馬表と単勝オッズを取得して race_cards/horse_entries/race_odds に保存する",
+    about = "netkeiba から当日の出馬表とオッズ（単複・馬連・馬単・三連複・三連単）を取得して race_cards/horse_entries/race_odds に保存する",
     version
 )]
 pub struct Cli {

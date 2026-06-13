@@ -13,7 +13,7 @@ pub struct IngestCardResponse {
     pub card_saved: bool,
     /// 保存した出走馬数（カードをスキップした場合は 0）。
     pub entries_saved: usize,
-    /// 保存したオッズ行数（単勝+複勝。レース前で未確定なら 0）。
+    /// 保存したオッズ行数（単勝・複勝＋馬連・馬単・三連複・三連単。レース前で未確定なら 0）。
     pub odds_saved: usize,
 }
 
@@ -78,23 +78,59 @@ impl<R: Repository, S: NetkeibaScraper> CardInteractor<R, S> {
         }
 
         // 2. オッズ: 常に取得。確定前で空なら保存をスキップ（後で再実行して取り直す想定）。
-        //    netkeiba は単勝と複勝を 1 レスポンスで返すため一括取得し、両方を 1 レコードに詰める。
+        //    単勝・複勝(type=1) は 1 レスポンスで両方、組合せ券種(type=4/6/7/8) は別 API で取得し、
+        //    全券種を 1 レコードにまとめて保存する（#102。キー規約は各ドメイン型の to_key）。
         let odds = self.scraper.fetch_win_place_odds(netkeiba_id)?;
-        let odds_saved = odds.win.len() + odds.place.len();
-        if odds.win.is_empty() && odds.place.is_empty() {
-            tracing::info!(%netkeiba_id, "win/place odds not available yet, skipping odds save");
+        // 組合せ券種はベストエフォート。別 API を 4 本叩くため、その一部が失敗しても
+        // 確定済みの単複保存まで巻き添えにしない（取りこぼし耐性、#102 レビュー反映）。
+        let exotic = self
+            .scraper
+            .fetch_exotic_odds(netkeiba_id)
+            .unwrap_or_else(|e| {
+                tracing::warn!(%netkeiba_id, error = %e, "組合せ券種オッズの取得に失敗、単複のみ保存して継続");
+                Default::default()
+            });
+        let mut rows: Vec<OddsRow> = Vec::with_capacity(
+            odds.win.len()
+                + odds.place.len()
+                + exotic.quinella.len()
+                + exotic.exacta.len()
+                + exotic.trio.len()
+                + exotic.trifecta.len(),
+        );
+        rows.extend(
+            odds.win
+                .iter()
+                .map(|w| OddsRow::win(w.horse_num.value(), w.odds, w.popularity)),
+        );
+        rows.extend(
+            odds.place
+                .iter()
+                .map(|p| OddsRow::place(p.horse_num.value(), p.odds_low, p.odds_high, p.popularity)),
+        );
+        rows.extend(
+            exotic
+                .quinella
+                .iter()
+                .map(|q| OddsRow::quinella(q.combination, q.odds)),
+        );
+        rows.extend(
+            exotic
+                .exacta
+                .iter()
+                .map(|e| OddsRow::exacta(e.combination, e.odds)),
+        );
+        rows.extend(exotic.trio.iter().map(|t| OddsRow::trio(t.combination, t.odds)));
+        rows.extend(
+            exotic
+                .trifecta
+                .iter()
+                .map(|t| OddsRow::trifecta(t.combination, t.odds)),
+        );
+        let odds_saved = rows.len();
+        if rows.is_empty() {
+            tracing::info!(%netkeiba_id, "odds not available yet, skipping odds save");
         } else {
-            // netkeiba fetch-card は type=1（単勝・複勝）のみ取得する。組合せ券種は JRA odds-scraper
-            // 経路（OddsInteractor）で取得・永続化する（#38、キー規約は各ドメイン型の to_key）。
-            let mut rows: Vec<OddsRow> = Vec::with_capacity(odds_saved);
-            rows.extend(
-                odds.win
-                    .iter()
-                    .map(|w| OddsRow::win(w.horse_num.value(), w.odds, w.popularity)),
-            );
-            rows.extend(odds.place.iter().map(|p| {
-                OddsRow::place(p.horse_num.value(), p.odds_low, p.odds_high, p.popularity)
-            }));
             self.repo
                 .save_race_odds(&RaceOddsRecord {
                     race_id,
