@@ -294,6 +294,12 @@ async fn dated_group_by(
     keys: &[(&str, &str)],
     cutoff: Option<&str>,
 ) -> Result<Vec<RecencySeries>> {
+    // `column` は SQL に直接埋め込むため既知リテラルのみ許す（`entity_stats` と同じ二重防御）。
+    // `keys`・`horse_name`・`cutoff` はプレースホルダでバインドする（インジェクション安全）。
+    debug_assert!(
+        matches!(column, "races.surface" | "races.track_condition"),
+        "column must be a known literal, got {column:?}"
+    );
     let mut out = Vec::with_capacity(keys.len());
     for (key, label) in keys {
         let q = format!(
