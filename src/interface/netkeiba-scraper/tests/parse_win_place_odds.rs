@@ -1,3 +1,4 @@
+use netkeiba_scraper::Error;
 use netkeiba_scraper::parse::parse_win_place_odds;
 
 const FIXTURE: &str = include_str!("fixtures/odds_win.json");
@@ -87,7 +88,36 @@ fn rejects_unexpected_status() {
     // 未掲載・対象外（status="NG"）はエラーにする。
     let json = r#"{"status":"NG","data":"","update_count":"0","reason":"history odds empty"}"#;
     let err = parse_win_place_odds(json).expect_err("NG status should error");
+    // メッセージ文言だけでなくエラー種別（Parse）も固定する。
+    assert!(matches!(err, Error::Parse(_)), "err={err}");
     assert!(err.to_string().contains("status=NG"), "err={err}");
+}
+
+#[test]
+fn parses_when_status_key_absent() {
+    // status キーが無い JSON は受理チェックをすり抜け、オッズがあればそのまま取り込む
+    // （fail-open）。この既存挙動を固定し、将来の API 仕様変更時の回帰検知にする。
+    let json = r#"{"data":{"odds":{"1":{"03":["4.2","0.0","1"]}}}}"#;
+    let odds = parse_win_place_odds(json).expect("absent status should parse");
+    assert_eq!(odds.win.len(), 1);
+    assert_eq!(odds.win[0].horse_num.value(), 3);
+    assert!((odds.win[0].odds - 4.2).abs() < 1e-9, "odds={}", odds.win[0].odds);
+}
+
+#[test]
+fn middle_skips_unpriced_rows() {
+    // 前売り中（middle）で一部馬のオッズが未確定（"---.-"）の場合、その行だけスキップし
+    // 確定済みの馬は取り込む。
+    let json = r#"{"status":"middle","data":{"odds":{
+        "1":{"01":["3.5","0.0","1"],"02":["---.-","0.0","0"]},
+        "2":{"01":["1.5","2.1","1"],"02":["---.-","---.-","0"]}
+    }}}"#;
+    let odds = parse_win_place_odds(json).expect("middle with unpriced rows should parse");
+    // 単勝・複勝とも確定済みの馬番1のみが残る。
+    assert_eq!(odds.win.len(), 1);
+    assert_eq!(odds.win[0].horse_num.value(), 1);
+    assert_eq!(odds.place.len(), 1);
+    assert_eq!(odds.place[0].horse_num.value(), 1);
 }
 
 #[test]
