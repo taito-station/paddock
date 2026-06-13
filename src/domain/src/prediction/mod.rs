@@ -411,8 +411,8 @@ const POP_GAP_K: f64 = 0.08;
 const MARGIN_CAP_LENGTHS: f64 = 5.0;
 
 /// 直近 1 走（`prev`、その開催日 `prev_date`）と対象レース日 `race_date` から「前走フォーム」
-/// スコア `[0,1]`（0.5=中立）を算出する。利用できる sub-signal（馬体重変化・前走人気乖離・前走間隔）の
-/// 平均を返す。有効な signal が 1 つも無い場合は `None`（前走情報が乏しい→スコアに寄与させない）。
+/// スコア `[0,1]`（0.5=中立）を算出する。利用できる sub-signal（馬体重変化・前走人気乖離・前走間隔・
+/// 前走着差）の平均を返す。有効な signal が 1 つも無い場合は `None`（前走情報が乏しい→スコアに寄与させない）。
 pub fn recent_form_score(
     prev: &HorseResult,
     prev_date: NaiveDate,
@@ -525,7 +525,8 @@ fn parse_margin_lengths(s: &str) -> Option<f64> {
     t.parse::<f64>().ok().filter(|v| v.is_finite() && *v >= 0.0)
 }
 
-/// `A/B` 形式の分数文字列を解釈する。パース不能・分母 0 は `None`。
+/// `A/B` 形式の分数文字列を解釈する。パース不能・分母 0・負値・非有限は `None`
+/// （小数経路と同じく着差は非負のみ受ける）。
 fn parse_fraction(s: &str) -> Option<f64> {
     let (num, den) = s.split_once('/')?;
     let num: f64 = num.trim().parse().ok()?;
@@ -533,7 +534,8 @@ fn parse_fraction(s: &str) -> Option<f64> {
     if den == 0.0 {
         return None;
     }
-    Some(num / den)
+    let v = num / den;
+    (v.is_finite() && v >= 0.0).then_some(v)
 }
 
 #[cfg(test)]
@@ -1459,7 +1461,7 @@ mod tests {
         // 空・記号のみ・分母0・非数値・負値に加え、整数+分数の分母0（1.1/0）・分子非数値（abc/2）・
         // 整数部欠落の先頭ドット（.5/2）も None に倒す。
         for s in [
-            "", "   ", "-", "1/0", "abc", "-1.0", "1.1/0", "abc/2", ".5/2",
+            "", "   ", "-", "1/0", "abc", "-1.0", "1.1/0", "abc/2", ".5/2", "-1/2",
         ] {
             assert!(parse_margin_lengths(s).is_none(), "expected None for {s:?}");
         }

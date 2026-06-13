@@ -42,6 +42,8 @@ static SIGN_DELTA_RE: LazyLock<Regex> =
 /// 誤って拾わないため）。全角の区切り `．`/`／` も受ける（後段で半角へ正規化）。
 /// 整数部は 1 桁のみ。JRA の数値着差は最大 9 馬身でそれ以上は「大差」表記（キーワード側で拾う）になる
 /// ため、2 桁トークン（通過順位 `10-9-8-8` の先頭 `10` 等）を着差と誤認しないよう 1 桁に絞る。
+/// 小数表記（`0.6` 等）は JRA PDF には現れないため意図的に非対応。`.` の後は必ず分数 `\d/\d` を要求する。
+/// netkeiba 由来の小数着差は domain 側 `parse_margin_lengths` が別途受ける。
 static MARGIN_NUM_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^[\s\u{3000}]*(\d(?:[.．]\d[/／]\d)?|\d[/／]\d)(?:[\s\u{3000}]|$)").unwrap()
 });
