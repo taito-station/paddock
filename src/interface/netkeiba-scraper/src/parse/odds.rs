@@ -13,15 +13,18 @@ pub fn parse_win_place_odds(json: &str) -> Result<FetchedOdds> {
     let root: Value =
         serde_json::from_str(json).map_err(|e| Error::Parse(format!("invalid odds JSON: {e}")))?;
 
-    // 正常時は status="result"。それ以外（API エラー）はレース前の未掲載と区別して
-    // エラーにする（未掲載は status="result" のまま odds が空で返るため別物）。
+    // オッズが正常に掲載されている status を受理する。
+    //   - "result": 確定後。
+    //   - "middle": 発走前の前売り中。全頭の単複オッズがそろった正常な JSON が返る。
+    // それ以外（"NG"=未掲載・対象外など）は API エラーとして弾く。
+    const OK_STATUSES: [&str; 2] = ["result", "middle"];
     if let Some(status) = root
         .get("status")
         .and_then(|s| s.as_str())
-        .filter(|&s| s != "result")
+        .filter(|&s| !OK_STATUSES.contains(&s))
     {
         return Err(Error::Parse(format!(
-            "odds API が result 以外を返しました: status={status}"
+            "odds API が想定外の status を返しました: status={status}"
         )));
     }
 

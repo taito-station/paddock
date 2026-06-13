@@ -1,6 +1,8 @@
 use netkeiba_scraper::parse::parse_win_place_odds;
 
 const FIXTURE: &str = include_str!("fixtures/odds_win.json");
+// 発走前の前売り中（status="middle"）に全頭の単複オッズがそろった JSON（5 頭分）。
+const FIXTURE_MIDDLE: &str = include_str!("fixtures/odds_win_middle.json");
 
 // fixture は race_id 202605030211 の単勝・複勝オッズ JSON（17 頭分）。
 #[test]
@@ -53,6 +55,39 @@ fn parses_all_place_odds() {
     assert!((p14.odds_low - 1.3).abs() < 1e-9, "low={}", p14.odds_low);
     assert!((p14.odds_high - 1.5).abs() < 1e-9, "high={}", p14.odds_high);
     assert_eq!(p14.popularity, Some(1));
+}
+
+#[test]
+fn parses_odds_when_status_is_middle() {
+    // 前売り中（status="middle"）でも全頭の単複オッズを取り込める。
+    let odds = parse_win_place_odds(FIXTURE_MIDDLE).expect("parse middle odds");
+    assert_eq!(odds.win.len(), 5);
+    assert_eq!(odds.place.len(), 5);
+
+    // 馬番5: 単勝 6.5 / 人気2、複勝 2.0 - 3.0。
+    let w5 = odds
+        .win
+        .iter()
+        .find(|o| o.horse_num.value() == 5)
+        .expect("win horse 5");
+    assert!((w5.odds - 6.5).abs() < 1e-9, "odds={}", w5.odds);
+    assert_eq!(w5.popularity, Some(2));
+
+    let p5 = odds
+        .place
+        .iter()
+        .find(|o| o.horse_num.value() == 5)
+        .expect("place horse 5");
+    assert!((p5.odds_low - 2.0).abs() < 1e-9, "low={}", p5.odds_low);
+    assert!((p5.odds_high - 3.0).abs() < 1e-9, "high={}", p5.odds_high);
+}
+
+#[test]
+fn rejects_unexpected_status() {
+    // 未掲載・対象外（status="NG"）はエラーにする。
+    let json = r#"{"status":"NG","data":"","update_count":"0","reason":"history odds empty"}"#;
+    let err = parse_win_place_odds(json).expect_err("NG status should error");
+    assert!(err.to_string().contains("status=NG"), "err={err}");
 }
 
 #[test]
