@@ -124,6 +124,8 @@ pub struct FetchedOdds {
 pub struct FetchedComboOdds<K> {
     pub combination: K,
     pub odds: f64,
+    /// API は組合せ券種にも人気を返すため取り込むが、現状の永続化（`OddsRow`）は組合せ券種の
+    /// 人気を保存しないため後段では未使用。将来 race_odds に人気を残す際に使えるよう保持する。
     pub popularity: Option<u32>,
 }
 

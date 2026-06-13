@@ -78,6 +78,18 @@ fn parses_trifecta_ordered_triples() {
 }
 
 #[test]
+fn skips_unpriced_combo_rows() {
+    // 前売り中に一部の組合せが未確定（"---.-"）の行はスキップし、確定済みのみ取り込む。
+    let json = r#"{"status":"middle","data":{"odds":{"4":{
+        "0407":["21.6","0.0","9"],
+        "0102":["---.-","0.0","--"]
+    }}}}"#;
+    let odds = parse_quinella_odds(json).expect("parse");
+    assert_eq!(odds.len(), 1, "未確定行はスキップされる");
+    assert_eq!(odds[0].combination.to_key(), "4-7");
+}
+
+#[test]
 fn returns_empty_when_pool_absent() {
     // 未公開（券種マップが無い）レース前は空で返す（エラーにしない）。
     let json = r#"{"status":"result","data":{"official_datetime":""}}"#;

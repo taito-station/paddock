@@ -81,8 +81,23 @@ impl<R: Repository, S: NetkeibaScraper> CardInteractor<R, S> {
         //    単勝・複勝(type=1) は 1 レスポンスで両方、組合せ券種(type=4/6/7/8) は別 API で取得し、
         //    全券種を 1 レコードにまとめて保存する（#102。キー規約は各ドメイン型の to_key）。
         let odds = self.scraper.fetch_win_place_odds(netkeiba_id)?;
-        let exotic = self.scraper.fetch_exotic_odds(netkeiba_id)?;
-        let mut rows: Vec<OddsRow> = Vec::new();
+        // 組合せ券種はベストエフォート。別 API を 4 本叩くため、その一部が失敗しても
+        // 確定済みの単複保存まで巻き添えにしない（取りこぼし耐性、#102 レビュー反映）。
+        let exotic = self
+            .scraper
+            .fetch_exotic_odds(netkeiba_id)
+            .unwrap_or_else(|e| {
+                tracing::warn!(%netkeiba_id, error = %e, "組合せ券種オッズの取得に失敗、単複のみ保存して継続");
+                Default::default()
+            });
+        let mut rows: Vec<OddsRow> = Vec::with_capacity(
+            odds.win.len()
+                + odds.place.len()
+                + exotic.quinella.len()
+                + exotic.exacta.len()
+                + exotic.trio.len()
+                + exotic.trifecta.len(),
+        );
         rows.extend(
             odds.win
                 .iter()
