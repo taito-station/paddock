@@ -10,9 +10,10 @@ use std::sync::Mutex;
 use chrono::NaiveDate;
 use paddock_domain::horse_result::{GateNum, HorseName, HorseNum};
 use paddock_domain::{JockeyName, Race, RaceCard, RaceId, Surface, TrainerName, Venue};
+use paddock_domain::{OrderedPair, OrderedTriple, Pair, Triple};
 use paddock_use_case::netkeiba_scraper::{
-    FetchedCard, FetchedEntry, FetchedOdds, FetchedPlaceOdds, FetchedWinOdds, HorsePastRun,
-    NetkeibaScraper, RunnerRef,
+    FetchedCard, FetchedComboOdds, FetchedEntry, FetchedExoticOdds, FetchedOdds, FetchedPlaceOdds,
+    FetchedWinOdds, HorsePastRun, NetkeibaScraper, RunnerRef,
 };
 use paddock_use_case::repository::{
     CourseStatsRow, FetchRecord, HorseStatsRow, JockeyStatsRow, PredictBetRecord,
@@ -29,6 +30,8 @@ struct FakeScraper {
     win: Vec<FetchedWinOdds>,
     /// fetch_win_place_odds が返す複勝オッズ。
     place: Vec<FetchedPlaceOdds>,
+    /// fetch_exotic_odds が返す組合せ券種オッズ（#102）。
+    exotic: FetchedExoticOdds,
     /// fetch_card が呼ばれた回数。
     card_fetches: Mutex<usize>,
 }
@@ -38,12 +41,18 @@ impl FakeScraper {
         Self {
             win,
             place: Vec::new(),
+            exotic: FetchedExoticOdds::default(),
             card_fetches: Mutex::new(0),
         }
     }
 
     fn with_place(mut self, place: Vec<FetchedPlaceOdds>) -> Self {
         self.place = place;
+        self
+    }
+
+    fn with_exotic(mut self, exotic: FetchedExoticOdds) -> Self {
+        self.exotic = exotic;
         self
     }
 }
@@ -106,6 +115,9 @@ impl NetkeibaScraper for FakeScraper {
             win: self.win.clone(),
             place: self.place.clone(),
         })
+    }
+    fn fetch_exotic_odds(&self, _race_id: &str) -> Result<FetchedExoticOdds> {
+        Ok(self.exotic.clone())
     }
 }
 
@@ -308,6 +320,46 @@ async fn saves_win_and_place_odds_in_one_record() {
     assert!((p1.odds - 2.6).abs() < 1e-9);
     assert_eq!(p1.odds_high, Some(4.1));
     assert_eq!(p1.popularity, Some(3));
+}
+
+#[tokio::test]
+async fn saves_exotic_odds_with_combination_keys() {
+    // #102: 馬連・馬単・三連複・三連単も単複と同じ 1 レコードに保存する。
+    let h = |n: u32| HorseNum::try_from(n).unwrap();
+    // 単一クロージャは K を 1 つに固定してしまうため、組合せ型ごとに構築する小関数を使う。
+    fn combo<K>(combination: K, odds: f64) -> FetchedComboOdds<K> {
+        FetchedComboOdds {
+            combination,
+            odds,
+            popularity: None,
+        }
+    }
+    let exotic = FetchedExoticOdds {
+        quinella: vec![combo(Pair::try_from((h(4), h(7))).unwrap(), 21.6)],
+        exacta: vec![combo(OrderedPair::try_from((h(7), h(4))).unwrap(), 31.0)],
+        trio: vec![combo(Triple::try_from((h(4), h(7), h(13))).unwrap(), 32.9)],
+        trifecta: vec![combo(OrderedTriple::try_from((h(7), h(4), h(13))).unwrap(), 154.6)],
+    };
+    let scraper = FakeScraper::new(vec![win_odds(7, 2.6, 1)]).with_exotic(exotic);
+    let interactor = CardInteractor::new(RecordingRepo::with_already(false), scraper);
+
+    let resp = interactor.ingest(NK_ID, race_id(), false).await.unwrap();
+
+    // 単勝 1 + 馬連 1 + 馬単 1 + 三連複 1 + 三連単 1 = 5 行。
+    assert_eq!(resp.odds_saved, 5);
+    let odds = interactor.repo.saved_odds.lock().unwrap();
+    let rows = &odds[0].rows;
+    let key_of = |bt: &str| {
+        rows.iter()
+            .find(|r| r.bet_type == bt)
+            .unwrap()
+            .combination_key
+            .clone()
+    };
+    assert_eq!(key_of("quinella"), "4-7");
+    assert_eq!(key_of("exacta"), "7>4"); // 順序保持
+    assert_eq!(key_of("trio"), "4-7-13");
+    assert_eq!(key_of("trifecta"), "7>4>13");
 }
 
 #[tokio::test]

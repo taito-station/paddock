@@ -9,7 +9,7 @@ use std::time::Duration;
 use paddock_domain::HorseId;
 use paddock_use_case::Result as UcResult;
 use paddock_use_case::netkeiba_scraper::{
-    FetchedCard, FetchedOdds, HorsePastRun, NetkeibaScraper, RunnerRef,
+    FetchedCard, FetchedExoticOdds, FetchedOdds, HorsePastRun, NetkeibaScraper, RunnerRef,
 };
 
 use crate::error::{Error, Result};
@@ -71,6 +71,17 @@ impl UreqNetkeibaScraper {
         tracing::debug!(race_id = %netkeiba_race_id, "fetching netkeiba race result");
         let html = fetch_decoded(&self.agent, &url)?;
         Ok(parse::parse_race_result(&html, netkeiba_race_id)?)
+    }
+
+    /// オッズ API を券種 `type` 指定で GET し、UTF-8 JSON を返す（#102）。
+    /// 単勝・複勝(type=1) と組合せ券種(type=4/6/7/8) で URL 構成は共通。
+    fn fetch_odds_json(&self, netkeiba_race_id: &str, odds_type: u8) -> Result<String> {
+        std::thread::sleep(self.delay);
+        let url =
+            format!("{WIN_ODDS_URL}?race_id={netkeiba_race_id}&type={odds_type}&action=update");
+        tracing::debug!(race_id = %netkeiba_race_id, odds_type, "fetching netkeiba odds");
+        // オッズ API は UTF-8 JSON。EUC-JP デコードしない。
+        fetch_utf8(&self.agent, &url)
     }
 }
 
@@ -136,14 +147,23 @@ impl NetkeibaScraper for UreqNetkeibaScraper {
     }
 
     fn fetch_win_place_odds(&self, netkeiba_race_id: &str) -> UcResult<FetchedOdds> {
-        std::thread::sleep(self.delay);
         // type=1 のレスポンスに単勝(odds["1"])と複勝(odds["2"])が同梱されるため 1 回の GET で両方取る。
-        let url = format!(
-            "{WIN_ODDS_URL}?race_id={netkeiba_race_id}&type=1&action=update"
-        );
-        tracing::debug!(race_id = %netkeiba_race_id, "fetching netkeiba win/place odds");
-        // オッズ API は UTF-8 JSON。EUC-JP デコードしない。
-        let json = fetch_utf8(&self.agent, &url)?;
+        let json = self.fetch_odds_json(netkeiba_race_id, 1)?;
         Ok(parse::parse_win_place_odds(&json)?)
+    }
+
+    fn fetch_exotic_odds(&self, netkeiba_race_id: &str) -> UcResult<FetchedExoticOdds> {
+        // 馬連・馬単・三連複・三連単は券種ごとに別 API（type=4/6/7/8）。順に取得して束ねる。
+        // 取得間に delay が挟まる（fetch_odds_json 内）。
+        let quinella = parse::parse_quinella_odds(&self.fetch_odds_json(netkeiba_race_id, 4)?)?;
+        let exacta = parse::parse_exacta_odds(&self.fetch_odds_json(netkeiba_race_id, 6)?)?;
+        let trio = parse::parse_trio_odds(&self.fetch_odds_json(netkeiba_race_id, 7)?)?;
+        let trifecta = parse::parse_trifecta_odds(&self.fetch_odds_json(netkeiba_race_id, 8)?)?;
+        Ok(FetchedExoticOdds {
+            quinella,
+            exacta,
+            trio,
+            trifecta,
+        })
     }
 }
