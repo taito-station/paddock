@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use chrono::NaiveDate;
 use paddock_domain::{
-    HorseEntry, HorseFactors, HorseName, HorseProbability, RaceId, RateTriple, Surface,
+    FactorStat, HorseEntry, HorseFactors, HorseName, HorseProbability, RaceId, RateTriple, Surface,
     TrackCondition,
 };
 
@@ -73,8 +73,12 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
         }
 
         // estimate_probabilities が win→1.0 / place→2.0 / show→3.0 正規化 + 累積 max 単調化を行い、
-        // win_prob ≤ place_prob ≤ show_prob を保証する（ADR 0007）。
-        let probs = paddock_domain::prediction::estimate_probabilities(&entry_factors);
+        // win_prob ≤ place_prob ≤ show_prob を保証する（ADR 0007）。本番経路は #75 で採用した
+        // ベイズ縮約（m=10）を有効にし、少データ馬の過信（win_prob=0 を含む）を緩和する。
+        let probs = paddock_domain::prediction::estimate_probabilities_with_config(
+            &entry_factors,
+            &paddock_domain::EstimationConfig::production(),
+        );
 
         // 市場オッズ（単勝）ブレンド（#72）。α<1.0 のときのみ最新オッズスナップショットを取得する
         // （α>=1.0・非有限はブレンド無効なので DB クエリを省く）。
@@ -155,17 +159,21 @@ pub(crate) fn build_factors(
     }
 }
 
-/// label 一致の GroupStat を RateTriple へ変換する。一致なし・出走 0 件は `None` を返し、
-/// 呼び出し側が「実績なし」を 0 レートと区別できるようにする（#73 で導入、#81 で全 factor 共通化）。
+/// label 一致の GroupStat を `FactorStat`（レート + 出走数）へ変換する。一致なし・出走 0 件は
+/// `None` を返し、呼び出し側が「実績なし」を 0 レートと区別できるようにする（#73 で導入、
+/// #81 で全 factor 共通化）。`starts` はベイズ縮約の信頼度重みに使う（#75）。
 /// 前提: groups 内で label は一意（rdb-gateway の `group_by` が固定キーごとに 1 行生成する）。
-fn stat_to_triple_opt(groups: &[GroupStat], label: &str) -> Option<RateTriple> {
+fn stat_to_triple_opt(groups: &[GroupStat], label: &str) -> Option<FactorStat> {
     groups
         .iter()
         .find(|g| g.label == label && g.starts > 0)
-        .map(|g| RateTriple {
-            win: g.win_rate(),
-            place: g.place_rate(),
-            show: g.show_rate(),
+        .map(|g| FactorStat {
+            rate: RateTriple {
+                win: g.win_rate(),
+                place: g.place_rate(),
+                show: g.show_rate(),
+            },
+            starts: g.starts,
         })
 }
 
