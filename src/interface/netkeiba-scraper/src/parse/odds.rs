@@ -104,13 +104,16 @@ fn parse_combo_odds<K>(
         return Ok(Vec::new());
     };
 
-    // 単勝・複勝（馬番昇順ソート）と同様に出力順を安定させる。netkeiba のゼロ詰め数字キーは
-    // 文字列昇順＝組合せの自然順になるため、キー順に処理して JSON オブジェクトの並びに依存しない。
+    // 単勝・複勝（馬番昇順ソート）と同様に出力順を安定させる。ここでソートするのは netkeiba の
+    // 生キー（"0407" 等、馬番 2 桁ゼロ詰め）であり、ドメインの to_key（"4-7"）順ではないが、
+    // ゼロ詰め固定なので文字列昇順＝馬番昇順に一致する。JSON オブジェクトの並びに依存しない。
     let mut entries: Vec<(&String, &Value)> = map.iter().collect();
     entries.sort_by(|a, b| a.0.cmp(b.0));
 
     let mut out = Vec::new();
     for (key, value) in entries {
+        // 馬番として不正なキー・配列でない値・未確定（"---.-" 等パース不能）のオッズ行は
+        // スキップする（単勝・複勝パーサと同じ方針。レース前は一部のみ確定し得る）。
         let Some(combination) = build(key) else {
             continue;
         };

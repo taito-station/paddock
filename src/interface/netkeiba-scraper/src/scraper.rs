@@ -153,17 +153,41 @@ impl NetkeibaScraper for UreqNetkeibaScraper {
     }
 
     fn fetch_exotic_odds(&self, netkeiba_race_id: &str) -> UcResult<FetchedExoticOdds> {
-        // 馬連・馬単・三連複・三連単は券種ごとに別 API（type=4/6/7/8）。順に取得して束ねる。
-        // 取得間に delay が挟まる（fetch_odds_json 内）。
-        let quinella = parse::parse_quinella_odds(&self.fetch_odds_json(netkeiba_race_id, 4)?)?;
-        let exacta = parse::parse_exacta_odds(&self.fetch_odds_json(netkeiba_race_id, 6)?)?;
-        let trio = parse::parse_trio_odds(&self.fetch_odds_json(netkeiba_race_id, 7)?)?;
-        let trifecta = parse::parse_trifecta_odds(&self.fetch_odds_json(netkeiba_race_id, 8)?)?;
+        // 馬連・馬単・三連複・三連単は券種ごとに別 API（type=4/6/7/8）。取得間に delay が挟まる
+        // ため 1 レースあたり 4 回の待ちが加わる。**券種ごとにベストエフォート**: 1 本の API が
+        // 失敗しても他券種や手前の取得分を巻き添えにせず、取れた券種だけ返す（#102 レビュー反映）。
         Ok(FetchedExoticOdds {
-            quinella,
-            exacta,
-            trio,
-            trifecta,
+            quinella: self.fetch_one_exotic(netkeiba_race_id, 4, parse::parse_quinella_odds),
+            exacta: self.fetch_one_exotic(netkeiba_race_id, 6, parse::parse_exacta_odds),
+            trio: self.fetch_one_exotic(netkeiba_race_id, 7, parse::parse_trio_odds),
+            trifecta: self.fetch_one_exotic(netkeiba_race_id, 8, parse::parse_trifecta_odds),
         })
+    }
+}
+
+impl UreqNetkeibaScraper {
+    /// 組合せ券種 1 種を取得・パースする。失敗（HTTP/想定外 status 等）は warn ログを残して
+    /// 空 Vec に倒し、他券種の取得を継続させる（券種単位のベストエフォート、#102）。
+    fn fetch_one_exotic<T>(
+        &self,
+        netkeiba_race_id: &str,
+        odds_type: u8,
+        parse: impl Fn(&str) -> Result<Vec<T>>,
+    ) -> Vec<T> {
+        match self
+            .fetch_odds_json(netkeiba_race_id, odds_type)
+            .and_then(|json| parse(&json))
+        {
+            Ok(rows) => rows,
+            Err(e) => {
+                tracing::warn!(
+                    race_id = %netkeiba_race_id,
+                    odds_type,
+                    error = %e,
+                    "組合せ券種オッズの取得に失敗、当該券種をスキップして継続"
+                );
+                Vec::new()
+            }
+        }
     }
 }

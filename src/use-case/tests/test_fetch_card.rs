@@ -32,6 +32,8 @@ struct FakeScraper {
     place: Vec<FetchedPlaceOdds>,
     /// fetch_exotic_odds が返す組合せ券種オッズ（#102）。
     exotic: FetchedExoticOdds,
+    /// true なら fetch_exotic_odds が Err を返す（組合せ取得失敗のベストエフォート検証用）。
+    exotic_err: bool,
     /// fetch_card が呼ばれた回数。
     card_fetches: Mutex<usize>,
 }
@@ -42,6 +44,7 @@ impl FakeScraper {
             win,
             place: Vec::new(),
             exotic: FetchedExoticOdds::default(),
+            exotic_err: false,
             card_fetches: Mutex::new(0),
         }
     }
@@ -53,6 +56,11 @@ impl FakeScraper {
 
     fn with_exotic(mut self, exotic: FetchedExoticOdds) -> Self {
         self.exotic = exotic;
+        self
+    }
+
+    fn with_exotic_err(mut self) -> Self {
+        self.exotic_err = true;
         self
     }
 }
@@ -117,6 +125,9 @@ impl NetkeibaScraper for FakeScraper {
         })
     }
     fn fetch_exotic_odds(&self, _race_id: &str) -> Result<FetchedExoticOdds> {
+        if self.exotic_err {
+            return Err(paddock_use_case::Error::Internal("exotic odds API down".into()));
+        }
         Ok(self.exotic.clone())
     }
 }
@@ -360,6 +371,29 @@ async fn saves_exotic_odds_with_combination_keys() {
     assert_eq!(key_of("exacta"), "7>4"); // 順序保持
     assert_eq!(key_of("trio"), "4-7-13");
     assert_eq!(key_of("trifecta"), "7>4>13");
+}
+
+#[tokio::test]
+async fn exotic_fetch_error_still_saves_win_place() {
+    // #102: 組合せ券種の取得が失敗しても、確定済みの単複は保存される（ベストエフォート）。
+    let scraper = FakeScraper::new(vec![win_odds(1, 7.9, 3), win_odds(2, 2.9, 1)])
+        .with_place(vec![place_odds(1, 2.6, 4.1, 3)])
+        .with_exotic_err();
+    let interactor = CardInteractor::new(RecordingRepo::with_already(false), scraper);
+
+    let resp = interactor.ingest(NK_ID, race_id(), false).await.unwrap();
+
+    // 単勝 2 + 複勝 1 = 3 行。組合せは取得失敗で 0 行だが ingest は成功する。
+    assert_eq!(resp.odds_saved, 3);
+    let odds = interactor.repo.saved_odds.lock().unwrap();
+    let rows = &odds[0].rows;
+    assert_eq!(rows.iter().filter(|r| r.bet_type == "win").count(), 2);
+    assert_eq!(rows.iter().filter(|r| r.bet_type == "place").count(), 1);
+    assert!(
+        rows.iter()
+            .all(|r| r.bet_type == "win" || r.bet_type == "place"),
+        "組合せ券種の行は無い"
+    );
 }
 
 #[tokio::test]
