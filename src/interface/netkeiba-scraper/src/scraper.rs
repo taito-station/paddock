@@ -83,6 +83,31 @@ impl UreqNetkeibaScraper {
         // オッズ API は UTF-8 JSON。EUC-JP デコードしない。
         fetch_utf8(&self.agent, &url)
     }
+
+    /// 組合せ券種 1 種を取得・パースする。失敗（HTTP/想定外 status 等）は warn ログを残して
+    /// 空 Vec に倒し、他券種の取得を継続させる（券種単位のベストエフォート、#102）。
+    fn fetch_one_exotic<T>(
+        &self,
+        netkeiba_race_id: &str,
+        odds_type: u8,
+        parse: impl Fn(&str) -> Result<Vec<T>>,
+    ) -> Vec<T> {
+        match self
+            .fetch_odds_json(netkeiba_race_id, odds_type)
+            .and_then(|json| parse(&json))
+        {
+            Ok(rows) => rows,
+            Err(e) => {
+                tracing::warn!(
+                    race_id = %netkeiba_race_id,
+                    odds_type,
+                    error = %e,
+                    "組合せ券種オッズの取得に失敗、当該券種をスキップして継続"
+                );
+                Vec::new()
+            }
+        }
+    }
 }
 
 /// URL を GET し、EUC-JP のレスポンスボディを UTF-8 へデコードして返す。
@@ -162,32 +187,5 @@ impl NetkeibaScraper for UreqNetkeibaScraper {
             trio: self.fetch_one_exotic(netkeiba_race_id, 7, parse::parse_trio_odds),
             trifecta: self.fetch_one_exotic(netkeiba_race_id, 8, parse::parse_trifecta_odds),
         })
-    }
-}
-
-impl UreqNetkeibaScraper {
-    /// 組合せ券種 1 種を取得・パースする。失敗（HTTP/想定外 status 等）は warn ログを残して
-    /// 空 Vec に倒し、他券種の取得を継続させる（券種単位のベストエフォート、#102）。
-    fn fetch_one_exotic<T>(
-        &self,
-        netkeiba_race_id: &str,
-        odds_type: u8,
-        parse: impl Fn(&str) -> Result<Vec<T>>,
-    ) -> Vec<T> {
-        match self
-            .fetch_odds_json(netkeiba_race_id, odds_type)
-            .and_then(|json| parse(&json))
-        {
-            Ok(rows) => rows,
-            Err(e) => {
-                tracing::warn!(
-                    race_id = %netkeiba_race_id,
-                    odds_type,
-                    error = %e,
-                    "組合せ券種オッズの取得に失敗、当該券種をスキップして継続"
-                );
-                Vec::new()
-            }
-        }
     }
 }

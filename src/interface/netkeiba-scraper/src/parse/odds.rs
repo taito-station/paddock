@@ -212,7 +212,8 @@ fn parse_three(key: &str) -> Option<(HorseNum, HorseNum, HorseNum)> {
 }
 
 /// オッズ文字列を f64 にする。組合せ券種の高額オッズはカンマ区切り（例 `"1,141.1"`）の
-/// ことがあるため除去してからパースする。`"---.-"` 等はパース不能で `None`。
+/// ことがあるため除去してからパースする。単勝・複勝にカンマは通常出ないため除去は無害。
+/// `"---.-"` 等はパース不能で `None`。
 fn str_f64(v: Option<&Value>) -> Option<f64> {
     v.and_then(|v| v.as_str())
         .and_then(|s| s.replace(',', "").parse::<f64>().ok())
