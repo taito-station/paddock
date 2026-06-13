@@ -1229,6 +1229,7 @@ dependencies = [
 name = "odds-scraper"
 version = "0.1.0"
 dependencies = [
+ "encoding_rs",
  "paddock-domain",
  "paddock-use-case",
  "scraper",
