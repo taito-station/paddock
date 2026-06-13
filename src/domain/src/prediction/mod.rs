@@ -311,7 +311,8 @@ pub fn apply_recency_weight(
         w_wins += w * r.wins as f64;
         w_places += w * r.places as f64;
         w_shows += w * r.shows as f64;
-        total_starts += r.starts;
+        // 実データでは 1 頭の生涯出走数は高々数十だが、契約外の入力でも安全側に倒す。
+        total_starts = total_starts.saturating_add(r.starts);
     }
     if w_starts <= 0.0 {
         return None;
