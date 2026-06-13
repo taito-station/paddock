@@ -1,5 +1,6 @@
 //! 成績 PDF の騎手列・調教師列を `mutool draw -F stext.json`（x/y 座標 + font サイズ付き）から
-//! 抽出する。騎手は `parse_jockeys`、調教師は `parse_trainers`（x 帯・size 帯のみ差し替え）。
+//! 抽出する。共通骨格 `parse_column`/`column_for` に対し、騎手は `parse_jockeys`、調教師は
+//! `parse_trainers` が x 帯・size 帯（とログ文言）のみ差し替えて渡す。
 //!
 //! プレーンテキスト（`-F text`）は列の x 座標と font サイズを失い、騎手名の 2 文字目と隣の
 //! 馬主名が区切り無しで 1 行に連結してしまう（例 `裕信本山`）。stext.json には座標とサイズが
@@ -123,34 +124,44 @@ fn side_of(x: f64) -> u8 {
     if x < COL_SPLIT_X { 0 } else { 1 }
 }
 
-/// stext.json から騎手インデックスを構築する。パース失敗時は空（呼び出し側で
-/// 既存ヒューリスティックにフォールバック）。
-pub fn parse_jockeys(stext_json: &str) -> JockeyIndex {
+/// stext.json から列インデックス（`race_num -> (horse_num -> 名前)`）を構築する共通骨格。
+/// 騎手・調教師の差分（列抽出関数 `extract`・ログ文言）だけを引数で受け取り、走査骨格
+/// （パース → `flatten` → `race_numbers` → `horse_rows` ループ → 0 件ログ）を共有する。
+///
+/// - `parse_err_msg`: JSON パース失敗時の debug ログ本文（空文字列入力時は静かに無視）。
+/// - `empty_msg`: トークンはあるのに 0 件だった場合（レイアウト退行の疑い）の debug ログ本文。
+/// - `extract`: トークン列と馬番アンカー行（toks, page, row_y, hn_x）から 1 件の名前を取り出す列抽出関数。
+fn parse_column(
+    stext_json: &str,
+    parse_err_msg: &str,
+    empty_msg: &str,
+    extract: impl Fn(&[Tok], usize, f64, f64) -> Option<String>,
+) -> HashMap<u32, HashMap<u32, String>> {
     let doc: StextDoc = match serde_json::from_str(stext_json) {
         Ok(d) => d,
         Err(e) => {
             // 空文字列（mutool 失敗）は best-effort なので静かに、非空なら JSON 破損として
             // ログする（レイアウト退行=0件ログ と切り分けられるように）。
             if !stext_json.is_empty() {
-                tracing::debug!(error = %e, "stext.json のパースに失敗。騎手はフォールバック抽出");
+                tracing::debug!(error = %e, "{}", parse_err_msg);
             }
-            return JockeyIndex::new();
+            return HashMap::new();
         }
     };
     let toks = flatten(&doc);
     let col_race = race_numbers(&toks);
 
-    let mut index: JockeyIndex = HashMap::new();
+    let mut index: HashMap<u32, HashMap<u32, String>> = HashMap::new();
     for (page, side, row_y, horse_num, hn_x) in horse_rows(&toks) {
         let Some(&race_num) = col_race.get(&(page, side)) else {
             continue;
         };
-        if let Some(jockey) = jockey_for(&toks, page, row_y, hn_x) {
+        if let Some(name) = extract(&toks, page, row_y, hn_x) {
             index
                 .entry(race_num)
                 .or_default()
                 .entry(horse_num)
-                .or_insert(jockey);
+                .or_insert(name);
         }
     }
     // レイアウト定数は実測ハードコードのため、開催場・年度差でレイアウトが変わると
@@ -158,12 +169,30 @@ pub fn parse_jockeys(stext_json: &str) -> JockeyIndex {
     // （取り込み自体は既存ヒューリスティックのフォールバックで継続する）。
     let total: usize = index.values().map(|m| m.len()).sum();
     if total == 0 && !toks.is_empty() {
-        tracing::debug!(
-            tokens = toks.len(),
-            "stext からの騎手抽出が 0 件。座標レイアウトが想定と異なる可能性"
-        );
+        tracing::debug!(tokens = toks.len(), "{}", empty_msg);
     }
     index
+}
+
+/// stext.json から騎手インデックスを構築する。パース失敗時は空（呼び出し側で
+/// 既存ヒューリスティックにフォールバック）。
+pub fn parse_jockeys(stext_json: &str) -> JockeyIndex {
+    parse_column(
+        stext_json,
+        "stext.json のパースに失敗。騎手はフォールバック抽出",
+        "stext からの騎手抽出が 0 件。座標レイアウトが想定と異なる可能性",
+        |toks, page, row_y, hn_x| {
+            column_for(
+                toks,
+                page,
+                row_y,
+                hn_x,
+                JOCKEY_OFFSET_LO,
+                JOCKEY_OFFSET_HI,
+                |size| size >= NAME_SIZE_MIN,
+            )
+        },
+    )
 }
 
 fn flatten(doc: &StextDoc) -> Vec<Tok> {
@@ -234,16 +263,30 @@ fn horse_rows(toks: &[Tok]) -> Vec<(usize, u8, f64, u32, f64)> {
     rows
 }
 
-/// 馬番アンカーと同じ行（y 近傍）の騎手列トークンを連結して騎手名を作る。
-fn jockey_for(toks: &[Tok], page: usize, row_y: f64, hn_x: f64) -> Option<String> {
-    let lo = hn_x + JOCKEY_OFFSET_LO;
-    let hi = hn_x + JOCKEY_OFFSET_HI;
+/// 馬番アンカーと同じ行（y 近傍）の列トークンを連結して名前を作る、騎手・調教師共通の抽出。
+/// 差分は **馬番グリフ x からの相対オフセット帯**（`offset_lo`/`offset_hi`）と
+/// **font サイズ条件**（`size_ok`）の 2 点のみ。帯でフィルタ → x 昇順ソート → `name_token`
+/// 連結 → トリム、という骨格は両者で共通。
+///
+/// - 騎手: `JOCKEY_OFFSET_LO/HI` + `size >= NAME_SIZE_MIN`（サイズ上限なし）。
+/// - 調教師: `TRAINER_OFFSET_LO/HI` + `TRAINER_SIZE`（上限 5.5 で jockey・馬主の size 6 を除外）。
+fn column_for(
+    toks: &[Tok],
+    page: usize,
+    row_y: f64,
+    hn_x: f64,
+    offset_lo: f64,
+    offset_hi: f64,
+    size_ok: impl Fn(f64) -> bool,
+) -> Option<String> {
+    let lo = hn_x + offset_lo;
+    let hi = hn_x + offset_hi;
 
     let mut parts: Vec<(f64, &str)> = toks
         .iter()
         .filter(|t| {
             t.page == page
-                && t.size >= NAME_SIZE_MIN
+                && size_ok(t.size)
                 && (t.y - row_y).abs() <= ROW_Y_TOL
                 && lo <= t.x
                 && t.x <= hi
@@ -267,76 +310,25 @@ fn jockey_for(toks: &[Tok], page: usize, row_y: f64, hn_x: f64) -> Option<String
     Some(name)
 }
 
-/// stext.json から調教師インデックスを構築する。`parse_jockeys` と同構造で、x 帯と
-/// size 帯のみ調教師用に差し替える。パース失敗時は空（呼び出し側で trainer なし扱い）。
+/// stext.json から調教師インデックスを構築する。`parse_jockeys` と同骨格（`parse_column`）で、
+/// 列抽出の x 帯と size 帯のみ調教師用に差し替える。パース失敗時は空（呼び出し側で trainer なし扱い）。
 pub fn parse_trainers(stext_json: &str) -> TrainerIndex {
-    let doc: StextDoc = match serde_json::from_str(stext_json) {
-        Ok(d) => d,
-        Err(e) => {
-            if !stext_json.is_empty() {
-                tracing::debug!(error = %e, "stext.json のパースに失敗。調教師は未取得");
-            }
-            return TrainerIndex::new();
-        }
-    };
-    let toks = flatten(&doc);
-    let col_race = race_numbers(&toks);
-
-    let mut index: TrainerIndex = HashMap::new();
-    for (page, side, row_y, horse_num, hn_x) in horse_rows(&toks) {
-        let Some(&race_num) = col_race.get(&(page, side)) else {
-            continue;
-        };
-        if let Some(trainer) = trainer_for(&toks, page, row_y, hn_x) {
-            index
-                .entry(race_num)
-                .or_default()
-                .entry(horse_num)
-                .or_insert(trainer);
-        }
-    }
-    let total: usize = index.values().map(|m| m.len()).sum();
-    if total == 0 && !toks.is_empty() {
-        tracing::debug!(
-            tokens = toks.len(),
-            "stext からの調教師抽出が 0 件。座標レイアウトが想定と異なる可能性"
-        );
-    }
-    index
-}
-
-/// 馬番アンカーと同じ行（y 近傍）の調教師列トークンを連結して調教師名を作る。
-/// `jockey_for` と同型だが、x 帯（`TRAINER_OFFSET_*`）と size 帯（`TRAINER_SIZE`）を使う。
-fn trainer_for(toks: &[Tok], page: usize, row_y: f64, hn_x: f64) -> Option<String> {
-    let lo = hn_x + TRAINER_OFFSET_LO;
-    let hi = hn_x + TRAINER_OFFSET_HI;
-
-    let mut parts: Vec<(f64, &str)> = toks
-        .iter()
-        .filter(|t| {
-            t.page == page
-                && TRAINER_SIZE.contains(&t.size)
-                && (t.y - row_y).abs() <= ROW_Y_TOL
-                && lo <= t.x
-                && t.x <= hi
-        })
-        .map(|t| (t.x, t.text.as_str()))
-        .collect();
-    parts.sort_by(|a, b| a.0.total_cmp(&b.0));
-
-    let mut name = String::new();
-    for (_, text) in parts {
-        let part = name_token(text);
-        if part.is_empty() {
-            continue;
-        }
-        name.push_str(&part);
-    }
-    let name = name.trim().to_string();
-    if name.is_empty() {
-        return None;
-    }
-    Some(name)
+    parse_column(
+        stext_json,
+        "stext.json のパースに失敗。調教師は未取得",
+        "stext からの調教師抽出が 0 件。座標レイアウトが想定と異なる可能性",
+        |toks, page, row_y, hn_x| {
+            column_for(
+                toks,
+                page,
+                row_y,
+                hn_x,
+                TRAINER_OFFSET_LO,
+                TRAINER_OFFSET_HI,
+                |size| TRAINER_SIZE.contains(&size),
+            )
+        },
+    )
 }
 
 /// 1 トークンから減量印を除去し、馬主マーカーで打ち切る。
