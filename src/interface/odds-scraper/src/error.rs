@@ -6,8 +6,6 @@ pub enum Error {
     Fetch(String),
     #[error("parse error: {0}")]
     Parse(String),
-    #[error("io error: {0}")]
-    Io(#[from] std::io::Error),
     #[error("domain error: {0}")]
     Domain(#[from] paddock_domain::Error),
 }
@@ -21,10 +19,8 @@ impl From<Error> for paddock_use_case::Error {
             Error::Parse(_) | Error::Domain(_) => {
                 paddock_use_case::Error::InvalidArgument(value.to_string())
             }
-            // Network / IO failures are infrastructure problems.
-            Error::Fetch(_) | Error::Io(_) => {
-                paddock_use_case::Error::Internal(value.to_string())
-            }
+            // Network / fetch failures are infrastructure problems.
+            Error::Fetch(_) => paddock_use_case::Error::Internal(value.to_string()),
         }
     }
 }
