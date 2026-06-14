@@ -75,9 +75,9 @@ impl Repository for MockRepo {
     async fn upsert_horse_history(
         &self,
         _horse_id: &paddock_domain::HorseId,
-        _runs: &[paddock_use_case::HorsePastRun],
-    ) -> Result<()> {
-        Ok(())
+        runs: &[paddock_use_case::HorsePastRun],
+    ) -> Result<usize> {
+        Ok(runs.len())
     }
     async fn backfill_results_horse_ids(&self) -> Result<u64> {
         Ok(0)
@@ -415,9 +415,9 @@ impl Repository for HistoryRepo {
     async fn upsert_horse_history(
         &self,
         _horse_id: &paddock_domain::HorseId,
-        _runs: &[paddock_use_case::HorsePastRun],
-    ) -> Result<()> {
-        Ok(())
+        runs: &[paddock_use_case::HorsePastRun],
+    ) -> Result<usize> {
+        Ok(runs.len())
     }
     async fn backfill_results_horse_ids(&self) -> Result<u64> {
         Ok(0)

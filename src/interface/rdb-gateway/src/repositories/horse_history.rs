@@ -15,11 +15,12 @@ pub async fn upsert_horse_history(
     pool: &SqlitePool,
     horse_id: &HorseId,
     runs: &[HorsePastRun],
-) -> Result<()> {
+) -> Result<usize> {
     if runs.is_empty() {
-        return Ok(());
+        return Ok(0);
     }
     let mut tx = pool.begin().await?;
+    let mut saved = 0usize;
 
     // horses マスタ: 馬名は同一馬の全 run で一致するため先頭を採用。
     sqlx::query(
@@ -110,8 +111,9 @@ pub async fn upsert_horse_history(
         .bind(run.popularity.map(|p| p as i64))
         .execute(&mut *tx)
         .await?;
+        saved += 1;
     }
 
     tx.commit().await?;
-    Ok(())
+    Ok(saved)
 }

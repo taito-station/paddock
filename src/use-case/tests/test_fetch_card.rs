@@ -182,7 +182,7 @@ impl Repository for RecordingRepo {
         &self,
         _horse_id: &paddock_domain::HorseId,
         _runs: &[paddock_use_case::HorsePastRun],
-    ) -> Result<()> {
+    ) -> Result<usize> {
         unimplemented!()
     }
     async fn backfill_results_horse_ids(&self) -> Result<u64> {

@@ -72,10 +72,12 @@ impl<R: Repository, S: NetkeibaScraper> HorseHistoryInteractor<R, S> {
             if deduped.is_empty() {
                 continue;
             }
-            self.repository
+            // 実際に保存された走数を積算する（canonical race_id へ変換できず skip された
+            // 走は含まれない）。表示・サマリの「保存近走数」を実 DB 行数と一致させる。
+            runs_saved += self
+                .repository
                 .upsert_horse_history(horse_id, &deduped)
                 .await?;
-            runs_saved += deduped.len();
         }
 
         Ok(FetchHorseHistoryResponse {

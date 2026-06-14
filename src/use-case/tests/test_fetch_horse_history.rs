@@ -110,12 +110,12 @@ struct RecordingRepo {
 }
 
 impl Repository for RecordingRepo {
-    async fn upsert_horse_history(&self, horse_id: &HorseId, runs: &[HorsePastRun]) -> Result<()> {
+    async fn upsert_horse_history(&self, horse_id: &HorseId, runs: &[HorsePastRun]) -> Result<usize> {
         self.upserted
             .lock()
             .unwrap()
             .push((horse_id.value().to_string(), runs.to_vec()));
-        Ok(())
+        Ok(runs.len())
     }
     async fn backfill_results_horse_ids(&self) -> Result<u64> {
         Ok(0)
