@@ -12,7 +12,7 @@ pub mod string;
 
 pub use backtest::{
     BacktestReport, CalibrationMetrics, FieldSizeSegment, HorseOutcome, PopularitySegment,
-    RaceEvaluation, ReliabilityBin, evaluate,
+    RaceEvaluation, ReliabilityBin, SurfaceSegment, evaluate,
 };
 pub use betting::{BetCombination, BettingConfig, BettingRecommendation, select_bets};
 pub use error::{Error, Result};
