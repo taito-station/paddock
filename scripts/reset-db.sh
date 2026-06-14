@@ -60,9 +60,10 @@ if [[ "$FORCE" -ne 1 ]]; then
     common_dir="$(git rev-parse --git-common-dir 2>/dev/null || true)"
     if [[ -n "$common_dir" ]]; then
         primary_data="$(cd "$(dirname "$common_dir")" && pwd)/data"
-        target_data="$(cd "$TO" 2>/dev/null && pwd || true)"
-        if [[ -n "$target_data" && "$target_data" == "$primary_data" ]]; then
-            echo "対象が primary clone の data（golden 元）です: ${target_data}。" >&2
+        # seed の自己 seed ガードと対称に `-ef`（inode 比較）で判定し、symlink や相対/絶対の
+        # 差異で primary を指していても検出する（対象 dir / primary dir が無ければ false）。
+        if [[ -d "$TO" && "$TO" -ef "$primary_data" ]]; then
+            echo "対象が primary clone の data（golden 元）です: $(cd "$TO" && pwd)。" >&2
             echo "全クローンの seed 元を失うため既定では中断する。意図的なら --force を付ける" >&2
             exit 1
         fi

@@ -191,7 +191,7 @@ cargo run -p predict -- --date 2026-06-01 --summary
 並走クローン（worktree / 独立 clone）は DB を共有しない（`PADDOCK_DB_URL` 既定は相対パスで各 cwd 配下）。
 新しいクローンは空の DB から始まるため、predict / backtest / analyze を実データで回すにはフル re-ingest が要る。
 これを避けるため、ingest 済みの clone（golden）から DB スナップショットを配置する `scripts/` を用意している。
-（`sqlite3` CLI が必要。）
+（`sqlite3` CLI が必要。既定パスは cwd 相対なので **対象クローンの root で実行**する。）
 
 ```bash
 # 並走クローンを切る → そのクローン内で seed → 実データで予想/解析
