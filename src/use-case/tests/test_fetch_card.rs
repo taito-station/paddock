@@ -304,6 +304,8 @@ async fn fresh_run_saves_card_and_odds() {
     assert!(resp.card_saved);
     assert_eq!(resp.entries_saved, 2);
     assert_eq!(resp.odds_saved, 2);
+    // card 取得時は各馬の horse_id を返す（近走取り込み #103 の再利用キー）。
+    assert_eq!(resp.horse_ids, vec!["2020000001", "2020000002"]);
     assert_eq!(interactor.repo.saved_cards.lock().unwrap().len(), 1);
     assert_eq!(interactor.repo.fetch_records.lock().unwrap().len(), 1);
     let odds = interactor.repo.saved_odds.lock().unwrap();
@@ -407,6 +409,8 @@ async fn skips_card_when_already_fetched_but_still_saves_odds() {
 
     assert!(!resp.card_saved, "取得済みなのでカードはスキップ");
     assert_eq!(resp.entries_saved, 0);
+    // 取得済みスキップ時は horse_id を採れない → 空（呼び出し側は出馬表から引き直す）。
+    assert!(resp.horse_ids.is_empty());
     assert_eq!(
         *interactor.scraper.card_fetches.lock().unwrap(),
         0,
