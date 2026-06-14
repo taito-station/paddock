@@ -375,15 +375,18 @@ async fn save_keeps_inverted_band_which_read_rejects() {
 #[tokio::test]
 async fn cleanup_migration_deletes_only_invalid_rows() {
     let (repo, _dir) = fresh_repo().await;
-    // 残骸は保存ガードで弾かれるため直接 INSERT で再現する。値域違反 3 行 + 有効 2 行を投入。
+    // 残骸は保存ガードで弾かれるため直接 INSERT で再現する。値域違反 4 行 + 有効 2 行を投入。
+    // fresh_repo は既に cleanup migration を適用済み（空テーブルで no-op）。ここで残骸を入れてから
+    // 同じ up.sql を再適用するため、有効行を消さない冪等性も同時に検証している。
     let rid = race_id().value().to_string();
     let fa = fetched_at().to_rfc3339();
-    let rows: [(&str, &str, f64, Option<f64>); 5] = [
-        ("win", "1", 3.5, None),           // 有効
-        ("place", "1", 1.5, Some(2.0)),    // 有効
-        ("trifecta", "3>1>2", 0.0, None),  // 残骸(下限)
-        ("place", "5", 0.0, Some(2.0)),    // 残骸(下限)
-        ("place", "6", 1.5, Some(0.0)),    // 残骸(上限)
+    let rows: [(&str, &str, f64, Option<f64>); 6] = [
+        ("win", "1", 3.5, None),                  // 有効
+        ("place", "1", 1.5, Some(2.0)),           // 有効
+        ("trifecta", "3>1>2", 0.0, None),         // 残骸(下限)
+        ("place", "5", 0.0, Some(2.0)),           // 残骸(下限)
+        ("place", "6", 1.5, Some(0.0)),           // 残骸(上限)
+        ("trifecta", "9>8>7", f64::INFINITY, None), // 残骸(+Inf。OddsValue は非有限も無効)
     ];
     for (bet, key, odds, high) in rows {
         sqlx::query(
