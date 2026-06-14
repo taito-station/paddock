@@ -181,6 +181,11 @@ fn parse_key<T>(
 /// 値域違反（下限・上限が odds < 1.0・非有限。0 埋め残骸など）は [`parse_odds_value`] 経由で
 /// race_id/key 付きの warn を残し `Ok(None)`（=その行を読み飛ばす）を返す(#114)。一方、上限欠落
 /// （odds_high NULL）と low>high は保存側の構造的不整合なので従来どおり `Error`（stop）で早期検知する。
+///
+/// 評価順は「odds_high NULL（構造）→ low/high の値域 → low>high（構造）」。NULL を値域より先に
+/// 見るため、`odds` が値域違反かつ `odds_high` も NULL の行は skip ではなく stop になる（構造不正の
+/// 早期検知を優先）。実害は無い: 実在する 0 埋め残骸は scalar の三連単で band 券種ではないため、
+/// band でこの組合せが起きるのは想定しない異常データであり、その場合は黙って消すより stop が安全。
 fn parse_band(race_id: &RaceId, row: &OddsRow) -> Result<Option<PlaceOdds>> {
     let high = row.odds_high.ok_or_else(|| {
         Error::Data(format!(

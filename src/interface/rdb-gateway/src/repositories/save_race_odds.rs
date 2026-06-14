@@ -17,6 +17,10 @@ fn is_invalid_odds(v: f64) -> bool {
 /// 値域違反行（odds < 1.0・非有限。netkeiba の未公開組合せ 0 埋めなど）は warn を残して INSERT
 /// しない。`race_odds` に無効値を入れない DB 境界のガードで、読み取り側(find_race_odds)の skip と
 /// 二重で predict セッションの全停止を防ぐ(#114)。netkeiba 経路は生 f64 を渡すためここで一元的に弾く。
+///
+/// ここで弾くのは値域違反のみ。band（複勝・ワイド）の構造的不整合（odds_high NULL・low>high）は
+/// 保存側バグの早期検知のため意図的にガードせず、読み取り側で `Error` として顕在化させる
+/// （find_race_odds::parse_band 参照。「保存できるが読めない」のは検知すべき不正状態のため許容）。
 pub async fn save_race_odds(pool: &SqlitePool, record: &RaceOddsRecord) -> Result<()> {
     let mut tx = pool.begin().await?;
 
