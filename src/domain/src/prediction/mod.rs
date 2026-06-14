@@ -366,6 +366,8 @@ fn raw_score(
         weight += DISTANCE_WEIGHT;
     }
     if let Some(jockey) = factors.jockey_surface {
+        // 騎手も全 factor 共通の縮約 m を使う。騎手専用の強い縮約（小サンプル過信の抑制）は
+        // #105 で backtest 評価したが集約指標に改善が無く（むしろ微悪化）採用見送り（ADR 0017）。
         weighted += JOCKEY_WEIGHT * factor_value(&jockey, rate, config);
         weight += JOCKEY_WEIGHT;
     }
