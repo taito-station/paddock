@@ -35,8 +35,21 @@ pub async fn upsert_horse_history(
     .await?;
 
     for run in runs {
-        let race_id = paddock_race_id_from_netkeiba(&run.netkeiba_race_id)
-            .map_err(|e| crate::Error::Data(format!("invalid netkeiba race_id: {e}")))?;
+        // 1 走の race_id 変換失敗（想定外の開催回・場コード等）で馬全体・バッチ全体の
+        // 取り込みを止めない。canonical race_id へ写せない走のみ warn してスキップし、
+        // 変換できる残りの走は保存する（per-horse の warn+continue と同じ耐性方針）。
+        let race_id = match paddock_race_id_from_netkeiba(&run.netkeiba_race_id) {
+            Ok(id) => id,
+            Err(e) => {
+                tracing::warn!(
+                    horse_id = %horse_id,
+                    netkeiba_race_id = %run.netkeiba_race_id,
+                    error = %e,
+                    "netkeiba race_id を paddock race_id に変換できず、この近走をスキップ"
+                );
+                continue;
+            }
+        };
         sqlx::query(
             r#"
             INSERT INTO horse_past_runs (
