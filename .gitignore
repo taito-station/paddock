@@ -3,6 +3,8 @@
 /data/*.db-journal
 /data/*.db-wal
 /data/*.db-shm
+# seed-db.sh / reset-db.sh が退避する .bak（#120）
+/data/*.bak-*
 /pdfs/**/*.pdf
 # JRA 著作物の PDF はリポジトリに含めない（テストはローカル優先 / 結果PDFは不在時DL）
 /samples/*.pdf
