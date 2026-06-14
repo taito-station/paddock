@@ -416,6 +416,40 @@ async fn backtest_prefers_market_odds_over_pdf() {
     );
 }
 
+#[tokio::test]
+async fn backtest_populates_by_exotic_from_curated_bets() {
+    // 当時オッズ（単勝）があるレースでは select_bets の curated 推奨を確定着順と突合し、
+    // by_exotic（券種別 校正・回収率）が埋まる結合経路を検証する（#121, 単体テストは domain 側）。
+    let race = finished_race();
+    let mut odds = HashMap::new();
+    // 本命 ウマA(1 着) に EV>1 かつ Kelly>min_kelly になる単勝オッズを与える。
+    odds.insert(
+        race.race_id.value().to_string(),
+        win_only_odds(race.race_id.value(), 1, 4.0),
+    );
+    let app = interactor_with_odds(vec![race], odds);
+    let report = app
+        .backtest(d(2026, 1, 1), d(2026, 1, 31), None, EstimationConfig::default())
+        .await
+        .unwrap();
+
+    // 単勝の買い目が採用され、本命 ウマA は 1 着なので的中して by_exotic に現れる。
+    let win = report
+        .by_exotic
+        .iter()
+        .find(|s| s.label == "win")
+        .expect("by_exotic に win セグメントが埋まること");
+    assert_eq!(win.bets, 1, "ウマA の単勝 1 点のみ採用");
+    assert!((win.hit_rate - 1.0).abs() < 1e-9, "1 着＝的中");
+    // 賭け金一定なので回収率 = 的中オッズ = 4.0。
+    assert!(
+        (win.payout_rate - 4.0).abs() < 1e-9,
+        "回収率は的中オッズ (payout_rate={})",
+        win.payout_rate
+    );
+    assert!(win.mean_predicted > 0.0 && win.mean_predicted <= 1.0);
+}
+
 /// モデルは高スタッツの ウマA を本命にするが、ウマA は 2 着で、低スタッツの ウマB(市場の
 /// 圧倒的人気)が 1 着のレース。ブレンドで本命が市場人気の ウマB に動くことを検証する。
 fn blend_race() -> Race {

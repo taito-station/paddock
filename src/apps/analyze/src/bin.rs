@@ -398,6 +398,9 @@ fn print_exotic_segments(segs: &[ExoticSegment]) {
             s.payout_rate * 100.0,
         );
     }
+    println!(
+        "※ 回収率は「1 点 100 円固定・複勝は中央値近似」の参考値。実払戻の端数処理や軸流し/予算配分（#122）は含まない。"
+    );
     println!();
 }
 
