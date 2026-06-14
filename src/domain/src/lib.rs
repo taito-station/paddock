@@ -12,10 +12,12 @@ pub mod simulation;
 pub mod string;
 
 pub use backtest::{
-    BacktestReport, CalibrationMetrics, FieldSizeSegment, HorseOutcome, PopularitySegment,
-    RaceEvaluation, ReliabilityBin, SurfaceSegment, evaluate,
+    BacktestReport, CalibrationMetrics, ExoticBet, ExoticSegment, FieldSizeSegment, HorseOutcome,
+    PopularitySegment, RaceEvaluation, ReliabilityBin, SurfaceSegment, evaluate, exotic_segments,
 };
-pub use betting::{BetCombination, BettingConfig, BettingRecommendation, select_bets};
+pub use betting::{
+    BetCombination, BettingConfig, BettingRecommendation, Podium, bet_hit, select_bets,
+};
 pub use error::{Error, Result};
 pub use horse_result::{
     FinishingPosition, GateNum, HorseId, HorseName, HorseNum, HorseResult, JockeyName,

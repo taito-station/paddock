@@ -4,8 +4,8 @@ mod setup;
 use chrono::NaiveDate;
 use clap::Parser;
 use paddock_domain::{
-    BacktestReport, EstimationConfig, FieldSizeSegment, HorseName, HorseProbability, JockeyName,
-    PopularitySegment, RaceId, RecencyConfig, ReliabilityBin, ShrinkageConfig, Surface,
+    BacktestReport, EstimationConfig, ExoticSegment, FieldSizeSegment, HorseName, HorseProbability,
+    JockeyName, PopularitySegment, RaceId, RecencyConfig, ReliabilityBin, ShrinkageConfig, Surface,
     SurfaceSegment, TrainerName, Venue,
 };
 use paddock_use_case::repository::{
@@ -270,6 +270,7 @@ fn print_backtest(from: NaiveDate, to: NaiveDate, r: &BacktestReport) {
     print_surface_segments(&r.by_surface);
     print_field_size_segments(&r.by_field_size);
     print_popularity_segments(&r.by_popularity);
+    print_exotic_segments(&r.by_exotic);
 
     println!(
         "※ 想定回収率は「トップ選好馬の単勝に毎レース 100 円」固定の参考値（本番の EV/Kelly 買い目とは別戦略）。"
@@ -371,6 +372,38 @@ fn print_popularity_segments(segs: &[PopularitySegment]) {
             s.win_calibration.log_loss,
         );
     }
+    println!();
+}
+
+/// 買い目（curated 推奨）の券種別 校正・回収率（#121）。空（当時オッズが無い等）なら省略。
+/// 過信なら「平均予測 ≫ 実的中率」。回収率は 1 点 100 円固定の的中オッズ平均。
+fn print_exotic_segments(segs: &[ExoticSegment]) {
+    if segs.is_empty() {
+        return;
+    }
+    println!("## 買い目（curated）券種別 校正・回収率");
+    println!(
+        "{:<10} {:>6} {:>10} {:>10} {:>9} {:>9} {:>9}",
+        "券種", "点数", "平均予測", "実的中率", "Brier", "LogLoss", "回収率"
+    );
+    for s in segs {
+        println!(
+            "{:<10} {:>6} {:>9.1}% {:>9.1}% {:>9.4} {:>9.4} {:>8.1}%",
+            s.label,
+            s.bets,
+            s.mean_predicted * 100.0,
+            s.hit_rate * 100.0,
+            s.calibration.brier,
+            s.calibration.log_loss,
+            s.payout_rate * 100.0,
+        );
+    }
+    println!(
+        "※ 回収率は「1 点 100 円固定・複勝は中央値近似」の参考値。実払戻の端数処理や軸流し/予算配分（#122）は含まない。"
+    );
+    println!(
+        "※ 小頭数(7頭以下)の複勝/ワイドは採用確率(3着以内)と的中定義(2着以内)が非対称で平均予測が実的中率を上回りやすく、同着レースは一部券種で取りこぼす（いずれも計測アーティファクト）。"
+    );
     println!();
 }
 
