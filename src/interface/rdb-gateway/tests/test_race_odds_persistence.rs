@@ -413,7 +413,7 @@ async fn cleanup_migration_deletes_only_invalid_rows() {
     .unwrap();
     sqlx::query(&sql).execute(&repo.pool).await.unwrap();
 
-    // 残骸 3 行のみ削除され、有効 2 行は残る。
+    // 残骸 4 行（下限 2・上限 1・+Inf 1）のみ削除され、有効 2 行は残る。
     let remaining: Vec<(String, String)> = sqlx::query_as(
         "SELECT bet_type, combination_key FROM race_odds WHERE race_id = $1 ORDER BY bet_type, combination_key",
     )
