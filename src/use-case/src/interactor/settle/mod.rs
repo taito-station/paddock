@@ -98,6 +98,9 @@ impl<S: PayoutFetcher, R: Repository> SettleInteractor<S, R> {
                 // (scratched) だけ拾えて entries が空という状態は正常確定では生じない。
                 // 注: 構造変更・エラーページも空になり得て未確定と区別できない（is_empty）。
                 // その場合は確定済みにならず pending のままになる（誤精算は起こさない）。
+                // 既知の制約: 開催中止・全馬取消で払戻ブロックが無いレースもここで pending に
+                // 倒れ、本来の全額返還が自動反映されない（誤精算ではなく安全側）。#129 のスコープ外
+                // （個別馬の取消/除外）のため別途フォロー（#131）で扱う。
                 pending_races += 1;
                 continue;
             }
