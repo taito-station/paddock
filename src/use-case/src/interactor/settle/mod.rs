@@ -93,7 +93,9 @@ impl<S: PayoutFetcher, R: Repository> SettleInteractor<S, R> {
                 }
             };
             if payouts.is_empty() {
-                // 未確定（払戻ブロック無し）: payout 据え置きで pending。
+                // 未確定（払戻ブロック無し）: payout 据え置きで pending。is_empty は的中組合せ
+                // (entries) の有無のみを見る。確定レースは必ず払戻ブロックを持つため、取消馬
+                // (scratched) だけ拾えて entries が空という状態は正常確定では生じない。
                 // 注: 構造変更・エラーページも空になり得て未確定と区別できない（is_empty）。
                 // その場合は確定済みにならず pending のままになる（誤精算は起こさない）。
                 pending_races += 1;
@@ -102,10 +104,12 @@ impl<S: PayoutFetcher, R: Repository> SettleInteractor<S, R> {
             settled_races += 1;
             for &idx in idxs {
                 let (bet_id, bet) = &bets[idx];
-                let payout = settle_bet(&bet.bet_type, &bet.combination, bet.stake, &payouts);
-                if payouts.is_refunded(&bet.combination) {
+                // 返還判定と払戻額を 1 度の評価でまとめて受け取る（is_refunded の二重評価を避ける）。
+                let settlement = settle_bet(&bet.bet_type, &bet.combination, bet.stake, &payouts);
+                if settlement.is_refund() {
                     refunded_bets += 1;
                 }
+                let payout = settlement.payout();
                 updated.push((*bet_id, payout));
                 bets[idx].1.payout = payout;
             }

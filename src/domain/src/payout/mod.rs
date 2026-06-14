@@ -85,18 +85,53 @@ fn combo_nums(combo_code: &str) -> impl Iterator<Item = u32> + '_ {
         .filter_map(|s| s.parse::<u32>().ok())
 }
 
-/// 確定払戻から 1 買い目の払戻額(円)を算出する純関数。
+/// 1 買い目の精算結果。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Settlement {
+    /// 的中。配当から算出した払戻額(円)。
+    Hit(u64),
+    /// 返還（組番に取消/除外馬を含む）。`stake` を全額返戻する。
+    Refund(u64),
+    /// 不的中（払戻 0）。
+    Miss,
+}
+
+impl Settlement {
+    /// 払戻額(円)。返還は stake、不的中は 0。
+    pub fn payout(self) -> u64 {
+        match self {
+            Settlement::Hit(p) | Settlement::Refund(p) => p,
+            Settlement::Miss => 0,
+        }
+    }
+
+    /// 返還（取消/除外馬を含む組番）か。
+    pub fn is_refund(self) -> bool {
+        matches!(self, Settlement::Refund(_))
+    }
+}
+
+/// 確定払戻から 1 買い目を精算する純関数。
 ///
-/// 返還対象（組番に取消/除外馬を含む）なら `stake` を全額返戻する。それ以外は配当を引けたら
-/// `stake / 100 * payoff_per_100`（JRA の 100 円あたり払戻）、引けなければ 0。
-/// `stake` は 100 円単位前提（端数は切り捨て）。
-pub fn settle_bet(type_label: &str, combo_code: &str, stake: u64, payouts: &RacePayouts) -> u64 {
+/// 判定は次の優先順で行う:
+/// 1. 組番に取消/除外馬を含むなら [`Settlement::Refund`]（`stake` 全額返戻）。**配当照合に優先する**。
+/// 2. 配当を引けたら [`Settlement::Hit`]（`stake / 100 * payoff_per_100`、JRA の 100 円あたり払戻）。
+/// 3. いずれでもなければ [`Settlement::Miss`]。
+///
+/// `stake` は 100 円単位前提（端数は切り捨て）。返還の評価は呼び出し側で重複しないよう、
+/// 払戻額と返還判定を [`Settlement`] にまとめて返す。
+pub fn settle_bet(
+    type_label: &str,
+    combo_code: &str,
+    stake: u64,
+    payouts: &RacePayouts,
+) -> Settlement {
     if payouts.is_refunded(combo_code) {
-        return stake;
+        return Settlement::Refund(stake);
     }
     match payouts.payoff(type_label, combo_code) {
-        Some(per100) => stake / 100 * u64::from(per100),
-        None => 0,
+        Some(per100) => Settlement::Hit(stake / 100 * u64::from(per100)),
+        None => Settlement::Miss,
     }
 }
 
@@ -121,37 +156,41 @@ mod tests {
     fn settles_hit_per_100yen() {
         let p = payouts();
         // 馬連 6-8 を ¥600 → 600/100 * 1260 = ¥7,560
-        assert_eq!(settle_bet("quinella", "6-8", 600, &p), 7560);
+        assert_eq!(
+            settle_bet("quinella", "6-8", 600, &p),
+            Settlement::Hit(7560)
+        );
         // 単勝 8 を ¥5,000 → 5000/100 * 140 = ¥7,000
-        assert_eq!(settle_bet("win", "8", 5000, &p), 7000);
+        assert_eq!(settle_bet("win", "8", 5000, &p), Settlement::Hit(7000));
     }
 
     #[test]
     fn miss_pays_zero() {
         let p = payouts();
-        assert_eq!(settle_bet("quinella", "3-8", 600, &p), 0);
-        assert_eq!(settle_bet("trifecta", "1>2>3", 100, &p), 0);
+        assert_eq!(settle_bet("quinella", "3-8", 600, &p), Settlement::Miss);
+        assert_eq!(settle_bet("trifecta", "1>2>3", 100, &p), Settlement::Miss);
+        assert_eq!(settle_bet("quinella", "3-8", 600, &p).payout(), 0);
     }
 
     #[test]
     fn dead_heat_keeps_both_winning_combos() {
         let p = payouts();
-        assert_eq!(settle_bet("quinella", "6-8", 100, &p), 1260);
-        assert_eq!(settle_bet("quinella", "1-2", 100, &p), 500);
+        assert_eq!(settle_bet("quinella", "6-8", 100, &p).payout(), 1260);
+        assert_eq!(settle_bet("quinella", "1-2", 100, &p).payout(), 500);
     }
 
     #[test]
     fn empty_is_unconfirmed() {
         let p = RacePayouts::empty(RaceId::try_from("2026-3-tokyo-3-1R").unwrap());
         assert!(p.is_empty());
-        assert_eq!(settle_bet("win", "8", 100, &p), 0);
+        assert_eq!(settle_bet("win", "8", 100, &p), Settlement::Miss);
     }
 
     #[test]
     fn stake_not_multiple_of_100_floors() {
         let p = payouts();
         // ¥150 → 1 単位ぶんのみ（端数切り捨て）: 150/100=1 * 140 = 140
-        assert_eq!(settle_bet("win", "8", 150, &p), 140);
+        assert_eq!(settle_bet("win", "8", 150, &p), Settlement::Hit(140));
     }
 
     /// scratched を持つ払戻集合（馬番 6 が取消/除外）。
@@ -165,18 +204,24 @@ mod tests {
     fn scratched_horse_in_single_bet_is_refunded() {
         let p = payouts_with_scratch();
         // 単勝 6 は取消 → 配当表に無くても stake 全額返戻。
-        assert_eq!(settle_bet("win", "6", 5000, &p), 5000);
+        assert_eq!(settle_bet("win", "6", 5000, &p), Settlement::Refund(5000));
         // 複勝 6 も同様に返還。
-        assert_eq!(settle_bet("place", "6", 600, &p), 600);
+        assert_eq!(settle_bet("place", "6", 600, &p), Settlement::Refund(600));
     }
 
     #[test]
     fn combo_containing_scratched_horse_is_refunded() {
         let p = payouts_with_scratch();
-        // 馬連 6-8 は本来 ¥1,260 的中だが、6 が取消なので組番ごと全額返還。
-        assert_eq!(settle_bet("quinella", "6-8", 600, &p), 600);
+        // 馬連 6-8 は本来 ¥1,260 的中だが、6 が取消なので組番ごと全額返還（配当照合に優先）。
+        assert_eq!(
+            settle_bet("quinella", "6-8", 600, &p),
+            Settlement::Refund(600)
+        );
         // 三連複 4-6-8 も 6 を含むため返還（配当表に無くても stake）。
-        assert_eq!(settle_bet("trio", "4-6-8", 300, &p), 300);
+        assert_eq!(
+            settle_bet("trio", "4-6-8", 300, &p),
+            Settlement::Refund(300)
+        );
     }
 
     #[test]
@@ -184,11 +229,17 @@ mod tests {
         // 流し（複数組番）のうち取消馬を含む行だけ返還・他行は通常精算される。
         let p = payouts_with_scratch();
         // 6 を含む 6-8 は返還（stake）。
-        assert_eq!(settle_bet("quinella", "6-8", 600, &p), 600);
+        assert_eq!(
+            settle_bet("quinella", "6-8", 600, &p),
+            Settlement::Refund(600)
+        );
         // 6 を含まない 1-2 は同着的中で通常払戻。
-        assert_eq!(settle_bet("quinella", "1-2", 600, &p), 3000);
+        assert_eq!(
+            settle_bet("quinella", "1-2", 600, &p),
+            Settlement::Hit(3000)
+        );
         // 6 を含まず不的中の 7-8 は 0 のまま。
-        assert_eq!(settle_bet("quinella", "7-8", 600, &p), 0);
+        assert_eq!(settle_bet("quinella", "7-8", 600, &p), Settlement::Miss);
     }
 
     #[test]
@@ -196,8 +247,21 @@ mod tests {
         // 取消が無いレースは従来どおり（is_refunded は常に false）。
         let p = payouts();
         assert!(!p.is_refunded("6-8"));
-        assert_eq!(settle_bet("quinella", "6-8", 600, &p), 7560);
-        assert_eq!(settle_bet("quinella", "3-8", 600, &p), 0);
+        assert_eq!(
+            settle_bet("quinella", "6-8", 600, &p),
+            Settlement::Hit(7560)
+        );
+        assert_eq!(settle_bet("quinella", "3-8", 600, &p), Settlement::Miss);
+    }
+
+    #[test]
+    fn settlement_payout_and_is_refund() {
+        assert_eq!(Settlement::Hit(7560).payout(), 7560);
+        assert_eq!(Settlement::Refund(600).payout(), 600);
+        assert_eq!(Settlement::Miss.payout(), 0);
+        assert!(Settlement::Refund(600).is_refund());
+        assert!(!Settlement::Hit(7560).is_refund());
+        assert!(!Settlement::Miss.is_refund());
     }
 
     #[test]
