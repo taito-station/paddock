@@ -14,7 +14,22 @@ TO="data"
 BACKUP=1
 
 usage() {
-    sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'
+    cat <<'EOF'
+reset-db.sh - 対象クローンの DB を空に戻す（再 seed / 再 ingest 前提）(#120)
+
+paddock.db と WAL/SHM を退避（既定）または削除する。次回の app 起動 or seed-db.sh で
+スキーマごと再生成される。
+
+使い方:
+  scripts/reset-db.sh                # ./data/paddock.db を .bak へ退避して空に戻す
+  scripts/reset-db.sh --to /other/data
+  scripts/reset-db.sh --no-backup    # 退避せず削除
+
+オプション:
+  --to <dir>     対象 data ディレクトリ（既定: data）
+  --no-backup    .bak へ退避せず削除する
+  -h, --help     このヘルプを表示
+EOF
 }
 
 while [[ $# -gt 0 ]]; do
