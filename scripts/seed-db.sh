@@ -84,7 +84,8 @@ fi
 # こうすると .backup や検証が失敗しても既存 DB を壊さない（非破壊）。
 tmp_base="paddock.db.seed-tmp.$$"
 tmp="$TO/$tmp_base"
-rm -f "$tmp" "$tmp-wal" "$tmp-shm"
+# 過去に別 PID が異常終了して残したステール tmp（自 PID 分含む）も掃除する。
+rm -f "$TO"/paddock.db.seed-tmp.* 2>/dev/null || true
 trap 'rm -f "$tmp" "$tmp-wal" "$tmp-shm"' EXIT
 
 # sqlite3 の .backup（ドットコマンド）の引数クォートは SQL とも shell とも異なり、パス中の
@@ -96,6 +97,7 @@ if ! ( cd "$TO" && sqlite3 "$FROM" ".backup '$tmp_base'" ); then
 fi
 
 # 本配置前にスナップショットの中身を検証する（破損 / 空 DB / スキーマ不一致を握りつぶさない）。
+# races は「実データが入っているか」の代表テーブルとしての sanity check。
 races="$(sqlite3 "$tmp" 'SELECT COUNT(*) FROM races;' 2>/dev/null || true)"
 # 整数かつ > 0 を要求する。失敗時は空（-z 相当）や非整数になり得るので正規表現で先にガードし、
 # set -e/-u 下で算術評価が不可解なエラーにならないようにする。

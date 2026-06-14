@@ -183,13 +183,15 @@ cargo run -p predict -- --date 2026-06-01 --summary
 - 環境変数 `PADDOCK_DB_URL` で接続先を上書き可能（例: `sqlite://./other.db?mode=rwc`）
 - DB を作り直したい場合は `data/paddock.db` を消してから取り込み直し
 - 接続プールは WAL・外部キー有効に加え `busy_timeout=5s` を設定済み（同一クローン内で predict と analyze を
-  並行起動したときのロック即時失敗を緩和する）
+  並行起動したときのロック即時失敗を緩和する）。これは **プロセス間の SQLite ファイルロックの再試行待ち**で、
+  プール（`max_connections`）の接続待ちタイムアウトとは別レイヤ。
 
 ### 並走クローンの seed / reset
 
 並走クローン（worktree / 独立 clone）は DB を共有しない（`PADDOCK_DB_URL` 既定は相対パスで各 cwd 配下）。
 新しいクローンは空の DB から始まるため、predict / backtest / analyze を実データで回すにはフル re-ingest が要る。
 これを避けるため、ingest 済みの clone（golden）から DB スナップショットを配置する `scripts/` を用意している。
+（`sqlite3` CLI が必要。）
 
 ```bash
 # 並走クローンを切る → そのクローン内で seed → 実データで予想/解析
@@ -208,7 +210,9 @@ scripts/reset-db.sh --no-backup          # 退避せず削除
 - 既定の golden 元は `git rev-parse --git-common-dir` から辿った primary clone の `data/paddock.db`。
   worktree 以外の独立 clone から seed する場合は `--from` か `PADDOCK_GOLDEN_DB` で明示する。
 - 配置前に既存 `data/paddock.db`（と `-wal`/`-shm`）は `.bak-<日時>` に退避される（`data/*.bak-*` は gitignore 済み）。
+  退避を戻すときは同じ `<日時>` の `.db` / `-wal` / `-shm` を揃えて元名に rename する。
 - **seed / reset は対象クローンの app（predict / analyze / fetch 等）を停止してから実行する**。稼働中プロセスが開いている DB の `-wal`/`-shm` を退避・削除すると、そのプロセス側の DB 整合性を壊しうるため。
+- `reset-db.sh` は primary clone（golden 元）の `data` を対象にすると既定で中断する（全クローンの seed 元を失うため）。意図的に primary を reset するときのみ `--force` を付ける。
 
 ### マイグレーション注意
 
