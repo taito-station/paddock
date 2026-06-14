@@ -8,9 +8,12 @@
     python3 answer_check.py preds.json results.json [win_odds.csv]
 
 win_odds.csv（任意, ROI と人気比較用）の列: race_id, combination_key(=単勝の馬番), popularity, odds
-    sqlite3 -noheader -csv data/paddock.db \
-      "SELECT race_id, combination_key, popularity, odds FROM race_odds
-       WHERE bet_type='win' AND date='YYYY-MM-DD' ORDER BY race_id, popularity;" > win_odds.csv
+    # race_odds に date 列は無いので paddock race_id（list_races.py の3列目）で引く。
+    for pad in $(python3 list_races.py YYYYMMDD 05 09 | cut -f3); do
+      sqlite3 -noheader -csv data/paddock.db \
+        "SELECT race_id, combination_key, popularity, odds FROM race_odds
+         WHERE bet_type='win' AND race_id='$pad' ORDER BY popularity;" >> win_odds.csv
+    done
 """
 import sys
 import json
@@ -132,9 +135,10 @@ for p in preds:
             pay += int(o * 100)
     t3 = [x["horse_num"] for x in sorted([y for y in r["rows"] if y["rank"]], key=lambda y: y["rank"])[:3]]
     mark = "◎" if hon_pos == 1 else ("○" if hon_pos in (2, 3) else "×")
-    wr = ranks.index(w) + 1 if w in ranks else None
+    # 勝ち馬がモデル確率表に居ない（除外馬等）場合は「圏外」表示にする。
+    wr = f"{ranks.index(w) + 1}位" if w in ranks else "圏外"
     log.append((f"{p['venue']}{p['race_num']}R", f"{surf}{p['distance']}", hon,
-                hon_pos or "圏外", mark, w, wr or "-", t3, ranks[:4]))
+                hon_pos or "圏外", mark, w, wr, t3, ranks[:4]))
 
 if n == 0:
     print("preds と results が1件もマッチしませんでした（venue 表記/race_num を確認）", file=sys.stderr)
@@ -160,8 +164,8 @@ if bet:
 print("\n=== 芝/ダ・距離別 本命成績 ===")
 for k in sorted(agg):
     nn, ww, tt = agg[k]
-    print(f"{k:<8}n={nn:>2} 本命勝 {ww/nn*100:>3.0f}% 複勝 {tt/nn*100:>3.0f}%")
+    print(f"{k:<8}n={nn:>2} 本命勝 {ww/nn*100:>3.0f}% 3着内 {tt/nn*100:>3.0f}%")
 
 print("\n=== レース別 ===")
 for race, cond, hon, pos, mark, w, wr, t3, mt in log:
-    print(f"{race:<8}{cond:<10}本命{hon:>3}→{str(pos):>3}着{mark} 勝馬{w:>3}(model{wr}位) 実3着内{t3} model上位{mt}")
+    print(f"{race:<8}{cond:<10}本命{hon:>3}→{str(pos):>3}着{mark} 勝馬{w:>3}(model{wr}) 実3着内{t3} model上位{mt}")
