@@ -15,6 +15,9 @@ pub struct IngestCardResponse {
     pub entries_saved: usize,
     /// 保存したオッズ行数（単勝・複勝＋馬連・馬単・三連複・三連単。レース前で未確定なら 0）。
     pub odds_saved: usize,
+    /// 取得した出走各馬の netkeiba horse_id（近走取り込み #103 の再利用キー）。
+    /// カードをスキップ（取得済み）した場合は空。呼び出し側はこれで出馬表の再取得を避ける。
+    pub horse_ids: Vec<String>,
 }
 
 impl<R: Repository, S: NetkeibaScraper> CardInteractor<R, S> {
@@ -35,10 +38,18 @@ impl<R: Repository, S: NetkeibaScraper> CardInteractor<R, S> {
         // 1. カード: 取得済みかつ !force ならスキップ。そうでなければ取得・保存して履歴を記録。
         let already = self.repo.fetch_history_contains(&source_key).await?;
         let (mut card_saved, mut entries_saved) = (false, 0);
+        // カードを取得したときのみ horse_id を採れる。再利用キーとして呼び出し側へ返す
+        // （取得済みスキップ時は空のまま → 呼び出し側は出馬表から引き直す）。
+        let mut horse_ids: Vec<String> = Vec::new();
         if already && !force {
             tracing::info!(%netkeiba_id, "card already fetched, skipping (use --force to refetch)");
         } else {
             let fetched = self.scraper.fetch_card(netkeiba_id)?;
+            horse_ids = fetched
+                .entries
+                .iter()
+                .filter_map(|e| e.horse_id.as_ref().map(|id| id.value().to_string()))
+                .collect();
             let entries: Vec<HorseEntry> = fetched
                 .entries
                 .into_iter()
@@ -144,6 +155,7 @@ impl<R: Repository, S: NetkeibaScraper> CardInteractor<R, S> {
             card_saved,
             entries_saved,
             odds_saved,
+            horse_ids,
         })
     }
 }

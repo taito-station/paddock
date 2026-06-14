@@ -125,6 +125,35 @@ async fn upsert_horse_history_lands_in_separate_tables() {
 }
 
 #[tokio::test]
+async fn upsert_skips_unconvertible_run_and_saves_rest() {
+    // netkeiba は一部 JRA レースに開催回 7 以上を採番する（例 202405070211）。canonical 変換は
+    // 開催回 1〜6 のみ許容するため変換に失敗するが、その 1 走だけ skip して残りは保存されること
+    // （バッチ全体を中断しないこと）を固定する回帰テスト（#103）。
+    let (repo, _dir) = fresh_repo().await;
+    let horse_id = HorseId::try_from("2019104567".to_string()).unwrap();
+    let runs = vec![
+        past_run("202605030211", "ウマZ", ymd(2026, 4, 1), 11, 1),
+        // netkeiba 12 桁の 7〜8 桁目（開催回）が 07 → paddock_race_id_from_netkeiba が弾く。
+        // 変換は netkeiba_race_id 文字列のみを見るため、past_run の round フィールド(=3)とは無関係。
+        past_run("202605070211", "ウマZ", ymd(2026, 4, 2), 11, 2),
+        past_run("202605030212", "ウマZ", ymd(2026, 3, 1), 12, 3),
+    ];
+    let saved = repo.upsert_horse_history(&horse_id, &runs).await.unwrap();
+
+    assert_eq!(saved, 2, "変換できた 2 走のみ保存（開催回 7 の 1 走は skip）");
+    assert_eq!(count(&repo, "horse_past_runs").await, 2);
+    assert_eq!(count(&repo, "horses").await, 1, "horses マスタは更新される");
+
+    let skipped: (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM horse_past_runs WHERE netkeiba_race_id = '202605070211'",
+    )
+    .fetch_one(&repo.pool)
+    .await
+    .unwrap();
+    assert_eq!(skipped.0, 0, "変換できない開催回 7 の走は保存されない");
+}
+
+#[tokio::test]
 async fn horse_stats_counts_pdf_only_not_netkeiba() {
     let (repo, _dir) = fresh_repo().await;
     // pdf で 1 戦 1 勝。

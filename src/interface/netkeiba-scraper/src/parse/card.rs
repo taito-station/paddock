@@ -1,11 +1,12 @@
 use std::sync::LazyLock;
 
 use chrono::NaiveDate;
-use paddock_domain::{GateNum, HorseName, HorseNum, JockeyName, Surface, TrainerName};
+use paddock_domain::{GateNum, HorseId, HorseName, HorseNum, JockeyName, Surface, TrainerName};
 use paddock_use_case::netkeiba_scraper::{FetchedCard, FetchedEntry};
 use regex::Regex;
 use scraper::{ElementRef, Html, Selector};
 
+use super::shutuba::extract_horse_id;
 use super::{cell_text, round_day_racenum, venue_from_race_id};
 use crate::error::{Error, Result};
 
@@ -155,9 +156,25 @@ fn extract_entries(doc: &Html) -> Result<Vec<FetchedEntry>> {
         else {
             continue;
         };
-        let Some(horse_name) = extract_horse_name(&row, &horse_link_sel) else {
+        // 馬名と horse_id は同じ `/horse/<id>` リンク（title=馬名, href=ID）から取る。
+        // 馬名が無い行（th のみ等）はスキップ。horse_id は近走取り込み（#103）の再利用キーで、
+        // 出馬表保存の必須項目ではないため、欠けても entry は落とさず Option として持つ。
+        let Some(horse_link) = row.select(&horse_link_sel).next() else {
             continue;
         };
+        let Some(horse_name) = horse_link
+            .value()
+            .attr("title")
+            .and_then(cell_text)
+            .and_then(|n| HorseName::try_from(n).ok())
+        else {
+            continue;
+        };
+        let horse_id = horse_link
+            .value()
+            .attr("href")
+            .and_then(extract_horse_id)
+            .and_then(|id| HorseId::try_from(id).ok());
         let jockey = extract_jockey(&row, &jockey_sel);
         let trainer = extract_trainer(&row, &trainer_sel);
 
@@ -165,6 +182,7 @@ fn extract_entries(doc: &Html) -> Result<Vec<FetchedEntry>> {
             gate_num,
             horse_num,
             horse_name,
+            horse_id,
             jockey,
             trainer,
         });
@@ -176,15 +194,6 @@ fn extract_entries(doc: &Html) -> Result<Vec<FetchedEntry>> {
         ));
     }
     Ok(entries)
-}
-
-/// `td.HorseInfo a[href*="/horse/"]` の `title` 属性から馬名を取る。
-fn extract_horse_name(row: &ElementRef, sel: &Selector) -> Option<HorseName> {
-    let link = row.select(sel).next()?;
-    link.value()
-        .attr("title")
-        .and_then(cell_text)
-        .and_then(|n| HorseName::try_from(n).ok())
 }
 
 /// `td.Jockey a` の `title` 属性から騎手名を取る。取れなければ None。

@@ -172,7 +172,7 @@ mod tests {
             &self,
             _: &paddock_domain::HorseId,
             _: &[crate::HorsePastRun],
-        ) -> Result<()> {
+        ) -> Result<usize> {
             unimplemented!()
         }
         async fn backfill_results_horse_ids(&self) -> Result<u64> {

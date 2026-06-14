@@ -67,11 +67,14 @@ pub struct ResultRow {
 }
 
 /// 出馬表 1 頭分の登録情報（枠・馬番・馬名・騎手・調教師）。当日の `RaceCard` を組むための最小集合。
+/// `horse_id` は近走取り込み（#103）の再利用キー。出馬表保存の必須項目ではないため `Option`
+/// とし、抽出できない馬がいても card 保存からは落とさない（近走取り込みの対象外になるだけ）。
 #[derive(Debug, Clone, PartialEq)]
 pub struct FetchedEntry {
     pub gate_num: GateNum,
     pub horse_num: HorseNum,
     pub horse_name: HorseName,
+    pub horse_id: Option<HorseId>,
     pub jockey: Option<JockeyName>,
     pub trainer: Option<TrainerName>,
 }

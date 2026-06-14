@@ -64,7 +64,7 @@ impl Repository for SqliteRepository {
         &self,
         horse_id: &HorseId,
         runs: &[paddock_use_case::HorsePastRun],
-    ) -> UcResult<()> {
+    ) -> UcResult<usize> {
         horse_history::upsert_horse_history(&self.pool, horse_id, runs)
             .await
             .map_err(Into::into)
