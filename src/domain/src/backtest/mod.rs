@@ -8,6 +8,8 @@
 
 use std::collections::HashMap;
 
+use crate::Surface;
+
 /// LogLoss で `ln(0)` を避けるための確率クランプ幅。`p` を `[EPS, 1-EPS]` に収める。
 const LOG_LOSS_EPS: f64 = 1e-15;
 
@@ -32,6 +34,9 @@ const POPULARITY_BANDS: [&str; 6] = [
 
 /// 頭数帯セグメントのラベル（出力順）。`field_size_band` の戻り値と一致させる。
 const FIELD_SIZE_BANDS: [&str; 4] = ["～9頭", "10-12頭", "13-15頭", "16頭以上"];
+
+/// 馬場（芝/ダート）セグメントのラベル（出力順）。`surface_band` の戻り値と一致させる。
+const SURFACE_BANDS: [&str; 2] = ["芝", "ダート"];
 
 /// 1 出走馬の予測確率と実着の突合（校正指標の純粋入力）。
 #[derive(Debug, Clone)]
@@ -73,6 +78,8 @@ pub struct RaceEvaluation {
     pub top_pick_position: Option<u32>,
     /// トップ選好馬の単勝確定オッズ。`None` なら回収率の母数外。
     pub top_pick_odds: Option<f64>,
+    /// 馬場（芝/ダート）。馬場別セグメントの分類軸。
+    pub surface: Surface,
 }
 
 impl RaceEvaluation {
@@ -132,6 +139,23 @@ pub struct FieldSizeSegment {
     pub win_calibration: CalibrationMetrics,
 }
 
+/// 馬場（芝/ダート）セグメント（レース単位の集計）。
+#[derive(Debug, Clone, PartialEq)]
+pub struct SurfaceSegment {
+    /// 馬場ラベル（[`SURFACE_BANDS`]）。
+    pub label: String,
+    /// この馬場のレース数。
+    pub races: u32,
+    /// 単勝的中率（トップ選好馬が 1 着）。
+    pub win_hit_rate: f64,
+    /// 連対的中率（トップ選好馬が 2 着以内）。
+    pub place_hit_rate: f64,
+    /// 複勝的中率（トップ選好馬が 3 着以内）。
+    pub show_hit_rate: f64,
+    /// この馬場の全エントリでの単勝校正。
+    pub win_calibration: CalibrationMetrics,
+}
+
 /// 人気帯セグメント（馬エントリ単位の集計）。
 #[derive(Debug, Clone, PartialEq)]
 pub struct PopularitySegment {
@@ -177,6 +201,8 @@ pub struct BacktestReport {
     pub by_field_size: Vec<FieldSizeSegment>,
     /// 人気帯別の集計（データのある帯のみ、[`POPULARITY_BANDS`] 順）。
     pub by_popularity: Vec<PopularitySegment>,
+    /// 馬場（芝/ダート）別の集計（データのある馬場のみ、[`SURFACE_BANDS`] 順）。
+    pub by_surface: Vec<SurfaceSegment>,
 }
 
 impl BacktestReport {
@@ -196,6 +222,7 @@ impl BacktestReport {
             win_reliability: Vec::new(),
             by_field_size: Vec::new(),
             by_popularity: Vec::new(),
+            by_surface: Vec::new(),
         }
     }
 }
@@ -283,6 +310,14 @@ fn field_size_band(field_size: usize) -> &'static str {
     }
 }
 
+/// 馬場を馬場ラベルへ分類する。
+fn surface_band(surface: Surface) -> &'static str {
+    match surface {
+        Surface::Turf => "芝",
+        Surface::Dirt => "ダート",
+    }
+}
+
 /// 人気帯別の集計（馬エントリ単位）。データのある帯のみ [`POPULARITY_BANDS`] 順に返す。
 fn popularity_segments(races: &[RaceEvaluation]) -> Vec<PopularitySegment> {
     let mut buckets: HashMap<&'static str, Vec<&HorseOutcome>> = HashMap::new();
@@ -302,8 +337,7 @@ fn popularity_segments(races: &[RaceEvaluation]) -> Vec<PopularitySegment> {
             let horses = buckets.get(label)?;
             let entries = horses.len() as u32;
             let pairs: Vec<(f64, bool)> = horses.iter().map(|h| (h.win_prob, h.won())).collect();
-            let mean_win_prob =
-                horses.iter().map(|h| h.win_prob).sum::<f64>() / entries as f64;
+            let mean_win_prob = horses.iter().map(|h| h.win_prob).sum::<f64>() / entries as f64;
             let observed_win_rate =
                 horses.iter().filter(|h| h.won()).count() as f64 / entries as f64;
             Some(PopularitySegment {
@@ -365,13 +399,62 @@ fn field_size_segments(races: &[RaceEvaluation]) -> Vec<FieldSizeSegment> {
         .collect()
 }
 
+/// 馬場（芝/ダート）別の集計（レース単位）。データのある馬場のみ [`SURFACE_BANDS`] 順に返す。
+/// `field_size_segments` と同じ集計方式（トップ選好馬の着順で的中、全馬エントリで単勝校正）。
+fn surface_segments(races: &[RaceEvaluation]) -> Vec<SurfaceSegment> {
+    let mut buckets: HashMap<&'static str, Vec<&RaceEvaluation>> = HashMap::new();
+    for race in races {
+        buckets
+            .entry(surface_band(race.surface))
+            .or_default()
+            .push(race);
+    }
+
+    SURFACE_BANDS
+        .iter()
+        .filter_map(|&label| {
+            // バケットは `or_default().push()` でしか作られないため、キーがあれば必ず非空。
+            let group = buckets.get(label)?;
+            let races_n = group.len() as f64;
+            let mut win_hits = 0u32;
+            let mut place_hits = 0u32;
+            let mut show_hits = 0u32;
+            let mut pairs: Vec<(f64, bool)> = Vec::new();
+            for race in group {
+                if let Some(pos) = race.top_pick_position {
+                    if pos == 1 {
+                        win_hits += 1;
+                    }
+                    if pos <= 2 {
+                        place_hits += 1;
+                    }
+                    if pos <= 3 {
+                        show_hits += 1;
+                    }
+                }
+                for h in &race.horses {
+                    pairs.push((h.win_prob, h.won()));
+                }
+            }
+            Some(SurfaceSegment {
+                label: label.to_string(),
+                races: group.len() as u32,
+                win_hit_rate: win_hits as f64 / races_n,
+                place_hit_rate: place_hits as f64 / races_n,
+                show_hit_rate: show_hits as f64 / races_n,
+                win_calibration: calibration(&pairs),
+            })
+        })
+        .collect()
+}
+
 /// 評価レース集合から [`BacktestReport`] を集計する。
 ///
 /// 的中率の母数は `races.len()`（突合できたレース）。トップ選好馬の着順が `None` の
 /// レースは全的中率で非的中として数える。回収率は `top_pick_odds` がある レースのみを母数に、
 /// トップ選好馬が 1 着なら `odds × STAKE_PER_RACE` を払戻として計上する。校正指標（Brier /
 /// LogLoss）は単勝・連対・複勝それぞれの全馬エントリを母数に算出し、reliability 曲線は単勝確率に
-/// ついて、人気帯・頭数帯のセグメントも併せて出す。
+/// ついて、人気帯・頭数帯・馬場(芝/ダート)別のセグメントも併せて出す。
 pub fn evaluate(races: &[RaceEvaluation]) -> BacktestReport {
     if races.is_empty() {
         return BacktestReport::empty();
@@ -441,6 +524,7 @@ pub fn evaluate(races: &[RaceEvaluation]) -> BacktestReport {
         win_reliability: reliability(&win_pairs, RELIABILITY_BINS),
         by_field_size: field_size_segments(races),
         by_popularity: popularity_segments(races),
+        by_surface: surface_segments(races),
     }
 }
 
@@ -453,13 +537,7 @@ mod tests {
     }
 
     /// テスト用の馬 outcome。win/place/show 確率と着順・人気を与える。
-    fn horse(
-        win: f64,
-        place: f64,
-        show: f64,
-        pos: Option<u32>,
-        pop: Option<u32>,
-    ) -> HorseOutcome {
+    fn horse(win: f64, place: f64, show: f64, pos: Option<u32>, pop: Option<u32>) -> HorseOutcome {
         HorseOutcome {
             win_prob: win,
             place_prob: place,
@@ -492,12 +570,14 @@ mod tests {
                 horses: vec![win_horse(0.5, Some(1)), win_horse(0.5, Some(2))],
                 top_pick_position: Some(1),
                 top_pick_odds: Some(2.0),
+                surface: Surface::Turf,
             },
             RaceEvaluation {
                 // トップ選好(0.6)は 3 着、勝ったのは 0.4 の馬。
                 horses: vec![win_horse(0.6, Some(3)), win_horse(0.4, Some(1))],
                 top_pick_position: Some(3),
                 top_pick_odds: Some(5.0),
+                surface: Surface::Turf,
             },
         ];
         let r = evaluate(&races);
@@ -530,16 +610,23 @@ mod tests {
             ],
             top_pick_position: Some(1),
             top_pick_odds: None,
+            surface: Surface::Turf,
         }];
         let r = evaluate(&races);
 
         // place: (0.7,true),(0.6,false) → Brier=((0.3)^2+(0.6)^2)/2
-        approx(r.place_calibration.brier, (0.3f64.powi(2) + 0.6f64.powi(2)) / 2.0);
+        approx(
+            r.place_calibration.brier,
+            (0.3f64.powi(2) + 0.6f64.powi(2)) / 2.0,
+        );
         let place_ll = (-(0.7f64).ln() - (1.0 - 0.6f64).ln()) / 2.0;
         approx(r.place_calibration.log_loss, place_ll);
 
         // show: (0.8,true),(0.7,false) → Brier=((0.2)^2+(0.7)^2)/2
-        approx(r.show_calibration.brier, (0.2f64.powi(2) + 0.7f64.powi(2)) / 2.0);
+        approx(
+            r.show_calibration.brier,
+            (0.2f64.powi(2) + 0.7f64.powi(2)) / 2.0,
+        );
         let show_ll = (-(0.8f64).ln() - (1.0 - 0.7f64).ln()) / 2.0;
         approx(r.show_calibration.log_loss, show_ll);
     }
@@ -550,6 +637,7 @@ mod tests {
             horses: vec![win_horse(0.7, Some(1)), win_horse(0.3, Some(2))],
             top_pick_position: Some(1),
             top_pick_odds: None,
+            surface: Surface::Turf,
         }];
         let r = evaluate(&races);
         assert_eq!(r.payout_races, 0);
@@ -563,6 +651,7 @@ mod tests {
             horses: vec![win_horse(0.4, None), win_horse(0.6, None)],
             top_pick_position: None, // 除外・失格等
             top_pick_odds: Some(3.0),
+            surface: Surface::Turf,
         }];
         let r = evaluate(&races);
         approx(r.win_hit_rate, 0.0);
@@ -578,6 +667,7 @@ mod tests {
             horses: vec![win_horse(0.0, Some(1)), win_horse(1.0, Some(5))],
             top_pick_position: Some(5),
             top_pick_odds: None,
+            surface: Surface::Turf,
         }];
         let r = evaluate(&races);
         assert!(r.log_loss.is_finite(), "log_loss must be finite");
@@ -592,16 +682,19 @@ mod tests {
                 horses: vec![win_horse(1.0, Some(1))],
                 top_pick_position: Some(1),
                 top_pick_odds: None,
+                surface: Surface::Turf,
             },
             RaceEvaluation {
                 horses: vec![win_horse(1.0, Some(2))],
                 top_pick_position: Some(2),
                 top_pick_odds: None,
+                surface: Surface::Turf,
             },
             RaceEvaluation {
                 horses: vec![win_horse(1.0, Some(3))],
                 top_pick_position: Some(3),
                 top_pick_odds: None,
+                surface: Surface::Turf,
             },
         ];
         let r = evaluate(&races);
@@ -661,7 +754,16 @@ mod tests {
     fn band_functions_only_emit_declared_labels() {
         // band 関数の戻り値は必ず出力順定義の定数配列に含まれること。片方だけ変更したときの
         // 同期ずれ（セグメントが無言でドロップされる）をコンパイル時でなくテストで検出する。
-        for pop in [None, Some(0u32), Some(1), Some(3), Some(6), Some(9), Some(18), Some(100)] {
+        for pop in [
+            None,
+            Some(0u32),
+            Some(1),
+            Some(3),
+            Some(6),
+            Some(9),
+            Some(18),
+            Some(100),
+        ] {
             assert!(
                 POPULARITY_BANDS.contains(&popularity_band(pop)),
                 "popularity_band({pop:?}) が POPULARITY_BANDS に無い"
@@ -673,19 +775,26 @@ mod tests {
                 "field_size_band({n}) が FIELD_SIZE_BANDS に無い"
             );
         }
+        for s in [Surface::Turf, Surface::Dirt] {
+            assert!(
+                SURFACE_BANDS.contains(&surface_band(s)),
+                "surface_band({s:?}) が SURFACE_BANDS に無い"
+            );
+        }
     }
 
     #[test]
     fn popularity_segments_group_entries_in_band_order() {
         let races = vec![RaceEvaluation {
             horses: vec![
-                horse(0.5, 0.6, 0.7, Some(1), Some(1)),  // 1番人気・勝ち
-                horse(0.2, 0.3, 0.4, Some(3), Some(2)),  // 2-3番人気・負け
-                horse(0.1, 0.2, 0.3, Some(2), Some(3)),  // 2-3番人気・負け
-                horse(0.05, 0.1, 0.2, Some(5), None),    // 人気不明
+                horse(0.5, 0.6, 0.7, Some(1), Some(1)), // 1番人気・勝ち
+                horse(0.2, 0.3, 0.4, Some(3), Some(2)), // 2-3番人気・負け
+                horse(0.1, 0.2, 0.3, Some(2), Some(3)), // 2-3番人気・負け
+                horse(0.05, 0.1, 0.2, Some(5), None),   // 人気不明
             ],
             top_pick_position: Some(1),
             top_pick_odds: None,
+            surface: Surface::Turf,
         }];
         let r = evaluate(&races);
 
@@ -711,11 +820,13 @@ mod tests {
             horses: (0..8).map(|_| win_horse(0.1, Some(2))).collect(),
             top_pick_position: pos,
             top_pick_odds: None,
+            surface: Surface::Turf,
         };
         let large = RaceEvaluation {
             horses: (0..14).map(|_| win_horse(0.07, Some(2))).collect(),
             top_pick_position: Some(1),
             top_pick_odds: None,
+            surface: Surface::Turf,
         };
         let races = vec![small(Some(1)), small(Some(5)), large];
         let r = evaluate(&races);
@@ -730,5 +841,44 @@ mod tests {
         let l = &r.by_field_size[1];
         assert_eq!(l.races, 1);
         approx(l.win_hit_rate, 1.0);
+    }
+
+    #[test]
+    fn surface_segments_group_races_in_band_order() {
+        // 芝 2 レース（うち本命1着は1つ）、ダート 1 レース（本命1着）。
+        let race = |surface: Surface, pos: Option<u32>| RaceEvaluation {
+            horses: vec![win_horse(0.5, pos), win_horse(0.5, Some(9))],
+            top_pick_position: pos,
+            top_pick_odds: None,
+            surface,
+        };
+        let races = vec![
+            race(Surface::Turf, Some(1)),
+            race(Surface::Turf, Some(4)),
+            race(Surface::Dirt, Some(1)),
+        ];
+        let r = evaluate(&races);
+
+        // 出力順は SURFACE_BANDS 順（芝→ダート）、データのある馬場のみ。
+        let labels: Vec<&str> = r.by_surface.iter().map(|s| s.label.as_str()).collect();
+        assert_eq!(labels, vec!["芝", "ダート"]);
+
+        let turf = &r.by_surface[0];
+        assert_eq!(turf.races, 2);
+        approx(turf.win_hit_rate, 0.5); // 芝 2 戦で本命1着は1つ
+        approx(turf.show_hit_rate, 0.5); // 本命の着順は 1 着と 4 着
+
+        let dirt = &r.by_surface[1];
+        assert_eq!(dirt.races, 1);
+        approx(dirt.win_hit_rate, 1.0);
+
+        // 片側馬場のみの入力では、その馬場 1 要素だけが返る（データのある馬場のみ）。
+        let dirt_only = evaluate(&[race(Surface::Dirt, Some(1))]);
+        let dirt_labels: Vec<&str> = dirt_only
+            .by_surface
+            .iter()
+            .map(|s| s.label.as_str())
+            .collect();
+        assert_eq!(dirt_labels, vec!["ダート"]);
     }
 }

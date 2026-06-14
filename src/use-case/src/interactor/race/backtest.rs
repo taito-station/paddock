@@ -230,6 +230,7 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
                 horses,
                 top_pick_position,
                 top_pick_odds,
+                surface: race.surface,
             });
         }
 

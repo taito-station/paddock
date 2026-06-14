@@ -5,8 +5,8 @@ use chrono::NaiveDate;
 use clap::Parser;
 use paddock_domain::{
     BacktestReport, EstimationConfig, FieldSizeSegment, HorseName, HorseProbability, JockeyName,
-    PopularitySegment, RaceId, RecencyConfig, ReliabilityBin, ShrinkageConfig, Surface, TrainerName,
-    Venue,
+    PopularitySegment, RaceId, RecencyConfig, ReliabilityBin, ShrinkageConfig, Surface,
+    SurfaceSegment, TrainerName, Venue,
 };
 use paddock_use_case::repository::{
     CourseStatsRow, GroupStat, HorseStatsRow, JockeyStatsRow, TrainerStatsRow,
@@ -111,7 +111,10 @@ async fn main() -> anyhow::Result<()> {
             let config = build_estimation_config(shrinkage_m, recency_half_life)?;
             let from = parse_date(&from)?;
             let to = parse_date(&to)?;
-            let report = app.interactor.backtest(from, to, blend_alpha, config).await?;
+            let report = app
+                .interactor
+                .backtest(from, to, blend_alpha, config)
+                .await?;
             print_backtest(from, to, &report);
         }
     }
@@ -264,6 +267,7 @@ fn print_backtest(from: NaiveDate, to: NaiveDate, r: &BacktestReport) {
     println!();
 
     print_reliability(&r.win_reliability);
+    print_surface_segments(&r.by_surface);
     print_field_size_segments(&r.by_field_size);
     print_popularity_segments(&r.by_popularity);
 
@@ -309,6 +313,31 @@ fn print_field_size_segments(segs: &[FieldSizeSegment]) {
     for s in segs {
         println!(
             "{:<10} {:>5} {:>7.1}% {:>7.1}% {:>7.1}% {:>9.4} {:>9.4}",
+            s.label,
+            s.races,
+            s.win_hit_rate * 100.0,
+            s.place_hit_rate * 100.0,
+            s.show_hit_rate * 100.0,
+            s.win_calibration.brier,
+            s.win_calibration.log_loss,
+        );
+    }
+    println!();
+}
+
+/// 馬場（芝/ダート）別の集計（的中率＋単勝校正）。馬場別 α の要否検討用（#113）。
+fn print_surface_segments(segs: &[SurfaceSegment]) {
+    if segs.is_empty() {
+        return;
+    }
+    println!("## 芝/ダート別");
+    println!(
+        "{:<8} {:>5} {:>8} {:>8} {:>8} {:>9} {:>9}",
+        "馬場", "R数", "単勝率", "連対率", "複勝率", "Brier", "LogLoss"
+    );
+    for s in segs {
+        println!(
+            "{:<8} {:>5} {:>7.1}% {:>7.1}% {:>7.1}% {:>9.4} {:>9.4}",
             s.label,
             s.races,
             s.win_hit_rate * 100.0,
