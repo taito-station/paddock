@@ -323,6 +323,56 @@ async fn save_skips_invalid_odds_row() {
 }
 
 #[tokio::test]
+async fn save_skips_row_with_invalid_odds_high() {
+    let (repo, _dir) = fresh_repo().await;
+    // 下限は有効だが上限が値域違反（odds_high=0.0）の複勝行。保存ガードの
+    // `odds_high.is_some_and(is_invalid_odds)` 分岐が弾くことを担保する(#114)。
+    repo.save_race_odds(&RaceOddsRecord {
+        race_id: race_id(),
+        fetched_at: fetched_at(),
+        rows: vec![OddsRow::place(7, 1.5, 0.0, None)],
+    })
+    .await
+    .unwrap();
+
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM race_odds WHERE race_id = $1")
+        .bind(race_id().value())
+        .fetch_one(&repo.pool)
+        .await
+        .unwrap();
+    assert_eq!(count, 0, "上限のみ値域違反でも行ごと弾く");
+}
+
+#[tokio::test]
+async fn save_keeps_inverted_band_which_read_rejects() {
+    let (repo, _dir) = fresh_repo().await;
+    // 下限・上限とも値域内だが low>high の複勝行。保存側ガードは値域のみ見るため**弾かず**、
+    // 読み取り側 parse_band が構造不正として Err を返す——という意図的な非対称性を回帰固定する。
+    // band 構造不正は「保存できるが読めない」検知すべき不正状態として stop させる設計(#114)。
+    repo.save_race_odds(&RaceOddsRecord {
+        race_id: race_id(),
+        fetched_at: fetched_at(),
+        rows: vec![OddsRow::place(7, 3.0, 2.0, None)],
+    })
+    .await
+    .unwrap();
+
+    // 値域内なので保存はされる。
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM race_odds WHERE race_id = $1")
+        .bind(race_id().value())
+        .fetch_one(&repo.pool)
+        .await
+        .unwrap();
+    assert_eq!(count, 1, "low>high でも値域内なら保存側は通す");
+
+    // 読み取り側は構造不正として Err（skip せず stop で早期検知）。
+    assert!(
+        repo.find_race_odds(&race_id(), None).await.is_err(),
+        "low>high の複勝行は読み取り時に Error"
+    );
+}
+
+#[tokio::test]
 async fn wide_row_with_null_odds_high_is_data_error() {
     let (repo, _dir) = fresh_repo().await;
     // ワイドは複勝同様の幅 odds。odds_high NULL は保存側不整合なので、place 同様に
