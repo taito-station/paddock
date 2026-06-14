@@ -87,7 +87,10 @@ fn pdf_race(race_id: &str, date: NaiveDate, race_num: u32, horse: &str, finish: 
 
 async fn count(repo: &SqliteRepository, table: &str) -> i64 {
     let sql = format!("SELECT COUNT(*) FROM {table}");
-    let row: (i64,) = sqlx::query_as(&sql).fetch_one(&repo.pool).await.unwrap();
+    let row: (i64,) = sqlx::query_as(sqlx::AssertSqlSafe(&*sql))
+        .fetch_one(&repo.pool)
+        .await
+        .unwrap();
     row.0
 }
 

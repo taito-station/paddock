@@ -80,7 +80,7 @@ async fn overall_stat(
         "#,
         date = date_lt_pred(cutoff, "?2"),
     );
-    let mut query = sqlx::query_as(&q).bind(horse_name);
+    let mut query = sqlx::query_as(sqlx::AssertSqlSafe(&*q)).bind(horse_name);
     if let Some(d) = cutoff {
         query = query.bind(d);
     }
@@ -119,7 +119,7 @@ async fn group_by(
             "#,
             date = date_lt_pred(cutoff, "?3"),
         );
-        let mut query = sqlx::query_as(&q).bind(horse_name).bind(*key);
+        let mut query = sqlx::query_as(sqlx::AssertSqlSafe(&*q)).bind(horse_name).bind(*key);
         if let Some(d) = cutoff {
             query = query.bind(d);
         }
@@ -164,7 +164,7 @@ async fn group_by_distance_band(
             "#,
             date = date_lt_pred(cutoff, "?2"),
         );
-        let mut query = sqlx::query_as(&q).bind(horse_name);
+        let mut query = sqlx::query_as(sqlx::AssertSqlSafe(&*q)).bind(horse_name);
         if let Some(d) = cutoff {
             query = query.bind(d);
         }
@@ -210,7 +210,7 @@ async fn group_by_popularity_band(
             "#,
             date = date_lt_pred(cutoff, "?2"),
         );
-        let mut query = sqlx::query_as(&q).bind(horse_name);
+        let mut query = sqlx::query_as(sqlx::AssertSqlSafe(&*q)).bind(horse_name);
         if let Some(d) = cutoff {
             query = query.bind(d);
         }
@@ -322,7 +322,7 @@ async fn dated_group_by(
             date = date_lt_pred(cutoff, "?3"),
         );
         let mut query =
-            sqlx::query_as::<_, (String, i64, i64, i64, i64)>(&q).bind(horse_name).bind(*key);
+            sqlx::query_as::<_, (String, i64, i64, i64, i64)>(sqlx::AssertSqlSafe(&*q)).bind(horse_name).bind(*key);
         if let Some(d) = cutoff {
             query = query.bind(d);
         }
@@ -368,7 +368,7 @@ async fn dated_distance_band(
             "#,
             date = date_lt_pred(cutoff, "?2"),
         );
-        let mut query = sqlx::query_as::<_, (String, i64, i64, i64, i64)>(&q).bind(horse_name);
+        let mut query = sqlx::query_as::<_, (String, i64, i64, i64, i64)>(sqlx::AssertSqlSafe(&*q)).bind(horse_name);
         if let Some(d) = cutoff {
             query = query.bind(d);
         }
@@ -409,7 +409,7 @@ async fn group_by_gate(
             "#,
             date = date_lt_pred(cutoff, "?2"),
         );
-        let mut query = sqlx::query_as(&q).bind(horse_name);
+        let mut query = sqlx::query_as(sqlx::AssertSqlSafe(&*q)).bind(horse_name);
         if let Some(d) = cutoff {
             query = query.bind(d);
         }
