@@ -39,6 +39,10 @@ pub struct Cli {
     /// netkeiba へのリクエスト間隔（ミリ秒）。未指定ならスクレイパ既定値。
     #[arg(long)]
     pub interval: Option<u64>,
+
+    /// 出走各馬の過去走（horse_past_runs）取り込みをスキップする（既定は取り込む）。
+    #[arg(long = "skip-history")]
+    pub skip_history: bool,
 }
 
 impl Cli {
