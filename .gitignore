@@ -16,3 +16,7 @@ docs/temp/
 
 # Claude Code のエージェント用一時 worktree
 .claude/worktrees/
+
+# Python バイトコードキャッシュ（scripts/ のハーネス用）
+__pycache__/
+*.pyc
