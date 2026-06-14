@@ -257,6 +257,33 @@ async fn invalid_odds_row_is_skipped_not_errored() {
 }
 
 #[tokio::test]
+async fn band_invalid_odds_row_is_skipped_not_errored() {
+    let (repo, _dir) = fresh_repo().await;
+    save_sample(&repo).await; // win/place(有効) を投入
+    // 幅 odds（複勝）の下限が値域違反（odds=0.0）だが odds_high は有効、というケースを直接 INSERT する。
+    // parse_band の値域違反 skip 経路（Ok(None)）を担保する: 構造不正(odds_high NULL/low>high)の Err
+    // とは別経路で、当該行のみ読み飛ばしセッションを止めないこと(#114)。
+    sqlx::query(
+        "INSERT INTO race_odds (race_id, bet_type, combination_key, odds, odds_high, popularity, fetched_at) \
+         VALUES ($1, 'place', '5', 0.0, 2.0, NULL, $2)",
+    )
+    .bind(race_id().value())
+    .bind(fetched_at().to_rfc3339())
+    .execute(&repo.pool)
+    .await
+    .unwrap();
+
+    let odds = repo
+        .find_race_odds(&race_id(), None)
+        .await
+        .unwrap()
+        .expect("有効な win/place があるので Some");
+    // 値域違反の複勝行(馬番5)は読み飛ばされ、save_sample の有効な複勝2頭(馬番1,2)のみ残る。
+    assert_eq!(odds.place.len(), 2);
+    assert!(!odds.place.contains_key(&horse(5)), "0.0 下限の複勝行は skip される");
+}
+
+#[tokio::test]
 async fn save_skips_invalid_odds_row() {
     let (repo, _dir) = fresh_repo().await;
     // 有効な単勝行 + 値域違反の三連単行(odds=0.0)を 1 レコードで保存する。

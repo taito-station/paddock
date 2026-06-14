@@ -1,11 +1,14 @@
+use paddock_domain::OddsValue;
 use paddock_use_case::RaceOddsRecord;
 use sqlx::SqlitePool;
 
 use crate::error::Result;
 
-/// オッズ値として不正か（非有限・< 1.0）。`OddsValue` の不変条件（finite かつ >= 1.0）と揃える。
+/// オッズ値として不正か。値域条件を手書きで複製せず `OddsValue` の不変条件（finite かつ >= 1.0）
+/// を単一の真実源として委譲する。読み取り側 `find_race_odds` の skip 判定（`OddsValue::try_from`）
+/// と境界が必ず一致する。
 fn is_invalid_odds(v: f64) -> bool {
-    !v.is_finite() || v < 1.0
+    OddsValue::try_from(v).is_err()
 }
 
 /// 1 レース分のオッズを 1 トランザクションで upsert する。

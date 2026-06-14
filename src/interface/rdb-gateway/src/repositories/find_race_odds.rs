@@ -190,10 +190,11 @@ fn parse_band(race_id: &RaceId, row: &OddsRow) -> Result<Option<PlaceOdds>> {
             row.combination_key
         ))
     })?;
-    let (Some(low), Some(high)) = (
-        parse_odds_value(race_id, row, row.odds),
-        parse_odds_value(race_id, row, high),
-    ) else {
+    // low を先に評価して早期 return することで、下限・上限の両方が値域違反でも warn は 1 行に抑える。
+    let Some(low) = parse_odds_value(race_id, row, row.odds) else {
+        return Ok(None);
+    };
+    let Some(high) = parse_odds_value(race_id, row, high) else {
         return Ok(None);
     };
     PlaceOdds::try_from((low, high))
