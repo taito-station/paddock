@@ -41,8 +41,11 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+TO="${TO%/}"          # 末尾スラッシュを正規化（data/ → data）
+[[ -n "$TO" ]] || TO="."
 DEST="$TO/paddock.db"
-ts="$(date +%Y%m%d-%H%M%S)"
+# ts に PID を付けて、同一秒に別プロセスが退避しても .bak が衝突しないようにする。
+ts="$(date +%Y%m%d-%H%M%S)-$$"
 removed=0
 
 for f in "$DEST" "$DEST-wal" "$DEST-shm"; do

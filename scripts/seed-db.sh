@@ -62,32 +62,40 @@ fi
 
 command -v sqlite3 >/dev/null || { echo "sqlite3 が見つからない" >&2; exit 1; }
 
+TO="${TO%/}"          # 末尾スラッシュを正規化（data/ → data）
+[[ -n "$TO" ]] || TO="."
 mkdir -p "$TO"
 DEST="$TO/paddock.db"
 
+# 以降 cd して使うため golden を絶対パス化する。
+FROM="$(cd "$(dirname "$FROM")" && pwd)/$(basename "$FROM")"
+
 # 自己 seed（golden と target が同一実体）を防ぐ。
-src_abs="$(cd "$(dirname "$FROM")" && pwd)/$(basename "$FROM")"
 dest_abs="$(cd "$TO" && pwd)/paddock.db"
-if [[ "$src_abs" == "$dest_abs" ]]; then
+if [[ "$FROM" == "$dest_abs" ]]; then
     echo "golden と配置先が同一: $dest_abs。別クローンから seed する" >&2
     exit 1
 fi
 
 # まず一時ファイルへ一貫スナップショットを作り、検証が通ってから本配置する。
 # こうすると .backup や検証が失敗しても既存 DB を壊さない（非破壊）。
-tmp="$DEST.seed-tmp.$$"
+tmp_base="paddock.db.seed-tmp.$$"
+tmp="$TO/$tmp_base"
 rm -f "$tmp" "$tmp-wal" "$tmp-shm"
 trap 'rm -f "$tmp" "$tmp-wal" "$tmp-shm"' EXIT
 
-# .backup のパスは sqlite のドット引数（SQL 文字列リテラル）として解釈されるため、
-# シェルクォートではなく SQL のクォート（' を '' に二重化）でエスケープする。
-tmp_sql="${tmp//\'/\'\'}"
-sqlite3 "$FROM" ".backup '$tmp_sql'"
+# sqlite3 の .backup（ドットコマンド）の引数クォートは SQL とも shell とも異なり、パス中の
+# ' " \ を安全に渡すのが難しい。そこで配置先ディレクトリへ cd し、特殊文字を含まない固定
+# basename へ書く。ディレクトリパス（$TO）と golden（$FROM）はシェル側で安全に扱える。
+if ! ( cd "$TO" && sqlite3 "$FROM" ".backup '$tmp_base'" ); then
+    echo "スナップショット作成に失敗: $FROM" >&2
+    exit 1
+fi
 
-# 本配置前にスナップショットの中身を検証する（破損/スキーマ不一致を握りつぶさない）。
+# 本配置前にスナップショットの中身を検証する（破損 / 空 DB / スキーマ不一致を握りつぶさない）。
 races="$(sqlite3 "$tmp" 'SELECT COUNT(*) FROM races;' 2>/dev/null || true)"
-if [[ -z "$races" ]]; then
-    echo "スナップショットから races を読めなかった（golden が破損 / スキーマ不一致の可能性）: $FROM" >&2
+if [[ -z "$races" || "$races" -eq 0 ]]; then
+    echo "スナップショットに races が無い（golden が破損 / 空 DB / スキーマ不一致の可能性）: $FROM" >&2
     exit 1
 fi
 
@@ -96,7 +104,8 @@ sqlite3 "$tmp" 'PRAGMA wal_checkpoint(TRUNCATE);' >/dev/null 2>&1 || true
 rm -f "$tmp-wal" "$tmp-shm"
 
 # ここで初めて既存 DB と WAL/SHM 残骸を .bak へ退避し、一時ファイルを本配置する。
-ts="$(date +%Y%m%d-%H%M%S)"
+# ts に PID を付けて、同一秒に別プロセスが実行しても退避先が衝突しないようにする。
+ts="$(date +%Y%m%d-%H%M%S)-$$"
 for f in "$DEST" "$DEST-wal" "$DEST-shm"; do
     if [[ -e "$f" ]]; then
         mv "$f" "$f.bak-$ts"
@@ -106,5 +115,6 @@ done
 mv "$tmp" "$DEST"
 trap - EXIT
 
-size="$(du -h "$DEST" | cut -f1)"
+# サイズ表示は補助情報。失敗しても seed 自体の成否（exit code）に影響させない。
+size="$(du -h "$DEST" 2>/dev/null | cut -f1 || true)"
 echo "seeded: $FROM -> $DEST ($size, races=$races)"
