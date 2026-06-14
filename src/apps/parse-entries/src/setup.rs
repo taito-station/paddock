@@ -15,14 +15,14 @@ impl PdfFetcher for UreqFetcher {
         let resp = ureq::get(url)
             .call()
             .map_err(|e| paddock_use_case::Error::Internal(format!("fetch {url}: {e}")))?;
-        read_body(url, resp)
+        read_body(url, resp.into_body())
     }
 
     fn fetch_if_exists(&self, url: &str) -> paddock_use_case::Result<Option<Vec<u8>>> {
         match ureq::get(url).call() {
-            Ok(resp) => Ok(Some(read_body(url, resp)?)),
+            Ok(resp) => Ok(Some(read_body(url, resp.into_body())?)),
             // 404 means the resource is not published (yet); treat as absent.
-            Err(ureq::Error::Status(404, _)) => Ok(None),
+            Err(ureq::Error::StatusCode(404)) => Ok(None),
             Err(e) => Err(paddock_use_case::Error::Internal(format!(
                 "fetch {url}: {e}"
             ))),
@@ -30,9 +30,9 @@ impl PdfFetcher for UreqFetcher {
     }
 }
 
-fn read_body(url: &str, resp: ureq::Response) -> paddock_use_case::Result<Vec<u8>> {
+fn read_body(url: &str, body: ureq::Body) -> paddock_use_case::Result<Vec<u8>> {
     let mut buf = Vec::new();
-    resp.into_reader()
+    body.into_reader()
         .read_to_end(&mut buf)
         .map_err(|e| paddock_use_case::Error::Internal(format!("read body {url}: {e}")))?;
     Ok(buf)

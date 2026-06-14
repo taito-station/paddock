@@ -34,7 +34,7 @@ tokio              = { version = "1.*", features = ["macros", "rt-multi-thread",
 tracing            = { version = "0.1.*" }
 tracing-log        = { version = "0.2.*" }
 tracing-subscriber = { version = "0.3.*", features = ["env-filter"] }
-ureq               = { version = "2.*", default-features = false, features = ["tls"] }
+ureq               = { version = "3.*", default-features = false, features = ["rustls"] }
 
 paddock-domain     = { path = "src/domain" }
 paddock-use-case   = { path = "src/use-case" }
