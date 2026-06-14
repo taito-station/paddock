@@ -7,10 +7,10 @@
 使い方:
     python3 answer_check.py preds.json results.json [win_odds.csv]
 
-win_odds.csv（任意, ROI と人気比較用）の列: race_id, horse_num(=combination_key), popularity, odds
+win_odds.csv（任意, ROI と人気比較用）の列: race_id, combination_key(=単勝の馬番), popularity, odds
     sqlite3 -noheader -csv data/paddock.db \
       "SELECT race_id, combination_key, popularity, odds FROM race_odds
-       WHERE bet_type='win' AND race_id LIKE '2026-3-%-3-%' ORDER BY race_id, popularity;" > win_odds.csv
+       WHERE bet_type='win' AND date='YYYY-MM-DD' ORDER BY race_id, popularity;" > win_odds.csv
 """
 import sys
 import json
@@ -21,8 +21,10 @@ if len(sys.argv) < 3:
     print(__doc__, file=sys.stderr)
     sys.exit(1)
 
-preds = json.load(open(sys.argv[1], encoding="utf-8"))
-results = json.load(open(sys.argv[2], encoding="utf-8"))
+with open(sys.argv[1], encoding="utf-8") as f:
+    preds = json.load(f)
+with open(sys.argv[2], encoding="utf-8") as f:
+    results = json.load(f)
 odds_csv = sys.argv[3] if len(sys.argv) > 3 else None
 
 SLUG2JP = {"tokyo": "東京", "hanshin": "阪神", "kyoto": "京都", "nakayama": "中山",
@@ -36,17 +38,24 @@ res_idx = {(r.get("venue_jp", r.get("venue")), r["race_num"]): r for r in result
 fav = {}
 win_odds = defaultdict(dict)
 if odds_csv:
-    for row in csv.reader(open(odds_csv, encoding="utf-8")):
-        if len(row) < 4:
-            continue
-        rid, num, pop, od = row[0], int(row[1]), row[2], float(row[3])
-        parts = rid.split("-")  # YYYY-round-slug-day-RRR
-        slug = parts[2]
-        rn = int(parts[4].replace("R", ""))
-        key = (SLUG2JP.get(slug, slug), rn)
-        win_odds[key][num] = od
-        if pop == "1":
-            fav[key] = num
+    with open(odds_csv, encoding="utf-8") as f:
+        for row in csv.reader(f):
+            if len(row) < 4:
+                continue
+            rid, num, pop, od = row[0], int(row[1]), row[2].strip(), float(row[3])
+            parts = rid.split("-")  # YYYY-round-slug-day-RRR
+            slug = parts[2]
+            rn = int(parts[4].replace("R", ""))
+            key = (SLUG2JP.get(slug, slug), rn)
+            win_odds[key][num] = od
+            # popularity は文字列。"1"/"1.0"/空白付きを吸収して 1 番人気を判定。
+            # ORDER BY popularity 前提なので最初の 1 番人気のみ採用（後勝ち上書きを避ける）。
+            try:
+                popi = int(float(pop))
+            except ValueError:
+                popi = None
+            if popi == 1 and key not in fav:
+                fav[key] = num
 
 
 def finish_map(r):
@@ -107,10 +116,11 @@ for p in preds:
             diff_n += 1
             if hon_pos == 1:
                 diff_win += 1
-    if key in win_odds:
+    # 本命オッズが取れたレースのみ ROI 母数に含める（欠損/0.0 を「外れ」と混同しない）。
+    o = win_odds.get(key, {}).get(hon)
+    if o is not None and o > 0:
         bet += 100
-        o = win_odds[key].get(hon)
-        if hon_pos == 1 and o:
+        if hon_pos == 1:
             pay += int(o * 100)
     t3 = [x["horse_num"] for x in sorted([y for y in r["rows"] if y["rank"]], key=lambda y: y["rank"])[:3]]
     mark = "◎" if hon_pos == 1 else ("○" if hon_pos in (2, 3) else "×")
@@ -118,12 +128,17 @@ for p in preds:
     log.append((f"{p['venue']}{p['race_num']}R", f"{surf}{p['distance']}", hon,
                 hon_pos or "圏外", mark, w, wr or "-", t3, ranks[:4]))
 
+if n == 0:
+    print("preds と results が1件もマッチしませんでした（venue 表記/race_num を確認）", file=sys.stderr)
+    sys.exit(1)
+
 print(f"対象レース: {n}")
 print(f"本命的中(単勝): {hon_win}/{n} = {hon_win/n*100:.1f}%")
 print(f"本命複勝(3着内): {hon_top3}/{n} = {hon_top3/n*100:.1f}%")
 for k in (1, 2, 3, 4, 5):
     print(f"勝ち馬 model Top{k} 内: {recall[k]}/{n} = {recall[k]/n*100:.1f}%")
-print(f"Brier(単勝, 馬あたり平均): {brier/nh:.4f}")
+if nh:
+    print(f"Brier(単勝, 馬あたり平均): {brier/nh:.4f}")
 if fav_n:
     print(f"\n市場1番人気 勝率: {fav_win}/{fav_n} = {fav_win/fav_n*100:.1f}%")
     print(f"本命≠1番人気: {diff_n}R（うちモデル本命勝ち {diff_win}）")

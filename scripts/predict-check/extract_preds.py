@@ -15,7 +15,8 @@ if len(sys.argv) < 2:
     print(__doc__, file=sys.stderr)
     sys.exit(1)
 
-lines = open(sys.argv[1], encoding="utf-8").read().splitlines()
+with open(sys.argv[1], encoding="utf-8") as f:
+    lines = f.read().splitlines()
 races = []
 cur = None
 hdr = re.compile(r"^--- レース (\d+): (\S+) (\S+) (\d+)m ---")

@@ -4,6 +4,7 @@
 """
 import re
 import subprocess
+import sys
 
 # JRA 場コード → (slug, 日本語)
 VENUES = {
@@ -16,17 +17,25 @@ UA = "Mozilla/5.0"
 
 
 def curl(url: str, timeout: int = 25) -> bytes:
-    return subprocess.run(
-        ["curl", "-s", "--max-time", str(timeout), url, "-H", f"User-Agent: {UA}"],
+    # 取得失敗を黙って空 bytes で流すと、結果 0 件が「正常」として集計を静かに汚す。
+    # returncode 非 0（通信失敗・タイムアウト）は例外、本文空は警告で気づけるようにする。
+    p = subprocess.run(
+        ["curl", "-sf", "--max-time", str(timeout), url, "-H", f"User-Agent: {UA}"],
         capture_output=True,
-    ).stdout
+    )
+    if p.returncode != 0:
+        raise RuntimeError(f"curl 失敗 (exit {p.returncode}): {url}")
+    if not p.stdout:
+        print(f"[warn] 空レスポンス: {url}", file=sys.stderr)
+    return p.stdout
 
 
 def decode(raw: bytes) -> str:
-    # netkeiba は EUC-JP。失敗時は UTF-8 フォールバック。
+    # netkeiba は EUC-JP。errors 無指定の strict で試し、失敗時のみ UTF-8 フォールバック
+    # （errors="replace" だと例外が出ずフォールバックに到達しないため strict にする）。
     try:
-        return raw.decode("euc_jp", errors="replace")
-    except Exception:
+        return raw.decode("euc_jp")
+    except UnicodeDecodeError:
         return raw.decode("utf-8", errors="replace")
 
 
@@ -35,6 +44,10 @@ def list_race_ids(date_yyyymmdd: str, venue_codes=None):
 
     race_id = YYYY + 場(2) + 回(2) + 日(2) + R(2)。
     """
+    if not re.fullmatch(r"\d{8}", date_yyyymmdd):
+        raise ValueError(f"date は YYYYMMDD 8桁: {date_yyyymmdd!r}")
+    if venue_codes and not all(re.fullmatch(r"\d{2}", v) for v in venue_codes):
+        raise ValueError(f"venue コードは 2桁数字: {venue_codes!r}")
     url = f"https://race.netkeiba.com/top/race_list_sub.html?kaisai_date={date_yyyymmdd}"
     html = decode(curl(url))
     ids = sorted(set(re.findall(r"race_id=([0-9]{12})", html)))
@@ -65,11 +78,17 @@ def fetch_result(rid: str):
     rows = []
     for r in re.findall(r'class="HorseList">(.*?)</tr>', html, re.S):
         rank = re.search(r'class="Rank">\s*(\d+)\s*<', r)
-        nums = re.findall(r'class="Num[^"]*">\s*<div[^>]*>\s*(\d+)\s*</div>', r)
         name = re.search(r'HorseNameSpan">\s*([^<]+?)\s*</span>', r)
-        if not nums:
-            continue
-        horse_num = int(nums[-1]) if len(nums) >= 2 else int(nums[0])
+        # 馬番は `class="Num Txt_C"` セル（枠 `Num WakuN` と区別する）。これを優先し、
+        # 取れなければ Num セル列の最後（=馬番）にフォールバック。どちらも無ければ行をスキップ。
+        mnum = re.search(r'class="Num[^"]*Txt_C[^"]*">\s*<div[^>]*>\s*(\d+)\s*</div>', r)
+        if mnum:
+            horse_num = int(mnum.group(1))
+        else:
+            nums = re.findall(r'class="Num[^"]*">\s*<div[^>]*>\s*(\d+)\s*</div>', r)
+            if not nums:
+                continue
+            horse_num = int(nums[-1])
         rows.append({
             "rank": int(rank.group(1)) if rank else None,
             "horse_num": horse_num,
