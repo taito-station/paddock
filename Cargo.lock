@@ -1153,11 +1153,11 @@ name = "netkeiba-scraper"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "encoding_rs",
  "paddock-domain",
  "paddock-use-case",
  "regex",
  "scraper",
+ "scraper-util",
  "serde_json",
  "thiserror",
  "tracing",
@@ -1229,10 +1229,10 @@ dependencies = [
 name = "odds-scraper"
 version = "0.1.0"
 dependencies = [
- "encoding_rs",
  "paddock-domain",
  "paddock-use-case",
  "scraper",
+ "scraper-util",
  "thiserror",
  "tracing",
  "ureq",
@@ -1861,6 +1861,14 @@ dependencies = [
  "once_cell",
  "selectors",
  "tendril",
+]
+
+[[package]]
+name = "scraper-util"
+version = "0.1.0"
+dependencies = [
+ "encoding_rs",
+ "tracing",
 ]
 
 [[package]]
