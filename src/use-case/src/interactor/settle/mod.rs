@@ -76,9 +76,24 @@ impl<S: PayoutFetcher, R: Repository> SettleInteractor<S, R> {
         for (race_key, idxs) in &by_race {
             let race_id = RaceId::try_from(race_key.as_str())?;
             let netkeiba_id = netkeiba_race_id_from_paddock(&race_id)?;
-            let payouts = self.scraper.fetch_race_payouts(&netkeiba_id)?;
+            // 取得失敗（ネット断・BAN 等）は当該レースを pending 扱いにして継続する。1 レースの
+            // 失敗で確定済みの他レースまで巻き添えに未保存（書き込みはループ後の 1 TXN）にしない。
+            let payouts = match self.scraper.fetch_race_payouts(&netkeiba_id) {
+                Ok(p) => p,
+                Err(e) => {
+                    tracing::warn!(
+                        race_id = race_id.value(),
+                        error = %e,
+                        "確定払戻の取得に失敗。pending として継続"
+                    );
+                    pending_races += 1;
+                    continue;
+                }
+            };
             if payouts.is_empty() {
-                // 未確定: payout 据え置きで pending。
+                // 未確定（払戻ブロック無し）: payout 据え置きで pending。
+                // 注: 構造変更・エラーページも空になり得て未確定と区別できない（is_empty）。
+                // その場合は確定済みにならず pending のままになる（誤精算は起こさない）。
                 pending_races += 1;
                 continue;
             }
@@ -93,6 +108,14 @@ impl<S: PayoutFetcher, R: Repository> SettleInteractor<S, R> {
 
         // セッション集計をゼロから再計算する（冪等）。total_bet は購入時に確定済みのため据え置き。
         let total_payout: u64 = bets.iter().map(|(_, b)| b.payout).sum();
+        // 購入は残高ガード下で行われ total_bet <= budget が不変条件。万一崩れた場合 saturating_sub は
+        // 0 に張り付いて異常を隠すため、debug ビルドで早期検知する（本番は防御的に飽和維持）。
+        debug_assert!(
+            session.total_bet <= session.budget,
+            "total_bet ({}) must not exceed budget ({})",
+            session.total_bet,
+            session.budget
+        );
         let balance = session
             .budget
             .saturating_sub(session.total_bet)

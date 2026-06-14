@@ -81,7 +81,19 @@ fn extract_row(row: &ElementRef, payouts: &mut RacePayouts) {
         parse_combos(&result_cell, is_unordered(label))
     };
 
-    // 馬番[i]/組合せ[i] ↔ 配当[i] を対応付ける（数の少ない方に合わせる）。
+    // 組合せ[i] ↔ 配当[i] を位置で対応付ける。件数が食い違う行は対応がズレて誤った
+    // 馬番に配当を貼るおそれがあるため、当該券種ごと skip して warn を出す（払戻金額に
+    // 直結するため沈黙させない）。複勝・ワイドのように 1 行に複数組×複数配当が並ぶ券種で
+    // HTML 構造が想定とズレた場合の保険。
+    if combos.len() != amounts.len() {
+        tracing::warn!(
+            bet_type = label,
+            combos = combos.len(),
+            amounts = amounts.len(),
+            "払戻の組合せ数と配当数が不一致のため当該券種をスキップ"
+        );
+        return;
+    }
     for (combo, payoff) in combos.iter().zip(amounts.iter()) {
         payouts.insert(label, combo.clone(), *payoff);
     }
@@ -134,22 +146,31 @@ fn parse_combos(result_cell: &ElementRef, unordered: bool) -> Vec<String> {
         .collect()
 }
 
-/// `td.Payout` の `<br>` 区切り配当文字列（例 `280円<br />110円`）を u32 円のリストにする。
-/// カンマと「円」を除去して数値化し、パースできない断片は捨てる。
+/// `td.Payout` の配当文字列（例 `280円<br />110円` / `1,010円`）を u32 円のリストにする。
+///
+/// `<br>` や改行の有無に依存せず、セル全体のテキストを走査して「数字（桁区切りカンマを含む）
+/// に直後 `円` が続く」並びを 1 配当ずつ取り出す。これにより `280円110円` のように区切りが
+/// 無く連結したケースでも `[280, 110]` と正しく分割でき、`5人気` のような円で終わらない数字は
+/// 拾わない（人気欄混入への保険）。
 fn parse_payouts(payout_cell: &ElementRef) -> Vec<u32> {
-    payout_cell
-        .text()
-        .flat_map(|frag| frag.split('\n'))
-        .filter_map(|frag| {
-            let cleaned: String = frag
-                .chars()
-                .filter(|c| c.is_ascii_digit())
-                .collect::<String>();
-            if cleaned.is_empty() {
-                None
-            } else {
-                cleaned.parse::<u32>().ok()
+    let text: String = payout_cell.text().collect();
+    let mut out = Vec::new();
+    let mut digits = String::new();
+    for ch in text.chars() {
+        if ch.is_ascii_digit() {
+            digits.push(ch);
+        } else if ch == ',' {
+            // 桁区切りカンマは無視して数字の連結を継続する。
+        } else {
+            // 数字列の直後が `円` のときだけ 1 配当として確定する。
+            if ch == '円'
+                && !digits.is_empty()
+                && let Ok(n) = digits.parse::<u32>()
+            {
+                out.push(n);
             }
-        })
-        .collect()
+            digits.clear();
+        }
+    }
+    out
 }

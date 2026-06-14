@@ -54,3 +54,32 @@ fn empty_html_is_unconfirmed() {
     let p = parse_race_payouts("<html><body></body></html>", race_id()).expect("parse");
     assert!(p.is_empty());
 }
+
+// 組合せ数と配当数が食い違う行は、誤った馬番に配当を貼らないよう当該券種ごと skip する
+// （複勝・ワイドのように 1 行に複数組×複数配当が並ぶ券種での構造ズレへの保険）。
+#[test]
+fn mismatched_combo_and_payout_count_is_skipped() {
+    // 馬連: 組合せ 1 組（4-6）に対し配当が 2 つ → 不一致なので採用しない。
+    let html = r#"<table class="Payout_Detail_Table"><tbody>
+        <tr class="Umaren"><th>馬連</th>
+          <td class="Result"><ul><li><span>4</span></li><li><span>6</span></li></ul></td>
+          <td class="Payout"><span>1,170円<br />999円</span></td>
+        </tr></tbody></table>"#;
+    let p = parse_race_payouts(html, race_id()).expect("parse");
+    assert_eq!(p.payoff("quinella", "4-6"), None, "件数不一致の行は採用しない");
+    assert!(p.is_empty());
+}
+
+// 区切り無しで配当が連結（`280円110円`）しても 1 配当ずつ正しく切り出す。
+#[test]
+fn concatenated_payouts_split_on_yen() {
+    // 複勝: 馬番 6,4 の 2 頭に対し配当が `280円110円`（br 無し連結）でも [280,110] に分割される。
+    let html = r#"<table class="Payout_Detail_Table"><tbody>
+        <tr class="Fukusho"><th>複勝</th>
+          <td class="Result"><div><span>6</span></div><div><span>4</span></div></td>
+          <td class="Payout"><span>280円110円</span></td>
+        </tr></tbody></table>"#;
+    let p = parse_race_payouts(html, race_id()).expect("parse");
+    assert_eq!(p.payoff("place", "6"), Some(280));
+    assert_eq!(p.payoff("place", "4"), Some(110));
+}
