@@ -373,6 +373,62 @@ async fn save_keeps_inverted_band_which_read_rejects() {
 }
 
 #[tokio::test]
+async fn cleanup_migration_deletes_only_invalid_rows() {
+    let (repo, _dir) = fresh_repo().await;
+    // 残骸は保存ガードで弾かれるため直接 INSERT で再現する。値域違反 3 行 + 有効 2 行を投入。
+    let rid = race_id().value().to_string();
+    let fa = fetched_at().to_rfc3339();
+    let rows: [(&str, &str, f64, Option<f64>); 5] = [
+        ("win", "1", 3.5, None),           // 有効
+        ("place", "1", 1.5, Some(2.0)),    // 有効
+        ("trifecta", "3>1>2", 0.0, None),  // 残骸(下限)
+        ("place", "5", 0.0, Some(2.0)),    // 残骸(下限)
+        ("place", "6", 1.5, Some(0.0)),    // 残骸(上限)
+    ];
+    for (bet, key, odds, high) in rows {
+        sqlx::query(
+            "INSERT INTO race_odds \
+             (race_id, bet_type, combination_key, odds, odds_high, popularity, fetched_at) \
+             VALUES ($1, $2, $3, $4, $5, NULL, $6)",
+        )
+        .bind(&rid)
+        .bind(bet)
+        .bind(key)
+        .bind(odds)
+        .bind(high)
+        .bind(&fa)
+        .execute(&repo.pool)
+        .await
+        .unwrap();
+    }
+
+    // 実際の cleanup migration SQL をディスクから読んで適用する（SQL 文の drift を防ぐ）。
+    let sql = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../deployments/db/migrations/20260614000001_cleanup_invalid_race_odds.up.sql"
+    ))
+    .unwrap();
+    sqlx::query(&sql).execute(&repo.pool).await.unwrap();
+
+    // 残骸 3 行のみ削除され、有効 2 行は残る。
+    let remaining: Vec<(String, String)> = sqlx::query_as(
+        "SELECT bet_type, combination_key FROM race_odds WHERE race_id = $1 ORDER BY bet_type, combination_key",
+    )
+    .bind(race_id().value())
+    .fetch_all(&repo.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        remaining,
+        vec![
+            ("place".to_string(), "1".to_string()),
+            ("win".to_string(), "1".to_string()),
+        ],
+        "値域違反行のみ削除され有効行は残る"
+    );
+}
+
+#[tokio::test]
 async fn wide_row_with_null_odds_high_is_data_error() {
     let (repo, _dir) = fresh_repo().await;
     // ワイドは複勝同様の幅 odds。odds_high NULL は保存側不整合なので、place 同様に
