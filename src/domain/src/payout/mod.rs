@@ -4,8 +4,11 @@
 //! **文字列一致**で照合して払戻額を算出する（[`settle_bet`]）。券種ラベルは
 //! [`crate::BetCombination::type_label`] と、組合せコードは
 //! [`crate::BetCombination::combination_code`] と同形式に揃える前提。
+//!
+//! 出走取消(取)・競走除外(除)の馬を含む組番は JRA ルールで**全額返還**されるため、
+//! `RacePayouts` は返還対象馬番（`scratched`）も保持し、[`settle_bet`] は返還を stake 返戻として扱う。
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::race::RaceId;
 
@@ -13,10 +16,13 @@ use crate::race::RaceId;
 ///
 /// 複勝・ワイドは的中組合せが複数、同着は同一券種に複数の的中組合せが並ぶが、いずれも
 /// 別キーとして保持されるため自然に表現できる。払戻が 1 件も無いレースは未確定とみなす。
+///
+/// `scratched` は出走取消・競走除外の馬番集合。これらを 1 頭でも含む組番は返還対象になる。
 #[derive(Debug, Clone)]
 pub struct RacePayouts {
     pub race_id: RaceId,
     entries: HashMap<(String, String), u32>,
+    scratched: HashSet<u32>,
 }
 
 impl RacePayouts {
@@ -25,6 +31,7 @@ impl RacePayouts {
         Self {
             race_id,
             entries: HashMap::new(),
+            scratched: HashSet::new(),
         }
     }
 
@@ -56,13 +63,37 @@ impl RacePayouts {
     pub fn len(&self) -> usize {
         self.entries.len()
     }
+
+    /// 返還対象馬番（出走取消・競走除外）の集合を設定する。
+    pub fn set_scratched(&mut self, scratched: HashSet<u32>) {
+        self.scratched = scratched;
+    }
+
+    /// `combo_code` 内の馬番に返還対象（取消/除外）が 1 頭でも含まれるか。
+    ///
+    /// JRA では組番に非出走馬を含むと当該組番は**全額返還**（按分なし・組番単位 all-or-nothing）。
+    /// 各 `predict_bets` 行＝1 組番なので、流しの一部のみ取消でも該当行だけが返還になる。
+    pub fn is_refunded(&self, combo_code: &str) -> bool {
+        !self.scratched.is_empty() && combo_nums(combo_code).any(|n| self.scratched.contains(&n))
+    }
+}
+
+/// 組合せコード（例 `8` / `6-8` / `1>2>3`）を構成馬番に分解する。区切りは `-`（無順）と `>`（順序付き）。
+fn combo_nums(combo_code: &str) -> impl Iterator<Item = u32> + '_ {
+    combo_code
+        .split(['-', '>'])
+        .filter_map(|s| s.parse::<u32>().ok())
 }
 
 /// 確定払戻から 1 買い目の払戻額(円)を算出する純関数。
 ///
-/// 配当を引けたら `stake / 100 * payoff_per_100`（JRA の 100 円あたり払戻）、引けなければ 0。
+/// 返還対象（組番に取消/除外馬を含む）なら `stake` を全額返戻する。それ以外は配当を引けたら
+/// `stake / 100 * payoff_per_100`（JRA の 100 円あたり払戻）、引けなければ 0。
 /// `stake` は 100 円単位前提（端数は切り捨て）。
 pub fn settle_bet(type_label: &str, combo_code: &str, stake: u64, payouts: &RacePayouts) -> u64 {
+    if payouts.is_refunded(combo_code) {
+        return stake;
+    }
     match payouts.payoff(type_label, combo_code) {
         Some(per100) => stake / 100 * u64::from(per100),
         None => 0,
@@ -121,5 +152,63 @@ mod tests {
         let p = payouts();
         // ¥150 → 1 単位ぶんのみ（端数切り捨て）: 150/100=1 * 140 = 140
         assert_eq!(settle_bet("win", "8", 150, &p), 140);
+    }
+
+    /// scratched を持つ払戻集合（馬番 6 が取消/除外）。
+    fn payouts_with_scratch() -> RacePayouts {
+        let mut p = payouts();
+        p.set_scratched(HashSet::from([6]));
+        p
+    }
+
+    #[test]
+    fn scratched_horse_in_single_bet_is_refunded() {
+        let p = payouts_with_scratch();
+        // 単勝 6 は取消 → 配当表に無くても stake 全額返戻。
+        assert_eq!(settle_bet("win", "6", 5000, &p), 5000);
+        // 複勝 6 も同様に返還。
+        assert_eq!(settle_bet("place", "6", 600, &p), 600);
+    }
+
+    #[test]
+    fn combo_containing_scratched_horse_is_refunded() {
+        let p = payouts_with_scratch();
+        // 馬連 6-8 は本来 ¥1,260 的中だが、6 が取消なので組番ごと全額返還。
+        assert_eq!(settle_bet("quinella", "6-8", 600, &p), 600);
+        // 三連複 4-6-8 も 6 を含むため返還（配当表に無くても stake）。
+        assert_eq!(settle_bet("trio", "4-6-8", 300, &p), 300);
+    }
+
+    #[test]
+    fn nagashi_refunds_only_rows_with_scratched_horse() {
+        // 流し（複数組番）のうち取消馬を含む行だけ返還・他行は通常精算される。
+        let p = payouts_with_scratch();
+        // 6 を含む 6-8 は返還（stake）。
+        assert_eq!(settle_bet("quinella", "6-8", 600, &p), 600);
+        // 6 を含まない 1-2 は同着的中で通常払戻。
+        assert_eq!(settle_bet("quinella", "1-2", 600, &p), 3000);
+        // 6 を含まず不的中の 7-8 は 0 のまま。
+        assert_eq!(settle_bet("quinella", "7-8", 600, &p), 0);
+    }
+
+    #[test]
+    fn no_scratch_keeps_existing_behavior() {
+        // 取消が無いレースは従来どおり（is_refunded は常に false）。
+        let p = payouts();
+        assert!(!p.is_refunded("6-8"));
+        assert_eq!(settle_bet("quinella", "6-8", 600, &p), 7560);
+        assert_eq!(settle_bet("quinella", "3-8", 600, &p), 0);
+    }
+
+    #[test]
+    fn is_refunded_detects_horse_in_any_position() {
+        let p = payouts_with_scratch();
+        assert!(p.is_refunded("6")); // 単一
+        assert!(p.is_refunded("6-8")); // 無順の先頭
+        assert!(p.is_refunded("8-6")); // 無順の末尾
+        assert!(p.is_refunded("1>6>3")); // 順序付きの中間
+        assert!(!p.is_refunded("7-8")); // 取消馬を含まない
+        // 「16」を「1」「6」と取り違えない（区切りで分解するため）。
+        assert!(!p.is_refunded("16-8"));
     }
 }

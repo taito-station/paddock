@@ -52,6 +52,7 @@ impl<S: PayoutFetcher, R: Repository> SettleInteractor<S, R> {
             return Ok(SettleReport {
                 settled_races: 0,
                 pending_races: 0,
+                refunded_bets: 0,
                 total_bet: session.total_bet,
                 total_payout: session.total_payout,
                 balance: session.balance,
@@ -70,6 +71,7 @@ impl<S: PayoutFetcher, R: Repository> SettleInteractor<S, R> {
 
         let mut settled_races = 0usize;
         let mut pending_races = 0usize;
+        let mut refunded_bets = 0usize;
         // 確定したレースの bet の (bet_id, payout) のみを書き込み対象にする。
         let mut updated: Vec<(i64, u64)> = Vec::new();
 
@@ -101,6 +103,9 @@ impl<S: PayoutFetcher, R: Repository> SettleInteractor<S, R> {
             for &idx in idxs {
                 let (bet_id, bet) = &bets[idx];
                 let payout = settle_bet(&bet.bet_type, &bet.combination, bet.stake, &payouts);
+                if payouts.is_refunded(&bet.combination) {
+                    refunded_bets += 1;
+                }
                 updated.push((*bet_id, payout));
                 bets[idx].1.payout = payout;
             }
@@ -132,6 +137,7 @@ impl<S: PayoutFetcher, R: Repository> SettleInteractor<S, R> {
         Ok(SettleReport {
             settled_races,
             pending_races,
+            refunded_bets,
             total_bet: session.total_bet,
             total_payout,
             balance,
@@ -156,6 +162,8 @@ pub struct SettleReport {
     pub settled_races: usize,
     /// 未確定でスキップしたレース数（payout 据え置き）。
     pub pending_races: usize,
+    /// 返還（取消/除外馬を含む組番）として stake を全額返戻した買い目数（#129）。
+    pub refunded_bets: usize,
     pub total_bet: u64,
     pub total_payout: u64,
     pub balance: u64,

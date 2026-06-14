@@ -369,6 +369,64 @@ async fn idempotent_recompute_does_not_double_count() {
 }
 
 #[tokio::test]
+async fn refunded_bet_returns_stake_and_is_counted() {
+    use std::collections::HashSet;
+
+    // 1R: 買い目は単勝 8 だが馬番 8 が出走取消 → stake 全額返戻。
+    // 払戻表には別の的中(単勝 3)が載るが、取消馬を含む組番は配当照合より優先して返還。
+    let mut p1 = RacePayouts::empty(RaceId::try_from("2026-4-tokyo-1-1R").unwrap());
+    p1.insert("win", "3", 500);
+    p1.set_scratched(HashSet::from([8]));
+    // 2R: 馬連 6-8 は通常的中。
+    let (repo, fetcher) = two_race_setup(Some(p1), Some(payouts_quinella_1260()));
+    let interactor = SettleInteractor::new(fetcher, repo);
+
+    let report = interactor.settle_session(date()).await.unwrap();
+
+    assert_eq!(report.settled_races, 2);
+    assert_eq!(report.refunded_bets, 1, "取消馬を含む 1 件が返還");
+    // 1R 返還=1000（stake）、2R 的中=6300。total_payout=7300。
+    assert_eq!(report.total_payout, 7300);
+    // balance = 10000 - 1500 + 7300 = 15800（返還分は純収支 0）。
+    assert_eq!(report.balance, 15800);
+
+    let written = interactor
+        .repository
+        .written
+        .lock()
+        .unwrap()
+        .clone()
+        .unwrap();
+    // 返還買い目の payout は stake と一致（不的中の 0 と区別可能）。
+    assert_eq!(written.1, vec![(1, 1000), (2, 6300)]);
+
+    // 冪等性: 再 settle しても同値（返還も毎回ゼロから再計算）。
+    let mut p1b = RacePayouts::empty(RaceId::try_from("2026-4-tokyo-1-1R").unwrap());
+    p1b.insert("win", "3", 500);
+    p1b.set_scratched(HashSet::from([8]));
+    let bets = vec![
+        (1i64, bet("2026-4-tokyo-1-1R", "win", "8", 1000, 1000)),
+        (2i64, bet("2026-4-tokyo-1-2R", "quinella", "6-8", 500, 6300)),
+    ];
+    let mut prior = session(10000, 1500);
+    prior.total_payout = 7300;
+    prior.balance = 15800;
+    let repo2 = MockRepo {
+        session: prior,
+        bets,
+        written: Mutex::new(None),
+    };
+    let mut payouts = HashMap::new();
+    payouts.insert("202605040101".to_string(), p1b);
+    payouts.insert("202605040102".to_string(), payouts_quinella_1260());
+    let interactor2 = SettleInteractor::new(FakeFetcher { payouts }, repo2);
+    let report2 = interactor2.settle_session(date()).await.unwrap();
+    assert_eq!(report2.total_payout, 7300);
+    assert_eq!(report2.balance, 15800);
+    assert_eq!(report2.refunded_bets, 1);
+}
+
+#[tokio::test]
 async fn no_bets_returns_empty_report() {
     // 買い目無しはエラーではなく空 report（セッションの既存値を反映）。
     let (mut repo, fetcher) = two_race_setup(None, None);

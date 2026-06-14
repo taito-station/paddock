@@ -1,6 +1,7 @@
+use std::collections::HashSet;
 use std::sync::LazyLock;
 
-use paddock_domain::{HorseNum, JockeyName, TimeSeconds, TrainerName};
+use paddock_domain::{HorseNum, JockeyName, ResultStatus, TimeSeconds, TrainerName};
 use paddock_use_case::netkeiba_scraper::ResultRow;
 use scraper::{ElementRef, Html, Selector};
 
@@ -45,6 +46,24 @@ pub fn parse_race_result(html: &str, netkeiba_race_id: &str) -> Result<Vec<Resul
         )));
     }
     Ok(rows)
+}
+
+/// 結果テーブルから**返還対象**（出走取消=取 / 競走除外=除）の馬番集合を抽出する。
+///
+/// 自動精算（#129）で組番に非出走馬を含む買い目を全額返還するために使う。`parse_race_payouts`
+/// と同じ結果ページ HTML（`doc`）を使い回す前提（追加取得なし）。中止(中)・失格(失) は出走済みの
+/// ため返還対象に含めない（`parse_finish` の status 分類に準拠）。該当馬が無ければ空集合を返す。
+pub(crate) fn scratched_horse_nums(doc: &Html) -> HashSet<u32> {
+    doc.select(&ROW)
+        .filter_map(|row| {
+            let (_, status) = parse_finish(&text_of(&row, &FINISH)?);
+            if matches!(status, ResultStatus::Cancelled | ResultStatus::Scratched) {
+                text_of(&row, &HORSE_NUM)?.parse::<u32>().ok()
+            } else {
+                None
+            }
+        })
+        .collect()
 }
 
 /// 1 行（`<tr>`）から成績を抽出する。着順セルか馬番セルを欠く行（ヘッダ等）は `None`。
