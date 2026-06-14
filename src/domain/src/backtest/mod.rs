@@ -196,6 +196,13 @@ pub struct ExoticBet {
 }
 
 /// 券種別の買い目（curated）校正・回収率セグメント（#121）。過信なら `mean_predicted ≫ hit_rate`。
+///
+/// 解釈の注意（いずれも計測アーティファクトで真の過信/過小ではない）:
+/// - 小頭数（7 頭以下）の複勝/ワイドは、`select_bets` の採用確率が `show_prob`（3 着以内）である一方、
+///   的中定義は払戻圏の 2 着以内になるため `mean_predicted` が `hit_rate` を上回りやすい（定義差）。
+///   `select_bets` 側の確率源を頭数で切り替える精緻化は follow-up（#122）。
+/// - 同着を含むレースは上位着が先頭馬のみ採られるため一部の組合せ券種で的中を取りこぼし、
+///   `hit_rate`／回収率が悲観側へわずかに振れうる。
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExoticSegment {
     /// 券種ラベル（[`EXOTIC_BET_TYPES`]）。
