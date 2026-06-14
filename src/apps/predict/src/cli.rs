@@ -18,10 +18,15 @@ pub struct Cli {
     pub budget: Option<u64>,
 
     /// 中断した同日セッションを保存済みの残高から再開する。
-    #[arg(long, conflicts_with = "summary")]
+    #[arg(long, conflicts_with_all = ["summary", "settle"])]
     pub resume: bool,
 
     /// 同日セッションの収支サマリと買い目明細を表示して終了する（読み取り専用）。
     #[arg(long)]
     pub summary: bool,
+
+    /// レース確定後の事後精算。netkeiba の確定払戻で購入済み買い目の payout を自動セットし、
+    /// セッションの収支・回収率を更新する（冪等。未確定レースはスキップ）。
+    #[arg(long, conflicts_with = "summary")]
+    pub settle: bool,
 }

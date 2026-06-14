@@ -128,7 +128,9 @@ impl NetkeibaScraper for FakeScraper {
     }
     fn fetch_exotic_odds(&self, _race_id: &str) -> Result<FetchedExoticOdds> {
         if self.exotic_err {
-            return Err(paddock_use_case::Error::Internal("exotic odds API down".into()));
+            return Err(paddock_use_case::Error::Internal(
+                "exotic odds API down".into(),
+            ));
         }
         Ok(self.exotic.clone())
     }
@@ -261,6 +263,19 @@ impl Repository for RecordingRepo {
     async fn find_predict_bets(&self, _date: NaiveDate) -> Result<Vec<PredictBetRecord>> {
         unimplemented!()
     }
+    async fn find_predict_bets_with_id(
+        &self,
+        _date: NaiveDate,
+    ) -> Result<Vec<(i64, PredictBetRecord)>> {
+        unimplemented!()
+    }
+    async fn settle_predict_session(
+        &self,
+        _session: &PredictSessionRecord,
+        _settled: &[(i64, u64)],
+    ) -> Result<()> {
+        unimplemented!()
+    }
     async fn save_predict_session(&self, _session: &PredictSessionRecord) -> Result<()> {
         unimplemented!()
     }
@@ -353,7 +368,10 @@ async fn saves_exotic_odds_with_combination_keys() {
         quinella: vec![combo(Pair::try_from((h(4), h(7))).unwrap(), 21.6)],
         exacta: vec![combo(OrderedPair::try_from((h(7), h(4))).unwrap(), 31.0)],
         trio: vec![combo(Triple::try_from((h(4), h(7), h(13))).unwrap(), 32.9)],
-        trifecta: vec![combo(OrderedTriple::try_from((h(7), h(4), h(13))).unwrap(), 154.6)],
+        trifecta: vec![combo(
+            OrderedTriple::try_from((h(7), h(4), h(13))).unwrap(),
+            154.6,
+        )],
     };
     let scraper = FakeScraper::new(vec![win_odds(7, 2.6, 1)]).with_exotic(exotic);
     let interactor = CardInteractor::new(RecordingRepo::with_already(false), scraper);

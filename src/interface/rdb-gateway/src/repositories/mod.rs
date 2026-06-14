@@ -25,8 +25,9 @@ use paddock_domain::{
 };
 use paddock_use_case::Result as UcResult;
 use paddock_use_case::repository::{
-    CourseStatsRow, FetchRecord, HorseRecencyStats, HorseStatsRow, JockeyStatsRow, PredictBetRecord,
-    PredictRaceConditionRecord, PredictSessionRecord, RaceOddsRecord, Repository, TrainerStatsRow,
+    CourseStatsRow, FetchRecord, HorseRecencyStats, HorseStatsRow, JockeyStatsRow,
+    PredictBetRecord, PredictRaceConditionRecord, PredictSessionRecord, RaceOddsRecord, Repository,
+    TrainerStatsRow,
 };
 
 use crate::pool::SqlitePool;
@@ -241,6 +242,25 @@ impl Repository for SqliteRepository {
 
     async fn find_predict_bets(&self, date: NaiveDate) -> UcResult<Vec<PredictBetRecord>> {
         predict_session::find_predict_bets(&self.pool, date)
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn find_predict_bets_with_id(
+        &self,
+        date: NaiveDate,
+    ) -> UcResult<Vec<(i64, PredictBetRecord)>> {
+        predict_session::find_predict_bets_with_id(&self.pool, date)
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn settle_predict_session(
+        &self,
+        session: &PredictSessionRecord,
+        settled: &[(i64, u64)],
+    ) -> UcResult<()> {
+        predict_session::settle_predict_session(&self.pool, session, settled)
             .await
             .map_err(Into::into)
     }

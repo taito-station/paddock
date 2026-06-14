@@ -3,6 +3,7 @@
 mod card;
 mod horse_history;
 mod odds;
+mod payout;
 mod result;
 mod shutuba;
 
@@ -12,6 +13,7 @@ pub use odds::{
     parse_exacta_odds, parse_quinella_odds, parse_trifecta_odds, parse_trio_odds,
     parse_win_place_odds,
 };
+pub use payout::parse_race_payouts;
 pub use result::parse_race_result;
 pub use shutuba::parse_shutuba;
 

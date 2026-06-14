@@ -64,6 +64,47 @@ fn validate_parts(round: u32, day: u32, race_num: u32, max_round: Option<u32>) -
     Ok(())
 }
 
+/// paddock RaceId `{year}-{round}-{venue_slug}-{day}-{race_num}R` を netkeiba 12 桁 race_id
+/// に変換する（[`paddock_race_id_from_netkeiba`] の逆）。確定払戻取得（#40）で、保存済みの
+/// 買い目（paddock RaceId）から netkeiba 結果ページの ID を組み立てるのに使う。
+/// 期待形式に合わない・場 slug が JRA 外・日次/R が物理外なら `InvalidArgument`。
+pub fn netkeiba_race_id_from_paddock(race_id: &RaceId) -> Result<String> {
+    let value = race_id.value();
+    let rest = value
+        .strip_suffix('R')
+        .ok_or_else(|| Error::InvalidArgument(format!("paddock RaceId は末尾 R 必須: {value}")))?;
+    let parts: Vec<&str> = rest.split('-').collect();
+    let [year, round, venue_slug, day, race_num] = parts.as_slice() else {
+        return Err(Error::InvalidArgument(format!(
+            "paddock RaceId は 5 要素である必要があります: {value}"
+        )));
+    };
+    let year: u32 = year
+        .parse()
+        .map_err(|_| Error::InvalidArgument(format!("invalid year in race_id: {value}")))?;
+    let round: u32 = round
+        .parse()
+        .map_err(|_| Error::InvalidArgument(format!("invalid round in race_id: {value}")))?;
+    let day: u32 = day
+        .parse()
+        .map_err(|_| Error::InvalidArgument(format!("invalid day in race_id: {value}")))?;
+    let race_num: u32 = race_num
+        .parse()
+        .map_err(|_| Error::InvalidArgument(format!("invalid race_num in race_id: {value}")))?;
+    let venue = Venue::try_from(*venue_slug)
+        .map_err(|_| Error::InvalidArgument(format!("JRA 外の場 slug です: {value}")))?;
+    // paddock RaceId は authoritative なため開催回上限は課さない（#111 と同方針）。
+    validate_parts(round, day, race_num, None)?;
+    Ok(format!(
+        "{:04}{}{:02}{:02}{:02}",
+        year,
+        venue.as_code(),
+        round,
+        day,
+        race_num
+    ))
+}
+
 /// netkeiba 12 桁 race_id を paddock RaceId に変換する。
 ///
 /// 12 桁でない、JRA 外（場コードが 01〜10 以外）の ID は `InvalidArgument`。
@@ -163,6 +204,36 @@ mod tests {
         // authoritative な入力として上限を課さず取り込む（#111）。
         let race_id = paddock_race_id_from_netkeiba("202408070706").unwrap();
         assert_eq!(race_id.value(), "2024-7-kyoto-7-6R");
+    }
+
+    #[test]
+    fn converts_paddock_to_netkeiba() {
+        let race_id = RaceId::try_from("2026-3-nakayama-8-1R").unwrap();
+        assert_eq!(
+            netkeiba_race_id_from_paddock(&race_id).unwrap(),
+            "202606030801"
+        );
+    }
+
+    #[test]
+    fn paddock_to_netkeiba_roundtrips() {
+        let race_id = paddock_race_id_from_netkeiba("202605030211").unwrap();
+        let netkeiba = netkeiba_race_id_from_paddock(&race_id).unwrap();
+        assert_eq!(netkeiba, "202605030211");
+    }
+
+    #[test]
+    fn paddock_to_netkeiba_rejects_malformed() {
+        // 末尾 R 無し・要素数不足・JRA 外 slug は弾く。
+        assert!(
+            netkeiba_race_id_from_paddock(&RaceId::try_from("2026-3-tokyo-2-11").unwrap()).is_err()
+        );
+        assert!(
+            netkeiba_race_id_from_paddock(&RaceId::try_from("2026-3-tokyo-11R").unwrap()).is_err()
+        );
+        assert!(
+            netkeiba_race_id_from_paddock(&RaceId::try_from("nk-202605030211").unwrap()).is_err()
+        );
     }
 
     #[test]

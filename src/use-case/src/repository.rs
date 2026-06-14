@@ -416,6 +416,22 @@ pub trait Repository: Send + Sync {
         date: NaiveDate,
     ) -> impl Future<Output = Result<Vec<PredictBetRecord>>> + Send;
 
+    /// 指定日のセッションで購入済みの買い目を `(bet_id, レコード)` で bet_id 昇順に返す。
+    /// 自動精算（#40）で payout を bet_id 指定で UPDATE するため、bet_id を併せて返す。
+    fn find_predict_bets_with_id(
+        &self,
+        date: NaiveDate,
+    ) -> impl Future<Output = Result<Vec<(i64, PredictBetRecord)>>> + Send;
+
+    /// 自動精算（#40）の書き込みを 1 トランザクションで行う。
+    /// `settled` の各 `(bet_id, payout)` で `predict_bets.payout` を UPDATE し、
+    /// セッションヘッダ（残高・累計・completed・updated_at）を upsert する。
+    fn settle_predict_session(
+        &self,
+        session: &PredictSessionRecord,
+        settled: &[(i64, u64)],
+    ) -> impl Future<Output = Result<()>> + Send;
+
     /// 予想セッションのヘッダ（残高・累計・completed）を upsert する。
     /// 新規開始時の作成と、全レース処理後の完了マークに使う。
     fn save_predict_session(

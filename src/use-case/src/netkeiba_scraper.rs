@@ -1,7 +1,7 @@
 use chrono::NaiveDate;
 use paddock_domain::{
     FinishingPosition, GateNum, HorseId, HorseName, HorseNum, JockeyName, OrderedPair,
-    OrderedTriple, Pair, ResultStatus, Surface, TimeSeconds, TrackCondition, Triple, TrainerName,
+    OrderedTriple, Pair, ResultStatus, Surface, TimeSeconds, TrackCondition, TrainerName, Triple,
     Venue,
 };
 
