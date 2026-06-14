@@ -30,9 +30,14 @@ pub fn build_race_ids(
         day,
         race_num
     );
-    let paddock_str = format!("{year}-{round}-{}-{day}-{race_num}R", venue.as_slug());
-    let race_id = RaceId::try_from(paddock_str)?;
+    let race_id = RaceId::try_from(paddock_race_id_string(year, venue, round, day, race_num))?;
     Ok((netkeiba, race_id))
+}
+
+/// paddock RaceId 文字列 `{year}-{round}-{venue_slug}-{day}-{race_num}R` を組み立てる。
+/// CLI 入力経路と netkeiba 解析経路の両方で同一表記を保証するための単一の正本。
+fn paddock_race_id_string(year: u32, venue: Venue, round: u32, day: u32, race_num: u32) -> String {
+    format!("{year}-{round}-{}-{day}-{race_num}R", venue.as_slug())
 }
 
 /// 開催回・日次・R の値域を検証する。0 や非現実値を弾き、`2026-3-tokyo-0-11R` の
@@ -67,8 +72,9 @@ fn validate_parts(round: u32, day: u32, race_num: u32, max_round: Option<u32>) -
 pub fn paddock_race_id_from_netkeiba(netkeiba_race_id: &str) -> Result<RaceId> {
     let (year, venue, round, day, race_num) = parse_netkeiba_race_id(netkeiba_race_id)?;
     validate_parts(round, day, race_num, None)?;
-    let paddock_str = format!("{year}-{round}-{}-{day}-{race_num}R", venue.as_slug());
-    Ok(RaceId::try_from(paddock_str)?)
+    Ok(RaceId::try_from(paddock_race_id_string(
+        year, venue, round, day, race_num,
+    ))?)
 }
 
 /// netkeiba 12 桁 race_id を構成要素 `(year, venue, round, day, race_num)` に分解する。
@@ -147,6 +153,8 @@ mod tests {
         assert!(paddock_race_id_from_netkeiba("202605030011").is_err());
         // netkeiba 経由でも開催回 0 は壊れた RaceId（2024-0-...）になるため弾く。
         assert!(paddock_race_id_from_netkeiba("202408000706").is_err());
+        // 上限撤廃は開催回のみ。netkeiba 経由でも R=13 は物理上限超で弾く（day/R は 1〜12 維持）。
+        assert!(paddock_race_id_from_netkeiba("202605030213").is_err());
     }
 
     #[test]
