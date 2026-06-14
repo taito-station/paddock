@@ -68,21 +68,22 @@ fn parse_validated_root(json: &str) -> Result<Value> {
     let root: Value =
         serde_json::from_str(json).map_err(|e| Error::Parse(format!("invalid odds JSON: {e}")))?;
 
-    // オッズが正常に掲載されている status を受理する。
+    // オッズが正常に掲載されている status のみ受理する（fail-closed, #100）。
     //   - "result": 確定後。
     //   - "middle": 発走前の前売り中。全頭分のオッズがそろった正常な JSON が返る。
-    // それ以外（"NG"=未掲載・対象外など）は API エラーとして弾く。
+    // status は成功・エラー双方で常に付くフィールド（エラーは "NG" 等で通知される）なので、
+    // 欠落・想定外値・非文字列はいずれも API エラーとして弾く。欠落を素通りさせると（旧 fail-open）、
+    // 将来 status 無しのエラーボディを返す仕様変更時に誤データを黙って取り込むリスクが残るため。
     const OK_STATUSES: [&str; 2] = ["result", "middle"];
-    if let Some(status) = root
-        .get("status")
-        .and_then(|s| s.as_str())
-        .filter(|&s| !OK_STATUSES.contains(&s))
-    {
-        return Err(Error::Parse(format!(
+    match root.get("status").and_then(|s| s.as_str()) {
+        Some(status) if OK_STATUSES.contains(&status) => Ok(root),
+        Some(status) => Err(Error::Parse(format!(
             "odds API が想定外の status を返しました: status={status}"
-        )));
+        ))),
+        None => Err(Error::Parse(
+            "odds API レスポンスに status がありません（想定外の形式のため受理しない）".to_string(),
+        )),
     }
-    Ok(root)
 }
 
 /// 組合せ券種（馬連・馬単・三連複・三連単）の共通パーサ。`sub_key` は `data.odds` 下の券種キー

@@ -104,3 +104,12 @@ fn rejects_unexpected_status() {
     assert!(parse_quinella_odds(json).is_err());
     assert!(parse_trio_odds(json).is_err());
 }
+
+#[test]
+fn rejects_when_status_key_absent() {
+    // status キー欠落は組合せ券種でも受理しない（fail-closed, #100）。単複側と対称に、
+    // 共通の status 検証（parse_validated_root）が組合せ券種パーサでも効くことを固定する。
+    let json = r#"{"data":{"odds":{"4":{"0102":["12.3","0.0","1"]}}}}"#;
+    assert!(parse_quinella_odds(json).is_err());
+    assert!(parse_trio_odds(json).is_err());
+}
