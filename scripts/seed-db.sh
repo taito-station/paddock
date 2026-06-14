@@ -1,0 +1,127 @@
+#!/usr/bin/env bash
+# 並走クローン/worktree の data/ に golden DB の一貫スナップショットを配置する(#120)。
+#
+# 各クローンは DB を共有しておらず（PADDOCK_DB_URL 既定 sqlite://data/paddock.db?mode=rwc は
+# 相対パス＝cwd 配下）、並走先は空になる。predict/backtest/analyze を実データで回すたびに
+# フル re-ingest する代わりに、ingest 済みの primary clone から即座に seed する。
+#
+# 既定の golden 元: primary clone（git rev-parse --git-common-dir から自動検出）の data/paddock.db。
+# 上書き: --from <path> または環境変数 PADDOCK_GOLDEN_DB。
+#
+# WAL の取り込み: sqlite3 の .backup（オンラインバックアップ API）を使う。実行中ソースでも
+# コミット済み状態の一貫スナップショットを 1 ファイルに作り、target に WAL/SHM 残骸を残さない。
+#
+# 前提: 配置先クローンの app（predict / analyze / fetch 等）を停止してから実行すること。
+# 稼働中プロセスが開いている DB の WAL/SHM を退避すると整合性を壊しうる。
+set -euo pipefail
+
+usage() {
+    cat <<'EOF'
+seed-db.sh - 並走クローンの data/ に golden DB のスナップショットを配置する(#120)
+
+使い方:
+  scripts/seed-db.sh                       # primary を自動検出して ./data に seed
+  scripts/seed-db.sh --from /path/to.db    # golden を明示
+  scripts/seed-db.sh --to /other/data      # 配置先 data ディレクトリを明示
+  PADDOCK_GOLDEN_DB=/path/to.db scripts/seed-db.sh
+
+オプション:
+  --from <path>   golden DB（省略時: PADDOCK_GOLDEN_DB → primary clone 自動検出）
+  --to <dir>      配置先 data ディレクトリ（既定: data）
+  -h, --help      このヘルプを表示
+EOF
+}
+
+FROM=""
+TO="data"
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --from) FROM="${2:?--from にパスが必要}"; shift 2 ;;
+        --to)   TO="${2:?--to にパスが必要}"; shift 2 ;;
+        -h|--help) usage; exit 0 ;;
+        *) echo "不明な引数: $1" >&2; usage >&2; exit 2 ;;
+    esac
+done
+
+# golden 元の解決: --from > PADDOCK_GOLDEN_DB > primary clone 自動検出。
+if [[ -z "$FROM" ]]; then
+    FROM="${PADDOCK_GOLDEN_DB:-}"
+fi
+if [[ -z "$FROM" ]]; then
+    common_dir="$(git rev-parse --git-common-dir 2>/dev/null || true)"
+    if [[ -n "$common_dir" ]]; then
+        # common_dir は cwd 相対のことがある（primary の root/サブディレクトリ）。
+        # cd && pwd で絶対パスへ正規化すると root/サブいずれから実行しても primary を指す。
+        FROM="$(cd "$(dirname "$common_dir")" && pwd)/data/paddock.db"
+    fi
+fi
+
+if [[ -z "$FROM" || ! -f "$FROM" ]]; then
+    echo "golden DB が見つからない: '${FROM:-<未指定>}'" >&2
+    echo "--from <path> か PADDOCK_GOLDEN_DB で ingest 済みの paddock.db を指定する" >&2
+    exit 1
+fi
+
+command -v sqlite3 >/dev/null || { echo "sqlite3 が見つからない" >&2; exit 1; }
+
+TO="${TO%/}"          # 末尾スラッシュを正規化（data/ → data）
+[[ -n "$TO" ]] || TO="."
+mkdir -p "$TO"
+DEST="$TO/paddock.db"
+
+# 以降 cd して使うため golden を絶対パス化する。
+FROM="$(cd "$(dirname "$FROM")" && pwd)/$(basename "$FROM")"
+
+# 自己 seed（golden と配置先が同一実体）を防ぐ。`-ef` は inode 比較なので、symlink や
+# 相対/絶対パスの違いで同じ実体を指していても検出できる（配置先が未作成なら false）。
+if [[ "$FROM" -ef "$DEST" ]]; then
+    echo "golden と配置先が同一実体: ${FROM}。別クローンから seed する" >&2
+    exit 1
+fi
+
+# まず一時ファイルへ一貫スナップショットを作り、検証が通ってから本配置する。
+# こうすると .backup や検証が失敗しても既存 DB を壊さない（非破壊）。
+tmp_base="paddock.db.seed-tmp.$$"
+tmp="$TO/$tmp_base"
+# 過去に別 PID が異常終了して残したステール tmp（自 PID 分含む）も掃除する。
+rm -f "$TO"/paddock.db.seed-tmp.* 2>/dev/null || true
+trap 'rm -f "$tmp" "$tmp-wal" "$tmp-shm"' EXIT
+
+# sqlite3 の .backup（ドットコマンド）の引数クォートは SQL とも shell とも異なり、パス中の
+# ' " \ を安全に渡すのが難しい。そこで配置先ディレクトリへ cd し、特殊文字を含まない固定
+# basename へ書く。ディレクトリパス（$TO）と golden（$FROM）はシェル側で安全に扱える。
+if ! ( cd "$TO" && sqlite3 "$FROM" ".backup '$tmp_base'" ); then
+    echo "スナップショット作成に失敗: $FROM" >&2
+    exit 1
+fi
+
+# 本配置前にスナップショットの中身を検証する（破損 / 空 DB / スキーマ不一致を握りつぶさない）。
+# races は「実データが入っているか」の代表テーブルとしての sanity check。
+races="$(sqlite3 "$tmp" 'SELECT COUNT(*) FROM races;' 2>/dev/null || true)"
+# 整数かつ > 0 を要求する。失敗時は空（-z 相当）や非整数になり得るので正規表現で先にガードし、
+# set -e/-u 下で算術評価が不可解なエラーにならないようにする。
+if ! [[ "$races" =~ ^[0-9]+$ ]] || [[ "$races" -eq 0 ]]; then
+    echo "スナップショットに races が無い（golden が破損 / 空 DB / スキーマ不一致の可能性）: $FROM" >&2
+    exit 1
+fi
+
+# 検証クエリが作った空の WAL/SHM を畳んで単一ファイルにする（app 起動時に再作成される）。
+sqlite3 "$tmp" 'PRAGMA wal_checkpoint(TRUNCATE);' >/dev/null 2>&1 || true
+rm -f "$tmp-wal" "$tmp-shm"
+
+# ここで初めて既存 DB と WAL/SHM 残骸を .bak へ退避し、一時ファイルを本配置する。
+# ts に PID を付けて、同一秒に別プロセスが実行しても退避先が衝突しないようにする。
+ts="$(date +%Y%m%d-%H%M%S)-$$"
+for f in "$DEST" "$DEST-wal" "$DEST-shm"; do
+    if [[ -e "$f" ]]; then
+        mv "$f" "$f.bak-$ts"
+        echo "退避: $f -> $f.bak-$ts"
+    fi
+done
+mv "$tmp" "$DEST"
+trap - EXIT
+
+# サイズ表示は補助情報。失敗しても seed 自体の成否（exit code）に影響させない。
+size="$(du -h "$DEST" 2>/dev/null | cut -f1 || true)"
+echo "seeded: $FROM -> $DEST ($size, races=$races)"
