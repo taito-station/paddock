@@ -230,6 +230,208 @@ async fn unknown_bet_type_row_is_skipped_not_errored() {
 }
 
 #[tokio::test]
+async fn invalid_odds_row_is_skipped_not_errored() {
+    let (repo, _dir) = fresh_repo().await;
+    save_sample(&repo).await; // win/place を投入
+    // 旧版スクレイパの残骸を模した値域違反行（三連単 odds=0.0）を直接 INSERT する(#114)。
+    // combination_key は妥当だが odds が OddsValue の下限(>=1.0)を割る。
+    sqlx::query(
+        "INSERT INTO race_odds (race_id, bet_type, combination_key, odds, odds_high, popularity, fetched_at) \
+         VALUES ($1, 'trifecta', '3>1>2', 0.0, NULL, NULL, $2)",
+    )
+    .bind(race_id().value())
+    .bind(fetched_at().to_rfc3339())
+    .execute(&repo.pool)
+    .await
+    .unwrap();
+
+    // 値域違反行はエラーにせず読み飛ばし（セッションを止めない）、既知の win/place は通常復元される。
+    let odds = repo
+        .find_race_odds(&race_id(), None)
+        .await
+        .unwrap()
+        .expect("有効な win/place があるので Some");
+    assert_eq!(odds.win.len(), 2);
+    assert_eq!(odds.place.len(), 2);
+    assert!(odds.trifecta.is_empty(), "0.0 の三連単行は読み飛ばされる");
+}
+
+#[tokio::test]
+async fn band_invalid_odds_row_is_skipped_not_errored() {
+    let (repo, _dir) = fresh_repo().await;
+    save_sample(&repo).await; // win/place(有効) を投入
+    // 幅 odds（複勝）の下限が値域違反（odds=0.0）だが odds_high は有効、というケースを直接 INSERT する。
+    // parse_band の値域違反 skip 経路（Ok(None)）を担保する: 構造不正(odds_high NULL/low>high)の Err
+    // とは別経路で、当該行のみ読み飛ばしセッションを止めないこと(#114)。
+    sqlx::query(
+        "INSERT INTO race_odds (race_id, bet_type, combination_key, odds, odds_high, popularity, fetched_at) \
+         VALUES ($1, 'place', '5', 0.0, 2.0, NULL, $2)",
+    )
+    .bind(race_id().value())
+    .bind(fetched_at().to_rfc3339())
+    .execute(&repo.pool)
+    .await
+    .unwrap();
+
+    let odds = repo
+        .find_race_odds(&race_id(), None)
+        .await
+        .unwrap()
+        .expect("有効な win/place があるので Some");
+    // 値域違反の複勝行(馬番5)は読み飛ばされ、save_sample の有効な複勝2頭(馬番1,2)のみ残る。
+    assert_eq!(odds.place.len(), 2);
+    assert!(!odds.place.contains_key(&horse(5)), "0.0 下限の複勝行は skip される");
+}
+
+#[tokio::test]
+async fn save_skips_invalid_odds_row() {
+    let (repo, _dir) = fresh_repo().await;
+    // 有効な単勝行 + 値域違反の三連単行(odds=0.0)を 1 レコードで保存する。
+    // netkeiba の生 f64 経路を模し、保存側ガードが 0.0 を弾くことを担保する(#114)。
+    let otriple = OrderedTriple::try_from((horse(3), horse(1), horse(2))).unwrap();
+    repo.save_race_odds(&RaceOddsRecord {
+        race_id: race_id(),
+        fetched_at: fetched_at(),
+        rows: vec![
+            OddsRow {
+                bet_type: "win".to_string(),
+                combination_key: "1".to_string(),
+                odds: 3.5,
+                odds_high: None,
+                popularity: None,
+            },
+            OddsRow::trifecta(otriple, 0.0),
+        ],
+    })
+    .await
+    .unwrap();
+
+    // 0.0 行は INSERT されず、有効な win 行のみ保存される。
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM race_odds WHERE race_id = $1")
+        .bind(race_id().value())
+        .fetch_one(&repo.pool)
+        .await
+        .unwrap();
+    assert_eq!(count, 1, "値域違反行を除いた有効 1 行のみ保存される");
+    let bet_type: String =
+        sqlx::query_scalar("SELECT bet_type FROM race_odds WHERE race_id = $1")
+            .bind(race_id().value())
+            .fetch_one(&repo.pool)
+            .await
+            .unwrap();
+    assert_eq!(bet_type, "win", "残るのは有効な win 行");
+}
+
+#[tokio::test]
+async fn save_skips_row_with_invalid_odds_high() {
+    let (repo, _dir) = fresh_repo().await;
+    // 下限は有効だが上限が値域違反（odds_high=0.0）の複勝行。保存ガードの
+    // `odds_high.is_some_and(is_invalid_odds)` 分岐が弾くことを担保する(#114)。
+    repo.save_race_odds(&RaceOddsRecord {
+        race_id: race_id(),
+        fetched_at: fetched_at(),
+        rows: vec![OddsRow::place(7, 1.5, 0.0, None)],
+    })
+    .await
+    .unwrap();
+
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM race_odds WHERE race_id = $1")
+        .bind(race_id().value())
+        .fetch_one(&repo.pool)
+        .await
+        .unwrap();
+    assert_eq!(count, 0, "上限のみ値域違反でも行ごと弾く");
+}
+
+#[tokio::test]
+async fn save_keeps_inverted_band_which_read_rejects() {
+    let (repo, _dir) = fresh_repo().await;
+    // 下限・上限とも値域内だが low>high の複勝行。保存側ガードは値域のみ見るため**弾かず**、
+    // 読み取り側 parse_band が構造不正として Err を返す——という意図的な非対称性を回帰固定する。
+    // band 構造不正は「保存できるが読めない」検知すべき不正状態として stop させる設計(#114)。
+    repo.save_race_odds(&RaceOddsRecord {
+        race_id: race_id(),
+        fetched_at: fetched_at(),
+        rows: vec![OddsRow::place(7, 3.0, 2.0, None)],
+    })
+    .await
+    .unwrap();
+
+    // 値域内なので保存はされる。
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM race_odds WHERE race_id = $1")
+        .bind(race_id().value())
+        .fetch_one(&repo.pool)
+        .await
+        .unwrap();
+    assert_eq!(count, 1, "low>high でも値域内なら保存側は通す");
+
+    // 読み取り側は構造不正として Err（skip せず stop で早期検知）。
+    assert!(
+        repo.find_race_odds(&race_id(), None).await.is_err(),
+        "low>high の複勝行は読み取り時に Error"
+    );
+}
+
+#[tokio::test]
+async fn cleanup_migration_deletes_only_invalid_rows() {
+    let (repo, _dir) = fresh_repo().await;
+    // 残骸は保存ガードで弾かれるため直接 INSERT で再現する。値域違反 4 行 + 有効 2 行を投入。
+    // fresh_repo は既に cleanup migration を適用済み（空テーブルで no-op）。ここで残骸を入れてから
+    // 同じ up.sql を再適用するため、有効行を消さない冪等性も同時に検証している。
+    let rid = race_id().value().to_string();
+    let fa = fetched_at().to_rfc3339();
+    let rows: [(&str, &str, f64, Option<f64>); 6] = [
+        ("win", "1", 3.5, None),                  // 有効
+        ("place", "1", 1.5, Some(2.0)),           // 有効
+        ("trifecta", "3>1>2", 0.0, None),         // 残骸(下限)
+        ("place", "5", 0.0, Some(2.0)),           // 残骸(下限)
+        ("place", "6", 1.5, Some(0.0)),           // 残骸(上限)
+        ("trifecta", "9>8>7", f64::INFINITY, None), // 残骸(+Inf。OddsValue は非有限も無効)
+    ];
+    for (bet, key, odds, high) in rows {
+        sqlx::query(
+            "INSERT INTO race_odds \
+             (race_id, bet_type, combination_key, odds, odds_high, popularity, fetched_at) \
+             VALUES ($1, $2, $3, $4, $5, NULL, $6)",
+        )
+        .bind(&rid)
+        .bind(bet)
+        .bind(key)
+        .bind(odds)
+        .bind(high)
+        .bind(&fa)
+        .execute(&repo.pool)
+        .await
+        .unwrap();
+    }
+
+    // 実際の cleanup migration SQL をディスクから読んで適用する（SQL 文の drift を防ぐ）。
+    let sql = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../deployments/db/migrations/20260614000001_cleanup_invalid_race_odds.up.sql"
+    ))
+    .unwrap();
+    sqlx::query(&sql).execute(&repo.pool).await.unwrap();
+
+    // 残骸 4 行（下限 2・上限 1・+Inf 1）のみ削除され、有効 2 行は残る。
+    let remaining: Vec<(String, String)> = sqlx::query_as(
+        "SELECT bet_type, combination_key FROM race_odds WHERE race_id = $1 ORDER BY bet_type, combination_key",
+    )
+    .bind(race_id().value())
+    .fetch_all(&repo.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        remaining,
+        vec![
+            ("place".to_string(), "1".to_string()),
+            ("win".to_string(), "1".to_string()),
+        ],
+        "値域違反行のみ削除され有効行は残る"
+    );
+}
+
+#[tokio::test]
 async fn wide_row_with_null_odds_high_is_data_error() {
     let (repo, _dir) = fresh_repo().await;
     // ワイドは複勝同様の幅 odds。odds_high NULL は保存側不整合なので、place 同様に
