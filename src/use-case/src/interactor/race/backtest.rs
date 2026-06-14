@@ -2,8 +2,9 @@ use std::collections::HashMap;
 
 use chrono::NaiveDate;
 use paddock_domain::{
-    BacktestReport, EstimationConfig, HorseEntry, HorseFactors, HorseOutcome, HorseResult,
-    RaceEvaluation, ResultStatus, evaluate,
+    BacktestReport, BettingConfig, EstimationConfig, ExoticBet, HorseEntry, HorseFactors,
+    HorseOutcome, HorseResult, Podium, RaceEvaluation, ResultStatus, bet_hit, evaluate,
+    exotic_segments, select_bets,
 };
 
 use crate::error::Result;
@@ -45,6 +46,9 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
             .await?;
 
         let mut evaluations: Vec<RaceEvaluation> = Vec::with_capacity(races.len());
+        // 買い目（curated 推奨）の券種別 校正・回収率評価用（#121）。当時 race_odds がある
+        // レースのみ select_bets を回し、確定着順と突合した結果を蓄積する。
+        let mut exotic_bets: Vec<ExoticBet> = Vec::new();
         for race in &races {
             // 実際に発走した馬のみを評価対象（出走頭数）にする。出走取消・競走除外は本番 predict の
             // 出馬表にも載らないため、確率推定の母集合に含めると正規化分母が水増しされ確率が歪む。
@@ -232,8 +236,41 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
                 top_pick_odds,
                 surface: race.surface,
             });
+
+            // 買い目（curated）の校正・回収率（#121）。当時オッズ（全券種）があるレースのみ、
+            // 本番と同じ BettingConfig::default()（curation 有）で推奨を作り、確定着順で的中判定。
+            if let Some(market) = &market {
+                let podium = build_podium(&starters);
+                for rec in select_bets(&probs, market, &BettingConfig::default()) {
+                    exotic_bets.push(ExoticBet {
+                        bet_type: rec.combination.type_label(),
+                        predicted_prob: rec.probability,
+                        hit: bet_hit(&rec.combination, &podium),
+                        odds: rec.odds,
+                    });
+                }
+            }
         }
 
-        Ok(evaluate(&evaluations))
+        let mut report = evaluate(&evaluations);
+        report.by_exotic = exotic_segments(&exotic_bets);
+        Ok(report)
+    }
+}
+
+/// 発走馬から確定上位 3 着（着順 → 馬番）の [`Podium`] を作る（#121, 買い目的中判定用）。
+/// 同着 1 着は同一 pos に複数馬が該当するが `find` は先頭のみ採るため、稀な同着で
+/// 一方の組合せ判定が漏れるのは許容（評価用途）。
+fn build_podium(starters: &[&HorseResult]) -> Podium {
+    let at = |pos: u32| {
+        starters
+            .iter()
+            .find(|r| r.finishing_position.map(|p| p.value()) == Some(pos))
+            .map(|r| r.horse_num)
+    };
+    Podium {
+        first: at(1),
+        second: at(2),
+        third: at(3),
     }
 }

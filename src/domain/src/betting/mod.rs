@@ -13,14 +13,24 @@ pub struct BettingConfig {
     pub ev_threshold: f64,
     pub trifecta_ev_threshold: f64,
     pub kelly_cap: f64,
+    /// curation（#121）: Kelly 分数がこの値以下の買い目を除外する。EV がわずかに正でも
+    /// Kelly≈0 の薄い買い目（全正EVダンプの主因）を落とす主要レバー。`0.0` で無効＝従来挙動。
+    pub min_kelly: f64,
+    /// curation（#121）: 券種ごとに EV 上位 N 点に制限する。`None` で無制限＝従来挙動。
+    /// 全組合せ羅列（1R 数千点）を実用的な点数に抑える。
+    pub max_bets_per_type: Option<usize>,
 }
 
 impl Default for BettingConfig {
+    /// 本番 predict が使う既定値。EV 閾値に加え curation（min_kelly / 券種別上限）で
+    /// 全正EVダンプ（#121）を抑える。curation 値は backtest（exotic 校正・回収率）で裏付ける。
     fn default() -> Self {
         Self {
             ev_threshold: 1.0,
             trifecta_ev_threshold: 2.0,
             kelly_cap: 0.25,
+            min_kelly: 0.01,
+            max_bets_per_type: Some(8),
         }
     }
 }
@@ -227,6 +237,24 @@ pub fn select_bets(
             combination_ord_key(&r.combination),
         )
     });
+
+    // curation（#121）: 全正EVダンプを止める。EV 閾値通過後の買い目から、
+    // (1) Kelly が薄い（過信に支えられた一点¥1〜3 級の）買い目を落とし、
+    // (2) 券種ごとに EV 上位 N 点へ絞る。recs は priority→EV 降順済みで、券種は
+    //     priority と 1:1 のため、type 別カウンタで残せば EV 上位 N が保たれる。
+    recs.retain(|r| r.kelly_fraction > config.min_kelly);
+    if let Some(n) = config.max_bets_per_type {
+        let mut per_type: HashMap<&'static str, usize> = HashMap::new();
+        recs.retain(|r| {
+            let c = per_type.entry(r.combination.type_label()).or_insert(0);
+            if *c < n {
+                *c += 1;
+                true
+            } else {
+                false
+            }
+        });
+    }
     recs
 }
 
@@ -269,6 +297,75 @@ fn push_if_positive(
             ev,
             kelly_fraction: kelly_fraction(probability, odds, config.kelly_cap),
         });
+    }
+}
+
+/// 確定レースの上位 3 着（着順 → 馬番）。同着や着順欠落は `None`。backtest の買い目的中判定用（#121）。
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Podium {
+    pub first: Option<HorseNum>,
+    pub second: Option<HorseNum>,
+    pub third: Option<HorseNum>,
+}
+
+impl Podium {
+    /// 馬番が 3 着以内に居るか（複勝/ワイドの判定用）。
+    fn contains(&self, h: HorseNum) -> bool {
+        [self.first, self.second, self.third].contains(&Some(h))
+    }
+}
+
+/// 買い目 `combination` が確定着順 `podium` で的中したか（#121, backtest 校正用）。
+///
+/// 着順が揃わない券種（例: 1〜2 着が未確定での馬連）は `false`（非的中扱い）。
+/// - 単勝: 1 着一致 / 複勝: 3 着以内 / 馬連: {1,2着}＝無順ペア / 馬単: 1→2 着完全一致
+/// - ワイド: 両馬が 3 着以内 / 三連複: {1,2,3着}＝無順トリプル / 三連単: 1→2→3 着完全一致
+pub fn bet_hit(combination: &BetCombination, podium: &Podium) -> bool {
+    match combination {
+        BetCombination::Win(h) => podium.first == Some(*h),
+        BetCombination::Place(h) => podium.contains(*h),
+        BetCombination::Quinella(p) => {
+            let (a, b) = p.as_tuple();
+            unordered_pair_eq(podium.first, podium.second, a, b)
+        }
+        BetCombination::Wide(p) => {
+            let (a, b) = p.as_tuple();
+            podium.contains(a) && podium.contains(b)
+        }
+        BetCombination::Exacta(p) => {
+            let (a, b) = p.as_tuple();
+            podium.first == Some(a) && podium.second == Some(b)
+        }
+        BetCombination::Trio(t) => {
+            let (a, b, c) = t.as_tuple();
+            unordered_triple_eq(podium, a, b, c)
+        }
+        BetCombination::Trifecta(t) => {
+            let (a, b, c) = t.as_tuple();
+            podium.first == Some(a) && podium.second == Some(b) && podium.third == Some(c)
+        }
+    }
+}
+
+/// {first, second}（ともに Some）が無順で {a, b} に一致するか。
+fn unordered_pair_eq(first: Option<HorseNum>, second: Option<HorseNum>, a: HorseNum, b: HorseNum) -> bool {
+    match (first, second) {
+        (Some(f), Some(s)) => (f == a && s == b) || (f == b && s == a),
+        _ => false,
+    }
+}
+
+/// {1,2,3着}（すべて Some）が無順で {a, b, c} に一致するか。
+fn unordered_triple_eq(podium: &Podium, a: HorseNum, b: HorseNum, c: HorseNum) -> bool {
+    match (podium.first, podium.second, podium.third) {
+        (Some(f), Some(s), Some(t)) => {
+            let mut got = [f.value(), s.value(), t.value()];
+            let mut want = [a.value(), b.value(), c.value()];
+            got.sort_unstable();
+            want.sort_unstable();
+            got == want
+        }
+        _ => false,
     }
 }
 
@@ -461,6 +558,8 @@ mod tests {
             ev_threshold: 1.0,
             trifecta_ev_threshold: 2.0,
             kelly_cap: 0.25,
+            min_kelly: 0.0,
+            max_bets_per_type: None,
         };
         let result = select_bets(&probs, &race_odds, &config);
         assert!(!result.is_empty());
@@ -500,6 +599,106 @@ mod tests {
         assert_eq!(result.len(), 1);
         assert!((result[0].odds - 3.0).abs() < 1e-10);
         assert!((result[0].ev - 1.8).abs() < 1e-10);
+    }
+
+    #[test]
+    fn min_kelly_filters_thin_positive_ev_bets() {
+        // EV はわずかに正だが Kelly が薄い買い目（全正EVダンプの主因, #121）。
+        // p=0.05, odds=21 → EV=1.05>1.0 だが Kelly=(0.05*20-0.95)/20=0.0025。
+        let probs = vec![prob(1, 0.05, 0.1)];
+        let mut race_odds = RaceOdds::empty(make_race_id());
+        race_odds.win.insert(horse(1), odds(21.0));
+
+        // uncurated（min_kelly=0）なら EV>1 で採用される。
+        let uncurated = BettingConfig {
+            ev_threshold: 1.0,
+            trifecta_ev_threshold: 2.0,
+            kelly_cap: 0.25,
+            min_kelly: 0.0,
+            max_bets_per_type: None,
+        };
+        assert_eq!(select_bets(&probs, &race_odds, &uncurated).len(), 1);
+        // 既定（min_kelly=0.01）では Kelly 薄として除外される。
+        assert!(select_bets(&probs, &race_odds, &BettingConfig::default()).is_empty());
+    }
+
+    #[test]
+    fn max_bets_per_type_caps_to_top_n_by_ev() {
+        // 同一券種（単勝）で +EV かつ Kelly 十分な 4 頭を用意し、券種上限 2 に絞る。
+        let probs = vec![
+            prob(1, 0.5, 0.7),
+            prob(2, 0.45, 0.65),
+            prob(3, 0.4, 0.6),
+            prob(4, 0.35, 0.55),
+        ];
+        let mut race_odds = RaceOdds::empty(make_race_id());
+        for h in 1..=4 {
+            race_odds.win.insert(horse(h), odds(3.0)); // EV = win_prob * 3.0
+        }
+        let config = BettingConfig {
+            ev_threshold: 1.0,
+            trifecta_ev_threshold: 2.0,
+            kelly_cap: 0.25,
+            min_kelly: 0.0,
+            max_bets_per_type: Some(2),
+        };
+        let result = select_bets(&probs, &race_odds, &config);
+        let wins: Vec<_> = result
+            .iter()
+            .filter(|r| matches!(r.combination, BetCombination::Win(_)))
+            .collect();
+        assert_eq!(wins.len(), 2, "券種上限 2 に絞られる");
+        // EV 上位（馬1=1.5, 馬2=1.35）が残り、下位（馬3=1.2, 馬4=1.05）は落ちる。
+        assert!(wins.iter().all(|r| r.ev >= 1.35 - 1e-9));
+    }
+
+    #[test]
+    fn bet_hit_judges_each_bet_type() {
+        // 確定: 1着=3, 2着=1, 3着=5。
+        let podium = Podium {
+            first: Some(horse(3)),
+            second: Some(horse(1)),
+            third: Some(horse(5)),
+        };
+        assert!(bet_hit(&BetCombination::Win(horse(3)), &podium));
+        assert!(!bet_hit(&BetCombination::Win(horse(1)), &podium));
+        assert!(bet_hit(&BetCombination::Place(horse(5)), &podium));
+        assert!(!bet_hit(&BetCombination::Place(horse(2)), &podium));
+        let q = |a, b| BetCombination::Quinella(Pair::try_from((horse(a), horse(b))).unwrap());
+        assert!(bet_hit(&q(1, 3), &podium)); // {1,2着}={3,1}
+        assert!(!bet_hit(&q(3, 5), &podium));
+        let ex = |a, b| BetCombination::Exacta(OrderedPair::try_from((horse(a), horse(b))).unwrap());
+        assert!(bet_hit(&ex(3, 1), &podium)); // 1→2着=3→1
+        assert!(!bet_hit(&ex(1, 3), &podium));
+        let wd = |a, b| BetCombination::Wide(Pair::try_from((horse(a), horse(b))).unwrap());
+        assert!(bet_hit(&wd(1, 5), &podium)); // 両馬3着以内
+        assert!(!bet_hit(&wd(1, 2), &podium));
+        let tr = |a, b, c| {
+            BetCombination::Trio(Triple::try_from((horse(a), horse(b), horse(c))).unwrap())
+        };
+        assert!(bet_hit(&tr(5, 3, 1), &podium)); // {1,2,3着}無順
+        assert!(!bet_hit(&tr(1, 2, 3), &podium));
+        let tf = |a, b, c| {
+            BetCombination::Trifecta(OrderedTriple::try_from((horse(a), horse(b), horse(c))).unwrap())
+        };
+        assert!(bet_hit(&tf(3, 1, 5), &podium)); // 1→2→3着
+        assert!(!bet_hit(&tf(3, 5, 1), &podium));
+    }
+
+    #[test]
+    fn bet_hit_false_when_podium_incomplete() {
+        // 1 着しか確定していない（同着・着順欠落など）。
+        let podium = Podium {
+            first: Some(horse(3)),
+            second: None,
+            third: None,
+        };
+        assert!(bet_hit(&BetCombination::Win(horse(3)), &podium)); // 単勝は 1 着のみで判定可
+        let q = BetCombination::Quinella(Pair::try_from((horse(3), horse(1))).unwrap());
+        assert!(!bet_hit(&q, &podium)); // 2 着未確定 → 非的中
+        let tf =
+            BetCombination::Trifecta(OrderedTriple::try_from((horse(3), horse(1), horse(5))).unwrap());
+        assert!(!bet_hit(&tf, &podium));
     }
 
     #[test]
