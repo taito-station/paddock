@@ -20,7 +20,8 @@ pub fn build_race_ids(
     day: u32,
     race_num: u32,
 ) -> Result<(String, RaceId)> {
-    validate_parts(round, day, race_num)?;
+    // CLI 入力（--round 等）経由なので開催回の上限を課し、打ち間違い（--round 99 等）を弾く。
+    validate_parts(round, day, race_num, Some(6))?;
     let netkeiba = format!(
         "{:04}{}{:02}{:02}{:02}",
         year,
@@ -35,11 +36,17 @@ pub fn build_race_ids(
 }
 
 /// 開催回・日次・R の値域を検証する。0 や非現実値を弾き、`2026-3-tokyo-0-11R` の
-/// ような壊れた RaceId や、打ち間違い（`--round 99` 等）で存在しないページを取りに
-/// 行くのを早期に防ぐ。上限は JRA の現実値域に余裕を見たもの。
-fn validate_parts(round: u32, day: u32, race_num: u32) -> Result<()> {
-    if !(1..=6).contains(&round) {
-        return Err(Error::InvalidArgument(format!("開催回は 1〜6: {round}")));
+/// ような壊れた RaceId を作らせない。`max_round` は開催回の上限で、CLI 入力の打ち間違い
+/// （`--round 99` 等）検知用。netkeiba 由来の authoritative な値には上限を課さないため
+/// `None` を渡す（netkeiba は一部 JRA レースに開催回 7 以上を採番するため。#111）。
+/// 日次・R は物理上限（1〜12）を常に課す。
+fn validate_parts(round: u32, day: u32, race_num: u32, max_round: Option<u32>) -> Result<()> {
+    let round_ok = round >= 1 && max_round.is_none_or(|max| round <= max);
+    if !round_ok {
+        return Err(Error::InvalidArgument(match max_round {
+            Some(max) => format!("開催回は 1〜{max}: {round}"),
+            None => format!("開催回は 1 以上: {round}"),
+        }));
     }
     if !(1..=12).contains(&day) {
         return Err(Error::InvalidArgument(format!("開催日次は 1〜12: {day}")));
@@ -55,10 +62,13 @@ fn validate_parts(round: u32, day: u32, race_num: u32) -> Result<()> {
 /// netkeiba 12 桁 race_id を paddock RaceId に変換する。
 ///
 /// 12 桁でない、JRA 外（場コードが 01〜10 以外）の ID は `InvalidArgument`。
+/// 入力は netkeiba 由来で authoritative なため、開催回の上限は課さない（京都 7 回など
+/// 開催回 7 以上の実在レースを取りこぼさない。#111）。0 や物理外の日次/R のみ弾く。
 pub fn paddock_race_id_from_netkeiba(netkeiba_race_id: &str) -> Result<RaceId> {
     let (year, venue, round, day, race_num) = parse_netkeiba_race_id(netkeiba_race_id)?;
-    let (_, race_id) = build_race_ids(year, venue, round, day, race_num)?;
-    Ok(race_id)
+    validate_parts(round, day, race_num, None)?;
+    let paddock_str = format!("{year}-{round}-{}-{day}-{race_num}R", venue.as_slug());
+    Ok(RaceId::try_from(paddock_str)?)
 }
 
 /// netkeiba 12 桁 race_id を構成要素 `(year, venue, round, day, race_num)` に分解する。
@@ -135,5 +145,21 @@ mod tests {
         assert!(build_race_ids(2026, Venue::Tokyo, 3, 2, 13).is_err());
         // netkeiba 12 桁経由でも day=00 を弾く。
         assert!(paddock_race_id_from_netkeiba("202605030011").is_err());
+        // netkeiba 経由でも開催回 0 は壊れた RaceId（2024-0-...）になるため弾く。
+        assert!(paddock_race_id_from_netkeiba("202408000706").is_err());
+    }
+
+    #[test]
+    fn netkeiba_accepts_round_over_six() {
+        // netkeiba は一部 JRA レースに開催回 7 以上を採番する（例: 2024 京都 7 回 7 日 6R）。
+        // authoritative な入力として上限を課さず取り込む（#111）。
+        let race_id = paddock_race_id_from_netkeiba("202408070706").unwrap();
+        assert_eq!(race_id.value(), "2024-7-kyoto-7-6R");
+    }
+
+    #[test]
+    fn cli_build_still_rejects_round_over_six() {
+        // CLI 入力経路（build_race_ids）は打ち間違い検知のため開催回上限 6 を維持する。
+        assert!(build_race_ids(2026, Venue::Tokyo, 7, 2, 11).is_err());
     }
 }
