@@ -70,6 +70,8 @@ fn entry(gate: u32, num: u32, name: &str, jockey: &str, trainer: &str) -> Fetche
         gate_num: GateNum::try_from(gate).unwrap(),
         horse_num: HorseNum::try_from(num).unwrap(),
         horse_name: HorseName::try_from(name).unwrap(),
+        // 馬番から決定的に 10 桁の netkeiba horse_id を作る（テスト用ダミー）。
+        horse_id: paddock_domain::HorseId::try_from(format!("2020{num:06}")).unwrap(),
         jockey: Some(JockeyName::try_from(jockey).unwrap()),
         trainer: Some(TrainerName::try_from(trainer).unwrap()),
     }

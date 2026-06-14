@@ -31,17 +31,26 @@ async fn main() -> anyhow::Result<()> {
     if args.skip_history {
         println!("近走: --skip-history のため取り込みなし");
     } else {
-        run_history(&app, &netkeiba_id).await?;
+        run_history(&app, &netkeiba_id, &resp.horse_ids).await?;
     }
     Ok(())
 }
 
 /// 出走各馬の過去走を取り込み、予想の馬個体 factor（recent_form / horse_stats）を生かす（#103）。
-/// card とは別経路（出馬表を再取得して horse_id を引く）なので --force 不要で毎回走る。
-async fn run_history(app: &setup::App, netkeiba_id: &str) -> anyhow::Result<()> {
-    // horse_id は出馬表（race_id）経由でのみ集めるため、直接指定の horse_ids（第 2 引数）は空。
-    let netkeiba_ids = [netkeiba_id.to_owned()];
-    let hist = app.history.fetch_and_store(&netkeiba_ids, &[]).await?;
+/// card 取得とは独立に毎回走る（--force 不要）。
+async fn run_history(
+    app: &setup::App,
+    netkeiba_id: &str,
+    horse_ids: &[String],
+) -> anyhow::Result<()> {
+    // card 取得時に採れた horse_id があればそれを直接使い、同じ出馬表ページの再取得を避ける（#103）。
+    // 取得済みスキップ等で horse_id が空のときのみ、race_id から出馬表を引いて horse_id を集める。
+    let hist = if horse_ids.is_empty() {
+        let netkeiba_ids = [netkeiba_id.to_owned()];
+        app.history.fetch_and_store(&netkeiba_ids, &[]).await?
+    } else {
+        app.history.fetch_and_store(&[], horse_ids).await?
+    };
     println!(
         "近走: {} 頭（失敗 {} 頭） / 保存: {} 近走",
         hist.horses_fetched, hist.horses_failed, hist.runs_saved

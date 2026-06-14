@@ -65,7 +65,7 @@ pub fn parse_shutuba(html: &str) -> Result<Vec<RunnerRef>> {
 
 /// `.../horse/2020102078"` 形式のリンクから馬IDの数字列を取り出す。
 /// netkeiba の馬 ID は 10 桁。誤リンクを拾わないよう桁数下限(8)で軽く検証する。
-fn extract_horse_id(href: &str) -> Option<String> {
+pub(super) fn extract_horse_id(href: &str) -> Option<String> {
     let rest = href.split("/horse/").nth(1)?;
     let id: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
     (id.len() >= 8).then_some(id)
