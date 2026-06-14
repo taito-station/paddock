@@ -3,13 +3,33 @@ use sqlx::SqlitePool;
 
 use crate::error::Result;
 
+/// オッズ値として不正か（非有限・< 1.0）。`OddsValue` の不変条件（finite かつ >= 1.0）と揃える。
+fn is_invalid_odds(v: f64) -> bool {
+    !v.is_finite() || v < 1.0
+}
+
 /// 1 レース分のオッズを 1 トランザクションで upsert する。
 /// 主キー `(race_id, bet_type, combination_key)` で衝突した行は最新値で上書きする。
+///
+/// 値域違反行（odds < 1.0・非有限。netkeiba の未公開組合せ 0 埋めなど）は warn を残して INSERT
+/// しない。`race_odds` に無効値を入れない DB 境界のガードで、読み取り側(find_race_odds)の skip と
+/// 二重で predict セッションの全停止を防ぐ(#114)。netkeiba 経路は生 f64 を渡すためここで一元的に弾く。
 pub async fn save_race_odds(pool: &SqlitePool, record: &RaceOddsRecord) -> Result<()> {
     let mut tx = pool.begin().await?;
 
     let fetched_at = record.fetched_at.to_rfc3339();
     for row in &record.rows {
+        if is_invalid_odds(row.odds) || row.odds_high.is_some_and(is_invalid_odds) {
+            tracing::warn!(
+                race_id = record.race_id.value(),
+                bet_type = row.bet_type,
+                key = row.combination_key,
+                odds = row.odds,
+                odds_high = row.odds_high,
+                "race_odds の不正オッズ行を保存せずスキップした"
+            );
+            continue;
+        }
         sqlx::query(
             r#"
             INSERT INTO race_odds

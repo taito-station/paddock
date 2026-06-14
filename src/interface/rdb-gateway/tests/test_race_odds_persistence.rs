@@ -230,6 +230,72 @@ async fn unknown_bet_type_row_is_skipped_not_errored() {
 }
 
 #[tokio::test]
+async fn invalid_odds_row_is_skipped_not_errored() {
+    let (repo, _dir) = fresh_repo().await;
+    save_sample(&repo).await; // win/place を投入
+    // 旧版スクレイパの残骸を模した値域違反行（三連単 odds=0.0）を直接 INSERT する(#114)。
+    // combination_key は妥当だが odds が OddsValue の下限(>=1.0)を割る。
+    sqlx::query(
+        "INSERT INTO race_odds (race_id, bet_type, combination_key, odds, odds_high, popularity, fetched_at) \
+         VALUES ($1, 'trifecta', '3>1>2', 0.0, NULL, NULL, $2)",
+    )
+    .bind(race_id().value())
+    .bind(fetched_at().to_rfc3339())
+    .execute(&repo.pool)
+    .await
+    .unwrap();
+
+    // 値域違反行はエラーにせず読み飛ばし（セッションを止めない）、既知の win/place は通常復元される。
+    let odds = repo
+        .find_race_odds(&race_id(), None)
+        .await
+        .unwrap()
+        .expect("有効な win/place があるので Some");
+    assert_eq!(odds.win.len(), 2);
+    assert_eq!(odds.place.len(), 2);
+    assert!(odds.trifecta.is_empty(), "0.0 の三連単行は読み飛ばされる");
+}
+
+#[tokio::test]
+async fn save_skips_invalid_odds_row() {
+    let (repo, _dir) = fresh_repo().await;
+    // 有効な単勝行 + 値域違反の三連単行(odds=0.0)を 1 レコードで保存する。
+    // netkeiba の生 f64 経路を模し、保存側ガードが 0.0 を弾くことを担保する(#114)。
+    let otriple = OrderedTriple::try_from((horse(3), horse(1), horse(2))).unwrap();
+    repo.save_race_odds(&RaceOddsRecord {
+        race_id: race_id(),
+        fetched_at: fetched_at(),
+        rows: vec![
+            OddsRow {
+                bet_type: "win".to_string(),
+                combination_key: "1".to_string(),
+                odds: 3.5,
+                odds_high: None,
+                popularity: None,
+            },
+            OddsRow::trifecta(otriple, 0.0),
+        ],
+    })
+    .await
+    .unwrap();
+
+    // 0.0 行は INSERT されず、有効な win 行のみ保存される。
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM race_odds WHERE race_id = $1")
+        .bind(race_id().value())
+        .fetch_one(&repo.pool)
+        .await
+        .unwrap();
+    assert_eq!(count, 1, "値域違反行を除いた有効 1 行のみ保存される");
+    let bet_type: String =
+        sqlx::query_scalar("SELECT bet_type FROM race_odds WHERE race_id = $1")
+            .bind(race_id().value())
+            .fetch_one(&repo.pool)
+            .await
+            .unwrap();
+    assert_eq!(bet_type, "win", "残るのは有効な win 行");
+}
+
+#[tokio::test]
 async fn wide_row_with_null_odds_high_is_data_error() {
     let (repo, _dir) = fresh_repo().await;
     // ワイドは複勝同様の幅 odds。odds_high NULL は保存側不整合なので、place 同様に
