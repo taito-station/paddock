@@ -40,6 +40,8 @@ const SURFACE_BANDS: [&str; 2] = ["芝", "ダート"];
 
 /// 買い目（curated）券種別セグメントの出力順（#121）。`BetCombination::type_label()` と一致させ、
 /// select_bets の priority 順に準拠（馬連→馬単→三連複→単勝→複勝→三連単、ワイドは末尾）。
+/// `wide` は現状 select_bets が生成しない（収支シミュレータ専用）ため exotic 集計では常に空＝
+/// dead entry だが、将来ワイドを買い目に含めたときの取りこぼし防止と type_label 網羅のため残す。
 const EXOTIC_BET_TYPES: [&str; 7] = [
     "quinella", "exacta", "trio", "win", "place", "trifecta", "wide",
 ];
@@ -187,6 +189,9 @@ pub struct ExoticBet {
     /// 確定着順で実的中したか。
     pub hit: bool,
     /// 払戻オッズ（倍率）。回収率 = Σ(的中時 odds) / 点数（賭け金一定）。
+    /// 複勝（place）は確定前のオッズ幅の中央値 `(low+high)/2`（select_bets と同じ近似）で、
+    /// 実払戻とは厳密には一致しない。賭け金は券種・点数によらず一定（1 点 1 単位）を仮定し、
+    /// 軸流しや予算配分のような現実的ポートフォリオは含まない（#122 のスコープ）。
     pub odds: f64,
 }
 

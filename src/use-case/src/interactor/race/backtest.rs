@@ -239,6 +239,10 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
 
             // 買い目（curated）の校正・回収率（#121）。当時オッズ（全券種）があるレースのみ、
             // 本番と同じ BettingConfig::default()（curation 有）で推奨を作り、確定着順で的中判定。
+            // 注意: ここに渡す probs は blend_alpha 指定時には市場 win でブレンド済みで、しかも
+            // exotic の payout は同じ market のオッズで計算するため、ブレンド有効時の exotic 校正・
+            // 回収率は top_pick_odds と同様に構造的に楽観側へ寄る（上の probs ブレンド注記と同根）。
+            // 本番 backtest の既定は blend 無効（blend_alpha=None）でこの偏りは出ない。
             if let Some(market) = &market {
                 let podium = build_podium(&starters);
                 for rec in select_bets(&probs, market, &BettingConfig::default()) {
