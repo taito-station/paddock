@@ -94,14 +94,14 @@ fn rejects_unexpected_status() {
 }
 
 #[test]
-fn parses_when_status_key_absent() {
-    // status キーが無い JSON は受理チェックをすり抜け、オッズがあればそのまま取り込む
-    // （fail-open）。この既存挙動を固定し、将来の API 仕様変更時の回帰検知にする。
+fn rejects_when_status_key_absent() {
+    // status キーが無い JSON は受理しない（fail-closed, #100）。status は成功・エラー双方で
+    // 常に付くため、欠落は想定外の形式とみなして弾く（旧 fail-open からの仕様変更）。
+    // オッズが実在しても status 欠落なら取り込まない。
     let json = r#"{"data":{"odds":{"1":{"03":["4.2","0.0","1"]}}}}"#;
-    let odds = parse_win_place_odds(json).expect("absent status should parse");
-    assert_eq!(odds.win.len(), 1);
-    assert_eq!(odds.win[0].horse_num.value(), 3);
-    assert!((odds.win[0].odds - 4.2).abs() < 1e-9, "odds={}", odds.win[0].odds);
+    let err = parse_win_place_odds(json).expect_err("absent status should error");
+    assert!(matches!(err, Error::Parse(_)), "err={err}");
+    assert!(err.to_string().contains("status"), "err={err}");
 }
 
 #[test]
