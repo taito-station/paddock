@@ -268,7 +268,9 @@ pub trait Repository: Send + Sync {
     /// netkeiba 由来の近走を horse 単位で `horses` / `horse_past_runs` に upsert する。
     /// pdf 確定成績(`results`)とは別テーブルに保存することで、集計の二重計上・フィールド
     /// バイアス（#58/#59）を構造的に防ぐ。`runs` が空のときは何もしない。
-    /// 戻り値は実際に保存した近走数（canonical race_id へ変換できず skip した走は含まない）。
+    /// 戻り値は upsert した近走数（canonical race_id へ変換できず skip した走は含まない。
+    /// 冪等再取り込みでの ON CONFLICT 更新も「保存」として数えるため、初回取り込みでのみ
+    /// 純粋な DB 行増分と一致する）。
     fn upsert_horse_history(
         &self,
         horse_id: &HorseId,

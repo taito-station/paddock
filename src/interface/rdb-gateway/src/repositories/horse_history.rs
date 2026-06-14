@@ -22,7 +22,8 @@ pub async fn upsert_horse_history(
     let mut tx = pool.begin().await?;
     let mut saved = 0usize;
 
-    // horses マスタ: 馬名は同一馬の全 run で一致するため先頭を採用。
+    // horses マスタ: 馬名は同一馬の全 run で一致するため先頭を採用。全 run が変換 skip でも
+    // ここは実行され、馬名マスタ（pdf 成績の horse_id backfill に有用）は更新される。
     sqlx::query(
         r#"
         INSERT INTO horses (horse_id, horse_name)

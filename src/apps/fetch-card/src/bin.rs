@@ -46,6 +46,9 @@ async fn run_history(app: &setup::App, netkeiba_id: &str) -> anyhow::Result<()> 
         "近走: {} 頭（失敗 {} 頭） / 保存: {} 近走",
         hist.horses_fetched, hist.horses_failed, hist.runs_saved
     );
+    // 近走取り込みは card/オッズ（本コマンドの主目的）に対する best-effort の補完。
+    // shutuba 取得が失敗しても警告のみで継続し、終了コードは 0 のままにする
+    // （card/オッズ保存まで成功している実行を history 失敗で巻き添えにしない）。
     if hist.shutuba_failed > 0 {
         eprintln!(
             "警告: 出馬表 {} 件の取得に失敗（対象馬が未取得）。ログを確認してください",
