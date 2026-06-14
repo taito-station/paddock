@@ -13,8 +13,10 @@ pub struct BettingConfig {
     pub ev_threshold: f64,
     pub trifecta_ev_threshold: f64,
     pub kelly_cap: f64,
-    /// curation（#121）: Kelly 分数がこの値以下の買い目を除外する。EV がわずかに正でも
-    /// Kelly≈0 の薄い買い目（全正EVダンプの主因）を落とす主要レバー。`0.0` で無効＝従来挙動。
+    /// curation（#121）: Kelly 分数がこの値以下の買い目を除外する（`retain(kelly > min_kelly)`）。
+    /// EV がわずかに正でも Kelly≈0 の薄い買い目（全正EVダンプの主因）を落とす主要レバー。
+    /// `0.0` で無効＝従来挙動: EV 閾値通過（ev>1.0）の買い目は必ず Kelly>0（`f=(ev-1)/b`）なので、
+    /// `min_kelly=0.0` の strict `>` でも EV 通過分は 1 点も落とさない。
     pub min_kelly: f64,
     /// curation（#121）: 券種ごとに EV 上位 N 点に制限する。`None` で無制限＝従来挙動。
     /// 全組合せ羅列（1R 数千点）を実用的な点数に抑える。
@@ -300,37 +302,47 @@ fn push_if_positive(
     }
 }
 
-/// 確定レースの上位 3 着（着順 → 馬番）。同着や着順欠落は `None`。backtest の買い目的中判定用（#121）。
+/// 確定レースの上位 3 着（着順 → 馬番）と出走頭数。同着や着順欠落は `None`。backtest の買い目的中判定用（#121）。
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Podium {
     pub first: Option<HorseNum>,
     pub second: Option<HorseNum>,
     pub third: Option<HorseNum>,
+    /// 出走頭数。複勝/ワイドの払戻圏が頭数依存（JRA: 8 頭以上＝3 着以内、7 頭以下＝2 着以内）の
+    /// ため判定に使う。0（既定）は払戻圏を 2 着以内に倒す保守側になる。
+    pub field_size: usize,
 }
 
 impl Podium {
-    /// 馬番が 3 着以内に居るか（複勝/ワイドの判定用）。
-    fn contains(&self, h: HorseNum) -> bool {
-        [self.first, self.second, self.third].contains(&Some(h))
+    /// 馬番が複勝/ワイドの払戻圏に居るか。JRA の複勝は出走 8 頭以上で 3 着以内、
+    /// 7 頭以下（5〜7 頭）では 2 着以内のみが払戻対象で 3 着は不的中（4 頭以下は複勝非発売）。
+    /// この頭数依存を反映しないと小頭数レースで複勝/ワイドの的中・回収率が楽観側へ歪む。
+    fn in_the_money(&self, h: HorseNum) -> bool {
+        let target = Some(h);
+        if self.first == target || self.second == target {
+            return true;
+        }
+        // 3 着が払戻圏に入るのは 8 頭以上のときだけ。
+        self.field_size >= 8 && self.third == target
     }
 }
 
 /// 買い目 `combination` が確定着順 `podium` で的中したか（#121, backtest 校正用）。
 ///
 /// 着順が揃わない券種（例: 1〜2 着が未確定での馬連）は `false`（非的中扱い）。
-/// - 単勝: 1 着一致 / 複勝: 3 着以内 / 馬連: {1,2着}＝無順ペア / 馬単: 1→2 着完全一致
-/// - ワイド: 両馬が 3 着以内 / 三連複: {1,2,3着}＝無順トリプル / 三連単: 1→2→3 着完全一致
+/// - 単勝: 1 着一致 / 複勝: 払戻圏（8 頭以上＝3 着以内・7 頭以下＝2 着以内）/ 馬連: {1,2着}＝無順ペア / 馬単: 1→2 着完全一致
+/// - ワイド: 両馬が払戻圏 / 三連複: {1,2,3着}＝無順トリプル / 三連単: 1→2→3 着完全一致
 pub fn bet_hit(combination: &BetCombination, podium: &Podium) -> bool {
     match combination {
         BetCombination::Win(h) => podium.first == Some(*h),
-        BetCombination::Place(h) => podium.contains(*h),
+        BetCombination::Place(h) => podium.in_the_money(*h),
         BetCombination::Quinella(p) => {
             let (a, b) = p.as_tuple();
             unordered_pair_eq(podium.first, podium.second, a, b)
         }
         BetCombination::Wide(p) => {
             let (a, b) = p.as_tuple();
-            podium.contains(a) && podium.contains(b)
+            podium.in_the_money(a) && podium.in_the_money(b)
         }
         BetCombination::Exacta(p) => {
             let (a, b) = p.as_tuple();
@@ -695,11 +707,12 @@ mod tests {
 
     #[test]
     fn bet_hit_judges_each_bet_type() {
-        // 確定: 1着=3, 2着=1, 3着=5。
+        // 確定: 1着=3, 2着=1, 3着=5。8 頭立て（複勝/ワイドは 3 着以内まで払戻圏）。
         let podium = Podium {
             first: Some(horse(3)),
             second: Some(horse(1)),
             third: Some(horse(5)),
+            field_size: 8,
         };
         assert!(bet_hit(&BetCombination::Win(horse(3)), &podium));
         assert!(!bet_hit(&BetCombination::Win(horse(1)), &podium));
@@ -736,6 +749,7 @@ mod tests {
             first: Some(horse(3)),
             second: None,
             third: None,
+            field_size: 8,
         };
         assert!(bet_hit(&BetCombination::Win(horse(3)), &podium)); // 単勝は 1 着のみで判定可
         let q = BetCombination::Quinella(Pair::try_from((horse(3), horse(1))).unwrap());
@@ -744,6 +758,29 @@ mod tests {
             OrderedTriple::try_from((horse(3), horse(1), horse(5))).unwrap(),
         );
         assert!(!bet_hit(&tf, &podium));
+    }
+
+    #[test]
+    fn bet_hit_place_and_wide_depend_on_field_size() {
+        // 確定: 1着=3, 2着=1, 3着=5。複勝/ワイドの払戻圏は頭数依存（JRA: 8頭以上=3着, 7頭以下=2着）。
+        let make = |field_size| Podium {
+            first: Some(horse(3)),
+            second: Some(horse(1)),
+            third: Some(horse(5)),
+            field_size,
+        };
+        // 7 頭立て: 3 着(=5)は払戻圏外。複勝 5 は不的中、ワイド{1,5}も 5 が圏外で不的中。
+        let small = make(7);
+        assert!(bet_hit(&BetCombination::Place(horse(1)), &small)); // 2 着は払戻圏
+        assert!(!bet_hit(&BetCombination::Place(horse(5)), &small)); // 3 着は圏外
+        let wd = |a, b| BetCombination::Wide(Pair::try_from((horse(a), horse(b))).unwrap());
+        assert!(!bet_hit(&wd(1, 5), &small)); // 5 が圏外
+        assert!(bet_hit(&wd(3, 1), &small)); // 1着・2着で両方圏内
+
+        // 8 頭立て: 3 着(=5)まで払戻圏。複勝 5・ワイド{1,5}とも的中。
+        let large = make(8);
+        assert!(bet_hit(&BetCombination::Place(horse(5)), &large));
+        assert!(bet_hit(&wd(1, 5), &large));
     }
 
     #[test]

@@ -245,6 +245,10 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
             // 本番 backtest の既定は blend 無効（blend_alpha=None）でこの偏りは出ない。
             if let Some(market) = &market {
                 let podium = build_podium(&starters);
+                // curation は本番 predict と同じ既定値（BettingConfig::default()）固定で測る。
+                // まず既定 curation の校正・回収率を定点観測するのが目的で、min_kelly /
+                // max_bets_per_type を振って比較する感度分析は CLI 引数化を伴う follow-up（#122 の
+                // 買い方チューニング、measurement-ordering: 既定を測ってから振る）。
                 for rec in select_bets(&probs, market, &BettingConfig::default()) {
                     exotic_bets.push(ExoticBet {
                         bet_type: rec.combination.type_label(),
@@ -262,7 +266,8 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
     }
 }
 
-/// 発走馬から確定上位 3 着（着順 → 馬番）の [`Podium`] を作る（#121, 買い目的中判定用）。
+/// 発走馬から確定上位 3 着（着順 → 馬番）と出走頭数の [`Podium`] を作る（#121, 買い目的中判定用）。
+/// `field_size` は複勝/ワイドの払戻圏（8 頭以上＝3 着・7 頭以下＝2 着）の判定に使うため発走頭数を渡す。
 /// 同着 1 着は同一 pos に複数馬が該当するが `find` は先頭のみ採るため、稀な同着で
 /// 一方の組合せ判定が漏れるのは許容（評価用途）。
 fn build_podium(starters: &[&HorseResult]) -> Podium {
@@ -276,5 +281,6 @@ fn build_podium(starters: &[&HorseResult]) -> Podium {
         first: at(1),
         second: at(2),
         third: at(3),
+        field_size: starters.len(),
     }
 }

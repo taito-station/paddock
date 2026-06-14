@@ -997,4 +997,36 @@ mod tests {
         approx(t.hit_rate, 0.0);
         approx(t.payout_rate, 0.0);
     }
+
+    #[test]
+    fn exotic_payout_rate_sums_all_hits_over_total_bets() {
+        // 同一券種で 2 点的中（賭け金一定前提）。回収率 = (的中オッズの和) / 総点数。
+        let bets = vec![
+            ExoticBet {
+                bet_type: "win",
+                predicted_prob: 0.5,
+                hit: true,
+                odds: 2.0,
+            },
+            ExoticBet {
+                bet_type: "win",
+                predicted_prob: 0.4,
+                hit: true,
+                odds: 3.0,
+            },
+            ExoticBet {
+                bet_type: "win",
+                predicted_prob: 0.3,
+                hit: false,
+                odds: 4.0,
+            },
+        ];
+        let segs = exotic_segments(&bets);
+        assert_eq!(segs.len(), 1);
+        let w = &segs[0];
+        assert_eq!(w.bets, 3);
+        approx(w.hit_rate, 2.0 / 3.0);
+        // (2.0 + 3.0) / 3 点 = 5/3。1 点でも複数的中でも分母は総点数。
+        approx(w.payout_rate, 5.0 / 3.0);
+    }
 }
