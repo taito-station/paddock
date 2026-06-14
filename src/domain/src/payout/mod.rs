@@ -79,6 +79,9 @@ impl RacePayouts {
 }
 
 /// 組合せコード（例 `8` / `6-8` / `1>2>3`）を構成馬番に分解する。区切りは `-`（無順）と `>`（順序付き）。
+///
+/// 入力は [`crate::BetCombination::combination_code`] が生成した正当な文字列（数字＋区切りのみ）前提。
+/// よって `parse` 失敗トークンの黙殺は安全（不正入力で返還漏れになる経路は存在しない）。
 fn combo_nums(combo_code: &str) -> impl Iterator<Item = u32> + '_ {
     combo_code
         .split(['-', '>'])
