@@ -19,7 +19,7 @@ impl From<Error> for paddock_use_case::Error {
             Error::Parse(_) | Error::Domain(_) => {
                 paddock_use_case::Error::InvalidArgument(value.to_string())
             }
-            // Network / IO failures are infrastructure problems.
+            // Network / fetch failures are infrastructure problems.
             Error::Fetch(_) => paddock_use_case::Error::Internal(value.to_string()),
         }
     }
