@@ -88,27 +88,13 @@ impl UreqOddsScraper {
             .map_err(|e| Error::Fetch(e.to_string()))?;
         // JRA は本文を EUC-JP で返すため、UTF-8 前提の read_to_string では
         // 「stream did not contain valid UTF-8」で失敗する。生バイトで受けてから
-        // EUC-JP デコードする（netkeiba-scraper::fetch_decoded と同じ方針）。
+        // EUC-JP デコードする（netkeiba-scraper と共通の scraper_util を使う）。
         let mut bytes = Vec::new();
         resp.into_reader()
             .read_to_end(&mut bytes)
             .map_err(|e| Error::Fetch(format!("read odds body (cname={cname}): {e}")))?;
-        Ok(decode_euc_jp(&bytes, cname))
+        Ok(scraper_util::decode_euc_jp(&bytes, cname))
     }
-}
-
-/// JRA のレスポンスボディ（EUC-JP）を文字列へデコードする。メンテ画面など別エンコーディングが
-/// 混じると後段の token/table 不検出に化けて原因が見えにくいので、解釈できないバイトがあれば
-/// どのページ（`cname`）で起きたかを添えて警告する。
-fn decode_euc_jp(bytes: &[u8], cname: &str) -> String {
-    let (decoded, _, had_errors) = encoding_rs::EUC_JP.decode(bytes);
-    if had_errors {
-        tracing::warn!(
-            cname,
-            "odds response was not valid EUC-JP; parsing may fail"
-        );
-    }
-    decoded.into_owned()
 }
 
 /// Extract `cname` tokens from an odds menu page, keyed by the Japanese bet
@@ -240,25 +226,6 @@ mod tests {
         assert_eq!(normalize_label("三連複"), "3連複");
         assert_eq!(normalize_label("３連単"), "3連単"); // full-width digit
         assert_eq!(normalize_label("3連単"), "3連単"); // already ASCII
-    }
-
-    #[test]
-    fn decodes_euc_jp_body_without_utf8_error() {
-        // 回帰ガード: JRA は EUC-JP を返すため、UTF-8 前提だと
-        // 「stream did not contain valid UTF-8」で失敗していた（#104）。
-        let (euc, _, had_errors) = encoding_rs::EUC_JP.encode("単勝・複勝オッズ");
-        assert!(!had_errors, "test fixture must be encodable as EUC-JP");
-        // バイト列は UTF-8 として不正であること（=旧経路が壊れていた条件）を確認する。
-        assert!(std::str::from_utf8(&euc).is_err());
-        assert_eq!(decode_euc_jp(&euc, "pwTAN001"), "単勝・複勝オッズ");
-    }
-
-    #[test]
-    fn decode_euc_jp_is_lossy_for_invalid_bytes() {
-        // メンテ画面等で EUC-JP として解釈できないバイトが来ても panic せず、
-        // 置換文字へ lossy デコードする（had_errors=true の warn 経路）。
-        let decoded = decode_euc_jp(&[0x80], "pwTAN001");
-        assert!(decoded.contains('\u{FFFD}'));
     }
 
     #[test]

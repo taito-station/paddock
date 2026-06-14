@@ -123,12 +123,9 @@ fn fetch_decoded(agent: &ureq::Agent, url: &str) -> Result<String> {
         .map_err(|e| Error::Fetch(format!("read body {url}: {e}")))?;
     // ureq は 4xx/5xx を Err(Status) にするためここに来るのは 2xx/3xx のみ。
     // それでもメンテ画面など別エンコーディングが返ると文字化けで後段の table 不検出に
-    // 化けて原因が見えにくいので、EUC-JP として解釈できないバイトがあれば警告する。
-    let (decoded, _, had_errors) = encoding_rs::EUC_JP.decode(&bytes);
-    if had_errors {
-        tracing::warn!(url, "response was not valid EUC-JP; parsing may fail");
-    }
-    Ok(decoded.into_owned())
+    // 化けて原因が見えにくいので、EUC-JP として解釈できないバイトがあれば警告する
+    // （odds-scraper と共通の scraper_util を使う）。
+    Ok(scraper_util::decode_euc_jp(&bytes, url))
 }
 
 /// URL を GET し、レスポンスボディを UTF-8 として（lossy で）受け取る。

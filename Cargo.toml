@@ -44,4 +44,5 @@ pdf-ocr            = { path = "src/interface/pdf-ocr" }
 pdf-parser         = { path = "src/interface/pdf-parser" }
 odds-scraper       = { path = "src/interface/odds-scraper" }
 netkeiba-scraper   = { path = "src/interface/netkeiba-scraper" }
+scraper-util       = { path = "src/interface/scraper-util" }
 rdb-gateway        = { path = "src/interface/rdb-gateway" }
