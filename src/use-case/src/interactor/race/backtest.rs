@@ -237,7 +237,8 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
                 surface: race.surface,
             });
 
-            // 買い目（curated）の校正・回収率（#121）。当時オッズ（全券種）があるレースのみ、
+            // 買い目（curated）の校正・回収率（#121）。当時 race_odds スナップショットがある
+            // レースのみ対象（券種は部分的でも可。例: win のみのスナップショットなら単勝のみ評価）。
             // 本番と同じ BettingConfig::default()（curation 有）で推奨を作り、確定着順で的中判定。
             // 注意: ここに渡す probs は blend_alpha 指定時には市場 win でブレンド済みで、しかも
             // exotic の payout は同じ market のオッズで計算するため、ブレンド有効時の exotic 校正・
@@ -268,8 +269,9 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
 
 /// 発走馬から確定上位 3 着（着順 → 馬番）と出走頭数の [`Podium`] を作る（#121, 買い目的中判定用）。
 /// `field_size` は複勝/ワイドの払戻圏（8 頭以上＝3 着・7 頭以下＝2 着）の判定に使うため発走頭数を渡す。
-/// 同着 1 着は同一 pos に複数馬が該当するが `find` は先頭のみ採るため、稀な同着で
-/// 一方の組合せ判定が漏れるのは許容（評価用途）。
+/// `starters` は競走除外・出走取消を除いた発走馬で、競走中止(DNF)は発走済みなので含む（JRA の
+/// 出走頭数定義と一致）。同着（1〜3 着が複数馬）は同一 pos に複数該当するが `find` は先頭のみ採るため、
+/// 稀な同着で組合せ券種（馬連/三連複等）や複勝/ワイドの一方馬の判定が漏れるのは許容（評価用途）。
 fn build_podium(starters: &[&HorseResult]) -> Podium {
     let at = |pos: u32| {
         starters
