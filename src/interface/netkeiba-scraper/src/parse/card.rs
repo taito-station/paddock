@@ -157,7 +157,8 @@ fn extract_entries(doc: &Html) -> Result<Vec<FetchedEntry>> {
             continue;
         };
         // 馬名と horse_id は同じ `/horse/<id>` リンク（title=馬名, href=ID）から取る。
-        // horse_id は近走取り込み（#103）の再利用キー。どちらか欠ける行はスキップ。
+        // 馬名が無い行（th のみ等）はスキップ。horse_id は近走取り込み（#103）の再利用キーで、
+        // 出馬表保存の必須項目ではないため、欠けても entry は落とさず Option として持つ。
         let Some(horse_link) = row.select(&horse_link_sel).next() else {
             continue;
         };
@@ -169,14 +170,11 @@ fn extract_entries(doc: &Html) -> Result<Vec<FetchedEntry>> {
         else {
             continue;
         };
-        let Some(horse_id) = horse_link
+        let horse_id = horse_link
             .value()
             .attr("href")
             .and_then(extract_horse_id)
-            .and_then(|id| HorseId::try_from(id).ok())
-        else {
-            continue;
-        };
+            .and_then(|id| HorseId::try_from(id).ok());
         let jockey = extract_jockey(&row, &jockey_sel);
         let trainer = extract_trainer(&row, &trainer_sel);
 

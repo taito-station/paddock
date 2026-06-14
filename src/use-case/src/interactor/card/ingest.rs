@@ -48,7 +48,7 @@ impl<R: Repository, S: NetkeibaScraper> CardInteractor<R, S> {
             horse_ids = fetched
                 .entries
                 .iter()
-                .map(|e| e.horse_id.value().to_string())
+                .filter_map(|e| e.horse_id.as_ref().map(|id| id.value().to_string()))
                 .collect();
             let entries: Vec<HorseEntry> = fetched
                 .entries
