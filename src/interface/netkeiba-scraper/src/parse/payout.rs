@@ -56,6 +56,8 @@ pub fn parse_race_payouts(html: &str, race_id: RaceId) -> Result<RacePayouts> {
             extract_row(&row, &mut payouts);
         }
     }
+    // 返還対象（取消/除外）の馬番を同じ結果ページから拾い、組番に含む買い目を全額返還できるようにする（#129）。
+    payouts.set_scratched(super::result::scratched_horse_nums(&doc));
     Ok(payouts)
 }
 

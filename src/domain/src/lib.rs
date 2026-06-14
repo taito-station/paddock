@@ -24,7 +24,7 @@ pub use horse_result::{
     ResultStatus, TimeSeconds, TrainerName,
 };
 pub use odds::{BetType, OddsValue, OrderedPair, OrderedTriple, Pair, PlaceOdds, RaceOdds, Triple};
-pub use payout::{RacePayouts, settle_bet};
+pub use payout::{RacePayouts, Settlement, settle_bet};
 pub use prediction::{
     DatedCounts, EstimationConfig, FactorStat, HorseFactors, HorseProbability, RateTriple,
     RecencyConfig, ShrinkageConfig, apply_recency_weight, blend_with_market_win,

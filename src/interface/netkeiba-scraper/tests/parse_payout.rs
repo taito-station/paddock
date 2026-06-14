@@ -66,7 +66,11 @@ fn mismatched_combo_and_payout_count_is_skipped() {
           <td class="Payout"><span>1,170円<br />999円</span></td>
         </tr></tbody></table>"#;
     let p = parse_race_payouts(html, race_id()).expect("parse");
-    assert_eq!(p.payoff("quinella", "4-6"), None, "件数不一致の行は採用しない");
+    assert_eq!(
+        p.payoff("quinella", "4-6"),
+        None,
+        "件数不一致の行は採用しない"
+    );
     assert!(p.is_empty());
 }
 
@@ -82,4 +86,42 @@ fn concatenated_payouts_split_on_yen() {
     let p = parse_race_payouts(html, race_id()).expect("parse");
     assert_eq!(p.payoff("place", "6"), Some(280));
     assert_eq!(p.payoff("place", "4"), Some(110));
+}
+
+// 結果ページの成績表から取消(取)/除外(除)馬を拾い、その馬を含む組番を返還対象にする（#129）。
+// 中止(中)・完走(着順あり)は返還対象に含めない。
+#[test]
+fn scratched_horses_are_marked_refunded() {
+    // 払戻ブロック（馬連 4-6）＋ 成績表（6=取消, 7=除外, 8=1着, 9=競走中止）。
+    let html = r#"
+        <table class="Payout_Detail_Table"><tbody>
+          <tr class="Umaren"><th>馬連</th>
+            <td class="Result"><ul><li><span>4</span></li><li><span>6</span></li></ul></td>
+            <td class="Payout"><span>1,170円</span></td>
+          </tr></tbody></table>
+        <table id="All_Result_Table"><tbody>
+          <tr><td class="Result_Num"><span>1</span></td><td class="Num Txt_C">8</td></tr>
+          <tr><td class="Result_Num">取</td><td class="Num Txt_C">6</td></tr>
+          <tr><td class="Result_Num">除</td><td class="Num Txt_C">7</td></tr>
+          <tr><td class="Result_Num">中</td><td class="Num Txt_C">9</td></tr>
+        </tbody></table>"#;
+    let p = parse_race_payouts(html, race_id()).expect("parse");
+
+    // 取消/除外馬を含む組番は返還対象。
+    assert!(p.is_refunded("6"), "取消馬 6 は返還対象");
+    assert!(p.is_refunded("7"), "除外馬 7 は返還対象");
+    assert!(p.is_refunded("4-6"), "6 を含む馬連は返還対象");
+    // 完走・中止は返還対象外。
+    assert!(!p.is_refunded("8"), "完走馬 8 は返還対象外");
+    assert!(!p.is_refunded("9"), "競走中止 9 は出走済みのため返還対象外");
+    assert!(!p.is_refunded("4-8"), "取消/除外を含まない組番は返還対象外");
+}
+
+// 取消馬が無いレースでは返還対象が発生しない（既存挙動の回帰防止）。
+#[test]
+fn no_scratch_marks_no_refund() {
+    let p = parse_race_payouts(FIXTURE, race_id()).expect("parse payouts");
+    // fixture の各馬は出走済みなので、的中組番も含めいずれも返還対象にならない。
+    assert!(!p.is_refunded("6"));
+    assert!(!p.is_refunded("4-6"));
 }
