@@ -10,6 +10,9 @@
 #
 # WAL の取り込み: sqlite3 の .backup（オンラインバックアップ API）を使う。実行中ソースでも
 # コミット済み状態の一貫スナップショットを 1 ファイルに作り、target に WAL/SHM 残骸を残さない。
+#
+# 前提: 配置先クローンの app（predict / analyze / fetch 等）を停止してから実行すること。
+# 稼働中プロセスが開いている DB の WAL/SHM を退避すると整合性を壊しうる。
 set -euo pipefail
 
 usage() {
@@ -70,10 +73,10 @@ DEST="$TO/paddock.db"
 # 以降 cd して使うため golden を絶対パス化する。
 FROM="$(cd "$(dirname "$FROM")" && pwd)/$(basename "$FROM")"
 
-# 自己 seed（golden と target が同一実体）を防ぐ。
-dest_abs="$(cd "$TO" && pwd)/paddock.db"
-if [[ "$FROM" == "$dest_abs" ]]; then
-    echo "golden と配置先が同一: $dest_abs。別クローンから seed する" >&2
+# 自己 seed（golden と配置先が同一実体）を防ぐ。`-ef` は inode 比較なので、symlink や
+# 相対/絶対パスの違いで同じ実体を指していても検出できる（配置先が未作成なら false）。
+if [[ "$FROM" -ef "$DEST" ]]; then
+    echo "golden と配置先が同一実体: ${FROM}。別クローンから seed する" >&2
     exit 1
 fi
 
@@ -94,7 +97,9 @@ fi
 
 # 本配置前にスナップショットの中身を検証する（破損 / 空 DB / スキーマ不一致を握りつぶさない）。
 races="$(sqlite3 "$tmp" 'SELECT COUNT(*) FROM races;' 2>/dev/null || true)"
-if [[ -z "$races" || "$races" -eq 0 ]]; then
+# 整数かつ > 0 を要求する。失敗時は空（-z 相当）や非整数になり得るので正規表現で先にガードし、
+# set -e/-u 下で算術評価が不可解なエラーにならないようにする。
+if ! [[ "$races" =~ ^[0-9]+$ ]] || [[ "$races" -eq 0 ]]; then
     echo "スナップショットに races が無い（golden が破損 / 空 DB / スキーマ不一致の可能性）: $FROM" >&2
     exit 1
 fi

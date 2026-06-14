@@ -4,6 +4,9 @@
 # paddock.db と WAL/SHM を退避（既定）または削除する。次回の app 起動 or seed-db.sh で
 # スキーマごと再生成される。
 #
+# 前提: 対象クローンの app（predict / analyze / fetch 等）を停止してから実行すること。
+# 稼働中プロセスが開いている DB の WAL/SHM を退避・削除すると整合性を壊しうる。
+#
 # 使い方:
 #   scripts/reset-db.sh                # ./data/paddock.db を .bak へ退避して空に戻す
 #   scripts/reset-db.sh --to /other/data

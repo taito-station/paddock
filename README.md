@@ -208,6 +208,7 @@ scripts/reset-db.sh --no-backup          # 退避せず削除
 - 既定の golden 元は `git rev-parse --git-common-dir` から辿った primary clone の `data/paddock.db`。
   worktree 以外の独立 clone から seed する場合は `--from` か `PADDOCK_GOLDEN_DB` で明示する。
 - 配置前に既存 `data/paddock.db`（と `-wal`/`-shm`）は `.bak-<日時>` に退避される（`data/*.bak-*` は gitignore 済み）。
+- **seed / reset は対象クローンの app（predict / analyze / fetch 等）を停止してから実行する**。稼働中プロセスが開いている DB の `-wal`/`-shm` を退避・削除すると、そのプロセス側の DB 整合性を壊しうるため。
 
 ### マイグレーション注意
 
