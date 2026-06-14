@@ -42,10 +42,14 @@ if odds_csv:
         for row in csv.reader(f):
             if len(row) < 4:
                 continue
-            rid, num, pop, od = row[0], int(row[1]), row[2].strip(), float(row[3])
-            parts = rid.split("-")  # YYYY-round-slug-day-RRR
-            slug = parts[2]
-            rn = int(parts[4].replace("R", ""))
+            # 馬番・オッズの不正値（ヘッダ混入等）は行ごとスキップ（popularity と同じ握り方針）。
+            try:
+                rid, num, pop, od = row[0], int(row[1]), row[2].strip(), float(row[3])
+                parts = rid.split("-")  # YYYY-round-slug-day-RRR
+                slug = parts[2]
+                rn = int(parts[4].replace("R", ""))
+            except (ValueError, IndexError):
+                continue
             key = (SLUG2JP.get(slug, slug), rn)
             win_odds[key][num] = od
             # popularity は文字列。"1"/"1.0"/空白付きを吸収して 1 番人気を判定。
@@ -79,12 +83,16 @@ fav_n = fav_win = diff_n = diff_win = 0
 bet = pay = 0
 log = []
 
+unmatched = []
 for p in preds:
     key = (p["venue"], p["race_num"])
     r = res_idx.get(key)
     if not r:
+        # venue 表記差・race_num ズレで一部だけ脱落するケースを可視化する（全脱落は後段で停止）。
+        unmatched.append(f"{p['venue']}{p['race_num']}R")
         continue
     fmap = finish_map(r)
+    # winner() は最初の rank==1 のみ返す（同着1着は稀。recall も単一勝ち馬前提）。
     w = winner(r)
     horses = sorted(p["horses"], key=lambda h: -h["win"])
     ranks = [h["num"] for h in horses]
@@ -131,10 +139,14 @@ for p in preds:
 if n == 0:
     print("preds と results が1件もマッチしませんでした（venue 表記/race_num を確認）", file=sys.stderr)
     sys.exit(1)
+if unmatched:
+    print(f"[warn] results に無く突合できなかった予想 {len(unmatched)}件: {', '.join(unmatched)}",
+          file=sys.stderr)
 
 print(f"対象レース: {n}")
 print(f"本命的中(単勝): {hon_win}/{n} = {hon_win/n*100:.1f}%")
-print(f"本命複勝(3着内): {hon_top3}/{n} = {hon_top3/n*100:.1f}%")
+# 「3着内率」: JRA 複勝は 7 頭以下だと 2 着までのため、厳密な複勝的中とは別物（一律 3 着内で計上）。
+print(f"本命3着内率: {hon_top3}/{n} = {hon_top3/n*100:.1f}%")
 for k in (1, 2, 3, 4, 5):
     print(f"勝ち馬 model Top{k} 内: {recall[k]}/{n} = {recall[k]/n*100:.1f}%")
 if nh:

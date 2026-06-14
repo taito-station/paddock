@@ -29,8 +29,11 @@ for rid in $(python3 scripts/predict-check/list_races.py $DATE $VENUES | cut -f1
 done
 
 # 1.5. 古い無効オッズ行で predict が落ちるのを回避（#114）
-sqlite3 data/paddock.db "DELETE FROM race_odds WHERE odds < 1.0 AND date='$DASH';" 2>/dev/null || \
-sqlite3 data/paddock.db "DELETE FROM race_odds WHERE odds < 1.0;"
+#  race_odds に date 列は無いので paddock race_id（list_races の 3 列目）で当該開催だけ消す。
+#  無条件 `WHERE odds < 1.0` は他開催を巻き込むため使わない。
+for pad in $(python3 scripts/predict-check/list_races.py $DATE $VENUES | cut -f3); do
+  sqlite3 data/paddock.db "DELETE FROM race_odds WHERE odds < 1.0 AND race_id='$pad';"
+done
 
 # 2. 予想（スキップモードで確率表を吸い出す）。N=対象レース数ぶん "\ns\n" を流す
 sqlite3 data/paddock.db "DELETE FROM predict_bets WHERE session_date='$DASH';
@@ -42,9 +45,13 @@ for i in $(seq 1 $N); do printf '\ns\n'; done \
 # 3. 予想と結果を JSON 化
 python3 scripts/predict-check/extract_preds.py /tmp/predict_out.log > /tmp/preds.json
 python3 scripts/predict-check/fetch_results.py $DATE $VENUES > /tmp/results.json
-sqlite3 -noheader -csv data/paddock.db \
-  "SELECT race_id, combination_key, popularity, odds FROM race_odds
-   WHERE bet_type='win' AND date='$DASH' ORDER BY race_id, popularity;" > /tmp/win_odds.csv
+# 単勝オッズ CSV（ROI/人気比較用）。race_odds は paddock race_id で引く（date 列は無い）
+: > /tmp/win_odds.csv
+for pad in $(python3 scripts/predict-check/list_races.py $DATE $VENUES | cut -f3); do
+  sqlite3 -noheader -csv data/paddock.db \
+    "SELECT race_id, combination_key, popularity, odds FROM race_odds
+     WHERE bet_type='win' AND race_id='$pad' ORDER BY popularity;" >> /tmp/win_odds.csv
+done
 
 # 4. 答え合わせ
 python3 scripts/predict-check/answer_check.py /tmp/preds.json /tmp/results.json /tmp/win_odds.csv

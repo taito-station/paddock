@@ -19,8 +19,9 @@ UA = "Mozilla/5.0"
 def curl(url: str, timeout: int = 25) -> bytes:
     # 取得失敗を黙って空 bytes で流すと、結果 0 件が「正常」として集計を静かに汚す。
     # returncode 非 0（通信失敗・タイムアウト）は例外、本文空は警告で気づけるようにする。
+    # `--url <url>` で URL を渡し、`-` 始まりでもオプション誤認されないようにする。
     p = subprocess.run(
-        ["curl", "-sf", "--max-time", str(timeout), url, "-H", f"User-Agent: {UA}"],
+        ["curl", "-sf", "--max-time", str(timeout), "-H", f"User-Agent: {UA}", "--url", url],
         capture_output=True,
     )
     if p.returncode != 0:
@@ -94,4 +95,7 @@ def fetch_result(rid: str):
             "horse_num": horse_num,
             "name": name.group(1).strip() if name else "",
         })
+    # HTML 取得は成功したのに 1 行も取れない＝サイト構造変化の疑い。集計を黙って汚さないよう警告。
+    if not rows:
+        print(f"[warn] 結果行を抽出できませんでした（HTML 構造変化の疑い）: {rid}", file=sys.stderr)
     return rows
