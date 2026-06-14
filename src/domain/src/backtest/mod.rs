@@ -454,7 +454,7 @@ fn surface_segments(races: &[RaceEvaluation]) -> Vec<SurfaceSegment> {
 /// レースは全的中率で非的中として数える。回収率は `top_pick_odds` がある レースのみを母数に、
 /// トップ選好馬が 1 着なら `odds × STAKE_PER_RACE` を払戻として計上する。校正指標（Brier /
 /// LogLoss）は単勝・連対・複勝それぞれの全馬エントリを母数に算出し、reliability 曲線は単勝確率に
-/// ついて、人気帯・頭数帯のセグメントも併せて出す。
+/// ついて、人気帯・頭数帯・馬場(芝/ダート)別のセグメントも併せて出す。
 pub fn evaluate(races: &[RaceEvaluation]) -> BacktestReport {
     if races.is_empty() {
         return BacktestReport::empty();
@@ -775,6 +775,12 @@ mod tests {
                 "field_size_band({n}) が FIELD_SIZE_BANDS に無い"
             );
         }
+        for s in [Surface::Turf, Surface::Dirt] {
+            assert!(
+                SURFACE_BANDS.contains(&surface_band(s)),
+                "surface_band({s:?}) が SURFACE_BANDS に無い"
+            );
+        }
     }
 
     #[test]
@@ -865,5 +871,14 @@ mod tests {
         let dirt = &r.by_surface[1];
         assert_eq!(dirt.races, 1);
         approx(dirt.win_hit_rate, 1.0);
+
+        // 片側馬場のみの入力では、その馬場 1 要素だけが返る（データのある馬場のみ）。
+        let dirt_only = evaluate(&[race(Surface::Dirt, Some(1))]);
+        let dirt_labels: Vec<&str> = dirt_only
+            .by_surface
+            .iter()
+            .map(|s| s.label.as_str())
+            .collect();
+        assert_eq!(dirt_labels, vec!["ダート"]);
     }
 }
