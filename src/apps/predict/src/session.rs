@@ -307,6 +307,40 @@ pub async fn print_session_summary(app: &App, date: NaiveDate) -> anyhow::Result
     Ok(())
 }
 
+/// 確定払戻でセッションを事後精算する（--settle、#40）。netkeiba の確定払戻で購入済み
+/// 買い目の payout を自動セットし、収支・回収率を更新する（冪等。未確定はスキップ）。
+pub async fn run_settle(app: &App, date: NaiveDate) -> anyhow::Result<()> {
+    let date_str = date.format("%Y-%m-%d").to_string();
+    println!("=== {date_str} 自動精算 ===");
+    let report = match app.settle.settle_session(date).await {
+        Ok(r) => r,
+        Err(paddock_use_case::Error::NotFound(msg)) => {
+            println!("{msg}。先に予想セッションを実行してください。");
+            return Ok(());
+        }
+        Err(e) => return Err(e.into()),
+    };
+
+    println!("確定レース: {}", report.settled_races);
+    if report.pending_races > 0 {
+        println!(
+            "未確定レース: {}（payout 据え置き。確定後に再実行してください）",
+            report.pending_races
+        );
+    }
+    println!("総賭け金: ¥{}", report.total_bet);
+    println!("総払戻:   ¥{}", report.total_payout);
+    println!("最終残高: ¥{}", report.balance);
+    let pnl = report.total_payout as i128 - report.total_bet as i128;
+    println!("P&L:      {}", format_signed(pnl));
+    if let Some(roi) = report.roi {
+        println!("回収率:   {roi:.1}%");
+    }
+
+    // 明細（更新後の payout）を表示する。
+    print_session_summary(app, date).await
+}
+
 /// 1 件の買い目を DB 保存用レコードに変換する純関数。馬券種ラベル・組み合わせコード・
 /// 各フィールド（残高・回収率に直結）のマッピングを対話 I/O から切り離して単体テストできる。
 fn make_bet_record(

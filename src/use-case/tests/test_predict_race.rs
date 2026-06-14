@@ -242,6 +242,21 @@ impl Repository for MockRepo {
         Ok(Vec::new())
     }
 
+    async fn find_predict_bets_with_id(
+        &self,
+        _: chrono::NaiveDate,
+    ) -> Result<Vec<(i64, paddock_use_case::repository::PredictBetRecord)>> {
+        unimplemented!()
+    }
+
+    async fn settle_predict_session(
+        &self,
+        _: &paddock_use_case::repository::PredictSessionRecord,
+        _: &[(i64, u64)],
+    ) -> Result<()> {
+        unimplemented!()
+    }
+
     async fn save_predict_session(
         &self,
         _: &paddock_use_case::repository::PredictSessionRecord,

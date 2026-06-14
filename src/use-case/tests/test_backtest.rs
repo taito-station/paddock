@@ -299,6 +299,19 @@ impl Repository for MockRepo {
     ) -> Result<Vec<paddock_use_case::repository::PredictBetRecord>> {
         unimplemented!()
     }
+    async fn find_predict_bets_with_id(
+        &self,
+        _: NaiveDate,
+    ) -> Result<Vec<(i64, paddock_use_case::repository::PredictBetRecord)>> {
+        unimplemented!()
+    }
+    async fn settle_predict_session(
+        &self,
+        _: &paddock_use_case::repository::PredictSessionRecord,
+        _: &[(i64, u64)],
+    ) -> Result<()> {
+        unimplemented!()
+    }
     async fn save_predict_session(
         &self,
         _: &paddock_use_case::repository::PredictSessionRecord,
@@ -375,7 +388,12 @@ fn d(y: i32, m: u32, day: u32) -> NaiveDate {
 async fn backtest_aggregates_top_pick_and_payout() {
     let app = interactor(vec![finished_race()]);
     let report = app
-        .backtest(d(2026, 1, 1), d(2026, 1, 31), None, EstimationConfig::default())
+        .backtest(
+            d(2026, 1, 1),
+            d(2026, 1, 31),
+            None,
+            EstimationConfig::default(),
+        )
         .await
         .unwrap();
 
@@ -403,7 +421,12 @@ async fn backtest_prefers_market_odds_over_pdf() {
     );
     let app = interactor_with_odds(vec![race], odds);
     let report = app
-        .backtest(d(2026, 1, 1), d(2026, 1, 31), None, EstimationConfig::default())
+        .backtest(
+            d(2026, 1, 1),
+            d(2026, 1, 31),
+            None,
+            EstimationConfig::default(),
+        )
         .await
         .unwrap();
 
@@ -462,7 +485,12 @@ fn soft_track_race(track_condition: Option<TrackCondition>) -> Race {
 async fn backtest_wires_race_track_condition_into_factors() {
     // 馬場状態なし: 本命は高スタッツの ウマA(2 着) → 単勝的中 0。
     let without_tc = interactor(vec![soft_track_race(None)])
-        .backtest(d(2026, 1, 1), d(2026, 1, 31), None, EstimationConfig::default())
+        .backtest(
+            d(2026, 1, 1),
+            d(2026, 1, 31),
+            None,
+            EstimationConfig::default(),
+        )
         .await
         .unwrap();
     assert!(
@@ -474,7 +502,12 @@ async fn backtest_wires_race_track_condition_into_factors() {
     // 不良馬場: race.track_condition が build_factors へ配線され、道悪巧者の
     // ウマB(1 着)へ本命が入れ替わる → 単勝的中 1。
     let with_tc = interactor(vec![soft_track_race(Some(TrackCondition::Soft))])
-        .backtest(d(2026, 1, 1), d(2026, 1, 31), None, EstimationConfig::default())
+        .backtest(
+            d(2026, 1, 1),
+            d(2026, 1, 31),
+            None,
+            EstimationConfig::default(),
+        )
         .await
         .unwrap();
     assert!(
@@ -488,7 +521,12 @@ async fn backtest_wires_race_track_condition_into_factors() {
 async fn backtest_wires_recency_into_horse_factors() {
     // recency なし: 本命は高スタッツの ウマA(2 着) → 単勝的中 0（集計レート経路）。
     let off = interactor(vec![soft_track_race(None)])
-        .backtest(d(2026, 1, 1), d(2026, 1, 31), None, EstimationConfig::default())
+        .backtest(
+            d(2026, 1, 1),
+            d(2026, 1, 31),
+            None,
+            EstimationConfig::default(),
+        )
         .await
         .unwrap();
     assert!(
@@ -547,7 +585,12 @@ fn trainer_race(b_trainer: Option<&str>) -> Race {
 async fn backtest_wires_result_trainer_into_factors() {
     // 調教師なし: 本命は高スタッツの ウマA(2 着) → 単勝的中 0。
     let without = interactor(vec![trainer_race(None)])
-        .backtest(d(2026, 1, 1), d(2026, 1, 31), None, EstimationConfig::default())
+        .backtest(
+            d(2026, 1, 1),
+            d(2026, 1, 31),
+            None,
+            EstimationConfig::default(),
+        )
         .await
         .unwrap();
     assert!(
@@ -559,7 +602,12 @@ async fn backtest_wires_result_trainer_into_factors() {
     // 名伯楽: results.trainer が build_factors へ配線され、ウマB(1 着)へ本命が入れ替わる
     // → 単勝的中 1。
     let with_tr = interactor(vec![trainer_race(Some("名伯楽"))])
-        .backtest(d(2026, 1, 1), d(2026, 1, 31), None, EstimationConfig::default())
+        .backtest(
+            d(2026, 1, 1),
+            d(2026, 1, 31),
+            None,
+            EstimationConfig::default(),
+        )
         .await
         .unwrap();
     assert!(
@@ -573,7 +621,12 @@ async fn backtest_wires_result_trainer_into_factors() {
 async fn backtest_blend_flips_top_pick_to_market_favorite() {
     // モデルのみ: 本命 ウマA は 2 着 → 単勝的中 0。
     let model_only = interactor(vec![blend_race()])
-        .backtest(d(2026, 1, 1), d(2026, 1, 31), None, EstimationConfig::default())
+        .backtest(
+            d(2026, 1, 1),
+            d(2026, 1, 31),
+            None,
+            EstimationConfig::default(),
+        )
         .await
         .unwrap();
     assert!(
@@ -597,7 +650,12 @@ async fn backtest_blend_flips_top_pick_to_market_favorite() {
     odds.insert(race.race_id.value().to_string(), o);
 
     let blended = interactor_with_odds(vec![race], odds)
-        .backtest(d(2026, 1, 1), d(2026, 1, 31), Some(0.2), EstimationConfig::default())
+        .backtest(
+            d(2026, 1, 1),
+            d(2026, 1, 31),
+            Some(0.2),
+            EstimationConfig::default(),
+        )
         .await
         .unwrap();
     assert!(
@@ -622,7 +680,12 @@ async fn backtest_blend_uses_partial_race_odds_as_is() {
     odds.insert(race.race_id.value().to_string(), o);
 
     let report = interactor_with_odds(vec![race], odds)
-        .backtest(d(2026, 1, 1), d(2026, 1, 31), Some(0.2), EstimationConfig::default())
+        .backtest(
+            d(2026, 1, 1),
+            d(2026, 1, 31),
+            Some(0.2),
+            EstimationConfig::default(),
+        )
         .await
         .unwrap();
     assert!(
@@ -637,7 +700,12 @@ async fn backtest_blend_falls_back_to_results_odds_when_no_snapshot() {
     // race_odds スナップショット無し → PDF 確定成績の単勝(ウマB=1.2)で代替し、市場のみ(α=0)で
     // 本命が ウマB に動き 1 着的中する。
     let blended = interactor(vec![blend_race()])
-        .backtest(d(2026, 1, 1), d(2026, 1, 31), Some(0.0), EstimationConfig::default())
+        .backtest(
+            d(2026, 1, 1),
+            d(2026, 1, 31),
+            Some(0.0),
+            EstimationConfig::default(),
+        )
         .await
         .unwrap();
     assert!(
@@ -651,7 +719,12 @@ async fn backtest_blend_falls_back_to_results_odds_when_no_snapshot() {
 async fn backtest_empty_when_no_races() {
     let app = interactor(Vec::new());
     let report = app
-        .backtest(d(2026, 1, 1), d(2026, 1, 31), None, EstimationConfig::default())
+        .backtest(
+            d(2026, 1, 1),
+            d(2026, 1, 31),
+            None,
+            EstimationConfig::default(),
+        )
         .await
         .unwrap();
     assert_eq!(report.races_evaluated, 0);
@@ -683,7 +756,12 @@ async fn backtest_excludes_scratched_and_cancelled_horses() {
     };
     let app = interactor(vec![race]);
     let report = app
-        .backtest(d(2026, 1, 1), d(2026, 1, 31), None, EstimationConfig::default())
+        .backtest(
+            d(2026, 1, 1),
+            d(2026, 1, 31),
+            None,
+            EstimationConfig::default(),
+        )
         .await
         .unwrap();
 

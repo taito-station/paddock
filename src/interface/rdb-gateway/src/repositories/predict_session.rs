@@ -116,6 +116,75 @@ pub async fn find_predict_bets(
     Ok(bets)
 }
 
+/// 購入済みの買い目を `(bet_id, レコード)` で bet_id 昇順に返す（自動精算 #40 用）。
+/// `find_predict_bets` と同 SQL に `bet_id` 列を加えたもの。
+pub async fn find_predict_bets_with_id(
+    pool: &SqlitePool,
+    date: NaiveDate,
+) -> Result<Vec<(i64, PredictBetRecord)>> {
+    let date_str = date_key(date);
+    let rows: Vec<(i64, String, String, String, i64, i64, f64)> = sqlx::query_as(
+        r#"
+        SELECT bet_id, race_id, bet_type, combination, stake, payout, ev
+        FROM predict_bets
+        WHERE session_date = $1
+        ORDER BY bet_id ASC
+        "#,
+    )
+    .bind(&date_str)
+    .fetch_all(pool)
+    .await?;
+
+    let mut bets = Vec::with_capacity(rows.len());
+    for (bet_id, race_id, bet_type, combination, stake, payout, ev) in rows {
+        bets.push((
+            bet_id,
+            PredictBetRecord {
+                race_id: RaceId::try_from(race_id.as_str())?,
+                bet_type,
+                combination,
+                stake: stake as u64,
+                payout: payout as u64,
+                ev,
+            },
+        ));
+    }
+    Ok(bets)
+}
+
+/// 自動精算（#40）の書き込みを 1 トランザクションで行う。
+/// `settled` の各 `(bet_id, payout)` で `predict_bets.payout` を UPDATE し、
+/// セッションヘッダを upsert する。
+pub async fn settle_predict_session(
+    pool: &SqlitePool,
+    session: &PredictSessionRecord,
+    settled: &[(i64, u64)],
+) -> Result<()> {
+    let date_str = date_key(session.date);
+    let mut tx = pool.begin().await?;
+
+    for (bet_id, payout) in settled {
+        sqlx::query("UPDATE predict_bets SET payout = $1 WHERE bet_id = $2")
+            .bind(*payout as i64)
+            .bind(*bet_id)
+            .execute(&mut *tx)
+            .await?;
+    }
+
+    bind_session(
+        sqlx::query(UPSERT_SESSION_SQL),
+        &date_str,
+        session,
+        session.created_at.to_rfc3339(),
+        session.updated_at.to_rfc3339(),
+    )
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+    Ok(())
+}
+
 /// セッションのヘッダのみを upsert する（新規作成・完了マーク用）。
 ///
 /// 新規セッションは必ずこの関数で先にヘッダを作成してから `save_race_outcome` を呼ぶ前提。
@@ -204,7 +273,9 @@ pub async fn find_predict_race_conditions(
     for (race_id, track_condition) in rows {
         let track_condition = match track_condition {
             Some(s) => Some(TrackCondition::try_from(s.as_str()).map_err(|e| {
-                Error::Data(format!("predict_race_conditions.track_condition {s:?}: {e}"))
+                Error::Data(format!(
+                    "predict_race_conditions.track_condition {s:?}: {e}"
+                ))
             })?),
             None => None,
         };

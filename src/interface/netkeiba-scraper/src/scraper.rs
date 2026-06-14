@@ -73,6 +73,21 @@ impl UreqNetkeibaScraper {
         Ok(parse::parse_race_result(&html, netkeiba_race_id)?)
     }
 
+    /// レース結果ページ (`race/result.html`) から確定払戻（単勝〜三連単）を取得する（#40）。
+    /// `fetch_race_result` と同じ URL・EUC-JP デコードを使い、payout ブロックをパースする。
+    /// 未確定（払戻ブロック無し）は空の `RacePayouts` を返す。
+    pub fn fetch_race_payouts(
+        &self,
+        netkeiba_race_id: &str,
+    ) -> UcResult<paddock_domain::RacePayouts> {
+        std::thread::sleep(self.delay);
+        let url = format!("{RACE_RESULT_URL}?race_id={netkeiba_race_id}");
+        tracing::debug!(race_id = %netkeiba_race_id, "fetching netkeiba race payouts");
+        let html = fetch_decoded(&self.agent, &url)?;
+        let race_id = paddock_use_case::paddock_race_id_from_netkeiba(netkeiba_race_id)?;
+        Ok(parse::parse_race_payouts(&html, race_id)?)
+    }
+
     /// オッズ API を券種 `type` 指定で GET し、UTF-8 JSON を返す（#102）。
     /// 単勝・複勝(type=1) と組合せ券種(type=4/6/7/8) で URL 構成は共通。
     fn fetch_odds_json(&self, netkeiba_race_id: &str, odds_type: u8) -> Result<String> {
@@ -141,6 +156,12 @@ fn fetch_utf8(agent: &ureq::Agent, url: &str) -> Result<String> {
         .read_to_end(&mut bytes)
         .map_err(|e| Error::Fetch(format!("read body {url}: {e}")))?;
     Ok(String::from_utf8_lossy(&bytes).into_owned())
+}
+
+impl paddock_use_case::PayoutFetcher for UreqNetkeibaScraper {
+    fn fetch_race_payouts(&self, netkeiba_race_id: &str) -> UcResult<paddock_domain::RacePayouts> {
+        UreqNetkeibaScraper::fetch_race_payouts(self, netkeiba_race_id)
+    }
 }
 
 impl NetkeibaScraper for UreqNetkeibaScraper {

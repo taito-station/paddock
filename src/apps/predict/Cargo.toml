@@ -14,6 +14,7 @@ clap               = { workspace = true }
 paddock-config     = { workspace = true }
 paddock-domain     = { workspace = true }
 paddock-use-case   = { workspace = true }
+netkeiba-scraper   = { workspace = true }
 odds-scraper       = { workspace = true }
 rdb-gateway        = { workspace = true }
 tokio              = { workspace = true }

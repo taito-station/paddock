@@ -110,7 +110,11 @@ struct RecordingRepo {
 }
 
 impl Repository for RecordingRepo {
-    async fn upsert_horse_history(&self, horse_id: &HorseId, runs: &[HorsePastRun]) -> Result<usize> {
+    async fn upsert_horse_history(
+        &self,
+        horse_id: &HorseId,
+        runs: &[HorsePastRun],
+    ) -> Result<usize> {
         self.upserted
             .lock()
             .unwrap()
@@ -215,6 +219,19 @@ impl Repository for RecordingRepo {
         unimplemented!()
     }
     async fn find_predict_bets(&self, _date: NaiveDate) -> Result<Vec<PredictBetRecord>> {
+        unimplemented!()
+    }
+    async fn find_predict_bets_with_id(
+        &self,
+        _date: NaiveDate,
+    ) -> Result<Vec<(i64, PredictBetRecord)>> {
+        unimplemented!()
+    }
+    async fn settle_predict_session(
+        &self,
+        _session: &PredictSessionRecord,
+        _settled: &[(i64, u64)],
+    ) -> Result<()> {
         unimplemented!()
     }
     async fn save_predict_session(&self, _session: &PredictSessionRecord) -> Result<()> {

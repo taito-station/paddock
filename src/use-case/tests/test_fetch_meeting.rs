@@ -190,6 +190,21 @@ impl Repository for MockRepo {
         Ok(Vec::new())
     }
 
+    async fn find_predict_bets_with_id(
+        &self,
+        _date: chrono::NaiveDate,
+    ) -> Result<Vec<(i64, paddock_use_case::repository::PredictBetRecord)>> {
+        unimplemented!()
+    }
+
+    async fn settle_predict_session(
+        &self,
+        _session: &paddock_use_case::repository::PredictSessionRecord,
+        _settled: &[(i64, u64)],
+    ) -> Result<()> {
+        unimplemented!()
+    }
+
     async fn save_predict_session(
         &self,
         _session: &paddock_use_case::repository::PredictSessionRecord,
@@ -527,6 +542,21 @@ impl Repository for HistoryRepo {
         _date: chrono::NaiveDate,
     ) -> Result<Vec<paddock_use_case::repository::PredictBetRecord>> {
         Ok(Vec::new())
+    }
+
+    async fn find_predict_bets_with_id(
+        &self,
+        _date: chrono::NaiveDate,
+    ) -> Result<Vec<(i64, paddock_use_case::repository::PredictBetRecord)>> {
+        unimplemented!()
+    }
+
+    async fn settle_predict_session(
+        &self,
+        _session: &paddock_use_case::repository::PredictSessionRecord,
+        _settled: &[(i64, u64)],
+    ) -> Result<()> {
+        unimplemented!()
     }
 
     async fn save_predict_session(

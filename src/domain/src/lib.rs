@@ -4,6 +4,7 @@ pub mod error;
 pub mod horse_result;
 mod normalize;
 pub mod odds;
+pub mod payout;
 pub mod prediction;
 pub mod race;
 pub mod race_card;
@@ -21,6 +22,7 @@ pub use horse_result::{
     ResultStatus, TimeSeconds, TrainerName,
 };
 pub use odds::{BetType, OddsValue, OrderedPair, OrderedTriple, Pair, PlaceOdds, RaceOdds, Triple};
+pub use payout::{RacePayouts, settle_bet};
 pub use prediction::{
     DatedCounts, EstimationConfig, FactorStat, HorseFactors, HorseProbability, RateTriple,
     RecencyConfig, ShrinkageConfig, apply_recency_weight, blend_with_market_win,

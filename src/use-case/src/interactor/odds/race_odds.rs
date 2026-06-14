@@ -255,6 +255,19 @@ mod tests {
         async fn find_predict_bets(&self, _: NaiveDate) -> Result<Vec<PredictBetRecord>> {
             unimplemented!()
         }
+        async fn find_predict_bets_with_id(
+            &self,
+            _: NaiveDate,
+        ) -> Result<Vec<(i64, PredictBetRecord)>> {
+            unimplemented!()
+        }
+        async fn settle_predict_session(
+            &self,
+            _: &PredictSessionRecord,
+            _: &[(i64, u64)],
+        ) -> Result<()> {
+            unimplemented!()
+        }
         async fn save_predict_session(&self, _: &PredictSessionRecord) -> Result<()> {
             unimplemented!()
         }
