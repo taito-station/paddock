@@ -219,8 +219,10 @@ async fn run_race(
     if let Some(ev) = &portfolio.ev {
         // 期待回収率・的中率はオッズ取得済みの脚についての値（未取得脚は払戻を見積もれず除外）。
         let unpriced = portfolio.bets.iter().filter(|b| b.odds.is_none()).count();
+        // 回収率・的中率はオッズ取得済の脚のみで算出する一方、賭け計は未取得脚も含む全脚の合計
+        // （基準が異なる）。未取得脚があるときはその非対称を明示する。
         let note = if unpriced > 0 {
-            format!("（オッズ取得済の脚のみ; 未取得 {unpriced} 点）")
+            format!("（回収率・的中率はオッズ取得済の脚基準、賭け計は未取得 {unpriced} 点を含む全脚）")
         } else {
             String::new()
         };

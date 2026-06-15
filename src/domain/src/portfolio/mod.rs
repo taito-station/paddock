@@ -138,6 +138,7 @@ pub fn build_portfolio(
     let total_w = (wq + ww + wt) as u128;
     let mut bets: Vec<PortfolioBet> = Vec::new();
     if total_w > 0 {
+        // 重み w の券種予算を 100 円単位に floor する（`/100*100`）。乗算オーバーフロー回避に u128。
         let type_budget =
             |w: u32| -> u64 { (race_budget as u128 * w as u128 / total_w / 100 * 100) as u64 };
         push_legs(&mut bets, quinella, type_budget(wq), &field, &win);
