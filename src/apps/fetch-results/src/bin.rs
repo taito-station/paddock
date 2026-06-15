@@ -25,8 +25,13 @@ async fn main() -> anyhow::Result<()> {
     for (i, race) in races.iter().enumerate() {
         let year = race.date.year() as u32;
         // race_id 導出に失敗しても当該レースだけスキップしてバッチは継続する（fetch 失敗と同様）。
-        let netkeiba_id = match build_race_ids(year, race.venue, race.round, race.day, race.race_num)
-        {
+        let netkeiba_id = match build_race_ids(
+            year,
+            race.venue,
+            race.round,
+            race.day,
+            race.race_num,
+        ) {
             Ok((id, _)) => id,
             Err(e) => {
                 failed += 1;

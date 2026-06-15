@@ -11,9 +11,7 @@
 
 use std::collections::HashMap;
 
-use paddock_domain::{
-    HorseNum, OddsValue, OrderedPair, OrderedTriple, Pair, PlaceOdds, Triple,
-};
+use paddock_domain::{HorseNum, OddsValue, OrderedPair, OrderedTriple, Pair, PlaceOdds, Triple};
 use scraper::{ElementRef, Html, Selector};
 
 use crate::error::{Error, Result};

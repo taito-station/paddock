@@ -25,11 +25,20 @@ const NON_FINISHER_HTML: &str = r#"
 fn non_finisher_has_no_position_and_status() {
     let rows = parse_race_result(NON_FINISHER_HTML, RACE_ID).expect("parse");
     assert_eq!(rows.len(), 2);
-    let cancelled = rows.iter().find(|r| r.horse_num.value() == 3).expect("馬番3");
+    let cancelled = rows
+        .iter()
+        .find(|r| r.horse_num.value() == 3)
+        .expect("馬番3");
     assert_eq!(cancelled.status, ResultStatus::Cancelled);
     assert_eq!(cancelled.finishing_position, None);
-    assert_eq!(cancelled.trainer.as_ref().map(|t| t.value()), Some("中内田"));
-    let finisher = rows.iter().find(|r| r.horse_num.value() == 5).expect("馬番5");
+    assert_eq!(
+        cancelled.trainer.as_ref().map(|t| t.value()),
+        Some("中内田")
+    );
+    let finisher = rows
+        .iter()
+        .find(|r| r.horse_num.value() == 5)
+        .expect("馬番5");
     assert_eq!(finisher.status, ResultStatus::Finished);
     assert_eq!(finisher.finishing_position.map(|p| p.value()), Some(1));
 }

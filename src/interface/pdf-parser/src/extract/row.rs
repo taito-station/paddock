@@ -601,11 +601,7 @@ mod tests {
     #[test]
     fn margin_numeric_after_time() {
         // 整数着差: タイム "1:13.1" 直後の "2" を着差として拾う。
-        let chunk = vec![
-            s("3 4"),
-            s("テストウマ牡4鹿57"),
-            s("474± 01：13．1 2"),
-        ];
+        let chunk = vec![s("3 4"), s("テストウマ牡4鹿57"), s("474± 01：13．1 2")];
         let row = parse_chunk(&chunk);
         assert_eq!(row.margin.as_deref(), Some("2"));
     }

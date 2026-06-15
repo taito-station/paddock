@@ -77,7 +77,10 @@ fn build_combination(kind: BetType, horses: &[u32]) -> Result<BetCombination> {
         }
         BetType::Exacta => {
             need(2)?;
-            BetCombination::Exacta(OrderedPair::try_from((horse(horses[0])?, horse(horses[1])?))?)
+            BetCombination::Exacta(OrderedPair::try_from((
+                horse(horses[0])?,
+                horse(horses[1])?,
+            ))?)
         }
         BetType::Trio => {
             need(3)?;
@@ -222,7 +225,8 @@ mod tests {
 
     #[test]
     fn wrong_horse_count_errors() {
-        let raw = r#"{ "runners": 6, "bets": [{"type":"win","horses":[1,2],"stake":100,"odds":2.0}] }"#;
+        let raw =
+            r#"{ "runners": 6, "bets": [{"type":"win","horses":[1,2],"stake":100,"odds":2.0}] }"#;
         let json: InputJson = serde_json::from_str(raw).unwrap();
         assert!(to_sim_input(json, None).is_err());
     }
@@ -234,13 +238,20 @@ mod tests {
         let sim = to_sim_input(json, None).unwrap();
         let probs = sim.win_probs.unwrap();
         assert_eq!(probs.len(), 2);
-        assert_eq!(probs.get(&HorseNum::try_from(1).unwrap()).copied(), Some(0.5));
-        assert_eq!(probs.get(&HorseNum::try_from(5).unwrap()).copied(), Some(0.3));
+        assert_eq!(
+            probs.get(&HorseNum::try_from(1).unwrap()).copied(),
+            Some(0.5)
+        );
+        assert_eq!(
+            probs.get(&HorseNum::try_from(5).unwrap()).copied(),
+            Some(0.3)
+        );
     }
 
     #[test]
     fn invalid_odds_errors() {
-        let raw = r#"{ "runners": 6, "bets": [{"type":"win","horses":[1],"stake":100,"odds":0.5}] }"#;
+        let raw =
+            r#"{ "runners": 6, "bets": [{"type":"win","horses":[1],"stake":100,"odds":0.5}] }"#;
         let json: InputJson = serde_json::from_str(raw).unwrap();
         assert!(to_sim_input(json, None).is_err());
     }

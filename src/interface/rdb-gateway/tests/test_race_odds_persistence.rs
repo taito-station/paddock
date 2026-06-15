@@ -280,7 +280,10 @@ async fn band_invalid_odds_row_is_skipped_not_errored() {
         .expect("有効な win/place があるので Some");
     // 値域違反の複勝行(馬番5)は読み飛ばされ、save_sample の有効な複勝2頭(馬番1,2)のみ残る。
     assert_eq!(odds.place.len(), 2);
-    assert!(!odds.place.contains_key(&horse(5)), "0.0 下限の複勝行は skip される");
+    assert!(
+        !odds.place.contains_key(&horse(5)),
+        "0.0 下限の複勝行は skip される"
+    );
 }
 
 #[tokio::test]
@@ -313,12 +316,11 @@ async fn save_skips_invalid_odds_row() {
         .await
         .unwrap();
     assert_eq!(count, 1, "値域違反行を除いた有効 1 行のみ保存される");
-    let bet_type: String =
-        sqlx::query_scalar("SELECT bet_type FROM race_odds WHERE race_id = $1")
-            .bind(race_id().value())
-            .fetch_one(&repo.pool)
-            .await
-            .unwrap();
+    let bet_type: String = sqlx::query_scalar("SELECT bet_type FROM race_odds WHERE race_id = $1")
+        .bind(race_id().value())
+        .fetch_one(&repo.pool)
+        .await
+        .unwrap();
     assert_eq!(bet_type, "win", "残るのは有効な win 行");
 }
 
@@ -381,11 +383,11 @@ async fn cleanup_migration_deletes_only_invalid_rows() {
     let rid = race_id().value().to_string();
     let fa = fetched_at().to_rfc3339();
     let rows: [(&str, &str, f64, Option<f64>); 6] = [
-        ("win", "1", 3.5, None),                  // 有効
-        ("place", "1", 1.5, Some(2.0)),           // 有効
-        ("trifecta", "3>1>2", 0.0, None),         // 残骸(下限)
-        ("place", "5", 0.0, Some(2.0)),           // 残骸(下限)
-        ("place", "6", 1.5, Some(0.0)),           // 残骸(上限)
+        ("win", "1", 3.5, None),                    // 有効
+        ("place", "1", 1.5, Some(2.0)),             // 有効
+        ("trifecta", "3>1>2", 0.0, None),           // 残骸(下限)
+        ("place", "5", 0.0, Some(2.0)),             // 残骸(下限)
+        ("place", "6", 1.5, Some(0.0)),             // 残骸(上限)
         ("trifecta", "9>8>7", f64::INFINITY, None), // 残骸(+Inf。OddsValue は非有限も無効)
     ];
     for (bet, key, odds, high) in rows {

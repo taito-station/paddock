@@ -115,9 +115,9 @@ impl<R: Repository, S: NetkeibaScraper> CardInteractor<R, S> {
                 .map(|w| OddsRow::win(w.horse_num.value(), w.odds, w.popularity)),
         );
         rows.extend(
-            odds.place
-                .iter()
-                .map(|p| OddsRow::place(p.horse_num.value(), p.odds_low, p.odds_high, p.popularity)),
+            odds.place.iter().map(|p| {
+                OddsRow::place(p.horse_num.value(), p.odds_low, p.odds_high, p.popularity)
+            }),
         );
         rows.extend(
             exotic
@@ -131,7 +131,12 @@ impl<R: Repository, S: NetkeibaScraper> CardInteractor<R, S> {
                 .iter()
                 .map(|e| OddsRow::exacta(e.combination, e.odds)),
         );
-        rows.extend(exotic.trio.iter().map(|t| OddsRow::trio(t.combination, t.odds)));
+        rows.extend(
+            exotic
+                .trio
+                .iter()
+                .map(|t| OddsRow::trio(t.combination, t.odds)),
+        );
         rows.extend(
             exotic
                 .trifecta

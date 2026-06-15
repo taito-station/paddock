@@ -52,7 +52,11 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
             let horse = self.repository.horse_stats(&entry.horse_name, None).await?;
             // recency 有効時のみ日付付き系列を取得する（#75 Phase B）。基準日は出馬表日。
             let recency = match config.recency {
-                Some(_) => Some(self.repository.horse_recency(&entry.horse_name, None).await?),
+                Some(_) => Some(
+                    self.repository
+                        .horse_recency(&entry.horse_name, None)
+                        .await?,
+                ),
                 None => None,
             };
             // jockey が None の馬は jockey 項を母数から除外して重み付き平均で評価され、欠落で
@@ -168,15 +172,21 @@ pub(crate) fn build_factors(
         None => stat_to_triple_opt(&horse.by_surface, surf_label),
     };
     let horse_distance = match recency_cfg {
-        Some((rc, r)) => {
-            recency_factor(&r.by_distance_band, dist_label, as_of_date, rc.half_life_days)
-        }
+        Some((rc, r)) => recency_factor(
+            &r.by_distance_band,
+            dist_label,
+            as_of_date,
+            rc.half_life_days,
+        ),
         None => stat_to_triple_opt(&horse.by_distance_band, dist_label),
     };
     let horse_track_condition = race.track_condition.and_then(|tc| match recency_cfg {
-        Some((rc, r)) => {
-            recency_factor(&r.by_track_condition, tc.as_str(), as_of_date, rc.half_life_days)
-        }
+        Some((rc, r)) => recency_factor(
+            &r.by_track_condition,
+            tc.as_str(),
+            as_of_date,
+            rc.half_life_days,
+        ),
         None => stat_to_triple_opt(&horse.by_track_condition, tc.as_str()),
     });
 

@@ -39,7 +39,12 @@ fn load_result_pdf() -> Option<Vec<u8>> {
     let mut buf = Vec::new();
     match agent.get(url).call() {
         Ok(resp) => {
-            if resp.into_body().into_reader().read_to_end(&mut buf).is_err() {
+            if resp
+                .into_body()
+                .into_reader()
+                .read_to_end(&mut buf)
+                .is_err()
+            {
                 eprintln!("skip: サンプル結果 PDF の読み取りに失敗");
                 return None;
             }

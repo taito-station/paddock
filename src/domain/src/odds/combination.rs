@@ -173,7 +173,11 @@ fn parse_three(key: &str, sep: char) -> Result<(HorseNum, HorseNum, HorseNum)> {
             "組合せキー '{key}' は '{sep}' 区切りの 3 馬番である必要があります"
         )));
     }
-    Ok((parse_num(parts[0])?, parse_num(parts[1])?, parse_num(parts[2])?))
+    Ok((
+        parse_num(parts[0])?,
+        parse_num(parts[1])?,
+        parse_num(parts[2])?,
+    ))
 }
 
 #[cfg(test)]

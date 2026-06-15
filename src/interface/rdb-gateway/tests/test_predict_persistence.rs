@@ -247,7 +247,10 @@ async fn race_condition_save_requires_existing_session_fk() {
             Utc::now(),
         )
         .await;
-    assert!(res.is_err(), "セッション無しでの保存は FK 制約で失敗するはず");
+    assert!(
+        res.is_err(),
+        "セッション無しでの保存は FK 制約で失敗するはず"
+    );
 }
 
 #[tokio::test]
@@ -278,5 +281,9 @@ async fn race_condition_upsert_preserves_created_at_and_advances_updated_at() {
     .unwrap();
 
     assert_eq!(created_at, t1.to_rfc3339(), "created_at は初回値を保持する");
-    assert_eq!(updated_at, t2.to_rfc3339(), "updated_at は最新の保存時刻に更新される");
+    assert_eq!(
+        updated_at,
+        t2.to_rfc3339(),
+        "updated_at は最新の保存時刻に更新される"
+    );
 }

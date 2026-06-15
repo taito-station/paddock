@@ -125,8 +125,10 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
                 entry_factors.push((entry, factors));
             }
 
-            let probs =
-                paddock_domain::prediction::estimate_probabilities_with_config(&entry_factors, &config);
+            let probs = paddock_domain::prediction::estimate_probabilities_with_config(
+                &entry_factors,
+                &config,
+            );
             // 市場オッズ（単勝）ブレンド（#72）。α 指定時のみ適用し、以降のトップ選好馬・校正集計は
             // すべてブレンド後の win で行う。市場 win は当時 race_odds を優先し、無ければ PDF 確定
             // 成績の単勝（results.odds, 確定＝クローズ前後のオッズで結果はリークしない）で代替する。

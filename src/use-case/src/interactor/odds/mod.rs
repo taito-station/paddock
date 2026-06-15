@@ -17,6 +17,9 @@ pub struct OddsInteractor<O: OddsScraper, R: Repository> {
 
 impl<O: OddsScraper, R: Repository> OddsInteractor<O, R> {
     pub fn new(scraper: O, repository: R) -> Self {
-        Self { scraper, repository }
+        Self {
+            scraper,
+            repository,
+        }
     }
 }
