@@ -130,8 +130,9 @@ cargo run --release -p parse-pdf -- fetch --year 2025 -j 8   # 8 並列で 1 年
 3. `mutool draw -F stext.json` の座標索引から **騎手・調教師・斤量** を確定する。斤量は CID 数字で読めるため
    EdiF 復号は不要（#124 / ADR 0018）。**人気は単勝オッズの昇順順位**から決定的に算出する（EdiF 非依存）
 4. PDF を PNG 化して OCR をかけ、着順は OCR 抽出結果が「1〜頭数の完全集合の半分以上を占める」場合のみ
-   上書き採用し、そうでなければ mutool の行順 fallback を使う。斤量・人気・調教師の OCR 補完は座標索引が
-   取りこぼした行のみに効く（#124 以降は基本冗長）
+   上書き採用し、そうでなければ mutool の行順 fallback を使う。斤量・調教師（座標索引が取りこぼした行）と
+   人気（オッズ欠落で順位が付かなかった行）の OCR 補完も残っているが、いずれもステップ 2〜3 で値が埋まらな
+   かった行にのみ効くため #124 以降は基本冗長
 
 進捗は `RUST_LOG=info` で OCR 開始・終了・所要時間が source 別に表示される:
 
@@ -333,7 +334,7 @@ sqlite3 data/paddock.db "SELECT gate_num, horse_num, horse_name, jockey FROM hor
 ## netkeiba から取得する
 
 JRA 成績 PDF が未公開の当日・直近レースを予想するためのデータ源。出馬表・オッズ・近走・確定結果を
-netkeiba から取得して DB に入れる。netkeiba は唯一の外部データ源なので、リクエスト間隔（`--interval`）で
+netkeiba から取得して DB に入れる。netkeiba は第三者の公開サーバなので、リクエスト間隔（`--interval`）で
 礼節に留意する。
 
 ### 出馬表＋オッズ＋近走（`fetch-card`）
