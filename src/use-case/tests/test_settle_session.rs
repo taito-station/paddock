@@ -260,6 +260,13 @@ fn payouts_quinella_1260() -> RacePayouts {
     p
 }
 
+/// 開催中止・全馬取消（払戻ブロック無し・全額返還レース）。
+fn payouts_voided(race_id: &str) -> RacePayouts {
+    let mut p = RacePayouts::empty(RaceId::try_from(race_id).unwrap());
+    p.mark_fully_refunded();
+    p
+}
+
 // --- tests -----------------------------------------------------------------
 
 #[tokio::test]
@@ -316,6 +323,73 @@ async fn pending_race_is_skipped_and_not_completed() {
     assert!(!sess.completed, "未確定が残るため completed=false");
     // 書き込み対象は確定した 1R の bet のみ。
     assert_eq!(settled, vec![(1, 1400)]);
+}
+
+#[tokio::test]
+async fn voided_race_refunds_all_bets_and_completes() {
+    // 1R は確定、2R は開催中止・全馬取消（全額返還レース）。
+    let (repo, fetcher) = two_race_setup(
+        Some(payouts_win8_140()),
+        Some(payouts_voided("2026-4-tokyo-1-2R")),
+    );
+    let interactor = SettleInteractor::new(fetcher, repo);
+
+    let report = interactor.settle_session(date()).await.unwrap();
+
+    // 1R 単勝 8: 1400。2R は全額返還で stake 500 をそのまま返戻。
+    assert_eq!(report.settled_races, 1);
+    assert_eq!(report.pending_races, 0);
+    assert_eq!(report.voided_races, 1);
+    assert_eq!(report.refunded_bets, 1);
+    assert_eq!(report.total_payout, 1400 + 500);
+    assert_eq!(report.balance, 10000 - 1500 + 1900);
+
+    let written = interactor
+        .repository
+        .written
+        .lock()
+        .unwrap()
+        .clone()
+        .unwrap();
+    let (sess, settled) = written;
+    assert!(
+        sess.completed,
+        "全額返還レースは pending を増やさず completed"
+    );
+    // 2R は payout=stake(500) で書き込まれる。
+    assert_eq!(settled, vec![(1, 1400), (2, 500)]);
+}
+
+#[tokio::test]
+async fn all_races_voided_refund_everything() {
+    // 両レースとも開催中止・全馬取消。全買い目が stake 返戻され completed。
+    let (repo, fetcher) = two_race_setup(
+        Some(payouts_voided("2026-4-tokyo-1-1R")),
+        Some(payouts_voided("2026-4-tokyo-1-2R")),
+    );
+    let interactor = SettleInteractor::new(fetcher, repo);
+
+    let report = interactor.settle_session(date()).await.unwrap();
+
+    assert_eq!(report.settled_races, 0);
+    assert_eq!(report.pending_races, 0);
+    assert_eq!(report.voided_races, 2);
+    assert_eq!(report.refunded_bets, 2);
+    // total_bet=1500 が全額返還 → total_payout=1500、balance=budget(10000)。
+    assert_eq!(report.total_payout, 1500);
+    assert_eq!(report.balance, 10000);
+    assert_eq!(report.roi.unwrap(), 100.0);
+
+    let written = interactor
+        .repository
+        .written
+        .lock()
+        .unwrap()
+        .clone()
+        .unwrap();
+    let (sess, settled) = written;
+    assert!(sess.completed);
+    assert_eq!(settled, vec![(1, 1000), (2, 500)]);
 }
 
 #[tokio::test]

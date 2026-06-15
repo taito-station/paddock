@@ -125,3 +125,50 @@ fn no_scratch_marks_no_refund() {
     assert!(!p.is_refunded("6"));
     assert!(!p.is_refunded("4-6"));
 }
+
+// 開催中止・全馬取消: 払戻ブロック無し＋成績表が全行=取/除 → 全額返還レース（#131）。
+#[test]
+fn all_runners_scratched_marks_fully_refunded() {
+    // 払戻ブロックは無く、成績表は全行が取消/除外。
+    let html = r#"
+        <table id="All_Result_Table"><tbody>
+          <tr><td class="Result_Num">取</td><td class="Num Txt_C">1</td></tr>
+          <tr><td class="Result_Num">取</td><td class="Num Txt_C">2</td></tr>
+          <tr><td class="Result_Num">除</td><td class="Num Txt_C">3</td></tr>
+        </tbody></table>"#;
+    let p = parse_race_payouts(html, race_id()).expect("parse");
+    assert!(p.is_empty(), "払戻ブロックが無いので的中組合せは空");
+    assert!(p.is_fully_refunded(), "全行取消/除外なら全額返還レース");
+}
+
+// 通常確定レース（払戻ブロックあり）は全額返還レースにしない。
+#[test]
+fn confirmed_race_is_not_fully_refunded() {
+    let p = parse_race_payouts(FIXTURE, race_id()).expect("parse payouts");
+    assert!(!p.is_empty());
+    assert!(!p.is_fully_refunded(), "確定レースは全額返還レースでない");
+}
+
+// 完走行が混在し払戻ブロックが無い（構造変化の擬似）→ 全額返還にせず pending に倒す（安全側）。
+#[test]
+fn payout_block_missing_but_finished_row_present_is_not_fully_refunded() {
+    let html = r#"
+        <table id="All_Result_Table"><tbody>
+          <tr><td class="Result_Num"><span>1</span></td><td class="Num Txt_C">8</td></tr>
+          <tr><td class="Result_Num">取</td><td class="Num Txt_C">6</td></tr>
+        </tbody></table>"#;
+    let p = parse_race_payouts(html, race_id()).expect("parse");
+    assert!(p.is_empty());
+    assert!(
+        !p.is_fully_refunded(),
+        "完走行が 1 つでもあれば全額返還にしない（払戻ありうる）"
+    );
+}
+
+// 成績表自体が無い空ページ（未確定）は全額返還レースにしない。
+#[test]
+fn empty_page_is_not_fully_refunded() {
+    let p = parse_race_payouts("<html><body></body></html>", race_id()).expect("parse");
+    assert!(p.is_empty());
+    assert!(!p.is_fully_refunded(), "成績表が無い未確定ページは pending");
+}

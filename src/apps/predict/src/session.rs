@@ -328,6 +328,12 @@ pub async fn run_settle(app: &App, date: NaiveDate) -> anyhow::Result<()> {
             report.pending_races
         );
     }
+    if report.voided_races > 0 {
+        println!(
+            "全額返還レース: {}（開催中止・全馬取消で全買い目に stake 返戻）",
+            report.voided_races
+        );
+    }
     if report.refunded_bets > 0 {
         println!(
             "返還: {}件（取消/除外を含む組番に stake 返戻）",

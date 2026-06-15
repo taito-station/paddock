@@ -70,6 +70,30 @@ pub(crate) fn scratched_horse_nums(doc: &Html) -> HashSet<u32> {
         .collect()
 }
 
+/// 結果テーブルの**全出走馬が取消(取)/除外(除)**か（開催中止・全馬取消の判定、#131）。
+///
+/// 着順セル `td.Result_Num` を持つ出走行が **1 行以上あり、その全行**の status が
+/// `Cancelled|Scratched` のとき `true`。0 行（成績表が無い空ページ・エラーページ・未確定）や、
+/// 完走・中止(中)・失格(失) の行が 1 つでも混在するレースは `false` を返す。
+///
+/// 呼び出し側（`parse_race_payouts`）は払戻ブロックが無い（`is_empty()`）レースに限り本判定を
+/// 用い、全額返還レースとして印を付ける。完走行が混在する＝払戻が存在し得るため、払戻パースが
+/// 構造変化で空になった場合でも全額返還へ誤分類せず pending に倒れる（安全側）。
+pub(crate) fn race_fully_refunded(doc: &Html) -> bool {
+    let mut any_runner = false;
+    for row in doc.select(&ROW) {
+        let Some(finish) = text_of(&row, &FINISH) else {
+            continue; // ヘッダ等、着順セルを欠く行は出走行でない。
+        };
+        any_runner = true;
+        let (_, status) = parse_finish(&finish);
+        if !matches!(status, ResultStatus::Cancelled | ResultStatus::Scratched) {
+            return false;
+        }
+    }
+    any_runner
+}
+
 /// 1 行（`<tr>`）から成績を抽出する。着順セルか馬番セルを欠く行（ヘッダ等）は `None`。
 fn extract_row(row: ElementRef) -> Option<ResultRow> {
     // 着順セル（`中/取/除/失` も含む）。無ければデータ行でない。

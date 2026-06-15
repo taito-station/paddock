@@ -58,6 +58,10 @@ pub fn parse_race_payouts(html: &str, race_id: RaceId) -> Result<RacePayouts> {
     }
     // 返還対象（取消/除外）の馬番を同じ結果ページから拾い、組番に含む買い目を全額返還できるようにする（#129）。
     payouts.set_scratched(super::result::scratched_horse_nums(&doc));
+    // 払戻ブロックが無く、結果表の全出走馬が取消/除外なら開催中止・全馬取消（全額返還レース）として印を付ける（#131）。
+    if payouts.is_empty() && super::result::race_fully_refunded(&doc) {
+        payouts.mark_fully_refunded();
+    }
     Ok(payouts)
 }
 

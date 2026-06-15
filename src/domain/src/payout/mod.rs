@@ -7,6 +7,9 @@
 //!
 //! 出走取消(取)・競走除外(除)の馬を含む組番は JRA ルールで**全額返還**されるため、
 //! `RacePayouts` は返還対象馬番（`scratched`）も保持し、[`settle_bet`] は返還を stake 返戻として扱う。
+//!
+//! さらに開催中止・全馬取消（払戻ブロックが恒久的に存在せず、全出走馬が取消/除外）のレースは
+//! 全買い目が全額返還されるため `fully_refunded` フラグで表現する（#131）。
 
 use std::collections::{HashMap, HashSet};
 
@@ -18,11 +21,15 @@ use crate::race::RaceId;
 /// 別キーとして保持されるため自然に表現できる。払戻が 1 件も無いレースは未確定とみなす。
 ///
 /// `scratched` は出走取消・競走除外の馬番集合。これらを 1 頭でも含む組番は返還対象になる。
+///
+/// `fully_refunded` は開催中止・全馬取消（払戻ブロック無し かつ 全出走馬が取消/除外）を表す。
+/// このレースは全買い目が全額返還される（#131）。
 #[derive(Debug, Clone)]
 pub struct RacePayouts {
     pub race_id: RaceId,
     entries: HashMap<(String, String), u32>,
     scratched: HashSet<u32>,
+    fully_refunded: bool,
 }
 
 impl RacePayouts {
@@ -32,6 +39,7 @@ impl RacePayouts {
             race_id,
             entries: HashMap::new(),
             scratched: HashSet::new(),
+            fully_refunded: false,
         }
     }
 
@@ -67,6 +75,19 @@ impl RacePayouts {
     /// 返還対象馬番（出走取消・競走除外）の集合を設定する。
     pub fn set_scratched(&mut self, scratched: HashSet<u32>) {
         self.scratched = scratched;
+    }
+
+    /// 開催中止・全馬取消（全額返還レース）として印を付ける。
+    ///
+    /// 払戻ブロックが無く（`is_empty()`）、結果ページの全出走馬が取消/除外のときに設定する想定。
+    /// 設定の判定は netkeiba 固有のため呼び出し側（パーサ）が行い、本型は結果のみ保持する。
+    pub fn mark_fully_refunded(&mut self) {
+        self.fully_refunded = true;
+    }
+
+    /// 開催中止・全馬取消で全買い目が全額返還されるレースか（#131）。
+    pub fn is_fully_refunded(&self) -> bool {
+        self.fully_refunded
     }
 
     /// `combo_code` 内の馬番に返還対象（取消/除外）が 1 頭でも含まれるか。
@@ -187,6 +208,16 @@ mod tests {
         let p = RacePayouts::empty(RaceId::try_from("2026-3-tokyo-3-1R").unwrap());
         assert!(p.is_empty());
         assert_eq!(settle_bet("win", "8", 100, &p), Settlement::Miss);
+    }
+
+    #[test]
+    fn fully_refunded_defaults_false_and_marks() {
+        let mut p = RacePayouts::empty(RaceId::try_from("2026-3-tokyo-3-1R").unwrap());
+        assert!(!p.is_fully_refunded(), "既定は全額返還レースでない");
+        p.mark_fully_refunded();
+        assert!(p.is_fully_refunded(), "印を付けると全額返還レース");
+        // フラグは払戻照合の純ロジックには影響しない（精算側で分岐する）。
+        assert!(p.is_empty());
     }
 
     #[test]
