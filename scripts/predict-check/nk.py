@@ -99,3 +99,72 @@ def fetch_result(rid: str):
     if not rows:
         print(f"[warn] 結果行を抽出できませんでした（HTML 構造変化の疑い）: {rid}", file=sys.stderr)
     return rows
+
+
+# 払戻ブロックの券種クラス（<tr class="...">）→ paddock の type_label。
+# Wakuren（枠連）は predict 非対象のため載せない（マップに無い券種は呼び出し側で無視）。
+# 本体 Rust の src/interface/netkeiba-scraper/src/parse/payout.rs と同じ対応。
+PAYOUT_TYPE = {
+    "Tansho": "win", "Fukusho": "place", "Umaren": "quinella",
+    "Wide": "wide", "Umatan": "exacta", "Fuku3": "trio", "Tan3": "trifecta",
+}
+# 無順（quinella/wide/trio）は組番を昇順ソートして `-` 連結、順序付きは出現順 `>` 連結。
+_UNORDERED = {"quinella", "wide", "trio"}
+
+
+def fetch_payouts(rid: str):
+    """race/result.html の払戻ブロックから確定配当を抽出する（答え合わせ・戦略評価用）.
+
+    返り値: {type_label: {combination_code: payout_per_100}}（100 円あたり払戻[円]）。
+    combination_code は本体 BetCombination::combination_code と一致する形式
+    （単複=馬番 "17" / 無順="5-13-17" / 順序付き="17>13>5"）。
+
+    本体 Rust parse_race_payouts(parse/payout.rs) の規則をミラー:
+    table.Payout_Detail_Table（ワイド以降は別テーブルなので複数並ぶ）の各 <tr class>。
+    """
+    url = f"https://race.netkeiba.com/race/result.html?race_id={rid}"
+    html = decode(curl(url))
+    out = {}
+    n_rows = 0
+    # 払戻テーブルは複数並ぶ。各テーブル内の <tr class="..."> を順に処理する。
+    for table in re.findall(r'class="Payout_Detail_Table".*?</table>', html, re.S):
+        for cls, body in re.findall(r'<tr class="(\w+)">(.*?)</tr>', table, re.S):
+            label = PAYOUT_TYPE.get(cls)
+            if label is None:
+                continue  # 枠連・想定外クラスはスキップ
+            n_rows += 1
+            result_cell = re.search(r'<td class="Result">(.*?)</td>', body, re.S)
+            payout_cell = re.search(r'<td class="Payout">(.*?)</td>', body, re.S)
+            if not result_cell or not payout_cell:
+                continue
+            # 配当: 「数字（桁区切りカンマ可）＋直後 円」を順に。`5人気` 等の円無し数字は拾わない。
+            amounts = [int(a.replace(",", ""))
+                       for a in re.findall(r'([\d,]+)円', payout_cell.group(1))]
+            if label in ("win", "place"):
+                # 単勝/複勝: div>span の数字のある馬番（空 span は除外）。複勝は馬番ごとに 1 点。
+                combos = re.findall(r'<span>\s*(\d+)\s*</span>', result_cell.group(1))
+            else:
+                # 組合せ券種: ul 1 つ＝1 組合せ。li>span の馬番（空 li/span は数字無しで除外）。
+                combos = []
+                for ul in re.findall(r'<ul>(.*?)</ul>', result_cell.group(1), re.S):
+                    nums = [int(x) for x in re.findall(r'<span>\s*(\d+)\s*</span>', ul)]
+                    if not nums:
+                        continue
+                    if label in _UNORDERED:
+                        combos.append("-".join(str(x) for x in sorted(nums)))
+                    else:
+                        combos.append(">".join(str(x) for x in nums))
+            # 組合せ数と配当数が食い違う行は対応がズレ誤った組番に配当を貼るおそれ。
+            # 当該券種を skip して warn（払戻金額に直結するため沈黙させない）。
+            if len(combos) != len(amounts):
+                print(f"[warn] {rid} {label}: 組合せ {len(combos)} 件 / 配当 {len(amounts)} 件 "
+                      f"が不一致のためスキップ", file=sys.stderr)
+                continue
+            bucket = out.setdefault(label, {})
+            for code, pay in zip(combos, amounts):
+                bucket[code] = pay
+    # 取得成功なのに 1 行も払戻が取れない＝中止/全馬取消、または構造変化。空 dict を返し警告。
+    if n_rows == 0:
+        print(f"[warn] 払戻行を抽出できませんでした（中止/全馬取消 or 構造変化の疑い）: {rid}",
+              file=sys.stderr)
+    return out
