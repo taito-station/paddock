@@ -582,8 +582,10 @@ fn time_form(prev_time: f64, standard_time: f64) -> f64 {
 /// 選択効果が「負担で遅くなる」効果を上回るため。`field_mean` 非正は防御として中立 0.5。
 /// レース内相対の計算は use-case（`build_factors`）が field 平均を出して呼ぶため `pub`。
 pub fn weight_factor(weight: f64, field_mean: f64) -> f64 {
-    // field 平均が非正、または weight が非有限（NaN/inf）のときは比が定義できないため中立 0.5（防御）。
-    if field_mean <= 0.0 || !weight.is_finite() {
+    // field 平均が非正/非有限、または weight が非有限（NaN/inf）のときは比が定義できないため中立 0.5。
+    // field_mean が NaN だと `NaN <= 0.0` を素通りし dev→NaN→clamp が NaN を返してレース全馬の確率を
+    // 汚染する（normalize_to_sum の合計も NaN 化）ため、weight 側と対称に明示ガードする。
+    if !field_mean.is_finite() || field_mean <= 0.0 || !weight.is_finite() {
         return 0.5;
     }
     let dev = weight - field_mean;
@@ -1711,6 +1713,10 @@ mod tests {
         approx(weight_factor(mean - WEIGHT_CARRIED_CAP_KG, mean), 0.0);
         approx(weight_factor(mean + 2.0 * WEIGHT_CARRIED_CAP_KG, mean), 1.0);
         approx(weight_factor(56.0, 0.0), 0.5);
+        // 非有限入力（NaN/inf）は中立 0.5（NaN を出力して全馬の確率を汚染しないための防御）。
+        approx(weight_factor(56.0, f64::NAN), 0.5);
+        approx(weight_factor(f64::NAN, mean), 0.5);
+        approx(weight_factor(f64::INFINITY, mean), 0.5);
     }
 
     #[test]

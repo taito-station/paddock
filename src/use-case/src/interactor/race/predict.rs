@@ -226,10 +226,13 @@ pub(crate) fn build_factors(
     }
 }
 
-/// 斤量のレース内相対シグナル用に、出走馬の斤量[kg]の単純平均を返す（#135）。値が 1 つも無ければ
+/// 斤量のレース内相対シグナル用に、出走馬の斤量[kg]の単純平均を返す（#135）。有限値が 1 つも無ければ
 /// `None`（斤量項なし）。predict（出馬表 entries）と backtest（出走馬 results）で共有する。
+/// 非有限値（NaN/inf）は母数から除外し、1 件の異常値が平均を NaN 化して全馬の斤量項を汚染しないようにする。
 pub(crate) fn field_mean_weight(weights: impl Iterator<Item = f64>) -> Option<f64> {
-    let (sum, n) = weights.fold((0.0, 0u32), |(s, c), w| (s + w, c + 1));
+    let (sum, n) = weights
+        .filter(|w| w.is_finite())
+        .fold((0.0, 0u32), |(s, c), w| (s + w, c + 1));
     (n > 0).then(|| sum / n as f64)
 }
 
