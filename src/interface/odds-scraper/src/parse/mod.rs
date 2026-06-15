@@ -200,3 +200,30 @@ pub fn parse_trifecta(html: &str) -> Result<HashMap<OrderedTriple, OddsValue>> {
         OrderedTriple::try_from((h[0], h[1], h[2])).map_err(Error::from)
     })
 }
+
+/// ワイド（2 頭がともに 3 着以内で的中）。組番は無順 `Pair`、オッズは下限..上限の帯
+/// （複勝と同じ band 形式）。JRA のワイドページは組合せページと同じ `td.num` + `td.odds`
+/// 構造だが、オッズセルが帯表記（例 `1.5 - 3.0`）なので `parse_place_band` で読む。
+pub fn parse_wide(html: &str) -> Result<HashMap<Pair, PlaceOdds>> {
+    let doc = Html::parse_document(html);
+    let row_sel = selector("tr");
+    let num_sel = selector("td.num");
+    let odds_sel = selector("td.odds");
+
+    let mut map = HashMap::new();
+    for row in doc.select(&row_sel) {
+        let (Some(num_cell), Some(odds_cell)) =
+            (row.select(&num_sel).next(), row.select(&odds_sel).next())
+        else {
+            continue;
+        };
+        // 未公開・取消（`---`/空）の帯はスキップ。組合せページと同じ方針。
+        let Some(band) = parse_place_band(&text_of(odds_cell))? else {
+            continue;
+        };
+        let horses = parse_combo(&text_of(num_cell))?;
+        expect_len(&horses, 2, "wide")?;
+        map.insert(Pair::try_from((horses[0], horses[1]))?, band);
+    }
+    Ok(map)
+}

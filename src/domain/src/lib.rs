@@ -5,6 +5,7 @@ pub mod horse_result;
 mod normalize;
 pub mod odds;
 pub mod payout;
+pub mod portfolio;
 pub mod prediction;
 pub mod race;
 pub mod race_card;
@@ -25,6 +26,7 @@ pub use horse_result::{
 };
 pub use odds::{BetType, OddsValue, OrderedPair, OrderedTriple, Pair, PlaceOdds, RaceOdds, Triple};
 pub use payout::{RacePayouts, Settlement, settle_bet};
+pub use portfolio::{Portfolio, PortfolioBet, PortfolioConfig, build_portfolio};
 pub use prediction::{
     DatedCounts, EstimationConfig, FactorStat, HorseFactors, HorseProbability, RateTriple,
     RecencyConfig, RecentRun, ShrinkageConfig, StandardTimes, apply_recency_weight,

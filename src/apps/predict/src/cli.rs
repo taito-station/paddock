@@ -17,6 +17,10 @@ pub struct Cli {
     #[arg(long)]
     pub budget: Option<u64>,
 
+    /// 1 レースあたりの予算（円、軸流しポートフォリオの上限）。実上限は min(race_budget, 残高)。
+    #[arg(long, default_value_t = 5000)]
+    pub race_budget: u64,
+
     /// 中断した同日セッションを保存済みの残高から再開する。
     #[arg(long, conflicts_with_all = ["summary", "settle"])]
     pub resume: bool,

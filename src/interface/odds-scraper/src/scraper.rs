@@ -29,6 +29,7 @@ use crate::parse;
 pub struct OddsPages {
     pub win_place: Option<String>,
     pub quinella: Option<String>,
+    pub wide: Option<String>,
     pub exacta: Option<String>,
     pub trio: Option<String>,
     pub trifecta: Option<String>,
@@ -45,6 +46,9 @@ pub fn assemble(race_id: RaceId, pages: &OddsPages) -> Result<RaceOdds> {
     }
     if let Some(html) = &pages.quinella {
         odds.quinella = parse::parse_quinella(html)?;
+    }
+    if let Some(html) = &pages.wide {
+        odds.wide = parse::parse_wide(html)?;
     }
     if let Some(html) = &pages.exacta {
         odds.exacta = parse::parse_exacta(html)?;
@@ -177,6 +181,7 @@ impl OddsScraper for UreqOddsScraper {
         let pages = OddsPages {
             win_place: fetch(match_token(&tokens, BetType::Win))?,
             quinella: fetch(match_token(&tokens, BetType::Quinella))?,
+            wide: fetch(match_token(&tokens, BetType::Wide))?,
             exacta: fetch(match_token(&tokens, BetType::Exacta))?,
             trio: fetch(match_token(&tokens, BetType::Trio))?,
             trifecta: fetch(match_token(&tokens, BetType::Trifecta))?,
@@ -196,6 +201,7 @@ mod tests {
         <ul>
           <li><a onclick="return doAction('/JRADB/accessO.html', 'pwTAN001')">単勝・複勝</a></li>
           <li><a onclick="return doAction('/JRADB/accessO.html', 'pwUMR002')">馬連</a></li>
+          <li><a onclick="return doAction('/JRADB/accessO.html', 'pwWID006')">ワイド</a></li>
           <li><a onclick="return doAction('/JRADB/accessO.html','pwUMT003')">馬単</a></li>
           <li><a onclick="return doAction('/JRADB/accessO.html', 'pwSF004')">3連複</a></li>
           <li><a onclick="return doAction('/JRADB/accessO.html', 'pwST005')">3連単</a></li>
@@ -219,7 +225,7 @@ mod tests {
     fn skips_links_without_doaction() {
         let tokens = extract_cname_tokens(MENU);
         // The plain "オッズトップ" anchor has no onclick and is excluded.
-        assert_eq!(tokens.len(), 5);
+        assert_eq!(tokens.len(), 6);
     }
 
     #[test]
@@ -240,6 +246,10 @@ mod tests {
         assert_eq!(
             match_token(&tokens, BetType::Quinella).as_deref(),
             Some("pwUMR002")
+        );
+        assert_eq!(
+            match_token(&tokens, BetType::Wide).as_deref(),
+            Some("pwWID006")
         );
         // 三連複 (as_ja) matches the menu's "3連複" via numeral folding.
         assert_eq!(
