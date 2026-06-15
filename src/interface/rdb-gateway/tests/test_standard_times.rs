@@ -4,9 +4,10 @@
 
 use chrono::NaiveDate;
 use paddock_domain::{
-    FinishingPosition, GateNum, HorseName, HorseNum, HorseResult, Race, RaceId, ResultStatus,
-    Surface, TimeSeconds, Venue,
+    FinishingPosition, GateNum, HorseId, HorseName, HorseNum, HorseResult, Race, RaceId,
+    ResultStatus, Surface, TimeSeconds, Venue,
 };
+use paddock_use_case::HorsePastRun;
 use paddock_use_case::repository::Repository;
 use rdb_gateway::{SqliteRepository, pool};
 
@@ -118,5 +119,68 @@ async fn standard_times_respects_as_of_cutoff() {
         st.get(Surface::Turf, 1600),
         None,
         "cutoff 以降のレースは標準タイムに含めない"
+    );
+}
+
+/// netkeiba 近走 1 走（芝2000, タイムあり）。`upsert_horse_history` 経由で horse_past_runs に入る。
+fn nk_run(nk_id: &str, date: NaiveDate, race_num: u32, time: f64) -> HorsePastRun {
+    HorsePastRun {
+        netkeiba_race_id: nk_id.to_string(),
+        date,
+        venue: Venue::Tokyo,
+        round: 1,
+        day: 1,
+        race_num,
+        surface: Surface::Turf,
+        distance: 2000,
+        track_condition: None,
+        finishing_position: Some(FinishingPosition::try_from(1u32).unwrap()),
+        status: ResultStatus::Finished,
+        gate_num: GateNum::try_from(1u32).unwrap(),
+        horse_num: HorseNum::try_from(1u32).unwrap(),
+        horse_name: HorseName::try_from("ウマN").unwrap(),
+        jockey: None,
+        time_seconds: Some(TimeSeconds::try_from(time).unwrap()),
+        margin: None,
+        odds: None,
+        horse_weight: None,
+        weight_change: None,
+        weight_carried: None,
+        popularity: None,
+    }
+}
+
+#[tokio::test]
+async fn standard_times_aggregates_pdf_and_netkeiba_sources() {
+    // 標準タイムは results(pdf) と horse_past_runs(netkeiba) の UNION で集計する。
+    // どちらか単独では閾値(5)未満だが、両ソースを合算すると到達するケースで
+    // netkeiba UNION 分岐の実行と cross-source 集計を固定する。
+    let (repo, _dir) = fresh_repo().await;
+    // pdf 1 件（芝2000, 100.0 秒）。
+    repo.save_race(&race_with_times(
+        "turf-2000-pdf",
+        ymd(2026, 1, 10),
+        Surface::Turf,
+        2000,
+        &[100.0],
+    ))
+    .await
+    .unwrap();
+    // netkeiba 近走 4 走（芝2000, いずれも 100.0 秒）。
+    let horse_id = HorseId::try_from("2019104567".to_string()).unwrap();
+    let runs = vec![
+        nk_run("202605010101", ymd(2026, 1, 1), 1, 100.0),
+        nk_run("202605010102", ymd(2026, 1, 2), 2, 100.0),
+        nk_run("202605010103", ymd(2026, 1, 3), 3, 100.0),
+        nk_run("202605010104", ymd(2026, 1, 4), 4, 100.0),
+    ];
+    repo.upsert_horse_history(&horse_id, &runs).await.unwrap();
+
+    // pdf 1 + netkeiba 4 = 5 サンプルで閾値到達（単独ソースでは未満）→ UNION 合算を検証。
+    let st = repo.standard_times(ymd(2026, 2, 1)).await.unwrap();
+    assert_eq!(
+        st.get(Surface::Turf, 2000),
+        Some(100.0),
+        "pdf と netkeiba が同一 (surface,distance) バケツに合算され閾値到達"
     );
 }

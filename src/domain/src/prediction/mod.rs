@@ -498,9 +498,12 @@ pub fn recent_form_score(
 
     // 前走タイム: 同一 (surface,distance) のコーパス標準タイムに対する相対速度（#76）。標準より
     // 速い＝強いで加点、遅い＝弱いで減点。タイム無し（中止・失格や未記録）や標準タイム未整備は
-    // sub-signal を落とし、残りの signal で評価する（欠落フォールバック）。
+    // sub-signal を落とし、残りの signal で評価する（欠落フォールバック）。`t > 0` は 0 秒の異常値
+    // （TimeSeconds は 0.0 を許容）を母数から落とす防御で、標準タイム集計側の `time_seconds > 0` と揃える。
     if let (Some(t), Some(std)) = (prev.time_seconds.map(|x| x.value()), standard_time) {
-        signals.push(time_form(t, std));
+        if t > 0.0 {
+            signals.push(time_form(t, std));
+        }
     }
 
     if signals.is_empty() {
