@@ -13,6 +13,8 @@ VENUES = {
     "07": ("chukyo", "中京"), "08": ("kyoto", "京都"), "09": ("hanshin", "阪神"),
     "10": ("kokura", "小倉"),
 }
+# slug → 日本語場名（VENUES から導出。paddock race_id の slug を場名に戻す用）。
+SLUG2JP = {slug: jp for slug, jp in VENUES.values()}
 UA = "Mozilla/5.0"
 
 
@@ -128,6 +130,9 @@ def fetch_payouts(rid: str):
     n_rows = 0
     # 払戻テーブルは複数並ぶ。各テーブル内の <tr ...class="..."> を順に処理する。
     # class は値全体を取り空白区切りで券種語を引く（複数クラス・他属性の付加に耐える）。
+    # 非貪欲 `.*?</table>` は払戻テーブルが入れ子 table を持たない flat 構造である前提
+    # （netkeiba の現行 DOM。入れ子になると最初の </table> で切れる）。崩れたら有効払戻 0 件
+    # 警告で気づける。
     for table in re.findall(r'class="Payout_Detail_Table".*?</table>', html, re.S):
         for cls, body in re.findall(r'<tr\b[^>]*\bclass="([^"]*)"[^>]*>(.*?)</tr>', table, re.S):
             label = next((PAYOUT_TYPE[c] for c in cls.split() if c in PAYOUT_TYPE), None)
@@ -145,7 +150,10 @@ def fetch_payouts(rid: str):
             # Rust 実装と挙動を揃える）。数字を含まない空 span は (\d+) 不一致で自然に除外。
             if label in ("win", "place"):
                 # 単勝/複勝: div>span の数字のある馬番。複勝は馬番ごとに 1 点。
-                combos = re.findall(r'<span[^>]*>\s*(\d+)\s*</span>', result_cell.group(1))
+                # div 配下に限定し（Rust の `div span` セレクタと一致）、td.Result 内に将来
+                # div 外の数字 span が混入しても馬番として誤検出しないようにする。
+                combos = re.findall(
+                    r'<div[^>]*>\s*<span[^>]*>\s*(\d+)\s*</span>', result_cell.group(1))
             else:
                 # 組合せ券種: ul 1 つ＝1 組合せ。li>span の馬番（空 li/span は数字無しで除外）。
                 combos = []

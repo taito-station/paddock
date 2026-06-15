@@ -25,12 +25,9 @@ import sys
 import json
 import csv
 import argparse
-from collections import defaultdict
 from itertools import combinations
 
-SLUG2JP = {"tokyo": "東京", "hanshin": "阪神", "kyoto": "京都", "nakayama": "中山",
-           "chukyo": "中京", "sapporo": "札幌", "hakodate": "函館", "fukushima": "福島",
-           "niigata": "新潟", "kokura": "小倉"}
+from nk import SLUG2JP
 
 
 def parse_args(argv):
@@ -56,7 +53,7 @@ def load_market_fav(path):
     fav = {}
     with open(path, encoding="utf-8") as f:
         for row in csv.reader(f):
-            if len(row) < 4:
+            if len(row) < 3:  # 軸選定に使うのは race_id/馬番/人気の 3 列（odds は不要）
                 continue
             try:
                 rid, num, pop = row[0], int(row[1]), row[2].strip()
@@ -234,8 +231,8 @@ def main(argv):
             used = st / cap * 100 if cap else 0.0
             print(f"{name:<28}{roi:>7.1f}%{used:>7.1f}%{pay - st:>+12,}{st:>12,}{pay:>12,}")
     else:
-        # 感度テーブル: 行=戦略, 列=相手頭数 K の回収率。
-        header = "".join(f"K={k:<7}" for k in ks)
+        # 感度テーブル: 行=戦略, 列=相手頭数 K の回収率。ヘッダ列とデータ列の幅(8)・右寄せを揃える。
+        header = "".join(f"{'K=' + str(k):>7} " for k in ks)
         print(f"相手頭数感度（回収率）\n{'戦略':<28}{header}")
         for name, _ in STRATEGIES:
             cells = ""
