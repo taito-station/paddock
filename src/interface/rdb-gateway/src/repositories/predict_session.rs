@@ -38,12 +38,12 @@ const UPSERT_SESSION_SQL: &str = r#"
 /// 達しないためキャストで安全。仮に超えても `as i64` でサイレントに負値化するだけで
 /// DB は受理する点に留意（ドメイン上は起き得ない）。
 fn bind_session<'q>(
-    query: sqlx::query::Query<'q, sqlx::Sqlite, sqlx::sqlite::SqliteArguments<'q>>,
+    query: sqlx::query::Query<'q, sqlx::Sqlite, sqlx::sqlite::SqliteArguments>,
     date_str: &'q str,
     session: &PredictSessionRecord,
     created_at: String,
     updated_at: String,
-) -> sqlx::query::Query<'q, sqlx::Sqlite, sqlx::sqlite::SqliteArguments<'q>> {
+) -> sqlx::query::Query<'q, sqlx::Sqlite, sqlx::sqlite::SqliteArguments> {
     query
         .bind(date_str)
         .bind(session.budget as i64)
@@ -60,9 +60,9 @@ pub async fn find_predict_session(
     date: NaiveDate,
 ) -> Result<Option<PredictSessionRecord>> {
     let date_str = date_key(date);
-    let row: Option<SessionRow> = sqlx::query_as(&format!(
+    let row: Option<SessionRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT {SESSION_COLUMNS} FROM predict_sessions WHERE date = $1"
-    ))
+    )))
     .bind(&date_str)
     .fetch_optional(pool)
     .await?;

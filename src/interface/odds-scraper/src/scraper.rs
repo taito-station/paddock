@@ -84,13 +84,14 @@ impl UreqOddsScraper {
     /// POST a `cname` token to the odds endpoint and return the page body.
     fn post_cname(&self, cname: &str) -> Result<String> {
         let resp = ureq::post(&self.endpoint)
-            .send_form(&[("cname", cname)])
+            .send_form([("cname", cname)])
             .map_err(|e| Error::Fetch(e.to_string()))?;
         // JRA は本文を EUC-JP で返すため、UTF-8 前提の read_to_string では
         // 「stream did not contain valid UTF-8」で失敗する。生バイトで受けてから
         // EUC-JP デコードする（netkeiba-scraper と共通の scraper_util を使う）。
         let mut bytes = Vec::new();
-        resp.into_reader()
+        resp.into_body()
+            .into_reader()
             .read_to_end(&mut bytes)
             .map_err(|e| Error::Fetch(format!("read odds body (cname={cname}): {e}")))?;
         Ok(scraper_util::decode_euc_jp(&bytes, cname))

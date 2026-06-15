@@ -31,7 +31,10 @@ pub async fn build_app(interval_ms: Option<u64>) -> anyhow::Result<App> {
     pool::migrate(&pool).await.context("apply migrations")?;
 
     // SqlitePool は Arc backed なので clone は安価。card / history で同一 DB を共有する。
-    let card = CardInteractor::new(SqliteRepository::new(pool.clone()), build_scraper(interval_ms));
+    let card = CardInteractor::new(
+        SqliteRepository::new(pool.clone()),
+        build_scraper(interval_ms),
+    );
     let history =
         HorseHistoryInteractor::new(SqliteRepository::new(pool), build_scraper(interval_ms));
     Ok(App { card, history })

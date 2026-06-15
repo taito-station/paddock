@@ -202,14 +202,12 @@ fn parse_band(race_id: &RaceId, row: &OddsRow) -> Result<Option<PlaceOdds>> {
     let Some(high) = parse_odds_value(race_id, row, high) else {
         return Ok(None);
     };
-    PlaceOdds::try_from((low, high))
-        .map(Some)
-        .map_err(|e| {
-            Error::Data(format!(
-                "race_odds {} 行 (race_id={}, key={}) の幅 odds が不正です: {e}",
-                row.bet_type,
-                race_id.value(),
-                row.combination_key
-            ))
-        })
+    PlaceOdds::try_from((low, high)).map(Some).map_err(|e| {
+        Error::Data(format!(
+            "race_odds {} 行 (race_id={}, key={}) の幅 odds が不正です: {e}",
+            row.bet_type,
+            race_id.value(),
+            row.combination_key
+        ))
+    })
 }

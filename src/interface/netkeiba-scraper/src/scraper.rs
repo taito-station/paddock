@@ -35,10 +35,15 @@ pub struct UreqNetkeibaScraper {
 
 impl Default for UreqNetkeibaScraper {
     fn default() -> Self {
-        let agent = ureq::AgentBuilder::new()
-            .timeout_connect(CONNECT_TIMEOUT)
-            .timeout_read(READ_TIMEOUT)
-            .build();
+        // ureq2 の単一 timeout_read を ureq3 ではレスポンス受信／ボディ受信の
+        // 2 フェーズに分割。各フェーズに独立して READ_TIMEOUT を適用する
+        // （ハング検知が目的で総予算の厳密一致は不要なため、各 30s で十分）。
+        let agent: ureq::Agent = ureq::Agent::config_builder()
+            .timeout_connect(Some(CONNECT_TIMEOUT))
+            .timeout_recv_response(Some(READ_TIMEOUT))
+            .timeout_recv_body(Some(READ_TIMEOUT))
+            .build()
+            .into();
         Self {
             agent,
             delay: DEFAULT_DELAY,
@@ -129,14 +134,15 @@ impl UreqNetkeibaScraper {
 fn fetch_decoded(agent: &ureq::Agent, url: &str) -> Result<String> {
     let resp = agent
         .get(url)
-        .set("User-Agent", USER_AGENT)
+        .header("User-Agent", USER_AGENT)
         .call()
         .map_err(|e| Error::Fetch(format!("GET {url}: {e}")))?;
     let mut bytes = Vec::new();
-    resp.into_reader()
+    resp.into_body()
+        .into_reader()
         .read_to_end(&mut bytes)
         .map_err(|e| Error::Fetch(format!("read body {url}: {e}")))?;
-    // ureq は 4xx/5xx を Err(Status) にするためここに来るのは 2xx/3xx のみ。
+    // ureq は 4xx/5xx を Err(StatusCode) にするためここに来るのは 2xx/3xx のみ。
     // それでもメンテ画面など別エンコーディングが返ると文字化けで後段の table 不検出に
     // 化けて原因が見えにくいので、EUC-JP として解釈できないバイトがあれば警告する
     // （odds-scraper と共通の scraper_util を使う）。
@@ -148,11 +154,12 @@ fn fetch_decoded(agent: &ureq::Agent, url: &str) -> Result<String> {
 fn fetch_utf8(agent: &ureq::Agent, url: &str) -> Result<String> {
     let resp = agent
         .get(url)
-        .set("User-Agent", USER_AGENT)
+        .header("User-Agent", USER_AGENT)
         .call()
         .map_err(|e| Error::Fetch(format!("GET {url}: {e}")))?;
     let mut bytes = Vec::new();
-    resp.into_reader()
+    resp.into_body()
+        .into_reader()
         .read_to_end(&mut bytes)
         .map_err(|e| Error::Fetch(format!("read body {url}: {e}")))?;
     Ok(String::from_utf8_lossy(&bytes).into_owned())

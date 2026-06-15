@@ -1195,7 +1195,10 @@ mod tests {
         let probs = estimate_probabilities_with_config(&entries, &shrink_cfg(10.0));
         let sparse_win = probs[1].win_prob;
         // 縮約により prior 方向へ持ち上がり、0 より大きい有限値になる。
-        assert!(sparse_win > 0.0 && sparse_win.is_finite(), "sparse_win={sparse_win}");
+        assert!(
+            sparse_win > 0.0 && sparse_win.is_finite(),
+            "sparse_win={sparse_win}"
+        );
         // ただし強い馬よりは低い（順位は保つ）。
         assert!(probs[0].win_prob > sparse_win);
     }
@@ -1210,7 +1213,10 @@ mod tests {
             RECOMMENDED_SHRINKAGE_M
         );
         assert!((RECOMMENDED_SHRINKAGE_M - 10.0).abs() < 1e-12);
-        assert!(c.recency.is_none(), "recency は backtest 評価で無効採用（ADR 0016）");
+        assert!(
+            c.recency.is_none(),
+            "recency は backtest 評価で無効採用（ADR 0016）"
+        );
     }
 
     // ---- リーセンシー重み付け（#75 Phase B） ----
@@ -1247,7 +1253,11 @@ mod tests {
             dc(NaiveDate::from_ymd_opt(2026, 5, 31).unwrap(), 1, 1), // 1 日前: 勝ち
         ];
         let fs = apply_recency_weight(&runs, as_of, 30.0).expect("some");
-        assert!(fs.rate.win > 0.5, "直近の勝ちが重く効くべき: {}", fs.rate.win);
+        assert!(
+            fs.rate.win > 0.5,
+            "直近の勝ちが重く効くべき: {}",
+            fs.rate.win
+        );
         // 総出走数は時間重みを掛けない素の値。
         assert_eq!(fs.starts, 2);
     }
@@ -1267,7 +1277,11 @@ mod tests {
             dc(NaiveDate::from_ymd_opt(2026, 5, 31).unwrap(), 1, 1),
         ];
         let fs = apply_recency_weight(&runs, as_of, 30.0).expect("some");
-        assert!((fs.rate.win - expected).abs() < 1e-12, "win={} expected={expected}", fs.rate.win);
+        assert!(
+            (fs.rate.win - expected).abs() < 1e-12,
+            "win={} expected={expected}",
+            fs.rate.win
+        );
     }
 
     fn prob(num: u32, win: f64, place: f64, show: f64) -> HorseProbability {

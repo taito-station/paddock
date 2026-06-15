@@ -208,7 +208,8 @@ mod tests {
     #[test]
     fn normalize_is_idempotent_roundtrip() {
         // 正規化結果を再正規化しても不変（取り込みと検索で表現が揺れない保証）。
-        for s in ["ｶﾞ", "ﾀﾞｲﾜｽｶｰﾚｯﾄ", "Ｃ．ルメール", " イクイノックス "] {
+        for s in ["ｶﾞ", "ﾀﾞｲﾜｽｶｰﾚｯﾄ", "Ｃ．ルメール", " イクイノックス "]
+        {
             let once = normalize_name(s.to_string());
             assert_eq!(normalize_name(once.clone()), once);
         }

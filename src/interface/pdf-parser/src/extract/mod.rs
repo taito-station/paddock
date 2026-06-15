@@ -16,11 +16,7 @@ pub use row::RawRow;
 /// 騎手・調教師は stext 座標ベースの索引（race_num→horse_num→名前）で確定する。
 /// 索引が空（stext 抽出失敗）または該当馬が無い場合は、各行の既存ヒューリスティックに
 /// フォールバックする（現行挙動から後退させない）。
-pub fn parse_text(
-    text: &str,
-    jockeys: &JockeyIndex,
-    trainers: &TrainerIndex,
-) -> Result<Vec<Race>> {
+pub fn parse_text(text: &str, jockeys: &JockeyIndex, trainers: &TrainerIndex) -> Result<Vec<Race>> {
     let blocks = split_into_race_blocks(text);
     let mut races = Vec::with_capacity(blocks.len());
     for block in blocks {

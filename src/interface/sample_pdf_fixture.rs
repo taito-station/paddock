@@ -30,14 +30,21 @@ fn load_result_pdf() -> Option<Vec<u8>> {
     // URL は `MeetingSpec::pdf_url` と同じ規則で安定。
     let url = "https://www.jra.go.jp/datafile/seiseki/report/2026/2026-3nakayama6.pdf";
     // 無応答時にテストがハングしないようタイムアウトを設定（失敗時はスキップ）。
-    let agent = ureq::AgentBuilder::new()
-        .timeout_connect(Duration::from_secs(10))
-        .timeout_read(Duration::from_secs(30))
-        .build();
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_connect(Some(Duration::from_secs(10)))
+        .timeout_recv_response(Some(Duration::from_secs(30)))
+        .timeout_recv_body(Some(Duration::from_secs(30)))
+        .build()
+        .into();
     let mut buf = Vec::new();
     match agent.get(url).call() {
         Ok(resp) => {
-            if resp.into_reader().read_to_end(&mut buf).is_err() {
+            if resp
+                .into_body()
+                .into_reader()
+                .read_to_end(&mut buf)
+                .is_err()
+            {
                 eprintln!("skip: サンプル結果 PDF の読み取りに失敗");
                 return None;
             }

@@ -87,7 +87,10 @@ fn pdf_race(race_id: &str, date: NaiveDate, race_num: u32, horse: &str, finish: 
 
 async fn count(repo: &SqliteRepository, table: &str) -> i64 {
     let sql = format!("SELECT COUNT(*) FROM {table}");
-    let row: (i64,) = sqlx::query_as(&sql).fetch_one(&repo.pool).await.unwrap();
+    let row: (i64,) = sqlx::query_as(sqlx::AssertSqlSafe(sql))
+        .fetch_one(&repo.pool)
+        .await
+        .unwrap();
     row.0
 }
 
@@ -108,11 +111,12 @@ async fn upsert_horse_history_lands_in_separate_tables() {
     assert_eq!(count(&repo, "races").await, 0, "races は汚さない");
 
     // netkeiba 12 桁が canonical paddock race_id に変換されて保存される（dedup が依存する不変条件）。
-    let rid: (String,) =
-        sqlx::query_as("SELECT race_id FROM horse_past_runs WHERE netkeiba_race_id = '202605030211'")
-            .fetch_one(&repo.pool)
-            .await
-            .unwrap();
+    let rid: (String,) = sqlx::query_as(
+        "SELECT race_id FROM horse_past_runs WHERE netkeiba_race_id = '202605030211'",
+    )
+    .fetch_one(&repo.pool)
+    .await
+    .unwrap();
     assert_eq!(rid.0, "2026-3-tokyo-2-11R");
 
     // 冪等性: 同じ取得を再実行しても増えない（ON CONFLICT 上書き）。

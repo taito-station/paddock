@@ -221,5 +221,6 @@ fn str_f64(v: Option<&Value>) -> Option<f64> {
 }
 
 fn str_u32(v: Option<&Value>) -> Option<u32> {
-    v.and_then(|v| v.as_str()).and_then(|s| s.parse::<u32>().ok())
+    v.and_then(|v| v.as_str())
+        .and_then(|s| s.parse::<u32>().ok())
 }

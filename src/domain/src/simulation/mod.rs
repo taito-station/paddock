@@ -323,8 +323,9 @@ mod tests {
     fn exacta_trio_trifecta_rules() {
         let e = BetCombination::Exacta(crate::odds::OrderedPair::try_from((h(1), h(5))).unwrap());
         let t = BetCombination::Trio(Triple::try_from((h(1), h(5), h(8))).unwrap());
-        let tf =
-            BetCombination::Trifecta(crate::odds::OrderedTriple::try_from((h(1), h(5), h(8))).unwrap());
+        let tf = BetCombination::Trifecta(
+            crate::odds::OrderedTriple::try_from((h(1), h(5), h(8))).unwrap(),
+        );
         assert!(is_hit(&e, (h(1), h(5), h(2)), 12));
         assert!(!is_hit(&e, (h(5), h(1), h(2)), 12)); // 順序違いは外れ
         assert!(is_hit(&t, (h(8), h(1), h(5)), 12)); // 順不同で 3 着以内
@@ -339,7 +340,11 @@ mod tests {
         let input = SimInput {
             field: field(6),
             bets: vec![
-                bet(BetCombination::Wide(Pair::try_from((h(1), h(5))).unwrap()), 500, 3.0),
+                bet(
+                    BetCombination::Wide(Pair::try_from((h(1), h(5))).unwrap()),
+                    500,
+                    3.0,
+                ),
                 bet(
                     BetCombination::Trifecta(
                         crate::odds::OrderedTriple::try_from((h(1), h(5), h(8))).unwrap(),
@@ -375,7 +380,11 @@ mod tests {
         let input = SimInput {
             field: field(6),
             bets: vec![
-                bet(BetCombination::Wide(Pair::try_from((h(1), h(5))).unwrap()), 1000, 1.2),
+                bet(
+                    BetCombination::Wide(Pair::try_from((h(1), h(5))).unwrap()),
+                    1000,
+                    1.2,
+                ),
                 bet(BetCombination::Win(h(9)), 5000, 2.0),
             ],
             main: None,

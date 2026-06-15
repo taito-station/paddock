@@ -23,7 +23,10 @@ async fn main() -> anyhow::Result<()> {
         println!("出馬表: 取得済みのためスキップ（--force で再取得）");
     }
     if resp.odds_saved > 0 {
-        println!("オッズ: {} 件を保存（単複＋馬連・馬単・三連複・三連単）", resp.odds_saved);
+        println!(
+            "オッズ: {} 件を保存（単複＋馬連・馬単・三連複・三連単）",
+            resp.odds_saved
+        );
     } else {
         println!("オッズ: 未確定のため保存なし");
     }

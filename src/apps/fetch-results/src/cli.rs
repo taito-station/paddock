@@ -6,7 +6,10 @@ use clap::Parser;
 /// PDF 由来の `results.jockey` の馬主名混入と、`results.trainer` 空・フルネーム不一致を解消し、
 /// predict の entry(netkeiba 略名)↔results join を噛み合わせる。races 行は更新しない。
 #[derive(Parser, Debug)]
-#[command(name = "paddock-fetch-results", about = "netkeiba 結果で results を再取込")]
+#[command(
+    name = "paddock-fetch-results",
+    about = "netkeiba 結果で results を再取込"
+)]
 pub struct Cli {
     /// 対象期間の開始日 YYYY-MM-DD（含む）。
     #[arg(long, default_value = "2025-01-01")]

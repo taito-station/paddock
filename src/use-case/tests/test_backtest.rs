@@ -452,7 +452,12 @@ async fn backtest_populates_by_exotic_from_curated_bets() {
     );
     let app = interactor_with_odds(vec![race], odds);
     let report = app
-        .backtest(d(2026, 1, 1), d(2026, 1, 31), None, EstimationConfig::default())
+        .backtest(
+            d(2026, 1, 1),
+            d(2026, 1, 31),
+            None,
+            EstimationConfig::default(),
+        )
         .await
         .unwrap();
 

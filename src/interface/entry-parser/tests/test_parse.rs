@@ -15,7 +15,10 @@ fn sample_entry_pdf() -> Option<Vec<u8>> {
     match std::fs::read(&path) {
         Ok(bytes) => Some(bytes),
         Err(_) => {
-            eprintln!("skip: entry sample PDF が不在のためスキップ ({})", path.display());
+            eprintln!(
+                "skip: entry sample PDF が不在のためスキップ ({})",
+                path.display()
+            );
             None
         }
     }

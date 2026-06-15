@@ -72,7 +72,10 @@ fn jockey_column_is_clean_and_separated_from_owner() {
 
     // 右レース列（馬主が size6 で size 分離が効かず、x 帯境界で切る必要がある）の検証。
     // 修正前はそれぞれ `横山典弘秋元` / `横山武史西山` と馬主サーネームが混入していた。
-    let r2 = races.iter().find(|r| r.race_num == 2).expect("race 2 not found");
+    let r2 = races
+        .iter()
+        .find(|r| r.race_num == 2)
+        .expect("race 2 not found");
     let jockey_of_r2 = |hn: u32| -> Option<String> {
         r2.results
             .iter()
@@ -156,8 +159,7 @@ fn trainer_column_is_clean_and_populated() {
             // 調教師名は漢字のみ。牧場列(x 帯のすぐ右)が混入すると仮名混じり地名
             // （新ひだか/ノーザンファーム 等）が紛れるため、平仮名・片仮名の不在で検知する。
             assert!(
-                !v.chars()
-                    .any(|c| ('\u{3040}'..='\u{30FF}').contains(&c)),
+                !v.chars().any(|c| ('\u{3040}'..='\u{30FF}').contains(&c)),
                 "trainer '{v}' に仮名が混入（牧場名混入の疑い） (race {})",
                 race.race_num
             );

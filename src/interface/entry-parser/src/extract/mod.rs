@@ -720,7 +720,9 @@ mod tests {
 
     #[test]
     fn trainer_re_parses_full_name() {
-        let caps = TRAINER_RE.captures("（吉岡辰弥・栗東）").expect("should match");
+        let caps = TRAINER_RE
+            .captures("（吉岡辰弥・栗東）")
+            .expect("should match");
         assert_eq!(&caps[1], "吉岡辰弥");
     }
 
@@ -728,7 +730,11 @@ mod tests {
     fn trainer_re_rejects_owner_cells() {
         // Owner cells lack the `（…・` shape and must not be mistaken for a trainer.
         assert!(TRAINER_RE.captures("増田雄一氏").is_none());
-        assert!(TRAINER_RE.captures("合同会社小林英一ホールディングス").is_none());
+        assert!(
+            TRAINER_RE
+                .captures("合同会社小林英一ホールディングス")
+                .is_none()
+        );
     }
 
     #[test]
@@ -769,7 +775,10 @@ mod tests {
         let refs: Vec<&FlatLine> = lines.iter().collect();
         let entries = extract_entries(&refs, &refs, col_x);
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].trainer, None, "owner cell must not be read as a trainer");
+        assert_eq!(
+            entries[0].trainer, None,
+            "owner cell must not be read as a trainer"
+        );
     }
 
     #[test]
@@ -779,14 +788,14 @@ mod tests {
         // under the row pitch, the second horse must bind None rather than steal horse 1's
         // trainer (binding is non-consuming, so this guards the dy-window invariant).
         let lines = [
-            line(0, 35.0, 128.0, 8.0, "白"),       // gate 1
+            line(0, 35.0, 128.0, 8.0, "白"),        // gate 1
             line(0, 69.0, 138.0, 11.0, "ウマエー"), // name 1
-            line(0, 49.0, 151.0, 11.0, "1"),       // num 1
+            line(0, 49.0, 151.0, 11.0, "1"),        // num 1
             line(0, 192.0, 167.0, 6.0, "（小野"),   // trainer 1
             line(0, 220.0, 167.0, 6.0, "次郎・"),
-            line(0, 35.0, 175.0, 8.0, "黒"),       // gate 2
+            line(0, 35.0, 175.0, 8.0, "黒"),        // gate 2
             line(0, 69.0, 185.0, 11.0, "ウマビー"), // name 2 (no trainer line)
-            line(0, 49.0, 198.0, 11.0, "2"),       // num 2
+            line(0, 49.0, 198.0, 11.0, "2"),        // num 2
         ];
         let refs: Vec<&FlatLine> = lines.iter().collect();
         let entries = extract_entries(&refs, &refs, col_x);

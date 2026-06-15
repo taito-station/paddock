@@ -5,10 +5,10 @@
 //! not exercised here — only the parsing and assembly, which is the verified
 //! core of this crate.
 
+use odds_scraper::{OddsPages, assemble, parse};
 use paddock_domain::{
     HorseNum, OddsValue, OrderedPair, OrderedTriple, Pair, PlaceOdds, RaceId, Triple,
 };
-use odds_scraper::{OddsPages, assemble, parse};
 
 const WIN_PLACE: &str = include_str!("fixtures/win_place.html");
 const QUINELLA: &str = include_str!("fixtures/quinella.html");
