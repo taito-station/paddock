@@ -184,3 +184,27 @@ async fn standard_times_aggregates_pdf_and_netkeiba_sources() {
         "pdf と netkeiba が同一 (surface,distance) バケツに合算され閾値到達"
     );
 }
+
+#[tokio::test]
+async fn standard_times_excludes_zero_seconds() {
+    // TimeSeconds は 0.0 を許容するため、0 秒の異常行が平均・標本数に混ざらないことを固定する
+    // （SQL の `time_seconds > 0` ガード）。0 秒 1 件 + 100 秒 5 件 → 0 秒を除いた平均 100.0、
+    // 母数も 5 件として閾値判定される（0 秒を数えると 6 件・平均は下振れする）。
+    let (repo, _dir) = fresh_repo().await;
+    repo.save_race(&race_with_times(
+        "turf-2000-zero",
+        ymd(2026, 1, 10),
+        Surface::Turf,
+        2000,
+        &[0.0, 100.0, 100.0, 100.0, 100.0, 100.0],
+    ))
+    .await
+    .unwrap();
+
+    let st = repo.standard_times(ymd(2026, 2, 1)).await.unwrap();
+    assert_eq!(
+        st.get(Surface::Turf, 2000),
+        Some(100.0),
+        "0 秒の異常行は平均・標本数から除外される"
+    );
+}

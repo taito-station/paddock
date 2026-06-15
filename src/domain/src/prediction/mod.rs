@@ -547,7 +547,9 @@ fn margin_form(position: u32, margin_lengths: f64) -> f64 {
 /// シグナル `[0,1]`（0.5=中立）を作る（#76）。標準より速い（タイムが小さい）ほど高く、遅いほど低い。
 /// 相対偏差 `dev = (standard - prev) / standard` を `TIME_DEV_CAP` で飽和させて線形に写像する。
 /// 馬場差は標準タイム集計時に (surface,distance) でプールして吸収する割り切り（v1）。
-/// 標準タイムが非正のときは比が定義できないため中立 0.5 を返す（防御）。
+/// 標準タイムが非正のときは比が定義できないため中立 0.5 を返す（防御）。`prev_time > 0` は
+/// 呼び出し側（`recent_form_score` の `t > 0.0` ガード）が保証する前提で、本関数は prev 側の
+/// 非正を検査しない（0 秒以下の異常タイムは sub-signal を母数から落とす方が中立 0.5 を混ぜるより適切なため）。
 fn time_form(prev_time: f64, standard_time: f64) -> f64 {
     if standard_time <= 0.0 {
         return 0.5;
