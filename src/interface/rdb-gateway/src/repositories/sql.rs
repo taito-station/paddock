@@ -143,7 +143,7 @@ pub(crate) async fn delete_absent_horse_nums(
         .join(", ");
     let sql =
         format!("DELETE FROM {table} WHERE race_id = ? AND horse_num NOT IN ({placeholders})");
-    let mut q = sqlx::query(sqlx::AssertSqlSafe(&*sql)).bind(race_id);
+    let mut q = sqlx::query(sqlx::AssertSqlSafe(sql)).bind(race_id);
     for n in horse_nums {
         q = q.bind(n);
     }

@@ -413,7 +413,7 @@ async fn cleanup_migration_deletes_only_invalid_rows() {
         "/../../../deployments/db/migrations/20260614000001_cleanup_invalid_race_odds.up.sql"
     ))
     .unwrap();
-    sqlx::query(sqlx::AssertSqlSafe(&*sql))
+    sqlx::query(sqlx::AssertSqlSafe(sql))
         .execute(&repo.pool)
         .await
         .unwrap();

@@ -29,7 +29,7 @@ pub async fn course_stats(
              AND races.surface = ?3 AND results.finishing_position IS NOT NULL \
              AND {predicate} {date}"
         );
-        let mut query = sqlx::query_as(sqlx::AssertSqlSafe(&*q))
+        let mut query = sqlx::query_as(sqlx::AssertSqlSafe(q))
             .bind(venue.as_jp())
             .bind(distance as i64)
             .bind(surface.as_str());
