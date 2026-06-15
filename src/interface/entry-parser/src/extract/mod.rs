@@ -264,6 +264,8 @@ fn parse_column(
             horse_name,
             jockey,
             trainer,
+            // 斤量は PDF 出馬表パーサ未対応のため None（#135 は netkeiba 経路のみ対応）。
+            weight_carried: None,
         });
     }
 

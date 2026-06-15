@@ -31,4 +31,7 @@ pub struct HorseEntry {
     /// 調教師（#74）。netkeiba 出馬表から取得。出馬表 PDF パーサは未対応のため、
     /// PDF 経路で取り込んだレースは `None`（確率推定で trainer 項なし）。
     pub trainer: Option<TrainerName>,
+    /// 負担重量[kg]（#135）。netkeiba 出馬表から取得。出馬表 PDF パーサは未対応のため、
+    /// PDF 経路で取り込んだレースは `None`（確率推定で斤量項なし）。
+    pub weight_carried: Option<f64>,
 }

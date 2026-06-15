@@ -28,6 +28,8 @@ fn parses_card_meta_and_entries() {
     assert_eq!(first.jockey.as_ref().map(|j| j.value()), Some("戸崎圭"));
     // 調教師（#74）。td.Trainer の title 属性から抽出する。
     assert_eq!(first.trainer.as_ref().map(|t| t.value()), Some("田中博"));
+    // 斤量（#135）。性齢セル直後の td(class=Txt_C) から抽出する。
+    assert_eq!(first.weight_carried, Some(58.0));
     // horse_id は近走取り込み（#103）の再利用キー。同じ /horse/ リンク（href）から抽出する。
     assert_eq!(
         first.horse_id.as_ref().map(|h| h.value()),

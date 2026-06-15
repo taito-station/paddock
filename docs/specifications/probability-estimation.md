@@ -76,13 +76,15 @@ raw_score =
     [ + 1.0  × trainer_surface_rate ] // 調教師の芝ダ実績（調教師あり×実績ありのときのみ, #74）
     [ + 1.0  × horse_track_condition_rate ] // 馬の馬場状態別実績（馬場状態あり×実績ありのときのみ, #73）
     [ + 0.25 × recent_form ]         // 前走フォーム[0,1]（前走ありのときのみ, #31）
-    ) / Σ(present weights)           // 例: 全項あり=7.25、全項なし: Σ重み=0（下記 注2）
+    [ + 0.25 × weight_carried ]      // 斤量のレース内相対[0,1]（斤量あり×field平均ありのときのみ, #135）
+    ) / Σ(present weights)           // 例: 全項あり=7.5、全項なし: Σ重み=0（下記 注2）
 ```
 
 > 注1: **「実績なし」の項はその項と重みを母数から除外する（0 埋め＝全敗扱いにしない）**（ADR 0007/0014）。
 > 当該グループの出走実績が無い（グループ不在・出走 0 件）factor は全て `None`: コース枠順
 > （`course_gate`）・馬の芝ダ／距離帯（`horse_surface`/`horse_distance`）・騎手（`jockey_surface`、騎手
-> 未登録も含む）・調教師（`trainer_surface`）・馬場状態（`horse_track_condition`）・前走（`recent_form`）。
+> 未登録も含む）・調教師（`trainer_surface`）・馬場状態（`horse_track_condition`）・前走（`recent_form`）・
+> 斤量（`weight_carried`、斤量未取得 or field 平均なし）。
 > #81 で 0 埋めだった course_gate/horse_surface/horse_distance/jockey_surface を None 除外へ統一した。
 > これらの項は「平均からの差分」としてのみ効き、欠落で不当に減点されない。全馬が同条件のときは定数除算
 > となり相対順位は不変。
@@ -310,7 +312,11 @@ paddock-analyze predict <race_id>
 - コースデータが存在しない組み合わせ（venue × distance × surface）の場合、`course_gate = None`（母数除外）
   として計算する（#81 以前は 0 埋め）
 - モデルは過去成績・前走フォーム（馬体重変化・前走人気乖離・前走間隔, #31／前走着差・前走タイム相対速度, #76）・
-  馬場状態別成績（#73）を使用。斤量は #76 の後続 PR で追加予定
+  馬場状態別成績（#73）・斤量のレース内相対（#135）を使用。
+- 斤量項（`weight_carried`）は当該レースの field 平均斤量との kg 差を [0,1]（0.5=中立）に写像する独立 factor。
+  向きは「平均より重い→加点」で、backtest（両符号比較）で減点符号より的中率・回収率・校正がすべて良かった
+  ため採用（実績馬ほど重い斤量を課される選択効果, ADR 0009 追補）。斤量は netkeiba 出馬表のみ取得（PDF 出馬表・
+  斤量欠落・field 平均なしは項なし）。backtest は results の確定斤量で field 平均を取る。
 - 馬場状態項は評価対象レースの馬場状態が分かるときのみ効く。出馬表 PDF に馬場状態は無いため、
   analyze CLI の predict では `--track-condition` の手入力が必要（未指定なら項なし＝従来どおり）。
   重み 1.0 はバックテストで「単勝/連対/複勝/回収率 改善・単勝 Brier/LogLoss 微悪化」を確認した

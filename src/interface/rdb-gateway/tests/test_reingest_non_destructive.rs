@@ -169,6 +169,7 @@ async fn save_race_card_reingest_removes_only_absent_entries() {
         horse_name: HorseName::try_from(format!("ウマ{n}")).unwrap(),
         jockey: None,
         trainer: None,
+        weight_carried: None,
     };
     let card = |entries: Vec<HorseEntry>| RaceCard {
         race_id: RaceId::try_from(rid).unwrap(),
@@ -220,6 +221,7 @@ async fn save_race_card_coalesce_keeps_trainer_from_netkeiba() {
             horse_name: HorseName::try_from("ウマA").unwrap(),
             jockey: None,
             trainer: trainer.map(|t| TrainerName::try_from(t).unwrap()),
+            weight_carried: None,
         }],
     };
 
