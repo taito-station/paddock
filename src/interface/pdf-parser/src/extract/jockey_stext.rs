@@ -373,6 +373,11 @@ pub fn parse_weights(stext_json: &str) -> WeightIndex {
 /// 帯内トークンを x 昇順で**連結**してから解釈する（`column_for` と同方針）。これにより斤量が
 /// 複数トークンに分割される PDF（例 `56.5` → `56` + `.5`）でも先頭片だけを誤採用しない。
 /// 連結が妥当域で解釈できないときのみ、単一トークン最左の妥当値にフォールバックする。
+///
+/// `column_for`（騎手・調教師）と違い font サイズ条件は持たない。斤量は **x 帯（馬番からの
+/// オフセット 92-117）＋数字/小数点のみ＋妥当域(48-63.5)** で一意に絞れ、見出し(size≈14)や
+/// 他列の数字はこの 3 条件で除外されるため、size 帯を加えても識別力は上がらず（むしろ size の
+/// 端数差で取りこぼすリスクがある）。意図的に size 非依存とする。
 fn weight_token(toks: &[Tok], page: usize, row_y: f64, hn_x: f64) -> Option<String> {
     let lo = hn_x + WEIGHT_OFFSET_LO;
     let hi = hn_x + WEIGHT_OFFSET_HI;

@@ -252,6 +252,8 @@ fn weight_and_popularity_are_sane() {
             .collect();
         for r in &race.results {
             if let Some(w) = r.weight_carried {
+                // 48.0..=63.5 は本体の WEIGHT_RANGE と同値（pub(crate) のため統合テストからは
+                // 参照不可。本体採用域の独立検算として同じリテラルを置く）。
                 assert!(
                     (48.0..=63.5).contains(&w),
                     "斤量 {w} が妥当域外 (race {})",
