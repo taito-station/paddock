@@ -17,7 +17,9 @@ impl PdfParser for MutoolParser {
         // （空文字列）各行のヒューリスティックにフォールバックして取り込みは継続する。
         let jockeys = extract::jockey_stext::parse_jockeys(&stext);
         let trainers = extract::jockey_stext::parse_trainers(&stext);
-        let races = extract::parse_text(&text, &jockeys, &trainers)
+        // 斤量は CID 数字で読めるため stext 座標索引で確定する（#124、EdiF 復号不要）。
+        let weights = extract::jockey_stext::parse_weights(&stext);
+        let races = extract::parse_text(&text, &jockeys, &trainers, &weights)
             .map_err(paddock_use_case::Error::from)?;
         Ok(races)
     }
