@@ -167,6 +167,10 @@ def main(argv):
     if not ks or any(k < 1 for k in ks):
         print("--partners は 1 以上の整数", file=sys.stderr)
         sys.exit(1)
+    if args.budget < 100:
+        # 100 円未満は全戦略 stake=0・ROI 0% になり無意味（distribute も < 100 で 0 を返す）。
+        print("--budget は 100 以上（100 円単位で配分する）", file=sys.stderr)
+        sys.exit(1)
     fav = {}
     if args.axis == "market":
         if not args.win_odds:
