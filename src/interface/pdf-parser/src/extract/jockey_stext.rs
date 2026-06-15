@@ -28,6 +28,10 @@ pub type JockeyIndex = HashMap<u32, HashMap<u32, String>>;
 /// 文字列がそのまま検証・保存される。結果 PDF の調教師はフルネームの漢字表記で width 揺れは無い。
 pub type TrainerIndex = HashMap<u32, HashMap<u32, String>>;
 
+/// `race_num -> (horse_num -> 斤量kg)`。斤量は CID 数字で読める（EdiF ではない）ため stext の
+/// x 帯から直接取れる（#124）。値は 48.0〜63.5kg の妥当域に収まるもののみ。
+pub type WeightIndex = HashMap<u32, HashMap<u32, f64>>;
+
 #[derive(Deserialize)]
 struct StextDoc {
     #[serde(default)]
@@ -99,6 +103,13 @@ const JOCKEY_OFFSET_HI: f64 = 161.0;
 const TRAINER_OFFSET_LO: f64 = 195.0;
 const TRAINER_OFFSET_HI: f64 = 230.0;
 const TRAINER_SIZE: std::ops::RangeInclusive<f64> = 3.0..=5.5;
+/// 斤量列の x 帯（馬番グリフ x からの相対オフセット）。斤量は CID 数字で読める（EdiF でない）。
+/// 絶対 x ~133（左列）で、性齢の年齢数字（offset ~89）より右・騎手（offset >= 118）より左。
+/// 数値かつ妥当域(48-63.5)で同定するため帯は広めでよい。
+const WEIGHT_OFFSET_LO: f64 = 92.0;
+const WEIGHT_OFFSET_HI: f64 = 117.0;
+/// JRA 斤量の妥当域(kg)。
+const WEIGHT_RANGE: std::ops::RangeInclusive<f64> = 48.0..=63.5;
 /// 同一行とみなす y 許容。
 const ROW_Y_TOL: f64 = 3.0;
 
@@ -329,6 +340,44 @@ pub fn parse_trainers(stext_json: &str) -> TrainerIndex {
             )
         },
     )
+}
+
+/// stext.json から斤量インデックス（`race_num -> (horse_num -> kg)`）を構築する。
+/// 斤量は CID 数字で読めるため、馬番アンカーからの x 帯にある数値トークンで妥当域のものを採る。
+/// 騎手・調教師と同骨格（`parse_column`）で、列抽出だけ数値トークン用に差し替える。
+pub fn parse_weights(stext_json: &str) -> WeightIndex {
+    let str_index = parse_column(
+        stext_json,
+        "stext.json のパースに失敗。斤量は未取得",
+        "stext からの斤量抽出が 0 件。座標レイアウトが想定と異なる可能性",
+        weight_token,
+    );
+    // 抽出文字列（"57" / "56.5"）を kg へ変換する。
+    str_index
+        .into_iter()
+        .map(|(race, m)| {
+            let weights = m
+                .into_iter()
+                .filter_map(|(hn, s)| s.parse::<f64>().ok().map(|w| (hn, w)))
+                .collect();
+            (race, weights)
+        })
+        .collect()
+}
+
+/// 馬番アンカー行で斤量列 x 帯にある妥当域(48-63.5)の数値トークンを返す。
+fn weight_token(toks: &[Tok], page: usize, row_y: f64, hn_x: f64) -> Option<String> {
+    let lo = hn_x + WEIGHT_OFFSET_LO;
+    let hi = hn_x + WEIGHT_OFFSET_HI;
+    toks.iter()
+        .filter(|t| t.page == page && (t.y - row_y).abs() <= ROW_Y_TOL && lo <= t.x && t.x <= hi)
+        .find_map(|t| {
+            let s = t.text.trim().replace('．', ".");
+            s.parse::<f64>()
+                .ok()
+                .filter(|w| WEIGHT_RANGE.contains(w))
+                .map(|_| s)
+        })
 }
 
 /// 1 トークンから減量印を除去し、馬主マーカーで打ち切る。
@@ -614,5 +663,45 @@ mod tests {
             idx.get(&2).and_then(|m| m.get(&13)).map(String::as_str),
             Some("加藤士津八")
         );
+    }
+
+    #[test]
+    fn extracts_weight_in_band_and_range() {
+        // 左列: 馬番9 / 斤量57(x133, offset106) を取る。年齢3(x116,offset89<92)と
+        // 馬体重478(x309)は帯外、騎手は数値でないため自然に除外される。
+        let json = doc_json(&[
+            (216.0, 116.0, 14.0, "1"),
+            (27.0, 191.0, 6.0, "9"),
+            (116.0, 191.0, 6.0, "3"),  // 年齢: offset 89 で帯(92)未満 → 除外
+            (133.0, 191.0, 6.0, "57"), // 斤量: offset 106 → 採用
+            (156.0, 191.0, 6.0, "横山"), // 騎手: 非数値
+            (309.0, 191.0, 6.0, "478"), // 馬体重: 帯外
+        ]);
+        let idx = parse_weights(&json);
+        assert_eq!(idx.get(&1).and_then(|m| m.get(&9)).copied(), Some(57.0));
+    }
+
+    #[test]
+    fn weight_rejects_out_of_range_numbers() {
+        // 帯内に妥当域外の数値（例 47 や 64）しか無ければ採らない。
+        let json = doc_json(&[
+            (216.0, 116.0, 14.0, "1"),
+            (27.0, 191.0, 6.0, "5"),
+            (133.0, 191.0, 6.0, "47"), // 妥当域(48-63.5)外 → 不採用
+        ]);
+        let idx = parse_weights(&json);
+        assert_eq!(idx.get(&1).and_then(|m| m.get(&5)).copied(), None);
+    }
+
+    #[test]
+    fn weight_right_column_uses_relative_offset() {
+        // 右列(hn_x≈438)でも馬番からの相対オフセットで斤量を取る（絶対 x≈544）。
+        let json = doc_json(&[
+            (627.0, 67.0, 14.0, "2"),
+            (438.0, 142.0, 6.0, "3"),
+            (544.0, 142.0, 6.0, "55"), // 斤量: offset 106 → 採用
+        ]);
+        let idx = parse_weights(&json);
+        assert_eq!(idx.get(&2).and_then(|m| m.get(&3)).copied(), Some(55.0));
     }
 }
