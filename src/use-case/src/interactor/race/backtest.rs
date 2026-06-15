@@ -75,7 +75,8 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
                 .course_stats(race.venue, race.distance, race.surface, as_of)
                 .await?;
 
-            // 斤量のレース内相対シグナル用の field 平均斤量（#135）。出走馬（starters）の確定斤量で平均する。
+            // 斤量のレース内相対シグナル用の field 平均斤量（#135）。斤量を持つ出走馬（starters）の確定斤量で
+            // 平均する（斤量欠落の馬は filter_map で母数から除外）。
             let mean_weight = field_mean_weight(starters.iter().filter_map(|r| r.weight_carried));
             let race_ctx = RaceContext {
                 surface: race.surface,

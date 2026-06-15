@@ -582,7 +582,8 @@ fn time_form(prev_time: f64, standard_time: f64) -> f64 {
 /// 選択効果が「負担で遅くなる」効果を上回るため。`field_mean` 非正は防御として中立 0.5。
 /// レース内相対の計算は use-case（`build_factors`）が field 平均を出して呼ぶため `pub`。
 pub fn weight_factor(weight: f64, field_mean: f64) -> f64 {
-    if field_mean <= 0.0 {
+    // field 平均が非正、または weight が非有限（NaN/inf）のときは比が定義できないため中立 0.5（防御）。
+    if field_mean <= 0.0 || !weight.is_finite() {
         return 0.5;
     }
     let dev = weight - field_mean;

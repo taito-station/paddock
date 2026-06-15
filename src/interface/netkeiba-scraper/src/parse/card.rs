@@ -220,11 +220,14 @@ fn extract_trainer(row: &ElementRef, sel: &Selector) -> Option<TrainerName> {
 }
 
 /// 性齢セル直後の斤量セル（`td.Barei + td`）から負担重量[kg]を取る（#135）。空・非数値は None。
+/// `td.Barei + td` は DOM 順依存（性齢列の直後が斤量）のため、レイアウト変更で別カラムを掴んでも
+/// 不正値が確率推定へ流れないよう、現実的な斤量レンジ（40〜70kg）外は `None` に落とす防御を入れる。
 fn extract_weight(row: &ElementRef, sel: &Selector) -> Option<f64> {
     let cell = row.select(sel).next()?;
     cell_text(&cell.text().collect::<String>())?
         .parse::<f64>()
         .ok()
+        .filter(|w| (40.0..=70.0).contains(w))
 }
 
 fn sel(s: &str) -> Result<Selector> {
