@@ -22,3 +22,6 @@ docs/temp/
 # Python バイトコードキャッシュ（scripts/ のハーネス用）
 __pycache__/
 *.pyc
+
+# Serena MCP のローカルキャッシュ・ローカル上書き設定（バージョン管理対象外）
+.serena/
