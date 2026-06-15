@@ -85,7 +85,7 @@ fn apply_ocr(races: &mut [Race], pages: &[OcrPageRows]) {
             if let Some(ocr_row) = match_ocr_row(result.horse_name.value(), &candidates) {
                 if result.weight_carried.is_none()
                     && let Some(w) = ocr_row.weight_carried
-                    && (48.0..=63.5).contains(&w)
+                    && crate::extract::jockey_stext::WEIGHT_RANGE.contains(&w)
                 {
                     result.weight_carried = Some(w);
                 }

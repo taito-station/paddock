@@ -10,17 +10,22 @@ use paddock_domain::{
 use crate::error::Result;
 
 pub use header::RaceHeader;
-pub use jockey_stext::{JockeyIndex, TrainerIndex};
+pub use jockey_stext::{JockeyIndex, TrainerIndex, WeightIndex};
 pub use row::RawRow;
 
-/// 騎手・調教師は stext 座標ベースの索引（race_num→horse_num→名前）で確定する。
+/// 騎手・調教師・斤量は stext 座標ベースの索引（race_num→horse_num→値）で確定する。
 /// 索引が空（stext 抽出失敗）または該当馬が無い場合は、各行の既存ヒューリスティックに
-/// フォールバックする（現行挙動から後退させない）。
-pub fn parse_text(text: &str, jockeys: &JockeyIndex, trainers: &TrainerIndex) -> Result<Vec<Race>> {
+/// フォールバックする（現行挙動から後退させない）。人気は単勝オッズの昇順順位から算出する（#124）。
+pub fn parse_text(
+    text: &str,
+    jockeys: &JockeyIndex,
+    trainers: &TrainerIndex,
+    weights: &WeightIndex,
+) -> Result<Vec<Race>> {
     let blocks = split_into_race_blocks(text);
     let mut races = Vec::with_capacity(blocks.len());
     for block in blocks {
-        if let Some(race) = build_race_from_block(&block, jockeys, trainers)? {
+        if let Some(race) = build_race_from_block(&block, jockeys, trainers, weights)? {
             races.push(race);
         }
     }
@@ -56,6 +61,7 @@ fn build_race_from_block(
     lines: &[String],
     jockeys: &JockeyIndex,
     trainers: &TrainerIndex,
+    weights: &WeightIndex,
 ) -> Result<Option<Race>> {
     let header = match header::parse_header(lines)? {
         Some(h) => h,
@@ -158,10 +164,17 @@ fn build_race_from_block(
             odds: raw.odds,
             horse_weight: raw.horse_weight,
             weight_change: raw.weight_change,
-            weight_carried: None,
+            // 斤量は stext 座標索引（CID 数字）で確定する（#124）。索引に無い行は None。
+            weight_carried: weights
+                .get(&header.race_num)
+                .and_then(|m| m.get(&horse_num.value()))
+                .copied(),
             popularity: None,
         });
     }
+
+    // 人気は単勝オッズの昇順順位から算出する（EdiF 列の復号に依らず決定的、#124）。
+    assign_popularity_from_odds(&mut results);
 
     let race = Race {
         race_id,
@@ -177,6 +190,43 @@ fn build_race_from_block(
         results,
     };
     Ok(Some(race))
+}
+
+/// 単勝オッズの昇順順位を人気として各結果に割り当てる（#124）。
+///
+/// JRA の人気は単勝オッズの低い順（＝支持の高い順）で決まる。順位付けの母数は status を問わず
+/// 全 results だが、`popularity_ranks` は `odds` が `Some` の行だけを対象にする。すなわち
+/// **確定オッズを持つ出走馬（競走中止 DNF も含む）が対象**で、確定オッズを持たない出走取消・
+/// 競走除外（`odds == None`）は自然に母数から外れる（行は残るが人気は None）。
+/// 同オッズは同順位とする（競争順位＝`1,2,2,4`）。
+fn assign_popularity_from_odds(results: &mut [HorseResult]) {
+    let ranks = popularity_ranks(&results.iter().map(|r| r.odds).collect::<Vec<_>>());
+    for (result, rank) in results.iter_mut().zip(ranks) {
+        result.popularity = rank;
+    }
+}
+
+/// オッズ列 → 人気順位列（純関数）。オッズ昇順の競争順位（同値同順位 `1,2,2,4`）。`None` は据え置き。
+fn popularity_ranks(odds: &[Option<f64>]) -> Vec<Option<u32>> {
+    let mut ranked: Vec<(usize, f64)> = odds
+        .iter()
+        .enumerate()
+        // NaN は順位を壊すため除外する（純関数としての防御。実データでは想定しない）。
+        .filter_map(|(i, o)| o.filter(|v| v.is_finite()).map(|v| (i, v)))
+        .collect();
+    ranked.sort_by(|a, b| a.1.total_cmp(&b.1));
+
+    let mut out = vec![None; odds.len()];
+    let mut prev_odds: Option<f64> = None;
+    let mut rank = 0u32;
+    for (seen, (idx, o)) in ranked.into_iter().enumerate() {
+        if prev_odds != Some(o) {
+            rank = seen as u32 + 1; // 競争順位: 異なる値は「これまでの件数+1」へ飛ぶ。
+            prev_odds = Some(o);
+        }
+        out[idx] = Some(rank);
+    }
+    out
 }
 
 /// Detect terminating-status keywords inside a horse chunk.
@@ -233,5 +283,26 @@ mod tests {
     fn chunk_status_did_not_finish_keyword() {
         let chunk = vec![s("2 3"), s("テスト馬"), s("（競走中止）")];
         assert_eq!(chunk_status(&chunk), ResultStatus::DidNotFinish);
+    }
+
+    #[test]
+    fn popularity_ranks_by_ascending_odds() {
+        // odds 1.7,3.0,2.6 → 人気 1,3,2（昇順順位）。
+        let r = popularity_ranks(&[Some(1.7), Some(3.0), Some(2.6)]);
+        assert_eq!(r, vec![Some(1), Some(3), Some(2)]);
+    }
+
+    #[test]
+    fn popularity_ranks_ties_share_rank_competition_style() {
+        // 同オッズは同順位、その次は件数分飛ぶ（1,2,2,4）。
+        let r = popularity_ranks(&[Some(1.5), Some(2.0), Some(2.0), Some(9.9)]);
+        assert_eq!(r, vec![Some(1), Some(2), Some(2), Some(4)]);
+    }
+
+    #[test]
+    fn popularity_ranks_skips_missing_odds() {
+        // オッズ未取得（取消等）は None のまま、順位付けの対象外。
+        let r = popularity_ranks(&[Some(5.0), None, Some(2.0)]);
+        assert_eq!(r, vec![Some(2), None, Some(1)]);
     }
 }

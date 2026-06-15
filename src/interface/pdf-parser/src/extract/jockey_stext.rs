@@ -1,6 +1,7 @@
-//! 成績 PDF の騎手列・調教師列を `mutool draw -F stext.json`（x/y 座標 + font サイズ付き）から
-//! 抽出する。共通骨格 `parse_column`/`column_for` に対し、騎手は `parse_jockeys`、調教師は
-//! `parse_trainers` が x 帯・size 帯（とログ文言）のみ差し替えて渡す。
+//! 成績 PDF の騎手列・調教師列・斤量列を `mutool draw -F stext.json`（x/y 座標 + font サイズ
+//! 付き）から抽出する。共通骨格 `parse_column`/`column_for` に対し、騎手は `parse_jockeys`、
+//! 調教師は `parse_trainers`、斤量は `parse_weights`（数値トークン抽出 `weight_token`）が
+//! x 帯・size 帯（とログ文言）のみ差し替えて渡す。斤量は CID 数字で読める（EdiF でない、#124）。
 //!
 //! プレーンテキスト（`-F text`）は列の x 座標と font サイズを失い、騎手名の 2 文字目と隣の
 //! 馬主名が区切り無しで 1 行に連結してしまう（例 `裕信本山`）。stext.json には座標とサイズが
@@ -27,6 +28,10 @@ pub type JockeyIndex = HashMap<u32, HashMap<u32, String>>;
 /// 異なり width 正規化フックを持たない（`define_string!(TrainerName, max=30)`）ため、抽出した
 /// 文字列がそのまま検証・保存される。結果 PDF の調教師はフルネームの漢字表記で width 揺れは無い。
 pub type TrainerIndex = HashMap<u32, HashMap<u32, String>>;
+
+/// `race_num -> (horse_num -> 斤量kg)`。斤量は CID 数字で読める（EdiF ではない）ため stext の
+/// x 帯から直接取れる（#124）。値は 48.0〜63.5kg の妥当域に収まるもののみ。
+pub type WeightIndex = HashMap<u32, HashMap<u32, f64>>;
 
 #[derive(Deserialize)]
 struct StextDoc {
@@ -99,6 +104,14 @@ const JOCKEY_OFFSET_HI: f64 = 161.0;
 const TRAINER_OFFSET_LO: f64 = 195.0;
 const TRAINER_OFFSET_HI: f64 = 230.0;
 const TRAINER_SIZE: std::ops::RangeInclusive<f64> = 3.0..=5.5;
+/// 斤量列の x 帯（馬番グリフ x からの相対オフセット）。斤量は CID 数字で読める（EdiF でない）。
+/// 絶対 x ~133（左列）で、性齢の年齢数字（offset ~89）より右・騎手（offset >= 118）より左。
+/// 数値かつ妥当域(48-63.5)で同定するため帯は広めでよい。
+const WEIGHT_OFFSET_LO: f64 = 92.0;
+const WEIGHT_OFFSET_HI: f64 = 117.0;
+/// JRA 斤量の妥当域(kg)。stext 抽出・OCR フォールバック（`hybrid.rs`）双方で採用域を揃える
+/// ため `pub(crate)` で共有する（採用域の二重定義による乖離防止）。
+pub(crate) const WEIGHT_RANGE: std::ops::RangeInclusive<f64> = 48.0..=63.5;
 /// 同一行とみなす y 許容。
 const ROW_Y_TOL: f64 = 3.0;
 
@@ -329,6 +342,90 @@ pub fn parse_trainers(stext_json: &str) -> TrainerIndex {
             )
         },
     )
+}
+
+/// stext.json から斤量インデックス（`race_num -> (horse_num -> kg)`）を構築する。
+/// 斤量は CID 数字で読めるため、馬番アンカーからの x 帯にある数値トークンで妥当域のものを採る。
+/// 騎手・調教師と同骨格（`parse_column`）で、列抽出だけ数値トークン用に差し替える。
+pub fn parse_weights(stext_json: &str) -> WeightIndex {
+    let str_index = parse_column(
+        stext_json,
+        "stext.json のパースに失敗。斤量は未取得",
+        "stext からの斤量抽出が 0 件。座標レイアウトが想定と異なる可能性",
+        weight_token,
+    );
+    // 抽出文字列（"57" / "56.5"）を kg へ確定変換する（型変換目的。weight_token は範囲検証で
+    // 一度 parse 済みだが、parse_column の String 契約に合わせるため文字列で受けてここで f64 化する）。
+    str_index
+        .into_iter()
+        .map(|(race, m)| {
+            let weights = m
+                .into_iter()
+                .filter_map(|(hn, s)| s.parse::<f64>().ok().map(|w| (hn, w)))
+                .collect();
+            (race, weights)
+        })
+        .collect()
+}
+
+/// 馬番アンカー行で斤量列 x 帯にある妥当域(48-63.5)の数値を返す。
+///
+/// 帯内トークンを x 昇順で**連結**してから解釈する（`column_for` と同方針）。これにより斤量が
+/// 複数トークンに分割される PDF（例 `56.5` → `56` + `.5`）でも先頭片だけを誤採用しない。
+/// 連結が妥当域で解釈できないときのみ、単一トークン最左の妥当値にフォールバックする。
+///
+/// `column_for`（騎手・調教師）と違い font サイズ条件は持たない。斤量は **x 帯（馬番からの
+/// オフセット 92-117）＋数字/小数点のみ＋妥当域(48-63.5)** で一意に絞れ、見出し(size≈14)や
+/// 他列の数字はこの 3 条件で除外されるため、size 帯を加えても識別力は上がらず（むしろ size の
+/// 端数差で取りこぼすリスクがある）。意図的に size 非依存とする。
+fn weight_token(toks: &[Tok], page: usize, row_y: f64, hn_x: f64) -> Option<String> {
+    let lo = hn_x + WEIGHT_OFFSET_LO;
+    let hi = hn_x + WEIGHT_OFFSET_HI;
+    let mut in_band: Vec<&Tok> = toks
+        .iter()
+        .filter(|t| t.page == page && (t.y - row_y).abs() <= ROW_Y_TOL && lo <= t.x && t.x <= hi)
+        .collect();
+    if in_band.is_empty() {
+        return None;
+    }
+    in_band.sort_by(|a, b| a.x.total_cmp(&b.x));
+
+    // 帯内（斤量列のみ。年齢は offset<92・騎手は offset>=118 で帯外）の **数字・小数点のみで構成
+    // されるトークン**を x 順に連結して 1 数値とみなす。記号片・漢字等のノイズが帯内に紛れても
+    // 連結対象から除外し、誤連結を防ぐ。
+    let joined: String = in_band
+        .iter()
+        .map(|t| normalize_number(&t.text))
+        .filter(|s| !s.is_empty() && s.chars().all(|c| c.is_ascii_digit() || c == '.'))
+        .collect();
+    if let Ok(w) = joined.parse::<f64>()
+        && WEIGHT_RANGE.contains(&w)
+    {
+        return Some(joined);
+    }
+    // フォールバック: 連結が妥当域で解釈できない場合のみ、最左の単一妥当トークンを採る。
+    // 帯内に妥当域内の別由来数値が複数並ぶ異常時は最左を採るため誤採用余地が残るが、行は
+    // ROW_Y_TOL=3.0 で絞られ斤量帯には通常 1 値のみのため、実データでは顕在化しない。
+    in_band.into_iter().find_map(|t| {
+        let s = normalize_number(&t.text);
+        s.parse::<f64>()
+            .ok()
+            .filter(|w| WEIGHT_RANGE.contains(w))
+            .map(|_| s)
+    })
+}
+
+/// 全角数字・全角ピリオドを半角へ正規化する（数値トークンの parse 前処理。判定用の
+/// `is_digit_char` とは別目的で、こちらは変換を行う）。
+fn normalize_number(text: &str) -> String {
+    text.trim()
+        .chars()
+        .map(|c| match c {
+            '０'..='９' => char::from(b'0' + (c as u32 - '０' as u32) as u8),
+            '．' => '.',
+            other => other,
+        })
+        .collect()
 }
 
 /// 1 トークンから減量印を除去し、馬主マーカーで打ち切る。
@@ -614,5 +711,72 @@ mod tests {
             idx.get(&2).and_then(|m| m.get(&13)).map(String::as_str),
             Some("加藤士津八")
         );
+    }
+
+    #[test]
+    fn extracts_weight_in_band_and_range() {
+        // 左列: 馬番9 / 斤量57(x133, offset106) を取る。年齢3(x116,offset89<92)と
+        // 馬体重478(x309)は帯外、騎手は数値でないため自然に除外される。
+        let json = doc_json(&[
+            (216.0, 116.0, 14.0, "1"),
+            (27.0, 191.0, 6.0, "9"),
+            (116.0, 191.0, 6.0, "3"),  // 年齢: offset 89 で帯(92)未満 → 除外
+            (133.0, 191.0, 6.0, "57"), // 斤量: offset 106 → 採用
+            (156.0, 191.0, 6.0, "横山"), // 騎手: 非数値
+            (309.0, 191.0, 6.0, "478"), // 馬体重: 帯外
+        ]);
+        let idx = parse_weights(&json);
+        assert_eq!(idx.get(&1).and_then(|m| m.get(&9)).copied(), Some(57.0));
+    }
+
+    #[test]
+    fn weight_rejects_out_of_range_numbers() {
+        // 帯内に妥当域外の数値（例 47 や 64）しか無ければ採らない。
+        let json = doc_json(&[
+            (216.0, 116.0, 14.0, "1"),
+            (27.0, 191.0, 6.0, "5"),
+            (133.0, 191.0, 6.0, "47"), // 妥当域(48-63.5)外 → 不採用
+        ]);
+        let idx = parse_weights(&json);
+        assert_eq!(idx.get(&1).and_then(|m| m.get(&5)).copied(), None);
+    }
+
+    #[test]
+    fn weight_right_column_uses_relative_offset() {
+        // 右列(hn_x≈438)でも馬番からの相対オフセットで斤量を取る（絶対 x≈544）。
+        let json = doc_json(&[
+            (627.0, 67.0, 14.0, "2"),
+            (438.0, 142.0, 6.0, "3"),
+            (544.0, 142.0, 6.0, "55"), // 斤量: offset 106 → 採用
+        ]);
+        let idx = parse_weights(&json);
+        assert_eq!(idx.get(&2).and_then(|m| m.get(&3)).copied(), Some(55.0));
+    }
+
+    #[test]
+    fn weight_joins_split_tokens() {
+        // 半 kg 斤量が複数トークンに分割（"56" + ".5"）されても帯内連結で 56.5 として取る。
+        // 先頭片 "56" だけを誤採用しない回帰。
+        let json = doc_json(&[
+            (216.0, 116.0, 14.0, "1"),
+            (27.0, 191.0, 6.0, "7"),
+            (133.0, 191.0, 6.0, "56"),
+            (140.0, 191.0, 6.0, ".5"),
+        ]);
+        let idx = parse_weights(&json);
+        assert_eq!(idx.get(&1).and_then(|m| m.get(&7)).copied(), Some(56.5));
+    }
+
+    #[test]
+    fn weight_ignores_non_numeric_noise_in_band() {
+        // 帯内に数字・小数点以外のノイズ片が紛れても連結対象から除外し、斤量だけ正しく取る。
+        let json = doc_json(&[
+            (216.0, 116.0, 14.0, "1"),
+            (27.0, 191.0, 6.0, "7"),
+            (130.0, 191.0, 6.0, "▲"), // ノイズ（記号）→ 連結除外
+            (133.0, 191.0, 6.0, "57"),
+        ]);
+        let idx = parse_weights(&json);
+        assert_eq!(idx.get(&1).and_then(|m| m.get(&7)).copied(), Some(57.0));
     }
 }

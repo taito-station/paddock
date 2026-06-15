@@ -193,3 +193,101 @@ fn detects_scratched_horse_in_race_two() {
         "expected at least one scratched horse in race 2"
     );
 }
+
+/// 着順・斤量・人気の充足率を `MutoolParser` でサンプル PDF から計測する（#124）。
+/// 完走馬（`Finished`）のみを母数にする。実行: `cargo test -p pdf-parser --test test_parse \
+/// measure_column_fill_rates -- --ignored --nocapture`
+#[test]
+#[ignore = "before/after 計測用。サンプル PDF が必要"]
+fn measure_column_fill_rates() {
+    use paddock_domain::ResultStatus;
+
+    let Some(sample) = fixture::sample_result_pdf() else {
+        eprintln!("skip: サンプル PDF を取得できず");
+        return;
+    };
+    let races = MutoolParser.parse(&sample).expect("parse sample pdf");
+
+    let (mut finishers, mut pos_ok, mut weight_ok, mut pop_ok) = (0usize, 0usize, 0usize, 0usize);
+    for race in &races {
+        for r in &race.results {
+            if r.status != ResultStatus::Finished {
+                continue;
+            }
+            finishers += 1;
+            pos_ok += usize::from(r.finishing_position.is_some());
+            weight_ok += usize::from(r.weight_carried.is_some());
+            pop_ok += usize::from(r.popularity.is_some());
+        }
+    }
+    assert!(finishers > 0, "完走馬が 0（母数なし）");
+    let pct = |n: usize| 100.0 * n as f64 / finishers as f64;
+    eprintln!(
+        "[fill] races={} finishers={} 着順={:.1}% 斤量={:.1}% 人気={:.1}%",
+        races.len(),
+        finishers,
+        pct(pos_ok),
+        pct(weight_ok),
+        pct(pop_ok),
+    );
+}
+
+/// 斤量・人気が妥当域に収まることを実 PDF で検証する（#124）。
+#[test]
+#[ignore = "サンプル PDF が必要"]
+fn weight_and_popularity_are_sane() {
+    use paddock_domain::ResultStatus;
+
+    let Some(sample) = fixture::sample_result_pdf() else {
+        return;
+    };
+    let races = MutoolParser.parse(&sample).expect("parse sample pdf");
+    for race in &races {
+        // 完走馬の人気（オッズ昇順順位）。同オッズは同順位になりうるため一意とは限らない。
+        let finishers: Vec<u32> = race
+            .results
+            .iter()
+            .filter(|r| r.status == ResultStatus::Finished)
+            .filter_map(|r| r.popularity)
+            .collect();
+        for r in &race.results {
+            if let Some(w) = r.weight_carried {
+                // 48.0..=63.5 は本体の WEIGHT_RANGE と同値（pub(crate) のため統合テストからは
+                // 参照不可。本体採用域の独立検算として同じリテラルを置く）。
+                assert!(
+                    (48.0..=63.5).contains(&w),
+                    "斤量 {w} が妥当域外 (race {})",
+                    race.race_num
+                );
+            }
+            if let Some(p) = r.popularity {
+                // 1..=18 は JRA のフルゲート最大頭数。
+                assert!(
+                    (1..=18).contains(&p),
+                    "人気 {p} が範囲外 (race {})",
+                    race.race_num
+                );
+            }
+        }
+        // 完走馬が居れば 1 番人気（最低オッズ）が必ず 1 頭存在する（オッズ取得済み前提）。
+        assert!(
+            finishers.is_empty() || finishers.contains(&1),
+            "race {} に 1番人気が見当たらない",
+            race.race_num
+        );
+    }
+
+    // 既知レースの実値で回帰を固定する（人気はオッズ抽出精度に従属するため値を直接検証する）。
+    // 1R ロードトライデント（馬番9・単勝1.7=1番人気・斤量57.0）。
+    let r1 = races
+        .iter()
+        .find(|r| r.race_num == 1)
+        .expect("race 1 not found");
+    let h9 = r1
+        .results
+        .iter()
+        .find(|r| r.horse_num.value() == 9)
+        .expect("race1 horse 9 not found");
+    assert_eq!(h9.popularity, Some(1), "1R 馬番9 は 1番人気");
+    assert_eq!(h9.weight_carried, Some(57.0), "1R 馬番9 の斤量は 57.0");
+}
