@@ -57,15 +57,50 @@ done
 python3 scripts/predict-check/answer_check.py /tmp/preds.json /tmp/results.json /tmp/win_odds.csv
 ```
 
+## 買い方（馬券構成）別の回収率評価（#122）
+
+「軸を決めて相手に流す」買い方は、単勝のみより回収率が大きく変わる（#122）。確定配当を取得し、
+本命を軸にした 単勝のみ / 馬連＋ワイド流し / ＋三連複流し の戦略別回収率を比較する。
+上記 3 の `preds.json` を流用し、確定配当を追加取得して評価する。
+
+```bash
+# 5. 確定配当（馬連/ワイド/三連複等）を取得
+python3 scripts/predict-check/fetch_payouts.py $DATE $VENUES > /tmp/payouts.json
+
+# 6. 戦略別回収率（予想本命を軸に）。相手頭数・予算配分を振って感度も見られる
+python3 scripts/predict-check/strategy_eval.py /tmp/preds.json /tmp/payouts.json --budget 5000 --partners 5
+python3 scripts/predict-check/strategy_eval.py /tmp/preds.json /tmp/payouts.json --budget 5000 --partners 3,5,7
+python3 scripts/predict-check/strategy_eval.py /tmp/preds.json /tmp/payouts.json --budget 5000 --alloc 4,2,1
+# 人気馬を軸にする場合（win_odds.csv が必要）
+python3 scripts/predict-check/strategy_eval.py /tmp/preds.json /tmp/payouts.json --axis market --win-odds /tmp/win_odds.csv
+```
+
+出力例（戦略別 回収率・収支）:
+
+```
+戦略                               回収率          収支         賭け計         払戻計
+本命単勝のみ                         51.7%     -87,000     180,000      93,000
+本命軸 馬連+ワイド流し                   68.7%     -56,300     180,000     123,700
+本命軸 馬連+ワイド+三連複流し               68.3%     -45,670     144,000      98,330
+```
+
+精算は `payouts.json`（確定した的中組のみが入る）への**組番一致**で判定する。確定配当そのものが
+「どの組が当たったか」を持つため、着順から的中を再導出しない（同着・複数本ワイドも自然対応）。
+
+`消化率` は予算上限（`budget × 評価レース数`）に対する実際の賭け額の割合。100 円単位の端数切り捨てで
+予算を使い切らない戦略（点数が多く 1 点あたりが小さい三連複流し等）はここが 100% 未満になる。
+
 ## スクリプト
 
 | ファイル | 役割 |
 |---|---|
-| `nk.py` | netkeiba 共通ヘルパ（場コード表・race_id 列挙・結果ページパース） |
+| `nk.py` | netkeiba 共通ヘルパ（場コード表・race_id 列挙・結果/確定配当パース） |
 | `list_races.py` | `YYYYMMDD [場コード...]` の race_id を列挙 |
 | `fetch_results.py` | 結果を取得して `results.json` 出力（答え合わせ用） |
+| `fetch_payouts.py` | 確定配当を取得して `payouts.json` 出力（戦略評価用, #122） |
 | `extract_preds.py` | predict の stdout → `preds.json`（確率テーブル） |
 | `answer_check.py` | preds × results の精度指標（本命的中/Brier/芝ダ別/回収率） |
+| `strategy_eval.py` | preds × payouts の買い方別回収率（軸流し・予算配分・100 円単位, #122） |
 
 ## 注意
 
