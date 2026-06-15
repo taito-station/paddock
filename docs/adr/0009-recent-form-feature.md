@@ -74,7 +74,7 @@
 
 設計上の決定:
 - **基準タイムはコーパス由来**（`Repository::standard_times`）。`results`＋`horse_past_runs` を UNION し、
-  完走（`time_seconds IS NOT NULL`）の平均を (surface, distance) 別に集計する。`date < before` の
+  完走（`time_seconds > 0`、NULL と 0 秒の異常値を除外）の平均を (surface, distance) 別に集計する。`date < before` の
   as-of カットオフで walk-forward のリークを防ぐ（horse_stats と同じ流儀）。標本数が閾値（5）未満の
   薄いバケツは除外し、該当前走の sub-signal は落とす（欠落フォールバック）。median は SQLite に無いため
   v1 は AVG を採用。
