@@ -32,6 +32,7 @@ impl<S: PayoutFetcher, R: Repository> SettleInteractor<S, R> {
     ///
     /// 1. セッションが無ければエラー。買い目が無ければ空の report を返す。
     /// 2. レース毎に確定払戻を取得。未確定（払戻ブロック無し）なら pending として payout 据え置き。
+    ///    開催中止・全馬取消（払戻ブロック無し かつ 全馬取消/除外）は全買い目を全額返還する（#131）。
     /// 3. 確定レースの各 bet を `settle_bet` で再計算し、payout を上書きする。
     /// 4. `total_payout = Σ payout`・`balance = budget - total_bet + total_payout` を再計算。
     /// 5. 全購入レース確定なら `completed = true`。1 トランザクションで永続化する。
@@ -52,6 +53,7 @@ impl<S: PayoutFetcher, R: Repository> SettleInteractor<S, R> {
             return Ok(SettleReport {
                 settled_races: 0,
                 pending_races: 0,
+                voided_races: 0,
                 refunded_bets: 0,
                 total_bet: session.total_bet,
                 total_payout: session.total_payout,
@@ -71,6 +73,7 @@ impl<S: PayoutFetcher, R: Repository> SettleInteractor<S, R> {
 
         let mut settled_races = 0usize;
         let mut pending_races = 0usize;
+        let mut voided_races = 0usize;
         let mut refunded_bets = 0usize;
         // 確定したレースの bet の (bet_id, payout) のみを書き込み対象にする。
         let mut updated: Vec<(i64, u64)> = Vec::new();
@@ -93,14 +96,26 @@ impl<S: PayoutFetcher, R: Repository> SettleInteractor<S, R> {
                 }
             };
             if payouts.is_empty() {
+                if payouts.is_fully_refunded() {
+                    // 開催中止・全馬取消（払戻ブロック無し かつ 結果表の全出走馬が取消/除外）: 全買い目を
+                    // 全額返還する（#131）。scratched 集合の完全性に依存せず、JRA の全額返還どおり stake を
+                    // そのまま返戻する。pending を増やさないため completed 判定にも算入される。
+                    voided_races += 1;
+                    for &idx in idxs {
+                        let (bet_id, bet) = &bets[idx];
+                        refunded_bets += 1;
+                        updated.push((*bet_id, bet.stake));
+                        bets[idx].1.payout = bet.stake;
+                    }
+                    continue;
+                }
                 // 未確定（払戻ブロック無し）: payout 据え置きで pending。is_empty は的中組合せ
                 // (entries) の有無のみを見る。確定レースは必ず払戻ブロックを持つため、取消馬
                 // (scratched) だけ拾えて entries が空という状態は正常確定では生じない。
                 // 注: 構造変更・エラーページも空になり得て未確定と区別できない（is_empty）。
                 // その場合は確定済みにならず pending のままになる（誤精算は起こさない）。
-                // 既知の制約: 開催中止・全馬取消で払戻ブロックが無いレースもここで pending に
-                // 倒れ、本来の全額返還が自動反映されない（誤精算ではなく安全側）。#129 のスコープ外
-                // （個別馬の取消/除外）のため別途フォロー（#131）で扱う。
+                // 開催中止でも netkeiba 結果ページに成績表が出ない（全行取消すら拾えない）場合は
+                // fully_refunded を立てられず、ここで安全側に pending 据え置きとなる（既知の制約）。
                 pending_races += 1;
                 continue;
             }
@@ -144,6 +159,7 @@ impl<S: PayoutFetcher, R: Repository> SettleInteractor<S, R> {
         Ok(SettleReport {
             settled_races,
             pending_races,
+            voided_races,
             refunded_bets,
             total_bet: session.total_bet,
             total_payout,
@@ -169,7 +185,9 @@ pub struct SettleReport {
     pub settled_races: usize,
     /// 未確定でスキップしたレース数（payout 据え置き）。
     pub pending_races: usize,
-    /// 返還（取消/除外馬を含む組番）として stake を全額返戻した買い目数（#129）。
+    /// 開催中止・全馬取消で全買い目を全額返還したレース数（#131）。
+    pub voided_races: usize,
+    /// 返還（取消/除外馬を含む組番、または開催中止・全馬取消）として stake を全額返戻した買い目数。
     pub refunded_bets: usize,
     pub total_bet: u64,
     pub total_payout: u64,
