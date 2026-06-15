@@ -109,8 +109,9 @@ const TRAINER_SIZE: std::ops::RangeInclusive<f64> = 3.0..=5.5;
 /// 数値かつ妥当域(48-63.5)で同定するため帯は広めでよい。
 const WEIGHT_OFFSET_LO: f64 = 92.0;
 const WEIGHT_OFFSET_HI: f64 = 117.0;
-/// JRA 斤量の妥当域(kg)。
-const WEIGHT_RANGE: std::ops::RangeInclusive<f64> = 48.0..=63.5;
+/// JRA 斤量の妥当域(kg)。stext 抽出・OCR フォールバック（`hybrid.rs`）双方で採用域を揃える
+/// ため `pub(crate)` で共有する（採用域の二重定義による乖離防止）。
+pub(crate) const WEIGHT_RANGE: std::ops::RangeInclusive<f64> = 48.0..=63.5;
 /// 同一行とみなす y 許容。
 const ROW_Y_TOL: f64 = 3.0;
 
@@ -397,7 +398,9 @@ fn weight_token(toks: &[Tok], page: usize, row_y: f64, hn_x: f64) -> Option<Stri
     {
         return Some(joined);
     }
-    // フォールバック: 連結が解釈不能なら最左の単一妥当トークンを採る。
+    // フォールバック: 連結が妥当域で解釈できない場合のみ、最左の単一妥当トークンを採る。
+    // 帯内に妥当域内の別由来数値が複数並ぶ異常時は最左を採るため誤採用余地が残るが、行は
+    // ROW_Y_TOL=3.0 で絞られ斤量帯には通常 1 値のみのため、実データでは顕在化しない。
     in_band.into_iter().find_map(|t| {
         let s = normalize_number(&t.text);
         s.parse::<f64>()
