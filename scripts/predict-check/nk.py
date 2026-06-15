@@ -126,10 +126,11 @@ def fetch_payouts(rid: str):
     html = decode(curl(url))
     out = {}
     n_rows = 0
-    # 払戻テーブルは複数並ぶ。各テーブル内の <tr class="..."> を順に処理する。
+    # 払戻テーブルは複数並ぶ。各テーブル内の <tr ...class="..."> を順に処理する。
+    # class は値全体を取り空白区切りで券種語を引く（複数クラス・他属性の付加に耐える）。
     for table in re.findall(r'class="Payout_Detail_Table".*?</table>', html, re.S):
-        for cls, body in re.findall(r'<tr class="(\w+)">(.*?)</tr>', table, re.S):
-            label = PAYOUT_TYPE.get(cls)
+        for cls, body in re.findall(r'<tr\b[^>]*\bclass="([^"]*)"[^>]*>(.*?)</tr>', table, re.S):
+            label = next((PAYOUT_TYPE[c] for c in cls.split() if c in PAYOUT_TYPE), None)
             if label is None:
                 continue  # 枠連・想定外クラスはスキップ
             n_rows += 1
@@ -140,14 +141,16 @@ def fetch_payouts(rid: str):
             # 配当: 「数字（桁区切りカンマ可）＋直後 円」を順に。`5人気` 等の円無し数字は拾わない。
             amounts = [int(a.replace(",", ""))
                        for a in re.findall(r'([\d,]+)円', payout_cell.group(1))]
+            # span は属性付き（<span class=...> 等）でも拾えるようにする（CSS セレクタの
+            # Rust 実装と挙動を揃える）。数字を含まない空 span は (\d+) 不一致で自然に除外。
             if label in ("win", "place"):
-                # 単勝/複勝: div>span の数字のある馬番（空 span は除外）。複勝は馬番ごとに 1 点。
-                combos = re.findall(r'<span>\s*(\d+)\s*</span>', result_cell.group(1))
+                # 単勝/複勝: div>span の数字のある馬番。複勝は馬番ごとに 1 点。
+                combos = re.findall(r'<span[^>]*>\s*(\d+)\s*</span>', result_cell.group(1))
             else:
                 # 組合せ券種: ul 1 つ＝1 組合せ。li>span の馬番（空 li/span は数字無しで除外）。
                 combos = []
                 for ul in re.findall(r'<ul>(.*?)</ul>', result_cell.group(1), re.S):
-                    nums = [int(x) for x in re.findall(r'<span>\s*(\d+)\s*</span>', ul)]
+                    nums = [int(x) for x in re.findall(r'<span[^>]*>\s*(\d+)\s*</span>', ul)]
                     if not nums:
                         continue
                     if label in _UNORDERED:
@@ -163,8 +166,10 @@ def fetch_payouts(rid: str):
             bucket = out.setdefault(label, {})
             for code, pay in zip(combos, amounts):
                 bucket[code] = pay
-    # 取得成功なのに 1 行も払戻が取れない＝中止/全馬取消、または構造変化。空 dict を返し警告。
-    if n_rows == 0:
-        print(f"[warn] 払戻行を抽出できませんでした（中止/全馬取消 or 構造変化の疑い）: {rid}",
-              file=sys.stderr)
+    # 有効な払戻が 1 件も取れない＝中止/全馬取消、または構造変化。空 dict を返し警告。
+    # 対象行を検出したのに out が空（セル欠落や件数不一致で全 skip）のケースも拾えるよう
+    # n_rows ではなく out で判定する（検出行数を併記して構造変化に気づけるようにする）。
+    if not out:
+        print(f"[warn] 有効な払戻を抽出できませんでした"
+              f"（中止/全馬取消 or 構造変化の疑い, 検出行数={n_rows}）: {rid}", file=sys.stderr)
     return out

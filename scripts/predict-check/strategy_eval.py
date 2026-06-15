@@ -136,6 +136,8 @@ def settle(bets, payouts):
 
 
 # 評価する戦略。axis/partners/budget/alloc を受けて買い目リストを返す。
+# 単勝の組番コードは str(馬番)。fetch_payouts の win キーも span 生文字列の馬番（ゼロ詰め無し）
+# なので一致する。組番コードの表記は fetch_payouts / code_unordered と揃えること。
 STRATEGIES = [
     ("本命単勝のみ",
      lambda axis, partners, b, alloc: [("win", str(axis), (b // 100) * 100)]),
@@ -152,11 +154,22 @@ def main(argv):
         preds = json.load(f)
     with open(args.payouts, encoding="utf-8") as f:
         payout_races = json.load(f)
-    alloc = tuple(int(x) for x in args.alloc.split(","))
-    if len(alloc) != 3:
-        print("--alloc は 3 値（馬連,ワイド,三連複）", file=sys.stderr)
+    try:
+        alloc = tuple(int(x) for x in args.alloc.split(","))
+    except ValueError:
+        print("--alloc は整数の3値（馬連,ワイド,三連複）", file=sys.stderr)
         sys.exit(1)
-    ks = [int(x) for x in args.partners.split(",")]
+    if len(alloc) != 3 or any(w < 0 for w in alloc) or sum(alloc) <= 0:
+        print("--alloc は非負整数の3値で合計 > 0（例 1,1,1 / 4,2,1）", file=sys.stderr)
+        sys.exit(1)
+    try:
+        ks = [int(x) for x in args.partners.split(",")]
+    except ValueError:
+        print("--partners は整数（カンマ区切り可。例 5 / 3,5,7）", file=sys.stderr)
+        sys.exit(1)
+    if not ks or any(k < 1 for k in ks):
+        print("--partners は 1 以上の整数", file=sys.stderr)
+        sys.exit(1)
     fav = {}
     if args.axis == "market":
         if not args.win_odds:
@@ -176,8 +189,8 @@ def main(argv):
             ranked[(r["venue"], r["race_num"])] = [h["num"] for h in horses]
 
     # 各 (budget, K, strategy) で全レース合算の stake/payout を集計。
-    # agg[K][strategy_name] -> [total_stake, total_payout, n_races]
-    agg = {k: {name: [0, 0, 0] for name, _ in STRATEGIES} for k in ks}
+    # agg[K][strategy_name] -> [total_stake, total_payout]
+    agg = {k: {name: [0, 0] for name, _ in STRATEGIES} for k in ks}
     used_races = set()
     for key, order in ranked.items():
         payouts = pay_idx.get(key)
@@ -198,20 +211,28 @@ def main(argv):
                 cell = agg[k][name]
                 cell[0] += stake
                 cell[1] += payout
-                cell[2] += 1
+
+    # preds と payouts でキーが噛み合わず 0 マッチ＝venue/race_num の表記不一致の疑い。
+    # 無言で全戦略 0% にならないよう警告する（join キーは双方 (venue_jp, race_num) 前提）。
+    if ranked and pay_idx and not used_races:
+        print("[warn] preds と payouts でマッチするレースが 0 件です"
+              "（venue 表記の不一致の疑い: 双方 (venue_jp, race_num) で索く前提）", file=sys.stderr)
 
     # 出力。
     print(f"予算: ¥{args.budget}/R  軸: {args.axis}  配分(馬連:ワイド:三連複)={':'.join(map(str, alloc))}")
     print(f"評価レース数: {len(used_races)}")
     print()
+    # 予算の上限（100 円単位の端数切り捨てで一部未消化になりうるため消化率も併記）。
+    cap = args.budget * len(used_races)
     if len(ks) == 1:
         k = ks[0]
         print(f"相手頭数: {k}")
-        print(f"{'戦略':<28}{'回収率':>8}{'収支':>12}{'賭け計':>12}{'払戻計':>12}")
+        print(f"{'戦略':<28}{'回収率':>8}{'消化率':>8}{'収支':>12}{'賭け計':>12}{'払戻計':>12}")
         for name, _ in STRATEGIES:
-            st, pay, _n = agg[k][name]
+            st, pay = agg[k][name]
             roi = pay / st * 100 if st else 0.0
-            print(f"{name:<28}{roi:>7.1f}%{pay - st:>+12,}{st:>12,}{pay:>12,}")
+            used = st / cap * 100 if cap else 0.0
+            print(f"{name:<28}{roi:>7.1f}%{used:>7.1f}%{pay - st:>+12,}{st:>12,}{pay:>12,}")
     else:
         # 感度テーブル: 行=戦略, 列=相手頭数 K の回収率。
         header = "".join(f"K={k:<7}" for k in ks)
@@ -219,7 +240,7 @@ def main(argv):
         for name, _ in STRATEGIES:
             cells = ""
             for k in ks:
-                st, pay, _n = agg[k][name]
+                st, pay = agg[k][name]
                 roi = pay / st * 100 if st else 0.0
                 cells += f"{roi:>6.1f}% "
             print(f"{name:<28}{cells}")
