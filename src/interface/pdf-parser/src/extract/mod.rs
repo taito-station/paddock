@@ -211,7 +211,8 @@ fn popularity_ranks(odds: &[Option<f64>]) -> Vec<Option<u32>> {
     let mut ranked: Vec<(usize, f64)> = odds
         .iter()
         .enumerate()
-        .filter_map(|(i, o)| o.map(|v| (i, v)))
+        // NaN は順位を壊すため除外する（純関数としての防御。実データでは想定しない）。
+        .filter_map(|(i, o)| o.filter(|v| v.is_finite()).map(|v| (i, v)))
         .collect();
     ranked.sort_by(|a, b| a.1.total_cmp(&b.1));
 

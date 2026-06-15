@@ -384,8 +384,14 @@ fn weight_token(toks: &[Tok], page: usize, row_y: f64, hn_x: f64) -> Option<Stri
     }
     in_band.sort_by(|a, b| a.x.total_cmp(&b.x));
 
-    // 帯内（斤量列のみ。年齢は offset<92・騎手は offset>=118 で帯外）を連結して 1 数値とみなす。
-    let joined = normalize_number(&in_band.iter().map(|t| t.text.trim()).collect::<String>());
+    // 帯内（斤量列のみ。年齢は offset<92・騎手は offset>=118 で帯外）の **数字・小数点のみで構成
+    // されるトークン**を x 順に連結して 1 数値とみなす。記号片・漢字等のノイズが帯内に紛れても
+    // 連結対象から除外し、誤連結を防ぐ。
+    let joined: String = in_band
+        .iter()
+        .map(|t| normalize_number(&t.text))
+        .filter(|s| !s.is_empty() && s.chars().all(|c| c.is_ascii_digit() || c == '.'))
+        .collect();
     if let Ok(w) = joined.parse::<f64>()
         && WEIGHT_RANGE.contains(&w)
     {
@@ -751,5 +757,18 @@ mod tests {
         ]);
         let idx = parse_weights(&json);
         assert_eq!(idx.get(&1).and_then(|m| m.get(&7)).copied(), Some(56.5));
+    }
+
+    #[test]
+    fn weight_ignores_non_numeric_noise_in_band() {
+        // 帯内に数字・小数点以外のノイズ片が紛れても連結対象から除外し、斤量だけ正しく取る。
+        let json = doc_json(&[
+            (216.0, 116.0, 14.0, "1"),
+            (27.0, 191.0, 6.0, "7"),
+            (130.0, 191.0, 6.0, "▲"), // ノイズ（記号）→ 連結除外
+            (133.0, 191.0, 6.0, "57"),
+        ]);
+        let idx = parse_weights(&json);
+        assert_eq!(idx.get(&1).and_then(|m| m.get(&7)).copied(), Some(57.0));
     }
 }
