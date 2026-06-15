@@ -8,8 +8,8 @@ use std::sync::Mutex;
 
 use chrono::{DateTime, NaiveDate, Utc};
 use paddock_domain::{
-    HorseId, HorseName, HorseResult, JockeyName, Race, RaceCard, RaceId, RacePayouts, Surface,
-    TrainerName, Venue,
+    HorseId, HorseName, JockeyName, Race, RaceCard, RaceId, RacePayouts, RecentRun, StandardTimes,
+    Surface, TrainerName, Venue,
 };
 use paddock_use_case::repository::{
     CourseStatsRow, FetchRecord, HorseStatsRow, JockeyStatsRow, PredictBetRecord,
@@ -172,7 +172,10 @@ impl Repository for MockRepo {
         _: &HorseName,
         _: NaiveDate,
         _: u32,
-    ) -> Result<Vec<(NaiveDate, HorseResult)>> {
+    ) -> Result<Vec<RecentRun>> {
+        unimplemented!()
+    }
+    async fn standard_times(&self, _: NaiveDate) -> Result<StandardTimes> {
         unimplemented!()
     }
     async fn find_predict_bets(&self, _: NaiveDate) -> Result<Vec<PredictBetRecord>> {
@@ -629,7 +632,10 @@ async fn missing_session_returns_not_found() {
             _: &HorseName,
             _: NaiveDate,
             _: u32,
-        ) -> Result<Vec<(NaiveDate, HorseResult)>> {
+        ) -> Result<Vec<RecentRun>> {
+            unimplemented!()
+        }
+        async fn standard_times(&self, _: NaiveDate) -> Result<StandardTimes> {
             unimplemented!()
         }
         async fn find_predict_bets(&self, _: NaiveDate) -> Result<Vec<PredictBetRecord>> {

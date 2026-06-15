@@ -2,7 +2,7 @@ use strum_macros::Display;
 
 use crate::error::Error;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Display)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Display)]
 #[strum(serialize_all = "lowercase")]
 pub enum Surface {
     Turf,

@@ -2,8 +2,9 @@ use core::future::Future;
 
 use chrono::{DateTime, NaiveDate, Utc};
 use paddock_domain::{
-    BetType, HorseId, HorseName, HorseResult, JockeyName, OrderedPair, OrderedTriple, Pair, Race,
-    RaceCard, RaceId, RaceOdds, Surface, TrackCondition, TrainerName, Triple, Venue,
+    BetType, HorseId, HorseName, JockeyName, OrderedPair, OrderedTriple, Pair, Race, RaceCard,
+    RaceId, RaceOdds, RecentRun, StandardTimes, Surface, TrackCondition, TrainerName, Triple,
+    Venue,
 };
 
 use crate::error::Result;
@@ -357,14 +358,23 @@ pub trait Repository: Send + Sync {
     ) -> impl Future<Output = Result<Vec<Race>>> + Send;
 
     /// 指定馬の `before` より前（`races.date < before`）の成績を date 降順で最大 `limit` 件返す。
-    /// 各要素は `(開催日, 成績)`。前走フォーム特徴量（#31）の算出に使う。`before` 制約により
-    /// バックステスト時のリークを防ぐ。pdf/netkeiba 双方の成績を対象とする（実際の前走）。
+    /// 各要素は `RecentRun`（開催日・当該レースの surface/distance・成績）。前走フォーム特徴量
+    /// （#31/#76）の算出に使う。surface/distance は前走タイムを標準タイムへ突き合わせるために運ぶ。
+    /// `before` 制約によりバックテスト時のリークを防ぐ。pdf/netkeiba 双方の成績を対象とする（実際の前走）。
     fn find_recent_runs(
         &self,
         name: &HorseName,
         before: NaiveDate,
         limit: u32,
-    ) -> impl Future<Output = Result<Vec<(NaiveDate, HorseResult)>>> + Send;
+    ) -> impl Future<Output = Result<Vec<RecentRun>>> + Send;
+
+    /// `before` より前（`races.date < before`）のコーパスから (surface, distance) 別の標準タイム
+    /// （代表タイム[秒]）を集計して返す（#76）。前走タイムを相対速度シグナルへ変換する分母に使う。
+    /// `before` 制約で as-of リークを防ぐ。標本数が閾値未満の薄いバケツは含めない。
+    fn standard_times(
+        &self,
+        before: NaiveDate,
+    ) -> impl Future<Output = Result<StandardTimes>> + Send;
 
     fn count_races(&self) -> impl Future<Output = Result<u64>> + Send;
 

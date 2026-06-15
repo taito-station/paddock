@@ -84,12 +84,18 @@ async fn find_recent_runs_respects_cutoff_order_and_limit() {
         .await
         .unwrap();
     assert_eq!(runs.len(), 2, "3/10 はカットオフ後で除外");
-    assert_eq!(runs[0].0, ymd(2026, 2, 10), "date 降順で直近が先頭");
-    assert_eq!(runs[1].0, ymd(2026, 1, 10));
+    assert_eq!(runs[0].date, ymd(2026, 2, 10), "date 降順で直近が先頭");
+    assert_eq!(runs[1].date, ymd(2026, 1, 10));
+    // 前走の (surface, distance) を運んでいる（#76 標準タイム突合用）。
+    assert_eq!(runs[0].surface, Surface::Turf);
+    assert_eq!(runs[0].distance, 2000);
     // 前走(2/10)の中身が取れている
-    assert_eq!(runs[0].1.finishing_position.map(|p| p.value()), Some(1));
-    assert_eq!(runs[0].1.popularity, Some(1));
-    assert_eq!(runs[0].1.weight_change, Some(-2));
+    assert_eq!(
+        runs[0].result.finishing_position.map(|p| p.value()),
+        Some(1)
+    );
+    assert_eq!(runs[0].result.popularity, Some(1));
+    assert_eq!(runs[0].result.weight_change, Some(-2));
 
     // limit=1 なら直近 1 走のみ。
     let one = repo
@@ -97,7 +103,7 @@ async fn find_recent_runs_respects_cutoff_order_and_limit() {
         .await
         .unwrap();
     assert_eq!(one.len(), 1);
-    assert_eq!(one[0].0, ymd(2026, 3, 10));
+    assert_eq!(one[0].date, ymd(2026, 3, 10));
 
     // before が最初の出走以前なら空（前走なし）。
     let none = repo
@@ -128,7 +134,7 @@ async fn find_recent_runs_is_deterministic_on_same_date_ties() {
             .unwrap();
         assert_eq!(runs.len(), 1);
         assert_eq!(
-            runs[0].1.finishing_position.map(|p| p.value()),
+            runs[0].result.finishing_position.map(|p| p.value()),
             Some(1),
             "race_id 降順タイブレークで zzz-high(1着) が決定的に選ばれる"
         );

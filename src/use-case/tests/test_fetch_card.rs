@@ -179,7 +179,10 @@ impl Repository for RecordingRepo {
         _name: &HorseName,
         _before: NaiveDate,
         _limit: u32,
-    ) -> Result<Vec<(NaiveDate, paddock_domain::horse_result::HorseResult)>> {
+    ) -> Result<Vec<paddock_domain::RecentRun>> {
+        unimplemented!()
+    }
+    async fn standard_times(&self, _before: NaiveDate) -> Result<paddock_domain::StandardTimes> {
         unimplemented!()
     }
     async fn upsert_horse_history(

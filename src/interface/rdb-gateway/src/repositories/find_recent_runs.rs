@@ -1,14 +1,17 @@
 use chrono::NaiveDate;
-use paddock_domain::{HorseName, HorseResult};
+use paddock_domain::{HorseName, RecentRun, Surface};
 use sqlx::SqlitePool;
 
 use super::find_finished_races_between::{ResultRow, row_to_result};
 use crate::error::Result;
 
-/// `races.date` と結果カラムをまとめて受けるための行（`ResultRow` を flatten で再利用）。
+/// `races.date` と当該レースの surface/distance、結果カラムをまとめて受けるための行
+/// （`ResultRow` を flatten で再利用、surface/distance は前走タイムの標準タイム突合用 #76）。
 #[derive(sqlx::FromRow)]
 struct RecentRow {
     date: String,
+    surface: String,
+    distance: i64,
     #[sqlx(flatten)]
     result: ResultRow,
 }
@@ -25,7 +28,7 @@ pub async fn find_recent_runs(
     name: &HorseName,
     before: NaiveDate,
     limit: u32,
-) -> Result<Vec<(NaiveDate, HorseResult)>> {
+) -> Result<Vec<RecentRun>> {
     let before_str = before.format("%Y-%m-%d").to_string();
 
     let rows: Vec<RecentRow> = sqlx::query_as(
@@ -33,6 +36,7 @@ pub async fn find_recent_runs(
         WITH unioned AS (
             SELECT
                 races.date AS date, races.venue AS venue, races.race_num AS race_num,
+                races.surface AS surface, races.distance AS distance,
                 0 AS src_rank,
                 results.race_id AS race_id, results.finishing_position AS finishing_position,
                 results.status AS status, results.gate_num AS gate_num,
@@ -49,6 +53,7 @@ pub async fn find_recent_runs(
             -- horse_past_runs は定義上 netkeiba 専用テーブルなので source 絞り込みは不要。
             SELECT
                 date, venue, race_num,
+                surface, distance,
                 1 AS src_rank,
                 race_id, finishing_position, status, gate_num, horse_num, horse_name,
                 horse_id, jockey, NULL AS trainer, time_seconds, margin, odds,
@@ -57,7 +62,8 @@ pub async fn find_recent_runs(
             WHERE horse_name = ? AND date < ?
         )
         SELECT
-            u.date, u.race_id, u.finishing_position, u.status, u.gate_num, u.horse_num,
+            u.date, u.surface, u.distance,
+            u.race_id, u.finishing_position, u.status, u.gate_num, u.horse_num,
             u.horse_name, u.horse_id, u.jockey, u.trainer, u.time_seconds, u.margin,
             u.odds, u.horse_weight, u.weight_change, u.weight_carried, u.popularity
         FROM unioned u
@@ -83,7 +89,12 @@ pub async fn find_recent_runs(
     for row in rows {
         let date = NaiveDate::parse_from_str(&row.date, "%Y-%m-%d")
             .map_err(|e| crate::Error::Data(format!("invalid race date: {e}")))?;
-        runs.push((date, row_to_result(row.result)?));
+        runs.push(RecentRun {
+            date,
+            surface: Surface::try_from(row.surface.as_str())?,
+            distance: row.distance as u32,
+            result: row_to_result(row.result)?,
+        });
     }
     Ok(runs)
 }

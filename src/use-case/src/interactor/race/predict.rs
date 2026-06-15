@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use chrono::NaiveDate;
 use paddock_domain::{
     EstimationConfig, FactorStat, HorseEntry, HorseFactors, HorseName, HorseProbability, RaceId,
-    RateTriple, Surface, TrackCondition,
+    RateTriple, StandardTimes, Surface, TrackCondition,
 };
 
 use crate::error::{Error, Result};
@@ -47,6 +47,9 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
         // 本番 predict の確率推定設定（#75: ベイズ縮約 m=10 を採用。recency は backtest 評価で
         // 改善が出ず無効のまま＝production() は recency: None。下の horse_recency も取得しない）。
         let config = paddock_domain::EstimationConfig::production();
+        // 前走タイムの相対速度シグナル用の標準タイム表（#76）。全馬共通なのでループ外で 1 回だけ
+        // 取得する。cutoff=card.date で出馬表日以降をリークさせない。
+        let standard_times = self.repository.standard_times(card.date).await?;
         let mut entry_factors: Vec<(HorseEntry, HorseFactors)> = Vec::new();
         for entry in &card.entries {
             let horse = self.repository.horse_stats(&entry.horse_name, None).await?;
@@ -72,7 +75,9 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
                 None => None,
             };
             // 前走フォーム（#31）。前走は出馬表日より前の成績から取る（card.date が cutoff）。
-            let recent_form = self.recent_form_for(&entry.horse_name, card.date).await?;
+            let recent_form = self
+                .recent_form_for(&entry.horse_name, card.date, &standard_times)
+                .await?;
             let factors = build_factors(
                 entry,
                 &course,
@@ -119,16 +124,19 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
     }
 
     /// 指定馬の前走（`before` より前の直近 1 走）から前走フォーム [0,1] を算出する。前走が無い／
-    /// 有効な signal が無い場合は `None`。predict と backtest で共有する（#31）。
+    /// 有効な signal が無い場合は `None`。predict と backtest で共有する（#31/#76）。`standard_times`
+    /// は前走の (surface,distance) に対する標準タイムを引くための表（レース単位で 1 回取得して共有）。
     pub(crate) async fn recent_form_for(
         &self,
         name: &HorseName,
         before: NaiveDate,
+        standard_times: &StandardTimes,
     ) -> Result<Option<f64>> {
         let runs = self.repository.find_recent_runs(name, before, 1).await?;
-        Ok(runs
-            .first()
-            .and_then(|(d, r)| paddock_domain::prediction::recent_form_score(r, *d, before)))
+        Ok(runs.first().and_then(|run| {
+            let std = standard_times.get(run.surface, run.distance);
+            paddock_domain::prediction::recent_form_score(&run.result, run.date, before, std)
+        }))
     }
 }
 
