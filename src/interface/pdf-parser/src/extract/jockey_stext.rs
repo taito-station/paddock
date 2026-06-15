@@ -367,8 +367,11 @@ pub fn parse_weights(stext_json: &str) -> WeightIndex {
         .collect()
 }
 
-/// 馬番アンカー行で斤量列 x 帯にある妥当域(48-63.5)の数値トークンを返す。
-/// 帯内候補は x 昇順で評価し最左（斤量列に最も近い）を採る（`column_for` と同じく順序依存を排す）。
+/// 馬番アンカー行で斤量列 x 帯にある妥当域(48-63.5)の数値を返す。
+///
+/// 帯内トークンを x 昇順で**連結**してから解釈する（`column_for` と同方針）。これにより斤量が
+/// 複数トークンに分割される PDF（例 `56.5` → `56` + `.5`）でも先頭片だけを誤採用しない。
+/// 連結が妥当域で解釈できないときのみ、単一トークン最左の妥当値にフォールバックする。
 fn weight_token(toks: &[Tok], page: usize, row_y: f64, hn_x: f64) -> Option<String> {
     let lo = hn_x + WEIGHT_OFFSET_LO;
     let hi = hn_x + WEIGHT_OFFSET_HI;
@@ -376,9 +379,20 @@ fn weight_token(toks: &[Tok], page: usize, row_y: f64, hn_x: f64) -> Option<Stri
         .iter()
         .filter(|t| t.page == page && (t.y - row_y).abs() <= ROW_Y_TOL && lo <= t.x && t.x <= hi)
         .collect();
+    if in_band.is_empty() {
+        return None;
+    }
     in_band.sort_by(|a, b| a.x.total_cmp(&b.x));
+
+    // 帯内（斤量列のみ。年齢は offset<92・騎手は offset>=118 で帯外）を連結して 1 数値とみなす。
+    let joined = normalize_number(&in_band.iter().map(|t| t.text.trim()).collect::<String>());
+    if let Ok(w) = joined.parse::<f64>()
+        && WEIGHT_RANGE.contains(&w)
+    {
+        return Some(joined);
+    }
+    // フォールバック: 連結が解釈不能なら最左の単一妥当トークンを採る。
     in_band.into_iter().find_map(|t| {
-        // 斤量は CID 半角数字だが、全角数字・全角ピリオドにも保険で対応する（is_digit_char と対称）。
         let s = normalize_number(&t.text);
         s.parse::<f64>()
             .ok()
@@ -387,7 +401,8 @@ fn weight_token(toks: &[Tok], page: usize, row_y: f64, hn_x: f64) -> Option<Stri
     })
 }
 
-/// 全角数字・全角ピリオドを半角へ正規化する（数値トークンの parse 前処理）。
+/// 全角数字・全角ピリオドを半角へ正規化する（数値トークンの parse 前処理。判定用の
+/// `is_digit_char` とは別目的で、こちらは変換を行う）。
 fn normalize_number(text: &str) -> String {
     text.trim()
         .chars()
@@ -722,5 +737,19 @@ mod tests {
         ]);
         let idx = parse_weights(&json);
         assert_eq!(idx.get(&2).and_then(|m| m.get(&3)).copied(), Some(55.0));
+    }
+
+    #[test]
+    fn weight_joins_split_tokens() {
+        // 半 kg 斤量が複数トークンに分割（"56" + ".5"）されても帯内連結で 56.5 として取る。
+        // 先頭片 "56" だけを誤採用しない回帰。
+        let json = doc_json(&[
+            (216.0, 116.0, 14.0, "1"),
+            (27.0, 191.0, 6.0, "7"),
+            (133.0, 191.0, 6.0, "56"),
+            (140.0, 191.0, 6.0, ".5"),
+        ]);
+        let idx = parse_weights(&json);
+        assert_eq!(idx.get(&1).and_then(|m| m.get(&7)).copied(), Some(56.5));
     }
 }

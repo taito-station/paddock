@@ -195,8 +195,9 @@ fn build_race_from_block(
 /// 単勝オッズの昇順順位を人気として各結果に割り当てる（#124）。
 ///
 /// JRA の人気は単勝オッズの低い順（＝支持の高い順）で決まる。順位付けの母数は status を問わず
-/// 全 results だが、`popularity_ranks` は `odds` が `Some` の行だけを対象にする。出走取消・競走
-/// 除外の馬は確定オッズを持たず（`odds == None`）自然に母数から外れる前提（行は残るが人気は None）。
+/// 全 results だが、`popularity_ranks` は `odds` が `Some` の行だけを対象にする。すなわち
+/// **確定オッズを持つ出走馬（競走中止 DNF も含む）が対象**で、確定オッズを持たない出走取消・
+/// 競走除外（`odds == None`）は自然に母数から外れる（行は残るが人気は None）。
 /// 同オッズは同順位とする（競争順位＝`1,2,2,4`）。
 fn assign_popularity_from_odds(results: &mut [HorseResult]) {
     let ranks = popularity_ranks(&results.iter().map(|r| r.odds).collect::<Vec<_>>());
