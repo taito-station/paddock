@@ -147,21 +147,25 @@ pub fn build_portfolio(
 
     let total_stake: u64 = bets.iter().map(|b| b.stake).sum();
 
-    // ポートフォリオ全体の期待回収率・的中確率（odds 未取得の脚は odds=0 として寄与しない）。
-    let ev = if bets.is_empty() || field.len() < 3 {
-        None
-    } else {
-        let placed: Vec<PlacedBet> = bets
-            .iter()
-            .map(|b| PlacedBet {
+    // ポートフォリオ全体の期待回収率・的中確率。odds 未取得の脚は払戻を見積もれないため
+    // EV 評価から除外する（odds=0 で混ぜると的中 0 の stake が分母 total_stake を膨らませ ROI を
+    // 過小評価するため）。よって roi は「オッズ取得済みの脚」についての期待回収率になる。
+    let priced: Vec<PlacedBet> = bets
+        .iter()
+        .filter_map(|b| {
+            b.odds.map(|o| PlacedBet {
                 combination: b.combination.clone(),
                 stake: b.stake,
-                odds: b.odds.unwrap_or(0.0),
+                odds: o,
             })
-            .collect();
+        })
+        .collect();
+    let ev = if priced.is_empty() || field.len() < 3 {
+        None
+    } else {
         simulate(&SimInput {
             field: field.clone(),
-            bets: placed,
+            bets: priced,
             main: None,
             win_probs: Some(win.clone()),
         })
@@ -376,6 +380,64 @@ mod tests {
             .collect();
         assert_eq!(trio.len(), 3);
         assert!(trio.iter().all(|b| b.odds.is_none() && b.ev == 0.0));
+    }
+
+    #[test]
+    fn default_config_stays_within_budget() {
+        // 既定 PortfolioConfig（相手 5・配分 1:1:1）でも 100 円単位・予算以内に収まる。
+        let (probs, o) = sample();
+        let pf = build_portfolio(&probs, &o, 5000, &PortfolioConfig::default());
+        assert!(pf.bets.iter().all(|b| b.stake % 100 == 0 && b.stake > 0));
+        assert!(pf.total_stake <= 5000, "stake {} <= 5000", pf.total_stake);
+        // 相手 4 頭（馬5まで）→ 馬連4・ワイド4・三連複 C(4,2)=6。
+        assert_eq!(pf.partners.len(), 4);
+    }
+
+    #[test]
+    fn portfolio_roi_excludes_unpriced_legs() {
+        // ワイドのオッズを空にすると、ワイド脚は ROI 評価から除外され、
+        // ポートフォリオ ROI は「オッズ取得済みの脚（馬連＋三連複）」だけで算出される。
+        let (probs, mut o) = sample();
+        o.wide.clear();
+        let config = PortfolioConfig {
+            partners: 3,
+            alloc: (1, 1, 1),
+        };
+        let pf = build_portfolio(&probs, &o, 5000, &config);
+        let ev = pf.ev.expect("ev should be Some when priced legs exist");
+
+        // 参照: オッズ取得済みの脚だけを simulate した期待回収率と一致すること。
+        let field: Vec<HorseNum> = probs.iter().map(|p| p.horse_num).collect();
+        let win: std::collections::HashMap<HorseNum, f64> =
+            probs.iter().map(|p| (p.horse_num, p.win_prob)).collect();
+        let priced: Vec<PlacedBet> = pf
+            .bets
+            .iter()
+            .filter_map(|b| {
+                b.odds.map(|odds| PlacedBet {
+                    combination: b.combination.clone(),
+                    stake: b.stake,
+                    odds,
+                })
+            })
+            .collect();
+        // ワイド 3 点は未取得、馬連 3＋三連複 3 が priced。
+        assert_eq!(priced.len(), 6);
+        let reference = simulate(&SimInput {
+            field,
+            bets: priced,
+            main: None,
+            win_probs: Some(win),
+        })
+        .unwrap()
+        .ev
+        .unwrap();
+        assert!(
+            (ev.roi - reference.roi).abs() < 1e-9,
+            "roi {} should match priced-only {}",
+            ev.roi,
+            reference.roi
+        );
     }
 
     #[test]
