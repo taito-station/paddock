@@ -243,7 +243,7 @@ fn weight_and_popularity_are_sane() {
     };
     let races = MutoolParser.parse(&sample).expect("parse sample pdf");
     for race in &races {
-        // 各レースの人気は完走馬で重複しない（オッズ順位＝概ね順列）。
+        // 完走馬の人気（オッズ昇順順位）。同オッズは同順位になりうるため一意とは限らない。
         let finishers: Vec<u32> = race
             .results
             .iter()
@@ -259,6 +259,7 @@ fn weight_and_popularity_are_sane() {
                 );
             }
             if let Some(p) = r.popularity {
+                // 1..=18 は JRA のフルゲート最大頭数。
                 assert!(
                     (1..=18).contains(&p),
                     "人気 {p} が範囲外 (race {})",
@@ -266,11 +267,25 @@ fn weight_and_popularity_are_sane() {
                 );
             }
         }
-        // 完走馬が居れば人気は最低 1 件付く（オッズ取得済み前提）。
+        // 完走馬が居れば 1 番人気（最低オッズ）が必ず 1 頭存在する（オッズ取得済み前提）。
         assert!(
             finishers.is_empty() || finishers.contains(&1),
             "race {} に 1番人気が見当たらない",
             race.race_num
         );
     }
+
+    // 既知レースの実値で回帰を固定する（人気はオッズ抽出精度に従属するため値を直接検証する）。
+    // 1R ロードトライデント（馬番9・単勝1.7=1番人気・斤量57.0）。
+    let r1 = races
+        .iter()
+        .find(|r| r.race_num == 1)
+        .expect("race 1 not found");
+    let h9 = r1
+        .results
+        .iter()
+        .find(|r| r.horse_num.value() == 9)
+        .expect("race1 horse 9 not found");
+    assert_eq!(h9.popularity, Some(1), "1R 馬番9 は 1番人気");
+    assert_eq!(h9.weight_carried, Some(57.0), "1R 馬番9 の斤量は 57.0");
 }

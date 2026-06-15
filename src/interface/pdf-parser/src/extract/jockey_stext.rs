@@ -1,6 +1,7 @@
-//! 成績 PDF の騎手列・調教師列を `mutool draw -F stext.json`（x/y 座標 + font サイズ付き）から
-//! 抽出する。共通骨格 `parse_column`/`column_for` に対し、騎手は `parse_jockeys`、調教師は
-//! `parse_trainers` が x 帯・size 帯（とログ文言）のみ差し替えて渡す。
+//! 成績 PDF の騎手列・調教師列・斤量列を `mutool draw -F stext.json`（x/y 座標 + font サイズ
+//! 付き）から抽出する。共通骨格 `parse_column`/`column_for` に対し、騎手は `parse_jockeys`、
+//! 調教師は `parse_trainers`、斤量は `parse_weights`（数値トークン抽出 `weight_token`）が
+//! x 帯・size 帯（とログ文言）のみ差し替えて渡す。斤量は CID 数字で読める（EdiF でない、#124）。
 //!
 //! プレーンテキスト（`-F text`）は列の x 座標と font サイズを失い、騎手名の 2 文字目と隣の
 //! 馬主名が区切り無しで 1 行に連結してしまう（例 `裕信本山`）。stext.json には座標とサイズが
@@ -352,7 +353,8 @@ pub fn parse_weights(stext_json: &str) -> WeightIndex {
         "stext からの斤量抽出が 0 件。座標レイアウトが想定と異なる可能性",
         weight_token,
     );
-    // 抽出文字列（"57" / "56.5"）を kg へ変換する。
+    // 抽出文字列（"57" / "56.5"）を kg へ確定変換する（型変換目的。weight_token は範囲検証で
+    // 一度 parse 済みだが、parse_column の String 契約に合わせるため文字列で受けてここで f64 化する）。
     str_index
         .into_iter()
         .map(|(race, m)| {
@@ -366,18 +368,35 @@ pub fn parse_weights(stext_json: &str) -> WeightIndex {
 }
 
 /// 馬番アンカー行で斤量列 x 帯にある妥当域(48-63.5)の数値トークンを返す。
+/// 帯内候補は x 昇順で評価し最左（斤量列に最も近い）を採る（`column_for` と同じく順序依存を排す）。
 fn weight_token(toks: &[Tok], page: usize, row_y: f64, hn_x: f64) -> Option<String> {
     let lo = hn_x + WEIGHT_OFFSET_LO;
     let hi = hn_x + WEIGHT_OFFSET_HI;
-    toks.iter()
+    let mut in_band: Vec<&Tok> = toks
+        .iter()
         .filter(|t| t.page == page && (t.y - row_y).abs() <= ROW_Y_TOL && lo <= t.x && t.x <= hi)
-        .find_map(|t| {
-            let s = t.text.trim().replace('．', ".");
-            s.parse::<f64>()
-                .ok()
-                .filter(|w| WEIGHT_RANGE.contains(w))
-                .map(|_| s)
+        .collect();
+    in_band.sort_by(|a, b| a.x.total_cmp(&b.x));
+    in_band.into_iter().find_map(|t| {
+        // 斤量は CID 半角数字だが、全角数字・全角ピリオドにも保険で対応する（is_digit_char と対称）。
+        let s = normalize_number(&t.text);
+        s.parse::<f64>()
+            .ok()
+            .filter(|w| WEIGHT_RANGE.contains(w))
+            .map(|_| s)
+    })
+}
+
+/// 全角数字・全角ピリオドを半角へ正規化する（数値トークンの parse 前処理）。
+fn normalize_number(text: &str) -> String {
+    text.trim()
+        .chars()
+        .map(|c| match c {
+            '０'..='９' => char::from(b'0' + (c as u32 - '０' as u32) as u8),
+            '．' => '.',
+            other => other,
         })
+        .collect()
 }
 
 /// 1 トークンから減量印を除去し、馬主マーカーで打ち切る。
