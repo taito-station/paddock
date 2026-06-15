@@ -110,8 +110,9 @@ mod tests {
 
     use chrono::{DateTime, NaiveDate, Utc};
     use paddock_domain::{
-        HorseName, HorseNum, HorseResult, JockeyName, OddsValue, OrderedPair, OrderedTriple, Pair,
-        PlaceOdds, Race, RaceCard, RaceId, RaceOdds, Surface, TrainerName, Triple, Venue,
+        HorseName, HorseNum, JockeyName, OddsValue, OrderedPair, OrderedTriple, Pair, PlaceOdds,
+        Race, RaceCard, RaceId, RaceOdds, RecentRun, StandardTimes, Surface, TrainerName, Triple,
+        Venue,
     };
 
     use crate::error::{Error, Result};
@@ -225,7 +226,10 @@ mod tests {
             _: &HorseName,
             _: NaiveDate,
             _: u32,
-        ) -> Result<Vec<(NaiveDate, HorseResult)>> {
+        ) -> Result<Vec<RecentRun>> {
+            unimplemented!()
+        }
+        async fn standard_times(&self, _: NaiveDate) -> Result<StandardTimes> {
             unimplemented!()
         }
         async fn count_races(&self) -> Result<u64> {

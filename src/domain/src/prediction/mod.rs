@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use chrono::NaiveDate;
 
 use crate::horse_result::{HorseName, HorseNum, HorseResult};
+use crate::race::Surface;
 use crate::race_card::HorseEntry;
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -93,6 +94,38 @@ pub struct HorseProbability {
     pub win_prob: f64,
     pub place_prob: f64,
     pub show_prob: f64,
+}
+
+/// 馬の過去 1 走を、その走の (surface, distance) と開催日付きで返す（#31/#76）。前走タイムを
+/// 標準タイムと突き合わせて相対速度に変換するため、成績本体 `result` に加えて当該レースの
+/// surface/distance を運ぶ。`find_recent_runs` の戻り要素。
+#[derive(Debug, Clone)]
+pub struct RecentRun {
+    pub date: NaiveDate,
+    pub surface: Surface,
+    pub distance: u32,
+    pub result: HorseResult,
+}
+
+/// コーパス由来の標準タイム表（surface×distance 別の代表タイム[秒], #76）。前走タイムを
+/// 「基準タイムに対する相対速度」へ変換する分母に使う。`date < before` で集計され（as-of で
+/// リーク防止）、標本数が閾値未満の薄いバケツは含めない。該当 (surface,distance) が無ければ
+/// `get` が `None` を返し、タイム sub-signal は母数から落ちる（欠落フォールバック）。
+#[derive(Debug, Clone, Default)]
+pub struct StandardTimes {
+    by_course: HashMap<(Surface, u32), f64>,
+}
+
+impl StandardTimes {
+    /// (surface, distance) → 標準タイム[秒] の表から構築する。
+    pub fn new(by_course: HashMap<(Surface, u32), f64>) -> Self {
+        Self { by_course }
+    }
+
+    /// 指定 (surface, distance) の標準タイム[秒]。未整備なら `None`。
+    pub fn get(&self, surface: Surface, distance: u32) -> Option<f64> {
+        self.by_course.get(&(surface, distance)).copied()
+    }
 }
 
 /// 現行挙動（縮約・減衰なし）で確率推定する。既存呼び出し・テスト互換のため signature を保つ。
@@ -411,14 +444,25 @@ const POP_GAP_K: f64 = 0.08;
 /// 前走着差（馬身）がこの値以上で競争力差を最大とみなすクランプ点（大差勝ち・大敗の上限, #76）。
 /// 暫定値。backtest（main との before/after 比較）で寄与を確認して調整する。
 const MARGIN_CAP_LENGTHS: f64 = 5.0;
+/// 前走タイムの相対速度 signal（#76）の飽和上限。標準タイムからの相対偏差
+/// `(standard - prev) / standard` がこの割合（例 0.05 = ±5%）で signal が 0/1 に飽和する。
+/// レース内のタイム差は数 % に収まるため小さめに置く。暫定値で backtest（main との before/after）
+/// で寄与を確認して調整する。
+const TIME_DEV_CAP: f64 = 0.05;
 
 /// 直近 1 走（`prev`、その開催日 `prev_date`）と対象レース日 `race_date` から「前走フォーム」
 /// スコア `[0,1]`（0.5=中立）を算出する。利用できる sub-signal（馬体重変化・前走人気乖離・前走間隔・
-/// 前走着差）の平均を返す。有効な signal が 1 つも無い場合は `None`（前走情報が乏しい→スコアに寄与させない）。
+/// 前走着差・前走タイム）の平均を返す。有効な signal が 1 つも無い場合は `None`（前走情報が乏しい→
+/// スコアに寄与させない）。
+///
+/// `standard_time` は前走の (surface, distance) に対するコーパス標準タイム[秒]（#76）。前走タイムを
+/// 相対速度シグナルに変換する分母で、呼び出し側が `StandardTimes::get` で解決して渡す。前走タイムが
+/// 無い／標準タイムが未整備（`None`）のときはタイム sub-signal を落とす（欠落フォールバック）。
 pub fn recent_form_score(
     prev: &HorseResult,
     prev_date: NaiveDate,
     race_date: NaiveDate,
+    standard_time: Option<f64>,
 ) -> Option<f64> {
     let mut signals: Vec<f64> = Vec::new();
 
@@ -450,6 +494,16 @@ pub fn recent_form_score(
         prev.margin.as_deref().and_then(parse_margin_lengths),
     ) {
         signals.push(margin_form(pos, len));
+    }
+
+    // 前走タイム: 同一 (surface,distance) のコーパス標準タイムに対する相対速度（#76）。標準より
+    // 速い＝強いで加点、遅い＝弱いで減点。タイム無し（中止・失格や未記録）や標準タイム未整備は
+    // sub-signal を落とし、残りの signal で評価する（欠落フォールバック）。`t > 0` は 0 秒の異常値
+    // （TimeSeconds は 0.0 を許容）を母数から落とす防御で、標準タイム集計側の `time_seconds > 0` と揃える。
+    if let (Some(t), Some(std)) = (prev.time_seconds.map(|x| x.value()), standard_time) {
+        if t > 0.0 {
+            signals.push(time_form(t, std));
+        }
     }
 
     if signals.is_empty() {
@@ -487,6 +541,21 @@ fn margin_form(position: u32, margin_lengths: f64) -> f64 {
     } else {
         0.5 - 0.5 * mag
     }
+}
+
+/// 前走タイム `prev_time`[秒] とコーパス標準タイム `standard_time`[秒] から「前走の相対速度」
+/// シグナル `[0,1]`（0.5=中立）を作る（#76）。標準より速い（タイムが小さい）ほど高く、遅いほど低い。
+/// 相対偏差 `dev = (standard - prev) / standard` を `TIME_DEV_CAP` で飽和させて線形に写像する。
+/// 馬場差は標準タイム集計時に (surface,distance) でプールして吸収する割り切り（v1）。
+/// 標準タイムが非正のときは比が定義できないため中立 0.5 を返す（防御）。`prev_time > 0` は
+/// 呼び出し側（`recent_form_score` の `t > 0.0` ガード）が保証する前提で、本関数は prev 側の
+/// 非正を検査しない（0 秒以下の異常タイムは sub-signal を母数から落とす方が中立 0.5 を混ぜるより適切なため）。
+fn time_form(prev_time: f64, standard_time: f64) -> f64 {
+    if standard_time <= 0.0 {
+        return 0.5;
+    }
+    let dev = (standard_time - prev_time) / standard_time;
+    (0.5 + 0.5 * dev / TIME_DEV_CAP).clamp(0.0, 1.0)
 }
 
 /// 前走着差文字列を馬身（length）に変換する（#76）。複数出典の表記を吸収する:
@@ -545,7 +614,9 @@ fn parse_fraction(s: &str) -> Option<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::horse_result::{FinishingPosition, GateNum, HorseName, HorseNum, ResultStatus};
+    use crate::horse_result::{
+        FinishingPosition, GateNum, HorseName, HorseNum, ResultStatus, TimeSeconds,
+    };
     use crate::race_card::HorseEntry;
 
     fn ymd(y: i32, m: u32, d: u32) -> NaiveDate {
@@ -1396,7 +1467,7 @@ mod tests {
     fn recent_form_none_when_no_signals() {
         // 体重変化・人気・着順すべて欠損、かつ前走間隔も非正（同日）→ signal 無し → None。
         let prev = prev_result(None, None, None);
-        assert!(recent_form_score(&prev, ymd(2026, 5, 1), ymd(2026, 5, 1)).is_none());
+        assert!(recent_form_score(&prev, ymd(2026, 5, 1), ymd(2026, 5, 1), None).is_none());
     }
 
     #[test]
@@ -1404,11 +1475,11 @@ mod tests {
         let d = ymd(2026, 5, 1);
         let pd = ymd(2026, 4, 1); // 30 日前（最適帯 1.0）
         // 体重変化のみで比較するため人気・着順は欠損。
-        let stable = recent_form_score(&prev_result(Some(2), None, None), pd, d).unwrap();
-        let swingy = recent_form_score(&prev_result(Some(18), None, None), pd, d).unwrap();
+        let stable = recent_form_score(&prev_result(Some(2), None, None), pd, d, None).unwrap();
+        let swingy = recent_form_score(&prev_result(Some(18), None, None), pd, d, None).unwrap();
         assert!(stable > swingy, "stable={stable}, swingy={swingy}");
         // CAP(20kg) 超は体重 signal が 0。間隔 signal(1.0) との平均なので 0.5。
-        let huge = recent_form_score(&prev_result(Some(40), None, None), pd, d).unwrap();
+        let huge = recent_form_score(&prev_result(Some(40), None, None), pd, d, None).unwrap();
         assert!((huge - 0.5).abs() < 1e-9, "huge={huge}");
     }
 
@@ -1417,8 +1488,8 @@ mod tests {
         let d = ymd(2026, 5, 1);
         let pd = ymd(2026, 4, 1);
         // 5 番人気で 2 着（人気以上に好走）→ 加点。1 番人気で 8 着（凡走）→ 減点。
-        let over = recent_form_score(&prev_result(None, Some(5), Some(2)), pd, d).unwrap();
-        let under = recent_form_score(&prev_result(None, Some(1), Some(8)), pd, d).unwrap();
+        let over = recent_form_score(&prev_result(None, Some(5), Some(2)), pd, d, None).unwrap();
+        let under = recent_form_score(&prev_result(None, Some(1), Some(8)), pd, d, None).unwrap();
         assert!(over > under, "over={over}, under={under}");
     }
 
@@ -1426,9 +1497,15 @@ mod tests {
     fn recent_form_interval_band() {
         // 最適帯(30日)=1.0、連闘(3日)=0.3、長休(200日)=0.5。間隔のみ（他欠損）。
         let base = ymd(2026, 5, 1);
-        let optimal = recent_form_score(&prev_result(None, None, None), ymd(2026, 4, 1), base);
-        let rento = recent_form_score(&prev_result(None, None, None), ymd(2026, 4, 28), base);
-        let layoff = recent_form_score(&prev_result(None, None, None), ymd(2025, 10, 13), base);
+        let optimal =
+            recent_form_score(&prev_result(None, None, None), ymd(2026, 4, 1), base, None);
+        let rento = recent_form_score(&prev_result(None, None, None), ymd(2026, 4, 28), base, None);
+        let layoff = recent_form_score(
+            &prev_result(None, None, None),
+            ymd(2025, 10, 13),
+            base,
+            None,
+        );
         assert!((optimal.unwrap() - 1.0).abs() < 1e-9);
         assert!((rento.unwrap() - 0.3).abs() < 1e-9);
         assert!((layoff.unwrap() - 0.5).abs() < 1e-9);
@@ -1440,7 +1517,7 @@ mod tests {
         // 人気乖離 signal を落とし、体重変化(0.9: Δ=2)と間隔(1.0: 30日)のみで算出 → 平均 0.95。
         let d = ymd(2026, 5, 1);
         let pd = ymd(2026, 4, 1);
-        let f = recent_form_score(&prev_result(Some(2), Some(3), None), pd, d).unwrap();
+        let f = recent_form_score(&prev_result(Some(2), Some(3), None), pd, d, None).unwrap();
         let weight_sig = 1.0 - 2.0 / WEIGHT_CHANGE_CAP; // 0.9
         assert!((f - (weight_sig + 1.0) / 2.0).abs() < 1e-9, "form={f}");
     }
@@ -1450,7 +1527,7 @@ mod tests {
         // 全 signal が揃ったケースでも [0,1]。
         let d = ymd(2026, 5, 1);
         let pd = ymd(2026, 4, 10);
-        let f = recent_form_score(&prev_result(Some(-4), Some(3), Some(1)), pd, d).unwrap();
+        let f = recent_form_score(&prev_result(Some(-4), Some(3), Some(1)), pd, d, None).unwrap();
         assert!((0.0..=1.0).contains(&f), "form={f}");
     }
 
@@ -1514,8 +1591,8 @@ mod tests {
         winner.margin = Some("大差".to_string());
         let mut loser = prev_result(None, None, Some(10));
         loser.margin = Some("大差".to_string());
-        let wf = recent_form_score(&winner, pd, d).unwrap();
-        let lf = recent_form_score(&loser, pd, d).unwrap();
+        let wf = recent_form_score(&winner, pd, d, None).unwrap();
+        let lf = recent_form_score(&loser, pd, d, None).unwrap();
         approx(wf, 1.0); // (間隔1.0 + 着差1.0)/2
         approx(lf, 0.5); // (間隔1.0 + 着差0.0)/2
         assert!(wf > lf);
@@ -1528,7 +1605,43 @@ mod tests {
         let pd = ymd(2026, 4, 1);
         let mut prev = prev_result(None, None, Some(3));
         prev.margin = Some("???".to_string());
-        approx(recent_form_score(&prev, pd, d).unwrap(), 1.0);
+        approx(recent_form_score(&prev, pd, d, None).unwrap(), 1.0);
+    }
+
+    #[test]
+    fn time_form_faster_is_higher() {
+        // 標準より速い（タイム小）→ >0.5、遅い→ <0.5、同値→0.5。
+        let std = 100.0;
+        assert!(time_form(98.0, std) > 0.5);
+        assert!(time_form(102.0, std) < 0.5);
+        approx(time_form(100.0, std), 0.5);
+    }
+
+    #[test]
+    fn time_form_saturates_at_cap() {
+        // CAP(=5%)を超える偏差は 0/1 に飽和。標準非正は中立 0.5（防御）。
+        let std = 100.0;
+        approx(time_form(std * (1.0 - TIME_DEV_CAP), std), 1.0); // ちょうど CAP 速い → 1.0
+        approx(time_form(std * (1.0 - 2.0 * TIME_DEV_CAP), std), 1.0); // CAP 超でも 1.0 にクランプ
+        approx(time_form(std * (1.0 + 2.0 * TIME_DEV_CAP), std), 0.0); // CAP 超の遅さ → 0.0
+        approx(time_form(95.0, 0.0), 0.5);
+    }
+
+    #[test]
+    fn recent_form_includes_time_signal() {
+        // タイム以外を欠損させ、間隔(30日=1.0)＋タイムのみで評価。標準より速い前走が遅い前走を上回る。
+        let d = ymd(2026, 5, 1);
+        let pd = ymd(2026, 4, 1);
+        let std = Some(100.0);
+        let mut fast = prev_result(None, None, None);
+        fast.time_seconds = Some(TimeSeconds::try_from(98.0).unwrap());
+        let mut slow = prev_result(None, None, None);
+        slow.time_seconds = Some(TimeSeconds::try_from(102.0).unwrap());
+        let ff = recent_form_score(&fast, pd, d, std).unwrap();
+        let sf = recent_form_score(&slow, pd, d, std).unwrap();
+        assert!(ff > sf, "fast={ff}, slow={sf}");
+        // 標準タイム未整備（None）ならタイム signal は落ち、間隔のみ → 1.0。
+        approx(recent_form_score(&fast, pd, d, None).unwrap(), 1.0);
     }
 
     #[test]

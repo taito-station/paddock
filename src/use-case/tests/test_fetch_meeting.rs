@@ -8,7 +8,8 @@ use std::sync::Mutex;
 use chrono::NaiveDate;
 use paddock_domain::horse_result::{FinishingPosition, GateNum, HorseName, HorseNum, ResultStatus};
 use paddock_domain::{
-    HorseResult, JockeyName, Race, RaceCard, RaceId, Surface, TrainerName, Venue,
+    HorseResult, JockeyName, Race, RaceCard, RaceId, RecentRun, StandardTimes, Surface,
+    TrainerName, Venue,
 };
 use paddock_use_case::dto::pdf::fetch::{FetchMeetingOutcome, MeetingSpec};
 use paddock_use_case::pdf_fetcher::PdfFetcher;
@@ -172,8 +173,12 @@ impl Repository for MockRepo {
         _name: &HorseName,
         _before: NaiveDate,
         _limit: u32,
-    ) -> Result<Vec<(NaiveDate, HorseResult)>> {
+    ) -> Result<Vec<RecentRun>> {
         Ok(Vec::new())
+    }
+
+    async fn standard_times(&self, _before: NaiveDate) -> Result<StandardTimes> {
+        Ok(StandardTimes::default())
     }
 
     async fn find_predict_session(
@@ -526,8 +531,12 @@ impl Repository for HistoryRepo {
         _name: &HorseName,
         _before: NaiveDate,
         _limit: u32,
-    ) -> Result<Vec<(NaiveDate, HorseResult)>> {
+    ) -> Result<Vec<RecentRun>> {
         Ok(Vec::new())
+    }
+
+    async fn standard_times(&self, _before: NaiveDate) -> Result<StandardTimes> {
+        Ok(StandardTimes::default())
     }
 
     async fn find_predict_session(

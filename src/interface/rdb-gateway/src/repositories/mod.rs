@@ -15,13 +15,14 @@ mod save_race;
 mod save_race_card;
 mod save_race_odds;
 mod sql;
+mod standard_times;
 mod trainer_stats;
 mod update_results;
 
 use chrono::{DateTime, NaiveDate, Utc};
 use paddock_domain::{
-    HorseId, HorseName, HorseResult, JockeyName, Race, RaceCard, RaceId, RaceOdds, Surface,
-    TrainerName, Venue,
+    HorseId, HorseName, JockeyName, Race, RaceCard, RaceId, RaceOdds, RecentRun, StandardTimes,
+    Surface, TrainerName, Venue,
 };
 use paddock_use_case::Result as UcResult;
 use paddock_use_case::repository::{
@@ -225,8 +226,14 @@ impl Repository for SqliteRepository {
         name: &HorseName,
         before: NaiveDate,
         limit: u32,
-    ) -> UcResult<Vec<(NaiveDate, HorseResult)>> {
+    ) -> UcResult<Vec<RecentRun>> {
         find_recent_runs::find_recent_runs(&self.pool, name, before, limit)
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn standard_times(&self, before: NaiveDate) -> UcResult<StandardTimes> {
+        standard_times::standard_times(&self.pool, before)
             .await
             .map_err(Into::into)
     }

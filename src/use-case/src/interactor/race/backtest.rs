@@ -80,6 +80,9 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
                 distance: race.distance,
                 track_condition: race.track_condition,
             };
+            // 前走タイムの相対速度シグナル用の標準タイム表（#76）。全馬共通なので horse ループ外で
+            // 1 回取得する。cutoff=race.date で walk-forward のリークを防ぐ。
+            let standard_times = self.repository.standard_times(race.date).await?;
             let mut entry_factors: Vec<(HorseEntry, HorseFactors)> = Vec::new();
             for r in &starters {
                 let entry = HorseEntry {
@@ -109,7 +112,9 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
                 // horse_stats/jockey_stats と同じく馬ごとの逐次クエリ（N+1）になるが、as_of/cutoff が
                 // レース日ごとに変わる walk-forward の性質上バッチ化できないため、オフライン評価用途
                 // として許容する（#30 で受容済みの方針と同じ）。
-                let recent_form = self.recent_form_for(&r.horse_name, race.date).await?;
+                let recent_form = self
+                    .recent_form_for(&r.horse_name, race.date, &standard_times)
+                    .await?;
                 let factors = build_factors(
                     &entry,
                     &course,

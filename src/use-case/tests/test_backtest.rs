@@ -9,7 +9,7 @@ use chrono::NaiveDate;
 use paddock_domain::horse_result::{FinishingPosition, GateNum, HorseName, HorseNum, ResultStatus};
 use paddock_domain::{
     DatedCounts, EstimationConfig, HorseResult, JockeyName, OddsValue, Race, RaceCard, RaceId,
-    RaceOdds, RecencyConfig, Surface, TrackCondition, TrainerName, Venue,
+    RaceOdds, RecencyConfig, RecentRun, StandardTimes, Surface, TrackCondition, TrainerName, Venue,
 };
 use paddock_use_case::repository::{
     CourseStatsRow, FetchRecord, GroupStat, HorseRecencyStats, HorseStatsRow, JockeyStatsRow,
@@ -140,8 +140,12 @@ impl Repository for MockRepo {
         _name: &HorseName,
         _before: NaiveDate,
         _limit: u32,
-    ) -> Result<Vec<(NaiveDate, HorseResult)>> {
+    ) -> Result<Vec<RecentRun>> {
         Ok(Vec::new())
+    }
+
+    async fn standard_times(&self, _before: NaiveDate) -> Result<StandardTimes> {
+        Ok(StandardTimes::default())
     }
 
     async fn horse_stats(

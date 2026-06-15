@@ -245,13 +245,16 @@ async fn find_recent_runs_unions_and_dedups_preferring_pdf() {
 
     assert_eq!(runs.len(), 2, "11R は 1 件に dedup、12R は単独 → 計 2");
     // date 降順: 先頭は 4/1 の 11R。pdf 優先なので着順は 1（netkeiba の 7 ではない）。
-    assert_eq!(runs[0].0, ymd(2026, 4, 1));
+    assert_eq!(runs[0].date, ymd(2026, 4, 1));
     assert_eq!(
-        runs[0].1.finishing_position.map(|p| p.value()),
+        runs[0].result.finishing_position.map(|p| p.value()),
         Some(1),
         "同一実レースは pdf を優先（netkeiba の 7 着で上書きされない）"
     );
     // 2 件目は netkeiba のみの 3/1 12R。
-    assert_eq!(runs[1].0, ymd(2026, 3, 1));
-    assert_eq!(runs[1].1.finishing_position.map(|p| p.value()), Some(3));
+    assert_eq!(runs[1].date, ymd(2026, 3, 1));
+    assert_eq!(
+        runs[1].result.finishing_position.map(|p| p.value()),
+        Some(3)
+    );
 }
