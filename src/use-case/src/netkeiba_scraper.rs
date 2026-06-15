@@ -77,6 +77,8 @@ pub struct FetchedEntry {
     pub horse_id: Option<HorseId>,
     pub jockey: Option<JockeyName>,
     pub trainer: Option<TrainerName>,
+    /// 負担重量[kg]（#135）。出馬表の斤量列から取得。欠損・パース不能は `None`。
+    pub weight_carried: Option<f64>,
 }
 
 /// 出馬表ページ 1 件のパース結果。レースメタ（日付/場/距離 等）と全出走馬を持つ。

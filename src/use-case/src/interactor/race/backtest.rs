@@ -9,7 +9,7 @@ use paddock_domain::{
 
 use crate::error::Result;
 use crate::interactor::Interactor;
-use crate::interactor::race::predict::{RaceContext, build_factors};
+use crate::interactor::race::predict::{RaceContext, build_factors, field_mean_weight};
 use crate::pdf_fetcher::PdfFetcher;
 use crate::pdf_parser::PdfParser;
 use crate::repository::Repository;
@@ -75,10 +75,14 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
                 .course_stats(race.venue, race.distance, race.surface, as_of)
                 .await?;
 
+            // 斤量のレース内相対シグナル用の field 平均斤量（#135）。斤量を持つ出走馬（starters）の確定斤量で
+            // 平均する（斤量欠落の馬は filter_map で母数から除外）。
+            let mean_weight = field_mean_weight(starters.iter().filter_map(|r| r.weight_carried));
             let race_ctx = RaceContext {
                 surface: race.surface,
                 distance: race.distance,
                 track_condition: race.track_condition,
+                mean_weight,
             };
             // 前走タイムの相対速度シグナル用の標準タイム表（#76）。全馬共通なので horse ループ外で
             // 1 回取得する。cutoff=race.date で walk-forward のリークを防ぐ。
@@ -91,6 +95,8 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
                     horse_name: r.horse_name.clone(),
                     jockey: r.jockey.clone(),
                     trainer: r.trainer.clone(),
+                    // 確定成績の斤量を出馬表 entry に載せ、build_factors で field 平均との相対を取る（#135）。
+                    weight_carried: r.weight_carried,
                 };
                 let horse = self.repository.horse_stats(&r.horse_name, as_of).await?;
                 // recency 有効時のみ日付付き系列を取得する（#75 Phase B）。基準日・cutoff はレース日。

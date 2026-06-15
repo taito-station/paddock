@@ -56,6 +56,7 @@ fn card(race_id: &str, race_num: u32) -> RaceCard {
             horse_name: HorseName::try_from("テストウマ").unwrap(),
             jockey: None,
             trainer: None,
+            weight_carried: None,
         }],
     }
 }

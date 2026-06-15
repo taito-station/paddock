@@ -74,6 +74,7 @@ fn entry(gate: u32, num: u32, name: &str, jockey: &str, trainer: &str) -> Fetche
         horse_id: Some(paddock_domain::HorseId::try_from(format!("2020{num:06}")).unwrap()),
         jockey: Some(JockeyName::try_from(jockey).unwrap()),
         trainer: Some(TrainerName::try_from(trainer).unwrap()),
+        weight_carried: Some(57.0),
     }
 }
 

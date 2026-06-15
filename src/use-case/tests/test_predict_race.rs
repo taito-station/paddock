@@ -45,6 +45,7 @@ fn make_race_card(race_id: &str) -> RaceCard {
                 horse_name: HorseName::try_from("ウマA").unwrap(),
                 jockey: None,
                 trainer: None,
+                weight_carried: None,
             },
             HorseEntry {
                 gate_num: GateNum::try_from(5u32).unwrap(),
@@ -52,6 +53,7 @@ fn make_race_card(race_id: &str) -> RaceCard {
                 horse_name: HorseName::try_from("ウマB").unwrap(),
                 jockey: None,
                 trainer: None,
+                weight_carried: None,
             },
         ],
     }

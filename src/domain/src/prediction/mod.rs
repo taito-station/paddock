@@ -85,6 +85,10 @@ pub struct HorseFactors {
     /// 前走フォーム [0,1]（0.5=中立）。前走が無い／有効な signal が無い馬は `None`。
     /// win/place/show に同値で寄与する（フォームは方向に依らず全体を底上げ／押し下げる）。
     pub recent_form: Option<f64>,
+    /// 斤量（負担重量）のレース内相対シグナル [0,1]（0.5=中立, #135）。当該レースの field 平均斤量に
+    /// 対する相対値で、斤量が取れない馬（PDF 出馬表等）・field 平均が出せないレースは `None`
+    /// （項と重みを母数から除外）。win/place/show に同値で寄与する。
+    pub weight_carried: Option<f64>,
 }
 
 #[derive(Debug, Clone)]
@@ -277,6 +281,10 @@ const TRAINER_WEIGHT: f64 = 1.0;
 /// 馬場状態（track_condition）項の重み。#73 バックテスト（0.25/0.5/1.0/1.5/2.0 を比較）で
 /// 1.0 が的中率・回収率のピークだったため採用（ADR 0011）。
 const TRACK_CONDITION_WEIGHT: f64 = 1.0;
+/// 斤量（レース内相対）項の重み（#135）。backtest（main との before/after・両符号, 2026-03-28〜05-31
+/// / 144R）で「重い→加点」採用時に 0.25 で連対 +4.1pt・複勝 +4.1pt・回収 +6.8pt・単勝 LogLoss
+/// 0.3144→0.2486 と全面改善を確認したため採用（ADR 0009 追補）。recent_form と同値の保守値。
+const WEIGHT_CARRIED_WEIGHT: f64 = 0.25;
 /// 前走フォーム項の重み。#30 バックテストで検証して決定（ADR 0009）。
 const FORM_WEIGHT: f64 = 0.25;
 
@@ -416,6 +424,10 @@ fn raw_score(
         weighted += FORM_WEIGHT * form;
         weight += FORM_WEIGHT;
     }
+    if let Some(w) = factors.weight_carried {
+        weighted += WEIGHT_CARRIED_WEIGHT * w;
+        weight += WEIGHT_CARRIED_WEIGHT;
+    }
     if weight == 0.0 {
         return 0.0;
     }
@@ -444,6 +456,9 @@ const POP_GAP_K: f64 = 0.08;
 /// 前走着差（馬身）がこの値以上で競争力差を最大とみなすクランプ点（大差勝ち・大敗の上限, #76）。
 /// 暫定値。backtest（main との before/after 比較）で寄与を確認して調整する。
 const MARGIN_CAP_LENGTHS: f64 = 5.0;
+/// 斤量シグナル（#135）の飽和上限[kg]。field 平均斤量からの差がこの kg で signal が 0/1 に飽和する。
+/// レース内の斤量差は数 kg に収まるため小さめに置く。暫定値で backtest（main との before/after）で調整する。
+const WEIGHT_CARRIED_CAP_KG: f64 = 3.0;
 /// 前走タイムの相対速度 signal（#76）の飽和上限。標準タイムからの相対偏差
 /// `(standard - prev) / standard` がこの割合（例 0.05 = ±5%）で signal が 0/1 に飽和する。
 /// レース内のタイム差は数 % に収まるため小さめに置く。暫定値で backtest（main との before/after）
@@ -500,10 +515,10 @@ pub fn recent_form_score(
     // 速い＝強いで加点、遅い＝弱いで減点。タイム無し（中止・失格や未記録）や標準タイム未整備は
     // sub-signal を落とし、残りの signal で評価する（欠落フォールバック）。`t > 0` は 0 秒の異常値
     // （TimeSeconds は 0.0 を許容）を母数から落とす防御で、標準タイム集計側の `time_seconds > 0` と揃える。
-    if let (Some(t), Some(std)) = (prev.time_seconds.map(|x| x.value()), standard_time) {
-        if t > 0.0 {
-            signals.push(time_form(t, std));
-        }
+    if let (Some(t), Some(std)) = (prev.time_seconds.map(|x| x.value()), standard_time)
+        && t > 0.0
+    {
+        signals.push(time_form(t, std));
     }
 
     if signals.is_empty() {
@@ -556,6 +571,25 @@ fn time_form(prev_time: f64, standard_time: f64) -> f64 {
     }
     let dev = (standard_time - prev_time) / standard_time;
     (0.5 + 0.5 * dev / TIME_DEV_CAP).clamp(0.0, 1.0)
+}
+
+/// 当該馬の斤量 `weight`[kg] とレース内の field 平均斤量 `field_mean`[kg] から「斤量のレース内相対」
+/// シグナル `[0,1]`（0.5=中立）を作る（#135）。kg 差 `dev = weight - field_mean` を
+/// `WEIGHT_CARRIED_CAP_KG` で飽和させて線形に写像する。向きは **平均より重い＝加点（>0.5）・軽い＝減点**。
+/// 当初は「重い＝負担大で減点」を仮説に置いたが、backtest（main との before/after・両符号比較,
+/// 2026-03-28〜05-31 / 144R）で逆符号（重い→加点）が的中率・回収率・Brier・LogLoss を全面的に改善し、
+/// 減点符号は的中率を下げたため加点を採用（ADR 0009 追補）。別定/ハンデで実績馬ほど重い斤量を課される
+/// 選択効果が「負担で遅くなる」効果を上回るため。`field_mean` 非正は防御として中立 0.5。
+/// レース内相対の計算は use-case（`build_factors`）が field 平均を出して呼ぶため `pub`。
+pub fn weight_factor(weight: f64, field_mean: f64) -> f64 {
+    // field 平均が非正/非有限、または weight が非有限（NaN/inf）のときは比が定義できないため中立 0.5。
+    // field_mean が NaN だと `NaN <= 0.0` を素通りし dev→NaN→clamp が NaN を返してレース全馬の確率を
+    // 汚染する（normalize_to_sum の合計も NaN 化）ため、weight 側と対称に明示ガードする。
+    if !field_mean.is_finite() || field_mean <= 0.0 || !weight.is_finite() {
+        return 0.5;
+    }
+    let dev = weight - field_mean;
+    (0.5 + 0.5 * dev / WEIGHT_CARRIED_CAP_KG).clamp(0.0, 1.0)
 }
 
 /// 前走着差文字列を馬身（length）に変換する（#76）。複数出典の表記を吸収する:
@@ -658,6 +692,7 @@ mod tests {
             horse_name: HorseName::try_from(horse_name).unwrap(),
             jockey: None,
             trainer: None,
+            weight_carried: None,
         }
     }
 
@@ -676,6 +711,7 @@ mod tests {
             horse_track_condition: None,
             trainer_surface: None,
             recent_form: None,
+            weight_carried: None,
         }
     }
 
@@ -716,6 +752,7 @@ mod tests {
             horse_track_condition: None,
             trainer_surface: None,
             recent_form: None,
+            weight_carried: None,
         };
         // assert_eq! は NaN（0/0 のゼロ除算）でも 0.0 と不一致で失敗するため NaN 回避も兼ねる。
         let s = raw_score(&none_factors, |r| r.win, &EstimationConfig::default());
@@ -751,6 +788,7 @@ mod tests {
             horse_track_condition: None,
             trainer_surface: None,
             recent_form: None,
+            weight_carried: None,
         };
         // 旧挙動相当: horse_surface=Some(0-rate) は母数に残り平均を押し下げる（＝減点）。
         let zero_filled = HorseFactors {
@@ -791,6 +829,7 @@ mod tests {
                     horse_track_condition: None,
                     trainer_surface: None,
                     recent_form: None,
+                    weight_carried: None,
                 },
             ),
             (
@@ -815,6 +854,7 @@ mod tests {
                     horse_track_condition: None,
                     trainer_surface: None,
                     recent_form: None,
+                    weight_carried: None,
                 },
             ),
         ];
@@ -848,6 +888,7 @@ mod tests {
             horse_track_condition: None,
             trainer_surface: None,
             recent_form: None,
+            weight_carried: None,
         };
         // 6 頭立て・全馬同一スコア → win=1/6, place=2/6, show=3/6（いずれも 1.0 未満で無クランプ）。
         let entries: Vec<_> = (1..=6)
@@ -882,6 +923,7 @@ mod tests {
             horse_track_condition: None,
             trainer_surface: None,
             recent_form: None,
+            weight_carried: None,
         };
         let b = HorseFactors {
             course_gate: Some(fs(RateTriple {
@@ -895,6 +937,7 @@ mod tests {
             horse_track_condition: None,
             trainer_surface: None,
             recent_form: None,
+            weight_carried: None,
         };
         let entries = vec![(make_entry(1, "ウマA"), a), (make_entry(2, "ウマB"), b)];
         let probs = estimate_probabilities(&entries);
@@ -924,6 +967,7 @@ mod tests {
             horse_track_condition: None,
             trainer_surface: None,
             recent_form: None,
+            weight_carried: None,
         };
         let entries = vec![
             (make_entry(1, "ウマA"), win_only(0.3)),
@@ -966,6 +1010,7 @@ mod tests {
             horse_track_condition: None,
             trainer_surface: None,
             recent_form: None,
+            weight_carried: None,
         };
         let without_jockey = HorseFactors {
             course_gate: Some(fs(base)),
@@ -975,6 +1020,7 @@ mod tests {
             horse_track_condition: None,
             trainer_surface: None,
             recent_form: None,
+            weight_carried: None,
         };
         let s_with = raw_score(&with_equal_jockey, |r| r.win, &EstimationConfig::default());
         let s_without = raw_score(&without_jockey, |r| r.win, &EstimationConfig::default());
@@ -1018,6 +1064,7 @@ mod tests {
             horse_track_condition: Some(fs(base)),
             trainer_surface: None,
             recent_form: None,
+            weight_carried: None,
         };
         let without_tc = HorseFactors {
             horse_track_condition: None,
@@ -1079,6 +1126,7 @@ mod tests {
                     })),
                     trainer_surface: None,
                     recent_form: None,
+                    weight_carried: None,
                 },
             ),
             (
@@ -1103,6 +1151,7 @@ mod tests {
                     horse_track_condition: None,
                     trainer_surface: None,
                     recent_form: None,
+                    weight_carried: None,
                 },
             ),
         ];
@@ -1136,6 +1185,7 @@ mod tests {
             trainer_surface: Some(fs(base)),
             horse_track_condition: None,
             recent_form: None,
+            weight_carried: None,
         };
         let without_trainer = HorseFactors {
             trainer_surface: None,
@@ -1212,6 +1262,7 @@ mod tests {
             trainer_surface: None,
             horse_track_condition: None,
             recent_form: None,
+            weight_carried: None,
         };
         let many = HorseFactors {
             course_gate: Some(FactorStat {
@@ -1251,6 +1302,7 @@ mod tests {
             trainer_surface: None,
             horse_track_condition: None,
             recent_form: None,
+            weight_carried: None,
         };
         let sparse = HorseFactors {
             course_gate: Some(FactorStat {
@@ -1642,6 +1694,48 @@ mod tests {
         assert!(ff > sf, "fast={ff}, slow={sf}");
         // 標準タイム未整備（None）ならタイム signal は落ち、間隔のみ → 1.0。
         approx(recent_form_score(&fast, pd, d, None).unwrap(), 1.0);
+    }
+
+    #[test]
+    fn weight_factor_heavier_is_higher() {
+        // 採用符号（backtest 検証）: 平均より重い→>0.5、軽い→<0.5、平均同値→0.5。
+        let mean = 55.0;
+        assert!(weight_factor(57.0, mean) > 0.5);
+        assert!(weight_factor(53.0, mean) < 0.5);
+        approx(weight_factor(55.0, mean), 0.5);
+    }
+
+    #[test]
+    fn weight_factor_saturates_and_guards() {
+        // CAP(=3kg) でちょうど 1/0 に飽和、CAP 超でもクランプ。field_mean 非正は中立 0.5。
+        let mean = 55.0;
+        approx(weight_factor(mean + WEIGHT_CARRIED_CAP_KG, mean), 1.0);
+        approx(weight_factor(mean - WEIGHT_CARRIED_CAP_KG, mean), 0.0);
+        approx(weight_factor(mean + 2.0 * WEIGHT_CARRIED_CAP_KG, mean), 1.0);
+        approx(weight_factor(56.0, 0.0), 0.5);
+        // 非有限入力（NaN/inf）は中立 0.5（NaN を出力して全馬の確率を汚染しないための防御）。
+        approx(weight_factor(56.0, f64::NAN), 0.5);
+        approx(weight_factor(f64::NAN, mean), 0.5);
+        approx(weight_factor(f64::INFINITY, mean), 0.5);
+    }
+
+    #[test]
+    fn weight_carried_factor_shifts_score_and_excluded_when_none() {
+        // weight_carried 項（スカラー [0,1]）が raw_score に効く（高い factor 値→高スコア）／
+        // None で母数から落ちる。値の向き（重い→高い）は weight_factor 側のテストで担保。
+        let mut low = zero_factors();
+        low.weight_carried = Some(0.2);
+        let mut high = zero_factors();
+        high.weight_carried = Some(0.8);
+        let cfg = EstimationConfig::default();
+        let s_low = raw_score(&low, |r| r.win, &cfg);
+        let s_high = raw_score(&high, |r| r.win, &cfg);
+        assert!(s_high > s_low, "high={s_high}, low={s_low}");
+        // None なら項なし（zero_factors と同一スコア）。
+        let base = raw_score(&zero_factors(), |r| r.win, &cfg);
+        let mut none_w = zero_factors();
+        none_w.weight_carried = None;
+        approx(raw_score(&none_w, |r| r.win, &cfg), base);
     }
 
     #[test]

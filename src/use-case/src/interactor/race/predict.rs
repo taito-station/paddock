@@ -39,10 +39,14 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
             .course_stats(card.venue, card.distance, card.surface, None)
             .await?;
 
+        // 斤量のレース内相対シグナル用の field 平均斤量（#135）。斤量を持つ出走馬のみで平均する。
+        // netkeiba 出馬表は斤量あり、PDF 出馬表は全馬 None なので平均も None（斤量項なし）。
+        let mean_weight = field_mean_weight(card.entries.iter().filter_map(|e| e.weight_carried));
         let race_ctx = RaceContext {
             surface: card.surface,
             distance: card.distance,
             track_condition,
+            mean_weight,
         };
         // 本番 predict の確率推定設定（#75: ベイズ縮約 m=10 を採用。recency は backtest 評価で
         // 改善が出ず無効のまま＝production() は recency: None。下の horse_recency も取得しない）。
@@ -146,6 +150,9 @@ pub(crate) struct RaceContext {
     pub distance: u32,
     /// 評価対象レースの馬場状態（#73）。未確定なら `None`（馬場項なし）。
     pub track_condition: Option<TrackCondition>,
+    /// レース内の field 平均斤量[kg]（#135）。斤量を持つ出走馬が居ないレース（PDF 出馬表等）は
+    /// `None`（斤量項なし）。`build_factors` が各馬の `weight_carried` との差から相対シグナルを作る。
+    pub mean_weight: Option<f64>,
 }
 
 /// 取得済みの stats 行と前走フォームから `HorseFactors` を組み立てる純粋変換。本番 predict
@@ -210,7 +217,23 @@ pub(crate) fn build_factors(
         // 馬場状態が未確定のレース・該当馬場での出走実績が無い馬は None（#73）。
         horse_track_condition,
         recent_form,
+        // 斤量のレース内相対シグナル（#135）。当該馬の斤量と field 平均斤量の両方があるときのみ項を立てる。
+        // PDF 出馬表（斤量なし）・field 平均が出せないレースは None（母数除外）。
+        weight_carried: entry
+            .weight_carried
+            .zip(race.mean_weight)
+            .map(|(w, mean)| paddock_domain::prediction::weight_factor(w, mean)),
     }
+}
+
+/// 斤量のレース内相対シグナル用に、出走馬の斤量[kg]の単純平均を返す（#135）。有限値が 1 つも無ければ
+/// `None`（斤量項なし）。predict（出馬表 entries）と backtest（出走馬 results）で共有する。
+/// 非有限値（NaN/inf）は母数から除外し、1 件の異常値が平均を NaN 化して全馬の斤量項を汚染しないようにする。
+pub(crate) fn field_mean_weight(weights: impl Iterator<Item = f64>) -> Option<f64> {
+    let (sum, n) = weights
+        .filter(|w| w.is_finite())
+        .fold((0.0, 0u32), |(s, c), w| (s + w, c + 1));
+    (n > 0).then(|| sum / n as f64)
 }
 
 /// recency 系列からラベル一致の日付系列を取り、時間減衰した重み付きレート（[`FactorStat`]）を返す。

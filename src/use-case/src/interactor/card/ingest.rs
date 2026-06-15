@@ -59,6 +59,7 @@ impl<R: Repository, S: NetkeibaScraper> CardInteractor<R, S> {
                     horse_name: e.horse_name,
                     jockey: e.jockey,
                     trainer: e.trainer,
+                    weight_carried: e.weight_carried,
                 })
                 .collect();
             entries_saved = entries.len();

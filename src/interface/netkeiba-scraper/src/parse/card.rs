@@ -135,6 +135,9 @@ fn extract_entries(doc: &Html) -> Result<Vec<FetchedEntry>> {
     let horse_link_sel = sel("td.HorseInfo a[href*=\"/horse/\"]")?;
     let jockey_sel = sel("td.Jockey a")?;
     let trainer_sel = sel("td.Trainer a")?;
+    // 斤量は性齢セル(td.Barei)の直後の td（class="Txt_C"）。td.Txt_C は枠/馬番/人気にも付くため
+    // 隣接セレクタで斤量列だけを特定する（#135）。
+    let weight_sel = sel("td.Barei + td")?;
 
     let mut entries = Vec::new();
     for row in doc.select(&row_sel) {
@@ -177,6 +180,7 @@ fn extract_entries(doc: &Html) -> Result<Vec<FetchedEntry>> {
             .and_then(|id| HorseId::try_from(id).ok());
         let jockey = extract_jockey(&row, &jockey_sel);
         let trainer = extract_trainer(&row, &trainer_sel);
+        let weight_carried = extract_weight(&row, &weight_sel);
 
         entries.push(FetchedEntry {
             gate_num,
@@ -185,6 +189,7 @@ fn extract_entries(doc: &Html) -> Result<Vec<FetchedEntry>> {
             horse_id,
             jockey,
             trainer,
+            weight_carried,
         });
     }
 
@@ -212,6 +217,17 @@ fn extract_trainer(row: &ElementRef, sel: &Selector) -> Option<TrainerName> {
         .attr("title")
         .and_then(cell_text)
         .and_then(|n| TrainerName::try_from(n).ok())
+}
+
+/// 性齢セル直後の斤量セル（`td.Barei + td`）から負担重量[kg]を取る（#135）。空・非数値は None。
+/// `td.Barei + td` は DOM 順依存（性齢列の直後が斤量）のため、レイアウト変更で別カラムを掴んでも
+/// 不正値が確率推定へ流れないよう、現実的な斤量レンジ（40〜70kg）外は `None` に落とす防御を入れる。
+fn extract_weight(row: &ElementRef, sel: &Selector) -> Option<f64> {
+    let cell = row.select(sel).next()?;
+    cell_text(&cell.text().collect::<String>())?
+        .parse::<f64>()
+        .ok()
+        .filter(|w| (40.0..=70.0).contains(w))
 }
 
 fn sel(s: &str) -> Result<Selector> {
