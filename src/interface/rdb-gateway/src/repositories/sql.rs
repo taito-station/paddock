@@ -41,7 +41,7 @@ pub(crate) fn group_stat_from_row(label: &str, row: (i64, i64, i64, i64)) -> Gro
 /// 順にバインドして 1 行の集計 tuple を取得する。`cutoff` は `date_lt_pred` のプレースホルダに対応。
 async fn fetch_agg(
     pool: &SqlitePool,
-    query: &str,
+    query: String,
     binds: &[&str],
     cutoff: Option<&str>,
 ) -> crate::error::Result<(i64, i64, i64, i64)> {
@@ -77,7 +77,7 @@ pub(crate) async fn entity_stats(
          AND results.finishing_position IS NOT NULL {date}",
         date = date_lt_pred(cutoff, "?2"),
     );
-    let overall = group_stat_from_row("全体", fetch_agg(pool, &overall_q, &[value], cutoff).await?);
+    let overall = group_stat_from_row("全体", fetch_agg(pool, overall_q, &[value], cutoff).await?);
 
     let mut by_surface = Vec::with_capacity(SURFACE_KEYS.len());
     for (key, label) in SURFACE_KEYS {
@@ -86,7 +86,7 @@ pub(crate) async fn entity_stats(
              AND results.finishing_position IS NOT NULL AND races.surface = ?2 {date}",
             date = date_lt_pred(cutoff, "?3"),
         );
-        let row = fetch_agg(pool, &q, &[value, key], cutoff).await?;
+        let row = fetch_agg(pool, q, &[value, key], cutoff).await?;
         by_surface.push(group_stat_from_row(label, row));
     }
 
@@ -97,7 +97,7 @@ pub(crate) async fn entity_stats(
              AND results.finishing_position IS NOT NULL AND {predicate} {date}",
             date = date_lt_pred(cutoff, "?2"),
         );
-        let row = fetch_agg(pool, &q, &[value], cutoff).await?;
+        let row = fetch_agg(pool, q, &[value], cutoff).await?;
         by_gate_group.push(group_stat_from_row(label, row));
     }
 
