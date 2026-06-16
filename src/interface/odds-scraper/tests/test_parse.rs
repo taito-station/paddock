@@ -12,6 +12,7 @@ use paddock_domain::{
 
 const WIN_PLACE: &str = include_str!("fixtures/win_place.html");
 const QUINELLA: &str = include_str!("fixtures/quinella.html");
+const WIDE: &str = include_str!("fixtures/wide.html");
 const EXACTA: &str = include_str!("fixtures/exacta.html");
 const TRIO: &str = include_str!("fixtures/trio.html");
 const TRIFECTA: &str = include_str!("fixtures/trifecta.html");
@@ -47,6 +48,17 @@ fn parses_quinella_normalising_order() {
 }
 
 #[test]
+fn parses_wide_band_normalising_order() {
+    let map = parse::parse_wide(WIDE).expect("parse wide");
+    // 3 published rows; the "3 - 4" row (---) is skipped.
+    assert_eq!(map.len(), 3);
+    let key = Pair::try_from((hn(2), hn(1))).unwrap(); // unordered: same as 1-2
+    let band = map[&key];
+    assert_eq!(band.low.value(), 2.1);
+    assert_eq!(band.high.value(), 3.4);
+}
+
+#[test]
 fn parses_exacta_preserving_order() {
     let map = parse::parse_exacta(EXACTA).expect("parse exacta");
     assert_eq!(map.len(), 3);
@@ -79,6 +91,7 @@ fn assemble_combines_all_bet_types() {
     let pages = OddsPages {
         win_place: Some(WIN_PLACE.to_string()),
         quinella: Some(QUINELLA.to_string()),
+        wide: Some(WIDE.to_string()),
         exacta: Some(EXACTA.to_string()),
         trio: Some(TRIO.to_string()),
         trifecta: Some(TRIFECTA.to_string()),
@@ -88,6 +101,7 @@ fn assemble_combines_all_bet_types() {
     assert_eq!(odds.win.len(), 3);
     assert_eq!(odds.place.len(), 3);
     assert_eq!(odds.quinella.len(), 3);
+    assert_eq!(odds.wide.len(), 3);
     assert_eq!(odds.exacta.len(), 3);
     assert_eq!(odds.trio.len(), 3);
     assert_eq!(odds.trifecta.len(), 3);

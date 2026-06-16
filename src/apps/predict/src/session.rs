@@ -3,8 +3,8 @@ use std::io::{self, Write};
 
 use chrono::{NaiveDate, Utc};
 use paddock_domain::{
-    BetCombination, BettingConfig, BettingRecommendation, HorseProbability, Race, RaceId, Surface,
-    TrackCondition, select_bets,
+    BetCombination, HorseProbability, PortfolioBet, PortfolioConfig, Race, RaceId, Surface,
+    TrackCondition, build_portfolio,
 };
 use paddock_use_case::{PredictBetRecord, PredictSessionRecord};
 
@@ -24,6 +24,7 @@ pub async fn run_session(
     app: &App,
     date: NaiveDate,
     budget: Option<u64>,
+    race_budget: u64,
     resume: bool,
 ) -> anyhow::Result<()> {
     let races = app.interactor.races_by_date(date).await?;
@@ -99,7 +100,7 @@ pub async fn run_session(
         if processed.contains(race.race_id.value()) {
             continue;
         }
-        run_race(app, race, &mut session, &recorded, &mut last_input).await?;
+        run_race(app, race, &mut session, race_budget, &recorded, &mut last_input).await?;
     }
 
     session.completed = true;
@@ -116,6 +117,7 @@ async fn run_race(
     app: &App,
     race: &Race,
     session: &mut PredictSessionRecord,
+    race_budget: u64,
     recorded: &HashMap<String, Option<TrackCondition>>,
     last_input: &mut Option<TrackCondition>,
 ) -> anyhow::Result<()> {
@@ -178,22 +180,58 @@ async fn run_race(
         return Ok(());
     };
 
-    let recs = select_bets(&probs, &odds, &BettingConfig::default());
-    let kelly_fractions: Vec<f64> = recs.iter().map(|r| r.kelly_fraction).collect();
-    let suggested = recommended_amounts(session.balance, &kelly_fractions);
+    // 軸流しポートフォリオ（馬連＋ワイド＋三連複）を予算内・100 円単位で生成する。
+    // 上限は per-race 予算と残高の小さい方。配分・相手頭数は PortfolioConfig 既定（#122）。
+    let race_cap = race_budget.min(session.balance);
+    let portfolio = build_portfolio(&probs, &odds, race_cap, &PortfolioConfig::default());
+    let suggested: Vec<u64> = portfolio.bets.iter().map(|b| b.stake).collect();
 
     println!();
-    println!("【買い目推奨】");
-    if recs.is_empty() {
-        println!("  EV 閾値を超える買い目なし");
+    println!("【買い目推奨（軸流し, 予算¥{race_cap}/R）】");
+    match portfolio.axis {
+        Some(axis) => {
+            let partners = portfolio
+                .partners
+                .iter()
+                .map(|h| h.value().to_string())
+                .collect::<Vec<_>>()
+                .join(",");
+            println!("  軸 {} → 相手 {}", axis.value(), partners);
+        }
+        None => println!("  確率推定が空のため買い目なし"),
     }
-    for (rec, amt) in recs.iter().zip(&suggested) {
+    if portfolio.bets.is_empty() {
+        println!("  予算内で組める買い目なし");
+    }
+    for bet in &portfolio.bets {
+        let odds = match bet.odds {
+            Some(o) => format!("オッズ{o:.1}"),
+            None => "オッズ未取得".to_string(),
+        };
         println!(
-            "  {} EV={:.2} Kelly={:.0}% 推奨額=¥{}",
-            format_combination(&rec.combination),
-            rec.ev,
-            rec.kelly_fraction * 100.0,
-            amt,
+            "  {} ¥{} {} EV={:.2}",
+            format_combination(&bet.combination),
+            bet.stake,
+            odds,
+            bet.ev,
+        );
+    }
+    if let Some(ev) = &portfolio.ev {
+        // 期待回収率・的中率はオッズ取得済みの脚についての値（未取得脚は払戻を見積もれず除外）。
+        let unpriced = portfolio.bets.iter().filter(|b| b.odds.is_none()).count();
+        // 回収率・的中率はオッズ取得済の脚のみで算出する一方、賭け計は未取得脚も含む全脚の合計
+        // （基準が異なる）。未取得脚があるときはその非対称を明示する。
+        let note = if unpriced > 0 {
+            format!("（回収率・的中率はオッズ取得済の脚基準、賭け計は未取得 {unpriced} 点を含む全脚）")
+        } else {
+            String::new()
+        };
+        println!(
+            "  ポートフォリオ期待回収率 {:.1}% / 的中率 {:.1}% / 賭け計 ¥{}{}",
+            ev.roi * 100.0,
+            ev.hit_prob * 100.0,
+            portfolio.total_stake,
+            note,
         );
     }
 
@@ -201,7 +239,7 @@ async fn run_race(
     let bet_amounts: Vec<u64> = match read_choice()? {
         's' => return Ok(()),
         'y' => suggested.clone(),
-        'e' => read_edited_amounts(&recs, &suggested, session.balance)?,
+        'e' => read_edited_amounts(&portfolio.bets, &suggested, session.balance)?,
         _ => unreachable!("read_choice returns only y/e/s"),
     };
 
@@ -210,7 +248,7 @@ async fn run_race(
         println!("賭けなし — 次のレースへ");
         return Ok(());
     }
-    // 残高ガード（y の比例縮小・e の入力チェックで保証されるが二重防御）
+    // 残高ガード（生成器は残高内に収め、e は入力チェックで保証するが二重防御）
     if bet > session.balance {
         println!(
             "賭け金合計 ¥{} が残高 ¥{} を超えるためスキップします",
@@ -228,19 +266,25 @@ async fn run_race(
     // 賭け金 > 0 の買い目だけを対象に払戻を入力し、その場でレコード化する
     // （stake==0 の判定はこの 1 箇所に集約）。
     let mut bet_records = Vec::new();
-    for (rec, &stake) in recs.iter().zip(&bet_amounts) {
+    for (bet_item, &stake) in portfolio.bets.iter().zip(&bet_amounts) {
         if stake == 0 {
             continue;
         }
         let payout = read_u64(
             &format!(
                 "  {} 賭け¥{} の払戻 (なし: Enter) > ",
-                format_combination(&rec.combination),
+                format_combination(&bet_item.combination),
                 stake
             ),
             true,
         )?;
-        bet_records.push(make_bet_record(&race.race_id, rec, stake, payout));
+        bet_records.push(make_bet_record(
+            &race.race_id,
+            &bet_item.combination,
+            bet_item.ev,
+            stake,
+            payout,
+        ));
     }
     let race_payout: u64 = bet_records.iter().map(|b| b.payout).sum();
     session.balance += race_payout;
@@ -357,64 +401,33 @@ pub async fn run_settle(app: &App, date: NaiveDate) -> anyhow::Result<()> {
 /// 各フィールド（残高・回収率に直結）のマッピングを対話 I/O から切り離して単体テストできる。
 fn make_bet_record(
     race_id: &RaceId,
-    rec: &BettingRecommendation,
+    combination: &BetCombination,
+    ev: f64,
     stake: u64,
     payout: u64,
 ) -> PredictBetRecord {
     PredictBetRecord {
         race_id: race_id.clone(),
-        bet_type: rec.combination.type_label().to_string(),
-        combination: rec.combination.combination_code(),
+        bet_type: combination.type_label().to_string(),
+        combination: combination.combination_code(),
         stake,
         payout,
-        ev: rec.ev,
+        ev,
     }
-}
-
-/// Kelly 比例縮小方式で各買い目の推奨額を算出する。
-///
-/// 丸め前の実数合計 `Σ raw_i` を分母に使うことで、`floor` の単調性により
-/// `Σ 推奨額 ≤ budget` を厳密に保証する（設計書 predict-session.md 参照）。
-fn recommended_amounts(budget: u64, kelly_fractions: &[f64]) -> Vec<u64> {
-    if kelly_fractions.is_empty() {
-        return Vec::new();
-    }
-    let budget_f = budget as f64;
-    let raws: Vec<f64> = kelly_fractions.iter().map(|k| budget_f * k).collect();
-    let sum: f64 = raws.iter().sum();
-    let mut amounts: Vec<u64> = if sum <= budget_f {
-        raws.iter().map(|r| r.floor() as u64).collect()
-    } else {
-        raws.iter()
-            .map(|r| (r * budget_f / sum).floor() as u64)
-            .collect()
-    };
-
-    // 浮動小数の丸め誤差に対する最終防御: 合計が budget を超える場合は
-    // 末尾の買い目から削り、u64 として確実に budget 以内へ収める。
-    let mut total: u64 = amounts.iter().sum();
-    let mut i = amounts.len();
-    while total > budget && i > 0 {
-        i -= 1;
-        let cut = (total - budget).min(amounts[i]);
-        amounts[i] -= cut;
-        total -= cut;
-    }
-    amounts
 }
 
 fn read_edited_amounts(
-    recs: &[BettingRecommendation],
+    bets: &[PortfolioBet],
     suggested: &[u64],
     budget: u64,
 ) -> anyhow::Result<Vec<u64>> {
     loop {
-        let mut amounts = Vec::with_capacity(recs.len());
-        for (rec, sug) in recs.iter().zip(suggested) {
+        let mut amounts = Vec::with_capacity(bets.len());
+        for (bet, sug) in bets.iter().zip(suggested) {
             let a = read_u64(
                 &format!(
                     "  {} 推奨¥{} 入力額 > ",
-                    format_combination(&rec.combination),
+                    format_combination(&bet.combination),
                     sug
                 ),
                 false,
@@ -582,19 +595,9 @@ fn read_u64(prompt: &str, allow_empty_as_zero: bool) -> anyhow::Result<u64> {
 
 #[cfg(test)]
 mod tests {
-    use super::{make_bet_record, recommended_amounts, resolve_track_condition_default};
+    use super::{make_bet_record, resolve_track_condition_default};
     use paddock_domain::horse_result::HorseNum;
-    use paddock_domain::{BetCombination, BettingRecommendation, RaceId, TrackCondition};
-
-    fn rec(combination: BetCombination, ev: f64) -> BettingRecommendation {
-        BettingRecommendation {
-            combination,
-            probability: 0.0,
-            odds: 0.0,
-            ev,
-            kelly_fraction: 0.0,
-        }
-    }
+    use paddock_domain::{BetCombination, RaceId, TrackCondition};
 
     fn horse(n: u32) -> HorseNum {
         HorseNum::try_from(n).unwrap()
@@ -604,7 +607,7 @@ mod tests {
     fn make_bet_record_maps_fields() {
         let race_id = RaceId::try_from("2026-3-nakayama-8-1R").unwrap();
 
-        let win = make_bet_record(&race_id, &rec(BetCombination::Win(horse(3)), 1.5), 1000, 0);
+        let win = make_bet_record(&race_id, &BetCombination::Win(horse(3)), 1.5, 1000, 0);
         assert_eq!(win.bet_type, "win");
         assert_eq!(win.combination, "3");
         assert_eq!(win.stake, 1000);
@@ -612,72 +615,14 @@ mod tests {
         assert!((win.ev - 1.5).abs() < 1e-10);
         assert_eq!(win.race_id.value(), "2026-3-nakayama-8-1R");
 
-        let place = make_bet_record(
-            &race_id,
-            &rec(BetCombination::Place(horse(7)), 1.2),
-            500,
-            2500,
+        let quinella = BetCombination::Quinella(
+            paddock_domain::Pair::try_from((horse(1), horse(5))).unwrap(),
         );
-        assert_eq!(place.bet_type, "place");
-        assert_eq!(place.combination, "7");
-        assert_eq!(place.stake, 500);
-        assert_eq!(place.payout, 2500);
-    }
-
-    #[test]
-    fn within_budget_keeps_floor() {
-        // budget 10000, kelly 0.15/0.08/0.05 → 1500/800/500（合計 2800 ≤ 10000）
-        let amounts = recommended_amounts(10000, &[0.15, 0.08, 0.05]);
-        assert_eq!(amounts, vec![1500, 800, 500]);
-    }
-
-    #[test]
-    fn four_quarter_kelly_exactly_fits() {
-        // 0.25 × 4 = 1.0、raw 合計 = 10000 = budget（縮小不要）
-        let amounts = recommended_amounts(10000, &[0.25, 0.25, 0.25, 0.25]);
-        assert_eq!(amounts, vec![2500, 2500, 2500, 2500]);
-        assert_eq!(amounts.iter().sum::<u64>(), 10000);
-    }
-
-    #[test]
-    fn over_budget_scales_down_within_balance() {
-        // 0.25 × 5 = 1.25、raw 合計 12500 > 10000 → 比例縮小で各 2000
-        let amounts = recommended_amounts(10000, &[0.25, 0.25, 0.25, 0.25, 0.25]);
-        let total: u64 = amounts.iter().sum();
-        assert!(total <= 10000, "total {total} must be <= budget");
-        assert_eq!(amounts, vec![2000, 2000, 2000, 2000, 2000]);
-    }
-
-    #[test]
-    fn floor_residual_never_exceeds_budget() {
-        // 丸め前合計を分母にすることで floor 残差でも budget を超えないこと
-        let amounts = recommended_amounts(
-            58,
-            &[0.2203, 0.1163, 0.0605, 0.2041, 0.2055, 0.1673, 0.1646],
-        );
-        let total: u64 = amounts.iter().sum();
-        assert!(total <= 58, "total {total} must be <= 58");
-    }
-
-    #[test]
-    fn empty_returns_empty() {
-        assert!(recommended_amounts(10000, &[]).is_empty());
-    }
-
-    #[test]
-    fn extreme_budget_never_exceeds() {
-        // 非現実的な巨大予算でも float 丸め誤差を最終クランプで吸収し
-        // u64 として budget を超えないこと
-        let budget = u64::MAX / 2;
-        let amounts = recommended_amounts(budget, &[0.25, 0.25, 0.25, 0.25, 0.25]);
-        let total: u128 = amounts.iter().map(|&a| a as u128).sum();
-        assert!(total <= budget as u128, "total {total} must be <= budget");
-    }
-
-    #[test]
-    fn zero_budget_returns_zeros() {
-        let amounts = recommended_amounts(0, &[0.25, 0.1]);
-        assert_eq!(amounts, vec![0, 0]);
+        let q = make_bet_record(&race_id, &quinella, 1.2, 500, 2500);
+        assert_eq!(q.bet_type, "quinella");
+        assert_eq!(q.combination, "1-5");
+        assert_eq!(q.stake, 500);
+        assert_eq!(q.payout, 2500);
     }
 
     #[test]
