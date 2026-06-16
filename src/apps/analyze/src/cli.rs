@@ -42,7 +42,7 @@ pub enum Command {
     /// win <= place <= show monotonicity is guaranteed; place/show are top-2 / top-3 probabilities
     /// (normalized to sum 2.0 / 3.0 across the field, then monotonized). See ADR 0007.
     Predict {
-        /// Race ID (例: 2026060412R02).
+        /// Race ID（paddock 形式 `{年}-{回}-{場slug}-{日}-{R}R`、例: 2026-3-nakayama-8-1R）。
         race_id: String,
         /// 市場オッズ(単勝)ブレンドのモデル重み α [0,1]。未指定でモデルのみ、
         /// 指定すると最新オッズスナップショット(時刻制約なし)の implied 確率と (1-α) で
