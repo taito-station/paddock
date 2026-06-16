@@ -1,6 +1,6 @@
 "use strict";
 
-const MARKS = { "◎": "honmei", "○": "taikou", "▲": "tanana", "△": "renge", "☆": "hoshi", "✓": "check" };
+const MARKS = { "◎": "honmei", "○": "taikou", "▲": "tanana", "△": "renge", "☆": "hoshi" };
 
 // 8 桁日付を読みやすく整形。それ以外はそのまま。
 function prettify(name) {
