@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use pulldown_cmark::{Options, Parser, html};
+use pulldown_cmark::{Event, Options, Parser, html};
 
 #[derive(Debug)]
 pub enum RenderError {
@@ -15,8 +15,9 @@ pub enum RenderError {
 /// pad_dir からの相対パスで指定された MD を読み、HTML 断片にレンダリングする。
 ///
 /// パストラバーサル対策: `..` を含むパスを拒否し、canonicalize 後に pad_dir 配下かつ
-/// `.md` 拡張子であることを検証する。pad/ 配下のファイルは Claude 自身が書いた信頼済み
-/// コンテンツなので、MD 内の生 HTML はそのまま通す（ローカル単一ユーザー）。
+/// `.md` 拡張子であることを検証する。MD 内の生 HTML は（pad/ 配下が信頼済みでも防御を
+/// 入力信頼の一点に依存させないため）エスケープしてテキスト表示し、DOM XSS を無効化する。
+/// 予想 MD は純 Markdown なのでこのエスケープで表示は変わらない。
 pub fn render_doc(pad_dir: &Path, rel: &str) -> Result<String, RenderError> {
     if rel.is_empty() || rel.contains("..") {
         return Err(RenderError::Invalid);
@@ -38,7 +39,13 @@ pub fn render_doc(pad_dir: &Path, rel: &str) -> Result<String, RenderError> {
     let mut options = Options::empty();
     options.insert(Options::ENABLE_TABLES);
     options.insert(Options::ENABLE_STRIKETHROUGH);
-    let parser = Parser::new_ext(&md, options);
+    // 生 HTML イベントを Text に落とすことで `html::push_html` がエスケープして出力し、
+    // 万一 MD に <script> 等が混入しても無害化する。
+    let parser = Parser::new_ext(&md, options).map(|event| match event {
+        Event::Html(s) => Event::Text(s),
+        Event::InlineHtml(s) => Event::Text(s),
+        other => other,
+    });
     let mut html_out = String::new();
     html::push_html(&mut html_out, parser);
     Ok(html_out)
@@ -65,6 +72,21 @@ mod tests {
         let html = render_doc(tmp.path(), "20260613/hanshin/4R.md").unwrap();
         assert!(html.contains("<table>"));
         assert!(html.contains("<h1>見出し</h1>"));
+    }
+
+    #[test]
+    fn escapes_raw_html() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join("d")).unwrap();
+        std::fs::write(
+            tmp.path().join("d/x.md"),
+            "ok <script>alert(1)</script> done\n",
+        )
+        .unwrap();
+        let html = render_doc(tmp.path(), "d/x.md").unwrap();
+        // 生 <script> ではなくエスケープされたテキストとして出力される。
+        assert!(!html.contains("<script>"));
+        assert!(html.contains("&lt;script&gt;"));
     }
 
     #[test]
