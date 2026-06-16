@@ -2,6 +2,7 @@ use std::path::Path;
 
 use pulldown_cmark::{Options, Parser, html};
 
+#[derive(Debug)]
 pub enum RenderError {
     /// 不正なパス（traversal・拡張子違い等）。
     Invalid,
@@ -41,4 +42,82 @@ pub fn render_doc(pad_dir: &Path, rel: &str) -> Result<String, RenderError> {
     let mut html_out = String::new();
     html::push_html(&mut html_out, parser);
     Ok(html_out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pad_with_md() -> tempfile::TempDir {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join("20260613/hanshin")).unwrap();
+        std::fs::write(
+            tmp.path().join("20260613/hanshin/4R.md"),
+            "# 見出し\n\n| a | b |\n|---|---|\n| 1 | 2 |\n",
+        )
+        .unwrap();
+        tmp
+    }
+
+    #[test]
+    fn renders_table_to_html() {
+        let tmp = pad_with_md();
+        let html = render_doc(tmp.path(), "20260613/hanshin/4R.md").unwrap();
+        assert!(html.contains("<table>"));
+        assert!(html.contains("<h1>見出し</h1>"));
+    }
+
+    #[test]
+    fn rejects_parent_traversal() {
+        let tmp = pad_with_md();
+        assert!(matches!(
+            render_doc(tmp.path(), "../escape.md"),
+            Err(RenderError::Invalid)
+        ));
+    }
+
+    #[test]
+    fn rejects_non_md_extension() {
+        let tmp = pad_with_md();
+        assert!(matches!(
+            render_doc(tmp.path(), "20260613/hanshin/4R.txt"),
+            Err(RenderError::Invalid)
+        ));
+    }
+
+    #[test]
+    fn rejects_empty_path() {
+        let tmp = pad_with_md();
+        assert!(matches!(
+            render_doc(tmp.path(), ""),
+            Err(RenderError::Invalid)
+        ));
+    }
+
+    #[test]
+    fn missing_file_is_not_found() {
+        let tmp = pad_with_md();
+        assert!(matches!(
+            render_doc(tmp.path(), "20260613/hanshin/99R.md"),
+            Err(RenderError::NotFound)
+        ));
+    }
+
+    #[test]
+    fn rejects_absolute_symlink_escape() {
+        // pad 配下に pad 外を指す symlink を置いても、canonicalize 後の
+        // starts_with 判定で root 外として弾かれること。
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("secret.md"), "# secret").unwrap();
+        let tmp = pad_with_md();
+        let link = tmp.path().join("link.md");
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(outside.path().join("secret.md"), &link).unwrap();
+            assert!(matches!(
+                render_doc(tmp.path(), "link.md"),
+                Err(RenderError::Invalid)
+            ));
+        }
+    }
 }

@@ -67,6 +67,13 @@ async fn main() -> std::io::Result<()> {
 
     let cfg = PadConfig::from_env();
     let port = cfg.port;
+    // pad_dir が無いと全ドキュメント取得が 500 になり原因が分かりにくいため、起動時に警告しておく。
+    if !cfg.pad_dir.exists() {
+        tracing::warn!(
+            "pad_dir が存在しません: {} （PADDOCK_PAD_DIR で指定してください）",
+            cfg.pad_dir.display()
+        );
+    }
     tracing::info!(
         "pad-web listening on http://localhost:{port}  (pad_dir = {})",
         cfg.pad_dir.display()

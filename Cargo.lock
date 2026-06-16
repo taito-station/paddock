@@ -3141,6 +3141,7 @@ dependencies = [
  "pulldown-cmark",
  "serde",
  "serde_json",
+ "tempfile",
  "tracing",
  "tracing-subscriber",
 ]
