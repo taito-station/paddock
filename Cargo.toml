@@ -9,6 +9,7 @@ members = [
     "src/apps/fetch-card",
     "src/apps/fetch-results",
     "src/apps/simulate",
+    "src/apps/web-viewer",
     # Standalone library crate: not yet consumed by any binary, so it is listed
     # explicitly to stay part of the workspace build/test graph.
     "src/interface/odds-scraper",
@@ -16,7 +17,9 @@ members = [
 
 [workspace.dependencies]
 anyhow             = { version = "1.0.*" }
+actix-web          = { version = "4.*" }
 ordered-float      = { version = "5.*" }
+pulldown-cmark     = { version = "0.12.*", default-features = false, features = ["html"] }
 chrono             = { version = "0.4.*", features = ["serde"] }
 clap               = { version = "4.6.*", features = ["derive"] }
 dotenvy            = { version = "0.15.*" }

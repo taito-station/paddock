@@ -251,6 +251,22 @@ cargo run -p predict -- --date 2026-06-01 --settle
 > オッズは `fetch-card`（netkeiba）が `race_odds` テーブルに永続化する。当日のカードを `fetch-card` で
 > 取り込んでおけば買い目推奨まで出る。オッズ未取得のレースはスキップのみになる。
 
+## 予想をブラウザで見る（web-viewer）
+
+Obsidian vault に書き出した予想 Markdown（`pad/{YYYYMMDD}/{開催場}/{RR}R.md`）を、ローカル Web サーバでブラウザ表示する軽量ビューア。確率表・印・買い目テーブルを読みやすく整形し、左ツリー（日付 > 開催場 > レース）から選んで右ペインに表示する。DB には触れず pad ディレクトリを読むだけ。
+
+```bash
+# 起動（http://localhost:8787 を開く）
+cargo run -p web-viewer
+
+# pad ディレクトリ／ポートを変える場合
+PADDOCK_PAD_DIR="/path/to/vault/pad" PAD_WEB_PORT=9000 cargo run -p web-viewer
+```
+
+- `PADDOCK_PAD_DIR`: 予想 MD のルート（既定は iCloud Obsidian vault の `pad/`）。
+- `PAD_WEB_PORT`: 待ち受けポート（既定 `8787`）。
+- 表示は永続化済みの MD をそのままレンダリングするだけで、自動更新やセッション操作はしない（フル GUI 化は #34）。
+
 ## DB
 
 - 既定パス: `data/paddock.db`
