@@ -47,22 +47,6 @@ JRA 公式のレース成績 PDF をパースして SQLite に蓄積し、その
   これらに対しては冗長だが、着順は依然 OCR 由来の値で上書きする余地があるため tesseract は必須のまま
   （撤去は別 PR で検討）。
 
-## データベース
-
-開発用の Postgres を `deployments/compose.yaml` で起動する（Docker / Docker Compose が前提）。
-
-```bash
-docker compose -f deployments/compose.yaml up -d   # 起動（バックグラウンド）
-docker compose -f deployments/compose.yaml ps       # 起動・healthy 確認
-psql postgres://paddock:paddock@localhost:5432/paddock -c '\l'   # 接続確認
-```
-
-接続情報は `.env.example` を `.env` にコピーして調整する（`PADDOCK_DB_URL`）。
-
-> 注: 現状のアプリ既定は SQLite（`data/paddock.db`）で、この PG にはまだ接続しない。Postgres への
-> 移行と、worktree ごとに database 名を変えて分離する運用（seed/reset スクリプト整備を含む）は
-> 後続 PR で行う。
-
 ## ビルド
 
 ```bash
@@ -314,6 +298,21 @@ cargo run -p ingest-predictions -- --render
 - 接続プールは WAL・外部キー有効に加え `busy_timeout=5s` を設定済み（同一クローン内で predict と analyze を
   並行起動したときのロック即時失敗を緩和する）。これは **プロセス間の SQLite ファイルロックの再試行待ち**で、
   プール（`max_connections`）の接続待ちタイムアウトとは別レイヤ。
+
+### 開発用 Postgres（移行先・compose）
+
+DB バックエンドは Postgres へ移行予定（#36）。移行先の PG サーバを `deployments/compose.yaml` で起動できる
+（Docker / Docker Compose が前提）。
+
+```bash
+docker compose -f deployments/compose.yaml up -d   # 起動（バックグラウンド）
+docker compose -f deployments/compose.yaml ps       # healthy 確認
+psql postgres://paddock:paddock@localhost:5432/paddock -c '\l'   # 接続確認
+```
+
+> 注: **現状のアプリはまだ SQLite（上記 `data/paddock.db`）に接続し、この PG は使わない。** コードの
+> Postgres 移行と、移行後の worktree 分離（上記 SQLite の相対パス方式に代わり database 名で分離。
+> seed/reset スクリプトの作り替えを含む）は後続 PR で行う。
 
 ### 並走クローンの seed / reset
 
