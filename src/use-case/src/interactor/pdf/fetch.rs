@@ -53,6 +53,9 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
         // network — silently self-blocking re-acquisition. Leave no history row
         // so it stays a re-fetch candidate. See issue #149.
         if races.is_empty() {
+            // Log which meeting was parser-gapped: the range summary only carries
+            // an empty count, so this is the trail that names the source_key.
+            tracing::info!(%source_key, %url, "fetched but parsed 0 races; not recorded (re-fetchable)");
             return Ok(FetchMeetingResponse {
                 source_key,
                 url,
