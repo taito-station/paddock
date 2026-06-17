@@ -299,6 +299,21 @@ cargo run -p ingest-predictions -- --render
   並行起動したときのロック即時失敗を緩和する）。これは **プロセス間の SQLite ファイルロックの再試行待ち**で、
   プール（`max_connections`）の接続待ちタイムアウトとは別レイヤ。
 
+### 開発用 Postgres（移行先・compose）
+
+DB バックエンドは Postgres へ移行予定（#36）。移行先の PG サーバを `deployments/compose.yaml` で起動できる
+（Docker / Docker Compose が前提）。
+
+```bash
+docker compose -f deployments/compose.yaml up -d   # 起動（バックグラウンド）
+docker compose -f deployments/compose.yaml ps       # healthy 確認
+psql postgres://paddock:paddock@localhost:5432/paddock -c '\l'   # 接続確認
+```
+
+> 注: **現状のアプリはまだ SQLite（上記 `data/paddock.db`）に接続し、この PG は使わない。** コードの
+> Postgres 移行と、移行後の worktree 分離（上記 SQLite の相対パス方式に代わり database 名で分離。
+> seed/reset スクリプトの作り替えを含む）は後続 PR で行う。
+
 ### 並走クローンの seed / reset
 
 並走クローン（worktree / 独立 clone）は DB を共有しない（`PADDOCK_DB_URL` 既定は相対パスで各 cwd 配下）。

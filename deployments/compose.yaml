@@ -1,0 +1,29 @@
+# ローカル/開発用のデータストア。
+#
+#   docker compose -f deployments/compose.yaml up -d
+#
+# paddock の DB バックエンド（Postgres への移行は後続 PR）。各 worktree は
+# この 1 サーバを共有し、worktree ごとに別 database 名で分離する運用を想定する。
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: paddock-postgres
+    # 開発専用の固定資格情報（本番流用禁止）。
+    environment:
+      POSTGRES_USER: paddock
+      POSTGRES_PASSWORD: paddock
+      POSTGRES_DB: paddock
+    # ローカル限定で公開（LAN へ晒さない）。
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - paddock-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U paddock -d paddock"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  paddock-pgdata:
