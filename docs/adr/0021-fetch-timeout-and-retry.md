@@ -31,6 +31,9 @@ JRA の PDF 取得（`pdf_parser::UreqFetcher` / `parse-entries` の `UreqFetche
 
 `parse-entries` の取得は単発（バルクループが無い）ため、ハング防止に効くタイムアウトのみを適用し
 リトライは載せない。リトライ policy はバルク経路の `pdf_parser::UreqFetcher` に集約する。
+なお `parse-entries` の不在判定は**従来どおり 404 のみ**を維持する（`pdf_parser` 側は seiseki の
+実挙動に合わせ 403/404 両方を不在とするが、entries エンドポイントが 403 を不在として返すかは未確認の
+ため、本 PR では挙動を変えない。必要が判明すれば 403 追加を別途検討）。
 
 ## 理由
 - 無限ハングの根治には**全体タイムアウトが必須十分**。リトライは一時的ネットワーク揺らぎ・5xx に

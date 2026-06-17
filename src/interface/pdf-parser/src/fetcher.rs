@@ -113,8 +113,13 @@ impl UreqFetcher {
 
     /// GET `url`, rate-gated, retrying transient failures with exponential
     /// backoff. The rate gate is honored before every attempt (each retry is a
-    /// fresh network request and must stay within the JRA pacing cap). Status
-    /// errors are returned as-is so the caller can map 403/404 to "absent".
+    /// fresh network request and must stay within the JRA pacing cap).
+    ///
+    /// Only the response head is retried here; the body is read by the caller
+    /// (`read_body`), so a stall mid-download is still bounded by the agent's
+    /// `timeout_global` but surfaces as a one-shot `Io` error rather than being
+    /// retried. Status errors are returned as-is: `fetch_if_exists` maps 403/404
+    /// to "absent", while `fetch` surfaces them as errors.
     fn get_with_retry(&self, url: &str) -> std::result::Result<ureq::Body, ureq::Error> {
         let mut attempt = 0;
         loop {
@@ -123,7 +128,10 @@ impl UreqFetcher {
             match self.agent.get(url).call() {
                 Ok(resp) => return Ok(resp.into_body()),
                 Err(err) if attempt < MAX_ATTEMPTS && is_transient(&err) => {
-                    let backoff = RETRY_BASE_BACKOFF * 2u32.pow(attempt - 1);
+                    // Saturating so bumping MAX_ATTEMPTS can never overflow the
+                    // shift or the Duration multiply into a panic.
+                    let backoff =
+                        RETRY_BASE_BACKOFF.saturating_mul(2u32.saturating_pow(attempt - 1));
                     tracing::warn!(
                         url,
                         attempt,
