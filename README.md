@@ -47,6 +47,21 @@ JRA 公式のレース成績 PDF をパースして SQLite に蓄積し、その
   これらに対しては冗長だが、着順は依然 OCR 由来の値で上書きする余地があるため tesseract は必須のまま
   （撤去は別 PR で検討）。
 
+## データベース
+
+開発用の Postgres を `deployments/compose.yaml` で起動する（Docker / Docker Compose が前提）。
+
+```bash
+docker compose -f deployments/compose.yaml up -d   # 起動（バックグラウンド）
+docker compose -f deployments/compose.yaml ps       # 起動・healthy 確認
+psql postgres://paddock:paddock@localhost:5432/paddock -c '\l'   # 接続確認
+```
+
+接続情報は `.env.example` を `.env` にコピーして調整する（`PADDOCK_DB_URL`）。各 worktree は
+この 1 サーバを共有し、database 名を変えて分離する運用を想定する。
+
+> 注: 現状のアプリ既定は SQLite（`data/paddock.db`）。Postgres への移行は後続 PR で行う。
+
 ## ビルド
 
 ```bash
