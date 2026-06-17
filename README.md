@@ -267,6 +267,28 @@ PADDOCK_PAD_DIR="/path/to/vault/pad" PAD_WEB_PORT=9000 cargo run -p web-viewer
 - `PAD_WEB_PORT`: 待ち受けポート（既定 `8787`）。
 - 表示は永続化済みの MD をそのままレンダリングするだけで、自動更新やセッション操作はしない（フル GUI 化は #34）。
 
+## 予想を DB に保存する（ingest-predictions）
+
+予想（印・短評・買い目・結果）を構造化レコードとして DB に永続化する。**DB が正で、pad の MD は
+このレコードから生成する**（手書き MD は不要）。予想を作るときは JSON（仕様: `docs/specifications/prediction-json.md`）を
+吐いて取り込み、必要なら `--render` で MD を生成してビューア（web-viewer）で見る。
+
+```bash
+# 取り込み（stdin もしくは --input <file>）
+cat pred.json | cargo run -p ingest-predictions
+cargo run -p ingest-predictions -- --input pred.json
+
+# パース・検証のみ（保存しない）
+cargo run -p ingest-predictions -- --input pred.json --dry-run
+
+# DB の全予想を pad の MD に生成（PADDOCK_PAD_DIR / --pad-dir で出力先指定）
+cargo run -p ingest-predictions -- --render
+```
+
+- レースは `(date, venue, race_num)` で一意（同キーの再取り込みは upsert＝冪等）。`race_id` は
+  `races`/`race_cards` に一致があれば自動解決して保持する。
+- 保存先は `PADDOCK_DB_URL`（既定 `data/paddock.db`）。検索・絞り込み・的中率の集計は別途（#145）。
+
 ## DB
 
 - 既定パス: `data/paddock.db`
