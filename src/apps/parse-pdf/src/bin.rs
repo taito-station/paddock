@@ -167,10 +167,11 @@ async fn run_fetch(app: Arc<setup::App>, args: FetchArgs) -> anyhow::Result<()> 
     };
 
     println!(
-        "done: {} ingested, {} skipped, {} not-found, {} failed ({} race(s), {} horse result(s))",
+        "done: {} ingested, {} skipped, {} not-found, {} empty, {} failed ({} race(s), {} horse result(s))",
         summary.ingested,
         summary.skipped,
         summary.not_found,
+        summary.empty,
         summary.failed,
         summary.races_saved,
         summary.horses_saved,
@@ -221,6 +222,14 @@ async fn run_fetch_single(
         }
         FetchMeetingOutcome::NotFound => {
             anyhow::bail!("not found: {} (no PDF; HTTP 403/404)", response.url);
+        }
+        FetchMeetingOutcome::Empty => {
+            // Exit non-zero: the PDF exists but yielded 0 races (parser gap). It
+            // is deliberately not recorded, so a later run can re-fetch it.
+            anyhow::bail!(
+                "empty: {} parsed to 0 races (not recorded; will re-fetch)",
+                response.url
+            );
         }
     }
     Ok(())
@@ -301,6 +310,7 @@ fn accumulate_outcome(
             }
             FetchMeetingOutcome::Skipped => summary.skipped += 1,
             FetchMeetingOutcome::NotFound => summary.not_found += 1,
+            FetchMeetingOutcome::Empty => summary.empty += 1,
         },
         Err(e) => {
             summary.failed += 1;
@@ -448,6 +458,11 @@ mod tests {
             "k4".into(),
             Err(paddock_use_case::Error::Internal("boom".into())),
         );
+        accumulate_outcome(
+            &mut s,
+            "k5".into(),
+            Ok(resp("k5", FetchMeetingOutcome::Empty)),
+        );
 
         assert_eq!(s.ingested, 1);
         assert_eq!(s.races_saved, 12);
@@ -455,6 +470,7 @@ mod tests {
         assert_eq!(s.skipped, 1);
         assert_eq!(s.not_found, 1);
         assert_eq!(s.failed, 1);
+        assert_eq!(s.empty, 1);
         // failed meetings retain their key + error so run_fetch can list them.
         assert_eq!(s.failures.len(), 1);
         assert_eq!(s.failures[0].0, "k4");

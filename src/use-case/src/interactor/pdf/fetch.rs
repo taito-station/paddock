@@ -46,6 +46,20 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
         };
 
         let races = self.pdf_parser.parse(&bytes)?;
+
+        // A 0-race parse is treated as a failure, not a success: the PDF exists
+        // (it was fetched), so recording it in fetch history would mark the
+        // meeting "done" and make every later fetch skip it without hitting the
+        // network — silently self-blocking re-acquisition. Leave no history row
+        // so it stays a re-fetch candidate. See issue #149.
+        if races.is_empty() {
+            return Ok(FetchMeetingResponse {
+                source_key,
+                url,
+                outcome: FetchMeetingOutcome::Empty,
+            });
+        }
+
         let mut races_saved = 0usize;
         let mut horses_saved = 0usize;
         for race in &races {
@@ -133,6 +147,12 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
                             FetchMeetingOutcome::Skipped => {
                                 summary.skipped += 1;
                                 // history hit, no network request → no wait
+                            }
+                            FetchMeetingOutcome::Empty => {
+                                // PDF exists but parsed to 0 races: count it and
+                                // keep going (it is not a round/day boundary).
+                                summary.empty += 1;
+                                self.wait(interval).await;
                             }
                             FetchMeetingOutcome::NotFound => {
                                 summary.not_found += 1;

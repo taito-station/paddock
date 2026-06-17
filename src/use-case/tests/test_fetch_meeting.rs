@@ -61,6 +61,16 @@ impl PdfParser for OneRaceParser {
     }
 }
 
+/// Parser that yields no races, mirroring the 2025-autumn parser gap (issue #149):
+/// the PDF is fetched fine but no race is extracted.
+struct ZeroRaceParser;
+
+impl PdfParser for ZeroRaceParser {
+    fn parse(&self, _bytes: &[u8]) -> Result<Vec<Race>> {
+        Ok(Vec::new())
+    }
+}
+
 #[derive(Default)]
 struct MockRepo {
     contains: bool,
@@ -386,6 +396,30 @@ async fn reports_not_found_and_records_nothing_on_404() {
     assert_eq!(resp.outcome, FetchMeetingOutcome::NotFound);
     assert_eq!(*interactor.repository.saved.lock().unwrap(), 0);
     assert!(interactor.repository.recorded.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn reports_empty_and_records_nothing_when_zero_races_parsed() {
+    // The PDF is fetched (Some bytes) but the parser extracts no race. The
+    // meeting must NOT be recorded in history, so a later run can re-fetch it
+    // instead of being self-blocked as a "successful" 0-race ingest (#149).
+    let interactor = Interactor::new(
+        MockRepo::default(),
+        ZeroRaceParser,
+        MockFetcher {
+            body: Some(vec![1, 2, 3]),
+            ..Default::default()
+        },
+    );
+
+    let resp = interactor.fetch_meeting(&spec(), false).await.unwrap();
+
+    assert_eq!(resp.outcome, FetchMeetingOutcome::Empty);
+    assert_eq!(*interactor.repository.saved.lock().unwrap(), 0);
+    assert!(
+        interactor.repository.recorded.lock().unwrap().is_empty(),
+        "a 0-race parse must not be recorded in fetch history"
+    );
 }
 
 // --- range fetch ---------------------------------------------------------
@@ -849,4 +883,36 @@ async fn errors_are_counted_and_do_not_abort_the_range() {
             .all(|(key, _)| key.contains("nakayama")),
         "failures carry the meeting source_key"
     );
+}
+
+#[tokio::test]
+async fn empty_meetings_are_counted_and_enumeration_continues() {
+    // Nakayama round 3: days 1-3 exist but every PDF parses to 0 races; day 4 is
+    // 404. The empty days must be counted (not recorded) and must not stop the
+    // day loop — only the 404 boundary does.
+    let existing: HashSet<String> = (1..=3)
+        .map(|d| url_for(2026, 3, Venue::Nakayama, d))
+        .collect();
+    let interactor = Interactor::new(
+        HistoryRepo::default(),
+        ZeroRaceParser,
+        ExistingUrlsFetcher { existing },
+    );
+
+    let range = MeetingRange {
+        year: 2026,
+        venue: Some(Venue::Nakayama),
+        round: Some(3),
+        day: None,
+    };
+    let summary = interactor
+        .fetch_meeting_range(&range, false, Duration::ZERO)
+        .await
+        .unwrap();
+
+    assert_eq!(summary.empty, 3);
+    assert_eq!(summary.ingested, 0);
+    assert_eq!(summary.not_found, 1); // day 4 stops the round
+    assert_eq!(summary.failed, 0);
+    assert_eq!(*interactor.repository.saved.lock().unwrap(), 0);
 }
