@@ -89,13 +89,21 @@ psql "$admin_url" -v ON_ERROR_STOP=1 -q \
     -c "DROP DATABASE IF EXISTS \"$target_db\" WITH (FORCE);" \
     -c "CREATE DATABASE \"$target_db\";"
 
-psql "$TO_URL" -v ON_ERROR_STOP=1 -q -f "$dump"
-
-# seed 後の sanity check（reset との対称性）。races 件数が golden と一致するか確認する。
-dest_races="$(psql "$TO_URL" -tAc 'SELECT COUNT(*) FROM races;' 2>/dev/null || true)"
-if [[ "$dest_races" != "$races" ]]; then
-    echo "seed 後の races 件数が一致しない（golden=$races, 配置先=${dest_races:-?}）" >&2
+# この段階で配置先は DROP/CREATE 済み（空）。流し込みが失敗するとその空のまま残るため、
+# 状態が分かるよう明示する（再実行で作り直される）。
+if ! psql "$TO_URL" -v ON_ERROR_STOP=1 -q -f "$dump"; then
+    echo "復元に失敗: 配置先 $target_db は空のまま残った。修正のうえ再実行する" >&2
     exit 1
 fi
+
+# seed 後の sanity check（reset との対称性）。races/results 件数が golden と一致するか確認する。
+for t in races results; do
+    g="$(psql "$FROM_URL" -tAc "SELECT COUNT(*) FROM $t;" 2>/dev/null || true)"
+    d="$(psql "$TO_URL"   -tAc "SELECT COUNT(*) FROM $t;" 2>/dev/null || true)"
+    if [[ "$d" != "$g" ]]; then
+        echo "seed 後の $t 件数が一致しない（golden=$g, 配置先=${d:-?}）" >&2
+        exit 1
+    fi
+done
 
 echo "seeded: $FROM_URL -> $TO_URL (races=$races)"
