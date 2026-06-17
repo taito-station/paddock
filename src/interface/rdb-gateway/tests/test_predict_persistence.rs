@@ -230,7 +230,7 @@ async fn race_condition_upsert_overwrites_same_race(pool: sqlx::PgPool) {
 async fn race_condition_save_requires_existing_session_fk(pool: sqlx::PgPool) {
     let repo = PostgresRepository::new(pool);
     // セッションヘッダ未作成のまま保存すると FK 制約（session_date → predict_sessions）違反で
-    // エラーになる。FK が有効（foreign_keys pragma + 制約宣言）であることの回帰検知。
+    // エラーになる。FK 制約宣言が有効（Postgres は FK を常時強制）であることの回帰検知。
     let res = repo
         .save_predict_race_condition(
             date(),

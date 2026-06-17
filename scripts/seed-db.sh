@@ -46,7 +46,9 @@ if [[ -z "$TO_URL" ]]; then
     echo "配置先が未指定: PADDOCK_DB_URL を .env で設定するか --to <url> を渡す" >&2
     exit 1
 fi
-if [[ "$FROM_URL" == "$TO_URL" ]]; then
+# クエリ文字列（?sslmode=... 等）を剥がして比較する（reset-db.sh の golden ガードと対称）。
+# 同一 DB をクエリだけ違う URL で指したときに golden を上書きしないため。
+if [[ "${FROM_URL%%\?*}" == "${TO_URL%%\?*}" ]]; then
     echo "golden と配置先が同一 DB: $TO_URL。別 database を配置先にする" >&2
     exit 1
 fi
@@ -72,9 +74,11 @@ fi
 
 # golden を一時ファイルへダンプし、成否を確かめてから流し込む（パイプ直結だと pg_dump の
 # 途中失敗を取りこぼし、中途半端な DB を「seed 成功」と誤認しうる）。
-dump="$(mktemp -t paddock-seed.XXXXXX.sql)"
+# X はテンプレート末尾に置く（GNU/BSD 双方で確実に展開させるため）。
+dump="$(mktemp "${TMPDIR:-/tmp}/paddock-seed.XXXXXX")"
 trap 'rm -f "$dump"' EXIT
-if ! pg_dump "$FROM_URL" >"$dump"; then
+# --no-owner / --no-privileges で owner・権限文を落とし、ロール差のある環境でも流し込めるようにする。
+if ! pg_dump --no-owner --no-privileges "$FROM_URL" >"$dump"; then
     echo "pg_dump に失敗: $FROM_URL（pg_dump のメジャー版がサーバ未満の可能性）" >&2
     exit 1
 fi

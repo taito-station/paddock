@@ -51,7 +51,10 @@ ALTER SCHEMA 'main' RENAME TO 'public';
 - `disable triggers`: FK 制約を投入中だけ無効化し、テーブル投入順の問題を避ける。FK 由来の
   system trigger を止めるため **superuser 権限が必要**（テーブル owner では不足。compose の `paddock`
   は superuser なので可）。非 superuser 環境では `disable triggers` を外し、親テーブルから順に
-  個別投入（`INCLUDING ONLY TABLE NAMES MATCHING` で順次）する。
+  個別投入（`INCLUDING ONLY TABLE NAMES MATCHING` で 1 テーブルずつ）する。順序の例:
+  **親**（`races` / `horses` / `predict_sessions` / `race_cards`）→ **子**（`results` / `horse_past_runs` /
+  `predict_bets` / `predict_race_conditions` / `horse_entries` / `predictions`）→ **孫**（`prediction_horses` /
+  `prediction_bets`）。`race_odds` は FK 無しなので順不同。
 - `EXCLUDING ...`: 旧 SQLite の `_sqlx_migrations`（旧 50 マイグレーション）と `sqlite_sequence` は移送しない。
 
 実行:
