@@ -1,4 +1,5 @@
 use std::io::Read;
+use std::time::Duration;
 
 use anyhow::Context;
 use entry_parser::MutoolEntryParser;
@@ -8,18 +9,46 @@ use paddock_use_case::pdf_fetcher::PdfFetcher;
 use rdb_gateway::{SqliteRepository, pool};
 use tracing_subscriber::{EnvFilter, fmt};
 
-pub struct UreqFetcher;
+/// Max time to establish the connection / finish the whole request. Without a
+/// global deadline a stalled connection blocks the thread forever (see issue
+/// #152). Entry fetches are single-shot, so no retry is layered on here — the
+/// bulk result fetcher (`pdf_parser::UreqFetcher`) carries the retry policy.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+const GLOBAL_TIMEOUT: Duration = Duration::from_secs(60);
+
+pub struct UreqFetcher {
+    agent: ureq::Agent,
+}
+
+impl Default for UreqFetcher {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl UreqFetcher {
+    pub fn new() -> Self {
+        let agent = ureq::Agent::config_builder()
+            .timeout_connect(Some(CONNECT_TIMEOUT))
+            .timeout_global(Some(GLOBAL_TIMEOUT))
+            .build()
+            .new_agent();
+        Self { agent }
+    }
+}
 
 impl PdfFetcher for UreqFetcher {
     fn fetch(&self, url: &str) -> paddock_use_case::Result<Vec<u8>> {
-        let resp = ureq::get(url)
+        let resp = self
+            .agent
+            .get(url)
             .call()
             .map_err(|e| paddock_use_case::Error::Internal(format!("fetch {url}: {e}")))?;
         read_body(url, resp.into_body())
     }
 
     fn fetch_if_exists(&self, url: &str) -> paddock_use_case::Result<Option<Vec<u8>>> {
-        match ureq::get(url).call() {
+        match self.agent.get(url).call() {
             Ok(resp) => Ok(Some(read_body(url, resp.into_body())?)),
             // 404 means the resource is not published (yet); treat as absent.
             Err(ureq::Error::StatusCode(404)) => Ok(None),
@@ -56,7 +85,11 @@ pub async fn build_app() -> anyhow::Result<App> {
         .context("connect SQLite pool")?;
     pool::migrate(&pool).await.context("apply migrations")?;
     let repo = SqliteRepository::new(pool);
-    Ok(EntryInteractor::new(repo, MutoolEntryParser, UreqFetcher))
+    Ok(EntryInteractor::new(
+        repo,
+        MutoolEntryParser,
+        UreqFetcher::new(),
+    ))
 }
 
 fn ensure_data_dir(database_url: &str) -> anyhow::Result<()> {
