@@ -69,6 +69,24 @@ struct MockRepo {
 }
 
 impl Repository for MockRepo {
+    async fn save_pad_prediction(
+        &self,
+        _: &paddock_domain::PadPrediction,
+        _: chrono::DateTime<chrono::Utc>,
+    ) -> Result<()> {
+        unimplemented!()
+    }
+    async fn find_pad_prediction(
+        &self,
+        _: chrono::NaiveDate,
+        _: paddock_domain::Venue,
+        _: u32,
+    ) -> Result<Option<paddock_domain::PadPrediction>> {
+        unimplemented!()
+    }
+    async fn list_pad_predictions(&self) -> Result<Vec<paddock_domain::PadPrediction>> {
+        unimplemented!()
+    }
     async fn save_race(&self, _race: &Race) -> Result<()> {
         *self.saved.lock().unwrap() += 1;
         Ok(())
@@ -428,6 +446,24 @@ struct HistoryRepo {
 }
 
 impl Repository for HistoryRepo {
+    async fn save_pad_prediction(
+        &self,
+        _: &paddock_domain::PadPrediction,
+        _: chrono::DateTime<chrono::Utc>,
+    ) -> Result<()> {
+        unimplemented!()
+    }
+    async fn find_pad_prediction(
+        &self,
+        _: chrono::NaiveDate,
+        _: paddock_domain::Venue,
+        _: u32,
+    ) -> Result<Option<paddock_domain::PadPrediction>> {
+        unimplemented!()
+    }
+    async fn list_pad_predictions(&self) -> Result<Vec<paddock_domain::PadPrediction>> {
+        unimplemented!()
+    }
     async fn save_race(&self, _race: &Race) -> Result<()> {
         *self.saved.lock().unwrap() += 1;
         Ok(())

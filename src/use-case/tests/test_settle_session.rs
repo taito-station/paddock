@@ -68,6 +68,24 @@ struct MockRepo {
 }
 
 impl Repository for MockRepo {
+    async fn save_pad_prediction(
+        &self,
+        _: &paddock_domain::PadPrediction,
+        _: chrono::DateTime<chrono::Utc>,
+    ) -> Result<()> {
+        unimplemented!()
+    }
+    async fn find_pad_prediction(
+        &self,
+        _: chrono::NaiveDate,
+        _: paddock_domain::Venue,
+        _: u32,
+    ) -> Result<Option<paddock_domain::PadPrediction>> {
+        unimplemented!()
+    }
+    async fn list_pad_predictions(&self) -> Result<Vec<paddock_domain::PadPrediction>> {
+        unimplemented!()
+    }
     async fn find_predict_session(&self, _: NaiveDate) -> Result<Option<PredictSessionRecord>> {
         Ok(Some(self.session.clone()))
     }
@@ -525,6 +543,24 @@ async fn missing_session_returns_not_found() {
         }
     }
     impl Repository for NoSessionRepo {
+        async fn save_pad_prediction(
+            &self,
+            _: &paddock_domain::PadPrediction,
+            _: chrono::DateTime<chrono::Utc>,
+        ) -> Result<()> {
+            unimplemented!()
+        }
+        async fn find_pad_prediction(
+            &self,
+            _: chrono::NaiveDate,
+            _: paddock_domain::Venue,
+            _: u32,
+        ) -> Result<Option<paddock_domain::PadPrediction>> {
+            unimplemented!()
+        }
+        async fn list_pad_predictions(&self) -> Result<Vec<paddock_domain::PadPrediction>> {
+            unimplemented!()
+        }
         async fn find_predict_session(&self, _: NaiveDate) -> Result<Option<PredictSessionRecord>> {
             Ok(None)
         }

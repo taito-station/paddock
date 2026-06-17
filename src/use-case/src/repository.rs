@@ -2,9 +2,9 @@ use core::future::Future;
 
 use chrono::{DateTime, NaiveDate, Utc};
 use paddock_domain::{
-    BetType, HorseId, HorseName, JockeyName, OrderedPair, OrderedTriple, Pair, Race, RaceCard,
-    RaceId, RaceOdds, RecentRun, StandardTimes, Surface, TrackCondition, TrainerName, Triple,
-    Venue,
+    BetType, HorseId, HorseName, JockeyName, OrderedPair, OrderedTriple, PadPrediction, Pair, Race,
+    RaceCard, RaceId, RaceOdds, RecentRun, StandardTimes, Surface, TrackCondition, TrainerName,
+    Triple, Venue,
 };
 
 use crate::error::Result;
@@ -477,4 +477,25 @@ pub trait Repository: Send + Sync {
         record: &PredictRaceConditionRecord,
         recorded_at: DateTime<Utc>,
     ) -> impl Future<Output = Result<()>> + Send;
+
+    /// 予想（印・短評・買い目・結果）を保存する。`(date, venue, race_num)` で upsert し、
+    /// 馬・買い目の子行は入れ替え（delete→insert）で冪等にする。`race_id` は実装側で
+    /// `races`/`race_cards` を `(date, venue, race_num)` 照合し解決できた時のみ格納する。
+    /// `now` は use-case 層が注入し gateway を時計から独立に保つ。
+    fn save_pad_prediction(
+        &self,
+        prediction: &PadPrediction,
+        now: DateTime<Utc>,
+    ) -> impl Future<Output = Result<()>> + Send;
+
+    /// 1 レース分の予想を返す（未保存なら `None`）。
+    fn find_pad_prediction(
+        &self,
+        date: NaiveDate,
+        venue: Venue,
+        race_num: u32,
+    ) -> impl Future<Output = Result<Option<PadPrediction>>> + Send;
+
+    /// 保存済みの全予想を date / venue / race_num 昇順で返す（生成・検証用）。
+    fn list_pad_predictions(&self) -> impl Future<Output = Result<Vec<PadPrediction>>> + Send;
 }

@@ -4,6 +4,7 @@ pub mod error;
 pub mod horse_result;
 mod normalize;
 pub mod odds;
+pub mod pad_prediction;
 pub mod payout;
 pub mod portfolio;
 pub mod prediction;
@@ -25,6 +26,7 @@ pub use horse_result::{
     ResultStatus, TimeSeconds, TrainerName,
 };
 pub use odds::{BetType, OddsValue, OrderedPair, OrderedTriple, Pair, PlaceOdds, RaceOdds, Triple};
+pub use pad_prediction::{Mark, PadPrediction, PredictionBet, PredictionHorse, PredictionResult};
 pub use payout::{RacePayouts, Settlement, settle_bet};
 pub use portfolio::{Portfolio, PortfolioBet, PortfolioConfig, build_portfolio};
 pub use prediction::{

@@ -10,6 +10,7 @@ mod find_recent_runs;
 mod horse_history;
 mod horse_stats;
 mod jockey_stats;
+mod pad_prediction;
 mod predict_session;
 mod save_race;
 mod save_race_card;
@@ -21,8 +22,8 @@ mod update_results;
 
 use chrono::{DateTime, NaiveDate, Utc};
 use paddock_domain::{
-    HorseId, HorseName, JockeyName, Race, RaceCard, RaceId, RaceOdds, RecentRun, StandardTimes,
-    Surface, TrainerName, Venue,
+    HorseId, HorseName, JockeyName, PadPrediction, Race, RaceCard, RaceId, RaceOdds, RecentRun,
+    StandardTimes, Surface, TrainerName, Venue,
 };
 use paddock_use_case::Result as UcResult;
 use paddock_use_case::repository::{
@@ -305,6 +306,33 @@ impl Repository for SqliteRepository {
         recorded_at: DateTime<Utc>,
     ) -> UcResult<()> {
         predict_session::save_predict_race_condition(&self.pool, date, record, recorded_at)
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn save_pad_prediction(
+        &self,
+        prediction: &PadPrediction,
+        now: DateTime<Utc>,
+    ) -> UcResult<()> {
+        pad_prediction::save_pad_prediction(&self.pool, prediction, now)
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn find_pad_prediction(
+        &self,
+        date: NaiveDate,
+        venue: Venue,
+        race_num: u32,
+    ) -> UcResult<Option<PadPrediction>> {
+        pad_prediction::find_pad_prediction(&self.pool, date, venue, race_num)
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn list_pad_predictions(&self) -> UcResult<Vec<PadPrediction>> {
+        pad_prediction::list_pad_predictions(&self.pool)
             .await
             .map_err(Into::into)
     }

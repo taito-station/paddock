@@ -1359,6 +1359,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "ingest-predictions"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "clap",
+ "paddock-config",
+ "paddock-domain",
+ "paddock-use-case",
+ "rdb-gateway",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "is_terminal_polyfill"
 version = "1.70.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

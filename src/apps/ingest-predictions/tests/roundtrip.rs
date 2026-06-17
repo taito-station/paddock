@@ -1,0 +1,135 @@
+//! 予想の保存→取得ラウンドトリップと upsert 冪等性を tempfile DB で検証する。
+
+use chrono::{NaiveDate, Utc};
+use paddock_domain::{
+    Mark, PadPrediction, PredictionBet, PredictionHorse, PredictionResult, Venue,
+};
+use paddock_use_case::repository::Repository;
+use rdb_gateway::{SqliteRepository, pool};
+
+fn sample() -> PadPrediction {
+    PadPrediction {
+        date: NaiveDate::from_ymd_opt(2026, 6, 13).unwrap(),
+        venue: Venue::Hanshin,
+        race_num: 4,
+        title: Some("3歳未勝利".into()),
+        budget: Some(10000),
+        strategy_note: Some("人気軸＋相手広め".into()),
+        commentary: Some("中位人気の相手抜けが反省点".into()),
+        horses: vec![
+            PredictionHorse {
+                horse_num: 7,
+                horse_name: "ラパンドール".into(),
+                jockey: Some("松山".into()),
+                mark: Some(Mark::Honmei),
+                win_odds: Some(2.4),
+                popularity: Some(1),
+                win_prob: Some(25.4),
+                place_prob: Some(25.4),
+                show_prob: Some(25.4),
+                comment: Some("単独最上位".into()),
+            },
+            PredictionHorse {
+                horse_num: 4,
+                horse_name: "ファランギーナ".into(),
+                jockey: Some("松若".into()),
+                mark: Some(Mark::Renge),
+                win_odds: Some(13.2),
+                popularity: Some(6),
+                win_prob: Some(6.1),
+                place_prob: Some(15.2),
+                show_prob: Some(21.4),
+                comment: None,
+            },
+        ],
+        bets: vec![
+            PredictionBet {
+                bet_type: "単勝".into(),
+                combination: "7".into(),
+                amount: 600,
+            },
+            PredictionBet {
+                bet_type: "馬連".into(),
+                combination: "7-14".into(),
+                amount: 1000,
+            },
+        ],
+        result: Some(PredictionResult {
+            finish: [Some(7), Some(4), Some(13)],
+            recovery_rate: Some(52.1),
+            pnl: Some(-4790),
+            note: Some("印は上位3頭を捕捉".into()),
+        }),
+    }
+}
+
+async fn repo() -> (tempfile::TempDir, SqliteRepository) {
+    let tmp = tempfile::tempdir().unwrap();
+    let url = format!("sqlite://{}?mode=rwc", tmp.path().join("t.db").display());
+    let p = pool::connect(&url).await.unwrap();
+    pool::migrate(&p).await.unwrap();
+    (tmp, SqliteRepository::new(p))
+}
+
+#[tokio::test]
+async fn save_find_roundtrip() {
+    let (_tmp, repo) = repo().await;
+    let pred = sample();
+    repo.save_pad_prediction(&pred, Utc::now()).await.unwrap();
+
+    let got = repo
+        .find_pad_prediction(pred.date, pred.venue, pred.race_num)
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(got.title.as_deref(), Some("3歳未勝利"));
+    assert_eq!(got.budget, Some(10000));
+    // 馬は horse_num 昇順で返る（4 → 7）。
+    assert_eq!(got.horses.len(), 2);
+    assert_eq!(got.horses[0].horse_num, 4);
+    assert_eq!(got.horses[0].horse_name, "ファランギーナ");
+    assert_eq!(got.horses[0].mark, Some(Mark::Renge));
+    assert_eq!(got.horses[1].horse_num, 7);
+    assert_eq!(got.horses[1].horse_name, "ラパンドール");
+    assert_eq!(got.horses[1].mark, Some(Mark::Honmei));
+    assert_eq!(got.horses[1].win_prob, Some(25.4));
+    assert_eq!(got.bets.len(), 2);
+    assert_eq!(got.bets[1].combination, "7-14");
+    let r = got.result.unwrap();
+    assert_eq!(r.finish, [Some(7), Some(4), Some(13)]);
+    assert_eq!(r.pnl, Some(-4790));
+}
+
+#[tokio::test]
+async fn re_save_is_idempotent_and_replaces_children() {
+    let (_tmp, repo) = repo().await;
+    repo.save_pad_prediction(&sample(), Utc::now())
+        .await
+        .unwrap();
+
+    // 子を減らして同キーで再保存 → 重複せず置き換わる。
+    let mut p2 = sample();
+    p2.horses.truncate(1);
+    p2.bets.clear();
+    repo.save_pad_prediction(&p2, Utc::now()).await.unwrap();
+
+    let all = repo.list_pad_predictions().await.unwrap();
+    assert_eq!(all.len(), 1, "同キー再保存で予想が重複してはならない");
+    assert_eq!(all[0].horses.len(), 1, "馬の子行が置き換わる");
+    assert_eq!(all[0].bets.len(), 0, "買い目の子行が置き換わる");
+}
+
+#[tokio::test]
+async fn missing_prediction_is_none() {
+    let (_tmp, repo) = repo().await;
+    let got = repo
+        .find_pad_prediction(
+            NaiveDate::from_ymd_opt(2026, 1, 1).unwrap(),
+            Venue::Tokyo,
+            1,
+        )
+        .await
+        .unwrap();
+    assert!(got.is_none());
+}
