@@ -59,6 +59,11 @@ pub enum FetchMeetingOutcome {
     /// The PDF does not exist (HTTP 403 or 404) — e.g. not published yet, or past
     /// the meeting's real round/day range.
     NotFound,
+    /// The PDF was fetched but parsed to **zero races** (e.g. a parser gap for a
+    /// particular PDF generation). Deliberately *not* recorded in fetch history,
+    /// so the meeting stays a re-fetch candidate instead of being silently
+    /// self-blocked as a "successful" 0-race ingest. See issue #149.
+    Empty,
 }
 
 #[derive(Debug, Clone)]
@@ -127,6 +132,10 @@ pub struct FetchRangeSummary {
     pub skipped: usize,
     pub not_found: usize,
     pub failed: usize,
+    /// Meetings whose PDF was fetched but parsed to zero races (not recorded,
+    /// so still re-fetchable). Tracked separately from `failed` because the PDF
+    /// exists — it is a parser gap, not a fetch error.
+    pub empty: usize,
     pub races_saved: usize,
     pub horses_saved: usize,
     /// (source_key, error message) for each meeting that errored mid-range.
