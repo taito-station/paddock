@@ -287,66 +287,49 @@ cargo run -p ingest-predictions -- --render
 
 - レースは `(date, venue, race_num)` で一意（同キーの再取り込みは upsert＝冪等）。`race_id` は
   `races`/`race_cards` に一致があれば自動解決して保持する。
-- 保存先は `PADDOCK_DB_URL`（既定 `data/paddock.db`）。検索・絞り込み・的中率の集計は別途（#145）。
+- 保存先は `PADDOCK_DB_URL`（Postgres）。検索・絞り込み・的中率の集計は別途（#145）。
 
 ## DB
 
-- 既定パス: `data/paddock.db`
-- スキーマは初回起動時に自動マイグレート（`deployments/db/migrations/`）
-- 環境変数 `PADDOCK_DB_URL` で接続先を上書き可能（例: `sqlite://./other.db?mode=rwc`）
-- DB を作り直したい場合は `data/paddock.db` を消してから取り込み直し
-- 接続プールは WAL・外部キー有効に加え `busy_timeout=5s` を設定済み（同一クローン内で predict と analyze を
-  並行起動したときのロック即時失敗を緩和する）。これは **プロセス間の SQLite ファイルロックの再試行待ち**で、
-  プール（`max_connections`）の接続待ちタイムアウトとは別レイヤ。
+- バックエンドは **Postgres**。`deployments/compose.yaml` で起動する
+  （`docker compose -f deployments/compose.yaml up -d`）。
+- 接続先は環境変数 `PADDOCK_DB_URL`（既定 `postgres://paddock:paddock@localhost:5432/paddock`）。
+  `.env.example` を `.env` にコピーして調整する。
+- スキーマは各アプリ起動時に自動マイグレート（`deployments/db/migrations/`、sqlx）。接続プールは `max_connections=5`。
+- テスト（`rdb-gateway` の統合テスト等）は `#[sqlx::test]` がテストごとに一時 database を自動作成・破棄する。
+  実行時に PG を指す `DATABASE_URL` が要る（例: `DATABASE_URL=postgres://paddock:paddock@localhost:5432/paddock cargo test`）。
 
-### 開発用 Postgres（移行先・compose）
+### worktree ごとの分離
 
-DB バックエンドは Postgres へ移行予定（#36）。移行先の PG サーバを `deployments/compose.yaml` で起動できる
-（Docker / Docker Compose が前提）。
+各 worktree は 1 つの PG サーバを共有し、**database 名を変えて分離する**（`.env` の `PADDOCK_DB_URL`
+末尾の DB 名を worktree 別にする。例: `.../paddock_feat_xxx`）。別 database は `seed-db.sh` が作成・複製する。
 
-```bash
-docker compose -f deployments/compose.yaml up -d   # 起動（バックグラウンド）
-docker compose -f deployments/compose.yaml ps       # healthy 確認
-psql postgres://paddock:paddock@localhost:5432/paddock -c '\l'   # 接続確認
-```
+### seed / reset（並走 worktree）
 
-> 注: **現状のアプリはまだ SQLite（上記 `data/paddock.db`）に接続し、この PG は使わない。** コードの
-> Postgres 移行と、移行後の worktree 分離（上記 SQLite の相対パス方式に代わり database 名で分離。
-> seed/reset スクリプトの作り替えを含む）は後続 PR で行う。
-
-### 並走クローンの seed / reset
-
-並走クローン（worktree / 独立 clone）は DB を共有しない（`PADDOCK_DB_URL` 既定は相対パスで各 cwd 配下）。
-新しいクローンは空の DB から始まるため、predict / backtest / analyze を実データで回すにはフル re-ingest が要る。
-これを避けるため、ingest 済みの clone（golden）から DB スナップショットを配置する `scripts/` を用意している。
-（`sqlite3` CLI が必要。既定パスは cwd 相対なので **対象クローンの root で実行**する。）
+新しい worktree の database は空なので、実データで predict / backtest / analyze を回すには golden
+（ingest 済みの DB。既定: 同サーバの `paddock`）から複製する。`psql` / `pg_dump`（libpq クライアント）が要る
+（`pg_dump` のメジャー版はサーバ（PG 17）以上が必要。例: `brew install postgresql@17`）。
 
 ```bash
-# 並走クローンを切る → そのクローン内で seed → 実データで予想/解析
-scripts/seed-db.sh            # primary clone を git 自動検出し、その data/paddock.db を ./data へ配置
-scripts/seed-db.sh --from /path/to/golden.db   # golden を明示
-scripts/seed-db.sh --to /path/to/data          # 配置先 data ディレクトリを明示
-PADDOCK_GOLDEN_DB=/path/to/golden.db scripts/seed-db.sh
+scripts/seed-db.sh                       # golden(paddock) → $PADDOCK_DB_URL へ複製
+scripts/seed-db.sh --from <golden_url>   # golden を明示
+scripts/seed-db.sh --to <target_url>     # 配置先 DB を明示
+PADDOCK_GOLDEN_DB_URL=<url> scripts/seed-db.sh
 
-scripts/reset-db.sh           # ./data/paddock.db を .bak へ退避して空に戻す（再 seed / 再 ingest 前提）
-scripts/reset-db.sh --to /path/to/data   # 対象 data ディレクトリを明示
-scripts/reset-db.sh --no-backup          # 退避せず削除
+scripts/reset-db.sh                      # $PADDOCK_DB_URL の database を空に戻す
+scripts/reset-db.sh --to <target_url>    # 対象 DB を明示
 ```
 
-- seed は `sqlite3` の `.backup`（オンラインバックアップ）で一貫スナップショットを作るため、golden が
-  **実行中でも安全**で、コミット済み状態と WAL を取り込んだ単一ファイルを配置する（WAL/SHM 残骸を残さない）。
-- 既定の golden 元は `git rev-parse --git-common-dir` から辿った primary clone の `data/paddock.db`。
-  worktree 以外の独立 clone から seed する場合は `--from` か `PADDOCK_GOLDEN_DB` で明示する。
-- 配置前に既存 `data/paddock.db`（と `-wal`/`-shm`）は `.bak-<日時>` に退避される（`data/*.bak-*` は gitignore 済み）。
-  退避を戻すときは同じ `<日時>` の `.db` / `-wal` / `-shm` を揃えて元名に rename する。
-- **seed / reset は対象クローンの app（predict / analyze / fetch 等）を停止してから実行する**。稼働中プロセスが開いている DB の `-wal`/`-shm` を退避・削除すると、そのプロセス側の DB 整合性を壊しうるため。
-- `reset-db.sh` は primary clone（golden 元）の `data` を対象にすると既定で中断する（全クローンの seed 元を失うため）。意図的に primary を reset するときのみ `--force` を付ける。
+- seed は配置先 database を作り直し、golden を `pg_dump | psql` で丸ごと複製する
+  （`_sqlx_migrations` も含むので配置後に再マイグレートは走らない）。
+- reset は対象 database を `DROP/CREATE` して空にする。次回アプリ起動で自動マイグレートされる。
+- seed / reset とも、対象 database を使用中のアプリは停止してから実行する。
+- golden（`paddock`）への reset は誤爆防止で既定中断する。意図的なら `--force`。
 
-### マイグレーション注意
+### 既存 SQLite からのデータ移行
 
-`results.status` カラム (migration `20260427000002`) は `NOT NULL DEFAULT 'finished'`。
-既存 DB に当てると過去レコードは全て `finished` になるため、競走除外馬が混在していた場合は誤情報になる。
-status 情報を正確に取り直すには対象 PDF を再 ingest する（同じ `race_id` の UPSERT で全フィールドが上書きされる）。
+過去の `data/paddock.db`（SQLite）に貯めた実データを Postgres へ移すには、pgloader 手順
+[`docs/runbooks/sqlite-to-postgres-migration.md`](docs/runbooks/sqlite-to-postgres-migration.md) を参照。
 
 ## 開発
 

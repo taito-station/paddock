@@ -1,0 +1,14 @@
+DROP TABLE IF EXISTS prediction_bets;
+DROP TABLE IF EXISTS prediction_horses;
+DROP TABLE IF EXISTS predictions;
+DROP TABLE IF EXISTS predict_race_conditions;
+DROP TABLE IF EXISTS horse_past_runs;
+DROP TABLE IF EXISTS horses;
+DROP TABLE IF EXISTS race_odds;
+DROP TABLE IF EXISTS predict_bets;
+DROP TABLE IF EXISTS predict_sessions;
+DROP TABLE IF EXISTS horse_entries;
+DROP TABLE IF EXISTS race_cards;
+DROP TABLE IF EXISTS fetch_history;
+DROP TABLE IF EXISTS results;
+DROP TABLE IF EXISTS races;

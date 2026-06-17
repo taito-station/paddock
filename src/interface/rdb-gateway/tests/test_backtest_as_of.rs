@@ -1,4 +1,4 @@
-//! バックテスト基盤 (#30) の中核を実 SQLite で検証する:
+//! バックテスト基盤 (#30) の中核をPostgres で検証する:
 //! - `horse_stats` の as-of 日付カットオフ（`races.date < D`）がリークを防ぐこと
 //! - `find_finished_races_between` が期間内の確定レースを results 付きで返し、`from > to` で空になること
 
@@ -8,16 +8,7 @@ use paddock_domain::{
     Surface, Venue,
 };
 use paddock_use_case::repository::Repository;
-use rdb_gateway::{SqliteRepository, pool};
-
-async fn fresh_repo() -> (SqliteRepository, tempfile::TempDir) {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let db_path = dir.path().join("test.db");
-    let url = format!("sqlite://{}?mode=rwc", db_path.display());
-    let p = pool::connect(&url).await.expect("connect");
-    pool::migrate(&p).await.expect("migrate");
-    (SqliteRepository::new(p), dir)
-}
+use rdb_gateway::PostgresRepository;
 
 fn ymd(y: i32, m: u32, d: u32) -> NaiveDate {
     NaiveDate::from_ymd_opt(y, m, d).unwrap()
@@ -65,9 +56,9 @@ fn turf_starts(row: &paddock_use_case::repository::HorseStatsRow) -> (u32, u32) 
     (g.starts, g.wins)
 }
 
-#[tokio::test]
-async fn horse_stats_as_of_excludes_same_day_and_future() {
-    let (repo, _dir) = fresh_repo().await;
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn horse_stats_as_of_excludes_same_day_and_future(pool: sqlx::PgPool) {
+    let repo = PostgresRepository::new(pool);
     // 同一馬が 1/1 と 2/1 に各 1 勝。
     repo.save_race(&race_with_winner(
         "2026-1-1-1R",
@@ -111,9 +102,9 @@ async fn horse_stats_as_of_excludes_same_day_and_future() {
     assert_eq!(turf_starts(&as_of_jan1), (0, 0), "当日も除外で 0 戦");
 }
 
-#[tokio::test]
-async fn find_finished_races_between_returns_results_in_range() {
-    let (repo, _dir) = fresh_repo().await;
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn find_finished_races_between_returns_results_in_range(pool: sqlx::PgPool) {
+    let repo = PostgresRepository::new(pool);
     repo.save_race(&race_with_winner(
         "2026-1-1-1R",
         ymd(2026, 1, 1),
@@ -156,9 +147,9 @@ async fn find_finished_races_between_returns_results_in_range() {
     assert_eq!(found[0].results[0].odds, Some(3.0));
 }
 
-#[tokio::test]
-async fn find_finished_races_between_empty_when_from_after_to() {
-    let (repo, _dir) = fresh_repo().await;
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn find_finished_races_between_empty_when_from_after_to(pool: sqlx::PgPool) {
+    let repo = PostgresRepository::new(pool);
     repo.save_race(&race_with_winner(
         "2026-2-1-1R",
         ymd(2026, 2, 1),

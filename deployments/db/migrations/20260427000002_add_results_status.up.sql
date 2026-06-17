@@ -1,1 +1,0 @@
-ALTER TABLE results ADD COLUMN status TEXT NOT NULL DEFAULT 'finished';

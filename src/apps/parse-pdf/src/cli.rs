@@ -3,7 +3,7 @@ use clap::{Args, Parser, Subcommand};
 #[derive(Debug, Parser)]
 #[command(
     name = "paddock-parse-pdf",
-    about = "Parse JRA race-result PDFs and store the data into SQLite",
+    about = "Parse JRA race-result PDFs and store the data into Postgres",
     version,
     args_conflicts_with_subcommands = true
 )]

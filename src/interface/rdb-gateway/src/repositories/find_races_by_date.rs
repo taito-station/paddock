@@ -1,6 +1,6 @@
 use chrono::NaiveDate;
 use paddock_domain::{Race, RaceId, Surface, TrackCondition, Venue, Weather};
-use sqlx::SqlitePool;
+use sqlx::PgPool;
 
 use crate::error::Result;
 
@@ -31,7 +31,7 @@ struct RaceRow {
 ///
 /// netkeiba 近走由来の合成レース（`source='netkeiba'`、過去日付の `nk-<id>`）は
 /// 予想対象ではないため `source = 'pdf'` で除外する（混入すると予想候補として現れてしまう）。
-pub async fn find_races_by_date(pool: &SqlitePool, date: NaiveDate) -> Result<Vec<Race>> {
+pub async fn find_races_by_date(pool: &PgPool, date: NaiveDate) -> Result<Vec<Race>> {
     let date_str = date.format("%Y-%m-%d").to_string();
 
     let rows: Vec<RaceRow> = sqlx::query_as(

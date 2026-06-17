@@ -1,4 +1,4 @@
-//! 再取り込みの非破壊性 (#61) を実 SQLite で検証する:
+//! 再取り込みの非破壊性 (#61) をPostgres で検証する:
 //! - `save_race` の再取り込みが backfill 済み `horse_id` を温存すること（全消し DELETE 廃止）
 //! - 今回の出走集合に無い馬番（取消・除外）だけが掃除されること
 //! - `save_race_card` も同様に非破壊で、消えた馬番のみ掃除されること
@@ -9,16 +9,7 @@ use paddock_domain::{
     RaceId, ResultStatus, Surface, TrainerName, Venue,
 };
 use paddock_use_case::repository::Repository;
-use rdb_gateway::{SqliteRepository, pool};
-
-async fn fresh_repo() -> (SqliteRepository, tempfile::TempDir) {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let db_path = dir.path().join("test.db");
-    let url = format!("sqlite://{}?mode=rwc", db_path.display());
-    let p = pool::connect(&url).await.expect("connect");
-    pool::migrate(&p).await.expect("migrate");
-    (SqliteRepository::new(p), dir)
-}
+use rdb_gateway::PostgresRepository;
 
 fn d() -> NaiveDate {
     NaiveDate::from_ymd_opt(2026, 4, 19).unwrap()
@@ -60,9 +51,9 @@ fn race(race_id: &str, results: Vec<HorseResult>) -> Race {
     }
 }
 
-async fn horse_id_of(repo: &SqliteRepository, race_id: &str, horse_num: i64) -> Option<String> {
+async fn horse_id_of(repo: &PostgresRepository, race_id: &str, horse_num: i64) -> Option<String> {
     let row: Option<(Option<String>,)> =
-        sqlx::query_as("SELECT horse_id FROM results WHERE race_id = ? AND horse_num = ?")
+        sqlx::query_as("SELECT horse_id FROM results WHERE race_id = $1 AND horse_num = $2")
             .bind(race_id)
             .bind(horse_num)
             .fetch_optional(&repo.pool)
@@ -71,9 +62,9 @@ async fn horse_id_of(repo: &SqliteRepository, race_id: &str, horse_num: i64) -> 
     row.and_then(|r| r.0)
 }
 
-async fn result_horse_nums(repo: &SqliteRepository, race_id: &str) -> Vec<i64> {
+async fn result_horse_nums(repo: &PostgresRepository, race_id: &str) -> Vec<i64> {
     let rows: Vec<(i64,)> =
-        sqlx::query_as("SELECT horse_num FROM results WHERE race_id = ? ORDER BY horse_num")
+        sqlx::query_as("SELECT horse_num FROM results WHERE race_id = $1 ORDER BY horse_num")
             .bind(race_id)
             .fetch_all(&repo.pool)
             .await
@@ -81,16 +72,16 @@ async fn result_horse_nums(repo: &SqliteRepository, race_id: &str) -> Vec<i64> {
     rows.into_iter().map(|r| r.0).collect()
 }
 
-#[tokio::test]
-async fn reingest_preserves_backfilled_horse_id() {
-    let (repo, _dir) = fresh_repo().await;
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn reingest_preserves_backfilled_horse_id(pool: sqlx::PgPool) {
+    let repo = PostgresRepository::new(pool);
     let rid = "2026-3-nakayama-8-1R";
     repo.save_race(&race(rid, vec![result(1, "ウマA"), result(2, "ウマB")]))
         .await
         .unwrap();
 
     // #60 の backfill を模して horse_id を後入れする（pdf は horse_id を持たない）。
-    sqlx::query("UPDATE results SET horse_id = ? WHERE race_id = ? AND horse_num = 1")
+    sqlx::query("UPDATE results SET horse_id = $1 WHERE race_id = $2 AND horse_num = 1")
         .bind("2020100001")
         .bind(rid)
         .execute(&repo.pool)
@@ -110,14 +101,14 @@ async fn reingest_preserves_backfilled_horse_id() {
     assert_eq!(result_horse_nums(&repo, rid).await, vec![1, 2]);
 }
 
-#[tokio::test]
-async fn reingest_removes_only_absent_horse_nums() {
-    let (repo, _dir) = fresh_repo().await;
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn reingest_removes_only_absent_horse_nums(pool: sqlx::PgPool) {
+    let repo = PostgresRepository::new(pool);
     let rid = "2026-3-nakayama-8-1R";
     repo.save_race(&race(rid, vec![result(1, "ウマA"), result(2, "ウマB")]))
         .await
         .unwrap();
-    sqlx::query("UPDATE results SET horse_id = ? WHERE race_id = ? AND horse_num = 1")
+    sqlx::query("UPDATE results SET horse_id = $1 WHERE race_id = $2 AND horse_num = 1")
         .bind("2020100001")
         .bind(rid)
         .execute(&repo.pool)
@@ -141,9 +132,9 @@ async fn reingest_removes_only_absent_horse_nums() {
     );
 }
 
-#[tokio::test]
-async fn reingest_with_empty_results_keeps_existing_rows() {
-    let (repo, _dir) = fresh_repo().await;
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn reingest_with_empty_results_keeps_existing_rows(pool: sqlx::PgPool) {
+    let repo = PostgresRepository::new(pool);
     let rid = "2026-3-nakayama-8-1R";
     repo.save_race(&race(rid, vec![result(1, "ウマA"), result(2, "ウマB")]))
         .await
@@ -159,9 +150,9 @@ async fn reingest_with_empty_results_keeps_existing_rows() {
     );
 }
 
-#[tokio::test]
-async fn save_race_card_reingest_removes_only_absent_entries() {
-    let (repo, _dir) = fresh_repo().await;
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn save_race_card_reingest_removes_only_absent_entries(pool: sqlx::PgPool) {
+    let repo = PostgresRepository::new(pool);
     let rid = "2026-3-nakayama-8-1R";
     let entry = |n: u32| HorseEntry {
         gate_num: GateNum::try_from(1u32).unwrap(),
@@ -200,11 +191,11 @@ async fn save_race_card_reingest_removes_only_absent_entries() {
     assert_eq!(nums, vec![1, 3], "出走取消の 2 番だけが掃除される");
 }
 
-#[tokio::test]
-async fn save_race_card_coalesce_keeps_trainer_from_netkeiba() {
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn save_race_card_coalesce_keeps_trainer_from_netkeiba(pool: sqlx::PgPool) {
     // trainer は netkeiba 経路のみが埋める。PDF 経路（trainer=None）が後から同じ race_id を
     // 書いても、COALESCE により netkeiba が入れた trainer が消えないことを検証する（#74）。
-    let (repo, _dir) = fresh_repo().await;
+    let repo = PostgresRepository::new(pool);
     let rid = "2026-3-nakayama-8-2R";
     let make_card = |trainer: Option<&str>| RaceCard {
         race_id: RaceId::try_from(rid).unwrap(),

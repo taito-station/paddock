@@ -3,7 +3,7 @@ use paddock_domain::{
     BetType, HorseNum, OddsValue, OrderedPair, OrderedTriple, Pair, PlaceOdds, RaceId, RaceOdds,
     Triple,
 };
-use sqlx::SqlitePool;
+use sqlx::PgPool;
 
 use crate::error::{Error, Result};
 
@@ -23,7 +23,7 @@ struct OddsRow {
 /// いずれの券種の行も無ければ `None`。combination_key はドメインの `from_key()` でパースし、
 /// 単勝・複勝の単一馬番キーは [`parse_horse_num`] で扱う。
 pub async fn find_race_odds(
-    pool: &SqlitePool,
+    pool: &PgPool,
     race_id: &RaceId,
     as_of: Option<NaiveDate>,
 ) -> Result<Option<RaceOdds>> {
@@ -40,7 +40,7 @@ pub async fn find_race_odds(
         SELECT bet_type, combination_key, odds, odds_high
         FROM race_odds
         WHERE race_id = $1
-            AND ($2 IS NULL OR date(fetched_at) <= $2)
+            AND ($2 IS NULL OR substr(fetched_at, 1, 10) <= $2)
         "#,
     )
     .bind(race_id.value())

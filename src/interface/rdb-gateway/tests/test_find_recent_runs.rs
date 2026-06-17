@@ -1,4 +1,4 @@
-//! `find_recent_runs`（前走フォーム #31 用）を実 SQLite で検証する:
+//! `find_recent_runs`（前走フォーム #31 用）をPostgres で検証する:
 //! `races.date < before` で前走のみ返し、date 降順・limit が効くこと。
 
 use chrono::NaiveDate;
@@ -7,16 +7,7 @@ use paddock_domain::{
     Surface, Venue,
 };
 use paddock_use_case::repository::Repository;
-use rdb_gateway::{SqliteRepository, pool};
-
-async fn fresh_repo() -> (SqliteRepository, tempfile::TempDir) {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let db_path = dir.path().join("test.db");
-    let url = format!("sqlite://{}?mode=rwc", db_path.display());
-    let p = pool::connect(&url).await.expect("connect");
-    pool::migrate(&p).await.expect("migrate");
-    (SqliteRepository::new(p), dir)
-}
+use rdb_gateway::PostgresRepository;
 
 fn ymd(y: i32, m: u32, d: u32) -> NaiveDate {
     NaiveDate::from_ymd_opt(y, m, d).unwrap()
@@ -62,9 +53,9 @@ fn race_run(
     }
 }
 
-#[tokio::test]
-async fn find_recent_runs_respects_cutoff_order_and_limit() {
-    let (repo, _dir) = fresh_repo().await;
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn find_recent_runs_respects_cutoff_order_and_limit(pool: sqlx::PgPool) {
+    let repo = PostgresRepository::new(pool);
     // ウマX が 1/10, 2/10, 3/10 に出走。
     repo.save_race(&race_run("r-1", ymd(2026, 1, 10), "ウマX", 3, 4, 2))
         .await
@@ -113,11 +104,11 @@ async fn find_recent_runs_respects_cutoff_order_and_limit() {
     assert!(none.is_empty(), "当日含む以前は前走なし");
 }
 
-#[tokio::test]
-async fn find_recent_runs_is_deterministic_on_same_date_ties() {
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn find_recent_runs_is_deterministic_on_same_date_ties(pool: sqlx::PgPool) {
     // 同一馬の同一日に 2 走（pdf と netkeiba の二重登録を模す。race_id 違い）。
     // race_id 降順タイブレークにより LIMIT 1 の選択が決定的になること。
-    let (repo, _dir) = fresh_repo().await;
+    let repo = PostgresRepository::new(pool);
     repo.save_race(&race_run("aaa-low", ymd(2026, 2, 10), "ウマY", 8, 9, 0))
         .await
         .unwrap();

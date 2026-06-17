@@ -1,4 +1,4 @@
-use sqlx::SqlitePool;
+use sqlx::PgPool;
 
 use crate::error::Result;
 
@@ -9,7 +9,7 @@ use crate::error::Result;
 /// - `horse_id IS NULL` 限定なので冪等（既存値は上書きしない）。
 /// - `results` は #59 以降 pdf 確定成績専用だが、その前提が崩れても netkeiba 由来行へ
 ///   誤って backfill しないよう `source = 'pdf'` を明示する（防御）。
-pub async fn backfill_results_horse_ids(pool: &SqlitePool) -> Result<u64> {
+pub async fn backfill_results_horse_ids(pool: &PgPool) -> Result<u64> {
     let affected = sqlx::query(
         r#"
         UPDATE results

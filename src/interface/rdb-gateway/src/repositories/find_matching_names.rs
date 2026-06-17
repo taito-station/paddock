@@ -1,4 +1,4 @@
-use sqlx::SqlitePool;
+use sqlx::PgPool;
 
 use crate::error::Result;
 
@@ -17,7 +17,7 @@ fn escape_like(query: &str) -> String {
 /// 前方ワイルドカードのため `horse_name` の index は使われずフルスキャンになるが、`results`
 /// 規模では許容する（大規模化したら FTS 等を検討）。
 pub async fn find_matching_horse_names(
-    pool: &SqlitePool,
+    pool: &PgPool,
     query: &str,
     limit: u32,
 ) -> Result<Vec<String>> {
@@ -25,9 +25,9 @@ pub async fn find_matching_horse_names(
         r#"
         SELECT DISTINCT horse_name
         FROM results
-        WHERE horse_name LIKE '%' || ? || '%' ESCAPE '\'
+        WHERE horse_name LIKE '%' || $1 || '%' ESCAPE '\'
         ORDER BY horse_name
-        LIMIT ?
+        LIMIT $2
         "#,
     )
     .bind(escape_like(query))
@@ -39,7 +39,7 @@ pub async fn find_matching_horse_names(
 
 /// 騎手名版（[`find_matching_horse_names`] と同方針）。`results.jockey` が NULL の行は除外する。
 pub async fn find_matching_jockey_names(
-    pool: &SqlitePool,
+    pool: &PgPool,
     query: &str,
     limit: u32,
 ) -> Result<Vec<String>> {
@@ -48,9 +48,9 @@ pub async fn find_matching_jockey_names(
         SELECT DISTINCT jockey
         FROM results
         WHERE jockey IS NOT NULL
-          AND jockey LIKE '%' || ? || '%' ESCAPE '\'
+          AND jockey LIKE '%' || $1 || '%' ESCAPE '\'
         ORDER BY jockey
-        LIMIT ?
+        LIMIT $2
         "#,
     )
     .bind(escape_like(query))
@@ -62,7 +62,7 @@ pub async fn find_matching_jockey_names(
 
 /// 調教師名版（[`find_matching_horse_names`] と同方針）。`results.trainer` が NULL の行は除外する。
 pub async fn find_matching_trainer_names(
-    pool: &SqlitePool,
+    pool: &PgPool,
     query: &str,
     limit: u32,
 ) -> Result<Vec<String>> {
@@ -71,9 +71,9 @@ pub async fn find_matching_trainer_names(
         SELECT DISTINCT trainer
         FROM results
         WHERE trainer IS NOT NULL
-          AND trainer LIKE '%' || ? || '%' ESCAPE '\'
+          AND trainer LIKE '%' || $1 || '%' ESCAPE '\'
         ORDER BY trainer
-        LIMIT ?
+        LIMIT $2
         "#,
     )
     .bind(escape_like(query))

@@ -1,4 +1,4 @@
-//! #60: pdf 成績行の horse_id backfill を実 SQLite で検証する。
+//! #60: pdf 成績行の horse_id backfill をPostgres で検証する。
 //! - 馬名が horses にちょうど 1 件一致 → horse_id が埋まる
 //! - 同名別馬（horses に 2 件）/ horses に無い名前 → NULL 据え置き
 //! - 冪等性（2 回目は 0 行）・既存 horse_id は上書きしない
@@ -9,16 +9,7 @@ use paddock_domain::{
     Surface, Venue,
 };
 use paddock_use_case::repository::Repository;
-use rdb_gateway::{SqliteRepository, pool};
-
-async fn fresh_repo() -> (SqliteRepository, tempfile::TempDir) {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let db_path = dir.path().join("test.db");
-    let url = format!("sqlite://{}?mode=rwc", db_path.display());
-    let p = pool::connect(&url).await.expect("connect");
-    pool::migrate(&p).await.expect("migrate");
-    (SqliteRepository::new(p), dir)
-}
+use rdb_gateway::PostgresRepository;
 
 /// pdf 成績 1 頭分のレースを作る（horse_id は None＝pdf 経路相当）。
 fn pdf_race(race_id: &str, race_num: u32, horse: &str) -> Race {
@@ -53,8 +44,8 @@ fn pdf_race(race_id: &str, race_num: u32, horse: &str) -> Race {
     }
 }
 
-async fn insert_horse(repo: &SqliteRepository, horse_id: &str, name: &str) {
-    sqlx::query("INSERT INTO horses (horse_id, horse_name) VALUES (?, ?)")
+async fn insert_horse(repo: &PostgresRepository, horse_id: &str, name: &str) {
+    sqlx::query("INSERT INTO horses (horse_id, horse_name) VALUES ($1, $2)")
         .bind(horse_id)
         .bind(name)
         .execute(&repo.pool)
@@ -62,8 +53,8 @@ async fn insert_horse(repo: &SqliteRepository, horse_id: &str, name: &str) {
         .unwrap();
 }
 
-async fn horse_id_of(repo: &SqliteRepository, race_id: &str) -> Option<String> {
-    let row: (Option<String>,) = sqlx::query_as("SELECT horse_id FROM results WHERE race_id = ?")
+async fn horse_id_of(repo: &PostgresRepository, race_id: &str) -> Option<String> {
+    let row: (Option<String>,) = sqlx::query_as("SELECT horse_id FROM results WHERE race_id = $1")
         .bind(race_id)
         .fetch_one(&repo.pool)
         .await
@@ -71,9 +62,9 @@ async fn horse_id_of(repo: &SqliteRepository, race_id: &str) -> Option<String> {
     row.0
 }
 
-#[tokio::test]
-async fn backfills_only_unique_name_matches() {
-    let (repo, _dir) = fresh_repo().await;
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn backfills_only_unique_name_matches(pool: sqlx::PgPool) {
+    let repo = PostgresRepository::new(pool);
     // ユニーク一致 / 同名別馬（2 件）/ horses に無い名前 の 3 ケース。
     insert_horse(&repo, "2019104567", "ウマユニーク").await;
     insert_horse(&repo, "2018100001", "ウマ被り").await;
@@ -109,9 +100,9 @@ async fn backfills_only_unique_name_matches() {
     );
 }
 
-#[tokio::test]
-async fn fills_multiple_rows_and_returns_total_count() {
-    let (repo, _dir) = fresh_repo().await;
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn fills_multiple_rows_and_returns_total_count(pool: sqlx::PgPool) {
+    let repo = PostgresRepository::new(pool);
     insert_horse(&repo, "2019100001", "ウマA").await;
     insert_horse(&repo, "2019100002", "ウマB").await;
     repo.save_race(&pdf_race("2026-3-tokyo-2-1R", 1, "ウマA"))
@@ -133,9 +124,9 @@ async fn fills_multiple_rows_and_returns_total_count() {
     );
 }
 
-#[tokio::test]
-async fn idempotent_and_preserves_existing() {
-    let (repo, _dir) = fresh_repo().await;
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn idempotent_and_preserves_existing(pool: sqlx::PgPool) {
+    let repo = PostgresRepository::new(pool);
     insert_horse(&repo, "2019104567", "ウマユニーク").await;
     repo.save_race(&pdf_race("2026-3-tokyo-2-1R", 1, "ウマユニーク"))
         .await
@@ -150,7 +141,7 @@ async fn idempotent_and_preserves_existing() {
     );
 
     // 別 horse_id へ手動変更後に再実行しても上書きしない。
-    sqlx::query("UPDATE results SET horse_id = ? WHERE race_id = ?")
+    sqlx::query("UPDATE results SET horse_id = $1 WHERE race_id = $2")
         .bind("9999999999")
         .bind("2026-3-tokyo-2-1R")
         .execute(&repo.pool)

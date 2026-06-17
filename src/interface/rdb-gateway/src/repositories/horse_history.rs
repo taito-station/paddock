@@ -1,7 +1,7 @@
 use paddock_domain::HorseId;
 use paddock_use_case::HorsePastRun;
 use paddock_use_case::paddock_race_id_from_netkeiba;
-use sqlx::SqlitePool;
+use sqlx::PgPool;
 
 use crate::error::Result;
 
@@ -12,7 +12,7 @@ use crate::error::Result;
 /// pdf 側 `results.race_id` と同一名前空間に揃える（`find_recent_runs` の dedup 用）。
 /// `(horse_id, race_id)` 衝突時は後勝ちで上書きする（再取得＝最新値で更新する想定）。
 pub async fn upsert_horse_history(
-    pool: &SqlitePool,
+    pool: &PgPool,
     horse_id: &HorseId,
     runs: &[HorsePastRun],
 ) -> Result<usize> {

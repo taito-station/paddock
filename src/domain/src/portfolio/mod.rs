@@ -356,11 +356,7 @@ mod tests {
         };
         let pf = build_portfolio(&probs, &o, 5000, &config);
         // 相手 1 頭では三連複は組めない（C(1,2)=0）。馬連・ワイドは 1 点ずつ。
-        assert!(
-            !pf.bets
-                .iter()
-                .any(|b| b.combination.type_label() == "trio")
-        );
+        assert!(!pf.bets.iter().any(|b| b.combination.type_label() == "trio"));
         assert_eq!(pf.partners, vec![horse(2)]);
     }
 
@@ -467,6 +463,10 @@ mod tests {
         assert_eq!(quinella.len(), 2, "200 円では 100 円 × 2 点まで");
         assert!(pf.total_stake <= 200);
         // ワイド・三連複は配分 0 なので無し。
-        assert!(pf.bets.iter().all(|b| b.combination.type_label() == "quinella"));
+        assert!(
+            pf.bets
+                .iter()
+                .all(|b| b.combination.type_label() == "quinella")
+        );
     }
 }

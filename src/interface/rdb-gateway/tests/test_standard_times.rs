@@ -1,4 +1,4 @@
-//! `standard_times`（前走タイム相対速度シグナル #76 用）を実 SQLite で検証する:
+//! `standard_times`（前走タイム相対速度シグナル #76 用）をPostgres で検証する:
 //! (surface, distance) 別に完走タイムを平均し、最小標本数未満のバケツを除外、`date < before`
 //! で as-of リークを防ぐこと。
 
@@ -9,16 +9,7 @@ use paddock_domain::{
 };
 use paddock_use_case::HorsePastRun;
 use paddock_use_case::repository::Repository;
-use rdb_gateway::{SqliteRepository, pool};
-
-async fn fresh_repo() -> (SqliteRepository, tempfile::TempDir) {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let db_path = dir.path().join("test.db");
-    let url = format!("sqlite://{}?mode=rwc", db_path.display());
-    let p = pool::connect(&url).await.expect("connect");
-    pool::migrate(&p).await.expect("migrate");
-    (SqliteRepository::new(p), dir)
-}
+use rdb_gateway::PostgresRepository;
 
 fn ymd(y: i32, m: u32, d: u32) -> NaiveDate {
     NaiveDate::from_ymd_opt(y, m, d).unwrap()
@@ -71,9 +62,9 @@ fn race_with_times(
     }
 }
 
-#[tokio::test]
-async fn standard_times_averages_and_drops_thin_buckets() {
-    let (repo, _dir) = fresh_repo().await;
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn standard_times_averages_and_drops_thin_buckets(pool: sqlx::PgPool) {
+    let repo = PostgresRepository::new(pool);
     // 芝2000: 5 サンプル（>= 閾値）→ 平均 100.0 を採用。
     repo.save_race(&race_with_times(
         "turf-2000",
@@ -100,9 +91,9 @@ async fn standard_times_averages_and_drops_thin_buckets() {
     assert_eq!(st.get(Surface::Dirt, 1200), None, "閾値未満は除外");
 }
 
-#[tokio::test]
-async fn standard_times_respects_as_of_cutoff() {
-    let (repo, _dir) = fresh_repo().await;
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn standard_times_respects_as_of_cutoff(pool: sqlx::PgPool) {
+    let repo = PostgresRepository::new(pool);
     // before=2/1 より後（3/10）のレースは集計から除外される（リーク防止）。
     repo.save_race(&race_with_times(
         "turf-1600-future",
@@ -150,12 +141,12 @@ fn nk_run(nk_id: &str, date: NaiveDate, race_num: u32, time: f64) -> HorsePastRu
     }
 }
 
-#[tokio::test]
-async fn standard_times_aggregates_pdf_and_netkeiba_sources() {
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn standard_times_aggregates_pdf_and_netkeiba_sources(pool: sqlx::PgPool) {
     // 標準タイムは results(pdf) と horse_past_runs(netkeiba) の UNION で集計する。
     // どちらか単独では閾値(5)未満だが、両ソースを合算すると到達するケースで
     // netkeiba UNION 分岐の実行と cross-source 集計を固定する。
-    let (repo, _dir) = fresh_repo().await;
+    let repo = PostgresRepository::new(pool);
     // pdf 1 件（芝2000, 100.0 秒）。
     repo.save_race(&race_with_times(
         "turf-2000-pdf",
@@ -185,12 +176,12 @@ async fn standard_times_aggregates_pdf_and_netkeiba_sources() {
     );
 }
 
-#[tokio::test]
-async fn standard_times_excludes_zero_seconds() {
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn standard_times_excludes_zero_seconds(pool: sqlx::PgPool) {
     // TimeSeconds は 0.0 を許容するため、0 秒の異常行が平均・標本数に混ざらないことを固定する
     // （SQL の `time_seconds > 0` ガード）。0 秒 1 件 + 100 秒 5 件 → 0 秒を除いた平均 100.0、
     // 母数も 5 件として閾値判定される（0 秒を数えると 6 件・平均は下振れする）。
-    let (repo, _dir) = fresh_repo().await;
+    let repo = PostgresRepository::new(pool);
     repo.save_race(&race_with_times(
         "turf-2000-zero",
         ymd(2026, 1, 10),

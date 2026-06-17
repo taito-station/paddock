@@ -5,7 +5,7 @@ use paddock_domain::{
     FinishingPosition, GateNum, HorseId, HorseName, HorseNum, HorseResult, JockeyName, Race,
     RaceId, ResultStatus, Surface, TimeSeconds, TrackCondition, TrainerName, Venue, Weather,
 };
-use sqlx::SqlitePool;
+use sqlx::PgPool;
 
 use crate::error::Result;
 
@@ -51,7 +51,7 @@ pub(crate) struct ResultRow {
 ///
 /// N+1 を避けるため、レース一覧と results をそれぞれ 1 クエリで取得し、Rust 側で race_id 突合する。
 pub async fn find_finished_races_between(
-    pool: &SqlitePool,
+    pool: &PgPool,
     from: NaiveDate,
     to: NaiveDate,
 ) -> Result<Vec<Race>> {

@@ -8,7 +8,7 @@ use chrono::{DateTime, NaiveDate, Utc};
 use paddock_domain::{
     Mark, PadPrediction, PredictionBet, PredictionHorse, PredictionResult, Venue,
 };
-use sqlx::{Row, SqlitePool};
+use sqlx::{PgPool, Row};
 
 use crate::error::{Error, Result};
 
@@ -19,7 +19,7 @@ fn date_key(date: NaiveDate) -> String {
 /// `races` / `race_cards` を `(date, venue, race_num)` で照合し race_id を解決する。
 /// 見つからなければ `None`（未確定・未取込レース）。venue は日本語名で格納されている。
 async fn resolve_race_id(
-    pool: &SqlitePool,
+    pool: &PgPool,
     date_str: &str,
     venue_jp: &str,
     race_num: u32,
@@ -48,7 +48,7 @@ async fn resolve_race_id(
 }
 
 pub async fn save_pad_prediction(
-    pool: &SqlitePool,
+    pool: &PgPool,
     prediction: &PadPrediction,
     now: DateTime<Utc>,
 ) -> Result<()> {
@@ -191,7 +191,7 @@ const HEADER_COLUMNS: &str = "prediction_id, date, venue, race_num, title, budge
 
 /// `prediction_horses` の 1 行を `PredictionHorse` に変換する（find / list 共通）。
 /// `prediction_id` 列の有無に依存しないので、単一・一括どちらの SELECT でも使える。
-fn row_to_horse(row: &sqlx::sqlite::SqliteRow) -> Result<PredictionHorse> {
+fn row_to_horse(row: &sqlx::postgres::PgRow) -> Result<PredictionHorse> {
     let mark: Option<String> = row.try_get("mark")?;
     Ok(PredictionHorse {
         horse_num: row.try_get::<i64, _>("horse_num")? as u32,
@@ -209,7 +209,7 @@ fn row_to_horse(row: &sqlx::sqlite::SqliteRow) -> Result<PredictionHorse> {
     })
 }
 
-async fn load_horses(pool: &SqlitePool, prediction_id: i64) -> Result<Vec<PredictionHorse>> {
+async fn load_horses(pool: &PgPool, prediction_id: i64) -> Result<Vec<PredictionHorse>> {
     let rows = sqlx::query(
         r#"
         SELECT horse_num, horse_name, jockey, mark, win_odds, popularity,
@@ -225,7 +225,7 @@ async fn load_horses(pool: &SqlitePool, prediction_id: i64) -> Result<Vec<Predic
     rows.iter().map(row_to_horse).collect()
 }
 
-async fn load_bets(pool: &SqlitePool, prediction_id: i64) -> Result<Vec<PredictionBet>> {
+async fn load_bets(pool: &PgPool, prediction_id: i64) -> Result<Vec<PredictionBet>> {
     let rows: Vec<(String, String, i64)> = sqlx::query_as(
         r#"
         SELECT bet_type, combination, amount
@@ -287,7 +287,7 @@ fn build_prediction(
 }
 
 pub async fn find_pad_prediction(
-    pool: &SqlitePool,
+    pool: &PgPool,
     date: NaiveDate,
     venue: Venue,
     race_num: u32,
@@ -311,7 +311,7 @@ pub async fn find_pad_prediction(
     }
 }
 
-pub async fn list_pad_predictions(pool: &SqlitePool) -> Result<Vec<PadPrediction>> {
+pub async fn list_pad_predictions(pool: &PgPool) -> Result<Vec<PadPrediction>> {
     let headers: Vec<PredictionHeaderRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT {HEADER_COLUMNS} FROM predictions ORDER BY date ASC, venue ASC, race_num ASC"
     )))

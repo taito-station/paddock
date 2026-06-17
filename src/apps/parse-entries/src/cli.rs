@@ -3,7 +3,7 @@ use clap::Parser;
 #[derive(Debug, Parser)]
 #[command(
     name = "paddock-parse-entries",
-    about = "Parse JRA race-card (出馬表) PDFs and store the data into SQLite",
+    about = "Parse JRA race-card (出馬表) PDFs and store the data into Postgres",
     version
 )]
 pub struct Cli {

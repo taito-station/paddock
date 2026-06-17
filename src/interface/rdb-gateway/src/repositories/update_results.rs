@@ -1,6 +1,6 @@
 use paddock_domain::RaceId;
 use paddock_use_case::netkeiba_scraper::ResultRow;
-use sqlx::SqlitePool;
+use sqlx::PgPool;
 
 use crate::error::Result;
 
@@ -13,11 +13,7 @@ use crate::error::Result;
 /// 値カラムは `COALESCE($新値, 既存)` とし、netkeiba パースが当該セルで `None` を返した場合は
 /// 既存の PDF 値を温存する（単一セル欠落で既存データを NULL 破壊しない）。`status` は netkeiba が
 /// 常に値を持つ（完走/取消/中止…）ため直接上書きする。
-pub async fn update_results(
-    pool: &SqlitePool,
-    race_id: &RaceId,
-    rows: &[ResultRow],
-) -> Result<u64> {
+pub async fn update_results(pool: &PgPool, race_id: &RaceId, rows: &[ResultRow]) -> Result<u64> {
     let mut tx = pool.begin().await?;
     let mut updated = 0u64;
     for r in rows {

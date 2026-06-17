@@ -1,6 +1,6 @@
 use paddock_domain::OddsValue;
 use paddock_use_case::RaceOddsRecord;
-use sqlx::SqlitePool;
+use sqlx::PgPool;
 
 use crate::error::Result;
 
@@ -21,7 +21,7 @@ fn is_invalid_odds(v: f64) -> bool {
 /// ここで弾くのは値域違反のみ。band（複勝・ワイド）の構造的不整合（odds_high NULL・low>high）は
 /// 保存側バグの早期検知のため意図的にガードせず、読み取り側で `Error` として顕在化させる
 /// （find_race_odds::parse_band 参照。「保存できるが読めない」のは検知すべき不正状態のため許容）。
-pub async fn save_race_odds(pool: &SqlitePool, record: &RaceOddsRecord) -> Result<()> {
+pub async fn save_race_odds(pool: &PgPool, record: &RaceOddsRecord) -> Result<()> {
     let mut tx = pool.begin().await?;
 
     let fetched_at = record.fetched_at.to_rfc3339();

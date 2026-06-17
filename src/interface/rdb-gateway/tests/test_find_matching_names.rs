@@ -1,4 +1,4 @@
-//! #50: 馬名/騎手名の部分一致（中間一致）検索を実 SQLite で検証する。
+//! #50: 馬名/騎手名の部分一致（中間一致）検索をPostgres で検証する。
 //! - 中間一致で部分入力がヒット / 複数候補が返る / 正規化（半角カナ入力で全角格納名）/ limit
 //! - 該当なしで空 / 騎手も同様
 
@@ -8,16 +8,7 @@ use paddock_domain::{
     ResultStatus, Surface, Venue,
 };
 use paddock_use_case::repository::Repository;
-use rdb_gateway::{SqliteRepository, pool};
-
-async fn fresh_repo() -> (SqliteRepository, tempfile::TempDir) {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let db_path = dir.path().join("test.db");
-    let url = format!("sqlite://{}?mode=rwc", db_path.display());
-    let p = pool::connect(&url).await.expect("connect");
-    pool::migrate(&p).await.expect("migrate");
-    (SqliteRepository::new(p), dir)
-}
+use rdb_gateway::PostgresRepository;
 
 /// 1 頭分の成績レース（horse_name は HorseName 正規化を通る）。
 fn race(race_id: &str, horse: &str, jockey: &str) -> Race {
@@ -52,7 +43,7 @@ fn race(race_id: &str, horse: &str, jockey: &str) -> Race {
     }
 }
 
-async fn seed(repo: &SqliteRepository) {
+async fn seed(repo: &PostgresRepository) {
     // 「ダイワ」を含む 2 頭 + 無関係 1 頭。
     repo.save_race(&race("2026-3-tokyo-2-1R", "ダイワスカーレット", "ルメール"))
         .await
@@ -65,9 +56,9 @@ async fn seed(repo: &SqliteRepository) {
         .unwrap();
 }
 
-#[tokio::test]
-async fn horse_partial_match_returns_multiple_sorted() {
-    let (repo, _dir) = fresh_repo().await;
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn horse_partial_match_returns_multiple_sorted(pool: sqlx::PgPool) {
+    let repo = PostgresRepository::new(pool);
     seed(&repo).await;
 
     let hits = repo.find_matching_horse_names("ダイワ", 20).await.unwrap();
@@ -85,9 +76,9 @@ async fn horse_partial_match_returns_multiple_sorted() {
     assert_eq!(mid, vec!["イクイノックス"]);
 }
 
-#[tokio::test]
-async fn horse_query_is_normalized_halfwidth_kana() {
-    let (repo, _dir) = fresh_repo().await;
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn horse_query_is_normalized_halfwidth_kana(pool: sqlx::PgPool) {
+    let repo = PostgresRepository::new(pool);
     seed(&repo).await;
 
     // 半角カナ入力を HorseName で正規化 → 全角格納名にヒットする。
@@ -96,9 +87,9 @@ async fn horse_query_is_normalized_halfwidth_kana() {
     assert_eq!(hits, vec!["イクイノックス"]);
 }
 
-#[tokio::test]
-async fn horse_no_match_is_empty_and_limit_applies() {
-    let (repo, _dir) = fresh_repo().await;
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn horse_no_match_is_empty_and_limit_applies(pool: sqlx::PgPool) {
+    let repo = PostgresRepository::new(pool);
     seed(&repo).await;
 
     assert!(
@@ -112,9 +103,9 @@ async fn horse_no_match_is_empty_and_limit_applies() {
     assert_eq!(one, vec!["ダイワスカーレット"]);
 }
 
-#[tokio::test]
-async fn like_wildcards_in_query_are_escaped() {
-    let (repo, _dir) = fresh_repo().await;
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn like_wildcards_in_query_are_escaped(pool: sqlx::PgPool) {
+    let repo = PostgresRepository::new(pool);
     seed(&repo).await;
     // `_`/`%` はワイルドカードでなくリテラル扱い → 馬名に含まれないので該当なし。
     assert!(
@@ -131,9 +122,9 @@ async fn like_wildcards_in_query_are_escaped() {
     );
 }
 
-#[tokio::test]
-async fn jockey_partial_match_and_distinct() {
-    let (repo, _dir) = fresh_repo().await;
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn jockey_partial_match_and_distinct(pool: sqlx::PgPool) {
+    let repo = PostgresRepository::new(pool);
     seed(&repo).await;
 
     // ルメールは 2 レースに騎乗 → DISTINCT で 1 件。
