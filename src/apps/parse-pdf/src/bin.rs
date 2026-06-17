@@ -240,6 +240,8 @@ async fn run_fetch_single(
 /// to `parallel` meetings at once, reusing `fetch_meeting` so each ingested meeting
 /// is still recorded in `fetch_history`. Discovery 403/404s are cheap and counted
 /// as not-found; already-ingested meetings short-circuit as skipped (no network).
+/// A fetched PDF that parses to 0 races is counted as empty and (per
+/// `fetch_meeting`) left unrecorded so it stays a re-fetch candidate.
 ///
 /// Unlike the sequential path it emits no truncation warning when a meeting reaches
 /// `ROUND_CAP`/`DAY_CAP`; the caps sit above real JRA maxima, so the grid is expected

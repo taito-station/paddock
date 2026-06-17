@@ -29,6 +29,11 @@ pub struct RaceHeader {
 /// [`parse_header`]: a race whose start line read `…日小雨` was otherwise not
 /// detected as a boundary, silently merging it into the previous race's block
 /// and dropping one race per meeting.
+///
+/// Detection only needs to recognize the *start* of the weather token, so the
+/// class is a single char here (no `+`), whereas [`parse_header`] captures the
+/// full weather word with `[晴曇雨雪小]+`. The asymmetry is intentional:
+/// detection is lenient, parsing is precise.
 pub fn is_race_start_line(line: &str) -> bool {
     let trimmed = line.trim();
     let re = Regex::new(r"^\d{5}\s*\d+月\d+日\s*[晴曇雨雪小]").unwrap();
@@ -182,6 +187,11 @@ mod tests {
         assert!(is_race_start_line("2701010月4日小雨"));
         // Non-header lines must still be rejected.
         assert!(!is_race_start_line("枠番馬番馬名"));
+        // Adding `小` to the weather class must not create false positives: a
+        // line containing `小` but lacking the code+date shape stays rejected.
+        assert!(!is_race_start_line("当日は小雨"));
+        // 5 digits followed by `小` but no `月日` date is not a race start.
+        assert!(!is_race_start_line("12345小雨"));
     }
 
     #[test]

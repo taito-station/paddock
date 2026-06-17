@@ -151,6 +151,8 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
                             FetchMeetingOutcome::Empty => {
                                 // PDF exists but parsed to 0 races: count it and
                                 // keep going (it is not a round/day boundary).
+                                // The PDF was downloaded (network round-trip), so
+                                // wait afterwards like the other fetched outcomes.
                                 summary.empty += 1;
                                 self.wait(interval).await;
                             }

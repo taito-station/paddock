@@ -916,3 +916,40 @@ async fn empty_meetings_are_counted_and_enumeration_continues() {
     assert_eq!(summary.failed, 0);
     assert_eq!(*interactor.repository.saved.lock().unwrap(), 0);
 }
+
+#[tokio::test]
+async fn empty_day1_does_not_stop_round_enumeration() {
+    // round unspecified: round 1 and round 2 each have a day-1 PDF that parses
+    // to 0 races (Empty); day 2 of each is 404; round 3 day 1 is 404. An Empty
+    // day 1 must NOT be mistaken for an absent round (only a 404 day 1 is), so
+    // enumeration must reach round 2 — proven by empty == 2.
+    let existing: HashSet<String> = [
+        url_for(2026, 1, Venue::Nakayama, 1),
+        url_for(2026, 2, Venue::Nakayama, 1),
+    ]
+    .into_iter()
+    .collect();
+    let interactor = Interactor::new(
+        HistoryRepo::default(),
+        ZeroRaceParser,
+        ExistingUrlsFetcher { existing },
+    );
+
+    let range = MeetingRange {
+        year: 2026,
+        venue: Some(Venue::Nakayama),
+        round: None,
+        day: None,
+    };
+    let summary = interactor
+        .fetch_meeting_range(&range, false, Duration::ZERO)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        summary.empty, 2,
+        "round 2 was reached despite round 1 day 1 empty"
+    );
+    assert_eq!(summary.ingested, 0);
+    assert_eq!(summary.failed, 0);
+}
