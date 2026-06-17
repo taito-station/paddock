@@ -8,7 +8,7 @@ use crate::error::Result;
 ///
 /// jockey/trainer を netkeiba の略名表記に揃え、PDF 由来の馬主混入・フルネーム不一致を解消する
 /// （predict の entry↔results join が噛み合うようにする）。`(race_id, horse_num)` 一致行のみを
-/// 更新し、INSERT はしない（既存 566 レースの母数差し替え用途）。更新できた行数を返す。
+/// 更新し、INSERT はしない（既存レースの母数差し替え用途）。更新できた行数を返す。
 ///
 /// 値カラムは `COALESCE($新値, 既存)` とし、netkeiba パースが当該セルで `None` を返した場合は
 /// 既存の PDF 値を温存する（単一セル欠落で既存データを NULL 破壊しない）。`status` は netkeiba が

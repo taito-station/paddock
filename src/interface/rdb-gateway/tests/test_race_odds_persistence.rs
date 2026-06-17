@@ -1,5 +1,5 @@
-//! `race_odds` の保存(save_race_odds)→読み出し(find_race_odds)をPostgres で往復検証する。
-//! 単勝・複勝・組合せ券種(#38)の復元と、backtest 用の `as_of`（`date(fetched_at) <= d`）境界を担保する。
+//! `race_odds` の保存(save_race_odds)→読み出し(find_race_odds)を Postgres で往復検証する。
+//! 単勝・複勝・組合せ券種(#38)の復元と、backtest 用の `as_of`（`substr(fetched_at,1,10) <= d`）境界を担保する。
 
 use chrono::{DateTime, NaiveDate, TimeZone, Utc};
 use paddock_domain::{HorseNum, OrderedPair, OrderedTriple, Pair, RaceId, Triple};
@@ -394,7 +394,7 @@ async fn wide_row_with_null_odds_high_is_data_error(pool: sqlx::PgPool) {
 #[sqlx::test(migrations = "../../../deployments/db/migrations")]
 async fn as_of_filters_combination_rows(pool: sqlx::PgPool) {
     let repo = PostgresRepository::new(pool);
-    // 組合せ券種行にも as_of(date(fetched_at)<=d) のリーク防止境界が効くことを担保する。
+    // 組合せ券種行にも as_of(substr(fetched_at,1,10)<=d) のリーク防止境界が効くことを担保する。
     let pair = Pair::try_from((horse(1), horse(2))).unwrap();
     repo.save_race_odds(&RaceOddsRecord {
         race_id: race_id(),
@@ -428,7 +428,7 @@ async fn as_of_filters_on_fetched_at_date(pool: sqlx::PgPool) {
     let repo = PostgresRepository::new(pool);
     save_sample(&repo).await; // fetched_at = 2026-04-19
 
-    // 当日以降の as_of は対象（date(fetched_at) <= as_of）。
+    // 当日以降の as_of は対象（substr(fetched_at,1,10) <= as_of）。
     let same_day = NaiveDate::from_ymd_opt(2026, 4, 19).unwrap();
     assert!(
         repo.find_race_odds(&race_id(), Some(same_day))

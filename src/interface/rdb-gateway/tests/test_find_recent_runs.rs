@@ -1,4 +1,4 @@
-//! `find_recent_runs`（前走フォーム #31 用）をPostgres で検証する:
+//! `find_recent_runs`（前走フォーム #31 用）を Postgres で検証する:
 //! `races.date < before` で前走のみ返し、date 降順・limit が効くこと。
 
 use chrono::NaiveDate;

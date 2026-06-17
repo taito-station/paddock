@@ -1,4 +1,4 @@
-//! `standard_times`（前走タイム相対速度シグナル #76 用）をPostgres で検証する:
+//! `standard_times`（前走タイム相対速度シグナル #76 用）を Postgres で検証する:
 //! (surface, distance) 別に完走タイムを平均し、最小標本数未満のバケツを除外、`date < before`
 //! で as-of リークを防ぐこと。
 

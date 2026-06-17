@@ -34,7 +34,7 @@ const UPSERT_SESSION_SQL: &str = r#"
 
 /// `UPSERT_SESSION_SQL` に session の各値をバインドする。
 ///
-/// 金額（円）は `u64` だが SQLite INTEGER は `i64`。賭け金は現実的に `i64::MAX` に
+/// 金額（円）は `u64` だが Postgres BIGINT は `i64`。賭け金は現実的に `i64::MAX` に
 /// 達しないためキャストで安全。仮に超えても `as i64` でサイレントに負値化するだけで
 /// DB は受理する点に留意（ドメイン上は起き得ない）。
 fn bind_session<'q>(

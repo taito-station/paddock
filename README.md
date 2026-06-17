@@ -325,6 +325,7 @@ scripts/reset-db.sh --to <target_url>    # 対象 DB を明示
 - reset は対象 database を `DROP/CREATE` して空にする。次回アプリ起動で自動マイグレートされる。
 - seed / reset とも、対象 database を使用中のアプリは停止してから実行する。
 - golden（`paddock`）への reset は誤爆防止で既定中断する。意図的なら `--force`。
+- DROP/CREATE DATABASE の管理接続には同サーバの `postgres` database を使う（compose の PG には存在）。
 
 ### 既存 SQLite からのデータ移行
 

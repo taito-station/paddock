@@ -1,4 +1,4 @@
-//! `predict_sessions` / `predict_bets` の永続化をPostgres（#[sqlx::test] の一時DB）で往復検証する。
+//! `predict_sessions` / `predict_bets` の永続化を Postgres（#[sqlx::test] の一時DB）で往復検証する。
 //! オッズ未整備のためライブセッションでは買い目を発生させられないので、賭けを伴う
 //! payout/bets の保存・復元はこの結合テストで担保する。
 

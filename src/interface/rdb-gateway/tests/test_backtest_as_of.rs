@@ -1,4 +1,4 @@
-//! バックテスト基盤 (#30) の中核をPostgres で検証する:
+//! バックテスト基盤 (#30) の中核を Postgres で検証する:
 //! - `horse_stats` の as-of 日付カットオフ（`races.date < D`）がリークを防ぐこと
 //! - `find_finished_races_between` が期間内の確定レースを results 付きで返し、`from > to` で空になること
 

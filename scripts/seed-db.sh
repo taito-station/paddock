@@ -70,12 +70,28 @@ if [[ -z "$target_db" || "$target_db" == "$to_noq" ]]; then
     exit 1
 fi
 
-# 配置先を作り直す（接続は FORCE で切断。PG13+ 必須）。
+# golden を一時ファイルへダンプし、成否を確かめてから流し込む（パイプ直結だと pg_dump の
+# 途中失敗を取りこぼし、中途半端な DB を「seed 成功」と誤認しうる）。
+dump="$(mktemp -t paddock-seed.XXXXXX.sql)"
+trap 'rm -f "$dump"' EXIT
+if ! pg_dump "$FROM_URL" >"$dump"; then
+    echo "pg_dump に失敗: $FROM_URL（pg_dump のメジャー版がサーバ未満の可能性）" >&2
+    exit 1
+fi
+
+# 配置先を作り直す（接続は FORCE で切断。PG13+ 必須）。ダンプ成功後に実施し、失敗時に
+# 既存の配置先 DB を壊さない。
 psql "$admin_url" -v ON_ERROR_STOP=1 -q \
     -c "DROP DATABASE IF EXISTS \"$target_db\" WITH (FORCE);" \
     -c "CREATE DATABASE \"$target_db\";"
 
-# golden を丸ごと複製（スキーマ + データ + _sqlx_migrations）。
-pg_dump "$FROM_URL" | psql "$TO_URL" -v ON_ERROR_STOP=1 -q
+psql "$TO_URL" -v ON_ERROR_STOP=1 -q -f "$dump"
+
+# seed 後の sanity check（reset との対称性）。races 件数が golden と一致するか確認する。
+dest_races="$(psql "$TO_URL" -tAc 'SELECT COUNT(*) FROM races;' 2>/dev/null || true)"
+if [[ "$dest_races" != "$races" ]]; then
+    echo "seed 後の races 件数が一致しない（golden=$races, 配置先=${dest_races:-?}）" >&2
+    exit 1
+fi
 
 echo "seeded: $FROM_URL -> $TO_URL (races=$races)"

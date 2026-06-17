@@ -48,7 +48,10 @@ ALTER SCHEMA 'main' RENAME TO 'public';
 
 - `data only`: 既に sqlx で作ったテーブルへ INSERT する（pgloader にテーブルを作らせない）。
 - `truncate`: 投入前に対象テーブルを空にする（再実行を冪等にする）。
-- `disable triggers`: FK 制約を投入中だけ無効化し、テーブル投入順の問題を避ける（要 superuser/owner）。
+- `disable triggers`: FK 制約を投入中だけ無効化し、テーブル投入順の問題を避ける。FK 由来の
+  system trigger を止めるため **superuser 権限が必要**（テーブル owner では不足。compose の `paddock`
+  は superuser なので可）。非 superuser 環境では `disable triggers` を外し、親テーブルから順に
+  個別投入（`INCLUDING ONLY TABLE NAMES MATCHING` で順次）する。
 - `EXCLUDING ...`: 旧 SQLite の `_sqlx_migrations`（旧 50 マイグレーション）と `sqlite_sequence` は移送しない。
 
 実行:
@@ -88,6 +91,10 @@ for t in races results race_odds fetch_history race_cards horse_entries predicti
 done
 ```
 
+> `results.status`（`NOT NULL DEFAULT 'finished'`）は、競走除外馬が混ざっていた古い取り込みでは
+> 一律 `finished` になっている可能性がある（PDF パース由来の既知の制約）。status を正確に取り直すには
+> 当該 PDF を再 ingest する（同じ `race_id` の UPSERT で全フィールドが上書きされる）。
+
 ### 5. アプリで動作確認
 
 ```bash
@@ -97,6 +104,6 @@ cargo run -p predict  -- --summary ...     # 予想セッションが読める
 
 ## トラブルシュート
 
-- `disable triggers` 実行に権限エラー → 接続ユーザが対象 DB の owner/superuser か確認（compose の `paddock` は superuser）。
+- `disable triggers` 実行に権限エラー → 接続ユーザが **superuser** か確認（owner では不足。compose の `paddock` は superuser）。
 - 一部テーブルだけ件数が合わない → 当該テーブルを pgloader の `INCLUDING ONLY TABLE NAMES MATCHING '<name>'` で個別再投入し、手順 3 のシーケンス補正を再実行。
 - 文字化け → SQLite 側はテキストが UTF-8 である前提。`encoding` 指定は不要（pgloader 既定で UTF-8）。

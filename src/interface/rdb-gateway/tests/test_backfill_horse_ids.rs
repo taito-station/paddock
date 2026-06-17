@@ -1,4 +1,4 @@
-//! #60: pdf 成績行の horse_id backfill をPostgres で検証する。
+//! #60: pdf 成績行の horse_id backfill を Postgres で検証する。
 //! - 馬名が horses にちょうど 1 件一致 → horse_id が埋まる
 //! - 同名別馬（horses に 2 件）/ horses に無い名前 → NULL 据え置き
 //! - 冪等性（2 回目は 0 行）・既存 horse_id は上書きしない
