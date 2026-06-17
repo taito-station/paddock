@@ -291,4 +291,22 @@ mod tests {
         assert_eq!(count.load(Ordering::SeqCst), 1, "404 must not be retried");
         handle.join().unwrap();
     }
+
+    #[test]
+    fn gives_up_after_max_attempts_on_persistent_5xx() {
+        // 503 on every attempt → retries are exhausted and fetch returns an
+        // error after exactly MAX_ATTEMPTS tries (no infinite loop).
+        let (url, count, handle) = serve(vec![R_503; MAX_ATTEMPTS as usize]);
+        let fetcher = UreqFetcher::default();
+        assert!(
+            fetcher.fetch(&url).is_err(),
+            "persistent 5xx must surface as an error, not hang or succeed"
+        );
+        assert_eq!(
+            count.load(Ordering::SeqCst),
+            MAX_ATTEMPTS as usize,
+            "should attempt exactly MAX_ATTEMPTS times then give up"
+        );
+        handle.join().unwrap();
+    }
 }
