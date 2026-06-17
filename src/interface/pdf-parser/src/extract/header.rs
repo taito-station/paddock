@@ -19,9 +19,19 @@ pub struct RaceHeader {
 }
 
 /// Race start lines look like `"08061 4月12日晴"` (5-digit race code + date + weather).
+///
+/// The whitespace between the 5-digit code and the date is optional: 2025
+/// autumn (Oct–Dec) result PDFs omit the space entirely (`"2700110月4日曇"`),
+/// so the separator is `\s*`, not `\s+`. The code is fixed-width (5 digits), so
+/// dropping the required space cannot let `\d{5}` bleed into the date digits.
+///
+/// The weather class includes `小` (`小雨`/`小雪`) to stay consistent with
+/// [`parse_header`]: a race whose start line read `…日小雨` was otherwise not
+/// detected as a boundary, silently merging it into the previous race's block
+/// and dropping one race per meeting.
 pub fn is_race_start_line(line: &str) -> bool {
     let trimmed = line.trim();
-    let re = Regex::new(r"^\d{5}\s+\d+月\d+日\s*[晴曇雨雪]").unwrap();
+    let re = Regex::new(r"^\d{5}\s*\d+月\d+日\s*[晴曇雨雪小]").unwrap();
     re.is_match(trimmed)
 }
 
@@ -30,8 +40,10 @@ pub fn parse_header(lines: &[String]) -> Result<Option<RaceHeader>> {
         return Ok(None);
     }
     let head = &lines[0];
+    // `\s*` (not `\s+`): the space between code and date is absent in 2025
+    // autumn PDFs — see `is_race_start_line`.
     let date_re =
-        Regex::new(r"^(?P<code>\d{5})\s+(?P<m>\d+)月(?P<d>\d+)日\s*(?P<w>[晴曇雨雪小]+)").unwrap();
+        Regex::new(r"^(?P<code>\d{5})\s*(?P<m>\d+)月(?P<d>\d+)日\s*(?P<w>[晴曇雨雪小]+)").unwrap();
     let cap = match date_re.captures(head) {
         Some(c) => c,
         None => return Ok(None),
@@ -152,4 +164,50 @@ pub fn find_field_size(lines: &[String]) -> Option<u32> {
         re.captures(l)
             .and_then(|c| c.name("n")?.as_str().parse().ok())
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn race_start_line_matches_with_or_without_space_after_code() {
+        // Spring/normal PDFs keep a space between the 5-digit code and the date.
+        assert!(is_race_start_line("14001 6月7日晴"));
+        // 2025 autumn (Oct–Dec) PDFs drop the space — this is the regression
+        // (issue #149): the meeting's races were dropped entirely as 0.
+        assert!(is_race_start_line("2700110月4日曇"));
+        // `小雨`/`小雪` weather must be detected too; otherwise that race's start
+        // line is missed and the race is silently merged into the previous one.
+        assert!(is_race_start_line("2701010月4日小雨"));
+        // Non-header lines must still be rejected.
+        assert!(!is_race_start_line("枠番馬番馬名"));
+    }
+
+    #[test]
+    fn parse_header_reads_spaceless_autumn_line() {
+        // Minimal header block mirroring a 2025 autumn result PDF: the start
+        // line has no space after the code, and the meeting line carries the
+        // round/venue/day plus surface and distance.
+        let lines: Vec<String> = [
+            "2700110月4日曇",
+            "良",
+            "（2025年4東京）第1日",
+            "第1競走",
+            "（芝）1，600",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+
+        let header = parse_header(&lines).unwrap().expect("header should parse");
+        assert_eq!(header.date, NaiveDate::from_ymd_opt(2025, 10, 4).unwrap());
+        assert_eq!(header.year, 2025);
+        assert_eq!(header.round, 4);
+        assert_eq!(header.venue, Venue::Tokyo);
+        assert_eq!(header.day, 1);
+        assert_eq!(header.race_num, 1);
+        assert_eq!(header.surface, Surface::Turf);
+        assert_eq!(header.distance, 1600);
+    }
 }
