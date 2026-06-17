@@ -8,12 +8,14 @@ services:
   postgres:
     image: postgres:17-alpine
     container_name: paddock-postgres
+    # 開発専用の固定資格情報（本番流用禁止）。
     environment:
       POSTGRES_USER: paddock
       POSTGRES_PASSWORD: paddock
       POSTGRES_DB: paddock
+    # ローカル限定で公開（LAN へ晒さない）。
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - paddock-pgdata:/var/lib/postgresql/data
     healthcheck:

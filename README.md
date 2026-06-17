@@ -57,10 +57,11 @@ docker compose -f deployments/compose.yaml ps       # 起動・healthy 確認
 psql postgres://paddock:paddock@localhost:5432/paddock -c '\l'   # 接続確認
 ```
 
-接続情報は `.env.example` を `.env` にコピーして調整する（`PADDOCK_DB_URL`）。各 worktree は
-この 1 サーバを共有し、database 名を変えて分離する運用を想定する。
+接続情報は `.env.example` を `.env` にコピーして調整する（`PADDOCK_DB_URL`）。
 
-> 注: 現状のアプリ既定は SQLite（`data/paddock.db`）。Postgres への移行は後続 PR で行う。
+> 注: 現状のアプリ既定は SQLite（`data/paddock.db`）で、この PG にはまだ接続しない。Postgres への
+> 移行と、worktree ごとに database 名を変えて分離する運用（seed/reset スクリプト整備を含む）は
+> 後続 PR で行う。
 
 ## ビルド
 
