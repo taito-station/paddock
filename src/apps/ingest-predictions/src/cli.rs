@@ -18,7 +18,8 @@ pub struct Cli {
     pub dry_run: bool,
 
     /// DB の全予想を pad の MD に出力する（取り込みではなく生成モード）。
-    #[arg(long)]
+    /// 取り込み用の `--input` / `--dry-run` とは排他。
+    #[arg(long, conflicts_with_all = ["input", "dry_run"])]
     pub render: bool,
 
     /// 生成先 pad ルート。省略時は環境変数 `PADDOCK_PAD_DIR`、無ければ既定の vault パス。

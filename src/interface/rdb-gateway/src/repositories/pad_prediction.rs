@@ -2,6 +2,8 @@
 //! 馬・買い目の子行は delete→insert で冪等にする。`predict_session.rs` のトランザクション
 //! 流儀に倣う。
 
+use std::collections::HashMap;
+
 use chrono::{DateTime, NaiveDate, Utc};
 use paddock_domain::{
     Mark, PadPrediction, PredictionBet, PredictionHorse, PredictionResult, Venue,
@@ -22,13 +24,18 @@ async fn resolve_race_id(
     venue_jp: &str,
     race_num: u32,
 ) -> Result<Option<String>> {
+    // 成績由来の races を優先し、無ければ出馬表由来の race_cards を引く。
+    // pri で優先度を付けて並べ替えることで、両テーブルに別 race_id があっても決定的に races を採る。
     let row: Option<(String,)> = sqlx::query_as(
         r#"
-        SELECT race_id FROM races
-        WHERE date = $1 AND venue = $2 AND race_num = $3
-        UNION
-        SELECT race_id FROM race_cards
-        WHERE date = $1 AND venue = $2 AND race_num = $3
+        SELECT race_id FROM (
+            SELECT race_id, 0 AS pri FROM races
+            WHERE date = $1 AND venue = $2 AND race_num = $3
+            UNION ALL
+            SELECT race_id, 1 AS pri FROM race_cards
+            WHERE date = $1 AND venue = $2 AND race_num = $3
+        )
+        ORDER BY pri ASC
         LIMIT 1
         "#,
     )
@@ -63,7 +70,8 @@ pub async fn save_pad_prediction(
              created_at, updated_at)
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$15)
         ON CONFLICT(date, venue, race_num) DO UPDATE SET
-            race_id       = excluded.race_id,
+            -- 一度解決した race_id は、後で未解決（NULL）で再取込しても巻き戻さない。
+            race_id       = COALESCE(excluded.race_id, predictions.race_id),
             title         = excluded.title,
             budget        = excluded.budget,
             strategy_note = excluded.strategy_note,
@@ -181,6 +189,26 @@ struct PredictionHeaderRow {
 const HEADER_COLUMNS: &str = "prediction_id, date, venue, race_num, title, budget, \
     strategy_note, commentary, finish_1, finish_2, finish_3, recovery_rate, pnl, result_note";
 
+/// `prediction_horses` の 1 行を `PredictionHorse` に変換する（find / list 共通）。
+/// `prediction_id` 列の有無に依存しないので、単一・一括どちらの SELECT でも使える。
+fn row_to_horse(row: &sqlx::sqlite::SqliteRow) -> Result<PredictionHorse> {
+    let mark: Option<String> = row.try_get("mark")?;
+    Ok(PredictionHorse {
+        horse_num: row.try_get::<i64, _>("horse_num")? as u32,
+        horse_name: row.try_get("horse_name")?,
+        jockey: row.try_get("jockey")?,
+        mark: mark.and_then(|s| Mark::from_slug(&s)),
+        win_odds: row.try_get("win_odds")?,
+        popularity: row
+            .try_get::<Option<i64>, _>("popularity")?
+            .map(|p| p as u32),
+        win_prob: row.try_get("win_prob")?,
+        place_prob: row.try_get("place_prob")?,
+        show_prob: row.try_get("show_prob")?,
+        comment: row.try_get("comment")?,
+    })
+}
+
 async fn load_horses(pool: &SqlitePool, prediction_id: i64) -> Result<Vec<PredictionHorse>> {
     let rows = sqlx::query(
         r#"
@@ -194,26 +222,7 @@ async fn load_horses(pool: &SqlitePool, prediction_id: i64) -> Result<Vec<Predic
     .bind(prediction_id)
     .fetch_all(pool)
     .await?;
-
-    let mut horses = Vec::with_capacity(rows.len());
-    for row in rows {
-        let mark: Option<String> = row.try_get("mark")?;
-        horses.push(PredictionHorse {
-            horse_num: row.try_get::<i64, _>("horse_num")? as u32,
-            horse_name: row.try_get("horse_name")?,
-            jockey: row.try_get("jockey")?,
-            mark: mark.and_then(|s| Mark::from_slug(&s)),
-            win_odds: row.try_get("win_odds")?,
-            popularity: row
-                .try_get::<Option<i64>, _>("popularity")?
-                .map(|p| p as u32),
-            win_prob: row.try_get("win_prob")?,
-            place_prob: row.try_get("place_prob")?,
-            show_prob: row.try_get("show_prob")?,
-            comment: row.try_get("comment")?,
-        });
-    }
-    Ok(horses)
+    rows.iter().map(row_to_horse).collect()
 }
 
 async fn load_bets(pool: &SqlitePool, prediction_id: i64) -> Result<Vec<PredictionBet>> {
@@ -239,11 +248,12 @@ async fn load_bets(pool: &SqlitePool, prediction_id: i64) -> Result<Vec<Predicti
         .collect())
 }
 
-/// ヘッダ行＋子行から `PadPrediction` を組み立てる。
-async fn hydrate(pool: &SqlitePool, h: PredictionHeaderRow) -> Result<PadPrediction> {
-    let horses = load_horses(pool, h.prediction_id).await?;
-    let bets = load_bets(pool, h.prediction_id).await?;
-
+/// ヘッダ行＋子行から `PadPrediction` を組み立てる（クエリは呼び出し側で実施）。
+fn build_prediction(
+    h: PredictionHeaderRow,
+    horses: Vec<PredictionHorse>,
+    bets: Vec<PredictionBet>,
+) -> Result<PadPrediction> {
     let has_result = h.finish_1.is_some()
         || h.finish_2.is_some()
         || h.finish_3.is_some()
@@ -292,7 +302,11 @@ pub async fn find_pad_prediction(
     .await?;
 
     match header {
-        Some(h) => Ok(Some(hydrate(pool, h).await?)),
+        Some(h) => {
+            let horses = load_horses(pool, h.prediction_id).await?;
+            let bets = load_bets(pool, h.prediction_id).await?;
+            Ok(Some(build_prediction(h, horses, bets)?))
+        }
         None => Ok(None),
     }
 }
@@ -304,9 +318,51 @@ pub async fn list_pad_predictions(pool: &SqlitePool) -> Result<Vec<PadPrediction
     .fetch_all(pool)
     .await?;
 
+    if headers.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // 子行は全件まとめて取得し prediction_id でグルーピングする（N+1 回避）。
+    let mut horses_by: HashMap<i64, Vec<PredictionHorse>> = HashMap::new();
+    let horse_rows = sqlx::query(
+        r#"
+        SELECT prediction_id, horse_num, horse_name, jockey, mark, win_odds, popularity,
+               win_prob, place_prob, show_prob, comment
+        FROM prediction_horses
+        ORDER BY prediction_id ASC, horse_num ASC
+        "#,
+    )
+    .fetch_all(pool)
+    .await?;
+    for row in &horse_rows {
+        let pid: i64 = row.try_get("prediction_id")?;
+        horses_by.entry(pid).or_default().push(row_to_horse(row)?);
+    }
+
+    let mut bets_by: HashMap<i64, Vec<PredictionBet>> = HashMap::new();
+    let bet_rows: Vec<(i64, String, String, i64)> = sqlx::query_as(
+        r#"
+        SELECT prediction_id, bet_type, combination, amount
+        FROM prediction_bets
+        ORDER BY prediction_id ASC, ordinal ASC
+        "#,
+    )
+    .fetch_all(pool)
+    .await?;
+    for (pid, bet_type, combination, amount) in bet_rows {
+        bets_by.entry(pid).or_default().push(PredictionBet {
+            bet_type,
+            combination,
+            amount: amount as u64,
+        });
+    }
+
     let mut out = Vec::with_capacity(headers.len());
     for h in headers {
-        out.push(hydrate(pool, h).await?);
+        let pid = h.prediction_id;
+        let horses = horses_by.remove(&pid).unwrap_or_default();
+        let bets = bets_by.remove(&pid).unwrap_or_default();
+        out.push(build_prediction(h, horses, bets)?);
     }
     Ok(out)
 }

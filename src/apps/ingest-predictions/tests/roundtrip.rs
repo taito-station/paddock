@@ -121,6 +121,52 @@ async fn re_save_is_idempotent_and_replaces_children() {
 }
 
 #[tokio::test]
+async fn race_id_resolves_and_is_preserved_on_reingest() {
+    let (_tmp, repo) = repo().await;
+
+    // races に一致行を入れて保存 → race_id が解決される。
+    sqlx::query(
+        "INSERT INTO races (race_id,date,venue,round,day,race_num,surface,distance,source) \
+         VALUES ('R-TEST','2026-06-13','阪神',3,4,4,'芝',1800,'pdf')",
+    )
+    .execute(&repo.pool)
+    .await
+    .unwrap();
+    repo.save_pad_prediction(&sample(), Utc::now())
+        .await
+        .unwrap();
+
+    let rid: Option<String> = sqlx::query_scalar(
+        "SELECT race_id FROM predictions WHERE date='2026-06-13' AND venue='阪神' AND race_num=4",
+    )
+    .fetch_one(&repo.pool)
+    .await
+    .unwrap();
+    assert_eq!(rid.as_deref(), Some("R-TEST"));
+
+    // races を消して未解決状態で再 ingest → 解決済み race_id は COALESCE で保持される。
+    sqlx::query("DELETE FROM races")
+        .execute(&repo.pool)
+        .await
+        .unwrap();
+    repo.save_pad_prediction(&sample(), Utc::now())
+        .await
+        .unwrap();
+
+    let rid2: Option<String> = sqlx::query_scalar(
+        "SELECT race_id FROM predictions WHERE date='2026-06-13' AND venue='阪神' AND race_num=4",
+    )
+    .fetch_one(&repo.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        rid2.as_deref(),
+        Some("R-TEST"),
+        "一度解決した race_id は未解決の再取込で巻き戻らない"
+    );
+}
+
+#[tokio::test]
 async fn missing_prediction_is_none() {
     let (_tmp, repo) = repo().await;
     let got = repo

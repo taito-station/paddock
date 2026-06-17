@@ -3,6 +3,9 @@
 //! 予想を作る Claude はこの JSON を吐けばよい（MD 整形は不要）。確率・単勝・人気は
 //! 不明なら省略（null）。`win_prob`/`place_prob`/`show_prob` は **百分率の表示値**
 //! （例 `25.4` = 25.4%）で受け取り、そのまま保持・表示する。
+//!
+//! 入力 DTO（serde 構造体）と `to_domain` の検証は、JSON を stdin で受ける既存の
+//! `simulate` バイナリと同じく app 層に置く（domain を serde 非依存に保つため）。
 
 use anyhow::{Context, Result, anyhow, bail};
 use chrono::NaiveDate;

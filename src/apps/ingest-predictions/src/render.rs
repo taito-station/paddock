@@ -107,7 +107,7 @@ pub fn render_md(p: &PadPrediction) -> String {
             parts.push(format!("回収率 {rr}%"));
         }
         if let Some(pnl) = r.pnl {
-            parts.push(format!("収支 {pnl}"));
+            parts.push(format!("収支 {}", signed_yen(pnl)));
         }
         s.push_str(&format!("> 結果: {}\n", parts.join(" | ")));
         if let Some(note) = &r.note {
@@ -152,16 +152,22 @@ fn opt(s: Option<&str>) -> String {
 
 fn pct(v: Option<f64>) -> String {
     match v {
-        Some(v) => format!("{v}%"),
+        Some(v) => format!("{v:.1}%"),
         None => "-".into(),
     }
 }
 
 fn odds(v: Option<f64>) -> String {
     match v {
-        Some(v) => format!("{v}"),
+        Some(v) => format!("{v:.1}"),
         None => "-".into(),
     }
+}
+
+/// 符号付き金額（例: -4790 -> "-4,790円", 2280 -> "+2,280円"）。収支表示を金額列と揃える。
+fn signed_yen(n: i64) -> String {
+    let sign = if n < 0 { "-" } else { "+" };
+    format!("{sign}{}円", group_thousands(n.unsigned_abs()))
 }
 
 /// 1000 区切り（例: 10000 -> "10,000"）。
@@ -237,7 +243,7 @@ mod tests {
         ));
         assert!(md.contains("## 買い目"));
         assert!(md.contains("| **合計** |  | **1,600** |"));
-        assert!(md.contains("> 結果: 1着 7 / 2着 4 / 3着 13 | 回収率 52.1% | 収支 -4790"));
+        assert!(md.contains("> 結果: 1着 7 / 2着 4 / 3着 13 | 回収率 52.1% | 収支 -4,790円"));
     }
 
     #[test]
