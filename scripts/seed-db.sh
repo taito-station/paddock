@@ -102,6 +102,7 @@ for t in races results; do
     d="$(psql "$TO_URL"   -tAc "SELECT COUNT(*) FROM $t;" 2>/dev/null || true)"
     if [[ "$d" != "$g" ]]; then
         echo "seed 後の $t 件数が一致しない（golden=$g, 配置先=${d:-?}）" >&2
+        echo "  （稼働中アプリの書き込み / golden の途中更新 / pg_dump 不整合の可能性）" >&2
         exit 1
     fi
 done
