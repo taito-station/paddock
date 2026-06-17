@@ -26,6 +26,9 @@ seed-db.sh - 並走 worktree の DB に golden DB を複製する（Postgres）
   --from <url>  golden DB の接続 URL（既定: PADDOCK_GOLDEN_DB_URL → postgres://paddock:paddock@localhost:5432/paddock）
   --to <url>    配置先 DB の接続 URL（既定: PADDOCK_DB_URL）
   -h, --help    このヘルプ
+
+前提: golden と配置先は同一 PG サーバ上にある想定（配置先の DROP/CREATE には配置先サーバの
+postgres DB へ管理接続する）。別サーバの golden から複製する用途は非対応。
 EOF
 }
 
@@ -96,7 +99,8 @@ if ! psql "$TO_URL" -v ON_ERROR_STOP=1 -q -f "$dump"; then
     exit 1
 fi
 
-# seed 後の sanity check（reset との対称性）。races/results 件数が golden と一致するか確認する。
+# seed 後の sanity check。pg_dump 全体復元なので部分欠落は通常起きないが、代表 2 表（races/results）
+# の件数一致だけ軽量に確認する（全数照合は runbook 手順 4 を参照）。
 for t in races results; do
     g="$(psql "$FROM_URL" -tAc "SELECT COUNT(*) FROM $t;" 2>/dev/null || true)"
     d="$(psql "$TO_URL"   -tAc "SELECT COUNT(*) FROM $t;" 2>/dev/null || true)"

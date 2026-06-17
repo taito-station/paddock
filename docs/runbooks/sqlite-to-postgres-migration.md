@@ -18,6 +18,10 @@
 以下、移行先を `postgres://paddock:paddock@localhost:5432/paddock`、移行元 SQLite を
 `/abs/path/to/data/paddock.db` とする（自分のパスに読み替える）。
 
+> 接続 URL に資格情報を直書きすると `psql`/`pg_dump` 実行中に `ps` でパスワードが見える。共有環境では
+> `~/.pgpass` か `PGPASSWORD` 等の環境変数経由にし、URL からは資格情報を外すことを推奨（ローカル開発の
+> 既定 `paddock:paddock` はこの限りでない）。
+
 ## 手順
 
 ### 1. 移行先 DB をベースラインで初期化
@@ -52,9 +56,10 @@ ALTER SCHEMA 'main' RENAME TO 'public';
   system trigger を止めるため **superuser 権限が必要**（テーブル owner では不足。compose の `paddock`
   は superuser なので可）。非 superuser 環境では `disable triggers` を外し、親テーブルから順に
   個別投入（`INCLUDING ONLY TABLE NAMES MATCHING` で 1 テーブルずつ）する。順序の例:
-  **親**（`races` / `horses` / `predict_sessions` / `race_cards`）→ **子**（`results` / `horse_past_runs` /
-  `predict_bets` / `predict_race_conditions` / `horse_entries` / `predictions`）→ **孫**（`prediction_horses` /
-  `prediction_bets`）。`race_odds` は FK 無しなので順不同。
+  **親/root**（`races` / `horses` / `predict_sessions` / `race_cards` / `predictions`）→ **子**（`results` /
+  `horse_past_runs` / `predict_bets` / `predict_race_conditions` / `horse_entries` / `prediction_horses` /
+  `prediction_bets`）。`race_odds` は FK 無しなので順不同（`predictions` も FK は持たないが、子の
+  `prediction_horses`/`prediction_bets` の親なので先に投入する）。
 - `EXCLUDING ...`: 旧 SQLite の `_sqlx_migrations`（旧 50 マイグレーション）と `sqlite_sequence` は移送しない。
 
 実行:
