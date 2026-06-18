@@ -11,11 +11,13 @@ use crate::interactor::Interactor;
 use crate::pdf_fetcher::PdfFetcher;
 use crate::pdf_parser::PdfParser;
 use crate::repository::{
-    CourseStatsRow, GroupStat, HorseRecencyStats, HorseStatsRow, JockeyStatsRow, RecencySeries,
-    Repository, TrainerStatsRow,
+    CourseStatsRow, GroupStat, HorseRecencyStats, HorseStatsRow, JockeyStatsRow, OddsRepository,
+    RaceCardRepository, RecencySeries, StatsRepository, TrainerStatsRow,
 };
 
-impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
+impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: PdfFetcher>
+    Interactor<R, P, F>
+{
     /// 出馬表から各馬の win/place/show 確率を推定する。`blend_alpha = Some(α)` のとき、
     /// 当日の市場オッズ（単勝, `find_race_odds(.., None)` の最新スナップショット）の implied 確率と
     /// α（モデル重み）でブレンドする（#72）。`None` はモデルのみ（市場オッズを取得しない）。
@@ -126,7 +128,9 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
 
         Ok(probs)
     }
+}
 
+impl<R: StatsRepository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
     /// 指定馬の前走（`before` より前の直近 1 走）から前走フォーム [0,1] を算出する。前走が無い／
     /// 有効な signal が無い場合は `None`。predict と backtest で共有する（#31/#76）。`standard_times`
     /// は前走の (surface,distance) に対する標準タイムを引くための表（レース単位で 1 回取得して共有）。

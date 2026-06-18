@@ -6,21 +6,21 @@ use paddock_domain::{RaceId, settle_bet};
 use crate::error::{Error, Result};
 use crate::netkeiba_race_id::netkeiba_race_id_from_paddock;
 use crate::payout_fetcher::PayoutFetcher;
-use crate::repository::Repository;
+use crate::repository::PredictSessionRepository;
 
 /// 確定払戻の自動精算ユースケース（#40）。
 ///
 /// 予想セッションの購入済み買い目（`predict_bets`）を netkeiba の確定払戻と照合して payout を
 /// セットし、セッションの総払戻・収支・回収率を更新する。**毎回ゼロから再計算**するため
 /// 再実行で二重加算しない（冪等）。未確定レースは payout を据え置いて pending とする。
-/// `PayoutFetcher`/`Repository` を必要とするため、メイン `Interactor` には載せず専用 interactor
+/// `PayoutFetcher`/`PredictSessionRepository` を必要とするため、メイン `Interactor` には載せず専用 interactor
 /// として切り出す（`OddsInteractor` と同方針）。
-pub struct SettleInteractor<S: PayoutFetcher, R: Repository> {
+pub struct SettleInteractor<S: PayoutFetcher, R> {
     pub scraper: S,
     pub repository: R,
 }
 
-impl<S: PayoutFetcher, R: Repository> SettleInteractor<S, R> {
+impl<S: PayoutFetcher, R: PredictSessionRepository> SettleInteractor<S, R> {
     pub fn new(scraper: S, repository: R) -> Self {
         Self {
             scraper,

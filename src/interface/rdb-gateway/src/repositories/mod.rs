@@ -27,9 +27,10 @@ use paddock_domain::{
 };
 use paddock_use_case::Result as UcResult;
 use paddock_use_case::repository::{
-    CourseStatsRow, FetchRecord, HorseRecencyStats, HorseStatsRow, JockeyStatsRow,
-    PredictBetRecord, PredictRaceConditionRecord, PredictSessionRecord, RaceOddsRecord, Repository,
-    TrainerStatsRow,
+    CourseStatsRow, FetchRecord, FetchRepository, HorseHistoryRepository, HorseRecencyStats,
+    HorseStatsRow, JockeyStatsRow, NameMatchRepository, OddsRepository, PadPredictionRepository,
+    PredictBetRecord, PredictRaceConditionRecord, PredictSessionRecord, PredictSessionRepository,
+    RaceCardRepository, RaceOddsRecord, RaceRepository, StatsRepository, TrainerStatsRow,
 };
 
 use crate::pool::PgPool;
@@ -56,47 +57,7 @@ impl PostgresRepository {
     }
 }
 
-impl Repository for PostgresRepository {
-    async fn save_race(&self, race: &Race) -> UcResult<()> {
-        save_race::save_race(&self.pool, race)
-            .await
-            .map_err(Into::into)
-    }
-
-    async fn upsert_horse_history(
-        &self,
-        horse_id: &HorseId,
-        runs: &[paddock_use_case::HorsePastRun],
-    ) -> UcResult<usize> {
-        horse_history::upsert_horse_history(&self.pool, horse_id, runs)
-            .await
-            .map_err(Into::into)
-    }
-
-    async fn backfill_results_horse_ids(&self) -> UcResult<u64> {
-        backfill_horse_ids::backfill_results_horse_ids(&self.pool)
-            .await
-            .map_err(Into::into)
-    }
-
-    async fn find_matching_horse_names(&self, query: &str, limit: u32) -> UcResult<Vec<String>> {
-        find_matching_names::find_matching_horse_names(&self.pool, query, limit)
-            .await
-            .map_err(Into::into)
-    }
-
-    async fn find_matching_jockey_names(&self, query: &str, limit: u32) -> UcResult<Vec<String>> {
-        find_matching_names::find_matching_jockey_names(&self.pool, query, limit)
-            .await
-            .map_err(Into::into)
-    }
-
-    async fn find_matching_trainer_names(&self, query: &str, limit: u32) -> UcResult<Vec<String>> {
-        find_matching_names::find_matching_trainer_names(&self.pool, query, limit)
-            .await
-            .map_err(Into::into)
-    }
-
+impl StatsRepository for PostgresRepository {
     async fn horse_stats(
         &self,
         name: &HorseName,
@@ -149,69 +110,6 @@ impl Repository for PostgresRepository {
             .map_err(Into::into)
     }
 
-    async fn count_races(&self) -> UcResult<u64> {
-        let row: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM races")
-            .fetch_one(&self.pool)
-            .await
-            .map_err(crate::Error::from)?;
-        Ok(row.0 as u64)
-    }
-
-    async fn race_exists(&self, race_id: &RaceId) -> UcResult<bool> {
-        let row: Option<(i64,)> = sqlx::query_as("SELECT 1 FROM races WHERE race_id = $1 LIMIT 1")
-            .bind(race_id.value())
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(crate::Error::from)?;
-        Ok(row.is_some())
-    }
-
-    async fn fetch_history_contains(&self, source_key: &str) -> UcResult<bool> {
-        fetch_history::contains(&self.pool, source_key)
-            .await
-            .map_err(Into::into)
-    }
-
-    async fn record_fetch(&self, record: &FetchRecord) -> UcResult<()> {
-        fetch_history::record(&self.pool, record)
-            .await
-            .map_err(Into::into)
-    }
-
-    async fn save_race_card(&self, card: &RaceCard) -> UcResult<()> {
-        save_race_card::save_race_card(&self.pool, card)
-            .await
-            .map_err(Into::into)
-    }
-
-    async fn save_race_odds(&self, record: &RaceOddsRecord) -> UcResult<()> {
-        save_race_odds::save_race_odds(&self.pool, record)
-            .await
-            .map_err(Into::into)
-    }
-
-    async fn find_race_card(&self, race_id: &RaceId) -> UcResult<Option<RaceCard>> {
-        find_race_card::find_race_card(&self.pool, race_id)
-            .await
-            .map_err(Into::into)
-    }
-
-    async fn find_race_odds(
-        &self,
-        race_id: &RaceId,
-        as_of: Option<NaiveDate>,
-    ) -> UcResult<Option<RaceOdds>> {
-        find_race_odds::find_race_odds(&self.pool, race_id, as_of)
-            .await
-            .map_err(Into::into)
-    }
-
-    async fn find_races_by_date(&self, date: NaiveDate) -> UcResult<Vec<Race>> {
-        find_races_by_date::find_races_by_date(&self.pool, date)
-            .await
-            .map_err(Into::into)
-    }
-
     async fn find_finished_races_between(
         &self,
         from: NaiveDate,
@@ -238,7 +136,124 @@ impl Repository for PostgresRepository {
             .await
             .map_err(Into::into)
     }
+}
 
+impl NameMatchRepository for PostgresRepository {
+    async fn find_matching_horse_names(&self, query: &str, limit: u32) -> UcResult<Vec<String>> {
+        find_matching_names::find_matching_horse_names(&self.pool, query, limit)
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn find_matching_jockey_names(&self, query: &str, limit: u32) -> UcResult<Vec<String>> {
+        find_matching_names::find_matching_jockey_names(&self.pool, query, limit)
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn find_matching_trainer_names(&self, query: &str, limit: u32) -> UcResult<Vec<String>> {
+        find_matching_names::find_matching_trainer_names(&self.pool, query, limit)
+            .await
+            .map_err(Into::into)
+    }
+}
+
+impl RaceRepository for PostgresRepository {
+    async fn save_race(&self, race: &Race) -> UcResult<()> {
+        save_race::save_race(&self.pool, race)
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn count_races(&self) -> UcResult<u64> {
+        let row: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM races")
+            .fetch_one(&self.pool)
+            .await
+            .map_err(crate::Error::from)?;
+        Ok(row.0 as u64)
+    }
+
+    async fn race_exists(&self, race_id: &RaceId) -> UcResult<bool> {
+        let row: Option<(i64,)> = sqlx::query_as("SELECT 1 FROM races WHERE race_id = $1 LIMIT 1")
+            .bind(race_id.value())
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(crate::Error::from)?;
+        Ok(row.is_some())
+    }
+
+    async fn find_races_by_date(&self, date: NaiveDate) -> UcResult<Vec<Race>> {
+        find_races_by_date::find_races_by_date(&self.pool, date)
+            .await
+            .map_err(Into::into)
+    }
+}
+
+impl RaceCardRepository for PostgresRepository {
+    async fn save_race_card(&self, card: &RaceCard) -> UcResult<()> {
+        save_race_card::save_race_card(&self.pool, card)
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn find_race_card(&self, race_id: &RaceId) -> UcResult<Option<RaceCard>> {
+        find_race_card::find_race_card(&self.pool, race_id)
+            .await
+            .map_err(Into::into)
+    }
+}
+
+impl OddsRepository for PostgresRepository {
+    async fn save_race_odds(&self, record: &RaceOddsRecord) -> UcResult<()> {
+        save_race_odds::save_race_odds(&self.pool, record)
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn find_race_odds(
+        &self,
+        race_id: &RaceId,
+        as_of: Option<NaiveDate>,
+    ) -> UcResult<Option<RaceOdds>> {
+        find_race_odds::find_race_odds(&self.pool, race_id, as_of)
+            .await
+            .map_err(Into::into)
+    }
+}
+
+impl FetchRepository for PostgresRepository {
+    async fn fetch_history_contains(&self, source_key: &str) -> UcResult<bool> {
+        fetch_history::contains(&self.pool, source_key)
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn record_fetch(&self, record: &FetchRecord) -> UcResult<()> {
+        fetch_history::record(&self.pool, record)
+            .await
+            .map_err(Into::into)
+    }
+}
+
+impl HorseHistoryRepository for PostgresRepository {
+    async fn upsert_horse_history(
+        &self,
+        horse_id: &HorseId,
+        runs: &[paddock_use_case::HorsePastRun],
+    ) -> UcResult<usize> {
+        horse_history::upsert_horse_history(&self.pool, horse_id, runs)
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn backfill_results_horse_ids(&self) -> UcResult<u64> {
+        backfill_horse_ids::backfill_results_horse_ids(&self.pool)
+            .await
+            .map_err(Into::into)
+    }
+}
+
+impl PredictSessionRepository for PostgresRepository {
     async fn find_predict_session(
         &self,
         date: NaiveDate,
@@ -309,7 +324,9 @@ impl Repository for PostgresRepository {
             .await
             .map_err(Into::into)
     }
+}
 
+impl PadPredictionRepository for PostgresRepository {
     async fn save_pad_prediction(
         &self,
         prediction: &PadPrediction,

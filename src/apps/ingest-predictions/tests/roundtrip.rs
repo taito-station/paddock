@@ -4,7 +4,7 @@ use chrono::{NaiveDate, Utc};
 use paddock_domain::{
     Mark, PadPrediction, PredictionBet, PredictionHorse, PredictionResult, Venue,
 };
-use paddock_use_case::repository::Repository;
+use paddock_use_case::repository::PadPredictionRepository;
 use rdb_gateway::PostgresRepository;
 
 fn sample() -> PadPrediction {

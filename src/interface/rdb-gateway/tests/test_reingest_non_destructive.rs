@@ -8,7 +8,7 @@ use paddock_domain::{
     FinishingPosition, GateNum, HorseEntry, HorseName, HorseNum, HorseResult, Race, RaceCard,
     RaceId, ResultStatus, Surface, TrainerName, Venue,
 };
-use paddock_use_case::repository::Repository;
+use paddock_use_case::repository::{RaceCardRepository, RaceRepository};
 use rdb_gateway::PostgresRepository;
 
 fn d() -> NaiveDate {

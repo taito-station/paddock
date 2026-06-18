@@ -263,48 +263,8 @@ pub struct PredictRaceConditionRecord {
     pub track_condition: Option<TrackCondition>,
 }
 
-pub trait Repository: Send + Sync {
-    fn save_race(&self, race: &Race) -> impl Future<Output = Result<()>> + Send;
-
-    /// netkeiba 由来の近走を horse 単位で `horses` / `horse_past_runs` に upsert する。
-    /// pdf 確定成績(`results`)とは別テーブルに保存することで、集計の二重計上・フィールド
-    /// バイアス（#58/#59）を構造的に防ぐ。`runs` が空のときは何もしない。
-    /// 戻り値は upsert した近走数（canonical race_id へ変換できず skip した走は含まない。
-    /// 冪等再取り込みでの ON CONFLICT 更新も「保存」として数えるため、初回取り込みでのみ
-    /// 純粋な DB 行増分と一致する）。
-    fn upsert_horse_history(
-        &self,
-        horse_id: &HorseId,
-        runs: &[HorsePastRun],
-    ) -> impl Future<Output = Result<usize>> + Send;
-
-    /// `horses` マスタに馬名がちょうど 1 件一致する pdf 成績行（`results.horse_id IS NULL`）へ
-    /// horse_id を backfill する。同名別馬（複数一致）・不一致は NULL のまま残し、既存値は
-    /// 上書きしない（冪等）。埋めた行数を返す。
-    fn backfill_results_horse_ids(&self) -> impl Future<Output = Result<u64>> + Send;
-
-    /// `analyze` の部分一致検索用。`results` に `query` を中間一致（`LIKE '%query%'`）する
-    /// 馬名を重複排除して名前昇順で最大 `limit` 件返す。`query` は呼び出し側で正規化済みとする。
-    fn find_matching_horse_names(
-        &self,
-        query: &str,
-        limit: u32,
-    ) -> impl Future<Output = Result<Vec<String>>> + Send;
-
-    /// 騎手名版（[`Repository::find_matching_horse_names`] と同方針）。
-    fn find_matching_jockey_names(
-        &self,
-        query: &str,
-        limit: u32,
-    ) -> impl Future<Output = Result<Vec<String>>> + Send;
-
-    /// 調教師名版（[`Repository::find_matching_horse_names`] と同方針）。
-    fn find_matching_trainer_names(
-        &self,
-        query: &str,
-        limit: u32,
-    ) -> impl Future<Output = Result<Vec<String>>> + Send;
-
+/// 馬・騎手・調教師・コースの成績統計と、標準タイム・近走・確定レース系の読み出し。
+pub trait StatsRepository: Send + Sync {
     /// 馬の各種成績統計を返す。`as_of = Some(d)` のとき `races.date < d` の成績のみを集計する
     /// （バックテストのリーク防止。本番予想は `None` で全期間集計）。
     fn horse_stats(
@@ -314,7 +274,7 @@ pub trait Repository: Send + Sync {
     ) -> impl Future<Output = Result<HorseStatsRow>> + Send;
 
     /// recency 重み付け（#75 Phase B）用に、馬の成績を「カテゴリ × ラベル別の日付付き系列」で返す。
-    /// `as_of` の意味は [`Repository::horse_stats`] と同じ（`races.date < as_of`）。既定実装は空を返す
+    /// `as_of` の意味は [`StatsRepository::horse_stats`] と同じ（`races.date < as_of`）。既定実装は空を返す
     /// （recency 無効時の本番経路・テスト mock はこの既定で十分。日付付き集計が要るのは
     /// rdb-gateway のみがオーバーライドする）。
     fn horse_recency(
@@ -325,7 +285,7 @@ pub trait Repository: Send + Sync {
         async { Ok(HorseRecencyStats::default()) }
     }
 
-    /// コース（場×距離×馬場）の枠順別統計を返す。`as_of` の意味は [`Repository::horse_stats`] と同じ。
+    /// コース（場×距離×馬場）の枠順別統計を返す。`as_of` の意味は [`StatsRepository::horse_stats`] と同じ。
     fn course_stats(
         &self,
         venue: Venue,
@@ -334,14 +294,14 @@ pub trait Repository: Send + Sync {
         as_of: Option<NaiveDate>,
     ) -> impl Future<Output = Result<CourseStatsRow>> + Send;
 
-    /// 騎手の各種成績統計を返す。`as_of` の意味は [`Repository::horse_stats`] と同じ。
+    /// 騎手の各種成績統計を返す。`as_of` の意味は [`StatsRepository::horse_stats`] と同じ。
     fn jockey_stats(
         &self,
         name: &JockeyName,
         as_of: Option<NaiveDate>,
     ) -> impl Future<Output = Result<JockeyStatsRow>> + Send;
 
-    /// 調教師の各種成績統計を返す。`as_of` の意味は [`Repository::horse_stats`] と同じ。
+    /// 調教師の各種成績統計を返す。`as_of` の意味は [`StatsRepository::horse_stats`] と同じ。
     fn trainer_stats(
         &self,
         name: &TrainerName,
@@ -351,6 +311,9 @@ pub trait Repository: Send + Sync {
     /// 指定期間 `[from, to]`（両端含む）の確定済みレースを `results` 付きで race_num 昇順に返す。
     /// `races.source='pdf'` かつ着順ありの `results` を 1 件以上含むレースのみを対象とする
     /// （バックテストの評価対象取得用）。`from > to` のときは空 Vec を返す。
+    ///
+    /// 命名は race 寄りだが、backtest の評価対象を集計読み出しする用途のため `StatsRepository` に置く
+    /// （backtest interactor の束縛を `StatsRepository + OddsRepository` に閉じ、mock を最小化するため）。
     fn find_finished_races_between(
         &self,
         from: NaiveDate,
@@ -375,20 +338,59 @@ pub trait Repository: Send + Sync {
         &self,
         before: NaiveDate,
     ) -> impl Future<Output = Result<StandardTimes>> + Send;
+}
+
+/// `analyze` の部分一致候補（馬名・騎手名・調教師名）の検索。
+pub trait NameMatchRepository: Send + Sync {
+    /// `analyze` の部分一致検索用。`results` に `query` を中間一致（`LIKE '%query%'`）する
+    /// 馬名を重複排除して名前昇順で最大 `limit` 件返す。`query` は呼び出し側で正規化済みとする。
+    fn find_matching_horse_names(
+        &self,
+        query: &str,
+        limit: u32,
+    ) -> impl Future<Output = Result<Vec<String>>> + Send;
+
+    /// 騎手名版（[`NameMatchRepository::find_matching_horse_names`] と同方針）。
+    fn find_matching_jockey_names(
+        &self,
+        query: &str,
+        limit: u32,
+    ) -> impl Future<Output = Result<Vec<String>>> + Send;
+
+    /// 調教師名版（[`NameMatchRepository::find_matching_horse_names`] と同方針）。
+    fn find_matching_trainer_names(
+        &self,
+        query: &str,
+        limit: u32,
+    ) -> impl Future<Output = Result<Vec<String>>> + Send;
+}
+
+/// レース本体（確定成績）の保存と存在判定・件数・日付検索。
+pub trait RaceRepository: Send + Sync {
+    fn save_race(&self, race: &Race) -> impl Future<Output = Result<()>> + Send;
 
     fn count_races(&self) -> impl Future<Output = Result<u64>> + Send;
 
     fn race_exists(&self, race_id: &RaceId) -> impl Future<Output = Result<bool>> + Send;
 
-    /// Whether a meeting-day source key has already been ingested.
-    fn fetch_history_contains(&self, source_key: &str)
-    -> impl Future<Output = Result<bool>> + Send;
+    /// 指定日に開催されるレース一覧を race_num 昇順で返す。
+    /// 予想用途のため `results` は読み込まず空 Vec で返す。
+    fn find_races_by_date(&self, date: NaiveDate)
+    -> impl Future<Output = Result<Vec<Race>>> + Send;
+}
 
-    /// Record a successful meeting-day fetch+ingest in the history table.
-    fn record_fetch(&self, record: &FetchRecord) -> impl Future<Output = Result<()>> + Send;
-
+/// 出馬表（race card）の保存・取得。
+pub trait RaceCardRepository: Send + Sync {
     fn save_race_card(&self, card: &RaceCard) -> impl Future<Output = Result<()>> + Send;
 
+    fn find_race_card(
+        &self,
+        race_id: &RaceId,
+    ) -> impl Future<Output = Result<Option<RaceCard>>> + Send;
+}
+
+/// レースオッズ（`race_odds`）の保存・取得。
+pub trait OddsRepository: Send + Sync {
     /// 1 レース分のオッズ（行単位）を upsert する。`race_odds` の主キー
     /// `(race_id, bet_type, combination_key)` で衝突した行は最新値で更新する。
     fn save_race_odds(&self, record: &RaceOddsRecord) -> impl Future<Output = Result<()>> + Send;
@@ -402,17 +404,40 @@ pub trait Repository: Send + Sync {
         race_id: &RaceId,
         as_of: Option<NaiveDate>,
     ) -> impl Future<Output = Result<Option<RaceOdds>>> + Send;
+}
 
-    fn find_race_card(
+/// 取り込み履歴（fetch history）の存在判定・記録。
+pub trait FetchRepository: Send + Sync {
+    /// Whether a meeting-day source key has already been ingested.
+    fn fetch_history_contains(&self, source_key: &str)
+    -> impl Future<Output = Result<bool>> + Send;
+
+    /// Record a successful meeting-day fetch+ingest in the history table.
+    fn record_fetch(&self, record: &FetchRecord) -> impl Future<Output = Result<()>> + Send;
+}
+
+/// netkeiba 由来の近走履歴の upsert と、pdf 成績への horse_id backfill。
+pub trait HorseHistoryRepository: Send + Sync {
+    /// netkeiba 由来の近走を horse 単位で `horses` / `horse_past_runs` に upsert する。
+    /// pdf 確定成績(`results`)とは別テーブルに保存することで、集計の二重計上・フィールド
+    /// バイアス（#58/#59）を構造的に防ぐ。`runs` が空のときは何もしない。
+    /// 戻り値は upsert した近走数（canonical race_id へ変換できず skip した走は含まない。
+    /// 冪等再取り込みでの ON CONFLICT 更新も「保存」として数えるため、初回取り込みでのみ
+    /// 純粋な DB 行増分と一致する）。
+    fn upsert_horse_history(
         &self,
-        race_id: &RaceId,
-    ) -> impl Future<Output = Result<Option<RaceCard>>> + Send;
+        horse_id: &HorseId,
+        runs: &[HorsePastRun],
+    ) -> impl Future<Output = Result<usize>> + Send;
 
-    /// 指定日に開催されるレース一覧を race_num 昇順で返す。
-    /// 予想用途のため `results` は読み込まず空 Vec で返す。
-    fn find_races_by_date(&self, date: NaiveDate)
-    -> impl Future<Output = Result<Vec<Race>>> + Send;
+    /// `horses` マスタに馬名がちょうど 1 件一致する pdf 成績行（`results.horse_id IS NULL`）へ
+    /// horse_id を backfill する。同名別馬（複数一致）・不一致は NULL のまま残し、既存値は
+    /// 上書きしない（冪等）。埋めた行数を返す。
+    fn backfill_results_horse_ids(&self) -> impl Future<Output = Result<u64>> + Send;
+}
 
+/// 予想セッション（収支・買い目・馬場入力）の読み書き。
+pub trait PredictSessionRepository: Send + Sync {
     /// 指定日の予想セッションを返す。未作成なら `None`。
     fn find_predict_session(
         &self,
@@ -477,7 +502,10 @@ pub trait Repository: Send + Sync {
         record: &PredictRaceConditionRecord,
         recorded_at: DateTime<Utc>,
     ) -> impl Future<Output = Result<()>> + Send;
+}
 
+/// pad 予想（印・短評・買い目・結果）の保存・取得。
+pub trait PadPredictionRepository: Send + Sync {
     /// 予想（印・短評・買い目・結果）を保存する。`(date, venue, race_num)` で upsert し、
     /// 馬・買い目の子行は入れ替え（delete→insert）で冪等にする。`race_id` は実装側で
     /// `races`/`race_cards` を `(date, venue, race_num)` 照合し解決できた時のみ格納する。
@@ -498,4 +526,32 @@ pub trait Repository: Send + Sync {
 
     /// 保存済みの全予想を date / venue / race_num 昇順で返す（生成・検証用）。
     fn list_pad_predictions(&self) -> impl Future<Output = Result<Vec<PadPrediction>>> + Send;
+}
+
+/// 後方互換のための集約スーパートレイト。全 sub-trait を満たす型に blanket 実装される。
+/// `Send + Sync` は各 sub-trait が既に要求するため、ここでは再列挙しない。
+pub trait Repository:
+    StatsRepository
+    + NameMatchRepository
+    + RaceRepository
+    + RaceCardRepository
+    + OddsRepository
+    + FetchRepository
+    + HorseHistoryRepository
+    + PredictSessionRepository
+    + PadPredictionRepository
+{
+}
+
+impl<T> Repository for T where
+    T: StatsRepository
+        + NameMatchRepository
+        + RaceRepository
+        + RaceCardRepository
+        + OddsRepository
+        + FetchRepository
+        + HorseHistoryRepository
+        + PredictSessionRepository
+        + PadPredictionRepository
+{
 }

@@ -9,7 +9,7 @@ use paddock_domain::{
     ResultStatus, Surface, Venue,
 };
 use paddock_use_case::HorsePastRun;
-use paddock_use_case::repository::Repository;
+use paddock_use_case::repository::{HorseHistoryRepository, RaceRepository, StatsRepository};
 use rdb_gateway::PostgresRepository;
 
 fn ymd(y: i32, m: u32, d: u32) -> NaiveDate {

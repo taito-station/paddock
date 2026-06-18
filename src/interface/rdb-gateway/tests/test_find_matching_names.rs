@@ -7,7 +7,7 @@ use paddock_domain::{
     FinishingPosition, GateNum, HorseName, HorseNum, HorseResult, JockeyName, Race, RaceId,
     ResultStatus, Surface, Venue,
 };
-use paddock_use_case::repository::Repository;
+use paddock_use_case::repository::{NameMatchRepository, RaceRepository};
 use rdb_gateway::PostgresRepository;
 
 /// 1 頭分の成績レース（horse_name は HorseName 正規化を通る）。
