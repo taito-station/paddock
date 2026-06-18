@@ -226,6 +226,8 @@ mod tests {
         assert_eq!(MeetingSpec::from_pdf_filename("2026-nakayama6"), None); // missing round
         assert_eq!(MeetingSpec::from_pdf_filename("2026-3nakayama"), None); // missing day
         assert_eq!(MeetingSpec::from_pdf_filename("2026-3mars6"), None); // unknown venue slug
+        assert_eq!(MeetingSpec::from_pdf_filename("2026-12345"), None); // digits only, no venue slug
+        assert_eq!(MeetingSpec::from_pdf_filename("-3nakayama6"), None); // empty year
     }
 
     #[test]

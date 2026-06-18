@@ -61,6 +61,11 @@ impl<R: RaceRepository + FetchRepository, P: PdfParser, F: PdfFetcher> Interacto
         };
 
         // Stage1: write the raw PDF to inbox and record `downloaded`; no parse.
+        // Order matters: write the file *before* recording, so a crash between the
+        // two leaves a row-less inbox file that the next run re-downloads (its
+        // `fetch_status` is None) rather than a `downloaded` row pointing at a
+        // missing file. fetch_history is the source of truth; a missing inbox file
+        // for a `downloaded` row is recovered by re-fetching (`--force` or #170).
         if let Some(inbox_dir) = inbox {
             let path = inbox_dir.join(spec.pdf_filename());
             std::fs::create_dir_all(inbox_dir).map_err(|e| {

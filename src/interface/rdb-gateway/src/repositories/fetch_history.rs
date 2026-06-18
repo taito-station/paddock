@@ -20,7 +20,7 @@ pub async fn contains(pool: &PgPool, source_key: &str) -> Result<bool> {
 /// 取得ライフサイクルの現在状態。履歴に無ければ `None`。
 pub async fn status(pool: &PgPool, source_key: &str) -> Result<Option<FetchStatus>> {
     let row: Option<(String,)> =
-        sqlx::query_as("SELECT status FROM fetch_history WHERE source_key = $1")
+        sqlx::query_as("SELECT status FROM fetch_history WHERE source_key = $1 LIMIT 1")
             .bind(source_key)
             .fetch_optional(pool)
             .await?;
@@ -53,7 +53,8 @@ pub async fn record(pool: &PgPool, record: &FetchRecord) -> Result<()> {
 
 /// Stage1: ダウンロード済み（inbox 保存済み・未 ingest）を記録する（status='downloaded'）。
 /// 件数は ingest 時に確定するため 0 で入れる。`--force` での再ダウンロードは ingest 済みを
-/// downloaded へ戻す（inbox に新しい PDF が再 ingest 待ちで置かれた状態を表す）。
+/// downloaded へ戻す（inbox に新しい PDF が再 ingest 待ちで置かれた状態を表す）。このとき
+/// 旧 ingest 時の races_saved/horses_saved も 0 へ戻し、「未 ingest=件数未確定」を保つ。
 pub async fn record_download(pool: &PgPool, download: &FetchDownload) -> Result<()> {
     sqlx::query(
         r#"
@@ -61,6 +62,8 @@ pub async fn record_download(pool: &PgPool, download: &FetchDownload) -> Result<
         VALUES ($1, $2, 0, 0, $3, 'downloaded')
         ON CONFLICT(source_key) DO UPDATE SET
             url = excluded.url,
+            races_saved = 0,
+            horses_saved = 0,
             fetched_at = excluded.fetched_at,
             status = 'downloaded'
         "#,

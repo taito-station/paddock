@@ -267,6 +267,11 @@ async fn run_fetch_single(
 /// to cover every published day.
 ///
 /// Concurrency mirrors `run_ingest` (owned-permit `Semaphore` + `JoinSet`).
+///
+/// Note: this path applies no `--interval` pacing (only the sequential path waits).
+/// `--download-only` reuses it as-is, so a polite bulk download must use `-j 1` for
+/// the inter-request interval; `--max-rps` still caps the peak rate when parallel.
+/// `run_fetch` already prints a note when `--interval` is set with `parallel > 1`.
 async fn run_fetch_range_parallel(
     app: Arc<setup::App>,
     range: MeetingRange,

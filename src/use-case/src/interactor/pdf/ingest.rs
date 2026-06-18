@@ -44,6 +44,10 @@ impl<R: RaceRepository + FetchRepository, P: PdfParser, F: PdfFetcher> Interacto
                     fetched_at: Utc::now(),
                 })
                 .await?;
+            // Recording precedes deletion: if removal fails the row is already
+            // `ingested`, so the leftover PDF is harmless — the next ingest run
+            // re-parses it, the ON CONFLICT upsert is idempotent, and deletion is
+            // retried. Hence a warn (not an error) is enough here.
             if let Err(e) = std::fs::remove_file(&path) {
                 tracing::warn!(source, error = %e, "ingested but failed to remove inbox PDF");
             }

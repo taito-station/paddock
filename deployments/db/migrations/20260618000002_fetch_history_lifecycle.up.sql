@@ -7,5 +7,7 @@
 -- 失敗(403/404 等)の追跡は別 Issue（ADR0024 論点1）。本マイグレーションでは扱わない。
 
 ALTER TABLE fetch_history
-    ADD COLUMN status TEXT NOT NULL DEFAULT 'ingested';
+    ADD COLUMN status TEXT NOT NULL DEFAULT 'ingested'
+        CHECK (status IN ('downloaded', 'ingested'));
 -- 既存行はすべて ingest 成功ログなので DEFAULT 'ingested' で正しい。
+-- CHECK で不正値を DB レベルで弾く（不明値が dedup を黙って無効化するのを防ぐ）。
