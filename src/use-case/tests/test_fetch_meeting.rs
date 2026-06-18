@@ -173,7 +173,10 @@ async fn ingests_and_records_history_when_new() {
         },
     );
 
-    let resp = interactor.fetch_meeting(&spec(), false, None).await.unwrap();
+    let resp = interactor
+        .fetch_meeting(&spec(), false, None)
+        .await
+        .unwrap();
 
     assert_eq!(
         resp.outcome,
@@ -205,7 +208,10 @@ async fn skips_without_fetching_when_already_in_history() {
         },
     );
 
-    let resp = interactor.fetch_meeting(&spec(), false, None).await.unwrap();
+    let resp = interactor
+        .fetch_meeting(&spec(), false, None)
+        .await
+        .unwrap();
 
     assert_eq!(resp.outcome, FetchMeetingOutcome::Skipped);
     assert_eq!(*interactor.pdf_fetcher.calls.lock().unwrap(), 0);
@@ -243,7 +249,10 @@ async fn reports_not_found_and_records_nothing_on_404() {
         },
     );
 
-    let resp = interactor.fetch_meeting(&spec(), false, None).await.unwrap();
+    let resp = interactor
+        .fetch_meeting(&spec(), false, None)
+        .await
+        .unwrap();
 
     assert_eq!(resp.outcome, FetchMeetingOutcome::NotFound);
     assert_eq!(*interactor.repository.saved.lock().unwrap(), 0);
@@ -264,7 +273,10 @@ async fn reports_empty_and_records_nothing_when_zero_races_parsed() {
         },
     );
 
-    let resp = interactor.fetch_meeting(&spec(), false, None).await.unwrap();
+    let resp = interactor
+        .fetch_meeting(&spec(), false, None)
+        .await
+        .unwrap();
 
     assert_eq!(resp.outcome, FetchMeetingOutcome::Empty);
     assert_eq!(*interactor.repository.saved.lock().unwrap(), 0);

@@ -98,9 +98,7 @@ pub enum FetchMeetingOutcome {
     },
     /// Stage1 (`--download-only`): fetched and written to inbox, **not** parsed.
     /// Carries the inbox path the PDF was written to.
-    Downloaded {
-        path: std::path::PathBuf,
-    },
+    Downloaded { path: std::path::PathBuf },
     /// Already in fetch history; skipped without fetching. In Stage1 this also
     /// covers a meeting already downloaded (inbox) but not yet ingested.
     Skipped,
@@ -205,9 +203,15 @@ mod tests {
             day: 6,
         };
         assert_eq!(spec.pdf_filename(), "2026-3nakayama6.pdf");
-        assert_eq!(MeetingSpec::from_pdf_filename("2026-3nakayama6.pdf"), Some(spec.clone()));
+        assert_eq!(
+            MeetingSpec::from_pdf_filename("2026-3nakayama6.pdf"),
+            Some(spec.clone())
+        );
         // The stem (no extension) is accepted too.
-        assert_eq!(MeetingSpec::from_pdf_filename("2026-3nakayama6"), Some(spec));
+        assert_eq!(
+            MeetingSpec::from_pdf_filename("2026-3nakayama6"),
+            Some(spec)
+        );
         // Multi-digit round/day still split on the alphabetic venue.
         assert_eq!(
             MeetingSpec::from_pdf_filename("2026-10tokyo12"),

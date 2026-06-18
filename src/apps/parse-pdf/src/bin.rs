@@ -218,7 +218,10 @@ async fn run_fetch_single(
     };
 
     let span = tracing::info_span!("fetch", source_key = %spec.source_key());
-    let response = app.fetch_meeting(&spec, force, inbox).instrument(span).await?;
+    let response = app
+        .fetch_meeting(&spec, force, inbox)
+        .instrument(span)
+        .await?;
 
     match response.outcome {
         FetchMeetingOutcome::Ingested {
