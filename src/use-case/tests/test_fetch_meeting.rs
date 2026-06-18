@@ -11,7 +11,9 @@ use paddock_domain::{HorseResult, Race, RaceId, Surface, Venue};
 use paddock_use_case::dto::pdf::fetch::{FetchMeetingOutcome, MeetingSpec};
 use paddock_use_case::pdf_fetcher::PdfFetcher;
 use paddock_use_case::pdf_parser::PdfParser;
-use paddock_use_case::repository::{FetchRecord, FetchRepository, RaceRepository};
+use paddock_use_case::repository::{
+    FetchDownload, FetchRecord, FetchRepository, FetchStatus, RaceRepository,
+};
 use paddock_use_case::{Error, Interactor, Result};
 
 #[test]
@@ -69,7 +71,10 @@ impl PdfParser for ZeroRaceParser {
 #[derive(Default)]
 struct MockRepo {
     contains: bool,
+    /// Drives `fetch_status` (the Stage1 / download-only dedup check).
+    status: Option<FetchStatus>,
     recorded: Mutex<Vec<FetchRecord>>,
+    downloads: Mutex<Vec<FetchDownload>>,
     saved: Mutex<usize>,
 }
 
@@ -96,6 +101,23 @@ impl FetchRepository for MockRepo {
     async fn record_fetch(&self, record: &FetchRecord) -> Result<()> {
         self.recorded.lock().unwrap().push(record.clone());
         Ok(())
+    }
+    async fn fetch_status(&self, _source_key: &str) -> Result<Option<FetchStatus>> {
+        Ok(self.status)
+    }
+    async fn record_download(&self, record: &FetchDownload) -> Result<()> {
+        self.downloads.lock().unwrap().push(record.clone());
+        Ok(())
+    }
+}
+
+/// Parser that panics if invoked — used to prove Stage1 (`--download-only`) never
+/// parses the fetched PDF.
+struct PanicParser;
+
+impl PdfParser for PanicParser {
+    fn parse(&self, _bytes: &[u8]) -> Result<Vec<Race>> {
+        panic!("download-only must not parse the PDF");
     }
 }
 
@@ -151,7 +173,7 @@ async fn ingests_and_records_history_when_new() {
         },
     );
 
-    let resp = interactor.fetch_meeting(&spec(), false).await.unwrap();
+    let resp = interactor.fetch_meeting(&spec(), false, None).await.unwrap();
 
     assert_eq!(
         resp.outcome,
@@ -183,7 +205,7 @@ async fn skips_without_fetching_when_already_in_history() {
         },
     );
 
-    let resp = interactor.fetch_meeting(&spec(), false).await.unwrap();
+    let resp = interactor.fetch_meeting(&spec(), false, None).await.unwrap();
 
     assert_eq!(resp.outcome, FetchMeetingOutcome::Skipped);
     assert_eq!(*interactor.pdf_fetcher.calls.lock().unwrap(), 0);
@@ -204,7 +226,7 @@ async fn force_refetches_even_when_in_history() {
         },
     );
 
-    let resp = interactor.fetch_meeting(&spec(), true).await.unwrap();
+    let resp = interactor.fetch_meeting(&spec(), true, None).await.unwrap();
 
     assert!(matches!(resp.outcome, FetchMeetingOutcome::Ingested { .. }));
     assert_eq!(*interactor.pdf_fetcher.calls.lock().unwrap(), 1);
@@ -221,7 +243,7 @@ async fn reports_not_found_and_records_nothing_on_404() {
         },
     );
 
-    let resp = interactor.fetch_meeting(&spec(), false).await.unwrap();
+    let resp = interactor.fetch_meeting(&spec(), false, None).await.unwrap();
 
     assert_eq!(resp.outcome, FetchMeetingOutcome::NotFound);
     assert_eq!(*interactor.repository.saved.lock().unwrap(), 0);
@@ -242,7 +264,7 @@ async fn reports_empty_and_records_nothing_when_zero_races_parsed() {
         },
     );
 
-    let resp = interactor.fetch_meeting(&spec(), false).await.unwrap();
+    let resp = interactor.fetch_meeting(&spec(), false, None).await.unwrap();
 
     assert_eq!(resp.outcome, FetchMeetingOutcome::Empty);
     assert_eq!(*interactor.repository.saved.lock().unwrap(), 0);
@@ -250,6 +272,136 @@ async fn reports_empty_and_records_nothing_when_zero_races_parsed() {
         interactor.repository.recorded.lock().unwrap().is_empty(),
         "a 0-race parse must not be recorded in fetch history"
     );
+}
+
+// --- stage 1: download-only ----------------------------------------------
+
+#[tokio::test]
+async fn download_only_writes_inbox_and_records_without_parsing() {
+    let inbox = tempfile::tempdir().unwrap();
+    let interactor = Interactor::new(
+        MockRepo::default(),
+        // PanicParser proves the PDF is never parsed in Stage1.
+        PanicParser,
+        MockFetcher {
+            body: Some(vec![9, 8, 7]),
+            ..Default::default()
+        },
+    );
+
+    let resp = interactor
+        .fetch_meeting(&spec(), false, Some(inbox.path()))
+        .await
+        .unwrap();
+
+    let expected = inbox.path().join("2026-3nakayama6.pdf");
+    assert_eq!(
+        resp.outcome,
+        FetchMeetingOutcome::Downloaded {
+            path: expected.clone()
+        }
+    );
+    // The raw PDF is written verbatim to the inbox.
+    assert_eq!(std::fs::read(&expected).unwrap(), vec![9, 8, 7]);
+    // Recorded as downloaded (Stage1), not ingested; no race was saved.
+    let downloads = interactor.repository.downloads.lock().unwrap();
+    assert_eq!(downloads.len(), 1);
+    assert_eq!(downloads[0].source_key, "2026-3-nakayama-6");
+    assert!(interactor.repository.recorded.lock().unwrap().is_empty());
+    assert_eq!(*interactor.repository.saved.lock().unwrap(), 0);
+}
+
+#[tokio::test]
+async fn download_only_skips_when_already_downloaded_or_ingested() {
+    for status in [FetchStatus::Downloaded, FetchStatus::Ingested] {
+        let inbox = tempfile::tempdir().unwrap();
+        let interactor = Interactor::new(
+            MockRepo {
+                status: Some(status),
+                ..Default::default()
+            },
+            PanicParser,
+            MockFetcher {
+                body: Some(vec![1]),
+                ..Default::default()
+            },
+        );
+
+        let resp = interactor
+            .fetch_meeting(&spec(), false, Some(inbox.path()))
+            .await
+            .unwrap();
+
+        assert_eq!(resp.outcome, FetchMeetingOutcome::Skipped);
+        // No network hit and nothing written when already in the lifecycle.
+        assert_eq!(*interactor.pdf_fetcher.calls.lock().unwrap(), 0);
+        assert!(interactor.repository.downloads.lock().unwrap().is_empty());
+    }
+}
+
+#[tokio::test]
+async fn download_only_reports_not_found_and_writes_nothing_on_404() {
+    let inbox = tempfile::tempdir().unwrap();
+    let interactor = Interactor::new(
+        MockRepo::default(),
+        PanicParser,
+        MockFetcher {
+            body: None, // 404
+            ..Default::default()
+        },
+    );
+
+    let resp = interactor
+        .fetch_meeting(&spec(), false, Some(inbox.path()))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.outcome, FetchMeetingOutcome::NotFound);
+    assert!(interactor.repository.downloads.lock().unwrap().is_empty());
+    assert_eq!(std::fs::read_dir(inbox.path()).unwrap().count(), 0);
+}
+
+// --- stage 2: ingest from inbox ------------------------------------------
+
+#[tokio::test]
+async fn ingesting_an_inbox_meeting_records_ingested_and_removes_the_pdf() {
+    // A Stage1 download leaves `<inbox>/2026-3nakayama6.pdf`; Stage2 ingest parses
+    // it, records the meeting as ingested (single source of truth), and deletes it.
+    let dir = tempfile::tempdir().unwrap();
+    let inbox = dir.path().join("inbox");
+    std::fs::create_dir_all(&inbox).unwrap();
+    let pdf = inbox.join("2026-3nakayama6.pdf");
+    std::fs::write(&pdf, vec![1, 2, 3]).unwrap();
+
+    let interactor = Interactor::new(MockRepo::default(), OneRaceParser, MockFetcher::default());
+
+    let resp = interactor.ingest_pdf(pdf.to_str().unwrap()).await.unwrap();
+
+    assert_eq!(resp.races_saved, 1);
+    assert_eq!(*interactor.repository.saved.lock().unwrap(), 1);
+    let recorded = interactor.repository.recorded.lock().unwrap();
+    assert_eq!(recorded.len(), 1, "Stage2 records the meeting ingested");
+    assert_eq!(recorded[0].source_key, "2026-3-nakayama-6");
+    assert!(!pdf.exists(), "the inbox PDF is removed after ingest");
+}
+
+#[tokio::test]
+async fn ingesting_a_zero_race_inbox_pdf_keeps_it_and_records_nothing() {
+    // A parser gap (0 races) must not be recorded and the PDF must stay so it can
+    // be re-ingested once the parser is fixed (#149).
+    let dir = tempfile::tempdir().unwrap();
+    let inbox = dir.path().join("inbox");
+    std::fs::create_dir_all(&inbox).unwrap();
+    let pdf = inbox.join("2026-3nakayama6.pdf");
+    std::fs::write(&pdf, vec![1, 2, 3]).unwrap();
+
+    let interactor = Interactor::new(MockRepo::default(), ZeroRaceParser, MockFetcher::default());
+
+    let resp = interactor.ingest_pdf(pdf.to_str().unwrap()).await.unwrap();
+
+    assert_eq!(resp.races_saved, 0);
+    assert!(interactor.repository.recorded.lock().unwrap().is_empty());
+    assert!(pdf.exists(), "a 0-race PDF is kept for re-ingest");
 }
 
 // --- range fetch ---------------------------------------------------------
@@ -332,6 +484,15 @@ impl FetchRepository for HistoryRepo {
     async fn record_fetch(&self, _record: &FetchRecord) -> Result<()> {
         Ok(())
     }
+    async fn fetch_status(&self, source_key: &str) -> Result<Option<FetchStatus>> {
+        Ok(self
+            .history
+            .contains(source_key)
+            .then_some(FetchStatus::Ingested))
+    }
+    async fn record_download(&self, _record: &FetchDownload) -> Result<()> {
+        Ok(())
+    }
 }
 
 fn url_for(year: i32, round: u32, venue: Venue, day: u32) -> String {
@@ -363,7 +524,7 @@ async fn round_wide_stops_at_first_missing_day() {
         day: None,
     };
     let summary = interactor
-        .fetch_meeting_range(&range, false, Duration::ZERO)
+        .fetch_meeting_range(&range, false, Duration::ZERO, None)
         .await
         .unwrap();
 
@@ -393,7 +554,7 @@ async fn year_wide_enumerates_every_venue() {
         day: None,
     };
     let summary = interactor
-        .fetch_meeting_range(&range, false, Duration::ZERO)
+        .fetch_meeting_range(&range, false, Duration::ZERO, None)
         .await
         .unwrap();
 
@@ -439,7 +600,7 @@ async fn already_ingested_days_are_skipped_and_enumeration_continues() {
         day: None,
     };
     let summary = interactor
-        .fetch_meeting_range(&range, false, Duration::ZERO)
+        .fetch_meeting_range(&range, false, Duration::ZERO, None)
         .await
         .unwrap();
 
@@ -480,7 +641,7 @@ async fn force_refetches_history_entries() {
         day: None,
     };
     let summary = interactor
-        .fetch_meeting_range(&range, true, Duration::ZERO)
+        .fetch_meeting_range(&range, true, Duration::ZERO, None)
         .await
         .unwrap();
 
@@ -505,7 +666,7 @@ async fn fully_specified_range_is_one_meeting() {
         day: Some(6),
     };
     let summary = interactor
-        .fetch_meeting_range(&range, false, Duration::ZERO)
+        .fetch_meeting_range(&range, false, Duration::ZERO, None)
         .await
         .unwrap();
 
@@ -532,7 +693,7 @@ async fn errors_are_counted_and_do_not_abort_the_range() {
         day: None,
     };
     let summary = interactor
-        .fetch_meeting_range(&range, false, Duration::ZERO)
+        .fetch_meeting_range(&range, false, Duration::ZERO, None)
         .await
         .unwrap();
 
@@ -571,7 +732,7 @@ async fn empty_meetings_are_counted_and_enumeration_continues() {
         day: None,
     };
     let summary = interactor
-        .fetch_meeting_range(&range, false, Duration::ZERO)
+        .fetch_meeting_range(&range, false, Duration::ZERO, None)
         .await
         .unwrap();
 
@@ -607,7 +768,7 @@ async fn empty_day1_does_not_stop_round_enumeration() {
         day: None,
     };
     let summary = interactor
-        .fetch_meeting_range(&range, false, Duration::ZERO)
+        .fetch_meeting_range(&range, false, Duration::ZERO, None)
         .await
         .unwrap();
 

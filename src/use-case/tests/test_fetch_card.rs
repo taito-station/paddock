@@ -162,6 +162,20 @@ impl FetchRepository for RecordingRepo {
         self.fetch_records.lock().unwrap().push(record.clone());
         Ok(())
     }
+    async fn fetch_status(
+        &self,
+        _source_key: &str,
+    ) -> Result<Option<paddock_use_case::repository::FetchStatus>> {
+        Ok(self
+            .already
+            .then_some(paddock_use_case::repository::FetchStatus::Ingested))
+    }
+    async fn record_download(
+        &self,
+        _record: &paddock_use_case::repository::FetchDownload,
+    ) -> Result<()> {
+        Ok(())
+    }
 }
 
 impl RaceCardRepository for RecordingRepo {

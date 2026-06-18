@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::Context;
@@ -10,9 +11,16 @@ use tracing_subscriber::{EnvFilter, fmt};
 
 pub type App = Interactor<PostgresRepository, HybridParser, JraFetcher>;
 
+/// The built app together with the configured PDF root (`paddock_pdfs_dir`), from
+/// which Stage1 derives the results inbox dir (`<root>/results/inbox`).
+pub struct Built {
+    pub app: App,
+    pub pdfs_dir: PathBuf,
+}
+
 /// Build the app. `fetch_min_interval` sets a global minimum spacing between
 /// outbound JRA requests (from `fetch --max-rps`); `None` imposes no cap.
-pub async fn build_app(fetch_min_interval: Option<Duration>) -> anyhow::Result<App> {
+pub async fn build_app(fetch_min_interval: Option<Duration>) -> anyhow::Result<Built> {
     let config = Config::from_env().context("load config")?;
     let _ = fmt()
         .with_env_filter(
@@ -28,9 +36,13 @@ pub async fn build_app(fetch_min_interval: Option<Duration>) -> anyhow::Result<A
         .context("connect Postgres pool")?;
     pool::migrate(&pool).await.context("apply migrations")?;
     let repo = PostgresRepository::new(pool);
-    Ok(Interactor::new(
+    let app = Interactor::new(
         repo,
         HybridParser::new(),
         JraFetcher::new(fetch_min_interval),
-    ))
+    );
+    Ok(Built {
+        app,
+        pdfs_dir: PathBuf::from(config.paddock_pdfs_dir),
+    })
 }
