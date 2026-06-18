@@ -133,9 +133,10 @@ impl JraFetcher {
     ///
     /// Only the response head is retried here; the body is read by the caller
     /// (`read_body`), so a stall mid-download is still bounded by the agent's
-    /// `timeout_global` but surfaces as a one-shot `Io` error rather than being
-    /// retried. Status errors are returned as-is: `fetch_if_exists` maps 403/404
-    /// to "absent", while `fetch` surfaces them as errors.
+    /// `timeout_global` but surfaces as a one-shot error (mapped to
+    /// [`Error::Fetch`]) rather than being retried. Status errors are returned
+    /// as-is: `fetch_if_exists` maps 403/404 to "absent", while `fetch` surfaces
+    /// them as errors.
     fn get_with_retry(&self, url: &str) -> std::result::Result<ureq::Body, ureq::Error> {
         let mut attempt = 0;
         loop {
@@ -316,6 +317,20 @@ mod tests {
         let fetcher = JraFetcher::default();
         let got = fetcher.fetch_if_exists(&url).expect("404 maps to Ok(None)");
         assert!(got.is_none());
+        assert_eq!(count.load(Ordering::SeqCst), 1, "404 must not be retried");
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn fetch_surfaces_404_as_error_unlike_fetch_if_exists() {
+        // `fetch` (used by the entries ingest path) does NOT map 404/403 to
+        // absent — only `fetch_if_exists` does. A missing PDF surfaces as Err.
+        let (url, count, handle) = serve(vec![R_404]);
+        let fetcher = JraFetcher::default();
+        assert!(
+            fetcher.fetch(&url).is_err(),
+            "fetch must surface 404 as an error, not absent"
+        );
         assert_eq!(count.load(Ordering::SeqCst), 1, "404 must not be retried");
         handle.join().unwrap();
     }
