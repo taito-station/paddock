@@ -1,0 +1,157 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="1330" viewBox="0 0 1000 1330" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,3 L0,6 z" fill="#333333"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="1000" height="1330" fill="#ffffff"/>
+
+  <!-- stage band labels -->
+  <rect x="20" y="32" width="14" height="690" fill="#dae8fc" opacity="0.5"/>
+  <text x="27" y="380" text-anchor="middle" font-size="13" font-weight="bold" fill="#3a5a8c" transform="rotate(-90 27 380)">Stage1: DL専用（ネットワーク律速）</text>
+  <rect x="20" y="800" width="14" height="500" fill="#e1d5e7" opacity="0.5"/>
+  <text x="27" y="1050" text-anchor="middle" font-size="13" font-weight="bold" fill="#6a4a86" transform="rotate(-90 27 1050)">Stage2: ingest（CPU律速・OCR並列）</text>
+
+  <!-- edges (under nodes) -->
+  <g stroke="#333333" stroke-width="1.5" fill="none">
+    <line x1="380" y1="84" x2="380" y2="116" marker-end="url(#arrow)"/>
+    <line x1="380" y1="178" x2="380" y2="234" marker-end="url(#arrow)"/>
+    <line x1="380" y1="324" x2="380" y2="360" marker-end="url(#arrow)"/>
+    <line x1="380" y1="420" x2="380" y2="478" marker-end="url(#arrow)"/>
+    <line x1="380" y1="568" x2="380" y2="604" marker-end="url(#arrow)"/>
+    <line x1="380" y1="674" x2="380" y2="700" marker-end="url(#arrow)"/>
+    <line x1="380" y1="784" x2="380" y2="816" marker-end="url(#arrow)"/>
+    <line x1="380" y1="864" x2="380" y2="896" marker-end="url(#arrow)"/>
+    <line x1="380" y1="958" x2="380" y2="980" marker-end="url(#arrow)"/>
+    <line x1="380" y1="1068" x2="380" y2="1104" marker-end="url(#arrow)"/>
+    <line x1="380" y1="1174" x2="380" y2="1206" marker-end="url(#arrow)"/>
+    <!-- diamond3 YES -> skip -->
+    <line x1="530" y1="280" x2="700" y2="280" marker-end="url(#arrow)"/>
+    <!-- diamond5 NO -> failed -->
+    <line x1="530" y1="524" x2="680" y2="524" marker-end="url(#arrow)"/>
+    <!-- diamond10 NO -> keep -->
+    <line x1="530" y1="1024" x2="680" y2="1024" marker-end="url(#arrow)"/>
+  </g>
+
+  <!-- edge labels -->
+  <g font-size="11" fill="#333333">
+    <text x="392" y="352">いいえ（未取得 / --force）</text>
+    <text x="560" y="274">はい</text>
+    <text x="392" y="600">はい（200）</text>
+    <text x="560" y="518">いいえ</text>
+    <text x="392" y="1096">はい</text>
+    <text x="560" y="1018">いいえ（0レース）</text>
+  </g>
+
+  <!-- 1 START stage1 -->
+  <g>
+    <rect x="200" y="40" width="360" height="44" rx="8" fill="#f5f5f5" stroke="#666666"/>
+    <text x="380" y="60" text-anchor="middle" font-size="12" font-weight="bold" fill="#333333">parse-pdf fetch --download-only</text>
+    <text x="380" y="76" text-anchor="middle" font-size="11" fill="#333333">--year … [--venue --round --day] -j1 --interval --max-rps</text>
+  </g>
+
+  <!-- 2 enumerate -->
+  <g>
+    <rect x="180" y="116" width="400" height="62" rx="8" fill="#e1d5e7" stroke="#9673a6"/>
+    <text x="380" y="138" text-anchor="middle" font-size="11" font-weight="bold">range 列挙 + 礼儀ペーシング</text>
+    <text x="380" y="155" text-anchor="middle" font-size="11">候補 source_key を 404/403 境界で打ち切りつつ列挙</text>
+    <text x="380" y="171" text-anchor="middle" font-size="11">既存 fetch のロジックを流用</text>
+  </g>
+
+  <!-- 3 diamond state -->
+  <g>
+    <polygon points="380,236 530,280 380,324 230,280" fill="#fff2cc" stroke="#d6b656"/>
+    <text x="380" y="276" text-anchor="middle" font-size="11">状態DB: ingested</text>
+    <text x="380" y="292" text-anchor="middle" font-size="11">/ downloaded ?</text>
+  </g>
+
+  <!-- skip (grey, right) -->
+  <g>
+    <rect x="700" y="252" width="250" height="56" rx="8" fill="#f5f5f5" stroke="#666666"/>
+    <text x="825" y="276" text-anchor="middle" font-size="11" fill="#333333">スキップ（取得済み）</text>
+    <text x="825" y="292" text-anchor="middle" font-size="11" fill="#333333">--force でのみ再取得</text>
+  </g>
+
+  <!-- 4 fetch_if_exists -->
+  <g>
+    <rect x="210" y="360" width="340" height="60" rx="8" fill="#e1d5e7" stroke="#9673a6"/>
+    <text x="380" y="385" text-anchor="middle" font-size="11" font-weight="bold">JraFetcher::fetch_if_exists(url)</text>
+    <text x="380" y="402" text-anchor="middle" font-size="11">timeout + transient リトライ（#152/#155 基盤）</text>
+  </g>
+
+  <!-- 5 diamond success -->
+  <g>
+    <polygon points="380,480 530,524 380,568 230,524" fill="#fff2cc" stroke="#d6b656"/>
+    <text x="380" y="528" text-anchor="middle" font-size="11">取得成功？</text>
+  </g>
+
+  <!-- failed (red, right) -->
+  <g>
+    <rect x="680" y="484" width="300" height="80" rx="8" fill="#f8cecc" stroke="#b85450"/>
+    <text x="830" y="506" text-anchor="middle" font-size="11" font-weight="bold">failed 記録（永久スキップしない）</text>
+    <text x="830" y="523" text-anchor="middle" font-size="11">status=failed / http_status(403/404/5xx)</text>
+    <text x="830" y="539" text-anchor="middle" font-size="11">attempts++ / last_attempt_at</text>
+    <text x="830" y="555" text-anchor="middle" font-size="11">403 はバックオフ再試行（論点1）</text>
+  </g>
+
+  <!-- 6 save inbox -->
+  <g>
+    <rect x="190" y="604" width="380" height="70" rx="8" fill="#d5e8d4" stroke="#82b366"/>
+    <text x="380" y="626" text-anchor="middle" font-size="11" font-weight="bold">inbox に保存 + status=downloaded</text>
+    <text x="380" y="643" text-anchor="middle" font-size="11">pdfs/results/inbox/&lt;source_key&gt;.pdf</text>
+    <text x="380" y="659" text-anchor="middle" font-size="11">解析・DB保存はしない（JRA接続を即解放）</text>
+  </g>
+
+  <!-- 7 inbox cylinder (grey) -->
+  <g>
+    <path d="M280,742 a100,12 0 0,0 200,0 v22 a100,12 0 0,0 -200,0 z" fill="#f5f5f5" stroke="#666666"/>
+    <ellipse cx="380" cy="742" rx="100" ry="12" fill="#f5f5f5" stroke="#666666"/>
+    <text x="380" y="746" text-anchor="middle" font-size="11" fill="#333333">inbox/&lt;source_key&gt;.pdf</text>
+  </g>
+
+  <!-- 8 START stage2 -->
+  <g>
+    <rect x="190" y="816" width="380" height="48" rx="8" fill="#f5f5f5" stroke="#666666"/>
+    <text x="380" y="838" text-anchor="middle" font-size="12" font-weight="bold" fill="#333333">parse-pdf ingest &lt;inbox/...&gt; -j &lt;コア数&gt;</text>
+    <text x="380" y="856" text-anchor="middle" font-size="11" fill="#333333">ネットワーク不要 → OCR を並列実行</text>
+  </g>
+
+  <!-- 9 OCR parse -->
+  <g>
+    <rect x="200" y="896" width="360" height="62" rx="8" fill="#e1d5e7" stroke="#9673a6"/>
+    <text x="380" y="918" text-anchor="middle" font-size="11" font-weight="bold">OCR 並列 + mutool 解析</text>
+    <text x="380" y="935" text-anchor="middle" font-size="11">HybridParser → Race 抽出</text>
+    <text x="380" y="951" text-anchor="middle" font-size="11">should_pin_ocr でスレッド調整</text>
+  </g>
+
+  <!-- 10 diamond races>0 -->
+  <g>
+    <polygon points="380,980 530,1024 380,1068 230,1024" fill="#fff2cc" stroke="#d6b656"/>
+    <text x="380" y="1028" text-anchor="middle" font-size="11">races &gt; 0 ?</text>
+  </g>
+
+  <!-- keep (red, right) -->
+  <g>
+    <rect x="680" y="986" width="300" height="76" rx="8" fill="#f8cecc" stroke="#b85450"/>
+    <text x="830" y="1008" text-anchor="middle" font-size="11" font-weight="bold">0レース（parser gap, #149）</text>
+    <text x="830" y="1025" text-anchor="middle" font-size="11">ingested にしない</text>
+    <text x="830" y="1041" text-anchor="middle" font-size="11">downloaded 据置 / PDF 保持</text>
+    <text x="830" y="1057" text-anchor="middle" font-size="11">パーサ改善後に再 ingest 可</text>
+  </g>
+
+  <!-- 11 ingested -->
+  <g>
+    <rect x="180" y="1104" width="400" height="70" rx="8" fill="#d5e8d4" stroke="#82b366"/>
+    <text x="380" y="1126" text-anchor="middle" font-size="11" font-weight="bold">save_race + status=ingested</text>
+    <text x="380" y="1143" text-anchor="middle" font-size="11">races_saved / horses_saved を記録</text>
+    <text x="380" y="1159" text-anchor="middle" font-size="11">完全 parse 完了 → PDF 削除（論点2）</text>
+  </g>
+
+  <!-- 12 DB cylinder (green) -->
+  <g>
+    <path d="M230,1252 a150,16 0 0,0 300,0 v24 a150,16 0 0,0 -300,0 z" fill="#d5e8d4" stroke="#82b366"/>
+    <ellipse cx="380" cy="1252" rx="150" ry="16" fill="#d5e8d4" stroke="#82b366"/>
+    <text x="380" y="1252" text-anchor="middle" font-size="11" font-weight="bold">取得ライフサイクル table</text>
+    <text x="380" y="1268" text-anchor="middle" font-size="10">source_key, status, http_status, attempts, last_attempt_at, …</text>
+  </g>
+</svg>
