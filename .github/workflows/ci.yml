@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+
+    # `#[sqlx::test]`（rdb-gateway / api-server / ingest-predictions の統合テスト）が接続する Postgres。
+    # ローカル開発（deployments/compose.yaml）と同じ postgres:17-alpine・同じ固定資格情報を使う。
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: paddock
+          POSTGRES_PASSWORD: paddock
+          POSTGRES_DB: paddock
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U paddock -d paddock"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      # `#[sqlx::test]` はこの接続先サーバへ繋ぎ、テストごとに一時 DB を作成・破棄する
+      # （paddock ロールは postgres image で superuser のため CREATEDB 可）。マイグレーションは
+      # 各テストの `migrations = "deployments/db/migrations"` 属性が一時 DB へ自動適用する。
+      DATABASE_URL: postgres://paddock:paddock@localhost:5432/paddock
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.96.0" # rust-toolchain.toml と一致させる
+          components: rustfmt, clippy
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Format check
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      # workspace 全体を 1 ステップで実行する。実 Postgres 接続テスト（#[sqlx::test]）は
+      # rdb-gateway / api-server / ingest-predictions に散在し単一サーバを共有するため、規約どおり
+      # --test-threads=1 で直列実行する（rules/rust/conventions.md）。非 DB テストも同じ直列実行に
+      # 含まれるが（DATABASE_URL は無視される）、スイートは小さく直列でも十分速い。DB クレートを
+      # 列挙して分割する方式は、将来別クレートに #[sqlx::test] が増えると取りこぼすため採らない。
+      - name: Test (Postgres 接続テストを含むため直列実行)
+        run: cargo test --workspace -- --test-threads=1
