@@ -244,6 +244,45 @@ async fn search_by_horse_name_partial(pool: sqlx::PgPool) {
 }
 
 #[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn search_by_horse_name_and_mark_same_horse(pool: sqlx::PgPool) {
+    seed(&PostgresRepository::new(pool.clone())).await;
+    let app = build_service!(pool);
+
+    // 馬名×印は「同一馬が両条件」。"ハナ"(P1 の◎ハナミチ) + honmei → P1 が一致。
+    let json = body_json(
+        get!(
+            app,
+            "/api/predictions?horse_name=%E3%83%8F%E3%83%8A&mark=honmei"
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(json["total_count"], 1);
+
+    // "ウマ"(P1 の○ウマB) + honmei → ウマB は○なので同一馬では一致せず 0 件。
+    let json = body_json(
+        get!(
+            app,
+            "/api/predictions?horse_name=%E3%82%A6%E3%83%9E&mark=honmei"
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(json["total_count"], 0);
+}
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn search_limit_is_clamped(pool: sqlx::PgPool) {
+    seed(&PostgresRepository::new(pool.clone())).await;
+    let app = build_service!(pool);
+
+    // 上限超過の limit は 200 に clamp される（成功扱い）。
+    let json = body_json(get!(app, "/api/predictions?limit=1000").await).await;
+    assert_eq!(json["limit"], 200);
+    assert_eq!(json["total_count"], 3);
+}
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
 async fn search_by_mark_and_hit(pool: sqlx::PgPool) {
     seed(&PostgresRepository::new(pool.clone())).await;
     let app = build_service!(pool);

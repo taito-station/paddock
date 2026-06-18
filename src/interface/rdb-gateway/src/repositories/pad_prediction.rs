@@ -441,6 +441,9 @@ fn build_search_where(filter: &PredictionFilter) -> (String, Vec<Bind>) {
         conds.push(format!("p.venue = ${n}"));
         binds.push(Bind::Text(v.as_jp().to_string()));
     }
+    // 距離・芝ダは `races` 結合列の述語。`races` は常時 LEFT JOIN だが、これらの述語を置くと
+    // 未照合（race_id NULL → r.* が NULL）の予想は条件不成立で脱落する＝距離/芝ダ指定時のみ
+    // 実質 INNER 相当になる（venue/date のみのフィルタでは未照合予想も残る）。
     if let Some(dmin) = filter.distance_min {
         n += 1;
         conds.push(format!("r.distance >= ${n}"));
@@ -526,7 +529,6 @@ struct SummaryRow {
 
 fn summary_from_row(r: SummaryRow) -> Result<PredictionSummaryRow> {
     let has_finish = r.finish_1.is_some() || r.finish_2.is_some() || r.finish_3.is_some();
-    let has_result = has_finish || r.recovery_rate.is_some() || r.pnl.is_some();
     let finish = has_finish.then(|| {
         [
             r.finish_1.map(|n| n as u32),
@@ -534,8 +536,17 @@ fn summary_from_row(r: SummaryRow) -> Result<PredictionSummaryRow> {
             r.finish_3.map(|n| n as u32),
         ]
     });
-    // 的中: 結果記録済みなら recovery_rate>0、未記録なら None（WHERE の hit 定義と整合）。
-    let hit = has_result.then(|| r.recovery_rate.unwrap_or(0.0) > 0.0);
+    // 的中。`build_search_where` の hit フィルタと同じ集合になるよう判定を完全に揃える:
+    //   recovery_rate > 0           → 的中 (true)
+    //   finish_1 あり且つ払戻 0/NULL → 不的中 (false)
+    //   それ以外（finish_1 なし）    → 結果未記録 (None)
+    let hit = if r.recovery_rate.unwrap_or(0.0) > 0.0 {
+        Some(true)
+    } else if r.finish_1.is_some() {
+        Some(false)
+    } else {
+        None
+    };
 
     Ok(PredictionSummaryRow {
         prediction_id: r.prediction_id,
@@ -563,9 +574,10 @@ pub async fn search_predictions(
 ) -> Result<PredictionSearchResult> {
     let (where_sql, where_binds) = build_search_where(filter);
 
-    let count_sql = format!(
-        "SELECT COUNT(*) FROM predictions p LEFT JOIN races r ON r.race_id = p.race_id {where_sql}"
-    );
+    // COUNT と SELECT で同一の FROM/JOIN を使う（JOIN 条件の変更で片方だけ直す事故を防ぐ）。
+    const FROM_JOIN: &str = "FROM predictions p LEFT JOIN races r ON r.race_id = p.race_id";
+
+    let count_sql = format!("SELECT COUNT(*) {FROM_JOIN} {where_sql}");
     let (total,): (i64,) = bind_all::<(i64,)>(count_sql, &where_binds)
         .fetch_one(pool)
         .await?;
@@ -579,8 +591,7 @@ pub async fn search_predictions(
           WHERE h.prediction_id = p.prediction_id AND h.mark = 'honmei' \
           ORDER BY h.horse_num ASC LIMIT 1) AS honmei_horse, \
          p.finish_1, p.finish_2, p.finish_3, p.recovery_rate, p.pnl \
-         FROM predictions p \
-         LEFT JOIN races r ON r.race_id = p.race_id \
+         {FROM_JOIN} \
          {where_sql} \
          ORDER BY p.date DESC, p.venue ASC, p.race_num ASC \
          LIMIT ${limit_ph} OFFSET ${offset_ph}"
