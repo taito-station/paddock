@@ -309,6 +309,8 @@ dependencies = [
  "actix-web",
  "anyhow",
  "chrono",
+ "netkeiba-scraper",
+ "odds-scraper",
  "paddock-config",
  "paddock-domain",
  "paddock-use-case",

@@ -1,6 +1,8 @@
 use anyhow::Context;
+use netkeiba_scraper::UreqNetkeibaScraper;
+use odds_scraper::UreqOddsScraper;
 use paddock_config::Config;
-use paddock_use_case::Interactor;
+use paddock_use_case::{Interactor, OddsInteractor, SettleInteractor};
 use rdb_gateway::{PostgresRepository, pool};
 use tracing_subscriber::{EnvFilter, fmt};
 
@@ -34,14 +36,21 @@ impl paddock_use_case::pdf_fetcher::PdfFetcher for UnusedFetcher {
 
 /// api-server が DI で組み立てる Interactor の具象型。
 pub type ApiInteractor = Interactor<PostgresRepository, UnusedParser, UnusedFetcher>;
+/// オッズ read-through 取得用（#51, odds:refresh）。
+pub type ApiOddsInteractor = OddsInteractor<UreqOddsScraper, PostgresRepository>;
+/// 確定払戻の自動精算用（#40, results:refresh）。
+pub type ApiSettleInteractor = SettleInteractor<UreqNetkeibaScraper, PostgresRepository>;
 
 pub struct Setup {
     pub interactor: ApiInteractor,
+    pub odds: ApiOddsInteractor,
+    pub settle: ApiSettleInteractor,
     /// bind アドレス（`host:port`）。
     pub server_addr: String,
 }
 
-/// ロガー初期化 → Postgres プール → `PostgresRepository` → `Interactor` を組み立てる。
+/// ロガー初期化 → Postgres プール → 各 Interactor を組み立てる。
+/// プールは sqlx の Arc ベースで安価に clone でき、read/odds/settle で共有する（predict と同流儀）。
 pub async fn build() -> anyhow::Result<Setup> {
     let config = Config::from_env().context("load config")?;
     let _ = fmt()
@@ -55,10 +64,20 @@ pub async fn build() -> anyhow::Result<Setup> {
         .await
         .context("connect Postgres pool")?;
     pool::migrate(&pool).await.context("apply migrations")?;
-    let repo = PostgresRepository::new(pool);
-    let interactor = Interactor::new(repo, UnusedParser, UnusedFetcher);
+
+    let odds = OddsInteractor::new(
+        UreqOddsScraper::new(),
+        PostgresRepository::new(pool.clone()),
+    );
+    let settle = SettleInteractor::new(
+        UreqNetkeibaScraper::new(),
+        PostgresRepository::new(pool.clone()),
+    );
+    let interactor = Interactor::new(PostgresRepository::new(pool), UnusedParser, UnusedFetcher);
     Ok(Setup {
         interactor,
+        odds,
+        settle,
         server_addr: config.paddock_server_addr,
     })
 }

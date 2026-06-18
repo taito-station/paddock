@@ -1,8 +1,8 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "paddock REST API (read)",
-    "description": "競馬予想・分析の read 系 REST API（#33）。確率推定・出馬表・レース一覧・分析統計を提供する。",
+    "title": "paddock REST API",
+    "description": "競馬予想・分析の REST API。read 系（#33）と予想セッション write 系（#53）を提供する。",
     "license": {
       "name": "Proprietary"
     },
@@ -437,10 +437,402 @@
           }
         }
       }
+    },
+    "/api/sessions/{date}": {
+      "get": {
+        "tags": [
+          "sessions"
+        ],
+        "summary": "セッション収支サマリ + 明細。",
+        "operationId": "get_session_summary",
+        "parameters": [
+          {
+            "name": "date",
+            "in": "path",
+            "description": "開催日 YYYY-MM-DD",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "セッション収支 + 明細",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionSummaryResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "日付不正",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "未作成のセッション",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "内部エラー",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "sessions"
+        ],
+        "summary": "セッション新規作成。",
+        "operationId": "create_session",
+        "parameters": [
+          {
+            "name": "date",
+            "in": "path",
+            "description": "開催日 YYYY-MM-DD",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSessionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "作成したセッションのサマリ",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionSummaryResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "budget 不正・日付不正",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "同一開催日のセッションが既に存在",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "内部エラー",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sessions/{date}/races/{race_id}/odds:refresh": {
+      "post": {
+        "tags": [
+          "sessions"
+        ],
+        "summary": "オッズをライブ取得して保存（#51, read-through）。",
+        "operationId": "odds_refresh",
+        "parameters": [
+          {
+            "name": "date",
+            "in": "path",
+            "description": "開催日 YYYY-MM-DD",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "race_id",
+            "in": "path",
+            "description": "レース ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "取得結果（未取得は fetched=false・HTTP は 200）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OddsRefreshResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "日付/ID 不正",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "未作成のセッション",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "内部エラー",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sessions/{date}/races/{race_id}/outcome": {
+      "post": {
+        "tags": [
+          "sessions"
+        ],
+        "summary": "1 レース分の賭け金・払戻を記録（残高ガード・1 トランザクション）。",
+        "operationId": "record_outcome",
+        "parameters": [
+          {
+            "name": "date",
+            "in": "path",
+            "description": "開催日 YYYY-MM-DD",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "race_id",
+            "in": "path",
+            "description": "レース ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecordOutcomeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "更新後のセッションサマリ",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionSummaryResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "残高超過・日付/ID 不正",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "未作成のセッション",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "当該レースの outcome が既に記録済み",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "内部エラー",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sessions/{date}/results:refresh": {
+      "post": {
+        "tags": [
+          "sessions"
+        ],
+        "summary": "確定結果を取得して払戻を自動補完（#40, 冪等）。",
+        "operationId": "results_refresh",
+        "parameters": [
+          {
+            "name": "date",
+            "in": "path",
+            "description": "開催日 YYYY-MM-DD",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "精算レポート（pending_races に未確定が出る）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettleReportResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "日付不正",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "未作成のセッション",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "内部エラー",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
     "schemas": {
+      "BetInput": {
+        "type": "object",
+        "description": "outcome 記録の 1 買い目（リクエスト）。race_id はパスから取るため含めない。",
+        "required": [
+          "bet_type",
+          "combination",
+          "stake"
+        ],
+        "properties": {
+          "bet_type": {
+            "type": "string",
+            "description": "馬券種ラベル（例 `単勝` / `馬連`）。"
+          },
+          "combination": {
+            "type": "string",
+            "description": "組み合わせコード（例 `7` / `7-14`）。"
+          },
+          "ev": {
+            "type": "number",
+            "format": "double",
+            "description": "期待値（参考値）。"
+          },
+          "payout": {
+            "type": "integer",
+            "format": "int64",
+            "description": "払戻（円、記録時点で不明なら 0。results:refresh で確定値に上書きされる）。",
+            "minimum": 0
+          },
+          "stake": {
+            "type": "integer",
+            "format": "int64",
+            "description": "賭け金（円）。",
+            "minimum": 0
+          }
+        }
+      },
       "CourseStatsResponse": {
         "type": "object",
         "description": "`GET /api/analyze/course?venue=&distance=&surface=` のレスポンス。",
@@ -470,6 +862,21 @@
           }
         }
       },
+      "CreateSessionRequest": {
+        "type": "object",
+        "description": "`POST /api/sessions/{date}` のリクエスト。",
+        "required": [
+          "budget"
+        ],
+        "properties": {
+          "budget": {
+            "type": "integer",
+            "format": "int64",
+            "description": "初期予算（円）。1 以上。",
+            "minimum": 1
+          }
+        }
+      },
       "ErrorBody": {
         "type": "object",
         "description": "エラーレスポンス本文。`{ \"error\": { \"code\": ..., \"message\": ... } }`。",
@@ -491,7 +898,7 @@
         "properties": {
           "code": {
             "type": "string",
-            "description": "機械可読なエラーコード（`bad_request` / `not_found` / `internal`）。"
+            "description": "機械可読なエラーコード（`bad_request` / `not_found` / `conflict` / `internal`）。"
           },
           "message": {
             "type": "string",
@@ -715,6 +1122,23 @@
           }
         }
       },
+      "OddsRefreshResponse": {
+        "type": "object",
+        "description": "`POST .../odds:refresh` のレスポンス。",
+        "required": [
+          "race_id",
+          "fetched"
+        ],
+        "properties": {
+          "fetched": {
+            "type": "boolean",
+            "description": "オッズを取得できたか（false = 未公開・取得失敗で未取得。HTTP は 200）。"
+          },
+          "race_id": {
+            "type": "string"
+          }
+        }
+      },
       "PredictionResponse": {
         "type": "object",
         "description": "`GET /api/races/{race_id}/prediction` のレスポンス。",
@@ -853,6 +1277,171 @@
           }
         }
       },
+      "RecordOutcomeRequest": {
+        "type": "object",
+        "description": "`POST /api/sessions/{date}/races/{race_id}/outcome` のリクエスト。",
+        "required": [
+          "bets"
+        ],
+        "properties": {
+          "bets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BetInput"
+            },
+            "description": "このレースで購入した買い目（空 = スキップ相当）。"
+          }
+        }
+      },
+      "SessionSummaryResponse": {
+        "type": "object",
+        "description": "セッション収支サマリ（作成 / outcome / GET summary 共通のレスポンス）。",
+        "required": [
+          "date",
+          "budget",
+          "balance",
+          "total_bet",
+          "total_payout",
+          "pnl",
+          "completed",
+          "bets"
+        ],
+        "properties": {
+          "balance": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "bets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SummaryBet"
+            }
+          },
+          "budget": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "completed": {
+            "type": "boolean"
+          },
+          "date": {
+            "type": "string",
+            "format": "date"
+          },
+          "pnl": {
+            "type": "integer",
+            "format": "int64",
+            "description": "損益（`total_payout − total_bet`。負もあるため i64）。"
+          },
+          "total_bet": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "total_payout": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "SettleReportResponse": {
+        "type": "object",
+        "description": "`POST .../results:refresh` のレスポンス（`SettleReport` の写像）。",
+        "required": [
+          "settled_races",
+          "pending_races",
+          "voided_races",
+          "refunded_bets",
+          "total_bet",
+          "total_payout",
+          "balance"
+        ],
+        "properties": {
+          "balance": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "pending_races": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "refunded_bets": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "roi": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "回収率(%)。総賭け金 0 なら null。"
+          },
+          "settled_races": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "total_bet": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "total_payout": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "voided_races": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
+      "SummaryBet": {
+        "type": "object",
+        "description": "サマリの 1 買い目（レスポンス）。どのレースの買い目かを race_id で示す。",
+        "required": [
+          "race_id",
+          "bet_type",
+          "combination",
+          "stake",
+          "payout",
+          "ev"
+        ],
+        "properties": {
+          "bet_type": {
+            "type": "string"
+          },
+          "combination": {
+            "type": "string"
+          },
+          "ev": {
+            "type": "number",
+            "format": "double"
+          },
+          "payout": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "race_id": {
+            "type": "string"
+          },
+          "stake": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
       "TrainerStatsResponse": {
         "type": "object",
         "description": "`GET /api/analyze/trainer?name=` のレスポンス。",
@@ -893,6 +1482,10 @@
     {
       "name": "analyze",
       "description": "馬 / 騎手 / 調教師 / コースの成績統計"
+    },
+    {
+      "name": "sessions",
+      "description": "予想セッション（作成 / 収支 / 賭け金・払戻記録 / オッズ・結果更新）"
     }
   ]
 }
