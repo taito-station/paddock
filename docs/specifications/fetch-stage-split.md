@@ -46,6 +46,25 @@ Issue #147 対応。`parse-pdf fetch`（結果 seiseki PDF の取得）を **取
 
 ---
 
+## 実装状況（#147 と follow-up #170）
+
+本仕様は最終形（取得ライフサイクルの完全管理）を記述する。#147 ではステージ分割の核に絞って実装し、
+失敗追跡（論点1）は **follow-up #170** に切り出した。以下が現時点の差分:
+
+| 範囲 | #147 で実装 | #170 へ送った |
+|------|-----------|--------------|
+| ステージ分割（`--download-only` / inbox / Stage2 削除） | ✅ | — |
+| `fetch_history.status`（`downloaded`/`ingested`）と dedup 一本化 | ✅ | — |
+| `failed` 状態・`http_status`・`attempts`・`last_attempt_at` | — | ✅ |
+| `fetched_at` の `TIMESTAMPTZ` 化 | — | ✅ |
+| 403/404 のバックオフ再試行・境界ヒューリスティクスの DB 記録 | — | ✅ |
+
+#147 時点では 403/404 は記録せず再取得可能のまま（#149 の 0 レースと同じ扱い）とし、「永久スキップに
+しない」という論点1の意図は満たしている。`failed` 行をジャンクで埋めない設計（grid 総当りの非実在組合せの
+扱い）が #170 の主眼。下記スキーマ表・状態遷移・「失敗とリトライ方針」は #170 完了後の最終形。
+
+---
+
 ## ステージ設計
 
 ### Stage1: DL 専用（`fetch --download-only`）
@@ -55,11 +74,12 @@ Issue #147 対応。`parse-pdf fetch`（結果 seiseki PDF の取得）を **取
 - 各候補 `source_key` について:
   1. 状態 DB を引く。`ingested` または `downloaded` なら**スキップ**（`--force` で再取得）。
   2. `JraFetcher::fetch_if_exists(url)` で取得。
-  3. 成功 → `pdfs/results/inbox/<source_key>.pdf` に保存し、状態を `downloaded` に。
-  4. 不在/失敗（403/404/5xx 等）→ 状態を `failed`＋`http_status`＋`attempts++`＋`last_attempt_at`。
-     PDF は保存しない。
-- ファイル名は `source_key`（`{年}-{回}-{会場}-{日}`、例 `2026-3-tokyo-4`）。PDF に綺麗な title は
-  無いため `source_key` を一意キーとして採用。
+  3. 成功 → `pdfs/results/inbox/<JRA ファイル名>.pdf` に保存し、状態を `downloaded` に。
+  4. 不在（403/404）→ 記録せず再取得可能のまま（#149 の 0 レースと同じ扱い）。失敗追跡（`failed`/
+     `http_status`/`attempts`）は #170（下記「実装状況」参照）。
+- ファイル名は JRA の結果 PDF ファイル名（`{年}-{回}{会場slug}{日}.pdf`、例 `2026-3nakayama6.pdf`）。
+  `MeetingSpec::from_pdf_filename` で `source_key`（`{年}-{回}-{会場}-{日}`）に復元でき、Stage2 が状態行の
+  更新と PDF 削除に使う。
 - **論点1（403）**: 詳細は「失敗とリトライ方針」。
 
 ### Stage2: ingest（既存 `ingest` を拡張）
