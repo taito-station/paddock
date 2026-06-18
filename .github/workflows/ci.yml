@@ -48,6 +48,11 @@ jobs:
       # third-party / 外部 action はサプライチェーン対策で commit SHA にピンする（コメントは対応タグ）。
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
+      # pdf-ocr の render テスト（test_render.rs）が `mutool draw` を shell out するため必要。
+      # OCR（tesseract）を使う test_extract.rs は #[ignore] で通常実行されないため tesseract は入れない。
+      - name: Install system deps (mutool)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends mupdf-tools
+
       - name: Install Rust toolchain
         # サプライチェーン対策で commit SHA にピン（dtolnay/rust-toolchain は version タグを
         # 切らないため master の 2026-03-27 時点を固定）。toolchain は input で 1.96.0 に固定。
