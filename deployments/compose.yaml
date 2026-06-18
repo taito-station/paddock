@@ -25,5 +25,31 @@ services:
       retries: 5
     restart: unless-stopped
 
+  # 成績取り込みを dev から隔離実行する importer（#146）。run-and-forget で使う:
+  #   docker compose -f deployments/compose.yaml build importer
+  #   docker compose -f deployments/compose.yaml run --rm -d importer fetch --year 2025
+  # fetch は entrypoint が礼節ペーシング（-j 1 --interval 3 --max-rps 0.3）を既定で補う。
+  # 取り込み状態は DB の fetch_history に記録され、中断後の再実行は冪等（取得済みはスキップ）。
+  importer:
+    build:
+      context: ..
+      dockerfile: deployments/importer.Dockerfile
+    image: paddock-importer
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # 開発専用の固定資格情報（本番流用禁止）。同一 compose ネットワークの postgres へ接続（bind mount 不要）。
+      PADDOCK_DB_URL: postgres://paddock:paddock@postgres:5432/paddock
+      PADDOCK_LOG: info
+    # CPU 使用量を制限し、取り込み中もホストの dev を軽く保つ。docker compose v2 は
+    # deploy.resources.limits.cpus を honor する（run/up とも NanoCpus に反映。検証済み）。
+    # 明示したい場合は `docker compose run --cpus 2 importer ...` でも上書きできる。
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+    restart: "no"
+
 volumes:
   paddock-pgdata:
