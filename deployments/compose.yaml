@@ -39,10 +39,12 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      # 同一 compose ネットワークの postgres サービスへ接続（bind mount は使わない）。
+      # 開発専用の固定資格情報（本番流用禁止）。同一 compose ネットワークの postgres へ接続（bind mount 不要）。
       PADDOCK_DB_URL: postgres://paddock:paddock@postgres:5432/paddock
       PADDOCK_LOG: info
-    # CPU 使用量を制限し、取り込み中もホストの dev を軽く保つ。
+    # CPU 使用量を制限し、取り込み中もホストの dev を軽く保つ。docker compose v2 は
+    # deploy.resources.limits.cpus を honor する（run/up とも NanoCpus に反映。検証済み）。
+    # 明示したい場合は `docker compose run --cpus 2 importer ...` でも上書きできる。
     deploy:
       resources:
         limits:

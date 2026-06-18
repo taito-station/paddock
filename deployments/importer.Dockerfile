@@ -13,8 +13,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY . .
-# parse-pdf のみをビルド（sqlx::migrate! がビルド時に deployments/db/migrations を埋め込む）。
-RUN cargo build --release -p parse-pdf --bin paddock-parse-pdf
+# cargo registry / target をキャッシュマウントして再ビルドを高速化する（parse-pdf のみビルド。
+# sqlx::migrate! がビルド時に deployments/db/migrations を埋め込む）。target はキャッシュマウント上に
+# あってレイヤに残らないため、成果物を /out へ取り出してから次ステージへ COPY する。
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/app/target \
+    cargo build --release -p parse-pdf --bin paddock-parse-pdf \
+    && mkdir -p /out && cp target/release/paddock-parse-pdf /out/paddock-parse-pdf
 
 # ---- runtime stage ----
 FROM debian:bookworm-slim AS runtime
@@ -23,9 +28,12 @@ FROM debian:bookworm-slim AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends \
         mupdf-tools tesseract-ocr tesseract-ocr-jpn libssl3 ca-certificates \
     && rm -rf /var/lib/apt/lists/*
-COPY --from=builder /app/target/release/paddock-parse-pdf /usr/local/bin/paddock-parse-pdf
+COPY --from=builder /out/paddock-parse-pdf /usr/local/bin/paddock-parse-pdf
 COPY deployments/importer-entrypoint.sh /usr/local/bin/importer-entrypoint.sh
-RUN chmod +x /usr/local/bin/importer-entrypoint.sh
+# 非 root 実行（外部 PDF/OCR を扱うため最小権限に。DB 接続のみで書込先はネットワーク先 + /tmp）。
+RUN chmod +x /usr/local/bin/importer-entrypoint.sh \
+    && useradd --create-home --uid 10001 importer
+USER importer
 
 # 起動時 preflight（tesseract + jpn パック）は paddock-parse-pdf 自身が行う。
 ENTRYPOINT ["/usr/local/bin/importer-entrypoint.sh"]
