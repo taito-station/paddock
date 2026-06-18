@@ -351,7 +351,9 @@ docker logs -f <container-id>
 
 - **礼節ペーシング**: `fetch` は entrypoint が `-j 1 --interval 3 --max-rps 0.3` を既定で補う
   （ノーペーシングだと JRA に IP ブロックされうるため。明示指定した値は尊重する）。
-- **CPU キャップ**: `deploy.resources.limits.cpus: "2.0"`。取り込み中も `docker stats` で使用量を確認できる。
+- **CPU キャップ**: `deploy.resources.limits.cpus: "2.0"`（docker compose v2 が `run` でも honor し検証済み）。
+  compose のバージョン差で効かない場合は `docker compose ... run --rm -d --cpus 2 importer fetch ...` で明示できる。
+  取り込み中も `docker stats` で使用量を確認できる。
 - **中断・再開（冪等）**: 取得状態は DB の `fetch_history` に記録される。中断後に同じコマンドを再実行すると
   取得済み開催はスキップされる（`--force` で再取得）。
 - **DB 共有**: importer は常に共有の `paddock` データベース（`postgres` サービス）に書き込む

@@ -5,7 +5,8 @@
 # DB は compose の postgres サービスへ接続するため bind mount は使わない。
 
 # ---- build stage ----
-# rust-toolchain.toml の 1.96.0 に合わせる。
+# rust:1.96 系イメージ。正確なパッチ版（1.96.0）は COPY した rust-toolchain.toml を
+# rustup が強制するため、再現性はイメージのタグではなく rust-toolchain.toml が担保する。
 FROM rust:1.96-slim-bookworm AS builder
 # sqlx の tls-native-tls が openssl を要求する。
 RUN apt-get update && apt-get install -y --no-install-recommends \
