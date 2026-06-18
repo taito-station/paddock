@@ -1,9 +1,10 @@
-# ローカル/開発用のデータストア。
+# ローカル/開発用の compose スタック（DB / REST API / 取り込み importer）。
 #
-#   docker compose -f deployments/compose.yaml up -d
+#   docker compose -f deployments/compose.yaml up -d postgres api   # DB + API を起動
 #
-# paddock の DB バックエンド（Postgres）。各 worktree はこの 1 サーバを共有し、worktree ごとに
-# 別 database 名で分離する（PADDOCK_DB_URL の DB 名を変える。seed/reset は scripts/ を使う）。
+# DB バックエンドは Postgres。各 worktree はこの 1 サーバを共有し、worktree ごとに別 database 名で
+# 分離する（PADDOCK_DB_URL の DB 名を変える。seed/reset は scripts/ を使う）。Postgres のデータは
+# named volume（paddock-pgdata）で永続化する（macOS の bind-mount はロックが不安定なため使わない）。
 services:
   postgres:
     image: postgres:17-alpine
@@ -23,6 +24,27 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+    restart: unless-stopped
+
+  # REST API（api-server, #33）の常駐サービス（#35）。postgres 健全化後に起動し、
+  # マイグレーションは API 自身が起動時に適用する（pool::migrate）。
+  api:
+    build:
+      context: ..
+      dockerfile: deployments/api.Dockerfile
+    image: paddock-api
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # 開発専用の固定資格情報（本番流用禁止）。同一 compose ネットワークの postgres へ接続。
+      PADDOCK_DB_URL: postgres://paddock:paddock@postgres:5432/paddock
+      # コンテナ外の公開ポートから到達するため全 IF で bind する（既定 127.0.0.1 はコンテナ内のみ）。
+      PADDOCK_SERVER_ADDR: 0.0.0.0:8080
+      PADDOCK_LOG: info
+    # ローカル限定で公開（LAN へ晒さない。postgres と同方針）。
+    ports:
+      - "127.0.0.1:8080:8080"
     restart: unless-stopped
 
   # 成績取り込みを dev から隔離実行する importer（#146）。run-and-forget で使う:
