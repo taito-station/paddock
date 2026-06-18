@@ -699,6 +699,16 @@
               }
             }
           },
+          "409": {
+            "description": "当該レースの outcome が既に記録済み",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
           "500": {
             "description": "内部エラー",
             "content": {
@@ -853,7 +863,7 @@
             "type": "integer",
             "format": "int64",
             "description": "初期予算（円）。1 以上。",
-            "minimum": 0
+            "minimum": 1
           }
         }
       },

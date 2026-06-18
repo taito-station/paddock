@@ -87,6 +87,7 @@ where
         (status = 200, description = "更新後のセッションサマリ", body = SessionSummaryResponse),
         (status = 400, description = "残高超過・日付/ID 不正", body = crate::error::ErrorBody),
         (status = 404, description = "未作成のセッション", body = crate::error::ErrorBody),
+        (status = 409, description = "当該レースの outcome が既に記録済み", body = crate::error::ErrorBody),
         (status = 500, description = "内部エラー", body = crate::error::ErrorBody),
     ),
     tag = "sessions",

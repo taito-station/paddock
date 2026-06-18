@@ -8,6 +8,7 @@ use paddock_use_case::repository::{PredictBetRecord, PredictSessionRecord};
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct CreateSessionRequest {
     /// 初期予算（円）。1 以上。
+    #[schema(minimum = 1)]
     pub budget: u64,
 }
 

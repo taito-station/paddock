@@ -36,6 +36,10 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
                 "budget must be greater than 0".into(),
             ));
         }
+        // 二重作成ガード（および record_race_outcome の各種ガード）は read-then-write で
+        // 厳密にはアトミックでない。現状はシングルユーザー運用前提（web-spa.md）のため許容する。
+        // マルチユーザー化の際は insert-only 経路（ON CONFLICT DO NOTHING で 0 行→Conflict）や
+        // 行ロックでガードをトランザクション内に閉じる必要がある。
         if self.repository.find_predict_session(date).await?.is_some() {
             return Err(Error::Conflict(format!(
                 "session for {date} already exists"
@@ -72,6 +76,17 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
             .await?
             .ok_or_else(|| Error::NotFound(format!("session for {date} not found")))?;
 
+        // 二重記録ガード: `save_race_outcome` は買い目を追記し、残高も都度差し引くため、同一レースへ
+        // 再 POST すると買い目重複＋残高二重適用で収支が壊れる。当該レースの記録済み買い目があれば
+        // `Conflict` で弾く（買い目なし＝スキップの再 POST は無害なので許容する）。
+        let existing = self.repository.find_predict_bets(date).await?;
+        if !bets.is_empty() && existing.iter().any(|b| &b.race_id == race_id) {
+            return Err(Error::Conflict(format!(
+                "outcome for race {} already recorded",
+                race_id.value()
+            )));
+        }
+
         let total_stake: u64 = bets.iter().map(|b| b.stake).sum();
         if total_stake > session.balance {
             return Err(Error::InvalidArgument(format!(
@@ -81,9 +96,11 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
         }
         let total_payout: u64 = bets.iter().map(|b| b.payout).sum();
 
-        session.balance = session.balance - total_stake + total_payout;
-        session.total_bet += total_stake;
-        session.total_payout += total_payout;
+        // 残高ガード（`total_stake <= balance`）後なので `balance - total_stake` は underflow しない。
+        // 念のため saturating で累計のオーバーフローも安全側に倒す（現実の金額では到達しない防御）。
+        session.balance = (session.balance - total_stake).saturating_add(total_payout);
+        session.total_bet = session.total_bet.saturating_add(total_stake);
+        session.total_payout = session.total_payout.saturating_add(total_payout);
         session.updated_at = Utc::now();
 
         self.repository

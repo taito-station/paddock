@@ -95,7 +95,8 @@ impl From<UseCaseError> for Error {
             UseCaseError::NotFound(m) => Error::NotFound(m),
             UseCaseError::Conflict(m) => Error::Conflict(m),
             UseCaseError::Internal(m) => Error::Internal(m),
-            // read API では外部 fetch を行わないため通常は発生しないが、網羅のため 500 に倒す
+            // odds:refresh / results:refresh の取得失敗は OddsInteractor/SettleInteractor が Ok（None/
+            // pending）に畳むため通常ここには来ない。畳まれずに伝播した Fetch/Timeout は 500 に倒す
             // （詳細は error_response 側でログにのみ出す）。
             UseCaseError::Fetch(m) | UseCaseError::Timeout(m) => Error::Internal(m),
         }

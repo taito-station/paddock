@@ -128,6 +128,48 @@ async fn outcome_updates_balance_and_summary(pool: sqlx::PgPool) {
 }
 
 #[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn duplicate_outcome_for_same_race_conflicts(pool: sqlx::PgPool) {
+    let app = build_service!(pool);
+    test::call_service(
+        &app,
+        test::TestRequest::post()
+            .uri(&format!("/api/sessions/{DATE}"))
+            .set_json(json!({ "budget": 10000 }))
+            .to_request(),
+    )
+    .await;
+
+    let outcome = || {
+        test::TestRequest::post()
+            .uri(&format!("/api/sessions/{DATE}/races/{RACE_ID}/outcome"))
+            .set_json(json!({
+                "bets": [ { "bet_type": "単勝", "combination": "1", "stake": 3000, "payout": 0, "ev": 1.0 } ]
+            }))
+            .to_request()
+    };
+    let first = test::call_service(&app, outcome()).await;
+    assert!(first.status().is_success());
+
+    // 同一レースへの再記録は 409（買い目重複・残高二重適用を防ぐ）。
+    let second = test::call_service(&app, outcome()).await;
+    assert_eq!(second.status().as_u16(), 409);
+    let json = body_json(second).await;
+    assert_eq!(json["error"]["code"], "conflict");
+
+    // 状態不変: 1 回目の控除のみ（10000 - 3000 = 7000）。
+    let summary = test::call_service(
+        &app,
+        test::TestRequest::get()
+            .uri(&format!("/api/sessions/{DATE}"))
+            .to_request(),
+    )
+    .await;
+    let json = body_json(summary).await;
+    assert_eq!(json["balance"], 7000);
+    assert_eq!(json["bets"].as_array().unwrap().len(), 1);
+}
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
 async fn outcome_rejects_stake_over_balance_without_state_change(pool: sqlx::PgPool) {
     let app = build_service!(pool);
     test::call_service(
