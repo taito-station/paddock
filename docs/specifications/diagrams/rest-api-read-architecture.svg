@@ -66,8 +66,8 @@
   <!-- use-case -->
   <rect x="40" y="382" width="620" height="92" rx="8" fill="#d5e8d4" stroke="#82b366" stroke-width="1.5"/>
   <text x="60" y="404" font-weight="bold" fill="#333">use-case（既存・再利用）Interactor&lt;R, P, F&gt;</text>
-  <text x="60" y="426" font-size="11" fill="#444">find_races_by_date(date) → Vec&lt;Race&gt;</text>
-  <text x="60" y="443" font-size="11" fill="#444">find_race_card(race_id) → Option&lt;RaceCard&gt;</text>
+  <text x="60" y="426" font-size="11" fill="#444">races_by_date(date) → Vec&lt;Race&gt;</text>
+  <text x="60" y="443" font-size="11" fill="#444">race_card(race_id) → Option&lt;RaceCard&gt;（新規）</text>
   <text x="60" y="460" font-size="11" fill="#444">predict_race(race_id, …) → Vec&lt;HorseProbability&gt;</text>
   <text x="360" y="426" font-size="11" fill="#444">horse_stats / course_stats</text>
   <text x="360" y="443" font-size="11" fill="#444">jockey_stats / trainer_stats</text>

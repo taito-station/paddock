@@ -2,8 +2,6 @@
 
 [Issue #33](https://github.com/taito-station/paddock/issues/33) / 関連: [#34 Web SPA](https://github.com/taito-station/paddock/issues/34)・[#53 セッション write API](https://github.com/taito-station/paddock/issues/53)・[web-spa.md](web-spa.md)
 
-> 確認日: 2026-06-18
-
 ## 概要
 
 Web GUI（#34）から予想・分析を使うための前段として、既存のクリーンアーキテクチャ（`domain` / `use-case`）を再利用した **REST API サーバ**を追加する。本フェーズのスコープは **read 系エンドポイントの基盤**まで（予想セッションの状態変更を伴う write 系は #53 に切り出す）。
@@ -27,23 +25,27 @@ API なので **OpenAPI 仕様を一級の成果物として整備する**。uto
 
 ### やらないこと（別 Issue）
 
-- 買い目推奨 `GET /races/{id}/recommendations`（保存オッズ #51 が前提 → #51 完了後）
+- 買い目推奨 `GET /api/races/{race_id}/recommendations`（保存オッズ #51 が前提 → #51 完了後）
 - セッション write 系（作成 / outcome 記録）→ #53
 - オッズ・確定結果の refresh（ライブ取得→保存）→ #51 / #40
 - 認証本体（JWT/argon2）→ マルチユーザー化の専用 Issue
 - フロントエンド（SPA）→ #34
 - PostgreSQL 移行（当面 SQLite を継続。`PADDOCK_DB_URL` で切替可能なまま）
 
+### 既存 `apps/web-viewer` との関係
+
+既に actix-web ベースの常駐バイナリ `apps/web-viewer`（`paddock-web`）が存在するが、これは予想 Markdown を HTML レンダリングして閲覧する**静的ビューア**であり、本 API（JSON で予想・分析データを返す read API）とは責務が異なる。本フェーズでは**両者を別バイナリとして併存**させる（web-viewer は変更しない）。将来 SPA（#34）が本 API を消費する形に一本化された段階で web-viewer の要否を再検討するが、本 Issue のスコープ外とする。
+
 ## レイヤー構成と依存方向
 
-`~/.claude/rules/rust/architecture.md`（クリーンアーキテクチャ規約）に従い、依存方向 **Apps → Interface → Use-Case → Domain** を厳守する。read 系の use-case（`interactor/race`・`interactor/{horse,course,jockey,trainer}`）と Repository 実装（`rdb-gateway`）は**既存のものをそのまま再利用**し、新規追加は interface（rest-controller）と apps（api-server）に閉じる。
+`~/.claude/rules/rust/architecture.md`（クリーンアーキテクチャ規約）に従い、依存方向 **Apps → Interface → Use-Case → Domain** を厳守する。確率推定（`interactor/race/predict.rs`）・レース一覧（`interactor/race/races_by_date.rs`）・分析（`interactor/{horse,course,jockey,trainer}/stats.rs`）の use-case は**既存のものをそのまま再利用**する。一方、出馬表単体取得の use-case メソッドは現状存在しない（`find_race_card` は Repository トレイト側にのみあり、use-case では `predict_race` の内部からしか呼ばれていない）ため、**#33 で出馬表取得 use-case メソッド（例 `race_card(race_id)`、`repository.find_race_card` を薄くラップ）を新規追加する**。新規追加はこの 1 メソッドと interface（rest-controller）・apps（api-server）に閉じ、handler から Repository を直接叩いて依存方向を崩すことはしない。
 
 | レイヤー | crate | 本 Issue での扱い |
 |---|---|---|
 | Apps | `apps/api-server` | 新規。常駐バイナリ・DI・route・OpenAPI マウント・認証フック |
 | Interface | `interface/rest-controller` | 新規。handler / router / schema / error |
 | Interface | `interface/rdb-gateway` | 既存。read メソッドのみ使用 |
-| Use-Case | `use-case` | 既存。read interactor を再利用 |
+| Use-Case | `use-case` | 既存。read interactor（`races_by_date` / `predict_race` / `*_stats`）を再利用。出馬表取得メソッド（`race_card`）のみ新規追加 |
 | Domain | `domain` | 既存。schema で DTO 化して公開 |
 
 ### Interactor のジェネリクス（実装上の注意）
@@ -62,7 +64,7 @@ API なので **OpenAPI 仕様を一級の成果物として整備する**。uto
 GET /api/races?date=YYYY-MM-DD
 ```
 
-- use-case: `find_races_by_date(date)`（race_num 昇順、`results` は読まない）
+- use-case: `races_by_date(date)`（既存。race_num 昇順、`results` は読まない。実体は `repository.find_races_by_date`）
 - `date` 必須・`YYYY-MM-DD`。不正フォーマットは `400`。
 - レスポンス: レース配列
 
@@ -83,7 +85,7 @@ GET /api/races?date=YYYY-MM-DD
 GET /api/races/{race_id}
 ```
 
-- use-case: `find_race_card(race_id)`。`None` は `404`。
+- use-case: `race_card(race_id)`（**#33 で新規追加**。`repository.find_race_card` をラップ）。`None` は `404`。
 - レスポンス: レース諸元 + 出走馬（`HorseEntry`）
 
 ```json
@@ -110,7 +112,7 @@ GET /api/races/{race_id}/prediction[?track_condition=&blend_alpha=]
 - use-case: `predict_race(race_id, blend_alpha, track_condition)`
 - 既定は **モデルのみ**（`blend_alpha=None`）・馬場未指定（`track_condition=None`）。本番 predict と同じ `EstimationConfig::production()` 経路。
 - `track_condition`（任意）: `good|good_to_firm|...`（`TrackCondition` の文字列表現）。不正値は `400`。
-- `blend_alpha`（任意）: `0.0..=1.0` の f64。市場オッズ（単勝）とのブレンド係数（#72）。範囲外・非有限は `400`。
+- `blend_alpha`（任意）: `0.0..=1.0` の f64。市場オッズ（単勝）とのブレンド係数（#72）。範囲外・非有限は `400`。`alpha < 1.0` を指定しても**当該レースの保存オッズが無ければブレンドは行われずモデル確率をそのまま返す**（#51 未完環境での既定挙動。`predict_race` の実装どおり）。
 - 出馬表が無い `race_id` は内部で `NotFound` → `404`。
 - レスポンス: 馬ごとの win/place/show 確率（`win ≤ place ≤ show` 単調性は use-case が保証）
 
@@ -132,7 +134,7 @@ GET /api/analyze/trainer?name=<調教師名>
 GET /api/analyze/course?venue=<場>&distance=<m>&surface=<turf|dirt>
 ```
 
-- use-case: `horse_stats` / `jockey_stats` / `trainer_stats` / `course_stats`（いずれも `as_of=None`＝全期間集計）
+- use-case: `horse_stats(name)` / `jockey_stats(name)` / `trainer_stats(name)` / `course_stats(venue, distance, surface)`（いずれも既存ラッパ。**全期間集計**＝内部で Repository に `as_of=None` を固定で渡す。`as_of` は API から制御しない）
 - 名前系は `name` 必須（`TryFrom` のドメインバリデーション、不正は `400`）。`course` は `venue`/`distance`/`surface` 必須。
 - レスポンス: `*StatsRow` を JSON 化（`overall` と各カテゴリ別 `GroupStat`：`label / starts / wins / places / shows` ＋算出レート `win_rate / place_rate / show_rate`）
 
@@ -161,7 +163,9 @@ API の仕様乖離を防ぐため、OpenAPI はコードから生成する（sp
   - `GET /api-docs/openapi.json` … OpenAPI ドキュメント（JSON）
   - `GET /docs` … Swagger UI
   をマウントする。
-- **リポジトリへのコミットと同期チェック**: `ApiDoc::openapi()` をシリアライズした `docs/api/openapi.json` をコミットする。`api-server` の統合テスト（または `cargo test`）に「生成結果が `docs/api/openapi.json` と一致する」スナップショットテストを置き、差分があれば失敗させる（仕様の更新漏れを CI で検出）。生成し直しは同テストの更新手順に従う。
+- **リポジトリへのコミットと同期チェック**: `ApiDoc::openapi()` をシリアライズした `docs/api/openapi.json`（配置先は新設。`docs/` 直下ではなくサブディレクトリ）をコミットする。`api-server` の統合テスト（または `cargo test`）に「生成結果が `docs/api/openapi.json` と一致する」スナップショットテストを置き、差分があれば失敗させる（仕様の更新漏れを CI で検出）。
+  - **生成 JSON の安定化**: utoipa／serde のフィールド順やバージョン差で偽陽性 fail しないよう、`serde_json::to_string_pretty` ＋キー順固定（必要なら `preserve_order` 無効でアルファベット順）で正規化してから比較・コミットする。
+  - **再生成手順**: `UPDATE_OPENAPI=1 cargo test -p api-server openapi_snapshot`（環境変数でスナップショット更新を許可する方式）等、テスト自身に再生成パスを用意し、手順を本節と同テストの doc コメントに明記する。
 - **認証**: no-op 段階のため security scheme は定義しない（マルチユーザー化 Issue で `bearerAuth` 等を追加）。
 
 ## エラーマッピング
@@ -178,7 +182,7 @@ API の仕様乖離を防ぐため、OpenAPI はコードから生成する（sp
 
 ## Apps 層（api-server）
 
-- `config.rs`: `PADDOCK_DB_URL`（既定 SQLite）・`SERVER_*`（bind アドレス/ポート）・`LOG_*` を環境変数から読む（既存 app の流儀に合わせる）。
+- 設定: DB 接続は既存の共有 crate `src/infrastructure/config`（`paddock-config`）の `Config { paddock_db_url, .. }` / `from_env()` を**再利用**する（規約 `architecture.md` どおり config は Infrastructure 層に集約し、app ローカルで `PADDOCK_DB_URL` を再実装しない）。bind アドレス/ポート（`SERVER_*`）・`LOG_*` が同 crate に無ければ `paddock-config` を拡張して足す。
 - `setup.rs`: ロガー初期化 → SQLite プール → `RdbGateway`（Repository 実装）→ `Interactor<R,P,F>` 構築（predict/analyze と同じ具象 P/F）。
 - `app.rs`: `configure_routes<R,P,F>` で rest-controller の各 router を `/api` 配下にマウント。**認証ミドルウェアの差し込み口を 1 箇所**用意（現状 no-op：素通し。将来ここに JWT 検証を挿す）。OpenAPI（`/docs`・`/api-docs/openapi.json`）もここでマウント。
 - `bin.rs`: エントリポイント（`HttpServer` 起動）。
