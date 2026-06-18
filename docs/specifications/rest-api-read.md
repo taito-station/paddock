@@ -21,7 +21,7 @@ API なので **OpenAPI 仕様を一級の成果物として整備する**。uto
 - read 系エンドポイント（後述）
 - OpenAPI 仕様（utoipa コードファースト）＋ Swagger UI 配信＋リポジトリへ `openapi.json` をコミットし CI で同期チェック
 - 認証ミドルウェアの差し込み口（no-op）を Apps 層に 1 箇所
-- 統合テスト（temp SQLite を seed して各エンドポイントを叩く）
+- 統合テスト（`#[sqlx::test]` の一時 Postgres DB を seed して各エンドポイントを叩く）
 
 ### やらないこと（別 Issue）
 
@@ -30,7 +30,7 @@ API なので **OpenAPI 仕様を一級の成果物として整備する**。uto
 - オッズ・確定結果の refresh（ライブ取得→保存）→ #51 / #40
 - 認証本体（JWT/argon2）→ マルチユーザー化の専用 Issue
 - フロントエンド（SPA）→ #34
-- PostgreSQL 移行（当面 SQLite を継続。`PADDOCK_DB_URL` で切替可能なまま）
+- DB バックエンドの変更（現状の **PostgreSQL** を継続。`PADDOCK_DB_URL` で接続先を切替可能なまま。別 DB への移行はしない）
 
 ### 既存 `apps/web-viewer` との関係
 
@@ -164,7 +164,7 @@ API の仕様乖離を防ぐため、OpenAPI はコードから生成する（sp
   - `GET /docs` … Swagger UI
   をマウントする。
 - **リポジトリへのコミットと同期チェック**: `ApiDoc::openapi()` をシリアライズした `docs/api/openapi.json`（配置先は新設。`docs/` 直下ではなくサブディレクトリ）をコミットする。`api-server` の統合テスト（または `cargo test`）に「生成結果が `docs/api/openapi.json` と一致する」スナップショットテストを置き、差分があれば失敗させる（仕様の更新漏れを CI で検出）。
-  - **生成 JSON の安定化**: utoipa／serde のフィールド順やバージョン差で偽陽性 fail しないよう、`serde_json::to_string_pretty` ＋キー順固定（必要なら `preserve_order` 無効でアルファベット順）で正規化してから比較・コミットする。
+  - **生成 JSON の安定化**: 偽陽性 fail を避けるため、serde の構造体定義順を正本とし `serde_json::to_string_pretty` の整形のみで安定化する（`preserve_order` 等のフィールド順入れ替えには依存しない）。utoipa のバージョン更新で生成差が出た場合は再生成して差分をレビューする。
   - **再生成手順**: `UPDATE_OPENAPI=1 cargo test -p api-server openapi_snapshot`（環境変数でスナップショット更新を許可する方式）等、テスト自身に再生成パスを用意し、手順を本節と同テストの doc コメントに明記する。
 - **認証**: no-op 段階のため security scheme は定義しない（マルチユーザー化 Issue で `bearerAuth` 等を追加）。
 
@@ -185,7 +185,7 @@ API の仕様乖離を防ぐため、OpenAPI はコードから生成する（sp
 ## Apps 層（api-server）
 
 - 設定: DB 接続は既存の共有 crate `src/infrastructure/config`（`paddock-config`）の `Config { paddock_db_url, .. }` / `from_env()` を**再利用**する（規約 `architecture.md` どおり config は Infrastructure 層に集約し、app ローカルで `PADDOCK_DB_URL` を再実装しない）。ログ設定は同 crate の `paddock_log` を流用する。bind アドレス/ポート（`SERVER_*`）は `paddock-config` に無いため同 crate を拡張して足す。
-- `setup.rs`: ロガー初期化 → SQLite プール → `RdbGateway`（Repository 実装）→ `Interactor<R,P,F>` 構築（predict/analyze と同じ具象 P/F）。
+- `setup.rs`: ロガー初期化 → Postgres プール（`PgPool`, sqlx）→ `PostgresRepository`（Repository 実装）→ `Interactor<R,P,F>` 構築（predict/analyze と同じ具象 P/F）。
 - `app.rs`: `configure_routes<R,P,F>` で rest-controller の各 router を `/api` 配下にマウント。**認証ミドルウェアの差し込み口を 1 箇所**用意（現状 no-op：素通し。将来ここに JWT 検証を挿す）。OpenAPI（`/docs`・`/api-docs/openapi.json`）もここでマウント。
 - `bin.rs`: エントリポイント（`HttpServer` 起動）。
 
@@ -196,7 +196,7 @@ API の仕様乖離を防ぐため、OpenAPI はコードから生成する（sp
 
 ## テスト方針
 
-- 統合テスト `src/apps/api-server/tests/`（規約どおり `helper/mod.rs` に temp SQLite 構築・seed・`App` 構築を集約）。
+- 統合テスト `src/apps/api-server/tests/`（規約どおり `helper/mod.rs` に seed・`App` 構築を集約）。DB は既存の統合テスト（`apps/ingest-predictions/tests/`）と同じく **`#[sqlx::test]` の一時 Postgres DB** を使う（実 PostgreSQL に接続するため `--test-threads=1` で直列実行）。
   - 各 read エンドポイントの正常系（200 + JSON 形状）、`404`（未存在 race_id）、`400`（不正クエリ）。
   - OpenAPI: `GET /api-docs/openapi.json` が 200 で返り、コミット済み `docs/api/openapi.json` と一致すること。
 - 既存の CLI 群（parse-pdf / predict / analyze 等）はバッチ用途として変更しない。
