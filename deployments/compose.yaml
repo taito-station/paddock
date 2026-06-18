@@ -33,6 +33,7 @@ services:
       context: ..
       dockerfile: deployments/api.Dockerfile
     image: paddock-api
+    container_name: paddock-api
     depends_on:
       postgres:
         condition: service_healthy
@@ -45,6 +46,14 @@ services:
     # ローカル限定で公開（LAN へ晒さない。postgres と同方針）。
     ports:
       - "127.0.0.1:8080:8080"
+    # listen（=起動時マイグレーション完了）を依存ツール無しで確認する。runtime に curl/wget は
+    # 入れていないため、bash の /dev/tcp でポート到達のみを検査する（HTTP レベルの health は見ない）。
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 15s
     restart: unless-stopped
 
   # 成績取り込みを dev から隔離実行する importer（#146）。run-and-forget で使う:

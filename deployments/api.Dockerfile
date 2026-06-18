@@ -24,8 +24,8 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 
 # ---- runtime stage ----
 FROM debian:bookworm-slim AS runtime
-# odds/netkeiba のライブスクレイプ（ureq native-tls）と sqlx native-tls のため
-# libssl3 + CA 証明書を入れる（OCR は使わないので mutool/tesseract は不要）。
+# sqlx native-tls（Postgres 接続）と odds/results refresh のスクレイプ（ureq native-tls）の
+# ため libssl3 + CA 証明書を入れる（OCR は使わないので mutool/tesseract は不要）。
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libssl3 ca-certificates \
     && rm -rf /var/lib/apt/lists/*
@@ -33,8 +33,9 @@ COPY --from=builder /out/paddock-api /usr/local/bin/paddock-api
 # 非 root 実行（最小権限。DB 接続と外部スクレイプのみで、ローカル書込先は /tmp 程度）。
 RUN useradd --create-home --uid 10001 apiserver
 USER apiserver
-# REST API の listen ポート。コンテナ外へ公開するには PADDOCK_SERVER_ADDR=0.0.0.0:8080 で
-# bind する（既定の 127.0.0.1 はコンテナ内ループバックのみで、公開ポートから到達できない）。
+# 既定 listen ポートのドキュメント。実際の listen 先は PADDOCK_SERVER_ADDR に従う。
+# コンテナ外へ公開するには PADDOCK_SERVER_ADDR=0.0.0.0:8080 で bind する
+# （既定の 127.0.0.1 はコンテナ内ループバックのみで、公開ポートから到達できない）。
 EXPOSE 8080
 # 起動時に自身が pool::migrate でマイグレーションを適用する（compose の depends_on で postgres 健全化を待つ）。
 ENTRYPOINT ["/usr/local/bin/paddock-api"]
