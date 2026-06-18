@@ -46,10 +46,11 @@ services:
     # ローカル限定で公開（LAN へ晒さない。postgres と同方針）。
     ports:
       - "127.0.0.1:8080:8080"
-    # listen（=起動時マイグレーション完了）を依存ツール無しで確認する。runtime に curl/wget は
-    # 入れていないため、bash の /dev/tcp でポート到達のみを検査する（HTTP レベルの health は見ない）。
+    # 起動 readiness を依存ツール無しで確認する。runtime に curl/wget は入れていないため bash の
+    # /dev/tcp で 8080 への TCP 到達のみを検査し、接続後すぐ fd を閉じる。bind は pool::migrate の後に
+    # 実行されるため、listening は起動時マイグレーション完了を含意する（HTTP レベルの health は見ない）。
     healthcheck:
-      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080"]
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080 && exec 3>&-"]
       interval: 10s
       timeout: 3s
       retries: 5
