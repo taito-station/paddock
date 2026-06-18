@@ -1,0 +1,122 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="760" viewBox="0 0 980 760" font-family="sans-serif" font-size="13">
+  <!-- 予想横断検索 API のデータフロー (Issue #145) -->
+
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#333"/>
+    </marker>
+  </defs>
+
+  <!-- 凡例 -->
+  <rect x="10" y="8" width="12" height="12" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1"/>
+  <text x="25" y="19" font-size="11" fill="#333">Client / 入力</text>
+  <rect x="120" y="8" width="12" height="12" fill="#e1d5e7" stroke="#9673a6" stroke-width="1"/>
+  <text x="135" y="19" font-size="11" fill="#333">Interface (handler / repo)</text>
+  <rect x="310" y="8" width="12" height="12" fill="#d5e8d4" stroke="#82b366" stroke-width="1"/>
+  <text x="325" y="19" font-size="11" fill="#333">Use-Case / Domain</text>
+  <rect x="470" y="8" width="12" height="12" fill="#fff2cc" stroke="#d6b656" stroke-width="1"/>
+  <text x="485" y="19" font-size="11" fill="#333">変換 (正規化 / SQL)</text>
+  <rect x="640" y="8" width="12" height="12" fill="#f5f5f5" stroke="#666" stroke-width="1"/>
+  <text x="655" y="19" font-size="11" fill="#333">DB (Postgres)</text>
+  <rect x="760" y="8" width="12" height="12" fill="#f8cecc" stroke="#b85450" stroke-width="1"/>
+  <text x="775" y="19" font-size="11" fill="#333">制約</text>
+
+  <!-- Client -->
+  <rect x="30" y="48" width="180" height="60" rx="8" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1.5"/>
+  <text x="120" y="72" text-anchor="middle" font-weight="bold" fill="#333">Client / SPA (#34)</text>
+  <text x="120" y="90" text-anchor="middle" font-size="11" fill="#444">GET /api/predictions ...</text>
+
+  <!-- handler -->
+  <rect x="260" y="40" width="220" height="76" rx="8" fill="#e1d5e7" stroke="#9673a6" stroke-width="1.5"/>
+  <text x="370" y="62" text-anchor="middle" font-weight="bold" fill="#333">rest-controller handler</text>
+  <text x="370" y="80" text-anchor="middle" font-size="11" fill="#444">Query 抽出 → ドメイン値検証</text>
+  <text x="370" y="96" text-anchor="middle" font-size="11" fill="#444">Surface / Mark / Venue (不正=400)</text>
+
+  <!-- normalize -->
+  <rect x="260" y="132" width="220" height="58" rx="8" fill="#fff2cc" stroke="#d6b656" stroke-width="1.5"/>
+  <text x="370" y="154" text-anchor="middle" font-weight="bold" fill="#333">馬名正規化 (#50)</text>
+  <text x="370" y="172" text-anchor="middle" font-size="11" fill="#444">HorseName::try_from → %正規化値%</text>
+
+  <!-- use-case -->
+  <rect x="530" y="40" width="210" height="150" rx="8" fill="#d5e8d4" stroke="#82b366" stroke-width="1.5"/>
+  <text x="635" y="62" text-anchor="middle" font-weight="bold" fill="#333">use-case interactor</text>
+  <text x="635" y="86" text-anchor="middle" font-size="11" fill="#444">search_predictions(filter)</text>
+  <text x="635" y="106" text-anchor="middle" font-size="11" fill="#444">prediction_detail(id)</text>
+  <text x="635" y="126" text-anchor="middle" font-size="11" fill="#444">prediction_mark_stats(filter)</text>
+  <text x="635" y="150" text-anchor="middle" font-size="10.5" fill="#666">レート算出 (win_rate / show_rate)</text>
+  <text x="635" y="168" text-anchor="middle" font-size="10.5" fill="#666">エラー封筒は #33 と共通</text>
+
+  <!-- repository -->
+  <rect x="530" y="214" width="210" height="86" rx="8" fill="#e1d5e7" stroke="#9673a6" stroke-width="1.5"/>
+  <text x="635" y="236" text-anchor="middle" font-weight="bold" fill="#333">PadPredictionRepository</text>
+  <text x="635" y="254" text-anchor="middle" font-size="11" fill="#444">(rdb-gateway / sqlx)</text>
+  <text x="635" y="274" text-anchor="middle" font-size="10.5" fill="#666">$1.. バインド・既存 index 利用</text>
+  <text x="635" y="290" text-anchor="middle" font-size="10.5" fill="#666">N+1 回避で子行一括取得</text>
+
+  <!-- arrows top flow -->
+  <line x1="210" y1="78" x2="256" y2="78" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="370" y1="116" x2="370" y2="128" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="480" y1="100" x2="526" y2="100" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="498" y="94" font-size="10" fill="#777">filter</text>
+  <line x1="635" y1="190" x2="635" y2="212" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- SQL box -->
+  <rect x="250" y="330" width="490" height="150" rx="8" fill="#fff2cc" stroke="#d6b656" stroke-width="1.5"/>
+  <text x="495" y="352" text-anchor="middle" font-weight="bold" fill="#333">SQL (指定軸のみ AND)</text>
+  <text x="270" y="376" font-size="11" fill="#444">FROM predictions p</text>
+  <text x="270" y="394" font-size="11" fill="#444">LEFT JOIN races r ON r.race_id = p.race_id   -- 表示用(距離/芝ダ)</text>
+  <text x="270" y="412" font-size="11" fill="#444">WHERE p.date BETWEEN $from AND $to AND p.venue = $venue</text>
+  <text x="270" y="430" font-size="11" fill="#444">  AND EXISTS (prediction_horses: horse_name LIKE / mark =)</text>
+  <text x="270" y="448" font-size="11" fill="#444">  AND r.distance BETWEEN .. AND r.surface = ..  -- 距離/芝ダ指定時のみ</text>
+  <text x="270" y="466" font-size="11" fill="#444">ORDER BY p.date DESC, venue ASC, race_num ASC  LIMIT/OFFSET  (+ COUNT)</text>
+
+  <line x1="600" y1="300" x2="540" y2="328" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- DB tables -->
+  <rect x="790" y="330" width="170" height="150" rx="8" fill="#f5f5f5" stroke="#666" stroke-width="1.5"/>
+  <text x="875" y="352" text-anchor="middle" font-weight="bold" fill="#333">Postgres</text>
+  <text x="806" y="376" font-size="11" fill="#444">predictions</text>
+  <text x="806" y="396" font-size="11" fill="#444">prediction_horses</text>
+  <text x="806" y="416" font-size="11" fill="#444">prediction_bets</text>
+  <text x="806" y="436" font-size="11" fill="#444">races (距離 / 芝ダ)</text>
+  <text x="806" y="462" font-size="10" fill="#777">既存 index 再利用</text>
+  <text x="806" y="476" font-size="10" fill="#777">(マイグレーション不要)</text>
+  <line x1="740" y1="405" x2="786" y2="405" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="786" y1="420" x2="740" y2="420" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- constraint note -->
+  <rect x="250" y="498" width="490" height="44" rx="8" fill="#f8cecc" stroke="#b85450" stroke-width="1.5"/>
+  <text x="495" y="516" text-anchor="middle" font-size="11" fill="#333" font-weight="bold">制約: 距離 / 芝ダ で絞ると race_id = NULL (races 未照合) の予想は対象外</text>
+  <text x="495" y="533" text-anchor="middle" font-size="10.5" fill="#555">的中 hit = recovery_rate &gt; 0 / 不的中 = 結果あり且つ払戻 0 / 結果未記録 = フィルタ対象外</text>
+
+  <!-- responses -->
+  <rect x="30" y="580" width="280" height="150" rx="8" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1.5"/>
+  <text x="170" y="602" text-anchor="middle" font-weight="bold" fill="#333">1. 検索一覧レスポンス</text>
+  <text x="48" y="624" font-size="11" fill="#444">total_count / limit / offset</text>
+  <text x="48" y="642" font-size="11" fill="#444">predictions[]: id・date・venue・title</text>
+  <text x="48" y="660" font-size="11" fill="#444">  ・race_num・race_id・distance・surface</text>
+  <text x="48" y="678" font-size="11" fill="#444">  ・honmei_horse・finish</text>
+  <text x="48" y="696" font-size="11" fill="#444">  ・recovery_rate・pnl・hit</text>
+  <text x="48" y="716" font-size="10.5" fill="#777">→ prediction_id で個別へ遷移</text>
+
+  <rect x="350" y="580" width="280" height="150" rx="8" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1.5"/>
+  <text x="490" y="602" text-anchor="middle" font-weight="bold" fill="#333">2. 個別予想 (ビューア相当)</text>
+  <text x="368" y="624" font-size="11" fill="#444">GET /api/predictions/{id}</text>
+  <text x="368" y="646" font-size="11" fill="#444">ヘッダ + prediction_horses[]</text>
+  <text x="368" y="664" font-size="11" fill="#444">  (印・確率・オッズ・人気・短評)</text>
+  <text x="368" y="682" font-size="11" fill="#444">+ prediction_bets[] + 結果</text>
+  <text x="368" y="704" font-size="10.5" fill="#777">未存在 id → 404</text>
+
+  <rect x="670" y="580" width="280" height="150" rx="8" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1.5"/>
+  <text x="810" y="602" text-anchor="middle" font-weight="bold" fill="#333">3. 集計 by-mark</text>
+  <text x="688" y="624" font-size="11" fill="#444">GET /api/predictions/stats/by-mark</text>
+  <text x="688" y="646" font-size="11" fill="#444">by_mark[]: mark・count</text>
+  <text x="688" y="664" font-size="11" fill="#444">  ・win・show</text>
+  <text x="688" y="682" font-size="11" fill="#444">  ・win_rate・show_rate</text>
+  <text x="688" y="704" font-size="10.5" fill="#777">母集団 = 結果記録済み</text>
+  <text x="688" y="720" font-size="10.5" fill="#777">詳細分析は #34 / analyze</text>
+
+  <line x1="350" y1="540" x2="200" y2="578" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="470" y1="542" x2="490" y2="578" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="640" y1="540" x2="790" y2="578" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
+</svg>
