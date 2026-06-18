@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="560" viewBox="0 0 900 560" font-family="sans-serif" font-size="13">
+  <!-- 予想セッション write API の状態遷移 -->
+
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#333"/>
+    </marker>
+  </defs>
+
+  <!-- 凡例 -->
+  <rect x="10" y="8" width="12" height="12" fill="#f5f5f5" stroke="#666"/>
+  <text x="25" y="19" font-size="11" fill="#333">初期/未作成</text>
+  <rect x="110" y="8" width="12" height="12" fill="#dae8fc" stroke="#6c8ebf"/>
+  <text x="125" y="19" font-size="11" fill="#333">進行中</text>
+  <rect x="185" y="8" width="12" height="12" fill="#d5e8d4" stroke="#82b366"/>
+  <text x="200" y="19" font-size="11" fill="#333">完了</text>
+  <rect x="245" y="8" width="12" height="12" fill="#f8cecc" stroke="#b85450"/>
+  <text x="260" y="19" font-size="11" fill="#333">拒否（状態不変）</text>
+
+  <!-- 未作成 -->
+  <rect x="60" y="60" width="200" height="56" rx="8" fill="#f5f5f5" stroke="#666" stroke-width="1.5"/>
+  <text x="160" y="84" text-anchor="middle" font-weight="bold" fill="#333">未作成（行なし）</text>
+  <text x="160" y="102" text-anchor="middle" font-size="11" fill="#444">find_predict_session = None</text>
+
+  <!-- 進行中 -->
+  <rect x="350" y="60" width="220" height="70" rx="8" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1.5"/>
+  <text x="460" y="84" text-anchor="middle" font-weight="bold" fill="#333">進行中（completed=false）</text>
+  <text x="460" y="102" text-anchor="middle" font-size="11" fill="#444">budget / balance / total_bet / total_payout</text>
+  <text x="460" y="118" text-anchor="middle" font-size="11" fill="#444">balance ≥ 0 を常に保つ</text>
+
+  <!-- 完了 -->
+  <rect x="660" y="60" width="200" height="70" rx="8" fill="#d5e8d4" stroke="#82b366" stroke-width="1.5"/>
+  <text x="760" y="84" text-anchor="middle" font-weight="bold" fill="#333">完了（completed=true）</text>
+  <text x="760" y="102" text-anchor="middle" font-size="11" fill="#444">P&amp;L = total_payout − total_bet</text>
+  <text x="760" y="118" text-anchor="middle" font-size="11" fill="#444">= balance − budget</text>
+
+  <!-- 未作成 → 進行中 -->
+  <line x1="260" y1="88" x2="350" y2="90" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="305" y="76" text-anchor="middle" font-size="11" fill="#333">POST /sessions/{date}</text>
+  <text x="305" y="120" text-anchor="middle" font-size="10" fill="#555">budget 必須 → balance=budget</text>
+
+  <!-- 進行中 → 完了 -->
+  <line x1="570" y1="95" x2="660" y2="95" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="615" y="80" text-anchor="middle" font-size="10" fill="#333">results:refresh</text>
+  <text x="615" y="92" text-anchor="middle" font-size="10" fill="#555">で pending=0</text>
+  <text x="615" y="132" text-anchor="middle" font-size="10" fill="#555">→ completed=true</text>
+
+  <!-- 自己ループ: outcome 記録 -->
+  <path d="M410,130 Q380,200 460,200 Q540,200 510,130" fill="none" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="460" y="222" text-anchor="middle" font-size="11" fill="#333">POST /sessions/{date}/races/{race_id}/outcome</text>
+  <text x="460" y="240" text-anchor="middle" font-size="10" fill="#555">Σstake ≤ balance（残高ガード）→ balance/total を 1 トランザクションで更新</text>
+
+  <!-- 自己ループ: refresh -->
+  <path d="M540,130 Q600,260 460,275 Q330,290 380,130" fill="none" stroke="#333" stroke-width="1.2" stroke-dasharray="5,3" marker-end="url(#arrow)"/>
+  <text x="460" y="300" text-anchor="middle" font-size="10" fill="#555">POST .../odds:refresh（#51 ライブ取得→保存）・POST .../results:refresh（#40 結果取得→払戻自動補完）</text>
+
+  <!-- 拒否: 二重作成 -->
+  <rect x="60" y="360" width="360" height="56" rx="8" fill="#f8cecc" stroke="#b85450" stroke-width="1.5"/>
+  <text x="240" y="383" text-anchor="middle" font-weight="bold" fill="#333">二重作成 → 409 Conflict</text>
+  <text x="240" y="401" text-anchor="middle" font-size="11" fill="#444">既存セッションがある日への POST /sessions/{date}</text>
+  <line x1="240" y1="360" x2="300" y2="130" stroke="#b85450" stroke-width="1.2" marker-end="url(#arrow)"/>
+
+  <!-- 拒否: 残高超過 -->
+  <rect x="480" y="360" width="360" height="56" rx="8" fill="#f8cecc" stroke="#b85450" stroke-width="1.5"/>
+  <text x="660" y="383" text-anchor="middle" font-weight="bold" fill="#333">Σstake &gt; balance → 400（状態不変）</text>
+  <text x="660" y="401" text-anchor="middle" font-size="11" fill="#444">outcome は確定せず balance を変えない</text>
+  <line x1="660" y1="360" x2="500" y2="130" stroke="#b85450" stroke-width="1.2" marker-end="url(#arrow)"/>
+
+  <!-- 注記 -->
+  <text x="60" y="470" font-size="12" font-weight="bold" fill="#333">不変条件</text>
+  <text x="60" y="492" font-size="11" fill="#444">・1 開催日 = 1 セッション（date 一意。将来は (user_id, date) へ非破壊拡張）</text>
+  <text x="60" y="510" font-size="11" fill="#444">・balance は u64 で常に ≥ 0（残高ガードで underflow を防ぐ）。total_bet は確定額の累計</text>
+  <text x="60" y="528" font-size="11" fill="#444">・outcome の更新（セッションヘッダ + 当該レースの買い目）は 1 トランザクション（save_race_outcome）</text>
+  <text x="60" y="546" font-size="11" fill="#444">・不変条件は use-case 層で強制し、API（rest-controller）と CLI（predict）で共有する</text>
+</svg>
