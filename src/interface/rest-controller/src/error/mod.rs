@@ -88,6 +88,9 @@ impl From<UseCaseError> for Error {
             UseCaseError::InvalidArgument(m) => Error::BadRequest(m),
             UseCaseError::NotFound(m) => Error::NotFound(m),
             UseCaseError::Internal(m) => Error::Internal(m),
+            // read API では外部 fetch を行わないため通常は発生しないが、網羅のため 500 に倒す
+            // （詳細は error_response 側でログにのみ出す）。
+            UseCaseError::Fetch(m) | UseCaseError::Timeout(m) => Error::Internal(m),
         }
     }
 }
