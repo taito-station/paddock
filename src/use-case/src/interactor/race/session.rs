@@ -124,21 +124,10 @@ impl<R: PredictSessionRepository, P: PdfParser, F: PdfFetcher> Interactor<R, P, 
         Ok((session, bets))
     }
 
-    /// 予想セッションのヘッダを upsert する（新規作成・完了マーク用）。
+    /// 予想セッションのヘッダを upsert する（完了マーク用。新規作成は不変条件を強制する
+    /// `create_predict_session` を使う）。
     pub async fn save_predict_session(&self, session: &PredictSessionRecord) -> Result<()> {
         self.repository.save_predict_session(session).await
-    }
-
-    /// 1 レース分の確定結果（セッション更新＋買い目）を 1 トランザクションで保存する。
-    pub async fn save_race_outcome(
-        &self,
-        session: &PredictSessionRecord,
-        race_id: &RaceId,
-        bets: &[PredictBetRecord],
-    ) -> Result<()> {
-        self.repository
-            .save_race_outcome(session, race_id, bets)
-            .await
     }
 
     /// 指定日のセッションで記録済みの馬場入力を取得する（`--resume` のデフォルト提示用）。

@@ -59,27 +59,22 @@ pub async fn run_session(
         );
         (session, processed)
     } else {
-        if existing.is_some() {
-            anyhow::bail!(
-                "{date_str} のセッションは既に存在します。続きは --resume、集計は --summary を使ってください。"
-            );
-        }
         let Some(budget) = budget else {
             anyhow::bail!("新規セッションには --budget が必要です（例: --budget 10000）。");
         };
-        let now = Utc::now();
-        let session = PredictSessionRecord {
-            date,
-            budget,
-            balance: budget,
-            total_bet: 0,
-            total_payout: 0,
-            completed: false,
-            created_at: now,
-            updated_at: now,
+        // budget>0・同一開催日の二重作成ガード・残高初期化・開始時点のヘッダ保存（全レースを
+        // スキップしても再開できるよう）は use-case の create_predict_session に集約済み（#164）。
+        // 不変条件違反の Conflict/InvalidArgument は CLI 向けの案内文へ翻訳する（判定は use-case が担う）。
+        let session = match app.interactor.create_predict_session(date, budget).await {
+            Ok(session) => session,
+            Err(paddock_use_case::Error::Conflict(_)) => anyhow::bail!(
+                "{date_str} のセッションは既に存在します。続きは --resume、集計は --summary を使ってください。"
+            ),
+            Err(paddock_use_case::Error::InvalidArgument(_)) => {
+                anyhow::bail!("予算は 1 以上を指定してください（例: --budget 10000）。")
+            }
+            Err(e) => return Err(e.into()),
         };
-        // 全レースをスキップしても再開できるよう、開始時点でヘッダを保存する。
-        app.interactor.save_predict_session(&session).await?;
         println!("=== {date_str} 開催 — {} レース ===", races.len());
         println!("初期予算: ¥{budget}");
         (session, HashSet::new())
@@ -258,18 +253,6 @@ async fn run_race(
         println!("賭けなし — 次のレースへ");
         return Ok(());
     }
-    // 残高ガード（生成器は残高内に収め、e は入力チェックで保証するが二重防御）
-    if bet > session.balance {
-        println!(
-            "賭け金合計 ¥{} が残高 ¥{} を超えるためスキップします",
-            bet, session.balance
-        );
-        return Ok(());
-    }
-
-    // 賭け金を先に差し引き、買い目ごとに払戻を入力する（per-bet 記録）。
-    session.balance -= bet;
-    session.total_bet += bet;
 
     println!();
     println!(">>> レース後 — 買い目ごとに払戻を入力 <<<");
@@ -297,14 +280,29 @@ async fn run_race(
         ));
     }
     let race_payout: u64 = bet_records.iter().map(|b| b.payout).sum();
-    session.balance += race_payout;
-    session.total_payout += race_payout;
 
-    // セッション更新＋このレースの買い目を 1 トランザクションで保存する。
-    session.updated_at = Utc::now();
-    app.interactor
-        .save_race_outcome(session, &race.race_id, &bet_records)
-        .await?;
+    // 残高ガード（Σstake ≤ balance）・残高/累計計算・セッション更新＋買い目追記の 1 トランザクション
+    // 保存・updated_at の時刻注入は use-case の record_race_outcome に集約済み（#164）。推奨は
+    // race_cap=min(race_budget, balance)、編集は read_edited_amounts が balance 上限を強制するため、
+    // ここに到達する bet は常に残高内・未記録だが、use-case が防御的に返す残高超過（InvalidArgument）・
+    // 二重記録（Conflict）はセッション全体を中断せず当該レースをスキップして継続する（旧「残高超過
+    // スキップ」挙動を踏襲）。成功時は DB 反映済みの更新後セッションで丸ごと置換し、残高表示に使う。
+    *session = match app
+        .interactor
+        .record_race_outcome(session.date, &race.race_id, bet_records)
+        .await
+    {
+        Ok(updated) => updated,
+        Err(paddock_use_case::Error::InvalidArgument(_)) => {
+            println!("賭け金合計が残高を超えるため、このレースをスキップします。");
+            return Ok(());
+        }
+        Err(paddock_use_case::Error::Conflict(_)) => {
+            println!("このレースは既に記録済みのため、スキップします。");
+            return Ok(());
+        }
+        Err(e) => return Err(e.into()),
+    };
 
     let pnl = race_payout as i128 - bet as i128;
     println!(
