@@ -176,13 +176,15 @@ API の仕様乖離を防ぐため、OpenAPI はコードから生成する（sp
 |---|---|---|
 | `InvalidArgument` | 400 | 不正な日付・クエリ・ドメイン値変換失敗 |
 | `NotFound` | 404 | 出馬表が無い race_id |
-| `ExternalServer` | 500 | DB エラー等 |
+| `Internal` | 500 | DB エラー等 |
 
-エラーレスポンスは JSON で返す（例 `{ "error": { "code": "not_found", "message": "race card: ..." } }`）。
+> 実体の `use_case::Error` は `InvalidArgument` / `NotFound` / `Internal` の 3 値（`src/use-case/src/error.rs`）。規約 `architecture.md` は `Unauthorized`/`Forbidden`/`AlreadyExist`/`PreconditionFailed`/`ExternalServer` 等も挙げるが、本プロジェクトの use-case は現状この 3 値のみ。read API では認証なし・更新なしのため不足しない。
+
+エラーレスポンスは JSON で返す（例 `{ "error": { "code": "not_found", "message": "race card: ..." } }`）。この error response 型も `#[derive(ToSchema)]` で schema 化し、`openapi.json` のコンポーネント・各エンドポイントのエラー応答に含める（契約として網羅する）。
 
 ## Apps 層（api-server）
 
-- 設定: DB 接続は既存の共有 crate `src/infrastructure/config`（`paddock-config`）の `Config { paddock_db_url, .. }` / `from_env()` を**再利用**する（規約 `architecture.md` どおり config は Infrastructure 層に集約し、app ローカルで `PADDOCK_DB_URL` を再実装しない）。bind アドレス/ポート（`SERVER_*`）・`LOG_*` が同 crate に無ければ `paddock-config` を拡張して足す。
+- 設定: DB 接続は既存の共有 crate `src/infrastructure/config`（`paddock-config`）の `Config { paddock_db_url, .. }` / `from_env()` を**再利用**する（規約 `architecture.md` どおり config は Infrastructure 層に集約し、app ローカルで `PADDOCK_DB_URL` を再実装しない）。ログ設定は同 crate の `paddock_log` を流用する。bind アドレス/ポート（`SERVER_*`）は `paddock-config` に無いため同 crate を拡張して足す。
 - `setup.rs`: ロガー初期化 → SQLite プール → `RdbGateway`（Repository 実装）→ `Interactor<R,P,F>` 構築（predict/analyze と同じ具象 P/F）。
 - `app.rs`: `configure_routes<R,P,F>` で rest-controller の各 router を `/api` 配下にマウント。**認証ミドルウェアの差し込み口を 1 箇所**用意（現状 no-op：素通し。将来ここに JWT 検証を挿す）。OpenAPI（`/docs`・`/api-docs/openapi.json`）もここでマウント。
 - `bin.rs`: エントリポイント（`HttpServer` 起動）。
