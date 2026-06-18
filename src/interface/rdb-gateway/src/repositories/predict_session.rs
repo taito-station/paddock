@@ -3,7 +3,7 @@ use paddock_domain::{RaceId, TrackCondition};
 use paddock_use_case::repository::{
     PredictBetRecord, PredictRaceConditionRecord, PredictSessionRecord,
 };
-use sqlx::SqlitePool;
+use sqlx::PgPool;
 
 use crate::error::{Error, Result};
 
@@ -34,16 +34,16 @@ const UPSERT_SESSION_SQL: &str = r#"
 
 /// `UPSERT_SESSION_SQL` に session の各値をバインドする。
 ///
-/// 金額（円）は `u64` だが SQLite INTEGER は `i64`。賭け金は現実的に `i64::MAX` に
+/// 金額（円）は `u64` だが Postgres BIGINT は `i64`。賭け金は現実的に `i64::MAX` に
 /// 達しないためキャストで安全。仮に超えても `as i64` でサイレントに負値化するだけで
 /// DB は受理する点に留意（ドメイン上は起き得ない）。
 fn bind_session<'q>(
-    query: sqlx::query::Query<'q, sqlx::Sqlite, sqlx::sqlite::SqliteArguments>,
+    query: sqlx::query::Query<'q, sqlx::Postgres, sqlx::postgres::PgArguments>,
     date_str: &'q str,
     session: &PredictSessionRecord,
     created_at: String,
     updated_at: String,
-) -> sqlx::query::Query<'q, sqlx::Sqlite, sqlx::sqlite::SqliteArguments> {
+) -> sqlx::query::Query<'q, sqlx::Postgres, sqlx::postgres::PgArguments> {
     query
         .bind(date_str)
         .bind(session.budget as i64)
@@ -56,7 +56,7 @@ fn bind_session<'q>(
 }
 
 pub async fn find_predict_session(
-    pool: &SqlitePool,
+    pool: &PgPool,
     date: NaiveDate,
 ) -> Result<Option<PredictSessionRecord>> {
     let date_str = date_key(date);
@@ -85,10 +85,7 @@ pub async fn find_predict_session(
     }))
 }
 
-pub async fn find_predict_bets(
-    pool: &SqlitePool,
-    date: NaiveDate,
-) -> Result<Vec<PredictBetRecord>> {
+pub async fn find_predict_bets(pool: &PgPool, date: NaiveDate) -> Result<Vec<PredictBetRecord>> {
     let date_str = date_key(date);
     let rows: Vec<(String, String, String, i64, i64, f64)> = sqlx::query_as(
         r#"
@@ -119,7 +116,7 @@ pub async fn find_predict_bets(
 /// 購入済みの買い目を `(bet_id, レコード)` で bet_id 昇順に返す（自動精算 #40 用）。
 /// `find_predict_bets` と同 SQL に `bet_id` 列を加えたもの。
 pub async fn find_predict_bets_with_id(
-    pool: &SqlitePool,
+    pool: &PgPool,
     date: NaiveDate,
 ) -> Result<Vec<(i64, PredictBetRecord)>> {
     let date_str = date_key(date);
@@ -156,7 +153,7 @@ pub async fn find_predict_bets_with_id(
 /// `settled` の各 `(bet_id, payout)` で `predict_bets.payout` を UPDATE し、
 /// セッションヘッダを upsert する。
 pub async fn settle_predict_session(
-    pool: &SqlitePool,
+    pool: &PgPool,
     session: &PredictSessionRecord,
     settled: &[(i64, u64)],
 ) -> Result<()> {
@@ -189,7 +186,7 @@ pub async fn settle_predict_session(
 ///
 /// 新規セッションは必ずこの関数で先にヘッダを作成してから `save_race_outcome` を呼ぶ前提。
 /// `created_at` は `ON CONFLICT DO UPDATE` の対象外なので、初回作成時の値が保持される。
-pub async fn save_predict_session(pool: &SqlitePool, session: &PredictSessionRecord) -> Result<()> {
+pub async fn save_predict_session(pool: &PgPool, session: &PredictSessionRecord) -> Result<()> {
     let date_str = date_key(session.date);
     bind_session(
         sqlx::query(UPSERT_SESSION_SQL),
@@ -205,7 +202,7 @@ pub async fn save_predict_session(pool: &SqlitePool, session: &PredictSessionRec
 
 /// セッション upsert と当該レースの買い目追記を 1 トランザクションで行う。
 pub async fn save_race_outcome(
-    pool: &SqlitePool,
+    pool: &PgPool,
     session: &PredictSessionRecord,
     race_id: &RaceId,
     bets: &[PredictBetRecord],
@@ -253,7 +250,7 @@ pub async fn save_race_outcome(
 /// 指定日のセッションで記録済みの馬場入力を race_id 昇順で返す（`--resume` のデフォルト提示用）。
 /// `track_condition` 列が NULL の行は「不明として入力済み」を表し `None` で返す。
 pub async fn find_predict_race_conditions(
-    pool: &SqlitePool,
+    pool: &PgPool,
     date: NaiveDate,
 ) -> Result<Vec<PredictRaceConditionRecord>> {
     let date_str = date_key(date);
@@ -290,7 +287,7 @@ pub async fn find_predict_race_conditions(
 /// 1 レース分の馬場入力を upsert する。`(session_date, race_id)` で衝突した行は
 /// `track_condition` と `updated_at` を更新し、`created_at` は初回値を保持する。
 pub async fn save_predict_race_condition(
-    pool: &SqlitePool,
+    pool: &PgPool,
     date: NaiveDate,
     record: &PredictRaceConditionRecord,
     recorded_at: DateTime<Utc>,

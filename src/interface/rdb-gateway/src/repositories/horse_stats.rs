@@ -1,7 +1,7 @@
 use chrono::NaiveDate;
 use paddock_domain::{DatedCounts, HorseName};
 use paddock_use_case::repository::{GroupStat, HorseRecencyStats, HorseStatsRow, RecencySeries};
-use sqlx::SqlitePool;
+use sqlx::PgPool;
 
 use crate::error::{Error, Result};
 
@@ -11,7 +11,7 @@ use super::sql::date_lt_pred;
 /// 集計する（バックテストのリーク防止）。`results.race_id` は `NOT NULL REFERENCES races` のため、
 /// `INNER JOIN races` を無条件に足しても行数は変わらず、`as_of = None`（全期間）の結果は従来と一致する。
 pub async fn horse_stats(
-    pool: &SqlitePool,
+    pool: &PgPool,
     name: &HorseName,
     as_of: Option<NaiveDate>,
 ) -> Result<HorseStatsRow> {
@@ -60,25 +60,21 @@ pub async fn horse_stats(
     })
 }
 
-async fn overall_stat(
-    pool: &SqlitePool,
-    horse_name: &str,
-    cutoff: Option<&str>,
-) -> Result<GroupStat> {
+async fn overall_stat(pool: &PgPool, horse_name: &str, cutoff: Option<&str>) -> Result<GroupStat> {
     let q = format!(
         r#"
         SELECT
             COUNT(*) AS starts,
-            SUM(CASE WHEN results.finishing_position = 1 THEN 1 ELSE 0 END) AS wins,
-            SUM(CASE WHEN results.finishing_position IN (1,2) THEN 1 ELSE 0 END) AS places,
-            SUM(CASE WHEN results.finishing_position IN (1,2,3) THEN 1 ELSE 0 END) AS shows
+            COALESCE(SUM(CASE WHEN results.finishing_position = 1 THEN 1 ELSE 0 END), 0) AS wins,
+            COALESCE(SUM(CASE WHEN results.finishing_position IN (1,2) THEN 1 ELSE 0 END), 0) AS places,
+            COALESCE(SUM(CASE WHEN results.finishing_position IN (1,2,3) THEN 1 ELSE 0 END), 0) AS shows
         FROM results
         INNER JOIN races ON races.race_id = results.race_id
         WHERE results.horse_name = $1
           AND results.finishing_position IS NOT NULL
           {date}
         "#,
-        date = date_lt_pred(cutoff, "?2"),
+        date = date_lt_pred(cutoff, "$2"),
     );
     let mut query = sqlx::query_as(sqlx::AssertSqlSafe(q)).bind(horse_name);
     if let Some(d) = cutoff {
@@ -95,7 +91,7 @@ async fn overall_stat(
 }
 
 async fn group_by(
-    pool: &SqlitePool,
+    pool: &PgPool,
     horse_name: &str,
     column: &str,
     keys: &[(&str, &str)],
@@ -107,17 +103,17 @@ async fn group_by(
             r#"
             SELECT
                 COUNT(*) AS starts,
-                SUM(CASE WHEN results.finishing_position = 1 THEN 1 ELSE 0 END) AS wins,
-                SUM(CASE WHEN results.finishing_position IN (1,2) THEN 1 ELSE 0 END) AS places,
-                SUM(CASE WHEN results.finishing_position IN (1,2,3) THEN 1 ELSE 0 END) AS shows
+                COALESCE(SUM(CASE WHEN results.finishing_position = 1 THEN 1 ELSE 0 END), 0) AS wins,
+                COALESCE(SUM(CASE WHEN results.finishing_position IN (1,2) THEN 1 ELSE 0 END), 0) AS places,
+                COALESCE(SUM(CASE WHEN results.finishing_position IN (1,2,3) THEN 1 ELSE 0 END), 0) AS shows
             FROM results
             INNER JOIN races ON races.race_id = results.race_id
             WHERE results.horse_name = $1
               AND results.finishing_position IS NOT NULL
-              AND {column} = ?2
+              AND {column} = $2
               {date}
             "#,
-            date = date_lt_pred(cutoff, "?3"),
+            date = date_lt_pred(cutoff, "$3"),
         );
         let mut query = sqlx::query_as(sqlx::AssertSqlSafe(q))
             .bind(horse_name)
@@ -138,7 +134,7 @@ async fn group_by(
 }
 
 async fn group_by_distance_band(
-    pool: &SqlitePool,
+    pool: &PgPool,
     horse_name: &str,
     cutoff: Option<&str>,
 ) -> Result<Vec<GroupStat>> {
@@ -154,9 +150,9 @@ async fn group_by_distance_band(
             r#"
             SELECT
                 COUNT(*) AS starts,
-                SUM(CASE WHEN results.finishing_position = 1 THEN 1 ELSE 0 END) AS wins,
-                SUM(CASE WHEN results.finishing_position IN (1,2) THEN 1 ELSE 0 END) AS places,
-                SUM(CASE WHEN results.finishing_position IN (1,2,3) THEN 1 ELSE 0 END) AS shows
+                COALESCE(SUM(CASE WHEN results.finishing_position = 1 THEN 1 ELSE 0 END), 0) AS wins,
+                COALESCE(SUM(CASE WHEN results.finishing_position IN (1,2) THEN 1 ELSE 0 END), 0) AS places,
+                COALESCE(SUM(CASE WHEN results.finishing_position IN (1,2,3) THEN 1 ELSE 0 END), 0) AS shows
             FROM results
             INNER JOIN races ON races.race_id = results.race_id
             WHERE results.horse_name = $1
@@ -164,7 +160,7 @@ async fn group_by_distance_band(
               AND {predicate}
               {date}
             "#,
-            date = date_lt_pred(cutoff, "?2"),
+            date = date_lt_pred(cutoff, "$2"),
         );
         let mut query = sqlx::query_as(sqlx::AssertSqlSafe(q)).bind(horse_name);
         if let Some(d) = cutoff {
@@ -183,7 +179,7 @@ async fn group_by_distance_band(
 }
 
 async fn group_by_popularity_band(
-    pool: &SqlitePool,
+    pool: &PgPool,
     horse_name: &str,
     cutoff: Option<&str>,
 ) -> Result<Vec<GroupStat>> {
@@ -199,9 +195,9 @@ async fn group_by_popularity_band(
             r#"
             SELECT
                 COUNT(*) AS starts,
-                SUM(CASE WHEN results.finishing_position = 1 THEN 1 ELSE 0 END) AS wins,
-                SUM(CASE WHEN results.finishing_position IN (1,2) THEN 1 ELSE 0 END) AS places,
-                SUM(CASE WHEN results.finishing_position IN (1,2,3) THEN 1 ELSE 0 END) AS shows
+                COALESCE(SUM(CASE WHEN results.finishing_position = 1 THEN 1 ELSE 0 END), 0) AS wins,
+                COALESCE(SUM(CASE WHEN results.finishing_position IN (1,2) THEN 1 ELSE 0 END), 0) AS places,
+                COALESCE(SUM(CASE WHEN results.finishing_position IN (1,2,3) THEN 1 ELSE 0 END), 0) AS shows
             FROM results
             INNER JOIN races ON races.race_id = results.race_id
             WHERE results.horse_name = $1
@@ -210,7 +206,7 @@ async fn group_by_popularity_band(
               AND results.{predicate}
               {date}
             "#,
-            date = date_lt_pred(cutoff, "?2"),
+            date = date_lt_pred(cutoff, "$2"),
         );
         let mut query = sqlx::query_as(sqlx::AssertSqlSafe(q)).bind(horse_name);
         if let Some(d) = cutoff {
@@ -233,7 +229,7 @@ async fn group_by_popularity_band(
 /// `races.date` で GROUP BY したカウントで、domain 側が時間減衰を掛ける。`as_of` は集計と同じ
 /// リーク防止（`races.date < as_of`）。
 pub async fn horse_recency(
-    pool: &SqlitePool,
+    pool: &PgPool,
     name: &HorseName,
     as_of: Option<NaiveDate>,
 ) -> Result<HorseRecencyStats> {
@@ -290,7 +286,7 @@ fn rows_to_dated(rows: Vec<(String, i64, i64, i64, i64)>) -> Result<Vec<DatedCou
 
 /// `column = key` でフィルタした成績を `races.date` 別に集計し、ラベルごとの日付系列で返す。
 async fn dated_group_by(
-    pool: &SqlitePool,
+    pool: &PgPool,
     horse_name: &str,
     column: &str,
     keys: &[(&str, &str)],
@@ -309,19 +305,19 @@ async fn dated_group_by(
             SELECT
                 races.date AS d,
                 COUNT(*) AS starts,
-                SUM(CASE WHEN results.finishing_position = 1 THEN 1 ELSE 0 END) AS wins,
-                SUM(CASE WHEN results.finishing_position IN (1,2) THEN 1 ELSE 0 END) AS places,
-                SUM(CASE WHEN results.finishing_position IN (1,2,3) THEN 1 ELSE 0 END) AS shows
+                COALESCE(SUM(CASE WHEN results.finishing_position = 1 THEN 1 ELSE 0 END), 0) AS wins,
+                COALESCE(SUM(CASE WHEN results.finishing_position IN (1,2) THEN 1 ELSE 0 END), 0) AS places,
+                COALESCE(SUM(CASE WHEN results.finishing_position IN (1,2,3) THEN 1 ELSE 0 END), 0) AS shows
             FROM results
             INNER JOIN races ON races.race_id = results.race_id
             WHERE results.horse_name = $1
               AND results.finishing_position IS NOT NULL
-              AND {column} = ?2
+              AND {column} = $2
               {date}
             GROUP BY races.date
             ORDER BY races.date
             "#,
-            date = date_lt_pred(cutoff, "?3"),
+            date = date_lt_pred(cutoff, "$3"),
         );
         let mut query = sqlx::query_as::<_, (String, i64, i64, i64, i64)>(sqlx::AssertSqlSafe(q))
             .bind(horse_name)
@@ -340,7 +336,7 @@ async fn dated_group_by(
 
 /// 距離帯（band 述語）でフィルタした成績を `races.date` 別に集計し、帯ごとの日付系列で返す。
 async fn dated_distance_band(
-    pool: &SqlitePool,
+    pool: &PgPool,
     horse_name: &str,
     cutoff: Option<&str>,
 ) -> Result<Vec<RecencySeries>> {
@@ -357,9 +353,9 @@ async fn dated_distance_band(
             SELECT
                 races.date AS d,
                 COUNT(*) AS starts,
-                SUM(CASE WHEN results.finishing_position = 1 THEN 1 ELSE 0 END) AS wins,
-                SUM(CASE WHEN results.finishing_position IN (1,2) THEN 1 ELSE 0 END) AS places,
-                SUM(CASE WHEN results.finishing_position IN (1,2,3) THEN 1 ELSE 0 END) AS shows
+                COALESCE(SUM(CASE WHEN results.finishing_position = 1 THEN 1 ELSE 0 END), 0) AS wins,
+                COALESCE(SUM(CASE WHEN results.finishing_position IN (1,2) THEN 1 ELSE 0 END), 0) AS places,
+                COALESCE(SUM(CASE WHEN results.finishing_position IN (1,2,3) THEN 1 ELSE 0 END), 0) AS shows
             FROM results
             INNER JOIN races ON races.race_id = results.race_id
             WHERE results.horse_name = $1
@@ -369,7 +365,7 @@ async fn dated_distance_band(
             GROUP BY races.date
             ORDER BY races.date
             "#,
-            date = date_lt_pred(cutoff, "?2"),
+            date = date_lt_pred(cutoff, "$2"),
         );
         let mut query = sqlx::query_as::<_, (String, i64, i64, i64, i64)>(sqlx::AssertSqlSafe(q))
             .bind(horse_name);
@@ -386,7 +382,7 @@ async fn dated_distance_band(
 }
 
 async fn group_by_gate(
-    pool: &SqlitePool,
+    pool: &PgPool,
     horse_name: &str,
     cutoff: Option<&str>,
 ) -> Result<Vec<GroupStat>> {
@@ -401,9 +397,9 @@ async fn group_by_gate(
             r#"
             SELECT
                 COUNT(*) AS starts,
-                SUM(CASE WHEN results.finishing_position = 1 THEN 1 ELSE 0 END) AS wins,
-                SUM(CASE WHEN results.finishing_position IN (1,2) THEN 1 ELSE 0 END) AS places,
-                SUM(CASE WHEN results.finishing_position IN (1,2,3) THEN 1 ELSE 0 END) AS shows
+                COALESCE(SUM(CASE WHEN results.finishing_position = 1 THEN 1 ELSE 0 END), 0) AS wins,
+                COALESCE(SUM(CASE WHEN results.finishing_position IN (1,2) THEN 1 ELSE 0 END), 0) AS places,
+                COALESCE(SUM(CASE WHEN results.finishing_position IN (1,2,3) THEN 1 ELSE 0 END), 0) AS shows
             FROM results
             INNER JOIN races ON races.race_id = results.race_id
             WHERE results.horse_name = $1
@@ -411,7 +407,7 @@ async fn group_by_gate(
               AND {predicate}
               {date}
             "#,
-            date = date_lt_pred(cutoff, "?2"),
+            date = date_lt_pred(cutoff, "$2"),
         );
         let mut query = sqlx::query_as(sqlx::AssertSqlSafe(q)).bind(horse_name);
         if let Some(d) = cutoff {

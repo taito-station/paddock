@@ -1,9 +1,9 @@
 use paddock_use_case::FetchRecord;
-use sqlx::SqlitePool;
+use sqlx::PgPool;
 
 use crate::error::Result;
 
-pub async fn contains(pool: &SqlitePool, source_key: &str) -> Result<bool> {
+pub async fn contains(pool: &PgPool, source_key: &str) -> Result<bool> {
     let row: Option<(i64,)> =
         sqlx::query_as("SELECT 1 FROM fetch_history WHERE source_key = $1 LIMIT 1")
             .bind(source_key)
@@ -12,7 +12,7 @@ pub async fn contains(pool: &SqlitePool, source_key: &str) -> Result<bool> {
     Ok(row.is_some())
 }
 
-pub async fn record(pool: &SqlitePool, record: &FetchRecord) -> Result<()> {
+pub async fn record(pool: &PgPool, record: &FetchRecord) -> Result<()> {
     sqlx::query(
         r#"
         INSERT INTO fetch_history (source_key, url, races_saved, horses_saved, fetched_at)

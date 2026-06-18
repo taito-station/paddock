@@ -4,10 +4,10 @@ use anyhow::Context;
 use paddock_config::Config;
 use paddock_use_case::Interactor;
 use pdf_parser::{HybridParser, UreqFetcher};
-use rdb_gateway::{SqliteRepository, pool};
+use rdb_gateway::{PostgresRepository, pool};
 use tracing_subscriber::{EnvFilter, fmt};
 
-pub type App = Interactor<SqliteRepository, HybridParser, UreqFetcher>;
+pub type App = Interactor<PostgresRepository, HybridParser, UreqFetcher>;
 
 /// Build the app. `fetch_min_interval` sets a global minimum spacing between
 /// outbound JRA requests (from `fetch --max-rps`); `None` imposes no cap.
@@ -22,29 +22,14 @@ pub async fn build_app(fetch_min_interval: Option<Duration>) -> anyhow::Result<A
 
     pdf_ocr::ensure_available("jpn").context("tesseract preflight")?;
 
-    ensure_data_dir(&config.paddock_db_url)?;
-
     let pool = pool::connect(&config.paddock_db_url)
         .await
-        .context("connect SQLite pool")?;
+        .context("connect Postgres pool")?;
     pool::migrate(&pool).await.context("apply migrations")?;
-    let repo = SqliteRepository::new(pool);
+    let repo = PostgresRepository::new(pool);
     Ok(Interactor::new(
         repo,
         HybridParser::new(),
         UreqFetcher::new(fetch_min_interval),
     ))
-}
-
-fn ensure_data_dir(database_url: &str) -> anyhow::Result<()> {
-    if let Some(rest) = database_url.strip_prefix("sqlite://") {
-        let path = rest.split('?').next().unwrap_or(rest);
-        if let Some(parent) = std::path::Path::new(path).parent()
-            && !parent.as_os_str().is_empty()
-        {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("create db parent dir {}", parent.display()))?;
-        }
-    }
-    Ok(())
 }

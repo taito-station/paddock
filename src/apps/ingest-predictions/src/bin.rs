@@ -10,7 +10,7 @@ use chrono::Utc;
 use clap::Parser;
 use paddock_config::Config;
 use paddock_use_case::repository::Repository;
-use rdb_gateway::{SqliteRepository, pool};
+use rdb_gateway::{PostgresRepository, pool};
 
 /// 既定の pad ルート（web-viewer と同じ iCloud Obsidian vault）。`PADDOCK_PAD_DIR` で上書き可。
 const DEFAULT_PAD_DIR: &str =
@@ -23,9 +23,9 @@ async fn main() -> Result<()> {
 
     let pool = pool::connect(&config.paddock_db_url)
         .await
-        .context("connect SQLite pool")?;
+        .context("connect Postgres pool")?;
     pool::migrate(&pool).await.context("apply migrations")?;
-    let repo = SqliteRepository::new(pool);
+    let repo = PostgresRepository::new(pool);
 
     if args.render {
         return render_all(&repo, args.pad_dir).await;
@@ -34,7 +34,7 @@ async fn main() -> Result<()> {
     ingest(&repo, args.input, args.dry_run).await
 }
 
-async fn ingest(repo: &SqliteRepository, input: Option<PathBuf>, dry_run: bool) -> Result<()> {
+async fn ingest(repo: &PostgresRepository, input: Option<PathBuf>, dry_run: bool) -> Result<()> {
     let raw = match &input {
         Some(path) => std::fs::read_to_string(path)
             .with_context(|| format!("入力 JSON を読めません: {}", path.display()))?,
@@ -79,7 +79,7 @@ async fn ingest(repo: &SqliteRepository, input: Option<PathBuf>, dry_run: bool) 
     Ok(())
 }
 
-async fn render_all(repo: &SqliteRepository, pad_dir: Option<PathBuf>) -> Result<()> {
+async fn render_all(repo: &PostgresRepository, pad_dir: Option<PathBuf>) -> Result<()> {
     let pad_root = pad_dir
         .or_else(|| std::env::var("PADDOCK_PAD_DIR").ok().map(PathBuf::from))
         .unwrap_or_else(|| PathBuf::from(DEFAULT_PAD_DIR));

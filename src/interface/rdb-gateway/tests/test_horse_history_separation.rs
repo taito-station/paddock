@@ -1,4 +1,4 @@
-//! netkeiba 近走を `horses`/`horse_past_runs` に分離した #59 の検証（実 SQLite）:
+//! netkeiba 近走を `horses`/`horse_past_runs` に分離した #59 の検証（Postgres）:
 //! - `upsert_horse_history` が horses/horse_past_runs に入り、results/races を汚さない
 //! - 集計（horse_stats）は pdf のみで二重計上しない
 //! - `find_recent_runs` は pdf と netkeiba を UNION し、同一実レースは pdf 優先で 1 件に dedup
@@ -10,16 +10,7 @@ use paddock_domain::{
 };
 use paddock_use_case::HorsePastRun;
 use paddock_use_case::repository::Repository;
-use rdb_gateway::{SqliteRepository, pool};
-
-async fn fresh_repo() -> (SqliteRepository, tempfile::TempDir) {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let db_path = dir.path().join("test.db");
-    let url = format!("sqlite://{}?mode=rwc", db_path.display());
-    let p = pool::connect(&url).await.expect("connect");
-    pool::migrate(&p).await.expect("migrate");
-    (SqliteRepository::new(p), dir)
-}
+use rdb_gateway::PostgresRepository;
 
 fn ymd(y: i32, m: u32, d: u32) -> NaiveDate {
     NaiveDate::from_ymd_opt(y, m, d).unwrap()
@@ -85,7 +76,7 @@ fn pdf_race(race_id: &str, date: NaiveDate, race_num: u32, horse: &str, finish: 
     }
 }
 
-async fn count(repo: &SqliteRepository, table: &str) -> i64 {
+async fn count(repo: &PostgresRepository, table: &str) -> i64 {
     let sql = format!("SELECT COUNT(*) FROM {table}");
     let row: (i64,) = sqlx::query_as(sqlx::AssertSqlSafe(sql))
         .fetch_one(&repo.pool)
@@ -94,9 +85,9 @@ async fn count(repo: &SqliteRepository, table: &str) -> i64 {
     row.0
 }
 
-#[tokio::test]
-async fn upsert_horse_history_lands_in_separate_tables() {
-    let (repo, _dir) = fresh_repo().await;
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn upsert_horse_history_lands_in_separate_tables(pool: sqlx::PgPool) {
+    let repo = PostgresRepository::new(pool);
     let horse_id = HorseId::try_from("2019104567".to_string()).unwrap();
     // 12 桁 netkeiba id（東京=05）。canonical: 2026-3-tokyo-2-11R / 2026-3-tokyo-2-12R。
     let runs = vec![
@@ -128,12 +119,12 @@ async fn upsert_horse_history_lands_in_separate_tables() {
     );
 }
 
-#[tokio::test]
-async fn upsert_skips_unconvertible_run_and_saves_rest() {
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn upsert_skips_unconvertible_run_and_saves_rest(pool: sqlx::PgPool) {
     // canonical race_id へ変換できない走（例: 場コード 44 = 地方/JRA 外）が混ざっても、その
     // 1 走だけ skip して残りは保存し、バッチ全体を止めないことを固定する回帰テスト（#103 の耐性）。
     // ※開催回 7 以上は #111 で変換可能になったため skip 例には使わない（下の別テストで保存を確認）。
-    let (repo, _dir) = fresh_repo().await;
+    let repo = PostgresRepository::new(pool);
     let horse_id = HorseId::try_from("2019104567".to_string()).unwrap();
     let runs = vec![
         past_run("202605030211", "ウマZ", ymd(2026, 4, 1), 11, 1),
@@ -157,11 +148,11 @@ async fn upsert_skips_unconvertible_run_and_saves_rest() {
     assert_eq!(skipped.0, 0, "変換できない非JRA の走は保存されない");
 }
 
-#[tokio::test]
-async fn upsert_saves_round_over_six_run() {
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn upsert_saves_round_over_six_run(pool: sqlx::PgPool) {
     // #111: netkeiba は一部 JRA レースに開催回 7 以上を採番する（例 2024 京都 7 回）。
     // これらも canonical 変換でき、skip されず保存されることを固定する。
-    let (repo, _dir) = fresh_repo().await;
+    let repo = PostgresRepository::new(pool);
     let horse_id = HorseId::try_from("2019104567".to_string()).unwrap();
     let saved = repo
         .upsert_horse_history(
@@ -181,9 +172,9 @@ async fn upsert_saves_round_over_six_run() {
     assert_eq!(rid.0, "2024-7-kyoto-7-6R");
 }
 
-#[tokio::test]
-async fn horse_stats_counts_pdf_only_not_netkeiba() {
-    let (repo, _dir) = fresh_repo().await;
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn horse_stats_counts_pdf_only_not_netkeiba(pool: sqlx::PgPool) {
+    let repo = PostgresRepository::new(pool);
     // pdf で 1 戦 1 勝。
     repo.save_race(&pdf_race(
         "2026-3-tokyo-2-11R",
@@ -214,9 +205,9 @@ async fn horse_stats_counts_pdf_only_not_netkeiba() {
     assert_eq!(stats.overall.wins, 1);
 }
 
-#[tokio::test]
-async fn find_recent_runs_unions_and_dedups_preferring_pdf() {
-    let (repo, _dir) = fresh_repo().await;
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn find_recent_runs_unions_and_dedups_preferring_pdf(pool: sqlx::PgPool) {
+    let repo = PostgresRepository::new(pool);
     // 11R は pdf(1着) と netkeiba(7着) の両方＝同一実レース。12R は netkeiba のみ。
     repo.save_race(&pdf_race(
         "2026-3-tokyo-2-11R",

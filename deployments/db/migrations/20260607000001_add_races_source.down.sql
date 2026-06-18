@@ -1,1 +1,0 @@
-ALTER TABLE races DROP COLUMN source;

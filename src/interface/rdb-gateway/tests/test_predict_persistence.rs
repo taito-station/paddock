@@ -1,4 +1,4 @@
-//! `predict_sessions` / `predict_bets` の永続化を実 SQLite（temp ファイル）で往復検証する。
+//! `predict_sessions` / `predict_bets` の永続化を Postgres（#[sqlx::test] の一時DB）で往復検証する。
 //! オッズ未整備のためライブセッションでは買い目を発生させられないので、賭けを伴う
 //! payout/bets の保存・復元はこの結合テストで担保する。
 
@@ -7,16 +7,7 @@ use paddock_domain::{RaceId, TrackCondition};
 use paddock_use_case::repository::{
     PredictBetRecord, PredictRaceConditionRecord, PredictSessionRecord, Repository,
 };
-use rdb_gateway::{SqliteRepository, pool};
-
-async fn fresh_repo() -> (SqliteRepository, tempfile::TempDir) {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let db_path = dir.path().join("test.db");
-    let url = format!("sqlite://{}?mode=rwc", db_path.display());
-    let p = pool::connect(&url).await.expect("connect");
-    pool::migrate(&p).await.expect("migrate");
-    (SqliteRepository::new(p), dir)
-}
+use rdb_gateway::PostgresRepository;
 
 fn date() -> NaiveDate {
     NaiveDate::from_ymd_opt(2026, 4, 19).unwrap()
@@ -33,9 +24,9 @@ fn bet(combo: &str, code: &str, stake: u64, payout: u64, ev: f64) -> PredictBetR
     }
 }
 
-#[tokio::test]
-async fn session_header_round_trips() {
-    let (repo, _dir) = fresh_repo().await;
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn session_header_round_trips(pool: sqlx::PgPool) {
+    let repo = PostgresRepository::new(pool);
     let now = Utc::now();
     let session = PredictSessionRecord {
         date: date(),
@@ -58,9 +49,9 @@ async fn session_header_round_trips() {
     assert!(!loaded.completed);
 }
 
-#[tokio::test]
-async fn save_race_outcome_updates_balance_and_persists_bets() {
-    let (repo, _dir) = fresh_repo().await;
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn save_race_outcome_updates_balance_and_persists_bets(pool: sqlx::PgPool) {
+    let repo = PostgresRepository::new(pool);
     let now = Utc::now();
     let mut session = PredictSessionRecord {
         date: date(),
@@ -106,9 +97,9 @@ async fn save_race_outcome_updates_balance_and_persists_bets() {
     assert_eq!(saved[1].race_id.value(), "2026-3-nakayama-8-1R");
 }
 
-#[tokio::test]
-async fn completed_flag_and_multi_race_append() {
-    let (repo, _dir) = fresh_repo().await;
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn completed_flag_and_multi_race_append(pool: sqlx::PgPool) {
+    let repo = PostgresRepository::new(pool);
     let now = Utc::now();
     let mut session = PredictSessionRecord {
         date: date(),
@@ -152,7 +143,7 @@ async fn completed_flag_and_multi_race_append() {
 }
 
 /// セッションヘッダを先に作る（predict_race_conditions.session_date の FK 充足）。
-async fn seed_session(repo: &SqliteRepository) {
+async fn seed_session(repo: &PostgresRepository) {
     let now = Utc::now();
     repo.save_predict_session(&PredictSessionRecord {
         date: date(),
@@ -175,9 +166,9 @@ fn cond(race: &str, tc: Option<TrackCondition>) -> PredictRaceConditionRecord {
     }
 }
 
-#[tokio::test]
-async fn race_condition_round_trips_value_and_unknown() {
-    let (repo, _dir) = fresh_repo().await;
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn race_condition_round_trips_value_and_unknown(pool: sqlx::PgPool) {
+    let repo = PostgresRepository::new(pool);
     seed_session(&repo).await;
     assert!(
         repo.find_predict_race_conditions(date())
@@ -208,9 +199,9 @@ async fn race_condition_round_trips_value_and_unknown() {
     assert_eq!(loaded[1].track_condition, None);
 }
 
-#[tokio::test]
-async fn race_condition_upsert_overwrites_same_race() {
-    let (repo, _dir) = fresh_repo().await;
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn race_condition_upsert_overwrites_same_race(pool: sqlx::PgPool) {
+    let repo = PostgresRepository::new(pool);
     seed_session(&repo).await;
     let now = Utc::now();
 
@@ -235,11 +226,11 @@ async fn race_condition_upsert_overwrites_same_race() {
     assert_eq!(loaded[0].track_condition, Some(TrackCondition::Yielding));
 }
 
-#[tokio::test]
-async fn race_condition_save_requires_existing_session_fk() {
-    let (repo, _dir) = fresh_repo().await;
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn race_condition_save_requires_existing_session_fk(pool: sqlx::PgPool) {
+    let repo = PostgresRepository::new(pool);
     // セッションヘッダ未作成のまま保存すると FK 制約（session_date → predict_sessions）違反で
-    // エラーになる。FK が有効（foreign_keys pragma + 制約宣言）であることの回帰検知。
+    // エラーになる。FK 制約宣言が有効（Postgres は FK を常時強制）であることの回帰検知。
     let res = repo
         .save_predict_race_condition(
             date(),
@@ -253,9 +244,9 @@ async fn race_condition_save_requires_existing_session_fk() {
     );
 }
 
-#[tokio::test]
-async fn race_condition_upsert_preserves_created_at_and_advances_updated_at() {
-    let (repo, _dir) = fresh_repo().await;
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn race_condition_upsert_preserves_created_at_and_advances_updated_at(pool: sqlx::PgPool) {
+    let repo = PostgresRepository::new(pool);
     seed_session(&repo).await;
 
     let t1 = Utc::now();

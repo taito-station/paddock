@@ -32,14 +32,14 @@ use paddock_use_case::repository::{
     TrainerStatsRow,
 };
 
-use crate::pool::SqlitePool;
+use crate::pool::PgPool;
 
-pub struct SqliteRepository {
-    pub pool: SqlitePool,
+pub struct PostgresRepository {
+    pub pool: PgPool,
 }
 
-impl SqliteRepository {
-    pub fn new(pool: SqlitePool) -> Self {
+impl PostgresRepository {
+    pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }
 
@@ -56,7 +56,7 @@ impl SqliteRepository {
     }
 }
 
-impl Repository for SqliteRepository {
+impl Repository for PostgresRepository {
     async fn save_race(&self, race: &Race) -> UcResult<()> {
         save_race::save_race(&self.pool, race)
             .await

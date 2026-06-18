@@ -2,8 +2,8 @@
 #
 #   docker compose -f deployments/compose.yaml up -d
 #
-# paddock の DB バックエンド（Postgres への移行は後続 PR）。各 worktree は
-# この 1 サーバを共有し、worktree ごとに別 database 名で分離する運用を想定する。
+# paddock の DB バックエンド（Postgres）。各 worktree はこの 1 サーバを共有し、worktree ごとに
+# 別 database 名で分離する（PADDOCK_DB_URL の DB 名を変える。seed/reset は scripts/ を使う）。
 services:
   postgres:
     image: postgres:17-alpine

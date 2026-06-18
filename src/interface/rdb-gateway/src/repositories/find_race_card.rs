@@ -3,7 +3,7 @@ use paddock_domain::{
     GateNum, HorseEntry, HorseName, HorseNum, JockeyName, RaceCard, RaceId, Surface, TrainerName,
     Venue,
 };
-use sqlx::SqlitePool;
+use sqlx::PgPool;
 
 use crate::error::{Error, Result};
 
@@ -29,7 +29,7 @@ struct CardRow {
     distance: i64,
 }
 
-pub async fn find_race_card(pool: &SqlitePool, race_id: &RaceId) -> Result<Option<RaceCard>> {
+pub async fn find_race_card(pool: &PgPool, race_id: &RaceId) -> Result<Option<RaceCard>> {
     let card_row: Option<CardRow> = sqlx::query_as(
         r#"
         SELECT race_id, date, venue, round, day, race_num, surface, distance

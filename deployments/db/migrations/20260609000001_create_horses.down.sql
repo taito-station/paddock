@@ -1,2 +1,0 @@
-DROP INDEX IF EXISTS idx_horses_name;
-DROP TABLE IF EXISTS horses;

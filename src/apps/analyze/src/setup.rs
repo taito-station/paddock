@@ -1,7 +1,7 @@
 use anyhow::Context;
 use paddock_config::Config;
 use paddock_use_case::Interactor;
-use rdb_gateway::{SqliteRepository, pool};
+use rdb_gateway::{PostgresRepository, pool};
 use tracing_subscriber::{EnvFilter, fmt};
 
 /// Stub PdfParser/PdfFetcher used by the analyze bin (it never ingests).
@@ -32,7 +32,7 @@ impl paddock_use_case::pdf_fetcher::PdfFetcher for UnusedFetcher {
 }
 
 pub struct App {
-    pub interactor: Interactor<SqliteRepository, UnusedParser, UnusedFetcher>,
+    pub interactor: Interactor<PostgresRepository, UnusedParser, UnusedFetcher>,
 }
 
 pub async fn build_app() -> anyhow::Result<App> {
@@ -46,9 +46,9 @@ pub async fn build_app() -> anyhow::Result<App> {
 
     let pool = pool::connect(&config.paddock_db_url)
         .await
-        .context("connect SQLite pool")?;
+        .context("connect Postgres pool")?;
     pool::migrate(&pool).await.context("apply migrations")?;
-    let repo = SqliteRepository::new(pool);
+    let repo = PostgresRepository::new(pool);
     let interactor = Interactor::new(repo, UnusedParser, UnusedFetcher);
     Ok(App { interactor })
 }

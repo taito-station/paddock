@@ -3,7 +3,7 @@ use netkeiba_scraper::UreqNetkeibaScraper;
 use odds_scraper::UreqOddsScraper;
 use paddock_config::Config;
 use paddock_use_case::{Interactor, OddsInteractor, SettleInteractor};
-use rdb_gateway::{SqliteRepository, pool};
+use rdb_gateway::{PostgresRepository, pool};
 use tracing_subscriber::{EnvFilter, fmt};
 
 /// predict バイナリは PDF 解析・取得を使わないため no-op を注入する（analyze と同パターン）。
@@ -34,11 +34,11 @@ impl paddock_use_case::pdf_fetcher::PdfFetcher for UnusedFetcher {
 }
 
 pub struct App {
-    pub interactor: Interactor<SqliteRepository, UnusedParser, UnusedFetcher>,
+    pub interactor: Interactor<PostgresRepository, UnusedParser, UnusedFetcher>,
     /// オッズは read-through で取得する（保存済み参照 → 無ければスクレイプして保存、#51/ADR 0010）。
-    pub odds: OddsInteractor<UreqOddsScraper, SqliteRepository>,
+    pub odds: OddsInteractor<UreqOddsScraper, PostgresRepository>,
     /// 確定払戻の自動精算（#40、`--settle`）。netkeiba 結果ページから払戻を取得する。
-    pub settle: SettleInteractor<UreqNetkeibaScraper, SqliteRepository>,
+    pub settle: SettleInteractor<UreqNetkeibaScraper, PostgresRepository>,
 }
 
 pub async fn build_app() -> anyhow::Result<App> {
@@ -52,15 +52,18 @@ pub async fn build_app() -> anyhow::Result<App> {
 
     let pool = pool::connect(&config.paddock_db_url)
         .await
-        .context("connect SQLite pool")?;
+        .context("connect Postgres pool")?;
     pool::migrate(&pool).await.context("apply migrations")?;
-    // オッズ参照用にプールを共有する（sqlx の SqlitePool は Arc ベースで安価に clone 可能）。
-    let odds = OddsInteractor::new(UreqOddsScraper::new(), SqliteRepository::new(pool.clone()));
+    // オッズ参照用にプールを共有する（sqlx の PgPool は Arc ベースで安価に clone 可能）。
+    let odds = OddsInteractor::new(
+        UreqOddsScraper::new(),
+        PostgresRepository::new(pool.clone()),
+    );
     let settle = SettleInteractor::new(
         UreqNetkeibaScraper::new(),
-        SqliteRepository::new(pool.clone()),
+        PostgresRepository::new(pool.clone()),
     );
-    let repo = SqliteRepository::new(pool);
+    let repo = PostgresRepository::new(pool);
     let interactor = Interactor::new(repo, UnusedParser, UnusedFetcher);
     Ok(App {
         interactor,

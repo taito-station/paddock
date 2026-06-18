@@ -20,7 +20,7 @@ pub struct Config {
 }
 
 fn default_db_url() -> String {
-    "sqlite://data/paddock.db?mode=rwc".to_string()
+    "postgres://paddock:paddock@localhost:5432/paddock".to_string()
 }
 
 fn default_pdfs_dir() -> String {

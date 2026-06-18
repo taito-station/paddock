@@ -100,7 +100,15 @@ pub async fn run_session(
         if processed.contains(race.race_id.value()) {
             continue;
         }
-        run_race(app, race, &mut session, race_budget, &recorded, &mut last_input).await?;
+        run_race(
+            app,
+            race,
+            &mut session,
+            race_budget,
+            &recorded,
+            &mut last_input,
+        )
+        .await?;
     }
 
     session.completed = true;
@@ -222,7 +230,9 @@ async fn run_race(
         // 回収率・的中率はオッズ取得済の脚のみで算出する一方、賭け計は未取得脚も含む全脚の合計
         // （基準が異なる）。未取得脚があるときはその非対称を明示する。
         let note = if unpriced > 0 {
-            format!("（回収率・的中率はオッズ取得済の脚基準、賭け計は未取得 {unpriced} 点を含む全脚）")
+            format!(
+                "（回収率・的中率はオッズ取得済の脚基準、賭け計は未取得 {unpriced} 点を含む全脚）"
+            )
         } else {
             String::new()
         };
@@ -615,9 +625,8 @@ mod tests {
         assert!((win.ev - 1.5).abs() < 1e-10);
         assert_eq!(win.race_id.value(), "2026-3-nakayama-8-1R");
 
-        let quinella = BetCombination::Quinella(
-            paddock_domain::Pair::try_from((horse(1), horse(5))).unwrap(),
-        );
+        let quinella =
+            BetCombination::Quinella(paddock_domain::Pair::try_from((horse(1), horse(5))).unwrap());
         let q = make_bet_record(&race_id, &quinella, 1.2, 500, 2500);
         assert_eq!(q.bet_type, "quinella");
         assert_eq!(q.combination, "1-5");

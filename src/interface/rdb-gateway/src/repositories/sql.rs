@@ -1,16 +1,16 @@
 //! stats クエリ共通の SQL 片ヘルパ。
 
 use paddock_use_case::repository::GroupStat;
-use sqlx::SqlitePool;
+use sqlx::PgPool;
 
 /// 成績集計の SELECT 本体（COUNT/SUM(CASE...) と `results INNER JOIN races`）。
 /// stats 系クエリ（jockey/trainer/course）で共通。呼び出し側が ` WHERE ...` を後続させる。
 pub(crate) const STATS_AGG_SELECT: &str = r#"
     SELECT
         COUNT(*) AS starts,
-        SUM(CASE WHEN results.finishing_position = 1 THEN 1 ELSE 0 END) AS wins,
-        SUM(CASE WHEN results.finishing_position IN (1,2) THEN 1 ELSE 0 END) AS places,
-        SUM(CASE WHEN results.finishing_position IN (1,2,3) THEN 1 ELSE 0 END) AS shows
+        COALESCE(SUM(CASE WHEN results.finishing_position = 1 THEN 1 ELSE 0 END), 0) AS wins,
+        COALESCE(SUM(CASE WHEN results.finishing_position IN (1,2) THEN 1 ELSE 0 END), 0) AS places,
+        COALESCE(SUM(CASE WHEN results.finishing_position IN (1,2,3) THEN 1 ELSE 0 END), 0) AS shows
     FROM results
     INNER JOIN races ON races.race_id = results.race_id
 "#;
@@ -37,10 +37,10 @@ pub(crate) fn group_stat_from_row(label: &str, row: (i64, i64, i64, i64)) -> Gro
     }
 }
 
-/// `[STATS_AGG_SELECT] WHERE ...` のクエリに `binds`（?1..）と任意の `cutoff`（末尾）を
+/// `[STATS_AGG_SELECT] WHERE ...` のクエリに `binds`（$1..）と任意の `cutoff`（末尾）を
 /// 順にバインドして 1 行の集計 tuple を取得する。`cutoff` は `date_lt_pred` のプレースホルダに対応。
 async fn fetch_agg(
-    pool: &SqlitePool,
+    pool: &PgPool,
     query: String,
     binds: &[&str],
     cutoff: Option<&str>,
@@ -62,7 +62,7 @@ async fn fetch_agg(
 /// （`delete_absent_horse_nums` と同じ二重防御）。`value` と `cutoff` はプレースホルダで
 /// バインドする（SQL インジェクション安全）。`as_of = None`（cutoff なし）の結果は従来と一致。
 pub(crate) async fn entity_stats(
-    pool: &SqlitePool,
+    pool: &PgPool,
     column: &str,
     value: &str,
     cutoff: Option<&str>,
@@ -73,18 +73,18 @@ pub(crate) async fn entity_stats(
     );
 
     let overall_q = format!(
-        "{STATS_AGG_SELECT} WHERE results.{column} = ?1 \
+        "{STATS_AGG_SELECT} WHERE results.{column} = $1 \
          AND results.finishing_position IS NOT NULL {date}",
-        date = date_lt_pred(cutoff, "?2"),
+        date = date_lt_pred(cutoff, "$2"),
     );
     let overall = group_stat_from_row("全体", fetch_agg(pool, overall_q, &[value], cutoff).await?);
 
     let mut by_surface = Vec::with_capacity(SURFACE_KEYS.len());
     for (key, label) in SURFACE_KEYS {
         let q = format!(
-            "{STATS_AGG_SELECT} WHERE results.{column} = ?1 \
-             AND results.finishing_position IS NOT NULL AND races.surface = ?2 {date}",
-            date = date_lt_pred(cutoff, "?3"),
+            "{STATS_AGG_SELECT} WHERE results.{column} = $1 \
+             AND results.finishing_position IS NOT NULL AND races.surface = $2 {date}",
+            date = date_lt_pred(cutoff, "$3"),
         );
         let row = fetch_agg(pool, q, &[value, key], cutoff).await?;
         by_surface.push(group_stat_from_row(label, row));
@@ -93,9 +93,9 @@ pub(crate) async fn entity_stats(
     let mut by_gate_group = Vec::with_capacity(GATE_GROUPS.len());
     for (label, predicate) in GATE_GROUPS {
         let q = format!(
-            "{STATS_AGG_SELECT} WHERE results.{column} = ?1 \
+            "{STATS_AGG_SELECT} WHERE results.{column} = $1 \
              AND results.finishing_position IS NOT NULL AND {predicate} {date}",
-            date = date_lt_pred(cutoff, "?2"),
+            date = date_lt_pred(cutoff, "$2"),
         );
         let row = fetch_agg(pool, q, &[value], cutoff).await?;
         by_gate_group.push(group_stat_from_row(label, row));
@@ -125,7 +125,7 @@ pub(crate) fn date_lt_pred(cutoff: Option<&str>, placeholder: &str) -> String {
 /// `table` はリテラル（`"results"` / `"horse_entries"`）のみを渡す前提で `format!` に埋め込む。
 /// race_id・馬番は必ずプレースホルダでバインドする（SQL インジェクション安全）。
 pub(crate) async fn delete_absent_horse_nums(
-    conn: &mut sqlx::SqliteConnection,
+    conn: &mut sqlx::PgConnection,
     table: &str,
     race_id: &str,
     horse_nums: &[i64],
@@ -138,11 +138,13 @@ pub(crate) async fn delete_absent_horse_nums(
     if horse_nums.is_empty() {
         return Ok(());
     }
-    let placeholders = std::iter::repeat_n("?", horse_nums.len())
+    // race_id = $1、馬番は $2.. と番号付きで並べる（Postgres は番号付きプレースホルダ）。
+    let placeholders = (0..horse_nums.len())
+        .map(|i| format!("${}", i + 2))
         .collect::<Vec<_>>()
         .join(", ");
     let sql =
-        format!("DELETE FROM {table} WHERE race_id = ? AND horse_num NOT IN ({placeholders})");
+        format!("DELETE FROM {table} WHERE race_id = $1 AND horse_num NOT IN ({placeholders})");
     let mut q = sqlx::query(sqlx::AssertSqlSafe(sql)).bind(race_id);
     for n in horse_nums {
         q = q.bind(n);

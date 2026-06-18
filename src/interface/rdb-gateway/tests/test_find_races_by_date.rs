@@ -1,5 +1,5 @@
 //! `find_races_by_date`（races ∪ race_cards）と `find_race_card` の date 往復を
-//! 実 SQLite（temp ファイル）で検証する。#26 の中核ロジックの回帰防止。
+//! Postgres（#[sqlx::test] の一時DB）で検証する。#26 の中核ロジックの回帰防止。
 
 use chrono::NaiveDate;
 use paddock_domain::{
@@ -7,16 +7,7 @@ use paddock_domain::{
     Venue,
 };
 use paddock_use_case::repository::Repository;
-use rdb_gateway::{SqliteRepository, pool};
-
-async fn fresh_repo() -> (SqliteRepository, tempfile::TempDir) {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let db_path = dir.path().join("test.db");
-    let url = format!("sqlite://{}?mode=rwc", db_path.display());
-    let p = pool::connect(&url).await.expect("connect");
-    pool::migrate(&p).await.expect("migrate");
-    (SqliteRepository::new(p), dir)
-}
+use rdb_gateway::PostgresRepository;
 
 fn d() -> NaiveDate {
     NaiveDate::from_ymd_opt(2026, 4, 19).unwrap()
@@ -61,9 +52,9 @@ fn card(race_id: &str, race_num: u32) -> RaceCard {
     }
 }
 
-#[tokio::test]
-async fn returns_races_from_results() {
-    let (repo, _dir) = fresh_repo().await;
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn returns_races_from_results(pool: sqlx::PgPool) {
+    let repo = PostgresRepository::new(pool);
     repo.save_race(&race("2026-3-nakayama-8-2R", 2))
         .await
         .unwrap();
@@ -78,10 +69,10 @@ async fn returns_races_from_results() {
     assert_eq!(found[1].race_num, 2);
 }
 
-#[tokio::test]
-async fn picks_up_race_cards_without_results() {
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn picks_up_race_cards_without_results(pool: sqlx::PgPool) {
     // #26 の核心: 成績がまだ無く出馬表だけでも開催日が拾えること。
-    let (repo, _dir) = fresh_repo().await;
+    let repo = PostgresRepository::new(pool);
     repo.save_race_card(&card("2026-3-nakayama-8-1R", 1))
         .await
         .unwrap();
@@ -98,9 +89,9 @@ async fn picks_up_race_cards_without_results() {
     assert!(found.iter().all(|r| r.results.is_empty()));
 }
 
-#[tokio::test]
-async fn dedupes_race_in_both_preferring_results() {
-    let (repo, _dir) = fresh_repo().await;
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn dedupes_race_in_both_preferring_results(pool: sqlx::PgPool) {
+    let repo = PostgresRepository::new(pool);
     // 1R は成績＋出馬表の両方、2R は出馬表のみ。
     repo.save_race(&race("2026-3-nakayama-8-1R", 1))
         .await
@@ -121,9 +112,9 @@ async fn dedupes_race_in_both_preferring_results() {
     assert_eq!(r1.distance, 2000, "成績側 distance(2000) が採用される");
 }
 
-#[tokio::test]
-async fn empty_when_no_data_for_date() {
-    let (repo, _dir) = fresh_repo().await;
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn empty_when_no_data_for_date(pool: sqlx::PgPool) {
+    let repo = PostgresRepository::new(pool);
     repo.save_race_card(&card("2026-3-nakayama-8-1R", 1))
         .await
         .unwrap();
@@ -132,9 +123,9 @@ async fn empty_when_no_data_for_date() {
     assert!(repo.find_races_by_date(other).await.unwrap().is_empty());
 }
 
-#[tokio::test]
-async fn find_race_card_round_trips_date() {
-    let (repo, _dir) = fresh_repo().await;
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn find_race_card_round_trips_date(pool: sqlx::PgPool) {
+    let repo = PostgresRepository::new(pool);
     let id = RaceId::try_from("2026-3-nakayama-8-1R").unwrap();
     repo.save_race_card(&card("2026-3-nakayama-8-1R", 1))
         .await

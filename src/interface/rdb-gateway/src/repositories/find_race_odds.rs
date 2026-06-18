@@ -3,7 +3,7 @@ use paddock_domain::{
     BetType, HorseNum, OddsValue, OrderedPair, OrderedTriple, Pair, PlaceOdds, RaceId, RaceOdds,
     Triple,
 };
-use sqlx::SqlitePool;
+use sqlx::PgPool;
 
 use crate::error::{Error, Result};
 
@@ -17,18 +17,19 @@ struct OddsRow {
 
 /// `race_odds` の全券種行を読み出してドメイン [`RaceOdds`] に再構成する（#38）。
 ///
-/// `as_of = Some(d)` のとき `date(fetched_at) <= d` のスナップショットに限定する
+/// `as_of = Some(d)` のとき `substr(fetched_at, 1, 10) <= d` のスナップショットに限定する
 /// （backtest の当時オッズ参照、リーク防止）。`None` は時刻制約なし（predict の最新参照）。
-/// `fetched_at` は常に UTC(RFC3339)で保存されるため、`date(fetched_at)` も UTC 日付で比較する。
+/// `fetched_at` は常に UTC(RFC3339)で保存されるため、先頭 10 文字（`YYYY-MM-DD`）の TEXT 比較が
+/// UTC 日付の比較になる（Postgres の `date <= text` 非互換を避け、SQLite 同等の挙動を保つ）。
 /// いずれの券種の行も無ければ `None`。combination_key はドメインの `from_key()` でパースし、
 /// 単勝・複勝の単一馬番キーは [`parse_horse_num`] で扱う。
 pub async fn find_race_odds(
-    pool: &SqlitePool,
+    pool: &PgPool,
     race_id: &RaceId,
     as_of: Option<NaiveDate>,
 ) -> Result<Option<RaceOdds>> {
     // as_of は NULL 許容バインドで「制約なし」と「日付以前」を 1 クエリに統一する。
-    // 主キー先頭 race_id で対象は 1 レース分（高々十数行）に絞られるため、`date(fetched_at)` が
+    // 主キー先頭 race_id で対象は 1 レース分（高々十数行）に絞られるため、`substr(fetched_at,1,10)` が
     // インデックス非対応（sargable でない）でも実害はない。
     // backtest の as_of は JST 開催日 `race.date`、`fetched_at` は UTC 取得時刻。両者の TZ は一致
     // しないため日付境界は厳密でない: レース後の深夜取得（翌 UTC 日付）は as_of から漏れて当時オッズを
@@ -40,7 +41,7 @@ pub async fn find_race_odds(
         SELECT bet_type, combination_key, odds, odds_high
         FROM race_odds
         WHERE race_id = $1
-            AND ($2 IS NULL OR date(fetched_at) <= $2)
+            AND ($2 IS NULL OR substr(fetched_at, 1, 10) <= $2)
         "#,
     )
     .bind(race_id.value())

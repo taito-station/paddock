@@ -6,7 +6,7 @@ use entry_parser::MutoolEntryParser;
 use paddock_config::Config;
 use paddock_use_case::EntryInteractor;
 use paddock_use_case::pdf_fetcher::PdfFetcher;
-use rdb_gateway::{SqliteRepository, pool};
+use rdb_gateway::{PostgresRepository, pool};
 use tracing_subscriber::{EnvFilter, fmt};
 
 /// Max time to establish the connection / finish the whole request. Without a
@@ -67,7 +67,7 @@ fn read_body(url: &str, body: ureq::Body) -> paddock_use_case::Result<Vec<u8>> {
     Ok(buf)
 }
 
-pub type App = EntryInteractor<SqliteRepository, MutoolEntryParser, UreqFetcher>;
+pub type App = EntryInteractor<PostgresRepository, MutoolEntryParser, UreqFetcher>;
 
 pub async fn build_app() -> anyhow::Result<App> {
     let config = Config::from_env().context("load config")?;
@@ -78,29 +78,10 @@ pub async fn build_app() -> anyhow::Result<App> {
         )
         .try_init();
 
-    ensure_data_dir(&config.paddock_db_url)?;
-
     let pool = pool::connect(&config.paddock_db_url)
         .await
-        .context("connect SQLite pool")?;
+        .context("connect Postgres pool")?;
     pool::migrate(&pool).await.context("apply migrations")?;
-    let repo = SqliteRepository::new(pool);
-    Ok(EntryInteractor::new(
-        repo,
-        MutoolEntryParser,
-        UreqFetcher::new(),
-    ))
-}
-
-fn ensure_data_dir(database_url: &str) -> anyhow::Result<()> {
-    if let Some(rest) = database_url.strip_prefix("sqlite://") {
-        let path = rest.split('?').next().unwrap_or(rest);
-        if let Some(parent) = std::path::Path::new(path).parent()
-            && !parent.as_os_str().is_empty()
-        {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("create db parent dir {}", parent.display()))?;
-        }
-    }
-    Ok(())
+    let repo = PostgresRepository::new(pool);
+    Ok(EntryInteractor::new(repo, MutoolEntryParser, UreqFetcher::new()))
 }

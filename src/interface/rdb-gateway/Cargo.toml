@@ -12,9 +12,6 @@ thiserror        = { workspace = true }
 tokio            = { workspace = true }
 tracing          = { workspace = true }
 
-[dev-dependencies]
-tempfile         = { workspace = true }
-
 [[test]]
 name = "test_predict_persistence"
 path = "tests/test_predict_persistence.rs"

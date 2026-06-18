@@ -1,93 +1,68 @@
 #!/usr/bin/env bash
-# 対象クローン/worktree の DB を空に戻す（再 seed / 再 ingest 前提）(#120)。
+# 対象 worktree の DB を空に戻す（再 seed / 再 ingest 前提）(#36 Postgres 版)。
 #
-# paddock.db と WAL/SHM を退避（既定）または削除する。次回の app 起動 or seed-db.sh で
-# スキーマごと再生成される。
+# 対象 database を DROP/CREATE して空にする。次回のアプリ起動（pool::migrate）でスキーマが
+# 再生成される。seed-db.sh と対称に、golden（既定: 同サーバの paddock DB）への reset は
+# 既定で中断する（--force で明示的に許可）。
 #
-# 前提: 対象クローンの app（predict / analyze / fetch 等）を停止してから実行すること。
-# 稼働中プロセスが開いている DB の WAL/SHM を退避・削除すると整合性を壊しうる。
-#
-# 使い方:
-#   scripts/reset-db.sh                # ./data/paddock.db を .bak へ退避して空に戻す
-#   scripts/reset-db.sh --to /other/data
-#   scripts/reset-db.sh --no-backup    # 退避せず削除
-#   scripts/reset-db.sh --force        # primary clone の data でも実行する
+# 前提: psql（libpq クライアント）が要る。対象 DB を使用中のアプリは停止しておく。
 set -euo pipefail
 
-TO="data"
-BACKUP=1
+TO_URL="${PADDOCK_DB_URL:-}"
+GOLDEN_URL="${PADDOCK_GOLDEN_DB_URL:-postgres://paddock:paddock@localhost:5432/paddock}"
 FORCE=0
 
 usage() {
     cat <<'EOF'
-reset-db.sh - 対象クローンの DB を空に戻す（再 seed / 再 ingest 前提）(#120)
+reset-db.sh - 対象 worktree の DB を空に戻す（Postgres）
 
-paddock.db と WAL/SHM を退避（既定）または削除する。次回の app 起動 or seed-db.sh で
-スキーマごと再生成される。
+対象 database を DROP/CREATE して空にする。次回のアプリ起動で自動マイグレートされる。
 
 使い方:
-  scripts/reset-db.sh                # ./data/paddock.db を .bak へ退避して空に戻す
-  scripts/reset-db.sh --to /other/data
-  scripts/reset-db.sh --no-backup    # 退避せず削除
-  scripts/reset-db.sh --force        # primary clone の data でも実行する
+  scripts/reset-db.sh                 # $PADDOCK_DB_URL の database を空に戻す
+  scripts/reset-db.sh --to <url>      # 対象を明示
+  scripts/reset-db.sh --force         # golden(paddock) への reset も許可する
 
 オプション:
-  --to <dir>     対象 data ディレクトリ（既定: data）
-  --no-backup    .bak へ退避せず削除する
-  --force        primary clone の data（golden 元）への reset を許可する
-  -h, --help     このヘルプを表示
+  --to <url>   対象 DB の接続 URL（既定: PADDOCK_DB_URL）
+  --force      golden DB への reset を許可する
+  -h, --help   このヘルプ
 EOF
 }
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --to) TO="${2:?--to にパスが必要}"; shift 2 ;;
-        --no-backup) BACKUP=0; shift ;;
+        --to) TO_URL="${2:?--to に URL が必要}"; shift 2 ;;
         --force) FORCE=1; shift ;;
         -h|--help) usage; exit 0 ;;
         *) echo "不明な引数: $1" >&2; usage >&2; exit 2 ;;
     esac
 done
 
-TO="${TO%/}"          # 末尾スラッシュを正規化（data/ → data）
-[[ -n "$TO" ]] || TO="."
-DEST="$TO/paddock.db"
-
-# primary clone の data を誤って reset すると全クローンの seed 元（golden）を失う。
-# seed-db.sh が `-ef` で primary への書き込みを防ぐのと対称に、reset でも git で primary を
-# 検出できる場合は対象が primary の data なら既定で中断する（--force で明示的に上書き）。
-if [[ "$FORCE" -ne 1 ]]; then
-    common_dir="$(git rev-parse --git-common-dir 2>/dev/null || true)"
-    if [[ -n "$common_dir" ]]; then
-        primary_data="$(cd "$(dirname "$common_dir")" && pwd)/data"
-        # seed の自己 seed ガードと対称に `-ef`（inode 比較）で判定し、symlink や相対/絶対の
-        # 差異で primary を指していても検出する（対象 dir / primary dir が無ければ false）。
-        if [[ -d "$TO" && "$TO" -ef "$primary_data" ]]; then
-            echo "対象が primary clone の data（golden 元）です: $(cd "$TO" && pwd)。" >&2
-            echo "全クローンの seed 元を失うため既定では中断する。意図的なら --force を付ける" >&2
-            exit 1
-        fi
-    fi
+if [[ -z "$TO_URL" ]]; then
+    echo "対象が未指定: PADDOCK_DB_URL を .env で設定するか --to <url> を渡す" >&2
+    exit 1
 fi
-# ts に PID を付けて、同一秒に別プロセスが退避しても .bak が衝突しないようにする。
-ts="$(date +%Y%m%d-%H%M%S)-$$"
-removed=0
+command -v psql >/dev/null || { echo "psql が見つからない" >&2; exit 1; }
 
-for f in "$DEST" "$DEST-wal" "$DEST-shm"; do
-    if [[ -e "$f" ]]; then
-        if [[ "$BACKUP" -eq 1 ]]; then
-            mv "$f" "$f.bak-$ts"
-            echo "退避: $f -> $f.bak-$ts"
-        else
-            rm -f "$f"
-            echo "削除: $f"
-        fi
-        removed=1
-    fi
-done
-
-if [[ "$removed" -eq 0 ]]; then
-    echo "reset 対象なし: $DEST は存在しない"
-else
-    echo "reset 完了: $DEST を空に戻した（再 seed / 再 ingest で再生成）"
+# golden への誤爆を防ぐ（クエリ文字列を無視して比較）。
+if [[ "$FORCE" -ne 1 && "${TO_URL%%\?*}" == "${GOLDEN_URL%%\?*}" ]]; then
+    echo "対象が golden DB です: $TO_URL。全 worktree の seed 元を失うため既定では中断する。" >&2
+    echo "意図的なら --force を付ける" >&2
+    exit 1
 fi
+
+# 対象 URL から database 名と管理用 URL（同サーバの postgres DB）を導出する。
+to_noq="${TO_URL%%\?*}"
+target_db="${to_noq##*/}"
+admin_url="${to_noq%/*}/postgres"
+if [[ -z "$target_db" || "$target_db" == "$to_noq" ]]; then
+    echo "対象 URL から database 名を取得できない: $TO_URL" >&2
+    exit 1
+fi
+
+psql "$admin_url" -v ON_ERROR_STOP=1 -q \
+    -c "DROP DATABASE IF EXISTS \"$target_db\" WITH (FORCE);" \
+    -c "CREATE DATABASE \"$target_db\";"
+
+echo "reset 完了: $target_db を空に戻した（次回アプリ起動で自動マイグレート / seed-db.sh で複製）"

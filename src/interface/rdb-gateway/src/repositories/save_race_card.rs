@@ -1,11 +1,11 @@
 use paddock_domain::RaceCard;
-use sqlx::SqlitePool;
+use sqlx::PgPool;
 
 use crate::error::Result;
 
 use super::sql::delete_absent_horse_nums;
 
-pub async fn save_race_card(pool: &SqlitePool, card: &RaceCard) -> Result<()> {
+pub async fn save_race_card(pool: &PgPool, card: &RaceCard) -> Result<()> {
     let mut tx = pool.begin().await?;
 
     sqlx::query(

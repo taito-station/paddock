@@ -1,11 +1,11 @@
-//! 予想の保存→取得ラウンドトリップと upsert 冪等性を tempfile DB で検証する。
+//! 予想の保存→取得ラウンドトリップと upsert 冪等性を Postgres（#[sqlx::test] の一時DB）で検証する。
 
 use chrono::{NaiveDate, Utc};
 use paddock_domain::{
     Mark, PadPrediction, PredictionBet, PredictionHorse, PredictionResult, Venue,
 };
 use paddock_use_case::repository::Repository;
-use rdb_gateway::{SqliteRepository, pool};
+use rdb_gateway::PostgresRepository;
 
 fn sample() -> PadPrediction {
     PadPrediction {
@@ -63,17 +63,9 @@ fn sample() -> PadPrediction {
     }
 }
 
-async fn repo() -> (tempfile::TempDir, SqliteRepository) {
-    let tmp = tempfile::tempdir().unwrap();
-    let url = format!("sqlite://{}?mode=rwc", tmp.path().join("t.db").display());
-    let p = pool::connect(&url).await.unwrap();
-    pool::migrate(&p).await.unwrap();
-    (tmp, SqliteRepository::new(p))
-}
-
-#[tokio::test]
-async fn save_find_roundtrip() {
-    let (_tmp, repo) = repo().await;
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn save_find_roundtrip(pool: sqlx::PgPool) {
+    let repo = PostgresRepository::new(pool);
     let pred = sample();
     repo.save_pad_prediction(&pred, Utc::now()).await.unwrap();
 
@@ -101,9 +93,9 @@ async fn save_find_roundtrip() {
     assert_eq!(r.pnl, Some(-4790));
 }
 
-#[tokio::test]
-async fn re_save_is_idempotent_and_replaces_children() {
-    let (_tmp, repo) = repo().await;
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn re_save_is_idempotent_and_replaces_children(pool: sqlx::PgPool) {
+    let repo = PostgresRepository::new(pool);
     repo.save_pad_prediction(&sample(), Utc::now())
         .await
         .unwrap();
@@ -120,9 +112,9 @@ async fn re_save_is_idempotent_and_replaces_children() {
     assert_eq!(all[0].bets.len(), 0, "買い目の子行が置き換わる");
 }
 
-#[tokio::test]
-async fn race_id_resolves_and_is_preserved_on_reingest() {
-    let (_tmp, repo) = repo().await;
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn race_id_resolves_and_is_preserved_on_reingest(pool: sqlx::PgPool) {
+    let repo = PostgresRepository::new(pool);
 
     // races に一致行を入れて保存 → race_id が解決される。
     sqlx::query(
@@ -166,9 +158,9 @@ async fn race_id_resolves_and_is_preserved_on_reingest() {
     );
 }
 
-#[tokio::test]
-async fn missing_prediction_is_none() {
-    let (_tmp, repo) = repo().await;
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn missing_prediction_is_none(pool: sqlx::PgPool) {
+    let repo = PostgresRepository::new(pool);
     let got = repo
         .find_pad_prediction(
             NaiveDate::from_ymd_opt(2026, 1, 1).unwrap(),

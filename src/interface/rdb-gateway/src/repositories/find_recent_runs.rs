@@ -1,6 +1,6 @@
 use chrono::NaiveDate;
 use paddock_domain::{HorseName, RecentRun, Surface};
-use sqlx::SqlitePool;
+use sqlx::PgPool;
 
 use super::find_finished_races_between::{ResultRow, row_to_result};
 use crate::error::Result;
@@ -24,7 +24,7 @@ struct RecentRow {
 /// 同一実レースの別 race_id）は `race_id` 降順で決定的に 1 件を選ぶ（前走フォームが run ごとに
 /// ブレないようにするため）。
 pub async fn find_recent_runs(
-    pool: &SqlitePool,
+    pool: &PgPool,
     name: &HorseName,
     before: NaiveDate,
     limit: u32,
@@ -48,7 +48,7 @@ pub async fn find_recent_runs(
                 results.weight_carried AS weight_carried, results.popularity AS popularity
             FROM results
             INNER JOIN races ON races.race_id = results.race_id
-            WHERE results.horse_name = ? AND races.date < ? AND races.source = 'pdf'
+            WHERE results.horse_name = $1 AND races.date < $2 AND races.source = 'pdf'
             UNION ALL
             -- horse_past_runs は定義上 netkeiba 専用テーブルなので source 絞り込みは不要。
             SELECT
@@ -59,7 +59,7 @@ pub async fn find_recent_runs(
                 horse_id, jockey, NULL AS trainer, time_seconds, margin, odds,
                 horse_weight, weight_change, weight_carried, popularity
             FROM horse_past_runs
-            WHERE horse_name = ? AND date < ?
+            WHERE horse_name = $3 AND date < $4
         )
         SELECT
             u.date, u.surface, u.distance,
@@ -74,7 +74,7 @@ pub async fn find_recent_runs(
                    OR (u2.src_rank = u.src_rank AND u2.race_id > u.race_id))
         )
         ORDER BY u.date DESC, u.race_id DESC
-        LIMIT ?
+        LIMIT $5
         "#,
     )
     .bind(name.value())

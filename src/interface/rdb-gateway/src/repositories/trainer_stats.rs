@@ -1,7 +1,7 @@
 use chrono::NaiveDate;
 use paddock_domain::TrainerName;
 use paddock_use_case::repository::TrainerStatsRow;
-use sqlx::SqlitePool;
+use sqlx::PgPool;
 
 use crate::error::Result;
 
@@ -11,7 +11,7 @@ use super::sql::entity_stats;
 /// `jockey_stats` と列名・Row 型以外は同型（#85）。`as_of = Some(d)` のとき `races.date < d` で
 /// 集計し、バックテストのリークを防ぐ（`as_of = None` の結果は従来と一致）。
 pub async fn trainer_stats(
-    pool: &SqlitePool,
+    pool: &PgPool,
     name: &TrainerName,
     as_of: Option<NaiveDate>,
 ) -> Result<TrainerStatsRow> {

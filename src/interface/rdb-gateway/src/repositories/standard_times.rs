@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use chrono::NaiveDate;
 use paddock_domain::{StandardTimes, Surface};
-use sqlx::SqlitePool;
+use sqlx::PgPool;
 
 use crate::error::Result;
 
@@ -36,7 +36,7 @@ struct StandardTimeRow {
 /// - `HAVING COUNT(*) >=` の標本数も dedup 前の行を数えるため、二重計上レースがあると閾値が緩む向きに効く。
 /// - 上側の異常タイム（非現実的に小さい値）は `> 0` 以外でガードしていない。極小タイムは `time_form` で
 ///   1.0 に飽和し母数からは落ちない。実データのパース経路では発生しない前提（必要なら後続で上限ガード）。
-pub async fn standard_times(pool: &SqlitePool, before: NaiveDate) -> Result<StandardTimes> {
+pub async fn standard_times(pool: &PgPool, before: NaiveDate) -> Result<StandardTimes> {
     let before_str = before.format("%Y-%m-%d").to_string();
 
     let rows: Vec<StandardTimeRow> = sqlx::query_as(
@@ -46,17 +46,17 @@ pub async fn standard_times(pool: &SqlitePool, before: NaiveDate) -> Result<Stan
                    results.time_seconds AS time_seconds
             FROM results
             INNER JOIN races ON races.race_id = results.race_id
-            WHERE races.date < ? AND races.source = 'pdf' AND results.time_seconds > 0
+            WHERE races.date < $1 AND races.source = 'pdf' AND results.time_seconds > 0
             UNION ALL
             -- horse_past_runs は定義上 netkeiba 専用テーブルなので source 絞り込みは不要。
             SELECT surface, distance, time_seconds
             FROM horse_past_runs
-            WHERE date < ? AND time_seconds > 0
+            WHERE date < $2 AND time_seconds > 0
         )
         SELECT surface, distance, AVG(time_seconds) AS avg_time
         FROM t
         GROUP BY surface, distance
-        HAVING COUNT(*) >= ?
+        HAVING COUNT(*) >= $3
         "#,
     )
     .bind(&before_str)
