@@ -284,11 +284,25 @@ async fn run_race(
     // 残高ガード（Σstake ≤ balance）・残高/累計計算・セッション更新＋買い目追記の 1 トランザクション
     // 保存・updated_at の時刻注入は use-case の record_race_outcome に集約済み（#164）。推奨は
     // race_cap=min(race_budget, balance)、編集は read_edited_amounts が balance 上限を強制するため、
-    // ここに到達する bet は常に残高内。更新後セッションを受け取り、残高表示に反映する。
-    *session = app
+    // ここに到達する bet は常に残高内・未記録だが、use-case が防御的に返す残高超過（InvalidArgument）・
+    // 二重記録（Conflict）はセッション全体を中断せず当該レースをスキップして継続する（旧「残高超過
+    // スキップ」挙動を踏襲）。成功時は DB 反映済みの更新後セッションで丸ごと置換し、残高表示に使う。
+    *session = match app
         .interactor
         .record_race_outcome(session.date, &race.race_id, bet_records)
-        .await?;
+        .await
+    {
+        Ok(updated) => updated,
+        Err(paddock_use_case::Error::InvalidArgument(_)) => {
+            println!("賭け金合計が残高を超えるため、このレースをスキップします。");
+            return Ok(());
+        }
+        Err(paddock_use_case::Error::Conflict(_)) => {
+            println!("このレースは既に記録済みのため、スキップします。");
+            return Ok(());
+        }
+        Err(e) => return Err(e.into()),
+    };
 
     let pnl = race_payout as i128 - bet as i128;
     println!(
