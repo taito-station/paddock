@@ -332,6 +332,31 @@ scripts/reset-db.sh --to <target_url>    # 対象 DB を明示
 過去の `data/paddock.db`（SQLite）に貯めた実データを Postgres へ移すには、pgloader 手順
 [`docs/runbooks/sqlite-to-postgres-migration.md`](docs/runbooks/sqlite-to-postgres-migration.md) を参照。
 
+## 取り込みをコンテナで隔離実行（importer / #146）
+
+成績取り込み（`parse-pdf fetch`）は OCR(tesseract) が CPU を食い、年単位のバックフィルで数時間かかる。
+取り込み中も開発機を軽く保つため、importer を**コンテナで CPU キャップ付き隔離実行**できる。DB は
+compose の `postgres` サービスへ接続するため bind mount は使わない。
+
+```bash
+# 1) イメージをビルド（mutool + tesseract(jpn) 同梱、paddock-parse-pdf を release ビルド）
+docker compose -f deployments/compose.yaml build importer
+
+# 2) detach（run-and-forget）で取り込み。例: 2025 年の全開催
+docker compose -f deployments/compose.yaml run --rm -d importer fetch --year 2025
+
+# 3) 進捗ログ（コンテナ ID は run の出力 or `docker ps`）
+docker logs -f <container-id>
+```
+
+- **礼節ペーシング**: `fetch` は entrypoint が `-j 1 --interval 3 --max-rps 0.3` を既定で補う
+  （ノーペーシングだと JRA に IP ブロックされうるため。明示指定した値は尊重する）。
+- **CPU キャップ**: `deploy.resources.limits.cpus: "2.0"`。取り込み中も `docker stats` で使用量を確認できる。
+- **中断・再開（冪等）**: 取得状態は DB の `fetch_history` に記録される。中断後に同じコマンドを再実行すると
+  取得済み開催はスキップされる（`--force` で再取得）。
+- **DB 共有**: importer はホスト側 dev と同じ `postgres` サービスに書き込む。ホスト側は読み取り中心で並行作業できる
+  （SQLite 時代のファイルロック問題は無い）。
+
 ## 開発
 
 ワークスペース全体ビルド:

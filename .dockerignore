@@ -1,0 +1,16 @@
+# importer イメージのビルドに不要なものをコンテキストから除外する。
+# ビルドに要るのは Cargo.* / src/ / deployments/db/migrations / rust-toolchain.toml 等のみ。
+target/
+data/
+pdfs/
+samples/
+docs/
+.git/
+.github/
+.claude/
+.serena/
+*.bak-*
+*.db
+*.db-*
+.env
+.DS_Store
