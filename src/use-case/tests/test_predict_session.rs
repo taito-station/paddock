@@ -164,7 +164,11 @@ async fn record_updates_balance_and_totals() {
     app.create_predict_session(date(), 10000).await.unwrap();
 
     let updated = app
-        .record_race_outcome(date(), &race_id("2026-4-tokyo-1-1R"), vec![bet("2026-4-tokyo-1-1R", 1000, 2500)])
+        .record_race_outcome(
+            date(),
+            &race_id("2026-4-tokyo-1-1R"),
+            vec![bet("2026-4-tokyo-1-1R", 1000, 2500)],
+        )
         .await
         .unwrap();
 
@@ -183,7 +187,11 @@ async fn record_rejects_overstake_and_leaves_session_unchanged() {
     app.create_predict_session(date(), 10000).await.unwrap();
 
     let err = app
-        .record_race_outcome(date(), &race_id("2026-4-tokyo-1-1R"), vec![bet("2026-4-tokyo-1-1R", 15000, 0)])
+        .record_race_outcome(
+            date(),
+            &race_id("2026-4-tokyo-1-1R"),
+            vec![bet("2026-4-tokyo-1-1R", 15000, 0)],
+        )
         .await
         .unwrap_err();
     assert!(matches!(err, Error::InvalidArgument(_)));
@@ -197,13 +205,21 @@ async fn record_rejects_overstake_and_leaves_session_unchanged() {
 async fn record_rejects_duplicate_race() {
     let app = interactor();
     app.create_predict_session(date(), 10000).await.unwrap();
-    app.record_race_outcome(date(), &race_id("2026-4-tokyo-1-1R"), vec![bet("2026-4-tokyo-1-1R", 1000, 0)])
-        .await
-        .unwrap();
+    app.record_race_outcome(
+        date(),
+        &race_id("2026-4-tokyo-1-1R"),
+        vec![bet("2026-4-tokyo-1-1R", 1000, 0)],
+    )
+    .await
+    .unwrap();
 
     // 同一レースへ買い目ありで再記録すると Conflict（買い目重複＋残高二重適用を防ぐ）。
     let err = app
-        .record_race_outcome(date(), &race_id("2026-4-tokyo-1-1R"), vec![bet("2026-4-tokyo-1-1R", 500, 0)])
+        .record_race_outcome(
+            date(),
+            &race_id("2026-4-tokyo-1-1R"),
+            vec![bet("2026-4-tokyo-1-1R", 500, 0)],
+        )
         .await
         .unwrap_err();
     assert!(matches!(err, Error::Conflict(_)));
@@ -214,7 +230,11 @@ async fn record_without_session_is_not_found() {
     let app = interactor();
 
     let err = app
-        .record_race_outcome(date(), &race_id("2026-4-tokyo-1-1R"), vec![bet("2026-4-tokyo-1-1R", 1000, 0)])
+        .record_race_outcome(
+            date(),
+            &race_id("2026-4-tokyo-1-1R"),
+            vec![bet("2026-4-tokyo-1-1R", 1000, 0)],
+        )
         .await
         .unwrap_err();
     assert!(matches!(err, Error::NotFound(_)));

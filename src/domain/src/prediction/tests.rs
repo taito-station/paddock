@@ -5,12 +5,12 @@ use std::collections::HashMap;
 
 use chrono::NaiveDate;
 
-use super::*;
 use super::parse::parse_margin_lengths;
 use super::scoring::{margin_form, raw_score, shrink_rate, time_form};
 use super::weights::{
     MARGIN_CAP_LENGTHS, PRIOR_RATE, TIME_DEV_CAP, WEIGHT_CARRIED_CAP_KG, WEIGHT_CHANGE_CAP,
 };
+use super::*;
 use crate::horse_result::{
     FinishingPosition, GateNum, HorseName, HorseNum, HorseResult, ResultStatus, TimeSeconds,
 };
@@ -912,8 +912,7 @@ fn recent_form_popularity_gap() {
 fn recent_form_interval_band() {
     // 最適帯(30日)=1.0、連闘(3日)=0.3、長休(200日)=0.5。間隔のみ（他欠損）。
     let base = ymd(2026, 5, 1);
-    let optimal =
-        recent_form_score(&prev_result(None, None, None), ymd(2026, 4, 1), base, None);
+    let optimal = recent_form_score(&prev_result(None, None, None), ymd(2026, 4, 1), base, None);
     let rento = recent_form_score(&prev_result(None, None, None), ymd(2026, 4, 28), base, None);
     let layoff = recent_form_score(
         &prev_result(None, None, None),

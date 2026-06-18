@@ -1,0 +1,88 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  # main 向け PR のみ（GitHub Flow で長命ブランチは main のみ）。
+  pull_request:
+    branches: [main]
+
+# 同一 PR への連続 push で進行中の旧 run を打ち切り、CI 時間とランナーを節約する。
+# ワークフロー名を group に含め、将来ワークフローが増えても ref 衝突しないようにする。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    # 無言の無限ハング（DB 接続待ち・retry のこじれ等）を防ぐ安全弁。
+    timeout-minutes: 30
+
+    # `#[sqlx::test]`（rdb-gateway / api-server / ingest-predictions の統合テスト）が接続する Postgres。
+    # ローカル開発（deployments/compose.yaml）と同じ postgres:17-alpine・同じ固定資格情報を使う。
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: paddock
+          POSTGRES_PASSWORD: paddock
+          POSTGRES_DB: paddock
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U paddock -d paddock"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      # `#[sqlx::test]` はこの接続先サーバへ繋ぎ、テストごとに一時 DB を作成・破棄する
+      # （paddock ロールは postgres image で superuser のため CREATEDB 可）。マイグレーションは
+      # 各テストの `migrations = "deployments/db/migrations"` 属性が一時 DB へ自動適用する。
+      DATABASE_URL: postgres://paddock:paddock@localhost:5432/paddock
+
+    steps:
+      # third-party / 外部 action はサプライチェーン対策で commit SHA にピンする（コメントは対応タグ）。
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Install Rust toolchain
+        # サプライチェーン対策で commit SHA にピン（dtolnay/rust-toolchain は version タグを
+        # 切らないため master の 2026-03-27 時点を固定）。toolchain は input で 1.96.0 に固定。
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+        with:
+          toolchain: "1.96.0" # rust-toolchain.toml と一致させる
+          components: rustfmt, clippy
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+
+      - name: Format check
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
+
+      # 大半のクレートを 1 ステップで実行する。実 Postgres 接続テスト（#[sqlx::test]）は
+      # rdb-gateway / api-server / ingest-predictions に散在し単一サーバを共有するため、
+      # --test-threads=1 で直列実行する（stock cargo test はテストバイナリ"間"を逐次実行し、
+      # --test-threads=1 が各バイナリ"内"も 1 スレッドにするので、両者で全体が直列になる）。
+      # 非 DB テストも同じ直列実行に含まれるが
+      # （DATABASE_URL は無視される）、スイートは小さく直列でも十分速い。DB クレートを列挙して
+      # 分割する方式は、将来別クレートに #[sqlx::test] が増えると取りこぼすため採らない。
+      #
+      # pdf-ocr / pdf-parser は crate ごと除外する。両クレートの tests/（test_render.rs /
+      # test_parse.rs）は mutool + tesseract OCR を shell out する統合テストで、OCR 出力が
+      # tesseract のバージョン・言語データに左右されて環境非再現（CI の ubuntu では解析結果が
+      # 0 件になる）ため CI 対象外とする（プロジェクトも重い OCR テスト test_extract を #[ignore]
+      # 済み）。OCR 統合テストの CI 再現可能化は今後のフォローアップ（要 issue 化）。
+      - name: Test (Postgres 接続テストを含むため直列実行 / OCR クレートを除く)
+        run: cargo test --locked --workspace --exclude pdf-ocr --exclude pdf-parser -- --test-threads=1
+
+      # 上で crate ごと除外した pdf-ocr / pdf-parser のうち、OCR 非依存のユニットテスト（src/、
+      # 外部ツール不要）は CI でも実走する。除外で純ロジックのカバレッジまで落とさないため。
+      - name: Test (OCR クレートのユニットテストのみ)
+        run: cargo test --locked -p pdf-ocr -p pdf-parser --lib
