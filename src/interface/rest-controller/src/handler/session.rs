@@ -136,6 +136,7 @@ where
     ),
     responses(
         (status = 200, description = "取得結果（未取得は fetched=false・HTTP は 200）", body = OddsRefreshResponse),
+        (status = 400, description = "日付/ID 不正", body = crate::error::ErrorBody),
         (status = 404, description = "未作成のセッション", body = crate::error::ErrorBody),
         (status = 500, description = "内部エラー", body = crate::error::ErrorBody),
     ),

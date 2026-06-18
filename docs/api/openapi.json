@@ -608,6 +608,16 @@
               }
             }
           },
+          "400": {
+            "description": "日付/ID 不正",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
           "404": {
             "description": "未作成のセッション",
             "content": {
