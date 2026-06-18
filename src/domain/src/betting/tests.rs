@@ -263,22 +263,18 @@ fn bet_hit_judges_each_bet_type() {
     let q = |a, b| BetCombination::Quinella(Pair::try_from((horse(a), horse(b))).unwrap());
     assert!(bet_hit(&q(1, 3), &podium)); // {1,2着}={3,1}
     assert!(!bet_hit(&q(3, 5), &podium));
-    let ex =
-        |a, b| BetCombination::Exacta(OrderedPair::try_from((horse(a), horse(b))).unwrap());
+    let ex = |a, b| BetCombination::Exacta(OrderedPair::try_from((horse(a), horse(b))).unwrap());
     assert!(bet_hit(&ex(3, 1), &podium)); // 1→2着=3→1
     assert!(!bet_hit(&ex(1, 3), &podium));
     let wd = |a, b| BetCombination::Wide(Pair::try_from((horse(a), horse(b))).unwrap());
     assert!(bet_hit(&wd(1, 5), &podium)); // 両馬3着以内
     assert!(!bet_hit(&wd(1, 2), &podium));
-    let tr = |a, b, c| {
-        BetCombination::Trio(Triple::try_from((horse(a), horse(b), horse(c))).unwrap())
-    };
+    let tr =
+        |a, b, c| BetCombination::Trio(Triple::try_from((horse(a), horse(b), horse(c))).unwrap());
     assert!(bet_hit(&tr(5, 3, 1), &podium)); // {1,2,3着}無順
     assert!(!bet_hit(&tr(1, 2, 3), &podium));
     let tf = |a, b, c| {
-        BetCombination::Trifecta(
-            OrderedTriple::try_from((horse(a), horse(b), horse(c))).unwrap(),
-        )
+        BetCombination::Trifecta(OrderedTriple::try_from((horse(a), horse(b), horse(c))).unwrap())
     };
     assert!(bet_hit(&tf(3, 1, 5), &podium)); // 1→2→3着
     assert!(!bet_hit(&tf(3, 5, 1), &podium));
@@ -296,9 +292,8 @@ fn bet_hit_false_when_podium_incomplete() {
     assert!(bet_hit(&BetCombination::Win(horse(3)), &podium)); // 単勝は 1 着のみで判定可
     let q = BetCombination::Quinella(Pair::try_from((horse(3), horse(1))).unwrap());
     assert!(!bet_hit(&q, &podium)); // 2 着未確定 → 非的中
-    let tf = BetCombination::Trifecta(
-        OrderedTriple::try_from((horse(3), horse(1), horse(5))).unwrap(),
-    );
+    let tf =
+        BetCombination::Trifecta(OrderedTriple::try_from((horse(3), horse(1), horse(5))).unwrap());
     assert!(!bet_hit(&tf, &podium));
 }
 
@@ -430,9 +425,8 @@ fn bet_combination_encodes_type_and_code() {
     // Triple は昇順に正規化されるため "1-3-5"
     assert_eq!(trio.combination_code(), "1-3-5");
 
-    let trifecta = BetCombination::Trifecta(
-        OrderedTriple::try_from((horse(1), horse(3), horse(5))).unwrap(),
-    );
+    let trifecta =
+        BetCombination::Trifecta(OrderedTriple::try_from((horse(1), horse(3), horse(5))).unwrap());
     assert_eq!(trifecta.type_label(), "trifecta");
     assert_eq!(trifecta.combination_code(), "1>3>5");
 }
