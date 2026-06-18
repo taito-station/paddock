@@ -41,8 +41,9 @@
 
   <!-- 進行中 → 完了 -->
   <line x1="570" y1="95" x2="660" y2="95" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
-  <text x="615" y="84" text-anchor="middle" font-size="11" fill="#333">完了マーク</text>
-  <text x="615" y="132" text-anchor="middle" font-size="10" fill="#555">全レース処理後</text>
+  <text x="615" y="80" text-anchor="middle" font-size="10" fill="#333">results:refresh</text>
+  <text x="615" y="92" text-anchor="middle" font-size="10" fill="#555">で pending=0</text>
+  <text x="615" y="132" text-anchor="middle" font-size="10" fill="#555">→ completed=true</text>
 
   <!-- 自己ループ: outcome 記録 -->
   <path d="M410,130 Q380,200 460,200 Q540,200 510,130" fill="none" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
