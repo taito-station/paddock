@@ -65,16 +65,22 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
-      # workspace のテストを 1 ステップで実行する。実 Postgres 接続テスト（#[sqlx::test]）は
+      # 大半のクレートを 1 ステップで実行する。実 Postgres 接続テスト（#[sqlx::test]）は
       # rdb-gateway / api-server / ingest-predictions に散在し単一サーバを共有するため、
       # --test-threads=1 で直列実行する（stock cargo test はテストバイナリを逐次実行するため、
       # このフラグと合わせて全体が直列になる）。非 DB テストも同じ直列実行に含まれるが
       # （DATABASE_URL は無視される）、スイートは小さく直列でも十分速い。DB クレートを列挙して
       # 分割する方式は、将来別クレートに #[sqlx::test] が増えると取りこぼすため採らない。
       #
-      # pdf-ocr / pdf-parser は mutool + tesseract OCR の外部ツールに依存し、OCR 出力が
+      # pdf-ocr / pdf-parser は crate ごと除外する。両クレートの tests/（test_render.rs /
+      # test_parse.rs）は mutool + tesseract OCR を shell out する統合テストで、OCR 出力が
       # tesseract のバージョン・言語データに左右されて環境非再現（CI の ubuntu では解析結果が
-      # 0 件になる）。これらの OCR パイプライン統合テストは本 CI の対象外とする（プロジェクトも
-      # 重い OCR テスト test_extract を #[ignore] 済み）。CI 再現可能化は別 issue に切り出す。
-      - name: Test (Postgres 接続テストを含むため直列実行 / OCR 依存クレートは除外)
+      # 0 件になる）ため CI 対象外とする（プロジェクトも重い OCR テスト test_extract を #[ignore]
+      # 済み）。OCR 統合テストの CI 再現可能化は今後のフォローアップ（要 issue 化）。
+      - name: Test (Postgres 接続テストを含むため直列実行 / OCR クレートを除く)
         run: cargo test --workspace --exclude pdf-ocr --exclude pdf-parser -- --test-threads=1
+
+      # 上で crate ごと除外した pdf-ocr / pdf-parser のうち、OCR 非依存のユニットテスト（src/、
+      # 外部ツール不要）は CI でも実走する。除外で純ロジックのカバレッジまで落とさないため。
+      - name: Test (OCR クレートのユニットテストのみ)
+        run: cargo test -p pdf-ocr -p pdf-parser --lib
