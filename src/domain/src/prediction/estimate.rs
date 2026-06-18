@@ -1,0 +1,146 @@
+//! レース内の馬群から win/place/show 確率を推定し、市場オッズとブレンドする中核ロジック（#72/#75）。
+
+use std::collections::HashMap;
+
+use super::config::EstimationConfig;
+use super::model::{HorseFactors, HorseProbability};
+use super::scoring::{normalize_to_sum, raw_score};
+use crate::horse_result::HorseNum;
+use crate::race_card::HorseEntry;
+
+/// 現行挙動（縮約・減衰なし）で確率推定する。既存呼び出し・テスト互換のため signature を保つ。
+pub fn estimate_probabilities(entries: &[(HorseEntry, HorseFactors)]) -> Vec<HorseProbability> {
+    estimate_probabilities_with_config(entries, &EstimationConfig::default())
+}
+
+/// `config` でベイズ縮約・リーセンシーの有効化を切り替えて確率推定する（#75）。
+/// `EstimationConfig::default()`（両方 `None`）は [`estimate_probabilities`] と同一挙動。
+pub fn estimate_probabilities_with_config(
+    entries: &[(HorseEntry, HorseFactors)],
+    config: &EstimationConfig,
+) -> Vec<HorseProbability> {
+    if entries.is_empty() {
+        return Vec::new();
+    }
+
+    let win_scores: Vec<f64> = entries
+        .iter()
+        .map(|(_, f)| raw_score(f, |r| r.win, config))
+        .collect();
+    let place_scores: Vec<f64> = entries
+        .iter()
+        .map(|(_, f)| raw_score(f, |r| r.place, config))
+        .collect();
+    let show_scores: Vec<f64> = entries
+        .iter()
+        .map(|(_, f)| raw_score(f, |r| r.show, config))
+        .collect();
+
+    // win は 1 着（1 ポジション）、place は 2 着以内（2 ポジション）、show は 3 着以内（3 ポジション）
+    // に相当するため、レース内合計をそれぞれ 1.0 / 2.0 / 3.0 へ正規化する。各馬は確率上限 1.0。
+    let win_probs = normalize_to_sum(&win_scores, 1.0);
+    let mut place_probs = normalize_to_sum(&place_scores, 2.0);
+    let mut show_probs = normalize_to_sum(&show_scores, 3.0);
+
+    // 馬ごとに累積 max で単調化し win_prob ≤ place_prob ≤ show_prob を保証する。
+    // win/place/show は別レートから独立に正規化するため、レート比率次第で正規化後に逆転が
+    // 残りうる。これを後処理で常に是正する。
+    for i in 0..place_probs.len() {
+        place_probs[i] = place_probs[i].max(win_probs[i]).min(1.0);
+        show_probs[i] = show_probs[i].max(place_probs[i]).min(1.0);
+    }
+
+    entries
+        .iter()
+        .enumerate()
+        .map(|(i, (entry, _))| HorseProbability {
+            horse_num: entry.horse_num,
+            horse_name: entry.horse_name.clone(),
+            win_prob: win_probs[i],
+            place_prob: place_probs[i],
+            show_prob: show_probs[i],
+        })
+        .collect()
+}
+
+/// 単勝確率を市場オッズ（単勝）の implied 確率とブレンドする（#72）。
+///
+/// `market_win_odds` は馬番→単勝確定オッズ（払戻倍率, ≥1.0）。各馬の implied 確率
+/// `1/odds` をレース内で合計 1.0 に正規化（控除率＝オーバーラウンドを除去）し、モデルの
+/// `win_prob` と `alpha`（モデル重み, `1-alpha` が市場重み）で線形ブレンドする。`alpha >= 1.0`
+/// またはオッズが空のときはモデル確率をそのまま返す（no-op）。オッズの無い馬はブレンド時点では
+/// モデル値を保つ（最後の win 合計 1.0 再正規化で全体と同じ係数でスケールはされる）。
+///
+/// ブレンドで win が動くため、最後に win 合計を 1.0 へ再正規化し、`place`/`show` は
+/// `win ≤ place ≤ show` を保つよう累積 max で再是正する（v1 は win のみブレンド対象で
+/// place/show のレートはモデル値を踏襲する）。
+///
+/// 前提・既知の割り切り（v1）:
+/// - **(ほぼ)全頭のオッズが揃っていることを前提**とする。implied の正規化母数はオッズを持つ馬
+///   のみの合計なので、一部の馬しかオッズが無い部分カバレッジでは市場重み `(1-α)` がカバー済みの
+///   少数馬に偏って乗り、過大評価になりうる。実運用の単勝オッズは全頭分そろうため通常は問題ない。
+/// - place/show は単調再是正のみで、**場内合計（2.0/3.0）は再正規化しない**ため、ブレンド後は
+///   その合計が崩れうる。place/show の精密なブレンドは将来課題。
+pub fn blend_with_market_win(
+    probs: &[HorseProbability],
+    market_win_odds: &HashMap<HorseNum, f64>,
+    alpha: f64,
+) -> Vec<HorseProbability> {
+    // 非有限な α（NaN 等）は no-op 扱い（呼び出し側で検証済みだが防御的に弾く）。
+    if !alpha.is_finite() {
+        return probs.to_vec();
+    }
+    let alpha = alpha.clamp(0.0, 1.0);
+    if probs.is_empty() || market_win_odds.is_empty() || alpha >= 1.0 {
+        return probs.to_vec();
+    }
+
+    // 市場 implied 確率: 1/odds を合計 1.0 に正規化（オッズのある馬のみが母数）。
+    // 単勝オッズ（払戻倍率）は ≥1.0。型検証を経ていない生の f64（backtest が results.odds から渡す
+    // 経路）に異常値が混じっても弾けるよう doc 契約どおり `>= 1.0` でフィルタする。OddsValue 由来の
+    // 経路では常に満たすが、フォールバック経路のための防御。
+    let implied: HashMap<HorseNum, f64> = market_win_odds
+        .iter()
+        .filter(|&(_, &odds)| odds.is_finite() && odds >= 1.0)
+        .map(|(&num, &odds)| (num, 1.0 / odds))
+        .collect();
+    let overround: f64 = implied.values().sum();
+    if overround <= 0.0 {
+        return probs.to_vec();
+    }
+
+    // モデル win と市場 implied をブレンド（オッズの無い馬はモデル値のまま）。
+    let blended: Vec<f64> = probs
+        .iter()
+        .map(|p| match implied.get(&p.horse_num) {
+            Some(&imp) => alpha * p.win_prob + (1.0 - alpha) * (imp / overround),
+            None => p.win_prob,
+        })
+        .collect();
+
+    // 部分カバレッジや凸結合のドリフトを吸収して win 合計を 1.0 へ戻す。
+    // `min(1.0)` は w ≤ total（全要素非負）より数学的には恒等だが、浮動小数点の保険として残す。
+    let total: f64 = blended.iter().sum();
+    let win_probs: Vec<f64> = if total > 0.0 {
+        blended.iter().map(|w| (w / total).min(1.0)).collect()
+    } else {
+        blended
+    };
+
+    probs
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            let win = win_probs[i];
+            let place = p.place_prob.max(win).min(1.0);
+            let show = p.show_prob.max(place).min(1.0);
+            HorseProbability {
+                horse_num: p.horse_num,
+                horse_name: p.horse_name.clone(),
+                win_prob: win,
+                place_prob: place,
+                show_prob: show,
+            }
+        })
+        .collect()
+}
