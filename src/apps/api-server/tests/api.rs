@@ -199,8 +199,10 @@ async fn prediction_rejects_out_of_range_blend_alpha(pool: sqlx::PgPool) {
 async fn analyze_horse_returns_stats(pool: sqlx::PgPool) {
     let app = build_service!(pool);
     // 履歴が無くても overall を含む統計（ゼロ）が 200 で返る。
+    // クエリ値の非 ASCII は実 HTTP クライアント同様に percent-encode する（生のマルチバイトは
+    // URI として不正で http::Uri パースが InvalidUriChar で弾く）。"ウマA" の UTF-8 = %E3%82%A6%E3%83%9EA。
     let req = test::TestRequest::get()
-        .uri("/api/analyze/horse?name=ウマA")
+        .uri("/api/analyze/horse?name=%E3%82%A6%E3%83%9EA")
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert!(resp.status().is_success(), "status: {}", resp.status());
