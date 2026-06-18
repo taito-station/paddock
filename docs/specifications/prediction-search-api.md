@@ -60,7 +60,8 @@
 **不要**。検索・ソート・結合に必要なインデックスは既存で揃っている:
 
 - 日付・期間の絞り込み / `date DESC` ソート → `UNIQUE(date, venue, race_num)` の複合インデックス（先頭列 `date`）。
-- 馬名・印の絞り込み → `idx_prediction_horses_name` / `idx_prediction_horses_mark`。
+- 印の絞り込み → `idx_prediction_horses_mark`（等価比較なので有効）。
+- 馬名の絞り込み → 中間一致（`LIKE '%query%'`）のため **btree インデックス（`idx_prediction_horses_name`）は効かずフルスキャン**になる（流用元 `find_matching_names.rs` でも同様）。予想件数が小さいため許容する（将来件数増で遅ければ pg_trgm 等を別途検討）。
 - 距離・芝ダの結合 → `predictions.race_id`（PK 参照）と `idx_races_course`。
 
 予想は 1 レース 1 行の手動入力ベースで件数が小さい（数千オーダー）ため、本フェーズは性能リスクが低い。`EXPLAIN ANALYZE` で想定インデックス使用を確認し、必要が出た時点で索引追加を別途検討する。
@@ -107,11 +108,11 @@ GET /api/predictions
 
 #### 距離・芝ダの結合
 
-距離・芝ダで絞り込むと、`predictions.race_id` が NULL（`races` 未照合）の予想は対象から外れる。**この制約は仕様**とし、OpenAPI 説明文で明示する（`race_id` 補完は #51/#40 系の充足に依存するため本 Issue では扱わない）。実装上は **距離・芝ダのいずれかが指定されたときだけ `INNER JOIN races`**（未指定時は結合自体を省くか `LEFT JOIN`）とし、`r.surface = $surface OR $surface IS NULL` のような OR 化で NULL 行を残さない（NULL 行を残すと未照合予想が誤って通過する）。
+距離・芝ダで絞り込むと、`predictions.race_id` が NULL（`races` 未照合）の予想は対象から外れる。**この制約は仕様**とし、OpenAPI 説明文で明示する（`race_id` 補完は #51/#40 系の充足に依存するため本 Issue では扱わない）。実装上は **距離・芝ダのいずれかが指定されたときだけ `INNER JOIN races`** し、`r.distance` / `r.surface` を指定値で直接絞る（未指定時は結合自体を省く）。`LEFT JOIN` のまま `r.surface = $surface OR $surface IS NULL` のような OR 化で代用しないこと（NULL 行が残り、未照合予想が誤って通過するため）。
 
 #### 日付の扱い
 
-`predictions.date` はスキーマ上 **TEXT（`YYYY-MM-DD`）**。`date_from` / `date_to` は `NaiveDate` でパースして妥当性検証（不正フォーマットは `400`）し、既存 `predict_session` の `date_key(NaiveDate) -> String` と同形式（ゼロ詰め `YYYY-MM-DD`）の文字列にしてからバインドする。固定長 `YYYY-MM-DD` のため TEXT の辞書順比較が日付順と一致し、`BETWEEN` / `date DESC` が正しく機能する。
+`predictions.date` はスキーマ上 **TEXT（`YYYY-MM-DD`）**。`date_from` / `date_to` は `NaiveDate` でパースして妥当性検証（不正フォーマットは `400`）し、既存 `predict_session` の `date_key`（private fn）と**同一ロジック**（ゼロ詰め `YYYY-MM-DD`）で文字列化してからバインドする。固定長 `YYYY-MM-DD` のため TEXT の辞書順比較が日付順と一致し、`BETWEEN` / `date DESC` が正しく機能する。
 
 #### ページングの境界
 
@@ -190,7 +191,9 @@ GET /api/predictions/stats/by-mark
 }
 ```
 
-- `count` = その印が付いた（かつ結果記録済みの）馬の延べ数。`win`/`show` = 1 着 / 複勝圏に入った数。レートは use-case 側で算出。
+- `count` = その印が付いた（かつ結果記録済みの）馬の**延べ数**。`win`/`show` = 1 着 / 複勝圏に入った数。レートは use-case 側で算出。
+- ここでの `show` / `show_rate` は**実績の複勝圏（top3）到達率**であり、`prediction_horses.show_prob`（予想入力の複勝率）とは別概念。OpenAPI 説明文で混同しないよう明記する。
+- 同一予想内に同じ印を複数馬へ付けうる（PK は `(prediction_id, horse_num)`。◎は通常 1 頭だが ☆ 等は複数あり得る）。レートは「延べ馬数」基準であり、複数印運用時はその前提で読む。
 
 ### 的中の定義
 
@@ -210,7 +213,7 @@ GET /api/predictions/stats/by-mark
 本 Issue の馬名検索は、#50 の資産のうち **(a) カナ正規化** と **(b) `LIKE` + `escape_like` による中間一致** を組み合わせる。両者は別経路にある点に注意する:
 
 - **(a) 正規化**: 分析 API（`GET /api/analyze/horse`）と同じく `HorseName::try_from(query)` でカナ正規化する。`HorseName` は domain の値オブジェクト（`TryFrom<&str>`）で、内部で `src/domain/src/normalize.rs` の正規化（全角/半角カナ・濁点合成・全角英数→半角等）を適用する。ただし **analyze/horse は完全一致**（`horse_stats(&name)`）であり、部分一致 `LIKE` は使っていない。本 Issue で流用するのは「正規化」までで、部分一致は (b) を組み合わせる。
-- **(b) 中間一致**: 既存 `find_matching_horse_names`（`NameMatchRepository` / `rdb-gateway` の `find_matching_names.rs`）が持つ `LIKE '%' || $1 || '%' ESCAPE '\'` + `escape_like()`（`%` / `_` / `\` をリテラル化）と**同一のイディオム**を `prediction_horses.horse_name` に適用する。`find_matching_horse_names` は `results` テーブル対象なので、予想テーブル向けの新規クエリとして実装する（ヘルパー `escape_like` は既存を再利用）。
+- **(b) 中間一致**: 既存 `find_matching_horse_names`（`NameMatchRepository` / `rdb-gateway` の `find_matching_names.rs`）が持つ `LIKE '%' || $1 || '%' ESCAPE '\'` + `escape_like()`（`%` / `_` / `\` をリテラル化）と**同一のイディオム**を `prediction_horses.horse_name` に適用する。`find_matching_horse_names` は `results` テーブル対象なので、予想テーブル向けの新規クエリとして実装する。ヘルパー `escape_like` は現状 `find_matching_names.rs` のモジュール private `fn` のため、**`pub(crate)` 化または共通ヘルパーへ昇格して再利用**する（実装 PR で軽微な可視性変更を伴う）。
 - 組み合わせ: クエリを正規化（a）→ `escape_like` でエスケープ（b）→ `LIKE '%' || $n || '%' ESCAPE '\'` にバインド。
 - `prediction_horses.horse_name` は取り込み時に値オブジェクトを通さず生 String で保存しているが、予想の馬名は predict パイプライン（`race_cards` / `results` 由来＝取り込み時に `HorseName` で正規化済み）から生成されるため、実用上は正規化済みの表記で格納されている。よって**検索クエリ側の正規化のみで部分一致が成立する**。
 - 取り込み時正規化＋既存行バックフィルまで行えば完全な整合になるが、`prediction_horses.horse_name` の上書きはロスあり（down で原文を復元できない）でスコープも広がるため、本 Issue では見送る。表記ゆれによる取りこぼしが観測された場合に別 Issue で対応する。
@@ -220,6 +223,7 @@ GET /api/predictions/stats/by-mark
 - [rest-api-read.md](rest-api-read.md) と同方針。新規 request（`PredictionSearchQuery` 等）に `#[derive(Deserialize, IntoParams)]`、response 型に `#[derive(Serialize, ToSchema)]`、handler に `#[utoipa::path(...)]` を付与し、`ApiDoc` に paths/components を追加する。
 - `docs/api/openapi.json` を再生成してコミットし、既存のスナップショット同期テストで CI 検証する（`UPDATE_OPENAPI=1` 再生成パスは既存どおり）。
 - エラー: 不正な日付/距離/`surface`/`mark`/`venue`・範囲（`distance_min > distance_max` 等）→ `400`、未存在 `prediction_id` → `404`、DB エラー → `500`。封筒は `{ "error": { "code", "message" } }`。
+- 馬名は `HorseName`（`max = 30` 文字）で検証するため、31 文字以上の `horse_name` は `400`（部分一致クエリでも上限を超える入力は受けない）。
 
 ## テスト方針
 
