@@ -202,3 +202,17 @@ async fn analyze_horse_returns_stats(pool: sqlx::PgPool) {
     assert_eq!(json["horse_name"], "ウマA");
     assert!(json["overall"].is_object());
 }
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn extraction_error_returns_error_body(pool: sqlx::PgPool) {
+    // クエリ抽出の型変換失敗（f64 パース不能）も、handler 内エラーと同じ ErrorBody 封筒で 400 を返す
+    // （app.rs の QueryConfig error_handler 経路）。
+    let app = build_service!(pool);
+    let req = test::TestRequest::get()
+        .uri(&format!("/api/races/{RACE_ID}/prediction?blend_alpha=abc"))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status().as_u16(), 400);
+    let json = body_json(resp).await;
+    assert_eq!(json["error"]["code"], "bad_request");
+}
