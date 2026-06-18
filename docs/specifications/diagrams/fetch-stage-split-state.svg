@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="620" viewBox="0 0 1000 620" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,3 L0,6 z" fill="#333333"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="1000" height="620" fill="#ffffff"/>
+  <text x="500" y="36" text-anchor="middle" font-size="14" font-weight="bold" fill="#333333">取得ライフサイクルの状態遷移（source_key 単位）</text>
+
+  <!-- edges -->
+  <g stroke="#333333" stroke-width="1.5" fill="none">
+    <!-- new -> downloaded -->
+    <line x1="258" y1="150" x2="396" y2="150" marker-end="url(#arrow)"/>
+    <!-- downloaded -> ingested -->
+    <line x1="604" y1="150" x2="752" y2="150" marker-end="url(#arrow)"/>
+    <!-- downloaded self loop (0 races) -->
+    <path d="M470,116 C470,60 600,60 600,116" marker-end="url(#arrow)"/>
+    <!-- new -> failed404 -->
+    <path d="M168,186 L168,300 L300,300 L300,372" marker-end="url(#arrow)"/>
+    <!-- new -> failed403 -->
+    <path d="M196,180 L196,330 L660,330 L660,372" marker-end="url(#arrow)"/>
+    <!-- failed404 -> new (retry) -->
+    <path d="M300,452 L300,520 L120,520 L120,184" stroke-dasharray="5,4" marker-end="url(#arrow)"/>
+    <!-- failed403 -> new (backoff retry) -->
+    <path d="M700,452 L700,560 L96,560 L96,178" stroke-dasharray="5,4" marker-end="url(#arrow)"/>
+    <!-- ingested back to new (force refetch) -->
+    <path d="M860,116 L860,80 L150,80 L150,116" stroke-dasharray="5,4" marker-end="url(#arrow)"/>
+  </g>
+
+  <!-- edge labels -->
+  <g font-size="11" fill="#333333">
+    <text x="300" y="142" text-anchor="middle">DL成功(200)</text>
+    <text x="678" y="142" text-anchor="middle">ingest成功 / PDF削除</text>
+    <text x="535" y="58" text-anchor="middle">0レース: 据置 / PDF保持（#149）</text>
+    <text x="312" y="294">404（未公開）</text>
+    <text x="430" y="324">403（ブロック疑い）</text>
+    <text x="130" y="514">後日リトライ</text>
+    <text x="120" y="554">バックオフ後リトライ（永久スキップしない）</text>
+    <text x="500" y="74" text-anchor="middle">--force 再取得</text>
+  </g>
+
+  <!-- new (grey) -->
+  <g>
+    <ellipse cx="170" cy="150" rx="88" ry="38" fill="#f5f5f5" stroke="#666666"/>
+    <text x="170" y="147" text-anchor="middle" font-size="12" font-weight="bold" fill="#333333">(無) / 新規</text>
+    <text x="170" y="163" text-anchor="middle" font-size="10" fill="#333333">未取得 or 行なし</text>
+  </g>
+
+  <!-- downloaded (yellow) -->
+  <g>
+    <rect x="396" y="116" width="208" height="68" rx="8" fill="#fff2cc" stroke="#d6b656"/>
+    <text x="500" y="140" text-anchor="middle" font-size="12" font-weight="bold">downloaded</text>
+    <text x="500" y="157" text-anchor="middle" font-size="10">inbox に PDF 保持</text>
+    <text x="500" y="172" text-anchor="middle" font-size="10">Stage2 ingest の対象</text>
+  </g>
+
+  <!-- ingested (green) -->
+  <g>
+    <rect x="752" y="116" width="208" height="68" rx="8" fill="#d5e8d4" stroke="#82b366"/>
+    <text x="856" y="140" text-anchor="middle" font-size="12" font-weight="bold">ingested</text>
+    <text x="856" y="157" text-anchor="middle" font-size="10">races/horses 保存・完了</text>
+    <text x="856" y="172" text-anchor="middle" font-size="10">PDF 削除（論点2）</text>
+  </g>
+
+  <!-- failed404 (red) -->
+  <g>
+    <rect x="200" y="372" width="200" height="80" rx="8" fill="#f8cecc" stroke="#b85450"/>
+    <text x="300" y="398" text-anchor="middle" font-size="12" font-weight="bold">failed (http=404)</text>
+    <text x="300" y="416" text-anchor="middle" font-size="10">未公開。attempts++ /</text>
+    <text x="300" y="431" text-anchor="middle" font-size="10">last_attempt_at 記録</text>
+    <text x="300" y="446" text-anchor="middle" font-size="10">除外フラグではない</text>
+  </g>
+
+  <!-- failed403 (red) -->
+  <g>
+    <rect x="600" y="372" width="200" height="80" rx="8" fill="#f8cecc" stroke="#b85450"/>
+    <text x="700" y="398" text-anchor="middle" font-size="12" font-weight="bold">failed (http=403)</text>
+    <text x="700" y="416" text-anchor="middle" font-size="10">不在 or ブロック。即断せず</text>
+    <text x="700" y="431" text-anchor="middle" font-size="10">バックオフ再試行。連続成功中の</text>
+    <text x="700" y="446" text-anchor="middle" font-size="10">単発403は当該runの境界扱い</text>
+  </g>
+</svg>
