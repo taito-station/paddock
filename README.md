@@ -354,8 +354,9 @@ docker logs -f <container-id>
 - **CPU キャップ**: `deploy.resources.limits.cpus: "2.0"`。取り込み中も `docker stats` で使用量を確認できる。
 - **中断・再開（冪等）**: 取得状態は DB の `fetch_history` に記録される。中断後に同じコマンドを再実行すると
   取得済み開催はスキップされる（`--force` で再取得）。
-- **DB 共有**: importer はホスト側 dev と同じ `postgres` サービスに書き込む。ホスト側は読み取り中心で並行作業できる
-  （SQLite 時代のファイルロック問題は無い）。
+- **DB 共有**: importer は常に共有の `paddock` データベース（`postgres` サービス）に書き込む
+  （取り込み先を 1 つに集約する。worktree ごとに DB 名を変える dev 運用とは別で、importer の書き込み先は固定）。
+  ホスト側 dev は読み取り中心で並行作業できる（SQLite 時代のファイルロック問題は無い）。
 
 ## 開発
 

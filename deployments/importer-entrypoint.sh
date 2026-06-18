@@ -8,9 +8,10 @@ set -eu
 if [ "${1:-}" = "fetch" ]; then
     shift
     extra=""
-    case " $* " in *" --max-rps"*) ;;            *) extra="$extra --max-rps 0.3" ;; esac
-    case " $* " in *" --interval"*) ;;           *) extra="$extra --interval 3" ;; esac
-    case " $* " in *" -j"* | *" --parallel"*) ;; *) extra="$extra -j 1" ;; esac
+    case " $* " in *" --max-rps "* | *" --max-rps="*) ;;   *) extra="$extra --max-rps 0.3" ;; esac
+    case " $* " in *" --interval "* | *" --interval="*) ;; *) extra="$extra --interval 3" ;; esac
+    case " $* " in *" -j "* | *" -j"[0-9]* | *" --parallel "* | *" --parallel="*) ;; \
+        *) extra="$extra -j 1" ;; esac
     # 既定は fetch 直後（ユーザ引数より前）に挿入。$extra は意図的に未クォート（語分割でフラグ化）。
     exec paddock-parse-pdf fetch $extra "$@"
 fi
