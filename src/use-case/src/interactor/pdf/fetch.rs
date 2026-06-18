@@ -10,9 +10,9 @@ use crate::error::Result;
 use crate::interactor::Interactor;
 use crate::pdf_fetcher::PdfFetcher;
 use crate::pdf_parser::PdfParser;
-use crate::repository::{FetchRecord, Repository};
+use crate::repository::{FetchRecord, FetchRepository, RaceRepository};
 
-impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
+impl<R: RaceRepository + FetchRepository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
     /// Fetch a single JRA meeting-day result PDF, parse it, and store the
     /// races. The PDF itself is never written to disk — only a fetch-history
     /// row is kept so the same meeting is not re-ingested on a later run.

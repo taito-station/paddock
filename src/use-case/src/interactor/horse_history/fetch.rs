@@ -6,9 +6,9 @@ use crate::dto::horse_history::fetch::FetchHorseHistoryResponse;
 use crate::error::Result;
 use crate::interactor::horse_history::HorseHistoryInteractor;
 use crate::netkeiba_scraper::{HorsePastRun, NetkeibaScraper};
-use crate::repository::Repository;
+use crate::repository::HorseHistoryRepository;
 
-impl<R: Repository, S: NetkeibaScraper> HorseHistoryInteractor<R, S> {
+impl<R: HorseHistoryRepository, S: NetkeibaScraper> HorseHistoryInteractor<R, S> {
     /// 出馬表(`race_ids`)と直接指定(`horse_ids`)の各馬について netkeiba の近走を取得し、
     /// 馬単位で `horses` / `horse_past_runs` に upsert する。
     ///

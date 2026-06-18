@@ -7,13 +7,9 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use chrono::{DateTime, NaiveDate, Utc};
-use paddock_domain::{
-    HorseId, HorseName, JockeyName, Race, RaceCard, RaceId, RacePayouts, RecentRun, StandardTimes,
-    Surface, TrainerName, Venue,
-};
+use paddock_domain::{RaceId, RacePayouts};
 use paddock_use_case::repository::{
-    CourseStatsRow, FetchRecord, HorseStatsRow, JockeyStatsRow, PredictBetRecord,
-    PredictRaceConditionRecord, PredictSessionRecord, RaceOddsRecord, Repository, TrainerStatsRow,
+    PredictBetRecord, PredictRaceConditionRecord, PredictSessionRecord, PredictSessionRepository,
 };
 use paddock_use_case::{Error, PayoutFetcher, Result, SettleInteractor};
 
@@ -67,25 +63,7 @@ struct MockRepo {
     written: Mutex<WrittenCapture>,
 }
 
-impl Repository for MockRepo {
-    async fn save_pad_prediction(
-        &self,
-        _: &paddock_domain::PadPrediction,
-        _: chrono::DateTime<chrono::Utc>,
-    ) -> Result<()> {
-        unimplemented!()
-    }
-    async fn find_pad_prediction(
-        &self,
-        _: chrono::NaiveDate,
-        _: paddock_domain::Venue,
-        _: u32,
-    ) -> Result<Option<paddock_domain::PadPrediction>> {
-        unimplemented!()
-    }
-    async fn list_pad_predictions(&self) -> Result<Vec<paddock_domain::PadPrediction>> {
-        unimplemented!()
-    }
+impl PredictSessionRepository for MockRepo {
     async fn find_predict_session(&self, _: NaiveDate) -> Result<Option<PredictSessionRecord>> {
         Ok(Some(self.session.clone()))
     }
@@ -107,95 +85,6 @@ impl Repository for MockRepo {
     }
 
     // --- 以降は settle で未使用 ---
-    async fn save_race(&self, _: &Race) -> Result<()> {
-        unimplemented!()
-    }
-    async fn upsert_horse_history(
-        &self,
-        _: &HorseId,
-        _: &[paddock_use_case::HorsePastRun],
-    ) -> Result<usize> {
-        unimplemented!()
-    }
-    async fn backfill_results_horse_ids(&self) -> Result<u64> {
-        unimplemented!()
-    }
-    async fn find_matching_horse_names(&self, _: &str, _: u32) -> Result<Vec<String>> {
-        unimplemented!()
-    }
-    async fn find_matching_jockey_names(&self, _: &str, _: u32) -> Result<Vec<String>> {
-        unimplemented!()
-    }
-    async fn find_matching_trainer_names(&self, _: &str, _: u32) -> Result<Vec<String>> {
-        unimplemented!()
-    }
-    async fn horse_stats(&self, _: &HorseName, _: Option<NaiveDate>) -> Result<HorseStatsRow> {
-        unimplemented!()
-    }
-    async fn course_stats(
-        &self,
-        _: Venue,
-        _: u32,
-        _: Surface,
-        _: Option<NaiveDate>,
-    ) -> Result<CourseStatsRow> {
-        unimplemented!()
-    }
-    async fn jockey_stats(&self, _: &JockeyName, _: Option<NaiveDate>) -> Result<JockeyStatsRow> {
-        unimplemented!()
-    }
-    async fn trainer_stats(
-        &self,
-        _: &TrainerName,
-        _: Option<NaiveDate>,
-    ) -> Result<TrainerStatsRow> {
-        unimplemented!()
-    }
-    async fn count_races(&self) -> Result<u64> {
-        unimplemented!()
-    }
-    async fn race_exists(&self, _: &RaceId) -> Result<bool> {
-        unimplemented!()
-    }
-    async fn fetch_history_contains(&self, _: &str) -> Result<bool> {
-        unimplemented!()
-    }
-    async fn record_fetch(&self, _: &FetchRecord) -> Result<()> {
-        unimplemented!()
-    }
-    async fn save_race_card(&self, _: &RaceCard) -> Result<()> {
-        unimplemented!()
-    }
-    async fn save_race_odds(&self, _: &RaceOddsRecord) -> Result<()> {
-        unimplemented!()
-    }
-    async fn find_race_card(&self, _: &RaceId) -> Result<Option<RaceCard>> {
-        unimplemented!()
-    }
-    async fn find_race_odds(
-        &self,
-        _: &RaceId,
-        _: Option<NaiveDate>,
-    ) -> Result<Option<paddock_domain::RaceOdds>> {
-        unimplemented!()
-    }
-    async fn find_races_by_date(&self, _: NaiveDate) -> Result<Vec<Race>> {
-        unimplemented!()
-    }
-    async fn find_finished_races_between(&self, _: NaiveDate, _: NaiveDate) -> Result<Vec<Race>> {
-        unimplemented!()
-    }
-    async fn find_recent_runs(
-        &self,
-        _: &HorseName,
-        _: NaiveDate,
-        _: u32,
-    ) -> Result<Vec<RecentRun>> {
-        unimplemented!()
-    }
-    async fn standard_times(&self, _: NaiveDate) -> Result<StandardTimes> {
-        unimplemented!()
-    }
     async fn find_predict_bets(&self, _: NaiveDate) -> Result<Vec<PredictBetRecord>> {
         unimplemented!()
     }
@@ -542,25 +431,7 @@ async fn missing_session_returns_not_found() {
             unimplemented!()
         }
     }
-    impl Repository for NoSessionRepo {
-        async fn save_pad_prediction(
-            &self,
-            _: &paddock_domain::PadPrediction,
-            _: chrono::DateTime<chrono::Utc>,
-        ) -> Result<()> {
-            unimplemented!()
-        }
-        async fn find_pad_prediction(
-            &self,
-            _: chrono::NaiveDate,
-            _: paddock_domain::Venue,
-            _: u32,
-        ) -> Result<Option<paddock_domain::PadPrediction>> {
-            unimplemented!()
-        }
-        async fn list_pad_predictions(&self) -> Result<Vec<paddock_domain::PadPrediction>> {
-            unimplemented!()
-        }
+    impl PredictSessionRepository for NoSessionRepo {
         async fn find_predict_session(&self, _: NaiveDate) -> Result<Option<PredictSessionRecord>> {
             Ok(None)
         }
@@ -575,103 +446,6 @@ async fn missing_session_returns_not_found() {
             _: &PredictSessionRecord,
             _: &[(i64, u64)],
         ) -> Result<()> {
-            unimplemented!()
-        }
-        async fn save_race(&self, _: &Race) -> Result<()> {
-            unimplemented!()
-        }
-        async fn upsert_horse_history(
-            &self,
-            _: &HorseId,
-            _: &[paddock_use_case::HorsePastRun],
-        ) -> Result<usize> {
-            unimplemented!()
-        }
-        async fn backfill_results_horse_ids(&self) -> Result<u64> {
-            unimplemented!()
-        }
-        async fn find_matching_horse_names(&self, _: &str, _: u32) -> Result<Vec<String>> {
-            unimplemented!()
-        }
-        async fn find_matching_jockey_names(&self, _: &str, _: u32) -> Result<Vec<String>> {
-            unimplemented!()
-        }
-        async fn find_matching_trainer_names(&self, _: &str, _: u32) -> Result<Vec<String>> {
-            unimplemented!()
-        }
-        async fn horse_stats(&self, _: &HorseName, _: Option<NaiveDate>) -> Result<HorseStatsRow> {
-            unimplemented!()
-        }
-        async fn course_stats(
-            &self,
-            _: Venue,
-            _: u32,
-            _: Surface,
-            _: Option<NaiveDate>,
-        ) -> Result<CourseStatsRow> {
-            unimplemented!()
-        }
-        async fn jockey_stats(
-            &self,
-            _: &JockeyName,
-            _: Option<NaiveDate>,
-        ) -> Result<JockeyStatsRow> {
-            unimplemented!()
-        }
-        async fn trainer_stats(
-            &self,
-            _: &TrainerName,
-            _: Option<NaiveDate>,
-        ) -> Result<TrainerStatsRow> {
-            unimplemented!()
-        }
-        async fn count_races(&self) -> Result<u64> {
-            unimplemented!()
-        }
-        async fn race_exists(&self, _: &RaceId) -> Result<bool> {
-            unimplemented!()
-        }
-        async fn fetch_history_contains(&self, _: &str) -> Result<bool> {
-            unimplemented!()
-        }
-        async fn record_fetch(&self, _: &FetchRecord) -> Result<()> {
-            unimplemented!()
-        }
-        async fn save_race_card(&self, _: &RaceCard) -> Result<()> {
-            unimplemented!()
-        }
-        async fn save_race_odds(&self, _: &RaceOddsRecord) -> Result<()> {
-            unimplemented!()
-        }
-        async fn find_race_card(&self, _: &RaceId) -> Result<Option<RaceCard>> {
-            unimplemented!()
-        }
-        async fn find_race_odds(
-            &self,
-            _: &RaceId,
-            _: Option<NaiveDate>,
-        ) -> Result<Option<paddock_domain::RaceOdds>> {
-            unimplemented!()
-        }
-        async fn find_races_by_date(&self, _: NaiveDate) -> Result<Vec<Race>> {
-            unimplemented!()
-        }
-        async fn find_finished_races_between(
-            &self,
-            _: NaiveDate,
-            _: NaiveDate,
-        ) -> Result<Vec<Race>> {
-            unimplemented!()
-        }
-        async fn find_recent_runs(
-            &self,
-            _: &HorseName,
-            _: NaiveDate,
-            _: u32,
-        ) -> Result<Vec<RecentRun>> {
-            unimplemented!()
-        }
-        async fn standard_times(&self, _: NaiveDate) -> Result<StandardTimes> {
             unimplemented!()
         }
         async fn find_predict_bets(&self, _: NaiveDate) -> Result<Vec<PredictBetRecord>> {

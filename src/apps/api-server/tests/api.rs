@@ -16,7 +16,7 @@ use paddock_domain::{
     GateNum, HorseEntry, HorseName, HorseNum, Race, RaceCard, RaceId, Surface, Venue,
 };
 use paddock_use_case::Interactor;
-use paddock_use_case::repository::Repository;
+use paddock_use_case::repository::{RaceCardRepository, RaceRepository};
 use rdb_gateway::PostgresRepository;
 
 type Repo = PostgresRepository;

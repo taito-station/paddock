@@ -6,7 +6,7 @@ use paddock_domain::{
     FinishingPosition, GateNum, HorseName, HorseNum, HorseResult, Race, RaceId, ResultStatus,
     Surface, Venue,
 };
-use paddock_use_case::repository::Repository;
+use paddock_use_case::repository::{RaceRepository, StatsRepository};
 use rdb_gateway::PostgresRepository;
 
 fn ymd(y: i32, m: u32, d: u32) -> NaiveDate {

@@ -12,12 +12,12 @@ use crate::interactor::Interactor;
 use crate::interactor::race::predict::{RaceContext, build_factors, field_mean_weight};
 use crate::pdf_fetcher::PdfFetcher;
 use crate::pdf_parser::PdfParser;
-use crate::repository::Repository;
+use crate::repository::{OddsRepository, StatsRepository};
 
 /// 馬番から引く発走馬の実績: `(着順, 単勝オッズ, 人気)`。いずれも欠落しうるので `Option`。
 type StarterFacts = (Option<u32>, Option<f64>, Option<u32>);
 
-impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
+impl<R: StatsRepository + OddsRepository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
     /// 指定期間 `[from, to]` の確定済みレースに対して確率推定を再現し、予測と実着順を突合した
     /// バックテストレポートを返す。各レース日 D の統計は `as_of = Some(D)`（`races.date < D`）で
     /// 取得するため、評価対象レース当日・以降の結果はリークしない（walk-forward）。

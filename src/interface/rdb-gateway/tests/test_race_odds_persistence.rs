@@ -3,7 +3,7 @@
 
 use chrono::{DateTime, NaiveDate, TimeZone, Utc};
 use paddock_domain::{HorseNum, OrderedPair, OrderedTriple, Pair, RaceId, Triple};
-use paddock_use_case::repository::{OddsRow, RaceOddsRecord, Repository};
+use paddock_use_case::repository::{OddsRepository, OddsRow, RaceOddsRecord};
 use rdb_gateway::PostgresRepository;
 
 fn race_id() -> RaceId {

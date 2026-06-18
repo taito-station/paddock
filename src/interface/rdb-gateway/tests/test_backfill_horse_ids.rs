@@ -8,7 +8,7 @@ use paddock_domain::{
     FinishingPosition, GateNum, HorseName, HorseNum, HorseResult, Race, RaceId, ResultStatus,
     Surface, Venue,
 };
-use paddock_use_case::repository::Repository;
+use paddock_use_case::repository::{HorseHistoryRepository, RaceRepository};
 use rdb_gateway::PostgresRepository;
 
 /// pdf 成績 1 頭分のレースを作る（horse_id は None＝pdf 経路相当）。

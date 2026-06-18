@@ -5,9 +5,9 @@ use crate::entry_parser::EntryParser;
 use crate::error::Result;
 use crate::interactor::entry::EntryInteractor;
 use crate::pdf_fetcher::PdfFetcher;
-use crate::repository::Repository;
+use crate::repository::RaceCardRepository;
 
-impl<R: Repository, E: EntryParser, F: PdfFetcher> EntryInteractor<R, E, F> {
+impl<R: RaceCardRepository, E: EntryParser, F: PdfFetcher> EntryInteractor<R, E, F> {
     pub async fn ingest_entry_pdf(&self, source: &str) -> Result<IngestEntryResponse> {
         // 出馬表 PDF 本文には日付が無いため、取り込み元ファイル名の先頭 `YYYYMMDD`
         // から開催日を導出して各 RaceCard に持たせる。

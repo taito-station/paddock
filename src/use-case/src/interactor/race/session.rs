@@ -6,10 +6,10 @@ use crate::interactor::Interactor;
 use crate::pdf_fetcher::PdfFetcher;
 use crate::pdf_parser::PdfParser;
 use crate::repository::{
-    PredictBetRecord, PredictRaceConditionRecord, PredictSessionRecord, Repository,
+    PredictBetRecord, PredictRaceConditionRecord, PredictSessionRecord, PredictSessionRepository,
 };
 
-impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
+impl<R: PredictSessionRepository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
     /// 指定日の予想セッションを取得する（未作成なら `None`）。
     pub async fn find_predict_session(
         &self,

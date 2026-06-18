@@ -5,7 +5,7 @@
 use chrono::{NaiveDate, Utc};
 use paddock_domain::{RaceId, TrackCondition};
 use paddock_use_case::repository::{
-    PredictBetRecord, PredictRaceConditionRecord, PredictSessionRecord, Repository,
+    PredictBetRecord, PredictRaceConditionRecord, PredictSessionRecord, PredictSessionRepository,
 };
 use rdb_gateway::PostgresRepository;
 

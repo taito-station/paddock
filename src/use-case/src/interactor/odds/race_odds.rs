@@ -4,9 +4,9 @@ use paddock_domain::{RaceId, RaceOdds};
 use crate::error::Result;
 use crate::interactor::odds::OddsInteractor;
 use crate::odds_scraper::OddsScraper;
-use crate::repository::{OddsRow, RaceOddsRecord, Repository};
+use crate::repository::{OddsRepository, OddsRow, RaceOddsRecord};
 
-impl<O: OddsScraper, R: Repository> OddsInteractor<O, R> {
+impl<O: OddsScraper, R: OddsRepository> OddsInteractor<O, R> {
     /// race_id のオッズを read-through で取得する（#51, ADR 0010）。
     ///
     /// 1. `race_odds` に保存済み（単勝・複勝）があれば、再スクレイプせずそれを返す。
@@ -108,21 +108,15 @@ impl<O: OddsScraper, R: Repository> OddsInteractor<O, R> {
 mod tests {
     use std::sync::Mutex;
 
-    use chrono::{DateTime, NaiveDate, Utc};
+    use chrono::NaiveDate;
     use paddock_domain::{
-        HorseName, HorseNum, JockeyName, OddsValue, OrderedPair, OrderedTriple, Pair, PlaceOdds,
-        Race, RaceCard, RaceId, RaceOdds, RecentRun, StandardTimes, Surface, TrainerName, Triple,
-        Venue,
+        HorseNum, OddsValue, OrderedPair, OrderedTriple, Pair, PlaceOdds, RaceId, RaceOdds, Triple,
     };
 
     use crate::error::{Error, Result};
     use crate::interactor::odds::OddsInteractor;
     use crate::odds_scraper::OddsScraper;
-    use crate::repository::{
-        CourseStatsRow, FetchRecord, HorseStatsRow, JockeyStatsRow, PredictBetRecord,
-        PredictRaceConditionRecord, PredictSessionRecord, RaceOddsRecord, Repository,
-        TrainerStatsRow,
-    };
+    use crate::repository::{OddsRepository, RaceOddsRecord};
 
     /// テスト用の OddsScraper。scrape の戻り値を差し替えつつ呼び出し回数を数える。
     struct FakeScraper {
@@ -153,25 +147,7 @@ mod tests {
         saved: Mutex<Vec<RaceOddsRecord>>,
     }
 
-    impl Repository for FakeRepo {
-        async fn save_pad_prediction(
-            &self,
-            _: &paddock_domain::PadPrediction,
-            _: chrono::DateTime<chrono::Utc>,
-        ) -> Result<()> {
-            unimplemented!()
-        }
-        async fn find_pad_prediction(
-            &self,
-            _: chrono::NaiveDate,
-            _: paddock_domain::Venue,
-            _: u32,
-        ) -> Result<Option<paddock_domain::PadPrediction>> {
-            unimplemented!()
-        }
-        async fn list_pad_predictions(&self) -> Result<Vec<paddock_domain::PadPrediction>> {
-            unimplemented!()
-        }
+    impl OddsRepository for FakeRepo {
         async fn find_race_odds(
             &self,
             _race_id: &RaceId,
@@ -182,138 +158,6 @@ mod tests {
         async fn save_race_odds(&self, record: &RaceOddsRecord) -> Result<()> {
             self.saved.lock().unwrap().push(record.clone());
             Ok(())
-        }
-        // --- 以降は本テストで未使用 ---
-        async fn save_race(&self, _: &Race) -> Result<()> {
-            unimplemented!()
-        }
-        async fn upsert_horse_history(
-            &self,
-            _: &paddock_domain::HorseId,
-            _: &[crate::HorsePastRun],
-        ) -> Result<usize> {
-            unimplemented!()
-        }
-        async fn backfill_results_horse_ids(&self) -> Result<u64> {
-            unimplemented!()
-        }
-        async fn find_matching_horse_names(&self, _: &str, _: u32) -> Result<Vec<String>> {
-            unimplemented!()
-        }
-        async fn find_matching_jockey_names(&self, _: &str, _: u32) -> Result<Vec<String>> {
-            unimplemented!()
-        }
-        async fn find_matching_trainer_names(&self, _: &str, _: u32) -> Result<Vec<String>> {
-            unimplemented!()
-        }
-        async fn horse_stats(&self, _: &HorseName, _: Option<NaiveDate>) -> Result<HorseStatsRow> {
-            unimplemented!()
-        }
-        async fn course_stats(
-            &self,
-            _: Venue,
-            _: u32,
-            _: Surface,
-            _: Option<NaiveDate>,
-        ) -> Result<CourseStatsRow> {
-            unimplemented!()
-        }
-        async fn jockey_stats(
-            &self,
-            _: &JockeyName,
-            _: Option<NaiveDate>,
-        ) -> Result<JockeyStatsRow> {
-            unimplemented!()
-        }
-        async fn trainer_stats(
-            &self,
-            _: &TrainerName,
-            _: Option<NaiveDate>,
-        ) -> Result<TrainerStatsRow> {
-            unimplemented!()
-        }
-        async fn find_finished_races_between(
-            &self,
-            _: NaiveDate,
-            _: NaiveDate,
-        ) -> Result<Vec<Race>> {
-            unimplemented!()
-        }
-        async fn find_recent_runs(
-            &self,
-            _: &HorseName,
-            _: NaiveDate,
-            _: u32,
-        ) -> Result<Vec<RecentRun>> {
-            unimplemented!()
-        }
-        async fn standard_times(&self, _: NaiveDate) -> Result<StandardTimes> {
-            unimplemented!()
-        }
-        async fn count_races(&self) -> Result<u64> {
-            unimplemented!()
-        }
-        async fn race_exists(&self, _: &RaceId) -> Result<bool> {
-            unimplemented!()
-        }
-        async fn fetch_history_contains(&self, _: &str) -> Result<bool> {
-            unimplemented!()
-        }
-        async fn record_fetch(&self, _: &FetchRecord) -> Result<()> {
-            unimplemented!()
-        }
-        async fn save_race_card(&self, _: &RaceCard) -> Result<()> {
-            unimplemented!()
-        }
-        async fn find_race_card(&self, _: &RaceId) -> Result<Option<RaceCard>> {
-            unimplemented!()
-        }
-        async fn find_races_by_date(&self, _: NaiveDate) -> Result<Vec<Race>> {
-            unimplemented!()
-        }
-        async fn find_predict_session(&self, _: NaiveDate) -> Result<Option<PredictSessionRecord>> {
-            unimplemented!()
-        }
-        async fn find_predict_bets(&self, _: NaiveDate) -> Result<Vec<PredictBetRecord>> {
-            unimplemented!()
-        }
-        async fn find_predict_bets_with_id(
-            &self,
-            _: NaiveDate,
-        ) -> Result<Vec<(i64, PredictBetRecord)>> {
-            unimplemented!()
-        }
-        async fn settle_predict_session(
-            &self,
-            _: &PredictSessionRecord,
-            _: &[(i64, u64)],
-        ) -> Result<()> {
-            unimplemented!()
-        }
-        async fn save_predict_session(&self, _: &PredictSessionRecord) -> Result<()> {
-            unimplemented!()
-        }
-        async fn save_race_outcome(
-            &self,
-            _: &PredictSessionRecord,
-            _: &RaceId,
-            _: &[PredictBetRecord],
-        ) -> Result<()> {
-            unimplemented!()
-        }
-        async fn find_predict_race_conditions(
-            &self,
-            _: NaiveDate,
-        ) -> Result<Vec<PredictRaceConditionRecord>> {
-            unimplemented!()
-        }
-        async fn save_predict_race_condition(
-            &self,
-            _: NaiveDate,
-            _: &PredictRaceConditionRecord,
-            _: DateTime<Utc>,
-        ) -> Result<()> {
-            unimplemented!()
         }
     }
 

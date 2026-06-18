@@ -4,7 +4,7 @@ mod setup;
 use chrono::Datelike;
 use clap::Parser;
 use paddock_use_case::build_race_ids;
-use paddock_use_case::repository::Repository;
+use paddock_use_case::repository::StatsRepository;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> anyhow::Result<()> {

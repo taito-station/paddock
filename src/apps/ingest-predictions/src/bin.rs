@@ -9,7 +9,7 @@ use anyhow::{Context, Result};
 use chrono::Utc;
 use clap::Parser;
 use paddock_config::Config;
-use paddock_use_case::repository::Repository;
+use paddock_use_case::repository::PadPredictionRepository;
 use rdb_gateway::{PostgresRepository, pool};
 
 /// 既定の pad ルート（web-viewer と同じ iCloud Obsidian vault）。`PADDOCK_PAD_DIR` で上書き可。

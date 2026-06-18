@@ -4,7 +4,9 @@ use paddock_domain::{HorseEntry, RaceCard, RaceId};
 use crate::error::Result;
 use crate::interactor::card::CardInteractor;
 use crate::netkeiba_scraper::NetkeibaScraper;
-use crate::repository::{FetchRecord, OddsRow, RaceOddsRecord, Repository};
+use crate::repository::{
+    FetchRecord, FetchRepository, OddsRepository, OddsRow, RaceCardRepository, RaceOddsRecord,
+};
 
 /// 出馬表・オッズ取り込みの結果サマリ。
 #[derive(Debug, Clone, PartialEq)]
@@ -20,7 +22,9 @@ pub struct IngestCardResponse {
     pub horse_ids: Vec<String>,
 }
 
-impl<R: Repository, S: NetkeibaScraper> CardInteractor<R, S> {
+impl<R: RaceCardRepository + OddsRepository + FetchRepository, S: NetkeibaScraper>
+    CardInteractor<R, S>
+{
     /// netkeiba の出馬表と単勝オッズを取得し、`race_cards`/`horse_entries`/`race_odds` に保存する。
     ///
     /// カードは `fetch_history`（source_key `netkeiba-card:<id>`）で重複取得を抑止する
