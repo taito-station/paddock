@@ -96,7 +96,7 @@ GET /api/predictions
 |---|---|---|
 | `date_from` / `date_to` | 期間（両端含む。片側のみも可） | `p.date >= $from` / `p.date <= $to`（`p.date` は TEXT。後述「日付の扱い」参照） |
 | `venue` | 開催場（`predictions.venue` と同形式の日本語場名） | `p.venue = $venue` |
-| `distance_min` / `distance_max` | 距離帯（m） | `r.distance BETWEEN ...`（距離・芝ダ指定時は `INNER JOIN races r ON r.race_id = p.race_id`。後述「距離・芝ダの結合」） |
+| `distance_min` / `distance_max` | 距離帯（m） | `r.distance BETWEEN ...`（`races` は表示用に常時 `LEFT JOIN races r ON r.race_id = p.race_id`。後述「距離・芝ダの結合」） |
 | `surface` | 芝 / ダート | `r.surface = $surface` |
 | `horse_name` | 馬名の部分一致（カナ正規化） | `EXISTS (SELECT 1 FROM prediction_horses h WHERE h.prediction_id = p.prediction_id AND h.horse_name LIKE '%' \|\| $n \|\| '%' ESCAPE '\')`（`$n` には `escape_like(正規化値)` をバインド。後述「馬名の正規化」） |
 | `mark` | 印（その印を付けた馬を含む予想） | `EXISTS (... AND h.mark = $mark)` |
@@ -108,11 +108,11 @@ GET /api/predictions
 
 #### 距離・芝ダの結合
 
-距離・芝ダで絞り込むと、`predictions.race_id` が NULL（`races` 未照合）の予想は対象から外れる。**この制約は仕様**とし、OpenAPI 説明文で明示する（`race_id` 補完は #51/#40 系の充足に依存するため本 Issue では扱わない）。実装上は **距離・芝ダのいずれかが指定されたときだけ `INNER JOIN races`** し、`r.distance` / `r.surface` を指定値で直接絞る（未指定時は結合自体を省く）。`LEFT JOIN` のまま `r.surface = $surface OR $surface IS NULL` のような OR 化で代用しないこと（NULL 行が残り、未照合予想が誤って通過するため）。
+`races` は**表示用に常時 `LEFT JOIN`** する（一覧レスポンスの `distance` / `surface` を埋めるため。未照合なら `null`）。一方で**距離・芝ダのフィルタは、指定されたときだけ `WHERE r.distance BETWEEN ...` / `WHERE r.surface = $surface` を足す**。フィルタを足すと `race_id` が NULL（`races` 未照合）の予想は `r.distance` / `r.surface` が NULL で述語に一致せず脱落する（＝距離・芝ダ指定時はその行が実質 INNER 相当で落ちる）。これは**仕様**とし、OpenAPI 説明文で明示する（`race_id` 補完は #51/#40 系の充足に依存するため本 Issue では扱わない）。`r.surface = $surface OR $surface IS NULL` のような OR 化で未照合行を残さないこと（未照合予想が誤って通過するため）。
 
 #### 日付の扱い
 
-`predictions.date` はスキーマ上 **TEXT（`YYYY-MM-DD`）**。`date_from` / `date_to` は `NaiveDate` でパースして妥当性検証（不正フォーマットは `400`）し、既存 `predict_session` の `date_key`（private fn）と**同一ロジック**（ゼロ詰め `YYYY-MM-DD`）で文字列化してからバインドする。固定長 `YYYY-MM-DD` のため TEXT の辞書順比較が日付順と一致し、`BETWEEN` / `date DESC` が正しく機能する。
+`predictions.date` はスキーマ上 **TEXT（`YYYY-MM-DD`）**。`date_from` / `date_to` は `NaiveDate` でパースして妥当性検証（不正フォーマットは `400`）し、`date_key`（private fn。`pad_prediction.rs:15` と `predict_session.rs:15` に同一実装が重複。検索クエリは pad_prediction リポに実装するため同ファイルの `date_key` を使う。重複は共通化が望ましい）と**同一ロジック**（ゼロ詰め `YYYY-MM-DD`）で文字列化してからバインドする。固定長 `YYYY-MM-DD` のため TEXT の辞書順比較が日付順と一致し、`BETWEEN` / `date DESC` が正しく機能する。`date_from > date_to`（逆転期間）は距離範囲（`distance_min > distance_max`）と揃えて `400` とする。
 
 #### ページングの境界
 
@@ -149,7 +149,7 @@ GET /api/predictions
 }
 ```
 
-- `honmei_horse` は印 ◎（`honmei`）の馬名（無ければ `null`）。一覧で「軸に何を選んだか」を一目で分かるようにする補助。
+- `honmei_horse` は印 ◎（`honmei`）の馬名（無ければ `null`）。一覧で「軸に何を選んだか」を一目で分かるようにする補助。◎が複数馬に付く場合は `horse_num` 昇順の先頭 1 件を採る。
 - `distance` / `surface` は `races` 結合で得られた値（未照合なら `null`）。
 - `finish` は `[finish_1, finish_2, finish_3]` を表す**固定長 3 の配列**で、各要素は `BIGINT`（馬番）または `null`（3 着決着しない・記録欠落時）。結果未記録なら `finish` 自体を `null` とする。
 - `recovery_rate` / `pnl` / `hit` は結果未記録なら `null`（`hit` は後述）。
