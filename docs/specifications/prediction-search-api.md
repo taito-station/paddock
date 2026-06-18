@@ -20,7 +20,7 @@
   - `GET /api/predictions` … 横断検索・絞り込み（一覧）
   - `GET /api/predictions/{prediction_id}` … 個別予想（ビューア相当の全項目）
   - `GET /api/predictions/stats/by-mark` … 印別の的中率（集計の入口 1 本）
-- 検索軸: 日付・期間 / 開催場 / 距離 / 芝ダ / 馬名（部分一致・カタカナ正規化, #50 流用）/ 印（◎○▲△☆☆注）/ 的中・不的中。
+- 検索軸: 日付・期間 / 開催場 / 距離 / 芝ダ / 馬名（部分一致・カタカナ正規化, #50 流用）/ 印（◎○▲△☆注）/ 的中・不的中。
 - use-case interactor・`PadPredictionRepository` への read メソッド追加（検索・個別取得・集計）。
 - OpenAPI（utoipa）への反映と `docs/api/openapi.json` スナップショット更新。
 - 統合テスト（`#[sqlx::test]` で一時 Postgres を seed して各エンドポイントを叩く）。
@@ -91,19 +91,35 @@ GET /api/predictions
 
 各パラメータの意味と SQL マッピング:
 
-| パラメータ | 意味 | SQL（`predictions` を `p` とする） |
+| パラメータ | 意味 | SQL（`predictions` を `p`、`prediction_horses` を `h` とする） |
 |---|---|---|
-| `date_from` / `date_to` | 期間（両端含む。片側のみも可） | `p.date >= $from` / `p.date <= $to` |
+| `date_from` / `date_to` | 期間（両端含む。片側のみも可） | `p.date >= $from` / `p.date <= $to`（`p.date` は TEXT。後述「日付の扱い」参照） |
 | `venue` | 開催場（`predictions.venue` と同形式の日本語場名） | `p.venue = $venue` |
-| `distance_min` / `distance_max` | 距離帯（m） | `r.distance BETWEEN ...`（`LEFT JOIN races r ON r.race_id = p.race_id`） |
+| `distance_min` / `distance_max` | 距離帯（m） | `r.distance BETWEEN ...`（距離・芝ダ指定時は `INNER JOIN races r ON r.race_id = p.race_id`。後述「距離・芝ダの結合」） |
 | `surface` | 芝 / ダート | `r.surface = $surface` |
-| `horse_name` | 馬名の部分一致（カナ正規化） | `EXISTS (SELECT 1 FROM prediction_horses h WHERE h.prediction_id = p.prediction_id AND h.horse_name LIKE $pat ESCAPE '\')` |
+| `horse_name` | 馬名の部分一致（カナ正規化） | `EXISTS (SELECT 1 FROM prediction_horses h WHERE h.prediction_id = p.prediction_id AND h.horse_name LIKE '%' \|\| $n \|\| '%' ESCAPE '\')`（`$n` には `escape_like(正規化値)` をバインド。後述「馬名の正規化」） |
 | `mark` | 印（その印を付けた馬を含む予想） | `EXISTS (... AND h.mark = $mark)` |
 | `hit` | 的中 / 不的中 | 後述「的中の定義」 |
 
 - **馬名 × 印を併用**した場合は「**同一馬**が馬名条件と印条件の両方を満たす」を意味する（単一の `EXISTS` 内で `horse_name LIKE ... AND mark = ...`）。「印◎の馬で馬名が X」という直感的意図に合わせる。
-- `distance_*` / `surface` を指定すると、`race_id` が NULL（`races` 未照合）の予想は対象から外れる（`INNER` 相当）。**この制約は仕様**とし、レスポンスのメタや OpenAPI 説明文で明示する。`race_id` 補完は #51/#40 系の充足に依存するため本 Issue では扱わない。
-- `surface` は `Surface`、`mark` は `Mark`、`venue` は `Venue` のドメイン値へ変換し、不正値は `400`。
+- **印（`mark`）は単一値のみ**受け付ける（最小形）。複数印の OR 検索（◎と○の両方など）は本 Issue では非対応とし、必要になれば #34 で扱う。
+- `surface` は `Surface`、`mark` は `Mark`、`venue` は `Venue` のドメイン値へ変換し、不正値は `400`。`venue` は分析 API（`GET /api/analyze/course`）と同じく `Venue::try_from` で検証する（JRA 10 場は `Venue` 列挙に含まれる）。`mark` は OpenAPI enum を **slug（`honmei`..`chui`）に固定**する（`Mark::from_slug` は記号 `◎` 等も受理する寛容な実装だが、API 入力は slug に正規化して契約を一意にする）。
+
+#### 距離・芝ダの結合
+
+距離・芝ダで絞り込むと、`predictions.race_id` が NULL（`races` 未照合）の予想は対象から外れる。**この制約は仕様**とし、OpenAPI 説明文で明示する（`race_id` 補完は #51/#40 系の充足に依存するため本 Issue では扱わない）。実装上は **距離・芝ダのいずれかが指定されたときだけ `INNER JOIN races`**（未指定時は結合自体を省くか `LEFT JOIN`）とし、`r.surface = $surface OR $surface IS NULL` のような OR 化で NULL 行を残さない（NULL 行を残すと未照合予想が誤って通過する）。
+
+#### 日付の扱い
+
+`predictions.date` はスキーマ上 **TEXT（`YYYY-MM-DD`）**。`date_from` / `date_to` は `NaiveDate` でパースして妥当性検証（不正フォーマットは `400`）し、既存 `predict_session` の `date_key(NaiveDate) -> String` と同形式（ゼロ詰め `YYYY-MM-DD`）の文字列にしてからバインドする。固定長 `YYYY-MM-DD` のため TEXT の辞書順比較が日付順と一致し、`BETWEEN` / `date DESC` が正しく機能する。
+
+#### ページングの境界
+
+`limit` は既定 50・上限 200（超過時は 200 に clamp）。`limit` / `offset` の負値・非数は `400`。`offset` は 0 以上（既定 0）。
+
+#### 動的 WHERE の組み立て（安全性）
+
+指定された軸のみ AND する都合上、WHERE 句は動的生成になる。既存 `find_pad_prediction` / `list_pad_predictions` は `sqlx::query_as(sqlx::AssertSqlSafe(format!(...)))` で SQL 文字列を組むが、**`format!` に混ぜてよいのは静的な句フラグメント（カラム名・固定の述語）のみ**とし、**ユーザー入力値は一切文字列連結せず必ず `.bind()` 経由**にする（プレースホルダ `$1, $2 ..` を動的に採番）。`~/.claude/rules/sql/queries.md` のプレースホルダ必須に従い、SQL インジェクションを排除する。
 
 レスポンス例:
 
@@ -134,7 +150,8 @@ GET /api/predictions
 
 - `honmei_horse` は印 ◎（`honmei`）の馬名（無ければ `null`）。一覧で「軸に何を選んだか」を一目で分かるようにする補助。
 - `distance` / `surface` は `races` 結合で得られた値（未照合なら `null`）。
-- `finish` / `recovery_rate` / `pnl` / `hit` は結果未記録なら `null`（`hit` は後述）。
+- `finish` は `[finish_1, finish_2, finish_3]` を表す**固定長 3 の配列**で、各要素は `BIGINT`（馬番）または `null`（3 着決着しない・記録欠落時）。結果未記録なら `finish` 自体を `null` とする。
+- `recovery_rate` / `pnl` / `hit` は結果未記録なら `null`（`hit` は後述）。
 
 ### 2. 個別予想（ビューア相当）
 
@@ -155,9 +172,10 @@ GET /api/predictions/stats/by-mark
 ```
 
 - use-case: `prediction_mark_stats(filter)`（新規）。
-- 集計対象は「結果が記録済み（`finish_1 IS NOT NULL`）の予想」に限定。`date_from`/`date_to`/`venue` で母集団を絞れる（任意）。
+- **母集団**は「**結果が記録済み（`predictions.finish_1 IS NOT NULL`）の予想に属し、かつ `mark IS NOT NULL` の `prediction_horses` 行**」の延べ数。`date_from`/`date_to`/`venue` で母集団を絞れる（任意）。`mark` が NULL（無印）の馬は集計に含めない。
 - 印ごとに、その印を付けた馬が **1 着 / 3 着内（複勝圏）** に入った割合を返す。「印別の信頼度」を素早く把握するための入口で、詳細クロス集計は #34 / `analyze` に委ねる。
-- 1 着判定: `prediction_horses.horse_num = predictions.finish_1`。複勝圏判定: `horse_num IN (finish_1, finish_2, finish_3)`。
+- 1 着判定: `prediction_horses.horse_num = predictions.finish_1`。複勝圏判定: `horse_num IN (finish_1, finish_2, finish_3)`。`finish_2` / `finish_3` が NULL（3 着決着しない・少頭数等）の場合、その NULL は `IN` に一致しない（複勝圏=不一致）扱いとする。
+- アクセスパスは `predictions`（`finish_1 IS NOT NULL` + 期間/場の絞り込み）を起点に `prediction_id` で `prediction_horses` を結合し `mark` で集計する。`idx_prediction_horses_mark` は必須ではない（件数が小さく、結合起点は `predictions` 側）。
 
 レスポンス例:
 
@@ -189,7 +207,11 @@ GET /api/predictions/stats/by-mark
 
 ## 馬名の正規化（#50 流用）
 
-- 検索クエリの `horse_name` は、分析 API（`GET /api/analyze/horse`）と同じく **`HorseName::try_from(query)`** でカナ正規化（全角/半角カナ・濁点合成・全角英数→半角等, `src/domain/src/normalize.rs`）してから LIKE パターン（`%正規化値%`）に変換する。ワイルドカード・エスケープは既存 `escape_like()` 相当でリテラル化する。
+本 Issue の馬名検索は、#50 の資産のうち **(a) カナ正規化** と **(b) `LIKE` + `escape_like` による中間一致** を組み合わせる。両者は別経路にある点に注意する:
+
+- **(a) 正規化**: 分析 API（`GET /api/analyze/horse`）と同じく `HorseName::try_from(query)` でカナ正規化する。`HorseName` は domain の値オブジェクト（`TryFrom<&str>`）で、内部で `src/domain/src/normalize.rs` の正規化（全角/半角カナ・濁点合成・全角英数→半角等）を適用する。ただし **analyze/horse は完全一致**（`horse_stats(&name)`）であり、部分一致 `LIKE` は使っていない。本 Issue で流用するのは「正規化」までで、部分一致は (b) を組み合わせる。
+- **(b) 中間一致**: 既存 `find_matching_horse_names`（`NameMatchRepository` / `rdb-gateway` の `find_matching_names.rs`）が持つ `LIKE '%' || $1 || '%' ESCAPE '\'` + `escape_like()`（`%` / `_` / `\` をリテラル化）と**同一のイディオム**を `prediction_horses.horse_name` に適用する。`find_matching_horse_names` は `results` テーブル対象なので、予想テーブル向けの新規クエリとして実装する（ヘルパー `escape_like` は既存を再利用）。
+- 組み合わせ: クエリを正規化（a）→ `escape_like` でエスケープ（b）→ `LIKE '%' || $n || '%' ESCAPE '\'` にバインド。
 - `prediction_horses.horse_name` は取り込み時に値オブジェクトを通さず生 String で保存しているが、予想の馬名は predict パイプライン（`race_cards` / `results` 由来＝取り込み時に `HorseName` で正規化済み）から生成されるため、実用上は正規化済みの表記で格納されている。よって**検索クエリ側の正規化のみで部分一致が成立する**。
 - 取り込み時正規化＋既存行バックフィルまで行えば完全な整合になるが、`prediction_horses.horse_name` の上書きはロスあり（down で原文を復元できない）でスコープも広がるため、本 Issue では見送る。表記ゆれによる取りこぼしが観測された場合に別 Issue で対応する。
 

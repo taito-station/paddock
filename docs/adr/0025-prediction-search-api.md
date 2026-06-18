@@ -17,8 +17,9 @@
   - `GET /api/predictions/{prediction_id}` … 個別予想（ビューア相当の全項目）
   - `GET /api/predictions/stats/by-mark` … 印別の的中率（集計の入口 1 本）
 - 検索軸: 日付・期間 / 開催場 / 距離 / 芝ダ / 馬名（部分一致・カナ正規化）/ 印 / 的中・不的中。指定軸のみ AND で絞る。
-- **距離・芝ダは `races` 結合**（`LEFT JOIN races ON race_id`）で得る。`predictions.race_id` は NULL あり（`races` 未照合）。距離・芝ダで絞ると race_id NULL の予想は対象外になる仕様とし、OpenAPI 説明文で明示する。race_id 補完は本 Issue の対象外。
-- **馬名の正規化は #50 を流用**。検索クエリを `HorseName::try_from`（`domain/src/normalize.rs`）で正規化してから LIKE。`prediction_horses.horse_name` は predict パイプライン（正規化済みの race_cards / results 由来）から生成されるため、クエリ側正規化のみで部分一致が成立する。取り込み時正規化＋バックフィルは見送る（ロスあり・スコープ拡大）。
+- **距離・芝ダは `races` 結合**で得る（距離・芝ダ指定時のみ `INNER JOIN races ON race_id`、未指定時は結合省略/`LEFT JOIN`）。`predictions.race_id` は NULL あり（`races` 未照合）。距離・芝ダで絞ると race_id NULL の予想は対象外になる仕様とし、OpenAPI 説明文で明示する。race_id 補完は本 Issue の対象外。
+- **馬名検索は #50 の資産を 2 経路に分けて流用**: (a) カナ正規化は `HorseName::try_from`（domain 値オブジェクト。内部で `domain/src/normalize.rs` の正規化を適用）。(b) 中間一致は既存 `find_matching_horse_names`（`NameMatchRepository`）の `LIKE '%' || $1 || '%' ESCAPE '\'` + `escape_like()` イディオムを `prediction_horses` 向け新規クエリに適用。analyze/horse は完全一致のため流用するのは正規化のみ。`prediction_horses.horse_name` は predict パイプライン（正規化済みの race_cards / results 由来）から生成されるため、クエリ側正規化のみで部分一致が成立する。取り込み時正規化＋バックフィルは見送る（ロスあり・スコープ拡大）。
+- 動的 WHERE は「静的フラグメントのみ `format!`、値は必ず `.bind()`」で組み、`venue`/`surface` は `Venue`/`Surface`、`mark` は OpenAPI enum を slug に固定して検証する。
 - **馬名 × 印を併用**した場合は同一馬が両条件を満たすことを要求する（単一 `EXISTS` 内で `horse_name LIKE ... AND mark = ...`）。
 - **的中は回収率ベース**で定義: 的中 = `recovery_rate > 0`、不的中 = `finish_1 IS NOT NULL AND COALESCE(recovery_rate,0)=0`、結果未記録 = `hit` フィルタ対象外。買い目と着順の突き合わせは行わず、取り込み済みの `recovery_rate` を正とする。
 - **集計は印別的中率 1 本**に限定。印ごとに 1 着率・複勝圏率（`horse_num` と `finish_1/2/3` の照合）を返す。詳細クロス集計は #34 / `analyze` に委ねる。
@@ -35,7 +36,7 @@
 
 ## 影響
 
-- `PadPredictionRepository`（use-case トレイト）に read メソッドを 3 つ追加（`search_predictions` / `find_pad_prediction_by_id` / `prediction_mark_stats`）。Postgres 実装（`rdb-gateway`）と、トレイトを実装する全ダミー/モックの網羅にコンパイラが追従を要求する。
+- use-case interactor を 3 つ追加（`search_predictions` / `prediction_detail` / `prediction_mark_stats`）。`PadPredictionRepository`（use-case トレイト）にも read メソッドを 3 つ追加するが、層ごとに名前を分ける: interactor `search_predictions` → repo `search_predictions`、interactor `prediction_detail` → repo `find_pad_prediction_by_id`（既存 `find_pad_prediction` は `(date,venue,race_num)` キーのため PK 取得版を新設）、interactor `prediction_mark_stats` → repo `prediction_mark_stats`。Postgres 実装（`rdb-gateway`）と、トレイトを実装する全ダミー/モックの網羅にコンパイラが追従を要求する。
 - rest-controller に handler / schema / router を追加し、`ApiDoc` の paths/components が増える → `docs/api/openapi.json` 再生成が必要（スナップショットテストで強制）。
 - 距離・芝ダ絞り込みは `race_id` 解決済みの予想に限られる。SPA はこの制約を UI 上で示す前提（未照合分の取りこぼし）。
 - 馬名検索は表記ゆれ（取り込み時非正規化）に理論上弱い。実害が観測されれば取り込み時正規化＋バックフィルを別 Issue で対応する。
