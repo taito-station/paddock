@@ -1,15 +1,7 @@
 use sqlx::PgPool;
 
 use crate::error::Result;
-
-/// LIKE のワイルドカード（`%` / `_`）とエスケープ文字（`\`）をリテラル化する。
-/// `query` 中にこれらが混じっても任意一致せず、入力文字そのものとして検索する。
-fn escape_like(query: &str) -> String {
-    query
-        .replace('\\', "\\\\")
-        .replace('%', "\\%")
-        .replace('_', "\\_")
-}
+use crate::repositories::sql::escape_like;
 
 /// `query` を中間一致（`LIKE '%query%'`）する馬名を、stats の出る `results` から重複排除して
 /// 名前昇順で最大 `limit` 件返す（`analyze` の部分一致検索用）。`query` は正規化済み前提。

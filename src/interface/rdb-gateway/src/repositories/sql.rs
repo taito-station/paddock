@@ -15,6 +15,17 @@ pub(crate) const STATS_AGG_SELECT: &str = r#"
     INNER JOIN races ON races.race_id = results.race_id
 "#;
 
+/// LIKE のワイルドカード（`%` / `_`）とエスケープ文字（`\`）をリテラル化する。
+/// `query` 中にこれらが混じっても任意一致せず、入力文字そのものとして検索する。
+/// `LIKE '%' || $n || '%' ESCAPE '\'` 形式のクエリにバインドする値を作る共通ヘルパ
+/// （`find_matching_names` / `pad_prediction` の馬名検索で共有, #145）。
+pub(crate) fn escape_like(query: &str) -> String {
+    query
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
+}
+
 /// 芝ダ別グループの (DB キー, 日本語ラベル)。
 pub(crate) const SURFACE_KEYS: &[(&str, &str)] = &[("turf", "芝"), ("dirt", "ダート")];
 
