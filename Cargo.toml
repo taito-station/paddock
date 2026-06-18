@@ -11,6 +11,7 @@ members = [
     "src/apps/simulate",
     "src/apps/web-viewer",
     "src/apps/ingest-predictions",
+    "src/apps/api-server",
     # Standalone library crate: not yet consumed by any binary, so it is listed
     # explicitly to stay part of the workspace build/test graph.
     "src/interface/odds-scraper",
@@ -39,6 +40,8 @@ tracing            = { version = "0.1.*" }
 tracing-log        = { version = "0.2.*" }
 tracing-subscriber = { version = "0.3.*", features = ["env-filter"] }
 ureq               = { version = "3.*", default-features = false, features = ["rustls"] }
+utoipa             = { version = "5.*", features = ["actix_extras", "chrono"] }
+utoipa-swagger-ui  = { version = "8.*", features = ["actix-web"] }
 
 paddock-domain     = { path = "src/domain" }
 paddock-use-case   = { path = "src/use-case" }
@@ -51,3 +54,4 @@ netkeiba-scraper   = { path = "src/interface/netkeiba-scraper" }
 scraper-util       = { path = "src/interface/scraper-util" }
 rdb-gateway        = { path = "src/interface/rdb-gateway" }
 jra-fetcher        = { path = "src/interface/jra-fetcher" }
+rest-controller    = { path = "src/interface/rest-controller" }

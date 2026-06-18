@@ -1,0 +1,31 @@
+[package]
+name = "api-server"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "api_server"
+path = "src/lib.rs"
+
+[[bin]]
+name = "paddock-api"
+path = "src/bin.rs"
+
+[dependencies]
+actix-web          = { workspace = true }
+anyhow             = { workspace = true }
+paddock-config     = { workspace = true }
+paddock-domain     = { workspace = true }
+paddock-use-case   = { workspace = true }
+rdb-gateway        = { workspace = true }
+rest-controller    = { workspace = true }
+tokio              = { workspace = true }
+tracing            = { workspace = true }
+tracing-subscriber = { workspace = true }
+utoipa             = { workspace = true }
+utoipa-swagger-ui  = { workspace = true }
+
+[dev-dependencies]
+chrono     = { workspace = true }
+serde_json = { workspace = true }
+sqlx       = { workspace = true }

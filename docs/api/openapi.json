@@ -1,0 +1,898 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "paddock REST API (read)",
+    "description": "競馬予想・分析の read 系 REST API（#33）。確率推定・出馬表・レース一覧・分析統計を提供する。",
+    "license": {
+      "name": "Proprietary"
+    },
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/api/analyze/course": {
+      "get": {
+        "tags": [
+          "analyze"
+        ],
+        "summary": "コース（場×距離×馬場）の枠順別統計。",
+        "operationId": "analyze_course",
+        "parameters": [
+          {
+            "name": "venue",
+            "in": "query",
+            "description": "開催場（英字スラッグまたは日本語）。",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "distance",
+            "in": "query",
+            "description": "距離[m]。",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "surface",
+            "in": "query",
+            "description": "芝/ダート（`turf` / `dirt`）。",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "コースの枠順別統計",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CourseStatsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "パラメータ不正",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "内部エラー",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/analyze/horse": {
+      "get": {
+        "tags": [
+          "analyze"
+        ],
+        "summary": "馬の成績統計。",
+        "operationId": "analyze_horse",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "query",
+            "description": "対象の名前（完全一致。あいまい検索は #50）。",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "馬の成績統計",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HorseStatsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "名前不正",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "内部エラー",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/analyze/jockey": {
+      "get": {
+        "tags": [
+          "analyze"
+        ],
+        "summary": "騎手の成績統計。",
+        "operationId": "analyze_jockey",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "query",
+            "description": "対象の名前（完全一致。あいまい検索は #50）。",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "騎手の成績統計",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JockeyStatsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "名前不正",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "内部エラー",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/analyze/trainer": {
+      "get": {
+        "tags": [
+          "analyze"
+        ],
+        "summary": "調教師の成績統計。",
+        "operationId": "analyze_trainer",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "query",
+            "description": "対象の名前（完全一致。あいまい検索は #50）。",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "調教師の成績統計",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrainerStatsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "名前不正",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "内部エラー",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/races": {
+      "get": {
+        "tags": [
+          "races"
+        ],
+        "summary": "レース一覧（指定日）。",
+        "operationId": "list_races",
+        "parameters": [
+          {
+            "name": "date",
+            "in": "query",
+            "description": "開催日（`YYYY-MM-DD`）。",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "指定日のレース一覧",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RaceListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "日付フォーマット不正",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "内部エラー",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/races/{race_id}": {
+      "get": {
+        "tags": [
+          "races"
+        ],
+        "summary": "出馬表（race card）。",
+        "operationId": "get_race_card",
+        "parameters": [
+          {
+            "name": "race_id",
+            "in": "path",
+            "description": "レース ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "出馬表",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RaceCardResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "レース ID 不正",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "未存在のレース",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "内部エラー",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/races/{race_id}/prediction": {
+      "get": {
+        "tags": [
+          "races"
+        ],
+        "summary": "確率推定（win/place/show）。",
+        "operationId": "get_prediction",
+        "parameters": [
+          {
+            "name": "race_id",
+            "in": "path",
+            "description": "レース ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "track_condition",
+            "in": "query",
+            "description": "馬場状態（`良` / `稍重` / `重` / `不良`。略記 `稍` / `不` も可）。未指定なら馬場項なし。",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "blend_alpha",
+            "in": "query",
+            "description": "市場オッズ（単勝）とのブレンド係数 `[0,1]`。未指定はモデルのみ。",
+            "required": false,
+            "schema": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "馬ごとの確率",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PredictionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "クエリ不正",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "出馬表が無いレース",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "内部エラー",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "CourseStatsResponse": {
+        "type": "object",
+        "description": "`GET /api/analyze/course?venue=&distance=&surface=` のレスポンス。",
+        "required": [
+          "venue",
+          "distance",
+          "surface",
+          "by_gate_group"
+        ],
+        "properties": {
+          "by_gate_group": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GroupStatSchema"
+            }
+          },
+          "distance": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "surface": {
+            "type": "string"
+          },
+          "venue": {
+            "type": "string"
+          }
+        }
+      },
+      "ErrorBody": {
+        "type": "object",
+        "description": "エラーレスポンス本文。`{ \"error\": { \"code\": ..., \"message\": ... } }`。",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/ErrorDetail"
+          }
+        }
+      },
+      "ErrorDetail": {
+        "type": "object",
+        "required": [
+          "code",
+          "message"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "機械可読なエラーコード（`bad_request` / `not_found` / `internal`）。"
+          },
+          "message": {
+            "type": "string",
+            "description": "人間可読なエラーメッセージ。"
+          }
+        }
+      },
+      "GroupStatSchema": {
+        "type": "object",
+        "description": "あるカテゴリ 1 区分の成績（出走数＋勝/連対/複勝の件数とレート）。",
+        "required": [
+          "label",
+          "starts",
+          "wins",
+          "places",
+          "shows",
+          "win_rate",
+          "place_rate",
+          "show_rate"
+        ],
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "place_rate": {
+            "type": "number",
+            "format": "double"
+          },
+          "places": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "show_rate": {
+            "type": "number",
+            "format": "double"
+          },
+          "shows": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "starts": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "win_rate": {
+            "type": "number",
+            "format": "double"
+          },
+          "wins": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
+      "HorseEntrySchema": {
+        "type": "object",
+        "description": "出馬表の 1 頭。",
+        "required": [
+          "gate_num",
+          "horse_num",
+          "horse_name"
+        ],
+        "properties": {
+          "gate_num": {
+            "type": "integer",
+            "format": "int32",
+            "description": "枠番（1..=8）。",
+            "minimum": 0
+          },
+          "horse_name": {
+            "type": "string"
+          },
+          "horse_num": {
+            "type": "integer",
+            "format": "int32",
+            "description": "馬番。",
+            "minimum": 0
+          },
+          "jockey": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "騎手名（PDF 出馬表由来は `null`）。"
+          },
+          "trainer": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "調教師名（PDF 出馬表由来は `null`）。"
+          },
+          "weight_carried": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "負担重量[kg]（PDF 出馬表由来は `null`）。"
+          }
+        }
+      },
+      "HorseProbabilitySchema": {
+        "type": "object",
+        "description": "1 頭分の win/place/show 確率。",
+        "required": [
+          "horse_num",
+          "horse_name",
+          "win_prob",
+          "place_prob",
+          "show_prob"
+        ],
+        "properties": {
+          "horse_name": {
+            "type": "string"
+          },
+          "horse_num": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "place_prob": {
+            "type": "number",
+            "format": "double",
+            "description": "連対率（2 着以内）[0,1]。"
+          },
+          "show_prob": {
+            "type": "number",
+            "format": "double",
+            "description": "複勝率（3 着以内）[0,1]。`win_prob ≤ place_prob ≤ show_prob` を保証。"
+          },
+          "win_prob": {
+            "type": "number",
+            "format": "double",
+            "description": "勝率 [0,1]。"
+          }
+        }
+      },
+      "HorseStatsResponse": {
+        "type": "object",
+        "description": "`GET /api/analyze/horse?name=` のレスポンス。",
+        "required": [
+          "horse_name",
+          "overall",
+          "by_surface",
+          "by_distance_band",
+          "by_gate_group",
+          "by_track_condition",
+          "by_popularity_band"
+        ],
+        "properties": {
+          "by_distance_band": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GroupStatSchema"
+            }
+          },
+          "by_gate_group": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GroupStatSchema"
+            }
+          },
+          "by_popularity_band": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GroupStatSchema"
+            }
+          },
+          "by_surface": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GroupStatSchema"
+            }
+          },
+          "by_track_condition": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GroupStatSchema"
+            }
+          },
+          "horse_name": {
+            "type": "string"
+          },
+          "overall": {
+            "$ref": "#/components/schemas/GroupStatSchema"
+          }
+        }
+      },
+      "JockeyStatsResponse": {
+        "type": "object",
+        "description": "`GET /api/analyze/jockey?name=` のレスポンス。",
+        "required": [
+          "jockey_name",
+          "overall",
+          "by_surface",
+          "by_gate_group"
+        ],
+        "properties": {
+          "by_gate_group": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GroupStatSchema"
+            }
+          },
+          "by_surface": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GroupStatSchema"
+            }
+          },
+          "jockey_name": {
+            "type": "string"
+          },
+          "overall": {
+            "$ref": "#/components/schemas/GroupStatSchema"
+          }
+        }
+      },
+      "PredictionResponse": {
+        "type": "object",
+        "description": "`GET /api/races/{race_id}/prediction` のレスポンス。",
+        "required": [
+          "race_id",
+          "probabilities"
+        ],
+        "properties": {
+          "probabilities": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HorseProbabilitySchema"
+            }
+          },
+          "race_id": {
+            "type": "string"
+          }
+        }
+      },
+      "RaceCardResponse": {
+        "type": "object",
+        "description": "`GET /api/races/{race_id}` のレスポンス（出馬表）。",
+        "required": [
+          "race_id",
+          "date",
+          "venue",
+          "round",
+          "day",
+          "race_num",
+          "surface",
+          "distance",
+          "entries"
+        ],
+        "properties": {
+          "date": {
+            "type": "string",
+            "format": "date"
+          },
+          "day": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "distance": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HorseEntrySchema"
+            }
+          },
+          "race_id": {
+            "type": "string"
+          },
+          "race_num": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "round": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "surface": {
+            "type": "string"
+          },
+          "venue": {
+            "type": "string"
+          }
+        }
+      },
+      "RaceListResponse": {
+        "type": "object",
+        "description": "`GET /api/races?date=` のレスポンス。",
+        "required": [
+          "date",
+          "races"
+        ],
+        "properties": {
+          "date": {
+            "type": "string",
+            "format": "date"
+          },
+          "races": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RaceSummary"
+            }
+          }
+        }
+      },
+      "RaceSummary": {
+        "type": "object",
+        "description": "レース一覧の 1 要素（出走前の諸元のみ。results は含まない）。",
+        "required": [
+          "race_id",
+          "date",
+          "venue",
+          "race_num",
+          "distance",
+          "surface"
+        ],
+        "properties": {
+          "date": {
+            "type": "string",
+            "format": "date",
+            "description": "開催日。"
+          },
+          "distance": {
+            "type": "integer",
+            "format": "int32",
+            "description": "距離[m]。",
+            "minimum": 0
+          },
+          "race_id": {
+            "type": "string",
+            "description": "レース ID（`RaceId` の文字列表現）。"
+          },
+          "race_num": {
+            "type": "integer",
+            "format": "int32",
+            "description": "レース番号（1..=12）。",
+            "minimum": 0
+          },
+          "surface": {
+            "type": "string",
+            "description": "芝/ダート（`turf` / `dirt`）。"
+          },
+          "venue": {
+            "type": "string",
+            "description": "開催場（英字スラッグ。例 `nakayama`）。"
+          }
+        }
+      },
+      "TrainerStatsResponse": {
+        "type": "object",
+        "description": "`GET /api/analyze/trainer?name=` のレスポンス。",
+        "required": [
+          "trainer_name",
+          "overall",
+          "by_surface",
+          "by_gate_group"
+        ],
+        "properties": {
+          "by_gate_group": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GroupStatSchema"
+            }
+          },
+          "by_surface": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GroupStatSchema"
+            }
+          },
+          "overall": {
+            "$ref": "#/components/schemas/GroupStatSchema"
+          },
+          "trainer_name": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "races",
+      "description": "レース一覧 / 出馬表 / 確率推定"
+    },
+    {
+      "name": "analyze",
+      "description": "馬 / 騎手 / 調教師 / コースの成績統計"
+    }
+  ]
+}
