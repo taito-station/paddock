@@ -311,6 +311,9 @@ pub trait StatsRepository: Send + Sync {
     /// 指定期間 `[from, to]`（両端含む）の確定済みレースを `results` 付きで race_num 昇順に返す。
     /// `races.source='pdf'` かつ着順ありの `results` を 1 件以上含むレースのみを対象とする
     /// （バックテストの評価対象取得用）。`from > to` のときは空 Vec を返す。
+    ///
+    /// 命名は race 寄りだが、backtest の評価対象を集計読み出しする用途のため `StatsRepository` に置く
+    /// （backtest interactor の束縛を `StatsRepository + OddsRepository` に閉じ、mock を最小化するため）。
     fn find_finished_races_between(
         &self,
         from: NaiveDate,
@@ -526,6 +529,7 @@ pub trait PadPredictionRepository: Send + Sync {
 }
 
 /// 後方互換のための集約スーパートレイト。全 sub-trait を満たす型に blanket 実装される。
+/// `Send + Sync` は各 sub-trait が既に要求するため、ここでは再列挙しない。
 pub trait Repository:
     StatsRepository
     + NameMatchRepository
@@ -536,8 +540,6 @@ pub trait Repository:
     + HorseHistoryRepository
     + PredictSessionRepository
     + PadPredictionRepository
-    + Send
-    + Sync
 {
 }
 
@@ -551,7 +553,5 @@ impl<T> Repository for T where
         + HorseHistoryRepository
         + PredictSessionRepository
         + PadPredictionRepository
-        + Send
-        + Sync
 {
 }
