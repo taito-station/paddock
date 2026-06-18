@@ -11,6 +11,8 @@ pub enum Error {
     BadRequest(String),
     /// 404: リソースが存在しない。
     NotFound(String),
+    /// 409: 既存リソースの再作成（セッション二重作成など）。
+    Conflict(String),
     /// 500: 内部エラー（DB 等）。
     Internal(String),
 }
@@ -20,13 +22,16 @@ impl Error {
         match self {
             Error::BadRequest(_) => "bad_request",
             Error::NotFound(_) => "not_found",
+            Error::Conflict(_) => "conflict",
             Error::Internal(_) => "internal",
         }
     }
 
     fn message(&self) -> &str {
         match self {
-            Error::BadRequest(m) | Error::NotFound(m) | Error::Internal(m) => m,
+            Error::BadRequest(m) | Error::NotFound(m) | Error::Conflict(m) | Error::Internal(m) => {
+                m
+            }
         }
     }
 }
@@ -47,7 +52,7 @@ pub struct ErrorBody {
 
 #[derive(Debug, Serialize, ToSchema)]
 pub struct ErrorDetail {
-    /// 機械可読なエラーコード（`bad_request` / `not_found` / `internal`）。
+    /// 機械可読なエラーコード（`bad_request` / `not_found` / `conflict` / `internal`）。
     pub code: String,
     /// 人間可読なエラーメッセージ。
     pub message: String,
@@ -58,6 +63,7 @@ impl ResponseError for Error {
         match self {
             Error::BadRequest(_) => StatusCode::BAD_REQUEST,
             Error::NotFound(_) => StatusCode::NOT_FOUND,
+            Error::Conflict(_) => StatusCode::CONFLICT,
             Error::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
@@ -71,7 +77,7 @@ impl ResponseError for Error {
                 tracing::error!(error = %detail, "internal error");
                 "internal server error".to_string()
             }
-            Error::BadRequest(m) | Error::NotFound(m) => m.clone(),
+            Error::BadRequest(m) | Error::NotFound(m) | Error::Conflict(m) => m.clone(),
         };
         HttpResponse::build(self.status_code()).json(ErrorBody {
             error: ErrorDetail {
@@ -87,6 +93,7 @@ impl From<UseCaseError> for Error {
         match e {
             UseCaseError::InvalidArgument(m) => Error::BadRequest(m),
             UseCaseError::NotFound(m) => Error::NotFound(m),
+            UseCaseError::Conflict(m) => Error::Conflict(m),
             UseCaseError::Internal(m) => Error::Internal(m),
             // read API では外部 fetch を行わないため通常は発生しないが、網羅のため 500 に倒す
             // （詳細は error_response 側でログにのみ出す）。

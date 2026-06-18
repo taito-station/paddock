@@ -10,6 +10,8 @@ use serde_json::Value;
 
 use api_server::app::configure_routes;
 use api_server::setup::{UnusedFetcher, UnusedParser};
+use netkeiba_scraper::UreqNetkeibaScraper;
+use odds_scraper::UreqOddsScraper;
 use paddock_domain::{
     GateNum, HorseEntry, HorseName, HorseNum, Race, RaceCard, RaceId, Surface, Venue,
 };
@@ -77,11 +79,15 @@ macro_rules! build_service {
         let repo = PostgresRepository::new($pool);
         let interactor = Interactor::new(repo, UnusedParser, UnusedFetcher);
         let data = web::Data::new(interactor);
-        test::init_service(
-            App::new()
-                .app_data(data)
-                .configure(configure_routes::<Repo, UnusedParser, UnusedFetcher>),
-        )
+        test::init_service(App::new().app_data(data).configure(
+            configure_routes::<
+                Repo,
+                UnusedParser,
+                UnusedFetcher,
+                UreqOddsScraper,
+                UreqNetkeibaScraper,
+            >,
+        ))
         .await
     }};
 }

@@ -6,6 +6,9 @@ pub enum Error {
     InvalidArgument(String),
     #[error("not found: {0}")]
     NotFound(String),
+    /// 既に存在するリソースの再作成（例: 同一開催日のセッション二重作成）。HTTP 409 に対応する。
+    #[error("conflict: {0}")]
+    Conflict(String),
     #[error("internal error: {0}")]
     Internal(String),
     /// An outbound fetch (e.g. a JRA PDF GET) failed for a non-timeout reason:

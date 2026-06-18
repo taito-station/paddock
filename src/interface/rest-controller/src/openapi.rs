@@ -10,15 +10,19 @@ use crate::schema::race::{
     HorseEntrySchema, HorseProbabilitySchema, PredictionResponse, RaceCardResponse,
     RaceListResponse, RaceSummary,
 };
+use crate::schema::session::{
+    BetInput, CreateSessionRequest, OddsRefreshResponse, RecordOutcomeRequest,
+    SessionSummaryResponse, SettleReportResponse, SummaryBet,
+};
 
-/// paddock REST API（read 基盤, #33）の OpenAPI ドキュメント。
+/// paddock REST API（read + session write, #33 / #53）の OpenAPI ドキュメント。
 /// handler の `#[utoipa::path]` と schema の `#[derive(ToSchema)]` から生成する（コードファースト）。
 #[derive(OpenApi)]
 #[openapi(
     info(
-        title = "paddock REST API (read)",
+        title = "paddock REST API",
         version = "0.1.0",
-        description = "競馬予想・分析の read 系 REST API（#33）。確率推定・出馬表・レース一覧・分析統計を提供する。",
+        description = "競馬予想・分析の REST API。read 系（#33）と予想セッション write 系（#53）を提供する。",
         license(name = "Proprietary")
     ),
     paths(
@@ -29,6 +33,11 @@ use crate::schema::race::{
         handler::analyze::analyze_jockey,
         handler::analyze::analyze_trainer,
         handler::analyze::analyze_course,
+        handler::session::create_session,
+        handler::session::get_session_summary,
+        handler::session::record_outcome,
+        handler::session::odds_refresh,
+        handler::session::results_refresh,
     ),
     components(schemas(
         RaceSummary,
@@ -42,12 +51,20 @@ use crate::schema::race::{
         CourseStatsResponse,
         JockeyStatsResponse,
         TrainerStatsResponse,
+        CreateSessionRequest,
+        BetInput,
+        RecordOutcomeRequest,
+        SummaryBet,
+        SessionSummaryResponse,
+        OddsRefreshResponse,
+        SettleReportResponse,
         ErrorBody,
         ErrorDetail,
     )),
     tags(
         (name = "races", description = "レース一覧 / 出馬表 / 確率推定"),
         (name = "analyze", description = "馬 / 騎手 / 調教師 / コースの成績統計"),
+        (name = "sessions", description = "予想セッション（作成 / 収支 / 賭け金・払戻記録 / オッズ・結果更新）"),
     )
 )]
 pub struct ApiDoc;
