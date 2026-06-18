@@ -13,7 +13,7 @@ use crate::repository::PredictSessionRepository;
 /// 予想セッションの購入済み買い目（`predict_bets`）を netkeiba の確定払戻と照合して payout を
 /// セットし、セッションの総払戻・収支・回収率を更新する。**毎回ゼロから再計算**するため
 /// 再実行で二重加算しない（冪等）。未確定レースは payout を据え置いて pending とする。
-/// `PayoutFetcher`/`Repository` を必要とするため、メイン `Interactor` には載せず専用 interactor
+/// `PayoutFetcher`/`PredictSessionRepository` を必要とするため、メイン `Interactor` には載せず専用 interactor
 /// として切り出す（`OddsInteractor` と同方針）。
 pub struct SettleInteractor<S: PayoutFetcher, R> {
     pub scraper: S,
