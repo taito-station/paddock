@@ -1,13 +1,14 @@
 use std::time::Duration;
 
 use anyhow::Context;
+use jra_fetcher::JraFetcher;
 use paddock_config::Config;
 use paddock_use_case::Interactor;
-use pdf_parser::{HybridParser, UreqFetcher};
+use pdf_parser::HybridParser;
 use rdb_gateway::{PostgresRepository, pool};
 use tracing_subscriber::{EnvFilter, fmt};
 
-pub type App = Interactor<PostgresRepository, HybridParser, UreqFetcher>;
+pub type App = Interactor<PostgresRepository, HybridParser, JraFetcher>;
 
 /// Build the app. `fetch_min_interval` sets a global minimum spacing between
 /// outbound JRA requests (from `fetch --max-rps`); `None` imposes no cap.
@@ -30,6 +31,6 @@ pub async fn build_app(fetch_min_interval: Option<Duration>) -> anyhow::Result<A
     Ok(Interactor::new(
         repo,
         HybridParser::new(),
-        UreqFetcher::new(fetch_min_interval),
+        JraFetcher::new(fetch_min_interval),
     ))
 }

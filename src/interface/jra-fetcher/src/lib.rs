@@ -1,16 +1,32 @@
+//! Shared HTTP fetcher for JRA PDFs (race results and entry lists).
+//!
+//! Both `parse-pdf` and `parse-entries` go through [`JraFetcher`] so the timeout
+//! config, retry policy, "absent" (403/404) detection, and error classification
+//! stay in one place. See ADR 0021 (timeout/retry) and ADR 0022 (consolidation).
+
 use std::io::Read;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use paddock_use_case::Result as UcResult;
 use paddock_use_case::pdf_fetcher::PdfFetcher;
+use paddock_use_case::{Error, Result};
 
-use crate::error::Error;
+/// Max time to establish the TCP/TLS connection before giving up.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+/// Deadline for the whole request — connect, response headers, and body read.
+/// Without this, a stalled connection (no FIN, no data) blocks the calling
+/// thread forever: a bulk `parse-pdf fetch` once hung ~8.7h on a single
+/// mid-run network stall before this was added. See issue #152.
+const GLOBAL_TIMEOUT: Duration = Duration::from_secs(60);
+/// Total attempts (1 initial + 2 retries) for a transient failure.
+const MAX_ATTEMPTS: u32 = 3;
+/// Base backoff; attempt N waits `BASE * 2^(N-1)` (1s, 2s, …).
+const RETRY_BASE_BACKOFF: Duration = Duration::from_secs(1);
 
 /// Global minimum spacing between outbound JRA requests, shared across every
-/// concurrent fetch task (the single [`UreqFetcher`] is shared via `Arc<App>`).
-/// A `None` interval disables throttling (the default). History skips never
-/// reach the fetcher, so only real network GETs are spaced — re-runs that hit
+/// concurrent fetch task (a single [`JraFetcher`] is shared via `Arc`). A `None`
+/// interval disables throttling (the default). History skips never reach the
+/// fetcher, so only real network GETs are spaced — re-runs that hit
 /// `fetch_history` stay fast.
 #[derive(Default)]
 struct RateGate {
@@ -33,12 +49,12 @@ impl RateGate {
     /// across the sleep so concurrent callers serialize their starts and the
     /// global rate stays under the cap.
     ///
-    /// The wait is a blocking `thread::sleep`, matching the fetcher's existing
-    /// blocking ureq/OCR pattern (the parallel range fetch bounds concurrency by
-    /// CPU cores, so worker threads already block during fetch). This assumes
-    /// in-flight fetches stay around the CPU-core count (the current `Semaphore`
-    /// bound); pushing concurrency far beyond that would park many runtime threads
-    /// here and should instead move to `spawn_blocking` / async sleep.
+    /// The wait is a blocking `thread::sleep`, matching the fetcher's blocking
+    /// ureq/OCR pattern (the parallel range fetch bounds concurrency by CPU
+    /// cores, so worker threads already block during fetch). This assumes
+    /// in-flight fetches stay around the CPU-core count; pushing concurrency far
+    /// beyond that would park many runtime threads here and should instead move
+    /// to `spawn_blocking` / async sleep.
     fn wait(&self) {
         let Some(min) = self.min_interval else {
             return;
@@ -53,18 +69,6 @@ impl RateGate {
         *last = Some(Instant::now());
     }
 }
-
-/// Max time to establish the TCP/TLS connection before giving up.
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
-/// Deadline for the whole request — connect, response headers, and body read.
-/// Without this, a stalled connection (no FIN, no data) blocks the calling
-/// thread forever: a bulk `parse-pdf fetch` once hung ~8.7h on a single
-/// mid-run network stall before this was added. See issue #152.
-const GLOBAL_TIMEOUT: Duration = Duration::from_secs(60);
-/// Total attempts (1 initial + 2 retries) for a transient failure.
-const MAX_ATTEMPTS: u32 = 3;
-/// Base backoff; attempt N waits `BASE * 2^(N-1)` (1s, 2s, …).
-const RETRY_BASE_BACKOFF: Duration = Duration::from_secs(1);
 
 /// Whether an error is worth retrying: transport-level hiccups and 5xx are
 /// transient; 4xx (including the 403/404 "absent" answers) and malformed
@@ -81,24 +85,36 @@ fn is_transient(err: &ureq::Error) -> bool {
     }
 }
 
-pub struct UreqFetcher {
+/// Map a ureq error to a use-case error, keeping fetch failures classified
+/// rather than rounding everything to `Internal`: timeouts become
+/// [`Error::Timeout`], everything else [`Error::Fetch`].
+fn to_use_case_error(err: &ureq::Error) -> Error {
+    let msg = err.to_string();
+    match err {
+        ureq::Error::Timeout(_) => Error::Timeout(msg),
+        _ => Error::Fetch(msg),
+    }
+}
+
+pub struct JraFetcher {
     /// Agent carrying the timeout config, reused across requests for connection
     /// pooling.
     agent: ureq::Agent,
     gate: RateGate,
 }
 
-impl Default for UreqFetcher {
+impl Default for JraFetcher {
     fn default() -> Self {
         Self::new(None)
     }
 }
 
-impl UreqFetcher {
+impl JraFetcher {
     /// Build a fetcher whose outbound JRA requests are spaced at least
     /// `min_interval` apart, shared globally across concurrent fetch tasks.
-    /// `None` (or [`UreqFetcher::default`]) imposes no rate cap — but timeouts
-    /// and retries always apply.
+    /// `None` (or [`JraFetcher::default`]) imposes no rate cap — but timeouts
+    /// and retries always apply. Single-shot callers (e.g. entry fetches) pass
+    /// `None`; the bulk result fetch passes its `--max-rps`-derived interval.
     pub fn new(min_interval: Option<Duration>) -> Self {
         let agent = ureq::Agent::config_builder()
             .timeout_connect(Some(CONNECT_TIMEOUT))
@@ -148,34 +164,35 @@ impl UreqFetcher {
     }
 }
 
-impl PdfFetcher for UreqFetcher {
-    fn fetch(&self, url: &str) -> UcResult<Vec<u8>> {
+impl PdfFetcher for JraFetcher {
+    fn fetch(&self, url: &str) -> Result<Vec<u8>> {
         let body = self
             .get_with_retry(url)
-            .map_err(|e| Error::Fetch(e.to_string()))?;
+            .map_err(|e| to_use_case_error(&e))?;
         read_body(body)
     }
 
-    fn fetch_if_exists(&self, url: &str) -> UcResult<Option<Vec<u8>>> {
+    fn fetch_if_exists(&self, url: &str) -> Result<Option<Vec<u8>>> {
         match self.get_with_retry(url) {
             Ok(body) => Ok(Some(read_body(body)?)),
-            // A meeting PDF that does not exist is reported as absent so range
+            // A PDF that does not exist is reported as absent so range
             // enumeration can stop / skip instead of erroring. JRA's seiseki
             // directory answers a missing report with 403 (not just 404): a
             // not-yet-published day returns 404, while a never-existing
             // (round/day past the meeting, or a non-running venue) returns 403.
-            // Both mean "no PDF here", so treat them alike.
+            // Both mean "no PDF here", so treat them alike — applied uniformly
+            // to result and entry fetches now that they share this fetcher.
             Err(ureq::Error::StatusCode(403 | 404)) => Ok(None),
-            Err(e) => Err(Error::Fetch(e.to_string()).into()),
+            Err(e) => Err(to_use_case_error(&e)),
         }
     }
 }
 
-fn read_body(body: ureq::Body) -> UcResult<Vec<u8>> {
+fn read_body(body: ureq::Body) -> Result<Vec<u8>> {
     let mut buf = Vec::new();
     body.into_reader()
         .read_to_end(&mut buf)
-        .map_err(Error::Io)?;
+        .map_err(|e| Error::Fetch(format!("read body: {e}")))?;
     Ok(buf)
 }
 
@@ -237,6 +254,16 @@ mod tests {
         assert!(!is_transient(&ureq::Error::BadUri("nope".into())));
     }
 
+    #[test]
+    fn timeout_errors_classify_as_timeout_not_fetch() {
+        // Timeouts get their own variant for monitoring; other transport errors
+        // fall under Fetch (not rounded to Internal).
+        let t = to_use_case_error(&ureq::Error::Timeout(ureq::Timeout::Global));
+        assert!(matches!(t, Error::Timeout(_)), "got {t:?}");
+        let f = to_use_case_error(&ureq::Error::ConnectionFailed);
+        assert!(matches!(f, Error::Fetch(_)), "got {f:?}");
+    }
+
     /// Minimal one-shot HTTP server: serves `responses` in order, one per
     /// accepted connection, closing each after replying. Returns the URL, a
     /// counter of accepted connections, and the join handle.
@@ -264,12 +291,13 @@ mod tests {
         "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
     const R_200_OK: &str = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok";
     const R_404: &str = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+    const R_403: &str = "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
 
     #[test]
     fn retries_transient_5xx_then_succeeds() {
         // 503, 503, then 200 → fetch must retry twice and return the body.
         let (url, count, handle) = serve(vec![R_503, R_503, R_200_OK]);
-        let fetcher = UreqFetcher::default();
+        let fetcher = JraFetcher::default();
         let body = fetcher.fetch(&url).expect("should succeed after retries");
         assert_eq!(body, b"ok");
         assert_eq!(
@@ -285,10 +313,22 @@ mod tests {
         // 404 is "absent", not transient: fetch_if_exists returns None after a
         // single attempt (no retry).
         let (url, count, handle) = serve(vec![R_404]);
-        let fetcher = UreqFetcher::default();
+        let fetcher = JraFetcher::default();
         let got = fetcher.fetch_if_exists(&url).expect("404 maps to Ok(None)");
         assert!(got.is_none());
         assert_eq!(count.load(Ordering::SeqCst), 1, "404 must not be retried");
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn treats_403_as_absent_too() {
+        // 403 (never-existing meeting) is absent just like 404, uniformly for
+        // result and entry fetches.
+        let (url, count, handle) = serve(vec![R_403]);
+        let fetcher = JraFetcher::default();
+        let got = fetcher.fetch_if_exists(&url).expect("403 maps to Ok(None)");
+        assert!(got.is_none());
+        assert_eq!(count.load(Ordering::SeqCst), 1, "403 must not be retried");
         handle.join().unwrap();
     }
 
@@ -297,7 +337,7 @@ mod tests {
         // 503 on every attempt → retries are exhausted and fetch returns an
         // error after exactly MAX_ATTEMPTS tries (no infinite loop).
         let (url, count, handle) = serve(vec![R_503; MAX_ATTEMPTS as usize]);
-        let fetcher = UreqFetcher::default();
+        let fetcher = JraFetcher::default();
         assert!(
             fetcher.fetch(&url).is_err(),
             "persistent 5xx must surface as an error, not hang or succeed"
