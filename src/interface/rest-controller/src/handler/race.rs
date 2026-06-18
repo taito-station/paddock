@@ -24,7 +24,7 @@ pub struct RaceListQuery {
 /// `GET /api/races/{race_id}/prediction` のクエリ。
 #[derive(Debug, Deserialize, IntoParams)]
 pub struct PredictionQuery {
-    /// 馬場状態（`良` / `稍重` / `重` / `不良`）。未指定なら馬場項なし。
+    /// 馬場状態（`良` / `稍重` / `重` / `不良`。略記 `稍` / `不` も可）。未指定なら馬場項なし。
     pub track_condition: Option<String>,
     /// 市場オッズ（単勝）とのブレンド係数 `[0,1]`。未指定はモデルのみ。
     pub blend_alpha: Option<f64>,
@@ -38,6 +38,7 @@ pub struct PredictionQuery {
     responses(
         (status = 200, description = "指定日のレース一覧", body = RaceListResponse),
         (status = 400, description = "日付フォーマット不正", body = crate::error::ErrorBody),
+        (status = 500, description = "内部エラー", body = crate::error::ErrorBody),
     ),
     tag = "races",
 )]
@@ -68,7 +69,9 @@ where
     params(("race_id" = String, Path, description = "レース ID")),
     responses(
         (status = 200, description = "出馬表", body = RaceCardResponse),
+        (status = 400, description = "レース ID 不正", body = crate::error::ErrorBody),
         (status = 404, description = "未存在のレース", body = crate::error::ErrorBody),
+        (status = 500, description = "内部エラー", body = crate::error::ErrorBody),
     ),
     tag = "races",
 )]
@@ -101,6 +104,7 @@ where
         (status = 200, description = "馬ごとの確率", body = PredictionResponse),
         (status = 400, description = "クエリ不正", body = crate::error::ErrorBody),
         (status = 404, description = "出馬表が無いレース", body = crate::error::ErrorBody),
+        (status = 500, description = "内部エラー", body = crate::error::ErrorBody),
     ),
     tag = "races",
 )]

@@ -63,10 +63,20 @@ impl ResponseError for Error {
     }
 
     fn error_response(&self) -> HttpResponse {
+        // 500（内部エラー）は DB エラー文字列などの内部情報を含みうる（rdb-gateway は
+        // `sqlx::Error` を `use_case::Error::Internal(詳細)` に畳む）。詳細はサーバログにのみ
+        // 出し、クライアントには固定文言を返して情報漏洩を防ぐ。
+        let message = match self {
+            Error::Internal(detail) => {
+                tracing::error!(error = %detail, "internal error");
+                "internal server error".to_string()
+            }
+            Error::BadRequest(m) | Error::NotFound(m) => m.clone(),
+        };
         HttpResponse::build(self.status_code()).json(ErrorBody {
             error: ErrorDetail {
                 code: self.code().to_string(),
-                message: self.message().to_string(),
+                message,
             },
         })
     }

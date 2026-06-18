@@ -67,6 +67,16 @@
                 }
               }
             }
+          },
+          "500": {
+            "description": "内部エラー",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
           }
         }
       }
@@ -102,6 +112,16 @@
           },
           "400": {
             "description": "名前不正",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "内部エラー",
             "content": {
               "application/json": {
                 "schema": {
@@ -151,6 +171,16 @@
                 }
               }
             }
+          },
+          "500": {
+            "description": "内部エラー",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
           }
         }
       }
@@ -186,6 +216,16 @@
           },
           "400": {
             "description": "名前不正",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "内部エラー",
             "content": {
               "application/json": {
                 "schema": {
@@ -235,6 +275,16 @@
                 }
               }
             }
+          },
+          "500": {
+            "description": "内部エラー",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
           }
         }
       }
@@ -268,8 +318,28 @@
               }
             }
           },
+          "400": {
+            "description": "レース ID 不正",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
           "404": {
             "description": "未存在のレース",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "内部エラー",
             "content": {
               "application/json": {
                 "schema": {
@@ -301,7 +371,7 @@
           {
             "name": "track_condition",
             "in": "query",
-            "description": "馬場状態（`良` / `稍重` / `重` / `不良`）。未指定なら馬場項なし。",
+            "description": "馬場状態（`良` / `稍重` / `重` / `不良`。略記 `稍` / `不` も可）。未指定なら馬場項なし。",
             "required": false,
             "schema": {
               "type": [
@@ -347,6 +417,16 @@
           },
           "404": {
             "description": "出馬表が無いレース",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "内部エラー",
             "content": {
               "application/json": {
                 "schema": {

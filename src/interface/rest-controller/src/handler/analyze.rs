@@ -39,6 +39,7 @@ pub struct CourseQuery {
     responses(
         (status = 200, description = "馬の成績統計", body = HorseStatsResponse),
         (status = 400, description = "名前不正", body = crate::error::ErrorBody),
+        (status = 500, description = "内部エラー", body = crate::error::ErrorBody),
     ),
     tag = "analyze",
 )]
@@ -64,6 +65,7 @@ where
     responses(
         (status = 200, description = "騎手の成績統計", body = JockeyStatsResponse),
         (status = 400, description = "名前不正", body = crate::error::ErrorBody),
+        (status = 500, description = "内部エラー", body = crate::error::ErrorBody),
     ),
     tag = "analyze",
 )]
@@ -89,6 +91,7 @@ where
     responses(
         (status = 200, description = "調教師の成績統計", body = TrainerStatsResponse),
         (status = 400, description = "名前不正", body = crate::error::ErrorBody),
+        (status = 500, description = "内部エラー", body = crate::error::ErrorBody),
     ),
     tag = "analyze",
 )]
@@ -114,6 +117,7 @@ where
     responses(
         (status = 200, description = "コースの枠順別統計", body = CourseStatsResponse),
         (status = 400, description = "パラメータ不正", body = crate::error::ErrorBody),
+        (status = 500, description = "内部エラー", body = crate::error::ErrorBody),
     ),
     tag = "analyze",
 )]

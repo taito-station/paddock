@@ -20,12 +20,18 @@ fn generate() -> String {
     serde_json::to_string_pretty(&ApiDoc::openapi()).expect("serialize OpenAPI to JSON")
 }
 
+/// 注意: このテストは「コミット済み JSON が生成結果と一致するか」のみを検証する。
+/// 生成結果も期待値も同じ `ApiDoc` 由来のため、handler/schema を `openapi.rs` の
+/// `paths(...)` / `components(...)` 列挙に追加し忘れた場合（＝ docs からの欠落）は検知できない。
+/// 列挙漏れは PR レビューと、エンドポイント追加時の openapi.json 差分で気づく運用とする。
 #[test]
 fn openapi_snapshot_is_up_to_date() {
     let generated = generate();
 
     if std::env::var_os("UPDATE_OPENAPI").is_some() {
-        std::fs::write(OPENAPI_PATH, &generated).expect("write docs/api/openapi.json");
+        // git フレンドリに末尾改行を付けてコミットする。
+        std::fs::write(OPENAPI_PATH, format!("{generated}\n"))
+            .expect("write docs/api/openapi.json");
         return;
     }
 
@@ -36,8 +42,10 @@ fn openapi_snapshot_is_up_to_date() {
         )
     });
 
+    // 末尾改行の有無で偽陽性 fail しないよう、両者を trim_end して比較する。
     assert_eq!(
-        generated, committed,
+        generated.trim_end(),
+        committed.trim_end(),
         "docs/api/openapi.json がコード生成結果と乖離しています。\n\
          再生成: UPDATE_OPENAPI=1 cargo test -p api-server --test openapi"
     );
