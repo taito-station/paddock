@@ -1,4 +1,4 @@
-# importer イメージのビルドに不要なものをコンテキストから除外する。
+# importer / api イメージのビルドに不要なものをコンテキストから除外する（同じ root を共有）。
 # ビルドに要るのは Cargo.* / src/ / deployments/db/migrations / rust-toolchain.toml 等のみ。
 target/
 data/
