@@ -23,8 +23,9 @@ impl<R: Repository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
         self.repository.find_predict_bets(date).await
     }
 
-    /// 予想セッションを新規作成する（REST API #53）。不変条件を use-case で強制し API/CLI で共有する:
-    /// budget は 1 以上（0 は `InvalidArgument`）、同一開催日の二重作成は `Conflict`。
+    /// 予想セッションを新規作成する（REST API #53）。不変条件を use-case で強制する（現状 REST API が
+    /// 利用。CLI predict の同経路への移行は #164）。budget は 1 以上（0 は `InvalidArgument`）、
+    /// 同一開催日の二重作成は `Conflict`。
     /// `balance = budget`・累計 0・未完了で保存し、作成したレコードを返す。時刻はこの層で注入する。
     pub async fn create_predict_session(
         &self,

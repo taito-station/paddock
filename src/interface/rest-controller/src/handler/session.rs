@@ -120,8 +120,9 @@ where
         })
         .collect();
 
-    interactor.record_race_outcome(date, &race_id, bets).await?;
-    let (session, all_bets) = interactor.session_summary(date).await?;
+    // record_race_outcome が更新後 session を返すので再取得せず、明細 bets のみ取り直す。
+    let session = interactor.record_race_outcome(date, &race_id, bets).await?;
+    let all_bets = interactor.find_predict_bets(date).await?;
     Ok(HttpResponse::Ok().json(SessionSummaryResponse::new(&session, &all_bets)))
 }
 
