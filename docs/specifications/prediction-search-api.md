@@ -59,10 +59,10 @@
 
 **不要**。検索・ソート・結合に必要なインデックスは既存で揃っている:
 
-- 日付・期間の絞り込み / `date DESC` ソート → `UNIQUE(date, venue, race_num)` の複合インデックス（先頭列 `date`）。
+- 期間の絞り込み → `UNIQUE(date, venue, race_num)` の先頭列 `date` が効く。最終ソート `date DESC, venue ASC, race_num ASC` は ASC/DESC 混在のため複合インデックスの順序スキャンにはならず別ソート段が入りうるが、件数小で許容する。
 - 印の絞り込み → `idx_prediction_horses_mark`（等価比較なので有効）。
 - 馬名の絞り込み → 中間一致（`LIKE '%query%'`）のため **btree インデックス（`idx_prediction_horses_name`）は効かずフルスキャン**になる（流用元 `find_matching_names.rs` でも同様）。予想件数が小さいため許容する（将来件数増で遅ければ pg_trgm 等を別途検討）。
-- 距離・芝ダの結合 → `predictions.race_id`（PK 参照）と `idx_races_course`。
+- 距離・芝ダの結合 → `races` の主キー（`race_id`）で引く。`idx_races_course` は先頭列が `venue` で、本クエリは `race_id` 結合・distance/surface は結合後の述語のため**寄与しない**。件数小で問題なく、いずれも新規インデックスは不要。
 
 予想は 1 レース 1 行の手動入力ベースで件数が小さい（数千オーダー）ため、本フェーズは性能リスクが低い。`EXPLAIN ANALYZE` で想定インデックス使用を確認し、必要が出た時点で索引追加を別途検討する。
 
@@ -96,7 +96,7 @@ GET /api/predictions
 |---|---|---|
 | `date_from` / `date_to` | 期間（両端含む。片側のみも可） | `p.date >= $from` / `p.date <= $to`（`p.date` は TEXT。後述「日付の扱い」参照） |
 | `venue` | 開催場（`predictions.venue` と同形式の日本語場名） | `p.venue = $venue` |
-| `distance_min` / `distance_max` | 距離帯（m） | `r.distance BETWEEN ...`（`races` は表示用に常時 `LEFT JOIN races r ON r.race_id = p.race_id`。後述「距離・芝ダの結合」） |
+| `distance_min` / `distance_max` | 距離帯（m。片側のみも可） | `r.distance >= $min` / `r.distance <= $max`（指定された側のみ。`races` は表示用に常時 `LEFT JOIN races r ON r.race_id = p.race_id`。後述「距離・芝ダの結合」） |
 | `surface` | 芝 / ダート | `r.surface = $surface` |
 | `horse_name` | 馬名の部分一致（カナ正規化） | `EXISTS (SELECT 1 FROM prediction_horses h WHERE h.prediction_id = p.prediction_id AND h.horse_name LIKE '%' \|\| $n \|\| '%' ESCAPE '\')`（`$n` には `escape_like(正規化値)` をバインド。後述「馬名の正規化」） |
 | `mark` | 印（その印を付けた馬を含む予想） | `EXISTS (... AND h.mark = $mark)` |

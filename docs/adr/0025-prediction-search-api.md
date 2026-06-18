@@ -18,12 +18,12 @@
   - `GET /api/predictions/stats/by-mark` … 印別の的中率（集計の入口 1 本）
 - 検索軸: 日付・期間 / 開催場 / 距離 / 芝ダ / 馬名（部分一致・カナ正規化）/ 印 / 的中・不的中。指定軸のみ AND で絞る。
 - **距離・芝ダは `races` 結合**で得る。一覧の `distance`/`surface` 表示用に **`races` は常時 `LEFT JOIN`**、距離・芝ダ**フィルタは指定時のみ `WHERE` で絞る**（指定時は `race_id` NULL の未照合予想が NULL 述語で脱落＝実質 INNER 相当）。この脱落は仕様とし OpenAPI 説明文で明示する。race_id 補完は本 Issue の対象外。
-- **馬名検索は #50 の資産を 2 経路に分けて流用**: (a) カナ正規化は `HorseName::try_from`（domain 値オブジェクト。内部で `domain/src/normalize.rs` の正規化を適用）。(b) 中間一致は既存 `find_matching_horse_names`（`NameMatchRepository`）の `LIKE '%' || $1 || '%' ESCAPE '\'` + `escape_like()` イディオムを `prediction_horses` 向け新規クエリに適用（`escape_like` は private のため `pub(crate)` 化／共通化して流用）。馬名は中間一致のため btree index は効かずフルスキャン（件数小で許容）。analyze/horse は完全一致のため流用するのは正規化のみ。`prediction_horses.horse_name` は predict パイプライン（正規化済みの race_cards / results 由来）から生成されるため、クエリ側正規化のみで部分一致が成立する。取り込み時正規化＋バックフィルは見送る（ロスあり・スコープ拡大）。
+- **馬名検索は #50 の資産を 2 経路に分けて流用**: (a) カナ正規化は `HorseName::try_from`（domain 値オブジェクト。内部で `src/domain/src/normalize.rs` の正規化を適用）。(b) 中間一致は既存 `find_matching_horse_names`（`NameMatchRepository`）の `LIKE '%' || $1 || '%' ESCAPE '\'` + `escape_like()` イディオムを `prediction_horses` 向け新規クエリに適用（`escape_like` は private のため `pub(crate)` 化／共通化して流用）。馬名は中間一致のため btree index は効かずフルスキャン（件数小で許容）。analyze/horse は完全一致のため流用するのは正規化のみ。`prediction_horses.horse_name` は predict パイプライン（正規化済みの race_cards / results 由来）から生成されるため、クエリ側正規化のみで部分一致が成立する。取り込み時正規化＋バックフィルは見送る（ロスあり・スコープ拡大）。
 - 動的 WHERE は「静的フラグメントのみ `format!`、値は必ず `.bind()`」で組み、`venue`/`surface` は `Venue`/`Surface`、`mark` は OpenAPI enum を slug に固定して検証する。
 - **馬名 × 印を併用**した場合は同一馬が両条件を満たすことを要求する（単一 `EXISTS` 内で `horse_name LIKE ... AND mark = ...`）。
 - **的中は回収率ベース**で定義: 的中 = `recovery_rate > 0`、不的中 = `finish_1 IS NOT NULL AND COALESCE(recovery_rate,0)=0`、結果未記録 = `hit` フィルタ対象外。買い目と着順の突き合わせは行わず、取り込み済みの `recovery_rate` を正とする。
 - **集計は印別的中率 1 本**に限定。印ごとに 1 着率・複勝圏率（`horse_num` と `finish_1/2/3` の照合）を返す。詳細クロス集計は #34 / `analyze` に委ねる。
-- **マイグレーション不要**。期間・ソートは `UNIQUE(date,venue,race_num)` 複合インデックス、馬名・印は `idx_prediction_horses_{name,mark}`、距離・芝ダは `idx_races_course` で賄える。
+- **マイグレーション不要**。期間絞り込みは `UNIQUE(date,venue,race_num)` の先頭列 date が効く（最終ソートは ASC/DESC 混在で別ソート段になりうるが件数小で許容）。印は等価比較で `idx_prediction_horses_mark` が有効、馬名は中間一致のため btree（`idx_prediction_horses_name`）は効かずフルスキャン（件数小で許容）、距離・芝ダは `races` の PK（`race_id`）結合で `idx_races_course` は寄与しない。いずれも新規インデックス不要。
 - OpenAPI は utoipa コードファーストで拡張し、`docs/api/openapi.json` をスナップショット検証する。
 
 ## 理由

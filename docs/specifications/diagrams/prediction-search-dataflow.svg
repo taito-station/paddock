@@ -93,8 +93,8 @@
   <rect x="30" y="580" width="280" height="150" rx="8" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1.5"/>
   <text x="170" y="602" text-anchor="middle" font-weight="bold" fill="#333">1. 検索一覧レスポンス</text>
   <text x="48" y="624" font-size="11" fill="#444">total_count / limit / offset</text>
-  <text x="48" y="642" font-size="11" fill="#444">predictions[]: id・date・venue</text>
-  <text x="48" y="660" font-size="11" fill="#444">  ・race_num・distance・surface</text>
+  <text x="48" y="642" font-size="11" fill="#444">predictions[]: id・date・venue・title</text>
+  <text x="48" y="660" font-size="11" fill="#444">  ・race_num・race_id・distance・surface</text>
   <text x="48" y="678" font-size="11" fill="#444">  ・honmei_horse・finish</text>
   <text x="48" y="696" font-size="11" fill="#444">  ・recovery_rate・pnl・hit</text>
   <text x="48" y="716" font-size="10.5" fill="#777">→ prediction_id で個別へ遷移</text>
