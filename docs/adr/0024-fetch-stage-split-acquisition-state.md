@@ -1,4 +1,4 @@
-# ADR 0023: fetch/parse のステージ分割と取得状態の DB 管理 (Issue #147)
+# ADR 0024: fetch/parse のステージ分割と取得状態の DB 管理 (Issue #147)
 
 ## ステータス
 承認済み（採用）
