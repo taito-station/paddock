@@ -1,0 +1,14 @@
+[package]
+name = "rest-controller"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+actix-web        = { workspace = true }
+chrono           = { workspace = true }
+serde            = { workspace = true }
+serde_json       = { workspace = true }
+tracing          = { workspace = true }
+utoipa           = { workspace = true }
+paddock-domain   = { workspace = true }
+paddock-use-case = { workspace = true }

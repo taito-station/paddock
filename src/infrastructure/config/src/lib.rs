@@ -17,6 +17,9 @@ pub struct Config {
     pub paddock_pdfs_dir: String,
     #[serde(default = "default_log_filter")]
     pub paddock_log: String,
+    /// REST API サーバ（api-server, #33）の bind アドレス（`host:port`）。
+    #[serde(default = "default_server_addr")]
+    pub paddock_server_addr: String,
 }
 
 fn default_db_url() -> String {
@@ -29,6 +32,10 @@ fn default_pdfs_dir() -> String {
 
 fn default_log_filter() -> String {
     "info".to_string()
+}
+
+fn default_server_addr() -> String {
+    "127.0.0.1:8080".to_string()
 }
 
 impl Config {
