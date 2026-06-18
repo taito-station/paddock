@@ -13,4 +13,9 @@ serde            = { workspace = true }
 serde_json       = { workspace = true }
 thiserror        = { workspace = true }
 tracing          = { workspace = true }
+
+[dev-dependencies]
+# Test-only: the shared `sample_pdf_fixture.rs` downloads the sample result PDF
+# with its own minimal ureq agent. The fixture is a standalone `#[path]`-included
+# file (kept crate-free by design), so it does not go through `jra-fetcher`.
 ureq             = { workspace = true }

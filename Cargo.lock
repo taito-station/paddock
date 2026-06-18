@@ -1399,6 +1399,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "jra-fetcher"
+version = "0.1.0"
+dependencies = [
+ "paddock-use-case",
+ "tracing",
+ "ureq",
+]
+
+[[package]]
 name = "js-sys"
 version = "0.3.102"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1758,13 +1767,13 @@ dependencies = [
  "anyhow",
  "clap",
  "entry-parser",
+ "jra-fetcher",
  "paddock-config",
  "paddock-use-case",
  "rdb-gateway",
  "tokio",
  "tracing",
  "tracing-subscriber",
- "ureq",
 ]
 
 [[package]]
@@ -1773,6 +1782,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "jra-fetcher",
  "paddock-config",
  "paddock-domain",
  "paddock-use-case",

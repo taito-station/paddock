@@ -10,6 +10,7 @@ path = "src/bin.rs"
 [dependencies]
 anyhow             = { workspace = true }
 clap               = { workspace = true }
+jra-fetcher        = { workspace = true }
 paddock-config     = { workspace = true }
 paddock-domain     = { workspace = true }
 paddock-use-case   = { workspace = true }
