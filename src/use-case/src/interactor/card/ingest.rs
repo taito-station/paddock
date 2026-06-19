@@ -96,7 +96,17 @@ impl<R: RaceCardRepository + OddsRepository + FetchRepository, S: NetkeibaScrape
         // 2. オッズ: 常に取得。確定前で空なら保存をスキップ（後で再実行して取り直す想定）。
         //    単勝・複勝(type=1) は 1 レスポンスで両方、組合せ券種(type=4/6/7/8) は別 API で取得し、
         //    全券種を 1 レコードにまとめて保存する（#102。キー規約は各ドメイン型の to_key）。
-        let odds = self.scraper.fetch_win_place_odds(netkeiba_id)?;
+        //    単複もベストエフォート: 前日(status=yoso)など未発売・想定外 status で取得失敗しても、
+        //    本コマンドの主目的（card 保存と後続の近走取り込み #103）を巻き添えにしない。
+        //    オッズ無し＝EV/Kelly が出ないだけで、当日朝に再取得すればよい（fail-closed な
+        //    #100 status ゲート自体は据え置き＝yoso オッズは保存しない）。
+        //    yoso だけでなくネットワーク断・5xx 等の想定外失敗も同様に握り潰すのは意図的:
+        //    odds は実行ごとに取り直す揮発データで永続欠落にはならず、card+近走（再取得が
+        //    高コストで主目的）を odds の一時障害で止めない方が運用上正しいため。warn は残す。
+        let odds = self.scraper.fetch_win_place_odds(netkeiba_id).unwrap_or_else(|e| {
+            tracing::warn!(%netkeiba_id, error = %e, "単複オッズの取得に失敗（未発売/想定外status等）、オッズ無しで card+近走取り込みを継続");
+            Default::default()
+        });
         // 組合せ券種はベストエフォート。別 API を 4 本叩くため、その一部が失敗しても
         // 確定済みの単複保存まで巻き添えにしない（取りこぼし耐性、#102 レビュー反映）。
         let exotic = self
