@@ -1,7 +1,9 @@
-//! netkeiba への同期 HTTP アクセス（`ureq`）と EUC-JP デコード。
+//! netkeiba への同期 HTTP アクセス（`ureq`）と charset 対応デコード。
 //!
 //! 純粋なパースは [`crate::parse`] に分離してあり、ここはネットワーク I/O のみ。
 //! netkeiba 配慮のためリクエスト間に固定ウェイトを挟む。
+//! 本文エンコーディングはホストで異なる（race=UTF-8 / db=EUC-JP）ため、
+//! [`fetch_decoded`] が `Content-Type` の charset に従ってデコードする。
 
 use std::io::Read;
 use std::time::Duration;
@@ -79,7 +81,7 @@ impl UreqNetkeibaScraper {
     }
 
     /// レース結果ページ (`race/result.html`) から確定払戻（単勝〜三連単）を取得する（#40）。
-    /// `fetch_race_result` と同じ URL・EUC-JP デコードを使い、payout ブロックをパースする。
+    /// `fetch_race_result` と同じ URL・charset 対応デコードを使い、payout ブロックをパースする。
     /// 未確定（払戻ブロック無し）は空の `RacePayouts` を返す。
     pub fn fetch_race_payouts(
         &self,
@@ -130,23 +132,31 @@ impl UreqNetkeibaScraper {
     }
 }
 
-/// URL を GET し、EUC-JP のレスポンスボディを UTF-8 へデコードして返す。
+/// URL を GET し、レスポンスの `Content-Type` charset に従って本文をデコードして返す。
+///
+/// netkeiba はホストで本文エンコーディングが異なる: `race.netkeiba.com`（出馬表・結果）は
+/// `charset=UTF-8` を明示し、`db.netkeiba.com`（馬個別成績）は charset を返さず本文は EUC-JP。
+/// charset を尊重し、不明時は EUC-JP にフォールバックする（`scraper_util::decode_html`）。
+/// EUC-JP 固定デコードは race.netkeiba.com の UTF-8 化で文字化けする回帰を起こしていた。
 fn fetch_decoded(agent: &ureq::Agent, url: &str) -> Result<String> {
     let resp = agent
         .get(url)
         .header("User-Agent", USER_AGENT)
         .call()
         .map_err(|e| Error::Fetch(format!("GET {url}: {e}")))?;
+    // ureq は 4xx/5xx を Err(StatusCode) にするためここに来るのは 2xx/3xx のみ。
+    // ボディ受信前に Content-Type の charset を控える（受信後は resp が消費される）。
+    let charset = resp
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .and_then(scraper_util::charset_from_content_type);
     let mut bytes = Vec::new();
     resp.into_body()
         .into_reader()
         .read_to_end(&mut bytes)
         .map_err(|e| Error::Fetch(format!("read body {url}: {e}")))?;
-    // ureq は 4xx/5xx を Err(StatusCode) にするためここに来るのは 2xx/3xx のみ。
-    // それでもメンテ画面など別エンコーディングが返ると文字化けで後段の table 不検出に
-    // 化けて原因が見えにくいので、EUC-JP として解釈できないバイトがあれば警告する
-    // （odds-scraper と共通の scraper_util を使う）。
-    Ok(scraper_util::decode_euc_jp(&bytes, url))
+    Ok(scraper_util::decode_html(&bytes, charset.as_deref(), url))
 }
 
 /// URL を GET し、レスポンスボディを UTF-8 として（lossy で）受け取る。
