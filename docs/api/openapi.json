@@ -1827,7 +1827,7 @@
               "boolean",
               "null"
             ],
-            "description": "的中（`recovery_rate > 0`）。結果未記録なら `null`。"
+            "description": "的中。`recovery_rate > 0`→`true`、結果あり且つ払戻 0 以下→`false`、結果未記録→`null`。"
           },
           "honmei_horse": {
             "type": [

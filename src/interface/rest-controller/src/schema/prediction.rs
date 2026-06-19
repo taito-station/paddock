@@ -26,7 +26,7 @@ pub struct PredictionSummarySchema {
     pub finish: Option<Vec<Option<u32>>>,
     pub recovery_rate: Option<f64>,
     pub pnl: Option<i64>,
-    /// 的中（`recovery_rate > 0`）。結果未記録なら `null`。
+    /// 的中。`recovery_rate > 0`→`true`、結果あり且つ払戻 0 以下→`false`、結果未記録→`null`。
     pub hit: Option<bool>,
 }
 

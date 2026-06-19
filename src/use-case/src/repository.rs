@@ -303,7 +303,8 @@ pub struct PredictionSummaryRow {
     pub finish: Option<[Option<u32>; 3]>,
     pub recovery_rate: Option<f64>,
     pub pnl: Option<i64>,
-    /// 的中判定（`recovery_rate > 0`）。結果未記録なら `None`。
+    /// 的中判定。`recovery_rate > 0` で `Some(true)`、結果あり（`finish_1` あり）かつ払戻 0 以下で
+    /// `Some(false)`、結果未記録なら `None`（`PredictionFilter::hit` フィルタと同じ集合）。
     pub hit: Option<bool>,
 }
 

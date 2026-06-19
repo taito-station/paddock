@@ -129,6 +129,9 @@ where
 
     // 馬名は #50 と同じく `HorseName` でカナ正規化（全/半角カナ・濁点合成等）してから
     // 部分一致に使う。空文字は「指定なし」として扱う（30 字超など不正値は 400）。
+    // 格納側 `prediction_horses.horse_name` は取り込み時に正規化していない（生 String）が、
+    // 予想は正規化済みの predict パイプライン由来の名前で書かれる前提（ADR0025）。
+    // 取り込み時正規化＋バックフィルはスコープ外で、表記ゆれの取りこぼしは別 Issue 扱い。
     let horse_name = match q
         .horse_name
         .as_deref()
