@@ -87,3 +87,18 @@ async fn lifecycle_is_per_source_key(pool: sqlx::PgPool) {
         Some(FetchStatus::Ingested)
     );
 }
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn check_constraint_rejects_unknown_status(pool: sqlx::PgPool) {
+    // status は CHECK (status IN ('downloaded','ingested')) で守られ、不正値は DB が弾く。
+    let result = sqlx::query(
+        "INSERT INTO fetch_history (source_key, url, races_saved, horses_saved, fetched_at, status)
+         VALUES ('2026-3-nakayama-6', 'https://example/x.pdf', 0, 0, '2026-01-01T00:00:00+00:00', 'bogus')",
+    )
+    .execute(&pool)
+    .await;
+    assert!(
+        result.is_err(),
+        "CHECK 制約が不正な status='bogus' の INSERT を弾くはず"
+    );
+}

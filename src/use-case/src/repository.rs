@@ -132,13 +132,6 @@ pub enum FetchStatus {
 }
 
 impl FetchStatus {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            FetchStatus::Downloaded => "downloaded",
-            FetchStatus::Ingested => "ingested",
-        }
-    }
-
     /// DB 文字列から復元する。未知の値は `None`。
     pub fn from_db_str(s: &str) -> Option<Self> {
         match s {

@@ -49,7 +49,11 @@ impl<R: RaceRepository + FetchRepository, P: PdfParser, F: PdfFetcher> Interacto
             // re-parses it, the ON CONFLICT upsert is idempotent, and deletion is
             // retried. Hence a warn (not an error) is enough here.
             if let Err(e) = std::fs::remove_file(&path) {
-                tracing::warn!(source, error = %e, "ingested but failed to remove inbox PDF");
+                tracing::warn!(
+                    source,
+                    error = %e,
+                    "ingested but failed to remove inbox PDF; the next ingest run will retry removal"
+                );
             }
         }
 
