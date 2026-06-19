@@ -33,6 +33,8 @@ struct FakeScraper {
     exotic: FetchedExoticOdds,
     /// true なら fetch_exotic_odds が Err を返す（組合せ取得失敗のベストエフォート検証用）。
     exotic_err: bool,
+    /// true なら fetch_win_place_odds が Err を返す（前日 status=yoso など単複取得失敗を模す）。
+    win_err: bool,
     /// fetch_card が呼ばれた回数。
     card_fetches: Mutex<usize>,
 }
@@ -44,6 +46,7 @@ impl FakeScraper {
             place: Vec::new(),
             exotic: FetchedExoticOdds::default(),
             exotic_err: false,
+            win_err: false,
             card_fetches: Mutex::new(0),
         }
     }
@@ -60,6 +63,11 @@ impl FakeScraper {
 
     fn with_exotic_err(mut self) -> Self {
         self.exotic_err = true;
+        self
+    }
+
+    fn with_win_err(mut self) -> Self {
+        self.win_err = true;
         self
     }
 }
@@ -121,6 +129,11 @@ impl NetkeibaScraper for FakeScraper {
         })
     }
     fn fetch_win_place_odds(&self, _race_id: &str) -> Result<FetchedOdds> {
+        if self.win_err {
+            return Err(paddock_use_case::Error::Internal(
+                "odds API が想定外の status を返しました: status=yoso".into(),
+            ));
+        }
         Ok(FetchedOdds {
             win: self.win.clone(),
             place: self.place.clone(),
@@ -350,6 +363,26 @@ async fn force_refetches_card_even_if_already_present() {
     assert!(resp.card_saved, "--force で取得済みでも再取得");
     assert_eq!(*interactor.scraper.card_fetches.lock().unwrap(), 1);
     assert_eq!(interactor.repo.saved_cards.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn win_place_fetch_error_still_saves_card() {
+    // 前日(status=yoso)など単複オッズ取得が失敗しても、card 保存と後続の近走取り込み(#103)を
+    // 巻き添えにしない（odds はベストエフォート、#100 の status ゲートは据え置き）。
+    let scraper = FakeScraper::new(vec![win_odds(1, 7.9, 3)]).with_win_err();
+    let interactor = CardInteractor::new(RecordingRepo::with_already(false), scraper);
+
+    let resp = interactor.ingest(NK_ID, race_id(), false).await.unwrap();
+
+    assert!(resp.card_saved, "オッズ取得失敗でもカードは保存される");
+    assert_eq!(resp.entries_saved, 2);
+    assert_eq!(resp.odds_saved, 0, "取得失敗時はオッズ 0 行");
+    assert!(
+        interactor.repo.saved_odds.lock().unwrap().is_empty(),
+        "オッズ取得失敗では save_race_odds を呼ばない（yoso を保存しない）"
+    );
+    // card 取得時の horse_id は返る（近走取り込みの再利用キーが失われない）。
+    assert_eq!(resp.horse_ids, vec!["2020000001", "2020000002"]);
 }
 
 #[tokio::test]
