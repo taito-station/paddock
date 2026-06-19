@@ -25,7 +25,7 @@
 ## 決定
 
 - `pdf-ocr` / `pdf-parser` の統合テストを、**mupdf 1.25 を持つ `debian:trixie-slim` コンテナ上の専用 CI ジョブ**（`ocr-pdf`）で実走する。
-  - ジョブは `runs-on: ubuntu-latest` + `container: debian:trixie-slim`。apt で `mupdf-tools`（1.25.1）/ `tesseract-ocr` / `tesseract-ocr-jpn` / ビルド依存（`build-essential pkg-config libssl-dev`）/ `git curl ca-certificates` を入れる。
+  - ジョブは `runs-on: ubuntu-latest` + `container: debian:trixie-slim`。apt で `mupdf-tools`（1.25.1）/ `tesseract-ocr` / `tesseract-ocr-jpn` / `build-essential`（rustls の ring が C/asm をビルドする）/ `git curl ca-certificates`（checkout・rustup ブートストラップ）を入れる。ureq は rustls（純 Rust TLS）で sqlx(native-tls) は閉包外のため `libssl-dev`/`pkg-config` は不要。
   - Rust toolchain は本体ジョブと同じ 1.96.0（`rust-toolchain.toml`）。`Swatinem/rust-cache` でキャッシュ。
   - `cargo test --locked -p pdf-ocr -p pdf-parser -- --test-threads=1`（lib + 統合）を実走する。Postgres は不要（これらは DB を触らない）。`--test-threads=1` は複数テストバイナリの並行 JRA 取得を避け出力を決定的にするため。
   - mupdf の版ドリフト対策として、テスト前に **`mutool` のバージョンが 1.25 以上であることを assert する gate ステップ**を置く。下限未満ならサイレントに 0 レース化させず明示的に fail させる。

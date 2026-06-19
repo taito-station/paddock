@@ -93,7 +93,8 @@ jobs:
     steps:
       # コンテナには git / 証明書 / ビルドツール / mupdf / tesseract が無いので先に入れる。
       #   - mupdf-tools: trixie の apt で 1.25 系（パーサが要求する下限を満たす）
-      #   - build-essential pkg-config libssl-dev: 依存クレート（ureq の TLS 等）のネイティブビルド用
+      #   - build-essential: rustls(ring) の C/asm ビルド用（ureq は rustls=純 Rust TLS のため
+      #     OpenSSL 非依存。pdf-ocr/pdf-parser の閉包に sqlx(native-tls) は入らず libssl-dev は不要）
       #   - git: actions/checkout の clone 用 / curl + ca-certificates: dtolnay/rust-toolchain が
       #     bare コンテナで rustup を自己ブートストラップ（sh.rustup.rs 取得）するのに必須
       - name: Install system deps (mupdf 1.25 / tesseract-jpn / build toolchain)
@@ -101,8 +102,7 @@ jobs:
           apt-get update
           apt-get install -y --no-install-recommends \
             mupdf-tools tesseract-ocr tesseract-ocr-jpn \
-            build-essential pkg-config libssl-dev \
-            git curl ca-certificates
+            build-essential git curl ca-certificates
 
       # mupdf の版ドリフト（trixie のポイント/安定版更新で 1.25 未満に戻る等）で統合テストが
       # サイレントに 0 レース化するのを防ぐ。パーサが要求する下限 1.25 を満たさなければ明示的に fail。
@@ -124,6 +124,8 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Install Rust toolchain
+        # 本体 ci ジョブと同じ SHA ピン（dtolnay/rust-toolchain は version タグを切らないため
+        # master の 2026-03-27 時点を固定）。toolchain は input で 1.96.0 に固定。
         uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
         with:
           toolchain: "1.96.0" # rust-toolchain.toml と一致させる
