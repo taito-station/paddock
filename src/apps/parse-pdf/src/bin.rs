@@ -181,7 +181,7 @@ async fn run_fetch(app: Arc<setup::App>, pdfs_dir: PathBuf, args: FetchArgs) -> 
     };
 
     println!(
-        "done: {} ingested, {} downloaded, {} skipped, {} not-found ({} recorded-failed), {} empty, {} failed ({} race(s), {} horse result(s))",
+        "done: {} ingested, {} downloaded, {} skipped, {} not-found (of which {} recorded for retry), {} empty, {} failed ({} race(s), {} horse result(s))",
         summary.ingested,
         summary.downloaded,
         summary.skipped,

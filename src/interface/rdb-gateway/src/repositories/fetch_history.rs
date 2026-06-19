@@ -27,8 +27,9 @@ pub async fn status(pool: &PgPool, source_key: &str) -> Result<Option<FetchStatu
     Ok(row.and_then(|(s,)| FetchStatus::from_db_str(&s)))
 }
 
-/// Stage2: ingest 成功を記録する（status='ingested'）。`failed` 行から成功へ遷移した場合に
-/// `http_status` を NULL へ戻す（再試行が成功した状態を正しく表す）。
+/// Stage2: ingest 成功を記録する（status='ingested'）。`failed` 行から成功へ遷移した場合は
+/// `http_status` を NULL へ、`attempts` を 0 へ戻す（`attempts` は「直近の成功以降に積んだ失敗回数」
+/// ＝再試行/バックオフ判断の入力なので、成功で失敗の連なりをリセットする）。
 pub async fn record(pool: &PgPool, record: &FetchRecord) -> Result<()> {
     sqlx::query(
         r#"
@@ -42,6 +43,7 @@ pub async fn record(pool: &PgPool, record: &FetchRecord) -> Result<()> {
             fetched_at = excluded.fetched_at,
             status = 'ingested',
             http_status = NULL,
+            attempts = 0,
             last_attempt_at = excluded.last_attempt_at
         "#,
     )
@@ -59,12 +61,12 @@ pub async fn record(pool: &PgPool, record: &FetchRecord) -> Result<()> {
 /// 件数は ingest 時に確定するため 0 で入れる。`--force` での再ダウンロードは ingest 済みを
 /// downloaded へ戻す（inbox に新しい PDF が再 ingest 待ちで置かれた状態を表す）。このとき
 /// 旧 ingest 時の races_saved/horses_saved も 0 へ戻し、「未 ingest=件数未確定」を保つ。
-/// `failed` 行からの再ダウンロードでは `http_status` を NULL へ戻す。
 ///
 /// 注意: `--force --download-only` で ingested を downloaded へ戻したら、続けて `ingest` で
 /// 消化すること。ingest し忘れると `fetch_history_contains`（ingested 判定）が一時的に false
 /// となり、当該開催が「未取得」に見える窓ができる（再 ingest で解消）。`races` 等の既存行は
-/// 残るため再 ingest は冪等。
+/// 残るため再 ingest は冪等。`failed` 行からの再ダウンロードでは `http_status` を NULL へ、
+/// `attempts` を 0 へ戻す（`record` と同じく成功で失敗の連なりをリセットする）。
 pub async fn record_download(pool: &PgPool, download: &FetchDownload) -> Result<()> {
     sqlx::query(
         r#"
@@ -78,6 +80,7 @@ pub async fn record_download(pool: &PgPool, download: &FetchDownload) -> Result<
             fetched_at = excluded.fetched_at,
             status = 'downloaded',
             http_status = NULL,
+            attempts = 0,
             last_attempt_at = excluded.last_attempt_at
         "#,
     )

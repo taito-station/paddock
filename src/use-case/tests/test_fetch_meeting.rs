@@ -451,6 +451,26 @@ impl PdfFetcher for ExistingUrlsFetcher {
     }
 }
 
+/// Fetcher: 200 for `existing` URLs, else returns the configured absent status.
+/// Used to exercise a 403 boundary (a possibly-transient JRA block), not just 404.
+struct AbsentStatusFetcher {
+    existing: HashSet<String>,
+    absent_status: u16,
+}
+
+impl PdfFetcher for AbsentStatusFetcher {
+    fn fetch(&self, _url: &str) -> Result<Vec<u8>> {
+        unimplemented!("range fetch uses fetch_if_exists")
+    }
+    fn fetch_if_exists(&self, url: &str) -> Result<FetchProbe> {
+        if self.existing.contains(url) {
+            Ok(FetchProbe::Found(vec![1]))
+        } else {
+            Ok(FetchProbe::Absent(self.absent_status))
+        }
+    }
+}
+
 /// Fetcher whose `fetch_if_exists` always errors (e.g. a network failure), used to verify
 /// that range fetch counts failures and keeps going rather than aborting.
 struct ErrorOnDayFetcher {
@@ -842,6 +862,42 @@ async fn boundary_absence_after_successes_is_recorded_as_failed() {
     assert_eq!(failures.len(), 1);
     assert_eq!(failures[0].source_key, "2026-3-nakayama-4");
     assert_eq!(failures[0].http_status, 404);
+}
+
+#[tokio::test]
+async fn boundary_403_after_successes_records_failed_with_403_status() {
+    // A 403 at the boundary (not just 404) is the case ADR0024 論点1 cares about:
+    // JRA returns 403 on a transient block of a real meeting. Days 1-2 exist, day 3
+    // is 403 → recorded as failed carrying its 403 status (not flattened to 404).
+    let existing: HashSet<String> = (1..=2)
+        .map(|d| url_for(2026, 3, Venue::Nakayama, d))
+        .collect();
+    let interactor = Interactor::new(
+        HistoryRepo::default(),
+        OneRaceParser,
+        AbsentStatusFetcher {
+            existing,
+            absent_status: 403,
+        },
+    );
+
+    let range = MeetingRange {
+        year: 2026,
+        venue: Some(Venue::Nakayama),
+        round: Some(3),
+        day: None,
+    };
+    let summary = interactor
+        .fetch_meeting_range(&range, false, Duration::ZERO, None)
+        .await
+        .unwrap();
+
+    assert_eq!(summary.ingested, 2);
+    assert_eq!(summary.recorded_failed, 1);
+    let failures = interactor.repository.failures.lock().unwrap();
+    assert_eq!(failures.len(), 1);
+    assert_eq!(failures[0].source_key, "2026-3-nakayama-3");
+    assert_eq!(failures[0].http_status, 403, "403 が 404 に潰れず保持される");
 }
 
 #[tokio::test]

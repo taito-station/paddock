@@ -184,7 +184,8 @@ async fn failure_then_download_transitions_and_clears_http_status(pool: sqlx::Pg
         repo.fetch_status(key).await.unwrap(),
         Some(FetchStatus::Downloaded)
     );
-    let (status, _, http_status, _) = tracking_row(&pool, key).await;
+    let (status, attempts, http_status, _) = tracking_row(&pool, key).await;
     assert_eq!(status, "downloaded");
     assert_eq!(http_status, None, "成功遷移で http_status はクリアされる");
+    assert_eq!(attempts, 0, "成功遷移で attempts（失敗の連なり）はリセットされる");
 }
