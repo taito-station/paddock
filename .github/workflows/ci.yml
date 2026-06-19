@@ -92,7 +92,10 @@ jobs:
     timeout-minutes: 30
     steps:
       # コンテナには git / 証明書 / ビルドツール / mupdf / tesseract が無いので先に入れる。
-      # mupdf-tools は trixie の apt で 1.25 系（パーサが要求する下限を満たす）。
+      #   - mupdf-tools: trixie の apt で 1.25 系（パーサが要求する下限を満たす）
+      #   - build-essential pkg-config libssl-dev: 依存クレート（ureq の TLS 等）のネイティブビルド用
+      #   - git: actions/checkout の clone 用 / curl + ca-certificates: dtolnay/rust-toolchain が
+      #     bare コンテナで rustup を自己ブートストラップ（sh.rustup.rs 取得）するのに必須
       - name: Install system deps (mupdf 1.25 / tesseract-jpn / build toolchain)
         run: |
           apt-get update
@@ -100,7 +103,18 @@ jobs:
             mupdf-tools tesseract-ocr tesseract-ocr-jpn \
             build-essential pkg-config libssl-dev \
             git curl ca-certificates
-          mutool -v
+
+      # mupdf の版ドリフト（trixie のポイント/安定版更新で 1.25 未満に戻る等）で統合テストが
+      # サイレントに 0 レース化するのを防ぐ。パーサが要求する下限 1.25 を満たさなければ明示的に fail。
+      - name: Assert mupdf >= 1.25 (parser floor; see ADR0026)
+        run: |
+          ver=$(mutool -v 2>&1 | grep -oE '[0-9]+\.[0-9]+' | head -1)
+          echo "mupdf version: $ver"
+          major=${ver%%.*}; minor=${ver#*.}; minor=${minor%%.*}
+          if [ "$major" -lt 1 ] || { [ "$major" -eq 1 ] && [ "$minor" -lt 25 ]; }; then
+            echo "::error::mupdf $ver < 1.25; pdf-parser はサンプルを 0 レースに割る。ADR0026 参照（コンテナ版を上げる）"
+            exit 1
+          fi
 
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
@@ -114,6 +128,8 @@ jobs:
 
       # lib（OCR 非依存ユニット）+ 統合（test_render の PNG 化 / test_parse の解析値）をまとめて実走。
       # サンプル PDF は JRA 著作物で repo に含めない（gitignore）。フィクスチャが JRA から取得を試み、
-      # 取得できれば統合テストが走り、取得不可なら graceful skip（ユニットは PDF 不要で常時走る）。
+      # 取得できれば統合テストが走り、取得不可なら graceful skip（ユニットは PDF 不要で常時走る。
+      # JRA 不通日は統合テストがアサーション未実行で緑になるトレードオフ。詳細は ADR0026）。
+      # `--test-threads=1`: 複数テストバイナリの並行 JRA 取得を避け、出力を決定的にするため直列化する。
       - name: Test pdf-ocr / pdf-parser (mupdf-backed 統合テストを含む)
         run: cargo test --locked -p pdf-ocr -p pdf-parser -- --test-threads=1
