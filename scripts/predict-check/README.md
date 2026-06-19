@@ -101,6 +101,7 @@ python3 scripts/predict-check/strategy_eval.py /tmp/preds.json /tmp/payouts.json
 | `extract_preds.py` | predict の stdout → `preds.json`（確率テーブル） |
 | `answer_check.py` | preds × results の精度指標（本命的中/Brier/芝ダ別/回収率） |
 | `strategy_eval.py` | preds × payouts の買い方別回収率（軸流し・予算配分・100 円単位, #122） |
+| `konsen_backtest.py` | 混戦判定の閾値バックテスト（¥5,000・確率重み配分・3連複ボックス, #180） |
 
 ## 注意
 
@@ -113,3 +114,21 @@ python3 scripts/predict-check/strategy_eval.py /tmp/preds.json /tmp/payouts.json
 
 本命的中 43.5% / 本命複勝 65.2% / 勝ち馬 Top5 包含 87% / Brier 0.053 / 本命単勝回収率 101.7%。
 芝中(1600-1800) が最強、ダートが最弱。詳細・改善候補は #113、predict 全停止バグは #114。
+
+## 混戦判定の閾値バックテスト（#180）
+
+`konsen_backtest.py` は確定買い方（¥5,000・ワイド/馬連/3連複を model 確率で重み付け配分・
+混戦は3連複ボックス追加）を複数開催日の全レースへ機械適用し、**混戦の発動条件**を切り替えて
+回収率を比較する。入力は predict-check ハーネスの中間生成物（races TSV / win_odds TSV /
+predict 出力 / netkeiba result.html）。
+
+```bash
+python3 scripts/predict-check/konsen_backtest.py \
+    --races /tmp/bt_races.tsv --winodds /tmp/bt_winodds.tsv \
+    --pred-dir /tmp --results-dir /tmp --odds-grid 3.0,3.5,4.0
+```
+
+**結論（2026-05/06 の 71R で検証, #180）**: 「◎単勝オッズが割れている（弱い1番人気）なら
+混戦扱い」案は **不採用**。`box-off 84.0% ≧ baseline(band≥4) 83.9% ＞ オッズ条件併用 79.5〜81.5%` で、
+どの閾値でも回収を悪化させた（回収率の分母を実消化額にした公平な会計でも同じ）。band=2 では
+ボックスが組成不能（3頭未満）で予算が余る。既存 band≥4 ボックスの寄与も中立。詳細は #180 のコメント参照。
