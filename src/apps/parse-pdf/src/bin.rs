@@ -458,6 +458,16 @@ mod tests {
             "k5".into(),
             Ok(resp("k5", FetchMeetingOutcome::Empty)),
         );
+        accumulate_outcome(
+            &mut s,
+            "k6".into(),
+            Ok(resp(
+                "k6",
+                FetchMeetingOutcome::Downloaded {
+                    path: std::path::PathBuf::from("/inbox/k6.pdf"),
+                },
+            )),
+        );
 
         assert_eq!(s.ingested, 1);
         assert_eq!(s.races_saved, 12);
@@ -466,6 +476,7 @@ mod tests {
         assert_eq!(s.not_found, 1);
         assert_eq!(s.failed, 1);
         assert_eq!(s.empty, 1);
+        assert_eq!(s.downloaded, 1);
         // failed meetings retain their key + error so run_fetch can list them.
         assert_eq!(s.failures.len(), 1);
         assert_eq!(s.failures[0].0, "k4");

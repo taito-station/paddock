@@ -55,6 +55,11 @@ pub async fn record(pool: &PgPool, record: &FetchRecord) -> Result<()> {
 /// 件数は ingest 時に確定するため 0 で入れる。`--force` での再ダウンロードは ingest 済みを
 /// downloaded へ戻す（inbox に新しい PDF が再 ingest 待ちで置かれた状態を表す）。このとき
 /// 旧 ingest 時の races_saved/horses_saved も 0 へ戻し、「未 ingest=件数未確定」を保つ。
+///
+/// 注意: `--force --download-only` で ingested を downloaded へ戻したら、続けて `ingest` で
+/// 消化すること。ingest し忘れると `fetch_history_contains`（ingested 判定）が一時的に false
+/// となり、当該開催が「未取得」に見える窓ができる（再 ingest で解消）。`races` 等の既存行は
+/// 残るため再 ingest は冪等。
 pub async fn record_download(pool: &PgPool, download: &FetchDownload) -> Result<()> {
     sqlx::query(
         r#"
