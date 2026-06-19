@@ -418,6 +418,26 @@ async fn win_place_fetch_error_still_saves_exotic_odds() {
 }
 
 #[tokio::test]
+async fn both_win_and_exotic_fetch_error_still_saves_card() {
+    // 単複も組合せも両方失敗しても、card 保存と horse_id 返却は守られ ingest は成功する
+    // （odds 二系統がいずれもベストエフォート。両 API 同時障害でも近走取り込みを止めない）。
+    let scraper = FakeScraper::new(vec![win_odds(1, 7.9, 3)])
+        .with_win_err()
+        .with_exotic_err();
+    let interactor = CardInteractor::new(RecordingRepo::with_already(false), scraper);
+
+    let resp = interactor.ingest(NK_ID, race_id(), false).await.unwrap();
+
+    assert!(resp.card_saved);
+    assert_eq!(resp.odds_saved, 0);
+    assert!(
+        interactor.repo.saved_odds.lock().unwrap().is_empty(),
+        "両失敗では save_race_odds を呼ばない"
+    );
+    assert_eq!(resp.horse_ids, vec!["2020000001", "2020000002"]);
+}
+
+#[tokio::test]
 async fn empty_odds_skips_odds_save() {
     let scraper = FakeScraper::new(vec![]); // レース前で未確定
     let interactor = CardInteractor::new(RecordingRepo::with_already(false), scraper);

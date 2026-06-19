@@ -34,7 +34,8 @@ pub fn decode_euc_jp(bytes: &[u8], context: &str) -> String {
 /// 添えて警告してからフォールバックする。解釈できないバイトがあっても置換文字（U+FFFD）へ
 /// lossy 変換して panic しない。
 pub fn decode_html(bytes: &[u8], charset: Option<&str>, context: &str) -> String {
-    let encoding = match charset.map(str::trim).filter(|label| !label.is_empty()) {
+    let label = charset.map(str::trim).filter(|label| !label.is_empty());
+    let encoding = match label {
         Some(label) => Encoding::for_label(label.as_bytes()).unwrap_or_else(|| {
             tracing::warn!(
                 context,
@@ -47,9 +48,12 @@ pub fn decode_html(bytes: &[u8], charset: Option<&str>, context: &str) -> String
     };
     let (decoded, _, had_errors) = encoding.decode(bytes);
     if had_errors {
+        // charset 宣言の有無も添える。宣言なし(=EUC-JP フォールバック)で decode error が
+        // 出るのは、charset を返さない経路が将来 UTF-8 化した兆候でありうるため切り分け用。
         tracing::warn!(
             context,
             encoding = encoding.name(),
+            charset_declared = label.is_some(),
             "response body had decode errors; parsing may fail"
         );
     }
