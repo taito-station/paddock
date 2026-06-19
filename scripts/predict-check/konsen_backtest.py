@@ -48,6 +48,7 @@ def largest_remainder(weights, units, minu=1):
     rem = units - minu * n
     if rem < 0:
         # 口数が頭数に満たない縮退ケース。重みの高い目から 1 口ずつ配る（先頭順ではなく）。
+        # units==0（券種予算が 100 円未満等）なら空ループで全 0 ＝その券種を賭けない、も自然に表現される。
         order = sorted(range(n), key=lambda i: weights[i], reverse=True)
         out = [0] * n
         for i in range(units):
@@ -210,24 +211,31 @@ def main():
     #   "box-off" は混戦を一切発動しない（純◎軸ながし）= ボックスの寄与そのものを測る対照。
     #   baseline は band>=4 のみ。
     variants = [("box-off", "OFF", None), ("baseline", None, None)]
-    for x in args.odds_grid.split(","):
+    grid = list(dict.fromkeys(args.odds_grid.split(",")))  # 重複指定を除去（variant 名の衝突防止）
+    for x in grid:
         for bm in (2, 3):
             variants.append((f"odds>={x}/band>={bm}", float(x), bm))
     agg = {name: dict(stake=0, ret=0, konsen=0, konsen_hit=0) for name, *_ in variants}
     used = 0
     konsen_detail = {name: [] for name, *_ in variants}
 
-    skipped = 0
+    skips = dict(probs=0, odds=0, result=0)
     for r in races:
         probs = preds.get(r["date"], {}).get((r["venue"], r["rnum"]))
         wo = winodds.get(r["pid"])
         resf = Path(args.results_dir) / f"res_{r['nk']}.html"
-        if not probs or not wo or not resf.exists():
-            skipped += 1
+        if not probs:
+            skips["probs"] += 1
+            continue
+        if not wo:
+            skips["odds"] += 1
+            continue
+        if not resf.exists():
+            skips["result"] += 1
             continue
         top3, pay = parse_result(resf)
         if len(top3) < 3:
-            skipped += 1
+            skips["result"] += 1
             continue
         axis = max(probs, key=lambda n: probs[n])
         axis_odds = wo.get(axis, (None, None))[1]
@@ -245,16 +253,22 @@ def main():
             agg[name]["ret"] += ret
             if k:
                 agg[name]["konsen"] += 1
+                # 「混戦時払戻」= 混戦化したレースで（ボックス以外の券種も含む）何らか払戻が出た回数。
+                # ボックス単独の的中ではない点に注意（混戦化が収支に寄与したかの粗い指標）。
                 if ret > 0:
                     agg[name]["konsen_hit"] += 1
                 konsen_detail[name].append((r["date"], r["venue"], r["rnum"], axis_odds, ret))
 
-    print(f"対象レース: {used}（データ欠落でスキップ: {skipped}）\n")
-    print(f"{'variant':<18} {'回収率':>8} {'損益':>10} {'混戦数':>6} {'混戦的中':>7}")
+    skipped = sum(skips.values())
+    print(
+        f"対象レース: {used}（スキップ {skipped}: probs欠落 {skips['probs']} / "
+        f"odds欠落 {skips['odds']} / result欠落 {skips['result']}）\n"
+    )
+    print(f"{'variant':<18} {'回収率':>8} {'損益':>10} {'混戦数':>6} {'混戦時払戻':>9}")
     for name, *_ in variants:
         a = agg[name]
         roi = a["ret"] / a["stake"] * 100 if a["stake"] else 0
-        print(f"{name:<18} {roi:>7.1f}% {a['ret']-a['stake']:>+10} {a['konsen']:>6} {a['konsen_hit']:>7}")
+        print(f"{name:<18} {roi:>7.1f}% {a['ret']-a['stake']:>+10} {a['konsen']:>6} {a['konsen_hit']:>9}")
 
     base_k = {(d, v, rn) for d, v, rn, *_ in konsen_detail["baseline"]}
     print("\n-- odds 条件で新規に混戦化したレースの収支（混戦モード時の払戻）--")
