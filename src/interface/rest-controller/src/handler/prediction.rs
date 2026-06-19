@@ -3,7 +3,7 @@ use chrono::NaiveDate;
 use serde::Deserialize;
 use utoipa::IntoParams;
 
-use paddock_domain::{Mark, Surface, Venue};
+use paddock_domain::{HorseName, Mark, Surface, Venue};
 use paddock_use_case::Interactor;
 use paddock_use_case::pdf_fetcher::PdfFetcher;
 use paddock_use_case::pdf_parser::PdfParser;
@@ -127,6 +127,18 @@ where
     let surface = q.surface.as_deref().map(Surface::try_from).transpose()?;
     let mark = q.mark.as_deref().map(parse_mark).transpose()?;
 
+    // 馬名は #50 と同じく `HorseName` でカナ正規化（全/半角カナ・濁点合成等）してから
+    // 部分一致に使う。空文字は「指定なし」として扱う（30 字超など不正値は 400）。
+    let horse_name = match q
+        .horse_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        Some(raw) => Some(HorseName::try_from(raw)?.value().to_string()),
+        None => None,
+    };
+
     let limit = q.limit.unwrap_or(DEFAULT_LIMIT).min(MAX_LIMIT);
     let offset = q.offset.unwrap_or(0);
 
@@ -137,7 +149,7 @@ where
         distance_min: q.distance_min,
         distance_max: q.distance_max,
         surface,
-        horse_name: q.horse_name.filter(|s| !s.is_empty()),
+        horse_name,
         mark,
         hit: q.hit,
         limit,

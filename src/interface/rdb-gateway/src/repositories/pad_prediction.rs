@@ -491,11 +491,12 @@ fn build_search_where(filter: &PredictionFilter) -> (String, Vec<Bind>) {
         }
         (None, None) => {}
     }
-    // 的中フィルタ（値は無いので静的フラグメントのみ）。
+    // 的中フィルタ（値は無いので静的フラグメントのみ）。`summary_from_row` の hit 算出と
+    // 同じ集合になるよう、不的中は払戻 <= 0（回収率は 0 以上だが負値が混じっても表示と一致させる）。
     match filter.hit {
         Some(true) => conds.push("p.recovery_rate > 0".to_string()),
         Some(false) => {
-            conds.push("p.finish_1 IS NOT NULL AND COALESCE(p.recovery_rate, 0) = 0".to_string())
+            conds.push("p.finish_1 IS NOT NULL AND COALESCE(p.recovery_rate, 0) <= 0".to_string())
         }
         None => {}
     }
@@ -536,9 +537,10 @@ fn summary_from_row(r: SummaryRow) -> Result<PredictionSummaryRow> {
             r.finish_3.map(|n| n as u32),
         ]
     });
-    // 的中。`build_search_where` の hit フィルタと同じ集合になるよう判定を完全に揃える:
+    // 的中。`build_search_where` の hit フィルタと同じ集合になるよう判定を完全に揃える。
+    // 結果記録済みの正準シグナルは finish_1（母集団 `prediction_mark_stats` も finish_1 基準）:
     //   recovery_rate > 0           → 的中 (true)
-    //   finish_1 あり且つ払戻 0/NULL → 不的中 (false)
+    //   finish_1 あり且つ払戻 0 以下 → 不的中 (false)
     //   それ以外（finish_1 なし）    → 結果未記録 (None)
     let hit = if r.recovery_rate.unwrap_or(0.0) > 0.0 {
         Some(true)

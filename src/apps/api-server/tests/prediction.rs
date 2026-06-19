@@ -241,6 +241,11 @@ async fn search_by_horse_name_partial(pool: sqlx::PgPool) {
     let json = body_json(get!(app, "/api/predictions?horse_name=%E3%83%8F%E3%83%8A").await).await;
     assert_eq!(json["total_count"], 1);
     assert_eq!(json["predictions"][0]["honmei_horse"], "ハナミチ");
+
+    // カナ正規化: 半角 "ﾊﾅ"(%EF%BE%8A%EF%BE%85) も全角格納の "ハナミチ" に一致する(#50 流用)。
+    let json = body_json(get!(app, "/api/predictions?horse_name=%EF%BE%8A%EF%BE%85").await).await;
+    assert_eq!(json["total_count"], 1);
+    assert_eq!(json["predictions"][0]["honmei_horse"], "ハナミチ");
 }
 
 #[sqlx::test(migrations = "../../../deployments/db/migrations")]
