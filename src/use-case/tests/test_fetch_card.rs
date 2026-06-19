@@ -176,6 +176,12 @@ impl FetchRepository for RecordingRepo {
     ) -> Result<()> {
         Ok(())
     }
+    async fn record_failure(
+        &self,
+        _record: &paddock_use_case::repository::FetchFailure,
+    ) -> Result<()> {
+        Ok(())
+    }
 }
 
 impl RaceCardRepository for RecordingRepo {

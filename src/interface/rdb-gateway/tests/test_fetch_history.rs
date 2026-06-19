@@ -4,7 +4,9 @@
 //! - source_key ごとに独立。
 
 use chrono::Utc;
-use paddock_use_case::repository::{FetchDownload, FetchRecord, FetchRepository, FetchStatus};
+use paddock_use_case::repository::{
+    FetchDownload, FetchFailure, FetchRecord, FetchRepository, FetchStatus,
+};
 use rdb_gateway::PostgresRepository;
 
 fn download(source_key: &str) -> FetchDownload {
@@ -13,6 +15,35 @@ fn download(source_key: &str) -> FetchDownload {
         url: format!("https://example/{source_key}.pdf"),
         downloaded_at: Utc::now(),
     }
+}
+
+fn failure(source_key: &str, http_status: u16) -> FetchFailure {
+    FetchFailure {
+        source_key: source_key.to_string(),
+        url: format!("https://example/{source_key}.pdf"),
+        http_status,
+        attempted_at: Utc::now(),
+    }
+}
+
+/// `fetch_history` の追跡カラムを直接読む（リポジトリ API は status しか公開しないため）。
+async fn tracking_row(
+    pool: &sqlx::PgPool,
+    source_key: &str,
+) -> (
+    String,
+    i32,
+    Option<i32>,
+    Option<chrono::DateTime<chrono::Utc>>,
+) {
+    sqlx::query_as(
+        "SELECT status, attempts, http_status, last_attempt_at
+         FROM fetch_history WHERE source_key = $1",
+    )
+    .bind(source_key)
+    .fetch_one(pool)
+    .await
+    .unwrap()
 }
 
 fn record(source_key: &str, races: u32, horses: u32) -> FetchRecord {
@@ -101,4 +132,59 @@ async fn check_constraint_rejects_unknown_status(pool: sqlx::PgPool) {
         result.is_err(),
         "CHECK 制約が不正な status='bogus' の INSERT を弾くはず"
     );
+}
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn record_failure_creates_failed_row_with_status_and_attempts(pool: sqlx::PgPool) {
+    // #170: 取得失敗を failed として記録する。status/http_status/attempts/last_attempt_at を持つ。
+    let repo = PostgresRepository::new(pool.clone());
+    let key = "2026-2-tokyo-12";
+
+    repo.record_failure(&failure(key, 403)).await.unwrap();
+
+    assert_eq!(
+        repo.fetch_status(key).await.unwrap(),
+        Some(FetchStatus::Failed),
+        "failed として記録される"
+    );
+    // failed 行は ingest 済みではない（再取得候補のまま）。
+    assert!(!repo.fetch_history_contains(key).await.unwrap());
+
+    let (status, attempts, http_status, last_attempt_at) = tracking_row(&pool, key).await;
+    assert_eq!(status, "failed");
+    assert_eq!(attempts, 1, "初回失敗は attempts=1");
+    assert_eq!(http_status, Some(403));
+    assert!(last_attempt_at.is_some(), "last_attempt_at が記録される");
+}
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn repeated_record_failure_increments_attempts(pool: sqlx::PgPool) {
+    // 再試行のたびに attempts が増える（バックオフ/再試行判断の入力）。
+    let repo = PostgresRepository::new(pool.clone());
+    let key = "2026-2-tokyo-12";
+
+    repo.record_failure(&failure(key, 404)).await.unwrap();
+    repo.record_failure(&failure(key, 403)).await.unwrap();
+
+    let (_, attempts, http_status, _) = tracking_row(&pool, key).await;
+    assert_eq!(attempts, 2, "2 回目の失敗で attempts=2");
+    assert_eq!(http_status, Some(403), "最新の http_status へ更新される");
+}
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn failure_then_download_transitions_and_clears_http_status(pool: sqlx::PgPool) {
+    // failed → 再取得成功（downloaded）で status が遷移し http_status は NULL へ戻る。
+    let repo = PostgresRepository::new(pool.clone());
+    let key = "2026-2-tokyo-12";
+
+    repo.record_failure(&failure(key, 403)).await.unwrap();
+    repo.record_download(&download(key)).await.unwrap();
+
+    assert_eq!(
+        repo.fetch_status(key).await.unwrap(),
+        Some(FetchStatus::Downloaded)
+    );
+    let (status, _, http_status, _) = tracking_row(&pool, key).await;
+    assert_eq!(status, "downloaded");
+    assert_eq!(http_status, None, "成功遷移で http_status はクリアされる");
 }

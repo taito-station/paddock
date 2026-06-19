@@ -27,7 +27,10 @@ impl paddock_use_case::pdf_fetcher::PdfFetcher for UnusedFetcher {
         ))
     }
 
-    fn fetch_if_exists(&self, _url: &str) -> paddock_use_case::Result<Option<Vec<u8>>> {
+    fn fetch_if_exists(
+        &self,
+        _url: &str,
+    ) -> paddock_use_case::Result<paddock_use_case::pdf_fetcher::FetchProbe> {
         Err(paddock_use_case::Error::InvalidArgument(
             "api-server does not fetch PDFs".into(),
         ))

@@ -103,8 +103,9 @@ pub enum FetchMeetingOutcome {
     /// covers a meeting already downloaded (inbox) but not yet ingested.
     Skipped,
     /// The PDF does not exist (HTTP 403 or 404) — e.g. not published yet, or past
-    /// the meeting's real round/day range.
-    NotFound,
+    /// the meeting's real round/day range. Carries the HTTP status so the range
+    /// loop can persist a boundary absence as a retryable `failed` row (#170).
+    NotFound { http_status: u16 },
     /// The PDF was fetched but parsed to **zero races** (e.g. a parser gap for a
     /// particular PDF generation). Deliberately *not* recorded in fetch history,
     /// so the meeting stays a re-fetch candidate instead of being silently
@@ -180,6 +181,11 @@ pub struct FetchRangeSummary {
     pub skipped: usize,
     pub not_found: usize,
     pub failed: usize,
+    /// Boundary 403/404s (absent day right after ≥1 existing day in the same round)
+    /// persisted as retryable `failed` rows by the sequential range fetch (#170).
+    /// A subset of `not_found`: counts only the absences recorded for re-try, not
+    /// the round-nonexistence boundaries (day-1 absent) or parallel-grid junk.
+    pub recorded_failed: usize,
     /// Meetings whose PDF was fetched but parsed to zero races (not recorded,
     /// so still re-fetchable). Tracked separately from `failed` because the PDF
     /// exists — it is a parser gap, not a fetch error.
