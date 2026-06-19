@@ -635,9 +635,13 @@ fn read_u64<R: BufRead>(
 
 #[cfg(test)]
 mod tests {
-    use super::{make_bet_record, resolve_track_condition_default};
+    use super::{
+        make_bet_record, read_choice, read_edited_amounts, read_track_condition, read_u64,
+        resolve_track_condition_default,
+    };
     use paddock_domain::horse_result::HorseNum;
-    use paddock_domain::{BetCombination, RaceId, TrackCondition};
+    use paddock_domain::{BetCombination, PortfolioBet, RaceId, TrackCondition};
+    use std::io::Cursor;
 
     fn horse(n: u32) -> HorseNum {
         HorseNum::try_from(n).unwrap()
@@ -711,9 +715,6 @@ mod tests {
     }
 
     // --- stdin reader の EOF 挙動（#179: EOF で無限ループしないこと）---
-    use super::{read_choice, read_edited_amounts, read_track_condition, read_u64};
-    use paddock_domain::PortfolioBet;
-    use std::io::Cursor;
 
     #[test]
     fn read_choice_returns_skip_on_eof() {
@@ -787,5 +788,22 @@ mod tests {
         let mut r = Cursor::new(b"".to_vec());
         let amounts = read_edited_amounts(&mut r, &bets, &suggested, 10000).unwrap();
         assert_eq!(amounts, vec![0, 0]);
+    }
+
+    #[test]
+    fn read_edited_amounts_overbudget_then_eof_terminates() {
+        // 1周目で予算超過 → 外側の再プロンプトループに入り、2周目が EOF でも
+        // 全0で確定して無限ループしない（コメントが謳う外側ループの終端を直接検証）。
+        let bets = vec![PortfolioBet {
+            combination: BetCombination::Win(horse(1)),
+            stake: 100,
+            odds: None,
+            ev: 0.0,
+        }];
+        let suggested = vec![100];
+        // 1周目: 20000 を入力（budget 10000 超過）→ 再プロンプト。2周目: EOF → 0。
+        let mut r = Cursor::new(b"20000\n".to_vec());
+        let amounts = read_edited_amounts(&mut r, &bets, &suggested, 10000).unwrap();
+        assert_eq!(amounts, vec![0]);
     }
 }
