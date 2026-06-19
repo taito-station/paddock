@@ -279,7 +279,7 @@ pub struct PredictionFilter {
     /// 印。指定時、その印を付けた馬を含む予想のみ。`horse_name` と併用すると同一馬が両条件を満たす。
     pub mark: Option<Mark>,
     /// 的中フィルタ。`Some(true)`=的中（`recovery_rate > 0`）、`Some(false)`=不的中
-    /// （結果あり且つ払戻 0）、`None`=結果有無を問わず全件。
+    /// （結果あり且つ払戻 0 以下）、`None`=結果有無を問わず全件。
     pub hit: Option<bool>,
     pub limit: u32,
     pub offset: u32,
