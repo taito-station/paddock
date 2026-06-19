@@ -6,6 +6,11 @@ use crate::schema::analyze::{
     CourseStatsResponse, GroupStatSchema, HorseStatsResponse, JockeyStatsResponse,
     TrainerStatsResponse,
 };
+use crate::schema::prediction::{
+    MarkStatSchema, MarkStatsResponse, PadPredictionResponse, PredictionBetSchema,
+    PredictionHorseSchema, PredictionResultSchema, PredictionSearchResponse,
+    PredictionSummarySchema,
+};
 use crate::schema::race::{
     HorseEntrySchema, HorseProbabilitySchema, PredictionResponse, RaceCardResponse,
     RaceListResponse, RaceSummary,
@@ -33,6 +38,9 @@ use crate::schema::session::{
         handler::analyze::analyze_jockey,
         handler::analyze::analyze_trainer,
         handler::analyze::analyze_course,
+        handler::prediction::search_predictions,
+        handler::prediction::get_prediction_detail,
+        handler::prediction::prediction_mark_stats,
         handler::session::create_session,
         handler::session::get_session_summary,
         handler::session::record_outcome,
@@ -51,6 +59,14 @@ use crate::schema::session::{
         CourseStatsResponse,
         JockeyStatsResponse,
         TrainerStatsResponse,
+        PredictionSummarySchema,
+        PredictionSearchResponse,
+        PredictionHorseSchema,
+        PredictionBetSchema,
+        PredictionResultSchema,
+        PadPredictionResponse,
+        MarkStatSchema,
+        MarkStatsResponse,
         CreateSessionRequest,
         BetInput,
         RecordOutcomeRequest,
@@ -64,6 +80,7 @@ use crate::schema::session::{
     tags(
         (name = "races", description = "レース一覧 / 出馬表 / 確率推定"),
         (name = "analyze", description = "馬 / 騎手 / 調教師 / コースの成績統計"),
+        (name = "predictions", description = "予想の横断検索 / 個別取得 / 印別的中率集計"),
         (name = "sessions", description = "予想セッション（作成 / 収支 / 賭け金・払戻記録 / オッズ・結果更新）"),
     )
 )]

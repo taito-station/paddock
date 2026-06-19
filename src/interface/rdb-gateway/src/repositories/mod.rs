@@ -28,10 +28,11 @@ use paddock_domain::{
 use paddock_use_case::Result as UcResult;
 use paddock_use_case::repository::{
     CourseStatsRow, FetchDownload, FetchRecord, FetchRepository, FetchStatus,
-    HorseHistoryRepository, HorseRecencyStats, HorseStatsRow, JockeyStatsRow, NameMatchRepository,
-    OddsRepository, PadPredictionRepository, PredictBetRecord, PredictRaceConditionRecord,
-    PredictSessionRecord, PredictSessionRepository, RaceCardRepository, RaceOddsRecord,
-    RaceRepository, StatsRepository, TrainerStatsRow,
+    HorseHistoryRepository, HorseRecencyStats, HorseStatsRow, JockeyStatsRow, MarkStatRow,
+    MarkStatsFilter, NameMatchRepository, OddsRepository, PadPredictionRepository, PredictBetRecord,
+    PredictRaceConditionRecord, PredictSessionRecord, PredictSessionRepository, PredictionFilter,
+    PredictionSearchResult, RaceCardRepository, RaceOddsRecord, RaceRepository, StatsRepository,
+    TrainerStatsRow,
 };
 
 use crate::pool::PgPool;
@@ -363,6 +364,30 @@ impl PadPredictionRepository for PostgresRepository {
 
     async fn list_pad_predictions(&self) -> UcResult<Vec<PadPrediction>> {
         pad_prediction::list_pad_predictions(&self.pool)
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn search_predictions(
+        &self,
+        filter: &PredictionFilter,
+    ) -> UcResult<PredictionSearchResult> {
+        pad_prediction::search_predictions(&self.pool, filter)
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn find_pad_prediction_by_id(
+        &self,
+        prediction_id: i64,
+    ) -> UcResult<Option<PadPrediction>> {
+        pad_prediction::find_pad_prediction_by_id(&self.pool, prediction_id)
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn prediction_mark_stats(&self, filter: &MarkStatsFilter) -> UcResult<Vec<MarkStatRow>> {
+        pad_prediction::prediction_mark_stats(&self.pool, filter)
             .await
             .map_err(Into::into)
     }

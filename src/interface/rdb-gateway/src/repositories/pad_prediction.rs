@@ -6,11 +6,15 @@ use std::collections::HashMap;
 
 use chrono::{DateTime, NaiveDate, Utc};
 use paddock_domain::{
-    Mark, PadPrediction, PredictionBet, PredictionHorse, PredictionResult, Venue,
+    Mark, PadPrediction, PredictionBet, PredictionHorse, PredictionResult, Surface, Venue,
+};
+use paddock_use_case::repository::{
+    MarkStatRow, MarkStatsFilter, PredictionFilter, PredictionSearchResult, PredictionSummaryRow,
 };
 use sqlx::{PgPool, Row};
 
 use crate::error::{Error, Result};
+use crate::repositories::sql::escape_like;
 
 fn date_key(date: NaiveDate) -> String {
     date.format("%Y-%m-%d").to_string()
@@ -364,5 +368,331 @@ pub async fn list_pad_predictions(pool: &PgPool) -> Result<Vec<PadPrediction>> {
         let bets = bets_by.remove(&pid).unwrap_or_default();
         out.push(build_prediction(h, horses, bets)?);
     }
+    Ok(out)
+}
+
+/// 主キー（`prediction_id`）で予想 1 件を取得する（#145・個別予想ビュー）。
+pub async fn find_pad_prediction_by_id(
+    pool: &PgPool,
+    prediction_id: i64,
+) -> Result<Option<PadPrediction>> {
+    let header: Option<PredictionHeaderRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+        "SELECT {HEADER_COLUMNS} FROM predictions WHERE prediction_id = $1"
+    )))
+    .bind(prediction_id)
+    .fetch_optional(pool)
+    .await?;
+
+    match header {
+        Some(h) => {
+            let horses = load_horses(pool, h.prediction_id).await?;
+            let bets = load_bets(pool, h.prediction_id).await?;
+            Ok(Some(build_prediction(h, horses, bets)?))
+        }
+        None => Ok(None),
+    }
+}
+
+/// 動的 WHERE のバインド値。静的な句フラグメントのみ `format!` に埋め、値はこの型で `.bind()` する
+/// （SQL インジェクション防止, #145）。
+#[derive(Clone)]
+enum Bind {
+    Text(String),
+    Int(i64),
+}
+
+/// `sql`（静的フラグメントのみで組んだ文字列）に `binds` を順に `$1..` でバインドした `QueryAs` を返す。
+fn bind_all<'q, O>(
+    sql: String,
+    binds: &'q [Bind],
+) -> sqlx::query::QueryAs<'q, sqlx::Postgres, O, sqlx::postgres::PgArguments>
+where
+    O: for<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow> + Send + Unpin,
+{
+    let mut q = sqlx::query_as::<_, O>(sqlx::AssertSqlSafe(sql));
+    for b in binds {
+        q = match b {
+            Bind::Text(s) => q.bind(s.as_str()),
+            Bind::Int(i) => q.bind(*i),
+        };
+    }
+    q
+}
+
+/// 検索フィルタから WHERE 句（`WHERE ...` を含む。条件なしなら空文字）とバインド列を組み立てる。
+/// `predictions` を `p`、`races` を `r`（呼び出し側で `LEFT JOIN`）とする。
+fn build_search_where(filter: &PredictionFilter) -> (String, Vec<Bind>) {
+    let mut conds: Vec<String> = Vec::new();
+    let mut binds: Vec<Bind> = Vec::new();
+    let mut n: u32 = 0;
+
+    if let Some(d) = filter.date_from {
+        n += 1;
+        conds.push(format!("p.date >= ${n}"));
+        binds.push(Bind::Text(date_key(d)));
+    }
+    if let Some(d) = filter.date_to {
+        n += 1;
+        conds.push(format!("p.date <= ${n}"));
+        binds.push(Bind::Text(date_key(d)));
+    }
+    if let Some(v) = filter.venue {
+        n += 1;
+        conds.push(format!("p.venue = ${n}"));
+        binds.push(Bind::Text(v.as_jp().to_string()));
+    }
+    // 距離・芝ダは `races` 結合列の述語。`races` は常時 LEFT JOIN だが、これらの述語を置くと
+    // 未照合（race_id NULL → r.* が NULL）の予想は条件不成立で脱落する＝距離/芝ダ指定時のみ
+    // 実質 INNER 相当になる（venue/date のみのフィルタでは未照合予想も残る）。
+    if let Some(dmin) = filter.distance_min {
+        n += 1;
+        conds.push(format!("r.distance >= ${n}"));
+        binds.push(Bind::Int(dmin as i64));
+    }
+    if let Some(dmax) = filter.distance_max {
+        n += 1;
+        conds.push(format!("r.distance <= ${n}"));
+        binds.push(Bind::Int(dmax as i64));
+    }
+    if let Some(s) = filter.surface {
+        n += 1;
+        conds.push(format!("r.surface = ${n}"));
+        binds.push(Bind::Text(s.as_str().to_string()));
+    }
+    // 馬名 × 印。両方指定時は「同一馬が両条件を満たす」（単一 EXISTS 内で AND）。
+    match (filter.horse_name.as_deref(), filter.mark) {
+        (Some(name), Some(mark)) => {
+            n += 1;
+            let name_ph = n;
+            n += 1;
+            let mark_ph = n;
+            conds.push(format!(
+                "EXISTS (SELECT 1 FROM prediction_horses h WHERE h.prediction_id = p.prediction_id \
+                 AND h.horse_name LIKE '%' || ${name_ph} || '%' ESCAPE '\\' AND h.mark = ${mark_ph})"
+            ));
+            binds.push(Bind::Text(escape_like(name)));
+            binds.push(Bind::Text(mark.as_slug().to_string()));
+        }
+        (Some(name), None) => {
+            n += 1;
+            conds.push(format!(
+                "EXISTS (SELECT 1 FROM prediction_horses h WHERE h.prediction_id = p.prediction_id \
+                 AND h.horse_name LIKE '%' || ${n} || '%' ESCAPE '\\')"
+            ));
+            binds.push(Bind::Text(escape_like(name)));
+        }
+        (None, Some(mark)) => {
+            n += 1;
+            conds.push(format!(
+                "EXISTS (SELECT 1 FROM prediction_horses h WHERE h.prediction_id = p.prediction_id \
+                 AND h.mark = ${n})"
+            ));
+            binds.push(Bind::Text(mark.as_slug().to_string()));
+        }
+        (None, None) => {}
+    }
+    // 的中フィルタ（値は無いので静的フラグメントのみ）。`summary_from_row` の hit 算出と
+    // 同じ集合になるよう、不的中は払戻 <= 0（回収率は 0 以上だが負値が混じっても表示と一致させる）。
+    match filter.hit {
+        Some(true) => conds.push("p.recovery_rate > 0".to_string()),
+        Some(false) => {
+            conds.push("p.finish_1 IS NOT NULL AND COALESCE(p.recovery_rate, 0) <= 0".to_string())
+        }
+        None => {}
+    }
+
+    let where_sql = if conds.is_empty() {
+        String::new()
+    } else {
+        format!("WHERE {}", conds.join(" AND "))
+    };
+    (where_sql, binds)
+}
+
+/// 検索一覧の 1 行（サマリ）。`distance` / `surface` は `races` 結合で得る（未照合なら NULL）。
+#[derive(sqlx::FromRow)]
+struct SummaryRow {
+    prediction_id: i64,
+    date: String,
+    venue: String,
+    race_num: i64,
+    race_id: Option<String>,
+    title: Option<String>,
+    distance: Option<i64>,
+    surface: Option<String>,
+    honmei_horse: Option<String>,
+    finish_1: Option<i64>,
+    finish_2: Option<i64>,
+    finish_3: Option<i64>,
+    recovery_rate: Option<f64>,
+    pnl: Option<i64>,
+}
+
+fn summary_from_row(r: SummaryRow) -> Result<PredictionSummaryRow> {
+    let has_finish = r.finish_1.is_some() || r.finish_2.is_some() || r.finish_3.is_some();
+    let finish = has_finish.then(|| {
+        [
+            r.finish_1.map(|n| n as u32),
+            r.finish_2.map(|n| n as u32),
+            r.finish_3.map(|n| n as u32),
+        ]
+    });
+    // 的中。`build_search_where` の hit フィルタと同じ集合になるよう判定を完全に揃える。
+    // 結果記録済みの正準シグナルは finish_1（母集団 `prediction_mark_stats` も finish_1 基準）:
+    //   recovery_rate > 0           → 的中 (true)
+    //   finish_1 あり且つ払戻 0 以下 → 不的中 (false)
+    //   それ以外（finish_1 なし）    → 結果未記録 (None)
+    let hit = if r.recovery_rate.unwrap_or(0.0) > 0.0 {
+        Some(true)
+    } else if r.finish_1.is_some() {
+        Some(false)
+    } else {
+        None
+    };
+
+    Ok(PredictionSummaryRow {
+        prediction_id: r.prediction_id,
+        date: NaiveDate::parse_from_str(&r.date, "%Y-%m-%d")
+            .map_err(|e| Error::Data(format!("predictions.date {:?}: {e}", r.date)))?,
+        venue: Venue::try_from(r.venue.as_str())?,
+        race_num: r.race_num as u32,
+        race_id: r.race_id,
+        title: r.title,
+        distance: r.distance.map(|d| d as u32),
+        surface: r.surface.as_deref().map(Surface::try_from).transpose()?,
+        honmei_horse: r.honmei_horse,
+        finish,
+        recovery_rate: r.recovery_rate,
+        pnl: r.pnl,
+        hit,
+    })
+}
+
+/// 予想を横断検索する（#145）。`races` は表示用に常時 LEFT JOIN し、距離・芝ダのフィルタ指定時は
+/// WHERE で絞る（未照合 race_id の予想は NULL 述語で脱落＝実質 INNER）。
+pub async fn search_predictions(
+    pool: &PgPool,
+    filter: &PredictionFilter,
+) -> Result<PredictionSearchResult> {
+    let (where_sql, where_binds) = build_search_where(filter);
+
+    // COUNT と SELECT で同一の FROM/JOIN を使う（JOIN 条件の変更で片方だけ直す事故を防ぐ）。
+    const FROM_JOIN: &str = "FROM predictions p LEFT JOIN races r ON r.race_id = p.race_id";
+
+    let count_sql = format!("SELECT COUNT(*) {FROM_JOIN} {where_sql}");
+    let (total,): (i64,) = bind_all::<(i64,)>(count_sql, &where_binds)
+        .fetch_one(pool)
+        .await?;
+
+    let limit_ph = where_binds.len() + 1;
+    let offset_ph = where_binds.len() + 2;
+    let select_sql = format!(
+        "SELECT p.prediction_id, p.date, p.venue, p.race_num, p.race_id, p.title, \
+         r.distance, r.surface, \
+         (SELECT h.horse_name FROM prediction_horses h \
+          WHERE h.prediction_id = p.prediction_id AND h.mark = 'honmei' \
+          ORDER BY h.horse_num ASC LIMIT 1) AS honmei_horse, \
+         p.finish_1, p.finish_2, p.finish_3, p.recovery_rate, p.pnl \
+         {FROM_JOIN} \
+         {where_sql} \
+         ORDER BY p.date DESC, p.venue ASC, p.race_num ASC \
+         LIMIT ${limit_ph} OFFSET ${offset_ph}"
+    );
+    let mut select_binds = where_binds.clone();
+    select_binds.push(Bind::Int(filter.limit as i64));
+    select_binds.push(Bind::Int(filter.offset as i64));
+
+    let rows: Vec<SummaryRow> = bind_all::<SummaryRow>(select_sql, &select_binds)
+        .fetch_all(pool)
+        .await?;
+    let summaries = rows
+        .into_iter()
+        .map(summary_from_row)
+        .collect::<Result<Vec<_>>>()?;
+
+    Ok(PredictionSearchResult {
+        total_count: total as u64,
+        summaries,
+    })
+}
+
+/// 印別集計の 1 行（slug + 延べ数 + 1 着 / 複勝圏数）。
+#[derive(sqlx::FromRow)]
+struct MarkStatSqlRow {
+    mark: String,
+    count: i64,
+    win: i64,
+    show: i64,
+}
+
+/// 印の正準順（◎○▲△☆注）。レスポンスの並びを安定させる。
+fn mark_order(m: Mark) -> u8 {
+    match m {
+        Mark::Honmei => 0,
+        Mark::Taikou => 1,
+        Mark::Tanana => 2,
+        Mark::Renge => 3,
+        Mark::Hoshi => 4,
+        Mark::Chui => 5,
+    }
+}
+
+/// 印別の的中率集計（#145）。母集団は結果記録済み（`finish_1 IS NOT NULL`）かつ `mark IS NOT NULL`
+/// の `prediction_horses` 延べ数。`win`=1 着、`show`=複勝圏（finish_1/2/3、NULL は不一致扱い）。
+pub async fn prediction_mark_stats(
+    pool: &PgPool,
+    filter: &MarkStatsFilter,
+) -> Result<Vec<MarkStatRow>> {
+    let mut conds: Vec<String> = vec![
+        "p.finish_1 IS NOT NULL".to_string(),
+        "h.mark IS NOT NULL".to_string(),
+    ];
+    let mut binds: Vec<Bind> = Vec::new();
+    let mut n: u32 = 0;
+
+    if let Some(d) = filter.date_from {
+        n += 1;
+        conds.push(format!("p.date >= ${n}"));
+        binds.push(Bind::Text(date_key(d)));
+    }
+    if let Some(d) = filter.date_to {
+        n += 1;
+        conds.push(format!("p.date <= ${n}"));
+        binds.push(Bind::Text(date_key(d)));
+    }
+    if let Some(v) = filter.venue {
+        n += 1;
+        conds.push(format!("p.venue = ${n}"));
+        binds.push(Bind::Text(v.as_jp().to_string()));
+    }
+
+    let sql = format!(
+        "SELECT h.mark AS mark, COUNT(*) AS count, \
+         COALESCE(SUM(CASE WHEN h.horse_num = p.finish_1 THEN 1 ELSE 0 END), 0) AS win, \
+         COALESCE(SUM(CASE WHEN h.horse_num IN (p.finish_1, p.finish_2, p.finish_3) \
+                          THEN 1 ELSE 0 END), 0) AS show \
+         FROM prediction_horses h \
+         INNER JOIN predictions p ON p.prediction_id = h.prediction_id \
+         WHERE {} \
+         GROUP BY h.mark",
+        conds.join(" AND ")
+    );
+
+    let rows: Vec<MarkStatSqlRow> = bind_all::<MarkStatSqlRow>(sql, &binds)
+        .fetch_all(pool)
+        .await?;
+
+    let mut out: Vec<MarkStatRow> = rows
+        .iter()
+        .filter_map(|r| {
+            Mark::from_slug(&r.mark).map(|m| MarkStatRow {
+                mark: m,
+                count: r.count as u32,
+                win: r.win as u32,
+                show: r.show as u32,
+            })
+        })
+        .collect();
+    out.sort_by_key(|s| mark_order(s.mark));
     Ok(out)
 }

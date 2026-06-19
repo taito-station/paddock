@@ -237,6 +237,321 @@
         }
       }
     },
+    "/api/predictions": {
+      "get": {
+        "tags": [
+          "predictions"
+        ],
+        "summary": "予想の横断検索（一覧）。",
+        "operationId": "search_predictions",
+        "parameters": [
+          {
+            "name": "date_from",
+            "in": "query",
+            "description": "期間開始（`YYYY-MM-DD`。両端含む）。",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "date_to",
+            "in": "query",
+            "description": "期間終了（`YYYY-MM-DD`。両端含む）。",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "venue",
+            "in": "query",
+            "description": "開催場（英字スラッグまたは日本語）。",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "distance_min",
+            "in": "query",
+            "description": "距離下限[m]。",
+            "required": false,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "distance_max",
+            "in": "query",
+            "description": "距離上限[m]。",
+            "required": false,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "surface",
+            "in": "query",
+            "description": "芝/ダート（`turf`/`dirt`）。",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "horse_name",
+            "in": "query",
+            "description": "馬名の部分一致（カナ正規化される）。",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "mark",
+            "in": "query",
+            "description": "印スラッグ（`honmei`/`taikou`/`tanana`/`renge`/`hoshi`/`chui`）。",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "hit",
+            "in": "query",
+            "description": "的中フィルタ（`true`=的中 / `false`=不的中。未指定は全件）。",
+            "required": false,
+            "schema": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "取得件数（既定 50・上限 200）。",
+            "required": false,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "オフセット（既定 0）。",
+            "required": false,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "検索一覧",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PredictionSearchResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "クエリ不正",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "内部エラー",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/predictions/stats/by-mark": {
+      "get": {
+        "tags": [
+          "predictions"
+        ],
+        "summary": "集計の入口（印別の的中率）。",
+        "operationId": "prediction_mark_stats",
+        "parameters": [
+          {
+            "name": "date_from",
+            "in": "query",
+            "description": "期間開始（`YYYY-MM-DD`）。",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "date_to",
+            "in": "query",
+            "description": "期間終了（`YYYY-MM-DD`）。",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "venue",
+            "in": "query",
+            "description": "開催場（英字スラッグまたは日本語）。",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "印別の的中率",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarkStatsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "クエリ不正",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "内部エラー",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/predictions/{prediction_id}": {
+      "get": {
+        "tags": [
+          "predictions"
+        ],
+        "summary": "個別予想（ビューア相当・全項目）。",
+        "operationId": "get_prediction_detail",
+        "parameters": [
+          {
+            "name": "prediction_id",
+            "in": "path",
+            "description": "予想 ID",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "個別予想",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PadPredictionResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "未存在の予想",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "内部エラー",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/races": {
       "get": {
         "tags": [
@@ -1122,6 +1437,67 @@
           }
         }
       },
+      "MarkStatSchema": {
+        "type": "object",
+        "description": "印 1 種の的中率。",
+        "required": [
+          "mark",
+          "count",
+          "win",
+          "show",
+          "win_rate",
+          "show_rate"
+        ],
+        "properties": {
+          "count": {
+            "type": "integer",
+            "format": "int32",
+            "description": "その印が付いた（結果記録済みの）馬の延べ数。",
+            "minimum": 0
+          },
+          "mark": {
+            "type": "string",
+            "description": "印スラッグ（`honmei` 等）。"
+          },
+          "show": {
+            "type": "integer",
+            "format": "int32",
+            "description": "複勝圏（3 着内）に入った延べ数。",
+            "minimum": 0
+          },
+          "show_rate": {
+            "type": "number",
+            "format": "double",
+            "description": "複勝圏到達率（`show / count`。予想入力の `show_prob` とは別概念）。"
+          },
+          "win": {
+            "type": "integer",
+            "format": "int32",
+            "description": "1 着に入った延べ数。",
+            "minimum": 0
+          },
+          "win_rate": {
+            "type": "number",
+            "format": "double",
+            "description": "1 着率（`win / count`）。"
+          }
+        }
+      },
+      "MarkStatsResponse": {
+        "type": "object",
+        "description": "`GET /api/predictions/stats/by-mark` のレスポンス。",
+        "required": [
+          "by_mark"
+        ],
+        "properties": {
+          "by_mark": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MarkStatSchema"
+            }
+          }
+        }
+      },
       "OddsRefreshResponse": {
         "type": "object",
         "description": "`POST .../odds:refresh` のレスポンス。",
@@ -1136,6 +1512,181 @@
           },
           "race_id": {
             "type": "string"
+          }
+        }
+      },
+      "PadPredictionResponse": {
+        "type": "object",
+        "description": "`GET /api/predictions/{prediction_id}` のレスポンス（個別予想・全項目）。",
+        "required": [
+          "prediction_id",
+          "date",
+          "venue",
+          "race_num",
+          "horses",
+          "bets"
+        ],
+        "properties": {
+          "bets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PredictionBetSchema"
+            }
+          },
+          "budget": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "commentary": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "date": {
+            "type": "string",
+            "format": "date"
+          },
+          "horses": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PredictionHorseSchema"
+            }
+          },
+          "prediction_id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "race_num": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "result": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PredictionResultSchema"
+              }
+            ]
+          },
+          "strategy_note": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "venue": {
+            "type": "string"
+          }
+        }
+      },
+      "PredictionBetSchema": {
+        "type": "object",
+        "description": "買い目 1 点。",
+        "required": [
+          "bet_type",
+          "combination",
+          "amount"
+        ],
+        "properties": {
+          "amount": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "bet_type": {
+            "type": "string",
+            "description": "券種（`単勝`/`複勝`/`馬連`/`ワイド`/`馬単`/`3連複`/`3連単`）。"
+          },
+          "combination": {
+            "type": "string",
+            "description": "組合せ（馬番のハイフン連結。例 `7` / `7-14` / `7-14-13`）。"
+          }
+        }
+      },
+      "PredictionHorseSchema": {
+        "type": "object",
+        "description": "予想 1 頭分（印・確率・単勝/人気・短評）。",
+        "required": [
+          "horse_num",
+          "horse_name"
+        ],
+        "properties": {
+          "comment": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "horse_name": {
+            "type": "string"
+          },
+          "horse_num": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "jockey": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "mark": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "印スラッグ（`honmei`/`taikou`/`tanana`/`renge`/`hoshi`/`chui`）。無印は `null`。"
+          },
+          "place_prob": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "popularity": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "show_prob": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "win_odds": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "win_prob": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
           }
         }
       },
@@ -1155,6 +1706,182 @@
           },
           "race_id": {
             "type": "string"
+          }
+        }
+      },
+      "PredictionResultSchema": {
+        "type": "object",
+        "description": "レース結果（答え合わせ後にのみ付く）。",
+        "required": [
+          "finish"
+        ],
+        "properties": {
+          "finish": {
+            "type": "array",
+            "items": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int32",
+              "minimum": 0
+            },
+            "description": "`[finish_1, finish_2, finish_3]`（馬番。各要素は `null` 可）。"
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "pnl": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "recovery_rate": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          }
+        }
+      },
+      "PredictionSearchResponse": {
+        "type": "object",
+        "description": "`GET /api/predictions` のレスポンス。",
+        "required": [
+          "total_count",
+          "limit",
+          "offset",
+          "predictions"
+        ],
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "offset": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "predictions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PredictionSummarySchema"
+            }
+          },
+          "total_count": {
+            "type": "integer",
+            "format": "int64",
+            "description": "フィルタ適用後の総件数（ページング用）。",
+            "minimum": 0
+          }
+        }
+      },
+      "PredictionSummarySchema": {
+        "type": "object",
+        "description": "検索一覧の 1 要素（サマリ）。馬・買い目の全量は持たず、個別取得で補う。",
+        "required": [
+          "prediction_id",
+          "date",
+          "venue",
+          "race_num"
+        ],
+        "properties": {
+          "date": {
+            "type": "string",
+            "format": "date"
+          },
+          "distance": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "距離[m]（`races` 結合で得た値。未照合は `null`）。",
+            "minimum": 0
+          },
+          "finish": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int32",
+              "minimum": 0
+            },
+            "description": "`[finish_1, finish_2, finish_3]`（馬番。各要素は `null` 可）。結果未記録なら `null`。"
+          },
+          "hit": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "的中。`recovery_rate > 0`→`true`、結果あり且つ払戻 0 以下→`false`、結果未記録→`null`。"
+          },
+          "honmei_horse": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "印 ◎ の馬名（◎が複数なら horse_num 昇順の先頭。無ければ `null`）。"
+          },
+          "pnl": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "prediction_id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "race_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "レース ID（`races`/`race_cards` 照合済みのときのみ。未照合は `null`）。"
+          },
+          "race_num": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "recovery_rate": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "surface": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "芝/ダート（`turf`/`dirt`。未照合は `null`）。"
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "venue": {
+            "type": "string",
+            "description": "開催場（英字スラッグ。例 `nakayama`）。"
           }
         }
       },
@@ -1482,6 +2209,10 @@
     {
       "name": "analyze",
       "description": "馬 / 騎手 / 調教師 / コースの成績統計"
+    },
+    {
+      "name": "predictions",
+      "description": "予想の横断検索 / 個別取得 / 印別的中率集計"
     },
     {
       "name": "sessions",

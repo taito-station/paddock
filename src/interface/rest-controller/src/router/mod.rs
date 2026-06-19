@@ -1,4 +1,5 @@
 pub mod analyze;
+pub mod prediction;
 pub mod race;
 pub mod session;
 
@@ -18,4 +19,5 @@ where
 {
     race::configure::<R, P, F>(cfg);
     analyze::configure::<R, P, F>(cfg);
+    prediction::configure::<R, P, F>(cfg);
 }
