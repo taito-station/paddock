@@ -215,7 +215,7 @@ impl paddock_use_case::PdfFetcher for NullFetcher {
     fn fetch(&self, _: &str) -> Result<Vec<u8>> {
         unimplemented!()
     }
-    fn fetch_if_exists(&self, _: &str) -> Result<Option<Vec<u8>>> {
+    fn fetch_if_exists(&self, _: &str) -> Result<paddock_use_case::FetchProbe> {
         unimplemented!()
     }
 }

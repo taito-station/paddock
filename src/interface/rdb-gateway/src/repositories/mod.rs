@@ -27,7 +27,7 @@ use paddock_domain::{
 };
 use paddock_use_case::Result as UcResult;
 use paddock_use_case::repository::{
-    CourseStatsRow, FetchDownload, FetchRecord, FetchRepository, FetchStatus,
+    CourseStatsRow, FetchDownload, FetchFailure, FetchRecord, FetchRepository, FetchStatus,
     HorseHistoryRepository, HorseRecencyStats, HorseStatsRow, JockeyStatsRow, MarkStatRow,
     MarkStatsFilter, NameMatchRepository, OddsRepository, PadPredictionRepository,
     PredictBetRecord, PredictRaceConditionRecord, PredictSessionRecord, PredictSessionRepository,
@@ -244,6 +244,12 @@ impl FetchRepository for PostgresRepository {
 
     async fn record_download(&self, record: &FetchDownload) -> UcResult<()> {
         fetch_history::record_download(&self.pool, record)
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn record_failure(&self, record: &FetchFailure) -> UcResult<()> {
+        fetch_history::record_failure(&self.pool, record)
             .await
             .map_err(Into::into)
     }

@@ -1,4 +1,4 @@
-use paddock_use_case::{FetchDownload, FetchRecord, FetchStatus};
+use paddock_use_case::{FetchDownload, FetchFailure, FetchRecord, FetchStatus};
 use sqlx::PgPool;
 
 use crate::error::Result;
@@ -27,25 +27,31 @@ pub async fn status(pool: &PgPool, source_key: &str) -> Result<Option<FetchStatu
     Ok(row.and_then(|(s,)| FetchStatus::from_db_str(&s)))
 }
 
-/// Stage2: ingest 成功を記録する（status='ingested'）。
+/// Stage2: ingest 成功を記録する（status='ingested'）。`failed` 行から成功へ遷移した場合は
+/// `http_status` を NULL へ、`attempts` を 0 へ戻す（`attempts` は「直近の成功以降に積んだ失敗回数」
+/// ＝再試行/バックオフ判断の入力なので、成功で失敗の連なりをリセットする）。
 pub async fn record(pool: &PgPool, record: &FetchRecord) -> Result<()> {
     sqlx::query(
         r#"
-        INSERT INTO fetch_history (source_key, url, races_saved, horses_saved, fetched_at, status)
-        VALUES ($1, $2, $3, $4, $5, 'ingested')
+        INSERT INTO fetch_history
+            (source_key, url, races_saved, horses_saved, fetched_at, status, http_status, last_attempt_at)
+        VALUES ($1, $2, $3, $4, $5, 'ingested', NULL, $5)
         ON CONFLICT(source_key) DO UPDATE SET
             url = excluded.url,
             races_saved = excluded.races_saved,
             horses_saved = excluded.horses_saved,
             fetched_at = excluded.fetched_at,
-            status = 'ingested'
+            status = 'ingested',
+            http_status = NULL,
+            attempts = 0,
+            last_attempt_at = excluded.last_attempt_at
         "#,
     )
     .bind(&record.source_key)
     .bind(&record.url)
     .bind(record.races_saved as i64)
     .bind(record.horses_saved as i64)
-    .bind(record.fetched_at.to_rfc3339())
+    .bind(record.fetched_at)
     .execute(pool)
     .await?;
     Ok(())
@@ -59,23 +65,59 @@ pub async fn record(pool: &PgPool, record: &FetchRecord) -> Result<()> {
 /// 注意: `--force --download-only` で ingested を downloaded へ戻したら、続けて `ingest` で
 /// 消化すること。ingest し忘れると `fetch_history_contains`（ingested 判定）が一時的に false
 /// となり、当該開催が「未取得」に見える窓ができる（再 ingest で解消）。`races` 等の既存行は
-/// 残るため再 ingest は冪等。
+/// 残るため再 ingest は冪等。`failed` 行からの再ダウンロードでは `http_status` を NULL へ、
+/// `attempts` を 0 へ戻す（`record` と同じく成功で失敗の連なりをリセットする）。
 pub async fn record_download(pool: &PgPool, download: &FetchDownload) -> Result<()> {
     sqlx::query(
         r#"
-        INSERT INTO fetch_history (source_key, url, races_saved, horses_saved, fetched_at, status)
-        VALUES ($1, $2, 0, 0, $3, 'downloaded')
+        INSERT INTO fetch_history
+            (source_key, url, races_saved, horses_saved, fetched_at, status, http_status, last_attempt_at)
+        VALUES ($1, $2, 0, 0, $3, 'downloaded', NULL, $3)
         ON CONFLICT(source_key) DO UPDATE SET
             url = excluded.url,
             races_saved = 0,
             horses_saved = 0,
             fetched_at = excluded.fetched_at,
-            status = 'downloaded'
+            status = 'downloaded',
+            http_status = NULL,
+            attempts = 0,
+            last_attempt_at = excluded.last_attempt_at
         "#,
     )
     .bind(&download.source_key)
     .bind(&download.url)
-    .bind(download.downloaded_at.to_rfc3339())
+    .bind(download.downloaded_at)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// 取得失敗（403/404）を `failed` として記録する（#170 / ADR0024 論点1）。新規は `attempts=1`、
+/// 既存行への再失敗は `attempts` を +1 する（再試行/バックオフ判断の入力）。除外フラグではなく
+/// 再試行の入力。`failed` 行は「成功メタを持たない」を不変条件とし、`--force` で既存 ingested/
+/// downloaded 行を境界 403/404 で踏んで failed へ落とす場合も `races_saved`/`horses_saved`/
+/// `fetched_at` を 0/0/NULL へ戻す（旧成功スナップショットを失敗行に残さない。`races` 等の本体は別表）。
+pub async fn record_failure(pool: &PgPool, failure: &FetchFailure) -> Result<()> {
+    sqlx::query(
+        r#"
+        INSERT INTO fetch_history
+            (source_key, url, races_saved, horses_saved, fetched_at, status, http_status, attempts, last_attempt_at)
+        VALUES ($1, $2, 0, 0, NULL, 'failed', $3, 1, $4)
+        ON CONFLICT(source_key) DO UPDATE SET
+            url = excluded.url,
+            races_saved = 0,
+            horses_saved = 0,
+            fetched_at = NULL,
+            status = 'failed',
+            http_status = excluded.http_status,
+            attempts = fetch_history.attempts + 1,
+            last_attempt_at = excluded.last_attempt_at
+        "#,
+    )
+    .bind(&failure.source_key)
+    .bind(&failure.url)
+    .bind(failure.http_status as i32)
+    .bind(failure.attempted_at)
     .execute(pool)
     .await?;
     Ok(())

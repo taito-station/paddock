@@ -8,7 +8,7 @@ use std::io::Read;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use paddock_use_case::pdf_fetcher::PdfFetcher;
+use paddock_use_case::pdf_fetcher::{FetchProbe, PdfFetcher};
 use paddock_use_case::{Error, Result};
 
 /// Max time to establish the TCP/TLS connection before giving up.
@@ -173,17 +173,18 @@ impl PdfFetcher for JraFetcher {
         read_body(body)
     }
 
-    fn fetch_if_exists(&self, url: &str) -> Result<Option<Vec<u8>>> {
+    fn fetch_if_exists(&self, url: &str) -> Result<FetchProbe> {
         match self.get_with_retry(url) {
-            Ok(body) => Ok(Some(read_body(body)?)),
+            Ok(body) => Ok(FetchProbe::Found(read_body(body)?)),
             // A PDF that does not exist is reported as absent so range
             // enumeration can stop / skip instead of erroring. JRA's seiseki
             // directory answers a missing report with 403 (not just 404): a
             // not-yet-published day returns 404, while a never-existing
             // (round/day past the meeting, or a non-running venue) returns 403.
-            // Both mean "no PDF here", so treat them alike — applied uniformly
-            // to result and entry fetches now that they share this fetcher.
-            Err(ureq::Error::StatusCode(403 | 404)) => Ok(None),
+            // Both mean "no PDF here", but we keep the status so the fetch layer
+            // can persist a boundary absence as a retryable `failed` row (#170) —
+            // applied uniformly to result and entry fetches that share this fetcher.
+            Err(ureq::Error::StatusCode(code @ (403 | 404))) => Ok(FetchProbe::Absent(code)),
             Err(e) => Err(to_use_case_error(&e)),
         }
     }
@@ -311,12 +312,14 @@ mod tests {
 
     #[test]
     fn does_not_retry_404_and_reports_absent() {
-        // 404 is "absent", not transient: fetch_if_exists returns None after a
-        // single attempt (no retry).
+        // 404 is "absent", not transient: fetch_if_exists returns Absent(404)
+        // after a single attempt (no retry).
         let (url, count, handle) = serve(vec![R_404]);
         let fetcher = JraFetcher::default();
-        let got = fetcher.fetch_if_exists(&url).expect("404 maps to Ok(None)");
-        assert!(got.is_none());
+        let got = fetcher
+            .fetch_if_exists(&url)
+            .expect("404 maps to Ok(Absent)");
+        assert_eq!(got, FetchProbe::Absent(404));
         assert_eq!(count.load(Ordering::SeqCst), 1, "404 must not be retried");
         handle.join().unwrap();
     }
@@ -338,11 +341,13 @@ mod tests {
     #[test]
     fn treats_403_as_absent_too() {
         // 403 (never-existing meeting) is absent just like 404, uniformly for
-        // result and entry fetches.
+        // result and entry fetches, but keeps its own status.
         let (url, count, handle) = serve(vec![R_403]);
         let fetcher = JraFetcher::default();
-        let got = fetcher.fetch_if_exists(&url).expect("403 maps to Ok(None)");
-        assert!(got.is_none());
+        let got = fetcher
+            .fetch_if_exists(&url)
+            .expect("403 maps to Ok(Absent)");
+        assert_eq!(got, FetchProbe::Absent(403));
         assert_eq!(count.load(Ordering::SeqCst), 1, "403 must not be retried");
         handle.join().unwrap();
     }

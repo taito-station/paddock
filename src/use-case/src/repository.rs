@@ -129,6 +129,9 @@ pub enum FetchStatus {
     Downloaded,
     /// parse+保存まで完了（Stage2 完了）。
     Ingested,
+    /// 取得が 403/404 で失敗した境界開催日（#170 / ADR0024 論点1）。除外フラグではなく
+    /// 「再試行の入力」。`Downloaded`/`Ingested` と違い dedup の skip 対象にしない。
+    Failed,
 }
 
 impl FetchStatus {
@@ -137,6 +140,7 @@ impl FetchStatus {
         match s {
             "downloaded" => Some(FetchStatus::Downloaded),
             "ingested" => Some(FetchStatus::Ingested),
+            "failed" => Some(FetchStatus::Failed),
             _ => None,
         }
     }
@@ -149,6 +153,17 @@ pub struct FetchDownload {
     pub source_key: String,
     pub url: String,
     pub downloaded_at: DateTime<Utc>,
+}
+
+/// 取得失敗（403/404）の記録（#170 / ADR0024 論点1）。再試行の入力として残す。
+/// 時刻は use-case 層が注入する（[`FetchRecord`] と同じ流儀）。
+#[derive(Debug, Clone)]
+pub struct FetchFailure {
+    pub source_key: String,
+    pub url: String,
+    /// 不在を返した HTTP ステータス（403 or 404）。
+    pub http_status: u16,
+    pub attempted_at: DateTime<Utc>,
 }
 
 /// 予想セッション 1 件（1 開催日 = 1 セッション）。途中離脱後の `--resume` と
@@ -544,6 +559,11 @@ pub trait FetchRepository: Send + Sync {
 
     /// Stage1: ダウンロード済み（inbox 保存済み・未 ingest）を記録する。
     fn record_download(&self, record: &FetchDownload) -> impl Future<Output = Result<()>> + Send;
+
+    /// 取得失敗（403/404）を `failed` として記録する（#170 / ADR0024 論点1）。
+    /// `attempts` を +1 し `http_status`/`last_attempt_at` を更新する。除外フラグではなく
+    /// 再試行の入力。逐次 range の「連続成功直後の境界 403/404」だけが呼ぶ（ジャンク回避）。
+    fn record_failure(&self, record: &FetchFailure) -> impl Future<Output = Result<()>> + Send;
 }
 
 /// netkeiba 由来の近走履歴の upsert と、pdf 成績への horse_id backfill。

@@ -181,11 +181,12 @@ async fn run_fetch(app: Arc<setup::App>, pdfs_dir: PathBuf, args: FetchArgs) -> 
     };
 
     println!(
-        "done: {} ingested, {} downloaded, {} skipped, {} not-found, {} empty, {} failed ({} race(s), {} horse result(s))",
+        "done: {} ingested, {} downloaded, {} skipped, {} not-found (of which {} recorded for retry), {} empty, {} failed ({} race(s), {} horse result(s))",
         summary.ingested,
         summary.downloaded,
         summary.skipped,
         summary.not_found,
+        summary.recorded_failed,
         summary.empty,
         summary.failed,
         summary.races_saved,
@@ -242,8 +243,8 @@ async fn run_fetch_single(
                 response.source_key
             );
         }
-        FetchMeetingOutcome::NotFound => {
-            anyhow::bail!("not found: {} (no PDF; HTTP 403/404)", response.url);
+        FetchMeetingOutcome::NotFound { http_status } => {
+            anyhow::bail!("not found: {} (no PDF; HTTP {http_status})", response.url);
         }
         FetchMeetingOutcome::Empty => {
             // Exit non-zero: the PDF exists but yielded 0 races (parser gap). It
@@ -341,7 +342,10 @@ fn accumulate_outcome(
             }
             FetchMeetingOutcome::Downloaded { .. } => summary.downloaded += 1,
             FetchMeetingOutcome::Skipped => summary.skipped += 1,
-            FetchMeetingOutcome::NotFound => summary.not_found += 1,
+            // The parallel grid records no failures (no adjacency knowledge); a
+            // 403/404 is only counted as not-found here. Boundary failures are
+            // persisted by the sequential range path. See fetch_meeting_range (#170).
+            FetchMeetingOutcome::NotFound { .. } => summary.not_found += 1,
             FetchMeetingOutcome::Empty => summary.empty += 1,
         },
         Err(e) => {
@@ -446,7 +450,10 @@ mod tests {
         accumulate_outcome(
             &mut s,
             "k3".into(),
-            Ok(resp("k3", FetchMeetingOutcome::NotFound)),
+            Ok(resp(
+                "k3",
+                FetchMeetingOutcome::NotFound { http_status: 404 },
+            )),
         );
         accumulate_outcome(
             &mut s,

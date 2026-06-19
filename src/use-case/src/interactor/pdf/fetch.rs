@@ -9,9 +9,11 @@ use crate::dto::pdf::fetch::{
 };
 use crate::error::Result;
 use crate::interactor::Interactor;
-use crate::pdf_fetcher::PdfFetcher;
+use crate::pdf_fetcher::{FetchProbe, PdfFetcher};
 use crate::pdf_parser::PdfParser;
-use crate::repository::{FetchDownload, FetchRecord, FetchRepository, RaceRepository};
+use crate::repository::{
+    FetchDownload, FetchFailure, FetchRecord, FetchRepository, FetchStatus, RaceRepository,
+};
 
 impl<R: RaceRepository + FetchRepository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
     /// Fetch a single JRA meeting-day result PDF.
@@ -37,10 +39,15 @@ impl<R: RaceRepository + FetchRepository, P: PdfParser, F: PdfFetcher> Interacto
         let url = spec.pdf_url();
 
         // dedup: Stage1 (download-only) skips a meeting already downloaded *or*
-        // ingested; the one-shot path only skips once it has been ingested.
+        // ingested; the one-shot path only skips once it has been ingested. A
+        // `failed` row (#170) is NOT a skip — it is a re-fetch candidate, so the
+        // Stage1 check matches only the two success states, not `Some(_)`.
         if !force {
             let already = match inbox {
-                Some(_) => self.repository.fetch_status(&source_key).await?.is_some(),
+                Some(_) => matches!(
+                    self.repository.fetch_status(&source_key).await?,
+                    Some(FetchStatus::Downloaded | FetchStatus::Ingested)
+                ),
                 None => self.repository.fetch_history_contains(&source_key).await?,
             };
             if already {
@@ -52,12 +59,19 @@ impl<R: RaceRepository + FetchRepository, P: PdfParser, F: PdfFetcher> Interacto
             }
         }
 
-        let Some(bytes) = self.pdf_fetcher.fetch_if_exists(&url)? else {
-            return Ok(FetchMeetingResponse {
-                source_key,
-                url,
-                outcome: FetchMeetingOutcome::NotFound,
-            });
+        let bytes = match self.pdf_fetcher.fetch_if_exists(&url)? {
+            FetchProbe::Found(bytes) => bytes,
+            // Absent (403/404). Surface the status but do NOT record here: a single
+            // `fetch_meeting` has no adjacency knowledge, so the parallel grid path
+            // never persists junk. Only the sequential range loop, which knows a
+            // day follows confirmed successes, records a boundary absence as failed.
+            FetchProbe::Absent(http_status) => {
+                return Ok(FetchMeetingResponse {
+                    source_key,
+                    url,
+                    outcome: FetchMeetingOutcome::NotFound { http_status },
+                });
+            }
         };
 
         // Stage1: write the raw PDF to inbox and record `downloaded`; no parse.
@@ -138,9 +152,12 @@ impl<R: RaceRepository + FetchRepository, P: PdfParser, F: PdfFetcher> Interacto
     /// Discovery is sequential and uses the per-meeting outcome to drive enumeration:
     /// an `Ingested`/`Skipped` day means "exists, keep going"; a `NotFound` (403/404)
     /// stops the day loop, and a not-found day 1 means the round/venue does not exist
-    /// (stops the round loop too). Per-meeting errors are counted as `failed` and do not abort the
-    /// range. `interval` is awaited after each request that actually hit the network;
-    /// pass `Duration::ZERO` (e.g. in tests) to disable the wait.
+    /// (stops the round loop too). Per-meeting errors are counted as `failed` (the summary
+    /// field) and do not abort the range. A boundary `NotFound` that follows ≥1 existing day
+    /// in the round is also persisted as a retryable `failed` *status* row (#170), best-effort
+    /// (a record failure is logged and skipped, not propagated). `interval` is awaited after
+    /// each request that actually hit the network; pass `Duration::ZERO` (e.g. in tests) to
+    /// disable the wait.
     pub async fn fetch_meeting_range(
         &self,
         range: &MeetingRange,
@@ -170,6 +187,14 @@ impl<R: RaceRepository + FetchRepository, P: PdfParser, F: PdfFetcher> Interacto
 
                 let mut round_exists = true;
                 let mut hit_day_boundary = false;
+                // Count of confirmed-existing days seen so far in this round
+                // (Ingested/Downloaded/Skipped/Empty). A 403/404 that follows ≥1 of
+                // these is the "連続成功直後の単発 403/404" boundary — a day that
+                // plausibly exists (not-yet-published or a transient JRA block), so it
+                // is persisted as a retryable `failed` row. A 403/404 with none before
+                // it (day-1 absent) means the round itself does not exist and is left
+                // unrecorded — keeping grid junk out of fetch_history (#170).
+                let mut existing_in_round = 0u32;
                 for day in days {
                     let spec = MeetingSpec {
                         year: range.year,
@@ -188,6 +213,7 @@ impl<R: RaceRepository + FetchRepository, P: PdfParser, F: PdfFetcher> Interacto
                                 summary.ingested += 1;
                                 summary.races_saved += races_saved;
                                 summary.horses_saved += horses_saved;
+                                existing_in_round += 1;
                                 self.wait(interval).await;
                             }
                             FetchMeetingOutcome::Downloaded { .. } => {
@@ -195,10 +221,12 @@ impl<R: RaceRepository + FetchRepository, P: PdfParser, F: PdfFetcher> Interacto
                                 // Behaves like Ingested for boundary discovery
                                 // ("exists, keep going") and waits after the GET.
                                 summary.downloaded += 1;
+                                existing_in_round += 1;
                                 self.wait(interval).await;
                             }
                             FetchMeetingOutcome::Skipped => {
                                 summary.skipped += 1;
+                                existing_in_round += 1;
                                 // history hit, no network request → no wait
                             }
                             FetchMeetingOutcome::Empty => {
@@ -207,10 +235,53 @@ impl<R: RaceRepository + FetchRepository, P: PdfParser, F: PdfFetcher> Interacto
                                 // The PDF was downloaded (network round-trip), so
                                 // wait afterwards like the other fetched outcomes.
                                 summary.empty += 1;
+                                existing_in_round += 1;
                                 self.wait(interval).await;
                             }
-                            FetchMeetingOutcome::NotFound => {
+                            FetchMeetingOutcome::NotFound { http_status } => {
                                 summary.not_found += 1;
+                                // A boundary absence right after ≥1 existing day in this
+                                // round is a plausibly-real day (not-yet-published or a
+                                // transient block): persist it as a retryable `failed`
+                                // row. A day-1 absence (no prior existing day) is the
+                                // round-nonexistence boundary — leave it unrecorded.
+                                // (A pinned single-day fetch, `range.day = Some`, also has
+                                // existing_in_round == 0, so it is never recorded here.)
+                                //
+                                // Recording is best-effort: a DB hiccup must not abort a
+                                // long bulk fetch (the whole point of #170 is resilience).
+                                // Mirror the sibling write paths, whose errors surface from
+                                // fetch_meeting into the loop's `Err` arm and continue; the
+                                // boundary is re-recorded on the next run, so it stays idempotent.
+                                if existing_in_round > 0 {
+                                    match self
+                                        .repository
+                                        .record_failure(&FetchFailure {
+                                            source_key: spec.source_key(),
+                                            url: spec.pdf_url(),
+                                            http_status,
+                                            attempted_at: chrono::Utc::now(),
+                                        })
+                                        .await
+                                    {
+                                        Ok(()) => {
+                                            summary.recorded_failed += 1;
+                                            tracing::info!(
+                                                source_key = %spec.source_key(),
+                                                http_status,
+                                                "boundary 403/404 recorded as failed (re-fetchable)"
+                                            );
+                                        }
+                                        Err(e) => {
+                                            tracing::warn!(
+                                                source_key = %spec.source_key(),
+                                                http_status,
+                                                error = %e,
+                                                "failed to record boundary 403/404; continuing (re-recorded next run)"
+                                            );
+                                        }
+                                    }
+                                }
                                 self.wait(interval).await;
                                 // No more days in this round; if day 1 is absent the
                                 // round (and any later rounds for this venue) is absent.
