@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::io::{self, Write};
+use std::io::{self, BufRead, Write};
 
 use chrono::{NaiveDate, Utc};
 use paddock_domain::{
@@ -143,7 +143,7 @@ async fn run_race(
         *last_input,
         race.track_condition,
     );
-    let track_condition = read_track_condition(default)?;
+    let track_condition = read_track_condition(&mut io::stdin().lock(), default)?;
     // 入力値は買い目の有無に依存せず記録し、「どの馬場前提で予想したか」を再現可能にする（#80）。
     // ただし resume 等で記録済みと同値なら、updated_at の無駄な更新（監査ノイズ）と
     // 冗長な書き込みを避けて保存を省く。`recorded` は run_session 冒頭でロードした不変の
@@ -179,7 +179,7 @@ async fn run_race(
     let Some(odds) = app.odds.race_odds(&race.race_id).await? else {
         println!();
         println!("オッズ未取得 — このレースはスキップします");
-        let _ = read_line("Enter で次のレースへ > ")?;
+        let _ = read_line(&mut io::stdin().lock(), "Enter で次のレースへ > ")?;
         return Ok(());
     };
 
@@ -241,10 +241,15 @@ async fn run_race(
     }
 
     println!();
-    let bet_amounts: Vec<u64> = match read_choice()? {
+    let bet_amounts: Vec<u64> = match read_choice(&mut io::stdin().lock())? {
         's' => return Ok(()),
         'y' => suggested.clone(),
-        'e' => read_edited_amounts(&portfolio.bets, &suggested, session.balance)?,
+        'e' => read_edited_amounts(
+            &mut io::stdin().lock(),
+            &portfolio.bets,
+            &suggested,
+            session.balance,
+        )?,
         _ => unreachable!("read_choice returns only y/e/s"),
     };
 
@@ -264,6 +269,7 @@ async fn run_race(
             continue;
         }
         let payout = read_u64(
+            &mut io::stdin().lock(),
             &format!(
                 "  {} 賭け¥{} の払戻 (なし: Enter) > ",
                 format_combination(&bet_item.combination),
@@ -424,7 +430,8 @@ fn make_bet_record(
     }
 }
 
-fn read_edited_amounts(
+fn read_edited_amounts<R: BufRead>(
+    reader: &mut R,
     bets: &[PortfolioBet],
     suggested: &[u64],
     budget: u64,
@@ -433,6 +440,7 @@ fn read_edited_amounts(
         let mut amounts = Vec::with_capacity(bets.len());
         for (bet, sug) in bets.iter().zip(suggested) {
             let a = read_u64(
+                reader,
                 &format!(
                     "  {} 推奨¥{} 入力額 > ",
                     format_combination(&bet.combination),
@@ -522,23 +530,34 @@ fn format_signed(v: i128) -> String {
     }
 }
 
-fn read_line(prompt: &str) -> io::Result<String> {
+/// 1 行読み取る。EOF（読み取り 0 バイト）は `None` を返し、呼び出し側が安全側へ畳めるようにする。
+/// 旧実装は EOF でも空文字 `Ok("")` を返していたため、`read_choice` のような再プロンプトループが
+/// EOF 後にブロックせず無限に回り続けて出力が暴走した（#179）。
+fn read_line<R: BufRead>(reader: &mut R, prompt: &str) -> io::Result<Option<String>> {
     print!("{prompt}");
     io::stdout().flush()?;
     let mut buf = String::new();
-    io::stdin().read_line(&mut buf)?;
-    Ok(buf.trim().to_string())
+    if reader.read_line(&mut buf)? == 0 {
+        return Ok(None);
+    }
+    Ok(Some(buf.trim().to_string()))
 }
 
 /// `y` / `e` / `s` のいずれかを読み取る（不正入力は再プロンプト）。
-fn read_choice() -> anyhow::Result<char> {
+/// EOF はスキップ（`s`）扱いにして無限ループを断つ（#179）。
+fn read_choice<R: BufRead>(reader: &mut R) -> anyhow::Result<char> {
     loop {
-        let s = read_line("購入方法を選んでください [y=推奨通り / e=編集 / s=スキップ] > ")?;
-        match s.as_str() {
-            "y" | "Y" => return Ok('y'),
-            "e" | "E" => return Ok('e'),
-            "s" | "S" => return Ok('s'),
-            _ => println!("y / e / s のいずれかを入力してください。"),
+        match read_line(
+            reader,
+            "購入方法を選んでください [y=推奨通り / e=編集 / s=スキップ] > ",
+        )? {
+            None => return Ok('s'),
+            Some(s) => match s.as_str() {
+                "y" | "Y" => return Ok('y'),
+                "e" | "E" => return Ok('e'),
+                "s" | "S" => return Ok('s'),
+                _ => println!("y / e / s のいずれかを入力してください。"),
+            },
         }
     }
 }
@@ -564,13 +583,19 @@ fn resolve_track_condition_default(
 /// 当日の馬場状態を読み取る（#73）。空入力は `default`（DB 値があればそれ、無ければ None=
 /// 馬場項なし）を採用し、`-` は不明（None）を明示する。不正入力は再プロンプト。
 /// 「稍」「不」の略記も受け付ける。
-fn read_track_condition(default: Option<TrackCondition>) -> anyhow::Result<Option<TrackCondition>> {
+/// EOF は空入力と同じくデフォルト採用で抜ける（#179）。
+fn read_track_condition<R: BufRead>(
+    reader: &mut R,
+    default: Option<TrackCondition>,
+) -> anyhow::Result<Option<TrackCondition>> {
     let prompt = match default {
         Some(tc) => format!("馬場状態 [良/稍重/重/不良, 空={tc}, -=不明] > "),
         None => "馬場状態 [良/稍重/重/不良, 空=不明] > ".to_string(),
     };
     loop {
-        let s = read_line(&prompt)?;
+        let Some(s) = read_line(reader, &prompt)? else {
+            return Ok(default);
+        };
         if s.is_empty() {
             return Ok(default);
         }
@@ -588,9 +613,16 @@ fn read_track_condition(default: Option<TrackCondition>) -> anyhow::Result<Optio
 }
 
 /// 非負整数を読み取る。`allow_empty_as_zero` が true なら空入力を 0 とみなす。
-fn read_u64(prompt: &str, allow_empty_as_zero: bool) -> anyhow::Result<u64> {
+/// EOF はこれ以上入力が無いので 0（賭けなし）扱いで抜ける（#179）。
+fn read_u64<R: BufRead>(
+    reader: &mut R,
+    prompt: &str,
+    allow_empty_as_zero: bool,
+) -> anyhow::Result<u64> {
     loop {
-        let s = read_line(prompt)?;
+        let Some(s) = read_line(reader, prompt)? else {
+            return Ok(0);
+        };
         if s.is_empty() && allow_empty_as_zero {
             return Ok(0);
         }
@@ -676,5 +708,44 @@ mod tests {
     fn track_default_all_none_is_none() {
         let d = resolve_track_condition_default(None, None, None);
         assert_eq!(d, None);
+    }
+
+    // --- stdin reader の EOF 挙動（#179: EOF で無限ループしないこと）---
+    use super::{read_choice, read_track_condition, read_u64};
+    use std::io::Cursor;
+
+    #[test]
+    fn read_choice_returns_skip_on_eof() {
+        // 空入力（即 EOF）は無限ループせずスキップ(s)で抜ける。
+        let mut r = Cursor::new(b"".to_vec());
+        assert_eq!(read_choice(&mut r).unwrap(), 's');
+    }
+
+    #[test]
+    fn read_choice_reprompts_then_skips_on_eof() {
+        // 不正入力を1回挟んでも、後続が EOF ならスキップで確定する（再プロンプトが無限化しない）。
+        let mut r = Cursor::new(b"x\n".to_vec());
+        assert_eq!(read_choice(&mut r).unwrap(), 's');
+    }
+
+    #[test]
+    fn read_choice_parses_valid_input() {
+        let mut r = Cursor::new(b"y\n".to_vec());
+        assert_eq!(read_choice(&mut r).unwrap(), 'y');
+    }
+
+    #[test]
+    fn read_track_condition_eof_takes_default() {
+        // EOF は空入力と同じくデフォルト採用で抜ける。
+        let mut r = Cursor::new(b"".to_vec());
+        let d = read_track_condition(&mut r, Some(TrackCondition::Good)).unwrap();
+        assert_eq!(d, Some(TrackCondition::Good));
+    }
+
+    #[test]
+    fn read_u64_eof_is_zero() {
+        // EOF は「これ以上入力なし」= 0（賭けなし）で抜ける。
+        let mut r = Cursor::new(b"".to_vec());
+        assert_eq!(read_u64(&mut r, "> ", false).unwrap(), 0);
     }
 }
