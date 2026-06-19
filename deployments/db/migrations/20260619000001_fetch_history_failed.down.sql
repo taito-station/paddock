@@ -14,6 +14,10 @@ ALTER TABLE fetch_history
     ADD CONSTRAINT fetch_history_status_check
         CHECK (status IN ('downloaded', 'ingested'));
 
+-- ::text は timestamptz を ' ' 区切り（例 '2026-06-19 00:00:00+00'）で出力し、元の
+-- to_rfc3339()（'T' 区切り）と書式が完全一致しない＝厳密には非可逆。ただし
+-- fetch_history.fetched_at を読み戻して RFC3339 でパースする消費者はコード上存在せず
+-- （write-only、dedup は status 列で判定）、ロールバック後も実害は無い。
 ALTER TABLE fetch_history
     ALTER COLUMN fetched_at TYPE TEXT USING fetched_at::text,
     ALTER COLUMN fetched_at SET NOT NULL;

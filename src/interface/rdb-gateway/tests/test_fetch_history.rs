@@ -189,3 +189,30 @@ async fn failure_then_download_transitions_and_clears_http_status(pool: sqlx::Pg
     assert_eq!(http_status, None, "成功遷移で http_status はクリアされる");
     assert_eq!(attempts, 0, "成功遷移で attempts（失敗の連なり）はリセットされる");
 }
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn record_failure_over_ingested_clears_success_metadata(pool: sqlx::PgPool) {
+    // --force で既存 ingested 行（races_saved>0, fetched_at 有り）を境界 403 で踏むケース。
+    // failed 行は「成功メタを持たない」を不変条件とするため、races_saved/horses_saved/fetched_at
+    // が 0/0/NULL へ戻ることを確認する（旧成功スナップショットを失敗行に残さない）。
+    let repo = PostgresRepository::new(pool.clone());
+    let key = "2026-2-tokyo-12";
+
+    repo.record_fetch(&record(key, 12, 180)).await.unwrap();
+    repo.record_failure(&failure(key, 403)).await.unwrap();
+
+    assert_eq!(
+        repo.fetch_status(key).await.unwrap(),
+        Some(FetchStatus::Failed)
+    );
+    let row: (i64, i64, Option<chrono::DateTime<chrono::Utc>>) = sqlx::query_as(
+        "SELECT races_saved, horses_saved, fetched_at FROM fetch_history WHERE source_key = $1",
+    )
+    .bind(key)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(row.0, 0, "failed 行は races_saved を残さない");
+    assert_eq!(row.1, 0, "failed 行は horses_saved を残さない");
+    assert_eq!(row.2, None, "failed 行は fetched_at を NULL にする");
+}

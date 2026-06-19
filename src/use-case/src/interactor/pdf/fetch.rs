@@ -242,21 +242,42 @@ impl<R: RaceRepository + FetchRepository, P: PdfParser, F: PdfFetcher> Interacto
                                 // transient block): persist it as a retryable `failed`
                                 // row. A day-1 absence (no prior existing day) is the
                                 // round-nonexistence boundary — leave it unrecorded.
+                                // (A pinned single-day fetch, `range.day = Some`, also has
+                                // existing_in_round == 0, so it is never recorded here.)
+                                //
+                                // Recording is best-effort: a DB hiccup must not abort a
+                                // long bulk fetch (the whole point of #170 is resilience).
+                                // Mirror the sibling write paths, whose errors surface from
+                                // fetch_meeting into the loop's `Err` arm and continue; the
+                                // boundary is re-recorded on the next run, so it stays idempotent.
                                 if existing_in_round > 0 {
-                                    self.repository
+                                    match self
+                                        .repository
                                         .record_failure(&FetchFailure {
                                             source_key: spec.source_key(),
                                             url: spec.pdf_url(),
                                             http_status,
                                             attempted_at: chrono::Utc::now(),
                                         })
-                                        .await?;
-                                    summary.recorded_failed += 1;
-                                    tracing::info!(
-                                        source_key = %spec.source_key(),
-                                        http_status,
-                                        "boundary 403/404 recorded as failed (re-fetchable)"
-                                    );
+                                        .await
+                                    {
+                                        Ok(()) => {
+                                            summary.recorded_failed += 1;
+                                            tracing::info!(
+                                                source_key = %spec.source_key(),
+                                                http_status,
+                                                "boundary 403/404 recorded as failed (re-fetchable)"
+                                            );
+                                        }
+                                        Err(e) => {
+                                            tracing::warn!(
+                                                source_key = %spec.source_key(),
+                                                http_status,
+                                                error = %e,
+                                                "failed to record boundary 403/404; continuing (re-recorded next run)"
+                                            );
+                                        }
+                                    }
                                 }
                                 self.wait(interval).await;
                                 // No more days in this round; if day 1 is absent the

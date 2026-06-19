@@ -93,8 +93,10 @@ pub async fn record_download(pool: &PgPool, download: &FetchDownload) -> Result<
 }
 
 /// 取得失敗（403/404）を `failed` として記録する（#170 / ADR0024 論点1）。新規は `attempts=1`、
-/// 既存行への再失敗は `attempts` を +1 する（再試行/バックオフ判断の入力）。`fetched_at` は
-/// 成功時のみ入る値なので失敗では触らない（新規は NULL）。除外フラグではなく再試行の入力。
+/// 既存行への再失敗は `attempts` を +1 する（再試行/バックオフ判断の入力）。除外フラグではなく
+/// 再試行の入力。`failed` 行は「成功メタを持たない」を不変条件とし、`--force` で既存 ingested/
+/// downloaded 行を境界 403/404 で踏んで failed へ落とす場合も `races_saved`/`horses_saved`/
+/// `fetched_at` を 0/0/NULL へ戻す（旧成功スナップショットを失敗行に残さない。`races` 等の本体は別表）。
 pub async fn record_failure(pool: &PgPool, failure: &FetchFailure) -> Result<()> {
     sqlx::query(
         r#"
@@ -103,6 +105,9 @@ pub async fn record_failure(pool: &PgPool, failure: &FetchFailure) -> Result<()>
         VALUES ($1, $2, 0, 0, NULL, 'failed', $3, 1, $4)
         ON CONFLICT(source_key) DO UPDATE SET
             url = excluded.url,
+            races_saved = 0,
+            horses_saved = 0,
+            fetched_at = NULL,
             status = 'failed',
             http_status = excluded.http_status,
             attempts = fetch_history.attempts + 1,
