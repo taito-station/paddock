@@ -23,17 +23,28 @@ pub fn decode_euc_jp(bytes: &[u8], context: &str) -> String {
 
 /// `Content-Type` の charset ラベル（無ければ `None`）に従って HTML 本文をデコードする。
 ///
-/// netkeiba はホストで本文エンコーディングが異なる: `race.netkeiba.com`（出馬表・結果・
-/// オッズ）は `charset=UTF-8` を明示する一方、`db.netkeiba.com`（馬個別成績）は charset を
-/// 返さず本文は EUC-JP。そのため charset 不明時は **EUC-JP にフォールバック**する。
-/// EUC-JP 固定デコードは race.netkeiba.com の UTF-8 化で文字化けする回帰を起こしていた。
+/// netkeiba はホストで本文エンコーディングが異なる: `race.netkeiba.com`（出馬表・結果）は
+/// `charset=UTF-8` を明示する一方、`db.netkeiba.com`（馬個別成績）は charset を返さず本文は
+/// EUC-JP。そのため charset 不明時は **EUC-JP にフォールバック**する。EUC-JP 固定デコードは
+/// race.netkeiba.com の UTF-8 化で文字化けする回帰を起こしていた。
+/// （オッズ API は UTF-8 JSON で本関数を通らず別経路でデコードする。）
 ///
-/// 解釈できないバイトがあれば取得元 `context` と採用エンコーディングを添えて警告し、
-/// 不正バイトは置換文字（U+FFFD）へ lossy 変換して panic しない。
+/// charset ラベルは付くが `encoding_rs` が解決できない（未知・タイポ等）場合は、無言で
+/// EUC-JP に倒すと UTF-8 本文を化けさせる同種の回帰を見落とすため、`context` とラベルを
+/// 添えて警告してからフォールバックする。解釈できないバイトがあっても置換文字（U+FFFD）へ
+/// lossy 変換して panic しない。
 pub fn decode_html(bytes: &[u8], charset: Option<&str>, context: &str) -> String {
-    let encoding = charset
-        .and_then(|label| Encoding::for_label(label.trim().as_bytes()))
-        .unwrap_or(EUC_JP);
+    let encoding = match charset.map(str::trim).filter(|label| !label.is_empty()) {
+        Some(label) => Encoding::for_label(label.as_bytes()).unwrap_or_else(|| {
+            tracing::warn!(
+                context,
+                charset = label,
+                "未知の charset ラベル。EUC-JP にフォールバックする（誤デコードの可能性）"
+            );
+            EUC_JP
+        }),
+        None => EUC_JP,
+    };
     let (decoded, _, had_errors) = encoding.decode(bytes);
     if had_errors {
         tracing::warn!(
@@ -97,6 +108,17 @@ mod tests {
         let (euc, _, had_errors) = EUC_JP.encode("競走成績");
         assert!(!had_errors);
         assert_eq!(decode_html(&euc, None, "horse/result"), "競走成績");
+    }
+
+    #[test]
+    fn decode_html_falls_back_to_euc_jp_for_unresolvable_label() {
+        // charset ラベルは付くが encoding_rs が解決できない（未知）場合も EUC-JP に倒す
+        // （warn を出した上でのフォールバック。挙動として EUC-JP デコードになることを確認）。
+        let (euc, _, _) = EUC_JP.encode("競走成績");
+        assert_eq!(
+            decode_html(&euc, Some("not-a-real-charset"), "horse/result"),
+            "競走成績"
+        );
     }
 
     #[test]

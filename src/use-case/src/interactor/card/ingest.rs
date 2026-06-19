@@ -100,6 +100,9 @@ impl<R: RaceCardRepository + OddsRepository + FetchRepository, S: NetkeibaScrape
         //    本コマンドの主目的（card 保存と後続の近走取り込み #103）を巻き添えにしない。
         //    オッズ無し＝EV/Kelly が出ないだけで、当日朝に再取得すればよい（fail-closed な
         //    #100 status ゲート自体は据え置き＝yoso オッズは保存しない）。
+        //    yoso だけでなくネットワーク断・5xx 等の想定外失敗も同様に握り潰すのは意図的:
+        //    odds は実行ごとに取り直す揮発データで永続欠落にはならず、card+近走（再取得が
+        //    高コストで主目的）を odds の一時障害で止めない方が運用上正しいため。warn は残す。
         let odds = self.scraper.fetch_win_place_odds(netkeiba_id).unwrap_or_else(|e| {
             tracing::warn!(%netkeiba_id, error = %e, "単複オッズの取得に失敗（未発売/想定外status等）、オッズ無しで card+近走取り込みを継続");
             Default::default()

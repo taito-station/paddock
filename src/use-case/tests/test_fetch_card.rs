@@ -130,8 +130,10 @@ impl NetkeibaScraper for FakeScraper {
     }
     fn fetch_win_place_odds(&self, _race_id: &str) -> Result<FetchedOdds> {
         if self.win_err {
+            // 実経路（netkeiba-scraper Error::Parse → use-case Error::Internal、
+            // From で "netkeiba parse failed: " を前置）と同じ variant・文言で模す。
             return Err(paddock_use_case::Error::Internal(
-                "odds API が想定外の status を返しました: status=yoso".into(),
+                "netkeiba parse failed: odds API が想定外の status を返しました: status=yoso".into(),
             ));
         }
         Ok(FetchedOdds {
@@ -383,6 +385,36 @@ async fn win_place_fetch_error_still_saves_card() {
     );
     // card 取得時の horse_id は返る（近走取り込みの再利用キーが失われない）。
     assert_eq!(resp.horse_ids, vec!["2020000001", "2020000002"]);
+}
+
+#[tokio::test]
+async fn win_place_fetch_error_still_saves_exotic_odds() {
+    // 単複取得が失敗しても、別 API の組合せ券種が取れていればそれだけは保存される
+    // （単複と組合せのベストエフォートは互いに独立。前日 yoso でも exotic が出るケースの担保）。
+    let h = |n: u32| HorseNum::try_from(n).unwrap();
+    let exotic = FetchedExoticOdds {
+        quinella: vec![FetchedComboOdds {
+            combination: Pair::try_from((h(4), h(7))).unwrap(),
+            odds: 21.6,
+            popularity: None,
+        }],
+        ..FetchedExoticOdds::default()
+    };
+    let scraper = FakeScraper::new(vec![win_odds(1, 7.9, 3)])
+        .with_exotic(exotic)
+        .with_win_err();
+    let interactor = CardInteractor::new(RecordingRepo::with_already(false), scraper);
+
+    let resp = interactor.ingest(NK_ID, race_id(), false).await.unwrap();
+
+    assert!(resp.card_saved);
+    assert_eq!(resp.odds_saved, 1, "単複は失敗で 0、馬連 1 のみ保存");
+    let odds = interactor.repo.saved_odds.lock().unwrap();
+    let rows = &odds[0].rows;
+    assert!(
+        rows.iter().all(|r| r.bet_type == "quinella"),
+        "単複行は無く組合せ券種のみ"
+    );
 }
 
 #[tokio::test]
