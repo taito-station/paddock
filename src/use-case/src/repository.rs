@@ -2,9 +2,9 @@ use core::future::Future;
 
 use chrono::{DateTime, NaiveDate, Utc};
 use paddock_domain::{
-    BetType, HorseId, HorseName, JockeyName, OrderedPair, OrderedTriple, PadPrediction, Pair, Race,
-    RaceCard, RaceId, RaceOdds, RecentRun, StandardTimes, Surface, TrackCondition, TrainerName,
-    Triple, Venue,
+    BetType, HorseId, HorseName, JockeyName, Mark, OrderedPair, OrderedTriple, PadPrediction, Pair,
+    Race, RaceCard, RaceId, RaceOdds, RecentRun, StandardTimes, Surface, TrackCondition,
+    TrainerName, Triple, Venue,
 };
 
 use crate::error::Result;
@@ -261,6 +261,94 @@ pub struct PredictBetRecord {
 pub struct PredictRaceConditionRecord {
     pub race_id: RaceId,
     pub track_condition: Option<TrackCondition>,
+}
+
+/// 予想横断検索（#145）のフィルタ。指定された軸のみ AND で絞り、未指定（None）は素通し。
+/// `limit` / `offset` はページング。`horse_name` は正規化済み・未エスケープの素の文字列を渡し、
+/// gateway 側で LIKE のワイルドカードをリテラル化する。
+#[derive(Debug, Clone)]
+pub struct PredictionFilter {
+    pub date_from: Option<NaiveDate>,
+    pub date_to: Option<NaiveDate>,
+    pub venue: Option<Venue>,
+    pub distance_min: Option<u32>,
+    pub distance_max: Option<u32>,
+    pub surface: Option<Surface>,
+    /// 馬名の部分一致（カナ正規化済み）。指定時、その馬を含む予想のみに絞る。
+    pub horse_name: Option<String>,
+    /// 印。指定時、その印を付けた馬を含む予想のみ。`horse_name` と併用すると同一馬が両条件を満たす。
+    pub mark: Option<Mark>,
+    /// 的中フィルタ。`Some(true)`=的中（`recovery_rate > 0`）、`Some(false)`=不的中
+    /// （結果あり且つ払戻 0 以下）、`None`=結果有無を問わず全件。
+    pub hit: Option<bool>,
+    pub limit: u32,
+    pub offset: u32,
+}
+
+/// 検索一覧の 1 行（サマリ）。馬・買い目の全量は持たず、個別取得で補う。
+/// `distance` / `surface` は `races` 結合で得た値（未照合なら `None`）。
+#[derive(Debug, Clone)]
+pub struct PredictionSummaryRow {
+    pub prediction_id: i64,
+    pub date: NaiveDate,
+    pub venue: Venue,
+    pub race_num: u32,
+    pub race_id: Option<String>,
+    pub title: Option<String>,
+    pub distance: Option<u32>,
+    pub surface: Option<Surface>,
+    /// 印 ◎（本命）の馬名（◎が複数なら horse_num 昇順の先頭。無ければ `None`）。
+    pub honmei_horse: Option<String>,
+    /// `[finish_1, finish_2, finish_3]`（馬番）。結果未記録なら `None`。
+    pub finish: Option<[Option<u32>; 3]>,
+    pub recovery_rate: Option<f64>,
+    pub pnl: Option<i64>,
+    /// 的中判定。`recovery_rate > 0` で `Some(true)`、結果あり（`finish_1` あり）かつ払戻 0 以下で
+    /// `Some(false)`、結果未記録なら `None`（`PredictionFilter::hit` フィルタと同じ集合）。
+    pub hit: Option<bool>,
+}
+
+/// 検索結果（サマリ配列 + フィルタ適用後の総件数）。`total_count` で SPA がページャを組む。
+#[derive(Debug, Clone)]
+pub struct PredictionSearchResult {
+    pub total_count: u64,
+    pub summaries: Vec<PredictionSummaryRow>,
+}
+
+/// 印別集計（#145）の母集団フィルタ。母集団は結果記録済み（`finish_1 IS NOT NULL`）の予想に限る。
+#[derive(Debug, Clone, Default)]
+pub struct MarkStatsFilter {
+    pub date_from: Option<NaiveDate>,
+    pub date_to: Option<NaiveDate>,
+    pub venue: Option<Venue>,
+}
+
+/// 印 1 種の的中率集計。`count` はその印が付いた（結果記録済みの）馬の延べ数。
+/// `win` = 1 着、`show` = 複勝圏（3 着内）に入った延べ数。
+#[derive(Debug, Clone)]
+pub struct MarkStatRow {
+    pub mark: Mark,
+    pub count: u32,
+    pub win: u32,
+    pub show: u32,
+}
+
+impl MarkStatRow {
+    pub fn win_rate(&self) -> f64 {
+        if self.count == 0 {
+            0.0
+        } else {
+            self.win as f64 / self.count as f64
+        }
+    }
+
+    pub fn show_rate(&self) -> f64 {
+        if self.count == 0 {
+            0.0
+        } else {
+            self.show as f64 / self.count as f64
+        }
+    }
 }
 
 /// 馬・騎手・調教師・コースの成績統計と、標準タイム・近走・確定レース系の読み出し。
@@ -526,6 +614,25 @@ pub trait PadPredictionRepository: Send + Sync {
 
     /// 保存済みの全予想を date / venue / race_num 昇順で返す（生成・検証用）。
     fn list_pad_predictions(&self) -> impl Future<Output = Result<Vec<PadPrediction>>> + Send;
+
+    /// 予想を横断検索する（#145）。`filter` の指定軸のみ AND で絞り、`date DESC, venue, race_num`
+    /// 昇順・`limit`/`offset` でページングしたサマリと、フィルタ適用後の総件数を返す。
+    fn search_predictions(
+        &self,
+        filter: &PredictionFilter,
+    ) -> impl Future<Output = Result<PredictionSearchResult>> + Send;
+
+    /// 予想 1 件を主キー（`prediction_id`）で返す（未存在なら `None`）。個別予想ビュー用。
+    fn find_pad_prediction_by_id(
+        &self,
+        prediction_id: i64,
+    ) -> impl Future<Output = Result<Option<PadPrediction>>> + Send;
+
+    /// 印別の的中率集計を返す（#145）。母集団は結果記録済みの予想で、`filter` で期間・場を絞れる。
+    fn prediction_mark_stats(
+        &self,
+        filter: &MarkStatsFilter,
+    ) -> impl Future<Output = Result<Vec<MarkStatRow>>> + Send;
 }
 
 /// 後方互換のための集約スーパートレイト。全 sub-trait を満たす型に blanket 実装される。

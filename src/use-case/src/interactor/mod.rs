@@ -6,6 +6,7 @@ pub mod horse_history;
 pub mod jockey;
 pub mod odds;
 pub mod pdf;
+pub mod prediction;
 pub mod race;
 pub mod settle;
 pub mod trainer;
