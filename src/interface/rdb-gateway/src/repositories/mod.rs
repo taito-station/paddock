@@ -27,11 +27,12 @@ use paddock_domain::{
 };
 use paddock_use_case::Result as UcResult;
 use paddock_use_case::repository::{
-    CourseStatsRow, FetchRecord, FetchRepository, HorseHistoryRepository, HorseRecencyStats,
-    HorseStatsRow, JockeyStatsRow, MarkStatRow, MarkStatsFilter, NameMatchRepository,
-    OddsRepository, PadPredictionRepository, PredictBetRecord, PredictRaceConditionRecord,
-    PredictSessionRecord, PredictSessionRepository, PredictionFilter, PredictionSearchResult,
-    RaceCardRepository, RaceOddsRecord, RaceRepository, StatsRepository, TrainerStatsRow,
+    CourseStatsRow, FetchDownload, FetchRecord, FetchRepository, FetchStatus,
+    HorseHistoryRepository, HorseRecencyStats, HorseStatsRow, JockeyStatsRow, MarkStatRow,
+    MarkStatsFilter, NameMatchRepository, OddsRepository, PadPredictionRepository,
+    PredictBetRecord, PredictRaceConditionRecord, PredictSessionRecord, PredictSessionRepository,
+    PredictionFilter, PredictionSearchResult, RaceCardRepository, RaceOddsRecord, RaceRepository,
+    StatsRepository, TrainerStatsRow,
 };
 
 use crate::pool::PgPool;
@@ -231,6 +232,18 @@ impl FetchRepository for PostgresRepository {
 
     async fn record_fetch(&self, record: &FetchRecord) -> UcResult<()> {
         fetch_history::record(&self.pool, record)
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn fetch_status(&self, source_key: &str) -> UcResult<Option<FetchStatus>> {
+        fetch_history::status(&self.pool, source_key)
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn record_download(&self, record: &FetchDownload) -> UcResult<()> {
+        fetch_history::record_download(&self.pool, record)
             .await
             .map_err(Into::into)
     }

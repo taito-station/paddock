@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::time::Duration;
 
 use paddock_domain::Venue;
@@ -10,31 +11,45 @@ use crate::error::Result;
 use crate::interactor::Interactor;
 use crate::pdf_fetcher::PdfFetcher;
 use crate::pdf_parser::PdfParser;
-use crate::repository::{FetchRecord, FetchRepository, RaceRepository};
+use crate::repository::{FetchDownload, FetchRecord, FetchRepository, RaceRepository};
 
 impl<R: RaceRepository + FetchRepository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
-    /// Fetch a single JRA meeting-day result PDF, parse it, and store the
-    /// races. The PDF itself is never written to disk — only a fetch-history
-    /// row is kept so the same meeting is not re-ingested on a later run.
+    /// Fetch a single JRA meeting-day result PDF.
     ///
-    /// When `force` is false and the meeting is already in fetch history, the
-    /// fetch is skipped entirely. A non-existent PDF (HTTP 403/404) reports
-    /// [`FetchMeetingOutcome::NotFound`] and is *not* recorded, so it can be
-    /// retried once JRA publishes it.
+    /// Two stages share this method, selected by `inbox` (#147):
+    /// - `inbox = None` (one-shot / Stage2-equivalent): parse in memory and store
+    ///   the races, keeping only a fetch-history row (`ingested`). The PDF is
+    ///   never written to disk. Skipped when already **ingested**.
+    /// - `inbox = Some(dir)` (Stage1, `--download-only`): write the PDF to
+    ///   `dir/{pdf_filename}` and record it `downloaded` **without parsing**, so a
+    ///   later `ingest` run does the parse. Skipped when already downloaded or
+    ///   ingested.
+    ///
+    /// A non-existent PDF (HTTP 403/404) reports [`FetchMeetingOutcome::NotFound`]
+    /// and is *not* recorded, so it can be retried once JRA publishes it.
     pub async fn fetch_meeting(
         &self,
         spec: &MeetingSpec,
         force: bool,
+        inbox: Option<&Path>,
     ) -> Result<FetchMeetingResponse> {
         let source_key = spec.source_key();
         let url = spec.pdf_url();
 
-        if !force && self.repository.fetch_history_contains(&source_key).await? {
-            return Ok(FetchMeetingResponse {
-                source_key,
-                url,
-                outcome: FetchMeetingOutcome::Skipped,
-            });
+        // dedup: Stage1 (download-only) skips a meeting already downloaded *or*
+        // ingested; the one-shot path only skips once it has been ingested.
+        if !force {
+            let already = match inbox {
+                Some(_) => self.repository.fetch_status(&source_key).await?.is_some(),
+                None => self.repository.fetch_history_contains(&source_key).await?,
+            };
+            if already {
+                return Ok(FetchMeetingResponse {
+                    source_key,
+                    url,
+                    outcome: FetchMeetingOutcome::Skipped,
+                });
+            }
         }
 
         let Some(bytes) = self.pdf_fetcher.fetch_if_exists(&url)? else {
@@ -44,6 +59,33 @@ impl<R: RaceRepository + FetchRepository, P: PdfParser, F: PdfFetcher> Interacto
                 outcome: FetchMeetingOutcome::NotFound,
             });
         };
+
+        // Stage1: write the raw PDF to inbox and record `downloaded`; no parse.
+        // Order matters: write the file *before* recording, so a crash between the
+        // two leaves a row-less inbox file that the next run re-downloads (its
+        // `fetch_status` is None) rather than a `downloaded` row pointing at a
+        // missing file. fetch_history is the source of truth; a missing inbox file
+        // for a `downloaded` row is recovered by re-fetching (`--force` or #170).
+        if let Some(inbox_dir) = inbox {
+            let path = inbox_dir.join(spec.pdf_filename());
+            std::fs::create_dir_all(inbox_dir).map_err(|e| {
+                crate::Error::Internal(format!("create inbox dir {}: {e}", inbox_dir.display()))
+            })?;
+            std::fs::write(&path, &bytes)
+                .map_err(|e| crate::Error::Internal(format!("write {}: {e}", path.display())))?;
+            self.repository
+                .record_download(&FetchDownload {
+                    source_key: source_key.clone(),
+                    url: url.clone(),
+                    downloaded_at: chrono::Utc::now(),
+                })
+                .await?;
+            return Ok(FetchMeetingResponse {
+                source_key,
+                url,
+                outcome: FetchMeetingOutcome::Downloaded { path },
+            });
+        }
 
         let races = self.pdf_parser.parse(&bytes)?;
 
@@ -104,6 +146,7 @@ impl<R: RaceRepository + FetchRepository, P: PdfParser, F: PdfFetcher> Interacto
         range: &MeetingRange,
         force: bool,
         interval: Duration,
+        inbox: Option<&Path>,
     ) -> Result<FetchRangeSummary> {
         let venues: Vec<Venue> = match range.venue {
             Some(v) => vec![v],
@@ -136,7 +179,7 @@ impl<R: RaceRepository + FetchRepository, P: PdfParser, F: PdfFetcher> Interacto
                     };
                     let is_first_day = day == 1;
 
-                    match self.fetch_meeting(&spec, force).await {
+                    match self.fetch_meeting(&spec, force, inbox).await {
                         Ok(resp) => match resp.outcome {
                             FetchMeetingOutcome::Ingested {
                                 races_saved,
@@ -145,6 +188,13 @@ impl<R: RaceRepository + FetchRepository, P: PdfParser, F: PdfFetcher> Interacto
                                 summary.ingested += 1;
                                 summary.races_saved += races_saved;
                                 summary.horses_saved += horses_saved;
+                                self.wait(interval).await;
+                            }
+                            FetchMeetingOutcome::Downloaded { .. } => {
+                                // Stage1: the PDF exists and was written to inbox.
+                                // Behaves like Ingested for boundary discovery
+                                // ("exists, keep going") and waits after the GET.
+                                summary.downloaded += 1;
                                 self.wait(interval).await;
                             }
                             FetchMeetingOutcome::Skipped => {

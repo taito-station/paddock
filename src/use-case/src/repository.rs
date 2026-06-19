@@ -121,6 +121,36 @@ pub struct FetchRecord {
     pub fetched_at: DateTime<Utc>,
 }
 
+/// 取得ライフサイクルの状態（#147 fetch/parse ステージ分割）。
+/// `fetch_history` の 1 開催日がどこまで進んだかを表す。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FetchStatus {
+    /// PDF を inbox に保存済みだが未 ingest（Stage1 完了）。
+    Downloaded,
+    /// parse+保存まで完了（Stage2 完了）。
+    Ingested,
+}
+
+impl FetchStatus {
+    /// DB 文字列から復元する。未知の値は `None`。
+    pub fn from_db_str(s: &str) -> Option<Self> {
+        match s {
+            "downloaded" => Some(FetchStatus::Downloaded),
+            "ingested" => Some(FetchStatus::Ingested),
+            _ => None,
+        }
+    }
+}
+
+/// Stage1（ダウンロードのみ）の記録。PDF を inbox に保存しただけで未 ingest。
+/// 時刻は use-case 層が注入する（[`FetchRecord`] と同じ流儀）。
+#[derive(Debug, Clone)]
+pub struct FetchDownload {
+    pub source_key: String,
+    pub url: String,
+    pub downloaded_at: DateTime<Utc>,
+}
+
 /// 予想セッション 1 件（1 開催日 = 1 セッション）。途中離脱後の `--resume` と
 /// 収支サマリ `--summary` のために永続化する。`created_at`/`updated_at` は use-case 層が
 /// 時刻を注入し、gateway を時計から独立に保つ（[`FetchRecord`] と同じ流儀）。
@@ -496,12 +526,24 @@ pub trait OddsRepository: Send + Sync {
 
 /// 取り込み履歴（fetch history）の存在判定・記録。
 pub trait FetchRepository: Send + Sync {
-    /// Whether a meeting-day source key has already been ingested.
+    /// Whether a meeting-day source key has already been **ingested**
+    /// (Stage2 完了)。ダウンロード済み・未 ingest（Stage1 のみ）は `false`。
     fn fetch_history_contains(&self, source_key: &str)
     -> impl Future<Output = Result<bool>> + Send;
 
-    /// Record a successful meeting-day fetch+ingest in the history table.
+    /// Record a successful meeting-day fetch+ingest in the history table
+    /// （status を `ingested` にする。Stage2 完了の記録）。
     fn record_fetch(&self, record: &FetchRecord) -> impl Future<Output = Result<()>> + Send;
+
+    /// 取得ライフサイクルの現在状態を返す（履歴に無ければ `None`）。
+    /// Stage1 の dedup（ダウンロード済み or ingest 済みなら再取得不要）に使う。
+    fn fetch_status(
+        &self,
+        source_key: &str,
+    ) -> impl Future<Output = Result<Option<FetchStatus>>> + Send;
+
+    /// Stage1: ダウンロード済み（inbox 保存済み・未 ingest）を記録する。
+    fn record_download(&self, record: &FetchDownload) -> impl Future<Output = Result<()>> + Send;
 }
 
 /// netkeiba 由来の近走履歴の upsert と、pdf 成績への horse_id backfill。

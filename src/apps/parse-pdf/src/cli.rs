@@ -86,4 +86,11 @@ pub struct FetchArgs {
     /// Re-fetch and re-ingest even if the meeting is already in fetch history.
     #[arg(long)]
     pub force: bool,
+
+    /// Stage1 only: download the PDF(s) into `<pdfs-dir>/results/inbox/` without
+    /// parsing, recording each as `downloaded`. Run `ingest` later (Stage2) to
+    /// parse, store, and remove them. Lets the polite bulk download (`-j 1
+    /// --interval ...`) and the CPU-heavy parse run as separate phases.
+    #[arg(long)]
+    pub download_only: bool,
 }

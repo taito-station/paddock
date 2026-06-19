@@ -28,11 +28,13 @@ async fn main() -> anyhow::Result<()> {
         Some(Command::Fetch(args)) => max_rps_to_interval(args.max_rps)?,
         _ => None,
     };
-    let app = Arc::new(setup::build_app(fetch_min_interval).await?);
+    let built = setup::build_app(fetch_min_interval).await?;
+    let app = Arc::new(built.app);
+    let pdfs_dir = built.pdfs_dir;
 
     match cli.command.unwrap_or(Command::Ingest(cli.ingest)) {
         Command::Ingest(args) => run_ingest(app, args).await,
-        Command::Fetch(args) => run_fetch(app, args).await,
+        Command::Fetch(args) => run_fetch(app, pdfs_dir, args).await,
     }
 }
 
@@ -92,11 +94,8 @@ async fn run_ingest(app: Arc<setup::App>, args: IngestArgs) -> anyhow::Result<()
                     "ingested: {} race(s), {} horse result(s) from {}",
                     response.races_saved, response.horses_saved, source
                 );
-                match move_to_done_if_inbox(&source) {
-                    Ok(Some(dest)) => println!("moved: {} -> {}", source, dest.display()),
-                    Ok(None) => {}
-                    Err(e) => eprintln!("warn: failed to move {source}: {e}"),
-                }
+                // Stage2 finalize (record `ingested` + remove the inbox PDF) is done
+                // inside `ingest_pdf` for meeting files, so nothing to do here (#147).
                 succeeded += 1;
             }
             Err(e) => {
@@ -117,7 +116,7 @@ async fn run_ingest(app: Arc<setup::App>, args: IngestArgs) -> anyhow::Result<()
     Ok(())
 }
 
-async fn run_fetch(app: Arc<setup::App>, args: FetchArgs) -> anyhow::Result<()> {
+async fn run_fetch(app: Arc<setup::App>, pdfs_dir: PathBuf, args: FetchArgs) -> anyhow::Result<()> {
     // Progressive omission: a narrower field requires every broader one.
     if args.day.is_some() && args.round.is_none() {
         anyhow::bail!("--day requires --round (and --venue)");
@@ -133,9 +132,24 @@ async fn run_fetch(app: Arc<setup::App>, args: FetchArgs) -> anyhow::Result<()> 
         None => None,
     };
 
+    // Stage1 (`--download-only`): write PDFs into `<pdfs-dir>/results/inbox/` instead
+    // of parsing them. `None` keeps the one-shot fetch+ingest behavior.
+    let inbox_dir: Option<PathBuf> = args
+        .download_only
+        .then(|| pdfs_dir.join("results").join("inbox"));
+
     // All four fields present → single meeting (preserves the original behavior).
     if let (Some(venue), Some(round), Some(day)) = (venue, args.round, args.day) {
-        return run_fetch_single(app, args.year, venue, round, day, args.force).await;
+        return run_fetch_single(
+            app,
+            args.year,
+            venue,
+            round,
+            day,
+            args.force,
+            inbox_dir.as_deref(),
+        )
+        .await;
     }
 
     // Otherwise → range fetch with a summary.
@@ -156,19 +170,20 @@ async fn run_fetch(app: Arc<setup::App>, args: FetchArgs) -> anyhow::Result<()> 
         );
     }
     let summary = if parallel > 1 {
-        run_fetch_range_parallel(app, range, args.force, parallel).await?
+        run_fetch_range_parallel(app, range, args.force, parallel, inbox_dir).await?
     } else {
         // Sequential: keep the smart 404-boundary discovery and the polite interval.
         let interval = Duration::from_secs_f64(args.interval.max(0.0));
         let span = tracing::info_span!("fetch_range", year = args.year);
-        app.fetch_meeting_range(&range, args.force, interval)
+        app.fetch_meeting_range(&range, args.force, interval, inbox_dir.as_deref())
             .instrument(span)
             .await?
     };
 
     println!(
-        "done: {} ingested, {} skipped, {} not-found, {} empty, {} failed ({} race(s), {} horse result(s))",
+        "done: {} ingested, {} downloaded, {} skipped, {} not-found, {} empty, {} failed ({} race(s), {} horse result(s))",
         summary.ingested,
+        summary.downloaded,
         summary.skipped,
         summary.not_found,
         summary.empty,
@@ -193,6 +208,7 @@ async fn run_fetch_single(
     round: u32,
     day: u32,
     force: bool,
+    inbox: Option<&Path>,
 ) -> anyhow::Result<()> {
     let spec = MeetingSpec {
         year,
@@ -202,7 +218,10 @@ async fn run_fetch_single(
     };
 
     let span = tracing::info_span!("fetch", source_key = %spec.source_key());
-    let response = app.fetch_meeting(&spec, force).instrument(span).await?;
+    let response = app
+        .fetch_meeting(&spec, force, inbox)
+        .instrument(span)
+        .await?;
 
     match response.outcome {
         FetchMeetingOutcome::Ingested {
@@ -214,9 +233,12 @@ async fn run_fetch_single(
                 response.url
             );
         }
+        FetchMeetingOutcome::Downloaded { path } => {
+            println!("downloaded: {} -> {}", response.url, path.display());
+        }
         FetchMeetingOutcome::Skipped => {
             println!(
-                "skipped: {} already ingested (use --force to re-fetch)",
+                "skipped: {} already fetched (use --force to re-fetch)",
                 response.source_key
             );
         }
@@ -248,11 +270,17 @@ async fn run_fetch_single(
 /// to cover every published day.
 ///
 /// Concurrency mirrors `run_ingest` (owned-permit `Semaphore` + `JoinSet`).
+///
+/// Note: this path applies no `--interval` pacing (only the sequential path waits).
+/// `--download-only` reuses it as-is, so a polite bulk download must use `-j 1` for
+/// the inter-request interval; `--max-rps` still caps the peak rate when parallel.
+/// `run_fetch` already prints a note when `--interval` is set with `parallel > 1`.
 async fn run_fetch_range_parallel(
     app: Arc<setup::App>,
     range: MeetingRange,
     force: bool,
     parallel: usize,
+    inbox: Option<PathBuf>,
 ) -> anyhow::Result<FetchRangeSummary> {
     let specs = range.candidate_specs();
     // Mirror run_ingest on the same predicate: pin OCR to one thread per process when
@@ -268,6 +296,7 @@ async fn run_fetch_range_parallel(
 
     for spec in specs {
         let app = Arc::clone(&app);
+        let inbox = inbox.clone();
         let permit = Arc::clone(&semaphore)
             .acquire_owned()
             .await
@@ -277,7 +306,7 @@ async fn run_fetch_range_parallel(
             async move {
                 let _permit = permit;
                 let key = spec.source_key();
-                let result = app.fetch_meeting(&spec, force).await;
+                let result = app.fetch_meeting(&spec, force, inbox.as_deref()).await;
                 (key, result)
             }
             .instrument(span),
@@ -310,6 +339,7 @@ fn accumulate_outcome(
                 summary.races_saved += races_saved;
                 summary.horses_saved += horses_saved;
             }
+            FetchMeetingOutcome::Downloaded { .. } => summary.downloaded += 1,
             FetchMeetingOutcome::Skipped => summary.skipped += 1,
             FetchMeetingOutcome::NotFound => summary.not_found += 1,
             FetchMeetingOutcome::Empty => summary.empty += 1,
@@ -351,43 +381,6 @@ fn pin_ocr_to_single_thread() {
         std::env::set_var("OMP_THREAD_LIMIT", "1");
         std::env::set_var("OMP_NUM_THREADS", "1");
     }
-}
-
-/// Move a successfully ingested file from `<root>/pdfs/<kind>/inbox/<file>` to
-/// `<root>/pdfs/<kind>/done/<file>`. Detection is based on src's parent directory chain,
-/// so it works regardless of CWD and across PDF kinds (results, entries, ...).
-fn move_to_done_if_inbox(source: &str) -> anyhow::Result<Option<PathBuf>> {
-    if source.starts_with("http://") || source.starts_with("https://") {
-        return Ok(None);
-    }
-    let src = Path::new(source);
-    let Ok(canonical_src) = src.canonicalize() else {
-        return Ok(None);
-    };
-    let Some(parent) = canonical_src.parent() else {
-        return Ok(None);
-    };
-    if parent.file_name().and_then(|n| n.to_str()) != Some("inbox") {
-        return Ok(None);
-    }
-    let Some(kind_dir) = parent.parent() else {
-        return Ok(None);
-    };
-    let Some(pdfs_dir) = kind_dir.parent() else {
-        return Ok(None);
-    };
-    if pdfs_dir.file_name().and_then(|n| n.to_str()) != Some("pdfs") {
-        return Ok(None);
-    }
-    let file_name = canonical_src
-        .file_name()
-        .context("source has no file name")?;
-    let done = kind_dir.join("done");
-    std::fs::create_dir_all(&done).with_context(|| format!("create {}", done.display()))?;
-    let dest = done.join(file_name);
-    std::fs::rename(&canonical_src, &dest)
-        .with_context(|| format!("rename {} -> {}", canonical_src.display(), dest.display()))?;
-    Ok(Some(dest))
 }
 
 #[cfg(test)]
@@ -465,6 +458,16 @@ mod tests {
             "k5".into(),
             Ok(resp("k5", FetchMeetingOutcome::Empty)),
         );
+        accumulate_outcome(
+            &mut s,
+            "k6".into(),
+            Ok(resp(
+                "k6",
+                FetchMeetingOutcome::Downloaded {
+                    path: std::path::PathBuf::from("/inbox/k6.pdf"),
+                },
+            )),
+        );
 
         assert_eq!(s.ingested, 1);
         assert_eq!(s.races_saved, 12);
@@ -473,6 +476,7 @@ mod tests {
         assert_eq!(s.not_found, 1);
         assert_eq!(s.failed, 1);
         assert_eq!(s.empty, 1);
+        assert_eq!(s.downloaded, 1);
         // failed meetings retain their key + error so run_fetch can list them.
         assert_eq!(s.failures.len(), 1);
         assert_eq!(s.failures[0].0, "k4");
