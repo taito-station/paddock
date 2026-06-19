@@ -8,6 +8,9 @@
 -- fetched_at は時刻比較のため TEXT(RFC3339) → TIMESTAMPTZ 化し、成功時のみ入る値として NOT NULL を外す
 -- （純 failed 行は成功時刻を持たない）。既存行はすべて RFC3339 文字列なので USING ::timestamptz で変換可。
 
+-- 制約名 fetch_history_status_check は lifecycle migration の `ADD COLUMN status ... CHECK(...)`
+-- が付けた Postgres 自動命名（<table>_<column>_check）。名前ズレ時は DROP が落ちて migration が
+-- 止まる（fail-closed）方が、IF EXISTS で旧 2 値 CHECK を残し 'failed' を黙って弾くより安全。
 ALTER TABLE fetch_history
     DROP CONSTRAINT fetch_history_status_check;
 ALTER TABLE fetch_history

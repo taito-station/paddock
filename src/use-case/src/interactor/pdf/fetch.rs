@@ -152,9 +152,12 @@ impl<R: RaceRepository + FetchRepository, P: PdfParser, F: PdfFetcher> Interacto
     /// Discovery is sequential and uses the per-meeting outcome to drive enumeration:
     /// an `Ingested`/`Skipped` day means "exists, keep going"; a `NotFound` (403/404)
     /// stops the day loop, and a not-found day 1 means the round/venue does not exist
-    /// (stops the round loop too). Per-meeting errors are counted as `failed` and do not abort the
-    /// range. `interval` is awaited after each request that actually hit the network;
-    /// pass `Duration::ZERO` (e.g. in tests) to disable the wait.
+    /// (stops the round loop too). Per-meeting errors are counted as `failed` (the summary
+    /// field) and do not abort the range. A boundary `NotFound` that follows ≥1 existing day
+    /// in the round is also persisted as a retryable `failed` *status* row (#170), best-effort
+    /// (a record failure is logged and skipped, not propagated). `interval` is awaited after
+    /// each request that actually hit the network; pass `Duration::ZERO` (e.g. in tests) to
+    /// disable the wait.
     pub async fn fetch_meeting_range(
         &self,
         range: &MeetingRange,
