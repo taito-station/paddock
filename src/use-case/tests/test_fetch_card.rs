@@ -133,7 +133,8 @@ impl NetkeibaScraper for FakeScraper {
             // 実経路（netkeiba-scraper Error::Parse → use-case Error::Internal、
             // From で "netkeiba parse failed: " を前置）と同じ variant・文言で模す。
             return Err(paddock_use_case::Error::Internal(
-                "netkeiba parse failed: odds API が想定外の status を返しました: status=yoso".into(),
+                "netkeiba parse failed: odds API が想定外の status を返しました: status=yoso"
+                    .into(),
             ));
         }
         Ok(FetchedOdds {
