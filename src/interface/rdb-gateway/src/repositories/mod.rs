@@ -29,10 +29,10 @@ use paddock_use_case::Result as UcResult;
 use paddock_use_case::repository::{
     CourseStatsRow, FetchDownload, FetchRecord, FetchRepository, FetchStatus,
     HorseHistoryRepository, HorseRecencyStats, HorseStatsRow, JockeyStatsRow, MarkStatRow,
-    MarkStatsFilter, NameMatchRepository, OddsRepository, PadPredictionRepository, PredictBetRecord,
-    PredictRaceConditionRecord, PredictSessionRecord, PredictSessionRepository, PredictionFilter,
-    PredictionSearchResult, RaceCardRepository, RaceOddsRecord, RaceRepository, StatsRepository,
-    TrainerStatsRow,
+    MarkStatsFilter, NameMatchRepository, OddsRepository, PadPredictionRepository,
+    PredictBetRecord, PredictRaceConditionRecord, PredictSessionRecord, PredictSessionRepository,
+    PredictionFilter, PredictionSearchResult, RaceCardRepository, RaceOddsRecord, RaceRepository,
+    StatsRepository, TrainerStatsRow,
 };
 
 use crate::pool::PgPool;
