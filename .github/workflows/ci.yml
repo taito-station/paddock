@@ -74,15 +74,46 @@ jobs:
       # （DATABASE_URL は無視される）、スイートは小さく直列でも十分速い。DB クレートを列挙して
       # 分割する方式は、将来別クレートに #[sqlx::test] が増えると取りこぼすため採らない。
       #
-      # pdf-ocr / pdf-parser は crate ごと除外する。両クレートの tests/（test_render.rs /
-      # test_parse.rs）は mutool + tesseract OCR を shell out する統合テストで、OCR 出力が
-      # tesseract のバージョン・言語データに左右されて環境非再現（CI の ubuntu では解析結果が
-      # 0 件になる）ため CI 対象外とする（プロジェクトも重い OCR テスト test_extract を #[ignore]
-      # 済み）。OCR 統合テストの CI 再現可能化は今後のフォローアップ（要 issue 化）。
-      - name: Test (Postgres 接続テストを含むため直列実行 / OCR クレートを除く)
+      # pdf-ocr / pdf-parser はこのジョブから除外し、専用の `ocr-pdf` ジョブ（mupdf 1.25 の
+      # debian:trixie コンテナ）で lib + 統合テストをまとめて実走する。両クレートの統合テスト
+      # （test_render / test_parse）は mutool(mupdf) のテキスト/画像抽出に依存し、ubuntu-latest の
+      # apt mupdf(1.23) では解析が 0 件になり失敗するため（mupdf >= 1.25 が必要。詳細は ADR0026）。
+      - name: Test (Postgres 接続テストを含むため直列実行 / OCR・PDF クレートを除く)
         run: cargo test --locked --workspace --exclude pdf-ocr --exclude pdf-parser -- --test-threads=1
 
-      # 上で crate ごと除外した pdf-ocr / pdf-parser のうち、OCR 非依存のユニットテスト（src/、
-      # 外部ツール不要）は CI でも実走する。除外で純ロジックのカバレッジまで落とさないため。
-      - name: Test (OCR クレートのユニットテストのみ)
-        run: cargo test --locked -p pdf-ocr -p pdf-parser --lib
+  # pdf-ocr / pdf-parser の統合テスト（test_render / test_parse）は mutool(mupdf) のテキスト/画像
+  # 抽出に依存し、mupdf >= 1.25 が必要（ubuntu-latest の apt mupdf は 1.23 でサンプル解析が 0 件に
+  # なり失敗する。検証結果・方針は ADR0026）。mupdf 1.25 を apt で得られる debian:trixie コンテナで
+  # 専用に実走する。これらのクレートは DB を触らないため Postgres サービスは付けない。
+  # tesseract OCR を使う test_extract は決定論性が低いため #[ignore] のままにする（CI 標準では走らない）。
+  ocr-pdf:
+    runs-on: ubuntu-latest
+    container: debian:trixie-slim
+    timeout-minutes: 30
+    steps:
+      # コンテナには git / 証明書 / ビルドツール / mupdf / tesseract が無いので先に入れる。
+      # mupdf-tools は trixie の apt で 1.25 系（パーサが要求する下限を満たす）。
+      - name: Install system deps (mupdf 1.25 / tesseract-jpn / build toolchain)
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            mupdf-tools tesseract-ocr tesseract-ocr-jpn \
+            build-essential pkg-config libssl-dev \
+            git curl ca-certificates
+          mutool -v
+
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+        with:
+          toolchain: "1.96.0" # rust-toolchain.toml と一致させる
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+
+      # lib（OCR 非依存ユニット）+ 統合（test_render の PNG 化 / test_parse の解析値）をまとめて実走。
+      # サンプル PDF は JRA 著作物で repo に含めない（gitignore）。フィクスチャが JRA から取得を試み、
+      # 取得できれば統合テストが走り、取得不可なら graceful skip（ユニットは PDF 不要で常時走る）。
+      - name: Test pdf-ocr / pdf-parser (mupdf-backed 統合テストを含む)
+        run: cargo test --locked -p pdf-ocr -p pdf-parser -- --test-threads=1
