@@ -711,7 +711,8 @@ mod tests {
     }
 
     // --- stdin reader の EOF 挙動（#179: EOF で無限ループしないこと）---
-    use super::{read_choice, read_track_condition, read_u64};
+    use super::{read_choice, read_edited_amounts, read_track_condition, read_u64};
+    use paddock_domain::PortfolioBet;
     use std::io::Cursor;
 
     #[test]
@@ -747,5 +748,44 @@ mod tests {
         // EOF は「これ以上入力なし」= 0（賭けなし）で抜ける。
         let mut r = Cursor::new(b"".to_vec());
         assert_eq!(read_u64(&mut r, "> ", false).unwrap(), 0);
+    }
+
+    #[test]
+    fn read_track_condition_reprompts_then_eof_takes_default() {
+        // 不正入力 → 後続 EOF でも再プロンプトループが無限化せず default で抜ける。
+        let mut r = Cursor::new(b"xxx\n".to_vec());
+        let d = read_track_condition(&mut r, Some(TrackCondition::Firm)).unwrap();
+        assert_eq!(d, Some(TrackCondition::Firm));
+    }
+
+    #[test]
+    fn read_u64_reprompts_then_eof_is_zero() {
+        // 数値でない入力 → 後続 EOF でも無限化せず 0 で抜ける。
+        let mut r = Cursor::new(b"abc\n".to_vec());
+        assert_eq!(read_u64(&mut r, "> ", false).unwrap(), 0);
+    }
+
+    #[test]
+    fn read_edited_amounts_eof_returns_zeros_without_looping() {
+        // 'e'（編集）経路で途中 EOF になっても、全脚 0（賭けなし）を返して
+        // 外側の再プロンプトループ（total>budget）が無限化しない（#179）。
+        let bets = vec![
+            PortfolioBet {
+                combination: BetCombination::Win(horse(1)),
+                stake: 500,
+                odds: None,
+                ev: 0.0,
+            },
+            PortfolioBet {
+                combination: BetCombination::Win(horse(2)),
+                stake: 300,
+                odds: None,
+                ev: 0.0,
+            },
+        ];
+        let suggested = vec![500, 300];
+        let mut r = Cursor::new(b"".to_vec());
+        let amounts = read_edited_amounts(&mut r, &bets, &suggested, 10000).unwrap();
+        assert_eq!(amounts, vec![0, 0]);
     }
 }
