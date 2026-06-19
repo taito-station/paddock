@@ -110,6 +110,11 @@ jobs:
         run: |
           ver=$(mutool -v 2>&1 | grep -oE '[0-9]+\.[0-9]+' | head -1)
           echo "mupdf version: $ver"
+          # 出力フォーマット変化等で版を取れなければ fail-closed（空のまま比較すると誤 PASS する）。
+          if [ -z "$ver" ]; then
+            echo "::error::mutool のバージョンを判定できなかった（出力形式の変化？）。ADR0026 参照"
+            exit 1
+          fi
           major=${ver%%.*}; minor=${ver#*.}; minor=${minor%%.*}
           if [ "$major" -lt 1 ] || { [ "$major" -eq 1 ] && [ "$minor" -lt 25 ]; }; then
             echo "::error::mupdf $ver < 1.25; pdf-parser はサンプルを 0 レースに割る。ADR0026 参照（コンテナ版を上げる）"
