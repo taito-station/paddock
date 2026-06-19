@@ -4,8 +4,12 @@
 確定買い方（¥5,000・ワイド/馬連/3連複を model 確率で重み付け配分・混戦は3連複ボックス追加）を、
 複数開催日の全レースに機械適用して回収率を集計する。混戦の発動条件を切り替えて比較する:
 
+  - box-off            : 混戦を一切発動しない純◎軸ながし（ボックス寄与の対照）
   - baseline           : ◎の model 勝率の 0.70 倍以上が ◎含め4頭以上なら混戦
-  - odds>=X (併用)     : baseline に加え「◎単勝 >= X 倍 かつ band>=3頭」でも混戦扱い
+  - odds>=X/band>=B    : baseline に加え「◎単勝 >= X 倍 かつ band>=B 頭」でも混戦扱い（B は 2/3 を掃引）
+
+回収率の分母は「実際に賭けた額」（賭けられない予算は計上しない）。混戦時 band<3 だと3連複
+ボックスが組成不能で予算が余るため、これを損失計上して特定 variant を不当に不利化しないため。
 
 入力（既定は /tmp、predict-check ハーネスの中間生成物）:
   --races     TSV: date, paddock_id, venue_jp, round, day, race_num, netkeiba_id
@@ -18,12 +22,18 @@
       --pred-dir /tmp --results-dir /tmp --odds-grid 3.0,3.5,4.0
 """
 import argparse
-import html
 import re
 from itertools import combinations
 from pathlib import Path
 
 BUDGET = 5000
+
+
+def band_of(probs):
+    """◎(最大 win_prob)の 0.70 倍以上の馬を勝率降順で返す（◎を含む）。
+    混戦の発動判定（頭数）と3連複ボックスの組成（最大5頭）で同じ band を共有する。"""
+    axis = max(probs, key=lambda n: probs[n])
+    return sorted([n for n in probs if probs[n] >= 0.70 * probs[axis]], key=lambda n: -probs[n])
 
 
 def largest_remainder(weights, units, minu=1):
@@ -37,7 +47,12 @@ def largest_remainder(weights, units, minu=1):
     base = [minu] * n
     rem = units - minu * n
     if rem < 0:
-        return [1 if i < units else 0 for i in range(n)]
+        # 口数が頭数に満たない縮退ケース。重みの高い目から 1 口ずつ配る（先頭順ではなく）。
+        order = sorted(range(n), key=lambda i: weights[i], reverse=True)
+        out = [0] * n
+        for i in range(units):
+            out[order[i]] = 1
+        return out
     ideal = [rem * w / s for w in weights]
     fl = [int(x) for x in ideal]
     alloc = [base[i] + fl[i] for i in range(n)]
@@ -112,6 +127,10 @@ def parse_result(path):
         nums = [int(x) for x in re.findall(r"\d+", re.sub(r"<[^>]+>", " ", combos[0]))]
         yens = [int(x.replace(",", "")) for x in re.findall(r"([\d,]+)円", re.sub(r"<[^>]+>", " ", pays[0]))]
         size = 3 if key == "trio" else 2
+        # 馬番列と払戻列の整合チェック。数字数が size×払戻数と合わなければ（注釈混入・構造変化等）、
+        # 誤対応で払戻を捏造するより当該券種を空にして取りこぼし側へ倒す。
+        if len(nums) != size * len(yens):
+            continue
         for k in range(len(yens)):
             combo = frozenset(nums[k * size:(k + 1) * size])
             if len(combo) == size:
@@ -120,34 +139,44 @@ def parse_result(path):
 
 
 def settle_race(probs, winodds, top3, pay, konsen):
-    """1レースを確定買い方で買って払戻を返す。konsen=True なら3連複ボックス追加。"""
+    """1レースを確定買い方で買い、(払戻, 実際に賭けた金額) を返す。konsen=True なら3連複ボックス追加。
+
+    実消化額（actual stake）を別途返すのは、混戦時に band<3 で3連複ボックスが組成不能だと
+    その券種予算が 1 円も賭けられないため。回収率の分母は「実際に賭けた額」を使い、賭けられない
+    予算を損失計上して特定 variant だけを不当にペナルティすることを避ける（#180 レビュー指摘）。"""
     axis = max(probs, key=lambda n: probs[n])
     parts = sorted([n for n in probs if n != axis], key=lambda n: -probs[n])[:5]
     ret = 0
+    stake = 0
     if konsen:
-        band = sorted([n for n in probs if probs[n] >= 0.70 * probs[axis]], key=lambda n: -probs[n])[:5]
-        combos = list(combinations(band, 3))
+        # ボックスは band（最大5頭）の3連複。band<3 なら combos が空＝この券種は賭けられない。
+        box = band_of(probs)[:5]
+        combos = list(combinations(box, 3))
         bu = largest_remainder([probs[a] * probs[b] * probs[c] for a, b, c in combos], 1500 // 100)
         for (a, b, c), u in zip(combos, bu):
+            stake += u * 100
             ret += u * 100 * pay["trio"].get(frozenset({a, b, c}), 0) // 100
         bw, bm, bf = 1000, 1000, 1500
     else:
         bw, bm, bf = 1500, 1500, 2000
     wp = parts[:3]
     for n, u in zip(wp, largest_remainder([probs[n] for n in wp], bw // 100)):
+        stake += u * 100
         ret += u * 100 * pay["wide"].get(frozenset({axis, n}), 0) // 100
     for n, u in zip(parts, largest_remainder([probs[n] for n in parts], bm // 100)):
+        stake += u * 100
         ret += u * 100 * pay["umaren"].get(frozenset({axis, n}), 0) // 100
     pairs = list(combinations(parts, 2))
     fu = largest_remainder([probs[a] * probs[b] for a, b in pairs], bf // 100)
+    # 3連複ながし（◎軸）はボックスと同一の目を重複購入しうるが、実購入として自然なので許容する。
     for (a, b), u in zip(pairs, fu):
+        stake += u * 100
         ret += u * 100 * pay["trio"].get(frozenset({axis, a, b}), 0) // 100
-    return ret
+    return ret, stake
 
 
 def is_konsen(probs, axis_odds, odds_thresh, odds_band_min=3):
-    axis = max(probs, key=lambda n: probs[n])
-    band = [n for n in probs if probs[n] >= 0.70 * probs[axis]]
+    band = band_of(probs)
     if len(band) >= 4:
         return True
     if (
@@ -188,14 +217,17 @@ def main():
     used = 0
     konsen_detail = {name: [] for name, *_ in variants}
 
+    skipped = 0
     for r in races:
         probs = preds.get(r["date"], {}).get((r["venue"], r["rnum"]))
         wo = winodds.get(r["pid"])
         resf = Path(args.results_dir) / f"res_{r['nk']}.html"
         if not probs or not wo or not resf.exists():
+            skipped += 1
             continue
         top3, pay = parse_result(resf)
         if len(top3) < 3:
+            skipped += 1
             continue
         axis = max(probs, key=lambda n: probs[n])
         axis_odds = wo.get(axis, (None, None))[1]
@@ -207,8 +239,9 @@ def main():
                 k = is_konsen(probs, axis_odds, thr, bm)
             else:
                 k = is_konsen(probs, axis_odds, thr)
-            ret = settle_race(probs, wo, top3, pay, k)
-            agg[name]["stake"] += BUDGET
+            ret, stake = settle_race(probs, wo, top3, pay, k)
+            # 回収率の分母は実際に賭けた額（賭けられない予算は計上しない）。
+            agg[name]["stake"] += stake
             agg[name]["ret"] += ret
             if k:
                 agg[name]["konsen"] += 1
@@ -216,7 +249,7 @@ def main():
                     agg[name]["konsen_hit"] += 1
                 konsen_detail[name].append((r["date"], r["venue"], r["rnum"], axis_odds, ret))
 
-    print(f"対象レース: {used}\n")
+    print(f"対象レース: {used}（データ欠落でスキップ: {skipped}）\n")
     print(f"{'variant':<18} {'回収率':>8} {'損益':>10} {'混戦数':>6} {'混戦的中':>7}")
     for name, *_ in variants:
         a = agg[name]
