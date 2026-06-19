@@ -450,7 +450,10 @@ mod tests {
         accumulate_outcome(
             &mut s,
             "k3".into(),
-            Ok(resp("k3", FetchMeetingOutcome::NotFound { http_status: 404 })),
+            Ok(resp(
+                "k3",
+                FetchMeetingOutcome::NotFound { http_status: 404 },
+            )),
         );
         accumulate_outcome(
             &mut s,

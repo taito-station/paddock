@@ -31,8 +31,8 @@ pub use payout_fetcher::PayoutFetcher;
 pub use pdf_fetcher::{FetchProbe, PdfFetcher};
 pub use pdf_parser::PdfParser;
 pub use repository::{
-    CourseStatsRow, FetchDownload, FetchFailure, FetchRecord, FetchStatus, GroupStat, HorseStatsRow,
-    JockeyStatsRow, MarkStatRow, MarkStatsFilter, OddsRow, PredictBetRecord,
+    CourseStatsRow, FetchDownload, FetchFailure, FetchRecord, FetchStatus, GroupStat,
+    HorseStatsRow, JockeyStatsRow, MarkStatRow, MarkStatsFilter, OddsRow, PredictBetRecord,
     PredictRaceConditionRecord, PredictSessionRecord, PredictionFilter, PredictionSearchResult,
     PredictionSummaryRow, RaceOddsRecord, Repository,
 };

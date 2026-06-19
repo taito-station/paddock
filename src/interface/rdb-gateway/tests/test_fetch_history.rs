@@ -187,7 +187,10 @@ async fn failure_then_download_transitions_and_clears_http_status(pool: sqlx::Pg
     let (status, attempts, http_status, _) = tracking_row(&pool, key).await;
     assert_eq!(status, "downloaded");
     assert_eq!(http_status, None, "成功遷移で http_status はクリアされる");
-    assert_eq!(attempts, 0, "成功遷移で attempts（失敗の連なり）はリセットされる");
+    assert_eq!(
+        attempts, 0,
+        "成功遷移で attempts（失敗の連なり）はリセットされる"
+    );
 }
 
 #[sqlx::test(migrations = "../../../deployments/db/migrations")]

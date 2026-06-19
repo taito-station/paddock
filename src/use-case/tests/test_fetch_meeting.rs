@@ -262,7 +262,10 @@ async fn reports_not_found_and_records_nothing_on_404() {
         .await
         .unwrap();
 
-    assert_eq!(resp.outcome, FetchMeetingOutcome::NotFound { http_status: 404 });
+    assert_eq!(
+        resp.outcome,
+        FetchMeetingOutcome::NotFound { http_status: 404 }
+    );
     assert_eq!(*interactor.repository.saved.lock().unwrap(), 0);
     assert!(interactor.repository.recorded.lock().unwrap().is_empty());
     // A single fetch_meeting never records a failure (no adjacency knowledge).
@@ -378,7 +381,10 @@ async fn download_only_reports_not_found_and_writes_nothing_on_404() {
         .await
         .unwrap();
 
-    assert_eq!(resp.outcome, FetchMeetingOutcome::NotFound { http_status: 404 });
+    assert_eq!(
+        resp.outcome,
+        FetchMeetingOutcome::NotFound { http_status: 404 }
+    );
     assert!(interactor.repository.downloads.lock().unwrap().is_empty());
     assert_eq!(std::fs::read_dir(inbox.path()).unwrap().count(), 0);
 }
@@ -897,7 +903,10 @@ async fn boundary_403_after_successes_records_failed_with_403_status() {
     let failures = interactor.repository.failures.lock().unwrap();
     assert_eq!(failures.len(), 1);
     assert_eq!(failures[0].source_key, "2026-3-nakayama-3");
-    assert_eq!(failures[0].http_status, 403, "403 が 404 に潰れず保持される");
+    assert_eq!(
+        failures[0].http_status, 403,
+        "403 が 404 に潰れず保持される"
+    );
 }
 
 #[tokio::test]
@@ -927,7 +936,10 @@ async fn absent_round_day1_is_not_recorded_as_junk() {
         .unwrap();
 
     assert_eq!(summary.ingested, 2);
-    assert_eq!(summary.recorded_failed, 1, "only the real boundary is recorded");
+    assert_eq!(
+        summary.recorded_failed, 1,
+        "only the real boundary is recorded"
+    );
     let failures = interactor.repository.failures.lock().unwrap();
     assert_eq!(failures.len(), 1);
     assert_eq!(failures[0].source_key, "2026-1-nakayama-3");
