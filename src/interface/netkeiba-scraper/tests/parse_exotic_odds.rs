@@ -47,6 +47,15 @@ fn parses_wide_unordered_bands() {
     assert!((w.odds_high - 9.1).abs() < 1e-9, "high={}", w.odds_high);
     assert_eq!(w.popularity, Some(8));
 
+    // 生キー "0507" が無順序キー "5-7" に正規化されることも個別に固定する。
+    let mid = odds
+        .iter()
+        .find(|o| o.combination.to_key() == "5-7")
+        .expect("pair 5-7");
+    assert!((mid.odds_low - 2.3).abs() < 1e-9, "low={}", mid.odds_low);
+    assert!((mid.odds_high - 2.6).abs() < 1e-9, "high={}", mid.odds_high);
+    assert_eq!(mid.popularity, Some(2));
+
     // 01-02 のような高額帯（カンマ無し）も両端を取り込む。
     let big = odds
         .iter()
