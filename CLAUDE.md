@@ -19,13 +19,16 @@ paddock-fetch-card <12桁race_id>
 ### 2. 予想実行
 
 ```sh
-paddock-predict --date YYYY-MM-DD --budget 5000
-# 全レースを流す場合は標準入力に "\ns\n" を繰り返す
-paddock-analyze predict <race_id> --blend-alpha 0.3   # 最新オッズ込みの model 勝率を出す
+# 1日全レースを予想（通常の予想フロー）
+printf "\ns\n" | paddock-predict --date YYYY-MM-DD --budget 5000
+# 全レースを対話的に流す場合は "\ns\n" を手動で繰り返す
+
+# 個別レースのモデル勝率確認（EV 算出・オッズ確認時）
+paddock-analyze predict <race_id> --blend-alpha 0.3
 ```
 
 - 本番モデル: 市場単勝 α=0.3 ブレンド・m=10 縮約。
-- race_odds に古い `odds=0.0` 行が残ると `find_race_odds` で predict が全停止する。`DELETE FROM race_odds WHERE odds < 1.0` で回避。
+- race_odds に古い `odds=0.0` 行が残ると `find_race_odds` で predict が全停止する。**暫定回避策**: `DELETE FROM race_odds WHERE odds = 0.0`（`0.0` 限定。< 1.0 では誤削除リスクあり）。
 
 ### 3. EV 判定 → 買い目決定
 
@@ -37,8 +40,9 @@ paddock-analyze predict <race_id> --blend-alpha 0.3   # 最新オッズ込みの
 ### 4. 結果取得
 
 ```sh
-# fetch-results は新規日不可。netkeiba から直接パース:
-# https://race.netkeiba.com/race/result.html?race_id=<12桁>（UTF-8、Rank/Num/HorseNameSpan）
+# fetch-results は新規日不可（netkeiba の確定結果ページは当日レース後に生成されるため）。
+# netkeiba から直接パース:
+# https://race.netkeiba.com/race/result.html?race_id=<12桁>（UTF-8, CSS: Rank/Num/HorseNameSpan）
 ```
 
 ### netkeiba エンコーディング
@@ -62,7 +66,7 @@ paddock-analyze predict <race_id> --blend-alpha 0.3   # 最新オッズ込みの
 
 - 判定条件: **◎の model 勝率の 0.70 倍以上の馬が ◎含め 4 頭以上** → 混戦。
 - 混戦時の配分（¥5,000）: **3連複ボックス ¥1,500 / ワイド ¥1,000 / 馬連 ¥1,000 / 3連複◎軸ながし ¥1,500**。
-- ボックス構成: ◎○▲☆の印馬（最大 5 頭）の 3 連複ボックス。組内も確率重み付け、最低 ¥100。
+- ボックス構成: ◎○▲☆の印馬（最大 5 頭）の 3 連複ボックス。組内も確率重み付け、最低 ¥100。印馬が 2 頭以下はボックス不成立（ながし¥1,500 を ◎軸ながしに転用）。6 頭以上は model 勝率上位 5 頭に絞る。
 - **相手を top5 より広げない**（バックテスト 105R で相手拡大は回収率を悪化させると確認済み）。
 - **オッズ条件を混戦判定に加えない**（バックテスト 71R で全閾値で回収悪化と確認済み）。
 
