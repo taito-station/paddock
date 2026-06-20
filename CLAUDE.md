@@ -53,6 +53,8 @@ https://race.netkeiba.com/race/result.html?race_id=<12桁>
 
 ## 買い方ルール
 
+> 現行ルールの決定根拠・棄却記録・バックテスト履歴: [docs/specifications/betting-rule-history.md](docs/specifications/betting-rule-history.md)（ルール変更を検討する時だけ参照。予想実行時は読まなくてよい）
+
 ### 予算・配分（既定）
 
 - **¥5,000/レース**（指定が無ければこれを使う。勝手に小さく組まない）。
