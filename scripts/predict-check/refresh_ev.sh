@@ -29,14 +29,19 @@ PSQL=(psql "$DB_URL" -tA)
 cd "$REPO_ROOT"
 
 # paddock race_id（例 2026-3-tokyo-5-6R）→ netkeiba 12桁 race_id を構成。
+# 本体に正本 `netkeiba_race_id_from_paddock`(src/use-case/src/netkeiba_race_id.rs) があるが
+# CLI 露出が無いため、当スクリプト内で同等の slug→場コード変換を行う（年は pid から取る）。
 nk_id() {
   python3 - "$1" <<'PY'
 import sys
 pid = sys.argv[1]
-_, kai, ven, day, rr = pid.split("-")
-vc = {"sapporo":"01","hakodate":"02","fukushima":"03","niigata":"04","tokyo":"05",
-      "nakayama":"06","chukyo":"07","kyoto":"08","hanshin":"09","kokura":"10"}[ven]
-print(f"2026{vc}{int(kai):02d}{int(day):02d}{int(rr.rstrip('R')):02d}")
+year, kai, ven, day, rr = pid.split("-")  # paddock race_id: {年}-{回}-{場slug}-{日}-{R}R
+vc = {"sapporo": "01", "hakodate": "02", "fukushima": "03", "niigata": "04", "tokyo": "05",
+      "nakayama": "06", "chukyo": "07", "kyoto": "08", "hanshin": "09", "kokura": "10"}.get(ven)
+if vc is None:
+    sys.exit(f"nk_id: 未知の場 slug: {ven}（pid={pid}）")
+# netkeiba race_id = 年 + 場(2) + 回(2) + 日(2) + R(2)。年は決め打ちせず pid から導出する。
+print(f"{year}{vc}{int(kai):02d}{int(day):02d}{int(rr.rstrip('R')):02d}")
 PY
 }
 
@@ -78,8 +83,11 @@ echo "[3/5] exotic TSV（馬連/3連複）"
 
 echo "[4/5] wide TSV（netkeiba type=5）"
 : > "$WORKDIR/wide.tsv"
+: > "$WORKDIR/wide_errors.log"
 for pid in "${PIDS[@]}"; do
-  python3 "$SCRIPT_DIR/fetch_wide.py" "$(nk_id "$pid")" "$pid" >> "$WORKDIR/wide.tsv" 2>/dev/null || true
+  # 取得失敗は無言で捨てず、stderr をログに残しつつ FAIL を可視化する（ワイド欠落は EV を歪めるため）。
+  python3 "$SCRIPT_DIR/fetch_wide.py" "$(nk_id "$pid")" "$pid" >> "$WORKDIR/wide.tsv" \
+    2>>"$WORKDIR/wide_errors.log" || echo "  wide FAIL $pid（詳細: $WORKDIR/wide_errors.log）" >&2
   sleep 1
 done
 

@@ -170,6 +170,9 @@ def build_bets(probs, budget):
     b_box, b_wide, b_ren, b_trio = (int(round(x * scale)) for x in alloc(kon))
     bets = []
     if kon:
+        # 混戦時は「印馬ボックス」と後段の「◎軸ながし」を別レイヤーとして重ねる設計
+        # （◎が飛んでも印が揃えば拾うボックス保険 + ◎軸の本線）。両者で同一組番が
+        # 出ることはあり、その場合は実際にその組へ二重に賭ける意図（金額は加算）。
         box = band_of(probs)[:5]
         combos = list(combinations(box, 3))
         units = largest_remainder([probs[a] * probs[b] * probs[d] for a, b, d in combos],
@@ -193,24 +196,30 @@ def build_bets(probs, budget):
 
 
 def race_roi(probs, bets, wide, qn, tr):
-    """買い目の期待回収率（ROI[%]）と総賭金を返す。"""
+    """買い目の期待回収率（ROI[%]）・総賭金・オッズ欠落の賭金合計を返す。
+
+    オッズが取得できなかった買い目は分子（期待配当）に寄与できないが、分母（stake）には
+    そのまま残す。これは保守的な選択で、欠落分を分母から外すと ROI を楽観方向に水増しして
+    +EV を誤検出するため。欠落額（missing）を返し、呼び出し側で「ROI の信頼度が低い」旨を
+    可視化する。
+    """
+    books = {"wide": wide, "quinella": qn, "trio": tr}
+    probfn = {
+        "wide": lambda cb: p_pair_top3(probs, *cb),
+        "quinella": lambda cb: p_top2_set(probs, *cb),
+        "trio": lambda cb: p_top3_set(probs, cb),
+    }
     ret = 0.0
     stake = 0
+    missing = 0
     for kind, combo, amt in bets:
         stake += amt
-        if kind == "wide":
-            o = wide.get(combo)
-            if o:
-                ret += amt * p_pair_top3(probs, *combo) * o
-        elif kind == "quinella":
-            o = qn.get(combo)
-            if o:
-                ret += amt * p_top2_set(probs, *combo) * o
-        elif kind == "trio":
-            o = tr.get(combo)
-            if o:
-                ret += amt * p_top3_set(probs, combo) * o
-    return (ret / stake * 100 if stake else 0.0), stake
+        o = books[kind].get(combo)
+        if o:
+            ret += amt * probfn[kind](combo) * o
+        else:
+            missing += amt
+    return (ret / stake * 100 if stake else 0.0), stake, missing
 
 
 def print_slip(venue, rnum, ax, h, probs, bets):
@@ -258,22 +267,27 @@ def main():
         if len(probs) < 3:
             continue
         ax, parts, kon, bets = build_bets(probs, args.budget)
-        roi, _ = race_roi(probs, bets, wide.get(m["pid"], {}),
-                          qn.get(m["pid"], {}), tr.get(m["pid"], {}))
+        roi, _, missing = race_roi(probs, bets, wide.get(m["pid"], {}),
+                                   qn.get(m["pid"], {}), tr.get(m["pid"], {}))
         rows.append((roi, m["venue"], m["rnum"], ax, h[ax]["odds"], probs[ax], kon,
-                     h[ax]["name"], h, probs, bets))
+                     h[ax]["name"], missing, h, probs, bets))
 
     rows.sort(key=lambda r: -r[0])
     print(f"=== EV ランキング（¥{args.budget:,}・全3券種ROI） ===")
-    for roi, v, rn, ax, o, p, kon, name, *_ in rows:
+    for roi, v, rn, ax, o, p, kon, name, missing, *_ in rows:
         flag = "✅+EV" if roi >= 100 else " −EV"
         km = "[混戦]" if kon else "    "
+        warn = "  ⚠オッズ欠落" if missing else ""
         print(f"  {flag} ROI{roi:5.0f}%  {v}{rn:02d}R {km} ◎{c(ax)} {name[:8]:<8} "
-              f"単勝{o:>5} model{p:4.1f}%")
+              f"単勝{o:>5} model{p:4.1f}%{warn}")
     pos = [r for r in rows if r[0] >= 100]
     print(f"\n+EV: {len(pos)} 本" + ("" if pos else "（現在ナシ）"))
+    nmiss = sum(1 for r in rows if r[8] > 0)
+    if nmiss:
+        print(f"⚠ オッズ欠落のあるレース {nmiss} 本: ROI は過小評価（買い目の一部に配当が無い）。"
+              f"fetch 失敗や wide_errors.log を確認のこと。")
     if args.slip:
-        for roi, v, rn, ax, o, p, kon, name, h, probs, bets in pos:
+        for roi, v, rn, ax, o, p, kon, name, missing, h, probs, bets in pos:
             print_slip(v, rn, ax, h, probs, bets)
 
 

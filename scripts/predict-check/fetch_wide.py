@@ -37,6 +37,10 @@ def fetch_wide(rid: str):
             hi = float(str(vals[1]).replace(",", ""))
         except (ValueError, IndexError, TypeError):
             continue
+        # ワイドは「下限 <= 上限」の正のレンジで返る。崩れていれば構造変化/異常値として捨てる
+        # （lo>hi のまま mid を取ると誤った中央値になるため）。
+        if lo <= 0 or hi < lo:
+            continue
         out[tuple(sorted((a, b)))] = (lo + hi) / 2
     if not out:
         print(f"[warn] ワイドオッズを抽出できませんでした（発走前で未確定 or 構造変化）: {rid}",
