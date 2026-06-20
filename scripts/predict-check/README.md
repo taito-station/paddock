@@ -102,6 +102,9 @@ python3 scripts/predict-check/strategy_eval.py /tmp/preds.json /tmp/payouts.json
 | `answer_check.py` | preds × results の精度指標（本命的中/Brier/芝ダ別/回収率） |
 | `strategy_eval.py` | preds × payouts の買い方別回収率（軸流し・予算配分・100 円単位, #122） |
 | `konsen_backtest.py` | 混戦判定の閾値バックテスト（¥5,000・確率重み配分・3連複ボックス, #180） |
+| `fetch_wide.py` | netkeiba ライブ（発走前）ワイドオッズ取得（type=5, fetch-card 未対応の補完, #187） |
+| `live_ev.py` | 当日・発走前オッズの全3券種 ROI（期待回収率）評価＋ +EV レースの買い目伝票 |
+| `refresh_ev.sh` | ライブ EV のオーケストレータ（fetch-card→DB→ワイド→predict→`live_ev.py`） |
 
 ## 注意
 
@@ -132,3 +135,43 @@ python3 scripts/predict-check/konsen_backtest.py \
 混戦扱い」案は **不採用**。`box-off 84.0% ≧ baseline(band≥4) 83.9% ＞ オッズ条件併用 79.5〜81.5%` で、
 どの閾値でも回収を悪化させた（回収率の分母を実消化額にした公平な会計でも同じ）。band=2 では
 ボックスが組成不能（3頭未満）で予算が余る。既存 band≥4 ボックスの寄与も中立。詳細は #180 のコメント参照。
+
+## ライブ EV 監視（当日・発走前オッズ）
+
+ブラインド予想→事後答え合わせ（上記）とは別に、**開催当日に発走前の最新オッズで「いま張る価値が
+あるレース」を見つける**ための一連。「高的中・低配当」を避け、**全3券種 ROI（期待回収率）が
++EV（≥100%）のレースだけ張る**方針（買い方は上記戦略評価と同一の確率重み配分・混戦ボックス）。
+
+> このフローの DB アクセスは **Postgres**（`PADDOCK_DB_URL`、本体が SQLite→Postgres 移行済み）。
+> 上のブラインド予想手順にある `sqlite3 data/paddock.db ...` は移行前の記述で、現行は Postgres。
+
+```bash
+# 当日 6-12R を最新オッズで再取得し ROI ランキング＋ +EV レースの買い目伝票を出す。
+# 15 分間隔等で回し、ROI>=100% かつ未走のレースが出たら張る。
+scripts/predict-check/refresh_ev.sh 2026-06-20 6 12 5000
+#                                    └日付      │ │ └1レース予算(円)
+#                                              └─┴ R 範囲（first last）
+```
+
+`refresh_ev.sh` の処理:
+
+1. `fetch-card --force`（netkeiba 最新オッズ → Postgres `race_odds`）
+2. Postgres から馬・単勝・馬連・3連複オッズを TSV 化（`$WORKDIR`、既定 `$TMPDIR/paddock-live-ev`）
+3. `fetch_wide.py`（netkeiba type=5）でワイドを取得（fetch-card 未対応の補完, #187）
+4. `analyze predict --blend-alpha 0.3`（最新オッズ込みの model 勝率）で確率テーブル生成
+5. `live_ev.py` が Plackett-Luce（model 勝率→着順確率）× 実オッズで全3券種 ROI を算出
+
+`live_ev.py` は中間 TSV を直接渡しても単独実行できる（再計算のみ・取得をスキップ）:
+
+```bash
+python3 scripts/predict-check/live_ev.py \
+    --pred $WORKDIR/pred.txt --meta $WORKDIR/meta.tsv --horses $WORKDIR/horses.tsv \
+    --exotic $WORKDIR/exotic.tsv --wide $WORKDIR/wide.tsv --budget 5000 --slip
+```
+
+**実測（2026-06-20 / 21R）**: +EV は函館12R（◎④ 1.7倍 model35% ROI≈125%）のみ。¥10,000 に増額し
+④→⑤→⑦ 本命決着で回収 222%。−EV で見送った断然人気（東京10R 1.7倍 ROI80% 等）は全て不的中 or
+薄配当で、ROI 基準の取捨が利益に直結した。
+
+> ⚠️ ライブ監視では **最新サイクルの判定のみが有効**。オッズで ◎ も +EV 判定も入れ替わるため、
+> 前サイクル/朝のランキングは無効化して扱う。
