@@ -174,6 +174,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/races/{race_id}/recommendations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 買い目推奨（軸流しポートフォリオ, EV/推奨額）。保存オッズ基準。 */
+        get: operations["get_recommendations"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/sessions/{date}": {
         parameters: {
             query?: never;
@@ -566,6 +583,62 @@ export interface components {
             surface: string;
             /** @description 開催場（英字スラッグ。例 `nakayama`）。 */
             venue: string;
+        };
+        /** @description 推奨ポートフォリオ内の 1 買い目。 */
+        RecommendationBet: {
+            /** @description 券種ラベル（`馬連` / `ワイド` / `三連複`）。 */
+            bet_type: string;
+            /** @description 組合せキー（馬連・ワイドは `a-b`、三連複は `a-b-c`）。 */
+            combination: string;
+            /**
+             * Format: double
+             * @description 期待値倍率（`simulate` 単体評価）。odds 未取得なら 0.0。
+             */
+            ev: number;
+            /**
+             * Format: double
+             * @description 払戻倍率（保存オッズ未取得の脚は `null`）。ワイドは下限/上限帯の中点。
+             */
+            odds?: number | null;
+            /**
+             * Format: int64
+             * @description 賭け金（円, 100 円単位）。
+             */
+            stake: number;
+        };
+        /**
+         * @description `GET /api/races/{race_id}/recommendations` のレスポンス。
+         *
+         *     CLI `predict` と同じ軸流しポートフォリオ（馬連＋ワイド＋三連複, #122）を予算内・100 円単位で
+         *     返す。`bets` が空になる原因は 2 通りで、`odds_available` で区別する:
+         *     - `odds_available=false`: 保存オッズ（#51）が無い → SPA は「最新取得」を促す。
+         *     - `odds_available=true` かつ `bets` 空: オッズはあるが予算内で組める買い目が無い（または確率が
+         *       空）＝「該当なし」→ 「最新取得」は出さない。
+         */
+        RecommendationResponse: {
+            /**
+             * Format: int32
+             * @description 軸（予想本命）の馬番。確率が空なら `null`。
+             */
+            axis?: number | null;
+            bets: components["schemas"]["RecommendationBet"][];
+            /**
+             * Format: double
+             * @description 同上の的中確率 [0,1]。
+             */
+            hit_prob?: number | null;
+            /** @description 保存オッズ（#51）の有無。false のとき `bets` は必ず空。true でも予算内で組めなければ空になりうる。 */
+            odds_available: boolean;
+            /** @description 相手（流す先）の馬番。 */
+            partners: number[];
+            race_id: string;
+            /**
+             * Format: double
+             * @description オッズ取得済みの脚に基づく期待回収率（倍率）。買い目が空なら `null`。
+             */
+            roi?: number | null;
+            /** Format: int64 */
+            total_stake: number;
         };
         /** @description `POST /api/sessions/{date}/races/{race_id}/outcome` のリクエスト。 */
         RecordOutcomeRequest: {
@@ -1072,6 +1145,63 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PredictionResponse"];
+                };
+            };
+            /** @description クエリ不正 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description 出馬表が無いレース */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description 内部エラー */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_recommendations: {
+        parameters: {
+            query: {
+                /** @description このレースに配分する予算（円）。1 以上。100 円単位の買い目に配分される。 */
+                budget: number;
+                /** @description 馬場状態（`良` / `稍重` / `重` / `不良`。略記 `稍` / `不` も可）。未指定なら馬場項なし。 */
+                track_condition?: string | null;
+                /** @description 市場オッズ（単勝）とのブレンド係数 `[0,1]`。未指定はモデルのみ（`/prediction` と同義）。 */
+                blend_alpha?: number | null;
+            };
+            header?: never;
+            path: {
+                /** @description レース ID */
+                race_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 予算内の軸流しポートフォリオ（オッズ未保存なら odds_available=false） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecommendationResponse"];
                 };
             };
             /** @description クエリ不正 */

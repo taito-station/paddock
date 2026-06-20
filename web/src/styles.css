@@ -146,3 +146,21 @@ button:disabled {
   margin: 0 0 0.4rem;
   font-size: 0.95rem;
 }
+
+/* key-value 表（収支サマリ）: 左ラベル・右値。 */
+.grid.kv {
+  max-width: 28rem;
+}
+.grid.kv th {
+  text-align: left;
+  background: #f7f7f7;
+  width: 9rem;
+}
+
+.grid a {
+  color: #1565c0;
+  text-decoration: none;
+}
+.grid a:hover {
+  text-decoration: underline;
+}

@@ -12,6 +12,17 @@ export function pct(rate: number): string {
   return `${(rate * 100).toFixed(1)}%`;
 }
 
+// 円表記（3 桁区切り）。例 12345 → "¥12,345"。
+export function yen(n: number): string {
+  return `¥${n.toLocaleString("ja-JP")}`;
+}
+
+// 回収率（%）。総賭け金 0 のときは null（0 除算回避）。
+export function recoveryRate(totalPayout: number, totalBet: number): number | null {
+  if (totalBet === 0) return null;
+  return (totalPayout / totalBet) * 100;
+}
+
 export const SURFACE_JP: Record<string, string> = { turf: "芝", dirt: "ダ" };
 
 // レース一覧の状態バッジ判定（表示と分離してテスト可能にする）。

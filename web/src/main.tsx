@@ -5,6 +5,8 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { Layout } from "./Layout";
 import { RaceList } from "./routes/RaceList";
 import { Analyze } from "./routes/Analyze";
+import { SessionSummary } from "./routes/SessionSummary";
+import { RaceDetail } from "./routes/RaceDetail";
 import "./styles.css";
 
 const queryClient = new QueryClient({
@@ -22,6 +24,11 @@ createRoot(document.getElementById("root")!).render(
           <Route element={<Layout />}>
             <Route index element={<RaceList />} />
             <Route path="analyze" element={<Analyze />} />
+            <Route path="sessions/:date" element={<SessionSummary />} />
+            <Route
+              path="sessions/:date/races/:raceId"
+              element={<RaceDetail />}
+            />
           </Route>
         </Routes>
       </BrowserRouter>
