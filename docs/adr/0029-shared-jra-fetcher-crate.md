@@ -1,4 +1,7 @@
-# ADR 0022: JRA fetcher を共有 crate `jra-fetcher` に集約 (Issue #155)
+# ADR 0029: JRA fetcher を共有 crate `jra-fetcher` に集約 (Issue #155)
+
+> 採番注記: 当初 `0022` で追加されたが [ADR 0022](0022-rest-api-read-server.md)（REST API read 基盤, Issue #33）と
+> 番号が重複していたため、後発の本 ADR を `0029` にリナンバーした（2026-06-20）。内容に変更はない。
 
 ## ステータス
 承認済み（採用）
