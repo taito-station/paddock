@@ -2,7 +2,7 @@
 //!
 //! Both `parse-pdf` and `parse-entries` go through [`JraFetcher`] so the timeout
 //! config, retry policy, "absent" (403/404) detection, and error classification
-//! stay in one place. See ADR 0021 (timeout/retry) and ADR 0022 (consolidation).
+//! stay in one place. See ADR 0021 (timeout/retry) and ADR 0029 (consolidation).
 
 use std::io::Read;
 use std::sync::Mutex;

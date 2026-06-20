@@ -38,4 +38,4 @@ read 基盤（#33, ADR rest-api-read-server）に続き、Web SPA（#34）が予
 - refresh の取得失敗を 200 + 状態で返す方針のため、SPA（#34）は `pending_races` / 未取得フラグを見てリトライ導線を出す前提になる（HTTP エラーでの分岐に頼らない）。
 - `predict_sessions` の一意制約は当面 `date` のまま。将来のマルチユーザー化で `(user_id, date)` へ拡張する前提を崩さない。
 - write API のため回帰検知には Postgres 実行の統合テストが要る（#160 の CI 整備に依存）。
-- 既存 ADR は main に `0022` が 2 ファイル重複している（`0022-rest-api-read-server.md` と `0022-shared-jra-fetcher-crate.md`）。本 ADR は次番 `0023` で採番するが、`0022` 重複の是正は別途リナンバー対象とする（本 Issue のスコープ外）。
+- 採番当時 `0022` が 2 ファイル重複していた（`0022-rest-api-read-server.md` と `0022-shared-jra-fetcher-crate.md`）ため本 ADR は次番 `0023` で採番した。重複は後に是正済み（後発の `jra-fetcher 集約` を ADR `0029` にリナンバー、2026-06-20）。
