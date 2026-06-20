@@ -13,7 +13,7 @@ use paddock_domain::{JockeyName, RaceCard, RaceId, Surface, TrainerName, Venue};
 use paddock_domain::{OrderedPair, OrderedTriple, Pair, Triple};
 use paddock_use_case::netkeiba_scraper::{
     FetchedCard, FetchedComboOdds, FetchedEntry, FetchedExoticOdds, FetchedOdds, FetchedPlaceOdds,
-    FetchedWinOdds, HorsePastRun, NetkeibaScraper, RunnerRef,
+    FetchedWideOdds, FetchedWinOdds, HorsePastRun, NetkeibaScraper, RunnerRef,
 };
 use paddock_use_case::repository::{
     FetchRecord, FetchRepository, OddsRepository, RaceCardRepository, RaceOddsRecord,
@@ -287,6 +287,12 @@ async fn saves_exotic_odds_with_combination_keys() {
     }
     let exotic = FetchedExoticOdds {
         quinella: vec![combo(Pair::try_from((h(4), h(7))).unwrap(), 21.6)],
+        wide: vec![FetchedWideOdds {
+            combination: Pair::try_from((h(4), h(7))).unwrap(),
+            odds_low: 7.8,
+            odds_high: 9.1,
+            popularity: None,
+        }],
         exacta: vec![combo(OrderedPair::try_from((h(7), h(4))).unwrap(), 31.0)],
         trio: vec![combo(Triple::try_from((h(4), h(7), h(13))).unwrap(), 32.9)],
         trifecta: vec![combo(
@@ -299,8 +305,8 @@ async fn saves_exotic_odds_with_combination_keys() {
 
     let resp = interactor.ingest(NK_ID, race_id(), false).await.unwrap();
 
-    // 単勝 1 + 馬連 1 + 馬単 1 + 三連複 1 + 三連単 1 = 5 行。
-    assert_eq!(resp.odds_saved, 5);
+    // 単勝 1 + 馬連 1 + ワイド 1 + 馬単 1 + 三連複 1 + 三連単 1 = 6 行。
+    assert_eq!(resp.odds_saved, 6);
     let odds = interactor.repo.saved_odds.lock().unwrap();
     let rows = &odds[0].rows;
     let key_of = |bt: &str| {
@@ -314,6 +320,11 @@ async fn saves_exotic_odds_with_combination_keys() {
     assert_eq!(key_of("exacta"), "7>4"); // 順序保持
     assert_eq!(key_of("trio"), "4-7-13");
     assert_eq!(key_of("trifecta"), "7>4>13");
+    // ワイドは複勝同様に幅 odds（odds=下限・odds_high=上限）で保存される（#187）。
+    let wide = rows.iter().find(|r| r.bet_type == "wide").unwrap();
+    assert_eq!(wide.combination_key, "4-7");
+    assert!((wide.odds - 7.8).abs() < 1e-9, "low={}", wide.odds);
+    assert_eq!(wide.odds_high, Some(9.1));
 }
 
 #[tokio::test]

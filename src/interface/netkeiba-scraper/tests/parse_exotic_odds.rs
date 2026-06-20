@@ -1,11 +1,12 @@
-//! 組合せ券種オッズ（馬連・馬単・三連複・三連単）のパース網羅テスト（#102）。
+//! 組合せ券種オッズ（馬連・ワイド・馬単・三連複・三連単）のパース網羅テスト（#102, #187）。
 //! fixture のオッズは 2026-06-13 阪神4R の実確定値に基づく。
 
 use netkeiba_scraper::parse::{
-    parse_exacta_odds, parse_quinella_odds, parse_trifecta_odds, parse_trio_odds,
+    parse_exacta_odds, parse_quinella_odds, parse_trifecta_odds, parse_trio_odds, parse_wide_odds,
 };
 
 const QUINELLA: &str = include_str!("fixtures/odds_quinella.json");
+const WIDE: &str = include_str!("fixtures/odds_wide.json");
 const EXACTA: &str = include_str!("fixtures/odds_exacta.json");
 const TRIO: &str = include_str!("fixtures/odds_trio.json");
 const TRIFECTA: &str = include_str!("fixtures/odds_trifecta.json");
@@ -29,6 +30,69 @@ fn parses_quinella_unordered_pairs() {
         .find(|o| o.combination.to_key() == "1-2")
         .expect("pair 1-2");
     assert!((big.odds - 1141.1).abs() < 1e-6, "odds={}", big.odds);
+}
+
+#[test]
+fn parses_wide_unordered_bands() {
+    // ワイド(type=5)は無順序ペアに下限〜上限の帯 odds を持つ（複勝と同形）。#187
+    let odds = parse_wide_odds(WIDE).expect("parse wide");
+    assert_eq!(odds.len(), 3);
+
+    // 04-07 = 7.8〜9.1（昇順キーに正規化）。下限=odds_low・上限=odds_high。
+    let w = odds
+        .iter()
+        .find(|o| o.combination.to_key() == "4-7")
+        .expect("pair 4-7");
+    assert!((w.odds_low - 7.8).abs() < 1e-9, "low={}", w.odds_low);
+    assert!((w.odds_high - 9.1).abs() < 1e-9, "high={}", w.odds_high);
+    assert_eq!(w.popularity, Some(8));
+
+    // 生キー "0507" が無順序キー "5-7" に正規化されることも個別に固定する。
+    let mid = odds
+        .iter()
+        .find(|o| o.combination.to_key() == "5-7")
+        .expect("pair 5-7");
+    assert!((mid.odds_low - 2.3).abs() < 1e-9, "low={}", mid.odds_low);
+    assert!((mid.odds_high - 2.6).abs() < 1e-9, "high={}", mid.odds_high);
+    assert_eq!(mid.popularity, Some(2));
+
+    // 01-02 のような高額帯（カンマ無し）も両端を取り込む。
+    let big = odds
+        .iter()
+        .find(|o| o.combination.to_key() == "1-2")
+        .expect("pair 1-2");
+    assert!((big.odds_low - 88.4).abs() < 1e-9, "low={}", big.odds_low);
+    assert!(
+        (big.odds_high - 112.5).abs() < 1e-9,
+        "high={}",
+        big.odds_high
+    );
+}
+
+#[test]
+fn skips_wide_rows_missing_a_band_end() {
+    // 前売り中に片端のみ（下限のみ確定・上限未確定）の行はスキップし、両端確定のみ取り込む。#114
+    let json = r#"{"status":"middle","data":{"odds":{"5":{
+        "0407":["7.8","9.1","8"],
+        "0102":["88.4","---.-","--"]
+    }}}}"#;
+    let odds = parse_wide_odds(json).expect("parse");
+    assert_eq!(odds.len(), 1, "片端欠落の行はスキップされる");
+    assert_eq!(odds[0].combination.to_key(), "4-7");
+}
+
+#[test]
+fn wide_returns_empty_when_pool_absent() {
+    // 未公開（type=5 マップが無い）レース前は空で返す（エラーにしない）。
+    let json = r#"{"status":"result","data":{"official_datetime":""}}"#;
+    assert!(parse_wide_odds(json).unwrap().is_empty());
+}
+
+#[test]
+fn wide_rejects_unexpected_or_absent_status() {
+    // status="NG" / status キー欠落は fail-closed で受理しない（#100、他券種と対称）。
+    assert!(parse_wide_odds(r#"{"status":"NG","data":""}"#).is_err());
+    assert!(parse_wide_odds(r#"{"data":{"odds":{"5":{"0102":["1.5","2.0","1"]}}}}"#).is_err());
 }
 
 #[test]

@@ -96,7 +96,7 @@ impl UreqNetkeibaScraper {
     }
 
     /// オッズ API を券種 `type` 指定で GET し、UTF-8 JSON を返す（#102）。
-    /// 単勝・複勝(type=1) と組合せ券種(type=4/6/7/8) で URL 構成は共通。
+    /// 単勝・複勝(type=1) と組合せ券種(type=4/5/6/7/8) で URL 構成は共通。
     fn fetch_odds_json(&self, netkeiba_race_id: &str, odds_type: u8) -> Result<String> {
         std::thread::sleep(self.delay);
         let url =
@@ -213,11 +213,12 @@ impl NetkeibaScraper for UreqNetkeibaScraper {
     }
 
     fn fetch_exotic_odds(&self, netkeiba_race_id: &str) -> UcResult<FetchedExoticOdds> {
-        // 馬連・馬単・三連複・三連単は券種ごとに別 API（type=4/6/7/8）。取得間に delay が挟まる
-        // ため 1 レースあたり 4 回の待ちが加わる。**券種ごとにベストエフォート**: 1 本の API が
-        // 失敗しても他券種や手前の取得分を巻き添えにせず、取れた券種だけ返す（#102 レビュー反映）。
+        // 馬連・ワイド・馬単・三連複・三連単は券種ごとに別 API（type=4/5/6/7/8）。取得間に delay が
+        // 挟まるため 1 レースあたり 5 回の待ちが加わる。**券種ごとにベストエフォート**: 1 本の API が
+        // 失敗しても他券種や手前の取得分を巻き添えにせず、取れた券種だけ返す（#102 レビュー反映, #187）。
         Ok(FetchedExoticOdds {
             quinella: self.fetch_one_exotic(netkeiba_race_id, 4, parse::parse_quinella_odds),
+            wide: self.fetch_one_exotic(netkeiba_race_id, 5, parse::parse_wide_odds),
             exacta: self.fetch_one_exotic(netkeiba_race_id, 6, parse::parse_exacta_odds),
             trio: self.fetch_one_exotic(netkeiba_race_id, 7, parse::parse_trio_odds),
             trifecta: self.fetch_one_exotic(netkeiba_race_id, 8, parse::parse_trifecta_odds),
