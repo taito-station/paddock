@@ -23,6 +23,10 @@ where
             .route(
                 "/{race_id}/prediction",
                 web::get().to(handler::race::get_prediction::<R, P, F>),
+            )
+            .route(
+                "/{race_id}/recommendations",
+                web::get().to(handler::race::get_recommendations::<R, P, F>),
             ),
     );
 }
