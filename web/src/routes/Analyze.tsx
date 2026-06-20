@@ -188,7 +188,7 @@ function CourseAnalyze() {
         <input
           type="number"
           placeholder="距離[m]"
-          min={800}
+          min={1000}
           step={100}
           value={form.distance}
           onChange={(e) => setForm({ ...form, distance: e.target.value })}

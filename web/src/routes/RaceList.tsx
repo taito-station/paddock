@@ -73,7 +73,11 @@ export function RaceList() {
             onChange={(e) => setDate(e.target.value)}
           />
         </label>
-        {session.data ? (
+        {session.isError ? (
+          // 404 は queryFn が null に倒す。ここに来るのは 500・ネットワーク断などの
+          // 実障害なので「未作成」と取り違えず失敗を明示する。
+          <span className="error">残高の取得に失敗しました</span>
+        ) : session.data ? (
           <span className="session-balance">
             残高 {session.data.balance.toLocaleString()}円 / 予算{" "}
             {session.data.budget.toLocaleString()}円
