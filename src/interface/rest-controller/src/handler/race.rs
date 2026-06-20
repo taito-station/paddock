@@ -35,6 +35,8 @@ pub struct PredictionQuery {
 #[derive(Debug, Deserialize, IntoParams)]
 pub struct RecommendationQuery {
     /// このレースに配分する予算（円）。1 以上。100 円単位の買い目に配分される。
+    // `minimum` は OpenAPI ドキュメント上の注記のみで、actix の Query デシリアライズは強制しない。
+    // 実際の 0 弾きはハンドラ本体の `budget == 0` チェックが担う（消さないこと）。
     #[param(minimum = 1)]
     pub budget: u64,
     /// 馬場状態（`良` / `稍重` / `重` / `不良`。略記 `稍` / `不` も可）。未指定なら馬場項なし。

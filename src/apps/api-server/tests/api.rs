@@ -262,14 +262,32 @@ async fn recommendations_with_saved_odds_returns_portfolio(pool: sqlx::PgPool) {
     let total = json["total_stake"].as_u64().unwrap();
     assert!(total <= 10000, "total_stake {total} > budget");
     assert_eq!(total % 100, 0, "100 円単位");
-    // 券種は軸流しの 馬連/ワイド/三連複 のいずれか。
+    // 券種ラベル・組合せ・EV など from_portfolio の写経フィールドが揃っていることを確認する。
     for b in bets {
         let t = b["bet_type"].as_str().unwrap();
         assert!(
             matches!(t, "馬連" | "ワイド" | "三連複"),
             "想定外の券種: {t}"
         );
+        // 組合せキーは a-b / a-b-c 形式（to_key 由来）。
+        assert!(b["combination"].as_str().unwrap().contains('-'));
+        assert!(b["stake"].as_u64().is_some());
+        assert!(b["ev"].is_number(), "ev フィールドが伝播している");
     }
+    // seed は全脚に odds を持ち、3 頭立てなので simulate による回収率・的中率が算出される。
+    assert!(
+        json["roi"].is_number(),
+        "オッズ付き脚があるので roi 非 null"
+    );
+    assert!(
+        json["hit_prob"].is_number(),
+        "オッズ付き脚があるので hit_prob 非 null"
+    );
+    // 少なくとも 1 脚は保存オッズが乗る（odds 非 null）。
+    assert!(
+        bets.iter().any(|b| b["odds"].is_number()),
+        "保存済みオッズが脚に反映される"
+    );
 }
 
 #[sqlx::test(migrations = "../../../deployments/db/migrations")]
