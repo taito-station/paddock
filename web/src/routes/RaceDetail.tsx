@@ -96,8 +96,10 @@ export function RaceDetail() {
       if (error) throw new Error("オッズの取得に失敗しました");
       return data;
     },
-    onSuccess: () =>
-      qc.invalidateQueries({ queryKey: ["recommendations", raceId] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["recommendations", raceId] });
+      setEdits({}); // 買い目集合が変わるので編集をリセット（孤児エントリ防止）。
+    },
   });
 
   const record = useMutation({
@@ -119,8 +121,12 @@ export function RaceDetail() {
 
   const bets = recs.data?.bets ?? [];
   const total = sumStake(bets, edits);
+  // 残高が実弾の制約。「予算/R」(appliedBudget) は推奨額の算出ヒントであって手編集の上限では
+  // ないため、超過判定は残高基準にする（編集で残高内まで増やすのは許容）。
   const overBudget = total > balance;
-  const canRecord = !!session.data && !record.isPending;
+  // 完了済みセッションは記録不可（バックエンドも拒否するが UI でも無効化して無駄な往復を防ぐ）。
+  const canRecord =
+    !!session.data && !session.data.completed && !record.isPending;
 
   const setEdit = (b: RecommendationBet, patch: Partial<Edits[string]>) =>
     setEdits((prev) => {
@@ -232,6 +238,9 @@ export function RaceDetail() {
           {oddsRefresh.isError && (
             <span className="error">{(oddsRefresh.error as Error).message}</span>
           )}
+          {record.isError && (
+            <span className="error">{(record.error as Error).message}</span>
+          )}
         </div>
       )}
 
@@ -242,6 +251,9 @@ export function RaceDetail() {
           </span>
           {canRecord && (
             <button onClick={skipRace}>このレースをスキップ</button>
+          )}
+          {record.isError && (
+            <span className="error">{(record.error as Error).message}</span>
           )}
         </div>
       )}

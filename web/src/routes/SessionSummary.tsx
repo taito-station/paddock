@@ -86,7 +86,11 @@ export function SessionSummary() {
           </label>
           <button
             type="submit"
-            disabled={create.isPending || Number(budget) < 1000}
+            disabled={
+              create.isPending ||
+              !Number.isFinite(Number(budget)) ||
+              Number(budget) < 1000
+            }
           >
             セッション開始
           </button>
