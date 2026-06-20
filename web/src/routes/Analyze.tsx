@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api, type GroupStat } from "../api/client";
-import { pct } from "../lib/format";
+import { pct, SURFACE_JP } from "../lib/format";
 
 type Kind = "horse" | "jockey" | "trainer" | "course";
 
@@ -65,7 +65,12 @@ export function Analyze() {
           </button>
         ))}
       </div>
-      {kind === "course" ? <CourseAnalyze /> : <NameAnalyze kind={kind} />}
+      {kind === "course" ? (
+        <CourseAnalyze />
+      ) : (
+        // key で kind ごとにインスタンスを分け、タブ切替で入力・結果をリセットする。
+        <NameAnalyze key={kind} kind={kind} />
+      )}
     </section>
   );
 }
@@ -206,7 +211,7 @@ function CourseAnalyze() {
         <>
           <h2>
             {q.data.venue} {q.data.distance}m{" "}
-            {q.data.surface === "turf" ? "芝" : "ダート"}
+            {SURFACE_JP[q.data.surface] ?? q.data.surface}
           </h2>
           <StatTable title="枠順別" rows={q.data.by_gate_group} />
         </>

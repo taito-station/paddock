@@ -17,20 +17,23 @@ export function RaceList() {
     },
   });
 
-  // セッションは未作成だと 404。その場合は「残高表示なし」に倒す（throwOnError しない）。
+  // セッションは未作成だと 404。404 のみ「残高表示なし」に倒し、それ以外の障害は
+  // 握り潰さず投げる（500・ネットワーク断を「未作成」と取り違えないため）。
   const session = useQuery({
     queryKey: ["session", date],
     retry: false,
     queryFn: async () => {
-      const { data, error } = await api.GET("/api/sessions/{date}", {
+      const { data, error, response } = await api.GET("/api/sessions/{date}", {
         params: { path: { date } },
       });
-      if (error) return null;
+      if (response.status === 404) return null;
+      if (error) throw new Error("セッション収支の取得に失敗しました");
       return data;
     },
   });
 
   const hasSession = !!session.data;
+  const sessionCompleted = session.data?.completed ?? false;
   const boughtRaceIds = useMemo(
     () => new Set(session.data?.bets.map((b) => b.race_id) ?? []),
     [session.data],
@@ -85,6 +88,9 @@ export function RaceList() {
                 <td>
                   {boughtRaceIds.has(r.race_id) ? (
                     <span className="badge badge-bought">購入済み</span>
+                  ) : sessionCompleted ? (
+                    // 完了セッションで未購入＝買わなかった（見送り）。
+                    <span className="badge">見送り</span>
                   ) : hasSession ? (
                     <span className="badge">未処理</span>
                   ) : (
