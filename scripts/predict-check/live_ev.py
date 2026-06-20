@@ -67,7 +67,12 @@ def p_top2_set(probs, a, b):
     """a,b がともに1-2着（馬連的中）になる確率。"""
     z = sum(probs.values())
     pa, pb = probs[a], probs[b]
-    return pa / z * pb / (z - pa) + pb / z * pa / (z - pb)
+    r = 0.0
+    if z - pa > 0:  # 1頭が場の全確率を占める等で分母0になるのを防ぐ
+        r += pa / z * pb / (z - pa)
+    if z - pb > 0:
+        r += pb / z * pa / (z - pb)
+    return r
 
 
 def p_top3_set(probs, trio):
@@ -75,7 +80,11 @@ def p_top3_set(probs, trio):
     z = sum(probs.values())
     s = 0.0
     for x, y, w in permutations(trio):
-        s += probs[x] / z * probs[y] / (z - probs[x]) * probs[w] / (z - probs[x] - probs[y])
+        d1 = z - probs[x]
+        d2 = z - probs[x] - probs[y]
+        if d1 <= 0 or d2 <= 0:  # 上位2頭で場の全確率に達する等の縮退で分母0を防ぐ
+            continue
+        s += probs[x] / z * probs[y] / d1 * probs[w] / d2
     return s
 
 
@@ -161,35 +170,40 @@ def alloc(konsen):
 
 
 def build_bets(probs, budget):
-    """買い目を組む。返り値: list[(kind, combo_tuple, stake)]（kind=wide/quinella/trio）。"""
-    scale = budget / 5000.0
+    """買い目を組む。返り値: list[(kind, combo_tuple, stake)]（kind=wide/quinella/trio）。
+
+    予算は100円単位（端数は切り捨て）。総ユニット(budget//100)を券種レイヤーへ alloc 比で
+    最大剰余配分し、レイヤー合計が必ず総ユニットに一致するようにする。これで任意の budget
+    （5,000 の倍数でなくても）で総賭金が `budget//100*100` ちょうどになり、予算を取りこぼさない。
+    """
     ax = max(probs, key=lambda n: probs[n])
     ranked = sorted(probs, key=lambda n: -probs[n])
     parts = [n for n in ranked if n != ax][:5]
     kon = is_konsen(probs)
-    b_box, b_wide, b_ren, b_trio = (int(round(x * scale)) for x in alloc(kon))
+    total_units = budget // 100
+    # alloc 比でレイヤー（box/wide/馬連/3連複）へユニットを厳密配分（合計 = total_units）。
+    u_box, u_wide, u_ren, u_trio = largest_remainder(list(alloc(kon)), total_units, minu=0)
     bets = []
-    if kon:
+    if kon and u_box > 0:
         # 混戦時は「印馬ボックス」と後段の「◎軸ながし」を別レイヤーとして重ねる設計
         # （◎が飛んでも印が揃えば拾うボックス保険 + ◎軸の本線）。両者で同一組番が
         # 出ることはあり、その場合は実際にその組へ二重に賭ける意図（金額は加算）。
         box = band_of(probs)[:5]
         combos = list(combinations(box, 3))
-        units = largest_remainder([probs[a] * probs[b] * probs[d] for a, b, d in combos],
-                                  b_box // 100)
-        for combo, u in zip(combos, units):
+        for combo, u in zip(combos, largest_remainder(
+                [probs[a] * probs[b] * probs[d] for a, b, d in combos], u_box)):
             if u > 0:
                 bets.append(("trio", tuple(sorted(combo)), u * 100))
     wp = parts[:3]
-    for n, u in zip(wp, largest_remainder([probs[n] for n in wp], b_wide // 100)):
+    for n, u in zip(wp, largest_remainder([probs[n] for n in wp], u_wide)):
         if u > 0:
             bets.append(("wide", tuple(sorted((ax, n))), u * 100))
-    for n, u in zip(parts, largest_remainder([probs[n] for n in parts], b_ren // 100)):
+    for n, u in zip(parts, largest_remainder([probs[n] for n in parts], u_ren)):
         if u > 0:
             bets.append(("quinella", tuple(sorted((ax, n))), u * 100))
     pairs = list(combinations(parts, 2))
-    for (a, b), u in zip(pairs, largest_remainder([probs[a] * probs[b] for a, b in pairs],
-                                                  b_trio // 100)):
+    for (a, b), u in zip(pairs, largest_remainder(
+            [probs[a] * probs[b] for a, b in pairs], u_trio)):
         if u > 0:
             bets.append(("trio", tuple(sorted((ax, a, b))), u * 100))
     return ax, parts, kon, bets

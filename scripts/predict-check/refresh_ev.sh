@@ -19,6 +19,11 @@ FIRST_R="${2:-6}"
 LAST_R="${3:-12}"
 BUDGET="${4:-5000}"
 
+# 引数は psql の SQL に文字列展開するため、形式を検証して注入・誤クエリを防ぐ。
+[[ "$DATE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || { echo "DATE は YYYY-MM-DD 形式: $DATE" >&2; exit 2; }
+[[ "$FIRST_R" =~ ^[0-9]+$ && "$LAST_R" =~ ^[0-9]+$ ]] || { echo "R 範囲は整数: $FIRST_R $LAST_R" >&2; exit 2; }
+[[ "$BUDGET" =~ ^[0-9]+$ ]] || { echo "予算は整数（円）: $BUDGET" >&2; exit 2; }
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 DB_URL="${PADDOCK_DB_URL:-postgres://paddock:paddock@localhost:5432/paddock}"
@@ -35,10 +40,14 @@ nk_id() {
   python3 - "$1" <<'PY'
 import sys
 pid = sys.argv[1]
-year, kai, ven, day, rr = pid.split("-")  # paddock race_id: {年}-{回}-{場slug}-{日}-{R}R
+parts = pid.split("-")  # paddock race_id: {年}-{回}-{場slug}-{日}-{R}R
+if len(parts) != 5:
+    sys.exit(f"nk_id: 想定外の race_id 形式: {pid}")
+year, kai, ven, day, rr = parts
 vc = {"sapporo": "01", "hakodate": "02", "fukushima": "03", "niigata": "04", "tokyo": "05",
       "nakayama": "06", "chukyo": "07", "kyoto": "08", "hanshin": "09", "kokura": "10"}.get(ven)
 if vc is None:
+    # 未知の場 slug は fail-fast（中央10場以外＝想定外データ。黙ってスキップせず止める）。
     sys.exit(f"nk_id: 未知の場 slug: {ven}（pid={pid}）")
 # netkeiba race_id = 年 + 場(2) + 回(2) + 日(2) + R(2)。年は決め打ちせず pid から導出する。
 print(f"{year}{vc}{int(kai):02d}{int(day):02d}{int(rr.rstrip('R')):02d}")

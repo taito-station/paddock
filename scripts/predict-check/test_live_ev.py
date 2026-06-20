@@ -86,11 +86,13 @@ def test_parse_pred(tmp_text=None):
 
 
 def test_build_bets_budget():
-    # 買い目の総額が予算ちょうど（100円単位の配分が合算で一致）
-    probs = {1: 35.0, 2: 15.0, 3: 12.0, 4: 8.0, 5: 6.0, 6: 5.0}
-    for budget in (5000, 10000):
-        _, _, _, bets = L.build_bets(probs, budget)
-        assert sum(amt for _, _, amt in bets) == budget, (budget, bets)
+    # 買い目の総額が予算（100円単位に丸めた額）ちょうど。5,000非倍数や混戦でも取りこぼさない。
+    clear = {1: 35.0, 2: 15.0, 3: 12.0, 4: 8.0, 5: 6.0, 6: 5.0}
+    konsen = {1: 30.0, 2: 25.0, 3: 22.0, 4: 21.0, 5: 8.0, 6: 6.0}
+    for probs in (clear, konsen):
+        for budget in (5000, 10000, 3300, 7777, 4900):
+            _, _, _, bets = L.build_bets(probs, budget)
+            assert sum(amt for _, _, amt in bets) == budget // 100 * 100, (budget, bets)
 
 
 def main():

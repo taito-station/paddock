@@ -27,9 +27,10 @@ def fetch_wide(rid: str):
     raw = nk.curl(ODDS_API.format(rid=rid))
     # オッズ API は UTF-8 JSON。空レスポンス（nk.curl は空 bytes を返しうる）や
     # 構造変化で JSON にならない場合は警告して空 dict を返す（単独実行時のトレースバック回避）。
+    # strict デコードにし、不正バイトが U+FFFD 置換で壊れた JSON を「成功」と誤認しないようにする。
     try:
-        data = json.loads(raw.decode("utf-8", errors="replace"))
-    except json.JSONDecodeError:
+        data = json.loads(raw.decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError):
         print(f"[warn] JSON パース失敗（空レスポンス or 構造変化）: {rid}", file=sys.stderr)
         return {}
     odds = data.get("data", {}).get("odds", {}).get("5", {})
