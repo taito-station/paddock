@@ -15,7 +15,7 @@ pub struct IngestCardResponse {
     pub card_saved: bool,
     /// 保存した出走馬数（カードをスキップした場合は 0）。
     pub entries_saved: usize,
-    /// 保存したオッズ行数（単勝・複勝＋馬連・馬単・三連複・三連単。レース前で未確定なら 0）。
+    /// 保存したオッズ行数（単勝・複勝＋馬連・ワイド・馬単・三連複・三連単。レース前で未確定なら 0）。
     pub odds_saved: usize,
     /// 取得した出走各馬の netkeiba horse_id（近走取り込み #103 の再利用キー）。
     /// カードをスキップ（取得済み）した場合は空。呼び出し側はこれで出馬表の再取得を避ける。
@@ -94,7 +94,7 @@ impl<R: RaceCardRepository + OddsRepository + FetchRepository, S: NetkeibaScrape
         }
 
         // 2. オッズ: 常に取得。確定前で空なら保存をスキップ（後で再実行して取り直す想定）。
-        //    単勝・複勝(type=1) は 1 レスポンスで両方、組合せ券種(type=4/6/7/8) は別 API で取得し、
+        //    単勝・複勝(type=1) は 1 レスポンスで両方、組合せ券種(type=4/5/6/7/8) は別 API で取得し、
         //    全券種を 1 レコードにまとめて保存する（#102。キー規約は各ドメイン型の to_key）。
         //    単複もベストエフォート: 前日(status=yoso)など未発売・想定外 status で取得失敗しても、
         //    本コマンドの主目的（card 保存と後続の近走取り込み #103）を巻き添えにしない。
@@ -120,6 +120,7 @@ impl<R: RaceCardRepository + OddsRepository + FetchRepository, S: NetkeibaScrape
             odds.win.len()
                 + odds.place.len()
                 + exotic.quinella.len()
+                + exotic.wide.len()
                 + exotic.exacta.len()
                 + exotic.trio.len()
                 + exotic.trifecta.len(),
@@ -139,6 +140,12 @@ impl<R: RaceCardRepository + OddsRepository + FetchRepository, S: NetkeibaScrape
                 .quinella
                 .iter()
                 .map(|q| OddsRow::quinella(q.combination, q.odds)),
+        );
+        rows.extend(
+            exotic
+                .wide
+                .iter()
+                .map(|w| OddsRow::wide(w.combination, w.odds_low, w.odds_high)),
         );
         rows.extend(
             exotic

@@ -134,12 +134,27 @@ pub struct FetchedComboOdds<K> {
     pub popularity: Option<u32>,
 }
 
-/// 馬連・馬単・三連複・三連単のオッズ取得結果（#102）。各券種は独立に空になり得る
-/// （未公開・確定前）。netkeiba は券種ごとに別 API（type=4/6/7/8）なので個別取得して束ねる。
+/// ワイドオッズ 1 点（#187）。netkeiba は複勝同様に下限〜上限の幅で公表するため両端を持つ。
+/// 無順序ペア（`Pair`）に帯 odds と人気を紐付ける。レース前で未確定（`---.-`）の行は
+/// パース層で除外済み。
+#[derive(Debug, Clone, PartialEq)]
+pub struct FetchedWideOdds {
+    pub combination: Pair,
+    pub odds_low: f64,
+    pub odds_high: f64,
+    /// API は人気も返すため取り込むが、現状の永続化（`OddsRow::wide`）は組合せ券種の人気を
+    /// 保存しないため後段では未使用（馬連等と同方針）。将来の利用に備えて保持する。
+    pub popularity: Option<u32>,
+}
+
+/// 馬連・ワイド・馬単・三連複・三連単のオッズ取得結果（#102, #187）。各券種は独立に空に
+/// なり得る（未公開・確定前）。netkeiba は券種ごとに別 API（type=4/5/6/7/8）なので個別取得して束ねる。
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct FetchedExoticOdds {
     /// 馬連（無順序ペア）
     pub quinella: Vec<FetchedComboOdds<Pair>>,
+    /// ワイド（無順序ペア・帯 odds）
+    pub wide: Vec<FetchedWideOdds>,
     /// 馬単（順序付きペア）
     pub exacta: Vec<FetchedComboOdds<OrderedPair>>,
     /// 三連複（無順序トリプル）
@@ -169,7 +184,7 @@ pub trait NetkeibaScraper: Send + Sync {
     /// レース前でオッズ未確定の行はスキップされ、確定前は空の `FetchedOdds` を返し得る。
     fn fetch_win_place_odds(&self, netkeiba_race_id: &str) -> Result<FetchedOdds>;
 
-    /// 馬連・馬単・三連複・三連単オッズ API（type=4/6/7/8）から組合せ券種オッズを取得する（#102）。
+    /// 馬連・ワイド・馬単・三連複・三連単オッズ API（type=4/5/6/7/8）から組合せ券種オッズを取得する（#102, #187）。
     /// レース前で未確定の行はスキップされ、確定前は空になり得る。既定実装は空を返す
     /// （組合せ券種を取得しないスクレイパ実装・テスト用フェイクとの後方互換）。
     fn fetch_exotic_odds(&self, _netkeiba_race_id: &str) -> Result<FetchedExoticOdds> {

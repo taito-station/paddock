@@ -1,6 +1,6 @@
 use paddock_domain::{HorseNum, OrderedPair, OrderedTriple, Pair, Triple};
 use paddock_use_case::netkeiba_scraper::{
-    FetchedComboOdds, FetchedOdds, FetchedPlaceOdds, FetchedWinOdds,
+    FetchedComboOdds, FetchedOdds, FetchedPlaceOdds, FetchedWideOdds, FetchedWinOdds,
 };
 use serde_json::{Map, Value};
 
@@ -37,6 +37,50 @@ pub fn parse_quinella_odds(json: &str) -> Result<Vec<FetchedComboOdds<Pair>>> {
         let (a, b) = parse_two(key)?;
         Pair::try_from((a, b)).ok()
     })
+}
+
+/// ワイドオッズ（`type=5`、`data.odds["5"]`）をパースする（#187）。キー=馬番 2 桁×2（無順序、
+/// 馬連と同形）、値 `[下限, 上限, 人気]`（複勝と同じ帯形式）。status ゲート(#100)と未確定行
+/// （`---.-` 等で下限・上限のいずれかがパース不能）のスキップ(#114)は単複・組合せ券種と共通。
+pub fn parse_wide_odds(json: &str) -> Result<Vec<FetchedWideOdds>> {
+    let root = parse_validated_root(json)?;
+    let Some(map) = root
+        .get("data")
+        .and_then(|d| d.get("odds"))
+        .and_then(|o| o.get("5"))
+        .and_then(|m| m.as_object())
+    else {
+        // 未公開（レース前）は券種マップが無い。空で返す。
+        return Ok(Vec::new());
+    };
+
+    // 組合せ券種と同じく netkeiba の生キー（"0104" 等、馬番 2 桁ゼロ詰め）昇順で安定させる。
+    let mut entries: Vec<(&String, &Value)> = map.iter().collect();
+    entries.sort_by(|a, b| a.0.cmp(b.0));
+
+    let mut out = Vec::new();
+    for (key, value) in entries {
+        let Some((a, b)) = parse_two(key) else {
+            continue;
+        };
+        let Ok(combination) = Pair::try_from((a, b)) else {
+            continue;
+        };
+        let Some(arr) = value.as_array() else {
+            continue;
+        };
+        // ワイドは複勝同様に下限・上限の両端が必要。いずれか欠ける/未確定ならスキップ。
+        let (Some(odds_low), Some(odds_high)) = (str_f64(arr.first()), str_f64(arr.get(1))) else {
+            continue;
+        };
+        out.push(FetchedWideOdds {
+            combination,
+            odds_low,
+            odds_high,
+            popularity: str_u32(arr.get(2)),
+        });
+    }
+    Ok(out)
 }
 
 /// 馬単オッズ（`type=6`、`data.odds["6"]`）をパースする（#102）。キー=馬番 2 桁×2（順序あり）。
