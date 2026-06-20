@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
 import {
@@ -24,7 +25,9 @@ function Badge({ kind }: { kind: RaceBadge }) {
 }
 
 export function RaceList() {
-  const [date, setDate] = useState(todayJst);
+  // 収支ビュー等からの ?date= 深リンクを初期値に使う（無ければ JST の今日）。
+  const [searchParams] = useSearchParams();
+  const [date, setDate] = useState(() => searchParams.get("date") || todayJst());
 
   const races = useQuery({
     queryKey: ["races", date],
@@ -86,6 +89,7 @@ export function RaceList() {
         ) : (
           <span className="muted">セッション未作成</span>
         )}
+        {date && <Link to={`/sessions/${date}`}>収支</Link>}
       </div>
 
       {!date && <p className="muted">開催日を選択してください。</p>}
@@ -109,7 +113,11 @@ export function RaceList() {
           <tbody>
             {races.data.races.map((r) => (
               <tr key={r.race_id}>
-                <td>{r.race_num}</td>
+                <td>
+                  <Link to={`/sessions/${date}/races/${r.race_id}`}>
+                    {r.race_num}
+                  </Link>
+                </td>
                 <td>{VENUE_JP[r.venue] ?? r.venue}</td>
                 <td>{r.distance}m</td>
                 <td>{SURFACE_JP[r.surface] ?? r.surface}</td>

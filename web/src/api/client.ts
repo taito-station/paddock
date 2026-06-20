@@ -5,6 +5,11 @@ import type { paths, components } from "./schema";
 // dev は Vite proxy、本番は nginx が同一オリジンで /api を裁く。
 export const api = createClient<paths>({ baseUrl: "" });
 
-// レスポンス型の再利用エイリアス（必要になった時点で増やす。今は分析の共通行のみ）。
+// レスポンス型の再利用エイリアス（必要になった時点で増やす）。
 export type Schemas = components["schemas"];
 export type GroupStat = Schemas["GroupStatSchema"];
+export type SessionSummary = Schemas["SessionSummaryResponse"];
+export type SummaryBet = Schemas["SummaryBet"];
+export type RecommendationResponse = Schemas["RecommendationResponse"];
+export type RecommendationBet = Schemas["RecommendationBet"];
+export type BetInput = Schemas["BetInput"];

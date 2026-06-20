@@ -1,5 +1,13 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { todayJst, pct, VENUE_JP, SURFACE_JP, raceBadge } from "./format";
+import {
+  todayJst,
+  pct,
+  yen,
+  recoveryRate,
+  VENUE_JP,
+  SURFACE_JP,
+  raceBadge,
+} from "./format";
 
 describe("todayJst", () => {
   afterEach(() => vi.useRealTimers());
@@ -21,6 +29,22 @@ describe("pct", () => {
     expect(pct(0.254)).toBe("25.4%");
     expect(pct(0)).toBe("0.0%");
     expect(pct(1)).toBe("100.0%");
+  });
+});
+
+describe("yen", () => {
+  it("formats with thousands separators", () => {
+    expect(yen(12345)).toBe("¥12,345");
+    expect(yen(0)).toBe("¥0");
+  });
+});
+
+describe("recoveryRate", () => {
+  it("returns percent", () => {
+    expect(recoveryRate(1500, 1000)).toBe(150);
+  });
+  it("null when no bet", () => {
+    expect(recoveryRate(0, 0)).toBeNull();
   });
 });
 
