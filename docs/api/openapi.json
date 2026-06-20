@@ -778,7 +778,7 @@
             "schema": {
               "type": "integer",
               "format": "int64",
-              "minimum": 0
+              "minimum": 1
             }
           },
           {
@@ -2143,7 +2143,7 @@
       },
       "RecommendationResponse": {
         "type": "object",
-        "description": "`GET /api/races/{race_id}/recommendations` のレスポンス。\n\nCLI `predict` と同じ軸流しポートフォリオ（馬連＋ワイド＋三連複, #122）を予算内・100 円単位で\n返す。`odds_available=false` は保存オッズ（#51）が無いことを示し、買い目は空（SPA は「最新取得」\nを促す）。",
+        "description": "`GET /api/races/{race_id}/recommendations` のレスポンス。\n\nCLI `predict` と同じ軸流しポートフォリオ（馬連＋ワイド＋三連複, #122）を予算内・100 円単位で\n返す。`bets` が空になる原因は 2 通りで、`odds_available` で区別する:\n- `odds_available=false`: 保存オッズ（#51）が無い → SPA は「最新取得」を促す。\n- `odds_available=true` かつ `bets` 空: オッズはあるが予算内で組める買い目が無い（または確率が\n  空）＝「該当なし」→ 「最新取得」は出さない。",
         "required": [
           "race_id",
           "odds_available",
@@ -2177,7 +2177,7 @@
           },
           "odds_available": {
             "type": "boolean",
-            "description": "保存オッズ（#51）の有無。false のとき `bets` は空。"
+            "description": "保存オッズ（#51）の有無。false のとき `bets` は必ず空。true でも予算内で組めなければ空になりうる。"
           },
           "partners": {
             "type": "array",

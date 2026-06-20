@@ -150,12 +150,14 @@ pub struct RecommendationBet {
 /// `GET /api/races/{race_id}/recommendations` のレスポンス。
 ///
 /// CLI `predict` と同じ軸流しポートフォリオ（馬連＋ワイド＋三連複, #122）を予算内・100 円単位で
-/// 返す。`odds_available=false` は保存オッズ（#51）が無いことを示し、買い目は空（SPA は「最新取得」
-/// を促す）。
+/// 返す。`bets` が空になる原因は 2 通りで、`odds_available` で区別する:
+/// - `odds_available=false`: 保存オッズ（#51）が無い → SPA は「最新取得」を促す。
+/// - `odds_available=true` かつ `bets` 空: オッズはあるが予算内で組める買い目が無い（または確率が
+///   空）＝「該当なし」→ 「最新取得」は出さない。
 #[derive(Debug, Serialize, ToSchema)]
 pub struct RecommendationResponse {
     pub race_id: String,
-    /// 保存オッズ（#51）の有無。false のとき `bets` は空。
+    /// 保存オッズ（#51）の有無。false のとき `bets` は必ず空。true でも予算内で組めなければ空になりうる。
     pub odds_available: bool,
     /// 軸（予想本命）の馬番。確率が空なら `null`。
     pub axis: Option<u32>,
@@ -212,37 +214,17 @@ impl RecommendationResponse {
     }
 }
 
-/// `BetCombination` を券種ラベルと組合せキー文字列に分解する。
-/// ペア（馬連・ワイド・馬単）と三連系のキーは `find_race_odds` の `from_key` と対称。
+/// `BetCombination` を券種ラベルと組合せキー文字列に分解する。組合せキーは各ドメイン型の
+/// `to_key()` に委譲し（`find_race_odds` の `from_key` と対称・形式の二重定義を避ける）、
+/// 単勝・複勝の単一馬番はそのまま文字列化する。
 fn combination_parts(c: &BetCombination) -> (&'static str, String) {
     match c {
         BetCombination::Win(h) => ("単勝", h.value().to_string()),
         BetCombination::Place(h) => ("複勝", h.value().to_string()),
-        BetCombination::Quinella(p) => {
-            let (a, b) = p.as_tuple();
-            ("馬連", format!("{}-{}", a.value(), b.value()))
-        }
-        BetCombination::Wide(p) => {
-            let (a, b) = p.as_tuple();
-            ("ワイド", format!("{}-{}", a.value(), b.value()))
-        }
-        BetCombination::Exacta(p) => {
-            let (a, b) = p.as_tuple();
-            ("馬単", format!("{}>{}", a.value(), b.value()))
-        }
-        BetCombination::Trio(t) => {
-            let (a, b, c) = t.as_tuple();
-            (
-                "三連複",
-                format!("{}-{}-{}", a.value(), b.value(), c.value()),
-            )
-        }
-        BetCombination::Trifecta(t) => {
-            let (a, b, c) = t.as_tuple();
-            (
-                "三連単",
-                format!("{}>{}>{}", a.value(), b.value(), c.value()),
-            )
-        }
+        BetCombination::Quinella(p) => ("馬連", p.to_key()),
+        BetCombination::Wide(p) => ("ワイド", p.to_key()),
+        BetCombination::Exacta(p) => ("馬単", p.to_key()),
+        BetCombination::Trio(t) => ("三連複", t.to_key()),
+        BetCombination::Trifecta(t) => ("三連単", t.to_key()),
     }
 }

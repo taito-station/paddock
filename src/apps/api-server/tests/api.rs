@@ -273,6 +273,21 @@ async fn recommendations_with_saved_odds_returns_portfolio(pool: sqlx::PgPool) {
 }
 
 #[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn recommendations_rejects_out_of_range_blend_alpha(pool: sqlx::PgPool) {
+    let app = build_service!(pool);
+    // クエリ検証は DB アクセス前に走るので seed 不要。
+    let req = test::TestRequest::get()
+        .uri(&format!(
+            "/api/races/{RACE_ID}/recommendations?budget=10000&blend_alpha=2.0"
+        ))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status().as_u16(), 400);
+    let json = body_json(resp).await;
+    assert_eq!(json["error"]["code"], "bad_request");
+}
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
 async fn recommendations_rejects_zero_budget(pool: sqlx::PgPool) {
     PostgresRepository::new(pool.clone())
         .save_race_card(&sample_card())
