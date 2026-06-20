@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { todayJst, pct, VENUE_JP, SURFACE_JP } from "./format";
+import { todayJst, pct, VENUE_JP, SURFACE_JP, raceBadge } from "./format";
 
 describe("todayJst", () => {
   afterEach(() => vi.useRealTimers());
@@ -35,5 +35,28 @@ describe("venue/surface maps", () => {
   it("maps surface", () => {
     expect(SURFACE_JP.turf).toBe("芝");
     expect(SURFACE_JP.dirt).toBe("ダ");
+  });
+});
+
+describe("raceBadge", () => {
+  it("bought takes precedence", () => {
+    expect(
+      raceBadge({ bought: true, hasSession: true, completed: true }),
+    ).toBe("bought");
+  });
+  it("completed session + not bought = skipped", () => {
+    expect(
+      raceBadge({ bought: false, hasSession: true, completed: true }),
+    ).toBe("skipped");
+  });
+  it("in-progress session + not bought = pending", () => {
+    expect(
+      raceBadge({ bought: false, hasSession: true, completed: false }),
+    ).toBe("pending");
+  });
+  it("no session = none", () => {
+    expect(
+      raceBadge({ bought: false, hasSession: false, completed: false }),
+    ).toBe("none");
   });
 });

@@ -1,13 +1,35 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
-import { SURFACE_JP, VENUE_JP, todayJst } from "../lib/format";
+import {
+  SURFACE_JP,
+  VENUE_JP,
+  raceBadge,
+  todayJst,
+  type RaceBadge,
+} from "../lib/format";
+
+function Badge({ kind }: { kind: RaceBadge }) {
+  switch (kind) {
+    case "bought":
+      return <span className="badge badge-bought">購入済み</span>;
+    case "skipped":
+      return <span className="badge">見送り</span>;
+    case "pending":
+      return <span className="badge">未処理</span>;
+    case "none":
+      // セッション未作成時は購入状況が不明なのでバッジを出さない。
+      return <span className="muted">-</span>;
+  }
+}
 
 export function RaceList() {
   const [date, setDate] = useState(todayJst);
 
   const races = useQuery({
     queryKey: ["races", date],
+    // 日付クリア時（空文字）は叩かない（API 400 のエラー点滅を防ぐ）。
+    enabled: !!date,
     queryFn: async () => {
       const { data, error } = await api.GET("/api/races", {
         params: { query: { date } },
@@ -21,6 +43,7 @@ export function RaceList() {
   // 握り潰さず投げる（500・ネットワーク断を「未作成」と取り違えないため）。
   const session = useQuery({
     queryKey: ["session", date],
+    enabled: !!date,
     retry: false,
     queryFn: async () => {
       const { data, error, response } = await api.GET("/api/sessions/{date}", {
@@ -61,7 +84,8 @@ export function RaceList() {
         )}
       </div>
 
-      {races.isPending && <p>読み込み中…</p>}
+      {!date && <p className="muted">開催日を選択してください。</p>}
+      {date && races.isPending && <p>読み込み中…</p>}
       {races.isError && <p className="error">{races.error.message}</p>}
       {races.data && races.data.races.length === 0 && (
         <p className="muted">この開催日のレースはありません。</p>
@@ -86,17 +110,13 @@ export function RaceList() {
                 <td>{r.distance}m</td>
                 <td>{SURFACE_JP[r.surface] ?? r.surface}</td>
                 <td>
-                  {boughtRaceIds.has(r.race_id) ? (
-                    <span className="badge badge-bought">購入済み</span>
-                  ) : sessionCompleted ? (
-                    // 完了セッションで未購入＝買わなかった（見送り）。
-                    <span className="badge">見送り</span>
-                  ) : hasSession ? (
-                    <span className="badge">未処理</span>
-                  ) : (
-                    // セッション未作成時は購入状況が不明なのでバッジを出さない。
-                    <span className="muted">-</span>
-                  )}
+                  <Badge
+                    kind={raceBadge({
+                      bought: boughtRaceIds.has(r.race_id),
+                      hasSession,
+                      completed: sessionCompleted,
+                    })}
+                  />
                 </td>
               </tr>
             ))}

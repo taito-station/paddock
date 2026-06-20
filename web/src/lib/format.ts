@@ -14,6 +14,21 @@ export function pct(rate: number): string {
 
 export const SURFACE_JP: Record<string, string> = { turf: "芝", dirt: "ダ" };
 
+// レース一覧の状態バッジ判定（表示と分離してテスト可能にする）。
+//   bought=購入済み / skipped=見送り(完了セッションで未購入) / pending=未処理(進行中) /
+//   none=セッション未作成で購入状況不明
+export type RaceBadge = "bought" | "skipped" | "pending" | "none";
+export function raceBadge(opts: {
+  bought: boolean;
+  hasSession: boolean;
+  completed: boolean;
+}): RaceBadge {
+  if (opts.bought) return "bought";
+  if (opts.completed) return "skipped";
+  if (opts.hasSession) return "pending";
+  return "none";
+}
+
 // JRA 10 場の slug→日本語。API は venue を英字スラッグで返すため表示時に変換する。
 export const VENUE_JP: Record<string, string> = {
   sapporo: "札幌",
