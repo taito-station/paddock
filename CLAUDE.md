@@ -19,9 +19,8 @@ paddock-fetch-card <12桁race_id>
 ### 2. 予想実行
 
 ```sh
-# 1日全レースを予想（通常の予想フロー）
-printf "\ns\n" | paddock-predict --date YYYY-MM-DD --budget 5000
-# 全レースを対話的に流す場合は "\ns\n" を手動で繰り返す
+# 1日全レースを予想（通常の予想フロー）: 対話起動して各レースのプロンプトで Enter→s→Enter を繰り返す
+paddock-predict --date YYYY-MM-DD --budget 5000
 
 # 個別レースのモデル勝率確認（EV 算出・オッズ確認時）
 paddock-analyze predict <race_id> --blend-alpha 0.3
@@ -32,25 +31,22 @@ paddock-analyze predict <race_id> --blend-alpha 0.3
 
 ### 3. EV 判定 → 買い目決定
 
-全 3 券種 ROI = Σ(賭金 × 的中確率 × 実配当) / 賭金 を算出し **ROI ≥ 100% のレースだけ張る**。−EV は見送る。
+各レースの ROI = Σ_i(賭金_i × 的中確率_i × 実配当_i) / 総賭金 を算出し、**ROI ≥ 100% のレースだけ張る**。判定基準の詳細は下記「レース選択基準」参照。
 
 - ワイドは netkeiba type=5 を別取得して EV に反映（`paddock-analyze predict` が処理）。
-- +EV レースは増額してよい（唯一エッジがある馬券）。
 
 ### 4. 結果取得
 
-```sh
-# fetch-results は新規日不可（netkeiba の確定結果ページは当日レース後に生成されるため）。
-# netkeiba から直接パース:
-# https://race.netkeiba.com/race/result.html?race_id=<12桁>（UTF-8, CSS: Rank/Num/HorseNameSpan）
+手動で netkeiba から直接パースする（fetch-results は当日レース後に結果ページが生成されるまで使用不可）:
+
+```
+https://race.netkeiba.com/race/result.html?race_id=<12桁>（UTF-8）
 ```
 
-### netkeiba エンコーディング
+### 補足: netkeiba エンコーディング
 
 - `race.netkeiba.com`（shutuba/result/odds）: **UTF-8**
 - `db.netkeiba.com`（horse/result=近走）: **EUC-JP**
-
----
 
 ## 買い方ルール
 
@@ -59,7 +55,7 @@ paddock-analyze predict <race_id> --blend-alpha 0.3
 - **¥5,000/レース**（指定が無ければこれを使う。勝手に小さく組まない）。
 - **3 券種すべて使う**: ワイド ¥1,500 / 馬連 ¥1,500 / 3連複 ¥2,000（◎1頭軸ながし）。
 - 相手の広さ: **ワイドは相手 top3 / 馬連・3連複は相手 top5**。
-- 各点の金額は組合せの確率で重み付け（最大剰余法で 100 円単位に丸め、券種予算ちょうどに収める）。薄い相手も最低 ¥100 置く。
+- 各点の金額は組合せの確率で重み付け。最低 ¥100 を先に確保し、残りを最大剰余法で配分（100 円単位）→ 券種予算ちょうどに収まる。薄い相手も最低 ¥100 置いて取りこぼしを防ぐ。
 - **印を打った馬は必ず買い目に絡める**（top5 まで広げる主因）。
 
 ### 混戦判定と配分
