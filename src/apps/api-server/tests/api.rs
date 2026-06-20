@@ -5,7 +5,7 @@
 //! Postgres 非接続環境ではコンパイルのみ確認できる（`cargo test --no-run`）。
 
 use actix_web::{App, test, web};
-use chrono::NaiveDate;
+use chrono::{NaiveDate, Utc};
 use serde_json::Value;
 
 use api_server::app::configure_routes;
@@ -16,7 +16,9 @@ use paddock_domain::{
     GateNum, HorseEntry, HorseName, HorseNum, Race, RaceCard, RaceId, Surface, Venue,
 };
 use paddock_use_case::Interactor;
-use paddock_use_case::repository::{RaceCardRepository, RaceRepository};
+use paddock_use_case::repository::{
+    OddsRepository, OddsRow, RaceCardRepository, RaceOddsRecord, RaceRepository,
+};
 use rdb_gateway::PostgresRepository;
 
 type Repo = PostgresRepository;
@@ -193,6 +195,98 @@ async fn prediction_rejects_out_of_range_blend_alpha(pool: sqlx::PgPool) {
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status().as_u16(), 400);
+}
+
+/// 保存オッズ（quinella/wide/trio）を 1 レース分 seed する。axis=1, partners=2,3 を流す想定。
+fn sample_odds() -> RaceOddsRecord {
+    let row = |bet_type: &str, key: &str, odds: f64, odds_high: Option<f64>| OddsRow {
+        bet_type: bet_type.to_string(),
+        combination_key: key.to_string(),
+        odds,
+        odds_high,
+        popularity: None,
+    };
+    RaceOddsRecord {
+        race_id: RaceId::try_from(RACE_ID).unwrap(),
+        fetched_at: Utc::now(),
+        rows: vec![
+            row("quinella", "1-2", 5.0, None),
+            row("quinella", "1-3", 8.0, None),
+            row("wide", "1-2", 2.0, Some(3.0)),
+            row("wide", "1-3", 3.0, Some(4.5)),
+            row("trio", "1-2-3", 25.0, None),
+        ],
+    }
+}
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn recommendations_without_saved_odds_is_empty(pool: sqlx::PgPool) {
+    PostgresRepository::new(pool.clone())
+        .save_race_card(&sample_card())
+        .await
+        .unwrap();
+    let app = build_service!(pool);
+
+    let req = test::TestRequest::get()
+        .uri(&format!(
+            "/api/races/{RACE_ID}/recommendations?budget=10000"
+        ))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert!(resp.status().is_success(), "status: {}", resp.status());
+    let json = body_json(resp).await;
+    assert_eq!(json["odds_available"], false);
+    assert_eq!(json["bets"].as_array().unwrap().len(), 0);
+    assert_eq!(json["total_stake"], 0);
+}
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn recommendations_with_saved_odds_returns_portfolio(pool: sqlx::PgPool) {
+    let repo = PostgresRepository::new(pool.clone());
+    repo.save_race_card(&sample_card()).await.unwrap();
+    repo.save_race_odds(&sample_odds()).await.unwrap();
+    let app = build_service!(pool);
+
+    let req = test::TestRequest::get()
+        .uri(&format!(
+            "/api/races/{RACE_ID}/recommendations?budget=10000"
+        ))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert!(resp.status().is_success(), "status: {}", resp.status());
+    let json = body_json(resp).await;
+    assert_eq!(json["odds_available"], true);
+    let bets = json["bets"].as_array().unwrap();
+    assert!(!bets.is_empty(), "保存オッズがあれば買い目が出る");
+    // 予算内・100 円単位で収まる。
+    let total = json["total_stake"].as_u64().unwrap();
+    assert!(total <= 10000, "total_stake {total} > budget");
+    assert_eq!(total % 100, 0, "100 円単位");
+    // 券種は軸流しの 馬連/ワイド/三連複 のいずれか。
+    for b in bets {
+        let t = b["bet_type"].as_str().unwrap();
+        assert!(
+            matches!(t, "馬連" | "ワイド" | "三連複"),
+            "想定外の券種: {t}"
+        );
+    }
+}
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn recommendations_rejects_zero_budget(pool: sqlx::PgPool) {
+    PostgresRepository::new(pool.clone())
+        .save_race_card(&sample_card())
+        .await
+        .unwrap();
+    let app = build_service!(pool);
+
+    let req = test::TestRequest::get()
+        .uri(&format!("/api/races/{RACE_ID}/recommendations?budget=0"))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status().as_u16(), 400);
+    let json = body_json(resp).await;
+    assert_eq!(json["error"]["code"], "bad_request");
 }
 
 #[sqlx::test(migrations = "../../../deployments/db/migrations")]

@@ -753,6 +753,104 @@
         }
       }
     },
+    "/api/races/{race_id}/recommendations": {
+      "get": {
+        "tags": [
+          "races"
+        ],
+        "summary": "買い目推奨（軸流しポートフォリオ, EV/推奨額）。保存オッズ基準。",
+        "operationId": "get_recommendations",
+        "parameters": [
+          {
+            "name": "race_id",
+            "in": "path",
+            "description": "レース ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "budget",
+            "in": "query",
+            "description": "このレースに配分する予算（円）。1 以上。100 円単位の買い目に配分される。",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "track_condition",
+            "in": "query",
+            "description": "馬場状態（`良` / `稍重` / `重` / `不良`。略記 `稍` / `不` も可）。未指定なら馬場項なし。",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "blend_alpha",
+            "in": "query",
+            "description": "市場オッズ（単勝）とのブレンド係数 `[0,1]`。未指定はモデルのみ（`/prediction` と同義）。",
+            "required": false,
+            "schema": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "予算内の軸流しポートフォリオ（オッズ未保存なら odds_available=false）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecommendationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "クエリ不正",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "出馬表が無いレース",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "内部エラー",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/sessions/{date}": {
       "get": {
         "tags": [
@@ -2001,6 +2099,110 @@
           "venue": {
             "type": "string",
             "description": "開催場（英字スラッグ。例 `nakayama`）。"
+          }
+        }
+      },
+      "RecommendationBet": {
+        "type": "object",
+        "description": "推奨ポートフォリオ内の 1 買い目。",
+        "required": [
+          "bet_type",
+          "combination",
+          "stake",
+          "ev"
+        ],
+        "properties": {
+          "bet_type": {
+            "type": "string",
+            "description": "券種ラベル（`馬連` / `ワイド` / `三連複`）。"
+          },
+          "combination": {
+            "type": "string",
+            "description": "組合せキー（馬連・ワイドは `a-b`、三連複は `a-b-c`）。"
+          },
+          "ev": {
+            "type": "number",
+            "format": "double",
+            "description": "期待値倍率（`simulate` 単体評価）。odds 未取得なら 0.0。"
+          },
+          "odds": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "払戻倍率（保存オッズ未取得の脚は `null`）。ワイドは下限/上限帯の中点。"
+          },
+          "stake": {
+            "type": "integer",
+            "format": "int64",
+            "description": "賭け金（円, 100 円単位）。",
+            "minimum": 0
+          }
+        }
+      },
+      "RecommendationResponse": {
+        "type": "object",
+        "description": "`GET /api/races/{race_id}/recommendations` のレスポンス。\n\nCLI `predict` と同じ軸流しポートフォリオ（馬連＋ワイド＋三連複, #122）を予算内・100 円単位で\n返す。`odds_available=false` は保存オッズ（#51）が無いことを示し、買い目は空（SPA は「最新取得」\nを促す）。",
+        "required": [
+          "race_id",
+          "odds_available",
+          "partners",
+          "bets",
+          "total_stake"
+        ],
+        "properties": {
+          "axis": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "軸（予想本命）の馬番。確率が空なら `null`。",
+            "minimum": 0
+          },
+          "bets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RecommendationBet"
+            }
+          },
+          "hit_prob": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "同上の的中確率 [0,1]。"
+          },
+          "odds_available": {
+            "type": "boolean",
+            "description": "保存オッズ（#51）の有無。false のとき `bets` は空。"
+          },
+          "partners": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            },
+            "description": "相手（流す先）の馬番。"
+          },
+          "race_id": {
+            "type": "string"
+          },
+          "roi": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "オッズ取得済みの脚に基づく期待回収率（倍率）。買い目が空なら `null`。"
+          },
+          "total_stake": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
           }
         }
       },
