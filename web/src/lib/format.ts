@@ -1,0 +1,29 @@
+// 表示用の純粋関数群（ユニットテスト対象）。
+
+// 既定の開催日 = JST の今日。toISOString() は UTC 基準で深夜〜午前のあいだ前日に
+// ズレるため使わず、Asia/Tokyo 固定でローカル日付を組み立てる。"sv-SE" ロケールは
+// YYYY-MM-DD 形式を返す。
+export function todayJst(): string {
+  return new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
+}
+
+// レート [0,1] を百分率表記にする（例 0.254 → "25.4%"）。
+export function pct(rate: number): string {
+  return `${(rate * 100).toFixed(1)}%`;
+}
+
+export const SURFACE_JP: Record<string, string> = { turf: "芝", dirt: "ダ" };
+
+// JRA 10 場の slug→日本語。API は venue を英字スラッグで返すため表示時に変換する。
+export const VENUE_JP: Record<string, string> = {
+  sapporo: "札幌",
+  hakodate: "函館",
+  fukushima: "福島",
+  niigata: "新潟",
+  tokyo: "東京",
+  nakayama: "中山",
+  chukyo: "中京",
+  kyoto: "京都",
+  hanshin: "阪神",
+  kokura: "小倉",
+};

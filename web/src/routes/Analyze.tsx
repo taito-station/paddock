@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api, type GroupStat } from "../api/client";
+import { pct } from "../lib/format";
 
 type Kind = "horse" | "jockey" | "trainer" | "course";
 
@@ -10,10 +11,6 @@ const KIND_LABEL: Record<Kind, string> = {
   trainer: "調教師",
   course: "コース",
 };
-
-function pct(rate: number): string {
-  return `${(rate * 100).toFixed(1)}%`;
-}
 
 function StatTable({ title, rows }: { title: string; rows: GroupStat[] }) {
   if (rows.length === 0) return null;
@@ -108,7 +105,7 @@ function NameAnalyze({ kind }: { kind: "horse" | "jockey" | "trainer" }) {
       >
         <input
           type="text"
-          placeholder={`${KIND_LABEL[kind]}名（部分一致可）`}
+          placeholder={`${KIND_LABEL[kind]}名（完全一致）`}
           value={input}
           onChange={(e) => setInput(e.target.value)}
         />
@@ -186,6 +183,8 @@ function CourseAnalyze() {
         <input
           type="number"
           placeholder="距離[m]"
+          min={800}
+          step={100}
           value={form.distance}
           onChange={(e) => setForm({ ...form, distance: e.target.value })}
         />

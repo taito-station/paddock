@@ -1,0 +1,6 @@
+# Docker は .gitignore を見ないため別途指定。ホストの node_modules を COPY で
+# ビルドステージへ持ち込むと npm ci の成果を壊し、プラットフォーム不一致や肥大の原因になる。
+node_modules
+dist
+.vite
+browser-test.mjs

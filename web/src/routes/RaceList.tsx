@@ -1,29 +1,10 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
-
-function today(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
-const SURFACE_JP: Record<string, string> = { turf: "芝", dirt: "ダ" };
-
-// JRA 10 場の slug→日本語。API は venue を英字スラッグで返すため表示時に変換する。
-const VENUE_JP: Record<string, string> = {
-  sapporo: "札幌",
-  hakodate: "函館",
-  fukushima: "福島",
-  niigata: "新潟",
-  tokyo: "東京",
-  nakayama: "中山",
-  chukyo: "中京",
-  kyoto: "京都",
-  hanshin: "阪神",
-  kokura: "小倉",
-};
+import { SURFACE_JP, VENUE_JP, todayJst } from "../lib/format";
 
 export function RaceList() {
-  const [date, setDate] = useState(today);
+  const [date, setDate] = useState(todayJst);
 
   const races = useQuery({
     queryKey: ["races", date],
@@ -49,7 +30,11 @@ export function RaceList() {
     },
   });
 
-  const boughtRaceIds = new Set(session.data?.bets.map((b) => b.race_id) ?? []);
+  const hasSession = !!session.data;
+  const boughtRaceIds = useMemo(
+    () => new Set(session.data?.bets.map((b) => b.race_id) ?? []),
+    [session.data],
+  );
 
   return (
     <section>
@@ -100,8 +85,11 @@ export function RaceList() {
                 <td>
                   {boughtRaceIds.has(r.race_id) ? (
                     <span className="badge badge-bought">購入済み</span>
-                  ) : (
+                  ) : hasSession ? (
                     <span className="badge">未処理</span>
+                  ) : (
+                    // セッション未作成時は購入状況が不明なのでバッジを出さない。
+                    <span className="muted">-</span>
                   )}
                 </td>
               </tr>
