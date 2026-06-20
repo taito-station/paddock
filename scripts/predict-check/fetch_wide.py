@@ -25,7 +25,13 @@ ODDS_API = "https://race.netkeiba.com/api/api_get_jra_odds.html?race_id={rid}&ty
 def fetch_wide(rid: str):
     """netkeiba race_id のライブワイドオッズを {(a,b): mid_odds} で返す（a<b の馬番）。"""
     raw = nk.curl(ODDS_API.format(rid=rid))
-    data = json.loads(raw.decode("utf-8", errors="replace"))
+    # オッズ API は UTF-8 JSON。空レスポンス（nk.curl は空 bytes を返しうる）や
+    # 構造変化で JSON にならない場合は警告して空 dict を返す（単独実行時のトレースバック回避）。
+    try:
+        data = json.loads(raw.decode("utf-8", errors="replace"))
+    except json.JSONDecodeError:
+        print(f"[warn] JSON パース失敗（空レスポンス or 構造変化）: {rid}", file=sys.stderr)
+        return {}
     odds = data.get("data", {}).get("odds", {}).get("5", {})
     out = {}
     for key, vals in odds.items():

@@ -60,6 +60,31 @@ def test_konsen_band():
     assert not L.is_konsen(clear)
 
 
+def test_parse_pred(tmp_text=None):
+    # predict 出力フォーマット契約を固定（ヘッダ + 「馬番 馬名 勝率% 連対% 複勝%」行）
+    import tempfile
+    import os
+    sample = (
+        "--- レース 6: tokyo 芝 1600m ---\n"
+        "   1 サンプルウマ              33.6%    33.6%    33.6%\n"
+        "   2 テストホース              12.1%    20.0%    28.0%\n"
+        "\n"
+        "--- レース 7: hanshin ダート 1800m ---\n"
+        "  10 ベツノウマ                25.0%    40.0%    55.0%\n"
+    )
+    fd, path = tempfile.mkstemp(suffix=".txt")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(sample)
+        out = L.parse_pred(path)
+        assert set(out) == {("tokyo", 6), ("hanshin", 7)}, list(out)
+        assert out[("tokyo", 6)]["probs"] == {1: 33.6, 2: 12.1}, out[("tokyo", 6)]
+        assert out[("tokyo", 6)]["surface"] == "芝" and out[("tokyo", 6)]["dist"] == 1600
+        assert out[("hanshin", 7)]["probs"] == {10: 25.0}
+    finally:
+        os.unlink(path)
+
+
 def test_build_bets_budget():
     # 買い目の総額が予算ちょうど（100円単位の配分が合算で一致）
     probs = {1: 35.0, 2: 15.0, 3: 12.0, 4: 8.0, 5: 6.0, 6: 5.0}

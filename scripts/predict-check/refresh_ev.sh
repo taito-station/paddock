@@ -55,11 +55,13 @@ done < <("${PSQL[@]}" -c \
 [ "${#PIDS[@]}" -gt 0 ] || { echo "対象レースなし: $DATE $FIRST_R-${LAST_R}R" >&2; exit 1; }
 
 echo "[1/5] fetch-card --force（netkeiba 最新オッズ → Postgres） ${#PIDS[@]} レース"
+FETCH_FAILED=()  # 取得失敗レースを集計し、古いオッズでの EV 誤判定を末尾で警告する
 for pid in "${PIDS[@]}"; do
   nk="$(nk_id "$pid")"
   if cargo run -q --bin paddock-fetch-card -- "$nk" --force --skip-history --interval 800 \
-       >/dev/null 2>&1; then echo "  ok   $pid ($nk)"; else echo "  FAIL $pid ($nk)"; fi
-  sleep 1
+       >/dev/null 2>&1; then echo "  ok   $pid ($nk)"
+  else echo "  FAIL $pid ($nk)"; FETCH_FAILED+=("$pid"); fi
+  sleep 1  # netkeiba への pacing（fetch-card の --interval とは別にループ間隔を空ける）
 done
 
 echo "[2/5] horses TSV"
@@ -75,11 +77,11 @@ echo "[2/5] horses TSV"
 
 echo "[3/5] exotic TSV（馬連/3連複）"
 "${PSQL[@]}" -F$'\t' -c \
-  "SELECT race_id, bet_type, combination_key, odds FROM race_odds o \
-   WHERE bet_type IN ('quinella','trio') \
-     AND race_id IN (SELECT race_id FROM race_cards \
-                     WHERE date='$DATE' AND race_num BETWEEN $FIRST_R AND $LAST_R) \
-   ORDER BY race_id, bet_type, combination_key;" > "$WORKDIR/exotic.tsv"
+  "SELECT o.race_id, o.bet_type, o.combination_key, o.odds FROM race_odds o \
+   JOIN race_cards c ON c.race_id=o.race_id \
+   WHERE c.date='$DATE' AND c.race_num BETWEEN $FIRST_R AND $LAST_R \
+     AND o.bet_type IN ('quinella','trio') \
+   ORDER BY o.race_id, o.bet_type, o.combination_key;" > "$WORKDIR/exotic.tsv"
 
 echo "[4/5] wide TSV（netkeiba type=5）"
 : > "$WORKDIR/wide.tsv"
@@ -88,7 +90,7 @@ for pid in "${PIDS[@]}"; do
   # 取得失敗は無言で捨てず、stderr をログに残しつつ FAIL を可視化する（ワイド欠落は EV を歪めるため）。
   python3 "$SCRIPT_DIR/fetch_wide.py" "$(nk_id "$pid")" "$pid" >> "$WORKDIR/wide.tsv" \
     2>>"$WORKDIR/wide_errors.log" || echo "  wide FAIL $pid（詳細: $WORKDIR/wide_errors.log）" >&2
-  sleep 1
+  sleep 1  # netkeiba への pacing
 done
 
 echo "[5/5] meta + 予想（analyze predict --blend-alpha 0.3）"
@@ -107,6 +109,11 @@ while IFS=$'\t' read -r pid venue rnum surf dist; do
     | grep -E '^[[:space:]]*[0-9]+[[:space:]]' >> "$WORKDIR/pred.txt" || true
   echo >> "$WORKDIR/pred.txt"
 done
+
+if [ "${#FETCH_FAILED[@]}" -gt 0 ]; then
+  echo "⚠ fetch-card 失敗 ${#FETCH_FAILED[@]} 本: ${FETCH_FAILED[*]}" >&2
+  echo "   → 該当レースは古い DB オッズで評価される。EV の信頼度が低い点に注意。" >&2
+fi
 
 echo "=== EV ==="
 python3 "$SCRIPT_DIR/live_ev.py" \

@@ -46,10 +46,10 @@ def largest_remainder(weights, units, minu=1):
         weights = [1] * n
         s = n
     rem = units - minu * n
-    if rem < 0:  # 全点に minu を置けない → 重い順に1ずつ
+    if rem < 0:  # 全点に minu を置けない → 重い順に1ずつ（units 点だけ）
         order = sorted(range(n), key=lambda i: weights[i], reverse=True)
         out = [0] * n
-        for i in range(units):
+        for i in range(min(units, n)):  # minu>1 等で units>n になっても添字溢れしない防御
             out[order[i]] = 1
         return out
     ideal = [rem * w / s for w in weights]
@@ -226,17 +226,18 @@ def print_slip(venue, rnum, ax, h, probs, bets):
     name = h.get(ax, {}).get("name", "?")
     print(f"\n  === {venue}{rnum:02d}R 買い目 ◎{c(ax)} {name} "
           f"単勝{h.get(ax, {}).get('odds', '?')} model{probs[ax]:.1f}% ===")
-    by_kind = {"wide": [], "quinella": [], "trio": []}
+    # 同一組番（混戦ボックスと◎軸ながしで重複しうる）は購入額を合算して1行で表示する
+    # （現場入力で同じ買い目が2行に割れて混乱しないように。賭金は合算）。
+    by_kind = {"wide": {}, "quinella": {}, "trio": {}}
     for kind, combo, amt in bets:
-        by_kind[kind].append((combo, amt))
+        by_kind[kind][combo] = by_kind[kind].get(combo, 0) + amt
     label = {"wide": "ワイド", "quinella": "馬連", "trio": "3連複"}
     for kind in ("wide", "quinella", "trio"):
         items = by_kind[kind]
         if not items:
             continue
-        total = sum(a for _, a in items)
-        print(f"  [{label[kind]}] 計¥{total:,}")
-        for combo, amt in items:
+        print(f"  [{label[kind]}] 計¥{sum(items.values()):,}")
+        for combo, amt in items.items():
             print(f"    {'-'.join(c(x) for x in combo)}  ¥{amt:,}")
 
 
