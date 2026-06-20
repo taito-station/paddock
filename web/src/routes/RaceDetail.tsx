@@ -1,13 +1,19 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type BetInput, type RecommendationBet } from "../api/client";
 import { pct, yen, VENUE_JP } from "../lib/format";
+import {
+  type Edits,
+  betKey,
+  buildOutcomeBets,
+  effPayout,
+  effStake,
+  toAmount,
+  totalStake as sumStake,
+} from "../lib/bets";
 
 const DEFAULT_RACE_BUDGET = 5000; // CLI predict の既定 race_budget と揃える。
-
-type Edit = { stake: number; payout: number };
-const betKey = (b: RecommendationBet) => `${b.bet_type}-${b.combination}`;
 
 export function RaceDetail() {
   const { date = "", raceId = "" } = useParams();
@@ -29,8 +35,19 @@ export function RaceDetail() {
   });
 
   const balance = session.data?.balance ?? 0;
-  const [budget, setBudget] = useState<number>(DEFAULT_RACE_BUDGET);
-  const [edits, setEdits] = useState<Record<string, Edit>>({});
+  // 入力中の文字列と、推奨計算に使う確定値を分離する。入力ごとの再取得（重い推奨計算）を避け、
+  // 確定（blur / Enter / 再計算ボタン）で appliedBudget に反映する。
+  const [budgetInput, setBudgetInput] = useState(String(DEFAULT_RACE_BUDGET));
+  const [appliedBudget, setAppliedBudget] = useState(DEFAULT_RACE_BUDGET);
+  const [edits, setEdits] = useState<Edits>({});
+
+  const applyBudget = () => {
+    const n = toAmount(budgetInput);
+    if (n > 0 && n !== appliedBudget) {
+      setAppliedBudget(n);
+      setEdits({}); // 買い目集合が変わるので編集をリセット（孤児エントリ防止）。
+    }
+  };
 
   const card = useQuery({
     queryKey: ["card", raceId],
@@ -48,16 +65,15 @@ export function RaceDetail() {
     queryKey: ["prediction", raceId],
     enabled: !!raceId,
     queryFn: async () => {
-      const { data, error } = await api.GET(
-        "/api/races/{race_id}/prediction",
-        { params: { path: { race_id: raceId } } },
-      );
+      const { data, error } = await api.GET("/api/races/{race_id}/prediction", {
+        params: { path: { race_id: raceId } },
+      });
       if (error) throw new Error("確率推定の取得に失敗しました");
       return data;
     },
   });
 
-  const cap = Math.min(budget, balance);
+  const cap = Math.min(appliedBudget, balance);
   const recs = useQuery({
     queryKey: ["recommendations", raceId, cap],
     enabled: !!raceId && cap > 0,
@@ -90,7 +106,8 @@ export function RaceDetail() {
         "/api/sessions/{date}/races/{race_id}/outcome",
         { params: { path: { date, race_id: raceId } }, body: { bets } },
       );
-      if (error) throw new Error("記録に失敗しました（残高超過・二重記録の可能性）");
+      if (error)
+        throw new Error("記録に失敗しました（残高超過・二重記録の可能性）");
       return data;
     },
     onSuccess: (data) => {
@@ -101,40 +118,22 @@ export function RaceDetail() {
   });
 
   const bets = recs.data?.bets ?? [];
-  const effStake = (b: RecommendationBet) => edits[betKey(b)]?.stake ?? b.stake;
-  const effPayout = (b: RecommendationBet) => edits[betKey(b)]?.payout ?? 0;
-  const totalStake = useMemo(
-    () => bets.reduce((s, b) => s + effStake(b), 0),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [bets, edits],
-  );
-  const overBudget = totalStake > balance;
+  const total = sumStake(bets, edits);
+  const overBudget = total > balance;
+  const canRecord = !!session.data && !record.isPending;
 
-  const setEdit = (b: RecommendationBet, patch: Partial<Edit>) =>
+  const setEdit = (b: RecommendationBet, patch: Partial<Edits[string]>) =>
     setEdits((prev) => {
       const k = betKey(b);
       const cur = prev[k] ?? { stake: b.stake, payout: 0 };
       return { ...prev, [k]: { ...cur, ...patch } };
     });
 
-  const useSuggested = () => setEdits({}); // 推奨額に戻す（編集をクリア）。
   const skipAll = () =>
     setEdits(
       Object.fromEntries(bets.map((b) => [betKey(b), { stake: 0, payout: 0 }])),
     );
-
-  const submit = () => {
-    const payload: BetInput[] = bets
-      .filter((b) => effStake(b) > 0)
-      .map((b) => ({
-        bet_type: b.bet_type,
-        combination: b.combination,
-        stake: effStake(b),
-        payout: effPayout(b),
-        ev: b.ev,
-      }));
-    record.mutate(payload); // 空配列 = スキップ（このレースを見送りとして記録）。
-  };
+  const skipRace = () => record.mutate([]); // 空 = このレースを見送りとして記録。
 
   return (
     <section>
@@ -148,15 +147,16 @@ export function RaceDetail() {
         <Link to={`/sessions/${date}`}>収支</Link>
       </div>
 
+      {session.isError && (
+        <p className="error">セッションの取得に失敗しました。</p>
+      )}
       {session.isSuccess && session.data === null && (
         <p className="error">
           この開催日のセッションが未作成です。
           <Link to={`/sessions/${date}`}>収支ページ</Link>で開始してください。
         </p>
       )}
-      {session.data && (
-        <p className="session-balance">残高 {yen(balance)}</p>
-      )}
+      {session.data && <p className="session-balance">残高 {yen(balance)}</p>}
 
       <h3>確率推定</h3>
       {prediction.isPending && <p>読み込み中…</p>}
@@ -196,18 +196,23 @@ export function RaceDetail() {
             type="number"
             min={100}
             step={100}
-            value={budget}
-            onChange={(e) => setBudget(Number(e.target.value))}
+            value={budgetInput}
+            onChange={(e) => setBudgetInput(e.target.value)}
+            onBlur={applyBudget}
+            onKeyDown={(e) => e.key === "Enter" && applyBudget()}
           />
           円
         </label>
+        <button onClick={applyBudget}>再計算</button>
         <span className="muted">実上限 {yen(cap)}（min(予算, 残高)）</span>
       </div>
 
-      {recs.isPending && cap > 0 && <p>読み込み中…</p>}
-      {recs.isError && (
-        <p className="error">{(recs.error as Error).message}</p>
+      {session.isPending && <p>読み込み中…</p>}
+      {session.data && cap <= 0 && (
+        <p className="muted">残高・予算が 0 のため推奨を出せません。</p>
       )}
+      {recs.isPending && cap > 0 && <p>読み込み中…</p>}
+      {recs.isError && <p className="error">{(recs.error as Error).message}</p>}
 
       {recs.data && !recs.data.odds_available && (
         <div className="toolbar">
@@ -218,6 +223,9 @@ export function RaceDetail() {
           >
             最新取得
           </button>
+          {canRecord && (
+            <button onClick={skipRace}>このレースをスキップ</button>
+          )}
           {oddsRefresh.isSuccess && !oddsRefresh.data.fetched && (
             <span className="error">オッズ未公開（取得できませんでした）</span>
           )}
@@ -228,7 +236,14 @@ export function RaceDetail() {
       )}
 
       {recs.data && recs.data.odds_available && bets.length === 0 && (
-        <p className="muted">該当なし（予算内で組める買い目がありません）。</p>
+        <div className="toolbar">
+          <span className="muted">
+            該当なし（予算内で組める買い目がありません）。
+          </span>
+          {canRecord && (
+            <button onClick={skipRace}>このレースをスキップ</button>
+          )}
+        </div>
       )}
 
       {recs.data && bets.length > 0 && (
@@ -268,9 +283,9 @@ export function RaceDetail() {
                       type="number"
                       min={0}
                       step={100}
-                      value={effStake(b)}
+                      value={effStake(b, edits)}
                       onChange={(e) =>
-                        setEdit(b, { stake: Number(e.target.value) })
+                        setEdit(b, { stake: toAmount(e.target.value) })
                       }
                       style={{ width: "6rem" }}
                     />
@@ -280,9 +295,9 @@ export function RaceDetail() {
                       type="number"
                       min={0}
                       step={100}
-                      value={effPayout(b)}
+                      value={effPayout(b, edits)}
                       onChange={(e) =>
-                        setEdit(b, { payout: Number(e.target.value) })
+                        setEdit(b, { payout: toAmount(e.target.value) })
                       }
                       style={{ width: "6rem" }}
                     />
@@ -293,16 +308,16 @@ export function RaceDetail() {
           </table>
 
           <div className="toolbar" style={{ marginTop: "0.75rem" }}>
-            <button onClick={useSuggested}>推奨通り</button>
+            <button onClick={() => setEdits({})}>推奨通り</button>
             <button onClick={skipAll}>スキップ</button>
             <span className={overBudget ? "error" : "muted"}>
-              賭け合計 {yen(totalStake)} / 残高 {yen(balance)}
+              賭け合計 {yen(total)} / 残高 {yen(balance)}
             </span>
             <button
-              onClick={submit}
-              disabled={overBudget || record.isPending || !session.data}
+              onClick={() => record.mutate(buildOutcomeBets(bets, edits))}
+              disabled={overBudget || !canRecord}
             >
-              記録する
+              {total === 0 ? "スキップとして記録" : "記録する"}
             </button>
             {record.isError && (
               <span className="error">{(record.error as Error).message}</span>

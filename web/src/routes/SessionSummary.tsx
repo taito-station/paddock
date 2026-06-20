@@ -66,7 +66,8 @@ export function SessionSummary() {
           onSubmit={(e) => {
             e.preventDefault();
             const n = Number(budget);
-            if (n >= 1) create.mutate(n);
+            // 予算は 1000 円単位（input の step と一致）。下限・有限性を確認して送る。
+            if (Number.isFinite(n) && n >= 1000) create.mutate(n);
           }}
         >
           <span className="muted">この開催日のセッションは未作成です。</span>
@@ -83,7 +84,10 @@ export function SessionSummary() {
             />
             円
           </label>
-          <button type="submit" disabled={create.isPending || Number(budget) < 1}>
+          <button
+            type="submit"
+            disabled={create.isPending || Number(budget) < 1000}
+          >
             セッション開始
           </button>
           {create.isError && (
