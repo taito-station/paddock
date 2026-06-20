@@ -60,7 +60,7 @@ def test_konsen_band():
     assert not L.is_konsen(clear)
 
 
-def test_parse_pred(tmp_text=None):
+def test_parse_pred():
     # predict 出力フォーマット契約を固定（ヘッダ + 「馬番 馬名 勝率% 連対% 複勝%」行）
     import tempfile
     import os

@@ -15,6 +15,7 @@ ROI = Σ(賭金 × 的中確率 × 実配当) / Σ賭金。--slip で +EV レー
 """
 import argparse
 import re
+import sys
 from itertools import combinations, permutations
 from pathlib import Path
 
@@ -146,6 +147,7 @@ def parse_wide(path):
 
 def parse_exotic(path):
     qn, tr = {}, {}
+    arity = {"quinella": 2, "trio": 3}  # 馬連=2頭, 3連複=3頭
     for line in Path(path).read_text().splitlines():
         if not line.strip():
             continue
@@ -154,6 +156,11 @@ def parse_exotic(path):
         try:
             ov = float(o)
         except ValueError:
+            continue
+        # combination_key は "1-2"(馬連) / "1-2-3"(3連複) の '-' 区切り前提。区切り変更等で
+        # 桁数が想定外になると的中判定が無言で 0 に縮退するため、警告して捨てる。
+        if len(nums) != arity.get(kind, len(nums)):
+            print(f"[warn] 想定外の組番形式 {kind}={combo}（pid={pid}）をスキップ", file=sys.stderr)
             continue
         if kind == "quinella":
             qn.setdefault(pid, {})[nums] = ov
