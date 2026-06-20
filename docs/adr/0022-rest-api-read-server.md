@@ -1,5 +1,8 @@
 # ADR 0022: REST API（read 基盤）サーバの追加 (Issue #33)
 
+> 採番注記: 一時期この `0022` が「jra-fetcher 集約」(Issue #155) と重複していたが、後発の集約 ADR を
+> [`0029`](0029-shared-jra-fetcher-crate.md) へ退避して解消した（2026-06-20）。本 ADR が `0022` の正本。
+
 ## ステータス
 承認済み
 
