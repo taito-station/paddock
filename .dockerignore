@@ -1,5 +1,6 @@
-# importer / api イメージのビルドに不要なものをコンテキストから除外する（同じ root を共有）。
-# ビルドに要るのは Cargo.* / src/ / deployments/db/migrations / rust-toolchain.toml 等のみ。
+# api / importer / web の各イメージは同じリポジトリルートをビルドコンテキストにする。
+# Docker はコンテキストルートの .dockerignore のみ参照する（サブディレクトリの
+# web/.dockerignore は無視される）ため、web のビルド不要物もここで除外する。
 target/
 data/
 pdfs/
@@ -14,3 +15,8 @@ docs/
 *.db-*
 .env
 .DS_Store
+# web SPA のビルド不要物（COPY web/ がホストの node_modules 等を取り込むのを防ぐ）。
+web/node_modules
+web/dist
+web/.vite
+web/browser-test.mjs

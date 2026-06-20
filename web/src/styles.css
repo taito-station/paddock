@@ -1,0 +1,148 @@
+:root {
+  font-family: system-ui, -apple-system, "Hiragino Sans", sans-serif;
+  color: #1a1a1a;
+  background: #fafafa;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+.app-header {
+  display: flex;
+  align-items: baseline;
+  gap: 1.5rem;
+  padding: 0.75rem 1.25rem;
+  background: #fff;
+  border-bottom: 1px solid #e5e5e5;
+}
+
+.app-header h1 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.app-header nav {
+  display: flex;
+  gap: 1rem;
+}
+
+.app-header nav a {
+  text-decoration: none;
+  color: #555;
+}
+
+.app-header nav a.active {
+  color: #1a1a1a;
+  font-weight: 600;
+}
+
+.app-main {
+  padding: 1.25rem;
+  max-width: 960px;
+  margin: 0 auto;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+
+input,
+select,
+button {
+  font: inherit;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background: #fff;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.grid {
+  border-collapse: collapse;
+  width: 100%;
+  background: #fff;
+}
+
+.grid th,
+.grid td {
+  border: 1px solid #e5e5e5;
+  padding: 0.35rem 0.6rem;
+  text-align: right;
+}
+
+.grid th:nth-child(-n + 2),
+.grid td:nth-child(-n + 2) {
+  text-align: left;
+}
+
+.grid thead th {
+  background: #f3f3f3;
+}
+
+.badge {
+  font-size: 0.8rem;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  background: #eee;
+  color: #777;
+}
+
+.badge-bought {
+  background: #e3f2e3;
+  color: #2e7d32;
+}
+
+.session-balance {
+  font-weight: 600;
+}
+
+.muted {
+  color: #999;
+}
+
+.error {
+  color: #c62828;
+}
+
+.tabs {
+  display: flex;
+  gap: 0.25rem;
+  margin-bottom: 1rem;
+}
+
+.tab {
+  background: #f0f0f0;
+  border: 1px solid #ddd;
+}
+
+.tab-active {
+  background: #1a1a1a;
+  color: #fff;
+  border-color: #1a1a1a;
+}
+
+.stat-block {
+  margin-bottom: 1.5rem;
+}
+
+.stat-block h3 {
+  margin: 0 0 0.4rem;
+  font-size: 0.95rem;
+}

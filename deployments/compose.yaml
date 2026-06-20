@@ -57,6 +57,22 @@ services:
       start_period: 15s
     restart: unless-stopped
 
+  # Web SPA（#34）。nginx がビルド済み静的資産を配信し、/api を api サービスへリバプロする
+  # （同一オリジン化で CORS 不要）。api 健全化後に起動。
+  web:
+    build:
+      context: ..
+      dockerfile: deployments/web.Dockerfile
+    image: paddock-web
+    container_name: paddock-web
+    depends_on:
+      api:
+        condition: service_healthy
+    # ローカル限定で公開（api/postgres と同方針。api の 8080 と衝突しない 8081 を使う）。
+    ports:
+      - "127.0.0.1:8081:80"
+    restart: unless-stopped
+
   # 成績取り込みを dev から隔離実行する importer（#146）。run-and-forget で使う:
   #   docker compose -f deployments/compose.yaml build importer
   #   docker compose -f deployments/compose.yaml run --rm -d importer fetch --year 2025
