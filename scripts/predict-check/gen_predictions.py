@@ -37,35 +37,48 @@ def get(url):
         return json.load(r)
 
 
-def db_odds(race_id):
-    """race_odds(win) から {horse_num: (odds, popularity)} を引く。"""
+def fetch_all_odds(date):
+    """当日の全レースの単勝オッズを 1 クエリで取得: {race_id: {horse_num: (odds, popularity)}}。
+
+    race_id をループ内で補間せず、`psql -v date=...` の変数束縛（`:'date'` は安全にクォート展開）
+    で 1 回だけ引く。SQL 文字列補間の禁止（rules/sql/queries.md）と N+1 回避を両立する。
+    変数展開は `-c` では効かないため、SQL は stdin 経由で psql に渡す。
+    """
+    sql = ("SELECT o.race_id, o.combination_key, o.odds, o.popularity "
+           "FROM race_odds o JOIN race_cards c ON c.race_id = o.race_id "
+           "WHERE c.date = :'date' AND o.bet_type = 'win';")
     out = subprocess.run(
-        ["psql", DB_URL, "-tA", "-F", "\t", "-c",
-         f"SELECT combination_key, odds, popularity FROM race_odds "
-         f"WHERE race_id='{race_id}' AND bet_type='win';"],
-        capture_output=True, text=True, check=True,
+        ["psql", DB_URL, "-tA", "-F", "\t", "-v", f"date={date}"],
+        input=sql, capture_output=True, text=True, check=True,
     ).stdout
     d = {}
     for line in out.splitlines():
         if not line.strip():
             continue
-        num, odds, pop = line.split("\t")
-        d[int(num)] = (float(odds), int(pop) if pop else None)
+        rid, num, odds, pop = line.split("\t")
+        d.setdefault(rid, {})[int(num)] = (float(odds), int(pop) if pop else None)
     return d
 
 
-races = get(f"{API}/api/races?date={DATE}")["races"]
+# races 一覧と odds は冒頭で 1 回ずつ取得し、失敗（api-server/DB 未起動）は fail-fast する。
+# 個別レースの 4xx/5xx（障害レース等）だけをループ内で skip し、全体停止と区別する。
+try:
+    races = get(f"{API}/api/races?date={DATE}")["races"]
+except Exception as exc:
+    sys.exit(f"races 一覧の取得に失敗（api-server 未起動? {API}）: {exc}")
+all_odds = fetch_all_odds(DATE)
+
 preds = []
 for r in races:
     rid = r["race_id"]
     try:
         pred = get(f"{API}/api/races/{rid}/prediction?blend_alpha={BLEND}")
         card = get(f"{API}/api/races/{rid}")
-    except Exception as e:  # noqa: BLE001 — 障害レース等は API が 4xx/5xx を返す。skip して継続。
-        print(f"[skip] {rid}: {e}", file=sys.stderr)
+    except Exception as exc:  # noqa: BLE001 — 障害レース等は API が 4xx/5xx を返す。skip して継続。
+        print(f"[skip] {rid}: {exc}", file=sys.stderr)
         continue
-    jockey = {e["horse_num"]: e.get("jockey", "") for e in card["entries"]}
-    odds = db_odds(rid)
+    jockey = {ent["horse_num"]: ent.get("jockey", "") for ent in card["entries"]}
+    odds = all_odds.get(rid, {})
     # 勝率降順で印を決める。
     probs = sorted(pred["probabilities"], key=lambda p: -p["win_prob"])
     mark_of = {p["horse_num"]: MARKS[i] for i, p in enumerate(probs[:len(MARKS)])}
