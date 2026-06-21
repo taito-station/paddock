@@ -535,8 +535,8 @@ async fn predict_race_trainer_lifts_horse_with_strong_record() {
 
 #[tokio::test]
 async fn predict_race_jockey_lifts_horse_with_strong_record() {
-    // ウマB だけ騎手（出馬表由来の entry.jockey）に芝の好成績を持たせる。jockey 統計が
-    // 無い場合と比べて ウマB の win_prob が上がり、ウマA は相対的に下がる（#205）。
+    // ウマB だけ騎手（出馬表由来の entry.jockey）に芝の好成績を持たせる。騎手あり・実績なし
+    // （by_surface が空）の場合と比べて ウマB の win_prob が上がり、ウマA は相対的に下がる（#205）。
     let race_id = "2026-1-tokyo-1-R1";
     let mut card = make_race_card(race_id);
     card.entries[1].jockey = Some(JockeyName::try_from("名手").unwrap());
@@ -578,7 +578,7 @@ async fn predict_race_jockey_lifts_horse_with_strong_record() {
 #[tokio::test]
 async fn predict_race_jockey_absent_not_penalized() {
     // 出馬表に騎手が無い（entry.jockey=None）馬は jockey 項なし。jockey_surface_stats を
-    // 渡しても entry.jockey=None なら無視され、jockey 統計を一切持たない場合と一致する（#205）。
+    // 渡しても entry.jockey=None なら名前収集段階でスキップされ batch にも渡らない（#205）。
     let race_id = "2026-1-tokyo-1-R1";
     let rid = RaceId::try_from(race_id).unwrap();
     let baseline = interactor(Some(make_race_card(race_id)))
