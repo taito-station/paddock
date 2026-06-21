@@ -98,12 +98,20 @@ def test_build_bets_budget():
 def test_build_bets_scale_invariant():
     # build_bets はスケール非依存（gen_predictions.py は [0,1]、live_ev は百分率で渡す）。
     # 組合せ・各点の金額・合計がすべてスケールに依存しないことを確認する。
+    # 確率合計が 100% でなくても成立する（スケール非依存性のテストなので分布の正規化は不要）。
     pct = {1: 35.0, 2: 15.0, 3: 12.0, 4: 8.0, 5: 6.0, 6: 5.0}
     frac = {k: v / 100 for k, v in pct.items()}
     _, _, _, bets_pct = L.build_bets(pct, 5000)
     _, _, _, bets_frac = L.build_bets(frac, 5000)
     assert bets_pct == bets_frac  # 組合せ・個別金額ともに完全一致
     assert sum(a for _, _, a in bets_pct) == 5000
+    # 混戦ケースでもスケール非依存
+    pct_k = {1: 30.0, 2: 25.0, 3: 22.0, 4: 21.0, 5: 8.0, 6: 6.0}
+    frac_k = {k: v / 100 for k, v in pct_k.items()}
+    _, _, _, bets_pct_k = L.build_bets(pct_k, 5000)
+    _, _, _, bets_frac_k = L.build_bets(frac_k, 5000)
+    assert bets_pct_k == bets_frac_k
+    assert sum(a for _, _, a in bets_pct_k) == 5000
 
 
 def main():

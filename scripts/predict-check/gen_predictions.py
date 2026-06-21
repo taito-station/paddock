@@ -111,7 +111,8 @@ for r in races:
     # モデル確率（[0,1]）から買い目を生成（ADR-0032）。+EV フィルタなし: 判定は refresh_ev.sh で。
     # build_bets はスケール非依存（max/比率のみ使用）のため [0,1] のまま渡してよい。
     prob_dict = {p["horse_num"]: p["win_prob"] for p in sorted_probs}
-    _, _, _, race_bets = build_bets(prob_dict, BUDGET)
+    # sorted_probs 空ガードより後なので prob_dict は必ず 1 件以上
+    _ax, _parts, _kon, race_bets = build_bets(prob_dict, BUDGET)
     bets_json = [
         # combo は build_bets が返す tuple[int, ...] (昇順ソート済み)
         {"bet_type": BET_LABEL[kind],

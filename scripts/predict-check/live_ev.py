@@ -20,7 +20,7 @@ from itertools import combinations, permutations
 from pathlib import Path
 
 CJ = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱"
-BET_LABEL = {"wide": "ワイド", "quinella": "馬連", "trio": "3連複"}
+BET_LABEL: dict[str, str] = {"wide": "ワイド", "quinella": "馬連", "trio": "3連複"}
 
 
 def c(n):
