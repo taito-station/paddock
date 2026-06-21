@@ -68,7 +68,6 @@ export function RaceDetail() {
       const { data, error } = await api.GET("/api/races/{race_id}/prediction", {
         params: {
           path: { race_id: raceId },
-          query: {},
         },
       });
       if (error) throw new Error("確率推定の取得に失敗しました");

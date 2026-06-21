@@ -189,6 +189,8 @@ async fn prediction_returns_probabilities(pool: sqlx::PgPool) {
     let json = body_json(resp).await;
     let probs = json["probabilities"].as_array().unwrap();
     assert_eq!(probs.len(), 3);
+    // blend_alpha 省略時は PRODUCTION_BLEND_ALPHA=0.3 が渡るが、オッズ未 seed のため
+    // ブレンドはスキップされ素モデルで動作する（predict.rs の no-odds フォールバック）。
     // 履歴ゼロでも均等フォールバックで確率が返り、単調性が保たれる。
     for p in probs {
         let win = p["win_prob"].as_f64().unwrap();
@@ -281,6 +283,7 @@ async fn recommendations_omitted_blend_alpha_equals_explicit_03(pool: sqlx::PgPo
     );
 
     // blend_alpha=1.0 は素モデル（オッズ不使用）→ ブレンドが実際に作用していれば買い目が異なる
+    // 馬番の組み合わせが同じでも確率が変わると各脚への stake 配分が変わるため bets 全体が差異を持つ
     let req_raw = test::TestRequest::get()
         .uri(&format!(
             "/api/races/{RACE_ID}/recommendations?budget=10000&blend_alpha=1.0"

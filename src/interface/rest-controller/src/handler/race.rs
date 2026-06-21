@@ -26,6 +26,18 @@ pub struct RaceListQuery {
 /// `blend_alpha` 省略時のデフォルト。`blend_alpha=1.0` を明示すれば素モデルを参照できる。
 pub(crate) const PRODUCTION_BLEND_ALPHA: f64 = 0.3;
 
+/// クエリの `blend_alpha` を検証してハンドラが使う値に正規化する。
+/// 省略（`None`）は [`PRODUCTION_BLEND_ALPHA`] にフォールバック。範囲外は `BadRequest`。
+fn resolve_blend_alpha(raw: Option<f64>) -> Result<Option<f64>> {
+    match raw {
+        Some(a) if !(0.0..=1.0).contains(&a) => Err(Error::BadRequest(format!(
+            "blend_alpha must be within [0, 1], got {a}"
+        ))),
+        None => Ok(Some(PRODUCTION_BLEND_ALPHA)),
+        other => Ok(other), // Some(0.0..=1.0): 明示値をそのまま使う
+    }
+}
+
 /// `GET /api/races/{race_id}/prediction` のクエリ。
 #[derive(Debug, Deserialize, IntoParams)]
 pub struct PredictionQuery {
@@ -141,15 +153,7 @@ where
 {
     let race_id = RaceId::try_from(path.into_inner())?;
 
-    let blend_alpha = match query.blend_alpha {
-        Some(a) if !(0.0..=1.0).contains(&a) => {
-            return Err(Error::BadRequest(format!(
-                "blend_alpha must be within [0, 1], got {a}"
-            )));
-        }
-        None => Some(PRODUCTION_BLEND_ALPHA),
-        other => other, // Some(0.0..=1.0): 明示値をそのまま使う
-    };
+    let blend_alpha = resolve_blend_alpha(query.blend_alpha)?;
 
     let track_condition = match query.track_condition.as_deref() {
         Some(s) => Some(TrackCondition::try_from(s)?),
@@ -198,15 +202,7 @@ where
         return Err(Error::BadRequest("budget must be >= 1".to_string()));
     }
 
-    let blend_alpha = match query.blend_alpha {
-        Some(a) if !(0.0..=1.0).contains(&a) => {
-            return Err(Error::BadRequest(format!(
-                "blend_alpha must be within [0, 1], got {a}"
-            )));
-        }
-        None => Some(PRODUCTION_BLEND_ALPHA),
-        other => other, // Some(0.0..=1.0): 明示値をそのまま使う
-    };
+    let blend_alpha = resolve_blend_alpha(query.blend_alpha)?;
 
     let track_condition = match query.track_condition.as_deref() {
         Some(s) => Some(TrackCondition::try_from(s)?),
