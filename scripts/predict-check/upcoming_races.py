@@ -23,6 +23,7 @@ netkeiba を無駄に叩くだけになる（IP ブロックのリスク, feedba
     3 列目: paddock 内部 race_id（refresh_ev の DB 突合用）
 """
 import argparse
+import re
 import sys
 from datetime import datetime
 
@@ -35,12 +36,27 @@ def to_minutes(hhmm: str) -> int:
     return int(h) * 60 + int(m)
 
 
+def valid_hhmm(s: str) -> str:
+    """argparse 用: --at の値を `HH:MM`（00:00〜23:59）に検証する。
+
+    不正値（`25:00` / `10:99` / `10` / `abc` 等）を黙って受理すると窓判定を静かに誤らせるため、
+    範囲込みで弾いて分かりやすいエラーにする（nk.py の date/venue 検証と対称）。
+    """
+    m = re.fullmatch(r"([01]?\d|2[0-3]):([0-5]\d)", s)
+    if not m:
+        raise argparse.ArgumentTypeError(f"HH:MM（00:00〜23:59）形式で指定してください: {s!r}")
+    return s
+
+
 def select_upcoming(post_times: dict, now_min: int, window_min: int):
     """発走時刻 dict {race_id: "HH:MM"} から「now 以降かつ now+window 以内」の race_id を返す.
 
     純粋関数（ネットワーク・時刻取得なし）でテスト可能にする。境界は両端含む
     （post == now はこれから発走＝対象、post == now+window もちょうど window 端で対象）。
     発走時刻順 → race_id 順で安定ソートして返す。
+
+    時刻は同日内の「0:00 からの経過分」で比較し、日跨ぎは扱わない（中央競馬は日中開催で
+    発走時刻が深夜域に来ないため。深夜域の `--at`/システム時刻では全レースが窓外になりうる）。
     """
     selected = [
         rid for rid, hhmm in post_times.items()
@@ -58,7 +74,7 @@ def main(argv=None):
     ap.add_argument("date", help="開催日 YYYYMMDD")
     ap.add_argument("--window-min", type=int, default=60,
                     help="発走まで何分以内を対象にするか（既定 60）")
-    ap.add_argument("--at", metavar="HH:MM",
+    ap.add_argument("--at", metavar="HH:MM", type=valid_hhmm,
                     help="現在時刻の上書き（テスト/検証用。既定はシステム時刻）")
     ap.add_argument("--all", action="store_true",
                     help="フィルタを無効化し全レースを出力（後方互換）")

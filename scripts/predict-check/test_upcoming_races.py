@@ -4,7 +4,10 @@
 ネットワークに触れない純粋関数だけを検証する。実行: `python3 -m pytest test_upcoming_races.py`
 もしくは `python3 test_upcoming_races.py`（pytest 不在時の素朴ランナー）。
 """
-from upcoming_races import select_upcoming, to_minutes
+import argparse
+
+from nk import parse_post_times
+from upcoming_races import select_upcoming, to_minutes, valid_hhmm
 
 # race_id は 12 桁である必要は無い（select_upcoming はキーを不透明に扱う）が、
 # 現実に近い形で並べ替え順も確認する。
@@ -52,6 +55,61 @@ def test_sorted_by_post_time():
 def test_empty_when_all_finished():
     got = select_upcoming(POSTS, to_minutes("17:00"), window_min=60)
     assert got == []
+
+
+# --- valid_hhmm（--at 入力検証） ---
+
+def test_valid_hhmm_accepts_well_formed():
+    for s in ("0:00", "09:50", "9:50", "23:59", "00:00"):
+        assert valid_hhmm(s) == s
+
+
+def test_valid_hhmm_rejects_out_of_range_and_malformed():
+    for bad in ("25:00", "10:99", "24:00", "10", "abc", "9:5", ":30", "10:60"):
+        try:
+            valid_hhmm(bad)
+        except argparse.ArgumentTypeError:
+            continue
+        raise AssertionError(f"不正値が弾かれていない: {bad!r}")
+
+
+# --- parse_post_times（race_list HTML パース） ---
+
+# netkeiba race_list_sub.html を模した最小フィクスチャ。各レース項目は
+# `class="RaceList_DataItem ..."` で始まり、shutuba リンクの race_id と Itemtime を 1 対 1 で持つ。
+FIXTURE = """
+<div class="RaceList_Box">
+<li class="RaceList_DataItem ">
+  <a href="../race/shutuba.html?race_id=202602010401&rf=race_list">
+  <div class="Race_Num"><span>1R</span></div></a>
+  <span class="RaceList_Itemtime">9:50</span>
+</li>
+<li class="RaceList_DataItem ">
+  <a href="../race/shutuba.html?race_id=202605030611&rf=race_list">
+  <div class="Race_Num"><span>11R</span></div></a>
+  <span class="RaceList_Itemtime">15:45</span>
+</li>
+<li class="RaceList_DataItem NoTime">
+  <a href="../race/shutuba.html?race_id=202609030699&rf=race_list">特殊行（発走時刻なし）</a>
+</li>
+</div>
+"""
+
+
+def test_parse_post_times_pairs_id_and_time():
+    got = parse_post_times(FIXTURE)
+    # 発走時刻 span を持つ 2 レースだけ採用、span 無しの特殊行はスキップ。
+    assert got == {"202602010401": "9:50", "202605030611": "15:45"}
+
+
+def test_parse_post_times_venue_filter():
+    # 場コード 05（東京）だけに絞る。race_id の 5-6 桁目が場コード。
+    got = parse_post_times(FIXTURE, venue_codes=["05"])
+    assert got == {"202605030611": "15:45"}
+
+
+def test_parse_post_times_empty_html():
+    assert parse_post_times("<html>no races</html>") == {}
 
 
 if __name__ == "__main__":

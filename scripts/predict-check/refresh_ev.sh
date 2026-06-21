@@ -74,18 +74,43 @@ if [ -n "${LIVE_WINDOW_MIN:-}" ]; then
   [[ "$LIVE_WINDOW_MIN" =~ ^[0-9]+$ ]] || { echo "LIVE_WINDOW_MIN は整数（分）: $LIVE_WINDOW_MIN" >&2; exit 2; }
   # upcoming_races.py の出力（3 列目=paddock race_id）を対象集合として読み、PIDS と積を取る。
   # 同 py は nk を同ディレクトリから import するため PYTHONPATH を SCRIPT_DIR に通す。
-  UPCOMING=" $(PYTHONPATH="$SCRIPT_DIR" python3 "$SCRIPT_DIR/upcoming_races.py" \
-                "${DATE//-/}" --window-min "$LIVE_WINDOW_MIN" | cut -f3 | tr '\n' ' ') "
+  # python の終了コードを cut|tr パイプに飲まれないよう一旦変数に受けて成否を判定する。
+  # 取得失敗（netkeiba エラー等）を空集合として握り潰すと「全レース終了」と区別できず
+  # 古いオッズで EV を誤判定するため、明示的に中断する。
+  if ! UPCOMING_RAW="$(PYTHONPATH="$SCRIPT_DIR" python3 "$SCRIPT_DIR/upcoming_races.py" \
+                        "${DATE//-/}" --window-min "$LIVE_WINDOW_MIN")"; then
+    echo "発走時刻の取得に失敗（netkeiba 取得エラー等）。EV 誤判定回避のため中断する。" >&2
+    exit 3
+  fi
+  UPCOMING=" $(printf '%s\n' "$UPCOMING_RAW" | cut -f3 | tr '\n' ' ') "
   FILTERED=()
   for pid in "${PIDS[@]}"; do
     [[ "$UPCOMING" == *" $pid "* ]] && FILTERED+=("$pid")
   done
-  PIDS=("${FILTERED[@]}")
-  [ "${#PIDS[@]}" -gt 0 ] || {
+  # 空配列の `"${FILTERED[@]}"` 展開は macOS Bash 3.2 + set -u で unbound エラーになり、
+  # 直後の親切メッセージに到達せず即死する（朝イチ＝窓内に未発走レース無しが主要ケース）。
+  # 代入前に件数で判定して安全に分岐する。
+  [ "${#FILTERED[@]}" -gt 0 ] || {
     echo "対象レースなし: $DATE 発走 ${LIVE_WINDOW_MIN} 分以内の未発走レースは無し（全レース終了 or 開催前）" >&2
     exit 1
   }
+  PIDS=("${FILTERED[@]}")
   echo "発走時刻フィルタ: 発走 ${LIVE_WINDOW_MIN} 分以内の未発走 ${#PIDS[@]} レースに絞り込み"
+fi
+
+# 下流 SQL（horses/exotic/meta）の対象レース述語。LIVE_WINDOW_MIN で絞った場合は
+# fetch-card/wide と同じ PIDS 集合に EV 出力も揃える。揃えないと窓外レースが「古い DB
+# オッズ＋ワイド欠落」のまま EV に混ざり、「対象を絞る」意図と乖離する（Reviewer 指摘）。
+# 未設定時は従来どおり R 範囲 BETWEEN（全レース）。alias 有無で 2 種の述語を用意する。
+if [ -n "${LIVE_WINDOW_MIN:-}" ]; then
+  # PIDS は race_cards.race_id 由来（DB 取得・検証済み）なので IN リストへ展開して安全。
+  RACE_ID_CSV=""
+  for pid in "${PIDS[@]}"; do RACE_ID_CSV="${RACE_ID_CSV:+$RACE_ID_CSV,}'$pid'"; done
+  RACE_PRED_C="c.race_id IN ($RACE_ID_CSV)"
+  RACE_PRED_BARE="race_id IN ($RACE_ID_CSV)"
+else
+  RACE_PRED_C="c.race_num BETWEEN $FIRST_R AND $LAST_R"
+  RACE_PRED_BARE="race_num BETWEEN $FIRST_R AND $LAST_R"
 fi
 
 echo "[1/5] fetch-card --force（netkeiba 最新オッズ → Postgres） ${#PIDS[@]} レース"
@@ -106,14 +131,14 @@ echo "[2/5] horses TSV"
    LEFT JOIN race_odds o ON o.race_id=e.race_id AND o.bet_type='win' \
         AND o.combination_key=e.horse_num::text \
    JOIN race_cards c ON c.race_id=e.race_id \
-   WHERE c.date='$DATE' AND c.race_num BETWEEN $FIRST_R AND $LAST_R \
+   WHERE c.date='$DATE' AND $RACE_PRED_C \
    ORDER BY e.race_id, e.horse_num;" > "$WORKDIR/horses.tsv"
 
 echo "[3/5] exotic TSV（馬連/3連複）"
 "${PSQL[@]}" -F$'\t' -c \
   "SELECT o.race_id, o.bet_type, o.combination_key, o.odds FROM race_odds o \
    JOIN race_cards c ON c.race_id=o.race_id \
-   WHERE c.date='$DATE' AND c.race_num BETWEEN $FIRST_R AND $LAST_R \
+   WHERE c.date='$DATE' AND $RACE_PRED_C \
      AND o.bet_type IN ('quinella','trio') \
    ORDER BY o.race_id, o.bet_type, o.combination_key;" > "$WORKDIR/exotic.tsv"
 
@@ -132,7 +157,7 @@ echo "[5/5] meta + 予想（analyze predict --blend-alpha 0.3）"
 : > "$WORKDIR/pred.txt"
 "${PSQL[@]}" -F$'\t' -c \
   "SELECT race_id, venue, race_num, surface, distance FROM race_cards \
-   WHERE date='$DATE' AND race_num BETWEEN $FIRST_R AND $LAST_R \
+   WHERE date='$DATE' AND $RACE_PRED_BARE \
    ORDER BY venue, race_num;" | \
 while IFS=$'\t' read -r pid venue rnum surf dist; do
   [ -n "$pid" ] || continue
