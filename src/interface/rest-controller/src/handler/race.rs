@@ -148,7 +148,7 @@ where
             )));
         }
         None => Some(PRODUCTION_BLEND_ALPHA),
-        other => other,
+        other => other, // Some(0.0..=1.0): 明示値をそのまま使う
     };
 
     let track_condition = match query.track_condition.as_deref() {
@@ -205,7 +205,7 @@ where
             )));
         }
         None => Some(PRODUCTION_BLEND_ALPHA),
-        other => other,
+        other => other, // Some(0.0..=1.0): 明示値をそのまま使う
     };
 
     let track_condition = match query.track_condition.as_deref() {
