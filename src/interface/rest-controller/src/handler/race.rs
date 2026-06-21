@@ -22,12 +22,16 @@ pub struct RaceListQuery {
     pub date: String,
 }
 
+/// 本番モデルの市場オッズブレンド係数（ADR 0027 / ADR 0031）。
+/// `blend_alpha` 省略時のデフォルト。`blend_alpha=1.0` を明示すれば素モデルを参照できる。
+pub const PRODUCTION_BLEND_ALPHA: f64 = 0.3;
+
 /// `GET /api/races/{race_id}/prediction` のクエリ。
 #[derive(Debug, Deserialize, IntoParams)]
 pub struct PredictionQuery {
     /// 馬場状態（`良` / `稍重` / `重` / `不良`。略記 `稍` / `不` も可）。未指定なら馬場項なし。
     pub track_condition: Option<String>,
-    /// 市場オッズ（単勝）とのブレンド係数 `[0,1]`。未指定はモデルのみ。
+    /// 市場オッズ（単勝）とのブレンド係数 `[0,1]`。未指定は本番ブレンド α=0.3。素モデルは `1.0` を明示。
     pub blend_alpha: Option<f64>,
 }
 
@@ -41,7 +45,7 @@ pub struct RecommendationQuery {
     pub budget: u64,
     /// 馬場状態（`良` / `稍重` / `重` / `不良`。略記 `稍` / `不` も可）。未指定なら馬場項なし。
     pub track_condition: Option<String>,
-    /// 市場オッズ（単勝）とのブレンド係数 `[0,1]`。未指定はモデルのみ（`/prediction` と同義）。
+    /// 市場オッズ（単勝）とのブレンド係数 `[0,1]`。未指定は本番ブレンド α=0.3（`/prediction` と同義）。
     pub blend_alpha: Option<f64>,
 }
 
@@ -141,7 +145,7 @@ where
                 "blend_alpha must be within [0, 1], got {a}"
             )));
         }
-        other => other,
+        other => other.or(Some(PRODUCTION_BLEND_ALPHA)),
     };
 
     let track_condition = match query.track_condition.as_deref() {
@@ -197,7 +201,7 @@ where
                 "blend_alpha must be within [0, 1], got {a}"
             )));
         }
-        other => other,
+        other => other.or(Some(PRODUCTION_BLEND_ALPHA)),
     };
 
     let track_condition = match query.track_condition.as_deref() {
