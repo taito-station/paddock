@@ -60,6 +60,47 @@ def list_race_ids(date_yyyymmdd: str, venue_codes=None):
     return ids
 
 
+def parse_post_times(html: str, venue_codes=None):
+    """race_list_sub.html の本文から発走時刻 dict {race_id(12桁): "HH:MM"} を抽出する純粋関数。
+
+    各レース項目は属性文字列 `class="RaceList_DataItem ..."` で始まり、その項目内に race_id
+    （shutuba リンク等）と発走時刻 `<span class="RaceList_Itemtime">HH:MM</span>` が 1 対 1 で
+    入る。`re.split` は **属性値の prefix 一致**でブロック分割し（先頭ブロックはヘッダなので捨てる）、
+    race_id と発走時刻の両方が取れたブロックだけを採用する。発走時刻 span を持たない項目
+    （地方・特殊行）はスキップする。ネットワーク非依存にしてフィクスチャでテスト可能にする。
+    """
+    vs = set(venue_codes) if venue_codes else None  # ループ外で一度だけ set 化（list_race_ids と対称）
+    out = {}
+    for block in re.split(r'class="RaceList_DataItem', html)[1:]:
+        rid = re.search(r"race_id=([0-9]{12})", block)
+        t = re.search(r'class="RaceList_Itemtime">\s*(\d{1,2}:\d{2})', block)
+        if not rid or not t:
+            continue
+        if vs and rid.group(1)[4:6] not in vs:
+            continue
+        out[rid.group(1)] = t.group(1)
+    return out
+
+
+def race_post_times(date_yyyymmdd: str, venue_codes=None):
+    """指定日の各レースの発走時刻を取得して返す: {race_id(12桁): "HH:MM"}。
+
+    netkeiba race_list を取得し [`parse_post_times`] でパースする。venue_codes でフィルタ可。
+    """
+    if not re.fullmatch(r"\d{8}", date_yyyymmdd):
+        raise ValueError(f"date は YYYYMMDD 8桁: {date_yyyymmdd!r}")
+    if venue_codes and not all(re.fullmatch(r"\d{2}", v) for v in venue_codes):
+        raise ValueError(f"venue コードは 2桁数字: {venue_codes!r}")
+    url = f"https://race.netkeiba.com/top/race_list_sub.html?kaisai_date={date_yyyymmdd}"
+    out = parse_post_times(decode(curl(url)), venue_codes)
+    # HTML 取得は成功したのに 1 件も取れない＝サイト構造変化の疑い。他の取得関数
+    # （fetch_result/fetch_payouts）と揃えて警告し、呼び出し側が「全レース終了」と誤認するのを防ぐ。
+    if not out:
+        print(f"[warn] 発走時刻を抽出できませんでした（HTML 構造変化の疑い）: {date_yyyymmdd}",
+              file=sys.stderr)
+    return out
+
+
 def parse_race_id(rid: str):
     """12桁 race_id を (year, venue_code, slug, jp, round, day, race_num) に分解。"""
     vc = rid[4:6]

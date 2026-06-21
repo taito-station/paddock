@@ -96,6 +96,7 @@ python3 scripts/predict-check/strategy_eval.py /tmp/preds.json /tmp/payouts.json
 |---|---|
 | `nk.py` | netkeiba 共通ヘルパ（場コード表・race_id 列挙・結果/確定配当パース） |
 | `list_races.py` | `YYYYMMDD [場コード...]` の race_id を列挙 |
+| `upcoming_races.py` | 発走時刻で「これから発走する直近レース」だけを列挙（発走済み除外＋発走 N 分以内, #197） |
 | `fetch_results.py` | 結果を取得して `results.json` 出力（答え合わせ用） |
 | `fetch_payouts.py` | 確定配当を取得して `payouts.json` 出力（戦略評価用, #122） |
 | `extract_preds.py` | predict の stdout → `preds.json`（確率テーブル） |
@@ -151,6 +152,12 @@ python3 scripts/predict-check/konsen_backtest.py \
 scripts/predict-check/refresh_ev.sh 2026-06-20 6 12 5000
 #                                    └日付      │ │ └1レース予算(円)
 #                                              └─┴ R 範囲（first last）
+
+# 発走時刻ウィンドウ絞り込み（#197）: LIVE_WINDOW_MIN を付けると、netkeiba 発走時刻で
+# 「これから発走する かつ 発走まで N 分以内」のレースだけに絞る。朝の早い時間帯に全レースを
+# 叩いてオッズが動かないのに netkeiba を過剰アクセスする無駄を防ぐ（feedback_jra_fetch_pacing）。
+# 15 分ループから回すときはこれを付け、第1R発走 1 時間前まで実質間引き・本格化後に本気稼働する。
+LIVE_WINDOW_MIN=60 scripts/predict-check/refresh_ev.sh 2026-06-20 1 12 5000
 ```
 
 `refresh_ev.sh` の処理:
