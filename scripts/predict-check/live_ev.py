@@ -20,6 +20,7 @@ from itertools import combinations, permutations
 from pathlib import Path
 
 CJ = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱"
+BET_LABEL = {"wide": "ワイド", "quinella": "馬連", "trio": "3連複"}
 
 
 def c(n):
@@ -177,7 +178,9 @@ def alloc(konsen):
 
 
 def build_bets(probs, budget):
-    """買い目を組む。返り値: list[(kind, combo_tuple, stake)]（kind=wide/quinella/trio）。
+    """買い目を組む。返り値: (ax, parts, kon, bets)。
+    ax=本命馬番, parts=相手馬番リスト, kon=混戦フラグ, bets=list[(kind, combo_tuple, stake)]。
+    kind は BET_LABEL のキー (wide/quinella/trio)。
 
     予算は100円単位（端数は切り捨て）。総ユニット(budget//100)を券種レイヤーへ alloc 比で
     最大剰余配分し、レイヤー合計が必ず総ユニットに一致するようにする。これで任意の budget
@@ -252,12 +255,11 @@ def print_slip(venue, rnum, ax, h, probs, bets):
     by_kind = {"wide": {}, "quinella": {}, "trio": {}}
     for kind, combo, amt in bets:
         by_kind[kind][combo] = by_kind[kind].get(combo, 0) + amt
-    label = {"wide": "ワイド", "quinella": "馬連", "trio": "3連複"}
     for kind in ("wide", "quinella", "trio"):
         items = by_kind[kind]
         if not items:
             continue
-        print(f"  [{label[kind]}] 計¥{sum(items.values()):,}")
+        print(f"  [{BET_LABEL[kind]}] 計¥{sum(items.values()):,}")
         for combo, amt in items.items():
             print(f"    {'-'.join(c(x) for x in combo)}  ¥{amt:,}")
 

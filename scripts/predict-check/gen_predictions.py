@@ -24,14 +24,13 @@ import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from live_ev import build_bets  # noqa: E402
+from live_ev import BET_LABEL, build_bets  # noqa: E402
 
 API = os.environ.get("PADDOCK_API_URL", "http://127.0.0.1:8080")
 DB_URL = os.environ.get("PADDOCK_DB_URL", "postgres://paddock:paddock@localhost:5432/paddock")
 BLEND = "0.3"
 BUDGET = 5000
 MARKS = ["◎", "○", "▲", "△", "☆"]  # 勝率上位 5 頭へ
-BET_LABEL = {"wide": "ワイド", "quinella": "馬連", "trio": "3連複"}
 
 if len(sys.argv) < 2 or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", sys.argv[1]):
     sys.exit("usage: gen_predictions.py <YYYY-MM-DD>")
@@ -87,6 +86,8 @@ for r in races:
     odds = all_odds.get(rid, {})
     # 勝率降順で印を決める。
     sorted_probs = sorted(pred["probabilities"], key=lambda p: -p["win_prob"])
+    if not sorted_probs:  # 出走馬確率なし（障害等）はスキップ
+        continue
     mark_of = {p["horse_num"]: MARKS[i] for i, p in enumerate(sorted_probs[:len(MARKS)])}
     horses = []
     for p in sorted_probs:
@@ -110,16 +111,14 @@ for r in races:
     # モデル確率（[0,1]）から買い目を生成（ADR-0032）。+EV フィルタなし: 判定は refresh_ev.sh で。
     # build_bets はスケール非依存（max/比率のみ使用）のため [0,1] のまま渡してよい。
     prob_dict = {p["horse_num"]: p["win_prob"] for p in sorted_probs}
-    if not prob_dict:
-        bets_json = []
-    else:
-        _, _, _, race_bets = build_bets(prob_dict, BUDGET)
-        bets_json = [
-            {"bet_type": BET_LABEL[kind],
-             "combination": "-".join(str(n) for n in combo),
-             "amount": amt}
-            for kind, combo, amt in race_bets
-        ]
+    _, _, _, race_bets = build_bets(prob_dict, BUDGET)
+    bets_json = [
+        # combo は build_bets が返す tuple[int, ...] (昇順ソート済み)
+        {"bet_type": BET_LABEL[kind],
+         "combination": "-".join(str(n) for n in combo),
+         "amount": amt}
+        for kind, combo, amt in race_bets
+    ]
     preds.append({
         "date": card["date"],
         "venue": card["venue"],
