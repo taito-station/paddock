@@ -445,6 +445,8 @@ pub trait StatsRepository: Send + Sync {
     /// ループするだけで挙動は変わらない（既定 `horse_recency` は空を返すため、recency 無効時の
     /// 本番経路・mock では空 map ではなく全馬の空系列が入る点に注意）。rdb-gateway のみが
     /// 1 レース一括クエリで override する。返却 map は `names` の全馬を含む。
+    /// なお、この既定実装が返す「全馬の空系列」を実際に使うのは default 実装を踏む経路（mock 等）
+    /// だけで、backtest は recency 無効時にそもそも本メソッドを呼ばない（呼ぶのは Postgres override のみ）。
     fn horse_recency_batch(
         &self,
         names: &[HorseName],

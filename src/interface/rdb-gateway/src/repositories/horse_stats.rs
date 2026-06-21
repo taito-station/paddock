@@ -445,6 +445,9 @@ async fn grouped_agg(
     extra_binds: &[&str],
     cutoff: Option<&str>,
 ) -> Result<HashMap<String, (i64, i64, i64, i64)>> {
+    // 空 `names` ガードは持たない（`ANY($1)` は空配列でも 0 件を返すだけで安全だが）。呼び出し側
+    // `horse_stats_batch` / `horse_recency_batch` が `unique.is_empty()` で空を弾くため、ここに空
+    // `names` は渡らない前提（entity_stats_batch 側は別途空ガードあり）。
     let q = format!(
         r#"
         SELECT
