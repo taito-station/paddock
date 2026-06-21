@@ -238,6 +238,35 @@ async fn prediction_omitted_blend_alpha_equals_explicit_03(pool: sqlx::PgPool) {
     );
 }
 
+/// recommendations も blend_alpha 省略時は `PRODUCTION_BLEND_ALPHA`(0.3) が適用され、明示した 0.3 と同一結果を返す。
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn recommendations_omitted_blend_alpha_equals_explicit_03(pool: sqlx::PgPool) {
+    let repo = PostgresRepository::new(pool.clone());
+    repo.save_race_card(&sample_card()).await.unwrap();
+    repo.save_race_odds(&sample_win_odds()).await.unwrap();
+    repo.save_race_odds(&sample_odds()).await.unwrap();
+    let app = build_service!(pool);
+
+    let req_omit = test::TestRequest::get()
+        .uri(&format!(
+            "/api/races/{RACE_ID}/recommendations?budget=10000"
+        ))
+        .to_request();
+    let json_omit = body_json(test::call_service(&app, req_omit).await).await;
+
+    let req_explicit = test::TestRequest::get()
+        .uri(&format!(
+            "/api/races/{RACE_ID}/recommendations?budget=10000&blend_alpha=0.3"
+        ))
+        .to_request();
+    let json_explicit = body_json(test::call_service(&app, req_explicit).await).await;
+
+    assert_eq!(
+        json_omit["bets"], json_explicit["bets"],
+        "省略時と明示 0.3 の買い目は一致する"
+    );
+}
+
 /// 保存オッズ（quinella/wide/trio）を 1 レース分 seed する。axis=1, partners=2,3 を流す想定。
 fn sample_odds() -> RaceOddsRecord {
     let row = |bet_type: &str, key: &str, odds: f64, odds_high: Option<f64>| OddsRow {
