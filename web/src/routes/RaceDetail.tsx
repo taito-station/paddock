@@ -14,6 +14,9 @@ import {
 } from "../lib/bets";
 
 const DEFAULT_RACE_BUDGET = 5000; // CLI predict の既定 race_budget と揃える。
+// 本番モデルの市場ブレンド係数（モデル α=0.3 ＋ 市場 0.7）。CLI predict / live EV と揃える。
+// これを渡さないと API は素のモデル確率を返し、画面の本命が買い目の本命と食い違う。
+const PREDICT_BLEND_ALPHA = 0.3;
 
 export function RaceDetail() {
   const { date = "", raceId = "" } = useParams();
@@ -66,7 +69,10 @@ export function RaceDetail() {
     enabled: !!raceId,
     queryFn: async () => {
       const { data, error } = await api.GET("/api/races/{race_id}/prediction", {
-        params: { path: { race_id: raceId } },
+        params: {
+          path: { race_id: raceId },
+          query: { blend_alpha: PREDICT_BLEND_ALPHA },
+        },
       });
       if (error) throw new Error("確率推定の取得に失敗しました");
       return data;
@@ -80,7 +86,12 @@ export function RaceDetail() {
     queryFn: async () => {
       const { data, error } = await api.GET(
         "/api/races/{race_id}/recommendations",
-        { params: { path: { race_id: raceId }, query: { budget: cap } } },
+        {
+          params: {
+            path: { race_id: raceId },
+            query: { budget: cap, blend_alpha: PREDICT_BLEND_ALPHA },
+          },
+        },
       );
       if (error) throw new Error("買い目推奨の取得に失敗しました");
       return data;
