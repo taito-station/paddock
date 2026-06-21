@@ -37,3 +37,6 @@
   レースでも表示される。レース選択（張る/見送り）は引き続きライブ EV の ROI ≥ 100% で行う。
 - `live_ev.py` のロジック（`build_bets`/`is_konsen`/`band_of` 等）を変更した場合、
   gen_predictions.py も同じ変更の影響を受ける（同一モジュールを import しているため自動的に追従）。
+- `ingest-predictions` は `bets` フィールドを配列として受け取る。空配列（障害レース等）は正常値
+  として扱われ、ingest 側でエラーにはならない（フィールドが存在しない場合の動作は未規定のため、
+  gen_predictions.py は常に `bets: []` を含めて出力する）。

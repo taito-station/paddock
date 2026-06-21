@@ -101,17 +101,25 @@ def test_build_bets_scale_invariant():
     # 確率合計が 100% でなくても成立する（スケール非依存性のテストなので分布の正規化は不要）。
     pct = {1: 35.0, 2: 15.0, 3: 12.0, 4: 8.0, 5: 6.0, 6: 5.0}
     frac = {k: v / 100 for k, v in pct.items()}
+    arb = {k: v * 3.7 for k, v in frac.items()}  # 1/100 でも 3.7 倍でも結果は同一
     _, _, _, bets_pct = L.build_bets(pct, 5000)
     _, _, _, bets_frac = L.build_bets(frac, 5000)
-    assert bets_pct == bets_frac  # 組合せ・個別金額ともに完全一致
+    _, _, _, bets_arb = L.build_bets(arb, 5000)
+    assert bets_pct == bets_frac == bets_arb  # 組合せ・個別金額ともに完全一致
     assert sum(a for _, _, a in bets_pct) == 5000
-    # 混戦ケースでもスケール非依存
-    pct_k = {1: 30.0, 2: 25.0, 3: 22.0, 4: 21.0, 5: 8.0, 6: 6.0}
+    # 混戦ケースでもスケール非依存（合計 112%: 正規化不要であることの確認）
+    pct_k = {1: 30.0, 2: 25.0, 3: 22.0, 4: 21.0, 5: 8.0, 6: 6.0}  # 合計112%（意図的：正規化不要の確認）
     frac_k = {k: v / 100 for k, v in pct_k.items()}
     _, _, _, bets_pct_k = L.build_bets(pct_k, 5000)
     _, _, _, bets_frac_k = L.build_bets(frac_k, 5000)
     assert bets_pct_k == bets_frac_k
     assert sum(a for _, _, a in bets_pct_k) == 5000
+
+
+def test_build_bets_single_horse():
+    # 1頭フィールド: parts が空になるため bets は空。budget は返らない（安全な縮退）。
+    _, _, _, bets = L.build_bets({1: 100.0}, 5000)
+    assert bets == []
 
 
 def main():

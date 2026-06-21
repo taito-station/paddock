@@ -180,7 +180,7 @@ def alloc(konsen):
 def build_bets(probs, budget):
     """買い目を組む。返り値: (ax, parts, kon, bets)。
     ax=本命馬番, parts=相手馬番リスト, kon=混戦フラグ, bets=list[(kind, combo_tuple, stake)]。
-    kind は BET_LABEL のキー (wide/quinella/trio)。
+    kind は BET_LABEL のキー (wide/quinella/trio)。combo_tuple は tuple[int, ...] (昇順ソート済み)。
 
     予算は100円単位（端数は切り捨て）。総ユニット(budget//100)を券種レイヤーへ alloc 比で
     最大剰余配分し、レイヤー合計が必ず総ユニットに一致するようにする。これで任意の budget
