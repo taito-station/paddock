@@ -154,4 +154,3 @@ https://race.netkeiba.com/race/result.html?race_id=<12桁>
 ## 精度実績
 
 最新の数値はメモリ `project_predict_check_workflow.md` を参照。
-（2026-06-13 実測: 本命単勝 43.5% / 複勝 65.2% / Top5包含 87% ／ 芝中距離が強み、ダートが弱点）
