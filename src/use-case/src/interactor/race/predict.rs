@@ -58,6 +58,8 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: 
         let standard_times = self.repository.standard_times(card.date).await?;
 
         // 全馬・騎手・調教師の名前を収集して 4 クエリで一括取得する（per-horse N+1 解消 #205）。
+        // 重複排除（同一騎手が複数馬に騎乗する場合等）は各 _batch 実装の内部で行うため、
+        // 呼び出し側は重複ありで渡してよい。
         let horse_names: Vec<HorseName> =
             card.entries.iter().map(|e| e.horse_name.clone()).collect();
         let jockey_names: Vec<JockeyName> = card
@@ -70,20 +72,26 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: 
             .iter()
             .filter_map(|e| e.trainer.clone())
             .collect();
+        // as_of: None = 全期間統計（predict は出馬表日時点での履歴制限なし。
+        // リーク防止の as_of は backtest 経路のみ必要）。
         let (horse_map, jockey_map, trainer_map, runs_map) = tokio::try_join!(
             self.repository.horse_stats_batch(&horse_names, None),
             self.repository.jockey_stats_batch(&jockey_names, None),
             self.repository.trainer_stats_batch(&trainer_names, None),
+            // limit: 前走 1 走のみ使用（recent_form_from_runs の仕様に合わせる）。
             self.repository
                 .recent_runs_batch(&horse_names, card.date, 1),
         )?;
 
         let mut entry_factors: Vec<(HorseEntry, HorseFactors)> = Vec::new();
         for entry in &card.entries {
+            // ok_or_else: batch 契約上 None になることはないが、rdb-gateway の override
+            // バグを panic ではなく error として伝播させるため backtest の expect とは意図的に非対称。
             let horse = horse_map.get(&entry.horse_name).ok_or_else(|| {
                 Error::NotFound(format!("horse stats: {}", entry.horse_name.value()))
             })?;
             // production() は recency: None なので horse_recency は取得しない（#75）。
+            // jockey/trainer が Some でも batch map にない場合は None 扱い（ADR 0007: 欠落は母数除外）。
             let jockey = entry.jockey.as_ref().and_then(|j| jockey_map.get(j));
             let trainer = entry.trainer.as_ref().and_then(|t| trainer_map.get(t));
             let recent_runs = runs_map
