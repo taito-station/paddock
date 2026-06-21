@@ -10,7 +10,7 @@
 #   例:  scripts/predict-check/refresh_ev.sh 2026-06-20 6 12 5000
 #
 # 環境変数:
-#   PADDOCK_DB_URL   Postgres 接続 URL（既定: postgres://paddock:paddock@localhost:5432/paddock）
+#   PADDOCK_DB_URL   Postgres 接続 URL（既定: postgres://paddock:paddock@127.0.0.1:5432/paddock）
 #   WORKDIR          中間 TSV の出力先（既定: $TMPDIR/paddock-live-ev）
 #   LIVE_WINDOW_MIN  設定すると発走時刻フィルタを有効化し、netkeiba 発走時刻で「これから発走する
 #                    かつ発走まで N 分以内」のレースだけを対象にする（#197, 朝の無駄打ち抑制）。
@@ -43,7 +43,10 @@ if (( _bin_missing )); then
 fi
 unset _bin_missing
 
-DB_URL="${PADDOCK_DB_URL:-postgres://paddock:paddock@localhost:5432/paddock}"
+# host は localhost ではなく 127.0.0.1 に固定する（#212）。Colima の postgres は
+# 127.0.0.1:5432 の IPv4 のみ公開しており、localhost が ::1 に先解決されると psql が
+# マッピングを外れて別の postgres に当たり `role "paddock" does not exist` で間欠失敗する。
+DB_URL="${PADDOCK_DB_URL:-postgres://paddock:paddock@127.0.0.1:5432/paddock}"
 WORKDIR="${WORKDIR:-${TMPDIR:-/tmp}/paddock-live-ev}"
 mkdir -p "$WORKDIR/logs"
 # 実行ごとにログをリセット（累積防止）
