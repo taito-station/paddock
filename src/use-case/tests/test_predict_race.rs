@@ -18,6 +18,14 @@ use paddock_use_case::{Error, Interactor, Result};
 
 // --- helpers ----------------------------------------------------------------
 
+fn win_of(probs: &[paddock_domain::HorseProbability], name: &str) -> f64 {
+    probs
+        .iter()
+        .find(|p| p.horse_name.value() == name)
+        .unwrap()
+        .win_prob
+}
+
 fn make_group(label: &str, starts: u32, wins: u32, places: u32, shows: u32) -> GroupStat {
     GroupStat {
         label: label.to_string(),
@@ -109,6 +117,8 @@ struct MockRepo {
     track_condition_stats: HashMap<String, Vec<GroupStat>>,
     /// 調教師名 → by_surface スタッツ（#74 のテスト用。未登録は空 = 実績なし）。
     trainer_surface_stats: HashMap<String, Vec<GroupStat>>,
+    /// 騎手名 → by_surface スタッツ（#205 のテスト用。未登録は空 = 実績なし）。
+    jockey_surface_stats: HashMap<String, Vec<GroupStat>>,
 }
 
 impl StatsRepository for MockRepo {
@@ -137,10 +147,19 @@ impl StatsRepository for MockRepo {
     }
     async fn jockey_stats(
         &self,
-        _: &JockeyName,
+        name: &JockeyName,
         _as_of: Option<chrono::NaiveDate>,
     ) -> Result<JockeyStatsRow> {
-        unimplemented!()
+        Ok(JockeyStatsRow {
+            jockey_name: name.value().to_string(),
+            overall: make_group("全体", 0, 0, 0, 0),
+            by_surface: self
+                .jockey_surface_stats
+                .get(name.value())
+                .cloned()
+                .unwrap_or_default(),
+            by_gate_group: vec![],
+        })
     }
     async fn trainer_stats(
         &self,
@@ -227,6 +246,7 @@ fn interactor(card: Option<RaceCard>) -> Interactor<MockRepo, NullParser, NullFe
             odds: None,
             track_condition_stats: HashMap::new(),
             trainer_surface_stats: HashMap::new(),
+            jockey_surface_stats: HashMap::new(),
         },
         NullParser,
         NullFetcher,
@@ -243,6 +263,7 @@ fn interactor_with_odds(
             odds: Some(odds),
             track_condition_stats: HashMap::new(),
             trainer_surface_stats: HashMap::new(),
+            jockey_surface_stats: HashMap::new(),
         },
         NullParser,
         NullFetcher,
@@ -259,6 +280,7 @@ fn interactor_with_tc_stats(
             odds: None,
             track_condition_stats,
             trainer_surface_stats: HashMap::new(),
+            jockey_surface_stats: HashMap::new(),
         },
         NullParser,
         NullFetcher,
@@ -275,6 +297,24 @@ fn interactor_with_trainer_stats(
             odds: None,
             track_condition_stats: HashMap::new(),
             trainer_surface_stats,
+            jockey_surface_stats: HashMap::new(),
+        },
+        NullParser,
+        NullFetcher,
+    )
+}
+
+fn interactor_with_jockey_stats(
+    card: Option<RaceCard>,
+    jockey_surface_stats: HashMap<String, Vec<GroupStat>>,
+) -> Interactor<MockRepo, NullParser, NullFetcher> {
+    Interactor::new(
+        MockRepo {
+            card,
+            odds: None,
+            track_condition_stats: HashMap::new(),
+            trainer_surface_stats: HashMap::new(),
+            jockey_surface_stats,
         },
         NullParser,
         NullFetcher,
@@ -357,13 +397,6 @@ async fn predict_race_track_condition_lifts_horse_with_strong_record() {
         .await
         .unwrap();
 
-    let win_of = |probs: &[paddock_domain::HorseProbability], name: &str| {
-        probs
-            .iter()
-            .find(|p| p.horse_name.value() == name)
-            .unwrap()
-            .win_prob
-    };
     assert!(
         win_of(&with_tc, "ウマB") > win_of(&without, "ウマB"),
         "良馬場巧者の ウマB は馬場項で win_prob が上がるはず: without={}, with={}",
@@ -479,13 +512,6 @@ async fn predict_race_trainer_lifts_horse_with_strong_record() {
         .await
         .unwrap();
 
-    let win_of = |probs: &[paddock_domain::HorseProbability], name: &str| {
-        probs
-            .iter()
-            .find(|p| p.horse_name.value() == name)
-            .unwrap()
-            .win_prob
-    };
     assert!(
         win_of(&with_tr, "ウマB") > win_of(&without, "ウマB"),
         "強い調教師の ウマB は trainer 項で win_prob が上がるはず: without={}, with={}",
@@ -498,6 +524,122 @@ async fn predict_race_trainer_lifts_horse_with_strong_record() {
             p.win_prob <= p.place_prob && p.place_prob <= p.show_prob,
             "{p:?}"
         );
+    }
+}
+
+#[tokio::test]
+async fn predict_race_jockey_lifts_horse_with_strong_record() {
+    // ウマB だけ騎手（出馬表由来の entry.jockey）に芝の好成績を持たせる。騎手あり・実績なし
+    // （by_surface が空）の場合と比べて ウマB の win_prob が上がり、ウマA は相対的に下がる（#205）。
+    let race_id = "2026-1-tokyo-1-R1";
+    let mut card = make_race_card(race_id);
+    card.entries[1].jockey = Some(JockeyName::try_from("名手").unwrap());
+    let rid = RaceId::try_from(race_id).unwrap();
+    let jk: HashMap<String, Vec<GroupStat>> =
+        HashMap::from([("名手".to_string(), vec![make_group("芝", 10, 8, 9, 10)])]);
+
+    let without = interactor_with_jockey_stats(Some(card.clone()), HashMap::new())
+        .predict_race(&rid, None, None)
+        .await
+        .unwrap();
+    let with_jk = interactor_with_jockey_stats(Some(card), jk)
+        .predict_race(&rid, None, None)
+        .await
+        .unwrap();
+
+    assert!(
+        win_of(&with_jk, "ウマB") > win_of(&without, "ウマB"),
+        "強い騎手の ウマB は jockey 項で win_prob が上がるはず: without={}, with={}",
+        win_of(&without, "ウマB"),
+        win_of(&with_jk, "ウマB")
+    );
+    assert!(win_of(&with_jk, "ウマA") < win_of(&without, "ウマA"));
+    for p in &with_jk {
+        assert!(
+            p.win_prob <= p.place_prob && p.place_prob <= p.show_prob,
+            "{p:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn predict_race_jockey_zero_stats_same_as_absent() {
+    // jockey=Some だが by_surface が空の馬は jockey_map に Some(empty_stats) として登録され、
+    // win_prob は jockey=None（entry 自体に騎手なし）の馬と一致する（ADR 0007: 欠落は母数除外）。
+    let race_id = "2026-1-tokyo-1-R1";
+    let rid = RaceId::try_from(race_id).unwrap();
+
+    let card_none = make_race_card(race_id); // ウマB: jockey=None
+    let mut card_some = make_race_card(race_id);
+    card_some.entries[1].jockey = Some(JockeyName::try_from("名手").unwrap()); // ウマB: jockey=Some, 実績なし
+
+    let without = interactor(Some(card_none))
+        .predict_race(&rid, None, None)
+        .await
+        .unwrap();
+    let with_empty = interactor_with_jockey_stats(Some(card_some), HashMap::new())
+        .predict_race(&rid, None, None)
+        .await
+        .unwrap();
+
+    let place_of = |probs: &[paddock_domain::HorseProbability], name: &str| {
+        probs
+            .iter()
+            .find(|p| p.horse_name.value() == name)
+            .unwrap()
+            .place_prob
+    };
+    let show_of = |probs: &[paddock_domain::HorseProbability], name: &str| {
+        probs
+            .iter()
+            .find(|p| p.horse_name.value() == name)
+            .unwrap()
+            .show_prob
+    };
+    for name in &["ウマA", "ウマB"] {
+        assert!(
+            (win_of(&without, name) - win_of(&with_empty, name)).abs() < 1e-12,
+            "{name}: win_prob: without={}, with_empty={}",
+            win_of(&without, name),
+            win_of(&with_empty, name)
+        );
+        assert!(
+            (place_of(&without, name) - place_of(&with_empty, name)).abs() < 1e-12,
+            "{name}: place_prob mismatch"
+        );
+        assert!(
+            (show_of(&without, name) - show_of(&with_empty, name)).abs() < 1e-12,
+            "{name}: show_prob mismatch"
+        );
+    }
+}
+
+#[tokio::test]
+async fn predict_race_jockey_absent_not_penalized() {
+    // 出馬表に騎手が無い（entry.jockey=None）馬は jockey 項なし。jockey_surface_stats を
+    // 渡しても entry.jockey=None なら名前収集段階でスキップされ batch にも渡らない（#205）。
+    let race_id = "2026-1-tokyo-1-R1";
+    let rid = RaceId::try_from(race_id).unwrap();
+    let baseline = interactor(Some(make_race_card(race_id)))
+        .predict_race(&rid, None, None)
+        .await
+        .unwrap();
+    let jk: HashMap<String, Vec<GroupStat>> =
+        HashMap::from([("名手".to_string(), vec![make_group("芝", 10, 8, 9, 10)])]);
+    let with_stats = interactor_with_jockey_stats(Some(make_race_card(race_id)), jk)
+        .predict_race(&rid, None, None)
+        .await
+        .unwrap();
+
+    assert_eq!(baseline.len(), 2);
+    assert_eq!(baseline.len(), with_stats.len());
+    for (a, b) in baseline.iter().zip(&with_stats) {
+        assert!((a.win_prob - b.win_prob).abs() < 1e-12, "{a:?} vs {b:?}");
+        assert!(
+            (a.place_prob - b.place_prob).abs() < 1e-12,
+            "{a:?} vs {b:?}"
+        );
+        assert!((a.show_prob - b.show_prob).abs() < 1e-12, "{a:?} vs {b:?}");
     }
 }
 

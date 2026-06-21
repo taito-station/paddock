@@ -2,8 +2,8 @@ use std::collections::HashMap;
 
 use chrono::NaiveDate;
 use paddock_domain::{
-    EstimationConfig, FactorStat, HorseEntry, HorseFactors, HorseName, HorseProbability, RaceId,
-    RateTriple, RecentRun, StandardTimes, Surface, TrackCondition,
+    EstimationConfig, FactorStat, HorseEntry, HorseFactors, HorseName, HorseProbability,
+    JockeyName, RaceId, RateTriple, RecentRun, StandardTimes, Surface, TrackCondition, TrainerName,
 };
 
 use crate::error::{Error, Result};
@@ -56,43 +56,62 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: 
         // 前走タイムの相対速度シグナル用の標準タイム表（#76）。全馬共通なのでループ外で 1 回だけ
         // 取得する。cutoff=card.date で出馬表日以降をリークさせない。
         let standard_times = self.repository.standard_times(card.date).await?;
+
+        // 全馬・騎手・調教師の名前を収集して 4 クエリで一括取得する（per-horse N+1 解消 #205）。
+        // 重複排除（同一騎手が複数馬に騎乗する場合等）は各 _batch 実装の内部で行うため、
+        // 呼び出し側は重複ありで渡してよい。
+        let horse_names: Vec<HorseName> =
+            card.entries.iter().map(|e| e.horse_name.clone()).collect();
+        let jockey_names: Vec<JockeyName> = card
+            .entries
+            .iter()
+            .filter_map(|e| e.jockey.clone())
+            .collect();
+        let trainer_names: Vec<TrainerName> = card
+            .entries
+            .iter()
+            .filter_map(|e| e.trainer.clone())
+            .collect();
+        // as_of: None = 全期間統計（predict は出馬表日時点での履歴制限なし。
+        // リーク防止の as_of は backtest 経路のみ必要）。
+        // try_join! の実際の並列度は接続プールのコネクション数に依存する。
+        let (horse_map, jockey_map, trainer_map, runs_map) = tokio::try_join!(
+            self.repository.horse_stats_batch(&horse_names, None),
+            self.repository.jockey_stats_batch(&jockey_names, None),
+            self.repository.trainer_stats_batch(&trainer_names, None),
+            // limit: 前走 1 走のみ使用（recent_form_from_runs の仕様に合わせる）。
+            self.repository
+                .recent_runs_batch(&horse_names, card.date, 1),
+        )?;
+
         let mut entry_factors: Vec<(HorseEntry, HorseFactors)> = Vec::new();
         for entry in &card.entries {
-            let horse = self.repository.horse_stats(&entry.horse_name, None).await?;
-            // recency 有効時のみ日付付き系列を取得する（#75 Phase B）。基準日は出馬表日。
-            let recency = match config.recency {
-                Some(_) => Some(
-                    self.repository
-                        .horse_recency(&entry.horse_name, None)
-                        .await?,
-                ),
-                None => None,
-            };
-            // jockey が None の馬は jockey 項を母数から除外して重み付き平均で評価され、欠落で
-            // 不当に減点されない（ADR 0007）。
-            let jockey = match &entry.jockey {
-                Some(j) => Some(self.repository.jockey_stats(j, None).await?),
-                None => None,
-            };
-            // 調教師統計（#74）。netkeiba 出馬表由来の entry.trainer から引く。PDF 経路で
-            // 取り込んだレースは entry.trainer=None のため項なし（ADR 0007 で減点しない）。
-            let trainer = match &entry.trainer {
-                Some(t) => Some(self.repository.trainer_stats(t, None).await?),
-                None => None,
-            };
-            // 前走フォーム（#31）。前走は出馬表日より前の成績から取る（card.date が cutoff）。
-            let recent_form = self
-                .recent_form_for(&entry.horse_name, card.date, &standard_times)
-                .await?;
+            // ok_or_else: batch 契約上 None になることはないが、rdb-gateway の override
+            // バグを panic ではなく error として伝播させるため backtest の expect とは意図的に非対称。
+            let horse = horse_map.get(&entry.horse_name).ok_or_else(|| {
+                Error::NotFound(format!("horse stats: {}", entry.horse_name.value()))
+            })?;
+            // production() は recency: None なので horse_recency は取得しない（#75）。
+            // jockey/trainer は DB 未登録（新人騎手・調教師交代等）が正当なケースのため horse と
+            // 異なり ok_or_else でエラーにせず None とし母数から除外する（ADR 0007）。
+            let jockey = entry.jockey.as_ref().and_then(|j| jockey_map.get(j));
+            let trainer = entry.trainer.as_ref().and_then(|t| trainer_map.get(t));
+            // 初戦馬（前走なし）は有効なケースのため unwrap_or(&[]) で空スライスを返す
+            // （horse_map の ok_or_else との非対称は意図的）。
+            let recent_runs = runs_map
+                .get(&entry.horse_name)
+                .map(Vec::as_slice)
+                .unwrap_or(&[]);
+            let recent_form = recent_form_from_runs(recent_runs, card.date, &standard_times);
             let factors = build_factors(
                 entry,
                 &course,
-                &horse,
-                jockey.as_ref(),
-                trainer.as_ref(),
+                horse,
+                jockey,
+                trainer,
                 &race_ctx,
                 recent_form,
-                recency.as_ref(),
+                None, // recency: production() では無効
                 card.date,
                 &config,
             );
@@ -127,21 +146,6 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: 
         };
 
         Ok(probs)
-    }
-}
-
-impl<R: StatsRepository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
-    /// 指定馬の前走（`before` より前の直近 1 走）から前走フォーム [0,1] を算出する。前走が無い／
-    /// 有効な signal が無い場合は `None`。predict と backtest で共有する（#31/#76）。`standard_times`
-    /// は前走の (surface,distance) に対する標準タイムを引くための表（レース単位で 1 回取得して共有）。
-    pub(crate) async fn recent_form_for(
-        &self,
-        name: &HorseName,
-        before: NaiveDate,
-        standard_times: &StandardTimes,
-    ) -> Result<Option<f64>> {
-        let runs = self.repository.find_recent_runs(name, before, 1).await?;
-        Ok(recent_form_from_runs(&runs, before, standard_times))
     }
 }
 
