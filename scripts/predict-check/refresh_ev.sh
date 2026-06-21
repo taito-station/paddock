@@ -10,8 +10,11 @@
 #   例:  scripts/predict-check/refresh_ev.sh 2026-06-20 6 12 5000
 #
 # 環境変数:
-#   PADDOCK_DB_URL  Postgres 接続 URL（既定: postgres://paddock:paddock@localhost:5432/paddock）
-#   WORKDIR         中間 TSV の出力先（既定: $TMPDIR/paddock-live-ev）
+#   PADDOCK_DB_URL   Postgres 接続 URL（既定: postgres://paddock:paddock@localhost:5432/paddock）
+#   WORKDIR          中間 TSV の出力先（既定: $TMPDIR/paddock-live-ev）
+#   LIVE_WINDOW_MIN  設定すると発走時刻フィルタを有効化し、netkeiba 発走時刻で「これから発走する
+#                    かつ発走まで N 分以内」のレースだけを対象にする（#197, 朝の無駄打ち抑制）。
+#                    未設定なら R 範囲の全レースを対象（後方互換）。例: LIVE_WINDOW_MIN=60
 set -euo pipefail
 
 DATE="${1:?usage: refresh_ev.sh <YYYY-MM-DD> [first_R] [last_R] [budget]}"
@@ -62,6 +65,28 @@ done < <("${PSQL[@]}" -c \
   "SELECT race_id FROM race_cards WHERE date='$DATE' \
    AND race_num BETWEEN $FIRST_R AND $LAST_R ORDER BY venue, race_num;")
 [ "${#PIDS[@]}" -gt 0 ] || { echo "対象レースなし: $DATE $FIRST_R-${LAST_R}R" >&2; exit 1; }
+
+# 発走時刻ウィンドウ絞り込み（#197, opt-in）。LIVE_WINDOW_MIN が設定されていれば、
+# netkeiba の発走時刻を使って「発走済み（now 超過）」と「発走まで window 分より先」を
+# 落とし、これから発走する直近レースだけを対象にする（朝の無駄打ち＝JRA 過剰アクセス回避,
+# feedback_jra_fetch_pacing）。未設定なら従来どおり R 範囲の全レースを対象にする（後方互換）。
+if [ -n "${LIVE_WINDOW_MIN:-}" ]; then
+  [[ "$LIVE_WINDOW_MIN" =~ ^[0-9]+$ ]] || { echo "LIVE_WINDOW_MIN は整数（分）: $LIVE_WINDOW_MIN" >&2; exit 2; }
+  # upcoming_races.py の出力（3 列目=paddock race_id）を対象集合として読み、PIDS と積を取る。
+  # 同 py は nk を同ディレクトリから import するため PYTHONPATH を SCRIPT_DIR に通す。
+  UPCOMING=" $(PYTHONPATH="$SCRIPT_DIR" python3 "$SCRIPT_DIR/upcoming_races.py" \
+                "${DATE//-/}" --window-min "$LIVE_WINDOW_MIN" | cut -f3 | tr '\n' ' ') "
+  FILTERED=()
+  for pid in "${PIDS[@]}"; do
+    [[ "$UPCOMING" == *" $pid "* ]] && FILTERED+=("$pid")
+  done
+  PIDS=("${FILTERED[@]}")
+  [ "${#PIDS[@]}" -gt 0 ] || {
+    echo "対象レースなし: $DATE 発走 ${LIVE_WINDOW_MIN} 分以内の未発走レースは無し（全レース終了 or 開催前）" >&2
+    exit 1
+  }
+  echo "発走時刻フィルタ: 発走 ${LIVE_WINDOW_MIN} 分以内の未発走 ${#PIDS[@]} レースに絞り込み"
+fi
 
 echo "[1/5] fetch-card --force（netkeiba 最新オッズ → Postgres） ${#PIDS[@]} レース"
 FETCH_FAILED=()  # 取得失敗レースを集計し、古いオッズでの EV 誤判定を末尾で警告する

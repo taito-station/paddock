@@ -60,6 +60,33 @@ def list_race_ids(date_yyyymmdd: str, venue_codes=None):
     return ids
 
 
+def race_post_times(date_yyyymmdd: str, venue_codes=None):
+    """指定日の各レースの発走時刻を返す: {race_id(12桁): "HH:MM"}。
+
+    race_list_sub.html の各レース項目 `<li class="RaceList_DataItem ...">` には
+    その race_id（shutuba リンク等）と発走時刻 `<span class="RaceList_Itemtime">HH:MM</span>`
+    が 1 対 1 で入る。項目ブロック単位で分割して両者をペアリングする。発走時刻 span を
+    持たない項目（地方・特殊行）はスキップする。
+    """
+    if not re.fullmatch(r"\d{8}", date_yyyymmdd):
+        raise ValueError(f"date は YYYYMMDD 8桁: {date_yyyymmdd!r}")
+    if venue_codes and not all(re.fullmatch(r"\d{2}", v) for v in venue_codes):
+        raise ValueError(f"venue コードは 2桁数字: {venue_codes!r}")
+    url = f"https://race.netkeiba.com/top/race_list_sub.html?kaisai_date={date_yyyymmdd}"
+    html = decode(curl(url))
+    out = {}
+    # 先頭ブロック（split の [0]）はヘッダで race 項目を含まないため捨てる。
+    for block in re.split(r'class="RaceList_DataItem', html)[1:]:
+        rid = re.search(r"race_id=([0-9]{12})", block)
+        t = re.search(r'class="RaceList_Itemtime">\s*(\d{1,2}:\d{2})', block)
+        if not rid or not t:
+            continue
+        if venue_codes and rid.group(1)[4:6] not in set(venue_codes):
+            continue
+        out[rid.group(1)] = t.group(1)
+    return out
+
+
 def parse_race_id(rid: str):
     """12桁 race_id を (year, venue_code, slug, jp, round, day, race_num) に分解。"""
     vc = rid[4:6]
