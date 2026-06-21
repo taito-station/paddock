@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use chrono::NaiveDate;
 use paddock_domain::{
     BacktestReport, BettingConfig, EstimationConfig, ExoticBet, HorseEntry, HorseFactors,
-    HorseOutcome, HorseResult, Podium, RaceEvaluation, ResultStatus, bet_hit, evaluate,
-    exotic_segments, select_bets,
+    HorseOutcome, HorseResult, Podium, RaceEvaluation, ResultStatus, StandardTimes, bet_hit,
+    evaluate, exotic_segments, select_bets,
 };
 
 use crate::error::Result;
@@ -53,6 +53,9 @@ impl<R: StatsRepository + OddsRepository, P: PdfParser, F: PdfFetcher> Interacto
         // 買い目（curated 推奨）の券種別 校正・回収率評価用（#121）。当時 race_odds がある
         // レースのみ select_bets を回し、確定着順と突合した結果を蓄積する。
         let mut exotic_bets: Vec<ExoticBet> = Vec::new();
+        // 標準タイム表は cutoff=race.date のみに依存し、同一開催日のレース間で完全に同一になる。
+        // レース単位で引くと同じ集計を日数ぶん重複実行するため、日付キャッシュで 1 日 1 回に畳む（#196）。
+        let mut standard_times_cache: HashMap<NaiveDate, StandardTimes> = HashMap::new();
         for race in &races {
             // 実際に発走した馬のみを評価対象（出走頭数）にする。出走取消・競走除外は本番 predict の
             // 出馬表にも載らないため、確率推定の母集合に含めると正規化分母が水増しされ確率が歪む。
@@ -89,8 +92,16 @@ impl<R: StatsRepository + OddsRepository, P: PdfParser, F: PdfFetcher> Interacto
                 mean_weight,
             };
             // 前走タイムの相対速度シグナル用の標準タイム表（#76）。全馬共通なので horse ループ外で
-            // 1 回取得する。cutoff=race.date で walk-forward のリークを防ぐ。
-            let standard_times = self.repository.standard_times(race.date).await?;
+            // 取得する。cutoff=race.date で walk-forward のリークを防ぐ。日付キャッシュにあれば再利用し、
+            // 同一開催日のレースで集計を重複実行しない（per-item 取得と同値）。
+            let standard_times = match standard_times_cache.get(&race.date) {
+                Some(st) => st.clone(),
+                None => {
+                    let st = self.repository.standard_times(race.date).await?;
+                    standard_times_cache.insert(race.date, st.clone());
+                    st
+                }
+            };
 
             // 馬ごとの N+1 を解消するため、出走全馬の統計をレース単位でバッチ取得する（#196）。
             // as_of/cutoff はレース日で従来と同一。重複名はバッチ側で 1 回に dedup される。
