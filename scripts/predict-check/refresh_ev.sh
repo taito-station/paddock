@@ -33,11 +33,15 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 # release バイナリの存在確認。debug ビルドでのライブ運用を防ぐ (#211)。
 FETCH_BIN="$REPO_ROOT/target/release/paddock-fetch-card"
 ANALYZE_BIN="$REPO_ROOT/target/release/paddock-analyze"
-if [[ ! -x "$FETCH_BIN" || ! -x "$ANALYZE_BIN" ]]; then
-  echo "release バイナリが見つかりません。先に以下を実行してください:" >&2
-  echo "  cargo build --release --bin paddock-fetch-card --bin paddock-analyze" >&2
+_bin_missing=0
+[[ -x "$FETCH_BIN" ]]   || { echo "release バイナリが見つかりません: $FETCH_BIN" >&2; _bin_missing=1; }
+[[ -x "$ANALYZE_BIN" ]] || { echo "release バイナリが見つかりません: $ANALYZE_BIN" >&2; _bin_missing=1; }
+if (( _bin_missing )); then
+  echo "先に以下を実行してください:" >&2
+  echo "  cd $REPO_ROOT && cargo build --release --bin paddock-fetch-card --bin paddock-analyze" >&2
   exit 1
 fi
+unset _bin_missing
 
 DB_URL="${PADDOCK_DB_URL:-postgres://paddock:paddock@localhost:5432/paddock}"
 WORKDIR="${WORKDIR:-${TMPDIR:-/tmp}/paddock-live-ev}"
