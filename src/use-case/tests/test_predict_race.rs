@@ -576,6 +576,43 @@ async fn predict_race_jockey_lifts_horse_with_strong_record() {
 }
 
 #[tokio::test]
+async fn predict_race_jockey_zero_stats_same_as_absent() {
+    // jockey=Some だが by_surface が空（実績なし）の馬は、jockey=None の馬と同じ win_prob に
+    // なる（ADR 0007: 欠落は母数除外・ゼロレートで減点しない）。
+    let race_id = "2026-1-tokyo-1-R1";
+    let rid = RaceId::try_from(race_id).unwrap();
+
+    let card_none = make_race_card(race_id); // ウマB: jockey=None
+    let mut card_some = make_race_card(race_id);
+    card_some.entries[1].jockey = Some(JockeyName::try_from("名手").unwrap()); // ウマB: jockey=Some, 実績なし
+
+    let without = interactor(Some(card_none))
+        .predict_race(&rid, None, None)
+        .await
+        .unwrap();
+    let with_empty = interactor_with_jockey_stats(Some(card_some), HashMap::new())
+        .predict_race(&rid, None, None)
+        .await
+        .unwrap();
+
+    let win_of = |probs: &[paddock_domain::HorseProbability], name: &str| {
+        probs
+            .iter()
+            .find(|p| p.horse_name.value() == name)
+            .unwrap()
+            .win_prob
+    };
+    for name in &["ウマA", "ウマB"] {
+        assert!(
+            (win_of(&without, name) - win_of(&with_empty, name)).abs() < 1e-12,
+            "{name}: jockey=None vs jockey=Some(empty): without={}, with_empty={}",
+            win_of(&without, name),
+            win_of(&with_empty, name)
+        );
+    }
+}
+
+#[tokio::test]
 async fn predict_race_jockey_absent_not_penalized() {
     // 出馬表に騎手が無い（entry.jockey=None）馬は jockey 項なし。jockey_surface_stats を
     // 渡しても entry.jockey=None なら名前収集段階でスキップされ batch にも渡らない（#205）。
