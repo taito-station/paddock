@@ -92,9 +92,12 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: 
                 Error::NotFound(format!("horse stats: {}", entry.horse_name.value()))
             })?;
             // production() は recency: None なので horse_recency は取得しない（#75）。
-            // jockey/trainer が Some でも batch map にない場合は None 扱い（ADR 0007: 欠落は母数除外）。
+            // jockey/trainer は DB 未登録（新人騎手・調教師交代等）が正当なケースのため horse と
+            // 異なり ok_or_else でエラーにせず None とし母数から除外する（ADR 0007）。
             let jockey = entry.jockey.as_ref().and_then(|j| jockey_map.get(j));
             let trainer = entry.trainer.as_ref().and_then(|t| trainer_map.get(t));
+            // 初戦馬（前走なし）は有効なケースのため unwrap_or(&[]) で空スライスを返す
+            // （horse_map の ok_or_else との非対称は意図的）。
             let recent_runs = runs_map
                 .get(&entry.horse_name)
                 .map(Vec::as_slice)

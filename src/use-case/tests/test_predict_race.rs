@@ -18,6 +18,14 @@ use paddock_use_case::{Error, Interactor, Result};
 
 // --- helpers ----------------------------------------------------------------
 
+fn win_of(probs: &[paddock_domain::HorseProbability], name: &str) -> f64 {
+    probs
+        .iter()
+        .find(|p| p.horse_name.value() == name)
+        .unwrap()
+        .win_prob
+}
+
 fn make_group(label: &str, starts: u32, wins: u32, places: u32, shows: u32) -> GroupStat {
     GroupStat {
         label: label.to_string(),
@@ -389,13 +397,6 @@ async fn predict_race_track_condition_lifts_horse_with_strong_record() {
         .await
         .unwrap();
 
-    let win_of = |probs: &[paddock_domain::HorseProbability], name: &str| {
-        probs
-            .iter()
-            .find(|p| p.horse_name.value() == name)
-            .unwrap()
-            .win_prob
-    };
     assert!(
         win_of(&with_tc, "ウマB") > win_of(&without, "ウマB"),
         "良馬場巧者の ウマB は馬場項で win_prob が上がるはず: without={}, with={}",
@@ -511,13 +512,6 @@ async fn predict_race_trainer_lifts_horse_with_strong_record() {
         .await
         .unwrap();
 
-    let win_of = |probs: &[paddock_domain::HorseProbability], name: &str| {
-        probs
-            .iter()
-            .find(|p| p.horse_name.value() == name)
-            .unwrap()
-            .win_prob
-    };
     assert!(
         win_of(&with_tr, "ウマB") > win_of(&without, "ウマB"),
         "強い調教師の ウマB は trainer 項で win_prob が上がるはず: without={}, with={}",
@@ -553,13 +547,6 @@ async fn predict_race_jockey_lifts_horse_with_strong_record() {
         .await
         .unwrap();
 
-    let win_of = |probs: &[paddock_domain::HorseProbability], name: &str| {
-        probs
-            .iter()
-            .find(|p| p.horse_name.value() == name)
-            .unwrap()
-            .win_prob
-    };
     assert!(
         win_of(&with_jk, "ウマB") > win_of(&without, "ウマB"),
         "強い騎手の ウマB は jockey 項で win_prob が上がるはず: without={}, with={}",
@@ -577,8 +564,8 @@ async fn predict_race_jockey_lifts_horse_with_strong_record() {
 
 #[tokio::test]
 async fn predict_race_jockey_zero_stats_same_as_absent() {
-    // jockey=Some だが by_surface が空（実績なし）の馬は、jockey=None の馬と同じ win_prob に
-    // なる（ADR 0007: 欠落は母数除外・ゼロレートで減点しない）。
+    // jockey=Some だが by_surface が空の馬は jockey_map に Some(empty_stats) として登録され、
+    // win_prob は jockey=None（entry 自体に騎手なし）の馬と一致する（ADR 0007: 欠落は母数除外）。
     let race_id = "2026-1-tokyo-1-R1";
     let rid = RaceId::try_from(race_id).unwrap();
 
@@ -595,13 +582,6 @@ async fn predict_race_jockey_zero_stats_same_as_absent() {
         .await
         .unwrap();
 
-    let win_of = |probs: &[paddock_domain::HorseProbability], name: &str| {
-        probs
-            .iter()
-            .find(|p| p.horse_name.value() == name)
-            .unwrap()
-            .win_prob
-    };
     for name in &["ウマA", "ウマB"] {
         assert!(
             (win_of(&without, name) - win_of(&with_empty, name)).abs() < 1e-12,
