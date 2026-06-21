@@ -22,17 +22,6 @@ FIRST_R="${2:-6}"
 LAST_R="${3:-12}"
 BUDGET="${4:-5000}"
 
-# release バイナリの存在確認。debug ビルドでのライブ運用を防ぐ (#211)。
-_REPO_ROOT_EARLY="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-_FETCH_BIN="$_REPO_ROOT_EARLY/target/release/paddock-fetch-card"
-_ANALYZE_BIN="$_REPO_ROOT_EARLY/target/release/paddock-analyze"
-if [ ! -x "$_FETCH_BIN" ] || [ ! -x "$_ANALYZE_BIN" ]; then
-  echo "release バイナリが見つかりません。先に以下を実行してください:" >&2
-  echo "  cargo build --release --bin paddock-fetch-card --bin paddock-analyze" >&2
-  exit 1
-fi
-unset _REPO_ROOT_EARLY _FETCH_BIN _ANALYZE_BIN
-
 # 引数は psql の SQL に文字列展開するため、形式を検証して注入・誤クエリを防ぐ。
 [[ "$DATE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || { echo "DATE は YYYY-MM-DD 形式: $DATE" >&2; exit 2; }
 [[ "$FIRST_R" =~ ^[0-9]+$ && "$LAST_R" =~ ^[0-9]+$ ]] || { echo "R 範囲は整数: $FIRST_R $LAST_R" >&2; exit 2; }
@@ -40,6 +29,16 @@ unset _REPO_ROOT_EARLY _FETCH_BIN _ANALYZE_BIN
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+# release バイナリの存在確認。debug ビルドでのライブ運用を防ぐ (#211)。
+FETCH_BIN="$REPO_ROOT/target/release/paddock-fetch-card"
+ANALYZE_BIN="$REPO_ROOT/target/release/paddock-analyze"
+if [[ ! -x "$FETCH_BIN" || ! -x "$ANALYZE_BIN" ]]; then
+  echo "release バイナリが見つかりません。先に以下を実行してください:" >&2
+  echo "  cargo build --release --bin paddock-fetch-card --bin paddock-analyze" >&2
+  exit 1
+fi
+
 DB_URL="${PADDOCK_DB_URL:-postgres://paddock:paddock@localhost:5432/paddock}"
 WORKDIR="${WORKDIR:-${TMPDIR:-/tmp}/paddock-live-ev}"
 mkdir -p "$WORKDIR"
@@ -128,7 +127,7 @@ echo "[1/5] fetch-card --force（netkeiba 最新オッズ → Postgres） ${#PID
 FETCH_FAILED=()  # 取得失敗レースを集計し、古いオッズでの EV 誤判定を末尾で警告する
 for pid in "${PIDS[@]}"; do
   nk="$(nk_id "$pid")"
-  if "$REPO_ROOT/target/release/paddock-fetch-card" "$nk" --force --skip-history --interval 800 \
+  if "$FETCH_BIN" "$nk" --force --skip-history --interval 800 \
        >/dev/null 2>&1; then echo "  ok   $pid ($nk)"
   else echo "  FAIL $pid ($nk)"; FETCH_FAILED+=("$pid"); fi
   sleep 1  # netkeiba への pacing（fetch-card の --interval とは別にループ間隔を空ける）
@@ -175,7 +174,7 @@ while IFS=$'\t' read -r pid venue rnum surf dist; do
   printf '%s\t%s\t%s\n' "$pid" "$venue" "$rnum" >> "$WORKDIR/meta.tsv"
   jsurf=$([ "$surf" = "turf" ] && echo "芝" || echo "ダート")
   echo "--- レース $rnum: $venue $jsurf ${dist}m ---" >> "$WORKDIR/pred.txt"
-  "$REPO_ROOT/target/release/paddock-analyze" predict "$pid" --blend-alpha 0.3 2>/dev/null \
+  "$ANALYZE_BIN" predict "$pid" --blend-alpha 0.3 2>/dev/null \
     | grep -E '^[[:space:]]*[0-9]+[[:space:]]' >> "$WORKDIR/pred.txt" || true
   echo >> "$WORKDIR/pred.txt"
 done
