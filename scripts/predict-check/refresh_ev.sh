@@ -29,9 +29,26 @@ BUDGET="${4:-5000}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+# release バイナリの存在確認。debug ビルドでのライブ運用を防ぐ (#211)。
+FETCH_BIN="$REPO_ROOT/target/release/paddock-fetch-card"
+ANALYZE_BIN="$REPO_ROOT/target/release/paddock-analyze"
+_bin_missing=0
+[[ -x "$FETCH_BIN" ]]   || { echo "release バイナリが見つかりません: $FETCH_BIN" >&2; _bin_missing=1; }
+[[ -x "$ANALYZE_BIN" ]] || { echo "release バイナリが見つかりません: $ANALYZE_BIN" >&2; _bin_missing=1; }
+if (( _bin_missing )); then
+  echo "先に以下を実行してください:" >&2
+  echo "  cd $REPO_ROOT && cargo build --release --bin paddock-fetch-card --bin paddock-analyze" >&2
+  exit 1
+fi
+unset _bin_missing
+
 DB_URL="${PADDOCK_DB_URL:-postgres://paddock:paddock@localhost:5432/paddock}"
 WORKDIR="${WORKDIR:-${TMPDIR:-/tmp}/paddock-live-ev}"
-mkdir -p "$WORKDIR"
+mkdir -p "$WORKDIR/logs"
+# 実行ごとにログをリセット（累積防止）
+: > "$WORKDIR/logs/fetch-card.log"
+: > "$WORKDIR/logs/analyze.log"
 PSQL=(psql "$DB_URL" -tA)
 
 cd "$REPO_ROOT"
@@ -117,8 +134,8 @@ echo "[1/5] fetch-card --force（netkeiba 最新オッズ → Postgres） ${#PID
 FETCH_FAILED=()  # 取得失敗レースを集計し、古いオッズでの EV 誤判定を末尾で警告する
 for pid in "${PIDS[@]}"; do
   nk="$(nk_id "$pid")"
-  if cargo run -q --bin paddock-fetch-card -- "$nk" --force --skip-history --interval 800 \
-       >/dev/null 2>&1; then echo "  ok   $pid ($nk)"
+  if "$FETCH_BIN" "$nk" --force --skip-history --interval 800 \
+       > /dev/null 2>> "$WORKDIR/logs/fetch-card.log"; then echo "  ok   $pid ($nk)"
   else echo "  FAIL $pid ($nk)"; FETCH_FAILED+=("$pid"); fi
   sleep 1  # netkeiba への pacing（fetch-card の --interval とは別にループ間隔を空ける）
 done
@@ -164,7 +181,7 @@ while IFS=$'\t' read -r pid venue rnum surf dist; do
   printf '%s\t%s\t%s\n' "$pid" "$venue" "$rnum" >> "$WORKDIR/meta.tsv"
   jsurf=$([ "$surf" = "turf" ] && echo "芝" || echo "ダート")
   echo "--- レース $rnum: $venue $jsurf ${dist}m ---" >> "$WORKDIR/pred.txt"
-  cargo run -q --bin paddock-analyze -- predict "$pid" --blend-alpha 0.3 2>/dev/null \
+  "$ANALYZE_BIN" predict "$pid" --blend-alpha 0.3 2>> "$WORKDIR/logs/analyze.log" \
     | grep -E '^[[:space:]]*[0-9]+[[:space:]]' >> "$WORKDIR/pred.txt" || true
   echo >> "$WORKDIR/pred.txt"
 done
@@ -172,6 +189,12 @@ done
 if [ "${#FETCH_FAILED[@]}" -gt 0 ]; then
   echo "⚠ fetch-card 失敗 ${#FETCH_FAILED[@]} 本: ${FETCH_FAILED[*]}" >&2
   echo "   → 該当レースは古い DB オッズで評価される。EV の信頼度が低い点に注意。" >&2
+fi
+if [[ -s "$WORKDIR/logs/fetch-card.log" ]]; then
+  echo "⚠ fetch-card stderr あり（詳細: $WORKDIR/logs/fetch-card.log）" >&2
+fi
+if [[ -s "$WORKDIR/logs/analyze.log" ]]; then
+  echo "⚠ analyze stderr あり（詳細: $WORKDIR/logs/analyze.log）" >&2
 fi
 
 echo "=== EV ==="
