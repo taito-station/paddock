@@ -40,11 +40,11 @@
   |---|---|---|---|
   | baseline | 79.5% | — | — |
   | +win≥100%/add | 76.0% | −3.5pt | 344 回 |
-  | +win≥100%/split | 72.8% | −6.8pt | 344 回 |
+  | +win≥100%/split | 74.5% | −5.0pt | 344 回 |
   | +win≥110%/add | 76.0% | −3.5pt | 340 回 |
-  | +win≥110%/split | 72.8% | −6.8pt | 340 回 |
+  | +win≥110%/split | 74.5% | −5.0pt | 340 回 |
   | +win≥120%/add | 76.0% | −3.5pt | 327 回 |
-  | +win≥120%/split | 72.8% | −6.8pt | 327 回 |
+  | +win≥120%/split | 74.5% | −5.0pt | 327 回 |
 
 - **結論**: 単勝は追加しない。発動頻度が高すぎ（71R で平均 4.6〜4.9 頭）、閾値上げても改善なし。単勝市場はモデルの win prob と高相関でエッジが出なかった。
 - 詳細: [docs/adr/0033-conditional-win-bet-rejected.md](../adr/0033-conditional-win-bet-rejected.md)（関連 Issue: #208）

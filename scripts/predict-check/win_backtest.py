@@ -18,8 +18,11 @@ baseline:        ¥5,000 をワイド¥1,500/馬連¥1,500/3連複¥2,000 で運
   python3 win_backtest.py --races /tmp/bt_races.tsv --winodds /tmp/bt_winodds.tsv \\
       --pred-dir /tmp --results-dir /tmp --ev-grid 100,110,120
 """
+from __future__ import annotations
+
 import argparse
 import re
+import sys
 from itertools import combinations
 from pathlib import Path
 
@@ -32,7 +35,12 @@ WIN_BUDGET = 500  # 条件付き単勝の 1 発動あたり予算（発動馬が
 # ---------------------------------------------------------------------------
 
 def largest_remainder(weights, units, minu=1):
-    """weights 比で units を整数配分（各 minu 以上）。100円単位最大剰余法。"""
+    """weights 比で units を整数配分（各 minu 以上）。100円単位最大剰余法。
+
+    units が minu*n を下回る場合（例: WIN_BUDGET < 100 × 発動頭数）は全馬に配分
+    できないため、上位馬から minu を割り当て残りは 0 にする。
+    呼び出し側でこの状況が起きないように WIN_BUDGET / 発動頭数上限を設計すること。
+    """
     n = len(weights)
     if n == 0:
         return []
@@ -50,6 +58,8 @@ def largest_remainder(weights, units, minu=1):
     ideal = [rem * w / s for w in weights]
     fl = [int(x) for x in ideal]
     al = [minu + fl[i] for i in range(n)]
+    # left < n が成立する: floor の切り捨て分の合計が rem - sum(fl) に等しく、
+    # 各 fl の切り捨て誤差は 1 未満なので left < n が保証される（循環なし）。
     left = rem - sum(fl)
     frac = sorted(range(n), key=lambda i: ideal[i] - fl[i], reverse=True)
     for i in range(left):
@@ -83,6 +93,9 @@ def parse_winodds(path):
 
 
 def parse_pred(path):
+    # 期待フォーマット（gen_win_backtest_data.sh が生成）:
+    #   --- レース N: 場名 芝|ダート 距離m ---
+    #      馬番 馬名 勝率% ...
     text = Path(path).read_text()
     blocks = re.split(r"--- レース (\d+): (\S+) \S+ \d+m ---", text)
     out = {}
@@ -126,8 +139,10 @@ def parse_result(path):
     pay = {"umaren": {}, "wide": {}, "trio": {}, "win": {}}
 
     # ワイド/馬連/3連複 は frozenset キー（konsen_backtest.py 踏襲）
+    # class 属性は "Wide" のみの完全一致ではなく、スペース区切りで一語でも一致すれば採用する
+    # （例: "Wide LowOdds" 等の複合クラスへの耐性）。
     for key, cls in [("umaren", "Umaren"), ("wide", "Wide"), ("trio", "Fuku3")]:
-        m = re.search(rf'<tr class="{cls}">(.*?)</tr>', t, re.S)
+        m = re.search(rf'<tr\b[^>]*\bclass="[^"]*\b{cls}\b[^"]*"[^>]*>(.*?)</tr>', t, re.S)
         if not m:
             continue
         combos = re.findall(r'class="Result">(.*?)</td>', m.group(1), re.S)
@@ -145,7 +160,7 @@ def parse_result(path):
                 pay[key][combo] = yens[k]
 
     # 単勝（Tansho）: nk.py の PAYOUT_TYPE と同じ命名
-    m = re.search(r'<tr class="Tansho">(.*?)</tr>', t, re.S)
+    m = re.search(r'<tr\b[^>]*\bclass="[^"]*\bTansho\b[^"]*"[^>]*>(.*?)</tr>', t, re.S)
     if m:
         result_cell = re.search(r'class="Result">(.*?)</td>', m.group(1), re.S)
         payout_cell = re.search(r'class="Payout">(.*?)</td>', m.group(1), re.S)
@@ -154,6 +169,8 @@ def parse_result(path):
                 r'<div[^>]*>\s*<span[^>]*>\s*(\d+)\s*</span>', result_cell.group(1))
             yens = [int(x.replace(",", ""))
                     for x in re.findall(r"([\d,]+)円", re.sub(r"<[^>]+>", " ", payout_cell.group(1)))]
+            if not winner_nums:
+                print(f"[warn] 単勝馬番を抽出できませんでした: {path}", file=sys.stderr)
             for uma, yen in zip(winner_nums, yens):
                 pay["win"][int(uma)] = yen
 
@@ -192,8 +209,9 @@ def settle_race(probs, winodds, top3, pay, ev_thresh, win_mode):
                     win_bets.append((n, u * 100))
 
     # 3 券種予算の決定: split は単勝が実際に発動した時だけ縮小し、未発動は baseline 相当
+    # split 時: ワイド¥1,300/馬連¥1,300/3連複¥1,900 + 単勝¥500 = ¥5,000 ちょうど
     if win_mode == "split" and win_bets:
-        bw, bm, bf = 1300, 1300, 1800  # 4400 + win500 = ¥4,900（100 円端数を許容）
+        bw, bm, bf = 1300, 1300, 1900  # 4500 + win500 = ¥5,000
     else:
         bw, bm, bf = 1500, 1500, 2000  # baseline ¥5,000
 

@@ -41,6 +41,7 @@ echo "[1/4] レース一覧 (bt_races.tsv)"
    WHERE rc.date >= '2026-05-30' AND rc.date <= '2026-06-14'
    ORDER BY rc.date, rc.venue, rc.race_num;" | \
 while IFS=$'\t' read -r date pid venue rnd day rnum _; do
+  # '--nk--' は SQL クエリ都合のプレースホルダ; nkid は shell 側で算出する
   vc=$(jp_to_code "$venue")
   [[ -n "$vc" ]] || { echo "未知の場名: $venue" >&2; continue; }
   nkid=$(printf '%s%s%02d%02d%02d' "${pid:0:4}" "$vc" "$rnd" "$day" "$rnum")
@@ -66,6 +67,7 @@ while IFS=$'\t' read -r date pid venue _ _ rnum _; do
     && grep -qE '^[[:space:]]*[0-9]+' "$outf" 2>/dev/null && continue
   # surface/distance を DB から取得してヘッダを組み立てる
   row=$("${PSQL[@]}" -F$'\t' -c "SELECT surface, distance FROM race_cards WHERE race_id='${pid}';")
+  [[ -z "$row" ]] && { echo "  WARN: race_card 未取得 ($pid)" >&2; continue; }
   read -r raw_surf dist <<< "$row"
   case "$raw_surf" in turf) surf=芝 ;; dirt) surf=ダート ;; *) surf="$raw_surf" ;; esac
   # predict 結果を先に取得し、0 行なら書き込まずスキップ
