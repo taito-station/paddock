@@ -233,8 +233,7 @@ async fn prediction_omitted_blend_alpha_equals_explicit_03(pool: sqlx::PgPool) {
     let json_explicit = body_json(test::call_service(&app, req_explicit).await).await;
 
     assert_eq!(
-        json_omit["probabilities"],
-        json_explicit["probabilities"],
+        json_omit["probabilities"], json_explicit["probabilities"],
         "省略時と明示 0.3 の確率は一致する"
     );
 }
