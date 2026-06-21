@@ -75,6 +75,22 @@ fn sample_card() -> RaceCard {
     }
 }
 
+/// blend 検証用の単勝オッズ（horse_num 1〜3）。
+fn sample_win_odds() -> RaceOddsRecord {
+    let row = |key: &str, odds: f64| OddsRow {
+        bet_type: "win".to_string(),
+        combination_key: key.to_string(),
+        odds,
+        odds_high: None,
+        popularity: None,
+    };
+    RaceOddsRecord {
+        race_id: RaceId::try_from(RACE_ID).unwrap(),
+        fetched_at: Utc::now(),
+        rows: vec![row("1", 2.5), row("2", 4.0), row("3", 6.0)],
+    }
+}
+
 /// テスト用 actix App を組み立てる。
 macro_rules! build_service {
     ($pool:expr) => {{
@@ -195,6 +211,32 @@ async fn prediction_rejects_out_of_range_blend_alpha(pool: sqlx::PgPool) {
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status().as_u16(), 400);
+}
+
+/// blend_alpha 省略時は `PRODUCTION_BLEND_ALPHA`(0.3) が適用され、明示した 0.3 と同一結果を返す。
+/// 単勝オッズを seed してブレンドが実際に走る状態で比較する（no-odds 時は両者とも素モデルで差異なし）。
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn prediction_omitted_blend_alpha_equals_explicit_03(pool: sqlx::PgPool) {
+    let repo = PostgresRepository::new(pool.clone());
+    repo.save_race_card(&sample_card()).await.unwrap();
+    repo.save_race_odds(&sample_win_odds()).await.unwrap();
+    let app = build_service!(pool);
+
+    let req_omit = test::TestRequest::get()
+        .uri(&format!("/api/races/{RACE_ID}/prediction"))
+        .to_request();
+    let json_omit = body_json(test::call_service(&app, req_omit).await).await;
+
+    let req_explicit = test::TestRequest::get()
+        .uri(&format!("/api/races/{RACE_ID}/prediction?blend_alpha=0.3"))
+        .to_request();
+    let json_explicit = body_json(test::call_service(&app, req_explicit).await).await;
+
+    assert_eq!(
+        json_omit["probabilities"],
+        json_explicit["probabilities"],
+        "省略時と明示 0.3 の確率は一致する"
+    );
 }
 
 /// 保存オッズ（quinella/wide/trio）を 1 レース分 seed する。axis=1, partners=2,3 を流す想定。

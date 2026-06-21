@@ -39,6 +39,9 @@
 ## 影響
 
 - 後方互換の破壊: **あり**（`blend_alpha` 省略時の返却値が変わる）。
-  ただし現状の「素モデル既定」は意図的な設計ではなく実装の未整備なので許容する。
+  現時点の既知コンシューマは SPA（`RaceDetail.tsx`）・CLI（`paddock-predict`）・
+  ライブ EV（`paddock-analyze predict`）の 3 つで、いずれも α=0.3 相当の動作を前提としている。
+  `blend_alpha` を省略するだけの素の呼び出しは想定コンシューマに存在しない。
 - `blend_alpha=1.0` を明示すれば旧来の素モデル挙動を再現できる。
-- SPA 側の `PREDICT_BLEND_ALPHA` 定数と明示 query パラメータを削除する（本 PR で同時対応）。
+- SPA 側の暫定回避コード（PR #202 で追加した `PREDICT_BLEND_ALPHA = 0.3`）が撤廃可能になり、
+  新規クライアントが `blend_alpha` を意識せずに呼んでも本番挙動が得られる。

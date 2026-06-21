@@ -24,7 +24,7 @@ pub struct RaceListQuery {
 
 /// 本番モデルの市場オッズブレンド係数（ADR 0027 / ADR 0031）。
 /// `blend_alpha` 省略時のデフォルト。`blend_alpha=1.0` を明示すれば素モデルを参照できる。
-pub const PRODUCTION_BLEND_ALPHA: f64 = 0.3;
+pub(crate) const PRODUCTION_BLEND_ALPHA: f64 = 0.3;
 
 /// `GET /api/races/{race_id}/prediction` のクエリ。
 #[derive(Debug, Deserialize, IntoParams)]
@@ -145,7 +145,8 @@ where
                 "blend_alpha must be within [0, 1], got {a}"
             )));
         }
-        other => other.or(Some(PRODUCTION_BLEND_ALPHA)),
+        None => Some(PRODUCTION_BLEND_ALPHA),
+        other => other,
     };
 
     let track_condition = match query.track_condition.as_deref() {
@@ -201,7 +202,8 @@ where
                 "blend_alpha must be within [0, 1], got {a}"
             )));
         }
-        other => other.or(Some(PRODUCTION_BLEND_ALPHA)),
+        None => Some(PRODUCTION_BLEND_ALPHA),
+        other => other,
     };
 
     let track_condition = match query.track_condition.as_deref() {
