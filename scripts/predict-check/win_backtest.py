@@ -45,7 +45,7 @@ def largest_remainder(weights, units, minu=1):
         order = sorted(range(n), key=lambda i: weights[i], reverse=True)
         out = [0] * n
         for i in range(min(units, n)):
-            out[order[i]] = 1
+            out[order[i]] = minu
         return out
     ideal = [rem * w / s for w in weights]
     fl = [int(x) for x in ideal]
@@ -56,10 +56,6 @@ def largest_remainder(weights, units, minu=1):
         al[frac[i % n]] += 1
     return al
 
-
-def band_of(probs):
-    ax = max(probs, key=lambda n: probs[n])
-    return sorted([n for n in probs if probs[n] >= 0.70 * probs[ax]], key=lambda n: -probs[n])
 
 
 # ---------------------------------------------------------------------------
@@ -158,8 +154,8 @@ def parse_result(path):
                 r'<div[^>]*>\s*<span[^>]*>\s*(\d+)\s*</span>', result_cell.group(1))
             yens = [int(x.replace(",", ""))
                     for x in re.findall(r"([\d,]+)円", re.sub(r"<[^>]+>", " ", payout_cell.group(1)))]
-            if winner_nums and yens:
-                pay["win"][int(winner_nums[0])] = yens[0]
+            for uma, yen in zip(winner_nums, yens):
+                pay["win"][int(uma)] = yen
 
     return top3, pay
 
@@ -172,14 +168,32 @@ def settle_race(probs, winodds, top3, pay, ev_thresh, win_mode):
     """1レースを精算し (払戻, 賭け金) を返す。
 
     ev_thresh: None=baseline / float=EV 閾値（1.0=100%, 1.1=110%, ...）
+               probs は %スケール（0〜100）なので /100 して実数に変換してから odds を掛ける
     win_mode:  None | "add" | "split"
     """
     axis = max(probs, key=lambda n: probs[n])
     parts = sorted([n for n in probs if n != axis], key=lambda n: -probs[n])[:5]
 
-    # 3 券種予算の決定
-    if win_mode == "split":
-        bw, bm, bf = 1300, 1300, 1800  # 4400 + win500 ≈ ¥4,900（端数¥100 が出うる）
+    # 条件付き単勝の発動馬を先に決定し、3券種の予算配分に反映する
+    win_bets = []
+    if ev_thresh is not None and winodds:
+        qualifying = [
+            (n, probs[n] / 100 * odds)
+            for n, odds in winodds.items()
+            if n in probs and probs[n] / 100 * odds >= ev_thresh
+        ]
+        qualifying.sort(key=lambda x: -x[1])  # EV 降順
+        qualifying = qualifying[:5]  # 最大5頭（予算過多防止）
+        if qualifying:
+            # WIN_BUDGET を発動馬に等分配（最大剰余法で 100 円単位に端数なく配分）
+            units = largest_remainder([1] * len(qualifying), WIN_BUDGET // 100)
+            for (n, _), u in zip(qualifying, units):
+                if u >= 1:
+                    win_bets.append((n, u * 100))
+
+    # 3 券種予算の決定: split は単勝が実際に発動した時だけ縮小し、未発動は baseline 相当
+    if win_mode == "split" and win_bets:
+        bw, bm, bf = 1300, 1300, 1800  # 4400 + win500 = ¥4,900（100 円端数を許容）
     else:
         bw, bm, bf = 1500, 1500, 2000  # baseline ¥5,000
 
@@ -204,23 +218,6 @@ def settle_race(probs, winodds, top3, pay, ev_thresh, win_mode):
         for (a, b), u in zip(pairs, fu):
             stake += u * 100
             ret += u * 100 * pay["trio"].get(frozenset({axis, a, b}), 0) // 100
-
-    # 条件付き単勝
-    win_bets = []
-    if ev_thresh is not None and winodds:
-        qualifying = [
-            (n, probs[n] / 100 * odds)
-            for n, odds in winodds.items()
-            if n in probs and probs[n] / 100 * odds >= ev_thresh
-        ]
-        qualifying.sort(key=lambda x: -x[1])  # EV 降順
-        qualifying = qualifying[:5]  # 最大5頭（予算過多防止）
-        if qualifying:
-            per_horse = (WIN_BUDGET // len(qualifying) // 100) * 100
-            per_horse = max(per_horse, 0)
-            for n, _ in qualifying:
-                if per_horse >= 100:
-                    win_bets.append((n, per_horse))
 
     for n, amt in win_bets:
         stake += amt

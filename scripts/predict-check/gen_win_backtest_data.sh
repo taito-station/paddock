@@ -50,7 +50,7 @@ wc -l "$WORKDIR/bt_races.tsv"
 
 echo "[2/4] 単勝オッズ (bt_winodds.tsv)"
 "${PSQL[@]}" -F$'\t' -c \
-  "SELECT o.race_id, o.combination_key, COALESCE(o.popularity::text, '99'), o.odds::text
+  "SELECT o.race_id, o.combination_key, COALESCE(o.popularity::text, '0'), o.odds::text
    FROM race_odds o
    JOIN race_cards rc ON rc.race_id = o.race_id
    WHERE o.bet_type = 'win'
@@ -61,17 +61,23 @@ wc -l "$WORKDIR/bt_winodds.tsv"
 echo "[3/4] analyze predict（bt_pred_DATE.txt）"
 while IFS=$'\t' read -r date pid venue _ _ rnum _; do
   outf="$WORKDIR/bt_pred_${date}.txt"
-  # すでにこのレースの予測が書かれていれば追記しない（冪等）
-  grep -qF "レース ${rnum}: ${venue}" "$outf" 2>/dev/null && continue
+  # 冪等: ヘッダ AND 馬番行が両方あればスキップ（ヘッダのみの失敗状態は再試行）
+  grep -qF "レース ${rnum}: ${venue}" "$outf" 2>/dev/null \
+    && grep -qE '^[[:space:]]*[0-9]+' "$outf" 2>/dev/null && continue
   # surface/distance を DB から取得してヘッダを組み立てる
-  row=$("${PSQL[@]}" -c "SELECT surface, distance FROM race_cards WHERE race_id='${pid}';")
-  raw_surf=$(echo "$row" | cut -d'|' -f1)
-  dist=$(echo "$row" | cut -d'|' -f2)
+  row=$("${PSQL[@]}" -F$'\t' -c "SELECT surface, distance FROM race_cards WHERE race_id='${pid}';")
+  read -r raw_surf dist <<< "$row"
   case "$raw_surf" in turf) surf=芝 ;; dirt) surf=ダート ;; *) surf="$raw_surf" ;; esac
+  # predict 結果を先に取得し、0 行なら書き込まずスキップ
+  pred_lines=$("$ANALYZE_BIN" predict "$pid" --blend-alpha 0.3 2>/dev/null \
+    | grep -E '^[[:space:]]*[0-9]+' || true)
+  if [[ -z "$pred_lines" ]]; then
+    echo "  WARN: predict が空 ($pid)" >&2
+    continue
+  fi
   echo "  analyze predict $pid"
   echo "--- レース ${rnum}: ${venue} ${surf} ${dist}m ---" >> "$outf"
-  "$ANALYZE_BIN" predict "$pid" --blend-alpha 0.3 2>/dev/null \
-    | grep -E '^[[:space:]]*[0-9]+' >> "$outf" || true
+  printf '%s\n' "$pred_lines" >> "$outf"
 done < "$WORKDIR/bt_races.tsv"
 
 echo "[4/4] netkeiba 結果 HTML（res_NKID.html）"
