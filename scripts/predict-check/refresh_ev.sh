@@ -46,6 +46,7 @@ unset _bin_missing
 # host は localhost ではなく 127.0.0.1 に固定する（#212）。Colima の postgres は
 # 127.0.0.1:5432 の IPv4 のみ公開しており、localhost が ::1 に先解決されると psql が
 # マッピングを外れて別の postgres に当たり `role "paddock" does not exist` で間欠失敗する。
+# PADDOCK_DB_URL で上書きする場合も host は localhost を避け 127.0.0.1 を使うこと（同じ間欠失敗が再発する）。
 DB_URL="${PADDOCK_DB_URL:-postgres://paddock:paddock@127.0.0.1:5432/paddock}"
 WORKDIR="${WORKDIR:-${TMPDIR:-/tmp}/paddock-live-ev}"
 mkdir -p "$WORKDIR/logs"

@@ -29,6 +29,7 @@ from live_ev import BET_LABEL, build_bets  # noqa: E402
 API = os.environ.get("PADDOCK_API_URL", "http://127.0.0.1:8080")
 # host は localhost ではなく 127.0.0.1 に固定する（#212）。Colima は IPv4(127.0.0.1) のみ
 # 公開しており、localhost が ::1 に先解決されると psql が別の postgres に当たって間欠失敗する。
+# PADDOCK_DB_URL で上書きする場合も host は localhost を避け 127.0.0.1 を使うこと（同じ間欠失敗が再発する）。
 DB_URL = os.environ.get("PADDOCK_DB_URL", "postgres://paddock:paddock@127.0.0.1:5432/paddock")
 BLEND = "0.3"
 BUDGET = 5000
