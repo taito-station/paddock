@@ -69,13 +69,14 @@ def parse_post_times(html: str, venue_codes=None):
     race_id と発走時刻の両方が取れたブロックだけを採用する。発走時刻 span を持たない項目
     （地方・特殊行）はスキップする。ネットワーク非依存にしてフィクスチャでテスト可能にする。
     """
+    vs = set(venue_codes) if venue_codes else None  # ループ外で一度だけ set 化（list_race_ids と対称）
     out = {}
     for block in re.split(r'class="RaceList_DataItem', html)[1:]:
         rid = re.search(r"race_id=([0-9]{12})", block)
         t = re.search(r'class="RaceList_Itemtime">\s*(\d{1,2}:\d{2})', block)
         if not rid or not t:
             continue
-        if venue_codes and rid.group(1)[4:6] not in set(venue_codes):
+        if vs and rid.group(1)[4:6] not in vs:
             continue
         out[rid.group(1)] = t.group(1)
     return out
