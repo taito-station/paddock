@@ -88,7 +88,7 @@ paddock-fetch-card <12桁race_id>
 # 全レース一括（通常フロー）
 paddock-predict --date YYYY-MM-DD --budget 5000
 
-# 全スキップして EV リストだけ先に確認したい場合（R は実際のレース数に合わせる）
+# 全レースをスキップして predict を完走させ EV 一覧を先に把握したい場合（R は実際のレース数に合わせる）
 R=12; python3 -c "print('\ns\n' * $R, end='')" | paddock-predict --date YYYY-MM-DD --budget 5000
 
 # 個別レース確認（ライブ EV 更新・オッズ変動追跡）
@@ -121,6 +121,7 @@ ROI = Σ_i(賭金_i × 的中確率_i × 払戻倍率_i) / 総賭金
 | 相手の広さ | ワイドは top3、馬連・3連複は top5 |
 | 混戦条件 | ◎の勝率 ×0.70 以上の馬が ◎含め 4 頭以上 |
 
+- 混戦時（◎勝率×0.70 以上が 4 頭以上）は配分が変わる → CLAUDE.md「混戦判定と配分」参照
 - 買い目は **「式別/方式/軸/相手/点数/金額」のそのまま買える形** で出す
 - 馬券は 100 円単位。各レース予算ちょうどに収める
 
@@ -153,4 +154,4 @@ https://race.netkeiba.com/race/result.html?race_id=<12桁>
 
 ## 精度実績
 
-最新の数値はメモリ `project_predict_check_workflow.md` を参照。
+最新の数値はメモリ `project_predict_check_workflow.md` を参照。メモリ未ロード時のスナップショット（2026-06-13 実測）: 本命単勝 43.5% / 複勝 65.2% / Top5包含 87%。芝中距離が強み、ダートが弱点。
