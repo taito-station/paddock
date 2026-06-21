@@ -44,7 +44,7 @@ pub struct PredictionQuery {
     /// 馬場状態（`良` / `稍重` / `重` / `不良`。略記 `稍` / `不` も可）。未指定なら馬場項なし。
     pub track_condition: Option<String>,
     /// 市場オッズ（単勝）とのブレンド係数 `[0,1]`。未指定は本番ブレンド α=0.3。素モデルは `1.0` を明示。
-    #[param(default = 0.3)]
+    #[param(default = 0.3, minimum = 0.0, maximum = 1.0)]
     pub blend_alpha: Option<f64>,
 }
 
@@ -59,7 +59,7 @@ pub struct RecommendationQuery {
     /// 馬場状態（`良` / `稍重` / `重` / `不良`。略記 `稍` / `不` も可）。未指定なら馬場項なし。
     pub track_condition: Option<String>,
     /// 市場オッズ（単勝）とのブレンド係数 `[0,1]`。未指定は本番ブレンド α=0.3。素モデルは `1.0` を明示（`/prediction` と同義）。
-    #[param(default = 0.3)]
+    #[param(default = 0.3, minimum = 0.0, maximum = 1.0)]
     pub blend_alpha: Option<f64>,
 }
 

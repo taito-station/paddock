@@ -75,7 +75,7 @@ fn sample_card() -> RaceCard {
     }
 }
 
-/// blend 検証用の単勝オッズ（horse_num 1〜3）。
+/// blend 検証用の単勝オッズ（horse_num 1〜3）。[`RACE_ID`] と同じレースに紐づける。
 fn sample_win_odds() -> RaceOddsRecord {
     let row = |key: &str, odds: f64| OddsRow {
         bet_type: "win".to_string(),
@@ -218,6 +218,7 @@ async fn prediction_rejects_out_of_range_blend_alpha(pool: sqlx::PgPool) {
 /// blend_alpha 省略時は `PRODUCTION_BLEND_ALPHA`(0.3) が適用され、明示した 0.3 と同一結果を返す。
 /// 単勝オッズを seed してブレンドが実際に走る状態で比較する（no-odds 時は両者とも素モデルで差異なし）。
 /// 加えて素モデル(blend_alpha=1.0)と差が出ることも確認し、ブレンドが実際に作用していることを保証する。
+/// `sample_win_odds` は 3 頭に odds 2.5/4.0/6.0 を与え、均等 prior を崩すためブレンドで差異が生じる。
 #[sqlx::test(migrations = "../../../deployments/db/migrations")]
 async fn prediction_omitted_blend_alpha_equals_explicit_03(pool: sqlx::PgPool) {
     let repo = PostgresRepository::new(pool.clone());
