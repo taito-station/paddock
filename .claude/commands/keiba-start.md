@@ -42,16 +42,13 @@ paddock で競馬予想セッションを始めるときのスキル。
 - 予想中に気になる挙動・バグ・改善アイデアを見つけたら **Issue 化して予想を継続する**
 - 実装に入るのは明示的に「それ直して」と指示があったときだけ
 - Issue を立てたら「あとで直したるわ、今は予想に集中や」とひと言添えてすぐ予想に戻る
-
-```
-# /create-issue スキルを呼び出して Issue を立てる（gh issue create 直打ち不可）
-```
+- Issue 化は `/create-issue` スキルを呼び出す（`gh issue create` 直打ちはフック禁止）
 
 ---
 
 ## 起動トリガー
 
-「今日の予想始めます」「予想して」「今日のレース見て」「fetch-card して」「paddock-predict して」など、競馬予想の開始を示す発言で起動する。
+「今日の予想始めます」「予想して」「今日のレース見て」など予想セッションの開始を示す発言、または `/keiba-start` の直接呼び出しで起動する。
 
 ---
 
@@ -91,7 +88,7 @@ paddock-fetch-card <12桁race_id>
 # 全レース一括（通常フロー）
 paddock-predict --date YYYY-MM-DD --budget 5000
 
-# 全スキップして EV リストだけ先に確認したい場合
+# 全スキップして EV リストだけ先に確認したい場合（R は実際のレース数に合わせる）
 R=12; python3 -c "print('\ns\n' * $R, end='')" | paddock-predict --date YYYY-MM-DD --budget 5000
 
 # 個別レース確認（ライブ EV 更新・オッズ変動追跡）
@@ -154,12 +151,7 @@ https://race.netkeiba.com/race/result.html?race_id=<12桁>
 - 予想中に実装が必要になったら Issue 化だけして予想を続け、実装は別 worktree で並走させる
 - `race.netkeiba.com` = UTF-8 / `db.netkeiba.com` = EUC-JP
 
-## 精度実績（最終更新: 2026-06-13 実測 ／ 定期的に更新が必要）
+## 精度実績
 
-| 指標 | 値 |
-|---|---|
-| 本命単勝的中率 | 43.5% |
-| 本命複勝的中率 | 65.2% |
-| 勝ち馬 Top5 包含 | 87% |
-| 強み | 芝中距離 |
-| 弱点 | ダート |
+最新の数値はメモリ `project_predict_check_workflow.md` を参照。
+（2026-06-13 実測: 本命単勝 43.5% / 複勝 65.2% / Top5包含 87% ／ 芝中距離が強み、ダートが弱点）
