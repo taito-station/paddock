@@ -576,6 +576,30 @@ async fn predict_race_jockey_lifts_horse_with_strong_record() {
 }
 
 #[tokio::test]
+async fn predict_race_jockey_absent_not_penalized() {
+    // 出馬表に騎手が無い（entry.jockey=None）馬は jockey 項なし。jockey_surface_stats を
+    // 渡しても entry.jockey=None なら無視され、jockey 統計を一切持たない場合と一致する（#205）。
+    let race_id = "2026-1-tokyo-1-R1";
+    let rid = RaceId::try_from(race_id).unwrap();
+    let baseline = interactor(Some(make_race_card(race_id)))
+        .predict_race(&rid, None, None)
+        .await
+        .unwrap();
+    let jk: HashMap<String, Vec<GroupStat>> =
+        HashMap::from([("名手".to_string(), vec![make_group("芝", 10, 8, 9, 10)])]);
+    let with_stats = interactor_with_jockey_stats(Some(make_race_card(race_id)), jk)
+        .predict_race(&rid, None, None)
+        .await
+        .unwrap();
+
+    assert_eq!(baseline.len(), 2);
+    assert_eq!(baseline.len(), with_stats.len());
+    for (a, b) in baseline.iter().zip(&with_stats) {
+        assert!((a.win_prob - b.win_prob).abs() < 1e-12, "{a:?} vs {b:?}");
+    }
+}
+
+#[tokio::test]
 async fn predict_race_trainer_absent_not_penalized() {
     // 出馬表に調教師が無い（entry.trainer=None）馬は trainer 項なし。trainer_surface_stats を
     // 渡しても entry.trainer=None なら無視され、trainer 統計を一切持たない場合と一致する（#74）。

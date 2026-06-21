@@ -74,6 +74,7 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: 
             .collect();
         // as_of: None = 全期間統計（predict は出馬表日時点での履歴制限なし。
         // リーク防止の as_of は backtest 経路のみ必要）。
+        // try_join! の実際の並列度は接続プールのコネクション数に依存する。
         let (horse_map, jockey_map, trainer_map, runs_map) = tokio::try_join!(
             self.repository.horse_stats_batch(&horse_names, None),
             self.repository.jockey_stats_batch(&jockey_names, None),
