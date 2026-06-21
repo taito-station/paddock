@@ -23,5 +23,8 @@ docs/temp/
 __pycache__/
 *.pyc
 
+# refresh_ev.sh 等のランタイムログ（WORKDIR をリポジトリ内に設定した場合の安全網）
+logs/
+
 # Serena MCP のローカルキャッシュ・ローカル上書き設定（バージョン管理対象外）
 .serena/

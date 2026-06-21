@@ -45,7 +45,7 @@ unset _bin_missing
 
 DB_URL="${PADDOCK_DB_URL:-postgres://paddock:paddock@localhost:5432/paddock}"
 WORKDIR="${WORKDIR:-${TMPDIR:-/tmp}/paddock-live-ev}"
-mkdir -p "$WORKDIR"
+mkdir -p "$WORKDIR/logs"
 PSQL=(psql "$DB_URL" -tA)
 
 cd "$REPO_ROOT"
@@ -132,7 +132,7 @@ FETCH_FAILED=()  # 取得失敗レースを集計し、古いオッズでの EV 
 for pid in "${PIDS[@]}"; do
   nk="$(nk_id "$pid")"
   if "$FETCH_BIN" "$nk" --force --skip-history --interval 800 \
-       >/dev/null 2>&1; then echo "  ok   $pid ($nk)"
+       > /dev/null 2>> "$WORKDIR/logs/fetch-card.log"; then echo "  ok   $pid ($nk)"
   else echo "  FAIL $pid ($nk)"; FETCH_FAILED+=("$pid"); fi
   sleep 1  # netkeiba への pacing（fetch-card の --interval とは別にループ間隔を空ける）
 done
@@ -178,7 +178,7 @@ while IFS=$'\t' read -r pid venue rnum surf dist; do
   printf '%s\t%s\t%s\n' "$pid" "$venue" "$rnum" >> "$WORKDIR/meta.tsv"
   jsurf=$([ "$surf" = "turf" ] && echo "芝" || echo "ダート")
   echo "--- レース $rnum: $venue $jsurf ${dist}m ---" >> "$WORKDIR/pred.txt"
-  "$ANALYZE_BIN" predict "$pid" --blend-alpha 0.3 2>/dev/null \
+  "$ANALYZE_BIN" predict "$pid" --blend-alpha 0.3 2>> "$WORKDIR/logs/analyze.log" \
     | grep -E '^[[:space:]]*[0-9]+[[:space:]]' >> "$WORKDIR/pred.txt" || true
   echo >> "$WORKDIR/pred.txt"
 done
@@ -187,6 +187,10 @@ if [ "${#FETCH_FAILED[@]}" -gt 0 ]; then
   echo "⚠ fetch-card 失敗 ${#FETCH_FAILED[@]} 本: ${FETCH_FAILED[*]}" >&2
   echo "   → 該当レースは古い DB オッズで評価される。EV の信頼度が低い点に注意。" >&2
 fi
+[ -s "$WORKDIR/logs/fetch-card.log" ] && \
+  echo "⚠ fetch-card stderr あり（詳細: $WORKDIR/logs/fetch-card.log）" >&2
+[ -s "$WORKDIR/logs/analyze.log" ] && \
+  echo "⚠ analyze stderr あり（詳細: $WORKDIR/logs/analyze.log）" >&2
 
 echo "=== EV ==="
 python3 "$SCRIPT_DIR/live_ev.py" \
