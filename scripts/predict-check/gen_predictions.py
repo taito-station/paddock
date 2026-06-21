@@ -120,7 +120,7 @@ for r in races:
         race_bets = []
     bets_json = [
         # combo は build_bets が返す tuple[int, ...] (昇順ソート済み)
-        {"bet_type": BET_LABEL[kind],
+        {"bet_type": BET_LABEL.get(kind, kind),
          "combination": "-".join(str(n) for n in combo),
          "amount": amt}
         for kind, combo, amt in race_bets
