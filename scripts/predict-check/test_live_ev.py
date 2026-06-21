@@ -95,6 +95,17 @@ def test_build_bets_budget():
             assert sum(amt for _, _, amt in bets) == budget // 100 * 100, (budget, bets)
 
 
+def test_build_bets_scale_invariant():
+    # build_bets はスケール非依存（gen_predictions.py は [0,1]、live_ev は百分率で渡す）。
+    # 組合せ・配分ともにスケールに依存しないことを確認する。
+    pct = {1: 35.0, 2: 15.0, 3: 12.0, 4: 8.0, 5: 6.0, 6: 5.0}
+    frac = {k: v / 100 for k, v in pct.items()}
+    _, _, _, bets_pct = L.build_bets(pct, 5000)
+    _, _, _, bets_frac = L.build_bets(frac, 5000)
+    assert [(k, c) for k, c, _ in bets_pct] == [(k, c) for k, c, _ in bets_frac]
+    assert sum(a for _, _, a in bets_pct) == sum(a for _, _, a in bets_frac) == 5000
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for t in tests:

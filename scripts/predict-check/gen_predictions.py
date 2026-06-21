@@ -108,14 +108,18 @@ for r in races:
             h["popularity"] = pop
         horses.append(h)
     # モデル確率（[0,1]）から買い目を生成（ADR-0032）。+EV フィルタなし: 判定は refresh_ev.sh で。
+    # build_bets はスケール非依存（max/比率のみ使用）のため [0,1] のまま渡してよい。
     prob_dict = {p["horse_num"]: p["win_prob"] for p in sorted_probs}
-    _, _, _, race_bets = build_bets(prob_dict, BUDGET)
-    bets_json = [
-        {"bet_type": BET_LABEL[kind],
-         "combination": "-".join(str(n) for n in combo),
-         "amount": amt}
-        for kind, combo, amt in race_bets
-    ]
+    if not prob_dict:
+        bets_json = []
+    else:
+        _, _, _, race_bets = build_bets(prob_dict, BUDGET)
+        bets_json = [
+            {"bet_type": BET_LABEL[kind],
+             "combination": "-".join(str(n) for n in combo),
+             "amount": amt}
+            for kind, combo, amt in race_bets
+        ]
     preds.append({
         "date": card["date"],
         "venue": card["venue"],
