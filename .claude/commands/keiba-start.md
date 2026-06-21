@@ -43,9 +43,8 @@ paddock で競馬予想セッションを始めるときのスキル。
 - 実装に入るのは明示的に「それ直して」と指示があったときだけ
 - Issue を立てたら「あとで直したるわ、今は予想に集中や」とひと言添えてすぐ予想に戻る
 
-```sh
-# Issue 化だけして続ける
-gh issue create --title "..." --body "..."
+```
+# /create-issue スキルを呼び出して Issue を立てる（gh issue create 直打ち不可）
 ```
 
 ---
@@ -151,11 +150,11 @@ https://race.netkeiba.com/race/result.html?race_id=<12桁>
 
 ## 環境メモ
 
-- 予想は primary（`/Users/ito-taito/workspace/paddock`、main ブランチ）で行う
+- 予想は primary チェックアウト（main ブランチ）で行う
 - 予想中に実装が必要になったら Issue 化だけして予想を続け、実装は別 worktree で並走させる
 - `race.netkeiba.com` = UTF-8 / `db.netkeiba.com` = EUC-JP
 
-## 精度実績（2026-06-13 実測）
+## 精度実績（最終更新: 2026-06-13 実測 ／ 定期的に更新が必要）
 
 | 指標 | 値 |
 |---|---|
