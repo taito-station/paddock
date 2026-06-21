@@ -46,6 +46,9 @@ unset _bin_missing
 DB_URL="${PADDOCK_DB_URL:-postgres://paddock:paddock@localhost:5432/paddock}"
 WORKDIR="${WORKDIR:-${TMPDIR:-/tmp}/paddock-live-ev}"
 mkdir -p "$WORKDIR/logs"
+# 実行ごとにログをリセット（累積防止）
+> "$WORKDIR/logs/fetch-card.log"
+> "$WORKDIR/logs/analyze.log"
 PSQL=(psql "$DB_URL" -tA)
 
 cd "$REPO_ROOT"
@@ -187,9 +190,9 @@ if [ "${#FETCH_FAILED[@]}" -gt 0 ]; then
   echo "⚠ fetch-card 失敗 ${#FETCH_FAILED[@]} 本: ${FETCH_FAILED[*]}" >&2
   echo "   → 該当レースは古い DB オッズで評価される。EV の信頼度が低い点に注意。" >&2
 fi
-[ -s "$WORKDIR/logs/fetch-card.log" ] && \
+[[ -s "$WORKDIR/logs/fetch-card.log" ]] && \
   echo "⚠ fetch-card stderr あり（詳細: $WORKDIR/logs/fetch-card.log）" >&2
-[ -s "$WORKDIR/logs/analyze.log" ] && \
+[[ -s "$WORKDIR/logs/analyze.log" ]] && \
   echo "⚠ analyze stderr あり（詳細: $WORKDIR/logs/analyze.log）" >&2
 
 echo "=== EV ==="
