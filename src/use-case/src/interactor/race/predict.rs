@@ -60,22 +60,29 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: 
         // 全馬・騎手・調教師の名前を収集して 4 クエリで一括取得する（per-horse N+1 解消 #205）。
         let horse_names: Vec<HorseName> =
             card.entries.iter().map(|e| e.horse_name.clone()).collect();
-        let jockey_names: Vec<JockeyName> =
-            card.entries.iter().filter_map(|e| e.jockey.clone()).collect();
-        let trainer_names: Vec<TrainerName> =
-            card.entries.iter().filter_map(|e| e.trainer.clone()).collect();
+        let jockey_names: Vec<JockeyName> = card
+            .entries
+            .iter()
+            .filter_map(|e| e.jockey.clone())
+            .collect();
+        let trainer_names: Vec<TrainerName> = card
+            .entries
+            .iter()
+            .filter_map(|e| e.trainer.clone())
+            .collect();
         let (horse_map, jockey_map, trainer_map, runs_map) = tokio::try_join!(
             self.repository.horse_stats_batch(&horse_names, None),
             self.repository.jockey_stats_batch(&jockey_names, None),
             self.repository.trainer_stats_batch(&trainer_names, None),
-            self.repository.recent_runs_batch(&horse_names, card.date, 1),
+            self.repository
+                .recent_runs_batch(&horse_names, card.date, 1),
         )?;
 
         let mut entry_factors: Vec<(HorseEntry, HorseFactors)> = Vec::new();
         for entry in &card.entries {
-            let horse = horse_map
-                .get(&entry.horse_name)
-                .ok_or_else(|| Error::NotFound(format!("horse stats: {}", entry.horse_name.value())))?;
+            let horse = horse_map.get(&entry.horse_name).ok_or_else(|| {
+                Error::NotFound(format!("horse stats: {}", entry.horse_name.value()))
+            })?;
             // production() は recency: None なので horse_recency は取得しない（#75）。
             let jockey = entry.jockey.as_ref().and_then(|j| jockey_map.get(j));
             let trainer = entry.trainer.as_ref().and_then(|t| trainer_map.get(t));
