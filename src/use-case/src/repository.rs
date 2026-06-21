@@ -1,4 +1,5 @@
 use core::future::Future;
+use std::collections::HashMap;
 
 use chrono::{DateTime, NaiveDate, Utc};
 use paddock_domain::{
@@ -406,6 +407,28 @@ pub trait StatsRepository: Send + Sync {
         as_of: Option<NaiveDate>,
     ) -> impl Future<Output = Result<HorseStatsRow>> + Send;
 
+    /// 複数馬の `horse_stats` をまとめて返す（#196 backtest の N+1 解消）。`names` の各馬を
+    /// キーに [`HorseStatsRow`] を引く。`as_of` の意味は [`StatsRepository::horse_stats`] と同じ。
+    /// 既定実装は per-item `horse_stats` をループするだけで挙動は変わらない（mock・predict 経路は
+    /// この既定で十分。rdb-gateway のみが 1 レース一括クエリで override する）。返却 map は `names`
+    /// に現れた全馬のエントリを含む（重複名は 1 回だけ引く）。
+    fn horse_stats_batch(
+        &self,
+        names: &[HorseName],
+        as_of: Option<NaiveDate>,
+    ) -> impl Future<Output = Result<HashMap<HorseName, HorseStatsRow>>> + Send {
+        async move {
+            let mut out = HashMap::new();
+            for name in names {
+                if out.contains_key(name) {
+                    continue;
+                }
+                out.insert(name.clone(), self.horse_stats(name, as_of).await?);
+            }
+            Ok(out)
+        }
+    }
+
     /// recency 重み付け（#75 Phase B）用に、馬の成績を「カテゴリ × ラベル別の日付付き系列」で返す。
     /// `as_of` の意味は [`StatsRepository::horse_stats`] と同じ（`races.date < as_of`）。既定実装は空を返す
     /// （recency 無効時の本番経路・テスト mock はこの既定で十分。日付付き集計が要るのは
@@ -416,6 +439,29 @@ pub trait StatsRepository: Send + Sync {
         _as_of: Option<NaiveDate>,
     ) -> impl Future<Output = Result<HorseRecencyStats>> + Send {
         async { Ok(HorseRecencyStats::default()) }
+    }
+
+    /// 複数馬の `horse_recency` をまとめて返す（#196）。既定実装は per-item `horse_recency` を
+    /// ループするだけで挙動は変わらない（既定 `horse_recency` は空を返すため、recency 無効時の
+    /// 本番経路・mock では空 map ではなく全馬の空系列が入る点に注意）。rdb-gateway のみが
+    /// 1 レース一括クエリで override する。返却 map は `names` の全馬を含む。
+    /// なお、この既定実装が返す「全馬の空系列」を実際に使うのは default 実装を踏む経路（mock 等）
+    /// だけで、backtest は recency 無効時にそもそも本メソッドを呼ばない（呼ぶのは Postgres override のみ）。
+    fn horse_recency_batch(
+        &self,
+        names: &[HorseName],
+        as_of: Option<NaiveDate>,
+    ) -> impl Future<Output = Result<HashMap<HorseName, HorseRecencyStats>>> + Send {
+        async move {
+            let mut out = HashMap::new();
+            for name in names {
+                if out.contains_key(name) {
+                    continue;
+                }
+                out.insert(name.clone(), self.horse_recency(name, as_of).await?);
+            }
+            Ok(out)
+        }
     }
 
     /// コース（場×距離×馬場）の枠順別統計を返す。`as_of` の意味は [`StatsRepository::horse_stats`] と同じ。
@@ -434,12 +480,50 @@ pub trait StatsRepository: Send + Sync {
         as_of: Option<NaiveDate>,
     ) -> impl Future<Output = Result<JockeyStatsRow>> + Send;
 
+    /// 複数騎手の `jockey_stats` をまとめて返す（#196）。既定実装は per-item をループするだけ。
+    /// rdb-gateway のみが 1 レース一括クエリで override する。返却 map は `names` の全騎手を含む。
+    fn jockey_stats_batch(
+        &self,
+        names: &[JockeyName],
+        as_of: Option<NaiveDate>,
+    ) -> impl Future<Output = Result<HashMap<JockeyName, JockeyStatsRow>>> + Send {
+        async move {
+            let mut out = HashMap::new();
+            for name in names {
+                if out.contains_key(name) {
+                    continue;
+                }
+                out.insert(name.clone(), self.jockey_stats(name, as_of).await?);
+            }
+            Ok(out)
+        }
+    }
+
     /// 調教師の各種成績統計を返す。`as_of` の意味は [`StatsRepository::horse_stats`] と同じ。
     fn trainer_stats(
         &self,
         name: &TrainerName,
         as_of: Option<NaiveDate>,
     ) -> impl Future<Output = Result<TrainerStatsRow>> + Send;
+
+    /// 複数調教師の `trainer_stats` をまとめて返す（#196）。既定実装は per-item をループするだけ。
+    /// rdb-gateway のみが 1 レース一括クエリで override する。返却 map は `names` の全調教師を含む。
+    fn trainer_stats_batch(
+        &self,
+        names: &[TrainerName],
+        as_of: Option<NaiveDate>,
+    ) -> impl Future<Output = Result<HashMap<TrainerName, TrainerStatsRow>>> + Send {
+        async move {
+            let mut out = HashMap::new();
+            for name in names {
+                if out.contains_key(name) {
+                    continue;
+                }
+                out.insert(name.clone(), self.trainer_stats(name, as_of).await?);
+            }
+            Ok(out)
+        }
+    }
 
     /// 指定期間 `[from, to]`（両端含む）の確定済みレースを `results` 付きで race_num 昇順に返す。
     /// `races.source='pdf'` かつ着順ありの `results` を 1 件以上含むレースのみを対象とする
@@ -463,6 +547,31 @@ pub trait StatsRepository: Send + Sync {
         before: NaiveDate,
         limit: u32,
     ) -> impl Future<Output = Result<Vec<RecentRun>>> + Send;
+
+    /// 複数馬の `find_recent_runs` をまとめて返す（#196）。各馬につき `before` より前の直近 `limit`
+    /// 件を date 降順で引く。既定実装は per-item `find_recent_runs` をループするだけで挙動は変わらない
+    /// （mock・predict 経路はこの既定で十分）。rdb-gateway のみが全馬一括の window 関数で override
+    /// する。返却 map は `names` の全馬を含む（前走が無い馬は空 `Vec`）。
+    fn recent_runs_batch(
+        &self,
+        names: &[HorseName],
+        before: NaiveDate,
+        limit: u32,
+    ) -> impl Future<Output = Result<HashMap<HorseName, Vec<RecentRun>>>> + Send {
+        async move {
+            let mut out = HashMap::new();
+            for name in names {
+                if out.contains_key(name) {
+                    continue;
+                }
+                out.insert(
+                    name.clone(),
+                    self.find_recent_runs(name, before, limit).await?,
+                );
+            }
+            Ok(out)
+        }
+    }
 
     /// `before` より前（`races.date < before`）のコーパスから (surface, distance) 別の標準タイム
     /// （代表タイム[秒]）を集計して返す（#76）。前走タイムを相対速度シグナルへ変換する分母に使う。

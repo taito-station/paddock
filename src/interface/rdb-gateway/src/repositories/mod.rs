@@ -20,6 +20,8 @@ mod standard_times;
 mod trainer_stats;
 mod update_results;
 
+use std::collections::HashMap;
+
 use chrono::{DateTime, NaiveDate, Utc};
 use paddock_domain::{
     HorseId, HorseName, JockeyName, PadPrediction, Race, RaceCard, RaceId, RaceOdds, RecentRun,
@@ -70,12 +72,32 @@ impl StatsRepository for PostgresRepository {
             .map_err(Into::into)
     }
 
+    async fn horse_stats_batch(
+        &self,
+        names: &[HorseName],
+        as_of: Option<NaiveDate>,
+    ) -> UcResult<HashMap<HorseName, HorseStatsRow>> {
+        horse_stats::horse_stats_batch(&self.pool, names, as_of)
+            .await
+            .map_err(Into::into)
+    }
+
     async fn horse_recency(
         &self,
         name: &HorseName,
         as_of: Option<NaiveDate>,
     ) -> UcResult<HorseRecencyStats> {
         horse_stats::horse_recency(&self.pool, name, as_of)
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn horse_recency_batch(
+        &self,
+        names: &[HorseName],
+        as_of: Option<NaiveDate>,
+    ) -> UcResult<HashMap<HorseName, HorseRecencyStats>> {
+        horse_stats::horse_recency_batch(&self.pool, names, as_of)
             .await
             .map_err(Into::into)
     }
@@ -102,12 +124,32 @@ impl StatsRepository for PostgresRepository {
             .map_err(Into::into)
     }
 
+    async fn jockey_stats_batch(
+        &self,
+        names: &[JockeyName],
+        as_of: Option<NaiveDate>,
+    ) -> UcResult<HashMap<JockeyName, JockeyStatsRow>> {
+        jockey_stats::jockey_stats_batch(&self.pool, names, as_of)
+            .await
+            .map_err(Into::into)
+    }
+
     async fn trainer_stats(
         &self,
         name: &TrainerName,
         as_of: Option<NaiveDate>,
     ) -> UcResult<TrainerStatsRow> {
         trainer_stats::trainer_stats(&self.pool, name, as_of)
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn trainer_stats_batch(
+        &self,
+        names: &[TrainerName],
+        as_of: Option<NaiveDate>,
+    ) -> UcResult<HashMap<TrainerName, TrainerStatsRow>> {
+        trainer_stats::trainer_stats_batch(&self.pool, names, as_of)
             .await
             .map_err(Into::into)
     }
@@ -129,6 +171,17 @@ impl StatsRepository for PostgresRepository {
         limit: u32,
     ) -> UcResult<Vec<RecentRun>> {
         find_recent_runs::find_recent_runs(&self.pool, name, before, limit)
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn recent_runs_batch(
+        &self,
+        names: &[HorseName],
+        before: NaiveDate,
+        limit: u32,
+    ) -> UcResult<HashMap<HorseName, Vec<RecentRun>>> {
+        find_recent_runs::recent_runs_batch(&self.pool, names, before, limit)
             .await
             .map_err(Into::into)
     }

@@ -3,13 +3,15 @@ use std::collections::HashMap;
 use chrono::NaiveDate;
 use paddock_domain::{
     BacktestReport, BettingConfig, EstimationConfig, ExoticBet, HorseEntry, HorseFactors,
-    HorseOutcome, HorseResult, Podium, RaceEvaluation, ResultStatus, bet_hit, evaluate,
-    exotic_segments, select_bets,
+    HorseOutcome, HorseResult, Podium, RaceEvaluation, ResultStatus, StandardTimes, bet_hit,
+    evaluate, exotic_segments, select_bets,
 };
 
 use crate::error::Result;
 use crate::interactor::Interactor;
-use crate::interactor::race::predict::{RaceContext, build_factors, field_mean_weight};
+use crate::interactor::race::predict::{
+    RaceContext, build_factors, field_mean_weight, recent_form_from_runs,
+};
 use crate::pdf_fetcher::PdfFetcher;
 use crate::pdf_parser::PdfParser;
 use crate::repository::{OddsRepository, StatsRepository};
@@ -22,9 +24,11 @@ impl<R: StatsRepository + OddsRepository, P: PdfParser, F: PdfFetcher> Interacto
     /// バックテストレポートを返す。各レース日 D の統計は `as_of = Some(D)`（`races.date < D`）で
     /// 取得するため、評価対象レース当日・以降の結果はリークしない（walk-forward）。
     ///
-    /// 性能: 統計取得は馬ごとに `horse_stats`/`jockey_stats` を逐次呼ぶ N+1 になる。`as_of` が
-    /// レース日ごとに変わる walk-forward の性質上、馬名でまたいでバッチ化できないため許容する
-    /// （オフライン評価用途で実行頻度が低い）。レース取得自体の N+1 は
+    /// 性能: 統計取得は **レース単位のバッチ**で行う（#196）。`as_of` はレース日ごとに変わるため
+    /// 馬名でレースをまたいだバッチ化はできないが、1 レース内の出走全馬・全騎手・全調教師は同一
+    /// `as_of` なので `horse_stats_batch`/`horse_recency_batch`/`jockey_stats_batch`/
+    /// `trainer_stats_batch`/`recent_runs_batch` を各 1 回ずつ呼んで馬ごとの N+1 を解消する
+    /// （挙動は per-item と同値）。レース取得自体の N+1 は
     /// [`Repository::find_finished_races_between`] が 2 クエリで回避済み。
     ///
     /// `blend_alpha = Some(α)` のとき、確率推定の出力を当時の市場オッズ（単勝, `as_of` 制約付き）の
@@ -49,6 +53,9 @@ impl<R: StatsRepository + OddsRepository, P: PdfParser, F: PdfFetcher> Interacto
         // 買い目（curated 推奨）の券種別 校正・回収率評価用（#121）。当時 race_odds がある
         // レースのみ select_bets を回し、確定着順と突合した結果を蓄積する。
         let mut exotic_bets: Vec<ExoticBet> = Vec::new();
+        // 標準タイム表は cutoff=race.date のみに依存し、同一開催日のレース間で完全に同一になる。
+        // レース単位で引くと同じ集計を日数ぶん重複実行するため、日付キャッシュで 1 日 1 回に畳む（#196）。
+        let mut standard_times_cache: HashMap<NaiveDate, StandardTimes> = HashMap::new();
         for race in &races {
             // 実際に発走した馬のみを評価対象（出走頭数）にする。出走取消・競走除外は本番 predict の
             // 出馬表にも載らないため、確率推定の母集合に含めると正規化分母が水増しされ確率が歪む。
@@ -85,8 +92,51 @@ impl<R: StatsRepository + OddsRepository, P: PdfParser, F: PdfFetcher> Interacto
                 mean_weight,
             };
             // 前走タイムの相対速度シグナル用の標準タイム表（#76）。全馬共通なので horse ループ外で
-            // 1 回取得する。cutoff=race.date で walk-forward のリークを防ぐ。
-            let standard_times = self.repository.standard_times(race.date).await?;
+            // 取得する。cutoff=race.date で walk-forward のリークを防ぐ。日付キャッシュにあれば再利用し、
+            // 同一開催日のレースで集計を重複実行しない（per-item 取得と同値）。
+            let standard_times = match standard_times_cache.get(&race.date) {
+                Some(st) => st.clone(),
+                None => {
+                    let st = self.repository.standard_times(race.date).await?;
+                    standard_times_cache.insert(race.date, st.clone());
+                    st
+                }
+            };
+
+            // 馬ごとの N+1 を解消するため、出走全馬の統計をレース単位でバッチ取得する（#196）。
+            // as_of/cutoff はレース日で従来と同一。重複名はバッチ側で 1 回に dedup される。
+            let horse_names: Vec<_> = starters.iter().map(|r| r.horse_name.clone()).collect();
+            let jockey_names: Vec<_> = starters.iter().filter_map(|r| r.jockey.clone()).collect();
+            let trainer_names: Vec<_> = starters.iter().filter_map(|r| r.trainer.clone()).collect();
+
+            let horse_stats_map = self
+                .repository
+                .horse_stats_batch(&horse_names, as_of)
+                .await?;
+            // recency 有効時のみ日付付き系列を取得する（#75 Phase B）。無効時は空 map で済ませ、
+            // per-item と同じく recency 取得自体をスキップする。
+            let horse_recency_map = match config.recency {
+                Some(_) => {
+                    self.repository
+                        .horse_recency_batch(&horse_names, as_of)
+                        .await?
+                }
+                None => HashMap::new(),
+            };
+            let jockey_stats_map = self
+                .repository
+                .jockey_stats_batch(&jockey_names, as_of)
+                .await?;
+            let trainer_stats_map = self
+                .repository
+                .trainer_stats_batch(&trainer_names, as_of)
+                .await?;
+            // 前走フォーム（#31）。cutoff = race.date でレース当日以降をリークさせない。直近 1 走のみ使う。
+            let recent_runs_map = self
+                .repository
+                .recent_runs_batch(&horse_names, race.date, 1)
+                .await?;
+
             let mut entry_factors: Vec<(HorseEntry, HorseFactors)> = Vec::new();
             for r in &starters {
                 let entry = HorseEntry {
@@ -98,38 +148,42 @@ impl<R: StatsRepository + OddsRepository, P: PdfParser, F: PdfFetcher> Interacto
                     // 確定成績の斤量を出馬表 entry に載せ、build_factors で field 平均との相対を取る（#135）。
                     weight_carried: r.weight_carried,
                 };
-                let horse = self.repository.horse_stats(&r.horse_name, as_of).await?;
-                // recency 有効時のみ日付付き系列を取得する（#75 Phase B）。基準日・cutoff はレース日。
-                let recency = match config.recency {
-                    Some(_) => Some(self.repository.horse_recency(&r.horse_name, as_of).await?),
-                    None => None,
-                };
-                let jockey = match &r.jockey {
-                    Some(j) => Some(self.repository.jockey_stats(j, as_of).await?),
-                    None => None,
-                };
+                // バッチ取得済みの map から引く（per-item の逐次取得と同値）。出走馬は
+                // horse_stats_batch の母集合に必ず含まれるため、horse は欠落しない。
+                let horse = horse_stats_map
+                    .get(&r.horse_name)
+                    .expect("horse_stats_batch covers all starters");
+                // recency 有効時のみ日付付き系列を使う（#75 Phase B）。基準日・cutoff はレース日。
+                // 無効時は map が空なので None（per-item で取得しなかったのと同値）。
+                let recency = config.recency.and(horse_recency_map.get(&r.horse_name));
+                let jockey = r.jockey.as_ref().map(|j| {
+                    jockey_stats_map
+                        .get(j)
+                        .expect("jockey_stats_batch covers all starters' jockeys")
+                });
                 // 調教師統計（#74）。results 由来の r.trainer（当該レース確定値）から as_of で引き、
                 // walk-forward のリークを防ぐ。trainer 欠落馬は項なし（ADR 0007）。
-                let trainer = match &r.trainer {
-                    Some(t) => Some(self.repository.trainer_stats(t, as_of).await?),
-                    None => None,
-                };
+                let trainer = r.trainer.as_ref().map(|t| {
+                    trainer_stats_map
+                        .get(t)
+                        .expect("trainer_stats_batch covers all starters' trainers")
+                });
                 // 前走フォーム（#31）。cutoff = race.date でレース当日以降をリークさせない。
-                // horse_stats/jockey_stats と同じく馬ごとの逐次クエリ（N+1）になるが、as_of/cutoff が
-                // レース日ごとに変わる walk-forward の性質上バッチ化できないため、オフライン評価用途
-                // として許容する（#30 で受容済みの方針と同じ）。
-                let recent_form = self
-                    .recent_form_for(&r.horse_name, race.date, &standard_times)
-                    .await?;
+                // バッチ取得済みの近走（直近 1 走）から純粋関数で算出する。
+                let recent_runs = recent_runs_map
+                    .get(&r.horse_name)
+                    .map(Vec::as_slice)
+                    .unwrap_or(&[]);
+                let recent_form = recent_form_from_runs(recent_runs, race.date, &standard_times);
                 let factors = build_factors(
                     &entry,
                     &course,
-                    &horse,
-                    jockey.as_ref(),
-                    trainer.as_ref(),
+                    horse,
+                    jockey,
+                    trainer,
                     &race_ctx,
                     recent_form,
-                    recency.as_ref(),
+                    recency,
                     race.date,
                     &config,
                 );

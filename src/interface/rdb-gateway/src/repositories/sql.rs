@@ -1,5 +1,7 @@
 //! stats クエリ共通の SQL 片ヘルパ。
 
+use std::collections::HashMap;
+
 use paddock_use_case::repository::GroupStat;
 use sqlx::PgPool;
 
@@ -113,6 +115,142 @@ pub(crate) async fn entity_stats(
     }
 
     Ok((overall, by_surface, by_gate_group))
+}
+
+/// `STATS_AGG_SELECT` に `results.<column>` を加え、`WHERE results.<column> = ANY($1) AND <tail>`
+/// と `GROUP BY results.<column>` で全エンティティ一括集計し、`entity 値 -> 4-tuple` を返す
+/// （#196。`entity_stats` の per-item を全エンティティバッチ化したもの）。`tail` は WHERE 後半
+/// （`finishing_position IS NOT NULL ...` 以降、`date_lt_pred` まで）で、`extra_binds` は `$2..`、
+/// cutoff は末尾に積む。
+async fn fetch_agg_grouped(
+    pool: &PgPool,
+    column: &str,
+    values: &[&str],
+    tail: &str,
+    extra_binds: &[&str],
+    cutoff: Option<&str>,
+) -> crate::error::Result<HashMap<String, (i64, i64, i64, i64)>> {
+    let query_str = format!(
+        r#"
+        SELECT
+            results.{column} AS entity,
+            COUNT(*) AS starts,
+            COALESCE(SUM(CASE WHEN results.finishing_position = 1 THEN 1 ELSE 0 END), 0) AS wins,
+            COALESCE(SUM(CASE WHEN results.finishing_position IN (1,2) THEN 1 ELSE 0 END), 0) AS places,
+            COALESCE(SUM(CASE WHEN results.finishing_position IN (1,2,3) THEN 1 ELSE 0 END), 0) AS shows
+        FROM results
+        INNER JOIN races ON races.race_id = results.race_id
+        WHERE results.{column} = ANY($1)
+          {tail}
+        GROUP BY results.{column}
+        "#,
+    );
+    let mut q = sqlx::query_as::<_, (String, i64, i64, i64, i64)>(sqlx::AssertSqlSafe(query_str))
+        .bind(values);
+    for b in extra_binds {
+        q = q.bind(*b);
+    }
+    if let Some(d) = cutoff {
+        q = q.bind(d);
+    }
+    let rows = q.fetch_all(pool).await?;
+    Ok(rows
+        .into_iter()
+        .map(|(v, s, w, p, sh)| (v, (s, w, p, sh)))
+        .collect())
+}
+
+/// グルーピング結果から `value` の `label` 行を取り出す。無ければ全ゼロを合成（per-item の
+/// COUNT(*)=0 と同一 `GroupStat`）。
+fn grouped_stat(
+    map: &HashMap<String, (i64, i64, i64, i64)>,
+    value: &str,
+    label: &str,
+) -> GroupStat {
+    group_stat_from_row(label, map.get(value).copied().unwrap_or((0, 0, 0, 0)))
+}
+
+/// `entity_stats` の per-item を全エンティティバッチ化（#196）。`values` の各値をキーに
+/// `(overall, by_surface, by_gate_group)` を返す。WHERE 述語・集計式・ラベル順は per-item と完全同値で、
+/// 結果に現れないエンティティは全ゼロを合成する。`as_of = None` の結果は従来と一致。
+pub(crate) async fn entity_stats_batch(
+    pool: &PgPool,
+    column: &str,
+    values: &[&str],
+    cutoff: Option<&str>,
+) -> crate::error::Result<HashMap<String, (GroupStat, Vec<GroupStat>, Vec<GroupStat>)>> {
+    debug_assert!(
+        matches!(column, "jockey" | "trainer"),
+        "column must be a known literal, got {column:?}"
+    );
+    if values.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    let overall_map = fetch_agg_grouped(
+        pool,
+        column,
+        values,
+        &format!(
+            "AND results.finishing_position IS NOT NULL {date}",
+            date = date_lt_pred(cutoff, "$2"),
+        ),
+        &[],
+        cutoff,
+    )
+    .await?;
+
+    let mut surface_maps = Vec::with_capacity(SURFACE_KEYS.len());
+    for (key, label) in SURFACE_KEYS {
+        let map = fetch_agg_grouped(
+            pool,
+            column,
+            values,
+            &format!(
+                "AND results.finishing_position IS NOT NULL AND races.surface = $2 {date}",
+                date = date_lt_pred(cutoff, "$3"),
+            ),
+            &[key],
+            cutoff,
+        )
+        .await?;
+        surface_maps.push((*label, map));
+    }
+
+    let mut gate_maps = Vec::with_capacity(GATE_GROUPS.len());
+    for (label, predicate) in GATE_GROUPS {
+        let map = fetch_agg_grouped(
+            pool,
+            column,
+            values,
+            &format!(
+                "AND results.finishing_position IS NOT NULL AND {predicate} {date}",
+                date = date_lt_pred(cutoff, "$2"),
+            ),
+            &[],
+            cutoff,
+        )
+        .await?;
+        gate_maps.push((*label, map));
+    }
+
+    let mut out = HashMap::with_capacity(values.len());
+    for value in values {
+        if out.contains_key(*value) {
+            continue;
+        }
+        let overall = grouped_stat(&overall_map, value, "全体");
+        let by_surface = surface_maps
+            .iter()
+            .map(|(label, m)| grouped_stat(m, value, label))
+            .collect();
+        let by_gate_group = gate_maps
+            .iter()
+            .map(|(label, m)| grouped_stat(m, value, label))
+            .collect();
+        out.insert(value.to_string(), (overall, by_surface, by_gate_group));
+    }
+    Ok(out)
 }
 
 /// `as_of` カットオフ用の `AND races.date < <placeholder>` 述語片を返す。
