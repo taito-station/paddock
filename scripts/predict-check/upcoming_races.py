@@ -26,8 +26,13 @@ import argparse
 import re
 import sys
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from nk import parse_race_id, race_post_times
+
+# netkeiba の発走時刻は JST 前提。システム TZ に依存して窓判定がずれないよう、現在時刻は
+# 常に JST で評価する（cron/別ホスト運用で TZ が JST 以外でも正しく動かすため）。
+JST = ZoneInfo("Asia/Tokyo")
 
 
 def to_minutes(hhmm: str) -> int:
@@ -88,7 +93,7 @@ def main(argv=None):
         ids = sorted(post_times, key=lambda r: (to_minutes(post_times[r]), r))
     else:
         now_min = to_minutes(args.at) if args.at else (
-            lambda n: n.hour * 60 + n.minute)(datetime.now())
+            lambda n: n.hour * 60 + n.minute)(datetime.now(JST))
         ids = select_upcoming(post_times, now_min, args.window_min)
 
     for rid in ids:

@@ -121,7 +121,7 @@ if __name__ == "__main__":
             try:
                 fn()
                 print(f"ok   {name}")
-            except AssertionError as e:
+            except Exception as e:  # AssertionError 以外（ValueError 等）も FAIL 計上する
                 failed += 1
-                print(f"FAIL {name}: {e}")
+                print(f"FAIL {name}: {type(e).__name__}: {e}")
     sys.exit(1 if failed else 0)
