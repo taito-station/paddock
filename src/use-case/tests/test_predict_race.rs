@@ -582,12 +582,34 @@ async fn predict_race_jockey_zero_stats_same_as_absent() {
         .await
         .unwrap();
 
+    let place_of = |probs: &[paddock_domain::HorseProbability], name: &str| {
+        probs
+            .iter()
+            .find(|p| p.horse_name.value() == name)
+            .unwrap()
+            .place_prob
+    };
+    let show_of = |probs: &[paddock_domain::HorseProbability], name: &str| {
+        probs
+            .iter()
+            .find(|p| p.horse_name.value() == name)
+            .unwrap()
+            .show_prob
+    };
     for name in &["ウマA", "ウマB"] {
         assert!(
             (win_of(&without, name) - win_of(&with_empty, name)).abs() < 1e-12,
-            "{name}: jockey=None vs jockey=Some(empty): without={}, with_empty={}",
+            "{name}: win_prob: without={}, with_empty={}",
             win_of(&without, name),
             win_of(&with_empty, name)
+        );
+        assert!(
+            (place_of(&without, name) - place_of(&with_empty, name)).abs() < 1e-12,
+            "{name}: place_prob mismatch"
+        );
+        assert!(
+            (show_of(&without, name) - show_of(&with_empty, name)).abs() < 1e-12,
+            "{name}: show_prob mismatch"
         );
     }
 }
@@ -613,6 +635,11 @@ async fn predict_race_jockey_absent_not_penalized() {
     assert_eq!(baseline.len(), with_stats.len());
     for (a, b) in baseline.iter().zip(&with_stats) {
         assert!((a.win_prob - b.win_prob).abs() < 1e-12, "{a:?} vs {b:?}");
+        assert!(
+            (a.place_prob - b.place_prob).abs() < 1e-12,
+            "{a:?} vs {b:?}"
+        );
+        assert!((a.show_prob - b.show_prob).abs() < 1e-12, "{a:?} vs {b:?}");
     }
 }
 
