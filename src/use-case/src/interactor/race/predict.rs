@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use chrono::NaiveDate;
 use paddock_domain::{
     EstimationConfig, FactorStat, HorseEntry, HorseFactors, HorseName, HorseProbability, RaceId,
-    RateTriple, StandardTimes, Surface, TrackCondition,
+    RateTriple, RecentRun, StandardTimes, Surface, TrackCondition,
 };
 
 use crate::error::{Error, Result};
@@ -141,11 +141,22 @@ impl<R: StatsRepository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
         standard_times: &StandardTimes,
     ) -> Result<Option<f64>> {
         let runs = self.repository.find_recent_runs(name, before, 1).await?;
-        Ok(runs.first().and_then(|run| {
-            let std = standard_times.get(run.surface, run.distance);
-            paddock_domain::prediction::recent_form_score(&run.result, run.date, before, std)
-        }))
+        Ok(recent_form_from_runs(&runs, before, standard_times))
     }
+}
+
+/// 取得済みの近走 `runs`（date 降順、最大 `limit` 件）から前走フォーム [0,1] を算出する純粋関数。
+/// `recent_form_for` の DB 取得を剥がした本体で、backtest のバッチ取得（#196）からも共有する。
+/// 先頭（直近 1 走）のみを使う既存挙動と一致する。
+pub(crate) fn recent_form_from_runs(
+    runs: &[RecentRun],
+    before: NaiveDate,
+    standard_times: &StandardTimes,
+) -> Option<f64> {
+    runs.first().and_then(|run| {
+        let std = standard_times.get(run.surface, run.distance);
+        paddock_domain::prediction::recent_form_score(&run.result, run.date, before, std)
+    })
 }
 
 /// `build_factors` に渡すレース側の条件（全馬共通）。
