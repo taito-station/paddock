@@ -26,10 +26,10 @@ paddock-predict --date YYYY-MM-DD --budget 5000
 
 # 個別レースのモデル勝率確認（EV 算出・オッズ確認時）
 # ワイドオッズ（netkeiba type=5）はこのコマンドが自動取得して EV に反映するため手動取得不要
-paddock-analyze predict <race_id> --blend-alpha 0.3
+paddock-analyze predict <race_id> --blend-alpha 0.2
 ```
 
-- 本番モデル: 市場単勝 α=0.3 ブレンド・m=10 縮約。
+- 本番モデル: 市場単勝 α=0.2 ブレンド・m=10 縮約。
 - race_odds に古い `odds=0.0` 行が残ると `find_race_odds` で predict が全停止する。**暫定回避策**: `DELETE FROM race_odds WHERE odds = 0.0`（`0.0` 限定。< 1.0 では誤削除リスクあり）。
 
 ### 3. EV 判定 → 買い目決定

@@ -698,7 +698,7 @@
           {
             "name": "blend_alpha",
             "in": "query",
-            "description": "市場オッズ（単勝）とのブレンド係数 `[0,1]`。未指定は本番ブレンド α=0.3。素モデルは `1.0` を明示。",
+            "description": "市場オッズ（単勝）とのブレンド係数 `[0,1]`。未指定は本番ブレンド α=0.2。素モデルは `1.0` を明示。",
             "required": false,
             "schema": {
               "type": [
@@ -706,7 +706,7 @@
                 "null"
               ],
               "format": "double",
-              "default": 0.3,
+              "default": 0.2,
               "maximum": 1,
               "minimum": 0
             }
@@ -799,7 +799,7 @@
           {
             "name": "blend_alpha",
             "in": "query",
-            "description": "市場オッズ（単勝）とのブレンド係数 `[0,1]`。未指定は本番ブレンド α=0.3。素モデルは `1.0` を明示（`/prediction` と同義）。",
+            "description": "市場オッズ（単勝）とのブレンド係数 `[0,1]`。未指定は本番ブレンド α=0.2。素モデルは `1.0` を明示（`/prediction` と同義）。",
             "required": false,
             "schema": {
               "type": [
@@ -807,7 +807,7 @@
                 "null"
               ],
               "format": "double",
-              "default": 0.3,
+              "default": 0.2,
               "maximum": 1,
               "minimum": 0
             }
