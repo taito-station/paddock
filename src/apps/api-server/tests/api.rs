@@ -189,7 +189,7 @@ async fn prediction_returns_probabilities(pool: sqlx::PgPool) {
     let json = body_json(resp).await;
     let probs = json["probabilities"].as_array().unwrap();
     assert_eq!(probs.len(), 3);
-    // blend_alpha 省略時は PRODUCTION_BLEND_ALPHA=0.3 が渡るが、オッズ未 seed のため
+    // blend_alpha 省略時は PRODUCTION_BLEND_ALPHA=0.2 が渡るが、オッズ未 seed のため
     // ブレンドはスキップされ素モデルで動作する（predict.rs の no-odds フォールバック）。
     // 履歴ゼロでも均等フォールバックで確率が返り、単調性が保たれる。
     for p in probs {
@@ -215,12 +215,12 @@ async fn prediction_rejects_out_of_range_blend_alpha(pool: sqlx::PgPool) {
     assert_eq!(resp.status().as_u16(), 400);
 }
 
-/// blend_alpha 省略時は `PRODUCTION_BLEND_ALPHA`(0.3) が適用され、明示した 0.3 と同一結果を返す。
+/// blend_alpha 省略時は `PRODUCTION_BLEND_ALPHA`(0.2) が適用され、明示した 0.2 と同一結果を返す。
 /// 単勝オッズを seed してブレンドが実際に走る状態で比較する（no-odds 時は両者とも素モデルで差異なし）。
 /// 加えて素モデル(blend_alpha=1.0)と差が出ることも確認し、ブレンドが実際に作用していることを保証する。
 /// `sample_win_odds` は 3 頭に odds 2.5/4.0/6.0 を与え、均等 prior を崩すためブレンドで差異が生じる。
 #[sqlx::test(migrations = "../../../deployments/db/migrations")]
-async fn prediction_omitted_blend_alpha_equals_explicit_03(pool: sqlx::PgPool) {
+async fn prediction_omitted_blend_alpha_equals_explicit_02(pool: sqlx::PgPool) {
     let repo = PostgresRepository::new(pool.clone());
     repo.save_race_card(&sample_card()).await.unwrap();
     repo.save_race_odds(&sample_win_odds()).await.unwrap();
@@ -231,15 +231,15 @@ async fn prediction_omitted_blend_alpha_equals_explicit_03(pool: sqlx::PgPool) {
         .to_request();
     let json_omit = body_json(test::call_service(&app, req_omit).await).await;
 
-    // 0.3 は PRODUCTION_BLEND_ALPHA と同値
+    // 0.2 は PRODUCTION_BLEND_ALPHA と同値
     let req_explicit = test::TestRequest::get()
-        .uri(&format!("/api/races/{RACE_ID}/prediction?blend_alpha=0.3"))
+        .uri(&format!("/api/races/{RACE_ID}/prediction?blend_alpha=0.2"))
         .to_request();
     let json_explicit = body_json(test::call_service(&app, req_explicit).await).await;
 
     assert_eq!(
         json_omit["probabilities"], json_explicit["probabilities"],
-        "省略時と明示 0.3 の確率は一致する"
+        "省略時と明示 0.2 の確率は一致する"
     );
 
     // blend_alpha=1.0 は素モデル（オッズ不使用）→ ブレンドが実際に作用していれば結果が異なる
@@ -253,10 +253,10 @@ async fn prediction_omitted_blend_alpha_equals_explicit_03(pool: sqlx::PgPool) {
     );
 }
 
-/// recommendations も blend_alpha 省略時は `PRODUCTION_BLEND_ALPHA`(0.3) が適用され、明示した 0.3 と同一結果を返す。
+/// recommendations も blend_alpha 省略時は `PRODUCTION_BLEND_ALPHA`(0.2) が適用され、明示した 0.2 と同一結果を返す。
 /// 素モデル(blend_alpha=1.0)との差異でブレンドが実際に作用していることを保証する。
 #[sqlx::test(migrations = "../../../deployments/db/migrations")]
-async fn recommendations_omitted_blend_alpha_equals_explicit_03(pool: sqlx::PgPool) {
+async fn recommendations_omitted_blend_alpha_equals_explicit_02(pool: sqlx::PgPool) {
     let repo = PostgresRepository::new(pool.clone());
     repo.save_race_card(&sample_card()).await.unwrap();
     repo.save_race_odds(&sample_win_odds()).await.unwrap();
@@ -270,17 +270,17 @@ async fn recommendations_omitted_blend_alpha_equals_explicit_03(pool: sqlx::PgPo
         .to_request();
     let json_omit = body_json(test::call_service(&app, req_omit).await).await;
 
-    // 0.3 は PRODUCTION_BLEND_ALPHA と同値
+    // 0.2 は PRODUCTION_BLEND_ALPHA と同値
     let req_explicit = test::TestRequest::get()
         .uri(&format!(
-            "/api/races/{RACE_ID}/recommendations?budget=10000&blend_alpha=0.3"
+            "/api/races/{RACE_ID}/recommendations?budget=10000&blend_alpha=0.2"
         ))
         .to_request();
     let json_explicit = body_json(test::call_service(&app, req_explicit).await).await;
 
     assert_eq!(
         json_omit["bets"], json_explicit["bets"],
-        "省略時と明示 0.3 の買い目は一致する"
+        "省略時と明示 0.2 の買い目は一致する"
     );
 
     // blend_alpha=1.0 は素モデル（オッズ不使用）→ ブレンドが実際に作用していれば買い目が異なる

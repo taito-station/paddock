@@ -22,9 +22,9 @@ pub struct RaceListQuery {
     pub date: String,
 }
 
-/// 本番モデルの市場オッズブレンド係数（ADR 0027 / ADR 0031）。
+/// 本番モデルの市場オッズブレンド係数（ADR 0027 / ADR 0031 / ADR 0034）。
 /// `blend_alpha` 省略時のデフォルト。`blend_alpha=1.0` を明示すれば素モデルを参照できる。
-pub(crate) const PRODUCTION_BLEND_ALPHA: f64 = 0.3;
+pub(crate) const PRODUCTION_BLEND_ALPHA: f64 = 0.2;
 
 /// クエリの `blend_alpha` を検証してハンドラが使う値に正規化する。
 /// 省略（`None`）は [`PRODUCTION_BLEND_ALPHA`] にフォールバック。範囲外は `BadRequest`。
