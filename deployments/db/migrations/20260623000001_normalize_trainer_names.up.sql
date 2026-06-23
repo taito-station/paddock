@@ -1,4 +1,5 @@
 -- horse_entries.trainer の略名（netkeiba が title 属性を省略する仕様）をフルネームに正規化する（#219）。
+-- sqlx は各 migration をトランザクション内で実行するため ① と ② は原子的に適用される。
 -- 処理順序: ① 全 results 前方一致（大多数をカバー）→ ② 同一レース直接上書き（非プレフィックス略名を補完）。
 -- Rust の normalize_trainer_names とは処理順が逆だが最終結果は同値。
 -- 同一レース results が存在するエントリは ② が ① を上書き（② が最終値）、

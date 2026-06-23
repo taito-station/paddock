@@ -237,6 +237,8 @@ async fn save_race_card_coalesce_keeps_trainer_from_netkeiba(pool: sqlx::PgPool)
 
 #[sqlx::test(migrations = "../../../deployments/db/migrations")]
 async fn save_race_card_normalizes_trainer_abbr_to_full_name(pool: sqlx::PgPool) {
+    // Step 2（全 results 前方一致）の経路を検証する。
+    // past_rid と card_rid を別レースにすることで Step 1（同一レース join）は fire しない。
     // results に「上原佑紀」（フルネーム）が存在する状態で、
     // race_card を「上原佑」（netkeiba 略名）で保存したとき、
     // normalize_trainer_names が「上原佑紀」に正規化することを検証する（#219）。
