@@ -1,7 +1,8 @@
-//! 再取り込みの非破壊性 (#61) を Postgres で検証する:
+//! 再取り込みの非破壊性 (#61) と trainer 正規化 (#219) を Postgres で検証する:
 //! - `save_race` の再取り込みが backfill 済み `horse_id` を温存すること（全消し DELETE 廃止）
 //! - 今回の出走集合に無い馬番（取消・除外）だけが掃除されること
 //! - `save_race_card` も同様に非破壊で、消えた馬番のみ掃除されること
+//! - `save_race_card` が results のフルネームで trainer 略名を正規化すること
 
 use chrono::NaiveDate;
 use paddock_domain::{
@@ -231,5 +232,272 @@ async fn save_race_card_coalesce_keeps_trainer_from_netkeiba(pool: sqlx::PgPool)
         loaded.entries[0].trainer.as_ref().map(|t| t.value()),
         Some("田中博"),
         "PDF 経路の None が netkeiba の trainer を消してはいけない（COALESCE）"
+    );
+}
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn save_race_card_normalizes_trainer_abbr_to_full_name(pool: sqlx::PgPool) {
+    // Step 2（全 results 前方一致）の経路を検証する。
+    // past_rid と card_rid を別レースにすることで Step 1（同一レース join）は fire しない。
+    // results に「上原佑紀」（フルネーム）が存在する状態で、
+    // race_card を「上原佑」（netkeiba 略名）で保存したとき、
+    // normalize_trainer_names が「上原佑紀」に正規化することを検証する（#219）。
+    let repo = PostgresRepository::new(pool);
+    let past_rid = "2026-3-nakayama-8-1R";
+    let card_rid = "2026-3-nakayama-8-2R";
+
+    // 過去レース（results に trainer フルネームあり）を登録する。
+    repo.save_race(&Race {
+        race_id: RaceId::try_from(past_rid).unwrap(),
+        date: d(),
+        venue: Venue::Nakayama,
+        round: 3,
+        day: 8,
+        race_num: 1,
+        surface: Surface::Turf,
+        distance: 2000,
+        track_condition: None,
+        weather: None,
+        results: vec![HorseResult {
+            finishing_position: Some(FinishingPosition::try_from(1u32).unwrap()),
+            status: ResultStatus::Finished,
+            gate_num: GateNum::try_from(1u32).unwrap(),
+            horse_num: HorseNum::try_from(1u32).unwrap(),
+            horse_name: HorseName::try_from("ウマA").unwrap(),
+            horse_id: None,
+            jockey: None,
+            trainer: Some(TrainerName::try_from("上原佑紀").unwrap()),
+            time_seconds: None,
+            margin: None,
+            odds: None,
+            horse_weight: None,
+            weight_change: None,
+            weight_carried: None,
+            popularity: None,
+        }],
+    })
+    .await
+    .unwrap();
+
+    // 同調教師の別レースのカードを略名で保存する。
+    repo.save_race_card(&RaceCard {
+        race_id: RaceId::try_from(card_rid).unwrap(),
+        date: d(),
+        venue: Venue::Nakayama,
+        round: 3,
+        day: 8,
+        race_num: 2,
+        surface: Surface::Turf,
+        distance: 1800,
+        entries: vec![HorseEntry {
+            gate_num: GateNum::try_from(1u32).unwrap(),
+            horse_num: HorseNum::try_from(1u32).unwrap(),
+            horse_name: HorseName::try_from("ウマB").unwrap(),
+            jockey: None,
+            trainer: Some(TrainerName::try_from("上原佑").unwrap()),
+            weight_carried: None,
+        }],
+    })
+    .await
+    .unwrap();
+
+    let loaded = repo
+        .find_race_card(&RaceId::try_from(card_rid).unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        loaded.entries[0].trainer.as_ref().map(|t| t.value()),
+        Some("上原佑紀"),
+        "略名「上原佑」が results のフルネーム「上原佑紀」に正規化される"
+    );
+}
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn save_race_card_normalizes_trainer_via_same_race_join(pool: sqlx::PgPool) {
+    // 同一 race_id + horse_num の results.trainer があるとき、
+    // Step 1（同一レース直接 join）でフルネームに正規化されることを検証する（#219）。
+    let repo = PostgresRepository::new(pool);
+    let rid = "2026-3-nakayama-8-1R";
+
+    // 同レースに results.trainer フルネームを登録する。
+    repo.save_race(&Race {
+        race_id: RaceId::try_from(rid).unwrap(),
+        date: d(),
+        venue: Venue::Nakayama,
+        round: 3,
+        day: 8,
+        race_num: 1,
+        surface: Surface::Turf,
+        distance: 2000,
+        track_condition: None,
+        weather: None,
+        results: vec![HorseResult {
+            finishing_position: Some(FinishingPosition::try_from(1u32).unwrap()),
+            status: ResultStatus::Finished,
+            gate_num: GateNum::try_from(1u32).unwrap(),
+            horse_num: HorseNum::try_from(1u32).unwrap(),
+            horse_name: HorseName::try_from("ウマA").unwrap(),
+            horse_id: None,
+            jockey: None,
+            trainer: Some(TrainerName::try_from("上原佑紀").unwrap()),
+            time_seconds: None,
+            margin: None,
+            odds: None,
+            horse_weight: None,
+            weight_change: None,
+            weight_carried: None,
+            popularity: None,
+        }],
+    })
+    .await
+    .unwrap();
+
+    // 同 race_id + horse_num でカードを略名で保存する（Step 1 が fire する経路）。
+    repo.save_race_card(&RaceCard {
+        race_id: RaceId::try_from(rid).unwrap(),
+        date: d(),
+        venue: Venue::Nakayama,
+        round: 3,
+        day: 8,
+        race_num: 1,
+        surface: Surface::Turf,
+        distance: 2000,
+        entries: vec![HorseEntry {
+            gate_num: GateNum::try_from(1u32).unwrap(),
+            horse_num: HorseNum::try_from(1u32).unwrap(),
+            horse_name: HorseName::try_from("ウマA").unwrap(),
+            jockey: None,
+            trainer: Some(TrainerName::try_from("上原佑").unwrap()),
+            weight_carried: None,
+        }],
+    })
+    .await
+    .unwrap();
+
+    let loaded = repo
+        .find_race_card(&RaceId::try_from(rid).unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        loaded.entries[0].trainer.as_ref().map(|t| t.value()),
+        Some("上原佑紀"),
+        "同レース results の直接 join（Step 1）でフルネームに正規化される"
+    );
+}
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn save_race_card_keeps_trainer_when_no_results_match(pool: sqlx::PgPool) {
+    // results に一切 match しない調教師名（新人調教師等）はそのまま残す（#219）。
+    let repo = PostgresRepository::new(pool);
+    let rid = "2026-3-nakayama-8-1R";
+
+    repo.save_race_card(&RaceCard {
+        race_id: RaceId::try_from(rid).unwrap(),
+        date: d(),
+        venue: Venue::Nakayama,
+        round: 3,
+        day: 8,
+        race_num: 1,
+        surface: Surface::Turf,
+        distance: 1800,
+        entries: vec![HorseEntry {
+            gate_num: GateNum::try_from(1u32).unwrap(),
+            horse_num: HorseNum::try_from(1u32).unwrap(),
+            horse_name: HorseName::try_from("ウマA").unwrap(),
+            jockey: None,
+            trainer: Some(TrainerName::try_from("新人太郎").unwrap()),
+            weight_carried: None,
+        }],
+    })
+    .await
+    .unwrap();
+
+    let loaded = repo
+        .find_race_card(&RaceId::try_from(rid).unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        loaded.entries[0].trainer.as_ref().map(|t| t.value()),
+        Some("新人太郎"),
+        "results に一致なしの場合はそのまま保持する"
+    );
+}
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn save_race_card_keeps_ambiguous_trainer_abbr(pool: sqlx::PgPool) {
+    // 同一略名に複数フルネームが存在する場合（衝突）は略名のまま残す（#219）。
+    let repo = PostgresRepository::new(pool);
+    let rid_a = "2026-3-nakayama-8-1R";
+    let rid_b = "2026-3-nakayama-8-3R";
+    let card_rid = "2026-3-nakayama-8-4R";
+
+    // 「小野」から始まる別々のフルネームを results に登録する。
+    for (rid, race_num, trainer) in [(rid_a, 1u32, "小野次郎"), (rid_b, 3u32, "小野望")] {
+        repo.save_race(&Race {
+            race_id: RaceId::try_from(rid).unwrap(),
+            date: d(),
+            venue: Venue::Nakayama,
+            round: 3,
+            day: 8,
+            race_num,
+            surface: Surface::Turf,
+            distance: 2000,
+            track_condition: None,
+            weather: None,
+            results: vec![HorseResult {
+                finishing_position: Some(FinishingPosition::try_from(1u32).unwrap()),
+                status: ResultStatus::Finished,
+                gate_num: GateNum::try_from(1u32).unwrap(),
+                horse_num: HorseNum::try_from(1u32).unwrap(),
+                horse_name: HorseName::try_from("ウマX").unwrap(),
+                horse_id: None,
+                jockey: None,
+                trainer: Some(TrainerName::try_from(trainer).unwrap()),
+                time_seconds: None,
+                margin: None,
+                odds: None,
+                horse_weight: None,
+                weight_change: None,
+                weight_carried: None,
+                popularity: None,
+            }],
+        })
+        .await
+        .unwrap();
+    }
+
+    repo.save_race_card(&RaceCard {
+        race_id: RaceId::try_from(card_rid).unwrap(),
+        date: d(),
+        venue: Venue::Nakayama,
+        round: 3,
+        day: 8,
+        race_num: 4,
+        surface: Surface::Turf,
+        distance: 1800,
+        entries: vec![HorseEntry {
+            gate_num: GateNum::try_from(1u32).unwrap(),
+            horse_num: HorseNum::try_from(1u32).unwrap(),
+            horse_name: HorseName::try_from("ウマY").unwrap(),
+            jockey: None,
+            trainer: Some(TrainerName::try_from("小野").unwrap()),
+            weight_carried: None,
+        }],
+    })
+    .await
+    .unwrap();
+
+    let loaded = repo
+        .find_race_card(&RaceId::try_from(card_rid).unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        loaded.entries[0].trainer.as_ref().map(|t| t.value()),
+        Some("小野"),
+        "衝突（小野次郎・小野望）の場合は略名のまま残す"
     );
 }
