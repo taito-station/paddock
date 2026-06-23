@@ -220,7 +220,7 @@ async fn prediction_rejects_out_of_range_blend_alpha(pool: sqlx::PgPool) {
 /// 加えて素モデル(blend_alpha=1.0)と差が出ることも確認し、ブレンドが実際に作用していることを保証する。
 /// `sample_win_odds` は 3 頭に odds 2.5/4.0/6.0 を与え、均等 prior を崩すためブレンドで差異が生じる。
 #[sqlx::test(migrations = "../../../deployments/db/migrations")]
-async fn prediction_omitted_blend_alpha_equals_explicit_02(pool: sqlx::PgPool) {
+async fn prediction_omitted_blend_alpha_equals_production_default(pool: sqlx::PgPool) {
     let repo = PostgresRepository::new(pool.clone());
     repo.save_race_card(&sample_card()).await.unwrap();
     repo.save_race_odds(&sample_win_odds()).await.unwrap();
@@ -256,7 +256,7 @@ async fn prediction_omitted_blend_alpha_equals_explicit_02(pool: sqlx::PgPool) {
 /// recommendations も blend_alpha 省略時は `PRODUCTION_BLEND_ALPHA`(0.2) が適用され、明示した 0.2 と同一結果を返す。
 /// 素モデル(blend_alpha=1.0)との差異でブレンドが実際に作用していることを保証する。
 #[sqlx::test(migrations = "../../../deployments/db/migrations")]
-async fn recommendations_omitted_blend_alpha_equals_explicit_02(pool: sqlx::PgPool) {
+async fn recommendations_omitted_blend_alpha_equals_production_default(pool: sqlx::PgPool) {
     let repo = PostgresRepository::new(pool.clone());
     repo.save_race_card(&sample_card()).await.unwrap();
     repo.save_race_odds(&sample_win_odds()).await.unwrap();
