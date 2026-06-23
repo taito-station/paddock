@@ -11,10 +11,10 @@ use paddock_use_case::{PredictBetRecord, PredictSessionRecord};
 use crate::setup::App;
 
 /// 本番予想で使う市場オッズ(単勝)ブレンドのモデル重み α（#72）。`None` はモデルのみ。
-/// backtest（2026-03〜05, 144R）の α スイープで、的中率・回収率が最良かつ校正も
-/// 市場のみに近い α=0.3（市場重み 0.7）を採用。市場オッズが無いレースは自動でモデルのみに
-/// フォールバックする。詳細は docs/specifications/probability-estimation.md。
-const MARKET_BLEND_ALPHA: Option<f64> = Some(0.3);
+/// backtest（2025-01〜2026-06, 4891R）の α スイープで Brier/LogLoss が α=0.2 で最良（ADR 0034）。
+/// 市場オッズが無いレースは自動でモデルのみにフォールバックする。
+/// 詳細は docs/specifications/probability-estimation.md。
+const MARKET_BLEND_ALPHA: Option<f64> = Some(0.2);
 
 /// 1 日分のレースを順番に処理する対話セッション。
 ///

@@ -22,9 +22,9 @@ pub struct RaceListQuery {
     pub date: String,
 }
 
-/// 本番モデルの市場オッズブレンド係数（ADR 0027 / ADR 0031）。
+/// 本番モデルの市場オッズブレンド係数（ADR 0027 → 0031 → 0034）。
 /// `blend_alpha` 省略時のデフォルト。`blend_alpha=1.0` を明示すれば素モデルを参照できる。
-pub(crate) const PRODUCTION_BLEND_ALPHA: f64 = 0.3;
+pub(crate) const PRODUCTION_BLEND_ALPHA: f64 = 0.2;
 
 /// クエリの `blend_alpha` を検証してハンドラが使う値に正規化する。
 /// 省略（`None`）は [`PRODUCTION_BLEND_ALPHA`] にフォールバック。範囲外は `BadRequest`。
@@ -43,8 +43,8 @@ fn resolve_blend_alpha(raw: Option<f64>) -> Result<Option<f64>> {
 pub struct PredictionQuery {
     /// 馬場状態（`良` / `稍重` / `重` / `不良`。略記 `稍` / `不` も可）。未指定なら馬場項なし。
     pub track_condition: Option<String>,
-    /// 市場オッズ（単勝）とのブレンド係数 `[0,1]`。未指定は本番ブレンド α=0.3。素モデルは `1.0` を明示。
-    #[param(default = 0.3, minimum = 0.0, maximum = 1.0)]
+    /// 市場オッズ（単勝）とのブレンド係数 `[0,1]`。未指定は本番ブレンド α=0.2。素モデルは `1.0` を明示。
+    #[param(default = 0.2, minimum = 0.0, maximum = 1.0)]
     pub blend_alpha: Option<f64>,
 }
 
@@ -58,8 +58,8 @@ pub struct RecommendationQuery {
     pub budget: u64,
     /// 馬場状態（`良` / `稍重` / `重` / `不良`。略記 `稍` / `不` も可）。未指定なら馬場項なし。
     pub track_condition: Option<String>,
-    /// 市場オッズ（単勝）とのブレンド係数 `[0,1]`。未指定は本番ブレンド α=0.3。素モデルは `1.0` を明示（`/prediction` と同義）。
-    #[param(default = 0.3, minimum = 0.0, maximum = 1.0)]
+    /// 市場オッズ（単勝）とのブレンド係数 `[0,1]`。未指定は本番ブレンド α=0.2。素モデルは `1.0` を明示（`/prediction` と同義）。
+    #[param(default = 0.2, minimum = 0.0, maximum = 1.0)]
     pub blend_alpha: Option<f64>,
 }
 
