@@ -110,6 +110,7 @@ async fn normalize_trainer_names(
 
     // Step 2: 全 results から前方一致で一意解決できる残存略名を正規化する
     // LIMIT 2 で「1件=一意 / 2件以上=衝突→スキップ」を効率よく判定する。
+    // 1 略名につき最大 2 クエリを発行するが、馬数上限（18頭）で有界なので許容範囲。
     let abbrs: Vec<String> = sqlx::query_scalar(
         "SELECT DISTINCT trainer FROM horse_entries WHERE race_id = $1 AND trainer IS NOT NULL",
     )

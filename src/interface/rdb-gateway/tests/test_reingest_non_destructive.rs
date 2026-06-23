@@ -320,14 +320,14 @@ async fn save_race_card_keeps_ambiguous_trainer_abbr(pool: sqlx::PgPool) {
     let card_rid = "2026-3-nakayama-8-4R";
 
     // 「小野」から始まる別々のフルネームを results に登録する。
-    for (rid, trainer) in [(rid_a, "小野次郎"), (rid_b, "小野望")] {
+    for (rid, race_num, trainer) in [(rid_a, 1u32, "小野次郎"), (rid_b, 3u32, "小野望")] {
         repo.save_race(&Race {
             race_id: RaceId::try_from(rid).unwrap(),
             date: d(),
             venue: Venue::Nakayama,
             round: 3,
             day: 8,
-            race_num: 1,
+            race_num,
             surface: Surface::Turf,
             distance: 2000,
             track_condition: None,
