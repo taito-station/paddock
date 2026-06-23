@@ -1,13 +1,15 @@
 -- horse_entries.trainer の略名（netkeiba が title 属性を省略する仕様）をフルネームに正規化する（#219）。
 -- 処理順序: ① 全 results 前方一致（大多数をカバー）→ ② 同一レース直接上書き（非プレフィックス略名を補完）。
--- Rust の normalize_trainer_names とは処理順が逆だが、② が ① を上書きする構造のため最終結果は同値。
+-- Rust の normalize_trainer_names とは処理順が逆だが最終結果は同値。
+-- 同一レース results が存在するエントリは ② が ① を上書き（② が最終値）、
+-- 存在しないエントリは ① のみが適用され ② は WHERE 不成立で無効となる。
 
 -- ① 全 results から前方一致で一意解決できる略名を正規化する（大多数のケースをカバー）。
 --   新人調教師等で一致なし・衝突（2件以上一致）の場合はスキップ。
 UPDATE horse_entries he
 SET trainer = subq.full_name
 FROM (
-    SELECT he2.trainer AS abbr, MIN(r.trainer) AS full_name
+    SELECT he2.trainer AS abbr, MIN(r.trainer) AS full_name  -- HAVING COUNT=1 保証済みのため MIN は唯一値を返す
     FROM horse_entries he2
     INNER JOIN results r
         ON r.trainer LIKE he2.trainer || '%'

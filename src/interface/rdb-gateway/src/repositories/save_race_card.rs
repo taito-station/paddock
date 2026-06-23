@@ -75,6 +75,7 @@ pub async fn save_race_card(pool: &PgPool, card: &RaceCard) -> Result<()> {
     // netkeiba のカード取得では trainer が3文字前後の略名（例:「上原佑」）になる。
     // results.trainer に蓄積されたフルネームと前方一致で一意解決できる場合のみ正規化する（#219）。
     // 衝突・未一致（新人調教師等）は略名のまま残し、trainer_surface は None として扱われる。
+    // delete_absent_horse_nums 後に呼ぶことで、取消・除外済みエントリへの正規化を避ける。
     normalize_trainer_names(&mut tx, card.race_id.value()).await?;
 
     tx.commit().await?;
@@ -111,6 +112,8 @@ async fn normalize_trainer_names(
     // Step 2: 全 results から前方一致で一意解決できる残存略名を正規化する
     // LIMIT 2 で「1件=一意 / 2件以上=衝突→スキップ」を効率よく判定する。
     // 1 略名につき最大 2 クエリを発行するが、馬数上限（18頭）で有界なので許容範囲。
+    // Step 1 でフルネーム更新済みの trainer も abbrs に含まれ得るが、
+    // `full_name != &abbr` ガードにより自己一致はスキップされる。
     let abbrs: Vec<String> = sqlx::query_scalar(
         "SELECT DISTINCT trainer FROM horse_entries WHERE race_id = $1 AND trainer IS NOT NULL",
     )
