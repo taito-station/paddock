@@ -7,5 +7,5 @@
 -- CONCURRENTLY 不使用: races テーブルは小規模（数千行）のためロック時間が無視できる。
 --   また sqlx はトランザクション内で migration を実行するため CONCURRENTLY を使うと
 --   エラーになる（回避には -- no-transaction が必要でロールバック不可になる）。
-CREATE INDEX idx_races_date ON races (date);
-CREATE INDEX idx_races_source ON races (source);
+CREATE INDEX IF NOT EXISTS idx_races_date ON races (date);
+CREATE INDEX IF NOT EXISTS idx_races_source ON races (source);

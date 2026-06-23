@@ -22,7 +22,7 @@ pub struct RaceListQuery {
     pub date: String,
 }
 
-/// 本番モデルの市場オッズブレンド係数（ADR 0034）。
+/// 本番モデルの市場オッズブレンド係数（ADR 0027 → 0031 → 0034）。
 /// `blend_alpha` 省略時のデフォルト。`blend_alpha=1.0` を明示すれば素モデルを参照できる。
 pub(crate) const PRODUCTION_BLEND_ALPHA: f64 = 0.2;
 
