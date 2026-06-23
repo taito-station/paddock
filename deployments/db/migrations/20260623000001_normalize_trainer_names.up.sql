@@ -6,6 +6,7 @@
 -- 存在しないエントリは ① のみが適用され ② は WHERE 不成立で無効となる。
 
 -- ① 全 results から前方一致で一意解決できる略名を正規化する（大多数のケースをカバー）。
+--   バックフィル用のため horse_entries 全行が対象（Rust 側は race_id = $1 に限定）。
 --   新人調教師等で一致なし・衝突（2件以上一致）の場合はスキップ。
 UPDATE horse_entries he
 SET trainer = subq.full_name

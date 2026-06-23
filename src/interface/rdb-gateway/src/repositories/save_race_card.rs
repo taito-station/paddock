@@ -89,6 +89,9 @@ pub async fn save_race_card(pool: &PgPool, card: &RaceCard) -> Result<()> {
 ///   レース前取得（results 未存在）の場合は 0 行更新で Skip。
 /// Step 2: results 全体から前方一致で一意に特定できる略名のみを更新する。
 ///   衝突・未一致（新人調教師等）はそのまま残し、trainer_surface は None として扱われる。
+///
+/// バックフィル migration（20260623000001）では処理順が逆（① 前方一致 → ② 同一レース）だが
+/// 最終結果は同値。
 async fn normalize_trainer_names(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     race_id: &str,
@@ -108,7 +111,11 @@ async fn normalize_trainer_names(
     .bind(race_id)
     .execute(&mut **tx)
     .await?;
-    tracing::debug!(race_id, rows = step1.rows_affected(), "normalize step1 (same-race join)");
+    tracing::debug!(
+        race_id,
+        rows = step1.rows_affected(),
+        "normalize step1 (same-race join)"
+    );
 
     // Step 2: 全 results から前方一致で一意解決できる残存略名を正規化する
     // LIMIT 2 で「1件=一意 / 2件以上=衝突→スキップ」を効率よく判定する。
