@@ -72,8 +72,9 @@ pub(crate) fn raw_score(
         weight += TRACK_CONDITION_WEIGHT;
     }
     if let Some(form) = factors.recent_form {
-        weighted += FORM_WEIGHT * form;
-        weight += FORM_WEIGHT;
+        let fw = config.recent_form_weight.unwrap_or(FORM_WEIGHT);
+        weighted += fw * form;
+        weight += fw;
     }
     if let Some(w) = factors.weight_carried {
         weighted += WEIGHT_CARRIED_WEIGHT * w;

@@ -79,6 +79,10 @@ pub enum Command {
         /// スイープ（30/60/90 等）で校正改善を比較する。
         #[arg(long)]
         recency_half_life: Option<f64>,
+        /// 前走フォーム項の重みオーバーライド（#217）。未指定はデフォルト 0.25（FORM_WEIGHT）。
+        /// スイープ（0.0/0.1/0.2/0.25/0.3/0.4/0.5 等）で最適重みを探す。
+        #[arg(long)]
+        recent_form_weight: Option<f64>,
     },
 }
 
