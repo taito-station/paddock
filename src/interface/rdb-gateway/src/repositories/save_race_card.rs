@@ -94,7 +94,7 @@ async fn normalize_trainer_names(
     race_id: &str,
 ) -> Result<()> {
     // Step 1: 同一レース join による直接解決
-    sqlx::query(
+    let step1 = sqlx::query(
         "UPDATE horse_entries he \
          SET trainer = r.trainer \
          FROM results r \
@@ -108,6 +108,7 @@ async fn normalize_trainer_names(
     .bind(race_id)
     .execute(&mut **tx)
     .await?;
+    tracing::debug!(race_id, rows = step1.rows_affected(), "normalize step1 (same-race join)");
 
     // Step 2: 全 results から前方一致で一意解決できる残存略名を正規化する
     // LIMIT 2 で「1件=一意 / 2件以上=衝突→スキップ」を効率よく判定する。
@@ -121,6 +122,7 @@ async fn normalize_trainer_names(
     .fetch_all(&mut **tx)
     .await?;
 
+    let mut step2_rows: u64 = 0;
     for abbr in abbrs {
         let candidates: Vec<String> = sqlx::query_scalar(
             "SELECT DISTINCT trainer FROM results \
@@ -134,7 +136,7 @@ async fn normalize_trainer_names(
         if let [full_name] = candidates.as_slice()
             && full_name != &abbr
         {
-            sqlx::query(
+            let r = sqlx::query(
                 "UPDATE horse_entries SET trainer = $1 \
                  WHERE race_id = $2 AND trainer = $3",
             )
@@ -143,8 +145,10 @@ async fn normalize_trainer_names(
             .bind(&abbr)
             .execute(&mut **tx)
             .await?;
+            step2_rows += r.rows_affected();
         }
     }
+    tracing::debug!(race_id, rows = step2_rows, "normalize step2 (prefix LIKE)");
 
     Ok(())
 }
