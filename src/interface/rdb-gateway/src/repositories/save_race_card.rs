@@ -127,18 +127,18 @@ async fn normalize_trainer_names(
         .fetch_all(&mut **tx)
         .await?;
 
-        if let [full_name] = candidates.as_slice() {
-            if full_name != &abbr {
-                sqlx::query(
-                    "UPDATE horse_entries SET trainer = $1 \
-                     WHERE race_id = $2 AND trainer = $3",
-                )
-                .bind(full_name)
-                .bind(race_id)
-                .bind(&abbr)
-                .execute(&mut **tx)
-                .await?;
-            }
+        if let [full_name] = candidates.as_slice()
+            && full_name != &abbr
+        {
+            sqlx::query(
+                "UPDATE horse_entries SET trainer = $1 \
+                 WHERE race_id = $2 AND trainer = $3",
+            )
+            .bind(full_name)
+            .bind(race_id)
+            .bind(&abbr)
+            .execute(&mut **tx)
+            .await?;
         }
     }
 
