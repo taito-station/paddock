@@ -79,9 +79,9 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: 
             self.repository.horse_stats_batch(&horse_names, None),
             self.repository.jockey_stats_batch(&jockey_names, None),
             self.repository.trainer_stats_batch(&trainer_names, None),
-            // limit: 前走 1 走のみ使用（recent_form_from_runs の仕様に合わせる）。
+            // limit: 最大 3 走取得し、trend_n で何走使うかを scoring 側で制御する（#220）。
             self.repository
-                .recent_runs_batch(&horse_names, card.date, 1),
+                .recent_runs_batch(&horse_names, card.date, 3),
         )?;
 
         let mut entry_factors: Vec<(HorseEntry, HorseFactors)> = Vec::new();
@@ -102,7 +102,8 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: 
                 .get(&entry.horse_name)
                 .map(Vec::as_slice)
                 .unwrap_or(&[]);
-            let recent_form = recent_form_from_runs(recent_runs, card.date, &standard_times);
+            let recent_form =
+                recent_form_from_runs(recent_runs, card.date, &standard_times, config.trend_n);
             let factors = build_factors(
                 entry,
                 &course,
@@ -149,18 +150,35 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: 
     }
 }
 
+/// 直近 N 走トレンドの重み（#220）。runs は date 降順なので index 0 が最新走。
+/// `[1.0, 0.5, 0.25]` = Issue #220 指定の指数的減衰ウェイト。
+const TREND_WEIGHTS: [f64; 3] = [1.0, 0.5, 0.25];
+
 /// 取得済みの近走 `runs`（date 降順、最大 `limit` 件）から前走フォーム [0,1] を算出する純粋関数。
 /// `recent_form_for` の DB 取得を剥がした本体で、backtest のバッチ取得（#196）からも共有する。
-/// 先頭（直近 1 走）のみを使う既存挙動と一致する。
+///
+/// `trend_n = 1` のとき直近 1 走スコアのみ返し、現行挙動と完全一致する。
+/// `trend_n >= 2` のとき有効スコアが得られた走を TREND_WEIGHTS で加重平均する。
+/// スコアが取れなかった走（中止・情報欠落等）は分母から除外（欠落フォールバック維持）。
 pub(crate) fn recent_form_from_runs(
     runs: &[RecentRun],
     before: NaiveDate,
     standard_times: &StandardTimes,
+    trend_n: u32,
 ) -> Option<f64> {
-    runs.first().and_then(|run| {
+    let n = (trend_n as usize).min(runs.len()).min(TREND_WEIGHTS.len());
+    let mut wsum = 0.0_f64;
+    let mut wden = 0.0_f64;
+    for (i, run) in runs[..n].iter().enumerate() {
         let std = standard_times.get(run.surface, run.distance);
-        paddock_domain::prediction::recent_form_score(&run.result, run.date, before, std)
-    })
+        if let Some(s) =
+            paddock_domain::prediction::recent_form_score(&run.result, run.date, before, std)
+        {
+            wsum += TREND_WEIGHTS[i] * s;
+            wden += TREND_WEIGHTS[i];
+        }
+    }
+    (wden > 0.0).then(|| wsum / wden)
 }
 
 /// `build_factors` に渡すレース側の条件（全馬共通）。

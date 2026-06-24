@@ -143,9 +143,10 @@ impl<R: StatsRepository + OddsRepository, P: PdfParser, F: PdfFetcher> Interacto
                 .repository
                 .trainer_stats_batch(&trainer_names, as_of)
                 .await?;
+            // 前走フォーム（#31/#220）。cutoff = date でリーク防止。最大 3 走取得し trend_n で制御。
             let recent_runs_map = self
                 .repository
-                .recent_runs_batch(&horse_names, date, RECENT_RUNS_LIMIT)
+                .recent_runs_batch(&horse_names, date, 3)
                 .await?;
 
             // 標準タイム表は date 単位で取得。by_date の BTreeMap 化で同一日は外側ループで 1 回だけ
@@ -239,14 +240,14 @@ impl<R: StatsRepository + OddsRepository, P: PdfParser, F: PdfFetcher> Interacto
                             .get(t)
                             .expect("date-batch trainer_stats covers all starters' trainers")
                     });
-                    // 前走フォーム（#31）。cutoff = race.date でレース当日以降をリークさせない。
-                    // バッチ取得済みの近走（直近 1 走）から純粋関数で算出する。
+                    // 前走フォーム（#31/#220）。cutoff = race.date でレース当日以降をリークさせない。
+                    // バッチ取得済みの近走（最大 3 走）を trend_n で絞り加重平均する純粋関数で算出する。
                     let recent_runs = recent_runs_map
                         .get(&r.horse_name)
                         .map(Vec::as_slice)
                         .unwrap_or(&[]);
                     let recent_form =
-                        recent_form_from_runs(recent_runs, race.date, &standard_times);
+                        recent_form_from_runs(recent_runs, race.date, &standard_times, config.trend_n);
                     let factors = build_factors(
                         &entry,
                         &course,

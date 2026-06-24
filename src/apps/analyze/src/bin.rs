@@ -106,9 +106,10 @@ async fn main() -> anyhow::Result<()> {
             blend_alpha,
             shrinkage_m,
             recency_half_life,
+            trend_n,
         } => {
             let blend_alpha = validate_blend_alpha(blend_alpha)?;
-            let config = build_estimation_config(shrinkage_m, recency_half_life)?;
+            let config = build_estimation_config(shrinkage_m, recency_half_life, trend_n)?;
             let from = parse_date(&from)?;
             let to = parse_date(&to)?;
             let report = app
@@ -137,12 +138,13 @@ fn validate_blend_alpha(alpha: Option<f64>) -> anyhow::Result<Option<f64>> {
     Ok(alpha)
 }
 
-/// backtest 用の確率推定設定（#75）を CLI フラグから組み立てる。未指定フラグは現行挙動。
+/// backtest 用の確率推定設定（#75, #220）を CLI フラグから組み立てる。未指定フラグは現行挙動。
 /// `--shrinkage-m` / `--recency-half-life` とも指定時は有限の正数のみ許可
-/// （0 や負値はゼロ除算・無意味なため）。
+/// （0 や負値はゼロ除算・無意味なため）。`--trend-n` は 1〜3 のみ許可。
 fn build_estimation_config(
     shrinkage_m: Option<f64>,
     recency_half_life: Option<f64>,
+    trend_n: u32,
 ) -> anyhow::Result<EstimationConfig> {
     let shrinkage = match shrinkage_m {
         Some(m) => {
@@ -162,7 +164,14 @@ fn build_estimation_config(
         }
         None => None,
     };
-    Ok(EstimationConfig { shrinkage, recency })
+    if !(1..=3).contains(&trend_n) {
+        anyhow::bail!("--trend-n must be 1, 2, or 3, got {trend_n}");
+    }
+    Ok(EstimationConfig {
+        shrinkage,
+        recency,
+        trend_n,
+    })
 }
 
 /// 候補が複数ある場合に一覧を提示して終了する（ユーザーが絞り込んで再実行）。

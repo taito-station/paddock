@@ -585,6 +585,7 @@ fn shrink_cfg(m: f64) -> EstimationConfig {
     EstimationConfig {
         shrinkage: Some(ShrinkageConfig { pseudo_count: m }),
         recency: None,
+        trend_n: 1,
     }
 }
 
