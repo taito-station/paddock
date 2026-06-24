@@ -43,6 +43,9 @@ pub struct JockeyFormRun {
 着順・人気のみを持つ軽量型。`HorseResult` を流用しないのは、
 タイム・体重・着差等の不要フィールドをリポジトリが取得しなくてよいようにするため。
 
+re-export パス: `domain/src/prediction/mod.rs` に `pub use model::JockeyFormRun;` を追加 →
+`domain/src/lib.rs` の既存 `pub use prediction::*;` で `paddock_domain::JockeyFormRun` として公開される。
+
 #### 1.2 新フィールド: `HorseFactors.jockey_recent_form`
 
 ```rust
@@ -120,10 +123,11 @@ trait StatsRepository {
 }
 ```
 
-トレイトに **単体版** `find_jockey_recent_runs` と、それをループする **既定のバッチ版** `jockey_recent_runs_batch` を定義する（`find_recent_runs` + `recent_runs_batch` の 2 ステップ構造と同パターン）。
+トレイトに **必須（required）** `find_jockey_recent_runs` と、それをループする **既定実装（provided）** `jockey_recent_runs_batch` を定義する（`find_recent_runs` + `recent_runs_batch` の 2 ステップ構造と同パターン）。
 
 ```rust
 // use-case/src/repository.rs に追加
+// ▶ required: rdb-gateway が SQL で実装する
 fn find_jockey_recent_runs(
     &self,
     jockey: &JockeyName,
@@ -131,7 +135,8 @@ fn find_jockey_recent_runs(
     limit: u32,
 ) -> impl Future<Output = Result<Vec<JockeyFormRun>>> + Send;
 
-// 既定実装 (async move + per-jockey ループ。recent_runs_batch L561–L574 と同パターン)
+// ▶ provided: デフォルト実装（per-jockey ループ）。recent_runs_batch L561–L574 と同パターン。
+// rdb-gateway は UNION ウィンドウ SQL で override して一括取得に置き換える。
 fn jockey_recent_runs_batch(
     &self,
     jockeys: &[JockeyName],
@@ -140,9 +145,9 @@ fn jockey_recent_runs_batch(
 ) -> impl Future<Output = Result<HashMap<JockeyName, Vec<JockeyFormRun>>>> + Send {
     async move {
         let mut out = HashMap::new();
-        for jockey in jockeys {
-            if out.contains_key(jockey) { continue; }
-            out.insert(jockey.clone(), self.find_jockey_recent_runs(jockey, before, limit).await?);
+        for jockey_name in jockeys {
+            if out.contains_key(jockey_name) { continue; }
+            out.insert(jockey_name.clone(), self.find_jockey_recent_runs(jockey_name, before, limit).await?);
         }
         Ok(out)
     }
@@ -183,7 +188,7 @@ WHERE NOT EXISTS (
     SELECT 1 FROM unioned u2
     WHERE u2.date = u.date AND u2.venue = u.venue AND u2.race_num = u.race_num
       AND (u2.src_rank < u.src_rank
-           -- src_rank 同値 tie-break: race_id 降順（PDF が先に INSERT = race_id 大）
+           -- src_rank 同値 tie-break: race_id 降順（同一ソース内の決定論的序列。方向は任意だが一貫性があれば十分）
            OR (u2.src_rank = u.src_rank AND u2.race_id > u.race_id))
 )
 ORDER BY u.date DESC, u.race_id DESC
@@ -208,10 +213,9 @@ WITH unioned AS (
     FROM horse_past_runs
     WHERE jockey = ANY($1) AND date < $2
 ),
+-- ステージ 1: 重複除去（find_recent_runs.rs の NOT EXISTS パターンと同一）
 deduped AS (
-    SELECT *, ROW_NUMBER() OVER (
-        PARTITION BY jockey ORDER BY date DESC, race_id DESC
-    ) AS rn
+    SELECT *
     FROM unioned u
     WHERE NOT EXISTS (
         SELECT 1 FROM unioned u2
@@ -219,8 +223,15 @@ deduped AS (
           AND u2.date = u.date AND u2.venue = u.venue AND u2.race_num = u.race_num
           AND (u2.src_rank < u.src_rank OR (u2.src_rank = u.src_rank AND u2.race_id > u.race_id))
     )
+),
+-- ステージ 2: 騎手ごとの最新 N 件に絞る（重複除去後に ROW_NUMBER を適用）
+ranked AS (
+    SELECT *, ROW_NUMBER() OVER (
+        PARTITION BY jockey ORDER BY date DESC, race_id DESC
+    ) AS rn
+    FROM deduped
 )
-SELECT finishing_position, popularity, jockey FROM deduped WHERE rn <= $3
+SELECT finishing_position, popularity, jockey FROM ranked WHERE rn <= $3
 ORDER BY jockey, date DESC, race_id DESC
 ```
 
@@ -259,7 +270,11 @@ let jockey_recent_form = entry.jockey.as_ref()
 #### backtest.rs
 
 backtest 経路では `as_of = Some(race.date)` として `before = race.date` を渡す（予測対象レース当日以降の騎手成績を含めないリーク防止）。
-既存 `recent_runs_batch(&horse_names, date, limit)` の呼び出しパターンと同様。
+
+**try_join! 不使用:** `backtest.rs` は `predict.rs` と異なり `try_join!` を使わず、各バッチ呼び出しを個別に `await?` する（既存の `recent_runs_batch` 呼び出しも同様）。`jockey_recent_runs_batch` も同じく個別 `await?` で追加する。
+
+**by_date バッチ構造:** backtest.rs は全レースを日付別 BTreeMap（`by_date`）でまとめ、同一日の馬・騎手・調教師名を一括取得してからレースごとに処理する。`jockey_recent_runs_batch` も `by_date` ループ内で他のバッチと並べて呼び出す（`recent_runs_batch` の呼び出し箇所を参照）。
+
 スイープパラメータ:
 
 | パラメータ | 値 |
@@ -302,10 +317,14 @@ pub(crate) const JOCKEY_RECENT_FORM_LIMIT: u32 = 10; // backtest sweep で 5 / 1
 
 `jockey_surface` との交互作用（多重共線性）は Brier / LogLoss の変化量で間接的に観察する。
 
+> **アブレーション（`jockey_surface` 無効化との比較）** は初回スイープの対象外とする。
+> 初回 sweep で有効性が確認できた場合に必要であれば追加評価する。
+
 ---
 
 ## 実装 PR でのタスク
 
+- [ ] `domain/src/prediction/mod.rs` に `pub use model::JockeyFormRun;` を追加し、`domain/src/lib.rs` の `prediction` re-export で `JockeyFormRun` が `paddock_domain::JockeyFormRun` として参照できることを確認する
 - [ ] `docs/specifications/probability-estimation.md` の `raw_score` 式一覧に `jockey_recent_form` 項を追記する
 - [ ] `use-case` mock（`test_predict_race.rs` / `test_backtest.rs`）に `find_jockey_recent_runs` と `jockey_recent_runs_batch` の実装を追加する
 - [ ] テストが 5 タプル destructure でコンパイルが通ることを確認する
