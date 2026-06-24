@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use chrono::NaiveDate;
 use paddock_domain::{
@@ -59,19 +59,18 @@ impl<R: StatsRepository + OddsRepository, P: PdfParser, F: PdfFetcher> Interacto
 
         // レースを開催日でグループ化し、同一日の全出走馬を一括バッチ取得する（#223）。
         // as_of はレース日ごとに変わるが、同一日のレース間は as_of が同一なのでバッチ化できる。
-        let mut by_date: HashMap<NaiveDate, Vec<usize>> = HashMap::new();
+        // BTreeMap で日付昇順を保証しつつ sort() を不要にする。
+        let mut by_date: BTreeMap<NaiveDate, Vec<usize>> = BTreeMap::new();
         for (i, race) in races.iter().enumerate() {
             by_date.entry(race.date).or_default().push(i);
         }
-        let mut sorted_dates: Vec<NaiveDate> = by_date.keys().copied().collect();
-        sorted_dates.sort();
 
-        for date in &sorted_dates {
-            let race_indices = &by_date[date];
+        for (date, race_indices) in &by_date {
             let as_of = Some(*date);
 
-            // 日付内の全レースの全出走馬を一括収集（出走取消・競走除外は除く）。
-            let all_starters: Vec<&HorseResult> = race_indices
+            // 日付内の全レースの全出走馬を名前収集用にフラット化する（出走取消・競走除外は除く）。
+            // バッチ関数に渡す名前リストの構築にのみ使用し、個別レース処理では再度 starters を絞る。
+            let day_starters: Vec<&HorseResult> = race_indices
                 .iter()
                 .flat_map(|&i| {
                     races[i].results.iter().filter(|r| {
@@ -80,17 +79,33 @@ impl<R: StatsRepository + OddsRepository, P: PdfParser, F: PdfFetcher> Interacto
                 })
                 .collect();
 
-            let horse_names: Vec<_> = all_starters.iter().map(|r| r.horse_name.clone()).collect();
-            let jockey_names: Vec<_> = all_starters
+            // その日の全レースに発走馬がいなければバッチ取得も不要なのでスキップ。
+            if day_starters.is_empty() {
+                continue;
+            }
+
+            // 同一日に同じ馬名・騎手名・調教師名が複数レースに登場しうるため呼び出し元で dedup する
+            // （バッチ関数の dedup だけに依存すると実装詳細への結合が生じる）。
+            let horse_names: Vec<_> = day_starters
+                .iter()
+                .map(|r| r.horse_name.clone())
+                .collect::<HashSet<_>>()
+                .into_iter()
+                .collect();
+            let jockey_names: Vec<_> = day_starters
                 .iter()
                 .filter_map(|r| r.jockey.clone())
+                .collect::<HashSet<_>>()
+                .into_iter()
                 .collect();
-            let trainer_names: Vec<_> = all_starters
+            let trainer_names: Vec<_> = day_starters
                 .iter()
                 .filter_map(|r| r.trainer.clone())
+                .collect::<HashSet<_>>()
+                .into_iter()
                 .collect();
 
-            // 1日1回のバッチ取得。名前の dedup はバッチ関数側で行う。
+            // 1日1回のバッチ取得。
             let horse_stats_map = self
                 .repository
                 .horse_stats_batch(&horse_names, as_of)
@@ -127,6 +142,7 @@ impl<R: StatsRepository + OddsRepository, P: PdfParser, F: PdfFetcher> Interacto
             };
 
             // コース統計キャッシュ: 同日同コース設定（場×距離×馬場）は as_of が同一なので再取得しない。
+            // 日付ループ内で宣言するのは as_of が日ごとに変わるため（意図的なスコープ）。
             let mut course_cache: HashMap<(Venue, u32, Surface), CourseStatsRow> = HashMap::new();
 
             for &race_idx in race_indices {
@@ -193,21 +209,21 @@ impl<R: StatsRepository + OddsRepository, P: PdfParser, F: PdfFetcher> Interacto
                     // horse_stats_batch の母集合に必ず含まれるため、horse は欠落しない。
                     let horse = horse_stats_map
                         .get(&r.horse_name)
-                        .expect("horse_stats_batch covers all starters");
+                        .expect("date-batch horse_stats covers all starters for the day");
                     // recency 有効時のみ日付付き系列を使う（#75 Phase B）。基準日・cutoff はレース日。
                     // 無効時は map が空なので None（per-item で取得しなかったのと同値）。
                     let recency = config.recency.and(horse_recency_map.get(&r.horse_name));
                     let jockey = r.jockey.as_ref().map(|j| {
                         jockey_stats_map
                             .get(j)
-                            .expect("jockey_stats_batch covers all starters' jockeys")
+                            .expect("date-batch jockey_stats covers all starters' jockeys")
                     });
                     // 調教師統計（#74）。results 由来の r.trainer（当該レース確定値）から as_of で引き、
                     // walk-forward のリークを防ぐ。trainer 欠落馬は項なし（ADR 0007）。
                     let trainer = r.trainer.as_ref().map(|t| {
                         trainer_stats_map
                             .get(t)
-                            .expect("trainer_stats_batch covers all starters' trainers")
+                            .expect("date-batch trainer_stats covers all starters' trainers")
                     });
                     // 前走フォーム（#31）。cutoff = race.date でレース当日以降をリークさせない。
                     // バッチ取得済みの近走（直近 1 走）から純粋関数で算出する。

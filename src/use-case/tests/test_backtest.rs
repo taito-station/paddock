@@ -664,6 +664,55 @@ async fn backtest_blend_falls_back_to_results_odds_when_no_snapshot() {
 }
 
 #[tokio::test]
+async fn backtest_same_day_multi_race_evaluates_independently() {
+    // 同一日（2026-1-10）に 2 つのレースがある場合、日付単位バッチで統計を共有しながら
+    // 各レースの評価が独立して正しく行われることを検証する（#223 日付バッチ化の回帰テスト）。
+    //
+    // Race A (1R): ウマA(高スタッツ, 1着) / ウマB(低スタッツ, 2着) → 本命ウマA, 単勝的中
+    // Race B (5R): ウマC(低スタッツ, 1着) / ウマD(低スタッツ, 2着) → 本命は馬番小さい方=1着的中
+    // ※ ウマC/ウマD は mock で win_rate=0.05 (同値)。馬番昇順タイブレーク → ウマC(horse_num=1)が本命。
+    // 2レース合算: 2/2 的中 → win_hit_rate = 1.0
+    let race_a = finished_race();
+    let race_b = Race {
+        race_id: RaceId::try_from("2026-1-nakayama-1-5R").unwrap(),
+        date: NaiveDate::from_ymd_opt(2026, 1, 10).unwrap(),
+        venue: Venue::Nakayama,
+        round: 1,
+        day: 1,
+        race_num: 5,
+        surface: Surface::Turf,
+        distance: 2000,
+        track_condition: None,
+        weather: None,
+        results: vec![
+            result(1, 1, "ウマC", 1, Some(5.0)), // 低スタッツだが馬番1→本命、1着
+            result(2, 5, "ウマD", 2, None),      // 低スタッツ、2着
+        ],
+    };
+
+    let app = interactor(vec![race_a, race_b]);
+    let report = app
+        .backtest(
+            d(2026, 1, 1),
+            d(2026, 1, 31),
+            None,
+            EstimationConfig::default(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        report.races_evaluated, 2,
+        "同日2レースがそれぞれ評価されること"
+    );
+    assert!(
+        (report.win_hit_rate - 1.0).abs() < 1e-9,
+        "各レースの評価が独立しており、両レースで本命が的中すること (win_hit_rate={})",
+        report.win_hit_rate
+    );
+}
+
+#[tokio::test]
 async fn backtest_empty_when_no_races() {
     let app = interactor(Vec::new());
     let report = app
