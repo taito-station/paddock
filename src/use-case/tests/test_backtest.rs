@@ -30,6 +30,21 @@ fn make_group(label: &str, starts: u32, wins: u32) -> GroupStat {
     }
 }
 
+/// horse_stats / horse_stats_batch の両経路から呼ぶ共通ロジック。
+/// ウマA=高スタッツ / ウマS=最高スタッツ / ウマB=道悪巧者 / 他=低スタッツ。
+fn make_horse_stats_row(name: &HorseName) -> HorseStatsRow {
+    let win_rate = match name.value() {
+        "ウマA" => 0.3,
+        "ウマS" => 0.9,
+        _ => 0.05,
+    };
+    let mut row = horse_stats_with_surface_win(win_rate);
+    if name.value() == "ウマB" {
+        row.by_track_condition = vec![make_group("不良", 10, 10)];
+    }
+    row
+}
+
 fn horse_stats_with_surface_win(win_rate: f64) -> HorseStatsRow {
     let starts = 10;
     let wins = (win_rate * starts as f64).round() as u32;
@@ -158,20 +173,7 @@ impl StatsRepository for MockRepo {
         name: &HorseName,
         _as_of: Option<NaiveDate>,
     ) -> Result<HorseStatsRow> {
-        // ウマA を高スタッツでトップ選好馬に。ウマS は最高スタッツだが（テストで）出走取消なので
-        // 除外され、確率推定の母集合に入らないことを検証する。
-        let win_rate = match name.value() {
-            "ウマA" => 0.3,
-            "ウマS" => 0.9,
-            _ => 0.05,
-        };
-        let mut row = horse_stats_with_surface_win(win_rate);
-        // ウマB のみ不良馬場の好成績を持たせる（#73 の配線テスト用）。レースの
-        // track_condition が None の既存テストでは馬場項が使われないため影響しない。
-        if name.value() == "ウマB" {
-            row.by_track_condition = vec![make_group("不良", 10, 10)];
-        }
-        Ok(row)
+        Ok(make_horse_stats_row(name))
     }
 
     async fn horse_recency(
@@ -222,25 +224,14 @@ impl StatsRepository for MockRepo {
     ) -> impl Future<Output = Result<HashMap<HorseName, HorseStatsRow>>> + Send {
         // 呼び出し回数をカウント（日付単位バッチ化の効果検証用、#223）。
         self.horse_stats_batch_calls.fetch_add(1, Ordering::Relaxed);
-        // self は async move に入れられないため、horse_stats と同じロジックをインライン化。
-        // horse_stats の win_rate 判定や by_track_condition 設定を変更した場合はここも合わせて更新すること。
+        // self は async move に入れられないため、names を owned に変換して async move で処理。
+        // ロジックは make_horse_stats_row に集約済み（horse_stats との二重管理を解消）。
         let names_owned = names.to_vec();
         async move {
             let mut out = HashMap::new();
             for name in &names_owned {
-                if out.contains_key(name) {
-                    continue;
-                }
-                let win_rate = match name.value() {
-                    "ウマA" => 0.3,
-                    "ウマS" => 0.9,
-                    _ => 0.05,
-                };
-                let mut row = horse_stats_with_surface_win(win_rate);
-                if name.value() == "ウマB" {
-                    row.by_track_condition = vec![make_group("不良", 10, 10)];
-                }
-                out.insert(name.clone(), row);
+                out.entry(name.clone())
+                    .or_insert_with(|| make_horse_stats_row(name));
             }
             Ok(out)
         }

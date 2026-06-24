@@ -3,8 +3,8 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use chrono::NaiveDate;
 use paddock_domain::{
     BacktestReport, BettingConfig, EstimationConfig, ExoticBet, HorseEntry, HorseFactors,
-    HorseOutcome, HorseResult, Podium, RaceEvaluation, ResultStatus, StandardTimes, Surface, Venue,
-    bet_hit, evaluate, exotic_segments, select_bets,
+    HorseOutcome, HorseResult, Podium, RaceEvaluation, ResultStatus, Surface, Venue, bet_hit,
+    evaluate, exotic_segments, select_bets,
 };
 
 use crate::error::Result;
@@ -56,10 +56,6 @@ impl<R: StatsRepository + OddsRepository, P: PdfParser, F: PdfFetcher> Interacto
         // 買い目（curated 推奨）の券種別 校正・回収率評価用（#121）。当時 race_odds がある
         // レースのみ select_bets を回し、確定着順と突合した結果を蓄積する。
         let mut exotic_bets: Vec<ExoticBet> = Vec::new();
-        // 標準タイム表は cutoff=race.date のみに依存し、同一開催日のレース間で完全に同一になる。
-        // レース単位で引くと同じ集計を日数ぶん重複実行するため、日付キャッシュで 1 日 1 回に畳む（#196）。
-        let mut standard_times_cache: HashMap<NaiveDate, StandardTimes> = HashMap::new();
-
         // レースを開催日でグループ化し、同一日の全出走馬を一括バッチ取得する（#223）。
         // as_of はレース日ごとに変わるが、同一日のレース間は as_of が同一なのでバッチ化できる。
         // BTreeMap で日付昇順を保証しつつ sort() を不要にする。
@@ -152,15 +148,9 @@ impl<R: StatsRepository + OddsRepository, P: PdfParser, F: PdfFetcher> Interacto
                 .recent_runs_batch(&horse_names, date, RECENT_RUNS_LIMIT)
                 .await?;
 
-            // 標準タイム表（日付キャッシュ）。
-            let standard_times = match standard_times_cache.get(&date) {
-                Some(st) => st.clone(),
-                None => {
-                    let st = self.repository.standard_times(date).await?;
-                    standard_times_cache.insert(date, st.clone());
-                    st
-                }
-            };
+            // 標準タイム表は date 単位で取得。by_date の BTreeMap 化で同一日は外側ループで 1 回だけ
+            // 訪れるため、キャッシュは不要。
+            let standard_times = self.repository.standard_times(date).await?;
 
             // コース統計キャッシュ: 同日同コース設定（場×距離×馬場）は as_of が同一なので再取得しない。
             // as_of がキーに含まれないため、日をまたぐと同コース設定でも統計値が異なるのにキャッシュヒットし
