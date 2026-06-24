@@ -672,6 +672,10 @@ async fn backtest_same_day_multi_race_evaluates_independently() {
     // Race B (5R): ウマC(低スタッツ, 1着) / ウマD(低スタッツ, 2着) → 本命は馬番小さい方=1着的中
     // ※ ウマC/ウマD は mock で win_rate=0.05 (同値)。馬番昇順タイブレーク → ウマC(horse_num=1)が本命。
     // 2レース合算: 2/2 的中 → win_hit_rate = 1.0
+    //
+    // 注意: horse_stats_batch 等のバッチ呼び出し回数は MockRepo 構造では検証しない。
+    // このテストは「バッチ化後も各レースが独立して正しく評価される」正当性の回帰テスト。
+    // バッチ化の効果（クエリ削減）は統合テスト or pg_stat_statements で別途確認すること。
     let race_a = finished_race();
     let race_b = Race {
         race_id: RaceId::try_from("2026-1-nakayama-1-5R").unwrap(),
@@ -705,6 +709,9 @@ async fn backtest_same_day_multi_race_evaluates_independently() {
         report.races_evaluated, 2,
         "同日2レースがそれぞれ評価されること"
     );
+    // win_hit_rate=1.0 は 2/2 的中を意味する。
+    // Race A: 本命ウマA(horse_num=1, win_rate=0.3) が 1 着 → 的中。
+    // Race B: 本命ウマC(horse_num=1, win_rate=0.05) が 1 着 → 的中（ウマD と同率スタッツ、馬番小優先）。
     assert!(
         (report.win_hit_rate - 1.0).abs() < 1e-9,
         "各レースの評価が独立しており、両レースで本命が的中すること (win_hit_rate={})",

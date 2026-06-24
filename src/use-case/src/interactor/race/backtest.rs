@@ -60,6 +60,8 @@ impl<R: StatsRepository + OddsRepository, P: PdfParser, F: PdfFetcher> Interacto
         // レースを開催日でグループ化し、同一日の全出走馬を一括バッチ取得する（#223）。
         // as_of はレース日ごとに変わるが、同一日のレース間は as_of が同一なのでバッチ化できる。
         // BTreeMap で日付昇順を保証しつつ sort() を不要にする。
+        // Vec<usize> でインデックスを保持するのは、by_date 構築中に races を借用しつつ
+        // BTreeMap にも挿入するためライフタイム上 Vec<&Race> にできないため。
         let mut by_date: BTreeMap<NaiveDate, Vec<usize>> = BTreeMap::new();
         for (i, race) in races.iter().enumerate() {
             by_date.entry(race.date).or_default().push(i);
@@ -86,24 +88,32 @@ impl<R: StatsRepository + OddsRepository, P: PdfParser, F: PdfFetcher> Interacto
 
             // 同一日に同じ馬名・騎手名・調教師名が複数レースに登場しうるため呼び出し元で dedup する
             // （バッチ関数の dedup だけに依存すると実装詳細への結合が生じる）。
-            let horse_names: Vec<_> = day_starters
-                .iter()
-                .map(|r| r.horse_name.clone())
-                .collect::<HashSet<_>>()
-                .into_iter()
-                .collect();
-            let jockey_names: Vec<_> = day_starters
-                .iter()
-                .filter_map(|r| r.jockey.clone())
-                .collect::<HashSet<_>>()
-                .into_iter()
-                .collect();
-            let trainer_names: Vec<_> = day_starters
-                .iter()
-                .filter_map(|r| r.trainer.clone())
-                .collect::<HashSet<_>>()
-                .into_iter()
-                .collect();
+            // HorseName/JockeyName/TrainerName は Ord 非実装のため BTreeSet/sort は使えない。
+            // seen+filter パターンで挿入順を保持しつつ決定的に dedup する。
+            let horse_names: Vec<_> = {
+                let mut seen = HashSet::new();
+                day_starters
+                    .iter()
+                    .map(|r| r.horse_name.clone())
+                    .filter(|n| seen.insert(n.clone()))
+                    .collect()
+            };
+            let jockey_names: Vec<_> = {
+                let mut seen = HashSet::new();
+                day_starters
+                    .iter()
+                    .filter_map(|r| r.jockey.clone())
+                    .filter(|n| seen.insert(n.clone()))
+                    .collect()
+            };
+            let trainer_names: Vec<_> = {
+                let mut seen = HashSet::new();
+                day_starters
+                    .iter()
+                    .filter_map(|r| r.trainer.clone())
+                    .filter(|n| seen.insert(n.clone()))
+                    .collect()
+            };
 
             // 1日1回のバッチ取得。
             let horse_stats_map = self
@@ -142,7 +152,8 @@ impl<R: StatsRepository + OddsRepository, P: PdfParser, F: PdfFetcher> Interacto
             };
 
             // コース統計キャッシュ: 同日同コース設定（場×距離×馬場）は as_of が同一なので再取得しない。
-            // 日付ループ内で宣言するのは as_of が日ごとに変わるため（意図的なスコープ）。
+            // as_of がキーに含まれないため、日をまたぐと同コース設定でも統計値が異なるのにキャッシュヒットし
+            // 汚染になる。日付ループ内スコープで確実に破棄する（意図的な配置）。
             let mut course_cache: HashMap<(Venue, u32, Surface), CourseStatsRow> = HashMap::new();
 
             for &race_idx in race_indices {
@@ -151,6 +162,8 @@ impl<R: StatsRepository + OddsRepository, P: PdfParser, F: PdfFetcher> Interacto
                 // 実際に発走した馬のみを評価対象（出走頭数）にする。出走取消・競走除外は本番 predict の
                 // 出馬表にも載らないため、確率推定の母集合に含めると正規化分母が水増しされ確率が歪む。
                 // 競走中止(DidNotFinish)は発走済みなので母集合に含め、非的中(着順なし)として扱う。
+                // フィルタ条件は外側の day_starters 収集と同一（Scratched | Cancelled 除外）。
+                // この一致により horse_stats_batch の母集合が starters 全員を網羅することが保証される。
                 let starters: Vec<&HorseResult> = race
                     .results
                     .iter()
