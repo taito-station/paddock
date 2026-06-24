@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use chrono::NaiveDate;
 use paddock_domain::{
     BacktestReport, BettingConfig, EstimationConfig, ExoticBet, HorseEntry, HorseFactors,
-    HorseOutcome, HorseResult, Podium, RaceEvaluation, ResultStatus, StandardTimes, Surface,
-    Venue, bet_hit, evaluate, exotic_segments, select_bets,
+    HorseOutcome, HorseResult, Podium, RaceEvaluation, ResultStatus, StandardTimes, Surface, Venue,
+    bet_hit, evaluate, exotic_segments, select_bets,
 };
 
 use crate::error::Result;
@@ -74,18 +74,21 @@ impl<R: StatsRepository + OddsRepository, P: PdfParser, F: PdfFetcher> Interacto
             let all_starters: Vec<&HorseResult> = race_indices
                 .iter()
                 .flat_map(|&i| {
-                    races[i]
-                        .results
-                        .iter()
-                        .filter(|r| !matches!(r.status, ResultStatus::Scratched | ResultStatus::Cancelled))
+                    races[i].results.iter().filter(|r| {
+                        !matches!(r.status, ResultStatus::Scratched | ResultStatus::Cancelled)
+                    })
                 })
                 .collect();
 
             let horse_names: Vec<_> = all_starters.iter().map(|r| r.horse_name.clone()).collect();
-            let jockey_names: Vec<_> =
-                all_starters.iter().filter_map(|r| r.jockey.clone()).collect();
-            let trainer_names: Vec<_> =
-                all_starters.iter().filter_map(|r| r.trainer.clone()).collect();
+            let jockey_names: Vec<_> = all_starters
+                .iter()
+                .filter_map(|r| r.jockey.clone())
+                .collect();
+            let trainer_names: Vec<_> = all_starters
+                .iter()
+                .filter_map(|r| r.trainer.clone())
+                .collect();
 
             // 1日1回のバッチ取得。名前の dedup はバッチ関数側で行う。
             let horse_stats_map = self
@@ -135,7 +138,9 @@ impl<R: StatsRepository + OddsRepository, P: PdfParser, F: PdfFetcher> Interacto
                 let starters: Vec<&HorseResult> = race
                     .results
                     .iter()
-                    .filter(|r| !matches!(r.status, ResultStatus::Scratched | ResultStatus::Cancelled))
+                    .filter(|r| {
+                        !matches!(r.status, ResultStatus::Scratched | ResultStatus::Cancelled)
+                    })
                     .collect();
                 // 発走馬が居なければ評価できないのでスキップ。
                 if starters.is_empty() {
@@ -210,7 +215,8 @@ impl<R: StatsRepository + OddsRepository, P: PdfParser, F: PdfFetcher> Interacto
                         .get(&r.horse_name)
                         .map(Vec::as_slice)
                         .unwrap_or(&[]);
-                    let recent_form = recent_form_from_runs(recent_runs, race.date, &standard_times);
+                    let recent_form =
+                        recent_form_from_runs(recent_runs, race.date, &standard_times);
                     let factors = build_factors(
                         &entry,
                         &course,
@@ -243,15 +249,21 @@ impl<R: StatsRepository + OddsRepository, P: PdfParser, F: PdfFetcher> Interacto
                         // race_odds の win は scraper が全頭分まとめて書くため部分カバレッジは想定しないが、
                         // 仮に部分的でも results.odds へは切り替えない（blend は full coverage 前提、
                         // probability-estimation.md 参照）。
-                        let market_win: HashMap<_, _> =
-                            match market.as_ref().filter(|o| !o.win.is_empty()) {
-                                Some(o) => o.win.iter().map(|(num, ov)| (*num, ov.value())).collect(),
-                                None => starters
-                                    .iter()
-                                    .filter_map(|r| r.odds.map(|o| (r.horse_num, o)))
-                                    .collect(),
-                            };
-                        paddock_domain::prediction::blend_with_market_win(&probs, &market_win, alpha)
+                        let market_win: HashMap<_, _> = match market
+                            .as_ref()
+                            .filter(|o| !o.win.is_empty())
+                        {
+                            Some(o) => o.win.iter().map(|(num, ov)| (*num, ov.value())).collect(),
+                            None => starters
+                                .iter()
+                                .filter_map(|r| r.odds.map(|o| (r.horse_num, o)))
+                                .collect(),
+                        };
+                        paddock_domain::prediction::blend_with_market_win(
+                            &probs,
+                            &market_win,
+                            alpha,
+                        )
                     }
                     None => probs,
                 };
