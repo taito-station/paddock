@@ -172,6 +172,7 @@ WITH unioned AS (
     UNION ALL
     -- horse_past_runs は定義上 netkeiba 専用テーブルなので source 絞り込みは不要
     -- horse_past_runs.jockey が NULL の行も = 比較で自然に除外される
+    -- horse_past_runs.race_id は PRIMARY KEY の一部として存在（baseline マイグレーション参照）
     SELECT date, venue, race_num,
            finishing_position, popularity,
            1 AS src_rank, race_id
@@ -182,10 +183,9 @@ SELECT u.finishing_position, u.popularity
 FROM unioned u
 WHERE NOT EXISTS (
     SELECT 1 FROM unioned u2
-    -- 単体版では $1 で騎手が 1 名固定のため u2.jockey = u.jockey は常に真だが、
-    -- バッチ版 NOT EXISTS と対称に書いておく
-    WHERE u2.jockey = u.jockey
-      AND u2.date = u.date AND u2.venue = u.venue AND u2.race_num = u.race_num
+    -- 単体版では $1 で騎手が 1 名固定のため jockey 条件は不要（全行同一騎手）
+    -- バッチ版との対称性ではなく単体版の unioned CTE にある列だけを参照する
+    WHERE u2.date = u.date AND u2.venue = u.venue AND u2.race_num = u.race_num
       AND (u2.src_rank < u.src_rank
            -- src_rank 同値 tie-break: race_id 降順（同一ソース内の決定論的序列。方向は任意だが一貫性があれば十分）
            OR (u2.src_rank = u.src_rank AND u2.race_id > u.race_id))
@@ -325,13 +325,15 @@ pub(crate) const JOCKEY_RECENT_FORM_LIMIT: u32 = 10; // backtest sweep で 5 / 1
 
 ## 実装 PR でのタスク
 
-- [ ] `domain/src/prediction/mod.rs` に `pub use model::JockeyFormRun;` を追加し、`domain/src/lib.rs` の `prediction` re-export で `JockeyFormRun` が `paddock_domain::JockeyFormRun` として参照できることを確認する
+- [ ] `domain/src/prediction/mod.rs` に `pub use model::JockeyFormRun;` および `pub use scoring::jockey_recent_form_score;` を追加し、`domain/src/lib.rs` の `prediction` re-export で `JockeyFormRun`・`jockey_recent_form_score` が `paddock_domain::*` として参照できることを確認する
 - [ ] `use-case/src/interactor/race/mod.rs` に `JOCKEY_RECENT_FORM_LIMIT` 定数を追加し、`predict.rs` と `backtest.rs` から `use super::JOCKEY_RECENT_FORM_LIMIT;` で参照できること（コンパイルで確認）
 - [ ] `docs/specifications/probability-estimation.md` の `raw_score` 式一覧に `jockey_recent_form` 項を追記する
 - [ ] `use-case` mock（`test_predict_race.rs` / `test_backtest.rs`）に `find_jockey_recent_runs` と `jockey_recent_runs_batch` の実装を追加する
 - [ ] テストが 5 タプル destructure でコンパイルが通ることを確認する
 - [ ] rdb-gateway の `jockey_recent_runs_batch` バッチ SQL に対して `EXPLAIN ANALYZE` を実行し、`deduped` CTE の `NOT EXISTS` サブクエリが想定外の重複スキャンをしていないことを確認する
+- [ ] `domain/src/prediction/scoring.rs` の `jockey_recent_form_score` に対するユニットテストを追加する（境界条件: 空スライス=None / 全欠損=None / pos=pop=clamp中央値 / 最低人気激走=clamp上限 / 大人気大敗=clamp下限）
 - [ ] バックテスト sweep 後にメトリクスを記録し ADR 0035 として棄却または採用を記録する（次の ADR 番号は 0035）
+- [ ] （任意）`JockeyFormRun.finishing_position` / `popularity` の型として `Option<NonZeroU32>` の採用を検討する（0 着順・0 人気を型レベルで弾けるが、DB の `BIGINT` からの変換コストを考慮する）
 - [ ] バックテスト評価期間: 既存 sweep との比較可能性のため `2026-03-28〜2026-05-31` を基準期間とする。ただし実施時点でより多くの開催が蓄積されている場合は最新 as-of まで延ばして標本を増やしてよい（その場合は ADR に実際の評価期間を明記すること）
 
 ---
