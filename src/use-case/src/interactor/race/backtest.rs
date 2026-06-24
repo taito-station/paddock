@@ -246,8 +246,12 @@ impl<R: StatsRepository + OddsRepository, P: PdfParser, F: PdfFetcher> Interacto
                         .get(&r.horse_name)
                         .map(Vec::as_slice)
                         .unwrap_or(&[]);
-                    let recent_form =
-                        recent_form_from_runs(recent_runs, race.date, &standard_times, config.trend_n);
+                    let recent_form = recent_form_from_runs(
+                        recent_runs,
+                        race.date,
+                        &standard_times,
+                        config.trend_n,
+                    );
                     let factors = build_factors(
                         &entry,
                         &course,
