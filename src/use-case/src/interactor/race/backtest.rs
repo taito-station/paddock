@@ -1,5 +1,8 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
+/// 近走取得の制約件数。バックテストでは直近 1 走のみ使う（predict と同じ前走フォーム算出）。
+const RECENT_RUNS_LIMIT: u32 = 1;
+
 use chrono::NaiveDate;
 use paddock_domain::{
     BacktestReport, BettingConfig, EstimationConfig, ExoticBet, HorseEntry, HorseFactors,
@@ -67,8 +70,8 @@ impl<R: StatsRepository + OddsRepository, P: PdfParser, F: PdfFetcher> Interacto
             by_date.entry(race.date).or_default().push(i);
         }
 
-        for (date, race_indices) in &by_date {
-            let as_of = Some(*date);
+        for (&date, race_indices) in &by_date {
+            let as_of = Some(date);
 
             // 日付内の全レースの全出走馬を名前収集用にフラット化する（出走取消・競走除外は除く）。
             // バッチ関数に渡す名前リストの構築にのみ使用し、個別レース処理では再度 starters を絞る。
@@ -82,6 +85,8 @@ impl<R: StatsRepository + OddsRepository, P: PdfParser, F: PdfFetcher> Interacto
                 .collect();
 
             // その日の全レースに発走馬がいなければバッチ取得も不要なのでスキップ。
+            // course_cache は後続のレースループ内（212行目付近）で宣言するため、
+            // ここで continue しても course_cache は構築されず自動的にスコープ外になる。
             if day_starters.is_empty() {
                 continue;
             }
@@ -89,29 +94,31 @@ impl<R: StatsRepository + OddsRepository, P: PdfParser, F: PdfFetcher> Interacto
             // 同一日に同じ馬名・騎手名・調教師名が複数レースに登場しうるため呼び出し元で dedup する
             // （バッチ関数の dedup だけに依存すると実装詳細への結合が生じる）。
             // HorseName/JockeyName/TrainerName は Ord 非実装のため BTreeSet/sort は使えない。
-            // seen+filter パターンで挿入順を保持しつつ決定的に dedup する。
+            // seen: HashSet<&_> で参照ベースに dedup し、フィルタ後にクローン（clone 1 回）。
             let horse_names: Vec<_> = {
-                let mut seen = HashSet::new();
+                let mut seen: HashSet<&_> = HashSet::new();
                 day_starters
                     .iter()
+                    .filter(|r| seen.insert(&r.horse_name))
                     .map(|r| r.horse_name.clone())
-                    .filter(|n| seen.insert(n.clone()))
                     .collect()
             };
             let jockey_names: Vec<_> = {
-                let mut seen = HashSet::new();
+                let mut seen: HashSet<&_> = HashSet::new();
                 day_starters
                     .iter()
-                    .filter_map(|r| r.jockey.clone())
-                    .filter(|n| seen.insert(n.clone()))
+                    .filter_map(|r| r.jockey.as_ref())
+                    .filter(|n| seen.insert(*n))
+                    .cloned()
                     .collect()
             };
             let trainer_names: Vec<_> = {
-                let mut seen = HashSet::new();
+                let mut seen: HashSet<&_> = HashSet::new();
                 day_starters
                     .iter()
-                    .filter_map(|r| r.trainer.clone())
-                    .filter(|n| seen.insert(n.clone()))
+                    .filter_map(|r| r.trainer.as_ref())
+                    .filter(|n| seen.insert(*n))
+                    .cloned()
                     .collect()
             };
 
@@ -138,15 +145,15 @@ impl<R: StatsRepository + OddsRepository, P: PdfParser, F: PdfFetcher> Interacto
                 .await?;
             let recent_runs_map = self
                 .repository
-                .recent_runs_batch(&horse_names, *date, 1)
+                .recent_runs_batch(&horse_names, date, RECENT_RUNS_LIMIT)
                 .await?;
 
             // 標準タイム表（日付キャッシュ）。
-            let standard_times = match standard_times_cache.get(date) {
+            let standard_times = match standard_times_cache.get(&date) {
                 Some(st) => st.clone(),
                 None => {
-                    let st = self.repository.standard_times(*date).await?;
-                    standard_times_cache.insert(*date, st.clone());
+                    let st = self.repository.standard_times(date).await?;
+                    standard_times_cache.insert(date, st.clone());
                     st
                 }
             };

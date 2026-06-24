@@ -2,6 +2,8 @@ use strum_macros::Display;
 
 use crate::error::Error;
 
+// Hash は backtest の course_stats キャッシュキー (Venue, u32, Surface) に必要（#223）。
+// Surface も元から Hash を derive 済み。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Display)]
 pub enum Venue {
     #[strum(to_string = "札幌")]
