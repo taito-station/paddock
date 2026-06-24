@@ -86,6 +86,11 @@ pub fn jockey_recent_form_score(runs: &[JockeyFormRun]) -> Option<f64> {
 - 馬体重変化・前走間隔・着差・タイムは騎手属性でなく馬・コース属性のため N 走平均に混ぜない
 - シンプルなスカラーで jockey_surface との重複寄与を最小化する
 
+**POP_GAP_K スケールと飽和挙動:**
+- 人気乖離が大きい（例: 1 番人気が 7 着: gap = -6 → signal = 0.02 → clamp 0.02）と clamp が効くが、信頼性は低い極端値なので飽和による情報量損失は許容する
+- 最低人気の激走（18 番人気 1 着: gap = 17 → signal = 1.86 → clamp 1.0）も同様に上限に張り付く。これは「異常値は最大/最小スコアで表現」という意図的な設計
+- `POP_GAP_K = 0.08` は馬版と同値で初期化する。騎手の人気乖離レンジは馬と同スケール（同じレースの同じ人気・着順体系）のため流用を正当とする。感度が合わない場合はバックテスト sweep で `POP_GAP_K` を独立調整することも検討できる（現状の sweep 対象外）
+
 **既知の制約（馬の地力バイアス）:** このシグナルは「騎手が乗った馬の人気 vs 着順」を見るため、弱馬ばかり乗る騎手の評価が低く出がちになる。
 逆に強馬に乗る有名騎手は市場が既に `jockey_surface` に織り込んでいるため、このシグナルは「市場の過小評価」（乗り替わり直後の勢い等）を狙う補助的な位置づけ。
 バックテストで有効性が確認できれば採用、なければ weight=0.0 で無効化する。
@@ -108,48 +113,39 @@ pub(crate) const JOCKEY_RECENT_FORM_WEIGHT: f64 = 0.25;
 `JockeyFormRun` は **domain 側（§1.1）のみに定義する**。use-case 側はクレートの re-export (`pub use paddock_domain::prediction::JockeyFormRun`) を経由して使う。
 既存の `RecentRun`（domain 型を use-case がそのまま参照）と同パターン。use-case 側に同名の struct を再定義しない。
 
+`find_recent_runs` + `recent_runs_batch` の 2 ステップ構造と同パターン: **必須（required）** `find_jockey_recent_runs` と、それをループする **既定実装（provided）** `jockey_recent_runs_batch` を 1 つの trait に追加する。
+
 ```rust
-// use-case/src/repository.rs （型定義の追加は不要。domain 型を参照する）
-use paddock_domain::JockeyFormRun; // re-export または直接参照
+// use-case/src/repository.rs に追加（型定義不要。domain 型を参照）
+use paddock_domain::JockeyFormRun;
 
 trait StatsRepository {
-    // 新メソッド（バッチ系は find_ 接頭辞なしで既存の horse_stats_batch 等に準拠）
+    // ─── 既存メソッド省略 ───
+
+    // ▶ required: rdb-gateway が SQL で実装する
+    fn find_jockey_recent_runs(
+        &self,
+        jockey: &JockeyName,
+        before: NaiveDate,
+        limit: u32,
+    ) -> impl Future<Output = Result<Vec<JockeyFormRun>>> + Send;
+
+    // ▶ provided: デフォルト実装（per-jockey ループ）。recent_runs_batch L561–L574 と同パターン。
+    // rdb-gateway は UNION ウィンドウ SQL で override して一括取得に置き換える。
     fn jockey_recent_runs_batch(
         &self,
         jockeys: &[JockeyName],
         before: NaiveDate,
         limit: u32,
-    ) -> impl Future<Output = Result<HashMap<JockeyName, Vec<JockeyFormRun>>>> + Send;
-}
-```
-
-トレイトに **必須（required）** `find_jockey_recent_runs` と、それをループする **既定実装（provided）** `jockey_recent_runs_batch` を定義する（`find_recent_runs` + `recent_runs_batch` の 2 ステップ構造と同パターン）。
-
-```rust
-// use-case/src/repository.rs に追加
-// ▶ required: rdb-gateway が SQL で実装する
-fn find_jockey_recent_runs(
-    &self,
-    jockey: &JockeyName,
-    before: NaiveDate,
-    limit: u32,
-) -> impl Future<Output = Result<Vec<JockeyFormRun>>> + Send;
-
-// ▶ provided: デフォルト実装（per-jockey ループ）。recent_runs_batch L561–L574 と同パターン。
-// rdb-gateway は UNION ウィンドウ SQL で override して一括取得に置き換える。
-fn jockey_recent_runs_batch(
-    &self,
-    jockeys: &[JockeyName],
-    before: NaiveDate,
-    limit: u32,
-) -> impl Future<Output = Result<HashMap<JockeyName, Vec<JockeyFormRun>>>> + Send {
-    async move {
-        let mut out = HashMap::new();
-        for jockey_name in jockeys {
-            if out.contains_key(jockey_name) { continue; }
-            out.insert(jockey_name.clone(), self.find_jockey_recent_runs(jockey_name, before, limit).await?);
+    ) -> impl Future<Output = Result<HashMap<JockeyName, Vec<JockeyFormRun>>>> + Send {
+        async move {
+            let mut out = HashMap::new();
+            for jockey_name in jockeys {
+                if out.contains_key(jockey_name) { continue; }
+                out.insert(jockey_name.clone(), self.find_jockey_recent_runs(jockey_name, before, limit).await?);
+            }
+            Ok(out)
         }
-        Ok(out)
     }
 }
 ```
@@ -186,7 +182,10 @@ SELECT u.finishing_position, u.popularity
 FROM unioned u
 WHERE NOT EXISTS (
     SELECT 1 FROM unioned u2
-    WHERE u2.date = u.date AND u2.venue = u.venue AND u2.race_num = u.race_num
+    -- 単体版では $1 で騎手が 1 名固定のため u2.jockey = u.jockey は常に真だが、
+    -- バッチ版 NOT EXISTS と対称に書いておく
+    WHERE u2.jockey = u.jockey
+      AND u2.date = u.date AND u2.venue = u.venue AND u2.race_num = u.race_num
       AND (u2.src_rank < u.src_rank
            -- src_rank 同値 tie-break: race_id 降順（同一ソース内の決定論的序列。方向は任意だが一貫性があれば十分）
            OR (u2.src_rank = u.src_rank AND u2.race_id > u.race_id))
@@ -247,6 +246,8 @@ ORDER BY jockey, date DESC, race_id DESC
 4 タプル構造を 5 タプルに変更する。
 
 ```rust
+use super::JOCKEY_RECENT_FORM_LIMIT; // mod.rs に定義された定数を参照
+
 // try_join! の 5 番目として追加（4 タプル destructure → 5 タプルに変更が必要）
 let (horse_map, jockey_map, trainer_map, runs_map, jockey_form_map) = tokio::try_join!(
     self.repository.horse_stats_batch(&horse_names, None),
@@ -256,10 +257,10 @@ let (horse_map, jockey_map, trainer_map, runs_map, jockey_form_map) = tokio::try
     self.repository.jockey_recent_runs_batch(&jockey_names, card.date, JOCKEY_RECENT_FORM_LIMIT),
 )?;
 
-// build_factors に渡す
+// build_factors に渡す（entry.jockey は Option<JockeyName>。既存の jockey_map.get パターンと同一）
 let jockey_recent_form = entry.jockey.as_ref()
     .and_then(|j| jockey_form_map.get(j))
-    .and_then(|runs| paddock_domain::prediction::jockey_recent_form_score(runs));
+    .and_then(|runs| paddock_domain::jockey_recent_form_score(runs));
 ```
 
 **実装時の注意:** `try_join!` の 4→5 引数変更により以下のファイルがコンパイルエラーになる:
@@ -325,9 +326,11 @@ pub(crate) const JOCKEY_RECENT_FORM_LIMIT: u32 = 10; // backtest sweep で 5 / 1
 ## 実装 PR でのタスク
 
 - [ ] `domain/src/prediction/mod.rs` に `pub use model::JockeyFormRun;` を追加し、`domain/src/lib.rs` の `prediction` re-export で `JockeyFormRun` が `paddock_domain::JockeyFormRun` として参照できることを確認する
+- [ ] `use-case/src/interactor/race/mod.rs` に `JOCKEY_RECENT_FORM_LIMIT` 定数を追加し、`predict.rs` と `backtest.rs` から `use super::JOCKEY_RECENT_FORM_LIMIT;` で参照できること（コンパイルで確認）
 - [ ] `docs/specifications/probability-estimation.md` の `raw_score` 式一覧に `jockey_recent_form` 項を追記する
 - [ ] `use-case` mock（`test_predict_race.rs` / `test_backtest.rs`）に `find_jockey_recent_runs` と `jockey_recent_runs_batch` の実装を追加する
 - [ ] テストが 5 タプル destructure でコンパイルが通ることを確認する
+- [ ] rdb-gateway の `jockey_recent_runs_batch` バッチ SQL に対して `EXPLAIN ANALYZE` を実行し、`deduped` CTE の `NOT EXISTS` サブクエリが想定外の重複スキャンをしていないことを確認する
 - [ ] バックテスト sweep 後にメトリクスを記録し ADR 0035 として棄却または採用を記録する（次の ADR 番号は 0035）
 - [ ] バックテスト評価期間: 既存 sweep との比較可能性のため `2026-03-28〜2026-05-31` を基準期間とする。ただし実施時点でより多くの開催が蓄積されている場合は最新 as-of まで延ばして標本を増やしてよい（その場合は ADR に実際の評価期間を明記すること）
 
@@ -338,5 +341,6 @@ pub(crate) const JOCKEY_RECENT_FORM_LIMIT: u32 = 10; // backtest sweep で 5 / 1
 - Issue #31（馬版前走フォーム）
 - ADR 0009（FORM_WEIGHT 採用・recent_form 有効化）
 - ADR 0016（recency 時間減衰棄却）
-- ADR 0017（jockey_surface 専用縮約棄却）
+- ADR 0017（jockey_surface 専用縮約棄却。`jockey_surface` 導入の経緯・限界は ADR 0017 参照）
 - ADR 0034（alpha 再調整・recency 棄却）
+- ADR 0035（未作成・backtest sweep 後に騎手直近フォームの棄却または採用を記録予定）
