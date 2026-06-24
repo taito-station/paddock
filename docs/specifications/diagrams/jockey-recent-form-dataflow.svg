@@ -1,0 +1,86 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="820" height="720" viewBox="0 0 820 720" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,3 L0,6 z" fill="#333333"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="820" height="720" fill="#ffffff"/>
+
+  <!-- 縦ライン矢印 -->
+  <g stroke="#333333" stroke-width="1.5" fill="none">
+    <line x1="310" y1="84" x2="310" y2="126" marker-end="url(#arrow)"/>
+    <line x1="310" y1="186" x2="310" y2="238" marker-end="url(#arrow)"/>
+    <line x1="310" y1="308" x2="310" y2="354" marker-end="url(#arrow)"/>
+    <line x1="310" y1="404" x2="310" y2="450" marker-end="url(#arrow)"/>
+    <line x1="310" y1="510" x2="310" y2="556" marker-end="url(#arrow)"/>
+    <line x1="310" y1="616" x2="310" y2="658" marker-end="url(#arrow)"/>
+  </g>
+
+  <!-- 1: DBテーブル（青：入力データ） -->
+  <rect x="100" y="30" width="420" height="54" rx="8" fill="#dae8fc" stroke="#6c8ebf"/>
+  <text x="310" y="52" text-anchor="middle" font-size="13" font-weight="bold" fill="#1a3a6c">DB: results (PDF確定) / horse_past_runs (netkeiba)</text>
+  <text x="310" y="72" text-anchor="middle" font-size="11" fill="#1a3a6c">jockey · finishing_position · popularity · date · venue · race_num</text>
+
+  <!-- 2: クエリ関数（紫：処理） -->
+  <rect x="100" y="126" width="420" height="60" rx="8" fill="#e1d5e7" stroke="#9673a6"/>
+  <text x="310" y="148" text-anchor="middle" font-size="12" font-weight="bold" fill="#3d1a5c">find_jockey_recent_runs_batch(jockeys, before, N)</text>
+  <text x="310" y="165" text-anchor="middle" font-size="11" fill="#3d1a5c">UNION dedup（PDF優先）→ date DESC LIMIT N</text>
+  <text x="310" y="181" text-anchor="middle" font-size="11" fill="#3d1a5c">as-of: races.date &lt; before （リークなし）</text>
+
+  <!-- 3: JockeyFormRun Vec（青：中間データ） -->
+  <rect x="100" y="238" width="420" height="70" rx="8" fill="#dae8fc" stroke="#6c8ebf"/>
+  <text x="310" y="260" text-anchor="middle" font-size="12" font-weight="bold" fill="#1a3a6c">Vec&lt;JockeyFormRun&gt;  (最大 N 件, date 降順)</text>
+  <text x="310" y="278" text-anchor="middle" font-size="11" fill="#1a3a6c">JockeyFormRun {</text>
+  <text x="310" y="295" text-anchor="middle" font-size="11" fill="#1a3a6c">  finishing_position: Option&lt;u32&gt;,  popularity: Option&lt;u32&gt;</text>
+  <text x="310" y="311" text-anchor="middle" font-size="11" fill="#1a3a6c">}</text>
+
+  <!-- 4: スコア算出（紫：処理） -->
+  <rect x="100" y="354" width="420" height="50" rx="8" fill="#e1d5e7" stroke="#9673a6"/>
+  <text x="310" y="376" text-anchor="middle" font-size="12" font-weight="bold" fill="#3d1a5c">jockey_recent_form_score(runs) → Option&lt;f64&gt;</text>
+  <text x="310" y="394" text-anchor="middle" font-size="11" fill="#3d1a5c">各走: signal = clamp(0.5 + (pop − pos) × POP_GAP_K, 0, 1)</text>
+
+  <!-- 5: Option<f64>（緑：中間出力） -->
+  <rect x="100" y="450" width="420" height="60" rx="8" fill="#d5e8d4" stroke="#82b366"/>
+  <text x="310" y="472" text-anchor="middle" font-size="12" font-weight="bold" fill="#1a4a1a">jockey_recent_form: Option&lt;f64&gt;  [0.0, 1.0]</text>
+  <text x="310" y="490" text-anchor="middle" font-size="11" fill="#1a4a1a">0.5 = 中立（期待通り）</text>
+  <text x="310" y="506" text-anchor="middle" font-size="11" fill="#1a4a1a">None = 騎手未登録 / 近走なし → 母数から除外</text>
+
+  <!-- 6: build_factors（紫：処理） -->
+  <rect x="100" y="556" width="420" height="60" rx="8" fill="#e1d5e7" stroke="#9673a6"/>
+  <text x="310" y="578" text-anchor="middle" font-size="12" font-weight="bold" fill="#3d1a5c">build_factors(entry, …, jockey_recent_form)</text>
+  <text x="310" y="596" text-anchor="middle" font-size="11" fill="#3d1a5c">HorseFactors.jockey_recent_form に格納</text>
+  <text x="310" y="612" text-anchor="middle" font-size="11" fill="#3d1a5c">（既存 jockey_surface とは独立した項）</text>
+
+  <!-- 7: raw_score（緑：出力） -->
+  <rect x="100" y="658" width="420" height="50" rx="8" fill="#d5e8d4" stroke="#82b366"/>
+  <text x="310" y="680" text-anchor="middle" font-size="12" font-weight="bold" fill="#1a4a1a">raw_score() に JOCKEY_RECENT_FORM_WEIGHT で加算</text>
+  <text x="310" y="697" text-anchor="middle" font-size="11" fill="#1a4a1a">None の馬は項と重みを母数から除外（ADR 0007 準拠）</text>
+
+  <!-- 右側注釈ボックス：バックテスト計画 -->
+  <rect x="560" y="238" width="240" height="230" rx="8" fill="#fff2cc" stroke="#d6b656"/>
+  <text x="680" y="260" text-anchor="middle" font-size="12" font-weight="bold" fill="#7a5a00">バックテスト計画</text>
+  <text x="570" y="282" font-size="11" fill="#7a5a00">スイープ対象:</text>
+  <text x="570" y="300" font-size="11" fill="#7a5a00">  N（走数）: 5 / 10 / 20</text>
+  <text x="570" y="318" font-size="11" fill="#7a5a00">  weight: 0.0 / 0.25 / 0.5 / 1.0</text>
+  <text x="570" y="342" font-size="11" fill="#7a5a00">評価指標:</text>
+  <text x="570" y="360" font-size="11" fill="#7a5a00">  単勝的中率 / 複勝的中率</text>
+  <text x="570" y="378" font-size="11" fill="#7a5a00">  単勝回収率 / 複勝回収率</text>
+  <text x="570" y="396" font-size="11" fill="#7a5a00">  Brier score（単勝 / 複勝）</text>
+  <text x="570" y="414" font-size="11" fill="#7a5a00">  LogLoss（単勝）</text>
+  <text x="570" y="438" font-size="11" fill="#7a5a00">ベースライン: weight=0.0 (現行)</text>
+  <text x="570" y="456" font-size="11" fill="#7a5a00">採用条件: 複数指標でベースライン超過</text>
+
+  <!-- 右側注釈ボックスへの横矢印 -->
+  <line x1="520" y1="308" x2="558" y2="308" stroke="#333333" stroke-width="1.5" marker-end="url(#arrow)" stroke-dasharray="4,3"/>
+  <text x="522" y="299" font-size="10" fill="#666666">N / weight</text>
+
+  <!-- 凡例 -->
+  <rect x="100" y="700" width="14" height="14" fill="#dae8fc" stroke="#6c8ebf"/>
+  <text x="120" y="712" font-size="11" fill="#555555">入力データ</text>
+  <rect x="200" y="700" width="14" height="14" fill="#e1d5e7" stroke="#9673a6"/>
+  <text x="220" y="712" font-size="11" fill="#555555">処理</text>
+  <rect x="280" y="700" width="14" height="14" fill="#d5e8d4" stroke="#82b366"/>
+  <text x="300" y="712" font-size="11" fill="#555555">出力 / 結果</text>
+  <rect x="370" y="700" width="14" height="14" fill="#fff2cc" stroke="#d6b656"/>
+  <text x="390" y="712" font-size="11" fill="#555555">評価計画</text>
+</svg>
