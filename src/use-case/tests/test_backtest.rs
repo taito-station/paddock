@@ -4,6 +4,9 @@
 //! 期待どおり集計されることを確認する（指標計算自体は domain 側で単体テスト済み）。
 
 use std::collections::HashMap;
+use std::future::Future;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use chrono::NaiveDate;
 use paddock_domain::horse_result::{FinishingPosition, GateNum, HorseName, HorseNum, ResultStatus};
@@ -25,6 +28,21 @@ fn make_group(label: &str, starts: u32, wins: u32) -> GroupStat {
         places: wins,
         shows: wins,
     }
+}
+
+/// horse_stats / horse_stats_batch の両経路から呼ぶ共通ロジック。
+/// ウマA=高スタッツ / ウマS=最高スタッツ / ウマB=道悪巧者 / 他=低スタッツ。
+fn make_horse_stats_row(name: &HorseName) -> HorseStatsRow {
+    let win_rate = match name.value() {
+        "ウマA" => 0.3,
+        "ウマS" => 0.9,
+        _ => 0.05,
+    };
+    let mut row = horse_stats_with_surface_win(win_rate);
+    if name.value() == "ウマB" {
+        row.by_track_condition = vec![make_group("不良", 10, 10)];
+    }
+    row
 }
 
 fn horse_stats_with_surface_win(win_rate: f64) -> HorseStatsRow {
@@ -124,6 +142,8 @@ struct MockRepo {
     races: Vec<Race>,
     /// race_id 値 → 保存済みオッズ。backtest の「当時オッズ参照」を模す。
     race_odds: HashMap<String, RaceOdds>,
+    /// horse_stats_batch の呼び出し回数カウンタ。日付単位バッチ化の効果検証に使う（#223）。
+    horse_stats_batch_calls: Arc<AtomicUsize>,
 }
 
 impl StatsRepository for MockRepo {
@@ -153,20 +173,7 @@ impl StatsRepository for MockRepo {
         name: &HorseName,
         _as_of: Option<NaiveDate>,
     ) -> Result<HorseStatsRow> {
-        // ウマA を高スタッツでトップ選好馬に。ウマS は最高スタッツだが（テストで）出走取消なので
-        // 除外され、確率推定の母集合に入らないことを検証する。
-        let win_rate = match name.value() {
-            "ウマA" => 0.3,
-            "ウマS" => 0.9,
-            _ => 0.05,
-        };
-        let mut row = horse_stats_with_surface_win(win_rate);
-        // ウマB のみ不良馬場の好成績を持たせる（#73 の配線テスト用）。レースの
-        // track_condition が None の既存テストでは馬場項が使われないため影響しない。
-        if name.value() == "ウマB" {
-            row.by_track_condition = vec![make_group("不良", 10, 10)];
-        }
-        Ok(row)
+        Ok(make_horse_stats_row(name))
     }
 
     async fn horse_recency(
@@ -208,6 +215,26 @@ impl StatsRepository for MockRepo {
         _as_of: Option<NaiveDate>,
     ) -> Result<CourseStatsRow> {
         Ok(course_stats())
+    }
+
+    fn horse_stats_batch(
+        &self,
+        names: &[HorseName],
+        _as_of: Option<NaiveDate>,
+    ) -> impl Future<Output = Result<HashMap<HorseName, HorseStatsRow>>> + Send {
+        // 呼び出し回数をカウント（日付単位バッチ化の効果検証用、#223）。
+        self.horse_stats_batch_calls.fetch_add(1, Ordering::Relaxed);
+        // self は async move に入れられないため、names を owned に変換して async move で処理。
+        // ロジックは make_horse_stats_row に集約済み（horse_stats との二重管理を解消）。
+        let names_owned = names.to_vec();
+        async move {
+            let mut out = HashMap::new();
+            for name in &names_owned {
+                out.entry(name.clone())
+                    .or_insert_with(|| make_horse_stats_row(name));
+            }
+            Ok(out)
+        }
     }
 
     async fn jockey_stats(
@@ -276,7 +303,31 @@ fn interactor_with_odds(
     races: Vec<Race>,
     race_odds: HashMap<String, RaceOdds>,
 ) -> Interactor<MockRepo, NullParser, NullFetcher> {
-    Interactor::new(MockRepo { races, race_odds }, NullParser, NullFetcher)
+    Interactor::new(
+        MockRepo {
+            races,
+            race_odds,
+            horse_stats_batch_calls: Arc::new(AtomicUsize::new(0)),
+        },
+        NullParser,
+        NullFetcher,
+    )
+}
+
+/// バッチ呼び出し回数を外部から観察できる interactor。日付単位バッチ化の効果検証に使う（#223）。
+fn interactor_with_batch_counter(
+    races: Vec<Race>,
+    counter: Arc<AtomicUsize>,
+) -> Interactor<MockRepo, NullParser, NullFetcher> {
+    Interactor::new(
+        MockRepo {
+            races,
+            race_odds: HashMap::new(),
+            horse_stats_batch_calls: counter,
+        },
+        NullParser,
+        NullFetcher,
+    )
 }
 
 /// 1 頭分の単勝オッズだけを持つ RaceOdds を作る（当時オッズ参照テスト用）。
@@ -660,6 +711,103 @@ async fn backtest_blend_falls_back_to_results_odds_when_no_snapshot() {
         (blended.win_hit_rate - 1.0).abs() < 1e-9,
         "fallback blended win_hit={}",
         blended.win_hit_rate
+    );
+}
+
+#[tokio::test]
+async fn backtest_same_day_multi_race_evaluates_independently() {
+    // 同一日（2026-1-10）に 2 つのレースがある場合、日付単位バッチで統計を共有しながら
+    // 各レースの評価が独立して正しく行われることを検証する（#223 日付バッチ化の回帰テスト）。
+    //
+    // Race A (1R): ウマA(高スタッツ, 1着) / ウマB(低スタッツ, 2着) → 本命ウマA, 単勝的中
+    // Race B (5R): ウマC(低スタッツ, 1着) / ウマD(低スタッツ, 2着) → 本命は馬番小さい方=1着的中
+    // ※ ウマC/ウマD は mock で win_rate=0.05 (同値)。馬番昇順タイブレーク → ウマC(horse_num=1)が本命。
+    // 2レース合算: 2/2 的中 → win_hit_rate = 1.0
+    //
+    // 注意: horse_stats_batch 等のバッチ呼び出し回数はこのテストでは検証しない。
+    // バッチ呼び出し回数の検証は backtest_date_batch_calls_horse_stats_batch_once_per_day を参照。
+    // このテストは「バッチ化後も各レースが独立して正しく評価される」正当性の回帰テスト。
+    let race_a = finished_race();
+    let race_b = Race {
+        race_id: RaceId::try_from("2026-1-nakayama-1-5R").unwrap(),
+        date: NaiveDate::from_ymd_opt(2026, 1, 10).unwrap(),
+        venue: Venue::Nakayama,
+        round: 1,
+        day: 1,
+        race_num: 5,
+        surface: Surface::Turf,
+        distance: 2000,
+        track_condition: None,
+        weather: None,
+        results: vec![
+            result(1, 1, "ウマC", 1, Some(5.0)), // 低スタッツだが馬番1→本命、1着
+            result(2, 5, "ウマD", 2, None),      // 低スタッツ、2着
+        ],
+    };
+
+    let app = interactor(vec![race_a, race_b]);
+    let report = app
+        .backtest(
+            d(2026, 1, 1),
+            d(2026, 1, 31),
+            None,
+            EstimationConfig::default(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        report.races_evaluated, 2,
+        "同日2レースがそれぞれ評価されること"
+    );
+    // win_hit_rate=1.0 は 2/2 的中を意味する。
+    // Race A: 本命ウマA(horse_num=1, win_rate=0.3) が 1 着 → 的中。
+    // Race B: 本命ウマC(horse_num=1, win_rate=0.05) が 1 着 → 的中（ウマD と同率スタッツ、馬番小優先）。
+    // 両レースが同日同コース設定（中山芝2000）なので course_cache ヒットも通る。
+    assert!(
+        (report.win_hit_rate - 1.0).abs() < 1e-9,
+        "各レースの評価が独立しており、両レースで本命が的中すること (win_hit_rate={})",
+        report.win_hit_rate
+    );
+}
+
+#[tokio::test]
+async fn backtest_date_batch_calls_horse_stats_batch_once_per_day() {
+    // 日付単位バッチ化（#223）の効果: 同一日の複数レースでも horse_stats_batch は 1 日 1 回だけ
+    // 呼ばれることを検証する。回帰すると「1 レース 1 回」に戻り assert が 2 になる。
+    let race_a = finished_race(); // 2026-01-10, 1R
+    let race_b = Race {
+        race_id: RaceId::try_from("2026-1-nakayama-1-5R").unwrap(),
+        date: NaiveDate::from_ymd_opt(2026, 1, 10).unwrap(), // 同日
+        venue: Venue::Nakayama,
+        round: 1,
+        day: 1,
+        race_num: 5,
+        surface: Surface::Turf,
+        distance: 2000,
+        track_condition: None,
+        weather: None,
+        results: vec![
+            result(1, 1, "ウマC", 1, Some(5.0)), // (horse_num, gate, name, finish, odds)
+            result(2, 5, "ウマD", 2, None),
+        ],
+    };
+
+    let counter = Arc::new(AtomicUsize::new(0));
+    let app = interactor_with_batch_counter(vec![race_a, race_b], counter.clone());
+    app.backtest(
+        d(2026, 1, 1),
+        d(2026, 1, 31),
+        None,
+        EstimationConfig::default(),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        counter.load(Ordering::Relaxed),
+        1,
+        "同日 2 レースでも horse_stats_batch は 1 回だけ呼ばれること（日付単位バッチ）"
     );
 }
 
