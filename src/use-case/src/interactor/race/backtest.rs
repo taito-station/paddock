@@ -16,7 +16,6 @@ use crate::pdf_fetcher::PdfFetcher;
 use crate::pdf_parser::PdfParser;
 use crate::repository::{CourseStatsRow, OddsRepository, StatsRepository};
 
-
 /// 馬番から引く発走馬の実績: `(着順, 単勝オッズ, 人気)`。いずれも欠落しうるので `Option`。
 type StarterFacts = (Option<u32>, Option<f64>, Option<u32>);
 
