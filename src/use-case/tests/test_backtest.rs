@@ -223,6 +223,7 @@ impl StatsRepository for MockRepo {
         // 呼び出し回数をカウント（日付単位バッチ化の効果検証用、#223）。
         self.horse_stats_batch_calls.fetch_add(1, Ordering::Relaxed);
         // self は async move に入れられないため、horse_stats と同じロジックをインライン化。
+        // horse_stats の win_rate 判定や by_track_condition 設定を変更した場合はここも合わせて更新すること。
         let names_owned = names.to_vec();
         async move {
             let mut out = HashMap::new();
@@ -732,9 +733,9 @@ async fn backtest_same_day_multi_race_evaluates_independently() {
     // ※ ウマC/ウマD は mock で win_rate=0.05 (同値)。馬番昇順タイブレーク → ウマC(horse_num=1)が本命。
     // 2レース合算: 2/2 的中 → win_hit_rate = 1.0
     //
-    // 注意: horse_stats_batch 等のバッチ呼び出し回数は MockRepo 構造では検証しない。
+    // 注意: horse_stats_batch 等のバッチ呼び出し回数はこのテストでは検証しない。
+    // バッチ呼び出し回数の検証は backtest_date_batch_calls_horse_stats_batch_once_per_day を参照。
     // このテストは「バッチ化後も各レースが独立して正しく評価される」正当性の回帰テスト。
-    // バッチ化の効果（クエリ削減）は統合テスト or pg_stat_statements で別途確認すること。
     let race_a = finished_race();
     let race_b = Race {
         race_id: RaceId::try_from("2026-1-nakayama-1-5R").unwrap(),
@@ -796,7 +797,7 @@ async fn backtest_date_batch_calls_horse_stats_batch_once_per_day() {
         track_condition: None,
         weather: None,
         results: vec![
-            result(1, 1, "ウマC", 1, Some(5.0)),
+            result(1, 1, "ウマC", 1, Some(5.0)), // (horse_num, gate, name, finish, odds)
             result(2, 5, "ウマD", 2, None),
         ],
     };

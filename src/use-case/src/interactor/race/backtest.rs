@@ -1,8 +1,5 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-/// 近走取得の制約件数。バックテストでは直近 1 走のみ使う（predict と同じ前走フォーム算出）。
-const RECENT_RUNS_LIMIT: u32 = 1;
-
 use chrono::NaiveDate;
 use paddock_domain::{
     BacktestReport, BettingConfig, EstimationConfig, ExoticBet, HorseEntry, HorseFactors,
@@ -18,6 +15,9 @@ use crate::interactor::race::predict::{
 use crate::pdf_fetcher::PdfFetcher;
 use crate::pdf_parser::PdfParser;
 use crate::repository::{CourseStatsRow, OddsRepository, StatsRepository};
+
+/// 近走取得の制約件数。バックテストでは直近 1 走のみ使う（predict と同じ前走フォーム算出）。
+const RECENT_RUNS_LIMIT: u32 = 1;
 
 /// 馬番から引く発走馬の実績: `(着順, 単勝オッズ, 人気)`。いずれも欠落しうるので `Option`。
 type StarterFacts = (Option<u32>, Option<f64>, Option<u32>);
@@ -85,7 +85,7 @@ impl<R: StatsRepository + OddsRepository, P: PdfParser, F: PdfFetcher> Interacto
                 .collect();
 
             // その日の全レースに発走馬がいなければバッチ取得も不要なのでスキップ。
-            // course_cache は後続のレースループ内（212行目付近）で宣言するため、
+            // course_cache は後続のレースループ内で宣言するため、
             // ここで continue しても course_cache は構築されず自動的にスコープ外になる。
             if day_starters.is_empty() {
                 continue;
@@ -95,6 +95,10 @@ impl<R: StatsRepository + OddsRepository, P: PdfParser, F: PdfFetcher> Interacto
             // （バッチ関数の dedup だけに依存すると実装詳細への結合が生じる）。
             // HorseName/JockeyName/TrainerName は Ord 非実装のため BTreeSet/sort は使えない。
             // seen: HashSet<&_> で参照ベースに dedup し、フィルタ後にクローン（clone 1 回）。
+            // horse_name は必須フィールドなので filter で直接イテレート。
+            // jockey/trainer は Option フィールドのため filter_map で Some だけ取り出す。
+            // is_empty ガードで horse_names は必ず 1 件以上。jockey/trainer は 0 件になりうるが
+            // バッチ関数は空スライスを受け取って空 Map を返せばよいため問題ない。
             let horse_names: Vec<_> = {
                 let mut seen: HashSet<&_> = HashSet::new();
                 day_starters
