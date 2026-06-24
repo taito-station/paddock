@@ -51,7 +51,7 @@ impl EstimationConfig {
                 pseudo_count: RECOMMENDED_SHRINKAGE_M,
             }),
             recency: None,
-            trend_n: 1, // #220 backtest 後に更新予定
+            trend_n: 1, // #220 backtest にて N=2/3 は全指標悪化のため棄却（ADR-0035）
         }
     }
 }
