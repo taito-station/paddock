@@ -3,10 +3,11 @@
 
 use chrono::NaiveDate;
 use paddock_domain::{
-    FinishingPosition, GateNum, HorseName, HorseNum, HorseResult, JockeyFormRun, JockeyName, Race,
-    RaceId, ResultStatus, Surface, Venue,
+    FinishingPosition, GateNum, HorseId, HorseName, HorseNum, HorseResult, JockeyFormRun,
+    JockeyName, Race, RaceId, ResultStatus, Surface, Venue,
 };
-use paddock_use_case::repository::{RaceRepository, StatsRepository};
+use paddock_use_case::HorsePastRun;
+use paddock_use_case::repository::{HorseHistoryRepository, RaceRepository, StatsRepository};
 use rdb_gateway::PostgresRepository;
 
 fn ymd(y: i32, m: u32, d: u32) -> NaiveDate {
@@ -171,4 +172,133 @@ async fn jockey_recent_runs_batch_covers_all_jockeys(pool: sqlx::PgPool) {
         .get(&JockeyName::try_from("未出走 騎手").unwrap())
         .unwrap();
     assert!(no_runs.is_empty(), "近走なし騎手は空 Vec");
+}
+
+/// 同一実レース（東京 3 回 2 日 11R）が pdf(`results`) と netkeiba(`horse_past_runs`) の双方に
+/// 存在する場合に、`(date, venue, race_num)` 単位で pdf 優先 dedup されて 1 件になることを検証する
+/// （find_recent_runs.rs の `find_recent_runs_unions_and_dedups_preferring_pdf` の騎手版）。
+fn pdf_race_with_jockey(
+    race_id: &str,
+    date: NaiveDate,
+    race_num: u32,
+    jockey: &str,
+    finish: u32,
+) -> Race {
+    Race {
+        race_id: RaceId::try_from(race_id).unwrap(),
+        date,
+        venue: Venue::Tokyo,
+        round: 3,
+        day: 2,
+        race_num,
+        surface: Surface::Turf,
+        distance: 2000,
+        track_condition: None,
+        weather: None,
+        results: vec![HorseResult {
+            finishing_position: Some(FinishingPosition::try_from(finish).unwrap()),
+            status: ResultStatus::Finished,
+            gate_num: GateNum::try_from(1u32).unwrap(),
+            horse_num: HorseNum::try_from(1u32).unwrap(),
+            horse_name: HorseName::try_from("ウマZ").unwrap(),
+            horse_id: None,
+            jockey: Some(JockeyName::try_from(jockey).unwrap()),
+            trainer: None,
+            time_seconds: None,
+            margin: None,
+            odds: None,
+            horse_weight: None,
+            weight_change: None,
+            weight_carried: None,
+            popularity: Some(1),
+        }],
+    }
+}
+
+fn past_run_with_jockey(
+    nk_id: &str,
+    date: NaiveDate,
+    race_num: u32,
+    jockey: &str,
+    finish: u32,
+) -> HorsePastRun {
+    HorsePastRun {
+        netkeiba_race_id: nk_id.to_string(),
+        date,
+        venue: Venue::Tokyo,
+        round: 3,
+        day: 2,
+        race_num,
+        surface: Surface::Turf,
+        distance: 2000,
+        track_condition: None,
+        finishing_position: Some(FinishingPosition::try_from(finish).unwrap()),
+        status: ResultStatus::Finished,
+        gate_num: GateNum::try_from(1u32).unwrap(),
+        horse_num: HorseNum::try_from(1u32).unwrap(),
+        horse_name: HorseName::try_from("ウマZ").unwrap(),
+        jockey: Some(JockeyName::try_from(jockey).unwrap()),
+        time_seconds: None,
+        margin: None,
+        odds: None,
+        horse_weight: None,
+        weight_change: None,
+        weight_carried: None,
+        popularity: Some(5),
+    }
+}
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn find_jockey_recent_runs_unions_and_dedups_preferring_pdf(pool: sqlx::PgPool) {
+    let repo = PostgresRepository::new(pool);
+    let jockey_name = "山田 騎手";
+    // 11R は pdf(1着) と netkeiba(7着) の両方＝同一実レース。12R は netkeiba のみ（3着）。
+    repo.save_race(&pdf_race_with_jockey(
+        "2026-3-tokyo-2-11R",
+        ymd(2026, 4, 1),
+        11,
+        jockey_name,
+        1,
+    ))
+    .await
+    .unwrap();
+    let horse_id = HorseId::try_from("2019104567".to_string()).unwrap();
+    repo.upsert_horse_history(
+        &horse_id,
+        &[
+            past_run_with_jockey("202605030211", ymd(2026, 4, 1), 11, jockey_name, 7),
+            past_run_with_jockey("202605030212", ymd(2026, 3, 1), 12, jockey_name, 3),
+        ],
+    )
+    .await
+    .unwrap();
+
+    let jockey = JockeyName::try_from(jockey_name).unwrap();
+    let runs = repo
+        .find_jockey_recent_runs(&jockey, ymd(2026, 5, 1), 5)
+        .await
+        .unwrap();
+
+    assert_eq!(runs.len(), 2, "11R は 1 件に dedup、12R は単独 → 計 2");
+    // date 降順: 先頭は 4/1 の 11R。pdf 優先なので着順は 1（netkeiba の 7 ではない）。
+    assert_eq!(
+        runs[0].finishing_position,
+        Some(1),
+        "同一実レースは pdf を優先（netkeiba の 7 着で上書きされない）"
+    );
+    // 2 件目は netkeiba のみの 3/1 12R（3着）。
+    assert_eq!(runs[1].finishing_position, Some(3));
+
+    // batch 版でも同じ dedup 挙動になること。
+    let map = repo
+        .jockey_recent_runs_batch(std::slice::from_ref(&jockey), ymd(2026, 5, 1), 5)
+        .await
+        .unwrap();
+    let batch_runs = map.get(&jockey).unwrap();
+    assert_eq!(batch_runs.len(), 2, "batch も dedup して計 2");
+    assert_eq!(
+        batch_runs[0].finishing_position,
+        Some(1),
+        "batch も pdf 優先"
+    );
 }
