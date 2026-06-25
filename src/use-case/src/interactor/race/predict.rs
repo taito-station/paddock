@@ -166,6 +166,8 @@ pub(crate) const TREND_WEIGHTS: [f64; 3] = [1.0, 0.5, 0.25];
 /// `before` は予測対象レースの日付（cutoff）。`recent_form_score` の間隔シグナルは
 /// cutoff と各走の日付の差で算出するため N 走すべてに同じ `before` を渡す
 /// （走間の間隔ではなく cutoff 基準）。リーク防止（before 以降の走を除外）も兼ねる。
+/// `runs` は呼び出し元が `date < before` でフィルタ済みであることを前提とする
+/// （この関数内では再チェックしない）。
 /// `trend_n` は 1 以上でなければならない（CLI バリデーション済み）。
 pub(crate) fn recent_form_from_runs(
     runs: &[RecentRun],
@@ -387,7 +389,10 @@ mod tests {
         }
     }
 
-    /// score が取れない走（中止・同日 = 間隔 0 日＋ weight_change=None）。
+    /// score=None になる走を生成するヘルパー。
+    /// `date=before`（cutoff 当日）で days=0 → scoring.rs が間隔シグナルを落とす。
+    /// `status=DidNotFinish` + `weight_change=None` で着順・体重変化シグナルも落ちる。
+    /// いずれか単独でも score=None になるが、二重に確保することでテストの堅牢性を高めている。
     fn run_no_score(before: NaiveDate) -> RecentRun {
         RecentRun {
             date: before,
@@ -418,7 +423,7 @@ mod tests {
         let before = ymd(2026, 1, 20);
         // 14 日前（interval_form=1.0: scoring.rs の 14〜60 日帯）・weight_change=0（signal=1.0） → score = 1.0
         let run1 = run_valid(ymd(2026, 1, 6), Some(0));
-        // 28 日前（interval_form=1.0: 同 14〜60 日帯）・weight_change=20（signal=0.0） → score = 0.5
+        // 28 日前（interval_form=1.0: 同 14〜60 日帯）・weight_change=20=WEIGHT_CHANGE_CAP（上限境界値: signal=0.0） → score = 0.5
         let run2 = run_valid(ymd(2025, 12, 23), Some(20));
         let st = StandardTimes::default();
         let result = recent_form_from_runs(&[run1, run2], before, &st, 2).unwrap();
@@ -469,6 +474,8 @@ mod tests {
         let run3 = run_valid(ymd(2025, 12, 9), Some(20)); // score=0.5
         let st = StandardTimes::default();
         let result = recent_form_from_runs(&[run1, run2, run3], before, &st, 3).unwrap();
+        // wsum=1.0*1+0.5*1+0.25*0.5=1.625, wden=1.75
+        // 期待値は scoring.rs の WEIGHT_CHANGE_CAP=20.0・interval_form 14〜60 日=1.0 に依存（scoring 変更時は要確認）。
         let expected = 1.625_f64 / 1.75;
         assert!(
             (result - expected).abs() < 1e-9,
