@@ -8,6 +8,7 @@ use paddock_domain::{
     JockeyName, PopularitySegment, RaceId, RecencyConfig, ReliabilityBin, ShrinkageConfig, Surface,
     SurfaceSegment, TrainerName, Venue,
 };
+use paddock_use_case::TREND_N_MAX;
 use paddock_use_case::repository::{
     CourseStatsRow, GroupStat, HorseStatsRow, JockeyStatsRow, TrainerStatsRow,
 };
@@ -107,10 +108,15 @@ async fn main() -> anyhow::Result<()> {
             shrinkage_m,
             recency_half_life,
             recent_form_weight,
+            trend_n,
         } => {
             let blend_alpha = validate_blend_alpha(blend_alpha)?;
-            let config =
-                build_estimation_config(shrinkage_m, recency_half_life, recent_form_weight)?;
+            let config = build_estimation_config(
+                shrinkage_m,
+                recency_half_life,
+                recent_form_weight,
+                trend_n,
+            )?;
             let from = parse_date(&from)?;
             let to = parse_date(&to)?;
             let report = app
@@ -139,13 +145,15 @@ fn validate_blend_alpha(alpha: Option<f64>) -> anyhow::Result<Option<f64>> {
     Ok(alpha)
 }
 
-/// backtest 用の確率推定設定（#75）を CLI フラグから組み立てる。未指定フラグは現行挙動。
+/// backtest 用の確率推定設定（#75, #217, #220）を CLI フラグから組み立てる。未指定フラグは現行挙動。
 /// `--shrinkage-m` / `--recency-half-life` とも指定時は有限の正数のみ許可
-/// （0 や負値はゼロ除算・無意味なため）。
+/// （0 や負値はゼロ除算・無意味なため）。`--recent-form-weight` は有限の非負数のみ、
+/// `--trend-n` は 1〜3 のみ許可。
 fn build_estimation_config(
     shrinkage_m: Option<f64>,
     recency_half_life: Option<f64>,
     recent_form_weight: Option<f64>,
+    trend_n: u32,
 ) -> anyhow::Result<EstimationConfig> {
     let shrinkage = match shrinkage_m {
         Some(m) => {
@@ -170,10 +178,14 @@ fn build_estimation_config(
     {
         anyhow::bail!("--recent-form-weight must be a finite non-negative number, got {w}");
     }
+    if !(1..=TREND_N_MAX).contains(&trend_n) {
+        anyhow::bail!("--trend-n must be between 1 and {TREND_N_MAX}, got {trend_n}");
+    }
     Ok(EstimationConfig {
         shrinkage,
         recency,
         recent_form_weight,
+        trend_n,
     })
 }
 

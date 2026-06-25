@@ -15,15 +15,30 @@ pub struct RecencyConfig {
     pub half_life_days: f64,
 }
 
-/// 確率推定の挙動切替（#75/#217）。いずれも `None` が現行挙動（縮約・減衰なし・デフォルト重み）で、
-/// `Default` も同様。backtest が CLI から組み立てて before/after を比較し、採用値を predict のデフォルトに反映する。
-#[derive(Debug, Clone, Copy, Default)]
+/// 確率推定の挙動切替（#75/#217/#220）。`Default` は後方互換（縮約・減衰なし / デフォルト重み / 直近 1 走）。
+/// backtest が CLI から組み立てて before/after を比較し、採用値を predict のデフォルトに反映する。
+#[derive(Debug, Clone, Copy)]
 pub struct EstimationConfig {
     pub shrinkage: Option<ShrinkageConfig>,
     pub recency: Option<RecencyConfig>,
     /// 前走フォーム項の重みオーバーライド（#217）。`None` のとき `weights::FORM_WEIGHT`（0.25）を使う。
     /// backtest の `--recent-form-weight` スイープ専用。predict 本番経路は `None`（デフォルト重み）。
     pub recent_form_weight: Option<f64>,
+    /// 直近 N 走トレンドの走数（#220）。重みは [1.0, 0.5, 0.25] 固定。
+    /// `1` = 前走のみ（現行挙動）、`2`/`3` = 加重平均。
+    pub trend_n: u32,
+}
+
+// trend_n のデフォルト値が 0 でなく 1 のため、derive(Default) ではなく手書き impl を使う。
+impl Default for EstimationConfig {
+    fn default() -> Self {
+        Self {
+            shrinkage: None,
+            recency: None,
+            recent_form_weight: None,
+            trend_n: 1,
+        }
+    }
 }
 
 /// 本番 predict が採用するベイズ縮約の擬似カウント（#75）。backtest（2026-03-28〜05-31 / 144R,
@@ -42,6 +57,7 @@ impl EstimationConfig {
             }),
             recency: None,
             recent_form_weight: None,
+            trend_n: 1, // #220 backtest にて N=2/3 は全指標悪化のため棄却（ADR-0036）
         }
     }
 }

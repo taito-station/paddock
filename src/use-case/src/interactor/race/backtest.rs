@@ -10,14 +10,11 @@ use paddock_domain::{
 use crate::error::Result;
 use crate::interactor::Interactor;
 use crate::interactor::race::predict::{
-    RaceContext, build_factors, field_mean_weight, recent_form_from_runs,
+    RaceContext, TREND_WEIGHTS, build_factors, field_mean_weight, recent_form_from_runs,
 };
 use crate::pdf_fetcher::PdfFetcher;
 use crate::pdf_parser::PdfParser;
 use crate::repository::{CourseStatsRow, OddsRepository, StatsRepository};
-
-/// 近走取得の制約件数。バックテストでは直近 1 走のみ使う（predict と同じ前走フォーム算出）。
-const RECENT_RUNS_LIMIT: u32 = 1;
 
 /// 馬番から引く発走馬の実績: `(着順, 単勝オッズ, 人気)`。いずれも欠落しうるので `Option`。
 type StarterFacts = (Option<u32>, Option<f64>, Option<u32>);
@@ -143,9 +140,10 @@ impl<R: StatsRepository + OddsRepository, P: PdfParser, F: PdfFetcher> Interacto
                 .repository
                 .trainer_stats_batch(&trainer_names, as_of)
                 .await?;
+            // 前走フォーム（#31/#220）。cutoff = date でリーク防止。最大 3 走取得し trend_n で制御。
             let recent_runs_map = self
                 .repository
-                .recent_runs_batch(&horse_names, date, RECENT_RUNS_LIMIT)
+                .recent_runs_batch(&horse_names, date, TREND_WEIGHTS.len() as u32)
                 .await?;
 
             // 標準タイム表は date 単位で取得。by_date の BTreeMap 化で同一日は外側ループで 1 回だけ
@@ -239,14 +237,18 @@ impl<R: StatsRepository + OddsRepository, P: PdfParser, F: PdfFetcher> Interacto
                             .get(t)
                             .expect("date-batch trainer_stats covers all starters' trainers")
                     });
-                    // 前走フォーム（#31）。cutoff = race.date でレース当日以降をリークさせない。
-                    // バッチ取得済みの近走（直近 1 走）から純粋関数で算出する。
+                    // 前走フォーム（#31/#220）。cutoff = race.date でレース当日以降をリークさせない。
+                    // バッチ取得済みの近走（最大 3 走）を trend_n で絞り加重平均する純粋関数で算出する。
                     let recent_runs = recent_runs_map
                         .get(&r.horse_name)
                         .map(Vec::as_slice)
                         .unwrap_or(&[]);
-                    let recent_form =
-                        recent_form_from_runs(recent_runs, race.date, &standard_times);
+                    let recent_form = recent_form_from_runs(
+                        recent_runs,
+                        race.date,
+                        &standard_times,
+                        config.trend_n,
+                    );
                     let factors = build_factors(
                         &entry,
                         &course,

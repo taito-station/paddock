@@ -79,9 +79,9 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: 
             self.repository.horse_stats_batch(&horse_names, None),
             self.repository.jockey_stats_batch(&jockey_names, None),
             self.repository.trainer_stats_batch(&trainer_names, None),
-            // limit: 前走 1 走のみ使用（recent_form_from_runs の仕様に合わせる）。
+            // limit: TREND_WEIGHTS の要素数まで取得し、trend_n で何走使うかを scoring 側で制御する（#220）。
             self.repository
-                .recent_runs_batch(&horse_names, card.date, 1),
+                .recent_runs_batch(&horse_names, card.date, TREND_WEIGHTS.len() as u32),
         )?;
 
         let mut entry_factors: Vec<(HorseEntry, HorseFactors)> = Vec::new();
@@ -102,7 +102,8 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: 
                 .get(&entry.horse_name)
                 .map(Vec::as_slice)
                 .unwrap_or(&[]);
-            let recent_form = recent_form_from_runs(recent_runs, card.date, &standard_times);
+            let recent_form =
+                recent_form_from_runs(recent_runs, card.date, &standard_times, config.trend_n);
             let factors = build_factors(
                 entry,
                 &course,
@@ -149,18 +150,46 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: 
     }
 }
 
+/// 直近 N 走トレンドの重み（#220）。runs は date 降順なので index 0 が最新走。
+/// `[1.0, 0.5, 0.25]` = Issue #220 指定の指数的減衰ウェイト。
+/// `pub(crate)` にして backtest.rs からも参照できるようにする（バッチ取得上限と一致させるため）。
+/// この配列を変更する場合は ADR-0036・CLI の `--trend-n` help・仕様書（probability-estimation.md）も更新すること。
+pub(crate) const TREND_WEIGHTS: [f64; 3] = [1.0, 0.5, 0.25];
+
 /// 取得済みの近走 `runs`（date 降順、最大 `limit` 件）から前走フォーム [0,1] を算出する純粋関数。
 /// `recent_form_for` の DB 取得を剥がした本体で、backtest のバッチ取得（#196）からも共有する。
-/// 先頭（直近 1 走）のみを使う既存挙動と一致する。
+///
+/// `trend_n = 1` のとき直近 1 走スコアのみ返し、現行挙動と完全一致する。
+/// `trend_n >= 2` のとき有効スコアが得られた走を TREND_WEIGHTS で加重平均する。
+/// スコアが取れなかった走（中止・情報欠落等）は分母から除外（欠落フォールバック維持）。
+///
+/// `before` は予測対象レースの日付（cutoff）。`recent_form_score` の間隔シグナルは
+/// cutoff と各走の日付の差で算出するため N 走すべてに同じ `before` を渡す
+/// （走間の間隔ではなく cutoff 基準）。リーク防止（before 以降の走を除外）も兼ねる。
+/// `runs` は呼び出し元が `date < before` でフィルタ済みであることを前提とする
+/// （この関数内では再チェックしない）。
+/// `trend_n` は 1 以上でなければならない（CLI バリデーション済み）。
 pub(crate) fn recent_form_from_runs(
     runs: &[RecentRun],
     before: NaiveDate,
     standard_times: &StandardTimes,
+    trend_n: u32,
 ) -> Option<f64> {
-    runs.first().and_then(|run| {
+    debug_assert!(trend_n >= 1, "trend_n must be >= 1, got {trend_n}");
+    // 三重 min: trend_n 上界 → 近走実在数 → TREND_WEIGHTS 配列長（CLI バリデーション済みだが防衛的に維持）。
+    let n = (trend_n as usize).min(runs.len()).min(TREND_WEIGHTS.len());
+    let mut wsum = 0.0_f64;
+    let mut wden = 0.0_f64;
+    for (i, run) in runs[..n].iter().enumerate() {
         let std = standard_times.get(run.surface, run.distance);
-        paddock_domain::prediction::recent_form_score(&run.result, run.date, before, std)
-    })
+        if let Some(s) =
+            paddock_domain::prediction::recent_form_score(&run.result, run.date, before, std)
+        {
+            wsum += TREND_WEIGHTS[i] * s;
+            wden += TREND_WEIGHTS[i];
+        }
+    }
+    (wden > 0.0).then(|| wsum / wden)
 }
 
 /// `build_factors` に渡すレース側の条件（全馬共通）。
@@ -316,5 +345,141 @@ fn distance_band_label(distance: u32) -> &'static str {
         "1900〜2200m"
     } else {
         "2300m〜"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::NaiveDate;
+    use paddock_domain::{
+        RecentRun, StandardTimes, Surface,
+        horse_result::{
+            FinishingPosition, GateNum, HorseName, HorseNum, HorseResult, ResultStatus,
+        },
+    };
+
+    use super::recent_form_from_runs;
+
+    fn ymd(y: i32, m: u32, d: u32) -> NaiveDate {
+        NaiveDate::from_ymd_opt(y, m, d).unwrap()
+    }
+
+    fn run_valid(date: NaiveDate, weight_change: Option<i32>) -> RecentRun {
+        RecentRun {
+            date,
+            surface: Surface::Turf,
+            distance: 1600,
+            result: HorseResult {
+                finishing_position: Some(FinishingPosition::try_from(1u32).unwrap()),
+                status: ResultStatus::Finished,
+                gate_num: GateNum::try_from(1u32).unwrap(),
+                horse_num: HorseNum::try_from(1u32).unwrap(),
+                horse_name: HorseName::try_from("テスト").unwrap(),
+                horse_id: None,
+                jockey: None,
+                trainer: None,
+                time_seconds: None,
+                margin: None,
+                odds: None,
+                horse_weight: None,
+                weight_change,
+                weight_carried: None,
+                popularity: None,
+            },
+        }
+    }
+
+    /// score=None になる走を生成するヘルパー。
+    /// `date=before`（cutoff 当日）で days=0 → scoring.rs が間隔シグナルを落とす。
+    /// `status=DidNotFinish` + `weight_change=None` で着順・体重変化シグナルも落ちる。
+    /// いずれか単独でも score=None になるが、二重に確保することでテストの堅牢性を高めている。
+    fn run_no_score(before: NaiveDate) -> RecentRun {
+        RecentRun {
+            date: before,
+            surface: Surface::Turf,
+            distance: 1600,
+            result: HorseResult {
+                finishing_position: None,
+                status: ResultStatus::DidNotFinish,
+                gate_num: GateNum::try_from(1u32).unwrap(),
+                horse_num: HorseNum::try_from(1u32).unwrap(),
+                horse_name: HorseName::try_from("テスト").unwrap(),
+                horse_id: None,
+                jockey: None,
+                trainer: None,
+                time_seconds: None,
+                margin: None,
+                odds: None,
+                horse_weight: None,
+                weight_change: None,
+                weight_carried: None,
+                popularity: None,
+            },
+        }
+    }
+
+    #[test]
+    fn trend_n2_both_valid_weighted_average() {
+        let before = ymd(2026, 1, 20);
+        // 14 日前（interval_form=1.0: scoring.rs の 14〜60 日帯）・weight_change=0（signal=1.0） → score = 1.0
+        let run1 = run_valid(ymd(2026, 1, 6), Some(0));
+        // 28 日前（interval_form=1.0: 同 14〜60 日帯）・weight_change=20=WEIGHT_CHANGE_CAP（上限境界値: signal=0.0） → score = 0.5
+        let run2 = run_valid(ymd(2025, 12, 23), Some(20));
+        let st = StandardTimes::default();
+        let result = recent_form_from_runs(&[run1, run2], before, &st, 2).unwrap();
+        // wsum = 1.0*1.0 + 0.5*0.5 = 1.25, wden = 1.5 → 1.25/1.5
+        // 期待値は scoring.rs の WEIGHT_CHANGE_CAP=20.0・interval_form 14〜60 日=1.0 に依存（scoring 変更時は要確認）。
+        let expected = 1.25_f64 / 1.5;
+        assert!(
+            (result - expected).abs() < 1e-9,
+            "got {result}, expected {expected}"
+        );
+    }
+
+    #[test]
+    fn trend_n2_second_run_no_score_uses_first_only() {
+        let before = ymd(2026, 1, 20);
+        let run1 = run_valid(ymd(2026, 1, 6), Some(0)); // score=1.0
+        let run2 = run_no_score(before); // score=None
+        let st = StandardTimes::default();
+        let result = recent_form_from_runs(&[run1, run2], before, &st, 2).unwrap();
+        // wsum = 1.0, wden = 1.0 → 1.0
+        assert!((result - 1.0).abs() < 1e-9, "got {result}");
+    }
+
+    #[test]
+    fn trend_n2_all_no_score_returns_none() {
+        let before = ymd(2026, 1, 20);
+        let runs = vec![run_no_score(before), run_no_score(before)];
+        let st = StandardTimes::default();
+        assert!(recent_form_from_runs(&runs, before, &st, 2).is_none());
+    }
+
+    #[test]
+    fn trend_n1_uses_only_first_run() {
+        let before = ymd(2026, 1, 20);
+        let run1 = run_valid(ymd(2026, 1, 6), Some(0)); // score=1.0
+        let run2 = run_valid(ymd(2025, 12, 23), Some(20)); // score=0.5 (would lower if included)
+        let st = StandardTimes::default();
+        let result = recent_form_from_runs(&[run1, run2], before, &st, 1).unwrap();
+        assert!((result - 1.0).abs() < 1e-9, "got {result}");
+    }
+
+    #[test]
+    fn trend_n3_all_valid_uses_all_weights() {
+        let before = ymd(2026, 1, 20);
+        // score=1.0, 1.0, 0.5 の 3 走 → wsum=1.0*1+0.5*1+0.25*0.5=1.625, wden=1.75
+        let run1 = run_valid(ymd(2026, 1, 6), Some(0)); // score=1.0
+        let run2 = run_valid(ymd(2025, 12, 23), Some(0)); // score=1.0
+        let run3 = run_valid(ymd(2025, 12, 9), Some(20)); // score=0.5
+        let st = StandardTimes::default();
+        let result = recent_form_from_runs(&[run1, run2, run3], before, &st, 3).unwrap();
+        // wsum=1.0*1+0.5*1+0.25*0.5=1.625, wden=1.75
+        // 期待値は scoring.rs の WEIGHT_CHANGE_CAP=20.0・interval_form 14〜60 日=1.0 に依存（scoring 変更時は要確認）。
+        let expected = 1.625_f64 / 1.75;
+        assert!(
+            (result - expected).abs() < 1e-9,
+            "got {result}, expected {expected}"
+        );
     }
 }

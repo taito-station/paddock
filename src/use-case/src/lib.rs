@@ -36,3 +36,7 @@ pub use repository::{
     PredictRaceConditionRecord, PredictSessionRecord, PredictionFilter, PredictionSearchResult,
     PredictionSummaryRow, RaceOddsRecord, Repository,
 };
+
+/// `--trend-n` に指定できる最大値（= TREND_WEIGHTS の要素数）。
+/// backtest CLI バリデーションと TREND_WEIGHTS の要素数を一致させるために参照する。
+pub const TREND_N_MAX: u32 = interactor::race::predict::TREND_WEIGHTS.len() as u32;
