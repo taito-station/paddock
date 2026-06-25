@@ -10,7 +10,7 @@ use paddock_domain::{
 use crate::error::Result;
 use crate::interactor::Interactor;
 use crate::interactor::race::predict::{
-    RaceContext, build_factors, field_mean_weight, recent_form_from_runs,
+    RaceContext, TREND_WEIGHTS, build_factors, field_mean_weight, recent_form_from_runs,
 };
 use crate::pdf_fetcher::PdfFetcher;
 use crate::pdf_parser::PdfParser;
@@ -143,7 +143,7 @@ impl<R: StatsRepository + OddsRepository, P: PdfParser, F: PdfFetcher> Interacto
             // 前走フォーム（#31/#220）。cutoff = date でリーク防止。最大 3 走取得し trend_n で制御。
             let recent_runs_map = self
                 .repository
-                .recent_runs_batch(&horse_names, date, 3)
+                .recent_runs_batch(&horse_names, date, TREND_WEIGHTS.len() as u32)
                 .await?;
 
             // 標準タイム表は date 単位で取得。by_date の BTreeMap 化で同一日は外側ループで 1 回だけ

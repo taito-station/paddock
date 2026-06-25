@@ -152,7 +152,8 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: 
 
 /// 直近 N 走トレンドの重み（#220）。runs は date 降順なので index 0 が最新走。
 /// `[1.0, 0.5, 0.25]` = Issue #220 指定の指数的減衰ウェイト。
-const TREND_WEIGHTS: [f64; 3] = [1.0, 0.5, 0.25];
+/// `pub(crate)` にして backtest.rs からも参照できるようにする（バッチ取得上限と一致させるため）。
+pub(crate) const TREND_WEIGHTS: [f64; 3] = [1.0, 0.5, 0.25];
 
 /// 取得済みの近走 `runs`（date 降順、最大 `limit` 件）から前走フォーム [0,1] を算出する純粋関数。
 /// `recent_form_for` の DB 取得を剥がした本体で、backtest のバッチ取得（#196）からも共有する。
@@ -160,12 +161,16 @@ const TREND_WEIGHTS: [f64; 3] = [1.0, 0.5, 0.25];
 /// `trend_n = 1` のとき直近 1 走スコアのみ返し、現行挙動と完全一致する。
 /// `trend_n >= 2` のとき有効スコアが得られた走を TREND_WEIGHTS で加重平均する。
 /// スコアが取れなかった走（中止・情報欠落等）は分母から除外（欠落フォールバック維持）。
+///
+/// `before` は各走のスコア算出（`recent_form_score`）に前走間隔（日数）の計算用として渡す。
+/// `trend_n` は 1 以上でなければならない（CLI バリデーション済み）。
 pub(crate) fn recent_form_from_runs(
     runs: &[RecentRun],
     before: NaiveDate,
     standard_times: &StandardTimes,
     trend_n: u32,
 ) -> Option<f64> {
+    debug_assert!(trend_n >= 1, "trend_n must be >= 1, got {trend_n}");
     let n = (trend_n as usize).min(runs.len()).min(TREND_WEIGHTS.len());
     let mut wsum = 0.0_f64;
     let mut wden = 0.0_f64;
@@ -334,5 +339,119 @@ fn distance_band_label(distance: u32) -> &'static str {
         "1900〜2200m"
     } else {
         "2300m〜"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::NaiveDate;
+    use paddock_domain::{
+        RecentRun, StandardTimes, Surface,
+        horse_result::{
+            FinishingPosition, GateNum, HorseName, HorseNum, HorseResult, ResultStatus,
+        },
+    };
+
+    use super::recent_form_from_runs;
+
+    fn ymd(y: i32, m: u32, d: u32) -> NaiveDate {
+        NaiveDate::from_ymd_opt(y, m, d).unwrap()
+    }
+
+    fn run_valid(date: NaiveDate, weight_change: Option<i32>) -> RecentRun {
+        RecentRun {
+            date,
+            surface: Surface::Turf,
+            distance: 1600,
+            result: HorseResult {
+                finishing_position: Some(FinishingPosition::try_from(1u32).unwrap()),
+                status: ResultStatus::Finished,
+                gate_num: GateNum::try_from(1u32).unwrap(),
+                horse_num: HorseNum::try_from(1u32).unwrap(),
+                horse_name: HorseName::try_from("テスト").unwrap(),
+                horse_id: None,
+                jockey: None,
+                trainer: None,
+                time_seconds: None,
+                margin: None,
+                odds: None,
+                horse_weight: None,
+                weight_change,
+                weight_carried: None,
+                popularity: None,
+            },
+        }
+    }
+
+    /// score が取れない走（中止・同日 = 間隔 0 日＋ weight_change=None）。
+    fn run_no_score(before: NaiveDate) -> RecentRun {
+        RecentRun {
+            date: before,
+            surface: Surface::Turf,
+            distance: 1600,
+            result: HorseResult {
+                finishing_position: None,
+                status: ResultStatus::DidNotFinish,
+                gate_num: GateNum::try_from(1u32).unwrap(),
+                horse_num: HorseNum::try_from(1u32).unwrap(),
+                horse_name: HorseName::try_from("テスト").unwrap(),
+                horse_id: None,
+                jockey: None,
+                trainer: None,
+                time_seconds: None,
+                margin: None,
+                odds: None,
+                horse_weight: None,
+                weight_change: None,
+                weight_carried: None,
+                popularity: None,
+            },
+        }
+    }
+
+    #[test]
+    fn trend_n2_both_valid_weighted_average() {
+        let before = ymd(2026, 1, 20);
+        // 14 日前（interval_form=1.0）・weight_change=0（signal=1.0） → score = 1.0
+        let run1 = run_valid(ymd(2026, 1, 6), Some(0));
+        // 28 日前（interval_form=1.0）・weight_change=20（signal=0.0） → score = 0.5
+        let run2 = run_valid(ymd(2025, 12, 23), Some(20));
+        let st = StandardTimes::default();
+        let result = recent_form_from_runs(&[run1, run2], before, &st, 2).unwrap();
+        // wsum = 1.0*1.0 + 0.5*0.5 = 1.25, wden = 1.5 → 1.25/1.5
+        let expected = 1.25_f64 / 1.5;
+        assert!(
+            (result - expected).abs() < 1e-9,
+            "got {result}, expected {expected}"
+        );
+    }
+
+    #[test]
+    fn trend_n2_second_run_no_score_uses_first_only() {
+        let before = ymd(2026, 1, 20);
+        let run1 = run_valid(ymd(2026, 1, 6), Some(0)); // score=1.0
+        let run2 = run_no_score(before); // score=None
+        let st = StandardTimes::default();
+        let result = recent_form_from_runs(&[run1, run2], before, &st, 2).unwrap();
+        // wsum = 1.0, wden = 1.0 → 1.0
+        assert!((result - 1.0).abs() < 1e-9, "got {result}");
+    }
+
+    #[test]
+    fn trend_n2_all_no_score_returns_none() {
+        let before = ymd(2026, 1, 20);
+        let runs = vec![run_no_score(before), run_no_score(before)];
+        let st = StandardTimes::default();
+        assert!(recent_form_from_runs(&runs, before, &st, 2).is_none());
+    }
+
+    #[test]
+    fn trend_n1_uses_only_first_run() {
+        let before = ymd(2026, 1, 20);
+        let run1 = run_valid(ymd(2026, 1, 6), Some(0)); // score=1.0
+        let run2 = run_valid(ymd(2025, 12, 23), Some(20)); // score=0.5 (would lower if included)
+        let st = StandardTimes::default();
+        let result = recent_form_from_runs(&[run1, run2], before, &st, 1).unwrap();
+        assert!((result - 1.0).abs() < 1e-9, "got {result}");
     }
 }
