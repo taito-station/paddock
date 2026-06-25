@@ -542,6 +542,7 @@ async fn backtest_wires_recency_into_horse_factors() {
         recency: Some(RecencyConfig {
             half_life_days: 30.0,
         }),
+        recent_form_weight: None,
         trend_n: 1,
     };
     let on = interactor(vec![soft_track_race(None)])

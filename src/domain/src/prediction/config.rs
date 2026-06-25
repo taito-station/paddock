@@ -15,12 +15,15 @@ pub struct RecencyConfig {
     pub half_life_days: f64,
 }
 
-/// 確率推定の挙動切替（#75, #220）。`Default` は後方互換（縮約・減衰なし / 直近 1 走）。
+/// 確率推定の挙動切替（#75/#217/#220）。`Default` は後方互換（縮約・減衰なし / デフォルト重み / 直近 1 走）。
 /// backtest が CLI から組み立てて before/after を比較し、採用値を predict のデフォルトに反映する。
 #[derive(Debug, Clone, Copy)]
 pub struct EstimationConfig {
     pub shrinkage: Option<ShrinkageConfig>,
     pub recency: Option<RecencyConfig>,
+    /// 前走フォーム項の重みオーバーライド（#217）。`None` のとき `weights::FORM_WEIGHT`（0.25）を使う。
+    /// backtest の `--recent-form-weight` スイープ専用。predict 本番経路は `None`（デフォルト重み）。
+    pub recent_form_weight: Option<f64>,
     /// 直近 N 走トレンドの走数（#220）。重みは [1.0, 0.5, 0.25] 固定。
     /// `1` = 前走のみ（現行挙動）、`2`/`3` = 加重平均。
     pub trend_n: u32,
@@ -32,6 +35,7 @@ impl Default for EstimationConfig {
         Self {
             shrinkage: None,
             recency: None,
+            recent_form_weight: None,
             trend_n: 1,
         }
     }
@@ -52,7 +56,8 @@ impl EstimationConfig {
                 pseudo_count: RECOMMENDED_SHRINKAGE_M,
             }),
             recency: None,
-            trend_n: 1, // #220 backtest にて N=2/3 は全指標悪化のため棄却（ADR-0035）
+            recent_form_weight: None,
+            trend_n: 1, // #220 backtest にて N=2/3 は全指標悪化のため棄却（ADR-0036）
         }
     }
 }

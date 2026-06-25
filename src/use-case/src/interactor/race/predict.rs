@@ -153,7 +153,7 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: 
 /// 直近 N 走トレンドの重み（#220）。runs は date 降順なので index 0 が最新走。
 /// `[1.0, 0.5, 0.25]` = Issue #220 指定の指数的減衰ウェイト。
 /// `pub(crate)` にして backtest.rs からも参照できるようにする（バッチ取得上限と一致させるため）。
-/// この配列を変更する場合は ADR-0035・CLI の `--trend-n` help・仕様書（probability-estimation.md）も更新すること。
+/// この配列を変更する場合は ADR-0036・CLI の `--trend-n` help・仕様書（probability-estimation.md）も更新すること。
 pub(crate) const TREND_WEIGHTS: [f64; 3] = [1.0, 0.5, 0.25];
 
 /// 取得済みの近走 `runs`（date 降順、最大 `limit` 件）から前走フォーム [0,1] を算出する純粋関数。
