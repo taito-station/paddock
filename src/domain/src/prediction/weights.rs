@@ -46,3 +46,6 @@ pub(crate) const WEIGHT_CARRIED_CAP_KG: f64 = 3.0;
 /// レース内のタイム差は数 % に収まるため小さめに置く。暫定値で backtest（main との before/after）
 /// で寄与を確認して調整する。
 pub(crate) const TIME_DEV_CAP: f64 = 0.05;
+/// 騎手直近フォーム項の重み（#221）。暫定値 0.25（FORM_WEIGHT と同値）。
+/// backtest sweep（N×weight）後に ADR 0035 で確定する。
+pub(crate) const JOCKEY_RECENT_FORM_WEIGHT: f64 = 0.25;

@@ -48,6 +48,9 @@ pub struct HorseFactors {
     /// 対する相対値で、斤量が取れない馬（PDF 出馬表等）・field 平均が出せないレースは `None`
     /// （項と重みを母数から除外）。win/place/show に同値で寄与する。
     pub weight_carried: Option<f64>,
+    /// 騎手直近フォームシグナル [0,1]（0.5=中立, #221）。騎手の直近 N 走の人気乖離平均で算出する。
+    /// 騎手未登録・近走なし・全走欠損は `None`（項と重みを母数から除外、ADR 0007 準拠）。
+    pub jockey_recent_form: Option<f64>,
 }
 
 #[derive(Debug, Clone)]
@@ -57,6 +60,14 @@ pub struct HorseProbability {
     pub win_prob: f64,
     pub place_prob: f64,
     pub show_prob: f64,
+}
+
+/// 騎手直近フォーム特徴量（#221）の算出に使う 1 走分の情報。`find_jockey_recent_runs` の戻り要素。
+/// `finishing_position` / `popularity` は PDF 未記録や中止等で `None` になることがある。
+#[derive(Debug, Clone)]
+pub struct JockeyFormRun {
+    pub finishing_position: Option<u32>,
+    pub popularity: Option<u32>,
 }
 
 /// 馬の過去 1 走を、その走の (surface, distance) と開催日付きで返す（#31/#76）。前走タイムを

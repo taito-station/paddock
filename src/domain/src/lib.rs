@@ -30,10 +30,10 @@ pub use pad_prediction::{Mark, PadPrediction, PredictionBet, PredictionHorse, Pr
 pub use payout::{RacePayouts, Settlement, settle_bet};
 pub use portfolio::{Portfolio, PortfolioBet, PortfolioConfig, build_portfolio};
 pub use prediction::{
-    DatedCounts, EstimationConfig, FactorStat, HorseFactors, HorseProbability, RateTriple,
-    RecencyConfig, RecentRun, ShrinkageConfig, StandardTimes, apply_recency_weight,
+    DatedCounts, EstimationConfig, FactorStat, HorseFactors, HorseProbability, JockeyFormRun,
+    RateTriple, RecencyConfig, RecentRun, ShrinkageConfig, StandardTimes, apply_recency_weight,
     blend_with_market_win, estimate_probabilities, estimate_probabilities_with_config,
-    recent_form_score,
+    jockey_recent_form_score, recent_form_score,
 };
 pub use race::{Race, RaceId, Surface, TrackCondition, Venue, Weather};
 pub use race_card::{HorseEntry, RaceCard};

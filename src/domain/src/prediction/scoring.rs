@@ -6,11 +6,13 @@ use super::config::EstimationConfig;
 use super::model::{FactorStat, HorseFactors, RateTriple};
 use super::parse::parse_margin_lengths;
 use super::weights::{
-    COURSE_GATE_WEIGHT, DISTANCE_WEIGHT, FORM_WEIGHT, JOCKEY_WEIGHT, MARGIN_CAP_LENGTHS, POP_GAP_K,
-    PRIOR_RATE, SURFACE_WEIGHT, TIME_DEV_CAP, TRACK_CONDITION_WEIGHT, TRAINER_WEIGHT,
-    WEIGHT_CARRIED_CAP_KG, WEIGHT_CARRIED_WEIGHT, WEIGHT_CHANGE_CAP,
+    COURSE_GATE_WEIGHT, DISTANCE_WEIGHT, FORM_WEIGHT, JOCKEY_RECENT_FORM_WEIGHT, JOCKEY_WEIGHT,
+    MARGIN_CAP_LENGTHS, POP_GAP_K, PRIOR_RATE, SURFACE_WEIGHT, TIME_DEV_CAP,
+    TRACK_CONDITION_WEIGHT, TRAINER_WEIGHT, WEIGHT_CARRIED_CAP_KG, WEIGHT_CARRIED_WEIGHT,
+    WEIGHT_CHANGE_CAP,
 };
 use crate::horse_result::HorseResult;
+use super::model::JockeyFormRun;
 
 /// ベイズ縮約: 出走数 `starts`(=k) の少ない factor のレートを prior へ寄せる（#75）。
 /// `smoothed = (k·rate + m·prior) / (k + m)`。k≫m で ≈rate、k=0 で =prior、単調に補間する。
@@ -79,6 +81,10 @@ pub(crate) fn raw_score(
     if let Some(w) = factors.weight_carried {
         weighted += WEIGHT_CARRIED_WEIGHT * w;
         weight += WEIGHT_CARRIED_WEIGHT;
+    }
+    if let Some(jrf) = factors.jockey_recent_form {
+        weighted += JOCKEY_RECENT_FORM_WEIGHT * jrf;
+        weight += JOCKEY_RECENT_FORM_WEIGHT;
     }
     if weight == 0.0 {
         return 0.0;
@@ -162,6 +168,22 @@ pub fn recent_form_score(
     } else {
         Some(signals.iter().sum::<f64>() / signals.len() as f64)
     }
+}
+
+/// 騎手の直近 N 走から「フォームシグナル」 [0,1]（0.5=中立）を返す（#221）。
+/// 各走の signal = clamp(0.5 + (人気順位 − 着順) × POP_GAP_K, 0, 1) の平均値。
+/// `finishing_position` / `popularity` いずれかが `None` の走は母数から除外する。
+/// 有効な走が 0 件なら `None`（騎手未登録・近走なしと同じ扱い）。
+pub fn jockey_recent_form_score(runs: &[JockeyFormRun]) -> Option<f64> {
+    let mut total = 0.0f64;
+    let mut count = 0u32;
+    for run in runs {
+        if let (Some(pos), Some(pop)) = (run.finishing_position, run.popularity) {
+            total += (0.5 + (pop as f64 - pos as f64) * POP_GAP_K).clamp(0.0, 1.0);
+            count += 1;
+        }
+    }
+    (count > 0).then(|| total / count as f64)
 }
 
 /// 前走間隔（日数）→ `[0,1]` の台形マップ。区分は離散で、境界に小さな段差がある（heuristic）。

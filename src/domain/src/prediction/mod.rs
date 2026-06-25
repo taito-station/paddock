@@ -27,7 +27,8 @@ pub use estimate::{
     blend_with_market_win, estimate_probabilities, estimate_probabilities_with_config,
 };
 pub use model::{
-    DatedCounts, FactorStat, HorseFactors, HorseProbability, RateTriple, RecentRun, StandardTimes,
+    DatedCounts, FactorStat, HorseFactors, HorseProbability, JockeyFormRun, RateTriple, RecentRun,
+    StandardTimes,
 };
 pub use recency::apply_recency_weight;
-pub use scoring::{recent_form_score, weight_factor};
+pub use scoring::{jockey_recent_form_score, recent_form_score, weight_factor};

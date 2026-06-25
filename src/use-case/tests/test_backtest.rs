@@ -10,6 +10,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use chrono::NaiveDate;
 use paddock_domain::horse_result::{FinishingPosition, GateNum, HorseName, HorseNum, ResultStatus};
+use paddock_domain::JockeyFormRun;
 use paddock_domain::{
     DatedCounts, EstimationConfig, HorseResult, JockeyName, OddsValue, Race, RaceId, RaceOdds,
     RecencyConfig, RecentRun, StandardTimes, Surface, TrackCondition, TrainerName, Venue,
@@ -161,6 +162,15 @@ impl StatsRepository for MockRepo {
         _before: NaiveDate,
         _limit: u32,
     ) -> Result<Vec<RecentRun>> {
+        Ok(Vec::new())
+    }
+
+    async fn find_jockey_recent_runs(
+        &self,
+        _jockey: &JockeyName,
+        _before: NaiveDate,
+        _limit: u32,
+    ) -> Result<Vec<JockeyFormRun>> {
         Ok(Vec::new())
     }
 
