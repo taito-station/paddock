@@ -805,7 +805,7 @@ fn jockey_recent_form_none_excluded_from_raw_score() {
     // None と 0.5（中立値）でスコアが同一（中立シグナルは平均を動かさない）。
     let s_none = raw_score(&base, |r| r.win, &cfg);
     let s_mid = raw_score(&with_jrf, |r| r.win, &cfg);
-    // zero_factors の rate は 0 なので、jocket_recent_form=0.5 で重み付き平均が上がる
+    // zero_factors の rate は 0 なので、jockey_recent_form=0.5 で重み付き平均が上がる
     // （0 に 0.5 を混ぜると平均は上がる）ためこの2つが異なることを確認する。
     // jockey_recent_form=None は zero_factors と同一スコアを維持する。
     assert!(

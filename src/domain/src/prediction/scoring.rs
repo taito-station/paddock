@@ -176,7 +176,7 @@ pub fn recent_form_score(
 /// 有効な走が 0 件なら `None`（騎手未登録・近走なしと同じ扱い）。
 pub fn jockey_recent_form_score(runs: &[JockeyFormRun]) -> Option<f64> {
     let mut total = 0.0f64;
-    let mut count = 0u32;
+    let mut count = 0usize;
     for run in runs {
         if let (Some(pos), Some(pop)) = (run.finishing_position, run.popularity) {
             total += (0.5 + (pop as f64 - pos as f64) * POP_GAP_K).clamp(0.0, 1.0);

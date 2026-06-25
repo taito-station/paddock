@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use chrono::NaiveDate;
 use paddock_domain::{JockeyFormRun, JockeyName};
@@ -11,8 +11,9 @@ use crate::error::Result;
 /// バックテスト時のリークを防ぐ。同一実レース重複は `(date, venue, race_num)` 単位で pdf 優先 dedup。
 #[derive(sqlx::FromRow)]
 struct JockeyFormRow {
-    finishing_position: Option<i32>,
-    popularity: Option<i32>,
+    // results / horse_past_runs の着順・人気は bigint(INT8) カラムなので i64 で受ける。
+    finishing_position: Option<i64>,
+    popularity: Option<i64>,
 }
 
 fn row_to_run(row: JockeyFormRow) -> JockeyFormRun {
@@ -50,6 +51,8 @@ pub async fn find_jockey_recent_runs(
                 1 AS src_rank,
                 race_id
             FROM horse_past_runs
+            -- $3=$1, $4=$2: sqlx は UNION の各アームで同一 $N を再利用できないため
+            -- UNION netkeiba アームにも同値の騎手名・日付を別番号でバインドする。
             WHERE jockey = $3 AND date < $4
         )
         SELECT u.finishing_position, u.popularity
@@ -57,6 +60,8 @@ pub async fn find_jockey_recent_runs(
         WHERE NOT EXISTS (
             SELECT 1 FROM unioned u2
             -- 単体版: $1 で騎手が 1 名固定のため全行が同一騎手。jockey 列は unioned に無いため条件不要。
+            -- 同ソース内で同一 (date,venue,race_num) が複数行ある場合は race_id 降順タイブレーク
+            -- （find_recent_runs.rs と同パターン: race_id 降順で決定的に 1 件を選ぶ）。
             WHERE u2.date = u.date AND u2.venue = u.venue AND u2.race_num = u.race_num
               AND (u2.src_rank < u.src_rank
                    OR (u2.src_rank = u.src_rank AND u2.race_id > u.race_id))
@@ -67,8 +72,8 @@ pub async fn find_jockey_recent_runs(
     )
     .bind(jockey.value())
     .bind(&before_str)
-    .bind(jockey.value())
-    .bind(&before_str)
+    .bind(jockey.value()) // $3=$1
+    .bind(&before_str) // $4=$2
     .bind(limit as i64)
     .fetch_all(pool)
     .await?;
@@ -85,9 +90,11 @@ pub async fn jockey_recent_runs_batch(
     before: NaiveDate,
     limit: u32,
 ) -> Result<HashMap<JockeyName, Vec<JockeyFormRun>>> {
+    // seen: O(n) の Vec.contains() を避けるため HashSet で重複チェック、unique に挿入順を保持。
+    let mut seen: HashSet<&JockeyName> = HashSet::new();
     let mut unique: Vec<JockeyName> = Vec::new();
     for j in jockeys {
-        if !unique.contains(j) {
+        if seen.insert(j) {
             unique.push(j.clone());
         }
     }
@@ -99,8 +106,9 @@ pub async fn jockey_recent_runs_batch(
 
     #[derive(sqlx::FromRow)]
     struct BatchRow {
-        finishing_position: Option<i32>,
-        popularity: Option<i32>,
+        // results / horse_past_runs の着順・人気は bigint(INT8) カラムなので i64 で受ける。
+        finishing_position: Option<i64>,
+        popularity: Option<i64>,
         jockey: String,
     }
 
@@ -126,6 +134,8 @@ pub async fn jockey_recent_runs_batch(
                 race_id,
                 jockey
             FROM horse_past_runs
+            -- $3=$1, $4=$2: sqlx は UNION の各アームで同一 $N を再利用できないため
+            -- UNION netkeiba アームにも同値の配列・日付を別番号でバインドする。
             WHERE jockey = ANY($3) AND date < $4
         ),
         deduped AS (
@@ -139,6 +149,8 @@ pub async fn jockey_recent_runs_batch(
                 SELECT 1 FROM unioned u2
                 WHERE u2.jockey = u.jockey
                   AND u2.date = u.date AND u2.venue = u.venue AND u2.race_num = u.race_num
+                  -- 同一 (date,venue,race_num) で pdf(src_rank=0) が netkeiba(1) より優先。
+                  -- 同ソース内で複数行がある場合は race_id 降順タイブレーク（find_recent_runs と同パターン）。
                   AND (u2.src_rank < u.src_rank
                        OR (u2.src_rank = u.src_rank AND u2.race_id > u.race_id))
             )
