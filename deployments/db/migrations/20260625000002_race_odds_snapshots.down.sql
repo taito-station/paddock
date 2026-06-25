@@ -1,1 +1,1 @@
-DROP TABLE race_odds_snapshots;
+DROP TABLE IF EXISTS race_odds_snapshots;

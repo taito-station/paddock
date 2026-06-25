@@ -560,11 +560,45 @@ async fn snapshots_skip_invalid_odds_rows(pool: sqlx::PgPool) {
     .await
     .unwrap();
 
-    let count: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM race_odds_snapshots WHERE race_id = $1")
-            .bind(race_id().value())
-            .fetch_one(&repo.pool)
-            .await
-            .unwrap();
-    assert_eq!(count, 1, "snapshots にも有効な win 行のみ残る");
+    // 残る 1 行が（弾かれた trifecta ではなく）有効な win 行であることまで確認する。
+    let rows: Vec<(String, String)> = sqlx::query_as(
+        "SELECT bet_type, combination_key FROM race_odds_snapshots WHERE race_id = $1",
+    )
+    .bind(race_id().value())
+    .fetch_all(&repo.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        rows,
+        vec![("win".to_string(), "1".to_string())],
+        "snapshots に残るのは有効な win 行のみ（trifecta 0.0 は弾かれる）"
+    );
+}
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn snapshots_persist_band_odds_high(pool: sqlx::PgPool) {
+    // 幅 odds（複勝・ワイドの odds_high）も snapshots に二重書きされることを担保する。
+    let repo = PostgresRepository::new(pool);
+    repo.save_race_odds(&RaceOddsRecord {
+        race_id: race_id(),
+        fetched_at: fetched_at(),
+        rows: vec![OddsRow::place(1, 1.5, 2.0, None)],
+    })
+    .await
+    .unwrap();
+
+    let (odds, odds_high): (f64, Option<f64>) = sqlx::query_as(
+        "SELECT odds, odds_high FROM race_odds_snapshots \
+         WHERE race_id = $1 AND bet_type = 'place' AND combination_key = '1'",
+    )
+    .bind(race_id().value())
+    .fetch_one(&repo.pool)
+    .await
+    .unwrap();
+    assert!((odds - 1.5).abs() < 1e-9, "下限が snapshots に残る");
+    assert_eq!(
+        odds_high.map(|h| (h - 2.0).abs() < 1e-9),
+        Some(true),
+        "上限(odds_high)も snapshots に残る"
+    );
 }

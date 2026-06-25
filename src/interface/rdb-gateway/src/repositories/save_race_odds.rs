@@ -70,6 +70,8 @@ pub async fn save_race_odds(pool: &PgPool, record: &RaceOddsRecord) -> Result<()
         // append-only 履歴(#232)。fetched_at が PK に入るため別時刻の取得は別行として残り、
         // 後続/事後フェッチで race_odds が上書きされても live スナップショットは消えない。
         // 同一 fetched_at の再保存は冪等にしたいので衝突時は何もしない（point-in-time をそのまま記録）。
+        // 上の race_odds INSERT と列構成（odds/odds_high/popularity/fetched_at）を共有するため、
+        // 列を増減するときは両 INSERT を同時に更新すること（片方だけの更新は履歴欠落を生む）。
         sqlx::query(
             r#"
             INSERT INTO race_odds_snapshots
