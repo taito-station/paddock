@@ -332,7 +332,7 @@ pub(crate) const JOCKEY_RECENT_FORM_LIMIT: u32 = 10; // backtest sweep で 5 / 1
 - [ ] テストが 5 タプル destructure でコンパイルが通ることを確認する
 - [ ] rdb-gateway の `jockey_recent_runs_batch` バッチ SQL に対して `EXPLAIN ANALYZE` を実行し、`deduped` CTE の `NOT EXISTS` サブクエリが想定外の重複スキャンをしていないことを確認する
 - [ ] `domain/src/prediction/scoring.rs` の `jockey_recent_form_score` に対するユニットテストを追加する（境界条件: 空スライス=None / 全欠損=None / pos=pop=clamp中央値 / 最低人気激走=clamp上限 / 大人気大敗=clamp下限）
-- [ ] バックテスト sweep 後にメトリクスを記録し ADR 0035 として棄却または採用を記録する（次の ADR 番号は 0035）
+- [ ] バックテスト sweep 後にメトリクスを記録し ADR 0038 として棄却または採用を記録する（次の ADR 番号は 0038。0035=recent_form_weight #217 / 0036=trend-n #220 / 0037=place/show・exotic 市場ブレンド棄却 で消費済み。作成時に最新の空き番号を再確認すること）
 - [ ] （任意）`JockeyFormRun.finishing_position` / `popularity` の型として `Option<NonZeroU32>` の採用を検討する（0 着順・0 人気を型レベルで弾けるが、DB の `BIGINT` からの変換コストを考慮する）
 - [ ] バックテスト評価期間: 既存 sweep との比較可能性のため `2026-03-28〜2026-05-31` を基準期間とする。ただし実施時点でより多くの開催が蓄積されている場合は最新 as-of まで延ばして標本を増やしてよい（その場合は ADR に実際の評価期間を明記すること）
 
@@ -345,4 +345,7 @@ pub(crate) const JOCKEY_RECENT_FORM_LIMIT: u32 = 10; // backtest sweep で 5 / 1
 - ADR 0016（recency 時間減衰棄却）
 - ADR 0017（jockey_surface 専用縮約棄却。`jockey_surface` 導入の経緯・限界は ADR 0017 参照）
 - ADR 0034（alpha 再調整・recency 棄却）
-- ADR 0035（未作成・backtest sweep 後に騎手直近フォームの棄却または採用を記録予定）
+- ADR 0035（recent_form_weight 再調整棄却, #217）
+- ADR 0036（直近 N 走トレンド加重平均棄却, #220）
+- ADR 0037（place/show・exotic 市場オッズブレンド棄却）
+- ADR 0038（未作成・backtest sweep 後に騎手直近フォームの棄却または採用を記録予定）
