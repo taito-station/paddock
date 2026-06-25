@@ -158,6 +158,8 @@ pub async fn jockey_recent_runs_batch(
         SELECT finishing_position, popularity, jockey
         FROM deduped
         WHERE rn <= $5
+        -- rn は PARTITION 内で date DESC, race_id DESC 順に採番されるため、
+        -- ORDER BY jockey, rn は騎手ごとに date 降順（単体版の ORDER BY date DESC, race_id DESC と等価）。
         ORDER BY jockey, rn
         "#,
     )

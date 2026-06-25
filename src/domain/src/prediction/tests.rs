@@ -794,6 +794,32 @@ fn jockey_recent_form_score_averages_multiple_runs() {
 }
 
 #[test]
+fn jockey_recent_form_score_excludes_partial_missing_runs_from_average() {
+    use super::model::JockeyFormRun;
+    // 3 走中、着順 or 人気が欠落した 2 走は母数から除外され、有効な 1 走（10人気1着→clamp 1.0）
+    // のみで平均される。欠落走を 0.5 等で埋めないことを固定する。
+    let runs = vec![
+        JockeyFormRun {
+            finishing_position: Some(1),
+            popularity: Some(10),
+        }, // 有効: clamp 1.0
+        JockeyFormRun {
+            finishing_position: None,
+            popularity: Some(3),
+        }, // 着順欠落 → 除外
+        JockeyFormRun {
+            finishing_position: Some(5),
+            popularity: None,
+        }, // 人気欠落 → 除外
+    ];
+    let score = jockey_recent_form_score(&runs).expect("有効走が 1 件あるので Some");
+    assert!(
+        (score - 1.0).abs() < 1e-12,
+        "欠落走を除外し有効 1 走のみで平均: score={score}"
+    );
+}
+
+#[test]
 fn jockey_recent_form_none_excluded_from_raw_score() {
     // jockey_recent_form=None の馬は項が母数から落ちてスコアが変わらない。
     let base = zero_factors();
