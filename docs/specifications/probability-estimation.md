@@ -118,7 +118,7 @@ raw_score =
 > 人気 vs 着順の乖離から算出するフォームスカラー（#221）。
 > 各走の signal = clamp(0.5 + (人気 − 着順) × POP_GAP_K, 0, 1) の算術平均。
 > 人気 or 着順が欠落している走は母数から除外。有効走数 0 → `None`（骨格は `recent_form` と同じ）。
-> 重み 0.25 は暫定値（`FORM_WEIGHT` 同値）。N × weight の backtest sweep 後に ADR 0037 で確定する。
+> 重み 0.25 は暫定値（`FORM_WEIGHT` 同値）。N × weight の backtest sweep 後に ADR 0038 で確定する。
 > （人気・着順はいずれも「順位」＝数値が小さいほど上位。10 番人気 1 着なら gap = 10 − 1 = 9 で好フォーム）
 
 ### ステップ 2.5: ベイズ縮約（#75, ADR 0016）
