@@ -109,7 +109,8 @@ async fn main() -> anyhow::Result<()> {
             recent_form_weight,
         } => {
             let blend_alpha = validate_blend_alpha(blend_alpha)?;
-            let config = build_estimation_config(shrinkage_m, recency_half_life, recent_form_weight)?;
+            let config =
+                build_estimation_config(shrinkage_m, recency_half_life, recent_form_weight)?;
             let from = parse_date(&from)?;
             let to = parse_date(&to)?;
             let report = app
