@@ -26,6 +26,7 @@ pub struct EstimationConfig {
     pub trend_n: u32,
 }
 
+// trend_n のデフォルト値が 0 でなく 1 のため、derive(Default) ではなく手書き impl を使う。
 impl Default for EstimationConfig {
     fn default() -> Self {
         Self {

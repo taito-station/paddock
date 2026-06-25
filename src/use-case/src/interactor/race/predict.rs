@@ -172,6 +172,7 @@ pub(crate) fn recent_form_from_runs(
     trend_n: u32,
 ) -> Option<f64> {
     debug_assert!(trend_n >= 1, "trend_n must be >= 1, got {trend_n}");
+    // 三重 min: trend_n 上界 → 近走実在数 → TREND_WEIGHTS 配列長（CLI バリデーション済みだが防衛的に維持）。
     let n = (trend_n as usize).min(runs.len()).min(TREND_WEIGHTS.len());
     let mut wsum = 0.0_f64;
     let mut wden = 0.0_f64;
