@@ -166,7 +166,7 @@ fn build_estimation_config(
         None => None,
     };
     if !(1..=TREND_N_MAX).contains(&trend_n) {
-        anyhow::bail!("--trend-n must be 1〜{TREND_N_MAX}, got {trend_n}");
+        anyhow::bail!("--trend-n must be between 1 and {TREND_N_MAX}, got {trend_n}");
     }
     Ok(EstimationConfig {
         shrinkage,

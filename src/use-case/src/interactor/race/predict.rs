@@ -79,9 +79,9 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: 
             self.repository.horse_stats_batch(&horse_names, None),
             self.repository.jockey_stats_batch(&jockey_names, None),
             self.repository.trainer_stats_batch(&trainer_names, None),
-            // limit: 最大 3 走取得し、trend_n で何走使うかを scoring 側で制御する（#220）。
+            // limit: TREND_WEIGHTS の要素数まで取得し、trend_n で何走使うかを scoring 側で制御する（#220）。
             self.repository
-                .recent_runs_batch(&horse_names, card.date, 3),
+                .recent_runs_batch(&horse_names, card.date, TREND_WEIGHTS.len() as u32),
         )?;
 
         let mut entry_factors: Vec<(HorseEntry, HorseFactors)> = Vec::new();
@@ -162,7 +162,8 @@ pub(crate) const TREND_WEIGHTS: [f64; 3] = [1.0, 0.5, 0.25];
 /// `trend_n >= 2` のとき有効スコアが得られた走を TREND_WEIGHTS で加重平均する。
 /// スコアが取れなかった走（中止・情報欠落等）は分母から除外（欠落フォールバック維持）。
 ///
-/// `before` は各走のスコア算出（`recent_form_score`）に前走間隔（日数）の計算用として渡す。
+/// `before` は各走のスコア算出（`recent_form_score`）の基準日（前走間隔計算・リーク防止）として
+/// N 走すべてに共通で渡す。
 /// `trend_n` は 1 以上でなければならない（CLI バリデーション済み）。
 pub(crate) fn recent_form_from_runs(
     runs: &[RecentRun],
@@ -412,9 +413,9 @@ mod tests {
     #[test]
     fn trend_n2_both_valid_weighted_average() {
         let before = ymd(2026, 1, 20);
-        // 14 日前（interval_form=1.0）・weight_change=0（signal=1.0） → score = 1.0
+        // 14 日前（interval_form=1.0: scoring.rs の 14〜60 日帯）・weight_change=0（signal=1.0） → score = 1.0
         let run1 = run_valid(ymd(2026, 1, 6), Some(0));
-        // 28 日前（interval_form=1.0）・weight_change=20（signal=0.0） → score = 0.5
+        // 28 日前（interval_form=1.0: 同 14〜60 日帯）・weight_change=20（signal=0.0） → score = 0.5
         let run2 = run_valid(ymd(2025, 12, 23), Some(20));
         let st = StandardTimes::default();
         let result = recent_form_from_runs(&[run1, run2], before, &st, 2).unwrap();
@@ -453,5 +454,21 @@ mod tests {
         let st = StandardTimes::default();
         let result = recent_form_from_runs(&[run1, run2], before, &st, 1).unwrap();
         assert!((result - 1.0).abs() < 1e-9, "got {result}");
+    }
+
+    #[test]
+    fn trend_n3_all_valid_uses_all_weights() {
+        let before = ymd(2026, 1, 20);
+        // score=1.0, 1.0, 0.5 の 3 走 → wsum=1.0*1+0.5*1+0.25*0.5=1.625, wden=1.75
+        let run1 = run_valid(ymd(2026, 1, 6), Some(0)); // score=1.0
+        let run2 = run_valid(ymd(2025, 12, 23), Some(0)); // score=1.0
+        let run3 = run_valid(ymd(2025, 12, 9), Some(20)); // score=0.5
+        let st = StandardTimes::default();
+        let result = recent_form_from_runs(&[run1, run2, run3], before, &st, 3).unwrap();
+        let expected = 1.625_f64 / 1.75;
+        assert!(
+            (result - expected).abs() < 1e-9,
+            "got {result}, expected {expected}"
+        );
     }
 }

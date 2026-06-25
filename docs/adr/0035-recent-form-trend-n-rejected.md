@@ -34,5 +34,6 @@ N=1（最新 1 走のみ）が最もシグナル強度を保てる。
 ## 影響
 
 - `EstimationConfig::production()` は trend_n = 1 のまま
-- `--trend-n` CLI フラグは実装済みのままスイープ再検証のために残す
+- `--trend-n` CLI フラグは `paddock-analyze backtest` サブコマンド専用フラグとして実装済みのまま残す
+  （`paddock-predict` は常に `production()` を使用するため `--trend-n` は不要）
 - `production()` のコメント「#220 backtest 後に更新予定」を「棄却（ADR-0035）」に差し替える
