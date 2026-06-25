@@ -153,6 +153,7 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: 
 /// 直近 N 走トレンドの重み（#220）。runs は date 降順なので index 0 が最新走。
 /// `[1.0, 0.5, 0.25]` = Issue #220 指定の指数的減衰ウェイト。
 /// `pub(crate)` にして backtest.rs からも参照できるようにする（バッチ取得上限と一致させるため）。
+/// この配列を変更する場合は ADR-0035・CLI の `--trend-n` help・仕様書（probability-estimation.md）も更新すること。
 pub(crate) const TREND_WEIGHTS: [f64; 3] = [1.0, 0.5, 0.25];
 
 /// 取得済みの近走 `runs`（date 降順、最大 `limit` 件）から前走フォーム [0,1] を算出する純粋関数。
@@ -162,8 +163,9 @@ pub(crate) const TREND_WEIGHTS: [f64; 3] = [1.0, 0.5, 0.25];
 /// `trend_n >= 2` のとき有効スコアが得られた走を TREND_WEIGHTS で加重平均する。
 /// スコアが取れなかった走（中止・情報欠落等）は分母から除外（欠落フォールバック維持）。
 ///
-/// `before` は各走のスコア算出（`recent_form_score`）の基準日（前走間隔計算・リーク防止）として
-/// N 走すべてに共通で渡す。
+/// `before` は予測対象レースの日付（cutoff）。`recent_form_score` の間隔シグナルは
+/// cutoff と各走の日付の差で算出するため N 走すべてに同じ `before` を渡す
+/// （走間の間隔ではなく cutoff 基準）。リーク防止（before 以降の走を除外）も兼ねる。
 /// `trend_n` は 1 以上でなければならない（CLI バリデーション済み）。
 pub(crate) fn recent_form_from_runs(
     runs: &[RecentRun],
@@ -421,6 +423,7 @@ mod tests {
         let st = StandardTimes::default();
         let result = recent_form_from_runs(&[run1, run2], before, &st, 2).unwrap();
         // wsum = 1.0*1.0 + 0.5*0.5 = 1.25, wden = 1.5 → 1.25/1.5
+        // 期待値は scoring.rs の WEIGHT_CHANGE_CAP=20.0・interval_form 14〜60 日=1.0 に依存（scoring 変更時は要確認）。
         let expected = 1.25_f64 / 1.5;
         assert!(
             (result - expected).abs() < 1e-9,
