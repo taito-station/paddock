@@ -106,9 +106,11 @@ async fn main() -> anyhow::Result<()> {
             blend_alpha,
             shrinkage_m,
             recency_half_life,
+            recent_form_weight,
         } => {
             let blend_alpha = validate_blend_alpha(blend_alpha)?;
-            let config = build_estimation_config(shrinkage_m, recency_half_life)?;
+            let config =
+                build_estimation_config(shrinkage_m, recency_half_life, recent_form_weight)?;
             let from = parse_date(&from)?;
             let to = parse_date(&to)?;
             let report = app
@@ -143,6 +145,7 @@ fn validate_blend_alpha(alpha: Option<f64>) -> anyhow::Result<Option<f64>> {
 fn build_estimation_config(
     shrinkage_m: Option<f64>,
     recency_half_life: Option<f64>,
+    recent_form_weight: Option<f64>,
 ) -> anyhow::Result<EstimationConfig> {
     let shrinkage = match shrinkage_m {
         Some(m) => {
@@ -162,7 +165,16 @@ fn build_estimation_config(
         }
         None => None,
     };
-    Ok(EstimationConfig { shrinkage, recency })
+    if let Some(w) = recent_form_weight
+        && !(w.is_finite() && w >= 0.0)
+    {
+        anyhow::bail!("--recent-form-weight must be a finite non-negative number, got {w}");
+    }
+    Ok(EstimationConfig {
+        shrinkage,
+        recency,
+        recent_form_weight,
+    })
 }
 
 /// 候補が複数ある場合に一覧を提示して終了する（ユーザーが絞り込んで再実行）。

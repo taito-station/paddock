@@ -15,12 +15,15 @@ pub struct RecencyConfig {
     pub half_life_days: f64,
 }
 
-/// 確率推定の挙動切替（#75）。いずれも `None` が現行挙動（縮約・減衰なし）で、`Default` も同様。
-/// backtest が CLI から組み立てて before/after を比較し、採用値を predict のデフォルトに反映する。
+/// 確率推定の挙動切替（#75/#217）。いずれも `None` が現行挙動（縮約・減衰なし・デフォルト重み）で、
+/// `Default` も同様。backtest が CLI から組み立てて before/after を比較し、採用値を predict のデフォルトに反映する。
 #[derive(Debug, Clone, Copy, Default)]
 pub struct EstimationConfig {
     pub shrinkage: Option<ShrinkageConfig>,
     pub recency: Option<RecencyConfig>,
+    /// 前走フォーム項の重みオーバーライド（#217）。`None` のとき `weights::FORM_WEIGHT`（0.25）を使う。
+    /// backtest の `--recent-form-weight` スイープ専用。predict 本番経路は `None`（デフォルト重み）。
+    pub recent_form_weight: Option<f64>,
 }
 
 /// 本番 predict が採用するベイズ縮約の擬似カウント（#75）。backtest（2026-03-28〜05-31 / 144R,
@@ -38,6 +41,7 @@ impl EstimationConfig {
                 pseudo_count: RECOMMENDED_SHRINKAGE_M,
             }),
             recency: None,
+            recent_form_weight: None,
         }
     }
 }
