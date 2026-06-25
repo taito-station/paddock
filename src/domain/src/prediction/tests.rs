@@ -8,7 +8,8 @@ use chrono::NaiveDate;
 use super::parse::parse_margin_lengths;
 use super::scoring::{jockey_recent_form_score, margin_form, raw_score, shrink_rate, time_form};
 use super::weights::{
-    MARGIN_CAP_LENGTHS, PRIOR_RATE, TIME_DEV_CAP, WEIGHT_CARRIED_CAP_KG, WEIGHT_CHANGE_CAP,
+    JOCKEY_RECENT_FORM_WEIGHT, MARGIN_CAP_LENGTHS, PRIOR_RATE, TIME_DEV_CAP, WEIGHT_CARRIED_CAP_KG,
+    WEIGHT_CHANGE_CAP,
 };
 use super::*;
 use crate::horse_result::{
@@ -602,6 +603,7 @@ fn shrink_cfg(m: f64) -> EstimationConfig {
         recency: None,
         recent_form_weight: None,
         trend_n: 1,
+        jockey_recent_form_weight: None,
     }
 }
 
@@ -827,19 +829,33 @@ fn jockey_recent_form_none_excluded_from_raw_score() {
         jockey_recent_form: Some(0.5),
         ..base.clone()
     };
+    // config 重み未指定（None）→ 本番の JOCKEY_RECENT_FORM_WEIGHT 定数を使う。
     let cfg = EstimationConfig::default();
-    // None と 0.5（中立値）でスコアが同一（中立シグナルは平均を動かさない）。
     let s_none = raw_score(&base, |r| r.win, &cfg);
     let s_mid = raw_score(&with_jrf, |r| r.win, &cfg);
-    // zero_factors の rate は 0 なので、jockey_recent_form=0.5 で重み付き平均が上がる
-    // （0 に 0.5 を混ぜると平均は上がる）ためこの2つが異なることを確認する。
-    // jockey_recent_form=None は zero_factors と同一スコアを維持する。
+    // Some(0.5) の寄与は本番 weight に依存する。weight=0.0（棄却・無効, ADR 0038）のときは
+    // 分子・分母とも寄与せず None と同値。weight>0（将来再評価で有効化）のときは rate=0 の
+    // zero_factors では中立 0.5 でも重み付き平均が動く。const 値に依存せず両ケースを固定する。
+    if JOCKEY_RECENT_FORM_WEIGHT > 0.0 {
+        assert!(
+            s_mid != s_none,
+            "weight>0 では中立 0.5 でも rate=0 なら変化する: none={s_none}, mid={s_mid}"
+        );
+    } else {
+        approx(s_mid, s_none);
+    }
+
+    // config で weight を明示的に与えれば、定数値に関係なく寄与する（sweep フラグの検証）。
+    let cfg_w = EstimationConfig {
+        jockey_recent_form_weight: Some(0.25),
+        ..EstimationConfig::default()
+    };
     assert!(
-        s_mid != s_none,
-        "中立でも rate=0 の場合は変化するはず: none={s_none}, mid={s_mid}"
+        raw_score(&with_jrf, |r| r.win, &cfg_w) != s_none,
+        "config 重み 0.25 を与えれば中立 0.5 でもスコアが動く"
     );
 
-    // None は母数から除外 → zero_factors と同一スコア
+    // None は母数から除外 → zero_factors と同一スコア（weight 値によらず常に成立）。
     let none_jrf = HorseFactors {
         jockey_recent_form: None,
         ..base

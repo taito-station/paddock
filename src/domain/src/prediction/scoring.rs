@@ -83,8 +83,12 @@ pub(crate) fn raw_score(
         weight += WEIGHT_CARRIED_WEIGHT;
     }
     if let Some(jrf) = factors.jockey_recent_form {
-        weighted += JOCKEY_RECENT_FORM_WEIGHT * jrf;
-        weight += JOCKEY_RECENT_FORM_WEIGHT;
+        // backtest の `--jockey-form-weight` スイープ（ADR 0038）用。predict 本番は None → 定数。
+        let jw = config
+            .jockey_recent_form_weight
+            .unwrap_or(JOCKEY_RECENT_FORM_WEIGHT);
+        weighted += jw * jrf;
+        weight += jw;
     }
     if weight == 0.0 {
         return 0.0;

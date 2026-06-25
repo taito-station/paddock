@@ -27,6 +27,9 @@ pub struct EstimationConfig {
     /// 直近 N 走トレンドの走数（#220）。重みは [1.0, 0.5, 0.25] 固定。
     /// `1` = 前走のみ（現行挙動）、`2`/`3` = 加重平均。
     pub trend_n: u32,
+    /// 騎手直近フォーム項の重みオーバーライド（#221）。`None` のとき `weights::JOCKEY_RECENT_FORM_WEIGHT`
+    /// を使う。backtest の `--jockey-form-weight` スイープ専用（ADR 0038）。predict 本番は `None`。
+    pub jockey_recent_form_weight: Option<f64>,
 }
 
 // trend_n のデフォルト値が 0 でなく 1 のため、derive(Default) ではなく手書き impl を使う。
@@ -37,6 +40,7 @@ impl Default for EstimationConfig {
             recency: None,
             recent_form_weight: None,
             trend_n: 1,
+            jockey_recent_form_weight: None,
         }
     }
 }
@@ -58,6 +62,7 @@ impl EstimationConfig {
             recency: None,
             recent_form_weight: None,
             trend_n: 1, // #220 backtest にて N=2/3 は全指標悪化のため棄却（ADR-0036）
+            jockey_recent_form_weight: None, // #221 暫定 weight（const）を使用。sweep は ADR 0038
         }
     }
 }
