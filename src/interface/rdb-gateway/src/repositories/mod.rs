@@ -2,11 +2,11 @@ mod backfill_horse_ids;
 mod course_stats;
 mod fetch_history;
 mod find_finished_races_between;
+mod find_jockey_recent_runs;
 mod find_matching_names;
 mod find_race_card;
 mod find_race_odds;
 mod find_races_by_date;
-mod find_jockey_recent_runs;
 mod find_recent_runs;
 mod horse_history;
 mod horse_stats;
@@ -25,8 +25,8 @@ use std::collections::HashMap;
 
 use chrono::{DateTime, NaiveDate, Utc};
 use paddock_domain::{
-    HorseId, HorseName, JockeyFormRun, JockeyName, PadPrediction, Race, RaceCard, RaceId,
-    RaceOdds, RecentRun, StandardTimes, Surface, TrainerName, Venue,
+    HorseId, HorseName, JockeyFormRun, JockeyName, PadPrediction, Race, RaceCard, RaceId, RaceOdds,
+    RecentRun, StandardTimes, Surface, TrainerName, Venue,
 };
 use paddock_use_case::Result as UcResult;
 use paddock_use_case::repository::{

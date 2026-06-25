@@ -3,6 +3,7 @@
 use chrono::NaiveDate;
 
 use super::config::EstimationConfig;
+use super::model::JockeyFormRun;
 use super::model::{FactorStat, HorseFactors, RateTriple};
 use super::parse::parse_margin_lengths;
 use super::weights::{
@@ -12,7 +13,6 @@ use super::weights::{
     WEIGHT_CHANGE_CAP,
 };
 use crate::horse_result::HorseResult;
-use super::model::JockeyFormRun;
 
 /// ベイズ縮約: 出走数 `starts`(=k) の少ない factor のレートを prior へ寄せる（#75）。
 /// `smoothed = (k·rate + m·prior) / (k + m)`。k≫m で ≈rate、k=0 で =prior、単調に補間する。

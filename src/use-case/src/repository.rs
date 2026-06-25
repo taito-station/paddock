@@ -598,7 +598,10 @@ pub trait StatsRepository: Send + Sync {
                 if out.contains_key(j) {
                     continue;
                 }
-                out.insert(j.clone(), self.find_jockey_recent_runs(j, before, limit).await?);
+                out.insert(
+                    j.clone(),
+                    self.find_jockey_recent_runs(j, before, limit).await?,
+                );
             }
             Ok(out)
         }

@@ -147,11 +147,7 @@ impl<R: StatsRepository + OddsRepository, P: PdfParser, F: PdfFetcher> Interacto
                 .await?;
             let jockey_form_map = self
                 .repository
-                .jockey_recent_runs_batch(
-                    &jockey_names,
-                    date,
-                    super::JOCKEY_RECENT_FORM_LIMIT,
-                )
+                .jockey_recent_runs_batch(&jockey_names, date, super::JOCKEY_RECENT_FORM_LIMIT)
                 .await?;
 
             // 標準タイム表は date 単位で取得。by_date の BTreeMap 化で同一日は外側ループで 1 回だけ

@@ -9,8 +9,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use chrono::NaiveDate;
-use paddock_domain::horse_result::{FinishingPosition, GateNum, HorseName, HorseNum, ResultStatus};
 use paddock_domain::JockeyFormRun;
+use paddock_domain::horse_result::{FinishingPosition, GateNum, HorseName, HorseNum, ResultStatus};
 use paddock_domain::{
     DatedCounts, EstimationConfig, HorseResult, JockeyName, OddsValue, Race, RaceId, RaceOdds,
     RecencyConfig, RecentRun, StandardTimes, Surface, TrackCondition, TrainerName, Venue,

@@ -719,9 +719,18 @@ fn jockey_recent_form_score_empty_is_none() {
 fn jockey_recent_form_score_all_missing_fields_is_none() {
     use super::model::JockeyFormRun;
     let runs = vec![
-        JockeyFormRun { finishing_position: None, popularity: Some(3) },
-        JockeyFormRun { finishing_position: Some(1), popularity: None },
-        JockeyFormRun { finishing_position: None, popularity: None },
+        JockeyFormRun {
+            finishing_position: None,
+            popularity: Some(3),
+        },
+        JockeyFormRun {
+            finishing_position: Some(1),
+            popularity: None,
+        },
+        JockeyFormRun {
+            finishing_position: None,
+            popularity: None,
+        },
     ];
     assert!(jockey_recent_form_score(&runs).is_none());
 }
@@ -730,7 +739,10 @@ fn jockey_recent_form_score_all_missing_fields_is_none() {
 fn jockey_recent_form_score_pop_equals_pos_is_neutral() {
     use super::model::JockeyFormRun;
     // pop=pos → gap=0 → signal=0.5
-    let runs = vec![JockeyFormRun { finishing_position: Some(3), popularity: Some(3) }];
+    let runs = vec![JockeyFormRun {
+        finishing_position: Some(3),
+        popularity: Some(3),
+    }];
     let score = jockey_recent_form_score(&runs).expect("some");
     assert!((score - 0.5).abs() < 1e-12, "score={score}");
 }
@@ -739,7 +751,10 @@ fn jockey_recent_form_score_pop_equals_pos_is_neutral() {
 fn jockey_recent_form_score_surprise_win_clamps_to_one() {
     use super::model::JockeyFormRun;
     // 10 番人気 1 着: gap=9 → 0.5+9*0.08=1.22 → clamp=1.0
-    let runs = vec![JockeyFormRun { finishing_position: Some(1), popularity: Some(10) }];
+    let runs = vec![JockeyFormRun {
+        finishing_position: Some(1),
+        popularity: Some(10),
+    }];
     let score = jockey_recent_form_score(&runs).expect("some");
     assert!((score - 1.0).abs() < 1e-12, "score={score}");
 }
@@ -748,7 +763,10 @@ fn jockey_recent_form_score_surprise_win_clamps_to_one() {
 fn jockey_recent_form_score_heavy_loss_clamps_to_zero() {
     use super::model::JockeyFormRun;
     // 1 番人気 10 着: gap=-9 → 0.5-9*0.08=-0.22 → clamp=0.0
-    let runs = vec![JockeyFormRun { finishing_position: Some(10), popularity: Some(1) }];
+    let runs = vec![JockeyFormRun {
+        finishing_position: Some(10),
+        popularity: Some(1),
+    }];
     let score = jockey_recent_form_score(&runs).expect("some");
     assert!((score - 0.0).abs() < 1e-12, "score={score}");
 }
@@ -758,9 +776,18 @@ fn jockey_recent_form_score_averages_multiple_runs() {
     use super::model::JockeyFormRun;
     // 3 走: signal = 1.0 + 0.5 + 0.0 → 平均 0.5
     let runs = vec![
-        JockeyFormRun { finishing_position: Some(1), popularity: Some(10) }, // clamp 1.0
-        JockeyFormRun { finishing_position: Some(3), popularity: Some(3) },  // 0.5
-        JockeyFormRun { finishing_position: Some(10), popularity: Some(1) }, // clamp 0.0
+        JockeyFormRun {
+            finishing_position: Some(1),
+            popularity: Some(10),
+        }, // clamp 1.0
+        JockeyFormRun {
+            finishing_position: Some(3),
+            popularity: Some(3),
+        }, // 0.5
+        JockeyFormRun {
+            finishing_position: Some(10),
+            popularity: Some(1),
+        }, // clamp 0.0
     ];
     let score = jockey_recent_form_score(&runs).expect("some");
     assert!((score - 0.5).abs() < 1e-12, "score={score}");
@@ -781,10 +808,16 @@ fn jockey_recent_form_none_excluded_from_raw_score() {
     // zero_factors の rate は 0 なので、jocket_recent_form=0.5 で重み付き平均が上がる
     // （0 に 0.5 を混ぜると平均は上がる）ためこの2つが異なることを確認する。
     // jockey_recent_form=None は zero_factors と同一スコアを維持する。
-    assert!(s_mid != s_none, "中立でも rate=0 の場合は変化するはず: none={s_none}, mid={s_mid}");
+    assert!(
+        s_mid != s_none,
+        "中立でも rate=0 の場合は変化するはず: none={s_none}, mid={s_mid}"
+    );
 
     // None は母数から除外 → zero_factors と同一スコア
-    let none_jrf = HorseFactors { jockey_recent_form: None, ..base };
+    let none_jrf = HorseFactors {
+        jockey_recent_form: None,
+        ..base
+    };
     approx(raw_score(&none_jrf, |r| r.win, &cfg), s_none);
 }
 
