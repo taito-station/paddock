@@ -9,6 +9,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use chrono::NaiveDate;
+use paddock_domain::JockeyFormRun;
 use paddock_domain::horse_result::{FinishingPosition, GateNum, HorseName, HorseNum, ResultStatus};
 use paddock_domain::{
     DatedCounts, EstimationConfig, HorseResult, JockeyName, OddsValue, Race, RaceId, RaceOdds,
@@ -161,6 +162,15 @@ impl StatsRepository for MockRepo {
         _before: NaiveDate,
         _limit: u32,
     ) -> Result<Vec<RecentRun>> {
+        Ok(Vec::new())
+    }
+
+    async fn find_jockey_recent_runs(
+        &self,
+        _jockey: &JockeyName,
+        _before: NaiveDate,
+        _limit: u32,
+    ) -> Result<Vec<JockeyFormRun>> {
         Ok(Vec::new())
     }
 
@@ -544,6 +554,7 @@ async fn backtest_wires_recency_into_horse_factors() {
         }),
         recent_form_weight: None,
         trend_n: 1,
+        jockey_recent_form_weight: None,
     };
     let on = interactor(vec![soft_track_race(None)])
         .backtest(d(2026, 1, 1), d(2026, 1, 31), None, cfg)

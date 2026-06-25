@@ -7,8 +7,8 @@ use std::collections::HashMap;
 
 use paddock_domain::horse_result::{GateNum, HorseName, HorseNum};
 use paddock_domain::{
-    HorseEntry, JockeyName, Race, RaceCard, RaceId, RecentRun, StandardTimes, Surface,
-    TrackCondition, TrainerName, Venue,
+    HorseEntry, JockeyFormRun, JockeyName, Race, RaceCard, RaceId, RecentRun, StandardTimes,
+    Surface, TrackCondition, TrainerName, Venue,
 };
 use paddock_use_case::repository::{
     CourseStatsRow, GroupStat, HorseStatsRow, JockeyStatsRow, OddsRepository, RaceCardRepository,
@@ -192,6 +192,15 @@ impl StatsRepository for MockRepo {
         _before: chrono::NaiveDate,
         _limit: u32,
     ) -> Result<Vec<RecentRun>> {
+        Ok(Vec::new())
+    }
+
+    async fn find_jockey_recent_runs(
+        &self,
+        _jockey: &JockeyName,
+        _before: chrono::NaiveDate,
+        _limit: u32,
+    ) -> Result<Vec<JockeyFormRun>> {
         Ok(Vec::new())
     }
 

@@ -46,3 +46,8 @@ pub(crate) const WEIGHT_CARRIED_CAP_KG: f64 = 3.0;
 /// レース内のタイム差は数 % に収まるため小さめに置く。暫定値で backtest（main との before/after）
 /// で寄与を確認して調整する。
 pub(crate) const TIME_DEV_CAP: f64 = 0.05;
+/// 騎手直近フォーム項の重み（#221）。**0.0（無効）**。
+/// 1561R（2026-01〜06）の weight sweep（0.0/0.1/0.25/0.5/1.0, α=0.2・m=10）で全 weight が
+/// Brier/LogLoss を単調悪化させ weight=0.0 が最良 → 棄却（ADR 0038、#217 と同型でシグナルが
+/// 縮約+市場ブレンドに吸収）。機構・`--jockey-form-weight` フラグは将来再評価のため残す（cf. ADR 0016 recency）。
+pub(crate) const JOCKEY_RECENT_FORM_WEIGHT: f64 = 0.0;

@@ -109,6 +109,7 @@ async fn main() -> anyhow::Result<()> {
             recency_half_life,
             recent_form_weight,
             trend_n,
+            jockey_form_weight,
         } => {
             let blend_alpha = validate_blend_alpha(blend_alpha)?;
             let config = build_estimation_config(
@@ -116,6 +117,7 @@ async fn main() -> anyhow::Result<()> {
                 recency_half_life,
                 recent_form_weight,
                 trend_n,
+                jockey_form_weight,
             )?;
             let from = parse_date(&from)?;
             let to = parse_date(&to)?;
@@ -154,6 +156,7 @@ fn build_estimation_config(
     recency_half_life: Option<f64>,
     recent_form_weight: Option<f64>,
     trend_n: u32,
+    jockey_form_weight: Option<f64>,
 ) -> anyhow::Result<EstimationConfig> {
     let shrinkage = match shrinkage_m {
         Some(m) => {
@@ -178,6 +181,11 @@ fn build_estimation_config(
     {
         anyhow::bail!("--recent-form-weight must be a finite non-negative number, got {w}");
     }
+    if let Some(w) = jockey_form_weight
+        && !(w.is_finite() && w >= 0.0)
+    {
+        anyhow::bail!("--jockey-form-weight must be a finite non-negative number, got {w}");
+    }
     if !(1..=TREND_N_MAX).contains(&trend_n) {
         anyhow::bail!("--trend-n must be between 1 and {TREND_N_MAX}, got {trend_n}");
     }
@@ -186,6 +194,7 @@ fn build_estimation_config(
         recency,
         recent_form_weight,
         trend_n,
+        jockey_recent_form_weight: jockey_form_weight,
     })
 }
 

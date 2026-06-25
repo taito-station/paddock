@@ -77,14 +77,15 @@ raw_score =
     [ + 1.0  × horse_track_condition_rate ] // 馬の馬場状態別実績（馬場状態あり×実績ありのときのみ, #73）
     [ + 0.25 × recent_form ]         // 前走フォームトレンド[0,1]（前走ありのときのみ, #31/#220）
     [ + 0.25 × weight_carried ]      // 斤量のレース内相対[0,1]（斤量あり×field平均ありのときのみ, #135）
-    ) / Σ(present weights)           // 例: 全項あり=7.5、全項なし: Σ重み=0（下記 注2）
+    [ + 0.0  × jockey_recent_form ]  // 騎手直近 N 走フォーム[0,1]（#221, sweep で棄却→重み 0.0 無効, 注6）
+    ) / Σ(present weights)           // 例: 全項あり=7.5（jockey_recent_form は重み 0 で実質不参加）、全項なし: Σ重み=0（下記 注2）
 ```
 
 > 注1: **「実績なし」の項はその項と重みを母数から除外する（0 埋め＝全敗扱いにしない）**（ADR 0007/0014）。
 > 当該グループの出走実績が無い（グループ不在・出走 0 件）factor は全て `None`: コース枠順
 > （`course_gate`）・馬の芝ダ／距離帯（`horse_surface`/`horse_distance`）・騎手（`jockey_surface`、騎手
 > 未登録も含む）・調教師（`trainer_surface`）・馬場状態（`horse_track_condition`）・前走（`recent_form`）・
-> 斤量（`weight_carried`、斤量未取得 or field 平均なし）。
+> 斤量（`weight_carried`、斤量未取得 or field 平均なし）・騎手直近フォーム（`jockey_recent_form`、騎手未登録 or 近走なし）。
 > #81 で 0 埋めだった course_gate/horse_surface/horse_distance/jockey_surface を None 除外へ統一した。
 > これらの項は「平均からの差分」としてのみ効き、欠落で不当に減点されない。全馬が同条件のときは定数除算
 > となり相対順位は不変。
@@ -113,6 +114,15 @@ raw_score =
 > **現状の制約**: 統計母数 `results.trainer`（および netkeiba 過去走）が未充足のため、本項は実データ上
 > まだ発火しない。母数充足（結果 PDF / netkeiba 過去走の trainer 抽出）は別 Issue。出馬表 PDF パーサの
 > trainer 抽出も別 Issue（PDF 経路は当面 `trainer=None`）。
+> 注6: `jockey_recent_form` は騎手の直近 N 走（N=10, `JOCKEY_RECENT_FORM_LIMIT`）における
+> 人気 vs 着順の乖離から算出するフォームスカラー（#221）。
+> 各走の signal = clamp(0.5 + (人気 − 着順) × POP_GAP_K, 0, 1) の算術平均。
+> 人気 or 着順が欠落している走は母数から除外。有効走数 0 → `None`（骨格は `recent_form` と同じ）。
+> （人気・着順はいずれも「順位」＝数値が小さいほど上位。10 番人気 1 着なら gap = 10 − 1 = 9 で好フォーム）
+> **重み 0.0（無効・棄却, ADR 0038）**: 1561R（2026-01〜06）の weight sweep（0.0/0.1/0.25/0.5/1.0,
+> α=0.2・m=10）で全 weight が Brier/LogLoss を単調悪化させ weight=0.0 が最良だった。#217（recent_form
+> weight）と同型で、シグナルが縮約 m=10 + 市場ブレンド α=0.2 に吸収される。算出機構と backtest の
+> `--jockey-form-weight` スイープフラグは将来の再評価のため残す（cf. recency 無効化 ADR 0016）。
 
 ### ステップ 2.5: ベイズ縮約（#75, ADR 0016）
 

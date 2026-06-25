@@ -3,9 +3,9 @@ use std::collections::HashMap;
 
 use chrono::{DateTime, NaiveDate, Utc};
 use paddock_domain::{
-    BetType, HorseId, HorseName, JockeyName, Mark, OrderedPair, OrderedTriple, PadPrediction, Pair,
-    Race, RaceCard, RaceId, RaceOdds, RecentRun, StandardTimes, Surface, TrackCondition,
-    TrainerName, Triple, Venue,
+    BetType, HorseId, HorseName, JockeyFormRun, JockeyName, Mark, OrderedPair, OrderedTriple,
+    PadPrediction, Pair, Race, RaceCard, RaceId, RaceOdds, RecentRun, StandardTimes, Surface,
+    TrackCondition, TrainerName, Triple, Venue,
 };
 
 use crate::error::Result;
@@ -567,6 +567,40 @@ pub trait StatsRepository: Send + Sync {
                 out.insert(
                     name.clone(),
                     self.find_recent_runs(name, before, limit).await?,
+                );
+            }
+            Ok(out)
+        }
+    }
+
+    /// 指定騎手の `before` より前（`races.date < before`）の近走を date 降順で最大 `limit` 件返す
+    /// （#221）。戻り要素 `JockeyFormRun` は着順・人気のみを運ぶ（フォームシグナル算出に特化）。
+    /// `before` 制約によりバックテスト時のリークを防ぐ。pdf/netkeiba 双方の成績を対象とする。
+    fn find_jockey_recent_runs(
+        &self,
+        jockey: &JockeyName,
+        before: NaiveDate,
+        limit: u32,
+    ) -> impl Future<Output = Result<Vec<JockeyFormRun>>> + Send;
+
+    /// 複数騎手の `find_jockey_recent_runs` をまとめて返す（#221）。既定実装は per-item ループ。
+    /// rdb-gateway のみが全騎手一括クエリで override する。返却 map は `jockeys` の全騎手を含む
+    /// （近走が無い騎手は空 `Vec`）。
+    fn jockey_recent_runs_batch(
+        &self,
+        jockeys: &[JockeyName],
+        before: NaiveDate,
+        limit: u32,
+    ) -> impl Future<Output = Result<HashMap<JockeyName, Vec<JockeyFormRun>>>> + Send {
+        async move {
+            let mut out = HashMap::new();
+            for j in jockeys {
+                if out.contains_key(j) {
+                    continue;
+                }
+                out.insert(
+                    j.clone(),
+                    self.find_jockey_recent_runs(j, before, limit).await?,
                 );
             }
             Ok(out)

@@ -75,13 +75,18 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: 
         // as_of: None = 全期間統計（predict は出馬表日時点での履歴制限なし。
         // リーク防止の as_of は backtest 経路のみ必要）。
         // try_join! の実際の並列度は接続プールのコネクション数に依存する。
-        let (horse_map, jockey_map, trainer_map, runs_map) = tokio::try_join!(
+        let (horse_map, jockey_map, trainer_map, runs_map, jockey_form_map) = tokio::try_join!(
             self.repository.horse_stats_batch(&horse_names, None),
             self.repository.jockey_stats_batch(&jockey_names, None),
             self.repository.trainer_stats_batch(&trainer_names, None),
             // limit: TREND_WEIGHTS の要素数まで取得し、trend_n で何走使うかを scoring 側で制御する（#220）。
             self.repository
                 .recent_runs_batch(&horse_names, card.date, TREND_WEIGHTS.len() as u32),
+            self.repository.jockey_recent_runs_batch(
+                &jockey_names,
+                card.date,
+                super::JOCKEY_RECENT_FORM_LIMIT,
+            ),
         )?;
 
         let mut entry_factors: Vec<(HorseEntry, HorseFactors)> = Vec::new();
@@ -104,6 +109,11 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: 
                 .unwrap_or(&[]);
             let recent_form =
                 recent_form_from_runs(recent_runs, card.date, &standard_times, config.trend_n);
+            let jockey_recent_form = entry
+                .jockey
+                .as_ref()
+                .and_then(|j| jockey_form_map.get(j))
+                .and_then(|runs| paddock_domain::jockey_recent_form_score(runs));
             let factors = build_factors(
                 entry,
                 &course,
@@ -115,6 +125,7 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: 
                 None, // recency: production() では無効
                 card.date,
                 &config,
+                jockey_recent_form,
             );
             entry_factors.push((entry.clone(), factors));
         }
@@ -223,6 +234,7 @@ pub(crate) fn build_factors(
     recency: Option<&HorseRecencyStats>,
     as_of_date: NaiveDate,
     config: &EstimationConfig,
+    jockey_recent_form: Option<f64>,
 ) -> HorseFactors {
     let gate_label = gate_group_label(entry.gate_num.value());
     let surf_label = surface_label(race.surface);
@@ -271,6 +283,7 @@ pub(crate) fn build_factors(
             .weight_carried
             .zip(race.mean_weight)
             .map(|(w, mean)| paddock_domain::prediction::weight_factor(w, mean)),
+        jockey_recent_form,
     }
 }
 
