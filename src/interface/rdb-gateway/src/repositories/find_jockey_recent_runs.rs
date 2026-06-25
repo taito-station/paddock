@@ -177,6 +177,9 @@ pub async fn jockey_recent_runs_batch(
         out.insert(j.clone(), Vec::new());
     }
     for row in rows {
+        // row.jockey は WHERE jockey = ANY($正規化済み JockeyName 群) で絞った結果なので、
+        // 正規化済みの値と byte 一致する。try_from は冪等で成功し（不正値混入時のみ Err で全体中断＝
+        // データ異常を検知）、get_mut も事前初期化した out のキーに必ず命中する（取りこぼしなし）。
         let name = JockeyName::try_from(row.jockey)
             .map_err(|e| crate::Error::Data(format!("invalid jockey name: {e}")))?;
         if let Some(v) = out.get_mut(&name) {
