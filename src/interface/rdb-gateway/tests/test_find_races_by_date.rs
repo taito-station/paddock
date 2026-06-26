@@ -146,3 +146,16 @@ async fn find_race_card_round_trips_date(pool: sqlx::PgPool) {
     );
     assert_eq!(loaded.entries.len(), 1);
 }
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn find_race_card_post_time_none_round_trips(pool: sqlx::PgPool) {
+    // PDF 経路・旧データ相当の post_time=None が NULL として保存され、None で読み戻る（#235）。
+    let repo = PostgresRepository::new(pool);
+    let id = RaceId::try_from("2026-3-nakayama-8-3R").unwrap();
+    let mut c = card("2026-3-nakayama-8-3R", 3);
+    c.post_time = None;
+    repo.save_race_card(&c).await.unwrap();
+
+    let loaded = repo.find_race_card(&id).await.unwrap().unwrap();
+    assert_eq!(loaded.post_time, None, "post_time 未設定は None で往復する");
+}

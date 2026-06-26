@@ -42,3 +42,15 @@ fn parses_card_meta_and_entries() {
     let nums: Vec<u32> = card.entries.iter().map(|e| e.horse_num.value()).collect();
     assert_eq!(nums, (1..=17).collect::<Vec<_>>());
 }
+
+// 発走時刻表記（「HH:MM発走」）が無い HTML では post_time が best-effort で None になり、
+// それでもカード自体は他項目から組める（#235）。fixture から「発走」アンカーを除いて再現する。
+#[test]
+fn post_time_is_none_when_absent() {
+    let html = FIXTURE.replace("発走", "");
+    let card = parse_card(&html, RACE_ID).expect("parse card");
+    assert_eq!(card.post_time, None, "発走表記が無ければ post_time は None");
+    // 発走時刻が無くても他のメタ・出走馬は通常どおり取れる（カード保存を止めない）。
+    assert_eq!(card.distance, 1600);
+    assert_eq!(card.entries.len(), 17);
+}
