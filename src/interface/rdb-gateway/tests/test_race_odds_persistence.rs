@@ -448,3 +448,157 @@ async fn as_of_filters_on_fetched_at_date(pool: sqlx::PgPool) {
         "as_of より後に取得されたオッズはリーク防止で除外される"
     );
 }
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn snapshots_retain_history_across_fetches(pool: sqlx::PgPool) {
+    // race_odds は最新値で上書きされるが、race_odds_snapshots は fetched_at ごとに履歴を
+    // 残す（#232）。締切前 live が後続/事後フェッチで消えないことを担保する。
+    let repo = PostgresRepository::new(pool);
+
+    // 1) 締切前 live 相当: odds=3.5 を 10:00 に保存。
+    repo.save_race_odds(&RaceOddsRecord {
+        race_id: race_id(),
+        fetched_at: Utc.with_ymd_and_hms(2026, 4, 19, 10, 0, 0).unwrap(),
+        rows: vec![OddsRow {
+            bet_type: "win".to_string(),
+            combination_key: "1".to_string(),
+            odds: 3.5,
+            odds_high: None,
+            popularity: None,
+        }],
+    })
+    .await
+    .unwrap();
+
+    // 2) 事後フェッチ相当: 同一キーを別時刻 12:00 に odds=4.0 で再保存。
+    repo.save_race_odds(&RaceOddsRecord {
+        race_id: race_id(),
+        fetched_at: Utc.with_ymd_and_hms(2026, 4, 19, 12, 0, 0).unwrap(),
+        rows: vec![OddsRow {
+            bet_type: "win".to_string(),
+            combination_key: "1".to_string(),
+            odds: 4.0,
+            odds_high: None,
+            popularity: None,
+        }],
+    })
+    .await
+    .unwrap();
+
+    // race_odds は最新値の単一行（既存キャッシュ挙動は不変）。
+    let cache: Vec<f64> = sqlx::query_scalar(
+        "SELECT odds FROM race_odds \
+         WHERE race_id = $1 AND bet_type = 'win' AND combination_key = '1'",
+    )
+    .bind(race_id().value())
+    .fetch_all(&repo.pool)
+    .await
+    .unwrap();
+    assert_eq!(cache, vec![4.0], "race_odds は最新値1行のみ");
+
+    // snapshots は両時刻の履歴を保持し、live(3.5) が事後フェッチ(4.0)で消えない。
+    let history: Vec<f64> = sqlx::query_scalar(
+        "SELECT odds FROM race_odds_snapshots \
+         WHERE race_id = $1 AND bet_type = 'win' AND combination_key = '1' \
+         ORDER BY fetched_at",
+    )
+    .bind(race_id().value())
+    .fetch_all(&repo.pool)
+    .await
+    .unwrap();
+    assert_eq!(history, vec![3.5, 4.0], "別時刻の取得が時系列で両方残る");
+}
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn snapshots_idempotent_on_same_fetched_at(pool: sqlx::PgPool) {
+    // 同一 fetched_at の再保存は履歴を増やさない（ON CONFLICT DO NOTHING の冪等性）。
+    let repo = PostgresRepository::new(pool);
+    let record = || RaceOddsRecord {
+        race_id: race_id(),
+        fetched_at: fetched_at(),
+        rows: vec![OddsRow {
+            bet_type: "win".to_string(),
+            combination_key: "1".to_string(),
+            odds: 3.5,
+            odds_high: None,
+            popularity: None,
+        }],
+    };
+    repo.save_race_odds(&record()).await.unwrap();
+    repo.save_race_odds(&record()).await.unwrap();
+
+    let count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM race_odds_snapshots \
+         WHERE race_id = $1 AND bet_type = 'win' AND combination_key = '1'",
+    )
+    .bind(race_id().value())
+    .fetch_one(&repo.pool)
+    .await
+    .unwrap();
+    assert_eq!(count, 1, "同一 fetched_at の再保存で履歴は重複しない");
+}
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn snapshots_skip_invalid_odds_rows(pool: sqlx::PgPool) {
+    // 値域違反行は race_odds 同様 snapshots にも入らない（保存ガードの内側で両テーブルへ書くため）。
+    let repo = PostgresRepository::new(pool);
+    let otriple = OrderedTriple::try_from((horse(3), horse(1), horse(2))).unwrap();
+    repo.save_race_odds(&RaceOddsRecord {
+        race_id: race_id(),
+        fetched_at: fetched_at(),
+        rows: vec![
+            OddsRow {
+                bet_type: "win".to_string(),
+                combination_key: "1".to_string(),
+                odds: 3.5,
+                odds_high: None,
+                popularity: None,
+            },
+            OddsRow::trifecta(otriple, 0.0), // 値域違反
+        ],
+    })
+    .await
+    .unwrap();
+
+    // 残る 1 行が（弾かれた trifecta ではなく）有効な win 行であることまで確認する。
+    let rows: Vec<(String, String)> = sqlx::query_as(
+        "SELECT bet_type, combination_key FROM race_odds_snapshots WHERE race_id = $1",
+    )
+    .bind(race_id().value())
+    .fetch_all(&repo.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        rows,
+        vec![("win".to_string(), "1".to_string())],
+        "snapshots に残るのは有効な win 行のみ（trifecta 0.0 は弾かれる）"
+    );
+}
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn snapshots_persist_band_odds_high(pool: sqlx::PgPool) {
+    // 幅 odds（複勝・ワイドの odds_high）も snapshots に二重書きされることを担保する。
+    let repo = PostgresRepository::new(pool);
+    repo.save_race_odds(&RaceOddsRecord {
+        race_id: race_id(),
+        fetched_at: fetched_at(),
+        rows: vec![OddsRow::place(1, 1.5, 2.0, None)],
+    })
+    .await
+    .unwrap();
+
+    let (odds, odds_high): (f64, Option<f64>) = sqlx::query_as(
+        "SELECT odds, odds_high FROM race_odds_snapshots \
+         WHERE race_id = $1 AND bet_type = 'place' AND combination_key = '1'",
+    )
+    .bind(race_id().value())
+    .fetch_one(&repo.pool)
+    .await
+    .unwrap();
+    assert!((odds - 1.5).abs() < 1e-9, "下限が snapshots に残る");
+    assert_eq!(
+        odds_high.map(|h| (h - 2.0).abs() < 1e-9),
+        Some(true),
+        "上限(odds_high)も snapshots に残る"
+    );
+}
