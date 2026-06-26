@@ -1,4 +1,4 @@
-use chrono::NaiveDate;
+use chrono::{NaiveDate, NaiveTime};
 use paddock_domain::{
     FinishingPosition, GateNum, HorseId, HorseName, HorseNum, JockeyName, OrderedPair,
     OrderedTriple, Pair, ResultStatus, Surface, TimeSeconds, TrackCondition, TrainerName, Triple,
@@ -85,6 +85,8 @@ pub struct FetchedEntry {
 #[derive(Debug, Clone, PartialEq)]
 pub struct FetchedCard {
     pub date: NaiveDate,
+    /// 発走時刻（#235）。RaceData01「HH:MM発走」から取得。取得失敗時は `None`（best-effort）。
+    pub post_time: Option<NaiveTime>,
     pub venue: Venue,
     pub round: u32,
     pub day: u32,

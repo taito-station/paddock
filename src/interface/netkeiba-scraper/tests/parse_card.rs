@@ -1,4 +1,4 @@
-use chrono::NaiveDate;
+use chrono::{NaiveDate, NaiveTime};
 use netkeiba_scraper::parse::parse_card;
 use paddock_domain::{Surface, Venue};
 
@@ -17,6 +17,8 @@ fn parses_card_meta_and_entries() {
     assert_eq!(card.surface, Surface::Turf);
     assert_eq!(card.distance, 1600);
     assert_eq!(card.date, NaiveDate::from_ymd_opt(2026, 6, 7).unwrap());
+    // 発走時刻（#235）。RaceData01「15:40発走」から抽出する。
+    assert_eq!(card.post_time, NaiveTime::from_hms_opt(15, 40, 0));
 
     assert_eq!(card.entries.len(), 17);
 

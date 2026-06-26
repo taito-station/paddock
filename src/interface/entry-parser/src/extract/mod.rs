@@ -272,6 +272,8 @@ fn parse_column(
     Ok(Some(RaceCard {
         race_id,
         date,
+        // 出馬表 PDF に発走時刻は無いため None（#235）。netkeiba 経路でのみ埋まる。
+        post_time: None,
         venue,
         round,
         day,
