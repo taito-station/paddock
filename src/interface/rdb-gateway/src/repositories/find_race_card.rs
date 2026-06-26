@@ -1,4 +1,4 @@
-use chrono::NaiveDate;
+use chrono::{NaiveDate, NaiveTime};
 use paddock_domain::{
     GateNum, HorseEntry, HorseName, HorseNum, JockeyName, RaceCard, RaceId, Surface, TrainerName,
     Venue,
@@ -21,6 +21,7 @@ type EntryRow = (
 struct CardRow {
     race_id: String,
     date: Option<String>,
+    post_time: Option<String>,
     venue: String,
     round: i64,
     day: i64,
@@ -32,7 +33,7 @@ struct CardRow {
 pub async fn find_race_card(pool: &PgPool, race_id: &RaceId) -> Result<Option<RaceCard>> {
     let card_row: Option<CardRow> = sqlx::query_as(
         r#"
-        SELECT race_id, date, venue, round, day, race_num, surface, distance
+        SELECT race_id, date, post_time, venue, round, day, race_num, surface, distance
         FROM race_cards
         WHERE race_id = $1
         "#,
@@ -47,6 +48,7 @@ pub async fn find_race_card(pool: &PgPool, race_id: &RaceId) -> Result<Option<Ra
     let CardRow {
         race_id: race_id_str,
         date: date_str,
+        post_time: post_time_str,
         venue: venue_str,
         round,
         day,
@@ -82,6 +84,14 @@ pub async fn find_race_card(pool: &PgPool, race_id: &RaceId) -> Result<Option<Ra
     })?;
     let date = NaiveDate::parse_from_str(&date_str, "%Y-%m-%d")
         .map_err(|e| Error::Data(format!("race_card date '{date_str}' のパースに失敗: {e}")))?;
+    // post_time は #235 で追加。netkeiba 経路のみ埋め、PDF 経路・旧データは NULL のため、
+    // date のような必須エラーにはせず None を許容する。値があればパース不正のみ Error。
+    let post_time = post_time_str
+        .map(|s| {
+            NaiveTime::parse_from_str(&s, "%H:%M")
+                .map_err(|e| Error::Data(format!("race_card post_time '{s}' のパースに失敗: {e}")))
+        })
+        .transpose()?;
 
     let mut entries = Vec::with_capacity(entry_rows.len());
     for (gate_num, horse_num, horse_name, jockey, trainer, weight_carried) in entry_rows {
@@ -104,6 +114,7 @@ pub async fn find_race_card(pool: &PgPool, race_id: &RaceId) -> Result<Option<Ra
     Ok(Some(RaceCard {
         race_id,
         date,
+        post_time,
         venue,
         round: round as u32,
         day: day as u32,

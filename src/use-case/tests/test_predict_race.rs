@@ -40,6 +40,7 @@ fn make_race_card(race_id: &str) -> RaceCard {
     RaceCard {
         race_id: RaceId::try_from(race_id).unwrap(),
         date: chrono::NaiveDate::from_ymd_opt(2026, 1, 1).unwrap(),
+        post_time: None,
         venue: Venue::Tokyo,
         round: 1,
         day: 1,

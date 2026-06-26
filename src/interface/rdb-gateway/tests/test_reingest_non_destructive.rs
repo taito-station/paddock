@@ -166,6 +166,7 @@ async fn save_race_card_reingest_removes_only_absent_entries(pool: sqlx::PgPool)
     let card = |entries: Vec<HorseEntry>| RaceCard {
         race_id: RaceId::try_from(rid).unwrap(),
         date: d(),
+        post_time: None,
         venue: Venue::Nakayama,
         round: 3,
         day: 8,
@@ -201,6 +202,7 @@ async fn save_race_card_coalesce_keeps_trainer_from_netkeiba(pool: sqlx::PgPool)
     let make_card = |trainer: Option<&str>| RaceCard {
         race_id: RaceId::try_from(rid).unwrap(),
         date: d(),
+        post_time: None,
         venue: Venue::Nakayama,
         round: 3,
         day: 8,
@@ -283,6 +285,7 @@ async fn save_race_card_normalizes_trainer_abbr_to_full_name(pool: sqlx::PgPool)
     repo.save_race_card(&RaceCard {
         race_id: RaceId::try_from(card_rid).unwrap(),
         date: d(),
+        post_time: None,
         venue: Venue::Nakayama,
         round: 3,
         day: 8,
@@ -357,6 +360,7 @@ async fn save_race_card_normalizes_trainer_via_same_race_join(pool: sqlx::PgPool
     repo.save_race_card(&RaceCard {
         race_id: RaceId::try_from(rid).unwrap(),
         date: d(),
+        post_time: None,
         venue: Venue::Nakayama,
         round: 3,
         day: 8,
@@ -396,6 +400,7 @@ async fn save_race_card_keeps_trainer_when_no_results_match(pool: sqlx::PgPool) 
     repo.save_race_card(&RaceCard {
         race_id: RaceId::try_from(rid).unwrap(),
         date: d(),
+        post_time: None,
         venue: Venue::Nakayama,
         round: 3,
         day: 8,
@@ -472,6 +477,7 @@ async fn save_race_card_keeps_ambiguous_trainer_abbr(pool: sqlx::PgPool) {
     repo.save_race_card(&RaceCard {
         race_id: RaceId::try_from(card_rid).unwrap(),
         date: d(),
+        post_time: None,
         venue: Venue::Nakayama,
         round: 3,
         day: 8,

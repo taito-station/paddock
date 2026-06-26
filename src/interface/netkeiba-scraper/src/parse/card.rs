@@ -1,6 +1,6 @@
 use std::sync::LazyLock;
 
-use chrono::NaiveDate;
+use chrono::{NaiveDate, NaiveTime};
 use paddock_domain::{GateNum, HorseId, HorseName, HorseNum, JockeyName, Surface, TrainerName};
 use paddock_use_case::netkeiba_scraper::{FetchedCard, FetchedEntry};
 use regex::Regex;
@@ -17,6 +17,10 @@ static SURFACE_DISTANCE_RE: LazyLock<Regex> =
 /// `YYYY年M月D日` の開催日表記を取る正規表現。
 static DATE_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(\d{4})年(\d{1,2})月(\d{1,2})日").expect("valid date regex"));
+
+/// `15:40発走` 等の発走時刻表記を取る正規表現（#235）。
+static POST_TIME_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(\d{1,2}):(\d{2})発走").expect("valid post_time regex"));
 
 /// 出馬表 (`race/shutuba.html`) のHTMLから当日のレースカード（メタ + 全出走馬）を抽出する。
 ///
@@ -42,10 +46,12 @@ pub fn parse_card(html: &str, netkeiba_race_id: &str) -> Result<FetchedCard> {
 
     let (surface, distance) = extract_surface_distance(&doc)?;
     let date = extract_date(&doc, year)?;
+    let post_time = extract_post_time(&doc);
     let entries = extract_entries(&doc)?;
 
     Ok(FetchedCard {
         date,
+        post_time,
         venue,
         round,
         day,
@@ -54,6 +60,24 @@ pub fn parse_card(html: &str, netkeiba_race_id: &str) -> Result<FetchedCard> {
         distance,
         entries,
     })
+}
+
+/// `div.RaceData01` の「HH:MM発走」から発走時刻を読む（#235）。surface/distance と同じ
+/// RaceData01 テキストにあるため追加リクエストは不要。取れない場合は `None`（best-effort：
+/// 発走時刻はカード取得の必須項目ではなく、欠けてもカード保存を止めない）。
+fn extract_post_time(doc: &Html) -> Option<NaiveTime> {
+    let data_sel = sel("div.RaceData01").ok()?;
+    let text = doc.select(&data_sel).next()?.text().collect::<String>();
+    let Some(caps) = POST_TIME_RE.captures(&text) else {
+        // RaceData01 自体は取れている（surface/distance は読めている）のに発走時刻だけ
+        // 読めないのは netkeiba のレイアウト変更の兆候になりうる。best-effort で None に
+        // 落とすが、将来の取得失敗を切り分けられるよう debug で可視化する。
+        tracing::debug!("RaceData01 から発走時刻(HH:MM発走)を読めませんでした");
+        return None;
+    };
+    let hour: u32 = caps[1].parse().ok()?;
+    let min: u32 = caps[2].parse().ok()?;
+    NaiveTime::from_hms_opt(hour, min, 0)
 }
 
 /// `div.RaceData01` のテキストから `芝1600m` 等を読み、Surface と距離(m)に変換する。

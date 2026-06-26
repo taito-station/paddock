@@ -70,6 +70,7 @@ impl<R: RaceCardRepository + OddsRepository + FetchRepository, S: NetkeibaScrape
             let card = RaceCard {
                 race_id: race_id.clone(),
                 date: fetched.date,
+                post_time: fetched.post_time,
                 venue: fetched.venue,
                 round: fetched.round,
                 day: fetched.day,

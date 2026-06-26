@@ -116,6 +116,7 @@ impl NetkeibaScraper for FakeScraper {
         *self.card_fetches.lock().unwrap() += 1;
         Ok(FetchedCard {
             date: NaiveDate::from_ymd_opt(2026, 6, 7).unwrap(),
+            post_time: chrono::NaiveTime::from_hms_opt(15, 40, 0),
             venue: Venue::Tokyo,
             round: 3,
             day: 2,

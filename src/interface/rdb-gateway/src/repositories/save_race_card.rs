@@ -10,10 +10,13 @@ pub async fn save_race_card(pool: &PgPool, card: &RaceCard) -> Result<()> {
 
     sqlx::query(
         r#"
-        INSERT INTO race_cards (race_id, date, venue, round, day, race_num, surface, distance)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        INSERT INTO race_cards (race_id, date, post_time, venue, round, day, race_num, surface, distance)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
         ON CONFLICT(race_id) DO UPDATE SET
             date     = excluded.date,
+            -- post_time は netkeiba 経路のみが埋める。新値が NULL のときは既存値を保持し、
+            -- 後続の PDF 取り込み（post_time なし）が netkeiba の発走時刻を消さないようにする（#235）。
+            post_time = COALESCE(excluded.post_time, race_cards.post_time),
             venue    = excluded.venue,
             round    = excluded.round,
             day      = excluded.day,
@@ -24,6 +27,7 @@ pub async fn save_race_card(pool: &PgPool, card: &RaceCard) -> Result<()> {
     )
     .bind(card.race_id.value())
     .bind(card.date.format("%Y-%m-%d").to_string())
+    .bind(card.post_time.map(|t| t.format("%H:%M").to_string()))
     .bind(card.venue.as_jp())
     .bind(card.round as i64)
     .bind(card.day as i64)

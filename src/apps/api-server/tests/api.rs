@@ -61,6 +61,7 @@ fn sample_card() -> RaceCard {
     RaceCard {
         race_id: RaceId::try_from(RACE_ID).unwrap(),
         date: date(),
+        post_time: None,
         venue: Venue::Nakayama,
         round: 1,
         day: 1,

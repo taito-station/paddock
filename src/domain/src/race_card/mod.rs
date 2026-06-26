@@ -1,4 +1,4 @@
-use chrono::NaiveDate;
+use chrono::{NaiveDate, NaiveTime};
 
 use crate::horse_result::{GateNum, HorseName, HorseNum, JockeyName, TrainerName};
 use crate::race::{RaceId, Surface, Venue};
@@ -11,6 +11,9 @@ pub struct RaceCard {
     /// 開催日。出馬表 PDF には日付テキストが無いため、取り込み元ファイル名の
     /// `YYYYMMDD` から導出してセットする（use-case 層の ingest で設定）。
     pub date: NaiveDate,
+    /// 発走時刻（#235）。netkeiba 出馬表 RaceData01 の「HH:MM発走」から取得。
+    /// 出馬表 PDF パーサは未対応のため PDF 経路は `None`。netkeiba 経路でも取得失敗時は `None`。
+    pub post_time: Option<NaiveTime>,
     pub venue: Venue,
     pub round: u32,
     pub day: u32,

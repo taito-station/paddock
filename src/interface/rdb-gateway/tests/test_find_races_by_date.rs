@@ -1,7 +1,7 @@
 //! `find_races_by_date`（races ∪ race_cards）と `find_race_card` の date 往復を
 //! Postgres（#[sqlx::test] の一時DB）で検証する。#26 の中核ロジックの回帰防止。
 
-use chrono::NaiveDate;
+use chrono::{NaiveDate, NaiveTime};
 use paddock_domain::{
     GateNum, HorseEntry, HorseName, HorseNum, Race, RaceCard, RaceId, Surface, TrackCondition,
     Venue,
@@ -30,11 +30,17 @@ fn race(race_id: &str, race_num: u32) -> Race {
     }
 }
 
+/// 出馬表の発走時刻（#235 の往復検証に使う）。
+fn pt() -> NaiveTime {
+    NaiveTime::from_hms_opt(15, 40, 0).unwrap()
+}
+
 /// 出馬表(race_cards)行。distance=1800 は race() の 2000 と区別して優先判定に使う。
 fn card(race_id: &str, race_num: u32) -> RaceCard {
     RaceCard {
         race_id: RaceId::try_from(race_id).unwrap(),
         date: d(),
+        post_time: Some(pt()),
         venue: Venue::Nakayama,
         round: 3,
         day: 8,
@@ -133,5 +139,23 @@ async fn find_race_card_round_trips_date(pool: sqlx::PgPool) {
 
     let loaded = repo.find_race_card(&id).await.unwrap().unwrap();
     assert_eq!(loaded.date, d());
+    assert_eq!(
+        loaded.post_time,
+        Some(pt()),
+        "発走時刻が HH:MM で往復する（#235）"
+    );
     assert_eq!(loaded.entries.len(), 1);
+}
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn find_race_card_post_time_none_round_trips(pool: sqlx::PgPool) {
+    // PDF 経路・旧データ相当の post_time=None が NULL として保存され、None で読み戻る（#235）。
+    let repo = PostgresRepository::new(pool);
+    let id = RaceId::try_from("2026-3-nakayama-8-3R").unwrap();
+    let mut c = card("2026-3-nakayama-8-3R", 3);
+    c.post_time = None;
+    repo.save_race_card(&c).await.unwrap();
+
+    let loaded = repo.find_race_card(&id).await.unwrap().unwrap();
+    assert_eq!(loaded.post_time, None, "post_time 未設定は None で往復する");
 }
