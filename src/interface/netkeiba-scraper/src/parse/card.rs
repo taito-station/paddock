@@ -68,7 +68,13 @@ pub fn parse_card(html: &str, netkeiba_race_id: &str) -> Result<FetchedCard> {
 fn extract_post_time(doc: &Html) -> Option<NaiveTime> {
     let data_sel = sel("div.RaceData01").ok()?;
     let text = doc.select(&data_sel).next()?.text().collect::<String>();
-    let caps = POST_TIME_RE.captures(&text)?;
+    let Some(caps) = POST_TIME_RE.captures(&text) else {
+        // RaceData01 自体は取れている（surface/distance は読めている）のに発走時刻だけ
+        // 読めないのは netkeiba のレイアウト変更の兆候になりうる。best-effort で None に
+        // 落とすが、将来の取得失敗を切り分けられるよう debug で可視化する。
+        tracing::debug!("RaceData01 から発走時刻(HH:MM発走)を読めませんでした");
+        return None;
+    };
     let hour: u32 = caps[1].parse().ok()?;
     let min: u32 = caps[2].parse().ok()?;
     NaiveTime::from_hms_opt(hour, min, 0)
