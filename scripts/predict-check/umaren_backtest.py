@@ -413,7 +413,8 @@ def gate_diagnostics(evaluated, winodds, gate=1.0):
           f"◎平均単勝 {_mean(pass_odds):.2f} 倍 / ◎平均人気 {_mean(pass_pop):.1f}")
     print(f"非通過 {fail_n}（うち◎オッズ有 {len(fail_odds)}）: "
           f"◎平均単勝 {_mean(fail_odds):.2f} 倍 / ◎平均人気 {_mean(fail_pop):.1f}")
-    print("（通過鞍の◎が低オッズ＝人気側に偏るほど、ゲートが人気馬偏重を選別している兆候）\n")
+    print("（通過/非通過で◎の市場人気度〔単勝オッズ・人気〕が分かれるかの確認用。"
+          "71R では両者ともほぼ市場最上位で差が小さく、人気度はゲート通過を分けない）\n")
 
 
 def gate_sweep(evaluated, winodds, gates, floors):
