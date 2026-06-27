@@ -32,10 +32,7 @@ pub use estimate::{
     apply_win_power, blend_with_market_win, estimate_probabilities,
     estimate_probabilities_with_config,
 };
-pub use explain::{
-    ExplainCategory, FactorExplanation, HorseExplanation, PrevRunSummary, Verdict,
-    verdict_from_show_rate,
-};
+pub use explain::{ExplainCategory, FactorExplanation, HorseExplanation, PrevRunSummary, Verdict};
 pub use model::{
     DatedCounts, FactorStat, HorseFactors, HorseProbability, JockeyFormRun, RateTriple, RecentRun,
     StandardTimes,

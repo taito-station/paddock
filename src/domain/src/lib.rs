@@ -38,7 +38,7 @@ pub use prediction::{
     RECOMMENDED_MARKET_BLEND_ALPHA, RateTriple, RecencyConfig, RecentRun, ShrinkageConfig,
     StandardTimes, Verdict, apply_recency_weight, apply_win_power, blend_with_market_win,
     estimate_probabilities, estimate_probabilities_with_config, jockey_recent_form_score,
-    recent_form_score, verdict_from_show_rate,
+    recent_form_score,
 };
 pub use race::{Race, RaceId, Surface, TrackCondition, Venue, Weather};
 pub use race_card::{HorseEntry, RaceCard};

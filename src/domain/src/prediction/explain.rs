@@ -95,7 +95,7 @@ pub struct HorseExplanation {
 /// 複勝率（show rate）と出走数から定性評価を決める。確率推定（[`super::scoring`]）と同じ
 /// ベイズ縮約（m=[`RECOMMENDED_SHRINKAGE_M`]）を prior へ掛けてから [`PRIOR_RATE`] と比較する。
 /// 少データ馬は prior へ強く寄るため Neutral 寄りになり、過信した「得意/苦手」断定を防ぐ。
-pub fn verdict_from_show_rate(show_rate: f64, starts: u32) -> Verdict {
+pub(crate) fn verdict_from_show_rate(show_rate: f64, starts: u32) -> Verdict {
     let shrunk = shrink_rate(show_rate, starts, PRIOR_RATE.show, RECOMMENDED_SHRINKAGE_M);
     if shrunk >= PRIOR_RATE.show + VERDICT_BAND {
         Verdict::Strong
@@ -131,16 +131,24 @@ mod tests {
     }
 
     #[test]
-    fn small_sample_shrinks_toward_neutral() {
-        // 複勝率 100% でも 1 走だけなら縮約で prior 近傍へ寄り、断定しない（Neutral）。
-        // shrunk = (1*1.0 + 10*0.214)/(1+10) ≈ 0.286 < prior(0.214)+band(0.05)=0.264？
-        // → 0.286 > 0.264 なので Strong 側だが、ここでは「1走で極端断定しない」境界の確認として
-        //   2 走未満でも極端値は丸まることを示す。閾値変更時に追従する。
-        let v = verdict_from_show_rate(1.0, 1);
-        // 1 走 100% は縮約後 ≈0.286 で Strong だが prior 近傍まで丸まることを確認（生 100% のままではない）。
+    fn small_sample_extreme_rate_is_dampened() {
+        // 1 走 100% は縮約後 ≈0.286 まで丸まる（生 100% のままではない）ことを確認する。
+        // 結論は Strong（0.286 > prior 0.214 + band 0.05 = 0.264）だが、縮約が効いている点が要点。
         let shrunk = shrink_rate(1.0, 1, PRIOR_RATE.show, RECOMMENDED_SHRINKAGE_M);
         assert!(shrunk < 0.3, "1 走の極端値が縮約されていない: {shrunk}");
-        assert_eq!(v, Verdict::Strong);
+        assert_eq!(verdict_from_show_rate(1.0, 1), Verdict::Strong);
+    }
+
+    #[test]
+    fn small_sample_moderate_rate_is_neutral() {
+        // 複勝率 50% でも 1 走だけなら縮約で prior 近傍へ寄り、断定しない（Neutral）。
+        // shrunk = (1*0.5 + 10*0.214)/(1+10) ≈ 0.240 ∈ [prior-band, prior+band] → Neutral。
+        let shrunk = shrink_rate(0.5, 1, PRIOR_RATE.show, RECOMMENDED_SHRINKAGE_M);
+        assert!(
+            (PRIOR_RATE.show - VERDICT_BAND..=PRIOR_RATE.show + VERDICT_BAND).contains(&shrunk),
+            "縮約後が中立帯に入っていない: {shrunk}"
+        );
+        assert_eq!(verdict_from_show_rate(0.5, 1), Verdict::Neutral);
     }
 
     #[test]

@@ -518,7 +518,7 @@ fn print_probs(probs: &[HorseProbability]) {
     }
 }
 
-/// win_prob 上位の馬について予想根拠（条件別成績・前走・斤量）を印付きで表示する（#274）。
+/// win_prob 上位の馬について予想根拠（条件別成績・前走フォーム・前走・斤量）を印付きで表示する（#274）。
 /// 確率テーブルは盤面順なので、ここで win_prob 降順に並べ替えて上位 `MARKS` 頭に印を振る。
 fn print_explanations(probs: &[HorseProbability], explanations: &[HorseExplanation]) {
     const MARKS: [&str; 5] = ["◎", "○", "▲", "△", "☆"];
@@ -529,13 +529,16 @@ fn print_explanations(probs: &[HorseProbability], explanations: &[HorseExplanati
             .unwrap_or(std::cmp::Ordering::Equal)
     });
 
+    // 馬番→根拠の引き当てを O(1) にする（並べ替えで probs/explanations の位置対応が崩れるため馬番で突き合わせる）。
+    let by_num: HashMap<HorseNum, &HorseExplanation> =
+        explanations.iter().map(|e| (e.horse_num, e)).collect();
+
     let shown = MARKS.len().min(ranked.len());
     println!();
     println!("【予想根拠（上位{shown}頭）】");
     for (rank, p) in ranked.iter().take(MARKS.len()).enumerate() {
         let mark = MARKS[rank];
-        // probs と explanations は同順だが、並べ替え後は馬番で引き直す（順位付けと根拠の対応を保つ）。
-        let Some(ex) = explanations.iter().find(|e| e.horse_num == p.horse_num) else {
+        let Some(ex) = by_num.get(&p.horse_num) else {
             continue;
         };
         println!(
@@ -546,6 +549,9 @@ fn print_explanations(probs: &[HorseProbability], explanations: &[HorseExplanati
         );
         for f in &ex.factors {
             println!("  {}", factor_phrase(f));
+        }
+        if let Some(form) = ex.recent_form {
+            println!("  {}", recent_form_phrase(form));
         }
         if let Some(prev) = &ex.prev_run {
             println!("  {}", prev_run_phrase(prev));
@@ -560,6 +566,8 @@ fn print_explanations(probs: &[HorseProbability], explanations: &[HorseExplanati
 }
 
 /// 1 factor 分の根拠を 1 行の日本語にする。カテゴリで話題語、verdict で「得意/標準/苦手」を付ける。
+/// ただし CourseGate は当該馬ではなく場×枠の全馬横断ベース率なので、馬の適性を示す「得意/苦手」は
+/// 誤読を招く。verdict を付けず率だけ提示する（枠傾向の参考情報）。
 fn factor_phrase(f: &FactorExplanation) -> String {
     let topic = match f.category {
         ExplainCategory::Surface | ExplainCategory::Distance => f.label.clone(),
@@ -568,6 +576,14 @@ fn factor_phrase(f: &FactorExplanation) -> String {
         ExplainCategory::Jockey => format!("騎手 {}", f.label),
         ExplainCategory::Trainer => format!("厩舎 {}", f.label),
     };
+    // CourseGate は枠全体の率で馬の適性ではないため verdict を出さない（誤読防止, #274 レビュー）。
+    if f.category == ExplainCategory::CourseGate {
+        return format!(
+            "{topic}：複勝率 {:.0}%（{}走）",
+            f.rate.show * 100.0,
+            f.starts
+        );
+    }
     let verdict = match f.verdict {
         Verdict::Strong => "得意",
         Verdict::Neutral => "標準",
@@ -578,6 +594,20 @@ fn factor_phrase(f: &FactorExplanation) -> String {
         f.rate.show * 100.0,
         f.starts,
     )
+}
+
+/// 前走フォームスコア [0,1]（0.5=中立）を「好調/標準/不調」の 1 行にする（#274）。
+/// 馬体重変化・人気乖離・間隔・着差・タイムを合成した近走の勢いの要約で、前走の着順などの
+/// 具体（[`prev_run_phrase`]）とは別軸の signal。
+fn recent_form_phrase(form: f64) -> String {
+    let label = if form >= 0.6 {
+        "好調"
+    } else if form <= 0.4 {
+        "不調"
+    } else {
+        "標準"
+    };
+    format!("前走フォーム：{label}（{form:.2}）")
 }
 
 /// 前走サマリを 1 行の日本語にする。欠落フィールドは黙って省く。
@@ -765,11 +795,14 @@ fn read_u64<R: BufRead>(
 #[cfg(test)]
 mod tests {
     use super::{
-        make_bet_record, read_choice, read_edited_amounts, read_track_condition, read_u64,
-        resolve_track_condition_default,
+        factor_phrase, make_bet_record, prev_run_phrase, read_choice, read_edited_amounts,
+        read_track_condition, read_u64, recent_form_phrase, resolve_track_condition_default,
     };
     use paddock_domain::horse_result::HorseNum;
-    use paddock_domain::{BetCombination, PortfolioBet, RaceId, TrackCondition};
+    use paddock_domain::{
+        BetCombination, ExplainCategory, FactorExplanation, PortfolioBet, PrevRunSummary, RaceId,
+        RateTriple, Surface, TrackCondition, Verdict,
+    };
     use std::io::Cursor;
 
     fn horse(n: u32) -> HorseNum {
@@ -934,5 +967,78 @@ mod tests {
         let mut r = Cursor::new(b"20000\n".to_vec());
         let amounts = read_edited_amounts(&mut r, &bets, &suggested, 10000).unwrap();
         assert_eq!(amounts, vec![0]);
+    }
+
+    fn factor(
+        category: ExplainCategory,
+        label: &str,
+        show: f64,
+        starts: u32,
+        verdict: Verdict,
+    ) -> FactorExplanation {
+        FactorExplanation {
+            category,
+            label: label.to_string(),
+            rate: RateTriple {
+                win: show / 3.0,
+                place: show * 2.0 / 3.0,
+                show,
+            },
+            starts,
+            verdict,
+        }
+    }
+
+    #[test]
+    fn factor_phrase_renders_verdict_for_horse_factors() {
+        let f = factor(ExplainCategory::Surface, "芝", 0.5, 20, Verdict::Strong);
+        assert_eq!(factor_phrase(&f), "芝 得意：複勝率 50%（20走）");
+        let f = factor(ExplainCategory::TrackCondition, "重", 0.0, 5, Verdict::Weak);
+        assert_eq!(factor_phrase(&f), "重馬場 苦手：複勝率 0%（5走）");
+    }
+
+    #[test]
+    fn factor_phrase_omits_verdict_for_course_gate() {
+        // 枠は全馬横断のベース率なので得意/苦手を出さない（#274 レビュー）。
+        let f = factor(
+            ExplainCategory::CourseGate,
+            "Outer (7-8)",
+            0.23,
+            622,
+            Verdict::Neutral,
+        );
+        assert_eq!(factor_phrase(&f), "枠（Outer (7-8)）：複勝率 23%（622走）");
+    }
+
+    #[test]
+    fn recent_form_phrase_buckets_by_score() {
+        assert_eq!(recent_form_phrase(0.72), "前走フォーム：好調（0.72）");
+        assert_eq!(recent_form_phrase(0.50), "前走フォーム：標準（0.50）");
+        assert_eq!(recent_form_phrase(0.30), "前走フォーム：不調（0.30）");
+    }
+
+    #[test]
+    fn prev_run_phrase_omits_missing_fields() {
+        let full = PrevRunSummary {
+            finishing_position: Some(3),
+            popularity: Some(8),
+            margin: Some("クビ".to_string()),
+            surface: Surface::Turf,
+            distance: 1600,
+        };
+        assert_eq!(
+            prev_run_phrase(&full),
+            "前走：3着・8番人気・芝1600m・着差クビ"
+        );
+
+        // 着順・人気・着差が欠落（中止等）でもコースは出る。
+        let sparse = PrevRunSummary {
+            finishing_position: None,
+            popularity: None,
+            margin: None,
+            surface: Surface::Dirt,
+            distance: 1800,
+        };
+        assert_eq!(prev_run_phrase(&sparse), "前走：ダート1800m");
     }
 }
