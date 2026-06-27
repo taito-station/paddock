@@ -37,10 +37,15 @@ def test_group_snapshots_wide_mid_and_keys():
 
 
 def test_group_snapshots_wide_missing_high_skipped():
-    # odds_high 欠落のワイドは mid を出せないのでスキップ（KeyError にしない）。
-    races = S.group_snapshots([_row("R1", "wide", "1-2", 3.0, odds_high="")])
-    books = races["R1"]["times"]["2026-06-27T00:00:00+00:00"]
-    assert books["wide"] == {}, books["wide"]
+    # odds_high 欠落のワイドは mid を出せないのでスキップ。正常行があれば race は作られ wide は空。
+    t0 = "2026-06-27T00:00:00+00:00"
+    races = S.group_snapshots([
+        _row("R1", "win", "1", 3.5, at=t0),
+        _row("R1", "wide", "1-2", 3.0, odds_high="", at=t0),
+    ])
+    assert races["R1"]["times"][t0]["wide"] == {}, races["R1"]["times"][t0]["wide"]
+    # high 欠落ワイドのみの入力では phantom レースを作らない。
+    assert S.group_snapshots([_row("R2", "wide", "1-2", 3.0, odds_high="")]) == {}
 
 
 def test_group_snapshots_multiple_times():
@@ -169,11 +174,17 @@ def test_build_report_drops_race_when_only_scratched():
     assert results == [], results
 
 
-def test_group_snapshots_nonnumeric_odds_skipped():
-    # 数値化できない odds 行は当該行のみスキップ（race は作られ、book は空）。
-    races = S.group_snapshots([_row("R1", "win", "1", "N/A")])
-    books = races["R1"]["times"]["2026-06-27T00:00:00+00:00"]
-    assert books["win"] == {}, books["win"]
+def test_group_snapshots_nonnumeric_odds_skipped_no_phantom_time():
+    # 数値化できない odds 行は当該行のみスキップし、空の phantom snapshot 時点を作らない。
+    # → 正常な t0 だけが残り、破損のみの t1 は times に現れない（final を空時点に乗っ取らせない）。
+    t0, t1 = "2026-06-27T00:00:00+00:00", "2026-06-27T01:00:00+00:00"
+    races = S.group_snapshots([_row("R1", "win", "1", 3.5, at=t0),
+                               _row("R1", "win", "2", "N/A", at=t1)])
+    assert set(races["R1"]["times"]) == {t0}, races["R1"]["times"]
+    assert races["R1"]["times"][t0]["win"] == {1: 3.5}
+
+    # 破損行のみの入力では race 自体を作らない（phantom レースを残さない）。
+    assert S.group_snapshots([_row("R2", "win", "1", "N/A")]) == {}
 
 
 def test_group_snapshots_nonnumeric_race_num_skipped():

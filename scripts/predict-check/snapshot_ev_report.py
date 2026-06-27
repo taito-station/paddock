@@ -75,6 +75,18 @@ def group_snapshots(rows):
             continue
         rid = r["race_id"]
         try:
+            # 先に全数値化を済ませてから race/time へ書く。これで破損行（非数値）が
+            # defaultdict 経由で空の phantom snapshot 時点を生成し、最終時点を上書きするのを防ぐ。
+            odds = float(r["odds"])
+            if bt == "win":
+                book, key, val = "win", int(r["combination_key"]), odds
+            elif bt == "wide":
+                hi = r["odds_high"]
+                if hi in (None, "", "\\N"):
+                    continue  # mid を出せない異常行は捨てる
+                book, key, val = "wide", _combo(r["combination_key"]), (odds + float(hi)) / 2.0
+            else:  # quinella / trio
+                book, key, val = bt, _combo(r["combination_key"]), odds
             race = races.get(rid)
             if race is None:
                 race = races[rid] = {
@@ -84,17 +96,7 @@ def group_snapshots(rows):
                     "times": defaultdict(
                         lambda: {"win": {}, "quinella": {}, "trio": {}, "wide": {}}),
                 }
-            books = race["times"][r["fetched_at"]]
-            odds = float(r["odds"])
-            if bt == "win":
-                books["win"][int(r["combination_key"])] = odds
-            elif bt == "wide":
-                hi = r["odds_high"]
-                if hi in (None, "", "\\N"):
-                    continue  # mid を出せない異常行は捨てる
-                books["wide"][_combo(r["combination_key"])] = (odds + float(hi)) / 2.0
-            else:  # quinella / trio
-                books[bt][_combo(r["combination_key"])] = odds
+            race["times"][r["fetched_at"]][book][key] = val
         except ValueError:
             print(f"[warn] 数値化できない snapshot 行をスキップ: "
                   f"{rid} {bt} {r['combination_key']} {r['odds']}", file=sys.stderr)
