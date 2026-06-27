@@ -26,6 +26,11 @@ TO="${PADDOCK_BT_TO:-2026-06-14}"
 ALPHA="${PADDOCK_BT_ALPHA:-0.3}"
 PSQL=(psql "$DB_URL" -tA)
 
+# FROM/TO は SQL に文字列補間するため、日付形式（数字とハイフンのみ）に制限して注入を防ぐ。
+for v in FROM TO; do
+  [[ "${!v}" =~ ^[0-9-]+$ ]] || { echo "不正な日付 $v=${!v}（YYYY-MM-DD のみ可）" >&2; exit 1; }
+done
+
 [[ -x "$ANALYZE_BIN" ]] || {
   echo "release バイナリが見つかりません: $ANALYZE_BIN" >&2
   echo "先に: cd $REPO_ROOT && cargo build --release --bin paddock-analyze" >&2

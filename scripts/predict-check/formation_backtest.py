@@ -37,8 +37,6 @@ import statistics
 from itertools import combinations
 from pathlib import Path
 
-BUDGET = 5000
-
 
 def largest_remainder(weights, units, minu=1):
     """重み比で units 口を整数配分（各目に最低 minu 口）。konsen_backtest と同一実装。"""
@@ -141,7 +139,8 @@ def parse_result(path):
 
 
 # --- 買い目組成 ---------------------------------------------------------------
-# 各 leg は (combo_frozenset, bet_type, weight) を返す純関数。settle で口数配分し払戻計算する。
+# _nagashi_* は [(combo_frozenset, 相手キー), ...] を返す。weight は呼び出し側が確率から算出し
+# (combo, weight) の列にして _settle_legs に渡す。
 
 
 def _nagashi_pairs(axis, partners):
@@ -154,7 +153,7 @@ def _nagashi_trios(axis, partners):
     return [(frozenset({axis, a, b}), (a, b)) for a, b in combinations(partners, 2)]
 
 
-def _settle_legs(legs_weights, budget, pay_table, probs):
+def _settle_legs(legs_weights, budget, pay_table):
     """[(combo, weight)] に budget(円) を重み配分し (払戻, 賭金) を返す。"""
     if not legs_weights or budget < 100:
         return 0, 0
@@ -190,7 +189,7 @@ def settle(probs, top3, pay, variant):
         uma = [(c, probs[p]) for c, p in _nagashi_pairs(A, others[:5])]
         trio = [(c, probs[a] * probs[b]) for c, (a, b) in _nagashi_trios(A, others[:5])]
         for legs, bud, bt in ((wide, 1500, "wide"), (uma, 1500, "umaren"), (trio, 2000, "trio")):
-            r, s = _settle_legs(legs, bud, pay[bt], probs)
+            r, s = _settle_legs(legs, bud, pay[bt])
             ret += r
             stake += s
         return ret, stake
@@ -203,29 +202,29 @@ def settle(probs, top3, pay, variant):
         # ワイド ¥1,500 → 各脚 ¥750（相手 top3）
         for axis, pool, bud in ((A, a_pool, 750), (B, b_pool, 750)):
             legs = [(c, probs[p]) for c, p in _nagashi_pairs(axis, pool[:3])]
-            r, s = _settle_legs(legs, bud, pay["wide"], probs)
+            r, s = _settle_legs(legs, bud, pay["wide"])
             ret += r
             stake += s
         # 馬連 ¥1,500 → 各脚 ¥750（相手 top5）
         for axis, pool, bud in ((A, a_pool, 750), (B, b_pool, 750)):
             legs = [(c, probs[p]) for c, p in _nagashi_pairs(axis, pool[:5])]
-            r, s = _settle_legs(legs, bud, pay["umaren"], probs)
+            r, s = _settle_legs(legs, bud, pay["umaren"])
             ret += r
             stake += s
         # 3連複 ¥2,000 → 各脚 ¥1,000（軸ながし、相手 top5）
         for axis, pool, bud in ((A, a_pool, 1000), (B, b_pool, 1000)):
             legs = [(c, probs[a] * probs[b]) for c, (a, b) in _nagashi_trios(axis, pool[:5])]
-            r, s = _settle_legs(legs, bud, pay["trio"], probs)
+            r, s = _settle_legs(legs, bud, pay["trio"])
             ret += r
             stake += s
         return ret, stake
 
     if variant == "pair2":
         # 全券種 ◎○両方必須（AND）。ワイド/馬連は ◎-○ に集中、3連複は ◎○2頭軸ながし。
-        rw, sw = _settle_legs([(frozenset({A, B}), 1.0)], 1500, pay["wide"], probs)
-        rm, sm = _settle_legs([(frozenset({A, B}), 1.0)], 1500, pay["umaren"], probs)
+        rw, sw = _settle_legs([(frozenset({A, B}), 1.0)], 1500, pay["wide"])
+        rm, sm = _settle_legs([(frozenset({A, B}), 1.0)], 1500, pay["umaren"])
         trio = [(frozenset({A, B, p}), probs[p]) for p in holes[:5]]
-        rt, st = _settle_legs(trio, 2000, pay["trio"], probs)
+        rt, st = _settle_legs(trio, 2000, pay["trio"])
         return rw + rm + rt, sw + sm + st
 
     raise ValueError(f"unknown variant: {variant}")
