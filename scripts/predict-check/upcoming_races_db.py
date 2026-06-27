@@ -67,9 +67,13 @@ def fetch_rows(date: str, db_url: str):
         f"WHERE date = '{date}' AND post_time IS NOT NULL"
     )
     # date は valid_date で厳格検証済みなので文字列展開でも注入されない。
+    # 接続タイムアウトを付ける（無人 launchd ジョブで DB が TCP は受けるが無応答＝ハング時に、
+    # 選択段階で無言ハングして 5 分毎に別プロセスが積み上がるのを防ぐ。fast-fail だけでなく
+    # ハングも救う）。PGCONNECT_TIMEOUT は URL を弄らず psql に効かせられる。
+    env = {**os.environ, "PGCONNECT_TIMEOUT": os.environ.get("PGCONNECT_TIMEOUT", "5")}
     proc = subprocess.run(
         ["psql", db_url, "-t", "-A", "-F", "\t", "-c", sql],
-        capture_output=True, text=True,
+        capture_output=True, text=True, env=env,
     )
     if proc.returncode != 0:
         # 無人運用（launchd/cron）での停止時に根因（connection refused 等）が消えないよう、
