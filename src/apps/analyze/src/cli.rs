@@ -92,6 +92,17 @@ pub enum Command {
         #[arg(long)]
         jockey_form_weight: Option<f64>,
     },
+    /// 古い race_odds_snapshots を保持期間でパージする（#234）。最新キャッシュ race_odds は消さない。
+    /// cutoff = 実行日(UTC) − months。fetched_at の日付が cutoff より前の行を削除する。
+    PurgeSnapshots {
+        /// 保持月数（これより古い fetched_at の行を削除）。既定 12。#218 が必要とする直近 3〜6 ヶ月を
+        /// 割らないよう下限 1（0 は全削除に近く危険なため弾く）。
+        #[arg(long, default_value_t = 12)]
+        months: u32,
+        /// 削除せず該当行数のみ表示する。
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 /// clap 用: 馬場状態のパース。引数解析時に検証し、不正値は usage エラーとして報告する。

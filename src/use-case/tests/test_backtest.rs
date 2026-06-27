@@ -286,6 +286,12 @@ impl OddsRepository for MockRepo {
     async fn save_race_odds(&self, _: &paddock_use_case::repository::RaceOddsRecord) -> Result<()> {
         unimplemented!()
     }
+    async fn purge_race_odds_snapshots(&self, _: NaiveDate) -> Result<u64> {
+        Ok(0)
+    }
+    async fn count_race_odds_snapshots_before(&self, _: NaiveDate) -> Result<u64> {
+        Ok(0)
+    }
 }
 
 struct NullParser;

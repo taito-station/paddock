@@ -4,6 +4,7 @@ pub mod entry;
 pub mod horse;
 pub mod horse_history;
 pub mod jockey;
+pub mod maintenance;
 pub mod odds;
 pub mod pdf;
 pub mod prediction;
