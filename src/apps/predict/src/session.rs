@@ -804,8 +804,8 @@ fn read_u64<R: BufRead>(
 #[cfg(test)]
 mod tests {
     use super::{
-        factor_phrase, format_explanations, make_bet_record, prev_run_phrase, read_choice,
-        read_edited_amounts, read_track_condition, read_u64, recent_form_phrase,
+        factor_phrase, format_explanations, gate_label_jp, make_bet_record, prev_run_phrase,
+        read_choice, read_edited_amounts, read_track_condition, read_u64, recent_form_phrase,
         resolve_track_condition_default,
     };
     use paddock_domain::horse_result::HorseNum;
@@ -1024,6 +1024,24 @@ mod tests {
         // 枠は全馬横断のベース率なので得意/苦手を出さず（verdict None）、ラベルは日本語化する（#274 レビュー）。
         let f = factor(ExplainCategory::CourseGate, "Outer (7-8)", 0.23, 622, None);
         assert_eq!(factor_phrase(&f), "枠（外 7-8）：複勝率 23%（622走）");
+    }
+
+    #[test]
+    fn factor_phrase_omits_verdict_for_jockey_and_trainer() {
+        // 騎手・調教師は馬の適性ではないため verdict なし（率のみ, #274 レビュー）。
+        let j = factor(ExplainCategory::Jockey, "ルメール", 0.4, 100, None);
+        assert_eq!(factor_phrase(&j), "騎手 ルメール：複勝率 40%（100走）");
+        let t = factor(ExplainCategory::Trainer, "藤沢", 0.3, 80, None);
+        assert_eq!(factor_phrase(&t), "厩舎 藤沢：複勝率 30%（80走）");
+    }
+
+    #[test]
+    fn gate_label_jp_maps_all_groups_and_passes_through_unknown() {
+        assert_eq!(gate_label_jp("Inner (1-3)"), "内 1-3");
+        assert_eq!(gate_label_jp("Middle (4-6)"), "中 4-6");
+        assert_eq!(gate_label_jp("Outer (7-8)"), "外 7-8");
+        // 想定外ラベルは素通し（domain 側書式変更で壊さない）。
+        assert_eq!(gate_label_jp("???"), "???");
     }
 
     #[test]

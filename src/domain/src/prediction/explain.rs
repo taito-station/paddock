@@ -54,13 +54,21 @@ pub struct FactorExplanation {
 
 impl FactorExplanation {
     /// 率・出走数から verdict を決めて factor 根拠を作る。
-    /// `CourseGate` は当該馬の適性ではなく枠の全馬横断率なので得意/苦手を付けない（`verdict = None`）。
-    /// `Jockey`/`Trainer` の verdict は当該騎手・調教師自身の複勝率を馬と同じ母集団 prior
-    /// （[`PRIOR_RATE`]）と比較する近似（field 平均≈同値で実害小、暫定ヒューリスティック）。
+    /// verdict（得意/標準/苦手）は **当該馬自身の条件別適性** にのみ付ける＝`Surface`/`Distance`/
+    /// `TrackCondition` のみ。`CourseGate`（場×枠の全馬横断率）・`Jockey`/`Trainer`（騎手・調教師
+    /// 自身の率）は馬の適性ではなく、かつ馬の母集団 prior（[`PRIOR_RATE`]≈3/14）と比較すると
+    /// 稼働中の騎手はほぼ全員上回り「得意」が既定値化して情報を持たない。よって `verdict = None`
+    /// として率のみ提示する（誤読防止, #274 レビュー）。
     pub fn new(category: ExplainCategory, label: String, rate: RateTriple, starts: u32) -> Self {
         let verdict = match category {
-            ExplainCategory::CourseGate => None,
-            _ => Some(verdict_from_show_rate(rate.show, starts)),
+            // 馬自身の条件別適性のみ判定対象。
+            ExplainCategory::Surface
+            | ExplainCategory::Distance
+            | ExplainCategory::TrackCondition => Some(verdict_from_show_rate(rate.show, starts)),
+            // 枠・騎手・調教師は馬の適性ではないため判定しない（率のみ）。
+            ExplainCategory::CourseGate | ExplainCategory::Jockey | ExplainCategory::Trainer => {
+                None
+            }
         };
         Self {
             category,
@@ -90,7 +98,8 @@ pub struct HorseExplanation {
     pub horse_name: HorseName,
     /// 条件別成績の根拠（存在する factor のみ。確率推定の母数除外と同じ欠落扱い）。
     pub factors: Vec<FactorExplanation>,
-    /// 前走フォームスコア [0,1]（0.5=中立）。前走情報が乏しければ `None`。
+    /// 近走フォームスコア [0,1]（0.5=中立）。`config.trend_n` 走のトレンド合成（本番は前走のみ）。
+    /// 近走情報が乏しければ `None`。
     pub recent_form: Option<f64>,
     /// 前走サマリ。前走が無い馬（初戦等）は `None`。
     pub prev_run: Option<PrevRunSummary>,
@@ -175,14 +184,28 @@ mod tests {
     }
 
     #[test]
-    fn course_gate_factor_has_no_verdict() {
-        // 枠は場×枠の全馬横断率で当該馬の適性ではないため verdict を持たない（#274 レビュー）。
-        let fe = FactorExplanation::new(
+    fn non_horse_factors_have_no_verdict() {
+        // 枠・騎手・調教師は馬の適性ではないため verdict を持たない（率のみ提示, #274 レビュー）。
+        for category in [
             ExplainCategory::CourseGate,
-            "Inner (1-3)".to_string(),
-            triple(0.5),
-            600,
-        );
-        assert_eq!(fe.verdict, None);
+            ExplainCategory::Jockey,
+            ExplainCategory::Trainer,
+        ] {
+            let fe = FactorExplanation::new(category, "ラベル".to_string(), triple(0.5), 600);
+            assert_eq!(fe.verdict, None, "{category:?} は verdict を持たないはず");
+        }
+    }
+
+    #[test]
+    fn horse_aptitude_factors_have_verdict() {
+        // 馬自身の条件別適性（芝ダ・距離・馬場）は verdict を持つ。
+        for category in [
+            ExplainCategory::Surface,
+            ExplainCategory::Distance,
+            ExplainCategory::TrackCondition,
+        ] {
+            let fe = FactorExplanation::new(category, "ラベル".to_string(), triple(0.5), 30);
+            assert!(fe.verdict.is_some(), "{category:?} は verdict を持つはず");
+        }
     }
 }
