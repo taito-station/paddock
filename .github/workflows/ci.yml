@@ -81,6 +81,17 @@ jobs:
       - name: Test (Postgres 接続テストを含むため直列実行 / OCR・PDF クレートを除く)
         run: cargo test --locked --workspace --exclude pdf-ocr --exclude pdf-parser -- --test-threads=1
 
+  # ADR 番号（docs/adr/NNNN-*.md）の重複検出（#254）。並行クローン/worktree 運用で番号が
+  # 二重取得される事故（#251 と #253 が同時に 0040 採番）の再発防止。Rust/Postgres 不要の
+  # 軽量チェックなので独立ジョブにして並列で即終わらせる（ci / ocr-pdf には影響させない）。
+  adr:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Check ADR number duplicates (#254)
+        run: bash scripts/check-adr-numbers.sh
+
   # pdf-ocr / pdf-parser の統合テスト（test_render / test_parse）は mutool(mupdf) のテキスト/画像
   # 抽出に依存し、mupdf >= 1.25 が必要（ubuntu-latest の apt mupdf は 1.23 でサンプル解析が 0 件に
   # なり失敗する。検証結果・方針は ADR0026）。mupdf 1.25 を apt で得られる debian:trixie コンテナで
