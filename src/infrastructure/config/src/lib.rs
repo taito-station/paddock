@@ -33,9 +33,10 @@ fn default_pdfs_dir() -> String {
 fn default_log_filter() -> String {
     // netkeiba の HTML は table 周辺が不正構造で、scraper(html5ever) が
     // foster parenting 経路の WARN を 1 レースあたり数千行出す（#238）。
-    // パース結果自体は得られるためノイズでしかなく、html5ever / selectors
-    // ターゲットに限定して off にし、他の有用な WARN は残す。
-    "info,html5ever=off,selectors=off".to_string()
+    // パース結果自体は得られるためノイズでしかなく、html5ever ターゲットに
+    // 限定して off にし、他の有用な WARN は残す。
+    // （selectors は実測でノイズを出さなかったため抑止対象から外している）
+    "info,html5ever=off".to_string()
 }
 
 fn default_server_addr() -> String {
@@ -67,6 +68,5 @@ mod tests {
     fn default_log_filter_suppresses_html5ever() {
         let filter = default_log_filter();
         assert!(filter.contains("html5ever=off"), "got: {filter}");
-        assert!(filter.contains("selectors=off"), "got: {filter}");
     }
 }
