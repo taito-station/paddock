@@ -112,6 +112,21 @@ def test_eval_pair_leg_swap_replaces_only_ev_favorable_legs():
     assert ret == 700 * 1000 // 100  # 7000（馬単 (1,2) 払戻で清算）
 
 
+def test_eval_exacta_plain_weighted_both_directions():
+    # top5 両方向・馬単確率重み（ADR の「馬単top5 67.6%」を生む load-bearing 経路）。
+    # 両方向 universe・p_exacta 重み・lr 配分・exacta 清算の契約を固定する。
+    probs = {1: 50.0, 2: 30.0, 3: 20.0}
+    pay = {"umaren": {}, "wide": {}, "trio": {}, "exacta": {(1, 2): 1000}}
+    A, partners = 1, [2, 3]
+    combos = [c for p in partners for c in ((A, p), (p, A))]  # (1,2)(2,1)(1,3)(3,1)
+    weights = [U.p_exacta(probs, c[0], c[1]) for c in combos]
+    units = U.largest_remainder(weights, 1500 // 100)
+    exp_ret = sum(u * 100 * pay["exacta"].get(c, 0) // 100 for c, u in zip(combos, units))
+    assert U.eval_exacta_plain(probs, pay, budget=1500) == (True, exp_ret, 1500)
+    # 重みは p_exacta（無順 p_top2_set ではない）: 強い向き (1,2) が逆向き (2,1) より厚い
+    assert units[0] > units[1]
+
+
 def test_eval_exacta_allflat_buys_both_directions():
     # 全頭両方向 flat。◎=1, 相手 [2,3] → 4 レッグ (1,2)(2,1)(1,3)(3,1)。予算ちょうど・実払戻清算。
     probs = {1: 50.0, 2: 30.0, 3: 20.0}
