@@ -5,6 +5,12 @@
 # されうる（実例: #251 と #253 が同時に 0040 を採番）。GitHub Issue 番号と違いサーバ採番では
 # ないため人手では再発が防げない。本スクリプトを CI / pre-push で走らせて重複を弾く。
 #
+# 検出タイミングの限界（重要）: pull_request CI はマージ ref 内のスナップショットしか見ない。
+# 別々の PR が各々 0040 を採番した場合、各 PR 単体では 0040 が 1 件なので CI は緑で通り、両者
+# マージ後の main push CI で初めて落ちる（=事後検出）。PR 段階で確実に弾くには branch protection
+# の "Require branches to be up to date before merging" を有効化し、本ジョブを required にする
+# （先行 PR マージ後に後続 PR の CI が新 base で再実行され、その時点で重複を検出できる）。
+#
 # 使い方:
 #   scripts/check-adr-numbers.sh          # 重複検出（重複があれば非ゼロ終了＋該当列挙）
 #   scripts/check-adr-numbers.sh check    # 同上
@@ -26,7 +32,10 @@ EOF
 }
 
 # どの cwd から呼んでも docs/adr を解決できるようリポジトリルート起点にする。
-repo_root="$(git rev-parse --show-toplevel)"
+if ! repo_root="$(git rev-parse --show-toplevel 2>/dev/null)"; then
+    echo "git リポジトリ外では実行できない（docs/adr の解決にリポジトリルートが必要）" >&2
+    exit 1
+fi
 adr_dir="$repo_root/docs/adr"
 
 if [[ ! -d "$adr_dir" ]]; then
@@ -34,16 +43,27 @@ if [[ ! -d "$adr_dir" ]]; then
     exit 1
 fi
 
-# docs/adr 直下の *.md を走査し、規約に合致するもの（NNNN-...）の番号と、
-# 合致しないもの（非 ADR）を分けて集める。
-declare -a numbers=()
-declare -a nonconforming=()
+# docs/adr 直下の *.md を走査する。番号抽出は「先頭 4 桁」という緩いパターンで行い、
+# kebab 規約（NNNN-kebab-title.md）への適合は別軸の警告として扱う。番号抽出を規約適合と
+# 同じ厳格パターンに縛ると、規約外ファイル（例: 0040-Foo.md, 0040_foo.md）が重複していても
+# 検出網から漏れ、コア保証（番号の重複を必ず弾く）が崩れるため。
+declare -a numbers=()        # 重複検出・next 算出に使う 4 桁番号（緩いパターンで抽出）
+declare -a nonconforming=()  # kebab 規約に外れるファイル名（警告のみ）
 shopt -s nullglob
 for path in "$adr_dir"/*.md; do
     base="$(basename "$path")"
-    if [[ "$base" =~ ^([0-9]{4})-[a-z0-9]+(-[a-z0-9]+)*\.md$ ]]; then
+    # 既知の非 ADR ファイルは対象外（将来 README/テンプレを置いても警告ノイズを出さない）。
+    case "$base" in
+        README.md | template.md | TEMPLATE.md) continue ;;
+    esac
+    if [[ "$base" =~ ^([0-9]{4}) ]]; then
         numbers+=("${BASH_REMATCH[1]}")
+        # 番号は取れるが kebab 規約に外れるものは警告対象にする（重複検出からは漏らさない）。
+        if [[ ! "$base" =~ ^[0-9]{4}-[a-z0-9]+(-[a-z0-9]+)*\.md$ ]]; then
+            nonconforming+=("$base")
+        fi
     else
+        # 先頭 4 桁すら無いファイルは ADR ではない疑い。気づけるよう警告に載せる。
         nonconforming+=("$base")
     fi
 done
@@ -89,7 +109,7 @@ if [[ -n "$dups" ]]; then
     while IFS= read -r num; do
         [[ -z "$num" ]] && continue
         echo "  番号 $num:" >&2
-        for path in "$adr_dir/$num"-*.md; do
+        for path in "$adr_dir/$num"*.md; do
             [[ -e "$path" ]] && echo "    $(basename "$path")" >&2
         done
     done <<<"$dups"
