@@ -644,7 +644,10 @@ def recompute_p_final(p_model_pct, implied, alpha, gamma):
     model=pct/100; blended=α*model+(1-α)*implied（implied に居る馬のみ、他は model 据置）;
     Σ1 正規化; powered=blended**γ; Σ1 正規化; *100。
     α>=1.0 では (1-α)*implied 項が消え市場補正なし（= normalize(model**γ)）。
+    α は本番 Rust（blend_with_market_win の alpha.clamp(0,1)）に倣い [0,1] にクランプする
+    （既定 grid は [0,1] 内なので恒等。範囲外を渡しても本番と乖離させない）。
     """
+    alpha = min(1.0, max(0.0, alpha))
     blended = {}
     for um, pct in p_model_pct.items():
         model = pct / 100.0
@@ -746,10 +749,10 @@ def calibration_buckets(evaluated, probs_by_race, edges):
         本番実 probs を渡す（main の prod_actual 参照）。
     各レースの予測 ROI = compute_baseline_pf(再計算 probs) の model_roi。
     バケット毎に n / 予測ROI平均 / 実現ROI(Σret/Σstake) / 的中率 を出し、
-    末尾に Spearman(予測ROI, レース毎実現ROI) と gate>=100% 実現ROI vs 無ゲート平均を付す。
+    末尾に Spearman(予測ROI, レース毎実現ROI) と gate>=100% 実現ROI vs 無ゲート全体を付す。
 
     「逆予測性が解消された」= Spearman>=0（予測 ROI が実現 ROI を正しく順位づける）かつ
-    gate>=100% 実現 ROI >= 無ゲート平均（model EV ゲートが正の選別になる）。
+    gate>=100% 実現 ROI >= 無ゲート全体（model EV ゲートが正の選別になる）。
     """
     edges = sorted(edges)
     buckets = [[] for _ in range(len(edges) + 1)]
@@ -805,7 +808,7 @@ def calibration_buckets(evaluated, probs_by_race, edges):
     nogate_roi = all_ret / all_stake * 100 if all_stake else float("nan")
     print(f"\nSpearman(予測ROI, レース実現ROI) = {sp:+.3f}"
           "（>=0 なら予測が実現を順位づけ＝逆予測性が解消）")
-    print(f"gate>=100% 実現ROI {gate_roi:.1f}% vs 無ゲート平均 {nogate_roi:.1f}%"
+    print(f"gate>=100% 実現ROI {gate_roi:.1f}% vs 無ゲート全体 {nogate_roi:.1f}%"
           "（gate>=無ゲート なら model EV ゲートが正の選別）\n")
 
 
@@ -826,7 +829,8 @@ def joint_sweep(evaluated, winodds, p_models, alphas, gammas):
           f"{'delta':>6} {'Spear':>6} {'top1':>5} {'Brier':>6}")
     for alpha in alphas:
         for gamma in gammas:
-            preds, reals = [], []
+            model_rois, reals = [], []
+            n_gate = 0
             g_ret = g_stake = a_ret = a_stake = 0
             top1_n = top1_tot = 0
             briers = []
@@ -839,11 +843,12 @@ def joint_sweep(evaluated, winodds, p_models, alphas, gammas):
                 model_roi, ret, stake = compute_baseline_pf(probs, quin, trio, pay)
                 if stake <= 0:
                     continue
-                preds.append(model_roi)
+                model_rois.append(model_roi)
                 reals.append(ret / stake)
                 a_ret += ret
                 a_stake += stake
                 if model_roi >= 1.0:
+                    n_gate += 1
                     g_ret += ret
                     g_stake += stake
                 w = race_winner(pay)
@@ -851,11 +856,10 @@ def joint_sweep(evaluated, winodds, p_models, alphas, gammas):
                     top1_tot += 1
                     top1_n += top1_hit(probs, w)
                     briers.append(brier(probs, w))
-            n_gate = sum(1 for m in preds if m >= 1.0)
             gate_roi = g_ret / g_stake * 100 if g_stake else float("nan")
             nogate_roi = a_ret / a_stake * 100 if a_stake else float("nan")
             delta = gate_roi - nogate_roi if (g_stake and a_stake) else float("nan")
-            sp = spearman(preds, reals)
+            sp = spearman(model_rois, reals)
             t1 = top1_n / top1_tot * 100 if top1_tot else float("nan")
             mb = sum(briers) / len(briers) if briers else float("nan")
             print(f"{alpha:>5.2f} {gamma:>5.2f} {n_gate:>6} {gate_roi:>7.1f}% {nogate_roi:>6.1f}% "
@@ -1036,17 +1040,17 @@ def main():
                 implied = market_implied(winodds.get(pid, {}))
                 prod_probs[(date, venue, rnum)] = recompute_p_final(pm, implied, 0.2, PRODUCTION_GAMMA)
 
-        # SANITY: 再計算 (α=0.2,γ=1.25) が本番 bt_pred（--pred-dir）を 1 桁丸め内で再現するか。
+        # SANITY: 再計算 (α=0.2,γ=PRODUCTION_GAMMA) が本番 bt_pred（--pred-dir）を 1 桁丸め内で
+        # 再現するか。本番 probs は evaluated タプル第5要素（= preds 由来）をそのまま使う。
         max_abs = 0.0
         nchk = 0
-        for date, venue, rnum, _pid, _probs, *_rest in evaluated:
+        for date, venue, rnum, _pid, actual, *_rest in evaluated:
             rp = prod_probs.get((date, venue, rnum))
-            pp = preds.get(date, {}).get((venue, rnum))
-            if not rp or not pp:
+            if not rp or not actual:
                 continue
-            for um in pp:
+            for um in actual:
                 if um in rp:
-                    max_abs = max(max_abs, abs(rp[um] - pp[um]))
+                    max_abs = max(max_abs, abs(rp[um] - actual[um]))
                     nchk += 1
         if nchk:
             print(f"=== #270 SANITY: 再計算(α=0.2,γ={PRODUCTION_GAMMA}) vs 本番 bt_pred "

@@ -272,6 +272,45 @@ def test_calibration_buckets_counts_and_realized():
     assert f"{realized:.1f}%" in out, (realized, out)
     # 的中 1/2 = 50%
     assert "50%" in out
+    # footer 行（この関数のもう一つの主目的）が出力されることを回帰固定する。
+    assert "Spearman" in out
+    assert "無ゲート全体" in out
+
+
+def test_recompute_p_final_pins_blend_then_power_order():
+    # 本 PR の中核主張「Rust 順序(blend→power)の鏡映」を恒久固定する。
+    # 既存テストは γ=1.0（冪恒等）か α=1.0（ブレンド恒等）で必ず片段が潰れ、順序入替を検出できない。
+    # α∈(0,1) かつ γ≠1 で両段を同時に効かせ、同順序の独立手計算を期待値にする。
+    pm = {1: 50.0, 2: 30.0, 3: 20.0}  # 縮約済 p_model%
+    implied = {1: 0.2, 2: 0.3, 3: 0.5}  # model と非一致＝ブレンドが効く（Σ1）
+    alpha, gamma = 0.5, 2.0
+    # 独立再現（blend → Σ1正規化 → 冪 → Σ1正規化 → *100）。
+    blended = {um: alpha * (pm[um] / 100.0) + (1 - alpha) * implied[um] for um in pm}
+    s = sum(blended.values())
+    blended = {um: v / s for um, v in blended.items()}
+    powered = {um: v ** gamma for um, v in blended.items()}
+    s2 = sum(powered.values())
+    expected = {um: v / s2 * 100.0 for um, v in powered.items()}
+    got = U.recompute_p_final(pm, implied, alpha, gamma)
+    for um in pm:
+        assert approx(got[um], expected[um], 1e-9), (um, got[um], expected[um])
+    # テスト自体の鋭敏性担保: 順序を入替（power→blend）すると有意に乖離することを確認。
+    pf = {um: (pm[um] / 100.0) ** gamma for um in pm}
+    sp = sum(pf.values())
+    pf = {um: v / sp for um, v in pf.items()}
+    swapped = {um: alpha * pf[um] + (1 - alpha) * implied[um] for um in pm}
+    ssw = sum(swapped.values())
+    swapped = {um: v / ssw * 100.0 for um, v in swapped.items()}
+    assert not approx(got[1], swapped[1], 0.5), (got[1], swapped[1])
+
+
+def test_recompute_p_final_clamps_alpha_like_rust():
+    # 本番 Rust(blend_with_market_win)の alpha.clamp(0,1) を鏡映。範囲外αは境界に丸める。
+    pm = {1: 60.0, 2: 40.0}
+    implied = {1: 0.3, 2: 0.7}
+    gamma = 1.25
+    assert U.recompute_p_final(pm, implied, 1.5, gamma) == U.recompute_p_final(pm, implied, 1.0, gamma)
+    assert U.recompute_p_final(pm, implied, -0.5, gamma) == U.recompute_p_final(pm, implied, 0.0, gamma)
 
 
 def test_joint_sweep_aggregation_e2e():
