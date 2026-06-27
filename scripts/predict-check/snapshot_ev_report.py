@@ -27,8 +27,8 @@
     # テスト/再現用に外部 TSV を注入（DB/analyze に触らない）
     python3 snapshot_ev_report.py --snapshots-tsv snaps.tsv --pred-tsv preds.tsv
 
-入力 TSV（--snapshots-tsv）形式（タブ区切り・1 行 1 オッズ）:
-    race_id  date  venue  race_num  surface  distance  bet_type  combination_key  odds  odds_high  fetched_at
+入力 TSV（--snapshots-tsv）形式（タブ区切り・1 行 1 オッズ・列順は _SNAP_COLS と一致）:
+    race_id  date  venue  race_num  bet_type  combination_key  odds  odds_high  fetched_at
 入力 TSV（--pred-tsv）形式:
     race_id  horse_num  model_pct
 """
@@ -47,7 +47,8 @@ WANT_BET_TYPES = ("win", "quinella", "trio", "wide")
 
 DEFAULT_DB_URL = "postgres://paddock:paddock@127.0.0.1:5432/paddock"
 # analyze predict の確率行: 「馬番 馬名 勝率%」。live_ev.parse_pred と同じ規約。
-PRED_LINE_RE = re.compile(r"\s*(\d+)\s+\S+\s+([\d.]+)%")
+# 勝率は厳格に「整数 or 小数1個」に絞る（`[\d.]+` だと `1.2.3` 等の多重ドットも拾い float() で落ちる）。
+PRED_LINE_RE = re.compile(r"\s*(\d+)\s+\S+\s+(\d+(?:\.\d+)?)%")
 
 
 def _combo(key: str) -> tuple[int, ...]:
@@ -73,16 +74,17 @@ def group_snapshots(rows):
         if bt not in WANT_BET_TYPES:
             continue
         rid = r["race_id"]
-        race = races.get(rid)
-        if race is None:
-            race = races[rid] = {
-                "date": r["date"],
-                "venue": r["venue"],
-                "race_num": int(r["race_num"]),
-                "times": defaultdict(lambda: {"win": {}, "quinella": {}, "trio": {}, "wide": {}}),
-            }
-        books = race["times"][r["fetched_at"]]
         try:
+            race = races.get(rid)
+            if race is None:
+                race = races[rid] = {
+                    "date": r["date"],
+                    "venue": r["venue"],
+                    "race_num": int(r["race_num"]),  # 外部 TSV の非数値 race_num も行単位で弾く
+                    "times": defaultdict(
+                        lambda: {"win": {}, "quinella": {}, "trio": {}, "wide": {}}),
+                }
+            books = race["times"][r["fetched_at"]]
             odds = float(r["odds"])
             if bt == "win":
                 books["win"][int(r["combination_key"])] = odds
@@ -115,6 +117,8 @@ def eval_race(probs, times, budget):
     if not bets:
         return None
     series = []  # (fetched_at, roi, missing)
+    # fetched_at は save_race_odds が rfc3339 UTC（+00:00 固定書式）で書くため辞書順=時系列順。
+    # final=最遅 fetched_at をこの前提で取る（migration 20260625 のコメントと同一規約）。
     for at in sorted(times):
         b = times[at]
         roi, _stake, missing = L.race_roi(probs, bets, b["wide"], b["quinella"], b["trio"])
@@ -270,6 +274,8 @@ def print_report(results, budget):
     print(f"  対象レース   : {n}")
     print(f"  ever +EV     : {ever}  ({ever / n * 100:.1f}%)  ← いずれかの snapshot 時点で ROI≥100%")
     print(f"  final +EV    : {final}  ({final / n * 100:.1f}%)  ← 最終 snapshot で ROI≥100%")
+    # ever は朝の剥がれやすい +EV も拾うため楽観側の参考値。実際に張れたかは発走直前＝final で見る。
+    print("  ※ ever は朝オッズ込みの参考値（朝の +EV は直前で剥がれやすい）。actionable は final。")
     if nmiss:
         print(f"  ⚠ 最終欠落   : {nmiss}  最終 snapshot にオッズ欠落があり final ROI が過小評価のレース")
     by_date = defaultdict(lambda: [0, 0, 0])  # date -> [races, ever, final]

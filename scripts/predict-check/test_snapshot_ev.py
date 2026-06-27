@@ -176,6 +176,25 @@ def test_group_snapshots_nonnumeric_odds_skipped():
     assert books["win"] == {}, books["win"]
 
 
+def test_group_snapshots_nonnumeric_race_num_skipped():
+    # 外部 TSV の非数値 race_num はレポート全体を落とさず当該行のみ warn スキップ。
+    good = _row("R1", "win", "1", 3.5)
+    bad = _row("R2", "win", "1", 3.5, rnum="N/A")  # race_num 異常
+    races = S.group_snapshots([bad, good])
+    assert set(races) == {"R1"}, races  # R2 は race_num 不正で作られない
+
+
+def test_psql_dump_rejects_bad_date():
+    # _psql_dump_snapshots は呼び出し側検証に依存せず日付形式を再検証する（多層防御）。
+    # 検証は subprocess 起動より前なので、不正日付では psql に到達せず ValueError になる。
+    for bad in ("2026-6-27", "2026-06-27; DROP", "', OR '1'='1"):
+        try:
+            S._psql_dump_snapshots("postgres://unused", bad, "2026-06-27")
+        except ValueError:
+            continue
+        raise AssertionError(f"不正日付 {bad!r} が ValueError にならなかった")
+
+
 def _run_all():
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     for fn in fns:
