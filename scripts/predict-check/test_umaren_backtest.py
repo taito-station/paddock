@@ -148,6 +148,218 @@ def test_plain_truncates_to_top5_but_allflat_keeps_all():
     assert bet_a and stake_a == 5000 and ret_a > 0   # 全頭は (1,7) を買う→的中
 
 
+# --- #270: 確率→EV パイプライン再計算（α×γ）の不変量 -------------------------
+def test_market_implied_normalizes_and_excludes_no_odds():
+    # オッズ有る馬の implied は overround 正規化で Σ1。オッズ<=0 / 欠落馬は除外。
+    winodds_pid = {1: (1, 2.0), 2: (2, 4.0), 3: (3, 4.0), 4: (4, 0.0)}
+    imp = U.market_implied(winodds_pid)
+    assert 4 not in imp  # odds=0 は市場確率を持たない
+    assert approx(sum(imp.values()), 1.0)
+    # raw=0.5,0.25,0.25 → overround=1.0 → そのまま implied
+    assert approx(imp[1], 0.5) and approx(imp[2], 0.25) and approx(imp[3], 0.25)
+    # overround>1（控除）の例: 全馬 odds=1.0 → raw=1 ×3 → 各 1/3
+    imp2 = U.market_implied({1: (1, 1.0), 2: (2, 1.0), 3: (3, 1.0)})
+    assert all(approx(v, 1 / 3) for v in imp2.values())
+    assert U.market_implied({}) == {}
+
+
+def test_recompute_p_final_matches_rust_order_fixture():
+    # 手計算した Rust 順序（blend→正規化→冪→正規化）の固定値と一致すること。
+    # p_model = {1:50,2:30,3:20}%、implied = {1:0.2,2:0.3,3:0.5}、α=0.5、γ=1.0。
+    # blended = 0.5*model + 0.5*implied = {1:0.35,2:0.30,3:0.35}（Σ=1.0）。
+    # γ=1.0 なので冪は恒等 → final% = {35,30,35}。
+    pmodel = {1: 50.0, 2: 30.0, 3: 20.0}
+    implied = {1: 0.2, 2: 0.3, 3: 0.5}
+    out = U.recompute_p_final(pmodel, implied, alpha=0.5, gamma=1.0)
+    assert approx(sum(out.values()), 100.0)
+    assert approx(out[1], 35.0) and approx(out[2], 30.0) and approx(out[3], 35.0)
+
+
+def test_recompute_alpha1_has_no_market_term():
+    # α=1.0 では (1-α)*implied 項が消え、output = normalize(model**γ)。implied は無視される。
+    pmodel = {1: 50.0, 2: 30.0, 3: 20.0}
+    implied = {1: 0.99, 2: 0.005, 3: 0.005}  # 極端な市場でも α=1.0 なら効かない
+    a = U.recompute_p_final(pmodel, implied, alpha=1.0, gamma=1.0)
+    assert approx(a[1], 50.0) and approx(a[2], 30.0) and approx(a[3], 20.0)
+    # γ=1.0・α=1.0 は恒等（model をそのまま返す）
+    b = U.recompute_p_final(pmodel, {}, alpha=1.0, gamma=1.0)
+    assert all(approx(a[k], b[k]) for k in pmodel)
+
+
+def test_recompute_gamma_normalized_and_in_unit():
+    # 任意 (α,γ) で出力は Σ1（%なら Σ100）かつ各値 [0,100]。
+    pmodel = {1: 50.0, 2: 30.0, 3: 15.0, 4: 5.0}
+    implied = {1: 0.4, 2: 0.3, 3: 0.2, 4: 0.1}
+    for alpha in (0.0, 0.2, 0.5, 1.0):
+        for gamma in (1.0, 1.25, 2.0):
+            out = U.recompute_p_final(pmodel, implied, alpha, gamma)
+            assert approx(sum(out.values()), 100.0), (alpha, gamma)
+            assert all(0.0 <= v <= 100.0 for v in out.values())
+
+
+def test_recompute_gamma_up_concentrates_top_mass():
+    # γ を上げると上位馬の確率質量が増える（冪較正の方向性）。
+    pmodel = {1: 50.0, 2: 30.0, 3: 20.0}
+    lo = U.recompute_p_final(pmodel, {}, alpha=1.0, gamma=1.0)
+    hi = U.recompute_p_final(pmodel, {}, alpha=1.0, gamma=2.0)
+    assert hi[1] > lo[1]  # トップは厚く
+    assert hi[3] < lo[3]  # ボトムは薄く
+
+
+def test_recover_p_model_roundtrip():
+    # α=1.0 の最終確率 = normalize(p_model**γ)。recover で元の p_model に戻ること。
+    pmodel = {1: 45.0, 2: 25.0, 3: 18.0, 4: 12.0}
+    final = U.recompute_p_final(pmodel, {}, alpha=1.0, gamma=1.25)
+    rec = U.recover_p_model(final, gamma=1.25)
+    assert approx(sum(rec.values()), 100.0)
+    assert all(approx(rec[k], pmodel[k], eps=1e-6) for k in pmodel), rec
+
+
+def test_top1_topk_brier_on_known_winner():
+    probs = {1: 50.0, 2: 30.0, 3: 20.0}
+    assert U.top1_hit(probs, 1) == 1
+    assert U.top1_hit(probs, 2) == 0
+    assert U.topk_recall(probs, 3, 1) == 0 and U.topk_recall(probs, 3, 3) == 1
+    assert U.topk_recall(probs, 2, 2) == 1
+    # Brier = mean_h (p-y)^2 = ((.5-1)^2+(.3)^2+(.2)^2)/3 = (0.25+0.09+0.04)/3
+    assert approx(U.brier(probs, 1), (0.25 + 0.09 + 0.04) / 3)
+
+
+def test_spearman_monotonic_and_degenerate():
+    assert approx(U.spearman([1, 2, 3, 4], [10, 20, 30, 40]), 1.0)
+    assert approx(U.spearman([1, 2, 3, 4], [40, 30, 20, 10]), -1.0)
+    assert U.spearman([1], [1]) == 0.0  # n<2
+    assert U.spearman([5, 5, 5], [1, 2, 3]) == 0.0  # 分散ゼロ
+    # 同順位（平均順位）: 2,2 のタイがあっても破綻しない（-1<=r<=1）
+    r = U.spearman([1, 2, 2, 3], [1, 2, 3, 4])
+    assert -1.0 <= r <= 1.0
+
+
+def test_race_winner_from_exacta():
+    pay = {"exacta": {(7, 3): 1000, (7, 5): 2000}}  # 1着=7 が共通
+    assert U.race_winner(pay) == 7
+    assert U.race_winner({"exacta": {}}) is None
+    assert U.race_winner({"exacta": {(1, 2): 100, (3, 4): 200}}) is None  # 同着1着→曖昧
+
+
+def test_calibration_buckets_counts_and_realized():
+    # 合成 evaluated 2 鞍で bucket 件数・実現 ROI が想定どおりか（stdout を捕捉）。
+    # 馬連のみ盤面（trio 空）で ◎=1 軸ながし。1 鞍は (1,2) 的中、もう 1 鞍は不的中。
+    import io
+    import contextlib
+    probs = {1: 50.0, 2: 30.0, 3: 20.0}
+    quin = {frozenset({1, 2}): 5.0, frozenset({1, 3}): 5.0}
+    trio = {}
+    pay_hit = {"umaren": {frozenset({1, 2}): 10000}, "wide": {}, "trio": {}, "exacta": {(1, 2): 1}}
+    pay_miss = {"umaren": {}, "wide": {}, "trio": {}, "exacta": {(9, 8): 1}}
+    evaluated = [
+        ("d1", "東京", 1, "p1", probs, quin, trio, {}, pay_hit),
+        ("d1", "東京", 2, "p2", probs, quin, trio, {}, pay_miss),
+    ]
+    probs_by_race = {("d1", "東京", 1): probs, ("d1", "東京", 2): probs}
+    # 両鞍とも同 probs/odds なので model_roi が一致 → 同一 bucket に 2 件入る。
+    mr, ret_hit, stake = U.compute_baseline_pf(probs, quin, trio, pay_hit)
+    _, ret_miss, _ = U.compute_baseline_pf(probs, quin, trio, pay_miss)
+    edges = [mr - 0.01]  # 2 件とも上側 bucket に入る境界
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        U.calibration_buckets(evaluated, probs_by_race, edges)
+    out = buf.getvalue()
+    # 上側 bucket に n=2、下側 bucket は n=0
+    assert f">={(mr - 0.01) * 100:.0f}%" in out
+    # 実現 ROI = (ret_hit + ret_miss) / (2*stake)
+    realized = (ret_hit + ret_miss) / (2 * stake) * 100
+    assert f"{realized:.1f}%" in out, (realized, out)
+    # 的中 1/2 = 50%
+    assert "50%" in out
+    # footer 行（この関数のもう一つの主目的）が出力されることを回帰固定する。
+    assert "Spearman" in out
+    assert "無ゲート全体" in out
+
+
+def test_recompute_p_final_pins_blend_then_power_order():
+    # 本 PR の中核主張「Rust 順序(blend→power)の鏡映」を恒久固定する。
+    # 既存テストは γ=1.0（冪恒等）か α=1.0（ブレンド恒等）で必ず片段が潰れ、順序入替を検出できない。
+    # α∈(0,1) かつ γ≠1 で両段を同時に効かせ、同順序の独立手計算を期待値にする。
+    pm = {1: 50.0, 2: 30.0, 3: 20.0}  # 縮約済 p_model%
+    implied = {1: 0.2, 2: 0.3, 3: 0.5}  # model と非一致＝ブレンドが効く（Σ1）
+    alpha, gamma = 0.5, 2.0
+    # 独立再現（blend → Σ1正規化 → 冪 → Σ1正規化 → *100）。
+    blended = {um: alpha * (pm[um] / 100.0) + (1 - alpha) * implied[um] for um in pm}
+    s = sum(blended.values())
+    blended = {um: v / s for um, v in blended.items()}
+    powered = {um: v ** gamma for um, v in blended.items()}
+    s2 = sum(powered.values())
+    expected = {um: v / s2 * 100.0 for um, v in powered.items()}
+    got = U.recompute_p_final(pm, implied, alpha, gamma)
+    for um in pm:
+        assert approx(got[um], expected[um], 1e-9), (um, got[um], expected[um])
+    # テスト自体の鋭敏性担保: 順序を入替（power→blend）すると有意に乖離することを確認。
+    pf = {um: (pm[um] / 100.0) ** gamma for um in pm}
+    sp = sum(pf.values())
+    pf = {um: v / sp for um, v in pf.items()}
+    swapped = {um: alpha * pf[um] + (1 - alpha) * implied[um] for um in pm}
+    ssw = sum(swapped.values())
+    swapped = {um: v / ssw * 100.0 for um, v in swapped.items()}
+    assert not approx(got[1], swapped[1], 0.5), (got[1], swapped[1])
+
+
+def test_recompute_p_final_clamps_alpha_like_rust():
+    # 本番 Rust(blend_with_market_win)の alpha.clamp(0,1) を鏡映。範囲外αは境界に丸める。
+    pm = {1: 60.0, 2: 40.0}
+    implied = {1: 0.3, 2: 0.7}
+    gamma = 1.25
+    assert U.recompute_p_final(pm, implied, 1.5, gamma) == U.recompute_p_final(pm, implied, 1.0, gamma)
+    assert U.recompute_p_final(pm, implied, -0.5, gamma) == U.recompute_p_final(pm, implied, 0.0, gamma)
+
+
+def test_joint_sweep_aggregation_e2e():
+    # PR の主力出力 joint_sweep の end-to-end 配線（recompute→baseline_pf→ゲート集計→
+    # top1 母集団）を合成 2 鞍で検証。期待値は関数合成で独立再現しハードコードしない。
+    import io
+    import contextlib
+    quin = {frozenset({1, 2}): 5.0, frozenset({1, 3}): 5.0}
+    trio = {}
+    pay1 = {"umaren": {frozenset({1, 2}): 10000}, "wide": {}, "trio": {}, "exacta": {(1, 2): 1}}
+    pay2 = {"umaren": {}, "wide": {}, "trio": {}, "exacta": {(3, 1): 1}}
+    pm = {1: 50.0, 2: 30.0, 3: 20.0}  # 縮約済 p_model%
+    evaluated = [
+        ("d1", "東京", 1, "p1", {}, quin, trio, {}, pay1),
+        ("d1", "東京", 2, "p2", {}, quin, trio, {}, pay2),
+    ]
+    p_models = {("d1", "東京", 1): pm, ("d1", "東京", 2): pm}
+    winodds = {
+        "p1": {1: (1, 2.0), 2: (2, 4.0), 3: (3, 8.0)},
+        "p2": {1: (1, 2.0), 2: (2, 4.0), 3: (3, 8.0)},
+    }
+    alpha, gamma = 0.2, 1.25
+    # 期待 n_gate / top1 母集団を joint_sweep と同じ手順で独立再現。
+    n_gate = top1_tot = top1_n = 0
+    for d, v, r, pid, _p, q, t, _e, pay in evaluated:
+        implied = U.market_implied(winodds[pid])
+        probs = U.recompute_p_final(p_models[(d, v, r)], implied, alpha, gamma)
+        mr, _ret, stake = U.compute_baseline_pf(probs, q, t, pay)
+        if stake <= 0:
+            continue
+        if mr >= 1.0:
+            n_gate += 1
+        w = U.race_winner(pay)
+        if w is not None:
+            top1_tot += 1
+            top1_n += U.top1_hit(probs, w)
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        U.joint_sweep(evaluated, winodds, p_models, [alpha], [gamma])
+    out = buf.getvalue()
+    assert "(α, γ) 同時掃引" in out
+    # 行頭 alpha / gamma / n_gate が独立再現と一致（集計配線の回帰検出）。
+    assert f"{alpha:>5.2f} {gamma:>5.2f} {n_gate:>6}" in out, out
+    # 両鞍とも exacta で 1 着復元可能 → top1 母集団 2、top1率列が一致。
+    assert top1_tot == 2
+    t1 = top1_n / top1_tot * 100
+    assert f"{t1:>4.0f}%" in out, (t1, out)
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for t in tests:

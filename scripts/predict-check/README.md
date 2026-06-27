@@ -135,7 +135,7 @@ python3 scripts/predict-check/snapshot_ev_report.py --snapshots-tsv snaps.tsv --
 | `strategy_eval.py` | preds × payouts の買い方別回収率（軸流し・予算配分・100 円単位, #122） |
 | `konsen_backtest.py` | 混戦判定の閾値バックテスト（¥5,000・確率重み配分・3連複ボックス, #180） |
 | `formation_backtest.py` | 上位近接時の2軸フォーメーション バックテスト（baseline vs union2/pair2・θ 掃引, #241） |
-| `umaren_backtest.py` | 馬連特化（馬連 EV≥θ）買い目のバックテスト（frequency 比較・cap/flat/weighted 掃引, #250）。`--gate-grid`/`--odds-floor-grid`/`--winodds` で baseline_pf の model-EV ROI≥100% ゲート精度を診断・掃引（#263） |
+| `umaren_backtest.py` | 馬連特化（馬連 EV≥θ）買い目のバックテスト（frequency 比較・cap/flat/weighted 掃引, #250）。`--gate-grid`/`--odds-floor-grid`/`--winodds` で baseline_pf の model-EV ROI≥100% ゲート精度を診断・掃引（#263）。`--p-model-dir` で確率→EV パイプライン（α×γ）を純 Python 再計算し較正バケット＋(α,γ)同時掃引（#270, ADR 0045） |
 | `fetch_wide.py` | netkeiba ライブ（発走前）ワイドオッズ取得（type=5, fetch-card 未対応の補完, #187） |
 | `live_ev.py` | 当日・発走前オッズの全3券種 ROI（期待回収率）評価＋ +EV レースの買い目伝票 |
 | `refresh_ev.sh` | ライブ EV のオーケストレータ（fetch-card→DB→ワイド→predict→`live_ev.py`） |
@@ -173,6 +173,42 @@ python3 scripts/predict-check/konsen_backtest.py \
 混戦扱い」案は **不採用**。`box-off 84.0% ≧ baseline(band≥4) 83.9% ＞ オッズ条件併用 79.5〜81.5%` で、
 どの閾値でも回収を悪化させた（回収率の分母を実消化額にした公平な会計でも同じ）。band=2 では
 ボックスが組成不能（3頭未満）で予算が余る。既存 band≥4 ボックスの寄与も中立。詳細は #180 のコメント参照。
+
+## 確率→EV パイプライン（α×γ）の同時再検証（#270, ADR 0045）
+
+ADR 0044 で判明した「較正後 model-EV ROI≥100% ゲートの逆予測性」が、確率→EV 合成
+（`m=10 縮約 → α 市場ブレンド → γ 冪較正 → 正規化`）のどの係数域で解消されるかを、
+**Rust 本番パイプラインを純 Python で鏡映して再計算**するフレームワーク（`umaren_backtest.py`）。
+
+binary を α・γ ごとに再実行せず、**α=1.0 実行 1 本から p_model を復元**して全グリッドを純 Python で掃引する:
+
+- `market_implied` … 単勝オッズ → overround 正規化済の市場確率。
+- `recover_p_model` … α=1.0 実行（final=normalize(p_model^γ)）の最終確率から単一冪逆変換で p_model 復元。
+- `recompute_p_final` … 任意 (α, γ) を Rust 順序（blend→正規化→冪→正規化）で再計算。
+- `calibration_buckets` … 予測 model ROI 帯ごとの実現 ROI・的中率＋ Spearman ＋ gate≥100% vs 無ゲート。
+- `joint_sweep` … (α, γ) 各点で n_gate・gateROI・無ゲート ROI・delta・Spearman・top1・Brier。
+
+```bash
+# 1. α=1.0 の bt_pred を再生成（p_model 復元用）。production(α=0.2) は #252 手順で /tmp/bt252。
+PADDOCK_DB_URL=postgres://paddock:paddock@127.0.0.1:5432/paddock \
+PADDOCK_BT_ALPHA=1.0 PADDOCK_ANALYZE_BIN=/path/to/release/paddock-analyze \
+  bash scripts/predict-check/gen_win_backtest_data.sh /tmp/bt270
+
+# 2. SANITY（再計算 vs 本番 bt_pred）＋較正バケット(α=0.2,γ=1.25)＋(α,γ)同時掃引
+python3 scripts/predict-check/umaren_backtest.py \
+  --races /tmp/bt252/bt_races.tsv --pred-dir /tmp/bt252 --results-dir /tmp/bt252 \
+  --exotic-odds /tmp/bt252/bt_exotic_odds.tsv --winodds /tmp/bt252/bt_winodds.tsv \
+  --p-model-dir /tmp/bt270 \
+  --alpha-grid 0,0.1,0.2,0.3,0.5,1.0 --gamma-grid 1.0,1.1,1.25,1.5,2.0 --bucket-edges 0.8,0.9,1.0,1.1,1.2
+```
+
+- `--p-model-dir` を**省略すると新規出力はスキップ**し、既存挙動（#250/#262/#263）は完全に不変。
+- 出力: `=== #270 SANITY ===`（最大絶対誤差。1 桁丸め由来 ~0.1-0.3pt 以内なら忠実）→
+  `=== 較正バケット ===`（予測 ROI 帯→実現 ROI の逆予測性）→ `=== (α, γ) 同時掃引 ===`。
+- **α は code ではモデル重み**（`blended=α·model+(1−α)·market`）。α=0.2＝市場 0.8＝市場補正が強い。
+  α を上げる＝モデル重みを増やす＝市場補正を弱める（issue 本文の α 記述は逆。ADR 0045 ALPHA-SIGN 訂正）。
+- **暫定 71R 知見は赤字窓での過学習が確実**。確定チューニング・本番定数(m/α/γ)・CLAUDE.md の変更は
+  #248 蓄積後（ADR 0045）。
 
 ## ライブ EV 監視（当日・発走前オッズ）
 

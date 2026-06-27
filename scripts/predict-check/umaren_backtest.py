@@ -60,6 +60,7 @@ bt_exotic_odds.tsv の生成（DB から、71R 窓の馬連・三連複・馬単
       --ev-grid 1.0,1.2,1.5 --cap-grid inf,50,30
 """
 import argparse
+import math
 import re
 import statistics
 import unicodedata
@@ -595,6 +596,277 @@ def gate_sweep(evaluated, winodds, gates, floors):
         print()
 
 
+# --- #270: 確率→EV パイプライン（α 市場ブレンド × γ 冪較正）の純 Python 再計算 ------
+# Rust 本番パイプライン（src/.../race.rs）の処理順を厳密に鏡映する:
+#   m=10 縮約（p_model に焼込み済）→ α ブレンド → γ 冪 → 正規化。
+# p_model は α=1.0 実行（ブレンド skip ＝ final=normalize(p_model**γ)）から
+# 単一の冪逆変換で復元できる（recover_p_model）。以後は任意の (α, γ) を純 Python で
+# 再計算でき、binary を α・γ ごとに再実行せずに同時掃引できる（復元の効率性）。
+def market_implied(winodds_pid):
+    """単勝オッズ {umaban: (pop, odds)} -> {umaban: implied}（overround 正規化済の市場確率）。
+
+    raw=1/odds、overround=Σraw（オッズのある全頭）、implied=raw/overround。
+    odds 採用条件は本番 Rust（estimate.rs: `odds.is_finite() && odds >= 1.0`）を鏡映する。
+    単勝オッズは常に有限かつ ≥1.0 なので実データでは差は出ないが、異常値（inf・0<odds<1）の
+    扱いを Rust と揃えて忠実性を保つ。
+    """
+    raw = {}
+    for um, (_pop, odds) in winodds_pid.items():
+        if odds is not None and math.isfinite(odds) and odds >= 1.0:
+            raw[um] = 1.0 / odds
+    s = sum(raw.values())
+    if s <= 0:
+        return {}
+    return {um: r / s for um, r in raw.items()}
+
+
+# 本番（analyze predict / EstimationConfig::production）の γ。recover_p_model は α=1.0 実行を
+# 生成した binary の本番 γ と一致せねば無言で誤るため、復元・再計算で参照する単一の真実源にする。
+PRODUCTION_GAMMA = 1.25
+
+
+def recover_p_model(p_final_pct, gamma=PRODUCTION_GAMMA):
+    """α=1.0 実行（final=normalize(p_model**γ)）の最終確率%から p_model%を復元する。
+
+    x=(pct/100)**(1/γ); Σ1 正規化; *100。単一の冪逆変換（縮約・ブレンドには触れない）。
+    α=1.0 ではブレンド項が消えるので、この逆変換だけで縮約済 p_model を厳密に取り出せる。
+    """
+    x = {um: (pct / 100.0) ** (1.0 / gamma) for um, pct in p_final_pct.items()}
+    s = sum(x.values())
+    if s <= 0:
+        return {um: 0.0 for um in p_final_pct}
+    return {um: v / s * 100.0 for um, v in x.items()}
+
+
+def recompute_p_final(p_model_pct, implied, alpha, gamma):
+    """縮約済 p_model%から (α, γ) で最終確率%を再計算する。Rust の処理順を鏡映。
+
+    model=pct/100; blended=α*model+(1-α)*implied（implied に居る馬のみ、他は model 据置）;
+    Σ1 正規化; powered=blended**γ; Σ1 正規化; *100。
+    α>=1.0 では (1-α)*implied 項が消え市場補正なし（= normalize(model**γ)）。
+    α は本番 Rust（blend_with_market_win の alpha.clamp(0,1)）に倣い [0,1] にクランプする
+    （既定 grid は [0,1] 内なので恒等。範囲外を渡しても本番と乖離させない）。
+    """
+    alpha = min(1.0, max(0.0, alpha))
+    blended = {}
+    for um, pct in p_model_pct.items():
+        model = pct / 100.0
+        if um in implied:
+            blended[um] = alpha * model + (1.0 - alpha) * implied[um]
+        else:
+            blended[um] = model
+    s = sum(blended.values())
+    if s > 0:
+        blended = {um: v / s for um, v in blended.items()}
+    powered = {um: v ** gamma for um, v in blended.items()}
+    s2 = sum(powered.values())
+    if s2 > 0:
+        powered = {um: v / s2 for um, v in powered.items()}
+    return {um: v * 100.0 for um, v in powered.items()}
+
+
+# --- 単勝精度メトリクス（answer_check.py と同式。較正が単勝精度を劣化させないかの確認用）---
+def top1_hit(probs, winner):
+    """probs（{umaban:%}）の最尤馬が実際の勝ち馬なら 1、否なら 0。"""
+    if not probs:
+        return 0
+    pred = max(probs, key=lambda n: probs[n])
+    return 1 if pred == winner else 0
+
+
+def topk_recall(probs, winner, k):
+    """勝ち馬が model 上位 k 頭に入れば 1、否なら 0（answer_check.py の recall と同義）。"""
+    ranked = sorted(probs, key=lambda n: -probs[n])
+    return 1 if winner in ranked[:k] else 0
+
+
+def brier(probs, winner):
+    """単勝 Brier（単一レース内の出走馬平均）= mean_h (p_h/100 - [h==winner])^2。
+
+    レース内の per-horse 項は answer_check.py:112-114 と同式。鞍跨ぎの集計方法は呼び出し側に依存し、
+    joint_sweep はこれをレース毎に取りさらに平均する（answer_check.py の全頭グローバル平均とは別。
+    集計差の詳細は joint_sweep のコメント参照）。
+    """
+    if not probs:
+        return 0.0
+    s = 0.0
+    for um, pct in probs.items():
+        y = 1.0 if um == winner else 0.0
+        s += (pct / 100.0 - y) ** 2
+    return s / len(probs)
+
+
+def _avg_ranks(vals):
+    """昇順の平均順位（1-based、同値は平均順位）を返す。Spearman 用の内部ヘルパ。"""
+    order = sorted(range(len(vals)), key=lambda i: vals[i])
+    ranks = [0.0] * len(vals)
+    i = 0
+    while i < len(order):
+        j = i
+        while j + 1 < len(order) and vals[order[j + 1]] == vals[order[i]]:
+            j += 1
+        avg = (i + j) / 2.0 + 1.0  # 1-based の平均順位
+        for k in range(i, j + 1):
+            ranks[order[k]] = avg
+        i = j + 1
+    return ranks
+
+
+def spearman(xs, ys):
+    """Spearman 順位相関（同順位は平均順位）。n<2 または分散ゼロは 0.0。"""
+    n = len(xs)
+    if n < 2:
+        return 0.0
+    rx = _avg_ranks(xs)
+    ry = _avg_ranks(ys)
+    mx = sum(rx) / n
+    my = sum(ry) / n
+    cov = sum((rx[i] - mx) * (ry[i] - my) for i in range(n))
+    vx = sum((r - mx) ** 2 for r in rx)
+    vy = sum((r - my) ** 2 for r in ry)
+    if vx <= 0 or vy <= 0:
+        return 0.0
+    return cov / (vx * vy) ** 0.5
+
+
+def race_winner(pay):
+    """実結果の 1 着 umaban を払戻から復元する（馬単キー=(1着,2着) の 1 着）。
+
+    evaluated タプルは top3 を持たないため、着順固定の馬単(exacta)払戻から 1 着を取る。
+    馬単欠落 or 同着 1 着（1 着が複数）の鞍は None（top1/Brier 集計から除外）。
+    """
+    ex = pay.get("exacta", {})
+    firsts = {a for (a, _b) in ex}
+    return next(iter(firsts)) if len(firsts) == 1 else None
+
+
+# --- #270: 較正バケット（#249 枠組みと統合）と (α,γ) 同時掃引 -------------------
+def calibration_buckets(evaluated, probs_by_race, edges):
+    """予測 model ROI でレースをバケット分けし、予測 ROI vs 実現 ROI の較正を測る（#249）。
+
+    probs_by_race: {(date,venue,rnum): 最終確率%}。関数は汎用で再計算 probs でも本番 bt_pred の
+        実 probs でも受ける。headline 較正の呼び出しは ADR 0044 の gate_sweep と同値にするため
+        本番実 probs を渡す（main の prod_actual 参照）。
+    各レースの予測 ROI = compute_baseline_pf(再計算 probs) の model_roi。
+    バケット毎に n / 予測ROI平均 / 実現ROI(Σret/Σstake) / 的中率 を出し、
+    末尾に Spearman(予測ROI, レース毎実現ROI) と gate>=100% 実現ROI vs 無ゲート全体を付す。
+
+    「逆予測性が解消された」= Spearman>=0（予測 ROI が実現 ROI を正しく順位づける）かつ
+    gate>=100% 実現 ROI >= 無ゲート全体（model EV ゲートが正の選別になる）。
+    """
+    edges = sorted(edges)
+    buckets = [[] for _ in range(len(edges) + 1)]
+    pred_all, real_all = [], []  # Spearman 用（予測 ROI, レース毎実現 ROI）
+    gate_ret = gate_stake = 0
+    all_ret = all_stake = 0
+    for date, venue, rnum, _pid, _probs, quin, trio, _exacta, pay in evaluated:
+        probs = probs_by_race.get((date, venue, rnum))
+        if not probs:
+            continue
+        model_roi, ret, stake = compute_baseline_pf(probs, quin, trio, pay)
+        if stake <= 0:
+            continue
+        bi = 0
+        while bi < len(edges) and model_roi >= edges[bi]:
+            bi += 1
+        buckets[bi].append((model_roi, ret, stake))
+        pred_all.append(model_roi)
+        real_all.append(ret / stake)
+        all_ret += ret
+        all_stake += stake
+        if model_roi >= 1.0:
+            gate_ret += ret
+            gate_stake += stake
+
+    print("=== 較正バケット（予測 model ROI 帯 → 実現 ROI, baseline_pf ポートフォリオ）===")
+    print(f"{'bucket':<12} {'n':>3} {'予測ROI':>9} {'実現ROI':>9} {'的中率':>7}")
+    labels = []
+    for i in range(len(edges) + 1):
+        lo = edges[i - 1] if i > 0 else None
+        hi = edges[i] if i < len(edges) else None
+        if lo is None:
+            labels.append(f"<{hi * 100:.0f}%")
+        elif hi is None:
+            labels.append(f">={lo * 100:.0f}%")
+        else:
+            labels.append(f"{lo * 100:.0f}-{hi * 100:.0f}%")
+    for lab, b in zip(labels, buckets):
+        labp = pad_disp(lab, 12)
+        if not b:
+            print(f"{labp} {0:>3} {'-':>9} {'-':>9} {'-':>7}")
+            continue
+        n = len(b)
+        mean_pred = sum(m for m, _, _ in b) / n * 100
+        sr = sum(r for _, r, _ in b)
+        ss = sum(s for _, _, s in b)
+        real = sr / ss * 100 if ss else 0.0
+        hit = sum(1 for _, r, _ in b if r > 0) / n * 100
+        print(f"{labp} {n:>3} {mean_pred:>8.1f}% {real:>8.1f}% {hit:>6.0f}%")
+
+    sp = spearman(pred_all, real_all)
+    gate_roi = gate_ret / gate_stake * 100 if gate_stake else float("nan")
+    nogate_roi = all_ret / all_stake * 100 if all_stake else float("nan")
+    print(f"\nSpearman(予測ROI, レース実現ROI) = {sp:+.3f}"
+          "（>=0 なら予測が実現を順位づけ＝逆予測性が解消）")
+    print(f"gate>=100% 実現ROI {gate_roi:.1f}% vs 無ゲート全体 {nogate_roi:.1f}%"
+          "（gate>=無ゲート なら model EV ゲートが正の選別）\n")
+
+
+def joint_sweep(evaluated, winodds, p_models, alphas, gammas):
+    """(α, γ) 同時掃引。各 (α,γ) で全レースを再計算→ baseline_pf 清算→ ゲート整合性を測る。
+
+    p_models: {(date,venue,rnum): 縮約済 p_model%}（α=1.0 実行から復元）。
+    行: n_gate(model_roi>=1.0) / gated実現ROI / 無ゲート実現ROI / 差分 /
+        Spearman(model_roi, ret/stake) / top1率 / 平均Brier。
+    delta>=0 かつ Spearman>=0 なら、その (α,γ) で model EV ゲートが正直な選別に戻る。
+
+    top1率・Brier は race_winner(pay) で 1 着が復元できる鞍のみが母集団（馬単欠落・同着 1 着は除外）。
+    Brier はレース毎平均をさらに鞍跨ぎ平均する（フィールドサイズ非重み）。α 間の相対比較が目的で、
+    answer_check.py の全頭グローバル平均（フィールドサイズ重み）とは集計が異なる点に留意。
+    """
+    print("=== (α, γ) 同時掃引（baseline_pf ポートフォリオのゲート整合性 + 単勝精度）===")
+    print(f"{'alpha':>5} {'gamma':>5} {'n_gate':>6} {'gateROI':>8} {'noGate':>7} "
+          f"{'delta':>6} {'Spear':>6} {'top1':>5} {'Brier':>6}")
+    for alpha in alphas:
+        for gamma in gammas:
+            model_rois, reals = [], []
+            n_gate = 0
+            g_ret = g_stake = a_ret = a_stake = 0
+            top1_n = top1_tot = 0
+            briers = []
+            for date, venue, rnum, pid, _probs, quin, trio, _exacta, pay in evaluated:
+                pm = p_models.get((date, venue, rnum))
+                if not pm:
+                    continue
+                implied = market_implied(winodds.get(pid, {}))
+                probs = recompute_p_final(pm, implied, alpha, gamma)
+                model_roi, ret, stake = compute_baseline_pf(probs, quin, trio, pay)
+                if stake <= 0:
+                    continue
+                model_rois.append(model_roi)
+                reals.append(ret / stake)
+                a_ret += ret
+                a_stake += stake
+                if model_roi >= 1.0:
+                    n_gate += 1
+                    g_ret += ret
+                    g_stake += stake
+                w = race_winner(pay)
+                if w is not None:
+                    top1_tot += 1
+                    top1_n += top1_hit(probs, w)
+                    briers.append(brier(probs, w))
+            gate_roi = g_ret / g_stake * 100 if g_stake else float("nan")
+            nogate_roi = a_ret / a_stake * 100 if a_stake else float("nan")
+            delta = gate_roi - nogate_roi if (g_stake and a_stake) else float("nan")
+            sp = spearman(model_rois, reals)
+            t1 = top1_n / top1_tot * 100 if top1_tot else float("nan")
+            mb = sum(briers) / len(briers) if briers else float("nan")
+            print(f"{alpha:>5.2f} {gamma:>5.2f} {n_gate:>6} {gate_roi:>7.1f}% {nogate_roi:>6.1f}% "
+                  f"{delta:>+6.1f} {sp:>+6.3f} {t1:>4.0f}% {mb:>6.4f}")
+        print()
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--races", default="/tmp/bt250/bt_races.tsv")
@@ -609,6 +881,16 @@ def main():
                     help="#263 baseline_pf ゲート閾値（model ROI）の掃引。0=無ゲート対照")
     ap.add_argument("--odds-floor-grid", default="0,2,3,5",
                     help="#263 ◎単勝オッズ下限の掃引（0=条件なし）")
+    # #270: 確率→EV パイプライン（α×γ）の同時再検証。--p-model-dir は α=1.0 実行の bt_pred dir。
+    ap.add_argument("--p-model-dir", default=None,
+                    help="#270 α=1.0 実行の bt_pred dir（指定時のみ較正バケット+α×γ掃引を追加）")
+    ap.add_argument("--alpha-grid", default="0,0.1,0.2,0.3,0.5,1.0",
+                    help="#270 α（市場ブレンド）掃引。α=モデル重み係数"
+                         "（blended=α·model+(1-α)·market）＝高いほど市場補正は弱い（ADR 0045）")
+    ap.add_argument("--gamma-grid", default="1.0,1.1,1.25,1.5,2.0",
+                    help="#270 γ（冪較正）掃引。γ>1 で上位確率に質量を集中")
+    ap.add_argument("--bucket-edges", default="0.8,0.9,1.0,1.1,1.2",
+                    help="#270 較正バケットの予測 model ROI 境界")
     args = ap.parse_args()
 
     races = parse_races(args.races)
@@ -735,6 +1017,54 @@ def main():
                         rows.append((ret, stake))
                 print(summarize(f"exacta θ={theta:.1f} {clabel} {mode}", rows))
         print()
+
+    # #270: 確率→EV パイプライン（α×γ）の同時再検証（--p-model-dir 指定時のみ）。
+    # α=1.0 実行の最終確率から p_model を復元し、任意 (α,γ) を純 Python で再計算する。
+    if args.p_model_dir:
+        a1_preds = {}
+        for d in sorted({r["date"] for r in races}):
+            p = Path(args.p_model_dir) / f"bt_pred_{d}.txt"
+            if p.exists():
+                a1_preds[d] = parse_pred(p)
+        p_models = {}  # (date,venue,rnum) -> 縮約済 p_model%
+        for date, venue, rnum, _pid, _probs, *_rest in evaluated:
+            pf = a1_preds.get(date, {}).get((venue, rnum))
+            if pf:
+                p_models[(date, venue, rnum)] = recover_p_model(pf, gamma=PRODUCTION_GAMMA)
+
+        # production (α=0.2, γ=1.25) で各レースの最終確率を再計算。
+        prod_probs = {}
+        for date, venue, rnum, pid, _probs, *_rest in evaluated:
+            pm = p_models.get((date, venue, rnum))
+            if pm:
+                implied = market_implied(winodds.get(pid, {}))
+                prod_probs[(date, venue, rnum)] = recompute_p_final(pm, implied, 0.2, PRODUCTION_GAMMA)
+
+        # SANITY: 再計算 (α=0.2,γ=PRODUCTION_GAMMA) が本番 bt_pred（--pred-dir）を 1 桁丸め内で
+        # 再現するか。本番 probs は evaluated タプル第5要素（= preds 由来）をそのまま使う。
+        max_abs = 0.0
+        nchk = 0
+        for date, venue, rnum, _pid, actual, *_rest in evaluated:
+            rp = prod_probs.get((date, venue, rnum))
+            if not rp or not actual:
+                continue
+            for um in actual:
+                if um in rp:
+                    max_abs = max(max_abs, abs(rp[um] - actual[um]))
+                    nchk += 1
+        if nchk:
+            print(f"=== #270 SANITY: 再計算(α=0.2,γ={PRODUCTION_GAMMA}) vs 本番 bt_pred "
+                  f"（{nchk}頭・最大絶対誤差 {max_abs:.3f}pt）===")
+            print("（純 Python 再計算が Rust 本番を鏡映していれば 1 桁丸め由来の ~0.1-0.3pt 以内）\n")
+
+        # 較正バケットの production headline は本番 bt_pred の実 probs を使う
+        # （ADR 0044 の gate_sweep と同値＝24.5% に一致。recompute は上の SANITY 専用）。
+        edges = [float(x) for x in args.bucket_edges.split(",")]
+        prod_actual = {(d, v, r): pr for d, v, r, _pid, pr, *_rest in evaluated}
+        calibration_buckets(evaluated, prod_actual, edges)
+        alphas = [float(x) for x in args.alpha_grid.split(",")]
+        gammas = [float(x) for x in args.gamma_grid.split(",")]
+        joint_sweep(evaluated, winodds, p_models, alphas, gammas)
 
 
 if __name__ == "__main__":
