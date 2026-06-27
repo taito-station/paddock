@@ -230,6 +230,12 @@ impl OddsRepository for MockRepo {
     ) -> Result<Option<paddock_domain::RaceOdds>> {
         Ok(self.odds.clone())
     }
+    async fn purge_race_odds_snapshots(&self, _: chrono::NaiveDate) -> Result<u64> {
+        Ok(0)
+    }
+    async fn count_race_odds_snapshots_before(&self, _: chrono::NaiveDate) -> Result<u64> {
+        Ok(0)
+    }
 }
 
 struct NullParser;

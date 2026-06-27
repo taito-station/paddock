@@ -1,7 +1,7 @@
 mod cli;
 mod setup;
 
-use chrono::NaiveDate;
+use chrono::{Months, NaiveDate, Utc};
 use clap::Parser;
 use paddock_domain::{
     BacktestReport, EstimationConfig, ExoticSegment, FieldSizeSegment, HorseName, HorseProbability,
@@ -126,6 +126,30 @@ async fn main() -> anyhow::Result<()> {
                 .backtest(from, to, blend_alpha, config)
                 .await?;
             print_backtest(from, to, &report);
+        }
+        cli::Command::PurgeSnapshots { months, dry_run } => {
+            // 0 ヶ月は当日以降のみ保持＝ほぼ全削除で #218 の蓄積を壊すため弾く。
+            if months == 0 {
+                anyhow::bail!("--months must be >= 1 (got {months})");
+            }
+            // fetched_at は UTC 基準なので cutoff も UTC の今日から引く。
+            let cutoff = Utc::now()
+                .date_naive()
+                .checked_sub_months(Months::new(months))
+                .ok_or_else(|| anyhow::anyhow!("cutoff date underflow for --months {months}"))?;
+            let n = app
+                .interactor
+                .purge_old_race_odds_snapshots(cutoff, dry_run)
+                .await?;
+            if dry_run {
+                println!(
+                    "[dry-run] race_odds_snapshots: cutoff={cutoff} より前の {n} 行が削除対象（保持 {months} ヶ月）"
+                );
+            } else {
+                println!(
+                    "race_odds_snapshots: cutoff={cutoff} より前の {n} 行を削除（保持 {months} ヶ月）"
+                );
+            }
         }
     }
 

@@ -13,6 +13,7 @@ mod horse_stats;
 mod jockey_stats;
 mod pad_prediction;
 mod predict_session;
+mod purge_race_odds_snapshots;
 mod save_race;
 mod save_race_card;
 mod save_race_odds;
@@ -294,6 +295,18 @@ impl OddsRepository for PostgresRepository {
         as_of: Option<NaiveDate>,
     ) -> UcResult<Option<RaceOdds>> {
         find_race_odds::find_race_odds(&self.pool, race_id, as_of)
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn purge_race_odds_snapshots(&self, before: NaiveDate) -> UcResult<u64> {
+        purge_race_odds_snapshots::purge_race_odds_snapshots(&self.pool, before)
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn count_race_odds_snapshots_before(&self, before: NaiveDate) -> UcResult<u64> {
+        purge_race_odds_snapshots::count_race_odds_snapshots_before(&self.pool, before)
             .await
             .map_err(Into::into)
     }

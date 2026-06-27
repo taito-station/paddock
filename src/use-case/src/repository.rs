@@ -680,6 +680,20 @@ pub trait OddsRepository: Send + Sync {
         race_id: &RaceId,
         as_of: Option<NaiveDate>,
     ) -> impl Future<Output = Result<Option<RaceOdds>>> + Send;
+
+    /// `race_odds_snapshots`（append-only 履歴, #232）のうち `fetched_at` の日付が `before`
+    /// より前の行を削除し、削除行数を返す（retention/パージ, #234）。最新キャッシュ `race_odds` は
+    /// 対象外。`before` 当日（`date(fetched_at) == before`）は残す（厳密 `<`）。
+    fn purge_race_odds_snapshots(
+        &self,
+        before: NaiveDate,
+    ) -> impl Future<Output = Result<u64>> + Send;
+
+    /// `purge_race_odds_snapshots` の削除対象行数を、削除せずに数える（dry-run 用, #234）。
+    fn count_race_odds_snapshots_before(
+        &self,
+        before: NaiveDate,
+    ) -> impl Future<Output = Result<u64>> + Send;
 }
 
 /// 取り込み履歴（fetch history）の存在判定・記録。

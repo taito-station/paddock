@@ -223,6 +223,12 @@ impl OddsRepository for RecordingRepo {
     ) -> Result<Option<paddock_domain::RaceOdds>> {
         unimplemented!()
     }
+    async fn purge_race_odds_snapshots(&self, _before: NaiveDate) -> Result<u64> {
+        Ok(0)
+    }
+    async fn count_race_odds_snapshots_before(&self, _before: NaiveDate) -> Result<u64> {
+        Ok(0)
+    }
 }
 
 fn race_id() -> RaceId {

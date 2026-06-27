@@ -602,3 +602,95 @@ async fn snapshots_persist_band_odds_high(pool: sqlx::PgPool) {
         "上限(odds_high)も snapshots に残る"
     );
 }
+
+/// 指定 UTC 日時の単勝 1 頭レコードを保存する（retention テスト用）。
+async fn save_win_at(repo: &PostgresRepository, at: DateTime<Utc>, odds: f64) {
+    repo.save_race_odds(&RaceOddsRecord {
+        race_id: race_id(),
+        fetched_at: at,
+        rows: vec![OddsRow {
+            bet_type: "win".to_string(),
+            combination_key: "1".to_string(),
+            odds,
+            odds_high: None,
+            popularity: None,
+        }],
+    })
+    .await
+    .unwrap();
+}
+
+async fn snapshots_count(repo: &PostgresRepository) -> i64 {
+    sqlx::query_scalar("SELECT COUNT(*) FROM race_odds_snapshots WHERE race_id = $1")
+        .bind(race_id().value())
+        .fetch_one(&repo.pool)
+        .await
+        .unwrap()
+}
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn purge_deletes_old_snapshots_keeps_recent(pool: sqlx::PgPool) {
+    // retention(#234): cutoff より前の fetched_at の snapshots だけ削除し、保持期間内は残す。
+    // race_odds（最新キャッシュ）は消さない。
+    let repo = PostgresRepository::new(pool);
+    let old = Utc.with_ymd_and_hms(2025, 1, 1, 10, 0, 0).unwrap();
+    let recent = Utc.with_ymd_and_hms(2026, 6, 1, 10, 0, 0).unwrap();
+    save_win_at(&repo, old, 3.5).await;
+    save_win_at(&repo, recent, 4.0).await; // 同一キー別時刻 → snapshots 2 行 / race_odds 最新1行
+    assert_eq!(snapshots_count(&repo).await, 2, "前提: snapshots は 2 行");
+
+    let cutoff = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
+    // dry-run(count) は削除せず対象行数（古い 1 行）を返す。
+    assert_eq!(
+        repo.count_race_odds_snapshots_before(cutoff).await.unwrap(),
+        1
+    );
+    assert_eq!(snapshots_count(&repo).await, 2, "count は削除しない");
+
+    // 実削除: 古い 1 行のみ削除。
+    assert_eq!(repo.purge_race_odds_snapshots(cutoff).await.unwrap(), 1);
+    assert_eq!(snapshots_count(&repo).await, 1, "保持期間内の 1 行が残る");
+    assert_eq!(
+        repo.count_race_odds_snapshots_before(cutoff).await.unwrap(),
+        0,
+        "古い行は消えた"
+    );
+
+    // 残った snapshot は recent(2026-06-01)。
+    let remaining: String = sqlx::query_scalar(
+        "SELECT substr(fetched_at,1,10) FROM race_odds_snapshots WHERE race_id=$1",
+    )
+    .bind(race_id().value())
+    .fetch_one(&repo.pool)
+    .await
+    .unwrap();
+    assert_eq!(remaining, "2026-06-01");
+
+    // race_odds（最新キャッシュ）は purge の影響を受けず、最新値 4.0 のまま読める。
+    let odds = repo
+        .find_race_odds(&race_id(), None)
+        .await
+        .unwrap()
+        .expect("race_odds は残る");
+    assert!((odds.win.get(&horse(1)).unwrap().value() - 4.0).abs() < 1e-9);
+}
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn purge_is_strict_before_cutoff(pool: sqlx::PgPool) {
+    // cutoff 当日（date(fetched_at) == cutoff）は残す（厳密 `<`）。翌日 cutoff で削除される。
+    let repo = PostgresRepository::new(pool);
+    save_win_at(
+        &repo,
+        Utc.with_ymd_and_hms(2026, 6, 1, 10, 0, 0).unwrap(),
+        3.5,
+    )
+    .await;
+
+    let same_day = NaiveDate::from_ymd_opt(2026, 6, 1).unwrap();
+    assert_eq!(repo.purge_race_odds_snapshots(same_day).await.unwrap(), 0);
+    assert_eq!(snapshots_count(&repo).await, 1, "cutoff 当日は残る");
+
+    let next_day = NaiveDate::from_ymd_opt(2026, 6, 2).unwrap();
+    assert_eq!(repo.purge_race_odds_snapshots(next_day).await.unwrap(), 1);
+    assert_eq!(snapshots_count(&repo).await, 0, "翌日 cutoff で削除される");
+}
