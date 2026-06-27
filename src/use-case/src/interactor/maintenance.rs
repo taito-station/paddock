@@ -13,7 +13,11 @@ impl<R: OddsRepository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
     ///
     /// 最新キャッシュ `race_odds` は対象外（snapshots 専用）。cutoff の決定（実行日 − 保持月数）は
     /// 呼び出し側（CLI）が UTC で行い、ここには確定済みの `before` 日付を渡す。
-    pub async fn purge_old_odds_snapshots(&self, before: NaiveDate, dry_run: bool) -> Result<u64> {
+    pub async fn purge_old_race_odds_snapshots(
+        &self,
+        before: NaiveDate,
+        dry_run: bool,
+    ) -> Result<u64> {
         if dry_run {
             let count = self
                 .repository

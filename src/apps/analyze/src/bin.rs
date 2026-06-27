@@ -128,8 +128,8 @@ async fn main() -> anyhow::Result<()> {
             print_backtest(from, to, &report);
         }
         cli::Command::PurgeSnapshots { months, dry_run } => {
-            // 0 ヶ月は当日以降のみ保持＝ほぼ全削除で #218 の蓄積を壊すため弾く（下限 1）。
-            if months < 1 {
+            // 0 ヶ月は当日以降のみ保持＝ほぼ全削除で #218 の蓄積を壊すため弾く。
+            if months == 0 {
                 anyhow::bail!("--months must be >= 1 (got {months})");
             }
             // fetched_at は UTC 基準なので cutoff も UTC の今日から引く。
@@ -139,7 +139,7 @@ async fn main() -> anyhow::Result<()> {
                 .ok_or_else(|| anyhow::anyhow!("cutoff date underflow for --months {months}"))?;
             let n = app
                 .interactor
-                .purge_old_odds_snapshots(cutoff, dry_run)
+                .purge_old_race_odds_snapshots(cutoff, dry_run)
                 .await?;
             if dry_run {
                 println!(
