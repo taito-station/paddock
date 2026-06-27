@@ -3,7 +3,8 @@ use std::collections::HashMap;
 use chrono::NaiveDate;
 use paddock_domain::{
     EstimationConfig, FactorStat, HorseEntry, HorseFactors, HorseName, HorseProbability,
-    JockeyName, RaceId, RateTriple, RecentRun, StandardTimes, Surface, TrackCondition, TrainerName,
+    JockeyName, PairEvDiagnostic, RaceId, RateTriple, RecentRun, StandardTimes, Surface,
+    TrackCondition, TrainerName,
 };
 
 use crate::error::{Error, Result};
@@ -157,7 +158,35 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: 
             None => probs,
         };
 
+        // 穴馬の 1 着過大評価を縮約する win_prob 冪変換（#246）。config.win_power が None なら no-op。
+        // ブレンド後の最終 win に適用し、連系・着順 EV（Harville/simulate）まで校正後 win が伝わる。
+        let probs = match config.win_power {
+            Some(gamma) => paddock_domain::prediction::apply_win_power(&probs, gamma),
+            None => probs,
+        };
+
         Ok(probs)
+    }
+
+    /// `predict_race` に加え、軸-相手ペアの馬連 vs 馬単(両方向) EV 診断（#246-C）も返す。
+    /// 軸＝win_prob 最大、相手＝上位 `partners` 頭。最新オッズスナップショット
+    /// （`find_race_odds(.., None)`）が取得できなければ診断は `None`（オッズ未取得レース）。
+    pub async fn predict_race_with_diagnostics(
+        &self,
+        race_id: &RaceId,
+        blend_alpha: Option<f64>,
+        track_condition: Option<TrackCondition>,
+        partners: usize,
+    ) -> Result<(Vec<HorseProbability>, Option<Vec<PairEvDiagnostic>>)> {
+        let probs = self
+            .predict_race(race_id, blend_alpha, track_condition)
+            .await?;
+        let diagnostics = self
+            .repository
+            .find_race_odds(race_id, None)
+            .await?
+            .map(|odds| paddock_domain::pair_ev_diagnostics(&probs, &odds, partners).1);
+        Ok((probs, diagnostics))
     }
 }
 

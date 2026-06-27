@@ -9,7 +9,7 @@ use std::collections::HashMap;
 
 use crate::betting::BetCombination;
 use crate::horse_result::HorseNum;
-use crate::odds::{Pair, RaceOdds, Triple};
+use crate::odds::{OrderedPair, Pair, RaceOdds, Triple};
 use crate::prediction::HorseProbability;
 use crate::simulation::{EvReport, PlacedBet, SimInput, simulate};
 
@@ -18,7 +18,7 @@ use crate::simulation::{EvReport, PlacedBet, SimInput, simulate};
 pub struct PortfolioConfig {
     /// 相手頭数（軸を除く `win_prob` 上位 N 頭に流す。相手広く）。
     pub partners: usize,
-    /// 予算配分の相対重み `(馬連, ワイド, 三連複)`。
+    /// 予算配分の相対重み `(連系ペア, ワイド, 三連複)`。連系ペアは馬連/馬単のうち EV 優位な方（#246）。
     pub alloc: (u32, u32, u32),
 }
 
@@ -60,18 +60,12 @@ pub struct Portfolio {
     pub ev: Option<EvReport>,
 }
 
-/// 予想本命を軸に、予算内・100 円単位の軸流しポートフォリオ（馬連＋ワイド＋三連複）を組む。
-///
-/// 軸 = `win_prob` 最大の馬、相手 = 次点 `config.partners` 頭。馬連・ワイドは軸-相手の K 点、
-/// 三連複は軸 1 頭ながし formation（軸＋相手 2 頭, C(K,2) 点）。`config.alloc` の重みで券種へ
-/// 予算を配分し、券種内は 100 円単位で均等配分する（賄えない端数は買わない）。
-pub fn build_portfolio(
+/// win_prob 降順（同率は馬番昇順）で軸＝本命と相手上位 `partners` 頭を選ぶ。出走確率が空なら `None`。
+/// `build_portfolio` と `pair_ev_diagnostics` で共用し、軸・相手の決め方を一元化する。
+fn rank_axis_partners(
     probs: &[HorseProbability],
-    odds: &RaceOdds,
-    race_budget: u64,
-    config: &PortfolioConfig,
-) -> Portfolio {
-    // win_prob 降順（同率は馬番昇順）で軸・相手を選ぶ。
+    partners: usize,
+) -> Option<(HorseNum, Vec<HorseNum>)> {
     let mut ranked: Vec<&HorseProbability> = probs.iter().collect();
     ranked.sort_by(|a, b| {
         b.win_prob
@@ -79,8 +73,94 @@ pub fn build_portfolio(
             .unwrap_or(std::cmp::Ordering::Equal)
             .then(a.horse_num.value().cmp(&b.horse_num.value()))
     });
+    let (axis_hp, rest) = ranked.split_first()?;
+    let ps = rest.iter().take(partners).map(|p| p.horse_num).collect();
+    Some((axis_hp.horse_num, ps))
+}
 
-    let Some((axis_hp, rest)) = ranked.split_first() else {
+/// 軸-相手 1 ペアの「馬連 vs 馬単(両方向)」EV 診断 1 行（#246-C）。
+/// EV は `leg_ev`（収支シミュレータ）で算出し、odds 未取得は `None`（EV 0.0）。
+#[derive(Debug, Clone)]
+pub struct PairEvDiagnostic {
+    pub partner: HorseNum,
+    pub quinella_ev: f64,
+    pub quinella_odds: Option<f64>,
+    /// 馬単 軸→相手（本命→相手）。
+    pub exacta_fwd_ev: f64,
+    pub exacta_fwd_odds: Option<f64>,
+    /// 馬単 相手→軸（相手→本命）。
+    pub exacta_rev_ev: f64,
+    pub exacta_rev_odds: Option<f64>,
+}
+
+/// 軸（win_prob 最大）と相手上位 `partners` 頭について、各ペアの馬連・馬単(両方向) EV を並べる
+/// 診断（#246-C）。手作業でオッズを引いて比較していた「馬連 vs 馬単」の判断材料を CLI に出すための
+/// 純粋関数。EV 計算は `build_portfolio` と同じ `leg_ev`（simulate 委譲）に揃える。出走確率が空なら
+/// 軸 `None`・空ベクタを返す。
+pub fn pair_ev_diagnostics(
+    probs: &[HorseProbability],
+    odds: &RaceOdds,
+    partners: usize,
+) -> (Option<HorseNum>, Vec<PairEvDiagnostic>) {
+    let Some((axis, partner_nums)) = rank_axis_partners(probs, partners) else {
+        return (None, Vec::new());
+    };
+    let win: HashMap<HorseNum, f64> = probs.iter().map(|p| (p.horse_num, p.win_prob)).collect();
+    let field: Vec<HorseNum> = probs.iter().map(|p| p.horse_num).collect();
+
+    let rows = partner_nums
+        .iter()
+        .map(|&p| {
+            let quinella_odds = Pair::try_from((axis, p))
+                .ok()
+                .and_then(|pair| odds.quinella.get(&pair).map(|v| v.value()));
+            let exacta_fwd_odds = OrderedPair::try_from((axis, p))
+                .ok()
+                .and_then(|op| odds.exacta.get(&op).map(|v| v.value()));
+            let exacta_rev_odds = OrderedPair::try_from((p, axis))
+                .ok()
+                .and_then(|op| odds.exacta.get(&op).map(|v| v.value()));
+            let quinella_ev = Pair::try_from((axis, p))
+                .ok()
+                .map(|pair| leg_ev(&field, &win, &BetCombination::Quinella(pair), quinella_odds))
+                .unwrap_or(0.0);
+            let exacta_fwd_ev = OrderedPair::try_from((axis, p))
+                .ok()
+                .map(|op| leg_ev(&field, &win, &BetCombination::Exacta(op), exacta_fwd_odds))
+                .unwrap_or(0.0);
+            let exacta_rev_ev = OrderedPair::try_from((p, axis))
+                .ok()
+                .map(|op| leg_ev(&field, &win, &BetCombination::Exacta(op), exacta_rev_odds))
+                .unwrap_or(0.0);
+            PairEvDiagnostic {
+                partner: p,
+                quinella_ev,
+                quinella_odds,
+                exacta_fwd_ev,
+                exacta_fwd_odds,
+                exacta_rev_ev,
+                exacta_rev_odds,
+            }
+        })
+        .collect();
+    (Some(axis), rows)
+}
+
+/// 予想本命を軸に、予算内・100 円単位の軸流しポートフォリオ（連系ペア＋ワイド＋三連複）を組む。
+///
+/// 軸 = `win_prob` 最大の馬、相手 = 次点 `config.partners` 頭。連系ペアは軸-相手ごとに馬連と馬単
+/// (本命→相手) の実効 EV を比べ優位な方を 1 脚採用（#246, [`pick_pair_leg`]）、ワイドは軸-相手の
+/// K 点、三連複は軸 1 頭ながし formation（軸＋相手 2 頭, C(K,2) 点）。`config.alloc` の重み
+/// `(連系ペア, ワイド, 三連複)` で券種へ予算を配分し、券種内は 100 円単位で均等配分する
+/// （賄えない端数は買わない）。
+pub fn build_portfolio(
+    probs: &[HorseProbability],
+    odds: &RaceOdds,
+    race_budget: u64,
+    config: &PortfolioConfig,
+) -> Portfolio {
+    // win_prob 降順（同率は馬番昇順）で軸・相手を選ぶ。
+    let Some((axis, partners)) = rank_axis_partners(probs, config.partners) else {
         return Portfolio {
             axis: None,
             partners: Vec::new(),
@@ -89,26 +169,16 @@ pub fn build_portfolio(
             ev: None,
         };
     };
-    let axis = axis_hp.horse_num;
-    let partners: Vec<HorseNum> = rest
-        .iter()
-        .take(config.partners)
-        .map(|p| p.horse_num)
-        .collect();
 
     let win: HashMap<HorseNum, f64> = probs.iter().map(|p| (p.horse_num, p.win_prob)).collect();
     let field: Vec<HorseNum> = probs.iter().map(|p| p.horse_num).collect();
 
     // 券種ごとの脚（組合せ, odds）を生成する。
-    // 馬連: 軸-相手 / ワイド: 軸-相手（保険, 帯の中点）
-    let quinella: Vec<(BetCombination, Option<f64>)> = partners
+    // 連系ペア: 軸-相手ごとに馬連 vs 馬単(本命→相手) を実効EVで比較し優位な方を採る（#246）。
+    // ワイド: 軸-相手（保険, 帯の中点）
+    let pair_legs: Vec<(BetCombination, Option<f64>)> = partners
         .iter()
-        .filter_map(|&p| {
-            Pair::try_from((axis, p)).ok().map(|pair| {
-                let o = odds.quinella.get(&pair).map(|v| v.value());
-                (BetCombination::Quinella(pair), o)
-            })
-        })
+        .filter_map(|&p| pick_pair_leg(axis, p, odds, &field, &win))
         .collect();
     let wide: Vec<(BetCombination, Option<f64>)> = partners
         .iter()
@@ -141,7 +211,7 @@ pub fn build_portfolio(
         // 重み w の券種予算を 100 円単位に floor する（`/100*100`）。乗算オーバーフロー回避に u128。
         let type_budget =
             |w: u32| -> u64 { (race_budget as u128 * w as u128 / total_w / 100 * 100) as u64 };
-        push_legs(&mut bets, quinella, type_budget(wq), &field, &win);
+        push_legs(&mut bets, pair_legs, type_budget(wq), &field, &win);
         push_legs(&mut bets, wide, type_budget(ww), &field, &win);
         push_legs(&mut bets, trio, type_budget(wt), &field, &win);
     }
@@ -180,6 +250,41 @@ pub fn build_portfolio(
         bets,
         total_stake,
         ev,
+    }
+}
+
+/// 軸-相手 1 ペアの連系脚を選ぶ（#246）。馬連 `Quinella(軸,相手)` と馬単 `Exacta(軸→相手)` の
+/// 実効 EV（`leg_ev` = 的中確率 × odds）を比べ、**両方のオッズが揃い馬単が strict に上回るときだけ**
+/// 馬単を採る。tie・どちらか欠落は着順不問の馬連を維持する（"常に馬単優先にしない" の担保）。
+/// 穴の 1 着確率が小さいほど `harville_exacta(軸→穴)` が相対的に有利化し、(A) の win 校正と連動する。
+/// 馬連 `Pair` が作れない（軸==相手, 通常起きない）ときは `None` で脚をスキップする。
+fn pick_pair_leg(
+    axis: HorseNum,
+    partner: HorseNum,
+    odds: &RaceOdds,
+    field: &[HorseNum],
+    win: &HashMap<HorseNum, f64>,
+) -> Option<(BetCombination, Option<f64>)> {
+    let pair = Pair::try_from((axis, partner)).ok()?;
+    let q_odds = odds.quinella.get(&pair).map(|v| v.value());
+    let quinella_leg = (BetCombination::Quinella(pair), q_odds);
+
+    // 馬単 軸→相手。OrderedPair が作れない/オッズ欠落/馬連オッズ欠落のときは馬連を維持。
+    let Ok(ord) = OrderedPair::try_from((axis, partner)) else {
+        return Some(quinella_leg);
+    };
+    let e_odds = odds.exacta.get(&ord).map(|v| v.value());
+    match (q_odds, e_odds) {
+        (Some(_), Some(_)) => {
+            let q_ev = leg_ev(field, win, &quinella_leg.0, q_odds);
+            let e_ev = leg_ev(field, win, &BetCombination::Exacta(ord), e_odds);
+            if e_ev > q_ev {
+                Some((BetCombination::Exacta(ord), e_odds))
+            } else {
+                Some(quinella_leg)
+            }
+        }
+        _ => Some(quinella_leg),
     }
 }
 
@@ -468,5 +573,122 @@ mod tests {
                 .iter()
                 .all(|b| b.combination.type_label() == "quinella")
         );
+    }
+
+    #[test]
+    fn exacta_chosen_when_ev_beats_quinella() {
+        // 軸1→相手2 の馬単に高オッズを与え、馬連(5.0)より実効EVが上回る → その脚は馬単になる。
+        // 他ペア（exacta オッズ無し）は馬連のまま。
+        let (probs, mut o) = sample();
+        o.exacta.insert(
+            OrderedPair::try_from((horse(1), horse(2))).unwrap(),
+            odds(100.0),
+        );
+        let config = PortfolioConfig {
+            partners: 3,
+            alloc: (1, 0, 0), // 連系ペアのみに絞って検証
+        };
+        let pf = build_portfolio(&probs, &o, 5000, &config);
+        let has_exacta_1_2 = pf.bets.iter().any(|b| {
+            matches!(&b.combination, BetCombination::Exacta(op)
+                if op.as_tuple() == (horse(1), horse(2)))
+        });
+        assert!(has_exacta_1_2, "高オッズ馬単 1→2 が選ばれる: {:?}", pf.bets);
+        // 相手3,4 は exacta 無し → 馬連のまま。連系ペアは計3点（馬連2 + 馬単1）。
+        let pair_legs = pf
+            .bets
+            .iter()
+            .filter(|b| {
+                matches!(
+                    b.combination,
+                    BetCombination::Quinella(_) | BetCombination::Exacta(_)
+                )
+            })
+            .count();
+        assert_eq!(pair_legs, 3);
+        assert_eq!(
+            pf.bets
+                .iter()
+                .filter(|b| matches!(b.combination, BetCombination::Quinella(_)))
+                .count(),
+            2
+        );
+    }
+
+    #[test]
+    fn quinella_kept_when_exacta_lower_ev() {
+        // 馬単オッズが低い（1.1）→ 馬連(5.0)が EV 優位 → 馬連のまま。
+        let (probs, mut o) = sample();
+        o.exacta.insert(
+            OrderedPair::try_from((horse(1), horse(2))).unwrap(),
+            odds(1.1),
+        );
+        let config = PortfolioConfig {
+            partners: 3,
+            alloc: (1, 0, 0),
+        };
+        let pf = build_portfolio(&probs, &o, 5000, &config);
+        assert!(
+            !pf.bets
+                .iter()
+                .any(|b| matches!(b.combination, BetCombination::Exacta(_))),
+            "低EV馬単は採用されない: {:?}",
+            pf.bets
+        );
+        assert_eq!(
+            pf.bets
+                .iter()
+                .filter(|b| matches!(b.combination, BetCombination::Quinella(_)))
+                .count(),
+            3
+        );
+    }
+
+    #[test]
+    fn pair_ev_diagnostics_lists_both_directions() {
+        let (probs, mut o) = sample();
+        // 相手2 に馬単 両方向オッズを入れる。相手3,4 は exacta 無し → fwd/rev odds は None。
+        o.exacta.insert(
+            OrderedPair::try_from((horse(1), horse(2))).unwrap(),
+            odds(40.0),
+        );
+        o.exacta.insert(
+            OrderedPair::try_from((horse(2), horse(1))).unwrap(),
+            odds(60.0),
+        );
+        let (axis, rows) = pair_ev_diagnostics(&probs, &o, 3);
+        assert_eq!(axis, Some(horse(1)));
+        assert_eq!(rows.len(), 3);
+        let r2 = rows.iter().find(|r| r.partner == horse(2)).unwrap();
+        // 馬連オッズ(5.0)・馬単両方向オッズが取れている。
+        assert_eq!(r2.quinella_odds, Some(5.0));
+        assert_eq!(r2.exacta_fwd_odds, Some(40.0));
+        assert_eq!(r2.exacta_rev_odds, Some(60.0));
+        assert!(r2.quinella_ev > 0.0 && r2.exacta_fwd_ev > 0.0 && r2.exacta_rev_ev > 0.0);
+        // 相手3 は exacta 無し → odds None・EV 0。
+        let r3 = rows.iter().find(|r| r.partner == horse(3)).unwrap();
+        assert_eq!(r3.exacta_fwd_odds, None);
+        assert_eq!(r3.exacta_fwd_ev, 0.0);
+    }
+
+    #[test]
+    fn pair_ev_diagnostics_empty_when_no_probs() {
+        let o = RaceOdds::empty(RaceId::try_from("202506040101".to_string()).unwrap());
+        let (axis, rows) = pair_ev_diagnostics(&[], &o, 5);
+        assert_eq!(axis, None);
+        assert!(rows.is_empty());
+    }
+
+    #[test]
+    fn exacta_swap_preserves_budget_and_units() {
+        // 馬単へ swap しても 100 円単位・予算内が保たれる。
+        let (probs, mut o) = sample();
+        o.exacta.insert(
+            OrderedPair::try_from((horse(1), horse(2))).unwrap(),
+            odds(100.0),
+        );
+        let pf = build_portfolio(&probs, &o, 5000, &PortfolioConfig::default());
+        assert!(pf.bets.iter().all(|b| b.stake % 100 == 0 && b.stake > 0));
+        assert!(pf.total_stake <= 5000, "stake {} <= 5000", pf.total_stake);
     }
 }

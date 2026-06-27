@@ -604,6 +604,7 @@ fn shrink_cfg(m: f64) -> EstimationConfig {
         recent_form_weight: None,
         trend_n: 1,
         jockey_recent_form_weight: None,
+        win_power: None,
     }
 }
 
@@ -865,6 +866,7 @@ fn jockey_recent_form_none_excluded_from_raw_score() {
 
 /// 本番 predict（`predict_race`）が使う `production()` の設定を固定する回帰ガード。
 /// 縮約 m を取り違えたり recency を誤って有効化すると CI で検知する（#75/ADR 0016）。
+/// win_power（#246/ADR 0042）も採用値 γ=1.25 を固定する。
 #[test]
 fn production_config_is_shrinkage_m10_and_recency_off() {
     let c = EstimationConfig::production();
@@ -877,6 +879,12 @@ fn production_config_is_shrinkage_m10_and_recency_off() {
         c.recency.is_none(),
         "recency は backtest 評価で無効採用（ADR 0016）"
     );
+    assert_eq!(
+        c.win_power
+            .expect("production は win_power on（#246/ADR 0042）"),
+        RECOMMENDED_WIN_POWER
+    );
+    assert!((RECOMMENDED_WIN_POWER - 1.25).abs() < 1e-12);
 }
 
 // ---- リーセンシー重み付け（#75 Phase B） ----
@@ -1050,6 +1058,71 @@ fn blend_partial_coverage_keeps_model_for_missing_and_renormalizes() {
     approx(total, 1.0);
     // 馬1 は超 favorite オッズなので blend で win が上がる。
     assert!(out[0].win_prob > out[1].win_prob);
+}
+
+#[test]
+fn win_power_gamma_one_is_noop() {
+    // γ=1.0 は実質恒等。win/place/show すべて不変。
+    let probs = vec![
+        prob(1, 0.6, 0.7, 0.8),
+        prob(2, 0.3, 0.5, 0.6),
+        prob(3, 0.1, 0.2, 0.4),
+    ];
+    let out = apply_win_power(&probs, 1.0);
+    for (a, b) in probs.iter().zip(&out) {
+        approx(a.win_prob, b.win_prob);
+        approx(a.place_prob, b.place_prob);
+        approx(a.show_prob, b.show_prob);
+    }
+}
+
+#[test]
+fn win_power_non_finite_or_nonpositive_is_noop() {
+    let probs = vec![prob(1, 0.6, 0.7, 0.8), prob(2, 0.4, 0.5, 0.6)];
+    for g in [f64::NAN, f64::INFINITY, 0.0, -1.0] {
+        let out = apply_win_power(&probs, g);
+        approx(out[0].win_prob, 0.6);
+        approx(out[1].win_prob, 0.4);
+    }
+}
+
+#[test]
+fn win_power_shifts_mass_to_favorite() {
+    // γ>1 で本命の win が増え穴の win が減る。合計は 1.0 を保つ。
+    let probs = vec![
+        prob(1, 0.5, 0.5, 0.5),
+        prob(2, 0.3, 0.3, 0.3),
+        prob(3, 0.2, 0.2, 0.2),
+    ];
+    let out = apply_win_power(&probs, 2.0);
+    assert!(out[0].win_prob > 0.5, "favorite up: {}", out[0].win_prob);
+    assert!(out[2].win_prob < 0.2, "longshot down: {}", out[2].win_prob);
+    let total: f64 = out.iter().map(|p| p.win_prob).sum();
+    approx(total, 1.0);
+}
+
+#[test]
+fn win_power_preserves_monotonicity() {
+    // 冪変換で favorite の win が元の place を超えても win ≤ place ≤ show を再是正する。
+    let probs = vec![
+        prob(1, 0.8, 0.81, 0.82),
+        prob(2, 0.15, 0.5, 0.6),
+        prob(3, 0.05, 0.3, 0.5),
+    ];
+    let out = apply_win_power(&probs, 3.0);
+    for p in &out {
+        assert!(
+            p.win_prob <= p.place_prob && p.place_prob <= p.show_prob,
+            "{p:?}"
+        );
+        assert!((0.0..=1.0).contains(&p.win_prob) && (0.0..=1.0).contains(&p.show_prob));
+    }
+}
+
+#[test]
+fn win_power_empty_is_empty() {
+    let out = apply_win_power(&[], 2.0);
+    assert!(out.is_empty());
 }
 
 #[test]

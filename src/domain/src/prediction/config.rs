@@ -30,6 +30,11 @@ pub struct EstimationConfig {
     /// 騎手直近フォーム項の重みオーバーライド（#221）。`None` のとき `weights::JOCKEY_RECENT_FORM_WEIGHT`
     /// を使う。backtest の `--jockey-form-weight` スイープ専用（ADR 0038）。predict 本番は `None`。
     pub jockey_recent_form_weight: Option<f64>,
+    /// win_prob 冪変換 `win'_i ∝ win_i^gamma` のγ（#246）。`None` のとき no-op（後方互換）。
+    /// `gamma > 1.0` で人気馬の win を相対強調し穴の 1 着過大評価を縮約する。ブレンド後の最終 win に
+    /// 適用する（[`super::estimate::apply_win_power`]）。backtest の `--win-power` スイープ専用で、
+    /// 採用値は backtest 検証後に `production()` へ反映する（ADR 0042）。
+    pub win_power: Option<f64>,
 }
 
 // trend_n のデフォルト値が 0 でなく 1 のため、derive(Default) ではなく手書き impl を使う。
@@ -41,6 +46,7 @@ impl Default for EstimationConfig {
             recent_form_weight: None,
             trend_n: 1,
             jockey_recent_form_weight: None,
+            win_power: None,
         }
     }
 }
@@ -50,6 +56,13 @@ impl Default for EstimationConfig {
 /// 的中率も改善（off 比 単勝 LogLoss 0.272→0.251、単勝的中 9.7→13.2%）だったため採用。
 /// m=50 は過縮約で劣化。
 pub const RECOMMENDED_SHRINKAGE_M: f64 = 10.0;
+
+/// 本番 predict が採用する win_prob 冪変換のγ（#246）。backtest（2025-01-01〜2026-06-30 / 4891R,
+/// α=0.2・m=10）で γ∈{1.0,1.25,1.5,2.0} を比較し、γ=1.25 が単勝 LogLoss 最良（0.1974→0.1954）で
+/// 穴帯（7〜9番人気・10番人気以下）の 1 着過大評価を縮小、トップ選好・回収率は単調変換のため不変。
+/// γ≥1.5 は LogLoss/Brier 悪化＋人気馬を過剰補正（1番人気 予測 37.5%/46.7% vs 実測 28.2%）のため棄却。
+/// 詳細は ADR 0042。
+pub const RECOMMENDED_WIN_POWER: f64 = 1.25;
 
 impl EstimationConfig {
     /// 本番 predict 経路のデフォルト設定（#75 で backtest 検証して採用した値）。
@@ -63,6 +76,9 @@ impl EstimationConfig {
             recent_form_weight: None,
             trend_n: 1, // #220 backtest にて N=2/3 は全指標悪化のため棄却（ADR-0036）
             jockey_recent_form_weight: None, // #221 暫定 weight（const）を使用。sweep は ADR 0038
+            // #246: γ=1.25 を採用（4891R sweep で単勝 LogLoss 0.1974→0.1954 最良・穴帯校正改善、
+            // γ≥1.5 は LogLoss/Brier 悪化＋人気馬過剰補正で棄却）。詳細は ADR 0042。
+            win_power: Some(RECOMMENDED_WIN_POWER),
         }
     }
 }

@@ -91,6 +91,11 @@ pub enum Command {
         /// スイープ（0.0/0.1/0.25/0.5/1.0 等）で最適重み（または棄却）を探す（ADR 0038）。
         #[arg(long)]
         jockey_form_weight: Option<f64>,
+        /// win_prob 冪変換のγ（#246）。`win'_i ∝ win_i^γ` で再正規化し穴馬の 1 着過大評価を縮約する。
+        /// 未指定は no-op（現行挙動）。スイープ（1.1/1.25/1.5/2.0 等。γ<1 は逆方向）で
+        /// 単勝校正・人気帯校正・回収を比較する（ADR 0042）。
+        #[arg(long)]
+        win_power: Option<f64>,
     },
     /// 古い race_odds_snapshots を保持期間でパージする（#234）。最新キャッシュ race_odds は消さない。
     /// cutoff = 実行日(UTC) − months。fetched_at の日付が cutoff より前の行を削除する。
