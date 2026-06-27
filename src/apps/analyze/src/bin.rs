@@ -4,9 +4,9 @@ mod setup;
 use chrono::{Months, NaiveDate, Utc};
 use clap::Parser;
 use paddock_domain::{
-    BacktestReport, EstimationConfig, ExoticSegment, FieldSizeSegment, HorseName, HorseProbability,
-    JockeyName, PairEvDiagnostic, PopularitySegment, PortfolioConfig, RaceId, RecencyConfig,
-    ReliabilityBin, ShrinkageConfig, Surface, SurfaceSegment, TrainerName, Venue,
+    BacktestReport, EstimationConfig, ExoticSegment, FieldSizeSegment, HorseName, HorseNum,
+    HorseProbability, JockeyName, PairEvDiagnostic, PopularitySegment, PortfolioConfig, RaceId,
+    RecencyConfig, ReliabilityBin, ShrinkageConfig, Surface, SurfaceSegment, TrainerName, Venue,
 };
 use paddock_use_case::TREND_N_MAX;
 use paddock_use_case::repository::{
@@ -105,8 +105,8 @@ async fn main() -> anyhow::Result<()> {
                 )
                 .await?;
             print_predict(&probs);
-            if let Some(rows) = diagnostics {
-                print_pair_ev_diagnostics(&probs, &rows);
+            if let Some((axis, rows)) = diagnostics {
+                print_pair_ev_diagnostics(axis, &probs, &rows);
             }
         }
         cli::Command::Backtest {
@@ -308,8 +308,13 @@ fn print_predict(probs: &[HorseProbability]) {
 
 /// 軸-相手ペアの「馬連 vs 馬単(両方向)」EV を並べる診断表（#246-C）。
 /// 着順不問の馬連と、本命→相手 / 相手→本命 の馬単 EV を比較して券種選択の判断材料にする。
-/// EV は的中確率 × オッズ。オッズ未取得のセルは `—`。
-fn print_pair_ev_diagnostics(probs: &[HorseProbability], rows: &[PairEvDiagnostic]) {
+/// EV は的中確率 × オッズ。オッズ未取得のセルは `—`。軸は `pair_ev_diagnostics` が決めた
+/// canonical な値（use-case 経由）を受け取り、ここで再計算しない。
+fn print_pair_ev_diagnostics(
+    axis: Option<HorseNum>,
+    probs: &[HorseProbability],
+    rows: &[PairEvDiagnostic],
+) {
     if rows.is_empty() {
         return;
     }
@@ -320,18 +325,11 @@ fn print_pair_ev_diagnostics(probs: &[HorseProbability], rows: &[PairEvDiagnosti
             .map(|p| p.horse_name.value().to_string())
             .unwrap_or_default()
     };
-    // 軸＝win_prob 最大（同率は馬番昇順）。pair_ev_diagnostics と同じ決め方。
-    let axis = probs.iter().max_by(|a, b| {
-        a.win_prob
-            .partial_cmp(&b.win_prob)
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then(b.horse_num.value().cmp(&a.horse_num.value()))
-    });
     match axis {
         Some(a) => println!(
             "\n# 馬連 vs 馬単 EV 診断（軸 {} {}）",
-            a.horse_num.value(),
-            a.horse_name.value()
+            a.value(),
+            name_of(a)
         ),
         None => return,
     }

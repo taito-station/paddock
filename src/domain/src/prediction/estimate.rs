@@ -151,7 +151,8 @@ pub fn blend_with_market_win(
 /// 馬単より高く見せる一因になる。`gamma > 1.0` で人気馬の win を相対的に強調し穴の 1 着を縮約する
 /// ことでこの偏りを是正する（`gamma < 1.0` は逆方向。backtest の `--win-power` で sweep するため許可）。
 ///
-/// `gamma` が非有限 / `<= 0.0` / `1.0` と実質同値、または入力が空・win 合計が 0 のときは no-op。
+/// `gamma` が非有限 / `<= 0.0` / ちょうど `1.0`（厳密一致近傍, `< f64::EPSILON`）、または入力が空・
+/// win 合計が 0 のときは no-op。production の γ は離散値（1.25 等）なのでこの厳密判定で十分。
 /// win を変えると単調性 `win ≤ place ≤ show` が崩れうるため、`blend_with_market_win` 末尾と同型の
 /// 累積 max で place/show を再是正する（place/show の場内合計 2.0/3.0 が崩れうる点も blend と同じ
 /// 既知の割り切り。連系・着順 EV は win_prob から導くため、ここでの win 校正がそのまま反映される）。

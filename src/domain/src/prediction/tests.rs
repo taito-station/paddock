@@ -1126,6 +1126,33 @@ fn win_power_empty_is_empty() {
 }
 
 #[test]
+fn win_power_all_zero_win_is_noop() {
+    // 全馬 win_prob=0（total<=0 ガード）→ 入力をそのまま返す。
+    let probs = vec![prob(1, 0.0, 0.3, 0.5), prob(2, 0.0, 0.2, 0.4)];
+    let out = apply_win_power(&probs, 2.0);
+    for (a, b) in probs.iter().zip(&out) {
+        approx(a.win_prob, b.win_prob);
+        approx(a.place_prob, b.place_prob);
+        approx(a.show_prob, b.show_prob);
+    }
+}
+
+#[test]
+fn win_power_gamma_below_one_spreads_to_longshots() {
+    // γ<1（逆方向 sweep。コードは許可）で本命の win が下がり穴の win が上がる。合計1.0維持。
+    let probs = vec![
+        prob(1, 0.6, 0.6, 0.6),
+        prob(2, 0.3, 0.3, 0.3),
+        prob(3, 0.1, 0.1, 0.1),
+    ];
+    let out = apply_win_power(&probs, 0.5);
+    assert!(out[0].win_prob < 0.6, "favorite down: {}", out[0].win_prob);
+    assert!(out[2].win_prob > 0.1, "longshot up: {}", out[2].win_prob);
+    let total: f64 = out.iter().map(|p| p.win_prob).sum();
+    approx(total, 1.0);
+}
+
+#[test]
 fn recent_form_none_when_no_signals() {
     // 体重変化・人気・着順すべて欠損、かつ前走間隔も非正（同日）→ signal 無し → None。
     let prev = prev_result(None, None, None);

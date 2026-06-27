@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use chrono::NaiveDate;
 use paddock_domain::{
-    EstimationConfig, FactorStat, HorseEntry, HorseFactors, HorseName, HorseProbability,
+    EstimationConfig, FactorStat, HorseEntry, HorseFactors, HorseName, HorseNum, HorseProbability,
     JockeyName, PairEvDiagnostic, RaceId, RateTriple, RecentRun, StandardTimes, Surface,
     TrackCondition, TrainerName,
 };
@@ -171,13 +171,18 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: 
     /// `predict_race` に加え、軸-相手ペアの馬連 vs 馬単(両方向) EV 診断（#246-C）も返す。
     /// 軸＝win_prob 最大、相手＝上位 `partners` 頭。最新オッズスナップショット
     /// （`find_race_odds(.., None)`）が取得できなければ診断は `None`（オッズ未取得レース）。
+    /// 診断は `(軸, 各ペア行)` で返す。軸は `pair_ev_diagnostics` が決めた canonical な値を
+    /// そのまま返し、表示側で軸を再計算しない（軸選定ロジックの二重化を避ける）。
     pub async fn predict_race_with_diagnostics(
         &self,
         race_id: &RaceId,
         blend_alpha: Option<f64>,
         track_condition: Option<TrackCondition>,
         partners: usize,
-    ) -> Result<(Vec<HorseProbability>, Option<Vec<PairEvDiagnostic>>)> {
+    ) -> Result<(
+        Vec<HorseProbability>,
+        Option<(Option<HorseNum>, Vec<PairEvDiagnostic>)>,
+    )> {
         let probs = self
             .predict_race(race_id, blend_alpha, track_condition)
             .await?;
@@ -185,7 +190,7 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: 
             .repository
             .find_race_odds(race_id, None)
             .await?
-            .map(|odds| paddock_domain::pair_ev_diagnostics(&probs, &odds, partners).1);
+            .map(|odds| paddock_domain::pair_ev_diagnostics(&probs, &odds, partners));
         Ok((probs, diagnostics))
     }
 }

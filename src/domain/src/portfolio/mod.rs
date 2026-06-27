@@ -60,6 +60,15 @@ pub struct Portfolio {
     pub ev: Option<EvReport>,
 }
 
+/// 馬連/馬単の組合せに対応する確定オッズ（払戻倍率）を引く。対象外券種・未取得は `None`。
+fn combo_odds(odds: &RaceOdds, combination: &BetCombination) -> Option<f64> {
+    match combination {
+        BetCombination::Quinella(pair) => odds.quinella.get(pair).map(|v| v.value()),
+        BetCombination::Exacta(op) => odds.exacta.get(op).map(|v| v.value()),
+        _ => None,
+    }
+}
+
 /// win_prob 降順（同率は馬番昇順）で軸＝本命と相手上位 `partners` 頭を選ぶ。出走確率が空なら `None`。
 /// `build_portfolio` と `pair_ev_diagnostics` で共用し、軸・相手の決め方を一元化する。
 fn rank_axis_partners(
@@ -108,31 +117,23 @@ pub fn pair_ev_diagnostics(
     let win: HashMap<HorseNum, f64> = probs.iter().map(|p| (p.horse_num, p.win_prob)).collect();
     let field: Vec<HorseNum> = probs.iter().map(|p| p.horse_num).collect();
 
+    // 馬連/馬単(両方向) の EV と odds を 1 行に出す。各組合せの odds と EV はペアで求める
+    // （odds 取得と EV 計算で try_from を二度呼ばないようヘルパに束ねる）。
+    let leg = |combo: BetCombination| {
+        let odds = combo_odds(odds, &combo);
+        let ev = leg_ev(&field, &win, &combo, odds);
+        (ev, odds)
+    };
     let rows = partner_nums
         .iter()
-        .map(|&p| {
-            let quinella_odds = Pair::try_from((axis, p))
-                .ok()
-                .and_then(|pair| odds.quinella.get(&pair).map(|v| v.value()));
-            let exacta_fwd_odds = OrderedPair::try_from((axis, p))
-                .ok()
-                .and_then(|op| odds.exacta.get(&op).map(|v| v.value()));
-            let exacta_rev_odds = OrderedPair::try_from((p, axis))
-                .ok()
-                .and_then(|op| odds.exacta.get(&op).map(|v| v.value()));
-            let quinella_ev = Pair::try_from((axis, p))
-                .ok()
-                .map(|pair| leg_ev(&field, &win, &BetCombination::Quinella(pair), quinella_odds))
-                .unwrap_or(0.0);
-            let exacta_fwd_ev = OrderedPair::try_from((axis, p))
-                .ok()
-                .map(|op| leg_ev(&field, &win, &BetCombination::Exacta(op), exacta_fwd_odds))
-                .unwrap_or(0.0);
-            let exacta_rev_ev = OrderedPair::try_from((p, axis))
-                .ok()
-                .map(|op| leg_ev(&field, &win, &BetCombination::Exacta(op), exacta_rev_odds))
-                .unwrap_or(0.0);
-            PairEvDiagnostic {
+        .filter_map(|&p| {
+            let pair = Pair::try_from((axis, p)).ok()?;
+            let fwd = OrderedPair::try_from((axis, p)).ok()?;
+            let rev = OrderedPair::try_from((p, axis)).ok()?;
+            let (quinella_ev, quinella_odds) = leg(BetCombination::Quinella(pair));
+            let (exacta_fwd_ev, exacta_fwd_odds) = leg(BetCombination::Exacta(fwd));
+            let (exacta_rev_ev, exacta_rev_odds) = leg(BetCombination::Exacta(rev));
+            Some(PairEvDiagnostic {
                 partner: p,
                 quinella_ev,
                 quinella_odds,
@@ -140,7 +141,7 @@ pub fn pair_ev_diagnostics(
                 exacta_fwd_odds,
                 exacta_rev_ev,
                 exacta_rev_odds,
-            }
+            })
         })
         .collect();
     (Some(axis), rows)
@@ -266,14 +267,18 @@ fn pick_pair_leg(
     win: &HashMap<HorseNum, f64>,
 ) -> Option<(BetCombination, Option<f64>)> {
     let pair = Pair::try_from((axis, partner)).ok()?;
-    let q_odds = odds.quinella.get(&pair).map(|v| v.value());
+    let q_odds = combo_odds(odds, &BetCombination::Quinella(pair));
     let quinella_leg = (BetCombination::Quinella(pair), q_odds);
 
     // 馬単 軸→相手。OrderedPair が作れない/オッズ欠落/馬連オッズ欠落のときは馬連を維持。
     let Ok(ord) = OrderedPair::try_from((axis, partner)) else {
         return Some(quinella_leg);
     };
-    let e_odds = odds.exacta.get(&ord).map(|v| v.value());
+    let e_odds = combo_odds(odds, &BetCombination::Exacta(ord));
+    // 両オッズが揃ったときだけ EV 比較で馬単化する。馬連オッズ欠落・馬単オッズ欠落のケースは
+    // EV を apples-to-apples で比べられないため、価格付き馬単があっても**あえて着順不問の馬連を
+    // 維持**する（保険性優先・"常に馬単優先にしない"。実運用では馬連/馬単オッズは同時取得され
+    // この縁ケースは稀）。
     match (q_odds, e_odds) {
         (Some(_), Some(_)) => {
             let q_ev = leg_ev(field, win, &quinella_leg.0, q_odds);
@@ -641,6 +646,28 @@ mod tests {
                 .filter(|b| matches!(b.combination, BetCombination::Quinella(_)))
                 .count(),
             3
+        );
+    }
+
+    #[test]
+    fn pick_pair_leg_tie_keeps_quinella() {
+        // 相手の win_prob=0 → 馬連・馬単とも的中確率 0 → EV 0 同士の tie。
+        // strict `>` ゲートなので馬単化せず着順不問の馬連を維持する（境界の固定）。
+        let probs = [prob(1, 0.5), prob(2, 0.0), prob(3, 0.5)];
+        let win: HashMap<HorseNum, f64> = probs.iter().map(|p| (p.horse_num, p.win_prob)).collect();
+        let field: Vec<HorseNum> = probs.iter().map(|p| p.horse_num).collect();
+        let mut o = RaceOdds::empty(RaceId::try_from("202506040101".to_string()).unwrap());
+        o.quinella
+            .insert(Pair::try_from((horse(1), horse(2))).unwrap(), odds(10.0));
+        o.exacta.insert(
+            OrderedPair::try_from((horse(1), horse(2))).unwrap(),
+            odds(10.0),
+        );
+        let leg = pick_pair_leg(horse(1), horse(2), &o, &field, &win).unwrap();
+        assert!(
+            matches!(leg.0, BetCombination::Quinella(_)),
+            "tie は馬連維持: {:?}",
+            leg.0
         );
     }
 

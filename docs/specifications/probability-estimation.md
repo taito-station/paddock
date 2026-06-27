@@ -232,7 +232,7 @@ win_prob_i  = win'_i / Σ win'_j           // 合計 1.0 へ再正規化
 place/show_i = 累積 max で win ≤ place ≤ show を再是正
 ```
 
-- `γ` は `EstimationConfig.win_power: Option<f64>`。`None` / 非有限 / `≤0` / `≈1.0` は no-op。
+- `γ` は `EstimationConfig.win_power: Option<f64>`。`None` / 非有限 / `≤0` / ちょうど `1.0`（厳密一致近傍）は no-op。
 - 連系・着順 EV（Harville/simulate）は win_prob から導くため、ここでの校正が馬連・馬単・三連複の
   EV までそのまま伝播する（#246(B) の馬単選択と連動）。
 - 採用値は backtest 検証で決める（ADR 0042）。CLI: `analyze backtest --win-power <γ>`
