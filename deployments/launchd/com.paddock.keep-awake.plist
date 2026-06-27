@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  開催日の発走ウィンドウ中、Mac のアイドルスリープを抑止して prefetch（#237）の launchd タイマーを
+  確実に発火させる keep-awake エージェント（#264）。__REPO_ROOT__ は install.sh が実パスへ置換する。
+  StartInterval=300（5 分間隔）。開催外/ウィンドウ外は no-op。keep_awake.sh が lock+PID 生存で
+  caffeinate の多重起動を防ぐため常時走らせてよい。
+  注意（best-effort の限界）: caffeinate はアイドルスリープのみ抑止。クラムシェル/pmset スケジュール
+  スリープは止められず、既にスリープ中の Mac は起こせない。完全策は常時稼働ホストへの移設（README）。
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.paddock.keep-awake</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>__REPO_ROOT__/scripts/predict-check/keep_awake.sh</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>__REPO_ROOT__</string>
+
+    <!-- launchd は最小 PATH なので psql / caffeinate を探せるよう補う（prefetch agent と同方針）。
+         WORKDIR を固定し本体ログを /tmp/paddock-keep-awake/logs/ に出す。 -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>WORKDIR</key>
+        <string>/tmp/paddock-keep-awake</string>
+    </dict>
+
+    <key>StartInterval</key>
+    <integer>300</integer>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- 必須: keep_awake.sh は caffeinate を背景起動して即終了する。AbandonProcessGroup を立てないと
+         launchd がジョブ主プロセス（keep_awake.sh）終了時に同一 PGID の caffeinate を巻き添えで kill し、
+         スリープ抑止が即死する（man launchd.plist。実 launchd で挙動を実証済み）。true で PGID 回収を
+         無効化し、background の caffeinate を最終 post_time まで存続させる。 -->
+    <key>AbandonProcessGroup</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/paddock-keep-awake.launchd.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/paddock-keep-awake.launchd.err.log</string>
+</dict>
+</plist>
