@@ -31,7 +31,11 @@ fn default_pdfs_dir() -> String {
 }
 
 fn default_log_filter() -> String {
-    "info".to_string()
+    // netkeiba の HTML は table 周辺が不正構造で、scraper(html5ever) が
+    // foster parenting 経路の WARN を 1 レースあたり数千行出す（#238）。
+    // パース結果自体は得られるためノイズでしかなく、html5ever / selectors
+    // ターゲットに限定して off にし、他の有用な WARN は残す。
+    "info,html5ever=off,selectors=off".to_string()
 }
 
 fn default_server_addr() -> String {
@@ -42,5 +46,27 @@ impl Config {
     pub fn from_env() -> Result<Self> {
         let _ = dotenvy::dotenv();
         envy::from_env::<Config>().map_err(|e| Error::Env(e.to_string()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tracing_subscriber::EnvFilter;
+
+    /// 既定フィルタが EnvFilter として正しくパースできること。
+    /// typo があると setup 側が黙って `info` にフォールバックし、
+    /// html5ever の WARN 抑止（#238）が効かなくなるため回帰として担保する。
+    #[test]
+    fn default_log_filter_is_valid_env_filter() {
+        EnvFilter::try_new(default_log_filter()).expect("default filter must parse");
+    }
+
+    /// netkeiba スクレイプ時の html5ever ノイズを抑止する指定を含むこと（#238）。
+    #[test]
+    fn default_log_filter_suppresses_html5ever() {
+        let filter = default_log_filter();
+        assert!(filter.contains("html5ever=off"), "got: {filter}");
+        assert!(filter.contains("selectors=off"), "got: {filter}");
     }
 }
