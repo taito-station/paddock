@@ -94,6 +94,36 @@ impl BetCombination {
             }
         }
     }
+
+    /// 日本語の券種名付き表示ラベル（人間向け。買い目アラート・予想出力で共用）。
+    /// `combination_code` と違い、順序付き（馬単/三連単）は `→`、無順は `-` で区切り、
+    /// 券種名を前置する。例: `単勝 3` / `馬連 1-5` / `馬単 1→5` / `三連複 1-3-5` / `三連単 1→3→5`。
+    pub fn label_ja(&self) -> String {
+        match self {
+            BetCombination::Win(h) => format!("単勝 {}", h.value()),
+            BetCombination::Place(h) => format!("複勝 {}", h.value()),
+            BetCombination::Quinella(p) => {
+                let (a, b) = p.as_tuple();
+                format!("馬連 {}-{}", a.value(), b.value())
+            }
+            BetCombination::Wide(p) => {
+                let (a, b) = p.as_tuple();
+                format!("ワイド {}-{}", a.value(), b.value())
+            }
+            BetCombination::Exacta(p) => {
+                let (a, b) = p.as_tuple();
+                format!("馬単 {}→{}", a.value(), b.value())
+            }
+            BetCombination::Trio(t) => {
+                let (a, b, c) = t.as_tuple();
+                format!("三連複 {}-{}-{}", a.value(), b.value(), c.value())
+            }
+            BetCombination::Trifecta(t) => {
+                let (a, b, c) = t.as_tuple();
+                format!("三連単 {}→{}→{}", a.value(), b.value(), c.value())
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -130,5 +160,42 @@ impl Podium {
         }
         // 3 着が払戻圏に入るのは 8 頭以上のときだけ。
         self.field_size >= 8 && self.third == target
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn h(n: u32) -> HorseNum {
+        HorseNum::try_from(n).unwrap()
+    }
+
+    #[test]
+    fn label_ja_prefixes_type_and_picks_separator() {
+        // 無順（馬連/ワイド/三連複）は `-`、順序付き（馬単/三連単）は `→`、券種名を前置。
+        assert_eq!(BetCombination::Win(h(3)).label_ja(), "単勝 3");
+        assert_eq!(BetCombination::Place(h(3)).label_ja(), "複勝 3");
+        assert_eq!(
+            BetCombination::Quinella(Pair::try_from((h(1), h(5))).unwrap()).label_ja(),
+            "馬連 1-5"
+        );
+        assert_eq!(
+            BetCombination::Wide(Pair::try_from((h(1), h(5))).unwrap()).label_ja(),
+            "ワイド 1-5"
+        );
+        assert_eq!(
+            BetCombination::Exacta(OrderedPair::try_from((h(1), h(5))).unwrap()).label_ja(),
+            "馬単 1→5"
+        );
+        assert_eq!(
+            BetCombination::Trio(Triple::try_from((h(1), h(3), h(5))).unwrap()).label_ja(),
+            "三連複 1-3-5"
+        );
+        assert_eq!(
+            BetCombination::Trifecta(OrderedTriple::try_from((h(1), h(3), h(5))).unwrap())
+                .label_ja(),
+            "三連単 1→3→5"
+        );
     }
 }

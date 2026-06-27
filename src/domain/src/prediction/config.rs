@@ -64,6 +64,12 @@ pub const RECOMMENDED_SHRINKAGE_M: f64 = 10.0;
 /// 詳細は ADR 0042。
 pub const RECOMMENDED_WIN_POWER: f64 = 1.25;
 
+/// 本番 predict が採用する市場オッズ(単勝)ブレンドのモデル重み α（#72）。`None` はモデルのみ。
+/// backtest（2025-01〜2026-06 / 4891R）の α スイープで Brier/LogLoss が α=0.2 で最良（ADR 0034）。
+/// 市場オッズが無いレースは自動でモデルのみにフォールバックする。
+/// 詳細は docs/specifications/probability-estimation.md。
+pub const RECOMMENDED_MARKET_BLEND_ALPHA: Option<f64> = Some(0.2);
+
 impl EstimationConfig {
     /// 本番 predict 経路のデフォルト設定（#75 で backtest 検証して採用した値）。
     /// backtest の `--shrinkage-m` 未指定（= `Default`, 縮約 off）とは別で、こちらは縮約 on。

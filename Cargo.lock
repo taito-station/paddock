@@ -1986,6 +1986,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "predict-watch"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "clap",
+ "odds-scraper",
+ "paddock-config",
+ "paddock-domain",
+ "paddock-use-case",
+ "rdb-gateway",
+ "tokio",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "prettyplease"
 version = "0.2.37"
 source = "registry+https://github.com/rust-lang/crates.io-index"

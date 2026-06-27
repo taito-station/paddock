@@ -52,6 +52,32 @@ impl<O: OddsScraper, R: OddsRepository> OddsInteractor<O, R> {
         }
     }
 
+    /// race_id のオッズを**必ず再スクレイプ**して新スナップショットを保存し、フルのオッズを返す（#257）。
+    ///
+    /// `race_odds()` の read-through はキャッシュ優先で再取得しないため、発走直前の
+    /// フレッシュなオッズで EV/ROI を再計算したい監視用途には使えない。本メソッドは
+    /// 保存済みの有無に関わらず常にライブスクレイプし、`persist_all` で新スナップショットを
+    /// 追記する（`find_race_odds(.., None)` が最新を返すため、後続の予想はフレッシュ値を見る）。
+    ///
+    /// 戻り値の意味は `race_odds()` と揃える: 取得できれば `Some(odds)`、未取得（スクレイプ
+    /// 失敗・全券種空＝未公開）は `None`。監視 1 レースの取得失敗で全体を止めない。
+    pub async fn refresh_race_odds(&self, race_id: &RaceId) -> Result<Option<RaceOdds>> {
+        match self.scraper.scrape(race_id) {
+            Ok(odds) if odds.is_empty() => {
+                tracing::debug!(race_id = %race_id, "オッズ再取得成功だが全馬券種が空（未公開）、スキップ");
+                Ok(None)
+            }
+            Ok(odds) => {
+                self.persist_all(race_id, &odds).await;
+                Ok(Some(odds))
+            }
+            Err(e) => {
+                tracing::warn!(race_id = %race_id, error = %e, "オッズ再取得に失敗、スキップ");
+                Ok(None)
+            }
+        }
+    }
+
     /// スクレイプで得た全券種のオッズを `race_odds` に保存する。複勝・ワイドは幅 odds
     /// （下限=odds, 上限=odds_high）。スクレイプ由来は人気を持たないため popularity は None。
     /// 保存失敗は予想フローを止めず warn ログのみ（次回参照時に取り直せる）。
@@ -295,5 +321,48 @@ mod tests {
         let got = interactor.race_odds(&race_id()).await.unwrap();
         assert!(got.is_none());
         assert!(interactor.repository.saved.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn refresh_scrapes_and_persists_even_when_saved() {
+        // #257: refresh は read-through と違い、保存済みがあっても必ず再スクレイプし
+        // 新スナップショットを保存する（発走直前のフレッシュなオッズを得るため）。
+        let scraper = FakeScraper::new(|rid| Ok(odds_all_types(rid.clone())));
+        let repo = FakeRepo {
+            preset: Some(odds_with_win(race_id())),
+            ..Default::default()
+        };
+        let interactor = OddsInteractor::new(scraper, repo);
+
+        let got = interactor.refresh_race_odds(&race_id()).await.unwrap();
+        assert!(got.is_some_and(|o| !o.is_empty()));
+        // 保存済みがあっても scrape は必ず 1 回呼ばれる（read-through との決定的な違い）。
+        assert_eq!(*interactor.scraper.calls.lock().unwrap(), 1);
+        // 新スナップショットが 1 レコード追記される。
+        assert_eq!(interactor.repository.saved.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn refresh_returns_none_when_empty_or_error() {
+        // 未公開（全券種空）も失敗も None。保存はしない（race_odds() と挙動を揃える）。
+        let empty = OddsInteractor::new(
+            FakeScraper::new(|rid| Ok(RaceOdds::empty(rid.clone()))),
+            FakeRepo::default(),
+        );
+        assert!(empty.refresh_race_odds(&race_id()).await.unwrap().is_none());
+        assert!(empty.repository.saved.lock().unwrap().is_empty());
+
+        let errored = OddsInteractor::new(
+            FakeScraper::new(|_| Err(Error::Internal("nav failed".into()))),
+            FakeRepo::default(),
+        );
+        assert!(
+            errored
+                .refresh_race_odds(&race_id())
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(errored.repository.saved.lock().unwrap().is_empty());
     }
 }
