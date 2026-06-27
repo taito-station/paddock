@@ -222,6 +222,16 @@ fn print_buy_targets(p: &Portfolio) {
 
 /// 監視ループ。発走前のレースが残っている間スキャンを繰り返し、全レース発走で自動終了する。
 pub async fn run(app: &App, cli: &Cli) -> anyhow::Result<()> {
+    // 連続再取得（busy loop）で JRA を叩き続けないよう、間隔・窓は 1 分以上を要求する。
+    if cli.interval == 0 {
+        anyhow::bail!(
+            "--interval は 1 分以上を指定してください（0 は JRA への連続再取得になり礼節に反します）。"
+        );
+    }
+    if cli.window == 0 {
+        anyhow::bail!("--window は 1 分以上を指定してください。");
+    }
+
     // α 未指定なら本番既定（market α=0.2）を使う。predict と同一値で判定を揃える。
     let blend_alpha = cli.blend_alpha.or(RECOMMENDED_MARKET_BLEND_ALPHA);
     let window = Duration::minutes(cli.window as i64);
@@ -240,15 +250,29 @@ pub async fn run(app: &App, cli: &Cli) -> anyhow::Result<()> {
     }
     let tz_offset = now_local.offset().fix().local_minus_utc();
     if tz_offset != JST_OFFSET_SECS {
+        // 半端な TZ（例 +05:30）も正しく出せるよう ±HH:MM 表記にする。
+        let sign = if tz_offset < 0 { '-' } else { '+' };
+        let abs = tz_offset.abs();
         println!(
-            "⚠ 実行マシンのタイムゾーンが JST(+09:00) ではありません（現在 UTC{:+}時間）。post_time は \
-             JST 起算のため、発走状態判定がオフセットぶんずれます。JST マシンで実行してください。",
-            tz_offset / 3600,
+            "⚠ 実行マシンのタイムゾーンが JST(+09:00) ではありません（現在 UTC{sign}{:02}:{:02}）。\
+             post_time は JST 起算のため、発走状態判定がオフセットぶんずれます。JST マシンで実行してください。",
+            abs / 3600,
+            (abs % 3600) / 60,
         );
     }
 
     loop {
-        let slots = load_slots(app, cli.date).await?;
+        // 継続監視中の一時的 DB エラーでプロセスを落とすと「唯一エッジのある局面」を取りこぼす。
+        // evaluate_race と同じく握って次スイープへ続行する（--once 時のみ伝播して非ゼロ終了）。
+        let slots = match load_slots(app, cli.date).await {
+            Ok(s) => s,
+            Err(e) if cli.once => return Err(e),
+            Err(e) => {
+                println!("⚠ レース一覧の取得に失敗（次スイープで再試行）: {e}");
+                tokio::time::sleep(StdDuration::from_secs(cli.interval * 60)).await;
+                continue;
+            }
+        };
         let now = Local::now().time();
         // 発走状態は 1 スイープ 1 回だけ算出し、sweep 表示と終了判定で共有する。
         let statuses: Vec<RaceStatus> = slots

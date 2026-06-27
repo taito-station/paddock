@@ -1998,7 +1998,6 @@ dependencies = [
  "paddock-use-case",
  "rdb-gateway",
  "tokio",
- "tracing",
  "tracing-subscriber",
 ]
 

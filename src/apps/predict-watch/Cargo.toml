@@ -17,5 +17,4 @@ paddock-use-case   = { workspace = true }
 odds-scraper       = { workspace = true }
 rdb-gateway        = { workspace = true }
 tokio              = { workspace = true }
-tracing            = { workspace = true }
 tracing-subscriber = { workspace = true }
