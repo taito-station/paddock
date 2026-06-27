@@ -518,7 +518,7 @@ def fav_market(winodds, pid, A):
 def gate_diagnostics(evaluated, winodds, gate=1.0):
     """ゲート通過鞍/非通過鞍を ◎の市場人気度で特徴づける（#263）。
 
-    evaluated 各要素: (date, venue, rnum, pid, probs, quin, trio, pay)。
+    evaluated 各要素: (date, venue, rnum, pid, probs, quin, trio, exacta, pay)。
     通過鞍の内訳行と、通過 vs 非通過の ◎市場オッズ/人気の平均比較を表示する。
     """
     print(f"=== ゲート診断（model ROI ≥ {gate * 100:.0f}% 通過鞍の内訳）===")

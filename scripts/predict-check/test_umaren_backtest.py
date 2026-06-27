@@ -137,6 +137,17 @@ def test_eval_exacta_allflat_buys_both_directions():
     assert ret == 1300 * 1000 // 100  # 13000
 
 
+def test_plain_truncates_to_top5_but_allflat_keeps_all():
+    # 7 頭立て: plain は相手 top5（ranked[1:6]）に切り詰め、allflat は全頭（ranked[1:]）。
+    # 第7頭（最下位）絡みの脚だけ的中させ、plain は買わず allflat は買うことで top5 切り詰めを固定。
+    probs = {1: 30.0, 2: 20.0, 3: 15.0, 4: 12.0, 5: 10.0, 6: 8.0, 7: 5.0}
+    pay = {"umaren": {}, "wide": {}, "trio": {}, "exacta": {(1, 7): 1000}}  # ◎→第7頭のみ的中
+    bet_p, ret_p, stake_p = U.eval_exacta_plain(probs, pay, budget=5000)
+    bet_a, ret_a, stake_a = U.eval_exacta_allflat(probs, pay, budget=5000)
+    assert bet_p and stake_p == 5000 and ret_p == 0  # top5 は第7頭の脚を買わない→不的中
+    assert bet_a and stake_a == 5000 and ret_a > 0   # 全頭は (1,7) を買う→的中
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for t in tests:
