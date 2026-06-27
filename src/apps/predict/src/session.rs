@@ -528,9 +528,9 @@ fn format_explanations(
     let by_num: HashMap<HorseNum, &HorseExplanation> =
         explanations.iter().map(|e| (e.horse_num, e)).collect();
 
-    let top: Vec<&&HorseProbability> = ranked.iter().take(MARKS.len()).collect();
-    let mut lines = vec![format!("【予想根拠（上位{}頭）】", top.len())];
-    for (rank, p) in top.iter().enumerate() {
+    let shown = ranked.len().min(MARKS.len());
+    let mut lines = vec![format!("【予想根拠（上位{shown}頭）】")];
+    for (rank, p) in ranked.into_iter().take(MARKS.len()).enumerate() {
         let mark = MARKS[rank];
         let Some(ex) = by_num.get(&p.horse_num) else {
             continue;
