@@ -31,6 +31,11 @@ for v in FROM TO; do
   [[ "${!v}" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || { echo "不正な日付 $v=${!v}（YYYY-MM-DD のみ可）" >&2; exit 1; }
 done
 
+# ALPHA はブレンド係数 [0,1]。形式と値域を検証する（refresh_ev.sh の LIVE_BLEND_ALPHA と対称）。
+[[ "$ALPHA" =~ ^[0-9]+(\.[0-9]+)?$ ]] \
+  && awk -v a="$ALPHA" 'BEGIN{exit !(a>=0 && a<=1)}' \
+  || { echo "PADDOCK_BT_ALPHA は 0〜1 の数値: $ALPHA" >&2; exit 1; }
+
 [[ -x "$ANALYZE_BIN" ]] || {
   echo "release バイナリが見つかりません: $ANALYZE_BIN" >&2
   echo "先に: cd $REPO_ROOT && cargo build --release --bin paddock-analyze" >&2

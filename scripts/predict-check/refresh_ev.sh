@@ -29,7 +29,9 @@ LIVE_BLEND_ALPHA="${LIVE_BLEND_ALPHA:-0.2}"
 [[ "$DATE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || { echo "DATE は YYYY-MM-DD 形式: $DATE" >&2; exit 2; }
 [[ "$FIRST_R" =~ ^[0-9]+$ && "$LAST_R" =~ ^[0-9]+$ ]] || { echo "R 範囲は整数: $FIRST_R $LAST_R" >&2; exit 2; }
 [[ "$BUDGET" =~ ^[0-9]+$ ]] || { echo "予算は整数（円）: $BUDGET" >&2; exit 2; }
-[[ "$LIVE_BLEND_ALPHA" =~ ^[0-9]+(\.[0-9]+)?$ ]] || { echo "LIVE_BLEND_ALPHA は数値: $LIVE_BLEND_ALPHA" >&2; exit 2; }
+[[ "$LIVE_BLEND_ALPHA" =~ ^[0-9]+(\.[0-9]+)?$ ]] \
+  && awk -v a="$LIVE_BLEND_ALPHA" 'BEGIN{exit !(a>=0 && a<=1)}' \
+  || { echo "LIVE_BLEND_ALPHA は 0〜1 の数値: $LIVE_BLEND_ALPHA" >&2; exit 2; }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
