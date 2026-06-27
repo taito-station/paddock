@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
-"""馬連特化 買い目戦略のバックテスト（#250）。
+"""馬連・馬単特化 買い目戦略のバックテスト（#250 / #262）。
 
 「ROI≥100% で張れる鞍が極端に少ない」運用課題に対し、+EV が集中する馬連に券種を絞ると
-−EV 閾値を下げずに「張れる鞍数（frequency）」を増やせるかを過去データで検証する。
+−EV 閾値を下げずに「張れる鞍数（frequency）」を増やせるかを過去データで検証する（#250）。
+あわせて馬単（exacta）特化を同一基盤で検証し、順序プレミアム（着順固定配当 > 着順不問配当を
+モデルが正しく EV 化できているか）が実エッジか・EV フィルタが逆予測でないかを判定する（#262）。
+馬単は馬連と対称に ◎軸ながしマルチ（各相手につき (◎>相手)・(相手>◎) の順序 2 レッグ）を universe とし、
+exacta model EV ≥ θ の点のみ抽出する。同一窓・同一モデルで馬連と並べて比較する。
 
 対照（baseline_pf）と比較する:
   - baseline_pf : 現行ルール−wide（馬連 ◎軸ながし相手 top5 ¥1500 + 三連複 ◎軸ながし相手 top5 ¥2000、
@@ -33,7 +37,8 @@
   --races        TSV: date, paddock_id, venue_jp, round, day, race_num, netkeiba_id
   --pred-dir     dir: bt_pred_<date>.txt（model 単勝勝率表、analyze predict --blend-alpha 0.2）
   --results-dir  dir: netkeiba result.html を res_<netkeiba>.html で保存したもの
-  --exotic-odds  TSV: paddock_id, bet_type(quinella|trio), combination_key, odds
+  --exotic-odds  TSV: paddock_id, bet_type(quinella|trio|exacta), combination_key, odds
+                  （exacta の combination_key は順序付き '1着>2着'、無順券種は '-' 連結）
   --winodds      TSV: paddock_id, umaban, popularity, odds（#263 ゲート診断の市場人気度。欠落可）
 
 #263 の baseline_pf ゲート精度診断/掃引:
@@ -41,11 +46,11 @@
   --odds-floor-grid  ◎単勝オッズ下限の掃引。0=条件なし（既定 0,2,3,5）
   ※ #246 較正後の検証は #252 と同じ /tmp/bt252 入力（較正後再生成）を明示指定する。
 
-bt_exotic_odds.tsv の生成（DB から、71R 窓の馬連・三連複盤面）:
+bt_exotic_odds.tsv の生成（DB から、71R 窓の馬連・三連複・馬単盤面）:
   psql "$DB" -tA -F$'\t' -c "
     SELECT o.race_id, o.bet_type, o.combination_key, o.odds::text
     FROM race_odds o JOIN race_cards rc ON rc.race_id=o.race_id
-    WHERE o.bet_type IN ('quinella','trio')
+    WHERE o.bet_type IN ('quinella','trio','exacta')
       AND rc.date >= '2026-05-30' AND rc.date <= '2026-06-14'
     ORDER BY o.race_id, o.bet_type, o.odds;" > /tmp/bt250/bt_exotic_odds.tsv
 
@@ -57,6 +62,7 @@ bt_exotic_odds.tsv の生成（DB から、71R 窓の馬連・三連複盤面）
 import argparse
 import re
 import statistics
+import unicodedata
 from itertools import combinations, permutations
 from pathlib import Path
 
@@ -99,6 +105,18 @@ def p_top2_set(probs, a, b):
     if z - pb > 0:
         r += pb / z * pa / (z - pb)
     return r
+
+
+def p_exacta(probs, a, b):
+    """a=1着・b=2着 の順序付き的中確率（馬単的中）。Plackett-Luce の単一順序。
+
+    p_top2_set（無順・馬連）と対称: p_exacta(a,b) + p_exacta(b,a) == p_top2_set(a,b)。
+    """
+    z = sum(probs.values())
+    pa = probs[a]
+    if z <= 0 or z - pa <= 0:
+        return 0.0
+    return pa / z * probs[b] / (z - pa)
 
 
 def p_top3_set(probs, trio):
@@ -156,8 +174,12 @@ def parse_result(path):
             order.append((int(rk.group(1)), int(um.group(1))))
     order.sort()
     top3 = [u for _, u in order[:3]]
-    pay = {"umaren": {}, "wide": {}, "trio": {}}
-    for key, cls in [("umaren", "Umaren"), ("wide", "Wide"), ("trio", "Fuku3")]:
+    pay = {"umaren": {}, "wide": {}, "trio": {}, "exacta": {}}
+    # exacta（馬単・Umatan）は着順保持のため出現順タプルでキー化。他は無順 frozenset。
+    # netkeiba result.html の Umatan 組は li が「1着→2着」順で並ぶ（実 result で実証済み・
+    # src/interface/netkeiba-scraper/src/parse/payout.rs「順序付きは出現順 > 連結」と一致）。
+    # 同着1着では複数の馬単組が並ぶため出現順をそのまま保持する（着順固定の hard assert は不可）。
+    for key, cls in [("umaren", "Umaren"), ("wide", "Wide"), ("trio", "Fuku3"), ("exacta", "Umatan")]:
         m = re.search(rf'<tr class="{cls}">(.*?)</tr>', t, re.S)
         if not m:
             continue
@@ -171,26 +193,37 @@ def parse_result(path):
         if len(nums) != size * len(yens):
             continue
         for k in range(len(yens)):
-            combo = frozenset(nums[k * size:(k + 1) * size])
-            if len(combo) == size:
+            seg = nums[k * size:(k + 1) * size]
+            combo = tuple(seg) if key == "exacta" else frozenset(seg)
+            if len(set(seg)) == size:
                 pay[key][combo] = yens[k]
     return top3, pay
 
 
 def parse_exotic(path):
-    """bt_exotic_odds.tsv -> {pid: {"quinella": {frozenset: odds}, "trio": {frozenset: odds}}}。
+    """bt_exotic_odds.tsv -> {pid: {"quinella": {frozenset: odds}, "trio": {frozenset: odds},
+    "exacta": {(1着,2着): odds}}}。
 
-    combination_key は馬番ハイフン区切りの無順序（例 quinella '9-15', trio '9-15-3'）。
+    combination_key の形式は券種で異なる:
+      - quinella/trio: 馬番ハイフン区切りの無順序（例 '9-15', '9-15-3'）→ frozenset。
+      - exacta: 馬番 '>' 区切りの順序付き（例 '9>15' = 9 着順 1 着・15 着順 2 着）→ (a, b) タプル。
     """
     out = {}
     for line in Path(path).read_text().splitlines():
         if not line.strip():
             continue
         pid, bt, key, odds = line.split("\t")
-        if bt not in ("quinella", "trio"):  # 想定外 bet_type を無視（TSV 手編集への防御）
+        if bt not in ("quinella", "trio", "exacta"):  # 想定外 bet_type を無視（TSV 手編集への防御）
             continue
-        nums = frozenset(int(x) for x in key.split("-"))
-        out.setdefault(pid, {"quinella": {}, "trio": {}})[bt][nums] = float(odds)
+        slot = out.setdefault(pid, {"quinella": {}, "trio": {}, "exacta": {}})
+        if bt == "exacta":
+            # exacta は '1着>2着' の順序付き 2 頭。区切り数が 2 でない異常行は無視する（DB は型付き export だが手編集 TSV への防御）。
+            parts = key.split(">")
+            if len(parts) != 2:
+                continue
+            slot[bt][(int(parts[0]), int(parts[1]))] = float(odds)
+        else:
+            slot[bt][frozenset(int(x) for x in key.split("-"))] = float(odds)
     return out
 
 
@@ -330,6 +363,114 @@ def eval_umaren_allflat(probs, pay, budget=5000):
     return True, ret, stake
 
 
+# --- 戦略（馬単・exacta）------------------------------------------------------
+# 馬単は ◎ を 1 着 or 2 着に固定した順序 2 レッグ (A>p), (p>A) を universe とする
+# （= 馬連の「◎軸ながし全頭」を順序空間へ対称拡張）。全レッグが ◎ を含む ◎1頭軸ながしマルチ。
+def eval_exacta_only(probs, exacta_odds, pay, theta, mode, cap=float("inf"), budget=5000):
+    """◎軸ながしマルチの各順序レッグのうち馬単 model EV ≥ θ の点のみ。予算を flat/weighted で配分。
+
+    cap: 採用するオッズ上限（穴の暴れ EV を除外する規律。既定 ∞ = 無制限）。
+    返り値 (bet, ret, stake)。bet = +EV 点が 1 点以上。清算は実払戻。
+    """
+    ranked = sorted(probs, key=lambda n: -probs[n])
+    if len(ranked) < 2:
+        return False, 0, 0
+    A = ranked[0]
+    sel = []  # (combo=(1着,2着), pairprob)
+    for p in ranked[1:]:
+        for combo in ((A, p), (p, A)):
+            o = exacta_odds.get(combo, 0.0)
+            if o <= 0 or o > cap:
+                continue
+            pp = p_exacta(probs, combo[0], combo[1])
+            if pp * o >= theta:
+                sel.append((combo, pp))
+    if not sel:
+        return False, 0, 0
+
+    combos = [c for c, _ in sel]
+    weights = [1.0] * len(sel) if mode == "flat" else [pp for _, pp in sel]
+    units = largest_remainder(weights, budget // 100)
+    ret = stake = 0
+    for c, u in zip(combos, units):
+        s = u * 100
+        stake += s
+        ret += s * pay["exacta"].get(c, 0) // 100
+    return True, ret, stake
+
+
+def eval_exacta_plain(probs, pay, budget=1500):
+    """参考: ◎軸ながしマルチ top5 両方向（EV フィルタ無し, 馬単確率重み, ¥1500）。全鞍機械買い。
+
+    全鞍機械買いの対照なので pay["exacta"] 欠落は損失扱い（JRA は必ず馬単を払うため欠落＝parse 漏れ）。
+    """
+    ranked = sorted(probs, key=lambda n: -probs[n])
+    if len(ranked) < 2:
+        return False, 0, 0
+    A = ranked[0]
+    partners = ranked[1:6]
+    combos = [c for p in partners for c in ((A, p), (p, A))]
+    weights = [p_exacta(probs, c[0], c[1]) for c in combos]
+    units = largest_remainder(weights, budget // 100)
+    ret = stake = 0
+    for c, u in zip(combos, units):
+        s = u * 100
+        stake += s
+        ret += s * pay["exacta"].get(c, 0) // 100
+    return True, ret, stake
+
+
+def eval_exacta_allflat(probs, pay, budget=5000):
+    """apples-to-apples 対照: ◎軸ながしマルチ全頭両方向（EV フィルタ無し・flat・¥5000）。全鞍機械買い。
+
+    eval_exacta_only と universe（全頭両方向）・配分（flat）を揃え、EV フィルタの有無だけを変えた対照。
+    これより eval_exacta_only が悪ければ馬単 model EV ランキングが逆予測的と切り分けられる。
+    全鞍機械買いの対照なので pay["exacta"] 欠落は損失扱い（JRA は必ず馬単を払うため欠落＝parse 漏れ）。
+    """
+    ranked = sorted(probs, key=lambda n: -probs[n])
+    if len(ranked) < 2:
+        return False, 0, 0
+    A = ranked[0]
+    combos = [c for p in ranked[1:] for c in ((A, p), (p, A))]
+    units = largest_remainder([1.0] * len(combos), budget // 100)
+    ret = stake = 0
+    for c, u in zip(combos, units):
+        s = u * 100
+        stake += s
+        ret += s * pay["exacta"].get(c, 0) // 100
+    return True, ret, stake
+
+
+def eval_pair_leg_swap(probs, quin_odds, exacta_odds, pay, swap=True, budget=1500):
+    """ADR 0043 `pick_pair_leg` の直接検証。馬連 top5 ◎軸ながし（確率重み・¥1500）を土台に、
+    各ペアで model EV（的中確率×盤面オッズ）が馬単(◎→相手) > 馬連 のとき馬単へ置換する。
+
+    置換は両券種のオッズが present かつ馬単が strict に優位なときだけ（ADR 0043 の発火条件）。
+    swap=False なら馬連のみ（土台＝馬連top5 無フィルタと同一）。返り値 (bet, ret, stake, swapped)。
+    清算は実払戻。EV 判定は DB 盤面オッズ、清算は result.html 実配当で分離（循環回避）。
+    """
+    ranked = sorted(probs, key=lambda n: -probs[n])
+    if len(ranked) < 2:
+        return False, 0, 0, 0
+    A = ranked[0]
+    partners = ranked[1:6]
+    units = largest_remainder([probs[p] for p in partners], budget // 100)
+    ret = stake = swapped = 0
+    for p, u in zip(partners, units):
+        s = u * 100
+        stake += s
+        qc = frozenset({A, p})
+        qo, eo = quin_odds.get(qc, 0.0), exacta_odds.get((A, p), 0.0)
+        q_ev = p_top2_set(probs, A, p) * qo
+        e_ev = p_exacta(probs, A, p) * eo
+        if swap and qo > 0 and eo > 0 and e_ev > q_ev:
+            ret += s * pay["exacta"].get((A, p), 0) // 100
+            swapped += 1
+        else:
+            ret += s * pay["umaren"].get(qc, 0) // 100
+    return True, ret, stake, swapped
+
+
 # --- 集計 ---------------------------------------------------------------------
 def max_drawdown(pnls):
     """損益列（円, 時系列）の最大ドローダウン（ピークからの最大下落, 正の円）。"""
@@ -341,10 +482,21 @@ def max_drawdown(pnls):
     return dd
 
 
+# 戦略ラベル列の表示幅（最長ラベル「馬単全頭両方向(無フィルタflat)」=30 セルに合わせる）。
+LABEL_W = 30
+
+
+def pad_disp(label, width=LABEL_W):
+    """CJK 全角（East Asian Wide/Fullwidth）を 2 セルとして右側空白パディング（表の列崩れ防止）。"""
+    disp = sum(2 if unicodedata.east_asian_width(c) in ("W", "F") else 1 for c in label)
+    return label + " " * max(0, width - disp)
+
+
 def summarize(label, rows):
     """rows = [(ret, stake)]（賭けた鞍のみ, 時系列順）-> 1 行サマリ文字列。"""
+    lab = pad_disp(label)
     if not rows:
-        return f"{label:<22} {'0':>4}  {'-':>7} {'-':>5} {'-':>7} {'-':>9}"
+        return f"{lab} {'0':>4}  {'-':>7} {'-':>5} {'-':>7} {'-':>9}"
     freq = len(rows)
     tot_ret = sum(r for r, _ in rows)
     tot_stake = sum(s for _, s in rows)
@@ -353,7 +505,7 @@ def summarize(label, rows):
     per = [r / s * 100 if s else 0 for r, s in rows]
     sd = statistics.pstdev(per) if freq > 1 else 0.0
     dd = max_drawdown([r - s for r, s in rows])
-    return f"{label:<22} {freq:>4}  {roi:>6.1f}% {hit:>4.0f}% {sd:>7.1f} {dd:>9.0f}"
+    return f"{lab} {freq:>4}  {roi:>6.1f}% {hit:>4.0f}% {sd:>7.1f} {dd:>9.0f}"
 
 
 # --- #263: 較正後 model ROI≥100% ゲートの精度診断 ----------------------------
@@ -366,7 +518,7 @@ def fav_market(winodds, pid, A):
 def gate_diagnostics(evaluated, winodds, gate=1.0):
     """ゲート通過鞍/非通過鞍を ◎の市場人気度で特徴づける（#263）。
 
-    evaluated 各要素: (date, venue, rnum, pid, probs, quin, trio, pay)。
+    evaluated 各要素: (date, venue, rnum, pid, probs, quin, trio, exacta, pay)。
     通過鞍の内訳行と、通過 vs 非通過の ◎市場オッズ/人気の平均比較を表示する。
     """
     print(f"=== ゲート診断（model ROI ≥ {gate * 100:.0f}% 通過鞍の内訳）===")
@@ -377,7 +529,7 @@ def gate_diagnostics(evaluated, winodds, gate=1.0):
     pass_n = fail_n = 0
     pass_odds, fail_odds = [], []
     pass_pop, fail_pop = [], []
-    for date, venue, rnum, pid, probs, quin, trio, pay in evaluated:
+    for date, venue, rnum, pid, probs, quin, trio, _exacta, pay in evaluated:
         model_roi, ret, stake = compute_baseline_pf(probs, quin, trio, pay)
         if stake <= 0:
             continue
@@ -424,11 +576,11 @@ def gate_sweep(evaluated, winodds, gates, floors):
     ◎オッズが欠落する鞍は floor>0 のとき保守的に除外する。
     """
     print("=== ゲート掃引（model ROI 閾値 × ◎単勝オッズ下限。発動鞍のみ集計）===")
-    print(f"{'setting':<22} {'張鞍':>4}  {'ROI':>7} {'的中':>5} {'σROI':>7} {'maxDD円':>9}")
+    print(f"{'setting':<{LABEL_W}} {'張鞍':>4}  {'ROI':>7} {'的中':>5} {'σROI':>7} {'maxDD円':>9}")
     for g in gates:
         for fl in floors:
             rows = []
-            for _date, _venue, _rnum, pid, probs, quin, trio, pay in evaluated:
+            for _date, _venue, _rnum, pid, probs, quin, trio, _exacta, pay in evaluated:
                 model_roi, ret, stake = compute_baseline_pf(probs, quin, trio, pay)
                 if stake <= 0 or model_roi < g:
                     continue
@@ -473,7 +625,8 @@ def main():
             for x in args.cap_grid.split(",")]
 
     # 各レースを 1 度評価。exotic オッズ（馬連/三連複盤面）が無い鞍は対象外。
-    evaluated = []  # (date, venue, rnum, pid, probs, quin, trio, pay)
+    # exacta 盤面の欠落は eval_exacta_only 内で個別スキップ（共通母集団 used を維持するため）。
+    evaluated = []  # (date, venue, rnum, pid, probs, quin, trio, exacta, pay)
     skips = dict(probs=0, exotic=0, result=0)
     for r in sorted(races, key=lambda x: (x["date"], x["venue"], x["rnum"])):
         probs = preds.get(r["date"], {}).get((r["venue"], r["rnum"]))
@@ -492,7 +645,10 @@ def main():
         if len(top3) < 3:
             skips["result"] += 1
             continue
-        evaluated.append((r["date"], r["venue"], r["rnum"], r["pid"], probs, ex["quinella"], ex["trio"], pay))
+        evaluated.append(
+            (r["date"], r["venue"], r["rnum"], r["pid"], probs,
+             ex["quinella"], ex["trio"], ex["exacta"], pay)
+        )
 
     used = len(evaluated)
     print(
@@ -502,29 +658,52 @@ def main():
 
     # baseline_pf（全鞍評価し、発動ゲート通過鞍のみ集計）
     base_rows = []
-    for _date, _venue, _rnum, _pid, probs, quin, trio, pay in evaluated:
+    for _date, _venue, _rnum, _pid, probs, quin, trio, _exacta, pay in evaluated:
         bet, ret, stake = eval_baseline_pf(probs, quin, trio, pay)
         if bet:
             base_rows.append((ret, stake))
 
-    # 参考: ◎軸 馬連 top5 ながし（EV フィルタ無し, 全鞍機械買い）
-    plain_rows = []
-    allflat_rows = []
-    for _date, _venue, _rnum, _pid, probs, _quin, _trio, pay in evaluated:
+    # 参考: 無フィルタ対照（馬連 top5 / 馬連全頭 / 馬単 top5 両方向 / 馬単全頭両方向, 全鞍機械買い）
+    um_plain_rows, um_allflat_rows = [], []
+    ex_plain_rows, ex_allflat_rows = [], []
+    for _date, _venue, _rnum, _pid, probs, _quin, _trio, _exacta, pay in evaluated:
         bet, ret, stake = eval_umaren_plain(probs, pay)
         if bet:
-            plain_rows.append((ret, stake))
+            um_plain_rows.append((ret, stake))
         bet, ret, stake = eval_umaren_allflat(probs, pay)
         if bet:
-            allflat_rows.append((ret, stake))
+            um_allflat_rows.append((ret, stake))
+        bet, ret, stake = eval_exacta_plain(probs, pay)
+        if bet:
+            ex_plain_rows.append((ret, stake))
+        bet, ret, stake = eval_exacta_allflat(probs, pay)
+        if bet:
+            ex_allflat_rows.append((ret, stake))
 
-    # maxDD(円) は戦略間で予算が異なる（baseline_pf ¥3,500 / top5 ¥1,500 / allflat・umaren ¥5,000）ため
+    # maxDD(円) は戦略間で予算が異なる（baseline_pf ¥3,500 / top5 ¥1,500 / allflat・特化 ¥5,000）ため
     # スケール非不変＝直接比較不可。判定は ROI / 的中 / σ（いずれもスケール不変）で行うこと。
     print(f"=== 戦略比較（全 {used}R に機械適用、発動ゲート通過鞍のみ集計）===")
-    print(f"{'strategy':<22} {'張鞍':>4}  {'ROI':>7} {'的中':>5} {'σROI':>7} {'maxDD円':>9}")
+    print(f"{'strategy':<{LABEL_W}} {'張鞍':>4}  {'ROI':>7} {'的中':>5} {'σROI':>7} {'maxDD円':>9}")
     print(summarize("baseline_pf", base_rows))
-    print(summarize("馬連top5(無フィルタ)", plain_rows))
-    print(summarize("馬連全頭(無フィルタflat)", allflat_rows))
+    print(summarize("馬連top5(無フィルタ)", um_plain_rows))
+    print(summarize("馬連全頭(無フィルタflat)", um_allflat_rows))
+    print(summarize("馬単top5両方向(無フィルタ)", ex_plain_rows))
+    print(summarize("馬単全頭両方向(無フィルタflat)", ex_allflat_rows))
+    print()
+
+    # ADR 0043 pick_pair_leg の直接検証: 馬連 top5 を土台に、EV 優位ペアのみ馬単(◎→相手)へ置換。
+    # 土台（swap無）= 馬連top5無フィルタと同値。置換版が土台を上回れば順序プレミアムは実エッジ。
+    base_leg, swap_leg, swap_count = [], [], 0
+    for _date, _venue, _rnum, _pid, probs, quin, _trio, exacta, pay in evaluated:
+        _, ret, stake, _ = eval_pair_leg_swap(probs, quin, exacta, pay, swap=False)
+        base_leg.append((ret, stake))
+        _, ret, stake, sw = eval_pair_leg_swap(probs, quin, exacta, pay, swap=True)
+        swap_leg.append((ret, stake))
+        swap_count += sw
+    print(f"=== ADR 0043 順序プレミアム直接検証（馬連top5 vs 馬単EV優位ペア置換, 全{used}R）===")
+    print(f"{'strategy':<{LABEL_W}} {'張鞍':>4}  {'ROI':>7} {'的中':>5} {'σROI':>7} {'maxDD円':>9}")
+    print(summarize("ペア脚: 馬連のみ(土台)", base_leg))
+    print(summarize(f"ペア脚: 馬単置換({swap_count}脚)", swap_leg))
     print()
 
     # #263: 較正後 model ROI≥100% ゲートの精度診断と閾値/オッズ条件の掃引。
@@ -538,11 +717,23 @@ def main():
         for cap, clabel in caps:
             for theta in thetas:
                 rows = []
-                for _date, _venue, _rnum, _pid, probs, quin, _trio, pay in evaluated:
+                for _date, _venue, _rnum, _pid, probs, quin, _trio, _exacta, pay in evaluated:
                     bet, ret, stake = eval_umaren_only(probs, quin, pay, theta, mode, cap)
                     if bet:
                         rows.append((ret, stake))
                 print(summarize(f"umaren θ={theta:.1f} {clabel} {mode}", rows))
+        print()
+
+    # 馬単特化（EV≥θ）。順序プレミアム検証。馬連と同一の θ×cap×flat/weighted 掃引。
+    for mode in ("flat", "weighted"):
+        for cap, clabel in caps:
+            for theta in thetas:
+                rows = []
+                for _date, _venue, _rnum, _pid, probs, _quin, _trio, exacta, pay in evaluated:
+                    bet, ret, stake = eval_exacta_only(probs, exacta, pay, theta, mode, cap)
+                    if bet:
+                        rows.append((ret, stake))
+                print(summarize(f"exacta θ={theta:.1f} {clabel} {mode}", rows))
         print()
 
 
