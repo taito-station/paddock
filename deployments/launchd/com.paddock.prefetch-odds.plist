@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  締切前 live オッズ自動 prefetch（#237）を定期発火する launchd エージェント。
+  __REPO_ROOT__ は install.sh が実リポジトリパスへ置換する（プレースホルダのまま load しない）。
+  StartInterval=300（5 分間隔）。開催外/朝は対象 0 件で no-op になるため常時走らせてよい。
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.paddock.prefetch-odds</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>__REPO_ROOT__/scripts/predict-check/prefetch_odds.sh</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>__REPO_ROOT__</string>
+
+    <!-- launchd は最小 PATH なので psql / python3 / cargo 産物を探せるよう補う。
+         Homebrew は Intel(/usr/local) と Apple Silicon(/opt/homebrew) の両方を入れておく。 -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+
+    <key>StartInterval</key>
+    <integer>300</integer>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>__REPO_ROOT__/.launchd-prefetch.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>__REPO_ROOT__/.launchd-prefetch.err.log</string>
+</dict>
+</plist>
