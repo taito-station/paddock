@@ -217,7 +217,7 @@ def parse_exotic(path):
             continue
         slot = out.setdefault(pid, {"quinella": {}, "trio": {}, "exacta": {}})
         if bt == "exacta":
-            # exacta は '1着>2着' の順序付き 2 頭。区切り形式の異常は当該行を無視（防御方針を quinella/trio と対称に）。
+            # exacta は '1着>2着' の順序付き 2 頭。区切り数が 2 でない異常行は無視する（DB は型付き export だが手編集 TSV への防御）。
             parts = key.split(">")
             if len(parts) != 2:
                 continue
@@ -482,7 +482,11 @@ def max_drawdown(pnls):
     return dd
 
 
-def pad_disp(label, width=24):
+# 戦略ラベル列の表示幅（最長ラベル「馬単全頭両方向(無フィルタflat)」=30 セルに合わせる）。
+LABEL_W = 30
+
+
+def pad_disp(label, width=LABEL_W):
     """CJK 全角（East Asian Wide/Fullwidth）を 2 セルとして右側空白パディング（表の列崩れ防止）。"""
     disp = sum(2 if unicodedata.east_asian_width(c) in ("W", "F") else 1 for c in label)
     return label + " " * max(0, width - disp)
@@ -572,7 +576,7 @@ def gate_sweep(evaluated, winodds, gates, floors):
     ◎オッズが欠落する鞍は floor>0 のとき保守的に除外する。
     """
     print("=== ゲート掃引（model ROI 閾値 × ◎単勝オッズ下限。発動鞍のみ集計）===")
-    print(f"{'setting':<22} {'張鞍':>4}  {'ROI':>7} {'的中':>5} {'σROI':>7} {'maxDD円':>9}")
+    print(f"{'setting':<{LABEL_W}} {'張鞍':>4}  {'ROI':>7} {'的中':>5} {'σROI':>7} {'maxDD円':>9}")
     for g in gates:
         for fl in floors:
             rows = []
@@ -679,7 +683,7 @@ def main():
     # maxDD(円) は戦略間で予算が異なる（baseline_pf ¥3,500 / top5 ¥1,500 / allflat・特化 ¥5,000）ため
     # スケール非不変＝直接比較不可。判定は ROI / 的中 / σ（いずれもスケール不変）で行うこと。
     print(f"=== 戦略比較（全 {used}R に機械適用、発動ゲート通過鞍のみ集計）===")
-    print(f"{'strategy':<24} {'張鞍':>4}  {'ROI':>7} {'的中':>5} {'σROI':>7} {'maxDD円':>9}")
+    print(f"{'strategy':<{LABEL_W}} {'張鞍':>4}  {'ROI':>7} {'的中':>5} {'σROI':>7} {'maxDD円':>9}")
     print(summarize("baseline_pf", base_rows))
     print(summarize("馬連top5(無フィルタ)", um_plain_rows))
     print(summarize("馬連全頭(無フィルタflat)", um_allflat_rows))
@@ -697,7 +701,7 @@ def main():
         swap_leg.append((ret, stake))
         swap_count += sw
     print(f"=== ADR 0043 順序プレミアム直接検証（馬連top5 vs 馬単EV優位ペア置換, 全{used}R）===")
-    print(f"{'strategy':<24} {'張鞍':>4}  {'ROI':>7} {'的中':>5} {'σROI':>7} {'maxDD円':>9}")
+    print(f"{'strategy':<{LABEL_W}} {'張鞍':>4}  {'ROI':>7} {'的中':>5} {'σROI':>7} {'maxDD円':>9}")
     print(summarize("ペア脚: 馬連のみ(土台)", base_leg))
     print(summarize(f"ペア脚: 馬単置換({swap_count}脚)", swap_leg))
     print()
