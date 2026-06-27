@@ -631,13 +631,40 @@ mod tests {
     #[test]
     fn portfolio_preserves_budget_and_units() {
         // 既定配分でも 100 円単位・予算内が保たれる（連系ペアは常に馬連）。
-        let (probs, mut o) = sample();
-        o.exacta.insert(
-            OrderedPair::try_from((horse(1), horse(2))).unwrap(),
-            odds(100.0),
-        );
+        let (probs, o) = sample();
         let pf = build_portfolio(&probs, &o, 5000, &PortfolioConfig::default());
         assert!(pf.bets.iter().all(|b| b.stake % 100 == 0 && b.stake > 0));
         assert!(pf.total_stake <= 5000, "stake {} <= 5000", pf.total_stake);
+    }
+
+    #[test]
+    fn pair_leg_kept_as_quinella_when_quinella_odds_missing() {
+        // 馬連オッズ欠落でも連系脚は Quinella（odds=None）として生成され、ペアが脱落しない。
+        // 撤去した pick_pair_leg のオッズ欠落ハンドリングが担保していた不変条件を維持する。
+        let (probs, mut o) = sample();
+        o.quinella
+            .remove(&Pair::try_from((horse(1), horse(2))).unwrap());
+        let config = PortfolioConfig {
+            partners: 3,
+            alloc: (1, 0, 0),
+        };
+        let pf = build_portfolio(&probs, &o, 5000, &config);
+        let leg = pf.bets.iter().find(|b| {
+            matches!(&b.combination, BetCombination::Quinella(p)
+                if p.as_tuple() == (horse(1), horse(2)))
+        });
+        assert!(
+            leg.is_some(),
+            "馬連オッズ欠落でも Quinella 脚は生成される: {:?}",
+            pf.bets
+        );
+        assert_eq!(leg.unwrap().odds, None, "欠落オッズは None のまま");
+        assert!(
+            !pf.bets
+                .iter()
+                .any(|b| matches!(b.combination, BetCombination::Exacta(_))),
+            "Exacta 化はしない: {:?}",
+            pf.bets
+        );
     }
 }
