@@ -97,8 +97,6 @@ if [[ "$cmd" == next ]]; then
     exit 0
 fi
 
-status=0
-
 # 規約に合致しないファイルは警告のみ（README 等の非 ADR が将来増える可能性を許容）。
 if [[ ${#nonconforming[@]} -gt 0 ]]; then
     echo "警告: ADR 命名規約（NNNN-kebab-title.md）に合致しないファイル:" >&2
@@ -107,7 +105,7 @@ fi
 
 if [[ ${#numbers[@]} -eq 0 ]]; then
     echo "ADR ファイルが見つからない（docs/adr/NNNN-*.md）" >&2
-    exit "$status"
+    exit 0
 fi
 
 # 重複番号を抽出する。出現回数 >= 2 の番号を集める。
@@ -119,7 +117,11 @@ if [[ -n "$dups" ]]; then
         [[ -z "$num" ]] && continue
         echo "  番号 $num:" >&2
         for path in "$adr_dir/$num"*.md; do
-            [[ -e "$path" ]] && echo "    $(basename "$path")" >&2
+            [[ -e "$path" ]] || continue
+            b="$(basename "$path")"
+            # 抽出と同じ境界（4 桁の直後が非数字/終端）で再確認し、5 桁番号ファイル
+            # （00401-*.md 等）が $num の重複として誤って列挙されるのを防ぐ。
+            [[ "$b" =~ ^${num}([^0-9]|$) ]] && echo "    $b" >&2
         done
     done <<<"$dups"
     echo "" >&2
