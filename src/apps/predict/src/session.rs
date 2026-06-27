@@ -234,10 +234,11 @@ async fn run_race(
             None => "オッズ未取得".to_string(),
         };
         println!(
-            "  {} ¥{} {} EV={:.2}",
+            "  {} ¥{} {} 的中{:.1}% EV={:.2}",
             bet.combination.label_ja(),
             bet.stake,
             odds,
+            bet.hit_prob * 100.0,
             bet.ev,
         );
     }
@@ -794,12 +795,14 @@ mod tests {
                 stake: 500,
                 odds: None,
                 ev: 0.0,
+                hit_prob: 0.0,
             },
             PortfolioBet {
                 combination: BetCombination::Win(horse(2)),
                 stake: 300,
                 odds: None,
                 ev: 0.0,
+                hit_prob: 0.0,
             },
         ];
         let suggested = vec![500, 300];
@@ -817,6 +820,7 @@ mod tests {
             stake: 100,
             odds: None,
             ev: 0.0,
+            hit_prob: 0.0,
         }];
         let suggested = vec![100];
         // 1周目: 20000 を入力（budget 10000 超過）→ 再プロンプト。2周目: EOF → 0。
