@@ -32,7 +32,8 @@ pub struct Cli {
     #[arg(long, default_value_t = 5000)]
     pub race_budget: u64,
 
-    /// 市場単勝ブレンドのモデル重み α。未指定なら本番既定（RECOMMENDED_MARKET_BLEND_ALPHA）。
+    /// 市場単勝ブレンドのモデル重み α（blended = α·model + (1-α)·market）。未指定なら本番既定 α=0.2。
+    /// 値を渡せば上書きするが、ブレンド無効化（predict の α=None 経路）は CLI からは選べない。
     #[arg(long)]
     pub blend_alpha: Option<f64>,
 

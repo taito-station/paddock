@@ -1,6 +1,6 @@
 use std::time::Duration as StdDuration;
 
-use chrono::{Duration, Local, NaiveTime};
+use chrono::{Duration, Local, NaiveTime, Offset};
 use paddock_domain::{
     Portfolio, PortfolioConfig, RECOMMENDED_MARKET_BLEND_ALPHA, Race, build_portfolio,
 };
@@ -154,7 +154,10 @@ async fn evaluate_race(app: &App, slot: &Slot, cli: &Cli, blend_alpha: Option<f6
         }
     };
 
-    // 2) 確率推定（直前に保存したフレッシュ snapshot を内部で参照してブレンド）。
+    // 2) 確率推定。predict_race は内部で find_race_odds（直前に persist した最新スナップショット）を
+    //    再読込して市場単勝ブレンドに使う。build_portfolio へ渡す odds と同一データだが読み出し経路は別。
+    //    persist 失敗時（warn のみで継続）は predict_race が旧スナップショットを見るため、その回だけ
+    //    買い目側と確率側でオッズ集合が食い違いうる（次スイープで解消する一時的劣化）。
     let probs = match app
         .interactor
         .predict_race(rid, blend_alpha, slot.race.track_condition)
@@ -220,20 +223,27 @@ fn print_buy_targets(p: &Portfolio) {
 /// 監視ループ。発走前のレースが残っている間スキャンを繰り返し、全レース発走で自動終了する。
 pub async fn run(app: &App, cli: &Cli) -> anyhow::Result<()> {
     // α 未指定なら本番既定（market α=0.2）を使う。predict と同一値で判定を揃える。
-    let blend_alpha = match cli.blend_alpha {
-        Some(v) => Some(v),
-        None => RECOMMENDED_MARKET_BLEND_ALPHA,
-    };
+    let blend_alpha = cli.blend_alpha.or(RECOMMENDED_MARKET_BLEND_ALPHA);
     let window = Duration::minutes(cli.window as i64);
 
-    // 発走状態は実行マシンの現在時刻（JST 想定）と post_time の「時刻」だけで判定するため、
-    // 当日以外の date を指定すると判定が無意味になる。誤用に早期に気づけるよう警告する。
-    let today = Local::now().date_naive();
+    // 発走状態は実行マシンの現在時刻と post_time の「時刻」だけで判定するため、(1) 当日以外の date、
+    // (2) JST 以外の TZ では判定が無意味になる。誤用に早期に気づけるよう起動時に警告する。
+    const JST_OFFSET_SECS: i32 = 9 * 3600;
+    let now_local = Local::now();
+    let today = now_local.date_naive();
     if cli.date != today {
         println!(
             "⚠ --date {} は本日（{today}）と異なります。発走状態は現在時刻と post_time の時刻のみで \
              判定するため、当日以外の指定では Due/Started 判定が正しく機能しません。",
             cli.date,
+        );
+    }
+    let tz_offset = now_local.offset().fix().local_minus_utc();
+    if tz_offset != JST_OFFSET_SECS {
+        println!(
+            "⚠ 実行マシンのタイムゾーンが JST(+09:00) ではありません（現在 UTC{:+}時間）。post_time は \
+             JST 起算のため、発走状態判定がオフセットぶんずれます。JST マシンで実行してください。",
+            tz_offset / 3600,
         );
     }
 
