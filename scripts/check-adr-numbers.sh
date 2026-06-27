@@ -38,6 +38,12 @@ case "$cmd" in
     next | check) ;;
     *) echo "不明な引数: $cmd" >&2; usage >&2; exit 2 ;;
 esac
+# 受理するのはサブコマンド 1 つだけ。余分な後続引数は黙殺せず弾く（不明引数と同じ厳格さ）。
+if [[ $# -gt 1 ]]; then
+    echo "引数が多すぎる（受理は check / next / -h のいずれか 1 つ）: $*" >&2
+    usage >&2
+    exit 2
+fi
 
 # どの cwd から呼んでも docs/adr を解決できるようリポジトリルート起点にする。
 if ! repo_root="$(git rev-parse --show-toplevel 2>/dev/null)"; then
