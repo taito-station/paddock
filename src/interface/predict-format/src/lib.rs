@@ -171,7 +171,7 @@ pub fn surface_jp(s: Surface) -> &'static str {
 mod tests {
     use super::{
         factor_phrase, format_explanations, format_probs, gate_label_jp, prev_run_phrase,
-        recent_form_phrase,
+        recent_form_phrase, surface_jp,
     };
     use paddock_domain::horse_result::HorseNum;
     use paddock_domain::{
@@ -370,5 +370,11 @@ mod tests {
         );
         assert!(lines[1].contains("ウマ7") && lines[1].contains("12.3%"));
         assert!(lines[2].contains("ウマ3") && lines[2].contains("50.0%"));
+    }
+
+    #[test]
+    fn surface_jp_maps_both_surfaces() {
+        assert_eq!(surface_jp(Surface::Turf), "芝");
+        assert_eq!(surface_jp(Surface::Dirt), "ダート");
     }
 }
