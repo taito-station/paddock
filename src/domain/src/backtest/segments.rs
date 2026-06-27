@@ -73,15 +73,24 @@ pub(crate) fn popularity_segments(races: &[RaceEvaluation]) -> Vec<PopularitySeg
             let horses = buckets.get(label)?;
             let entries = horses.len() as u32;
             let pairs: Vec<(f64, bool)> = horses.iter().map(|h| (h.win_prob, h.won())).collect();
-            let mean_win_prob = horses.iter().map(|h| h.win_prob).sum::<f64>() / entries as f64;
-            let observed_win_rate =
-                horses.iter().filter(|h| h.won()).count() as f64 / entries as f64;
+            let n = entries as f64;
+            let mean_win_prob = horses.iter().map(|h| h.win_prob).sum::<f64>() / n;
+            let observed_win_rate = horses.iter().filter(|h| h.won()).count() as f64 / n;
+            // #258: 複勝圏の人気薄過小評価を見るため place/show の平均予測 vs 実率も帯別に出す。
+            let mean_place_prob = horses.iter().map(|h| h.place_prob).sum::<f64>() / n;
+            let observed_place_rate = horses.iter().filter(|h| h.placed()).count() as f64 / n;
+            let mean_show_prob = horses.iter().map(|h| h.show_prob).sum::<f64>() / n;
+            let observed_show_rate = horses.iter().filter(|h| h.showed()).count() as f64 / n;
             Some(PopularitySegment {
                 label: label.to_string(),
                 entries,
                 mean_win_prob,
                 observed_win_rate,
                 win_calibration: calibration(&pairs),
+                mean_place_prob,
+                observed_place_rate,
+                mean_show_prob,
+                observed_show_rate,
             })
         })
         .collect()

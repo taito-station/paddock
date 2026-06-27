@@ -275,11 +275,21 @@ fn popularity_segments_group_entries_in_band_order() {
     assert_eq!(fav.entries, 1);
     approx(fav.mean_win_prob, 0.5);
     approx(fav.observed_win_rate, 1.0);
+    // #258: place/show も帯別に出る。1番人気馬(place 0.6, show 0.7)は 1 着で連対・複勝とも的中。
+    approx(fav.mean_place_prob, 0.6);
+    approx(fav.observed_place_rate, 1.0);
+    approx(fav.mean_show_prob, 0.7);
+    approx(fav.observed_show_rate, 1.0);
 
     let band23 = &r.by_popularity[1];
     assert_eq!(band23.entries, 2);
     approx(band23.mean_win_prob, (0.2 + 0.1) / 2.0);
     approx(band23.observed_win_rate, 0.0);
+    // 2 頭(place 0.3/0.2, show 0.4/0.3, 着順 3/2)。連対は pos2 のみ、複勝は両方。
+    approx(band23.mean_place_prob, (0.3 + 0.2) / 2.0);
+    approx(band23.observed_place_rate, 0.5);
+    approx(band23.mean_show_prob, (0.4 + 0.3) / 2.0);
+    approx(band23.observed_show_rate, 1.0);
 }
 
 #[test]
@@ -420,4 +430,53 @@ fn exotic_payout_rate_sums_all_hits_over_total_bets() {
     approx(w.hit_rate, 2.0 / 3.0);
     // (2.0 + 3.0) / 3 点 = 5/3。1 点でも複数的中でも分母は総点数。
     approx(w.payout_rate, 5.0 / 3.0);
+}
+
+#[test]
+fn top3_rank_distribution_buckets_by_model_show_rank() {
+    // 8 頭、show_prob 降順（h0=0.80 … h7=0.10）＝モデル順位 = index+1。
+    // 3 着内入線: h0(rank1, 3着)→1-3 / h4(rank5, 2着)→4-6 / h7(rank8, 1着)→7+。
+    let s = |idx: usize| 0.80 - 0.10 * idx as f64;
+    let mk = |idx: usize, pos: Option<u32>| horse(s(idx), s(idx), s(idx), pos, None);
+    let races = vec![RaceEvaluation {
+        horses: vec![
+            mk(0, Some(3)), // rank1 → 1-3
+            mk(1, Some(4)),
+            mk(2, Some(5)),
+            mk(3, Some(6)),
+            mk(4, Some(2)), // rank5 → 4-6
+            mk(5, Some(7)),
+            mk(6, None),
+            mk(7, Some(1)), // rank8 → 7+
+        ],
+        top_pick_position: Some(3),
+        top_pick_odds: None,
+        surface: Surface::Turf,
+    }];
+    let d = evaluate(&races).top3_rank_distribution;
+    assert_eq!(d.finishers, 3);
+    assert_eq!(d.model_rank_1_3, 1);
+    assert_eq!(d.model_rank_4_6, 1);
+    assert_eq!(d.model_rank_7_plus, 1);
+}
+
+#[test]
+fn place_and_show_reliability_are_populated() {
+    // 評価レースがあれば place/show の reliability 曲線も win と同じ 10 ビンで埋まる（#258）。
+    let races = vec![RaceEvaluation {
+        horses: vec![
+            horse(0.5, 0.7, 0.9, Some(1), Some(1)),
+            horse(0.3, 0.5, 0.7, Some(4), Some(2)),
+        ],
+        top_pick_position: Some(1),
+        top_pick_odds: None,
+        surface: Surface::Turf,
+    }];
+    let r = evaluate(&races);
+    assert_eq!(r.place_reliability.len(), 10);
+    assert_eq!(r.show_reliability.len(), 10);
+    // show_prob 0.9 の馬は最終ビン[0.9,1.0]に入り 3着以内(1着)で実率 1.0。
+    let top_bin = r.show_reliability.last().unwrap();
+    assert_eq!(top_bin.count, 1);
+    approx(top_bin.observed_rate, 1.0);
 }

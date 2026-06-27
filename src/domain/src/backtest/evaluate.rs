@@ -1,7 +1,7 @@
 //! 評価レース集合から [`BacktestReport`] を集計するトップレベル関数。
 
 use super::metrics::{RELIABILITY_BINS, calibration, reliability};
-use super::model::{BacktestReport, RaceEvaluation};
+use super::model::{BacktestReport, RaceEvaluation, Top3RankDistribution};
 use super::segments::{field_size_segments, popularity_segments, surface_segments};
 
 /// 1 レース 1 賭けの想定賭け金（円）。トップ選好馬の単勝に固定額を賭ける。
@@ -73,6 +73,9 @@ pub fn evaluate(races: &[RaceEvaluation]) -> BacktestReport {
     let win_calibration = calibration(&win_pairs);
 
     BacktestReport {
+        top3_rank_distribution: top3_rank_distribution(races),
+        place_reliability: reliability(&place_pairs, RELIABILITY_BINS),
+        show_reliability: reliability(&show_pairs, RELIABILITY_BINS),
         races_evaluated: races.len() as u32,
         win_hit_rate: win_hits as f64 / n,
         place_hit_rate: place_hits as f64 / n,
@@ -90,4 +93,39 @@ pub fn evaluate(races: &[RaceEvaluation]) -> BacktestReport {
         // 買い目（curated）の校正・回収率は買い目単位の別入力（exotic_segments）で埋める（#121）。
         by_exotic: Vec::new(),
     }
+}
+
+/// 3 着以内入線馬のモデル `show_prob` 順位分布を集計する（#258）。
+///
+/// 各レースで全出走馬を `show_prob` 降順（同値は元順で安定）に並べ、実際に 3 着以内へ来た馬が
+/// モデルで何位だったかを 1-3 / 4-6 / 7+ にバケットする。`model_rank_7_plus` が多いほど、モデルは
+/// 複勝圏に飛び込む人気薄を下位に沈めて取りこぼしている（複勝圏の過小評価）。
+fn top3_rank_distribution(races: &[RaceEvaluation]) -> Top3RankDistribution {
+    let mut dist = Top3RankDistribution::default();
+    for race in races {
+        // show_prob 降順インデックス（slice::sort_by は安定ソートなので同値は元順）。
+        let mut order: Vec<usize> = (0..race.horses.len()).collect();
+        order.sort_by(|&a, &b| {
+            race.horses[b]
+                .show_prob
+                .partial_cmp(&race.horses[a].show_prob)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        // 馬 index → モデル順位（1 始まり）の逆引き。
+        let mut rank_of = vec![0u32; race.horses.len()];
+        for (r, &h) in order.iter().enumerate() {
+            rank_of[h] = (r + 1) as u32;
+        }
+        for (h, horse) in race.horses.iter().enumerate() {
+            if horse.showed() {
+                dist.finishers += 1;
+                match rank_of[h] {
+                    1..=3 => dist.model_rank_1_3 += 1,
+                    4..=6 => dist.model_rank_4_6 += 1,
+                    _ => dist.model_rank_7_plus += 1,
+                }
+            }
+        }
+    }
+    dist
 }

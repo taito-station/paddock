@@ -133,6 +133,31 @@ pub struct PopularitySegment {
     pub observed_win_rate: f64,
     /// この帯の単勝校正。
     pub win_calibration: CalibrationMetrics,
+    /// 平均予測連対確率（2 着以内, #258）。
+    pub mean_place_prob: f64,
+    /// 実測連対率。`observed_place_rate − mean_place_prob` が大きく正なら過小評価。
+    pub observed_place_rate: f64,
+    /// 平均予測複勝確率（3 着以内, #258）。複勝圏の人気薄過小評価を見る主指標。
+    pub mean_show_prob: f64,
+    /// 実測複勝率。人気薄帯で `observed_show_rate ≫ mean_show_prob` なら過小評価が確定。
+    pub observed_show_rate: f64,
+}
+
+/// 3 着以内に入線した馬の「モデル複勝(show_prob)順位」分布（#258）。
+///
+/// 各レースで全出走馬を `show_prob` 降順に並べ、実際に 3 着以内へ来た馬がモデルで何位だったかを
+/// 数える。`model_rank_7_plus` が大きいほど、モデルは複勝圏に飛び込む人気薄を順位下位に沈めており
+/// 取りこぼしている（= 複勝圏の過小評価）。
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Top3RankDistribution {
+    /// 突合できた 3 着以内入線馬の延べ頭数（分母）。
+    pub finishers: u32,
+    /// うちモデル show_prob 順位が 1〜3 位だった数（モデルが圏内予測できていた）。
+    pub model_rank_1_3: u32,
+    /// 4〜6 位だった数。
+    pub model_rank_4_6: u32,
+    /// 7 位以下だった数（モデルが大きく外した人気薄の複勝圏入線）。
+    pub model_rank_7_plus: u32,
 }
 
 /// 買い目（券種）単位の評価入力（#121）。`select_bets` の curated 推奨をそのまま 1 点 1 件で渡す。
@@ -201,6 +226,12 @@ pub struct BacktestReport {
     pub show_calibration: CalibrationMetrics,
     /// 単勝確率の reliability 曲線（等幅 10 ビン、空ビンも含む）。
     pub win_reliability: Vec<ReliabilityBin>,
+    /// 連対（2 着以内）確率の reliability 曲線（#258）。
+    pub place_reliability: Vec<ReliabilityBin>,
+    /// 複勝（3 着以内）確率の reliability 曲線（#258）。低予測ビンで実率が上振れ＝裾の過小評価。
+    pub show_reliability: Vec<ReliabilityBin>,
+    /// 3 着以内入線馬のモデル複勝順位分布（#258）。
+    pub top3_rank_distribution: Top3RankDistribution,
     /// 頭数帯別の集計（データのある帯のみ、[`FIELD_SIZE_BANDS`](super::segments::FIELD_SIZE_BANDS) 順）。
     pub by_field_size: Vec<FieldSizeSegment>,
     /// 人気帯別の集計（データのある帯のみ、[`POPULARITY_BANDS`](super::segments::POPULARITY_BANDS) 順）。
@@ -228,6 +259,9 @@ impl BacktestReport {
             place_calibration: CalibrationMetrics::ZERO,
             show_calibration: CalibrationMetrics::ZERO,
             win_reliability: Vec::new(),
+            place_reliability: Vec::new(),
+            show_reliability: Vec::new(),
+            top3_rank_distribution: Top3RankDistribution::default(),
             by_field_size: Vec::new(),
             by_popularity: Vec::new(),
             by_surface: Vec::new(),
