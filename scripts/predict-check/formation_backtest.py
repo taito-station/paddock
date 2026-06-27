@@ -315,7 +315,7 @@ def main():
         print()
 
     # 全体（発動時のみ差替え）の portfolio ROI も併記。day 全レースに張る前提の総回収率。
-    print("=== 全 {0}R 通し（非発動=baseline, 発動時のみ差替え）の総回収率 ===".format(used))
+    print(f"=== 全 {used}R 通し（非発動=baseline, 発動時のみ差替え）の総回収率 ===")
     print(f"{'theta':>6}  {'strategy':<9} {'ROI':>7} {'的中':>6}")
     for theta in thetas:
         for variant in variants:
