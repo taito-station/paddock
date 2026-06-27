@@ -59,12 +59,13 @@ def group_snapshots(rows):
     """snapshot 行（dict の iterable）を race_id → レース情報へ畳む（純関数・DB 非依存）。
 
     返り値: race_id -> {
-        "date","venue","race_num","surface","distance",
+        "date","venue","race_num",
         "times": { fetched_at: {"win":{n:odds}, "quinella":{tuple:odds},
                                 "trio":{tuple:odds}, "wide":{tuple:mid}} },
     }
     ワイドは low(odds)/high(odds_high) から mid=(low+high)/2 を採る（live_ev と同一意味論）。
     odds_high 欠落のワイドは構造異常としてスキップ（mid を出せない）。
+    値（odds や馬番）が数値化できない異常行は当該行のみ warn スキップ（レポート全体を止めない）。
     """
     races = {}
     for r in rows:
@@ -78,21 +79,23 @@ def group_snapshots(rows):
                 "date": r["date"],
                 "venue": r["venue"],
                 "race_num": int(r["race_num"]),
-                "surface": r["surface"],
-                "distance": int(r["distance"]) if r["distance"] else 0,
                 "times": defaultdict(lambda: {"win": {}, "quinella": {}, "trio": {}, "wide": {}}),
             }
         books = race["times"][r["fetched_at"]]
-        odds = float(r["odds"])
-        if bt == "win":
-            books["win"][int(r["combination_key"])] = odds
-        elif bt == "wide":
-            hi = r["odds_high"]
-            if hi in (None, "", "\\N"):
-                continue  # mid を出せない異常行は捨てる
-            books["wide"][_combo(r["combination_key"])] = (odds + float(hi)) / 2.0
-        else:  # quinella / trio
-            books[bt][_combo(r["combination_key"])] = odds
+        try:
+            odds = float(r["odds"])
+            if bt == "win":
+                books["win"][int(r["combination_key"])] = odds
+            elif bt == "wide":
+                hi = r["odds_high"]
+                if hi in (None, "", "\\N"):
+                    continue  # mid を出せない異常行は捨てる
+                books["wide"][_combo(r["combination_key"])] = (odds + float(hi)) / 2.0
+            else:  # quinella / trio
+                books[bt][_combo(r["combination_key"])] = odds
+        except ValueError:
+            print(f"[warn] 数値化できない snapshot 行をスキップ: "
+                  f"{rid} {bt} {r['combination_key']} {r['odds']}", file=sys.stderr)
     return races
 
 
@@ -111,20 +114,23 @@ def eval_race(probs, times, budget):
     _ax, _parts, kon, bets = L.build_bets(probs, budget)
     if not bets:
         return None
-    series = []  # (fetched_at, roi)
+    series = []  # (fetched_at, roi, missing)
     for at in sorted(times):
         b = times[at]
-        roi, _stake, _missing = L.race_roi(probs, bets, b["wide"], b["quinella"], b["trio"])
-        series.append((at, roi))
+        roi, _stake, missing = L.race_roi(probs, bets, b["wide"], b["quinella"], b["trio"])
+        series.append((at, roi, missing))
     if not series:
         return None
-    final_at, final_roi = series[-1]
-    best_at, best_roi = max(series, key=lambda t: t[1])
+    final_at, final_roi, final_missing = series[-1]
+    best_at, best_roi, _best_missing = max(series, key=lambda t: t[1])
     return {
         "konsen": kon,
         "n_times": len(series),
         "final_at": final_at,
         "final_roi": final_roi,
+        # 最終 snapshot のオッズ欠落（賭金は分母に残り分子0）。>0 なら final_roi は過小評価で、
+        # final +EV→−EV を黙って誤判定しうる（live_ev と同じ保守側）。print_report で ⚠ 可視化する。
+        "final_missing": final_missing,
         "best_at": best_at,
         "best_roi": best_roi,
         "ever_pos": best_roi >= 100.0,
@@ -134,9 +140,17 @@ def eval_race(probs, times, budget):
 
 # --- 入力ロード（DB or 外部 TSV） ---
 def _psql_dump_snapshots(db_url, date_from, date_to):
-    """期間内の snapshot を race_cards と join して TSV 文字列で返す。"""
+    """期間内の snapshot を race_cards と join して TSV 文字列で返す。
+
+    date_* は SQL リテラルへ補間するため、呼び出し側検証に依存せず関数内でも YYYY-MM-DD を
+    再検証する（多層防御）。psql -c の単発クエリはプレースホルダを取れないので、形式を厳格に
+    固定した値だけを通す。
+    """
+    for d in (date_from, date_to):
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", d):
+            raise ValueError(f"日付は YYYY-MM-DD のみ許可: {d!r}")
     sql = (
-        "SELECT s.race_id, c.date, c.venue, c.race_num, c.surface, c.distance, "
+        "SELECT s.race_id, c.date, c.venue, c.race_num, "
         "       s.bet_type, s.combination_key, s.odds, COALESCE(s.odds_high::text,''), s.fetched_at "
         "FROM race_odds_snapshots s "
         "JOIN race_cards c ON c.race_id = s.race_id "
@@ -151,7 +165,7 @@ def _psql_dump_snapshots(db_url, date_from, date_to):
     return out.stdout
 
 
-_SNAP_COLS = ["race_id", "date", "venue", "race_num", "surface", "distance",
+_SNAP_COLS = ["race_id", "date", "venue", "race_num",
               "bet_type", "combination_key", "odds", "odds_high", "fetched_at"]
 
 
@@ -170,13 +184,25 @@ def load_snapshot_rows(tsv_text):
 
 
 def load_pred_tsv(path):
-    """--pred-tsv（race_id\\thorse_num\\tmodel_pct）を race_id -> {horse_num: pct} へ。"""
+    """--pred-tsv（race_id\\thorse_num\\tmodel_pct）を race_id -> {horse_num: pct} へ。
+
+    列数・数値の不正行は load_snapshot_rows と同様に warn スキップし、1 行の崩れでレポート全体を
+    落とさない（非対称な握り潰しを避ける）。
+    """
     preds = defaultdict(dict)
     for line in Path(path).read_text().splitlines():
         if not line.strip():
             continue
-        rid, num, pct = line.split("\t")
-        preds[rid][int(num)] = float(pct)
+        cells = line.split("\t")
+        if len(cells) != 3:
+            print(f"[warn] pred-tsv の想定外の列数 {len(cells)} をスキップ: {line[:80]}",
+                  file=sys.stderr)
+            continue
+        rid, num, pct = cells
+        try:
+            preds[rid][int(num)] = float(pct)
+        except ValueError:
+            print(f"[warn] pred-tsv の数値化できない行をスキップ: {line[:80]}", file=sys.stderr)
     return preds
 
 
@@ -191,11 +217,14 @@ def model_probs_via_analyze(race_id, alpha, analyze_bin, db_url):
     except (subprocess.CalledProcessError, FileNotFoundError) as e:
         print(f"[warn] analyze predict 失敗 {race_id}: {e}", file=sys.stderr)
         return {}
+    # 確率表は predict 出力の先頭側に固まって出る（馬番 馬名 勝率%…）。現状の analyze 出力では
+    # 後続の診断行（馬単EV・穴馬1着確率など）は本 regex にマッチしないことを実出力で確認済みだが、
+    # 将来出力が変わっても先に出た確率表行を診断行に上書きされないよう「先勝ち」で確定する。
     probs = {}
     for line in out.stdout.splitlines():
         m = PRED_LINE_RE.match(line)
         if m:
-            probs[int(m.group(1))] = float(m.group(2))
+            probs.setdefault(int(m.group(1)), float(m.group(2)))
     return probs
 
 
@@ -226,18 +255,23 @@ def print_report(results, budget):
         ev_flag = "✅" if r["ever_pos"] else "  "
         fn_flag = "✅+EV" if r["final_pos"] else " −EV"
         kon = "[混戦]" if r["konsen"] else "     "
+        # 最終 snapshot にオッズ欠落があると final_roi は過小評価＝−EV へ振れうるため ⚠ で警告。
+        miss = " ⚠欠落" if r.get("final_missing") else ""
         print(f"  {r['date']} {r['venue']:<4}{r['race_num']:>2}R {r['n_times']:>3}本 "
-              f"{ev_flag}{r['best_roi']:>5.0f}% {r['final_roi']:>5.0f}% {fn_flag} {kon}")
+              f"{ev_flag}{r['best_roi']:>5.0f}% {r['final_roi']:>5.0f}% {fn_flag} {kon}{miss}")
     n = len(results)
     if n == 0:
         print("\n対象レースなし（snapshot or 予想が揃わない）")
         return
     ever = sum(1 for r in results if r["ever_pos"])
     final = sum(1 for r in results if r["final_pos"])
-    print(f"\n=== 年間サマリ ===")
+    nmiss = sum(1 for r in results if r.get("final_missing"))
+    print("\n=== 年間サマリ ===")
     print(f"  対象レース   : {n}")
     print(f"  ever +EV     : {ever}  ({ever / n * 100:.1f}%)  ← いずれかの snapshot 時点で ROI≥100%")
     print(f"  final +EV    : {final}  ({final / n * 100:.1f}%)  ← 最終 snapshot で ROI≥100%")
+    if nmiss:
+        print(f"  ⚠ 最終欠落   : {nmiss}  最終 snapshot にオッズ欠落があり final ROI が過小評価のレース")
     by_date = defaultdict(lambda: [0, 0, 0])  # date -> [races, ever, final]
     for r in results:
         d = by_date[r["date"]]

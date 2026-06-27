@@ -12,9 +12,9 @@ def approx(a, b, eps=1e-9):
 
 
 def _row(rid, bt, key, odds, odds_high="", at="2026-06-27T00:00:00+00:00",
-         date="2026-06-27", venue="hakodate", rnum="1", surface="turf", dist="1200"):
-    return dict(race_id=rid, date=date, venue=venue, race_num=rnum, surface=surface,
-                distance=dist, bet_type=bt, combination_key=key, odds=str(odds),
+         date="2026-06-27", venue="hakodate", rnum="1"):
+    return dict(race_id=rid, date=date, venue=venue, race_num=rnum,
+                bet_type=bt, combination_key=key, odds=str(odds),
                 odds_high=str(odds_high), fetched_at=at)
 
 
@@ -55,7 +55,7 @@ def test_group_snapshots_multiple_times():
 
 
 def test_load_snapshot_rows_column_guard():
-    good = "\t".join(["R1", "2026-06-27", "hakodate", "1", "turf", "1200",
+    good = "\t".join(["R1", "2026-06-27", "hakodate", "1",
                       "win", "1", "3.5", "", "2026-06-27T00:00:00+00:00"])
     bad = "R1\twin\t3.5"  # 列数不足は捨てる
     rows = S.load_snapshot_rows(good + "\n" + bad + "\n")
@@ -110,6 +110,70 @@ def test_eval_race_final_pos():
 def test_eval_race_degenerate_returns_none():
     # 出走馬 < 3 は買い目が組めず None（集計対象外）。
     assert S.eval_race({1: 50.0, 2: 50.0}, _times_with({"t": 10.0}), 5000) is None
+
+
+def test_eval_race_final_missing_flag():
+    # 最終時点のオッズが欠落（配当0=未掲載）なら final_missing>0 が立つ（final ROI 過小評価の警告材料）。
+    probs = {1: 40.0, 2: 30.0, 3: 20.0, 4: 10.0}
+    times = _times_with({
+        "2026-06-27T00:00:00+00:00": 1000.0,  # 揃っている
+        "2026-06-27T01:00:00+00:00": 0.0,      # 最終が欠落
+    })
+    ev = S.eval_race(probs, times, budget=5000)
+    assert ev["final_missing"] > 0, ev
+    # 逆に最終が揃っていれば欠落 0。
+    times2 = _times_with({"2026-06-27T00:00:00+00:00": 1000.0})
+    assert S.eval_race(probs, times2, 5000)["final_missing"] == 0
+
+
+def test_load_pred_tsv_guard():
+    # 正常行は読み、列数不正・非数値行は warn スキップ（1 行の崩れで全体を落とさない）。
+    import os
+    import tempfile
+    with tempfile.NamedTemporaryFile("w", suffix=".tsv", delete=False) as f:
+        f.write("R1\t1\t40.0\nR1\t2\t30.0\nR1\tbad\n2列\tだけ\nR1\t3\tNaNだよ\n")
+        path = f.name
+    try:
+        preds = S.load_pred_tsv(path)
+    finally:
+        os.unlink(path)
+    assert preds["R1"] == {1: 40.0, 2: 30.0}, preds  # 不正 3 行はスキップ
+
+
+def _full_race_rows(rid, at="2026-06-27T00:00:00+00:00"):
+    """build_report が eval_race まで到達できる最小のフル券種 snapshot 行を作る。"""
+    return [
+        _row(rid, "win", "1", 2.0, at=at), _row(rid, "win", "2", 3.0, at=at),
+        _row(rid, "win", "3", 4.0, at=at),
+        _row(rid, "quinella", "1-2", 50.0, at=at), _row(rid, "quinella", "1-3", 60.0, at=at),
+        _row(rid, "quinella", "2-3", 70.0, at=at),
+        _row(rid, "trio", "1-2-3", 200.0, at=at),
+        _row(rid, "wide", "1-2", 8.0, odds_high=12.0, at=at),
+        _row(rid, "wide", "1-3", 9.0, odds_high=13.0, at=at),
+        _row(rid, "wide", "2-3", 10.0, odds_high=14.0, at=at),
+    ]
+
+
+def test_build_report_excludes_scratched_horses():
+    # 最終 snapshot の出走馬（win 集合）に無い馬番は probs から除外される。
+    races = S.group_snapshots(_full_race_rows("R1"))
+    # 9 は取消（win に無い）。除外後 probs={1,2,3} で評価成立。
+    results = S.build_report(races, {"R1": {1: 40.0, 2: 30.0, 3: 20.0, 9: 99.0}}, budget=5000)
+    assert len(results) == 1 and results[0]["race_id"] == "R1", results
+
+
+def test_build_report_drops_race_when_only_scratched():
+    # preds が出走馬を 1 頭も含まなければ probs 空 → eval_race None → 結果から落ちる。
+    races = S.group_snapshots(_full_race_rows("R1"))
+    results = S.build_report(races, {"R1": {7: 50.0, 8: 30.0, 9: 20.0}}, budget=5000)
+    assert results == [], results
+
+
+def test_group_snapshots_nonnumeric_odds_skipped():
+    # 数値化できない odds 行は当該行のみスキップ（race は作られ、book は空）。
+    races = S.group_snapshots([_row("R1", "win", "1", "N/A")])
+    books = races["R1"]["times"]["2026-06-27T00:00:00+00:00"]
+    assert books["win"] == {}, books["win"]
 
 
 def _run_all():
