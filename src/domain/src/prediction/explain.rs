@@ -47,13 +47,21 @@ pub struct FactorExplanation {
     pub label: String,
     pub rate: RateTriple,
     pub starts: u32,
-    pub verdict: Verdict,
+    /// 定性評価。`None` は「この factor に得意/苦手の判定を当てない」を型で表す。
+    /// `CourseGate`（場×枠の全馬横断ベース率）は当該馬の適性ではないため verdict を持たない。
+    pub verdict: Option<Verdict>,
 }
 
 impl FactorExplanation {
     /// 率・出走数から verdict を決めて factor 根拠を作る。
+    /// `CourseGate` は当該馬の適性ではなく枠の全馬横断率なので得意/苦手を付けない（`verdict = None`）。
+    /// `Jockey`/`Trainer` の verdict は当該騎手・調教師自身の複勝率を馬と同じ母集団 prior
+    /// （[`PRIOR_RATE`]）と比較する近似（field 平均≈同値で実害小、暫定ヒューリスティック）。
     pub fn new(category: ExplainCategory, label: String, rate: RateTriple, starts: u32) -> Self {
-        let verdict = verdict_from_show_rate(rate.show, starts);
+        let verdict = match category {
+            ExplainCategory::CourseGate => None,
+            _ => Some(verdict_from_show_rate(rate.show, starts)),
+        };
         Self {
             category,
             label,
@@ -95,7 +103,7 @@ pub struct HorseExplanation {
 /// 複勝率（show rate）と出走数から定性評価を決める。確率推定（[`super::scoring`]）と同じ
 /// ベイズ縮約（m=[`RECOMMENDED_SHRINKAGE_M`]）を prior へ掛けてから [`PRIOR_RATE`] と比較する。
 /// 少データ馬は prior へ強く寄るため Neutral 寄りになり、過信した「得意/苦手」断定を防ぐ。
-pub(crate) fn verdict_from_show_rate(show_rate: f64, starts: u32) -> Verdict {
+fn verdict_from_show_rate(show_rate: f64, starts: u32) -> Verdict {
     let shrunk = shrink_rate(show_rate, starts, PRIOR_RATE.show, RECOMMENDED_SHRINKAGE_M);
     if shrunk >= PRIOR_RATE.show + VERDICT_BAND {
         Verdict::Strong
@@ -161,8 +169,20 @@ mod tests {
     fn factor_explanation_carries_verdict() {
         let fe =
             FactorExplanation::new(ExplainCategory::Surface, "芝".to_string(), triple(0.5), 30);
-        assert_eq!(fe.verdict, Verdict::Strong);
+        assert_eq!(fe.verdict, Some(Verdict::Strong));
         assert_eq!(fe.label, "芝");
         assert_eq!(fe.starts, 30);
+    }
+
+    #[test]
+    fn course_gate_factor_has_no_verdict() {
+        // 枠は場×枠の全馬横断率で当該馬の適性ではないため verdict を持たない（#274 レビュー）。
+        let fe = FactorExplanation::new(
+            ExplainCategory::CourseGate,
+            "Inner (1-3)".to_string(),
+            triple(0.5),
+            600,
+        );
+        assert_eq!(fe.verdict, None);
     }
 }

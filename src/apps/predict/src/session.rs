@@ -155,52 +155,43 @@ async fn run_race(
     // 保存成功後に直前入力を更新する（保存失敗時は `?` で中断し、更新しない）。
     *last_input = track_condition;
 
-    // 出馬表未登録（NotFound）はそのレースのみスキップ。
-    // DB 障害等（Internal）はセッション継続不能なため伝播して中断する。
     // --explain 時は根拠付き API を使う（確率値は predict_race と同一経路で完全一致, #274）。
-    let (probs, explanations) = if explain {
-        match app
-            .interactor
+    // 両経路を Result<(probs, 根拠 option)> に揃え、エラー処理（NotFound→スキップ / その他→伝播）を一本化する。
+    let predicted = if explain {
+        app.interactor
             .predict_race_explained(
                 &race.race_id,
                 RECOMMENDED_MARKET_BLEND_ALPHA,
                 track_condition,
             )
             .await
-        {
-            Ok(items) => {
-                let (probs, expls): (Vec<_>, Vec<_>) = items.into_iter().unzip();
-                (probs, Some(expls))
-            }
-            Err(paddock_use_case::Error::NotFound(msg)) => {
-                println!("出馬表が見つかりません（{msg}）。スキップします。");
-                return Ok(());
-            }
-            Err(e) => return Err(e.into()),
-        }
+            .map(|(probs, expls)| (probs, Some(expls)))
     } else {
-        match app
-            .interactor
+        app.interactor
             .predict_race(
                 &race.race_id,
                 RECOMMENDED_MARKET_BLEND_ALPHA,
                 track_condition,
             )
             .await
-        {
-            Ok(p) => (p, None),
-            Err(paddock_use_case::Error::NotFound(msg)) => {
-                println!("出馬表が見つかりません（{msg}）。スキップします。");
-                return Ok(());
-            }
-            Err(e) => return Err(e.into()),
+            .map(|probs| (probs, None))
+    };
+    // 出馬表未登録（NotFound）はそのレースのみスキップ。DB 障害等は継続不能なため伝播して中断する。
+    let (probs, explanations) = match predicted {
+        Ok(v) => v,
+        Err(paddock_use_case::Error::NotFound(msg)) => {
+            println!("出馬表が見つかりません（{msg}）。スキップします。");
+            return Ok(());
         }
+        Err(e) => return Err(e.into()),
     };
 
     println!();
     print_probs(&probs);
     if let Some(explanations) = &explanations {
-        print_explanations(&probs, explanations);
+        for line in format_explanations(&probs, explanations) {
+            println!("{line}");
+        }
     }
 
     // オッズ未取得（None）はスキップのみ受付（select_bets は呼ばない）。
@@ -518,9 +509,13 @@ fn print_probs(probs: &[HorseProbability]) {
     }
 }
 
-/// win_prob 上位の馬について予想根拠（条件別成績・前走フォーム・前走・斤量）を印付きで表示する（#274）。
-/// 確率テーブルは盤面順なので、ここで win_prob 降順に並べ替えて上位 `MARKS` 頭に印を振る。
-fn print_explanations(probs: &[HorseProbability], explanations: &[HorseExplanation]) {
+/// win_prob 上位の馬について予想根拠（条件別成績・近走フォーム・前走・斤量）を印付きで整形し、
+/// 表示行を順に返す（#274）。確率テーブルは盤面順なので win_prob 降順に並べ替えて上位 `MARKS` 頭に
+/// 印を振る。`println!` から分離して純粋関数にし、ランク付け・印・フォールバックをテスト可能にする。
+fn format_explanations(
+    probs: &[HorseProbability],
+    explanations: &[HorseExplanation],
+) -> Vec<String> {
     const MARKS: [&str; 5] = ["◎", "○", "▲", "△", "☆"];
     let mut ranked: Vec<&HorseProbability> = probs.iter().collect();
     ranked.sort_by(|a, b| {
@@ -533,72 +528,86 @@ fn print_explanations(probs: &[HorseProbability], explanations: &[HorseExplanati
     let by_num: HashMap<HorseNum, &HorseExplanation> =
         explanations.iter().map(|e| (e.horse_num, e)).collect();
 
-    let shown = MARKS.len().min(ranked.len());
-    println!();
-    println!("【予想根拠（上位{shown}頭）】");
-    for (rank, p) in ranked.iter().take(MARKS.len()).enumerate() {
+    let top: Vec<&&HorseProbability> = ranked.iter().take(MARKS.len()).collect();
+    let mut lines = vec![format!("【予想根拠（上位{}頭）】", top.len())];
+    for (rank, p) in top.iter().enumerate() {
         let mark = MARKS[rank];
         let Some(ex) = by_num.get(&p.horse_num) else {
             continue;
         };
-        println!(
+        lines.push(format!(
             "{mark}{} {}（勝率{:.1}%）",
             p.horse_num.value(),
             p.horse_name.value(),
             p.win_prob * 100.0,
-        );
+        ));
+        // この馬の根拠本文（factor / 近走フォーム / 前走 / 斤量）。1 行も無ければデータ不足とする。
+        let mut body: Vec<String> = Vec::new();
         for f in &ex.factors {
-            println!("  {}", factor_phrase(f));
+            body.push(factor_phrase(f));
         }
         if let Some(form) = ex.recent_form {
-            println!("  {}", recent_form_phrase(form));
+            body.push(recent_form_phrase(form));
         }
         if let Some(prev) = &ex.prev_run {
-            println!("  {}", prev_run_phrase(prev));
+            body.push(prev_run_phrase(prev));
         }
         if let (Some(w), Some(mean)) = (ex.weight_carried, ex.field_mean_weight) {
-            println!("  斤量 {w:.1}kg（平均比 {:+.1}kg）", w - mean);
+            body.push(format!("斤量 {w:.1}kg（平均比 {:+.1}kg）", w - mean));
         }
-        if ex.factors.is_empty() && ex.prev_run.is_none() {
-            println!("  （実績データ不足）");
+        if body.is_empty() {
+            body.push("（実績データ不足）".to_string());
         }
+        lines.extend(body.into_iter().map(|b| format!("  {b}")));
     }
+    lines
 }
 
-/// 1 factor 分の根拠を 1 行の日本語にする。カテゴリで話題語、verdict で「得意/標準/苦手」を付ける。
-/// ただし CourseGate は当該馬ではなく場×枠の全馬横断ベース率なので、馬の適性を示す「得意/苦手」は
-/// 誤読を招く。verdict を付けず率だけ提示する（枠傾向の参考情報）。
+/// 1 factor 分の根拠を 1 行の日本語にする。カテゴリで話題語、`verdict` があれば「得意/標準/苦手」を付ける。
+/// `verdict == None`（CourseGate＝場×枠の全馬横断率）は率だけ提示する（馬の適性ではないため誤読防止）。
 fn factor_phrase(f: &FactorExplanation) -> String {
     let topic = match f.category {
         ExplainCategory::Surface | ExplainCategory::Distance => f.label.clone(),
         ExplainCategory::TrackCondition => format!("{}馬場", f.label),
-        ExplainCategory::CourseGate => format!("枠（{}）", f.label),
+        ExplainCategory::CourseGate => format!("枠（{}）", gate_label_jp(&f.label)),
         ExplainCategory::Jockey => format!("騎手 {}", f.label),
         ExplainCategory::Trainer => format!("厩舎 {}", f.label),
     };
-    // CourseGate は枠全体の率で馬の適性ではないため verdict を出さない（誤読防止, #274 レビュー）。
-    if f.category == ExplainCategory::CourseGate {
-        return format!(
+    match f.verdict {
+        Some(v) => {
+            let word = match v {
+                Verdict::Strong => "得意",
+                Verdict::Neutral => "標準",
+                Verdict::Weak => "苦手",
+            };
+            format!(
+                "{topic} {word}：複勝率 {:.0}%（{}走）",
+                f.rate.show * 100.0,
+                f.starts,
+            )
+        }
+        None => format!(
             "{topic}：複勝率 {:.0}%（{}走）",
             f.rate.show * 100.0,
             f.starts
-        );
+        ),
     }
-    let verdict = match f.verdict {
-        Verdict::Strong => "得意",
-        Verdict::Neutral => "標準",
-        Verdict::Weak => "苦手",
-    };
-    format!(
-        "{topic} {verdict}：複勝率 {:.0}%（{}走）",
-        f.rate.show * 100.0,
-        f.starts,
-    )
 }
 
-/// 前走フォームスコア [0,1]（0.5=中立）を「好調/標準/不調」の 1 行にする（#274）。
-/// 馬体重変化・人気乖離・間隔・着差・タイムを合成した近走の勢いの要約で、前走の着順などの
-/// 具体（[`prev_run_phrase`]）とは別軸の signal。
+/// 枠グループラベル（domain の `gate_group_label` 由来の英語）を日本語表記に写像する（#274 レビュー）。
+/// domain のラベルはコース統計のキーで英語固定のため、表示は presentation 層で日本語化する。
+fn gate_label_jp(label: &str) -> &str {
+    match label {
+        "Inner (1-3)" => "内 1-3",
+        "Middle (4-6)" => "中 4-6",
+        "Outer (7-8)" => "外 7-8",
+        other => other, // 想定外ラベルはそのまま（将来 domain 側が変わっても壊さない）
+    }
+}
+
+/// 近走フォームスコア [0,1]（0.5=中立）を「好調/標準/不調」の 1 行にする（#274）。
+/// 馬体重変化・人気乖離・間隔・着差・タイムを合成した近走の勢いの要約（`config.trend_n` 走、本番は
+/// 前走のみ）で、前走の着順などの具体（[`prev_run_phrase`]）とは別軸の signal。
 fn recent_form_phrase(form: f64) -> String {
     let label = if form >= 0.6 {
         "好調"
@@ -607,7 +616,7 @@ fn recent_form_phrase(form: f64) -> String {
     } else {
         "標準"
     };
-    format!("前走フォーム：{label}（{form:.2}）")
+    format!("近走フォーム：{label}（{form:.2}）")
 }
 
 /// 前走サマリを 1 行の日本語にする。欠落フィールドは黙って省く。
@@ -795,13 +804,14 @@ fn read_u64<R: BufRead>(
 #[cfg(test)]
 mod tests {
     use super::{
-        factor_phrase, make_bet_record, prev_run_phrase, read_choice, read_edited_amounts,
-        read_track_condition, read_u64, recent_form_phrase, resolve_track_condition_default,
+        factor_phrase, format_explanations, make_bet_record, prev_run_phrase, read_choice,
+        read_edited_amounts, read_track_condition, read_u64, recent_form_phrase,
+        resolve_track_condition_default,
     };
     use paddock_domain::horse_result::HorseNum;
     use paddock_domain::{
-        BetCombination, ExplainCategory, FactorExplanation, PortfolioBet, PrevRunSummary, RaceId,
-        RateTriple, Surface, TrackCondition, Verdict,
+        BetCombination, ExplainCategory, FactorExplanation, HorseExplanation, HorseProbability,
+        PortfolioBet, PrevRunSummary, RaceId, RateTriple, Surface, TrackCondition, Verdict,
     };
     use std::io::Cursor;
 
@@ -974,7 +984,7 @@ mod tests {
         label: &str,
         show: f64,
         starts: u32,
-        verdict: Verdict,
+        verdict: Option<Verdict>,
     ) -> FactorExplanation {
         FactorExplanation {
             category,
@@ -991,30 +1001,106 @@ mod tests {
 
     #[test]
     fn factor_phrase_renders_verdict_for_horse_factors() {
-        let f = factor(ExplainCategory::Surface, "芝", 0.5, 20, Verdict::Strong);
+        let f = factor(
+            ExplainCategory::Surface,
+            "芝",
+            0.5,
+            20,
+            Some(Verdict::Strong),
+        );
         assert_eq!(factor_phrase(&f), "芝 得意：複勝率 50%（20走）");
-        let f = factor(ExplainCategory::TrackCondition, "重", 0.0, 5, Verdict::Weak);
+        let f = factor(
+            ExplainCategory::TrackCondition,
+            "重",
+            0.0,
+            5,
+            Some(Verdict::Weak),
+        );
         assert_eq!(factor_phrase(&f), "重馬場 苦手：複勝率 0%（5走）");
     }
 
     #[test]
-    fn factor_phrase_omits_verdict_for_course_gate() {
-        // 枠は全馬横断のベース率なので得意/苦手を出さない（#274 レビュー）。
-        let f = factor(
-            ExplainCategory::CourseGate,
-            "Outer (7-8)",
-            0.23,
-            622,
-            Verdict::Neutral,
-        );
-        assert_eq!(factor_phrase(&f), "枠（Outer (7-8)）：複勝率 23%（622走）");
+    fn factor_phrase_omits_verdict_and_jp_label_for_course_gate() {
+        // 枠は全馬横断のベース率なので得意/苦手を出さず（verdict None）、ラベルは日本語化する（#274 レビュー）。
+        let f = factor(ExplainCategory::CourseGate, "Outer (7-8)", 0.23, 622, None);
+        assert_eq!(factor_phrase(&f), "枠（外 7-8）：複勝率 23%（622走）");
     }
 
     #[test]
     fn recent_form_phrase_buckets_by_score() {
-        assert_eq!(recent_form_phrase(0.72), "前走フォーム：好調（0.72）");
-        assert_eq!(recent_form_phrase(0.50), "前走フォーム：標準（0.50）");
-        assert_eq!(recent_form_phrase(0.30), "前走フォーム：不調（0.30）");
+        assert_eq!(recent_form_phrase(0.72), "近走フォーム：好調（0.72）");
+        assert_eq!(recent_form_phrase(0.50), "近走フォーム：標準（0.50）");
+        assert_eq!(recent_form_phrase(0.30), "近走フォーム：不調（0.30）");
+    }
+
+    fn prob(num: u32, name: &str, win: f64) -> HorseProbability {
+        HorseProbability {
+            horse_num: horse(num),
+            horse_name: paddock_domain::horse_result::HorseName::try_from(name).unwrap(),
+            win_prob: win,
+            place_prob: win,
+            show_prob: win,
+        }
+    }
+
+    fn explanation(num: u32, name: &str, factors: Vec<FactorExplanation>) -> HorseExplanation {
+        HorseExplanation {
+            horse_num: horse(num),
+            horse_name: paddock_domain::horse_result::HorseName::try_from(name).unwrap(),
+            factors,
+            recent_form: None,
+            prev_run: None,
+            weight_carried: None,
+            field_mean_weight: None,
+        }
+    }
+
+    #[test]
+    fn format_explanations_ranks_marks_and_matches_by_horse_num() {
+        // probs は盤面順（馬番昇順）で勝率は逆順。format_explanations は勝率降順に並べ替えて印を振る。
+        let probs = vec![
+            prob(1, "ウマ1", 0.10),
+            prob(2, "ウマ2", 0.50),
+            prob(3, "ウマ3", 0.30),
+        ];
+        // explanations の順序は probs と別（馬番で引き当てられることの確認）。
+        let expls = vec![
+            explanation(
+                3,
+                "ウマ3",
+                vec![factor(
+                    ExplainCategory::Surface,
+                    "芝",
+                    0.5,
+                    20,
+                    Some(Verdict::Strong),
+                )],
+            ),
+            explanation(2, "ウマ2", vec![]), // factor 無し → データ不足
+            explanation(1, "ウマ1", vec![]),
+        ];
+        let lines = format_explanations(&probs, &expls);
+        assert_eq!(lines[0], "【予想根拠（上位3頭）】");
+        // 勝率降順: ◎ウマ2(0.50) → ○ウマ3(0.30) → ▲ウマ1(0.10)
+        assert_eq!(lines[1], "◎2 ウマ2（勝率50.0%）");
+        assert_eq!(lines[2], "  （実績データ不足）");
+        assert_eq!(lines[3], "○3 ウマ3（勝率30.0%）");
+        assert_eq!(lines[4], "  芝 得意：複勝率 50%（20走）");
+        assert_eq!(lines[5], "▲1 ウマ1（勝率10.0%）");
+        assert_eq!(lines[6], "  （実績データ不足）");
+    }
+
+    #[test]
+    fn format_explanations_weight_only_is_not_data_insufficient() {
+        // factor・前走が無くても斤量があれば「データ不足」にしない（#274 レビュー C10）。
+        let probs = vec![prob(1, "ウマ1", 0.2)];
+        let mut ex = explanation(1, "ウマ1", vec![]);
+        ex.weight_carried = Some(57.0);
+        ex.field_mean_weight = Some(55.0);
+        let lines = format_explanations(&probs, &[ex]);
+        assert_eq!(lines[1], "◎1 ウマ1（勝率20.0%）");
+        assert_eq!(lines[2], "  斤量 57.0kg（平均比 +2.0kg）");
+        assert!(!lines.iter().any(|l| l.contains("実績データ不足")));
     }
 
     #[test]

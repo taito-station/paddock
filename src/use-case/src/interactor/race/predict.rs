@@ -31,15 +31,18 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: 
         track_condition: Option<TrackCondition>,
     ) -> Result<Vec<HorseProbability>> {
         // with_explanation=false: 通常経路では根拠を組まず無駄な String 割当てを避ける（#274 レビュー）。
+        // config は本番設定を 1 度だけ生成し factor 収集と推定で共有する（単一情報源, #274 レビュー）。
+        let config = EstimationConfig::production();
         let (entry_factors, _) = self
-            .collect_race_factors(race_id, track_condition, false)
+            .collect_race_factors(race_id, track_condition, false, &config)
             .await?;
-        self.estimate_and_blend(&entry_factors, race_id, blend_alpha)
+        self.estimate_and_blend(&entry_factors, race_id, blend_alpha, &config)
             .await
     }
 
     /// `predict_race` に加え、各馬の予想根拠（条件別成績・前走サマリ, #274）も返す。
-    /// 確率と根拠は同じ出走馬順で揃い、要素 i 同士が同一馬を指す（`debug_assert` で馬番一致を検査）。
+    /// 確率（出走馬順）と根拠（同じ出走馬順）を並行 Vec で返す。要素 i 同士が同一馬を指す
+    /// （`collect_race_factors` と `estimate_*` が共に `card.entries` 順を保つ。`debug_assert` で検査）。
     /// 市場ブレンド・冪変換は `predict_race` と同一経路なので確率値は完全一致する（根拠は probs に
     /// 依らず factor の生レートから作るため、ブレンド有無で根拠は変わらない）。
     pub async fn predict_race_explained(
@@ -47,28 +50,27 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: 
         race_id: &RaceId,
         blend_alpha: Option<f64>,
         track_condition: Option<TrackCondition>,
-    ) -> Result<Vec<(HorseProbability, HorseExplanation)>> {
+    ) -> Result<(Vec<HorseProbability>, Vec<HorseExplanation>)> {
+        let config = EstimationConfig::production();
         let (entry_factors, explanations) = self
-            .collect_race_factors(race_id, track_condition, true)
+            .collect_race_factors(race_id, track_condition, true, &config)
             .await?;
         let probs = self
-            .estimate_and_blend(&entry_factors, race_id, blend_alpha)
+            .estimate_and_blend(&entry_factors, race_id, blend_alpha, &config)
             .await?;
         debug_assert_eq!(
             probs.len(),
             explanations.len(),
             "probs と explanations の頭数が一致しない"
         );
-        Ok(probs
-            .into_iter()
-            .zip(explanations)
-            .inspect(|(p, e)| {
-                debug_assert_eq!(
-                    p.horse_num, e.horse_num,
-                    "probs/explanations の馬番がズレている"
-                );
-            })
-            .collect())
+        debug_assert!(
+            probs
+                .iter()
+                .zip(&explanations)
+                .all(|(p, e)| p.horse_num == e.horse_num),
+            "probs/explanations の馬番がズレている"
+        );
+        Ok((probs, explanations))
     }
 
     /// 出馬表の取得と各馬の factor / 予想根拠の構築までを共通化する内部ヘルパ（#274）。
@@ -76,11 +78,13 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: 
     /// 避ける。返す `entry_factors` と `explanations` は同じ出走馬順で揃う。
     /// `with_explanation=false` のとき `explanations` は空 Vec を返す（通常経路で根拠を組まず
     /// 無駄な String 割当てを避ける。`predict_race` は確率しか使わないため）。
+    /// `config` は呼び出し側が生成して渡す（推定と同じ設定を共有するため, #274 レビュー）。
     async fn collect_race_factors(
         &self,
         race_id: &RaceId,
         track_condition: Option<TrackCondition>,
         with_explanation: bool,
+        config: &EstimationConfig,
     ) -> Result<(Vec<(HorseEntry, HorseFactors)>, Vec<HorseExplanation>)> {
         let card = self
             .repository
@@ -103,9 +107,7 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: 
             track_condition,
             mean_weight,
         };
-        // 本番 predict の確率推定設定（#75: ベイズ縮約 m=10 を採用。recency は backtest 評価で
-        // 改善が出ず無効のまま＝production() は recency: None。下の horse_recency も取得しない）。
-        let config = paddock_domain::EstimationConfig::production();
+        // 確率推定設定（#75: ベイズ縮約 m=10。recency は production() で None）は呼び出し側から共有。
         // 前走タイムの相対速度シグナル用の標準タイム表（#76）。全馬共通なのでループ外で 1 回だけ
         // 取得する。cutoff=card.date で出馬表日以降をリークさせない。
         let standard_times = self.repository.standard_times(card.date).await?;
@@ -178,7 +180,7 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: 
                 recent_form,
                 None, // recency: production() では無効
                 card.date,
-                &config,
+                config,
                 jockey_recent_form,
             );
             // 予想根拠（#274）。確率推定と同じ factor レート・前走から作る。runs は date 降順なので
@@ -203,20 +205,20 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: 
     }
 
     /// 構築済みの `entry_factors` から確率を推定し、市場オッズブレンド・冪変換まで適用する（#72/#246）。
-    /// `predict_race` と `predict_race_explained` が共有する。本番経路の縮約・γ は `production()`。
+    /// `predict_race` と `predict_race_explained` が共有する。`config` は呼び出し側が生成し
+    /// `collect_race_factors` と同じ設定を渡す（単一情報源, #274 レビュー）。
     async fn estimate_and_blend(
         &self,
         entry_factors: &[(HorseEntry, HorseFactors)],
         race_id: &RaceId,
         blend_alpha: Option<f64>,
+        config: &EstimationConfig,
     ) -> Result<Vec<HorseProbability>> {
-        let config = EstimationConfig::production();
-
         // estimate_probabilities が win→1.0 / place→2.0 / show→3.0 正規化 + 累積 max 単調化を行い、
         // win_prob ≤ place_prob ≤ show_prob を保証する（ADR 0007）。本番経路は #75 で採用した
         // ベイズ縮約（m=10）を有効にし、少データ馬の過信（win_prob=0 を含む）を緩和する。
         let probs =
-            paddock_domain::prediction::estimate_probabilities_with_config(entry_factors, &config);
+            paddock_domain::prediction::estimate_probabilities_with_config(entry_factors, config);
 
         // 市場オッズ（単勝）ブレンド（#72）。α<1.0 のときのみ最新オッズスナップショットを取得する
         // （α>=1.0・非有限はブレンド無効なので DB クエリを省く）。
@@ -693,12 +695,14 @@ mod tests {
         assert_eq!(ex.factors.len(), 3);
         assert_eq!(ex.factors[0].category, ExplainCategory::Surface);
         assert_eq!(ex.factors[0].label, "芝");
-        assert_eq!(ex.factors[0].verdict, Verdict::Strong);
+        assert_eq!(ex.factors[0].verdict, Some(Verdict::Strong));
         assert_eq!(ex.factors[1].category, ExplainCategory::Distance);
         assert_eq!(ex.factors[1].label, "1500〜1800m");
-        assert_eq!(ex.factors[1].verdict, Verdict::Weak);
+        assert_eq!(ex.factors[1].verdict, Some(Verdict::Weak));
         assert_eq!(ex.factors[2].category, ExplainCategory::CourseGate);
         assert_eq!(ex.factors[2].label, "Inner (1-3)");
+        // 枠は全馬横断率なので verdict なし。
+        assert_eq!(ex.factors[2].verdict, None);
 
         assert_eq!(ex.recent_form, Some(0.7));
         let prev_summary = ex.prev_run.expect("前走サマリがあるはず");
