@@ -3,8 +3,8 @@ use std::io::{self, BufRead, Write};
 
 use chrono::{NaiveDate, Utc};
 use paddock_domain::{
-    BetCombination, HorseProbability, PortfolioBet, PortfolioConfig, Race, RaceId, Surface,
-    TrackCondition, build_portfolio,
+    BetCombination, HorseNum, HorseProbability, PairEvDiagnostic, PortfolioBet, PortfolioConfig,
+    Race, RaceId, Surface, TrackCondition, build_portfolio, pair_ev_diagnostics,
 };
 use paddock_use_case::{PredictBetRecord, PredictSessionRecord};
 
@@ -239,6 +239,11 @@ async fn run_race(
             note,
         );
     }
+
+    // 馬連 vs 馬単(両方向) EV 診断（#246-C）。「穴は1着にならない」読みのとき本命→穴の馬単が
+    // 同ペアの馬連より EV 優位になりうる。買い目選択の判断材料として並べて表示する。
+    let diag = pair_ev_diagnostics(&probs, &odds, PortfolioConfig::default().partners);
+    print_pair_ev_diagnostics(diag.axis, &probs, &diag.rows);
 
     println!();
     let bet_amounts: Vec<u64> = match read_choice(&mut io::stdin().lock())? {
@@ -484,6 +489,52 @@ fn print_probs(probs: &[HorseProbability]) {
             p.win_prob * 100.0,
             p.place_prob * 100.0,
             p.show_prob * 100.0,
+        );
+    }
+}
+
+/// 軸-相手ペアの「馬連 vs 馬単(両方向)」EV 診断表（#246-C）。EV は的中確率 × オッズ、
+/// オッズ未取得のセルは `—`。軸は `pair_ev_diagnostics` が決めた canonical な値を受け取り再計算しない。
+fn print_pair_ev_diagnostics(
+    axis: Option<HorseNum>,
+    probs: &[HorseProbability],
+    rows: &[PairEvDiagnostic],
+) {
+    if rows.is_empty() {
+        return;
+    }
+    let name_of = |num| {
+        probs
+            .iter()
+            .find(|p| p.horse_num == num)
+            .map(|p| p.horse_name.value().to_string())
+            .unwrap_or_default()
+    };
+    let fmt = |ev: f64, odds: Option<f64>| match odds {
+        Some(o) => format!("{ev:.2}({o:.1})"),
+        None => "—".to_string(),
+    };
+    println!();
+    match axis {
+        Some(a) => println!(
+            "【馬連 vs 馬単 EV 診断（軸 {} {}）】",
+            a.value(),
+            name_of(a)
+        ),
+        None => return,
+    }
+    println!(
+        "  {:<16} {:>14} {:>14} {:>14}",
+        "相手", "馬連EV(オッズ)", "馬単 軸→相手", "馬単 相手→軸"
+    );
+    for r in rows {
+        let label = format!("{} {}", r.partner.value(), name_of(r.partner));
+        println!(
+            "  {:<16} {:>14} {:>14} {:>14}",
+            label,
+            fmt(r.quinella_ev, r.quinella_odds),
+            fmt(r.exacta_fwd_ev, r.exacta_fwd_odds),
+            fmt(r.exacta_rev_ev, r.exacta_rev_odds),
         );
     }
 }

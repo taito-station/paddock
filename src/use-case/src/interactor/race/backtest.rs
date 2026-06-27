@@ -309,6 +309,13 @@ impl<R: StatsRepository + OddsRepository, P: PdfParser, F: PdfFetcher> Interacto
                     }
                     None => probs,
                 };
+                // 穴馬の 1 着過大評価を縮約する win_prob 冪変換（#246）。config.win_power が None なら
+                // no-op。ブレンド後に適用するため top_pick / select_bets まで校正後 win が伝わり、
+                // --win-power の sweep 効果が Brier/回収・券種別校正に反映される。
+                let probs = match config.win_power {
+                    Some(gamma) => paddock_domain::prediction::apply_win_power(&probs, gamma),
+                    None => probs,
+                };
                 // entry_factors が非空なら estimate_probabilities は非空を返すため、理論上到達しない
                 // 安全弁（空なら集計に寄与しないのでスキップ）。
                 if probs.is_empty() {

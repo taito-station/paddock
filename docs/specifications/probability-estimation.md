@@ -219,6 +219,25 @@ place/show_i   = 累積 max で win ≤ place ≤ show を再是正（v1 は win
 
 CLI: `analyze backtest --blend-alpha <α>` / `analyze predict --blend-alpha <α>`（未指定でモデルのみ）。
 
+### ステップ 5: win_prob 冪変換（#246, ADR 0042, 任意）
+
+ブレンド後の最終 win に冪変換 `win'_i ∝ win_i^γ` を掛け、合計 1.0 へ再正規化する
+（`apply_win_power`）。Harville は IIA 的性質から人気薄馬の「1着」確率を過大評価しがちで、
+人気帯別校正でも穴帯の「平均予測 > 実測勝率」（過大）・人気帯の過小が観測される。`γ>1` は
+人気馬の win を相対強調し穴の 1 着を縮約してこの偏りを是正する。
+
+```text
+win'_i      = win_i^γ
+win_prob_i  = win'_i / Σ win'_j           // 合計 1.0 へ再正規化
+place/show_i = 累積 max で win ≤ place ≤ show を再是正
+```
+
+- `γ` は `EstimationConfig.win_power: Option<f64>`。`None` / 非有限 / `≤0` / ちょうど `1.0`（厳密一致近傍）は no-op。
+- 連系・着順 EV（Harville/simulate）は win_prob から導くため、ここでの校正が馬連・馬単・三連複の
+  EV までそのまま伝播する（#246(B) の馬単選択と連動）。
+- 採用値は backtest 検証で決める（ADR 0042）。CLI: `analyze backtest --win-power <γ>`
+  （未指定で no-op）。`analyze predict` は `production()` 固定。
+
 ---
 
 ## 統計データ拡張: GroupStat への `shows` 追加

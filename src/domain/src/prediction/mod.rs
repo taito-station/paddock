@@ -22,9 +22,13 @@ mod weights;
 #[cfg(test)]
 mod tests;
 
-pub use config::{EstimationConfig, RECOMMENDED_SHRINKAGE_M, RecencyConfig, ShrinkageConfig};
+pub use config::{
+    EstimationConfig, RECOMMENDED_SHRINKAGE_M, RECOMMENDED_WIN_POWER, RecencyConfig,
+    ShrinkageConfig,
+};
 pub use estimate::{
-    blend_with_market_win, estimate_probabilities, estimate_probabilities_with_config,
+    apply_win_power, blend_with_market_win, estimate_probabilities,
+    estimate_probabilities_with_config,
 };
 pub use model::{
     DatedCounts, FactorStat, HorseFactors, HorseProbability, JockeyFormRun, RateTriple, RecentRun,

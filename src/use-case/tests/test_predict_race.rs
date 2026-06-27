@@ -372,6 +372,45 @@ async fn predict_race_win_sums_to_one_and_monotone() {
 }
 
 #[tokio::test]
+async fn predict_race_with_diagnostics_none_when_no_odds() {
+    // オッズ未取得（find_race_odds → None）のレースは診断 None（#246-C）。
+    let card = make_race_card("2026-1-tokyo-1-R1");
+    let app = interactor(Some(card)); // odds: None
+    let race_id = RaceId::try_from("2026-1-tokyo-1-R1").unwrap();
+    let (probs, diag) = app
+        .predict_race_with_diagnostics(&race_id, None, None, 5)
+        .await
+        .unwrap();
+    assert_eq!(probs.len(), 2);
+    assert!(diag.is_none(), "オッズ未取得なら診断は None");
+}
+
+#[tokio::test]
+async fn predict_race_with_diagnostics_returns_axis_and_rows_with_odds() {
+    // オッズありなら (軸, 各ペア行) を返す。軸は domain が決めた値で、表示側は再計算しない（#246-C）。
+    let race_id_str = "2026-1-tokyo-1-R1";
+    let card = make_race_card(race_id_str);
+    let mut odds = paddock_domain::RaceOdds::empty(RaceId::try_from(race_id_str).unwrap());
+    odds.quinella.insert(
+        paddock_domain::Pair::try_from((
+            HorseNum::try_from(1u32).unwrap(),
+            HorseNum::try_from(2u32).unwrap(),
+        ))
+        .unwrap(),
+        paddock_domain::OddsValue::try_from(5.0).unwrap(),
+    );
+    let app = interactor_with_odds(Some(card), odds);
+    let race_id = RaceId::try_from(race_id_str).unwrap();
+    let (_probs, diag) = app
+        .predict_race_with_diagnostics(&race_id, None, None, 5)
+        .await
+        .unwrap();
+    let diag = diag.expect("オッズありなら診断 Some");
+    assert!(diag.axis.is_some(), "軸が決まる");
+    assert_eq!(diag.rows.len(), 1, "2 頭立て → 相手 1 頭");
+}
+
+#[tokio::test]
 async fn predict_race_higher_stats_horse_gets_higher_win_prob() {
     // ウマA（枠番1=Inner, win_rate=0.2）と ウマB（枠番5=Middle, win_rate=0.1）で、
     // course_stats は inner_win=4 > middle_win=2 と設定。

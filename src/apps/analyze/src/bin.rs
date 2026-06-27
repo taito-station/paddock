@@ -4,9 +4,9 @@ mod setup;
 use chrono::{Months, NaiveDate, Utc};
 use clap::Parser;
 use paddock_domain::{
-    BacktestReport, EstimationConfig, ExoticSegment, FieldSizeSegment, HorseName, HorseProbability,
-    JockeyName, PopularitySegment, RaceId, RecencyConfig, ReliabilityBin, ShrinkageConfig, Surface,
-    SurfaceSegment, TrainerName, Venue,
+    BacktestReport, EstimationConfig, ExoticSegment, FieldSizeSegment, HorseName, HorseNum,
+    HorseProbability, JockeyName, PairEvDiagnostic, PopularitySegment, PortfolioConfig, RaceId,
+    RecencyConfig, ReliabilityBin, ShrinkageConfig, Surface, SurfaceSegment, TrainerName, Venue,
 };
 use paddock_use_case::TREND_N_MAX;
 use paddock_use_case::repository::{
@@ -95,11 +95,19 @@ async fn main() -> anyhow::Result<()> {
         } => {
             let blend_alpha = validate_blend_alpha(blend_alpha)?;
             let rid = RaceId::try_from(race_id.as_str())?;
-            let probs = app
+            let (probs, diagnostics) = app
                 .interactor
-                .predict_race(&rid, blend_alpha, track_condition)
+                .predict_race_with_diagnostics(
+                    &rid,
+                    blend_alpha,
+                    track_condition,
+                    PortfolioConfig::default().partners,
+                )
                 .await?;
             print_predict(&probs);
+            if let Some(diag) = diagnostics {
+                print_pair_ev_diagnostics(diag.axis, &probs, &diag.rows);
+            }
         }
         cli::Command::Backtest {
             from,
@@ -110,6 +118,7 @@ async fn main() -> anyhow::Result<()> {
             recent_form_weight,
             trend_n,
             jockey_form_weight,
+            win_power,
         } => {
             let blend_alpha = validate_blend_alpha(blend_alpha)?;
             let config = build_estimation_config(
@@ -118,6 +127,7 @@ async fn main() -> anyhow::Result<()> {
                 recent_form_weight,
                 trend_n,
                 jockey_form_weight,
+                win_power,
             )?;
             let from = parse_date(&from)?;
             let to = parse_date(&to)?;
@@ -181,6 +191,7 @@ fn build_estimation_config(
     recent_form_weight: Option<f64>,
     trend_n: u32,
     jockey_form_weight: Option<f64>,
+    win_power: Option<f64>,
 ) -> anyhow::Result<EstimationConfig> {
     let shrinkage = match shrinkage_m {
         Some(m) => {
@@ -210,6 +221,12 @@ fn build_estimation_config(
     {
         anyhow::bail!("--jockey-form-weight must be a finite non-negative number, got {w}");
     }
+    // win_power はγ。0/負/非有限は不正（γ<1 は逆方向 sweep として許可）。
+    if let Some(g) = win_power
+        && !(g.is_finite() && g > 0.0)
+    {
+        anyhow::bail!("--win-power must be a finite positive number, got {g}");
+    }
     if !(1..=TREND_N_MAX).contains(&trend_n) {
         anyhow::bail!("--trend-n must be between 1 and {TREND_N_MAX}, got {trend_n}");
     }
@@ -219,6 +236,7 @@ fn build_estimation_config(
         recent_form_weight,
         trend_n,
         jockey_recent_form_weight: jockey_form_weight,
+        win_power,
     })
 }
 
@@ -285,6 +303,57 @@ fn print_predict(probs: &[HorseProbability]) {
             p.place_prob * 100.0,
             p.show_prob * 100.0,
         );
+    }
+}
+
+/// 軸-相手ペアの「馬連 vs 馬単(両方向)」EV を並べる診断表（#246-C）。
+/// 着順不問の馬連と、本命→相手 / 相手→本命 の馬単 EV を比較して券種選択の判断材料にする。
+/// EV は的中確率 × オッズ。オッズ未取得のセルは `—`。軸は `pair_ev_diagnostics` が決めた
+/// canonical な値（use-case 経由）を受け取り、ここで再計算しない。
+fn print_pair_ev_diagnostics(
+    axis: Option<HorseNum>,
+    probs: &[HorseProbability],
+    rows: &[PairEvDiagnostic],
+) {
+    if rows.is_empty() {
+        return;
+    }
+    let name_of = |num| {
+        probs
+            .iter()
+            .find(|p| p.horse_num == num)
+            .map(|p| p.horse_name.value().to_string())
+            .unwrap_or_default()
+    };
+    match axis {
+        Some(a) => println!(
+            "\n# 馬連 vs 馬単 EV 診断（軸 {} {}）",
+            a.value(),
+            name_of(a)
+        ),
+        None => return,
+    }
+    println!(
+        "{:<18} {:>16} {:>16} {:>16}",
+        "相手", "馬連EV(オッズ)", "馬単 軸→相手", "馬単 相手→軸"
+    );
+    for r in rows {
+        let label = format!("{} {}", r.partner.value(), name_of(r.partner));
+        println!(
+            "{:<18} {:>16} {:>16} {:>16}",
+            label,
+            fmt_ev_odds(r.quinella_ev, r.quinella_odds),
+            fmt_ev_odds(r.exacta_fwd_ev, r.exacta_fwd_odds),
+            fmt_ev_odds(r.exacta_rev_ev, r.exacta_rev_odds),
+        );
+    }
+}
+
+/// EV とオッズを `EV(オッズ)` で整形。オッズ未取得は `—`。
+fn fmt_ev_odds(ev: f64, odds: Option<f64>) -> String {
+    match odds {
+        Some(o) => format!("{ev:.2}({o:.1})"),
+        None => "—".to_string(),
     }
 }
 

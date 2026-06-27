@@ -28,12 +28,15 @@ pub use horse_result::{
 pub use odds::{BetType, OddsValue, OrderedPair, OrderedTriple, Pair, PlaceOdds, RaceOdds, Triple};
 pub use pad_prediction::{Mark, PadPrediction, PredictionBet, PredictionHorse, PredictionResult};
 pub use payout::{RacePayouts, Settlement, settle_bet};
-pub use portfolio::{Portfolio, PortfolioBet, PortfolioConfig, build_portfolio};
+pub use portfolio::{
+    PairEvDiagnostic, PairEvDiagnostics, Portfolio, PortfolioBet, PortfolioConfig, build_portfolio,
+    pair_ev_diagnostics,
+};
 pub use prediction::{
     DatedCounts, EstimationConfig, FactorStat, HorseFactors, HorseProbability, JockeyFormRun,
     RateTriple, RecencyConfig, RecentRun, ShrinkageConfig, StandardTimes, apply_recency_weight,
-    blend_with_market_win, estimate_probabilities, estimate_probabilities_with_config,
-    jockey_recent_form_score, recent_form_score,
+    apply_win_power, blend_with_market_win, estimate_probabilities,
+    estimate_probabilities_with_config, jockey_recent_form_score, recent_form_score,
 };
 pub use race::{Race, RaceId, Surface, TrackCondition, Venue, Weather};
 pub use race_card::{HorseEntry, RaceCard};

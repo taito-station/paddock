@@ -144,3 +144,45 @@ pub fn blend_with_market_win(
         })
         .collect()
 }
+
+/// win_prob を冪変換 `win'_i ∝ win_i^gamma` して場内合計 1.0 へ再正規化する（#246 / ADR 0042）。
+///
+/// Harville は IIA 的性質から人気薄馬の「1着」確率を過大評価しがちで、これが穴を絡めた馬連 EV を
+/// 馬単より高く見せる一因になる。`gamma > 1.0` で人気馬の win を相対的に強調し穴の 1 着を縮約する
+/// ことでこの偏りを是正する（`gamma < 1.0` は逆方向。backtest の `--win-power` で sweep するため許可）。
+///
+/// `gamma` が非有限 / `<= 0.0` / ちょうど `1.0`（厳密一致近傍, `< f64::EPSILON`）、または入力が空・
+/// win 合計が 0 のときは no-op。production の γ は離散値（1.25 等）なのでこの厳密判定で十分。
+/// win を変えると単調性 `win ≤ place ≤ show` が崩れうるため、`blend_with_market_win` 末尾と同型の
+/// 累積 max で place/show を再是正する（place/show の場内合計 2.0/3.0 が崩れうる点も blend と同じ
+/// 既知の割り切り。連系・着順 EV は win_prob から導くため、ここでの win 校正がそのまま反映される）。
+pub fn apply_win_power(probs: &[HorseProbability], gamma: f64) -> Vec<HorseProbability> {
+    if !gamma.is_finite() || gamma <= 0.0 || (gamma - 1.0).abs() < f64::EPSILON || probs.is_empty()
+    {
+        return probs.to_vec();
+    }
+
+    let powered: Vec<f64> = probs.iter().map(|p| p.win_prob.powf(gamma)).collect();
+    let total: f64 = powered.iter().sum();
+    // total<=0 は全 win 0、!finite は win_prob 不変条件（[0,1]）が崩れた場合の防御（NaN 伝播回避）。
+    if total <= 0.0 || !total.is_finite() {
+        return probs.to_vec();
+    }
+
+    probs
+        .iter()
+        .zip(powered)
+        .map(|(p, w)| {
+            let win = (w / total).min(1.0);
+            let place = p.place_prob.max(win).min(1.0);
+            let show = p.show_prob.max(place).min(1.0);
+            HorseProbability {
+                horse_num: p.horse_num,
+                horse_name: p.horse_name.clone(),
+                win_prob: win,
+                place_prob: place,
+                show_prob: show,
+            }
+        })
+        .collect()
+}
