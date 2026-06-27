@@ -34,6 +34,12 @@
   --pred-dir     dir: bt_pred_<date>.txt（model 単勝勝率表、analyze predict --blend-alpha 0.2）
   --results-dir  dir: netkeiba result.html を res_<netkeiba>.html で保存したもの
   --exotic-odds  TSV: paddock_id, bet_type(quinella|trio), combination_key, odds
+  --winodds      TSV: paddock_id, umaban, popularity, odds（#263 ゲート診断の市場人気度。欠落可）
+
+#263 の baseline_pf ゲート精度診断/掃引:
+  --gate-grid        baseline_pf ゲート閾値（model ROI）の掃引。0=無ゲート対照（既定 0,1.0,1.1,1.2,1.3）
+  --odds-floor-grid  ◎単勝オッズ下限の掃引。0=条件なし（既定 0,2,3,5）
+  ※ #246 較正後の検証は #252 と同じ /tmp/bt252 入力（較正後再生成）を明示指定する。
 
 bt_exotic_odds.tsv の生成（DB から、71R 窓の馬連・三連複盤面）:
   psql "$DB" -tA -F$'\t' -c "
@@ -366,6 +372,9 @@ def gate_diagnostics(evaluated, winodds, gate=1.0):
     print(f"=== ゲート診断（model ROI ≥ {gate * 100:.0f}% 通過鞍の内訳）===")
     print(f"{'date':<10} {'場':<3}{'R':>3} {'◎':>3} {'◎model':>7} {'◎mktO':>6} {'◎人':>3} "
           f"{'modelROI':>8} {'実ROI':>7} {'的中':>4}")
+    # 鞍数は winodds の有無に依存しない独立カウンタで数える。◎オッズ/人気の平均は
+    # winodds がある鞍のみで集計する（欠落鞍を平均から除く）ため、件数とは別に持つ。
+    pass_n = fail_n = 0
     pass_odds, fail_odds = [], []
     pass_pop, fail_pop = [], []
     for date, venue, rnum, pid, probs, quin, trio, pay in evaluated:
@@ -376,29 +385,34 @@ def gate_diagnostics(evaluated, winodds, gate=1.0):
         pop, odds = fav_market(winodds, pid, A)
         passed = model_roi >= gate
         if passed:
+            pass_n += 1
             if odds is not None:
                 pass_odds.append(odds)
             if pop is not None:
                 pass_pop.append(pop)
         else:
+            fail_n += 1
             if odds is not None:
                 fail_odds.append(odds)
             if pop is not None:
                 fail_pop.append(pop)
         if not passed:
             continue
-        real_roi = ret / stake * 100 if stake else 0
+        real_roi = ret / stake * 100
+        odds_s = f"{odds:>6.1f}" if odds is not None else f"{'-':>6}"
+        pop_s = f"{pop:>3}" if pop is not None else f"{'-':>3}"
         print(f"{date:<10} {venue:<3}{rnum:>3} {A:>3} {probs[A]:>6.1f}% "
-              f"{(odds if odds is not None else float('nan')):>6.1f} "
-              f"{(pop if pop is not None else 0):>3} "
+              f"{odds_s} {pop_s} "
               f"{model_roi * 100:>7.1f}% {real_roi:>6.0f}% {'○' if ret > 0 else '×':>3}")
 
     def _mean(xs):
         return statistics.mean(xs) if xs else float("nan")
 
     print()
-    print(f"通過鞍 {len(pass_odds)}: ◎平均単勝 {_mean(pass_odds):.2f} 倍 / ◎平均人気 {_mean(pass_pop):.1f}")
-    print(f"非通過 {len(fail_odds)}: ◎平均単勝 {_mean(fail_odds):.2f} 倍 / ◎平均人気 {_mean(fail_pop):.1f}")
+    print(f"通過鞍 {pass_n}（うち◎オッズ有 {len(pass_odds)}）: "
+          f"◎平均単勝 {_mean(pass_odds):.2f} 倍 / ◎平均人気 {_mean(pass_pop):.1f}")
+    print(f"非通過 {fail_n}（うち◎オッズ有 {len(fail_odds)}）: "
+          f"◎平均単勝 {_mean(fail_odds):.2f} 倍 / ◎平均人気 {_mean(fail_pop):.1f}")
     print("（通過鞍の◎が低オッズ＝人気側に偏るほど、ゲートが人気馬偏重を選別している兆候）\n")
 
 
@@ -438,8 +452,8 @@ def main():
                     help="単勝オッズ TSV（#263 ゲート診断の市場人気度。欠落可）")
     ap.add_argument("--ev-grid", default="1.0,1.2,1.5")
     ap.add_argument("--cap-grid", default="inf,50,30", help="馬連オッズ上限の掃引（inf=無制限）")
-    ap.add_argument("--gate-grid", default="1.0,1.1,1.2,1.3,1.5",
-                    help="#263 baseline_pf ゲート閾値（model ROI）の掃引")
+    ap.add_argument("--gate-grid", default="0,1.0,1.1,1.2,1.3",
+                    help="#263 baseline_pf ゲート閾値（model ROI）の掃引。0=無ゲート対照")
     ap.add_argument("--odds-floor-grid", default="0,2,3,5",
                     help="#263 ◎単勝オッズ下限の掃引（0=条件なし）")
     args = ap.parse_args()
