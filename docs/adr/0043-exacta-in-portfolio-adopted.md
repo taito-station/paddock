@@ -75,7 +75,9 @@ cargo test -p paddock-domain portfolio
 EV フィルタが #246 較正後も逆予測（無フィルタ 66.4% → フィルタ 29.1%）と確定したのを受け、同一モデルの
 馬単 EV シグナルを `scripts/predict-check/umaren_backtest.py`（馬連特化基盤に exacta を対称追加）で
 **71R（窓 2026-05-30〜06-14・較正後バイナリ・α=0.2）** に展開して検証した。EV 判定は DB 盤面オッズ、
-清算は result.html 実配当で分離（循環回避）。
+清算は result.html 実配当で分離（循環回避）。対象 71R すべてに馬連・三連複・**馬単の盤面オッズが
+揃っている（exacta 盤面 71/71）**ため、馬単特化の張鞍数は盤面カバレッジでなく EV フィルタの効果を
+純粋に反映する。
 
 ### 結果（較正後モデル）
 
@@ -98,8 +100,9 @@ EV フィルタが #246 較正後も逆予測（無フィルタ 66.4% → フィ
   （top5: 67.6% < 78.7% / 全頭: 60.9% < 66.4%）。両方向を買うと外れ向きが必ず死に、着順固定配当でも
   倍化したカバレッジを賄えない。的中率は馬連と同値（同一の上位2着条件）なのに ROI だけ劣化する。
 - **馬単 EV フィルタは逆予測（#252 の馬連と同型・より顕著）**。apples-to-apples の無フィルタ 60.9% に対し、
-  EV≥θ フィルタはどの θ×cap でも下回り最良でも 33.3%（44鞍・的中 5%）、cap 系はほぼ的中 0。馬連特化が
-  小標本で見せた >100% アーティファクト（θ1.2 cap30 で 121%）すら馬単では一切出ない。
+  EV≥θ フィルタはどの θ×cap でも下回り最良でも 33.3%（θ1.0 cap30 flat・44鞍・的中 5%）。θ1.0 系の
+  的中は 4〜6% に留まり、**θ≥1.2 の cap 系は的中ほぼ 0**。馬連特化が小標本で見せた >100% アーティファクト
+  （θ1.2 cap30 で 121%）すら馬単では一切出ない。
 
 → 本 ADR が依拠した「穴は1着になりにくい → 本命→穴の馬単に配当プレミアムがある」という仮説は、#246
 較正後の 71R では **model EV シグナル経由では取り出せない**。`pick_pair_leg` による馬連→馬単の置換は
@@ -109,10 +112,11 @@ EV フィルタが #246 較正後も逆予測（無フィルタ 66.4% → フィ
 ### 再現（#262）
 
 ```sh
-# 較正後 release バイナリで /tmp/bt262 に入力生成（results/exotic odds はモデル非依存で /tmp/bt250 流用可）
+# 較正後 release バイナリで /tmp/bt262 に入力生成（result.html はモデル非依存で /tmp/bt250 等から流用可）
 PADDOCK_ANALYZE_BIN=<calibrated paddock-analyze> \
   bash scripts/predict-check/gen_win_backtest_data.sh /tmp/bt262
-# exotic odds は exacta 込みでエクスポート（umaren_backtest.py 冒頭 docstring の SQL, bet_type に 'exacta' を含む）
+# exotic odds は exacta 込みで必ず再エクスポート（旧 bt250 には exacta 行が無く流用不可。
+# umaren_backtest.py 冒頭 docstring の SQL, bet_type IN ('quinella','trio','exacta') を使う）
 python3 scripts/predict-check/umaren_backtest.py \
   --races /tmp/bt262/bt_races.tsv --pred-dir /tmp/bt262 --results-dir /tmp/bt262 \
   --exotic-odds /tmp/bt262/bt_exotic_odds.tsv --ev-grid 1.0,1.2,1.5 --cap-grid inf,50,30

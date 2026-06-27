@@ -90,6 +90,38 @@ def test_parse_result_exacta_ordered_key():
     assert (4, 6) not in pay["exacta"]  # 逆順は別物
 
 
+def test_eval_pair_leg_swap_replaces_only_ev_favorable_legs():
+    # ADR 0043 pick_pair_leg 直接検証の中核。◎=1。
+    # pair(1,2): 馬単オッズ高=EV優位→置換 / pair(1,3): 馬単オッズ低=非優位→馬連維持 /
+    # pair(1,4): 馬単オッズ欠落→馬連維持。置換は1脚のみのはず。
+    probs = {1: 40.0, 2: 30.0, 3: 20.0, 4: 10.0}
+    quin_odds = {frozenset({1, 2}): 1.0, frozenset({1, 3}): 1.0, frozenset({1, 4}): 1.0}
+    exacta_odds = {(1, 2): 100.0, (1, 3): 1.0}  # (1,4) は欠落
+    pay = {
+        "umaren": {frozenset({1, 2}): 500},  # 馬連は (1,2) のみ的中
+        "wide": {}, "trio": {},
+        "exacta": {(1, 2): 1000},  # 馬単も (1,2) 的中
+    }
+    # swap=False: 全ペア馬連で清算（土台）。配分 lr([30,20,10],15)=[7,5,3]→¥700/500/300。
+    bet, ret, stake, sw = U.eval_pair_leg_swap(probs, quin_odds, exacta_odds, pay, swap=False)
+    assert bet and stake == 1500 and sw == 0
+    assert ret == 700 * 500 // 100  # 3500（馬連 (1,2) のみ）
+    # swap=True: (1,2) のみ馬単へ置換。(1,3)=非優位/(1,4)=欠落は馬連維持。
+    bet, ret, stake, sw = U.eval_pair_leg_swap(probs, quin_odds, exacta_odds, pay, swap=True)
+    assert bet and stake == 1500 and sw == 1, sw
+    assert ret == 700 * 1000 // 100  # 7000（馬単 (1,2) 払戻で清算）
+
+
+def test_eval_exacta_allflat_buys_both_directions():
+    # 全頭両方向 flat。◎=1, 相手 [2,3] → 4 レッグ (1,2)(2,1)(1,3)(3,1)。予算ちょうど・実払戻清算。
+    probs = {1: 50.0, 2: 30.0, 3: 20.0}
+    pay = {"umaren": {}, "wide": {}, "trio": {}, "exacta": {(1, 2): 1000}}
+    bet, ret, stake = U.eval_exacta_allflat(probs, pay, budget=5000)
+    assert bet and stake == 5000
+    # lr([1,1,1,1],50)=[13,13,12,12]。(1,2) は最初のレッグ=¥1300。
+    assert ret == 1300 * 1000 // 100  # 13000
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for t in tests:

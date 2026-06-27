@@ -62,6 +62,7 @@ bt_exotic_odds.tsv の生成（DB から、71R 窓の馬連・三連複・馬単
 import argparse
 import re
 import statistics
+import unicodedata
 from itertools import combinations, permutations
 from pathlib import Path
 
@@ -175,6 +176,9 @@ def parse_result(path):
     top3 = [u for _, u in order[:3]]
     pay = {"umaren": {}, "wide": {}, "trio": {}, "exacta": {}}
     # exacta（馬単・Umatan）は着順保持のため出現順タプルでキー化。他は無順 frozenset。
+    # netkeiba result.html の Umatan 組は li が「1着→2着」順で並ぶ（実 result で実証済み・
+    # src/interface/netkeiba-scraper/src/parse/payout.rs「順序付きは出現順 > 連結」と一致）。
+    # 同着1着では複数の馬単組が並ぶため出現順をそのまま保持する（着順固定の hard assert は不可）。
     for key, cls in [("umaren", "Umaren"), ("wide", "Wide"), ("trio", "Fuku3"), ("exacta", "Umatan")]:
         m = re.search(rf'<tr class="{cls}">(.*?)</tr>', t, re.S)
         if not m:
@@ -213,8 +217,11 @@ def parse_exotic(path):
             continue
         slot = out.setdefault(pid, {"quinella": {}, "trio": {}, "exacta": {}})
         if bt == "exacta":
-            a, b = (int(x) for x in key.split(">"))
-            slot[bt][(a, b)] = float(odds)
+            # exacta は '1着>2着' の順序付き 2 頭。区切り形式の異常は当該行を無視（防御方針を quinella/trio と対称に）。
+            parts = key.split(">")
+            if len(parts) != 2:
+                continue
+            slot[bt][(int(parts[0]), int(parts[1]))] = float(odds)
         else:
             slot[bt][frozenset(int(x) for x in key.split("-"))] = float(odds)
     return out
@@ -393,7 +400,10 @@ def eval_exacta_only(probs, exacta_odds, pay, theta, mode, cap=float("inf"), bud
 
 
 def eval_exacta_plain(probs, pay, budget=1500):
-    """参考: ◎軸ながしマルチ top5 両方向（EV フィルタ無し, 馬単確率重み, ¥1500）。全鞍機械買い。"""
+    """参考: ◎軸ながしマルチ top5 両方向（EV フィルタ無し, 馬単確率重み, ¥1500）。全鞍機械買い。
+
+    全鞍機械買いの対照なので pay["exacta"] 欠落は損失扱い（JRA は必ず馬単を払うため欠落＝parse 漏れ）。
+    """
     ranked = sorted(probs, key=lambda n: -probs[n])
     if len(ranked) < 2:
         return False, 0, 0
@@ -415,6 +425,7 @@ def eval_exacta_allflat(probs, pay, budget=5000):
 
     eval_exacta_only と universe（全頭両方向）・配分（flat）を揃え、EV フィルタの有無だけを変えた対照。
     これより eval_exacta_only が悪ければ馬単 model EV ランキングが逆予測的と切り分けられる。
+    全鞍機械買いの対照なので pay["exacta"] 欠落は損失扱い（JRA は必ず馬単を払うため欠落＝parse 漏れ）。
     """
     ranked = sorted(probs, key=lambda n: -probs[n])
     if len(ranked) < 2:
@@ -471,10 +482,17 @@ def max_drawdown(pnls):
     return dd
 
 
+def pad_disp(label, width=24):
+    """CJK 全角（East Asian Wide/Fullwidth）を 2 セルとして右側空白パディング（表の列崩れ防止）。"""
+    disp = sum(2 if unicodedata.east_asian_width(c) in ("W", "F") else 1 for c in label)
+    return label + " " * max(0, width - disp)
+
+
 def summarize(label, rows):
     """rows = [(ret, stake)]（賭けた鞍のみ, 時系列順）-> 1 行サマリ文字列。"""
+    lab = pad_disp(label)
     if not rows:
-        return f"{label:<24} {'0':>4}  {'-':>7} {'-':>5} {'-':>7} {'-':>9}"
+        return f"{lab} {'0':>4}  {'-':>7} {'-':>5} {'-':>7} {'-':>9}"
     freq = len(rows)
     tot_ret = sum(r for r, _ in rows)
     tot_stake = sum(s for _, s in rows)
@@ -483,7 +501,7 @@ def summarize(label, rows):
     per = [r / s * 100 if s else 0 for r, s in rows]
     sd = statistics.pstdev(per) if freq > 1 else 0.0
     dd = max_drawdown([r - s for r, s in rows])
-    return f"{label:<24} {freq:>4}  {roi:>6.1f}% {hit:>4.0f}% {sd:>7.1f} {dd:>9.0f}"
+    return f"{lab} {freq:>4}  {roi:>6.1f}% {hit:>4.0f}% {sd:>7.1f} {dd:>9.0f}"
 
 
 # --- #263: 較正後 model ROI≥100% ゲートの精度診断 ----------------------------
