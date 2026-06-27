@@ -1979,10 +1979,18 @@ dependencies = [
  "paddock-config",
  "paddock-domain",
  "paddock-use-case",
+ "predict-format",
  "rdb-gateway",
  "tokio",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "predict-format"
+version = "0.1.0"
+dependencies = [
+ "paddock-domain",
 ]
 
 [[package]]
@@ -1996,6 +2004,7 @@ dependencies = [
  "paddock-config",
  "paddock-domain",
  "paddock-use-case",
+ "predict-format",
  "rdb-gateway",
  "tokio",
  "tracing-subscriber",
