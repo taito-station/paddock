@@ -70,7 +70,8 @@ impl CalibrationMetrics {
     };
 }
 
-/// reliability 曲線の 1 ビン（予測確率帯ごとの平均予測 vs 実測勝率）。
+/// reliability 曲線の 1 ビン（予測確率帯ごとの平均予測 vs 実測率）。
+/// 単勝・連対・複勝で再利用する（#258）。
 #[derive(Debug, Clone, PartialEq)]
 pub struct ReliabilityBin {
     /// ビン下限（含む）。
@@ -81,8 +82,8 @@ pub struct ReliabilityBin {
     pub count: u32,
     /// ビン内の平均予測確率（`count == 0` のとき 0）。
     pub mean_predicted: f64,
-    /// ビン内の実測勝率（`count == 0` のとき 0）。`count > 0` のビンで完全校正なら
-    /// `mean_predicted` に一致する。
+    /// ビン内の実測率（その券種で的中した割合, `count == 0` のとき 0）。`count > 0` のビンで
+    /// 完全校正なら `mean_predicted` に一致する。
     pub observed_rate: f64,
 }
 

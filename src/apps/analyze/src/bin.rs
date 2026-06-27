@@ -410,6 +410,8 @@ fn print_backtest(from: NaiveDate, to: NaiveDate, r: &BacktestReport) {
 
 /// `kind`（単勝/連対/複勝）の reliability 曲線（予測確率帯ごとの平均予測 vs 実測率）。空ビンは省略。
 fn print_reliability(bins: &[ReliabilityBin], kind: &str) {
+    // 全ビン空（= 評価レース 0 件）なら見出しごと省略する。3 券種を出すようになり（#258）、
+    // 空表 3 つを並べないため。評価レースがあれば必ず非空ビンができるので通常は出力される。
     if bins.iter().all(|b| b.count == 0) {
         return;
     }
