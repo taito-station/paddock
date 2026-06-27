@@ -188,11 +188,17 @@ pub fn build_portfolio(
     let field: Vec<HorseNum> = probs.iter().map(|p| p.horse_num).collect();
 
     // 券種ごとの脚（組合せ, odds）を生成する。
-    // 連系ペア: 軸-相手ごとに馬連 vs 馬単(本命→相手) を実効EVで比較し優位な方を採る（#246）。
+    // 連系ペア: 軸-相手の馬連（着順不問）を常に採る。馬単への置換は #262 の 71R バックテストで
+    //   純損（順序プレミアムは逆予測）と判明したため #271 で撤去した（ADR 0043 棄却）。
     // ワイド: 軸-相手（保険, 帯の中点）
     let pair_legs: Vec<(BetCombination, Option<f64>)> = partners
         .iter()
-        .filter_map(|&p| pick_pair_leg(axis, p, odds, &field, &win))
+        .filter_map(|&p| {
+            Pair::try_from((axis, p)).ok().map(|pair| {
+                let o = combo_odds(odds, &BetCombination::Quinella(pair));
+                (BetCombination::Quinella(pair), o)
+            })
+        })
         .collect();
     let wide: Vec<(BetCombination, Option<f64>)> = partners
         .iter()
@@ -264,45 +270,6 @@ pub fn build_portfolio(
         bets,
         total_stake,
         ev,
-    }
-}
-
-/// 軸-相手 1 ペアの連系脚を選ぶ（#246）。馬連 `Quinella(軸,相手)` と馬単 `Exacta(軸→相手)` の
-/// 実効 EV（`leg_ev` = 的中確率 × odds）を比べ、**両方のオッズが揃い馬単が strict に上回るときだけ**
-/// 馬単を採る。tie・どちらか欠落は着順不問の馬連を維持する（"常に馬単優先にしない" の担保）。
-/// 穴の 1 着確率が小さいほど `harville_exacta(軸→穴)` が相対的に有利化し、(A) の win 校正と連動する。
-/// 馬連 `Pair` が作れない（軸==相手, 通常起きない）ときは `None` で脚をスキップする。
-fn pick_pair_leg(
-    axis: HorseNum,
-    partner: HorseNum,
-    odds: &RaceOdds,
-    field: &[HorseNum],
-    win: &HashMap<HorseNum, f64>,
-) -> Option<(BetCombination, Option<f64>)> {
-    let pair = Pair::try_from((axis, partner)).ok()?;
-    let q_odds = combo_odds(odds, &BetCombination::Quinella(pair));
-    let quinella_leg = (BetCombination::Quinella(pair), q_odds);
-
-    // 馬単 軸→相手。OrderedPair が作れない/オッズ欠落/馬連オッズ欠落のときは馬連を維持。
-    let Ok(ord) = OrderedPair::try_from((axis, partner)) else {
-        return Some(quinella_leg);
-    };
-    let e_odds = combo_odds(odds, &BetCombination::Exacta(ord));
-    // 両オッズが揃ったときだけ EV 比較で馬単化する。馬連オッズ欠落・馬単オッズ欠落のケースは
-    // EV を apples-to-apples で比べられないため、価格付き馬単があっても**あえて着順不問の馬連を
-    // 維持**する（保険性優先・"常に馬単優先にしない"。実運用では馬連/馬単オッズは同時取得され
-    // この縁ケースは稀）。
-    match (q_odds, e_odds) {
-        (Some(_), Some(_)) => {
-            let q_ev = leg_ev(field, win, &quinella_leg.0, q_odds);
-            let e_ev = leg_ev(field, win, &BetCombination::Exacta(ord), e_odds);
-            if e_ev > q_ev {
-                Some((BetCombination::Exacta(ord), e_odds))
-            } else {
-                Some(quinella_leg)
-            }
-        }
-        _ => Some(quinella_leg),
     }
 }
 
@@ -594,9 +561,9 @@ mod tests {
     }
 
     #[test]
-    fn exacta_chosen_when_ev_beats_quinella() {
-        // 軸1→相手2 の馬単に高オッズを与え、馬連(5.0)より実効EVが上回る → その脚は馬単になる。
-        // 他ペア（exacta オッズ無し）は馬連のまま。
+    fn pair_legs_are_always_quinella_even_with_high_exacta() {
+        // #271: 馬連→馬単の EV 置換は #262 の 71R バックテストで純損（順序プレミアムは逆予測）と
+        // 判明したため撤去した。高オッズの馬単を与えても連系脚は一切 Exacta にならず全て Quinella。
         let (probs, mut o) = sample();
         o.exacta.insert(
             OrderedPair::try_from((horse(1), horse(2))).unwrap(),
@@ -607,80 +574,20 @@ mod tests {
             alloc: (1, 0, 0), // 連系ペアのみに絞って検証
         };
         let pf = build_portfolio(&probs, &o, 5000, &config);
-        let has_exacta_1_2 = pf.bets.iter().any(|b| {
-            matches!(&b.combination, BetCombination::Exacta(op)
-                if op.as_tuple() == (horse(1), horse(2)))
-        });
-        assert!(has_exacta_1_2, "高オッズ馬単 1→2 が選ばれる: {:?}", pf.bets);
-        // 相手3,4 は exacta 無し → 馬連のまま。連系ペアは計3点（馬連2 + 馬単1）。
-        let pair_legs = pf
-            .bets
-            .iter()
-            .filter(|b| {
-                matches!(
-                    b.combination,
-                    BetCombination::Quinella(_) | BetCombination::Exacta(_)
-                )
-            })
-            .count();
-        assert_eq!(pair_legs, 3);
-        assert_eq!(
-            pf.bets
-                .iter()
-                .filter(|b| matches!(b.combination, BetCombination::Quinella(_)))
-                .count(),
-            2
-        );
-    }
-
-    #[test]
-    fn quinella_kept_when_exacta_lower_ev() {
-        // 馬単オッズが低い（1.1）→ 馬連(5.0)が EV 優位 → 馬連のまま。
-        let (probs, mut o) = sample();
-        o.exacta.insert(
-            OrderedPair::try_from((horse(1), horse(2))).unwrap(),
-            odds(1.1),
-        );
-        let config = PortfolioConfig {
-            partners: 3,
-            alloc: (1, 0, 0),
-        };
-        let pf = build_portfolio(&probs, &o, 5000, &config);
         assert!(
             !pf.bets
                 .iter()
                 .any(|b| matches!(b.combination, BetCombination::Exacta(_))),
-            "低EV馬単は採用されない: {:?}",
+            "馬単置換は撤去済み（常に馬連）: {:?}",
             pf.bets
         );
+        // 連系ペアは相手 3 頭ぶん全て馬連。
         assert_eq!(
             pf.bets
                 .iter()
                 .filter(|b| matches!(b.combination, BetCombination::Quinella(_)))
                 .count(),
             3
-        );
-    }
-
-    #[test]
-    fn pick_pair_leg_tie_keeps_quinella() {
-        // 相手の win_prob=0 → 馬連・馬単とも的中確率 0 → EV 0 同士の tie。
-        // strict `>` ゲートなので馬単化せず着順不問の馬連を維持する（境界の固定）。
-        let probs = [prob(1, 0.5), prob(2, 0.0), prob(3, 0.5)];
-        let win: HashMap<HorseNum, f64> = probs.iter().map(|p| (p.horse_num, p.win_prob)).collect();
-        let field: Vec<HorseNum> = probs.iter().map(|p| p.horse_num).collect();
-        let mut o = RaceOdds::empty(RaceId::try_from("202506040101".to_string()).unwrap());
-        o.quinella
-            .insert(Pair::try_from((horse(1), horse(2))).unwrap(), odds(10.0));
-        o.exacta.insert(
-            OrderedPair::try_from((horse(1), horse(2))).unwrap(),
-            odds(10.0),
-        );
-        let leg = pick_pair_leg(horse(1), horse(2), &o, &field, &win).unwrap();
-        assert!(
-            matches!(leg.0, BetCombination::Quinella(_)),
-            "tie は馬連維持: {:?}",
-            leg.0
         );
     }
 
@@ -721,29 +628,8 @@ mod tests {
     }
 
     #[test]
-    fn pick_pair_leg_keeps_quinella_when_quinella_odds_missing() {
-        // 馬連オッズ欠落・馬単オッズあり → EV を apples-to-apples で比べられないため
-        // 価格付き馬単があっても着順不問の馬連を維持する（保険性優先の縁ケース固定）。
-        let (probs, mut o) = sample();
-        o.quinella
-            .remove(&Pair::try_from((horse(1), horse(2))).unwrap());
-        o.exacta.insert(
-            OrderedPair::try_from((horse(1), horse(2))).unwrap(),
-            odds(100.0),
-        );
-        let win: HashMap<HorseNum, f64> = probs.iter().map(|p| (p.horse_num, p.win_prob)).collect();
-        let field: Vec<HorseNum> = probs.iter().map(|p| p.horse_num).collect();
-        let leg = pick_pair_leg(horse(1), horse(2), &o, &field, &win).unwrap();
-        assert!(
-            matches!(leg.0, BetCombination::Quinella(_)),
-            "馬連オッズ欠落でも馬連維持: {:?}",
-            leg.0
-        );
-    }
-
-    #[test]
-    fn exacta_swap_preserves_budget_and_units() {
-        // 馬単へ swap しても 100 円単位・予算内が保たれる。
+    fn portfolio_preserves_budget_and_units() {
+        // 既定配分でも 100 円単位・予算内が保たれる（連系ペアは常に馬連）。
         let (probs, mut o) = sample();
         o.exacta.insert(
             OrderedPair::try_from((horse(1), horse(2))).unwrap(),
