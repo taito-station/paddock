@@ -8,3 +8,6 @@ dotenvy   = { workspace = true }
 envy      = { workspace = true }
 serde     = { workspace = true }
 thiserror = { workspace = true }
+
+[dev-dependencies]
+tracing-subscriber = { workspace = true }
