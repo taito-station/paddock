@@ -15,17 +15,23 @@
 #   LIVE_WINDOW_MIN  設定すると発走時刻フィルタを有効化し、netkeiba 発走時刻で「これから発走する
 #                    かつ発走まで N 分以内」のレースだけを対象にする（#197, 朝の無駄打ち抑制）。
 #                    未設定なら R 範囲の全レースを対象（後方互換）。例: LIVE_WINDOW_MIN=60
+#   LIVE_BLEND_ALPHA analyze predict の市場単勝ブレンド係数 --blend-alpha（既定 0.2 ＝本番モデル,
+#                    ADR 0034 で 0.3→0.2 に確定）。実験で別 α を試すときだけ上書きする。例: LIVE_BLEND_ALPHA=0.3
 set -euo pipefail
 
 DATE="${1:?usage: refresh_ev.sh <YYYY-MM-DD> [first_R] [last_R] [budget]}"
 FIRST_R="${2:-6}"
 LAST_R="${3:-12}"
 BUDGET="${4:-5000}"
+LIVE_BLEND_ALPHA="${LIVE_BLEND_ALPHA:-0.2}"
 
 # 引数は psql の SQL に文字列展開するため、形式を検証して注入・誤クエリを防ぐ。
 [[ "$DATE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || { echo "DATE は YYYY-MM-DD 形式: $DATE" >&2; exit 2; }
 [[ "$FIRST_R" =~ ^[0-9]+$ && "$LAST_R" =~ ^[0-9]+$ ]] || { echo "R 範囲は整数: $FIRST_R $LAST_R" >&2; exit 2; }
 [[ "$BUDGET" =~ ^[0-9]+$ ]] || { echo "予算は整数（円）: $BUDGET" >&2; exit 2; }
+[[ "$LIVE_BLEND_ALPHA" =~ ^[0-9]+(\.[0-9]+)?$ ]] \
+  && LC_ALL=C awk -v a="$LIVE_BLEND_ALPHA" 'BEGIN{exit !(a>=0 && a<=1)}' \
+  || { echo "LIVE_BLEND_ALPHA は 0〜1 の数値: $LIVE_BLEND_ALPHA" >&2; exit 2; }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -173,7 +179,7 @@ for pid in "${PIDS[@]}"; do
   sleep 1  # netkeiba への pacing
 done
 
-echo "[5/5] meta + 予想（analyze predict --blend-alpha 0.3）"
+echo "[5/5] meta + 予想（analyze predict --blend-alpha $LIVE_BLEND_ALPHA）"
 : > "$WORKDIR/meta.tsv"
 : > "$WORKDIR/pred.txt"
 "${PSQL[@]}" -F$'\t' -c \
@@ -185,7 +191,7 @@ while IFS=$'\t' read -r pid venue rnum surf dist; do
   printf '%s\t%s\t%s\n' "$pid" "$venue" "$rnum" >> "$WORKDIR/meta.tsv"
   jsurf=$([ "$surf" = "turf" ] && echo "芝" || echo "ダート")
   echo "--- レース $rnum: $venue $jsurf ${dist}m ---" >> "$WORKDIR/pred.txt"
-  "$ANALYZE_BIN" predict "$pid" --blend-alpha 0.3 2>> "$WORKDIR/logs/analyze.log" \
+  "$ANALYZE_BIN" predict "$pid" --blend-alpha "$LIVE_BLEND_ALPHA" 2>> "$WORKDIR/logs/analyze.log" \
     | grep -E '^[[:space:]]*[0-9]+[[:space:]]' >> "$WORKDIR/pred.txt" || true
   echo >> "$WORKDIR/pred.txt"
 done

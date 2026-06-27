@@ -10,10 +10,11 @@
 # 使い方:
 #   scripts/predict-check/gen_win_backtest_data.sh [WORKDIR]
 #
-# 環境変数で対象期間・predict 設定を上書きできる（既定は #208 の win-backtest 用）:
+# 環境変数で対象期間・predict 設定を上書きできる（FROM/TO の既定は #208 の win-backtest 窓）:
 #   PADDOCK_BT_FROM   対象開始日（既定 2026-05-30）
 #   PADDOCK_BT_TO     対象終了日（既定 2026-06-14）
-#   PADDOCK_BT_ALPHA  predict の --blend-alpha（既定 0.3）
+#   PADDOCK_BT_ALPHA  predict の --blend-alpha（既定 0.2 ＝本番モデル, ADR 0034。
+#                     #208 当時の α=0.3 を再現するなら PADDOCK_BT_ALPHA=0.3 を渡す）
 #   PADDOCK_ANALYZE_BIN  analyze バイナリのパス（別 worktree のビルドを流用する時など）
 set -euo pipefail
 
@@ -23,13 +24,18 @@ DB_URL="${PADDOCK_DB_URL:-postgres://paddock:paddock@127.0.0.1:5432/paddock}"
 ANALYZE_BIN="${PADDOCK_ANALYZE_BIN:-$REPO_ROOT/target/release/paddock-analyze}"
 FROM="${PADDOCK_BT_FROM:-2026-05-30}"
 TO="${PADDOCK_BT_TO:-2026-06-14}"
-ALPHA="${PADDOCK_BT_ALPHA:-0.3}"
+ALPHA="${PADDOCK_BT_ALPHA:-0.2}"
 PSQL=(psql "$DB_URL" -tA)
 
 # FROM/TO は SQL に文字列補間するため、日付形式（数字とハイフンのみ）に制限して注入を防ぐ。
 for v in FROM TO; do
   [[ "${!v}" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || { echo "不正な日付 $v=${!v}（YYYY-MM-DD のみ可）" >&2; exit 1; }
 done
+
+# ALPHA はブレンド係数 [0,1]。形式と値域を検証する（refresh_ev.sh の LIVE_BLEND_ALPHA と対称）。
+[[ "$ALPHA" =~ ^[0-9]+(\.[0-9]+)?$ ]] \
+  && LC_ALL=C awk -v a="$ALPHA" 'BEGIN{exit !(a>=0 && a<=1)}' \
+  || { echo "PADDOCK_BT_ALPHA は 0〜1 の数値: $ALPHA" >&2; exit 1; }
 
 [[ -x "$ANALYZE_BIN" ]] || {
   echo "release バイナリが見つかりません: $ANALYZE_BIN" >&2
