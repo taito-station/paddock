@@ -20,11 +20,15 @@
     <string>__REPO_ROOT__</string>
 
     <!-- launchd は最小 PATH なので psql / python3 / cargo 産物を探せるよう補う。
-         Homebrew は Intel(/usr/local) と Apple Silicon(/opt/homebrew) の両方を入れておく。 -->
+         Homebrew は Intel(/usr/local) と Apple Silicon(/opt/homebrew) の両方を入れておく。
+         WORKDIR を固定し、launchd 起動でも本体ログが決まった場所（/tmp/paddock-prefetch/logs/）に
+         出るようにする（README の確認パスと一致させる。$TMPDIR は launchd と対話シェルでズレうる）。 -->
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
         <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>WORKDIR</key>
+        <string>/tmp/paddock-prefetch</string>
     </dict>
 
     <key>StartInterval</key>
@@ -33,9 +37,11 @@
     <key>RunAtLoad</key>
     <true/>
 
+    <!-- launchd の捕捉する stdout/stderr は常に存在する /tmp 直下へ出す（リポジトリ直下に
+         未追跡ファイルを生成しない。本体の詳細ログは WORKDIR/logs/prefetch.log）。 -->
     <key>StandardOutPath</key>
-    <string>__REPO_ROOT__/.launchd-prefetch.out.log</string>
+    <string>/tmp/paddock-prefetch.launchd.out.log</string>
     <key>StandardErrorPath</key>
-    <string>__REPO_ROOT__/.launchd-prefetch.err.log</string>
+    <string>/tmp/paddock-prefetch.launchd.err.log</string>
 </dict>
 </plist>

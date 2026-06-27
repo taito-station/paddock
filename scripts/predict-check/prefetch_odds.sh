@@ -49,12 +49,26 @@ LOG="$WORKDIR/logs/prefetch.log"
 
 log() { echo "[$(date '+%Y-%m-%dT%H:%M:%S%z')] $*" | tee -a "$LOG"; }
 
-# 多重起動防止。launchd の StartInterval と前回実行が重なっても二重 fetch しない。
-# flock 不在（素の macOS には無い）でも動くよう、有無で分岐する。
+# 多重起動防止。launchd の StartInterval と前回実行（ハング含む）が重なっても二重 fetch しない。
+# 素の macOS に flock は同梱されないため、flock 不在時は mkdir の原子性で排他するフォールバックを
+# 必ず効かせる（cron 代替経路でもノーガードにしない）。
 LOCK="$WORKDIR/prefetch.lock"
+LOCK_DIR="$WORKDIR/prefetch.lock.d"
 if command -v flock >/dev/null 2>&1; then
   exec 9>"$LOCK"
   flock -n 9 || { log "別の prefetch 実行中のためスキップ"; exit 0; }
+else
+  # 異常終了でロックが残ると永久ブロックするため、一定時間より古いロックは奪う（前回が
+  # ハング/強制終了した残骸とみなす）。閾値は StartInterval(5分) より十分長い 30 分。
+  if [ -d "$LOCK_DIR" ] && [ -n "$(find "$LOCK_DIR" -prune -mmin +30 2>/dev/null)" ]; then
+    log "古いロックを破棄（前回が異常終了した可能性）: $LOCK_DIR"
+    rmdir "$LOCK_DIR" 2>/dev/null || true
+  fi
+  if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+    log "別の prefetch 実行中のためスキップ（mkdir ロック）"
+    exit 0
+  fi
+  trap 'rmdir "$LOCK_DIR" 2>/dev/null || true' EXIT
 fi
 
 # paddock race_id（例 2026-3-tokyo-5-6R）→ netkeiba 12 桁。正本は
@@ -76,13 +90,20 @@ PY
 }
 
 # 対象 paddock race_id を DB post_time で選択（#235）。--at はテスト/検証用に現在時刻を上書き。
+# command substitution で受けて選択の成否を明示判定する。process substitution（< <(...)）だと
+# psql 接続失敗（DB ダウン）でも非0終了が伝播せず「対象0件」と区別不能になり、無人 prefetch が
+# 黙って機能停止してもログ上は正常に見えてしまう（Reviewer 指摘）。
 SELECT_ARGS=(--window-min "$WINDOW_MIN")
 [ -n "$AT" ] && SELECT_ARGS+=(--at "$AT")
+if ! SELECTED="$(PADDOCK_DB_URL="$DB_URL" PYTHONPATH="$SCRIPT_DIR" \
+      python3 "$SCRIPT_DIR/upcoming_races_db.py" "$DATE" "${SELECT_ARGS[@]}")"; then
+  log "レース選択に失敗（DB 接続不可・クエリ失敗等）。中断する。"
+  exit 1
+fi
 PIDS=()
 while IFS= read -r line; do
   [ -n "$line" ] && PIDS+=("$line")
-done < <(PADDOCK_DB_URL="$DB_URL" PYTHONPATH="$SCRIPT_DIR" \
-           python3 "$SCRIPT_DIR/upcoming_races_db.py" "$DATE" "${SELECT_ARGS[@]}")
+done <<< "$SELECTED"
 
 if [ "${#PIDS[@]}" -eq 0 ]; then
   log "対象レースなし: $DATE 発走 ${WINDOW_MIN} 分以内の未発走は無し（開催外/朝/全レース終了）"
@@ -106,7 +127,11 @@ fi
 log "prefetch 開始: $DATE 発走 ${WINDOW_MIN} 分以内 ${#PIDS[@]} レース"
 FAILED=()
 for pid in "${PIDS[@]}"; do
-  nk="$(nk_id "$pid")"
+  # race_id 変換失敗（未知 slug 等の異常データ）は 1 件スキップに留め、残りの締切前 prefetch を
+  # 巻き添えで止めない（set -e 下の代入失敗で全体中断するのを防ぐ）。
+  if ! nk="$(nk_id "$pid")"; then
+    log "  SKIP $pid (race_id 変換失敗)"; FAILED+=("$pid"); continue
+  fi
   # --force で再取得（既存 race_odds を最新で上書き＋snapshots へ追記）、--skip-history で近走は省く。
   if "$FETCH_BIN" "$nk" --force --skip-history --interval 800 >> "$LOG" 2>&1; then
     log "  ok   $pid ($nk)"

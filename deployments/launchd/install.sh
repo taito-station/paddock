@@ -22,6 +22,6 @@ launchctl load "$DEST"
 
 echo "ロードしました: $DEST"
 echo "確認: launchctl list | grep $LABEL"
-echo "ログ: $REPO_ROOT/.launchd-prefetch.out.log（prefetch 本体ログは \$TMPDIR/paddock-prefetch/logs/prefetch.log）"
+echo "ログ: 本体=/tmp/paddock-prefetch/logs/prefetch.log（launchd 捕捉 stdout/stderr=/tmp/paddock-prefetch.launchd.{out,err}.log）"
 echo "注意: 当日カード（post_time 入り）は朝の paddock-fetch-card で投入済みであること。"
 echo "      release バイナリ未ビルドなら: cargo build --release --bin paddock-fetch-card"

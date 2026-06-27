@@ -34,9 +34,18 @@ DEFAULT_DB_URL = "postgres://paddock:paddock@127.0.0.1:5432/paddock"
 
 
 def valid_date(s: str) -> str:
-    """argparse 用: 開催日を `YYYY-MM-DD`（race_cards.date と同形式）に検証する。"""
+    """argparse 用: 開催日を `YYYY-MM-DD`（race_cards.date と同形式）に検証する。
+
+    形式（ゼロ埋め YYYY-MM-DD）と暦妥当性の両方を見る。形式だけだと `2026-13-45` のような
+    非実在日も通り、SQL は無害（注入不能）だが「形式 OK だが存在しない日→常に 0 件」を
+    静かに招くため、`strptime` で暦も検証する。
+    """
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", s):
         raise argparse.ArgumentTypeError(f"YYYY-MM-DD 形式で指定してください: {s!r}")
+    try:
+        datetime.strptime(s, "%Y-%m-%d")
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"存在しない日付です: {s!r}")
     return s
 
 

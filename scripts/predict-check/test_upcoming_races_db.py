@@ -65,7 +65,9 @@ def test_valid_date_accepts_well_formed():
 
 
 def test_valid_date_rejects_malformed():
-    for bad in ("20260620", "2026-6-20", "2026/06/20", "abc", ""):
+    # 形式不正（ゼロ埋めでない/区切り違い等）と、形式 OK だが暦上存在しない日の両方を弾く。
+    for bad in ("20260620", "2026-6-20", "2026/06/20", "abc", "",
+                "2026-13-45", "2026-02-30", "2026-00-10"):
         try:
             valid_date(bad)
         except argparse.ArgumentTypeError:
