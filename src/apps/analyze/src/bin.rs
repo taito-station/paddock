@@ -105,8 +105,8 @@ async fn main() -> anyhow::Result<()> {
                 )
                 .await?;
             print_predict(&probs);
-            if let Some((axis, rows)) = diagnostics {
-                print_pair_ev_diagnostics(axis, &probs, &rows);
+            if let Some(diag) = diagnostics {
+                print_pair_ev_diagnostics(diag.axis, &probs, &diag.rows);
             }
         }
         cli::Command::Backtest {

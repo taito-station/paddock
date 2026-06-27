@@ -242,9 +242,8 @@ async fn run_race(
 
     // 馬連 vs 馬単(両方向) EV 診断（#246-C）。「穴は1着にならない」読みのとき本命→穴の馬単が
     // 同ペアの馬連より EV 優位になりうる。買い目選択の判断材料として並べて表示する。
-    let (diag_axis, diag_rows) =
-        pair_ev_diagnostics(&probs, &odds, PortfolioConfig::default().partners);
-    print_pair_ev_diagnostics(diag_axis, &probs, &diag_rows);
+    let diag = pair_ev_diagnostics(&probs, &odds, PortfolioConfig::default().partners);
+    print_pair_ev_diagnostics(diag.axis, &probs, &diag.rows);
 
     println!();
     let bet_amounts: Vec<u64> = match read_choice(&mut io::stdin().lock())? {

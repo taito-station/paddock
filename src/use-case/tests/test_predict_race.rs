@@ -405,9 +405,9 @@ async fn predict_race_with_diagnostics_returns_axis_and_rows_with_odds() {
         .predict_race_with_diagnostics(&race_id, None, None, 5)
         .await
         .unwrap();
-    let (axis, rows) = diag.expect("オッズありなら診断 Some");
-    assert!(axis.is_some(), "軸が決まる");
-    assert_eq!(rows.len(), 1, "2 頭立て → 相手 1 頭");
+    let diag = diag.expect("オッズありなら診断 Some");
+    assert!(diag.axis.is_some(), "軸が決まる");
+    assert_eq!(diag.rows.len(), 1, "2 頭立て → 相手 1 頭");
 }
 
 #[tokio::test]

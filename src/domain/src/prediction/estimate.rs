@@ -164,7 +164,8 @@ pub fn apply_win_power(probs: &[HorseProbability], gamma: f64) -> Vec<HorseProba
 
     let powered: Vec<f64> = probs.iter().map(|p| p.win_prob.powf(gamma)).collect();
     let total: f64 = powered.iter().sum();
-    if total <= 0.0 {
+    // total<=0 は全 win 0、!finite は win_prob 不変条件（[0,1]）が崩れた場合の防御（NaN 伝播回避）。
+    if total <= 0.0 || !total.is_finite() {
         return probs.to_vec();
     }
 

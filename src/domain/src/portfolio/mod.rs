@@ -102,6 +102,13 @@ pub struct PairEvDiagnostic {
     pub exacta_rev_odds: Option<f64>,
 }
 
+/// 馬連 vs 馬単 EV 診断の結果（#246-C）。`axis`＝本命（出走確率が空なら `None`）、`rows`＝各相手の行。
+#[derive(Debug, Clone)]
+pub struct PairEvDiagnostics {
+    pub axis: Option<HorseNum>,
+    pub rows: Vec<PairEvDiagnostic>,
+}
+
 /// 軸（win_prob 最大）と相手上位 `partners` 頭について、各ペアの馬連・馬単(両方向) EV を並べる
 /// 診断（#246-C）。手作業でオッズを引いて比較していた「馬連 vs 馬単」の判断材料を CLI に出すための
 /// 純粋関数。EV 計算は `build_portfolio` と同じ `leg_ev`（simulate 委譲）に揃える。出走確率が空なら
@@ -110,9 +117,12 @@ pub fn pair_ev_diagnostics(
     probs: &[HorseProbability],
     odds: &RaceOdds,
     partners: usize,
-) -> (Option<HorseNum>, Vec<PairEvDiagnostic>) {
+) -> PairEvDiagnostics {
     let Some((axis, partner_nums)) = rank_axis_partners(probs, partners) else {
-        return (None, Vec::new());
+        return PairEvDiagnostics {
+            axis: None,
+            rows: Vec::new(),
+        };
     };
     let win: HashMap<HorseNum, f64> = probs.iter().map(|p| (p.horse_num, p.win_prob)).collect();
     let field: Vec<HorseNum> = probs.iter().map(|p| p.horse_num).collect();
@@ -120,9 +130,9 @@ pub fn pair_ev_diagnostics(
     // 馬連/馬単(両方向) の EV と odds を 1 行に出す。各組合せの odds と EV はペアで求める
     // （odds 取得と EV 計算で try_from を二度呼ばないようヘルパに束ねる）。
     let leg = |combo: BetCombination| {
-        let odds = combo_odds(odds, &combo);
-        let ev = leg_ev(&field, &win, &combo, odds);
-        (ev, odds)
+        let cell_odds = combo_odds(odds, &combo);
+        let ev = leg_ev(&field, &win, &combo, cell_odds);
+        (ev, cell_odds)
     };
     let rows = partner_nums
         .iter()
@@ -144,7 +154,10 @@ pub fn pair_ev_diagnostics(
             })
         })
         .collect();
-    (Some(axis), rows)
+    PairEvDiagnostics {
+        axis: Some(axis),
+        rows,
+    }
 }
 
 /// 予想本命を軸に、予算内・100 円単位の軸流しポートフォリオ（連系ペア＋ワイド＋三連複）を組む。
@@ -683,8 +696,9 @@ mod tests {
             OrderedPair::try_from((horse(2), horse(1))).unwrap(),
             odds(60.0),
         );
-        let (axis, rows) = pair_ev_diagnostics(&probs, &o, 3);
-        assert_eq!(axis, Some(horse(1)));
+        let diag = pair_ev_diagnostics(&probs, &o, 3);
+        assert_eq!(diag.axis, Some(horse(1)));
+        let rows = &diag.rows;
         assert_eq!(rows.len(), 3);
         let r2 = rows.iter().find(|r| r.partner == horse(2)).unwrap();
         // 馬連オッズ(5.0)・馬単両方向オッズが取れている。
@@ -701,9 +715,30 @@ mod tests {
     #[test]
     fn pair_ev_diagnostics_empty_when_no_probs() {
         let o = RaceOdds::empty(RaceId::try_from("202506040101".to_string()).unwrap());
-        let (axis, rows) = pair_ev_diagnostics(&[], &o, 5);
-        assert_eq!(axis, None);
-        assert!(rows.is_empty());
+        let diag = pair_ev_diagnostics(&[], &o, 5);
+        assert_eq!(diag.axis, None);
+        assert!(diag.rows.is_empty());
+    }
+
+    #[test]
+    fn pick_pair_leg_keeps_quinella_when_quinella_odds_missing() {
+        // 馬連オッズ欠落・馬単オッズあり → EV を apples-to-apples で比べられないため
+        // 価格付き馬単があっても着順不問の馬連を維持する（保険性優先の縁ケース固定）。
+        let (probs, mut o) = sample();
+        o.quinella
+            .remove(&Pair::try_from((horse(1), horse(2))).unwrap());
+        o.exacta.insert(
+            OrderedPair::try_from((horse(1), horse(2))).unwrap(),
+            odds(100.0),
+        );
+        let win: HashMap<HorseNum, f64> = probs.iter().map(|p| (p.horse_num, p.win_prob)).collect();
+        let field: Vec<HorseNum> = probs.iter().map(|p| p.horse_num).collect();
+        let leg = pick_pair_leg(horse(1), horse(2), &o, &field, &win).unwrap();
+        assert!(
+            matches!(leg.0, BetCombination::Quinella(_)),
+            "馬連オッズ欠落でも馬連維持: {:?}",
+            leg.0
+        );
     }
 
     #[test]
