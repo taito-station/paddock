@@ -123,7 +123,7 @@ def eval_race(probs, times, budget):
         b = times[at]
         roi, _stake, missing = L.race_roi(probs, bets, b["wide"], b["quinella"], b["trio"])
         series.append((at, roi, missing))
-    if not series:
+    if not series:  # times は group_snapshots で必ず 1 件以上。到達しない防御的ガード。
         return None
     final_at, final_roi, final_missing = series[-1]
     best_at, best_roi, _best_missing = max(series, key=lambda t: t[1])
@@ -150,8 +150,9 @@ def _psql_dump_snapshots(db_url, date_from, date_to):
     再検証する（多層防御）。psql -c の単発クエリはプレースホルダを取れないので、形式を厳格に
     固定した値だけを通す。
     """
+    # [0-9] に固定（\d は Unicode 数字も通すため、ASCII 桁のみ許可して曖昧な値を早期に弾く）。
     for d in (date_from, date_to):
-        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", d):
+        if not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", d):
             raise ValueError(f"日付は YYYY-MM-DD のみ許可: {d!r}")
     sql = (
         "SELECT s.race_id, c.date, c.venue, c.race_num, "
@@ -239,8 +240,11 @@ def build_report(races, preds_by_race, budget):
         probs_all = preds_by_race.get(rid, {})
         if not probs_all:
             continue
-        # 最終 snapshot の出走馬（win が取れた馬番）で絞る。取消馬を買い目に混ぜない。
-        win_horses = set(race["times"][max(race["times"])]["win"])
+        # 出走馬（= 有効な win オッズが付いた馬番）で絞り、取消馬を買い目に混ぜない。
+        # 最終 snapshot だけ win 欠落の部分キャプチャでも弾けるよう全 snapshot 時点の和集合を取り、
+        # odds>0 のみ採用する（odds=0.0 のプレースホルダを「出走」と誤認しない, CLAUDE.md 既知問題）。
+        win_horses = {n for t in race["times"].values()
+                      for n, o in t["win"].items() if o > 0}
         probs = {n: p for n, p in probs_all.items() if not win_horses or n in win_horses}
         ev = eval_race(probs, race["times"], budget)
         if ev is None:
@@ -270,14 +274,23 @@ def print_report(results, budget):
     ever = sum(1 for r in results if r["ever_pos"])
     final = sum(1 for r in results if r["final_pos"])
     nmiss = sum(1 for r in results if r.get("final_missing"))
+    # final 判定が信頼できるのは最終 snapshot にオッズ欠落が無いレースだけ。欠落レースは
+    # final_roi が過小評価で −EV 側に倒れるため、欠落込みの率は capture 取りこぼし(#264)で
+    # 下方バイアスする。判定可能母数（欠落除外）の率を正とし、欠落込みは参考で併記する。
+    jud = [r for r in results if not r.get("final_missing")]
+    njud = len(jud)
+    final_judged = sum(1 for r in jud if r["final_pos"])
     print("\n=== 年間サマリ ===")
     print(f"  対象レース   : {n}")
     print(f"  ever +EV     : {ever}  ({ever / n * 100:.1f}%)  ← いずれかの snapshot 時点で ROI≥100%")
-    print(f"  final +EV    : {final}  ({final / n * 100:.1f}%)  ← 最終 snapshot で ROI≥100%")
+    if njud:
+        print(f"  final +EV    : {final_judged}/{njud}  ({final_judged / njud * 100:.1f}%)  "
+              f"← 最終 snapshot で ROI≥100%（欠落除外の判定可能母数。これを正とする）")
+    print(f"  （参考）欠落込: {final}/{n}  ({final / n * 100:.1f}%)  ← 欠落レースを −EV 計上した下限値")
     # ever は朝の剥がれやすい +EV も拾うため楽観側の参考値。実際に張れたかは発走直前＝final で見る。
     print("  ※ ever は朝オッズ込みの参考値（朝の +EV は直前で剥がれやすい）。actionable は final。")
     if nmiss:
-        print(f"  ⚠ 最終欠落   : {nmiss}  最終 snapshot にオッズ欠落があり final ROI が過小評価のレース")
+        print(f"  ⚠ 最終欠落   : {nmiss}  最終 snapshot にオッズ欠落があり final 判定不能（#264 で対策）")
     by_date = defaultdict(lambda: [0, 0, 0])  # date -> [races, ever, final]
     for r in results:
         d = by_date[r["date"]]
@@ -311,7 +324,7 @@ def main():
             ap.error("--from が必要（または --snapshots-tsv を指定）")
         date_to = args.date_to or args.date_from
         for d in (args.date_from, date_to):
-            if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", d):
+            if not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", d):
                 ap.error(f"日付は YYYY-MM-DD: {d}")
         try:
             tsv = _psql_dump_snapshots(args.db_url, args.date_from, date_to)
