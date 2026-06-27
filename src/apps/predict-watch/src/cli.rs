@@ -3,11 +3,12 @@ use clap::Parser;
 
 /// 発走直前 EV 監視（#257）。指定開催日の発走前レースを定期的にスキャンし、
 /// 発走直前のフレッシュなオッズで EV/ROI を再計算して ROI≥ゲートをアラートする。
-/// **読み取り専用**: predict のセッション記録（買い目）には一切触れない。
+/// predict のセッション記録（predict_sessions / predict_bets＝買い目）には一切書き込まない。
+/// 監視のためオッズスナップショット（race_odds）の再取得・保存は行う。
 #[derive(Debug, Parser)]
 #[command(
     name = "paddock-predict-watch",
-    about = "発走直前のフレッシュなオッズで EV/ROI を再計算し ROI≥ゲートを通知する（読み取り専用）",
+    about = "発走直前のフレッシュなオッズで EV/ROI を再計算し ROI≥ゲートを通知する（セッション記録は不変）",
     version
 )]
 pub struct Cli {

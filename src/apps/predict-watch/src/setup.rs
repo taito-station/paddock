@@ -37,7 +37,8 @@ impl paddock_use_case::pdf_fetcher::PdfFetcher for UnusedFetcher {
     }
 }
 
-/// 監視に必要な依存だけを束ねる。記録系（settle 等）は持たない＝**読み取り専用**を構造で担保する。
+/// 監視に必要な依存だけを束ねる。買い目記録系の interactor を持たない＝predict のセッション記録
+/// （predict_sessions / predict_bets）に触れないことを構造で担保する。オッズの再取得・保存は行う。
 pub struct App {
     pub interactor: Interactor<PostgresRepository, UnusedParser, UnusedFetcher>,
     /// オッズは `refresh_race_odds` で**毎回再スクレイプ**する（read-through キャッシュは使わない、#257）。

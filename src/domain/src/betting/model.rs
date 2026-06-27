@@ -162,3 +162,40 @@ impl Podium {
         self.field_size >= 8 && self.third == target
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn h(n: u32) -> HorseNum {
+        HorseNum::try_from(n).unwrap()
+    }
+
+    #[test]
+    fn label_ja_prefixes_type_and_picks_separator() {
+        // 無順（馬連/ワイド/三連複）は `-`、順序付き（馬単/三連単）は `→`、券種名を前置。
+        assert_eq!(BetCombination::Win(h(3)).label_ja(), "単勝 3");
+        assert_eq!(BetCombination::Place(h(3)).label_ja(), "複勝 3");
+        assert_eq!(
+            BetCombination::Quinella(Pair::try_from((h(1), h(5))).unwrap()).label_ja(),
+            "馬連 1-5"
+        );
+        assert_eq!(
+            BetCombination::Wide(Pair::try_from((h(1), h(5))).unwrap()).label_ja(),
+            "ワイド 1-5"
+        );
+        assert_eq!(
+            BetCombination::Exacta(OrderedPair::try_from((h(1), h(5))).unwrap()).label_ja(),
+            "馬単 1→5"
+        );
+        assert_eq!(
+            BetCombination::Trio(Triple::try_from((h(1), h(3), h(5))).unwrap()).label_ja(),
+            "三連複 1-3-5"
+        );
+        assert_eq!(
+            BetCombination::Trifecta(OrderedTriple::try_from((h(1), h(3), h(5))).unwrap())
+                .label_ja(),
+            "三連単 1→3→5"
+        );
+    }
+}

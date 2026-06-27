@@ -40,7 +40,7 @@ paddock-analyze predict <race_id> --blend-alpha 0.2
 
 ```sh
 # 発走前レースを定期スキャンし、毎回オッズを再取得して ROI を再計算、ROI≥ゲートを買い目付きで通知
-# 読み取り専用（predict のセッション記録には触れない）。全レース発走で自動終了。
+# predict のセッション記録（買い目）には触れない（オッズスナップショットは再取得・保存する）。全レース発走で自動終了。
 paddock-predict-watch --date YYYY-MM-DD          # 既定: 窓40分 / 間隔5分 / ROIゲート100% / α=本番0.2
 paddock-predict-watch --date YYYY-MM-DD --once   # 1スイープのみ（cron 等）
 ```

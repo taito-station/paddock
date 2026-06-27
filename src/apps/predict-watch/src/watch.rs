@@ -46,7 +46,17 @@ pub fn classify(
     }
 }
 
-/// 結果取込済み（＝発走済み）か。`races` 由来は track_condition/results が埋まると確定。
+/// 監視を継続すべきか（発走前のレースが残っているか）を判定する純関数（単体テスト対象）。
+/// Due か NotYet が 1 つでもあれば継続、無ければ終了。
+pub fn should_continue(statuses: &[RaceStatus]) -> bool {
+    statuses
+        .iter()
+        .any(|s| matches!(s, RaceStatus::Due | RaceStatus::NotYet))
+}
+
+/// 結果取込済み（＝発走済み）か。`races_by_date` は発走前レースを race_cards 由来で
+/// track_condition=NULL・results 空として返すため、この経路の実効シグナルは track_condition。
+/// `results` 句は `races` テーブル由来（成績取込済み）に対する防御的判定として併記する。
 fn has_result(race: &Race) -> bool {
     race.track_condition.is_some() || !race.results.is_empty()
 }
@@ -87,15 +97,24 @@ fn race_label(slot: &Slot) -> String {
 }
 
 /// 1 スイープ: Due レースのオッズを再取得し EV/ROI を再計算、結果を 1 行ずつ出力する。
-async fn sweep(app: &App, slots: &[Slot], now: NaiveTime, cli: &Cli, blend_alpha: Option<f64>) {
-    let window = Duration::minutes(cli.window as i64);
+/// `statuses` は `slots` と同順の発走状態（呼び出し側で 1 度だけ算出して使い回す）。
+async fn sweep(
+    app: &App,
+    slots: &[Slot],
+    statuses: &[RaceStatus],
+    now: NaiveTime,
+    cli: &Cli,
+    blend_alpha: Option<f64>,
+) {
     let due: Vec<&Slot> = slots
         .iter()
-        .filter(|s| classify(now, s.post_time, has_result(&s.race), window) == RaceStatus::Due)
+        .zip(statuses)
+        .filter(|(_, st)| **st == RaceStatus::Due)
+        .map(|(s, _)| s)
         .collect();
-    let unknown = slots
+    let unknown = statuses
         .iter()
-        .filter(|s| classify(now, s.post_time, has_result(&s.race), window) == RaceStatus::Unknown)
+        .filter(|st| **st == RaceStatus::Unknown)
         .count();
 
     println!(
@@ -127,6 +146,8 @@ async fn evaluate_race(app: &App, slot: &Slot, cli: &Cli, blend_alpha: Option<f6
             println!("  {label}: オッズ未取得（未公開/失敗）、スキップ");
             return;
         }
+        // refresh_race_odds は現状スクレイプ失敗を Ok(None) に畳むため Err は来ないが、
+        // 将来の戻り値変更（DB エラー伝播等）に備えて防御的に握っておく。
         Err(e) => {
             println!("  {label}: オッズ再取得エラー: {e}");
             return;
@@ -205,20 +226,36 @@ pub async fn run(app: &App, cli: &Cli) -> anyhow::Result<()> {
     };
     let window = Duration::minutes(cli.window as i64);
 
+    // 発走状態は実行マシンの現在時刻（JST 想定）と post_time の「時刻」だけで判定するため、
+    // 当日以外の date を指定すると判定が無意味になる。誤用に早期に気づけるよう警告する。
+    let today = Local::now().date_naive();
+    if cli.date != today {
+        println!(
+            "⚠ --date {} は本日（{today}）と異なります。発走状態は現在時刻と post_time の時刻のみで \
+             判定するため、当日以外の指定では Due/Started 判定が正しく機能しません。",
+            cli.date,
+        );
+    }
+
     loop {
         let slots = load_slots(app, cli.date).await?;
         let now = Local::now().time();
-        sweep(app, &slots, now, cli, blend_alpha).await;
+        // 発走状態は 1 スイープ 1 回だけ算出し、sweep 表示と終了判定で共有する。
+        let statuses: Vec<RaceStatus> = slots
+            .iter()
+            .map(|s| classify(now, s.post_time, has_result(&s.race), window))
+            .collect();
 
-        // 終了判定: Due も NotYet も無い（＝発走前のレースが残っていない）。
-        let remaining = slots.iter().any(|s| {
-            matches!(
-                classify(now, s.post_time, has_result(&s.race), window),
-                RaceStatus::Due | RaceStatus::NotYet
-            )
-        });
-        if !remaining {
-            println!("── 監視終了: 発走前のレースが残っていません。");
+        sweep(app, &slots, &statuses, now, cli, blend_alpha).await;
+
+        if !should_continue(&statuses) {
+            if !statuses.is_empty() && statuses.iter().all(|s| *s == RaceStatus::Unknown) {
+                println!(
+                    "── 監視終了: 全レースで発走時刻（post_time）が不明です。fetch-card 済みか確認してください。"
+                );
+            } else {
+                println!("── 監視終了: 発走前のレースが残っていません。");
+            }
             break;
         }
         if cli.once {
@@ -289,5 +326,18 @@ mod tests {
             classify(t(14, 19), Some(t(15, 0)), false, Duration::minutes(40)),
             RaceStatus::NotYet
         );
+    }
+
+    #[test]
+    fn should_continue_while_due_or_not_yet_remains() {
+        use RaceStatus::*;
+        // Due か NotYet が 1 つでもあれば継続。
+        assert!(should_continue(&[Started, Due, Started]));
+        assert!(should_continue(&[Started, NotYet]));
+        // 全て発走済み or 不明なら終了。
+        assert!(!should_continue(&[Started, Started, Unknown]));
+        assert!(!should_continue(&[Unknown]));
+        // 空（その日に開催なし）も終了。
+        assert!(!should_continue(&[]));
     }
 }
