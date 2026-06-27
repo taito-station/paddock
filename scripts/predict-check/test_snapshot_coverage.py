@@ -78,6 +78,16 @@ def test_parse_rows_column_guard():
     assert len(rows) == 1 and rows[0][0] == "R1" and rows[0][5] == 6, rows
 
 
+def test_psql_dump_rejects_bad_date():
+    # _psql_dump は呼び出し側検証に依存せず日付形式を再検証する（多層防御・subprocess 前に弾く）。
+    for bad in ("2026-6-27", "2026-06-27; DROP", "', OR '1'='1"):
+        try:
+            C._psql_dump("postgres://unused", bad)
+        except ValueError:
+            continue
+        raise AssertionError(f"不正日付 {bad!r} が ValueError にならなかった")
+
+
 def _run_all():
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     for fn in fns:

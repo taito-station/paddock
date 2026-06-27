@@ -91,19 +91,29 @@ fi
 # PID が死ぬと lock は stale 化するので、次回起動時に PID 生存を見て掃除する（self-heal。
 # 専用の後始末プロセスは持たない＝兄弟 PID を wait できない罠を避ける）。
 # mkdir のアトミック性を排他取得の唯一の門にする（check→rm→mkdir の TOCTOU を避ける）。
+# mkdir〜pid 記入の窓でプロセスが死ぬと pid 未記入の空 lock が残りうる。これを「起動中」と取り違えて
+# 放置すると keep-awake が恒久的に無言停止するため、mtime の時効（STARTUP_GRACE_MIN 分）で
+# 「起動中の正常 lock」と「窓内で死んだ残骸」を見分けて self-heal する。StartInterval(5分) より短くし、
+# 最大 1 サイクルの取りこぼしで自己回復させる。
+STARTUP_GRACE_MIN=2
 LOCK_DIR="/tmp/paddock-keep-awake.lock.d"
 if ! mkdir "$LOCK_DIR" 2>/dev/null; then
-  # lock 既存。中身で「起動中／稼働中／stale」を見分ける。
+  # lock 既存。中身で「稼働中／起動中／stale」を見分ける。
   pid="$(cat "$LOCK_DIR/pid" 2>/dev/null || echo '')"
-  if [ -z "$pid" ]; then
-    # lock はあるが pid 未記入＝別プロセスが今まさに起動中。掃除せず重複させず終了。
-    log "別プロセスが起動中（lock あり・pid 未記入）。終了"; exit 0
-  fi
-  # pid 記入済み。生存かつプロセス名が caffeinate なら稼働中（PID 再利用の誤判定を comm で排除）。
-  if kill -0 "$pid" 2>/dev/null && ps -p "$pid" -o comm= 2>/dev/null | grep -q 'caffeinate'; then
+  # 稼働中: pid 生存かつプロセス名が caffeinate（PID 再利用の誤判定を comm で排除）。
+  if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null \
+     && ps -p "$pid" -o comm= 2>/dev/null | grep -q 'caffeinate'; then
     log "既に caffeinate 稼働中（pid ${pid}）。重複起動せず終了"; exit 0
   fi
-  # ここまで来たら本当に stale（caffeinate が死亡 or PID が別プロセスに再利用）。掃除して取り直す。
+  # pid 未記入かつ lock が新しい（grace 分以内）＝別プロセスが今まさに起動中。掃除せず終了。
+  if [ -z "$pid" ] \
+     && [ -z "$(find "$LOCK_DIR" -prune -mmin +"$STARTUP_GRACE_MIN" 2>/dev/null)" ]; then
+    log "別プロセスが起動中（lock あり・pid 未記入・新しい）。終了"; exit 0
+  fi
+  # 残るは stale（caffeinate 死亡/PID 再利用、または起動途中で死んだ古い空 lock）。掃除して取り直す。
+  # この rm→mkdir は厳密にはアトミックでないが、同時到達で caffeinate が二重起動しても -t で自動
+  # 終了する無害事象（launchd はジョブを直列化するため実発生も稀）。門の単純さを優先する。
+  log "stale lock を回収して取り直す（pid=${pid:-未記入}）"
   rm -rf "$LOCK_DIR" 2>/dev/null || true
   mkdir "$LOCK_DIR" 2>/dev/null || { log "lock 競合で取得失敗。終了"; exit 0; }
 fi

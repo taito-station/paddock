@@ -89,15 +89,20 @@ def build_coverage(rows, max_lag_min):
         last_min = fetched_at_to_jst_min(last_at) if last_at else None
         ev = classify(post_min, last_min, n_snaps, max_lag_min)
         out.append({"race_id": rid, "venue": venue, "race_num": int(rnum),
-                    "post_time": post_time, "n_snaps": n_snaps,
-                    "last_min": last_min, **ev})
+                    "post_time": post_time, "n_snaps": n_snaps, **ev})
     out.sort(key=lambda r: (r["venue"], r["race_num"]))
     return out
 
 
 # --- 入力ロード（DB or 外部 TSV） ---
 def _psql_dump(db_url, date):
-    """race_cards × race_odds_snapshots を集計して 1 レース 1 行の TSV で返す。"""
+    """race_cards × race_odds_snapshots を集計して 1 レース 1 行の TSV で返す。
+
+    date は SQL リテラルへ補間するため、呼び出し側検証に依存せず関数内でも YYYY-MM-DD を
+    再検証する（多層防御。psql -c はプレースホルダを取れないので形式を厳格に固定した値だけ通す）。
+    """
+    if not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", date):
+        raise ValueError(f"date は YYYY-MM-DD のみ許可: {date!r}")
     sql = (
         "SELECT c.race_id, c.venue, c.race_num, COALESCE(c.post_time,''), "
         "       COALESCE(MAX(s.fetched_at), ''), COUNT(DISTINCT s.fetched_at) "
@@ -177,7 +182,7 @@ def main(argv=None):
     ap.add_argument("--db-url", default=os.environ.get("PADDOCK_DB_URL", DEFAULT_DB_URL))
     ap.add_argument("--rows-tsv", help="集計済み TSV を外部供給（指定時 DB を引かない）")
     ap.add_argument("--fail-on-gap", action="store_true",
-                    help="gap/none が 1 件でもあれば exit 1（CI/監視用）")
+                    help="gap/none/bad_ts が 1 件でもあれば exit 1（CI/監視用）")
     args = ap.parse_args(argv)
 
     if args.rows_tsv:
