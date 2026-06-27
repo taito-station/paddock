@@ -170,7 +170,8 @@ pub fn surface_jp(s: Surface) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::{
-        factor_phrase, format_explanations, gate_label_jp, prev_run_phrase, recent_form_phrase,
+        factor_phrase, format_explanations, format_probs, gate_label_jp, prev_run_phrase,
+        recent_form_phrase,
     };
     use paddock_domain::horse_result::HorseNum;
     use paddock_domain::{
@@ -356,5 +357,18 @@ mod tests {
             distance: 1800,
         };
         assert_eq!(prev_run_phrase(&sparse), "前走：ダート1800m");
+    }
+
+    #[test]
+    fn format_probs_renders_header_and_rows() {
+        // 先頭はヘッダ行、以降は盤面順 1 頭 1 行。率は小数 1 桁＋%（prob は win=place=show）。
+        let probs = vec![prob(7, "ウマ7", 0.123), prob(3, "ウマ3", 0.5)];
+        let lines = format_probs(&probs);
+        assert_eq!(lines.len(), 3);
+        assert!(
+            lines[0].contains("馬番") && lines[0].contains("勝率") && lines[0].contains("複勝率")
+        );
+        assert!(lines[1].contains("ウマ7") && lines[1].contains("12.3%"));
+        assert!(lines[2].contains("ウマ3") && lines[2].contains("50.0%"));
     }
 }
