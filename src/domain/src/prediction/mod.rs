@@ -9,10 +9,12 @@
 //! - [`scoring`] — factor の重み付き採点と前走フォーム sub-signal
 //! - [`recency`] — 日付付き成績の時間減衰集計
 //! - [`estimate`] — レース内確率推定と市場オッズブレンド
+//! - [`explain`] — 予想根拠の構造化データ（条件別成績・前走サマリ, #274）
 //! - [`parse`] — 前走着差文字列のパース
 
 mod config;
 mod estimate;
+mod explain;
 mod model;
 mod parse;
 mod recency;
@@ -30,6 +32,7 @@ pub use estimate::{
     apply_win_power, blend_with_market_win, estimate_probabilities,
     estimate_probabilities_with_config,
 };
+pub use explain::{ExplainCategory, FactorExplanation, HorseExplanation, PrevRunSummary, Verdict};
 pub use model::{
     DatedCounts, FactorStat, HorseFactors, HorseProbability, JockeyFormRun, RateTriple, RecentRun,
     StandardTimes,

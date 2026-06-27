@@ -19,7 +19,15 @@ async fn main() -> anyhow::Result<()> {
         }
         session::run_settle(&app, args.date).await?;
     } else {
-        session::run_session(&app, args.date, args.budget, args.race_budget, args.resume).await?;
+        session::run_session(
+            &app,
+            args.date,
+            args.budget,
+            args.race_budget,
+            args.resume,
+            args.explain,
+        )
+        .await?;
     }
     Ok(())
 }

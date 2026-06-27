@@ -2,9 +2,9 @@ use std::collections::HashMap;
 
 use chrono::NaiveDate;
 use paddock_domain::{
-    EstimationConfig, FactorStat, HorseEntry, HorseFactors, HorseName, HorseProbability,
-    JockeyName, PairEvDiagnostics, RaceId, RateTriple, RecentRun, StandardTimes, Surface,
-    TrackCondition, TrainerName,
+    EstimationConfig, ExplainCategory, FactorExplanation, FactorStat, HorseEntry, HorseExplanation,
+    HorseFactors, HorseName, HorseProbability, JockeyName, PairEvDiagnostics, PrevRunSummary,
+    RaceId, RateTriple, RecentRun, StandardTimes, Surface, TrackCondition, TrainerName,
 };
 
 use crate::error::{Error, Result};
@@ -30,6 +30,62 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: 
         blend_alpha: Option<f64>,
         track_condition: Option<TrackCondition>,
     ) -> Result<Vec<HorseProbability>> {
+        // with_explanation=false: 通常経路では根拠を組まず無駄な String 割当てを避ける（#274 レビュー）。
+        // config は本番設定を 1 度だけ生成し factor 収集と推定で共有する（単一情報源, #274 レビュー）。
+        let config = EstimationConfig::production();
+        let (entry_factors, _) = self
+            .collect_race_factors(race_id, track_condition, false, &config)
+            .await?;
+        self.estimate_and_blend(&entry_factors, race_id, blend_alpha, &config)
+            .await
+    }
+
+    /// `predict_race` に加え、各馬の予想根拠（条件別成績・前走サマリ, #274）も返す。
+    /// 確率（出走馬順）と根拠（同じ出走馬順）を並行 Vec で返す。要素 i 同士が同一馬を指す
+    /// （`collect_race_factors` と `estimate_*` が共に `card.entries` 順を保つ。`debug_assert` で検査）。
+    /// 市場ブレンド・冪変換は `predict_race` と同一経路なので確率値は完全一致する（根拠は probs に
+    /// 依らず factor の生レートから作るため、ブレンド有無で根拠は変わらない）。
+    pub async fn predict_race_explained(
+        &self,
+        race_id: &RaceId,
+        blend_alpha: Option<f64>,
+        track_condition: Option<TrackCondition>,
+    ) -> Result<(Vec<HorseProbability>, Vec<HorseExplanation>)> {
+        let config = EstimationConfig::production();
+        let (entry_factors, explanations) = self
+            .collect_race_factors(race_id, track_condition, true, &config)
+            .await?;
+        let probs = self
+            .estimate_and_blend(&entry_factors, race_id, blend_alpha, &config)
+            .await?;
+        debug_assert_eq!(
+            probs.len(),
+            explanations.len(),
+            "probs と explanations の頭数が一致しない"
+        );
+        debug_assert!(
+            probs
+                .iter()
+                .zip(&explanations)
+                .all(|(p, e)| p.horse_num == e.horse_num),
+            "probs/explanations の馬番がズレている"
+        );
+        Ok((probs, explanations))
+    }
+
+    /// 出馬表の取得と各馬の factor / 予想根拠の構築までを共通化する内部ヘルパ（#274）。
+    /// `predict_race`（確率のみ）と `predict_race_explained`（確率＋根拠）が共有し、DB の二重取得を
+    /// 避ける。返す `entry_factors` と `explanations` は同じ出走馬順で揃う。
+    /// `with_explanation=false` のとき `explanations` は空 Vec を返す（通常経路で根拠を組まず
+    /// 無駄な String 割当てを避ける。`predict_race` は確率しか使わないため）。
+    /// `config` は呼び出し側が生成して渡す（推定と同じ設定を共有するため, #274 レビュー）。
+    async fn collect_race_factors(
+        &self,
+        race_id: &RaceId,
+        track_condition: Option<TrackCondition>,
+        with_explanation: bool,
+        config: &EstimationConfig,
+    ) -> Result<(Vec<(HorseEntry, HorseFactors)>, Vec<HorseExplanation>)> {
         let card = self
             .repository
             .find_race_card(race_id)
@@ -51,9 +107,7 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: 
             track_condition,
             mean_weight,
         };
-        // 本番 predict の確率推定設定（#75: ベイズ縮約 m=10 を採用。recency は backtest 評価で
-        // 改善が出ず無効のまま＝production() は recency: None。下の horse_recency も取得しない）。
-        let config = paddock_domain::EstimationConfig::production();
+        // 確率推定設定（#75: ベイズ縮約 m=10。recency は production() で None）は呼び出し側から共有。
         // 前走タイムの相対速度シグナル用の標準タイム表（#76）。全馬共通なのでループ外で 1 回だけ
         // 取得する。cutoff=card.date で出馬表日以降をリークさせない。
         let standard_times = self.repository.standard_times(card.date).await?;
@@ -91,6 +145,7 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: 
         )?;
 
         let mut entry_factors: Vec<(HorseEntry, HorseFactors)> = Vec::new();
+        let mut explanations: Vec<HorseExplanation> = Vec::new();
         for entry in &card.entries {
             // ok_or_else: batch 契約上 None になることはないが、rdb-gateway の override
             // バグを panic ではなく error として伝播させるため backtest の expect とは意図的に非対称。
@@ -125,17 +180,45 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: 
                 recent_form,
                 None, // recency: production() では無効
                 card.date,
-                &config,
+                config,
                 jockey_recent_form,
             );
+            // 予想根拠（#274）。確率推定と同じ factor レート・前走から作る。runs は date 降順なので
+            // index 0 が最新（前走）。本番経路は recency: None なので集計レート（build_factors と同源）。
+            // with_explanation=false（通常の predict_race）では組まずに無駄な String 割当てを避ける。
+            if with_explanation {
+                explanations.push(build_explanation(
+                    entry,
+                    &course,
+                    horse,
+                    jockey,
+                    trainer,
+                    &race_ctx,
+                    recent_form,
+                    recent_runs.first(),
+                ));
+            }
             entry_factors.push((entry.clone(), factors));
         }
 
+        Ok((entry_factors, explanations))
+    }
+
+    /// 構築済みの `entry_factors` から確率を推定し、市場オッズブレンド・冪変換まで適用する（#72/#246）。
+    /// `predict_race` と `predict_race_explained` が共有する。`config` は呼び出し側が生成し
+    /// `collect_race_factors` と同じ設定を渡す（単一情報源, #274 レビュー）。
+    async fn estimate_and_blend(
+        &self,
+        entry_factors: &[(HorseEntry, HorseFactors)],
+        race_id: &RaceId,
+        blend_alpha: Option<f64>,
+        config: &EstimationConfig,
+    ) -> Result<Vec<HorseProbability>> {
         // estimate_probabilities が win→1.0 / place→2.0 / show→3.0 正規化 + 累積 max 単調化を行い、
         // win_prob ≤ place_prob ≤ show_prob を保証する（ADR 0007）。本番経路は #75 で採用した
         // ベイズ縮約（m=10）を有効にし、少データ馬の過信（win_prob=0 を含む）を緩和する。
         let probs =
-            paddock_domain::prediction::estimate_probabilities_with_config(&entry_factors, &config);
+            paddock_domain::prediction::estimate_probabilities_with_config(entry_factors, config);
 
         // 市場オッズ（単勝）ブレンド（#72）。α<1.0 のときのみ最新オッズスナップショットを取得する
         // （α>=1.0・非有限はブレンド無効なので DB クエリを省く）。
@@ -318,6 +401,118 @@ pub(crate) fn build_factors(
     }
 }
 
+/// 取得済みの stats 行・前走から各馬の予想根拠 [`HorseExplanation`] を組み立てる純粋変換（#274）。
+/// `build_factors` と同じ素材（同一ラベルの集計レート・前走）を使うが、score への合成ではなく
+/// 「人が読める条件別成績」へ写像する。本番経路は recency: None なので集計レート（build_factors と
+/// 同源）を使い、確率推定と根拠の数値が一致する。`prev_run` は最新走（runs の index 0）。
+///
+/// **build_factors との同期が前提**: ラベル選択（`*_label`）と `stat_to_triple_opt` の組は
+/// `build_factors` と揃えて「根拠の数値＝score の入力」を保つ。factor を増やす際は両方を更新する。
+/// 確率自体は `predict_race` と `predict_race_explained` が同一の `collect_race_factors`＋
+/// `estimate_and_blend` を通るため構造的に一致する（`with_explanation` フラグは根拠生成の有無だけを
+/// 切り替え、`entry_factors` には影響しない）。
+/// 既知の乖離点: `config.recency = Some(..)` を有効化すると build_factors は時間減衰レート・本関数は
+/// 集計レートになり数値がズレる。現 production は recency None のため実害なし（有効化時に追従が必要）。
+#[allow(clippy::too_many_arguments)]
+fn build_explanation(
+    entry: &HorseEntry,
+    course: &CourseStatsRow,
+    horse: &HorseStatsRow,
+    jockey: Option<&JockeyStatsRow>,
+    trainer: Option<&TrainerStatsRow>,
+    race: &RaceContext,
+    recent_form: Option<f64>,
+    prev_run: Option<&RecentRun>,
+) -> HorseExplanation {
+    let gate_label = gate_group_label(entry.gate_num.value());
+    let surf_label = surface_label(race.surface);
+    let dist_label = distance_band_label(race.distance);
+
+    let mut factors: Vec<FactorExplanation> = Vec::new();
+    // 馬の条件別成績（芝ダ・距離帯）。一致なし・出走 0 件は stat_to_triple_opt が None（母数除外と同じ欠落扱い）。
+    if let Some(fs) = stat_to_triple_opt(&horse.by_surface, surf_label) {
+        factors.push(FactorExplanation::new(
+            ExplainCategory::Surface,
+            surf_label.to_string(),
+            fs.rate,
+            fs.starts,
+        ));
+    }
+    if let Some(fs) = stat_to_triple_opt(&horse.by_distance_band, dist_label) {
+        factors.push(FactorExplanation::new(
+            ExplainCategory::Distance,
+            dist_label.to_string(),
+            fs.rate,
+            fs.starts,
+        ));
+    }
+    // 馬場状態は当日値が確定しているレースのみ（未確定なら根拠に含めない）。
+    if let Some(tc) = race.track_condition
+        && let Some(fs) = stat_to_triple_opt(&horse.by_track_condition, tc.as_str())
+    {
+        factors.push(FactorExplanation::new(
+            ExplainCategory::TrackCondition,
+            tc.as_str().to_string(),
+            fs.rate,
+            fs.starts,
+        ));
+    }
+    // コース×枠（場×距離×馬場の枠順別）。全馬共通の course から。
+    if let Some(fs) = stat_to_triple_opt(&course.by_gate_group, gate_label) {
+        factors.push(FactorExplanation::new(
+            ExplainCategory::CourseGate,
+            gate_label.to_string(),
+            fs.rate,
+            fs.starts,
+        ));
+    }
+    // 騎手・調教師（芝ダ別）。未登録・実績なしは項を立てない。ラベルは entry の名前を使う。
+    if let Some(fs) = jockey.and_then(|j| stat_to_triple_opt(&j.by_surface, surf_label)) {
+        let label = entry
+            .jockey
+            .as_ref()
+            .map(|n| n.value().to_string())
+            .unwrap_or_default();
+        factors.push(FactorExplanation::new(
+            ExplainCategory::Jockey,
+            label,
+            fs.rate,
+            fs.starts,
+        ));
+    }
+    if let Some(fs) = trainer.and_then(|t| stat_to_triple_opt(&t.by_surface, surf_label)) {
+        let label = entry
+            .trainer
+            .as_ref()
+            .map(|n| n.value().to_string())
+            .unwrap_or_default();
+        factors.push(FactorExplanation::new(
+            ExplainCategory::Trainer,
+            label,
+            fs.rate,
+            fs.starts,
+        ));
+    }
+
+    let prev_run = prev_run.map(|r| PrevRunSummary {
+        finishing_position: r.result.finishing_position.map(|p| p.value()),
+        popularity: r.result.popularity,
+        margin: r.result.margin.clone(),
+        surface: r.surface,
+        distance: r.distance,
+    });
+
+    HorseExplanation {
+        horse_num: entry.horse_num,
+        horse_name: entry.horse_name.clone(),
+        factors,
+        recent_form,
+        prev_run,
+        weight_carried: entry.weight_carried,
+        field_mean_weight: race.mean_weight,
+    }
+}
+
 /// 斤量のレース内相対シグナル用に、出走馬の斤量[kg]の単純平均を返す（#135）。有限値が 1 つも無ければ
 /// `None`（斤量項なし）。predict（出馬表 entries）と backtest（出走馬 results）で共有する。
 /// 非有限値（NaN/inf）は母数から除外し、1 件の異常値が平均を NaN 化して全馬の斤量項を汚染しないようにする。
@@ -396,16 +591,163 @@ fn distance_band_label(distance: u32) -> &'static str {
 mod tests {
     use chrono::NaiveDate;
     use paddock_domain::{
-        RecentRun, StandardTimes, Surface,
+        ExplainCategory, RecentRun, StandardTimes, Surface, Verdict,
         horse_result::{
             FinishingPosition, GateNum, HorseName, HorseNum, HorseResult, ResultStatus,
         },
+        race_card::HorseEntry,
     };
 
-    use super::recent_form_from_runs;
+    use super::{RaceContext, build_explanation, recent_form_from_runs};
+    use crate::repository::{CourseStatsRow, GroupStat, HorseStatsRow};
 
     fn ymd(y: i32, m: u32, d: u32) -> NaiveDate {
         NaiveDate::from_ymd_opt(y, m, d).unwrap()
+    }
+
+    /// shows/starts から GroupStat を作る（win/place は show と整合する適当値で埋める）。
+    fn group(label: &str, starts: u32, shows: u32) -> GroupStat {
+        GroupStat {
+            label: label.to_string(),
+            starts,
+            wins: shows / 3,
+            places: shows / 2,
+            shows,
+        }
+    }
+
+    fn empty_horse_stats() -> HorseStatsRow {
+        HorseStatsRow {
+            horse_name: "テスト".to_string(),
+            by_surface: vec![],
+            by_distance_band: vec![],
+            by_gate_group: vec![],
+            by_track_condition: vec![],
+            by_popularity_band: vec![],
+            overall: GroupStat::new("overall"),
+        }
+    }
+
+    #[test]
+    fn build_explanation_maps_factors_prev_and_weight() {
+        let entry = HorseEntry {
+            gate_num: GateNum::try_from(1u32).unwrap(),
+            horse_num: HorseNum::try_from(5u32).unwrap(),
+            horse_name: HorseName::try_from("テスト馬").unwrap(),
+            jockey: None,
+            trainer: None,
+            weight_carried: Some(57.0),
+        };
+        let course = CourseStatsRow {
+            venue: "東京".to_string(),
+            distance: 1600,
+            surface: "芝".to_string(),
+            by_gate_group: vec![group("Inner (1-3)", 100, 23)],
+        };
+        let horse = HorseStatsRow {
+            // 芝 複勝率 50%（10走）→ 縮約後も prior 超で Strong
+            by_surface: vec![group("芝", 10, 5)],
+            // 1500〜1800m 複勝率 0%（8走）→ Weak
+            by_distance_band: vec![group("1500〜1800m", 8, 0)],
+            ..empty_horse_stats()
+        };
+        let race = RaceContext {
+            surface: Surface::Turf,
+            distance: 1600,
+            track_condition: None, // 馬場 factor なし
+            mean_weight: Some(55.0),
+        };
+        let prev = RecentRun {
+            date: ymd(2026, 1, 6),
+            surface: Surface::Turf,
+            distance: 1600,
+            result: HorseResult {
+                finishing_position: Some(FinishingPosition::try_from(3u32).unwrap()),
+                status: ResultStatus::Finished,
+                gate_num: GateNum::try_from(1u32).unwrap(),
+                horse_num: HorseNum::try_from(5u32).unwrap(),
+                horse_name: HorseName::try_from("テスト馬").unwrap(),
+                horse_id: None,
+                jockey: None,
+                trainer: None,
+                time_seconds: None,
+                margin: None,
+                odds: None,
+                horse_weight: None,
+                weight_change: None,
+                weight_carried: None,
+                popularity: Some(8),
+            },
+        };
+
+        let ex = build_explanation(
+            &entry,
+            &course,
+            &horse,
+            None,
+            None,
+            &race,
+            Some(0.7),
+            Some(&prev),
+        );
+
+        // jockey/trainer/馬場 は None なので factor は 芝・距離・枠 の 3 本。
+        assert_eq!(ex.factors.len(), 3);
+        assert_eq!(ex.factors[0].category, ExplainCategory::Surface);
+        assert_eq!(ex.factors[0].label, "芝");
+        assert_eq!(ex.factors[0].verdict, Some(Verdict::Strong));
+        assert_eq!(ex.factors[1].category, ExplainCategory::Distance);
+        assert_eq!(ex.factors[1].label, "1500〜1800m");
+        assert_eq!(ex.factors[1].verdict, Some(Verdict::Weak));
+        assert_eq!(ex.factors[2].category, ExplainCategory::CourseGate);
+        assert_eq!(ex.factors[2].label, "Inner (1-3)");
+        // 枠は全馬横断率なので verdict なし。
+        assert_eq!(ex.factors[2].verdict, None);
+
+        assert_eq!(ex.recent_form, Some(0.7));
+        let prev_summary = ex.prev_run.expect("前走サマリがあるはず");
+        assert_eq!(prev_summary.finishing_position, Some(3));
+        assert_eq!(prev_summary.popularity, Some(8));
+        assert_eq!(ex.weight_carried, Some(57.0));
+        assert_eq!(ex.field_mean_weight, Some(55.0));
+    }
+
+    #[test]
+    fn build_explanation_first_starter_has_no_factors_or_prev() {
+        // 初戦馬: stats 全空・前走なし・斤量なし → factors 空・prev_run None。
+        let entry = HorseEntry {
+            gate_num: GateNum::try_from(4u32).unwrap(),
+            horse_num: HorseNum::try_from(2u32).unwrap(),
+            horse_name: HorseName::try_from("新馬").unwrap(),
+            jockey: None,
+            trainer: None,
+            weight_carried: None,
+        };
+        let course = CourseStatsRow {
+            venue: "東京".to_string(),
+            distance: 1600,
+            surface: "芝".to_string(),
+            by_gate_group: vec![], // コース統計も空
+        };
+        let race = RaceContext {
+            surface: Surface::Turf,
+            distance: 1600,
+            track_condition: None,
+            mean_weight: None,
+        };
+        let ex = build_explanation(
+            &entry,
+            &course,
+            &empty_horse_stats(),
+            None,
+            None,
+            &race,
+            None,
+            None,
+        );
+        assert!(ex.factors.is_empty());
+        assert!(ex.prev_run.is_none());
+        assert_eq!(ex.weight_carried, None);
     }
 
     fn run_valid(date: NaiveDate, weight_change: Option<i32>) -> RecentRun {

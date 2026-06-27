@@ -33,4 +33,9 @@ pub struct Cli {
     /// セッションの収支・回収率を更新する（冪等。未確定レースはスキップ）。
     #[arg(long, conflicts_with = "summary")]
     pub settle: bool,
+
+    /// 各レースで上位馬の予想根拠（条件別成績・前走サマリ）を表示する（#274）。
+    /// 既定オフ。確率テーブル・買い目・確率値は本フラグの有無で一切変わらない。
+    #[arg(long)]
+    pub explain: bool,
 }
