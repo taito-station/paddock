@@ -10,10 +10,11 @@
 # 使い方:
 #   scripts/predict-check/gen_win_backtest_data.sh [WORKDIR]
 #
-# 環境変数で対象期間・predict 設定を上書きできる（既定は #208 の win-backtest 用）:
+# 環境変数で対象期間・predict 設定を上書きできる（FROM/TO の既定は #208 の win-backtest 窓）:
 #   PADDOCK_BT_FROM   対象開始日（既定 2026-05-30）
 #   PADDOCK_BT_TO     対象終了日（既定 2026-06-14）
-#   PADDOCK_BT_ALPHA  predict の --blend-alpha（既定 0.2 ＝本番モデル, ADR 0034）
+#   PADDOCK_BT_ALPHA  predict の --blend-alpha（既定 0.2 ＝本番モデル, ADR 0034。
+#                     #208 当時の α=0.3 を再現するなら PADDOCK_BT_ALPHA=0.3 を渡す）
 #   PADDOCK_ANALYZE_BIN  analyze バイナリのパス（別 worktree のビルドを流用する時など）
 set -euo pipefail
 
@@ -33,7 +34,7 @@ done
 
 # ALPHA はブレンド係数 [0,1]。形式と値域を検証する（refresh_ev.sh の LIVE_BLEND_ALPHA と対称）。
 [[ "$ALPHA" =~ ^[0-9]+(\.[0-9]+)?$ ]] \
-  && awk -v a="$ALPHA" 'BEGIN{exit !(a>=0 && a<=1)}' \
+  && LC_ALL=C awk -v a="$ALPHA" 'BEGIN{exit !(a>=0 && a<=1)}' \
   || { echo "PADDOCK_BT_ALPHA は 0〜1 の数値: $ALPHA" >&2; exit 1; }
 
 [[ -x "$ANALYZE_BIN" ]] || {
