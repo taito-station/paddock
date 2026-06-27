@@ -34,6 +34,12 @@
   --pred-dir     dir: bt_pred_<date>.txt（model 単勝勝率表、analyze predict --blend-alpha 0.2）
   --results-dir  dir: netkeiba result.html を res_<netkeiba>.html で保存したもの
   --exotic-odds  TSV: paddock_id, bet_type(quinella|trio), combination_key, odds
+  --winodds      TSV: paddock_id, umaban, popularity, odds（#263 ゲート診断の市場人気度。欠落可）
+
+#263 の baseline_pf ゲート精度診断/掃引:
+  --gate-grid        baseline_pf ゲート閾値（model ROI）の掃引。0=無ゲート対照（既定 0,1.0,1.1,1.2,1.3）
+  --odds-floor-grid  ◎単勝オッズ下限の掃引。0=条件なし（既定 0,2,3,5）
+  ※ #246 較正後の検証は #252 と同じ /tmp/bt252 入力（較正後再生成）を明示指定する。
 
 bt_exotic_odds.tsv の生成（DB から、71R 窓の馬連・三連複盤面）:
   psql "$DB" -tA -F$'\t' -c "
@@ -188,16 +194,36 @@ def parse_exotic(path):
     return out
 
 
-# --- 戦略 ---------------------------------------------------------------------
-def eval_baseline_pf(probs, quin_odds, trio_odds, pay):
-    """現行ルール−wide。馬連 ◎軸ながし top5 ¥1500 + 三連複 ◎軸ながし top5 ¥2000（確率重み）。
+def parse_winodds(path):
+    """bt_winodds.tsv -> {pid: {umaban: (popularity, odds)}}（#263 診断用の市場人気度）。
 
-    返り値 (bet, ret, stake)。bet = ポートフォリオ model ROI ≥ 100%（DB 盤面オッズで算出）。
-    清算は実払戻。DB オッズ欠落の目は model EV 寄与 0（保守的）。
+    TSV: paddock_id, umaban, popularity, odds。ファイルが無ければ空 dict（診断は odds 欠落扱い）。
+    """
+    out = {}
+    p = Path(path)
+    if not p.exists():
+        return out
+    for line in p.read_text().splitlines():
+        if not line.strip():
+            continue
+        pid, um, pop, odds = line.split("\t")
+        out.setdefault(pid, {})[int(um)] = (int(pop), float(odds))
+    return out
+
+
+# --- 戦略 ---------------------------------------------------------------------
+def compute_baseline_pf(probs, quin_odds, trio_odds, pay):
+    """現行ルール−wide ポートフォリオの (model_roi, ret, stake) を算出（ゲート判定はしない）。
+
+    馬連 ◎軸ながし top5 ¥1500 + 三連複 ◎軸ながし top5 ¥2000（確率重み）。
+    model_roi = 期待払戻 / 賭金（DB 盤面オッズで算出）。清算 ret は実払戻。
+    DB オッズ欠落の目は model EV 寄与 0（保守的）。評価不能（3 頭未満）は (0.0, 0, 0)。
+
+    ゲート閾値や ◎オッズ条件の掃引（#263）のため、計算と発動判定を分離している。
     """
     ranked = sorted(probs, key=lambda n: -probs[n])
     if len(ranked) < 3:
-        return False, 0, 0
+        return 0.0, 0, 0
     A = ranked[0]
     partners = ranked[1:6]
 
@@ -220,7 +246,17 @@ def eval_baseline_pf(probs, quin_odds, trio_odds, pay):
         exp_ret += s * p_top3_set(probs, (A, a, b)) * trio_odds.get(c, 0.0)
         ret += s * pay["trio"].get(c, 0) // 100
 
-    bet = stake > 0 and exp_ret / stake >= 1.0
+    model_roi = exp_ret / stake if stake > 0 else 0.0
+    return model_roi, ret, stake
+
+
+def eval_baseline_pf(probs, quin_odds, trio_odds, pay, gate=1.0):
+    """現行ルール−wide。発動ゲート = ポートフォリオ model ROI ≥ gate（既定 1.0=100%）。
+
+    返り値 (bet, ret, stake)。計算は compute_baseline_pf に委譲。
+    """
+    model_roi, ret, stake = compute_baseline_pf(probs, quin_odds, trio_odds, pay)
+    bet = stake > 0 and model_roi >= gate
     return bet, ret, stake
 
 
@@ -320,18 +356,112 @@ def summarize(label, rows):
     return f"{label:<22} {freq:>4}  {roi:>6.1f}% {hit:>4.0f}% {sd:>7.1f} {dd:>9.0f}"
 
 
+# --- #263: 較正後 model ROI≥100% ゲートの精度診断 ----------------------------
+def fav_market(winodds, pid, A):
+    """◎（model 1 番手）の市場（人気, 単勝オッズ）。欠落は (None, None)。"""
+    pop, odds = winodds.get(pid, {}).get(A, (None, None))
+    return pop, odds
+
+
+def gate_diagnostics(evaluated, winodds, gate=1.0):
+    """ゲート通過鞍/非通過鞍を ◎の市場人気度で特徴づける（#263）。
+
+    evaluated 各要素: (date, venue, rnum, pid, probs, quin, trio, pay)。
+    通過鞍の内訳行と、通過 vs 非通過の ◎市場オッズ/人気の平均比較を表示する。
+    """
+    print(f"=== ゲート診断（model ROI ≥ {gate * 100:.0f}% 通過鞍の内訳）===")
+    print(f"{'date':<10} {'場':<3}{'R':>3} {'◎':>3} {'◎model':>7} {'◎mktO':>6} {'◎人':>3} "
+          f"{'modelROI':>8} {'実ROI':>7} {'的中':>4}")
+    # 鞍数は winodds の有無に依存しない独立カウンタで数える。◎オッズ/人気の平均は
+    # winodds がある鞍のみで集計する（欠落鞍を平均から除く）ため、件数とは別に持つ。
+    pass_n = fail_n = 0
+    pass_odds, fail_odds = [], []
+    pass_pop, fail_pop = [], []
+    for date, venue, rnum, pid, probs, quin, trio, pay in evaluated:
+        model_roi, ret, stake = compute_baseline_pf(probs, quin, trio, pay)
+        if stake <= 0:
+            continue
+        A = sorted(probs, key=lambda n: -probs[n])[0]
+        pop, odds = fav_market(winodds, pid, A)
+        passed = model_roi >= gate
+        if passed:
+            pass_n += 1
+            if odds is not None:
+                pass_odds.append(odds)
+            if pop is not None:
+                pass_pop.append(pop)
+        else:
+            fail_n += 1
+            if odds is not None:
+                fail_odds.append(odds)
+            if pop is not None:
+                fail_pop.append(pop)
+        if not passed:
+            continue
+        real_roi = ret / stake * 100
+        odds_s = f"{odds:>6.1f}" if odds is not None else f"{'-':>6}"
+        pop_s = f"{pop:>3}" if pop is not None else f"{'-':>3}"
+        print(f"{date:<10} {venue:<3}{rnum:>3} {A:>3} {probs[A]:>6.1f}% "
+              f"{odds_s} {pop_s} "
+              f"{model_roi * 100:>7.1f}% {real_roi:>6.0f}% {'○' if ret > 0 else '×':>3}")
+
+    def _mean(xs):
+        return statistics.mean(xs) if xs else float("nan")
+
+    print()
+    print(f"通過鞍 {pass_n}（うち◎オッズ有 {len(pass_odds)}）: "
+          f"◎平均単勝 {_mean(pass_odds):.2f} 倍 / ◎平均人気 {_mean(pass_pop):.1f}")
+    print(f"非通過 {fail_n}（うち◎オッズ有 {len(fail_odds)}）: "
+          f"◎平均単勝 {_mean(fail_odds):.2f} 倍 / ◎平均人気 {_mean(fail_pop):.1f}")
+    print("（通過/非通過で◎の市場人気度〔単勝オッズ・人気〕が分かれるかの確認用。"
+          "71R では両者ともほぼ市場最上位で差が小さく、人気度はゲート通過を分けない）\n")
+
+
+def gate_sweep(evaluated, winodds, gates, floors):
+    """ゲート閾値 × ◎単勝オッズ下限の掃引（#263）。各設定の実 ROI を測る。
+
+    floor は ◎の市場単勝オッズ下限（断然人気の除外）。floor=0 は条件なし。
+    ◎オッズが欠落する鞍は floor>0 のとき保守的に除外する。
+    """
+    print("=== ゲート掃引（model ROI 閾値 × ◎単勝オッズ下限。発動鞍のみ集計）===")
+    print(f"{'setting':<22} {'張鞍':>4}  {'ROI':>7} {'的中':>5} {'σROI':>7} {'maxDD円':>9}")
+    for g in gates:
+        for fl in floors:
+            rows = []
+            for _date, _venue, _rnum, pid, probs, quin, trio, pay in evaluated:
+                model_roi, ret, stake = compute_baseline_pf(probs, quin, trio, pay)
+                if stake <= 0 or model_roi < g:
+                    continue
+                if fl > 0:
+                    A = sorted(probs, key=lambda n: -probs[n])[0]
+                    _pop, odds = fav_market(winodds, pid, A)
+                    if odds is None or odds < fl:
+                        continue
+                rows.append((ret, stake))
+            flabel = "◎O≥%.0f" % fl if fl > 0 else "条件なし"
+            print(summarize(f"gate≥{g * 100:.0f}% {flabel}", rows))
+        print()
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--races", default="/tmp/bt250/bt_races.tsv")
     ap.add_argument("--pred-dir", default="/tmp/bt250")
     ap.add_argument("--results-dir", default="/tmp/bt250")
     ap.add_argument("--exotic-odds", default="/tmp/bt250/bt_exotic_odds.tsv")
+    ap.add_argument("--winodds", default="/tmp/bt250/bt_winodds.tsv",
+                    help="単勝オッズ TSV（#263 ゲート診断の市場人気度。欠落可）")
     ap.add_argument("--ev-grid", default="1.0,1.2,1.5")
     ap.add_argument("--cap-grid", default="inf,50,30", help="馬連オッズ上限の掃引（inf=無制限）")
+    ap.add_argument("--gate-grid", default="0,1.0,1.1,1.2,1.3",
+                    help="#263 baseline_pf ゲート閾値（model ROI）の掃引。0=無ゲート対照")
+    ap.add_argument("--odds-floor-grid", default="0,2,3,5",
+                    help="#263 ◎単勝オッズ下限の掃引（0=条件なし）")
     args = ap.parse_args()
 
     races = parse_races(args.races)
     exotic = parse_exotic(args.exotic_odds)
+    winodds = parse_winodds(args.winodds)
     preds = {}
     for d in sorted({r["date"] for r in races}):
         p = Path(args.pred_dir) / f"bt_pred_{d}.txt"
@@ -343,7 +473,7 @@ def main():
             for x in args.cap_grid.split(",")]
 
     # 各レースを 1 度評価。exotic オッズ（馬連/三連複盤面）が無い鞍は対象外。
-    evaluated = []  # (date, venue, rnum, probs, quin, trio, pay)
+    evaluated = []  # (date, venue, rnum, pid, probs, quin, trio, pay)
     skips = dict(probs=0, exotic=0, result=0)
     for r in sorted(races, key=lambda x: (x["date"], x["venue"], x["rnum"])):
         probs = preds.get(r["date"], {}).get((r["venue"], r["rnum"]))
@@ -362,7 +492,7 @@ def main():
         if len(top3) < 3:
             skips["result"] += 1
             continue
-        evaluated.append((r["date"], r["venue"], r["rnum"], probs, ex["quinella"], ex["trio"], pay))
+        evaluated.append((r["date"], r["venue"], r["rnum"], r["pid"], probs, ex["quinella"], ex["trio"], pay))
 
     used = len(evaluated)
     print(
@@ -372,7 +502,7 @@ def main():
 
     # baseline_pf（全鞍評価し、発動ゲート通過鞍のみ集計）
     base_rows = []
-    for _, _, _, probs, quin, trio, pay in evaluated:
+    for _date, _venue, _rnum, _pid, probs, quin, trio, pay in evaluated:
         bet, ret, stake = eval_baseline_pf(probs, quin, trio, pay)
         if bet:
             base_rows.append((ret, stake))
@@ -380,7 +510,7 @@ def main():
     # 参考: ◎軸 馬連 top5 ながし（EV フィルタ無し, 全鞍機械買い）
     plain_rows = []
     allflat_rows = []
-    for _, _, _, probs, _quin, _trio, pay in evaluated:
+    for _date, _venue, _rnum, _pid, probs, _quin, _trio, pay in evaluated:
         bet, ret, stake = eval_umaren_plain(probs, pay)
         if bet:
             plain_rows.append((ret, stake))
@@ -397,12 +527,18 @@ def main():
     print(summarize("馬連全頭(無フィルタflat)", allflat_rows))
     print()
 
+    # #263: 較正後 model ROI≥100% ゲートの精度診断と閾値/オッズ条件の掃引。
+    gate_diagnostics(evaluated, winodds, gate=1.0)
+    gates = [float(x) for x in args.gate_grid.split(",")]
+    floors = [float(x) for x in args.odds_floor_grid.split(",")]
+    gate_sweep(evaluated, winodds, gates, floors)
+
     # 馬連特化（EV≥θ）。cap=∞（課題の素案）と規律版（オッズ上限）を掃引。
     for mode in ("flat", "weighted"):
         for cap, clabel in caps:
             for theta in thetas:
                 rows = []
-                for _, _, _, probs, quin, _trio, pay in evaluated:
+                for _date, _venue, _rnum, _pid, probs, quin, _trio, pay in evaluated:
                     bet, ret, stake = eval_umaren_only(probs, quin, pay, theta, mode, cap)
                     if bet:
                         rows.append((ret, stake))
