@@ -103,6 +103,7 @@ python3 scripts/predict-check/strategy_eval.py /tmp/preds.json /tmp/payouts.json
 | `answer_check.py` | preds × results の精度指標（本命的中/Brier/芝ダ別/回収率） |
 | `strategy_eval.py` | preds × payouts の買い方別回収率（軸流し・予算配分・100 円単位, #122） |
 | `konsen_backtest.py` | 混戦判定の閾値バックテスト（¥5,000・確率重み配分・3連複ボックス, #180） |
+| `formation_backtest.py` | 上位近接時の2軸フォーメーション バックテスト（baseline vs union2/pair2・θ 掃引, #241） |
 | `fetch_wide.py` | netkeiba ライブ（発走前）ワイドオッズ取得（type=5, fetch-card 未対応の補完, #187） |
 | `live_ev.py` | 当日・発走前オッズの全3券種 ROI（期待回収率）評価＋ +EV レースの買い目伝票 |
 | `refresh_ev.sh` | ライブ EV のオーケストレータ（fetch-card→DB→ワイド→predict→`live_ev.py`） |
