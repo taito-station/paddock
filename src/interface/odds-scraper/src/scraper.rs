@@ -14,6 +14,7 @@
 //! the pure, fully-tested core that turns fetched HTML into [`RaceOdds`].
 
 use std::io::Read;
+use std::time::Duration;
 
 use paddock_domain::{BetType, RaceId, RaceOdds};
 use paddock_use_case::Result as UcResult;
@@ -70,12 +71,16 @@ const ODDS_MENU_URL: &str = "https://www.jra.go.jp/JRADB/accessO.html";
 pub struct UreqOddsScraper {
     /// The `accessO.html` endpoint; overridable for tests/staging.
     endpoint: String,
+    /// Per-request pacing: slept before each `post_cname`. JRA への礼節のため、
+    /// 監視（#257）のように同一オッズを繰り返し叩く用途で間隔を空ける。既定はゼロ。
+    delay: Duration,
 }
 
 impl Default for UreqOddsScraper {
     fn default() -> Self {
         Self {
             endpoint: ODDS_MENU_URL.to_string(),
+            delay: Duration::ZERO,
         }
     }
 }
@@ -85,8 +90,21 @@ impl UreqOddsScraper {
         Self::default()
     }
 
+    /// 各リクエスト前に `delay` だけ待つスクレイパを作る（#257 の発走直前監視で
+    /// JRA を繰り返し叩くためのペーシング。`UreqNetkeibaScraper::with_delay` と同パターン）。
+    pub fn with_delay(delay: Duration) -> Self {
+        Self {
+            delay,
+            ..Self::default()
+        }
+    }
+
     /// POST a `cname` token to the odds endpoint and return the page body.
     fn post_cname(&self, cname: &str) -> Result<String> {
+        // 1 レースあたり券種ごとに複数 POST するため、リクエスト単位で間隔を空ける。
+        if !self.delay.is_zero() {
+            std::thread::sleep(self.delay);
+        }
         let resp = ureq::post(&self.endpoint)
             .send_form([("cname", cname)])
             .map_err(|e| Error::Fetch(e.to_string()))?;
