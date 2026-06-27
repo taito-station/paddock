@@ -166,7 +166,8 @@ LIVE_WINDOW_MIN=60 scripts/predict-check/refresh_ev.sh 2026-06-20 1 12 5000
 1. `fetch-card --force`（netkeiba 最新オッズ → Postgres `race_odds`）
 2. Postgres から馬・単勝・馬連・3連複オッズを TSV 化（`$WORKDIR`、既定 `$TMPDIR/paddock-live-ev`）
 3. `fetch_wide.py`（netkeiba type=5）でワイドを取得（fetch-card 未対応の補完, #187）
-4. `analyze predict --blend-alpha 0.3`（最新オッズ込みの model 勝率）で確率テーブル生成
+4. `analyze predict --blend-alpha 0.2`（最新オッズ込みの model 勝率）で確率テーブル生成
+   （α は本番モデルと同じ 0.2＝ADR 0034。実験時は `LIVE_BLEND_ALPHA` で上書き可）
 5. `live_ev.py` が Plackett-Luce（model 勝率→着順確率）× 実オッズで全3券種 ROI を算出
 
 `live_ev.py` は中間 TSV を直接渡しても単独実行できる（再計算のみ・取得をスキップ）:

@@ -13,7 +13,7 @@
 # 環境変数で対象期間・predict 設定を上書きできる（既定は #208 の win-backtest 用）:
 #   PADDOCK_BT_FROM   対象開始日（既定 2026-05-30）
 #   PADDOCK_BT_TO     対象終了日（既定 2026-06-14）
-#   PADDOCK_BT_ALPHA  predict の --blend-alpha（既定 0.3）
+#   PADDOCK_BT_ALPHA  predict の --blend-alpha（既定 0.2 ＝本番モデル, ADR 0034）
 #   PADDOCK_ANALYZE_BIN  analyze バイナリのパス（別 worktree のビルドを流用する時など）
 set -euo pipefail
 
@@ -23,7 +23,7 @@ DB_URL="${PADDOCK_DB_URL:-postgres://paddock:paddock@127.0.0.1:5432/paddock}"
 ANALYZE_BIN="${PADDOCK_ANALYZE_BIN:-$REPO_ROOT/target/release/paddock-analyze}"
 FROM="${PADDOCK_BT_FROM:-2026-05-30}"
 TO="${PADDOCK_BT_TO:-2026-06-14}"
-ALPHA="${PADDOCK_BT_ALPHA:-0.3}"
+ALPHA="${PADDOCK_BT_ALPHA:-0.2}"
 PSQL=(psql "$DB_URL" -tA)
 
 # FROM/TO は SQL に文字列補間するため、日付形式（数字とハイフンのみ）に制限して注入を防ぐ。
