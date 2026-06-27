@@ -54,24 +54,28 @@ log() { echo "[$(date '+%Y-%m-%dT%H:%M:%S%z')] $*" | tee -a "$LOG"; }
 # 必ず効かせる（cron 代替経路でもノーガードにしない）。
 # ロックパスは WORKDIR に依存させず固定にする。launchd は WORKDIR=/tmp/paddock-prefetch、手動実行は
 # $TMPDIR 配下と WORKDIR が異なるため、WORKDIR 配下に置くと両者が別ロックになり二重 fetch しうる。
+# 排他が要るのは実 fetch だけなので、取得は dry-run 早期 return の後（fetch 直前）で行う。
+# こうすると read-only な --dry-run は launchd 実走中でもロックに阻まれず常に選択結果を表示できる。
 LOCK="/tmp/paddock-prefetch.lock"
 LOCK_DIR="/tmp/paddock-prefetch.lock.d"
-if command -v flock >/dev/null 2>&1; then
-  exec 9>"$LOCK"
-  flock -n 9 || { log "別の prefetch 実行中のためスキップ"; exit 0; }
-else
-  # 異常終了でロックが残ると永久ブロックするため、一定時間より古いロックは奪う（前回が
-  # ハング/強制終了した残骸とみなす）。閾値は StartInterval(5分) より十分長い 30 分。
-  if [ -d "$LOCK_DIR" ] && [ -n "$(find "$LOCK_DIR" -prune -mmin +30 2>/dev/null)" ]; then
-    log "古いロックを破棄（前回が異常終了した可能性）: $LOCK_DIR"
-    rmdir "$LOCK_DIR" 2>/dev/null || true
+acquire_lock() {
+  if command -v flock >/dev/null 2>&1; then
+    exec 9>"$LOCK"
+    flock -n 9 || { log "別の prefetch 実行中のためスキップ"; exit 0; }
+  else
+    # 異常終了でロックが残ると永久ブロックするため、一定時間より古いロックは奪う（前回が
+    # ハング/強制終了した残骸とみなす）。閾値は StartInterval(5分) より十分長い 30 分。
+    if [ -d "$LOCK_DIR" ] && [ -n "$(find "$LOCK_DIR" -prune -mmin +30 2>/dev/null)" ]; then
+      log "古いロックを破棄（前回が異常終了した可能性）: $LOCK_DIR"
+      rmdir "$LOCK_DIR" 2>/dev/null || true
+    fi
+    if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+      log "別の prefetch 実行中のためスキップ（mkdir ロック）"
+      exit 0
+    fi
+    trap 'rmdir "$LOCK_DIR" 2>/dev/null || true' EXIT
   fi
-  if ! mkdir "$LOCK_DIR" 2>/dev/null; then
-    log "別の prefetch 実行中のためスキップ（mkdir ロック）"
-    exit 0
-  fi
-  trap 'rmdir "$LOCK_DIR" 2>/dev/null || true' EXIT
-fi
+}
 
 # paddock race_id（例 2026-3-tokyo-5-6R）→ netkeiba 12 桁。正本は
 # src/use-case/src/netkeiba_race_id.rs（CLI 露出が無いため refresh_ev.sh と同じ変換を持つ）。
@@ -118,6 +122,9 @@ if [ "$DRY_RUN" -eq 1 ]; then
   log "[dry-run] 対象 ${#PIDS[@]} レース: ${PIDS[*]}"
   exit 0
 fi
+
+# ここから実 fetch。多重起動防止のロックを取得（read-only な選択・dry-run は阻まない）。
+acquire_lock
 
 # release バイナリ確認（debug ビルドでのライブ運用を防ぐ, refresh_ev.sh と同方針 #211）。
 # 実フェッチ時のみ必要なので dry-run の後に置く。
