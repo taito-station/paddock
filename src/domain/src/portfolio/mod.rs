@@ -324,8 +324,9 @@ fn distribute(type_budget: u64, n: usize) -> Vec<u64> {
 }
 
 /// 脚 1 点の (ev 倍率, 的中確率) を `simulate` 単体評価で 1 度に求める。
-/// 的中確率はオッズに依らない（payout>0 の着順確率和）ため、odds 未取得の脚はダミー倍率 1.0 で
-/// 確率だけ得る（配分の重みに使えるようにする）。ev 倍率は odds 未取得なら 0.0（精算不能のため）。
+/// 的中確率は買い目の判断材料として表示するためのもの（配分の重みには使わない＝配分は均等割り, ADR 0046）。
+/// オッズに依らない（payout>0 の着順確率和）ので、odds 未取得の脚もダミー倍率 1.0 で確率だけ得る
+/// （その分 simulate を呼ぶが頭数小・実害なし）。ev 倍率は odds 未取得なら 0.0（精算不能のため）。
 /// 頭数不足（3 頭未満）は (0.0, 0.0)。
 fn leg_metrics(
     field: &[HorseNum],
@@ -712,6 +713,7 @@ mod tests {
     #[test]
     fn portfolio_populates_hit_prob_for_each_bet() {
         // 各買い目に的中確率（判断材料）が入る。確率なので (0, 1] の範囲。
+        // sample() の相手は全て勝率 > 0 なので hit_prob > 0 が保証される（勝率 0 の相手なら 0.0 になりうる）。
         let (probs, o) = sample();
         let pf = build_portfolio(&probs, &o, 5000, &PortfolioConfig::default());
         assert!(!pf.bets.is_empty());
