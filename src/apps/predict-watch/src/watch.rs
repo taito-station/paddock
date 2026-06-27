@@ -4,6 +4,7 @@ use chrono::{Duration, Local, NaiveTime, Offset};
 use paddock_domain::{
     Portfolio, PortfolioConfig, RECOMMENDED_MARKET_BLEND_ALPHA, Race, build_portfolio,
 };
+use predict_format::{format_explanations, format_probs};
 
 use crate::cli::Cli;
 use crate::setup::App;
@@ -155,23 +156,34 @@ async fn evaluate_race(app: &App, slot: &Slot, cli: &Cli, blend_alpha: Option<f6
         }
     };
 
-    // 2) 確率推定。predict_race は内部で find_race_odds（直前に persist した最新スナップショット）を
-    //    再読込して市場単勝ブレンドに使う。build_portfolio へ渡す odds と同一データだが読み出し経路は別。
-    //    persist 失敗時（warn のみで継続）は predict_race が旧スナップショットを見るため、その回だけ
-    //    買い目側と確率側でオッズ集合が食い違いうる（次スイープで解消する一時的劣化）。
+    // 2) 確率推定＋予想根拠。predict_race_explained は内部で find_race_odds（直前に persist した最新
+    //    スナップショット）を再読込して市場単勝ブレンドに使う。build_portfolio へ渡す odds と同一データ
+    //    だが読み出し経路は別。persist 失敗時（warn のみで継続）は旧スナップショットを見るため、その回だけ
+    //    買い目側と確率側でオッズ集合が食い違いうる（次スイープで解消する一時的劣化）。確率値は predict_race
+    //    と同一経路で完全一致する（根拠は probs に依らず factor の生レートから作る, #274）。
     //    track_condition は発走前レースでは None のため、監視は当日の馬場状態を反映しない
     //    （対話 predict は馬場を入力するので、同一レースで確率が僅かに乖離しうる）。
-    let probs = match app
+    let (probs, explanations) = match app
         .interactor
-        .predict_race(rid, blend_alpha, slot.race.track_condition)
+        .predict_race_explained(rid, blend_alpha, slot.race.track_condition)
         .await
     {
-        Ok(p) => p,
+        Ok(pe) => pe,
         Err(e) => {
             println!("  {label}: 確率推定エラー: {e}");
             return;
         }
     };
+
+    // 予想（順位＋根拠）は EV ゲートに依らず常に出す（#272 分離）。エッジが無く全レース見送りになる窓でも
+    // 「なぜこの順位か」を必ず提示する。買い目（張り候補）だけを ROI ゲートの後段に残す。
+    println!("  ── {label} 予想");
+    for line in format_probs(&probs) {
+        println!("    {line}");
+    }
+    for line in format_explanations(&probs, &explanations) {
+        println!("    {line}");
+    }
 
     // 3) 本番と同じ軸流しポートフォリオで買い目＋EV を組成。
     let portfolio = build_portfolio(&probs, &odds, cli.race_budget, &PortfolioConfig::default());
