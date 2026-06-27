@@ -1,0 +1,259 @@
+"""snapshot_ev_report.py の純関数テスト（pytest 不要・`python3 test_snapshot_ev.py` で実行）.
+
+DB / analyze に触れない group_snapshots / eval_race / load_snapshot_rows の不変量を固定する。
+ROI ロジック自体は live_ev 側（test_live_ev.py）で担保済みなので、ここでは
+「snapshot 構造 → 時系列走査 → ever/final 判定」と「ワイド mid 変換」の正しさに絞る。
+"""
+import snapshot_ev_report as S
+
+
+def approx(a, b, eps=1e-9):
+    return abs(a - b) < eps
+
+
+def _row(rid, bt, key, odds, odds_high="", at="2026-06-27T00:00:00+00:00",
+         date="2026-06-27", venue="hakodate", rnum="1"):
+    return dict(race_id=rid, date=date, venue=venue, race_num=rnum,
+                bet_type=bt, combination_key=key, odds=str(odds),
+                odds_high=str(odds_high), fetched_at=at)
+
+
+def test_group_snapshots_wide_mid_and_keys():
+    # ワイドは low(odds)/high(odds_high) から mid を採る。馬連/3連複は単一オッズ。
+    rows = [
+        _row("R1", "win", "1", 3.5),
+        _row("R1", "quinella", "1-2", 12.4),
+        _row("R1", "trio", "3-1-2", 88.0),   # 非ソート入力でも昇順 tuple に正規化
+        _row("R1", "wide", "2-1", 3.0, odds_high=5.0),
+    ]
+    races = S.group_snapshots(rows)
+    assert set(races) == {"R1"}, races
+    books = races["R1"]["times"]["2026-06-27T00:00:00+00:00"]
+    assert books["win"] == {1: 3.5}
+    assert books["quinella"] == {(1, 2): 12.4}
+    assert books["trio"] == {(1, 2, 3): 88.0}
+    assert approx(books["wide"][(1, 2)], 4.0), books["wide"]  # (3+5)/2
+    assert races["R1"]["race_num"] == 1
+
+
+def test_group_snapshots_wide_missing_high_skipped():
+    # odds_high 欠落のワイドは mid を出せないのでスキップ。正常行があれば race は作られ wide は空。
+    t0 = "2026-06-27T00:00:00+00:00"
+    races = S.group_snapshots([
+        _row("R1", "win", "1", 3.5, at=t0),
+        _row("R1", "wide", "1-2", 3.0, odds_high="", at=t0),
+    ])
+    assert races["R1"]["times"][t0]["wide"] == {}, races["R1"]["times"][t0]["wide"]
+    # high 欠落ワイドのみの入力では phantom レースを作らない。
+    assert S.group_snapshots([_row("R2", "wide", "1-2", 3.0, odds_high="")]) == {}
+
+
+def test_group_snapshots_multiple_times():
+    # 同一レースの別 fetched_at は別 snapshot 時点として分かれる。
+    rows = [
+        _row("R1", "win", "1", 3.5, at="2026-06-27T00:00:00+00:00"),
+        _row("R1", "win", "1", 3.2, at="2026-06-27T01:00:00+00:00"),
+    ]
+    races = S.group_snapshots(rows)
+    assert set(races["R1"]["times"]) == {
+        "2026-06-27T00:00:00+00:00", "2026-06-27T01:00:00+00:00"}
+
+
+def test_load_snapshot_rows_column_guard():
+    good = "\t".join(["R1", "2026-06-27", "hakodate", "1",
+                      "win", "1", "3.5", "", "2026-06-27T00:00:00+00:00"])
+    bad = "R1\twin\t3.5"  # 列数不足は捨てる
+    rows = S.load_snapshot_rows(good + "\n" + bad + "\n")
+    assert len(rows) == 1 and rows[0]["bet_type"] == "win", rows
+
+
+class ConstBook(dict):
+    """任意の組番に対し固定オッズを返すテスト用 book（bets の組番を事前に知らずに済む）。"""
+
+    def __init__(self, value):
+        super().__init__()
+        self._value = value
+
+    def get(self, _key, _default=None):
+        return self._value
+
+
+def _times_with(const_by_time):
+    """{fetched_at: const_odds} から eval_race 用の times（wide/quinella/trio を ConstBook）を作る。"""
+    times = {}
+    for at, val in const_by_time.items():
+        times[at] = {"win": {1: 2.0, 2: 3.0, 3: 4.0, 4: 5.0},
+                     "quinella": ConstBook(val), "trio": ConstBook(val), "wide": ConstBook(val)}
+    return times
+
+
+def test_eval_race_ever_but_not_final():
+    # 早い時点は高オッズ(+EV)、最終時点は配当0(−EV) → ever_pos=True, final_pos=False。
+    probs = {1: 40.0, 2: 30.0, 3: 20.0, 4: 10.0}
+    times = _times_with({
+        "2026-06-27T00:00:00+00:00": 1000.0,  # 高配当 → ROI 大
+        "2026-06-27T01:00:00+00:00": 0.0,      # 配当なし → ROI 0
+    })
+    ev = S.eval_race(probs, times, budget=5000)
+    assert ev["ever_pos"] is True, ev
+    assert ev["final_pos"] is False, ev
+    assert ev["final_at"] == "2026-06-27T01:00:00+00:00", ev  # 最終=最遅 fetched_at
+    assert ev["n_times"] == 2
+
+
+def test_eval_race_final_pos():
+    # 最終時点が高配当なら final_pos=True。
+    probs = {1: 40.0, 2: 30.0, 3: 20.0, 4: 10.0}
+    times = _times_with({
+        "2026-06-27T00:00:00+00:00": 0.0,
+        "2026-06-27T01:00:00+00:00": 1000.0,
+    })
+    ev = S.eval_race(probs, times, budget=5000)
+    assert ev["final_pos"] is True and ev["ever_pos"] is True, ev
+
+
+def test_eval_race_degenerate_returns_none():
+    # 出走馬 < 3 は買い目が組めず None（集計対象外）。
+    assert S.eval_race({1: 50.0, 2: 50.0}, _times_with({"t": 10.0}), 5000) is None
+
+
+def test_eval_race_final_missing_flag():
+    # 最終時点のオッズが欠落（配当0=未掲載）なら final_missing>0 が立つ（final ROI 過小評価の警告材料）。
+    probs = {1: 40.0, 2: 30.0, 3: 20.0, 4: 10.0}
+    times = _times_with({
+        "2026-06-27T00:00:00+00:00": 1000.0,  # 揃っている
+        "2026-06-27T01:00:00+00:00": 0.0,      # 最終が欠落
+    })
+    ev = S.eval_race(probs, times, budget=5000)
+    assert ev["final_missing"] > 0, ev
+    # 逆に最終が揃っていれば欠落 0。
+    times2 = _times_with({"2026-06-27T00:00:00+00:00": 1000.0})
+    assert S.eval_race(probs, times2, 5000)["final_missing"] == 0
+
+
+def test_load_pred_tsv_guard():
+    # 正常行は読み、列数不正・非数値行は warn スキップ（1 行の崩れで全体を落とさない）。
+    import os
+    import tempfile
+    with tempfile.NamedTemporaryFile("w", suffix=".tsv", delete=False) as f:
+        f.write("R1\t1\t40.0\nR1\t2\t30.0\nR1\tbad\n2列\tだけ\nR1\t3\tNaNだよ\n")
+        path = f.name
+    try:
+        preds = S.load_pred_tsv(path)
+    finally:
+        os.unlink(path)
+    assert preds["R1"] == {1: 40.0, 2: 30.0}, preds  # 不正 3 行はスキップ
+
+
+def _full_race_rows(rid, at="2026-06-27T00:00:00+00:00"):
+    """build_report が eval_race まで到達できる最小のフル券種 snapshot 行を作る。"""
+    return [
+        _row(rid, "win", "1", 2.0, at=at), _row(rid, "win", "2", 3.0, at=at),
+        _row(rid, "win", "3", 4.0, at=at),
+        _row(rid, "quinella", "1-2", 50.0, at=at), _row(rid, "quinella", "1-3", 60.0, at=at),
+        _row(rid, "quinella", "2-3", 70.0, at=at),
+        _row(rid, "trio", "1-2-3", 200.0, at=at),
+        _row(rid, "wide", "1-2", 8.0, odds_high=12.0, at=at),
+        _row(rid, "wide", "1-3", 9.0, odds_high=13.0, at=at),
+        _row(rid, "wide", "2-3", 10.0, odds_high=14.0, at=at),
+    ]
+
+
+def test_build_report_excludes_scratched_horses():
+    # 最終 snapshot の出走馬（win 集合）に無い馬番は probs から除外される。
+    races = S.group_snapshots(_full_race_rows("R1"))
+    # 9 は取消（win に無い）。除外後 probs={1,2,3} で評価成立。
+    results = S.build_report(races, {"R1": {1: 40.0, 2: 30.0, 3: 20.0, 9: 99.0}}, budget=5000)
+    assert len(results) == 1 and results[0]["race_id"] == "R1", results
+
+
+def test_build_report_drops_race_when_only_scratched():
+    # preds が出走馬を 1 頭も含まなければ probs 空 → eval_race None → 結果から落ちる。
+    races = S.group_snapshots(_full_race_rows("R1"))
+    results = S.build_report(races, {"R1": {7: 50.0, 8: 30.0, 9: 20.0}}, budget=5000)
+    assert results == [], results
+
+
+def test_group_snapshots_nonnumeric_odds_skipped_no_phantom_time():
+    # 数値化できない odds 行は当該行のみスキップし、空の phantom snapshot 時点を作らない。
+    # → 正常な t0 だけが残り、破損のみの t1 は times に現れない（final を空時点に乗っ取らせない）。
+    t0, t1 = "2026-06-27T00:00:00+00:00", "2026-06-27T01:00:00+00:00"
+    races = S.group_snapshots([_row("R1", "win", "1", 3.5, at=t0),
+                               _row("R1", "win", "2", "N/A", at=t1)])
+    assert set(races["R1"]["times"]) == {t0}, races["R1"]["times"]
+    assert races["R1"]["times"][t0]["win"] == {1: 3.5}
+
+    # 破損行のみの入力では race 自体を作らない（phantom レースを残さない）。
+    assert S.group_snapshots([_row("R2", "win", "1", "N/A")]) == {}
+
+
+def test_group_snapshots_nonnumeric_race_num_skipped():
+    # 外部 TSV の非数値 race_num はレポート全体を落とさず当該行のみ warn スキップ。
+    good = _row("R1", "win", "1", 3.5)
+    bad = _row("R2", "win", "1", 3.5, rnum="N/A")  # race_num 異常
+    races = S.group_snapshots([bad, good])
+    assert set(races) == {"R1"}, races  # R2 は race_num 不正で作られない
+
+
+def test_pred_line_re():
+    # analyze predict の確率行を捕捉し、最初の % を勝率として取る。
+    m = S.PRED_LINE_RE.match("   1 ビアーレ                 4.3%    12.8%    19.0%")
+    assert m and int(m.group(1)) == 1 and float(m.group(2)) == 4.3, m
+    # 多重ドット（1.2.3%）は厳格化した regex でマッチしない（float 落ち防止）。
+    assert S.PRED_LINE_RE.match("   2 ばば                 1.2.3%") is None
+    # 馬番も馬名も無いヘッダ等はマッチしない。
+    assert S.PRED_LINE_RE.match("=== 診断 ===") is None
+
+
+def test_build_report_win_from_latest_snapshot_with_win():
+    # 最終 snapshot に win が無くても、win を持つ直近 snapshot へフォールバックして出走馬を判定する。
+    t0, t1 = "2026-06-27T00:00:00+00:00", "2026-06-27T01:00:00+00:00"
+    rows = [
+        _row("R1", "win", "1", 2.0, at=t0), _row("R1", "win", "2", 3.0, at=t0),
+        _row("R1", "win", "3", 4.0, at=t0),
+        _row("R1", "quinella", "1-2", 50.0, at=t1),  # 最終時点は exotic のみ（win 欠落）
+    ]
+    races = S.group_snapshots(rows)
+    # 出走馬 {1,2,3} に無い preds は空になり race が落ちる。
+    assert S.build_report(races, {"R1": {7: 50.0, 8: 30.0, 9: 20.0}}, budget=5000) == []
+    assert len(S.build_report(races, {"R1": {1: 40.0, 2: 30.0, 3: 20.0}}, budget=5000)) == 1
+
+
+def test_build_report_excludes_late_scratched_horse():
+    # 終盤に取消された馬（早い snapshot の win にだけ居る）は最新 win snapshot から外れ除外される。
+    # 和集合方式だと早い時点の取消馬を拾ってしまうため、この区別が「最新 win snapshot」採用の要点。
+    t0, t1 = "2026-06-27T00:00:00+00:00", "2026-06-27T01:00:00+00:00"
+    rows = [
+        # t0: 4 頭出走。t1: 4 が取消（win 落ち）で 3 頭。
+        _row("R1", "win", "1", 2.0, at=t0), _row("R1", "win", "2", 3.0, at=t0),
+        _row("R1", "win", "3", 4.0, at=t0), _row("R1", "win", "4", 5.0, at=t0),
+        _row("R1", "win", "1", 2.1, at=t1), _row("R1", "win", "2", 3.1, at=t1),
+        _row("R1", "win", "3", 4.1, at=t1),
+    ]
+    races = S.group_snapshots(rows)
+    # preds={1,2,4}: 最新 win snapshot(t1)={1,2,3} なので 4 が除外され probs={1,2}<3 → race 落ち。
+    # （和集合 {1,2,3,4} 採用だと 4 が残り 3 頭で評価対象になってしまう＝退行検知）。
+    assert S.build_report(races, {"R1": {1: 40.0, 2: 30.0, 4: 20.0}}, budget=5000) == []
+
+
+def test_psql_dump_rejects_bad_date():
+    # _psql_dump_snapshots は呼び出し側検証に依存せず日付形式を再検証する（多層防御）。
+    # 検証は subprocess 起動より前なので、不正日付では psql に到達せず ValueError になる。
+    for bad in ("2026-6-27", "2026-06-27; DROP", "', OR '1'='1"):
+        try:
+            S._psql_dump_snapshots("postgres://unused", bad, "2026-06-27")
+        except ValueError:
+            continue
+        raise AssertionError(f"不正日付 {bad!r} が ValueError にならなかった")
+
+
+def _run_all():
+    fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
+    for fn in fns:
+        fn()
+        print(f"  ok  {fn.__name__}")
+    print(f"\n{len(fns)} passed")
+
+
+if __name__ == "__main__":
+    _run_all()

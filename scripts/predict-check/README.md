@@ -90,6 +90,37 @@ python3 scripts/predict-check/strategy_eval.py /tmp/preds.json /tmp/payouts.json
 `消化率` は予算上限（`budget × 評価レース数`）に対する実際の賭け額の割合。100 円単位の端数切り捨てで
 予算を使い切らない戦略（点数が多く 1 点あたりが小さい三連複流し等）はここが 100% 未満になる。
 
+## snapshot ベース +EV 発生率レポート（#248）
+
+「ROI≥100% で張る」買い方が機能しているかを年間で裏付けるため、`race_odds_snapshots`
+（発走直前オッズの時系列アーカイブ, #232。`prefetch_odds.sh` + launchd #237 が蓄積）に
+`live_ev.py` を当て、**開催日×レース単位で「いずれかの snapshot 時点で +EV(ROI≥100%) だったか」**
+を後追い集計する。`snapshot_ev_report.py` は買い方・ROI を `live_ev.py` から再利用し、データ源を
+live の `race_odds` から snapshots の時系列に差し替えるだけ（ロジックは複製しない）。
+
+```bash
+cargo build --release --bin paddock-analyze   # model 勝率算出に使用
+
+# 単日
+python3 scripts/predict-check/snapshot_ev_report.py --from 2026-06-27
+
+# 期間（年間集計）
+python3 scripts/predict-check/snapshot_ev_report.py --from 2026-01-01 --to 2026-12-31
+
+# テスト/再現用に外部 TSV を注入（DB/analyze に触らない）
+python3 scripts/predict-check/snapshot_ev_report.py --snapshots-tsv snaps.tsv --pred-tsv preds.tsv
+```
+
+- **オッズ**は snapshots から忠実に取る（ワイドは low/high の幅から mid=(low+high)/2）。各レースの
+  全 snapshot 時点を走査し、`ever`（best ROI）と `final`（最終 snapshot の ROI）の両方で +EV を判定。
+- **model 勝率**は `analyze predict --blend-alpha 0.2`。analyze は現行 `race_odds` の単勝を α ブレンドに
+  読むため、**当日中に走らせれば final snapshot と一致し忠実**。後日実行は α 由来の僅差が出うる
+  （オッズ自体は snapshots 由来で忠実なので EV の支配項は保たれる）。`--pred-tsv` で固定供給も可能。
+- **過去データの限界**: snapshot 機構は 2026-06-25 導入。それ以前の開催は snapshot が無く、過去
+  `race_odds` も事後フェッチで上書き済みのため再現不能（年間集計は導入日以降が対象）。
+- 取りこぼし（Mac スリープ等で発走直前 snapshot が欠ける）対策は #264、snapshot の耐久性
+  （local volume 単一障害点）は #265 で別途扱う。
+
 ## スクリプト
 
 | ファイル | 役割 |
@@ -108,6 +139,8 @@ python3 scripts/predict-check/strategy_eval.py /tmp/preds.json /tmp/payouts.json
 | `fetch_wide.py` | netkeiba ライブ（発走前）ワイドオッズ取得（type=5, fetch-card 未対応の補完, #187） |
 | `live_ev.py` | 当日・発走前オッズの全3券種 ROI（期待回収率）評価＋ +EV レースの買い目伝票 |
 | `refresh_ev.sh` | ライブ EV のオーケストレータ（fetch-card→DB→ワイド→predict→`live_ev.py`） |
+| `prefetch_odds.sh` | 締切前 live オッズの自動 prefetch（post_time 選択→`fetch-card --force`→snapshots 蓄積, #237） |
+| `snapshot_ev_report.py` | `race_odds_snapshots` を後追い集計し開催日×レースの ever/final +EV と年間発生率を出す（#248） |
 
 ## 注意
 
