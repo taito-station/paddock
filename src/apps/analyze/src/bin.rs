@@ -6,7 +6,8 @@ use clap::Parser;
 use paddock_domain::{
     BacktestReport, EstimationConfig, ExoticSegment, FieldSizeSegment, HorseName, HorseNum,
     HorseProbability, JockeyName, PairEvDiagnostic, PopularitySegment, PortfolioConfig, RaceId,
-    RecencyConfig, ReliabilityBin, ShrinkageConfig, Surface, SurfaceSegment, TrainerName, Venue,
+    RecencyConfig, ReliabilityBin, ShrinkageConfig, Surface, SurfaceSegment, Top3RankDistribution,
+    TrainerName, Venue,
 };
 use paddock_use_case::TREND_N_MAX;
 use paddock_use_case::repository::{
@@ -392,10 +393,14 @@ fn print_backtest(from: NaiveDate, to: NaiveDate, r: &BacktestReport) {
     );
     println!();
 
-    print_reliability(&r.win_reliability);
+    print_reliability(&r.win_reliability, "単勝");
+    print_reliability(&r.place_reliability, "連対");
+    print_reliability(&r.show_reliability, "複勝");
+    print_top3_rank_distribution(&r.top3_rank_distribution);
     print_surface_segments(&r.by_surface);
     print_field_size_segments(&r.by_field_size);
     print_popularity_segments(&r.by_popularity);
+    print_placeshow_popularity(&r.by_popularity);
     print_exotic_segments(&r.by_exotic);
 
     println!(
@@ -403,12 +408,17 @@ fn print_backtest(from: NaiveDate, to: NaiveDate, r: &BacktestReport) {
     );
 }
 
-/// 単勝の reliability 曲線（予測確率帯ごとの平均予測 vs 実測勝率）。空ビンは省略する。
-fn print_reliability(bins: &[ReliabilityBin]) {
-    println!("## reliability 曲線（単勝・予測確率帯ごと）");
+/// `kind`（単勝/連対/複勝）の reliability 曲線（予測確率帯ごとの平均予測 vs 実測率）。空ビンは省略。
+fn print_reliability(bins: &[ReliabilityBin], kind: &str) {
+    // 全ビン空（= 評価レース 0 件）なら見出しごと省略する。3 券種を出すようになり（#258）、
+    // 空表 3 つを並べないため。評価レースがあれば必ず非空ビンができるので通常は出力される。
+    if bins.iter().all(|b| b.count == 0) {
+        return;
+    }
+    println!("## reliability 曲線（{kind}・予測確率帯ごと）");
     println!(
         "{:<10} {:>6} {:>10} {:>10}",
-        "確率帯", "件数", "平均予測", "実測勝率"
+        "確率帯", "件数", "平均予測", "実測率"
     );
     for b in bins {
         if b.count == 0 {
@@ -423,7 +433,29 @@ fn print_reliability(bins: &[ReliabilityBin]) {
         );
     }
     println!();
-    println!("（平均予測 ≒ 実測勝率なら校正良好。平均予測 > 実測なら過大評価、< なら過小評価。）");
+    println!("（平均予測 ≒ 実測率なら校正良好。平均予測 > 実測なら過大評価、< なら過小評価。）");
+    println!();
+}
+
+/// 3 着以内入線馬のモデル複勝(show_prob)順位分布（#258）。7 位以下が多いほど、複勝圏に来る
+/// 人気薄をモデルが下位に沈めて取りこぼしている（複勝圏の過小評価の直接指標）。
+fn print_top3_rank_distribution(d: &Top3RankDistribution) {
+    if d.finishers == 0 {
+        return;
+    }
+    let pct = |x: u32| x as f64 / d.finishers as f64 * 100.0;
+    println!("## 3着内入線馬のモデル複勝順位分布（#258）");
+    println!(
+        "入線 {} 頭 — モデル順位 1-3位: {} ({:.1}%) / 4-6位: {} ({:.1}%) / 7位以下: {} ({:.1}%)",
+        d.finishers,
+        d.model_rank_1_3,
+        pct(d.model_rank_1_3),
+        d.model_rank_4_6,
+        pct(d.model_rank_4_6),
+        d.model_rank_7_plus,
+        pct(d.model_rank_7_plus),
+    );
+    println!("（7位以下が多いほど、複勝圏に来る人気薄をモデルが下位に沈めて取りこぼしている。）");
     println!();
 }
 
@@ -498,6 +530,37 @@ fn print_popularity_segments(segs: &[PopularitySegment]) {
             s.win_calibration.log_loss,
         );
     }
+    println!();
+}
+
+/// 人気帯別の複勝圏（place/show）過小評価診断（#258）。差 = 実率 − 平均予測。
+/// 人気薄帯で複勝差が大きく正なら、モデルは複勝圏に来る人気薄を過小評価している。
+fn print_placeshow_popularity(segs: &[PopularitySegment]) {
+    if segs.is_empty() {
+        return;
+    }
+    println!("## 人気帯別 複勝圏 過小評価診断（#258）");
+    println!(
+        "{:<12} {:>6} {:>9} {:>9} {:>8} {:>9} {:>9} {:>8}",
+        "人気帯", "頭数", "予測連対", "実連対", "連対差", "予測複勝", "実複勝", "複勝差"
+    );
+    for s in segs {
+        let place_gap = s.observed_place_rate - s.mean_place_prob;
+        let show_gap = s.observed_show_rate - s.mean_show_prob;
+        println!(
+            "{:<12} {:>6} {:>8.1}% {:>8.1}% {:>+7.1}% {:>8.1}% {:>8.1}% {:>+7.1}%",
+            s.label,
+            s.entries,
+            s.mean_place_prob * 100.0,
+            s.observed_place_rate * 100.0,
+            place_gap * 100.0,
+            s.mean_show_prob * 100.0,
+            s.observed_show_rate * 100.0,
+            show_gap * 100.0,
+        );
+    }
+    println!();
+    println!("（差 = 実率 − 平均予測。人気薄帯で複勝差が大きく正なら複勝圏の過小評価が確定。）");
     println!();
 }
 
