@@ -54,9 +54,10 @@ pub fn should_continue(statuses: &[RaceStatus]) -> bool {
         .any(|s| matches!(s, RaceStatus::Due | RaceStatus::NotYet))
 }
 
-/// 結果取込済み（＝発走済み）か。`races_by_date` は発走前レースを race_cards 由来で
-/// track_condition=NULL・results 空として返すため、この経路の実効シグナルは track_condition。
-/// `results` 句は `races` テーブル由来（成績取込済み）に対する防御的判定として併記する。
+/// 結果取込済み（＝確実に発走済み）か。`races_by_date` は発走前レースを race_cards 由来で
+/// track_condition=NULL・results 空として返す（fact-check 済みの不変条件）ため、この経路では
+/// track_condition/results は「成績取込が済んだ＝確実に過去のレース」を指す早期シグナル。
+/// 成績取込前でも発走済みになる通常遷移（発走直後）は classify の `now > post` 側が捕捉する。
 fn has_result(race: &Race) -> bool {
     race.track_condition.is_some() || !race.results.is_empty()
 }
@@ -158,6 +159,8 @@ async fn evaluate_race(app: &App, slot: &Slot, cli: &Cli, blend_alpha: Option<f6
     //    再読込して市場単勝ブレンドに使う。build_portfolio へ渡す odds と同一データだが読み出し経路は別。
     //    persist 失敗時（warn のみで継続）は predict_race が旧スナップショットを見るため、その回だけ
     //    買い目側と確率側でオッズ集合が食い違いうる（次スイープで解消する一時的劣化）。
+    //    track_condition は発走前レースでは None のため、監視は当日の馬場状態を反映しない
+    //    （対話 predict は馬場を入力するので、同一レースで確率が僅かに乖離しうる）。
     let probs = match app
         .interactor
         .predict_race(rid, blend_alpha, slot.race.track_condition)
@@ -231,6 +234,14 @@ pub async fn run(app: &App, cli: &Cli) -> anyhow::Result<()> {
     if cli.window == 0 {
         anyhow::bail!("--window は 1 分以上を指定してください。");
     }
+    // α は市場とモデルのブレンド重み（0=市場のみ, 1=モデルのみ）。範囲外は無意味なので弾く。
+    if let Some(a) = cli.blend_alpha
+        && !(0.0..=1.0).contains(&a)
+    {
+        anyhow::bail!(
+            "--blend-alpha は 0.0〜1.0 で指定してください（市場とモデルのブレンド重み）。"
+        );
+    }
 
     // α 未指定なら本番既定（market α=0.2）を使う。predict と同一値で判定を揃える。
     let blend_alpha = cli.blend_alpha.or(RECOMMENDED_MARKET_BLEND_ALPHA);
@@ -280,10 +291,26 @@ pub async fn run(app: &App, cli: &Cli) -> anyhow::Result<()> {
             .map(|s| classify(now, s.post_time, has_result(&s.race), window))
             .collect();
 
+        // 防御: 発走前（now <= post）なのに結果取込済みのレースは、races_by_date の不変条件
+        //（発走前＝race_cards 由来で track_condition=NULL）が崩れた兆候。放置すると Started 誤判定で
+        // 監視が無言の no-op 化するため、検出したら警告して気づけるようにする。
+        let started_before_post = slots
+            .iter()
+            .filter(|s| has_result(&s.race) && s.post_time.is_some_and(|p| now <= p))
+            .count();
+        if started_before_post > 0 {
+            println!(
+                "⚠ 発走前なのに結果取込済みのレースが {started_before_post} 件あります。発走状態判定の前提が \
+                 崩れている可能性があり、対象から外れます（fetch-card / 成績取込の状態を確認してください）。"
+            );
+        }
+
         sweep(app, &slots, &statuses, now, cli, blend_alpha).await;
 
         if !should_continue(&statuses) {
-            if !statuses.is_empty() && statuses.iter().all(|s| *s == RaceStatus::Unknown) {
+            if statuses.is_empty() {
+                println!("── 監視終了: 本日（{}）は対象開催がありません。", cli.date);
+            } else if statuses.iter().all(|s| *s == RaceStatus::Unknown) {
                 println!(
                     "── 監視終了: 全レースで発走時刻（post_time）が不明です。fetch-card 済みか確認してください。"
                 );
