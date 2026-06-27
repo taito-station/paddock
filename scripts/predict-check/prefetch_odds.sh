@@ -52,8 +52,10 @@ log() { echo "[$(date '+%Y-%m-%dT%H:%M:%S%z')] $*" | tee -a "$LOG"; }
 # 多重起動防止。launchd の StartInterval と前回実行（ハング含む）が重なっても二重 fetch しない。
 # 素の macOS に flock は同梱されないため、flock 不在時は mkdir の原子性で排他するフォールバックを
 # 必ず効かせる（cron 代替経路でもノーガードにしない）。
-LOCK="$WORKDIR/prefetch.lock"
-LOCK_DIR="$WORKDIR/prefetch.lock.d"
+# ロックパスは WORKDIR に依存させず固定にする。launchd は WORKDIR=/tmp/paddock-prefetch、手動実行は
+# $TMPDIR 配下と WORKDIR が異なるため、WORKDIR 配下に置くと両者が別ロックになり二重 fetch しうる。
+LOCK="/tmp/paddock-prefetch.lock"
+LOCK_DIR="/tmp/paddock-prefetch.lock.d"
 if command -v flock >/dev/null 2>&1; then
   exec 9>"$LOCK"
   flock -n 9 || { log "別の prefetch 実行中のためスキップ"; exit 0; }
@@ -97,7 +99,9 @@ SELECT_ARGS=(--window-min "$WINDOW_MIN")
 [ -n "$AT" ] && SELECT_ARGS+=(--at "$AT")
 if ! SELECTED="$(PADDOCK_DB_URL="$DB_URL" PYTHONPATH="$SCRIPT_DIR" \
       python3 "$SCRIPT_DIR/upcoming_races_db.py" "$DATE" "${SELECT_ARGS[@]}")"; then
-  log "レース選択に失敗（DB 接続不可・クエリ失敗等）。中断する。"
+  # 失敗要因は DB 接続不可・クエリ失敗のほか、暦上不正な日付（python 側 valid_date が弾く）も
+  # ありうるため、原因を断定しない中立な文言にする（「対象0件」とは区別して必ず中断する）。
+  log "レース選択コマンドに失敗（DB 接続不可・日付不正・クエリ失敗等）。中断する。"
   exit 1
 fi
 PIDS=()
