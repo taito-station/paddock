@@ -18,7 +18,8 @@ use crate::simulation::{EvReport, PlacedBet, SimInput, simulate};
 pub struct PortfolioConfig {
     /// 相手頭数（軸を除く `win_prob` 上位 N 頭に流す。相手広く）。
     pub partners: usize,
-    /// 予算配分の相対重み `(連系ペア, ワイド, 三連複)`。連系ペアは馬連/馬単のうち EV 優位な方（#246）。
+    /// 予算配分の相対重み `(連系ペア, ワイド, 三連複)`。連系ペアは常に馬連
+    /// （#271 で馬単置換 `pick_pair_leg` を撤去・ADR 0043 棄却）。
     pub alloc: (u32, u32, u32),
 }
 
@@ -162,9 +163,9 @@ pub fn pair_ev_diagnostics(
 
 /// 予想本命を軸に、予算内・100 円単位の軸流しポートフォリオ（連系ペア＋ワイド＋三連複）を組む。
 ///
-/// 軸 = `win_prob` 最大の馬、相手 = 次点 `config.partners` 頭。連系ペアは軸-相手ごとに馬連と馬単
-/// (本命→相手) の実効 EV を比べ優位な方を 1 脚採用（#246, [`pick_pair_leg`]）、ワイドは軸-相手の
-/// K 点、三連複は軸 1 頭ながし formation（軸＋相手 2 頭, C(K,2) 点）。`config.alloc` の重み
+/// 軸 = `win_prob` 最大の馬、相手 = 次点 `config.partners` 頭。連系ペアは軸-相手の馬連（着順不問）を
+/// 常に採る（#271 で馬連→馬単の EV 置換を撤去・ADR 0043 棄却。順序プレミアムは #262 の 71R で逆予測）。
+/// ワイドは軸-相手の K 点、三連複は軸 1 頭ながし formation（軸＋相手 2 頭, C(K,2) 点）。`config.alloc` の重み
 /// `(連系ペア, ワイド, 三連複)` で券種へ予算を配分し、券種内は 100 円単位で均等配分する
 /// （賄えない端数は買わない）。
 pub fn build_portfolio(
