@@ -60,6 +60,7 @@ bt_exotic_odds.tsv の生成（DB から、71R 窓の馬連・三連複・馬単
       --ev-grid 1.0,1.2,1.5 --cap-grid inf,50,30
 """
 import argparse
+import math
 import re
 import statistics
 import unicodedata
@@ -605,11 +606,13 @@ def market_implied(winodds_pid):
     """単勝オッズ {umaban: (pop, odds)} -> {umaban: implied}（overround 正規化済の市場確率）。
 
     raw=1/odds、overround=Σraw（オッズのある全頭）、implied=raw/overround。
-    odds<=0 の馬は市場確率を持たない（ブレンド対象外）として除外する。
+    odds 採用条件は本番 Rust（estimate.rs: `odds.is_finite() && odds >= 1.0`）を鏡映する。
+    単勝オッズは常に有限かつ ≥1.0 なので実データでは差は出ないが、異常値（inf・0<odds<1）の
+    扱いを Rust と揃えて忠実性を保つ。
     """
     raw = {}
     for um, (_pop, odds) in winodds_pid.items():
-        if odds and odds > 0:
+        if odds is not None and math.isfinite(odds) and odds >= 1.0:
             raw[um] = 1.0 / odds
     s = sum(raw.values())
     if s <= 0:
@@ -617,7 +620,12 @@ def market_implied(winodds_pid):
     return {um: r / s for um, r in raw.items()}
 
 
-def recover_p_model(p_final_pct, gamma=1.25):
+# 本番（analyze predict / EstimationConfig::production）の γ。recover_p_model は α=1.0 実行を
+# 生成した binary の本番 γ と一致せねば無言で誤るため、復元・再計算で参照する単一の真実源にする。
+PRODUCTION_GAMMA = 1.25
+
+
+def recover_p_model(p_final_pct, gamma=PRODUCTION_GAMMA):
     """α=1.0 実行（final=normalize(p_model**γ)）の最終確率%から p_model%を復元する。
 
     x=(pct/100)**(1/γ); Σ1 正規化; *100。単一の冪逆変換（縮約・ブレンドには触れない）。
@@ -670,7 +678,12 @@ def topk_recall(probs, winner, k):
 
 
 def brier(probs, winner):
-    """単勝 Brier（出走馬平均）= mean_h (p_h/100 - [h==winner])^2。answer_check.py:112-114 と同式。"""
+    """単勝 Brier（単一レース内の出走馬平均）= mean_h (p_h/100 - [h==winner])^2。
+
+    レース内の per-horse 項は answer_check.py:112-114 と同式。鞍跨ぎの集計方法は呼び出し側に依存し、
+    joint_sweep はこれをレース毎に取りさらに平均する（answer_check.py の全頭グローバル平均とは別。
+    集計差の詳細は joint_sweep のコメント参照）。
+    """
     if not probs:
         return 0.0
     s = 0.0
@@ -728,7 +741,9 @@ def race_winner(pay):
 def calibration_buckets(evaluated, probs_by_race, edges):
     """予測 model ROI でレースをバケット分けし、予測 ROI vs 実現 ROI の較正を測る（#249）。
 
-    probs_by_race: {(date,venue,rnum): 最終確率%}（再計算後）。
+    probs_by_race: {(date,venue,rnum): 最終確率%}。関数は汎用で再計算 probs でも本番 bt_pred の
+        実 probs でも受ける。headline 較正の呼び出しは ADR 0044 の gate_sweep と同値にするため
+        本番実 probs を渡す（main の prod_actual 参照）。
     各レースの予測 ROI = compute_baseline_pf(再計算 probs) の model_roi。
     バケット毎に n / 予測ROI平均 / 実現ROI(Σret/Σstake) / 的中率 を出し、
     末尾に Spearman(予測ROI, レース毎実現ROI) と gate>=100% 実現ROI vs 無ゲート平均を付す。
@@ -801,6 +816,10 @@ def joint_sweep(evaluated, winodds, p_models, alphas, gammas):
     行: n_gate(model_roi>=1.0) / gated実現ROI / 無ゲート実現ROI / 差分 /
         Spearman(model_roi, ret/stake) / top1率 / 平均Brier。
     delta>=0 かつ Spearman>=0 なら、その (α,γ) で model EV ゲートが正直な選別に戻る。
+
+    top1率・Brier は race_winner(pay) で 1 着が復元できる鞍のみが母集団（馬単欠落・同着 1 着は除外）。
+    Brier はレース毎平均をさらに鞍跨ぎ平均する（フィールドサイズ非重み）。α 間の相対比較が目的で、
+    answer_check.py の全頭グローバル平均（フィールドサイズ重み）とは集計が異なる点に留意。
     """
     print("=== (α, γ) 同時掃引（baseline_pf ポートフォリオのゲート整合性 + 単勝精度）===")
     print(f"{'alpha':>5} {'gamma':>5} {'n_gate':>6} {'gateROI':>8} {'noGate':>7} "
@@ -862,7 +881,8 @@ def main():
     ap.add_argument("--p-model-dir", default=None,
                     help="#270 α=1.0 実行の bt_pred dir（指定時のみ較正バケット+α×γ掃引を追加）")
     ap.add_argument("--alpha-grid", default="0,0.1,0.2,0.3,0.5,1.0",
-                    help="#270 α（市場ブレンド）掃引。α=市場へ寄せる係数＝高いほど市場補正は弱い")
+                    help="#270 α（市場ブレンド）掃引。α=モデル重み係数"
+                         "（blended=α·model+(1-α)·market）＝高いほど市場補正は弱い（ADR 0045）")
     ap.add_argument("--gamma-grid", default="1.0,1.1,1.25,1.5,2.0",
                     help="#270 γ（冪較正）掃引。γ>1 で上位確率に質量を集中")
     ap.add_argument("--bucket-edges", default="0.8,0.9,1.0,1.1,1.2",
@@ -1006,7 +1026,7 @@ def main():
         for date, venue, rnum, _pid, _probs, *_rest in evaluated:
             pf = a1_preds.get(date, {}).get((venue, rnum))
             if pf:
-                p_models[(date, venue, rnum)] = recover_p_model(pf, gamma=1.25)
+                p_models[(date, venue, rnum)] = recover_p_model(pf, gamma=PRODUCTION_GAMMA)
 
         # production (α=0.2, γ=1.25) で各レースの最終確率を再計算。
         prod_probs = {}
@@ -1014,7 +1034,7 @@ def main():
             pm = p_models.get((date, venue, rnum))
             if pm:
                 implied = market_implied(winodds.get(pid, {}))
-                prod_probs[(date, venue, rnum)] = recompute_p_final(pm, implied, 0.2, 1.25)
+                prod_probs[(date, venue, rnum)] = recompute_p_final(pm, implied, 0.2, PRODUCTION_GAMMA)
 
         # SANITY: 再計算 (α=0.2,γ=1.25) が本番 bt_pred（--pred-dir）を 1 桁丸め内で再現するか。
         max_abs = 0.0
@@ -1029,7 +1049,7 @@ def main():
                     max_abs = max(max_abs, abs(rp[um] - pp[um]))
                     nchk += 1
         if nchk:
-            print(f"=== #270 SANITY: 再計算(α=0.2,γ=1.25) vs 本番 bt_pred "
+            print(f"=== #270 SANITY: 再計算(α=0.2,γ={PRODUCTION_GAMMA}) vs 本番 bt_pred "
                   f"（{nchk}頭・最大絶対誤差 {max_abs:.3f}pt）===")
             print("（純 Python 再計算が Rust 本番を鏡映していれば 1 桁丸め由来の ~0.1-0.3pt 以内）\n")
 

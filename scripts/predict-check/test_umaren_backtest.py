@@ -274,6 +274,53 @@ def test_calibration_buckets_counts_and_realized():
     assert "50%" in out
 
 
+def test_joint_sweep_aggregation_e2e():
+    # PR の主力出力 joint_sweep の end-to-end 配線（recompute→baseline_pf→ゲート集計→
+    # top1 母集団）を合成 2 鞍で検証。期待値は関数合成で独立再現しハードコードしない。
+    import io
+    import contextlib
+    quin = {frozenset({1, 2}): 5.0, frozenset({1, 3}): 5.0}
+    trio = {}
+    pay1 = {"umaren": {frozenset({1, 2}): 10000}, "wide": {}, "trio": {}, "exacta": {(1, 2): 1}}
+    pay2 = {"umaren": {}, "wide": {}, "trio": {}, "exacta": {(3, 1): 1}}
+    pm = {1: 50.0, 2: 30.0, 3: 20.0}  # 縮約済 p_model%
+    evaluated = [
+        ("d1", "東京", 1, "p1", {}, quin, trio, {}, pay1),
+        ("d1", "東京", 2, "p2", {}, quin, trio, {}, pay2),
+    ]
+    p_models = {("d1", "東京", 1): pm, ("d1", "東京", 2): pm}
+    winodds = {
+        "p1": {1: (1, 2.0), 2: (2, 4.0), 3: (3, 8.0)},
+        "p2": {1: (1, 2.0), 2: (2, 4.0), 3: (3, 8.0)},
+    }
+    alpha, gamma = 0.2, 1.25
+    # 期待 n_gate / top1 母集団を joint_sweep と同じ手順で独立再現。
+    n_gate = top1_tot = top1_n = 0
+    for d, v, r, pid, _p, q, t, _e, pay in evaluated:
+        implied = U.market_implied(winodds[pid])
+        probs = U.recompute_p_final(p_models[(d, v, r)], implied, alpha, gamma)
+        mr, _ret, stake = U.compute_baseline_pf(probs, q, t, pay)
+        if stake <= 0:
+            continue
+        if mr >= 1.0:
+            n_gate += 1
+        w = U.race_winner(pay)
+        if w is not None:
+            top1_tot += 1
+            top1_n += U.top1_hit(probs, w)
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        U.joint_sweep(evaluated, winodds, p_models, [alpha], [gamma])
+    out = buf.getvalue()
+    assert "(α, γ) 同時掃引" in out
+    # 行頭 alpha / gamma / n_gate が独立再現と一致（集計配線の回帰検出）。
+    assert f"{alpha:>5.2f} {gamma:>5.2f} {n_gate:>6}" in out, out
+    # 両鞍とも exacta で 1 着復元可能 → top1 母集団 2、top1率列が一致。
+    assert top1_tot == 2
+    t1 = top1_n / top1_tot * 100
+    assert f"{t1:>4.0f}%" in out, (t1, out)
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for t in tests:
