@@ -111,9 +111,11 @@ def _psql_dump(db_url, date):
     """
     if not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", date):
         raise ValueError(f"date は YYYY-MM-DD のみ許可: {date!r}")
+    # MAX(fetched_at) は ::text にして COALESCE の '' と型を揃える（fetched_at が将来 timestamptz でも
+    # none レース＝MAX が NULL の行で `''::timestamptz` 不正リテラルにならない。現 TEXT では no-op）。
     sql = (
         "SELECT c.race_id, c.venue, c.race_num, COALESCE(c.post_time,''), "
-        "       COALESCE(MAX(s.fetched_at), ''), COUNT(DISTINCT s.fetched_at) "
+        "       COALESCE(MAX(s.fetched_at)::text, ''), COUNT(DISTINCT s.fetched_at) "
         "FROM race_cards c "
         "LEFT JOIN race_odds_snapshots s ON s.race_id = c.race_id "
         f"WHERE c.date = '{date}' "

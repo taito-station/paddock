@@ -13,3 +13,15 @@ for LABEL in "${LABELS[@]}"; do
     echo "未インストール: $DEST は存在しません"
   fi
 done
+
+# keep-awake は plist の AbandonProcessGroup=true で caffeinate を PGID から切り離すため、
+# unload だけでは背景 caffeinate が最終 post_time まで残りスリープ抑止が居座る。lock に記録した
+# 自分の pid を comm 確認のうえ kill して即停止する（無差別 pkill はユーザー自身の caffeinate を
+# 巻き込むため使わない）。
+LOCK_DIR="/tmp/paddock-keep-awake.lock.d"
+pid="$(cat "$LOCK_DIR/pid" 2>/dev/null || echo '')"
+if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null \
+   && ps -p "$pid" -o comm= 2>/dev/null | grep -q 'caffeinate'; then
+  kill "$pid" 2>/dev/null && echo "keep-awake の caffeinate を停止しました（pid $pid）"
+fi
+rm -rf "$LOCK_DIR" 2>/dev/null || true
