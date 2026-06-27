@@ -67,10 +67,16 @@ def fetch_rows(date: str, db_url: str):
         f"WHERE date = '{date}' AND post_time IS NOT NULL"
     )
     # date は valid_date で厳格検証済みなので文字列展開でも注入されない。
-    out = subprocess.run(
+    proc = subprocess.run(
         ["psql", db_url, "-t", "-A", "-F", "\t", "-c", sql],
-        check=True, capture_output=True, text=True,
-    ).stdout
+        capture_output=True, text=True,
+    )
+    if proc.returncode != 0:
+        # 無人運用（launchd/cron）での停止時に根因（connection refused 等）が消えないよう、
+        # psql の stderr を呼び出し側の stderr（launchd.err.log）へ転記してから非0終了する。
+        sys.stderr.write(proc.stderr)
+        raise SystemExit(f"psql 失敗 (exit {proc.returncode})")
+    out = proc.stdout
     rows = []
     for line in out.splitlines():
         if not line.strip():
