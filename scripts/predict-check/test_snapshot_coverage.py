@@ -24,6 +24,11 @@ def test_fetched_at_to_jst_min():
     # スペース区切り（timestamptz/datestyle 変化で psql が出す形式）も T 同様にパースする。
     assert C.fetched_at_to_jst_min("2026-06-27 05:40:45+00") == 14 * 60 + 40
     assert C.fetched_at_to_jst_min("壊れた") is None
+    # UTC 以外のオフセットは二重シフトを避けるため拒否（None→bad_ts で顕在化、沈黙故障にしない）。
+    assert C.fetched_at_to_jst_min("2026-06-27T14:40:45+09:00") is None
+    assert C.fetched_at_to_jst_min("2026-06-27 14:40:45+09") is None
+    # Z 表記の UTC は受理。
+    assert C.fetched_at_to_jst_min("2026-06-27T05:40:45Z") == 14 * 60 + 40
 
 
 def test_classify_bad_ts():

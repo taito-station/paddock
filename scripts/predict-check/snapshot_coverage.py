@@ -49,9 +49,17 @@ def fetched_at_to_jst_min(fetched_at: str):
 
     区切りは `T`（rfc3339 TEXT）とスペース（timestamptz/datestyle 変化で psql が `2026-06-27
     05:40:45+00` と出すケース）の両方を許容し、フォーマット差で全件 none に化ける事故を防ぐ。
+
+    この HH:MM が **UTC である前提**で +540 固定シフトする。将来 timestamptz 化やセッション
+    TimeZone 変化で UTC 以外のオフセット付き文字列が来た場合、黙って二重シフト（gap→ok の沈黙
+    故障）させないため、UTC 以外のオフセットを検出したら変換を諦め None を返す（→ bad_ts で顕在化）。
     """
     m = re.search(r"[T ]([0-9]{2}):([0-9]{2})", fetched_at)
     if not m:
+        return None
+    # 末尾のタイムゾーン表記を検査。UTC（Z / +00 / +0000 / +00:00）以外は拒否（二重シフト防止）。
+    tz = re.search(r"(Z|[+-][0-9]{2}:?[0-9]{2}|[+-][0-9]{2})$", fetched_at.strip())
+    if tz and tz.group(0) not in ("Z", "+00", "+0000", "+00:00", "-00", "-0000", "-00:00"):
         return None
     utc_min = int(m.group(1)) * 60 + int(m.group(2))
     return (utc_min + JST_OFFSET_MIN) % 1440
@@ -112,9 +120,11 @@ def _psql_dump(db_url, date):
         "GROUP BY c.race_id, c.venue, c.race_num, c.post_time "
         "ORDER BY c.venue, c.race_num;"
     )
+    # DB 到達不能時の無言ハングを避ける接続タイムアウト（keep_awake.sh と対称、URL を弄らず効く）。
+    env = {**os.environ, "PGCONNECT_TIMEOUT": os.environ.get("PGCONNECT_TIMEOUT", "5")}
     out = subprocess.run(
         ["psql", db_url, "-tA", "-F", "\t", "-c", sql],
-        capture_output=True, text=True, check=True,
+        capture_output=True, text=True, check=True, env=env,
     )
     return out.stdout
 
