@@ -594,14 +594,14 @@ fn factor_phrase(f: &FactorExplanation) -> String {
     }
 }
 
-/// 枠グループラベル（domain の `gate_group_label` 由来の英語）を日本語表記に写像する（#274 レビュー）。
-/// domain のラベルはコース統計のキーで英語固定のため、表示は presentation 層で日本語化する。
+/// 枠グループラベル（コース統計のキー由来の英語。use-case の `gate_group_label` が生成）を日本語
+/// 表記に写像する（#274 レビュー）。ラベルは統計キーで英語固定のため、表示は presentation 層で日本語化する。
 fn gate_label_jp(label: &str) -> &str {
     match label {
         "Inner (1-3)" => "内 1-3",
         "Middle (4-6)" => "中 4-6",
         "Outer (7-8)" => "外 7-8",
-        other => other, // 想定外ラベルはそのまま（将来 domain 側が変わっても壊さない）
+        other => other, // 想定外ラベルはそのまま（将来キー書式が変わっても壊さない）
     }
 }
 
@@ -1049,6 +1049,15 @@ mod tests {
         assert_eq!(recent_form_phrase(0.72), "近走フォーム：好調（0.72）");
         assert_eq!(recent_form_phrase(0.50), "近走フォーム：標準（0.50）");
         assert_eq!(recent_form_phrase(0.30), "近走フォーム：不調（0.30）");
+    }
+
+    #[test]
+    fn recent_form_phrase_boundaries_are_inclusive() {
+        // 境界: >=0.6 は好調・<=0.4 は不調（等号を含む）。中間は標準。
+        assert_eq!(recent_form_phrase(0.60), "近走フォーム：好調（0.60）");
+        assert_eq!(recent_form_phrase(0.40), "近走フォーム：不調（0.40）");
+        assert_eq!(recent_form_phrase(0.59), "近走フォーム：標準（0.59）");
+        assert_eq!(recent_form_phrase(0.41), "近走フォーム：標準（0.41）");
     }
 
     fn prob(num: u32, name: &str, win: f64) -> HorseProbability {
