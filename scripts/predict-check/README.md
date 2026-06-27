@@ -140,7 +140,9 @@ python3 scripts/predict-check/snapshot_ev_report.py --snapshots-tsv snaps.tsv --
 | `live_ev.py` | 当日・発走前オッズの全3券種 ROI（期待回収率）評価＋ +EV レースの買い目伝票 |
 | `refresh_ev.sh` | ライブ EV のオーケストレータ（fetch-card→DB→ワイド→predict→`live_ev.py`） |
 | `prefetch_odds.sh` | 締切前 live オッズの自動 prefetch（post_time 選択→`fetch-card --force`→snapshots 蓄積, #237） |
+| `keep_awake.sh` | 開催日の発走ウィンドウ中 `caffeinate -i` で Mac のアイドルスリープを抑止し prefetch 取りこぼしを防ぐ（#264） |
 | `snapshot_ev_report.py` | `race_odds_snapshots` を後追い集計し開催日×レースの ever/final +EV と年間発生率を出す（#248） |
+| `snapshot_coverage.py` | snapshot 取りこぼし検知（最終 snapshot が発走の何分前か→gap/none を可視化, #264） |
 
 ## 注意
 
