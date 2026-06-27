@@ -10,10 +10,13 @@ DEST_DIR="$HOME/Library/LaunchAgents"
 LABELS=(com.paddock.prefetch-odds com.paddock.keep-awake)
 
 mkdir -p "$DEST_DIR"
+# 先に全テンプレートの存在を検証してから load を始める（片方 load 済みで他方欠落＝部分インストールを防ぐ）。
+for LABEL in "${LABELS[@]}"; do
+  [ -f "$SCRIPT_DIR/$LABEL.plist" ] || { echo "テンプレートが見つかりません: $SCRIPT_DIR/$LABEL.plist" >&2; exit 1; }
+done
 for LABEL in "${LABELS[@]}"; do
   TEMPLATE="$SCRIPT_DIR/$LABEL.plist"
   DEST="$DEST_DIR/$LABEL.plist"
-  [ -f "$TEMPLATE" ] || { echo "テンプレートが見つかりません: $TEMPLATE" >&2; exit 1; }
   # __REPO_ROOT__ を実パスに置換して配置（| 区切りで sed に渡しパス中の / を気にしない）。
   sed "s|__REPO_ROOT__|$REPO_ROOT|g" "$TEMPLATE" > "$DEST"
   # 既存ロードがあれば外してから入れ直す（更新を確実に反映）。

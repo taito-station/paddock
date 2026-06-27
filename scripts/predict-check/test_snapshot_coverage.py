@@ -21,7 +21,15 @@ def test_fetched_at_to_jst_min():
     assert C.fetched_at_to_jst_min("2026-06-27T00:50:00+00:00") == 9 * 60 + 50
     # 日跨ぎ（UTC 23:30 → JST 08:30 翌日）も mod 1440 で分は正しい。
     assert C.fetched_at_to_jst_min("2026-06-26T23:30:00+00:00") == 8 * 60 + 30
+    # スペース区切り（timestamptz/datestyle 変化で psql が出す形式）も T 同様にパースする。
+    assert C.fetched_at_to_jst_min("2026-06-27 05:40:45+00") == 14 * 60 + 40
     assert C.fetched_at_to_jst_min("壊れた") is None
+
+
+def test_classify_bad_ts():
+    # snapshot はあるが fetched_at をパース不能 → 'none' でなく 'bad_ts'（取りこぼしと混同しない）。
+    ev = C.classify(14 * 60 + 45, None, n_snaps=3, max_lag_min=10)
+    assert ev["status"] == "bad_ts" and ev["lag_min"] is None, ev
 
 
 def test_classify():
@@ -64,8 +72,9 @@ def test_build_coverage_filters_and_sorts():
 def test_parse_rows_column_guard():
     good = "\t".join(["R1", "函館", "1", "09:50", "2026-06-27T00:43:00+00:00", "6"])
     bad_cols = "R1\t函館\t1"            # 列数不足
-    bad_n = "\t".join(["R2", "函館", "2", "10:20", "", "x"])  # n_snaps 非数値
-    rows = C.parse_rows(good + "\n" + bad_cols + "\n" + bad_n + "\n")
+    bad_n = "\t".join(["R2", "函館", "2", "10:20", "", "x"])      # n_snaps 非数値
+    bad_rnum = "\t".join(["R3", "函館", "x", "10:20", "", "2"])   # race_num 非数値
+    rows = C.parse_rows("\n".join([good, bad_cols, bad_n, bad_rnum]) + "\n")
     assert len(rows) == 1 and rows[0][0] == "R1" and rows[0][5] == 6, rows
 
 

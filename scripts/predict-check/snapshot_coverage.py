@@ -46,8 +46,11 @@ def fetched_at_to_jst_min(fetched_at: str):
     save_race_odds が +00:00 固定で書く前提（migration 20260625）で時刻部の HH:MM だけ見る。
     JST 日中レース（09:00-16:59）の snapshot は UTC 00:00-07:59 に収まり日跨ぎしないので、
     (UTC 分 + 540) % 1440 で JST 分になる。パースできなければ None。
+
+    区切りは `T`（rfc3339 TEXT）とスペース（timestamptz/datestyle 変化で psql が `2026-06-27
+    05:40:45+00` と出すケース）の両方を許容し、フォーマット差で全件 none に化ける事故を防ぐ。
     """
-    m = re.search(r"T([0-9]{2}):([0-9]{2})", fetched_at)
+    m = re.search(r"[T ]([0-9]{2}):([0-9]{2})", fetched_at)
     if not m:
         return None
     utc_min = int(m.group(1)) * 60 + int(m.group(2))
@@ -57,13 +60,17 @@ def fetched_at_to_jst_min(fetched_at: str):
 def classify(post_min, last_snap_min, n_snaps, max_lag_min):
     """1 レースの取りこぼし判定（純関数）。返り値 dict: status/lag_min。
 
-    status: 'none'（snapshot 無し）/ 'gap'（最終が発走から max_lag 超前）/ 'ok'。
-    lag_min: 最終 snapshot が発走の何分前か（post 以降取得なら負）。snapshot 無しは None。
+    status: 'none'（snapshot 無し）/ 'bad_ts'（snapshot はあるが fetched_at をパース不能）/
+            'gap'（最終が発走から max_lag 超前）/ 'ok'。
+    lag_min: 最終 snapshot が発走の何分前か（post 以降取得なら負）。none/bad_ts は None。
     post 直前に日跨ぎは無い前提（JST 日中）だが、深夜帯の異常データで lag が極端な負になった場合も
     「post 以降に取れている」とみなし ok（取りこぼしではない）。
     """
-    if not n_snaps or last_snap_min is None:
+    if not n_snaps:
         return {"status": "none", "lag_min": None}
+    if last_snap_min is None:
+        # snapshot はあるが時刻が読めない＝取りこぼし(none)ではなくデータ品質問題。混同させない。
+        return {"status": "bad_ts", "lag_min": None}
     lag = post_min - last_snap_min
     status = "gap" if lag > max_lag_min else "ok"
     return {"status": status, "lag_min": lag}
@@ -118,10 +125,13 @@ def parse_rows(tsv_text):
             print(f"[warn] 想定外の列数 {len(cells)} をスキップ: {line[:80]}", file=sys.stderr)
             continue
         rid, venue, rnum, post_time, last_at, n = cells
+        # race_num・n_snaps とも数値必須（外部 --rows-tsv の破損行で build_coverage の int() が
+        # 落ちないよう入口で弾く。DB 経路は整数列なので実害は外部入力のみ）。
         try:
             n_snaps = int(n)
+            int(rnum)
         except ValueError:
-            print(f"[warn] n_snaps が数値でない行をスキップ: {line[:80]}", file=sys.stderr)
+            print(f"[warn] race_num/n_snaps が数値でない行をスキップ: {line[:80]}", file=sys.stderr)
             continue
         rows.append((rid, venue, rnum, post_time, last_at, n_snaps))
     return rows
@@ -130,25 +140,33 @@ def parse_rows(tsv_text):
 def print_report(cov, date, max_lag_min):
     print(f"=== snapshot カバレッジ（{date}・最終 snapshot が発走 {max_lag_min} 分前以内なら ok） ===")
     print("  場 R    発走   snap数  最終→発走  判定")
-    label = {"ok": "✅ok", "gap": "⚠gap", "none": "❌none"}
+    label = {"ok": "✅ok", "gap": "⚠gap", "none": "❌none", "bad_ts": "⚠bad_ts"}
     for r in cov:
         lag = r["lag_min"]
-        lag_s = "  --" if lag is None else f"{lag:>3}分前"
+        if lag is None:
+            lag_s = "  --"
+        elif lag < 0:
+            lag_s = f"post後{-lag}分"  # post 以降に取得（取りこぼしではない）
+        else:
+            lag_s = f"{lag:>3}分前"
         print(f"  {r['venue']:<4}{r['race_num']:>2}R {r['post_time']:>5} "
-              f"{r['n_snaps']:>4}本 {lag_s:>8}  {label[r['status']]}")
+              f"{r['n_snaps']:>4}本 {lag_s:>9}  {label[r['status']]}")
     n = len(cov)
     if n == 0:
         print("\n対象レースなし（post_time 入りカードが無い）")
-        return
+        return 0
     ok = sum(1 for r in cov if r["status"] == "ok")
     gap = sum(1 for r in cov if r["status"] == "gap")
     none = sum(1 for r in cov if r["status"] == "none")
-    print(f"\n  対象 {n}R  /  ✅ok {ok} ({ok / n * 100:.0f}%)  ⚠gap {gap}  ❌none {none}")
-    if gap or none:
+    bad_ts = sum(1 for r in cov if r["status"] == "bad_ts")
+    print(f"\n  対象 {n}R  /  ✅ok {ok} ({ok / n * 100:.0f}%)  "
+          f"⚠gap {gap}  ❌none {none}  ⚠bad_ts {bad_ts}")
+    bad_total = gap + none + bad_ts
+    if bad_total:
         bad = [f"{r['venue']}{r['race_num']}R" for r in cov if r["status"] != "ok"]
-        print(f"  取りこぼし {gap + none}R: {' '.join(bad)}")
-        print("  → 発走直前 snapshot が欠落。原因は Mac スリープ/不在等（#264）。過去オッズは復元不能。")
-    return gap + none
+        print(f"  要確認 {bad_total}R: {' '.join(bad)}")
+        print("  → 発走直前 snapshot の欠落/時刻不明。原因は Mac スリープ/不在等（#264）。過去オッズは復元不能。")
+    return bad_total
 
 
 def main(argv=None):

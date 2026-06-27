@@ -38,6 +38,13 @@
     <key>RunAtLoad</key>
     <true/>
 
+    <!-- 必須: keep_awake.sh は caffeinate を背景起動して即終了する。AbandonProcessGroup を立てないと
+         launchd がジョブ主プロセス（keep_awake.sh）終了時に同一 PGID の caffeinate を巻き添えで kill し、
+         スリープ抑止が即死する（man launchd.plist。実 launchd で挙動を実証済み）。true で PGID 回収を
+         無効化し、background の caffeinate を最終 post_time まで存続させる。 -->
+    <key>AbandonProcessGroup</key>
+    <true/>
+
     <key>StandardOutPath</key>
     <string>/tmp/paddock-keep-awake.launchd.out.log</string>
     <key>StandardErrorPath</key>

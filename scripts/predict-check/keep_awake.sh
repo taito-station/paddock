@@ -38,7 +38,12 @@ done
 DATE="${DATE:-$(TZ=Asia/Tokyo date +%Y-%m-%d)}"
 [[ "$DATE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || { echo "DATE は YYYY-MM-DD: $DATE" >&2; exit 2; }
 [[ "$BUFFER_MIN" =~ ^[0-9]+$ ]] || { echo "BUFFER_MIN は整数（分）: $BUFFER_MIN" >&2; exit 2; }
-[ -z "$AT" ] || [[ "$AT" =~ ^[0-9]{1,2}:[0-9]{2}$ ]] || { echo "--at は HH:MM: $AT" >&2; exit 2; }
+if [ -n "$AT" ]; then
+  [[ "$AT" =~ ^([0-9]{1,2}):([0-9]{2})$ ]] || { echo "--at は HH:MM: $AT" >&2; exit 2; }
+  # 時 0-23・分 0-59 の範囲も検証（Python 側 hhmm_to_min と対称。25:00 等を弾く）。
+  { [ "$((10#${BASH_REMATCH[1]}))" -le 23 ] && [ "$((10#${BASH_REMATCH[2]}))" -le 59 ]; } \
+    || { echo "--at は 00:00〜23:59: $AT" >&2; exit 2; }
+fi
 
 DB_URL="${PADDOCK_DB_URL:-postgres://paddock:paddock@127.0.0.1:5432/paddock}"
 WORKDIR="${WORKDIR:-${TMPDIR:-/tmp}/paddock-keep-awake}"
@@ -85,16 +90,28 @@ fi
 # （StartInterval で 5 分毎に発火しても caffeinate を積み上げない）。caffeinate は -t で自動終了し
 # PID が死ぬと lock は stale 化するので、次回起動時に PID 生存を見て掃除する（self-heal。
 # 専用の後始末プロセスは持たない＝兄弟 PID を wait できない罠を避ける）。
+# mkdir のアトミック性を排他取得の唯一の門にする（check→rm→mkdir の TOCTOU を避ける）。
 LOCK_DIR="/tmp/paddock-keep-awake.lock.d"
-if [ -d "$LOCK_DIR" ] && [ -f "$LOCK_DIR/pid" ] \
-   && kill -0 "$(cat "$LOCK_DIR/pid" 2>/dev/null)" 2>/dev/null; then
-  log "既に caffeinate 稼働中（pid $(cat "$LOCK_DIR/pid")）。重複起動せず終了"; exit 0
+if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+  # lock 既存。中身で「起動中／稼働中／stale」を見分ける。
+  pid="$(cat "$LOCK_DIR/pid" 2>/dev/null || echo '')"
+  if [ -z "$pid" ]; then
+    # lock はあるが pid 未記入＝別プロセスが今まさに起動中。掃除せず重複させず終了。
+    log "別プロセスが起動中（lock あり・pid 未記入）。終了"; exit 0
+  fi
+  # pid 記入済み。生存かつプロセス名が caffeinate なら稼働中（PID 再利用の誤判定を comm で排除）。
+  if kill -0 "$pid" 2>/dev/null && ps -p "$pid" -o comm= 2>/dev/null | grep -q 'caffeinate'; then
+    log "既に caffeinate 稼働中（pid ${pid}）。重複起動せず終了"; exit 0
+  fi
+  # ここまで来たら本当に stale（caffeinate が死亡 or PID が別プロセスに再利用）。掃除して取り直す。
+  rm -rf "$LOCK_DIR" 2>/dev/null || true
+  mkdir "$LOCK_DIR" 2>/dev/null || { log "lock 競合で取得失敗。終了"; exit 0; }
 fi
-rm -rf "$LOCK_DIR" 2>/dev/null || true
-mkdir "$LOCK_DIR" 2>/dev/null || { log "lock 取得失敗（競合）。終了"; exit 0; }
 
-# アイドルスリープを END まで抑止。-t で自動終了するので開放忘れが無い。nohup+disown で launchd
-# ジョブ本体終了後も caffeinate を存続させ、SIGHUP で巻き添え終了しないようにする。
+# アイドルスリープを END まで抑止。-t で自動終了するので開放忘れが無い。launchd 経由では plist の
+# AbandonProcessGroup=true により、ジョブ主プロセス（本スクリプト）終了後も caffeinate が存続する
+# （未設定だと launchd が同一 PGID を kill して即死する。実 launchd で実証済み）。nohup+disown は
+# 端末/cron 経路での SIGHUP 巻き添え回避。先に lock を取ってから起動し、起動直後に pid を書く。
 nohup caffeinate -i -t "$SECS" >/dev/null 2>&1 &
 CAF_PID=$!
 echo "$CAF_PID" > "$LOCK_DIR/pid"
