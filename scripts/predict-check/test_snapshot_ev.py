@@ -194,10 +194,8 @@ def test_pred_line_re():
     assert S.PRED_LINE_RE.match("=== 診断 ===") is None
 
 
-def test_build_report_win_union_partial_capture():
-    # 最終 snapshot に win が無くても、過去 snapshot の win 和集合で出走馬を判定する。
-    # → 和集合 {1,2,3} に無い 7/8/9 だけの preds はフィルタで空になり race が落ちる
-    #   （最終 snapshot のみ参照の旧挙動だと win 空＝無フィルタで誤って評価対象になる）。
+def test_build_report_win_from_latest_snapshot_with_win():
+    # 最終 snapshot に win が無くても、win を持つ直近 snapshot へフォールバックして出走馬を判定する。
     t0, t1 = "2026-06-27T00:00:00+00:00", "2026-06-27T01:00:00+00:00"
     rows = [
         _row("R1", "win", "1", 2.0, at=t0), _row("R1", "win", "2", 3.0, at=t0),
@@ -205,9 +203,26 @@ def test_build_report_win_union_partial_capture():
         _row("R1", "quinella", "1-2", 50.0, at=t1),  # 最終時点は exotic のみ（win 欠落）
     ]
     races = S.group_snapshots(rows)
+    # 出走馬 {1,2,3} に無い preds は空になり race が落ちる。
     assert S.build_report(races, {"R1": {7: 50.0, 8: 30.0, 9: 20.0}}, budget=5000) == []
-    # 和集合内の馬なら評価対象に残る。
     assert len(S.build_report(races, {"R1": {1: 40.0, 2: 30.0, 3: 20.0}}, budget=5000)) == 1
+
+
+def test_build_report_excludes_late_scratched_horse():
+    # 終盤に取消された馬（早い snapshot の win にだけ居る）は最新 win snapshot から外れ除外される。
+    # 和集合方式だと早い時点の取消馬を拾ってしまうため、この区別が「最新 win snapshot」採用の要点。
+    t0, t1 = "2026-06-27T00:00:00+00:00", "2026-06-27T01:00:00+00:00"
+    rows = [
+        # t0: 4 頭出走。t1: 4 が取消（win 落ち）で 3 頭。
+        _row("R1", "win", "1", 2.0, at=t0), _row("R1", "win", "2", 3.0, at=t0),
+        _row("R1", "win", "3", 4.0, at=t0), _row("R1", "win", "4", 5.0, at=t0),
+        _row("R1", "win", "1", 2.1, at=t1), _row("R1", "win", "2", 3.1, at=t1),
+        _row("R1", "win", "3", 4.1, at=t1),
+    ]
+    races = S.group_snapshots(rows)
+    # preds={1,2,4}: 最新 win snapshot(t1)={1,2,3} なので 4 が除外され probs={1,2}<3 → race 落ち。
+    # （和集合 {1,2,3,4} 採用だと 4 が残り 3 頭で評価対象になってしまう＝退行検知）。
+    assert S.build_report(races, {"R1": {1: 40.0, 2: 30.0, 4: 20.0}}, budget=5000) == []
 
 
 def test_psql_dump_rejects_bad_date():

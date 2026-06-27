@@ -154,13 +154,15 @@ def _psql_dump_snapshots(db_url, date_from, date_to):
     for d in (date_from, date_to):
         if not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", d):
             raise ValueError(f"日付は YYYY-MM-DD のみ許可: {d!r}")
+    # 対象券種は WANT_BET_TYPES を単一情報源に IN リストへ展開（いずれも内部定数で注入リスク無し）。
+    bet_in = ",".join(f"'{t}'" for t in WANT_BET_TYPES)
     sql = (
         "SELECT s.race_id, c.date, c.venue, c.race_num, "
         "       s.bet_type, s.combination_key, s.odds, COALESCE(s.odds_high::text,''), s.fetched_at "
         "FROM race_odds_snapshots s "
         "JOIN race_cards c ON c.race_id = s.race_id "
         f"WHERE c.date BETWEEN '{date_from}' AND '{date_to}' "
-        "  AND s.bet_type IN ('win','quinella','trio','wide') "
+        f"  AND s.bet_type IN ({bet_in}) "
         "ORDER BY s.race_id, s.fetched_at;"
     )
     out = subprocess.run(
@@ -241,10 +243,16 @@ def build_report(races, preds_by_race, budget):
         if not probs_all:
             continue
         # 出走馬（= 有効な win オッズが付いた馬番）で絞り、取消馬を買い目に混ぜない。
-        # 最終 snapshot だけ win 欠落の部分キャプチャでも弾けるよう全 snapshot 時点の和集合を取り、
-        # odds>0 のみ採用する（odds=0.0 のプレースホルダを「出走」と誤認しない, CLAUDE.md 既知問題）。
-        win_horses = {n for t in race["times"].values()
-                      for n, o in t["win"].items() if o > 0}
+        # 「win を持つ最新 snapshot」の win 集合を採る。最終 snapshot が win 欠落（部分キャプチャ）
+        # でも win のある直近時点へフォールバックし、かつ和集合のように 1 日全体へ窓を広げないので
+        # 朝に早期取消された馬（終盤 snapshot の win から外れる）を拾わない。odds>0 のみ採用し
+        # odds=0.0 のプレースホルダを「出走」と誤認しない（CLAUDE.md 既知問題）。
+        win_horses = set()
+        for at in sorted(race["times"], reverse=True):
+            w = {n for n, o in race["times"][at]["win"].items() if o > 0}
+            if w:
+                win_horses = w
+                break
         probs = {n: p for n, p in probs_all.items() if not win_horses or n in win_horses}
         ev = eval_race(probs, race["times"], budget)
         if ev is None:
@@ -291,16 +299,21 @@ def print_report(results, budget):
     print("  ※ ever は朝オッズ込みの参考値（朝の +EV は直前で剥がれやすい）。actionable は final。")
     if nmiss:
         print(f"  ⚠ 最終欠落   : {nmiss}  最終 snapshot にオッズ欠落があり final 判定不能（#264 で対策）")
-    by_date = defaultdict(lambda: [0, 0, 0])  # date -> [races, ever, final]
+    # 日別も headline と母数を揃える: final は欠落除外の「判定可能母数中の +EV」で出し、欠落数を併記。
+    by_date = defaultdict(lambda: [0, 0, 0, 0])  # date -> [races, ever, final_judged, judged]
     for r in results:
         d = by_date[r["date"]]
         d[0] += 1
         d[1] += r["ever_pos"]
-        d[2] += r["final_pos"]
+        if not r.get("final_missing"):
+            d[3] += 1
+            d[2] += r["final_pos"]
     print("  日別:")
     for d in sorted(by_date):
-        races_n, ever_n, final_n = by_date[d]
-        print(f"    {d}: {races_n}R  ever {ever_n}  final {final_n}")
+        races_n, ever_n, final_n, judged_n = by_date[d]
+        miss_n = races_n - judged_n
+        miss_s = f"  欠落 {miss_n}" if miss_n else ""
+        print(f"    {d}: {races_n}R  ever {ever_n}  final {final_n}/{judged_n}{miss_s}")
 
 
 def main():
@@ -326,6 +339,10 @@ def main():
         for d in (args.date_from, date_to):
             if not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", d):
                 ap.error(f"日付は YYYY-MM-DD: {d}")
+        # 逆順は BETWEEN が空集合になり「対象なし」と紛れるため明示エラーにする（形式が同じなので
+        # 辞書順比較＝日付比較）。
+        if date_to < args.date_from:
+            ap.error(f"--to は --from 以降にしてください: {args.date_from}..{date_to}")
         try:
             tsv = _psql_dump_snapshots(args.db_url, args.date_from, date_to)
         except (subprocess.CalledProcessError, FileNotFoundError) as e:
@@ -340,6 +357,11 @@ def main():
     if args.pred_tsv:
         preds = load_pred_tsv(args.pred_tsv)
     else:
+        if args.snapshots_tsv:
+            # snapshots は外部 TSV なのに勝率は DB の analyze に頼る取り違えを警告（両者ペア利用が前提）。
+            print("[warn] --snapshots-tsv 指定だが --pred-tsv 未指定。勝率は DB の analyze predict "
+                  "から取得します（TSV 内のレースが DB に無ければ全 drop で『対象なし』になります）。",
+                  file=sys.stderr)
         analyze_bin = args.analyze_bin or str(
             Path(__file__).resolve().parents[2] / "target/release/paddock-analyze")
         if not os.access(analyze_bin, os.X_OK):
