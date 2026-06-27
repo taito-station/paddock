@@ -4,17 +4,12 @@ use std::io::{self, BufRead, Write};
 use chrono::{NaiveDate, Utc};
 use paddock_domain::{
     BetCombination, HorseNum, HorseProbability, PairEvDiagnostic, PortfolioBet, PortfolioConfig,
-    Race, RaceId, Surface, TrackCondition, build_portfolio, pair_ev_diagnostics,
+    RECOMMENDED_MARKET_BLEND_ALPHA, Race, RaceId, Surface, TrackCondition, build_portfolio,
+    pair_ev_diagnostics,
 };
 use paddock_use_case::{PredictBetRecord, PredictSessionRecord};
 
 use crate::setup::App;
-
-/// 本番予想で使う市場オッズ(単勝)ブレンドのモデル重み α（#72）。`None` はモデルのみ。
-/// backtest（2025-01〜2026-06, 4891R）の α スイープで Brier/LogLoss が α=0.2 で最良（ADR 0034）。
-/// 市場オッズが無いレースは自動でモデルのみにフォールバックする。
-/// 詳細は docs/specifications/probability-estimation.md。
-const MARKET_BLEND_ALPHA: Option<f64> = Some(0.2);
 
 /// 1 日分のレースを順番に処理する対話セッション。
 ///
@@ -160,7 +155,11 @@ async fn run_race(
     // DB 障害等（Internal）はセッション継続不能なため伝播して中断する。
     let probs = match app
         .interactor
-        .predict_race(&race.race_id, MARKET_BLEND_ALPHA, track_condition)
+        .predict_race(
+            &race.race_id,
+            RECOMMENDED_MARKET_BLEND_ALPHA,
+            track_condition,
+        )
         .await
     {
         Ok(p) => p,
@@ -213,7 +212,7 @@ async fn run_race(
         };
         println!(
             "  {} ¥{} {} EV={:.2}",
-            format_combination(&bet.combination),
+            bet.combination.label_ja(),
             bet.stake,
             odds,
             bet.ev,
@@ -277,7 +276,7 @@ async fn run_race(
             &mut io::stdin().lock(),
             &format!(
                 "  {} 賭け¥{} の払戻 (なし: Enter) > ",
-                format_combination(&bet_item.combination),
+                bet_item.combination.label_ja(),
                 stake
             ),
             true,
@@ -446,11 +445,7 @@ fn read_edited_amounts<R: BufRead>(
         for (bet, sug) in bets.iter().zip(suggested) {
             let a = read_u64(
                 reader,
-                &format!(
-                    "  {} 推奨¥{} 入力額 > ",
-                    format_combination(&bet.combination),
-                    sug
-                ),
+                &format!("  {} 推奨¥{} 入力額 > ", bet.combination.label_ja(), sug),
                 false,
             )?;
             amounts.push(a);
@@ -536,33 +531,6 @@ fn print_pair_ev_diagnostics(
             fmt(r.exacta_fwd_ev, r.exacta_fwd_odds),
             fmt(r.exacta_rev_ev, r.exacta_rev_odds),
         );
-    }
-}
-
-fn format_combination(c: &BetCombination) -> String {
-    match c {
-        BetCombination::Win(h) => format!("単勝 {}", h.value()),
-        BetCombination::Place(h) => format!("複勝 {}", h.value()),
-        BetCombination::Quinella(p) => {
-            let (a, b) = p.as_tuple();
-            format!("馬連 {}-{}", a.value(), b.value())
-        }
-        BetCombination::Wide(p) => {
-            let (a, b) = p.as_tuple();
-            format!("ワイド {}-{}", a.value(), b.value())
-        }
-        BetCombination::Exacta(p) => {
-            let (a, b) = p.as_tuple();
-            format!("馬単 {}→{}", a.value(), b.value())
-        }
-        BetCombination::Trio(t) => {
-            let (a, b, c) = t.as_tuple();
-            format!("三連複 {}-{}-{}", a.value(), b.value(), c.value())
-        }
-        BetCombination::Trifecta(t) => {
-            let (a, b, c) = t.as_tuple();
-            format!("三連単 {}→{}→{}", a.value(), b.value(), c.value())
-        }
     }
 }
 

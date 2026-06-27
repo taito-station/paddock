@@ -94,6 +94,36 @@ impl BetCombination {
             }
         }
     }
+
+    /// 日本語の券種名付き表示ラベル（人間向け。買い目アラート・予想出力で共用）。
+    /// `combination_code` と違い、順序付き（馬単/三連単）は `→`、無順は `-` で区切り、
+    /// 券種名を前置する。例: `単勝 3` / `馬連 1-5` / `馬単 1→5` / `三連複 1-3-5` / `三連単 1→3→5`。
+    pub fn label_ja(&self) -> String {
+        match self {
+            BetCombination::Win(h) => format!("単勝 {}", h.value()),
+            BetCombination::Place(h) => format!("複勝 {}", h.value()),
+            BetCombination::Quinella(p) => {
+                let (a, b) = p.as_tuple();
+                format!("馬連 {}-{}", a.value(), b.value())
+            }
+            BetCombination::Wide(p) => {
+                let (a, b) = p.as_tuple();
+                format!("ワイド {}-{}", a.value(), b.value())
+            }
+            BetCombination::Exacta(p) => {
+                let (a, b) = p.as_tuple();
+                format!("馬単 {}→{}", a.value(), b.value())
+            }
+            BetCombination::Trio(t) => {
+                let (a, b, c) = t.as_tuple();
+                format!("三連複 {}-{}-{}", a.value(), b.value(), c.value())
+            }
+            BetCombination::Trifecta(t) => {
+                let (a, b, c) = t.as_tuple();
+                format!("三連単 {}→{}→{}", a.value(), b.value(), c.value())
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
