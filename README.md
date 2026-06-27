@@ -127,7 +127,8 @@ cargo run --release -p parse-pdf -- fetch --year 2025 -j 8   # 8 並列で 1 年
 3. `mutool draw -F stext.json` の座標索引から騎手・調教師・斤量を確定し、人気は単勝オッズの昇順順位から
    算出する（いずれも決定的・OCR 非依存）
 4. PDF を PNG 化して OCR をかけ、着順は OCR 抽出が「1〜頭数の完全集合の半分以上を占める」場合のみ
-   上書き採用し、そうでなければ mutool の行順 fallback を使う
+   上書き採用し、そうでなければ mutool の行順 fallback を使う。斤量・調教師など mutool が取りこぼした
+   行も、この OCR 結果で補完する
 
 進捗は `RUST_LOG=info` で OCR 開始・終了・所要時間が source 別に表示される:
 
