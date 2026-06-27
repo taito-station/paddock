@@ -33,11 +33,12 @@ pub use portfolio::{
     pair_ev_diagnostics,
 };
 pub use prediction::{
-    DatedCounts, EstimationConfig, FactorStat, HorseFactors, HorseProbability, JockeyFormRun,
+    DatedCounts, EstimationConfig, ExplainCategory, FactorExplanation, FactorStat,
+    HorseExplanation, HorseFactors, HorseProbability, JockeyFormRun, PrevRunSummary,
     RECOMMENDED_MARKET_BLEND_ALPHA, RateTriple, RecencyConfig, RecentRun, ShrinkageConfig,
-    StandardTimes, apply_recency_weight, apply_win_power, blend_with_market_win,
+    StandardTimes, Verdict, apply_recency_weight, apply_win_power, blend_with_market_win,
     estimate_probabilities, estimate_probabilities_with_config, jockey_recent_form_score,
-    recent_form_score,
+    recent_form_score, verdict_from_show_rate,
 };
 pub use race::{Race, RaceId, Surface, TrackCondition, Venue, Weather};
 pub use race_card::{HorseEntry, RaceCard};

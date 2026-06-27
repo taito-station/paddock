@@ -3,9 +3,10 @@ use std::io::{self, BufRead, Write};
 
 use chrono::{NaiveDate, Utc};
 use paddock_domain::{
-    BetCombination, HorseNum, HorseProbability, PairEvDiagnostic, PortfolioBet, PortfolioConfig,
-    RECOMMENDED_MARKET_BLEND_ALPHA, Race, RaceId, Surface, TrackCondition, build_portfolio,
-    pair_ev_diagnostics,
+    BetCombination, ExplainCategory, FactorExplanation, HorseExplanation, HorseNum,
+    HorseProbability, PairEvDiagnostic, PortfolioBet, PortfolioConfig, PrevRunSummary,
+    RECOMMENDED_MARKET_BLEND_ALPHA, Race, RaceId, Surface, TrackCondition, Verdict,
+    build_portfolio, pair_ev_diagnostics,
 };
 use paddock_use_case::{PredictBetRecord, PredictSessionRecord};
 
@@ -21,6 +22,7 @@ pub async fn run_session(
     budget: Option<u64>,
     race_budget: u64,
     resume: bool,
+    explain: bool,
 ) -> anyhow::Result<()> {
     let races = app.interactor.races_by_date(date).await?;
     if races.is_empty() {
@@ -97,6 +99,7 @@ pub async fn run_session(
             race_budget,
             &recorded,
             &mut last_input,
+            explain,
         )
         .await?;
     }
@@ -118,6 +121,7 @@ async fn run_race(
     race_budget: u64,
     recorded: &HashMap<String, Option<TrackCondition>>,
     last_input: &mut Option<TrackCondition>,
+    explain: bool,
 ) -> anyhow::Result<()> {
     println!();
     println!(
@@ -153,25 +157,51 @@ async fn run_race(
 
     // 出馬表未登録（NotFound）はそのレースのみスキップ。
     // DB 障害等（Internal）はセッション継続不能なため伝播して中断する。
-    let probs = match app
-        .interactor
-        .predict_race(
-            &race.race_id,
-            RECOMMENDED_MARKET_BLEND_ALPHA,
-            track_condition,
-        )
-        .await
-    {
-        Ok(p) => p,
-        Err(paddock_use_case::Error::NotFound(msg)) => {
-            println!("出馬表が見つかりません（{msg}）。スキップします。");
-            return Ok(());
+    // --explain 時は根拠付き API を使う（確率値は predict_race と同一経路で完全一致, #274）。
+    let (probs, explanations) = if explain {
+        match app
+            .interactor
+            .predict_race_explained(
+                &race.race_id,
+                RECOMMENDED_MARKET_BLEND_ALPHA,
+                track_condition,
+            )
+            .await
+        {
+            Ok(items) => {
+                let (probs, expls): (Vec<_>, Vec<_>) = items.into_iter().unzip();
+                (probs, Some(expls))
+            }
+            Err(paddock_use_case::Error::NotFound(msg)) => {
+                println!("出馬表が見つかりません（{msg}）。スキップします。");
+                return Ok(());
+            }
+            Err(e) => return Err(e.into()),
         }
-        Err(e) => return Err(e.into()),
+    } else {
+        match app
+            .interactor
+            .predict_race(
+                &race.race_id,
+                RECOMMENDED_MARKET_BLEND_ALPHA,
+                track_condition,
+            )
+            .await
+        {
+            Ok(p) => (p, None),
+            Err(paddock_use_case::Error::NotFound(msg)) => {
+                println!("出馬表が見つかりません（{msg}）。スキップします。");
+                return Ok(());
+            }
+            Err(e) => return Err(e.into()),
+        }
     };
 
     println!();
     print_probs(&probs);
+    if let Some(explanations) = &explanations {
+        print_explanations(&probs, explanations);
+    }
 
     // オッズ未取得（None）はスキップのみ受付（select_bets は呼ばない）。
     // OddsInteractor が都度ライブスクレイプし、取得失敗・未公開は None に畳む。
@@ -486,6 +516,86 @@ fn print_probs(probs: &[HorseProbability]) {
             p.show_prob * 100.0,
         );
     }
+}
+
+/// win_prob 上位の馬について予想根拠（条件別成績・前走・斤量）を印付きで表示する（#274）。
+/// 確率テーブルは盤面順なので、ここで win_prob 降順に並べ替えて上位 `MARKS` 頭に印を振る。
+fn print_explanations(probs: &[HorseProbability], explanations: &[HorseExplanation]) {
+    const MARKS: [&str; 5] = ["◎", "○", "▲", "△", "☆"];
+    let mut ranked: Vec<&HorseProbability> = probs.iter().collect();
+    ranked.sort_by(|a, b| {
+        b.win_prob
+            .partial_cmp(&a.win_prob)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    let shown = MARKS.len().min(ranked.len());
+    println!();
+    println!("【予想根拠（上位{shown}頭）】");
+    for (rank, p) in ranked.iter().take(MARKS.len()).enumerate() {
+        let mark = MARKS[rank];
+        // probs と explanations は同順だが、並べ替え後は馬番で引き直す（順位付けと根拠の対応を保つ）。
+        let Some(ex) = explanations.iter().find(|e| e.horse_num == p.horse_num) else {
+            continue;
+        };
+        println!(
+            "{mark}{} {}（勝率{:.1}%）",
+            p.horse_num.value(),
+            p.horse_name.value(),
+            p.win_prob * 100.0,
+        );
+        for f in &ex.factors {
+            println!("  {}", factor_phrase(f));
+        }
+        if let Some(prev) = &ex.prev_run {
+            println!("  {}", prev_run_phrase(prev));
+        }
+        if let (Some(w), Some(mean)) = (ex.weight_carried, ex.field_mean_weight) {
+            println!("  斤量 {w:.1}kg（平均比 {:+.1}kg）", w - mean);
+        }
+        if ex.factors.is_empty() && ex.prev_run.is_none() {
+            println!("  （実績データ不足）");
+        }
+    }
+}
+
+/// 1 factor 分の根拠を 1 行の日本語にする。カテゴリで話題語、verdict で「得意/標準/苦手」を付ける。
+fn factor_phrase(f: &FactorExplanation) -> String {
+    let topic = match f.category {
+        ExplainCategory::Surface | ExplainCategory::Distance => f.label.clone(),
+        ExplainCategory::TrackCondition => format!("{}馬場", f.label),
+        ExplainCategory::CourseGate => format!("枠（{}）", f.label),
+        ExplainCategory::Jockey => format!("騎手 {}", f.label),
+        ExplainCategory::Trainer => format!("厩舎 {}", f.label),
+    };
+    let verdict = match f.verdict {
+        Verdict::Strong => "得意",
+        Verdict::Neutral => "標準",
+        Verdict::Weak => "苦手",
+    };
+    format!(
+        "{topic} {verdict}：複勝率 {:.0}%（{}走）",
+        f.rate.show * 100.0,
+        f.starts,
+    )
+}
+
+/// 前走サマリを 1 行の日本語にする。欠落フィールドは黙って省く。
+fn prev_run_phrase(p: &PrevRunSummary) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(pos) = p.finishing_position {
+        parts.push(format!("{pos}着"));
+    }
+    if let Some(pop) = p.popularity {
+        parts.push(format!("{pop}番人気"));
+    }
+    parts.push(format!("{}{}m", surface_jp(p.surface), p.distance));
+    if let Some(m) = &p.margin
+        && !m.is_empty()
+    {
+        parts.push(format!("着差{m}"));
+    }
+    format!("前走：{}", parts.join("・"))
 }
 
 /// 軸-相手ペアの「馬連 vs 馬単(両方向)」EV 診断表（#246-C）。EV は的中確率 × オッズ、
