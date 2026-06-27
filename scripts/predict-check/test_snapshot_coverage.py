@@ -29,6 +29,9 @@ def test_fetched_at_to_jst_min():
     assert C.fetched_at_to_jst_min("2026-06-27 14:40:45+09") is None
     # Z 表記の UTC は受理。
     assert C.fetched_at_to_jst_min("2026-06-27T05:40:45Z") == 14 * 60 + 40
+    # オフセット表記が全く無い naive 文字列も UTC と確認できないため拒否（誤シフト防止）。
+    assert C.fetched_at_to_jst_min("2026-06-27T05:40:45") is None
+    assert C.fetched_at_to_jst_min("2026-06-27 05:40:45.19") is None
 
 
 def test_classify_bad_ts():

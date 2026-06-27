@@ -57,9 +57,12 @@ def fetched_at_to_jst_min(fetched_at: str):
     m = re.search(r"[T ]([0-9]{2}):([0-9]{2})", fetched_at)
     if not m:
         return None
-    # 末尾のタイムゾーン表記を検査。UTC（Z / +00 / +0000 / +00:00）以外は拒否（二重シフト防止）。
+    # 末尾のタイムゾーン表記を検査し UTC（Z / +00 / +0000 / +00:00）のみ受理。非 UTC オフセットも、
+    # オフセット表記が全く無い naive 文字列（JST ローカル時刻が来ると誤シフトしうる）も拒否する。
+    # 「UTC と確認できない時刻は変換しない」で二重シフトの沈黙故障を一律に防ぐ（→ bad_ts で顕在化）。
+    utc_tz = ("Z", "+00", "+0000", "+00:00", "-00", "-0000", "-00:00")
     tz = re.search(r"(Z|[+-][0-9]{2}:?[0-9]{2}|[+-][0-9]{2})$", fetched_at.strip())
-    if tz and tz.group(0) not in ("Z", "+00", "+0000", "+00:00", "-00", "-0000", "-00:00"):
+    if tz is None or tz.group(0) not in utc_tz:
         return None
     utc_min = int(m.group(1)) * 60 + int(m.group(2))
     return (utc_min + JST_OFFSET_MIN) % 1440
