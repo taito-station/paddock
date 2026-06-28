@@ -235,7 +235,7 @@ impl NetkeibaScraper for UreqNetkeibaScraper {
 /// low<=high）へ変換する。API は妥当値を返すが、変換に失敗する行（想定外の `< 1.0` 等）は
 /// **その行だけ skip** し、レース全体を落とさない（取りこぼし耐性）。組合せ券種は DTO 段階で
 /// 既にドメイン型キー（`Pair`/`OrderedPair`/`Triple`/`OrderedTriple`）を持つのでキー変換は不要。
-pub fn assemble_netkeiba(
+pub(crate) fn assemble_netkeiba(
     odds: &FetchedOdds,
     exotic: &FetchedExoticOdds,
     race_id: RaceId,
