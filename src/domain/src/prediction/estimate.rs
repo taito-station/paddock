@@ -200,7 +200,8 @@ pub fn apply_placeshow_power(probs: &[HorseProbability], gamma: f64) -> Vec<Hors
         return probs.to_vec();
     }
     // vals を ^gamma して合計 target に再正規化（各要素 ≤1.0）。合計 0/非有限は None（no-op 判定）。
-    let pow_sum = |vals: Vec<f64>, target: f64| -> Option<Vec<f64>> {
+    // Python 側 calibration.py の `power_renorm` と対応（命名・式を揃える）。
+    let power_renorm = |vals: Vec<f64>, target: f64| -> Option<Vec<f64>> {
         let powered: Vec<f64> = vals.iter().map(|v| v.powf(gamma)).collect();
         let total: f64 = powered.iter().sum();
         if total <= 0.0 || !total.is_finite() {
@@ -213,8 +214,8 @@ pub fn apply_placeshow_power(probs: &[HorseProbability], gamma: f64) -> Vec<Hors
                 .collect(),
         )
     };
-    let place = pow_sum(probs.iter().map(|p| p.place_prob).collect(), 2.0);
-    let show = pow_sum(probs.iter().map(|p| p.show_prob).collect(), 3.0);
+    let place = power_renorm(probs.iter().map(|p| p.place_prob).collect(), 2.0);
+    let show = power_renorm(probs.iter().map(|p| p.show_prob).collect(), 3.0);
     let (Some(place), Some(show)) = (place, show) else {
         return probs.to_vec();
     };
@@ -271,16 +272,22 @@ mod placeshow_power_tests {
 
     #[test]
     fn preserves_ranking_and_sharpens_spread() {
-        // 単調変換なので place/show のランクは保存し、相対スプレッド（比）は広がる（シャープ化）。
+        // 単調変換なので show のランクは保存し、相対スプレッド（比）は広がる（シャープ化）。
+        // cap(1.0) に当たらない値域で純粋に検証する: 6 頭・show² の合計を大きく取り、最上位でも
+        //   show² 再正規化 = .14²/Σ*3 = .0196/.0736*3 ≈ 0.80 < 1.0（cap 未到達）。
         let probs = vec![
-            prob(1, 0.05, 0.10, 0.15),
-            prob(2, 0.04, 0.08, 0.12),
-            prob(3, 0.03, 0.06, 0.10),
+            prob(1, 0.05, 0.13, 0.14),
+            prob(2, 0.05, 0.11, 0.12),
+            prob(3, 0.05, 0.09, 0.10),
+            prob(4, 0.05, 0.09, 0.10),
+            prob(5, 0.05, 0.09, 0.10),
+            prob(6, 0.05, 0.09, 0.10),
         ];
         let out = apply_placeshow_power(&probs, 2.0);
-        // show のランク保存（入力 1>2>3）。
+        // show のランク保存（入力 1>2>3）かつ cap 未到達（<1.0）。
+        assert!(out[0].show_prob < 1.0, "cap 未到達: {:?}", out[0]);
         assert!(out[0].show_prob > out[1].show_prob && out[1].show_prob > out[2].show_prob);
-        // 比が広がる: out 比 > in 比（cap 未到達の小さい値で検証）。
+        // 比が広がる: out 比 > in 比（cap に頼らない純シャープ化）。
         let in_ratio = probs[0].show_prob / probs[2].show_prob;
         let out_ratio = out[0].show_prob / out[2].show_prob;
         assert!(out_ratio > in_ratio, "out {out_ratio} > in {in_ratio}");
