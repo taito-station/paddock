@@ -73,9 +73,7 @@
 
 ```sh
 # 入力（馬連・三連複盤面 + 結果）は #252 の手順で生成（/tmp/bt252）。
-# 比較スクリプトは本 ADR の検証用（umaren_backtest の parser/helper を再利用）:
-python3 - <<'PY'
-# scripts/predict-check を import path に追加し、proxy/true/equal × minu=1/0 を 71R で比較。
-# 結果: proxy+minu1=75.5% / equal+minu0=75.5% / true+minu1=71.1% / proxy+minu0=66.4% / true+minu0=66.3%
-PY
+# 比較スクリプト（umaren_backtest の parser/helper を再利用し proxy/true/equal × minu=1/0 を 71R で比較）:
+python3 scripts/predict-check/alloc_compare.py
+# 期待出力: proxy+minu1=75.5% / equal+minu0=75.5% / true+minu1=71.1% / proxy+minu0=66.4% / true+minu0=66.3%
 ```

@@ -276,12 +276,12 @@ pub fn build_portfolio(
     }
 }
 
-/// 1 券種ぶんの脚を予算配分して `out` に積む。`type_budget` を 100 円単位で均等配分し、
-/// 賭け金 0 の脚は捨てる。各脚の ev 倍率・的中確率は `simulate` 単体評価で求める。
+/// 1 券種ぶんの脚を予算配分して `out` に積む。`type_budget` を 100 円単位で均等配分し
+/// （予算が賄える範囲で薄い脚にも少額が乗る。賄えない端数の脚は ¥0＝買わない）、賭け金 0 の脚は捨てる。
+/// 各脚の ev 倍率・的中確率は `simulate` 単体評価で求める。
 ///
-/// 配分は均等割り（薄い脚へも少額が乗る）を維持する。確率重み＋脚ごと最低¥100 撤廃へ変える案は
-/// 71R 検証で実 ROI を 75.5%→66.3% に悪化させた（三連複の薄い穴目への少額が高配当を拾うため）ため不採用。
-/// 詳細は docs/specifications/betting-rule-history.md。
+/// 配分を確率重み＋脚ごと最低¥100 撤廃へ変える案は 71R 検証で実 ROI を悪化させたため不採用
+/// （均等割りを維持）。根拠は ADR 0046 / docs/specifications/betting-rule-history.md ⑨。
 fn push_legs(
     out: &mut Vec<PortfolioBet>,
     legs: Vec<(BetCombination, Option<f64>)>,
