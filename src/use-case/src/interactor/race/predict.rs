@@ -248,6 +248,13 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: 
             None => probs,
         };
 
+        // place/show の中央圧縮を是正する冪変換（#286）。config.placeshow_power が None なら no-op。
+        // win は変えないため top-1・連系/着順 EV（win 由来）は不変＝表示の連対率/複勝率だけが校正される。
+        let probs = match config.placeshow_power {
+            Some(gamma) => paddock_domain::prediction::apply_placeshow_power(&probs, gamma),
+            None => probs,
+        };
+
         Ok(probs)
     }
 

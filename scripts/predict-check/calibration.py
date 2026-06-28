@@ -24,6 +24,7 @@ import umaren_backtest as ub  # noqa: E402
 
 WIN_BINS = [0.0, 0.02, 0.05, 0.10, 0.20, 0.40, 1.01]
 SHOW_BINS = [0.0, 0.10, 0.20, 0.30, 0.45, 0.60, 1.01]
+PLACE_BINS = [0.0, 0.05, 0.12, 0.20, 0.30, 0.45, 1.01]
 
 
 def load_pure(path):
@@ -57,11 +58,56 @@ def reliability(samples, bins, label):
     return ece
 
 
+def ece_of(samples, bins):
+    """reliability の ECE だけを静かに返す（掃引用）。"""
+    n = len(samples)
+    if n == 0:
+        return 0.0
+    e = 0.0
+    for i in range(len(bins) - 1):
+        lo, hi = bins[i], bins[i + 1]
+        b = [(p, h) for p, h in samples if lo <= p < hi]
+        if not b:
+            continue
+        mp = statistics.mean(p for p, _ in b)
+        emp = sum(1 for _, h in b if h) / len(b)
+        e += len(b) / n * abs(emp - mp)
+    return e
+
+
+def power_renorm(vals, target, gamma):
+    """vals を ^gamma して合計 target に再正規化（各要素 ≤1.0）。rust apply_placeshow_power と同型。"""
+    powered = [v ** gamma for v in vals]
+    total = sum(powered)
+    if total <= 0:
+        return list(vals)
+    return [min(1.0, p / total * target) for p in powered]
+
+
+def placeshow_after_power(horses, gamma):
+    """1 レースの {num:(win,place,show)} に place/show 冪 gamma を後掛け（win 不変・単調再是正）。
+
+    place^gamma→合計2.0、show^gamma→合計3.0 に再正規化し、win ≤ place ≤ show を累積 max で是正。
+    """
+    nums = list(horses)
+    wins = [horses[n][0] for n in nums]
+    place = power_renorm([horses[n][1] for n in nums], 2.0, gamma)
+    show = power_renorm([horses[n][2] for n in nums], 3.0, gamma)
+    out = {}
+    for i, n in enumerate(nums):
+        pl = min(1.0, max(place[i], wins[i]))
+        sh = min(1.0, max(show[i], pl))
+        out[n] = (wins[i], pl, sh)
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--pure", default="/tmp/bt252/pure_preds.tsv")
     ap.add_argument("--results-dir", default="/tmp/bt252")
     ap.add_argument("--winodds", default="/tmp/bt252/bt_winodds.tsv")
+    ap.add_argument("--placeshow-power-grid", default="1.0,1.25,1.5,1.75,2.0,2.5",
+                    help="place/show 冪 γ の掃引（show/place ECE 最小を選ぶ）")
     args = ap.parse_args()
 
     preds, nk = load_pure(args.pure)
@@ -72,6 +118,7 @@ def main():
     win_samples, show_samples = [], []          # 純モデル
     mkt_win_samples = []                         # 市場 implied（対照）
     longshot = []                               # (pred_win, won) for モデル高×市場薄
+    scored = []                                 # 掃引用 per-race: (horses, winner, place_set, show_set)
 
     for slug, horses in preds.items():
         resf = Path(args.results_dir) / f"res_{nk[slug]}.html"
@@ -81,6 +128,7 @@ def main():
         if len(top3) < 3:
             continue
         winner, show_set = top3[0], set(top3[:3])
+        scored.append((horses, winner, set(top3[:2]), show_set))
 
         wins = {num: w for num, (w, _, _) in horses.items()}
         widths.append(max(wins.values()) - min(wins.values()))
@@ -142,6 +190,19 @@ def main():
               f"→ 過大評価 {(mp - emp) * 100:+.1f}pt")
     else:
         print("  該当なし")
+
+    # --- place/show 冪 γ の掃引（show/place ECE 最小を選ぶ。win 不変）---
+    grid = [float(x) for x in args.placeshow_power_grid.split(",")]
+    print("\n=== place/show 冪 γ 掃引（ECE 最小を採用。win は不変）===")
+    print(f"{'γ':>5} {'show ECE':>9} {'place ECE':>10}")
+    for g in grid:
+        ss, ps = [], []
+        for horses, winner, place_set, show_set in scored:
+            t = placeshow_after_power(horses, g)
+            for num, (_, pl, sh) in t.items():
+                ps.append((pl, num in place_set))
+                ss.append((sh, num in show_set))
+        print(f"{g:>5.2f} {ece_of(ss, SHOW_BINS) * 100:>8.2f}% {ece_of(ps, PLACE_BINS) * 100:>9.2f}%")
 
 
 if __name__ == "__main__":

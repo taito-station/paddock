@@ -238,6 +238,9 @@ fn build_estimation_config(
         trend_n,
         jockey_recent_form_weight: jockey_form_weight,
         win_power,
+        // backtest は win 系指標の sweep 用。placeshow_power は表示の連対/複勝率専用で win 非関与のため
+        // 本 sweep では off（採用値の校正は scripts/predict-check/calibration.py で実施・ADR 0047）。
+        placeshow_power: None,
     })
 }
 

@@ -605,6 +605,7 @@ fn shrink_cfg(m: f64) -> EstimationConfig {
         trend_n: 1,
         jockey_recent_form_weight: None,
         win_power: None,
+        placeshow_power: None,
     }
 }
 

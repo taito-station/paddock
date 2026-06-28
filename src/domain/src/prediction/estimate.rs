@@ -186,3 +186,117 @@ pub fn apply_win_power(probs: &[HorseProbability], gamma: f64) -> Vec<HorseProba
         })
         .collect()
 }
+
+/// place/show を冪変換 `p'_i ∝ p_i^gamma` して場内合計 2.0 / 3.0 へ再正規化する（#286 / ADR 0047）。
+///
+/// m=10 縮約後の place/show は中央に圧縮（強い連対/複勝馬を過小・弱い馬を過大）するため、`gamma > 1.0`
+/// で相対的にシャープ化し校正を改善する。**win は変えない**（top-1・EV・回収率は win 由来なので不変）。
+/// place を ^gamma→合計 2.0、show を ^gamma→合計 3.0 に再正規化し、最後に `win ≤ place ≤ show` を
+/// 累積 max で再是正する（[`apply_win_power`] と同型。cap で合計が 2.0/3.0 を下回りうる割り切りも同じ）。
+/// `gamma` 非有限 / `<= 0.0` / ≈ `1.0` / 入力空、または place・show の合計が 0/非有限のときは no-op。
+pub fn apply_placeshow_power(probs: &[HorseProbability], gamma: f64) -> Vec<HorseProbability> {
+    if !gamma.is_finite() || gamma <= 0.0 || (gamma - 1.0).abs() < f64::EPSILON || probs.is_empty()
+    {
+        return probs.to_vec();
+    }
+    // vals を ^gamma して合計 target に再正規化（各要素 ≤1.0）。合計 0/非有限は None（no-op 判定）。
+    let pow_sum = |vals: Vec<f64>, target: f64| -> Option<Vec<f64>> {
+        let powered: Vec<f64> = vals.iter().map(|v| v.powf(gamma)).collect();
+        let total: f64 = powered.iter().sum();
+        if total <= 0.0 || !total.is_finite() {
+            return None;
+        }
+        Some(
+            powered
+                .iter()
+                .map(|v| (v / total * target).min(1.0))
+                .collect(),
+        )
+    };
+    let place = pow_sum(probs.iter().map(|p| p.place_prob).collect(), 2.0);
+    let show = pow_sum(probs.iter().map(|p| p.show_prob).collect(), 3.0);
+    let (Some(place), Some(show)) = (place, show) else {
+        return probs.to_vec();
+    };
+
+    probs
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            let win = p.win_prob;
+            let place = place[i].max(win).min(1.0);
+            let show = show[i].max(place).min(1.0);
+            HorseProbability {
+                horse_num: p.horse_num,
+                horse_name: p.horse_name.clone(),
+                win_prob: win,
+                place_prob: place,
+                show_prob: show,
+            }
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod placeshow_power_tests {
+    use super::*;
+    use crate::horse_result::{HorseName, HorseNum};
+
+    fn prob(n: u32, w: f64, p: f64, s: f64) -> HorseProbability {
+        HorseProbability {
+            horse_num: HorseNum::try_from(n).unwrap(),
+            horse_name: HorseName::try_from(format!("ウマ{n}")).unwrap(),
+            win_prob: w,
+            place_prob: p,
+            show_prob: s,
+        }
+    }
+
+    #[test]
+    fn powers_placeshow_with_concrete_values_and_keeps_win() {
+        // 2 頭・γ=2。place^2→合計2.0 / show^2→合計3.0 へ再正規化、win は不変、単調 win≤place≤show。
+        let probs = vec![prob(1, 0.3, 0.4, 0.5), prob(2, 0.1, 0.2, 0.3)];
+        let out = apply_placeshow_power(&probs, 2.0);
+        // win は完全不変。
+        assert_eq!(out[0].win_prob, 0.3);
+        assert_eq!(out[1].win_prob, 0.1);
+        // h2: place .2^2/(.2^2+.4^2)*2 = .04/.20*2 = 0.4、show .3^2/(.3^2+.5^2)*3 = .09/.34*3 ≈ 0.7941。
+        assert!((out[1].place_prob - 0.4).abs() < 1e-9);
+        assert!((out[1].show_prob - 0.09 / 0.34 * 3.0).abs() < 1e-9);
+        // 単調性。
+        for p in &out {
+            assert!(p.win_prob <= p.place_prob + 1e-12 && p.place_prob <= p.show_prob + 1e-12);
+        }
+    }
+
+    #[test]
+    fn preserves_ranking_and_sharpens_spread() {
+        // 単調変換なので place/show のランクは保存し、相対スプレッド（比）は広がる（シャープ化）。
+        let probs = vec![
+            prob(1, 0.05, 0.10, 0.15),
+            prob(2, 0.04, 0.08, 0.12),
+            prob(3, 0.03, 0.06, 0.10),
+        ];
+        let out = apply_placeshow_power(&probs, 2.0);
+        // show のランク保存（入力 1>2>3）。
+        assert!(out[0].show_prob > out[1].show_prob && out[1].show_prob > out[2].show_prob);
+        // 比が広がる: out 比 > in 比（cap 未到達の小さい値で検証）。
+        let in_ratio = probs[0].show_prob / probs[2].show_prob;
+        let out_ratio = out[0].show_prob / out[2].show_prob;
+        assert!(out_ratio > in_ratio, "out {out_ratio} > in {in_ratio}");
+    }
+
+    #[test]
+    fn no_op_conditions() {
+        let probs = vec![prob(1, 0.3, 0.4, 0.5), prob(2, 0.1, 0.2, 0.3)];
+        // γ≈1.0 / ≤0 / 非有限 / 空 は no-op。
+        for g in [1.0, 0.0, -1.0, f64::NAN, f64::INFINITY] {
+            let out = apply_placeshow_power(&probs, g);
+            for (a, b) in out.iter().zip(&probs) {
+                assert_eq!(a.place_prob, b.place_prob);
+                assert_eq!(a.show_prob, b.show_prob);
+            }
+        }
+        assert!(apply_placeshow_power(&[], 2.0).is_empty());
+    }
+}

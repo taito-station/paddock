@@ -35,6 +35,11 @@ pub struct EstimationConfig {
     /// 適用する（[`super::estimate::apply_win_power`]）。backtest の `--win-power` スイープ専用で、
     /// 採用値は backtest 検証後に `production()` へ反映する（ADR 0042）。
     pub win_power: Option<f64>,
+    /// place/show 冪変換 `p'_i ∝ p_i^gamma` のγ（#286）。`None` のとき no-op（後方互換）。
+    /// `gamma > 1.0` で連対率/複勝率の中央圧縮を是正（強い馬を上げ弱い馬を下げる）。win には掛けない。
+    /// win_power 適用後の place/show に適用する（[`super::estimate::apply_placeshow_power`]）。
+    /// place/show は表示値で EV は win 由来のため回収率には影響しない（読む連対率/複勝率の精度向上）。
+    pub placeshow_power: Option<f64>,
 }
 
 // trend_n のデフォルト値が 0 でなく 1 のため、derive(Default) ではなく手書き impl を使う。
@@ -47,6 +52,7 @@ impl Default for EstimationConfig {
             trend_n: 1,
             jockey_recent_form_weight: None,
             win_power: None,
+            placeshow_power: None,
         }
     }
 }
@@ -70,6 +76,12 @@ pub const RECOMMENDED_WIN_POWER: f64 = 1.25;
 /// 詳細は docs/specifications/probability-estimation.md。
 pub const RECOMMENDED_MARKET_BLEND_ALPHA: Option<f64> = Some(0.2);
 
+/// 本番 predict が採用する place/show 冪変換のγ（#286）。純モデル校正測定（71R, 2026-05-30〜06-14,
+/// `scripts/predict-check/calibration.py`）で place/show が中央に圧縮（show ECE 9.3%・強い複勝馬を
+/// 過小/弱い馬を過大）と判明。γ∈{1.0..2.5} 掃引で γ=2.0 が show ECE 9.3→7.1%・place ECE 6.6→3.8%
+/// （place ECE 最小付近）。win は不変なので top-1・回収率は不変。詳細は ADR 0047。
+pub const RECOMMENDED_PLACESHOW_POWER: f64 = 2.0;
+
 impl EstimationConfig {
     /// 本番 predict 経路のデフォルト設定（#75 で backtest 検証して採用した値）。
     /// backtest の `--shrinkage-m` 未指定（= `Default`, 縮約 off）とは別で、こちらは縮約 on。
@@ -85,6 +97,9 @@ impl EstimationConfig {
             // #246: γ=1.25 を採用（4891R sweep で単勝 LogLoss 0.1974→0.1954 最良・穴帯校正改善、
             // γ≥1.5 は LogLoss/Brier 悪化＋人気馬過剰補正で棄却）。詳細は ADR 0042。
             win_power: Some(RECOMMENDED_WIN_POWER),
+            // #286: γ=2.0 を採用（71R 校正測定で place/show 圧縮を是正、show ECE 9.3→7.1%・
+            // place ECE 6.6→3.8%。win 不変＝回収率不変）。詳細は ADR 0047。
+            placeshow_power: Some(RECOMMENDED_PLACESHOW_POWER),
         }
     }
 }
