@@ -1,4 +1,4 @@
-# 0049. place/show 素スコアの脱圧縮を狙った m×recency×form joint retune の棄却
+# 0050. place/show 素スコアの脱圧縮を狙った m×recency×form joint retune の棄却
 
 ## ステータス
 
