@@ -422,8 +422,9 @@ mod tests {
 
     #[test]
     fn scrape_propagates_conversion_error_for_non_jra_race_id() {
-        // scrape() の glue 回帰ガード: 合成 race_id（`nk-` プレフィックス＝JRA 12 桁へ変換不能）は
-        // netkeiba_race_id_from_paddock が Err を返し、ネットワークへ出る前に伝播する
+        // scrape() の glue 回帰ガード: 馬個別成績由来の合成 race_id `nk-<12桁>` は paddock RaceId の
+        // `{year}-{round}-{slug}-{day}-{race_num}R` 構造でなく（末尾 R も無い）、
+        // netkeiba_race_id_from_paddock が変換段で Err を返してネットワークへ出る前に伝播する
         // （OddsInteractor 側で skip(None) になる）。ネットワーク非依存で変換分岐のみを検証する。
         let scraper = UreqNetkeibaScraper::new();
         let synthetic = RaceId::try_from("nk-202602010605").unwrap();

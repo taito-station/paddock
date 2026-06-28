@@ -1,7 +1,8 @@
 # ADR 0005: predict にオッズを結線し買い目算出を可能にする (Issue #25)
 
 ## ステータス
-承認済み
+承認済み（結線方針は有効。ただし注入する `OddsScraper` 実装は #287 / ADR 0048 で
+`UreqOddsScraper`(JRA) → `UreqNetkeibaScraper`(netkeiba) へ置換済み）
 
 ## コンテキスト
 `predict` は各馬の確率表を表示できるが、全レースで「オッズ未取得 — スキップ」となり
