@@ -148,6 +148,10 @@ def main():
         print(f"  純モデル: {model_top1}/{races_scored} = {model_top1 / races_scored * 100:.1f}%")
     if market_races:
         print(f"  市場本命: {market_top1}/{market_races} = {market_top1 / market_races * 100:.1f}%（対照）")
+    else:
+        # 市場対照が 1 件も採れない＝winodds の id と pure_preds の slug が不一致の可能性。
+        # クラッシュせず「対照だけ消える」事故になるので気づけるよう警告する。
+        print("WARN: 市場対照が空（--winodds の id と --pure の slug が不一致の可能性）", file=sys.stderr)
 
     # --- reliability / ECE ---
     # 注: win 純モデルは全レース全頭、市場 implied は winner∈odds のレースのみ採録で母集団が
