@@ -44,8 +44,10 @@ pub struct PortfolioBet {
     /// 払戻倍率（ライブ未取得なら `None`。買い目は残し精算は確定配当で可能）。
     /// ワイドは下限..上限帯の中点を用いる。
     pub odds: Option<f64>,
-    /// 期待値倍率 = 的中確率 × odds（`simulate` 単体評価の期待回収率）。odds 未取得なら 0.0。
+    /// 期待値倍率 = 的中確率 × floor(100×odds)/100（`leg_metrics` 算出, 払戻 floor 込み）。odds 未取得なら 0.0。
     pub ev: f64,
+    /// 的中確率（この組合せが当たる確率, オッズ非依存）。買うか判断する材料として表示する。
+    pub hit_prob: f64,
 }
 
 /// 生成された軸流しポートフォリオ。
@@ -274,8 +276,12 @@ pub fn build_portfolio(
     }
 }
 
-/// 1 券種ぶんの脚を予算配分して `out` に積む。`type_budget` を 100 円単位で均等配分し、
-/// 賭け金 0 の脚は捨てる。各脚の ev 倍率は `simulate` 単体評価の期待回収率で求める。
+/// 1 券種ぶんの脚を予算配分して `out` に積む。`type_budget` を 100 円単位で均等配分し
+/// （予算が賄える範囲で薄い脚にも少額が乗る。賄えない端数の脚は ¥0＝買わない）、賭け金 0 の脚は捨てる。
+/// 各脚の ev 倍率・的中確率は `simulate` 単体評価で求める。
+///
+/// 配分を確率重み＋脚ごと最低¥100 撤廃へ変える案は 71R 検証で実 ROI を悪化させたため不採用
+/// （均等割りを維持）。根拠は ADR 0046 / docs/specifications/betting-rule-history.md ⑨。
 fn push_legs(
     out: &mut Vec<PortfolioBet>,
     legs: Vec<(BetCombination, Option<f64>)>,
@@ -288,12 +294,14 @@ fn push_legs(
         if stake == 0 {
             continue;
         }
-        let ev = leg_ev(field, win, &combination, odds);
+        // ev 倍率と的中確率（判断材料として表示）を 1 度の simulate で求める。
+        let (ev, hit_prob) = leg_metrics(field, win, &combination, odds);
         out.push(PortfolioBet {
             combination,
             stake,
             odds,
             ev,
+            hit_prob,
         });
     }
 }
@@ -313,6 +321,45 @@ fn distribute(type_budget: u64, n: usize) -> Vec<u64> {
     let mut v = vec![100u64; affordable.min(n)];
     v.resize(n, 0);
     v
+}
+
+/// 脚 1 点の (ev 倍率, 的中確率) を求める（的中確率は買い目の判断材料として表示するためのもの。
+/// 配分の重みには使わない＝配分は均等割り, ADR 0046）。
+///
+/// 的中確率（occurrence 確率）は **常にダミー倍率 1.0 の単体 simulate** で求める＝オッズ非依存。
+/// 実オッズを simulate に渡すと、`odds=0.0` の汚染値（CLAUDE.md 既知の race_odds 汚染）で payout=0 となり
+/// 当たる脚の的中% が 0 に潰れるため、判断ビューでは必ず 1.0 で確率だけを取る。
+/// 単一脚の ev 倍率は `的中確率 × floor(100×odds)/100`。simulate の払戻 floor（`payout_of`）に合わせており
+/// 従来の `leg_ev`（odds で simulate した roi）と同値になる（テストで担保）。よって simulate は的中確率の
+/// 1 度で足り、odds 未取得は精算不能で 0.0。頭数不足（3 頭未満）は (0.0, 0.0)。
+fn leg_metrics(
+    field: &[HorseNum],
+    win: &HashMap<HorseNum, f64>,
+    combination: &BetCombination,
+    odds: Option<f64>,
+) -> (f64, f64) {
+    if field.len() < 3 {
+        return (0.0, 0.0);
+    }
+    let hit_prob = simulate(&SimInput {
+        field: field.to_vec(),
+        bets: vec![PlacedBet {
+            combination: combination.clone(),
+            stake: 100,
+            odds: 1.0,
+        }],
+        main: None,
+        win_probs: Some(win.clone()),
+    })
+    .ok()
+    .and_then(|r| r.ev)
+    .map(|e| e.hit_prob)
+    .unwrap_or(0.0);
+    // 払戻 floor（simulate `payout_of` の floor(stake×odds)）に合わせる＝従来 leg_ev と同値。
+    let ev = odds
+        .map(|o| hit_prob * (100.0 * o).floor() / 100.0)
+        .unwrap_or(0.0);
+    (ev, hit_prob)
 }
 
 /// 脚 1 点の期待値倍率（= 的中確率 × odds）を `simulate` 単体評価で求める。
@@ -665,6 +712,55 @@ mod tests {
                 .any(|b| matches!(b.combination, BetCombination::Exacta(_))),
             "Exacta 化はしない: {:?}",
             pf.bets
+        );
+    }
+
+    #[test]
+    fn portfolio_populates_hit_prob_for_each_bet() {
+        // 各買い目に的中確率（判断材料）が入る。確率なので (0, 1] の範囲。
+        // sample() の相手は全て勝率 > 0 なので hit_prob > 0 が保証される（勝率 0 の相手なら 0.0 になりうる）。
+        let (probs, o) = sample();
+        let pf = build_portfolio(&probs, &o, 5000, &PortfolioConfig::default());
+        assert!(!pf.bets.is_empty());
+        assert!(
+            pf.bets
+                .iter()
+                .all(|b| b.hit_prob > 0.0 && b.hit_prob <= 1.0),
+            "全買い目に的中確率(0,1]が入る: {:?}",
+            pf.bets
+        );
+        // ev 倍率は従来の leg_ev（simulate 由来・払戻 floor 込み）と一致する（恒真でない独立検証）。
+        let win: HashMap<HorseNum, f64> = probs.iter().map(|p| (p.horse_num, p.win_prob)).collect();
+        let field: Vec<HorseNum> = probs.iter().map(|p| p.horse_num).collect();
+        for b in pf.bets.iter().filter(|b| b.odds.is_some()) {
+            let expected = leg_ev(&field, &win, &b.combination, b.odds);
+            assert!(
+                (b.ev - expected).abs() < 1e-9,
+                "ev {} == leg_ev {}: {:?}",
+                b.ev,
+                expected,
+                b
+            );
+        }
+    }
+
+    #[test]
+    fn hit_prob_is_computed_even_when_odds_missing() {
+        // 的中確率はオッズ非依存。三連複オッズを空にしても hit_prob は算出される（ev のみ 0）。
+        let (probs, mut o) = sample();
+        o.trio.clear();
+        let pf = build_portfolio(&probs, &o, 5000, &PortfolioConfig::default());
+        let trio: Vec<_> = pf
+            .bets
+            .iter()
+            .filter(|b| matches!(b.combination, BetCombination::Trio(_)))
+            .collect();
+        assert!(!trio.is_empty());
+        assert!(
+            trio.iter()
+                .all(|b| b.odds.is_none() && b.ev == 0.0 && b.hit_prob > 0.0),
+            "オッズ欠落でも的中確率は出る（ev だけ 0）: {:?}",
+            trio
         );
     }
 }

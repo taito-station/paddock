@@ -219,16 +219,18 @@ fn print_buy_targets(p: &Portfolio) {
         }
         match bet.odds {
             Some(o) => println!(
-                "     {} ¥{} オッズ{:.1} EV={:.2}",
+                "     {} ¥{} オッズ{:.1} 的中{:.1}% EV={:.2}",
                 bet.combination.label_ja(),
                 bet.stake,
                 o,
+                bet.hit_prob * 100.0,
                 bet.ev,
             ),
             None => println!(
-                "     {} ¥{} オッズ未取得",
+                "     {} ¥{} オッズ未取得 的中{:.1}%",
                 bet.combination.label_ja(),
                 bet.stake,
+                bet.hit_prob * 100.0,
             ),
         }
     }
