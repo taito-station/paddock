@@ -118,10 +118,15 @@ impl<R: RaceCardRepository + OddsRepository + FetchRepository, S: NetkeibaScrape
             // `Error::Fetch` に集約するため実際には `Fetch` のみ届くが、将来 Timeout を分けて
             // 伝播しても transient として同じ degraded 分岐に乗るようまとめて捕捉する。
             Err(Error::Fetch(_) | Error::Timeout(_)) => {
-                tracing::warn!(%netkeiba_id, "単複オッズが一時的なネットワーク障害でリトライ後も取得できず、オッズ未保存で degraded 継続（card+近走は保存、要再取得）");
+                tracing::warn!(%netkeiba_id, "単複オッズの取得に失敗し、オッズ未保存で degraded 継続（card+近走は保存、要再取得）");
                 win_odds_degraded = true;
                 Default::default()
             }
+            // 未発売(status=yoso 等)/想定外 status は best-effort。下の else 分岐で exotic を取りに行き、
+            // 取れた分だけ保存しうる（exotic-only の部分スナップショットになりうる）。これは degraded 側で
+            // 排除した「win 欠落の部分永続化」と同型に見えるが、netkeiba は単複と組合せをほぼ同時発売する
+            // ため win=未発売のときは exotic も未発売（空）→ rows 空 → 保存スキップとなり実質到達しない。
+            // よって Parse 経路に degraded 同等の保存スキップ強制は課さない（既存挙動を温存）。
             Err(e) => {
                 tracing::warn!(%netkeiba_id, error = %e, "単複オッズの取得に失敗（未発売/想定外status）、オッズ無しで card+近走取り込みを継続");
                 Default::default()

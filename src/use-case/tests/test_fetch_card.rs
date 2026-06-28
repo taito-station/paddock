@@ -423,6 +423,10 @@ async fn win_place_fetch_error_still_saves_card() {
     let resp = interactor.ingest(NK_ID, race_id(), false).await.unwrap();
 
     assert!(resp.card_saved, "オッズ取得失敗でもカードは保存される");
+    assert!(
+        !resp.win_odds_degraded,
+        "未発売(yoso=Internal)は degraded ではない（transient のみ degraded）"
+    );
     assert_eq!(resp.entries_saved, 2);
     assert_eq!(resp.odds_saved, 0, "取得失敗時はオッズ 0 行");
     assert!(
@@ -454,6 +458,10 @@ async fn win_place_fetch_error_still_saves_exotic_odds() {
     let resp = interactor.ingest(NK_ID, race_id(), false).await.unwrap();
 
     assert!(resp.card_saved);
+    assert!(
+        !resp.win_odds_degraded,
+        "未発売(yoso)は degraded ではない（exotic は best-effort 保存）"
+    );
     assert_eq!(resp.odds_saved, 1, "単複は失敗で 0、馬連 1 のみ保存");
     let odds = interactor.repo.saved_odds.lock().unwrap();
     let rows = &odds[0].rows;

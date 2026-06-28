@@ -5,6 +5,11 @@ use std::process::ExitCode;
 
 use clap::Parser;
 
+/// degraded（単複だけ未取得・要再取得）を表す終了コード。ハード失敗(=1)・正常(=0)と区別し、
+/// 消費側（例: scripts/predict-check/refresh_ev.sh は exit≠0 を FAIL 扱いし「古いオッズ警告」を
+/// 出す）が win 欠落レースだけ再取得対象として識別できるようにする（#288, ADR 0049）。
+const EXIT_WIN_ODDS_DEGRADED: u8 = 3;
+
 #[tokio::main]
 async fn main() -> anyhow::Result<ExitCode> {
     let args = cli::Cli::parse();
@@ -29,7 +34,7 @@ async fn main() -> anyhow::Result<ExitCode> {
         // degraded の通知はここに 1 本化する。終了コードはここで断定せず末尾の return に委ねる
         // （ここは run_history より前で、history 失敗時は anyhow 経由で exit 1 になりうるため）。
         eprintln!(
-            "オッズ: 単複が一時的なネットワーク障害でリトライ後も取得できず未保存（card は保存済み）。win 欠落のため要再取得（degraded）"
+            "オッズ: 単複オッズを取得できず未保存（card は保存済み）。win 欠落のため要再取得（degraded）"
         );
     } else if resp.odds_saved > 0 {
         println!(
@@ -52,7 +57,7 @@ async fn main() -> anyhow::Result<ExitCode> {
     // win 欠落レースだけ再取得を回せる（#288, ADR 0049）。`process::exit` ではなく `ExitCode` を
     // 返し、tokio ランタイム・DB プール等の Drop を走らせてから終了する。
     if resp.win_odds_degraded {
-        return Ok(ExitCode::from(3));
+        return Ok(ExitCode::from(EXIT_WIN_ODDS_DEGRADED));
     }
     Ok(ExitCode::SUCCESS)
 }
