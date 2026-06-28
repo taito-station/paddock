@@ -276,6 +276,329 @@ fn place_show_sum_to_two_and_three_in_even_field() {
     assert!((show_total - 3.0).abs() < 1e-9, "show_total={show_total}");
 }
 
+/// place/show 冪変換（#283）: γ>1 で本命の place/show が持ち上がり人気薄が下がる（脱圧縮）。
+/// 上限クランプの起きない 8 頭立てで、場内合計 2.0/3.0 は保たれることも確認する。
+#[test]
+fn place_show_power_decompresses_toward_favorite() {
+    // 1 頭だけ place/show レートが高く、残り 7 頭は低い。win は全馬同一にして
+    // 単調化（place を win で floor）が脱圧縮の判定に干渉しないようにする。
+    let strong = RateTriple {
+        win: 0.1,
+        place: 0.25,
+        show: 0.3,
+    };
+    let weak = RateTriple {
+        win: 0.1,
+        place: 0.15,
+        show: 0.2,
+    };
+    let mk = |t: RateTriple| HorseFactors {
+        course_gate: Some(fs(t)),
+        horse_surface: Some(fs(t)),
+        horse_distance: Some(fs(t)),
+        jockey_surface: None,
+        horse_track_condition: None,
+        trainer_surface: None,
+        recent_form: None,
+        weight_carried: None,
+        jockey_recent_form: None,
+    };
+    let entries: Vec<_> = (1..=8)
+        .map(|i| {
+            let t = if i == 1 { strong } else { weak };
+            (make_entry(i, &format!("ウマ{i}")), mk(t))
+        })
+        .collect();
+
+    let base = estimate_probabilities(&entries);
+    let powered = estimate_probabilities_with_config(
+        &entries,
+        &EstimationConfig {
+            place_show_power: Some(2.0),
+            ..EstimationConfig::default()
+        },
+    );
+
+    // 本命（idx 0）の place/show は上がり、人気薄（idx 1）の place/show は下がる。
+    assert!(
+        powered[0].place_prob > base[0].place_prob,
+        "favorite place up: {} -> {}",
+        base[0].place_prob,
+        powered[0].place_prob
+    );
+    assert!(
+        powered[0].show_prob > base[0].show_prob,
+        "favorite show up: {} -> {}",
+        base[0].show_prob,
+        powered[0].show_prob
+    );
+    assert!(
+        powered[1].place_prob < base[1].place_prob,
+        "longshot place down: {} -> {}",
+        base[1].place_prob,
+        powered[1].place_prob
+    );
+
+    // クランプの無い設定なので場内合計は 2.0 / 3.0 を保つ。
+    let place_total: f64 = powered.iter().map(|p| p.place_prob).sum();
+    let show_total: f64 = powered.iter().map(|p| p.show_prob).sum();
+    assert!(
+        (place_total - 2.0).abs() < 1e-9,
+        "place_total={place_total}"
+    );
+    assert!((show_total - 3.0).abs() < 1e-9, "show_total={show_total}");
+}
+
+/// place/show 冪変換（#283）: γ=None / γ=1.0 は no-op（後方互換）。win も不変。
+#[test]
+fn place_show_power_none_or_one_is_noop() {
+    let triple = RateTriple {
+        win: 0.2,
+        place: 0.3,
+        show: 0.4,
+    };
+    let mk = || HorseFactors {
+        course_gate: Some(fs(triple)),
+        horse_surface: Some(fs(RateTriple {
+            win: 0.1,
+            place: 0.2,
+            show: 0.25,
+        })),
+        horse_distance: Some(fs(triple)),
+        jockey_surface: None,
+        horse_track_condition: None,
+        trainer_surface: None,
+        recent_form: None,
+        weight_carried: None,
+        jockey_recent_form: None,
+    };
+    // スコアに差がつくよう馬ごとに 1 factor だけ差し替える。
+    let entries: Vec<_> = (1..=6)
+        .map(|i| {
+            let mut f = mk();
+            f.horse_surface = Some(fs(RateTriple {
+                win: 0.1 * i as f64 / 6.0,
+                place: 0.2 * i as f64 / 6.0,
+                show: 0.25 * i as f64 / 6.0,
+            }));
+            (make_entry(i, &format!("ウマ{i}")), f)
+        })
+        .collect();
+    let base = estimate_probabilities(&entries);
+    for g in [None, Some(1.0)] {
+        let out = estimate_probabilities_with_config(
+            &entries,
+            &EstimationConfig {
+                place_show_power: g,
+                ..EstimationConfig::default()
+            },
+        );
+        for (a, b) in base.iter().zip(&out) {
+            approx(a.win_prob, b.win_prob);
+            approx(a.place_prob, b.place_prob);
+            approx(a.show_prob, b.show_prob);
+        }
+    }
+}
+
+/// place/show 冪変換（#283）: γ<1（逆方向＝圧縮）は本命の place/show を下げ人気薄を上げる。
+/// help で「γ<1 は逆方向」と宣伝しているため逆向きの挙動も固定する。
+#[test]
+fn place_show_power_below_one_compresses() {
+    let strong = RateTriple {
+        win: 0.1,
+        place: 0.25,
+        show: 0.3,
+    };
+    let weak = RateTriple {
+        win: 0.1,
+        place: 0.15,
+        show: 0.2,
+    };
+    let mk = |t: RateTriple| HorseFactors {
+        course_gate: Some(fs(t)),
+        horse_surface: Some(fs(t)),
+        horse_distance: Some(fs(t)),
+        jockey_surface: None,
+        horse_track_condition: None,
+        trainer_surface: None,
+        recent_form: None,
+        weight_carried: None,
+        jockey_recent_form: None,
+    };
+    let entries: Vec<_> = (1..=8)
+        .map(|i| {
+            let t = if i == 1 { strong } else { weak };
+            (make_entry(i, &format!("ウマ{i}")), mk(t))
+        })
+        .collect();
+    let base = estimate_probabilities(&entries);
+    let compressed = estimate_probabilities_with_config(
+        &entries,
+        &EstimationConfig {
+            place_show_power: Some(0.5),
+            ..EstimationConfig::default()
+        },
+    );
+    // 本命（idx 0）の place/show は下がり、人気薄（idx 1）は上がる（脱圧縮と逆向き）。
+    assert!(
+        compressed[0].place_prob < base[0].place_prob,
+        "favorite place down: {} -> {}",
+        base[0].place_prob,
+        compressed[0].place_prob
+    );
+    assert!(
+        compressed[1].place_prob > base[1].place_prob,
+        "longshot place up: {} -> {}",
+        base[1].place_prob,
+        compressed[1].place_prob
+    );
+}
+
+/// place/show 冪変換（#283）の中核契約: win_prob は γ に依らず**不変**。win レートを馬ごとに
+/// 変えた（脱圧縮テストは全馬 win 同一で win を突き合わせていない）うえで γ=2.0 と baseline の
+/// win_prob 一致を全馬アサートし、誤って win スコアに冪変換が掛かる回帰を検知する。
+#[test]
+fn place_show_power_leaves_win_prob_unchanged() {
+    let mk = |t: RateTriple| HorseFactors {
+        course_gate: Some(fs(t)),
+        horse_surface: Some(fs(RateTriple::default())),
+        horse_distance: Some(fs(RateTriple::default())),
+        jockey_surface: None,
+        horse_track_condition: None,
+        trainer_surface: None,
+        recent_form: None,
+        weight_carried: None,
+        jockey_recent_form: None,
+    };
+    // win も place/show も馬ごとに変える（win 0.05〜0.40 / place・show も傾斜）。place/show が
+    // 馬間で異なるので γ=2.0 が分布を実際にシャープ化する（クランプを避ける程度の小さい値）。
+    let entries: Vec<_> = (1..=8)
+        .map(|i| {
+            let f = i as f64;
+            let t = RateTriple {
+                win: 0.05 * f,
+                place: 0.05 + 0.01 * f,
+                show: 0.08 + 0.01 * f,
+            };
+            (make_entry(i, &format!("ウマ{i}")), mk(t))
+        })
+        .collect();
+    let base = estimate_probabilities(&entries);
+    let powered = estimate_probabilities_with_config(
+        &entries,
+        &EstimationConfig {
+            place_show_power: Some(2.0),
+            ..EstimationConfig::default()
+        },
+    );
+    for (b, p) in base.iter().zip(&powered) {
+        approx(b.win_prob, p.win_prob);
+    }
+    // place/show は実際に変わっている（テストが no-op を誤検証していないことの確認）。
+    assert!(
+        powered
+            .iter()
+            .zip(&base)
+            .any(|(p, b)| (p.place_prob - b.place_prob).abs() > 1e-9),
+        "place_show_power=2.0 で place/show は変化するはず"
+    );
+}
+
+/// place/show 冪変換（#283）: 不正 γ（非有限 / ≤0）はライブラリ防御で no-op になる契約を固定する。
+/// CLI は同条件を usage エラーで弾くが、ライブラリ層は黙って no-op（doc の非対称契約）。
+#[test]
+fn place_show_power_invalid_gamma_is_noop() {
+    let mk = |t: RateTriple| HorseFactors {
+        course_gate: Some(fs(t)),
+        horse_surface: Some(fs(RateTriple::default())),
+        horse_distance: Some(fs(t)),
+        jockey_surface: None,
+        horse_track_condition: None,
+        trainer_surface: None,
+        recent_form: None,
+        weight_carried: None,
+        jockey_recent_form: None,
+    };
+    let entries: Vec<_> = (1..=6)
+        .map(|i| {
+            let f = i as f64;
+            let t = RateTriple {
+                win: 0.05 * f,
+                place: 0.05 + 0.02 * f,
+                show: 0.08 + 0.02 * f,
+            };
+            (make_entry(i, &format!("ウマ{i}")), mk(t))
+        })
+        .collect();
+    let base = estimate_probabilities(&entries);
+    for g in [f64::NAN, f64::INFINITY, 0.0, -1.0] {
+        let out = estimate_probabilities_with_config(
+            &entries,
+            &EstimationConfig {
+                place_show_power: Some(g),
+                ..EstimationConfig::default()
+            },
+        );
+        for (a, b) in base.iter().zip(&out) {
+            approx(a.win_prob, b.win_prob);
+            approx(a.place_prob, b.place_prob);
+            approx(a.show_prob, b.show_prob);
+        }
+    }
+}
+
+/// place/show 冪変換（#283）: 強い本命がいて上限クランプが発火しても、(a) 各確率は 1.0 以下、
+/// (b) 単調性 win ≤ place ≤ show が保たれることを固定する（ADR 0047 が明記する境界挙動の回帰ロック）。
+#[test]
+fn place_show_power_clamps_strong_favorite() {
+    let strong = RateTriple {
+        win: 0.1,
+        place: 0.5,
+        show: 0.6,
+    };
+    let weak = RateTriple {
+        win: 0.1,
+        place: 0.1,
+        show: 0.15,
+    };
+    let mk = |t: RateTriple| HorseFactors {
+        course_gate: Some(fs(t)),
+        horse_surface: Some(fs(t)),
+        horse_distance: Some(fs(t)),
+        jockey_surface: None,
+        horse_track_condition: None,
+        trainer_surface: None,
+        recent_form: None,
+        weight_carried: None,
+        jockey_recent_form: None,
+    };
+    let entries: Vec<_> = (1..=6)
+        .map(|i| {
+            let t = if i == 1 { strong } else { weak };
+            (make_entry(i, &format!("ウマ{i}")), mk(t))
+        })
+        .collect();
+    let powered = estimate_probabilities_with_config(
+        &entries,
+        &EstimationConfig {
+            place_show_power: Some(2.0),
+            ..EstimationConfig::default()
+        },
+    );
+    // 本命の place/show は冪シャープ化＋正規化で 1.0 に張り付く（クランプ発火）。
+    approx(powered[0].place_prob, 1.0);
+    approx(powered[0].show_prob, 1.0);
+    for p in &powered {
+        assert!((0.0..=1.0).contains(&p.place_prob), "place ≤ 1.0: {p:?}");
+        assert!((0.0..=1.0).contains(&p.show_prob), "show ≤ 1.0: {p:?}");
+        assert!(
+            p.win_prob <= p.place_prob && p.place_prob <= p.show_prob,
+            "monotonic: {p:?}"
+        );
+    }
+}
+
 /// win レートが高く place/show レートが相対的に低い馬でも、後処理の累積 max で
 /// win ≤ place ≤ show が必ず成立する。
 #[test]
@@ -605,6 +928,7 @@ fn shrink_cfg(m: f64) -> EstimationConfig {
         trend_n: 1,
         jockey_recent_form_weight: None,
         win_power: None,
+        place_show_power: None,
     }
 }
 
@@ -866,7 +1190,7 @@ fn jockey_recent_form_none_excluded_from_raw_score() {
 
 /// 本番 predict（`predict_race`）が使う `production()` の設定を固定する回帰ガード。
 /// 縮約 m を取り違えたり recency を誤って有効化すると CI で検知する（#75/ADR 0016）。
-/// win_power（#246/ADR 0042）も採用値 γ=1.25 を固定する。
+/// win_power（#246/ADR 0042）γ=1.25・place_show_power（#283/ADR 0047）γ=2.0 も採用値を固定する。
 #[test]
 fn production_config_is_shrinkage_m10_and_recency_off() {
     let c = EstimationConfig::production();
@@ -885,6 +1209,12 @@ fn production_config_is_shrinkage_m10_and_recency_off() {
         RECOMMENDED_WIN_POWER
     );
     assert!((RECOMMENDED_WIN_POWER - 1.25).abs() < 1e-12);
+    assert_eq!(
+        c.place_show_power
+            .expect("production は place_show_power on（#283/ADR 0047）"),
+        RECOMMENDED_PLACE_SHOW_POWER
+    );
+    assert!((RECOMMENDED_PLACE_SHOW_POWER - 2.0).abs() < 1e-12);
 }
 
 // ---- リーセンシー重み付け（#75 Phase B） ----

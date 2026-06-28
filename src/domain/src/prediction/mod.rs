@@ -25,8 +25,8 @@ mod weights;
 mod tests;
 
 pub use config::{
-    EstimationConfig, RECOMMENDED_MARKET_BLEND_ALPHA, RECOMMENDED_SHRINKAGE_M,
-    RECOMMENDED_WIN_POWER, RecencyConfig, ShrinkageConfig,
+    EstimationConfig, RECOMMENDED_MARKET_BLEND_ALPHA, RECOMMENDED_PLACE_SHOW_POWER,
+    RECOMMENDED_SHRINKAGE_M, RECOMMENDED_WIN_POWER, RecencyConfig, ShrinkageConfig,
 };
 pub use estimate::{
     apply_win_power, blend_with_market_win, estimate_probabilities,

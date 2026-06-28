@@ -36,6 +36,14 @@ pub fn estimate_probabilities_with_config(
         .map(|(_, f)| raw_score(f, |r| r.show, config))
         .collect();
 
+    // place/show は正規化前にスコアを冪変換 γ でシャープ化して分布の中央圧縮を脱圧縮する（#283）。
+    // `normalize_to_sum(score^γ, target)` は `normalize(prob^γ, target)` と数学的に一致するため、
+    // **上限クランプ・単調化 floor が発火しない範囲では**場内合計 2.0/3.0 を保ったまま本命を持ち上げ
+    // 人気薄を下げる（強い本命がいると後段のクランプ/floor で合計はわずかに下振れしうる）。win は
+    // ここでは変えない（win の冪変換はブレンド後の `apply_win_power` が担当, ADR 0042）。
+    let place_scores = apply_score_power(place_scores, config.place_show_power);
+    let show_scores = apply_score_power(show_scores, config.place_show_power);
+
     // win は 1 着（1 ポジション）、place は 2 着以内（2 ポジション）、show は 3 着以内（3 ポジション）
     // に相当するため、レース内合計をそれぞれ 1.0 / 2.0 / 3.0 へ正規化する。各馬は確率上限 1.0。
     let win_probs = normalize_to_sum(&win_scores, 1.0);
@@ -61,6 +69,25 @@ pub fn estimate_probabilities_with_config(
             show_prob: show_probs[i],
         })
         .collect()
+}
+
+/// スコア列に冪変換 `score^γ` を適用する（#283 / place/show 脱圧縮）。
+///
+/// `gamma` が `None` / 非有限 / `<= 0.0` / 実質 `1.0`（`|γ-1.0| < f64::EPSILON`＝リテラル 1.0 のみ捕捉）
+/// のときは no-op で入力をそのまま返す（後方互換・所有権を受けるので no-op はアロケーション無し）。`raw_score`
+/// は非負（レート ∈ [0,1] とフォーム signal の重み付き平均）なので底が負になることはなく、
+/// `0.0^γ = 0.0`（γ>0）でスコア 0 馬は 0 のまま。呼び出し側で `normalize_to_sum` に渡して場内合計を
+/// 保つ前提で、ここでは正規化しない。
+///
+/// 不正値ポリシーは backtest CLI（`--place-show-power`）と非対称: CLI は γ≤0/非有限を usage エラーで
+/// 弾く一方、本関数はライブラリ防御として黙って no-op に畳む（CLI 経由では到達しない値への保険）。
+fn apply_score_power(scores: Vec<f64>, gamma: Option<f64>) -> Vec<f64> {
+    match gamma {
+        Some(g) if g.is_finite() && g > 0.0 && (g - 1.0).abs() >= f64::EPSILON => {
+            scores.into_iter().map(|s| s.powf(g)).collect()
+        }
+        _ => scores,
+    }
 }
 
 /// 単勝確率を市場オッズ（単勝）の implied 確率とブレンドする（#72）。
