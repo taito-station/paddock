@@ -141,6 +141,8 @@ def main():
     # --- top-1 的中 ---
     # 注: 純モデルの分母 races_scored（winner が pred 表に居るレース）と市場本命の分母
     # market_races（winner が odds に居るレース）は厳密には別集合。両件数を併記して透明にする。
+    # また win は gen_pure_preds が表示テーブルから読む 0.1% 量子化値なので、最上位が同率だと
+    # argmax は dict 順で先勝ちする（極稀。相対比較が用途なので許容）。
     print("\n=== top-1 的中（argmax が勝つか）===")
     if races_scored:
         print(f"  純モデル: {model_top1}/{races_scored} = {model_top1 / races_scored * 100:.1f}%")
