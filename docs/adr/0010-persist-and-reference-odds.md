@@ -55,6 +55,22 @@ predict/backtest を止めない）。なお組合せ券種は 1 レースで行
 18×17×16 = 4896 通り）が、`find_race_odds` は PK 先頭 `race_id` で 1 レースに絞って読むため
 許容範囲とする。
 
+## 後日談（#294 で更新）
+本 ADR「影響」の cache-hit 判定「保存済みが空でない（`!is_empty()`）」は **#294 で強化**した。
+`fetch_one_exotic` は各組合せ券種の一過性失敗を空 Vec に畳む（券種ベストエフォート）ため、
+**win は成功・組合せ券種の一部が欠落**した部分スナップショットが生まれうる。これが `!is_empty()` を
+満たして cache-hit すると、欠落券種（馬連・ワイド・三連複 等）が当日ずっと取り直されない不具合があった。
+
+cache-hit 判定を **`RaceOdds::is_complete()`（win + 組合せ 5 券種＝馬連・ワイド・馬単・三連複・三連単が
+そろう）** に変更した。不完全なスナップショットは cache-miss として再スクレイプし、`find_race_odds(None)`
+が race_id の全スナップショットを union 読みするため、新たに取れた券種が追記されて union が complete に
+収束する（`persist_all` 側は変更不要・自己修復）。
+
+`place` は **引き続き cache-hit 条件に含めない**。netkeiba は win と同梱で複勝を返すため通常そろうが、
+上記「複勝未公開時は win-only で cache-hit を許容（両方そろうまで cache-miss にはしない）」方針を維持し、
+発走前の place 未公開で再スクレイプが無限化するのを避ける。影響は read-through を使う predict /
+api-server のみ（predict-watch は `refresh_race_odds` で毎回再スクレイプするため元々無関係）。
+
 ## 関連
 - ADR 0001（JRA オッズスクレイパー実装, #10）
 - ADR 0005（predict にオッズを結線, #25）— 本 ADR が案B を限定的に復活させる
