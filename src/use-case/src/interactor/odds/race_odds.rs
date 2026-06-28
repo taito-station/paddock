@@ -7,10 +7,10 @@ use crate::odds_scraper::OddsScraper;
 use crate::repository::{OddsRepository, OddsRow, RaceOddsRecord};
 
 impl<O: OddsScraper, R: OddsRepository> OddsInteractor<O, R> {
-    /// race_id のオッズを read-through で取得する（#51, ADR 0010）。
+    /// race_id のオッズを read-through で取得する（#51, ADR 0010 / #294）。
     ///
-    /// 1. `race_odds` に保存済み（単勝・複勝）があれば、再スクレイプせずそれを返す。
-    /// 2. 無ければライブスクレイプし、取得できた単勝・複勝を保存してからフルのオッズを返す。
+    /// 1. `race_odds` に保存済みが complete（win + 組合せ 5 券種）なら、再スクレイプせずそれを返す。
+    /// 2. complete でなければライブスクレイプし、取得した全券種(#38)を保存してフルのオッズを返す。
     ///    保存はその回の買い目には影響させない（exotic も含めて返す）。
     ///
     /// 取得できれば `Some(odds)`、未取得なら `None`。「未取得」は次の 2 つを束ねる:
@@ -20,18 +20,27 @@ impl<O: OddsScraper, R: OddsRepository> OddsInteractor<O, R> {
     /// いずれも予想フロー側ではスキップ扱いになり、1 レースの取得失敗でセッション全体を
     /// 止めない（`select_bets` を呼ばず安全に次レースへ進める設計、predict-session.md 参照）。
     pub async fn race_odds(&self, race_id: &RaceId) -> Result<Option<RaceOdds>> {
-        // 1. 保存済みがあれば再スクレイプせずに返す。
-        //    cache-hit 判定は「いずれかの馬券種が保存済み」(= `!is_empty()`)。#38 で組合せ券種も
-        //    保存・読み戻すようになったため、cache-hit 時も exotic を含むフルのオッズを返す。
-        //    find_race_odds は行が無ければ None を返すため `!is_empty()` は実質二重ガード（防御目的）。
+        // 1. 保存済みが complete なら再スクレイプせずに返す。
+        //    cache-hit 判定は「win + 組合せ 5 券種が揃った complete スナップショット」(#294)。
+        //    win あり・組合せ券種一部欠落の部分スナップショット（exotic の一過性取得失敗で生じる）は
+        //    `!is_empty()` を満たすため旧判定では cache-hit して当日ずっと欠落が恒久化していた。
+        //    `is_complete()` 基準にすると不完全なスナップショットは cache-miss として再スクレイプする。
+        //    `race_odds` は (race_id,bet_type,combination_key) 単一行 UPSERT（save_race_odds）で、
+        //    再スクレイプは欠けていた券種の行を追加するだけで既存行を消さないため、保存済みの券種集合は
+        //    取得済み券種の和集合として単調に埋まり、complete に収束する（persist 側は変更不要・自己修復）。
+        //    place は判定に含めない（ADR 0010 の複勝未公開時 win-only 許容を維持、is_complete 参照）。
+        //    注意: JRA が一部の組合せ券種を発売しない極小頭数レースでは is_complete が常に false になり
+        //    read-through を呼ぶ度に再スクレイプする。が、UPSERT で行は肥大せず、predict は 1 レース
+        //    1 回・api-server は手動 refresh のみで自動ループは無いため負荷は限定的（#294 影響: 低）。
         if let Some(saved) = self.repository.find_race_odds(race_id, None).await?
-            && !saved.is_empty()
+            && saved.is_complete()
         {
-            tracing::debug!(race_id = %race_id, "保存済み race_odds を参照（再スクレイプなし）");
+            tracing::debug!(race_id = %race_id, "complete な保存済み race_odds を参照（再スクレイプなし）");
             return Ok(Some(saved));
         }
 
-        // 2. 未保存ならライブスクレイプ。空/失敗は従来どおりスキップ(None)。
+        // 2. complete でなければ（未保存 or 部分スナップショット）ライブスクレイプ。
+        //    部分スナップショットの取り直しが #294 の中核ケース。空/失敗は従来どおりスキップ(None)。
         match self.scraper.scrape(race_id) {
             Ok(odds) if odds.is_empty() => {
                 // 取得は成功したが全馬券種が空（未公開）。スクレイプ失敗（warn）と
@@ -221,18 +230,47 @@ mod tests {
 
     #[tokio::test]
     async fn returns_saved_without_scraping() {
-        // 保存済みがあれば scrape を呼ばずにそれを返す。
+        // 保存済みが complete（win + 組合せ 5 券種）なら scrape を呼ばずにそれを返す（#294）。
         let scraper = FakeScraper::new(|_| panic!("scrape は呼ばれてはならない"));
         let repo = FakeRepo {
-            preset: Some(odds_with_win(race_id())),
+            preset: Some(odds_all_types(race_id())),
             ..Default::default()
         };
         let interactor = OddsInteractor::new(scraper, repo);
 
         let got = interactor.race_odds(&race_id()).await.unwrap();
-        assert!(got.is_some_and(|o| !o.is_empty()));
+        assert!(got.is_some_and(|o| o.is_complete()));
         assert_eq!(*interactor.scraper.calls.lock().unwrap(), 0);
         assert!(interactor.repository.saved.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn rescrapes_when_saved_snapshot_incomplete() {
+        // #294: 保存済みが部分スナップショット（win+place のみ・組合せ券種欠落）の場合は
+        // cache-miss として再スクレイプし、complete を取り直して persist する。
+        // exotic の一過性取得失敗で生じた欠落が当日恒久化するのを防ぐ。
+        let scraper = FakeScraper::new(|rid| Ok(odds_all_types(rid.clone())));
+        let repo = FakeRepo {
+            preset: Some(odds_win_place(race_id())), // 組合せ券種が無い＝is_complete()=false
+            ..Default::default()
+        };
+        let interactor = OddsInteractor::new(scraper, repo);
+
+        let got = interactor.race_odds(&race_id()).await.unwrap();
+        assert!(
+            got.is_some_and(|o| o.is_complete()),
+            "再スクレイプで complete を返す"
+        );
+        assert_eq!(
+            *interactor.scraper.calls.lock().unwrap(),
+            1,
+            "部分スナップショットは cache-miss として再スクレイプする"
+        );
+        assert_eq!(
+            interactor.repository.saved.lock().unwrap().len(),
+            1,
+            "再取得した complete スナップショットを追記保存する"
+        );
     }
 
     #[tokio::test]
