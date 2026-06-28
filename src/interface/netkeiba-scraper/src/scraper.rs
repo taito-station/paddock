@@ -305,6 +305,8 @@ impl OddsScraper for UreqNetkeibaScraper {
     fn scrape(&self, race_id: &RaceId) -> UcResult<RaceOdds> {
         let netkeiba_id = netkeiba_race_id_from_paddock(race_id)?;
         let odds = self.fetch_win_place_odds(&netkeiba_id)?;
+        // 現状 `fetch_exotic_odds` は券種ごとに Err を空 Vec へ畳むため常に Ok だが、将来エラー伝播へ
+        // 変わっても win ベース判定を巻き添えにしないよう、ここはベストエフォート（空で継続）に倒す。
         let exotic = self.fetch_exotic_odds(&netkeiba_id).unwrap_or_default();
         Ok(assemble_netkeiba(&odds, &exotic, race_id.clone()))
     }
