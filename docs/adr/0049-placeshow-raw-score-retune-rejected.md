@@ -16,8 +16,8 @@ m×recency×form の joint retune が素スコアを作り直せば γ への依
 place/show 素スコア（`--place-show-power` 未指定＝冪変換 off）の校正を、raw レバー（m / recency /
 form）を振って測定した。なお ADR 0047 の後段冪変換（place_show_power）は place/show のみを触る
 設計なので win 指標はそれには不変だが、m / recency / form は `raw_score` 経由で win にも効きうる。
-よって win（hold 基準）も同バッチで同時に測る（結果は下記「観察」のとおりフラット）。複勝差は
-予測−実測の率差＝percentage point（pt）。
+よって win（hold 基準）も同バッチで同時に測る（結果は下記「観察」のとおりフラット）。1番人気 複勝差は
+**実測 − 予測**の率差＝percentage point（pt）。正値＝過小評価（予測 < 実測）で、0 に近いほど校正が良い。
 
 | 構成 | 単勝 Brier | 単勝 LogLoss | 連対 Brier | 複勝 Brier | 1番人気 複勝差 |
 |---|---|---|---|---|---|
@@ -78,7 +78,8 @@ BIN=./target/debug/paddock-analyze
 PADDOCK_DB_URL=postgres://paddock:paddock@127.0.0.1:5432/paddock \
 "$BIN" backtest --from 2025-01-01 --to 2026-06-30 --blend-alpha 0.2 --win-power 1.25 \
   --shrinkage-m 5            # m を 5/7/10/15 と振る
-# recency/form: --recency-half-life 60 / --recent-form-weight 0.5 を併用
+# recency/form は単独でも測る（表の m=10+rec60 / m=10+form0.5 行）: --recency-half-life 60 を単独、
+# --recent-form-weight 0.5 を単独、最後に m=5 + 両者併用（最強試行）の 3 パターン。
 # place/show 素スコアを測るため --place-show-power は付けない（off）。
 # 出力の「確率校正」表（単勝/連対/複勝 Brier・LogLoss）と「人気帯別 複勝圏 過小評価診断」の
 # 1番人気 複勝差を比較する。
