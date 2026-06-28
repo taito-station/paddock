@@ -191,8 +191,9 @@ pub fn apply_win_power(probs: &[HorseProbability], gamma: f64) -> Vec<HorseProba
 ///
 /// m=10 縮約後の place/show は中央に圧縮（強い連対/複勝馬を過小・弱い馬を過大）するため、`gamma > 1.0`
 /// で相対的にシャープ化し校正を改善する。**win は変えない**（top-1・EV・回収率は win 由来なので不変）。
-/// place を ^gamma→合計 2.0、show を ^gamma→合計 3.0 に再正規化し、最後に `win ≤ place ≤ show` を
-/// 累積 max で再是正する（[`apply_win_power`] と同型。cap で合計が 2.0/3.0 を下回りうる割り切りも同じ）。
+/// place を ^gamma→合計 2.0、show を ^gamma→合計 3.0 に再正規化し、最後に各馬内で `place=max(place,win)`・
+/// `show=max(show,place)` と max を取り `win ≤ place ≤ show` を単調化する（[`apply_win_power`] と同型。
+/// cap で合計が 2.0/3.0 を下回りうる割り切りも同じ）。
 /// `gamma` 非有限 / `<= 0.0` / ≈ `1.0` / 入力空、または place・show の合計が 0/非有限のときは no-op。
 pub fn apply_placeshow_power(probs: &[HorseProbability], gamma: f64) -> Vec<HorseProbability> {
     if !gamma.is_finite() || gamma <= 0.0 || (gamma - 1.0).abs() < f64::EPSILON || probs.is_empty()
@@ -274,7 +275,7 @@ mod placeshow_power_tests {
     fn preserves_ranking_and_sharpens_spread() {
         // 単調変換なので show のランクは保存し、相対スプレッド（比）は広がる（シャープ化）。
         // cap(1.0) に当たらない値域で純粋に検証する: 6 頭・show² の合計を大きく取り、最上位でも
-        //   show² 再正規化 = .14²/Σ*3 = .0196/.0736*3 ≈ 0.80 < 1.0（cap 未到達）。
+        //   show² 再正規化 = .14²/Σ*3 = .0196/.074*3 ≈ 0.79 < 1.0（cap 未到達。Σ=.0196+.0144+.01×4=.074）。
         let probs = vec![
             prob(1, 0.05, 0.13, 0.14),
             prob(2, 0.05, 0.11, 0.12),
@@ -299,7 +300,7 @@ mod placeshow_power_tests {
         // show < place になる（cap 1.0 に到達しない値域で純粋に再正規化由来の逆転を作る）:
         //   place²: 馬2=.09, 他4頭=.04 → Σ=.25, 馬2 = .09/.25*2 = 0.72
         //   show² : 馬2=.09, 他4頭=.25 → Σ=1.09, 馬2 = .09/1.09*3 ≈ 0.248
-        // 累積 max 再是正で show ← max(show, place) = 0.72 となり win ≤ place ≤ show が保たれる。
+        // 各馬内の単調化 show ← max(show, place) = 0.72 となり win ≤ place ≤ show が保たれる。
         let probs = vec![
             prob(1, 0.05, 0.20, 0.50),
             prob(2, 0.05, 0.30, 0.30),

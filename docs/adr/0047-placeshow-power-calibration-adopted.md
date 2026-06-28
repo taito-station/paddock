@@ -16,7 +16,7 @@
 
 ## 決定
 
-`apply_placeshow_power(probs, gamma)` を追加し（`apply_win_power` と同型: place を ^γ→合計2.0、show を ^γ→合計3.0 に再正規化、`win ≤ place ≤ show` を累積 max で再是正、**win は不変**）、`production()` で **γ=2.0** を適用する。win_power 適用後の place/show にかける。`default()` は `None`（後方互換）。
+`apply_placeshow_power(probs, gamma)` を追加し（`apply_win_power` と同型: place を ^γ→合計2.0、show を ^γ→合計3.0 に再正規化、各馬内で max を取り `win ≤ place ≤ show` を単調化、**win は不変**）、`production()` で **γ=2.0** を適用する。win_power 適用後の place/show にかける。`default()` は `None`（後方互換）。
 
 ## 掃引（71R, place/show に γ を後掛けして ECE 測定。win 不変）
 
