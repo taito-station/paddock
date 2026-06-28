@@ -161,9 +161,11 @@ async fn incomplete_snapshot_converges_to_complete_via_upsert(pool: sqlx::PgPool
 
     // 2) 取り直し: win を更新しつつ残りの組合せ券種を取得。**馬連は含まない**ことで、
     //    UPSERT が前回の馬連行を消さない（和集合として残る）ことを検証する。
+    //    再スクレイプは実運用では必ず後続時刻になるため fetched_at を進める（snapshots の
+    //    append-only 蓄積も同時に通す）。
     repo.save_race_odds(&RaceOddsRecord {
         race_id: race_id(),
-        fetched_at: fetched_at(),
+        fetched_at: Utc.with_ymd_and_hms(2026, 4, 19, 10, 5, 0).unwrap(),
         rows: vec![
             OddsRow {
                 bet_type: "win".to_string(),

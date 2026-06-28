@@ -39,7 +39,8 @@ impl<O: OddsScraper, R: OddsRepository> OddsInteractor<O, R> {
             return Ok(Some(saved));
         }
 
-        // 2. 未保存ならライブスクレイプ。空/失敗は従来どおりスキップ(None)。
+        // 2. complete でなければ（未保存 or 部分スナップショット）ライブスクレイプ。
+        //    部分スナップショットの取り直しが #294 の中核ケース。空/失敗は従来どおりスキップ(None)。
         match self.scraper.scrape(race_id) {
             Ok(odds) if odds.is_empty() => {
                 // 取得は成功したが全馬券種が空（未公開）。スクレイプ失敗（warn）と
