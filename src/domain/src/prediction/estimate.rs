@@ -287,6 +287,30 @@ mod placeshow_power_tests {
     }
 
     #[test]
+    fn monotonicity_held_when_independent_renorm_would_violate() {
+        // place を多く持ち show が薄い馬は、独立正規化（place→2.0 / show→3.0）後に show < place に
+        // なりうる。累積 max 再是正で win ≤ place ≤ show が必ず保たれることを検証する。
+        let probs = vec![
+            prob(1, 0.05, 0.10, 0.80),
+            prob(2, 0.05, 0.40, 0.45),
+            prob(3, 0.05, 0.10, 0.15),
+        ];
+        let out = apply_placeshow_power(&probs, 2.0);
+        for p in &out {
+            assert!(
+                p.win_prob <= p.place_prob + 1e-12 && p.place_prob <= p.show_prob + 1e-12,
+                "単調性違反: {p:?}"
+            );
+        }
+        // 馬2 は独立正規化だと show<place だが、再是正で show ≥ place が保たれる。
+        let h2 = out
+            .iter()
+            .find(|p| p.horse_num == HorseNum::try_from(2).unwrap())
+            .unwrap();
+        assert!(h2.show_prob >= h2.place_prob);
+    }
+
+    #[test]
     fn no_op_conditions() {
         let probs = vec![prob(1, 0.3, 0.4, 0.5), prob(2, 0.1, 0.2, 0.3)];
         // γ≈1.0 / ≤0 / 非有限 / 空 は no-op。
