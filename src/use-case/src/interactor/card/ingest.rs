@@ -1,7 +1,7 @@
 use chrono::Utc;
 use paddock_domain::{HorseEntry, RaceCard, RaceId};
 
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::interactor::card::CardInteractor;
 use crate::netkeiba_scraper::NetkeibaScraper;
 use crate::repository::{
@@ -20,6 +20,10 @@ pub struct IngestCardResponse {
     /// 取得した出走各馬の netkeiba horse_id（近走取り込み #103 の再利用キー）。
     /// カードをスキップ（取得済み）した場合は空。呼び出し側はこれで出馬表の再取得を避ける。
     pub horse_ids: Vec<String>,
+    /// 単複(type=1)が transient なネットワーク障害（接続リセット等）でリトライ後も取得できず、
+    /// オッズを保存しなかったか（#288）。未発売(status=yoso)による空とは区別する。true のとき
+    /// 呼び出し側（bin）は専用 exit code で「単複だけ未取得・要再取得」を surface する。
+    pub win_odds_degraded: bool,
 }
 
 impl<R: RaceCardRepository + OddsRepository + FetchRepository, S: NetkeibaScraper>
@@ -94,96 +98,113 @@ impl<R: RaceCardRepository + OddsRepository + FetchRepository, S: NetkeibaScrape
             card_saved = true;
         }
 
-        // 2. オッズ: 常に取得。確定前で空なら保存をスキップ（後で再実行して取り直す想定）。
-        //    単勝・複勝(type=1) は 1 レスポンスで両方、組合せ券種(type=4/5/6/7/8) は別 API で取得し、
+        // 2. オッズ: 単勝・複勝(type=1) は 1 レスポンスで両方、組合せ券種(type=4/5/6/7/8) は別 API。
         //    全券種を 1 レコードにまとめて保存する（#102。キー規約は各ドメイン型の to_key）。
-        //    単複もベストエフォート: 前日(status=yoso)など未発売・想定外 status で取得失敗しても、
-        //    本コマンドの主目的（card 保存と後続の近走取り込み #103）を巻き添えにしない。
-        //    オッズ無し＝EV/Kelly が出ないだけで、当日朝に再取得すればよい（fail-closed な
-        //    #100 status ゲート自体は据え置き＝yoso オッズは保存しない）。
-        //    yoso だけでなくネットワーク断・5xx 等の想定外失敗も同様に握り潰すのは意図的:
-        //    odds は実行ごとに取り直す揮発データで永続欠落にはならず、card+近走（再取得が
-        //    高コストで主目的）を odds の一時障害で止めない方が運用上正しいため。warn は残す。
-        let odds = self.scraper.fetch_win_place_odds(netkeiba_id).unwrap_or_else(|e| {
-            tracing::warn!(%netkeiba_id, error = %e, "単複オッズの取得に失敗（未発売/想定外status等）、オッズ無しで card+近走取り込みを継続");
-            Default::default()
-        });
-        // 組合せ券種はベストエフォート。別 API を 4 本叩くため、その一部が失敗しても
-        // 確定済みの単複保存まで巻き添えにしない（取りこぼし耐性、#102 レビュー反映）。
-        let exotic = self
-            .scraper
-            .fetch_exotic_odds(netkeiba_id)
-            .unwrap_or_else(|e| {
-                tracing::warn!(%netkeiba_id, error = %e, "組合せ券種オッズの取得に失敗、単複のみ保存して継続");
+        //    単複の取得失敗は 2 種類を区別する（#288）:
+        //    - 未発売(status=yoso 等の想定外 status = `Internal`): 正規の「まだオッズが無い」状態。
+        //      従来どおり best-effort で握り潰す。card+近走（再取得が高コストで主目的）を巻き添えに
+        //      しない。当日朝に再取得すればよい（fail-closed な #100 status ゲートは据え置き）。
+        //    - transient なネットワーク障害(`Fetch`/`Timeout` = 接続リセット os error 54 等):
+        //      scraper 内のリトライ後も残る一時障害。「本来取れるはずが取れていない」ので握り潰さず
+        //      degraded として surface する。win 欠落のまま exotic だけ保存すると predict が
+        //      「オッズ有り・win 無し」で誤判定し対象レースが脱落するため、odds 保存自体をスキップ
+        //      する（部分スナップショットを永続化しない。cf. #287/commit a54e56b）。
+        let mut win_odds_degraded = false;
+        let odds = match self.scraper.fetch_win_place_odds(netkeiba_id) {
+            Ok(odds) => odds,
+            Err(Error::Fetch(_) | Error::Timeout(_)) => {
+                tracing::warn!(%netkeiba_id, "単複オッズが一時的なネットワーク障害でリトライ後も取得できず、オッズ未保存で degraded 継続（card+近走は保存、要再取得）");
+                win_odds_degraded = true;
                 Default::default()
-            });
-        let mut rows: Vec<OddsRow> = Vec::with_capacity(
-            odds.win.len()
-                + odds.place.len()
-                + exotic.quinella.len()
-                + exotic.wide.len()
-                + exotic.exacta.len()
-                + exotic.trio.len()
-                + exotic.trifecta.len(),
-        );
-        rows.extend(
-            odds.win
-                .iter()
-                .map(|w| OddsRow::win(w.horse_num.value(), w.odds, w.popularity)),
-        );
-        rows.extend(
-            odds.place.iter().map(|p| {
-                OddsRow::place(p.horse_num.value(), p.odds_low, p.odds_high, p.popularity)
-            }),
-        );
-        rows.extend(
-            exotic
-                .quinella
-                .iter()
-                .map(|q| OddsRow::quinella(q.combination, q.odds)),
-        );
-        rows.extend(
-            exotic
-                .wide
-                .iter()
-                .map(|w| OddsRow::wide(w.combination, w.odds_low, w.odds_high)),
-        );
-        rows.extend(
-            exotic
-                .exacta
-                .iter()
-                .map(|e| OddsRow::exacta(e.combination, e.odds)),
-        );
-        rows.extend(
-            exotic
-                .trio
-                .iter()
-                .map(|t| OddsRow::trio(t.combination, t.odds)),
-        );
-        rows.extend(
-            exotic
-                .trifecta
-                .iter()
-                .map(|t| OddsRow::trifecta(t.combination, t.odds)),
-        );
-        let odds_saved = rows.len();
-        if rows.is_empty() {
-            tracing::info!(%netkeiba_id, "odds not available yet, skipping odds save");
+            }
+            Err(e) => {
+                tracing::warn!(%netkeiba_id, error = %e, "単複オッズの取得に失敗（未発売/想定外status）、オッズ無しで card+近走取り込みを継続");
+                Default::default()
+            }
+        };
+
+        // degraded（単複 transient 失敗）時は win 欠落の部分スナップショットを残さない。
+        // exotic も取りに行かず（無駄な 5 リクエストを避ける）、オッズ保存をまるごとスキップする。
+        let odds_saved = if win_odds_degraded {
+            0
         } else {
-            self.repo
-                .save_race_odds(&RaceOddsRecord {
-                    race_id,
-                    fetched_at: now,
-                    rows,
-                })
-                .await?;
-        }
+            // 組合せ券種はベストエフォート。別 API を 4 本叩くため、その一部が失敗しても
+            // 確定済みの単複保存まで巻き添えにしない（取りこぼし耐性、#102 レビュー反映）。
+            let exotic = self
+                .scraper
+                .fetch_exotic_odds(netkeiba_id)
+                .unwrap_or_else(|e| {
+                    tracing::warn!(%netkeiba_id, error = %e, "組合せ券種オッズの取得に失敗、単複のみ保存して継続");
+                    Default::default()
+                });
+            let mut rows: Vec<OddsRow> = Vec::with_capacity(
+                odds.win.len()
+                    + odds.place.len()
+                    + exotic.quinella.len()
+                    + exotic.wide.len()
+                    + exotic.exacta.len()
+                    + exotic.trio.len()
+                    + exotic.trifecta.len(),
+            );
+            rows.extend(
+                odds.win
+                    .iter()
+                    .map(|w| OddsRow::win(w.horse_num.value(), w.odds, w.popularity)),
+            );
+            rows.extend(odds.place.iter().map(|p| {
+                OddsRow::place(p.horse_num.value(), p.odds_low, p.odds_high, p.popularity)
+            }));
+            rows.extend(
+                exotic
+                    .quinella
+                    .iter()
+                    .map(|q| OddsRow::quinella(q.combination, q.odds)),
+            );
+            rows.extend(
+                exotic
+                    .wide
+                    .iter()
+                    .map(|w| OddsRow::wide(w.combination, w.odds_low, w.odds_high)),
+            );
+            rows.extend(
+                exotic
+                    .exacta
+                    .iter()
+                    .map(|e| OddsRow::exacta(e.combination, e.odds)),
+            );
+            rows.extend(
+                exotic
+                    .trio
+                    .iter()
+                    .map(|t| OddsRow::trio(t.combination, t.odds)),
+            );
+            rows.extend(
+                exotic
+                    .trifecta
+                    .iter()
+                    .map(|t| OddsRow::trifecta(t.combination, t.odds)),
+            );
+            let odds_saved = rows.len();
+            if rows.is_empty() {
+                tracing::info!(%netkeiba_id, "odds not available yet, skipping odds save");
+            } else {
+                self.repo
+                    .save_race_odds(&RaceOddsRecord {
+                        race_id,
+                        fetched_at: now,
+                        rows,
+                    })
+                    .await?;
+            }
+            odds_saved
+        };
 
         Ok(IngestCardResponse {
             card_saved,
             entries_saved,
             odds_saved,
             horse_ids,
+            win_odds_degraded,
         })
     }
 }

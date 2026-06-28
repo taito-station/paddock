@@ -22,7 +22,12 @@ async fn main() -> anyhow::Result<()> {
     } else {
         println!("出馬表: 取得済みのためスキップ（--force で再取得）");
     }
-    if resp.odds_saved > 0 {
+    if resp.win_odds_degraded {
+        // 単複が transient 障害でリトライ後も取れず、win 欠落の部分保存を避けてオッズ未保存にした（#288）。
+        eprintln!(
+            "オッズ: 単複が一時的なネットワーク障害でリトライ後も取得できず、オッズ未保存（card は保存済み）。win 欠落のため再取得が必要"
+        );
+    } else if resp.odds_saved > 0 {
         println!(
             "オッズ: {} 件を保存（単複＋馬連・馬単・三連複・三連単）",
             resp.odds_saved
@@ -35,6 +40,16 @@ async fn main() -> anyhow::Result<()> {
         println!("近走: --skip-history のため取り込みなし");
     } else {
         run_history(&app, &netkeiba_id, &resp.horse_ids).await?;
+    }
+
+    // 近走取り込み（主目的）まで終えた後で degraded を非0 exit で surface する。
+    // 専用コード 3: ハード失敗(=1)と「単複だけ未取得・要再取得」を呼び出し側（バルク取得・
+    // predict-watch）が区別でき、win 欠落レースだけ再取得を回せる（#288, ADR 0049）。
+    if resp.win_odds_degraded {
+        eprintln!(
+            "fetch-card: 単複オッズ未取得のため degraded 終了（exit 3）。当該レースを再取得してください"
+        );
+        std::process::exit(3);
     }
     Ok(())
 }

@@ -35,6 +35,9 @@ struct FakeScraper {
     exotic_err: bool,
     /// true なら fetch_win_place_odds が Err を返す（前日 status=yoso など単複取得失敗を模す）。
     win_err: bool,
+    /// true なら fetch_win_place_odds が transient な `Error::Fetch` を返す（接続リセット等、
+    /// リトライ後も残る一時障害を模す。#288 の degraded 分岐検証用）。
+    win_transient_err: bool,
     /// fetch_card が呼ばれた回数。
     card_fetches: Mutex<usize>,
 }
@@ -47,6 +50,7 @@ impl FakeScraper {
             exotic: FetchedExoticOdds::default(),
             exotic_err: false,
             win_err: false,
+            win_transient_err: false,
             card_fetches: Mutex::new(0),
         }
     }
@@ -68,6 +72,11 @@ impl FakeScraper {
 
     fn with_win_err(mut self) -> Self {
         self.win_err = true;
+        self
+    }
+
+    fn with_win_transient_err(mut self) -> Self {
+        self.win_transient_err = true;
         self
     }
 }
@@ -130,6 +139,14 @@ impl NetkeibaScraper for FakeScraper {
         })
     }
     fn fetch_win_place_odds(&self, _race_id: &str) -> Result<FetchedOdds> {
+        if self.win_transient_err {
+            // 実経路（netkeiba-scraper Error::Fetch → use-case Error::Fetch、scraper 内リトライ後も
+            // 残る接続リセット）と同じ variant・文言で模す。ingest は degraded 分岐へ回す。
+            return Err(paddock_use_case::Error::Fetch(
+                "netkeiba fetch failed: GET ...&type=1&action=update: io: Connection reset by peer (os error 54)"
+                    .into(),
+            ));
+        }
         if self.win_err {
             // 実経路（netkeiba-scraper Error::Parse → use-case Error::Internal、
             // From で "netkeiba parse failed: " を前置）と同じ variant・文言で模す。
@@ -440,6 +457,44 @@ async fn win_place_fetch_error_still_saves_exotic_odds() {
         rows.iter().all(|r| r.bet_type == "quinella"),
         "単複行は無く組合せ券種のみ"
     );
+}
+
+#[tokio::test]
+async fn win_place_transient_error_marks_degraded_and_skips_odds_save() {
+    // 接続リセット等の transient 障害（scraper 内リトライ後も失敗 = Error::Fetch）は未発売(yoso)と
+    // 区別する（#288）。win 欠落のまま exotic だけ保存すると predict が「オッズ有り・win 無し」で
+    // 誤判定し対象レースが脱落するため、exotic が取れていても odds 保存をまるごとスキップし、
+    // degraded フラグを立てる。card 保存と horse_id 返却は守る。
+    let h = |n: u32| HorseNum::try_from(n).unwrap();
+    let exotic = FetchedExoticOdds {
+        quinella: vec![FetchedComboOdds {
+            combination: Pair::try_from((h(4), h(7))).unwrap(),
+            odds: 21.6,
+            popularity: None,
+        }],
+        ..FetchedExoticOdds::default()
+    };
+    let scraper = FakeScraper::new(vec![win_odds(1, 7.9, 3)])
+        .with_exotic(exotic)
+        .with_win_transient_err();
+    let interactor = CardInteractor::new(RecordingRepo::with_already(false), scraper);
+
+    let resp = interactor.ingest(NK_ID, race_id(), false).await.unwrap();
+
+    assert!(resp.card_saved, "transient 失敗でも card は保存");
+    assert!(
+        resp.win_odds_degraded,
+        "transient 失敗は degraded として surface"
+    );
+    assert_eq!(
+        resp.odds_saved, 0,
+        "win 欠落の部分スナップショットは保存しない"
+    );
+    assert!(
+        interactor.repo.saved_odds.lock().unwrap().is_empty(),
+        "exotic が取れていても save_race_odds を呼ばない（部分永続化の回避）"
+    );
+    assert_eq!(resp.horse_ids, vec!["2020000001", "2020000002"]);
 }
 
 #[tokio::test]
