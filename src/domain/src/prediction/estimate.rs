@@ -288,12 +288,17 @@ mod placeshow_power_tests {
 
     #[test]
     fn monotonicity_held_when_independent_renorm_would_violate() {
-        // place を多く持ち show が薄い馬は、独立正規化（place→2.0 / show→3.0）後に show < place に
-        // なりうる。累積 max 再是正で win ≤ place ≤ show が必ず保たれることを検証する。
+        // 馬2 は place share が高く show share が低いので、独立正規化（place→2.0 / show→3.0）後に
+        // show < place になる（cap 1.0 に到達しない値域で純粋に再正規化由来の逆転を作る）:
+        //   place²: 馬2=.09, 他4頭=.04 → Σ=.25, 馬2 = .09/.25*2 = 0.72
+        //   show² : 馬2=.09, 他4頭=.25 → Σ=1.09, 馬2 = .09/1.09*3 ≈ 0.248
+        // 累積 max 再是正で show ← max(show, place) = 0.72 となり win ≤ place ≤ show が保たれる。
         let probs = vec![
-            prob(1, 0.05, 0.10, 0.80),
-            prob(2, 0.05, 0.40, 0.45),
-            prob(3, 0.05, 0.10, 0.15),
+            prob(1, 0.05, 0.20, 0.50),
+            prob(2, 0.05, 0.30, 0.30),
+            prob(3, 0.05, 0.20, 0.50),
+            prob(4, 0.05, 0.20, 0.50),
+            prob(5, 0.05, 0.20, 0.50),
         ];
         let out = apply_placeshow_power(&probs, 2.0);
         for p in &out {
@@ -302,12 +307,27 @@ mod placeshow_power_tests {
                 "単調性違反: {p:?}"
             );
         }
-        // 馬2 は独立正規化だと show<place だが、再是正で show ≥ place が保たれる。
+        // 馬2: place ≈ 0.72（cap 未到達）・独立 show ≈ 0.248 → 再是正で show = place = 0.72。
         let h2 = out
             .iter()
             .find(|p| p.horse_num == HorseNum::try_from(2).unwrap())
             .unwrap();
-        assert!(h2.show_prob >= h2.place_prob);
+        assert!((h2.place_prob - 0.72).abs() < 1e-9, "place {h2:?}");
+        assert!(
+            (h2.show_prob - h2.place_prob).abs() < 1e-9,
+            "show は place まで押し上げ: {h2:?}"
+        );
+    }
+
+    #[test]
+    fn no_op_when_placeshow_sums_zero() {
+        // 全頭 place=show=0 のレースは合計 0 で再正規化不能 → 入力そのまま（whole no-op）。
+        let probs = vec![prob(1, 0.0, 0.0, 0.0), prob(2, 0.0, 0.0, 0.0)];
+        let out = apply_placeshow_power(&probs, 2.0);
+        assert!(
+            out.iter()
+                .all(|p| p.place_prob == 0.0 && p.show_prob == 0.0)
+        );
     }
 
     #[test]

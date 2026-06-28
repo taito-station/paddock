@@ -7,6 +7,10 @@
 
 出力 TSV 列: race_slug, nk12, horse_num, win, place, show（win/place/show は小数 0..1）
 
+注意: `analyze predict` は production 設定（ADR 0047 採用後は placeshow_power=2.0）を通すため、
+本スクリプトの place/show は既に校正済み。calibration.py の γ 掃引（raw 前提）の入力には使えない
+（二重適用になる）。掃引を再現するときは placeshow off のビルド/設定で生成すること。
+
 使い方:
     python3 scripts/predict-check/gen_pure_preds.py \
         --races /tmp/bt252/bt_races.tsv --bin ./target/debug/paddock-analyze \
