@@ -46,7 +46,8 @@ def main():
     ap.add_argument("--alpha", default="0", help="blend-alpha（既定 0=純モデル）")
     args = ap.parse_args()
 
-    db = os.environ.get("PADDOCK_DB_URL", "postgres://paddock:paddock@localhost:5432/paddock")
+    # host は localhost を避け 127.0.0.1 を使う（兄弟スクリプトと同じ。localhost だと間欠失敗が再発）。
+    db = os.environ.get("PADDOCK_DB_URL", "postgres://paddock:paddock@127.0.0.1:5432/paddock")
     env = {**os.environ, "PADDOCK_DB_URL": db}
 
     races = []
@@ -54,6 +55,7 @@ def main():
         for line in f:
             parts = line.rstrip("\n").split("\t")
             if len(parts) >= 7:
+                # parts[1] = paddock のレース id（slug 状, predict が受ける引数）, parts[6] = netkeiba 12 桁
                 races.append((parts[1], parts[6]))  # slug, nk12
 
     n_ok = n_empty = 0
