@@ -1,7 +1,8 @@
 # ADR 0001: JRA オッズスクレイパーの実装 (Issue #10)
 
 ## ステータス
-承認済み
+承認済み（**ライブ遷移層 `UreqOddsScraper` / `odds-scraper` crate は #287 / ADR 0048 で撤去・supersede**。
+live odds 取得は netkeiba の `OddsScraper` 実装に統一。本 ADR のパース設計記録は歴史的価値で残置）
 
 ## コンテキスト
 issue #10 で、JRA 公式サイトから当日の馬券オッズ（単勝/複勝/馬連/馬単/三連複/三連単）を

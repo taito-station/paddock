@@ -1,7 +1,8 @@
 # ADR 0019: 予算内・軸流しポートフォリオ生成器 (Issue #122 PR2)
 
 ## ステータス
-提案中
+提案中（本文が言及する production の `odds-scraper` / `UreqOddsScraper` は #287 / ADR 0048 で撤去。
+オッズ供給は netkeiba の `OddsScraper` 実装に置換済み。ポートフォリオ生成器の設計自体は不変）
 
 ## コンテキスト
 predict の買い目出力は `select_bets`（ADR 0003 / #121 curation 済み）の EV 羅列で、

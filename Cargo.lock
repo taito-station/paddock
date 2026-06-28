@@ -310,7 +310,6 @@ dependencies = [
  "anyhow",
  "chrono",
  "netkeiba-scraper",
- "odds-scraper",
  "paddock-config",
  "paddock-domain",
  "paddock-use-case",
@@ -1677,19 +1676,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "odds-scraper"
-version = "0.1.0"
-dependencies = [
- "paddock-domain",
- "paddock-use-case",
- "scraper",
- "scraper-util",
- "thiserror",
- "tracing",
- "ureq",
-]
-
-[[package]]
 name = "once_cell"
 version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1975,7 +1961,6 @@ dependencies = [
  "chrono",
  "clap",
  "netkeiba-scraper",
- "odds-scraper",
  "paddock-config",
  "paddock-domain",
  "paddock-use-case",
@@ -2000,7 +1985,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "clap",
- "odds-scraper",
+ "netkeiba-scraper",
  "paddock-config",
  "paddock-domain",
  "paddock-use-case",

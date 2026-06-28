@@ -15,7 +15,6 @@ path = "src/bin.rs"
 actix-web          = { workspace = true }
 anyhow             = { workspace = true }
 netkeiba-scraper   = { workspace = true }
-odds-scraper       = { workspace = true }
 paddock-config     = { workspace = true }
 paddock-domain     = { workspace = true }
 paddock-use-case   = { workspace = true }

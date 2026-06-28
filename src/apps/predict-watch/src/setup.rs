@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use anyhow::Context;
-use odds_scraper::UreqOddsScraper;
+use netkeiba_scraper::UreqNetkeibaScraper;
 use paddock_config::Config;
 use paddock_use_case::{Interactor, OddsInteractor};
 use rdb_gateway::{PostgresRepository, pool};
@@ -42,10 +42,10 @@ impl paddock_use_case::pdf_fetcher::PdfFetcher for UnusedFetcher {
 pub struct App {
     pub interactor: Interactor<PostgresRepository, UnusedParser, UnusedFetcher>,
     /// オッズは `refresh_race_odds` で**毎回再スクレイプ**する（read-through キャッシュは使わない、#257）。
-    pub odds: OddsInteractor<UreqOddsScraper, PostgresRepository>,
+    pub odds: OddsInteractor<UreqNetkeibaScraper, PostgresRepository>,
 }
 
-/// `scrape_delay_ms` はオッズスクレイパの 1 リクエストごとの待機（JRA への礼節, [[jra-fetch-pacing]]）。
+/// `scrape_delay_ms` はオッズスクレイパの 1 リクエストごとの待機（netkeiba への礼節, [[jra-fetch-pacing]]）。
 pub async fn build_app(scrape_delay_ms: u64) -> anyhow::Result<App> {
     let config = Config::from_env().context("load config")?;
     let _ = fmt()
@@ -62,7 +62,7 @@ pub async fn build_app(scrape_delay_ms: u64) -> anyhow::Result<App> {
 
     // PgPool は Arc backed なので clone は安価。odds / interactor で同一 DB を共有する。
     let odds = OddsInteractor::new(
-        UreqOddsScraper::with_delay(Duration::from_millis(scrape_delay_ms)),
+        UreqNetkeibaScraper::with_delay(Duration::from_millis(scrape_delay_ms)),
         PostgresRepository::new(pool.clone()),
     );
     let interactor = Interactor::new(PostgresRepository::new(pool), UnusedParser, UnusedFetcher);
