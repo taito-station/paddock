@@ -401,6 +401,110 @@ fn place_show_power_none_or_one_is_noop() {
     }
 }
 
+/// place/show 冪変換（#283）: γ<1（逆方向＝圧縮）は本命の place/show を下げ人気薄を上げる。
+/// help で「γ<1 は逆方向」と宣伝しているため逆向きの挙動も固定する。
+#[test]
+fn place_show_power_below_one_compresses() {
+    let strong = RateTriple {
+        win: 0.1,
+        place: 0.25,
+        show: 0.3,
+    };
+    let weak = RateTriple {
+        win: 0.1,
+        place: 0.15,
+        show: 0.2,
+    };
+    let mk = |t: RateTriple| HorseFactors {
+        course_gate: Some(fs(t)),
+        horse_surface: Some(fs(t)),
+        horse_distance: Some(fs(t)),
+        jockey_surface: None,
+        horse_track_condition: None,
+        trainer_surface: None,
+        recent_form: None,
+        weight_carried: None,
+        jockey_recent_form: None,
+    };
+    let entries: Vec<_> = (1..=8)
+        .map(|i| {
+            let t = if i == 1 { strong } else { weak };
+            (make_entry(i, &format!("ウマ{i}")), mk(t))
+        })
+        .collect();
+    let base = estimate_probabilities(&entries);
+    let compressed = estimate_probabilities_with_config(
+        &entries,
+        &EstimationConfig {
+            place_show_power: Some(0.5),
+            ..EstimationConfig::default()
+        },
+    );
+    // 本命（idx 0）の place/show は下がり、人気薄（idx 1）は上がる（脱圧縮と逆向き）。
+    assert!(
+        compressed[0].place_prob < base[0].place_prob,
+        "favorite place down: {} -> {}",
+        base[0].place_prob,
+        compressed[0].place_prob
+    );
+    assert!(
+        compressed[1].place_prob > base[1].place_prob,
+        "longshot place up: {} -> {}",
+        base[1].place_prob,
+        compressed[1].place_prob
+    );
+}
+
+/// place/show 冪変換（#283）の中核契約: win_prob は γ に依らず**不変**。win レートを馬ごとに
+/// 変えた（脱圧縮テストは全馬 win 同一で win を突き合わせていない）うえで γ=2.0 と baseline の
+/// win_prob 一致を全馬アサートし、誤って win スコアに冪変換が掛かる回帰を検知する。
+#[test]
+fn place_show_power_leaves_win_prob_unchanged() {
+    let mk = |t: RateTriple| HorseFactors {
+        course_gate: Some(fs(t)),
+        horse_surface: Some(fs(RateTriple::default())),
+        horse_distance: Some(fs(RateTriple::default())),
+        jockey_surface: None,
+        horse_track_condition: None,
+        trainer_surface: None,
+        recent_form: None,
+        weight_carried: None,
+        jockey_recent_form: None,
+    };
+    // win も place/show も馬ごとに変える（win 0.05〜0.40 / place・show も傾斜）。place/show が
+    // 馬間で異なるので γ=2.0 が分布を実際にシャープ化する（クランプを避ける程度の小さい値）。
+    let entries: Vec<_> = (1..=8)
+        .map(|i| {
+            let f = i as f64;
+            let t = RateTriple {
+                win: 0.05 * f,
+                place: 0.05 + 0.01 * f,
+                show: 0.08 + 0.01 * f,
+            };
+            (make_entry(i, &format!("ウマ{i}")), mk(t))
+        })
+        .collect();
+    let base = estimate_probabilities(&entries);
+    let powered = estimate_probabilities_with_config(
+        &entries,
+        &EstimationConfig {
+            place_show_power: Some(2.0),
+            ..EstimationConfig::default()
+        },
+    );
+    for (b, p) in base.iter().zip(&powered) {
+        approx(b.win_prob, p.win_prob);
+    }
+    // place/show は実際に変わっている（テストが no-op を誤検証していないことの確認）。
+    assert!(
+        powered
+            .iter()
+            .zip(&base)
+            .any(|(p, b)| (p.place_prob - b.place_prob).abs() > 1e-9),
+        "place_show_power=2.0 で place/show は変化するはず"
+    );
+}
+
 /// win レートが高く place/show レートが相対的に低い馬でも、後処理の累積 max で
 /// win ≤ place ≤ show が必ず成立する。
 #[test]

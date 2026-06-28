@@ -29,7 +29,9 @@
 place/show のスコアに、正規化前に冪変換 `score'_i = score_i^γ` を掛けてから合計 2.0 / 3.0 へ
 正規化する（`apply_score_power`, `EstimationConfig.place_show_power`）。`normalize_to_sum(score^γ, T)`
 は `normalize(prob^γ, T)` と数学的に一致するため、**場内合計 2.0 / 3.0 を保ったまま**分布を
-シャープ化（脱圧縮）できる。win の `apply_win_power`（ADR 0042）と同型だが、
+シャープ化（脱圧縮）できる（厳密には上限クランプ `min(1.0)` と単調化 floor `place=max(place,win)` が
+発火しない範囲での恒等。γ>1 は本命スコアをシャープ化するためクランプ/floor の発火頻度を増やし、
+強い本命がいるレースでは合計が 2.0 / 3.0 をわずかに下回りうる）。win の `apply_win_power`（ADR 0042）と同型だが、
 
 - place/show は市場ブレンド対象外（ADR 0037 で棄却）なので**推定時にスコアへ適用**する（win は
   ブレンド後の確率へ適用）、
