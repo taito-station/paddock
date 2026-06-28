@@ -40,6 +40,8 @@ struct FakeScraper {
     win_transient_err: bool,
     /// fetch_card が呼ばれた回数。
     card_fetches: Mutex<usize>,
+    /// fetch_exotic_odds が呼ばれた回数（degraded 時に exotic を叩かないことの検証用）。
+    exotic_fetches: Mutex<usize>,
 }
 
 impl FakeScraper {
@@ -52,6 +54,7 @@ impl FakeScraper {
             win_err: false,
             win_transient_err: false,
             card_fetches: Mutex::new(0),
+            exotic_fetches: Mutex::new(0),
         }
     }
 
@@ -161,6 +164,7 @@ impl NetkeibaScraper for FakeScraper {
         })
     }
     fn fetch_exotic_odds(&self, _race_id: &str) -> Result<FetchedExoticOdds> {
+        *self.exotic_fetches.lock().unwrap() += 1;
         if self.exotic_err {
             return Err(paddock_use_case::Error::Internal(
                 "exotic odds API down".into(),
@@ -493,6 +497,11 @@ async fn win_place_transient_error_marks_degraded_and_skips_odds_save() {
     assert!(
         interactor.repo.saved_odds.lock().unwrap().is_empty(),
         "exotic が取れていても save_race_odds を呼ばない（部分永続化の回避）"
+    );
+    assert_eq!(
+        *interactor.scraper.exotic_fetches.lock().unwrap(),
+        0,
+        "degraded 時は exotic API を叩かない（無駄な 5 リクエストを避ける）"
     );
     assert_eq!(resp.horse_ids, vec!["2020000001", "2020000002"]);
 }

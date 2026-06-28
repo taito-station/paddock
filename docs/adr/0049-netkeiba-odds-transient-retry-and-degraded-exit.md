@@ -38,8 +38,12 @@ netkeiba に統一済み。
      （exotic だけ）を永続化すると predict が「オッズ有り・win 無し」で誤判定するため、exotic 取得も
      含め **odds 保存をまるごとスキップ**し `win_odds_degraded` を立てる（cf. #287/commit a54e56b）。
 4. **degraded を専用 exit code=3 で surface**。`fetch-card` は近走取り込み（主目的）まで終えた後、
-   degraded なら `std::process::exit(3)`。ハード失敗(=1)と「単複だけ未取得・要再取得」を呼び出し側
-   （バルク取得・predict-watch）が区別でき、win 欠落レースだけ再取得を回せる。
+   degraded なら exit code 3 を返す。ハード失敗(=1)と「単複だけ未取得・要再取得」を呼び出し側が
+   区別でき、win 欠落レースだけ再取得を回せる。`main` は `std::process::exit` ではなく
+   `anyhow::Result<ExitCode>` を返し、tokio ランタイム・DB プール等の Drop を走らせてから終了する。
+   既存の消費側 `scripts/predict-check/refresh_ev.sh` は `fetch-card` の exit≠0 を FAIL 扱いして
+   「古い DB オッズで評価される」警告を出すため、exit=3 は変更なしで正しく統合される（従来は degraded
+   でも exit 0 で "ok" 扱い → 無言で stale オッズ評価していたのが本バグの一面）。
 
 ## 理由
 - 「try1 失敗 / try2 成功」の実測どおり、接続リセットの大半はリトライで透過的に回復する。リトライを

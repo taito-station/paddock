@@ -112,6 +112,9 @@ impl<R: RaceCardRepository + OddsRepository + FetchRepository, S: NetkeibaScrape
         let mut win_odds_degraded = false;
         let odds = match self.scraper.fetch_win_place_odds(netkeiba_id) {
             Ok(odds) => odds,
+            // `Timeout` は防御的: 現状 netkeiba 経路はタイムアウトも `call_with_retry` で
+            // `Error::Fetch` に集約するため実際には `Fetch` のみ届くが、将来 Timeout を分けて
+            // 伝播しても transient として同じ degraded 分岐に乗るようまとめて捕捉する。
             Err(Error::Fetch(_) | Error::Timeout(_)) => {
                 tracing::warn!(%netkeiba_id, "単複オッズが一時的なネットワーク障害でリトライ後も取得できず、オッズ未保存で degraded 継続（card+近走は保存、要再取得）");
                 win_odds_degraded = true;

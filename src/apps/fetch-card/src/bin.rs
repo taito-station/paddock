@@ -1,10 +1,12 @@
 mod cli;
 mod setup;
 
+use std::process::ExitCode;
+
 use clap::Parser;
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn main() -> anyhow::Result<ExitCode> {
     let args = cli::Cli::parse();
     let (netkeiba_id, race_id) = args.resolve_race_id()?;
 
@@ -24,8 +26,9 @@ async fn main() -> anyhow::Result<()> {
     }
     if resp.win_odds_degraded {
         // 単複が transient 障害でリトライ後も取れず、win 欠落の部分保存を避けてオッズ未保存にした（#288）。
+        // degraded の通知はここに 1 本化し、末尾では exit code だけ返す（メッセージ重複回避）。
         eprintln!(
-            "オッズ: 単複が一時的なネットワーク障害でリトライ後も取得できず、オッズ未保存（card は保存済み）。win 欠落のため再取得が必要"
+            "オッズ: 単複が一時的なネットワーク障害でリトライ後も取得できず未保存（card は保存済み）。win 欠落のため要再取得。degraded 終了（exit 3）"
         );
     } else if resp.odds_saved > 0 {
         println!(
@@ -43,15 +46,14 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // 近走取り込み（主目的）まで終えた後で degraded を非0 exit で surface する。
-    // 専用コード 3: ハード失敗(=1)と「単複だけ未取得・要再取得」を呼び出し側（バルク取得・
-    // predict-watch）が区別でき、win 欠落レースだけ再取得を回せる（#288, ADR 0049）。
+    // 専用コード 3: ハード失敗(=1)と「単複だけ未取得・要再取得」を呼び出し側（例: scripts/
+    // predict-check/refresh_ev.sh は exit≠0 を FAIL 扱いし「古いオッズ警告」を出す）が区別でき、
+    // win 欠落レースだけ再取得を回せる（#288, ADR 0049）。`process::exit` ではなく `ExitCode` を
+    // 返し、tokio ランタイム・DB プール等の Drop を走らせてから終了する。
     if resp.win_odds_degraded {
-        eprintln!(
-            "fetch-card: 単複オッズ未取得のため degraded 終了（exit 3）。当該レースを再取得してください"
-        );
-        std::process::exit(3);
+        return Ok(ExitCode::from(3));
     }
-    Ok(())
+    Ok(ExitCode::SUCCESS)
 }
 
 /// 出走各馬の過去走を取り込み、予想の馬個体 factor（recent_form / horse_stats）を生かす（#103）。
