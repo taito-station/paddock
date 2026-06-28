@@ -68,6 +68,12 @@ impl RaceOdds {
     /// win-only で cache-hit を許容」を維持し、発走前の place 未公開で再スクレイプが無限化するのを
     /// 避けるため。netkeiba は win と組合せ券種をほぼ同時公開するので、「win あり・組合せ欠落」は
     /// 一過性の取得失敗に限られ、これを cache-miss として取り直すのが本判定の狙い。
+    ///
+    /// 組合せ 5 券種すべてを要求するのは「健全なスクレイプが返すフルの形」を完全性の基準にするため
+    /// （買い目に使わない馬単・三連単も api-server 配信や将来用途のため欠落を検知して取り直す）。
+    /// 副作用として、JRA が一部の組合せ券種を発売しない極小頭数レースでは常に false になり
+    /// read-through で毎回再スクレイプするが、`race_odds` は UPSERT で行が肥大せず呼び出しも
+    /// 1 レース 1 回程度のため許容する（#294 影響: 低。詳細は OddsInteractor::race_odds のコメント）。
     pub fn is_complete(&self) -> bool {
         !self.win.is_empty()
             && !self.quinella.is_empty()

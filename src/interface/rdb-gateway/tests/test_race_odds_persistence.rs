@@ -122,6 +122,85 @@ async fn round_trips_all_combination_bet_types(pool: sqlx::PgPool) {
 }
 
 #[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn incomplete_snapshot_converges_to_complete_via_upsert(pool: sqlx::PgPool) {
+    // #294 の自己修復の核を Postgres で担保する: race_odds は単一行 UPSERT で欠落券種の行を
+    // 消さないため、部分スクレイプ（win+馬連のみ）の後に残りの券種を取り直すと、保存済みの
+    // 券種集合が和集合として埋まり is_complete() に収束する（cache-hit ゲートが取り直しを促す前提）。
+    let repo = PostgresRepository::new(pool);
+    let pair = Pair::try_from((horse(1), horse(2))).unwrap();
+    let opair = OrderedPair::try_from((horse(3), horse(1))).unwrap();
+    let triple = Triple::try_from((horse(1), horse(2), horse(3))).unwrap();
+    let otriple = OrderedTriple::try_from((horse(5), horse(2), horse(7))).unwrap();
+
+    // 1) 部分スクレイプ: win + 馬連のみ（ワイド・馬単・三連複・三連単が一過性失敗で欠落）。
+    repo.save_race_odds(&RaceOddsRecord {
+        race_id: race_id(),
+        fetched_at: fetched_at(),
+        rows: vec![
+            OddsRow {
+                bet_type: "win".to_string(),
+                combination_key: "1".to_string(),
+                odds: 3.5,
+                odds_high: None,
+                popularity: None,
+            },
+            OddsRow::quinella(pair, 12.4),
+        ],
+    })
+    .await
+    .unwrap();
+    let partial = repo
+        .find_race_odds(&race_id(), None)
+        .await
+        .unwrap()
+        .expect("部分でも Some");
+    assert!(
+        !partial.is_complete(),
+        "部分スナップショット（win+馬連のみ）は complete でない＝cache-miss で再取得される"
+    );
+
+    // 2) 取り直し: win を更新しつつ残りの組合せ券種を取得。**馬連は含まない**ことで、
+    //    UPSERT が前回の馬連行を消さない（和集合として残る）ことを検証する。
+    repo.save_race_odds(&RaceOddsRecord {
+        race_id: race_id(),
+        fetched_at: fetched_at(),
+        rows: vec![
+            OddsRow {
+                bet_type: "win".to_string(),
+                combination_key: "1".to_string(),
+                odds: 4.0,
+                odds_high: None,
+                popularity: None,
+            },
+            OddsRow::wide(pair, 3.1, 4.8),
+            OddsRow::exacta(opair, 25.0),
+            OddsRow::trio(triple, 88.0),
+            OddsRow::trifecta(otriple, 410.0),
+        ],
+    })
+    .await
+    .unwrap();
+
+    let merged = repo
+        .find_race_odds(&race_id(), None)
+        .await
+        .unwrap()
+        .expect("Some");
+    assert!(
+        merged.is_complete(),
+        "取り直し後は win + 全組合せ券種が和集合として揃い complete に収束する"
+    );
+    assert!(
+        merged.quinella.contains_key(&pair),
+        "前回の馬連行は UPSERT で消えず残る（和集合）"
+    );
+    assert!(
+        (merged.win.get(&horse(1)).unwrap().value() - 4.0).abs() < 1e-9,
+        "win は最新値で上書きされる（鮮度は最新）"
+    );
+}
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
 async fn returns_none_when_absent(pool: sqlx::PgPool) {
     let repo = PostgresRepository::new(pool);
     let other = RaceId::try_from("2026-3-nakayama-8-9R").unwrap();

@@ -62,9 +62,13 @@ predict/backtest を止めない）。なお組合せ券種は 1 レースで行
 満たして cache-hit すると、欠落券種（馬連・ワイド・三連複 等）が当日ずっと取り直されない不具合があった。
 
 cache-hit 判定を **`RaceOdds::is_complete()`（win + 組合せ 5 券種＝馬連・ワイド・馬単・三連複・三連単が
-そろう）** に変更した。不完全なスナップショットは cache-miss として再スクレイプし、`find_race_odds(None)`
-が race_id の全スナップショットを union 読みするため、新たに取れた券種が追記されて union が complete に
-収束する（`persist_all` 側は変更不要・自己修復）。
+そろう）** に変更した。不完全なスナップショットは cache-miss として再スクレイプする。`race_odds` は
+PK=(race_id,bet_type,combination_key) の **単一行 UPSERT**（`save_race_odds`。時系列履歴は別テーブル
+`race_odds_snapshots` #232）なので、再スクレイプは欠けていた券種の行を追加するだけで既存行を消さない。
+よって保存済みの券種集合は取得済み券種の和集合として単調に埋まり、complete に収束する
+（`persist_all` 側は変更不要・自己修復）。なお JRA が一部券種を発売しない極小頭数レースでは
+is_complete が常に false になり read-through で毎回再スクレイプするが、UPSERT で行は肥大せず呼び出しも
+1 レース 1 回程度のため許容する。
 
 `place` は **引き続き cache-hit 条件に含めない**。netkeiba は win と同梱で複勝を返すため通常そろうが、
 上記「複勝未公開時は win-only で cache-hit を許容（両方そろうまで cache-miss にはしない）」方針を維持し、

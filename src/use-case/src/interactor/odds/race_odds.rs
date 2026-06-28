@@ -7,10 +7,10 @@ use crate::odds_scraper::OddsScraper;
 use crate::repository::{OddsRepository, OddsRow, RaceOddsRecord};
 
 impl<O: OddsScraper, R: OddsRepository> OddsInteractor<O, R> {
-    /// race_id のオッズを read-through で取得する（#51, ADR 0010）。
+    /// race_id のオッズを read-through で取得する（#51, ADR 0010 / #294）。
     ///
-    /// 1. `race_odds` に保存済み（単勝・複勝）があれば、再スクレイプせずそれを返す。
-    /// 2. 無ければライブスクレイプし、取得できた単勝・複勝を保存してからフルのオッズを返す。
+    /// 1. `race_odds` に保存済みが complete（win + 組合せ 5 券種）なら、再スクレイプせずそれを返す。
+    /// 2. complete でなければライブスクレイプし、取得した全券種(#38)を保存してフルのオッズを返す。
     ///    保存はその回の買い目には影響させない（exotic も含めて返す）。
     ///
     /// 取得できれば `Some(odds)`、未取得なら `None`。「未取得」は次の 2 つを束ねる:
@@ -24,10 +24,14 @@ impl<O: OddsScraper, R: OddsRepository> OddsInteractor<O, R> {
         //    cache-hit 判定は「win + 組合せ 5 券種が揃った complete スナップショット」(#294)。
         //    win あり・組合せ券種一部欠落の部分スナップショット（exotic の一過性取得失敗で生じる）は
         //    `!is_empty()` を満たすため旧判定では cache-hit して当日ずっと欠落が恒久化していた。
-        //    `is_complete()` 基準にすると不完全なスナップショットは cache-miss として再スクレイプし、
-        //    find_race_odds(None) が全スナップショットを union 読みするため、新たに取れた券種が
-        //    追記されて union が complete に収束する（persist 側は変更不要・自己修復）。
+        //    `is_complete()` 基準にすると不完全なスナップショットは cache-miss として再スクレイプする。
+        //    `race_odds` は (race_id,bet_type,combination_key) 単一行 UPSERT（save_race_odds）で、
+        //    再スクレイプは欠けていた券種の行を追加するだけで既存行を消さないため、保存済みの券種集合は
+        //    取得済み券種の和集合として単調に埋まり、complete に収束する（persist 側は変更不要・自己修復）。
         //    place は判定に含めない（ADR 0010 の複勝未公開時 win-only 許容を維持、is_complete 参照）。
+        //    注意: JRA が一部の組合せ券種を発売しない極小頭数レースでは is_complete が常に false になり
+        //    read-through を呼ぶ度に再スクレイプする。が、UPSERT で行は肥大せず、predict は 1 レース
+        //    1 回・api-server は手動 refresh のみで自動ループは無いため負荷は限定的（#294 影響: 低）。
         if let Some(saved) = self.repository.find_race_odds(race_id, None).await?
             && saved.is_complete()
         {
