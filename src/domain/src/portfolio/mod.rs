@@ -44,7 +44,7 @@ pub struct PortfolioBet {
     /// 払戻倍率（ライブ未取得なら `None`。買い目は残し精算は確定配当で可能）。
     /// ワイドは下限..上限帯の中点を用いる。
     pub odds: Option<f64>,
-    /// 期待値倍率 = 的中確率 × odds（`simulate` 単体評価の期待回収率）。odds 未取得なら 0.0。
+    /// 期待値倍率 = 的中確率 × floor(100×odds)/100（`leg_metrics` 算出, 払戻 floor 込み）。odds 未取得なら 0.0。
     pub ev: f64,
     /// 的中確率（この組合せが当たる確率, オッズ非依存）。買うか判断する材料として表示する。
     pub hit_prob: f64,
@@ -329,8 +329,9 @@ fn distribute(type_budget: u64, n: usize) -> Vec<u64> {
 /// 的中確率（occurrence 確率）は **常にダミー倍率 1.0 の単体 simulate** で求める＝オッズ非依存。
 /// 実オッズを simulate に渡すと、`odds=0.0` の汚染値（CLAUDE.md 既知の race_odds 汚染）で payout=0 となり
 /// 当たる脚の的中% が 0 に潰れるため、判断ビューでは必ず 1.0 で確率だけを取る。
-/// 単一脚の ev 倍率は厳密に `的中確率 × odds`（payout は当否の二値なので E\[払戻\]/賭金 = P(的中)×odds）。
-/// よって simulate は 1 度で足り、odds 未取得は精算不能で 0.0。頭数不足（3 頭未満）は (0.0, 0.0)。
+/// 単一脚の ev 倍率は `的中確率 × floor(100×odds)/100`。simulate の払戻 floor（`payout_of`）に合わせており
+/// 従来の `leg_ev`（odds で simulate した roi）と同値になる（テストで担保）。よって simulate は的中確率の
+/// 1 度で足り、odds 未取得は精算不能で 0.0。頭数不足（3 頭未満）は (0.0, 0.0)。
 fn leg_metrics(
     field: &[HorseNum],
     win: &HashMap<HorseNum, f64>,
@@ -354,7 +355,10 @@ fn leg_metrics(
     .and_then(|r| r.ev)
     .map(|e| e.hit_prob)
     .unwrap_or(0.0);
-    let ev = odds.map(|o| hit_prob * o).unwrap_or(0.0);
+    // 払戻 floor（simulate `payout_of` の floor(stake×odds)）に合わせる＝従来 leg_ev と同値。
+    let ev = odds
+        .map(|o| hit_prob * (100.0 * o).floor() / 100.0)
+        .unwrap_or(0.0);
     (ev, hit_prob)
 }
 
@@ -725,12 +729,14 @@ mod tests {
             "全買い目に的中確率(0,1]が入る: {:?}",
             pf.bets
         );
-        // 単一脚の ev 倍率は厳密に hit_prob × odds（オッズ取得済みの脚で検証）。
+        // ev 倍率は従来の leg_ev（simulate 由来・払戻 floor 込み）と一致する（恒真でない独立検証）。
+        let win: HashMap<HorseNum, f64> = probs.iter().map(|p| (p.horse_num, p.win_prob)).collect();
+        let field: Vec<HorseNum> = probs.iter().map(|p| p.horse_num).collect();
         for b in pf.bets.iter().filter(|b| b.odds.is_some()) {
-            let expected = b.hit_prob * b.odds.unwrap();
+            let expected = leg_ev(&field, &win, &b.combination, b.odds);
             assert!(
                 (b.ev - expected).abs() < 1e-9,
-                "ev {} == hit_prob×odds {}: {:?}",
+                "ev {} == leg_ev {}: {:?}",
                 b.ev,
                 expected,
                 b
