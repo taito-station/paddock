@@ -104,11 +104,13 @@ impl<R: RaceCardRepository + OddsRepository + FetchRepository, S: NetkeibaScrape
         //    - 未発売(status=yoso 等の想定外 status = `Internal`): 正規の「まだオッズが無い」状態。
         //      従来どおり best-effort で握り潰す。card+近走（再取得が高コストで主目的）を巻き添えに
         //      しない。当日朝に再取得すればよい（fail-closed な #100 status ゲートは据え置き）。
-        //    - transient なネットワーク障害(`Fetch`/`Timeout` = 接続リセット os error 54 等):
-        //      scraper 内のリトライ後も残る一時障害。「本来取れるはずが取れていない」ので握り潰さず
-        //      degraded として surface する。win 欠落のまま exotic だけ保存すると predict が
-        //      「オッズ有り・win 無し」で誤判定し対象レースが脱落するため、odds 保存自体をスキップ
-        //      する（部分スナップショットを永続化しない。cf. #287/commit a54e56b）。
+        //    - ネットワーク/HTTP 失敗(`Fetch`/`Timeout` = 接続リセット os error 54・タイムアウト・5xx、
+        //      および稀な 4xx。scraper 内リトライ後も残る取得失敗): 「本来取れるはずが取れていない」ので
+        //      握り潰さず degraded として surface する。win 欠落のまま exotic だけ保存すると predict が
+        //      「オッズ有り・win 無し」で誤判定し対象レースが脱落するため、odds 保存自体をスキップする
+        //      （部分スナップショットを永続化しない。cf. #287/commit a54e56b）。4xx は再試行しない
+        //      （`is_transient` 参照）が、部分永続化を避け非0 exit で surface する点は同じで安全
+        //      （消費側の再取得は run/sweep 単位で有界）。
         let mut win_odds_degraded = false;
         let odds = match self.scraper.fetch_win_place_odds(netkeiba_id) {
             Ok(odds) => odds,

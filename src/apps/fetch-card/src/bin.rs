@@ -26,9 +26,10 @@ async fn main() -> anyhow::Result<ExitCode> {
     }
     if resp.win_odds_degraded {
         // 単複が transient 障害でリトライ後も取れず、win 欠落の部分保存を避けてオッズ未保存にした（#288）。
-        // degraded の通知はここに 1 本化し、末尾では exit code だけ返す（メッセージ重複回避）。
+        // degraded の通知はここに 1 本化する。終了コードはここで断定せず末尾の return に委ねる
+        // （ここは run_history より前で、history 失敗時は anyhow 経由で exit 1 になりうるため）。
         eprintln!(
-            "オッズ: 単複が一時的なネットワーク障害でリトライ後も取得できず未保存（card は保存済み）。win 欠落のため要再取得。degraded 終了（exit 3）"
+            "オッズ: 単複が一時的なネットワーク障害でリトライ後も取得できず未保存（card は保存済み）。win 欠落のため要再取得（degraded）"
         );
     } else if resp.odds_saved > 0 {
         println!(
