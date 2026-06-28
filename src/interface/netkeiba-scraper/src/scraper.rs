@@ -292,19 +292,20 @@ impl OddsScraper for UreqNetkeibaScraper {
     /// ライブオッズを取得して [`RaceOdds`] を組み立てる。旧 JRA `accessO.html` cname 経路
     /// （ADR 0001 で未検証・実質機能せず #287 で撤去）を置き換え、fetch-card と同一の取得経路に統一する。
     ///
-    /// fetch-card（`CardInteractor::ingest`）同様の**ベストエフォート**: 単複・組合せのどちらかの API が
-    /// 失敗しても warn を残して取れた券種だけ返す（1 券種の障害で監視 1 レースを丸ごと落とさない）。
-    /// RaceId が JRA 形式でない（合成 `nk-` 等）場合のみ変換エラーを伝播する。
+    /// 失敗の扱いは券種の重要度で分ける:
+    /// - **単複(type=1)は EV/ROI と市場単勝 α ブレンドの基礎**。取得失敗を握り潰して win 欠落の
+    ///   部分オッズを返すと、read-through 経路では `persist_all` がそれを永続化し、以降 cache-hit で
+    ///   不完全スナップショットが再利用されて誤判定を生む。よって失敗は `Err` を伝播し、`OddsInteractor`
+    ///   側で当該レースを skip(`None`) させる（#287 の silent failure 撲滅の趣旨。旧 JRA 経路の
+    ///   「token 解決失敗＝loud skip」と挙動を揃える）。
+    /// - **組合せ券種は券種ごとにベストエフォート**（`fetch_one_exotic` が各 type の失敗を空 Vec に
+    ///   畳むため `fetch_exotic_odds` は実質常に `Ok`）。1 券種の欠落で単複ベースの判定を巻き添えにしない。
+    ///
+    /// RaceId が JRA 形式でない（合成 `nk-` 等）場合は変換エラーをそのまま伝播する。
     fn scrape(&self, race_id: &RaceId) -> UcResult<RaceOdds> {
         let netkeiba_id = netkeiba_race_id_from_paddock(race_id)?;
-        let odds = self.fetch_win_place_odds(&netkeiba_id).unwrap_or_else(|e| {
-            tracing::warn!(race_id = %race_id, error = %e, "単複オッズの再取得に失敗、組合せ券種のみで継続");
-            FetchedOdds::default()
-        });
-        let exotic = self.fetch_exotic_odds(&netkeiba_id).unwrap_or_else(|e| {
-            tracing::warn!(race_id = %race_id, error = %e, "組合せ券種オッズの再取得に失敗、単複のみで継続");
-            FetchedExoticOdds::default()
-        });
+        let odds = self.fetch_win_place_odds(&netkeiba_id)?;
+        let exotic = self.fetch_exotic_odds(&netkeiba_id).unwrap_or_default();
         Ok(assemble_netkeiba(&odds, &exotic, race_id.clone()))
     }
 }
@@ -415,5 +416,15 @@ mod tests {
             race_id,
         );
         assert!(got.is_empty());
+    }
+
+    #[test]
+    fn scrape_propagates_conversion_error_for_non_jra_race_id() {
+        // scrape() の glue 回帰ガード: 合成 race_id（`nk-` プレフィックス＝JRA 12 桁へ変換不能）は
+        // netkeiba_race_id_from_paddock が Err を返し、ネットワークへ出る前に伝播する
+        // （OddsInteractor 側で skip(None) になる）。ネットワーク非依存で変換分岐のみを検証する。
+        let scraper = UreqNetkeibaScraper::new();
+        let synthetic = RaceId::try_from("nk-202602010605").unwrap();
+        assert!(scraper.scrape(&synthetic).is_err());
     }
 }
