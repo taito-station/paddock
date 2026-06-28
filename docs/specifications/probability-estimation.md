@@ -143,6 +143,25 @@ smoothed = (k · rate + m · prior) / (k + m)        // m = 擬似カウント
 > 時間減衰集計）。ただし backtest で改善が確認できず（前走フォーム #31 が直近を既に捕捉・カテゴリ別
 > 出走数が疎）、**デフォルトは無効**。機構は将来評価のため残す（ADR 0016）。
 
+### ステップ 2.7: place/show 冪変換（脱圧縮, #283, ADR 0047, 任意）
+
+place/show のスコアに、次ステップの正規化前に冪変換 `score'_i = score_i^γ` を掛ける
+（`apply_score_power`）。合計固定の正規化（2.0 / 3.0）＋単調化は分布を中央へ圧縮し、本命の複勝を
+過小評価・人気薄を過大評価する。`γ > 1.0` でスコアをシャープ化すると、`normalize_to_sum(score^γ, T)`
+は `normalize(prob^γ, T)` と一致するため**場内合計 2.0 / 3.0 を保ったまま**本命を持ち上げ人気薄を下げる
+（脱圧縮）。win 列には適用しない（win の冪変換はステップ 5 がブレンド後に担当）。
+
+```
+raw_place_score_i ← raw_place_score_i ^ γ
+raw_show_score_i  ← raw_show_score_i  ^ γ
+```
+
+- `γ` は `EstimationConfig.place_show_power: Option<f64>`。`None` / 非有限 / `≤0` / ちょうど `1.0`
+  （厳密一致近傍）は no-op。`production()` は `RECOMMENDED_PLACE_SHOW_POWER = 2.0`（ADR 0047）。
+- backtest の `--place-show-power <γ>` で sweep する。
+
+---
+
 ### ステップ 3: レース内正規化（top-k）+ 単調化
 
 各列を「着以内ポジション数」に対応する合計へ正規化し、各馬を確率として 1.0 で上限クランプする。

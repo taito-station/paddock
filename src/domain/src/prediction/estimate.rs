@@ -36,6 +36,13 @@ pub fn estimate_probabilities_with_config(
         .map(|(_, f)| raw_score(f, |r| r.show, config))
         .collect();
 
+    // place/show は正規化前にスコアを冪変換 γ でシャープ化して分布の中央圧縮を脱圧縮する（#283）。
+    // `normalize_to_sum(score^γ, target)` は `normalize(prob^γ, target)` と数学的に一致するため、
+    // 場内合計 2.0/3.0 を保ったまま本命を持ち上げ人気薄を下げる。win はここでは変えない
+    // （win の冪変換はブレンド後の `apply_win_power` が担当, ADR 0042）。
+    let place_scores = apply_score_power(&place_scores, config.place_show_power);
+    let show_scores = apply_score_power(&show_scores, config.place_show_power);
+
     // win は 1 着（1 ポジション）、place は 2 着以内（2 ポジション）、show は 3 着以内（3 ポジション）
     // に相当するため、レース内合計をそれぞれ 1.0 / 2.0 / 3.0 へ正規化する。各馬は確率上限 1.0。
     let win_probs = normalize_to_sum(&win_scores, 1.0);
@@ -61,6 +68,21 @@ pub fn estimate_probabilities_with_config(
             show_prob: show_probs[i],
         })
         .collect()
+}
+
+/// スコア列に冪変換 `score^γ` を適用する（#283 / place/show 脱圧縮）。
+///
+/// `gamma` が `None` / 非有限 / `<= 0.0` / ちょうど `1.0`（厳密一致近傍, `< f64::EPSILON`）のときは
+/// no-op でクローンを返す（後方互換）。`raw_score` は非負（レート ∈ [0,1] とフォーム signal の重み付き
+/// 平均）なので底が負になることはなく、`0.0^γ = 0.0`（γ>0）でスコア 0 馬は 0 のまま。呼び出し側で
+/// `normalize_to_sum` に渡して場内合計を保つ前提で、ここでは正規化しない。
+fn apply_score_power(scores: &[f64], gamma: Option<f64>) -> Vec<f64> {
+    match gamma {
+        Some(g) if g.is_finite() && g > 0.0 && (g - 1.0).abs() >= f64::EPSILON => {
+            scores.iter().map(|s| s.powf(g)).collect()
+        }
+        _ => scores.to_vec(),
+    }
 }
 
 /// 単勝確率を市場オッズ（単勝）の implied 確率とブレンドする（#72）。

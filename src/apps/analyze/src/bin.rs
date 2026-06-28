@@ -120,6 +120,7 @@ async fn main() -> anyhow::Result<()> {
             trend_n,
             jockey_form_weight,
             win_power,
+            place_show_power,
         } => {
             let blend_alpha = validate_blend_alpha(blend_alpha)?;
             let config = build_estimation_config(
@@ -129,6 +130,7 @@ async fn main() -> anyhow::Result<()> {
                 trend_n,
                 jockey_form_weight,
                 win_power,
+                place_show_power,
             )?;
             let from = parse_date(&from)?;
             let to = parse_date(&to)?;
@@ -193,6 +195,7 @@ fn build_estimation_config(
     trend_n: u32,
     jockey_form_weight: Option<f64>,
     win_power: Option<f64>,
+    place_show_power: Option<f64>,
 ) -> anyhow::Result<EstimationConfig> {
     let shrinkage = match shrinkage_m {
         Some(m) => {
@@ -228,6 +231,12 @@ fn build_estimation_config(
     {
         anyhow::bail!("--win-power must be a finite positive number, got {g}");
     }
+    // place_show_power もγ。0/負/非有限は不正（γ<1 は逆方向 sweep として許可）。
+    if let Some(g) = place_show_power
+        && !(g.is_finite() && g > 0.0)
+    {
+        anyhow::bail!("--place-show-power must be a finite positive number, got {g}");
+    }
     if !(1..=TREND_N_MAX).contains(&trend_n) {
         anyhow::bail!("--trend-n must be between 1 and {TREND_N_MAX}, got {trend_n}");
     }
@@ -238,6 +247,7 @@ fn build_estimation_config(
         trend_n,
         jockey_recent_form_weight: jockey_form_weight,
         win_power,
+        place_show_power,
     })
 }
 

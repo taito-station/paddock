@@ -35,6 +35,13 @@ pub struct EstimationConfig {
     /// 適用する（[`super::estimate::apply_win_power`]）。backtest の `--win-power` スイープ専用で、
     /// 採用値は backtest 検証後に `production()` へ反映する（ADR 0042）。
     pub win_power: Option<f64>,
+    /// place/show スコアの冪変換 γ（#283 / #258 Phase 2）。`None` のとき no-op（後方互換）。
+    /// `normalize_to_sum(score^γ, target)` で正規化前にスコアをシャープ化し、正規化＋単調化が招く
+    /// 分布の中央圧縮（本命の複勝を過小評価・人気薄を過大評価）を脱圧縮する。`γ > 1.0` で本命の
+    /// place/show を持ち上げ人気薄を下げる（win の [`super::estimate::apply_win_power`] と同型だが、
+    /// place/show は推定時にスコアへ適用し場内合計 2.0/3.0 を保つ点が異なる）。backtest の
+    /// `--place-show-power` スイープ専用で、採用値は検証後に `production()` へ反映する。
+    pub place_show_power: Option<f64>,
 }
 
 // trend_n のデフォルト値が 0 でなく 1 のため、derive(Default) ではなく手書き impl を使う。
@@ -47,6 +54,7 @@ impl Default for EstimationConfig {
             trend_n: 1,
             jockey_recent_form_weight: None,
             win_power: None,
+            place_show_power: None,
         }
     }
 }
@@ -63,6 +71,16 @@ pub const RECOMMENDED_SHRINKAGE_M: f64 = 10.0;
 /// γ≥1.5 は LogLoss/Brier 悪化＋人気馬を過剰補正（1番人気 予測 37.5%/46.7% vs 実測 28.2%）のため棄却。
 /// 詳細は ADR 0042。
 pub const RECOMMENDED_WIN_POWER: f64 = 1.25;
+
+/// 本番 predict が採用する place/show スコア冪変換のγ（#283 / #258 Phase 2）。backtest
+/// （2025-01-01〜2026-06-27 / 4891R, α=0.2・m=10・win_power=1.25）で γ∈{none,1.25,1.5,2.0} を比較し、
+/// γ が大きいほど place/show Brier・LogLoss・人気帯校正・複勝買い目 ROI が**単調改善**、単勝校正は
+/// 全γで完全不変（place/show のみ冪変換し win を触らない設計）。γ=2.0 が試験範囲で最良
+/// （show Brier 0.1492→0.1461、複勝買い目 ROI 76.7→79.2%、1番人気の複勝過小評価 +24.8→+22.9pt）。
+/// 本命ギャップは +22.9pt とまだ大きく過補正の手前で、安全側。γ≥2.5 は #286（win 側 m×recency×form
+/// の joint retune）が place/show 素スコアを作り直すため過学習回避の観点で未掃引（棄却ではなく保留）。
+/// 詳細は ADR 0047。
+pub const RECOMMENDED_PLACE_SHOW_POWER: f64 = 2.0;
 
 /// 本番 predict が採用する市場オッズ(単勝)ブレンドのモデル重み α（#72）。`None` はモデルのみ。
 /// backtest（2025-01〜2026-06 / 4891R）の α スイープで Brier/LogLoss が α=0.2 で最良（ADR 0034）。
@@ -85,6 +103,9 @@ impl EstimationConfig {
             // #246: γ=1.25 を採用（4891R sweep で単勝 LogLoss 0.1974→0.1954 最良・穴帯校正改善、
             // γ≥1.5 は LogLoss/Brier 悪化＋人気馬過剰補正で棄却）。詳細は ADR 0042。
             win_power: Some(RECOMMENDED_WIN_POWER),
+            // #283 Phase 2: γ=2.0 を採用（4891R sweep で place/show Brier/LogLoss・人気帯校正・
+            // 複勝 ROI が単調改善・単勝校正は完全不変）。詳細は ADR 0047。
+            place_show_power: Some(RECOMMENDED_PLACE_SHOW_POWER),
         }
     }
 }

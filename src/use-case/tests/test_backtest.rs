@@ -562,6 +562,7 @@ async fn backtest_wires_recency_into_horse_factors() {
         trend_n: 1,
         jockey_recent_form_weight: None,
         win_power: None,
+        place_show_power: None,
     };
     let on = interactor(vec![soft_track_race(None)])
         .backtest(d(2026, 1, 1), d(2026, 1, 31), None, cfg)

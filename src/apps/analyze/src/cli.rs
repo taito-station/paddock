@@ -96,6 +96,12 @@ pub enum Command {
         /// 単勝校正・人気帯校正・回収を比較する（ADR 0042）。
         #[arg(long)]
         win_power: Option<f64>,
+        /// place/show スコア冪変換のγ（#283 / #258 Phase 2）。正規化前に `score^γ` でシャープ化し、
+        /// 正規化＋単調化が招く分布の中央圧縮（本命の複勝過小評価・人気薄過大評価）を脱圧縮する。
+        /// 未指定は no-op（現行挙動）。スイープ（1.25/1.5/2.0 等。γ<1 は逆方向）で複勝校正・人気帯
+        /// 校正・三連複回収を比較する。
+        #[arg(long)]
+        place_show_power: Option<f64>,
     },
     /// 古い race_odds_snapshots を保持期間でパージする（#234）。最新キャッシュ race_odds は消さない。
     /// cutoff = 実行日(UTC) − months。fetched_at の日付が cutoff より前の行を削除する。
