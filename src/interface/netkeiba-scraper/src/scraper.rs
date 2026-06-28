@@ -27,6 +27,10 @@ const DEFAULT_DELAY: Duration = Duration::from_millis(1000);
 // ハングした接続で CLI が無限に止まらないよう接続/読取にタイムアウトを設ける。
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const READ_TIMEOUT: Duration = Duration::from_secs(30);
+// 一時障害（接続リセット os error 54・5xx 等）を握り潰さず自動回復させるためのリトライ（#288）。
+// jra-fetcher（ADR 0021/0029）の指数バックオフ policy を netkeiba GET に展開する。
+const MAX_ATTEMPTS: u32 = 3;
+const RETRY_BASE_BACKOFF: Duration = Duration::from_secs(1);
 // netkeiba は素の ureq UA を弾くことがあるためブラウザ風 UA を送る。
 const USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 \
      (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
@@ -134,6 +138,51 @@ impl UreqNetkeibaScraper {
     }
 }
 
+/// 再試行する価値のある一時障害かを判定する。jra-fetcher（ADR 0021/0029）の同名関数を
+/// netkeiba 向けに複製。transport hiccup（接続リセット os error 54 = `Io`・タイムアウト・
+/// 接続失敗・名前解決失敗・不完全 HTTP 応答）と 5xx を transient とする。netkeiba のオッズ API は
+/// 未発売を HTTP ではなく 200+JSON status（`yoso` 等）で返すため、jra のような 403/404=absent
+/// 概念は無く 4xx は単純に非 transient（即返し）。
+fn is_transient(err: &ureq::Error) -> bool {
+    match err {
+        ureq::Error::Timeout(_)
+        | ureq::Error::Io(_)
+        | ureq::Error::ConnectionFailed
+        | ureq::Error::HostNotFound
+        | ureq::Error::Protocol(_) => true,
+        ureq::Error::StatusCode(code) => *code >= 500,
+        _ => false,
+    }
+}
+
+/// `url` を GET し、transient 失敗時は指数バックオフ（1s/2s）で最大 [`MAX_ATTEMPTS`] 回再試行する
+/// （#288, ADR 0021 を netkeiba へ展開）。接続リセット等の一時障害を握り潰さず自動回復させ、
+/// 単複オッズの「try1 失敗 / try2 成功」を透過的に解消する。レスポンスヘッダ取得（`.call()`）のみ
+/// 再試行し、ボディ読取中の失敗は呼び出し側で一発 [`Error::Fetch`] とする（jra-fetcher と同方針）。
+fn call_with_retry(agent: &ureq::Agent, url: &str) -> Result<ureq::http::Response<ureq::Body>> {
+    let mut attempt = 0;
+    loop {
+        attempt += 1;
+        match agent.get(url).header("User-Agent", USER_AGENT).call() {
+            Ok(resp) => return Ok(resp),
+            Err(err) if attempt < MAX_ATTEMPTS && is_transient(&err) => {
+                // saturating で MAX_ATTEMPTS を増やしても shift/乗算が panic しないようにする。
+                let backoff = RETRY_BASE_BACKOFF.saturating_mul(2u32.saturating_pow(attempt - 1));
+                tracing::warn!(
+                    url,
+                    attempt,
+                    max_attempts = MAX_ATTEMPTS,
+                    backoff_ms = backoff.as_millis() as u64,
+                    error = %err,
+                    "transient fetch error; retrying after backoff"
+                );
+                std::thread::sleep(backoff);
+            }
+            Err(err) => return Err(Error::Fetch(format!("GET {url}: {err}"))),
+        }
+    }
+}
+
 /// URL を GET し、レスポンスの `Content-Type` charset に従って本文をデコードして返す。
 ///
 /// netkeiba はホストで本文エンコーディングが異なる: `race.netkeiba.com`（出馬表・結果）は
@@ -141,11 +190,7 @@ impl UreqNetkeibaScraper {
 /// charset を尊重し、不明時は EUC-JP にフォールバックする（`scraper_util::decode_html`）。
 /// EUC-JP 固定デコードは race.netkeiba.com の UTF-8 化で文字化けする回帰を起こしていた。
 fn fetch_decoded(agent: &ureq::Agent, url: &str) -> Result<String> {
-    let resp = agent
-        .get(url)
-        .header("User-Agent", USER_AGENT)
-        .call()
-        .map_err(|e| Error::Fetch(format!("GET {url}: {e}")))?;
+    let resp = call_with_retry(agent, url)?;
     // ureq は 4xx/5xx を Err(StatusCode) にするためここに来るのは 2xx/3xx のみ。
     // ボディ受信前に Content-Type の charset を控える（受信後は resp が消費される）。
     let charset = resp
@@ -164,11 +209,7 @@ fn fetch_decoded(agent: &ureq::Agent, url: &str) -> Result<String> {
 /// URL を GET し、レスポンスボディを UTF-8 として（lossy で）受け取る。
 /// オッズ API は UTF-8 JSON を返すため、EUC-JP デコードする [`fetch_decoded`] とは分ける。
 fn fetch_utf8(agent: &ureq::Agent, url: &str) -> Result<String> {
-    let resp = agent
-        .get(url)
-        .header("User-Agent", USER_AGENT)
-        .call()
-        .map_err(|e| Error::Fetch(format!("GET {url}: {e}")))?;
+    let resp = call_with_retry(agent, url)?;
     let mut bytes = Vec::new();
     resp.into_body()
         .into_reader()
@@ -429,5 +470,105 @@ mod tests {
         let scraper = UreqNetkeibaScraper::new();
         let synthetic = RaceId::try_from("nk-202602010605").unwrap();
         assert!(scraper.scrape(&synthetic).is_err());
+    }
+
+    // --- transient リトライ（#288） ---------------------------------------
+    // jra-fetcher（ADR 0021/0029）の TcpListener ベース局所サーバ方式を踏襲し、netkeiba GET の
+    // `call_with_retry` が一時障害を再試行して回復することを実機ソケットで検証する。
+
+    // `Read` はモジュール先頭の `use std::io::Read;` が `super::*` 経由で入るため再 import 不要。
+    use std::io::Write as _;
+    use std::net::TcpListener;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::thread::{self, JoinHandle};
+
+    /// `responses` を接続ごとに 1 つずつ順に返す最小 HTTP サーバ。返り値は URL・受理接続数・join handle。
+    fn serve(responses: Vec<&'static str>) -> (String, Arc<AtomicUsize>, JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let count = Arc::new(AtomicUsize::new(0));
+        let counter = Arc::clone(&count);
+        let handle = thread::spawn(move || {
+            for resp in responses {
+                let (mut stream, _) = listener.accept().unwrap();
+                counter.fetch_add(1, Ordering::SeqCst);
+                let mut buf = [0u8; 1024];
+                let _ = stream.read(&mut buf);
+                stream.write_all(resp.as_bytes()).unwrap();
+                stream.flush().unwrap();
+            }
+        });
+        (format!("http://{addr}/odds.json"), count, handle)
+    }
+
+    const R_503: &str =
+        "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+    const R_200_OK: &str = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok";
+    const R_404: &str = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+
+    fn test_agent() -> ureq::Agent {
+        ureq::Agent::config_builder()
+            .timeout_connect(Some(CONNECT_TIMEOUT))
+            .build()
+            .into()
+    }
+
+    #[test]
+    fn is_transient_classifies_retryable_errors() {
+        assert!(is_transient(&ureq::Error::StatusCode(503)));
+        assert!(is_transient(&ureq::Error::ConnectionFailed));
+        assert!(is_transient(&ureq::Error::HostNotFound));
+        assert!(is_transient(&ureq::Error::Io(std::io::Error::new(
+            std::io::ErrorKind::ConnectionReset,
+            "reset"
+        ))));
+        // 4xx は未発売(200+JSON)とは別の純粋な HTTP エラーで、再試行しない。
+        assert!(!is_transient(&ureq::Error::StatusCode(404)));
+        assert!(!is_transient(&ureq::Error::StatusCode(400)));
+    }
+
+    #[test]
+    fn call_with_retry_retries_transient_5xx_then_succeeds() {
+        // 503, 503, 200 → 2 回再試行して本文を返す。
+        let (url, count, handle) = serve(vec![R_503, R_503, R_200_OK]);
+        let resp = call_with_retry(&test_agent(), &url).expect("should succeed after retries");
+        let mut body = String::new();
+        resp.into_body()
+            .into_reader()
+            .read_to_string(&mut body)
+            .unwrap();
+        assert_eq!(body, "ok");
+        assert_eq!(
+            count.load(Ordering::SeqCst),
+            3,
+            "expected 3 attempts (2 retries) before success"
+        );
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn call_with_retry_gives_up_after_max_attempts_on_persistent_5xx() {
+        // 毎回 503 → MAX_ATTEMPTS 回で打ち切り Err（無限ループしない）。
+        let (url, count, handle) = serve(vec![R_503; MAX_ATTEMPTS as usize]);
+        assert!(
+            call_with_retry(&test_agent(), &url).is_err(),
+            "persistent 5xx must surface as an error, not hang or succeed"
+        );
+        assert_eq!(
+            count.load(Ordering::SeqCst),
+            MAX_ATTEMPTS as usize,
+            "should attempt exactly MAX_ATTEMPTS times then give up"
+        );
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn call_with_retry_does_not_retry_4xx() {
+        // 404 は非 transient: 1 回で即 Err（再試行しない）。
+        let (url, count, handle) = serve(vec![R_404]);
+        assert!(call_with_retry(&test_agent(), &url).is_err());
+        assert_eq!(count.load(Ordering::SeqCst), 1, "4xx must not be retried");
+        handle.join().unwrap();
     }
 }

@@ -1,10 +1,17 @@
 mod cli;
 mod setup;
 
+use std::process::ExitCode;
+
 use clap::Parser;
 
+/// degraded（単複だけ未取得・要再取得）を表す終了コード。ハード失敗(=1)・正常(=0)と区別し、
+/// 消費側（例: scripts/predict-check/refresh_ev.sh は exit≠0 を FAIL 扱いし「古いオッズ警告」を
+/// 出す）が win 欠落レースだけ再取得対象として識別できるようにする（#288, ADR 0049）。
+const EXIT_WIN_ODDS_DEGRADED: u8 = 3;
+
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn main() -> anyhow::Result<ExitCode> {
     let args = cli::Cli::parse();
     let (netkeiba_id, race_id) = args.resolve_race_id()?;
 
@@ -22,7 +29,14 @@ async fn main() -> anyhow::Result<()> {
     } else {
         println!("出馬表: 取得済みのためスキップ（--force で再取得）");
     }
-    if resp.odds_saved > 0 {
+    if resp.win_odds_degraded {
+        // 単複が transient 障害でリトライ後も取れず、win 欠落の部分保存を避けてオッズ未保存にした（#288）。
+        // degraded の通知はここに 1 本化する。終了コードはここで断定せず末尾の return に委ねる
+        // （ここは run_history より前で、history 失敗時は anyhow 経由で exit 1 になりうるため）。
+        eprintln!(
+            "オッズ: 単複オッズを取得できず未保存（card は保存済み）。win 欠落のため要再取得（degraded）"
+        );
+    } else if resp.odds_saved > 0 {
         println!(
             "オッズ: {} 件を保存（単複＋馬連・馬単・三連複・三連単）",
             resp.odds_saved
@@ -36,7 +50,16 @@ async fn main() -> anyhow::Result<()> {
     } else {
         run_history(&app, &netkeiba_id, &resp.horse_ids).await?;
     }
-    Ok(())
+
+    // 近走取り込み（主目的）まで終えた後で degraded を非0 exit で surface する。
+    // 専用コード 3: ハード失敗(=1)と「単複だけ未取得・要再取得」を呼び出し側（例: scripts/
+    // predict-check/refresh_ev.sh は exit≠0 を FAIL 扱いし「古いオッズ警告」を出す）が区別でき、
+    // win 欠落レースだけ再取得を回せる（#288, ADR 0049）。`process::exit` ではなく `ExitCode` を
+    // 返し、tokio ランタイム・DB プール等の Drop を走らせてから終了する。
+    if resp.win_odds_degraded {
+        return Ok(ExitCode::from(EXIT_WIN_ODDS_DEGRADED));
+    }
+    Ok(ExitCode::SUCCESS)
 }
 
 /// 出走各馬の過去走を取り込み、予想の馬個体 factor（recent_form / horse_stats）を生かす（#103）。
