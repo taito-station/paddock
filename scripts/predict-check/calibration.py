@@ -150,6 +150,8 @@ def main():
         print(f"  市場本命: {market_top1}/{market_races} = {market_top1 / market_races * 100:.1f}%（対照）")
 
     # --- reliability / ECE ---
+    # 注: win 純モデルは全レース全頭、市場 implied は winner∈odds のレースのみ採録で母集団が
+    # 厳密には別（勝者は常に odds>0 を持つため実質バイアスは無視できる範囲）。
     reliability(win_samples, WIN_BINS, "win 純モデル")
     if mkt_win_samples:
         reliability(mkt_win_samples, WIN_BINS, "win 市場 implied（対照）")

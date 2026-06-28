@@ -6,8 +6,10 @@
 import os
 import tempfile
 
-import calibration as C
 import gen_pure_preds as G
+
+# 注: calibration は import 時に umaren_backtest を読む。parse_table（ROW 正規表現）の回帰
+# 検出が umaren 側の破損でマスクされないよう、calibration は load_pure テスト内で遅延 import する。
 
 
 def approx(a, b, eps=1e-9):
@@ -37,6 +39,7 @@ def test_parse_table_ignores_non_matching():
 
 
 def test_load_pure_roundtrip():
+    import calibration as C
     with tempfile.TemporaryDirectory() as d:
         p = os.path.join(d, "pure.tsv")
         with open(p, "w") as f:
@@ -50,6 +53,7 @@ def test_load_pure_roundtrip():
 
 
 def test_load_pure_empty_file_no_crash():
+    import calibration as C
     with tempfile.TemporaryDirectory() as d:
         p = os.path.join(d, "empty.tsv")
         open(p, "w").close()  # 完全な空ファイル（ヘッダ行すら無い）
