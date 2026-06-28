@@ -505,6 +505,100 @@ fn place_show_power_leaves_win_prob_unchanged() {
     );
 }
 
+/// place/show 冪変換（#283）: 不正 γ（非有限 / ≤0）はライブラリ防御で no-op になる契約を固定する。
+/// CLI は同条件を usage エラーで弾くが、ライブラリ層は黙って no-op（doc の非対称契約）。
+#[test]
+fn place_show_power_invalid_gamma_is_noop() {
+    let mk = |t: RateTriple| HorseFactors {
+        course_gate: Some(fs(t)),
+        horse_surface: Some(fs(RateTriple::default())),
+        horse_distance: Some(fs(t)),
+        jockey_surface: None,
+        horse_track_condition: None,
+        trainer_surface: None,
+        recent_form: None,
+        weight_carried: None,
+        jockey_recent_form: None,
+    };
+    let entries: Vec<_> = (1..=6)
+        .map(|i| {
+            let f = i as f64;
+            let t = RateTriple {
+                win: 0.05 * f,
+                place: 0.05 + 0.02 * f,
+                show: 0.08 + 0.02 * f,
+            };
+            (make_entry(i, &format!("ウマ{i}")), mk(t))
+        })
+        .collect();
+    let base = estimate_probabilities(&entries);
+    for g in [f64::NAN, f64::INFINITY, 0.0, -1.0] {
+        let out = estimate_probabilities_with_config(
+            &entries,
+            &EstimationConfig {
+                place_show_power: Some(g),
+                ..EstimationConfig::default()
+            },
+        );
+        for (a, b) in base.iter().zip(&out) {
+            approx(a.win_prob, b.win_prob);
+            approx(a.place_prob, b.place_prob);
+            approx(a.show_prob, b.show_prob);
+        }
+    }
+}
+
+/// place/show 冪変換（#283）: 強い本命がいて上限クランプが発火しても、(a) 各確率は 1.0 以下、
+/// (b) 単調性 win ≤ place ≤ show が保たれることを固定する（ADR 0047 が明記する境界挙動の回帰ロック）。
+#[test]
+fn place_show_power_clamps_strong_favorite() {
+    let strong = RateTriple {
+        win: 0.1,
+        place: 0.5,
+        show: 0.6,
+    };
+    let weak = RateTriple {
+        win: 0.1,
+        place: 0.1,
+        show: 0.15,
+    };
+    let mk = |t: RateTriple| HorseFactors {
+        course_gate: Some(fs(t)),
+        horse_surface: Some(fs(t)),
+        horse_distance: Some(fs(t)),
+        jockey_surface: None,
+        horse_track_condition: None,
+        trainer_surface: None,
+        recent_form: None,
+        weight_carried: None,
+        jockey_recent_form: None,
+    };
+    let entries: Vec<_> = (1..=6)
+        .map(|i| {
+            let t = if i == 1 { strong } else { weak };
+            (make_entry(i, &format!("ウマ{i}")), mk(t))
+        })
+        .collect();
+    let powered = estimate_probabilities_with_config(
+        &entries,
+        &EstimationConfig {
+            place_show_power: Some(2.0),
+            ..EstimationConfig::default()
+        },
+    );
+    // 本命の place/show は冪シャープ化＋正規化で 1.0 に張り付く（クランプ発火）。
+    approx(powered[0].place_prob, 1.0);
+    approx(powered[0].show_prob, 1.0);
+    for p in &powered {
+        assert!((0.0..=1.0).contains(&p.place_prob), "place ≤ 1.0: {p:?}");
+        assert!((0.0..=1.0).contains(&p.show_prob), "show ≤ 1.0: {p:?}");
+        assert!(
+            p.win_prob <= p.place_prob && p.place_prob <= p.show_prob,
+            "monotonic: {p:?}"
+        );
+    }
+}
+
 /// win レートが高く place/show レートが相対的に低い馬でも、後処理の累積 max で
 /// win ≤ place ≤ show が必ず成立する。
 #[test]

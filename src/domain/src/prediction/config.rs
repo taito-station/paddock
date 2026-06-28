@@ -39,8 +39,9 @@ pub struct EstimationConfig {
     /// `normalize_to_sum(score^γ, target)` で正規化前にスコアをシャープ化し、正規化＋単調化が招く
     /// 分布の中央圧縮（本命の複勝を過小評価・人気薄を過大評価）を脱圧縮する。`γ > 1.0` で本命の
     /// place/show を持ち上げ人気薄を下げる（win の [`super::estimate::apply_win_power`] と同型だが、
-    /// place/show は推定時にスコアへ適用し場内合計 2.0/3.0 を保つ点が異なる）。backtest の
-    /// `--place-show-power` スイープ専用で、採用値は検証後に `production()` へ反映する。
+    /// place/show は推定時にスコアへ適用し場内合計 2.0/3.0 を保つ点が異なる）。`production()` は
+    /// 採用値 `RECOMMENDED_PLACE_SHOW_POWER`（ADR 0047）を既定にする。再 sweep は backtest の
+    /// `--place-show-power` フラグ経由（`Default` は `None`＝no-op）。
     pub place_show_power: Option<f64>,
 }
 
