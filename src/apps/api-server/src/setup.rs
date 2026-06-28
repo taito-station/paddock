@@ -1,6 +1,5 @@
 use anyhow::Context;
 use netkeiba_scraper::UreqNetkeibaScraper;
-use odds_scraper::UreqOddsScraper;
 use paddock_config::Config;
 use paddock_use_case::{Interactor, OddsInteractor, SettleInteractor};
 use rdb_gateway::{PostgresRepository, pool};
@@ -40,7 +39,7 @@ impl paddock_use_case::pdf_fetcher::PdfFetcher for UnusedFetcher {
 /// api-server が DI で組み立てる Interactor の具象型。
 pub type ApiInteractor = Interactor<PostgresRepository, UnusedParser, UnusedFetcher>;
 /// オッズ read-through 取得用（#51, odds:refresh）。
-pub type ApiOddsInteractor = OddsInteractor<UreqOddsScraper, PostgresRepository>;
+pub type ApiOddsInteractor = OddsInteractor<UreqNetkeibaScraper, PostgresRepository>;
 /// 確定払戻の自動精算用（#40, results:refresh）。
 pub type ApiSettleInteractor = SettleInteractor<UreqNetkeibaScraper, PostgresRepository>;
 
@@ -69,7 +68,7 @@ pub async fn build() -> anyhow::Result<Setup> {
     pool::migrate(&pool).await.context("apply migrations")?;
 
     let odds = OddsInteractor::new(
-        UreqOddsScraper::new(),
+        UreqNetkeibaScraper::new(),
         PostgresRepository::new(pool.clone()),
     );
     let settle = SettleInteractor::new(

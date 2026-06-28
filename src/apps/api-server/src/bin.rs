@@ -1,6 +1,5 @@
 use actix_web::{App, HttpServer, web};
 use netkeiba_scraper::UreqNetkeibaScraper;
-use odds_scraper::UreqOddsScraper;
 use rdb_gateway::PostgresRepository;
 
 use api_server::app;
@@ -26,7 +25,7 @@ async fn main() -> anyhow::Result<()> {
                     PostgresRepository,
                     UnusedParser,
                     UnusedFetcher,
-                    UreqOddsScraper,
+                    UreqNetkeibaScraper,
                     UreqNetkeibaScraper,
                 >,
             )

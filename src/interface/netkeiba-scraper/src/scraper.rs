@@ -8,11 +8,13 @@
 use std::io::Read;
 use std::time::Duration;
 
-use paddock_domain::HorseId;
+use paddock_domain::{HorseId, OddsValue, PlaceOdds, RaceId, RaceOdds};
 use paddock_use_case::Result as UcResult;
+use paddock_use_case::netkeiba_race_id_from_paddock;
 use paddock_use_case::netkeiba_scraper::{
     FetchedCard, FetchedExoticOdds, FetchedOdds, HorsePastRun, NetkeibaScraper, RunnerRef,
 };
+use paddock_use_case::odds_scraper::OddsScraper;
 
 use crate::error::{Error, Result};
 use crate::parse;
@@ -223,5 +225,195 @@ impl NetkeibaScraper for UreqNetkeibaScraper {
             trio: self.fetch_one_exotic(netkeiba_race_id, 7, parse::parse_trio_odds),
             trifecta: self.fetch_one_exotic(netkeiba_race_id, 8, parse::parse_trifecta_odds),
         })
+    }
+}
+
+/// netkeiba の単複・組合せ券種オッズ DTO を 1 レース分の [`RaceOdds`] へ組み立てる純関数。
+///
+/// [`UreqNetkeibaScraper::scrape`] のネットワーク非依存な核（fetch と分離して単体テスト可能にする）。
+/// DTO は生 f64 を持つため、ここでドメインの `OddsValue`/`PlaceOdds`（finite かつ `>= 1.0`、複勝は
+/// low<=high）へ変換する。API は妥当値を返すが、変換に失敗する行（想定外の `< 1.0` 等）は
+/// **その行だけ skip** し、レース全体を落とさない（取りこぼし耐性）。組合せ券種は DTO 段階で
+/// 既にドメイン型キー（`Pair`/`OrderedPair`/`Triple`/`OrderedTriple`）を持つのでキー変換は不要。
+pub fn assemble_netkeiba(
+    odds: &FetchedOdds,
+    exotic: &FetchedExoticOdds,
+    race_id: RaceId,
+) -> RaceOdds {
+    let mut out = RaceOdds::empty(race_id);
+    for w in &odds.win {
+        if let Ok(v) = OddsValue::try_from(w.odds) {
+            out.win.insert(w.horse_num, v);
+        }
+    }
+    for p in &odds.place {
+        if let (Ok(low), Ok(high)) = (
+            OddsValue::try_from(p.odds_low),
+            OddsValue::try_from(p.odds_high),
+        ) && let Ok(band) = PlaceOdds::try_from((low, high))
+        {
+            out.place.insert(p.horse_num, band);
+        }
+    }
+    for q in &exotic.quinella {
+        if let Ok(v) = OddsValue::try_from(q.odds) {
+            out.quinella.insert(q.combination, v);
+        }
+    }
+    for w in &exotic.wide {
+        if let (Ok(low), Ok(high)) = (
+            OddsValue::try_from(w.odds_low),
+            OddsValue::try_from(w.odds_high),
+        ) && let Ok(band) = PlaceOdds::try_from((low, high))
+        {
+            out.wide.insert(w.combination, band);
+        }
+    }
+    for e in &exotic.exacta {
+        if let Ok(v) = OddsValue::try_from(e.odds) {
+            out.exacta.insert(e.combination, v);
+        }
+    }
+    for t in &exotic.trio {
+        if let Ok(v) = OddsValue::try_from(t.odds) {
+            out.trio.insert(t.combination, v);
+        }
+    }
+    for t in &exotic.trifecta {
+        if let Ok(v) = OddsValue::try_from(t.odds) {
+            out.trifecta.insert(t.combination, v);
+        }
+    }
+    out
+}
+
+impl OddsScraper for UreqNetkeibaScraper {
+    /// 内部 `RaceId` を netkeiba 12 桁へ変換し、単複・組合せ券種オッズ API（UTF-8 JSON）から
+    /// ライブオッズを取得して [`RaceOdds`] を組み立てる。旧 JRA `accessO.html` cname 経路
+    /// （ADR 0001 で未検証・実質機能せず #287 で撤去）を置き換え、fetch-card と同一の取得経路に統一する。
+    ///
+    /// fetch-card（`CardInteractor::ingest`）同様の**ベストエフォート**: 単複・組合せのどちらかの API が
+    /// 失敗しても warn を残して取れた券種だけ返す（1 券種の障害で監視 1 レースを丸ごと落とさない）。
+    /// RaceId が JRA 形式でない（合成 `nk-` 等）場合のみ変換エラーを伝播する。
+    fn scrape(&self, race_id: &RaceId) -> UcResult<RaceOdds> {
+        let netkeiba_id = netkeiba_race_id_from_paddock(race_id)?;
+        let odds = self.fetch_win_place_odds(&netkeiba_id).unwrap_or_else(|e| {
+            tracing::warn!(race_id = %race_id, error = %e, "単複オッズの再取得に失敗、組合せ券種のみで継続");
+            FetchedOdds::default()
+        });
+        let exotic = self.fetch_exotic_odds(&netkeiba_id).unwrap_or_else(|e| {
+            tracing::warn!(race_id = %race_id, error = %e, "組合せ券種オッズの再取得に失敗、単複のみで継続");
+            FetchedExoticOdds::default()
+        });
+        Ok(assemble_netkeiba(&odds, &exotic, race_id.clone()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use paddock_domain::{HorseNum, OrderedPair, OrderedTriple, Pair, RaceId, Triple};
+    use paddock_use_case::netkeiba_scraper::{
+        FetchedComboOdds, FetchedPlaceOdds, FetchedWideOdds, FetchedWinOdds,
+    };
+
+    use super::*;
+
+    fn h(n: u32) -> HorseNum {
+        HorseNum::try_from(n).unwrap()
+    }
+
+    #[test]
+    fn assembles_all_bet_types_into_race_odds() {
+        let race_id = RaceId::try_from("2026-1-hakodate-6-5R").unwrap();
+        let odds = FetchedOdds {
+            win: vec![FetchedWinOdds {
+                horse_num: h(1),
+                odds: 3.5,
+                popularity: Some(2),
+            }],
+            place: vec![FetchedPlaceOdds {
+                horse_num: h(1),
+                odds_low: 1.5,
+                odds_high: 2.0,
+                popularity: Some(2),
+            }],
+        };
+        let exotic = FetchedExoticOdds {
+            quinella: vec![FetchedComboOdds {
+                combination: Pair::try_from((h(1), h(2))).unwrap(),
+                odds: 12.4,
+                popularity: None,
+            }],
+            wide: vec![FetchedWideOdds {
+                combination: Pair::try_from((h(1), h(2))).unwrap(),
+                odds_low: 3.1,
+                odds_high: 4.8,
+                popularity: None,
+            }],
+            exacta: vec![FetchedComboOdds {
+                combination: OrderedPair::try_from((h(2), h(1))).unwrap(),
+                odds: 25.0,
+                popularity: None,
+            }],
+            trio: vec![FetchedComboOdds {
+                combination: Triple::try_from((h(1), h(2), h(3))).unwrap(),
+                odds: 88.0,
+                popularity: None,
+            }],
+            trifecta: vec![FetchedComboOdds {
+                combination: OrderedTriple::try_from((h(3), h(1), h(2))).unwrap(),
+                odds: 410.0,
+                popularity: None,
+            }],
+        };
+
+        let got = assemble_netkeiba(&odds, &exotic, race_id);
+        assert_eq!(got.win.len(), 1);
+        assert!((got.win[&h(1)].value() - 3.5).abs() < 1e-9);
+        let place = &got.place[&h(1)];
+        assert!((place.low.value() - 1.5).abs() < 1e-9);
+        assert!((place.high.value() - 2.0).abs() < 1e-9);
+        assert_eq!(got.quinella.len(), 1);
+        assert_eq!(got.wide.len(), 1);
+        assert_eq!(got.exacta.len(), 1);
+        assert_eq!(got.trio.len(), 1);
+        assert_eq!(got.trifecta.len(), 1);
+        assert!(!got.is_empty());
+    }
+
+    #[test]
+    fn skips_invalid_odds_rows_without_dropping_others() {
+        // odds < 1.0 は OddsValue 変換に失敗する想定外行。その行だけ skip し、妥当行は残す。
+        let race_id = RaceId::try_from("2026-1-hakodate-6-5R").unwrap();
+        let odds = FetchedOdds {
+            win: vec![
+                FetchedWinOdds {
+                    horse_num: h(1),
+                    odds: 0.5, // 不正（< 1.0）→ skip
+                    popularity: None,
+                },
+                FetchedWinOdds {
+                    horse_num: h(2),
+                    odds: 4.2, // 妥当 → 残す
+                    popularity: None,
+                },
+            ],
+            place: vec![],
+        };
+        let got = assemble_netkeiba(&odds, &FetchedExoticOdds::default(), race_id);
+        assert_eq!(got.win.len(), 1);
+        assert!(got.win.contains_key(&h(2)));
+        assert!(!got.win.contains_key(&h(1)));
+    }
+
+    #[test]
+    fn empty_inputs_yield_empty_race_odds() {
+        let race_id = RaceId::try_from("2026-1-hakodate-6-5R").unwrap();
+        let got = assemble_netkeiba(
+            &FetchedOdds::default(),
+            &FetchedExoticOdds::default(),
+            race_id,
+        );
+        assert!(got.is_empty());
     }
 }
