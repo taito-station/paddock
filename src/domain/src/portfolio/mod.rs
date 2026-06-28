@@ -323,11 +323,14 @@ fn distribute(type_budget: u64, n: usize) -> Vec<u64> {
     v
 }
 
-/// 脚 1 点の (ev 倍率, 的中確率) を `simulate` 単体評価で 1 度に求める。
-/// 的中確率は買い目の判断材料として表示するためのもの（配分の重みには使わない＝配分は均等割り, ADR 0046）。
-/// オッズに依らない（payout>0 の着順確率和）ので、odds 未取得の脚もダミー倍率 1.0 で確率だけ得る
-/// （その分 simulate を呼ぶが頭数小・実害なし）。ev 倍率は odds 未取得なら 0.0（精算不能のため）。
-/// 頭数不足（3 頭未満）は (0.0, 0.0)。
+/// 脚 1 点の (ev 倍率, 的中確率) を求める（的中確率は買い目の判断材料として表示するためのもの。
+/// 配分の重みには使わない＝配分は均等割り, ADR 0046）。
+///
+/// 的中確率（occurrence 確率）は **常にダミー倍率 1.0 の単体 simulate** で求める＝オッズ非依存。
+/// 実オッズを simulate に渡すと、`odds=0.0` の汚染値（CLAUDE.md 既知の race_odds 汚染）で payout=0 となり
+/// 当たる脚の的中% が 0 に潰れるため、判断ビューでは必ず 1.0 で確率だけを取る。
+/// 単一脚の ev 倍率は厳密に `的中確率 × odds`（payout は当否の二値なので E\[払戻\]/賭金 = P(的中)×odds）。
+/// よって simulate は 1 度で足り、odds 未取得は精算不能で 0.0。頭数不足（3 頭未満）は (0.0, 0.0)。
 fn leg_metrics(
     field: &[HorseNum],
     win: &HashMap<HorseNum, f64>,
@@ -337,24 +340,22 @@ fn leg_metrics(
     if field.len() < 3 {
         return (0.0, 0.0);
     }
-    let sim_odds = odds.unwrap_or(1.0);
-    let report = simulate(&SimInput {
+    let hit_prob = simulate(&SimInput {
         field: field.to_vec(),
         bets: vec![PlacedBet {
             combination: combination.clone(),
             stake: 100,
-            odds: sim_odds,
+            odds: 1.0,
         }],
         main: None,
         win_probs: Some(win.clone()),
     })
     .ok()
-    .and_then(|r| r.ev);
-    match report {
-        // ev 倍率は odds 取得済みの脚のみ意味を持つ（未取得は精算不能なので 0.0）。的中確率は常に有効。
-        Some(e) => (if odds.is_some() { e.roi } else { 0.0 }, e.hit_prob),
-        None => (0.0, 0.0),
-    }
+    .and_then(|r| r.ev)
+    .map(|e| e.hit_prob)
+    .unwrap_or(0.0);
+    let ev = odds.map(|o| hit_prob * o).unwrap_or(0.0);
+    (ev, hit_prob)
 }
 
 /// 脚 1 点の期待値倍率（= 的中確率 × odds）を `simulate` 単体評価で求める。
@@ -724,6 +725,17 @@ mod tests {
             "全買い目に的中確率(0,1]が入る: {:?}",
             pf.bets
         );
+        // 単一脚の ev 倍率は厳密に hit_prob × odds（オッズ取得済みの脚で検証）。
+        for b in pf.bets.iter().filter(|b| b.odds.is_some()) {
+            let expected = b.hit_prob * b.odds.unwrap();
+            assert!(
+                (b.ev - expected).abs() < 1e-9,
+                "ev {} == hit_prob×odds {}: {:?}",
+                b.ev,
+                expected,
+                b
+            );
+        }
     }
 
     #[test]
