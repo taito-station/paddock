@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""純モデル（α=0）の win/place/show 校正計測。
+"""純モデル（α=1.0）の win/place/show 校正計測。
+
+α＝モデル重み（`blended = α·model + (1−α)·market`, estimate.rs / ADR 0045・0052）で **α=1.0 が純モデル /
+α=0.0 が純市場**。`--pure` には gen_pure_preds.py を α=1.0（既定）で生成した TSV を渡すこと。α=0 で
+生成した TSV は純市場なので「純モデル校正」にならない（旧既定の取り違え。#303 で是正）。
 
 gen_pure_preds.py が出した純モデル prob と netkeiba 実結果を突き合わせ、以下を出す:
   - モデル幅（各レースの win 最大−最小）の分布＝フラットさの定量化
