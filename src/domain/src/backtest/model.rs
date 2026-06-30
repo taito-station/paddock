@@ -1,6 +1,9 @@
 //! バックテスト集計の値オブジェクト・データ構造（純粋な型と最小限の impl）。
 
+use chrono::NaiveDate;
+
 use crate::Surface;
+use crate::prediction::HorseFactors;
 
 /// 1 出走馬の予測確率と実着の突合（校正指標の純粋入力）。
 #[derive(Debug, Clone)]
@@ -201,6 +204,29 @@ pub struct ExoticSegment {
     pub payout_rate: f64,
 }
 
+/// 学習型モデル評価ハーネス（#272 Phase A）の 1 出走馬分の特徴量＋ラベル行。`analyze backtest
+/// --dump-features` 要求時のみ収集される。特徴量は本番 predict と同じ walk-forward（`races.date < D`）
+/// で算出した [`HorseFactors`]（市場ブレンド・冪変換の前の生値）で、ラベルは確定着順・人気、value 検証用に
+/// 当時市場の単勝オッズを併載する。欠落（`Option` の `None`）は TSV で空セルとして書き出し、`0` 埋めしない。
+#[derive(Debug, Clone, PartialEq)]
+pub struct FeatureRow {
+    /// レース ID（12 桁）。
+    pub race_id: String,
+    /// 開催日（walk-forward の as-of 境界＝この日の `races.date < date` 統計で算出）。
+    pub date: NaiveDate,
+    /// 馬番。
+    pub horse_num: u32,
+    /// 本番 predict と同経路で算出した素性（ブレンド・冪変換前）。`None` 項は欠落（母数除外）。
+    pub factors: HorseFactors,
+    /// 確定着順（ラベル）。着順なし（除外・失格・競走中止等）は `None`。
+    pub finishing_position: Option<u32>,
+    /// 当時市場の単勝オッズ。当時 race_odds スナップショット（as-of）を優先し、無ければ PDF 確定単勝で
+    /// 代替する（backtest の `top_pick_odds` と同一ソース）。いずれも欠落なら `None`。value 検証の分母に使う。
+    pub win_odds: Option<f64>,
+    /// 人気（1 = 1 番人気）。`None` は不明。
+    pub popularity: Option<u32>,
+}
+
 /// バックテストの集計結果。
 #[derive(Debug, Clone, PartialEq)]
 pub struct BacktestReport {
@@ -243,6 +269,10 @@ pub struct BacktestReport {
     /// 呼び出し側（backtest interactor）が [`exotic_segments`](super::exotic::exotic_segments) の結果で埋める（買い目は
     /// `RaceEvaluation`＝馬単位の集計とは別の「買い目単位」のため `evaluate` には含めない）。
     pub by_exotic: Vec<ExoticSegment>,
+    /// 学習型モデル評価ハーネス用の特徴量ダンプ（#272 Phase A）。`by_exotic` と同様 `evaluate` では
+    /// `None` で、ダンプ要求時のみ backtest interactor が per-horse の [`FeatureRow`] を集めて埋める
+    /// （集計ではなく生の特徴量＋ラベルのため別フィールド）。未要求時は `None` で既存挙動と不変。
+    pub feature_dump: Option<Vec<FeatureRow>>,
 }
 
 impl BacktestReport {
@@ -267,6 +297,7 @@ impl BacktestReport {
             by_popularity: Vec::new(),
             by_surface: Vec::new(),
             by_exotic: Vec::new(),
+            feature_dump: None,
         }
     }
 }

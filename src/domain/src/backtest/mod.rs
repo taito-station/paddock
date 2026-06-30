@@ -27,8 +27,9 @@ mod tests;
 pub use evaluate::evaluate;
 pub use exotic::exotic_segments;
 pub use model::{
-    BacktestReport, CalibrationMetrics, ExoticBet, ExoticSegment, FieldSizeSegment, HorseOutcome,
-    PopularitySegment, RaceEvaluation, ReliabilityBin, SurfaceSegment, Top3RankDistribution,
+    BacktestReport, CalibrationMetrics, ExoticBet, ExoticSegment, FeatureRow, FieldSizeSegment,
+    HorseOutcome, PopularitySegment, RaceEvaluation, ReliabilityBin, SurfaceSegment,
+    Top3RankDistribution,
 };
 
 // テストが参照する crate 内部シンボル。外部公開はしない。

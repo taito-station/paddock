@@ -4,10 +4,10 @@ mod setup;
 use chrono::{Months, NaiveDate, Utc};
 use clap::Parser;
 use paddock_domain::{
-    BacktestReport, EstimationConfig, ExoticSegment, FieldSizeSegment, HorseName, HorseNum,
-    HorseProbability, JockeyName, PairEvDiagnostic, PopularitySegment, PortfolioConfig, RaceId,
-    RecencyConfig, ReliabilityBin, ShrinkageConfig, Surface, SurfaceSegment, Top3RankDistribution,
-    TrainerName, Venue,
+    BacktestReport, EstimationConfig, ExoticSegment, FactorStat, FeatureRow, FieldSizeSegment,
+    HorseName, HorseNum, HorseProbability, JockeyName, PairEvDiagnostic, PopularitySegment,
+    PortfolioConfig, RaceId, RecencyConfig, ReliabilityBin, ShrinkageConfig, Surface,
+    SurfaceSegment, Top3RankDistribution, TrainerName, Venue,
 };
 use paddock_use_case::TREND_N_MAX;
 use paddock_use_case::repository::{
@@ -16,6 +16,70 @@ use paddock_use_case::repository::{
 
 /// 部分一致候補の表示上限。これを超える場合も先頭から打ち切って提示する。
 const CANDIDATE_LIMIT: u32 = 20;
+
+/// 特徴量ダンプ（#272 Phase A）TSV のヘッダ行。列順は [`write_feature_dump`] の行生成と一致させる。
+/// 6 factor（course_gate/horse_surface/horse_distance/jockey_surface/trainer_surface/
+/// horse_track_condition）× (win,place,show,starts) + signal3 + ラベル3 = 33 列。
+const FEATURE_DUMP_HEADER: &str = "race_id\tdate\thorse_num\t\
+course_gate_win\tcourse_gate_place\tcourse_gate_show\tcourse_gate_starts\t\
+horse_surface_win\thorse_surface_place\thorse_surface_show\thorse_surface_starts\t\
+horse_distance_win\thorse_distance_place\thorse_distance_show\thorse_distance_starts\t\
+jockey_surface_win\tjockey_surface_place\tjockey_surface_show\tjockey_surface_starts\t\
+trainer_surface_win\ttrainer_surface_place\ttrainer_surface_show\ttrainer_surface_starts\t\
+horse_track_condition_win\thorse_track_condition_place\thorse_track_condition_show\thorse_track_condition_starts\t\
+recent_form\tweight_carried\tjockey_recent_form\t\
+finishing_position\twin_odds\tpopularity";
+
+/// 特徴量ダンプ（#272 Phase A）を TSV で書き出す。欠落（`None`）は空セルで 0 埋めしない。数値は
+/// `f64`/`u32` の既定 Display（round-trip 可能な厳密値）で出力し、忠実性サニティで backtest 集計と
+/// 突合できるようにする。列順は [`FEATURE_DUMP_HEADER`] と一致させる。
+fn write_feature_dump(path: &str, rows: &[FeatureRow]) -> anyhow::Result<()> {
+    use std::io::Write;
+
+    // factor 1 つを (win,place,show,starts) の 4 セルに展開する。欠落項は 4 セルとも空。
+    fn push_stat(cells: &mut Vec<String>, stat: Option<FactorStat>) {
+        match stat {
+            Some(s) => {
+                cells.push(s.rate.win.to_string());
+                cells.push(s.rate.place.to_string());
+                cells.push(s.rate.show.to_string());
+                cells.push(s.starts.to_string());
+            }
+            None => {
+                for _ in 0..4 {
+                    cells.push(String::new());
+                }
+            }
+        }
+    }
+    let cell_f64 = |v: Option<f64>| v.map(|x| x.to_string()).unwrap_or_default();
+    let cell_u32 = |v: Option<u32>| v.map(|x| x.to_string()).unwrap_or_default();
+
+    let file = std::fs::File::create(path)?;
+    let mut w = std::io::BufWriter::new(file);
+    writeln!(w, "{FEATURE_DUMP_HEADER}")?;
+    for row in rows {
+        let mut cells: Vec<String> = Vec::with_capacity(33);
+        cells.push(row.race_id.clone());
+        cells.push(row.date.to_string());
+        cells.push(row.horse_num.to_string());
+        push_stat(&mut cells, row.factors.course_gate);
+        push_stat(&mut cells, row.factors.horse_surface);
+        push_stat(&mut cells, row.factors.horse_distance);
+        push_stat(&mut cells, row.factors.jockey_surface);
+        push_stat(&mut cells, row.factors.trainer_surface);
+        push_stat(&mut cells, row.factors.horse_track_condition);
+        cells.push(cell_f64(row.factors.recent_form));
+        cells.push(cell_f64(row.factors.weight_carried));
+        cells.push(cell_f64(row.factors.jockey_recent_form));
+        cells.push(cell_u32(row.finishing_position));
+        cells.push(cell_f64(row.win_odds));
+        cells.push(cell_u32(row.popularity));
+        writeln!(w, "{}", cells.join("\t"))?;
+    }
+    w.flush()?;
+    Ok(())
+}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -121,6 +185,7 @@ async fn main() -> anyhow::Result<()> {
             jockey_form_weight,
             win_power,
             place_show_power,
+            dump_features,
         } => {
             let blend_alpha = validate_blend_alpha(blend_alpha)?;
             let config = build_estimation_config(
@@ -136,9 +201,20 @@ async fn main() -> anyhow::Result<()> {
             let to = parse_date(&to)?;
             let report = app
                 .interactor
-                .backtest(from, to, blend_alpha, config)
+                .backtest(from, to, blend_alpha, config, dump_features.is_some())
                 .await?;
             print_backtest(from, to, &report);
+            // --dump-features 指定時は特徴量ダンプを TSV に書く（#272 Phase A）。clean-arch のため
+            // interactor は file IO せず report.feature_dump に行を載せて返し、ここで書き出す。
+            if let Some(path) = dump_features {
+                // dump_features.is_some() を渡しているので feature_dump は必ず Some。
+                let rows = report
+                    .feature_dump
+                    .as_deref()
+                    .expect("dump_features 要求時は feature_dump が埋まる");
+                write_feature_dump(&path, rows)?;
+                println!("特徴量ダンプ: {} 行を {path} に書き出し", rows.len());
+            }
         }
         cli::Command::PurgeSnapshots { months, dry_run } => {
             // 0 ヶ月は当日以降のみ保持＝ほぼ全削除で #218 の蓄積を壊すため弾く。

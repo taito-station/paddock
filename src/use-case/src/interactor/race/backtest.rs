@@ -2,9 +2,9 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use chrono::NaiveDate;
 use paddock_domain::{
-    BacktestReport, BettingConfig, EstimationConfig, ExoticBet, HorseEntry, HorseFactors,
-    HorseOutcome, HorseResult, Podium, RaceEvaluation, ResultStatus, Surface, Venue, bet_hit,
-    evaluate, exotic_segments, select_bets,
+    BacktestReport, BettingConfig, EstimationConfig, ExoticBet, FeatureRow, HorseEntry,
+    HorseFactors, HorseOutcome, HorseResult, Podium, RaceEvaluation, ResultStatus, Surface, Venue,
+    bet_hit, evaluate, exotic_segments, select_bets,
 };
 
 use crate::error::Result;
@@ -37,12 +37,18 @@ impl<R: StatsRepository + OddsRepository, P: PdfParser, F: PdfFetcher> Interacto
     ///
     /// `config` でベイズ縮約・リーセンシー（#75）の有効化を切り替える。`EstimationConfig::default()`
     /// は現行挙動（縮約・減衰なし）。パラメータスイープによる before/after 比較に使う。
+    ///
+    /// `dump_features = true` のとき、各出走馬の素性（ブレンド・冪変換前の [`HorseFactors`]）＋ラベル
+    /// （確定着順・人気）＋当時市場の単勝オッズを [`FeatureRow`] として収集し `report.feature_dump`
+    /// に載せる（学習型モデル評価ハーネス #272 Phase A）。リーク無しの walk-forward 経路をそのまま
+    /// 再利用するため、ダンプ特徴量は本番 predict と同一。`false` のときは収集せず既存挙動と不変。
     pub async fn backtest(
         &self,
         from: NaiveDate,
         to: NaiveDate,
         blend_alpha: Option<f64>,
         config: EstimationConfig,
+        dump_features: bool,
     ) -> Result<BacktestReport> {
         let races = self
             .repository
@@ -53,6 +59,9 @@ impl<R: StatsRepository + OddsRepository, P: PdfParser, F: PdfFetcher> Interacto
         // 買い目（curated 推奨）の券種別 校正・回収率評価用（#121）。当時 race_odds がある
         // レースのみ select_bets を回し、確定着順と突合した結果を蓄積する。
         let mut exotic_bets: Vec<ExoticBet> = Vec::new();
+        // 学習型モデル評価ハーネス（#272 Phase A）の特徴量ダンプ。`dump_features` のときだけ
+        // per-horse の素性＋ラベルを蓄積する。未要求時は空のまま破棄され既存挙動と不変。
+        let mut feature_rows: Vec<FeatureRow> = Vec::new();
         // レースを開催日でグループ化し、同一日の全出走馬を一括バッチ取得する（#223）。
         // as_of はレース日ごとに変わるが、同一日のレース間は as_of が同一なのでバッチ化できる。
         // BTreeMap で日付昇順を保証しつつ sort() を不要にする。
@@ -339,6 +348,32 @@ impl<R: StatsRepository + OddsRepository, P: PdfParser, F: PdfFetcher> Interacto
                     })
                     .collect();
 
+                // 学習型モデル評価ハーネス（#272 Phase A）: ダンプ要求時のみ、当該レースの全出走馬の
+                // 素性（ブレンド・冪変換前の生 HorseFactors）＋ラベル＋当時市場単勝を収集する。
+                // entry_factors は starters と同集合・同順で、by_num は確定着順/人気/PDF 確定単勝を持つ。
+                // win_odds は backtest の top_pick_odds と同一ソース（当時 race_odds 優先・無ければ PDF 単勝）。
+                if dump_features {
+                    for (entry, factors) in &entry_factors {
+                        let (finishing_position, pdf_odds, popularity) = by_num
+                            .get(&entry.horse_num.value())
+                            .copied()
+                            .unwrap_or((None, None, None));
+                        let market_win = market
+                            .as_ref()
+                            .and_then(|m| m.win.get(&entry.horse_num))
+                            .map(|o| o.value());
+                        feature_rows.push(FeatureRow {
+                            race_id: race.race_id.to_string(),
+                            date: race.date,
+                            horse_num: entry.horse_num.value(),
+                            factors: factors.clone(),
+                            finishing_position,
+                            win_odds: market_win.or(pdf_odds),
+                            popularity,
+                        });
+                    }
+                }
+
                 // 全馬の予測確率と実着・人気を蓄積（校正指標・reliability・セグメント用）。
                 let horses: Vec<HorseOutcome> = probs
                     .iter()
@@ -429,6 +464,10 @@ impl<R: StatsRepository + OddsRepository, P: PdfParser, F: PdfFetcher> Interacto
 
         let mut report = evaluate(&evaluations);
         report.by_exotic = exotic_segments(&exotic_bets);
+        // ダンプ要求時のみ特徴量行を載せる（#272）。未要求時は None で既存挙動と不変。
+        if dump_features {
+            report.feature_dump = Some(feature_rows);
+        }
         Ok(report)
     }
 }
