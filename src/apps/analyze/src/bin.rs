@@ -79,6 +79,12 @@ fn feature_row_cells(row: &FeatureRow) -> Vec<String> {
         FEATURE_DUMP_COLUMNS,
         "feature dump の列数がヘッダと不一致"
     );
+    // TSV のセルに区切り文字が混入すると静かに列ズレする。現状の列（英数字+`-` の race_id・
+    // NaiveDate・数値）はタブ/改行を含まないが、ソース書式変更時の退行を開発時に検知する。
+    debug_assert!(
+        cells.iter().all(|c| !c.contains(['\t', '\n'])),
+        "feature dump のセルに区切り文字(タブ/改行)が混入"
+    );
     cells
 }
 
@@ -803,5 +809,30 @@ mod feature_dump_tests {
         assert_eq!(cells[30], "");
         assert_eq!(cells[31], "");
         assert_eq!(cells[32], "");
+    }
+
+    /// IO 本体 `write_feature_dump` が「ヘッダ行 + 各行 = `feature_row_cells` の TSV 連結」を出力し、
+    /// 余計な行を足さないこと（出力契約の end-to-end 回帰固定）。tempfile 依存を足さず temp_dir を使う。
+    #[test]
+    fn write_feature_dump_emits_header_then_rows() {
+        let row = FeatureRow {
+            race_id: "2026-1-nakayama-1-1R".to_string(),
+            date: NaiveDate::from_ymd_opt(2026, 1, 10).unwrap(),
+            horse_num: 7,
+            factors: empty_factors(),
+            finishing_position: Some(1),
+            win_odds: Some(4.0),
+            popularity: Some(3),
+        };
+        let path =
+            std::env::temp_dir().join(format!("paddock_dump_test_{}.tsv", std::process::id()));
+        write_feature_dump(path.to_str().unwrap(), std::slice::from_ref(&row)).unwrap();
+        let content = std::fs::read_to_string(&path).unwrap();
+        std::fs::remove_file(&path).ok();
+
+        let mut lines = content.lines();
+        assert_eq!(lines.next().unwrap(), FEATURE_DUMP_HEADER);
+        assert_eq!(lines.next().unwrap(), feature_row_cells(&row).join("\t"));
+        assert!(lines.next().is_none(), "ヘッダ + 1 行のみのはず");
     }
 }
