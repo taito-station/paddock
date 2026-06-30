@@ -102,14 +102,15 @@ def compute_metrics(rows):
     }
 
 
-# 突合に必要な期待値キー。1 つでも抽出できなければレポートのフォーマットがドリフトしたと
-# みなしてゲートを hard fail させる（パース退行で「偽 OK」になる穴を塞ぐ）。
+# 常に印字される＝抽出できなければレポートのフォーマットがドリフトしたとみなしてゲートを
+# hard fail させる必須キー（パース退行で「偽 OK」になる穴を塞ぐ）。`payout_rate` はオッズ取得
+# レースが 0 件だと backtest が「—」を印字し正当に欠落しうるので、ここには含めず main で
+# payout_races>0 のときだけ要求する。
 REQUIRED_REPORT_KEYS = (
     "races",
     "win_hit",
     "place_hit",
     "show_hit",
-    "payout_rate",
     "payout_races",
     "brier_win",
     "brier_place",
@@ -138,10 +139,12 @@ def parse_backtest_report(text):
     out["win_hit"] = pct("単勝的中率")
     out["place_hit"] = pct("連対的中率")
     out["show_hit"] = pct("複勝的中率")
-    # 想定回収率と母数（オッズ取得レース数）を同じ行から取る。
-    m_pay = re.search(r"想定回収率\s*[:：]\s*([\d.]+)%\s*\(母数\s*(\d+)\s*レース\)", text)
-    out["payout_rate"] = float(m_pay.group(1)) / 100.0 if m_pay else None
-    out["payout_races"] = int(m_pay.group(2)) if m_pay else None
+    # 母数（オッズ取得レース数）は回収率が「—」でも常に印字されるので独立に取る。回収率本体は
+    # 0 件時に「—」になり数値が無いため、`%` 形のみ拾う（無ければ None で、母数 0 のときは正当）。
+    m_races_pay = re.search(r"\(母数\s*(\d+)\s*レース\)", text)
+    out["payout_races"] = int(m_races_pay.group(1)) if m_races_pay else None
+    m_rate = re.search(r"想定回収率\s*[:：]\s*([\d.]+)%", text)
+    out["payout_rate"] = float(m_rate.group(1)) / 100.0 if m_rate else None
 
     # Brier/LogLoss テーブル（「単勝 0.0589 0.2104」等）は「## 確率校正」セクション以降に限定して
     # 行頭アンカーで拾う。reliability 等の後続表や的中率行を誤って拾わないようにするため。
@@ -223,6 +226,9 @@ def main(argv=None):
     # パース退行（backtest 出力フォーマットの変化）を「偽 OK」にしないため、必須キーが 1 つでも
     # 取れなければ突合せず hard fail する。これがゲートの堅牢性の要（#312 レビュー C1）。
     missing = [k for k in REQUIRED_REPORT_KEYS if expected.get(k) is None]
+    # オッズ取得レースがあるのに回収率が拾えないのはパース退行（0 件時は「—」で正当に欠落）。
+    if expected.get("payout_races") and expected.get("payout_rate") is None:
+        missing.append("payout_rate")
     if missing:
         print(
             f"\n忠実性サニティ NG: backtest レポートのパースに失敗（未抽出キー: {', '.join(missing)}）。"

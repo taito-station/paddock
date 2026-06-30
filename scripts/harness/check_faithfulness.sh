@@ -33,8 +33,8 @@ trap 'rm -f "$DUMP" "$REPORT" "$CARGO_LOG"' EXIT
 
 # production 構成: m=10 / win_power=1.25 / place_show_power=2.0 / α=0.2。
 # cargo の stderr（ビルド・html5ever WARN 等）は REPORT を汚さないよう別ログに退避する。
-# 破棄せず保持し、cargo/backtest 自体が失敗したときだけ診断として出す（忠実性の不一致は
-# python が自前で NG を表示するため cargo ログは出さない）。
+# cargo/backtest 自体が失敗したときだけ診断として cat し、その後 trap で削除する（忠実性の
+# 不一致は python が自前で NG を表示するため cargo ログは出さない）。
 set +e
 cargo run -q --manifest-path "$REPO_ROOT/Cargo.toml" -p analyze -- backtest \
     --from "$FROM" --to "$TO" \
