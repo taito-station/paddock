@@ -46,6 +46,15 @@ def parse_table(text):
     return rows
 
 
+def is_pure_model_alpha(alpha_str):
+    """--alpha が純モデル相当か。実装（estimate.rs）は alpha>=1.0 を純モデルに短絡するので
+    >=1.0 を純モデル扱いにする（"1"/"1.0"/"1.5" 等）。数値でなければ False（predict 側に委ね警告）。"""
+    try:
+        return float(alpha_str) >= 1.0
+    except ValueError:
+        return False
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--races", default="/tmp/bt252/bt_races.tsv")
@@ -57,13 +66,7 @@ def main():
 
     # 出力 TSV は純モデル前提（calibration.py も入力を純モデル＝α=1.0 生成と仮定して集計）。
     # 純モデルでない α を渡すと「純モデルでない値」が pure_preds として下流に流れるので警告する。
-    try:
-        # 実装は estimate.rs で alpha>=1.0 を純モデルに短絡するため、>=1.0 を純モデル扱いにする
-        # （"1"/"1.0"/"1.00"/"1.5" 等いずれも純モデル）。
-        alpha_is_pure_model = float(args.alpha) >= 1.0
-    except ValueError:
-        alpha_is_pure_model = False  # 数値でなければ predict 側に委ねつつ警告
-    if not alpha_is_pure_model:
+    if not is_pure_model_alpha(args.alpha):
         print(f"WARN: --alpha={args.alpha}（純モデル=α≥1.0 でない）。出力は純モデルではない"
               f"（下流は純モデル＝α=1.0 前提）", file=sys.stderr)
 
