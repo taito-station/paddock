@@ -99,7 +99,11 @@ def load_races(path, feature_cols=FUND_FEATURES):
 
 def market_implied(win_odds):
     """単勝オッズ→レース内正規化した implied 勝率（控除率込みの素朴版）。欠落は一様で補完。"""
-    inv = np.where(np.isfinite(win_odds) & (win_odds > 0), 1.0 / win_odds, math.nan)
+    # 有効オッズのみ逆数を取る。`where=` でマスク要素は除算自体を行わず（0 割の RuntimeWarning 回避）、
+    # `out` の初期値 NaN がそのまま残る。
+    mask = np.isfinite(win_odds) & (win_odds > 0)
+    inv = np.full(len(win_odds), math.nan)
+    np.divide(1.0, win_odds, out=inv, where=mask)
     if np.all(np.isnan(inv)):
         return np.full(len(win_odds), 1.0 / len(win_odds))
     # 欠落馬はレース内の有効平均で補完してから正規化。

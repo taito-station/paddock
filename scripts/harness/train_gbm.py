@@ -112,6 +112,8 @@ def main(argv=None):
     preds_fund = walk_forward(races, cutoffs, use_market=False, params=params)
     preds_mkt = walk_forward(races, cutoffs, use_market=True, params=params)
 
+    # baseline / market は walk_forward に依らず evaluate 内で算出され、両呼び出しとも同じ OOS 集合な
+    # ので同値（PL 側と同じ）。fund 側の評価結果から表示する。
     oos = [r for r in races if r.race_id in preds_fund]
     n1, m_fund = T.evaluate(oos, preds_fund)
     _, m_mkt = T.evaluate(oos, preds_mkt)
