@@ -64,8 +64,10 @@ def shrink_rate(rate, starts, prior, m=SHRINKAGE_M):
 
 
 def _stat_cell(row, base):
-    """FactorStat 1 つを (win, place, show, starts) で返す。欠落（空セル）は None。"""
-    if row[base] == "" or row[base + 3] == "":
+    """FactorStat 1 つを (win, place, show, starts) で返す。欠落（空セル）は None。
+    Rust の dump は factor 単位で 4 セル all-or-nothing だが、一部だけ空の壊れた行でも
+    float("") の ValueError を出さず欠落扱いにする（防御的・4 セルいずれか空なら None）。"""
+    if any(row[base + k] == "" for k in range(4)):
         return None
     return (float(row[base]), float(row[base + 1]), float(row[base + 2]), int(row[base + 3]))
 
@@ -242,7 +244,7 @@ def pava_apply(thr_x, fit_y, x):
 
 # --- データ読み込み --------------------------------------------------------------
 def load(tsv):
-    rows = []
+    rows, skipped = [], 0
     with open(tsv, encoding="utf-8") as f:
         header = f.readline().rstrip("\n").split("\t")
         assert len(header) == N_COLS, f"列数 {len(header)} != {N_COLS}"
@@ -250,6 +252,12 @@ def load(tsv):
             cells = line.rstrip("\n").split("\t")
             if len(cells) == N_COLS:
                 rows.append(cells)
+            else:
+                skipped += 1
+    if skipped:
+        # 列数不一致行を黙って捨てると schema 変更・破損に気づけない。件数を必ず可視化する。
+        print(f"警告: 列数 != {N_COLS} の行を {skipped} 件スキップしました（dump の整合性を確認）。",
+              file=sys.stderr)
     return rows
 
 
@@ -285,7 +293,7 @@ def run(args):
 
     all_win, all_ywin, all_imp = [], [], []
     fid_max = 0.0
-    top1_model = top1_market = n_races = 0
+    top1_model = top1_market = n_races = market_n = 0  # market_n: オッズ有(s>0)レースの分母（市場 top1 用）
     spear_model, spear_market, auc_model_races = [], [], []
     raw_var, prob_var = [], []
     q_rows = defaultdict(list)  # quarter -> [(model_win, y_win, implied)]
@@ -303,11 +311,12 @@ def run(args):
             n_races += 1
             if y_win[argmax(win_p)] == 1:
                 top1_model += 1
-            if s > 0 and y_win[argmax(implied)] == 1:
-                top1_market += 1
-            spear_model.append(spearman(win_p, [-p for p in fp]))
-            if s > 0:
+            if s > 0:  # 市場 top1 はオッズ有レースのみを母数にする（model と分母を分離）
+                market_n += 1
+                if y_win[argmax(implied)] == 1:
+                    top1_market += 1
                 spear_market.append(spearman(implied, [-p for p in fp]))
+            spear_model.append(spearman(win_p, [-p for p in fp]))
             auc_model_races.append(auc(win_p, y_win))
 
         rw = [raw_score(r, "win") for r in rrows]
@@ -318,15 +327,23 @@ def run(args):
             all_win.append(win_p[i]); all_ywin.append(y_win[i]); all_imp.append(implied[i])
             q_rows[quarter(r[COL["date"]])].append((win_p[i], y_win[i], implied[i]))
 
+    if n_races == 0:
+        print("勝馬記録のあるレースが 0 件です。入力 TSV を確認してください。", file=sys.stderr)
+        return
+
     print("## (0) 忠実性アンカー（Python 再構成 ≡ Rust model_win）")
     ok = fid_max < 1e-6
     print(f"  max|python_win - dump_model_win| = {fid_max:.2e}  -> "
           f"{'OK' if ok else 'FAIL（再構成が不一致・以降の数値は無効）'}\n")
     if not ok:
-        print("  忠実性 FAIL。定数/手順の鏡映を直すまで結論を出さない。", file=sys.stderr)
+        # 鏡映が前提なので、FAIL 時は無効な数値を並べず打ち切る（docstring の宣言と整合）。
+        print("  忠実性 FAIL。定数/手順の鏡映を直すまで結論を出さない（以降の診断を打ち切り）。",
+              file=sys.stderr)
+        return
 
     print("## (1) resolution（純モデル vs 市場）")
-    print(f"  top1 的中率   model={top1_model/n_races:.3f}  market={top1_market/n_races:.3f}  (n={n_races} レース)")
+    print(f"  top1 的中率   model={top1_model/n_races:.3f}  "
+          f"market={top1_market/market_n:.3f}  (model n={n_races} / market n={market_n} レース)")
     print(f"  Spearman(race内, 確率 vs 着順)  model={nanmean(spear_model):.3f}  market={nanmean(spear_market):.3f}")
     print(f"  AUC(win, 全馬)  model={auc(all_win, all_ywin):.3f}  market={auc(all_imp, all_ywin):.3f}")
     print(f"  AUC(win, race内平均)  model={nanmean(auc_model_races):.3f}")
@@ -335,7 +352,7 @@ def run(args):
 
     print("## (1b) resolution の窓別安定性（四半期）")
     print(f"  {'四半期':8} {'races':>6} {'top1_model':>11} {'top1_market':>12} {'AUC_model':>10} {'AUC_market':>11}")
-    by_q = defaultdict(lambda: {"t1m": 0, "t1k": 0, "n": 0, "w": [], "i": [], "y": []})
+    by_q = defaultdict(lambda: {"t1m": 0, "t1k": 0, "n": 0, "mn": 0, "w": [], "i": [], "y": []})
     for rid, rrows in races.items():
         win_p, _, _ = race_probs(rrows)
         fp = [_fp(r) for r in rrows]
@@ -348,12 +365,15 @@ def run(args):
         b["n"] += 1
         if y_win[argmax(win_p)] == 1:
             b["t1m"] += 1
-        if s > 0 and y_win[argmax(implied)] == 1:
-            b["t1k"] += 1
+        if s > 0:  # 市場 top1 の分母 mn はオッズ有レースのみ（(1) と同じ扱い）
+            b["mn"] += 1
+            if y_win[argmax(implied)] == 1:
+                b["t1k"] += 1
         b["w"].extend(win_p); b["i"].extend(implied); b["y"].extend(y_win)
     for q in sorted(by_q):
         b = by_q[q]
-        print(f"  {q:8} {b['n']:>6} {b['t1m']/b['n']:>11.3f} {b['t1k']/b['n']:>12.3f} "
+        t1k = b["t1k"] / b["mn"] if b["mn"] else float("nan")
+        print(f"  {q:8} {b['n']:>6} {b['t1m']/b['n']:>11.3f} {t1k:>12.3f} "
               f"{auc(b['w'], b['y']):>10.3f} {auc(b['i'], b['y']):>11.3f}")
     print()
 

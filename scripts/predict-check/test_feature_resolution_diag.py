@@ -28,7 +28,7 @@ def test_win_power_sharpens_and_renormalizes():
     out = d.win_power([0.5, 0.3, 0.2], 1.25)
     assert abs(sum(out) - 1.0) < 1e-9
     # γ>1 は本命を相対強調（最大値のシェアが上がる）。
-    assert out[0] > 0.5 / 1.0  # 0.5 のシェアが上がる
+    assert out[0] > 0.5  # 0.5 のシェアが上がる
     # γ=1 は no-op。
     assert d.win_power([0.5, 0.5], 1.0) == [0.5, 0.5]
 
