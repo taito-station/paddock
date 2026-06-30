@@ -14,8 +14,10 @@
   (B) bankroll 土俵 — fractional Kelly の本質（edge に応じ総賭金を bankroll 比で変える）を測る。
       開始資金から時系列に張り→実払戻で清算→残高更新。現行（固定 ¥3,500/レース flat 張り）と
       Kelly（λ·Σf_leg·bankroll）を、最終資金倍率・σ・最大DD・近似破産確率で比較する。
-      破産確率はレース順のブートストラップ並べ替え（既定 2000 本）で残高が ruin 閾値に
-      到達した経路の割合として近似する。
+      破産確率はレース順の順列並べ替え（permutation・非復元リサンプル。既定 2000 本）で
+      残高が ruin 閾値に到達した経路の割合として近似する。固定 71R を並べ替えるだけなので
+      捉えるのは「賭ける順序による経路リスク」で、母集団からのサンプリング変動ではない
+      （標本変動 CI ではない）。最終資金倍率・実 ROI は実時系列（chronological）1 経路の実現値。
 
 【循環回避】EV/Kelly 判定に使うオッズ（DB 盤面）と的中時の清算（result.html 実配当）を分離する
 （umaren_backtest.py と同方針）。Kelly 式は本番 Rust src/domain/src/betting/kelly.rs を鏡映:
@@ -97,17 +99,26 @@ def load(bt_dir):
         if p.exists():
             preds[d] = ub.parse_pred(p)
     out = []
+    skips = dict(probs=0, exotic=0, result=0)
     for r in sorted(races, key=lambda x: (x["date"], x["venue"], x["rnum"])):
         probs = preds.get(r["date"], {}).get((r["venue"], r["rnum"]))
         ex = exotic.get(r["pid"])
         resf = Path(bt_dir) / f"res_{r['nk']}.html"
-        if not probs or not ex or not ex["quinella"] or not resf.exists():
+        if not probs:
+            skips["probs"] += 1
+            continue
+        if not ex or not ex["quinella"]:
+            skips["exotic"] += 1
+            continue
+        if not resf.exists():
+            skips["result"] += 1
             continue
         top3, pay = ub.parse_result(resf)
         if len(top3) < 3:
+            skips["result"] += 1
             continue
         out.append((probs, ex["quinella"], ex["trio"], pay))
-    return out
+    return out, skips
 
 
 # --- (A) 定額土俵: 総額 ¥3,500 固定で重みだけ変える ---------------------------
@@ -117,6 +128,11 @@ def stake_fixed(probs, quin_odds, trio_odds, pay, weight):
     weight="prob": 現行（馬連=probs[p]/三連複=probs[a]·probs[b]、最低¥100）。
     weight="kelly": 券種内を Kelly 比率で配分（最低¥100は現行と揃え weighting 効果を分離）。
     清算は実払戻 pay。配分母数 minu=1 は現行と同一（floor 効果を交絡させない）。
+
+    留保: +EV 脚が 1 本も無いレースでは Kelly 重みが全 0 になり、largest_remainder の
+    「重み和≤0 → 一様」フォールバックで ¥3,500 を均等張りに縮退する（Kelly本来の「張らない」
+    挙動とは乖離）。定額土俵は「毎レース ¥3,500 を必ず張る前提で重みだけ比較する」枠組みゆえの
+    仕様で、Kelly の自己縮小（張らない判断）は (B) bankroll 土俵が忠実に測る。
     """
     ranked = sorted(probs, key=lambda n: -probs[n])
     if len(ranked) < 3:
@@ -175,6 +191,13 @@ def sim_bankroll(races, mode, b0, lam=0.5, kelly_cap=1.0, round_unit=100):
     mode="kelly": 各レース W=λ·Σf_leg·bankroll を +EV 脚へ Kelly 比率配分（W は残高上限）。
     round_unit: 100円単位丸め（実運用制約）。残高は清算後に更新。
 
+    近似の留保:
+    - 脚ごとの f_leg を単純加算する（Σf_leg）。同一レースの馬連・三連複は ◎を共有し結果が
+      相互排他/相関するため、真の同時 Kelly はこれより小さい。素朴加算は過大張り側に振れ、
+      λ=1 の破産規模を増幅しうる（＝「Kelly は危険」という棄却結論には保守的な向き）。
+    - 100円丸めで稀に Σstake>bank になる鞍は当該レースを張らず skip する（保守的な過小張り。
+      張り回数がわずかに減るだけで結論には影響しない）。
+
     返り値: (bankroll_series, per_race_ret 配列[(ret,stake)], n_bet)。
     bankroll_series[0]=b0、以後レース毎の清算後残高。
     """
@@ -205,6 +228,8 @@ def sim_bankroll(races, mode, b0, lam=0.5, kelly_cap=1.0, round_unit=100):
                 if s <= 0:
                     continue
                 stake += s
+                # s は 100 の倍数なので s·m = s·pay/100 = (s/100)·pay は厳密に整数。
+                # flat 側の `s·pay//100` と一致する（float 由来の 1 円ズレは生じない）。
                 ret += int(s * m)  # 実払戻（paymult 倍）
             if stake <= 0 or stake > bank:
                 series.append(bank)
@@ -218,7 +243,11 @@ def sim_bankroll(races, mode, b0, lam=0.5, kelly_cap=1.0, round_unit=100):
 
 
 def ruin_prob(races, mode, b0, lam, ruin_frac, n_boot, seed=42):
-    """レース順ブートストラップ並べ替えで残高が b0·ruin_frac 以下に到達する経路割合（近似破産確率）。"""
+    """レース順の順列並べ替え（permutation・非復元）で残高が b0·ruin_frac 以下に到達する経路割合。
+
+    固定 races を shuffle するだけなので「賭ける順序による経路リスク」の近似で、復元リサンプリング
+    （統計的ブートストラップ）ではない。母集団のサンプリング変動 CI ではなく、λ=1 が順序に依らず
+    破産する（破産率 100%）といった経路頑健性の判定に用いる。"""
     rng = random.Random(seed)
     ruin_level = b0 * ruin_frac
     hit = 0
@@ -258,7 +287,9 @@ def bankroll_table(races, b0, lambdas, ruin_frac, n_boot):
     report("現行(flat ¥3,500)", "flat", 0.0)
     for lam in lambdas:
         report(f"Kelly λ={lam:g}", "kelly", lam)
-    print(f"\n（破産%＝レース順{n_boot}本ブートストラップで残高≤開始×{ruin_frac:g}到達経路の割合）")
+    print(f"\n（最終資金/倍率/ROI/的中/σ/maxDD/最小残=実時系列1経路の実現値。"
+          f"破産%＝レース順{n_boot}本の順列リサンプル(permutation・非復元)で"
+          f"残高≤開始×{ruin_frac:g}到達経路の割合）")
     print()
 
 
@@ -268,11 +299,14 @@ def main():
     ap.add_argument("--b0", type=int, default=100000, help="bankroll 開始資金（円）")
     ap.add_argument("--lambdas", default="0.25,0.5,1.0", help="fractional Kelly 係数の掃引")
     ap.add_argument("--ruin-frac", type=float, default=0.2, help="破産判定の残高水準（開始比）")
-    ap.add_argument("--n-boot", type=int, default=2000, help="破産確率近似のブートストラップ本数")
+    ap.add_argument("--n-boot", type=int, default=2000,
+                    help="破産確率近似の順列リサンプル(permutation・非復元)本数")
     args = ap.parse_args()
 
-    races = load(args.bt_dir)
-    print(f"対象 {len(races)}R（baseline_pf ユニバース固定・配分方式のみ比較）\n")
+    races, skips = load(args.bt_dir)
+    print(f"対象 {len(races)}R（baseline_pf ユニバース固定・配分方式のみ比較。"
+          f"除外 {sum(skips.values())}: probs欠落 {skips['probs']} / "
+          f"exoticオッズ欠落 {skips['exotic']} / result欠落 {skips['result']}）\n")
     fixed_table(races)
     lambdas = [float(x) for x in args.lambdas.split(",")]
     bankroll_table(races, args.b0, lambdas, args.ruin_frac, args.n_boot)
