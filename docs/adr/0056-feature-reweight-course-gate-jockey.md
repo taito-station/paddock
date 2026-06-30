@@ -25,7 +25,7 @@ Phase A 診断（ADR 0055 の follow-up・PR #319・`docs/specifications/feature
 
 ## 検証（measure→implement→validate）
 
-**スイープ（Python ミラー・既存 dump 上・忠実性 1.1e-16 実証）**: `scripts/predict-check/weight_sweep.py`。`course_gate` を下げ `jockey_surface` を上げると純 AUC/top1 が単調改善。`course_gate=1.0, jockey_surface=2.0` が頑健（全6四半期で AUC/top1 改善）。`within-race z-score` prototype は悪化（採用せず）。
+**スイープ（Python ミラー・既存 dump 上・忠実性 1.7e-16 実証。1.1e-16 は実装後の新 dump 再確認値）**: `scripts/predict-check/weight_sweep.py`。`course_gate` を下げ `jockey_surface` を上げると純 AUC/top1 が単調改善。`course_gate=1.0, jockey_surface=2.0` が頑健（全6四半期で AUC/top1 改善）。`within-race z-score` prototype は悪化（採用せず）。
 
 **Rust 実装の二段ガード（実 backtest, 2025-01〜2026-06）**:
 
