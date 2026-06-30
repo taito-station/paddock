@@ -83,6 +83,23 @@ def test_raw_score_all_missing_returns_zero():
     assert d.raw_score(_row(), "win") == 0.0
 
 
+def test_race_probs_monotone_and_normalized():
+    # race_probs（win/place/show 合成）は win≤place≤show の単調性と win 合計≒1.0 を保つ。
+    rows = [
+        _row(course=(0.3, 0.4, 0.5, 10), surface=(0.6, 0.7, 0.8, 12)),
+        _row(course=(0.1, 0.2, 0.3, 8), surface=(0.2, 0.3, 0.4, 9)),
+        _row(surface=(0.5, 0.6, 0.7, 5), form=0.7),
+    ]
+    win_p, place_p, show_p = d.race_probs(rows)
+    assert abs(sum(win_p) - 1.0) < 1e-9, "win 合計 ≒ 1.0"
+    for i in range(len(rows)):
+        assert 0.0 <= win_p[i] <= place_p[i] <= show_p[i] <= 1.0, f"単調性/範囲: row {i}"
+    # drop で素性を外しても単調性は保たれる。
+    w2, p2, s2 = d.race_probs(rows, drop="course_gate")
+    for i in range(len(rows)):
+        assert w2[i] <= p2[i] <= s2[i]
+
+
 def test_pava_monotone_and_fits():
     # 非単調入力 [3,1,2] を単調化（PAVA で平均ブロック）。
     thr, fit = d.pava_fit([1.0, 2.0, 3.0], [3.0, 1.0, 2.0])

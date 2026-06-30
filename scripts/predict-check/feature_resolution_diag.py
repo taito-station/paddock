@@ -49,6 +49,8 @@ PRIOR = {"win": 1.0 / 14.0, "place": 2.0 / 14.0, "show": 3.0 / 14.0}
 SHRINKAGE_M = 10.0
 WIN_POWER = 1.25
 PLACE_SHOW_POWER = 2.0
+# γ=1.0 を厳密 no-op 扱いにする machine-eps（Rust estimate.rs の f64::EPSILON 判定の鏡映）。
+GAMMA_EPS = 2.2e-16
 
 COL = {
     "race_id": 0, "date": 1, "horse_num": 2,
@@ -102,7 +104,7 @@ def raw_score(row, sel, drop=None):
 
 
 def score_power(scores, gamma):
-    if gamma is None or not math.isfinite(gamma) or gamma <= 0.0 or abs(gamma - 1.0) < 2.2e-16:
+    if gamma is None or not math.isfinite(gamma) or gamma <= 0.0 or abs(gamma - 1.0) < GAMMA_EPS:
         return scores
     return [s ** gamma for s in scores]
 
@@ -116,7 +118,7 @@ def normalize_to_sum(scores, target):
 
 
 def win_power(win_probs, gamma):
-    if gamma is None or not math.isfinite(gamma) or gamma <= 0.0 or abs(gamma - 1.0) < 2.2e-16:
+    if gamma is None or not math.isfinite(gamma) or gamma <= 0.0 or abs(gamma - 1.0) < GAMMA_EPS:
         return list(win_probs)
     powered = [p ** gamma for p in win_probs]
     total = sum(powered)
@@ -293,10 +295,11 @@ def run(args):
 
     all_win, all_ywin, all_imp = [], [], []
     fid_max = 0.0
-    top1_model = top1_market = n_races = market_n = 0  # market_n: オッズ有(s>0)レースの分母（市場 top1 用）
+    top1_model = top1_market = n_races = 0
     spear_model, spear_market, auc_model_races = [], [], []
     raw_var, prob_var = [], []
     q_rows = defaultdict(list)  # quarter -> [(model_win, y_win, implied)]
+    gated_ids = set()  # 勝馬記録あり かつ オッズありのレース（(2)(3) も同一母数で測るため）
 
     for rid, rrows in races.items():
         win_p, _, _ = race_probs(rrows)
@@ -304,25 +307,25 @@ def run(args):
         y_win = [1 if p == 1 else 0 for p in fp]
         implied, s = _implied(rrows)
 
+        # 忠実性は鏡映の正しさ（outcome 非依存）なので全行で測る。
         for i, r in enumerate(rrows):
             fid_max = max(fid_max, abs(win_p[i] - float(r[COL["model_win"]])))
 
-        if any(y_win):
-            n_races += 1
-            if y_win[argmax(win_p)] == 1:
-                top1_model += 1
-            if s > 0:  # 市場 top1 はオッズ有レースのみを母数にする（model と分母を分離）
-                market_n += 1
-                if y_win[argmax(implied)] == 1:
-                    top1_market += 1
-                spear_market.append(spearman(implied, [-p for p in fp]))
-            spear_model.append(spearman(win_p, [-p for p in fp]))
-            auc_model_races.append(auc(win_p, y_win))
-
-        rw = [raw_score(r, "win") for r in rrows]
-        raw_var.append(pvar(rw))
+        # 以降の全指標は「勝馬記録あり かつ オッズあり」レースに母数を統一する（#272 レビュー）。
+        # 結果欠損レース（全馬 y=0）を負例として混ぜず、model と market を同一レース集合で比較する。
+        if not (any(y_win) and s > 0):
+            continue
+        gated_ids.add(rid)
+        n_races += 1
+        if y_win[argmax(win_p)] == 1:
+            top1_model += 1
+        if y_win[argmax(implied)] == 1:
+            top1_market += 1
+        spear_model.append(spearman(win_p, [-p for p in fp]))
+        spear_market.append(spearman(implied, [-p for p in fp]))
+        auc_model_races.append(auc(win_p, y_win))
+        raw_var.append(pvar([raw_score(r, "win") for r in rrows]))
         prob_var.append(pvar(win_p))
-
         for i, r in enumerate(rrows):
             all_win.append(win_p[i]); all_ywin.append(y_win[i]); all_imp.append(implied[i])
             q_rows[quarter(r[COL["date"]])].append((win_p[i], y_win[i], implied[i]))
@@ -341,9 +344,9 @@ def run(args):
               file=sys.stderr)
         return
 
-    print("## (1) resolution（純モデル vs 市場）")
+    print("## (1) resolution（純モデル vs 市場・勝馬記録ありかつオッズありのレースに統一）")
     print(f"  top1 的中率   model={top1_model/n_races:.3f}  "
-          f"market={top1_market/market_n:.3f}  (model n={n_races} / market n={market_n} レース)")
+          f"market={top1_market/n_races:.3f}  (n={n_races} レース)")
     print(f"  Spearman(race内, 確率 vs 着順)  model={nanmean(spear_model):.3f}  market={nanmean(spear_market):.3f}")
     print(f"  AUC(win, 全馬)  model={auc(all_win, all_ywin):.3f}  market={auc(all_imp, all_ywin):.3f}")
     print(f"  AUC(win, race内平均)  model={nanmean(auc_model_races):.3f}")
@@ -352,42 +355,43 @@ def run(args):
 
     print("## (1b) resolution の窓別安定性（四半期）")
     print(f"  {'四半期':8} {'races':>6} {'top1_model':>11} {'top1_market':>12} {'AUC_model':>10} {'AUC_market':>11}")
-    by_q = defaultdict(lambda: {"t1m": 0, "t1k": 0, "n": 0, "mn": 0, "w": [], "i": [], "y": []})
+    by_q = defaultdict(lambda: {"t1m": 0, "t1k": 0, "n": 0, "w": [], "i": [], "y": []})
     for rid, rrows in races.items():
         win_p, _, _ = race_probs(rrows)
         fp = [_fp(r) for r in rrows]
         y_win = [1 if p == 1 else 0 for p in fp]
-        if not any(y_win):
-            continue
         implied, s = _implied(rrows)
+        if not (any(y_win) and s > 0):  # (1) と同一母数（勝馬記録あり かつ オッズあり）
+            continue
         q = quarter(rrows[0][COL["date"]])
         b = by_q[q]
         b["n"] += 1
         if y_win[argmax(win_p)] == 1:
             b["t1m"] += 1
-        if s > 0:  # 市場 top1 の分母 mn はオッズ有レースのみ（(1) と同じ扱い）
-            b["mn"] += 1
-            if y_win[argmax(implied)] == 1:
-                b["t1k"] += 1
+        if y_win[argmax(implied)] == 1:
+            b["t1k"] += 1
         b["w"].extend(win_p); b["i"].extend(implied); b["y"].extend(y_win)
     for q in sorted(by_q):
         b = by_q[q]
-        t1k = b["t1k"] / b["mn"] if b["mn"] else float("nan")
-        print(f"  {q:8} {b['n']:>6} {b['t1m']/b['n']:>11.3f} {t1k:>12.3f} "
+        print(f"  {q:8} {b['n']:>6} {b['t1m']/b['n']:>11.3f} {b['t1k']/b['n']:>12.3f} "
               f"{auc(b['w'], b['y']):>10.3f} {auc(b['i'], b['y']):>11.3f}")
     print()
 
-    print("## (2) 素性別 識別力・欠落率")
+    # 欠落率は全ダンプ行（データ可用性）で測り、レース内分散・相関は (1) と同一母数（gated）で測る。
+    # corr は show レートと複勝（1<=着順<=3）の代理指標であり、win スコアそのものの識別力ではない点に注意。
+    print("## (2) 素性別 識別力・欠落率（分散/相関は勝馬+オッズありレース・corr は show率代理）")
     print(f"  {'factor':24} {'欠落率':>7} {'race内分散(平均)':>16} {'corr(show率,複勝)':>18}")
     n_tot = len(rows)
     for name, base, w in STAT_FACTORS:
-        miss, within_var, rates, ys = 0, [], [], []
+        miss = sum(1 for r in rows if _stat_cell(r, base) is None)  # 欠落率は全行
+        within_var, rates, ys = [], [], []
         for rid, rrows in races.items():
+            if rid not in gated_ids:
+                continue
             vals = []
             for r in rrows:
                 fs = _stat_cell(r, base)
                 if fs is None:
-                    miss += 1
                     continue
                 sh = shrink_rate(fs[2], fs[3], PRIOR["show"])
                 vals.append(sh); rates.append(sh)
@@ -409,12 +413,13 @@ def run(args):
     for name in drops:
         dw, dy, dtop1, dn = [], [], 0, 0
         for rid, rrows in races.items():
+            if rid not in gated_ids:  # baseline（all_win/all_ywin）と同一母数で比較する
+                continue
             wp, _, _ = race_probs(rrows, drop=name)
             yw = [1 if _fp(r) == 1 else 0 for r in rrows]
-            if any(yw):
-                dn += 1
-                if yw[argmax(wp)] == 1:
-                    dtop1 += 1
+            dn += 1
+            if yw[argmax(wp)] == 1:
+                dtop1 += 1
             dw.extend(wp); dy.extend(yw)
         print(f"  -{name:22} ΔBrier={brier(dw,dy)-base_brier:+.4f}  "
               f"ΔLogLoss={logloss(dw,dy)-base_ll:+.4f}  Δtop1={dtop1/dn-base_top1:+.3f}")
