@@ -61,8 +61,10 @@ def kelly_fraction(p, gross_odds, cap=1.0):
 def race_legs(probs, quin_odds, trio_odds, pay):
     """baseline_pf ユニバース（馬連◎軸 top5 + 三連複◎軸 top5）の脚を返す。
 
-    各脚 = (種別, combo, prob 的中確率, gross_odds DB盤面, paymult 実払戻倍率)。
-    paymult = result.html 配当（¥100 当たり円）/100 = 賭金 1 円当たりの総払戻。
+    各脚 = (種別, combo, prob 的中確率, gross_odds DB盤面, pay_raw 実配当)。
+    pay_raw = result.html の確定配当（¥100 当たり円・整数）。清算は flat と同じ整数演算
+    `s * pay_raw // 100`（s は 100 の倍数）。pay/100.0 を先に float 化すると割り切れない配当
+    （例 230→2.3 は float 非正確）で int() が 1 円下振れするため、生の整数で持つ。
     DB 盤面オッズ欠落の脚は Kelly では除外（edge 不明な脚は張らない）。
     """
     ranked = sorted(probs, key=lambda n: -probs[n])
@@ -76,13 +78,13 @@ def race_legs(probs, quin_odds, trio_odds, pay):
         o = quin_odds.get(c, 0.0)
         if o > 0:
             legs.append(("umaren", c, ub.p_top2_set(probs, A, p), o,
-                         pay["umaren"].get(c, 0) / 100.0))
+                         pay["umaren"].get(c, 0)))
     for a, b in combinations(partners, 2):
         c = frozenset({A, a, b})
         o = trio_odds.get(c, 0.0)
         if o > 0:
             legs.append(("trio", c, ub.p_top3_set(probs, (A, a, b)), o,
-                         pay["trio"].get(c, 0) / 100.0))
+                         pay["trio"].get(c, 0)))
     return legs
 
 
@@ -212,25 +214,23 @@ def sim_bankroll(races, mode, b0, lam=0.5, kelly_cap=1.0, round_unit=100):
                 continue
         else:  # kelly
             legs = race_legs(probs, quin, trio, pay)
-            sized = [(c, kelly_fraction(p, o, kelly_cap), m) for _typ, c, p, o, m in legs]
-            sized = [(c, f, m) for c, f, m in sized if f > 0]
+            sized = [(c, kelly_fraction(p, o, kelly_cap), pr) for _typ, c, p, o, pr in legs]
+            sized = [(c, f, pr) for c, f, pr in sized if f > 0]
             if not sized:
                 series.append(bank)
                 continue
-            total_frac = min(1.0, lam * sum(f for _c, f, _m in sized))
+            fsum = sum(f for _c, f, _pr in sized)
+            total_frac = min(1.0, lam * fsum)
             wager = total_frac * bank
-            fsum = sum(f for _c, f, _m in sized)
             stake = 0
             ret = 0
-            for _c, f, m in sized:
+            for _c, f, pr in sized:
                 s = wager * f / fsum
                 s = int(round(s / round_unit)) * round_unit  # 100円単位
                 if s <= 0:
                     continue
                 stake += s
-                # s は 100 の倍数なので s·m = s·pay/100 = (s/100)·pay は厳密に整数。
-                # flat 側の `s·pay//100` と一致する（float 由来の 1 円ズレは生じない）。
-                ret += int(s * m)  # 実払戻（paymult 倍）
+                ret += s * pr // 100  # 実払戻（flat と同一の整数演算）
             if stake <= 0 or stake > bank:
                 series.append(bank)
                 continue
@@ -242,7 +242,7 @@ def sim_bankroll(races, mode, b0, lam=0.5, kelly_cap=1.0, round_unit=100):
     return series, rows, len(rows)
 
 
-def ruin_prob(races, mode, b0, lam, ruin_frac, n_boot, seed=42):
+def ruin_prob(races, mode, b0, lam, ruin_frac, n_perm, seed=42):
     """レース順の順列並べ替え（permutation・非復元）で残高が b0·ruin_frac 以下に到達する経路割合。
 
     固定 races を shuffle するだけなので「賭ける順序による経路リスク」の近似で、復元リサンプリング
@@ -251,16 +251,16 @@ def ruin_prob(races, mode, b0, lam, ruin_frac, n_boot, seed=42):
     rng = random.Random(seed)
     ruin_level = b0 * ruin_frac
     hit = 0
-    for _ in range(n_boot):
+    for _ in range(n_perm):
         order = races[:]
         rng.shuffle(order)
         series, _rows, _n = sim_bankroll(order, mode, b0, lam=lam)
         if min(series) <= ruin_level:
             hit += 1
-    return hit / n_boot if n_boot else float("nan")
+    return hit / n_perm if n_perm else float("nan")
 
 
-def bankroll_table(races, b0, lambdas, ruin_frac, n_boot):
+def bankroll_table(races, b0, lambdas, ruin_frac, n_perm):
     print(f"=== (B) bankroll 土俵: 開始¥{b0:,}・{len(races)}R 時系列・実払戻清算 ===")
     print(f"{'strategy':<20} {'最終資金':>10} {'倍率':>6} {'実ROI':>7} {'的中':>5} "
           f"{'σ%':>6} {'maxDD%':>7} {'最小残':>9} {'破産%':>6}")
@@ -280,7 +280,7 @@ def bankroll_table(races, b0, lambdas, ruin_frac, n_boot):
         for v in series:
             peak = max(peak, v)
             dd = max(dd, (peak - v) / peak * 100 if peak > 0 else 0.0)
-        rp = ruin_prob(races, mode, b0, lam, ruin_frac, n_boot) * 100
+        rp = ruin_prob(races, mode, b0, lam, ruin_frac, n_perm) * 100
         print(f"{ub.pad_disp(label, 20)} {final:>10,.0f} {mult:>5.2f}x {roi:>6.1f}% {hit:>4.0f}% "
               f"{sd:>6.1f} {dd:>6.1f}% {min(series):>9,.0f} {rp:>5.1f}%")
 
@@ -288,7 +288,7 @@ def bankroll_table(races, b0, lambdas, ruin_frac, n_boot):
     for lam in lambdas:
         report(f"Kelly λ={lam:g}", "kelly", lam)
     print(f"\n（最終資金/倍率/ROI/的中/σ/maxDD/最小残=実時系列1経路の実現値。"
-          f"破産%＝レース順{n_boot}本の順列リサンプル(permutation・非復元)で"
+          f"破産%＝レース順{n_perm}本の順列リサンプル(permutation・非復元)で"
           f"残高≤開始×{ruin_frac:g}到達経路の割合）")
     print()
 
@@ -299,7 +299,7 @@ def main():
     ap.add_argument("--b0", type=int, default=100000, help="bankroll 開始資金（円）")
     ap.add_argument("--lambdas", default="0.25,0.5,1.0", help="fractional Kelly 係数の掃引")
     ap.add_argument("--ruin-frac", type=float, default=0.2, help="破産判定の残高水準（開始比）")
-    ap.add_argument("--n-boot", type=int, default=2000,
+    ap.add_argument("--n-perm", type=int, default=2000,
                     help="破産確率近似の順列リサンプル(permutation・非復元)本数")
     args = ap.parse_args()
 
@@ -309,7 +309,7 @@ def main():
           f"exoticオッズ欠落 {skips['exotic']} / result欠落 {skips['result']}）\n")
     fixed_table(races)
     lambdas = [float(x) for x in args.lambdas.split(",")]
-    bankroll_table(races, args.b0, lambdas, args.ruin_frac, args.n_boot)
+    bankroll_table(races, args.b0, lambdas, args.ruin_frac, args.n_perm)
 
 
 if __name__ == "__main__":

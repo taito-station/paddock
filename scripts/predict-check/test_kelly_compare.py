@@ -87,6 +87,26 @@ def test_sim_bankroll_kelly_wins_increase_bankroll():
     assert series[-1] == 100000 + ret - stake
 
 
+def test_sim_bankroll_kelly_settlement_is_integer_exact():
+    # 割り切れない配当（pay=230=2.3倍）でも kelly 清算が flat と同じ整数演算 s*pay//100 になり、
+    # float 由来の 1 円下振れ（int(s*2.3)=229 等）を起こさないことを検証（2巡目 R-1 回帰）。
+    probs = {1: 50.0, 2: 25.0, 3: 15.0, 4: 10.0}
+    A = 1
+    quin = {frozenset({A, p}): 6.0 for p in (2, 3, 4)}
+    trio = {frozenset({A, a, b}): 40.0 for a, b in combinations((2, 3, 4), 2)}
+    pay = {"umaren": {frozenset({1, 2}): 230}, "trio": {}, "wide": {}, "exacta": {}}
+    _series, rows, n = kc.sim_bankroll([(probs, quin, trio, pay)], "kelly", 100000, lam=1.0)
+    assert n == 1
+    ret, stake = rows[0]
+    assert ret > 0
+    # pay_raw は整数で保持され、清算は整数演算（float int(s*2.3) の 1 円下振れを避ける）。
+    legs = kc.race_legs(probs, quin, trio, pay)
+    assert all(isinstance(pr, int) for *_x, pr in legs)
+    # 馬連1-2のみ的中。張った額 s は ret=s*230//100 を満たす（=ret*100 が 230 で割り切れる）。
+    # float 版 int(s*2.3) なら s=100 で 229 となり ret*100=22900 は 230 で割り切れない。
+    assert (ret * 100) % 230 == 0
+
+
 def test_ruin_prob_full_kelly_is_deterministic_and_high():
     # 確率較正不良を模した負け続けのレース列で full Kelly(λ=1) の破産率が高い。
     # seed 固定で決定的（回帰テスト）。全レース外れ → bankroll は単調減少。
