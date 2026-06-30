@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """#272 改善① 素性重みスイープ: 純モデルの resolution を上げる重み構成を探す。
 
-`feature_resolution_diag.py` の鏡映（raw_score→shrinkage→score_power→normalize→win_power・忠実性
-1.7e-16 実証済）を import し、`analyze backtest --dump-features` の TSV 上で **重みだけ**を振って
-純モデルの resolution（AUC/top1）と calibration（Brier/LogLoss）を測る。Rust 変更・再 backtest 不要。
+`feature_resolution_diag.py` の鏡映（raw_score→shrinkage→score_power→normalize→win_power・忠実性は
+Rust `model_win` 列と一致, 旧 dump で 1.7e-16）を import し、`analyze backtest --dump-features` の TSV 上で
+**重みだけ**を振って純モデルの resolution（AUC/top1）と calibration（Brier/LogLoss）を測る。Rust 変更・再 backtest 不要。
+selection は screening 用途で、最終採用は実 backtest（pure resolution 改善＋blended 非回帰）で確定する
+（pool AUC はレース間難易度差を混ぜるため、top1 も併記して判断する）。
 
 診断（feature-resolution-diagnosis.md）の所見:
   - 最大重み 2.0 の course_gate が識別力ゼロ（レース内分散最小・複勝相関≒0）で希釈源。
@@ -144,10 +146,13 @@ def run(args):
     # 3. 代表的な合成案
     print("## (3) 合成案")
     candidates = {
+        "cg=1.0 jk=2.0 (採用/ADR0056)": {"course_gate": 1.0, "jockey_surface": 2.0},
         "cg=0 jk=2 tr=1.5": {"course_gate": 0.0, "jockey_surface": 2.0, "trainer_surface": 1.5},
         "cg=0.5 jk=1.5 tr=1.5": {"course_gate": 0.5, "jockey_surface": 1.5, "trainer_surface": 1.5},
         "cg=0 (drop) only": {"course_gate": 0.0},
         "all-equal-1.0": {n: 1.0 for n, *_ in d.STAT_FACTORS},
+        # 旧重み（before baseline 再現用・ADR 0056 の 0.649/0.162 に対応）。
+        "old (cg=2.0 jk=1.0)": {"course_gate": 2.0, "jockey_surface": 1.0},
     }
     best = (base, "baseline", None)
     for label, w in candidates.items():

@@ -110,7 +110,7 @@ raw_score =
 > `--track-condition`）。
 > 注5: `trainer_surface` は調教師の芝ダ別成績（#74）。調教師名は出馬表 `HorseEntry` に無いため、
 > predict は **netkeiba 出馬表**から取った `entry.trainer`、backtest は `results.trainer`（当該レース
-> 確定値）を使う。調教師なし／該当 surface 実績なしの馬は `None`。重み 1.0 は jockey と同値（ADR 0012）。
+> 確定値）を使う。調教師なし／該当 surface 実績なしの馬は `None`。重み 1.0（ADR 0012。旧くは jockey と同値だったが #272 改善①/ADR 0056 で jockey のみ 2.0 へ）。
 > **現状の制約**: 統計母数 `results.trainer`（および netkeiba 過去走）が未充足のため、本項は実データ上
 > まだ発火しない。母数充足（結果 PDF / netkeiba 過去走の trainer 抽出）は別 Issue。出馬表 PDF パーサの
 > trainer 抽出も別 Issue（PDF 経路は当面 `trainer=None`）。

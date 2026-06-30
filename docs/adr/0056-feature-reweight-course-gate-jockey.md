@@ -68,7 +68,9 @@ Phase A 診断（ADR 0055 の follow-up・PR #319・`docs/specifications/feature
   --blend-alpha 1.0 --shrinkage-m 10 --win-power 1.25 --place-show-power 2.0 \
   --dump-features /tmp/pa/pure_new.tsv
 python3 scripts/predict-check/feature_resolution_diag.py --tsv /tmp/pa/pure_new.tsv   # AUC/top1 と忠実性
-python3 scripts/predict-check/weight_sweep.py --tsv /tmp/pa/pure.tsv                  # スイープ（旧 dump で重み探索）
+python3 scripts/predict-check/weight_sweep.py --tsv /tmp/pa/pure.tsv                  # 重みスイープ（旧 dump 上）
+# マージ後は weights=None の baseline が新重みを指すため、before(0.649/0.162) は candidates の
+# "old (cg=2.0 jk=1.0)" 行、after(0.671/0.182) は "cg=1.0 jk=2.0 (採用)" 行で対比できる。
 # blended 非回帰（新旧重みの binary で）
 ./target/release/paddock-analyze backtest --from 2025-01-01 --to 2026-06-30 \
   --blend-alpha 0.2 --shrinkage-m 10 --win-power 1.25 --place-show-power 2.0
