@@ -144,6 +144,26 @@ python3 scripts/predict-check/snapshot_ev_report.py --snapshots-tsv snaps.tsv --
 | `snapshot_ev_report.py` | `race_odds_snapshots` を後追い集計し開催日×レースの ever/final +EV と年間発生率を出す（#248） |
 | `snapshot_coverage.py` | snapshot 取りこぼし検知（最終 snapshot が発走の何分前か→gap/none を可視化, #264） |
 
+## 校正計測はリーク無しの `analyze backtest` を使う（#302）
+
+win/place/show の reliability（予測確率帯ごとの予測 vs 実測）・複勝圏過小評価診断・複勝順位分布は、
+本体 `paddock-analyze backtest`（**as-of 統計＝リーク無し**）が出力する。純モデル校正なら
+`--blend-alpha 1.0`、現行なら `0.2` を指定する。
+
+```sh
+paddock-analyze backtest --from <YYYY-MM-DD> --to <YYYY-MM-DD> --blend-alpha 1.0
+```
+
+> かつて `gen_pure_preds.py` / `calibration.py` が同等の校正を測っていたが、これらは
+> `analyze predict`（集計統計が `as_of=None`＝未来込み）経由で過去レースを再予想しており
+> **リークしていた**（過去レース校正で純モデルが非現実的に良く出る）。リーク無しの同等機能は
+> backtest が提供するため **#302 で退役**した。ECE スカラーが要る場合は reliability 帯の
+> `Σ (件数/総数)·|実測率−平均予測|` で算出する。
+>
+> なお退役ツールにあった一部の細かい診断（モデル幅＝フラットさ分布・市場 implied 対照の reliability・
+> 大穴過大評価＝モデル win≥5%×市場20倍以上）は backtest に直接の代替が無いが、いずれもリークした純予測上の
+> 値で無効だったため復元しない（必要なら backtest の reliability 帯・人気帯セグメントで近い観察ができる）。
+
 ## 注意
 
 - 予想の主信号は**確率テーブル**。predict の推奨買い目は全正 EV 組合せを大量列挙する設計で
