@@ -53,39 +53,6 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: 
             .await
     }
 
-    /// `predict_race` に加え、各馬の予想根拠（条件別成績・前走サマリ, #274）も返す。
-    /// 確率（出走馬順）と根拠（同じ出走馬順）を並行 Vec で返す。要素 i 同士が同一馬を指す
-    /// （`collect_race_factors` と `estimate_*` が共に `card.entries` 順を保つ。`debug_assert` で検査）。
-    /// 市場ブレンド・冪変換は `predict_race` と同一経路なので確率値は完全一致する（根拠は probs に
-    /// 依らず factor の生レートから作るため、ブレンド有無で根拠は変わらない）。
-    pub async fn predict_race_explained(
-        &self,
-        race_id: &RaceId,
-        blend_alpha: Option<f64>,
-        track_condition: Option<TrackCondition>,
-    ) -> Result<(Vec<HorseProbability>, Vec<HorseExplanation>)> {
-        let config = EstimationConfig::production();
-        let (entry_factors, explanations) = self
-            .collect_race_factors(race_id, track_condition, true, &config)
-            .await?;
-        let probs = self
-            .estimate_and_blend(&entry_factors, race_id, blend_alpha, &config)
-            .await?;
-        debug_assert_eq!(
-            probs.len(),
-            explanations.len(),
-            "probs と explanations の頭数が一致しない"
-        );
-        debug_assert!(
-            probs
-                .iter()
-                .zip(&explanations)
-                .all(|(p, e)| p.horse_num == e.horse_num),
-            "probs/explanations の馬番がズレている"
-        );
-        Ok((probs, explanations))
-    }
-
     /// 過去データ視点（純モデル α=1.0）と市場ブレンド視点（α=`blend_alpha`）の両確率を、factor 収集
     /// 1 回・市場オッズ 1 回 fetch で返す（#272 確率分離）。順位付けには `blended`（解像度が高い）、
     /// EV 計算には `pure`（市場と独立＝循環断ち）を使う想定で、呼び出し側が `build_portfolio` に
@@ -116,6 +83,17 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: 
             pure.len(),
             "blended と pure の頭数が一致しない"
         );
+        // with_explanation=true のとき根拠は確率と同じ盤面順・同頭数で揃う（collect_race_factors と
+        // estimate_* が card.entries 順を保つ）。false のとき explanations は空。
+        debug_assert!(
+            !with_explanation
+                || (explanations.len() == pure.len()
+                    && explanations
+                        .iter()
+                        .zip(&pure)
+                        .all(|(e, p)| e.horse_num == p.horse_num)),
+            "explanations が pure と頭数/馬番でズレている"
+        );
         Ok(PredictionViews {
             blended,
             pure,
@@ -124,7 +102,7 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: 
     }
 
     /// 出馬表の取得と各馬の factor / 予想根拠の構築までを共通化する内部ヘルパ（#274）。
-    /// `predict_race`（確率のみ）と `predict_race_explained`（確率＋根拠）が共有し、DB の二重取得を
+    /// `predict_race`（確率のみ）と `predict_race_views`（確率＋根拠）が共有し、DB の二重取得を
     /// 避ける。返す `entry_factors` と `explanations` は同じ出走馬順で揃う。
     /// `with_explanation=false` のとき `explanations` は空 Vec を返す（通常経路で根拠を組まず
     /// 無駄な String 割当てを避ける。`predict_race` は確率しか使わないため）。
@@ -255,8 +233,8 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: 
     }
 
     /// 構築済みの `entry_factors` から確率を推定し、市場オッズブレンド・冪変換まで適用する（#72/#246）。
-    /// `predict_race` と `predict_race_explained` が共有する。`config` は呼び出し側が生成し
-    /// `collect_race_factors` と同じ設定を渡す（単一情報源, #274 レビュー）。
+    /// `predict_race` と `predict_race_views` が共有する（後者は α を変えて 2 回呼び blended/pure を得る）。
+    /// `config` は呼び出し側が生成し `collect_race_factors` と同じ設定を渡す（単一情報源, #274 レビュー）。
     async fn estimate_and_blend(
         &self,
         entry_factors: &[(HorseEntry, HorseFactors)],
@@ -463,7 +441,7 @@ pub(crate) fn build_factors(
 ///
 /// **build_factors との同期が前提**: ラベル選択（`*_label`）と `stat_to_triple_opt` の組は
 /// `build_factors` と揃えて「根拠の数値＝score の入力」を保つ。factor を増やす際は両方を更新する。
-/// 確率自体は `predict_race` と `predict_race_explained` が同一の `collect_race_factors`＋
+/// 確率自体は `predict_race` と `predict_race_views` が同一の `collect_race_factors`＋
 /// `estimate_and_blend` を通るため構造的に一致する（`with_explanation` フラグは根拠生成の有無だけを
 /// 切り替え、`entry_factors` には影響しない）。
 /// 既知の乖離点: `config.recency = Some(..)` を有効化すると build_factors は時間減衰レート・本関数は

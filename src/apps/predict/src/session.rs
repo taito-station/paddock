@@ -511,6 +511,8 @@ fn print_totals(session: &PredictSessionRecord) {
 /// オッズ未取得のセルは `—`。軸は `pair_ev_diagnostics` が決めた canonical な値を受け取り再計算しない。
 fn print_pair_ev_diagnostics(
     axis: Option<HorseNum>,
+    // `probs` は馬名の引き当てにのみ使う（勝率は表示しない）。EV は rows 側（純モデル由来）が持つため、
+    // ここに blended/pure どちらを渡しても表示は変わらない（馬名は両系統で同一）。
     probs: &[HorseProbability],
     rows: &[PairEvDiagnostic],
 ) {

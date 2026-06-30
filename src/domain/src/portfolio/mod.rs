@@ -186,6 +186,11 @@ pub fn pair_ev_diagnostics(
 /// ワイドは軸-相手の K 点、三連複は軸 1 頭ながし formation（軸＋相手 2 頭, C(K,2) 点）。`config.alloc` の重み
 /// `(連系ペア, ワイド, 三連複)` で券種へ予算を配分し、券種内は 100 円単位で均等配分する
 /// （賄えない端数は買わない）。
+///
+/// 確率は 2 系統（#272 循環断ち）: `rank_probs`（市場ブレンド・軸/相手の順位付け）と `ev_probs`
+/// （純モデル・EV/的中の評価）。**両者は同一馬集合でなければならない**（`debug_assert` で検査）。
+/// `ev_probs` に順位付け対象の馬が欠けると、その脚の `win` 引きが None になり EV/的中が過小算出される。
+/// 現呼び出し側は同一 `entry_factors` 由来の blended/pure を渡すため常に満たす。
 pub fn build_portfolio(
     rank_probs: &[HorseProbability],
     ev_probs: &[HorseProbability],
