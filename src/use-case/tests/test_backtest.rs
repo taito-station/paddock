@@ -972,4 +972,18 @@ async fn backtest_dump_features_collects_starters_with_labels_and_market_odds() 
     // 騎手・調教師を持たない fixture なので欠落 factor が None で運ばれる（母数除外項の正例）。
     assert!(b.factors.trainer_surface.is_none());
     assert!(b.factors.jockey_surface.is_none());
+
+    // 内蔵モデル予測（#309）が全馬に付き [0,1] に収まること。高スタッツの ウマA は低スタッツの
+    // ウマB より単勝確率が高い（probs が忠実に運ばれている証跡）。
+    for r in &rows {
+        for p in [r.model_win, r.model_place, r.model_show] {
+            assert!((0.0..=1.0).contains(&p), "確率が [0,1] 外: {p}");
+        }
+    }
+    assert!(
+        a.model_win > b.model_win,
+        "高スタッツ ウマA の単勝確率が ウマB 以下 (a={}, b={})",
+        a.model_win,
+        b.model_win
+    );
 }
