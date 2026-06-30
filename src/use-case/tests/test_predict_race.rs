@@ -548,6 +548,61 @@ async fn predict_race_blends_market_odds_when_alpha_given() {
 }
 
 #[tokio::test]
+async fn predict_race_views_separates_blended_and_pure() {
+    // #272 確率分離: blended は市場ブレンド（α<1.0）、pure は α=1.0（市場非依存）。市場で ウマB を
+    // 圧倒的人気にすると blended の ウマB win は pure より上がる（pure は市場で動かない）。
+    let race_id_str = "2026-1-tokyo-1-R1";
+    let card = make_race_card(race_id_str);
+    let mut odds = paddock_domain::RaceOdds::empty(RaceId::try_from(race_id_str).unwrap());
+    odds.win.insert(
+        HorseNum::try_from(1u32).unwrap(),
+        paddock_domain::OddsValue::try_from(8.0).unwrap(), // ウマA: 人気薄
+    );
+    odds.win.insert(
+        HorseNum::try_from(2u32).unwrap(),
+        paddock_domain::OddsValue::try_from(1.3).unwrap(), // ウマB: 圧倒的人気
+    );
+    let rid = RaceId::try_from(race_id_str).unwrap();
+
+    let views = interactor_with_odds(Some(card), odds)
+        .predict_race_views(&rid, Some(0.3), None, true)
+        .await
+        .unwrap();
+
+    // 市場で人気の ウマB は blended でのみ持ち上がり、pure（市場非依存）は据え置き。
+    assert!(
+        win_of(&views.blended, "ウマB") > win_of(&views.pure, "ウマB"),
+        "市場ブレンドは blended のみに効く: blend={}, pure={}",
+        win_of(&views.blended, "ウマB"),
+        win_of(&views.pure, "ウマB")
+    );
+    // pure は α=1.0 で win 合計 ≒ 1.0・単調性を維持。
+    let pure_total: f64 = views.pure.iter().map(|p| p.win_prob).sum();
+    assert!((pure_total - 1.0).abs() < 1e-9, "pure win sum={pure_total}");
+    // with_explanation=true → 根拠が全馬ぶん返る（pure と同頭数）。
+    assert_eq!(views.explanations.len(), views.pure.len());
+}
+
+#[tokio::test]
+async fn predict_race_views_omits_explanations_when_flag_false() {
+    // with_explanation=false なら根拠は組まない（空 Vec）。確率は両系統とも返る。
+    let race_id_str = "2026-1-tokyo-1-R1";
+    let card = make_race_card(race_id_str);
+    let app = interactor(Some(card)); // odds None でも pure/blended は出る（odds 無ければブレンド素通り）
+    let rid = RaceId::try_from(race_id_str).unwrap();
+    let views = app
+        .predict_race_views(&rid, Some(0.2), None, false)
+        .await
+        .unwrap();
+    assert!(
+        views.explanations.is_empty(),
+        "with_explanation=false なら根拠は空"
+    );
+    assert_eq!(views.blended.len(), 2);
+    assert_eq!(views.pure.len(), 2);
+}
+
+#[tokio::test]
 async fn predict_race_trainer_lifts_horse_with_strong_record() {
     // ウマB だけ調教師（出馬表由来の entry.trainer）に芝の好成績を持たせる。trainer 統計が
     // 無い場合（実績なし）と比べて ウマB の win_prob が上がり、ウマA は相対的に下がる（#74）。

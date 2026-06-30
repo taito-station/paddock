@@ -7,8 +7,8 @@ use paddock_domain::{
     RECOMMENDED_MARKET_BLEND_ALPHA, Race, RaceId, TrackCondition, build_portfolio,
     pair_ev_diagnostics,
 };
-use paddock_use_case::{PredictBetRecord, PredictSessionRecord};
-use predict_format::{format_explanations, format_probs, surface_jp};
+use paddock_use_case::{PredictBetRecord, PredictSessionRecord, PredictionViews};
+use predict_format::{format_explanations, format_probs, format_probs_with_market, surface_jp};
 
 use crate::setup::App;
 
@@ -155,49 +155,46 @@ async fn run_race(
     // 保存成功後に直前入力を更新する（保存失敗時は `?` で中断し、更新しない）。
     *last_input = track_condition;
 
-    // --explain 時は根拠付き API を使う（確率値は predict_race と同一経路で完全一致, #274）。
-    // 両経路を Result<(probs, 根拠 option)> に揃え、エラー処理（NotFound→スキップ / その他→伝播）を一本化する。
-    let predicted = if explain {
-        app.interactor
-            .predict_race_explained(
-                &race.race_id,
-                RECOMMENDED_MARKET_BLEND_ALPHA,
-                track_condition,
-            )
-            .await
-            .map(|(probs, expls)| (probs, Some(expls)))
-    } else {
-        app.interactor
-            .predict_race(
-                &race.race_id,
-                RECOMMENDED_MARKET_BLEND_ALPHA,
-                track_condition,
-            )
-            .await
-            .map(|probs| (probs, None))
-    };
-    // 出馬表未登録（NotFound）はそのレースのみスキップ。DB 障害等は継続不能なため伝播して中断する。
-    let (probs, explanations) = match predicted {
+    // 確率は 2 視点で取る（#272 確率分離）。順位付け（軸/相手）は blended（市場ブレンド・解像度が
+    // 高い）、EV は pure（純モデル α=1.0・市場非依存）で計算し EV=P_blended×odds の循環を断つ。
+    // --explain 時は根拠も返す（with_explanation）。
+    let views = match app
+        .interactor
+        .predict_race_views(
+            &race.race_id,
+            RECOMMENDED_MARKET_BLEND_ALPHA,
+            track_condition,
+            explain,
+        )
+        .await
+    {
         Ok(v) => v,
+        // 出馬表未登録（NotFound）はそのレースのみスキップ。DB 障害等は継続不能なため伝播して中断する。
         Err(paddock_use_case::Error::NotFound(msg)) => {
             println!("出馬表が見つかりません（{msg}）。スキップします。");
             return Ok(());
         }
         Err(e) => return Err(e.into()),
     };
+    let PredictionViews {
+        blended,
+        pure,
+        explanations,
+    } = views;
 
+    // 過去データ視点（#272 ④）: 純モデルの順位＋根拠。市場に依らない「公開データだけの読み」。
     println!();
-    for line in format_probs(&probs) {
+    println!("【過去データ視点（純モデル）】");
+    for line in format_probs(&pure) {
         println!("{line}");
     }
-    if let Some(explanations) = &explanations {
-        for line in format_explanations(&probs, explanations) {
+    if explain {
+        for line in format_explanations(&pure, &explanations) {
             println!("{line}");
         }
     }
 
-    // オッズ未取得（None）はスキップのみ受付（select_bets は呼ばない）。
-    // OddsInteractor が都度ライブスクレイプし、取得失敗・未公開は None に畳む。
+    // オッズ未取得（None）はスキップのみ受付。OddsInteractor が都度ライブスクレイプし、未公開は None に畳む。
     let Some(odds) = app.odds.race_odds(&race.race_id).await? else {
         println!();
         println!("オッズ未取得 — このレースはスキップします");
@@ -205,14 +202,29 @@ async fn run_race(
         return Ok(());
     };
 
-    // 軸流しポートフォリオ（馬連＋ワイド＋三連複）を予算内・100 円単位で生成する。
-    // 上限は per-race 予算と残高の小さい方。配分・相手頭数は PortfolioConfig 既定（#122）。
+    // 市場 implied との比較（過去データ視点に市場列を添える）。差＝純勝率−市場implied で割安/割高を読む。
+    let market_win: HashMap<HorseNum, f64> =
+        odds.win.iter().map(|(num, o)| (*num, o.value())).collect();
+    println!();
+    println!("【純モデル vs 市場implied】");
+    for line in format_probs_with_market(&pure, &market_win) {
+        println!("{line}");
+    }
+
+    // 軸流しポートフォリオ（馬連＋ワイド＋三連複）を予算内・100 円単位で生成する。軸/相手は blended、
+    // EV/的中は pure（循環断ち, #272）。上限は per-race 予算と残高の小さい方。配分・相手頭数は既定（#122）。
     let race_cap = race_budget.min(session.balance);
-    let portfolio = build_portfolio(&probs, &odds, race_cap, &PortfolioConfig::default());
+    let portfolio = build_portfolio(
+        &blended,
+        &pure,
+        &odds,
+        race_cap,
+        &PortfolioConfig::default(),
+    );
     let suggested: Vec<u64> = portfolio.bets.iter().map(|b| b.stake).collect();
 
     println!();
-    println!("【買い目推奨（軸流し, 予算¥{race_cap}/R）】");
+    println!("【市場EV視点：買い目推奨（軸流し, 予算¥{race_cap}/R・EV=純モデル×odds）】");
     match portfolio.axis {
         Some(axis) => {
             let partners = portfolio
@@ -255,7 +267,7 @@ async fn run_race(
             String::new()
         };
         println!(
-            "  ポートフォリオ期待回収率 {:.1}% / 的中率 {:.1}% / 賭け計 ¥{}{}",
+            "  ポートフォリオ期待回収率 {:.1}% / 的中率 {:.1}% / 賭け計 ¥{}（モデル単独視点）{}",
             ev.roi * 100.0,
             ev.hit_prob * 100.0,
             portfolio.total_stake,
@@ -265,8 +277,8 @@ async fn run_race(
 
     // 馬連 vs 馬単(両方向) EV 診断（#246-C）。「穴は1着にならない」読みのとき本命→穴の馬単が
     // 同ペアの馬連より EV 優位になりうる。買い目選択の判断材料として並べて表示する。
-    let diag = pair_ev_diagnostics(&probs, &odds, PortfolioConfig::default().partners);
-    print_pair_ev_diagnostics(diag.axis, &probs, &diag.rows);
+    let diag = pair_ev_diagnostics(&blended, &pure, &odds, PortfolioConfig::default().partners);
+    print_pair_ev_diagnostics(diag.axis, &blended, &diag.rows);
 
     println!();
     let bet_amounts: Vec<u64> = match read_choice(&mut io::stdin().lock())? {
@@ -499,6 +511,8 @@ fn print_totals(session: &PredictSessionRecord) {
 /// オッズ未取得のセルは `—`。軸は `pair_ev_diagnostics` が決めた canonical な値を受け取り再計算しない。
 fn print_pair_ev_diagnostics(
     axis: Option<HorseNum>,
+    // `probs` は馬名の引き当てにのみ使う（勝率は表示しない）。EV は rows 側（純モデル由来）が持つため、
+    // ここに blended/pure どちらを渡しても表示は変わらない（馬名は両系統で同一）。
     probs: &[HorseProbability],
     rows: &[PairEvDiagnostic],
 ) {

@@ -72,6 +72,16 @@ fn combo_odds(odds: &RaceOdds, combination: &BetCombination) -> Option<f64> {
     }
 }
 
+/// `rank_probs` と `ev_probs` が同一馬集合かを検査する（`build_portfolio`/`pair_ev_diagnostics` の
+/// `debug_assert` 用, #272）。順位付け（rank）と EV 評価（ev）で別系統の確率を渡すため、両者が同じ
+/// レースの同じ出走馬を指すことを保証する。順序は問わず馬番の集合一致だけを見る。
+fn same_field(rank_probs: &[HorseProbability], ev_probs: &[HorseProbability]) -> bool {
+    use std::collections::HashSet;
+    let r: HashSet<HorseNum> = rank_probs.iter().map(|p| p.horse_num).collect();
+    let e: HashSet<HorseNum> = ev_probs.iter().map(|p| p.horse_num).collect();
+    r == e
+}
+
 /// win_prob 降順（同率は馬番昇順）で軸＝本命と相手上位 `partners` 頭を選ぶ。出走確率が空なら `None`。
 /// `build_portfolio` と `pair_ev_diagnostics` で共用し、軸・相手の決め方を一元化する。
 fn rank_axis_partners(
@@ -117,18 +127,24 @@ pub struct PairEvDiagnostics {
 /// 純粋関数。EV 計算は `build_portfolio` と同じ `leg_ev`（simulate 委譲）に揃える。出走確率が空なら
 /// 軸 `None`・空ベクタを返す。
 pub fn pair_ev_diagnostics(
-    probs: &[HorseProbability],
+    rank_probs: &[HorseProbability],
+    ev_probs: &[HorseProbability],
     odds: &RaceOdds,
     partners: usize,
 ) -> PairEvDiagnostics {
-    let Some((axis, partner_nums)) = rank_axis_partners(probs, partners) else {
+    debug_assert!(
+        same_field(rank_probs, ev_probs),
+        "rank_probs と ev_probs は同一馬集合でなければならない"
+    );
+    // 軸・相手は rank_probs（市場ブレンド）で選び、EV は ev_probs（純モデル）で評価する（循環断ち, #272）。
+    let Some((axis, partner_nums)) = rank_axis_partners(rank_probs, partners) else {
         return PairEvDiagnostics {
             axis: None,
             rows: Vec::new(),
         };
     };
-    let win: HashMap<HorseNum, f64> = probs.iter().map(|p| (p.horse_num, p.win_prob)).collect();
-    let field: Vec<HorseNum> = probs.iter().map(|p| p.horse_num).collect();
+    let win: HashMap<HorseNum, f64> = ev_probs.iter().map(|p| (p.horse_num, p.win_prob)).collect();
+    let field: Vec<HorseNum> = ev_probs.iter().map(|p| p.horse_num).collect();
 
     // 馬連/馬単(両方向) の EV と odds を 1 行に出す。各組合せの odds と EV はペアで求める
     // （odds 取得と EV 計算で try_from を二度呼ばないようヘルパに束ねる）。
@@ -170,14 +186,25 @@ pub fn pair_ev_diagnostics(
 /// ワイドは軸-相手の K 点、三連複は軸 1 頭ながし formation（軸＋相手 2 頭, C(K,2) 点）。`config.alloc` の重み
 /// `(連系ペア, ワイド, 三連複)` で券種へ予算を配分し、券種内は 100 円単位で均等配分する
 /// （賄えない端数は買わない）。
+///
+/// 確率は 2 系統（#272 循環断ち）: `rank_probs`（市場ブレンド・軸/相手の順位付け）と `ev_probs`
+/// （純モデル・EV/的中の評価）。**両者は同一馬集合でなければならない**（`debug_assert` で検査）。
+/// `ev_probs` に順位付け対象の馬が欠けると、その脚の `win` 引きが None になり EV/的中が過小算出される。
+/// 現呼び出し側は同一 `entry_factors` 由来の blended/pure を渡すため常に満たす。
 pub fn build_portfolio(
-    probs: &[HorseProbability],
+    rank_probs: &[HorseProbability],
+    ev_probs: &[HorseProbability],
     odds: &RaceOdds,
     race_budget: u64,
     config: &PortfolioConfig,
 ) -> Portfolio {
-    // win_prob 降順（同率は馬番昇順）で軸・相手を選ぶ。
-    let Some((axis, partners)) = rank_axis_partners(probs, config.partners) else {
+    debug_assert!(
+        same_field(rank_probs, ev_probs),
+        "rank_probs と ev_probs は同一馬集合でなければならない"
+    );
+    // 軸・相手は rank_probs（市場ブレンド α=0.2）で選ぶ＝解像度の高い本命選定（Phase A: 純モデルは
+    // 本命をフラットにしか出せない, #272）。win_prob 降順（同率は馬番昇順）。
+    let Some((axis, partners)) = rank_axis_partners(rank_probs, config.partners) else {
         return Portfolio {
             axis: None,
             partners: Vec::new(),
@@ -187,8 +214,10 @@ pub fn build_portfolio(
         };
     };
 
-    let win: HashMap<HorseNum, f64> = probs.iter().map(|p| (p.horse_num, p.win_prob)).collect();
-    let field: Vec<HorseNum> = probs.iter().map(|p| p.horse_num).collect();
+    // EV・的中確率は ev_probs（純モデル α=1.0）で評価する＝循環断ち（市場 odds と独立な確率で
+    // EV=P_pure×odds を coherent に計算する, #272）。field も ev_probs から（rank と同一馬集合）。
+    let win: HashMap<HorseNum, f64> = ev_probs.iter().map(|p| (p.horse_num, p.win_prob)).collect();
+    let field: Vec<HorseNum> = ev_probs.iter().map(|p| p.horse_num).collect();
 
     // 券種ごとの脚（組合せ, odds）を生成する。
     // 連系ペア: 軸-相手の馬連（着順不問）を常に採る。馬単への置換は #262 の 71R バックテストで
@@ -454,9 +483,55 @@ mod tests {
             partners: 3,
             alloc: (1, 1, 1),
         };
-        let pf = build_portfolio(&probs, &o, 5000, &config);
+        let pf = build_portfolio(&probs, &probs, &o, 5000, &config);
         assert_eq!(pf.axis, Some(horse(1)));
         assert_eq!(pf.partners, vec![horse(2), horse(3), horse(4)]);
+    }
+
+    #[test]
+    fn ev_uses_ev_probs_while_ranking_uses_rank_probs() {
+        // 循環断ち（#272）の非トートロジー検証: 軸/相手は rank_probs、EV/的中は ev_probs で評価される。
+        // rank と ev に**逆向きの win 分布**を与え、両者が別系統で使われることを実証する。
+        let (rank, o) = sample(); // 軸=馬1（win 0.40 最大）, 相手=馬2,3,4
+        // ev_probs は rank と逆順: 馬5 を最有力・馬1 を最弱にする。EV/的中はこちらに従う。
+        let ev = vec![
+            prob(1, 0.07),
+            prob(2, 0.10),
+            prob(3, 0.18),
+            prob(4, 0.25),
+            prob(5, 0.40),
+        ];
+        let config = PortfolioConfig {
+            partners: 3,
+            alloc: (1, 1, 1),
+        };
+        let pf = build_portfolio(&rank, &ev, &o, 5000, &config);
+
+        // (a) 軸・相手は rank_probs に従う（ev_probs の最有力 馬5 を軸にしない）。
+        assert_eq!(pf.axis, Some(horse(1)));
+        assert_eq!(pf.partners, vec![horse(2), horse(3), horse(4)]);
+
+        // (b) 各買い目の EV・的中確率は ev_probs の win 分布で算出され、rank_probs では再現しない。
+        let ev_win: HashMap<HorseNum, f64> = ev.iter().map(|p| (p.horse_num, p.win_prob)).collect();
+        let rank_win: HashMap<HorseNum, f64> =
+            rank.iter().map(|p| (p.horse_num, p.win_prob)).collect();
+        let field: Vec<HorseNum> = ev.iter().map(|p| p.horse_num).collect();
+        let priced: Vec<_> = pf.bets.iter().filter(|b| b.odds.is_some()).collect();
+        assert!(!priced.is_empty(), "オッズ取得済みの脚があるはず");
+        for b in priced {
+            let (exp_ev, exp_hit) = leg_metrics(&field, &ev_win, &b.combination, b.odds);
+            assert!((b.ev - exp_ev).abs() < 1e-9, "EV は ev_probs 由来: {b:?}");
+            assert!(
+                (b.hit_prob - exp_hit).abs() < 1e-9,
+                "的中確率は ev_probs 由来: {b:?}"
+            );
+            // rank_probs で計算すると別値（恒真でないことの担保）。
+            let (rank_ev, _) = leg_metrics(&field, &rank_win, &b.combination, b.odds);
+            assert!(
+                (b.ev - rank_ev).abs() > 1e-9,
+                "EV は rank_probs では再現しない（循環断ちの実証）: {b:?}"
+            );
+        }
     }
 
     #[test]
@@ -466,7 +541,7 @@ mod tests {
             partners: 3,
             alloc: (1, 1, 1),
         };
-        let pf = build_portfolio(&probs, &o, 5000, &config);
+        let pf = build_portfolio(&probs, &probs, &o, 5000, &config);
 
         let count = |label: &str| {
             pf.bets
@@ -492,7 +567,7 @@ mod tests {
             partners: 1,
             alloc: (1, 1, 1),
         };
-        let pf = build_portfolio(&probs, &o, 5000, &config);
+        let pf = build_portfolio(&probs, &probs, &o, 5000, &config);
         // 相手 1 頭では三連複は組めない（C(1,2)=0）。馬連・ワイドは 1 点ずつ。
         assert!(!pf.bets.iter().any(|b| b.combination.type_label() == "trio"));
         assert_eq!(pf.partners, vec![horse(2)]);
@@ -507,7 +582,7 @@ mod tests {
             partners: 3,
             alloc: (1, 1, 1),
         };
-        let pf = build_portfolio(&probs, &o, 5000, &config);
+        let pf = build_portfolio(&probs, &probs, &o, 5000, &config);
         let trio: Vec<_> = pf
             .bets
             .iter()
@@ -521,7 +596,7 @@ mod tests {
     fn default_config_stays_within_budget() {
         // 既定 PortfolioConfig（相手 5・配分 1:1:1）でも 100 円単位・予算以内に収まる。
         let (probs, o) = sample();
-        let pf = build_portfolio(&probs, &o, 5000, &PortfolioConfig::default());
+        let pf = build_portfolio(&probs, &probs, &o, 5000, &PortfolioConfig::default());
         assert!(pf.bets.iter().all(|b| b.stake % 100 == 0 && b.stake > 0));
         assert!(pf.total_stake <= 5000, "stake {} <= 5000", pf.total_stake);
         // 相手 4 頭（馬5まで）→ 馬連4・ワイド4・三連複 C(4,2)=6。
@@ -538,7 +613,7 @@ mod tests {
             partners: 3,
             alloc: (1, 1, 1),
         };
-        let pf = build_portfolio(&probs, &o, 5000, &config);
+        let pf = build_portfolio(&probs, &probs, &o, 5000, &config);
         let ev = pf.ev.expect("ev should be Some when priced legs exist");
 
         // 参照: オッズ取得済みの脚だけを simulate した期待回収率と一致すること。
@@ -578,7 +653,7 @@ mod tests {
     #[test]
     fn empty_probabilities_is_empty_portfolio() {
         let o = RaceOdds::empty(RaceId::try_from("202506040101".to_string()).unwrap());
-        let pf = build_portfolio(&[], &o, 5000, &PortfolioConfig::default());
+        let pf = build_portfolio(&[], &[], &o, 5000, &PortfolioConfig::default());
         assert_eq!(pf.axis, None);
         assert!(pf.bets.is_empty());
         assert!(pf.ev.is_none());
@@ -592,7 +667,7 @@ mod tests {
             partners: 3,
             alloc: (1, 0, 0),
         };
-        let pf = build_portfolio(&probs, &o, 200, &config);
+        let pf = build_portfolio(&probs, &probs, &o, 200, &config);
         let quinella: Vec<_> = pf
             .bets
             .iter()
@@ -621,7 +696,7 @@ mod tests {
             partners: 3,
             alloc: (1, 0, 0), // 連系ペアのみに絞って検証
         };
-        let pf = build_portfolio(&probs, &o, 5000, &config);
+        let pf = build_portfolio(&probs, &probs, &o, 5000, &config);
         assert!(
             !pf.bets
                 .iter()
@@ -651,7 +726,7 @@ mod tests {
             OrderedPair::try_from((horse(2), horse(1))).unwrap(),
             odds(60.0),
         );
-        let diag = pair_ev_diagnostics(&probs, &o, 3);
+        let diag = pair_ev_diagnostics(&probs, &probs, &o, 3);
         assert_eq!(diag.axis, Some(horse(1)));
         let rows = &diag.rows;
         assert_eq!(rows.len(), 3);
@@ -670,7 +745,7 @@ mod tests {
     #[test]
     fn pair_ev_diagnostics_empty_when_no_probs() {
         let o = RaceOdds::empty(RaceId::try_from("202506040101".to_string()).unwrap());
-        let diag = pair_ev_diagnostics(&[], &o, 5);
+        let diag = pair_ev_diagnostics(&[], &[], &o, 5);
         assert_eq!(diag.axis, None);
         assert!(diag.rows.is_empty());
     }
@@ -679,7 +754,7 @@ mod tests {
     fn portfolio_preserves_budget_and_units() {
         // 既定配分でも 100 円単位・予算内が保たれる（連系ペアは常に馬連）。
         let (probs, o) = sample();
-        let pf = build_portfolio(&probs, &o, 5000, &PortfolioConfig::default());
+        let pf = build_portfolio(&probs, &probs, &o, 5000, &PortfolioConfig::default());
         assert!(pf.bets.iter().all(|b| b.stake % 100 == 0 && b.stake > 0));
         assert!(pf.total_stake <= 5000, "stake {} <= 5000", pf.total_stake);
     }
@@ -695,7 +770,7 @@ mod tests {
             partners: 3,
             alloc: (1, 0, 0),
         };
-        let pf = build_portfolio(&probs, &o, 5000, &config);
+        let pf = build_portfolio(&probs, &probs, &o, 5000, &config);
         let leg = pf.bets.iter().find(|b| {
             matches!(&b.combination, BetCombination::Quinella(p)
                 if p.as_tuple() == (horse(1), horse(2)))
@@ -720,7 +795,7 @@ mod tests {
         // 各買い目に的中確率（判断材料）が入る。確率なので (0, 1] の範囲。
         // sample() の相手は全て勝率 > 0 なので hit_prob > 0 が保証される（勝率 0 の相手なら 0.0 になりうる）。
         let (probs, o) = sample();
-        let pf = build_portfolio(&probs, &o, 5000, &PortfolioConfig::default());
+        let pf = build_portfolio(&probs, &probs, &o, 5000, &PortfolioConfig::default());
         assert!(!pf.bets.is_empty());
         assert!(
             pf.bets
@@ -749,7 +824,7 @@ mod tests {
         // 的中確率はオッズ非依存。三連複オッズを空にしても hit_prob は算出される（ev のみ 0）。
         let (probs, mut o) = sample();
         o.trio.clear();
-        let pf = build_portfolio(&probs, &o, 5000, &PortfolioConfig::default());
+        let pf = build_portfolio(&probs, &probs, &o, 5000, &PortfolioConfig::default());
         let trio: Vec<_> = pf
             .bets
             .iter()

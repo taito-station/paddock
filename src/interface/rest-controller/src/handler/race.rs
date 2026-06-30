@@ -171,6 +171,8 @@ where
 }
 
 /// 買い目推奨（軸流しポートフォリオ, EV/推奨額）。保存オッズ基準。
+/// EV・期待回収率は純モデル（市場非依存・α=1.0）× 市場オッズで算出する（#272 循環断ち）。
+/// 軸/相手の順位付けは市場ブレンド確率を使う（順位付けと EV で確率系統が異なる）。
 #[utoipa::path(
     get,
     path = "/api/races/{race_id}/recommendations",
@@ -179,7 +181,7 @@ where
         RecommendationQuery,
     ),
     responses(
-        (status = 200, description = "予算内の軸流しポートフォリオ（オッズ未保存なら odds_available=false）", body = RecommendationResponse),
+        (status = 200, description = "予算内の軸流しポートフォリオ（EV は純モデル×市場オッズ。オッズ未保存なら odds_available=false）", body = RecommendationResponse),
         (status = 400, description = "クエリ不正", body = crate::error::ErrorBody),
         (status = 404, description = "出馬表が無いレース", body = crate::error::ErrorBody),
         (status = 500, description = "内部エラー", body = crate::error::ErrorBody),

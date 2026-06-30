@@ -4,7 +4,8 @@ use chrono::{Duration, Local, NaiveTime, Offset};
 use paddock_domain::{
     Portfolio, PortfolioConfig, RECOMMENDED_MARKET_BLEND_ALPHA, Race, build_portfolio,
 };
-use predict_format::{format_explanations, format_probs};
+use paddock_use_case::PredictionViews;
+use predict_format::{format_explanations, format_probs, format_probs_with_market};
 
 use crate::cli::Cli;
 use crate::setup::App;
@@ -120,7 +121,7 @@ async fn sweep(
         .count();
 
     println!(
-        "── {} スイープ: 対象 {} レース（窓 {}分 / ROIゲート {:.0}%）",
+        "── {} スイープ: 対象 {} レース（窓 {}分 / 参考ROIゲート {:.0}%・判定は手動精査）",
         now.format("%H:%M"),
         due.len(),
         cli.window,
@@ -156,50 +157,70 @@ async fn evaluate_race(app: &App, slot: &Slot, cli: &Cli, blend_alpha: Option<f6
         }
     };
 
-    // 2) 確率推定＋予想根拠。predict_race_explained は内部で find_race_odds（直前に persist した最新
-    //    スナップショット）を再読込して市場単勝ブレンドに使う。build_portfolio へ渡す odds と同一データ
-    //    だが読み出し経路は別。persist 失敗時（warn のみで継続）は旧スナップショットを見るため、その回だけ
-    //    買い目側と確率側でオッズ集合が食い違いうる（次スイープで解消する一時的劣化）。確率値は predict_race
-    //    と同一経路で完全一致する（根拠は probs に依らず factor の生レートから作る, #274）。
-    //    track_condition は発走前レースでは None のため、監視は当日の馬場状態を反映しない
-    //    （対話 predict は馬場を入力するので、同一レースで確率が僅かに乖離しうる）。
-    let (probs, explanations) = match app
+    // 2) 確率を 2 視点で推定（#272 確率分離）。predict_race_views は factor 収集 1 回で blended（順位
+    //    付け・市場ブレンド）と pure（EV 用・純モデル α=1.0）を返す。内部で find_race_odds（直前に
+    //    persist した最新スナップショット）を再読込して blended のブレンドに使う。build_portfolio へ渡す
+    //    odds と同一データだが読み出し経路は別。persist 失敗時（warn のみで継続）は旧スナップショットを
+    //    見るため、その回だけ買い目側と確率側でオッズ集合が食い違いうる（次スイープで解消する一時的劣化）。
+    //    track_condition は発走前レースでは None のため、監視は当日の馬場状態を反映しない。
+    let PredictionViews {
+        blended,
+        pure,
+        explanations,
+    } = match app
         .interactor
-        .predict_race_explained(rid, blend_alpha, slot.race.track_condition)
+        .predict_race_views(rid, blend_alpha, slot.race.track_condition, true)
         .await
     {
-        Ok(pe) => pe,
+        Ok(v) => v,
         Err(e) => {
             println!("  {label}: 確率推定エラー: {e}");
             return;
         }
     };
 
-    // 予想（順位＋根拠）は EV ゲートに依らず常に出す（#272 分離）。エッジが無く全レース見送りになる窓でも
-    // 「なぜこの順位か」を必ず提示する。買い目（張り候補）だけを ROI ゲートの後段に残す。
-    println!("  ── {label} 予想");
-    for line in format_probs(&probs) {
+    // 過去データ視点（純モデルの順位＋根拠）。EV に依らず常に出す。エッジが無い窓でも「なぜこの順位か」を提示。
+    println!("  ── {label} 過去データ視点（純モデル）");
+    for line in format_probs(&pure) {
         println!("    {line}");
     }
-    for line in format_explanations(&probs, &explanations) {
+    for line in format_explanations(&pure, &explanations) {
+        println!("    {line}");
+    }
+    // 純モデル vs 市場implied（差で割安/割高の向きを読む）。
+    let market_win: std::collections::HashMap<_, _> =
+        odds.win.iter().map(|(num, o)| (*num, o.value())).collect();
+    for line in format_probs_with_market(&pure, &market_win) {
         println!("    {line}");
     }
 
-    // 3) 本番と同じ軸流しポートフォリオで買い目＋EV を組成。
-    let portfolio = build_portfolio(&probs, &odds, cli.race_budget, &PortfolioConfig::default());
+    // 3) 市場EV視点: 軸/相手は blended、EV/的中は pure（循環断ち, #272）。
+    let portfolio = build_portfolio(
+        &blended,
+        &pure,
+        &odds,
+        cli.race_budget,
+        &PortfolioConfig::default(),
+    );
     let Some(ev) = &portfolio.ev else {
         println!("  {label}: 買い目を組成できず（オッズ不足）、スキップ");
         return;
     };
 
+    // decision-support（#272）: 自動の張る/見送り判定はしない。純モデル EV/ROI は「市場に対しモデルが
+    // 割安と見るか」の参考情報で、最終判断は人間のハンデ精査に委ねる。参考 ROI がゲート以上のときだけ
+    // 🔶 を付けて目立たせる（張り推奨ではない）。
     let roi_pct = ev.roi * 100.0;
     let hit_pct = ev.hit_prob * 100.0;
-    if ev.roi >= cli.roi_gate {
-        println!("  🟢 {label}: ROI {roi_pct:.1}% / 的中 {hit_pct:.1}%（張り候補）");
-        print_buy_targets(&portfolio);
+    let mark = if ev.roi >= cli.roi_gate {
+        "🔶"
     } else {
-        println!("  ⚪ {label}: ROI {roi_pct:.1}% / 的中 {hit_pct:.1}%（見送り）");
-    }
+        "・"
+    };
+    println!(
+        "  {mark} {label}: 参考ROI {roi_pct:.1}% / 的中 {hit_pct:.1}%（モデル単独視点・最終判断は手動精査）"
+    );
+    print_buy_targets(&portfolio);
 }
 
 /// 張り候補の買い目を「そのまま買える形」で出力する（軸/相手＋各点）。

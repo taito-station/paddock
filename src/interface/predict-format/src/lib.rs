@@ -31,6 +31,48 @@ pub fn format_probs(probs: &[HorseProbability]) -> Vec<String> {
     lines
 }
 
+/// 過去データ視点の比較テーブル（#272 ④）。純モデル勝率と市場 implied 勝率を並べ、差（pt）を見せる。
+/// `market_win` は馬番→単勝オッズ（払戻倍率 ≥1.0）。implied = `(1/odds)/Σ(1/odds)`（控除率＝オーバー
+/// ラウンドを除去）。オッズの無い馬は市場・差欄を `-` にする。盤面順（`pure` の順）で出力し先頭はヘッダ。
+/// 差 = 純勝率 − 市場implied（正＝モデルが市場より強気）。EV の向き（割安/割高）を読む材料。
+pub fn format_probs_with_market(
+    pure: &[HorseProbability],
+    market_win: &HashMap<HorseNum, f64>,
+) -> Vec<String> {
+    // 控除率除去のため、有効オッズの 1/odds 合計で正規化する（blend_with_market_win と同じ implied 定義）。
+    let overround: f64 = market_win
+        .values()
+        .filter(|&&o| o.is_finite() && o >= 1.0)
+        .map(|&o| 1.0 / o)
+        .sum();
+    let mut lines = vec![format!(
+        "{:<4} {:<16} {:>8} {:>8} {:>8}",
+        "馬番", "馬名", "純勝率", "市場", "差pt"
+    )];
+    for p in pure {
+        let implied = market_win
+            .get(&p.horse_num)
+            .filter(|&&o| o.is_finite() && o >= 1.0 && overround > 0.0)
+            .map(|&o| (1.0 / o) / overround);
+        let (mkt, diff) = match implied {
+            Some(m) => (
+                format!("{:>7.1}%", m * 100.0),
+                format!("{:>+8.1}", (p.win_prob - m) * 100.0),
+            ),
+            None => (format!("{:>8}", "-"), format!("{:>8}", "-")),
+        };
+        lines.push(format!(
+            "{:>4} {:<16} {:>7.1}% {} {}",
+            p.horse_num.value(),
+            p.horse_name.value(),
+            p.win_prob * 100.0,
+            mkt,
+            diff,
+        ));
+    }
+    lines
+}
+
 /// win_prob 上位の馬について予想根拠（条件別成績・近走フォーム・前走・斤量）を印付きで整形し、
 /// 表示行を順に返す（#274）。確率テーブルは盤面順なので win_prob 降順に並べ替えて上位 `MARKS` 頭に
 /// 印を振る。`println!` から分離して純粋関数にし、ランク付け・印・フォールバックをテスト可能にする。
@@ -376,5 +418,45 @@ mod tests {
     fn surface_jp_maps_both_surfaces() {
         assert_eq!(surface_jp(Surface::Turf), "芝");
         assert_eq!(surface_jp(Surface::Dirt), "ダート");
+    }
+
+    #[test]
+    fn format_probs_with_market_shows_pure_market_and_diff() {
+        use super::format_probs_with_market;
+        use std::collections::HashMap;
+        let pure = vec![prob(1, "ウマ1", 0.30), prob(2, "ウマ2", 0.10)];
+        // 馬1 odds=2.0→1/2=0.5、馬2 odds=4.0→0.25。overround=0.75。
+        // implied: 馬1=0.5/0.75≒66.7%、馬2=0.25/0.75≒33.3%。
+        let mut market: HashMap<HorseNum, f64> = HashMap::new();
+        market.insert(horse(1), 2.0);
+        market.insert(horse(2), 4.0);
+        let lines = format_probs_with_market(&pure, &market);
+        assert!(
+            lines[0].contains("純勝率") && lines[0].contains("市場") && lines[0].contains("差pt")
+        );
+        // 馬1: 純30.0% 市場66.7% 差 -36.7（純<市場＝モデルは市場より弱気）。
+        assert!(
+            lines[1].contains("ウマ1")
+                && lines[1].contains("30.0%")
+                && lines[1].contains("66.7%")
+                && lines[1].contains("-36.7")
+        );
+        // 馬2: 市場33.3%。
+        assert!(lines[2].contains("ウマ2") && lines[2].contains("33.3%"));
+    }
+
+    #[test]
+    fn format_probs_with_market_dashes_when_odds_missing() {
+        use super::format_probs_with_market;
+        use std::collections::HashMap;
+        let pure = vec![prob(1, "ウマ1", 0.30)];
+        let market: HashMap<HorseNum, f64> = HashMap::new(); // オッズ無し → 市場・差は「-」
+        let lines = format_probs_with_market(&pure, &market);
+        assert!(lines[1].contains("ウマ1") && lines[1].contains("30.0%"));
+        assert!(
+            lines[1].contains('-'),
+            "オッズ無しは市場・差欄が「-」: {}",
+            lines[1]
+        );
     }
 }

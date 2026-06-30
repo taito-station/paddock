@@ -761,7 +761,7 @@
         "tags": [
           "races"
         ],
-        "summary": "買い目推奨（軸流しポートフォリオ, EV/推奨額）。保存オッズ基準。",
+        "summary": "買い目推奨（軸流しポートフォリオ, EV/推奨額）。保存オッズ基準。\nEV・期待回収率は純モデル（市場非依存・α=1.0）× 市場オッズで算出する（#272 循環断ち）。\n軸/相手の順位付けは市場ブレンド確率を使う（順位付けと EV で確率系統が異なる）。",
         "operationId": "get_recommendations",
         "parameters": [
           {
@@ -815,7 +815,7 @@
         ],
         "responses": {
           "200": {
-            "description": "予算内の軸流しポートフォリオ（オッズ未保存なら odds_available=false）",
+            "description": "予算内の軸流しポートフォリオ（EV は純モデル×市場オッズ。オッズ未保存なら odds_available=false）",
             "content": {
               "application/json": {
                 "schema": {
