@@ -32,7 +32,9 @@ as-of ダンプ（統計は予測対象日 `< D`）。さらに日付分割で**
 - **HGB（非線形 GBM 木）**: ヒストグラム勾配ブースティング（sklearn `HistGradientBoostingClassifier`）。
   特徴量 = 上記9＋factor 出走数 starts6（rate×starts 交互作用を木が使える、欠落は NaN のまま）。レース内正規化で
   win 確率化。LightGBM は libomp（OpenMP 共有ライブラリ）を要求し未導入環境でロードできないため、libomp 不要・
-  NaN ネイティブで同じヒストグラム勾配ブースティング系の sklearn HGB を採用した。
+  NaN ネイティブで同じヒストグラム勾配ブースティング系の sklearn HGB を採用した。なお HGB は PL のような
+  レース条件付き softmax ではなく、出走馬を pooled な per-horse 二値分類（is_winner）で学習し**学習後にレース内
+  正規化**する近似（fundamental の marginal 寄与を非線形・交互作用込みで見る目的には十分）。
 
 | モデル | 単勝 Brier | 単勝 LogLoss | flat ROI |
 |---|---|---|---|

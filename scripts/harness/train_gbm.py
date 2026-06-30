@@ -42,10 +42,19 @@ def load_gbm(path):
 
 
 def _design(race, use_market):
+    # 市場列は線形 implied をそのまま 1 列足す（木は単調変換不変なので PL の log(implied) と違い
+    # 対数化しない）。
     if not use_market:
         return race.fund
     imp = T.market_implied(race.win_odds).reshape(-1, 1)
     return np.hstack([race.fund, imp])
+
+
+def _onehot(n, winner):
+    """winner 行のみ 1 の長さ n ベクトル（`np.eye(n)[winner]` の n×n 確保を避ける軽量版）。"""
+    y = np.zeros(n)
+    y[winner] = 1.0
+    return y
 
 
 def _normalize_within_race(p):
@@ -64,7 +73,7 @@ def walk_forward(races, cutoffs, use_market, params):
             continue
         x_tr = np.vstack([_design(r, use_market) for r in train])
         # train は winner ありに限定済みなので one-hot は常に作れる（winner 行=1・他=0）。
-        y_tr = np.concatenate([np.eye(len(r.horse_nums))[r.winner] for r in train])
+        y_tr = np.concatenate([_onehot(len(r.horse_nums), r.winner) for r in train])
         clf = HistGradientBoostingClassifier(**params)
         clf.fit(x_tr, y_tr)
         for race in test:
