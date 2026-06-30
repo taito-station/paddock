@@ -18,6 +18,7 @@ pub use interactor::card::CardInteractor;
 pub use interactor::entry::EntryInteractor;
 pub use interactor::horse_history::HorseHistoryInteractor;
 pub use interactor::odds::OddsInteractor;
+pub use interactor::race::predict::PredictionViews;
 pub use interactor::settle::{SettleInteractor, SettleReport};
 pub use netkeiba_race_id::{
     build_race_ids, netkeiba_race_id_from_paddock, paddock_race_id_from_netkeiba,

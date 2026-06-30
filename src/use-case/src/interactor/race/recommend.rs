@@ -23,14 +23,16 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: 
         blend_alpha: Option<f64>,
         track_condition: Option<TrackCondition>,
     ) -> Result<Option<Portfolio>> {
-        let probs = self
-            .predict_race(race_id, blend_alpha, track_condition)
+        // 循環断ち（#272）: 軸/相手は blended、EV は pure（α=1.0・市場非依存）で評価する。
+        let views = self
+            .predict_race_views(race_id, blend_alpha, track_condition, false)
             .await?;
         let Some(odds) = self.repository.find_race_odds(race_id, None).await? else {
             return Ok(None);
         };
         Ok(Some(build_portfolio(
-            &probs,
+            &views.blended,
+            &views.pure,
             &odds,
             budget,
             &PortfolioConfig::default(),

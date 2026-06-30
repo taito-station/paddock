@@ -16,6 +16,19 @@ use crate::repository::{
     RaceCardRepository, RecencySeries, StatsRepository, TrainerStatsRow,
 };
 
+/// `predict_race_views` の戻り値（#272 確率分離）。同一レース・同一盤面順の 2 系統の確率と任意の根拠。
+///
+/// 循環断ち（EV=P_blended×odds の循環）のため、順位付け（軸/相手）と EV 計算で別系統の確率を使う:
+/// - `blended`（市場ブレンド α=blend_alpha）= 軸/相手の順位付け用。市場情報を含み解像度が高い
+///   （Phase A: 純モデルは本命をフラットにしか出せない）。
+/// - `pure`（純モデル α=1.0・市場非依存）= EV=P_pure×odds の計算と「過去データ視点」表示用。
+pub struct PredictionViews {
+    pub blended: Vec<HorseProbability>,
+    pub pure: Vec<HorseProbability>,
+    /// 予想根拠（`with_explanation=false` なら空）。`pure`/`blended` と同じ盤面順。
+    pub explanations: Vec<HorseExplanation>,
+}
+
 impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: PdfFetcher>
     Interactor<R, P, F>
 {
@@ -71,6 +84,43 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: 
             "probs/explanations の馬番がズレている"
         );
         Ok((probs, explanations))
+    }
+
+    /// 過去データ視点（純モデル α=1.0）と市場ブレンド視点（α=`blend_alpha`）の両確率を、factor 収集
+    /// 1 回・市場オッズ 1 回 fetch で返す（#272 確率分離）。順位付けには `blended`（解像度が高い）、
+    /// EV 計算には `pure`（市場と独立＝循環断ち）を使う想定で、呼び出し側が `build_portfolio` に
+    /// `rank=blended` / `ev=pure` を渡す。`with_explanation=true` のとき根拠も返す（`pure` と同じ盤面順）。
+    ///
+    /// `blended` は `estimate_and_blend(.., blend_alpha, ..)`（α<1.0 で市場 odds を 1 回 fetch）、
+    /// `pure` は同 `Some(1.0)`（ブレンド無効で odds fetch を省く・γ 冪は両者に適用）。`blend_alpha=Some(1.0)`
+    /// や `None` を渡すと両者が一致しうる（呼び出し側の選択に委ねる）。
+    pub async fn predict_race_views(
+        &self,
+        race_id: &RaceId,
+        blend_alpha: Option<f64>,
+        track_condition: Option<TrackCondition>,
+        with_explanation: bool,
+    ) -> Result<PredictionViews> {
+        let config = EstimationConfig::production();
+        let (entry_factors, explanations) = self
+            .collect_race_factors(race_id, track_condition, with_explanation, &config)
+            .await?;
+        let blended = self
+            .estimate_and_blend(&entry_factors, race_id, blend_alpha, &config)
+            .await?;
+        let pure = self
+            .estimate_and_blend(&entry_factors, race_id, Some(1.0), &config)
+            .await?;
+        debug_assert_eq!(
+            blended.len(),
+            pure.len(),
+            "blended と pure の頭数が一致しない"
+        );
+        Ok(PredictionViews {
+            blended,
+            pure,
+            explanations,
+        })
     }
 
     /// 出馬表の取得と各馬の factor / 予想根拠の構築までを共通化する内部ヘルパ（#274）。
@@ -256,6 +306,9 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: 
     /// （`find_race_odds(.., None)`）が取得できなければ診断は `None`（オッズ未取得レース）。
     /// 診断 `PairEvDiagnostics`（軸＋各ペア行）を返す。軸は `pair_ev_diagnostics` が決めた canonical
     /// な値で、表示側で軸を再計算しない（軸選定ロジックの二重化を避ける）。`None` はオッズ未取得。
+    ///
+    /// 返す確率は `blended`（順位付け・表示用）。EV 診断は循環断ち（#272）のため軸=`blended`・
+    /// EV=`pure`（純モデル α=1.0）で算出する。
     pub async fn predict_race_with_diagnostics(
         &self,
         race_id: &RaceId,
@@ -263,15 +316,17 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: 
         track_condition: Option<TrackCondition>,
         partners: usize,
     ) -> Result<(Vec<HorseProbability>, Option<PairEvDiagnostics>)> {
-        let probs = self
-            .predict_race(race_id, blend_alpha, track_condition)
+        let views = self
+            .predict_race_views(race_id, blend_alpha, track_condition, false)
             .await?;
         let diagnostics = self
             .repository
             .find_race_odds(race_id, None)
             .await?
-            .map(|odds| paddock_domain::pair_ev_diagnostics(&probs, &odds, partners));
-        Ok((probs, diagnostics))
+            .map(|odds| {
+                paddock_domain::pair_ev_diagnostics(&views.blended, &views.pure, &odds, partners)
+            });
+        Ok((views.blended, diagnostics))
     }
 }
 
