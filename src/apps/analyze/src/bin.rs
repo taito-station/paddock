@@ -17,9 +17,13 @@ use paddock_use_case::repository::{
 /// 部分一致候補の表示上限。これを超える場合も先頭から打ち切って提示する。
 const CANDIDATE_LIMIT: u32 = 20;
 
-/// 特徴量ダンプ（#272 Phase A）TSV のヘッダ行。列順は [`write_feature_dump`] の行生成と一致させる。
-/// 6 factor（course_gate/horse_surface/horse_distance/jockey_surface/trainer_surface/
-/// horse_track_condition）× (win,place,show,starts) + signal3 + ラベル3 = 33 列。
+/// 特徴量ダンプ（#272 Phase A）TSV の列数。[`FEATURE_DUMP_HEADER`] と [`feature_row_cells`] の
+/// 双方をこの不変条件で縛り、列ズレ（＝学習データの静かな汚染）を防ぐ（ユニットテストで担保）。
+/// 内訳: id3(race_id/date/horse_num) + 6 factor × (win,place,show,starts)=24 + signal3 + ラベル3。
+const FEATURE_DUMP_COLUMNS: usize = 33;
+
+/// 特徴量ダンプ（#272 Phase A）TSV のヘッダ行。列順は [`feature_row_cells`] の行生成と一致させ、
+/// 列数は [`FEATURE_DUMP_COLUMNS`] と一致させる（いずれもユニットテストで担保）。
 const FEATURE_DUMP_HEADER: &str = "race_id\tdate\thorse_num\t\
 course_gate_win\tcourse_gate_place\tcourse_gate_show\tcourse_gate_starts\t\
 horse_surface_win\thorse_surface_place\thorse_surface_show\thorse_surface_starts\t\
@@ -30,12 +34,10 @@ horse_track_condition_win\thorse_track_condition_place\thorse_track_condition_sh
 recent_form\tweight_carried\tjockey_recent_form\t\
 finishing_position\twin_odds\tpopularity";
 
-/// 特徴量ダンプ（#272 Phase A）を TSV で書き出す。欠落（`None`）は空セルで 0 埋めしない。数値は
-/// `f64`/`u32` の既定 Display（round-trip 可能な厳密値）で出力し、忠実性サニティで backtest 集計と
-/// 突合できるようにする。列順は [`FEATURE_DUMP_HEADER`] と一致させる。
-fn write_feature_dump(path: &str, rows: &[FeatureRow]) -> anyhow::Result<()> {
-    use std::io::Write;
-
+/// 1 行分の特徴量を [`FEATURE_DUMP_HEADER`] と同じ列順の文字列セル列に展開する。欠落（`None`）は
+/// 空セルで 0 埋めしない（欠落項とレート 0 を区別する）。数値は `f64`/`u32` の既定 Display
+/// （round-trip 可能な厳密値）で出力し、忠実性サニティで backtest 集計と突合できるようにする。
+fn feature_row_cells(row: &FeatureRow) -> Vec<String> {
     // factor 1 つを (win,place,show,starts) の 4 セルに展開する。欠落項は 4 セルとも空。
     fn push_stat(cells: &mut Vec<String>, stat: Option<FactorStat>) {
         match stat {
@@ -55,27 +57,39 @@ fn write_feature_dump(path: &str, rows: &[FeatureRow]) -> anyhow::Result<()> {
     let cell_f64 = |v: Option<f64>| v.map(|x| x.to_string()).unwrap_or_default();
     let cell_u32 = |v: Option<u32>| v.map(|x| x.to_string()).unwrap_or_default();
 
+    let mut cells: Vec<String> = Vec::with_capacity(FEATURE_DUMP_COLUMNS);
+    cells.push(row.race_id.clone());
+    cells.push(row.date.to_string());
+    cells.push(row.horse_num.to_string());
+    push_stat(&mut cells, row.factors.course_gate);
+    push_stat(&mut cells, row.factors.horse_surface);
+    push_stat(&mut cells, row.factors.horse_distance);
+    push_stat(&mut cells, row.factors.jockey_surface);
+    push_stat(&mut cells, row.factors.trainer_surface);
+    push_stat(&mut cells, row.factors.horse_track_condition);
+    cells.push(cell_f64(row.factors.recent_form));
+    cells.push(cell_f64(row.factors.weight_carried));
+    cells.push(cell_f64(row.factors.jockey_recent_form));
+    cells.push(cell_u32(row.finishing_position));
+    cells.push(cell_f64(row.win_odds));
+    cells.push(cell_u32(row.popularity));
+    // ヘッダと行の列数ズレを開発時に即検知する（出力契約の保険。本数値はテストでも担保）。
+    debug_assert_eq!(
+        cells.len(),
+        FEATURE_DUMP_COLUMNS,
+        "feature dump の列数がヘッダと不一致"
+    );
+    cells
+}
+
+/// 特徴量ダンプ（#272 Phase A）を TSV で書き出す。ヘッダ＋各行を [`feature_row_cells`] で生成する。
+fn write_feature_dump(path: &str, rows: &[FeatureRow]) -> anyhow::Result<()> {
+    use std::io::Write;
     let file = std::fs::File::create(path)?;
     let mut w = std::io::BufWriter::new(file);
     writeln!(w, "{FEATURE_DUMP_HEADER}")?;
     for row in rows {
-        let mut cells: Vec<String> = Vec::with_capacity(33);
-        cells.push(row.race_id.clone());
-        cells.push(row.date.to_string());
-        cells.push(row.horse_num.to_string());
-        push_stat(&mut cells, row.factors.course_gate);
-        push_stat(&mut cells, row.factors.horse_surface);
-        push_stat(&mut cells, row.factors.horse_distance);
-        push_stat(&mut cells, row.factors.jockey_surface);
-        push_stat(&mut cells, row.factors.trainer_surface);
-        push_stat(&mut cells, row.factors.horse_track_condition);
-        cells.push(cell_f64(row.factors.recent_form));
-        cells.push(cell_f64(row.factors.weight_carried));
-        cells.push(cell_f64(row.factors.jockey_recent_form));
-        cells.push(cell_u32(row.finishing_position));
-        cells.push(cell_f64(row.win_odds));
-        cells.push(cell_u32(row.popularity));
-        writeln!(w, "{}", cells.join("\t"))?;
+        writeln!(w, "{}", feature_row_cells(row).join("\t"))?;
     }
     w.flush()?;
     Ok(())
@@ -700,4 +714,94 @@ fn print_section(title: &str, rows: &[GroupStat]) {
         );
     }
     println!();
+}
+
+#[cfg(test)]
+mod feature_dump_tests {
+    use super::*;
+    use chrono::NaiveDate;
+    use paddock_domain::{HorseFactors, RateTriple};
+
+    fn empty_factors() -> HorseFactors {
+        HorseFactors {
+            course_gate: None,
+            horse_surface: None,
+            horse_distance: None,
+            jockey_surface: None,
+            trainer_surface: None,
+            horse_track_condition: None,
+            recent_form: None,
+            weight_carried: None,
+            jockey_recent_form: None,
+        }
+    }
+
+    /// ヘッダの列数が不変条件 [`FEATURE_DUMP_COLUMNS`] と一致すること（列追加時の更新漏れ検知）。
+    #[test]
+    fn header_has_expected_column_count() {
+        assert_eq!(
+            FEATURE_DUMP_HEADER.split('\t').count(),
+            FEATURE_DUMP_COLUMNS
+        );
+    }
+
+    /// 行生成の列数がヘッダと一致し、欠落（factor 全 None・signal None）は空セル、ラベルは実値を
+    /// 文字列で運ぶこと（popularity が値で出る正例 + 欠落→空セルの 0 埋め無しを同時に担保）。
+    #[test]
+    fn row_cells_match_header_and_render_missing_as_empty() {
+        let row = FeatureRow {
+            race_id: "2026-1-nakayama-1-1R".to_string(),
+            date: NaiveDate::from_ymd_opt(2026, 1, 10).unwrap(),
+            horse_num: 7,
+            factors: empty_factors(),
+            finishing_position: Some(1),
+            win_odds: Some(4.0),
+            popularity: Some(3),
+        };
+        let cells = feature_row_cells(&row);
+        assert_eq!(cells.len(), FEATURE_DUMP_COLUMNS);
+        assert_eq!(cells[0], "2026-1-nakayama-1-1R");
+        assert_eq!(cells[2], "7");
+        // factor 24 セル（cells[3..27]）は全欠落で空。
+        assert!(
+            cells[3..27].iter().all(String::is_empty),
+            "欠落 factor は空セル"
+        );
+        // signal3（cells[27..30]）も欠落で空。
+        assert!(cells[27..30].iter().all(String::is_empty));
+        // ラベルは実値（finishing_position=1, win_odds=4.0→"4", popularity=3）。
+        assert_eq!(cells[30], "1");
+        assert_eq!(cells[31], "4");
+        assert_eq!(cells[32], "3");
+    }
+
+    /// 実値を持つ factor は (win,place,show,starts) の 4 セルに展開され、欠落ラベルは空になること。
+    #[test]
+    fn row_cells_render_present_factor_stats() {
+        let mut factors = empty_factors();
+        factors.horse_surface = Some(FactorStat {
+            rate: RateTriple {
+                win: 0.3,
+                place: 0.4,
+                show: 0.5,
+            },
+            starts: 10,
+        });
+        let row = FeatureRow {
+            race_id: "r".to_string(),
+            date: NaiveDate::from_ymd_opt(2026, 1, 10).unwrap(),
+            horse_num: 1,
+            factors,
+            finishing_position: None,
+            win_odds: None,
+            popularity: None,
+        };
+        let cells = feature_row_cells(&row);
+        // horse_surface は course_gate(3..7) の次の cells[7..11]。
+        assert_eq!(&cells[7..11], ["0.3", "0.4", "0.5", "10"]);
+        // 欠落ラベルは空セル。
+        assert_eq!(cells[30], "");
+        assert_eq!(cells[31], "");
+        assert_eq!(cells[32], "");
+    }
 }

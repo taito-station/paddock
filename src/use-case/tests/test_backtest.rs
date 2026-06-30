@@ -969,4 +969,7 @@ async fn backtest_dump_features_collects_starters_with_labels_and_market_odds() 
     assert_eq!(b.finishing_position, Some(2));
     // 市場単勝なし・PDF 単勝も None → win_odds は None（欠落は 0 埋めしない）。
     assert_eq!(b.win_odds, None);
+    // 騎手・調教師を持たない fixture なので欠落 factor が None で運ばれる（母数除外項の正例）。
+    assert!(b.factors.trainer_surface.is_none());
+    assert!(b.factors.jockey_surface.is_none());
 }
