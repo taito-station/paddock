@@ -87,6 +87,8 @@ def load_races(path, feature_cols=FUND_FEATURES):
             win_odds[i] = _f(row["win_odds"])
             baseline[i] = _f(row["model_win"])
             fp = row["finishing_position"]
+            # 1 着＝winner。同着 1 着（稀）は先頭の 1 頭のみ winner とし他は loser 扱い（全モデル共通で
+            # 比較は公平・影響は軽微）。winner なしレースは訓練から除外、評価では全 0 ラベル（母数に残る）。
             if fp not in ("", None) and int(fp) == 1 and winner is None:
                 winner = i
         races.append(
@@ -128,8 +130,15 @@ def build_design(races, use_market, impute, mean, std):
 
 
 def fit_stats(train_races):
-    """訓練 fold の factor/signal 補完値（列平均）と標準化統計（平均・標準偏差）を返す。"""
+    """訓練 fold の factor/signal 補完値（列平均）と標準化統計（平均・標準偏差）を返す。
+
+    補完・signal 中立値は PL の基礎特徴量レイアウト（[`FUND_FEATURES`]）前提。`Race.fund` の列が
+    これと一致することを assert で固定する（`load_races(feature_cols=...)` に別の列セットを渡して PL
+    経路に流すと無言で列対応がズレるのを防ぐ。GBM 経路は fit_stats を呼ばず NaN ネイティブ）。"""
     stacked = np.vstack([r.fund for r in train_races])
+    assert stacked.shape[1] == len(FUND_FEATURES), (
+        "fit_stats は FUND_FEATURES レイアウト前提（PL 基礎特徴量）"
+    )
 
     def col_impute(j, col):
         if col in SIGNAL_NEUTRAL:
@@ -315,7 +324,9 @@ def main(argv=None):
     # ADR 0053 の中心証拠を再現可能にするため、全 winner ありレースに当てはめた係数を出す。
     # 「市場を入れると β_market≈1 で市場を再現し fundamental が ±0 へ崩壊」を監査できる。
     # 注: fundamental は標準化済み係数、log_market_implied は log-implied 生値の係数でスケールが
-    # 異なる（β_market≈1 は softmax(log implied)=implied＝市場再現を意味する）。
+    # 異なる（β_market≈1 は softmax(log implied)=implied＝市場再現を意味する）。L2 は両者を同強度で
+    # 罰する（未標準化の市場列にもスケール差のまま適用）が、結果は市場支配・fundamental 崩壊で、
+    # 仮に市場列の罰を緩めても fundamental 側へ寄る材料にはならず棄却結論を変えない。
     train_all = [r for r in races if r.winner is not None]
     imp, mean, std = fit_stats(train_all)
     b_fund = fit_conditional_logit(
@@ -332,8 +343,10 @@ def main(argv=None):
 
     print(
         "\n注: 「flat 払戻率」は「トップ選好馬の単勝 100 円」固定での総払戻倍率／賭けレース数（net ROI で"
-        "なく粗の払戻率）。Brier/LogLoss は全出走馬を独立 Bernoulli とした per-horse スコア（全モデル"
-        "共通母数で比較は公平）。控除率 20-25% のため払戻率の 100% 接近は困難。採否は複数指標で判断する。"
+        "なく粗の払戻率）。分母 payout_races は各モデルの top 選好馬のオッズが取れたレースで、モデル間で"
+        "わずかに異なりうる（高分散の参考値で採否には使わない）。Brier/LogLoss は全出走馬を独立 Bernoulli"
+        "とした per-horse スコア（全モデル共通母数で比較は公平）。控除率 20-25% のため払戻率の 100% 接近は"
+        "困難。採否は複数指標で判断する。"
     )
     return 0
 
