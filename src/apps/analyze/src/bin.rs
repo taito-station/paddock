@@ -17,13 +17,14 @@ use paddock_use_case::repository::{
 /// 部分一致候補の表示上限。これを超える場合も先頭から打ち切って提示する。
 const CANDIDATE_LIMIT: u32 = 20;
 
-/// 特徴量ダンプ（#272 Phase A）TSV の列数。[`FEATURE_DUMP_HEADER`] と [`feature_row_cells`] の
+/// 特徴量ダンプ（#272 Phase A / #309）TSV の列数。[`FEATURE_DUMP_HEADER`] と [`feature_row_cells`] の
 /// 双方をこの不変条件で縛り、列ズレ（＝学習データの静かな汚染）を防ぐ（ユニットテストで担保）。
-/// 内訳: id3(race_id/date/horse_num) + 6 factor × (win,place,show,starts)=24 + signal3 + ラベル3。
-const FEATURE_DUMP_COLUMNS: usize = 33;
+/// 内訳: id3(race_id/date/horse_num) + 6 factor × (win,place,show,starts)=24 + signal3 + model3 + ラベル3。
+const FEATURE_DUMP_COLUMNS: usize = 36;
 
-/// 特徴量ダンプ（#272 Phase A）TSV のヘッダ行。列順は [`feature_row_cells`] の行生成と一致させ、
-/// 列数は [`FEATURE_DUMP_COLUMNS`] と一致させる（いずれもユニットテストで担保）。
+/// 特徴量ダンプ（#272 Phase A / #309）TSV のヘッダ行。列順は [`feature_row_cells`] の行生成と一致させ、
+/// 列数は [`FEATURE_DUMP_COLUMNS`] と一致させる（いずれもユニットテストで担保）。`model_*` は内蔵モデルの
+/// 最終確率（backtest が評価するのと同一値）で、Python ハーネス③の忠実性サニティの基準に使う。
 const FEATURE_DUMP_HEADER: &str = "race_id\tdate\thorse_num\t\
 course_gate_win\tcourse_gate_place\tcourse_gate_show\tcourse_gate_starts\t\
 horse_surface_win\thorse_surface_place\thorse_surface_show\thorse_surface_starts\t\
@@ -32,6 +33,7 @@ jockey_surface_win\tjockey_surface_place\tjockey_surface_show\tjockey_surface_st
 trainer_surface_win\ttrainer_surface_place\ttrainer_surface_show\ttrainer_surface_starts\t\
 horse_track_condition_win\thorse_track_condition_place\thorse_track_condition_show\thorse_track_condition_starts\t\
 recent_form\tweight_carried\tjockey_recent_form\t\
+model_win\tmodel_place\tmodel_show\t\
 finishing_position\twin_odds\tpopularity";
 
 /// 1 行分の特徴量を [`FEATURE_DUMP_HEADER`] と同じ列順の文字列セル列に展開する。欠落（`None`）は
@@ -70,6 +72,10 @@ fn feature_row_cells(row: &FeatureRow) -> Vec<String> {
     cells.push(cell_f64(row.factors.recent_form));
     cells.push(cell_f64(row.factors.weight_carried));
     cells.push(cell_f64(row.factors.jockey_recent_form));
+    // 内蔵モデルの最終確率（必ず付く・欠落なし）。Python ハーネス③が backtest 数値との一致に使う。
+    cells.push(row.model_win.to_string());
+    cells.push(row.model_place.to_string());
+    cells.push(row.model_show.to_string());
     cells.push(cell_u32(row.finishing_position));
     cells.push(cell_f64(row.win_odds));
     cells.push(cell_u32(row.popularity));
@@ -760,6 +766,9 @@ mod feature_dump_tests {
             date: NaiveDate::from_ymd_opt(2026, 1, 10).unwrap(),
             horse_num: 7,
             factors: empty_factors(),
+            model_win: 0.2,
+            model_place: 0.3,
+            model_show: 0.4,
             finishing_position: Some(1),
             win_odds: Some(4.0),
             popularity: Some(3),
@@ -775,10 +784,12 @@ mod feature_dump_tests {
         );
         // signal3（cells[27..30]）も欠落で空。
         assert!(cells[27..30].iter().all(String::is_empty));
+        // 内蔵モデル予測3（cells[30..33]）は必ず実値。
+        assert_eq!(&cells[30..33], ["0.2", "0.3", "0.4"]);
         // ラベルは実値（finishing_position=1, win_odds=4.0→"4", popularity=3）。
-        assert_eq!(cells[30], "1");
-        assert_eq!(cells[31], "4");
-        assert_eq!(cells[32], "3");
+        assert_eq!(cells[33], "1");
+        assert_eq!(cells[34], "4");
+        assert_eq!(cells[35], "3");
     }
 
     /// 実値を持つ factor は (win,place,show,starts) の 4 セルに展開され、欠落ラベルは空になること。
@@ -798,6 +809,9 @@ mod feature_dump_tests {
             date: NaiveDate::from_ymd_opt(2026, 1, 10).unwrap(),
             horse_num: 1,
             factors,
+            model_win: 0.1,
+            model_place: 0.2,
+            model_show: 0.3,
             finishing_position: None,
             win_odds: None,
             popularity: None,
@@ -805,10 +819,12 @@ mod feature_dump_tests {
         let cells = feature_row_cells(&row);
         // horse_surface は course_gate(3..7) の次の cells[7..11]。
         assert_eq!(&cells[7..11], ["0.3", "0.4", "0.5", "10"]);
+        // 内蔵モデル予測（cells[30..33]）は欠落しない。
+        assert_eq!(&cells[30..33], ["0.1", "0.2", "0.3"]);
         // 欠落ラベルは空セル。
-        assert_eq!(cells[30], "");
-        assert_eq!(cells[31], "");
-        assert_eq!(cells[32], "");
+        assert_eq!(cells[33], "");
+        assert_eq!(cells[34], "");
+        assert_eq!(cells[35], "");
     }
 
     /// IO 本体 `write_feature_dump` が「ヘッダ行 + 各行 = `feature_row_cells` の TSV 連結」を出力し、
@@ -820,6 +836,9 @@ mod feature_dump_tests {
             date: NaiveDate::from_ymd_opt(2026, 1, 10).unwrap(),
             horse_num: 7,
             factors: empty_factors(),
+            model_win: 0.2,
+            model_place: 0.3,
+            model_show: 0.4,
             finishing_position: Some(1),
             win_odds: Some(4.0),
             popularity: Some(3),

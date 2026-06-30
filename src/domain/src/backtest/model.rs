@@ -204,10 +204,13 @@ pub struct ExoticSegment {
     pub payout_rate: f64,
 }
 
-/// 学習型モデル評価ハーネス（#272 Phase A）の 1 出走馬分の特徴量＋ラベル行。`analyze backtest
-/// --dump-features` 要求時のみ収集される。特徴量は本番 predict と同じ walk-forward（`races.date < D`）
-/// で算出した [`HorseFactors`]（市場ブレンド・冪変換の前の生値）で、ラベルは確定着順・人気、value 検証用に
-/// 当時市場の単勝オッズを併載する。欠落（`Option` の `None`）は TSV で空セルとして書き出し、`0` 埋めしない。
+/// 学習型モデル評価ハーネス（#272 Phase A / #309）の 1 出走馬分の特徴量＋内蔵モデル予測＋ラベル行。
+/// `analyze backtest --dump-features` 要求時のみ収集される。特徴量は本番 predict と同じ walk-forward
+/// （`races.date < D`）で算出した [`HorseFactors`]（市場ブレンド・冪変換の前の生値）。`model_*` は backtest が
+/// 校正・的中集計に用いるのと同一の最終確率（指定フラグの blend/冪変換適用後）で、Python 評価ハーネス③が
+/// これを集計して `analyze backtest` の数値と一致することを確認する忠実性サニティに使う（#309）。ラベルは
+/// 確定着順・人気、value 検証用に当時市場の単勝オッズを併載する。欠落（`Option` の `None`）は TSV で空セル
+/// として書き出し、`0` 埋めしない。
 #[derive(Debug, Clone, PartialEq)]
 pub struct FeatureRow {
     /// レース ID（12 桁）。
@@ -218,6 +221,13 @@ pub struct FeatureRow {
     pub horse_num: u32,
     /// 本番 predict と同経路で算出した素性（ブレンド・冪変換前）。`None` 項は欠落（母数除外）。
     pub factors: HorseFactors,
+    /// 内蔵モデルの単勝確率。backtest が評価する最終確率（指定フラグの blend/win_power 等を適用後）と
+    /// 同一値で、Python 評価ハーネスの忠実性サニティ（③）の基準に使う。全出走馬に必ず付く。
+    pub model_win: f64,
+    /// 内蔵モデルの連対（2 着以内）確率。`model_win` と同じく backtest 評価値と同一。
+    pub model_place: f64,
+    /// 内蔵モデルの複勝（3 着以内）確率。`model_win` と同じく backtest 評価値と同一。
+    pub model_show: f64,
     /// 確定着順（ラベル）。着順なし（除外・失格・競走中止等）は `None`。
     pub finishing_position: Option<u32>,
     /// 当時市場の単勝オッズ。当時 race_odds スナップショット（as-of）を優先し、無ければ PDF 確定単勝で

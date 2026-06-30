@@ -348,11 +348,16 @@ impl<R: StatsRepository + OddsRepository, P: PdfParser, F: PdfFetcher> Interacto
                     })
                     .collect();
 
-                // 学習型モデル評価ハーネス（#272 Phase A）: ダンプ要求時のみ、当該レースの全出走馬の
-                // 素性（ブレンド・冪変換前の生 HorseFactors）＋ラベル＋当時市場単勝を収集する。
+                // 学習型モデル評価ハーネス（#272 Phase A / #309）: ダンプ要求時のみ、当該レースの全出走馬の
+                // 素性（ブレンド・冪変換前の生 HorseFactors）＋内蔵モデル予測＋ラベル＋当時市場単勝を収集する。
                 // entry_factors は starters と同集合・同順で、by_num は確定着順/人気/PDF 確定単勝を持つ。
-                // win_odds は backtest の top_pick_odds と同一ソース（当時 race_odds 優先・無ければ PDF 単勝）。
+                // model_* は probs（blend/win_power 適用後＝backtest が校正・的中に使う最終確率）と同一値を
+                // 馬番で引く（忠実性サニティの基準）。win_odds は top_pick_odds と同一ソース（当時優先・無ければ PDF）。
                 if dump_features {
+                    let prob_by_num: HashMap<u32, (f64, f64, f64)> = probs
+                        .iter()
+                        .map(|p| (p.horse_num.value(), (p.win_prob, p.place_prob, p.show_prob)))
+                        .collect();
                     for (entry, factors) in &entry_factors {
                         let (finishing_position, pdf_odds, popularity) = by_num
                             .get(&entry.horse_num.value())
@@ -362,11 +367,19 @@ impl<R: StatsRepository + OddsRepository, P: PdfParser, F: PdfFetcher> Interacto
                             .as_ref()
                             .and_then(|m| m.win.get(&entry.horse_num))
                             .map(|o| o.value());
+                        // probs は entry_factors と 1:1（同じ starters 集合から estimate）なので必ず引ける。
+                        let (model_win, model_place, model_show) = prob_by_num
+                            .get(&entry.horse_num.value())
+                            .copied()
+                            .expect("probs covers every starter (1:1 with entry_factors)");
                         feature_rows.push(FeatureRow {
                             race_id: race.race_id.to_string(),
                             date: race.date,
                             horse_num: entry.horse_num.value(),
                             factors: factors.clone(),
+                            model_win,
+                            model_place,
+                            model_show,
                             finishing_position,
                             win_odds: market_win.or(pdf_odds),
                             popularity,
