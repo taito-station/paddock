@@ -20,6 +20,7 @@ within-race z-score（診断の指摘③）は **prototype 測定のみ**（Rust
 from __future__ import annotations
 
 import argparse
+import sys
 
 import feature_resolution_diag as d
 
@@ -48,8 +49,8 @@ def eval_weights(races, gated, weights=None):
             top1 += 1
         aw.extend(win_p)
         ay.extend(yw)
-    return {"auc": d.auc(aw, ay), "top1": top1 / n, "brier": d.brier(aw, ay),
-            "logloss": d.logloss(aw, ay), "n": n}
+    return {"auc": d.auc(aw, ay), "top1": top1 / n if n else float("nan"),
+            "brier": d.brier(aw, ay), "logloss": d.logloss(aw, ay), "n": n}
 
 
 def zscore_win_scores(rrows, weights=None):
@@ -101,7 +102,7 @@ def eval_zscore(races, gated, weights=None):
             top1 += 1
         aw.extend(sc)
         ay.extend(yw)
-    return {"auc": d.auc(aw, ay), "top1": top1 / n, "n": n}
+    return {"auc": d.auc(aw, ay), "top1": top1 / n if n else float("nan"), "n": n}
 
 
 def fmt(label, m, base=None):
@@ -119,6 +120,11 @@ def run(args):
     gated = gated_set(races)
     print(f"# {len(rows)} 行 / {len(races)} レース / gated {len(gated)} ({args.tsv})\n")
 
+    if not gated:
+        print("勝馬記録ありかつオッズありのレースが 0 件です。入力 TSV を確認してください。", file=sys.stderr)
+        return
+    # 注: baseline（weights=None）は現行ミラー重み＝マージ後は新重み（course_gate1.0/jockey2.0）を指す。
+    # before/after の対比は (3) の candidates 行 "old (cg=2.0 jk=1.0)" / "cg=1.0 jk=2.0 (採用)" を使う。
     base = eval_weights(races, gated)  # 現行重み（weights=None）
     print("## baseline（現行重み）")
     print(fmt("baseline", base))
@@ -150,7 +156,7 @@ def run(args):
         "cg=0 jk=2 tr=1.5": {"course_gate": 0.0, "jockey_surface": 2.0, "trainer_surface": 1.5},
         "cg=0.5 jk=1.5 tr=1.5": {"course_gate": 0.5, "jockey_surface": 1.5, "trainer_surface": 1.5},
         "cg=0 (drop) only": {"course_gate": 0.0},
-        "all-equal-1.0": {n: 1.0 for n, *_ in d.STAT_FACTORS},
+        "stat-equal-1.0 (scalarは既定)": {n: 1.0 for n, *_ in d.STAT_FACTORS},
         # 旧重み（before baseline 再現用・ADR 0056 の 0.649/0.162 に対応）。
         "old (cg=2.0 jk=1.0)": {"course_gate": 2.0, "jockey_surface": 1.0},
     }
@@ -164,7 +170,7 @@ def run(args):
 
     # 4. 最良案の per-quarter 安定性
     if best[2] is not None:
-        print(f"\n## (4) 最良案 [{best[1]}] の per-quarter 安定性（AUC/top1）")
+        print(f"\n## (4) 最良案 [{best[1]}] の per-quarter 安定性（AUC/top1。base=現行ミラー重み）")
         print(f"  {'四半期':8} {'races':>6} {'AUC_base':>9} {'AUC_best':>9} {'top1_base':>10} {'top1_best':>10}")
         from collections import defaultdict
         q_races = defaultdict(dict)
