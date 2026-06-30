@@ -1,0 +1,9 @@
+# 学習型モデル（#309 Phase B）の訓練・評価に使う依存。忠実性サニティ③（faithfulness.py）は
+# 標準ライブラリのみで動くが、PL/条件付きロジットの当てはめには numpy/scipy、非線形 GBM 木の
+# 検証には scikit-learn の HistGradientBoostingClassifier を使う。
+# 注: LightGBM は libomp（OpenMP のシステム共有ライブラリ）を要求し未導入環境ではロードできない
+# ため、libomp 不要・NaN ネイティブ対応で同じヒストグラム勾配ブースティング系の sklearn HGB を採用。
+# 再現用: python3 -m venv scripts/harness/.venv && scripts/harness/.venv/bin/pip install -r scripts/harness/requirements.txt
+numpy>=2,<3
+scipy>=1.13,<2
+scikit-learn>=1.5,<2
