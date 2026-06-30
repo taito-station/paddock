@@ -23,15 +23,30 @@ shift 2
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-DUMP="$(mktemp -t paddock_dump.XXXXXX.tsv)"
-REPORT="$(mktemp -t paddock_bt.XXXXXX.txt)"
-trap 'rm -f "$DUMP" "$REPORT"' EXIT
+# mktemp は GNU と BSD/macOS でテンプレ解釈が異なるため、末尾 X 列のテンプレ形式
+# （-t 無し・拡張子無し）で両対応する。
+TMP="${TMPDIR:-/tmp}"
+DUMP="$(mktemp "$TMP/paddock_dump.XXXXXX")"
+REPORT="$(mktemp "$TMP/paddock_bt.XXXXXX")"
+CARGO_LOG="$(mktemp "$TMP/paddock_cargo.XXXXXX")"
+trap 'rm -f "$DUMP" "$REPORT" "$CARGO_LOG"' EXIT
 
 # production 構成: m=10 / win_power=1.25 / place_show_power=2.0 / α=0.2。
+# cargo の stderr（ビルド・html5ever WARN 等）は REPORT を汚さないよう別ログに退避する。
+# 破棄せず保持し、cargo/backtest 自体が失敗したときだけ診断として出す（忠実性の不一致は
+# python が自前で NG を表示するため cargo ログは出さない）。
+set +e
 cargo run -q --manifest-path "$REPO_ROOT/Cargo.toml" -p analyze -- backtest \
     --from "$FROM" --to "$TO" \
     --shrinkage-m 10 --win-power 1.25 --place-show-power 2.0 --blend-alpha 0.2 \
-    --dump-features "$DUMP" "$@" 2>/dev/null | tee "$REPORT"
+    --dump-features "$DUMP" "$@" 2>"$CARGO_LOG" | tee "$REPORT"
+cargo_rc=${PIPESTATUS[0]}
+set -e
+if [ "$cargo_rc" -ne 0 ]; then
+    echo "backtest 実行に失敗 (rc=$cargo_rc):" >&2
+    cat "$CARGO_LOG" >&2
+    exit "$cargo_rc"
+fi
 
 echo
 python3 "$SCRIPT_DIR/faithfulness.py" "$DUMP" --backtest-report "$REPORT"

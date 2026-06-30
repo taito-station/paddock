@@ -10,7 +10,7 @@
 依存は標準ライブラリのみ（このリポの Python 規約に合わせる）。集計ロジックは Rust 側
 `src/domain/src/backtest/{evaluate,metrics}.rs` を忠実に移したもの:
   - トップ選好馬 = model_win 最大（同値は馬番昇順）。
-  - 的中率（単勝/連対/複勝）= トップ選好馬の確定着順が 1 / ≤2 / ≦3。母数は評価レース数。
+  - 的中率（単勝/連対/複勝）= トップ選好馬の確定着順が 1 / ≤2 / ≤3。母数は評価レース数。
   - 想定回収率 = Σ(的中時オッズ) / オッズ取得レース数（賭金一定 100 円は約分）。
   - Brier/LogLoss = 全出走馬エントリ平均。LogLoss は ε=1e-15 クランプ。
 """
@@ -102,11 +102,30 @@ def compute_metrics(rows):
     }
 
 
+# 突合に必要な期待値キー。1 つでも抽出できなければレポートのフォーマットがドリフトしたと
+# みなしてゲートを hard fail させる（パース退行で「偽 OK」になる穴を塞ぐ）。
+REQUIRED_REPORT_KEYS = (
+    "races",
+    "win_hit",
+    "place_hit",
+    "show_hit",
+    "payout_rate",
+    "payout_races",
+    "brier_win",
+    "brier_place",
+    "brier_show",
+    "logloss_win",
+    "logloss_place",
+    "logloss_show",
+)
+
+
 def parse_backtest_report(text):
     """`analyze backtest` の標準出力から突合用の数値を抽出する。
 
     印字は的中率/回収率が小数1桁の%、Brier/LogLoss が小数4桁。丸め後の値を返すため、
-    突合は印字桁に合わせた許容で行う（[`compare`] 参照）。
+    突合は印字桁に合わせた許容で行う（[`compare`] 参照）。抽出できなかったキーは `None`。
+    呼び出し側は必須キーの欠落を hard fail として扱う（[`REQUIRED_REPORT_KEYS`] / [`main`]）。
     """
     out = {}
 
@@ -114,23 +133,24 @@ def parse_backtest_report(text):
         m = re.search(rf"{label}\s*[:：]\s*([\d.]+)%", text)
         return float(m.group(1)) / 100.0 if m else None
 
-    out["races"] = (
-        int(re.search(r"評価レース数\s*[:：]\s*(\d+)", text).group(1))
-        if re.search(r"評価レース数\s*[:：]\s*(\d+)", text)
-        else None
-    )
+    m_races = re.search(r"評価レース数\s*[:：]\s*(\d+)", text)
+    out["races"] = int(m_races.group(1)) if m_races else None
     out["win_hit"] = pct("単勝的中率")
     out["place_hit"] = pct("連対的中率")
     out["show_hit"] = pct("複勝的中率")
-    m = re.search(r"想定回収率\s*[:：]\s*([\d.]+)%", text)
-    out["payout_rate"] = float(m.group(1)) / 100.0 if m else None
+    # 想定回収率と母数（オッズ取得レース数）を同じ行から取る。
+    m_pay = re.search(r"想定回収率\s*[:：]\s*([\d.]+)%\s*\(母数\s*(\d+)\s*レース\)", text)
+    out["payout_rate"] = float(m_pay.group(1)) / 100.0 if m_pay else None
+    out["payout_races"] = int(m_pay.group(2)) if m_pay else None
 
-    # Brier/LogLoss テーブル: 「単勝 0.0589 0.2104」等。
+    # Brier/LogLoss テーブル（「単勝 0.0589 0.2104」等）は「## 確率校正」セクション以降に限定して
+    # 行頭アンカーで拾う。reliability 等の後続表や的中率行を誤って拾わないようにするため。
+    cal_idx = text.find("確率校正")
+    cal_section = text[cal_idx:] if cal_idx != -1 else text
     for jp, key in (("単勝", "win"), ("連対", "place"), ("複勝", "show")):
-        m = re.search(rf"{jp}\s+([\d.]+)\s+([\d.]+)", text)
-        if m:
-            out[f"brier_{key}"] = float(m.group(1))
-            out[f"logloss_{key}"] = float(m.group(2))
+        m = re.search(rf"^{jp}\s+([\d.]+)\s+([\d.]+)", cal_section, re.MULTILINE)
+        out[f"brier_{key}"] = float(m.group(1)) if m else None
+        out[f"logloss_{key}"] = float(m.group(2)) if m else None
     return out
 
 
@@ -150,8 +170,11 @@ def compare(computed, expected):
         "logloss_show": 5e-5,
     }
     mismatches = []
-    if expected.get("races") is not None and expected["races"] != computed["races"]:
-        mismatches.append(("races", computed["races"], expected["races"], 0))
+    # 整数の母数（評価レース数・オッズ取得レース数）は許容ゼロで厳密一致を要求する。
+    for key in ("races", "payout_races"):
+        exp = expected.get(key)
+        if exp is not None and exp != computed.get(key):
+            mismatches.append((key, computed.get(key), exp, 0))
     for key, t in tol.items():
         exp = expected.get(key)
         got = computed.get(key)
@@ -197,6 +220,16 @@ def main(argv=None):
 
     with open(args.backtest_report, encoding="utf-8") as f:
         expected = parse_backtest_report(f.read())
+    # パース退行（backtest 出力フォーマットの変化）を「偽 OK」にしないため、必須キーが 1 つでも
+    # 取れなければ突合せず hard fail する。これがゲートの堅牢性の要（#312 レビュー C1）。
+    missing = [k for k in REQUIRED_REPORT_KEYS if expected.get(k) is None]
+    if missing:
+        print(
+            f"\n忠実性サニティ NG: backtest レポートのパースに失敗（未抽出キー: {', '.join(missing)}）。"
+            "出力フォーマットが変わった可能性。",
+            file=sys.stderr,
+        )
+        return 1
     mismatches = compare(metrics, expected)
     if mismatches:
         print("\n忠実性サニティ NG（ハーネスが backtest と不一致）:", file=sys.stderr)
