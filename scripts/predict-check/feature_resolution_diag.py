@@ -50,7 +50,7 @@ SHRINKAGE_M = 10.0
 WIN_POWER = 1.25
 PLACE_SHOW_POWER = 2.0
 # γ=1.0 を厳密 no-op 扱いにする machine-eps（Rust estimate.rs の f64::EPSILON 判定の鏡映）。
-GAMMA_EPS = 2.2e-16
+GAMMA_EPS = sys.float_info.epsilon
 
 COL = {
     "race_id": 0, "date": 1, "horse_num": 2,
@@ -357,12 +357,12 @@ def run(args):
     print(f"  {'四半期':8} {'races':>6} {'top1_model':>11} {'top1_market':>12} {'AUC_model':>10} {'AUC_market':>11}")
     by_q = defaultdict(lambda: {"t1m": 0, "t1k": 0, "n": 0, "w": [], "i": [], "y": []})
     for rid, rrows in races.items():
+        if rid not in gated_ids:  # (1)/(2)/(3) と同一母数。gate を先に置き不要な race_probs を避ける
+            continue
         win_p, _, _ = race_probs(rrows)
         fp = [_fp(r) for r in rrows]
         y_win = [1 if p == 1 else 0 for p in fp]
-        implied, s = _implied(rrows)
-        if not (any(y_win) and s > 0):  # (1) と同一母数（勝馬記録あり かつ オッズあり）
-            continue
+        implied, _ = _implied(rrows)
         q = quarter(rrows[0][COL["date"]])
         b = by_q[q]
         b["n"] += 1
@@ -382,7 +382,7 @@ def run(args):
     print("## (2) 素性別 識別力・欠落率（分散/相関は勝馬+オッズありレース・corr は show率代理）")
     print(f"  {'factor':24} {'欠落率':>7} {'race内分散(平均)':>16} {'corr(show率,複勝)':>18}")
     n_tot = len(rows)
-    for name, base, w in STAT_FACTORS:
+    for name, base, _ in STAT_FACTORS:
         miss = sum(1 for r in rows if _stat_cell(r, base) is None)  # 欠落率は全行
         within_var, rates, ys = [], [], []
         for rid, rrows in races.items():
