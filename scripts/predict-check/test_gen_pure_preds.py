@@ -38,6 +38,16 @@ def test_parse_table_ignores_non_matching():
     assert G.parse_table("") == []
 
 
+def test_is_pure_model_alpha():
+    # 純モデル＝α≥1.0（estimate.rs が alpha>=1.0 を純モデルに短絡する実装に一致）。
+    assert G.is_pure_model_alpha("1.0") and G.is_pure_model_alpha("1") and G.is_pure_model_alpha("1.5")
+    # 純市場(0)・現行(0.2) は純モデルでない。非数値は False（predict 側に委ね警告）。
+    assert not G.is_pure_model_alpha("0")
+    assert not G.is_pure_model_alpha("0.2")
+    assert not G.is_pure_model_alpha("0.999")
+    assert not G.is_pure_model_alpha("abc")
+
+
 def test_load_pure_roundtrip():
     import calibration as C
     with tempfile.TemporaryDirectory() as d:

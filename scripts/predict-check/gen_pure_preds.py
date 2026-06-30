@@ -1,16 +1,23 @@
 #!/usr/bin/env python3
-"""純モデル（α=0）の確率を bt_races の各レースで再生成する（校正計測の入力）。
+"""純モデル（α=1.0）の確率を bt_races の各レースで再生成する（校正計測の入力）。
 
-`paddock-analyze predict <slug> --blend-alpha 0` を各レースで実行し、確率テーブル
+`paddock-analyze predict <slug> --blend-alpha 1.0` を各レースで実行し、確率テーブル
 （馬番/馬名/勝率/連対率/複勝率）をパースして TSV に落とす。市場ブレンドを切った
 純モデル出力なので、win/place/show の校正（reliability / ECE）計測に使える。
 
+α の意味（重要）: 実装は `blended = α·model + (1−α)·market`（estimate.rs / ADR 0045・0052）で
+**α＝モデル重み**。**α=1.0 が純モデル / α=0.0 が純市場 / α=0.2 が現行**。以前の docstring・既定値は
+「α=0=純モデル」と逆だった（#303 で是正）。純モデル校正を測るには α=1.0 を渡す（既定もこれに変更）。
+
 出力 TSV 列: race_slug, nk12, horse_num, win, place, show（win/place/show は小数 0..1）
 
-注意: `analyze predict` は production 設定を通すため、place/show は本番採用の冪変換
+注意1: `analyze predict` は production 設定を通すため、place/show は本番採用の冪変換
 （place_show_power, ADR 0047）適用済みの値になる。本番が実際に表示する純モデル校正を
 そのまま測る用途。素スコア段階の校正を測りたい場合は place_show_power を off にした
 ビルド/設定で生成すること。
+注意2: `analyze predict` は集計統計に as_of=None（全期間=未来込み）を使うため、過去レースを
+再予想すると未来データがリークする（#302）。本スクリプトはその制約を引き継ぐ。リーク無しの
+集約スコアは `analyze backtest` を使う（#302 / ADR 0052）。
 
 使い方:
     python3 scripts/predict-check/gen_pure_preds.py \
@@ -39,22 +46,29 @@ def parse_table(text):
     return rows
 
 
+def is_pure_model_alpha(alpha_str):
+    """--alpha が純モデル相当か。実装（estimate.rs）は alpha>=1.0 を純モデルに短絡するので
+    >=1.0 を純モデル扱いにする（"1"/"1.0"/"1.5" 等）。数値でなければ False（predict 側に委ね警告）。"""
+    try:
+        return float(alpha_str) >= 1.0
+    except ValueError:
+        return False
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--races", default="/tmp/bt252/bt_races.tsv")
     ap.add_argument("--bin", default="./target/debug/paddock-analyze")
     ap.add_argument("--out", default="/tmp/bt252/pure_preds.tsv")
-    ap.add_argument("--alpha", default="0", help="blend-alpha（既定 0=純モデル）")
+    ap.add_argument("--alpha", default="1.0",
+                    help="blend-alpha＝モデル重み（既定 1.0=純モデル。α=0 は純市場、α=0.2 が現行）")
     args = ap.parse_args()
 
-    # 出力 TSV は純モデル前提（calibration.py も α=0 として集計）。α≠0 を渡すと
-    # 「純モデルでない値」が pure_preds として下流に流れるので警告する。
-    try:
-        alpha_is_zero = float(args.alpha) == 0.0  # "0" / "0.0" / "0.00" などを等価に扱う
-    except ValueError:
-        alpha_is_zero = False  # 数値でなければ predict 側に委ねつつ警告
-    if not alpha_is_zero:
-        print(f"WARN: --alpha={args.alpha}（≠0）。出力は純モデルではない（下流は α=0 前提）", file=sys.stderr)
+    # 出力 TSV は純モデル前提（calibration.py も入力を純モデル＝α=1.0 生成と仮定して集計）。
+    # 純モデルでない α を渡すと「純モデルでない値」が pure_preds として下流に流れるので警告する。
+    if not is_pure_model_alpha(args.alpha):
+        print(f"WARN: --alpha={args.alpha}（純モデル=α≥1.0 でない）。出力は純モデルではない"
+              f"（下流は純モデル＝α=1.0 前提）", file=sys.stderr)
 
     # host は localhost を避け 127.0.0.1 を使う（兄弟スクリプトと同じ。localhost だと間欠失敗が再発）。
     db = os.environ.get("PADDOCK_DB_URL", "postgres://paddock:paddock@127.0.0.1:5432/paddock")
