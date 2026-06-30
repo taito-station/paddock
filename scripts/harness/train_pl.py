@@ -58,8 +58,10 @@ def _f(s):
     return float(s) if s not in ("", None) else math.nan
 
 
-def load_races(path):
-    """ダンプ TSV をレース単位の [`Race`] リストに読む（日付昇順）。"""
+def load_races(path, feature_cols=FUND_FEATURES):
+    """ダンプ TSV をレース単位の [`Race`] リストに読む（日付昇順）。`fund` には `feature_cols` の列を
+    その順で詰める（PL は 9 基礎、GBM は基礎＋starts の 15 を渡す）。`Race.fund` 以外（winner/win_odds/
+    baseline）は列セットに依らず共通。`finishing_position` はラベルにのみ使い特徴量には混入しない。"""
     by_race = {}
     order = []
     with open(path, newline="", encoding="utf-8") as fh:
@@ -73,14 +75,14 @@ def load_races(path):
     for rid in order:
         rows = by_race[rid]
         n = len(rows)
-        fund = np.full((n, len(FUND_FEATURES)), math.nan)
+        fund = np.full((n, len(feature_cols)), math.nan)
         win_odds = np.full(n, math.nan)
         baseline = np.full(n, math.nan)
         horse_nums = []
         winner = None
         for i, row in enumerate(rows):
             horse_nums.append(int(row["horse_num"]))
-            for j, col in enumerate(FUND_FEATURES):
+            for j, col in enumerate(feature_cols):
                 fund[i, j] = _f(row[col])
             win_odds[i] = _f(row["win_odds"])
             baseline[i] = _f(row["model_win"])
@@ -219,7 +221,11 @@ def monthly_cutoffs(races, start):
 
 
 def evaluate(races, preds):
-    """OOS レース集合で Brier(win)/LogLoss(win)/flat ROI を、PL・baseline・市場で算出する。"""
+    """OOS レース集合で Brier(win)/LogLoss(win)/flat ROI を、PL・baseline・市場で算出する。
+
+    母数は OOS の全レース・全出走馬（`analyze backtest` と同じ慣習）。winner 不明レース（着順が全馬
+    未確定）も含み、その場合 y は全 0・的中は常に非的中になる。全モデルが同一 OOS 集合・同一母数で
+    評価されるため比較は公平。実ダンプは結果確定済みでこの母数バイアスは軽微。"""
     metrics = {"pl": _Acc(), "baseline": _Acc(), "market": _Acc()}
     n_races = 0
     for race in races:
@@ -293,7 +299,7 @@ def main(argv=None):
     _, m_mkt = evaluate(oos, preds_mkt)
 
     print(f"# PL walk-forward 評価（OOS {args.oos_start}〜 / {n1} レース / L2={args.l2}）")
-    print(f"{'モデル':<22} {'Brier':>9} {'LogLoss':>9} {'flat ROI':>9}")
+    print(f"{'モデル':<22} {'Brier':>9} {'LogLoss':>9} {'flat 払戻率':>9}")
 
     def line(label, m):
         print(
@@ -305,9 +311,29 @@ def main(argv=None):
     line("PL 市場あり(fund+mkt)", m_mkt["pl"])
     line("baseline(α=0.2)", m_fund["baseline"])
     line("純市場(implied)", m_fund["market"])
+
+    # ADR 0053 の中心証拠を再現可能にするため、全 winner ありレースに当てはめた係数を出す。
+    # 「市場を入れると β_market≈1 で市場を再現し fundamental が ±0 へ崩壊」を監査できる。
+    # 注: fundamental は標準化済み係数、log_market_implied は log-implied 生値の係数でスケールが
+    # 異なる（β_market≈1 は softmax(log implied)=implied＝市場再現を意味する）。
+    train_all = [r for r in races if r.winner is not None]
+    imp, mean, std = fit_stats(train_all)
+    b_fund = fit_conditional_logit(
+        build_design(train_all, False, imp, mean, std), [r.winner for r in train_all], args.l2
+    )
+    b_mkt = fit_conditional_logit(
+        build_design(train_all, True, imp, mean, std), [r.winner for r in train_all], args.l2
+    )
+    print("\n## 学習係数（全 winner ありレース当てはめ・|大|ほど寄与）")
+    print("特徴量                       基礎のみ   市場あり")
+    for j, name in enumerate(FUND_FEATURES):
+        print(f"  {name:<26} {b_fund[j]:+7.3f}  {b_mkt[j]:+7.3f}")
+    print(f"  {'log_market_implied':<26} {'—':>7}  {b_mkt[-1]:+7.3f}")
+
     print(
-        "\n注: flat ROI は「トップ選好馬の単勝 100 円」固定の参考値。控除率 20-25% のため"
-        "100% 接近は困難。採否は複数指標＋複数窓で判断する。"
+        "\n注: 「flat 払戻率」は「トップ選好馬の単勝 100 円」固定での総払戻倍率／賭けレース数（net ROI で"
+        "なく粗の払戻率）。Brier/LogLoss は全出走馬を独立 Bernoulli とした per-horse スコア（全モデル"
+        "共通母数で比較は公平）。控除率 20-25% のため払戻率の 100% 接近は困難。採否は複数指標で判断する。"
     )
     return 0
 

@@ -43,16 +43,23 @@ as-of ダンプ（統計は予測対象日 `< D`）。さらに日付分割で**
 | HGB 基礎（fund のみ） | 0.0610 | 0.2317 | 76.7% |
 | HGB 市場あり（fund+mkt） | 0.0554 | 0.1988 | 74.6% |
 
-（Brier/LogLoss は小さいほど良い・全出走馬エントリ母数。flat ROI は「トップ選好馬の単勝 100 円」固定の参考値。
-PL は L2=1/10/100 で同結論＝正則化に頑健。）
+（Brier/LogLoss は小さいほど良い・全出走馬を独立 Bernoulli とした **per-horse** スコア（race-level の
+`-log p_winner` ではない）で全モデル共通母数のため比較は公平。flat ROI は「トップ選好馬の単勝 100 円」固定の
+**総払戻倍率／賭けレース数＝粗の払戻率**（net ROI ではない）。PL は L2=1/10/100 で同結論＝正則化に頑健。）
 
 **観察**:
 
 - **市場を入れると学習モデルは「市場をほぼ再現し fundamental を無視」する。** PL 市場ありの係数は
-  `log_market_implied = +1.04`（≈市場そのまま）に対し**全 fundamental 係数が ±0.04 以下に崩壊**。HGB 市場ありも
-  Brier 0.0554・LogLoss 0.1988 と純市場（0.0551/0.1975）・baseline（0.0552/0.1981）に並ぶだけで改善しない。
-  **線形・非線形いずれでも市場が fundamental シグナルを包含**しており、市場に対する marginal な情報を
-  過去走 fundamental から取り出せていない。
+  `log_market_implied = +1.04`（≈市場そのまま）に対し**全 fundamental 係数が ±0.05 未満に崩壊**（最大でも
+  jockey_recent_form の +0.043。基礎のみでは jockey_surface_win +0.34 等が効くのと対照的）（`train_pl.py`
+  が main で当てはめ係数を出力する。`scripts/harness/.venv/bin/python scripts/harness/train_pl.py <dump>` の
+  「学習係数」節で再現可能）。HGB 市場ありも Brier 0.0554・LogLoss 0.1988 と純市場（0.0551/0.1975）・
+  baseline（0.0552/0.1981）に並ぶだけで改善しない。**線形・非線形いずれでも市場が fundamental シグナルを
+  包含**しており、市場に対する marginal な情報を過去走 fundamental から取り出せていない。
+  - 係数のスケール注記: fundamental は標準化済み（z-score）係数、`log_market_implied` は log-implied 生値の
+    係数で、直接の絶対値比較はスケールが異なる。`β_market ≈ 1` は `softmax(log implied) = implied`＝**市場の
+    完全再現**を意味する意図的設計で、その上で fundamental 係数が ±0 へ落ちる（市場再現で十分＝fundamental
+    不要）という**定性**が結論の核。
 - **fundamental のみのモデルは市場に校正で劣る。** PL 基礎 Brier 0.0614・HGB 基礎 0.0610 はいずれも純市場
   0.0551 より明確に悪い。HGB 基礎の flat ROI 76.7% は baseline を上回るが、**校正（Brier/LogLoss）は market に
   劣るまま**で、単一窓の flat ROI（高オッズ的中由来で高分散）であり信頼できるエッジではない。
@@ -86,6 +93,10 @@ PL は L2=1/10/100 で同結論＝正則化に頑健。）
   資金流入など、ADR 0027）を取り込む新規特徴量が得られれば再検討の余地はある。
 - value シグナル（純モデルの高 ROI、ADR 0052 留保）の真偽は本 ADR では未解決のまま。市場包含の本結果は、
   fundamental 単体の overlay が高分散ノイズである可能性を支持する側の証拠になる。
+- 市場特徴量・純市場・回収率に使う `win_odds` はダンプ上のオッズ（当時 race_odds スナップショット優先・
+  無ければ PDF 確定単勝）で、bet 時点より後の情報を含みうる。ただしこれは**市場側を有利にする**方向で、
+  「fundamental が市場を超えない＝棄却」の結論をむしろ保守的に強める（市場を過大評価しても fundamental は
+  勝てない）ため、結論の妥当性は損なわれない。
 - 依存追加: 学習・評価に numpy/scipy/scikit-learn を使う venv（`scripts/harness/requirements.txt`）。忠実性
   サニティ③（`faithfulness.py`）は引き続き標準ライブラリのみ。
 
