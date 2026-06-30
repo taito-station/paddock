@@ -315,7 +315,8 @@ def main(argv=None):
             f"{label:<22} {m['brier']:>9.4f} {m['logloss']:>9.4f} {m['roi'] * 100:>8.1f}%"
         )
 
-    # baseline / market は両 walk_forward で同一（同じ OOS レース集合）。fund 側の値を使う。
+    # baseline / market は walk_forward に依らず evaluate 内で算出され、両呼び出しとも同じ OOS 集合な
+    # ので同値。fund 側の評価結果から表示する。
     line("PL 基礎(fund)", m_fund["pl"])
     line("PL 市場あり(fund+mkt)", m_mkt["pl"])
     line("baseline(α=0.2)", m_fund["baseline"])
