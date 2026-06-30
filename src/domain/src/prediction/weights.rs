@@ -2,10 +2,17 @@
 
 use super::model::RateTriple;
 
-pub(crate) const COURSE_GATE_WEIGHT: f64 = 2.0;
+/// コース×枠グループの複勝ベース率の重み。#272 改善① で 2.0→1.0 に再調整（ADR 0056）。
+/// 旧 2.0 は #87 の小窓 blended Brier で採られたが、Phase A 診断（4,594R 純モデル resolution）で
+/// course_gate はレース内でほぼ一定＝最も識別力が無い（複勝相関≒0）のに最大重みで識別素性を希釈
+/// していた。純モデル AUC は 2.0→1.0 で改善し、0 まで下げると逆に top1 が落ちるため 1.0 を採る。
+pub(crate) const COURSE_GATE_WEIGHT: f64 = 1.0;
 pub(crate) const SURFACE_WEIGHT: f64 = 1.0;
 pub(crate) const DISTANCE_WEIGHT: f64 = 1.0;
-pub(crate) const JOCKEY_WEIGHT: f64 = 1.0;
+/// 騎手（surface 別）項の重み。#272 改善① で 1.0→2.0 に再調整（ADR 0056）。Phase A 診断で
+/// jockey_surface は純モデルの主シグナル（leave-one-out で top1 を最も落とす）と判明し、up-weight が
+/// 純 AUC/top1 を全6四半期で改善（jk 2.0 が最大寄与・Brier/LogLoss も改善）。
+pub(crate) const JOCKEY_WEIGHT: f64 = 2.0;
 /// 調教師（trainer）項の重み。#87 で母数（results.trainer）を充足し backtest（0.0/0.5/1.0/2.0 を
 /// 比較, 2026-03-28〜05-31 / 144 レース, #81 後ロジック）で再検証した。項を有効化すると校正が改善
 /// （0.0→0.5 で LogLoss 単勝 0.60→0.40、Brier 系は小幅）。0.5/1.0/2.0 は拮抗で、1.0 が LogLoss 単勝・

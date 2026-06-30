@@ -32,10 +32,10 @@ from collections import defaultdict
 # --- Rust 定数の鏡映（src/domain/src/prediction/weights.rs, config.rs） -------------
 # FactorStat 系（shrinkage 対象）。名前→(列の起点 index, 重み)。各 factor は win/place/show/starts の 4 列。
 STAT_FACTORS = [
-    ("course_gate", 3, 2.0),
+    ("course_gate", 3, 1.0),  # #272 改善① で 2.0→1.0（ADR 0056）
     ("horse_surface", 7, 1.0),
     ("horse_distance", 11, 1.0),
-    ("jockey_surface", 15, 1.0),
+    ("jockey_surface", 15, 2.0),  # #272 改善① で 1.0→2.0（ADR 0056・主シグナル）
     ("trainer_surface", 19, 1.0),
     ("horse_track_condition", 23, 1.0),
 ]
