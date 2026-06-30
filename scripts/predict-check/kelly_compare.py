@@ -1,0 +1,282 @@
+#!/usr/bin/env python3
+"""#316: fractional Kelly 配分 vs 現行ヒューリスティック配分の walk-forward 比較。
+
+確率モデルのレバーは枯渇（ADR 0052/0053）。残る別軸が「賭け方（staking）」。現行の買い目配分は
+経験則（最大剰余法・固定予算・最低¥100, CLAUDE.md「買い方ルール」）で、確率とオッズに対する
+理論最適配分（fractional Kelly）になっていない。本スクリプトは **同一の買い目候補（baseline_pf =
+馬連◎軸ながし top5 + 三連複◎軸ながし top5）・同一の当時オッズ** の上で配分方式だけを変え、
+リーク無し walk-forward（/tmp/bt252, 71R）で現行配分と Kelly 配分を比較する。
+
+二つの土俵で測る:
+  (A) 定額土俵 — 総賭金を現行と同額（¥3,500/レース）に固定し、券種内の重みだけを
+      確率重み（現行）→ Kelly 比率 に替える。総額一定なので実 ROI 差は「どの脚に厚く張るか」
+      だけに由来する apples-to-apples 比較（alloc_compare.py と同じ原則）。
+  (B) bankroll 土俵 — fractional Kelly の本質（edge に応じ総賭金を bankroll 比で変える）を測る。
+      開始資金から時系列に張り→実払戻で清算→残高更新。現行（固定 ¥3,500/レース flat 張り）と
+      Kelly（λ·Σf_leg·bankroll）を、最終資金倍率・σ・最大DD・近似破産確率で比較する。
+      破産確率はレース順のブートストラップ並べ替え（既定 2000 本）で残高が ruin 閾値に
+      到達した経路の割合として近似する。
+
+【循環回避】EV/Kelly 判定に使うオッズ（DB 盤面）と的中時の清算（result.html 実配当）を分離する
+（umaren_backtest.py と同方針）。Kelly 式は本番 Rust src/domain/src/betting/kelly.rs を鏡映:
+net odds b=gross-1, f=(p·b−q)/b, clamp。
+
+リーク注意: bt_pred の確率は analyze predict 由来で過去走較正にリークの可能性（memory
+alpha_sign_and_predict_leak）。ただし配分比較は全方式が同一 probs を共有する common-mode で、
+相対比較（Kelly vs 現行）には影響しない。
+
+使い方:
+    python3 scripts/predict-check/kelly_compare.py [--bt-dir /tmp/bt252]
+"""
+import argparse
+import random
+import statistics
+import sys
+from itertools import combinations
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import umaren_backtest as ub  # noqa: E402
+
+UMAREN_BUDGET = 1500
+TRIO_BUDGET = 2000
+PF_BUDGET = UMAREN_BUDGET + TRIO_BUDGET  # 現行 baseline_pf の固定総額 ¥3,500
+
+
+def kelly_fraction(p, gross_odds, cap=1.0):
+    """Rust src/domain/src/betting/kelly.rs を鏡映。net b=gross-1; f=(p·b−q)/b; clamp[0,cap]。
+
+    gross_odds = 払戻倍率（JRA オッズ）。EV=p·gross_odds。負 edge / オッズ≤1 は 0。
+    """
+    b = gross_odds - 1.0
+    if b <= 0:
+        return 0.0
+    q = 1.0 - p
+    f = (p * b - q) / b
+    return max(0.0, min(cap, f))
+
+
+def race_legs(probs, quin_odds, trio_odds, pay):
+    """baseline_pf ユニバース（馬連◎軸 top5 + 三連複◎軸 top5）の脚を返す。
+
+    各脚 = (種別, combo, prob 的中確率, gross_odds DB盤面, paymult 実払戻倍率)。
+    paymult = result.html 配当（¥100 当たり円）/100 = 賭金 1 円当たりの総払戻。
+    DB 盤面オッズ欠落の脚は Kelly では除外（edge 不明な脚は張らない）。
+    """
+    ranked = sorted(probs, key=lambda n: -probs[n])
+    if len(ranked) < 3:
+        return []
+    A = ranked[0]
+    partners = ranked[1:6]
+    legs = []
+    for p in partners:
+        c = frozenset({A, p})
+        o = quin_odds.get(c, 0.0)
+        if o > 0:
+            legs.append(("umaren", c, ub.p_top2_set(probs, A, p), o,
+                         pay["umaren"].get(c, 0) / 100.0))
+    for a, b in combinations(partners, 2):
+        c = frozenset({A, a, b})
+        o = trio_odds.get(c, 0.0)
+        if o > 0:
+            legs.append(("trio", c, ub.p_top3_set(probs, (A, a, b)), o,
+                         pay["trio"].get(c, 0) / 100.0))
+    return legs
+
+
+def load(bt_dir):
+    """alloc_compare.load と同形だが、Kelly の edge 算出に DB 盤面オッズも返す。
+
+    返り値: races = [(probs, quin_odds, trio_odds, pay)]（date,venue,rnum 昇順＝時系列）。
+    """
+    races = ub.parse_races(str(Path(bt_dir) / "bt_races.tsv"))
+    exotic = ub.parse_exotic(str(Path(bt_dir) / "bt_exotic_odds.tsv"))
+    preds = {}
+    for d in sorted({r["date"] for r in races}):
+        p = Path(bt_dir) / f"bt_pred_{d}.txt"
+        if p.exists():
+            preds[d] = ub.parse_pred(p)
+    out = []
+    for r in sorted(races, key=lambda x: (x["date"], x["venue"], x["rnum"])):
+        probs = preds.get(r["date"], {}).get((r["venue"], r["rnum"]))
+        ex = exotic.get(r["pid"])
+        resf = Path(bt_dir) / f"res_{r['nk']}.html"
+        if not probs or not ex or not ex["quinella"] or not resf.exists():
+            continue
+        top3, pay = ub.parse_result(resf)
+        if len(top3) < 3:
+            continue
+        out.append((probs, ex["quinella"], ex["trio"], pay))
+    return out
+
+
+# --- (A) 定額土俵: 総額 ¥3,500 固定で重みだけ変える ---------------------------
+def stake_fixed(probs, quin_odds, trio_odds, pay, weight):
+    """総額 ¥3,500（馬連¥1,500+三連複¥2,000）固定で配分し (ret, stake) を返す。
+
+    weight="prob": 現行（馬連=probs[p]/三連複=probs[a]·probs[b]、最低¥100）。
+    weight="kelly": 券種内を Kelly 比率で配分（最低¥100は現行と揃え weighting 効果を分離）。
+    清算は実払戻 pay。配分母数 minu=1 は現行と同一（floor 効果を交絡させない）。
+    """
+    ranked = sorted(probs, key=lambda n: -probs[n])
+    if len(ranked) < 3:
+        return 0, 0
+    A = ranked[0]
+    partners = ranked[1:6]
+    um_combos = [frozenset({A, p}) for p in partners]
+    tr_pairs = list(combinations(partners, 2))
+    tr_combos = [frozenset({A, a, b}) for a, b in tr_pairs]
+
+    if weight == "prob":
+        um_w = [probs[p] for p in partners]
+        tr_w = [probs[a] * probs[b] for a, b in tr_pairs]
+    else:  # kelly
+        um_w = [kelly_fraction(ub.p_top2_set(probs, A, p), quin_odds.get(frozenset({A, p}), 0.0))
+                for p in partners]
+        tr_w = [kelly_fraction(ub.p_top3_set(probs, (A, a, b)), trio_odds.get(frozenset({A, a, b}), 0.0))
+                for a, b in tr_pairs]
+
+    um_stakes = [u * 100 for u in ub.largest_remainder(um_w, UMAREN_BUDGET // 100, minu=1)]
+    tr_stakes = [u * 100 for u in ub.largest_remainder(tr_w, TRIO_BUDGET // 100, minu=1)]
+    ret = stake = 0
+    for c, s in zip(um_combos, um_stakes):
+        stake += s
+        ret += s * pay["umaren"].get(c, 0) // 100
+    for c, s in zip(tr_combos, tr_stakes):
+        stake += s
+        ret += s * pay["trio"].get(c, 0) // 100
+    return ret, stake
+
+
+def fixed_table(races):
+    print(f"=== (A) 定額土俵: 総額¥{PF_BUDGET}/R 固定・重みのみ変更（全{len(races)}R 機械買い）===")
+    print(f"{'method':<22} {'実ROI':>7} {'的中':>5} {'σROI':>7} {'総賭金':>9} {'総払戻':>9}")
+    for label, w in [("現行(確率重み)", "prob"), ("Kelly重み", "kelly")]:
+        rows = []
+        for probs, quin, trio, pay in races:
+            ret, stake = stake_fixed(probs, quin, trio, pay, w)
+            if stake > 0:
+                rows.append((ret, stake))
+        tot_ret = sum(r for r, _ in rows)
+        tot_stake = sum(s for _, s in rows)
+        roi = tot_ret / tot_stake * 100 if tot_stake else 0
+        hit = sum(1 for r, _ in rows if r > 0) / len(rows) * 100 if rows else 0
+        per = [r / s * 100 for r, s in rows if s]
+        sd = statistics.pstdev(per) if len(per) > 1 else 0.0
+        print(f"{ub.pad_disp(label, 22)} {roi:>6.1f}% {hit:>4.0f}% {sd:>7.1f} {tot_stake:>9} {tot_ret:>9}")
+    print()
+
+
+# --- (B) bankroll 土俵: flat（現行）vs fractional Kelly --------------------------
+def sim_bankroll(races, mode, b0, lam=0.5, kelly_cap=1.0, round_unit=100):
+    """時系列 races を逐次清算し bankroll 系列を返す。
+
+    mode="flat": 各レース固定 ¥PF_BUDGET を現行重みで張る（残高不足なら張らない＝skip）。
+    mode="kelly": 各レース W=λ·Σf_leg·bankroll を +EV 脚へ Kelly 比率配分（W は残高上限）。
+    round_unit: 100円単位丸め（実運用制約）。残高は清算後に更新。
+
+    返り値: (bankroll_series, per_race_ret 配列[(ret,stake)], n_bet)。
+    bankroll_series[0]=b0、以後レース毎の清算後残高。
+    """
+    bank = b0
+    series = [b0]
+    rows = []
+    for probs, quin, trio, pay in races:
+        if mode == "flat":
+            ret, stake = stake_fixed(probs, quin, trio, pay, "prob")
+            if stake > bank:  # 残高不足は張れない
+                series.append(bank)
+                continue
+        else:  # kelly
+            legs = race_legs(probs, quin, trio, pay)
+            sized = [(c, kelly_fraction(p, o, kelly_cap), m) for _typ, c, p, o, m in legs]
+            sized = [(c, f, m) for c, f, m in sized if f > 0]
+            if not sized:
+                series.append(bank)
+                continue
+            total_frac = min(1.0, lam * sum(f for _c, f, _m in sized))
+            wager = total_frac * bank
+            fsum = sum(f for _c, f, _m in sized)
+            stake = 0
+            ret = 0
+            for _c, f, m in sized:
+                s = wager * f / fsum
+                s = int(round(s / round_unit)) * round_unit  # 100円単位
+                if s <= 0:
+                    continue
+                stake += s
+                ret += int(s * m)  # 実払戻（paymult 倍）
+            if stake <= 0 or stake > bank:
+                series.append(bank)
+                continue
+        bank += ret - stake
+        series.append(bank)
+        rows.append((ret, stake))
+        if bank <= 0:
+            break
+    return series, rows, len(rows)
+
+
+def ruin_prob(races, mode, b0, lam, ruin_frac, n_boot, seed=42):
+    """レース順ブートストラップ並べ替えで残高が b0·ruin_frac 以下に到達する経路割合（近似破産確率）。"""
+    rng = random.Random(seed)
+    ruin_level = b0 * ruin_frac
+    hit = 0
+    for _ in range(n_boot):
+        order = races[:]
+        rng.shuffle(order)
+        series, _rows, _n = sim_bankroll(order, mode, b0, lam=lam)
+        if min(series) <= ruin_level:
+            hit += 1
+    return hit / n_boot if n_boot else float("nan")
+
+
+def bankroll_table(races, b0, lambdas, ruin_frac, n_boot):
+    print(f"=== (B) bankroll 土俵: 開始¥{b0:,}・{len(races)}R 時系列・実払戻清算 ===")
+    print(f"{'strategy':<20} {'最終資金':>10} {'倍率':>6} {'実ROI':>7} {'的中':>5} "
+          f"{'σ%':>6} {'maxDD%':>7} {'最小残':>9} {'破産%':>6}")
+
+    def report(label, mode, lam):
+        series, rows, _n = sim_bankroll(races, mode, b0, lam=lam)
+        final = series[-1]
+        mult = final / b0
+        tot_ret = sum(r for r, _ in rows)
+        tot_stake = sum(s for _, s in rows)
+        roi = tot_ret / tot_stake * 100 if tot_stake else 0
+        hit = sum(1 for r, _ in rows if r > 0) / len(rows) * 100 if rows else 0
+        per = [r / s * 100 for r, s in rows if s]
+        sd = statistics.pstdev(per) if len(per) > 1 else 0.0
+        peak = b0
+        dd = 0.0
+        for v in series:
+            peak = max(peak, v)
+            dd = max(dd, (peak - v) / peak * 100 if peak > 0 else 0.0)
+        rp = ruin_prob(races, mode, b0, lam, ruin_frac, n_boot) * 100
+        print(f"{ub.pad_disp(label, 20)} {final:>10,.0f} {mult:>5.2f}x {roi:>6.1f}% {hit:>4.0f}% "
+              f"{sd:>6.1f} {dd:>6.1f}% {min(series):>9,.0f} {rp:>5.1f}%")
+
+    report("現行(flat ¥3,500)", "flat", 0.0)
+    for lam in lambdas:
+        report(f"Kelly λ={lam:g}", "kelly", lam)
+    print(f"\n（破産%＝レース順{n_boot}本ブートストラップで残高≤開始×{ruin_frac:g}到達経路の割合）")
+    print()
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--bt-dir", default="/tmp/bt252", help="#252 手順で生成した入力ディレクトリ")
+    ap.add_argument("--b0", type=int, default=100000, help="bankroll 開始資金（円）")
+    ap.add_argument("--lambdas", default="0.25,0.5,1.0", help="fractional Kelly 係数の掃引")
+    ap.add_argument("--ruin-frac", type=float, default=0.2, help="破産判定の残高水準（開始比）")
+    ap.add_argument("--n-boot", type=int, default=2000, help="破産確率近似のブートストラップ本数")
+    args = ap.parse_args()
+
+    races = load(args.bt_dir)
+    print(f"対象 {len(races)}R（baseline_pf ユニバース固定・配分方式のみ比較）\n")
+    fixed_table(races)
+    lambdas = [float(x) for x in args.lambdas.split(",")]
+    bankroll_table(races, args.b0, lambdas, args.ruin_frac, args.n_boot)
+
+
+if __name__ == "__main__":
+    main()
