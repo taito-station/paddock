@@ -40,6 +40,21 @@ def test_stake_fixed_total_is_budget():
         assert stake % 100 == 0
 
 
+def test_kelly_and_prob_weights_differ():
+    # (A) 定額土俵が「重みだけ変える」非トートロジーな比較であること:
+    # 同一入力で確率重みと Kelly 重みの largest_remainder 配分が実際に異なる。
+    probs = {1: 40.0, 2: 20.0, 3: 15.0, 4: 10.0, 5: 8.0, 6: 7.0}
+    A = 1
+    partners = [2, 3, 4, 5, 6]
+    quin = {frozenset({A, p}): o for p, o in zip(partners, (8.0, 10.0, 14.0, 20.0, 30.0))}
+    prob_w = [probs[p] for p in partners]
+    kelly_w = [kc.kelly_fraction(kc.ub.p_top2_set(probs, A, p), quin[frozenset({A, p})])
+               for p in partners]
+    prob_alloc = kc.ub.largest_remainder(prob_w, kc.UMAREN_BUDGET // 100, minu=1)
+    kelly_alloc = kc.ub.largest_remainder(kelly_w, kc.UMAREN_BUDGET // 100, minu=1)
+    assert prob_alloc != kelly_alloc  # 重みが効いて配分が変わる（比較がトートロジーでない）
+
+
 def test_sim_bankroll_flat_settles_real_payout():
     # 単一レース・的中で flat 清算が実払戻で残高更新されるか。
     probs = {1: 40.0, 2: 20.0, 3: 15.0, 4: 10.0, 5: 8.0, 6: 7.0}

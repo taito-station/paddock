@@ -238,7 +238,7 @@ def sim_bankroll(races, mode, b0, lam=0.5, kelly_cap=1.0, round_unit=100):
         series.append(bank)
         rows.append((ret, stake))
         if bank <= 0:
-            break
+            break  # 保険: stake<=bank を常に強制するので通常到達しないが、残高 0 で打ち切る
     return series, rows, len(rows)
 
 
