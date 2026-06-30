@@ -55,11 +55,11 @@ def _row(course=None, surface=None, form=None):
 
 
 def test_raw_score_weighted_average_with_shrinkage():
-    # course_gate(w2.0, win=0.3, k=10) と horse_surface(w1.0, win=0.6, k=10) のみ。
+    # course_gate(w1.0, win=0.3, k=10) と horse_surface(w1.0, win=0.6, k=10) のみ（#272 改善① 後の重み）。
     r = _row(course=(0.3, 0.4, 0.5, 10), surface=(0.6, 0.7, 0.8, 10))
     sc = d.shrink_rate(0.3, 10, d.PRIOR["win"])
     ss = d.shrink_rate(0.6, 10, d.PRIOR["win"])
-    expect = (2.0 * sc + 1.0 * ss) / 3.0
+    expect = (1.0 * sc + 1.0 * ss) / 2.0
     assert abs(d.raw_score(r, "win") - expect) < 1e-12
 
 
@@ -81,6 +81,15 @@ def test_raw_score_drop_excludes_factor():
 
 def test_raw_score_all_missing_returns_zero():
     assert d.raw_score(_row(), "win") == 0.0
+
+
+def test_raw_score_weights_override():
+    # #272 改善①: weights override。None は既定と一致、重み 0 は drop と同値、変更で値が変わる。
+    r = _row(course=(0.3, 0.4, 0.5, 10), surface=(0.6, 0.7, 0.8, 10))
+    assert d.raw_score(r, "win") == d.raw_score(r, "win", weights=None)
+    sc0 = d.raw_score(r, "win", weights={"course_gate": 0.0})
+    assert abs(sc0 - d.raw_score(r, "win", drop="course_gate")) < 1e-12
+    assert d.raw_score(r, "win", weights={"course_gate": 5.0}) != d.raw_score(r, "win")
 
 
 def test_race_probs_monotone_and_normalized():
