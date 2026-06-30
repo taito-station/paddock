@@ -11,13 +11,15 @@
 
 | α | 単勝的中 | フラット回収率 | EV選抜 win 買い目 |
 |---|---|---|---|
-| 0.0 純市場 | 31.3% | 75.6% | 2点・−0%（+EV の win がほぼ無い） |
-| 0.2 現行 | 31.2% | 75.4% | 1点・−0% |
+| 0.0 純市場 | 31.3% | 75.6% | 2点・ROI≈0%（+EV の win がほぼ無い） |
+| 0.2 現行 | 31.2% | 75.4% | 1点・ROI≈0% |
 | 1.0 純モデル | 15.2% | 80.1% | 251点・**ROI 98.2%** |
 
 - **純モデルだけが +EV の単勝を多数（251点）見つけ ROI 98.2%**。市場・現行は efficient で食い違いを作れない。
-- ただし **98.2% < 100%（赤字）**＝現行の手作りモデルでは**エッジは実在するが閾値下**。
-- → レバーはモデルの識別力（#309）。98.2% を 100% 超へ押すための基盤が本ハーネス。
+- ただし **98.2% < 100%（赤字）**。ADR 0052 はこの value シグナルを「**未否定（要検証）**」に留め、(1) 点推定のみで
+  分散未計測、(2) 純モデル回収率は母数 852 の非ランダム部分集合で選択効果が乗りうる、(3) blend を外すと精度崩壊、の
+  3 留保を置き、真偽の切り分けを **#305** に委ねている。本ハーネスはその検証（複数窓・out-of-sample）を担う基盤でもある。
+- → 仮にエッジが本物なら、レバーはモデルの識別力（#309）。98.2% を 100% 超へ押すには本ハーネスが要る。
 
 ADR 0052（α blend 廃止＝純モデル化の棄却）の通り、純 P_model を EV に直接使う素朴案は不可（校正が崩れる）。
 本ハーネスは「強い学習モデルを安全に訓練・評価し、勝てたら採用する」ための仕組みであり、設計を変えずに
@@ -35,24 +37,27 @@ ADR 0052（α blend 廃止＝純モデル化の棄却）の通り、純 P_model 
 
 既存 `analyze backtest` の per-race ループ（`src/use-case/src/interactor/race/backtest.rs`：`entry_factors`
 構築〜`HorseOutcome` 突合）に**ダンプ経路を追加**する。backtest は既に**as_of（`races.date < D`）でリーク無しに
-全特徴量を日次バッチ取得**しているため、その値をそのまま emit すれば production 特徴量に忠実 かつ 未来リークなし。
+全特徴量を日次バッチ取得**しているため、その値をそのまま emit すれば production 特徴量に忠実 かつ 未来リーク無し。
 
 1 行 = 1 レース×1 馬。列（`HorseFactors` 9 項＋ラベル＋市場）:
+
+各 `FactorStat`（6 レート項）は `rate: RateTriple{win, place, show}` と `starts: u32` を持つため、
+**1 項につき win/place/show の 3 レート＋ starts の 4 列**を出す（縮約・信頼度を学習側で扱えるように）。
 
 | 群 | 列 |
 |---|---|
 | キー | `race_id, date, horse_num` |
-| 特徴(レート) | `course_gate_rate, course_gate_n, horse_surface_rate/n, horse_distance_rate/n, jockey_surface_rate/n, trainer_surface_rate/n, horse_track_condition_rate/n` |
+| 特徴(レート×6項) | 各項 `{factor}_win_rate, {factor}_place_rate, {factor}_show_rate, {factor}_starts`。`{factor}` ∈ `course_gate, horse_surface, horse_distance, jockey_surface, trainer_surface, horse_track_condition`（計 24 列） |
 | 特徴(シグナル) | `recent_form, weight_carried, jockey_recent_form`（各 [0,1]、欠落は空） |
 | ラベル | `finishing_position`（→ win=1着 / place=2着内 / show=3着内 を下流で導出） |
-| 市場 | `win_odds, popularity`（as_of の確定オッズ＝post 時点既知でリーク無し、ADR 0027 と同基準） |
+| 市場 | `win_odds, popularity`（backtest の確定オッズ突合と同じく post 時点既知＝リーク無し。ADR 0027 影響節「`results.odds` は post 時点で既知＝リークなし」と同基準） |
 
 - 欠落項（`Option=None`）は**空セルのまま**出す（木はネイティブ対応、logit は欠損指標で対応）。0 埋めしない。
-- `FactorStat` は rate と count(n) を両方出す（縮約・信頼度を学習側で扱えるように）。
+- count 列名は `starts`（ドメインのフィールド名 `FactorStat.starts` に合わせる）。
 - 出力 TSV（将来 Parquet 可）。`--dump-features` 未指定なら既存挙動・出力は完全に不変。
 
 実装方針（clean-arch 準拠）: interactor は file IO せず、ダンプ要求時のみ per-horse 行を `BacktestReport`
-の新規 optional フィールドに収集し、`apps/analyze/bin.rs` が TSV を書く。未要求時は収集自体を行わない。
+の新規 optional フィールドに収集し、`src/apps/analyze/src/bin.rs` が TSV を書く。未要求時は収集自体を行わない。
 
 ### ② オフライン訓練（Python：walk-forward）
 
@@ -103,6 +108,6 @@ ADR 0052（α blend 廃止＝純モデル化の棄却）の通り、純 P_model 
 
 ## 関連
 
-- Issue: #272（予測フロー再設計・親）/ #309（学習モデル実装）/ #263（較正後 EV ゲートの逆予測性）
-- ADR: 0027（精度のレバーは市場ブレンド）/ 0042（win_power）/ 0050・0051（place/show 冪 knee）/ 0052（α blend 廃止の棄却）
+- Issue: #272（予測フロー再設計・親）/ #309（学習モデル実装）/ #305（純モデル value シグナル検証＝本ハーネスが担う）/ #263（較正後 EV ゲートの逆予測性）
+- ADR: 0027（精度のレバーは市場ブレンド）/ 0042（win_power）/ 0047（place/show 冪変換の採用＝`place_show_power=2.0` の根拠）/ 0050（place/show raw_score 再調整の棄却）/ 0051（place/show 冪 γ の knee 確定）/ 0052（α blend 廃止の棄却）
 - 既存: `scripts/predict-check/live_ev.py`（EV/買い方ロジック）/ `docs/specifications/backtest.md` / `probability-estimation.md`
