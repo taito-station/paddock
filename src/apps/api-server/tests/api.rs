@@ -254,7 +254,11 @@ async fn prediction_omitted_blend_alpha_equals_production_default(pool: sqlx::Pg
 }
 
 /// recommendations も blend_alpha 省略時は `PRODUCTION_BLEND_ALPHA`(0.2) が適用され、明示した 0.2 と同一結果を返す。
-/// 素モデル(blend_alpha=1.0)との差異でブレンドが実際に作用していることを保証する。
+/// #272 循環断ち以降、recommendations の EV/的中は純モデル(α=1.0)×市場odds で計算され blend_alpha に
+/// 依らない（blend_alpha は軸/相手の順位付けにのみ効く）。本フィクスチャでは順位も一致するため、
+/// 素モデル(1.0)と省略時(0.2)で買い目は完全一致する＝EV が blend 不変であることの回帰。
+/// （ブレンドが確率に作用すること自体は予測エンドポイントの
+/// `prediction_omitted_blend_alpha_equals_production_default` が担保する。）
 #[sqlx::test(migrations = "../../../deployments/db/migrations")]
 async fn recommendations_omitted_blend_alpha_equals_production_default(pool: sqlx::PgPool) {
     let repo = PostgresRepository::new(pool.clone());
@@ -283,17 +287,18 @@ async fn recommendations_omitted_blend_alpha_equals_production_default(pool: sql
         "省略時と明示 0.2 の買い目は一致する"
     );
 
-    // blend_alpha=1.0 は素モデル（オッズ不使用）→ ブレンドが実際に作用していれば買い目が異なる
-    // 馬番の組み合わせが同じでも確率が変わると各脚への stake 配分が変わるため bets 全体が差異を持つ
+    // blend_alpha=1.0（素モデル）でも、EV/的中は純モデル固定なので省略時(0.2)と同じ EV になる。
+    // このフィクスチャでは順位（軸/相手）も一致するため、買い目（組合せ・stake・EV）は完全一致する。
+    // = recommendations の EV が blend_alpha に依存しない（循環断ち, #272）ことの回帰。
     let req_raw = test::TestRequest::get()
         .uri(&format!(
             "/api/races/{RACE_ID}/recommendations?budget=10000&blend_alpha=1.0"
         ))
         .to_request();
     let json_raw = body_json(test::call_service(&app, req_raw).await).await;
-    assert_ne!(
+    assert_eq!(
         json_omit["bets"], json_raw["bets"],
-        "省略時（ブレンド）と素モデル(1.0)は異なる買い目を返す"
+        "EV は純モデル固定（#272）。本フィクスチャでは順位も一致し買い目は blend_alpha に依らず同一"
     );
 }
 
