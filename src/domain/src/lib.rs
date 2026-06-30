@@ -14,9 +14,9 @@ pub mod simulation;
 pub mod string;
 
 pub use backtest::{
-    BacktestReport, CalibrationMetrics, ExoticBet, ExoticSegment, FieldSizeSegment, HorseOutcome,
-    PopularitySegment, RaceEvaluation, ReliabilityBin, SurfaceSegment, Top3RankDistribution,
-    evaluate, exotic_segments,
+    BacktestReport, CalibrationMetrics, ExoticBet, ExoticSegment, FeatureRow, FieldSizeSegment,
+    HorseOutcome, PopularitySegment, RaceEvaluation, ReliabilityBin, SurfaceSegment,
+    Top3RankDistribution, evaluate, exotic_segments,
 };
 pub use betting::{
     BetCombination, BettingConfig, BettingRecommendation, Podium, bet_hit, select_bets,

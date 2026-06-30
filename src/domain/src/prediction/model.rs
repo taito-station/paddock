@@ -7,7 +7,7 @@ use chrono::NaiveDate;
 use crate::horse_result::{HorseName, HorseNum, HorseResult};
 use crate::race::Surface;
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct RateTriple {
     pub win: f64,
     pub place: f64,
@@ -16,13 +16,13 @@ pub struct RateTriple {
 
 /// 1 つの factor のレート（win/place/show）と、その算出母数となった出走数（#75）。
 /// `starts` はベイズ縮約（少データほど prior へ寄せる）で信頼度の重みに使う。
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FactorStat {
     pub rate: RateTriple,
     pub starts: u32,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct HorseFactors {
     /// コース（場×距離×馬場）の枠順別成績。当該コース×枠区分の出走実績が無い馬は `None`
     /// （項と重みを母数から除外、ADR 0007/0014 の欠落項扱い）。

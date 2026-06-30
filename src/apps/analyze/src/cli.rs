@@ -102,6 +102,11 @@ pub enum Command {
         /// 校正・複勝回収を比較する（trio/馬連/馬単は win_prob 由来で本フラグでは不変）。
         #[arg(long)]
         place_show_power: Option<f64>,
+        /// 学習型モデル評価ハーネス用の特徴量ダンプ出力先 TSV パス（#272 Phase A）。指定すると各
+        /// 出走馬の素性（ブレンド・冪変換前）＋ラベル（確定着順・人気）＋当時市場単勝をリーク無しの
+        /// walk-forward で書き出す。未指定は集計レポートのみ（既存挙動）。
+        #[arg(long)]
+        dump_features: Option<String>,
     },
     /// 古い race_odds_snapshots を保持期間でパージする（#234）。最新キャッシュ race_odds は消さない。
     /// cutoff = 実行日(UTC) − months。fetched_at の日付が cutoff より前の行を削除する。

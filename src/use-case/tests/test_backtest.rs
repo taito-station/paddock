@@ -369,6 +369,7 @@ async fn backtest_aggregates_top_pick_and_payout() {
             d(2026, 1, 31),
             None,
             EstimationConfig::default(),
+            false,
         )
         .await
         .unwrap();
@@ -402,6 +403,7 @@ async fn backtest_prefers_market_odds_over_pdf() {
             d(2026, 1, 31),
             None,
             EstimationConfig::default(),
+            false,
         )
         .await
         .unwrap();
@@ -433,6 +435,7 @@ async fn backtest_populates_by_exotic_from_curated_bets() {
             d(2026, 1, 31),
             None,
             EstimationConfig::default(),
+            false,
         )
         .await
         .unwrap();
@@ -505,6 +508,7 @@ async fn backtest_wires_race_track_condition_into_factors() {
             d(2026, 1, 31),
             None,
             EstimationConfig::default(),
+            false,
         )
         .await
         .unwrap();
@@ -522,6 +526,7 @@ async fn backtest_wires_race_track_condition_into_factors() {
             d(2026, 1, 31),
             None,
             EstimationConfig::default(),
+            false,
         )
         .await
         .unwrap();
@@ -541,6 +546,7 @@ async fn backtest_wires_recency_into_horse_factors() {
             d(2026, 1, 31),
             None,
             EstimationConfig::default(),
+            false,
         )
         .await
         .unwrap();
@@ -565,7 +571,7 @@ async fn backtest_wires_recency_into_horse_factors() {
         place_show_power: None,
     };
     let on = interactor(vec![soft_track_race(None)])
-        .backtest(d(2026, 1, 1), d(2026, 1, 31), None, cfg)
+        .backtest(d(2026, 1, 1), d(2026, 1, 31), None, cfg, false)
         .await
         .unwrap();
     assert!(
@@ -610,6 +616,7 @@ async fn backtest_wires_result_trainer_into_factors() {
             d(2026, 1, 31),
             None,
             EstimationConfig::default(),
+            false,
         )
         .await
         .unwrap();
@@ -627,6 +634,7 @@ async fn backtest_wires_result_trainer_into_factors() {
             d(2026, 1, 31),
             None,
             EstimationConfig::default(),
+            false,
         )
         .await
         .unwrap();
@@ -646,6 +654,7 @@ async fn backtest_blend_flips_top_pick_to_market_favorite() {
             d(2026, 1, 31),
             None,
             EstimationConfig::default(),
+            false,
         )
         .await
         .unwrap();
@@ -675,6 +684,7 @@ async fn backtest_blend_flips_top_pick_to_market_favorite() {
             d(2026, 1, 31),
             Some(0.2),
             EstimationConfig::default(),
+            false,
         )
         .await
         .unwrap();
@@ -705,6 +715,7 @@ async fn backtest_blend_uses_partial_race_odds_as_is() {
             d(2026, 1, 31),
             Some(0.2),
             EstimationConfig::default(),
+            false,
         )
         .await
         .unwrap();
@@ -725,6 +736,7 @@ async fn backtest_blend_falls_back_to_results_odds_when_no_snapshot() {
             d(2026, 1, 31),
             Some(0.0),
             EstimationConfig::default(),
+            false,
         )
         .await
         .unwrap();
@@ -773,6 +785,7 @@ async fn backtest_same_day_multi_race_evaluates_independently() {
             d(2026, 1, 31),
             None,
             EstimationConfig::default(),
+            false,
         )
         .await
         .unwrap();
@@ -821,6 +834,7 @@ async fn backtest_date_batch_calls_horse_stats_batch_once_per_day() {
         d(2026, 1, 31),
         None,
         EstimationConfig::default(),
+        false,
     )
     .await
     .unwrap();
@@ -841,6 +855,7 @@ async fn backtest_empty_when_no_races() {
             d(2026, 1, 31),
             None,
             EstimationConfig::default(),
+            false,
         )
         .await
         .unwrap();
@@ -878,6 +893,7 @@ async fn backtest_excludes_scratched_and_cancelled_horses() {
             d(2026, 1, 31),
             None,
             EstimationConfig::default(),
+            false,
         )
         .await
         .unwrap();
@@ -889,4 +905,71 @@ async fn backtest_excludes_scratched_and_cancelled_horses() {
         "出走取消・競走除外が母集合に混入している (win_hit_rate={})",
         report.win_hit_rate
     );
+}
+
+#[tokio::test]
+async fn backtest_dump_features_none_when_not_requested() {
+    // dump_features=false では feature_dump は None で既存挙動と不変（#272 Phase A）。
+    let report = interactor(vec![finished_race()])
+        .backtest(
+            d(2026, 1, 1),
+            d(2026, 1, 31),
+            None,
+            EstimationConfig::default(),
+            false,
+        )
+        .await
+        .unwrap();
+    assert!(report.feature_dump.is_none());
+}
+
+#[tokio::test]
+async fn backtest_dump_features_collects_starters_with_labels_and_market_odds() {
+    // dump_features=true で全発走馬の素性＋ラベル＋当時市場単勝を収集する（#272 Phase A）。
+    // race_odds に ウマA(馬番1) の単勝 7.0 を置き、win_odds が PDF 確定単勝(4.0)より市場を優先する
+    // ことと、市場が無い ウマB(馬番2, PDF 単勝も None) は None になることを検証する。
+    let race = finished_race();
+    let mut odds = HashMap::new();
+    odds.insert(
+        race.race_id.value().to_string(),
+        win_only_odds(race.race_id.value(), 1, 7.0),
+    );
+    let report = interactor_with_odds(vec![race], odds)
+        .backtest(
+            d(2026, 1, 1),
+            d(2026, 1, 31),
+            None,
+            EstimationConfig::default(),
+            true,
+        )
+        .await
+        .unwrap();
+
+    let rows = report.feature_dump.expect("dump 要求時は Some");
+    // finished_race の発走馬は 2 頭のみ（非発走馬は entry_factors=starters から除外される）。
+    assert_eq!(rows.len(), 2, "発走馬 1 頭につき 1 行のはず");
+
+    let a = rows
+        .iter()
+        .find(|r| r.horse_num == 1)
+        .expect("ウマA(馬番1) の行");
+    assert_eq!(a.race_id, "2026-1-nakayama-1-1R");
+    assert_eq!(a.date, d(2026, 1, 10));
+    assert_eq!(a.finishing_position, Some(1));
+    // 当時市場 7.0 を PDF 確定単勝 4.0 より優先。
+    assert_eq!(a.win_odds, Some(7.0));
+    assert_eq!(a.popularity, None);
+    // ウマA は芝の出走実績があるため horse_surface は欠落しない（素性が運ばれている証跡）。
+    assert!(a.factors.horse_surface.is_some());
+
+    let b = rows
+        .iter()
+        .find(|r| r.horse_num == 2)
+        .expect("ウマB(馬番2) の行");
+    assert_eq!(b.finishing_position, Some(2));
+    // 市場単勝なし・PDF 単勝も None → win_odds は None（欠落は 0 埋めしない）。
+    assert_eq!(b.win_odds, None);
+    // 騎手・調教師を持たない fixture なので欠落 factor が None で運ばれる（母数除外項の正例）。
+    assert!(b.factors.trainer_surface.is_none());
+    assert!(b.factors.jockey_surface.is_none());
 }

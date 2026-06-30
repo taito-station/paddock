@@ -92,6 +92,8 @@ pub fn evaluate(races: &[RaceEvaluation]) -> BacktestReport {
         by_surface: surface_segments(races),
         // 買い目（curated）の校正・回収率は買い目単位の別入力（exotic_segments）で埋める（#121）。
         by_exotic: Vec::new(),
+        // 特徴量ダンプは backtest interactor がダンプ要求時のみ埋める（#272）。集計には不要。
+        feature_dump: None,
     }
 }
 
