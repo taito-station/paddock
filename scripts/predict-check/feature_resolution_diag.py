@@ -78,28 +78,33 @@ def _scalar_cell(row, idx):
     return None if row[idx] == "" else float(row[idx])
 
 
-def raw_score(row, sel, drop=None):
-    """Rust raw_score の鏡映。sel ∈ {win,place,show}。drop=factor 名で leave-one-out。"""
+def raw_score(row, sel, drop=None, weights=None):
+    """Rust raw_score の鏡映。sel ∈ {win,place,show}。drop=factor 名で leave-one-out。
+    `weights`（factor名→重み の dict）を渡すと既定重みを上書きして重みスイープに使う
+    （#272 改善①）。`None` は現行定数（後方互換・既定挙動と完全一致）。重み 0 の factor は
+    母数から除外される（Rust と同じく寄与 0）。"""
     sel_i = {"win": 0, "place": 1, "show": 2}[sel]
     weighted = 0.0
     weight = 0.0
     for name, base, w in STAT_FACTORS:
-        if name == drop:
+        ww = w if weights is None else weights.get(name, w)
+        if name == drop or ww == 0.0:
             continue
         fs = _stat_cell(row, base)
         if fs is None:
             continue
         val = shrink_rate(fs[sel_i], fs[3], PRIOR[sel])
-        weighted += w * val
-        weight += w
+        weighted += ww * val
+        weight += ww
     for name, idx, w in SCALAR_FACTORS:
-        if name == drop or w == 0.0:
+        ww = w if weights is None else weights.get(name, w)
+        if name == drop or ww == 0.0:
             continue
         v = _scalar_cell(row, idx)
         if v is None:
             continue
-        weighted += w * v
-        weight += w
+        weighted += ww * v
+        weight += ww
     return 0.0 if weight == 0.0 else weighted / weight
 
 
@@ -127,11 +132,12 @@ def win_power(win_probs, gamma):
     return [min(p / total, 1.0) for p in powered]
 
 
-def race_probs(rows, drop=None):
-    """1 レース分の最終 win/place/show（純モデル α=1.0）を Rust 同手順で出す。"""
-    win_s = [raw_score(r, "win", drop) for r in rows]
-    place_s = score_power([raw_score(r, "place", drop) for r in rows], PLACE_SHOW_POWER)
-    show_s = score_power([raw_score(r, "show", drop) for r in rows], PLACE_SHOW_POWER)
+def race_probs(rows, drop=None, weights=None):
+    """1 レース分の最終 win/place/show（純モデル α=1.0）を Rust 同手順で出す。
+    `weights` で factor 重みを上書きできる（#272 改善① の重みスイープ用・既定は現行定数）。"""
+    win_s = [raw_score(r, "win", drop, weights) for r in rows]
+    place_s = score_power([raw_score(r, "place", drop, weights) for r in rows], PLACE_SHOW_POWER)
+    show_s = score_power([raw_score(r, "show", drop, weights) for r in rows], PLACE_SHOW_POWER)
     win_p = normalize_to_sum(win_s, 1.0)
     place_p = normalize_to_sum(place_s, 2.0)
     show_p = normalize_to_sum(show_s, 3.0)

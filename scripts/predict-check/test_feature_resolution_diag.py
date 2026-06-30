@@ -83,6 +83,15 @@ def test_raw_score_all_missing_returns_zero():
     assert d.raw_score(_row(), "win") == 0.0
 
 
+def test_raw_score_weights_override():
+    # #272 改善①: weights override。None は既定と一致、重み 0 は drop と同値、変更で値が変わる。
+    r = _row(course=(0.3, 0.4, 0.5, 10), surface=(0.6, 0.7, 0.8, 10))
+    assert d.raw_score(r, "win") == d.raw_score(r, "win", weights=None)
+    sc0 = d.raw_score(r, "win", weights={"course_gate": 0.0})
+    assert abs(sc0 - d.raw_score(r, "win", drop="course_gate")) < 1e-12
+    assert d.raw_score(r, "win", weights={"course_gate": 5.0}) != d.raw_score(r, "win")
+
+
 def test_race_probs_monotone_and_normalized():
     # race_probs（win/place/show 合成）は win≤place≤show の単調性と win 合計≒1.0 を保つ。
     rows = [
