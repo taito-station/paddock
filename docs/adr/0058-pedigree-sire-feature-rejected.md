@@ -1,8 +1,28 @@
-# 0058. 血統（種牡馬）適性 factor は現行データの coverage 天井内でノイズ級（棄却）
+# 0058. 血統（種牡馬）適性 factor は現行データの天井内でノイズ級（棄却）
 
 ## ステータス
 
 棄却（#272 純モデル resolution 改善 arc・新データソース取得 arc）。本番コードは変更なし（measure-first ゲートで撤退したため配管ゼロ）。改善①（ADR 0056）＋改善②（ADR 0057）で到達した純 top1 0.162→0.197・AUC 0.649→0.678 は merged 済みで不変。
+
+## 訂正（2026-07-02・追測で判明）
+
+本 ADR 初版の「構造的天井は coverage（horse_id 可用 19.5%）」という論拠は**誤診**だった。棄却の verdict（sire はノイズ級・不採用）は変わらないが、根拠を factor 冗長性に訂正する:
+
+- **19.5% は sire 固有のアーティファクト**。sire を dump 行へ join する際、`results.horse_id`（backfill が弱く 20.6%）／`horses` 名前引き（同 20.6%・pedigree を 2124 頭しか fetch していない）を使ったため。**馬 factor 一般の天井ではない。**
+- **馬履歴 factor の実 coverage は ~60-71%**。backtest は `horse_surface`/`horse_distance`/`horse_track_condition` を **`results` の過去成績の名前引き**で作る（horse_id 不要・2017-2026 の全成績が母数）。`course_gate`(95.8%) は `course.by_gate_group`＝コース×枠の汎用バイアスで馬履歴不要。
+- **coverage を上げても resolution は改善しない**（`/tmp/pa/coverage_strata.py`・gated 4,594R を「1レース内の馬履歴 factor カバー率」で層別）:
+
+| horse-history coverage | races | AUC_model | AUC_market |
+|---|---:|---:|---:|
+| 0% | 437 | 0.677 | 0.776 |
+| 25-50% | 169 | 0.660 | 0.863 |
+| 50-75% | 482 | 0.651 | 0.860 |
+| 75-99% | 1,649 | 0.664 | 0.845 |
+| 100% | 1,765 | 0.685 | 0.824 |
+
+model AUC は coverage 層でフラット（0.65-0.685）。**フル装備の 100% 層(0.685) は履歴ゼロの 0% 層(0.677) をわずか +0.008 しか上回らない**＝馬履歴 factor は常在の course_gate/jockey/trainer に**冗長**。よって天井は **coverage でなく factor 冗長性**（ADR 0027・ADR 0057 の ablation と整合）。全 runner 履歴の大量 fetch arc も、sire を高 coverage で再測定することも、この冗長性ゆえ不要。
+
+以下本文中の「coverage cap / 構造的天井は coverage」は本訂正に読み替えること。
 
 ## コンテキスト
 
@@ -14,7 +34,7 @@
 
 ## 決定
 
-血統（種牡馬）適性 factor を**採用しない**。as-of 自前集計は現行データの coverage 天井内でノイズ級 lift しか出さず、本番配管（parser/schema/backfill/factor 統合）を作る価値がない。
+血統（種牡馬）適性 factor を**採用しない**。as-of 自前集計は現行データの天井内でノイズ級 lift しか出さず、本番配管（parser/schema/backfill/factor 統合）を作る価値がない（天井の性質は上記「訂正」＝factor 冗長性）。
 
 ## 検証（measure-first ゲート）
 
@@ -33,20 +53,21 @@
 
 ※ 上表は測定した全 12 構成（overall／surface／distance／both × 重み {0.5,1.0,2.0}）からの抜粋で、各指標の最良行（overall w=1.0/2.0）・本文で言及する surface/distance の代表行（各 w=1.0）・最悪行（both w=2.0）を提示したもの。下記「各指標の全構成最大」は 12 構成すべてに対する最大値。Δ は表示 4 桁でなくフル精度の baseline との差から算出（同一表示値でも Δ が僅かに異なるのはこのため）。Brier は全構成で |Δ|<0.00005 のため表示上 ±0（both の劣化は AUC/top1 に表れる）。baseline=drop は改善①相当で改善②の impute は未反映（ステータス掲載の merged 値 0.678/0.197 とは別物）。
 
-- **各指標の全構成最大**でも AUC +0.0011（overall w=1.0）・top1 +0.0020（overall w=2.0）・Brier ±0＝単一構成が両指標を同時達成するわけではない。surface モードは AUC +0.0009 で overall に届かない。改善①（AUC +0.022）比で約 20 倍・桁違いに小さく、改善②（+0.007）比でも約 1/6、**棄却済みクラス arc（top1 最良 +0.0015「ノイズ級」）とほぼ同水準**の実務上ノイズ。棄却は有意性検定でなく、この絶対水準の小ささと下記 coverage cap で判断する（top1 の周辺 SE ≈0.0057 は対応差の SE でなく粗い上界にすぎず、有意/非有意の物差しには使わない）。
+- **各指標の全構成最大**でも AUC +0.0011（overall w=1.0）・top1 +0.0020（overall w=2.0）・Brier ±0＝単一構成が両指標を同時達成するわけではない。surface モードは AUC +0.0009 で overall に届かない。改善①（AUC +0.022）比で約 20 倍・桁違いに小さく、改善②（+0.007）比でも約 1/6、**棄却済みクラス arc（top1 最良 +0.0015「ノイズ級」）とほぼ同水準**の実務上ノイズ。棄却は有意性検定でなく、この絶対水準の小ささと上記「訂正」の factor 冗長性で判断する（top1 の周辺 SE ≈0.0057 は対応差の SE でなく粗い上界にすぎず、有意/非有意の物差しには使わない）。
 - 「both」は surface∩距離で過スパースになり有害。high weight も AUC を削る＝positive は脆い。
 
 ## 理由
 
-- **構造的天井は coverage**: 純 dump 68,149 行のうち種牡馬を乗せられるのは **19.5%**（＝backtest 窓で `results.horse_id` が付く割合の上限）。純 dump の約 80%（相手馬）は履歴未取得で horse_id が付かず、sire に限らずどの馬 factor も乗らない。sire は乗せられる層にはほぼ全て乗っている（overall 19.5%≈上限）。→ 種牡馬率をどれだけ厚くしても full-field 指標の上振れ余地は小さい。median 2 progeny/sire の母数薄は**二次要因**。
-- **baseline は改善①(drop) で測った**（Python ミラーが改善②の impute 未実装のため）。impute は既存欠落 factor を field mean で埋めるので sire の marginal 余地はむしろ縮むと見込まれる（directional な想定・未計測で、sire×impute の交互作用が単調である保証はない）。ただし**棄却の主根拠は a fortiori でなく上記 coverage cap** であり、baseline の drop/impute 差はその結論を揺るがさない。
-- ADR 0027（データ量は resolution の主レバーでない）を、クラスに続き血統でも再確認。純 resolution の残り gap は「新 factor 追加」では詰まらない。
+- **天井は factor 冗長性**（上記「訂正」参照）。直接の馬能力 factor（horse_surface/distance/track_condition, 実 coverage ~60-71%）ですら、それが常在の course_gate/jockey/trainer に対し full 装備レースで +0.008 AUC しか足せない（coverage 層別）。種牡馬適性はその馬能力のさらに弱い代理なので、乗せる層を広げても full-field 指標の上振れ余地は小さい。median 2 progeny/sire の母数薄は二次要因。
+  - なお sire を dump に乗せられたのは 19.5% だが、これは**馬 factor 一般の天井でなく pedigree を 2124 頭しか fetch していない sire 固有の制約**（初版はこれを coverage cap と誤診・上記訂正）。
+- **baseline は改善①(drop) で測った**（Python ミラーが改善②の impute 未実装のため）。impute は既存欠落 factor を field mean で埋めるので sire の marginal 余地はむしろ縮むと見込まれる（directional な想定・未計測で、sire×impute の交互作用が単調である保証はない）。ただし**棄却の主根拠は a fortiori でなく上記 factor 冗長性**であり、baseline の drop/impute 差はその結論を揺るがさない。
+- ADR 0027（データ量は resolution の主レバーでない）を、クラスに続き血統でも再確認。純 resolution の残り gap は「新 factor 追加」でも「coverage 拡大」でも詰まらない。
 
 ## スコープ外 / 次にありうる伸び代
 
-- **本命の天井は coverage cap（horse_id 可用性）**であり、これは 2025-2026 全 runner の履歴を大量 fetch（数万頭規模・別 arc）して初めて動く。sire に限らず全 horse factor に効く前提条件だが、コスト大で本 arc のスコープ外。将来やるならこちらであって、新 factor 探しではない。
-- netkeiba 既成 sire 集計（厚い母数）の scrape は fallback として検討したが、coverage 19.5% cap が不変で上振れ余地が小さく、かつ既成集計は as-of でない（リーク）ため見送り。
-- 本 marginal-lift は改善①(drop) baseline 上で測っており、本番 merged（改善② impute 込み）baseline での再測定はしていない（impute は sire の余地をむしろ縮める見込みで、結論は coverage cap で立つ）。将来 pedigree を再検討する場合もこの限界を踏まえること。
+- **全 runner 履歴の大量 fetch（数万頭・coverage 拡大）arc は測定して否定済み**（上記「訂正」の coverage 層別＝100% 層でも +0.008 AUC）。初版は「coverage cap を上げれば動く」と書いたが誤り。次に resolution を動かすなら coverage でも新 factor でもなく、公開データ外の情報が要る（ADR 0027）。
+- netkeiba 既成 sire 集計（厚い母数）の scrape は fallback として検討したが、sire を乗せられる層が pedigree fetch 範囲に縛られ、かつ既成集計は as-of でない（リーク）ため見送り。仮に厚くしても factor 冗長性ゆえ効かない。
+- 本 marginal-lift は改善①(drop) baseline 上で測っており、本番 merged（改善② impute 込み）baseline での再測定はしていない（impute は sire の余地をむしろ縮める見込みで、結論は factor 冗長性で立つ）。将来 pedigree を再検討する場合もこの限界を踏まえること。
 - 学習モデル（ADR 0053 棄却）・isotonic（#319 診断で棄却）には戻らない。
 
 ## 影響
