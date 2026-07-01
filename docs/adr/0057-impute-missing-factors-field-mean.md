@@ -64,7 +64,9 @@
 ## 影響
 
 - `config.rs`/`scoring.rs`/`estimate.rs` と CLI（`--impute-missing-factors`）。`production()` 既定で predict/EV 層に反映。`Default` は false のため既存の default-config 呼び出し・テストは挙動不変。
-- 補完有効時は全 stat factor が Some 化されて `weight > 0` になるため、**全 stat 欠落馬（scalar も無い新馬等）では従来の `weight==0` → score 0.0 → 均等フォールバック（ADR 0014）が非到達**になり、prior 相当のスコアで参加する（drop 時の低評価から中立寄りへ。ADR 0007/0014 の「実績なし≠全敗」に整合する方向）。テスト `all_factors_missing_horse_imputes_to_weight_nonzero` で担保。
+- 補完有効時は全 stat factor が Some 化されて `weight > 0` になるため、全 stat 欠落馬の挙動が drop から変わる（いずれも意図した中立寄りへのシフトで、集計指標 Brier/AUC/top1 で非回帰を確認済み・ADR 0007/0014 の「実績なし≠全敗」に整合）:
+  - **scalar も無い馬（新馬等）**: 従来の `weight==0` → score 0.0 → 均等フォールバック（ADR 0014）が非到達になり、prior 相当のスコアで参加する。テスト `all_factors_missing_horse_imputes_to_weight_nonzero` で担保。
+  - **scalar（recent_form 等）は present だが全 stat 欠落の馬**: drop 時は scalar 単独スコアだったが、補完後は中立 stat（field mean/prior）との加重平均になり scalar signal がやや希釈される。
 - 測定ツール `scripts/predict-check/impute_prototype.py`（掃引＋ `--verify-dump` 忠実性）。診断ツール `feature_resolution_diag.py`/`weight_sweep.py` は BEFORE 分解を記録する #319/#320 の成果物として不変（drop 母数の分解を保つ）。
 - `docs/specifications/probability-estimation.md` の欠落処理を更新。
 - 関連: 0055（EV 層分離・純モデル化）/0056（改善①重み再調整）/0027（精度の主レバー＝市場ブレンド）/0007・0014（欠落項の母数除外方針）/0053（学習モデル棄却）。

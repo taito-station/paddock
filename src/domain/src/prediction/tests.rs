@@ -1919,3 +1919,23 @@ fn production_enables_imputation_default_disables() {
         "Default は後方互換で drop（補完なし）"
     );
 }
+
+#[test]
+fn field_impute_mean_uses_shrunk_rate_under_shrinkage() {
+    // production は shrinkage m=10 を通す。field mean は「present 馬の縮約後レート平均」であり、
+    // 生レート平均ではないことを直接ガードする（factor_value と補完の縮約整合の回帰防止）。
+    let m = 10.0;
+    let factors = [surf(Some(0.4)), surf(Some(0.6))]; // starts=10（fs のデフォルト）
+    let cfg = shrink_cfg(m);
+    let expected =
+        (shrink_rate(0.4, 10, PRIOR_RATE.win, m) + shrink_rate(0.6, 10, PRIOR_RATE.win, m)) / 2.0;
+    let got = FactorImpute::from_field(factors.iter(), |r| r.win, &cfg)
+        .horse_surface
+        .unwrap();
+    approx(got, expected);
+    // 縮約により生レート平均 0.5 とは一致しない（縮約が実際に効いている証拠）。
+    assert!(
+        (got - 0.5).abs() > 1e-6,
+        "縮約後平均は生平均 0.5 と異なるはず: {got}"
+    );
+}
