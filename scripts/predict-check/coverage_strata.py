@@ -19,7 +19,6 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-from collections import defaultdict
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import feature_resolution_diag as D  # noqa: E402
@@ -55,13 +54,16 @@ def run(tsv):
     races = D.group_by_race(rows)
     S = {k: {"n": 0, "t1m": 0, "t1k": 0, "mw": [], "iw": [], "y": [], "field": []} for k in ORDER}
 
+    fid_max = 0.0  # 忠実性アンカー: mirror 再計算 win が dump の model_win 列と一致するか（sibling 準拠）
     for _rid, rr in races.items():
+        win_p, _, _ = D.race_probs(rr)
+        for i, r in enumerate(rr):  # gate 前・全行で測る（鏡映の正しさは outcome 非依存）
+            fid_max = max(fid_max, abs(win_p[i] - float(r[D.COL["model_win"]])))
         fp = [D._fp(r) for r in rr]
         y = [1 if p == 1 else 0 for p in fp]
         implied, s = D._implied(rr)
         if not (any(y) and s > 0):  # feature_resolution_diag と同一 gated 母数
             continue
-        win_p, _, _ = D.race_probs(rr)
         cov = sum(1 for r in rr if has_horse_history(r)) / len(rr)
         b = S[stratum(cov)]
         b["n"] += 1
@@ -71,6 +73,14 @@ def run(tsv):
         if y[D.argmax(implied)] == 1:
             b["t1k"] += 1
         b["mw"].extend(win_p); b["iw"].extend(implied); b["y"].extend(y)
+
+    if fid_max >= 1e-6:
+        # 鏡映が dump と一致しない＝非 production flags（m≠10 等）で生成された dump の疑い。
+        # 黙って誤った層別を出さず打ち切る（production 相当: --shrinkage-m 10 --win-power 1.25 --place-show-power 2.0）。
+        print(f"忠実性 FAIL: max|python_win - dump model_win| = {fid_max:.2e} >= 1e-6。"
+              f"production 相当 flags の純 dump か確認（中断）。", file=sys.stderr)
+        sys.exit(1)
+    print(f"# 忠実性アンカー max|python_win - dump model_win| = {fid_max:.2e} (OK)\n")
 
     print(f"{'馬履歴cov層':10} {'races':>6} {'頭数':>5} {'top1_model':>11} {'top1_market':>12} "
           f"{'AUC_model':>10} {'AUC_market':>11} {'gap':>7}")
