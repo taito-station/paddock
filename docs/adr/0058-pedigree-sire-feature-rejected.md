@@ -6,23 +6,24 @@
 
 ## 訂正（2026-07-02・追測で判明）
 
-本 ADR 初版の「構造的天井は coverage（horse_id 可用 19.5%）」という論拠は**誤診**だった。棄却の verdict（sire はノイズ級・不採用）は変わらないが、根拠を factor 冗長性に訂正する:
+本 ADR 初版の「構造的天井は coverage（sire を乗せられるのは 19.5%）」という論拠は**誤診**だった。棄却の verdict（sire はノイズ級・不採用）は変わらないが、根拠を factor 冗長性に訂正する:
 
 - **19.5% は sire 固有のアーティファクト**。sire を dump 行へ join する際、`results.horse_id`（backfill が弱く 20.6%）／`horses` 名前引き（同 20.6%・pedigree を 2124 頭しか fetch していない）を使ったため。**馬 factor 一般の天井ではない。**
 - **馬履歴 factor の実 coverage は ~60-71%**。backtest は `horse_surface`/`horse_distance`/`horse_track_condition` を **`results` の過去成績の名前引き**で作る（horse_id 不要・2017-2026 の全成績が母数）。`course_gate`(95.8%) は `course.by_gate_group`＝コース×枠の汎用バイアスで馬履歴不要。
-- **coverage を上げても resolution は改善しない**（`/tmp/pa/coverage_strata.py`・gated 4,594R を「1レース内の馬履歴 factor カバー率」で層別）:
+- **coverage を上げても resolution は改善しない**（`scripts/predict-check/coverage_strata.py --tsv <pure dump>`・gated 4,594R を「1レース内の馬履歴 factor カバー率」で層別）:
 
 | horse-history coverage | races | AUC_model | AUC_market |
 |---|---:|---:|---:|
 | 0% | 437 | 0.677 | 0.776 |
+| 0-25% | 92 | 0.610 | 0.823 |
 | 25-50% | 169 | 0.660 | 0.863 |
 | 50-75% | 482 | 0.651 | 0.860 |
 | 75-99% | 1,649 | 0.664 | 0.845 |
 | 100% | 1,765 | 0.685 | 0.824 |
 
-model AUC は coverage 層でフラット（0.65-0.685）。**フル装備の 100% 層(0.685) は履歴ゼロの 0% 層(0.677) をわずか +0.008 しか上回らない**＝馬履歴 factor は常在の course_gate/jockey/trainer に**冗長**。よって天井は **coverage でなく factor 冗長性**（ADR 0027・ADR 0057 の ablation と整合）。全 runner 履歴の大量 fetch arc も、sire を高 coverage で再測定することも、この冗長性ゆえ不要。
+model AUC は coverage 層でフラット（0.61-0.685・上に単調増でない）。**フル装備の 100% 層(0.685) は履歴ゼロの 0% 層(0.677) をわずか +0.008 しか上回らない**＝馬履歴 factor は常在の course_gate/jockey/trainer に**冗長**。よって天井は **coverage でなく factor 冗長性**（ADR 0027〔データ量は主レバーでない〕・ADR 0057 の ablation〔馬 factor 除去でも top1 ほぼ不変〕と整合）。全 runner 履歴の大量 fetch arc も、sire を高 coverage で再測定することも、この冗長性ゆえ不要。
 
-以下本文中の「coverage cap / 構造的天井は coverage」は本訂正に読み替えること。
+※ caveat: 層はレース母集団が非同質（0% 層は新馬等に偏りうる・AUC_market も 0.78-0.86 と層で振れる）ため、端点比較は coverage 効果と race-type 交絡込みの directional read。交絡なしの主根拠は同一母数の ADR 0057 ablation（上記）。
 
 ## コンテキスト
 
