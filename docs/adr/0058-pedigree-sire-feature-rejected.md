@@ -21,9 +21,9 @@
 | 75-99% | 1,649 | 0.664 | 0.845 |
 | 100% | 1,765 | 0.685 | 0.824 |
 
-model AUC は coverage 層でフラット（0.61-0.685・上に単調増でない）。**フル装備の 100% 層(0.685) は履歴ゼロの 0% 層(0.677) をわずか +0.008 しか上回らない**＝馬履歴 factor は常在の course_gate/jockey/trainer に**冗長**。よって天井は **coverage でなく factor 冗長性**（ADR 0027〔データ量は主レバーでない〕・ADR 0057 の ablation〔馬 factor 除去でも top1 ほぼ不変〕と整合）。全 runner 履歴の大量 fetch arc も、sire を高 coverage で再測定することも、この冗長性ゆえ不要。
+model AUC は coverage 層でフラット（0.61-0.685・上に単調増でない）。**フル装備の 100% 層(0.685) は履歴ゼロの 0% 層(0.677) をわずか +0.008 しか上回らない**＝馬履歴 factor は常在の course_gate/jockey/trainer に**冗長**。よって天井は **coverage でなく factor 冗長性**（ADR 0027〔データ量は主レバーでない〕・ADR 0057 の drop 下 ablation〔馬 factor 除去でも top1 ほぼ不変〕と整合）。全 runner 履歴の大量 fetch arc も、sire を高 coverage で再測定することも、この冗長性ゆえ不要。
 
-※ caveat: 層はレース母集団が非同質（0% 層は新馬等に偏りうる・AUC_market も 0.78-0.86 と層で振れる）ため、端点比較は coverage 効果と race-type 交絡込みの directional read。交絡なしの主根拠は同一母数の ADR 0057 ablation（上記）。
+※ caveat: 層はレース母集団が非同質（0% 層は新馬等に偏りうる・AUC_market も 0.78-0.86 と層で振れる）ため、端点比較は coverage 効果と race-type 交絡込みの directional read。ただし **0%↔100% 層の +0.008 は欠損補完が無関係な端点なので drop/impute どちらのモデルでも成立**（endpoint はモデル非依存）＝この load-bearing 比較は交絡・補完方式に頑健。ADR 0057 の ablation（drop 下で馬 factor 除去しても top1 ほぼ不変）も同方向の支持。
 
 ## コンテキスト
 
