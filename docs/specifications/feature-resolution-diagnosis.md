@@ -95,7 +95,7 @@
 
 ### 到達点（2026-07-02・arc 完了後の追記）
 
-上の「伸び代は大きい」は arc を回した結果**否定された**。改善①（重み再調整・ADR 0056）＋改善②（欠落 factor の field mean 補完・ADR 0057）で純 AUC 0.649→0.678・top1 0.162→0.197 まで改善し merged。その後**既存データの resolution レバーは全滅**（within-race 相対化・recency・クラス昇降＝ADR 0034 ほか）、**新データ（血統/種牡馬）も measure-first ゲートでノイズ級・棄却（ADR 0058）**。純 AUC 0.678 vs 市場 0.833 の残り gap は**素性追加では詰まらない**ことが確定。真の天井は素性不足でなく **coverage cap**（純 dump の約 80% は相手馬で `results.horse_id` が付かず、どの馬 factor も乗らない＝乗せられるのは 19.5%）。次に動かすなら新 factor 探しでなく coverage を上げる別 arc。
+上の「伸び代は大きい」は arc を回した結果**否定された**。改善①（重み再調整・ADR 0056）＋改善②（欠落 factor の field mean 補完・ADR 0057）で純 AUC 0.649→0.678・top1 0.162→0.197 まで改善し merged。その後**既存データの resolution レバーは全滅**（within-race 相対化＝ADR 0056・recency＝ADR 0034・クラス昇降＝class_prototype 撤退）、**新データ（血統/種牡馬）も measure-first ゲートでノイズ級・棄却（ADR 0058）**。純 AUC 0.678 vs 市場 0.833 の残り gap は**素性追加では詰まらない**ことが確定。真の天井は素性不足でなく **coverage cap**（純 dump の約 80% は相手馬で `results.horse_id` が付かず、どの馬 factor も乗らない＝乗せられるのは 19.5%）。次に動かすなら新 factor 探しでなく coverage を上げる別 arc。
 
 ## 再現
 
