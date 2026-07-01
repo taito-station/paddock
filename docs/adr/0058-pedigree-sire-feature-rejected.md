@@ -1,4 +1,4 @@
-# 0058. 血統（種牡馬）適性 factor は現行データの coverage 天井内でノイズ級・棄却
+# 0058. 血統（種牡馬）適性 factor は現行データの coverage 天井内でノイズ級（棄却）
 
 ## ステータス
 
@@ -29,15 +29,17 @@
 | +sire overall  w=2.0 | 0.6719 (+0.0010) | 0.1844 (+0.0020) | ±0 |
 | +sire surface  w=1.0 | 0.6717 (+0.0009) | 0.1839 (+0.0015) | ±0 |
 | +sire distance w=1.0 | 0.6712 (+0.0003) | 0.1842 (+0.0017) | ±0 |
-| +sire both     w=2.0 | 0.6697 (−0.0012) | 0.1805 (−0.0020) | +0 |
+| +sire both     w=2.0 | 0.6697 (−0.0012) | 0.1805 (−0.0020) | ±0 |
 
-- 最良（overall/surface）でも **AUC +0.0011・top1 +0.0020・Brier ±0**。改善①（AUC +0.022）/改善②（+0.007）より桁が 1 つ小さく、**棄却済みクラス arc（top1 最良 +0.0015「ノイズ級」）とほぼ同水準**。top1 +0.0020 は n=4,594 で 1SE(≈0.0057) 未満＝統計的に非有意。
+※ Δ は表示 4 桁でなくフル精度の baseline との差から算出（同一表示値でも Δ が僅かに異なるのはこのため）。
+
+- **各指標の全構成最大**でも AUC +0.0011（overall w=1.0）・top1 +0.0020（overall w=2.0）・Brier ±0＝単一構成が両指標を同時達成するわけではなく、surface は AUC +0.0009 で overall に届かない。改善①（AUC +0.022）/改善②（+0.007）より桁が 1 つ小さく、**棄却済みクラス arc（top1 最良 +0.0015「ノイズ級」）とほぼ同水準**。top1 +0.0020 は改善①/②比較で明らかに桁違いに小さく、top1 水準の周辺 SE(≈0.0057・対応差でなく粗い上界) すら下回る＝実務上ノイズ。
 - 「both」は surface∩距離で過スパースになり有害。high weight も AUC を削る＝positive は脆い。
 
 ## 理由
 
 - **構造的天井は coverage**: 純 dump 68,149 行のうち種牡馬を乗せられるのは **19.5%**（＝backtest 窓で `results.horse_id` が付く割合の上限）。相手馬の約 80% は履歴未取得で horse_id が付かず、sire に限らずどの馬 factor も乗らない。sire は乗せられる層にはほぼ全て乗っている（overall 19.5%≈上限）。→ 種牡馬率をどれだけ厚くしても full-field 指標の上振れ余地は小さい。median 2 progeny/sire の母数薄は**二次要因**。
-- **baseline は改善①(drop) で測った**（Python ミラーが改善②の impute 未実装のため）。impute は既存欠落 factor を field mean で埋めるので sire の marginal 余地はむしろ縮む方向。弱い baseline で測って落ちた＝棄却は a fortiori に成立。
+- **baseline は改善①(drop) で測った**（Python ミラーが改善②の impute 未実装のため）。impute は既存欠落 factor を field mean で埋めるので sire の marginal 余地はむしろ縮むと見込まれる（directional な想定・未計測で、sire×impute の交互作用が単調である保証はない）。ただし**棄却の主根拠は a fortiori でなく上記 coverage cap** であり、baseline の drop/impute 差はその結論を揺るがさない。
 - ADR 0027（データ量は resolution の主レバーでない）を、クラスに続き血統でも再確認。純 resolution の残り gap は「新 factor 追加」では詰まらない。
 
 ## スコープ外 / 次にありうる伸び代
