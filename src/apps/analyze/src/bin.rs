@@ -211,6 +211,7 @@ async fn main() -> anyhow::Result<()> {
             jockey_form_weight,
             win_power,
             place_show_power,
+            impute_missing_factors,
             dump_features,
         } => {
             let blend_alpha = validate_blend_alpha(blend_alpha)?;
@@ -222,6 +223,7 @@ async fn main() -> anyhow::Result<()> {
                 jockey_form_weight,
                 win_power,
                 place_show_power,
+                impute_missing_factors,
             )?;
             let from = parse_date(&from)?;
             let to = parse_date(&to)?;
@@ -290,6 +292,9 @@ fn validate_blend_alpha(alpha: Option<f64>) -> anyhow::Result<Option<f64>> {
 /// `--shrinkage-m` / `--recency-half-life` とも指定時は有限の正数のみ許可
 /// （0 や負値はゼロ除算・無意味なため）。`--recent-form-weight` は有限の非負数のみ、
 /// `--trend-n` は 1〜3 のみ許可。
+// 引数は backtest CLI の各スイープフラグと 1:1 対応（#75/#217/#220/#246/#283/#272）。まとめ struct 化は
+// clap 側と本関数で二重定義になり見通しを損なうため、フラグ列をそのまま受ける。
+#[allow(clippy::too_many_arguments)]
 fn build_estimation_config(
     shrinkage_m: Option<f64>,
     recency_half_life: Option<f64>,
@@ -298,6 +303,7 @@ fn build_estimation_config(
     jockey_form_weight: Option<f64>,
     win_power: Option<f64>,
     place_show_power: Option<f64>,
+    impute_missing_factors: bool,
 ) -> anyhow::Result<EstimationConfig> {
     let shrinkage = match shrinkage_m {
         Some(m) => {
@@ -350,6 +356,7 @@ fn build_estimation_config(
         jockey_recent_form_weight: jockey_form_weight,
         win_power,
         place_show_power,
+        impute_missing_factors,
     })
 }
 

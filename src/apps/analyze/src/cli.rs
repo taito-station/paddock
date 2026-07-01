@@ -102,6 +102,12 @@ pub enum Command {
         /// 校正・複勝回収を比較する（trio/馬連/馬単は win_prob 由来で本フラグでは不変）。
         #[arg(long)]
         place_show_power: Option<f64>,
+        /// 欠落 stat factor をレース内 field mean で補完する（#272 改善② / ADR 0057）。指定すると各 factor を
+        /// 欠く馬に present 馬の縮約後レート平均（present<2 は prior）を代入し weight も数える。未指定は従来
+        /// どおり欠落項を母数から落とす（drop）。純 resolution 改善（AUC/top1）と blended 非回帰を A/B するための
+        /// フラグ。predict 本番（`EstimationConfig::production()`）は既定で有効。
+        #[arg(long)]
+        impute_missing_factors: bool,
         /// 学習型モデル評価ハーネス用の特徴量ダンプ出力先 TSV パス（#272 Phase A）。指定すると各
         /// 出走馬の素性（ブレンド・冪変換前）＋ラベル（確定着順・人気）＋当時市場単勝をリーク無しの
         /// walk-forward で書き出す。未指定は集計レポートのみ（既存挙動）。
@@ -165,5 +171,30 @@ mod tests {
         ])
         .unwrap_err();
         assert_eq!(err.kind(), clap::error::ErrorKind::ValueValidation);
+    }
+
+    /// `--impute-missing-factors` は bool フラグで、未指定は false（drop）・指定で true（#272 改善②）。
+    #[test]
+    fn backtest_parses_impute_missing_factors_flag() {
+        let parse = |extra: &[&str]| {
+            let mut args = vec![
+                "paddock-analyze",
+                "backtest",
+                "--from",
+                "2025-01-01",
+                "--to",
+                "2025-01-31",
+            ];
+            args.extend_from_slice(extra);
+            match Cli::try_parse_from(args).unwrap().command {
+                Command::Backtest {
+                    impute_missing_factors,
+                    ..
+                } => impute_missing_factors,
+                other => panic!("unexpected command: {other:?}"),
+            }
+        };
+        assert!(!parse(&[]), "未指定は drop（false）");
+        assert!(parse(&["--impute-missing-factors"]), "指定で補完（true）");
     }
 }

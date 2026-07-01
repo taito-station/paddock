@@ -6,7 +6,10 @@ use std::collections::HashMap;
 use chrono::NaiveDate;
 
 use super::parse::parse_margin_lengths;
-use super::scoring::{jockey_recent_form_score, margin_form, raw_score, shrink_rate, time_form};
+use super::scoring::{
+    FactorImpute, jockey_recent_form_score, margin_form, raw_score, raw_score_with_impute,
+    shrink_rate, time_form,
+};
 use super::weights::{
     JOCKEY_RECENT_FORM_WEIGHT, MARGIN_CAP_LENGTHS, PRIOR_RATE, TIME_DEV_CAP, WEIGHT_CARRIED_CAP_KG,
     WEIGHT_CHANGE_CAP,
@@ -929,6 +932,7 @@ fn shrink_cfg(m: f64) -> EstimationConfig {
         jockey_recent_form_weight: None,
         win_power: None,
         place_show_power: None,
+        impute_missing_factors: false,
     }
 }
 
@@ -1726,6 +1730,112 @@ fn recent_form_keeps_monotonicity_in_estimate() {
     ];
     let probs = estimate_probabilities(&entries);
     for p in &probs {
+        assert!(p.win_prob <= p.place_prob && p.place_prob <= p.show_prob);
+    }
+}
+
+// ---- 欠落 stat factor の field mean 補完（#272 改善② / ADR 0057） ----
+
+/// horse_surface だけ設定できる（他 stat/scalar は欠落）テスト用 HorseFactors。
+fn surf(win: Option<f64>) -> HorseFactors {
+    HorseFactors {
+        course_gate: None,
+        horse_surface: win.map(|w| {
+            fs(RateTriple {
+                win: w,
+                place: w,
+                show: w,
+            })
+        }),
+        horse_distance: None,
+        jockey_surface: None,
+        trainer_surface: None,
+        horse_track_condition: None,
+        recent_form: None,
+        weight_carried: None,
+        jockey_recent_form: None,
+    }
+}
+
+#[test]
+fn field_impute_uses_present_mean_and_prior_fallback() {
+    // 縮約 off（default）では factor_value = 生レート。present 2 頭（A,B）の horse_surface 平均 = 0.5。
+    let factors = [surf(Some(0.4)), surf(Some(0.6)), surf(None)];
+    let imp = FactorImpute::from_field(factors.iter(), |r| r.win, &EstimationConfig::default());
+    approx(imp.horse_surface.unwrap(), 0.5);
+    // present 0 頭の factor は prior へフォールバック（レース内平均が立たない）。
+    approx(imp.course_gate.unwrap(), PRIOR_RATE.win);
+    approx(imp.jockey_surface.unwrap(), PRIOR_RATE.win);
+
+    // present が 1 頭だと平均が単一馬に潰れて中立にならないため prior で埋める。
+    let one = [surf(Some(0.6)), surf(None)];
+    let imp1 = FactorImpute::from_field(one.iter(), |r| r.win, &EstimationConfig::default());
+    approx(imp1.horse_surface.unwrap(), PRIOR_RATE.win);
+}
+
+#[test]
+fn impute_fills_missing_factor_instead_of_dropping() {
+    // course_gate のみ持ち horse_surface を欠く馬。
+    let mut f = surf(None);
+    f.course_gate = Some(fs(RateTriple {
+        win: 0.2,
+        place: 0.2,
+        show: 0.2,
+    }));
+    let cfg = EstimationConfig::default();
+    // drop（従来）: 母数は course_gate のみ → 0.2。
+    let dropped = raw_score(&f, |r| r.win, &cfg);
+    approx(dropped, 0.2);
+    // horse_surface を field mean 0.8 で補完すると course(0.2) と 0.8 の重み付き平均へ動く。
+    let imp = FactorImpute {
+        horse_surface: Some(0.8),
+        ..FactorImpute::DROP
+    };
+    let filled = raw_score_with_impute(&f, |r| r.win, &cfg, &imp);
+    assert!(
+        filled > dropped && filled < 0.8,
+        "filled={filled} は drop(0.2) と impute(0.8) の間に入るはず"
+    );
+    // 全 drop 補完は raw_score（従来）と厳密一致（回帰ガード）。
+    approx(
+        raw_score_with_impute(&f, |r| r.win, &cfg, &FactorImpute::DROP),
+        dropped,
+    );
+}
+
+#[test]
+fn estimate_imputation_changes_missing_horse_probability() {
+    // A,B は horse_surface を持ち field mean が立つ。C は欠落し、course_gate を field mean と別値に
+    // することで補完 on/off で C の勝率が動く（配線の回帰ガード）。
+    let mk = |surface: Option<f64>, cg: f64| {
+        let mut f = surf(surface);
+        f.course_gate = Some(fs(RateTriple {
+            win: cg,
+            place: cg,
+            show: cg,
+        }));
+        f
+    };
+    let entries = vec![
+        (make_entry(1, "A"), mk(Some(0.7), 0.5)),
+        (make_entry(2, "B"), mk(Some(0.3), 0.5)),
+        (make_entry(3, "C"), mk(None, 0.2)),
+    ];
+    let off = estimate_probabilities_with_config(&entries, &EstimationConfig::default());
+    let impute_cfg = EstimationConfig {
+        impute_missing_factors: true,
+        ..EstimationConfig::default()
+    };
+    let on = estimate_probabilities_with_config(&entries, &impute_cfg);
+    let c = HorseNum::try_from(3u32).unwrap();
+    let c_off = off.iter().find(|p| p.horse_num == c).unwrap().win_prob;
+    let c_on = on.iter().find(|p| p.horse_num == c).unwrap().win_prob;
+    assert!(
+        (c_off - c_on).abs() > 1e-6,
+        "補完で C の勝率が動くはず: off={c_off} on={c_on}"
+    );
+    // 補完 off は現行の drop 経路と一致（単調性も維持）。
+    for p in &on {
         assert!(p.win_prob <= p.place_prob && p.place_prob <= p.show_prob);
     }
 }

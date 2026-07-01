@@ -43,6 +43,14 @@ pub struct EstimationConfig {
     /// 採用値 `RECOMMENDED_PLACE_SHOW_POWER`（ADR 0047）を既定にする。再 sweep は backtest の
     /// `--place-show-power` フラグ経由（`Default` は `None`＝no-op）。
     pub place_show_power: Option<f64>,
+    /// 欠落 stat factor をレース内 field mean で補完するか（#272 改善② / ADR 0057）。`false`（`Default`）は
+    /// 従来どおり欠落項を母数から落とす（drop）。`true` は present 馬の縮約後レート平均（present<2 は prior）を
+    /// 欠く馬に代入して weight も数える。欠落を drop すると識別力の高い高欠落 factor
+    /// （horse_surface/distance/track_condition, 欠落 0.28〜0.39）の resolution が希釈されるため、field mean
+    /// で present 馬の相対差を保ったまま欠く馬を中立に置く。診断ダンプ screening で純 AUC 0.671→0.678・
+    /// top1 0.182→0.197（全 6 四半期改善）。`production()` は `true`、backtest の `--impute-missing-factors`
+    /// で A/B できる。詳細は [`super::scoring::FactorImpute`] と ADR 0057。
+    pub impute_missing_factors: bool,
 }
 
 // trend_n のデフォルト値が 0 でなく 1 のため、derive(Default) ではなく手書き impl を使う。
@@ -56,6 +64,7 @@ impl Default for EstimationConfig {
             jockey_recent_form_weight: None,
             win_power: None,
             place_show_power: None,
+            impute_missing_factors: false,
         }
     }
 }
@@ -108,6 +117,9 @@ impl EstimationConfig {
             // #283 Phase 2: γ=2.0 を採用（4891R sweep で place/show Brier/LogLoss・人気帯校正・
             // 複勝 ROI が単調改善・単勝校正は完全不変）。詳細は ADR 0047。
             place_show_power: Some(RECOMMENDED_PLACE_SHOW_POWER),
+            // #272 改善②: 欠落 stat factor を field mean 補完（純 AUC 0.671→0.678・top1 0.182→0.197,
+            // 全 6 四半期改善／blended α=0.2 非回帰）。詳細は ADR 0057。
+            impute_missing_factors: true,
         }
     }
 }
