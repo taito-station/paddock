@@ -40,7 +40,8 @@ fn factor_value(fs: &FactorStat, rate: fn(&RateTriple) -> f64, config: &Estimati
 /// 希釈される（#272 Phase A 診断）。欠落を field mean（レース内中立）で埋めると present 馬の相対差を
 /// 保ったまま欠く馬を中立に置ける。診断ダンプ screening で純 AUC 0.671→0.678・top1 0.182→0.197
 /// （全 6 四半期改善）を確認して採用（ADR 0057）。`EstimationConfig::impute_missing_factors` で有効化する。
-#[derive(Debug, Clone, Copy, Default)]
+/// 中立値の綴りは全 drop の [`FactorImpute::DROP`] に一本化する（`Default` は導出しない）。
+#[derive(Debug, Clone, Copy)]
 pub(crate) struct FactorImpute {
     pub course_gate: Option<f64>,
     pub horse_surface: Option<f64>,

@@ -1839,3 +1839,83 @@ fn estimate_imputation_changes_missing_horse_probability() {
         assert!(p.win_prob <= p.place_prob && p.place_prob <= p.show_prob);
     }
 }
+
+#[test]
+fn field_impute_is_per_selector() {
+    // win/place/show でレートが異なる horse_surface。selector ごとに独立に field mean を取り、
+    // present 0 頭の factor は selector 対応の PRIOR_RATE でフォールバックすることを確認する。
+    let hs = |w: f64, p: f64, s: f64| HorseFactors {
+        horse_surface: Some(fs(RateTriple {
+            win: w,
+            place: p,
+            show: s,
+        })),
+        ..surf(None)
+    };
+    let factors = [hs(0.4, 0.5, 0.6), hs(0.6, 0.7, 0.8), surf(None)];
+    let cfg = EstimationConfig::default();
+    // horse_surface: present 2 頭の平均は selector 別（win 0.5 / place 0.6 / show 0.7）。
+    approx(
+        FactorImpute::from_field(factors.iter(), |r| r.win, &cfg)
+            .horse_surface
+            .unwrap(),
+        0.5,
+    );
+    approx(
+        FactorImpute::from_field(factors.iter(), |r| r.place, &cfg)
+            .horse_surface
+            .unwrap(),
+        0.6,
+    );
+    approx(
+        FactorImpute::from_field(factors.iter(), |r| r.show, &cfg)
+            .horse_surface
+            .unwrap(),
+        0.7,
+    );
+    // present 0 頭の course_gate は selector 別 prior（place/show は win と別値）。
+    approx(
+        FactorImpute::from_field(factors.iter(), |r| r.place, &cfg)
+            .course_gate
+            .unwrap(),
+        PRIOR_RATE.place,
+    );
+    approx(
+        FactorImpute::from_field(factors.iter(), |r| r.show, &cfg)
+            .course_gate
+            .unwrap(),
+        PRIOR_RATE.show,
+    );
+}
+
+#[test]
+fn all_factors_missing_horse_imputes_to_weight_nonzero() {
+    // 全 factor 欠落の馬。drop なら weight==0 → score 0.0（均等フォールバック, ADR 0014）。
+    let bare = surf(None);
+    let cfg = EstimationConfig::default();
+    approx(raw_score(&bare, |r| r.win, &cfg), 0.0);
+    // 補完有効時は全 stat factor が field mean（present 0 → prior）で Some 化され weight>0 になり、
+    // weight==0 の均等フォールバック経路は該当馬で非到達になる（#272 改善② の意図した挙動変化）。
+    let prior = PRIOR_RATE.win;
+    let imp = FactorImpute {
+        course_gate: Some(prior),
+        horse_surface: Some(prior),
+        horse_distance: Some(prior),
+        jockey_surface: Some(prior),
+        trainer_surface: Some(prior),
+        horse_track_condition: Some(prior),
+    };
+    approx(raw_score_with_impute(&bare, |r| r.win, &cfg, &imp), prior);
+}
+
+#[test]
+fn production_enables_imputation_default_disables() {
+    assert!(
+        EstimationConfig::production().impute_missing_factors,
+        "predict 本番は欠落補完を有効にする（ADR 0057）"
+    );
+    assert!(
+        !EstimationConfig::default().impute_missing_factors,
+        "Default は後方互換で drop（補完なし）"
+    );
+}
