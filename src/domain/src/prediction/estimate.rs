@@ -3,8 +3,8 @@
 use std::collections::HashMap;
 
 use super::config::EstimationConfig;
-use super::model::{HorseFactors, HorseProbability};
-use super::scoring::{normalize_to_sum, raw_score};
+use super::model::{HorseFactors, HorseProbability, RateTriple};
+use super::scoring::{FactorImpute, normalize_to_sum, raw_score_with_impute};
 use crate::horse_result::HorseNum;
 use crate::race_card::HorseEntry;
 
@@ -23,17 +23,30 @@ pub fn estimate_probabilities_with_config(
         return Vec::new();
     }
 
+    // 欠落補完（#272 改善② / ADR 0057）: config で有効なときレース内 field mean を selector ごとに
+    // 計算する。無効時は全 drop（従来挙動）で raw_score_with_impute は現行の raw_score と一致する。
+    let field_impute = |rate: fn(&RateTriple) -> f64| {
+        if config.impute_missing_factors {
+            FactorImpute::from_field(entries.iter().map(|(_, f)| f), rate, config)
+        } else {
+            FactorImpute::DROP
+        }
+    };
+    let win_impute = field_impute(|r| r.win);
+    let place_impute = field_impute(|r| r.place);
+    let show_impute = field_impute(|r| r.show);
+
     let win_scores: Vec<f64> = entries
         .iter()
-        .map(|(_, f)| raw_score(f, |r| r.win, config))
+        .map(|(_, f)| raw_score_with_impute(f, |r| r.win, config, &win_impute))
         .collect();
     let place_scores: Vec<f64> = entries
         .iter()
-        .map(|(_, f)| raw_score(f, |r| r.place, config))
+        .map(|(_, f)| raw_score_with_impute(f, |r| r.place, config, &place_impute))
         .collect();
     let show_scores: Vec<f64> = entries
         .iter()
-        .map(|(_, f)| raw_score(f, |r| r.show, config))
+        .map(|(_, f)| raw_score_with_impute(f, |r| r.show, config, &show_impute))
         .collect();
 
     // place/show は正規化前にスコアを冪変換 γ でシャープ化して分布の中央圧縮を脱圧縮する（#283）。
@@ -74,8 +87,8 @@ pub fn estimate_probabilities_with_config(
 /// スコア列に冪変換 `score^γ` を適用する（#283 / place/show 脱圧縮）。
 ///
 /// `gamma` が `None` / 非有限 / `<= 0.0` / 実質 `1.0`（`|γ-1.0| < f64::EPSILON`＝リテラル 1.0 のみ捕捉）
-/// のときは no-op で入力をそのまま返す（後方互換・所有権を受けるので no-op はアロケーション無し）。`raw_score`
-/// は非負（レート ∈ [0,1] とフォーム signal の重み付き平均）なので底が負になることはなく、
+/// のときは no-op で入力をそのまま返す（後方互換・所有権を受けるので no-op はアロケーション無し）。採点
+/// （`raw_score_with_impute`）は非負（レート ∈ [0,1] とフォーム signal の重み付き平均）なので底が負になることはなく、
 /// `0.0^γ = 0.0`（γ>0）でスコア 0 馬は 0 のまま。呼び出し側で `normalize_to_sum` に渡して場内合計を
 /// 保つ前提で、ここでは正規化しない。
 ///

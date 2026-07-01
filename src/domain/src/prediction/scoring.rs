@@ -31,48 +31,163 @@ fn factor_value(fs: &FactorStat, rate: fn(&RateTriple) -> f64, config: &Estimati
     }
 }
 
-/// 存在する factor の**重み付き平均**を返す。実績の無い項（出走実績なし・騎手未登録・前走なし等）は
-/// その項と重みを母数から除外して評価するため、欠落で不当に減点されない（ADR 0007/0014）。
-/// 「実績なし」を 0 レート（＝全敗）と同一視しない方針を全 factor に統一する（#81）。全馬が同条件の
-/// ときは定数除算となり、レース内正規化後の相対順位は変わらない。
+/// 欠落 stat factor をレース内 field mean（present 馬の縮約後レート平均）で補完する値の束（#272 改善②）。
+/// 各 stat factor について「その factor を欠く馬に代入するレート」を持つ。`None` は従来どおりその馬で
+/// 項ごと母数から落とす（drop）。`Some(v)` は欠く馬に `v` を代入し weight も数える。
 ///
-/// 全 factor が欠落（`weight == 0.0`）の馬はゼロ除算（NaN）を避けて `0.0` を返す。score 0 の馬は
-/// `normalize_to_sum` の全 0 フォールバックで均等確率に畳まれる。
-///
-/// `recent_form` はスカラー（[0,1]、0.5=中立）で win/place/show に同値で寄与する。
+/// 欠落を drop すると、その factor を持つ馬だけがシグナルを得て欠く馬とのレース内相対比較が失われ、
+/// 識別力の高い高欠落 factor（horse_surface/distance/track_condition, 欠落 0.28〜0.39）の resolution が
+/// 希釈される（#272 Phase A 診断）。欠落を field mean（レース内中立）で埋めると present 馬の相対差を
+/// 保ったまま欠く馬を中立に置ける。診断ダンプ screening で純 AUC 0.671→0.678・top1 0.182→0.197
+/// （全 6 四半期改善）を確認して採用（ADR 0057）。`EstimationConfig::impute_missing_factors` で有効化する。
+/// 中立値の綴りは全 drop の [`FactorImpute::DROP`] に一本化する（`Default` は導出しない）。
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct FactorImpute {
+    pub course_gate: Option<f64>,
+    pub horse_surface: Option<f64>,
+    pub horse_distance: Option<f64>,
+    pub jockey_surface: Option<f64>,
+    pub trainer_surface: Option<f64>,
+    pub horse_track_condition: Option<f64>,
+}
+
+impl FactorImpute {
+    /// 全 factor drop（従来挙動）。補完無効時と後方互換 wrapper [`raw_score`]・テスト用。
+    pub(crate) const DROP: Self = Self {
+        course_gate: None,
+        horse_surface: None,
+        horse_distance: None,
+        jockey_surface: None,
+        trainer_surface: None,
+        horse_track_condition: None,
+    };
+
+    /// レース内の全馬 `factors` から selector `rate` の field mean を計算して補完値を作る。各 stat factor で
+    /// present 馬（当該 factor が `Some`）の縮約後レート平均を取り、present が 2 頭未満のときは代わりに
+    /// prior（`rate(&PRIOR_RATE)`）で埋める（レース内比較の母数が立たず平均が単一馬に潰れるため）。
+    /// 平均は `factor_value` と同じ縮約を通すので、`config.shrinkage` の有無に対して present 馬の
+    /// 自己スコアと整合する。
+    pub(crate) fn from_field<'a>(
+        factors: impl Iterator<Item = &'a HorseFactors>,
+        rate: fn(&RateTriple) -> f64,
+        config: &EstimationConfig,
+    ) -> Self {
+        let (mut s_cg, mut n_cg) = (0.0, 0u32);
+        let (mut s_hs, mut n_hs) = (0.0, 0u32);
+        let (mut s_hd, mut n_hd) = (0.0, 0u32);
+        let (mut s_jk, mut n_jk) = (0.0, 0u32);
+        let (mut s_tr, mut n_tr) = (0.0, 0u32);
+        let (mut s_tc, mut n_tc) = (0.0, 0u32);
+        for f in factors {
+            if let Some(fs) = &f.course_gate {
+                s_cg += factor_value(fs, rate, config);
+                n_cg += 1;
+            }
+            if let Some(fs) = &f.horse_surface {
+                s_hs += factor_value(fs, rate, config);
+                n_hs += 1;
+            }
+            if let Some(fs) = &f.horse_distance {
+                s_hd += factor_value(fs, rate, config);
+                n_hd += 1;
+            }
+            if let Some(fs) = &f.jockey_surface {
+                s_jk += factor_value(fs, rate, config);
+                n_jk += 1;
+            }
+            if let Some(fs) = &f.trainer_surface {
+                s_tr += factor_value(fs, rate, config);
+                n_tr += 1;
+            }
+            if let Some(fs) = &f.horse_track_condition {
+                s_tc += factor_value(fs, rate, config);
+                n_tc += 1;
+            }
+        }
+        let prior = rate(&PRIOR_RATE);
+        // present が 2 頭未満なら平均が単一馬（または空）に潰れてレース内中立にならないため prior で埋める。
+        let mean_or_prior = |sum: f64, n: u32| Some(if n >= 2 { sum / n as f64 } else { prior });
+        Self {
+            course_gate: mean_or_prior(s_cg, n_cg),
+            horse_surface: mean_or_prior(s_hs, n_hs),
+            horse_distance: mean_or_prior(s_hd, n_hd),
+            jockey_surface: mean_or_prior(s_jk, n_jk),
+            trainer_surface: mean_or_prior(s_tr, n_tr),
+            horse_track_condition: mean_or_prior(s_tc, n_tc),
+        }
+    }
+}
+
+/// 欠落補完なしの重み付き採点（従来挙動）。[`raw_score_with_impute`] に全 drop の [`FactorImpute::DROP`]
+/// を渡す薄い wrapper で、per-horse 単位の採点意味論（欠落＝母数除外, ADR 0007/0014）を検証するテスト用。
+/// 本番経路（`estimate_probabilities_with_config`）は field mean を渡す `raw_score_with_impute` を直接使う。
+#[cfg(test)]
 pub(crate) fn raw_score(
     factors: &HorseFactors,
     rate: fn(&RateTriple) -> f64,
     config: &EstimationConfig,
 ) -> f64 {
+    raw_score_with_impute(factors, rate, config, &FactorImpute::DROP)
+}
+
+/// 存在する factor の**重み付き平均**を返す。実績の無い項（出走実績なし・騎手未登録・前走なし等）は
+/// その項と重みを母数から除外して評価するため、欠落で不当に減点されない（ADR 0007/0014）。
+/// 「実績なし」を 0 レート（＝全敗）と同一視しない方針を全 factor に統一する（#81）。全馬が同条件の
+/// ときは定数除算となり、レース内正規化後の相対順位は変わらない。
+///
+/// `impute` が stat factor に `Some(v)` を持つ場合、その factor を欠く馬は drop せず `v`（レース内 field
+/// mean）を代入して weight も数える（#272 改善②）。`impute` は [`FactorImpute::from_field`] がレース単位で
+/// 作る。スカラー項（recent_form 等）は補完対象外で従来どおり欠落は母数から落とす。
+///
+/// 全 factor が欠落（`weight == 0.0`）の馬はゼロ除算（NaN）を避けて `0.0` を返す。score 0 の馬は
+/// `normalize_to_sum` の全 0 フォールバックで均等確率に畳まれる。
+///
+/// `recent_form` はスカラー（[0,1]、0.5=中立）で win/place/show に同値で寄与する。
+pub(crate) fn raw_score_with_impute(
+    factors: &HorseFactors,
+    rate: fn(&RateTriple) -> f64,
+    config: &EstimationConfig,
+    impute: &FactorImpute,
+) -> f64 {
     let mut weighted = 0.0;
     let mut weight = 0.0;
-    if let Some(course_gate) = factors.course_gate {
-        weighted += COURSE_GATE_WEIGHT * factor_value(&course_gate, rate, config);
-        weight += COURSE_GATE_WEIGHT;
-    }
-    if let Some(surface) = factors.horse_surface {
-        weighted += SURFACE_WEIGHT * factor_value(&surface, rate, config);
-        weight += SURFACE_WEIGHT;
-    }
-    if let Some(distance) = factors.horse_distance {
-        weighted += DISTANCE_WEIGHT * factor_value(&distance, rate, config);
-        weight += DISTANCE_WEIGHT;
-    }
-    if let Some(jockey) = factors.jockey_surface {
-        // 騎手も全 factor 共通の縮約 m を使う。騎手専用の強い縮約（小サンプル過信の抑制）は
-        // #105 で backtest 評価したが集約指標に改善が無く（むしろ微悪化）採用見送り（ADR 0017）。
-        weighted += JOCKEY_WEIGHT * factor_value(&jockey, rate, config);
-        weight += JOCKEY_WEIGHT;
-    }
-    if let Some(trainer) = factors.trainer_surface {
-        weighted += TRAINER_WEIGHT * factor_value(&trainer, rate, config);
-        weight += TRAINER_WEIGHT;
-    }
-    if let Some(tc) = factors.horse_track_condition {
-        weighted += TRACK_CONDITION_WEIGHT * factor_value(&tc, rate, config);
-        weight += TRACK_CONDITION_WEIGHT;
-    }
+    // stat factor: present は自己スコア、欠落は impute が Some のとき field mean を代入して weight を数える。
+    let mut accum_stat = |fs: &Option<FactorStat>, w: f64, imp: Option<f64>| match fs {
+        Some(fs) => {
+            weighted += w * factor_value(fs, rate, config);
+            weight += w;
+        }
+        None => {
+            if let Some(v) = imp {
+                weighted += w * v;
+                weight += w;
+            }
+        }
+    };
+    accum_stat(&factors.course_gate, COURSE_GATE_WEIGHT, impute.course_gate);
+    accum_stat(&factors.horse_surface, SURFACE_WEIGHT, impute.horse_surface);
+    accum_stat(
+        &factors.horse_distance,
+        DISTANCE_WEIGHT,
+        impute.horse_distance,
+    );
+    // 騎手も全 factor 共通の縮約 m を使う。騎手専用の強い縮約（小サンプル過信の抑制）は #105 で
+    // backtest 評価したが集約指標に改善が無く（むしろ微悪化）採用見送り（ADR 0017）。
+    accum_stat(
+        &factors.jockey_surface,
+        JOCKEY_WEIGHT,
+        impute.jockey_surface,
+    );
+    accum_stat(
+        &factors.trainer_surface,
+        TRAINER_WEIGHT,
+        impute.trainer_surface,
+    );
+    accum_stat(
+        &factors.horse_track_condition,
+        TRACK_CONDITION_WEIGHT,
+        impute.horse_track_condition,
+    );
     if let Some(form) = factors.recent_form {
         let fw = config.recent_form_weight.unwrap_or(FORM_WEIGHT);
         weighted += fw * form;

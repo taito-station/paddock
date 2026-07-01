@@ -89,8 +89,20 @@ raw_score =
 > #81 で 0 埋めだった course_gate/horse_surface/horse_distance/jockey_surface を None 除外へ統一した。
 > これらの項は「平均からの差分」としてのみ効き、欠落で不当に減点されない。全馬が同条件のときは定数除算
 > となり相対順位は不変。
+> 注1b（#272改善② / ADR 0057）: 上の「欠落＝母数から落とす（drop）」は `Default`（`impute_missing_factors=false`）の
+> 挙動。**predict 本番（`production()`）は欠落 stat factor をレース内 field mean で補完する**（present 馬の
+> 縮約後レート平均、present<2 は prior）。欠落を drop すると同レースで当該 factor を持つ馬だけがシグナルを得て
+> 欠く馬とのレース内相対比較が失われ、識別力の高い高欠落 factor（`horse_surface`/`horse_distance`/
+> `horse_track_condition`, 欠落 0.28〜0.39）の resolution が希釈されるため。field mean はレース内中立なので
+> 「実績なし ≠ 減点」の方針（ADR 0007/0014）を保つ。**scalar 項（`recent_form`/`weight_carried`/
+> `jockey_recent_form`）は補完対象外で従来どおり drop**。純 AUC 0.671→0.678・top1 0.182→0.197（全6四半期改善）、
+> blended α=0.2 は非回帰。backtest は `--impute-missing-factors` で on/off できる。
 > 注2: 全 factor が `None`（どの統計も実績なし）の馬は `weight == 0` → ゼロ除算を避けて score = 0.0。
-> score 0 の馬は次ステップの均等フォールバックに畳まれる（ADR 0014）。
+> score 0 の馬は次ステップの均等フォールバックに畳まれる（ADR 0014）。**ただし補完有効時（注1b・本番）は
+> 全 stat factor が field mean（present 0 頭なら prior）で補完されて `weight > 0` になるため、stat のみ
+> 欠落する馬（全 stat 欠落・scalar も無い新馬等）ではこの `weight==0` 均等フォールバックは非到達になり、
+> prior 相当のスコアでレースに参加する**（drop 時の score 0.0＝低評価から中立寄りへ変わる。ADR 0007/0014 の
+> 「実績なし≠全敗」に整合する方向・ADR 0057）。
 > 注3: `recent_form` は直近 N 走（N=1〜3、backtest #220 評価の結果 N=1 を維持）の各走スコアを
 > 重み [1.0, 0.5, 0.25] で加重平均したトレンドスカラー値（0.5=中立）。各走スコアは馬体重変化・
 > 前走人気乖離・前走間隔・前走着差（#76）・前走タイム相対速度（#76）を [0,1] に統合した値。
