@@ -38,7 +38,7 @@
 
 ## 理由
 
-- **構造的天井は coverage**: 純 dump 68,149 行のうち種牡馬を乗せられるのは **19.5%**（＝backtest 窓で `results.horse_id` が付く割合の上限）。相手馬の約 80% は履歴未取得で horse_id が付かず、sire に限らずどの馬 factor も乗らない。sire は乗せられる層にはほぼ全て乗っている（overall 19.5%≈上限）。→ 種牡馬率をどれだけ厚くしても full-field 指標の上振れ余地は小さい。median 2 progeny/sire の母数薄は**二次要因**。
+- **構造的天井は coverage**: 純 dump 68,149 行のうち種牡馬を乗せられるのは **19.5%**（＝backtest 窓で `results.horse_id` が付く割合の上限）。純 dump の約 80%（相手馬）は履歴未取得で horse_id が付かず、sire に限らずどの馬 factor も乗らない。sire は乗せられる層にはほぼ全て乗っている（overall 19.5%≈上限）。→ 種牡馬率をどれだけ厚くしても full-field 指標の上振れ余地は小さい。median 2 progeny/sire の母数薄は**二次要因**。
 - **baseline は改善①(drop) で測った**（Python ミラーが改善②の impute 未実装のため）。impute は既存欠落 factor を field mean で埋めるので sire の marginal 余地はむしろ縮むと見込まれる（directional な想定・未計測で、sire×impute の交互作用が単調である保証はない）。ただし**棄却の主根拠は a fortiori でなく上記 coverage cap** であり、baseline の drop/impute 差はその結論を揺るがさない。
 - ADR 0027（データ量は resolution の主レバーでない）を、クラスに続き血統でも再確認。純 resolution の残り gap は「新 factor 追加」では詰まらない。
 
