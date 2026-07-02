@@ -97,7 +97,7 @@
 
 上の「伸び代は大きい」は arc を回した結果**否定された**。改善①（重み再調整・ADR 0056）＋改善②（欠落 factor の field mean 補完・ADR 0057）で純 AUC 0.649→0.678・top1 0.162→0.197 まで改善し merged。その後**既存データの resolution レバーは全滅**（within-race 相対化＝ADR 0056・recency＝ADR 0034・クラス昇降＝class_prototype 撤退）、**新データ（血統/種牡馬）も measure-first ゲートでノイズ級・棄却（ADR 0058）**。純 AUC 0.678 vs 市場 0.833 の残り gap は**素性追加でも coverage 拡大でも詰まらない**ことが確定。
 
-**天井は coverage でなく factor 冗長性**（ADR 0058 訂正で確定）。gated 4,594R を「1レース内の馬履歴 factor（horse_surface/distance/track_condition）カバー率」で層別すると、model AUC はフラット（0.61-0.685）で、フル装備の 100% 層(0.685) は履歴ゼロの 0% 層(0.677) を +0.008 しか上回らない＝馬履歴 factor は常在の course_gate/jockey/trainer に冗長（層別ツール `scripts/predict-check/coverage_strata.py`）。※ ADR 0058 初版の「coverage cap 19.5%」は sire を `results.horse_id`(20.6%) で join したアーティファクトで馬 factor 一般の天井ではない（実 coverage ~60-71%）＝同 ADR 訂正節参照。全 runner 履歴の大量 fetch arc は不要。次に動かすなら公開データ外の情報が要る（ADR 0027）。
+**天井は coverage でなく factor 冗長性**（ADR 0058 訂正で確定）。gated 4,594R を「1レース内の馬履歴 factor（horse_surface/distance/track_condition）カバー率」で層別すると、model AUC はフラット（0.61-0.685）で、フル装備の 100% 層(0.685) は履歴ゼロの 0% 層(0.677) を +0.008 しか上回らない＝馬履歴 factor は常在の course_gate/jockey/trainer に冗長（層別ツール `scripts/predict-check/coverage_strata.py`）。※ ADR 0058 初版の「coverage cap 19.5%」は sire を `results.horse_id`(20.6%) で join したアーティファクトで馬 factor 一般の天井ではない（実 coverage ~60-71%）＝同 ADR 訂正節参照。全 runner 履歴の大量 fetch arc は不要。次に動かすなら公開データ外の情報が要る（ADR 0027）。市場自体の系統誤差（人気-穴バイアス）を突く路も測って棄却済（市場は takeout 後で効率的・ADR 0059）。
 
 ## 再現
 
