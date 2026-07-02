@@ -9,7 +9,8 @@
              deployments/launchd/com.paddock.backup-db.plist \
              > ~/Library/LaunchAgents/com.paddock.backup-db.plist
     2. launchctl load ~/Library/LaunchAgents/com.paddock.backup-db.plist
-  PATH は launchd の最小環境で docker(/usr/local/bin) を解決するため明示する。
+  PATH は launchd の最小環境で docker を解決するため明示する（Intel の /usr/local/bin と
+  Apple Silicon の /opt/homebrew/bin の両方を含める。docker/colima の brew prefix が環境で異なる）。
 -->
 <plist version="1.0">
 <dict>
@@ -25,7 +26,7 @@
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>/usr/local/bin:/usr/bin:/bin</string>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
     </dict>
 
     <key>StartCalendarInterval</key>

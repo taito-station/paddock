@@ -45,8 +45,17 @@ CONTAINER="${PADDOCK_PG_CONTAINER:-paddock-postgres}"
 PG_USER="${PADDOCK_PG_USER:-paddock}"
 PG_DB="${PADDOCK_PG_DB:-paddock}"
 
+# KEEP は正整数のみ許可（0 や非整数だと世代管理で作成直後の dump ごと全削除する footgun）。
+if ! [[ "$KEEP" =~ ^[1-9][0-9]*$ ]]; then
+    echo "PADDOCK_BACKUP_KEEP は正整数である必要がある: $KEEP" >&2
+    exit 2
+fi
+
 command -v docker >/dev/null || { echo "docker が見つからない（PATH を確認）" >&2; exit 1; }
-if ! docker ps --format '{{.Names}}' | grep -qx "$CONTAINER"; then
+# 起動確認。パイプ+grep -q は pipefail 下で SIGPIPE により誤判定しうるため、一旦変数へ受けてから
+# 固定文字列(-F)・完全一致(-x)で照合する。
+running_containers="$(docker ps --format '{{.Names}}')"
+if ! grep -qxF "$CONTAINER" <<<"$running_containers"; then
     echo "コンテナ $CONTAINER が起動していない（docker compose -f deployments/compose.yaml up -d postgres）" >&2
     exit 1
 fi
