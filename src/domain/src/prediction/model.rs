@@ -51,6 +51,10 @@ pub struct HorseFactors {
     /// 騎手直近フォームシグナル [0,1]（0.5=中立, #221）。騎手の直近 N 走の人気乖離平均で算出する。
     /// 騎手未登録・近走なし・全走欠損は `None`（項と重みを母数から除外、ADR 0007 準拠）。
     pub jockey_recent_form: Option<f64>,
+    /// 脚質（先行度）シグナル [0,1]（1=逃げ・0=追込, #329 Phase1）。近走のコーナー通過順位を頭数で
+    /// 相対化した先行度の平均。corner/頭数が取れない（pdf 成績・未 backfill）馬は `None`（母数除外）。
+    /// 本番は `RUNNING_STYLE_WEIGHT=0.0` で寄与ゼロ（measure-first・dump 列のみ）。win/place/show に同値で寄与。
+    pub running_style: Option<f64>,
 }
 
 #[derive(Debug, Clone)]
@@ -79,6 +83,12 @@ pub struct RecentRun {
     pub surface: Surface,
     pub distance: u32,
     pub result: HorseResult,
+    /// コーナー通過順位の生テキスト（"10-9-5-5"、#329 Phase1）。脚質（先行度）導出の入力。
+    /// netkeiba 近走(`horse_past_runs`)のみが持ち、pdf 成績(`results`)や未 backfill は `None`。
+    pub corner_positions: Option<String>,
+    /// 出走頭数（#329 Phase1）。先行度でコーナー通過順位を相対化する分母。
+    /// netkeiba 近走のみが持ち、pdf 成績や未 backfill は `None`。
+    pub field_size: Option<u32>,
 }
 
 /// コーパス由来の標準タイム表（surface×distance 別の代表タイム[秒], #76）。前走タイムを

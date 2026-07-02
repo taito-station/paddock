@@ -44,6 +44,7 @@ SCALAR_FACTORS = [
     ("recent_form", 27, 0.25),
     ("weight_carried", 28, 0.25),
     ("jockey_recent_form", 29, 0.0),  # 無効（ADR 0038）。weight 0 で母数に入らない。
+    ("running_style", 30, 0.0),  # #329 Phase1・measure-first。weight 0 で母数に入らない（Python sweep で判定）。
 ]
 PRIOR = {"win": 1.0 / 14.0, "place": 2.0 / 14.0, "show": 3.0 / 14.0}
 SHRINKAGE_M = 10.0
@@ -54,10 +55,10 @@ GAMMA_EPS = sys.float_info.epsilon
 
 COL = {
     "race_id": 0, "date": 1, "horse_num": 2,
-    "model_win": 30, "model_place": 31, "model_show": 32,
-    "finishing_position": 33, "win_odds": 34, "popularity": 35,
+    "model_win": 31, "model_place": 32, "model_show": 33,
+    "finishing_position": 34, "win_odds": 35, "popularity": 36,
 }
-N_COLS = 36
+N_COLS = 37
 
 
 # --- パイプライン鏡映 -------------------------------------------------------------

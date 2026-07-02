@@ -5,10 +5,10 @@ use chrono::NaiveDate;
 use super::config::EstimationConfig;
 use super::model::JockeyFormRun;
 use super::model::{FactorStat, HorseFactors, RateTriple};
-use super::parse::parse_margin_lengths;
+use super::parse::{parse_corner_positions, parse_margin_lengths};
 use super::weights::{
     COURSE_GATE_WEIGHT, DISTANCE_WEIGHT, FORM_WEIGHT, JOCKEY_RECENT_FORM_WEIGHT, JOCKEY_WEIGHT,
-    MARGIN_CAP_LENGTHS, POP_GAP_K, PRIOR_RATE, SURFACE_WEIGHT, TIME_DEV_CAP,
+    MARGIN_CAP_LENGTHS, POP_GAP_K, PRIOR_RATE, RUNNING_STYLE_WEIGHT, SURFACE_WEIGHT, TIME_DEV_CAP,
     TRACK_CONDITION_WEIGHT, TRAINER_WEIGHT, WEIGHT_CARRIED_CAP_KG, WEIGHT_CARRIED_WEIGHT,
     WEIGHT_CHANGE_CAP,
 };
@@ -205,6 +205,13 @@ pub(crate) fn raw_score_with_impute(
         weighted += jw * jrf;
         weight += jw;
     }
+    if let Some(rs) = factors.running_style {
+        // 脚質（先行度）スカラー（#329 Phase1）。本番は RUNNING_STYLE_WEIGHT=0.0 で挙動不変
+        // （measure-first・dump 列のみ）。backtest sweep は `--running-style-weight` で override。
+        let rw = config.running_style_weight.unwrap_or(RUNNING_STYLE_WEIGHT);
+        weighted += rw * rs;
+        weight += rw;
+    }
     if weight == 0.0 {
         return 0.0;
     }
@@ -303,6 +310,36 @@ pub fn jockey_recent_form_score(runs: &[JockeyFormRun]) -> Option<f64> {
         }
     }
     (count > 0).then(|| total / count as f64)
+}
+
+/// 近走 1 走のコーナー通過順位テキストと出走頭数から「先行度」スカラー `[0,1]`（1=逃げ・0=追込）を
+/// 導く（#329 Phase1）。先頭コーナーの通過順位を頭数で相対化する。corner/頭数が無い・解釈不能・
+/// 頭数 < 2 の走は `None`（母数から除外）。近走平均の集約は use-case 側（`running_style_from_runs`）。
+pub fn running_style_of_run(
+    corner_positions: Option<&str>,
+    field_size: Option<u32>,
+) -> Option<f64> {
+    let field_size = field_size?;
+    let positions = parse_corner_positions(corner_positions?);
+    leading_position(&positions, field_size)
+}
+
+/// 先頭コーナー通過順位（1 起点）を頭数で相対化した先行度 `[0,1]`（1=逃げ・0=追込, #329 Phase1）。
+/// `rel = (pos-1)/(field_size-1)`、先行度 = `1 - rel`。通過順位が空・頭数 < 2・順位が頭数超過
+/// （データ不整合）は `None`（正規化不能で母数除外）。
+///
+/// **既知の割り切り（measure-first）**: 使うのは「記録された先頭コーナー」であり、コーナー数は
+/// レース形態で変わる（短距離は 3-4 コーナーのみ、長距離は 1-2-3-4）。よって `first()` が指すコーナーが
+/// レース間で必ずしも同一位相ではなく、脚質スカラーの意味がレース形状で揺れる。Phase1 は重み 0 の
+/// 計測専用なので許容し、Phase 2 で lift を見て重みを入れる前に「どのコーナーを起点にするか」を
+/// 明示検討する（プラン eager-spinning-clarke.md の「符号仮説リスク」節）。
+pub(crate) fn leading_position(corner_positions: &[u32], field_size: u32) -> Option<f64> {
+    let pos = *corner_positions.first()?;
+    if field_size < 2 || pos < 1 || pos > field_size {
+        return None;
+    }
+    let rel = (pos - 1) as f64 / (field_size - 1) as f64;
+    Some(1.0 - rel)
 }
 
 /// 前走間隔（日数）→ `[0,1]` の台形マップ。区分は離散で、境界に小さな段差がある（heuristic）。

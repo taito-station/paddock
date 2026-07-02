@@ -38,4 +38,6 @@ pub use model::{
     StandardTimes,
 };
 pub use recency::apply_recency_weight;
-pub use scoring::{jockey_recent_form_score, recent_form_score, weight_factor};
+pub use scoring::{
+    jockey_recent_form_score, recent_form_score, running_style_of_run, weight_factor,
+};

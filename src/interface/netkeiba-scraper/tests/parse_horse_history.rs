@@ -55,6 +55,8 @@ fn parses_sapporo_kinen_row_exactly() {
     // #329 Phase0: レース名(列4)・通過順位(列25)。
     assert_eq!(r.race_name.as_deref(), Some("札幌記念(GII)"));
     assert_eq!(r.corner_positions.as_deref(), Some("5-3-6-6"));
+    // #329 Phase1: 出走頭数(列6)。脚質の相対化分母。
+    assert_eq!(r.field_size, Some(11));
 }
 
 #[test]
@@ -72,4 +74,6 @@ fn parses_nakayama_row_with_weight() {
     assert_eq!(r.weight_change, Some(0));
     assert_eq!(r.race_name.as_deref(), Some("有馬記念(GI)"));
     assert_eq!(r.corner_positions.as_deref(), Some("4-4-5-6"));
+    // #329 Phase1: 出走頭数(列6)。
+    assert_eq!(r.field_size, Some(16));
 }

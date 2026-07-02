@@ -23,8 +23,9 @@ const CANDIDATE_LIMIT: u32 = 20;
 
 /// 特徴量ダンプ（#272 Phase A / #309）TSV の列数。[`FEATURE_DUMP_HEADER`] と [`feature_row_cells`] の
 /// 双方をこの不変条件で縛り、列ズレ（＝学習データの静かな汚染）を防ぐ（ユニットテストで担保）。
-/// 内訳: id3(race_id/date/horse_num) + 6 factor × (win,place,show,starts)=24 + signal3 + model3 + ラベル3。
-const FEATURE_DUMP_COLUMNS: usize = 36;
+/// 内訳: id3(race_id/date/horse_num) + 6 factor × (win,place,show,starts)=24 + signal4 + model3 + ラベル3。
+/// signal4 = recent_form/weight_carried/jockey_recent_form/running_style（#329 Phase1 で running_style 追加）。
+const FEATURE_DUMP_COLUMNS: usize = 37;
 
 /// 特徴量ダンプ（#272 Phase A / #309）TSV のヘッダ行。列順は [`feature_row_cells`] の行生成と一致させ、
 /// 列数は [`FEATURE_DUMP_COLUMNS`] と一致させる（いずれもユニットテストで担保）。`model_*` は内蔵モデルの
@@ -36,7 +37,7 @@ horse_distance_win\thorse_distance_place\thorse_distance_show\thorse_distance_st
 jockey_surface_win\tjockey_surface_place\tjockey_surface_show\tjockey_surface_starts\t\
 trainer_surface_win\ttrainer_surface_place\ttrainer_surface_show\ttrainer_surface_starts\t\
 horse_track_condition_win\thorse_track_condition_place\thorse_track_condition_show\thorse_track_condition_starts\t\
-recent_form\tweight_carried\tjockey_recent_form\t\
+recent_form\tweight_carried\tjockey_recent_form\trunning_style\t\
 model_win\tmodel_place\tmodel_show\t\
 finishing_position\twin_odds\tpopularity";
 
@@ -76,6 +77,7 @@ fn feature_row_cells(row: &FeatureRow) -> Vec<String> {
     cells.push(cell_f64(row.factors.recent_form));
     cells.push(cell_f64(row.factors.weight_carried));
     cells.push(cell_f64(row.factors.jockey_recent_form));
+    cells.push(cell_f64(row.factors.running_style));
     // 内蔵モデルの最終確率（必ず付く・欠落なし）。Python ハーネス③が backtest 数値との一致に使う。
     cells.push(row.model_win.to_string());
     cells.push(row.model_place.to_string());
@@ -395,6 +397,7 @@ fn build_estimation_config(
         recent_form_weight,
         trend_n,
         jockey_recent_form_weight: jockey_form_weight,
+        running_style_weight: None,
         win_power,
         place_show_power,
         impute_missing_factors,
@@ -774,6 +777,7 @@ mod feature_dump_tests {
             recent_form: None,
             weight_carried: None,
             jockey_recent_form: None,
+            running_style: None,
         }
     }
 
@@ -811,14 +815,14 @@ mod feature_dump_tests {
             cells[3..27].iter().all(String::is_empty),
             "欠落 factor は空セル"
         );
-        // signal3（cells[27..30]）も欠落で空。
-        assert!(cells[27..30].iter().all(String::is_empty));
-        // 内蔵モデル予測3（cells[30..33]）は必ず実値。
-        assert_eq!(&cells[30..33], ["0.2", "0.3", "0.4"]);
+        // signal4（cells[27..31]、running_style 追加で 4 列）も欠落で空。
+        assert!(cells[27..31].iter().all(String::is_empty));
+        // 内蔵モデル予測3（cells[31..34]）は必ず実値。
+        assert_eq!(&cells[31..34], ["0.2", "0.3", "0.4"]);
         // ラベルは実値（finishing_position=1, win_odds=4.0→"4", popularity=3）。
-        assert_eq!(cells[33], "1");
-        assert_eq!(cells[34], "4");
-        assert_eq!(cells[35], "3");
+        assert_eq!(cells[34], "1");
+        assert_eq!(cells[35], "4");
+        assert_eq!(cells[36], "3");
     }
 
     /// 実値を持つ factor は (win,place,show,starts) の 4 セルに展開され、欠落ラベルは空になること。
@@ -833,6 +837,9 @@ mod feature_dump_tests {
             },
             starts: 10,
         });
+        // running_style に実値を入れ、signal4 の末尾セル(cells[30])に正しい位置で載ることを確認する
+        // （#329 Phase1・列順デグレ検出。None 経路は別テストで担保）。
+        factors.running_style = Some(0.75);
         let row = FeatureRow {
             race_id: "r".to_string(),
             date: NaiveDate::from_ymd_opt(2026, 1, 10).unwrap(),
@@ -848,12 +855,14 @@ mod feature_dump_tests {
         let cells = feature_row_cells(&row);
         // horse_surface は course_gate(3..7) の次の cells[7..11]。
         assert_eq!(&cells[7..11], ["0.3", "0.4", "0.5", "10"]);
-        // 内蔵モデル予測（cells[30..33]）は欠落しない。
-        assert_eq!(&cells[30..33], ["0.1", "0.2", "0.3"]);
+        // running_style は signal4 の末尾セル cells[30]（jockey_recent_form の直後）。
+        assert_eq!(cells[30], "0.75");
+        // 内蔵モデル予測（cells[31..34]）は欠落しない。
+        assert_eq!(&cells[31..34], ["0.1", "0.2", "0.3"]);
         // 欠落ラベルは空セル。
-        assert_eq!(cells[33], "");
         assert_eq!(cells[34], "");
         assert_eq!(cells[35], "");
+        assert_eq!(cells[36], "");
     }
 
     /// IO 本体 `write_feature_dump` が「ヘッダ行 + 各行 = `feature_row_cells` の TSV 連結」を出力し、

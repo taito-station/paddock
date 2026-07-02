@@ -247,6 +247,7 @@ fn past_run_with_jockey(
         popularity: Some(5),
         race_name: None,
         corner_positions: None,
+        field_size: None,
     }
 }
 

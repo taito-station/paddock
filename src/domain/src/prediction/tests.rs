@@ -5,10 +5,10 @@ use std::collections::HashMap;
 
 use chrono::NaiveDate;
 
-use super::parse::parse_margin_lengths;
+use super::parse::{parse_corner_positions, parse_margin_lengths};
 use super::scoring::{
-    FactorImpute, jockey_recent_form_score, margin_form, raw_score, raw_score_with_impute,
-    shrink_rate, time_form,
+    FactorImpute, jockey_recent_form_score, leading_position, margin_form, raw_score,
+    raw_score_with_impute, shrink_rate, time_form,
 };
 use super::weights::{
     JOCKEY_RECENT_FORM_WEIGHT, MARGIN_CAP_LENGTHS, PRIOR_RATE, TIME_DEV_CAP, WEIGHT_CARRIED_CAP_KG,
@@ -80,6 +80,7 @@ fn zero_factors() -> HorseFactors {
         recent_form: None,
         weight_carried: None,
         jockey_recent_form: None,
+        running_style: None,
     }
 }
 
@@ -122,6 +123,7 @@ fn all_factors_none_scores_zero_and_falls_back_uniform() {
         recent_form: None,
         weight_carried: None,
         jockey_recent_form: None,
+        running_style: None,
     };
     // assert_eq! は NaN（0/0 のゼロ除算）でも 0.0 と不一致で失敗するため NaN 回避も兼ねる。
     let s = raw_score(&none_factors, |r| r.win, &EstimationConfig::default());
@@ -159,6 +161,7 @@ fn missing_record_excluded_is_not_penalized_like_zero_fill() {
         recent_form: None,
         weight_carried: None,
         jockey_recent_form: None,
+        running_style: None,
     };
     // 旧挙動相当: horse_surface=Some(0-rate) は母数に残り平均を押し下げる（＝減点）。
     let zero_filled = HorseFactors {
@@ -201,6 +204,7 @@ fn win_sums_to_one_and_values_monotone_small_field() {
                 recent_form: None,
                 weight_carried: None,
                 jockey_recent_form: None,
+                running_style: None,
             },
         ),
         (
@@ -227,6 +231,7 @@ fn win_sums_to_one_and_values_monotone_small_field() {
                 recent_form: None,
                 weight_carried: None,
                 jockey_recent_form: None,
+                running_style: None,
             },
         ),
     ];
@@ -262,6 +267,7 @@ fn place_show_sum_to_two_and_three_in_even_field() {
         recent_form: None,
         weight_carried: None,
         jockey_recent_form: None,
+        running_style: None,
     };
     // 6 頭立て・全馬同一スコア → win=1/6, place=2/6, show=3/6（いずれも 1.0 未満で無クランプ）。
     let entries: Vec<_> = (1..=6)
@@ -305,6 +311,7 @@ fn place_show_power_decompresses_toward_favorite() {
         recent_form: None,
         weight_carried: None,
         jockey_recent_form: None,
+        running_style: None,
     };
     let entries: Vec<_> = (1..=8)
         .map(|i| {
@@ -374,6 +381,7 @@ fn place_show_power_none_or_one_is_noop() {
         recent_form: None,
         weight_carried: None,
         jockey_recent_form: None,
+        running_style: None,
     };
     // スコアに差がつくよう馬ごとに 1 factor だけ差し替える。
     let entries: Vec<_> = (1..=6)
@@ -428,6 +436,7 @@ fn place_show_power_below_one_compresses() {
         recent_form: None,
         weight_carried: None,
         jockey_recent_form: None,
+        running_style: None,
     };
     let entries: Vec<_> = (1..=8)
         .map(|i| {
@@ -473,6 +482,7 @@ fn place_show_power_leaves_win_prob_unchanged() {
         recent_form: None,
         weight_carried: None,
         jockey_recent_form: None,
+        running_style: None,
     };
     // win も place/show も馬ごとに変える（win 0.05〜0.40 / place・show も傾斜）。place/show が
     // 馬間で異なるので γ=2.0 が分布を実際にシャープ化する（クランプを避ける程度の小さい値）。
@@ -522,6 +532,7 @@ fn place_show_power_invalid_gamma_is_noop() {
         recent_form: None,
         weight_carried: None,
         jockey_recent_form: None,
+        running_style: None,
     };
     let entries: Vec<_> = (1..=6)
         .map(|i| {
@@ -575,6 +586,7 @@ fn place_show_power_clamps_strong_favorite() {
         recent_form: None,
         weight_carried: None,
         jockey_recent_form: None,
+        running_style: None,
     };
     let entries: Vec<_> = (1..=6)
         .map(|i| {
@@ -621,6 +633,7 @@ fn monotonicity_guaranteed_even_with_inverted_rates() {
         recent_form: None,
         weight_carried: None,
         jockey_recent_form: None,
+        running_style: None,
     };
     let b = HorseFactors {
         course_gate: Some(fs(RateTriple {
@@ -636,6 +649,7 @@ fn monotonicity_guaranteed_even_with_inverted_rates() {
         recent_form: None,
         weight_carried: None,
         jockey_recent_form: None,
+        running_style: None,
     };
     let entries = vec![(make_entry(1, "ウマA"), a), (make_entry(2, "ウマB"), b)];
     let probs = estimate_probabilities(&entries);
@@ -667,6 +681,7 @@ fn monotonic_when_only_some_columns_are_all_zero() {
         recent_form: None,
         weight_carried: None,
         jockey_recent_form: None,
+        running_style: None,
     };
     let entries = vec![
         (make_entry(1, "ウマA"), win_only(0.3)),
@@ -711,6 +726,7 @@ fn jockey_none_not_penalized() {
         recent_form: None,
         weight_carried: None,
         jockey_recent_form: None,
+        running_style: None,
     };
     let without_jockey = HorseFactors {
         course_gate: Some(fs(base)),
@@ -722,6 +738,7 @@ fn jockey_none_not_penalized() {
         recent_form: None,
         weight_carried: None,
         jockey_recent_form: None,
+        running_style: None,
     };
     let s_with = raw_score(&with_equal_jockey, |r| r.win, &EstimationConfig::default());
     let s_without = raw_score(&without_jockey, |r| r.win, &EstimationConfig::default());
@@ -767,6 +784,7 @@ fn track_condition_none_not_penalized() {
         recent_form: None,
         weight_carried: None,
         jockey_recent_form: None,
+        running_style: None,
     };
     let without_tc = HorseFactors {
         horse_track_condition: None,
@@ -830,6 +848,7 @@ fn track_condition_keeps_monotonicity_in_estimate() {
                 recent_form: None,
                 weight_carried: None,
                 jockey_recent_form: None,
+                running_style: None,
             },
         ),
         (
@@ -856,6 +875,7 @@ fn track_condition_keeps_monotonicity_in_estimate() {
                 recent_form: None,
                 weight_carried: None,
                 jockey_recent_form: None,
+                running_style: None,
             },
         ),
     ];
@@ -891,6 +911,7 @@ fn trainer_absent_not_penalized() {
         recent_form: None,
         weight_carried: None,
         jockey_recent_form: None,
+        running_style: None,
     };
     let without_trainer = HorseFactors {
         trainer_surface: None,
@@ -930,6 +951,7 @@ fn shrink_cfg(m: f64) -> EstimationConfig {
         recent_form_weight: None,
         trend_n: 1,
         jockey_recent_form_weight: None,
+        running_style_weight: None,
         win_power: None,
         place_show_power: None,
         impute_missing_factors: false,
@@ -975,6 +997,7 @@ fn shrinkage_pulls_low_sample_toward_prior() {
         recent_form: None,
         weight_carried: None,
         jockey_recent_form: None,
+        running_style: None,
     };
     let many = HorseFactors {
         course_gate: Some(FactorStat {
@@ -1016,6 +1039,7 @@ fn shrinkage_keeps_low_sample_horse_above_zero() {
         recent_form: None,
         weight_carried: None,
         jockey_recent_form: None,
+        running_style: None,
     };
     let sparse = HorseFactors {
         course_gate: Some(FactorStat {
@@ -1156,6 +1180,7 @@ fn jockey_recent_form_none_excluded_from_raw_score() {
     let base = zero_factors();
     let with_jrf = HorseFactors {
         jockey_recent_form: Some(0.5),
+        running_style: None,
         ..base.clone()
     };
     // config 重み未指定（None）→ 本番の JOCKEY_RECENT_FORM_WEIGHT 定数を使う。
@@ -1177,6 +1202,7 @@ fn jockey_recent_form_none_excluded_from_raw_score() {
     // config で weight を明示的に与えれば、定数値に関係なく寄与する（sweep フラグの検証）。
     let cfg_w = EstimationConfig {
         jockey_recent_form_weight: Some(0.25),
+        running_style_weight: None,
         ..EstimationConfig::default()
     };
     assert!(
@@ -1187,6 +1213,7 @@ fn jockey_recent_form_none_excluded_from_raw_score() {
     // None は母数から除外 → zero_factors と同一スコア（weight 値によらず常に成立）。
     let none_jrf = HorseFactors {
         jockey_recent_form: None,
+        running_style: None,
         ..base
     };
     approx(raw_score(&none_jrf, |r| r.win, &cfg), s_none);
@@ -1754,6 +1781,7 @@ fn surf(win: Option<f64>) -> HorseFactors {
         recent_form: None,
         weight_carried: None,
         jockey_recent_form: None,
+        running_style: None,
     }
 }
 
@@ -1937,5 +1965,90 @@ fn field_impute_mean_uses_shrunk_rate_under_shrinkage() {
     assert!(
         (got - 0.5).abs() > 1e-6,
         "縮約後平均は生平均 0.5 と異なるはず: {got}"
+    );
+}
+
+// ---- 脚質（先行度）導出（#329 Phase1） ----
+
+#[test]
+fn parse_corner_positions_splits_and_filters() {
+    assert_eq!(parse_corner_positions("10-9-5-5"), vec![10, 9, 5, 5]);
+    assert_eq!(parse_corner_positions("3-3"), vec![3, 3]);
+    // 空・非数値・0（順位は 1 起点）は除外する。
+    assert_eq!(parse_corner_positions(""), Vec::<u32>::new());
+    assert_eq!(parse_corner_positions("-"), Vec::<u32>::new());
+    assert_eq!(parse_corner_positions("1--2"), vec![1, 2]);
+    assert_eq!(parse_corner_positions("0-2"), vec![2]);
+    assert_eq!(parse_corner_positions("a-2"), vec![2]);
+}
+
+#[test]
+fn leading_position_relativizes_first_corner_by_field_size() {
+    // 16 頭立て 1 番手 = 逃げ（先行度 1.0）、16 番手 = 追込（0.0）、中団はその間。
+    approx(leading_position(&[1, 3, 5], 16).unwrap(), 1.0);
+    approx(leading_position(&[16], 16).unwrap(), 0.0);
+    // 8 頭立て 3 番手: rel=(3-1)/(8-1)=2/7、先行度=1-2/7。
+    approx(leading_position(&[3], 8).unwrap(), 1.0 - 2.0 / 7.0);
+    // 同じ 3 番手でも頭数が違えば先行度が変わる（相対化が効いている）。
+    assert!(leading_position(&[3], 16).unwrap() > leading_position(&[3], 8).unwrap());
+}
+
+#[test]
+fn leading_position_none_on_invalid_inputs() {
+    assert!(leading_position(&[], 16).is_none()); // 通過順位なし
+    assert!(leading_position(&[1], 1).is_none()); // 頭数 < 2（正規化不能）
+    assert!(leading_position(&[0], 16).is_none()); // 順位 0（1 起点外）
+    assert!(leading_position(&[17], 16).is_none()); // 順位が頭数超過（データ不整合）
+}
+
+#[test]
+fn running_style_of_run_requires_corner_and_field_size() {
+    // corner・頭数が揃えば先頭コーナーの先行度を返す。
+    approx(running_style_of_run(Some("1-1-1"), Some(16)).unwrap(), 1.0);
+    // どちらか欠けたら None（母数除外）。
+    assert!(running_style_of_run(None, Some(16)).is_none());
+    assert!(running_style_of_run(Some("3-3"), None).is_none());
+    // 解釈不能な corner も None。
+    assert!(running_style_of_run(Some(""), Some(16)).is_none());
+}
+
+#[test]
+fn running_style_zero_weight_does_not_change_score() {
+    // 本番 RUNNING_STYLE_WEIGHT=0.0（override なし）では running_style の有無でスコアが不変
+    // （measure-first・dump 列のみ・production 挙動不変の回帰ガード）。
+    // 非ゼロレートの実 factor を持つ base（score != 0）で、running_style 付与がスコアを
+    // 一切動かさないことを確認する（0 レート base だと不変が自明化するため）。
+    let cfg = EstimationConfig::default();
+    let mut base = zero_factors();
+    base.course_gate = Some(fs(RateTriple {
+        win: 0.3,
+        place: 0.4,
+        show: 0.5,
+    }));
+    let baseline = raw_score(&base, |r| r.win, &cfg);
+    assert!(baseline > 0.0, "base は非ゼロスコアであること: {baseline}");
+    let mut with_rs = base.clone();
+    with_rs.running_style = Some(0.9);
+    approx(raw_score(&with_rs, |r| r.win, &cfg), baseline);
+}
+
+#[test]
+fn running_style_weight_override_moves_score() {
+    // sweep 用 override（config.running_style_weight）を効かせると running_style がスコアに寄与する。
+    let base = zero_factors();
+    let mut with_rs = zero_factors();
+    with_rs.running_style = Some(1.0);
+    let cfg = EstimationConfig {
+        running_style_weight: Some(1.0),
+        ..EstimationConfig::default()
+    };
+    assert!(
+        raw_score(&with_rs, |r| r.win, &cfg) > raw_score(&base, |r| r.win, &cfg),
+        "override 有効時は先行度 1.0 がスコアを押し上げるはず"
+    );
+    // None の馬は override 有効でも母数から落ちる（zero_factors と一致）。
+    approx(
+        raw_score(&base, |r| r.win, &cfg),
+        raw_score(&zero_factors(), |r| r.win, &EstimationConfig::default()),
     );
 }

@@ -11,6 +11,7 @@ use crate::error::Result;
 use crate::interactor::Interactor;
 use crate::interactor::race::predict::{
     RaceContext, TREND_WEIGHTS, build_factors, field_mean_weight, recent_form_from_runs,
+    running_style_from_runs,
 };
 use crate::pdf_fetcher::PdfFetcher;
 use crate::pdf_parser::PdfParser;
@@ -267,6 +268,8 @@ impl<R: StatsRepository + OddsRepository, P: PdfParser, F: PdfFetcher> Interacto
                         .as_ref()
                         .and_then(|j| jockey_form_map.get(j))
                         .and_then(|runs| paddock_domain::jockey_recent_form_score(runs));
+                    // 脚質（先行度, #329 Phase1）。predict と同じ純粋関数で近走から算出（重み 0 で挙動不変）。
+                    let running_style = running_style_from_runs(recent_runs);
                     let factors = build_factors(
                         &entry,
                         &course,
@@ -279,6 +282,7 @@ impl<R: StatsRepository + OddsRepository, P: PdfParser, F: PdfFetcher> Interacto
                         race.date,
                         &config,
                         jockey_recent_form,
+                        running_style,
                     );
                     entry_factors.push((entry, factors));
                 }

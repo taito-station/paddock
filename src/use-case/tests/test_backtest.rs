@@ -567,6 +567,7 @@ async fn backtest_wires_recency_into_horse_factors() {
         recent_form_weight: None,
         trend_n: 1,
         jockey_recent_form_weight: None,
+        running_style_weight: None,
         win_power: None,
         place_show_power: None,
         impute_missing_factors: false,
