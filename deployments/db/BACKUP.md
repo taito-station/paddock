@@ -25,6 +25,8 @@ PADDOCK_BACKUP_DIR=/path/to/dir PADDOCK_BACKUP_KEEP=30 scripts/backup-db.sh
 
 ```sh
 # __PADDOCK_REPO__ と __HOME__ を実値へ置換して LaunchAgents へ配置
+# （~/Library/LaunchAgents は clean な macOS では未作成のことがあるため先に作る）
+mkdir -p ~/Library/LaunchAgents
 sed -e "s#__PADDOCK_REPO__#$PWD#g" -e "s#__HOME__#$HOME#g" \
     deployments/launchd/com.paddock.backup-db.plist \
     > ~/Library/LaunchAgents/com.paddock.backup-db.plist
@@ -64,6 +66,7 @@ docker exec -i paddock-postgres pg_restore -U paddock -d paddock --clean --if-ex
 ### snapshots だけ戻す（部分復元）
 
 ```sh
+DUMP=~/Library/Mobile\ Documents/com~apple~CloudDocs/paddock-backups/paddock-YYYYMMDD-HHMMSS.dump
 docker exec -i paddock-postgres pg_restore -U paddock -d paddock \
     --clean --if-exists -t race_odds_snapshots < "$DUMP"
 ```
