@@ -932,6 +932,7 @@ def parse_m_dir_specs(specs):
     """
     out = []
     seen = set()
+    seen_dirs = set()
     for spec in specs:
         m_label, sep, d = spec.partition(":")
         if not sep or not m_label or not d:
@@ -945,7 +946,12 @@ def parse_m_dir_specs(specs):
         # 重複は数値 mv で判定する（'10' と '10.0' は同一 m＝別ブロックにしない）。
         if mv in seen:
             raise ValueError(f"M が重複: {m_label!r}")
+        # 同一 dir を別 m で指すのは誤り（同じ p_model が別 m ラベルで二重表示される）。致命ではないので警告。
+        if d in seen_dirs:
+            print(f"WARN: 同一 dir を複数の M で指定（dir={d}）。同じ復元結果が別 m として表示されます",
+                  file=sys.stderr)
         seen.add(mv)
+        seen_dirs.add(d)
         out.append((m_label, d))
     return out
 

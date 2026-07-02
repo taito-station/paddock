@@ -441,6 +441,14 @@ def test_parse_m_dir_specs_validates():
             assert False, f"should raise ValueError: {bad}"
         except ValueError:
             pass
+    # 別 m で同一 dir は致命ではなく警告（stderr）。パースは通り WARN が出る。
+    import io
+    import contextlib
+    err = io.StringIO()
+    with contextlib.redirect_stderr(err):
+        res = U.parse_m_dir_specs(["10:/a", "20:/a"])
+    assert res == [("10", "/a"), ("20", "/a")]
+    assert "WARN" in err.getvalue(), err.getvalue()
 
 
 def main():
