@@ -83,6 +83,9 @@ def run(tsv):
         tot_roi += a["roi_sum"]
         lab = f"{b[0]:g}-{b[1]:g}" if b[1] < 1e9 else f"{b[0]:g}+"
         print(f"{lab:>12} {a['n']:>6} {wr:>7.3f} {imp:>10.3f} {wr-imp:>+10.3f} {mo:>8.1f} {roi:>8.3f}")
+    if tot_n == 0:
+        print("\nオッズ帯に該当する runner が 0 件でした（入力 TSV の win_odds 列を確認）。", file=sys.stderr)
+        return
     print(f"\n全体 n={tot_n}  単勝blind ROI={tot_roi/tot_n:.3f}")
     print("読み: 効率ベンチ(1/overround)から ROI が分散＝バイアス実在。"
           "頑健なのは極端大穴の overbet（ROI↓）で、本命 underbet 側は非単調・ノイズ域。"

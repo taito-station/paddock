@@ -12,7 +12,7 @@
 
 ## 検証（measure-first）
 
-`scripts/predict-check/market_calibration.py --tsv <pure dump>`。gated 4,594R・61,821 runner を単勝オッズ帯で層別し、takeout 除去後の正規化 implied 確率 vs 実勝率、および生オッズでの単勝 blind bet ROI を測定。平均 overround Σ(1/odds)=1.237（takeout ≈ 19.1%）。
+`scripts/predict-check/market_calibration.py --tsv <pure dump>`。gated 4,594R・61,821 runner を単勝オッズ帯で層別し、takeout 除去後の正規化 implied 確率 vs 実勝率、および生オッズでの単勝 blind bet ROI を測定。平均 overround Σ(1/odds)=1.237（フル精度 1.2362・takeout ≈ 19.1%。丸め値 1.237 から素朴計算すると 19.2% で 0.1pt ずれる）。
 
 | odds帯 | n | 実勝率 | 正規implied | 差(実-imp) | 平均odds | 単勝ROI |
 |---|---:|---:|---:|---:|---:|---:|
@@ -28,7 +28,7 @@
 | 30-50 | 6,639 | 0.019 | 0.021 | −0.003 | 39.0 | 0.695 |
 | 50+ | 21,977 | 0.006 | 0.007 | −0.001 | 169.4 | 0.616 |
 
-全体 n=61,821・単勝 blind ROI=0.736。**効率ベンチ**: 市場が unbiased（takeout のみ）なら全帯の flat 単勝 ROI は 1/overround=**0.809**（表示 1.237 からは 0.808・フル精度 orr 1.2362 で 0.809）で一様になるはず。差(実-imp)・ROI はフル精度算出で表示 4 桁からは検算不可。
+全体 n=61,821・単勝 blind ROI=0.736。**効率ベンチ**: 市場が unbiased（takeout のみ）なら全帯の flat 単勝 ROI は 1/overround=**0.809**（表示 1.237 からは 0.808・フル精度 orr 1.2362 で 0.809）で一様になるはず。差(実-imp)・ROI はフル精度算出で表示丸め値（3 桁）からは検算不可。
 
 ## 決定
 
@@ -38,7 +38,7 @@
 
 - **バイアスは（極端大穴の overbet として）実在する（が sub-takeout）**。効率ベンチ 0.809 に対し実測 ROI は分散し、**極端大穴 50+=0.616・30-50=0.695 が明確に下振れ＝大穴 overbet が頑健**に出ている（全体 blind ROI 0.736 も 0.809 を下回る）。ただし ROI 分散は単調でなく、**古典的 favorite-longshot の対称形（本命 underbet）は本データでは支持されない**：強本命の 1.5-2 帯は 0.731 とむしろ低く、最高 ROI は穴側の 20-30 帯 0.902。かつ帯別 ROI に SE を併記しておらず、20-30=0.902 は効率ベンチ比 ~1.5σ でノイズ域。＝**頑健に読めるのは極端大穴の overbet のみ**で、当初「バイアス不在」と読んだのは誤りだが、逆に FL バイアス全体（本命 underbet を含む）を当てはめるのも過剰。
 - **ただし sub-takeout で exploitable でない**。バイアスの有利側でも**最良帯 20-30 の ROI 0.902 が最大で依然 < 1.0**＝どの帯を flat で張っても takeout 19% に負ける。頑健な大穴 overbet も含め、どの帯も flat では +EV にならない。
-- **within-race 相対較正**：takeout 除去後の正規化 implied ≈ 実勝率で、**中位〜穴帯（3-5〜20-30）は差 ±0.006 以内**と良好。ただし本命帯は外れが大きい：1-1.5=+0.039（n=221・SE≈0.032・1.2σ）、**1.5-2=−0.036（n=868・SE≈0.017・約 2.1σ）**、2-3=+0.009。1.5-2 の負符号は「この本命帯は実勝率 < implied＝むしろ overbet」を意味し、本命 underbet とは逆。いずれも within-race 再重み付け補正で系統的 +EV 馬を生むほどではない（有利側でも ROI<1）。**注意：正規化 implied は overround（takeout）を除くだけで資金シェア＝バイアスは保持する（圧縮しない）**。差(実-imp) が小さく見えるのは、バイアスが極小確率（大穴）に集中し絶対確率差では乗法/ROI バイアスを過小表現するため。ゆえに exploitability は絶対確率差でなく ROI 分散で判定する。
+- **within-race 相対較正**：takeout 除去後の正規化 implied ≈ 実勝率で、**中位〜穴帯（3-5〜20-30）は差 ±0.006 以内**と良好。ただし本命帯は外れが大きい：1-1.5=+0.039（n=221・SE≈0.032・1.2σ）、**1.5-2=−0.036（n=868・SE≈0.017・約 2.1σ）**、2-3=+0.009。1.5-2 の負符号は「この本命帯は実勝率 < implied＝むしろ overbet」を意味し、本命 underbet とは逆。いずれも within-race 再重み付け補正で系統的 +EV 馬を生むほどではない（有利側でも ROI<1）。**注意：正規化 implied は overround（takeout）を除くだけで資金シェア＝バイアスは保持する（圧縮しない）**。差(実-imp) が全帯で小さく見えるのは（絶対確率差の最大はむしろ本命帯 1-1.5=+0.039）、頑健な ROI バイアスが大穴側にあり、そこでは確率が極小なため乗法的なズレが微小な絶対確率差にしか現れない＝絶対確率差では ROI バイアスを過小表現するため。ゆえに exploitability は絶対確率差でなく ROI 分散で判定する。
 - 以上より「市場較正補正で EV」は不可：(a) 頑健なバイアス（極端大穴 overbet）も有利側は sub-takeout、(b) within-race 相対較正は中位帯で既に良好・本命帯の外れも +EV には届かない。ADR 0027（市場＝公開データの最良推定）を、純モデル resolution に続き**市場自体の較正**でも再確認。
 
 ## スコープ外 / 残る候補
@@ -62,3 +62,5 @@
   --dump-features /tmp/pa/pure.tsv
 python3 scripts/predict-check/market_calibration.py --tsv /tmp/pa/pure.tsv
 ```
+
+※ `--win-power` / `--place-show-power` / `--shrinkage-m` / `--blend-alpha` はモデル確率列に作用するフラグで、本測定（`win_odds` と着順列のみ参照）の出力には影響しない（ADR 0058 の pure dump をそのまま流用しているだけ）。
