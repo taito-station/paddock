@@ -327,6 +327,12 @@ pub fn running_style_of_run(
 /// 先頭コーナー通過順位（1 起点）を頭数で相対化した先行度 `[0,1]`（1=逃げ・0=追込, #329 Phase1）。
 /// `rel = (pos-1)/(field_size-1)`、先行度 = `1 - rel`。通過順位が空・頭数 < 2・順位が頭数超過
 /// （データ不整合）は `None`（正規化不能で母数除外）。
+///
+/// **既知の割り切り（measure-first）**: 使うのは「記録された先頭コーナー」であり、コーナー数は
+/// レース形態で変わる（短距離は 3-4 コーナーのみ、長距離は 1-2-3-4）。よって `first()` が指すコーナーが
+/// レース間で必ずしも同一位相ではなく、脚質スカラーの意味がレース形状で揺れる。Phase1 は重み 0 の
+/// 計測専用なので許容し、Phase 2 で lift を見て重みを入れる前に「どのコーナーを起点にするか」を
+/// 明示検討する（プラン eager-spinning-clarke.md の「符号仮説リスク」節）。
 pub(crate) fn leading_position(corner_positions: &[u32], field_size: u32) -> Option<f64> {
     let pos = *corner_positions.first()?;
     if field_size < 2 || pos < 1 || pos > field_size {

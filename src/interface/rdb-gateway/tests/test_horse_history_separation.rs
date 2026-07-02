@@ -252,3 +252,26 @@ async fn find_recent_runs_unions_and_dedups_preferring_pdf(pool: sqlx::PgPool) {
         Some(3)
     );
 }
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn find_recent_runs_round_trips_nonnull_field_size_and_corner(pool: sqlx::PgPool) {
+    // #329 Phase1 回帰ガード: field_size は BIGINT・corner_positions は TEXT で、非NULL値を
+    // upsert → find_recent_runs で読み戻せること。NULL のみだと sqlx の型互換チェックが
+    // スキップされ型不一致（int4 を i64 で decode 等）が顕在化しないため、実値で round-trip する。
+    let repo = PostgresRepository::new(pool);
+    let horse_id = HorseId::try_from("2019104567".to_string()).unwrap();
+    let run = HorsePastRun {
+        field_size: Some(16),
+        corner_positions: Some("3-3-5-5".to_string()),
+        ..past_run("202605030212", "ウマZ", ymd(2026, 3, 1), 12, 3)
+    };
+    repo.upsert_horse_history(&horse_id, &[run]).await.unwrap();
+
+    let runs = repo
+        .find_recent_runs(&HorseName::try_from("ウマZ").unwrap(), ymd(2026, 5, 1), 5)
+        .await
+        .unwrap();
+    assert_eq!(runs.len(), 1);
+    assert_eq!(runs[0].field_size, Some(16), "頭数が値付きで読み戻せる");
+    assert_eq!(runs[0].corner_positions.as_deref(), Some("3-3-5-5"));
+}

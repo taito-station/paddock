@@ -647,7 +647,7 @@ mod tests {
         race_card::HorseEntry,
     };
 
-    use super::{RaceContext, build_explanation, recent_form_from_runs};
+    use super::{RaceContext, build_explanation, recent_form_from_runs, running_style_from_runs};
     use crate::repository::{CourseStatsRow, GroupStat, HorseStatsRow};
 
     fn ymd(y: i32, m: u32, d: u32) -> NaiveDate {
@@ -922,5 +922,40 @@ mod tests {
             (result - expected).abs() < 1e-9,
             "got {result}, expected {expected}"
         );
+    }
+
+    /// 脚質テスト用に corner_positions/field_size だけ差し替えた RecentRun を作る。
+    fn run_with_style(corner: Option<&str>, field_size: Option<u32>) -> RecentRun {
+        RecentRun {
+            corner_positions: corner.map(str::to_string),
+            field_size,
+            ..run_no_score(ymd(2026, 1, 1))
+        }
+    }
+
+    #[test]
+    fn running_style_from_runs_averages_valid_and_skips_invalid() {
+        // 16 頭立て 1 番手（先行度 1.0）と 8 頭立て 8 番手（先行度 0.0）→ 平均 0.5。
+        // corner/頭数を欠く走・正規化不能な走は母数から除外する。
+        let runs = [
+            run_with_style(Some("1-1"), Some(16)), // 1.0
+            run_with_style(Some("8-7"), Some(8)),  // 0.0
+            run_with_style(None, Some(16)),        // corner 欠落 → 除外
+            run_with_style(Some("3-3"), None),     // 頭数欠落 → 除外
+            run_with_style(Some(""), Some(16)),    // 解釈不能 → 除外
+        ];
+        let got = running_style_from_runs(&runs).expect("有効走 2 件で Some");
+        assert!((got - 0.5).abs() < 1e-9, "got {got}");
+    }
+
+    #[test]
+    fn running_style_from_runs_none_when_no_valid_run() {
+        // 空・全欠落は None（母数除外・既存 scalar と統一）。
+        assert!(running_style_from_runs(&[]).is_none());
+        let runs = [
+            run_with_style(None, Some(16)),
+            run_with_style(Some("3-3"), None),
+        ];
+        assert!(running_style_from_runs(&runs).is_none());
     }
 }

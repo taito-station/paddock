@@ -42,7 +42,7 @@ pub async fn find_recent_runs(
             SELECT
                 races.date AS date, races.venue AS venue, races.race_num AS race_num,
                 races.surface AS surface, races.distance AS distance,
-                NULL AS corner_positions, NULL::integer AS field_size,
+                NULL::text AS corner_positions, NULL::bigint AS field_size,
                 0 AS src_rank,
                 results.race_id AS race_id, results.finishing_position AS finishing_position,
                 results.status AS status, results.gate_num AS gate_num,
@@ -139,7 +139,7 @@ pub async fn recent_runs_batch(
             SELECT
                 races.date AS date, races.venue AS venue, races.race_num AS race_num,
                 races.surface AS surface, races.distance AS distance,
-                NULL AS corner_positions, NULL::integer AS field_size,
+                NULL::text AS corner_positions, NULL::bigint AS field_size,
                 0 AS src_rank,
                 results.race_id AS race_id, results.finishing_position AS finishing_position,
                 results.status AS status, results.gate_num AS gate_num,
