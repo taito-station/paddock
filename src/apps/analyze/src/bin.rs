@@ -837,6 +837,9 @@ mod feature_dump_tests {
             },
             starts: 10,
         });
+        // running_style に実値を入れ、signal4 の末尾セル(cells[30])に正しい位置で載ることを確認する
+        // （#329 Phase1・列順デグレ検出。None 経路は別テストで担保）。
+        factors.running_style = Some(0.75);
         let row = FeatureRow {
             race_id: "r".to_string(),
             date: NaiveDate::from_ymd_opt(2026, 1, 10).unwrap(),
@@ -852,6 +855,8 @@ mod feature_dump_tests {
         let cells = feature_row_cells(&row);
         // horse_surface は course_gate(3..7) の次の cells[7..11]。
         assert_eq!(&cells[7..11], ["0.3", "0.4", "0.5", "10"]);
+        // running_style は signal4 の末尾セル cells[30]（jockey_recent_form の直後）。
+        assert_eq!(cells[30], "0.75");
         // 内蔵モデル予測（cells[31..34]）は欠落しない。
         assert_eq!(&cells[31..34], ["0.1", "0.2", "0.3"]);
         // 欠落ラベルは空セル。

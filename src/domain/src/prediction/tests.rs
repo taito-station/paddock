@@ -2016,14 +2016,20 @@ fn running_style_of_run_requires_corner_and_field_size() {
 fn running_style_zero_weight_does_not_change_score() {
     // 本番 RUNNING_STYLE_WEIGHT=0.0（override なし）では running_style の有無でスコアが不変
     // （measure-first・dump 列のみ・production 挙動不変の回帰ガード）。
+    // 非ゼロレートの実 factor を持つ base（score != 0）で、running_style 付与がスコアを
+    // 一切動かさないことを確認する（0 レート base だと不変が自明化するため）。
     let cfg = EstimationConfig::default();
-    let base = zero_factors();
-    let mut with_rs = zero_factors();
+    let mut base = zero_factors();
+    base.course_gate = Some(fs(RateTriple {
+        win: 0.3,
+        place: 0.4,
+        show: 0.5,
+    }));
+    let baseline = raw_score(&base, |r| r.win, &cfg);
+    assert!(baseline > 0.0, "base は非ゼロスコアであること: {baseline}");
+    let mut with_rs = base.clone();
     with_rs.running_style = Some(0.9);
-    approx(
-        raw_score(&with_rs, |r| r.win, &cfg),
-        raw_score(&base, |r| r.win, &cfg),
-    );
+    approx(raw_score(&with_rs, |r| r.win, &cfg), baseline);
 }
 
 #[test]
