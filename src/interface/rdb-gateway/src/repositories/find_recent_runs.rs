@@ -14,6 +14,9 @@ struct RecentRow {
     date: String,
     surface: String,
     distance: i64,
+    // 脚質（先行度）導出の元（#329 Phase1）。netkeiba 近走のみ値を持ち、pdf 側は UNION で NULL。
+    corner_positions: Option<String>,
+    field_size: Option<i64>,
     #[sqlx(flatten)]
     result: ResultRow,
 }
@@ -39,6 +42,7 @@ pub async fn find_recent_runs(
             SELECT
                 races.date AS date, races.venue AS venue, races.race_num AS race_num,
                 races.surface AS surface, races.distance AS distance,
+                NULL AS corner_positions, NULL::integer AS field_size,
                 0 AS src_rank,
                 results.race_id AS race_id, results.finishing_position AS finishing_position,
                 results.status AS status, results.gate_num AS gate_num,
@@ -56,6 +60,7 @@ pub async fn find_recent_runs(
             SELECT
                 date, venue, race_num,
                 surface, distance,
+                corner_positions, field_size,
                 1 AS src_rank,
                 race_id, finishing_position, status, gate_num, horse_num, horse_name,
                 horse_id, jockey, NULL AS trainer, time_seconds, margin, odds,
@@ -65,6 +70,7 @@ pub async fn find_recent_runs(
         )
         SELECT
             u.date, u.surface, u.distance,
+            u.corner_positions, u.field_size,
             u.race_id, u.finishing_position, u.status, u.gate_num, u.horse_num,
             u.horse_name, u.horse_id, u.jockey, u.trainer, u.time_seconds, u.margin,
             u.odds, u.horse_weight, u.weight_change, u.weight_carried, u.popularity
@@ -96,6 +102,8 @@ pub async fn find_recent_runs(
             surface: Surface::try_from(row.surface.as_str())?,
             distance: row.distance as u32,
             result: row_to_result(row.result)?,
+            corner_positions: row.corner_positions,
+            field_size: row.field_size.map(|n| n as u32),
         });
     }
     Ok(runs)
@@ -131,6 +139,7 @@ pub async fn recent_runs_batch(
             SELECT
                 races.date AS date, races.venue AS venue, races.race_num AS race_num,
                 races.surface AS surface, races.distance AS distance,
+                NULL AS corner_positions, NULL::integer AS field_size,
                 0 AS src_rank,
                 results.race_id AS race_id, results.finishing_position AS finishing_position,
                 results.status AS status, results.gate_num AS gate_num,
@@ -148,6 +157,7 @@ pub async fn recent_runs_batch(
             SELECT
                 date, venue, race_num,
                 surface, distance,
+                corner_positions, field_size,
                 1 AS src_rank,
                 race_id, finishing_position, status, gate_num, horse_num, horse_name,
                 horse_id, jockey, NULL AS trainer, time_seconds, margin, odds,
@@ -158,6 +168,7 @@ pub async fn recent_runs_batch(
         deduped AS (
             SELECT
                 u.date, u.surface, u.distance,
+                u.corner_positions, u.field_size,
                 u.race_id, u.finishing_position, u.status, u.gate_num, u.horse_num,
                 u.horse_name, u.horse_id, u.jockey, u.trainer, u.time_seconds, u.margin,
                 u.odds, u.horse_weight, u.weight_change, u.weight_carried, u.popularity,
@@ -176,6 +187,7 @@ pub async fn recent_runs_batch(
         )
         SELECT
             d.date, d.surface, d.distance,
+            d.corner_positions, d.field_size,
             d.race_id, d.finishing_position, d.status, d.gate_num, d.horse_num,
             d.horse_name, d.horse_id, d.jockey, d.trainer, d.time_seconds, d.margin,
             d.odds, d.horse_weight, d.weight_change, d.weight_carried, d.popularity
@@ -205,6 +217,8 @@ pub async fn recent_runs_batch(
             surface: Surface::try_from(row.surface.as_str())?,
             distance: row.distance as u32,
             result: row_to_result(row.result)?,
+            corner_positions: row.corner_positions,
+            field_size: row.field_size.map(|n| n as u32),
         };
         // result.horse_name は既に正規化済みの `HorseName`。これを直接キーにして振り分ける
         // （unique の馬名＝同じ正規化を通っているので一致する）。

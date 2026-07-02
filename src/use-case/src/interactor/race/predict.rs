@@ -198,6 +198,8 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: 
                 .as_ref()
                 .and_then(|j| jockey_form_map.get(j))
                 .and_then(|runs| paddock_domain::jockey_recent_form_score(runs));
+            // 脚質（先行度, #329 Phase1）。近走のコーナー通過順位＋頭数から算出（本番は重み 0 で挙動不変）。
+            let running_style = running_style_from_runs(recent_runs);
             let factors = build_factors(
                 entry,
                 &course,
@@ -210,6 +212,7 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: 
                 card.date,
                 config,
                 jockey_recent_form,
+                running_style,
             );
             // 予想根拠（#274）。確率推定と同じ factor レート・前走から作る。runs は date 降順なので
             // index 0 が最新（前走）。本番経路は recency: None なので集計レート（build_factors と同源）。
@@ -341,6 +344,26 @@ pub(crate) fn recent_form_from_runs(
     (wden > 0.0).then(|| wsum / wden)
 }
 
+/// 取得済みの近走 `runs`（date 降順）から脚質（先行度）スカラー [0,1]（1=逃げ・0=追込）を算出する
+/// 純粋関数（#329 Phase1）。各走のコーナー通過順位を頭数で相対化した先行度の単純平均。corner/頭数が
+/// 取れない走（pdf 成績・未 backfill・中止等）は母数から除外し、有効走 0 は `None`（母数除外）。
+/// 前走フォームと異なり trend 重みは掛けない（measure-first の最小形。効けば次段で重み付けを検討）。
+/// `recent_form_from_runs` と同じく predict/backtest 両経路で共有する。
+pub(crate) fn running_style_from_runs(runs: &[RecentRun]) -> Option<f64> {
+    let mut sum = 0.0_f64;
+    let mut n = 0u32;
+    for run in runs {
+        if let Some(v) = paddock_domain::prediction::running_style_of_run(
+            run.corner_positions.as_deref(),
+            run.field_size,
+        ) {
+            sum += v;
+            n += 1;
+        }
+    }
+    (n > 0).then(|| sum / n as f64)
+}
+
 /// `build_factors` に渡すレース側の条件（全馬共通）。
 pub(crate) struct RaceContext {
     pub surface: Surface,
@@ -373,6 +396,7 @@ pub(crate) fn build_factors(
     as_of_date: NaiveDate,
     config: &EstimationConfig,
     jockey_recent_form: Option<f64>,
+    running_style: Option<f64>,
 ) -> HorseFactors {
     let gate_label = gate_group_label(entry.gate_num.value());
     let surf_label = surface_label(race.surface);
@@ -422,6 +446,7 @@ pub(crate) fn build_factors(
             .zip(race.mean_weight)
             .map(|(w, mean)| paddock_domain::prediction::weight_factor(w, mean)),
         jockey_recent_form,
+        running_style,
     }
 }
 
@@ -702,6 +727,8 @@ mod tests {
                 weight_carried: None,
                 popularity: Some(8),
             },
+            corner_positions: None,
+            field_size: None,
         };
 
         let ex = build_explanation(
@@ -796,6 +823,8 @@ mod tests {
                 weight_carried: None,
                 popularity: None,
             },
+            corner_positions: None,
+            field_size: None,
         }
     }
 
@@ -825,6 +854,8 @@ mod tests {
                 weight_carried: None,
                 popularity: None,
             },
+            corner_positions: None,
+            field_size: None,
         }
     }
 

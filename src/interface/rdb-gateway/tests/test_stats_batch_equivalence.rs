@@ -107,6 +107,7 @@ fn past_run(
         popularity: None,
         race_name: None,
         corner_positions: None,
+        field_size: None,
     }
 }
 

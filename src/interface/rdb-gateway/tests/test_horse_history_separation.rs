@@ -42,6 +42,7 @@ fn past_run(nk_id: &str, horse: &str, date: NaiveDate, race_num: u32, finish: u3
         popularity: None,
         race_name: None,
         corner_positions: None,
+        field_size: None,
     }
 }
 

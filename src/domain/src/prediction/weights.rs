@@ -59,3 +59,8 @@ pub(crate) const TIME_DEV_CAP: f64 = 0.05;
 /// Brier/LogLoss を単調悪化させ weight=0.0 が最良 → 棄却（ADR 0038、#217 と同型でシグナルが
 /// 縮約+市場ブレンドに吸収）。機構・`--jockey-form-weight` フラグは将来再評価のため残す（cf. ADR 0016 recency）。
 pub(crate) const JOCKEY_RECENT_FORM_WEIGHT: f64 = 0.0;
+/// 脚質（先行度）項の重み（#329 Phase1）。**0.0（無効）** で導入する。measure-first の撤退前提 arc で、
+/// production スコアには寄与させず（挙動不変）dump 列にだけ出す。lift は Phase 2b のサンプル weight sweep
+/// （Python `impute_prototype.py`）で判定し、効いた場合のみ backtest 二段ゲート（Phase 3）を経て採用値へ。
+/// backtest の `--running-style-weight` で override して掃引する（jockey_recent_form / recent_form と同型）。
+pub(crate) const RUNNING_STYLE_WEIGHT: f64 = 0.0;

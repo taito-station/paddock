@@ -42,6 +42,16 @@ pub(crate) fn parse_margin_lengths(s: &str) -> Option<f64> {
     t.parse::<f64>().ok().filter(|v| v.is_finite() && *v >= 0.0)
 }
 
+/// コーナー通過順位の生テキスト（例「10-9-5-5」）を各コーナー位置の `Vec<u32>` に変換する（#329 Phase1）。
+/// `-` 区切りで、空セル・非数値・0（順位は 1 起点）は除外する。有効要素が無ければ空 `Vec`。
+/// 脚質（先行度）導出の入力で、[`super::scoring::leading_position`] が先頭要素を使う。
+pub(crate) fn parse_corner_positions(s: &str) -> Vec<u32> {
+    s.split('-')
+        .filter_map(|p| p.trim().parse::<u32>().ok())
+        .filter(|&n| n > 0)
+        .collect()
+}
+
 /// `A/B` 形式の分数文字列を解釈する。パース不能・分母 0・負値・非有限は `None`
 /// （小数経路と同じく着差は非負のみ受ける）。
 fn parse_fraction(s: &str) -> Option<f64> {

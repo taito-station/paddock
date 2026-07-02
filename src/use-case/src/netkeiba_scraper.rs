@@ -50,6 +50,9 @@ pub struct HorsePastRun {
     /// コーナー通過順位の生テキスト（例「10-9-5-5」= 各コーナーでの位置, #329 Phase0）。
     /// 脚質（逃げ/先行/差し/追込）は domain 層でここから導出する。中止等で欠く行は `None`。
     pub corner_positions: Option<String>,
+    /// 出走頭数（例 15, #329 Phase1）。脚質（先行度）でコーナー通過順位を相対化する分母。
+    /// 取得できない行は `None`。
+    pub field_size: Option<u32>,
 }
 
 /// netkeiba レース結果ページ (`race/result.html`) 1 頭分の確定成績。

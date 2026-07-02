@@ -12,6 +12,7 @@ use crate::error::{Error, Result};
 // db_h_race_results テーブルの列インデックス（33 列。disp_none の隠し列も含め固定順）。
 const COL_DATE: usize = 0;
 const COL_RACE_NAME: usize = 4;
+const COL_FIELD_SIZE: usize = 6; // 出走頭数 "15"（#329 Phase1・脚質の相対化分母）
 const COL_GATE: usize = 7;
 const COL_HORSE_NUM: usize = 8;
 const COL_ODDS: usize = 9;
@@ -142,6 +143,8 @@ fn parse_row(
         race_name: text(COL_RACE_NAME),
         // 通過順位セル(列25)。競走中止等で空の行は None（#329 Phase0）。
         corner_positions: text(COL_CORNER),
+        // 出走頭数セル(列6)。脚質（先行度）の相対化分母（#329 Phase1）。欠く行は None。
+        field_size: text(COL_FIELD_SIZE).and_then(|t| t.parse::<u32>().ok()),
     })
 }
 

@@ -140,6 +140,7 @@ fn nk_run(nk_id: &str, date: NaiveDate, race_num: u32, time: f64) -> HorsePastRu
         popularity: None,
         race_name: None,
         corner_positions: None,
+        field_size: None,
     }
 }
 

@@ -27,6 +27,9 @@ pub struct EstimationConfig {
     /// 直近 N 走トレンドの走数（#220）。重みは [1.0, 0.5, 0.25] 固定。
     /// `1` = 前走のみ（現行挙動）、`2`/`3` = 加重平均。
     pub trend_n: u32,
+    /// 脚質（先行度）項の重みオーバーライド（#329 Phase1）。`None` のとき `weights::RUNNING_STYLE_WEIGHT`
+    /// （0.0）を使う。backtest の `--running-style-weight` スイープ専用（measure-first）。predict 本番は `None`。
+    pub running_style_weight: Option<f64>,
     /// 騎手直近フォーム項の重みオーバーライド（#221）。`None` のとき `weights::JOCKEY_RECENT_FORM_WEIGHT`
     /// を使う。backtest の `--jockey-form-weight` スイープ専用（ADR 0038）。predict 本番は `None`。
     pub jockey_recent_form_weight: Option<f64>,
@@ -61,6 +64,7 @@ impl Default for EstimationConfig {
             recency: None,
             recent_form_weight: None,
             trend_n: 1,
+            running_style_weight: None,
             jockey_recent_form_weight: None,
             win_power: None,
             place_show_power: None,
@@ -109,6 +113,8 @@ impl EstimationConfig {
             }),
             recency: None,
             recent_form_weight: None,
+            // #329 Phase1: 脚質は measure-first で production 非組込（重み 0）。lift 判定後に採用値を入れる。
+            running_style_weight: None,
             trend_n: 1, // #220 backtest にて N=2/3 は全指標悪化のため棄却（ADR-0036）
             jockey_recent_form_weight: None, // #221 暫定 weight（const）を使用。sweep は ADR 0038
             // #246: γ=1.25 を採用（4891R sweep で単勝 LogLoss 0.1974→0.1954 最良・穴帯校正改善、
