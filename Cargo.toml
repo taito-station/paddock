@@ -6,6 +6,7 @@ members = [
     "src/apps/analyze",
     "src/apps/predict",
     "src/apps/predict-watch",
+    "src/apps/odds-collect",
     "src/apps/fetch-history",
     "src/apps/fetch-card",
     "src/apps/fetch-results",

@@ -87,6 +87,30 @@ impl<O: OddsScraper, R: OddsRepository> OddsInteractor<O, R> {
         }
     }
 
+    /// race_id の**単複のみ**を必ず再スクレイプして新スナップショットを保存する（#odds-collect）。
+    ///
+    /// オッズ時系列コレクタ用の軽量版 `refresh_race_odds`。組合せ 5 券種を打たず win/place
+    /// （type=1・1 GET）だけを取り、`persist_all` で `race_odds`（最新・key 単位 UPSERT なので
+    /// exotic 行は破壊しない）＋ `race_odds_snapshots`（append）へ保存する。全レースを終日高頻度で
+    /// 貯めるため netkeiba への負荷を最小化する。戻り値の意味は `refresh_race_odds` と揃える
+    /// （取得できれば `Some`、未公開/失敗は `None`・1 レースの失敗で収集ループを止めない）。
+    pub async fn refresh_win_place_odds(&self, race_id: &RaceId) -> Result<Option<RaceOdds>> {
+        match self.scraper.scrape_win_place(race_id) {
+            Ok(odds) if odds.is_empty() => {
+                tracing::debug!(race_id = %race_id, "単複再取得成功だが空（未公開）、スキップ");
+                Ok(None)
+            }
+            Ok(odds) => {
+                self.persist_all(race_id, &odds).await;
+                Ok(Some(odds))
+            }
+            Err(e) => {
+                tracing::warn!(race_id = %race_id, error = %e, "単複再取得に失敗、スキップ");
+                Ok(None)
+            }
+        }
+    }
+
     /// スクレイプで得た全券種のオッズを `race_odds` に保存する。複勝・ワイドは幅 odds
     /// （下限=odds, 上限=odds_high）。スクレイプ由来は人気を持たないため popularity は None。
     /// 保存失敗は予想フローを止めず warn ログのみ（次回参照時に取り直せる）。
@@ -378,6 +402,58 @@ mod tests {
         assert_eq!(*interactor.scraper.calls.lock().unwrap(), 1);
         // 新スナップショットが 1 レコード追記される。
         assert_eq!(interactor.repository.saved.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn refresh_win_place_persists_only_win_place() {
+        // #odds-collect: 単複限定 refresh は win/place だけを保存する（組合せ券種は打たない）。
+        // FakeScraper は scrape() で全券種を返すが、trait 既定の scrape_win_place が win/place に絞る。
+        let scraper = FakeScraper::new(|rid| Ok(odds_all_types(rid.clone())));
+        let interactor = OddsInteractor::new(scraper, FakeRepo::default());
+
+        let got = interactor.refresh_win_place_odds(&race_id()).await.unwrap();
+        assert!(got.is_some_and(|o| !o.is_empty()));
+        assert_eq!(*interactor.scraper.calls.lock().unwrap(), 1);
+
+        let saved = interactor.repository.saved.lock().unwrap();
+        assert_eq!(saved.len(), 1, "新スナップショットを 1 レコード追記");
+        let rows = &saved[0].rows;
+        let count = |bt: &str| rows.iter().filter(|r| r.bet_type == bt).count();
+        assert_eq!(count("win"), 1, "win を保存");
+        assert_eq!(count("place"), 1, "place を保存");
+        for bt in ["quinella", "wide", "exacta", "trio", "trifecta"] {
+            assert_eq!(count(bt), 0, "{bt} は単複限定なので保存しない");
+        }
+    }
+
+    #[tokio::test]
+    async fn refresh_win_place_returns_none_when_empty_or_error() {
+        // 未公開（空）も失敗も None・保存なし（refresh_race_odds と挙動を揃える）。
+        let empty = OddsInteractor::new(
+            FakeScraper::new(|rid| Ok(RaceOdds::empty(rid.clone()))),
+            FakeRepo::default(),
+        );
+        assert!(
+            empty
+                .refresh_win_place_odds(&race_id())
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(empty.repository.saved.lock().unwrap().is_empty());
+
+        let errored = OddsInteractor::new(
+            FakeScraper::new(|_| Err(Error::Internal("nav failed".into()))),
+            FakeRepo::default(),
+        );
+        assert!(
+            errored
+                .refresh_win_place_odds(&race_id())
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(errored.repository.saved.lock().unwrap().is_empty());
     }
 
     #[tokio::test]

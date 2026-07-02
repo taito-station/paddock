@@ -1676,6 +1676,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "odds-collect"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "clap",
+ "netkeiba-scraper",
+ "paddock-config",
+ "paddock-domain",
+ "paddock-use-case",
+ "rdb-gateway",
+ "tokio",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "once_cell"
 version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"

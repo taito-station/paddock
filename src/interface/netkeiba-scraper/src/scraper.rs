@@ -351,6 +351,19 @@ impl OddsScraper for UreqNetkeibaScraper {
         let exotic = self.fetch_exotic_odds(&netkeiba_id).unwrap_or_default();
         Ok(assemble_netkeiba(&odds, &exotic, race_id.clone()))
     }
+
+    /// 単複のみ（type=1・1 GET）の軽量取得。オッズ時系列コレクタが全レースを終日高頻度で
+    /// スナップするため、組合せ券種を打たず netkeiba への負荷を最小化する（trait 既定の
+    /// 「full scrape して win/place を残す」を 1 GET へ override）。
+    fn scrape_win_place(&self, race_id: &RaceId) -> UcResult<RaceOdds> {
+        let netkeiba_id = netkeiba_race_id_from_paddock(race_id)?;
+        let odds = self.fetch_win_place_odds(&netkeiba_id)?;
+        Ok(assemble_netkeiba(
+            &odds,
+            &FetchedExoticOdds::default(),
+            race_id.clone(),
+        ))
+    }
 }
 
 #[cfg(test)]
