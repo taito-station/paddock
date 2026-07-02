@@ -6,8 +6,18 @@
 
 - **退避スクリプト**: [`scripts/backup-db.sh`](../../scripts/backup-db.sh)
 - **日次スケジュール**: [`deployments/launchd/com.paddock.backup-db.plist`](../launchd/com.paddock.backup-db.plist)
-- **退避先（既定）**: `~/Library/Mobile Documents/com~apple~CloudDocs/paddock-backups`（iCloud Drive＝off-machine で durable）。`PADDOCK_BACKUP_DIR` で変更可。
-- **形式 / 世代**: `paddock-YYYYMMDD-HHMMSS.dump`（`pg_dump -Fc` custom-format・圧縮込み）。既定で直近 14 世代を保持（`PADDOCK_BACKUP_KEEP`）。
+- **二段構成の退避先**:
+  - **ローカル権威**（`PADDOCK_BACKUP_DIR`・既定 `~/paddock-backups`）: dump 本体。**世代管理（列挙→剪定）はここで行う**。
+  - **off-machine ミラー**（`PADDOCK_BACKUP_MIRROR_DIR`・既定 iCloud Drive `~/Library/Mobile Documents/com~apple~CloudDocs/paddock-backups`）: 各 dump をコピーしディスク障害にも備える。空文字で無効化。
+- **形式 / 世代**: `paddock-YYYYMMDD-HHMMSS.dump`（`pg_dump -Fc` custom-format・圧縮込み）。既定で直近 14 世代を保持（`PADDOCK_BACKUP_KEEP`）。剪定はローカル/ミラー両方に効く。
+
+> **なぜ二段構成か**: launchd から実行すると **iCloud への "列挙" も "削除" も信頼できない**（書き込み=`cp`
+> は効くが `ls`/glob は空を返し `rm` も反映されない macOS file-provider の癖・検証で確認）。iCloud を権威
+> dir にすると世代管理が効かず dump が無制限に溜まる。そこで**列挙・剪定は必ずローカルで行い**（launchd
+> でもローカル dir は確実に列挙・削除できる）、iCloud へは各 dump を `cp` で append する。iCloud 側の剪定は
+> best-effort（terminal から本スクリプトを実行したときのみ確実に効く。launchd 下では no-op で iCloud は
+> 溜まるので、iCloud を KEEP 世代に揃えたいときは時々 terminal から `scripts/backup-db.sh` を回して
+> reconcile する）。**権威（ローカル）は常に bounded で、主脅威の Colima volume 喪失は自動的に外れる。**
 
 > **重要**: host の `pg_dump` が PG17 サーバより古い（v14 等）とダンプを拒否する。退避も復元も
 > **必ず container 内（`paddock-postgres`・pg17）の pg_dump/pg_restore を `docker exec` で使う**
@@ -55,7 +65,7 @@ rm ~/Library/LaunchAgents/com.paddock.backup-db.plist
 落としてから復元する（同名 DB へ上書き復元する場合）。
 
 ```sh
-DUMP=~/Library/Mobile\ Documents/com~apple~CloudDocs/paddock-backups/paddock-YYYYMMDD-HHMMSS.dump
+DUMP=~/paddock-backups/paddock-YYYYMMDD-HHMMSS.dump   # ミラー(iCloud)側から戻すなら iCloud パスを指定
 docker exec -i paddock-postgres pg_restore -U paddock -d paddock --clean --if-exists < "$DUMP"
 ```
 
@@ -66,7 +76,7 @@ docker exec -i paddock-postgres pg_restore -U paddock -d paddock --clean --if-ex
 ### snapshots だけ戻す（部分復元）
 
 ```sh
-DUMP=~/Library/Mobile\ Documents/com~apple~CloudDocs/paddock-backups/paddock-YYYYMMDD-HHMMSS.dump
+DUMP=~/paddock-backups/paddock-YYYYMMDD-HHMMSS.dump   # ミラー(iCloud)側から戻すなら iCloud パスを指定
 docker exec -i paddock-postgres pg_restore -U paddock -d paddock \
     --clean --if-exists -t race_odds_snapshots < "$DUMP"
 ```
@@ -80,7 +90,7 @@ docker exec -i paddock-postgres pg_restore -U paddock -d paddock \
 scratch DB へ復元して行数が一致するか確認する。
 
 ```sh
-DUMP=~/Library/Mobile\ Documents/com~apple~CloudDocs/paddock-backups/paddock-YYYYMMDD-HHMMSS.dump
+DUMP=~/paddock-backups/paddock-YYYYMMDD-HHMMSS.dump   # ミラー(iCloud)側から戻すなら iCloud パスを指定
 docker exec paddock-postgres createdb -U paddock paddock_restore_test
 docker exec -i paddock-postgres pg_restore -U paddock -d paddock_restore_test < "$DUMP"
 # 行数突合（source と一致すれば OK）
