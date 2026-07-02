@@ -52,7 +52,7 @@ fn parses_sapporo_kinen_row_exactly() {
     // タイム 2:00.2 = 120.2 秒
     let secs = r.time_seconds.as_ref().map(|t| t.value()).unwrap();
     assert!((secs - 120.2).abs() < 1e-6, "got {secs}");
-    // #272 改善③: レース名(列4)・通過順位(列25)。
+    // #329 Phase0: レース名(列4)・通過順位(列25)。
     assert_eq!(r.race_name.as_deref(), Some("札幌記念(GII)"));
     assert_eq!(r.corner_positions.as_deref(), Some("5-3-6-6"));
 }
