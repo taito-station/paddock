@@ -138,6 +138,8 @@ fn nk_run(nk_id: &str, date: NaiveDate, race_num: u32, time: f64) -> HorsePastRu
         weight_change: None,
         weight_carried: None,
         popularity: None,
+        race_name: None,
+        corner_positions: None,
     }
 }
 

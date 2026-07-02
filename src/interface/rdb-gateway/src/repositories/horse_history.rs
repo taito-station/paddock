@@ -58,9 +58,9 @@ pub async fn upsert_horse_history(
                 horse_id, race_id, netkeiba_race_id, date, venue, round, day, race_num,
                 surface, distance, track_condition, finishing_position, status, gate_num,
                 horse_num, horse_name, jockey, time_seconds, margin, odds, horse_weight,
-                weight_change, weight_carried, popularity)
+                weight_change, weight_carried, popularity, race_name, corner_positions)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
-                    $17, $18, $19, $20, $21, $22, $23, $24)
+                    $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)
             ON CONFLICT(horse_id, race_id) DO UPDATE SET
                 netkeiba_race_id   = excluded.netkeiba_race_id,
                 date               = excluded.date,
@@ -83,7 +83,9 @@ pub async fn upsert_horse_history(
                 horse_weight       = excluded.horse_weight,
                 weight_change      = excluded.weight_change,
                 weight_carried     = excluded.weight_carried,
-                popularity         = excluded.popularity
+                popularity         = excluded.popularity,
+                race_name          = excluded.race_name,
+                corner_positions   = excluded.corner_positions
             "#,
         )
         .bind(horse_id.value())
@@ -110,6 +112,8 @@ pub async fn upsert_horse_history(
         .bind(run.weight_change.map(|w| w as i64))
         .bind(run.weight_carried)
         .bind(run.popularity.map(|p| p as i64))
+        .bind(run.race_name.clone())
+        .bind(run.corner_positions.clone())
         .execute(&mut *tx)
         .await?;
         saved += 1;

@@ -23,6 +23,7 @@ const COL_DISTANCE: usize = 14;
 const COL_TRACK_COND: usize = 16;
 const COL_TIME: usize = 18;
 const COL_MARGIN: usize = 19;
+const COL_CORNER: usize = 25; // コーナー通過順位 "10-9-5-5"（#272 改善③）
 const COL_HORSE_WEIGHT: usize = 28;
 const MIN_CELLS: usize = 29;
 
@@ -136,6 +137,11 @@ fn parse_row(
         weight_change,
         weight_carried: text(COL_WEIGHT_CARRIED).and_then(|t| t.parse::<f64>().ok()),
         popularity: text(COL_POPULARITY).and_then(|t| t.parse::<u32>().ok()),
+        // レース名セル(列4)の可視テキスト（/race/ リンクのアンカーテキスト＝レース名）。
+        // クラス正規化は domain 層で行うため、ここでは生テキストを保持する（#272 改善③）。
+        race_name: text(COL_RACE_NAME),
+        // 通過順位セル(列25)。競走中止等で空の行は None（#272 改善③）。
+        corner_positions: text(COL_CORNER),
     })
 }
 

@@ -44,6 +44,12 @@ pub struct HorsePastRun {
     pub weight_change: Option<i32>,
     pub weight_carried: Option<f64>,
     pub popularity: Option<u32>,
+    /// レース名の生テキスト（例「有馬記念(GI)」「3歳未勝利」「1勝クラス」, #272 改善③）。
+    /// クラス（新馬〜G1 の順序尺度）は domain 層でここから正規化する。取得できない行は `None`。
+    pub race_name: Option<String>,
+    /// コーナー通過順位の生テキスト（例「10-9-5-5」= 各コーナーでの位置, #272 改善③）。
+    /// 脚質（逃げ/先行/差し/追込）は domain 層でここから導出する。中止等で欠く行は `None`。
+    pub corner_positions: Option<String>,
 }
 
 /// netkeiba レース結果ページ (`race/result.html`) 1 頭分の確定成績。

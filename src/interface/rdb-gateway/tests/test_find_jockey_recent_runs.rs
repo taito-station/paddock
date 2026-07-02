@@ -245,6 +245,8 @@ fn past_run_with_jockey(
         weight_change: None,
         weight_carried: None,
         popularity: Some(5),
+        race_name: None,
+        corner_positions: None,
     }
 }
 

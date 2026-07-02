@@ -52,6 +52,9 @@ fn parses_sapporo_kinen_row_exactly() {
     // タイム 2:00.2 = 120.2 秒
     let secs = r.time_seconds.as_ref().map(|t| t.value()).unwrap();
     assert!((secs - 120.2).abs() < 1e-6, "got {secs}");
+    // #272 改善③: レース名(列4)・通過順位(列25)。
+    assert_eq!(r.race_name.as_deref(), Some("札幌記念(GII)"));
+    assert_eq!(r.corner_positions.as_deref(), Some("5-3-6-6"));
 }
 
 #[test]
@@ -67,4 +70,6 @@ fn parses_nakayama_row_with_weight() {
     assert_eq!(r.finishing_position.as_ref().map(|p| p.value()), Some(5));
     assert_eq!(r.horse_weight, Some(454));
     assert_eq!(r.weight_change, Some(0));
+    assert_eq!(r.race_name.as_deref(), Some("有馬記念(GI)"));
+    assert_eq!(r.corner_positions.as_deref(), Some("4-4-5-6"));
 }
