@@ -41,6 +41,8 @@ fn past_run(nk_race: &str, horse: &str, horse_num: u32, finish: u32) -> HorsePas
         weight_change: None,
         weight_carried: None,
         popularity: None,
+        race_name: None,
+        corner_positions: None,
     }
 }
 
