@@ -55,8 +55,11 @@ def run(tsv):
             if b is None:
                 continue
             a = agg[b]
-            a["n"] += 1; a["wins"] += y[i]; a["odds_sum"] += o
-            a["imp_sum"] += implied[i]; a["roi_sum"] += y[i] * o
+            a["n"] += 1
+            a["wins"] += y[i]
+            a["odds_sum"] += o
+            a["imp_sum"] += implied[i]
+            a["roi_sum"] += y[i] * o
 
     if nrace == 0:
         print("gated レース（勝馬記録あり かつ オッズあり）が 0 件です。入力 TSV を確認してください。", file=sys.stderr)
@@ -72,15 +75,20 @@ def run(tsv):
         a = agg[b]
         if a["n"] == 0:
             continue
-        wr = a["wins"] / a["n"]; imp = a["imp_sum"] / a["n"]
-        mo = a["odds_sum"] / a["n"]; roi = a["roi_sum"] / a["n"]
-        tot_n += a["n"]; tot_roi += a["roi_sum"]
+        wr = a["wins"] / a["n"]
+        imp = a["imp_sum"] / a["n"]
+        mo = a["odds_sum"] / a["n"]
+        roi = a["roi_sum"] / a["n"]
+        tot_n += a["n"]
+        tot_roi += a["roi_sum"]
         lab = f"{b[0]:g}-{b[1]:g}" if b[1] < 1e9 else f"{b[0]:g}+"
         print(f"{lab:>12} {a['n']:>6} {wr:>7.3f} {imp:>10.3f} {wr-imp:>+10.3f} {mo:>8.1f} {roi:>8.3f}")
     print(f"\n全体 n={tot_n}  単勝blind ROI={tot_roi/tot_n:.3f}")
-    print("読み: 効率ベンチ(1/overround)から ROI が分散＝人気-穴バイアス実在（大穴↓/本命↑）。"
+    print("読み: 効率ベンチ(1/overround)から ROI が分散＝バイアス実在。"
+          "頑健なのは極端大穴の overbet（ROI↓）で、本命 underbet 側は非単調・ノイズ域。"
           "ただし最良帯でも ROI<1 なら sub-takeout で exploitable でない。"
-          "正規implied（takeout除去）はバイアスを圧縮するので、バイアスの有無は ROI 分散で見る。")
+          "正規implied は overround(takeout)を除くだけでバイアス(資金シェア)は保持するので、"
+          "exploitability は絶対確率差でなく ROI 分散で判定する。")
 
 
 def main():
