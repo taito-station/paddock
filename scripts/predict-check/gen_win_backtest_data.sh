@@ -15,6 +15,9 @@
 #   PADDOCK_BT_TO     対象終了日（既定 2026-06-14）
 #   PADDOCK_BT_ALPHA  predict の --blend-alpha（既定 0.2 ＝本番モデル, ADR 0034。
 #                     #208 当時の α=0.3 を再現するなら PADDOCK_BT_ALPHA=0.3 を渡す）
+#   PADDOCK_BT_SHRINKAGE_M  predict の --shrinkage-m（#282）。未設定なら本番既定 m=10。
+#                     #270/ADR 0045 の m×α×γ 再検証で m を振った α=1.0 bt_pred を作るとき、m 値ごとに
+#                     別 WORKDIR へ本スクリプトを回す（例: PADDOCK_BT_ALPHA=1.0 PADDOCK_BT_SHRINKAGE_M=20）。
 #   PADDOCK_ANALYZE_BIN  analyze バイナリのパス（別 worktree のビルドを流用する時など）
 set -euo pipefail
 
@@ -25,6 +28,7 @@ ANALYZE_BIN="${PADDOCK_ANALYZE_BIN:-$REPO_ROOT/target/release/paddock-analyze}"
 FROM="${PADDOCK_BT_FROM:-2026-05-30}"
 TO="${PADDOCK_BT_TO:-2026-06-14}"
 ALPHA="${PADDOCK_BT_ALPHA:-0.2}"
+SHRINKAGE_M="${PADDOCK_BT_SHRINKAGE_M:-}"
 PSQL=(psql "$DB_URL" -tA)
 
 # FROM/TO は SQL に文字列補間するため、日付形式（数字とハイフンのみ）に制限して注入を防ぐ。
@@ -36,6 +40,16 @@ done
 [[ "$ALPHA" =~ ^[0-9]+(\.[0-9]+)?$ ]] \
   && LC_ALL=C awk -v a="$ALPHA" 'BEGIN{exit !(a>=0 && a<=1)}' \
   || { echo "PADDOCK_BT_ALPHA は 0〜1 の数値: $ALPHA" >&2; exit 1; }
+
+# SHRINKAGE_M（#282）: 未設定なら本番既定 m=10（predict にフラグを渡さない）。設定時は有限正数のみ許可
+# （analyze predict の --shrinkage-m と同じ制約）。set -u 下でも空配列展開が安全な idiom で predict に渡す。
+SHRINKAGE_M_ARGS=()
+if [[ -n "$SHRINKAGE_M" ]]; then
+  [[ "$SHRINKAGE_M" =~ ^[0-9]+(\.[0-9]+)?$ ]] \
+    && LC_ALL=C awk -v m="$SHRINKAGE_M" 'BEGIN{exit !(m>0)}' \
+    || { echo "PADDOCK_BT_SHRINKAGE_M は正の数値: $SHRINKAGE_M" >&2; exit 1; }
+  SHRINKAGE_M_ARGS=(--shrinkage-m "$SHRINKAGE_M")
+fi
 
 [[ -x "$ANALYZE_BIN" ]] || {
   echo "release バイナリが見つかりません: $ANALYZE_BIN" >&2
@@ -91,7 +105,8 @@ while IFS=$'\t' read -r date pid venue _ _ rnum _; do
   read -r raw_surf dist <<< "$row"
   case "$raw_surf" in turf) surf=芝 ;; dirt) surf=ダート ;; *) surf="$raw_surf" ;; esac
   # predict 結果を先に取得し、0 行なら書き込まずスキップ
-  pred_lines=$("$ANALYZE_BIN" predict "$pid" --blend-alpha "$ALPHA" 2>/dev/null \
+  pred_lines=$("$ANALYZE_BIN" predict "$pid" --blend-alpha "$ALPHA" \
+    ${SHRINKAGE_M_ARGS[@]+"${SHRINKAGE_M_ARGS[@]}"} 2>/dev/null \
     | grep -E '^[[:space:]]*[0-9]+' || true)
   if [[ -z "$pred_lines" ]]; then
     echo "  WARN: predict が空 ($pid)" >&2

@@ -68,15 +68,38 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: 
         track_condition: Option<TrackCondition>,
         with_explanation: bool,
     ) -> Result<PredictionViews> {
-        let config = EstimationConfig::production();
+        // 本番フロー（session/predict-watch/recommend）は常に本番既定 config。m/γ 上書きは
+        // predict_race_views_with_config 経由（analyze predict の #282 フラグ）でのみ効かせる。
+        self.predict_race_views_with_config(
+            race_id,
+            blend_alpha,
+            track_condition,
+            with_explanation,
+            &EstimationConfig::production(),
+        )
+        .await
+    }
+
+    /// `predict_race_views` の config 明示版（#282）。確率推定 config を呼び出し側が与える。
+    /// analyze predict の `--shrinkage-m` / `--win-power` で本番既定 m=10 / γ=1.25 を上書きした
+    /// bt_pred を生成するために使う（#270/ADR 0045 の m×α×γ 再検証）。本番フローは
+    /// `predict_race_views`（config=production 固定）を使い、この経路の影響を受けない。
+    async fn predict_race_views_with_config(
+        &self,
+        race_id: &RaceId,
+        blend_alpha: Option<f64>,
+        track_condition: Option<TrackCondition>,
+        with_explanation: bool,
+        config: &EstimationConfig,
+    ) -> Result<PredictionViews> {
         let (entry_factors, explanations) = self
-            .collect_race_factors(race_id, track_condition, with_explanation, &config)
+            .collect_race_factors(race_id, track_condition, with_explanation, config)
             .await?;
         let blended = self
-            .estimate_and_blend(&entry_factors, race_id, blend_alpha, &config)
+            .estimate_and_blend(&entry_factors, race_id, blend_alpha, config)
             .await?;
         let pure = self
-            .estimate_and_blend(&entry_factors, race_id, Some(1.0), &config)
+            .estimate_and_blend(&entry_factors, race_id, Some(1.0), config)
             .await?;
         debug_assert_eq!(
             blended.len(),
@@ -287,15 +310,23 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: 
     /// 組み立てる呼び出し側向け（#272 ③④）。オッズ未取得なら `None`（過去データ視点だけ出せる）。
     /// 診断は呼び出し側が `pair_ev_diagnostics(&blended, &pure, &odds, ..)` を実行する（軸=`blended`・
     /// EV=`pure` の循環断ち #272。session.rs と同じ経路）。オッズは保存スナップショット参照。
+    /// `config` で確率推定の m/γ を上書きできる（#282。本番は `EstimationConfig::production()` を渡す）。
     pub async fn predict_race_views_with_odds(
         &self,
         race_id: &RaceId,
         blend_alpha: Option<f64>,
         track_condition: Option<TrackCondition>,
         with_explanation: bool,
+        config: &EstimationConfig,
     ) -> Result<(PredictionViews, Option<RaceOdds>)> {
         let views = self
-            .predict_race_views(race_id, blend_alpha, track_condition, with_explanation)
+            .predict_race_views_with_config(
+                race_id,
+                blend_alpha,
+                track_condition,
+                with_explanation,
+                config,
+            )
             .await?;
         let odds = self.repository.find_race_odds(race_id, None).await?;
         Ok((views, odds))

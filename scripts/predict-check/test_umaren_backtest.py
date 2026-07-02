@@ -360,6 +360,75 @@ def test_joint_sweep_aggregation_e2e():
     assert f"{t1:>4.0f}%" in out, (t1, out)
 
 
+def test_recover_p_models_reads_dir_and_recovers():
+    # #282: recover_p_models が α=1.0 bt_pred dir を読み、各鞍の縮約済 p_model% を復元する
+    # （ファイル経由の復元が recover_p_model 直接適用と一致）。
+    pm = {1: 45.0, 2: 25.0, 3: 18.0, 4: 12.0}
+    final = U.recompute_p_final(pm, {}, alpha=1.0, gamma=U.PRODUCTION_GAMMA)
+    names = {1: "ウマA", 2: "ウマB", 3: "ウマC", 4: "ウマD"}
+    # parse_pred フォーマット: 「--- レース N: 場 馬場 距離m ---」ヘッダ + 「馬番 名前 勝率% ...」行。
+    body = "--- レース 1: 東京 芝 2000m ---\n" + "".join(
+        f"  {um} {names[um]} {final[um]:.1f}% 0.0% 0.0%\n" for um in sorted(final))
+    d = tempfile.mkdtemp()
+    with open(os.path.join(d, "bt_pred_2026-01-01.txt"), "w") as f:
+        f.write(body)
+    races = [{"date": "2026-01-01"}]
+    evaluated = [("2026-01-01", "東京", 1, "p1", {}, {}, {}, {}, {})]
+    recovered = U.recover_p_models(d, races, evaluated)
+    assert set(recovered) == {("2026-01-01", "東京", 1)}, recovered
+    got = recovered[("2026-01-01", "東京", 1)]
+    # ファイルには 1 桁丸めで書いているので、期待値も同じ丸め値から復元する。
+    written = {um: float(f"{final[um]:.1f}") for um in final}
+    exp = U.recover_p_model(written, gamma=U.PRODUCTION_GAMMA)
+    assert all(approx(got[k], exp[k], eps=1e-6) for k in exp), (got, exp)
+
+
+def test_joint_sweep_m_tags_m_and_matches_per_m_sweep():
+    # #282: m×α×γ 掃引が先頭に m 列を付け、各 m ブロックが「その m の p_models で回した joint_sweep」と
+    # 一致すること（m は縮約を変えた別 p_models として与える＝binary 再生成の代理）。
+    import io
+    import contextlib
+    quin = {frozenset({1, 2}): 5.0, frozenset({1, 3}): 5.0}
+    trio = {}
+    pay1 = {"umaren": {frozenset({1, 2}): 10000}, "wide": {}, "trio": {}, "exacta": {(1, 2): 1}}
+    pay2 = {"umaren": {}, "wide": {}, "trio": {}, "exacta": {(3, 1): 1}}
+    evaluated = [
+        ("d1", "東京", 1, "p1", {}, quin, trio, {}, pay1),
+        ("d1", "東京", 2, "p2", {}, quin, trio, {}, pay2),
+    ]
+    winodds = {
+        "p1": {1: (1, 2.0), 2: (2, 4.0), 3: (3, 8.0)},
+        "p2": {1: (1, 2.0), 2: (2, 4.0), 3: (3, 8.0)},
+    }
+    # 縮約 m が違えば復元後 p_model も変わる。m ごとに別 p_model を与えて独立性を模す。
+    pm_a = {1: 50.0, 2: 30.0, 3: 20.0}
+    pm_b = {1: 34.0, 2: 33.0, 3: 33.0}
+    pmods_a = {("d1", "東京", 1): pm_a, ("d1", "東京", 2): pm_a}
+    pmods_b = {("d1", "東京", 1): pm_b, ("d1", "東京", 2): pm_b}
+    alphas, gammas = [0.2], [1.25]
+
+    def one_row(pmods):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            U.joint_sweep(evaluated, winodds, pmods, alphas, gammas)
+        for line in buf.getvalue().splitlines():
+            if "alpha" not in line and line.strip().startswith(f"{alphas[0]:>5.2f}".strip()):
+                return line
+        raise AssertionError("joint_sweep data row not found")
+
+    row_a, row_b = one_row(pmods_a), one_row(pmods_b)
+    assert row_a != row_b, "m 違いで p_model が変われば出力も変わる（テストの鋭敏性担保）"
+
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        U.joint_sweep_m(evaluated, winodds, [("10", pmods_a), ("20", pmods_b)], alphas, gammas)
+    out = buf.getvalue()
+    # 先頭に m 列ヘッダ、各 m ブロックの行が「m ラベル + joint_sweep 行」で一致。
+    assert out.splitlines()[1].split()[0] == "m", out
+    assert f"{'10':>6} {row_a}" in out, out
+    assert f"{'20':>6} {row_b}" in out, out
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for t in tests:
