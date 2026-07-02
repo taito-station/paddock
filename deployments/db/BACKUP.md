@@ -69,7 +69,8 @@ docker exec -i paddock-postgres pg_restore -U paddock -d paddock \
 ```
 
 > 部分復元は「スキーマ互換な live DB が既にある」前提。単表 `--clean` は FK/依存順の都合で
-> 失敗しうる（そのときは全体復元を使う）。データだけ差し戻すなら `--data-only` を併用する。
+> 失敗しうる（そのときは全体復元を使う）。行データだけ差し戻すなら `--clean` を外し
+> `--data-only` 単独で流す（重複を避けるなら事前に `TRUNCATE race_odds_snapshots`）。
 
 ## 復元検証（dump→restore の 1 サイクル・live DB を汚さない）
 
