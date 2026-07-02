@@ -63,6 +63,7 @@ import argparse
 import math
 import re
 import statistics
+import sys
 import unicodedata
 from itertools import combinations, permutations
 from pathlib import Path
@@ -915,6 +916,10 @@ def recover_p_models(dir_path, races, evaluated, gamma=PRODUCTION_GAMMA):
         pf = a1_preds.get(date, {}).get((venue, rnum))
         if pf:
             p_models[(date, venue, rnum)] = recover_p_model(pf, gamma=gamma)
+    # dir 誤指定や bt_pred 未生成に気付けるよう、1 鞍も復元できなければ警告する（掃引表が全 nan で
+    # 黙って出るのを防ぐ・decision-support）。
+    if not p_models:
+        print(f"WARN: p_model を 1 鞍も復元できませんでした（dir={dir_path}）", file=sys.stderr)
     return p_models
 
 
@@ -934,12 +939,13 @@ def parse_m_dir_specs(specs):
         try:
             mv = float(m_label)
         except ValueError:
-            raise ValueError(f"M は数値: {m_label!r}")
-        if mv != mv or mv in (float("inf"), float("-inf")) or mv <= 0:
+            raise ValueError(f"M は数値: {m_label!r}") from None
+        if not math.isfinite(mv) or mv <= 0:
             raise ValueError(f"M は正の有限数: {m_label!r}")
-        if m_label in seen:
+        # 重複は数値 mv で判定する（'10' と '10.0' は同一 m＝別ブロックにしない）。
+        if mv in seen:
             raise ValueError(f"M が重複: {m_label!r}")
-        seen.add(m_label)
+        seen.add(mv)
         out.append((m_label, d))
     return out
 

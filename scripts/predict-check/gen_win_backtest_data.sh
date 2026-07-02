@@ -43,8 +43,9 @@ done
   && LC_ALL=C awk -v a="$ALPHA" 'BEGIN{exit !(a>=0 && a<=1)}' \
   || { echo "PADDOCK_BT_ALPHA は 0〜1 の数値: $ALPHA" >&2; exit 1; }
 
-# SHRINKAGE_M（#282）: 未設定なら本番既定 m=10（predict にフラグを渡さない）。設定時は有限正数のみ許可
-# （analyze predict の --shrinkage-m と同じ制約）。set -u 下でも空配列展開が安全な idiom で predict に渡す。
+# SHRINKAGE_M（#282）: 未設定なら本番既定 m=10（predict にフラグを渡さない）。設定時は正数のみ許可
+# （analyze predict の --shrinkage-m の finite-positive 制約に整合。指数表記や `.5`/`5.` は shell 側で
+# 弾く安全側の差はある）。set -u 下でも空配列展開が安全な idiom で predict に渡す。
 SHRINKAGE_M_ARGS=()
 if [[ -n "$SHRINKAGE_M" ]]; then
   [[ "$SHRINKAGE_M" =~ ^[0-9]+(\.[0-9]+)?$ ]] \

@@ -433,9 +433,9 @@ def test_parse_m_dir_specs_validates():
     # #282: 正常な 'M:DIR' 列はそのまま (m_label, dir) に。
     assert U.parse_m_dir_specs(["10:/a", "20:/b"]) == [("10", "/a"), ("20", "/b")]
     assert U.parse_m_dir_specs([]) == []
-    # 不正: 形式不備 / 非数値 M / 0・負・非有限 M / m 重複 は ValueError。
+    # 不正: 形式不備 / 非数値 M / 0・負・非有限 M / m 重複（数値等価 '10' と '10.0' も含む）は ValueError。
     for bad in (["10"], ["10:"], [":/a"], ["x:/a"], ["0:/a"], ["-1:/a"],
-                ["inf:/a"], ["nan:/a"], ["10:/a", "10:/b"]):
+                ["inf:/a"], ["nan:/a"], ["10:/a", "10:/b"], ["10:/a", "10.0:/b"]):
         try:
             U.parse_m_dir_specs(bad)
             assert False, f"should raise ValueError: {bad}"
