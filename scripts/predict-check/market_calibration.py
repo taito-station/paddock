@@ -7,12 +7,11 @@
 pure dump（win_odds 列・着順列）の gated レース runner を単勝オッズ帯で層別:
 - 較正: takeout 除去後の正規化 implied 確率 vs 実勝率（帯ごと・バイアス検出）。
 - ROI:  生オッズで各帯を単勝 blind bet した回収率 = mean(won × odds)。+ の帯があれば実 edge。
-確率鏡映は不要（市場側だけ見る）。feature_resolution_diag を load/group/_fp/_implied のみ流用。
+確率鏡映は不要（市場側だけ見る）。feature_resolution_diag を load/group_by_race/_fp/_implied/COL で流用。
 
 使い方:
   python3 market_calibration.py --tsv /tmp/pa/pure.tsv
 """
-from __future__ import annotations
 import argparse
 import os
 import sys
@@ -59,8 +58,13 @@ def run(tsv):
             a["n"] += 1; a["wins"] += y[i]; a["odds_sum"] += o
             a["imp_sum"] += implied[i]; a["roi_sum"] += y[i] * o
 
+    if nrace == 0:
+        print("gated レース（勝馬記録あり かつ オッズあり）が 0 件です。入力 TSV を確認してください。", file=sys.stderr)
+        return
     orr = sum(overround) / len(overround)
-    print(f"# gated races={nrace}  平均 overround Σ(1/odds)={orr:.3f}  (→ takeout ≈ {100*(1-1/orr):.1f}%)\n")
+    print(f"# gated races={nrace}  平均 overround Σ(1/odds)={orr:.3f}  (→ takeout ≈ {100*(1-1/orr):.1f}%)")
+    print(f"# 効率ベンチ（unbiased なら全帯 flat ROI がここに一様収束）= 1/overround = {1/orr:.3f}")
+    print(f"# ※ 差(実-imp) と ROI はフル精度で算出（表示丸めからは検算できない）\n")
     print(f"{'odds帯':>12} {'n':>6} {'実勝率':>7} {'正規implied':>10} {'差(実-imp)':>10} {'平均odds':>8} {'単勝ROI':>8}")
     tot_n = 0
     tot_roi = 0.0
@@ -74,8 +78,9 @@ def run(tsv):
         lab = f"{b[0]:g}-{b[1]:g}" if b[1] < 1e9 else f"{b[0]:g}+"
         print(f"{lab:>12} {a['n']:>6} {wr:>7.3f} {imp:>10.3f} {wr-imp:>+10.3f} {mo:>8.1f} {roi:>8.3f}")
     print(f"\n全体 n={tot_n}  単勝blind ROI={tot_roi/tot_n:.3f}")
-    print("読み: 正規implied（takeout除去）vs 実勝率の差が系統的（単調）なら人気-穴バイアス。"
-          "単勝ROIは生オッズ（takeout込み）＝どの帯も<1なら市場は効率的で張る妙味なし。")
+    print("読み: 効率ベンチ(1/overround)から ROI が分散＝人気-穴バイアス実在（大穴↓/本命↑）。"
+          "ただし最良帯でも ROI<1 なら sub-takeout で exploitable でない。"
+          "正規implied（takeout除去）はバイアスを圧縮するので、バイアスの有無は ROI 分散で見る。")
 
 
 def main():
