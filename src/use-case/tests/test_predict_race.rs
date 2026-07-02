@@ -372,22 +372,23 @@ async fn predict_race_win_sums_to_one_and_monotone() {
 }
 
 #[tokio::test]
-async fn predict_race_with_diagnostics_none_when_no_odds() {
-    // オッズ未取得（find_race_odds → None）のレースは診断 None（#246-C）。
+async fn predict_race_views_with_odds_none_when_no_odds() {
+    // オッズ未取得（find_race_odds → None）なら odds は None＝過去データ視点のみ出せる（#272 ③④）。
     let card = make_race_card("2026-1-tokyo-1-R1");
     let app = interactor(Some(card)); // odds: None
     let race_id = RaceId::try_from("2026-1-tokyo-1-R1").unwrap();
-    let (probs, diag) = app
-        .predict_race_with_diagnostics(&race_id, None, None, 5)
+    let (views, odds) = app
+        .predict_race_views_with_odds(&race_id, None, None, false)
         .await
         .unwrap();
-    assert_eq!(probs.len(), 2);
-    assert!(diag.is_none(), "オッズ未取得なら診断は None");
+    assert_eq!(views.pure.len(), 2);
+    assert!(odds.is_none(), "オッズ未取得なら odds は None");
 }
 
 #[tokio::test]
-async fn predict_race_with_diagnostics_returns_axis_and_rows_with_odds() {
-    // オッズありなら (軸, 各ペア行) を返す。軸は domain が決めた値で、表示側は再計算しない（#246-C）。
+async fn predict_race_views_with_odds_returns_odds_and_diagnostics() {
+    // オッズありなら odds Some。呼び出し側が pair_ev_diagnostics で (軸, 各ペア行) を得る
+    // （軸=blended・EV=pure の循環断ち #272。旧 predict_race_with_diagnostics の後継検証）。
     let race_id_str = "2026-1-tokyo-1-R1";
     let card = make_race_card(race_id_str);
     let mut odds = paddock_domain::RaceOdds::empty(RaceId::try_from(race_id_str).unwrap());
@@ -401,11 +402,12 @@ async fn predict_race_with_diagnostics_returns_axis_and_rows_with_odds() {
     );
     let app = interactor_with_odds(Some(card), odds);
     let race_id = RaceId::try_from(race_id_str).unwrap();
-    let (_probs, diag) = app
-        .predict_race_with_diagnostics(&race_id, None, None, 5)
+    let (views, odds) = app
+        .predict_race_views_with_odds(&race_id, None, None, false)
         .await
         .unwrap();
-    let diag = diag.expect("オッズありなら診断 Some");
+    let odds = odds.expect("オッズありなら odds は Some");
+    let diag = paddock_domain::pair_ev_diagnostics(&views.blended, &views.pure, &odds, 5);
     assert!(diag.axis.is_some(), "軸が決まる");
     assert_eq!(diag.rows.len(), 1, "2 頭立て → 相手 1 頭");
 }

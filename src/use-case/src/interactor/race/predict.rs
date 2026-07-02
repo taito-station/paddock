@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use chrono::NaiveDate;
 use paddock_domain::{
     EstimationConfig, ExplainCategory, FactorExplanation, FactorStat, HorseEntry, HorseExplanation,
-    HorseFactors, HorseName, HorseProbability, JockeyName, PairEvDiagnostics, PrevRunSummary,
-    RaceId, RateTriple, RecentRun, StandardTimes, Surface, TrackCondition, TrainerName,
+    HorseFactors, HorseName, HorseProbability, JockeyName, PrevRunSummary, RaceId, RaceOdds,
+    RateTriple, RecentRun, StandardTimes, Surface, TrackCondition, TrainerName,
 };
 
 use crate::error::{Error, Result};
@@ -279,32 +279,23 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: 
         Ok(probs)
     }
 
-    /// `predict_race` に加え、軸-相手ペアの馬連 vs 馬単(両方向) EV 診断（#246-C）も返す。
-    /// 軸＝win_prob 最大、相手＝上位 `partners` 頭。最新オッズスナップショット
-    /// （`find_race_odds(.., None)`）が取得できなければ診断は `None`（オッズ未取得レース）。
-    /// 診断 `PairEvDiagnostics`（軸＋各ペア行）を返す。軸は `pair_ev_diagnostics` が決めた canonical
-    /// な値で、表示側で軸を再計算しない（軸選定ロジックの二重化を避ける）。`None` はオッズ未取得。
-    ///
-    /// 返す確率は `blended`（順位付け・表示用）。EV 診断は循環断ち（#272）のため軸=`blended`・
-    /// EV=`pure`（純モデル α=1.0）で算出する。
-    pub async fn predict_race_with_diagnostics(
+    /// `predict_race_views` に加え、最新オッズスナップショット（`find_race_odds(.., None)`）も返す。
+    /// analyze predict 等、二視点（過去データ視点=`pure`・市場EV視点=`blended`×odds）を自前で
+    /// 組み立てる呼び出し側向け（#272 ③④）。オッズ未取得なら `None`（過去データ視点だけ出せる）。
+    /// 診断は呼び出し側が `pair_ev_diagnostics(&blended, &pure, &odds, ..)` を実行する（軸=`blended`・
+    /// EV=`pure` の循環断ち #272。session.rs と同じ経路）。オッズは保存スナップショット参照。
+    pub async fn predict_race_views_with_odds(
         &self,
         race_id: &RaceId,
         blend_alpha: Option<f64>,
         track_condition: Option<TrackCondition>,
-        partners: usize,
-    ) -> Result<(Vec<HorseProbability>, Option<PairEvDiagnostics>)> {
+        with_explanation: bool,
+    ) -> Result<(PredictionViews, Option<RaceOdds>)> {
         let views = self
-            .predict_race_views(race_id, blend_alpha, track_condition, false)
+            .predict_race_views(race_id, blend_alpha, track_condition, with_explanation)
             .await?;
-        let diagnostics = self
-            .repository
-            .find_race_odds(race_id, None)
-            .await?
-            .map(|odds| {
-                paddock_domain::pair_ev_diagnostics(&views.blended, &views.pure, &odds, partners)
-            });
-        Ok((views.blended, diagnostics))
+        let odds = self.repository.find_race_odds(race_id, None).await?;
+        Ok((views, odds))
     }
 }
 

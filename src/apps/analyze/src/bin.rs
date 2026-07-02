@@ -1,18 +1,22 @@
 mod cli;
 mod setup;
 
+use std::collections::HashMap;
+
 use chrono::{Months, NaiveDate, Utc};
 use clap::Parser;
 use paddock_domain::{
     BacktestReport, EstimationConfig, ExoticSegment, FactorStat, FeatureRow, FieldSizeSegment,
     HorseName, HorseNum, HorseProbability, JockeyName, PairEvDiagnostic, PopularitySegment,
-    PortfolioConfig, RaceId, RecencyConfig, ReliabilityBin, ShrinkageConfig, Surface,
-    SurfaceSegment, Top3RankDistribution, TrainerName, Venue,
+    PortfolioConfig, RECOMMENDED_MARKET_BLEND_ALPHA, RaceId, RecencyConfig, ReliabilityBin,
+    ShrinkageConfig, Surface, SurfaceSegment, Top3RankDistribution, TrainerName, Venue,
+    pair_ev_diagnostics,
 };
-use paddock_use_case::TREND_N_MAX;
 use paddock_use_case::repository::{
     CourseStatsRow, GroupStat, HorseStatsRow, JockeyStatsRow, TrainerStatsRow,
 };
+use paddock_use_case::{PredictionViews, TREND_N_MAX};
+use predict_format::{format_probs, format_probs_with_market};
 
 /// 部分一致候補の表示上限。これを超える場合も先頭から打ち切って提示する。
 const CANDIDATE_LIMIT: u32 = 20;
@@ -184,20 +188,57 @@ async fn main() -> anyhow::Result<()> {
             blend_alpha,
             track_condition,
         } => {
-            let blend_alpha = validate_blend_alpha(blend_alpha)?;
+            // 未指定時は本番既定 α=0.2（session.rs / predict-watch と対称）。過去データ視点は常に
+            // 純モデルなので、この α は市場EV視点の軸/相手ランキングにのみ効く。
+            let blend_alpha = validate_blend_alpha(blend_alpha)?.or(RECOMMENDED_MARKET_BLEND_ALPHA);
             let rid = RaceId::try_from(race_id.as_str())?;
-            let (probs, diagnostics) = app
+            // #272 ③④: session.rs と同じ二視点で出す。過去データ視点＝純モデル（α=1.0・市場非依存）、
+            // 市場EV視点＝軸/相手 blended・EV pure（循環断ち）。--blend-alpha は市場EV視点の順位付け用。
+            let (views, odds) = app
                 .interactor
-                .predict_race_with_diagnostics(
-                    &rid,
-                    blend_alpha,
-                    track_condition,
-                    PortfolioConfig::default().partners,
-                )
+                .predict_race_views_with_odds(&rid, blend_alpha, track_condition, false)
                 .await?;
-            print_predict(&probs);
-            if let Some(diag) = diagnostics {
-                print_pair_ev_diagnostics(diag.axis, &probs, &diag.rows);
+            let PredictionViews {
+                blended,
+                pure,
+                explanations: _,
+            } = views;
+
+            // 過去データ視点（純モデル）: 市場に依らない公開データだけの読み。
+            println!("【過去データ視点（純モデル）】");
+            for line in format_probs(&pure) {
+                println!("{line}");
+            }
+
+            match odds {
+                Some(odds) => {
+                    // 純モデル勝率 vs 市場implied（控除率除去）。差＝割安/割高を読む材料。
+                    let market_win: HashMap<HorseNum, f64> =
+                        odds.win.iter().map(|(num, o)| (*num, o.value())).collect();
+                    println!();
+                    println!("【純モデル vs 市場implied】");
+                    for line in format_probs_with_market(&pure, &market_win) {
+                        println!("{line}");
+                    }
+
+                    // 市場EV視点: 軸/相手=blended・EV/的中=pure（#272 循環断ち）のペアEV診断。
+                    // 見出しは print_pair_ev_diagnostics 側（"# 馬連 vs 馬単 EV 診断（軸 …）"）に集約する。
+                    println!();
+                    println!("【市場EV視点（軸/相手=市場ブレンド・EV=純モデル×odds）】");
+                    let diag = pair_ev_diagnostics(
+                        &blended,
+                        &pure,
+                        &odds,
+                        PortfolioConfig::default().partners,
+                    );
+                    print_pair_ev_diagnostics(diag.axis, &blended, &diag.rows);
+                }
+                None => {
+                    println!();
+                    println!(
+                        "オッズ未取得 — 市場implied比較・EV視点は表示できません（過去データ視点のみ）"
+                    );
+                }
             }
         }
         cli::Command::Backtest {
@@ -405,25 +446,6 @@ fn print_trainer(s: &TrainerStatsRow) {
     print_section("全体", std::slice::from_ref(&s.overall));
     print_section("芝/ダート", &s.by_surface);
     print_section("枠順", &s.by_gate_group);
-}
-
-fn print_predict(probs: &[HorseProbability]) {
-    // 全角文字は端末上で 2 カラム分の幅を占めるため、{:<16} の文字数パディングでは
-    // 列がずれる場合がある。unicode-width 対応は今後の改善課題。
-    println!(
-        "{:<4} {:<16} {:>8} {:>8} {:>8}",
-        "馬番", "馬名", "勝率", "連対率", "複勝率"
-    );
-    for p in probs {
-        println!(
-            "{:>4} {:<16} {:>7.1}% {:>7.1}% {:>7.1}%",
-            p.horse_num.value(),
-            p.horse_name.value(),
-            p.win_prob * 100.0,
-            p.place_prob * 100.0,
-            p.show_prob * 100.0,
-        );
-    }
 }
 
 /// 軸-相手ペアの「馬連 vs 馬単(両方向)」EV を並べる診断表（#246-C）。
