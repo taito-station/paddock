@@ -106,24 +106,31 @@ if [[ -n "$MIRROR_DIR" ]]; then
     fi
 fi
 
-# 世代管理: ローカル権威 dir を列挙して新しい順に KEEP 個を残し、超過分を削除（列挙は必ずローカルで
-# 行い、iCloud 列挙の不安定さを避ける）。同名をミラーからも rm する（terminal 実行では効く／launchd 下
-# では反映されず best-effort）。macOS 既定の /bin/bash 3.2（launchd もこれを使う）に mapfile が無いため
-# while-read で読む。
-dumps=()
-while IFS= read -r f; do
-    [[ -n "$f" ]] && dumps+=("$f")
-done < <(ls -1t "$BACKUP_DIR"/paddock-*.dump 2>/dev/null || true)
-if (( ${#dumps[@]} > KEEP )); then
-    i=0
-    for old in "${dumps[@]}"; do
-        if (( i >= KEEP )); then
-            rm -f "$old"
-            [[ -n "$MIRROR_DIR" ]] && rm -f "$MIRROR_DIR/$(basename "$old")"
-            echo "古い世代を削除: $(basename "$old")"
-        fi
-        i=$((i + 1))
-    done
+# 世代管理: 指定 dir を独立に列挙し新しい順に KEEP 個を残して超過分を削除する。権威(ローカル)と
+# ミラー(iCloud)の両方に同じロジックを適用する（ミラーも独立列挙するので、launchd 下で溜まった
+# iCloud の蓄積を terminal 実行時に真に KEEP まで reconcile できる）。launchd 下では iCloud 列挙が
+# 空を返すためミラー側は自然に no-op（＝溜まる。terminal で回収する）。ローカルは常に KEEP に bounded。
+# macOS 既定の /bin/bash 3.2（launchd もこれを使う）に mapfile が無いため while-read で読む。
+prune_dir() {
+    local dir="$1" label="$2"
+    local files=() f i=0
+    while IFS= read -r f; do
+        [[ -n "$f" ]] && files+=("$f")
+    done < <(ls -1t "$dir"/paddock-*.dump 2>/dev/null || true)
+    if (( ${#files[@]} > KEEP )); then
+        for f in "${files[@]}"; do
+            if (( i >= KEEP )); then
+                rm -f "$f"
+                echo "古い世代を削除($label): $(basename "$f")"
+            fi
+            i=$((i + 1))
+        done
+    fi
+    local kept=$(( ${#files[@]} > KEEP ? KEEP : ${#files[@]} ))
+    echo "保持世代数($label): $kept / KEEP=$KEEP  $dir"
+}
+
+prune_dir "$BACKUP_DIR" "権威"
+if [[ -n "$MIRROR_DIR" ]]; then
+    prune_dir "$MIRROR_DIR" "ミラー"
 fi
-kept=$(( ${#dumps[@]} > KEEP ? KEEP : ${#dumps[@]} ))
-echo "保持世代数: $kept / KEEP=$KEEP  権威: $BACKUP_DIR  ミラー: ${MIRROR_DIR:-（無効）}"
