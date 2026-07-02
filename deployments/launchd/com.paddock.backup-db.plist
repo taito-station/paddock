@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  paddock DB の日次バックアップ LaunchAgent（#265）。
+  scripts/backup-db.sh を毎日 23:30 に実行し、full DB dump を退避先へ退避＋世代管理する。
+
+  インストール（deployments/db/BACKUP.md 参照）:
+    1. __PADDOCK_REPO__（リポの絶対パス）と __HOME__（$HOME）を実値へ置換
+       例: sed -e "s#__PADDOCK_REPO__#$PWD#g" -e "s#__HOME__#$HOME#g" \
+             deployments/launchd/com.paddock.backup-db.plist \
+             > ~/Library/LaunchAgents/com.paddock.backup-db.plist
+    2. launchctl load ~/Library/LaunchAgents/com.paddock.backup-db.plist
+  PATH は launchd の最小環境で docker を解決するため明示する（Intel の /usr/local/bin と
+  Apple Silicon の /opt/homebrew/bin の両方を含める。docker/colima の brew prefix が環境で異なる）。
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.paddock.backup-db</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>__PADDOCK_REPO__/scripts/backup-db.sh</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
+
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>23</integer>
+        <key>Minute</key>
+        <integer>30</integer>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>__HOME__/Library/Logs/paddock-backup.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/Library/Logs/paddock-backup.log</string>
+</dict>
+</plist>
