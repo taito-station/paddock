@@ -4,7 +4,7 @@ use chrono::NaiveDate;
 use paddock_domain::{
     EstimationConfig, ExplainCategory, FactorExplanation, FactorStat, HorseEntry, HorseExplanation,
     HorseFactors, HorseName, HorseProbability, JockeyName, PairEvDiagnostics, PrevRunSummary,
-    RaceId, RateTriple, RecentRun, StandardTimes, Surface, TrackCondition, TrainerName,
+    RaceId, RaceOdds, RateTriple, RecentRun, StandardTimes, Surface, TrackCondition, TrainerName,
 };
 
 use crate::error::{Error, Result};
@@ -305,6 +305,24 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: 
                 paddock_domain::pair_ev_diagnostics(&views.blended, &views.pure, &odds, partners)
             });
         Ok((views.blended, diagnostics))
+    }
+
+    /// `predict_race_views` に加え、最新オッズスナップショット（`find_race_odds(.., None)`）も返す。
+    /// analyze predict 等、二視点（過去データ視点=`pure`・市場EV視点=`blended`×odds）を自前で
+    /// 組み立てる呼び出し側向け（#272 ③④）。オッズ未取得なら `None`（過去データ視点だけ出せる）。
+    /// `predict_race_with_diagnostics` と同じ保存オッズ経路（`find_race_odds`）を使う。
+    pub async fn predict_race_views_with_odds(
+        &self,
+        race_id: &RaceId,
+        blend_alpha: Option<f64>,
+        track_condition: Option<TrackCondition>,
+        with_explanation: bool,
+    ) -> Result<(PredictionViews, Option<RaceOdds>)> {
+        let views = self
+            .predict_race_views(race_id, blend_alpha, track_condition, with_explanation)
+            .await?;
+        let odds = self.repository.find_race_odds(race_id, None).await?;
+        Ok((views, odds))
     }
 }
 

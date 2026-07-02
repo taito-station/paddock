@@ -231,6 +231,7 @@ dependencies = [
  "paddock-config",
  "paddock-domain",
  "paddock-use-case",
+ "predict-format",
  "rdb-gateway",
  "tokio",
  "tracing",
