@@ -18,6 +18,8 @@
 #   PADDOCK_BT_SHRINKAGE_M  predict の --shrinkage-m（#282）。未設定なら本番既定 m=10。
 #                     #270/ADR 0045 の m×α×γ 再検証で m を振った α=1.0 bt_pred を作るとき、m 値ごとに
 #                     別 WORKDIR へ本スクリプトを回す（例: PADDOCK_BT_ALPHA=1.0 PADDOCK_BT_SHRINKAGE_M=20）。
+#                     γ（win_power）は本番既定 1.25 固定で生成する（受け口を出さない）。umaren_backtest.py の
+#                     recover_p_models が γ=1.25 で逆変換するため、ここで γ を変えると p_model 復元が狂う。
 #   PADDOCK_ANALYZE_BIN  analyze バイナリのパス（別 worktree のビルドを流用する時など）
 set -euo pipefail
 

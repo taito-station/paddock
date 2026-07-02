@@ -918,6 +918,32 @@ def recover_p_models(dir_path, races, evaluated, gamma=PRODUCTION_GAMMA):
     return p_models
 
 
+def parse_m_dir_specs(specs):
+    """--p-model-dir-m の 'M:DIR' 列を [(m_label, dir), ...] に検証パースする（#282）。
+
+    M は表示ラベルだが（実際の縮約は各 dir の bt_pred に焼き込み済）、誤ラベルで掃引表の m 列が
+    黙って化けるのを防ぐため、Rust 側 --shrinkage-m と対称に**正の有限数のみ**許可する。m ラベルの
+    重複も弾く（同 m の 2 ブロックは解釈を誤らせる）。不正時は ValueError（呼び出し側が fail-fast する）。
+    """
+    out = []
+    seen = set()
+    for spec in specs:
+        m_label, sep, d = spec.partition(":")
+        if not sep or not m_label or not d:
+            raise ValueError(f"'M:DIR' 形式で渡す: {spec!r}")
+        try:
+            mv = float(m_label)
+        except ValueError:
+            raise ValueError(f"M は数値: {m_label!r}")
+        if mv != mv or mv in (float("inf"), float("-inf")) or mv <= 0:
+            raise ValueError(f"M は正の有限数: {m_label!r}")
+        if m_label in seen:
+            raise ValueError(f"M が重複: {m_label!r}")
+        seen.add(m_label)
+        out.append((m_label, d))
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--races", default="/tmp/bt250/bt_races.tsv")
@@ -947,6 +973,12 @@ def main():
     ap.add_argument("--bucket-edges", default="0.8,0.9,1.0,1.1,1.2",
                     help="#270 較正バケットの予測 model ROI 境界")
     args = ap.parse_args()
+    # #282: --p-model-dir-m の spec は重い読込前に検証して fail-fast する（誤形式で全レース評価を
+    # 走らせてから落ちるのを防ぐ）。
+    try:
+        m_dir_specs = parse_m_dir_specs(args.p_model_dir_m or [])
+    except ValueError as e:
+        ap.error(f"--p-model-dir-m {e}")
 
     races = parse_races(args.races)
     exotic = parse_exotic(args.exotic_odds)
@@ -1114,15 +1146,12 @@ def main():
 
     # #282: m×α×γ 3 軸掃引（--p-model-dir-m を M:DIR で複数指定）。各 M は縮約を変えて再生成した
     # α=1.0 bt_pred dir。m は p_model に焼き込まれ純 Python では動かせないため m ごとに別 dir が要る。
-    if args.p_model_dir_m:
+    if m_dir_specs:
         alphas = [float(x) for x in args.alpha_grid.split(",")]
         gammas = [float(x) for x in args.gamma_grid.split(",")]
-        p_models_by_m = []
-        for spec in args.p_model_dir_m:
-            m_label, sep, d = spec.partition(":")
-            if not sep or not m_label or not d:
-                ap.error(f"--p-model-dir-m は 'M:DIR' 形式で渡す: {spec!r}")
-            p_models_by_m.append((m_label, recover_p_models(d, races, evaluated)))
+        # 各 m dir は本番 γ=1.25 で生成した α=1.0 bt_pred 前提（recover_p_models は γ=PRODUCTION_GAMMA で
+        # 逆変換する）。dir 生成時に --win-power を上書きすると復元が狂うので m のみ振ること。
+        p_models_by_m = [(m_label, recover_p_models(d, races, evaluated)) for m_label, d in m_dir_specs]
         joint_sweep_m(evaluated, winodds, p_models_by_m, alphas, gammas)
 
 
