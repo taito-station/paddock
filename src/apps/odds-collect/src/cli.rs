@@ -16,8 +16,8 @@ pub struct Cli {
     #[arg(long)]
     pub date: NaiveDate,
 
-    /// スイープ間隔（分・最小 1 分）。既定 15。
-    #[arg(long, default_value_t = 15)]
+    /// スイープ間隔（分・最小 1 分）。既定 15。0 は連続再取得＝礼節に反するため parse 時に弾く。
+    #[arg(long, default_value_t = 15, value_parser = clap::value_parser!(u64).range(1..))]
     pub interval: u64,
 
     /// オッズ再取得の 1 リクエストごとの待機（ms・netkeiba への礼節）。既定 2000。

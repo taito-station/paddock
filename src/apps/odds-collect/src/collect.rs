@@ -129,12 +129,8 @@ async fn sweep(app: &App, slots: &[Slot], statuses: &[CollectStatus], now: Naive
 
 /// 収集ループ。発走前のレースが残っている間スイープを繰り返し、全レース発走で自動終了する。
 pub async fn run(app: &App, cli: &Cli) -> anyhow::Result<()> {
-    // 連続再取得（busy loop）で netkeiba を叩き続けないよう、間隔は 1 分以上を要求する。
-    if cli.interval == 0 {
-        anyhow::bail!(
-            "--interval は 1 分以上を指定してください（0 は連続再取得になり礼節に反します）。"
-        );
-    }
+    // 連続再取得（busy loop）で netkeiba を叩き続けないよう、間隔は 1 分以上（cli の
+    // value_parser=range(1..) で parse 時に強制。DB 接続前に弾くため実行時チェックは不要）。
 
     // 発走状態は実行マシンの現在時刻と post_time の「時刻」だけで判定するため、(1) 当日以外の date、
     // (2) JST 以外の TZ では判定が無意味になる。誤用に早期に気づけるよう起動時に警告する（predict-watch と同旨）。
@@ -180,6 +176,9 @@ pub async fn run(app: &App, cli: &Cli) -> anyhow::Result<()> {
 
         sweep(app, &slots, &statuses, now).await;
 
+        // 発走前（Collect）が無ければ終了。非 once の常駐モードでも全 Unknown（post_time 全欠落）は
+        // 終了する: 当日 fetch-card 済みが前提で、post_time が恒久的に無い状況で待ち続けると無限ループに
+        // なるため。カード未取得での誤起動は下の警告メッセージで気づける（fetch-card 後に再起動する運用）。
         if !should_continue(&statuses) {
             if statuses.is_empty() {
                 println!("── 収集終了: 本日（{}）は対象開催がありません。", cli.date);
