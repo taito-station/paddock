@@ -58,6 +58,11 @@ CONTAINER="${PADDOCK_PG_CONTAINER:-paddock-postgres}"
 PG_USER="${PADDOCK_PG_USER:-paddock}"
 PG_DB="${PADDOCK_PG_DB:-paddock}"
 
+# 権威と同一 dir へのミラーは無意味（cp が same-file エラーになる）なので無効化する。
+if [[ "$MIRROR_DIR" == "$BACKUP_DIR" ]]; then
+    MIRROR_DIR=""
+fi
+
 # KEEP は正整数のみ許可（0 や非整数だと世代管理で作成直後の dump ごと全削除する footgun）。
 if ! [[ "$KEEP" =~ ^[1-9][0-9]*$ ]]; then
     echo "PADDOCK_BACKUP_KEEP は正整数である必要がある: $KEEP" >&2

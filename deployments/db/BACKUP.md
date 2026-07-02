@@ -9,7 +9,7 @@
 - **二段構成の退避先**:
   - **ローカル権威**（`PADDOCK_BACKUP_DIR`・既定 `~/paddock-backups`）: dump 本体。**世代管理（列挙→剪定）はここで行う**。
   - **off-machine ミラー**（`PADDOCK_BACKUP_MIRROR_DIR`・既定 iCloud Drive `~/Library/Mobile Documents/com~apple~CloudDocs/paddock-backups`）: 各 dump をコピーしディスク障害にも備える。空文字で無効化。
-- **形式 / 世代**: `paddock-YYYYMMDD-HHMMSS.dump`（`pg_dump -Fc` custom-format・圧縮込み）。既定で直近 14 世代を保持（`PADDOCK_BACKUP_KEEP`）。剪定はローカル/ミラー両方に効く。
+- **形式 / 世代**: `paddock-YYYYMMDD-HHMMSS.dump`（`pg_dump -Fc` custom-format・圧縮込み）。既定で直近 14 世代を保持（`PADDOCK_BACKUP_KEEP`）。剪定はローカル権威で常に効き、ミラー(iCloud)は terminal 実行時に効く（launchd 下は下記のとおり best-effort）。
 
 > **なぜ二段構成か**: launchd から実行すると **iCloud への "列挙" も "削除" も信頼できない**（書き込み=`cp`
 > は効くが `ls`/glob は空を返し `rm` も反映されない macOS file-provider の癖・検証で確認）。iCloud を権威
