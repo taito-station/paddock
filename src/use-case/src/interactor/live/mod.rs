@@ -62,46 +62,51 @@ pub struct LiveFlip {
 impl<R: LiveEvRepository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
     /// 指定開催日の race ごと最新サイクル＋伝票を返す（read-only, #260 / ADR 0064）。
     ///
-    /// repository はフラットな `rank<=2` 行（`(race_id, rank)` 昇順）を返すので、ここで
-    /// 最新（`rank=1`）/直前（`rank=2`）にグルーピングし、フリップと一望サマリを算出する。
-    /// 該当行が無ければ races 空・count 0・`last_updated=None`（200 空・404 にしない）。
+    /// repository はフラットな `rank<=2` 行（`(race_id, rank)` 昇順）を返すので、
+    /// [`assemble_live_view`] が最新（`rank=1`）/直前（`rank=2`）へグルーピングし、フリップと
+    /// 一望サマリを算出する。該当行が無ければ races 空・count 0・`last_updated=None`（200 空・404 にしない）。
     pub async fn find_live_by_date(&self, date: NaiveDate) -> Result<LiveView> {
         let rows = self.repository.find_live_ev_by_date(date).await?;
+        Ok(assemble_live_view(date, rows))
+    }
+}
 
-        let mut races: Vec<LiveRaceView> = Vec::new();
-        let mut i = 0;
-        while i < rows.len() {
-            // 行は (race_id, rank) 昇順のため rows[i] は必ず rank=1（最新）。
-            let latest = &rows[i];
-            // 直後の行が同一 race_id なら rank=2（直前サイクル）。
-            let prev = rows
-                .get(i + 1)
-                .filter(|next| next.race_id == latest.race_id);
+/// repository が返す `rank<=2` のフラット行を最新/直前へグルーピングし、フリップ・一望サマリ・
+/// 整列まで行う純関数（DB 非依存＝ユニットテスト可能）。行は `(race_id, rank)` 昇順を前提とする。
+fn assemble_live_view(date: NaiveDate, rows: Vec<LiveEvSnapshot>) -> LiveView {
+    let mut races: Vec<LiveRaceView> = Vec::new();
+    let mut i = 0;
+    while i < rows.len() {
+        // 行は (race_id, rank) 昇順のため rows[i] は必ず rank=1（最新）。
+        let latest = &rows[i];
+        // 直後の行が同一 race_id かつ rank=2 なら直前サイクル（フリップ算出に使う）。
+        let prev = rows
+            .get(i + 1)
+            .filter(|next| next.race_id == latest.race_id && next.rank == 2);
 
-            races.push(build_race_view(latest, prev));
-            i += if prev.is_some() { 2 } else { 1 };
-        }
+        races.push(build_race_view(latest, prev));
+        i += if prev.is_some() { 2 } else { 1 };
+    }
 
-        let summary = LiveSummary {
-            bet_race_count: races.iter().filter(|r| r.verdict == "bet").count() as u32,
-            watched_race_count: races.len() as u32,
-            last_updated: races.iter().map(|r| r.captured_at.clone()).max(),
-        };
+    let summary = LiveSummary {
+        bet_race_count: races.iter().filter(|r| r.verdict == "bet").count() as u32,
+        watched_race_count: races.len() as u32,
+        last_updated: races.iter().map(|r| r.captured_at.clone()).max(),
+    };
 
-        // post_time 昇順（NULL は後ろ）→ race_no 昇順。post_time は同規約の rfc3339 文字列のため
-        // 辞書順比較が時刻順比較になる。
-        races.sort_by(|a, b| match (&a.post_time, &b.post_time) {
-            (Some(x), Some(y)) => x.cmp(y).then(a.race_no.cmp(&b.race_no)),
-            (Some(_), None) => Ordering::Less,
-            (None, Some(_)) => Ordering::Greater,
-            (None, None) => a.race_no.cmp(&b.race_no),
-        });
+    // post_time 昇順（NULL は後ろ）→ race_no 昇順。post_time は同規約の rfc3339 文字列のため
+    // 辞書順比較が時刻順比較になる。
+    races.sort_by(|a, b| match (&a.post_time, &b.post_time) {
+        (Some(x), Some(y)) => x.cmp(y).then(a.race_no.cmp(&b.race_no)),
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => a.race_no.cmp(&b.race_no),
+    });
 
-        Ok(LiveView {
-            date,
-            summary,
-            races,
-        })
+    LiveView {
+        date,
+        summary,
+        races,
     }
 }
 
@@ -139,5 +144,177 @@ fn build_race_view(latest: &LiveEvSnapshot, prev: Option<&LiveEvSnapshot>) -> Li
         odds_missing: latest.odds_missing,
         slip_json: latest.slip_json.clone(),
         flip,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// テスト用 snapshot ビルダ。rank・race_id・verdict・roi・axis・captured_at・post_time を指定。
+    #[allow(clippy::too_many_arguments)]
+    fn snap(
+        rank: u32,
+        race_id: &str,
+        race_no: u32,
+        verdict: &str,
+        roi: f64,
+        axis: u32,
+        captured_at: &str,
+        post_time: Option<&str>,
+    ) -> LiveEvSnapshot {
+        LiveEvSnapshot {
+            rank,
+            race_id: race_id.into(),
+            venue: "tokyo".into(),
+            race_no,
+            post_time: post_time.map(Into::into),
+            captured_at: captured_at.into(),
+            verdict: verdict.into(),
+            roi,
+            konsen: false,
+            axis,
+            axis_prob: 30.0,
+            axis_win_odds: Some(2.0),
+            odds_missing: false,
+            slip_json: r#"{"race_budget":5000,"legs":[]}"#.into(),
+        }
+    }
+
+    fn date() -> NaiveDate {
+        NaiveDate::from_ymd_opt(2026, 6, 20).unwrap()
+    }
+
+    #[test]
+    fn empty_rows_yield_empty_view() {
+        let v = assemble_live_view(date(), vec![]);
+        assert!(v.races.is_empty());
+        assert_eq!(v.summary.bet_race_count, 0);
+        assert_eq!(v.summary.watched_race_count, 0);
+        assert_eq!(v.summary.last_updated, None);
+    }
+
+    #[test]
+    fn single_cycle_has_no_flip() {
+        let rows = vec![snap(
+            1,
+            "r1",
+            11,
+            "bet",
+            120.0,
+            5,
+            "2026-06-20T10:00:00Z",
+            None,
+        )];
+        let v = assemble_live_view(date(), rows);
+        assert_eq!(v.races.len(), 1);
+        let r = &v.races[0];
+        assert_eq!(r.verdict, "bet");
+        assert!(!r.flip.axis_changed && !r.flip.ev_reversed);
+        assert_eq!(r.flip.prev_axis, None);
+        assert_eq!(r.flip.prev_verdict, None);
+        assert_eq!(r.flip.prev_roi, None);
+        assert_eq!(v.summary.bet_race_count, 1);
+    }
+
+    #[test]
+    fn two_cycles_compute_flip_from_previous() {
+        // 最新(rank1)=bet/axis5、直前(rank2)=skip/axis3 → 軸変化＋EV反転。
+        let rows = vec![
+            snap(1, "r1", 11, "bet", 120.0, 5, "2026-06-20T10:20:00Z", None),
+            snap(2, "r1", 11, "skip", 90.0, 3, "2026-06-20T10:00:00Z", None),
+        ];
+        let v = assemble_live_view(date(), rows);
+        assert_eq!(v.races.len(), 1);
+        let r = &v.races[0];
+        // 本体は最新サイクル。
+        assert_eq!(r.captured_at, "2026-06-20T10:20:00Z");
+        assert_eq!(r.verdict, "bet");
+        assert_eq!(r.axis, 5);
+        // フリップは直前との差分。
+        assert!(r.flip.axis_changed);
+        assert_eq!(r.flip.prev_axis, Some(3));
+        assert!(r.flip.ev_reversed);
+        assert_eq!(r.flip.prev_verdict, Some("skip".into()));
+        assert_eq!(r.flip.prev_roi, Some(90.0));
+    }
+
+    #[test]
+    fn multiple_races_group_and_summarize() {
+        // r1 は 2 サイクル、r2 は 1 サイクルのみ。summary と grouping を検証。
+        let rows = vec![
+            snap(
+                1,
+                "r1",
+                11,
+                "bet",
+                120.0,
+                5,
+                "2026-06-20T10:20:00Z",
+                Some("2026-06-20T15:40:00Z"),
+            ),
+            snap(
+                2,
+                "r1",
+                11,
+                "skip",
+                90.0,
+                5,
+                "2026-06-20T10:00:00Z",
+                Some("2026-06-20T15:40:00Z"),
+            ),
+            snap(
+                1,
+                "r2",
+                9,
+                "skip",
+                80.0,
+                2,
+                "2026-06-20T10:10:00Z",
+                Some("2026-06-20T15:10:00Z"),
+            ),
+        ];
+        let v = assemble_live_view(date(), rows);
+        assert_eq!(v.races.len(), 2);
+        assert_eq!(v.summary.bet_race_count, 1); // r1 のみ bet
+        assert_eq!(v.summary.watched_race_count, 2);
+        assert_eq!(v.summary.last_updated, Some("2026-06-20T10:20:00Z".into())); // 全 race 中の最新
+        // post_time 昇順（r2 15:10 が先、r1 15:40 が後）。
+        assert_eq!(v.races[0].race_id, "r2");
+        assert_eq!(v.races[1].race_id, "r1");
+        // r1 は axis 不変（5→5）で ev 反転のみ。
+        assert!(!v.races[1].flip.axis_changed && v.races[1].flip.ev_reversed);
+        // r2 は直前なし。
+        assert_eq!(v.races[0].flip.prev_axis, None);
+    }
+
+    #[test]
+    fn post_time_null_sorts_after_present() {
+        let rows = vec![
+            snap(
+                1,
+                "r_null",
+                12,
+                "skip",
+                80.0,
+                1,
+                "2026-06-20T10:00:00Z",
+                None,
+            ),
+            snap(
+                1,
+                "r_have",
+                1,
+                "skip",
+                80.0,
+                1,
+                "2026-06-20T10:00:00Z",
+                Some("2026-06-20T15:00:00Z"),
+            ),
+        ];
+        let v = assemble_live_view(date(), rows);
+        // post_time あり → null の順。
+        assert_eq!(v.races[0].race_id, "r_have");
+        assert_eq!(v.races[1].race_id, "r_null");
     }
 }

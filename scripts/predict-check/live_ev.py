@@ -291,11 +291,13 @@ def emit_payload(rows, budget):
             "race_id": pid,
             "venue": venue,
             "race_no": rnum,
+            # verdict と roi は同一の生値で判定・出力する（丸めると境界 99.96 等で
+            # verdict='skip' なのに roi=100.0 表示となり UI が矛盾するため。表示丸めは SPA 側）。
             "verdict": "bet" if roi >= 100 else "skip",
-            "roi": round(roi, 1),
+            "roi": roi,
             "konsen": kon,
             "axis": ax,
-            "axis_prob": round(prob, 1),
+            "axis_prob": prob,
             "axis_win_odds": odds if odds else None,
             "odds_missing": missing > 0,
             "slip": {"race_budget": budget, "legs": legs},

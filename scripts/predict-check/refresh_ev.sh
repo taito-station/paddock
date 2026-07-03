@@ -220,5 +220,8 @@ python3 "$SCRIPT_DIR/live_ev.py" \
 # と SPA が「最新サイクルの判定＋伝票」を参照できるようにする。captured_at はサイクル境界時刻で、
 # LIVE_CAPTURED_AT で上書き可（cron/スケジューラが安定 cycle_id を渡せば同一サイクルの再実行が冪等）。
 CAPTURED_AT="${LIVE_CAPTURED_AT:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
+# 永続化は best-effort。EV 伝票は上で stdout 済みで、ライブ監視は decision-support のため、
+# DB 一時障害で監視フロー全体（set -e）を止めない。失敗は警告に留める（UI 反映は次サイクルで回復）。
 python3 "$SCRIPT_DIR/persist_live_ev.py" \
-  --json "$WORKDIR/live_ev.json" --date "$DATE" --captured-at "$CAPTURED_AT" --db-url "$DB_URL"
+  --json "$WORKDIR/live_ev.json" --date "$DATE" --captured-at "$CAPTURED_AT" --db-url "$DB_URL" \
+  || echo "⚠ live_ev_snapshots への永続化に失敗（UI 反映は次サイクルで回復）。EV 出力自体は上記のとおり有効。" >&2
