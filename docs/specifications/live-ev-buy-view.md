@@ -167,9 +167,9 @@
 
 本 API は **OpenAPI を一級成果物**として扱う（プロジェクト標準）。実装 PR#1 の受け入れ条件に含める。
 
-- **utoipa コードファースト**: `GET /api/live/{date}` の path/クエリ・全レスポンス DTO（トップレベル・`summary`・`races[]`・`slip`・`flip`・nullable な `prev_*`）を utoipa の `#[derive(ToSchema)]` / `#[utoipa::path]` で宣言し、既存 `ApiDoc`（`utoipa::OpenApi`）に新エンドポイント・新スキーマを登録する。
-- **`openapi.json` スナップショット検証**: コミット済み `openapi.json` を本エンドポイント追加ぶん更新し、生成物との一致を検証するスナップショットテストを green にする（スキーマドリフトの検出）。この更新・検証を PR の DoD とする。
-- **SPA 型の単一ソース**: SPA（実装 PR#2）のクライアント型は、この OpenAPI/DTO を単一ソースとして生成/追従する（`web/src/api/`）。API とビューの契約差異を防ぐ。
+- **utoipa コードファースト**: `GET /api/live/{date}` の path/クエリ・全レスポンス DTO（トップレベル・`summary`・`races[]`・`slip`・`flip`・nullable な `prev_*`）を utoipa の `#[derive(ToSchema)]` / `#[utoipa::path]` で宣言し、既存 `ApiDoc`（`src/interface/rest-controller/src/openapi.rs` の `utoipa::OpenApi`）の `paths(...)`・`components(schemas(...))` に新エンドポイント・新スキーマを登録する。schema は既存の `schema/` モジュール分離に倣う。
+- **`openapi.json` スナップショット検証**: コミット済み `docs/api/openapi.json` を本エンドポイント追加ぶん更新（`UPDATE_OPENAPI=1 cargo test -p api-server --test openapi`）し、既存スナップショットテスト `src/apps/api-server/tests/openapi.rs::openapi_snapshot_is_up_to_date`（`ApiDoc::openapi()` 生成物と `docs/api/openapi.json` の一致を assert）を green にする（スキーマドリフトの検出）。この更新・検証を PR の DoD とする。なお本テストは `paths(...)` への**登録漏れ自体は検知しない**ため、エンドポイント登録は実装時にレビューで担保する。
+- **SPA 型の単一ソース**: SPA（実装 PR#2）のクライアント型は、この OpenAPI/DTO を単一ソースとして生成/追従する（既存 `web/src/api/schema.d.ts`・`client.ts` の機構に追従）。API とビューの契約差異を防ぐ。
 
 ---
 
