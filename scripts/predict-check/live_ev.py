@@ -14,6 +14,7 @@ model 勝率→着順確率に変換し、実オッズを掛けて ROI を出す
 ROI = Σ(賭金 × 的中確率 × 実配当) / Σ賭金。--slip で +EV レースの買い目伝票も出す。
 """
 import argparse
+import json
 import re
 import sys
 from itertools import combinations, permutations
@@ -179,8 +180,9 @@ def alloc(konsen):
 
 def build_bets(probs, budget):
     """買い目を組む。返り値: (ax, parts, kon, bets)。
-    ax=本命馬番, parts=相手馬番リスト, kon=混戦フラグ, bets=list[(kind, combo_tuple, stake)]。
-    kind は BET_LABEL のキー (wide/quinella/trio)。combo_tuple は tuple[int, ...] (昇順ソート済み)。
+    ax=本命馬番, parts=相手馬番リスト, kon=混戦フラグ, bets=list[(kind, method, combo_tuple, stake)]。
+    kind は BET_LABEL のキー (wide/quinella/trio)。method は方式 (nagashi=◎軸ながし /
+    box=混戦時の印馬3連複ボックス)。combo_tuple は tuple[int, ...] (昇順ソート済み)。
 
     予算は100円単位（端数は切り捨て）。総ユニット(budget//100)を券種レイヤーへ alloc 比で
     最大剰余配分し、レイヤー合計が必ず総ユニットに一致するようにする。これで任意の budget
@@ -203,19 +205,19 @@ def build_bets(probs, budget):
         for combo, u in zip(combos, largest_remainder(
                 [probs[a] * probs[b] * probs[d] for a, b, d in combos], u_box)):
             if u > 0:
-                bets.append(("trio", tuple(sorted(combo)), u * 100))
+                bets.append(("trio", "box", tuple(sorted(combo)), u * 100))
     wp = parts[:3]
     for n, u in zip(wp, largest_remainder([probs[n] for n in wp], u_wide)):
         if u > 0:
-            bets.append(("wide", tuple(sorted((ax, n))), u * 100))
+            bets.append(("wide", "nagashi", tuple(sorted((ax, n))), u * 100))
     for n, u in zip(parts, largest_remainder([probs[n] for n in parts], u_ren)):
         if u > 0:
-            bets.append(("quinella", tuple(sorted((ax, n))), u * 100))
+            bets.append(("quinella", "nagashi", tuple(sorted((ax, n))), u * 100))
     pairs = list(combinations(parts, 2))
     for (a, b), u in zip(pairs, largest_remainder(
             [probs[a] * probs[b] for a, b in pairs], u_trio)):
         if u > 0:
-            bets.append(("trio", tuple(sorted((ax, a, b))), u * 100))
+            bets.append(("trio", "nagashi", tuple(sorted((ax, a, b))), u * 100))
     return ax, parts, kon, bets
 
 
@@ -236,7 +238,7 @@ def race_roi(probs, bets, wide, qn, tr):
     ret = 0.0
     stake = 0
     missing = 0
-    for kind, combo, amt in bets:
+    for kind, _method, combo, amt in bets:
         stake += amt
         o = books[kind].get(combo)
         if o:
@@ -253,7 +255,7 @@ def print_slip(venue, rnum, ax, h, probs, bets):
     # 同一組番（混戦ボックスと◎軸ながしで重複しうる）は購入額を合算して1行で表示する
     # （現場入力で同じ買い目が2行に割れて混乱しないように。賭金は合算）。
     by_kind = {"wide": {}, "quinella": {}, "trio": {}}
-    for kind, combo, amt in bets:
+    for kind, _method, combo, amt in bets:
         by_kind[kind][combo] = by_kind[kind].get(combo, 0) + amt
     for kind in ("wide", "quinella", "trio"):
         items = by_kind[kind]
@@ -262,6 +264,43 @@ def print_slip(venue, rnum, ax, h, probs, bets):
         print(f"  [{BET_LABEL[kind]}] 計¥{sum(items.values()):,}")
         for combo, amt in items.items():
             print(f"    {'-'.join(c(x) for x in combo)}  ¥{amt:,}")
+
+
+def emit_payload(rows, budget):
+    """全評価レースの判定＋伝票を機械可読 dict にする（#260 永続化用・ADR 0064）。
+
+    計算は一切やり直さず、main が組んだ rows を写すだけ（--slip と同一結果）。伝票 leg は
+    (方式レイヤー × 券種) 単位で、print_slip のような同一組番マージはしない（box/nagashi の
+    内訳を保つ）。race_id は meta の pid（＝paddock race_id）。date/post_time は persist 側
+    （refresh_ev.sh）が DB から補完するためここでは出さない。
+    """
+    races = []
+    for roi, venue, rnum, ax, odds, prob, kon, _name, missing, _h, _probs, bets, pid in rows:
+        legs = [
+            {
+                "bet_type": kind,
+                "method": method,
+                "axis": ax if method == "nagashi" else None,
+                "combo": list(combo),
+                "points": 1,
+                "amount": amt,
+            }
+            for kind, method, combo, amt in bets
+        ]
+        races.append({
+            "race_id": pid,
+            "venue": venue,
+            "race_no": rnum,
+            "verdict": "bet" if roi >= 100 else "skip",
+            "roi": round(roi, 1),
+            "konsen": kon,
+            "axis": ax,
+            "axis_prob": round(prob, 1),
+            "axis_win_odds": odds if odds else None,
+            "odds_missing": missing > 0,
+            "slip": {"race_budget": budget, "legs": legs},
+        })
+    return {"default_budget": budget, "races": races}
 
 
 def main():
@@ -273,6 +312,9 @@ def main():
     ap.add_argument("--wide", required=True, help="ワイドオッズの TSV")
     ap.add_argument("--budget", type=int, default=5000, help="1レース予算（円, 既定5000）")
     ap.add_argument("--slip", action="store_true", help="+EV レースの買い目伝票も出力")
+    ap.add_argument("--emit-json", metavar="PATH",
+                    help="全評価レースの判定＋伝票を機械可読 JSON で PATH に出力（#260・永続化用）。"
+                         "計算は --slip と同一・全レース出力（verdict/roi で区別）")
     args = ap.parse_args()
 
     preds = parse_pred(args.pred)
@@ -294,7 +336,7 @@ def main():
         roi, _, missing = race_roi(probs, bets, wide.get(m["pid"], {}),
                                    qn.get(m["pid"], {}), tr.get(m["pid"], {}))
         rows.append((roi, m["venue"], m["rnum"], ax, h[ax]["odds"], probs[ax], kon,
-                     h[ax]["name"], missing, h, probs, bets))
+                     h[ax]["name"], missing, h, probs, bets, m["pid"]))
 
     rows.sort(key=lambda r: -r[0])
     print(f"=== EV ランキング（¥{args.budget:,}・全3券種ROI） ===")
@@ -311,8 +353,11 @@ def main():
         print(f"⚠ オッズ欠落のあるレース {nmiss} 本: ROI は過小評価（買い目の一部に配当が無い）。"
               f"fetch 失敗や wide_errors.log を確認のこと。")
     if args.slip:
-        for roi, v, rn, ax, o, p, kon, name, missing, h, probs, bets in pos:
+        for roi, v, rn, ax, o, p, kon, name, missing, h, probs, bets, _pid in pos:
             print_slip(v, rn, ax, h, probs, bets)
+    if args.emit_json:
+        Path(args.emit_json).write_text(
+            json.dumps(emit_payload(rows, args.budget), ensure_ascii=False))
 
 
 if __name__ == "__main__":

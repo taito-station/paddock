@@ -17,6 +17,9 @@
 #                    未設定なら R 範囲の全レースを対象（後方互換）。例: LIVE_WINDOW_MIN=60
 #   LIVE_BLEND_ALPHA analyze predict の市場単勝ブレンド係数 --blend-alpha（既定 0.2 ＝本番モデル,
 #                    ADR 0034 で 0.3→0.2 に確定）。実験で別 α を試すときだけ上書きする。例: LIVE_BLEND_ALPHA=0.3
+#   LIVE_CAPTURED_AT live_ev_snapshots へ書く captured_at（サイクル境界時刻, UTC rfc3339, #260）。
+#                    未設定なら実行時刻を使う。cron/スケジューラが安定 cycle_id を渡すと同一サイクルの
+#                    再実行が冪等になる（(race_id, captured_at) upsert）。例: LIVE_CAPTURED_AT=2026-06-20T15:20:00Z
 set -euo pipefail
 
 DATE="${1:?usage: refresh_ev.sh <YYYY-MM-DD> [first_R] [last_R] [budget]}"
@@ -210,4 +213,12 @@ fi
 echo "=== EV ==="
 python3 "$SCRIPT_DIR/live_ev.py" \
   --pred "$WORKDIR/pred.txt" --meta "$WORKDIR/meta.tsv" --horses "$WORKDIR/horses.tsv" \
-  --exotic "$WORKDIR/exotic.tsv" --wide "$WORKDIR/wide.tsv" --budget "$BUDGET" --slip
+  --exotic "$WORKDIR/exotic.tsv" --wide "$WORKDIR/wide.tsv" --budget "$BUDGET" --slip \
+  --emit-json "$WORKDIR/live_ev.json"
+
+# 永続化（#260 ADR 0064）: emit-json を live_ev_snapshots へ upsert し、read API `GET /api/live/{date}`
+# と SPA が「最新サイクルの判定＋伝票」を参照できるようにする。captured_at はサイクル境界時刻で、
+# LIVE_CAPTURED_AT で上書き可（cron/スケジューラが安定 cycle_id を渡せば同一サイクルの再実行が冪等）。
+CAPTURED_AT="${LIVE_CAPTURED_AT:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
+python3 "$SCRIPT_DIR/persist_live_ev.py" \
+  --json "$WORKDIR/live_ev.json" --date "$DATE" --captured-at "$CAPTURED_AT" --db-url "$DB_URL"
