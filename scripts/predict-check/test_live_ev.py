@@ -92,7 +92,7 @@ def test_build_bets_budget():
     for probs in (clear, konsen):
         for budget in (5000, 10000, 3300, 7777, 4900):
             _, _, _, bets = L.build_bets(probs, budget)
-            assert sum(amt for _, _, amt in bets) == budget // 100 * 100, (budget, bets)
+            assert sum(amt for *_, amt in bets) == budget // 100 * 100, (budget, bets)
 
 
 def test_build_bets_scale_invariant():
@@ -106,7 +106,7 @@ def test_build_bets_scale_invariant():
     _, _, _, bets_frac = L.build_bets(frac, 5000)
     _, _, _, bets_arb = L.build_bets(arb, 5000)
     assert bets_pct == bets_frac == bets_arb  # 組合せ・個別金額ともに完全一致
-    assert sum(a for _, _, a in bets_pct) == 5000
+    assert sum(a for *_, a in bets_pct) == 5000
     # 混戦ケースでもスケール非依存（合計 112%: 正規化不要であることと混戦分岐に入ることを兼ねて確認）
     pct_k = {1: 30.0, 2: 25.0, 3: 22.0, 4: 21.0, 5: 8.0, 6: 6.0}  # 合計112%（意図的：正規化不要の確認）
     frac_k = {k: v / 100 for k, v in pct_k.items()}
@@ -114,13 +114,57 @@ def test_build_bets_scale_invariant():
     _, _, _, bets_frac_k = L.build_bets(frac_k, 5000)
     assert kon_k  # このケースは混戦分岐（is_konsen=True）に入ることを明示
     assert bets_pct_k == bets_frac_k
-    assert sum(a for _, _, a in bets_pct_k) == 5000
+    assert sum(a for *_, a in bets_pct_k) == 5000
 
 
 def test_build_bets_single_horse():
     # 1頭フィールド: parts が空になるため bets は空（¥5,000 は未使用）。相手なしで買い目は組めない。
     _, _, _, bets = L.build_bets({1: 100.0}, 5000)
     assert bets == []
+
+
+def test_build_bets_method_tags():
+    # 非混戦は全 leg が nagashi（box 無し）。混戦は box(3連複のみ) と nagashi が併存。
+    clear = {1: 35.0, 2: 15.0, 3: 12.0, 4: 8.0, 5: 6.0, 6: 5.0}
+    _, _, kon, bets = L.build_bets(clear, 5000)
+    assert not kon
+    assert all(m == "nagashi" for _, m, _, _ in bets), bets
+    konsen = {1: 30.0, 2: 25.0, 3: 22.0, 4: 21.0, 5: 8.0, 6: 6.0}
+    _, _, kon2, bets2 = L.build_bets(konsen, 5000)
+    assert kon2
+    methods = {m for _, m, _, _ in bets2}
+    assert "box" in methods and "nagashi" in methods, methods
+    # box は 3連複だけ（ワイド/馬連に box は無い）
+    assert all(k == "trio" for k, m, _, _ in bets2 if m == "box"), bets2
+
+
+def test_emit_payload():
+    # emit_payload は rows を写すだけ。verdict/leg method/axis/金額合計/odds_missing を固定。
+    probs = {1: 35.0, 2: 15.0, 3: 12.0, 4: 8.0, 5: 6.0, 6: 5.0}
+    ax, _parts, kon, bets = L.build_bets(probs, 5000)
+    # rows tuple 配置: (roi, venue, rnum, ax, odds, prob, kon, name, missing, h, probs, bets, pid)
+    rows = [(125.0, "tokyo", 11, ax, 1.7, probs[ax], kon, "ウマ", 0,
+             {}, probs, bets, "2026-3-tokyo-5-11R")]
+    out = L.emit_payload(rows, 5000)
+    assert out["default_budget"] == 5000
+    r = out["races"][0]
+    assert r["race_id"] == "2026-3-tokyo-5-11R"
+    assert r["verdict"] == "bet"  # roi 125 >= 100
+    assert r["axis"] == ax and r["axis_win_odds"] == 1.7
+    assert r["odds_missing"] is False
+    legs = r["slip"]["legs"]
+    assert r["slip"]["race_budget"] == 5000
+    assert all(l["method"] in ("nagashi", "box") for l in legs)
+    assert all(l["axis"] == ax for l in legs if l["method"] == "nagashi")
+    assert all(l["axis"] is None for l in legs if l["method"] == "box")
+    assert all(l["points"] == 1 for l in legs)
+    assert sum(l["amount"] for l in legs) == 5000  # 予算ちょうど
+    # skip 判定（roi<100）と odds 欠落フラグ
+    rows2 = [(80.0, "tokyo", 10, ax, None, probs[ax], kon, "ウマ", 2,
+              {}, probs, bets, "pid2")]
+    r2 = L.emit_payload(rows2, 5000)["races"][0]
+    assert r2["verdict"] == "skip" and r2["odds_missing"] is True
+    assert r2["axis_win_odds"] is None  # 単勝欠落は null
 
 
 def main():

@@ -6,6 +6,9 @@ use crate::schema::analyze::{
     CourseStatsResponse, GroupStatSchema, HorseStatsResponse, JockeyStatsResponse,
     TrainerStatsResponse,
 };
+use crate::schema::live::{
+    LiveFlip, LiveRaceViewSchema, LiveResponse, LiveSummary, SlipLeg, SlipView,
+};
 use crate::schema::prediction::{
     MarkStatSchema, MarkStatsResponse, PadPredictionResponse, PredictionBetSchema,
     PredictionHorseSchema, PredictionResultSchema, PredictionSearchResponse,
@@ -42,6 +45,7 @@ use crate::schema::session::{
         handler::prediction::search_predictions,
         handler::prediction::get_prediction_detail,
         handler::prediction::prediction_mark_stats,
+        handler::live::get_live,
         handler::session::create_session,
         handler::session::get_session_summary,
         handler::session::record_outcome,
@@ -70,6 +74,12 @@ use crate::schema::session::{
         PadPredictionResponse,
         MarkStatSchema,
         MarkStatsResponse,
+        LiveResponse,
+        LiveSummary,
+        LiveRaceViewSchema,
+        SlipView,
+        SlipLeg,
+        LiveFlip,
         CreateSessionRequest,
         BetInput,
         RecordOutcomeRequest,
@@ -85,6 +95,7 @@ use crate::schema::session::{
         (name = "analyze", description = "馬 / 騎手 / 調教師 / コースの成績統計"),
         (name = "predictions", description = "予想の横断検索 / 個別取得 / 印別的中率集計"),
         (name = "sessions", description = "予想セッション（作成 / 収支 / 賭け金・払戻記録 / オッズ・結果更新）"),
+        (name = "live", description = "ライブEV買い目（今これを買え）"),
     )
 )]
 pub struct ApiDoc;

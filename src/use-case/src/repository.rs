@@ -811,6 +811,49 @@ pub trait PredictSessionRepository: Send + Sync {
     ) -> impl Future<Output = Result<()>> + Send;
 }
 
+/// ライブ EV 監視サイクルの評価結果 1 行（`live_ev_snapshots` の 1 レコード）。
+/// フリップ算出のため 1 レースにつき最新（`rank=1`）と直前（`rank=2`）の 2 行までをフラットに運び、
+/// 最新/直前へのグルーピングは interactor が行う（`analyze` の Row 流儀）。`slip_json` は
+/// JSONB 列 `slip` を JSON テキストのまま運び、rest-controller の DTO でデシリアライズする
+/// （use-case を serde 非依存に保つ）。日付・時刻は DB の TEXT 規約どおり文字列で運ぶ。
+#[derive(Debug, Clone)]
+pub struct LiveEvSnapshot {
+    /// 1 = 最新サイクル、2 = 直前サイクル（`captured_at` 降順の順位）。
+    pub rank: u32,
+    pub race_id: String,
+    pub venue: String,
+    pub race_no: u32,
+    pub post_time: Option<String>,
+    /// 監視サイクル時刻（UTC rfc3339。辞書順＝時刻順）。
+    pub captured_at: String,
+    /// `'bet'`（ROI≥100%）/ `'skip'`（−EV）。
+    pub verdict: String,
+    /// 全 3 券種 ROI[%]。
+    pub roi: f64,
+    pub konsen: bool,
+    /// ◎馬番（model 勝率最上位）。
+    pub axis: u32,
+    /// ◎の model 勝率[%]。
+    pub axis_prob: f64,
+    /// ◎の単勝オッズ（欠落時 None）。
+    pub axis_win_odds: Option<f64>,
+    /// 一部買い目のオッズ欠落（ROI 過小評価の可能性）。
+    pub odds_missing: bool,
+    /// 買い目伝票 JSONB（`slip` 列）の JSON テキスト。
+    pub slip_json: String,
+}
+
+/// ライブ EV スナップショット（`live_ev_snapshots`, #260 / ADR 0064）の read-only 取得。
+/// 書き込みは Python 側（`persist_live_ev.py`）が担うため、Rust は SELECT のみを持つ。
+pub trait LiveEvRepository: Send + Sync {
+    /// 指定開催日の全 race について、`captured_at` 降順で最新 2 サイクル（`rank<=2`）を
+    /// フラットに返す。並びは `(race_id, rank)` 昇順。該当行が無ければ空 `Vec`。
+    fn find_live_ev_by_date(
+        &self,
+        date: NaiveDate,
+    ) -> impl Future<Output = Result<Vec<LiveEvSnapshot>>> + Send;
+}
+
 /// pad 予想（印・短評・買い目・結果）の保存・取得。
 pub trait PadPredictionRepository: Send + Sync {
     /// 予想（印・短評・買い目・結果）を保存する。`(date, venue, race_num)` で upsert し、
@@ -866,6 +909,7 @@ pub trait Repository:
     + HorseHistoryRepository
     + PredictSessionRepository
     + PadPredictionRepository
+    + LiveEvRepository
 {
 }
 
@@ -879,5 +923,6 @@ impl<T> Repository for T where
         + HorseHistoryRepository
         + PredictSessionRepository
         + PadPredictionRepository
+        + LiveEvRepository
 {
 }

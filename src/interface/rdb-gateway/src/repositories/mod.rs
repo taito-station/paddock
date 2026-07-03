@@ -3,6 +3,7 @@ mod course_stats;
 mod fetch_history;
 mod find_finished_races_between;
 mod find_jockey_recent_runs;
+mod find_live_ev_by_date;
 mod find_matching_names;
 mod find_race_card;
 mod find_race_odds;
@@ -32,11 +33,11 @@ use paddock_domain::{
 use paddock_use_case::Result as UcResult;
 use paddock_use_case::repository::{
     CourseStatsRow, FetchDownload, FetchFailure, FetchRecord, FetchRepository, FetchStatus,
-    HorseHistoryRepository, HorseRecencyStats, HorseStatsRow, JockeyStatsRow, MarkStatRow,
-    MarkStatsFilter, NameMatchRepository, OddsRepository, PadPredictionRepository,
-    PredictBetRecord, PredictRaceConditionRecord, PredictSessionRecord, PredictSessionRepository,
-    PredictionFilter, PredictionSearchResult, RaceCardRepository, RaceOddsRecord, RaceRepository,
-    StatsRepository, TrainerStatsRow,
+    HorseHistoryRepository, HorseRecencyStats, HorseStatsRow, JockeyStatsRow, LiveEvRepository,
+    LiveEvSnapshot, MarkStatRow, MarkStatsFilter, NameMatchRepository, OddsRepository,
+    PadPredictionRepository, PredictBetRecord, PredictRaceConditionRecord, PredictSessionRecord,
+    PredictSessionRepository, PredictionFilter, PredictionSearchResult, RaceCardRepository,
+    RaceOddsRecord, RaceRepository, StatsRepository, TrainerStatsRow,
 };
 
 use crate::pool::PgPool;
@@ -430,6 +431,14 @@ impl PredictSessionRepository for PostgresRepository {
         recorded_at: DateTime<Utc>,
     ) -> UcResult<()> {
         predict_session::save_predict_race_condition(&self.pool, date, record, recorded_at)
+            .await
+            .map_err(Into::into)
+    }
+}
+
+impl LiveEvRepository for PostgresRepository {
+    async fn find_live_ev_by_date(&self, date: NaiveDate) -> UcResult<Vec<LiveEvSnapshot>> {
+        find_live_ev_by_date::find_live_ev_by_date(&self.pool, date)
             .await
             .map_err(Into::into)
     }

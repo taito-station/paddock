@@ -237,6 +237,59 @@
         }
       }
     },
+    "/api/live/{date}": {
+      "get": {
+        "tags": [
+          "live"
+        ],
+        "summary": "指定開催日のライブ EV 買い目（race ごと最新サイクル＋伝票＋フリップ）。",
+        "description": "該当日の snapshot が無ければ races 空・summary count 0（200 空・404 にしない）。",
+        "operationId": "get_live",
+        "parameters": [
+          {
+            "name": "date",
+            "in": "path",
+            "description": "開催日 YYYY-MM-DD",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "race ごと最新サイクルの判定＋伝票（無い日は races 空・200）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LiveResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "日付フォーマット不正",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "内部エラー（伝票 JSON 復元失敗を含む）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/predictions": {
       "get": {
         "tags": [
@@ -1541,6 +1594,184 @@
           }
         }
       },
+      "LiveFlip": {
+        "type": "object",
+        "description": "直前サイクルとの差分（◎変化・+EV↔−EV 反転）。直前が無ければ全て false / null。",
+        "required": [
+          "axis_changed",
+          "ev_reversed"
+        ],
+        "properties": {
+          "axis_changed": {
+            "type": "boolean",
+            "description": "◎馬番が直前から変化したか。"
+          },
+          "ev_reversed": {
+            "type": "boolean",
+            "description": "verdict が直前から反転（+EV↔−EV）したか。"
+          },
+          "prev_axis": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "直前サイクルの◎馬番（無ければ null）。",
+            "minimum": 0
+          },
+          "prev_roi": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "直前サイクルの ROI[%]（無ければ null）。"
+          },
+          "prev_verdict": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "直前サイクルの verdict（無ければ null）。"
+          }
+        }
+      },
+      "LiveRaceViewSchema": {
+        "type": "object",
+        "description": "1 レースの最新サイクル本体＋伝票＋フリップ。",
+        "required": [
+          "race_id",
+          "venue",
+          "race_no",
+          "captured_at",
+          "verdict",
+          "roi",
+          "konsen",
+          "axis",
+          "axis_prob",
+          "odds_missing",
+          "slip",
+          "flip"
+        ],
+        "properties": {
+          "axis": {
+            "type": "integer",
+            "format": "int32",
+            "description": "◎馬番。",
+            "minimum": 0
+          },
+          "axis_prob": {
+            "type": "number",
+            "format": "double",
+            "description": "◎の model 勝率[%]。"
+          },
+          "axis_win_odds": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "◎の単勝オッズ（欠落時 null）。"
+          },
+          "captured_at": {
+            "type": "string",
+            "description": "監視サイクル時刻（UTC rfc3339）。"
+          },
+          "flip": {
+            "$ref": "#/components/schemas/LiveFlip"
+          },
+          "konsen": {
+            "type": "boolean"
+          },
+          "odds_missing": {
+            "type": "boolean",
+            "description": "一部買い目のオッズ欠落（ROI 過小評価の可能性）。"
+          },
+          "post_time": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "発走時刻（netkeiba 由来文字列。欠落時 null）。"
+          },
+          "race_id": {
+            "type": "string"
+          },
+          "race_no": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "roi": {
+            "type": "number",
+            "format": "double",
+            "description": "全 3 券種 ROI[%]。"
+          },
+          "slip": {
+            "$ref": "#/components/schemas/SlipView"
+          },
+          "venue": {
+            "type": "string"
+          },
+          "verdict": {
+            "type": "string",
+            "description": "`'bet'`（ROI≥100%）/ `'skip'`（−EV）。"
+          }
+        }
+      },
+      "LiveResponse": {
+        "type": "object",
+        "description": "`GET /api/live/{date}` のレスポンス（#260 / ADR 0064）。\n指定開催日の race ごと最新サイクル＋伝票＋フリップを返す（read-only）。",
+        "required": [
+          "date",
+          "summary",
+          "races"
+        ],
+        "properties": {
+          "date": {
+            "type": "string",
+            "description": "開催日（`YYYY-MM-DD`）。"
+          },
+          "races": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LiveRaceViewSchema"
+            }
+          },
+          "summary": {
+            "$ref": "#/components/schemas/LiveSummary"
+          }
+        }
+      },
+      "LiveSummary": {
+        "type": "object",
+        "description": "一望サマリ（張る本数・監視数・最終更新時刻）。",
+        "required": [
+          "bet_race_count",
+          "watched_race_count"
+        ],
+        "properties": {
+          "bet_race_count": {
+            "type": "integer",
+            "format": "int32",
+            "description": "最新サイクルが `verdict='bet'` の race 数。",
+            "minimum": 0
+          },
+          "last_updated": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "全 race 中の最新 `captured_at` の最大値。無ければ null。"
+          },
+          "watched_race_count": {
+            "type": "integer",
+            "format": "int32",
+            "description": "監視レース数（= `races.len()`）。",
+            "minimum": 0
+          }
+        }
+      },
       "MarkStatSchema": {
         "type": "object",
         "description": "印 1 種の的中率。",
@@ -2340,6 +2571,80 @@
           }
         }
       },
+      "SlipLeg": {
+        "type": "object",
+        "description": "伝票の 1 leg（式別×方式×軸×組番×点数×金額の「そのまま買える形」）。",
+        "required": [
+          "bet_type",
+          "method",
+          "combo",
+          "points",
+          "amount"
+        ],
+        "properties": {
+          "amount": {
+            "type": "integer",
+            "format": "int64",
+            "description": "金額（100 円単位）。",
+            "minimum": 0
+          },
+          "axis": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "◎馬番（`method=box` では null）。",
+            "minimum": 0
+          },
+          "bet_type": {
+            "type": "string",
+            "description": "式別（`wide` / `quinella` / `trio`）。"
+          },
+          "combo": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            },
+            "description": "組番（昇順ソート済み）。"
+          },
+          "method": {
+            "type": "string",
+            "description": "方式（`nagashi` / `box` / `formation`）。"
+          },
+          "points": {
+            "type": "integer",
+            "format": "int32",
+            "description": "この leg の点数。",
+            "minimum": 0
+          }
+        }
+      },
+      "SlipView": {
+        "type": "object",
+        "description": "買い目伝票。`slip` JSONB 列（`{ race_budget, legs }`）をデシリアライズしたもの。",
+        "required": [
+          "race_budget",
+          "legs"
+        ],
+        "properties": {
+          "legs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SlipLeg"
+            },
+            "description": "(方式レイヤー × 券種) 単位の leg 配列。"
+          },
+          "race_budget": {
+            "type": "integer",
+            "format": "int64",
+            "description": "このレースに配分した予算（円）。",
+            "minimum": 0
+          }
+        }
+      },
       "SummaryBet": {
         "type": "object",
         "description": "サマリの 1 買い目（レスポンス）。どのレースの買い目かを race_id で示す。",
@@ -2425,6 +2730,10 @@
     {
       "name": "sessions",
       "description": "予想セッション（作成 / 収支 / 賭け金・払戻記録 / オッズ・結果更新）"
+    },
+    {
+      "name": "live",
+      "description": "ライブEV買い目（今これを買え）"
     }
   ]
 }
