@@ -18,8 +18,11 @@ import subprocess
 import sys
 
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-# rfc3339 UTC（例 2026-06-20T15:20:00Z / +09:00 も許容）。厳密な妥当性までは見ない軽い形式検証。
-_TS_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$")
+# captured_at は UTC rfc3339（`...Z` 終端）に限定する。read API の window `ORDER BY captured_at
+# DESC` と interactor の last_updated=max() は辞書順=時刻順を前提とし、これは全 captured_at が
+# 同一表記（UTC Z）のときだけ成立する。`+09:00` 等の混在で「最新サイクル」判定が静かに壊れるため、
+# 正本フロー（refresh_ev.sh の `date -u ...Z`）と同じ Z 終端だけを許す。
+_TS_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$")
 
 
 def lit_str(s):

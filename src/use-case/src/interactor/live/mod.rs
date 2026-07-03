@@ -94,8 +94,8 @@ fn assemble_live_view(date: NaiveDate, rows: Vec<LiveEvSnapshot>) -> LiveView {
         last_updated: races.iter().map(|r| r.captured_at.clone()).max(),
     };
 
-    // post_time 昇順（NULL は後ろ）→ race_no 昇順。post_time は同規約の rfc3339 文字列のため
-    // 辞書順比較が時刻順比較になる。
+    // post_time 昇順（NULL は後ろ）→ race_no 昇順。post_time は `HH:MM` 文字列
+    // （race_cards.post_time・ゼロ埋め）のため、同一開催日内では辞書順比較が時刻順比較になる。
     races.sort_by(|a, b| match (&a.post_time, &b.post_time) {
         (Some(x), Some(y)) => x.cmp(y).then(a.race_no.cmp(&b.race_no)),
         (Some(_), None) => Ordering::Less,
@@ -251,7 +251,7 @@ mod tests {
                 120.0,
                 5,
                 "2026-06-20T10:20:00Z",
-                Some("2026-06-20T15:40:00Z"),
+                Some("15:40"),
             ),
             snap(
                 2,
@@ -261,7 +261,7 @@ mod tests {
                 90.0,
                 5,
                 "2026-06-20T10:00:00Z",
-                Some("2026-06-20T15:40:00Z"),
+                Some("15:40"),
             ),
             snap(
                 1,
@@ -271,7 +271,7 @@ mod tests {
                 80.0,
                 2,
                 "2026-06-20T10:10:00Z",
-                Some("2026-06-20T15:10:00Z"),
+                Some("15:10"),
             ),
         ];
         let v = assemble_live_view(date(), rows);
@@ -309,7 +309,7 @@ mod tests {
                 80.0,
                 1,
                 "2026-06-20T10:00:00Z",
-                Some("2026-06-20T15:00:00Z"),
+                Some("15:00"),
             ),
         ];
         let v = assemble_live_view(date(), rows);
