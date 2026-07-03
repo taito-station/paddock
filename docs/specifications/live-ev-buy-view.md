@@ -44,7 +44,7 @@
 | `axis_win_odds` | numeric | ◎の単勝オッズ |
 | `odds_missing` | boolean | 一部買い目のオッズ欠落（ROI 過小評価の可能性） |
 | `slip` | jsonb | 買い目伝票（下記スキーマ）。`verdict='skip'` でも参考として保存 |
-| `raw` | jsonb | `live_ev.py --emit-json` の生ペイロード（1 レース分）。**将来の再集計・スキーマ進化時の後方互換のために保持**。`slip`・各スカラー列と内容は重複するが、列は描画/検索用の正規化ビュー、`raw` は原本という位置づけ。時系列蓄積で肥大するため、保持期間の TTL は運用で別途定める（当面は無制限・`race_odds_snapshots` に倣う） |
+| `raw` | jsonb | `live_ev.py --emit-json` の **`races[]` 要素 1 件ぶん**（トップレベルの `default_budget` は `race_budget` 列に写す）。**将来の再集計・スキーマ進化時の後方互換のために保持**。`slip`・各スカラー列と内容は重複するが、列は描画/検索用の正規化ビュー、`raw` は原本という位置づけ。時系列蓄積で肥大するため、保持期間の TTL は運用で別途定める（当面は無制限・`race_odds_snapshots` に倣う） |
 
 - **一意キー**: `(race_id, captured_at)`。「最新サイクル」= `race_id` ごとの `max(captured_at)`。
 - **インデックス**: 最新サイクル抽出（`WHERE date=$1` → race ごと `max(captured_at)`）とフリップ用の直前サイクル取得を賄うため `(date, race_id, captured_at DESC)` を張る（`race_odds_snapshots` #232 の索引方針を踏襲）。時系列で成長するテーブルのため索引を DDL に含める。
@@ -56,7 +56,7 @@
 
 ```jsonc
 {
-  "race_budget": 5000,             // このレースに実際に配分した予算（増額時は既定 budget と異なりうる）
+  "race_budget": 5000,             // このレースに配分した予算。live_ev.py は --budget で計算するため現状は常に default_budget と同値。増額（ADR 0060）は人間の執行判断でモデルに戻さないため、本列は将来の per-race 予算差分の予約枠
   "legs": [
     {
       "bet_type": "wide",          // wide | quinella | trio（式別）
@@ -111,7 +111,7 @@
 
 - `refresh_ev.sh`（既に Postgres アクセスを持つオーケストレータ）の最後に、`live_ev.py --emit-json` の JSON を `live_ev_snapshots` へ upsert する 1 ステップを追加する（小さな `persist_live_ev.py` か psql）。
 - **`race_id`・`date`・`post_time` の補完**: persist ステップが各 `pid` から DB を引いて paddock `race_id`・`date`（開催日）・`post_time` を注入する（`live_ev.py` は pid ローカル値のみ出力するため）。`pid`→`race_id` の対応は `refresh_ev.sh` が既に保持している（TSV 生成時の race 列挙）。
-- **`captured_at` の供給と冪等性**: `captured_at` は **サイクル実行時刻を persist ステップが 1 サイクル 1 値で割り当てる論理サイクル時刻**（行ごとに `now()` を取らない）。これにより同一サイクル内の再実行は `(race_id, captured_at)` upsert で冪等になる。
+- **`captured_at` の供給と冪等性（安定サイクルキー）**: `captured_at` は **その監視サイクルの論理境界時刻**（＝スイープの予定時刻／`prefetch_odds.sh`・cron のスケジュール時刻。プロセス起動時刻の `now()` ではない）を persist が全レース同一値で割り当てる。こうすると同一サイクルの再実行（cron 二重発火・手動再走）でも同じ `captured_at` に写像され、`(race_id, captured_at)` upsert で確実に冪等になる（プロセス起動時刻を使うと近似重複行が生え、「直前サイクル＝2 番目に新しい `captured_at`」を汚染してフリップ算出を誤らせるため、これを避ける）。実装は「サイクル間隔で丸めた時刻」または明示 `cycle_id` を persist に渡す。
 - `live_ev.py` 本体は DB に触らない（責務分離。README「DB アクセスは refresh_ev.sh 側」と整合）。
 
 ---
@@ -122,7 +122,9 @@
 
 - **最新サイクル抽出**: `race_id` ごとに `max(captured_at)` の行のみ返す（window 関数）。
 - **フリップ算出**: 各 race について直前 snapshot（2 番目に新しい `captured_at`）と比較し、`axis_changed`（◎変化）・`ev_reversed`（+EV↔−EV 反転）を算出する。**前サイクルが無ければ `axis_changed`/`ev_reversed` は false、`prev_*`（`prev_axis`/`prev_verdict`/`prev_roi`）は null**（utoipa 上は nullable）。
-- **見送り理由**: `verdict='skip'` の `reason` は `roi` と `flip.prev_roi` から構成（例: 「◎断然人気崩れ ROI 103%→78.9%」）。API か SPA のどちらで文字列化するかは実装で決めるが、素材（roi・prev_roi・axis_changed・axis_win_odds）を必ず返す。
+- **見送り理由**: `verdict='skip'` の `reason` は `roi`・`flip.prev_roi`・`axis_win_odds` から構成する。API か SPA のどちらで文字列化するかは実装で決めるが、素材（roi・prev_roi・axis_changed・axis_win_odds）を必ず返す。例:
+  - 断然人気で妙味なし（フリップ無し）: 「◎断然人気 単勝1.7・ROI 80%（−EV）」。
+  - 前サイクルから反転（フリップ有り）: 「朝+EV→直前−EVに反転 ROI 103%→78.9%」（`ev_reversed=true`）。
 
 ### レスポンス（DTO）
 
@@ -185,14 +187,16 @@
 │ 2026-06-20 ライブ  🟢張る 1レース（監視中 21R）  更新 15:20 [更新]│
 ├────────────────────────────────────────────────┤
 │ 🟢 函館12R  ROI 125%  ◎④(model35% 単勝1.7)                       │
-│   ワイド / ながし / 軸④ / 相手⑤⑦③(3点) / 各¥500                  │
+│   ワイド / ながし / 軸④ / 相手⑤⑦③(3点) / 計¥1,500               │
 │   馬連   / ながし / 軸④ / 相手⑤⑦③①⑧(5点) / 計¥1,500             │
 │   3連複  / ながし / 軸④ / 相手⑤⑦③①⑧(10点) / 計¥2,000            │
 ├────────────────────────────────────────────────┤
-│ ⚪ 東京10R  見送り  ROI 80%（◎断然人気 単勝1.7・−EV）             │
+│ ⚪ 東京10R  見送り  ROI 80%（◎②断然人気 単勝1.4 model48%・−EV）  │
 │ 🔶 小倉5R  見送り  朝+EV→直前−EVに反転（◎⑥→⑨ フリップ）         │
 └────────────────────────────────────────────────┘
 ```
+
+> ワイヤーの金額は説明用の概算。実配分は各点を組合せ確率で重み付けし最低¥100 を確保（CLAUDE.md 買い方ルール）、券種予算ちょうどに収める。東京10R は同オッズでも model 勝率が高く（過剰人気）ROI が 100% を割るため見送り、という verdict 差の読み取り例。
 
 ---
 
