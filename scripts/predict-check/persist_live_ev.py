@@ -18,11 +18,12 @@ import subprocess
 import sys
 
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-# captured_at は UTC rfc3339（`...Z` 終端）に限定する。read API の window `ORDER BY captured_at
-# DESC` と interactor の last_updated=max() は辞書順=時刻順を前提とし、これは全 captured_at が
-# 同一表記（UTC Z）のときだけ成立する。`+09:00` 等の混在で「最新サイクル」判定が静かに壊れるため、
-# 正本フロー（refresh_ev.sh の `date -u ...Z`）と同じ Z 終端だけを許す。
-_TS_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$")
+# captured_at は UTC rfc3339 の**秒精度固定・`...Z` 終端**に限定する。read API の window
+# `ORDER BY captured_at DESC` と interactor の last_updated=max() は辞書順=時刻順を前提とし、
+# これは全 captured_at が同一表記のときだけ成立する。`+09:00` 等のオフセット混在だけでなく
+# 小数秒の有無混在でも壊れる（`...00Z` と `...00.3Z` は `.`(0x2E) < `Z`(0x5A) で later が先に来る）。
+# 正本フロー（refresh_ev.sh の `date -u +%Y-%m-%dT%H:%M:%SZ`）と同じ秒精度 Z 固定だけを許す。
+_TS_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 
 
 def lit_str(s):
