@@ -17,6 +17,7 @@ pub use interactor::Interactor;
 pub use interactor::card::CardInteractor;
 pub use interactor::entry::EntryInteractor;
 pub use interactor::horse_history::HorseHistoryInteractor;
+pub use interactor::live::{LiveFlip, LiveRaceView, LiveSummary, LiveView};
 pub use interactor::odds::OddsInteractor;
 pub use interactor::race::predict::PredictionViews;
 pub use interactor::settle::{SettleInteractor, SettleReport};
