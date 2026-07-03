@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="470" viewBox="0 0 960 470" font-family="'Helvetica Neue',Arial,'Hiragino Kaku Gothic ProN',Meiryo,sans-serif">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#555555"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="960" height="470" fill="#ffffff"/>
+  <text x="480" y="30" text-anchor="middle" font-size="18" font-weight="bold" fill="#333333">ライブ EV 買い目ビュー データフロー</text>
+  <text x="480" y="52" text-anchor="middle" font-size="13" fill="#666666">Approach C：Python 正本 → 永続化 → read API → SPA 描画</text>
+
+  <!-- Input (grey) -->
+  <rect x="40" y="70" width="230" height="86" rx="8" fill="#f5f5f5" stroke="#999999" stroke-width="1.5"/>
+  <text x="155" y="98" text-anchor="middle" font-size="14" font-weight="bold" fill="#333333">データ取得（既存）</text>
+  <text x="155" y="120" text-anchor="middle" font-size="12" fill="#555555">fetch-card --force → race_odds</text>
+  <text x="155" y="138" text-anchor="middle" font-size="12" fill="#555555">analyze predict α=0.2 / fetch_wide.py</text>
+
+  <!-- A: live_ev.py 正本 (green) -->
+  <rect x="40" y="196" width="230" height="118" rx="8" fill="#d5e8d4" stroke="#82b366" stroke-width="1.8"/>
+  <text x="155" y="222" text-anchor="middle" font-size="14" font-weight="bold" fill="#1b5e20">live_ev.py --emit-json</text>
+  <text x="155" y="244" text-anchor="middle" font-size="12" fill="#33691e">買い方ルールの正本</text>
+  <text x="155" y="262" text-anchor="middle" font-size="11.5" fill="#33691e">Plackett-Luce 着順確率</text>
+  <text x="155" y="279" text-anchor="middle" font-size="11.5" fill="#33691e">混戦判定・相手 top3/top5 分別</text>
+  <text x="155" y="296" text-anchor="middle" font-size="11.5" fill="#33691e">最大剰余法配分・ROI≥100% ゲート</text>
+
+  <!-- B: snapshot table (yellow) -->
+  <rect x="365" y="196" width="230" height="118" rx="8" fill="#fff2cc" stroke="#d6b656" stroke-width="1.8"/>
+  <text x="480" y="222" text-anchor="middle" font-size="14" font-weight="bold" fill="#7f6000">live_ev_snapshots</text>
+  <text x="480" y="243" text-anchor="middle" font-size="12" fill="#7f6000">Postgres（時系列アーカイブ）</text>
+  <text x="480" y="261" text-anchor="middle" font-size="11.5" fill="#7f6000">key: (race_id, captured_at)</text>
+  <text x="480" y="278" text-anchor="middle" font-size="11.5" fill="#7f6000">verdict / roi / axis / slip(JSONB)</text>
+  <text x="480" y="295" text-anchor="middle" font-size="11.5" fill="#7f6000">最新サイクル = max(captured_at)</text>
+
+  <!-- C: API (purple) -->
+  <rect x="690" y="196" width="230" height="118" rx="8" fill="#e1d5e7" stroke="#9673a6" stroke-width="1.8"/>
+  <text x="805" y="222" text-anchor="middle" font-size="14" font-weight="bold" fill="#4a148c">GET /api/live/{date}</text>
+  <text x="805" y="243" text-anchor="middle" font-size="12" fill="#4a148c">read-only（utoipa）</text>
+  <text x="805" y="261" text-anchor="middle" font-size="11.5" fill="#4a148c">race ごと最新サイクルを抽出</text>
+  <text x="805" y="278" text-anchor="middle" font-size="11.5" fill="#4a148c">前 snapshot 比較でフリップ算出</text>
+  <text x="805" y="295" text-anchor="middle" font-size="11.5" fill="#4a148c">summary（張る N / 監視 NR / 更新時刻）</text>
+
+  <!-- D: SPA (blue) -->
+  <rect x="365" y="352" width="230" height="100" rx="8" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1.8"/>
+  <text x="480" y="378" text-anchor="middle" font-size="14" font-weight="bold" fill="#0d47a1">SPA LiveBets「今これを買え」</text>
+  <text x="480" y="399" text-anchor="middle" font-size="11.5" fill="#0d47a1">🟢張る＝式別/方式/軸/相手/点数/金額</text>
+  <text x="480" y="416" text-anchor="middle" font-size="11.5" fill="#0d47a1">⚪見送り（理由付き）・🔶フリップ強調</text>
+  <text x="480" y="433" text-anchor="middle" font-size="11.5" fill="#0d47a1">最新サイクルのみ正・最終更新時刻明示</text>
+
+  <!-- edges -->
+  <line x1="155" y1="156" x2="155" y2="194" stroke="#555555" stroke-width="1.6" marker-end="url(#arrow)"/>
+
+  <line x1="270" y1="255" x2="363" y2="255" stroke="#555555" stroke-width="1.6" marker-end="url(#arrow)"/>
+  <text x="316" y="230" text-anchor="middle" font-size="11" fill="#555555">refresh_ev.sh</text>
+  <text x="316" y="245" text-anchor="middle" font-size="11" fill="#555555">が 20 分周期で persist</text>
+
+  <line x1="595" y1="255" x2="688" y2="255" stroke="#555555" stroke-width="1.6" marker-end="url(#arrow)"/>
+  <text x="641" y="245" text-anchor="middle" font-size="11" fill="#555555">SELECT</text>
+
+  <!-- API -> SPA (down-left) -->
+  <path d="M805,314 L805,336 L480,336 L480,350" fill="none" stroke="#555555" stroke-width="1.6" marker-end="url(#arrow)"/>
+  <text x="642" y="331" text-anchor="middle" font-size="11" fill="#555555">JSON（最新サイクルの判定＋伝票）</text>
+
+  <!-- legend -->
+  <text x="40" y="452" font-size="11" fill="#777777">凡例：緑=正本ロジック / 黄=中間アーカイブ / 紫=API 処理 / 青=SPA / 灰=既存データ取得</text>
+</svg>
