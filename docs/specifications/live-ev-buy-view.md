@@ -118,7 +118,7 @@
 
 ## API: `GET /api/live/{date}`（read-only）
 
-指定開催日の**最新サイクルの判定＋伝票**を返す。utoipa でスキーマ宣言し `openapi.json` スナップショット検証に載せる（既存 read エンドポイント（`race.rs`）と同じ実装パターン）。
+指定開催日の**最新サイクルの判定＋伝票**を返す。既存 read エンドポイント（`race.rs`）と同じ実装パターン。**OpenAPI を一級成果物とする**（下記「OpenAPI 契約」）。
 
 - **最新サイクル抽出**: `race_id` ごとに `max(captured_at)` の行のみ返す（window 関数）。
 - **フリップ算出**: 各 race について直前 snapshot（2 番目に新しい `captured_at`）と比較し、`axis_changed`（◎変化）・`ev_reversed`（+EV↔−EV 反転）を算出する。**前サイクルが無ければ `axis_changed`/`ev_reversed` は false、`prev_*`（`prev_axis`/`prev_verdict`/`prev_roi`）は null**（utoipa 上は nullable）。
@@ -162,6 +162,14 @@
 | `use-case` | LiveEv query interactor（最新サイクル取得＋フリップ算出） | 既存 interactor |
 | `infrastructure/rdb-gateway` | snapshot 取得 repository（race ごと **最新＋直前** の 2 サイクルを返す。フリップ算出に直前が要るため。window 関数 `row_number()` 等） | 既存 repo |
 | `apps/api-server` | route 配線・OpenAPI 登録 | 既存 route 登録 |
+
+### OpenAPI 契約（一級成果物）
+
+本 API は **OpenAPI を一級成果物**として扱う（プロジェクト標準）。実装 PR#1 の受け入れ条件に含める。
+
+- **utoipa コードファースト**: `GET /api/live/{date}` の path/クエリ・全レスポンス DTO（トップレベル・`summary`・`races[]`・`slip`・`flip`・nullable な `prev_*`）を utoipa の `#[derive(ToSchema)]` / `#[utoipa::path]` で宣言し、既存 `ApiDoc`（`utoipa::OpenApi`）に新エンドポイント・新スキーマを登録する。
+- **`openapi.json` スナップショット検証**: コミット済み `openapi.json` を本エンドポイント追加ぶん更新し、生成物との一致を検証するスナップショットテストを green にする（スキーマドリフトの検出）。この更新・検証を PR の DoD とする。
+- **SPA 型の単一ソース**: SPA（実装 PR#2）のクライアント型は、この OpenAPI/DTO を単一ソースとして生成/追従する（`web/src/api/`）。API とビューの契約差異を防ぐ。
 
 ---
 
@@ -209,8 +217,8 @@
 
 ## 実装フェーズ分割
 
-1. **実装 PR#1（API でライブ EV 公開）**: `live_ev_snapshots` マイグレーション / `live_ev.py --emit-json`（+ `test_live_ev.py`）/ `refresh_ev.sh` 永続化ステップ / `GET /api/live/{date}`（4 層）+ utoipa snapshot 検証。
-2. **実装 PR#2（SPA 買い目ビュー）**: `LiveBets.tsx` + ルート追加 + API クライアント型 + vitest / ブラウザテスト（`tests/browser-test-cases/live-ev-buy-view.md`）。
+1. **実装 PR#1（API でライブ EV 公開）**: `live_ev_snapshots` マイグレーション / `live_ev.py --emit-json`（+ `test_live_ev.py`）/ `refresh_ev.sh` 永続化ステップ / `GET /api/live/{date}`（4 層）+ **OpenAPI（utoipa コードファースト＋`openapi.json` スナップショット更新・検証）を一級成果物として DoD に含める**。
+2. **実装 PR#2（SPA 買い目ビュー）**: `LiveBets.tsx` + ルート追加 + **OpenAPI/DTO を単一ソースとした API クライアント型** + vitest / ブラウザテスト（`tests/browser-test-cases/live-ev-buy-view.md`）。
 
 ## 関連
 
