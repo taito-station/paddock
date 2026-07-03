@@ -100,7 +100,8 @@ function SkipRow({ race }: { race: LiveRaceView }) {
   const flipped = notes.length > 0;
   return (
     <div className={`live-skip${flipped ? " live-flipped" : ""}`}>
-      <span className="live-mark">{flipped ? "🔶" : "⚪"}</span>
+      {/* 見送りの基底マーク ⚪ を維持しつつ、フリップ時は 🔶 も併記（張るカードと様式を揃える）。 */}
+      <span className="live-mark">{flipped ? "⚪🔶" : "⚪"}</span>
       <strong>{raceLabel(race)}</strong>
       <span className="muted">発走 {race.post_time ?? "—"}</span>
       <span>見送り</span>
