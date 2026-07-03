@@ -2,7 +2,7 @@
 
 ## ステータス
 
-承認済み（[#260](https://github.com/taito-station/paddock/issues/260)）。設計書先出し（設計書 PR）。本 ADR に伴う実装は承認後の別 PR（API → SPA の順）。
+提案中（設計書 PR レビュー中）。対象 Issue: [#260](https://github.com/taito-station/paddock/issues/260)。**本設計書 PR のマージ承認をもって「承認済み」に更新**する。本 ADR に伴う実装は承認後の別 PR（API → SPA の順）。
 
 ## コンテキスト
 
@@ -10,9 +10,9 @@
 
 - 「張る/見送り＋そのまま買える伝票」を出すのは `scripts/predict-check/live_ev.py --slip`（`refresh_ev.sh` が駆動）だが、**出力は CLI/標準出力のみ**で UI に出ていない。ライブ中はターミナル出力を見て md を手写しする運用になり、前サイクルの古い買い目と混ざる。
 - SPA（`web/src/routes/`）と REST API は**事後のセッション＋outcome 記録**向けで、ライブ監視フローを想定していない。
-- 既存 API `/races/{race_id}/recommendations` は `build_portfolio()`（Harville・一律 top5・**混戦判定なし**）で、CLAUDE.md「買い方ルール」準拠の `live_ev.py` 伝票（Plackett-Luce・混戦ボックス・相手 top3/top5 分別・最大剰余法配分）**とは別物**。今の API では「そのまま買える伝票」を出せない。
+- 既存 API `/api/races/{race_id}/recommendations` は use-case `recommend_bets()` → `build_portfolio()`（Harville・一律 top5・**混戦判定なし**）で、CLAUDE.md「買い方ルール」準拠の `live_ev.py` 伝票（Plackett-Luce・混戦ボックス・相手 top3/top5 分別・最大剰余法配分）**とは別物**。今の API では「そのまま買える伝票」を出せない。
 
-CLAUDE.md「買い方ルール」（混戦判定・相手幅・配分）は ADR 0028/0030/0046 で、EV 層分離と軸ロック（decision-support）は ADR 0055/0060 で確定済み。ライブ監視の伝票を UI 化するにあたり、この確定ロジックをどこに正本として置くかが論点。
+CLAUDE.md「買い方ルール」（混戦判定・相手幅・配分）の一次定義は CLAUDE.md・実装は `live_ev.py`。関連 ADR 0028/0030/0046 は**代替案を棄却して baseline を固定した記録**（`*-rejected.md`）であり定義そのものではない。EV 層分離と軸ロック（decision-support）は ADR 0055/0060。ライブ監視の伝票を UI 化するにあたり、この確定ロジックをどこに正本として置くかが論点。
 
 ## 決定
 
@@ -38,6 +38,6 @@ CLAUDE.md「買い方ルール」（混戦判定・相手幅・配分）は ADR 
 ## 影響
 
 - **新規**: Postgres テーブル `live_ev_snapshots`（マイグレーション）／`live_ev.py --emit-json`（＋テスト）／`refresh_ev.sh` に永続化ステップ／read API `GET /api/live/{date}`（rest-controller・use-case・rdb-gateway・api-server の 4 層＋utoipa snapshot 検証）／SPA `LiveBets` ビュー 1 画面。
-- **不変**: `live_ev.py` の計算ロジック（買い方ルール・ROI・混戦判定）／既存 `/recommendations`（`build_portfolio`）／確率モデル・EV 層（ADR 0055）／予算・配分（ADR 0046）。
+- **不変**: `live_ev.py` の計算ロジック（買い方ルール・ROI・混戦判定）／既存 `/api/races/{race_id}/recommendations`（`recommend_bets()`→`build_portfolio()`）／確率モデル・EV 層（ADR 0055）／予算・配分（ADR 0046）。
 - ライブ監視の運用が「ターミナル＋手写し md」から「UI 一望」へ移行し、最新サイクル散逸・前サイクル混入のヒューマンエラーが消える。あくまで decision-support（ADR 0055/0060）で、張る/見送り/増額の最終判断・軸ロックは人間側に残る。
 - 関連: 0028・0030（混戦判定・相手幅）／0046（配分・floor）／0055（EV 層分離・decision-support）／0060（軸ロック＝ズレ増額のみ）。設計詳細は [docs/specifications/live-ev-buy-view.md](../specifications/live-ev-buy-view.md)。

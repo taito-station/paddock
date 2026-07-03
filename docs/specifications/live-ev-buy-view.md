@@ -16,8 +16,8 @@
 
 - `live_ev.py` が各監視サイクルの ROI・張る/見送り判定・買い目伝票を JSON 化し、Postgres に snapshot 永続化する。
 - **API は最新サイクルを返すだけ**（read-only）、**SPA は描画のみ**。
-- CLAUDE.md「買い方ルール」（混戦判定・Plackett-Luce 着順確率・相手 top3/top5 分別・最大剰余法配分・伝票整形）は ADR 0028/0030/0046/0055/0060 で確定済み。これを Rust/TS に**再実装しない**（二重実装＝乖離リスクの排除。「シンプル第一」）。
-- 既存 API `/races/{race_id}/recommendations`（`build_portfolio()`＝Harville・一律 top5・混戦なし）は**別関心事**であり、本ビューはそれを使わない。
+- CLAUDE.md「買い方ルール」（混戦判定・Plackett-Luce 着順確率・相手 top3/top5 分別・最大剰余法配分・伝票整形）を正本とする。関連 ADR 0028/0030/0046 は**代替案を棄却して baseline（混戦条件・相手幅・配分 floor）を固定した記録**であり、ルールの一次定義は CLAUDE.md「買い方ルール」・実装は `live_ev.py`。EV 層分離・軸ロックは ADR 0055/0060。これらを Rust/TS に**再実装しない**（二重実装＝乖離リスクの排除。「シンプル第一」）。
+- 既存 API `/api/races/{race_id}/recommendations`（use-case `recommend_bets()` → `build_portfolio()`＝Harville・一律 top5・混戦なし）は**別関心事**であり、本ビューはそれを使わない。
 
 > 既定 SPA は「永続化済みデータを表示」する（[web-spa.md](web-spa.md) の鮮度方針）。本ビューも snapshot 済みデータの表示に徹し、「最新サイクルのみが正」を snapshot の時系列で自然に表現する。
 
@@ -34,7 +34,7 @@
 | `race_id` | text | paddock race_id |
 | `venue` | text | 場名 |
 | `race_no` | int | レース番号 |
-| `post_time` | timestamptz / text | 発走時刻（netkeiba 由来） |
+| `post_time` | timestamptz | 発走時刻（netkeiba 由来を +09:00 で正規化。他列と型を揃える） |
 | `captured_at` | timestamptz | **監視サイクル時刻**（この評価を出した時刻） |
 | `verdict` | text | `'bet'`（ROI≥100%）/ `'skip'`（−EV） |
 | `roi` | numeric | 全3券種 ROI[%]（`live_ev.py` の `race_roi`） |
@@ -44,23 +44,24 @@
 | `axis_win_odds` | numeric | ◎の単勝オッズ |
 | `odds_missing` | boolean | 一部買い目のオッズ欠落（ROI 過小評価の可能性） |
 | `slip` | jsonb | 買い目伝票（下記スキーマ）。`verdict='skip'` でも参考として保存 |
-| `raw` | jsonb | `live_ev.py --emit-json` の生ペイロード（将来の再集計用・予備） |
+| `raw` | jsonb | `live_ev.py --emit-json` の生ペイロード（1 レース分）。**将来の再集計・スキーマ進化時の後方互換のために保持**。`slip`・各スカラー列と内容は重複するが、列は描画/検索用の正規化ビュー、`raw` は原本という位置づけ。時系列蓄積で肥大するため、保持期間の TTL は運用で別途定める（当面は無制限・`race_odds_snapshots` に倣う） |
 
 - **一意キー**: `(race_id, captured_at)`。「最新サイクル」= `race_id` ごとの `max(captured_at)`。
+- **インデックス**: 最新サイクル抽出（`WHERE date=$1` → race ごと `max(captured_at)`）とフリップ用の直前サイクル取得を賄うため `(date, race_id, captured_at DESC)` を張る（`race_odds_snapshots` #232 の索引方針を踏襲）。時系列で成長するテーブルのため索引を DDL に含める。
 - **マルチユーザー化の布石**（web-spa.md 準拠）: 将来 `user_id` を非破壊で追加できるよう、一意制約は `(race_id, captured_at)` 単位に留め、DDL 整理時に `(user_id, race_id, captured_at)` へ拡張可能な形にする。
 
 ### `slip` JSONB スキーマ
 
-`live_ev.py` の `build_bets()` / `print_slip()` の出力を機械可読化したもの。券種（式別）ごとに、同一組番は金額合算（`print_slip` と同じ現場入力配慮）。
+`live_ev.py` の `build_bets()` / `print_slip()` の出力を機械可読化したもの。leg は **(方式レイヤー × 券種) 単位**で持つ（下記「方式の付与」参照）。
 
 ```jsonc
 {
-  "budget": 5000,
+  "race_budget": 5000,             // このレースに実際に配分した予算（増額時は既定 budget と異なりうる）
   "legs": [
     {
       "bet_type": "wide",          // wide | quinella | trio（式別）
       "method": "nagashi",         // nagashi | box | formation（方式）
-      "axis": 10,                   // ◎馬番（box では null）
+      "axis": 10,                   // ◎馬番（method=box では null）
       "combo": [10, 13],            // 組番（昇順ソート済み）
       "points": 1,                  // この leg の点数（1組）
       "amount": 300                 // 金額（100 円単位）
@@ -70,11 +71,12 @@
 }
 ```
 
-- **方式（method）の付与**: `build_bets()` は現状 leg に method ラベルを持たない（`--slip` は券種と組番のみ表示）。`--emit-json` では **CLAUDE.md 表記規約（ながし/ボックス/フォーメーションを正しく区別）を満たすため method を明示付与**する:
+- **方式（method）の付与とレイヤー分離**: `build_bets()` は混戦時、印馬 3連複ボックスと ◎軸ながし 3連複を**別レイヤーで生成し、`print_slip()` は券種ごとに同一組番の金額を合算**する（実測。マージ後は box 分/nagashi 分の内訳が失われる）。CLAUDE.md 表記規約（ながし/ボックス/フォーメーションを正しく区別）を満たすため、`--emit-json` は **マージ前の leg を (method, combo) 単位で出力**し method を明示付与する:
   - ワイド・馬連・3連複の◎軸ながし部分 → `nagashi`（`axis` に◎馬番）。
   - 混戦時の印馬 3連複ボックス部分 → `box`（`axis` は null）。
   - フォーメーションは本 PJ で基本不使用（列は予約のみ）。
-- **点数・金額**: 100 円単位（`largest_remainder` により券種予算ちょうどに収束）。ビューは leg を券種ごとに束ね、`式別 / 方式 / 軸 / 相手 / 点数 / 金額` の「そのまま買える形」で描画する。
+  - **同一組番の金額合算は「同一 method レイヤー内のみ」**に適用する（box と nagashi で同じ組番が出ても別 leg として保持し、内訳を UI で区別できるようにする）。
+- **点数・金額**: 100 円単位（`largest_remainder` により券種予算ちょうどに収束）。ビューは leg を券種＋方式ごとに束ね、`式別 / 方式 / 軸 / 相手 / 点数 / 金額` の「そのまま買える形」で描画する。
 
 ---
 
@@ -82,17 +84,17 @@
 
 - 既存 `--slip` と**同一の計算結果**を機械可読 JSON で `PATH` に出力する（計算ロジックは一切変えない・追加のみ）。
 - **DB 非依存を維持**（現状どおり TSV 入力のみ）。永続化は呼び出し側（`refresh_ev.sh`）が担う。テスト容易性を保つ。
+- **重要**: 現行 `live_ev.py` の入力（`--meta` は `pid/venue/rnum` のみ）は **netkeiba `pid` キーで完結し、paddock `race_id`・`date`・`post_time` を持たない**。よって `--emit-json` はこれらを出力せず、**pid ローカルの値のみ**を出す（＝「出力追加のみ・DB 非依存」を厳守）。`race_id`・`date`・`post_time` は **永続化側（`refresh_ev.sh`）が pid から DB 参照で補完**する（下記）。
 - 出力ペイロード（1 レース 1 要素の配列）:
 
 ```jsonc
 {
-  "budget": 5000,
+  "default_budget": 5000,          // --budget（レース増額前の既定値）
   "races": [
     {
-      "race_id": "2026...",          // meta 由来（pid ではなく paddock race_id）
+      "pid": "202602...",           // netkeiba pid（meta 由来。race_id はここでは出さない）
       "venue": "函館", "race_no": 12,
-      "post_time": "2026-06-20T15:35:00+09:00",
-      "verdict": "bet",               // roi>=100 → bet, else skip
+      "verdict": "bet",             // roi>=100 → bet, else skip
       "roi": 125.3,
       "konsen": false,
       "axis": 4, "axis_prob": 35.2, "axis_win_odds": 1.7,
@@ -108,7 +110,8 @@
 ## 永続化（`refresh_ev.sh` を拡張）
 
 - `refresh_ev.sh`（既に Postgres アクセスを持つオーケストレータ）の最後に、`live_ev.py --emit-json` の JSON を `live_ev_snapshots` へ upsert する 1 ステップを追加する（小さな `persist_live_ev.py` か psql）。
-- `captured_at` はサイクル実行時刻。同一サイクル内での再実行は `(race_id, captured_at)` upsert で冪等。
+- **`race_id`・`date`・`post_time` の補完**: persist ステップが各 `pid` から DB を引いて paddock `race_id`・`date`（開催日）・`post_time` を注入する（`live_ev.py` は pid ローカル値のみ出力するため）。`pid`→`race_id` の対応は `refresh_ev.sh` が既に保持している（TSV 生成時の race 列挙）。
+- **`captured_at` の供給と冪等性**: `captured_at` は **サイクル実行時刻を persist ステップが 1 サイクル 1 値で割り当てる論理サイクル時刻**（行ごとに `now()` を取らない）。これにより同一サイクル内の再実行は `(race_id, captured_at)` upsert で冪等になる。
 - `live_ev.py` 本体は DB に触らない（責務分離。README「DB アクセスは refresh_ev.sh 側」と整合）。
 
 ---
@@ -118,7 +121,7 @@
 指定開催日の**最新サイクルの判定＋伝票**を返す。utoipa でスキーマ宣言し `openapi.json` スナップショット検証に載せる（既存 read エンドポイント（`race.rs`）と同じ実装パターン）。
 
 - **最新サイクル抽出**: `race_id` ごとに `max(captured_at)` の行のみ返す（window 関数）。
-- **フリップ算出**: 各 race について直前 snapshot（2 番目に新しい `captured_at`）と比較し、`axis_changed`（◎変化）・`ev_reversed`（+EV↔−EV 反転）を算出する。前サイクルが無ければ両方 false。
+- **フリップ算出**: 各 race について直前 snapshot（2 番目に新しい `captured_at`）と比較し、`axis_changed`（◎変化）・`ev_reversed`（+EV↔−EV 反転）を算出する。**前サイクルが無ければ `axis_changed`/`ev_reversed` は false、`prev_*`（`prev_axis`/`prev_verdict`/`prev_roi`）は null**（utoipa 上は nullable）。
 - **見送り理由**: `verdict='skip'` の `reason` は `roi` と `flip.prev_roi` から構成（例: 「◎断然人気崩れ ROI 103%→78.9%」）。API か SPA のどちらで文字列化するかは実装で決めるが、素材（roi・prev_roi・axis_changed・axis_win_odds）を必ず返す。
 
 ### レスポンス（DTO）
@@ -155,7 +158,7 @@
 |---|---|---|
 | `interface/rest-controller` | `GET /api/live/{date}` handler・レスポンス DTO・utoipa schema | `src/interface/rest-controller/src/handler/race.rs`・`session.rs` |
 | `use-case` | LiveEv query interactor（最新サイクル取得＋フリップ算出） | 既存 interactor |
-| `infrastructure/rdb-gateway` | 最新 snapshot 取得 repository（window 関数） | 既存 repo |
+| `infrastructure/rdb-gateway` | snapshot 取得 repository（race ごと **最新＋直前** の 2 サイクルを返す。フリップ算出に直前が要るため。window 関数 `row_number()` 等） | 既存 repo |
 | `apps/api-server` | route 配線・OpenAPI 登録 | 既存 route 登録 |
 
 ---
@@ -170,9 +173,10 @@
 2. **最新サイクルのみが正**: 表示は常に最新サイクルの判定のみ。前サイクル・朝の +EV リストは出さない（CLAUDE.md「唯一の正＝最新サイクルの判定のみ」を UI 契約として固定）。
 3. **🟢張るレース＝そのまま買える形**: 各 `verdict='bet'` レースに `式別 / 方式（ながし・ボックス・フォーメーションを正しく区別）/ 軸 / 相手 / 点数 / 金額` を表示（100 円単位）。`slip.legs` を券種ごとに束ねて描画し、`live_ev.py --slip` の伝票と同一内容にする。
 4. **⚪見送りは理由付きで明示**: `verdict='skip'` レースを理由（roi・prev_roi・◎断然人気崩れ等）付きで表示。曖昧な据え置きをしない。
-5. **🔶フリップ強調**: `flip.axis_changed` / `flip.ev_reversed` が真のレースを視覚強調（例:「小倉R5: 朝+EV→直前−EVに転落＋◎⑥→見送り」）。
-6. **鮮度**: web-spa.md「SPA は自動ポーリングしない」に従い、**手動更新ボタン**＋最終更新時刻を主表示にする（`GET /api/live/{date}` の再取得）。軽量な client-side polling は follow-up（スコープ外）。
-7. 手作業の買い目シート md を書かなくても、この画面だけで「いま張るレースと買い目」が完結すること。
+5. **🔶フリップ強調**: `flip.axis_changed` / `flip.ev_reversed` が真のレースを視覚強調（例:「小倉5R: 朝+EV→直前−EVに反転、◎⑥→⑨」）。
+6. **オッズ欠落の注記**: `odds_missing=true` のレースに「一部買い目にオッズ欠落あり・ROI は過小評価の可能性」を注記する（張る/見送りいずれでも。ROI 判定の信頼度を明示）。
+7. **鮮度**: web-spa.md「SPA は自動ポーリングしない」に従い、**手動更新ボタン**＋最終更新時刻を主表示にする（`GET /api/live/{date}` の再取得）。軽量な client-side polling は follow-up（スコープ外）。
+8. 手作業の買い目シート md を書かなくても、この画面だけで「いま張るレースと買い目」が完結すること。
 
 ### 表示例（ワイヤー）
 
@@ -186,7 +190,7 @@
 │   3連複  / ながし / 軸④ / 相手⑤⑦③①⑧(10点) / 計¥2,000            │
 ├────────────────────────────────────────────────┤
 │ ⚪ 東京10R  見送り  ROI 80%（◎断然人気 単勝1.7・−EV）             │
-│ 🔶 小倉 5R  見送り  朝+EV→直前−EVに反転（◎⑥→⑨ フリップ）        │
+│ 🔶 小倉5R  見送り  朝+EV→直前−EVに反転（◎⑥→⑨ フリップ）         │
 └────────────────────────────────────────────────┘
 ```
 
