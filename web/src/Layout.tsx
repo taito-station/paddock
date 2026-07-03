@@ -1,4 +1,5 @@
 import { NavLink, Outlet } from "react-router-dom";
+import { todayJst } from "./lib/format";
 
 export function Layout() {
   return (
@@ -9,6 +10,7 @@ export function Layout() {
           <NavLink to="/" end>
             レース
           </NavLink>
+          <NavLink to={`/live/${todayJst()}`}>ライブ</NavLink>
           <NavLink to="/analyze">分析</NavLink>
         </nav>
       </header>
