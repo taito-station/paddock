@@ -2,10 +2,11 @@
 # 条件付き単勝バックテスト用の入力データを生成する（#208）。
 #
 # 出力先（WORKDIR、既定 /tmp）:
-#   bt_races.tsv       レース一覧（win_backtest.py の --races）
-#   bt_winodds.tsv     単勝オッズ（--winodds）
-#   bt_pred_DATE.txt   analyze predict 出力（--pred-dir）
-#   res_NKID.html      netkeiba 結果 HTML（--results-dir）
+#   bt_races.tsv        レース一覧（win_backtest.py の --races）
+#   bt_winodds.tsv      単勝オッズ（--winodds）
+#   bt_exotic_odds.tsv  エキゾオッズ 馬連/3連複/馬単（exotic_mispricing.py の --exotic-odds, #314）
+#   bt_pred_DATE.txt    analyze predict 出力（--pred-dir）
+#   res_NKID.html       netkeiba 結果 HTML（--results-dir）
 #
 # 使い方:
 #   scripts/predict-check/gen_win_backtest_data.sh [WORKDIR]
