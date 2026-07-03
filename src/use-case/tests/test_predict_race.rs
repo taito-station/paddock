@@ -378,7 +378,13 @@ async fn predict_race_views_with_odds_none_when_no_odds() {
     let app = interactor(Some(card)); // odds: None
     let race_id = RaceId::try_from("2026-1-tokyo-1-R1").unwrap();
     let (views, odds) = app
-        .predict_race_views_with_odds(&race_id, None, None, false)
+        .predict_race_views_with_odds(
+            &race_id,
+            None,
+            None,
+            false,
+            &paddock_domain::EstimationConfig::production(),
+        )
         .await
         .unwrap();
     assert_eq!(views.pure.len(), 2);
@@ -403,7 +409,13 @@ async fn predict_race_views_with_odds_returns_odds_and_diagnostics() {
     let app = interactor_with_odds(Some(card), odds);
     let race_id = RaceId::try_from(race_id_str).unwrap();
     let (views, odds) = app
-        .predict_race_views_with_odds(&race_id, None, None, false)
+        .predict_race_views_with_odds(
+            &race_id,
+            None,
+            None,
+            false,
+            &paddock_domain::EstimationConfig::production(),
+        )
         .await
         .unwrap();
     let odds = odds.expect("オッズありなら odds は Some");

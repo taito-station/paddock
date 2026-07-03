@@ -189,16 +189,21 @@ async fn main() -> anyhow::Result<()> {
             race_id,
             blend_alpha,
             track_condition,
+            shrinkage_m,
+            win_power,
         } => {
             // 未指定時は本番既定 α=0.2（session.rs / predict-watch と対称）。過去データ視点は常に
             // 純モデルなので、この α は市場EV視点の軸/相手ランキングにのみ効く。
             let blend_alpha = validate_blend_alpha(blend_alpha)?.or(RECOMMENDED_MARKET_BLEND_ALPHA);
+            // #282: 本番既定（m=10/γ=1.25）を土台に、指定フラグだけ上書きした config を組む。
+            // #270/ADR 0045 の m×α×γ 再検証で m/γ を振った bt_pred を生成するために使う。
+            let config = production_config_with_overrides(shrinkage_m, win_power)?;
             let rid = RaceId::try_from(race_id.as_str())?;
             // #272 ③④: session.rs と同じ二視点で出す。過去データ視点＝純モデル（α=1.0・市場非依存）、
             // 市場EV視点＝軸/相手 blended・EV pure（循環断ち）。--blend-alpha は市場EV視点の順位付け用。
             let (views, odds) = app
                 .interactor
-                .predict_race_views_with_odds(&rid, blend_alpha, track_condition, false)
+                .predict_race_views_with_odds(&rid, blend_alpha, track_condition, false, &config)
                 .await?;
             let PredictionViews {
                 blended,
@@ -331,6 +336,35 @@ fn validate_blend_alpha(alpha: Option<f64>) -> anyhow::Result<Option<f64>> {
     Ok(alpha)
 }
 
+/// 有限の正数のみ許可するフラグ（縮約 m・冪 γ 系）を検証する。未指定は `None` を透過。
+/// 0/負/非有限はゼロ除算・無意味なため usage エラーにする。`flag` はエラーメッセージ用のフラグ名。
+fn validate_positive_finite(flag: &str, value: Option<f64>) -> anyhow::Result<Option<f64>> {
+    if let Some(v) = value
+        && !(v.is_finite() && v > 0.0)
+    {
+        anyhow::bail!("{flag} must be a finite positive number, got {v}");
+    }
+    Ok(value)
+}
+
+/// predict 用（#282）: 本番既定 `EstimationConfig::production()`（m=10/α=0.2/γ=1.25）を土台に、
+/// 指定された `--shrinkage-m` / `--win-power` だけを上書きした config を組む。未指定フィールドは
+/// 本番既定のまま（backtest の `build_estimation_config` が空 config から積むのと対照的に、predict は
+/// 本番挙動の上に差分だけ載せる）。#270/ADR 0045 の m×α×γ 再検証 bt_pred 生成に使う。
+fn production_config_with_overrides(
+    shrinkage_m: Option<f64>,
+    win_power: Option<f64>,
+) -> anyhow::Result<EstimationConfig> {
+    let mut config = EstimationConfig::production();
+    if let Some(m) = validate_positive_finite("--shrinkage-m", shrinkage_m)? {
+        config.shrinkage = Some(ShrinkageConfig { pseudo_count: m });
+    }
+    if let Some(g) = validate_positive_finite("--win-power", win_power)? {
+        config.win_power = Some(g);
+    }
+    Ok(config)
+}
+
 /// backtest 用の確率推定設定（#75, #217, #220）を CLI フラグから組み立てる。未指定フラグは現行挙動。
 /// `--shrinkage-m` / `--recency-half-life` とも指定時は有限の正数のみ許可
 /// （0 や負値はゼロ除算・無意味なため）。`--recent-form-weight` は有限の非負数のみ、
@@ -348,24 +382,13 @@ fn build_estimation_config(
     place_show_power: Option<f64>,
     impute_missing_factors: bool,
 ) -> anyhow::Result<EstimationConfig> {
-    let shrinkage = match shrinkage_m {
-        Some(m) => {
-            if !(m.is_finite() && m > 0.0) {
-                anyhow::bail!("--shrinkage-m must be a finite positive number, got {m}");
-            }
-            Some(ShrinkageConfig { pseudo_count: m })
-        }
-        None => None,
-    };
-    let recency = match recency_half_life {
-        Some(h) => {
-            if !(h.is_finite() && h > 0.0) {
-                anyhow::bail!("--recency-half-life must be a finite positive number, got {h}");
-            }
-            Some(RecencyConfig { half_life_days: h })
-        }
-        None => None,
-    };
+    // 縮約 m・γ 系（有限正数のみ）は predict の override と同じ検証を共用する（#282）。
+    let shrinkage = validate_positive_finite("--shrinkage-m", shrinkage_m)?
+        .map(|m| ShrinkageConfig { pseudo_count: m });
+    let recency = validate_positive_finite("--recency-half-life", recency_half_life)?
+        .map(|h| RecencyConfig { half_life_days: h });
+    let win_power = validate_positive_finite("--win-power", win_power)?;
+    let place_show_power = validate_positive_finite("--place-show-power", place_show_power)?;
     if let Some(w) = recent_form_weight
         && !(w.is_finite() && w >= 0.0)
     {
@@ -375,18 +398,6 @@ fn build_estimation_config(
         && !(w.is_finite() && w >= 0.0)
     {
         anyhow::bail!("--jockey-form-weight must be a finite non-negative number, got {w}");
-    }
-    // win_power はγ。0/負/非有限は不正（γ<1 は逆方向 sweep として許可）。
-    if let Some(g) = win_power
-        && !(g.is_finite() && g > 0.0)
-    {
-        anyhow::bail!("--win-power must be a finite positive number, got {g}");
-    }
-    // place_show_power もγ。0/負/非有限は不正（γ<1 は逆方向 sweep として許可）。
-    if let Some(g) = place_show_power
-        && !(g.is_finite() && g > 0.0)
-    {
-        anyhow::bail!("--place-show-power must be a finite positive number, got {g}");
     }
     if !(1..=TREND_N_MAX).contains(&trend_n) {
         anyhow::bail!("--trend-n must be between 1 and {TREND_N_MAX}, got {trend_n}");
@@ -758,6 +769,41 @@ fn print_section(title: &str, rows: &[GroupStat]) {
         );
     }
     println!();
+}
+
+#[cfg(test)]
+mod config_override_tests {
+    use super::*;
+
+    /// フラグ未指定なら production 既定（m=10 / γ=1.25 / place_show=2.0 / impute=true）のまま（#282）。
+    #[test]
+    fn no_flags_keeps_production_defaults() {
+        let c = production_config_with_overrides(None, None).unwrap();
+        assert_eq!(c.shrinkage.unwrap().pseudo_count, 10.0);
+        assert_eq!(c.win_power, Some(1.25));
+        // 上書き対象外のフィールドは production のまま。
+        assert_eq!(c.place_show_power, Some(2.0));
+        assert!(c.impute_missing_factors);
+    }
+
+    /// 指定フラグだけを上書きし、他フィールドは production を維持する（#282）。
+    #[test]
+    fn overrides_only_given_fields() {
+        let c = production_config_with_overrides(Some(20.0), Some(3.0)).unwrap();
+        assert_eq!(c.shrinkage.unwrap().pseudo_count, 20.0);
+        assert_eq!(c.win_power, Some(3.0));
+        assert_eq!(c.place_show_power, Some(2.0), "place_show は据え置き");
+        assert!(c.impute_missing_factors, "impute は据え置き");
+    }
+
+    /// 0/負/非有限は usage エラーで弾く（有限正数のみ許可）。
+    #[test]
+    fn rejects_non_positive_or_non_finite() {
+        assert!(production_config_with_overrides(Some(0.0), None).is_err());
+        assert!(production_config_with_overrides(Some(-1.0), None).is_err());
+        assert!(production_config_with_overrides(None, Some(0.0)).is_err());
+        assert!(production_config_with_overrides(None, Some(f64::NAN)).is_err());
+    }
 }
 
 #[cfg(test)]

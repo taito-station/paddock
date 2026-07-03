@@ -54,6 +54,17 @@ pub enum Command {
         /// 手で渡す。未指定なら馬場項なし。
         #[arg(long, value_parser = parse_track_condition)]
         track_condition: Option<TrackCondition>,
+        /// ベイズ縮約の擬似カウント m（#282）。本番既定 m=10（`EstimationConfig::production()`）を
+        /// 上書きする。#270/ADR 0045 の再検証で m を振った α=1.0 bt_pred を生成するために使う
+        /// （m は p_model に焼き込まれ純 Python では動かせないため binary 再生成が要る）。
+        /// 未指定は本番既定 m=10。有限正数のみ。
+        #[arg(long)]
+        shrinkage_m: Option<f64>,
+        /// win_prob 冪変換のγ（#282 / #246）。本番既定 γ=1.25（`EstimationConfig::production()`）を
+        /// 上書きする。`win'_i ∝ win_i^γ` で再正規化する。未指定は本番既定 γ=1.25。
+        /// 有限正数のみ（γ<1 は逆方向）。
+        #[arg(long)]
+        win_power: Option<f64>,
     },
     /// Backtest the prediction logic over finished races in a date range.
     /// Reproduces probability estimation with as-of stats (no leakage) and reports
@@ -155,6 +166,32 @@ mod tests {
             Command::Predict {
                 track_condition, ..
             } => assert_eq!(track_condition, Some(TrackCondition::Good)),
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    /// `--shrinkage-m` / `--win-power`（#282）が Predict にパースされること。
+    #[test]
+    fn predict_parses_shrinkage_m_and_win_power() {
+        let cli = Cli::try_parse_from([
+            "paddock-analyze",
+            "predict",
+            "2026-1-tokyo-1-R1",
+            "--shrinkage-m",
+            "20",
+            "--win-power",
+            "1.5",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Predict {
+                shrinkage_m,
+                win_power,
+                ..
+            } => {
+                assert_eq!(shrinkage_m, Some(20.0));
+                assert_eq!(win_power, Some(1.5));
+            }
             other => panic!("unexpected command: {other:?}"),
         }
     }

@@ -63,6 +63,7 @@ import argparse
 import math
 import re
 import statistics
+import sys
 import unicodedata
 from itertools import combinations, permutations
 from pathlib import Path
@@ -812,6 +813,48 @@ def calibration_buckets(evaluated, probs_by_race, edges):
           "（gate>=無ゲート なら model EV ゲートが正の選別）\n")
 
 
+def _eval_alpha_gamma(evaluated, winodds, p_models, alpha, gamma):
+    """1 つの (α, γ) で全レースを再計算し、ゲート整合性 + 単勝精度の指標を返す（#270/#282 共通）。
+
+    返り値: (n_gate, gate_roi, nogate_roi, delta, sp, t1, mb)。ROI は %、nan は母数ゼロ。
+    top1率・Brier は race_winner(pay) で 1 着が復元できる鞍のみが母集団（馬単欠落・同着 1 着は除外）。
+    """
+    model_rois, reals = [], []
+    n_gate = 0
+    g_ret = g_stake = a_ret = a_stake = 0
+    top1_n = top1_tot = 0
+    briers = []
+    for date, venue, rnum, pid, _probs, quin, trio, _exacta, pay in evaluated:
+        pm = p_models.get((date, venue, rnum))
+        if not pm:
+            continue
+        implied = market_implied(winodds.get(pid, {}))
+        probs = recompute_p_final(pm, implied, alpha, gamma)
+        model_roi, ret, stake = compute_baseline_pf(probs, quin, trio, pay)
+        if stake <= 0:
+            continue
+        model_rois.append(model_roi)
+        reals.append(ret / stake)
+        a_ret += ret
+        a_stake += stake
+        if model_roi >= 1.0:
+            n_gate += 1
+            g_ret += ret
+            g_stake += stake
+        w = race_winner(pay)
+        if w is not None:
+            top1_tot += 1
+            top1_n += top1_hit(probs, w)
+            briers.append(brier(probs, w))
+    gate_roi = g_ret / g_stake * 100 if g_stake else float("nan")
+    nogate_roi = a_ret / a_stake * 100 if a_stake else float("nan")
+    delta = gate_roi - nogate_roi if (g_stake and a_stake) else float("nan")
+    sp = spearman(model_rois, reals)
+    t1 = top1_n / top1_tot * 100 if top1_tot else float("nan")
+    mb = sum(briers) / len(briers) if briers else float("nan")
+    return (n_gate, gate_roi, nogate_roi, delta, sp, t1, mb)
+
+
 def joint_sweep(evaluated, winodds, p_models, alphas, gammas):
     """(α, γ) 同時掃引。各 (α,γ) で全レースを再計算→ baseline_pf 清算→ ゲート整合性を測る。
 
@@ -820,7 +863,6 @@ def joint_sweep(evaluated, winodds, p_models, alphas, gammas):
         Spearman(model_roi, ret/stake) / top1率 / 平均Brier。
     delta>=0 かつ Spearman>=0 なら、その (α,γ) で model EV ゲートが正直な選別に戻る。
 
-    top1率・Brier は race_winner(pay) で 1 着が復元できる鞍のみが母集団（馬単欠落・同着 1 着は除外）。
     Brier はレース毎平均をさらに鞍跨ぎ平均する（フィールドサイズ非重み）。α 間の相対比較が目的で、
     answer_check.py の全頭グローバル平均（フィールドサイズ重み）とは集計が異なる点に留意。
     """
@@ -829,42 +871,89 @@ def joint_sweep(evaluated, winodds, p_models, alphas, gammas):
           f"{'delta':>6} {'Spear':>6} {'top1':>5} {'Brier':>6}")
     for alpha in alphas:
         for gamma in gammas:
-            model_rois, reals = [], []
-            n_gate = 0
-            g_ret = g_stake = a_ret = a_stake = 0
-            top1_n = top1_tot = 0
-            briers = []
-            for date, venue, rnum, pid, _probs, quin, trio, _exacta, pay in evaluated:
-                pm = p_models.get((date, venue, rnum))
-                if not pm:
-                    continue
-                implied = market_implied(winodds.get(pid, {}))
-                probs = recompute_p_final(pm, implied, alpha, gamma)
-                model_roi, ret, stake = compute_baseline_pf(probs, quin, trio, pay)
-                if stake <= 0:
-                    continue
-                model_rois.append(model_roi)
-                reals.append(ret / stake)
-                a_ret += ret
-                a_stake += stake
-                if model_roi >= 1.0:
-                    n_gate += 1
-                    g_ret += ret
-                    g_stake += stake
-                w = race_winner(pay)
-                if w is not None:
-                    top1_tot += 1
-                    top1_n += top1_hit(probs, w)
-                    briers.append(brier(probs, w))
-            gate_roi = g_ret / g_stake * 100 if g_stake else float("nan")
-            nogate_roi = a_ret / a_stake * 100 if a_stake else float("nan")
-            delta = gate_roi - nogate_roi if (g_stake and a_stake) else float("nan")
-            sp = spearman(model_rois, reals)
-            t1 = top1_n / top1_tot * 100 if top1_tot else float("nan")
-            mb = sum(briers) / len(briers) if briers else float("nan")
+            n_gate, gate_roi, nogate_roi, delta, sp, t1, mb = _eval_alpha_gamma(
+                evaluated, winodds, p_models, alpha, gamma)
             print(f"{alpha:>5.2f} {gamma:>5.2f} {n_gate:>6} {gate_roi:>7.1f}% {nogate_roi:>6.1f}% "
                   f"{delta:>+6.1f} {sp:>+6.3f} {t1:>4.0f}% {mb:>6.4f}")
         print()
+
+
+def joint_sweep_m(evaluated, winodds, p_models_by_m, alphas, gammas):
+    """m×α×γ 3 軸掃引（#282）。joint_sweep に m 軸（ベイズ縮約）を足したもの。
+
+    p_models_by_m: [(m_label, p_models), ...]。各 m は**縮約を変えて再生成した α=1.0 bt_pred**から
+    復元した p_models（m は p_model に焼き込まれ純 Python では動かせないため binary 再生成が要る。
+    ADR 0045）。呼び出し側が与えた dir 集合が m グリッドを定義する。先頭に m 列を足し、
+    m→α→γ の順で joint_sweep と同じ指標を出す（各 (α,γ) は _eval_alpha_gamma を共用）。
+    """
+    print("=== m×α×γ 3 軸掃引（各 m は縮約を変えて再生成した α=1.0 bt_pred から復元）===")
+    print(f"{'m':>6} {'alpha':>5} {'gamma':>5} {'n_gate':>6} {'gateROI':>8} {'noGate':>7} "
+          f"{'delta':>6} {'Spear':>6} {'top1':>5} {'Brier':>6}")
+    for m_label, p_models in p_models_by_m:
+        for alpha in alphas:
+            for gamma in gammas:
+                n_gate, gate_roi, nogate_roi, delta, sp, t1, mb = _eval_alpha_gamma(
+                    evaluated, winodds, p_models, alpha, gamma)
+                print(f"{m_label:>6} {alpha:>5.2f} {gamma:>5.2f} {n_gate:>6} {gate_roi:>7.1f}% "
+                      f"{nogate_roi:>6.1f}% {delta:>+6.1f} {sp:>+6.3f} {t1:>4.0f}% {mb:>6.4f}")
+            print()
+
+
+def recover_p_models(dir_path, races, evaluated, gamma=PRODUCTION_GAMMA):
+    """α=1.0 実行の bt_pred dir から各鞍の縮約済 p_model% を復元する（#270/#282 共通）。
+
+    dir_path 内の bt_pred_DATE.txt を読み、evaluated の各鞍について recover_p_model（単一冪逆変換）を
+    適用して {(date,venue,rnum): p_model%} を返す。m は復元後の p_model に既に焼き込まれている前提で、
+    m を振るには dir 自体を m ごとに再生成する（本関数は復元のみ・m には非依存）。
+    """
+    a1_preds = {}
+    for d in sorted({r["date"] for r in races}):
+        p = Path(dir_path) / f"bt_pred_{d}.txt"
+        if p.exists():
+            a1_preds[d] = parse_pred(p)
+    p_models = {}
+    for date, venue, rnum, _pid, _probs, *_rest in evaluated:
+        pf = a1_preds.get(date, {}).get((venue, rnum))
+        if pf:
+            p_models[(date, venue, rnum)] = recover_p_model(pf, gamma=gamma)
+    # dir 誤指定や bt_pred 未生成に気付けるよう、1 鞍も復元できなければ警告する（掃引表が全 nan で
+    # 黙って出るのを防ぐ・decision-support）。
+    if not p_models:
+        print(f"WARN: p_model を 1 鞍も復元できませんでした（dir={dir_path}）", file=sys.stderr)
+    return p_models
+
+
+def parse_m_dir_specs(specs):
+    """--p-model-dir-m の 'M:DIR' 列を [(m_label, dir), ...] に検証パースする（#282）。
+
+    M は表示ラベルだが（実際の縮約は各 dir の bt_pred に焼き込み済）、誤ラベルで掃引表の m 列が
+    黙って化けるのを防ぐため、Rust 側 --shrinkage-m と対称に**正の有限数のみ**許可する。m ラベルの
+    重複も弾く（同 m の 2 ブロックは解釈を誤らせる）。不正時は ValueError（呼び出し側が fail-fast する）。
+    """
+    out = []
+    seen = set()
+    seen_dirs = set()
+    for spec in specs:
+        m_label, sep, d = spec.partition(":")
+        if not sep or not m_label or not d:
+            raise ValueError(f"'M:DIR' 形式で渡す: {spec!r}")
+        try:
+            mv = float(m_label)
+        except ValueError:
+            raise ValueError(f"M は数値: {m_label!r}") from None
+        if not math.isfinite(mv) or mv <= 0:
+            raise ValueError(f"M は正の有限数: {m_label!r}")
+        # 重複は数値 mv で判定する（'10' と '10.0' は同一 m＝別ブロックにしない）。
+        if mv in seen:
+            raise ValueError(f"M が重複: {m_label!r}")
+        # 同一 dir を別 m で指すのは誤り（同じ p_model が別 m ラベルで二重表示される）。致命ではないので警告。
+        if d in seen_dirs:
+            print(f"WARN: 同一 dir を複数の M で指定（dir={d}）。同じ復元結果が別 m として表示されます",
+                  file=sys.stderr)
+        seen.add(mv)
+        seen_dirs.add(d)
+        out.append((m_label, d))
+    return out
 
 
 def main():
@@ -884,6 +973,10 @@ def main():
     # #270: 確率→EV パイプライン（α×γ）の同時再検証。--p-model-dir は α=1.0 実行の bt_pred dir。
     ap.add_argument("--p-model-dir", default=None,
                     help="#270 α=1.0 実行の bt_pred dir（指定時のみ較正バケット+α×γ掃引を追加）")
+    ap.add_argument("--p-model-dir-m", action="append", metavar="M:DIR",
+                    help="#282 m×α×γ 3 軸掃引。M（縮約）と、その m で再生成した α=1.0 bt_pred dir を "
+                         "'M:DIR' で渡す（複数回可。例: --p-model-dir-m 10:/tmp/bt_m10 "
+                         "--p-model-dir-m 20:/tmp/bt_m20）。与えた dir 集合が m グリッドを定義する")
     ap.add_argument("--alpha-grid", default="0,0.1,0.2,0.3,0.5,1.0",
                     help="#270 α（市場ブレンド）掃引。α=モデル重み係数"
                          "（blended=α·model+(1-α)·market）＝高いほど市場補正は弱い（ADR 0045）")
@@ -892,6 +985,12 @@ def main():
     ap.add_argument("--bucket-edges", default="0.8,0.9,1.0,1.1,1.2",
                     help="#270 較正バケットの予測 model ROI 境界")
     args = ap.parse_args()
+    # #282: --p-model-dir-m の spec は重い読込前に検証して fail-fast する（誤形式で全レース評価を
+    # 走らせてから落ちるのを防ぐ）。
+    try:
+        m_dir_specs = parse_m_dir_specs(args.p_model_dir_m or [])
+    except ValueError as e:
+        ap.error(f"--p-model-dir-m {e}")
 
     races = parse_races(args.races)
     exotic = parse_exotic(args.exotic_odds)
@@ -1021,16 +1120,7 @@ def main():
     # #270: 確率→EV パイプライン（α×γ）の同時再検証（--p-model-dir 指定時のみ）。
     # α=1.0 実行の最終確率から p_model を復元し、任意 (α,γ) を純 Python で再計算する。
     if args.p_model_dir:
-        a1_preds = {}
-        for d in sorted({r["date"] for r in races}):
-            p = Path(args.p_model_dir) / f"bt_pred_{d}.txt"
-            if p.exists():
-                a1_preds[d] = parse_pred(p)
-        p_models = {}  # (date,venue,rnum) -> 縮約済 p_model%
-        for date, venue, rnum, _pid, _probs, *_rest in evaluated:
-            pf = a1_preds.get(date, {}).get((venue, rnum))
-            if pf:
-                p_models[(date, venue, rnum)] = recover_p_model(pf, gamma=PRODUCTION_GAMMA)
+        p_models = recover_p_models(args.p_model_dir, races, evaluated)  # (date,venue,rnum)->p_model%
 
         # production (α=0.2, γ=1.25) で各レースの最終確率を再計算。
         prod_probs = {}
@@ -1065,6 +1155,16 @@ def main():
         alphas = [float(x) for x in args.alpha_grid.split(",")]
         gammas = [float(x) for x in args.gamma_grid.split(",")]
         joint_sweep(evaluated, winodds, p_models, alphas, gammas)
+
+    # #282: m×α×γ 3 軸掃引（--p-model-dir-m を M:DIR で複数指定）。各 M は縮約を変えて再生成した
+    # α=1.0 bt_pred dir。m は p_model に焼き込まれ純 Python では動かせないため m ごとに別 dir が要る。
+    if m_dir_specs:
+        alphas = [float(x) for x in args.alpha_grid.split(",")]
+        gammas = [float(x) for x in args.gamma_grid.split(",")]
+        # 各 m dir は本番 γ=1.25 で生成した α=1.0 bt_pred 前提（recover_p_models は γ=PRODUCTION_GAMMA で
+        # 逆変換する）。dir 生成時に --win-power を上書きすると復元が狂うので m のみ振ること。
+        p_models_by_m = [(m_label, recover_p_models(d, races, evaluated)) for m_label, d in m_dir_specs]
+        joint_sweep_m(evaluated, winodds, p_models_by_m, alphas, gammas)
 
 
 if __name__ == "__main__":
