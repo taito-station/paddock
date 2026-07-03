@@ -32,6 +32,19 @@ def test_parse_dump_by_header_name():
     assert dump == {"R1": {1: 0.5, 2: 0.3}, "R2": {7: 0.9}}, dump
 
 
+def test_parse_dump_missing_column_raises():
+    # 必須列（race_id/horse_num/model_win）欠落は明示 ValueError（生 KeyError で落とさない）。
+    d = tempfile.mkdtemp()
+    p = os.path.join(d, "bad.tsv")
+    with open(p, "w") as f:
+        f.write("race_id\tdate\thorse_num\n1\t2026-01-01\t3\n")  # model_win 欠落
+    try:
+        E.parse_dump(p)
+        assert False, "model_win 欠落で ValueError を送出すべき"
+    except ValueError as e:
+        assert "model_win" in str(e), str(e)
+
+
 def test_synth_prob_dispatch_and_missing():
     probs = {1: 0.5, 2: 0.3, 3: 0.2}
     assert approx(E.synth_prob("quinella", probs, frozenset({1, 2})), U.p_top2_set(probs, 1, 2))
