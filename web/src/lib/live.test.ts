@@ -88,6 +88,14 @@ describe("groupLegs", () => {
     expect(groups[0].amount).toBe(500);
   });
 
+  it("orders nagashi before box within the same bet_type", () => {
+    const groups = groupLegs([
+      { bet_type: "trio", method: "box", axis: null, combo: [4, 5, 7], points: 1, amount: 300 },
+      { bet_type: "trio", method: "nagashi", axis: 4, combo: [4, 5, 8], points: 1, amount: 200 },
+    ]);
+    expect(groups.map((g) => g.method)).toEqual(["nagashi", "box"]);
+  });
+
   it("keeps box and nagashi separate even for same combo", () => {
     const groups = groupLegs([
       { bet_type: "trio", method: "box", axis: null, combo: [4, 5, 7], points: 1, amount: 300 },
@@ -117,6 +125,14 @@ describe("skipReason", () => {
       "◎②断然人気 単勝1.4・ROI 80%・−EV",
     );
   });
+  it("断然人気 boundary: <=1.9 に入る / 2.0 は入らない", () => {
+    expect(skipReason({ roi: 80, axis: 2, axis_win_odds: 1.9 })).toContain(
+      "断然人気",
+    );
+    expect(skipReason({ roi: 80, axis: 2, axis_win_odds: 2.0 })).not.toContain(
+      "断然人気",
+    );
+  });
 });
 
 describe("flipNotes", () => {
@@ -140,6 +156,13 @@ describe("flipNotes", () => {
       { axis: 9, roi: 118, verdict: "bet" },
     );
     expect(notes).toEqual(["◎⑥→⑨"]);
+  });
+  it("ev_reversed in bet direction (−EV→+EV)", () => {
+    const notes = flipNotes(
+      { axis_changed: false, ev_reversed: true, prev_axis: 4, prev_roi: 92, prev_verdict: "skip" },
+      { axis: 4, roi: 108, verdict: "bet" },
+    );
+    expect(notes).toEqual(["−EV→+EVに反転（ROI 92%→108%）"]);
   });
   it("no flip = empty", () => {
     const notes = flipNotes(

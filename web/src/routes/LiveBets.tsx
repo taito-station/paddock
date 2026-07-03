@@ -18,6 +18,7 @@ const venueJp = (v: string) => VENUE_JP[v] ?? v;
 const raceLabel = (r: LiveRaceView) => `${venueJp(r.venue)}${r.race_no}R`;
 
 // post_time（HH:MM 文字列。欠落時 null）でレースを並べる。null は末尾。
+// race_cards.post_time は %H:%M（ゼロ埋め 2 桁時）で保存されるため、文字列辞書順＝時刻順。
 function byPostTime(a: LiveRaceView, b: LiveRaceView): number {
   const pa = a.post_time ?? "99:99";
   const pb = b.post_time ?? "99:99";
@@ -142,6 +143,12 @@ export function LiveBets() {
   const races = live.data?.races ?? [];
   const bets = races.filter((r) => r.verdict === "bet").sort(byPostTime);
   const skips = races.filter((r) => r.verdict !== "bet").sort(byPostTime);
+
+  // ルート live/:date により date は通常必ず存在するが、空だと query が無効化され
+  // isPending のまま「読み込み中…」で固まるため、明示的にガードする。
+  if (!date) {
+    return <p className="error">開催日が指定されていません。</p>;
+  }
 
   return (
     <section>

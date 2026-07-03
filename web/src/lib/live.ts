@@ -27,9 +27,14 @@ export function jstHm(iso: string | null | undefined): string {
     timeZone: "Asia/Tokyo",
     hour: "2-digit",
     minute: "2-digit",
-    hour12: false,
+    // h23 を明示し、深夜 0 時が一部 Intl 実装で "24:00" になるのを防ぐ。
+    hourCycle: "h23",
   });
 }
+
+// 「断然人気」とみなす◎の単勝オッズ上限。この値以下は過剰人気として見送り理由に明記する
+// （CLAUDE.md「断然人気は EV がマイナスになりがち」。実運用の単勝 1.4 例をカバーする保守値）。
+export const DANZEN_WIN_ODDS_MAX = 1.9;
 
 // 冒頭の一望サマリ 1 行。張る本数が 0 なら「張り無し」を明示（曖昧な据え置きをしない）。
 export function summaryLine(s: LiveSummary): string {
@@ -113,6 +118,9 @@ export function groupLegs(legs: SlipLeg[]): LegGroup[] {
       method: g.method,
       axis: isBox ? null : g.axis,
       members,
+      // 点数は合算後の distinct 組番数で再計算する（正本 SlipLeg.points は使わない）。
+      // emit-json は「1 leg = 1 組番 = 1 点」粒度のため両者は一致するが、同一組番の合算後は
+      // 点数も 1 に畳む必要があり、combos.length が現場で買う実点数になる。
       points: combos.length,
       amount: combos.reduce((s, c) => s + c.amount, 0),
     });
@@ -132,7 +140,7 @@ export function skipReason(r: {
   axis_win_odds?: number | null;
 }): string {
   const bits: string[] = [];
-  if (r.axis_win_odds != null && r.axis_win_odds <= 1.9) {
+  if (r.axis_win_odds != null && r.axis_win_odds <= DANZEN_WIN_ODDS_MAX) {
     bits.push(`◎${maru(r.axis)}断然人気 単勝${r.axis_win_odds.toFixed(1)}`);
   }
   bits.push(`ROI ${roiPct(r.roi)}`, "−EV");
