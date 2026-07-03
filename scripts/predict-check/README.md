@@ -243,7 +243,10 @@ python3 scripts/predict-check/umaren_backtest.py \
 paddock-analyze backtest --from 2026-03-15 --to 2026-06-14 \
   --shrinkage-m 10 --win-power 1.25 --place-show-power 2.0 --blend-alpha 0.2 \
   --dump-features /tmp/ex/dump.tsv
-# 2. エキゾオッズ・結果・races は gen_win_backtest_data.sh（[3/5] bt_exotic_odds.tsv を含む）で用意。
+# 2. エキゾオッズ・結果・races を用意（[3/5] bt_exotic_odds.tsv を含む）。窓は dump と揃える
+#    （既定 FROM=2026-05-30 のままだと 03-15 が落ちて母集団が 83R に届かない）。
+PADDOCK_BT_FROM=2026-03-15 PADDOCK_BT_TO=2026-06-14 PADDOCK_BT_ALPHA=0.2 \
+  bash scripts/predict-check/gen_win_backtest_data.sh /tmp/ex
 # 3. 検証（まず最小構成の馬連。--bet-types quinella,trio,exacta で拡張）
 python3 scripts/predict-check/exotic_mispricing.py \
   --dump /tmp/ex/dump.tsv --exotic-odds /tmp/ex/bt_exotic_odds.tsv \

@@ -56,6 +56,10 @@ def test_synth_prob_dispatch_and_missing():
     assert E.synth_prob("quinella", probs, frozenset({1, 9})) is None
     assert E.synth_prob("trio", probs, frozenset({1, 2, 9})) is None
     assert E.synth_prob("exacta", probs, (1, 9)) is None
+    # 退化キー（同一馬）は各券種で None（quinella/trio は size guard、exacta は a==b guard）。
+    assert E.synth_prob("exacta", probs, (1, 1)) is None
+    assert E.synth_prob("quinella", probs, frozenset({1})) is None
+    assert E.synth_prob("trio", probs, frozenset({1, 2})) is None
 
 
 def test_collect_bets_ev_settlement_and_quinella_umaren_mapping():

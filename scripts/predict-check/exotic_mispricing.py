@@ -64,7 +64,7 @@ def synth_prob(bet_type, probs, combo):
     """
     if bet_type == "exacta":
         a, b = combo
-        if a not in probs or b not in probs:
+        if a == b or a not in probs or b not in probs:  # 同一馬キー（退化）は弾く。quinella/trio の size guard と対称。
             return None
         return U.p_exacta(probs, a, b)
     members = tuple(combo)
