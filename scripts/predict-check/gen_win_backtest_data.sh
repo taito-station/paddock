@@ -2,10 +2,11 @@
 # 条件付き単勝バックテスト用の入力データを生成する（#208）。
 #
 # 出力先（WORKDIR、既定 /tmp）:
-#   bt_races.tsv       レース一覧（win_backtest.py の --races）
-#   bt_winodds.tsv     単勝オッズ（--winodds）
-#   bt_pred_DATE.txt   analyze predict 出力（--pred-dir）
-#   res_NKID.html      netkeiba 結果 HTML（--results-dir）
+#   bt_races.tsv        レース一覧（win_backtest.py の --races）
+#   bt_winodds.tsv      単勝オッズ（--winodds）
+#   bt_exotic_odds.tsv  エキゾオッズ 馬連/3連複/馬単（exotic_mispricing.py の --exotic-odds, #314）
+#   bt_pred_DATE.txt    analyze predict 出力（--pred-dir）
+#   res_NKID.html       netkeiba 結果 HTML（--results-dir）
 #
 # 使い方:
 #   scripts/predict-check/gen_win_backtest_data.sh [WORKDIR]
@@ -70,7 +71,7 @@ jp_to_code() {
   esac
 }
 
-echo "[1/4] レース一覧 (bt_races.tsv)"
+echo "[1/5] レース一覧 (bt_races.tsv)"
 "${PSQL[@]}" -F$'\t' -c \
   "SELECT rc.date, rc.race_id, rc.venue, rc.round::text, rc.day::text, rc.race_num::text,
           '--nk--'
@@ -86,7 +87,7 @@ while IFS=$'\t' read -r date pid venue rnd day rnum _; do
 done > "$WORKDIR/bt_races.tsv"
 wc -l "$WORKDIR/bt_races.tsv"
 
-echo "[2/4] 単勝オッズ (bt_winodds.tsv)"
+echo "[2/5] 単勝オッズ (bt_winodds.tsv)"
 "${PSQL[@]}" -F$'\t' -c \
   "SELECT o.race_id, o.combination_key, COALESCE(o.popularity::text, '0'), o.odds::text
    FROM race_odds o
@@ -96,7 +97,19 @@ echo "[2/4] 単勝オッズ (bt_winodds.tsv)"
    ORDER BY o.race_id, o.popularity;" > "$WORKDIR/bt_winodds.tsv"
 wc -l "$WORKDIR/bt_winodds.tsv"
 
-echo "[3/4] analyze predict（bt_pred_DATE.txt）"
+# エキゾ（馬連/3連複/馬単）オッズ（#314 ミスプライス検証の --exotic-odds 入力）。refresh_ev.sh の
+# exotic TSV と同じ列（race_id / bet_type / combination_key / odds）。ワイドは過去データ不足で除外。
+echo "[3/5] エキゾオッズ (bt_exotic_odds.tsv)"
+"${PSQL[@]}" -F$'\t' -c \
+  "SELECT o.race_id, o.bet_type, o.combination_key, o.odds::text
+   FROM race_odds o
+   JOIN race_cards rc ON rc.race_id = o.race_id
+   WHERE o.bet_type IN ('quinella', 'trio', 'exacta')
+     AND rc.date >= '$FROM' AND rc.date <= '$TO'
+   ORDER BY o.race_id, o.bet_type, o.combination_key;" > "$WORKDIR/bt_exotic_odds.tsv"
+wc -l "$WORKDIR/bt_exotic_odds.tsv"
+
+echo "[4/5] analyze predict（bt_pred_DATE.txt）"
 while IFS=$'\t' read -r date pid venue _ _ rnum _; do
   outf="$WORKDIR/bt_pred_${date}.txt"
   # 冪等: ヘッダ AND 馬番行が両方あればスキップ（ヘッダのみの失敗状態は再試行）
@@ -120,7 +133,7 @@ while IFS=$'\t' read -r date pid venue _ _ rnum _; do
   printf '%s\n' "$pred_lines" >> "$outf"
 done < "$WORKDIR/bt_races.tsv"
 
-echo "[4/4] netkeiba 結果 HTML（res_NKID.html）"
+echo "[5/5] netkeiba 結果 HTML（res_NKID.html）"
 while IFS=$'\t' read -r _ _ _ _ _ _ nkid; do
   outf="$WORKDIR/res_${nkid}.html"
   [[ -f "$outf" ]] && continue

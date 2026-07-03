@@ -230,6 +230,33 @@ python3 scripts/predict-check/umaren_backtest.py \
 - **暫定 71R 知見は赤字窓での過学習が確実**。確定チューニング・本番定数(m/α/γ)・CLAUDE.md の変更は
   #248 蓄積後（ADR 0045）。
 
+### エキゾ・ミスプライス検証（#314・`exotic_mispricing.py`）
+
+派生市場（馬連/3連複/馬単）で群衆の組合せ合成が雑になりミスプライスが残るか、を**リーク無し**で測る。
+新規モデルは作らず、**as-of の市場ブレンド単勝確率（α=0.2）を Plackett-Luce でエキゾ確率に展開 → 実オッズ
+と突合**する。合成確率・パース・実配当は `umaren_backtest.py` を import 再利用し、券種/予測EV帯/頭数帯/
+オッズ帯/開催日別の net-ROI と baseline（全組合せ均等）を出す。**清算は netkeiba 実配当**（DB オッズは EV
+選抜のみ＝循環回避）。ワイドは過去データ不足（結果結線 12R のみ）で対象外。
+
+```bash
+# 1. リーク無し win%（model_win = α=0.2 ブレンド後・as-of）を dump。predict は all-time 統計でリークするため不可。
+paddock-analyze backtest --from 2026-03-15 --to 2026-06-14 \
+  --shrinkage-m 10 --win-power 1.25 --place-show-power 2.0 --blend-alpha 0.2 \
+  --dump-features /tmp/ex/dump.tsv
+# 2. エキゾオッズ・結果・races を用意（[3/5] bt_exotic_odds.tsv を含む）。窓は dump と揃える
+#    （既定 FROM=2026-05-30 のままだと 03-15 が落ちて母集団が 83R に届かない）。
+PADDOCK_BT_FROM=2026-03-15 PADDOCK_BT_TO=2026-06-14 PADDOCK_BT_ALPHA=0.2 \
+  bash scripts/predict-check/gen_win_backtest_data.sh /tmp/ex
+# 3. 検証（まず最小構成の馬連。--bet-types quinella,trio,exacta で拡張）
+python3 scripts/predict-check/exotic_mispricing.py \
+  --dump /tmp/ex/dump.tsv --exotic-odds /tmp/ex/bt_exotic_odds.tsv \
+  --results-dir /tmp/ex --races /tmp/ex/bt_races.tsv --bet-types quinella
+```
+
+- **結論（83R）: 現データでは棄却**（ADR 0063）。馬連は額面 +EV（138〜242%）が出るが、実質 5 開催日の
+  小標本で **1〜2 日の幸運が全体を牽引・他日は 0%・予測EV帯が単調でない**（大穴超低頻度の分散）。3連複/馬単
+  は集計で 100% を抜けない。控除率を安定して抜くには過去エキゾオッズ＋結果が数百 R 規模に要蓄積（#248）。
+
 ## ライブ EV 監視（当日・発走前オッズ）
 
 ブラインド予想→事後答え合わせ（上記）とは別に、**開催当日に発走前の最新オッズで「いま張る価値が
