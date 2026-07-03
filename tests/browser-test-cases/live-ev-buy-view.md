@@ -6,7 +6,7 @@
 
 前提データ（`live_ev_snapshots` に投入する最新サイクルの想定）:
 - 函館12R: `verdict='bet'`, ROI 125%, ◎④(model35% 単勝1.7), 混戦なし, フリップなし。
-- 東京10R: `verdict='skip'`, ROI 80%, ◎④断然人気, フリップなし。
+- 東京10R: `verdict='skip'`, ROI 80%, ◎②断然人気(model48% 単勝1.4), フリップなし。
 - 小倉5R: `verdict='skip'`, ROI 78.9%, 前サイクル ROI 103%（`ev_reversed=true`）＋ ◎⑥→⑨（`axis_changed=true`）。
 
 ---
