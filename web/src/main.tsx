@@ -7,6 +7,7 @@ import { RaceList } from "./routes/RaceList";
 import { Analyze } from "./routes/Analyze";
 import { SessionSummary } from "./routes/SessionSummary";
 import { RaceDetail } from "./routes/RaceDetail";
+import { LiveBets } from "./routes/LiveBets";
 import "./styles.css";
 
 const queryClient = new QueryClient({
@@ -23,6 +24,7 @@ createRoot(document.getElementById("root")!).render(
         <Routes>
           <Route element={<Layout />}>
             <Route index element={<RaceList />} />
+            <Route path="live/:date" element={<LiveBets />} />
             <Route path="analyze" element={<Analyze />} />
             <Route path="sessions/:date" element={<SessionSummary />} />
             <Route

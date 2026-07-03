@@ -164,3 +164,71 @@ button:disabled {
 .grid a:hover {
   text-decoration: underline;
 }
+
+/* ライブ EV 買い目ビュー（LiveBets）。 */
+.live-summary {
+  font-size: 1.05rem;
+  font-weight: 600;
+  margin: 0.25rem 0 1rem;
+}
+
+.live-section {
+  margin-bottom: 1.5rem;
+}
+.live-section h3 {
+  margin: 0 0 0.5rem;
+  font-size: 0.95rem;
+}
+
+.live-card {
+  border: 1px solid #e5e5e5;
+  border-left: 4px solid #2e7d32;
+  border-radius: 6px;
+  background: #fff;
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+}
+
+.live-card-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-bottom: 0.5rem;
+}
+.live-mark {
+  font-size: 1.1rem;
+}
+.live-roi {
+  font-weight: 600;
+  color: #2e7d32;
+}
+.live-tag {
+  font-size: 0.75rem;
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  background: #fff3e0;
+  color: #e65100;
+}
+
+.grid.live-slip {
+  max-width: 40rem;
+}
+
+.live-flip {
+  color: #e65100;
+  font-weight: 600;
+  margin: 0.2rem 0;
+}
+
+.live-skip {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  padding: 0.4rem 0;
+  border-bottom: 1px solid #eee;
+}
+.live-skip.live-flipped {
+  color: #e65100;
+}

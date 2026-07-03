@@ -72,6 +72,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/live/{date}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 指定開催日のライブ EV 買い目（race ごと最新サイクル＋伝票＋フリップ）。
+         * @description 該当日の snapshot が無ければ races 空・summary count 0（200 空・404 にしない）。
+         */
+        get: operations["get_live"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/predictions": {
         parameters: {
             query?: never;
@@ -181,7 +201,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 買い目推奨（軸流しポートフォリオ, EV/推奨額）。保存オッズ基準。 */
+        /**
+         * 買い目推奨（軸流しポートフォリオ, EV/推奨額）。保存オッズ基準。
+         *     EV・期待回収率は純モデル（市場非依存・α=1.0）× 市場オッズで算出する（#272 循環断ち）。
+         *     軸/相手の順位付けは市場ブレンド確率を使う（順位付けと EV で確率系統が異なる）。
+         */
         get: operations["get_recommendations"];
         put?: never;
         post?: never;
@@ -390,6 +414,88 @@ export interface components {
             by_surface: components["schemas"]["GroupStatSchema"][];
             jockey_name: string;
             overall: components["schemas"]["GroupStatSchema"];
+        };
+        /** @description 直前サイクルとの差分（◎変化・+EV↔−EV 反転）。直前が無ければ全て false / null。 */
+        LiveFlip: {
+            /** @description ◎馬番が直前から変化したか。 */
+            axis_changed: boolean;
+            /** @description verdict が直前から反転（+EV↔−EV）したか。 */
+            ev_reversed: boolean;
+            /**
+             * Format: int32
+             * @description 直前サイクルの◎馬番（無ければ null）。
+             */
+            prev_axis?: number | null;
+            /**
+             * Format: double
+             * @description 直前サイクルの ROI[%]（無ければ null）。
+             */
+            prev_roi?: number | null;
+            /** @description 直前サイクルの verdict（無ければ null）。 */
+            prev_verdict?: string | null;
+        };
+        /** @description 1 レースの最新サイクル本体＋伝票＋フリップ。 */
+        LiveRaceViewSchema: {
+            /**
+             * Format: int32
+             * @description ◎馬番。
+             */
+            axis: number;
+            /**
+             * Format: double
+             * @description ◎の model 勝率[%]。
+             */
+            axis_prob: number;
+            /**
+             * Format: double
+             * @description ◎の単勝オッズ（欠落時 null）。
+             */
+            axis_win_odds?: number | null;
+            /** @description 監視サイクル時刻（UTC rfc3339）。 */
+            captured_at: string;
+            flip: components["schemas"]["LiveFlip"];
+            konsen: boolean;
+            /** @description 一部買い目のオッズ欠落（ROI 過小評価の可能性）。 */
+            odds_missing: boolean;
+            /** @description 発走時刻（netkeiba 由来文字列。欠落時 null）。 */
+            post_time?: string | null;
+            race_id: string;
+            /** Format: int32 */
+            race_no: number;
+            /**
+             * Format: double
+             * @description 全 3 券種 ROI[%]。
+             */
+            roi: number;
+            slip: components["schemas"]["SlipView"];
+            venue: string;
+            /** @description `'bet'`（ROI≥100%）/ `'skip'`（−EV）。 */
+            verdict: string;
+        };
+        /**
+         * @description `GET /api/live/{date}` のレスポンス（#260 / ADR 0064）。
+         *     指定開催日の race ごと最新サイクル＋伝票＋フリップを返す（read-only）。
+         */
+        LiveResponse: {
+            /** @description 開催日（`YYYY-MM-DD`）。 */
+            date: string;
+            races: components["schemas"]["LiveRaceViewSchema"][];
+            summary: components["schemas"]["LiveSummary"];
+        };
+        /** @description 一望サマリ（張る本数・監視数・最終更新時刻）。 */
+        LiveSummary: {
+            /**
+             * Format: int32
+             * @description 最新サイクルが `verdict='bet'` の race 数。
+             */
+            bet_race_count: number;
+            /** @description 全 race 中の最新 `captured_at` の最大値。無ければ null。 */
+            last_updated?: string | null;
+            /**
+             * Format: int32
+             * @description 監視レース数（= `races.len()`）。
+             */
+            watched_race_count: number;
         };
         /** @description 印 1 種の的中率。 */
         MarkStatSchema: {
@@ -687,6 +793,40 @@ export interface components {
             /** Format: int32 */
             voided_races: number;
         };
+        /** @description 伝票の 1 leg（式別×方式×軸×組番×点数×金額の「そのまま買える形」）。 */
+        SlipLeg: {
+            /**
+             * Format: int64
+             * @description 金額（100 円単位）。
+             */
+            amount: number;
+            /**
+             * Format: int32
+             * @description ◎馬番（`method=box` では null）。
+             */
+            axis?: number | null;
+            /** @description 式別（`wide` / `quinella` / `trio`）。 */
+            bet_type: string;
+            /** @description 組番（昇順ソート済み）。 */
+            combo: number[];
+            /** @description 方式（`nagashi` / `box` / `formation`）。 */
+            method: string;
+            /**
+             * Format: int32
+             * @description この leg の点数。
+             */
+            points: number;
+        };
+        /** @description 買い目伝票。`slip` JSONB 列（`{ race_budget, legs }`）をデシリアライズしたもの。 */
+        SlipView: {
+            /** @description (方式レイヤー × 券種) 単位の leg 配列。 */
+            legs: components["schemas"]["SlipLeg"][];
+            /**
+             * Format: int64
+             * @description このレースに配分した予算（円）。
+             */
+            race_budget: number;
+        };
         /** @description サマリの 1 買い目（レスポンス）。どのレースの買い目かを race_id で示す。 */
         SummaryBet: {
             bet_type: string;
@@ -873,6 +1013,47 @@ export interface operations {
                 };
             };
             /** @description 内部エラー */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_live: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 開催日 YYYY-MM-DD */
+                date: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description race ごと最新サイクルの判定＋伝票（無い日は races 空・200） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LiveResponse"];
+                };
+            };
+            /** @description 日付フォーマット不正 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description 内部エラー（伝票 JSON 復元失敗を含む） */
             500: {
                 headers: {
                     [name: string]: unknown;
@@ -1126,7 +1307,7 @@ export interface operations {
             query?: {
                 /** @description 馬場状態（`良` / `稍重` / `重` / `不良`。略記 `稍` / `不` も可）。未指定なら馬場項なし。 */
                 track_condition?: string | null;
-                /** @description 市場オッズ（単勝）とのブレンド係数 `[0,1]`。未指定はモデルのみ。 */
+                /** @description 市場オッズ（単勝）とのブレンド係数 `[0,1]`。未指定は本番ブレンド α=0.2。素モデルは `1.0` を明示。 */
                 blend_alpha?: number | null;
             };
             header?: never;
@@ -1183,7 +1364,7 @@ export interface operations {
                 budget: number;
                 /** @description 馬場状態（`良` / `稍重` / `重` / `不良`。略記 `稍` / `不` も可）。未指定なら馬場項なし。 */
                 track_condition?: string | null;
-                /** @description 市場オッズ（単勝）とのブレンド係数 `[0,1]`。未指定はモデルのみ（`/prediction` と同義）。 */
+                /** @description 市場オッズ（単勝）とのブレンド係数 `[0,1]`。未指定は本番ブレンド α=0.2。素モデルは `1.0` を明示（`/prediction` と同義）。 */
                 blend_alpha?: number | null;
             };
             header?: never;
@@ -1195,7 +1376,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description 予算内の軸流しポートフォリオ（オッズ未保存なら odds_available=false） */
+            /** @description 予算内の軸流しポートフォリオ（EV は純モデル×市場オッズ。オッズ未保存なら odds_available=false） */
             200: {
                 headers: {
                     [name: string]: unknown;
