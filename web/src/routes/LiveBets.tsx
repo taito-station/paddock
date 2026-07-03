@@ -9,6 +9,7 @@ import {
   groupLegs,
   jstHm,
   maru,
+  postMinutes,
   roiPct,
   skipReason,
   summaryLine,
@@ -17,12 +18,9 @@ import {
 const venueJp = (v: string) => VENUE_JP[v] ?? v;
 const raceLabel = (r: LiveRaceView) => `${venueJp(r.venue)}${r.race_no}R`;
 
-// post_time（HH:MM 文字列。欠落時 null）でレースを並べる。null は末尾。
-// race_cards.post_time は %H:%M（ゼロ埋め 2 桁時）で保存されるため、文字列辞書順＝時刻順。
+// post_time（発走時刻）でレースを並べる。null は末尾（postMinutes が +∞ を返す）。
 function byPostTime(a: LiveRaceView, b: LiveRaceView): number {
-  const pa = a.post_time ?? "99:99";
-  const pb = b.post_time ?? "99:99";
-  return pa < pb ? -1 : pa > pb ? 1 : 0;
+  return postMinutes(a.post_time) - postMinutes(b.post_time);
 }
 
 // 🟢 張るレース: そのまま買える形（式別 / 方式 / 軸 / 相手 / 点数 / 金額）。
@@ -37,7 +35,8 @@ function BetCard({ race }: { race: LiveRaceView }) {
   return (
     <section className="live-card live-bet">
       <div className="live-card-head">
-        <span className="live-mark">{flipped ? "🔶" : "🟢"}</span>
+        {/* 張るレースは 🟢 を維持しつつ、フリップ時は 🔶 も併記（両シグナルを両立）。 */}
+        <span className="live-mark">{flipped ? "🟢🔶" : "🟢"}</span>
         <strong>{raceLabel(race)}</strong>
         <span className="live-roi">ROI {roiPct(race.roi)}</span>
         <span>
@@ -49,8 +48,8 @@ function BetCard({ race }: { race: LiveRaceView }) {
       </div>
 
       {flipped &&
-        notes.map((n, i) => (
-          <p key={i} className="live-flip">
+        notes.map((n) => (
+          <p key={n} className="live-flip">
             🔶 {n}
           </p>
         ))}
@@ -72,8 +71,8 @@ function BetCard({ race }: { race: LiveRaceView }) {
           </tr>
         </thead>
         <tbody>
-          {groups.map((g, i) => (
-            <tr key={`${g.betType}-${g.method}-${i}`}>
+          {groups.map((g) => (
+            <tr key={`${g.betType}-${g.method}`}>
               <td>{BET_TYPE_JP[g.betType] ?? g.betType}</td>
               <td>
                 {METHOD_JP[g.method] ?? g.method}
@@ -112,8 +111,8 @@ function SkipRow({ race }: { race: LiveRaceView }) {
           axis_win_odds: race.axis_win_odds,
         })}
       </span>
-      {notes.map((n, i) => (
-        <span key={i} className="live-flip">
+      {notes.map((n) => (
+        <span key={n} className="live-flip">
           🔶 {n}
         </span>
       ))}
@@ -140,15 +139,15 @@ export function LiveBets() {
     },
   });
 
-  const races = live.data?.races ?? [];
-  const bets = races.filter((r) => r.verdict === "bet").sort(byPostTime);
-  const skips = races.filter((r) => r.verdict !== "bet").sort(byPostTime);
-
   // ルート live/:date により date は通常必ず存在するが、空だと query が無効化され
-  // isPending のまま「読み込み中…」で固まるため、明示的にガードする。
+  // isPending のまま「読み込み中…」で固まるため、派生計算の前に明示的にガードする。
   if (!date) {
     return <p className="error">開催日が指定されていません。</p>;
   }
+
+  const races = live.data?.races ?? [];
+  const bets = races.filter((r) => r.verdict === "bet").sort(byPostTime);
+  const skips = races.filter((r) => r.verdict !== "bet").sort(byPostTime);
 
   return (
     <section>

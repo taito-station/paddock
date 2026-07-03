@@ -3,11 +3,27 @@ import {
   maru,
   roiPct,
   jstHm,
+  postMinutes,
   summaryLine,
   groupLegs,
   skipReason,
   flipNotes,
 } from "./live";
+
+describe("postMinutes", () => {
+  it("parses HH:MM to minutes", () => {
+    expect(postMinutes("15:35")).toBe(935);
+    expect(postMinutes("09:05")).toBe(545);
+  });
+  it("orders non-zero-padded correctly (数値比較)", () => {
+    // 文字列辞書順なら "9:30" > "10:00" で壊れるが、数値化で正しく並ぶ。
+    expect(postMinutes("9:30")).toBeLessThan(postMinutes("10:00"));
+  });
+  it("null / invalid go to the tail (+∞)", () => {
+    expect(postMinutes(null)).toBe(Number.POSITIVE_INFINITY);
+    expect(postMinutes("--")).toBe(Number.POSITIVE_INFINITY);
+  });
+});
 
 describe("maru", () => {
   it("maps 1..20 to circled numbers", () => {

@@ -36,6 +36,15 @@ export function jstHm(iso: string | null | undefined): string {
 // （CLAUDE.md「断然人気は EV がマイナスになりがち」。実運用の単勝 1.4 例をカバーする保守値）。
 export const DANZEN_WIN_ODDS_MAX = 1.9;
 
+// "HH:MM" を分に数値化する。欠落・不正は +∞（末尾送り）。文字列辞書順だとゼロ埋めが
+// 崩れた供給値（"9:30"）で順序が壊れるため、時刻順を数値比較で確定させる。
+export function postMinutes(t: string | null | undefined): number {
+  if (!t) return Number.POSITIVE_INFINITY;
+  const [h, m] = t.split(":");
+  const min = Number(h) * 60 + Number(m);
+  return Number.isFinite(min) ? min : Number.POSITIVE_INFINITY;
+}
+
 // 冒頭の一望サマリ 1 行。張る本数が 0 なら「張り無し」を明示（曖昧な据え置きをしない）。
 export function summaryLine(s: LiveSummary): string {
   const head =
@@ -154,6 +163,8 @@ export function flipNotes(
 ): string[] {
   const notes: string[] = [];
   if (flip.ev_reversed) {
+    // 反転方向は現サイクルの verdict から導出する。verdict は bet/skip の二値で
+    // ev_reversed=前後反転が保証されるため prev_verdict と等価（三値化したら要再考）。
     const dir = cur.verdict === "bet" ? "−EV→+EVに反転" : "+EV→−EVに反転";
     const roiPart =
       flip.prev_roi != null
