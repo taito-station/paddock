@@ -4,6 +4,7 @@
 配線（dump パース・券種→合成確率の振り分け・EV/実配当清算・quinella↔umaren 払戻マッピング・ROI・
 オッズ帯）を手計算で固定する。
 """
+import math
 import os
 import tempfile
 
@@ -76,6 +77,38 @@ def test_collect_bets_ev_settlement_and_quinella_umaren_mapping():
     assert approx(r, 400.0) and approx(hr, 50.0) and n == 2
 
 
+def test_collect_bets_exacta_and_trio_settlement():
+    # exacta（順序付き (1着,2着) タプル）と trio（frozenset）の PAY_KEY 経由清算を e2e で固定。
+    # 4 頭立てで trio の的中/不的中を両方カバー。exacta は順序区別（逆順は不的中）。
+    probs = {1: 0.4, 2: 0.3, 3: 0.2, 4: 0.1}
+    dump = {"P": probs}
+    exotic = {"P": {
+        "quinella": {},
+        "exacta": {(1, 2): 5.0, (2, 1): 5.0},  # (1着,2着)。正順のみ的中
+        "trio": {frozenset({1, 2, 3}): 10.0, frozenset({1, 2, 4}): 25.0},  # {1,2,3} 的中 / {1,2,4} 不的中
+    }}
+    races = [{"pid": "P", "date": "d1", "venue": "x", "rnum": 1, "nk": "N"}]
+    rdir = tempfile.mkdtemp()
+    open(os.path.join(rdir, "res_N.html"), "w").close()
+
+    orig = U.parse_result
+    U.parse_result = lambda path: ([1, 2, 3], {
+        "umaren": {}, "wide": {},
+        "trio": {frozenset({1, 2, 3}): 1500}, "exacta": {(1, 2): 900}})
+    try:
+        bets = E.collect_bets(dump, exotic, races, rdir, ["exacta", "trio"])
+    finally:
+        U.parse_result = orig
+
+    by = {(b["bet_type"], b["combo"]): b for b in bets}
+    # exacta: 正順 (1,2) 的中 900 / 逆順 (2,1) 不的中（順序タプルキーの一致を担保）。
+    assert by[("exacta", (1, 2))]["hit"] and by[("exacta", (1, 2))]["payout"] == 900
+    assert not by[("exacta", (2, 1))]["hit"] and by[("exacta", (2, 1))]["payout"] == 0
+    # trio: {1,2,3} 的中 1500 / {1,2,4} 不的中（frozenset キーの一致を担保）。
+    assert by[("trio", frozenset({1, 2, 3}))]["hit"] and by[("trio", frozenset({1, 2, 3}))]["payout"] == 1500
+    assert not by[("trio", frozenset({1, 2, 4}))]["hit"] and by[("trio", frozenset({1, 2, 4}))]["payout"] == 0
+
+
 def test_collect_bets_skips_missing_inputs():
     # dump/exotic/result のいずれか欠落レースは投票候補に載らない。
     probs = {1: 0.6, 2: 0.4}
@@ -88,7 +121,8 @@ def test_collect_bets_skips_missing_inputs():
 
 
 def test_roi_empty_and_all_miss():
-    assert E.roi([]) == (float("nan"), float("nan"), 0) or True  # nan 比較は下で個別に
+    r0, hr0, n0 = E.roi([])  # 空入力は nan/nan/0（ゼロ除算を避ける）。
+    assert math.isnan(r0) and math.isnan(hr0) and n0 == 0
     r, hr, n = E.roi([{"payout": 0, "hit": False}, {"payout": 0, "hit": False}])
     assert approx(r, 0.0) and approx(hr, 0.0) and n == 2
 
