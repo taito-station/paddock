@@ -183,6 +183,9 @@ fn build_board_horses(
         .iter()
         .map(|hp| {
             let num = hp.horse_num.value();
+            // pure と blended は同一 predict_race_views 由来で常に同じ馬集合。見つからないのは
+            // 到達しないが、防御的に blended 値へフォールバックする（純モデル列に無警告で混入しない
+            // よう、本来は同集合であることを前提とする）。
             let pure_win_prob = pure
                 .iter()
                 .find(|p| p.horse_num == hp.horse_num)

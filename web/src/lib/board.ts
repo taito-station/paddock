@@ -43,11 +43,6 @@ export function sortByModelRank(horses: BoardHorse[]): BoardHorse[] {
   );
 }
 
-// 馬番順（盤の別ソート用）。
-export function sortByHorseNum(horses: BoardHorse[]): BoardHorse[] {
-  return [...horses].sort((a, b) => a.horse_num - b.horse_num);
-}
-
 // 複勝オッズ帯の表示（"1.6-2.0"）。未取得は "-"。
 export function placeOddsLabel(
   low: number | null | undefined,
