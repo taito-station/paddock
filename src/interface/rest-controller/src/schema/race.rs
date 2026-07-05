@@ -247,12 +247,10 @@ pub struct BoardHorseSchema {
     pub win_odds: Option<f64>,
     pub place_odds_low: Option<f64>,
     pub place_odds_high: Option<f64>,
-    /// 単勝人気（1=1番人気。単勝未取得なら `null`）。
+    /// 単勝人気（1=1番人気。単勝未取得なら `null`）。乖離判定の市場順位も兼ねる。
     pub popularity: Option<u32>,
     /// モデル勝率順位（1=最上位）。
     pub model_rank: u32,
-    /// 市場人気順位（= `popularity`）。
-    pub market_rank: Option<u32>,
     /// 機械導出の印スラッグ（honmei/taikou/tanana/hoshi）。無印は `null`。
     pub mark: Option<String>,
     /// 重なり馬（モデル勝率1位 かつ 単勝人気1位＝ほぼ複勝圏サイン）。
@@ -355,7 +353,6 @@ impl From<RaceBoard> for RaceBoardResponse {
                     place_odds_high: h.place_odds_high,
                     popularity: h.popularity,
                     model_rank: h.model_rank,
-                    market_rank: h.market_rank,
                     mark: h.mark,
                     is_overlay: h.is_overlay,
                     is_value: h.is_value,

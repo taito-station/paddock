@@ -355,11 +355,6 @@ export interface components {
             market_implied?: number | null;
             /**
              * Format: int32
-             * @description 市場人気順位（= `popularity`）。
-             */
-            market_rank?: number | null;
-            /**
-             * Format: int32
              * @description モデル勝率順位（1=最上位）。
              */
             model_rank: number;
@@ -371,7 +366,7 @@ export interface components {
             place_prob: number;
             /**
              * Format: int32
-             * @description 単勝人気（1=1番人気。単勝未取得なら `null`）。
+             * @description 単勝人気（1=1番人気。単勝未取得なら `null`）。乖離判定の市場順位も兼ねる。
              */
             popularity?: number | null;
             /**

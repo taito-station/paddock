@@ -26,9 +26,11 @@ const CONFUSION_RATIO: f64 = 0.70;
 const CONFUSION_MIN_HORSES: u32 = 4;
 
 /// 乖離馬（妙味・ワイドボックス候補）の判定に使う「人気順 − モデル順」の下限。
-/// モデル上位（[`VALUE_MODEL_RANK_MAX`] 位以内）かつ市場人気がこれ以上下なら乖離馬。
+/// モデル上位圏（[`VALUE_MODEL_RANK_MAX`] 位以内）かつ市場人気がこれ以上下なら乖離馬。
 const VALUE_RANK_GAP: i32 = 3;
-const VALUE_MODEL_RANK_MAX: u32 = 3;
+/// 妙味候補として扱うモデル順位の上限（＝contender 圏）。top3 に限らず 4〜6 位の過小人気も
+/// 拾えるようにする（top3 のみだと ◎○▲ と重なり ☆ が機械印として出番を失うため）。
+const VALUE_MODEL_RANK_MAX: u32 = 6;
 
 /// 盤全体（1レース）。
 #[derive(Debug, Clone)]
@@ -82,12 +84,10 @@ pub struct BoardHorse {
     pub win_odds: Option<f64>,
     pub place_odds_low: Option<f64>,
     pub place_odds_high: Option<f64>,
-    /// 単勝人気（オッズ昇順ランク・1=1番人気。単勝未取得なら `None`）。
+    /// 単勝人気（オッズ昇順ランク・1=1番人気。単勝未取得なら `None`）。乖離判定の市場順位も兼ねる。
     pub popularity: Option<u32>,
     /// モデル勝率順位（1=最上位）。
     pub model_rank: u32,
-    /// 市場人気順位（= `popularity`。乖離判定の生値として別名で保持）。
-    pub market_rank: Option<u32>,
     /// 機械導出の印スラッグ（honmei/taikou/tanana/hoshi）。無印は `None`。
     pub mark: Option<String>,
     /// 重なり馬（モデル勝率1位 かつ 単勝人気1位＝ほぼ複勝圏サイン）。
@@ -193,8 +193,13 @@ fn build_board_horses(
                 .and_then(|o| o.win.get(&hp.horse_num))
                 .map(|v| v.value());
             let place = odds.and_then(|o| o.place.get(&hp.horse_num));
+            // model_rank は blended（表示用の勝率と同系統）で算出する。乖離判定を pure で行うと
+            // 盤に見える「勝率(blended)」と「妙味フラグ」の基準がズレて読み手が混乱するため、
+            // 表示と同じ blended 順位で市場人気(pop)との差を測る（純モデル差の増幅より整合性を優先）。
             let mr = *model_rank.get(&num).unwrap_or(&0);
             let pop = popularity.get(&num).copied();
+            // 重なり馬: blended 勝率1位 かつ 単勝人気1位。◎(model_rank==1)＝買い目軸(build_portfolio の
+            // rank_axis_partners も blended 首位・同一 tie-break)なので、盤の ◎ と「軸 N」は構造上一致する。
             let is_overlay = mr == 1 && pop == Some(1);
             let is_value = mr <= VALUE_MODEL_RANK_MAX
                 && pop.is_some_and(|p| p as i32 - mr as i32 >= VALUE_RANK_GAP);
@@ -215,7 +220,6 @@ fn build_board_horses(
                 place_odds_high: place.map(|p| p.high.value()),
                 popularity: pop,
                 model_rank: mr,
-                market_rank: pop,
                 mark,
                 is_overlay,
                 is_value,
@@ -379,6 +383,39 @@ mod tests {
         assert_eq!(h1.popularity, Some(4));
         assert!(h1.is_value);
         assert!(!h1.is_overlay);
+    }
+
+    #[test]
+    fn hoshi_mark_for_value_horse_outside_top3() {
+        // ④: モデル4位（top3外）だが単勝最下位（人気8）＝ gap 4 の過小人気 → ☆(hoshi)。
+        // top3 は ◎○▲、top3外の乖離馬に ☆ が付くことを担保（旧 top3 上限だと ☆ は到達不能だった）。
+        let b = vec![
+            hp(1, 0.20),
+            hp(2, 0.18),
+            hp(3, 0.16),
+            hp(4, 0.14),
+            hp(5, 0.10),
+            hp(6, 0.08),
+            hp(7, 0.07),
+            hp(8, 0.05),
+        ];
+        let o = odds_with_win(&[
+            (1, 2.0),
+            (2, 3.0),
+            (3, 4.0),
+            (5, 5.0),
+            (6, 6.0),
+            (7, 7.0),
+            (8, 8.0),
+            (4, 50.0), // ④ を最も高オッズ＝人気8 に
+        ]);
+        let horses = build_board_horses(&b, &b, Some(&o), None);
+        let h4 = horses.iter().find(|h| h.horse_num == 4).unwrap();
+        assert_eq!(h4.model_rank, 4);
+        assert_eq!(h4.popularity, Some(8));
+        assert!(h4.is_value);
+        assert!(!h4.is_overlay);
+        assert_eq!(h4.mark.as_deref(), Some("hoshi"));
     }
 
     #[test]

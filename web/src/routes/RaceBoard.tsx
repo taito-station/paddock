@@ -14,7 +14,7 @@ const DEFAULT_RACE_BUDGET = 5000; // CLI predict / recommendations の既定 rac
 export function RaceBoard() {
   const { raceId = "" } = useParams();
   const [searchParams] = useSearchParams();
-  const date = searchParams.get("date") ?? "";
+  const dateParam = searchParams.get("date") ?? "";
 
   const board = useQuery({
     queryKey: ["board", raceId],
@@ -30,6 +30,10 @@ export function RaceBoard() {
       return data;
     },
   });
+
+  // 開催日は ?date= を優先しつつ、直リンク（クエリ無し）でも盤レスポンスの date に
+  // フォールバックして場/R切替と「← レース一覧」リンクを維持する。
+  const date = dateParam || board.data?.date || "";
 
   // 同開催日の全レースを引き、同じ R の他場（函館⇄福島⇄小倉…）へ場内切替する。
   const races = useQuery({
@@ -47,7 +51,7 @@ export function RaceBoard() {
   const d = board.data;
   const maxWin = d ? Math.max(0, ...d.horses.map((h) => h.win_prob)) : 0;
   const horses = d ? sortByModelRank(d.horses) : [];
-  // 同じレース番号の他場（場コード順に安定ソート）。
+  // 同じレース番号の他場（スラッグ辞書順で安定ソート）。
   const siblings = d
     ? (races.data?.races ?? [])
         .filter((r) => r.race_num === d.race_num)

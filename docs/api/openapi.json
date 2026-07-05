@@ -1471,15 +1471,6 @@
             "format": "double",
             "description": "市場implied 勝率（フィールド内 `1/単勝` 正規化。単勝未取得なら `null`）。"
           },
-          "market_rank": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int32",
-            "description": "市場人気順位（= `popularity`）。",
-            "minimum": 0
-          },
           "model_rank": {
             "type": "integer",
             "format": "int32",
@@ -1510,7 +1501,7 @@
               "null"
             ],
             "format": "int32",
-            "description": "単勝人気（1=1番人気。単勝未取得なら `null`）。",
+            "description": "単勝人気（1=1番人気。単勝未取得なら `null`）。乖離判定の市場順位も兼ねる。",
             "minimum": 0
           },
           "pure_win_prob": {
