@@ -19,6 +19,7 @@ pub use interactor::entry::EntryInteractor;
 pub use interactor::horse_history::HorseHistoryInteractor;
 pub use interactor::live::{LiveFlip, LiveRaceView, LiveSummary, LiveView};
 pub use interactor::odds::OddsInteractor;
+pub use interactor::race::board::{BoardHorse, Confusion, RaceBoard};
 pub use interactor::race::predict::PredictionViews;
 pub use interactor::settle::{SettleInteractor, SettleReport};
 pub use netkeiba_race_id::{

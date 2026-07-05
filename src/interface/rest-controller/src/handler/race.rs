@@ -11,8 +11,8 @@ use paddock_use_case::repository::Repository;
 
 use crate::error::{Error, Result};
 use crate::schema::race::{
-    HorseProbabilitySchema, PredictionResponse, RaceCardResponse, RaceListResponse, RaceSummary,
-    RecommendationResponse,
+    HorseProbabilitySchema, PredictionResponse, RaceBoardResponse, RaceCardResponse,
+    RaceListResponse, RaceSummary, RecommendationResponse,
 };
 
 /// `GET /api/races` のクエリ。
@@ -62,6 +62,22 @@ pub struct RecommendationQuery {
     #[param(default = 0.2, minimum = 0.0, maximum = 1.0)]
     pub blend_alpha: Option<f64>,
 }
+
+/// `GET /api/races/{race_id}/board` のクエリ。
+#[derive(Debug, Deserialize, IntoParams)]
+pub struct BoardQuery {
+    /// このレースに配分する予算（円）。1 以上。買い目組成の上限（`/recommendations` と同義）。
+    #[param(default = 5000, minimum = 1)]
+    pub budget: Option<u64>,
+    /// 馬場状態（`良` / `稍重` / `重` / `不良`。略記 `稍` / `不` も可）。未指定なら馬場項なし。
+    pub track_condition: Option<String>,
+    /// 市場オッズ（単勝）とのブレンド係数 `[0,1]`。未指定は本番ブレンド α=0.2。素モデルは `1.0` を明示。
+    #[param(default = 0.2, minimum = 0.0, maximum = 1.0)]
+    pub blend_alpha: Option<f64>,
+}
+
+/// このレースに配分する予算の既定（円）。`/board` の `budget` 省略時に使う（CLAUDE.md 既定と一致）。
+pub(crate) const DEFAULT_RACE_BUDGET: u64 = 5000;
 
 /// レース一覧（指定日）。
 #[utoipa::path(
@@ -220,4 +236,52 @@ where
         None => RecommendationResponse::odds_unavailable(race_id_str),
     };
     Ok(HttpResponse::Ok().json(body))
+}
+
+/// 1レース盤（全頭 ＋ 買い目 ＋ 混戦/乖離/重なり）。
+/// 全出走馬を truncate せず返し、買い目の相手 top5 から漏れる市場人気馬も盤で見える。
+/// 買い目は `/recommendations` と同経路・同値（相手 top5 不変）。
+#[utoipa::path(
+    get,
+    path = "/api/races/{race_id}/board",
+    params(
+        ("race_id" = String, Path, description = "レース ID"),
+        BoardQuery,
+    ),
+    responses(
+        (status = 200, description = "1レース盤（全頭＋買い目＋混戦/乖離/重なり）", body = RaceBoardResponse),
+        (status = 400, description = "クエリ不正", body = crate::error::ErrorBody),
+        (status = 404, description = "出馬表が無いレース", body = crate::error::ErrorBody),
+        (status = 500, description = "内部エラー", body = crate::error::ErrorBody),
+    ),
+    tag = "races",
+)]
+pub async fn get_race_board<R, P, F>(
+    interactor: web::Data<Interactor<R, P, F>>,
+    path: web::Path<String>,
+    query: web::Query<BoardQuery>,
+) -> Result<HttpResponse>
+where
+    R: Repository + 'static,
+    P: PdfParser + Send + Sync + 'static,
+    F: PdfFetcher + Send + Sync + 'static,
+{
+    let race_id = RaceId::try_from(path.into_inner())?;
+
+    let budget = query.budget.unwrap_or(DEFAULT_RACE_BUDGET);
+    if budget == 0 {
+        return Err(Error::BadRequest("budget must be >= 1".to_string()));
+    }
+
+    let blend_alpha = resolve_blend_alpha(query.blend_alpha)?;
+
+    let track_condition = match query.track_condition.as_deref() {
+        Some(s) => Some(TrackCondition::try_from(s)?),
+        None => None,
+    };
+
+    let board = interactor
+        .race_board(&race_id, budget, blend_alpha, track_condition)
+        .await?;
+    Ok(HttpResponse::Ok().json(RaceBoardResponse::from(board)))
 }
