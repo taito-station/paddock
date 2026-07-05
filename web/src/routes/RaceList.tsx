@@ -107,6 +107,7 @@ export function RaceList() {
               <th>開催</th>
               <th>距離</th>
               <th>馬場</th>
+              <th>盤</th>
               <th>状態</th>
             </tr>
           </thead>
@@ -121,6 +122,9 @@ export function RaceList() {
                 <td>{VENUE_JP[r.venue] ?? r.venue}</td>
                 <td>{r.distance}m</td>
                 <td>{SURFACE_JP[r.surface] ?? r.surface}</td>
+                <td>
+                  <Link to={`/races/${r.race_id}/board?date=${date}`}>盤</Link>
+                </td>
                 <td>
                   <Badge
                     kind={raceBadge({
