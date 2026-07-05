@@ -17,6 +17,8 @@ export function RaceBoard() {
   const dateParam = searchParams.get("date") ?? "";
 
   const board = useQuery({
+    // budget/blend_alpha は現状固定（5000 / 既定 α）。将来これらを可変にする際は
+    // stale キャッシュを避けるため queryKey に必ず含めること。
     queryKey: ["board", raceId],
     enabled: !!raceId,
     queryFn: async () => {

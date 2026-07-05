@@ -1,4 +1,4 @@
-//! 1レース全頭「盤」ビュー（#board）。
+//! 1レース全頭「盤」ビュー（予想ビューア RaceBoard の read ユースケース）。
 //!
 //! 予想ビューアの1レース盤に必要な全頭データを 1 レスポンスに束ねる read ユースケース。
 //! 確率・買い目は既存経路（`predict_race_views` ＋ `build_portfolio`）を**そのまま再利用**し、
@@ -255,9 +255,9 @@ fn compute_market(
     if priced.is_empty() {
         return (implied, popularity);
     }
-    let inv_sum: f64 = priced.iter().map(|(_, odds)| 1.0 / odds).sum();
-    for (num, odds) in &priced {
-        implied.insert(*num, (1.0 / odds) / inv_sum);
+    let inv_sum: f64 = priced.iter().map(|(_, win_odds)| 1.0 / win_odds).sum();
+    for (num, win_odds) in &priced {
+        implied.insert(*num, (1.0 / win_odds) / inv_sum);
     }
     // 人気: オッズ昇順（同値は馬番昇順で安定）。
     priced.sort_by(|a, b| {

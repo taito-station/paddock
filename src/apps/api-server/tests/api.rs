@@ -525,6 +525,21 @@ async fn board_bets_match_recommendations(pool: sqlx::PgPool) {
         "買い目が一致（相手 top5 不変）"
     );
     assert_eq!(board["roi"], reco["roi"], "ROI が一致");
+
+    // 盤の ◎（model_rank==1 の馬）＝買い目軸（build_portfolio の axis）が一致することを固定する。
+    // 両者は blended 首位・同一 tie-break（win_prob 降順→馬番昇順）由来なのでズレない前提を回帰で担保。
+    let axis = board["axis"].as_u64().unwrap();
+    let top = board["horses"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|h| h["model_rank"].as_u64() == Some(1))
+        .expect("model_rank==1 の馬が存在する");
+    assert_eq!(
+        top["horse_num"].as_u64().unwrap(),
+        axis,
+        "盤の ◎(model_rank 1) と買い目軸は同一馬でなければならない"
+    );
 }
 
 #[sqlx::test(migrations = "../../../deployments/db/migrations")]
