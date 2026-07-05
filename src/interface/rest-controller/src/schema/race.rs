@@ -3,6 +3,7 @@ use serde::Serialize;
 use utoipa::ToSchema;
 
 use paddock_domain::{BetCombination, HorseEntry, HorseProbability, Portfolio, Race, RaceCard};
+use paddock_use_case::RaceBoard;
 
 /// レース一覧の 1 要素（出走前の諸元のみ。results は含まない）。
 #[derive(Debug, Serialize, ToSchema)]
@@ -210,6 +211,153 @@ impl RecommendationResponse {
             total_stake: p.total_stake,
             roi: p.ev.as_ref().map(|e| e.roi),
             hit_prob: p.ev.as_ref().map(|e| e.hit_prob),
+        }
+    }
+}
+
+/// 混戦サマリ（CLAUDE.md の混戦判定を機械化した結果）。
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ConfusionSchema {
+    /// 混戦か（◎の勝率×0.70 以上が ◎含め 4 頭以上）。
+    pub is_confused: bool,
+    /// ◎（モデル勝率1位）の勝率 [0,1]。
+    pub axis_win_prob: f64,
+    /// 判定しきい値（= `axis_win_prob * 0.70`）。
+    pub threshold: f64,
+    /// しきい値以上の頭数（◎含む）。
+    pub qualifying_count: u32,
+}
+
+/// 盤の 1 頭分（全頭 truncate せず返す）。
+#[derive(Debug, Serialize, ToSchema)]
+pub struct BoardHorseSchema {
+    /// 枠番（出馬表に無ければ `null`）。
+    pub gate_num: Option<u32>,
+    pub horse_num: u32,
+    pub horse_name: String,
+    pub jockey: Option<String>,
+    /// 表示用（市場ブレンド α）の勝率/連対率/複勝率 [0,1]。
+    pub win_prob: f64,
+    pub place_prob: f64,
+    pub show_prob: f64,
+    /// EV 視点（純モデル α=1.0）の勝率 [0,1]。
+    pub pure_win_prob: f64,
+    /// 市場implied 勝率（フィールド内 `1/単勝` 正規化。単勝未取得なら `null`）。
+    pub market_implied: Option<f64>,
+    pub win_odds: Option<f64>,
+    pub place_odds_low: Option<f64>,
+    pub place_odds_high: Option<f64>,
+    /// 単勝人気（1=1番人気。単勝未取得なら `null`）。乖離判定の市場順位も兼ねる。
+    pub popularity: Option<u32>,
+    /// モデル勝率順位（1=最上位）。
+    pub model_rank: u32,
+    /// 機械導出の印スラッグ（honmei/taikou/tanana/hoshi）。無印は `null`。
+    pub mark: Option<String>,
+    /// 重なり馬（モデル勝率1位 かつ 単勝人気1位＝ほぼ複勝圏サイン）。
+    pub is_overlay: bool,
+    /// 乖離馬（モデル上位×市場人気低＝妙味・ワイドボックス候補）。
+    pub is_value: bool,
+}
+
+/// `GET /api/races/{race_id}/board` のレスポンス（1レース盤）。
+///
+/// 全出走馬 ＋ 買い目 ＋ 混戦/乖離/重なりを 1 レスポンスで返す。`horses` は truncate しない
+/// （買い目の相手 top5 から漏れる市場人気馬も盤で見える）。買い目（`axis`/`partners`/`bets`/
+/// `roi`/`hit_prob`）は `/recommendations` と同経路・同値で、保存オッズが無ければ `odds_available=false`。
+#[derive(Debug, Serialize, ToSchema)]
+pub struct RaceBoardResponse {
+    pub race_id: String,
+    pub date: NaiveDate,
+    pub venue: String,
+    pub race_num: u32,
+    pub surface: String,
+    pub distance: u32,
+    pub field_size: u32,
+    /// 発走時刻 `HH:MM`（未取得は `null`）。
+    pub post_time: Option<String>,
+    /// 保存オッズ（#51）の有無。false のとき `bets` は必ず空。
+    pub odds_available: bool,
+    pub axis: Option<u32>,
+    pub partners: Vec<u32>,
+    pub bets: Vec<RecommendationBet>,
+    pub total_stake: u64,
+    pub roi: Option<f64>,
+    pub hit_prob: Option<f64>,
+    pub confusion: ConfusionSchema,
+    pub horses: Vec<BoardHorseSchema>,
+}
+
+impl From<RaceBoard> for RaceBoardResponse {
+    fn from(b: RaceBoard) -> Self {
+        let (odds_available, axis, partners, bets, total_stake, roi, hit_prob) = match b.portfolio {
+            Some(p) => (
+                true,
+                p.axis.map(|h| h.value()),
+                p.partners.iter().map(|h| h.value()).collect(),
+                p.bets
+                    .iter()
+                    .map(|bet| {
+                        let (bet_type, combination) = combination_parts(&bet.combination);
+                        RecommendationBet {
+                            bet_type: bet_type.to_string(),
+                            combination,
+                            stake: bet.stake,
+                            odds: bet.odds,
+                            ev: bet.ev,
+                        }
+                    })
+                    .collect(),
+                p.total_stake,
+                p.ev.as_ref().map(|e| e.roi),
+                p.ev.as_ref().map(|e| e.hit_prob),
+            ),
+            None => (false, None, Vec::new(), Vec::new(), 0, None, None),
+        };
+        Self {
+            race_id: b.race_id.value().to_string(),
+            date: b.date,
+            venue: b.venue,
+            race_num: b.race_num,
+            surface: b.surface,
+            distance: b.distance,
+            field_size: b.field_size,
+            post_time: b.post_time,
+            odds_available,
+            axis,
+            partners,
+            bets,
+            total_stake,
+            roi,
+            hit_prob,
+            confusion: ConfusionSchema {
+                is_confused: b.confusion.is_confused,
+                axis_win_prob: b.confusion.axis_win_prob,
+                threshold: b.confusion.threshold,
+                qualifying_count: b.confusion.qualifying_count,
+            },
+            horses: b
+                .horses
+                .into_iter()
+                .map(|h| BoardHorseSchema {
+                    gate_num: h.gate_num,
+                    horse_num: h.horse_num,
+                    horse_name: h.horse_name,
+                    jockey: h.jockey,
+                    win_prob: h.win_prob,
+                    place_prob: h.place_prob,
+                    show_prob: h.show_prob,
+                    pure_win_prob: h.pure_win_prob,
+                    market_implied: h.market_implied,
+                    win_odds: h.win_odds,
+                    place_odds_low: h.place_odds_low,
+                    place_odds_high: h.place_odds_high,
+                    popularity: h.popularity,
+                    model_rank: h.model_rank,
+                    mark: h.mark,
+                    is_overlay: h.is_overlay,
+                    is_value: h.is_value,
+                })
+                .collect(),
         }
     }
 }

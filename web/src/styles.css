@@ -232,3 +232,204 @@ button:disabled {
 .live-skip.live-flipped {
   color: #e65100;
 }
+
+/* ===== 1レース盤（ダークテーマ・全頭横並び） ===== */
+.board-view {
+  background: #14171c;
+  color: #e6e8eb;
+  margin: -1rem;
+  padding: 1rem;
+  border-radius: 8px;
+  min-height: 80vh;
+}
+.board-view h2,
+.board-view h3 {
+  color: #f2f4f7;
+}
+.board-view .muted {
+  color: #97a0ab;
+}
+.board-view a {
+  color: #6fb1ff;
+}
+.board-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin: 0.5rem 0 1rem;
+}
+.chip {
+  display: inline-block;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  background: #2a2f37;
+  color: #cbd2da;
+  border: 1px solid #39414c;
+}
+.chip-konsen {
+  background: #4a2c00;
+  color: #ffcc80;
+  border-color: #7a4a00;
+}
+.chip-plus {
+  background: #0d3a1e;
+  color: #7ee2a8;
+  border-color: #1c6b3a;
+}
+.chip-warn {
+  background: #3a1414;
+  color: #ff9a9a;
+  border-color: #6b1c1c;
+}
+.chip-overlay {
+  background: #10324f;
+  color: #8fd0ff;
+  border-color: #1f5c8a;
+}
+.chip-value {
+  background: #402a00;
+  color: #ffd27a;
+  border-color: #6b4a00;
+}
+
+.venue-switch {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0 0 0.75rem;
+}
+.venue-switch .venue-link {
+  text-decoration: none;
+  cursor: pointer;
+}
+.venue-switch .venue-link:hover {
+  background: #2f3945;
+  color: #fff;
+}
+.venue-switch .venue-current {
+  background: #10324f;
+  color: #8fd0ff;
+  border-color: #1f5c8a;
+  font-weight: 700;
+}
+.venue-switch.race-switch {
+  margin-top: -0.4rem;
+}
+.venue-switch.race-switch .chip {
+  min-width: 1.6rem;
+  text-align: center;
+}
+
+.board-scroll {
+  overflow-x: auto;
+  padding-bottom: 0.5rem;
+}
+.board-row {
+  display: flex;
+  gap: 6px;
+  min-width: min-content;
+}
+.horse-col {
+  flex: 0 0 92px;
+  width: 92px;
+  background: #1c2129;
+  border: 1px solid #2a2f37;
+  border-radius: 6px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.horse-col.is-overlay {
+  border-color: #2f7fbf;
+  box-shadow: 0 0 0 1px #2f7fbf inset;
+}
+.horse-col.is-value {
+  border-color: #bf8f2f;
+  box-shadow: 0 0 0 1px #bf8f2f inset;
+}
+.horse-col .heat {
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-weight: 700;
+}
+.horse-col .heat .rank {
+  font-size: 1.1rem;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+}
+.num-mark {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.2rem 0.4rem;
+  font-weight: 700;
+}
+.num-mark .num {
+  font-size: 1rem;
+}
+.num-mark .mark {
+  font-size: 1rem;
+  color: #ffd27a;
+}
+.hname {
+  font-size: 0.72rem;
+  line-height: 1.15;
+  padding: 0 0.3rem;
+  height: 2.3em;
+  overflow: hidden;
+  color: #eef1f4;
+}
+.jockey {
+  font-size: 0.68rem;
+  color: #97a0ab;
+  padding: 0.1rem 0.3rem 0.3rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.horse-col .stats {
+  margin: 0;
+  padding: 0.2rem 0.3rem;
+  border-top: 1px solid #2a2f37;
+}
+.horse-col .stats > div {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.68rem;
+  padding: 0.05rem 0;
+}
+.horse-col .stats dt {
+  color: #8a93a0;
+}
+.horse-col .stats dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  color: #e6e8eb;
+}
+.flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  padding: 0.25rem 0.3rem 0.4rem;
+}
+.flags .chip {
+  font-size: 0.65rem;
+  padding: 0.05rem 0.35rem;
+}
+.board-view .grid {
+  background: #1c2129;
+  color: #e6e8eb;
+}
+.board-view .grid th {
+  background: #232a33;
+  color: #cbd2da;
+}
+.board-view .grid th,
+.board-view .grid td {
+  border-color: #2a2f37;
+}

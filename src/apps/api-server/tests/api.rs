@@ -428,6 +428,121 @@ async fn recommendations_rejects_zero_budget(pool: sqlx::PgPool) {
 }
 
 #[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn board_without_odds_returns_all_horses(pool: sqlx::PgPool) {
+    PostgresRepository::new(pool.clone())
+        .save_race_card(&sample_card())
+        .await
+        .unwrap();
+    let app = build_service!(pool);
+
+    let req = test::TestRequest::get()
+        .uri(&format!("/api/races/{RACE_ID}/board"))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert!(resp.status().is_success(), "status: {}", resp.status());
+    let json = body_json(resp).await;
+
+    // 全頭が truncate されず返る（出馬表 3 頭）。
+    let horses = json["horses"].as_array().unwrap();
+    assert_eq!(horses.len(), 3);
+    assert_eq!(json["field_size"], 3);
+    // オッズ未 seed → 買い目なし・市場implied/人気は null だが確率と model_rank は出る。
+    assert_eq!(json["odds_available"], false);
+    assert_eq!(json["bets"].as_array().unwrap().len(), 0);
+    for h in horses {
+        assert!(h["market_implied"].is_null());
+        assert!(h["popularity"].is_null());
+        assert!(h["model_rank"].as_u64().unwrap() >= 1);
+    }
+    // 混戦サマリは常に返る。
+    assert!(json["confusion"].is_object());
+    assert!(json["confusion"]["is_confused"].is_boolean());
+}
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn board_with_odds_returns_market_and_bets(pool: sqlx::PgPool) {
+    let repo = PostgresRepository::new(pool.clone());
+    repo.save_race_card(&sample_card()).await.unwrap();
+    repo.save_race_odds(&sample_win_odds()).await.unwrap();
+    repo.save_race_odds(&sample_odds()).await.unwrap();
+    let app = build_service!(pool);
+
+    let req = test::TestRequest::get()
+        .uri(&format!("/api/races/{RACE_ID}/board"))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert!(resp.status().is_success(), "status: {}", resp.status());
+    let json = body_json(resp).await;
+
+    assert_eq!(json["horses"].as_array().unwrap().len(), 3);
+    assert_eq!(json["odds_available"], true);
+    // 単勝 seed 済み → 市場implied・人気が全頭に付く。
+    for h in json["horses"].as_array().unwrap() {
+        assert!(h["market_implied"].is_number(), "implied: {h}");
+        assert!(h["popularity"].as_u64().unwrap() >= 1);
+    }
+    // 買い目は /recommendations と同経路（相手 top5 不変）→ 非空。
+    assert!(!json["bets"].as_array().unwrap().is_empty());
+    assert!(json["roi"].is_number());
+}
+
+/// board の買い目（axis/partners/bets/roi）は /recommendations と完全一致する（同経路の担保）。
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn board_bets_match_recommendations(pool: sqlx::PgPool) {
+    let repo = PostgresRepository::new(pool.clone());
+    repo.save_race_card(&sample_card()).await.unwrap();
+    repo.save_race_odds(&sample_win_odds()).await.unwrap();
+    repo.save_race_odds(&sample_odds()).await.unwrap();
+    let app = build_service!(pool);
+
+    let board = body_json(
+        test::call_service(
+            &app,
+            test::TestRequest::get()
+                .uri(&format!("/api/races/{RACE_ID}/board?budget=10000"))
+                .to_request(),
+        )
+        .await,
+    )
+    .await;
+    let reco = body_json(
+        test::call_service(
+            &app,
+            test::TestRequest::get()
+                .uri(&format!(
+                    "/api/races/{RACE_ID}/recommendations?budget=10000"
+                ))
+                .to_request(),
+        )
+        .await,
+    )
+    .await;
+
+    assert_eq!(board["axis"], reco["axis"], "軸が一致");
+    assert_eq!(board["partners"], reco["partners"], "相手が一致");
+    assert_eq!(
+        board["bets"], reco["bets"],
+        "買い目が一致（相手 top5 不変）"
+    );
+    assert_eq!(board["roi"], reco["roi"], "ROI が一致");
+
+    // 盤の ◎（model_rank==1 の馬）＝買い目軸（build_portfolio の axis）が一致することを固定する。
+    // 両者は blended 首位・同一 tie-break（win_prob 降順→馬番昇順）由来なのでズレない前提を回帰で担保。
+    let axis = board["axis"].as_u64().unwrap();
+    let top = board["horses"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|h| h["model_rank"].as_u64() == Some(1))
+        .expect("model_rank==1 の馬が存在する");
+    assert_eq!(
+        top["horse_num"].as_u64().unwrap(),
+        axis,
+        "盤の ◎(model_rank 1) と買い目軸は同一馬でなければならない"
+    );
+}
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
 async fn analyze_horse_returns_stats(pool: sqlx::PgPool) {
     let app = build_service!(pool);
     // 履歴が無くても overall を含む統計（ゼロ）が 200 で返る。

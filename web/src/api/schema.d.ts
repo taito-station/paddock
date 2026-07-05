@@ -177,6 +177,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/races/{race_id}/board": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 1レース盤（全頭 ＋ 買い目 ＋ 混戦/乖離/重なり）。
+         *     全出走馬を truncate せず返し、買い目の相手 top5 から漏れる市場人気馬も盤で見える。
+         *     買い目は `/recommendations` と同経路・同値（相手 top5 不変）。
+         */
+        get: operations["get_race_board"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/races/{race_id}/prediction": {
         parameters: {
             query?: never;
@@ -309,6 +330,79 @@ export interface components {
              * @description 賭け金（円）。
              */
             stake: number;
+        };
+        /** @description 盤の 1 頭分（全頭 truncate せず返す）。 */
+        BoardHorseSchema: {
+            /**
+             * Format: int32
+             * @description 枠番（出馬表に無ければ `null`）。
+             */
+            gate_num?: number | null;
+            horse_name: string;
+            /** Format: int32 */
+            horse_num: number;
+            /** @description 重なり馬（モデル勝率1位 かつ 単勝人気1位＝ほぼ複勝圏サイン）。 */
+            is_overlay: boolean;
+            /** @description 乖離馬（モデル上位×市場人気低＝妙味・ワイドボックス候補）。 */
+            is_value: boolean;
+            jockey?: string | null;
+            /** @description 機械導出の印スラッグ（honmei/taikou/tanana/hoshi）。無印は `null`。 */
+            mark?: string | null;
+            /**
+             * Format: double
+             * @description 市場implied 勝率（フィールド内 `1/単勝` 正規化。単勝未取得なら `null`）。
+             */
+            market_implied?: number | null;
+            /**
+             * Format: int32
+             * @description モデル勝率順位（1=最上位）。
+             */
+            model_rank: number;
+            /** Format: double */
+            place_odds_high?: number | null;
+            /** Format: double */
+            place_odds_low?: number | null;
+            /** Format: double */
+            place_prob: number;
+            /**
+             * Format: int32
+             * @description 単勝人気（1=1番人気。単勝未取得なら `null`）。乖離判定の市場順位も兼ねる。
+             */
+            popularity?: number | null;
+            /**
+             * Format: double
+             * @description EV 視点（純モデル α=1.0）の勝率 [0,1]。
+             */
+            pure_win_prob: number;
+            /** Format: double */
+            show_prob: number;
+            /** Format: double */
+            win_odds?: number | null;
+            /**
+             * Format: double
+             * @description 表示用（市場ブレンド α）の勝率/連対率/複勝率 [0,1]。
+             */
+            win_prob: number;
+        };
+        /** @description 混戦サマリ（CLAUDE.md の混戦判定を機械化した結果）。 */
+        ConfusionSchema: {
+            /**
+             * Format: double
+             * @description ◎（モデル勝率1位）の勝率 [0,1]。
+             */
+            axis_win_prob: number;
+            /** @description 混戦か（◎の勝率×0.70 以上が ◎含め 4 頭以上）。 */
+            is_confused: boolean;
+            /**
+             * Format: int32
+             * @description しきい値以上の頭数（◎含む）。
+             */
+            qualifying_count: number;
+            /**
+             * Format: double
+             * @description 判定しきい値（= `axis_win_prob * 0.70`）。
+             */
+            threshold: number;
         };
         /** @description `GET /api/analyze/course?venue=&distance=&surface=` のレスポンス。 */
         CourseStatsResponse: {
@@ -641,6 +735,42 @@ export interface components {
             surface?: string | null;
             title?: string | null;
             /** @description 開催場（英字スラッグ。例 `nakayama`）。 */
+            venue: string;
+        };
+        /**
+         * @description `GET /api/races/{race_id}/board` のレスポンス（1レース盤）。
+         *
+         *     全出走馬 ＋ 買い目 ＋ 混戦/乖離/重なりを 1 レスポンスで返す。`horses` は truncate しない
+         *     （買い目の相手 top5 から漏れる市場人気馬も盤で見える）。買い目（`axis`/`partners`/`bets`/
+         *     `roi`/`hit_prob`）は `/recommendations` と同経路・同値で、保存オッズが無ければ `odds_available=false`。
+         */
+        RaceBoardResponse: {
+            /** Format: int32 */
+            axis?: number | null;
+            bets: components["schemas"]["RecommendationBet"][];
+            confusion: components["schemas"]["ConfusionSchema"];
+            /** Format: date */
+            date: string;
+            /** Format: int32 */
+            distance: number;
+            /** Format: int32 */
+            field_size: number;
+            /** Format: double */
+            hit_prob?: number | null;
+            horses: components["schemas"]["BoardHorseSchema"][];
+            /** @description 保存オッズ（#51）の有無。false のとき `bets` は必ず空。 */
+            odds_available: boolean;
+            partners: number[];
+            /** @description 発走時刻 `HH:MM`（未取得は `null`）。 */
+            post_time?: string | null;
+            race_id: string;
+            /** Format: int32 */
+            race_num: number;
+            /** Format: double */
+            roi?: number | null;
+            surface: string;
+            /** Format: int64 */
+            total_stake: number;
             venue: string;
         };
         /** @description `GET /api/races/{race_id}` のレスポンス（出馬表）。 */
@@ -1283,6 +1413,63 @@ export interface operations {
                 };
             };
             /** @description 未存在のレース */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description 内部エラー */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_race_board: {
+        parameters: {
+            query?: {
+                /** @description このレースに配分する予算（円）。1 以上。買い目組成の上限（`/recommendations` と同義）。 */
+                budget?: number | null;
+                /** @description 馬場状態（`良` / `稍重` / `重` / `不良`。略記 `稍` / `不` も可）。未指定なら馬場項なし。 */
+                track_condition?: string | null;
+                /** @description 市場オッズ（単勝）とのブレンド係数 `[0,1]`。未指定は本番ブレンド α=0.2。素モデルは `1.0` を明示。 */
+                blend_alpha?: number | null;
+            };
+            header?: never;
+            path: {
+                /** @description レース ID */
+                race_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 1レース盤（全頭＋買い目＋混戦/乖離/重なり） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RaceBoardResponse"];
+                };
+            };
+            /** @description クエリ不正 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description 出馬表が無いレース */
             404: {
                 headers: {
                     [name: string]: unknown;

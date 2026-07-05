@@ -27,6 +27,10 @@ where
             .route(
                 "/{race_id}/recommendations",
                 web::get().to(handler::race::get_recommendations::<R, P, F>),
+            )
+            .route(
+                "/{race_id}/board",
+                web::get().to(handler::race::get_race_board::<R, P, F>),
             ),
     );
 }
