@@ -537,6 +537,16 @@ export interface components {
             axis: number;
             /**
              * Format: double
+             * @description ◎の複勝オッズ上限（帯 high。欠落時 null）。
+             */
+            axis_place_odds_high?: number | null;
+            /**
+             * Format: double
+             * @description ◎の複勝オッズ下限（帯 low。欠落時 null）。
+             */
+            axis_place_odds_low?: number | null;
+            /**
+             * Format: double
              * @description ◎の model 勝率[%]。
              */
             axis_prob: number;

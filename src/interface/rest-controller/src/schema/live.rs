@@ -47,6 +47,10 @@ pub struct LiveRaceViewSchema {
     pub axis_prob: f64,
     /// ◎の単勝オッズ（欠落時 null）。
     pub axis_win_odds: Option<f64>,
+    /// ◎の複勝オッズ下限（帯 low。欠落時 null）。
+    pub axis_place_odds_low: Option<f64>,
+    /// ◎の複勝オッズ上限（帯 high。欠落時 null）。
+    pub axis_place_odds_high: Option<f64>,
     /// 一部買い目のオッズ欠落（ROI 過小評価の可能性）。
     pub odds_missing: bool,
     pub slip: SlipView,
@@ -137,6 +141,8 @@ impl LiveRaceViewSchema {
             axis: r.axis,
             axis_prob: r.axis_prob,
             axis_win_odds: r.axis_win_odds,
+            axis_place_odds_low: r.axis_place_odds_low,
+            axis_place_odds_high: r.axis_place_odds_high,
             odds_missing: r.odds_missing,
             slip,
             flip: LiveFlip::from(r.flip),

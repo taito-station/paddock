@@ -18,6 +18,17 @@ export function roiPct(n: number): string {
   return `${Number.isInteger(n) ? n.toFixed(0) : n.toFixed(1)}%`;
 }
 
+// ◎の複勝オッズ帯を "Y.Y–Z.Z" 表記にする（#346）。low/high のどちらかでも欠ければ "—"
+// （発走直前でも JRA 未公開なら欠落しうる。単勝オッズと同じ堅牢性で扱う）。
+export function placeBand(
+  low: number | null | undefined,
+  high: number | null | undefined,
+): string {
+  if (low == null || high == null) return "—";
+  // 帯は low≤high が前提だが、異常データで逆転しても正しい範囲を描くよう min/max で正規化する。
+  return `${Math.min(low, high).toFixed(1)}–${Math.max(low, high).toFixed(1)}`;
+}
+
 // UTC rfc3339 の時刻を JST の HH:MM にする。null/不正は "—"。
 export function jstHm(iso: string | null | undefined): string {
   if (!iso) return "—";

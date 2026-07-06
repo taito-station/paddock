@@ -18,6 +18,8 @@ struct LiveEvRow {
     axis: i64,
     axis_prob: f64,
     axis_win_odds: Option<f64>,
+    axis_place_odds_low: Option<f64>,
+    axis_place_odds_high: Option<f64>,
     odds_missing: bool,
     slip: String,
 }
@@ -49,6 +51,8 @@ pub async fn find_live_ev_by_date(pool: &PgPool, date: NaiveDate) -> Result<Vec<
             axis,
             axis_prob,
             axis_win_odds,
+            axis_place_odds_low,
+            axis_place_odds_high,
             odds_missing,
             slip
         FROM (
@@ -64,6 +68,8 @@ pub async fn find_live_ev_by_date(pool: &PgPool, date: NaiveDate) -> Result<Vec<
                 axis,
                 axis_prob,
                 axis_win_odds,
+                axis_place_odds_low,
+                axis_place_odds_high,
                 odds_missing,
                 slip::text AS slip,
                 ROW_NUMBER() OVER (PARTITION BY race_id ORDER BY captured_at DESC) AS rnk
@@ -93,6 +99,8 @@ pub async fn find_live_ev_by_date(pool: &PgPool, date: NaiveDate) -> Result<Vec<
             axis: row.axis as u32,
             axis_prob: row.axis_prob,
             axis_win_odds: row.axis_win_odds,
+            axis_place_odds_low: row.axis_place_odds_low,
+            axis_place_odds_high: row.axis_place_odds_high,
             odds_missing: row.odds_missing,
             slip_json: row.slip,
         })
