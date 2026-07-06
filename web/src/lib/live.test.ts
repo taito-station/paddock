@@ -53,6 +53,9 @@ describe("placeBand", () => {
     expect(placeBand(1.1, 1.3)).toBe("1.1–1.3");
     expect(placeBand(2, 3.5)).toBe("2.0–3.5");
   });
+  it("normalizes a reversed band via min/max", () => {
+    expect(placeBand(1.3, 1.1)).toBe("1.1–1.3");
+  });
   it("returns — when either bound is missing (JRA 未公開)", () => {
     expect(placeBand(null, 1.3)).toBe("—");
     expect(placeBand(1.1, null)).toBe("—");

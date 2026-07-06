@@ -25,7 +25,8 @@ export function placeBand(
   high: number | null | undefined,
 ): string {
   if (low == null || high == null) return "—";
-  return `${low.toFixed(1)}–${high.toFixed(1)}`;
+  // 帯は low≤high が前提だが、異常データで逆転しても正しい範囲を描くよう min/max で正規化する。
+  return `${Math.min(low, high).toFixed(1)}–${Math.max(low, high).toFixed(1)}`;
 }
 
 // UTC rfc3339 の時刻を JST の HH:MM にする。null/不正は "—"。

@@ -217,6 +217,9 @@ mod tests {
         assert_eq!(v.races.len(), 1);
         let r = &v.races[0];
         assert_eq!(r.verdict, "bet");
+        // 複勝オッズ帯が snapshot からビューへ写像される（#346）。
+        assert_eq!(r.axis_place_odds_low, Some(1.1));
+        assert_eq!(r.axis_place_odds_high, Some(1.3));
         assert!(!r.flip.axis_changed && !r.flip.ev_reversed);
         assert_eq!(r.flip.prev_axis, None);
         assert_eq!(r.flip.prev_verdict, None);
