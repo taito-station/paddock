@@ -5,11 +5,19 @@
 ワイドの点数だけ独立して変わること、および未指定時（wide_partners==partners）は従来出力に
 帰着することを固定する。計測ハーネスは ADR 0065 の意思決定根拠なのでリグレッションを防ぐ。
 """
+import json
+import os
+import subprocess
+import sys
+import tempfile
+
 import strategy_eval as S
+
+_HERE = os.path.dirname(os.path.abspath(__file__))
 
 
 def _labels(bets):
-    return {lbl: [c for l, c, _ in bets if l == lbl] for lbl in ("quinella", "wide", "trio")}
+    return {want: [c for lbl, c, _ in bets if lbl == want] for want in ("quinella", "wide", "trio")}
 
 
 def test_wide_partners_narrower_than_others():
@@ -57,7 +65,51 @@ def test_distribute_100yen_units():
 def test_no_trio_when_disabled():
     # with_trio=False は三連複を出さない（馬連＋ワイドのみ）。
     bets = S.build_bets(1, [2, 3, 4, 5, 6], [2, 3, 4, 5, 6], 5000, (1, 1, 1), with_trio=False)
-    assert all(l != "trio" for l, _, _ in bets)
+    assert all(lbl != "trio" for lbl, _, _ in bets)
+
+
+def _run_json(tmp, extra):
+    """--json で strategy_eval を CLI 実行し、(returncode, parsed_json_or_None) を返す。"""
+    preds = os.path.join(tmp, "preds.json")
+    payouts = os.path.join(tmp, "payouts.json")
+    with open(preds, "w", encoding="utf-8") as f:
+        json.dump([{"venue": "東京", "race_num": 11, "horses": [
+            {"num": n, "win": w} for n, w in
+            [(1, 0.30), (2, 0.20), (3, 0.15), (4, 0.12), (5, 0.10), (6, 0.08), (7, 0.05)]]}], f)
+    with open(payouts, "w", encoding="utf-8") as f:
+        json.dump([{"venue_jp": "東京", "race_num": 11,
+                    "payouts": {"wide": {"1-6": 1200}, "quinella": {}, "trio": {}, "win": {}}}], f)
+    p = subprocess.run(
+        [sys.executable, os.path.join(_HERE, "strategy_eval.py"), preds, payouts,
+         "--budget", "5000", *extra],
+        cwd=_HERE, capture_output=True, text=True)
+    try:
+        return p.returncode, json.loads(p.stdout)
+    except json.JSONDecodeError:
+        return p.returncode, None
+
+
+def test_json_output_shape():
+    # --json 集計パス（多日集計 = ADR 0065 の意思決定根拠機構）の出力形状を固定する。
+    with tempfile.TemporaryDirectory() as tmp:
+        rc, out = _run_json(tmp, ["--partners", "5", "--wide-partners", "3", "--json"])
+        assert rc == 0 and out is not None
+        assert out["budget"] == 5000 and out["partners"] == 5 and out["wide_partners"] == 3
+        assert out["races"] == 1
+        strat = out["strategies"]
+        assert set(strat) == {"本命単勝のみ", "本命軸 馬連+ワイド流し", "本命軸 馬連+ワイド+三連複流し"}
+        for cell in strat.values():
+            assert isinstance(cell["stake"], int) and isinstance(cell["payout"], int)
+        # 未指定なら wide_partners は partners に追従する
+        rc2, out2 = _run_json(tmp, ["--partners", "5", "--json"])
+        assert rc2 == 0 and out2["wide_partners"] == 5
+
+
+def test_json_rejects_multi_k():
+    # --json は単一 K のみ（多日集計で合算するため）。複数Kは exit 1。
+    with tempfile.TemporaryDirectory() as tmp:
+        rc, out = _run_json(tmp, ["--partners", "3,5", "--json"])
+        assert rc == 1
 
 
 def main():
