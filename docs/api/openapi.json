@@ -1914,6 +1914,22 @@
             "description": "◎馬番。",
             "minimum": 0
           },
+          "axis_place_odds_high": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "◎の複勝オッズ上限（帯 high。欠落時 null）。"
+          },
+          "axis_place_odds_low": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "◎の複勝オッズ下限（帯 low。欠落時 null）。"
+          },
           "axis_prob": {
             "type": "number",
             "format": "double",

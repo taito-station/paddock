@@ -837,6 +837,10 @@ pub struct LiveEvSnapshot {
     pub axis_prob: f64,
     /// ◎の単勝オッズ（欠落時 None）。
     pub axis_win_odds: Option<f64>,
+    /// ◎の複勝オッズ下限（帯 low。欠落時 None）。#346
+    pub axis_place_odds_low: Option<f64>,
+    /// ◎の複勝オッズ上限（帯 high。欠落時 None）。#346
+    pub axis_place_odds_high: Option<f64>,
     /// 一部買い目のオッズ欠落（ROI 過小評価の可能性）。
     pub odds_missing: bool,
     /// 買い目伝票 JSONB（`slip` 列）の JSON テキスト。

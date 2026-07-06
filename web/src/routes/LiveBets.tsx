@@ -9,6 +9,7 @@ import {
   groupLegs,
   jstHm,
   maru,
+  placeBand,
   postMinutes,
   roiPct,
   skipReason,
@@ -41,7 +42,8 @@ function BetCard({ race }: { race: LiveRaceView }) {
         <span className="live-roi">ROI {roiPct(race.roi)}</span>
         <span>
           ◎{maru(race.axis)}（model {race.axis_prob.toFixed(0)}% 単勝
-          {race.axis_win_odds != null ? race.axis_win_odds.toFixed(1) : "—"}）
+          {race.axis_win_odds != null ? race.axis_win_odds.toFixed(1) : "—"} 複勝
+          {placeBand(race.axis_place_odds_low, race.axis_place_odds_high)}）
         </span>
         {race.konsen && <span className="live-tag">混戦</span>}
         <span className="muted">発走 {race.post_time ?? "—"}</span>

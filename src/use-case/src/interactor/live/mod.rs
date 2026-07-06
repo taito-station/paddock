@@ -43,6 +43,9 @@ pub struct LiveRaceView {
     pub axis: u32,
     pub axis_prob: f64,
     pub axis_win_odds: Option<f64>,
+    /// ◎の複勝オッズ帯（low, high。欠落時 None）。#346
+    pub axis_place_odds_low: Option<f64>,
+    pub axis_place_odds_high: Option<f64>,
     pub odds_missing: bool,
     /// 買い目伝票 JSONB（`slip` 列）の JSON テキスト。
     pub slip_json: String,
@@ -141,6 +144,8 @@ fn build_race_view(latest: &LiveEvSnapshot, prev: Option<&LiveEvSnapshot>) -> Li
         axis: latest.axis,
         axis_prob: latest.axis_prob,
         axis_win_odds: latest.axis_win_odds,
+        axis_place_odds_low: latest.axis_place_odds_low,
+        axis_place_odds_high: latest.axis_place_odds_high,
         odds_missing: latest.odds_missing,
         slip_json: latest.slip_json.clone(),
         flip,
@@ -176,6 +181,8 @@ mod tests {
             axis,
             axis_prob: 30.0,
             axis_win_odds: Some(2.0),
+            axis_place_odds_low: Some(1.1),
+            axis_place_odds_high: Some(1.3),
             odds_missing: false,
             slip_json: r#"{"race_budget":5000,"legs":[]}"#.into(),
         }
