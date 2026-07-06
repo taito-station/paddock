@@ -15,8 +15,9 @@ options:
     --budget N       1 レースの予算（円, 既定 5000）
     --partners K     相手頭数（馬連・三連複）。カンマ区切りで複数指定すると感度テーブルを出す（既定 5）
     --wide-partners K  ワイドだけ別の相手頭数にする（既定: 未指定＝--partners に追従）。
-                     本番 build_portfolio は「ワイド top3 / 馬連・三連複 top5」だが実装は
-                     単一 partners で全券種 top5。この乖離を計測するため券種別に絞れるようにする（#347）。
+                     doc（CLAUDE.md）はかつて「ワイド top3」と定めていたが、本番実装 build_portfolio は
+                     単一 partners で全券種 top5 だった。この doc↔実装の乖離を計測するため券種別に
+                     絞れるようにした（#347 / ADR 0065）。
     --alloc q,w,t    馬連:ワイド:三連複 の予算配分の相対重み（既定 1,1,1）
     --axis {model,market}  軸の選び方（既定 model=予想本命 / market=1番人気）
     --win-odds FILE  --axis market 用の win_odds.csv（answer_check.py と同形式）
@@ -101,7 +102,7 @@ def build_bets(axis, partners, wide_partners, budget, alloc, with_trio):
     with_trio=False: 馬連流し＋ワイド流し。True: さらに三連複（軸 1 頭流し formation）。
     予算は alloc の重みで券種に配分し、券種内は distribute で 100 円単位均等配分する。
     wide_partners はワイド専用の相手（本番 build_portfolio の券種別頭数を再現、#347）。
-    partners を prefix で絞ったもの（同順位から少ない頭数）を渡す前提。
+    partners と同じ相手ランキングの prefix を渡す（頭数は partners と別でよい）。
     """
     qn = [code_unordered([axis, p]) for p in partners]                 # 馬連: 軸-相手 K 点
     wd = [code_unordered([axis, p]) for p in wide_partners]            # ワイド: 軸-相手 Kw 点

@@ -138,6 +138,22 @@ def test_build_bets_method_tags():
     assert all(k == "trio" for k, m, _, _ in bets2 if m == "box"), bets2
 
 
+def test_wide_partners_top5():
+    # ワイドも馬連・三連複と同じ相手 top5（軸-相手 5 点）で組む（ADR 0065・#347）。
+    # 十分頭数（相手 5 頭以上）の非混戦フィールドで、ワイド nagashi 脚が 5 点・
+    # 各脚が軸-相手であることを固定する。かつて wp=parts[:3] だった名残の top3 化を防ぐ回帰。
+    clear = {1: 35.0, 2: 15.0, 3: 12.0, 4: 8.0, 5: 6.0, 6: 5.0, 7: 4.0}
+    ax, parts, kon, bets = L.build_bets(clear, 5000)
+    assert not kon
+    assert parts == [2, 3, 4, 5, 6], parts  # 軸を除く top5
+    wide = [combo for k, m, combo, _ in bets if k == "wide" and m == "nagashi"]
+    assert len(wide) == 5, wide  # top3 だと 3 になる
+    assert all(ax in combo and len(combo) == 2 for combo in wide), wide
+    # 馬連も同じ 5 点（ワイドと券種横断で相手頭数が揃う）
+    quinella = [combo for k, m, combo, _ in bets if k == "quinella" and m == "nagashi"]
+    assert len(quinella) == 5, quinella
+
+
 def test_emit_payload():
     # emit_payload は rows を写すだけ。verdict/leg method/axis/金額合計/odds_missing を固定。
     probs = {1: 35.0, 2: 15.0, 3: 12.0, 4: 8.0, 5: 6.0, 6: 5.0}

@@ -83,7 +83,10 @@ top5 へ統一しないと #347 が潰す乖離が別エンジンに残るため
   後方互換）と多日集計用 `--json` 出力を追加。既存挙動（`--wide-partners` 未指定）は不変。
 - `scripts/predict-check/live_ev.py`: ライブ買い目のワイドを `wp = parts[:3]`（top3）→ `wp = parts`（top5）
   に変更。ライブ伝票のワイドが軸込み 4 頭→6 頭になる。`docs/specifications/live-ev-buy-view.md` の
-  「wide top3」注記も top5 に更新。`test_live_ev.py` はワイド点数を固定していないため不変で通る。
+  「wide top3」注記も top5 に更新。
+- テスト: `test_live_ev.py` に `test_wide_partners_top5`（ワイド nagashi=5 脚を固定＝top3 化の回帰を防ぐ）を追加。
+  `test_strategy_eval.py` を新規追加し、`build_bets` の券種別相手頭数（ワイドだけ絞る／未指定は従来出力に帰着）
+  と 100 円単位配分を固定。
 - 本番 Rust コード（`build_portfolio` / `PortfolioConfig`）・統合テストは不変（既に top5）。
 
 ## 再検証の条件
