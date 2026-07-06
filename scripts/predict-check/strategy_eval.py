@@ -13,13 +13,19 @@ predict 本命を軸にした「単勝のみ / 馬連＋ワイド流し / ＋三
 
 options:
     --budget N       1 レースの予算（円, 既定 5000）
-    --partners K     相手頭数。カンマ区切りで複数指定すると感度テーブルを出す（既定 5）
+    --partners K     相手頭数（馬連・三連複）。カンマ区切りで複数指定すると感度テーブルを出す（既定 5）
+    --wide-partners K  ワイドだけ別の相手頭数にする（既定: 未指定＝--partners に追従）。
+                     doc（CLAUDE.md）はかつて「ワイド top3」と定めていたが、本番実装 build_portfolio は
+                     単一 partners で全券種 top5 だった。この doc↔実装の乖離を計測するため券種別に
+                     絞れるようにした（#347 / ADR 0065）。
     --alloc q,w,t    馬連:ワイド:三連複 の予算配分の相対重み（既定 1,1,1）
     --axis {model,market}  軸の選び方（既定 model=予想本命 / market=1番人気）
     --win-odds FILE  --axis market 用の win_odds.csv（answer_check.py と同形式）
 
 例:
     python3 strategy_eval.py preds.json payouts.json --budget 5000 --partners 3,5,7
+    # ワイド top3 / 馬連・三連複 top5 で計測（#347）
+    python3 strategy_eval.py preds.json payouts.json --budget 5000 --partners 5 --wide-partners 3
 """
 import sys
 import json
@@ -36,9 +42,12 @@ def parse_args(argv):
     ap.add_argument("payouts")
     ap.add_argument("--budget", type=int, default=5000)
     ap.add_argument("--partners", default="5")
+    ap.add_argument("--wide-partners", dest="wide_partners", type=int, default=None)
     ap.add_argument("--alloc", default="1,1,1")
     ap.add_argument("--axis", choices=["model", "market"], default="model")
     ap.add_argument("--win-odds", dest="win_odds")
+    # 集計を機械可読に出す（開催日ごとに run して合算する多日集計用, #347）。単一 K のみ対応。
+    ap.add_argument("--json", dest="as_json", action="store_true")
     if not argv or argv[0] in ("-h", "--help"):
         print(__doc__, file=sys.stderr)
         sys.exit(0 if argv else 1)
@@ -87,14 +96,16 @@ def distribute(type_budget, n_combos):
     return [100] * k + [0] * (n_combos - k)
 
 
-def build_bets(axis, partners, budget, alloc, with_trio):
+def build_bets(axis, partners, wide_partners, budget, alloc, with_trio):
     """軸流しの買い目（(type_label, combination_code, stake) のリスト）を組み立てる。
 
     with_trio=False: 馬連流し＋ワイド流し。True: さらに三連複（軸 1 頭流し formation）。
     予算は alloc の重みで券種に配分し、券種内は distribute で 100 円単位均等配分する。
+    wide_partners はワイド専用の相手（本番 build_portfolio の券種別頭数を再現、#347）。
+    partners と同じ相手ランキングの prefix を渡す（頭数は partners と別でよい）。
     """
     qn = [code_unordered([axis, p]) for p in partners]                 # 馬連: 軸-相手 K 点
-    wd = list(qn)                                                       # ワイド: 同じ組（K 点）
+    wd = [code_unordered([axis, p]) for p in wide_partners]            # ワイド: 軸-相手 Kw 点
     tr = [code_unordered([axis, a, b]) for a, b in combinations(partners, 2)]  # 三連複 C(K,2)
 
     wq, ww, wt = alloc
@@ -137,11 +148,13 @@ def settle(bets, payouts):
 # なので一致する。組番コードの表記は fetch_payouts / code_unordered と揃えること。
 STRATEGIES = [
     ("本命単勝のみ",
-     lambda axis, partners, b, alloc: [("win", str(axis), (b // 100) * 100)]),
+     lambda axis, partners, wide_partners, b, alloc: [("win", str(axis), (b // 100) * 100)]),
     ("本命軸 馬連+ワイド流し",
-     lambda axis, partners, b, alloc: build_bets(axis, partners, b, alloc, with_trio=False)),
+     lambda axis, partners, wide_partners, b, alloc:
+        build_bets(axis, partners, wide_partners, b, alloc, with_trio=False)),
     ("本命軸 馬連+ワイド+三連複流し",
-     lambda axis, partners, b, alloc: build_bets(axis, partners, b, alloc, with_trio=True)),
+     lambda axis, partners, wide_partners, b, alloc:
+        build_bets(axis, partners, wide_partners, b, alloc, with_trio=True)),
 ]
 
 
@@ -166,6 +179,13 @@ def main(argv):
         sys.exit(1)
     if not ks or any(k < 1 for k in ks):
         print("--partners は 1 以上の整数", file=sys.stderr)
+        sys.exit(1)
+    if args.wide_partners is not None and args.wide_partners < 1:
+        print("--wide-partners は 1 以上の整数", file=sys.stderr)
+        sys.exit(1)
+    # --json は単一 K のみ（多日集計で合算するため）。他の引数検証と同様に早期に弾く（fail-fast）。
+    if args.as_json and len(ks) != 1:
+        print("--json は単一 K のみ対応（--partners を 1 値に）", file=sys.stderr)
         sys.exit(1)
     if args.budget < 100:
         # 100 円未満は全戦略 stake=0・ROI 0% になり無意味（distribute も < 100 で 0 を返す）。
@@ -204,10 +224,14 @@ def main(argv):
         else:
             axis = order[0]
         used_races.add(key)
+        ranked_partners = [n for n in order if n != axis]  # 軸を除いた相手ランキング
         for k in ks:
-            partners = [n for n in order if n != axis][:k]
+            partners = ranked_partners[:k]
+            # ワイドは wide_partners 指定時のみ別頭数。未指定なら他券種と同じ K（現行挙動）。
+            wk = args.wide_partners if args.wide_partners is not None else k
+            wide_partners = ranked_partners[:wk]
             for name, builder in STRATEGIES:
-                bets = builder(axis, partners, args.budget, alloc)
+                bets = builder(axis, partners, wide_partners, args.budget, alloc)
                 stake, payout = settle(bets, payouts)
                 cell = agg[k][name]
                 cell[0] += stake
@@ -219,8 +243,24 @@ def main(argv):
         print("[warn] preds と payouts でマッチするレースが 0 件です"
               "（venue 表記の不一致の疑い: 双方 (venue_jp, race_num) で索く前提）", file=sys.stderr)
 
+    # 機械可読出力（多日集計用, #347）。単一 K のみ（早期に検証済み）。stake/payout の生値を返す。
+    if args.as_json:
+        k = ks[0]
+        out = {
+            "budget": args.budget, "partners": k,
+            "wide_partners": args.wide_partners if args.wide_partners is not None else k,
+            "races": len(used_races),
+            "strategies": {name: {"stake": agg[k][name][0], "payout": agg[k][name][1]}
+                           for name, _ in STRATEGIES},
+        }
+        json.dump(out, sys.stdout, ensure_ascii=False)
+        print()
+        return
+
     # 出力。
     print(f"予算: ¥{args.budget}/R  軸: {args.axis}  配分(馬連:ワイド:三連複)={':'.join(map(str, alloc))}")
+    if args.wide_partners is not None:
+        print(f"ワイド相手頭数: {args.wide_partners}（馬連・三連複は --partners に従う）")
     print(f"評価レース数: {len(used_races)}")
     print()
     # 予算の上限（100 円単位の端数切り捨てで一部未消化になりうるため消化率も併記）。
