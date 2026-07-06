@@ -206,7 +206,7 @@ def build_bets(probs, budget):
                 [probs[a] * probs[b] * probs[d] for a, b, d in combos], u_box)):
             if u > 0:
                 bets.append(("trio", "box", tuple(sorted(combo)), u * 100))
-    wp = parts[:3]
+    wp = parts  # ワイドも相手 top5（馬連・三連複と同じ）。build_portfolio に統一・ADR 0065
     for n, u in zip(wp, largest_remainder([probs[n] for n in wp], u_wide)):
         if u > 0:
             bets.append(("wide", "nagashi", tuple(sorted((ax, n))), u * 100))

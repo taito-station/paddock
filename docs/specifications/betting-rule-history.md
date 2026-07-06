@@ -112,6 +112,15 @@
 - **結論**: 配分は現状の均等割りを維持。確率重み化＋最低¥100撤廃は採用しない。#272 では各買い目の的中確率 `hit_prob` を**表示**する（判断材料）のみ追加し、配分は不変。
 - 詳細: [docs/adr/0046-allocation-prob-weight-no-floor-rejected.md](../adr/0046-allocation-prob-weight-no-floor-rejected.md)（関連 Issue: #272）
 
+### ⑩ ワイド相手を top3 に絞る（不採用＝top5 に統一 / 2026-07-06 / ADR 0065）
+
+CLAUDE.md は「ワイドは相手 top3」と定めていたが、本番 `build_portfolio` は全券種 top5（ワイドも top5）で、doc とコードが乖離していた。「ワイド top3」の出所は ADR 0030 baseline スクリプトの実装都合（`wp=parts[:3]`）で、production 買い方構造での top3 vs top5 直接比較根拠は無かった。measurement-first で計測。
+
+- 検証: `strategy_eval.py` に `--wide-partners` を追加し、馬連・三連複 top5 固定・ワイドだけ top3/top5 を比較（予測確率不変＝相対比較はリーク中立）。窓 A=71R / 窓 B=262R（12 開催日）を開催日ごとに集計。
+- 結果: **有意差なし**。窓 A（71R）は top3 +4.0pt だが単勝 ROI 594% の幸運な小標本で、窓 B（262R）に広げると **符号反転して top5 +3.9pt**。日別では **top5 ≥ top3 が 6/12 日・top3 > top5 が 6/12 日＝五分**で、B 集計の top5 優位は単一外れ日（2026-06-27 Δ−32pt）が牽引。どちらの優位も標本ノイズ。
+- **結論**: 有意差が無いので最小変更を採る。`build_portfolio` は無変更（既に top5）、CLAUDE.md を「3 券種とも top5」に修正。「ワイド top3」の縛りは撤去（＝top3 に絞る案は再提案しない）。top5 は ADR 0030 の上限内で矛盾なし。なお計測中に **2 つ目の買い目エンジン `live_ev.py`（ライブ伝票）もワイド top3** だったと判明し、これも top5 に統一（両エンジン＋doc が top5 で一致）。
+- 詳細: [docs/adr/0065-wide-partners-top5-alignment.md](../adr/0065-wide-partners-top5-alignment.md)（関連 Issue: #347）
+
 ## バックテスト/実績ログ（ADR 未収録）
 
 ADR 化していないが、現行ルール（確率配分・混戦ボックス自動追加）の効果を裏付ける実測記録。数値はセッション時の実測ログに基づく当時の集計値で、再現スクリプトは未整備。

@@ -66,7 +66,7 @@
       "points": 1,                  // この leg の点数（1組）
       "amount": 300                 // 金額（100 円単位）
     }
-    // ... wide top3 / quinella top5 / trio top5 nagashi (+ 混戦時 trio box)
+    // ... wide top5 / quinella top5 / trio top5 nagashi (+ 混戦時 trio box)
   ]
 }
 ```
