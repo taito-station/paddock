@@ -183,6 +183,10 @@ def main(argv):
     if args.wide_partners is not None and args.wide_partners < 1:
         print("--wide-partners は 1 以上の整数", file=sys.stderr)
         sys.exit(1)
+    # --json は単一 K のみ（多日集計で合算するため）。他の引数検証と同様に早期に弾く（fail-fast）。
+    if args.as_json and len(ks) != 1:
+        print("--json は単一 K のみ対応（--partners を 1 値に）", file=sys.stderr)
+        sys.exit(1)
     if args.budget < 100:
         # 100 円未満は全戦略 stake=0・ROI 0% になり無意味（distribute も < 100 で 0 を返す）。
         print("--budget は 100 以上（100 円単位で配分する）", file=sys.stderr)
@@ -239,11 +243,8 @@ def main(argv):
         print("[warn] preds と payouts でマッチするレースが 0 件です"
               "（venue 表記の不一致の疑い: 双方 (venue_jp, race_num) で索く前提）", file=sys.stderr)
 
-    # 機械可読出力（多日集計用, #347）。単一 K のみ。stake/payout の生値を返し、集計側で合算する。
+    # 機械可読出力（多日集計用, #347）。単一 K のみ（早期に検証済み）。stake/payout の生値を返す。
     if args.as_json:
-        if len(ks) != 1:
-            print("--json は単一 K のみ対応（--partners を 1 値に）", file=sys.stderr)
-            sys.exit(1)
         k = ks[0]
         out = {
             "budget": args.budget, "partners": k,
