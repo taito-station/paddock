@@ -12,8 +12,9 @@ use crate::interactor::Interactor;
 use crate::pdf_fetcher::PdfFetcher;
 use crate::pdf_parser::PdfParser;
 use crate::repository::{
-    CourseStatsRow, GroupStat, HorseRecencyStats, HorseStatsRow, JockeyStatsRow, OddsRepository,
-    RaceCardRepository, RecencySeries, StatsRepository, TrainerStatsRow,
+    ConditionalGateStatsRow, CourseStatsRow, GroupStat, HorseRecencyStats, HorseStatsRow,
+    JockeyStatsRow, OddsRepository, RaceCardRepository, RecencySeries, StatsRepository,
+    TrainerStatsRow, gate_field_band_label, gate_track_cond2_label,
 };
 
 /// `predict_race_views` の戻り値（#272 確率分離）。同一レース・同一盤面順の 2 系統の確率と任意の根拠。
@@ -156,7 +157,19 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: 
             surface: card.surface,
             distance: card.distance,
             track_condition,
+            field_size: card.entries.len(),
             mean_weight,
+        };
+        // 条件依存枠バイアス（#343・提示専用）。根拠生成時だけ 1 回取得する（18 セル集計。確率のみの
+        // predict_race・backtest 経路では取得せずスコアにも影響させない＝measure-first）。
+        let conditional_gate = if with_explanation {
+            Some(
+                self.repository
+                    .conditional_gate_stats(card.venue, card.distance, card.surface, None)
+                    .await?,
+            )
+        } else {
+            None
         };
         // 確率推定設定（#75: ベイズ縮約 m=10。recency は production() で None）は呼び出し側から共有。
         // 前走タイムの相対速度シグナル用の標準タイム表（#76）。全馬共通なのでループ外で 1 回だけ
@@ -244,6 +257,7 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: 
                 explanations.push(build_explanation(
                     entry,
                     &course,
+                    conditional_gate.as_ref(),
                     horse,
                     jockey,
                     trainer,
@@ -401,6 +415,8 @@ pub(crate) struct RaceContext {
     pub distance: u32,
     /// 評価対象レースの馬場状態（#73）。未確定なら `None`（馬場項なし）。
     pub track_condition: Option<TrackCondition>,
+    /// 出走頭数（#343 条件依存枠バイアスの頭数帯判定に使う。＝出馬表エントリ数）。
+    pub field_size: usize,
     /// レース内の field 平均斤量[kg]（#135）。斤量を持つ出走馬が居ないレース（PDF 出馬表等）は
     /// `None`（斤量項なし）。`build_factors` が各馬の `weight_carried` との差から相対シグナルを作る。
     pub mean_weight: Option<f64>,
@@ -497,6 +513,7 @@ pub(crate) fn build_factors(
 fn build_explanation(
     entry: &HorseEntry,
     course: &CourseStatsRow,
+    conditional_gate: Option<&ConditionalGateStatsRow>,
     horse: &HorseStatsRow,
     jockey: Option<&JockeyStatsRow>,
     trainer: Option<&TrainerStatsRow>,
@@ -546,6 +563,38 @@ fn build_explanation(
             fs.starts,
         ));
     }
+    // 条件依存枠バイアス（馬場×頭数×枠, #343・提示専用・スコア非投入）。馬場が確定し、集計セルに実績が
+    // あるときだけ提示する。lift（同条件全枠平均との差）を HorseExplanation に載せ、市場差分フラグ判定に使う。
+    let mut gate_bias_lift: Option<f64> = None;
+    if let Some(cg) = conditional_gate
+        && let Some(tc) = race.track_condition
+    {
+        let track_label = gate_track_cond2_label(tc.as_str());
+        let field_label = gate_field_band_label(race.field_size as u32);
+        if let Some(cell) = cg.cell(track_label, field_label, gate_label)
+            && cell.stat.starts > 0
+        {
+            factors.push(FactorExplanation::new(
+                ExplainCategory::ConditionalGateBias,
+                format!(
+                    "{} / {} / {}",
+                    gate_bias_gate_jp(entry.gate_num.value()),
+                    track_label,
+                    field_label
+                ),
+                RateTriple {
+                    win: cell.stat.win_rate(),
+                    place: cell.stat.place_rate(),
+                    show: cell.stat.show_rate(),
+                },
+                cell.stat.starts,
+            ));
+            // 枠効果 lift = セル複勝率 − 同条件(馬場×頭数)の全枠平均複勝率。
+            if let Some(base) = cg.condition_show_rate(track_label, field_label) {
+                gate_bias_lift = Some(cell.stat.show_rate() - base);
+            }
+        }
+    }
     // 騎手・調教師（芝ダ別）。未登録・実績なしは項を立てない。ラベルは entry の名前を使う。
     if let Some(fs) = jockey.and_then(|j| stat_to_triple_opt(&j.by_surface, surf_label)) {
         let label = entry
@@ -588,8 +637,20 @@ fn build_explanation(
         factors,
         recent_form,
         prev_run,
+        gate_bias_lift,
         weight_carried: entry.weight_carried,
         field_mean_weight: race.mean_weight,
+    }
+}
+
+/// 枠番（1..=8, `GateNum` 検証済み）を「内枠/中枠/外枠」に写す（#343 提示ラベル用）。英字ラベル文字列に
+/// 依存せず枠番から直接引くことで、集計側 `GATE_GROUPS` ラベルとの二重定義を 1 つ減らす（レビュー指摘）。
+fn gate_bias_gate_jp(gate_num: u32) -> &'static str {
+    match gate_num {
+        1..=3 => "内枠",
+        4..=6 => "中枠",
+        // GateNum は 1..=8 検証済みなので _ は 7-8（外枠）のみ（`gate_group_label` と同じ区分）。
+        _ => "外枠",
     }
 }
 
@@ -735,6 +796,7 @@ mod tests {
             surface: Surface::Turf,
             distance: 1600,
             track_condition: None, // 馬場 factor なし
+            field_size: 16,
             mean_weight: Some(55.0),
         };
         let prev = RecentRun {
@@ -765,6 +827,7 @@ mod tests {
         let ex = build_explanation(
             &entry,
             &course,
+            None,
             &horse,
             None,
             None,
@@ -815,11 +878,13 @@ mod tests {
             surface: Surface::Turf,
             distance: 1600,
             track_condition: None,
+            field_size: 8,
             mean_weight: None,
         };
         let ex = build_explanation(
             &entry,
             &course,
+            None,
             &empty_horse_stats(),
             None,
             None,
@@ -830,6 +895,174 @@ mod tests {
         assert!(ex.factors.is_empty());
         assert!(ex.prev_run.is_none());
         assert_eq!(ex.weight_carried, None);
+    }
+
+    #[test]
+    fn build_explanation_adds_conditional_gate_bias_with_lift() {
+        use crate::repository::{ConditionalGateStatsRow, GateBiasCell};
+        use paddock_domain::TrackCondition;
+        // 良・16頭(多帯)・内枠。当該セル複勝40%、中/外は20%/15% → 全枠平均=25%、lift=+15pt。
+        let mk = |gate: &str, shows: u32| GateBiasCell {
+            track_label: "良".to_string(),
+            field_label: "多(14-18)".to_string(),
+            gate_label: gate.to_string(),
+            stat: group(gate, 100, shows),
+        };
+        let cg = ConditionalGateStatsRow {
+            cells: vec![
+                mk("Inner (1-3)", 40),
+                mk("Middle (4-6)", 20),
+                mk("Outer (7-8)", 15),
+            ],
+        };
+        let entry = HorseEntry {
+            gate_num: GateNum::try_from(1u32).unwrap(),
+            horse_num: HorseNum::try_from(3u32).unwrap(),
+            horse_name: HorseName::try_from("枠テスト").unwrap(),
+            jockey: None,
+            trainer: None,
+            weight_carried: None,
+        };
+        let course = CourseStatsRow {
+            venue: "東京".to_string(),
+            distance: 1600,
+            surface: "芝".to_string(),
+            by_gate_group: vec![],
+        };
+        let race = RaceContext {
+            surface: Surface::Turf,
+            distance: 1600,
+            track_condition: Some(TrackCondition::Firm),
+            field_size: 16,
+            mean_weight: None,
+        };
+        let ex = build_explanation(
+            &entry,
+            &course,
+            Some(&cg),
+            &empty_horse_stats(),
+            None,
+            None,
+            &race,
+            None,
+            None,
+        );
+        let f = ex
+            .factors
+            .iter()
+            .find(|f| f.category == ExplainCategory::ConditionalGateBias)
+            .expect("条件依存枠バイアスが提示される");
+        assert!((f.rate.show - 0.40).abs() < 1e-9);
+        assert_eq!(f.verdict, None, "全馬横断率＝判定なし");
+        assert!(
+            f.label.contains("内枠") && f.label.contains("良") && f.label.contains("多(14-18)"),
+            "label={}",
+            f.label
+        );
+        // lift = 0.40 − 0.25。
+        assert!(
+            (ex.gate_bias_lift.unwrap() - 0.15).abs() < 1e-9,
+            "lift={:?}",
+            ex.gate_bias_lift
+        );
+    }
+
+    #[test]
+    fn build_explanation_no_gate_bias_when_track_unconfirmed() {
+        use crate::repository::{ConditionalGateStatsRow, GateBiasCell};
+        let cg = ConditionalGateStatsRow {
+            cells: vec![GateBiasCell {
+                track_label: "良".to_string(),
+                field_label: "多(14-18)".to_string(),
+                gate_label: "Inner (1-3)".to_string(),
+                stat: group("Inner (1-3)", 100, 40),
+            }],
+        };
+        let entry = HorseEntry {
+            gate_num: GateNum::try_from(1u32).unwrap(),
+            horse_num: HorseNum::try_from(3u32).unwrap(),
+            horse_name: HorseName::try_from("枠テスト").unwrap(),
+            jockey: None,
+            trainer: None,
+            weight_carried: None,
+        };
+        let course = CourseStatsRow {
+            venue: "東京".to_string(),
+            distance: 1600,
+            surface: "芝".to_string(),
+            by_gate_group: vec![],
+        };
+        // 馬場未確定(None) → 枠バイアスは提示しない（当日馬場が定まらないと条件セルを引けない）。
+        let race = RaceContext {
+            surface: Surface::Turf,
+            distance: 1600,
+            track_condition: None,
+            field_size: 16,
+            mean_weight: None,
+        };
+        let ex = build_explanation(
+            &entry,
+            &course,
+            Some(&cg),
+            &empty_horse_stats(),
+            None,
+            None,
+            &race,
+            None,
+            None,
+        );
+        assert!(
+            !ex.factors
+                .iter()
+                .any(|f| f.category == ExplainCategory::ConditionalGateBias)
+        );
+        assert_eq!(ex.gate_bias_lift, None);
+    }
+
+    #[test]
+    fn gate_field_band_label_covers_boundaries() {
+        use crate::repository::gate_field_band_label;
+        // 少(≤9) / 中(10-13) / 多(14-18) の境界。集計 SQL の GATE_FIELD_BANDS と同一定数源。
+        assert_eq!(gate_field_band_label(9), "少(-9)");
+        assert_eq!(gate_field_band_label(10), "中(10-13)");
+        assert_eq!(gate_field_band_label(13), "中(10-13)");
+        assert_eq!(gate_field_band_label(14), "多(14-18)");
+        assert_eq!(gate_field_band_label(18), "多(14-18)");
+    }
+
+    #[test]
+    fn gate_track_cond2_label_maps_firm_vs_rest() {
+        use crate::repository::gate_track_cond2_label;
+        use paddock_domain::TrackCondition;
+        assert_eq!(
+            gate_track_cond2_label(TrackCondition::Firm.to_string().as_str()),
+            "良"
+        );
+        for tc in [
+            TrackCondition::Good,
+            TrackCondition::Yielding,
+            TrackCondition::Soft,
+        ] {
+            assert_eq!(
+                gate_track_cond2_label(tc.to_string().as_str()),
+                "非良",
+                "{tc:?} は非良"
+            );
+        }
+    }
+
+    #[test]
+    fn condition_show_rate_none_when_no_starts() {
+        use crate::repository::{ConditionalGateStatsRow, GateBiasCell};
+        let row = ConditionalGateStatsRow {
+            cells: vec![GateBiasCell {
+                track_label: "良".to_string(),
+                field_label: "少(-9)".to_string(),
+                gate_label: "Inner (1-3)".to_string(),
+                stat: group("Inner (1-3)", 0, 0),
+            }],
+        };
+        assert_eq!(row.condition_show_rate("良", "少(-9)"), None);
     }
 
     fn run_valid(date: NaiveDate, weight_change: Option<i32>) -> RecentRun {

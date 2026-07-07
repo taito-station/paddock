@@ -75,6 +75,91 @@ pub struct CourseStatsRow {
     pub by_gate_group: Vec<GroupStat>,
 }
 
+/// 条件依存枠バイアスの頭数帯 `(ラベル, 下限, 上限)`。集計（rdb-gateway の SQL）と提示側の当日頭数
+/// 分類（[`gate_field_band_label`]）が共有する**単一の真実源**（ラベル drift 防止, #343）。
+/// 多帯の上限 99 はラベル表記（14-18）より広いが、JRA 実頭数上限は 18 なので実害はなく、18 超の
+/// 異常データを多帯に吸収するための余裕（BETWEEN の上端）。
+pub const GATE_FIELD_BANDS: &[(&str, u32, u32)] = &[
+    ("多(14-18)", 14, 99),
+    ("中(10-13)", 10, 13),
+    ("少(-9)", 1, 9),
+];
+
+/// 馬場 2 値ラベル: 良。
+pub const GATE_TRACK_FIRM: &str = "良";
+/// 馬場 2 値ラベル: 非良（稍重・重・不良）。
+pub const GATE_TRACK_OTHER: &str = "非良";
+
+/// 当日の出走頭数を [`GATE_FIELD_BANDS`] の帯ラベルへ写す（集計セルと同じ区分, #343）。
+pub fn gate_field_band_label(field_size: u32) -> &'static str {
+    GATE_FIELD_BANDS
+        .iter()
+        .find(|(_, lo, hi)| field_size >= *lo && field_size <= *hi)
+        .map(|(label, _, _)| *label)
+        // 全帯（1..=99）を覆うので通常到達しないが、範囲外は最少帯に寄せる。
+        .unwrap_or(GATE_FIELD_BANDS[GATE_FIELD_BANDS.len() - 1].0)
+}
+
+/// 馬場状態文字列を 良/非良 の 2 値ラベルへ写す（[`GATE_TRACK_FIRM`]/[`GATE_TRACK_OTHER`], #343）。
+pub fn gate_track_cond2_label(track_condition: &str) -> &'static str {
+    if track_condition == GATE_TRACK_FIRM {
+        GATE_TRACK_FIRM
+    } else {
+        GATE_TRACK_OTHER
+    }
+}
+
+/// 条件依存の枠バイアス集計 1 セル（馬場2値 × 頭数帯 × 枠群）の複勝ベース率（#343・提示専用）。
+#[derive(Debug, Clone)]
+pub struct GateBiasCell {
+    /// 馬場ラベル（"良" / "非良"）。
+    pub track_label: String,
+    /// 頭数帯ラベル（"多(14-18)" / "中(10-13)" / "少(-9)"）。
+    pub field_label: String,
+    /// 枠群ラベル（`GATE_GROUPS` と同一: "Inner (1-3)" 等）。
+    pub gate_label: String,
+    pub stat: GroupStat,
+}
+
+/// コース（場×距離×馬場）の「馬場状態 × 頭数帯 × 枠群」条件依存枠バイアス集計（#343）。
+/// **提示専用**（decision-support）でスコアには入れない（measure-first）。薄いセルは呼び出し側が
+/// `stat.starts` で信頼度を判断する。既知の枠バイアスは市場が織り込み済みのため、edge は「市場が
+/// 雑にしか評価していない交互作用」だけに宿る想定（本 issue で市場差分により可視化する）。
+#[derive(Debug, Clone)]
+pub struct ConditionalGateStatsRow {
+    pub cells: Vec<GateBiasCell>,
+}
+
+impl ConditionalGateStatsRow {
+    /// 指定セル（馬場×頭数×枠）を引く。該当なしは `None`。
+    pub fn cell(
+        &self,
+        track_label: &str,
+        field_label: &str,
+        gate_label: &str,
+    ) -> Option<&GateBiasCell> {
+        self.cells.iter().find(|c| {
+            c.track_label == track_label
+                && c.field_label == field_label
+                && c.gate_label == gate_label
+        })
+    }
+
+    /// 同条件（馬場×頭数）の全枠合算の複勝率＝枠効果 lift の基準線。starts 合計 0 なら `None`。
+    pub fn condition_show_rate(&self, track_label: &str, field_label: &str) -> Option<f64> {
+        let (mut starts, mut shows) = (0u32, 0u32);
+        for c in self
+            .cells
+            .iter()
+            .filter(|c| c.track_label == track_label && c.field_label == field_label)
+        {
+            starts += c.stat.starts;
+            shows += c.stat.shows;
+        }
+        (starts > 0).then(|| shows as f64 / starts as f64)
+    }
+}
+
 /// recency 重み付け（#75 Phase B）用に、あるカテゴリの 1 ラベルぶんの日付付き成績系列。
 /// `runs` は `races.date < as_of` の各開催日のカウント（同一日複数走は 1 要素にまとめる）。
 #[derive(Debug, Clone, Default)]
@@ -472,6 +557,18 @@ pub trait StatsRepository: Send + Sync {
         surface: Surface,
         as_of: Option<NaiveDate>,
     ) -> impl Future<Output = Result<CourseStatsRow>> + Send;
+
+    /// コースの「馬場状態 × 頭数帯 × 枠群」条件依存枠バイアス（複勝ベース率）を返す（#343・提示専用）。
+    /// 既定は空（mock・提示不要経路。実集計は rdb-gateway のみ override）。`as_of` は他 stats と同義。
+    fn conditional_gate_stats(
+        &self,
+        _venue: Venue,
+        _distance: u32,
+        _surface: Surface,
+        _as_of: Option<NaiveDate>,
+    ) -> impl Future<Output = Result<ConditionalGateStatsRow>> + Send {
+        async move { Ok(ConditionalGateStatsRow { cells: Vec::new() }) }
+    }
 
     /// 騎手の各種成績統計を返す。`as_of` の意味は [`StatsRepository::horse_stats`] と同じ。
     fn jockey_stats(

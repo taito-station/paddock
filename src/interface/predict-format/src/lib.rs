@@ -31,13 +31,26 @@ pub fn format_probs(probs: &[HorseProbability]) -> Vec<String> {
     lines
 }
 
+/// 条件依存枠バイアスの複勝 lift がこの値以上で「枠有利」とみなし、市場過小評価と重なれば枠妙味を光らせる
+/// 閾値（#343）。lift は複勝ベース・市場差分は単勝ベースの近似併用（下記 doc 参照）。
+/// TODO(#343 後続): この 0.05 は measure-first の暫定値。backtest lift 掃引（`--gate-bias-weight` 相当）で
+/// 校正してから確定する（現段階は提示のみ・スコア非投入なので回収率に影響しない）。
+const GATE_BIAS_FLAG_LIFT: f64 = 0.05;
+
 /// 過去データ視点の比較テーブル（#272 ④）。純モデル勝率と市場 implied 勝率を並べ、差（pt）を見せる。
 /// `market_win` は馬番→単勝オッズ（払戻倍率 ≥1.0）。implied = `(1/odds)/Σ(1/odds)`（控除率＝オーバー
 /// ラウンドを除去）。オッズの無い馬は市場・差欄を `-` にする。盤面順（`pure` の順）で出力し先頭はヘッダ。
 /// 差 = 純勝率 − 市場implied（正＝モデルが市場より強気）。EV の向き（割安/割高）を読む材料。
+///
+/// `gate_lift` は馬番→条件依存枠バイアスの複勝 lift（#343）。**枠有利（lift≥[`GATE_BIAS_FLAG_LIFT`]）かつ
+/// 市場過小（純勝率 > 市場implied）** の馬に `🔶枠妙味` を付す＝「市場が見落としている枠バイアス」だけを
+/// 光らせる（decision-support・提示のみ。軸は動かさない, ADR 0055/0060）。lift は複勝ベース・市場差分は
+/// 単勝ベースの近似併用（複勝の市場implied は place odds 依存で広く取れないため単勝差分を代理に使う）。
+/// フラグ不要な経路は空 map を渡す。
 pub fn format_probs_with_market(
     pure: &[HorseProbability],
     market_win: &HashMap<HorseNum, f64>,
+    gate_lift: &HashMap<HorseNum, f64>,
 ) -> Vec<String> {
     // 控除率除去のため、有効オッズの 1/odds 合計で正規化する（blend_with_market_win と同じ implied 定義）。
     let overround: f64 = market_win
@@ -61,13 +74,24 @@ pub fn format_probs_with_market(
             ),
             None => (format!("{:>8}", "-"), format!("{:>8}", "-")),
         };
+        // 枠妙味フラグ: 枠有利（lift≥閾値）かつ市場過小（純勝率 > 市場implied）だけを光らせる（#343）。
+        let gate_edge = match implied {
+            Some(m) => {
+                gate_lift
+                    .get(&p.horse_num)
+                    .is_some_and(|&l| l >= GATE_BIAS_FLAG_LIFT)
+                    && p.win_prob > m
+            }
+            None => false,
+        };
         lines.push(format!(
-            "{:>4} {:<16} {:>7.1}% {} {}",
+            "{:>4} {:<16} {:>7.1}% {} {}{}",
             p.horse_num.value(),
             p.horse_name.value(),
             p.win_prob * 100.0,
             mkt,
             diff,
+            if gate_edge { "  🔶枠妙味" } else { "" },
         ));
     }
     lines
@@ -134,6 +158,8 @@ fn factor_phrase(f: &FactorExplanation) -> String {
         ExplainCategory::Surface | ExplainCategory::Distance => f.label.clone(),
         ExplainCategory::TrackCondition => format!("{}馬場", f.label),
         ExplainCategory::CourseGate => format!("枠（{}）", gate_label_jp(&f.label)),
+        // 条件依存枠バイアス（#343）。label は use-case で「内枠 / 良 / 多(14-18)」形式に整形済み。
+        ExplainCategory::ConditionalGateBias => format!("枠バイアス（{}）", f.label),
         ExplainCategory::Jockey => format!("騎手 {}", f.label),
         ExplainCategory::Trainer => format!("厩舎 {}", f.label),
     };
@@ -262,6 +288,7 @@ mod tests {
             factors,
             recent_form: None,
             prev_run: None,
+            gate_bias_lift: None,
             weight_carried: None,
             field_mean_weight: None,
         }
@@ -430,7 +457,7 @@ mod tests {
         let mut market: HashMap<HorseNum, f64> = HashMap::new();
         market.insert(horse(1), 2.0);
         market.insert(horse(2), 4.0);
-        let lines = format_probs_with_market(&pure, &market);
+        let lines = format_probs_with_market(&pure, &market, &HashMap::new());
         assert!(
             lines[0].contains("純勝率") && lines[0].contains("市場") && lines[0].contains("差pt")
         );
@@ -446,12 +473,79 @@ mod tests {
     }
 
     #[test]
+    fn format_probs_with_market_flags_gate_edge_when_favorable_and_underpriced() {
+        use super::format_probs_with_market;
+        use std::collections::HashMap;
+        // 馬1: odds 5.0→implied 低め・純30%>市場 で過小、枠 lift 有利 → 🔶枠妙味。
+        // 馬2: 枠 lift 有利だが odds 1.5→implied 高め・純10%<市場 で過大 → フラグなし。
+        let pure = vec![prob(1, "ウマ1", 0.30), prob(2, "ウマ2", 0.10)];
+        let mut market: HashMap<HorseNum, f64> = HashMap::new();
+        market.insert(horse(1), 5.0);
+        market.insert(horse(2), 1.5);
+        let mut gate_lift: HashMap<HorseNum, f64> = HashMap::new();
+        gate_lift.insert(horse(1), 0.08);
+        gate_lift.insert(horse(2), 0.08);
+        let lines = format_probs_with_market(&pure, &market, &gate_lift);
+        assert!(
+            lines[1].contains("🔶枠妙味"),
+            "馬1=枠有利∧市場過小: {}",
+            lines[1]
+        );
+        assert!(
+            !lines[2].contains("🔶枠妙味"),
+            "馬2=市場過大なので光らせない: {}",
+            lines[2]
+        );
+    }
+
+    #[test]
+    fn format_probs_with_market_no_flag_when_lift_below_threshold() {
+        use super::format_probs_with_market;
+        use std::collections::HashMap;
+        // 過小評価だが枠 lift が閾値未満 → フラグなし（枠の見落としではない）。
+        let pure = vec![prob(1, "ウマ1", 0.30)];
+        let mut market: HashMap<HorseNum, f64> = HashMap::new();
+        market.insert(horse(1), 5.0);
+        let mut gate_lift: HashMap<HorseNum, f64> = HashMap::new();
+        gate_lift.insert(horse(1), 0.01);
+        let lines = format_probs_with_market(&pure, &market, &gate_lift);
+        assert!(!lines[1].contains("🔶枠妙味"), "{}", lines[1]);
+    }
+
+    #[test]
+    fn conditional_gate_bias_factor_renders_as_gate_bias_phrase() {
+        use paddock_domain::{ExplainCategory, FactorExplanation, RateTriple};
+        let probs = vec![prob(1, "ウマ1", 0.30)];
+        let ex = explanation(
+            1,
+            "ウマ1",
+            vec![FactorExplanation::new(
+                ExplainCategory::ConditionalGateBias,
+                "内枠 / 良 / 多(14-18)".to_string(),
+                RateTriple {
+                    win: 0.1,
+                    place: 0.2,
+                    show: 0.35,
+                },
+                40,
+            )],
+        );
+        let joined = format_explanations(&probs, &[ex]).join("\n");
+        assert!(
+            joined.contains("枠バイアス（内枠 / 良 / 多(14-18)）"),
+            "{joined}"
+        );
+        // verdict なし（全馬横断率）＝「得意/苦手」を付けず複勝率だけ。
+        assert!(joined.contains("複勝率 35%"), "{joined}");
+    }
+
+    #[test]
     fn format_probs_with_market_dashes_when_odds_missing() {
         use super::format_probs_with_market;
         use std::collections::HashMap;
         let pure = vec![prob(1, "ウマ1", 0.30)];
         let market: HashMap<HorseNum, f64> = HashMap::new(); // オッズ無し → 市場・差は「-」
-        let lines = format_probs_with_market(&pure, &market);
+        let lines = format_probs_with_market(&pure, &market, &HashMap::new());
         assert!(lines[1].contains("ウマ1") && lines[1].contains("30.0%"));
         assert!(
             lines[1].contains('-'),
