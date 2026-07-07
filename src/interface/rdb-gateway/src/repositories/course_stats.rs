@@ -11,7 +11,7 @@ use sqlx::PgPool;
 use crate::error::Result;
 
 use super::sql::{
-    GATE_GROUPS, STATS_AGG_EXPRS, STATS_AGG_SELECT, case_from_preds, date_lt_pred,
+    GATE_GROUPS, STATS_AGG_EXPRS, STATS_AGG_SELECT, case_from_bands, case_from_preds, date_lt_pred,
     group_stat_from_row, or_from_preds,
 };
 
@@ -98,21 +98,10 @@ pub async fn conditional_gate_stats(
     let track_filter = or_from_preds(GATE_TRACK_PREDS);
     let gate_case = case_from_preds(GATE_GROUPS);
     let gate_filter = or_from_preds(GATE_GROUPS);
-    // 頭数帯は (label, lo, hi) 形式で CASE を組む（rf.field_size を BETWEEN で帯分け）。
-    // 帯は 1-99 を隙間なく被覆する code 定数（field_size は per-race COUNT で最低 1・実頭数 ≤18）
-    // なので CASE は必ずいずれかの帯に当たり NULL を返さない。ラベルは SQL リテラルに素で埋めるため
-    // 単一引用符を禁止（case_from_preds と同じ契約）。
-    let mut field_case = String::from("CASE");
-    for (label, lo, hi) in GATE_FIELD_BANDS {
-        debug_assert!(
-            !label.contains('\''),
-            "field band label must not contain a single quote: {label:?}"
-        );
-        field_case.push_str(&format!(
-            " WHEN rf.field_size BETWEEN {lo} AND {hi} THEN '{label}'"
-        ));
-    }
-    field_case.push_str(" END");
+    // 頭数帯は rf.field_size を帯（多/中/少）で BETWEEN 分けした CASE キー。帯は 1-99 を隙間なく
+    // 被覆する code 定数（field_size は per-race COUNT で最低 1・実頭数 ≤18）なので必ずいずれかに
+    // 当たり NULL を返さない。ラベルの SQL リテラル埋め込み契約は case_from_bands に集約。
+    let field_case = case_from_bands("rf.field_size", GATE_FIELD_BANDS);
 
     // 集計式は共通 `STATS_AGG_EXPRS`（fetch_agg_grouped と同じくキー列を前置してグループ集計）。
     // 頭数(field_size)は対象コースのレースだけに絞って COUNT する（`target_races` 経由）。全 results の

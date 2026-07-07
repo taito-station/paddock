@@ -76,6 +76,23 @@ pub(crate) fn or_from_preds(arms: &[(&str, &str)]) -> String {
         .join(" OR ")
 }
 
+/// `(label, lo, hi)` の並びから `CASE WHEN <col> BETWEEN lo AND hi THEN '<label>' ... END` を組む。
+/// 数値帯（頭数帯など）のキー化用。`case_from_preds` の BETWEEN 版で、ラベルの SQL リテラル
+/// 埋め込み契約（単一引用符禁止の `debug_assert`）を同じ 1 箇所に集約する（#358）。
+/// `col` は呼び出し側の code 定数（列式）前提でユーザー入力を渡さない。
+pub(crate) fn case_from_bands(col: &str, bands: &[(&str, u32, u32)]) -> String {
+    let mut s = String::from("CASE");
+    for (label, lo, hi) in bands {
+        debug_assert!(
+            !label.contains('\''),
+            "band label must not contain a single quote: {label:?}"
+        );
+        s.push_str(&format!(" WHEN {col} BETWEEN {lo} AND {hi} THEN '{label}'"));
+    }
+    s.push_str(" END");
+    s
+}
+
 /// 集計結果の 4-tuple `(starts, wins, places, shows)` を [`GroupStat`] に詰める。
 pub(crate) fn group_stat_from_row(label: &str, row: (i64, i64, i64, i64)) -> GroupStat {
     GroupStat {
@@ -338,7 +355,9 @@ pub(crate) async fn delete_absent_horse_nums(
 
 #[cfg(test)]
 mod tests {
-    use super::{STATS_AGG_EXPRS, STATS_AGG_SELECT, case_from_preds, or_from_preds};
+    use super::{
+        STATS_AGG_EXPRS, STATS_AGG_SELECT, case_from_bands, case_from_preds, or_from_preds,
+    };
 
     #[test]
     fn case_from_preds_builds_when_then_chain() {
@@ -373,5 +392,14 @@ mod tests {
     #[test]
     fn or_from_preds_single_has_no_or() {
         assert_eq!(or_from_preds(&[("A", "x = 1")]), "(x = 1)");
+    }
+
+    #[test]
+    fn case_from_bands_builds_between_chain() {
+        let sql = case_from_bands("f", &[("多", 14, 99), ("少", 1, 9)]);
+        assert_eq!(
+            sql,
+            "CASE WHEN f BETWEEN 14 AND 99 THEN '多' WHEN f BETWEEN 1 AND 9 THEN '少' END"
+        );
     }
 }
