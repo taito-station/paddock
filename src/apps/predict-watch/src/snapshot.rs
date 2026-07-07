@@ -173,6 +173,15 @@ mod tests {
     }
 
     #[test]
+    fn verdict_bet_at_exact_100pct_boundary() {
+        // 契約は ROI≥100%（`>=`）で bet。境界 roi==1.0（=100%）ちょうどを bet 側にロックする。
+        let p = portfolio(vec![wide(6, 3, 1500, Some(5.0))], 1.0);
+        let r = build_snapshot_record(&p, &ctx()).unwrap();
+        assert_eq!(r.verdict, "bet");
+        assert!((r.roi - 100.0).abs() < 1e-9);
+    }
+
+    #[test]
     fn legs_are_per_bet_nagashi_with_sorted_combo() {
         // stake>0 の買い目だけが 1 leg=1 点=1 組番（昇順）で写る。
         let p = portfolio(vec![wide(6, 3, 1500, Some(5.0)), trio(8, 3, 6, 2000)], 1.1);
