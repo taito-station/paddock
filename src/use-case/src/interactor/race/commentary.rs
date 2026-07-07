@@ -26,8 +26,9 @@ pub(crate) fn race_commentary(confusion: &Confusion, horses: &[BoardHorse]) -> S
             axis.horse_name, axis_pct
         )
     };
-    // 乖離馬（モデル上位×市場人気低）があれば妙味として一言添える。
-    if let Some(v) = horses.iter().find(|h| h.is_value) {
+    // 乖離馬（モデル上位×市場人気低）があれば妙味として一言添える。◎（model_rank==1）自身は
+    // 除く（contrarian 本命が is_value のとき「◎馬X…妙味は馬X」の二重言及を防ぐ）。
+    if let Some(v) = horses.iter().find(|h| h.is_value && h.model_rank != 1) {
         match v.popularity {
             Some(pop) => s.push_str(&format!(" 妙味は{}（{}番人気）。", v.horse_name, pop)),
             None => s.push_str(&format!(" 妙味は{}。", v.horse_name)),
@@ -81,10 +82,13 @@ pub(crate) fn horse_detail_lines(expl: &HorseExplanation) -> Vec<String> {
             verdict
         ));
     }
-    if let Some(lift) = expl.gate_bias_lift {
-        let dir = if lift >= 0.0 { "有利" } else { "不利" };
+    // gate_bias_lift は同条件（馬場×頭数）の全枠平均比の複勝 lift。ConditionalGateBias factor 行
+    // （絶対複勝率「枠バイアス（ラベル）：…」）と話題が被らないよう「相対有利度」と明示する。
+    // lift=0 は無情報なので出さない。
+    if let Some(lift) = expl.gate_bias_lift.filter(|&l| l != 0.0) {
+        let dir = if lift > 0.0 { "有利" } else { "不利" };
         lines.push(format!(
-            "枠バイアス：複勝 {:+.0}pt（この馬場×頭数で枠が{dir}）",
+            "枠の相対有利度：複勝 {:+.0}pt（同条件の全枠平均比で{dir}）",
             lift * 100.0
         ));
     }
@@ -278,7 +282,9 @@ mod tests {
             "{lines:?}"
         );
         assert!(
-            lines.iter().any(|l| l.contains("枠バイアス：複勝 +6pt")),
+            lines
+                .iter()
+                .any(|l| l.contains("枠の相対有利度：複勝 +6pt")),
             "{lines:?}"
         );
         assert!(lines.iter().any(|l| l == "近走フォーム：好調"), "{lines:?}");

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
@@ -18,6 +18,9 @@ export function RaceBoard() {
   const dateParam = searchParams.get("date") ?? "";
   // クリックで馬書評（詳細パネル）を開く馬番。同じ馬を再クリック or 閉じるで null に戻す。
   const [selectedHorse, setSelectedHorse] = useState<number | null>(null);
+  // レース遷移（React Router の param 変更では remount されない）で開いたパネルが別馬に
+  // 引き継がれるのを防ぐため、raceId が変わったら選択を解除する。
+  useEffect(() => setSelectedHorse(null), [raceId]);
 
   const board = useQuery({
     // budget/blend_alpha は現状固定（5000 / 既定 α）。将来これらを可変にする際は
@@ -165,8 +168,12 @@ export function RaceBoard() {
           <div className="board-scroll">
             <div className="board-row">
               {horses.map((h) => {
-                const hasDetail =
-                  !!h.comment || (h.detail_lines?.length ?? 0) > 0;
+                // detail_lines はスキーマ上必須（string[]）。comment または根拠行があれば展開可。
+                const hasDetail = !!h.comment || h.detail_lines.length > 0;
+                const toggleDetail = () =>
+                  setSelectedHorse((cur) =>
+                    cur === h.horse_num ? null : h.horse_num,
+                  );
                 return (
                 <div
                   key={h.horse_num}
@@ -179,13 +186,16 @@ export function RaceBoard() {
                   }
                   role={hasDetail ? "button" : undefined}
                   tabIndex={hasDetail ? 0 : undefined}
-                  title={hasDetail ? "クリックで書評を表示" : undefined}
-                  onClick={
+                  title={hasDetail ? "クリック / Enter で書評を表示" : undefined}
+                  onClick={hasDetail ? toggleDetail : undefined}
+                  onKeyDown={
                     hasDetail
-                      ? () =>
-                          setSelectedHorse((cur) =>
-                            cur === h.horse_num ? null : h.horse_num,
-                          )
+                      ? (e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            toggleDetail();
+                          }
+                        }
                       : undefined
                   }
                 >
@@ -273,8 +283,8 @@ export function RaceBoard() {
                   {h.comment && <p className="horse-detail-lead">{h.comment}</p>}
                   {h.detail_lines.length > 0 ? (
                     <ul className="horse-detail-lines">
-                      {h.detail_lines.map((line, i) => (
-                        <li key={i}>{line}</li>
+                      {h.detail_lines.map((line) => (
+                        <li key={line}>{line}</li>
                       ))}
                     </ul>
                   ) : (

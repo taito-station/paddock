@@ -154,11 +154,12 @@ impl<
         let confusion = compute_confusion(&views.blended);
         enrich_commentary(&mut horses, &views.explanations, pad.as_ref());
 
-        // レース書評: 人手 commentary 優先、無ければルールベース生成（◎不在なら空→None）。
-        let race_comment = pad.as_ref().and_then(|p| p.commentary.clone()).or_else(|| {
-            let generated = race_commentary(&confusion, &horses);
-            (!generated.is_empty()).then_some(generated)
-        });
+        // レース書評: 人手 commentary 優先、無ければルールベース生成（◎不在なら None）。
+        let race_comment = resolve_race_comment(
+            pad.as_ref().and_then(|p| p.commentary.as_deref()),
+            &confusion,
+            &horses,
+        );
 
         let (venue, surface, distance, race_num, date, post_time) = match card.as_ref() {
             Some(c) => (
@@ -265,8 +266,9 @@ fn build_board_horses(
 }
 
 /// 盤行に書評（一行寸評＋根拠 bullet）を後付けする（#348）。`explanations` は
-/// `with_explanation=true` の predict 由来（馬番で突き合わせ）。人手 `pad` の短評があれば
-/// ルールベース生成より優先する（overlay）。`explanations` が空なら何もしない。
+/// `with_explanation=true` の predict 由来（馬番で突き合わせ）。一行寸評は人手 `pad` の短評を
+/// ルールベース生成より優先する（overlay）。`explanations` が空でも人手 comment の overlay は効く
+/// （その場合 detail_lines は空・ルールベース headline は付かない）。空文字の人手短評は採用しない。
 fn enrich_commentary(
     horses: &mut [BoardHorse],
     explanations: &[HorseExplanation],
@@ -276,16 +278,32 @@ fn enrich_commentary(
         let expl = explanations
             .iter()
             .find(|e| e.horse_num.value() == h.horse_num);
-        // 一行寸評: 人手コメント優先、無ければ factor/前走/近走からのルールベース。
-        let human = pad.and_then(|p| {
-            p.horses
-                .iter()
-                .find(|ph| ph.horse_num == h.horse_num)
-                .and_then(|ph| ph.comment.clone())
-        });
+        // 一行寸評: 人手コメント優先（空文字は不採用）、無ければ factor/前走/近走のルールベース。
+        let human = pad
+            .and_then(|p| {
+                p.horses
+                    .iter()
+                    .find(|ph| ph.horse_num == h.horse_num)
+                    .and_then(|ph| ph.comment.clone())
+            })
+            .filter(|s| !s.trim().is_empty());
         h.comment = human.or_else(|| expl.and_then(horse_headline));
         h.detail_lines = expl.map(horse_detail_lines).unwrap_or_default();
     }
+}
+
+/// レース書評を決める（#348）。人手 `human` が非空ならそれを優先、無ければルールベース生成を返す。
+/// ルールベースが空（◎不在）なら `None`。人手優先の分岐を純関数に切り出して単体テスト可能にする。
+fn resolve_race_comment(
+    human: Option<&str>,
+    confusion: &Confusion,
+    horses: &[BoardHorse],
+) -> Option<String> {
+    if let Some(h) = human.filter(|h| !h.trim().is_empty()) {
+        return Some(h.to_string());
+    }
+    let generated = race_commentary(confusion, horses);
+    (!generated.is_empty()).then_some(generated)
 }
 
 /// 単勝オッズから市場implied（フィールド内 `1/odds` 正規化＝控除抜き）と人気順（昇順・1始まり）を導く。
@@ -377,7 +395,9 @@ fn compute_confusion(blended: &[HorseProbability]) -> Confusion {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use paddock_domain::{HorseName, HorseNum};
+    use paddock_domain::{
+        ExplainCategory, FactorExplanation, HorseName, HorseNum, PredictionHorse, RateTriple, Venue,
+    };
 
     fn hp(num: u32, win: f64) -> HorseProbability {
         HorseProbability {
@@ -512,6 +532,130 @@ mod tests {
         assert_eq!(
             horses.iter().find(|h| h.horse_num == 1).unwrap().model_rank,
             1
+        );
+    }
+
+    /// Surface の Strong factor 1 本を持つ説明（headline "芝が得意。"・detail 1 行を生む）。
+    fn expl_surface_strong(num: u32) -> HorseExplanation {
+        HorseExplanation {
+            horse_num: HorseNum::try_from(num).unwrap(),
+            horse_name: HorseName::try_from(format!("馬{num}")).unwrap(),
+            factors: vec![FactorExplanation::new(
+                ExplainCategory::Surface,
+                "芝".to_string(),
+                RateTriple {
+                    win: 0.3,
+                    place: 0.5,
+                    show: 0.7,
+                },
+                20,
+            )],
+            recent_form: None,
+            prev_run: None,
+            gate_bias_lift: None,
+            weight_carried: None,
+            field_mean_weight: None,
+        }
+    }
+
+    fn pad_with(num: u32, comment: Option<&str>, commentary: Option<&str>) -> PadPrediction {
+        PadPrediction {
+            date: NaiveDate::default(),
+            venue: Venue::Hakodate,
+            race_num: 1,
+            title: None,
+            budget: None,
+            strategy_note: None,
+            commentary: commentary.map(str::to_string),
+            horses: vec![PredictionHorse {
+                horse_num: num,
+                horse_name: format!("馬{num}"),
+                jockey: None,
+                mark: None,
+                win_odds: None,
+                popularity: None,
+                win_prob: None,
+                place_prob: None,
+                show_prob: None,
+                comment: comment.map(str::to_string),
+            }],
+            bets: vec![],
+            result: None,
+        }
+    }
+
+    #[test]
+    fn enrich_prefers_human_comment_over_rulebase() {
+        let b = vec![hp(1, 0.4)];
+        let mut horses = build_board_horses(&b, &b, None, None);
+        let expls = vec![expl_surface_strong(1)];
+        let pad = pad_with(1, Some("人手の寸評"), None);
+        enrich_commentary(&mut horses, &expls, Some(&pad));
+        assert_eq!(horses[0].comment.as_deref(), Some("人手の寸評"));
+        // detail_lines は explanation 由来（人手 comment とは独立に付く）。
+        assert!(!horses[0].detail_lines.is_empty());
+    }
+
+    #[test]
+    fn enrich_falls_back_to_rulebase_when_no_human() {
+        let b = vec![hp(1, 0.4)];
+        let mut horses = build_board_horses(&b, &b, None, None);
+        let expls = vec![expl_surface_strong(1)];
+        enrich_commentary(&mut horses, &expls, None);
+        assert_eq!(horses[0].comment.as_deref(), Some("芝が得意。"));
+    }
+
+    #[test]
+    fn enrich_ignores_blank_human_comment() {
+        let b = vec![hp(1, 0.4)];
+        let mut horses = build_board_horses(&b, &b, None, None);
+        let expls = vec![expl_surface_strong(1)];
+        let pad = pad_with(1, Some("   "), None); // 空白のみ → 不採用
+        enrich_commentary(&mut horses, &expls, Some(&pad));
+        assert_eq!(
+            horses[0].comment.as_deref(),
+            Some("芝が得意。"),
+            "空白のみの人手はルールベースにフォールバック"
+        );
+    }
+
+    #[test]
+    fn enrich_human_overlay_applies_without_explanation() {
+        // explanations 空でも人手 comment の overlay は効く（detail_lines は空）。
+        let b = vec![hp(1, 0.4)];
+        let mut horses = build_board_horses(&b, &b, None, None);
+        let pad = pad_with(1, Some("人手のみ"), None);
+        enrich_commentary(&mut horses, &[], Some(&pad));
+        assert_eq!(horses[0].comment.as_deref(), Some("人手のみ"));
+        assert!(horses[0].detail_lines.is_empty());
+    }
+
+    #[test]
+    fn resolve_race_comment_prefers_human() {
+        let b = vec![hp(1, 0.4), hp(2, 0.1)];
+        let horses = build_board_horses(&b, &b, None, None);
+        let c = compute_confusion(&b);
+        assert_eq!(
+            resolve_race_comment(Some("人手レース評"), &c, &horses).as_deref(),
+            Some("人手レース評")
+        );
+    }
+
+    #[test]
+    fn resolve_race_comment_generates_or_blank_falls_back() {
+        let b = vec![hp(1, 0.4), hp(2, 0.1)];
+        let horses = build_board_horses(&b, &b, None, None);
+        let c = compute_confusion(&b);
+        // 人手なし → ルールベース。空白のみの人手も同じくルールベースへ。
+        assert!(
+            resolve_race_comment(None, &c, &horses)
+                .unwrap()
+                .contains("◎馬1")
+        );
+        assert!(
+            resolve_race_comment(Some("  "), &c, &horses)
+                .unwrap()
+                .contains("◎馬1")
         );
     }
 }
