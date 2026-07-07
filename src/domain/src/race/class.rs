@@ -67,18 +67,20 @@ impl RaceClass {
     /// カード側では `<title>`（グレードを含む）と `RaceData02`（条件を含む）を結合した
     /// ラベルを渡す想定。どれにも当てはまらなければ `None`。
     ///
-    /// - グレードは算用数字(G1)とローマ数字(GI)の両表記に対応（GIII→GII→GI の順で最長一致）。
-    /// - 地方交流重賞の Jpn1/Jpn2/Jpn3 表記と unicode ローマ数字（GⅠ 等）は非対応で `None` に
-    ///   落ちる（JRA 中央スコープの best-effort。必要になれば拡張する）。
+    /// - グレードは算用数字(G1)とローマ数字(GI)の両表記に対応し、**括弧付き表記にアンカー**する
+    ///   （GIII→GII→GI の順で最長一致）。レース名・スポンサー名中に偶発的に混じる裸の "GI"/"G1"
+    ///   部分文字列を誤検出しないため、必ず `(GI)`/`(G1)` の括弧付きで判定する。
+    /// - 地方交流重賞の Jpn1/Jpn2/Jpn3 表記と unicode ローマ数字（GⅠ 等）・全角括弧は非対応で
+    ///   `None` に落ちる（JRA 中央スコープの best-effort。必要になれば拡張する）。
     pub fn from_label(label: &str) -> Option<Self> {
-        // 1. グレード（最長一致: GIII/GII/GI）
-        if label.contains("GIII") || label.contains("G3") {
+        // 1. グレード（括弧付きにアンカー・最長一致: (GIII)/(GII)/(GI)）
+        if label.contains("(GIII)") || label.contains("(G3)") {
             return Some(RaceClass::G3);
         }
-        if label.contains("GII") || label.contains("G2") {
+        if label.contains("(GII)") || label.contains("(G2)") {
             return Some(RaceClass::G2);
         }
-        if label.contains("GI") || label.contains("G1") {
+        if label.contains("(GI)") || label.contains("(G1)") {
             return Some(RaceClass::G1);
         }
         // 2. リステッド

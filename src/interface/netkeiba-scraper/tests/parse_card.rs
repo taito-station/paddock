@@ -61,6 +61,15 @@ fn race_class_from_racedata02_when_title_has_no_grade() {
     assert_eq!(card.entries.len(), 17);
 }
 
+// G1 以外のグレード（G2）も <title> の括弧付き表記から取れる（#345）。fixture の
+// 「安田記念(G1)」を「○○記念(G2)」に差し替えて title→グレードの経路を G1 以外でも検証する。
+#[test]
+fn race_class_reads_g2_grade_from_title() {
+    let html = FIXTURE.replace("安田記念(G1)", "○○記念(G2)");
+    let card = parse_card(&html, RACE_ID).expect("parse card");
+    assert_eq!(card.race_class, Some(RaceClass::G2));
+}
+
 // 発走時刻表記（「HH:MM発走」）が無い HTML では post_time が best-effort で None になり、
 // それでもカード自体は他項目から組める（#235）。発走時刻トークンだけを除いて再現する
 // （「発走」全置換だと将来 fixture の別箇所に「発走」が増えたとき意図せず消えるため、

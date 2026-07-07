@@ -74,9 +74,13 @@ pub fn resolve_notify_gate(explicit: Option<f64>, roi_gate: f64) -> anyhow::Resu
 /// - `notify_gate <= roi < buy_gate` → `🔍`（検証候補。買う閾値未満だが結果照合で学ぶために残す）
 /// - `roi < notify_gate` → `・`（低シグナル）
 ///
-/// `notify_gate <= buy_gate` を前提とする（run で検証済み）。表示のみで、買う/見送りの判断や
-/// DB snapshot の verdict には影響しない（decision-support・軸ロック）。
+/// `notify_gate <= buy_gate` を前提とする（`resolve_notify_gate` が保証）。表示のみで、買う/見送りの
+/// 判断や DB snapshot の verdict には影響しない（decision-support・軸ロック）。
 pub fn mark_for(roi: f64, notify_gate: f64, buy_gate: f64) -> &'static str {
+    debug_assert!(
+        notify_gate <= buy_gate,
+        "notify_gate ({notify_gate}) は buy_gate ({buy_gate}) 以下である前提"
+    );
     if roi >= buy_gate {
         "🔶"
     } else if roi >= notify_gate {
@@ -94,6 +98,10 @@ pub fn mark_for(roi: f64, notify_gate: f64, buy_gate: f64) -> &'static str {
 ///
 /// G1 とその裏に旨みが偏在する、という未検証仮説（#345）の可視化用フラグ。買う/見送りの判断や
 /// 軸には影響しない（decision-support・-EV でも通知に残すためのタグ）。
+///
+/// 注意: `day_classes` は各レースの race_card 由来の race_class から作る。当日 G1 の race_card が
+/// 未取得、または title の parse に失敗すると day_classes に G1 が現れず、裏タグもバナーも無言で
+/// 出なくなる（G1 開催日は G1 のカードも fetch-card しておくこと）。
 pub fn is_g1_ura(
     venue: Venue,
     race_class: Option<RaceClass>,

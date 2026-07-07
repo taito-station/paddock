@@ -569,3 +569,53 @@ async fn save_race_card_round_trips_race_class(pool: sqlx::PgPool) {
         "PDF 経路の None は netkeiba のクラスを消さない"
     );
 }
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn save_race_card_persists_all_race_class_variants(pool: sqlx::PgPool) {
+    // migration の CHECK 制約のスラッグ集合と RaceClass::as_str の drift を検知する（#345）。
+    // 全 10 変種を保存 → 取得で往復し、CHECK 漏れなら save 時に落ちる。新変種を追加して
+    // CHECK/as_str のどちらか片方だけ更新した場合にこのテストが失敗する（drift-lock）。
+    let repo = PostgresRepository::new(pool);
+    let variants = [
+        RaceClass::G1,
+        RaceClass::G2,
+        RaceClass::G3,
+        RaceClass::Listed,
+        RaceClass::Open,
+        RaceClass::Win3,
+        RaceClass::Win2,
+        RaceClass::Win1,
+        RaceClass::Maiden,
+        RaceClass::NewComer,
+    ];
+    for (i, rc) in variants.iter().enumerate() {
+        let rid = format!("2026-3-nakayama-8-{}R", i + 1);
+        let card = RaceCard {
+            race_id: RaceId::try_from(rid.as_str()).unwrap(),
+            date: d(),
+            post_time: None,
+            venue: Venue::Nakayama,
+            round: 3,
+            day: 8,
+            race_num: (i + 1) as u32,
+            surface: Surface::Turf,
+            distance: 1800,
+            race_class: Some(*rc),
+            entries: vec![HorseEntry {
+                gate_num: GateNum::try_from(1u32).unwrap(),
+                horse_num: HorseNum::try_from(1u32).unwrap(),
+                horse_name: HorseName::try_from("ウマV").unwrap(),
+                jockey: None,
+                trainer: None,
+                weight_carried: None,
+            }],
+        };
+        repo.save_race_card(&card).await.unwrap();
+        let loaded = repo
+            .find_race_card(&RaceId::try_from(rid.as_str()).unwrap())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(loaded.race_class, Some(*rc), "{rc} が往復する");
+    }
+}
