@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
@@ -15,6 +16,27 @@ export function RaceBoard() {
   const { raceId = "" } = useParams();
   const [searchParams] = useSearchParams();
   const dateParam = searchParams.get("date") ?? "";
+  // クリックで馬書評（詳細パネル）を開く馬番。同じ馬を再クリック or 閉じるで null に戻す。
+  const [selectedHorse, setSelectedHorse] = useState<number | null>(null);
+  // フォーカス管理（a11y）: パネルを開いた馬カラム（trigger）を覚えておき、閉じたら戻す。
+  // 開いたらパネル内（閉じるボタン）へフォーカスを移す。
+  const triggerRef = useRef<HTMLElement | null>(null);
+  const closeBtnRef = useRef<HTMLButtonElement | null>(null);
+  // レース遷移（React Router の param 変更では remount されない）で開いたパネルが別馬に
+  // 引き継がれるのを防ぐため、raceId が変わったら選択を解除する。
+  useEffect(() => {
+    setSelectedHorse(null);
+  }, [raceId]);
+  // パネルが開いたら閉じるボタンへフォーカス（キーボード操作でパネルに入れるように）。
+  useEffect(() => {
+    if (selectedHorse != null) closeBtnRef.current?.focus();
+  }, [selectedHorse]);
+
+  // パネルを閉じ、開いた馬カラムへフォーカスを戻す。
+  const closePanel = () => {
+    setSelectedHorse(null);
+    triggerRef.current?.focus();
+  };
 
   const board = useQuery({
     // budget/blend_alpha は現状固定（5000 / 既定 α）。将来これらを可変にする際は
@@ -153,16 +175,65 @@ export function RaceBoard() {
             )}
           </div>
 
+          {/* レース書評（混戦度・◎の狙いどころ・妙味。人手優先・無ければルールベース生成） */}
+          {d.race_comment && (
+            <p className="race-comment">{d.race_comment}</p>
+          )}
+
           {/* 全頭横並び盤（モデル勝率順・truncate しない） */}
           <div className="board-scroll">
             <div className="board-row">
-              {horses.map((h) => (
+              {horses.map((h) => {
+                // detail_lines はスキーマ上必須（string[]）。comment または根拠行があれば展開可。
+                const hasDetail = !!h.comment || h.detail_lines.length > 0;
+                // 開く時は trigger 要素を覚えてパネルからフォーカスを戻せるようにする。
+                // ref 代入は updater の外（純粋な updater を保つ・StrictMode の二重実行対策）。
+                const toggleDetail = (el: HTMLElement) => {
+                  if (selectedHorse === h.horse_num) {
+                    setSelectedHorse(null);
+                  } else {
+                    triggerRef.current = el;
+                    setSelectedHorse(h.horse_num);
+                  }
+                };
+                return (
                 <div
                   key={h.horse_num}
                   className={
                     "horse-col" +
                     (h.is_overlay ? " is-overlay" : "") +
-                    (h.is_value ? " is-value" : "")
+                    (h.is_value ? " is-value" : "") +
+                    (hasDetail ? " has-detail" : "") +
+                    (selectedHorse === h.horse_num ? " is-selected" : "")
+                  }
+                  role={hasDetail ? "button" : undefined}
+                  tabIndex={hasDetail ? 0 : undefined}
+                  aria-label={
+                    hasDetail
+                      ? `${h.horse_num} ${h.horse_name} の書評を開く`
+                      : undefined
+                  }
+                  aria-expanded={hasDetail ? selectedHorse === h.horse_num : undefined}
+                  aria-controls={
+                    hasDetail && selectedHorse === h.horse_num
+                      ? "horse-detail-panel"
+                      : undefined
+                  }
+                  title={
+                    hasDetail ? "クリック / Enter / Space で書評を表示" : undefined
+                  }
+                  onClick={
+                    hasDetail ? (e) => toggleDetail(e.currentTarget) : undefined
+                  }
+                  onKeyDown={
+                    hasDetail
+                      ? (e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            toggleDetail(e.currentTarget);
+                          }
+                        }
+                      : undefined
                   }
                 >
                   <div
@@ -217,11 +288,57 @@ export function RaceBoard() {
                         妙味
                       </span>
                     )}
+                    {hasDetail && <span className="chip chip-note">書評</span>}
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           </div>
+
+          {/* 馬書評（クリックで展開する詳細パネル）。数値密度を保ちつつ掘りたい馬だけ開く */}
+          {selectedHorse != null &&
+            (() => {
+              const h = horses.find((x) => x.horse_num === selectedHorse);
+              if (!h) return null;
+              return (
+                <div
+                  className="horse-detail"
+                  id="horse-detail-panel"
+                  role="region"
+                  aria-label={`${h.horse_num} ${h.horse_name} の書評`}
+                  onKeyDown={(e) => {
+                    if (e.key === "Escape") closePanel();
+                  }}
+                >
+                  <div className="horse-detail-head">
+                    <span className="mark">{markSymbol(h.mark)}</span>
+                    <strong>
+                      {h.horse_num} {h.horse_name}
+                    </strong>
+                    <span className="muted">{h.jockey ?? "-"}</span>
+                    <button
+                      ref={closeBtnRef}
+                      className="detail-close"
+                      onClick={closePanel}
+                      aria-label="閉じる"
+                    >
+                      ×
+                    </button>
+                  </div>
+                  {h.comment && <p className="horse-detail-lead">{h.comment}</p>}
+                  {/* パネルは hasDetail(=comment もしくは detail_lines あり)でのみ開くため、
+                      detail_lines 空のとき comment は必ず存在する（lead 表示済み・追加表示は不要）。 */}
+                  {h.detail_lines.length > 0 && (
+                    <ul className="horse-detail-lines">
+                      {h.detail_lines.map((line, i) => (
+                        <li key={`${i}-${line}`}>{line}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              );
+            })()}
 
           {/* 買い目（/recommendations と同経路・相手 top5 不変） */}
           <h3 style={{ marginTop: "1.25rem" }}>買い目</h3>

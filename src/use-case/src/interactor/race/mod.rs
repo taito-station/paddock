@@ -1,5 +1,6 @@
 pub mod backtest;
 pub mod board;
+pub mod commentary;
 pub mod predict;
 pub mod race_card;
 pub mod races_by_date;

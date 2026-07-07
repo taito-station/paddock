@@ -1422,9 +1422,24 @@
           "pure_win_prob",
           "model_rank",
           "is_overlay",
-          "is_value"
+          "is_value",
+          "detail_lines"
         ],
         "properties": {
+          "comment": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "馬書評の一行寸評（人手優先・無ければルールベース生成, #348）。特筆材料なしは `null`。"
+          },
+          "detail_lines": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "展開パネル用の根拠 bullet（条件別 factor・枠 lift・近走・前走・斤量）。空配列＝根拠情報なし。"
+          },
           "gate_num": {
             "type": [
               "integer",
@@ -2571,6 +2586,13 @@
               "null"
             ],
             "description": "発走時刻 `HH:MM`（未取得は `null`）。"
+          },
+          "race_comment": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "レース書評（混戦度・◎の狙いどころ・妙味）。人手優先・無ければルールベース生成（#348）。`null` 可。"
           },
           "race_id": {
             "type": "string"

@@ -333,6 +333,10 @@ export interface components {
         };
         /** @description 盤の 1 頭分（全頭 truncate せず返す）。 */
         BoardHorseSchema: {
+            /** @description 馬書評の一行寸評（人手優先・無ければルールベース生成, #348）。特筆材料なしは `null`。 */
+            comment?: string | null;
+            /** @description 展開パネル用の根拠 bullet（条件別 factor・枠 lift・近走・前走・斤量）。空配列＝根拠情報なし。 */
+            detail_lines: string[];
             /**
              * Format: int32
              * @description 枠番（出馬表に無ければ `null`）。
@@ -773,6 +777,8 @@ export interface components {
             partners: number[];
             /** @description 発走時刻 `HH:MM`（未取得は `null`）。 */
             post_time?: string | null;
+            /** @description レース書評（混戦度・◎の狙いどころ・妙味）。人手優先・無ければルールベース生成（#348）。`null` 可。 */
+            race_comment?: string | null;
             race_id: string;
             /** Format: int32 */
             race_num: number;
