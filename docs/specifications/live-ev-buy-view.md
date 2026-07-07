@@ -6,8 +6,9 @@
 > 「EV/伝票の正本は Python `live_ev.py`・`refresh_ev.sh` が `live_ev_snapshots` へ永続化」という
 > **書き込み側の設計は退役した**。ライブ writer は Rust の `predict-watch` に一本化され、
 > `live_ev_snapshots` への upsert・複勝オッズ・`captured_at` 供給も Rust が担う（2 エンジン問題の解消）。
-> **以下のデータフロー図・「設計方針（Approach C）」・emit-json / 永続化の各節は当初 #260 設計の歴史的記録**
-> であり、writer に関する記述は上記のとおり読み替えること（理由と現行構成は
+> **以下の本文（データフロー図・設計方針〈Approach C〉・emit-json・永続化・実装 PR 分割 など各節）は
+> 当初 #260 設計の歴史的記録**であり、writer に関する記述は上記のとおり読み替えること（個別の節に
+> 退役注記が無くても本バナーが優先する。理由と現行構成は
 > [ADR 0064 の「追補（#346）」](../adr/0064-live-ev-buy-view.md) を参照）。read API `GET /api/live/{date}`・
 > `live_ev_snapshots` スキーマ・SPA `LiveBets`・slip 契約は不変で、Rust writer が同一契約を満たす。
 > `live_ev.py` 本体はオフライン用途で温存。
