@@ -67,6 +67,7 @@ fn sample_card() -> RaceCard {
         race_num: 1,
         surface: Surface::Turf,
         distance: 1800,
+        race_class: None,
         entries: vec![
             entry(1, 1, "ウマA"),
             entry(2, 2, "ウマB"),

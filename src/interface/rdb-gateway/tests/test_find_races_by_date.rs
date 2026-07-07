@@ -47,6 +47,7 @@ fn card(race_id: &str, race_num: u32) -> RaceCard {
         race_num,
         surface: Surface::Turf,
         distance: 1800,
+        race_class: None,
         entries: vec![HorseEntry {
             gate_num: GateNum::try_from(1u32).unwrap(),
             horse_num: HorseNum::try_from(1u32).unwrap(),

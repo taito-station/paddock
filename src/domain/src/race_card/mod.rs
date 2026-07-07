@@ -1,7 +1,7 @@
 use chrono::{NaiveDate, NaiveTime};
 
 use crate::horse_result::{GateNum, HorseName, HorseNum, JockeyName, TrainerName};
-use crate::race::{RaceId, Surface, Venue};
+use crate::race::{RaceClass, RaceId, Surface, Venue};
 
 /// A single race's entry sheet (出馬表). Static pre-race information used as input for
 /// pre-race tendency prediction; distinct from `Race` which carries day-of results.
@@ -20,6 +20,10 @@ pub struct RaceCard {
     pub race_num: u32,
     pub surface: Surface,
     pub distance: u32,
+    /// レースの格付け／条件クラス（#345）。netkeiba 出馬表の `<title>` グレード表記と
+    /// `RaceData02` 条件から導出。出馬表 PDF パーサは未対応のため PDF 経路は `None`。
+    /// netkeiba 経路でも表記から判定できない場合は `None`。
+    pub race_class: Option<RaceClass>,
     pub entries: Vec<HorseEntry>,
 }
 

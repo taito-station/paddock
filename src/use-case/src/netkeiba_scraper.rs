@@ -1,8 +1,8 @@
 use chrono::{NaiveDate, NaiveTime};
 use paddock_domain::{
     FinishingPosition, GateNum, HorseId, HorseName, HorseNum, JockeyName, OrderedPair,
-    OrderedTriple, Pair, ResultStatus, Surface, TimeSeconds, TrackCondition, TrainerName, Triple,
-    Venue,
+    OrderedTriple, Pair, RaceClass, ResultStatus, Surface, TimeSeconds, TrackCondition,
+    TrainerName, Triple, Venue,
 };
 
 use crate::error::Result;
@@ -102,6 +102,9 @@ pub struct FetchedCard {
     pub race_num: u32,
     pub surface: Surface,
     pub distance: u32,
+    /// レースの格付け／条件クラス（#345）。`<title>` のグレード表記と `RaceData02` の
+    /// 条件から判定。判定できなければ `None`。
+    pub race_class: Option<RaceClass>,
     pub entries: Vec<FetchedEntry>,
 }
 

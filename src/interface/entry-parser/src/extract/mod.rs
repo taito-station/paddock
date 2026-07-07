@@ -280,6 +280,8 @@ fn parse_column(
         race_num: origin.race_num,
         surface,
         distance,
+        // レースクラスは PDF 出馬表パーサ未対応のため None（#345 は netkeiba 経路のみ対応）。
+        race_class: None,
         entries,
     }))
 }
