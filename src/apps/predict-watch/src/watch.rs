@@ -2,7 +2,8 @@ use std::time::Duration as StdDuration;
 
 use chrono::{Duration, Local, NaiveTime, Offset, Utc};
 use paddock_domain::{
-    BetMethod, Portfolio, PortfolioConfig, RECOMMENDED_MARKET_BLEND_ALPHA, Race, build_portfolio,
+    BetMethod, Portfolio, PortfolioConfig, RECOMMENDED_MARKET_BLEND_ALPHA, Race, RaceClass, Venue,
+    build_portfolio,
 };
 use paddock_use_case::PredictionViews;
 use predict_format::{format_explanations, format_probs, format_probs_with_market};
@@ -67,6 +68,40 @@ pub fn mark_for(roi: f64, notify_gate: f64, buy_gate: f64) -> &'static str {
     }
 }
 
+/// 当該レースが「G1 裏」（G1 開催日・別場の非重賞）かを判定する純関数（#345・単体テスト対象）。
+///
+/// 当日どこかで G1 が行われ、かつ当該レースが (a) 非重賞（G1/G2/G3 以外）かつ (b) その G1
+/// 開催場と別場のとき true。「別場」は当日 G1 を開催する全 venue 集合との照合で判定し、G1
+/// 開催場と同一場の平場は裏に含めない。クラス不明（None）は非重賞と断定できないため false。
+///
+/// G1 とその裏に旨みが偏在する、という未検証仮説（#345）の可視化用フラグ。買う/見送りの判断や
+/// 軸には影響しない（decision-support・-EV でも通知に残すためのタグ）。
+pub fn is_g1_ura(
+    venue: Venue,
+    race_class: Option<RaceClass>,
+    day_classes: &[(Venue, Option<RaceClass>)],
+) -> bool {
+    // 非重賞（クラス既知）でなければ裏対象外。
+    let Some(class) = race_class else {
+        return false;
+    };
+    if class.is_graded() {
+        return false;
+    }
+    // 当日どこかで G1 が開催されているか。無ければ裏は成立しない。
+    let g1_today = day_classes
+        .iter()
+        .any(|(_, c)| c.is_some_and(|c| c.is_g1()));
+    if !g1_today {
+        return false;
+    }
+    // 当該場で G1 が行われているなら「別場」ではない（同一開催場の平場は裏に含めない）。
+    let g1_at_this_venue = day_classes
+        .iter()
+        .any(|(v, c)| *v == venue && c.is_some_and(|c| c.is_g1()));
+    !g1_at_this_venue
+}
+
 /// 監視を継続すべきか（発走前のレースが残っているか）を判定する純関数（単体テスト対象）。
 /// Due か NotYet が 1 つでもあれば継続、無ければ終了。
 pub fn should_continue(statuses: &[RaceStatus]) -> bool {
@@ -83,23 +118,28 @@ fn has_result(race: &Race) -> bool {
     race.track_condition.is_some() || !race.results.is_empty()
 }
 
-/// 発走時刻付きのレース 1 件（races_by_date の Race ＋ race_card の post_time）。
+/// 発走時刻付きのレース 1 件（races_by_date の Race ＋ race_card の post_time / race_class）。
 struct Slot {
     race: Race,
     post_time: Option<NaiveTime>,
+    /// レースクラス（#345・race_card 由来）。G1 裏レース検出に使う。未取得・判定不能は None。
+    race_class: Option<RaceClass>,
 }
 
-/// 指定日の全レースを取得し、各レースの post_time（race_card 由来）を引き当てる。
+/// 指定日の全レースを取得し、各レースの post_time / race_class（race_card 由来）を引き当てる。
 async fn load_slots(app: &App, date: chrono::NaiveDate) -> anyhow::Result<Vec<Slot>> {
     let races = app.interactor.races_by_date(date).await?;
     let mut slots = Vec::with_capacity(races.len());
     for race in races {
-        let post_time = app
-            .interactor
-            .race_card(&race.race_id)
-            .await?
-            .and_then(|c| c.post_time);
-        slots.push(Slot { race, post_time });
+        // race_card は 1 回だけ引き、post_time と race_class の両方を取り出す。
+        let card = app.interactor.race_card(&race.race_id).await?;
+        let post_time = card.as_ref().and_then(|c| c.post_time);
+        let race_class = card.and_then(|c| c.race_class);
+        slots.push(Slot {
+            race,
+            post_time,
+            race_class,
+        });
     }
     Ok(slots)
 }
@@ -153,8 +193,23 @@ async fn sweep(
             "   ※ 発走時刻不明（post_time 無し）{unknown} レースは対象外。fetch-card 済みか確認。"
         );
     }
+
+    // G1 裏レース検出用に、当日の全レース（Due 以外も含む）の (場, クラス) を集める。G1 は
+    // 当該レースが Due になる時点と別の場・別の時間帯で行われうるため、Due だけでは判定できない。
+    let day_classes: Vec<(Venue, Option<RaceClass>)> =
+        slots.iter().map(|s| (s.race.venue, s.race_class)).collect();
+    if day_classes
+        .iter()
+        .any(|(_, c)| c.is_some_and(|c| c.is_g1()))
+    {
+        println!(
+            "   🎯裏 = G1 開催日の別場・非重賞（在庫偏在の可能性がある注目枠。-EV でも検証用に表示・張り推奨ではない）"
+        );
+    }
+
     for slot in due {
-        evaluate_race(app, slot, captured_at, cli, blend_alpha).await;
+        let is_ura = is_g1_ura(slot.race.venue, slot.race_class, &day_classes);
+        evaluate_race(app, slot, is_ura, captured_at, cli, blend_alpha).await;
     }
 }
 
@@ -162,6 +217,7 @@ async fn sweep(
 async fn evaluate_race(
     app: &App,
     slot: &Slot,
+    is_ura: bool,
     captured_at: &str,
     cli: &Cli,
     blend_alpha: Option<f64>,
@@ -245,8 +301,10 @@ async fn evaluate_race(
     let roi_pct = ev.roi * 100.0;
     let hit_pct = ev.hit_prob * 100.0;
     let mark = mark_for(ev.roi, cli.notify_gate, cli.roi_gate);
+    // G1 裏（別場の非重賞）は ROI ゲートに関わらずタグを付けて注目枠として残す（#345）。
+    let ura_tag = if is_ura { " 🎯裏" } else { "" };
     println!(
-        "  {mark} {label}: 参考ROI {roi_pct:.1}% / 的中 {hit_pct:.1}%（モデル単独視点・最終判断は手動精査）"
+        "  {mark} {label}{ura_tag}: 参考ROI {roi_pct:.1}% / 的中 {hit_pct:.1}%（モデル単独視点・最終判断は手動精査）"
     );
     print_buy_targets(&portfolio);
 
@@ -459,6 +517,53 @@ mod tests {
 
     fn t(h: u32, m: u32) -> NaiveTime {
         NaiveTime::from_hms_opt(h, m, 0).unwrap()
+    }
+
+    #[test]
+    fn is_g1_ura_detects_other_venue_nongraded_on_g1_day() {
+        // 東京で G1、函館は非重賞（未勝利）→ 函館の当該は G1 裏。
+        let day = [
+            (Venue::Tokyo, Some(RaceClass::G1)),
+            (Venue::Hakodate, Some(RaceClass::Maiden)),
+        ];
+        assert!(is_g1_ura(Venue::Hakodate, Some(RaceClass::Maiden), &day));
+    }
+
+    #[test]
+    fn is_g1_ura_false_for_same_venue_as_g1() {
+        // G1 開催場（東京）の平場は「別場」でないため裏に含めない。
+        let day = [
+            (Venue::Tokyo, Some(RaceClass::G1)),
+            (Venue::Tokyo, Some(RaceClass::Open)),
+        ];
+        assert!(!is_g1_ura(Venue::Tokyo, Some(RaceClass::Open), &day));
+    }
+
+    #[test]
+    fn is_g1_ura_false_for_graded_race() {
+        // 別場でも重賞（G3）は非重賞でないため裏でない。
+        let day = [
+            (Venue::Tokyo, Some(RaceClass::G1)),
+            (Venue::Hakodate, Some(RaceClass::G3)),
+        ];
+        assert!(!is_g1_ura(Venue::Hakodate, Some(RaceClass::G3), &day));
+    }
+
+    #[test]
+    fn is_g1_ura_false_when_no_g1_today() {
+        // 当日 G1 が無ければ裏は成立しない。
+        let day = [
+            (Venue::Tokyo, Some(RaceClass::G3)),
+            (Venue::Hakodate, Some(RaceClass::Maiden)),
+        ];
+        assert!(!is_g1_ura(Venue::Hakodate, Some(RaceClass::Maiden), &day));
+    }
+
+    #[test]
+    fn is_g1_ura_false_when_class_unknown() {
+        // クラス不明は非重賞と断定できないため裏にしない。
+        let day = [(Venue::Tokyo, Some(RaceClass::G1)), (Venue::Hakodate, None)];
+        assert!(!is_g1_ura(Venue::Hakodate, None, &day));
     }
 
     #[test]
