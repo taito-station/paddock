@@ -267,12 +267,16 @@ def print_slip(venue, rnum, ax, h, probs, bets):
 
 
 def emit_payload(rows, budget):
-    """全評価レースの判定＋伝票を機械可読 dict にする（#260 永続化用・ADR 0064）。
+    """全評価レースの判定＋伝票を機械可読 dict にする（--slip と同一結果の JSON 版）。
 
     計算は一切やり直さず、main が組んだ rows を写すだけ（--slip と同一結果）。伝票 leg は
     (方式レイヤー × 券種) 単位で、print_slip のような同一組番マージはしない（box/nagashi の
-    内訳を保つ）。race_id は meta の pid（＝paddock race_id）。date/post_time は persist 側
-    （refresh_ev.sh）が DB から補完するためここでは出さない。
+    内訳を保つ）。race_id は meta の pid（＝paddock race_id）。date/post_time は pid ローカルに
+    持たないため出さない。
+
+    注（#346）: 当初は #260/ADR 0064 の live_ev_snapshots 永続化フィード用だったが、その writer は
+    Rust predict-watch に一本化され（旧 persist_live_ev.py / refresh_ev.sh 永続化ステップは退役）、
+    本 JSON を消費する in-repo スクリプトは無い。ad-hoc なオフライン検査用途として温存する。
     """
     races = []
     for roi, venue, rnum, ax, odds, prob, kon, _name, missing, _h, _probs, bets, pid in rows:
@@ -315,7 +319,8 @@ def main():
     ap.add_argument("--budget", type=int, default=5000, help="1レース予算（円, 既定5000）")
     ap.add_argument("--slip", action="store_true", help="+EV レースの買い目伝票も出力")
     ap.add_argument("--emit-json", metavar="PATH",
-                    help="全評価レースの判定＋伝票を機械可読 JSON で PATH に出力（#260・永続化用）。"
+                    help="全評価レースの判定＋伝票を機械可読 JSON で PATH に出力（ad-hoc オフライン検査用。"
+                         "旧 live_ev_snapshots 永続化フィードは #346 で Rust predict-watch に退役）。"
                          "計算は --slip と同一・全レース出力（verdict/roi で区別）")
     args = ap.parse_args()
 
