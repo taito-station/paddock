@@ -338,7 +338,7 @@ pub(crate) async fn delete_absent_horse_nums(
 
 #[cfg(test)]
 mod tests {
-    use super::{case_from_preds, or_from_preds};
+    use super::{STATS_AGG_EXPRS, STATS_AGG_SELECT, case_from_preds, or_from_preds};
 
     #[test]
     fn case_from_preds_builds_when_then_chain() {
@@ -347,9 +347,21 @@ mod tests {
     }
 
     #[test]
-    fn case_from_preds_empty_is_bare_case_end() {
-        // アーム 0 個でも構文上壊れない（END のみ。実運用では非空定数を渡す）。
+    fn case_from_preds_empty_does_not_panic() {
+        // アーム 0 個でも Rust ビルダーは panic せず `CASE END` を返す（この生成 SQL 自体は
+        // WHEN/ELSE を欠き不正。実運用では常に非空の code 定数を渡す前提）。
         assert_eq!(case_from_preds(&[]), "CASE END");
+    }
+
+    #[test]
+    fn stats_agg_exprs_stay_in_sync_with_select() {
+        // STATS_AGG_SELECT は const 連結ができず集計式リテラルを別に保持する。両者がドリフトすると
+        // ベース率が静かに食い違うため、SELECT 本体が EXPRS を（空白差を無視して）包含することをロックする。
+        let norm = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(
+            norm(STATS_AGG_SELECT).contains(&norm(STATS_AGG_EXPRS)),
+            "STATS_AGG_SELECT must embed STATS_AGG_EXPRS verbatim (drift detected)"
+        );
     }
 
     #[test]
