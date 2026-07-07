@@ -24,9 +24,18 @@ pub struct Cli {
     #[arg(long, default_value_t = 5)]
     pub interval: u64,
 
-    /// アラート閾値の ROI（期待回収率）。これ以上のレースを 🟢 として通知する（既定 1.0 = 100%）。
+    /// 買い妙味ゲートの ROI（期待回収率）。これ以上のレースを 🔶 買い妙味として目立たせる
+    /// （既定 1.0 = 100%）。張る/見送りの一次判断に使う「買う閾値」で、DB snapshot の
+    /// verdict(bet/skip) 100% 固定とは独立（表示のみ・軸ロック）。
     #[arg(long, default_value_t = 1.0)]
     pub roi_gate: f64,
+
+    /// 通知（検証候補）ゲートの ROI。notify_gate 以上・roi_gate 未満のレースを 🔍 検証候補
+    /// として表示に残す（既定 0.7 = 70%）。+EV 在庫が構造的に稀で一日ゼロ通知＝学習材料すら
+    /// 出ない問題を解消するための「通知閾値」（#345）。買う閾値 roi_gate とは分離し、張る判断は
+    /// 据え置き。roi_gate 以下であること。
+    #[arg(long, default_value_t = 0.7)]
+    pub notify_gate: f64,
 
     /// 1 レースあたりの予算（円）。買い目（軸流しポートフォリオ）の組成上限。
     #[arg(long, default_value_t = 5000)]

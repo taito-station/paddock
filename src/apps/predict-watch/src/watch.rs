@@ -49,6 +49,24 @@ pub fn classify(
     }
 }
 
+/// 参考 ROI を 2 つのゲートに照らして表示マークを決める純関数（#345・単体テスト対象）。
+///
+/// - `roi >= buy_gate` → `🔶`（買い妙味。張る/見送りの一次判断対象）
+/// - `notify_gate <= roi < buy_gate` → `🔍`（検証候補。買う閾値未満だが結果照合で学ぶために残す）
+/// - `roi < notify_gate` → `・`（低シグナル）
+///
+/// `notify_gate <= buy_gate` を前提とする（run で検証済み）。表示のみで、買う/見送りの判断や
+/// DB snapshot の verdict には影響しない（decision-support・軸ロック）。
+pub fn mark_for(roi: f64, notify_gate: f64, buy_gate: f64) -> &'static str {
+    if roi >= buy_gate {
+        "🔶"
+    } else if roi >= notify_gate {
+        "🔍"
+    } else {
+        "・"
+    }
+}
+
 /// 監視を継続すべきか（発走前のレースが残っているか）を判定する純関数（単体テスト対象）。
 /// Due か NotYet が 1 つでもあれば継続、無ければ終了。
 pub fn should_continue(statuses: &[RaceStatus]) -> bool {
@@ -123,11 +141,12 @@ async fn sweep(
         .count();
 
     println!(
-        "── {} スイープ: 対象 {} レース（窓 {}分 / 参考ROIゲート {:.0}%・判定は手動精査）",
+        "── {} スイープ: 対象 {} レース（窓 {}分 / 🔶買い妙味≥{:.0}% ・ 🔍検証候補≥{:.0}%・判定は手動精査）",
         now.format("%H:%M"),
         due.len(),
         cli.window,
         cli.roi_gate * 100.0,
+        cli.notify_gate * 100.0,
     );
     if unknown > 0 {
         println!(
@@ -221,15 +240,11 @@ async fn evaluate_race(
     };
 
     // decision-support（#272）: 自動の張る/見送り判定はしない。純モデル EV/ROI は「市場に対しモデルが
-    // 割安と見るか」の参考情報で、最終判断は人間のハンデ精査に委ねる。参考 ROI がゲート以上のときだけ
-    // 🔶 を付けて目立たせる（張り推奨ではない）。
+    // 割安と見るか」の参考情報で、最終判断は人間のハンデ精査に委ねる。買う閾値（roi_gate）以上は 🔶、
+    // 通知閾値（notify_gate）以上は 🔍 検証候補として表示に残す（#345・張り推奨ではない）。
     let roi_pct = ev.roi * 100.0;
     let hit_pct = ev.hit_prob * 100.0;
-    let mark = if ev.roi >= cli.roi_gate {
-        "🔶"
-    } else {
-        "・"
-    };
+    let mark = mark_for(ev.roi, cli.notify_gate, cli.roi_gate);
     println!(
         "  {mark} {label}: 参考ROI {roi_pct:.1}% / 的中 {hit_pct:.1}%（モデル単独視点・最終判断は手動精査）"
     );
@@ -340,6 +355,14 @@ pub async fn run(app: &App, cli: &Cli) -> anyhow::Result<()> {
             "--blend-alpha は 0.0〜1.0 で指定してください（市場とモデルのブレンド重み）。"
         );
     }
+    // 通知（検証候補）閾値は買う閾値以下でなければ 🔍 の帯が生じない（#345）。逆転指定は誤用として弾く。
+    if cli.notify_gate > cli.roi_gate {
+        anyhow::bail!(
+            "--notify-gate（{:.2}）は --roi-gate（{:.2}）以下で指定してください（検証候補は買う閾値の下の帯です）。",
+            cli.notify_gate,
+            cli.roi_gate,
+        );
+    }
 
     // α 未指定なら本番既定（market α=0.2）を使う。predict と同一値で判定を揃える。
     let blend_alpha = cli.blend_alpha.or(RECOMMENDED_MARKET_BLEND_ALPHA);
@@ -436,6 +459,16 @@ mod tests {
 
     fn t(h: u32, m: u32) -> NaiveTime {
         NaiveTime::from_hms_opt(h, m, 0).unwrap()
+    }
+
+    #[test]
+    fn mark_for_tiers_by_gates() {
+        // buy_gate=1.0 / notify_gate=0.7 の既定帯。
+        assert_eq!(mark_for(1.20, 0.7, 1.0), "🔶", "買う閾値以上は買い妙味");
+        assert_eq!(mark_for(1.00, 0.7, 1.0), "🔶", "買う閾値ちょうども 🔶");
+        assert_eq!(mark_for(0.85, 0.7, 1.0), "🔍", "検証候補帯");
+        assert_eq!(mark_for(0.70, 0.7, 1.0), "🔍", "通知閾値ちょうども 🔍");
+        assert_eq!(mark_for(0.69, 0.7, 1.0), "・", "通知閾値未満は低シグナル");
     }
 
     #[test]
