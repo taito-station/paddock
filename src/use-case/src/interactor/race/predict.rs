@@ -578,7 +578,7 @@ fn build_explanation(
                 ExplainCategory::ConditionalGateBias,
                 format!(
                     "{} / {} / {}",
-                    gate_bias_gate_jp(gate_label),
+                    gate_bias_gate_jp(entry.gate_num.value()),
                     track_label,
                     field_label
                 ),
@@ -643,13 +643,14 @@ fn build_explanation(
     }
 }
 
-/// 枠グループラベル（`gate_group_label` 由来の英字）を「内枠/中枠/外枠」に写す（#343 提示ラベル用）。
-fn gate_bias_gate_jp(gate_label: &str) -> &'static str {
-    match gate_label {
-        "Inner (1-3)" => "内枠",
-        "Middle (4-6)" => "中枠",
-        "Outer (7-8)" => "外枠",
-        _ => "枠",
+/// 枠番（1..=8, `GateNum` 検証済み）を「内枠/中枠/外枠」に写す（#343 提示ラベル用）。英字ラベル文字列に
+/// 依存せず枠番から直接引くことで、集計側 `GATE_GROUPS` ラベルとの二重定義を 1 つ減らす（レビュー指摘）。
+fn gate_bias_gate_jp(gate_num: u32) -> &'static str {
+    match gate_num {
+        1..=3 => "内枠",
+        4..=6 => "中枠",
+        // GateNum は 1..=8 検証済みなので _ は 7-8（外枠）のみ（`gate_group_label` と同じ区分）。
+        _ => "外枠",
     }
 }
 
@@ -1016,6 +1017,52 @@ mod tests {
                 .any(|f| f.category == ExplainCategory::ConditionalGateBias)
         );
         assert_eq!(ex.gate_bias_lift, None);
+    }
+
+    #[test]
+    fn gate_field_band_label_covers_boundaries() {
+        use crate::repository::gate_field_band_label;
+        // 少(≤9) / 中(10-13) / 多(14-18) の境界。集計 SQL の GATE_FIELD_BANDS と同一定数源。
+        assert_eq!(gate_field_band_label(9), "少(-9)");
+        assert_eq!(gate_field_band_label(10), "中(10-13)");
+        assert_eq!(gate_field_band_label(13), "中(10-13)");
+        assert_eq!(gate_field_band_label(14), "多(14-18)");
+        assert_eq!(gate_field_band_label(18), "多(14-18)");
+    }
+
+    #[test]
+    fn gate_track_cond2_label_maps_firm_vs_rest() {
+        use crate::repository::gate_track_cond2_label;
+        use paddock_domain::TrackCondition;
+        assert_eq!(
+            gate_track_cond2_label(TrackCondition::Firm.to_string().as_str()),
+            "良"
+        );
+        for tc in [
+            TrackCondition::Good,
+            TrackCondition::Yielding,
+            TrackCondition::Soft,
+        ] {
+            assert_eq!(
+                gate_track_cond2_label(tc.to_string().as_str()),
+                "非良",
+                "{tc:?} は非良"
+            );
+        }
+    }
+
+    #[test]
+    fn condition_show_rate_none_when_no_starts() {
+        use crate::repository::{ConditionalGateStatsRow, GateBiasCell};
+        let row = ConditionalGateStatsRow {
+            cells: vec![GateBiasCell {
+                track_label: "良".to_string(),
+                field_label: "少(-9)".to_string(),
+                gate_label: "Inner (1-3)".to_string(),
+                stat: group("Inner (1-3)", 0, 0),
+            }],
+        };
+        assert_eq!(row.condition_show_rate("良", "少(-9)"), None);
     }
 
     fn run_valid(date: NaiveDate, weight_change: Option<i32>) -> RecentRun {

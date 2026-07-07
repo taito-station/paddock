@@ -33,6 +33,8 @@ pub fn format_probs(probs: &[HorseProbability]) -> Vec<String> {
 
 /// 条件依存枠バイアスの複勝 lift がこの値以上で「枠有利」とみなし、市場過小評価と重なれば枠妙味を光らせる
 /// 閾値（#343）。lift は複勝ベース・市場差分は単勝ベースの近似併用（下記 doc 参照）。
+/// TODO(#343 後続): この 0.05 は measure-first の暫定値。backtest lift 掃引（`--gate-bias-weight` 相当）で
+/// 校正してから確定する（現段階は提示のみ・スコア非投入なので回収率に影響しない）。
 const GATE_BIAS_FLAG_LIFT: f64 = 0.05;
 
 /// 過去データ視点の比較テーブル（#272 ④）。純モデル勝率と市場 implied 勝率を並べ、差（pt）を見せる。
