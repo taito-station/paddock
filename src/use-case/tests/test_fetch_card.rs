@@ -135,6 +135,7 @@ impl NetkeibaScraper for FakeScraper {
             race_num: 11,
             surface: Surface::Turf,
             distance: 1600,
+            race_class: None,
             entries: vec![
                 entry(1, 1, "ウマエー", "戸崎圭", "藤沢和"),
                 entry(2, 2, "ウマビー", "武豊", "友道康"),

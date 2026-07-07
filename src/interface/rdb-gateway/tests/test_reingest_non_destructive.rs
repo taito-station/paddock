@@ -7,7 +7,7 @@
 use chrono::NaiveDate;
 use paddock_domain::{
     FinishingPosition, GateNum, HorseEntry, HorseName, HorseNum, HorseResult, Race, RaceCard,
-    RaceId, ResultStatus, Surface, TrainerName, Venue,
+    RaceClass, RaceId, ResultStatus, Surface, TrainerName, Venue,
 };
 use paddock_use_case::repository::{RaceCardRepository, RaceRepository};
 use rdb_gateway::PostgresRepository;
@@ -173,6 +173,7 @@ async fn save_race_card_reingest_removes_only_absent_entries(pool: sqlx::PgPool)
         race_num: 1,
         surface: Surface::Turf,
         distance: 1800,
+        race_class: None,
         entries,
     };
 
@@ -209,6 +210,7 @@ async fn save_race_card_coalesce_keeps_trainer_from_netkeiba(pool: sqlx::PgPool)
         race_num: 2,
         surface: Surface::Turf,
         distance: 1800,
+        race_class: None,
         entries: vec![HorseEntry {
             gate_num: GateNum::try_from(1u32).unwrap(),
             horse_num: HorseNum::try_from(1u32).unwrap(),
@@ -292,6 +294,7 @@ async fn save_race_card_normalizes_trainer_abbr_to_full_name(pool: sqlx::PgPool)
         race_num: 2,
         surface: Surface::Turf,
         distance: 1800,
+        race_class: None,
         entries: vec![HorseEntry {
             gate_num: GateNum::try_from(1u32).unwrap(),
             horse_num: HorseNum::try_from(1u32).unwrap(),
@@ -367,6 +370,7 @@ async fn save_race_card_normalizes_trainer_via_same_race_join(pool: sqlx::PgPool
         race_num: 1,
         surface: Surface::Turf,
         distance: 2000,
+        race_class: None,
         entries: vec![HorseEntry {
             gate_num: GateNum::try_from(1u32).unwrap(),
             horse_num: HorseNum::try_from(1u32).unwrap(),
@@ -407,6 +411,7 @@ async fn save_race_card_keeps_trainer_when_no_results_match(pool: sqlx::PgPool) 
         race_num: 1,
         surface: Surface::Turf,
         distance: 1800,
+        race_class: None,
         entries: vec![HorseEntry {
             gate_num: GateNum::try_from(1u32).unwrap(),
             horse_num: HorseNum::try_from(1u32).unwrap(),
@@ -484,6 +489,7 @@ async fn save_race_card_keeps_ambiguous_trainer_abbr(pool: sqlx::PgPool) {
         race_num: 4,
         surface: Surface::Turf,
         distance: 1800,
+        race_class: None,
         entries: vec![HorseEntry {
             gate_num: GateNum::try_from(1u32).unwrap(),
             horse_num: HorseNum::try_from(1u32).unwrap(),
@@ -505,5 +511,61 @@ async fn save_race_card_keeps_ambiguous_trainer_abbr(pool: sqlx::PgPool) {
         loaded.entries[0].trainer.as_ref().map(|t| t.value()),
         Some("小野"),
         "衝突（小野次郎・小野望）の場合は略名のまま残す"
+    );
+}
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn save_race_card_round_trips_race_class(pool: sqlx::PgPool) {
+    // race_class（#345）が保存 → 取得で往復すること、かつ netkeiba が入れたクラスを
+    // 後続の PDF 経路（race_class=None）が COALESCE で消さないことを検証する。
+    let repo = PostgresRepository::new(pool);
+    let rid = "2026-3-nakayama-8-11R";
+    let make_card = |race_class: Option<RaceClass>| RaceCard {
+        race_id: RaceId::try_from(rid).unwrap(),
+        date: d(),
+        post_time: None,
+        venue: Venue::Nakayama,
+        round: 3,
+        day: 8,
+        race_num: 11,
+        surface: Surface::Turf,
+        distance: 2000,
+        race_class,
+        entries: vec![HorseEntry {
+            gate_num: GateNum::try_from(1u32).unwrap(),
+            horse_num: HorseNum::try_from(1u32).unwrap(),
+            horse_name: HorseName::try_from("ウマZ").unwrap(),
+            jockey: None,
+            trainer: None,
+            weight_carried: None,
+        }],
+    };
+
+    // netkeiba 経路が G1 を書く。
+    repo.save_race_card(&make_card(Some(RaceClass::G1)))
+        .await
+        .unwrap();
+    let loaded = repo
+        .find_race_card(&RaceId::try_from(rid).unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        loaded.race_class,
+        Some(RaceClass::G1),
+        "保存した G1 が往復する"
+    );
+
+    // 後続の PDF 経路（race_class=None）が上書きしても G1 は保持される（COALESCE）。
+    repo.save_race_card(&make_card(None)).await.unwrap();
+    let loaded = repo
+        .find_race_card(&RaceId::try_from(rid).unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        loaded.race_class,
+        Some(RaceClass::G1),
+        "PDF 経路の None は netkeiba のクラスを消さない"
     );
 }

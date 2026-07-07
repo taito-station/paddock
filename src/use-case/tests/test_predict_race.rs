@@ -47,6 +47,7 @@ fn make_race_card(race_id: &str) -> RaceCard {
         race_num: 1,
         surface: Surface::Turf,
         distance: 2000,
+        race_class: None,
         entries: vec![
             HorseEntry {
                 gate_num: GateNum::try_from(1u32).unwrap(),

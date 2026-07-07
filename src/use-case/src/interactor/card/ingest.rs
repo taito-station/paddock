@@ -81,6 +81,7 @@ impl<R: RaceCardRepository + OddsRepository + FetchRepository, S: NetkeibaScrape
                 race_num: fetched.race_num,
                 surface: fetched.surface,
                 distance: fetched.distance,
+                race_class: fetched.race_class,
                 entries,
             };
             self.repo.save_race_card(&card).await?;

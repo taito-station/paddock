@@ -10,8 +10,8 @@ pub async fn save_race_card(pool: &PgPool, card: &RaceCard) -> Result<()> {
 
     sqlx::query(
         r#"
-        INSERT INTO race_cards (race_id, date, post_time, venue, round, day, race_num, surface, distance)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        INSERT INTO race_cards (race_id, date, post_time, venue, round, day, race_num, surface, distance, race_class)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
         ON CONFLICT(race_id) DO UPDATE SET
             date     = excluded.date,
             -- post_time は netkeiba 経路のみが埋める。新値が NULL のときは既存値を保持し、
@@ -22,7 +22,10 @@ pub async fn save_race_card(pool: &PgPool, card: &RaceCard) -> Result<()> {
             day      = excluded.day,
             race_num = excluded.race_num,
             surface  = excluded.surface,
-            distance = excluded.distance
+            distance = excluded.distance,
+            -- race_class も netkeiba 経路のみが埋める（PDF 経路は NULL）。新値が NULL のときは
+            -- 既存値を保持し、後続の PDF 取り込みが netkeiba のクラスを消さないようにする（#345）。
+            race_class = COALESCE(excluded.race_class, race_cards.race_class)
         "#,
     )
     .bind(card.race_id.value())
@@ -34,6 +37,7 @@ pub async fn save_race_card(pool: &PgPool, card: &RaceCard) -> Result<()> {
     .bind(card.race_num as i64)
     .bind(card.surface.as_str())
     .bind(card.distance as i64)
+    .bind(card.race_class.map(|c| c.as_str()))
     .execute(&mut *tx)
     .await?;
 

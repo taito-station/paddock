@@ -1,9 +1,11 @@
+mod class;
 mod race_id;
 mod surface;
 mod track_condition;
 mod venue;
 mod weather;
 
+pub use class::RaceClass;
 pub use race_id::RaceId;
 pub use surface::Surface;
 pub use track_condition::TrackCondition;

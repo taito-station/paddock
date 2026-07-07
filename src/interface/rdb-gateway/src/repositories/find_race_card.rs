@@ -1,7 +1,7 @@
 use chrono::{NaiveDate, NaiveTime};
 use paddock_domain::{
-    GateNum, HorseEntry, HorseName, HorseNum, JockeyName, RaceCard, RaceId, Surface, TrainerName,
-    Venue,
+    GateNum, HorseEntry, HorseName, HorseNum, JockeyName, RaceCard, RaceClass, RaceId, Surface,
+    TrainerName, Venue,
 };
 use sqlx::PgPool;
 
@@ -28,12 +28,13 @@ struct CardRow {
     race_num: i64,
     surface: String,
     distance: i64,
+    race_class: Option<String>,
 }
 
 pub async fn find_race_card(pool: &PgPool, race_id: &RaceId) -> Result<Option<RaceCard>> {
     let card_row: Option<CardRow> = sqlx::query_as(
         r#"
-        SELECT race_id, date, post_time, venue, round, day, race_num, surface, distance
+        SELECT race_id, date, post_time, venue, round, day, race_num, surface, distance, race_class
         FROM race_cards
         WHERE race_id = $1
         "#,
@@ -55,6 +56,7 @@ pub async fn find_race_card(pool: &PgPool, race_id: &RaceId) -> Result<Option<Ra
         race_num,
         surface: surface_str,
         distance,
+        race_class: race_class_str,
     } = row;
 
     let entry_rows: Vec<EntryRow> = sqlx::query_as(
@@ -92,6 +94,14 @@ pub async fn find_race_card(pool: &PgPool, race_id: &RaceId) -> Result<Option<Ra
                 .map_err(|e| Error::Data(format!("race_card post_time '{s}' のパースに失敗: {e}")))
         })
         .transpose()?;
+    // race_class は #345 で追加。netkeiba 経路のみ埋め、PDF 経路・旧データ・判定不能は NULL の
+    // ため None を許容する。値があれば未知スラッグのみ Error（DB の書き込みは as_str 由来で往復保証）。
+    let race_class = race_class_str
+        .map(|s| {
+            RaceClass::try_from(s.as_str())
+                .map_err(|e| Error::Data(format!("race_card race_class '{s}' が不正: {e}")))
+        })
+        .transpose()?;
 
     let mut entries = Vec::with_capacity(entry_rows.len());
     for (gate_num, horse_num, horse_name, jockey, trainer, weight_carried) in entry_rows {
@@ -121,6 +131,7 @@ pub async fn find_race_card(pool: &PgPool, race_id: &RaceId) -> Result<Option<Ra
         race_num: race_num as u32,
         surface,
         distance: distance as u32,
+        race_class,
         entries,
     }))
 }

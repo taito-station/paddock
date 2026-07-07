@@ -1,6 +1,6 @@
 use chrono::{NaiveDate, NaiveTime};
 use netkeiba_scraper::parse::parse_card;
-use paddock_domain::{Surface, Venue};
+use paddock_domain::{RaceClass, Surface, Venue};
 
 const FIXTURE: &str = include_str!("fixtures/shutuba_card.html");
 const RACE_ID: &str = "202605030211";
@@ -19,6 +19,8 @@ fn parses_card_meta_and_entries() {
     assert_eq!(card.date, NaiveDate::from_ymd_opt(2026, 6, 7).unwrap());
     // 発走時刻（#235）。RaceData01「15:40発走」から抽出する。
     assert_eq!(card.post_time, NaiveTime::from_hms_opt(15, 40, 0));
+    // レースクラス（#345）。<title>「安田記念(G1)」のグレード表記から G1 と判定する。
+    assert_eq!(card.race_class, Some(RaceClass::G1));
 
     assert_eq!(card.entries.len(), 17);
 

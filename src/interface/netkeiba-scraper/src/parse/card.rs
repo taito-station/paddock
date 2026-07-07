@@ -1,7 +1,9 @@
 use std::sync::LazyLock;
 
 use chrono::{NaiveDate, NaiveTime};
-use paddock_domain::{GateNum, HorseId, HorseName, HorseNum, JockeyName, Surface, TrainerName};
+use paddock_domain::{
+    GateNum, HorseId, HorseName, HorseNum, JockeyName, RaceClass, Surface, TrainerName,
+};
 use paddock_use_case::netkeiba_scraper::{FetchedCard, FetchedEntry};
 use regex::Regex;
 use scraper::{ElementRef, Html, Selector};
@@ -47,6 +49,7 @@ pub fn parse_card(html: &str, netkeiba_race_id: &str) -> Result<FetchedCard> {
     let (surface, distance) = extract_surface_distance(&doc)?;
     let date = extract_date(&doc, year)?;
     let post_time = extract_post_time(&doc);
+    let race_class = extract_race_class(&doc);
     let entries = extract_entries(&doc)?;
 
     Ok(FetchedCard {
@@ -58,8 +61,35 @@ pub fn parse_card(html: &str, netkeiba_race_id: &str) -> Result<FetchedCard> {
         race_num,
         surface,
         distance,
+        race_class,
         entries,
     })
+}
+
+/// `<title>` のグレード表記（例「安田記念(G1)」）と `div.RaceData02` の条件表記
+/// （オープン/n勝クラス/未勝利/新馬）を結合し、レースクラスを正規化する（#345）。
+///
+/// グレードは `<title>` にのみ現れ（`h1.RaceName` は「安田記念」でグレードを含まない）、
+/// 条件は RaceData02 に現れるため両方を結合したラベルを `RaceClass::from_label` に渡す。
+/// 判定できなければ `None`（best-effort：クラスはカード取得の必須項目ではなく、欠けても
+/// カード保存を止めない）。
+fn extract_race_class(doc: &Html) -> Option<RaceClass> {
+    let title = sel("title")
+        .ok()
+        .and_then(|s| doc.select(&s).next().map(|t| t.text().collect::<String>()))
+        .unwrap_or_default();
+    let condition = sel("div.RaceData02")
+        .ok()
+        .and_then(|s| doc.select(&s).next().map(|d| d.text().collect::<String>()))
+        .unwrap_or_default();
+    let label = format!("{title} {condition}");
+    let class = RaceClass::from_label(&label);
+    if class.is_none() {
+        // title も RaceData02 も取れているのにクラスを判定できないのは netkeiba の
+        // 表記変更の兆候になりうる。best-effort で None に落とすが debug で可視化する。
+        tracing::debug!("title/RaceData02 からレースクラスを判定できませんでした");
+    }
+    class
 }
 
 /// `div.RaceData01` の「HH:MM発走」から発走時刻を読む（#235）。surface/distance と同じ
