@@ -15,6 +15,7 @@ mod jockey_stats;
 mod pad_prediction;
 mod predict_session;
 mod purge_race_odds_snapshots;
+mod save_live_ev;
 mod save_race;
 mod save_race_card;
 mod save_race_odds;
@@ -34,10 +35,10 @@ use paddock_use_case::Result as UcResult;
 use paddock_use_case::repository::{
     CourseStatsRow, FetchDownload, FetchFailure, FetchRecord, FetchRepository, FetchStatus,
     HorseHistoryRepository, HorseRecencyStats, HorseStatsRow, JockeyStatsRow, LiveEvRepository,
-    LiveEvSnapshot, MarkStatRow, MarkStatsFilter, NameMatchRepository, OddsRepository,
-    PadPredictionRepository, PredictBetRecord, PredictRaceConditionRecord, PredictSessionRecord,
-    PredictSessionRepository, PredictionFilter, PredictionSearchResult, RaceCardRepository,
-    RaceOddsRecord, RaceRepository, StatsRepository, TrainerStatsRow,
+    LiveEvSnapshot, LiveEvSnapshotRecord, MarkStatRow, MarkStatsFilter, NameMatchRepository,
+    OddsRepository, PadPredictionRepository, PredictBetRecord, PredictRaceConditionRecord,
+    PredictSessionRecord, PredictSessionRepository, PredictionFilter, PredictionSearchResult,
+    RaceCardRepository, RaceOddsRecord, RaceRepository, StatsRepository, TrainerStatsRow,
 };
 
 use crate::pool::PgPool;
@@ -439,6 +440,12 @@ impl PredictSessionRepository for PostgresRepository {
 impl LiveEvRepository for PostgresRepository {
     async fn find_live_ev_by_date(&self, date: NaiveDate) -> UcResult<Vec<LiveEvSnapshot>> {
         find_live_ev_by_date::find_live_ev_by_date(&self.pool, date)
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn save_live_ev_snapshot(&self, record: &LiveEvSnapshotRecord) -> UcResult<()> {
+        save_live_ev::save_live_ev_snapshot(&self.pool, record)
             .await
             .map_err(Into::into)
     }

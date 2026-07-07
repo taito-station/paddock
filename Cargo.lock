@@ -2094,6 +2094,7 @@ dependencies = [
  "chrono",
  "paddock-domain",
  "paddock-use-case",
+ "serde_json",
  "sqlx",
  "thiserror",
  "tokio",

@@ -1,6 +1,6 @@
 use std::time::Duration as StdDuration;
 
-use chrono::{Duration, Local, NaiveTime, Offset};
+use chrono::{Duration, Local, NaiveTime, Offset, Utc};
 use paddock_domain::{
     Portfolio, PortfolioConfig, RECOMMENDED_MARKET_BLEND_ALPHA, Race, build_portfolio,
 };
@@ -9,6 +9,7 @@ use predict_format::{format_explanations, format_probs, format_probs_with_market
 
 use crate::cli::Cli;
 use crate::setup::App;
+use crate::snapshot::{SnapshotContext, build_snapshot_record};
 
 /// `now` 時点でのレースの発走状態。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -106,6 +107,7 @@ async fn sweep(
     slots: &[Slot],
     statuses: &[RaceStatus],
     now: NaiveTime,
+    captured_at: &str,
     cli: &Cli,
     blend_alpha: Option<f64>,
 ) {
@@ -133,12 +135,18 @@ async fn sweep(
         );
     }
     for slot in due {
-        evaluate_race(app, slot, cli, blend_alpha).await;
+        evaluate_race(app, slot, captured_at, cli, blend_alpha).await;
     }
 }
 
 /// 1 レースを評価: フレッシュなオッズ再取得 → 確率推定 → 買い目/EV → ROI 判定。
-async fn evaluate_race(app: &App, slot: &Slot, cli: &Cli, blend_alpha: Option<f64>) {
+async fn evaluate_race(
+    app: &App,
+    slot: &Slot,
+    captured_at: &str,
+    cli: &Cli,
+    blend_alpha: Option<f64>,
+) {
     let rid = &slot.race.race_id;
     let label = race_label(slot);
 
@@ -221,6 +229,46 @@ async fn evaluate_race(app: &App, slot: &Slot, cli: &Cli, blend_alpha: Option<f6
         "  {mark} {label}: 参考ROI {roi_pct:.1}% / 的中 {hit_pct:.1}%（モデル単独視点・最終判断は手動精査）"
     );
     print_buy_targets(&portfolio);
+
+    // 4) ライブ EV ビュー/アーカイブ（live_ev_snapshots）へ best-effort で永続化（#346 / ADR 0064）。
+    //    ここは decision-support のスナップショット記録であり、predict のセッション記録
+    //    （predict_sessions / predict_bets）には触れない。保存失敗で監視ループは止めない。
+    if let Some(axis) = portfolio.axis {
+        // ◎の model 勝率[%]は blended（順位付け視点）の軸馬から採る。axis は build_portfolio が
+        // blended の勝率最上位から選ぶため必ず blended に含まれる。unwrap_or(0.0) は到達しない前提の
+        // 防御で、万一の不整合でも監視を止めず 0% として記録する（無言のクラッシュより望ましい）。
+        let axis_prob = blended
+            .iter()
+            .find(|hp| hp.horse_num == axis)
+            .map(|hp| hp.win_prob * 100.0)
+            .unwrap_or(0.0);
+        let axis_win_odds = odds.win.get(&axis).map(|o| o.value());
+        let (axis_place_low, axis_place_high) = odds
+            .place
+            .get(&axis)
+            .map(|b| (Some(b.low.value()), Some(b.high.value())))
+            .unwrap_or((None, None));
+        let post_time = slot.post_time.map(|t| t.format("%H:%M").to_string());
+
+        let ctx = SnapshotContext {
+            date: cli.date,
+            race_id: rid.value(),
+            venue: slot.race.venue.as_slug(),
+            race_no: slot.race.race_num,
+            post_time,
+            captured_at,
+            axis_prob,
+            axis_win_odds,
+            axis_place_odds_low: axis_place_low,
+            axis_place_odds_high: axis_place_high,
+            race_budget: cli.race_budget,
+        };
+        if let Some(record) = build_snapshot_record(&portfolio, &ctx)
+            && let Err(e) = app.interactor.save_live_ev_snapshot(&record).await
+        {
+            println!("  {label}: ライブEVスナップショット保存に失敗（監視は継続）: {e}");
+        }
+    }
 }
 
 /// 張り候補の買い目を「そのまま買える形」で出力する（軸/相手＋各点）。
@@ -320,6 +368,10 @@ pub async fn run(app: &App, cli: &Cli) -> anyhow::Result<()> {
             }
         };
         let now = Local::now().time();
+        // 監視サイクル境界時刻（1 スイープ 1 値・UTC rfc3339 秒精度 Z 終端）。同一サイクルの全レースが
+        // 同一 captured_at を共有し、live_ev_snapshots の「辞書順＝時刻順」「(race_id, captured_at) 冪等」
+        // 契約を満たす（旧 refresh_ev.sh の `date -u +%Y-%m-%dT%H:%M:%SZ` と同表記）。
+        let captured_at = Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
         // 発走状態は 1 スイープ 1 回だけ算出し、sweep 表示と終了判定で共有する。
         let statuses: Vec<RaceStatus> = slots
             .iter()
@@ -340,7 +392,7 @@ pub async fn run(app: &App, cli: &Cli) -> anyhow::Result<()> {
             );
         }
 
-        sweep(app, &slots, &statuses, now, cli, blend_alpha).await;
+        sweep(app, &slots, &statuses, now, &captured_at, cli, blend_alpha).await;
 
         if !should_continue(&statuses) {
             if statuses.is_empty() {

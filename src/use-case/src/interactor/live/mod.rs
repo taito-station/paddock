@@ -6,7 +6,7 @@ use crate::error::Result;
 use crate::interactor::Interactor;
 use crate::pdf_fetcher::PdfFetcher;
 use crate::pdf_parser::PdfParser;
-use crate::repository::{LiveEvRepository, LiveEvSnapshot};
+use crate::repository::{LiveEvRepository, LiveEvSnapshot, LiveEvSnapshotRecord};
 
 /// `GET /api/live/{date}` が返すライブ EV ビュー（use-case 側の view 型）。
 /// slip 伝票は JSON テキストのまま運び、rest-controller の DTO でデシリアライズする
@@ -71,6 +71,14 @@ impl<R: LiveEvRepository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
     pub async fn find_live_by_date(&self, date: NaiveDate) -> Result<LiveView> {
         let rows = self.repository.find_live_ev_by_date(date).await?;
         Ok(assemble_live_view(date, rows))
+    }
+
+    /// ライブ EV スナップショット 1 レコードを upsert する（#346 / ADR 0064）。
+    /// predict-watch が 1 スイープ 1 レース評価するたびに best-effort で呼ぶ薄い passthrough。
+    /// decision-support のライブビュー/アーカイブ（`live_ev_snapshots`）への書き込みであり、
+    /// predict のセッション記録（`predict_sessions` / `predict_bets`）には一切触れない。
+    pub async fn save_live_ev_snapshot(&self, record: &LiveEvSnapshotRecord) -> Result<()> {
+        self.repository.save_live_ev_snapshot(record).await
     }
 }
 

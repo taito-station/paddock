@@ -7,6 +7,7 @@ edition = "2024"
 chrono           = { workspace = true }
 paddock-domain   = { workspace = true }
 paddock-use-case = { workspace = true }
+serde_json       = { workspace = true }
 sqlx             = { workspace = true }
 thiserror        = { workspace = true }
 tokio            = { workspace = true }
@@ -15,6 +16,10 @@ tracing          = { workspace = true }
 [[test]]
 name = "test_predict_persistence"
 path = "tests/test_predict_persistence.rs"
+
+[[test]]
+name = "test_live_ev_persistence"
+path = "tests/test_live_ev_persistence.rs"
 
 [[test]]
 name = "test_find_races_by_date"
