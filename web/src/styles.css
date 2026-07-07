@@ -421,6 +421,87 @@ button:disabled {
   font-size: 0.65rem;
   padding: 0.05rem 0.35rem;
 }
+.chip-note {
+  background: #24303a;
+  color: #9fd8c4;
+  border-color: #2f5a4c;
+}
+
+/* レース書評（盤上部の散文） */
+.race-comment {
+  margin: 0 0 1rem;
+  padding: 0.7rem 0.9rem;
+  background: #171c24;
+  border: 1px solid #2a3340;
+  border-left: 3px solid #3f7d68;
+  border-radius: 6px;
+  color: #dce3ea;
+  font-size: 0.9rem;
+  line-height: 1.6;
+}
+
+/* 馬書評クリック展開 */
+.horse-col.has-detail {
+  cursor: pointer;
+}
+.horse-col.has-detail:hover {
+  border-color: #3f7d68;
+}
+.horse-col.is-selected {
+  border-color: #4fae90;
+  box-shadow: 0 0 0 1px #4fae90 inset;
+}
+
+.horse-detail {
+  margin: 0.8rem 0 0.4rem;
+  padding: 0.8rem 1rem;
+  background: #171c24;
+  border: 1px solid #2f5a4c;
+  border-radius: 8px;
+}
+.horse-detail-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.4rem;
+}
+.horse-detail-head .mark {
+  color: #ffd27a;
+  font-size: 1.1rem;
+}
+.horse-detail-head strong {
+  font-size: 1rem;
+  color: #eef1f4;
+}
+.detail-close {
+  margin-left: auto;
+  background: #2a2f37;
+  color: #cbd2da;
+  border: 1px solid #39414c;
+  border-radius: 999px;
+  width: 1.6rem;
+  height: 1.6rem;
+  cursor: pointer;
+  line-height: 1;
+  font-size: 1rem;
+}
+.detail-close:hover {
+  background: #3a1414;
+  color: #ff9a9a;
+}
+.horse-detail-lead {
+  margin: 0 0 0.5rem;
+  color: #dce3ea;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+.horse-detail-lines {
+  margin: 0;
+  padding-left: 1.1rem;
+  color: #c3cbd4;
+  font-size: 0.82rem;
+  line-height: 1.7;
+}
 .board-view .grid {
   background: #1c2129;
   color: #e6e8eb;

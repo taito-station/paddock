@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
@@ -15,6 +16,8 @@ export function RaceBoard() {
   const { raceId = "" } = useParams();
   const [searchParams] = useSearchParams();
   const dateParam = searchParams.get("date") ?? "";
+  // クリックで馬書評（詳細パネル）を開く馬番。同じ馬を再クリック or 閉じるで null に戻す。
+  const [selectedHorse, setSelectedHorse] = useState<number | null>(null);
 
   const board = useQuery({
     // budget/blend_alpha は現状固定（5000 / 既定 α）。将来これらを可変にする際は
@@ -153,16 +156,37 @@ export function RaceBoard() {
             )}
           </div>
 
+          {/* レース書評（混戦度・◎の狙いどころ・妙味。人手優先・無ければルールベース生成） */}
+          {d.race_comment && (
+            <p className="race-comment">{d.race_comment}</p>
+          )}
+
           {/* 全頭横並び盤（モデル勝率順・truncate しない） */}
           <div className="board-scroll">
             <div className="board-row">
-              {horses.map((h) => (
+              {horses.map((h) => {
+                const hasDetail =
+                  !!h.comment || (h.detail_lines?.length ?? 0) > 0;
+                return (
                 <div
                   key={h.horse_num}
                   className={
                     "horse-col" +
                     (h.is_overlay ? " is-overlay" : "") +
-                    (h.is_value ? " is-value" : "")
+                    (h.is_value ? " is-value" : "") +
+                    (hasDetail ? " has-detail" : "") +
+                    (selectedHorse === h.horse_num ? " is-selected" : "")
+                  }
+                  role={hasDetail ? "button" : undefined}
+                  tabIndex={hasDetail ? 0 : undefined}
+                  title={hasDetail ? "クリックで書評を表示" : undefined}
+                  onClick={
+                    hasDetail
+                      ? () =>
+                          setSelectedHorse((cur) =>
+                            cur === h.horse_num ? null : h.horse_num,
+                          )
+                      : undefined
                   }
                 >
                   <div
@@ -217,11 +241,48 @@ export function RaceBoard() {
                         妙味
                       </span>
                     )}
+                    {hasDetail && <span className="chip chip-note">書評</span>}
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           </div>
+
+          {/* 馬書評（クリックで展開する詳細パネル）。数値密度を保ちつつ掘りたい馬だけ開く */}
+          {selectedHorse != null &&
+            (() => {
+              const h = horses.find((x) => x.horse_num === selectedHorse);
+              if (!h) return null;
+              return (
+                <div className="horse-detail">
+                  <div className="horse-detail-head">
+                    <span className="mark">{markSymbol(h.mark)}</span>
+                    <strong>
+                      {h.horse_num} {h.horse_name}
+                    </strong>
+                    <span className="muted">{h.jockey ?? "-"}</span>
+                    <button
+                      className="detail-close"
+                      onClick={() => setSelectedHorse(null)}
+                      aria-label="閉じる"
+                    >
+                      ×
+                    </button>
+                  </div>
+                  {h.comment && <p className="horse-detail-lead">{h.comment}</p>}
+                  {h.detail_lines.length > 0 ? (
+                    <ul className="horse-detail-lines">
+                      {h.detail_lines.map((line, i) => (
+                        <li key={i}>{line}</li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="muted">根拠データがありません。</p>
+                  )}
+                </div>
+              );
+            })()}
 
           {/* 買い目（/recommendations と同経路・相手 top5 不変） */}
           <h3 style={{ marginTop: "1.25rem" }}>買い目</h3>
