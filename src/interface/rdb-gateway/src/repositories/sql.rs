@@ -5,7 +5,16 @@ use std::collections::HashMap;
 use paddock_use_case::repository::GroupStat;
 use sqlx::PgPool;
 
-/// 成績集計の SELECT 本体（COUNT/SUM(CASE...) と `results INNER JOIN races`）。
+/// 成績集計の集計式（starts/wins/places/shows）。SELECT リストに埋め込む共通片で、
+/// キー列を前置するグループ集計（`fetch_agg_grouped` / `conditional_gate_stats`）が共有し、
+/// ベース率定義のドリフトを防ぐ（#358）。`STATS_AGG_SELECT` の集計部と同一（const 連結が
+/// できないためリテラルは 2 箇所に残るが、変更時は必ず両方を揃える）。
+pub(crate) const STATS_AGG_EXPRS: &str = "COUNT(*) AS starts,
+        COALESCE(SUM(CASE WHEN results.finishing_position = 1 THEN 1 ELSE 0 END), 0) AS wins,
+        COALESCE(SUM(CASE WHEN results.finishing_position IN (1,2) THEN 1 ELSE 0 END), 0) AS places,
+        COALESCE(SUM(CASE WHEN results.finishing_position IN (1,2,3) THEN 1 ELSE 0 END), 0) AS shows";
+
+/// 成績集計の SELECT 本体（`STATS_AGG_EXPRS` の集計式と `results INNER JOIN races`）。
 /// stats 系クエリ（jockey/trainer/course）で共通。呼び出し側が ` WHERE ...` を後続させる。
 pub(crate) const STATS_AGG_SELECT: &str = r#"
     SELECT
@@ -45,6 +54,12 @@ pub(crate) const GATE_GROUPS: &[(&str, &str)] = &[
 pub(crate) fn case_from_preds(arms: &[(&str, &str)]) -> String {
     let mut s = String::from("CASE");
     for (label, pred) in arms {
+        // ラベルは SQL 文字列リテラルに素で埋める（code 定数前提）。単一引用符が混じると
+        // 破損/注入し得るため契約を機械化（`delete_absent_horse_nums` の debug_assert と同型）。
+        debug_assert!(
+            !label.contains('\''),
+            "label must not contain a single quote: {label:?}"
+        );
         s.push_str(&format!(" WHEN {pred} THEN '{label}'"));
     }
     s.push_str(" END");
@@ -156,10 +171,7 @@ async fn fetch_agg_grouped(
         r#"
         SELECT
             results.{column} AS entity,
-            COUNT(*) AS starts,
-            COALESCE(SUM(CASE WHEN results.finishing_position = 1 THEN 1 ELSE 0 END), 0) AS wins,
-            COALESCE(SUM(CASE WHEN results.finishing_position IN (1,2) THEN 1 ELSE 0 END), 0) AS places,
-            COALESCE(SUM(CASE WHEN results.finishing_position IN (1,2,3) THEN 1 ELSE 0 END), 0) AS shows
+            {STATS_AGG_EXPRS}
         FROM results
         INNER JOIN races ON races.race_id = results.race_id
         WHERE results.{column} = ANY($1)
@@ -322,4 +334,32 @@ pub(crate) async fn delete_absent_horse_nums(
     }
     q.execute(conn).await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{case_from_preds, or_from_preds};
+
+    #[test]
+    fn case_from_preds_builds_when_then_chain() {
+        let sql = case_from_preds(&[("A", "x = 1"), ("B", "x = 2")]);
+        assert_eq!(sql, "CASE WHEN x = 1 THEN 'A' WHEN x = 2 THEN 'B' END");
+    }
+
+    #[test]
+    fn case_from_preds_empty_is_bare_case_end() {
+        // アーム 0 個でも構文上壊れない（END のみ。実運用では非空定数を渡す）。
+        assert_eq!(case_from_preds(&[]), "CASE END");
+    }
+
+    #[test]
+    fn or_from_preds_wraps_and_joins_with_or() {
+        let sql = or_from_preds(&[("A", "x = 1"), ("B", "x BETWEEN 2 AND 3")]);
+        assert_eq!(sql, "(x = 1) OR (x BETWEEN 2 AND 3)");
+    }
+
+    #[test]
+    fn or_from_preds_single_has_no_or() {
+        assert_eq!(or_from_preds(&[("A", "x = 1")]), "(x = 1)");
+    }
 }
