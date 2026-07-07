@@ -39,6 +39,28 @@ pub(crate) const GATE_GROUPS: &[(&str, &str)] = &[
     ("Outer (7-8)", "results.gate_num BETWEEN 7 AND 8"),
 ];
 
+/// `(label, predicate)` の並びから `CASE WHEN <pred> THEN '<label>' ... END` を組み立てる。
+/// GROUP BY のキー式に使う。`label`・`predicate` はいずれも呼び出し側の **code 定数**
+/// （`GATE_GROUPS` 等）前提で、ユーザー入力を渡さない（`AssertSqlSafe` の契約・二重防御, #358）。
+pub(crate) fn case_from_preds(arms: &[(&str, &str)]) -> String {
+    let mut s = String::from("CASE");
+    for (label, pred) in arms {
+        s.push_str(&format!(" WHEN {pred} THEN '{label}'"));
+    }
+    s.push_str(" END");
+    s
+}
+
+/// `(label, predicate)` の述語部だけを `(<pred>) OR (<pred>) ...` で OR 連結する。
+/// 対象セルの行だけに絞る WHERE 片に使う（非セル行＝枠9+・NULL 馬場を除外）。
+/// `predicate` は code 定数前提（`case_from_preds` と同じ SQL 安全契約, #358）。
+pub(crate) fn or_from_preds(arms: &[(&str, &str)]) -> String {
+    arms.iter()
+        .map(|(_, pred)| format!("({pred})"))
+        .collect::<Vec<_>>()
+        .join(" OR ")
+}
+
 /// 集計結果の 4-tuple `(starts, wins, places, shows)` を [`GroupStat`] に詰める。
 pub(crate) fn group_stat_from_row(label: &str, row: (i64, i64, i64, i64)) -> GroupStat {
     GroupStat {
