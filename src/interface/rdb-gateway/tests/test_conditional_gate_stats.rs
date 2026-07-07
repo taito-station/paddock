@@ -88,6 +88,18 @@ async fn conditional_gate_stats_filters_track_field_and_gate(pool: sqlx::PgPool)
     assert_eq!(inner.stat.starts, 3, "内枠は 3 走");
     assert_eq!(inner.stat.shows, 2, "内枠の複勝は 2");
 
+    // 単一 GROUP BY が 1 クエリで複数セルを同時に分割集計することをロック（中枠・外枠も別セルへ）。
+    let middle = row
+        .cell("良", "少(-9)", "Middle (4-6)")
+        .expect("良・少・中枠セルがある");
+    assert_eq!(middle.stat.starts, 1, "中枠は gate4 の 1 走");
+    assert_eq!(middle.stat.shows, 1, "中枠 gate4 は 3 着で複勝");
+    let outer = row
+        .cell("良", "少(-9)", "Outer (7-8)")
+        .expect("良・少・外枠セルがある");
+    assert_eq!(outer.stat.starts, 2, "外枠は gate7,8 の 2 走");
+    assert_eq!(outer.stat.shows, 0, "外枠は複勝圏外(4,6着)");
+
     // 同条件の全枠平均複勝率＝(2+1+0)/6。lift 基準線が集計できる。
     let base = row.condition_show_rate("良", "少(-9)").unwrap();
     assert!(
@@ -115,6 +127,58 @@ async fn conditional_gate_stats_filters_track_field_and_gate(pool: sqlx::PgPool)
             .starts,
         2,
         "非良・少・内枠は yielding の 2 走"
+    );
+}
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn conditional_gate_stats_respects_as_of_cutoff(pool: sqlx::PgPool) {
+    // date フィルタ（`as_of` = `races.date < d`）はバックテストのリーク防止の高感度点。
+    // #358 で per-query WHERE から `target_races` CTE へ移設したため、cutoff 以降のレースが
+    // 集計から除外されることを回帰でロックする。
+    let repo = PostgresRepository::new(pool);
+
+    // 同一コース・良・少帯・内枠。cutoff より前(1/1)と後(2/1)に 1 レースずつ。
+    let mut early = race(
+        "202606050301",
+        TrackCondition::Firm,
+        vec![result(1, 1, 1), result(2, 2, 2), result(4, 3, 3)],
+    );
+    early.date = ymd(2026, 1, 1);
+    let mut late = race(
+        "202606050302",
+        TrackCondition::Firm,
+        vec![result(1, 1, 1), result(2, 2, 2), result(3, 3, 3)],
+    );
+    late.date = ymd(2026, 2, 1);
+    repo.save_race(&early).await.unwrap();
+    repo.save_race(&late).await.unwrap();
+
+    // cutoff = 1/15。early(1/1) のみ算入され late(2/1) は除外される。
+    let row = repo
+        .conditional_gate_stats(Venue::Nakayama, 1600, Surface::Turf, Some(ymd(2026, 1, 15)))
+        .await
+        .unwrap();
+    let inner = row
+        .cell("良", "少(-9)", "Inner (1-3)")
+        .expect("良・少・内枠セルがある");
+    assert_eq!(
+        inner.stat.starts, 3,
+        "early の 3 走のみ（late は cutoff で除外）"
+    );
+    assert_eq!(
+        inner.stat.shows, 2,
+        "early の複勝 2（着1,2）。late 分は混ざらない"
+    );
+
+    // cutoff 無し（None）だと両レース算入＝6 走。移設した date フィルタが効いていることの対照。
+    let all = repo
+        .conditional_gate_stats(Venue::Nakayama, 1600, Surface::Turf, None)
+        .await
+        .unwrap();
+    assert_eq!(
+        all.cell("良", "少(-9)", "Inner (1-3)").unwrap().stat.starts,
+        6,
+        "cutoff 無しなら early+late の 6 走"
     );
 }
 

@@ -5,7 +5,16 @@ use std::collections::HashMap;
 use paddock_use_case::repository::GroupStat;
 use sqlx::PgPool;
 
-/// 成績集計の SELECT 本体（COUNT/SUM(CASE...) と `results INNER JOIN races`）。
+/// 成績集計の集計式（starts/wins/places/shows）。SELECT リストに埋め込む共通片で、
+/// キー列を前置するグループ集計（`fetch_agg_grouped` / `conditional_gate_stats`）が共有し、
+/// ベース率定義のドリフトを防ぐ（#358）。`STATS_AGG_SELECT` の集計部と同一（const 連結が
+/// できないためリテラルは 2 箇所に残るが、変更時は必ず両方を揃える）。
+pub(crate) const STATS_AGG_EXPRS: &str = "COUNT(*) AS starts,
+        COALESCE(SUM(CASE WHEN results.finishing_position = 1 THEN 1 ELSE 0 END), 0) AS wins,
+        COALESCE(SUM(CASE WHEN results.finishing_position IN (1,2) THEN 1 ELSE 0 END), 0) AS places,
+        COALESCE(SUM(CASE WHEN results.finishing_position IN (1,2,3) THEN 1 ELSE 0 END), 0) AS shows";
+
+/// 成績集計の SELECT 本体（`STATS_AGG_EXPRS` の集計式と `results INNER JOIN races`）。
 /// stats 系クエリ（jockey/trainer/course）で共通。呼び出し側が ` WHERE ...` を後続させる。
 pub(crate) const STATS_AGG_SELECT: &str = r#"
     SELECT
@@ -38,6 +47,51 @@ pub(crate) const GATE_GROUPS: &[(&str, &str)] = &[
     ("Middle (4-6)", "results.gate_num BETWEEN 4 AND 6"),
     ("Outer (7-8)", "results.gate_num BETWEEN 7 AND 8"),
 ];
+
+/// `(label, predicate)` の並びから `CASE WHEN <pred> THEN '<label>' ... END` を組み立てる。
+/// GROUP BY のキー式に使う。`label`・`predicate` はいずれも呼び出し側の **code 定数**
+/// （`GATE_GROUPS` 等）前提で、ユーザー入力を渡さない（`AssertSqlSafe` の契約・二重防御, #358）。
+pub(crate) fn case_from_preds(arms: &[(&str, &str)]) -> String {
+    let mut s = String::from("CASE");
+    for (label, pred) in arms {
+        // ラベルは SQL 文字列リテラルに素で埋める（code 定数前提）。単一引用符が混じると
+        // 破損/注入し得るため契約を機械化（`delete_absent_horse_nums` の debug_assert と同型）。
+        debug_assert!(
+            !label.contains('\''),
+            "label must not contain a single quote: {label:?}"
+        );
+        s.push_str(&format!(" WHEN {pred} THEN '{label}'"));
+    }
+    s.push_str(" END");
+    s
+}
+
+/// `(label, predicate)` の述語部だけを `(<pred>) OR (<pred>) ...` で OR 連結する。
+/// 対象セルの行だけに絞る WHERE 片に使う（非セル行＝枠9+・NULL 馬場を除外）。
+/// `predicate` は code 定数前提（`case_from_preds` と同じ SQL 安全契約, #358）。
+pub(crate) fn or_from_preds(arms: &[(&str, &str)]) -> String {
+    arms.iter()
+        .map(|(_, pred)| format!("({pred})"))
+        .collect::<Vec<_>>()
+        .join(" OR ")
+}
+
+/// `(label, lo, hi)` の並びから `CASE WHEN <col> BETWEEN lo AND hi THEN '<label>' ... END` を組む。
+/// 数値帯（頭数帯など）のキー化用。`case_from_preds` の BETWEEN 版で、ラベルの SQL リテラル
+/// 埋め込み契約（単一引用符禁止の `debug_assert`）を同じ 1 箇所に集約する（#358）。
+/// `col` は呼び出し側の code 定数（列式）前提でユーザー入力を渡さない。
+pub(crate) fn case_from_bands(col: &str, bands: &[(&str, u32, u32)]) -> String {
+    let mut s = String::from("CASE");
+    for (label, lo, hi) in bands {
+        debug_assert!(
+            !label.contains('\''),
+            "band label must not contain a single quote: {label:?}"
+        );
+        s.push_str(&format!(" WHEN {col} BETWEEN {lo} AND {hi} THEN '{label}'"));
+    }
+    s.push_str(" END");
+    s
+}
 
 /// 集計結果の 4-tuple `(starts, wins, places, shows)` を [`GroupStat`] に詰める。
 pub(crate) fn group_stat_from_row(label: &str, row: (i64, i64, i64, i64)) -> GroupStat {
@@ -134,10 +188,7 @@ async fn fetch_agg_grouped(
         r#"
         SELECT
             results.{column} AS entity,
-            COUNT(*) AS starts,
-            COALESCE(SUM(CASE WHEN results.finishing_position = 1 THEN 1 ELSE 0 END), 0) AS wins,
-            COALESCE(SUM(CASE WHEN results.finishing_position IN (1,2) THEN 1 ELSE 0 END), 0) AS places,
-            COALESCE(SUM(CASE WHEN results.finishing_position IN (1,2,3) THEN 1 ELSE 0 END), 0) AS shows
+            {STATS_AGG_EXPRS}
         FROM results
         INNER JOIN races ON races.race_id = results.race_id
         WHERE results.{column} = ANY($1)
@@ -300,4 +351,55 @@ pub(crate) async fn delete_absent_horse_nums(
     }
     q.execute(conn).await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        STATS_AGG_EXPRS, STATS_AGG_SELECT, case_from_bands, case_from_preds, or_from_preds,
+    };
+
+    #[test]
+    fn case_from_preds_builds_when_then_chain() {
+        let sql = case_from_preds(&[("A", "x = 1"), ("B", "x = 2")]);
+        assert_eq!(sql, "CASE WHEN x = 1 THEN 'A' WHEN x = 2 THEN 'B' END");
+    }
+
+    #[test]
+    fn case_from_preds_empty_does_not_panic() {
+        // アーム 0 個でも Rust ビルダーは panic せず `CASE END` を返す（この生成 SQL 自体は
+        // WHEN/ELSE を欠き不正。実運用では常に非空の code 定数を渡す前提）。
+        assert_eq!(case_from_preds(&[]), "CASE END");
+    }
+
+    #[test]
+    fn stats_agg_exprs_stay_in_sync_with_select() {
+        // STATS_AGG_SELECT は const 連結ができず集計式リテラルを別に保持する。両者がドリフトすると
+        // ベース率が静かに食い違うため、SELECT 本体が EXPRS を（空白差を無視して）包含することをロックする。
+        let norm = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(
+            norm(STATS_AGG_SELECT).contains(&norm(STATS_AGG_EXPRS)),
+            "STATS_AGG_SELECT must embed STATS_AGG_EXPRS verbatim (drift detected)"
+        );
+    }
+
+    #[test]
+    fn or_from_preds_wraps_and_joins_with_or() {
+        let sql = or_from_preds(&[("A", "x = 1"), ("B", "x BETWEEN 2 AND 3")]);
+        assert_eq!(sql, "(x = 1) OR (x BETWEEN 2 AND 3)");
+    }
+
+    #[test]
+    fn or_from_preds_single_has_no_or() {
+        assert_eq!(or_from_preds(&[("A", "x = 1")]), "(x = 1)");
+    }
+
+    #[test]
+    fn case_from_bands_builds_between_chain() {
+        let sql = case_from_bands("f", &[("多", 14, 99), ("少", 1, 9)]);
+        assert_eq!(
+            sql,
+            "CASE WHEN f BETWEEN 14 AND 99 THEN '多' WHEN f BETWEEN 1 AND 9 THEN '少' END"
+        );
+    }
 }
