@@ -30,8 +30,8 @@ pub use odds::{BetType, OddsValue, OrderedPair, OrderedTriple, Pair, PlaceOdds, 
 pub use pad_prediction::{Mark, PadPrediction, PredictionBet, PredictionHorse, PredictionResult};
 pub use payout::{RacePayouts, Settlement, settle_bet};
 pub use portfolio::{
-    PairEvDiagnostic, PairEvDiagnostics, Portfolio, PortfolioBet, PortfolioConfig, build_portfolio,
-    pair_ev_diagnostics,
+    BetMethod, KONSEN_BAND_RATIO, KONSEN_MIN_HORSES, PairEvDiagnostic, PairEvDiagnostics,
+    Portfolio, PortfolioBet, PortfolioConfig, build_portfolio, konsen_band, pair_ev_diagnostics,
 };
 pub use prediction::{
     DatedCounts, EstimationConfig, ExplainCategory, FactorExplanation, FactorStat,

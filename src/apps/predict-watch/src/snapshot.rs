@@ -2,10 +2,10 @@
 //!
 //! predict-watch が 1 スイープ 1 レースを評価した結果（買い目 Portfolio ＋ ◎確率・オッズ）を、
 //! `live_ev_snapshots` へ書ける 1 レコードへ落とす。DB・時計に触れない純関数なのでユニットテスト可能。
-//! 混戦（box）は MVP では組まないため `konsen=false`・全 leg が `nagashi`（#352 で移植）。
+//! 混戦時は `konsen=true`・印馬3連複ボックスの leg を `method="box"`（軸なし）で写す（#352）。
 
 use chrono::NaiveDate;
-use paddock_domain::Portfolio;
+use paddock_domain::{BetMethod, Portfolio};
 use paddock_use_case::repository::{LiveEvSnapshotRecord, SlipLegRecord};
 
 /// Portfolio 以外に写像へ要るレース単位のスカラ文脈（確率・オッズ・識別子）。
@@ -46,14 +46,17 @@ pub fn build_snapshot_record(
         .bets
         .iter()
         .filter(|b| b.stake > 0)
-        .map(|b| SlipLegRecord {
-            bet_type: b.combination.type_label().to_string(),
-            // MVP: konsen=false のため box は組まれず、全 leg が ◎軸ながし。
-            method: "nagashi".to_string(),
-            axis: Some(axis.value()),
-            combo: b.combination.horse_nums(),
-            points: 1,
-            amount: b.stake,
+        .map(|b| {
+            // 印馬3連複ボックス（混戦時）は軸を持たない。ながしは ◎軸を写す。
+            let is_box = b.method == BetMethod::Box;
+            SlipLegRecord {
+                bet_type: b.combination.type_label().to_string(),
+                method: if is_box { "box" } else { "nagashi" }.to_string(),
+                axis: if is_box { None } else { Some(axis.value()) },
+                combo: b.combination.horse_nums(),
+                points: 1,
+                amount: b.stake,
+            }
         })
         .collect();
 
@@ -74,7 +77,7 @@ pub fn build_snapshot_record(
         // cli.roi_gate・可変）とは独立で、roi_gate を 1.0 以外にしても保存 verdict の意味は変えない。
         verdict: if ev.roi >= 1.0 { "bet" } else { "skip" }.to_string(),
         roi: ev.roi * 100.0,
-        konsen: false,
+        konsen: portfolio.konsen,
         axis: axis.value(),
         axis_prob: ctx.axis_prob,
         axis_win_odds: ctx.axis_win_odds,
@@ -89,7 +92,9 @@ pub fn build_snapshot_record(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use paddock_domain::{BetCombination, EvReport, HorseNum, Pair, PortfolioBet, Triple};
+    use paddock_domain::{
+        BetCombination, BetMethod, EvReport, HorseNum, Pair, PortfolioBet, Triple,
+    };
 
     fn h(n: u32) -> HorseNum {
         HorseNum::try_from(n).unwrap()
@@ -114,6 +119,7 @@ mod tests {
     fn wide(a: u32, b: u32, stake: u64, odds: Option<f64>) -> PortfolioBet {
         PortfolioBet {
             combination: BetCombination::Wide(Pair::try_from((h(a), h(b))).unwrap()),
+            method: BetMethod::Nagashi,
             stake,
             odds,
             ev: 1.2,
@@ -124,6 +130,7 @@ mod tests {
     fn trio(a: u32, b: u32, c: u32, stake: u64) -> PortfolioBet {
         PortfolioBet {
             combination: BetCombination::Trio(Triple::try_from((h(a), h(b), h(c))).unwrap()),
+            method: BetMethod::Nagashi,
             stake,
             odds: Some(8.0),
             ev: 1.5,
@@ -131,10 +138,26 @@ mod tests {
         }
     }
 
+    fn trio_box(a: u32, b: u32, c: u32, stake: u64) -> PortfolioBet {
+        PortfolioBet {
+            combination: BetCombination::Trio(Triple::try_from((h(a), h(b), h(c))).unwrap()),
+            method: BetMethod::Box,
+            stake,
+            odds: Some(12.0),
+            ev: 1.3,
+            hit_prob: 0.1,
+        }
+    }
+
     fn portfolio(bets: Vec<PortfolioBet>, roi: f64) -> Portfolio {
+        portfolio_konsen(bets, roi, false)
+    }
+
+    fn portfolio_konsen(bets: Vec<PortfolioBet>, roi: f64, konsen: bool) -> Portfolio {
         Portfolio {
             axis: Some(h(6)),
             partners: vec![h(3), h(8)],
+            konsen,
             total_stake: bets.iter().map(|b| b.stake).sum(),
             bets,
             ev: Some(EvReport {
@@ -200,6 +223,29 @@ mod tests {
         assert_eq!(t.bet_type, "trio");
         assert_eq!(t.combo, vec![3, 6, 8]); // 昇順
         assert_eq!(t.amount, 2000);
+    }
+
+    #[test]
+    fn konsen_box_leg_has_box_method_and_no_axis() {
+        // 混戦時: konsen=true を写し、印馬3連複ボックスの leg は method="box"・axis=None で出す。
+        // 同時に共存する ◎軸ながしは method="nagashi"・axis=◎ のまま。
+        let p = portfolio_konsen(
+            vec![wide(6, 3, 1000, Some(5.0)), trio_box(3, 6, 8, 1500)],
+            1.1,
+            true,
+        );
+        let r = build_snapshot_record(&p, &ctx()).unwrap();
+        assert!(r.konsen);
+
+        let nagashi = r.legs.iter().find(|l| l.bet_type == "wide").unwrap();
+        assert_eq!(nagashi.method, "nagashi");
+        assert_eq!(nagashi.axis, Some(6));
+
+        let bx = r.legs.iter().find(|l| l.method == "box").unwrap();
+        assert_eq!(bx.bet_type, "trio");
+        assert_eq!(bx.axis, None);
+        assert_eq!(bx.combo, vec![3, 6, 8]); // 昇順
+        assert_eq!(bx.amount, 1500);
     }
 
     #[test]

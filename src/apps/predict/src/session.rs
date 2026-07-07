@@ -3,8 +3,8 @@ use std::io::{self, BufRead, Write};
 
 use chrono::{NaiveDate, Utc};
 use paddock_domain::{
-    BetCombination, HorseNum, HorseProbability, PairEvDiagnostic, PortfolioBet, PortfolioConfig,
-    RECOMMENDED_MARKET_BLEND_ALPHA, Race, RaceId, TrackCondition, build_portfolio,
+    BetCombination, BetMethod, HorseNum, HorseProbability, PairEvDiagnostic, PortfolioBet,
+    PortfolioConfig, RECOMMENDED_MARKET_BLEND_ALPHA, Race, RaceId, TrackCondition, build_portfolio,
     pair_ev_diagnostics,
 };
 use paddock_use_case::{PredictBetRecord, PredictSessionRecord, PredictionViews};
@@ -237,6 +237,9 @@ async fn run_race(
         }
         None => println!("  確率推定が空のため買い目なし"),
     }
+    if portfolio.bets.iter().any(|b| b.method == BetMethod::Box) {
+        println!("  混戦: 印馬3連複ボックス（軸なし）を併用");
+    }
     if portfolio.bets.is_empty() {
         println!("  予算内で組める買い目なし");
     }
@@ -245,8 +248,15 @@ async fn run_race(
             Some(o) => format!("オッズ{o:.1}"),
             None => "オッズ未取得".to_string(),
         };
+        // 方式（ながし/ボックス）を明示する。box は軸を持たない印馬総当たりで、
+        // 「軸流し」枠の脚と混同しないよう区別表示する（CLAUDE.md 表記規約）。
+        let method = match bet.method {
+            BetMethod::Nagashi => "ながし",
+            BetMethod::Box => "ボックス",
+        };
         println!(
-            "  {} ¥{} {} 的中{:.1}% EV={:.2}",
+            "  [{}] {} ¥{} {} 的中{:.1}% EV={:.2}",
+            method,
             bet.combination.label_ja(),
             bet.stake,
             odds,
@@ -673,7 +683,7 @@ mod tests {
         resolve_track_condition_default,
     };
     use paddock_domain::horse_result::HorseNum;
-    use paddock_domain::{BetCombination, PortfolioBet, RaceId, TrackCondition};
+    use paddock_domain::{BetCombination, BetMethod, PortfolioBet, RaceId, TrackCondition};
     use std::io::Cursor;
 
     fn horse(n: u32) -> HorseNum {
@@ -806,6 +816,7 @@ mod tests {
         let bets = vec![
             PortfolioBet {
                 combination: BetCombination::Win(horse(1)),
+                method: BetMethod::Nagashi,
                 stake: 500,
                 odds: None,
                 ev: 0.0,
@@ -813,6 +824,7 @@ mod tests {
             },
             PortfolioBet {
                 combination: BetCombination::Win(horse(2)),
+                method: BetMethod::Nagashi,
                 stake: 300,
                 odds: None,
                 ev: 0.0,
@@ -831,6 +843,7 @@ mod tests {
         // 全0で確定して無限ループしない（コメントが謳う外側ループの終端を直接検証）。
         let bets = vec![PortfolioBet {
             combination: BetCombination::Win(horse(1)),
+            method: BetMethod::Nagashi,
             stake: 100,
             odds: None,
             ev: 0.0,
