@@ -3,8 +3,8 @@ use std::io::{self, BufRead, Write};
 
 use chrono::{NaiveDate, Utc};
 use paddock_domain::{
-    BetCombination, HorseNum, HorseProbability, PairEvDiagnostic, PortfolioBet, PortfolioConfig,
-    RECOMMENDED_MARKET_BLEND_ALPHA, Race, RaceId, TrackCondition, build_portfolio,
+    BetCombination, BetMethod, HorseNum, HorseProbability, PairEvDiagnostic, PortfolioBet,
+    PortfolioConfig, RECOMMENDED_MARKET_BLEND_ALPHA, Race, RaceId, TrackCondition, build_portfolio,
     pair_ev_diagnostics,
 };
 use paddock_use_case::{PredictBetRecord, PredictSessionRecord, PredictionViews};
@@ -237,6 +237,9 @@ async fn run_race(
         }
         None => println!("  確率推定が空のため買い目なし"),
     }
+    if portfolio.konsen {
+        println!("  混戦: 印馬3連複ボックス（軸なし）を併用");
+    }
     if portfolio.bets.is_empty() {
         println!("  予算内で組める買い目なし");
     }
@@ -245,8 +248,15 @@ async fn run_race(
             Some(o) => format!("オッズ{o:.1}"),
             None => "オッズ未取得".to_string(),
         };
+        // 方式（ながし/ボックス）を明示する。box は軸を持たない印馬総当たりで、
+        // 「軸流し」枠の脚と混同しないよう区別表示する（CLAUDE.md 表記規約）。
+        let method = match bet.method {
+            BetMethod::Nagashi => "ながし",
+            BetMethod::Box => "ボックス",
+        };
         println!(
-            "  {} ¥{} {} 的中{:.1}% EV={:.2}",
+            "  [{}] {} ¥{} {} 的中{:.1}% EV={:.2}",
+            method,
             bet.combination.label_ja(),
             bet.stake,
             odds,

@@ -2,7 +2,7 @@ use std::time::Duration as StdDuration;
 
 use chrono::{Duration, Local, NaiveTime, Offset, Utc};
 use paddock_domain::{
-    Portfolio, PortfolioConfig, RECOMMENDED_MARKET_BLEND_ALPHA, Race, build_portfolio,
+    BetMethod, Portfolio, PortfolioConfig, RECOMMENDED_MARKET_BLEND_ALPHA, Race, build_portfolio,
 };
 use paddock_use_case::PredictionViews;
 use predict_format::{format_explanations, format_probs, format_probs_with_market};
@@ -282,13 +282,22 @@ fn print_buy_targets(p: &Portfolio) {
             .join(",");
         println!("     軸 {} → 相手 {}", axis.value(), rel);
     }
+    if p.konsen {
+        println!("     混戦: 印馬3連複ボックス（軸なし）を併用");
+    }
     for bet in &p.bets {
         if bet.stake == 0 {
             continue;
         }
+        // 方式（ながし/ボックス）を明示。box は軸なしの印馬総当たりで「軸流し」枠と区別する（表記規約）。
+        let method = match bet.method {
+            BetMethod::Nagashi => "ながし",
+            BetMethod::Box => "ボックス",
+        };
         match bet.odds {
             Some(o) => println!(
-                "     {} ¥{} オッズ{:.1} 的中{:.1}% EV={:.2}",
+                "     [{}] {} ¥{} オッズ{:.1} 的中{:.1}% EV={:.2}",
+                method,
                 bet.combination.label_ja(),
                 bet.stake,
                 o,
@@ -296,7 +305,8 @@ fn print_buy_targets(p: &Portfolio) {
                 bet.ev,
             ),
             None => println!(
-                "     {} ¥{} オッズ未取得 的中{:.1}%",
+                "     [{}] {} ¥{} オッズ未取得 的中{:.1}%",
+                method,
                 bet.combination.label_ja(),
                 bet.stake,
                 bet.hit_prob * 100.0,

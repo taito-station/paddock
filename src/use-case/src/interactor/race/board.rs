@@ -10,8 +10,8 @@
 use chrono::NaiveDate;
 
 use paddock_domain::{
-    HorseProbability, Mark, Portfolio, PortfolioConfig, RaceId, RaceOdds, TrackCondition,
-    build_portfolio,
+    HorseProbability, KONSEN_BAND_RATIO, KONSEN_MIN_HORSES, Mark, Portfolio, PortfolioConfig,
+    RaceId, RaceOdds, TrackCondition, build_portfolio, konsen_band,
 };
 
 use crate::error::Result;
@@ -19,11 +19,6 @@ use crate::interactor::Interactor;
 use crate::pdf_fetcher::PdfFetcher;
 use crate::pdf_parser::PdfParser;
 use crate::repository::{OddsRepository, RaceCardRepository, StatsRepository};
-
-/// 混戦しきい値（CLAUDE.md 買い方ルール）。◎の勝率 × この係数以上の馬が ◎含めて
-/// [`CONFUSION_MIN_HORSES`] 頭以上いれば混戦。
-const CONFUSION_RATIO: f64 = 0.70;
-const CONFUSION_MIN_HORSES: u32 = 4;
 
 /// 乖離馬（妙味・ワイドボックス候補）の判定に使う「人気順 − モデル順」の下限。
 /// モデル上位圏（[`VALUE_MODEL_RANK_MAX`] 位以内）かつ市場人気がこれ以上下なら乖離馬。
@@ -303,15 +298,17 @@ fn derive_mark(model_rank: u32, is_value: bool) -> Option<Mark> {
 }
 
 /// 混戦判定（CLAUDE.md）: ◎（勝率1位）の勝率 × 0.70 以上の馬が ◎含め 4 頭以上。
+/// 判定ロジックは domain の [`konsen_band`]（`build_portfolio` の混戦分岐と同一の真実源）を再利用し、
+/// 盤面表示に要る `axis_win_prob` / `threshold`（母集団しきい値）だけをここで補う。
 fn compute_confusion(blended: &[HorseProbability]) -> Confusion {
     let axis_win_prob = blended.iter().map(|hp| hp.win_prob).fold(0.0_f64, f64::max);
-    let threshold = axis_win_prob * CONFUSION_RATIO;
-    let qualifying_count = blended.iter().filter(|hp| hp.win_prob >= threshold).count() as u32;
+    let threshold = axis_win_prob * KONSEN_BAND_RATIO;
+    let band = konsen_band(blended);
     Confusion {
-        is_confused: axis_win_prob > 0.0 && qualifying_count >= CONFUSION_MIN_HORSES,
+        is_confused: axis_win_prob > 0.0 && band.len() >= KONSEN_MIN_HORSES,
         axis_win_prob,
         threshold,
-        qualifying_count,
+        qualifying_count: band.len() as u32,
     }
 }
 

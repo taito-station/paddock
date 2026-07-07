@@ -27,6 +27,11 @@ pub enum BetMethod {
     Box,
 }
 
+/// 混戦判定の母集団しきい値: ◎（`win_prob` 最大）のこの倍率以上の馬を band に含める（CLAUDE.md）。
+pub const KONSEN_BAND_RATIO: f64 = 0.70;
+/// 混戦成立の最小頭数: band（◎含む）がこの頭数以上なら混戦（CLAUDE.md）。
+pub const KONSEN_MIN_HORSES: usize = 4;
+
 /// 混戦時の券種配分の相対重み `(連系ペア, ワイド, 三連複ながし, 印馬3連複ボックス)`。
 /// CLAUDE.md「混戦判定と配分」の ¥5,000 基準（馬連¥1,000 / ワイド¥1,000 / 3連複ながし¥1,500 /
 /// 3連複ボックス¥1,500）をそのまま相対重みにしたもの。race_budget にスケールして使う。
@@ -203,17 +208,20 @@ pub fn pair_ev_diagnostics(
     }
 }
 
-/// ◎（`win_prob` 最大）の 0.70 倍以上の馬（◎含む）を `win_prob` 降順（同率は馬番昇順）で返す＝混戦判定の母集団。
-/// Python `live_ev.py:band_of` と等価。軸選定と同じ確率系列（`rank_probs`＝市場ブレンド）を渡すことで
-/// `band[0] == axis`（◎）が保たれ、「◎含め」の意味が壊れない。空なら空 Vec。
-fn band_of(probs: &[HorseProbability]) -> Vec<HorseNum> {
+/// ◎（`win_prob` 最大）の [`KONSEN_BAND_RATIO`] 倍以上の馬（◎含む）を `win_prob` 降順（同率は馬番昇順）で
+/// 返す＝混戦判定の母集団。Python `live_ev.py:band_of` と等価。軸選定と同じ確率系列（`rank_probs`＝市場
+/// ブレンド）を渡すことで `band[0] == axis`（◎）が保たれ、「◎含め」の意味が壊れない。空なら空 Vec。
+///
+/// domain の混戦ルール（0.70 倍・◎含め [`KONSEN_MIN_HORSES`] 頭以上）の単一の真実源。`build_portfolio`
+/// の混戦判定と、use-case 側の盤面「混戦」表示（`compute_confusion`）の双方がこれを再利用する。
+pub fn konsen_band(probs: &[HorseProbability]) -> Vec<HorseNum> {
     if probs.is_empty() {
         return Vec::new();
     }
     let max_win = probs.iter().map(|p| p.win_prob).fold(f64::MIN, f64::max);
     let mut band: Vec<&HorseProbability> = probs
         .iter()
-        .filter(|p| p.win_prob >= 0.70 * max_win)
+        .filter(|p| p.win_prob >= KONSEN_BAND_RATIO * max_win)
         .collect();
     band.sort_by(|a, b| {
         b.win_prob
@@ -286,8 +294,8 @@ pub fn build_portfolio(
 
     // 混戦判定（◎の win_prob 0.70 倍以上が ◎含め 4 頭以上）。band は軸選定と同じ rank_probs で作る
     // （◎=band[0] を保つ）。Python `live_ev.py:is_konsen` と等価。
-    let band = band_of(rank_probs);
-    let konsen = band.len() >= 4;
+    let band = konsen_band(rank_probs);
+    let konsen = band.len() >= KONSEN_MIN_HORSES;
 
     // EV・的中確率は ev_probs（純モデル α=1.0）で評価する＝循環断ち（市場 odds と独立な確率で
     // EV=P_pure×odds を coherent に計算する, #272）。field も ev_probs から（rank と同一馬集合）。
@@ -737,12 +745,16 @@ mod tests {
         // 混戦: ◎の 0.70 倍以上（0.21 以上）を win_prob 降順で返す＝[1,2,3,4]、馬5 は外れる。
         let (probs, _) = konsen_sample();
         assert_eq!(
-            band_of(&probs),
+            konsen_band(&probs),
             vec![horse(1), horse(2), horse(3), horse(4)]
         );
         // 非混戦（差が開いたサンプル）: band は 4 頭未満。
         let (flat, _) = sample();
-        assert!(band_of(&flat).len() < 4, "band={:?}", band_of(&flat));
+        assert!(
+            konsen_band(&flat).len() < 4,
+            "band={:?}",
+            konsen_band(&flat)
+        );
     }
 
     #[test]
@@ -762,7 +774,7 @@ mod tests {
         let pf = build_portfolio(&probs, &probs, &o, 5000, &PortfolioConfig::default());
 
         // 「◎含め」の要: band[0] が軸（◎）と一致する（rank_probs 同系列で作るため）。
-        assert_eq!(band_of(&probs)[0], pf.axis.unwrap(), "band[0] == ◎");
+        assert_eq!(konsen_band(&probs)[0], pf.axis.unwrap(), "band[0] == ◎");
 
         // 印馬3連複ボックス = band[..5]=[1,2,3,4] の C(4,3)=4 点。全て method=Box・軸なし想定。
         let box_bets: Vec<_> = pf
@@ -841,7 +853,7 @@ mod tests {
             prob(7, 0.145),
             prob(8, 0.05), // band 外
         ];
-        assert_eq!(band_of(&probs).len(), 7, "band は 7 頭");
+        assert_eq!(konsen_band(&probs).len(), 7, "band は 7 頭");
         let mut o = RaceOdds::empty(RaceId::try_from("202506040101".to_string()).unwrap());
         // 上位 5 頭 [1,2,3,4,5] の三連複ボックス組番に odds を与える。
         for i in 1..=5u32 {
@@ -877,7 +889,7 @@ mod tests {
             prob(5, 0.13),  // 閾値未満 → 除外
         ];
         assert_eq!(
-            band_of(&probs),
+            konsen_band(&probs),
             vec![horse(1), horse(2), horse(3), horse(4)],
             "同率は馬番昇順・0.13 は band 外"
         );
