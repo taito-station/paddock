@@ -20,7 +20,9 @@ export function RaceBoard() {
   const [selectedHorse, setSelectedHorse] = useState<number | null>(null);
   // レース遷移（React Router の param 変更では remount されない）で開いたパネルが別馬に
   // 引き継がれるのを防ぐため、raceId が変わったら選択を解除する。
-  useEffect(() => setSelectedHorse(null), [raceId]);
+  useEffect(() => {
+    setSelectedHorse(null);
+  }, [raceId]);
 
   const board = useQuery({
     // budget/blend_alpha は現状固定（5000 / 既定 α）。将来これらを可変にする際は
@@ -186,6 +188,8 @@ export function RaceBoard() {
                   }
                   role={hasDetail ? "button" : undefined}
                   tabIndex={hasDetail ? 0 : undefined}
+                  aria-expanded={hasDetail ? selectedHorse === h.horse_num : undefined}
+                  aria-controls={hasDetail ? "horse-detail-panel" : undefined}
                   title={hasDetail ? "クリック / Enter で書評を表示" : undefined}
                   onClick={hasDetail ? toggleDetail : undefined}
                   onKeyDown={
@@ -265,7 +269,7 @@ export function RaceBoard() {
               const h = horses.find((x) => x.horse_num === selectedHorse);
               if (!h) return null;
               return (
-                <div className="horse-detail">
+                <div className="horse-detail" id="horse-detail-panel">
                   <div className="horse-detail-head">
                     <span className="mark">{markSymbol(h.mark)}</span>
                     <strong>
@@ -283,8 +287,8 @@ export function RaceBoard() {
                   {h.comment && <p className="horse-detail-lead">{h.comment}</p>}
                   {h.detail_lines.length > 0 ? (
                     <ul className="horse-detail-lines">
-                      {h.detail_lines.map((line) => (
-                        <li key={line}>{line}</li>
+                      {h.detail_lines.map((line, i) => (
+                        <li key={`${i}-${line}`}>{line}</li>
                       ))}
                     </ul>
                   ) : (

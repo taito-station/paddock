@@ -658,4 +658,11 @@ mod tests {
                 .contains("◎馬1")
         );
     }
+
+    #[test]
+    fn resolve_race_comment_none_without_axis() {
+        // ◎（model_rank==1）不在＝全頭空ならルールベースも空 → None。
+        let c = compute_confusion(&[]);
+        assert_eq!(resolve_race_comment(None, &c, &[]), None);
+    }
 }

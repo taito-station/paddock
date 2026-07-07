@@ -84,8 +84,9 @@ pub(crate) fn horse_detail_lines(expl: &HorseExplanation) -> Vec<String> {
     }
     // gate_bias_lift は同条件（馬場×頭数）の全枠平均比の複勝 lift。ConditionalGateBias factor 行
     // （絶対複勝率「枠バイアス（ラベル）：…」）と話題が被らないよう「相対有利度」と明示する。
-    // lift=0 は無情報なので出さない。
-    if let Some(lift) = expl.gate_bias_lift.filter(|&l| l != 0.0) {
+    // 表示は pt 丸めなので、丸めて ±0pt になる微小 lift（例 0.004）は「+0pt なのに有利」の矛盾を
+    // 避けるため無情報として出さない。
+    if let Some(lift) = expl.gate_bias_lift.filter(|&l| (l * 100.0).round() != 0.0) {
         let dir = if lift > 0.0 { "有利" } else { "不利" };
         lines.push(format!(
             "枠の相対有利度：複勝 {:+.0}pt（同条件の全枠平均比で{dir}）",
@@ -168,7 +169,7 @@ fn pct(rate: f64) -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use paddock_domain::{FactorExplanation, HorseName, HorseNum, RateTriple};
+    use paddock_domain::{FactorExplanation, HorseName, HorseNum, PrevRunSummary, RateTriple};
 
     fn expl(factors: Vec<FactorExplanation>, form: Option<f64>) -> HorseExplanation {
         HorseExplanation {
@@ -308,5 +309,74 @@ mod tests {
             lines.iter().any(|l| l.contains("枠（内 1-3）：複勝27%")),
             "{lines:?}"
         );
+    }
+
+    #[test]
+    fn horse_detail_lines_weak_negative_lift_poor_form_and_prev_run() {
+        // 反対側の分岐: Weak factor「（苦手）」・負 lift「不利」・不調フォーム・前走行。
+        let f = FactorExplanation::new(
+            ExplainCategory::TrackCondition,
+            "重".to_string(),
+            RateTriple {
+                win: 0.02,
+                place: 0.05,
+                show: 0.08,
+            },
+            30,
+        );
+        assert_eq!(f.verdict, Some(Verdict::Weak));
+        let mut e = expl(vec![f], Some(0.3)); // 不調
+        e.gate_bias_lift = Some(-0.04); // 不利
+        e.prev_run = Some(PrevRunSummary {
+            finishing_position: Some(8),
+            popularity: Some(5),
+            margin: Some("2馬身".to_string()),
+            surface: Surface::Dirt,
+            distance: 1600,
+        });
+        let lines = horse_detail_lines(&e);
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.contains("重馬場：複勝8%（30走）（苦手）")),
+            "{lines:?}"
+        );
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.contains("枠の相対有利度：複勝 -4pt") && l.contains("不利")),
+            "{lines:?}"
+        );
+        assert!(lines.iter().any(|l| l == "近走フォーム：不調"), "{lines:?}");
+        assert!(
+            lines
+                .iter()
+                .any(|l| l == "前走：8着・5番人気（ダート1600m・2馬身）"),
+            "{lines:?}"
+        );
+    }
+
+    #[test]
+    fn horse_detail_lines_hides_negligible_lift() {
+        // 丸めて ±0pt になる微小 lift は矛盾表示を避けるため出さない。
+        let mut e = expl(vec![], None);
+        e.gate_bias_lift = Some(0.004);
+        assert!(
+            !horse_detail_lines(&e)
+                .iter()
+                .any(|l| l.contains("枠の相対有利度")),
+            "微小 lift は非表示"
+        );
+    }
+
+    #[test]
+    fn race_commentary_value_without_popularity() {
+        // 妙味馬の popularity が None のとき「妙味は馬X。」（人気表記なし）。
+        let mut v = board_horse(2, 0.15, true);
+        v.popularity = None;
+        let horses = vec![board_horse(1, 0.4, false), v];
+        let s = race_commentary(&confusion(false, 1), &horses);
+        assert!(s.contains("妙味は馬2。"), "got: {s}");
+        assert!(!s.contains("番人気"), "人気表記は出ない: {s}");
     }
 }
