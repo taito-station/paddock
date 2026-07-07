@@ -84,13 +84,16 @@ pub(crate) fn horse_detail_lines(expl: &HorseExplanation) -> Vec<String> {
     }
     // gate_bias_lift は同条件（馬場×頭数）の全枠平均比の複勝 lift。ConditionalGateBias factor 行
     // （絶対複勝率「枠バイアス（ラベル）：…」）と話題が被らないよう「相対有利度」と明示する。
-    // 表示は pt 丸めなので、丸めて ±0pt になる微小 lift（例 0.004）は「+0pt なのに有利」の矛盾を
-    // 避けるため無情報として出さない。
-    if let Some(lift) = expl.gate_bias_lift.filter(|&l| (l * 100.0).round() != 0.0) {
-        let dir = if lift > 0.0 { "有利" } else { "不利" };
+    // 判定・方向・表示すべて「pt に丸めた整数」で統一し、丸めて ±0pt になる微小 lift（例 0.004）は
+    // 「+0pt なのに有利」の矛盾を避けるため出さない（判定と表示の丸め方式ズレも防ぐ）。
+    if let Some(pt) = expl
+        .gate_bias_lift
+        .map(|l| (l * 100.0).round() as i64)
+        .filter(|&p| p != 0)
+    {
+        let dir = if pt > 0 { "有利" } else { "不利" };
         lines.push(format!(
-            "枠の相対有利度：複勝 {:+.0}pt（同条件の全枠平均比で{dir}）",
-            lift * 100.0
+            "枠の相対有利度：複勝 {pt:+}pt（同条件の全枠平均比で{dir}）"
         ));
     }
     if let Some(w) = form_word(expl.recent_form) {

@@ -189,7 +189,11 @@ export function RaceBoard() {
                   role={hasDetail ? "button" : undefined}
                   tabIndex={hasDetail ? 0 : undefined}
                   aria-expanded={hasDetail ? selectedHorse === h.horse_num : undefined}
-                  aria-controls={hasDetail ? "horse-detail-panel" : undefined}
+                  aria-controls={
+                    hasDetail && selectedHorse === h.horse_num
+                      ? "horse-detail-panel"
+                      : undefined
+                  }
                   title={hasDetail ? "クリック / Enter で書評を表示" : undefined}
                   onClick={hasDetail ? toggleDetail : undefined}
                   onKeyDown={
@@ -292,7 +296,8 @@ export function RaceBoard() {
                       ))}
                     </ul>
                   ) : (
-                    <p className="muted">根拠データがありません。</p>
+                    // 人手 comment があるなら lead だけで足りるので「根拠データなし」は出さない。
+                    !h.comment && <p className="muted">根拠データがありません。</p>
                   )}
                 </div>
               );
