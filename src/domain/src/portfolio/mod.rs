@@ -210,15 +210,19 @@ pub fn pair_ev_diagnostics(
 
 /// ◎（`win_prob` 最大）の [`KONSEN_BAND_RATIO`] 倍以上の馬（◎含む）を `win_prob` 降順（同率は馬番昇順）で
 /// 返す＝混戦判定の母集団。Python `live_ev.py:band_of` と等価。軸選定と同じ確率系列（`rank_probs`＝市場
-/// ブレンド）を渡すことで `band[0] == axis`（◎）が保たれ、「◎含め」の意味が壊れない。空なら空 Vec。
+/// ブレンド）を渡すことで `band[0] == axis`（◎）が保たれ、「◎含め」の意味が壊れない。
+/// 空スライス・◎勝率 0 以下なら空 Vec（＝混戦でない）。
 ///
 /// domain の混戦ルール（0.70 倍・◎含め [`KONSEN_MIN_HORSES`] 頭以上）の単一の真実源。`build_portfolio`
 /// の混戦判定と、use-case 側の盤面「混戦」表示（`compute_confusion`）の双方がこれを再利用する。
 pub fn konsen_band(probs: &[HorseProbability]) -> Vec<HorseNum> {
-    if probs.is_empty() {
+    let max_win = probs.iter().map(|p| p.win_prob).fold(f64::MIN, f64::max);
+    // ◎の勝率が 0 以下（空スライス含む）なら母集団は成立しない＝混戦でない。この早期 return により
+    // build_portfolio の混戦判定と board の `compute_confusion`（`axis_win_prob > 0.0` ガード）が
+    // 退化ケースでも一致する（単一の真実源）。
+    if max_win <= 0.0 {
         return Vec::new();
     }
-    let max_win = probs.iter().map(|p| p.win_prob).fold(f64::MIN, f64::max);
     let mut band: Vec<&HorseProbability> = probs
         .iter()
         .filter(|p| p.win_prob >= KONSEN_BAND_RATIO * max_win)

@@ -282,7 +282,7 @@ fn print_buy_targets(p: &Portfolio) {
             .join(",");
         println!("     軸 {} → 相手 {}", axis.value(), rel);
     }
-    if p.konsen {
+    if p.bets.iter().any(|b| b.method == BetMethod::Box) {
         println!("     混戦: 印馬3連複ボックス（軸なし）を併用");
     }
     for bet in &p.bets {

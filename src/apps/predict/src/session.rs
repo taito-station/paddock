@@ -237,7 +237,7 @@ async fn run_race(
         }
         None => println!("  確率推定が空のため買い目なし"),
     }
-    if portfolio.konsen {
+    if portfolio.bets.iter().any(|b| b.method == BetMethod::Box) {
         println!("  混戦: 印馬3連複ボックス（軸なし）を併用");
     }
     if portfolio.bets.is_empty() {
