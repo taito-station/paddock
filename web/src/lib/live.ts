@@ -96,8 +96,8 @@ function uniqSorted(xs: number[]): number[] {
 }
 
 // slip.legs を「券種×方式」で束ね、同一組番の金額を合算して描画用に整形する。
-// emit-json は box×nagashi の同一組番を別 leg で保持する（内訳保存）。合算は同一 method
-// レイヤー内のみに閉じ、box と nagashi は別グループのまま区別を失わない（設計書「方式の付与」）。
+// writer（現行は Rust predict-watch）は box×nagashi の同一組番を別 leg で保持する（内訳保存）。合算は同一
+// method レイヤー内のみに閉じ、box と nagashi は別グループのまま区別を失わない（設計書「方式の付与」）。
 export function groupLegs(legs: SlipLeg[]): LegGroup[] {
   type Acc = {
     betType: string;
@@ -139,7 +139,7 @@ export function groupLegs(legs: SlipLeg[]): LegGroup[] {
       axis: isBox ? null : g.axis,
       members,
       // 点数は合算後の distinct 組番数で再計算する（正本 SlipLeg.points は使わない）。
-      // emit-json は「1 leg = 1 組番 = 1 点」粒度のため両者は一致するが、同一組番の合算後は
+      // writer は「1 leg = 1 組番 = 1 点」粒度のため両者は一致するが、同一組番の合算後は
       // 点数も 1 に畳む必要があり、combos.length が現場で買う実点数になる。
       points: combos.length,
       amount: combos.reduce((s, c) => s + c.amount, 0),

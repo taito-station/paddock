@@ -2,6 +2,16 @@
 
 [Issue #260](https://github.com/taito-station/paddock/issues/260) / 依存: [#33 REST API（read 基盤）](https://github.com/taito-station/paddock/issues/33)・[#34 Web SPA](https://github.com/taito-station/paddock/issues/34) / 関連 ADR: [0064](../adr/0064-live-ev-buy-view.md)
 
+> **更新（#346・2026-07 / ライブ writer を Rust に一本化）**: 本仕様が当初採った
+> 「EV/伝票の正本は Python `live_ev.py`・`refresh_ev.sh` が `live_ev_snapshots` へ永続化」という
+> **書き込み側の設計は退役した**。ライブ writer は Rust の `predict-watch` に一本化され、
+> `live_ev_snapshots` への upsert・複勝オッズ・`captured_at` 供給も Rust が担う（2 エンジン問題の解消）。
+> **以下のデータフロー図・「設計方針（Approach C）」・emit-json / 永続化の各節は当初 #260 設計の歴史的記録**
+> であり、writer に関する記述は上記のとおり読み替えること（理由と現行構成は
+> [ADR 0064 の「追補（#346）」](../adr/0064-live-ev-buy-view.md) を参照）。read API `GET /api/live/{date}`・
+> `live_ev_snapshots` スキーマ・SPA `LiveBets`・slip 契約は不変で、Rust writer が同一契約を満たす。
+> `live_ev.py` 本体はオフライン用途で温存。
+
 ## 概要
 
 開催当日のライブ監視で「**結局いま何を買えばいいのか**」を一望できる Web ビューを SPA に追加し、手作業の買い目シート（`買い目_YYYYMMDD.md`）を不要にする。「張る/見送り」と「そのまま買える買い目伝票」を出すのは `scripts/predict-check/live_ev.py --slip`（`refresh_ev.sh` が 20 分周期で駆動）だが、出力が CLI/標準出力のみのため、ライブ中はターミナルを見て md を手写しする運用になっている。本仕様は、その伝票を **常時最新の「今これを買え」ビュー**として UI に出す。
