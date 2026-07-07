@@ -95,6 +95,32 @@ impl BetCombination {
         }
     }
 
+    /// この買い目に含まれる馬番を昇順で返す（伝票 `slip.legs[].combo`・分析用。#346）。
+    /// 順序付き（馬単/三連単）でも組番表示は昇順のため `combination_code` と違いソートして返す。
+    pub fn horse_nums(&self) -> Vec<u32> {
+        let mut ns = match self {
+            BetCombination::Win(h) | BetCombination::Place(h) => vec![h.value()],
+            BetCombination::Quinella(p) | BetCombination::Wide(p) => {
+                let (a, b) = p.as_tuple();
+                vec![a.value(), b.value()]
+            }
+            BetCombination::Exacta(p) => {
+                let (a, b) = p.as_tuple();
+                vec![a.value(), b.value()]
+            }
+            BetCombination::Trio(t) => {
+                let (a, b, c) = t.as_tuple();
+                vec![a.value(), b.value(), c.value()]
+            }
+            BetCombination::Trifecta(t) => {
+                let (a, b, c) = t.as_tuple();
+                vec![a.value(), b.value(), c.value()]
+            }
+        };
+        ns.sort_unstable();
+        ns
+    }
+
     /// 日本語の券種名付き表示ラベル（人間向け。買い目アラート・予想出力で共用）。
     /// `combination_code` と違い、順序付き（馬単/三連単）は `→`、無順は `-` で区切り、
     /// 券種名を前置する。例: `単勝 3` / `馬連 1-5` / `馬単 1→5` / `三連複 1-3-5` / `三連単 1→3→5`。
