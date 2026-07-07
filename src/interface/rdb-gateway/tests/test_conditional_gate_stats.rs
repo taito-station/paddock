@@ -117,3 +117,44 @@ async fn conditional_gate_stats_filters_track_field_and_gate(pool: sqlx::PgPool)
         "非良・少・内枠は yielding の 2 走"
     );
 }
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn conditional_gate_stats_many_band_positive_via_field_size_count(pool: sqlx::PgPool) {
+    // 多帯(14-18)の positive 検証: field_size は race 単位 COUNT で導出されるため、14 走の良レースは
+    // 多帯セルに入り、同レースは少帯セルには入らない（頭数帯フィルタが COUNT で効くこと）。
+    let repo = PostgresRepository::new(pool);
+    // 良・14頭・全馬 枠2(内枠 1-3)。複勝(top3)は着1,2,3 の 3 頭。
+    let results: Vec<HorseResult> = (1..=14).map(|n| result(n, 2, n)).collect();
+    repo.save_race(&race("202606050201", TrackCondition::Firm, results))
+        .await
+        .unwrap();
+
+    let row = repo
+        .conditional_gate_stats(Venue::Nakayama, 1600, Surface::Turf, None)
+        .await
+        .unwrap();
+
+    // 多帯・良・内枠: 14 走・複勝 3。COUNT=14 が多帯(14-18)に落ちることの positive 確認。
+    assert_eq!(
+        row.cell("良", "多(14-18)", "Inner (1-3)")
+            .unwrap()
+            .stat
+            .starts,
+        14,
+        "14 頭は多帯(COUNT 由来)"
+    );
+    assert_eq!(
+        row.cell("良", "多(14-18)", "Inner (1-3)")
+            .unwrap()
+            .stat
+            .shows,
+        3,
+        "複勝は着1,2,3 の 3 頭"
+    );
+    // 同レースは少帯には入らない（COUNT=14 は少(-9) の範囲外）。
+    assert_eq!(
+        row.cell("良", "少(-9)", "Inner (1-3)").unwrap().stat.starts,
+        0,
+        "14 頭レースは少帯に入らない"
+    );
+}
