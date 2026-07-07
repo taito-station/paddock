@@ -109,6 +109,8 @@
 
 ## 永続化（`refresh_ev.sh` を拡張）
 
+> **更新（#346・2026-07）**: 以下の Python 永続化経路（`live_ev.py --emit-json` → `refresh_ev.sh` → `persist_live_ev.py` → `live_ev_snapshots`）は退役した。ライブ writer は Rust の `predict-watch` に一本化され、`captured_at` 供給・冪等 upsert・複勝オッズ書き込みも Rust 側が担う。理由と現行構成は [ADR 0064 の「追補（#346）」](../adr/0064-live-ev-buy-view.md) を参照。以下は当初設計の歴史的記録として残す。
+
 - `refresh_ev.sh`（既に Postgres アクセスを持つオーケストレータ）の最後に、`live_ev.py --emit-json` の JSON を `live_ev_snapshots` へ upsert する 1 ステップを追加する（小さな `persist_live_ev.py` か psql）。
 - **`race_id`・`date`・`post_time` の補完**: persist ステップが各 `pid` から DB を引いて paddock `race_id`・`date`（開催日）・`post_time` を注入する（`live_ev.py` は pid ローカル値のみ出力するため）。`pid`→`race_id` の対応は `refresh_ev.sh` が既に保持している（TSV 生成時の race 列挙）。
 - **`captured_at` の供給と冪等性（安定サイクルキー）**: `captured_at` は **その監視サイクルの論理境界時刻**（＝スイープの予定時刻／`prefetch_odds.sh`・cron のスケジュール時刻。プロセス起動時刻の `now()` ではない）を persist が全レース同一値で割り当てる。こうすると同一サイクルの再実行（cron 二重発火・手動再走）でも同じ `captured_at` に写像され、`(race_id, captured_at)` upsert で確実に冪等になる（プロセス起動時刻を使うと近似重複行が生え、「直前サイクル＝2 番目に新しい `captured_at`」を汚染してフリップ算出を誤らせるため、これを避ける）。実装は「サイクル間隔で丸めた時刻」または明示 `cycle_id` を persist に渡す。

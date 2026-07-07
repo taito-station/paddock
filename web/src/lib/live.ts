@@ -1,5 +1,5 @@
 // ライブ EV 買い目ビュー（LiveBets）の表示用純粋関数群（ユニットテスト対象）。
-// EV/伝票の計算ロジックは Python live_ev.py が正本（ADR 0064）。ここは描画整形のみ。
+// EV/伝票の計算・永続化は Rust predict-watch が正本（#346・ADR 0064 追補）。ここは描画整形のみ。
 import type { Schemas } from "../api/client";
 
 type SlipLeg = Schemas["SlipLeg"];
