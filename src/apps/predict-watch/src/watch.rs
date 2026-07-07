@@ -234,7 +234,9 @@ async fn evaluate_race(
     //    ここは decision-support のスナップショット記録であり、predict のセッション記録
     //    （predict_sessions / predict_bets）には触れない。保存失敗で監視ループは止めない。
     if let Some(axis) = portfolio.axis {
-        // ◎の model 勝率[%]は blended（順位付け視点）の軸馬から採る。
+        // ◎の model 勝率[%]は blended（順位付け視点）の軸馬から採る。axis は build_portfolio が
+        // blended の勝率最上位から選ぶため必ず blended に含まれる。unwrap_or(0.0) は到達しない前提の
+        // 防御で、万一の不整合でも監視を止めず 0% として記録する（無言のクラッシュより望ましい）。
         let axis_prob = blended
             .iter()
             .find(|hp| hp.horse_num == axis)

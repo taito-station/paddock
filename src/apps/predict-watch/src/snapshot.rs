@@ -70,6 +70,8 @@ pub fn build_snapshot_record(
         race_no: ctx.race_no,
         post_time: ctx.post_time.clone(),
         captured_at: ctx.captured_at.to_string(),
+        // verdict は DB 契約の固定 100% ゲート（`bet`/`skip`）。監視表示の 🔶（watch.rs の
+        // cli.roi_gate・可変）とは独立で、roi_gate を 1.0 以外にしても保存 verdict の意味は変えない。
         verdict: if ev.roi >= 1.0 { "bet" } else { "skip" }.to_string(),
         roi: ev.roi * 100.0,
         konsen: false,
@@ -221,6 +223,14 @@ mod tests {
     fn none_when_portfolio_has_no_ev() {
         let mut p = portfolio(vec![wide(6, 3, 1500, Some(5.0))], 1.1);
         p.ev = None;
+        assert!(build_snapshot_record(&p, &ctx()).is_none());
+    }
+
+    #[test]
+    fn none_when_portfolio_has_no_axis() {
+        // 軸が無い（＝買い目を組めなかった）Portfolio はレコード化しない（axis? 経路）。
+        let mut p = portfolio(vec![wide(6, 3, 1500, Some(5.0))], 1.1);
+        p.axis = None;
         assert!(build_snapshot_record(&p, &ctx()).is_none());
     }
 }

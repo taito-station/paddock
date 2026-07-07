@@ -70,6 +70,9 @@ async fn snapshot_round_trips_place_and_slip(pool: sqlx::PgPool) {
     // 複勝オッズ帯が往復する（#346 の主眼）。
     assert_eq!(r.axis_place_odds_low, Some(1.1));
     assert_eq!(r.axis_place_odds_high, Some(1.4));
+    // bool 列（konsen / odds_missing）も書いた値どおり往復する。
+    assert!(!r.konsen);
+    assert!(!r.odds_missing);
 
     // slip JSONB が read 側 SlipView 契約（race_budget / legs[bet_type,method,axis,combo,points,amount]）で往復する。
     let slip: serde_json::Value = serde_json::from_str(&r.slip_json).unwrap();
@@ -84,6 +87,22 @@ async fn snapshot_round_trips_place_and_slip(pool: sqlx::PgPool) {
     assert_eq!(legs[0]["amount"], 1500);
     assert_eq!(legs[1]["bet_type"], "trio");
     assert_eq!(legs[1]["combo"], serde_json::json!([3, 6, 8]));
+
+    // raw アーカイブ列も識別子・時刻・slip を漏れなく保持する（read パス非依存の後方互換砦）。
+    // JSONB は `::text` で取り出す（workspace sqlx は `json` feature 無効）。
+    let raw_text: String =
+        sqlx::query_scalar("SELECT raw::text FROM live_ev_snapshots WHERE race_id = $1")
+            .bind("202602020611")
+            .fetch_one(&repo.pool)
+            .await
+            .unwrap();
+    let raw: serde_json::Value = serde_json::from_str(&raw_text).unwrap();
+    assert_eq!(raw["date"], "2026-07-06");
+    assert_eq!(raw["captured_at"], "2026-07-06T06:20:00Z");
+    assert_eq!(raw["post_time"], "15:35");
+    assert_eq!(raw["race_id"], "202602020611");
+    assert_eq!(raw["axis_place_odds_low"], 1.1);
+    assert_eq!(raw["slip"]["legs"].as_array().unwrap().len(), 2);
 }
 
 #[sqlx::test(migrations = "../../../deployments/db/migrations")]

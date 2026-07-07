@@ -904,7 +904,9 @@ pub struct SlipLegRecord {
 }
 
 /// ライブ EV スナップショット（`live_ev_snapshots`, #260 / ADR 0064）の取得・書き込み。
-/// 書き込みは #346 で Rust（predict-watch）へ一本化した（旧 `persist_live_ev.py` を退役）。
+/// 書き込みは #346 で Rust（predict-watch）に実装した。旧 `persist_live_ev.py` は当面併存する
+/// （冪等キー `(race_id, captured_at)` で衝突しない）。Python writer の退役（refresh_ev.sh からの
+/// 呼び出し停止・スクリプト削除）は後続 PR（#346 PR-3）で行う。
 pub trait LiveEvRepository: Send + Sync {
     /// 指定開催日の全 race について、`captured_at` 降順で最新 2 サイクル（`rank<=2`）を
     /// フラットに返す。並びは `(race_id, rank)` 昇順。該当行が無ければ空 `Vec`。

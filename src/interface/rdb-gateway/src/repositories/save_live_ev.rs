@@ -35,11 +35,15 @@ pub async fn save_live_ev_snapshot(pool: &PgPool, record: &LiveEvSnapshotRecord)
         "race_budget": record.race_budget,
         "legs": legs,
     });
-    // raw = 原本アーカイブ（Python 正本の races[] 要素 1 件に相当。全スカラ＋slip）。
+    // raw = 原本アーカイブ（Python 正本の races[] 要素 1 件に相当。全スカラ＋slip）。read パスは
+    // 使わないが、後方互換・調査用に列（date/post_time/captured_at 含む識別子と時刻）を漏れなく写す。
     let raw = json!({
+        "date": date,
         "race_id": record.race_id,
         "venue": record.venue,
         "race_no": record.race_no,
+        "post_time": record.post_time,
+        "captured_at": record.captured_at,
         "verdict": record.verdict,
         "roi": record.roi,
         "konsen": record.konsen,
