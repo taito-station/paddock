@@ -187,12 +187,15 @@ export function RaceBoard() {
                 // detail_lines はスキーマ上必須（string[]）。comment または根拠行があれば展開可。
                 const hasDetail = !!h.comment || h.detail_lines.length > 0;
                 // 開く時は trigger 要素を覚えてパネルからフォーカスを戻せるようにする。
-                const toggleDetail = (el: HTMLElement) =>
-                  setSelectedHorse((cur) => {
-                    if (cur === h.horse_num) return null;
+                // ref 代入は updater の外（純粋な updater を保つ・StrictMode の二重実行対策）。
+                const toggleDetail = (el: HTMLElement) => {
+                  if (selectedHorse === h.horse_num) {
+                    setSelectedHorse(null);
+                  } else {
                     triggerRef.current = el;
-                    return h.horse_num;
-                  });
+                    setSelectedHorse(h.horse_num);
+                  }
+                };
                 return (
                 <div
                   key={h.horse_num}
@@ -205,6 +208,11 @@ export function RaceBoard() {
                   }
                   role={hasDetail ? "button" : undefined}
                   tabIndex={hasDetail ? 0 : undefined}
+                  aria-label={
+                    hasDetail
+                      ? `${h.horse_num} ${h.horse_name} の書評を開く`
+                      : undefined
+                  }
                   aria-expanded={hasDetail ? selectedHorse === h.horse_num : undefined}
                   aria-controls={
                     hasDetail && selectedHorse === h.horse_num

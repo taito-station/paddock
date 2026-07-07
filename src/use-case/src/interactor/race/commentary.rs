@@ -16,8 +16,9 @@ pub(crate) fn race_commentary(confusion: &Confusion, horses: &[BoardHorse]) -> S
     };
     let axis_pct = pct(axis.win_prob);
     let mut s = if confusion.is_confused {
+        // 相手は top5 より広げない（CLAUDE.md 買い方ルール）ので文言も規約準拠にする。
         format!(
-            "混戦。勝率上位が {} 頭拮抗。◎{}（勝率{}%）を軸に相手を広く取りたい。",
+            "混戦。勝率上位が {} 頭拮抗。◎{}（勝率{}%）を軸に相手 top5 まで手広く構えたい。",
             confusion.qualifying_count, axis.horse_name, axis_pct
         )
     } else {
