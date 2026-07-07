@@ -73,6 +73,16 @@ impl RaceClass {
     /// - 地方交流重賞の Jpn1/Jpn2/Jpn3 表記と unicode ローマ数字（GⅠ 等）・全角括弧は非対応で
     ///   `None` に落ちる（JRA 中央スコープの best-effort。必要になれば拡張する）。
     pub fn from_label(label: &str) -> Option<Self> {
+        // netkeiba の RaceData02 は数字を全角でレンダする（出馬表 fixture の「サラ系３歳以上」も
+        // 全角３）。n勝クラス（１勝/２勝/３勝）を取りこぼさないよう、判定前に全角数字だけ半角へ
+        // 寄せる。グレードは title 側が半角のため無影響。かな等は触らない（focused な正規化）。
+        let label: String = label
+            .chars()
+            .map(|c| match c {
+                '０'..='９' => char::from(b'0' + (c as u32 - '０' as u32) as u8),
+                other => other,
+            })
+            .collect();
         // 1. グレード（括弧付きにアンカー・最長一致: (GIII)/(GII)/(GI)）
         if label.contains("(GIII)") || label.contains("(G3)") {
             return Some(RaceClass::G3);
@@ -176,10 +186,13 @@ mod tests {
     #[test]
     fn display_uses_short_jp_labels() {
         assert_eq!(RaceClass::G1.to_string(), "G1");
+        assert_eq!(RaceClass::G2.to_string(), "G2");
         assert_eq!(RaceClass::G3.to_string(), "G3");
         assert_eq!(RaceClass::Listed.to_string(), "L");
         assert_eq!(RaceClass::Open.to_string(), "OP");
         assert_eq!(RaceClass::Win3.to_string(), "3勝");
+        assert_eq!(RaceClass::Win2.to_string(), "2勝");
+        assert_eq!(RaceClass::Win1.to_string(), "1勝");
         assert_eq!(RaceClass::Maiden.to_string(), "未勝利");
         assert_eq!(RaceClass::NewComer.to_string(), "新馬");
     }
@@ -200,6 +213,10 @@ mod tests {
         assert_eq!(RaceClass::from_label("3勝クラス"), Some(RaceClass::Win3));
         assert_eq!(RaceClass::from_label("2勝クラス"), Some(RaceClass::Win2));
         assert_eq!(RaceClass::from_label("1勝クラス"), Some(RaceClass::Win1));
+        // netkeiba の RaceData02 は全角数字でレンダするため、全角の n勝クラスも拾う。
+        assert_eq!(RaceClass::from_label("３勝クラス"), Some(RaceClass::Win3));
+        assert_eq!(RaceClass::from_label("２勝クラス"), Some(RaceClass::Win2));
+        assert_eq!(RaceClass::from_label("１勝クラス"), Some(RaceClass::Win1));
         assert_eq!(RaceClass::from_label("オープン"), Some(RaceClass::Open));
         assert_eq!(
             RaceClass::from_label("霞ステークス(L)"),

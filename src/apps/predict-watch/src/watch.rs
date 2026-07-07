@@ -58,6 +58,8 @@ const DEFAULT_NOTIFY_GATE: f64 = 0.7;
 /// - 明示指定なし → `min(roi_gate, DEFAULT_NOTIFY_GATE)`。roi_gate を既定 0.7 未満へ下げた
 ///   探索運用でも「notify_gate > roi_gate」で起動が壊れないようクランプする。
 /// - 明示指定あり → その値。ただし buy 閾値 `roi_gate` 超は 🔍 帯が生じない誤用として弾く。
+///   `notify_gate == roi_gate`（境界）は許容するが、その場合 🔍 検証候補の帯は構造的に空になる
+///   （`notify_gate <= roi < buy_gate` が成立しない）。等号指定＝検証候補を出さない意図として通す。
 pub fn resolve_notify_gate(explicit: Option<f64>, roi_gate: f64) -> anyhow::Result<f64> {
     match explicit {
         Some(ng) if ng > roi_gate => anyhow::bail!(

@@ -70,6 +70,19 @@ fn race_class_reads_g2_grade_from_title() {
     assert_eq!(card.race_class, Some(RaceClass::G2));
 }
 
+// n勝クラスは RaceData02 に全角数字（「３勝クラス」）でレンダされるため、全角のまま Win3 を
+// 取れることを parse 経由で検証する（#345）。G1裏の大半は n勝クラスのアンダーカードなので、
+// この経路が全角数字で機能しないと 🎯裏 が実質点かない。title グレードを外し、RaceData02 の
+// 「オープン」を全角数字の「３勝クラス」へ差し替えて末端まで確認する。
+#[test]
+fn race_class_reads_fullwidth_win_class_from_racedata02() {
+    let html = FIXTURE
+        .replace("安田記念(G1)", "テスト特別")
+        .replace("オープン", "３勝クラス");
+    let card = parse_card(&html, RACE_ID).expect("parse card");
+    assert_eq!(card.race_class, Some(RaceClass::Win3));
+}
+
 // 発走時刻表記（「HH:MM発走」）が無い HTML では post_time が best-effort で None になり、
 // それでもカード自体は他項目から組める（#235）。発走時刻トークンだけを除いて再現する
 // （「発走」全置換だと将来 fixture の別箇所に「発走」が増えたとき意図せず消えるため、
