@@ -57,11 +57,16 @@ const DEFAULT_NOTIFY_GATE: f64 = 0.7;
 ///
 /// - 明示指定なし → `min(roi_gate, DEFAULT_NOTIFY_GATE)`。roi_gate を既定 0.7 未満へ下げた
 ///   探索運用でも「notify_gate > roi_gate」で起動が壊れないようクランプする。
-/// - 明示指定あり → その値。ただし buy 閾値 `roi_gate` 超は 🔍 帯が生じない誤用として弾く。
-///   `notify_gate == roi_gate`（境界）は許容するが、その場合 🔍 検証候補の帯は構造的に空になる
-///   （`notify_gate <= roi < buy_gate` が成立しない）。等号指定＝検証候補を出さない意図として通す。
+/// - 明示指定あり → その値。ただし非有限（NaN/∞）・負値は誤設定として弾く（NaN は比較が常に
+///   false になり全レースが無言で `・` へ落ちるため）。また buy 閾値 `roi_gate` 超は 🔍 帯が
+///   生じない誤用として弾く。`notify_gate == roi_gate`（境界）は許容するが、その場合 🔍 検証候補の
+///   帯は構造的に空になる（`notify_gate <= roi < buy_gate` が成立しない）。等号指定＝検証候補を
+///   出さない意図として通す。
 pub fn resolve_notify_gate(explicit: Option<f64>, roi_gate: f64) -> anyhow::Result<f64> {
     match explicit {
+        Some(ng) if !ng.is_finite() || ng < 0.0 => {
+            anyhow::bail!("--notify-gate（{ng}）は 0 以上の有限値で指定してください。")
+        }
         Some(ng) if ng > roi_gate => anyhow::bail!(
             "--notify-gate（{ng:.2}）は --roi-gate（{roi_gate:.2}）以下で指定してください（検証候補は買う閾値の下の帯です）。"
         ),
@@ -219,13 +224,20 @@ async fn sweep(
         .filter(|st| **st == RaceStatus::Unknown)
         .count();
 
+    // notify_gate == roi_gate（🔍 帯が構造的に空）のときはヘッダから 🔍 表記を落とし、
+    // 出ないマークを案内しない（表示と実挙動を一致させる）。
+    let notify_part = if notify_gate < cli.roi_gate {
+        format!(" ・ 🔍検証候補≥{:.0}%", notify_gate * 100.0)
+    } else {
+        String::new()
+    };
     println!(
-        "── {} スイープ: 対象 {} レース（窓 {}分 / 🔶買い妙味≥{:.0}% ・ 🔍検証候補≥{:.0}%・判定は手動精査）",
+        "── {} スイープ: 対象 {} レース（窓 {}分 / 🔶買い妙味≥{:.0}%{}・判定は手動精査）",
         now.format("%H:%M"),
         due.len(),
         cli.window,
         cli.roi_gate * 100.0,
-        notify_gate * 100.0,
+        notify_part,
     );
     if unknown > 0 {
         println!(
@@ -614,6 +626,10 @@ mod tests {
         assert_eq!(resolve_notify_gate(Some(1.0), 1.0).unwrap(), 1.0);
         // 明示指定が buy 閾値超は誤用として弾く。
         assert!(resolve_notify_gate(Some(0.9), 0.8).is_err());
+        // 非有限・負値は弾く（NaN は比較が常に false で無言劣化するため）。
+        assert!(resolve_notify_gate(Some(f64::NAN), 1.0).is_err());
+        assert!(resolve_notify_gate(Some(f64::INFINITY), 1.0).is_err());
+        assert!(resolve_notify_gate(Some(-0.1), 1.0).is_err());
     }
 
     #[test]

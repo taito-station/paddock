@@ -222,6 +222,11 @@ mod tests {
             RaceClass::from_label("霞ステークス(L)"),
             Some(RaceClass::Listed)
         );
+        // 全角括弧のリステッド表記も拾う。
+        assert_eq!(
+            RaceClass::from_label("霞ステークス（L）"),
+            Some(RaceClass::Listed)
+        );
     }
 
     #[test]
