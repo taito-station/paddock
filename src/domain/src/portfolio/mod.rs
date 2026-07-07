@@ -13,6 +13,26 @@ use crate::odds::{OrderedPair, Pair, RaceOdds, Triple};
 use crate::prediction::HorseProbability;
 use crate::simulation::{EvReport, PlacedBet, SimInput, simulate};
 
+/// 1 脚の候補 `(組合せ, 払戻倍率)`。odds 未取得は `None`。
+type Leg = (BetCombination, Option<f64>);
+/// 予算配分の単位となる券種レイヤー `(脚一覧, 相対重み, 方式)`。
+type BetLayer = (Vec<Leg>, u32, BetMethod);
+
+/// 買い目の方式。混戦時のみ [`BetMethod::Box`]（印馬3連複ボックス）が現れる。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BetMethod {
+    /// ◎軸ながし（軸を固定して相手へ流す）。
+    Nagashi,
+    /// 印馬3連複ボックス（軸なし・混戦時のみ・band 上位の総当たり）。
+    Box,
+}
+
+/// 混戦時の券種配分の相対重み `(連系ペア, ワイド, 三連複ながし, 印馬3連複ボックス)`。
+/// CLAUDE.md「混戦判定と配分」の ¥5,000 基準（馬連¥1,000 / ワイド¥1,000 / 3連複ながし¥1,500 /
+/// 3連複ボックス¥1,500）をそのまま相対重みにしたもの。race_budget にスケールして使う。
+/// Python `live_ev.py` の `alloc(konsen)=(box1500, wide1000, quinella1000, trio1500)` と等価。
+const KONSEN_ALLOC: (u32, u32, u32, u32) = (1000, 1000, 1500, 1500);
+
 /// ポートフォリオ生成の方針。
 #[derive(Debug, Clone)]
 pub struct PortfolioConfig {
@@ -39,6 +59,8 @@ impl Default for PortfolioConfig {
 #[derive(Debug, Clone)]
 pub struct PortfolioBet {
     pub combination: BetCombination,
+    /// 方式（◎軸ながし / 印馬3連複ボックス）。box は軸を持たない（`snapshot` が axis=None で出す）。
+    pub method: BetMethod,
     /// 賭け金（円, 100 円単位）。
     pub stake: u64,
     /// 払戻倍率（ライブ未取得なら `None`。買い目は残し精算は確定配当で可能）。
@@ -57,6 +79,8 @@ pub struct Portfolio {
     pub axis: Option<HorseNum>,
     /// 相手（流す先）。
     pub partners: Vec<HorseNum>,
+    /// 混戦（◎の win_prob 0.70 倍以上が ◎含め 4 頭以上）か。混戦時は印馬3連複ボックスを重ねる。
+    pub konsen: bool,
     pub bets: Vec<PortfolioBet>,
     pub total_stake: u64,
     /// ポートフォリオ全体の期待回収率・的中確率（`simulate` による。買い目が空なら `None`）。
@@ -179,18 +203,45 @@ pub fn pair_ev_diagnostics(
     }
 }
 
-/// 予想本命を軸に、予算内・100 円単位の軸流しポートフォリオ（連系ペア＋ワイド＋三連複）を組む。
-///
-/// 軸 = `win_prob` 最大の馬、相手 = 次点 `config.partners` 頭。連系ペアは軸-相手の馬連（着順不問）を
-/// 常に採る（#271 で馬連→馬単の EV 置換を撤去・ADR 0043 棄却。順序プレミアムは #262 の 71R で逆予測）。
-/// ワイドは軸-相手の K 点、三連複は軸 1 頭ながし formation（軸＋相手 2 頭, C(K,2) 点）。`config.alloc` の重み
-/// `(連系ペア, ワイド, 三連複)` で券種へ予算を配分し、券種内は 100 円単位で均等配分する
-/// （賄えない端数は買わない）。
-///
-/// 確率は 2 系統（#272 循環断ち）: `rank_probs`（市場ブレンド・軸/相手の順位付け）と `ev_probs`
-/// （純モデル・EV/的中の評価）。**両者は同一馬集合でなければならない**（`debug_assert` で検査）。
-/// `ev_probs` に順位付け対象の馬が欠けると、その脚の `win` 引きが None になり EV/的中が過小算出される。
-/// 現呼び出し側は同一 `entry_factors` 由来の blended/pure を渡すため常に満たす。
+/// ◎（`win_prob` 最大）の 0.70 倍以上の馬（◎含む）を `win_prob` 降順（同率は馬番昇順）で返す＝混戦判定の母集団。
+/// Python `live_ev.py:band_of` と等価。軸選定と同じ確率系列（`rank_probs`＝市場ブレンド）を渡すことで
+/// `band[0] == axis`（◎）が保たれ、「◎含め」の意味が壊れない。空なら空 Vec。
+fn band_of(probs: &[HorseProbability]) -> Vec<HorseNum> {
+    if probs.is_empty() {
+        return Vec::new();
+    }
+    let max_win = probs.iter().map(|p| p.win_prob).fold(f64::MIN, f64::max);
+    let mut band: Vec<&HorseProbability> = probs
+        .iter()
+        .filter(|p| p.win_prob >= 0.70 * max_win)
+        .collect();
+    band.sort_by(|a, b| {
+        b.win_prob
+            .partial_cmp(&a.win_prob)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(a.horse_num.value().cmp(&b.horse_num.value()))
+    });
+    band.into_iter().map(|p| p.horse_num).collect()
+}
+
+/// 印馬（band 上位最大 5 頭）の 3 連複ボックス脚（軸なし・C(n,3) 点）を組む。
+/// Python `live_ev.py` の `band_of(probs)[:5]` の `combinations(box, 3)` と等価。
+fn build_box_legs(band: &[HorseNum], odds: &RaceOdds) -> Vec<(BetCombination, Option<f64>)> {
+    let box_horses: Vec<HorseNum> = band.iter().take(5).copied().collect();
+    let mut legs = Vec::new();
+    for i in 0..box_horses.len() {
+        for j in (i + 1)..box_horses.len() {
+            for k in (j + 1)..box_horses.len() {
+                if let Ok(t) = Triple::try_from((box_horses[i], box_horses[j], box_horses[k])) {
+                    let o = odds.trio.get(&t).map(|v| v.value());
+                    legs.push((BetCombination::Trio(t), o));
+                }
+            }
+        }
+    }
+    legs
+}
+
 pub fn build_portfolio(
     rank_probs: &[HorseProbability],
     ev_probs: &[HorseProbability],
@@ -208,11 +259,17 @@ pub fn build_portfolio(
         return Portfolio {
             axis: None,
             partners: Vec::new(),
+            konsen: false,
             bets: Vec::new(),
             total_stake: 0,
             ev: None,
         };
     };
+
+    // 混戦判定（◎の win_prob 0.70 倍以上が ◎含め 4 頭以上）。band は軸選定と同じ rank_probs で作る
+    // （◎=band[0] を保つ）。Python `live_ev.py:is_konsen` と等価。
+    let band = band_of(rank_probs);
+    let konsen = band.len() >= 4;
 
     // EV・的中確率は ev_probs（純モデル α=1.0）で評価する＝循環断ち（市場 odds と独立な確率で
     // EV=P_pure×odds を coherent に計算する, #272）。field も ev_probs から（rank と同一馬集合）。
@@ -244,7 +301,7 @@ pub fn build_portfolio(
             })
         })
         .collect();
-    // 三連複: 軸 + 相手 2 頭（C(K,2) 点）。
+    // 三連複 ◎軸ながし: 軸 + 相手 2 頭（C(K,2) 点）。
     let mut trio: Vec<(BetCombination, Option<f64>)> = Vec::new();
     for i in 0..partners.len() {
         for j in (i + 1)..partners.len() {
@@ -255,17 +312,35 @@ pub fn build_portfolio(
         }
     }
 
-    // 予算配分（重み→券種予算、券種内 100 円単位均等配分）。
-    let (wq, ww, wt) = config.alloc;
-    let total_w = (wq + ww + wt) as u128;
+    // 券種レイヤー `(脚, 相対重み, 方式)`。混戦時のみ CLAUDE.md 配分（`KONSEN_ALLOC`）で印馬3連複
+    // ボックスを重ねる（◎が飛んでも印が揃えば拾う保険）。非混戦は現状どおり `config.alloc`（変更なし）。
+    // box と ◎軸ながし三連複で同一組番が出うるが、それぞれ別レイヤーとして二重に張る意図（Python 同様）。
+    let layers: Vec<BetLayer> = if konsen {
+        let (wq, ww, wt, wb) = KONSEN_ALLOC;
+        vec![
+            (pair_legs, wq, BetMethod::Nagashi),
+            (wide, ww, BetMethod::Nagashi),
+            (trio, wt, BetMethod::Nagashi),
+            (build_box_legs(&band, odds), wb, BetMethod::Box),
+        ]
+    } else {
+        let (wq, ww, wt) = config.alloc;
+        vec![
+            (pair_legs, wq, BetMethod::Nagashi),
+            (wide, ww, BetMethod::Nagashi),
+            (trio, wt, BetMethod::Nagashi),
+        ]
+    };
+
+    // 予算配分（重み→券種予算, 券種内 100 円単位均等配分）。乗算オーバーフロー回避に u128。
+    let total_w: u128 = layers.iter().map(|(_, w, _)| *w as u128).sum();
     let mut bets: Vec<PortfolioBet> = Vec::new();
-    if total_w > 0 {
-        // 重み w の券種予算を 100 円単位に floor する（`/100*100`）。乗算オーバーフロー回避に u128。
-        let type_budget =
-            |w: u32| -> u64 { (race_budget as u128 * w as u128 / total_w / 100 * 100) as u64 };
-        push_legs(&mut bets, pair_legs, type_budget(wq), &field, &win);
-        push_legs(&mut bets, wide, type_budget(ww), &field, &win);
-        push_legs(&mut bets, trio, type_budget(wt), &field, &win);
+    if let Some(total_w) = std::num::NonZeroU128::new(total_w) {
+        for (legs, w, method) in layers {
+            // 重み w の券種予算を 100 円単位に floor する（`/100*100`）。
+            let type_budget = (race_budget as u128 * w as u128 / total_w.get() / 100 * 100) as u64;
+            push_legs(&mut bets, legs, type_budget, &field, &win, method);
+        }
     }
 
     let total_stake: u64 = bets.iter().map(|b| b.stake).sum();
@@ -299,6 +374,7 @@ pub fn build_portfolio(
     Portfolio {
         axis: Some(axis),
         partners,
+        konsen,
         bets,
         total_stake,
         ev,
@@ -307,7 +383,7 @@ pub fn build_portfolio(
 
 /// 1 券種ぶんの脚を予算配分して `out` に積む。`type_budget` を 100 円単位で均等配分し
 /// （予算が賄える範囲で薄い脚にも少額が乗る。賄えない端数の脚は ¥0＝買わない）、賭け金 0 の脚は捨てる。
-/// 各脚の ev 倍率・的中確率は `simulate` 単体評価で求める。
+/// 各脚に `method`（ながし / ボックス）を付ける。各脚の ev 倍率・的中確率は `simulate` 単体評価で求める。
 ///
 /// 配分を確率重み＋脚ごと最低¥100 撤廃へ変える案は 71R 検証で実 ROI を悪化させたため不採用
 /// （均等割りを維持）。根拠は ADR 0046 / docs/specifications/betting-rule-history.md ⑨。
@@ -317,6 +393,7 @@ fn push_legs(
     type_budget: u64,
     field: &[HorseNum],
     win: &HashMap<HorseNum, f64>,
+    method: BetMethod,
 ) {
     let stakes = distribute(type_budget, legs.len());
     for ((combination, odds), stake) in legs.into_iter().zip(stakes) {
@@ -327,6 +404,7 @@ fn push_legs(
         let (ev, hit_prob) = leg_metrics(field, win, &combination, odds);
         out.push(PortfolioBet {
             combination,
+            method,
             stake,
             odds,
             ev,
@@ -601,6 +679,105 @@ mod tests {
         assert!(pf.total_stake <= 5000, "stake {} <= 5000", pf.total_stake);
         // 相手 4 頭（馬5まで）→ 馬連4・ワイド4・三連複 C(4,2)=6。
         assert_eq!(pf.partners.len(), 4);
+    }
+
+    /// 混戦サンプル: ◎=馬1、0.70×0.30=0.21 以上が 4 頭（馬1..4）→ konsen。馬5(0.05) は band 外。
+    /// Python `test_live_ev.py` の konsen fixture {1:30,2:25,3:22,4:21.5,5:5} と同構造。
+    fn konsen_sample() -> (Vec<HorseProbability>, RaceOdds) {
+        let probs = vec![
+            prob(1, 0.30),
+            prob(2, 0.25),
+            prob(3, 0.22),
+            prob(4, 0.215),
+            prob(5, 0.05),
+        ];
+        let mut o = RaceOdds::empty(RaceId::try_from("202506040101".to_string()).unwrap());
+        for p in 2..=5 {
+            o.quinella
+                .insert(Pair::try_from((horse(1), horse(p))).unwrap(), odds(6.0));
+            o.wide.insert(
+                Pair::try_from((horse(1), horse(p))).unwrap(),
+                PlaceOdds::try_from((odds(2.0), odds(3.0))).unwrap(),
+            );
+        }
+        // 三連複は全組合せに odds（◎軸ながし・印馬ボックス双方をカバー）。
+        for i in 1..=5 {
+            for j in (i + 1)..=5 {
+                for k in (j + 1)..=5 {
+                    o.trio.insert(
+                        Triple::try_from((horse(i), horse(j), horse(k))).unwrap(),
+                        odds(30.0),
+                    );
+                }
+            }
+        }
+        (probs, o)
+    }
+
+    #[test]
+    fn band_of_returns_horses_within_70pct_in_desc_order() {
+        // 混戦: ◎の 0.70 倍以上（0.21 以上）を win_prob 降順で返す＝[1,2,3,4]、馬5 は外れる。
+        let (probs, _) = konsen_sample();
+        assert_eq!(
+            band_of(&probs),
+            vec![horse(1), horse(2), horse(3), horse(4)]
+        );
+        // 非混戦（差が開いたサンプル）: band は 4 頭未満。
+        let (flat, _) = sample();
+        assert!(band_of(&flat).len() < 4, "band={:?}", band_of(&flat));
+    }
+
+    #[test]
+    fn konsen_flag_reflects_band_size() {
+        let (kprobs, ko) = konsen_sample();
+        let kpf = build_portfolio(&kprobs, &kprobs, &ko, 5000, &PortfolioConfig::default());
+        assert!(kpf.konsen, "band>=4 で混戦のはず");
+
+        let (fprobs, fo) = sample();
+        let fpf = build_portfolio(&fprobs, &fprobs, &fo, 5000, &PortfolioConfig::default());
+        assert!(!fpf.konsen, "band<4 は非混戦のはず");
+    }
+
+    #[test]
+    fn konsen_adds_trio_box_layer_within_budget() {
+        let (probs, o) = konsen_sample();
+        let pf = build_portfolio(&probs, &probs, &o, 5000, &PortfolioConfig::default());
+
+        // 印馬3連複ボックス = band[..5]=[1,2,3,4] の C(4,3)=4 点。全て method=Box・軸なし想定。
+        let box_bets: Vec<_> = pf
+            .bets
+            .iter()
+            .filter(|b| b.method == BetMethod::Box)
+            .collect();
+        assert_eq!(box_bets.len(), 4, "C(4,3)=4 のボックス脚");
+        assert!(
+            box_bets
+                .iter()
+                .all(|b| b.combination.type_label() == "trio")
+        );
+
+        // ◎軸ながしの三連複も別レイヤーで共存する（method=Nagashi）。
+        let nagashi_trio = pf
+            .bets
+            .iter()
+            .filter(|b| b.combination.type_label() == "trio" && b.method == BetMethod::Nagashi)
+            .count();
+        assert!(nagashi_trio > 0, "◎軸ながし三連複も残る");
+
+        // 予算内・100 円単位。
+        assert!(pf.bets.iter().all(|b| b.stake % 100 == 0 && b.stake > 0));
+        assert!(pf.total_stake <= 5000, "stake {} <= 5000", pf.total_stake);
+    }
+
+    #[test]
+    fn non_konsen_has_no_box_layer() {
+        let (probs, o) = sample();
+        let pf = build_portfolio(&probs, &probs, &o, 5000, &PortfolioConfig::default());
+        assert!(!pf.konsen);
+        assert!(
+            pf.bets.iter().all(|b| b.method == BetMethod::Nagashi),
+            "非混戦はボックスを組まない"
+        );
     }
 
     #[test]

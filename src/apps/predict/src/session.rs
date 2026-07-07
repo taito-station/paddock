@@ -673,7 +673,7 @@ mod tests {
         resolve_track_condition_default,
     };
     use paddock_domain::horse_result::HorseNum;
-    use paddock_domain::{BetCombination, PortfolioBet, RaceId, TrackCondition};
+    use paddock_domain::{BetCombination, BetMethod, PortfolioBet, RaceId, TrackCondition};
     use std::io::Cursor;
 
     fn horse(n: u32) -> HorseNum {
@@ -806,6 +806,7 @@ mod tests {
         let bets = vec![
             PortfolioBet {
                 combination: BetCombination::Win(horse(1)),
+                method: BetMethod::Nagashi,
                 stake: 500,
                 odds: None,
                 ev: 0.0,
@@ -813,6 +814,7 @@ mod tests {
             },
             PortfolioBet {
                 combination: BetCombination::Win(horse(2)),
+                method: BetMethod::Nagashi,
                 stake: 300,
                 odds: None,
                 ev: 0.0,
@@ -831,6 +833,7 @@ mod tests {
         // 全0で確定して無限ループしない（コメントが謳う外側ループの終端を直接検証）。
         let bets = vec![PortfolioBet {
             combination: BetCombination::Win(horse(1)),
+            method: BetMethod::Nagashi,
             stake: 100,
             odds: None,
             ev: 0.0,

@@ -154,6 +154,39 @@ async fn two_cycles_are_ranked_latest_first(pool: sqlx::PgPool) {
 }
 
 #[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn konsen_box_leg_round_trips_with_null_axis(pool: sqlx::PgPool) {
+    // 混戦（#352）: konsen=true と、印馬3連複ボックスの leg（method="box"・axis=None）が
+    // slip JSONB を往復する。box は軸を持たないため axis は JSON null で保存・復元される。
+    let repo = PostgresRepository::new(pool);
+    let mut rec = record("2026-07-06T06:20:00Z", 110.0, "bet");
+    rec.konsen = true;
+    rec.legs.push(SlipLegRecord {
+        bet_type: "trio".to_string(),
+        method: "box".to_string(),
+        axis: None,
+        combo: vec![3, 6, 8],
+        points: 1,
+        amount: 1500,
+    });
+    repo.save_live_ev_snapshot(&rec).await.unwrap();
+
+    let rows = repo.find_live_ev_by_date(date()).await.unwrap();
+    assert_eq!(rows.len(), 1);
+    assert!(rows[0].konsen, "混戦フラグが往復する");
+
+    let slip: serde_json::Value = serde_json::from_str(&rows[0].slip_json).unwrap();
+    let legs = slip["legs"].as_array().unwrap();
+    let bx = legs
+        .iter()
+        .find(|l| l["method"] == "box")
+        .expect("box leg があるはず");
+    assert_eq!(bx["bet_type"], "trio");
+    assert!(bx["axis"].is_null(), "box は軸なし＝JSON null");
+    assert_eq!(bx["combo"], serde_json::json!([3, 6, 8]));
+    assert_eq!(bx["amount"], 1500);
+}
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
 async fn place_odds_null_when_absent(pool: sqlx::PgPool) {
     let repo = PostgresRepository::new(pool);
     // JRA 未公開で複勝欠落＝None を書いて NULL で往復する（read 側は「複勝—」表示に落とす）。
