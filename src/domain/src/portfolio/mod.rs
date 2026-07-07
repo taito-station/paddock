@@ -242,6 +242,24 @@ fn build_box_legs(band: &[HorseNum], odds: &RaceOdds) -> Vec<(BetCombination, Op
     legs
 }
 
+/// 予想本命を軸に、予算内・100 円単位の軸流しポートフォリオ（連系ペア＋ワイド＋三連複）を組む。
+///
+/// 軸 = `win_prob` 最大の馬、相手 = 次点 `config.partners` 頭。連系ペアは軸-相手の馬連（着順不問）を
+/// 常に採る（#271 で馬連→馬単の EV 置換を撤去・ADR 0043 棄却。順序プレミアムは #262 の 71R で逆予測）。
+/// ワイドは軸-相手の K 点、三連複は軸 1 頭ながし（軸＋相手 2 頭, C(K,2) 点）。`config.alloc` の重み
+/// `(連系ペア, ワイド, 三連複)` で券種へ予算を配分し、券種内は 100 円単位で均等配分する
+/// （賄えない端数は買わない）。
+///
+/// 混戦（`band_of(rank_probs)` が ◎含め 4 頭以上）のときは、上記の券種配分を `KONSEN_ALLOC`
+/// （馬連1000/ワイド1000/三連複ながし1500/印馬3連複ボックス1500）に切り替え、印馬（=確率 band 上位
+/// 最大 5 頭・[`build_box_legs`]）の 3 連複ボックスレイヤーを重ねる（◎が飛んでも印が揃えば拾う保険）。
+/// **混戦時は `config.alloc` を使わず `KONSEN_ALLOC` を用いる**（CLAUDE.md「混戦判定と配分」準拠）。
+/// なお「印馬」は Mark（◎○▲☆）ではなく確率 band（◎の 0.70 倍以上）で近似する（Python `live_ev.py` 等価）。
+///
+/// 確率は 2 系統（#272 循環断ち）: `rank_probs`（市場ブレンド・軸/相手の順位付け＝混戦 band も同系列）と
+/// `ev_probs`（純モデル・EV/的中の評価）。**両者は同一馬集合でなければならない**（`debug_assert` で検査）。
+/// `ev_probs` に順位付け対象の馬が欠けると、その脚の `win` 引きが None になり EV/的中が過小算出される。
+/// 現呼び出し側は同一 `entry_factors` 由来の blended/pure を渡すため常に満たす。
 pub fn build_portfolio(
     rank_probs: &[HorseProbability],
     ev_probs: &[HorseProbability],
@@ -743,6 +761,9 @@ mod tests {
         let (probs, o) = konsen_sample();
         let pf = build_portfolio(&probs, &probs, &o, 5000, &PortfolioConfig::default());
 
+        // 「◎含め」の要: band[0] が軸（◎）と一致する（rank_probs 同系列で作るため）。
+        assert_eq!(band_of(&probs)[0], pf.axis.unwrap(), "band[0] == ◎");
+
         // 印馬3連複ボックス = band[..5]=[1,2,3,4] の C(4,3)=4 点。全て method=Box・軸なし想定。
         let box_bets: Vec<_> = pf
             .bets
@@ -764,9 +785,102 @@ mod tests {
             .count();
         assert!(nagashi_trio > 0, "◎軸ながし三連複も残る");
 
+        // box と ◎軸ながしで同一組番(1,2,3)が出た場合、dedup せず二重に張る（Python 同様の意図的挙動）。
+        let t123: Vec<_> = pf
+            .bets
+            .iter()
+            .filter(|b| b.combination.horse_nums() == vec![1, 2, 3])
+            .collect();
+        assert_eq!(
+            t123.len(),
+            2,
+            "同一組番(1,2,3)は box と nagashi で 2 本残る"
+        );
+        assert!(t123.iter().any(|b| b.method == BetMethod::Box));
+        assert!(t123.iter().any(|b| b.method == BetMethod::Nagashi));
+
+        // 券種×方式ごとの賭金合計が KONSEN_ALLOC(馬連1000/ワイド1000/3連複ながし1500/box1500) の
+        // 配分比を反映する（distribute の floor で各上限以下に収まりつつ、重み比は保たれる）。
+        let sum = |bt: &str, m: BetMethod| -> u64 {
+            pf.bets
+                .iter()
+                .filter(|b| b.combination.type_label() == bt && b.method == m)
+                .map(|b| b.stake)
+                .sum()
+        };
+        let quinella = sum("quinella", BetMethod::Nagashi);
+        let wide = sum("wide", BetMethod::Nagashi);
+        let trio_nagashi = sum("trio", BetMethod::Nagashi);
+        let box_sum = sum("trio", BetMethod::Box);
+        assert!(
+            quinella <= 1000 && wide <= 1000 && trio_nagashi <= 1500 && box_sum <= 1500,
+            "各レイヤーは KONSEN_ALLOC 上限以下"
+        );
+        assert_eq!(quinella, wide, "馬連とワイドは同一重み(1000)");
+        assert_eq!(
+            trio_nagashi, box_sum,
+            "3連複ながしとボックスは同一重み(1500)"
+        );
+        assert!(box_sum > quinella, "1500 重みは 1000 重みより厚い");
+
         // 予算内・100 円単位。
         assert!(pf.bets.iter().all(|b| b.stake % 100 == 0 && b.stake > 0));
         assert!(pf.total_stake <= 5000, "stake {} <= 5000", pf.total_stake);
+    }
+
+    #[test]
+    fn konsen_box_caps_at_top5_when_band_exceeds_5() {
+        // band が 6 頭以上でも印馬ボックスは上位 5 頭のみ（C(5,3)=10 点）に切り詰める。
+        let probs = vec![
+            prob(1, 0.20),
+            prob(2, 0.19),
+            prob(3, 0.18),
+            prob(4, 0.17),
+            prob(5, 0.16),
+            prob(6, 0.15), // 0.70×0.20=0.14 以上 → band 入り（7 頭）
+            prob(7, 0.145),
+            prob(8, 0.05), // band 外
+        ];
+        assert_eq!(band_of(&probs).len(), 7, "band は 7 頭");
+        let mut o = RaceOdds::empty(RaceId::try_from("202506040101".to_string()).unwrap());
+        // 上位 5 頭 [1,2,3,4,5] の三連複ボックス組番に odds を与える。
+        for i in 1..=5u32 {
+            for j in (i + 1)..=5 {
+                for k in (j + 1)..=5 {
+                    o.trio.insert(
+                        Triple::try_from((horse(i), horse(j), horse(k))).unwrap(),
+                        odds(30.0),
+                    );
+                }
+            }
+        }
+        let pf = build_portfolio(&probs, &probs, &o, 5000, &PortfolioConfig::default());
+        assert!(pf.konsen);
+        let box_count = pf
+            .bets
+            .iter()
+            .filter(|b| b.method == BetMethod::Box)
+            .count();
+        assert_eq!(box_count, 10, "band 上位 5 頭 C(5,3)=10 に切り詰め");
+    }
+
+    #[test]
+    fn band_of_includes_boundary_and_breaks_ties_by_horse_num() {
+        // 同率は馬番昇順・閾値近傍の採否を検証（Python band_of と等価: -prob ソート + 挿入=馬番順）。
+        // 厳密境界（win == 0.70×max）の等価比較は Rust/Python とも float 誤差でどちらにも転びうるため、
+        // ここではマージンを持たせた採否（0.145>閾値0.14・0.13<0.14）と同率のタイブレークを固める。
+        let probs = vec![
+            prob(1, 0.20),
+            prob(2, 0.20),  // 1 と同率 → 馬番昇順で 1,2
+            prob(3, 0.15),  // 閾値 0.14 超 → 採用
+            prob(4, 0.145), // 閾値 0.14 超 → 採用
+            prob(5, 0.13),  // 閾値未満 → 除外
+        ];
+        assert_eq!(
+            band_of(&probs),
+            vec![horse(1), horse(2), horse(3), horse(4)],
+            "同率は馬番昇順・0.13 は band 外"
+        );
     }
 
     #[test]
