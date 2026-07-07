@@ -257,6 +257,10 @@ pub struct BoardHorseSchema {
     pub is_overlay: bool,
     /// 乖離馬（モデル上位×市場人気低＝妙味・ワイドボックス候補）。
     pub is_value: bool,
+    /// 馬書評の一行寸評（人手優先・無ければルールベース生成, #348）。特筆材料なしは `null`。
+    pub comment: Option<String>,
+    /// 展開パネル用の根拠 bullet（条件別 factor・枠 lift・近走・前走・斤量）。空配列＝根拠情報なし。
+    pub detail_lines: Vec<String>,
 }
 
 /// `GET /api/races/{race_id}/board` のレスポンス（1レース盤）。
@@ -284,6 +288,8 @@ pub struct RaceBoardResponse {
     pub roi: Option<f64>,
     pub hit_prob: Option<f64>,
     pub confusion: ConfusionSchema,
+    /// レース書評（混戦度・◎の狙いどころ・妙味）。人手優先・無ければルールベース生成（#348）。`null` 可。
+    pub race_comment: Option<String>,
     pub horses: Vec<BoardHorseSchema>,
 }
 
@@ -335,6 +341,7 @@ impl From<RaceBoard> for RaceBoardResponse {
                 threshold: b.confusion.threshold,
                 qualifying_count: b.confusion.qualifying_count,
             },
+            race_comment: b.race_comment,
             horses: b
                 .horses
                 .into_iter()
@@ -356,6 +363,8 @@ impl From<RaceBoard> for RaceBoardResponse {
                     mark: h.mark,
                     is_overlay: h.is_overlay,
                     is_value: h.is_value,
+                    comment: h.comment,
+                    detail_lines: h.detail_lines,
                 })
                 .collect(),
         }

@@ -10,15 +10,18 @@
 use chrono::NaiveDate;
 
 use paddock_domain::{
-    HorseProbability, KONSEN_BAND_RATIO, KONSEN_MIN_HORSES, Mark, Portfolio, PortfolioConfig,
-    RaceId, RaceOdds, TrackCondition, build_portfolio, konsen_band,
+    HorseExplanation, HorseProbability, KONSEN_BAND_RATIO, KONSEN_MIN_HORSES, Mark, PadPrediction,
+    Portfolio, PortfolioConfig, RaceId, RaceOdds, TrackCondition, build_portfolio, konsen_band,
 };
 
 use crate::error::Result;
 use crate::interactor::Interactor;
+use crate::interactor::race::commentary::{horse_detail_lines, horse_headline, race_commentary};
 use crate::pdf_fetcher::PdfFetcher;
 use crate::pdf_parser::PdfParser;
-use crate::repository::{OddsRepository, RaceCardRepository, StatsRepository};
+use crate::repository::{
+    OddsRepository, PadPredictionRepository, RaceCardRepository, StatsRepository,
+};
 
 /// 乖離馬（妙味・ワイドボックス候補）の判定に使う「人気順 − モデル順」の下限。
 /// モデル上位圏（[`VALUE_MODEL_RANK_MAX`] 位以内）かつ市場人気がこれ以上下なら乖離馬。
@@ -44,6 +47,9 @@ pub struct RaceBoard {
     /// 買い目ポートフォリオ（保存オッズが無ければ `None`＝買い目は組めない。盤は確率だけで描ける）。
     pub portfolio: Option<Portfolio>,
     pub confusion: Confusion,
+    /// レース書評（混戦度・◎の狙いどころ・妙味）。人手 `PadPrediction.commentary` があれば優先、
+    /// 無ければルールベース生成（#348）。◎が無い等で生成できなければ `None`。
+    pub race_comment: Option<String>,
     /// 全出走馬（truncate しない）。盤面順（`blended` と同順）。
     pub horses: Vec<BoardHorse>,
 }
@@ -89,10 +95,18 @@ pub struct BoardHorse {
     pub is_overlay: bool,
     /// 乖離馬（モデル上位×市場人気低＝妙味・ワイドボックス候補）。
     pub is_value: bool,
+    /// 馬書評の一行寸評（headline）。人手 `PredictionHorse.comment` があれば優先、無ければ
+    /// ルールベース生成（#348）。特筆材料が無ければ `None`。
+    pub comment: Option<String>,
+    /// 展開パネル用の根拠 bullet（条件別 factor・枠 lift・近走・前走・斤量）。空なら根拠情報なし。
+    pub detail_lines: Vec<String>,
 }
 
-impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: PdfFetcher>
-    Interactor<R, P, F>
+impl<
+    R: StatsRepository + RaceCardRepository + OddsRepository + PadPredictionRepository,
+    P: PdfParser,
+    F: PdfFetcher,
+> Interactor<R, P, F>
 {
     /// 1レース盤（全頭 ＋ 買い目 ＋ 混戦/乖離/重なり）を組んで返す。
     ///
@@ -106,11 +120,23 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: 
         blend_alpha: Option<f64>,
         track_condition: Option<TrackCondition>,
     ) -> Result<RaceBoard> {
+        // 書評レイヤ（#348）のため with_explanation=true で根拠を取得する（盤は on-demand で
+        // hot loop 非経由のため conditional_gate_stats 1 回追加の負荷は許容）。
         let views = self
-            .predict_race_views(race_id, blend_alpha, track_condition, false)
+            .predict_race_views(race_id, blend_alpha, track_condition, true)
             .await?;
         let card = self.race_card(race_id).await?;
         let odds = self.repository.find_race_odds(race_id, None).await?;
+
+        // 人手予想（印・短評）があれば overlay の材料に取得する（未保存なら None）。
+        let pad = match card.as_ref() {
+            Some(c) => {
+                self.repository
+                    .find_pad_prediction(c.date, c.venue, c.race_num)
+                    .await?
+            }
+            None => None,
+        };
 
         // 買い目は既存経路そのまま（相手 top5 不変）。オッズ無しなら組まない。
         let portfolio = odds.as_ref().map(|o| {
@@ -123,8 +149,16 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: 
             )
         });
 
-        let horses = build_board_horses(&views.blended, &views.pure, odds.as_ref(), card.as_ref());
+        let mut horses =
+            build_board_horses(&views.blended, &views.pure, odds.as_ref(), card.as_ref());
         let confusion = compute_confusion(&views.blended);
+        enrich_commentary(&mut horses, &views.explanations, pad.as_ref());
+
+        // レース書評: 人手 commentary 優先、無ければルールベース生成（◎不在なら空→None）。
+        let race_comment = pad.as_ref().and_then(|p| p.commentary.clone()).or_else(|| {
+            let generated = race_commentary(&confusion, &horses);
+            (!generated.is_empty()).then_some(generated)
+        });
 
         let (venue, surface, distance, race_num, date, post_time) = match card.as_ref() {
             Some(c) => (
@@ -157,6 +191,7 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: 
             post_time,
             portfolio,
             confusion,
+            race_comment,
             horses,
         })
     }
@@ -221,9 +256,36 @@ fn build_board_horses(
                 mark,
                 is_overlay,
                 is_value,
+                // 書評は enrich_commentary で後付けする（build_board_horses は IO 非依存の純関数に保つ）。
+                comment: None,
+                detail_lines: Vec::new(),
             }
         })
         .collect()
+}
+
+/// 盤行に書評（一行寸評＋根拠 bullet）を後付けする（#348）。`explanations` は
+/// `with_explanation=true` の predict 由来（馬番で突き合わせ）。人手 `pad` の短評があれば
+/// ルールベース生成より優先する（overlay）。`explanations` が空なら何もしない。
+fn enrich_commentary(
+    horses: &mut [BoardHorse],
+    explanations: &[HorseExplanation],
+    pad: Option<&PadPrediction>,
+) {
+    for h in horses.iter_mut() {
+        let expl = explanations
+            .iter()
+            .find(|e| e.horse_num.value() == h.horse_num);
+        // 一行寸評: 人手コメント優先、無ければ factor/前走/近走からのルールベース。
+        let human = pad.and_then(|p| {
+            p.horses
+                .iter()
+                .find(|ph| ph.horse_num == h.horse_num)
+                .and_then(|ph| ph.comment.clone())
+        });
+        h.comment = human.or_else(|| expl.and_then(horse_headline));
+        h.detail_lines = expl.map(horse_detail_lines).unwrap_or_default();
+    }
 }
 
 /// 単勝オッズから市場implied（フィールド内 `1/odds` 正規化＝控除抜き）と人気順（昇順・1始まり）を導く。
