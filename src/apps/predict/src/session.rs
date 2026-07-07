@@ -205,9 +205,14 @@ async fn run_race(
     // 市場 implied との比較（過去データ視点に市場列を添える）。差＝純勝率−市場implied で割安/割高を読む。
     let market_win: HashMap<HorseNum, f64> =
         odds.win.iter().map(|(num, o)| (*num, o.value())).collect();
+    // 条件依存枠バイアスの複勝 lift（#343・提示専用）。枠妙味フラグ（枠有利∧市場過小）の判定に使う。
+    let gate_lift: HashMap<HorseNum, f64> = explanations
+        .iter()
+        .filter_map(|e| e.gate_bias_lift.map(|l| (e.horse_num, l)))
+        .collect();
     println!();
     println!("【純モデル vs 市場implied】");
-    for line in format_probs_with_market(&pure, &market_win) {
+    for line in format_probs_with_market(&pure, &market_win, &gate_lift) {
         println!("{line}");
     }
 

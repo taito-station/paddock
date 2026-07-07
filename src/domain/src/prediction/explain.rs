@@ -19,6 +19,9 @@ pub enum ExplainCategory {
     Distance,
     TrackCondition,
     CourseGate,
+    /// 条件依存の枠バイアス（馬場×頭数×枠の複勝ベース率, #343・提示専用）。
+    /// `CourseGate` と同じく全馬横断ベース率のため verdict は持たない。
+    ConditionalGateBias,
     Jockey,
     Trainer,
 }
@@ -65,10 +68,11 @@ impl FactorExplanation {
             ExplainCategory::Surface
             | ExplainCategory::Distance
             | ExplainCategory::TrackCondition => Some(verdict_from_show_rate(rate.show, starts)),
-            // 枠・騎手・調教師は馬の適性ではないため判定しない（率のみ）。
-            ExplainCategory::CourseGate | ExplainCategory::Jockey | ExplainCategory::Trainer => {
-                None
-            }
+            // 枠・条件依存枠バイアス・騎手・調教師は馬の適性ではないため判定しない（率のみ）。
+            ExplainCategory::CourseGate
+            | ExplainCategory::ConditionalGateBias
+            | ExplainCategory::Jockey
+            | ExplainCategory::Trainer => None,
         };
         Self {
             category,
@@ -103,6 +107,9 @@ pub struct HorseExplanation {
     pub recent_form: Option<f64>,
     /// 前走サマリ。前走が無い馬（初戦等）は `None`。
     pub prev_run: Option<PrevRunSummary>,
+    /// 条件依存枠バイアスの複勝 lift（当該枠セル複勝率 − 同条件全枠平均, #343）。正＝この馬場×頭数で
+    /// 当該枠が歴史的に有利。市場差分フラグ（枠妙味）判定に使う。馬場未確定・実績なしは `None`。
+    pub gate_bias_lift: Option<f64>,
     /// 斤量[kg]。出馬表 PDF 経路（斤量なし）は `None`。
     pub weight_carried: Option<f64>,
     /// レース内 field 平均斤量[kg]。両方ある時だけ「平均比」を語れる。

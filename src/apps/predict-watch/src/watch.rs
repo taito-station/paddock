@@ -198,7 +198,12 @@ async fn evaluate_race(
     // 純モデル vs 市場implied（差で割安/割高の向きを読む）。
     let market_win: std::collections::HashMap<_, _> =
         odds.win.iter().map(|(num, o)| (*num, o.value())).collect();
-    for line in format_probs_with_market(&pure, &market_win) {
+    // 条件依存枠バイアスの複勝 lift（#343）。枠妙味フラグ（枠有利∧市場過小）判定に使う。
+    let gate_lift: std::collections::HashMap<_, _> = explanations
+        .iter()
+        .filter_map(|e| e.gate_bias_lift.map(|l| (e.horse_num, l)))
+        .collect();
+    for line in format_probs_with_market(&pure, &market_win, &gate_lift) {
         println!("    {line}");
     }
 

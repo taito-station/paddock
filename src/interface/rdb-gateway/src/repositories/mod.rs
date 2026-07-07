@@ -33,12 +33,13 @@ use paddock_domain::{
 };
 use paddock_use_case::Result as UcResult;
 use paddock_use_case::repository::{
-    CourseStatsRow, FetchDownload, FetchFailure, FetchRecord, FetchRepository, FetchStatus,
-    HorseHistoryRepository, HorseRecencyStats, HorseStatsRow, JockeyStatsRow, LiveEvRepository,
-    LiveEvSnapshot, LiveEvSnapshotRecord, MarkStatRow, MarkStatsFilter, NameMatchRepository,
-    OddsRepository, PadPredictionRepository, PredictBetRecord, PredictRaceConditionRecord,
-    PredictSessionRecord, PredictSessionRepository, PredictionFilter, PredictionSearchResult,
-    RaceCardRepository, RaceOddsRecord, RaceRepository, StatsRepository, TrainerStatsRow,
+    ConditionalGateStatsRow, CourseStatsRow, FetchDownload, FetchFailure, FetchRecord,
+    FetchRepository, FetchStatus, HorseHistoryRepository, HorseRecencyStats, HorseStatsRow,
+    JockeyStatsRow, LiveEvRepository, LiveEvSnapshot, LiveEvSnapshotRecord, MarkStatRow,
+    MarkStatsFilter, NameMatchRepository, OddsRepository, PadPredictionRepository,
+    PredictBetRecord, PredictRaceConditionRecord, PredictSessionRecord, PredictSessionRepository,
+    PredictionFilter, PredictionSearchResult, RaceCardRepository, RaceOddsRecord, RaceRepository,
+    StatsRepository, TrainerStatsRow,
 };
 
 use crate::pool::PgPool;
@@ -114,6 +115,18 @@ impl StatsRepository for PostgresRepository {
         as_of: Option<NaiveDate>,
     ) -> UcResult<CourseStatsRow> {
         course_stats::course_stats(&self.pool, venue, distance, surface, as_of)
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn conditional_gate_stats(
+        &self,
+        venue: Venue,
+        distance: u32,
+        surface: Surface,
+        as_of: Option<NaiveDate>,
+    ) -> UcResult<ConditionalGateStatsRow> {
+        course_stats::conditional_gate_stats(&self.pool, venue, distance, surface, as_of)
             .await
             .map_err(Into::into)
     }

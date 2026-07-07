@@ -224,7 +224,9 @@ async fn main() -> anyhow::Result<()> {
                         odds.win.iter().map(|(num, o)| (*num, o.value())).collect();
                     println!();
                     println!("【純モデル vs 市場implied】");
-                    for line in format_probs_with_market(&pure, &market_win) {
+                    // analyze predict は根拠（explanations）を組まないため枠妙味フラグは空（#343 は
+                    // 通常 predict フロー=predict/predict-watch で提示）。市場差分列は従来どおり出す。
+                    for line in format_probs_with_market(&pure, &market_win, &HashMap::new()) {
                         println!("{line}");
                     }
 

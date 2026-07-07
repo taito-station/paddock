@@ -217,6 +217,9 @@ impl<R: StatsRepository + OddsRepository, P: PdfParser, F: PdfFetcher> Interacto
                     surface: race.surface,
                     distance: race.distance,
                     track_condition: race.track_condition,
+                    // 条件依存枠バイアスは提示専用で backtest（スコア経路）では未使用だが、型上は必須。
+                    // 頭数は出走馬数を渡す（build_factors はこの値を参照しない＝挙動不変）。
+                    field_size: starters.len(),
                     mean_weight,
                 };
 
