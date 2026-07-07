@@ -85,9 +85,10 @@ fn extract_race_class(doc: &Html) -> Option<RaceClass> {
     let label = format!("{title} {condition}");
     let class = RaceClass::from_label(&label);
     if class.is_none() {
-        // title も RaceData02 も取れているのにクラスを判定できないのは netkeiba の
-        // 表記変更の兆候になりうる。best-effort で None に落とすが debug で可視化する。
-        tracing::debug!("title/RaceData02 からレースクラスを判定できませんでした");
+        // 判定不能。セレクタ取得失敗（title/RaceData02 が空）か、既知外の表記かのどちらか。
+        // どちらも best-effort で None に落とすが、netkeiba のレイアウト/表記変更の切り分けに
+        // 使えるよう、実際に読めたラベルを添えて debug で可視化する。
+        tracing::debug!(label = %label, "レースクラスを判定できませんでした");
     }
     class
 }

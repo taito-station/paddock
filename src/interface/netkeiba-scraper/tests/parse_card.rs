@@ -45,6 +45,22 @@ fn parses_card_meta_and_entries() {
     assert_eq!(nums, (1..=17).collect::<Vec<_>>());
 }
 
+// グレードが <title> に無いレースは RaceData02 の条件表記からクラスを取る（#345）。安田記念
+// fixture の title グレード「安田記念(G1)」を外し、RaceData02 の「オープン」を「３歳未勝利」に
+// 差し替えて、非重賞クラス抽出経路（div.RaceData02）が働き Maiden を返すことを検証する。
+// （この経路は G1裏＝別場の非重賞検出の前提。title のみで確定する G1 ケースだけでは未検証になる）
+#[test]
+fn race_class_from_racedata02_when_title_has_no_grade() {
+    let html = FIXTURE
+        .replace("安田記念(G1)", "テスト特別")
+        .replace("オープン", "３歳未勝利");
+    let card = parse_card(&html, RACE_ID).expect("parse card");
+    assert_eq!(card.race_class, Some(RaceClass::Maiden));
+    // 他メタは通常どおり取れる。
+    assert_eq!(card.distance, 1600);
+    assert_eq!(card.entries.len(), 17);
+}
+
 // 発走時刻表記（「HH:MM発走」）が無い HTML では post_time が best-effort で None になり、
 // それでもカード自体は他項目から組める（#235）。発走時刻トークンだけを除いて再現する
 // （「発走」全置換だと将来 fixture の別箇所に「発走」が増えたとき意図せず消えるため、

@@ -68,6 +68,8 @@ impl RaceClass {
     /// ラベルを渡す想定。どれにも当てはまらなければ `None`。
     ///
     /// - グレードは算用数字(G1)とローマ数字(GI)の両表記に対応（GIII→GII→GI の順で最長一致）。
+    /// - 地方交流重賞の Jpn1/Jpn2/Jpn3 表記と unicode ローマ数字（GⅠ 等）は非対応で `None` に
+    ///   落ちる（JRA 中央スコープの best-effort。必要になれば拡張する）。
     pub fn from_label(label: &str) -> Option<Self> {
         // 1. グレード（最長一致: GIII/GII/GI）
         if label.contains("GIII") || label.contains("G3") {
@@ -156,6 +158,28 @@ mod tests {
         assert_eq!(RaceClass::from_label("有馬記念(GI)"), Some(RaceClass::G1));
         assert_eq!(RaceClass::from_label("札幌記念(GII)"), Some(RaceClass::G2));
         assert_eq!(RaceClass::from_label("毎日杯(GIII)"), Some(RaceClass::G3));
+        // 算用数字 (G2)/(G3) 直接ケース（最長一致が算用側でも効く）。
+        assert_eq!(RaceClass::from_label("レース(G2)"), Some(RaceClass::G2));
+        assert_eq!(RaceClass::from_label("レース(G3)"), Some(RaceClass::G3));
+    }
+
+    #[test]
+    fn is_g1_only_true_for_g1() {
+        assert!(RaceClass::G1.is_g1());
+        assert!(!RaceClass::G2.is_g1());
+        assert!(!RaceClass::Open.is_g1());
+        assert!(!RaceClass::Maiden.is_g1());
+    }
+
+    #[test]
+    fn display_uses_short_jp_labels() {
+        assert_eq!(RaceClass::G1.to_string(), "G1");
+        assert_eq!(RaceClass::G3.to_string(), "G3");
+        assert_eq!(RaceClass::Listed.to_string(), "L");
+        assert_eq!(RaceClass::Open.to_string(), "OP");
+        assert_eq!(RaceClass::Win3.to_string(), "3勝");
+        assert_eq!(RaceClass::Maiden.to_string(), "未勝利");
+        assert_eq!(RaceClass::NewComer.to_string(), "新馬");
     }
 
     #[test]

@@ -50,6 +50,24 @@ pub fn classify(
     }
 }
 
+/// 通知（検証候補）閾値の既定値。買う閾値を下回る帯を 🔍 として残す（#345）。
+const DEFAULT_NOTIFY_GATE: f64 = 0.7;
+
+/// 通知（検証候補）閾値を解決する純関数（#345・単体テスト対象）。
+///
+/// - 明示指定なし → `min(roi_gate, DEFAULT_NOTIFY_GATE)`。roi_gate を既定 0.7 未満へ下げた
+///   探索運用でも「notify_gate > roi_gate」で起動が壊れないようクランプする。
+/// - 明示指定あり → その値。ただし buy 閾値 `roi_gate` 超は 🔍 帯が生じない誤用として弾く。
+pub fn resolve_notify_gate(explicit: Option<f64>, roi_gate: f64) -> anyhow::Result<f64> {
+    match explicit {
+        Some(ng) if ng > roi_gate => anyhow::bail!(
+            "--notify-gate（{ng:.2}）は --roi-gate（{roi_gate:.2}）以下で指定してください（検証候補は買う閾値の下の帯です）。"
+        ),
+        Some(ng) => Ok(ng),
+        None => Ok(roi_gate.min(DEFAULT_NOTIFY_GATE)),
+    }
+}
+
 /// 参考 ROI を 2 つのゲートに照らして表示マークを決める純関数（#345・単体テスト対象）。
 ///
 /// - `roi >= buy_gate` → `🔶`（買い妙味。張る/見送りの一次判断対象）
@@ -118,6 +136,15 @@ fn has_result(race: &Race) -> bool {
     race.track_condition.is_some() || !race.results.is_empty()
 }
 
+/// 1 スイープ全体で共有する評価コンテキスト（#345）。sweep / evaluate_race の引数肥大を避ける。
+/// notify_gate は run で 1 度だけ解決した値、blend_alpha は解決済みの市場ブレンド重み。
+#[derive(Clone, Copy)]
+struct SweepCtx<'a> {
+    cli: &'a Cli,
+    notify_gate: f64,
+    blend_alpha: Option<f64>,
+}
+
 /// 発走時刻付きのレース 1 件（races_by_date の Race ＋ race_card の post_time / race_class）。
 struct Slot {
     race: Race,
@@ -166,9 +193,11 @@ async fn sweep(
     statuses: &[RaceStatus],
     now: NaiveTime,
     captured_at: &str,
-    cli: &Cli,
-    blend_alpha: Option<f64>,
+    ctx: SweepCtx<'_>,
 ) {
+    let SweepCtx {
+        cli, notify_gate, ..
+    } = ctx;
     let due: Vec<&Slot> = slots
         .iter()
         .zip(statuses)
@@ -186,7 +215,7 @@ async fn sweep(
         due.len(),
         cli.window,
         cli.roi_gate * 100.0,
-        cli.notify_gate * 100.0,
+        notify_gate * 100.0,
     );
     if unknown > 0 {
         println!(
@@ -209,19 +238,17 @@ async fn sweep(
 
     for slot in due {
         let is_ura = is_g1_ura(slot.race.venue, slot.race_class, &day_classes);
-        evaluate_race(app, slot, is_ura, captured_at, cli, blend_alpha).await;
+        evaluate_race(app, slot, is_ura, captured_at, ctx).await;
     }
 }
 
 /// 1 レースを評価: フレッシュなオッズ再取得 → 確率推定 → 買い目/EV → ROI 判定。
-async fn evaluate_race(
-    app: &App,
-    slot: &Slot,
-    is_ura: bool,
-    captured_at: &str,
-    cli: &Cli,
-    blend_alpha: Option<f64>,
-) {
+async fn evaluate_race(app: &App, slot: &Slot, is_ura: bool, captured_at: &str, ctx: SweepCtx<'_>) {
+    let SweepCtx {
+        cli,
+        notify_gate,
+        blend_alpha,
+    } = ctx;
     let rid = &slot.race.race_id;
     let label = race_label(slot);
 
@@ -300,7 +327,7 @@ async fn evaluate_race(
     // 通知閾値（notify_gate）以上は 🔍 検証候補として表示に残す（#345・張り推奨ではない）。
     let roi_pct = ev.roi * 100.0;
     let hit_pct = ev.hit_prob * 100.0;
-    let mark = mark_for(ev.roi, cli.notify_gate, cli.roi_gate);
+    let mark = mark_for(ev.roi, notify_gate, cli.roi_gate);
     // G1 裏（別場の非重賞）は ROI ゲートに関わらずタグを付けて注目枠として残す（#345）。
     let ura_tag = if is_ura { " 🎯裏" } else { "" };
     println!(
@@ -413,14 +440,8 @@ pub async fn run(app: &App, cli: &Cli) -> anyhow::Result<()> {
             "--blend-alpha は 0.0〜1.0 で指定してください（市場とモデルのブレンド重み）。"
         );
     }
-    // 通知（検証候補）閾値は買う閾値以下でなければ 🔍 の帯が生じない（#345）。逆転指定は誤用として弾く。
-    if cli.notify_gate > cli.roi_gate {
-        anyhow::bail!(
-            "--notify-gate（{:.2}）は --roi-gate（{:.2}）以下で指定してください（検証候補は買う閾値の下の帯です）。",
-            cli.notify_gate,
-            cli.roi_gate,
-        );
-    }
+    // 通知（検証候補）閾値を解決する。未指定は min(roi_gate, 0.7)、明示指定の逆転（buy 超）は弾く（#345）。
+    let notify_gate = resolve_notify_gate(cli.notify_gate, cli.roi_gate)?;
 
     // α 未指定なら本番既定（market α=0.2）を使う。predict と同一値で判定を揃える。
     let blend_alpha = cli.blend_alpha.or(RECOMMENDED_MARKET_BLEND_ALPHA);
@@ -488,7 +509,12 @@ pub async fn run(app: &App, cli: &Cli) -> anyhow::Result<()> {
             );
         }
 
-        sweep(app, &slots, &statuses, now, &captured_at, cli, blend_alpha).await;
+        let ctx = SweepCtx {
+            cli,
+            notify_gate,
+            blend_alpha,
+        };
+        sweep(app, &slots, &statuses, now, &captured_at, ctx).await;
 
         if !should_continue(&statuses) {
             if statuses.is_empty() {
@@ -564,6 +590,20 @@ mod tests {
         // クラス不明は非重賞と断定できないため裏にしない。
         let day = [(Venue::Tokyo, Some(RaceClass::G1)), (Venue::Hakodate, None)];
         assert!(!is_g1_ura(Venue::Hakodate, None, &day));
+    }
+
+    #[test]
+    fn resolve_notify_gate_defaults_and_clamps() {
+        // 未指定 → min(roi_gate, 0.7)。
+        assert_eq!(resolve_notify_gate(None, 1.0).unwrap(), 0.7);
+        // roi_gate を 0.7 未満へ下げた探索運用は起動を壊さずクランプ。
+        assert_eq!(resolve_notify_gate(None, 0.6).unwrap(), 0.6);
+        // 明示指定はそのまま。
+        assert_eq!(resolve_notify_gate(Some(0.8), 1.0).unwrap(), 0.8);
+        // 明示指定が buy 閾値ちょうどは許容（境界）。
+        assert_eq!(resolve_notify_gate(Some(1.0), 1.0).unwrap(), 1.0);
+        // 明示指定が buy 閾値超は誤用として弾く。
+        assert!(resolve_notify_gate(Some(0.9), 0.8).is_err());
     }
 
     #[test]
