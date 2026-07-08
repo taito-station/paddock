@@ -11,7 +11,26 @@ import {
   flipNotes,
   tierBadge,
   roughnessChip,
+  boardHref,
 } from "./live";
+
+describe("boardHref", () => {
+  it("builds a drilldown link with from=live and date", () => {
+    expect(boardHref("202602050811", "2026-07-08", { fromLive: true })).toBe(
+      "/races/202602050811/board?from=live&date=2026-07-08",
+    );
+  });
+  it("omits date when empty (盤レスポンスの date にフォールバックさせる)", () => {
+    expect(boardHref("202602050811", "", { fromLive: true })).toBe(
+      "/races/202602050811/board?from=live",
+    );
+  });
+  it("omits from when not from live (盤内の場内/R切替リンク)", () => {
+    expect(boardHref("202602050811", "2026-07-08")).toBe(
+      "/races/202602050811/board?date=2026-07-08",
+    );
+  });
+});
 
 describe("tierBadge", () => {
   it("maps tier slugs to badges", () => {

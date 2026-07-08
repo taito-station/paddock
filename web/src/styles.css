@@ -199,6 +199,15 @@ button:disabled {
 .live-mark {
   font-size: 1.1rem;
 }
+/* レース名＝全頭盤へのドリルダウンリンク（買い/様子見 行で共通）。#344 */
+.live-race-link {
+  color: inherit;
+  text-decoration: none;
+}
+.live-race-link:hover,
+.live-race-link:focus-visible {
+  text-decoration: underline;
+}
 .live-roi {
   font-weight: 600;
   color: #2e7d32;
