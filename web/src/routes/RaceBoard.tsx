@@ -260,7 +260,7 @@ export function RaceBoard() {
                   </div>
                   <div className="jockey">{h.jockey ?? "-"}</div>
                   <dl className="stats">
-                    <div>
+                    <div title="1着になる確率（勝率）">
                       <dt>勝率</dt>
                       <dd>{pct(h.win_prob)}</dd>
                     </div>
