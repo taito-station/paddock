@@ -77,6 +77,12 @@ export function tierBadge(tier: string): string {
   return TIER_BADGE[tier] ?? tier;
 }
 
+// tier の描画順位（買い強度の高い順）。ボードの一次ソートキー。未知 tier は末尾。#344
+const TIER_RANK: Record<string, number> = { buy: 0, close: 1, watch: 2, hidden: 3 };
+export function tierRank(tier: string): number {
+  return TIER_RANK[tier] ?? 99;
+}
+
 // 荒れ度チップの表記（例 "荒れ 0.88"）。ROI（期待値）とは別軸の「分布の乱れ」。
 // roughness スコア or ラベルが欠ければ null（旧データ・算出不能。チップを出さない）。#344
 export function roughnessChip(

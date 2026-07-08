@@ -4,17 +4,20 @@ import { api, type LiveRaceView } from "../api/client";
 import { VENUE_JP, yen } from "../lib/format";
 import {
   BET_TYPE_JP,
+  DANZEN_WIN_ODDS_MAX,
   METHOD_JP,
   flipNotes,
   groupLegs,
   jstHm,
   maru,
   placeBand,
+  postMinutes,
   roiPct,
   roughnessChip,
   skipReason,
   summaryLine,
   tierBadge,
+  tierRank,
 } from "../lib/live";
 
 const venueJp = (v: string) => VENUE_JP[v] ?? v;
@@ -116,8 +119,9 @@ function StageRow({ race }: { race: LiveRaceView }) {
         {race.axis_win_odds != null ? race.axis_win_odds.toFixed(1) : "—"}）
       </span>
       {race.konsen && <span className="live-tag">混戦</span>}
-      {/* 断然人気の見送り理由は −EV 局面の注意喚起として残す。 */}
-      {race.axis_win_odds != null && race.axis_win_odds <= 1.9 && (
+      {/* 断然人気の見送り理由は −EV 局面の注意喚起として残す（閾値は live.ts の共有定数）。 */}
+      {race.axis_win_odds != null &&
+        race.axis_win_odds <= DANZEN_WIN_ODDS_MAX && (
         <span className="muted">
           {skipReason({
             roi: race.roi,
@@ -161,11 +165,16 @@ export function LiveBets() {
   }
 
   const races = live.data?.races ?? [];
-  // 段階ボードは floor 未満（tier=hidden）を隠し、残りを ROI 降順の常時ランキングにする。
+  // 段階ボードは floor 未満（tier=hidden）を隠し、残りを「買い強度(tier)昇順 → 発走時刻昇順」で並べる。
+  // 買い強度でランキングしつつ、time-sensitive な用途（発走直前に判断）で直近発走を band 内で先頭に出す。
   // 🟢買い(ROI≥100)は伝票付き BetCard、🟡⚪ は StageRow（在庫は常に出すが買いに見せない）。#344
   const visible = races
     .filter((r) => r.tier !== "hidden")
-    .sort((a, b) => b.roi - a.roi);
+    .sort(
+      (a, b) =>
+        tierRank(a.tier) - tierRank(b.tier) ||
+        postMinutes(a.post_time) - postMinutes(b.post_time),
+    );
   const hiddenCount = races.length - visible.length;
 
   return (
