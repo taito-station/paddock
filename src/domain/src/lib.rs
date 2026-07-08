@@ -41,6 +41,9 @@ pub use prediction::{
     estimate_probabilities, estimate_probabilities_with_config, jockey_recent_form_score,
     recent_form_score,
 };
-pub use race::{Race, RaceClass, RaceId, Surface, TrackCondition, Venue, Weather};
+pub use race::{
+    Race, RaceClass, RaceId, StageTier, Surface, TrackCondition, Venue, Weather, race_roughness,
+    roughness_label, stage_tier,
+};
 pub use race_card::{HorseEntry, RaceCard};
 pub use simulation::{EvReport, Finish, Outcome, PlacedBet, SimInput, SimReport, simulate};
