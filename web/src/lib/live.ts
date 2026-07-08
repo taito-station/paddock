@@ -65,6 +65,28 @@ export function summaryLine(s: LiveSummary): string {
   return `${head}（監視中 ${s.watched_race_count}R）`;
 }
 
+// 段階 ROI tier のバッジ表記（買い強度）。買いは ROI≥100 のみ、以下は当日分布の相対位置（#344）。
+export const TIER_BADGE: Record<string, string> = {
+  buy: "🟢買い",
+  close: "🟡惜しい",
+  watch: "⚪様子見",
+  hidden: "非表示",
+};
+
+export function tierBadge(tier: string): string {
+  return TIER_BADGE[tier] ?? tier;
+}
+
+// 荒れ度チップの表記（例 "荒れ 0.88"）。ROI（期待値）とは別軸の「分布の乱れ」。
+// roughness スコア or ラベルが欠ければ null（旧データ・算出不能。チップを出さない）。#344
+export function roughnessChip(
+  roughness: number | null | undefined,
+  label: string | null | undefined,
+): string | null {
+  if (roughness == null || !label) return null;
+  return `${label} ${roughness.toFixed(2)}`;
+}
+
 export const BET_TYPE_JP: Record<string, string> = {
   wide: "ワイド",
   quinella: "馬連",

@@ -10,18 +10,20 @@ import {
   jstHm,
   maru,
   placeBand,
-  postMinutes,
   roiPct,
+  roughnessChip,
   skipReason,
   summaryLine,
+  tierBadge,
 } from "../lib/live";
 
 const venueJp = (v: string) => VENUE_JP[v] ?? v;
 const raceLabel = (r: LiveRaceView) => `${venueJp(r.venue)}${r.race_no}R`;
 
-// post_time（発走時刻）でレースを並べる。null は末尾（postMinutes が +∞ を返す）。
-function byPostTime(a: LiveRaceView, b: LiveRaceView): number {
-  return postMinutes(a.post_time) - postMinutes(b.post_time);
+// 荒れ度チップ（ROI とは別軸＝分布の乱れ）。データが無ければ描画しない。#344
+function RoughnessChip({ race }: { race: LiveRaceView }) {
+  const chip = roughnessChip(race.roughness, race.roughness_label);
+  return chip ? <span className="live-tag chip-rough">{chip}</span> : null;
 }
 
 // 🟢 張るレース: そのまま買える形（式別 / 方式 / 軸 / 相手 / 点数 / 金額）。
@@ -46,6 +48,7 @@ function BetCard({ race }: { race: LiveRaceView }) {
           {placeBand(race.axis_place_odds_low, race.axis_place_odds_high)}）
         </span>
         {race.konsen && <span className="live-tag">混戦</span>}
+        <RoughnessChip race={race} />
         <span className="muted">発走 {race.post_time ?? "—"}</span>
       </div>
 
@@ -92,8 +95,9 @@ function BetCard({ race }: { race: LiveRaceView }) {
   );
 }
 
-// ⚪ 見送りレース: 理由付き（フリップ時は 🔶 で強調）。
-function SkipRow({ race }: { race: LiveRaceView }) {
+// 🟡惜しい / ⚪様子見レース: 段階ボードの 1 行（コンパクト）。買い(ROI≥100)ではないので伝票は出さず、
+// tier バッジ・ROI・荒れ度・◎情報・フリップ注記を並べる（在庫は常に出すが「買い」に見せない）。#344
+function StageRow({ race }: { race: LiveRaceView }) {
   const notes = flipNotes(race.flip, {
     axis: race.axis,
     roi: race.roi,
@@ -102,18 +106,26 @@ function SkipRow({ race }: { race: LiveRaceView }) {
   const flipped = notes.length > 0;
   return (
     <div className={`live-skip${flipped ? " live-flipped" : ""}`}>
-      {/* 見送りの基底マーク ⚪ を維持しつつ、フリップ時は 🔶 も併記（張るカードと様式を揃える）。 */}
-      <span className="live-mark">{flipped ? "⚪🔶" : "⚪"}</span>
+      <span className="live-mark">{tierBadge(race.tier)}</span>
       <strong>{raceLabel(race)}</strong>
       <span className="muted">発走 {race.post_time ?? "—"}</span>
-      <span>見送り</span>
+      <span className="live-roi">ROI {roiPct(race.roi)}</span>
+      <RoughnessChip race={race} />
       <span>
-        {skipReason({
-          roi: race.roi,
-          axis: race.axis,
-          axis_win_odds: race.axis_win_odds,
-        })}
+        ◎{maru(race.axis)}（model {race.axis_prob.toFixed(0)}% 単勝
+        {race.axis_win_odds != null ? race.axis_win_odds.toFixed(1) : "—"}）
       </span>
+      {race.konsen && <span className="live-tag">混戦</span>}
+      {/* 断然人気の見送り理由は −EV 局面の注意喚起として残す。 */}
+      {race.axis_win_odds != null && race.axis_win_odds <= 1.9 && (
+        <span className="muted">
+          {skipReason({
+            roi: race.roi,
+            axis: race.axis,
+            axis_win_odds: race.axis_win_odds,
+          })}
+        </span>
+      )}
       {notes.map((n) => (
         <span key={n} className="live-flip">
           🔶 {n}
@@ -149,8 +161,12 @@ export function LiveBets() {
   }
 
   const races = live.data?.races ?? [];
-  const bets = races.filter((r) => r.verdict === "bet").sort(byPostTime);
-  const skips = races.filter((r) => r.verdict !== "bet").sort(byPostTime);
+  // 段階ボードは floor 未満（tier=hidden）を隠し、残りを ROI 降順の常時ランキングにする。
+  // 🟢買い(ROI≥100)は伝票付き BetCard、🟡🄫⚪ は StageRow（在庫は常に出すが買いに見せない）。#344
+  const visible = races
+    .filter((r) => r.tier !== "hidden")
+    .sort((a, b) => b.roi - a.roi);
+  const hiddenCount = races.length - visible.length;
 
   return (
     <section>
@@ -180,23 +196,20 @@ export function LiveBets() {
           {races.length === 0 ? (
             <p className="muted">監視データなし</p>
           ) : (
-            <>
-              {bets.length > 0 && (
-                <div className="live-section">
-                  {bets.map((r) => (
-                    <BetCard key={r.race_id} race={r} />
-                  ))}
-                </div>
+            <div className="live-section">
+              {visible.map((r) =>
+                r.tier === "buy" ? (
+                  <BetCard key={r.race_id} race={r} />
+                ) : (
+                  <StageRow key={r.race_id} race={r} />
+                ),
               )}
-              {skips.length > 0 && (
-                <div className="live-section">
-                  <h3>見送り</h3>
-                  {skips.map((r) => (
-                    <SkipRow key={r.race_id} race={r} />
-                  ))}
-                </div>
+              {hiddenCount > 0 && (
+                <p className="muted">
+                  他 {hiddenCount} レースは当日 ROI 分布の下位（floor 未満）で非表示。
+                </p>
               )}
-            </>
+            </div>
           )}
         </>
       )}

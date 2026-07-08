@@ -9,7 +9,33 @@ import {
   groupLegs,
   skipReason,
   flipNotes,
+  tierBadge,
+  roughnessChip,
 } from "./live";
+
+describe("tierBadge", () => {
+  it("maps tier slugs to badges", () => {
+    expect(tierBadge("buy")).toBe("🟢買い");
+    expect(tierBadge("close")).toBe("🟡惜しい");
+    expect(tierBadge("watch")).toBe("⚪様子見");
+    expect(tierBadge("hidden")).toBe("非表示");
+  });
+  it("falls back to the raw slug when unknown", () => {
+    expect(tierBadge("bogus")).toBe("bogus");
+  });
+});
+
+describe("roughnessChip", () => {
+  it("formats score with label", () => {
+    expect(roughnessChip(0.88, "荒れ")).toBe("荒れ 0.88");
+    expect(roughnessChip(0.5, "堅い")).toBe("堅い 0.50");
+  });
+  it("returns null when score or label is missing (old rows)", () => {
+    expect(roughnessChip(null, "荒れ")).toBeNull();
+    expect(roughnessChip(0.7, null)).toBeNull();
+    expect(roughnessChip(undefined, undefined)).toBeNull();
+  });
+});
 
 describe("postMinutes", () => {
   it("parses HH:MM to minutes", () => {

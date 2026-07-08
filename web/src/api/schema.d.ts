@@ -575,7 +575,16 @@ export interface components {
              * @description 全 3 券種 ROI[%]。
              */
             roi: number;
+            /**
+             * Format: double
+             * @description 荒れ度スコア（純モデル勝率分布の正規化エントロピー [0,1]。0=堅い〜1=荒れ。#344）。旧行は null。
+             */
+            roughness?: number | null;
+            /** @description 荒れ度ラベル（`堅い`/`標準`/`荒れ`。roughness が null なら null）。 */
+            roughness_label?: string | null;
             slip: components["schemas"]["SlipView"];
+            /** @description 段階 ROI tier（`buy`/`close`/`watch`/`hidden`。当日 ROI 分布から算出。#344）。 */
+            tier: string;
             venue: string;
             /** @description `'bet'`（ROI≥100%）/ `'skip'`（−EV）。 */
             verdict: string;
