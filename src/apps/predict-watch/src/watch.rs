@@ -3,7 +3,7 @@ use std::time::Duration as StdDuration;
 use chrono::{Duration, Local, NaiveTime, Offset, Utc};
 use paddock_domain::{
     BetMethod, Portfolio, PortfolioConfig, RECOMMENDED_MARKET_BLEND_ALPHA, Race, RaceClass, Venue,
-    build_portfolio,
+    build_portfolio, race_roughness,
 };
 use paddock_use_case::PredictionViews;
 use predict_format::{format_explanations, format_probs, format_probs_with_market};
@@ -376,6 +376,8 @@ async fn evaluate_race(app: &App, slot: &Slot, is_ura: bool, captured_at: &str, 
             .map(|b| (Some(b.low.value()), Some(b.high.value())))
             .unwrap_or((None, None));
         let post_time = slot.post_time.map(|t| t.format("%H:%M").to_string());
+        // 荒れ度は純モデル勝率（odds 非依存のレース形状）から算出する（#344）。ROI とは別軸。
+        let roughness = race_roughness(&pure.iter().map(|hp| hp.win_prob).collect::<Vec<_>>());
 
         let ctx = SnapshotContext {
             date: cli.date,
@@ -389,6 +391,7 @@ async fn evaluate_race(app: &App, slot: &Slot, is_ura: bool, captured_at: &str, 
             axis_place_odds_low: axis_place_low,
             axis_place_odds_high: axis_place_high,
             race_budget: cli.race_budget,
+            roughness,
         };
         if let Some(record) = build_snapshot_record(&portfolio, &ctx)
             && let Err(e) = app.interactor.save_live_ev_snapshot(&record).await

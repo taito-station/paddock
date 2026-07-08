@@ -21,6 +21,7 @@ fn record(captured_at: &str, roi: f64, verdict: &str) -> LiveEvSnapshotRecord {
         captured_at: captured_at.to_string(),
         verdict: verdict.to_string(),
         roi,
+        roughness: 0.72,
         konsen: false,
         axis: 6,
         axis_prob: 32.5,

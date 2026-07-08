@@ -46,6 +46,7 @@ pub async fn save_live_ev_snapshot(pool: &PgPool, record: &LiveEvSnapshotRecord)
         "captured_at": record.captured_at,
         "verdict": record.verdict,
         "roi": record.roi,
+        "roughness": record.roughness,
         "konsen": record.konsen,
         "axis": record.axis,
         "axis_prob": record.axis_prob,
@@ -67,6 +68,7 @@ pub async fn save_live_ev_snapshot(pool: &PgPool, record: &LiveEvSnapshotRecord)
             captured_at,
             verdict,
             roi,
+            roughness,
             konsen,
             axis,
             axis_prob,
@@ -78,7 +80,7 @@ pub async fn save_live_ev_snapshot(pool: &PgPool, record: &LiveEvSnapshotRecord)
             raw
         )
         VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16::jsonb, $17::jsonb
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17::jsonb, $18::jsonb
         )
         ON CONFLICT (race_id, captured_at) DO UPDATE SET
             date                 = excluded.date,
@@ -87,6 +89,7 @@ pub async fn save_live_ev_snapshot(pool: &PgPool, record: &LiveEvSnapshotRecord)
             post_time            = excluded.post_time,
             verdict              = excluded.verdict,
             roi                  = excluded.roi,
+            roughness            = excluded.roughness,
             konsen               = excluded.konsen,
             axis                 = excluded.axis,
             axis_prob            = excluded.axis_prob,
@@ -106,6 +109,7 @@ pub async fn save_live_ev_snapshot(pool: &PgPool, record: &LiveEvSnapshotRecord)
     .bind(&record.captured_at)
     .bind(&record.verdict)
     .bind(record.roi)
+    .bind(record.roughness)
     .bind(record.konsen)
     .bind(record.axis as i64)
     .bind(record.axis_prob)
