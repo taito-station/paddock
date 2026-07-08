@@ -9,6 +9,7 @@ import {
   placeOddsLabel,
   sortByModelRank,
 } from "../lib/board";
+import { boardHref } from "../lib/live";
 
 const DEFAULT_RACE_BUDGET = 5000; // CLI predict / recommendations の既定 race_budget と揃える。
 
@@ -100,7 +101,7 @@ export function RaceBoard() {
             : raceId}
         </h2>
         {d?.post_time && <span className="muted">発走 {d.post_time}</span>}
-        {fromLive ? (
+        {fromLive && date ? (
           <Link to={`/live/${date}`}>← ライブに戻る</Link>
         ) : (
           <Link to={`/?date=${date}`}>← レース一覧</Link>
@@ -121,7 +122,7 @@ export function RaceBoard() {
               <Link
                 key={r.race_id}
                 className="chip venue-link"
-                to={`/races/${r.race_id}/board?date=${date}${fromLive ? "&from=live" : ""}`}
+                to={boardHref(r.race_id, date, { fromLive })}
               >
                 {label}
               </Link>
@@ -143,7 +144,7 @@ export function RaceBoard() {
               <Link
                 key={r.race_id}
                 className="chip venue-link"
-                to={`/races/${r.race_id}/board?date=${date}${fromLive ? "&from=live" : ""}`}
+                to={boardHref(r.race_id, date, { fromLive })}
               >
                 {r.race_num}
               </Link>

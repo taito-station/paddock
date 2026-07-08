@@ -43,13 +43,21 @@ export function jstHm(iso: string | null | undefined): string {
   });
 }
 
-// ライブ行 → レース詳細盤（RaceBoard）へのドリルダウン遷移先。
-// from=live を付けて盤側で「← ライブに戻る」導線を出し、date は戻り先 /live/:date の復元に使う
-// （date が空なら省略。RaceBoard は盤レスポンスの date にフォールバックできる）。
-export function boardHref(raceId: string, date: string): string {
-  const params = new URLSearchParams({ from: "live" });
+// レース詳細盤（RaceBoard）への遷移先 URL を組む単一の生成源。
+// - fromLive=true: ライブ日次ボード由来。盤側で「← ライブに戻る」導線を出す（LiveBets 行／
+//   ライブ経由の盤内 場内・R 切替リンクで使う）。
+// - date: 戻り先 /live/:date の復元に使う。空なら省略（RaceBoard は盤レスポンスの date に
+//   フォールバックできる）。
+export function boardHref(
+  raceId: string,
+  date: string,
+  opts: { fromLive?: boolean } = {},
+): string {
+  const params = new URLSearchParams();
+  if (opts.fromLive) params.set("from", "live");
   if (date) params.set("date", date);
-  return `/races/${raceId}/board?${params.toString()}`;
+  const qs = params.toString();
+  return `/races/${raceId}/board${qs ? `?${qs}` : ""}`;
 }
 
 // 「断然人気」とみなす◎の単勝オッズ上限。この値以下は過剰人気として見送り理由に明記する

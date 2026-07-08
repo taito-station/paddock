@@ -29,7 +29,7 @@ function RaceLabelLink({ race, date }: { race: LiveRaceView; date: string }) {
   return (
     <Link
       className="live-race-link"
-      to={boardHref(race.race_id, date)}
+      to={boardHref(race.race_id, date, { fromLive: true })}
       title="全頭盤・top5理由を見る"
     >
       <strong>{raceLabel(race)}</strong>
