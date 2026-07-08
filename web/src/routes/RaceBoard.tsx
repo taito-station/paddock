@@ -16,6 +16,9 @@ export function RaceBoard() {
   const { raceId = "" } = useParams();
   const [searchParams] = useSearchParams();
   const dateParam = searchParams.get("date") ?? "";
+  // ライブ日次ボード（/live/:date）から来たか。来た場合は戻り導線をライブに向け、
+  // 盤内の場内/R切替でも from を引き継いで戻り先を保つ。
+  const fromLive = searchParams.get("from") === "live";
   // クリックで馬書評（詳細パネル）を開く馬番。同じ馬を再クリック or 閉じるで null に戻す。
   const [selectedHorse, setSelectedHorse] = useState<number | null>(null);
   // フォーカス管理（a11y）: パネルを開いた馬カラム（trigger）を覚えておき、閉じたら戻す。
@@ -97,7 +100,11 @@ export function RaceBoard() {
             : raceId}
         </h2>
         {d?.post_time && <span className="muted">発走 {d.post_time}</span>}
-        <Link to={`/?date=${date}`}>← レース一覧</Link>
+        {fromLive ? (
+          <Link to={`/live/${date}`}>← ライブに戻る</Link>
+        ) : (
+          <Link to={`/?date=${date}`}>← レース一覧</Link>
+        )}
       </div>
 
       {/* 同じ R の場内切替（函館⇄福島⇄小倉…） */}
@@ -114,7 +121,7 @@ export function RaceBoard() {
               <Link
                 key={r.race_id}
                 className="chip venue-link"
-                to={`/races/${r.race_id}/board?date=${date}`}
+                to={`/races/${r.race_id}/board?date=${date}${fromLive ? "&from=live" : ""}`}
               >
                 {label}
               </Link>
@@ -136,7 +143,7 @@ export function RaceBoard() {
               <Link
                 key={r.race_id}
                 className="chip venue-link"
-                to={`/races/${r.race_id}/board?date=${date}`}
+                to={`/races/${r.race_id}/board?date=${date}${fromLive ? "&from=live" : ""}`}
               >
                 {r.race_num}
               </Link>
@@ -256,7 +263,11 @@ export function RaceBoard() {
                       <dt>勝率</dt>
                       <dd>{pct(h.win_prob)}</dd>
                     </div>
-                    <div>
+                    <div title="2着以内に入る確率（連対率）">
+                      <dt>連対率</dt>
+                      <dd>{pct(h.place_prob)}</dd>
+                    </div>
+                    <div title="3着以内に入る確率（複勝率）">
                       <dt>複勝率</dt>
                       <dd>{pct(h.show_prob)}</dd>
                     </div>

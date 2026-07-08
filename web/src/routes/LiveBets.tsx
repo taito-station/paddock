@@ -6,6 +6,7 @@ import {
   BET_TYPE_JP,
   DANZEN_WIN_ODDS_MAX,
   METHOD_JP,
+  boardHref,
   flipNotes,
   groupLegs,
   jstHm,
@@ -23,6 +24,19 @@ import {
 const venueJp = (v: string) => VENUE_JP[v] ?? v;
 const raceLabel = (r: LiveRaceView) => `${venueJp(r.venue)}${r.race_no}R`;
 
+// レース名を全頭盤（RaceBoard）へのドリルダウンリンクにする。買い/様子見どちらの行でも共通。#344
+function RaceLabelLink({ race, date }: { race: LiveRaceView; date: string }) {
+  return (
+    <Link
+      className="live-race-link"
+      to={boardHref(race.race_id, date)}
+      title="全頭盤・top5理由を見る"
+    >
+      <strong>{raceLabel(race)}</strong>
+    </Link>
+  );
+}
+
 // 荒れ度チップ（ROI とは別軸＝分布の乱れ）。データが無ければ描画しない。#344
 function RoughnessChip({ race }: { race: LiveRaceView }) {
   const chip = roughnessChip(race.roughness, race.roughness_label);
@@ -30,7 +44,7 @@ function RoughnessChip({ race }: { race: LiveRaceView }) {
 }
 
 // 🟢 張るレース: そのまま買える形（式別 / 方式 / 軸 / 相手 / 点数 / 金額）。
-function BetCard({ race }: { race: LiveRaceView }) {
+function BetCard({ race, date }: { race: LiveRaceView; date: string }) {
   const groups = groupLegs(race.slip.legs);
   const notes = flipNotes(race.flip, {
     axis: race.axis,
@@ -43,7 +57,7 @@ function BetCard({ race }: { race: LiveRaceView }) {
       <div className="live-card-head">
         {/* 張るレースは 🟢 を維持しつつ、フリップ時は 🔶 も併記（両シグナルを両立）。 */}
         <span className="live-mark">{flipped ? "🟢🔶" : "🟢"}</span>
-        <strong>{raceLabel(race)}</strong>
+        <RaceLabelLink race={race} date={date} />
         <span className="live-roi">ROI {roiPct(race.roi)}</span>
         <span>
           ◎{maru(race.axis)}（model {race.axis_prob.toFixed(0)}% 単勝
@@ -100,7 +114,7 @@ function BetCard({ race }: { race: LiveRaceView }) {
 
 // 🟡惜しい / ⚪様子見レース: 段階ボードの 1 行（コンパクト）。買い(ROI≥100)ではないので伝票は出さず、
 // tier バッジ・ROI・荒れ度・◎情報・フリップ注記を並べる（在庫は常に出すが「買い」に見せない）。#344
-function StageRow({ race }: { race: LiveRaceView }) {
+function StageRow({ race, date }: { race: LiveRaceView; date: string }) {
   const notes = flipNotes(race.flip, {
     axis: race.axis,
     roi: race.roi,
@@ -110,7 +124,7 @@ function StageRow({ race }: { race: LiveRaceView }) {
   return (
     <div className={`live-skip${flipped ? " live-flipped" : ""}`}>
       <span className="live-mark">{tierBadge(race.tier)}</span>
-      <strong>{raceLabel(race)}</strong>
+      <RaceLabelLink race={race} date={date} />
       <span className="muted">発走 {race.post_time ?? "—"}</span>
       <span className="live-roi">ROI {roiPct(race.roi)}</span>
       <RoughnessChip race={race} />
@@ -208,9 +222,9 @@ export function LiveBets() {
             <div className="live-section">
               {visible.map((r) =>
                 r.tier === "buy" ? (
-                  <BetCard key={r.race_id} race={r} />
+                  <BetCard key={r.race_id} race={r} date={date} />
                 ) : (
-                  <StageRow key={r.race_id} race={r} />
+                  <StageRow key={r.race_id} race={r} date={date} />
                 ),
               )}
               {hiddenCount > 0 && (

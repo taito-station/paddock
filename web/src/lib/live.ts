@@ -43,6 +43,15 @@ export function jstHm(iso: string | null | undefined): string {
   });
 }
 
+// ライブ行 → レース詳細盤（RaceBoard）へのドリルダウン遷移先。
+// from=live を付けて盤側で「← ライブに戻る」導線を出し、date は戻り先 /live/:date の復元に使う
+// （date が空なら省略。RaceBoard は盤レスポンスの date にフォールバックできる）。
+export function boardHref(raceId: string, date: string): string {
+  const params = new URLSearchParams({ from: "live" });
+  if (date) params.set("date", date);
+  return `/races/${raceId}/board?${params.toString()}`;
+}
+
 // 「断然人気」とみなす◎の単勝オッズ上限。この値以下は過剰人気として見送り理由に明記する
 // （CLAUDE.md「断然人気は EV がマイナスになりがち」。実運用の単勝 1.4 例をカバーする保守値）。
 export const DANZEN_WIN_ODDS_MAX = 1.9;
