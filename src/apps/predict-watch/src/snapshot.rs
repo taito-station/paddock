@@ -29,6 +29,8 @@ pub struct SnapshotContext<'a> {
     pub axis_place_odds_high: Option<f64>,
     /// このレースへ配分した予算（円）。
     pub race_budget: u64,
+    /// 荒れ度（純モデル勝率分布の正規化エントロピー [0,1]。#344）。呼び出し側が pure 勝率から算出。
+    pub roughness: f64,
 }
 
 /// Portfolio ＋文脈から 1 レコードを組む。`ev`・`axis` が無ければ（買い目を組めなかった）`None`。
@@ -77,6 +79,7 @@ pub fn build_snapshot_record(
         // cli.roi_gate・可変）とは独立で、roi_gate を 1.0 以外にしても保存 verdict の意味は変えない。
         verdict: if ev.roi >= 1.0 { "bet" } else { "skip" }.to_string(),
         roi: ev.roi * 100.0,
+        roughness: ctx.roughness,
         konsen: portfolio.konsen,
         axis: axis.value(),
         axis_prob: ctx.axis_prob,
@@ -113,6 +116,7 @@ mod tests {
             axis_place_odds_low: Some(1.1),
             axis_place_odds_high: Some(1.4),
             race_budget: 5000,
+            roughness: 0.72,
         }
     }
 

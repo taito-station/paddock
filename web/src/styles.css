@@ -211,6 +211,12 @@ button:disabled {
   color: #e65100;
 }
 
+/* 荒れ度チップ（ROI とは別軸＝分布の乱れ。#344）。live-tag ベースに色だけ変える。 */
+.live-tag.chip-rough {
+  background: #ede7f6;
+  color: #5e35b1;
+}
+
 .grid.live-slip {
   max-width: 40rem;
 }

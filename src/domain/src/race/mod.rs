@@ -1,5 +1,6 @@
 mod class;
 mod race_id;
+mod race_shape;
 mod surface;
 mod track_condition;
 mod venue;
@@ -7,6 +8,7 @@ mod weather;
 
 pub use class::RaceClass;
 pub use race_id::RaceId;
+pub use race_shape::{StageTier, race_roughness, roughness_label, stage_tier};
 pub use surface::Surface;
 pub use track_condition::TrackCondition;
 pub use venue::Venue;

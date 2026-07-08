@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
+use paddock_domain::roughness_label;
 use paddock_use_case::{
     LiveFlip as LiveFlipView, LiveRaceView, LiveSummary as LiveSummaryView, LiveView,
 };
@@ -40,6 +41,12 @@ pub struct LiveRaceViewSchema {
     pub verdict: String,
     /// 全 3 券種 ROI[%]。
     pub roi: f64,
+    /// 荒れ度スコア（純モデル勝率分布の正規化エントロピー [0,1]。0=堅い〜1=荒れ。#344）。旧行は null。
+    pub roughness: Option<f64>,
+    /// 荒れ度ラベル（`堅い`/`標準`/`荒れ`。roughness が null なら null）。
+    pub roughness_label: Option<String>,
+    /// 段階 ROI tier（`buy`/`close`/`watch`/`hidden`。当日 ROI 分布から算出。#344）。
+    pub tier: String,
     pub konsen: bool,
     /// ◎馬番。
     pub axis: u32,
@@ -137,6 +144,9 @@ impl LiveRaceViewSchema {
             captured_at: r.captured_at,
             verdict: r.verdict,
             roi: r.roi,
+            roughness: r.roughness,
+            roughness_label: r.roughness.map(|s| roughness_label(s).to_string()),
+            tier: r.tier.as_str().to_string(),
             konsen: r.konsen,
             axis: r.axis,
             axis_prob: r.axis_prob,
