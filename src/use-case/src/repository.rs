@@ -927,6 +927,8 @@ pub struct LiveEvSnapshot {
     pub verdict: String,
     /// 全 3 券種 ROI[%]。
     pub roi: f64,
+    /// 荒れ度（純モデル勝率分布の正規化エントロピー [0,1]。#344）。本 migration 以前の行は None。
+    pub roughness: Option<f64>,
     pub konsen: bool,
     /// ◎馬番（model 勝率最上位）。
     pub axis: u32,

@@ -74,6 +74,8 @@ async fn snapshot_round_trips_place_and_slip(pool: sqlx::PgPool) {
     // bool 列（konsen / odds_missing）も書いた値どおり往復する。
     assert!(!r.konsen);
     assert!(!r.odds_missing);
+    // 荒れ度も往復する（#344）。
+    assert_eq!(r.roughness, Some(0.72));
 
     // slip JSONB が read 側 SlipView 契約（race_budget / legs[bet_type,method,axis,combo,points,amount]）で往復する。
     let slip: serde_json::Value = serde_json::from_str(&r.slip_json).unwrap();

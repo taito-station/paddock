@@ -1,6 +1,7 @@
 use std::cmp::Ordering;
 
 use chrono::NaiveDate;
+use paddock_domain::{StageTier, stage_tier};
 
 use crate::error::Result;
 use crate::interactor::Interactor;
@@ -39,6 +40,10 @@ pub struct LiveRaceView {
     pub captured_at: String,
     pub verdict: String,
     pub roi: f64,
+    /// 荒れ度（純モデル勝率分布の正規化エントロピー [0,1]。#344）。旧行は None。
+    pub roughness: Option<f64>,
+    /// 段階 ROI tier（買い強度）。当日全レースの ROI 分布から算出（#344）。
+    pub tier: StageTier,
     pub konsen: bool,
     pub axis: u32,
     pub axis_prob: f64,
@@ -99,6 +104,13 @@ fn assemble_live_view(date: NaiveDate, rows: Vec<LiveEvSnapshot>) -> LiveView {
         i += if prev.is_some() { 2 } else { 1 };
     }
 
+    // 段階 ROI tier は当日全レースの ROI 分布を母集団に決めるため、全 race を組んでから 2 パス目で
+    // 付与する（#344）。build_race_view は 1 レースぶんの情報しか持たないので tier をここで確定する。
+    let day_rois: Vec<f64> = races.iter().map(|r| r.roi).collect();
+    for r in &mut races {
+        r.tier = stage_tier(r.roi, &day_rois);
+    }
+
     let summary = LiveSummary {
         bet_race_count: races.iter().filter(|r| r.verdict == "bet").count() as u32,
         watched_race_count: races.len() as u32,
@@ -148,6 +160,9 @@ fn build_race_view(latest: &LiveEvSnapshot, prev: Option<&LiveEvSnapshot>) -> Li
         captured_at: latest.captured_at.clone(),
         verdict: latest.verdict.clone(),
         roi: latest.roi,
+        roughness: latest.roughness,
+        // tier は assemble_live_view の 2 パス目で当日 ROI 分布から確定する（ここは仮値）。
+        tier: StageTier::Watch,
         konsen: latest.konsen,
         axis: latest.axis,
         axis_prob: latest.axis_prob,
@@ -185,6 +200,7 @@ mod tests {
             captured_at: captured_at.into(),
             verdict: verdict.into(),
             roi,
+            roughness: Some(0.72),
             konsen: false,
             axis,
             axis_prob: 30.0,
@@ -304,6 +320,77 @@ mod tests {
         assert!(!v.races[1].flip.axis_changed && v.races[1].flip.ev_reversed);
         // r2 は直前なし。
         assert_eq!(v.races[0].flip.prev_axis, None);
+    }
+
+    #[test]
+    fn stage_tier_assigned_from_day_roi_distribution() {
+        // ROI≥100 は Buy（絶対）。<100 は当日分布の分位で Close/Watch/Hidden。roughness も写る。
+        let rows = vec![
+            snap(
+                1,
+                "r1",
+                1,
+                "bet",
+                110.0,
+                1,
+                "2026-06-20T10:00:00Z",
+                Some("15:00"),
+            ),
+            snap(
+                1,
+                "r2",
+                2,
+                "skip",
+                88.0,
+                1,
+                "2026-06-20T10:00:00Z",
+                Some("15:10"),
+            ),
+            snap(
+                1,
+                "r3",
+                3,
+                "skip",
+                82.0,
+                1,
+                "2026-06-20T10:00:00Z",
+                Some("15:20"),
+            ),
+            snap(
+                1,
+                "r4",
+                4,
+                "skip",
+                78.0,
+                1,
+                "2026-06-20T10:00:00Z",
+                Some("15:30"),
+            ),
+            snap(
+                1,
+                "r5",
+                5,
+                "skip",
+                70.0,
+                1,
+                "2026-06-20T10:00:00Z",
+                Some("15:40"),
+            ),
+        ];
+        let v = assemble_live_view(date(), rows);
+        let tier = |id: &str| v.races.iter().find(|r| r.race_id == id).unwrap().tier;
+        assert_eq!(tier("r1"), StageTier::Buy, "110%=買い");
+        assert_eq!(tier("r2"), StageTier::Close, "上位=惜しい");
+        assert_eq!(tier("r5"), StageTier::Hidden, "下位=非表示");
+        // roughness が snapshot からビューへ写る。
+        assert_eq!(
+            v.races
+                .iter()
+                .find(|r| r.race_id == "r1")
+                .unwrap()
+                .roughness,
+            Some(0.72)
+        );
     }
 
     #[test]
