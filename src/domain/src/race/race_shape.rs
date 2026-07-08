@@ -15,7 +15,9 @@ const ROUGHNESS_WIDE_OPEN: f64 = 0.85;
 ///
 /// - 入力は勝率（合計 1 前提だが、数値誤差に強いよう内部で正規化する）。
 /// - 頭数 N<2、または合計が 0 のときは荒れ度を定義できないため `0.0` を返す。
-/// - 0 以下の確率（欠損・負の数値誤差）は寄与 0 として無視する。
+/// - 0 以下の確率（欠損・負の数値誤差）は寄与 0 として無視し、**正の確率を持つ頭数**で正規化する
+///   （`ln(n)`）。純モデルは全頭に正の勝率を与えるため実運用で n は出走頭数と一致するが、万一
+///   厳密 0 が混じると母数 n が縮み荒れ度がやや過大化しうる（decision-support 表示のため許容）。
 pub fn race_roughness(win_probs: &[f64]) -> f64 {
     let total: f64 = win_probs.iter().filter(|p| **p > 0.0).sum();
     let n = win_probs.iter().filter(|p| **p > 0.0).count();
@@ -58,17 +60,8 @@ pub enum StageTier {
 }
 
 impl StageTier {
-    /// 表示用の絵文字＋日本語ラベル。
-    pub fn as_badge(&self) -> &'static str {
-        match self {
-            StageTier::Buy => "🟢買い",
-            StageTier::Close => "🟡惜しい",
-            StageTier::Watch => "⚪様子見",
-            StageTier::Hidden => "非表示",
-        }
-    }
-
-    /// SPA/REST で運ぶ安定スラッグ。
+    /// SPA/REST で運ぶ安定スラッグ。表示用のバッジ文字列は SPA 側（`web/src/lib/live.ts` の
+    /// `TIER_BADGE`）が slug から生成するため、Rust 側はスラッグのみを提供して二重管理を避ける。
     pub fn as_str(&self) -> &'static str {
         match self {
             StageTier::Buy => "buy",

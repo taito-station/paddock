@@ -162,7 +162,7 @@ export function LiveBets() {
 
   const races = live.data?.races ?? [];
   // 段階ボードは floor 未満（tier=hidden）を隠し、残りを ROI 降順の常時ランキングにする。
-  // 🟢買い(ROI≥100)は伝票付き BetCard、🟡🄫⚪ は StageRow（在庫は常に出すが買いに見せない）。#344
+  // 🟢買い(ROI≥100)は伝票付き BetCard、🟡⚪ は StageRow（在庫は常に出すが買いに見せない）。#344
   const visible = races
     .filter((r) => r.tier !== "hidden")
     .sort((a, b) => b.roi - a.roi);
