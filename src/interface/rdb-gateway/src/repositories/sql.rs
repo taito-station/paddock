@@ -314,6 +314,19 @@ pub(crate) const DISTANCE_BAND_PREDS: &[(&str, &str)] = &[
     ("2300m〜", "races.distance >= 2300"),
 ];
 
+/// `dynamic_group_stats(_batch)` の `group_col` が **code 定数の列参照 or CASE 式** であることを
+/// 機械的に担保する（#350・二重防御の対称化。`entity_col` の `matches!` guard と揃える）。現行の
+/// 呼び出しは `races.venue` / `results.jockey` / `case_from_preds(..)` 生成の `CASE ... END` のみで、
+/// いずれも単一引用符でリテラルを破らない code 定数。将来の呼び出し追加で外部入力が group_col に
+/// 混じる回帰を debug ビルドで即検知する（`case_from_preds` の label 側 debug_assert と同型の契約）。
+fn is_safe_group_col(group_col: &str) -> bool {
+    // 列参照は既知の 2 種を厳密一致で許可（`entity_col` の matches! と同型）。CASE 式は
+    // `case_from_preds` が label 側の単一引用符を debug_assert 済みで注入不可なので shape
+    // （`CASE` 始まり）で許可する（CASE 式は label リテラルの単一引用符を正当に含むため、
+    // 単一引用符の有無では判定しない）。
+    matches!(group_col, "races.venue" | "results.jockey") || group_col.starts_with("CASE")
+}
+
 /// 動的キー GROUP BY の成績集計（#350 相性 factor）。`results.<entity_col> = $1` に一致する成績を
 /// `group_col`（`races.venue` / `results.jockey` / 距離帯 CASE 等の **code 定数式**）別に集計し、
 /// group_col 値をラベルにした `Vec<GroupStat>` を返す。固定ラベル版（`entity_stats` の by_surface 等）と
@@ -330,6 +343,10 @@ pub(crate) async fn dynamic_group_stats(
     debug_assert!(
         matches!(entity_col, "jockey" | "horse_name"),
         "entity_col must be a known literal, got {entity_col:?}"
+    );
+    debug_assert!(
+        is_safe_group_col(group_col),
+        "group_col must be a code-constant column/CASE expr, got {group_col:?}"
     );
     let q = format!(
         r#"
@@ -371,6 +388,10 @@ pub(crate) async fn dynamic_group_stats_batch(
     debug_assert!(
         matches!(entity_col, "jockey" | "horse_name"),
         "entity_col must be a known literal, got {entity_col:?}"
+    );
+    debug_assert!(
+        is_safe_group_col(group_col),
+        "group_col must be a code-constant column/CASE expr, got {group_col:?}"
     );
     let q = format!(
         r#"
@@ -492,6 +513,19 @@ mod tests {
     #[test]
     fn or_from_preds_single_has_no_or() {
         assert_eq!(or_from_preds(&[("A", "x = 1")]), "(x = 1)");
+    }
+
+    #[test]
+    fn is_safe_group_col_accepts_known_and_rejects_injection() {
+        use super::{DISTANCE_BAND_PREDS, case_from_preds, is_safe_group_col};
+        // 現行の全呼び出し形（列参照 2 種 + case_from_preds 生成の CASE 式）を許可。
+        assert!(is_safe_group_col("races.venue"));
+        assert!(is_safe_group_col("results.jockey"));
+        assert!(is_safe_group_col(&case_from_preds(DISTANCE_BAND_PREDS)));
+        // 単一引用符（リテラル注入）・未知の列は拒否。
+        assert!(!is_safe_group_col("races.venue; DROP TABLE races"));
+        assert!(!is_safe_group_col("'injected'"));
+        assert!(!is_safe_group_col("results.horse_name"));
     }
 
     #[test]
