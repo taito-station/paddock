@@ -153,10 +153,12 @@ fn has_result(race: &Race) -> bool {
 }
 
 /// `--race-budget-override <race_id>=<円>` の並びを `race_id → 予算(円)` マップにパースする（#342）。
-/// 各要素は 1 個の `=` で分割し、左辺は `RaceId` として形式検証（誤 pid を早期に弾く）、右辺は
-/// 正の整数（円）としてパースする。重複 race_id は誤設定として弾く（後勝ちで黙って上書きしない）。
-/// 予算は既定 `--race-budget` と同じく 100 円単位への切り捨ては `build_portfolio` 側に委ねる
-/// （ここでは >0 のみ要求）。空入力は空マップ（override なし）。純関数として単体テストする。
+/// 各要素は 1 個の `=` で分割し、左辺は `RaceId` として**不正文字を早期に弾く**（`_` 等。ただし
+/// valid-format な pid 取り違えは形式検証を通るため runtime の unmatched 警告で検出する二段構え）、
+/// 右辺は正の整数（円）としてパースする。重複 race_id は誤設定として弾く（後勝ちで黙って上書きしない）。
+/// 予算は **100 円以上**を要求する（`build_portfolio` は券種予算を 100 円単位に floor するため、100 円
+/// 未満は全券種 0 円＝空伝票になり増額用途として無意味。100 円単位への切り捨て自体は build_portfolio に
+/// 委ねる）。空入力は空マップ（override なし）。純関数として単体テストする。
 fn parse_race_budget_overrides(entries: &[String]) -> anyhow::Result<HashMap<String, u64>> {
     let mut out = HashMap::with_capacity(entries.len());
     for entry in entries {
@@ -173,8 +175,10 @@ fn parse_race_budget_overrides(entries: &[String]) -> anyhow::Result<HashMap<Str
                 "--race-budget-override の予算は正の整数で指定してください: {raw_yen:?}"
             )
         })?;
-        if yen == 0 {
-            anyhow::bail!("--race-budget-override の予算は 1 円以上で指定してください: {entry:?}");
+        if yen < 100 {
+            anyhow::bail!(
+                "--race-budget-override の予算は 100 円以上で指定してください（100 円未満は空伝票になります）: {entry:?}"
+            );
         }
         let key = race_id.value().to_string();
         if out.insert(key, yen).is_some() {
@@ -596,7 +600,7 @@ pub async fn run(app: &App, cli: &Cli) -> anyhow::Result<()> {
                     .collect::<Vec<_>>()
                     .join(", ");
                 println!(
-                    "⚠ per-race 予算 override の race_id が当日（{}）のレースに一致しません（未適用）: {list}。pid を確認してください。",
+                    "⚠ per-race 予算 override の race_id が当日（{}）のレースに一致しません（初回スイープの出馬表基準・未適用）: {list}。pid を確認してください（card 未取得なら fetch-card 後に再実行）。",
                     cli.date
                 );
             }
@@ -741,16 +745,25 @@ mod tests {
     }
 
     #[test]
-    fn parse_race_budget_overrides_rejects_zero_and_non_numeric() {
+    fn parse_race_budget_overrides_rejects_under_100_and_non_numeric() {
+        // 0 円・100 円未満は空伝票になるため弾く（増額用途として無意味）。
         assert!(parse_race_budget_overrides(&["2026-3-tokyo-5-11R=0".to_string()]).is_err());
+        assert!(parse_race_budget_overrides(&["2026-3-tokyo-5-11R=50".to_string()]).is_err());
         assert!(parse_race_budget_overrides(&["2026-3-tokyo-5-11R=abc".to_string()]).is_err());
         // 負値は u64 パース失敗で弾かれる。
         assert!(parse_race_budget_overrides(&["2026-3-tokyo-5-11R=-100".to_string()]).is_err());
+        // 100 円ちょうどは許容（境界）。
+        assert_eq!(
+            parse_race_budget_overrides(&["2026-3-tokyo-5-11R=100".to_string()])
+                .unwrap()
+                .get("2026-3-tokyo-5-11R"),
+            Some(&100)
+        );
     }
 
     #[test]
     fn parse_race_budget_overrides_rejects_invalid_race_id() {
-        // RaceId は英数・`-`・`R` のみ許可。空白入り以外の不正文字（`_`）を弾く。
+        // RaceId は英数・`-` のみ許可（`_` は不可）。不正文字を含む pid を弾く。
         assert!(parse_race_budget_overrides(&["bad_id=7000".to_string()]).is_err());
         assert!(parse_race_budget_overrides(&["=7000".to_string()]).is_err());
     }

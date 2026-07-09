@@ -19,7 +19,7 @@ per-race 予算を「どこに・どう持たせるか」は既存 ADR の思想
 
 **Approach C: per-race 予算は `predict-watch` の CLI override（`--race-budget-override <race_id>=<円>`）で人間が明示入力し、指定レースだけその予算で `build_portfolio` を回して `slip.race_budget` に記録する。**
 
-- 入力: `predict-watch` に `--race-budget-override` を追加（`<race_id>=<円>` 形式・複数レースはフラグ繰り返し）。起動時に形式検証（`RaceId` 形式・予算 >0・重複禁止）し、適用一覧を表示。当日レースに一致しない race_id は 1 度だけ警告する。
+- 入力: `predict-watch` に `--race-budget-override` を追加（`<race_id>=<円>` 形式・複数レースはフラグ繰り返し）。起動時に形式検証（`RaceId` 形式・予算 **≥100 円**・重複禁止）し、適用一覧を表示。当日レースに一致しない race_id は初回スイープの出馬表を基準に 1 度だけ警告する。予算 100 円未満は `build_portfolio` の券種予算 floor で空伝票になるため弾く。
 - 計算: 指定レースは override 予算、未指定レースは既定 `--race-budget` を使って `build_portfolio` に渡す。**予算は配分額（各点の金額）にのみ効き、軸・点数・相手（3 券種とも top5）は不変**（`build_portfolio` の仕様どおり）。
 - 記録: `SnapshotContext.race_budget` に per-race 値を詰め、既存経路で `slip.race_budget`（`live_ev_snapshots.slip` JSONB）に保存。**DB スキーマ変更なし**。
 - 描画: SPA は `slip.race_budget` と各 leg の金額をそのまま描画（既存実装・再配分しない）。
