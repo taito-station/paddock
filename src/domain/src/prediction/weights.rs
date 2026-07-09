@@ -64,3 +64,20 @@ pub(crate) const JOCKEY_RECENT_FORM_WEIGHT: f64 = 0.0;
 /// （Python `impute_prototype.py`）で判定し、効いた場合のみ backtest 二段ゲート（Phase 3）を経て採用値へ。
 /// backtest の `--running-style-weight` で override して掃引する（jockey_recent_form / recent_form と同型）。
 pub(crate) const RUNNING_STYLE_WEIGHT: f64 = 0.0;
+
+/// 騎手×競馬場（venue）項の重み（#350 measure-first）。**0.0（無効）** で導入する。running_style（#329）と
+/// 同型の撤退前提 arc：production スコアには寄与させず（挙動不変）dump 列にだけ出す。lift は backtest の
+/// `--jockey-venue-weight` sweep で判定し、効いた場合のみ二段ゲートを経て採用値へ。純モデルの resolution は
+/// 既存データレバーで天井付近（[[project_resolution_data_ceiling]]）ゆえ、相性 factor も市場ブレンド+縮約に
+/// 吸収され増分ゼロの可能性がある。安易に weight を上げず backtest 実測で採否を決める（jockey_recent_form
+/// の轍を踏まない）。
+pub(crate) const JOCKEY_VENUE_WEIGHT: f64 = 0.0;
+/// 騎手×距離帯項の重み（#350 measure-first）。**0.0（無効）**。詳細は [`JOCKEY_VENUE_WEIGHT`] と同じ
+/// 撤退前提 arc。backtest の `--jockey-distance-weight` で override して掃引する。
+pub(crate) const JOCKEY_DISTANCE_WEIGHT: f64 = 0.0;
+/// 騎手×馬コンビ項の重み（#350 measure-first）。**0.0（無効）**。詳細は [`JOCKEY_VENUE_WEIGHT`] と同じ。
+/// backtest の `--jockey-horse-combo-weight` で override。母数が薄いため縮約 m の効きも合わせて見る。
+pub(crate) const JOCKEY_HORSE_COMBO_WEIGHT: f64 = 0.0;
+/// 馬×競馬場（venue）項の重み（#350 measure-first）。**0.0（無効）**。詳細は [`JOCKEY_VENUE_WEIGHT`] と同じ。
+/// backtest の `--horse-venue-weight` で override して掃引する。
+pub(crate) const HORSE_VENUE_WEIGHT: f64 = 0.0;

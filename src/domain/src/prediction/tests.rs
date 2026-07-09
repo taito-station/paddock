@@ -77,6 +77,10 @@ fn zero_factors() -> HorseFactors {
         jockey_surface: None,
         horse_track_condition: None,
         trainer_surface: None,
+        jockey_venue: None,
+        jockey_distance: None,
+        jockey_horse_combo: None,
+        horse_venue: None,
         recent_form: None,
         weight_carried: None,
         jockey_recent_form: None,
@@ -120,6 +124,10 @@ fn all_factors_none_scores_zero_and_falls_back_uniform() {
         jockey_surface: None,
         horse_track_condition: None,
         trainer_surface: None,
+        jockey_venue: None,
+        jockey_distance: None,
+        jockey_horse_combo: None,
+        horse_venue: None,
         recent_form: None,
         weight_carried: None,
         jockey_recent_form: None,
@@ -158,6 +166,10 @@ fn missing_record_excluded_is_not_penalized_like_zero_fill() {
         jockey_surface: None,
         horse_track_condition: None,
         trainer_surface: None,
+        jockey_venue: None,
+        jockey_distance: None,
+        jockey_horse_combo: None,
+        horse_venue: None,
         recent_form: None,
         weight_carried: None,
         jockey_recent_form: None,
@@ -201,6 +213,10 @@ fn win_sums_to_one_and_values_monotone_small_field() {
                 jockey_surface: None,
                 horse_track_condition: None,
                 trainer_surface: None,
+                jockey_venue: None,
+                jockey_distance: None,
+                jockey_horse_combo: None,
+                horse_venue: None,
                 recent_form: None,
                 weight_carried: None,
                 jockey_recent_form: None,
@@ -228,6 +244,10 @@ fn win_sums_to_one_and_values_monotone_small_field() {
                 jockey_surface: None,
                 horse_track_condition: None,
                 trainer_surface: None,
+                jockey_venue: None,
+                jockey_distance: None,
+                jockey_horse_combo: None,
+                horse_venue: None,
                 recent_form: None,
                 weight_carried: None,
                 jockey_recent_form: None,
@@ -264,6 +284,10 @@ fn place_show_sum_to_two_and_three_in_even_field() {
         jockey_surface: None,
         horse_track_condition: None,
         trainer_surface: None,
+        jockey_venue: None,
+        jockey_distance: None,
+        jockey_horse_combo: None,
+        horse_venue: None,
         recent_form: None,
         weight_carried: None,
         jockey_recent_form: None,
@@ -308,6 +332,10 @@ fn place_show_power_decompresses_toward_favorite() {
         jockey_surface: None,
         horse_track_condition: None,
         trainer_surface: None,
+        jockey_venue: None,
+        jockey_distance: None,
+        jockey_horse_combo: None,
+        horse_venue: None,
         recent_form: None,
         weight_carried: None,
         jockey_recent_form: None,
@@ -378,6 +406,10 @@ fn place_show_power_none_or_one_is_noop() {
         jockey_surface: None,
         horse_track_condition: None,
         trainer_surface: None,
+        jockey_venue: None,
+        jockey_distance: None,
+        jockey_horse_combo: None,
+        horse_venue: None,
         recent_form: None,
         weight_carried: None,
         jockey_recent_form: None,
@@ -433,6 +465,10 @@ fn place_show_power_below_one_compresses() {
         jockey_surface: None,
         horse_track_condition: None,
         trainer_surface: None,
+        jockey_venue: None,
+        jockey_distance: None,
+        jockey_horse_combo: None,
+        horse_venue: None,
         recent_form: None,
         weight_carried: None,
         jockey_recent_form: None,
@@ -479,6 +515,10 @@ fn place_show_power_leaves_win_prob_unchanged() {
         jockey_surface: None,
         horse_track_condition: None,
         trainer_surface: None,
+        jockey_venue: None,
+        jockey_distance: None,
+        jockey_horse_combo: None,
+        horse_venue: None,
         recent_form: None,
         weight_carried: None,
         jockey_recent_form: None,
@@ -529,6 +569,10 @@ fn place_show_power_invalid_gamma_is_noop() {
         jockey_surface: None,
         horse_track_condition: None,
         trainer_surface: None,
+        jockey_venue: None,
+        jockey_distance: None,
+        jockey_horse_combo: None,
+        horse_venue: None,
         recent_form: None,
         weight_carried: None,
         jockey_recent_form: None,
@@ -583,6 +627,10 @@ fn place_show_power_clamps_strong_favorite() {
         jockey_surface: None,
         horse_track_condition: None,
         trainer_surface: None,
+        jockey_venue: None,
+        jockey_distance: None,
+        jockey_horse_combo: None,
+        horse_venue: None,
         recent_form: None,
         weight_carried: None,
         jockey_recent_form: None,
@@ -630,6 +678,10 @@ fn monotonicity_guaranteed_even_with_inverted_rates() {
         jockey_surface: None,
         horse_track_condition: None,
         trainer_surface: None,
+        jockey_venue: None,
+        jockey_distance: None,
+        jockey_horse_combo: None,
+        horse_venue: None,
         recent_form: None,
         weight_carried: None,
         jockey_recent_form: None,
@@ -646,6 +698,10 @@ fn monotonicity_guaranteed_even_with_inverted_rates() {
         jockey_surface: None,
         horse_track_condition: None,
         trainer_surface: None,
+        jockey_venue: None,
+        jockey_distance: None,
+        jockey_horse_combo: None,
+        horse_venue: None,
         recent_form: None,
         weight_carried: None,
         jockey_recent_form: None,
@@ -678,6 +734,10 @@ fn monotonic_when_only_some_columns_are_all_zero() {
         jockey_surface: None,
         horse_track_condition: None,
         trainer_surface: None,
+        jockey_venue: None,
+        jockey_distance: None,
+        jockey_horse_combo: None,
+        horse_venue: None,
         recent_form: None,
         weight_carried: None,
         jockey_recent_form: None,
@@ -723,6 +783,10 @@ fn jockey_none_not_penalized() {
         jockey_surface: Some(fs(base)),
         horse_track_condition: None,
         trainer_surface: None,
+        jockey_venue: None,
+        jockey_distance: None,
+        jockey_horse_combo: None,
+        horse_venue: None,
         recent_form: None,
         weight_carried: None,
         jockey_recent_form: None,
@@ -735,6 +799,10 @@ fn jockey_none_not_penalized() {
         jockey_surface: None,
         horse_track_condition: None,
         trainer_surface: None,
+        jockey_venue: None,
+        jockey_distance: None,
+        jockey_horse_combo: None,
+        horse_venue: None,
         recent_form: None,
         weight_carried: None,
         jockey_recent_form: None,
@@ -765,6 +833,85 @@ fn jockey_none_not_penalized() {
     assert!(raw_score(&weak, |r| r.win, &EstimationConfig::default()) < s_without);
 }
 
+/// #350 measure-first の中核不変条件: 相性 factor（jockey_venue/jockey_distance/jockey_horse_combo/
+/// horse_venue）は const 重み 0.0 なので、値が入っても production スコアを一切変えない（挙動不変）。
+/// running_style（#329）と同じ撤退前提 arc。この不変が破れると本番予想を静かに動かすため回帰で固定する。
+#[test]
+fn affinity_factors_at_zero_weight_do_not_change_score() {
+    // 相性 factor 以外は等しく、相性 factor だけ極端な高レートで差が出る余地を最大化する。
+    let base = HorseFactors {
+        course_gate: Some(fs(RateTriple::default())),
+        horse_surface: Some(fs(RateTriple::default())),
+        horse_distance: Some(fs(RateTriple::default())),
+        jockey_surface: None,
+        horse_track_condition: None,
+        trainer_surface: None,
+        jockey_venue: None,
+        jockey_distance: None,
+        jockey_horse_combo: None,
+        horse_venue: None,
+        recent_form: None,
+        weight_carried: None,
+        jockey_recent_form: None,
+        running_style: None,
+    };
+    let hot = fs(RateTriple {
+        win: 1.0,
+        place: 1.0,
+        show: 1.0,
+    });
+    let with_affinity = HorseFactors {
+        jockey_venue: Some(hot),
+        jockey_distance: Some(hot),
+        jockey_horse_combo: Some(hot),
+        horse_venue: Some(hot),
+        ..base.clone()
+    };
+    // production も default も相性 weight は None → const 0.0。両 config で不変を確認する。
+    for cfg in [EstimationConfig::default(), EstimationConfig::production()] {
+        let s_base = raw_score(&base, |r| r.win, &cfg);
+        let s_aff = raw_score(&with_affinity, |r| r.win, &cfg);
+        assert!(
+            (s_base - s_aff).abs() < 1e-12,
+            "weight 0 の相性 factor がスコアを変えた: base={s_base}, with={s_aff}"
+        );
+    }
+}
+
+/// backtest sweep 用に、相性 factor の重み override（`config.*_weight = Some(w>0)`）が実際に
+/// スコアへ寄与すること（lift 計測の前提）。override 経路が死んでいると sweep が無意味になるため固定する。
+#[test]
+fn affinity_weight_override_contributes_to_score() {
+    let base = HorseFactors {
+        course_gate: Some(fs(RateTriple::default())),
+        horse_surface: Some(fs(RateTriple::default())),
+        horse_distance: Some(fs(RateTriple::default())),
+        jockey_surface: None,
+        horse_track_condition: None,
+        trainer_surface: None,
+        jockey_venue: Some(fs(RateTriple {
+            win: 1.0,
+            place: 1.0,
+            show: 1.0,
+        })),
+        jockey_distance: None,
+        jockey_horse_combo: None,
+        horse_venue: None,
+        recent_form: None,
+        weight_carried: None,
+        jockey_recent_form: None,
+        running_style: None,
+    };
+    let mut cfg = EstimationConfig::default();
+    let s_off = raw_score(&base, |r| r.win, &cfg); // weight 0（不関与）
+    cfg.jockey_venue_weight = Some(2.0);
+    let s_on = raw_score(&base, |r| r.win, &cfg); // weight 2.0（高レート venue で加点）
+    assert!(
+        s_on > s_off,
+        "override weight>0 で相性 factor が加点されるはず: off={s_off}, on={s_on}"
+    );
+}
+
 /// 馬場状態項（#73）が欠落項で不当に減点されないこと（重み付き平均、ADR 0007 の流儀）。
 /// レートが全 factor で等しいなら馬場項の有無でスコアは変わらず、「平均からの差」としてのみ効く。
 #[test]
@@ -781,6 +928,10 @@ fn track_condition_none_not_penalized() {
         jockey_surface: None,
         horse_track_condition: Some(fs(base)),
         trainer_surface: None,
+        jockey_venue: None,
+        jockey_distance: None,
+        jockey_horse_combo: None,
+        horse_venue: None,
         recent_form: None,
         weight_carried: None,
         jockey_recent_form: None,
@@ -845,6 +996,10 @@ fn track_condition_keeps_monotonicity_in_estimate() {
                     show: 0.1,
                 })),
                 trainer_surface: None,
+                jockey_venue: None,
+                jockey_distance: None,
+                jockey_horse_combo: None,
+                horse_venue: None,
                 recent_form: None,
                 weight_carried: None,
                 jockey_recent_form: None,
@@ -872,6 +1027,10 @@ fn track_condition_keeps_monotonicity_in_estimate() {
                 jockey_surface: None,
                 horse_track_condition: None,
                 trainer_surface: None,
+                jockey_venue: None,
+                jockey_distance: None,
+                jockey_horse_combo: None,
+                horse_venue: None,
                 recent_form: None,
                 weight_carried: None,
                 jockey_recent_form: None,
@@ -908,6 +1067,10 @@ fn trainer_absent_not_penalized() {
         jockey_surface: None,
         trainer_surface: Some(fs(base)),
         horse_track_condition: None,
+        jockey_venue: None,
+        jockey_distance: None,
+        jockey_horse_combo: None,
+        horse_venue: None,
         recent_form: None,
         weight_carried: None,
         jockey_recent_form: None,
@@ -952,6 +1115,10 @@ fn shrink_cfg(m: f64) -> EstimationConfig {
         trend_n: 1,
         jockey_recent_form_weight: None,
         running_style_weight: None,
+        jockey_venue_weight: None,
+        jockey_distance_weight: None,
+        jockey_horse_combo_weight: None,
+        horse_venue_weight: None,
         win_power: None,
         place_show_power: None,
         impute_missing_factors: false,
@@ -994,6 +1161,10 @@ fn shrinkage_pulls_low_sample_toward_prior() {
         jockey_surface: None,
         trainer_surface: None,
         horse_track_condition: None,
+        jockey_venue: None,
+        jockey_distance: None,
+        jockey_horse_combo: None,
+        horse_venue: None,
         recent_form: None,
         weight_carried: None,
         jockey_recent_form: None,
@@ -1036,6 +1207,10 @@ fn shrinkage_keeps_low_sample_horse_above_zero() {
         jockey_surface: None,
         trainer_surface: None,
         horse_track_condition: None,
+        jockey_venue: None,
+        jockey_distance: None,
+        jockey_horse_combo: None,
+        horse_venue: None,
         recent_form: None,
         weight_carried: None,
         jockey_recent_form: None,
@@ -1778,6 +1953,10 @@ fn surf(win: Option<f64>) -> HorseFactors {
         jockey_surface: None,
         trainer_surface: None,
         horse_track_condition: None,
+        jockey_venue: None,
+        jockey_distance: None,
+        jockey_horse_combo: None,
+        horse_venue: None,
         recent_form: None,
         weight_carried: None,
         jockey_recent_form: None,
@@ -1932,6 +2111,10 @@ fn all_factors_missing_horse_imputes_to_weight_nonzero() {
         jockey_surface: Some(prior),
         trainer_surface: Some(prior),
         horse_track_condition: Some(prior),
+        jockey_venue: Some(prior),
+        jockey_distance: Some(prior),
+        jockey_horse_combo: Some(prior),
+        horse_venue: Some(prior),
     };
     approx(raw_score_with_impute(&bare, |r| r.win, &cfg, &imp), prior);
 }

@@ -214,6 +214,7 @@ impl<R: StatsRepository + OddsRepository, P: PdfParser, F: PdfFetcher> Interacto
                 let mean_weight =
                     field_mean_weight(starters.iter().filter_map(|r| r.weight_carried));
                 let race_ctx = RaceContext {
+                    venue: race.venue,
                     surface: race.surface,
                     distance: race.distance,
                     track_condition: race.track_condition,

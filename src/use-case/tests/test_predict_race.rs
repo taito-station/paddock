@@ -87,6 +87,8 @@ fn horse_stats_with_surface_win(win_rate: f64) -> HorseStatsRow {
         by_gate_group: vec![],
         by_track_condition: vec![],
         by_popularity_band: vec![],
+        by_venue: vec![],
+        by_jockey: vec![],
         overall: make_group("全体", starts, wins, wins + 1, wins + 2),
     }
 }
@@ -161,6 +163,8 @@ impl StatsRepository for MockRepo {
                 .cloned()
                 .unwrap_or_default(),
             by_gate_group: vec![],
+            by_venue: vec![],
+            by_distance_band: vec![],
         })
     }
     async fn trainer_stats(

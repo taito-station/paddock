@@ -7,7 +7,8 @@ use super::model::JockeyFormRun;
 use super::model::{FactorStat, HorseFactors, RateTriple};
 use super::parse::{parse_corner_positions, parse_margin_lengths};
 use super::weights::{
-    COURSE_GATE_WEIGHT, DISTANCE_WEIGHT, FORM_WEIGHT, JOCKEY_RECENT_FORM_WEIGHT, JOCKEY_WEIGHT,
+    COURSE_GATE_WEIGHT, DISTANCE_WEIGHT, FORM_WEIGHT, HORSE_VENUE_WEIGHT, JOCKEY_DISTANCE_WEIGHT,
+    JOCKEY_HORSE_COMBO_WEIGHT, JOCKEY_RECENT_FORM_WEIGHT, JOCKEY_VENUE_WEIGHT, JOCKEY_WEIGHT,
     MARGIN_CAP_LENGTHS, POP_GAP_K, PRIOR_RATE, RUNNING_STYLE_WEIGHT, SURFACE_WEIGHT, TIME_DEV_CAP,
     TRACK_CONDITION_WEIGHT, TRAINER_WEIGHT, WEIGHT_CARRIED_CAP_KG, WEIGHT_CARRIED_WEIGHT,
     WEIGHT_CHANGE_CAP,
@@ -49,6 +50,12 @@ pub(crate) struct FactorImpute {
     pub jockey_surface: Option<f64>,
     pub trainer_surface: Option<f64>,
     pub horse_track_condition: Option<f64>,
+    // #350 相性 factor（measure-first）。他 stat factor と同じ流儀で field mean 補完対象に含める。
+    // 本番は weight 0 のため補完値があっても score には寄与しない（accum_stat が w=0 で数えない）。
+    pub jockey_venue: Option<f64>,
+    pub jockey_distance: Option<f64>,
+    pub jockey_horse_combo: Option<f64>,
+    pub horse_venue: Option<f64>,
 }
 
 impl FactorImpute {
@@ -60,6 +67,10 @@ impl FactorImpute {
         jockey_surface: None,
         trainer_surface: None,
         horse_track_condition: None,
+        jockey_venue: None,
+        jockey_distance: None,
+        jockey_horse_combo: None,
+        horse_venue: None,
     };
 
     /// レース内の全馬 `factors` から selector `rate` の field mean を計算して補完値を作る。各 stat factor で
@@ -78,6 +89,11 @@ impl FactorImpute {
         let (mut s_jk, mut n_jk) = (0.0, 0u32);
         let (mut s_tr, mut n_tr) = (0.0, 0u32);
         let (mut s_tc, mut n_tc) = (0.0, 0u32);
+        // #350 相性 factor（measure-first）。
+        let (mut s_jv, mut n_jv) = (0.0, 0u32);
+        let (mut s_jd, mut n_jd) = (0.0, 0u32);
+        let (mut s_jc, mut n_jc) = (0.0, 0u32);
+        let (mut s_hv, mut n_hv) = (0.0, 0u32);
         for f in factors {
             if let Some(fs) = &f.course_gate {
                 s_cg += factor_value(fs, rate, config);
@@ -103,6 +119,22 @@ impl FactorImpute {
                 s_tc += factor_value(fs, rate, config);
                 n_tc += 1;
             }
+            if let Some(fs) = &f.jockey_venue {
+                s_jv += factor_value(fs, rate, config);
+                n_jv += 1;
+            }
+            if let Some(fs) = &f.jockey_distance {
+                s_jd += factor_value(fs, rate, config);
+                n_jd += 1;
+            }
+            if let Some(fs) = &f.jockey_horse_combo {
+                s_jc += factor_value(fs, rate, config);
+                n_jc += 1;
+            }
+            if let Some(fs) = &f.horse_venue {
+                s_hv += factor_value(fs, rate, config);
+                n_hv += 1;
+            }
         }
         let prior = rate(&PRIOR_RATE);
         // present が 2 頭未満なら平均が単一馬（または空）に潰れてレース内中立にならないため prior で埋める。
@@ -114,6 +146,10 @@ impl FactorImpute {
             jockey_surface: mean_or_prior(s_jk, n_jk),
             trainer_surface: mean_or_prior(s_tr, n_tr),
             horse_track_condition: mean_or_prior(s_tc, n_tc),
+            jockey_venue: mean_or_prior(s_jv, n_jv),
+            jockey_distance: mean_or_prior(s_jd, n_jd),
+            jockey_horse_combo: mean_or_prior(s_jc, n_jc),
+            horse_venue: mean_or_prior(s_hv, n_hv),
         }
     }
 }
@@ -187,6 +223,32 @@ pub(crate) fn raw_score_with_impute(
         &factors.horse_track_condition,
         TRACK_CONDITION_WEIGHT,
         impute.horse_track_condition,
+    );
+    // #350 相性 factor（measure-first）。本番は const 0.0 で寄与ゼロ（挙動不変）。backtest は
+    // config の `*_weight` override（`--jockey-venue-weight` 等）で掃引して lift を測る。
+    accum_stat(
+        &factors.jockey_venue,
+        config.jockey_venue_weight.unwrap_or(JOCKEY_VENUE_WEIGHT),
+        impute.jockey_venue,
+    );
+    accum_stat(
+        &factors.jockey_distance,
+        config
+            .jockey_distance_weight
+            .unwrap_or(JOCKEY_DISTANCE_WEIGHT),
+        impute.jockey_distance,
+    );
+    accum_stat(
+        &factors.jockey_horse_combo,
+        config
+            .jockey_horse_combo_weight
+            .unwrap_or(JOCKEY_HORSE_COMBO_WEIGHT),
+        impute.jockey_horse_combo,
+    );
+    accum_stat(
+        &factors.horse_venue,
+        config.horse_venue_weight.unwrap_or(HORSE_VENUE_WEIGHT),
+        impute.horse_venue,
     );
     if let Some(form) = factors.recent_form {
         let fw = config.recent_form_weight.unwrap_or(FORM_WEIGHT);

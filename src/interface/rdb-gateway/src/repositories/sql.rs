@@ -304,6 +304,106 @@ pub(crate) async fn entity_stats_batch(
     Ok(out)
 }
 
+/// 距離帯（band）の (ラベル, 述語)。相性 factor（#350）の jockey_distance が使う。ラベルは
+/// build_factors の `distance_band_label` と、述語は horse_stats の `group_by_distance_band` と
+/// 完全一致させる（跨るラベルが factor の照合キーになるため drift は factor を静かに欠落させる）。
+pub(crate) const DISTANCE_BAND_PREDS: &[(&str, &str)] = &[
+    ("〜1400m", "races.distance <= 1400"),
+    ("1500〜1800m", "races.distance BETWEEN 1500 AND 1800"),
+    ("1900〜2200m", "races.distance BETWEEN 1900 AND 2200"),
+    ("2300m〜", "races.distance >= 2300"),
+];
+
+/// 動的キー GROUP BY の成績集計（#350 相性 factor）。`results.<entity_col> = $1` に一致する成績を
+/// `group_col`（`races.venue` / `results.jockey` / 距離帯 CASE 等の **code 定数式**）別に集計し、
+/// group_col 値をラベルにした `Vec<GroupStat>` を返す。固定ラベル版（`entity_stats` の by_surface 等）と
+/// 違い、走った場・騎乗騎手など可変集合をそのまま返す。`entity_col`/`group_col` は SQL に直接埋め込む
+/// ため code 定数のみ（`entity_stats` と同じ二重防御）。`value`/`cutoff` はプレースホルダでバインド。
+/// cutoff で as-of リーク（`races.date < cutoff`）を防ぐ。
+pub(crate) async fn dynamic_group_stats(
+    pool: &PgPool,
+    entity_col: &str,
+    value: &str,
+    group_col: &str,
+    cutoff: Option<&str>,
+) -> crate::error::Result<Vec<GroupStat>> {
+    debug_assert!(
+        matches!(entity_col, "jockey" | "horse_name"),
+        "entity_col must be a known literal, got {entity_col:?}"
+    );
+    let q = format!(
+        r#"
+        SELECT
+            {group_col} AS k,
+            {STATS_AGG_EXPRS}
+        FROM results
+        INNER JOIN races ON races.race_id = results.race_id
+        WHERE results.{entity_col} = $1
+          AND results.finishing_position IS NOT NULL
+          AND ({group_col}) IS NOT NULL
+          {date}
+        GROUP BY {group_col}
+        "#,
+        date = date_lt_pred(cutoff, "$2"),
+    );
+    let mut query =
+        sqlx::query_as::<_, (String, i64, i64, i64, i64)>(sqlx::AssertSqlSafe(q)).bind(value);
+    if let Some(d) = cutoff {
+        query = query.bind(d);
+    }
+    let rows = query.fetch_all(pool).await?;
+    Ok(rows
+        .into_iter()
+        .map(|(label, s, w, p, sh)| group_stat_from_row(&label, (s, w, p, sh)))
+        .collect())
+}
+
+/// [`dynamic_group_stats`] のバッチ版（#350）。`results.<entity_col> = ANY($1)` を `(entity, group_col)` で
+/// 一括集計し、`entity 値 -> Vec<GroupStat>` を返す（per-item と同一の述語・集計式・ラベル）。
+/// 結果に現れない entity は map に載らない（呼び出し側が空 `Vec` を補完する）。
+pub(crate) async fn dynamic_group_stats_batch(
+    pool: &PgPool,
+    entity_col: &str,
+    values: &[&str],
+    group_col: &str,
+    cutoff: Option<&str>,
+) -> crate::error::Result<HashMap<String, Vec<GroupStat>>> {
+    debug_assert!(
+        matches!(entity_col, "jockey" | "horse_name"),
+        "entity_col must be a known literal, got {entity_col:?}"
+    );
+    let q = format!(
+        r#"
+        SELECT
+            results.{entity_col} AS e,
+            {group_col} AS k,
+            {STATS_AGG_EXPRS}
+        FROM results
+        INNER JOIN races ON races.race_id = results.race_id
+        WHERE results.{entity_col} = ANY($1)
+          AND results.finishing_position IS NOT NULL
+          AND ({group_col}) IS NOT NULL
+          {date}
+        GROUP BY results.{entity_col}, {group_col}
+        "#,
+        date = date_lt_pred(cutoff, "$2"),
+    );
+    let mut query =
+        sqlx::query_as::<_, (String, String, i64, i64, i64, i64)>(sqlx::AssertSqlSafe(q))
+            .bind(values);
+    if let Some(d) = cutoff {
+        query = query.bind(d);
+    }
+    let rows = query.fetch_all(pool).await?;
+    let mut out: HashMap<String, Vec<GroupStat>> = HashMap::new();
+    for (entity, label, s, w, p, sh) in rows {
+        out.entry(entity)
+            .or_default()
+            .push(group_stat_from_row(&label, (s, w, p, sh)));
+    }
+    Ok(out)
+}
+
 /// `as_of` カットオフ用の `AND races.date < <placeholder>` 述語片を返す。
 ///
 /// `cutoff` が `None`（全期間集計）なら空文字。日付値は呼び出し側がプレースホルダで

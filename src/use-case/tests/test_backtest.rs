@@ -61,6 +61,8 @@ fn horse_stats_with_surface_win(win_rate: f64) -> HorseStatsRow {
         by_gate_group: vec![],
         by_track_condition: vec![],
         by_popularity_band: vec![],
+        by_venue: vec![],
+        by_jockey: vec![],
         overall: make_group("全体", starts, wins),
     }
 }
@@ -568,6 +570,10 @@ async fn backtest_wires_recency_into_horse_factors() {
         trend_n: 1,
         jockey_recent_form_weight: None,
         running_style_weight: None,
+        jockey_venue_weight: None,
+        jockey_distance_weight: None,
+        jockey_horse_combo_weight: None,
+        horse_venue_weight: None,
         win_power: None,
         place_show_power: None,
         impute_missing_factors: false,
