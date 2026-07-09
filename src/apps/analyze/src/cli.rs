@@ -102,6 +102,19 @@ pub enum Command {
         /// スイープ（0.0/0.1/0.25/0.5/1.0 等）で最適重み（または棄却）を探す（ADR 0038）。
         #[arg(long)]
         jockey_form_weight: Option<f64>,
+        /// 騎手×競馬場（venue）項の重みオーバーライド（#350 measure-first）。未指定は 0.0（無効）。
+        /// スイープ（0.0/0.5/1.0/2.0 等）で lift を測り採否を判定する（安易に上げない）。
+        #[arg(long)]
+        jockey_venue_weight: Option<f64>,
+        /// 騎手×距離帯項の重みオーバーライド（#350）。未指定は 0.0（無効）。スイープで lift 判定。
+        #[arg(long)]
+        jockey_distance_weight: Option<f64>,
+        /// 騎手×馬コンビ項の重みオーバーライド（#350）。未指定は 0.0（無効）。スイープで lift 判定。
+        #[arg(long)]
+        jockey_horse_combo_weight: Option<f64>,
+        /// 馬×競馬場（venue）項の重みオーバーライド（#350）。未指定は 0.0（無効）。スイープで lift 判定。
+        #[arg(long)]
+        horse_venue_weight: Option<f64>,
         /// win_prob 冪変換のγ（#246）。`win'_i ∝ win_i^γ` で再正規化し穴馬の 1 着過大評価を縮約する。
         /// 未指定は no-op（現行挙動）。スイープ（1.1/1.25/1.5/2.0 等。γ<1 は逆方向）で
         /// 単勝校正・人気帯校正・回収を比較する（ADR 0042）。

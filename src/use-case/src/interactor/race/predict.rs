@@ -4,7 +4,7 @@ use chrono::NaiveDate;
 use paddock_domain::{
     EstimationConfig, ExplainCategory, FactorExplanation, FactorStat, HorseEntry, HorseExplanation,
     HorseFactors, HorseName, HorseProbability, JockeyName, PrevRunSummary, RaceId, RaceOdds,
-    RateTriple, RecentRun, StandardTimes, Surface, TrackCondition, TrainerName,
+    RateTriple, RecentRun, StandardTimes, Surface, TrackCondition, TrainerName, Venue,
 };
 
 use crate::error::{Error, Result};
@@ -154,6 +154,7 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: 
         // netkeiba 出馬表は斤量あり、PDF 出馬表は全馬 None なので平均も None（斤量項なし）。
         let mean_weight = field_mean_weight(card.entries.iter().filter_map(|e| e.weight_carried));
         let race_ctx = RaceContext {
+            venue: card.venue,
             surface: card.surface,
             distance: card.distance,
             track_condition,
@@ -411,6 +412,8 @@ pub(crate) fn running_style_from_runs(runs: &[RecentRun]) -> Option<f64> {
 
 /// `build_factors` に渡すレース側の条件（全馬共通）。
 pub(crate) struct RaceContext {
+    /// 開催場（#350 相性 factor の venue 別成績の照合キー。`Venue::as_jp()`＝`races.venue` の値）。
+    pub venue: Venue,
     pub surface: Surface,
     pub distance: u32,
     /// 評価対象レースの馬場状態（#73）。未確定なら `None`（馬場項なし）。
@@ -448,6 +451,8 @@ pub(crate) fn build_factors(
     let gate_label = gate_group_label(entry.gate_num.value());
     let surf_label = surface_label(race.surface);
     let dist_label = distance_band_label(race.distance);
+    // #350 相性 factor の照合キー: 競馬場は日本語場名（by_venue のラベル＝races.venue の値と一致）。
+    let venue_label = race.venue.as_jp();
 
     // recency 有効時は horse 系 factor を日付系列の時間減衰で評価する。無効時・系列なしは集計レート。
     let recency_cfg = config.recency.zip(recency);
@@ -485,6 +490,16 @@ pub(crate) fn build_factors(
         trainer_surface: trainer.and_then(|t| stat_to_triple_opt(&t.by_surface, surf_label)),
         // 馬場状態が未確定のレース・該当馬場での出走実績が無い馬は None（#73）。
         horse_track_condition,
+        // #350 相性 factor（measure-first・本番は重み 0 で挙動不変）。既存 stat factor と同じ流儀で
+        // 母数 0・欠落は None（stat_to_triple_opt）。騎手系は騎手未登録も None（and_then の外側）。
+        jockey_venue: jockey.and_then(|j| stat_to_triple_opt(&j.by_venue, venue_label)),
+        jockey_distance: jockey.and_then(|j| stat_to_triple_opt(&j.by_distance_band, dist_label)),
+        // 騎手×馬コンビ: この馬の騎手別成績（horse.by_jockey）を現騎手名で引く。騎手未登録は None。
+        jockey_horse_combo: entry
+            .jockey
+            .as_ref()
+            .and_then(|jn| stat_to_triple_opt(&horse.by_jockey, jn.value())),
+        horse_venue: stat_to_triple_opt(&horse.by_venue, venue_label),
         recent_form,
         // 斤量のレース内相対シグナル（#135）。当該馬の斤量と field 平均斤量の両方があるときのみ項を立てる。
         // PDF 出馬表（斤量なし）・field 平均が出せないレースは None（母数除外）。
@@ -732,7 +747,7 @@ fn distance_band_label(distance: u32) -> &'static str {
 mod tests {
     use chrono::NaiveDate;
     use paddock_domain::{
-        ExplainCategory, RecentRun, StandardTimes, Surface, Verdict,
+        ExplainCategory, RecentRun, StandardTimes, Surface, Venue, Verdict,
         horse_result::{
             FinishingPosition, GateNum, HorseName, HorseNum, HorseResult, ResultStatus,
         },
@@ -765,6 +780,8 @@ mod tests {
             by_gate_group: vec![],
             by_track_condition: vec![],
             by_popularity_band: vec![],
+            by_venue: vec![],
+            by_jockey: vec![],
             overall: GroupStat::new("overall"),
         }
     }
@@ -793,6 +810,7 @@ mod tests {
             ..empty_horse_stats()
         };
         let race = RaceContext {
+            venue: Venue::Tokyo,
             surface: Surface::Turf,
             distance: 1600,
             track_condition: None, // 馬場 factor なし
@@ -875,6 +893,7 @@ mod tests {
             by_gate_group: vec![], // コース統計も空
         };
         let race = RaceContext {
+            venue: Venue::Tokyo,
             surface: Surface::Turf,
             distance: 1600,
             track_condition: None,
@@ -930,6 +949,7 @@ mod tests {
             by_gate_group: vec![],
         };
         let race = RaceContext {
+            venue: Venue::Tokyo,
             surface: Surface::Turf,
             distance: 1600,
             track_condition: Some(TrackCondition::Firm),
@@ -994,6 +1014,7 @@ mod tests {
         };
         // 馬場未確定(None) → 枠バイアスは提示しない（当日馬場が定まらないと条件セルを引けない）。
         let race = RaceContext {
+            venue: Venue::Tokyo,
             surface: Surface::Turf,
             distance: 1600,
             track_condition: None,

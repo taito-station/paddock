@@ -304,6 +304,137 @@ pub(crate) async fn entity_stats_batch(
     Ok(out)
 }
 
+/// 距離帯（band）の (ラベル, 述語)。相性 factor（#350）の jockey_distance が使う。ラベルは
+/// build_factors の `distance_band_label` と、述語は horse_stats の `group_by_distance_band` と
+/// 完全一致させる（跨るラベルが factor の照合キーになるため drift は factor を静かに欠落させる）。
+pub(crate) const DISTANCE_BAND_PREDS: &[(&str, &str)] = &[
+    ("〜1400m", "races.distance <= 1400"),
+    ("1500〜1800m", "races.distance BETWEEN 1500 AND 1800"),
+    ("1900〜2200m", "races.distance BETWEEN 1900 AND 2200"),
+    ("2300m〜", "races.distance >= 2300"),
+];
+
+/// `dynamic_group_stats(_batch)` の `group_col` が **code 定数の列参照 or CASE 式** であることを
+/// 機械的に担保する（#350・二重防御の対称化。`entity_col` の `matches!` guard と揃える）。現行の
+/// 呼び出しは `races.venue` / `results.jockey` / `case_from_preds(..)` 生成の `CASE ... END` のみで、
+/// いずれも単一引用符でリテラルを破らない code 定数。将来の呼び出し追加で外部入力が group_col に
+/// 混じる回帰を debug ビルドで即検知する（`case_from_preds` の label 側 debug_assert と同型の契約）。
+///
+/// **契約**: CASE 式を渡すときは必ず `case_from_preds` / `case_from_bands` 経由で生成すること
+/// （label 側の単一引用符が debug_assert 済みで注入不可）。本 guard は shape（`CASE` 始まり）しか
+/// 見ないため、`case_from_preds` を経由しない生の CASE 文字列（predicate 側に外部入力を含みうる）を
+/// 渡すと素通しになる。列参照は既知 2 種の厳密一致に限る。
+fn is_safe_group_col(group_col: &str) -> bool {
+    // 列参照は既知の 2 種を厳密一致で許可（`entity_col` の matches! と同型）。CASE 式は
+    // `case_from_preds` が label 側の単一引用符を debug_assert 済みで注入不可なので shape
+    // （`CASE` 始まり）で許可する（CASE 式は label リテラルの単一引用符を正当に含むため、
+    // 単一引用符の有無では判定しない）。
+    matches!(group_col, "races.venue" | "results.jockey") || group_col.starts_with("CASE")
+}
+
+/// 動的キー GROUP BY の成績集計（#350 相性 factor）。`results.<entity_col> = $1` に一致する成績を
+/// `group_col`（`races.venue` / `results.jockey` / 距離帯 CASE 等の **code 定数式**）別に集計し、
+/// group_col 値をラベルにした `Vec<GroupStat>` を返す。固定ラベル版（`entity_stats` の by_surface 等）と
+/// 違い、走った場・騎乗騎手など可変集合をそのまま返す。`entity_col`/`group_col` は SQL に直接埋め込む
+/// ため code 定数のみ（`entity_stats` と同じ二重防御）。`value`/`cutoff` はプレースホルダでバインド。
+/// cutoff で as-of リーク（`races.date < cutoff`）を防ぐ。
+pub(crate) async fn dynamic_group_stats(
+    pool: &PgPool,
+    entity_col: &str,
+    value: &str,
+    group_col: &str,
+    cutoff: Option<&str>,
+) -> crate::error::Result<Vec<GroupStat>> {
+    debug_assert!(
+        matches!(entity_col, "jockey" | "horse_name"),
+        "entity_col must be a known literal, got {entity_col:?}"
+    );
+    debug_assert!(
+        is_safe_group_col(group_col),
+        "group_col must be a code-constant column/CASE expr, got {group_col:?}"
+    );
+    let q = format!(
+        r#"
+        SELECT
+            {group_col} AS k,
+            {STATS_AGG_EXPRS}
+        FROM results
+        INNER JOIN races ON races.race_id = results.race_id
+        WHERE results.{entity_col} = $1
+          AND results.finishing_position IS NOT NULL
+          AND ({group_col}) IS NOT NULL
+          {date}
+        GROUP BY {group_col}
+        "#,
+        date = date_lt_pred(cutoff, "$2"),
+    );
+    let mut query =
+        sqlx::query_as::<_, (String, i64, i64, i64, i64)>(sqlx::AssertSqlSafe(q)).bind(value);
+    if let Some(d) = cutoff {
+        query = query.bind(d);
+    }
+    let rows = query.fetch_all(pool).await?;
+    Ok(rows
+        .into_iter()
+        .map(|(label, s, w, p, sh)| group_stat_from_row(&label, (s, w, p, sh)))
+        .collect())
+}
+
+/// [`dynamic_group_stats`] のバッチ版（#350）。`results.<entity_col> = ANY($1)` を `(entity, group_col)` で
+/// 一括集計し、`entity 値 -> Vec<GroupStat>` を返す（per-item と同一の述語・集計式・ラベル）。
+/// 結果に現れない entity は map に載らない（呼び出し側が空 `Vec` を補完する）。
+pub(crate) async fn dynamic_group_stats_batch(
+    pool: &PgPool,
+    entity_col: &str,
+    values: &[&str],
+    group_col: &str,
+    cutoff: Option<&str>,
+) -> crate::error::Result<HashMap<String, Vec<GroupStat>>> {
+    debug_assert!(
+        matches!(entity_col, "jockey" | "horse_name"),
+        "entity_col must be a known literal, got {entity_col:?}"
+    );
+    debug_assert!(
+        is_safe_group_col(group_col),
+        "group_col must be a code-constant column/CASE expr, got {group_col:?}"
+    );
+    // 空 values ガード（`entity_stats_batch` と対称）。`= ANY('{}')` は 0 行で無害だが、
+    // 無駄なクエリ発行を避けて呼び出し規約を揃える。
+    if values.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let q = format!(
+        r#"
+        SELECT
+            results.{entity_col} AS e,
+            {group_col} AS k,
+            {STATS_AGG_EXPRS}
+        FROM results
+        INNER JOIN races ON races.race_id = results.race_id
+        WHERE results.{entity_col} = ANY($1)
+          AND results.finishing_position IS NOT NULL
+          AND ({group_col}) IS NOT NULL
+          {date}
+        GROUP BY results.{entity_col}, {group_col}
+        "#,
+        date = date_lt_pred(cutoff, "$2"),
+    );
+    let mut query =
+        sqlx::query_as::<_, (String, String, i64, i64, i64, i64)>(sqlx::AssertSqlSafe(q))
+            .bind(values);
+    if let Some(d) = cutoff {
+        query = query.bind(d);
+    }
+    let rows = query.fetch_all(pool).await?;
+    let mut out: HashMap<String, Vec<GroupStat>> = HashMap::new();
+    for (entity, label, s, w, p, sh) in rows {
+        out.entry(entity)
+            .or_default()
+            .push(group_stat_from_row(&label, (s, w, p, sh)));
+    }
+    Ok(out)
+}
+
 /// `as_of` カットオフ用の `AND races.date < <placeholder>` 述語片を返す。
 ///
 /// `cutoff` が `None`（全期間集計）なら空文字。日付値は呼び出し側がプレースホルダで
@@ -392,6 +523,19 @@ mod tests {
     #[test]
     fn or_from_preds_single_has_no_or() {
         assert_eq!(or_from_preds(&[("A", "x = 1")]), "(x = 1)");
+    }
+
+    #[test]
+    fn is_safe_group_col_accepts_known_and_rejects_injection() {
+        use super::{DISTANCE_BAND_PREDS, case_from_preds, is_safe_group_col};
+        // 現行の全呼び出し形（列参照 2 種 + case_from_preds 生成の CASE 式）を許可。
+        assert!(is_safe_group_col("races.venue"));
+        assert!(is_safe_group_col("results.jockey"));
+        assert!(is_safe_group_col(&case_from_preds(DISTANCE_BAND_PREDS)));
+        // 単一引用符（リテラル注入）・未知の列は拒否。
+        assert!(!is_safe_group_col("races.venue; DROP TABLE races"));
+        assert!(!is_safe_group_col("'injected'"));
+        assert!(!is_safe_group_col("results.horse_name"));
     }
 
     #[test]

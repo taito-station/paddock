@@ -64,6 +64,12 @@ pub struct HorseStatsRow {
     pub by_gate_group: Vec<GroupStat>,
     pub by_track_condition: Vec<GroupStat>,
     pub by_popularity_band: Vec<GroupStat>,
+    /// 競馬場（venue）別成績（#350 measure-first）。ラベルは日本語場名（`races.venue` の値＝
+    /// `Venue::as_jp()` と一致）。当該馬が走ったことのある場のみ含む（動的キー GROUP BY）。
+    pub by_venue: Vec<GroupStat>,
+    /// 騎手別成績（#350 measure-first、騎手×馬コンビ用）。ラベルは騎手名（`results.jockey` の値）。
+    /// この馬に騎乗したことのある騎手のみ含む（動的キー GROUP BY）。build_factors が現騎手名で引く。
+    pub by_jockey: Vec<GroupStat>,
     pub overall: GroupStat,
 }
 
@@ -184,6 +190,11 @@ pub struct JockeyStatsRow {
     pub overall: GroupStat,
     pub by_surface: Vec<GroupStat>,
     pub by_gate_group: Vec<GroupStat>,
+    /// 競馬場（venue）別成績（#350 measure-first）。ラベルは日本語場名（`races.venue` の値＝
+    /// `Venue::as_jp()` と一致）。当該騎手が騎乗したことのある場のみ含む（動的キー GROUP BY）。
+    pub by_venue: Vec<GroupStat>,
+    /// 距離帯別成績（#350 measure-first）。ラベルは horse の距離帯（〜1400m 等）と同一区分。
+    pub by_distance_band: Vec<GroupStat>,
 }
 
 #[derive(Debug, Clone)]

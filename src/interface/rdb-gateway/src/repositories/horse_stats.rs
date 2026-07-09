@@ -7,7 +7,7 @@ use sqlx::PgPool;
 
 use crate::error::{Error, Result};
 
-use super::sql::date_lt_pred;
+use super::sql::{date_lt_pred, dynamic_group_stats, dynamic_group_stats_batch};
 
 /// `as_of = Some(d)` のとき各サブクエリに `races.date < d` を付与し、その日付より前の成績のみを
 /// 集計する（バックテストのリーク防止）。`results.race_id` は `NOT NULL REFERENCES races` のため、
@@ -49,6 +49,12 @@ pub async fn horse_stats(
 
     let by_popularity_band = group_by_popularity_band(pool, n, cutoff.as_deref()).await?;
 
+    // #350 相性 factor: 馬×競馬場（venue）・騎手×馬コンビ（この馬の戦績を騎手別に分割）。動的キー GROUP BY。
+    let by_venue =
+        dynamic_group_stats(pool, "horse_name", n, "races.venue", cutoff.as_deref()).await?;
+    let by_jockey =
+        dynamic_group_stats(pool, "horse_name", n, "results.jockey", cutoff.as_deref()).await?;
+
     let overall = overall_stat(pool, n, cutoff.as_deref()).await?;
 
     Ok(HorseStatsRow {
@@ -58,6 +64,8 @@ pub async fn horse_stats(
         by_gate_group,
         by_track_condition,
         by_popularity_band,
+        by_venue,
+        by_jockey,
         overall,
     })
 }
@@ -634,6 +642,25 @@ pub async fn horse_stats_batch(
         popularity_maps.push((*label, map));
     }
 
+    // #350 相性 factor（バッチ版）。venue（races.venue）・combo（results.jockey）とも動的キーで
+    // 全馬一括集計。結果に現れない馬は空 Vec（該当実績なし＝factor None）で補完する。
+    let venue_map = dynamic_group_stats_batch(
+        pool,
+        "horse_name",
+        &name_strs,
+        "races.venue",
+        cutoff.as_deref(),
+    )
+    .await?;
+    let jockey_map = dynamic_group_stats_batch(
+        pool,
+        "horse_name",
+        &name_strs,
+        "results.jockey",
+        cutoff.as_deref(),
+    )
+    .await?;
+
     let mut out = HashMap::with_capacity(unique.len());
     for name in &unique {
         let n = name.value();
@@ -661,6 +688,8 @@ pub async fn horse_stats_batch(
                     .iter()
                     .map(|(label, m)| group_stat_for(m, n, label))
                     .collect(),
+                by_venue: venue_map.get(n).cloned().unwrap_or_default(),
+                by_jockey: jockey_map.get(n).cloned().unwrap_or_default(),
                 overall: group_stat_for(&overall_map, n, "全体"),
             },
         );

@@ -33,6 +33,18 @@ pub struct EstimationConfig {
     /// 騎手直近フォーム項の重みオーバーライド（#221）。`None` のとき `weights::JOCKEY_RECENT_FORM_WEIGHT`
     /// を使う。backtest の `--jockey-form-weight` スイープ専用（ADR 0038）。predict 本番は `None`。
     pub jockey_recent_form_weight: Option<f64>,
+    /// 騎手×競馬場項の重みオーバーライド（#350 measure-first）。`None` のとき `weights::JOCKEY_VENUE_WEIGHT`
+    /// （0.0）を使う。backtest の `--jockey-venue-weight` スイープ専用。predict 本番は `None`（＝挙動不変）。
+    pub jockey_venue_weight: Option<f64>,
+    /// 騎手×距離帯項の重みオーバーライド（#350）。`None` のとき `weights::JOCKEY_DISTANCE_WEIGHT`（0.0）。
+    /// backtest の `--jockey-distance-weight` 専用。predict 本番は `None`。
+    pub jockey_distance_weight: Option<f64>,
+    /// 騎手×馬コンビ項の重みオーバーライド（#350）。`None` のとき `weights::JOCKEY_HORSE_COMBO_WEIGHT`（0.0）。
+    /// backtest の `--jockey-horse-combo-weight` 専用。predict 本番は `None`。
+    pub jockey_horse_combo_weight: Option<f64>,
+    /// 馬×競馬場項の重みオーバーライド（#350）。`None` のとき `weights::HORSE_VENUE_WEIGHT`（0.0）。
+    /// backtest の `--horse-venue-weight` 専用。predict 本番は `None`。
+    pub horse_venue_weight: Option<f64>,
     /// win_prob 冪変換 `win'_i ∝ win_i^gamma` のγ（#246）。`None` のとき no-op（後方互換）。
     /// `gamma > 1.0` で人気馬の win を相対強調し穴の 1 着過大評価を縮約する。ブレンド後の最終 win に
     /// 適用する（[`super::estimate::apply_win_power`]）。backtest の `--win-power` スイープ専用で、
@@ -66,6 +78,11 @@ impl Default for EstimationConfig {
             trend_n: 1,
             running_style_weight: None,
             jockey_recent_form_weight: None,
+            // #350 measure-first: 相性 factor は override 未指定なら const（0.0）で寄与ゼロ。
+            jockey_venue_weight: None,
+            jockey_distance_weight: None,
+            jockey_horse_combo_weight: None,
+            horse_venue_weight: None,
             win_power: None,
             place_show_power: None,
             impute_missing_factors: false,
@@ -117,6 +134,11 @@ impl EstimationConfig {
             running_style_weight: None,
             trend_n: 1, // #220 backtest にて N=2/3 は全指標悪化のため棄却（ADR-0036）
             jockey_recent_form_weight: None, // #221 暫定 weight（const）を使用。sweep は ADR 0038
+            // #350 Phase1: 相性 factor は measure-first で production 非組込（重み 0）。lift 判定後に採用値を入れる。
+            jockey_venue_weight: None,
+            jockey_distance_weight: None,
+            jockey_horse_combo_weight: None,
+            horse_venue_weight: None,
             // #246: γ=1.25 を採用（4891R sweep で単勝 LogLoss 0.1974→0.1954 最良・穴帯校正改善、
             // γ≥1.5 は LogLoss/Brier 悪化＋人気馬過剰補正で棄却）。詳細は ADR 0042。
             win_power: Some(RECOMMENDED_WIN_POWER),

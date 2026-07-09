@@ -41,6 +41,20 @@ pub struct HorseFactors {
     /// 馬場状態（良/稍重/重/不良）別の馬成績（#73）。対象レースの馬場状態が未確定、または
     /// 該当馬場での出走実績が無い馬は `None`（項と重みを母数から除外、ADR 0007 の欠落項扱い）。
     pub horse_track_condition: Option<FactorStat>,
+    /// 騎手×競馬場（venue）別成績（#350 measure-first）。当該騎手が当該場で騎乗実績を持たない・
+    /// 騎手未登録の馬は `None`（母数除外、既存 stat factor と統一）。本番は `JOCKEY_VENUE_WEIGHT=0.0`
+    /// で寄与ゼロ（dump 列のみ・backtest sweep で lift 判定）。jockey_surface（芝ダ）の競馬場粒度への深掘り。
+    pub jockey_venue: Option<FactorStat>,
+    /// 騎手×距離帯別成績（#350 measure-first）。当該騎手が当該距離帯で騎乗実績を持たない・騎手未登録の
+    /// 馬は `None`。本番は `JOCKEY_DISTANCE_WEIGHT=0.0` で寄与ゼロ（dump 列のみ）。距離帯は horse_distance と同一区分。
+    pub jockey_distance: Option<FactorStat>,
+    /// 騎手×その馬コンビの過去成績（#350 measure-first）。当該馬の過去走のうち当該騎手が騎乗した分の
+    /// 成績。同コンビ実績なし・騎手未登録は `None`。本番は `JOCKEY_HORSE_COMBO_WEIGHT=0.0` で寄与ゼロ
+    /// （dump 列のみ）。母数が薄く（同コンビは数走程度）縮約が強く効く前提。
+    pub jockey_horse_combo: Option<FactorStat>,
+    /// 馬×競馬場（venue）別成績（#350 measure-first）。当該馬が当該場で出走実績を持たない馬は `None`。
+    /// 本番は `HORSE_VENUE_WEIGHT=0.0` で寄与ゼロ（dump 列のみ）。horse_surface/distance の競馬場粒度への深掘り。
+    pub horse_venue: Option<FactorStat>,
     /// 前走フォーム [0,1]（0.5=中立）。前走が無い／有効な signal が無い馬は `None`。
     /// win/place/show に同値で寄与する（フォームは方向に依らず全体を底上げ／押し下げる）。
     pub recent_form: Option<f64>,

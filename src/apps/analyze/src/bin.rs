@@ -23,9 +23,10 @@ const CANDIDATE_LIMIT: u32 = 20;
 
 /// 特徴量ダンプ（#272 Phase A / #309）TSV の列数。[`FEATURE_DUMP_HEADER`] と [`feature_row_cells`] の
 /// 双方をこの不変条件で縛り、列ズレ（＝学習データの静かな汚染）を防ぐ（ユニットテストで担保）。
-/// 内訳: id3(race_id/date/horse_num) + 6 factor × (win,place,show,starts)=24 + signal4 + model3 + ラベル3。
+/// 内訳: id3(race_id/date/horse_num) + 10 factor × (win,place,show,starts)=40 + signal4 + model3 + ラベル3。
 /// signal4 = recent_form/weight_carried/jockey_recent_form/running_style（#329 Phase1 で running_style 追加）。
-const FEATURE_DUMP_COLUMNS: usize = 37;
+/// 10 factor = 既存 6 + #350 相性 4（jockey_venue/jockey_distance/jockey_horse_combo/horse_venue）。
+const FEATURE_DUMP_COLUMNS: usize = 53;
 
 /// 特徴量ダンプ（#272 Phase A / #309）TSV のヘッダ行。列順は [`feature_row_cells`] の行生成と一致させ、
 /// 列数は [`FEATURE_DUMP_COLUMNS`] と一致させる（いずれもユニットテストで担保）。`model_*` は内蔵モデルの
@@ -37,6 +38,10 @@ horse_distance_win\thorse_distance_place\thorse_distance_show\thorse_distance_st
 jockey_surface_win\tjockey_surface_place\tjockey_surface_show\tjockey_surface_starts\t\
 trainer_surface_win\ttrainer_surface_place\ttrainer_surface_show\ttrainer_surface_starts\t\
 horse_track_condition_win\thorse_track_condition_place\thorse_track_condition_show\thorse_track_condition_starts\t\
+jockey_venue_win\tjockey_venue_place\tjockey_venue_show\tjockey_venue_starts\t\
+jockey_distance_win\tjockey_distance_place\tjockey_distance_show\tjockey_distance_starts\t\
+jockey_horse_combo_win\tjockey_horse_combo_place\tjockey_horse_combo_show\tjockey_horse_combo_starts\t\
+horse_venue_win\thorse_venue_place\thorse_venue_show\thorse_venue_starts\t\
 recent_form\tweight_carried\tjockey_recent_form\trunning_style\t\
 model_win\tmodel_place\tmodel_show\t\
 finishing_position\twin_odds\tpopularity";
@@ -74,6 +79,11 @@ fn feature_row_cells(row: &FeatureRow) -> Vec<String> {
     push_stat(&mut cells, row.factors.jockey_surface);
     push_stat(&mut cells, row.factors.trainer_surface);
     push_stat(&mut cells, row.factors.horse_track_condition);
+    // #350 相性 factor（既存 6 factor の直後・signal4 の直前に 4 factor × 4 セル）。
+    push_stat(&mut cells, row.factors.jockey_venue);
+    push_stat(&mut cells, row.factors.jockey_distance);
+    push_stat(&mut cells, row.factors.jockey_horse_combo);
+    push_stat(&mut cells, row.factors.horse_venue);
     cells.push(cell_f64(row.factors.recent_form));
     cells.push(cell_f64(row.factors.weight_carried));
     cells.push(cell_f64(row.factors.jockey_recent_form));
@@ -259,6 +269,10 @@ async fn main() -> anyhow::Result<()> {
             recent_form_weight,
             trend_n,
             jockey_form_weight,
+            jockey_venue_weight,
+            jockey_distance_weight,
+            jockey_horse_combo_weight,
+            horse_venue_weight,
             win_power,
             place_show_power,
             impute_missing_factors,
@@ -271,6 +285,12 @@ async fn main() -> anyhow::Result<()> {
                 recent_form_weight,
                 trend_n,
                 jockey_form_weight,
+                AffinityWeights {
+                    jockey_venue: jockey_venue_weight,
+                    jockey_distance: jockey_distance_weight,
+                    jockey_horse_combo: jockey_horse_combo_weight,
+                    horse_venue: horse_venue_weight,
+                },
                 win_power,
                 place_show_power,
                 impute_missing_factors,
@@ -373,6 +393,16 @@ fn production_config_with_overrides(
 /// `--trend-n` は 1〜3 のみ許可。
 // 引数は backtest CLI の各スイープフラグと 1:1 対応（#75/#217/#220/#246/#283/#272）。まとめ struct 化は
 // clap 側と本関数で二重定義になり見通しを損なうため、フラグ列をそのまま受ける。
+/// #350 相性 factor の重み override（measure-first sweep）。`build_estimation_config` の引数肥大を
+/// 抑えるためまとめて渡す。未指定は各 factor の const（0.0）＝寄与ゼロ。
+#[derive(Debug, Clone, Copy, Default)]
+struct AffinityWeights {
+    jockey_venue: Option<f64>,
+    jockey_distance: Option<f64>,
+    jockey_horse_combo: Option<f64>,
+    horse_venue: Option<f64>,
+}
+
 #[allow(clippy::too_many_arguments)]
 fn build_estimation_config(
     shrinkage_m: Option<f64>,
@@ -380,6 +410,7 @@ fn build_estimation_config(
     recent_form_weight: Option<f64>,
     trend_n: u32,
     jockey_form_weight: Option<f64>,
+    affinity: AffinityWeights,
     win_power: Option<f64>,
     place_show_power: Option<f64>,
     impute_missing_factors: bool,
@@ -401,6 +432,19 @@ fn build_estimation_config(
     {
         anyhow::bail!("--jockey-form-weight must be a finite non-negative number, got {w}");
     }
+    // #350 相性 factor の weight override（有限非負のみ。recent_form_weight と同じ検証）。
+    for (flag, w) in [
+        ("--jockey-venue-weight", affinity.jockey_venue),
+        ("--jockey-distance-weight", affinity.jockey_distance),
+        ("--jockey-horse-combo-weight", affinity.jockey_horse_combo),
+        ("--horse-venue-weight", affinity.horse_venue),
+    ] {
+        if let Some(w) = w
+            && !(w.is_finite() && w >= 0.0)
+        {
+            anyhow::bail!("{flag} must be a finite non-negative number, got {w}");
+        }
+    }
     if !(1..=TREND_N_MAX).contains(&trend_n) {
         anyhow::bail!("--trend-n must be between 1 and {TREND_N_MAX}, got {trend_n}");
     }
@@ -411,6 +455,10 @@ fn build_estimation_config(
         trend_n,
         jockey_recent_form_weight: jockey_form_weight,
         running_style_weight: None,
+        jockey_venue_weight: affinity.jockey_venue,
+        jockey_distance_weight: affinity.jockey_distance,
+        jockey_horse_combo_weight: affinity.jockey_horse_combo,
+        horse_venue_weight: affinity.horse_venue,
         win_power,
         place_show_power,
         impute_missing_factors,
@@ -822,6 +870,10 @@ mod feature_dump_tests {
             jockey_surface: None,
             trainer_surface: None,
             horse_track_condition: None,
+            jockey_venue: None,
+            jockey_distance: None,
+            jockey_horse_combo: None,
+            horse_venue: None,
             recent_form: None,
             weight_carried: None,
             jockey_recent_form: None,
@@ -858,19 +910,19 @@ mod feature_dump_tests {
         assert_eq!(cells.len(), FEATURE_DUMP_COLUMNS);
         assert_eq!(cells[0], "2026-1-nakayama-1-1R");
         assert_eq!(cells[2], "7");
-        // factor 24 セル（cells[3..27]）は全欠落で空。
+        // factor 40 セル（cells[3..43]、#350 で 6→10 factor）は全欠落で空。
         assert!(
-            cells[3..27].iter().all(String::is_empty),
+            cells[3..43].iter().all(String::is_empty),
             "欠落 factor は空セル"
         );
-        // signal4（cells[27..31]、running_style 追加で 4 列）も欠落で空。
-        assert!(cells[27..31].iter().all(String::is_empty));
-        // 内蔵モデル予測3（cells[31..34]）は必ず実値。
-        assert_eq!(&cells[31..34], ["0.2", "0.3", "0.4"]);
+        // signal4（cells[43..47]、running_style 含む 4 列）も欠落で空。
+        assert!(cells[43..47].iter().all(String::is_empty));
+        // 内蔵モデル予測3（cells[47..50]）は必ず実値。
+        assert_eq!(&cells[47..50], ["0.2", "0.3", "0.4"]);
         // ラベルは実値（finishing_position=1, win_odds=4.0→"4", popularity=3）。
-        assert_eq!(cells[34], "1");
-        assert_eq!(cells[35], "4");
-        assert_eq!(cells[36], "3");
+        assert_eq!(cells[50], "1");
+        assert_eq!(cells[51], "4");
+        assert_eq!(cells[52], "3");
     }
 
     /// 実値を持つ factor は (win,place,show,starts) の 4 セルに展開され、欠落ラベルは空になること。
@@ -885,7 +937,7 @@ mod feature_dump_tests {
             },
             starts: 10,
         });
-        // running_style に実値を入れ、signal4 の末尾セル(cells[30])に正しい位置で載ることを確認する
+        // running_style に実値を入れ、signal4 の末尾セル(cells[46])に正しい位置で載ることを確認する
         // （#329 Phase1・列順デグレ検出。None 経路は別テストで担保）。
         factors.running_style = Some(0.75);
         let row = FeatureRow {
@@ -903,14 +955,14 @@ mod feature_dump_tests {
         let cells = feature_row_cells(&row);
         // horse_surface は course_gate(3..7) の次の cells[7..11]。
         assert_eq!(&cells[7..11], ["0.3", "0.4", "0.5", "10"]);
-        // running_style は signal4 の末尾セル cells[30]（jockey_recent_form の直後）。
-        assert_eq!(cells[30], "0.75");
-        // 内蔵モデル予測（cells[31..34]）は欠落しない。
-        assert_eq!(&cells[31..34], ["0.1", "0.2", "0.3"]);
+        // running_style は signal4 の末尾セル cells[46]（jockey_recent_form の直後）。
+        assert_eq!(cells[46], "0.75");
+        // 内蔵モデル予測（cells[47..50]）は欠落しない。
+        assert_eq!(&cells[47..50], ["0.1", "0.2", "0.3"]);
         // 欠落ラベルは空セル。
-        assert_eq!(cells[34], "");
-        assert_eq!(cells[35], "");
-        assert_eq!(cells[36], "");
+        assert_eq!(cells[50], "");
+        assert_eq!(cells[51], "");
+        assert_eq!(cells[52], "");
     }
 
     /// IO 本体 `write_feature_dump` が「ヘッダ行 + 各行 = `feature_row_cells` の TSV 連結」を出力し、
