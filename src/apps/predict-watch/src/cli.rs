@@ -42,6 +42,13 @@ pub struct Cli {
     #[arg(long, default_value_t = 5000)]
     pub race_budget: u64,
 
+    /// 特定レースだけ予算を上書きする（#342・per-race 増額）。`<race_id>=<円>` 形式で、複数レースは
+    /// フラグを繰り返す（例: `--race-budget-override 2026-3-hakodate-2-6R=7000`）。指定レースは
+    /// その予算で買い目を組成し `slip.race_budget` に記録する（軸ロック ADR 0060: 軸・点数・相手は
+    /// 不変で金額だけ増やす人間の執行入力。未指定レースは `--race-budget` 既定を使う）。
+    #[arg(long = "race-budget-override", value_name = "RACE_ID=YEN")]
+    pub race_budget_overrides: Vec<String>,
+
     /// 市場単勝ブレンドのモデル重み α（blended = α·model + (1-α)·market）。未指定なら本番既定 α=0.2。
     /// 値を渡せば上書きするが、ブレンド無効化（predict の α=None 経路）は CLI からは選べない。
     #[arg(long)]

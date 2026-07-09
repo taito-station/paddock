@@ -1,9 +1,10 @@
+use std::collections::HashMap;
 use std::time::Duration as StdDuration;
 
 use chrono::{Duration, Local, NaiveTime, Offset, Utc};
 use paddock_domain::{
-    BetMethod, Portfolio, PortfolioConfig, RECOMMENDED_MARKET_BLEND_ALPHA, Race, RaceClass, Venue,
-    build_portfolio, race_roughness,
+    BetMethod, Portfolio, PortfolioConfig, RECOMMENDED_MARKET_BLEND_ALPHA, Race, RaceClass, RaceId,
+    Venue, build_portfolio, race_roughness,
 };
 use paddock_use_case::PredictionViews;
 use predict_format::{format_explanations, format_probs, format_probs_with_market};
@@ -151,13 +152,64 @@ fn has_result(race: &Race) -> bool {
     race.track_condition.is_some() || !race.results.is_empty()
 }
 
+/// `--race-budget-override <race_id>=<円>` の並びを `race_id → 予算(円)` マップにパースする（#342）。
+/// 各要素は 1 個の `=` で分割し、左辺は `RaceId` として**不正文字を早期に弾く**（`_` 等。ただし
+/// valid-format な pid 取り違えは形式検証を通るため runtime の unmatched 警告で検出する二段構え）、
+/// 右辺は正の整数（円）としてパースする。重複 race_id は誤設定として弾く（後勝ちで黙って上書きしない）。
+/// 予算は **100 円以上**を要求する（`build_portfolio` は券種予算を 100 円単位に floor するため、100 円
+/// 未満は全券種 0 円＝空伝票になり増額用途として無意味。100 円単位への切り捨て自体は build_portfolio に
+/// 委ねる）。空入力は空マップ（override なし）。純関数として単体テストする。
+fn parse_race_budget_overrides(entries: &[String]) -> anyhow::Result<HashMap<String, u64>> {
+    let mut out = HashMap::with_capacity(entries.len());
+    for entry in entries {
+        let (raw_id, raw_yen) = entry.split_once('=').ok_or_else(|| {
+            anyhow::anyhow!(
+                "--race-budget-override は `<race_id>=<円>` 形式で指定してください: {entry:?}"
+            )
+        })?;
+        let race_id = RaceId::try_from(raw_id.trim()).map_err(|e| {
+            anyhow::anyhow!("--race-budget-override の race_id が不正です（{raw_id:?}）: {e}")
+        })?;
+        let yen: u64 = raw_yen.trim().parse().map_err(|_| {
+            anyhow::anyhow!(
+                "--race-budget-override の予算は正の整数で指定してください: {raw_yen:?}"
+            )
+        })?;
+        if yen < 100 {
+            anyhow::bail!(
+                "--race-budget-override の予算は 100 円以上で指定してください（100 円未満は空伝票になります）: {entry:?}"
+            );
+        }
+        let key = race_id.value().to_string();
+        if out.insert(key, yen).is_some() {
+            anyhow::bail!(
+                "--race-budget-override で同じ race_id を複数回指定しています: {}",
+                race_id.value()
+            );
+        }
+    }
+    Ok(out)
+}
+
+/// 当該レースの予算（円）を解決する（#342）。override があればそのレースだけ per-race 値、無ければ
+/// 既定 `--race-budget`。予算は `build_portfolio` の配分額にのみ効き、軸・点数・相手は変えない。純関数。
+fn resolve_race_budget(
+    overrides: &HashMap<String, u64>,
+    race_id: &str,
+    default_budget: u64,
+) -> u64 {
+    overrides.get(race_id).copied().unwrap_or(default_budget)
+}
+
 /// 1 スイープ全体で共有する評価コンテキスト（#345）。sweep / evaluate_race の引数肥大を避ける。
 /// notify_gate は run で 1 度だけ解決した値、blend_alpha は解決済みの市場ブレンド重み。
+/// race_budget_overrides は run で 1 度だけパースした per-race 予算（#342・空なら override なし）。
 #[derive(Clone, Copy)]
 struct SweepCtx<'a> {
     cli: &'a Cli,
     notify_gate: f64,
     blend_alpha: Option<f64>,
+    race_budget_overrides: &'a HashMap<String, u64>,
 }
 
 /// 発走時刻付きのレース 1 件（races_by_date の Race ＋ race_card の post_time / race_class）。
@@ -270,9 +322,13 @@ async fn evaluate_race(app: &App, slot: &Slot, is_ura: bool, captured_at: &str, 
         cli,
         notify_gate,
         blend_alpha,
+        race_budget_overrides,
     } = ctx;
     let rid = &slot.race.race_id;
     let label = race_label(slot);
+    // per-race 予算（#342）: override があればそのレースだけ増額、無ければ既定 --race-budget。
+    // 軸・点数・相手は不変で金額のみ変わる（build_portfolio は budget を配分額にのみ使う）。
+    let race_budget = resolve_race_budget(race_budget_overrides, rid.value(), cli.race_budget);
 
     // 1) 発走直前のフレッシュなオッズを再取得（新スナップショットを保存。read-through は使わない）。
     let odds = match app.odds.refresh_race_odds(rid).await {
@@ -336,7 +392,7 @@ async fn evaluate_race(app: &App, slot: &Slot, is_ura: bool, captured_at: &str, 
         &blended,
         &pure,
         &odds,
-        cli.race_budget,
+        race_budget,
         &PortfolioConfig::default(),
     );
     let Some(ev) = &portfolio.ev else {
@@ -390,7 +446,7 @@ async fn evaluate_race(app: &App, slot: &Slot, is_ura: bool, captured_at: &str, 
             axis_win_odds,
             axis_place_odds_low: axis_place_low,
             axis_place_odds_high: axis_place_high,
-            race_budget: cli.race_budget,
+            race_budget,
             roughness,
         };
         if let Some(record) = build_snapshot_record(&portfolio, &ctx)
@@ -472,6 +528,24 @@ pub async fn run(app: &App, cli: &Cli) -> anyhow::Result<()> {
     let blend_alpha = cli.blend_alpha.or(RECOMMENDED_MARKET_BLEND_ALPHA);
     let window = Duration::minutes(cli.window as i64);
 
+    // per-race 予算 override（#342）。起動時に 1 度だけパース・検証し、適用一覧を提示する。
+    // 当日レースに無い race_id（pid タイプミス等）は初回スイープの slots ロード後に 1 度だけ警告する。
+    let race_budget_overrides = parse_race_budget_overrides(&cli.race_budget_overrides)?;
+    if !race_budget_overrides.is_empty() {
+        let mut applied: Vec<(&String, &u64)> = race_budget_overrides.iter().collect();
+        applied.sort_by(|a, b| a.0.cmp(b.0));
+        let list = applied
+            .iter()
+            .map(|(pid, yen)| format!("{pid}=¥{yen}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        println!(
+            "── per-race 予算 override: {} 件適用（{list}）。指定レースは軸・点数・相手を変えず金額のみ増減。",
+            race_budget_overrides.len()
+        );
+    }
+    let mut overrides_checked = false;
+
     // 発走状態は実行マシンの現在時刻と post_time の「時刻」だけで判定するため、(1) 当日以外の date、
     // (2) JST 以外の TZ では判定が無意味になる。誤用に早期に気づけるよう起動時に警告する。
     const JST_OFFSET_SECS: i32 = 9 * 3600;
@@ -509,6 +583,29 @@ pub async fn run(app: &App, cli: &Cli) -> anyhow::Result<()> {
                 continue;
             }
         };
+        // per-race override の pid が当日レースに 1 件も一致しなければ、タイプミス等の可能性を 1 度だけ
+        // 警告する（黙って未適用のまま監視が進むのを防ぐ。#342）。slots が空の巡はまだ判定材料が無いので
+        // 次巡に持ち越す（overrides_checked を立てない）。
+        if !overrides_checked && !race_budget_overrides.is_empty() && !slots.is_empty() {
+            let present: std::collections::HashSet<&str> =
+                slots.iter().map(|s| s.race.race_id.value()).collect();
+            let unmatched: Vec<&String> = race_budget_overrides
+                .keys()
+                .filter(|pid| !present.contains(pid.as_str()))
+                .collect();
+            if !unmatched.is_empty() {
+                let list = unmatched
+                    .iter()
+                    .map(|s| s.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                println!(
+                    "⚠ per-race 予算 override の race_id が当日（{}）のレースに一致しません（初回スイープの出馬表基準・未適用）: {list}。pid を確認してください（card 未取得なら fetch-card 後に再実行）。",
+                    cli.date
+                );
+            }
+            overrides_checked = true;
+        }
         let now = Local::now().time();
         // 監視サイクル境界時刻（1 スイープ 1 値・UTC rfc3339 秒精度 Z 終端）。同一サイクルの全レースが
         // 同一 captured_at を共有し、live_ev_snapshots の「辞書順＝時刻順」「(race_id, captured_at) 冪等」
@@ -538,6 +635,7 @@ pub async fn run(app: &App, cli: &Cli) -> anyhow::Result<()> {
             cli,
             notify_gate,
             blend_alpha,
+            race_budget_overrides: &race_budget_overrides,
         };
         sweep(app, &slots, &statuses, now, &captured_at, ctx).await;
 
@@ -615,6 +713,89 @@ mod tests {
         // クラス不明は非重賞と断定できないため裏にしない。
         let day = [(Venue::Tokyo, Some(RaceClass::G1)), (Venue::Hakodate, None)];
         assert!(!is_g1_ura(Venue::Hakodate, None, &day));
+    }
+
+    #[test]
+    fn parse_race_budget_overrides_parses_multiple_entries() {
+        let entries = vec![
+            "2026-3-hakodate-2-6R=7000".to_string(),
+            "2026-3-hakodate-2-7R=5500".to_string(),
+        ];
+        let map = parse_race_budget_overrides(&entries).unwrap();
+        assert_eq!(map.len(), 2);
+        assert_eq!(map.get("2026-3-hakodate-2-6R"), Some(&7000));
+        assert_eq!(map.get("2026-3-hakodate-2-7R"), Some(&5500));
+    }
+
+    #[test]
+    fn parse_race_budget_overrides_empty_is_empty_map() {
+        assert!(parse_race_budget_overrides(&[]).unwrap().is_empty());
+    }
+
+    #[test]
+    fn parse_race_budget_overrides_trims_whitespace() {
+        let entries = vec![" 2026-3-tokyo-5-11R = 8000 ".to_string()];
+        let map = parse_race_budget_overrides(&entries).unwrap();
+        assert_eq!(map.get("2026-3-tokyo-5-11R"), Some(&8000));
+    }
+
+    #[test]
+    fn parse_race_budget_overrides_rejects_missing_eq() {
+        assert!(parse_race_budget_overrides(&["2026-3-tokyo-5-11R".to_string()]).is_err());
+    }
+
+    #[test]
+    fn parse_race_budget_overrides_rejects_under_100_and_non_numeric() {
+        // 0 円・100 円未満は空伝票になるため弾く（増額用途として無意味）。
+        assert!(parse_race_budget_overrides(&["2026-3-tokyo-5-11R=0".to_string()]).is_err());
+        assert!(parse_race_budget_overrides(&["2026-3-tokyo-5-11R=50".to_string()]).is_err());
+        assert!(parse_race_budget_overrides(&["2026-3-tokyo-5-11R=abc".to_string()]).is_err());
+        // 負値は u64 パース失敗で弾かれる。
+        assert!(parse_race_budget_overrides(&["2026-3-tokyo-5-11R=-100".to_string()]).is_err());
+        // 100 円ちょうどは許容（境界）。
+        assert_eq!(
+            parse_race_budget_overrides(&["2026-3-tokyo-5-11R=100".to_string()])
+                .unwrap()
+                .get("2026-3-tokyo-5-11R"),
+            Some(&100)
+        );
+    }
+
+    #[test]
+    fn parse_race_budget_overrides_rejects_invalid_race_id() {
+        // RaceId は英数・`-` のみ許可（`_` は不可）。不正文字を含む pid を弾く。
+        assert!(parse_race_budget_overrides(&["bad_id=7000".to_string()]).is_err());
+        assert!(parse_race_budget_overrides(&["=7000".to_string()]).is_err());
+    }
+
+    #[test]
+    fn parse_race_budget_overrides_rejects_duplicate_race_id() {
+        let entries = vec![
+            "2026-3-tokyo-5-11R=7000".to_string(),
+            "2026-3-tokyo-5-11R=8000".to_string(),
+        ];
+        assert!(parse_race_budget_overrides(&entries).is_err());
+    }
+
+    #[test]
+    fn resolve_race_budget_uses_override_then_default() {
+        let mut overrides = HashMap::new();
+        overrides.insert("2026-3-tokyo-5-6R".to_string(), 7000);
+        // override 有: per-race 値。
+        assert_eq!(
+            resolve_race_budget(&overrides, "2026-3-tokyo-5-6R", 5000),
+            7000
+        );
+        // override 無: 既定。
+        assert_eq!(
+            resolve_race_budget(&overrides, "2026-3-tokyo-5-7R", 5000),
+            5000
+        );
+        // 空 override: 常に既定。
+        assert_eq!(
+            resolve_race_budget(&HashMap::new(), "2026-3-tokyo-5-6R", 5000),
+            5000
+        );
     }
 
     #[test]
