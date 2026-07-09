@@ -67,7 +67,7 @@
 
 ```jsonc
 {
-  "race_budget": 5000,             // このレースに配分した予算。live_ev.py は --budget で計算するため現状は常に default_budget と同値。増額（ADR 0060）は人間の執行判断でモデルに戻さないため、本フィールドは将来の per-race 予算差分の予約枠
+  "race_budget": 5000,             // このレースに配分した予算。既定は predict-watch の --race-budget（全レース同値）。#342/ADR 0066 で per-race 増額に対応: --race-budget-override <race_id>=<円> を指定したレースはその予算で組成され本フィールドに per-race 値が入る（軸・点数・相手は不変で金額のみ）。増額は人間の CLI 入力＝執行判断であり、モデル確率/基準配分は不変（ADR 0060 と整合）。
   "legs": [
     {
       "bet_type": "wide",          // wide | quinella | trio（式別）
