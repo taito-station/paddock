@@ -319,6 +319,11 @@ pub(crate) const DISTANCE_BAND_PREDS: &[(&str, &str)] = &[
 /// 呼び出しは `races.venue` / `results.jockey` / `case_from_preds(..)` 生成の `CASE ... END` のみで、
 /// いずれも単一引用符でリテラルを破らない code 定数。将来の呼び出し追加で外部入力が group_col に
 /// 混じる回帰を debug ビルドで即検知する（`case_from_preds` の label 側 debug_assert と同型の契約）。
+///
+/// **契約**: CASE 式を渡すときは必ず `case_from_preds` / `case_from_bands` 経由で生成すること
+/// （label 側の単一引用符が debug_assert 済みで注入不可）。本 guard は shape（`CASE` 始まり）しか
+/// 見ないため、`case_from_preds` を経由しない生の CASE 文字列（predicate 側に外部入力を含みうる）を
+/// 渡すと素通しになる。列参照は既知 2 種の厳密一致に限る。
 fn is_safe_group_col(group_col: &str) -> bool {
     // 列参照は既知の 2 種を厳密一致で許可（`entity_col` の matches! と同型）。CASE 式は
     // `case_from_preds` が label 側の単一引用符を debug_assert 済みで注入不可なので shape
@@ -393,6 +398,11 @@ pub(crate) async fn dynamic_group_stats_batch(
         is_safe_group_col(group_col),
         "group_col must be a code-constant column/CASE expr, got {group_col:?}"
     );
+    // 空 values ガード（`entity_stats_batch` と対称）。`= ANY('{}')` は 0 行で無害だが、
+    // 無駄なクエリ発行を避けて呼び出し規約を揃える。
+    if values.is_empty() {
+        return Ok(HashMap::new());
+    }
     let q = format!(
         r#"
         SELECT
