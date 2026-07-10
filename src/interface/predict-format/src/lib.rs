@@ -162,6 +162,12 @@ fn factor_phrase(f: &FactorExplanation) -> String {
         ExplainCategory::ConditionalGateBias => format!("枠バイアス（{}）", f.label),
         ExplainCategory::Jockey => format!("騎手 {}", f.label),
         ExplainCategory::Trainer => format!("厩舎 {}", f.label),
+        // 相性 factor（#366(b)・率のみ）。board 書評 commentary::factor_topic と話題語を揃える。
+        ExplainCategory::JockeyVenue | ExplainCategory::JockeyDistance => {
+            format!("騎手の{}成績", f.label)
+        }
+        ExplainCategory::JockeyHorseCombo => format!("馬×騎手（{}）", f.label),
+        ExplainCategory::HorseVenue => format!("当場（{}）", f.label),
     };
     match f.verdict {
         Some(v) => {

@@ -118,6 +118,13 @@ fn factor_topic(category: ExplainCategory, label: &str) -> String {
         ExplainCategory::ConditionalGateBias => format!("枠バイアス（{}）", gate_label_jp(label)),
         ExplainCategory::Jockey => format!("騎手 {label}"),
         ExplainCategory::Trainer => format!("厩舎 {label}"),
+        // 相性 factor（#366(b)・率のみ）。venue/距離は「騎手の◯成績」、コンビは「馬×騎手（騎手名）」、
+        // 馬×場は「当場（場名）」。predict-format の factor_phrase と話題語を揃える。
+        ExplainCategory::JockeyVenue | ExplainCategory::JockeyDistance => {
+            format!("騎手の{label}成績")
+        }
+        ExplainCategory::JockeyHorseCombo => format!("馬×騎手（{label}）"),
+        ExplainCategory::HorseVenue => format!("当場（{label}）"),
     }
 }
 
@@ -293,6 +300,71 @@ mod tests {
             "{lines:?}"
         );
         assert!(lines.iter().any(|l| l == "近走フォーム：好調"), "{lines:?}");
+    }
+
+    #[test]
+    fn affinity_factors_rendered_rate_only() {
+        // #366(b) 相性 factor は verdict=None（率のみ）で detail 行に出る。話題語を確認。
+        let combo = FactorExplanation::new(
+            ExplainCategory::JockeyHorseCombo,
+            "武豊".to_string(),
+            RateTriple {
+                win: 0.2,
+                place: 0.35,
+                show: 0.5,
+            },
+            8,
+        );
+        let jv = FactorExplanation::new(
+            ExplainCategory::JockeyVenue,
+            "函館".to_string(),
+            RateTriple {
+                win: 0.1,
+                place: 0.2,
+                show: 0.28,
+            },
+            40,
+        );
+        let hv = FactorExplanation::new(
+            ExplainCategory::HorseVenue,
+            "函館".to_string(),
+            RateTriple {
+                win: 0.15,
+                place: 0.25,
+                show: 0.33,
+            },
+            6,
+        );
+        let lines = horse_detail_lines(&expl(vec![combo, jv, hv], None));
+        assert!(
+            lines.iter().any(|l| l == "馬×騎手（武豊）：複勝50%（8走）"),
+            "{lines:?}"
+        );
+        assert!(
+            lines.iter().any(|l| l == "騎手の函館成績：複勝28%（40走）"),
+            "{lines:?}"
+        );
+        assert!(
+            lines.iter().any(|l| l == "当場（函館）：複勝33%（6走）"),
+            "{lines:?}"
+        );
+        // 相性 factor は verdict=None ゆえ headline（得意 factor 拾い）には出ない。
+        assert_eq!(
+            horse_headline(&expl(
+                vec![FactorExplanation::new(
+                    ExplainCategory::JockeyHorseCombo,
+                    "武豊".to_string(),
+                    RateTriple {
+                        win: 0.4,
+                        place: 0.6,
+                        show: 0.8,
+                    },
+                    20,
+                )],
+                Some(0.5)
+            )),
+            None
+        );
     }
 
     #[test]

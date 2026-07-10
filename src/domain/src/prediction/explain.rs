@@ -24,6 +24,15 @@ pub enum ExplainCategory {
     ConditionalGateBias,
     Jockey,
     Trainer,
+    /// 相性 factor（#350/#366(b)・書評の根拠専用・スコア非投入）。いずれも率のみ提示（verdict なし）。
+    /// `Jockey` と同様、稼働騎手はほぼ全員 prior を上回り「得意」が既定値化して情報を持たないため。
+    /// 当該騎手の当開催場成績（`JockeyVenue`）／当距離帯成績（`JockeyDistance`）。
+    JockeyVenue,
+    JockeyDistance,
+    /// この馬×現騎手コンビの過去成績。
+    JockeyHorseCombo,
+    /// この馬の当開催場成績。
+    HorseVenue,
 }
 
 /// 条件別成績の定性評価。母集団基準率 [`PRIOR_RATE`] との比較で決める（縮約後の複勝率基準）。
@@ -68,11 +77,16 @@ impl FactorExplanation {
             ExplainCategory::Surface
             | ExplainCategory::Distance
             | ExplainCategory::TrackCondition => Some(verdict_from_show_rate(rate.show, starts)),
-            // 枠・条件依存枠バイアス・騎手・調教師は馬の適性ではないため判定しない（率のみ）。
+            // 枠・条件依存枠バイアス・騎手・調教師・相性 factor は馬の適性ではない（または稼働騎手が
+            // 既定で prior 超え）ため判定しない（率のみ）。
             ExplainCategory::CourseGate
             | ExplainCategory::ConditionalGateBias
             | ExplainCategory::Jockey
-            | ExplainCategory::Trainer => None,
+            | ExplainCategory::Trainer
+            | ExplainCategory::JockeyVenue
+            | ExplainCategory::JockeyDistance
+            | ExplainCategory::JockeyHorseCombo
+            | ExplainCategory::HorseVenue => None,
         };
         Self {
             category,
@@ -192,11 +206,15 @@ mod tests {
 
     #[test]
     fn non_horse_factors_have_no_verdict() {
-        // 枠・騎手・調教師は馬の適性ではないため verdict を持たない（率のみ提示, #274 レビュー）。
+        // 枠・騎手・調教師・相性 factor は馬の適性ではないため verdict を持たない（率のみ提示, #274/#366）。
         for category in [
             ExplainCategory::CourseGate,
             ExplainCategory::Jockey,
             ExplainCategory::Trainer,
+            ExplainCategory::JockeyVenue,
+            ExplainCategory::JockeyDistance,
+            ExplainCategory::JockeyHorseCombo,
+            ExplainCategory::HorseVenue,
         ] {
             let fe = FactorExplanation::new(category, "ラベル".to_string(), triple(0.5), 600);
             assert_eq!(fe.verdict, None, "{category:?} は verdict を持たないはず");
