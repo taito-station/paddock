@@ -136,6 +136,7 @@ def main():
     skipped_span = 0
     skipped_no_id = 0
     no_result = 0
+    no_overlap = 0  # 結果は取れたが snapshot 側の馬番と1頭も一致しない（実走では到達しない想定）
     for rid, hs in by_race.items():
         # 時点数・スパン判定はレース全体の fetched_at 集合で
         all_ts = sorted({t for h in hs.values() for (t, _) in h})
@@ -185,11 +186,13 @@ def main():
             used = True
         if used:
             used_races += 1
+        else:
+            no_overlap += 1
 
     print("=" * 70)
     print(f"総レース: {len(by_race)} → 対象レース(結果取得済): {used_races}")
     print(f"  内訳skip: 時点<{MIN_TIMEPOINTS}={skipped_tp} / span<{MIN_SPAN_MIN}分={skipped_span} / "
-          f"slug非対応={skipped_no_id} / 結果無={no_result}")
+          f"slug非対応={skipped_no_id} / 結果無={no_result} / 馬番不一致={no_overlap}")
     print(f"対象馬(頭数): {len(horses)}")
     if len(horses) < 30:
         print("サンプル過少。中断。")
