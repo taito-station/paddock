@@ -337,6 +337,29 @@ mod tests {
     }
 
     #[test]
+    fn factor_phrase_renders_affinity_factors() {
+        // #366(b) 相性 factor は率のみ提示（verdict なし）。board 書評 commentary::factor_topic と
+        // 話題語を揃える（2 formatter の乖離検知）。
+        let jv = factor(ExplainCategory::JockeyVenue, "函館", 0.28, 40, None);
+        assert_eq!(factor_phrase(&jv), "騎手の函館成績：複勝率 28%（40走）");
+        let jd = factor(
+            ExplainCategory::JockeyDistance,
+            "1500〜1800m",
+            0.3,
+            50,
+            None,
+        );
+        assert_eq!(
+            factor_phrase(&jd),
+            "騎手の1500〜1800m成績：複勝率 30%（50走）"
+        );
+        let combo = factor(ExplainCategory::JockeyHorseCombo, "武豊", 0.5, 8, None);
+        assert_eq!(factor_phrase(&combo), "馬×騎手（武豊）：複勝率 50%（8走）");
+        let hv = factor(ExplainCategory::HorseVenue, "函館", 0.33, 6, None);
+        assert_eq!(factor_phrase(&hv), "当場（函館）：複勝率 33%（6走）");
+    }
+
+    #[test]
     fn gate_label_jp_maps_all_groups_and_passes_through_unknown() {
         assert_eq!(gate_label_jp("Inner (1-3)"), "内 1-3");
         assert_eq!(gate_label_jp("Middle (4-6)"), "中 4-6");
