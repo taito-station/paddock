@@ -68,6 +68,8 @@ def fetch_snapshots():
 def parse_ts(s):
     # '2026-06-27T00:01:03.024586+00:00' -> epoch 秒 (UTC 保存前提・相対差専用。うるう秒無視)。
     m = re.match(r"(\d{4})-(\d\d)-(\d\d)T(\d\d):(\d\d):(\d\d)", s)
+    if not m:  # 黙って壊さず気づけるように（nk.py の防御的スタイルに合わせる）
+        raise ValueError(f"想定外の timestamp 形式: {s!r}")
     y, mo, d, h, mi, se = map(int, m.groups())
     return calendar.timegm((y, mo, d, h, mi, se, 0, 0, 0))
 
@@ -82,8 +84,11 @@ def fetch_finish(nk_id):
         return {int(k): v for k, v in json.load(open(path, encoding="utf-8")).items()}
     rows = nk.fetch_result(nk_id)  # curl+parse。取得成功だが 0 行なら nk 側が warn
     finish = {r["horse_num"]: r["rank"] for r in rows if r["rank"] is not None}
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(finish, f)
+    # 空（結果ページ未生成・構造変化）はキャッシュしない。永続化すると再走で
+    # 空を読み続け no_result に固定され、後日レース確定後も取りこぼす。
+    if finish:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(finish, f)
     time.sleep(1.5)  # netkeiba への礼儀 (未キャッシュ取得時のみ)
     return finish
 
@@ -127,12 +132,15 @@ def main():
 
     horses = []  # dict per horse
     used_races = 0
+    skipped_tp = 0
     skipped_span = 0
+    skipped_no_id = 0
     no_result = 0
     for rid, hs in by_race.items():
         # 時点数・スパン判定はレース全体の fetched_at 集合で
         all_ts = sorted({t for h in hs.values() for (t, _) in h})
         if len(all_ts) < MIN_TIMEPOINTS:
+            skipped_tp += 1
             continue
         span_min = (all_ts[-1] - all_ts[0]) / 60.0
         if span_min < MIN_SPAN_MIN:
@@ -140,6 +148,7 @@ def main():
             continue
         nk_id = slug_to_netkeiba_id(rid)
         if not nk_id:
+            skipped_no_id += 1
             continue
         try:
             finish = fetch_finish(nk_id)
@@ -178,7 +187,9 @@ def main():
             used_races += 1
 
     print("=" * 70)
-    print(f"対象レース(結果取得済): {used_races}  / span不足でskip: {skipped_span} / 結果無: {no_result}")
+    print(f"総レース: {len(by_race)} → 対象レース(結果取得済): {used_races}")
+    print(f"  内訳skip: 時点<{MIN_TIMEPOINTS}={skipped_tp} / span<{MIN_SPAN_MIN}分={skipped_span} / "
+          f"slug非対応={skipped_no_id} / 結果無={no_result}")
     print(f"対象馬(頭数): {len(horses)}")
     if len(horses) < 30:
         print("サンプル過少。中断。")
