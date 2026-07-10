@@ -539,6 +539,8 @@ fn build_explanation(
     let gate_label = gate_group_label(entry.gate_num.value());
     let surf_label = surface_label(race.surface);
     let dist_label = distance_band_label(race.distance);
+    // #350/#366(b) 相性 factor の照合キー: 競馬場は日本語場名（build_factors と同一）。
+    let venue_label = race.venue.as_jp();
 
     let mut factors: Vec<FactorExplanation> = Vec::new();
     // 馬の条件別成績（芝ダ・距離帯）。一致なし・出走 0 件は stat_to_triple_opt が None（母数除外と同じ欠落扱い）。
@@ -633,6 +635,44 @@ fn build_explanation(
         factors.push(FactorExplanation::new(
             ExplainCategory::Trainer,
             label,
+            fs.rate,
+            fs.starts,
+        ));
+    }
+    // #366(b) 相性 factor を書評の根拠に載せる（描画層のみ・本番 weight は不変）。build_factors と同じ
+    // 照合キー・`stat_to_triple_opt` を使い「実績がある時だけ書く」欠落扱い（母数 0・欠落は項を立てない）。
+    // coverage が薄い combo/horse_venue も starts>0 の時だけ出る。率のみ提示（verdict=None）。
+    if let Some(fs) = jockey.and_then(|j| stat_to_triple_opt(&j.by_venue, venue_label)) {
+        factors.push(FactorExplanation::new(
+            ExplainCategory::JockeyVenue,
+            venue_label.to_string(),
+            fs.rate,
+            fs.starts,
+        ));
+    }
+    if let Some(fs) = jockey.and_then(|j| stat_to_triple_opt(&j.by_distance_band, dist_label)) {
+        factors.push(FactorExplanation::new(
+            ExplainCategory::JockeyDistance,
+            dist_label.to_string(),
+            fs.rate,
+            fs.starts,
+        ));
+    }
+    // 馬×騎手コンビ: この馬の騎手別成績（horse.by_jockey）を現騎手名で引く（build_factors と同源）。
+    if let Some(jn) = entry.jockey.as_ref()
+        && let Some(fs) = stat_to_triple_opt(&horse.by_jockey, jn.value())
+    {
+        factors.push(FactorExplanation::new(
+            ExplainCategory::JockeyHorseCombo,
+            jn.value().to_string(),
+            fs.rate,
+            fs.starts,
+        ));
+    }
+    if let Some(fs) = stat_to_triple_opt(&horse.by_venue, venue_label) {
+        factors.push(FactorExplanation::new(
+            ExplainCategory::HorseVenue,
+            venue_label.to_string(),
             fs.rate,
             fs.starts,
         ));
@@ -747,7 +787,7 @@ fn distance_band_label(distance: u32) -> &'static str {
 mod tests {
     use chrono::NaiveDate;
     use paddock_domain::{
-        ExplainCategory, RecentRun, StandardTimes, Surface, Venue, Verdict,
+        ExplainCategory, JockeyName, RecentRun, StandardTimes, Surface, Venue, Verdict,
         horse_result::{
             FinishingPosition, GateNum, HorseName, HorseNum, HorseResult, ResultStatus,
         },
@@ -755,7 +795,7 @@ mod tests {
     };
 
     use super::{RaceContext, build_explanation, recent_form_from_runs, running_style_from_runs};
-    use crate::repository::{CourseStatsRow, GroupStat, HorseStatsRow};
+    use crate::repository::{CourseStatsRow, GroupStat, HorseStatsRow, JockeyStatsRow};
 
     fn ymd(y: i32, m: u32, d: u32) -> NaiveDate {
         NaiveDate::from_ymd_opt(y, m, d).unwrap()
@@ -873,6 +913,81 @@ mod tests {
         assert_eq!(prev_summary.popularity, Some(8));
         assert_eq!(ex.weight_carried, Some(57.0));
         assert_eq!(ex.field_mean_weight, Some(55.0));
+    }
+
+    #[test]
+    fn build_explanation_adds_affinity_factors() {
+        // #366(b): 相性 factor（騎手×場/距離・馬×騎手コンビ・馬×場）が実績ありのとき push され、
+        // いずれも率のみ提示（verdict=None）であることを確認する。馬の芝ダ/距離/枠は空にして相性のみ拾う。
+        let entry = HorseEntry {
+            gate_num: GateNum::try_from(1u32).unwrap(),
+            horse_num: HorseNum::try_from(5u32).unwrap(),
+            horse_name: HorseName::try_from("テスト馬").unwrap(),
+            jockey: Some(JockeyName::try_from("武豊".to_string()).unwrap()),
+            trainer: None,
+            weight_carried: None,
+        };
+        let course = CourseStatsRow {
+            venue: "東京".to_string(),
+            distance: 1600,
+            surface: "芝".to_string(),
+            by_gate_group: vec![],
+        };
+        let horse = HorseStatsRow {
+            by_jockey: vec![group("武豊", 8, 4)], // 馬×騎手コンビ
+            by_venue: vec![group("東京", 12, 4)], // 馬×場（当場）
+            ..empty_horse_stats()
+        };
+        let jockey = JockeyStatsRow {
+            jockey_name: "武豊".to_string(),
+            overall: GroupStat::new("overall"),
+            by_surface: vec![],
+            by_gate_group: vec![],
+            by_venue: vec![group("東京", 40, 11)], // 騎手×場
+            by_distance_band: vec![group("1500〜1800m", 50, 14)], // 騎手×距離
+        };
+        let race = RaceContext {
+            venue: Venue::Tokyo,
+            surface: Surface::Turf,
+            distance: 1600,
+            track_condition: None,
+            field_size: 16,
+            mean_weight: None,
+        };
+
+        let ex = build_explanation(
+            &entry,
+            &course,
+            None,
+            &horse,
+            Some(&jockey),
+            None,
+            &race,
+            None,
+            None,
+        );
+
+        let cats: Vec<_> = ex
+            .factors
+            .iter()
+            .map(|f| (f.category, f.label.as_str(), f.verdict))
+            .collect();
+        assert!(
+            cats.contains(&(ExplainCategory::JockeyVenue, "東京", None)),
+            "{cats:?}"
+        );
+        assert!(
+            cats.contains(&(ExplainCategory::JockeyDistance, "1500〜1800m", None)),
+            "{cats:?}"
+        );
+        assert!(
+            cats.contains(&(ExplainCategory::JockeyHorseCombo, "武豊", None)),
+            "{cats:?}"
+        );
+        assert!(
+            cats.contains(&(ExplainCategory::HorseVenue, "東京", None)),
+            "{cats:?}"
+        );
     }
 
     #[test]

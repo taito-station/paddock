@@ -162,6 +162,12 @@ fn factor_phrase(f: &FactorExplanation) -> String {
         ExplainCategory::ConditionalGateBias => format!("枠バイアス（{}）", f.label),
         ExplainCategory::Jockey => format!("騎手 {}", f.label),
         ExplainCategory::Trainer => format!("厩舎 {}", f.label),
+        // 相性 factor（#366(b)・率のみ）。board 書評 commentary::factor_topic と話題語を揃える。
+        ExplainCategory::JockeyVenue | ExplainCategory::JockeyDistance => {
+            format!("騎手の{}成績", f.label)
+        }
+        ExplainCategory::JockeyHorseCombo => format!("馬×騎手（{}）", f.label),
+        ExplainCategory::HorseVenue => format!("当場（{}）", f.label),
     };
     match f.verdict {
         Some(v) => {
@@ -328,6 +334,29 @@ mod tests {
         assert_eq!(factor_phrase(&j), "騎手 ルメール：複勝率 40%（100走）");
         let t = factor(ExplainCategory::Trainer, "藤沢", 0.3, 80, None);
         assert_eq!(factor_phrase(&t), "厩舎 藤沢：複勝率 30%（80走）");
+    }
+
+    #[test]
+    fn factor_phrase_renders_affinity_factors() {
+        // #366(b) 相性 factor は率のみ提示（verdict なし）。board 書評 commentary::factor_topic と
+        // 話題語を揃える（2 formatter の乖離検知）。
+        let jv = factor(ExplainCategory::JockeyVenue, "函館", 0.28, 40, None);
+        assert_eq!(factor_phrase(&jv), "騎手の函館成績：複勝率 28%（40走）");
+        let jd = factor(
+            ExplainCategory::JockeyDistance,
+            "1500〜1800m",
+            0.3,
+            50,
+            None,
+        );
+        assert_eq!(
+            factor_phrase(&jd),
+            "騎手の1500〜1800m成績：複勝率 30%（50走）"
+        );
+        let combo = factor(ExplainCategory::JockeyHorseCombo, "武豊", 0.5, 8, None);
+        assert_eq!(factor_phrase(&combo), "馬×騎手（武豊）：複勝率 50%（8走）");
+        let hv = factor(ExplainCategory::HorseVenue, "函館", 0.33, 6, None);
+        assert_eq!(factor_phrase(&hv), "当場（函館）：複勝率 33%（6走）");
     }
 
     #[test]
