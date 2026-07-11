@@ -5,6 +5,7 @@ import type { Schemas } from "../api/client";
 type SlipLeg = Schemas["SlipLeg"];
 type LiveFlip = Schemas["LiveFlip"];
 type LiveSummary = Schemas["LiveSummary"];
+type LiveRaceView = Schemas["LiveRaceViewSchema"];
 
 // 馬番を丸数字にする（①..⑳）。範囲外はそのまま数字（JRA は最大 18 のため実質全域）。
 export function maru(n: number): string {
@@ -210,6 +211,220 @@ export function skipReason(r: {
   }
   bits.push(`ROI ${roiPct(r.roi)}`, "−EV");
   return bits.join("・");
+}
+
+// ===== テーブル型ボード（#370/#372）用の純粋関数群 =====
+// now / date はすべて引数で受ける（テスト可能性とマシン TZ 非依存のため）。
+
+// 発走 N 分前を「まもなく発走」としてハイライトする閾値（predict-watch の監視窓 40 分の半分）。
+export const SOON_MINUTES = 20;
+// スナップショット鮮度の警告閾値（predict-watch のスイープ間隔 5 分の 2 倍）。
+export const STALE_MINUTES = 10;
+
+// 開催日 + JST "HH:MM" を Date にする。+09:00 を明示合成しマシン TZ に依存させない。
+// 欠落・不正は null（不明。終了扱いにしない）。
+function postDate(date: string, postTime: string | null | undefined): Date | null {
+  if (!date || !postTime) return null;
+  const m = /^(\d{1,2}):(\d{2})$/.exec(postTime);
+  if (!m) return null;
+  const d = new Date(`${date}T${m[1].padStart(2, "0")}:${m[2]}:00+09:00`);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+// 発走済みか。発走時刻ちょうどは「発走済み」。post_time 不明は null。
+export function raceStarted(
+  date: string,
+  postTime: string | null | undefined,
+  now: Date,
+): boolean | null {
+  const t = postDate(date, postTime);
+  return t == null ? null : now.getTime() >= t.getTime();
+}
+
+// まもなく発走（未発走かつ SOON_MINUTES 分以内）。post_time 不明は false。
+export function isSoon(
+  date: string,
+  postTime: string | null | undefined,
+  now: Date,
+): boolean {
+  const t = postDate(date, postTime);
+  if (t == null) return false;
+  const diffMin = (t.getTime() - now.getTime()) / 60_000;
+  return diffMin > 0 && diffMin <= SOON_MINUTES;
+}
+
+// 状態列の短縮バッジ（テーブルの幅節約用。tierBadge のフル表記と対）。
+const TIER_SHORT: Record<string, string> = {
+  buy: "🟢張",
+  close: "🟡惜",
+  watch: "⚪様",
+};
+export function tierShort(tier: string): string {
+  return TIER_SHORT[tier] ?? tier;
+}
+
+export type SortKey = "status" | "post" | "roi" | "axisProb" | "rough" | "race";
+export type SortDir = "asc" | "desc";
+export type LiveSortCtx = { date: string; now: Date };
+
+// 列の初回クリック方向。数値の大きさに関心がある列（ROI・軸勝率・荒れ度）は降順スタート。
+export function defaultDir(key: SortKey): SortDir {
+  return key === "roi" || key === "axisProb" || key === "rough" ? "desc" : "asc";
+}
+
+function sortValue(r: LiveRaceView, key: SortKey): number | string | null {
+  switch (key) {
+    case "post":
+      return postMinutes(r.post_time); // 欠落は +∞（下の null 末尾処理に合流）
+    case "roi":
+      return r.roi;
+    case "axisProb":
+      return r.axis_prob;
+    case "rough":
+      return r.roughness ?? null;
+    case "race":
+      // 会場名 → R 番号。R は 2 桁ゼロ埋めで辞書順と数値順を一致させる。
+      return `${r.venue}-${String(r.race_no).padStart(2, "0")}`;
+    default:
+      return null;
+  }
+}
+
+// ソート。既定 "status" は「未発走を発走時刻昇順で上、発走済みは下」（今なにをすべきかを先頭に）。
+// その他の列は dir 指定でトグル。null / 欠落値は方向に関わらず常に末尾。
+export function sortRaces(
+  races: LiveRaceView[],
+  key: SortKey,
+  dir: SortDir,
+  ctx: LiveSortCtx,
+): LiveRaceView[] {
+  const arr = [...races];
+  if (key === "status") {
+    arr.sort((a, b) => {
+      const fa = raceStarted(ctx.date, a.post_time, ctx.now) === true ? 1 : 0;
+      const fb = raceStarted(ctx.date, b.post_time, ctx.now) === true ? 1 : 0;
+      if (fa !== fb) return fa - fb;
+      return (
+        postMinutes(a.post_time) - postMinutes(b.post_time) ||
+        a.race_no - b.race_no
+      );
+    });
+    return arr;
+  }
+  const sign = dir === "asc" ? 1 : -1;
+  arr.sort((a, b) => {
+    const va = sortValue(a, key);
+    const vb = sortValue(b, key);
+    const missA = va == null || va === Number.POSITIVE_INFINITY;
+    const missB = vb == null || vb === Number.POSITIVE_INFINITY;
+    if (missA && missB) return 0;
+    if (missA) return 1;
+    if (missB) return -1;
+    if (typeof va === "string" && typeof vb === "string") {
+      return sign * va.localeCompare(vb);
+    }
+    return sign * ((va as number) - (vb as number));
+  });
+  return arr;
+}
+
+export type StatusFilter = "all" | "upcoming" | "finished";
+export type VerdictFilter = "all" | "bet" | "skip";
+export type LiveFilter = { status: StatusFilter; verdict: VerdictFilter };
+
+// 絞り込み。post_time 不明（raceStarted=null）は「未発走」側に寄せる（終了と断定しない）。
+// tier=hidden の除外（#344 の floor 非表示）は従来通り呼び出し側で先に行う。
+export function filterRaces(
+  races: LiveRaceView[],
+  f: LiveFilter,
+  ctx: LiveSortCtx,
+): LiveRaceView[] {
+  return races.filter((r) => {
+    if (f.status !== "all") {
+      const finished = raceStarted(ctx.date, r.post_time, ctx.now) === true;
+      if (f.status === "finished" ? !finished : finished) return false;
+    }
+    if (f.verdict !== "all" && r.verdict !== f.verdict) return false;
+    return true;
+  });
+}
+
+export type LiveQuery = {
+  sort: SortKey;
+  dir: SortDir;
+  status: StatusFilter;
+  verdict: VerdictFilter;
+};
+
+export const DEFAULT_LIVE_QUERY: LiveQuery = {
+  sort: "status",
+  dir: "asc",
+  status: "all",
+  verdict: "all",
+};
+
+const SORT_KEYS: SortKey[] = ["status", "post", "roi", "axisProb", "rough", "race"];
+
+// URL クエリ → 状態。不正値は既定へフォールバック（リロード・共有耐性、#370 任意要件）。
+export function parseLiveQuery(sp: URLSearchParams): LiveQuery {
+  const sort = sp.get("sort") as SortKey | null;
+  const dir = sp.get("dir") as SortDir | null;
+  const status = sp.get("status") as StatusFilter | null;
+  const verdict = sp.get("verdict") as VerdictFilter | null;
+  return {
+    sort: sort && SORT_KEYS.includes(sort) ? sort : DEFAULT_LIVE_QUERY.sort,
+    dir: dir === "asc" || dir === "desc" ? dir : DEFAULT_LIVE_QUERY.dir,
+    status:
+      status === "upcoming" || status === "finished"
+        ? status
+        : DEFAULT_LIVE_QUERY.status,
+    verdict:
+      verdict === "bet" || verdict === "skip"
+        ? verdict
+        : DEFAULT_LIVE_QUERY.verdict,
+  };
+}
+
+// 状態 → URL クエリ。既定値は省略し、素の /live/:date を既定表示と一致させる。
+export function liveQueryParams(q: LiveQuery): URLSearchParams {
+  const sp = new URLSearchParams();
+  if (q.sort !== DEFAULT_LIVE_QUERY.sort) sp.set("sort", q.sort);
+  if (q.dir !== DEFAULT_LIVE_QUERY.dir) sp.set("dir", q.dir);
+  if (q.status !== DEFAULT_LIVE_QUERY.status) sp.set("status", q.status);
+  if (q.verdict !== DEFAULT_LIVE_QUERY.verdict) sp.set("verdict", q.verdict);
+  return sp;
+}
+
+export type Freshness = {
+  label: string; // 相対表記（"3分前" 等）
+  state: "fresh" | "stale" | "done";
+};
+
+// スナップショット鮮度（#372）。stale = STALE_MINUTES 超過かつ未発走レース残存
+// （= predict-watch が動いていない疑い）。未発走ゼロなら監視終了（done、警告なし）。
+export function freshness(
+  lastUpdated: string | null | undefined,
+  hasUpcoming: boolean,
+  now: Date,
+): Freshness {
+  let label = "—";
+  let mins: number | null = null;
+  if (lastUpdated) {
+    const t = new Date(lastUpdated);
+    if (!Number.isNaN(t.getTime())) {
+      mins = Math.max(0, Math.floor((now.getTime() - t.getTime()) / 60_000));
+      label =
+        mins < 1
+          ? "たった今"
+          : mins < 60
+            ? `${mins}分前`
+            : `${Math.floor(mins / 60)}時間前`;
+    }
+  }
+  if (!hasUpcoming) return { label, state: "done" };
+  // 更新時刻が読めない（null/不正）のに未発走が残る状態も警戒対象に倒す。
+  if (mins == null || mins > STALE_MINUTES) return { label, state: "stale" };
+  return { label, state: "fresh" };
 }
 
 // フリップ注記。axis_changed / ev_reversed を独立に評価し、真の側のみ返す（片側 false を誤強調しない）。

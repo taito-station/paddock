@@ -242,33 +242,6 @@ button:disabled {
   margin: 0.25rem 0 1rem;
 }
 
-.live-section {
-  margin-bottom: 1.5rem;
-}
-.live-section h3 {
-  margin: 0 0 0.5rem;
-  font-size: 0.95rem;
-}
-
-.live-card {
-  border: 1px solid var(--border);
-  border-left: 4px solid var(--accent);
-  border-radius: 6px;
-  background: var(--surface);
-  padding: 0.75rem 1rem;
-  margin-bottom: 1rem;
-}
-
-.live-card-head {
-  display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: 0.6rem;
-  margin-bottom: 0.5rem;
-}
-.live-mark {
-  font-size: 1.1rem;
-}
 /* レース名＝全頭盤へのドリルダウンリンク（買い/様子見 行で共通）。#344 */
 .live-race-link {
   color: inherit;
@@ -306,15 +279,67 @@ button:disabled {
   margin: 0.2rem 0;
 }
 
-.live-skip {
+/* ===== テーブル型ライブボード（#370/#372） ===== */
+/* 絞り込みチップ列（状態 × 判定）。見た目は .tab / .tab-active を流用。 */
+.live-filter {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   flex-wrap: wrap;
-  gap: 0.6rem;
-  padding: 0.4rem 0;
-  border-bottom: 1px solid var(--border);
+  gap: 0.4rem;
+  margin-bottom: 0.75rem;
 }
-.live-skip.live-flipped {
+
+.live-board th,
+.live-board td {
+  vertical-align: baseline;
+}
+/* ソートヘッダ。<th> のセル装飾を殺し、ラベルだけボタンにする。 */
+.live-board th button.live-sort {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--muted);
+  cursor: pointer;
+  font-weight: 600;
+}
+.live-board th button.live-sort-active {
+  color: var(--heading);
+}
+.live-status {
+  white-space: nowrap;
+}
+.live-notes span {
+  display: block;
+}
+
+/* まもなく発走（SOON_MINUTES 以内）: 「今なにをすべきか」を左端の帯で示す。 */
+.live-board tr.live-row-soon > td:first-child {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+/* 発走済みは減光して未発走との視覚差を付ける。 */
+.live-board tr.live-row-done {
+  color: var(--muted);
+  opacity: 0.75;
+}
+/* 買い行は行クリックで伝票トグルできることを示す。 */
+.live-board tr.live-row-buy {
+  cursor: pointer;
+}
+/* 伝票展開行（買いのみ）。ネスト感を出すため一段暗いサーフェス。 */
+.live-slip-row > td {
+  background: var(--surface-2);
+  padding: 0.6rem 0.9rem;
+}
+.live-slip-head {
+  margin: 0 0 0.4rem;
+}
+
+/* 鮮度警告（stale）と再読込失敗の注意書き（#372）。 */
+.live-stale {
+  font-size: 0.85rem;
+  padding: 0.1rem 0.5rem;
+  border-radius: 4px;
+  background: var(--warn-dim);
   color: var(--warn);
 }
 
