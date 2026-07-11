@@ -24,6 +24,8 @@
   --text-2: #cbd2da;
   --text-3: #c3cbd4;
   --muted-2: #8a93a0;
+
+  /* 会場切替リンクの hover 背景 */
   --venue-hover-bg: #2f3945;
 
   /* オーバーレイ（複勝圏）系: .tab-active / .chip-overlay / .venue-current で共有 */
