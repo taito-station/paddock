@@ -29,6 +29,7 @@ export function ExecutionPanel({
   bets,
   oddsAvailable,
   session,
+  sessionError = false,
   cap,
 }: {
   raceId: string;
@@ -37,6 +38,8 @@ export function ExecutionPanel({
   oddsAvailable: boolean;
   // undefined=ロード中 / null=セッション未作成（404）/ 値あり=作成済み
   session: SessionSummary | null | undefined;
+  // 取得エラー時は「読込中…」を出し続けない（エラー表示はヘッダ側が担う）。
+  sessionError?: boolean;
   cap: number;
 }) {
   const qc = useQueryClient();
@@ -150,7 +153,7 @@ export function ExecutionPanel({
         セッション未作成のため閲覧のみ（記録するには
         <Link to={`/sessions/${date}`}>収支ページ</Link>で開始）。
       </p>
-    ) : session === undefined && date ? (
+    ) : session === undefined && date && !sessionError ? (
       <p className="muted">セッション読込中…</p>
     ) : null;
   // ロード中（undefined）・未作成（null）は執行操作を出さない。

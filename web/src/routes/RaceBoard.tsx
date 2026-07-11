@@ -446,6 +446,7 @@ export function RaceBoard() {
             bets={d.bets}
             oddsAvailable={d.odds_available}
             session={session.data}
+            sessionError={session.isError}
             cap={cap}
           />
           <p className="muted" style={{ marginTop: "0.5rem" }}>
