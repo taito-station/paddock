@@ -37,7 +37,9 @@
   --danger-text: #ff9a9a;
   --danger-border: #6b1c1c;
 
-  /* チップ配色（荒れ度 / 混戦 / 妙味 / プラス / 補足） */
+  /* チップ配色（荒れ度 / 混戦 / 妙味 / プラス / 補足）
+     混戦チップの文字=--warn・妙味チップの背景=--warn-dim・印マーク=--value-text は
+     旧リテラルが同値だったための意図的な共有（グループ独立で動かす時はトークン分離する） */
   --rough-bg: #2a2440;
   --rough-text: #c4b0f0;
   --konsen-bg: #4a2c00;
@@ -50,11 +52,11 @@
   --note-text: #9fd8c4;
   --note-border: #2f5a4c;
 
-  /* 書評パネル系 */
+  /* 書評パネル系（枠=--note-border は旧リテラル同値のための意図的な共有） */
   --panel-bg: #171c24;
   --panel-border: #2a3340;
-  --green: #3f7d68;
-  --green-strong: #4fae90;
+  --comment-accent: #3f7d68;
+  --selected-edge: #4fae90;
 
   font-family: system-ui, -apple-system, "Hiragino Sans", sans-serif;
   color: var(--text);
@@ -513,7 +515,7 @@ button:disabled {
   padding: 0.7rem 0.9rem;
   background: var(--panel-bg);
   border: 1px solid var(--panel-border);
-  border-left: 3px solid var(--green);
+  border-left: 3px solid var(--comment-accent);
   border-radius: 6px;
   color: var(--text-soft);
   font-size: 0.9rem;
@@ -525,11 +527,11 @@ button:disabled {
   cursor: pointer;
 }
 .horse-col.has-detail:hover {
-  border-color: var(--green);
+  border-color: var(--comment-accent);
 }
 .horse-col.is-selected {
-  border-color: var(--green-strong);
-  box-shadow: 0 0 0 1px var(--green-strong) inset;
+  border-color: var(--selected-edge);
+  box-shadow: 0 0 0 1px var(--selected-edge) inset;
 }
 
 .horse-detail {
