@@ -9,6 +9,7 @@ import {
   todayJst,
   type RaceBadge,
 } from "../lib/format";
+import { boardHref } from "../lib/live";
 
 function Badge({ kind }: { kind: RaceBadge }) {
   switch (kind) {
@@ -107,7 +108,6 @@ export function RaceList() {
               <th>開催</th>
               <th>距離</th>
               <th>馬場</th>
-              <th>盤</th>
               <th>状態</th>
             </tr>
           </thead>
@@ -115,16 +115,12 @@ export function RaceList() {
             {races.data.races.map((r) => (
               <tr key={r.race_id}>
                 <td>
-                  <Link to={`/sessions/${date}/races/${r.race_id}`}>
-                    {r.race_num}
-                  </Link>
+                  {/* 盤＝唯一のレースビュー（#377 で RaceDetail を統合・廃止） */}
+                  <Link to={boardHref(r.race_id, date)}>{r.race_num}</Link>
                 </td>
                 <td>{VENUE_JP[r.venue] ?? r.venue}</td>
                 <td>{r.distance}m</td>
                 <td>{SURFACE_JP[r.surface] ?? r.surface}</td>
-                <td>
-                  <Link to={`/races/${r.race_id}/board?date=${date}`}>盤</Link>
-                </td>
                 <td>
                   <Badge
                     kind={raceBadge({
