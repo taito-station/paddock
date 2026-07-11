@@ -14,6 +14,7 @@ import {
   buildOutcomeBets,
   effPayout,
   effStake,
+  isRaceRecorded,
   toAmount,
   totalStake as sumStake,
 } from "../../lib/bets";
@@ -75,8 +76,7 @@ export function ExecutionPanel({
   });
 
   const balance = session?.balance ?? 0;
-  // このレースを記録済みか（session の明細に痕跡があるか。スキップ記録は痕跡が残らない）。
-  const bought = !!session?.bets.some((b) => b.race_id === raceId);
+  const bought = !!session && isRaceRecorded(session.bets, raceId);
   const total = sumStake(bets, edits);
   // 残高が実弾の制約。「予算/R」(appliedBudget) は推奨額の算出ヒントであって手編集の上限では
   // ないため、超過判定は残高基準にする（編集で残高内まで増やすのは許容）。
@@ -143,13 +143,15 @@ export function ExecutionPanel({
     );
   }
 
-  // --- セッション文脈の縮退表示 ---
+  // --- セッション文脈の縮退表示（undefined=ロード中 / null=未作成） ---
   const sessionNote =
     session === null ? (
       <p className="muted">
         セッション未作成のため閲覧のみ（記録するには
         <Link to={`/sessions/${date}`}>収支ページ</Link>で開始）。
       </p>
+    ) : session === undefined && date ? (
+      <p className="muted">セッション読込中…</p>
     ) : null;
   // ロード中（undefined）・未作成（null）は執行操作を出さない。
   const canOperate = !!session;

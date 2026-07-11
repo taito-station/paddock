@@ -23,6 +23,14 @@ export function totalStake(bets: RecommendationBet[], edits: Edits): number {
   return bets.reduce((s, b) => s + effStake(b, edits), 0);
 }
 
+// このレースを記録済みか（セッション明細に痕跡があるか）。スキップ記録は痕跡が残らない。
+export function isRaceRecorded(
+  bets: { race_id: string }[],
+  raceId: string,
+): boolean {
+  return bets.some((b) => b.race_id === raceId);
+}
+
 // outcome 記録の payload。賭け金 > 0 の脚のみ送る（空配列 = スキップ相当）。
 export function buildOutcomeBets(
   bets: RecommendationBet[],

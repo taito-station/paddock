@@ -51,7 +51,13 @@ export function RaceBoard() {
   const [appliedBudget, setAppliedBudget] = useState(DEFAULT_RACE_BUDGET);
   const applyBudget = () => {
     const n = toAmount(budgetInput);
-    if (n > 0 && n !== appliedBudget) setAppliedBudget(n);
+    if (n > 0) {
+      if (n !== appliedBudget) setAppliedBudget(n);
+      setBudgetInput(String(n)); // 入力を正規化（先頭ゼロ等）して表示と適用値を揃える。
+    } else {
+      // 不正入力（空・0 以下）は適用値へ巻き戻し、表示と適用値の乖離を残さない。
+      setBudgetInput(String(appliedBudget));
+    }
   };
 
   // 開催日は ?date= を優先。直リンク（クエリ無し）は盤レスポンスの date にフォールバック
@@ -88,8 +94,11 @@ export function RaceBoard() {
     // budget は可変（#377）。stale キャッシュを避けるため queryKey に必ず含める。
     queryKey: ["board", raceId, queryBudget],
     enabled: !!raceId,
-    // 予算変更時に盤全体（馬カラム）がスピナーへ戻るチラつきを防ぎ、前データを保持する。
-    placeholderData: (prev) => prev,
+    // 予算変更時に盤全体（馬カラム）がスピナーへ戻るチラつきを防ぐ。**同一レースに限定**
+    // すること: 無条件 `(prev) => prev` だと場/R 切替でも前レースの盤・買い目が placeholder
+    // 表示され、ロード完了前に前レースの買い目を新レースとして記録できてしまう。
+    placeholderData: (prev, prevQuery) =>
+      prevQuery?.queryKey[1] === raceId ? prev : undefined,
     queryFn: async () => {
       const { data, error } = await api.GET("/api/races/{race_id}/board", {
         params: {
