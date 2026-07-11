@@ -17,13 +17,14 @@
   --warn: #ffcc80;
   --warn-dim: #402a00;
 
-  /* テキスト階調（盤の馬名・書評・表ヘッダ等） */
+  /* テキスト階調（盤の馬名・書評・表ヘッダ等）。明→暗の序列:
+     strong > (--text) > soft > 2 > 3 > (--muted) > muted-2 */
   --text-strong: #eef1f4;
   --text-soft: #dce3ea;
   --text-2: #cbd2da;
   --text-3: #c3cbd4;
   --muted-2: #8a93a0;
-  --hover-bg: #2f3945;
+  --venue-hover-bg: #2f3945;
 
   /* オーバーレイ（複勝圏）系: .tab-active / .chip-overlay / .venue-current で共有 */
   --overlay-bg: #10324f;
@@ -388,7 +389,7 @@ button:disabled {
   cursor: pointer;
 }
 .venue-switch .venue-link:hover {
-  background: var(--hover-bg);
+  background: var(--venue-hover-bg);
   color: #fff;
 }
 .venue-switch .venue-current {
