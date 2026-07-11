@@ -283,7 +283,9 @@ function sortValue(r: LiveRaceView, key: SortKey): number | string | null {
     case "rough":
       return r.roughness ?? null;
     case "race":
-      // 会場名 → R 番号。R は 2 桁ゼロ埋めで辞書順と数値順を一致させる。
+      // 会場 slug → R 番号。R は 2 桁ゼロ埋めで辞書順と数値順を一致させる。
+      // slug（英字）順は日本語表示名の音順とは一致しないが、目的は「同一会場の
+      // R をまとめて並べる」ことでありグルーピングが安定していれば足りる。
       return `${r.venue}-${String(r.race_no).padStart(2, "0")}`;
     default:
       return null;
@@ -291,6 +293,7 @@ function sortValue(r: LiveRaceView, key: SortKey): number | string | null {
 }
 
 // ソート。既定 "status" は「未発走を発走時刻昇順で上、発走済みは下」（今なにをすべきかを先頭に）。
+// status は正準の固定順で dir を反映しない（UI 側も状態列は方向トグルさせない）。
 // その他の列は dir 指定でトグル。null / 欠落値は方向に関わらず常に末尾。
 export function sortRaces(
   races: LiveRaceView[],
@@ -304,10 +307,12 @@ export function sortRaces(
       const fa = raceStarted(ctx.date, a.post_time, ctx.now) === true ? 1 : 0;
       const fb = raceStarted(ctx.date, b.post_time, ctx.now) === true ? 1 : 0;
       if (fa !== fb) return fa - fb;
-      return (
-        postMinutes(a.post_time) - postMinutes(b.post_time) ||
-        a.race_no - b.race_no
-      );
+      const pa = postMinutes(a.post_time);
+      const pb = postMinutes(b.post_time);
+      // post 不明（+∞）は同状態グループの末尾。両方不明（∞ === ∞）は R 番号順に
+      // 明示フォールバック（∞−∞=NaN の falsy に依存しない）。
+      if (pa !== pb) return pa - pb;
+      return a.race_no - b.race_no;
     });
     return arr;
   }

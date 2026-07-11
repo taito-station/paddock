@@ -7,6 +7,7 @@ import {
   BET_TYPE_JP,
   DANZEN_WIN_ODDS_MAX,
   METHOD_JP,
+  STALE_MINUTES,
   boardHref,
   defaultDir,
   filterRaces,
@@ -49,6 +50,8 @@ function RaceLabelLink({ race, date }: { race: LiveRaceView; date: string }) {
 }
 
 // ソート可能な列見出し。クリックで「同列=方向トグル / 別列=その列の既定方向」。
+// 状態列だけは正準の固定順（sortRaces が dir を反映しない）なので、方向表示を出さず
+// aria-sort も "other" にする（▲/▼ と実際の並びの乖離を作らない）。
 function SortTh({
   label,
   col,
@@ -61,11 +64,14 @@ function SortTh({
   onSort: (key: SortKey) => void;
 }) {
   const active = query.sort === col;
-  const ariaSort = active
-    ? query.dir === "asc"
-      ? "ascending"
-      : "descending"
-    : undefined;
+  const fixedOrder = col === "status";
+  const ariaSort = !active
+    ? undefined
+    : fixedOrder
+      ? "other"
+      : query.dir === "asc"
+        ? "ascending"
+        : "descending";
   return (
     <th aria-sort={ariaSort}>
       <button
@@ -74,7 +80,7 @@ function SortTh({
         onClick={() => onSort(col)}
       >
         {label}
-        {active && (query.dir === "asc" ? " ▲" : " ▼")}
+        {active && !fixedOrder && (query.dir === "asc" ? " ▲" : " ▼")}
       </button>
     </th>
   );
@@ -180,7 +186,21 @@ function LiveRow({
         }}
       >
         <td className="live-status">
-          {isBuy && <span className="muted">{slipOpen ? "▼" : "▶"}</span>}
+          {isBuy && (
+            <button
+              type="button"
+              className="live-slip-toggle"
+              aria-expanded={slipOpen}
+              aria-label={slipOpen ? "伝票を折りたたむ" : "伝票を展開"}
+              onClick={(e) => {
+                // 行クリックのトグルと二重発火させない。
+                e.stopPropagation();
+                onToggle();
+              }}
+            >
+              {slipOpen ? "▼" : "▶"}
+            </button>
+          )}
           {started && "⚫終 "}
           {tierShort(race.tier)}
           {flipped && "🔶"}
@@ -296,9 +316,12 @@ export function LiveBets() {
     setSearchParams(liveQueryParams(next), { replace: true });
   const onSort = (key: SortKey) =>
     applyQuery(
-      query.sort === key
-        ? { ...query, dir: query.dir === "asc" ? "desc" : "asc" }
-        : { ...query, sort: key, dir: defaultDir(key) },
+      // 状態列は固定順（sortRaces が dir 非対応）なのでトグルせず既定に戻すだけ。
+      key === "status"
+        ? { ...query, sort: "status", dir: "asc" }
+        : query.sort === key
+          ? { ...query, dir: query.dir === "asc" ? "desc" : "asc" }
+          : { ...query, sort: key, dir: defaultDir(key) },
     );
   const setStatus = (status: StatusFilter) => applyQuery({ ...query, status });
   const setVerdict = (verdict: VerdictFilter) =>
@@ -327,7 +350,8 @@ export function LiveBets() {
         )}
         {fresh?.state === "stale" && (
           <span className="live-stale">
-            ⚠ 10分以上スナップショット更新なし — predict-watch の稼働を確認
+            ⚠ {STALE_MINUTES}分以上スナップショット更新なし — predict-watch
+            の稼働を確認
           </span>
         )}
         {fresh?.state === "done" && (
@@ -385,6 +409,8 @@ export function LiveBets() {
 
           {races.length === 0 ? (
             <p className="muted">監視データなし</p>
+          ) : visible.length === 0 ? (
+            <p className="muted">絞り込み条件に該当するレースなし</p>
           ) : (
             <>
               <table className="grid live-board">
@@ -436,9 +462,6 @@ export function LiveBets() {
                   })}
                 </tbody>
               </table>
-              {visible.length === 0 && (
-                <p className="muted">絞り込み条件に該当するレースなし</p>
-              )}
               {hiddenCount > 0 && (
                 <p className="muted">
                   他 {hiddenCount} レースは当日 ROI 分布の下位（floor

@@ -308,6 +308,14 @@ button:disabled {
 .live-status {
   white-space: nowrap;
 }
+/* 買い行の伝票開閉ボタン（▼/▶）。セル内で装飾を殺しキーボード操作可能にする。 */
+.live-board button.live-slip-toggle {
+  background: none;
+  border: none;
+  padding: 0 0.2rem 0 0;
+  color: var(--muted);
+  cursor: pointer;
+}
 .live-notes span {
   display: block;
 }

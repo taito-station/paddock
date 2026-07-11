@@ -341,6 +341,18 @@ describe("sortRaces", () => {
   it("axisProb desc", () => {
     expect(sortRaces(races, "axisProb", "desc", ctx).map((r) => r.race_id)).toEqual(["c", "a", "b", "d"]);
   });
+  it("status は正準の固定順で dir を反映しない（UI 側も状態列はトグルしない前提）", () => {
+    expect(sortRaces(races, "status", "desc", ctx).map((r) => r.race_id)).toEqual(
+      sortRaces(races, "status", "asc", ctx).map((r) => r.race_id),
+    );
+  });
+  it("status: post 不明同士は R 番号順（NaN に依存しない明示フォールバック）", () => {
+    const rs = [
+      raceView({ race_id: "n2", race_no: 8, post_time: null }),
+      raceView({ race_id: "n1", race_no: 2, post_time: null }),
+    ];
+    expect(sortRaces(rs, "status", "asc", ctx).map((r) => r.race_id)).toEqual(["n1", "n2"]);
+  });
   it("does not mutate the input array", () => {
     const before = races.map((r) => r.race_id);
     sortRaces(races, "roi", "desc", ctx);
