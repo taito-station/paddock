@@ -15,6 +15,7 @@ import {
   freshness,
   groupLegs,
   hasUpcomingRaces,
+  isPastDate,
   isSoon,
   jstHm,
   liveQueryParams,
@@ -281,7 +282,7 @@ export function LiveBets() {
       // スイープ開始前（データ未取得・races 0 件）は判定材料が無いので、
       // 過去日でなければポーリングを続けて初回スナップショットを自動で拾う。
       if (!rs || rs.length === 0) {
-        return raceStarted(date, "23:59", t) === true ? false : 60_000;
+        return isPastDate(date, t) ? false : 60_000;
       }
       return hasUpcomingRaces(rs, date, t) ? 60_000 : false;
     },
@@ -313,7 +314,7 @@ export function LiveBets() {
   // 判定し、「ポーリング継続中なのにバッジは監視終了」の不整合を作らない。
   const hasUpcoming =
     races.length === 0
-      ? raceStarted(date, "23:59", now) !== true
+      ? !isPastDate(date, now)
       : hasUpcomingRaces(races, date, now);
   const fresh = live.data
     ? freshness(live.data.summary.last_updated, hasUpcoming, now)
@@ -326,6 +327,9 @@ export function LiveBets() {
   }
 
   // ソート・絞り込み状態は URL クエリに反映（リロード・共有耐性、#370）。既定値は省略。
+  // replace は意図的: チップ連打で履歴を汚さない（Back は /live 以前へ戻る）。
+  // liveQueryParams は他のクエリを引き継がないため、このルートに別パラメータを
+  // 追加する場合はマージ方式に変えること。
   const applyQuery = (next: LiveQuery) =>
     setSearchParams(liveQueryParams(next), { replace: true });
   const onSort = (key: SortKey) =>
@@ -366,11 +370,14 @@ export function LiveBets() {
         )}
         {fresh?.state === "stale" && (
           <span className="live-stale">
-            ⚠ {STALE_MINUTES}分以上スナップショット更新なし — predict-watch
-            の稼働を確認
+            {/* label "—" = 更新時刻が一度も読めていない（経過時間の主張はできない） */}
+            {fresh.label === "—"
+              ? "⚠ スナップショット未取得 — predict-watch の稼働を確認"
+              : `⚠ ${STALE_MINUTES}分以上スナップショット更新なし — predict-watch の稼働を確認`}
           </span>
         )}
-        {fresh?.state === "done" && (
+        {/* races 空（監視対象なし）で「全レース発走済み」と読ませない */}
+        {fresh?.state === "done" && races.length > 0 && (
           <span className="badge">監視終了（全レース発走済み）</span>
         )}
       </div>

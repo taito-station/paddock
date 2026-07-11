@@ -14,6 +14,7 @@ import {
   roughnessChip,
   boardHref,
   raceStarted,
+  isPastDate,
   isSoon,
   sortRaces,
   filterRaces,
@@ -285,6 +286,21 @@ describe("raceStarted", () => {
   it("accepts non-zero-padded hours (\"9:30\")", () => {
     expect(raceStarted(DATE, "9:30", NOON)).toBe(true);
   });
+  it("非正規形の date（エンジン依存解釈）は不明(null)に倒す", () => {
+    expect(raceStarted("2026-7-11", "9:30", NOON)).toBeNull();
+    expect(raceStarted("nonsense", "9:30", NOON)).toBeNull();
+  });
+});
+
+describe("isPastDate", () => {
+  it("開催日の 23:59 を過ぎたら過去日", () => {
+    expect(isPastDate("2026-07-10", NOON)).toBe(true);
+    expect(isPastDate(DATE, NOON)).toBe(false);
+    expect(isPastDate("2026-07-12", NOON)).toBe(false);
+  });
+  it("date 不正は false（不明を過去と断定しない）", () => {
+    expect(isPastDate("2026-7-10", NOON)).toBe(false);
+  });
 });
 
 describe("isSoon", () => {
@@ -455,8 +471,12 @@ describe("freshness", () => {
   it("stale beyond STALE_MINUTES when upcoming races remain", () => {
     expect(freshness("2026-07-11T02:49:00Z", true, NOON)).toEqual({ label: "11分前", state: "stale" });
   });
-  it("boundary: ちょうど STALE_MINUTES は fresh", () => {
+  it("boundary: ちょうど STALE_MINUTES は fresh、1 秒超過で stale（生 ms 比較）", () => {
     expect(freshness("2026-07-11T02:50:00Z", true, NOON).state).toBe("fresh");
+    expect(freshness("2026-07-11T02:49:59Z", true, NOON)).toEqual({
+      label: "10分前",
+      state: "stale",
+    });
   });
   it("done when no upcoming races (警告は出さない)", () => {
     expect(freshness("2026-07-11T01:00:00Z", false, NOON).state).toBe("done");

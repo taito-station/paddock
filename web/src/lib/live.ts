@@ -222,13 +222,20 @@ export const SOON_MINUTES = 20;
 export const STALE_MINUTES = 10;
 
 // 開催日 + JST "HH:MM" を Date にする。+09:00 を明示合成しマシン TZ に依存させない。
-// 欠落・不正は null（不明。終了扱いにしない）。
+// 欠落・不正は null（不明。終了扱いにしない）。date も正規形（YYYY-MM-DD）を検証する
+// — 非正規形（"2026-7-11" 等）は ECMAScript の日付文字列仕様外でエンジン依存の解釈になるため。
 function postDate(date: string, postTime: string | null | undefined): Date | null {
-  if (!date || !postTime) return null;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !postTime) return null;
   const m = /^(\d{1,2}):(\d{2})$/.exec(postTime);
   if (!m) return null;
   const d = new Date(`${date}T${m[1].padStart(2, "0")}:${m[2]}:00+09:00`);
   return Number.isNaN(d.getTime()) ? null : d;
+}
+
+// 開催日が丸ごと過去か（JST の 23:59 を過ぎたか）。races が空でスナップショットから
+// 判定できないときの自動ポーリング打ち切り・監視終了判定に使う。date 不正は false（不明）。
+export function isPastDate(date: string, now: Date): boolean {
+  return raceStarted(date, "23:59", now) === true;
 }
 
 // 発走済みか。発走時刻ちょうどは「発走済み」。post_time 不明は null。
@@ -432,11 +439,12 @@ export function freshness(
   now: Date,
 ): Freshness {
   let label = "—";
-  let mins: number | null = null;
+  let diffMs: number | null = null;
   if (lastUpdated) {
     const t = new Date(lastUpdated);
     if (!Number.isNaN(t.getTime())) {
-      mins = Math.max(0, Math.floor((now.getTime() - t.getTime()) / 60_000));
+      diffMs = Math.max(0, now.getTime() - t.getTime());
+      const mins = Math.floor(diffMs / 60_000);
       label =
         mins < 1
           ? "たった今"
@@ -447,7 +455,10 @@ export function freshness(
   }
   if (!hasUpcoming) return { label, state: "done" };
   // 更新時刻が読めない（null/不正）のに未発走が残る状態も警戒対象に倒す。
-  if (mins == null || mins > STALE_MINUTES) return { label, state: "stale" };
+  // 判定は生 ms で行う（分に floor すると実効閾値が +1 分ズレるため）。
+  if (diffMs == null || diffMs > STALE_MINUTES * 60_000) {
+    return { label, state: "stale" };
+  }
   return { label, state: "fresh" };
 }
 
