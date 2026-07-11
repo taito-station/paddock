@@ -371,14 +371,23 @@ export const DEFAULT_LIVE_QUERY: LiveQuery = {
 const SORT_KEYS: SortKey[] = ["status", "post", "roi", "axisProb", "rough", "race"];
 
 // URL クエリ → 状態。不正値は既定へフォールバック（リロード・共有耐性、#370 任意要件）。
+// dir は列の意味論に正規化する: status は固定順（常に asc 扱い）、dir 欠落・不正は
+// その列の既定方向 defaultDir(sort)（手打ち `?sort=roi` を UI 初回クリックと一致させる）。
 export function parseLiveQuery(sp: URLSearchParams): LiveQuery {
-  const sort = sp.get("sort") as SortKey | null;
-  const dir = sp.get("dir") as SortDir | null;
+  const sortRaw = sp.get("sort") as SortKey | null;
+  const sort =
+    sortRaw && SORT_KEYS.includes(sortRaw) ? sortRaw : DEFAULT_LIVE_QUERY.sort;
+  const dirRaw = sp.get("dir");
   const status = sp.get("status") as StatusFilter | null;
   const verdict = sp.get("verdict") as VerdictFilter | null;
   return {
-    sort: sort && SORT_KEYS.includes(sort) ? sort : DEFAULT_LIVE_QUERY.sort,
-    dir: dir === "asc" || dir === "desc" ? dir : DEFAULT_LIVE_QUERY.dir,
+    sort,
+    dir:
+      sort === "status"
+        ? "asc"
+        : dirRaw === "asc" || dirRaw === "desc"
+          ? dirRaw
+          : defaultDir(sort),
     status:
       status === "upcoming" || status === "finished"
         ? status
@@ -391,10 +400,11 @@ export function parseLiveQuery(sp: URLSearchParams): LiveQuery {
 }
 
 // 状態 → URL クエリ。既定値は省略し、素の /live/:date を既定表示と一致させる。
+// dir は列の既定方向と一致するとき省略（parseLiveQuery の正規化と対で round-trip する）。
 export function liveQueryParams(q: LiveQuery): URLSearchParams {
   const sp = new URLSearchParams();
   if (q.sort !== DEFAULT_LIVE_QUERY.sort) sp.set("sort", q.sort);
-  if (q.dir !== DEFAULT_LIVE_QUERY.dir) sp.set("dir", q.dir);
+  if (q.sort !== "status" && q.dir !== defaultDir(q.sort)) sp.set("dir", q.dir);
   if (q.status !== DEFAULT_LIVE_QUERY.status) sp.set("status", q.status);
   if (q.verdict !== DEFAULT_LIVE_QUERY.verdict) sp.set("verdict", q.verdict);
   return sp;

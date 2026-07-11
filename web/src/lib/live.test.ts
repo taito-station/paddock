@@ -409,10 +409,22 @@ describe("parseLiveQuery / liveQueryParams", () => {
   it("round-trip: 非既定値は保存・復元される", () => {
     const q: LiveQuery = { sort: "roi", dir: "desc", status: "upcoming", verdict: "bet" };
     expect(parseLiveQuery(liveQueryParams(q))).toEqual(q);
+    const q2: LiveQuery = { sort: "post", dir: "desc", status: "all", verdict: "all" };
+    expect(parseLiveQuery(liveQueryParams(q2))).toEqual(q2);
   });
   it("既定値はクエリから省略される（素の URL を保つ）", () => {
     expect(liveQueryParams(DEFAULT_LIVE_QUERY).toString()).toBe("");
-    expect(liveQueryParams({ ...DEFAULT_LIVE_QUERY, sort: "roi" }).toString()).toBe("sort=roi");
+    // 列の既定方向（roi は desc）と一致する dir も省略される。
+    expect(liveQueryParams({ ...DEFAULT_LIVE_QUERY, sort: "roi", dir: "desc" }).toString()).toBe("sort=roi");
+    expect(liveQueryParams({ ...DEFAULT_LIVE_QUERY, sort: "roi", dir: "asc" }).toString()).toBe("sort=roi&dir=asc");
+  });
+  it("dir 欠落は列の既定方向へ正規化（手打ち URL と UI 初回クリックを一致させる）", () => {
+    expect(parseLiveQuery(new URLSearchParams("sort=roi")).dir).toBe("desc");
+    expect(parseLiveQuery(new URLSearchParams("sort=post")).dir).toBe("asc");
+  });
+  it("status は固定順のため dir=desc を与えても asc に正規化される", () => {
+    expect(parseLiveQuery(new URLSearchParams("sort=status&dir=desc")).dir).toBe("asc");
+    expect(liveQueryParams({ ...DEFAULT_LIVE_QUERY, dir: "desc" }).toString()).toBe("");
   });
 });
 

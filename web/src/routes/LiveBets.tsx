@@ -259,7 +259,11 @@ export function LiveBets() {
     return () => clearInterval(id);
   }, []);
   // 買い行の伝票は既定展開。「ユーザーが畳んだもの」だけ持つ（refetch で状態が飛ばない）。
+  // route param の date 変更では再マウントされないため、日付を跨いだ残留は明示的に消す。
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    setCollapsed(new Set());
+  }, [date]);
 
   const live = useQuery({
     queryKey: ["live", date],
@@ -409,10 +413,17 @@ export function LiveBets() {
 
           {races.length === 0 ? (
             <p className="muted">監視データなし</p>
-          ) : visible.length === 0 ? (
-            <p className="muted">絞り込み条件に該当するレースなし</p>
+          ) : shown.length === 0 ? (
+            // 全レースが floor 未満のケース。絞り込みが原因でないことを誤案内しない。
+            <p className="muted">
+              全 {races.length} レースが当日 ROI 分布の下位（floor
+              未満）で非表示。
+            </p>
           ) : (
             <>
+              {visible.length === 0 ? (
+                <p className="muted">絞り込み条件に該当するレースなし</p>
+              ) : (
               <table className="grid live-board">
                 <thead>
                   <tr>
@@ -462,6 +473,7 @@ export function LiveBets() {
                   })}
                 </tbody>
               </table>
+              )}
               {hiddenCount > 0 && (
                 <p className="muted">
                   他 {hiddenCount} レースは当日 ROI 分布の下位（floor
