@@ -1,5 +1,7 @@
 /* ===== ダークテーマ（アプリ既定）=====
-   盤（.board-view）の暗色パレットをアプリ全体の既定にそろえる。トークンは :root 変数に集約。 */
+   アプリ既定側（ヘッダー / レース一覧 / グリッド / フォーム / LiveBets）を、
+   盤（.board-view）の暗色パレットに合わせて :root トークンで暗色化する。
+   盤（.board-view）配下の色は既存のリテラルのまま（トークンへの寄せは別スコープ）。 */
 :root {
   --bg: #14171c;
   --surface: #1c2129;
@@ -14,7 +16,6 @@
   --accent-dim: #0d3a1e;
   --warn: #ffcc80;
   --warn-dim: #402a00;
-  --danger: #ff9a9a;
 
   font-family: system-ui, -apple-system, "Hiragino Sans", sans-serif;
   color: var(--text);
