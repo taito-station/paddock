@@ -342,7 +342,8 @@ export function sortRaces(
     if (missA) return 1;
     if (missB) return -1;
     if (typeof va === "string" && typeof vb === "string") {
-      return sign * va.localeCompare(vb);
+      // slug ベースの ASCII 文字列なので、ロケール非依存の単純比較で決定性を担保する。
+      return sign * (va < vb ? -1 : va > vb ? 1 : 0);
     }
     return sign * ((va as number) - (vb as number));
   });

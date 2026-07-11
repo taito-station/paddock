@@ -119,7 +119,7 @@ const COLS = 8;
 function SlipRow({ race }: { race: LiveRaceView }) {
   const groups = groupLegs(race.slip.legs);
   return (
-    <tr className="live-slip-row">
+    <tr className="live-slip-row" id={`slip-${race.race_id}`}>
       <td colSpan={COLS}>
         <p className="muted live-slip-head">
           ◎{maru(race.axis)} 複勝帯{" "}
@@ -196,6 +196,7 @@ function LiveRow({
               type="button"
               className="live-slip-toggle"
               aria-expanded={slipOpen}
+              aria-controls={`slip-${race.race_id}`}
               aria-label={slipOpen ? "伝票を折りたたむ" : "伝票を展開"}
               onClick={(e) => {
                 // 行クリックのトグルと二重発火させない。
@@ -368,9 +369,11 @@ export function LiveBets() {
             {fresh.label !== "—" && `（${fresh.label}）`}
           </span>
         )}
-        {fresh?.state === "stale" && (
+        {/* 開催前日など JST でその日が始まる前は predict-watch 停止が正常なので警告しない。 */}
+        {fresh?.state === "stale" &&
+          raceStarted(date, "0:00", now) === true && (
           <span className="live-stale">
-            {/* label "—" = 更新時刻が一度も読めていない（経過時間の主張はできない） */}
+            {/* label "—" = 更新時刻が読めていない（null/不正。経過時間の主張はできない） */}
             {fresh.label === "—"
               ? "⚠ スナップショット未取得 — predict-watch の稼働を確認"
               : `⚠ ${STALE_MINUTES}分以上スナップショット更新なし — predict-watch の稼働を確認`}
@@ -397,40 +400,40 @@ export function LiveBets() {
 
           {/* 表示対象が無いときは操作しても何も起きないため、チップ自体を出さない。 */}
           {shown.length > 0 && (
-          <div className="live-filter">
-            <span className="muted">状態:</span>
-            <FilterChip
-              label="全部"
-              active={query.status === "all"}
-              onClick={() => setStatus("all")}
-            />
-            <FilterChip
-              label="未発走"
-              active={query.status === "upcoming"}
-              onClick={() => setStatus("upcoming")}
-            />
-            <FilterChip
-              label="終了"
-              active={query.status === "finished"}
-              onClick={() => setStatus("finished")}
-            />
-            <span className="muted">判定:</span>
-            <FilterChip
-              label="全部"
-              active={query.verdict === "all"}
-              onClick={() => setVerdict("all")}
-            />
-            <FilterChip
-              label="張り"
-              active={query.verdict === "bet"}
-              onClick={() => setVerdict("bet")}
-            />
-            <FilterChip
-              label="見送り"
-              active={query.verdict === "skip"}
-              onClick={() => setVerdict("skip")}
-            />
-          </div>
+            <div className="live-filter">
+              <span className="muted">状態:</span>
+              <FilterChip
+                label="全部"
+                active={query.status === "all"}
+                onClick={() => setStatus("all")}
+              />
+              <FilterChip
+                label="未発走"
+                active={query.status === "upcoming"}
+                onClick={() => setStatus("upcoming")}
+              />
+              <FilterChip
+                label="終了"
+                active={query.status === "finished"}
+                onClick={() => setStatus("finished")}
+              />
+              <span className="muted">判定:</span>
+              <FilterChip
+                label="全部"
+                active={query.verdict === "all"}
+                onClick={() => setVerdict("all")}
+              />
+              <FilterChip
+                label="張り"
+                active={query.verdict === "bet"}
+                onClick={() => setVerdict("bet")}
+              />
+              <FilterChip
+                label="見送り"
+                active={query.verdict === "skip"}
+                onClick={() => setVerdict("skip")}
+              />
+            </div>
           )}
 
           {races.length === 0 ? (
@@ -446,55 +449,55 @@ export function LiveBets() {
               {visible.length === 0 ? (
                 <p className="muted">絞り込み条件に該当するレースなし</p>
               ) : (
-              <table className="grid live-board">
-                <thead>
-                  <tr>
-                    <SortTh label="状態" col="status" query={query} onSort={onSort} />
-                    <SortTh label="レース" col="race" query={query} onSort={onSort} />
-                    <SortTh label="発走" col="post" query={query} onSort={onSort} />
-                    <SortTh label="ROI" col="roi" query={query} onSort={onSort} />
-                    <SortTh label="軸" col="axisProb" query={query} onSort={onSort} />
-                    <th>単勝</th>
-                    <SortTh label="荒れ" col="rough" query={query} onSort={onSort} />
-                    <th>注記</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {visible.map((r) => {
-                    const started =
-                      raceStarted(date, r.post_time, now) === true;
-                    const soon = !started && isSoon(date, r.post_time, now);
-                    const notes = flipNotes(r.flip, {
-                      axis: r.axis,
-                      roi: r.roi,
-                      verdict: r.verdict,
-                    });
-                    const isBuy = r.tier === "buy";
-                    const rowClass =
-                      [
-                        started ? "live-row-done" : "",
-                        soon ? "live-row-soon" : "",
-                        isBuy ? "live-row-buy" : "",
-                      ]
-                        .filter(Boolean)
-                        .join(" ") || undefined;
-                    return (
-                      <LiveRow
-                        key={r.race_id}
-                        race={r}
-                        date={date}
-                        rowClass={rowClass}
-                        started={started}
-                        notes={notes}
-                        chip={roughnessChip(r.roughness, r.roughness_label)}
-                        isBuy={isBuy}
-                        slipOpen={isBuy && !collapsed.has(r.race_id)}
-                        onToggle={() => toggleSlip(r.race_id)}
-                      />
-                    );
-                  })}
-                </tbody>
-              </table>
+                <table className="grid live-board">
+                  <thead>
+                    <tr>
+                      <SortTh label="状態" col="status" query={query} onSort={onSort} />
+                      <SortTh label="レース" col="race" query={query} onSort={onSort} />
+                      <SortTh label="発走" col="post" query={query} onSort={onSort} />
+                      <SortTh label="ROI" col="roi" query={query} onSort={onSort} />
+                      <SortTh label="軸" col="axisProb" query={query} onSort={onSort} />
+                      <th>単勝</th>
+                      <SortTh label="荒れ" col="rough" query={query} onSort={onSort} />
+                      <th>注記</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {visible.map((r) => {
+                      const started =
+                        raceStarted(date, r.post_time, now) === true;
+                      const soon = !started && isSoon(date, r.post_time, now);
+                      const notes = flipNotes(r.flip, {
+                        axis: r.axis,
+                        roi: r.roi,
+                        verdict: r.verdict,
+                      });
+                      const isBuy = r.tier === "buy";
+                      const rowClass =
+                        [
+                          started ? "live-row-done" : "",
+                          soon ? "live-row-soon" : "",
+                          isBuy ? "live-row-buy" : "",
+                        ]
+                          .filter(Boolean)
+                          .join(" ") || undefined;
+                      return (
+                        <LiveRow
+                          key={r.race_id}
+                          race={r}
+                          date={date}
+                          rowClass={rowClass}
+                          started={started}
+                          notes={notes}
+                          chip={roughnessChip(r.roughness, r.roughness_label)}
+                          isBuy={isBuy}
+                          slipOpen={isBuy && !collapsed.has(r.race_id)}
+                          onToggle={() => toggleSlip(r.race_id)}
+                        />
+                      );
+                    })}
+                  </tbody>
+                </table>
               )}
               {hiddenCount > 0 && (
                 <p className="muted">
