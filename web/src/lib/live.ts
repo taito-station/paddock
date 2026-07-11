@@ -263,6 +263,15 @@ export function tierShort(tier: string): string {
   return TIER_SHORT[tier] ?? tier;
 }
 
+// 未発走（不明含む）のレースが残っているか。自動ポーリング継続と鮮度 done 判定の共有述語。
+export function hasUpcomingRaces(
+  races: LiveRaceView[],
+  date: string,
+  now: Date,
+): boolean {
+  return races.some((r) => raceStarted(date, r.post_time, now) !== true);
+}
+
 export type SortKey = "status" | "post" | "roi" | "axisProb" | "rough" | "race";
 export type SortDir = "asc" | "desc";
 export type LiveSortCtx = { date: string; now: Date };

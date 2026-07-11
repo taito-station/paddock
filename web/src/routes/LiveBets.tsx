@@ -14,6 +14,7 @@ import {
   flipNotes,
   freshness,
   groupLegs,
+  hasUpcomingRaces,
   isSoon,
   jstHm,
   liveQueryParams,
@@ -100,6 +101,7 @@ function FilterChip({
     <button
       type="button"
       className={`tab${active ? " tab-active" : ""}`}
+      aria-pressed={active}
       onClick={onClick}
     >
       {label}
@@ -107,6 +109,8 @@ function FilterChip({
   );
 }
 
+// thead の <th> 本数（SortTh 6 + 単勝 + 注記）。列を増減したらここも更新する
+// （SlipRow の colSpan がズレると伝票展開行のレイアウトが崩れる）。
 const COLS = 8;
 
 // 🟢買いレースの伝票（そのまま買える形: 式別 / 方式 / 軸 / 相手 / 点数 / 金額）。
@@ -272,11 +276,14 @@ export function LiveBets() {
     // スナップショットは predict-watch のスイープ（5 分間隔）でしか変わらないため、
     // 未発走レースが残る間だけ 1 分間隔で自動再取得して新スイープを拾う（#372）。
     refetchInterval: (q) => {
-      const rs = q.state.data?.races ?? [];
+      const rs = q.state.data?.races;
       const t = new Date();
-      return rs.some((r) => raceStarted(date, r.post_time, t) !== true)
-        ? 60_000
-        : false;
+      // スイープ開始前（データ未取得・races 0 件）は判定材料が無いので、
+      // 過去日でなければポーリングを続けて初回スナップショットを自動で拾う。
+      if (!rs || rs.length === 0) {
+        return raceStarted(date, "23:59", t) === true ? false : 60_000;
+      }
+      return hasUpcomingRaces(rs, date, t) ? 60_000 : false;
     },
     queryFn: async () => {
       const { data, error } = await api.GET("/api/live/{date}", {
@@ -302,9 +309,12 @@ export function LiveBets() {
     [shown, query.status, query.verdict, query.sort, query.dir, ctx],
   );
   const hiddenCount = races.length - shown.length;
-  const hasUpcoming = races.some(
-    (r) => raceStarted(date, r.post_time, now) !== true,
-  );
+  // races が空（スイープ開始前）のときは refetchInterval と同じ基準（過去日か否か）で
+  // 判定し、「ポーリング継続中なのにバッジは監視終了」の不整合を作らない。
+  const hasUpcoming =
+    races.length === 0
+      ? raceStarted(date, "23:59", now) !== true
+      : hasUpcomingRaces(races, date, now);
   const fresh = live.data
     ? freshness(live.data.summary.last_updated, hasUpcoming, now)
     : null;
@@ -349,7 +359,9 @@ export function LiveBets() {
         </button>
         {live.data && fresh && (
           <span className="muted">
-            最終更新 {jstHm(live.data.summary.last_updated)}（{fresh.label}）
+            最終更新 {jstHm(live.data.summary.last_updated)}
+            {/* last_updated が無いとき「—（—）」の二重ダッシュにしない */}
+            {fresh.label !== "—" && `（${fresh.label}）`}
           </span>
         )}
         {fresh?.state === "stale" && (
@@ -376,6 +388,8 @@ export function LiveBets() {
         <>
           <p className="live-summary">{summaryLine(live.data.summary)}</p>
 
+          {/* 表示対象が無いときは操作しても何も起きないため、チップ自体を出さない。 */}
+          {shown.length > 0 && (
           <div className="live-filter">
             <span className="muted">状態:</span>
             <FilterChip
@@ -410,6 +424,7 @@ export function LiveBets() {
               onClick={() => setVerdict("skip")}
             />
           </div>
+          )}
 
           {races.length === 0 ? (
             <p className="muted">監視データなし</p>

@@ -20,13 +20,19 @@ import {
   parseLiveQuery,
   liveQueryParams,
   freshness,
+  hasUpcomingRaces,
   DEFAULT_LIVE_QUERY,
   defaultDir,
   type LiveQuery,
 } from "./live";
 
+import type { Schemas } from "../api/client";
+
+type LiveRaceView = Schemas["LiveRaceViewSchema"];
+
 // テーブル型ボード（#370/#372）用の最小 LiveRaceView。指定フィールドだけ上書きする。
-function raceView(over: Record<string, unknown> = {}) {
+// 戻り値を実型にしておき、スキーマのフィールド改名を typecheck で検出させる。
+function raceView(over: Partial<LiveRaceView> = {}): LiveRaceView {
   return {
     race_id: "2026-1-hakodate-9-1R",
     venue: "hakodate",
@@ -45,7 +51,7 @@ function raceView(over: Record<string, unknown> = {}) {
     axis_place_odds_low: null,
     axis_place_odds_high: null,
     odds_missing: false,
-    slip: { legs: [] },
+    slip: { legs: [], race_budget: 5000 },
     flip: {
       axis_changed: false,
       prev_axis: null,
@@ -54,8 +60,7 @@ function raceView(over: Record<string, unknown> = {}) {
       prev_roi: null,
     },
     ...over,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  } as any;
+  };
 }
 
 const DATE = "2026-07-11";
@@ -337,9 +342,11 @@ describe("sortRaces", () => {
       raceView({ race_id: "y", venue: "hakodate", race_no: 9 }),
     ];
     expect(sortRaces(rs, "race", "asc", ctx).map((r) => r.race_id)).toEqual(["y", "x"]);
+    expect(sortRaces(rs, "race", "desc", ctx).map((r) => r.race_id)).toEqual(["x", "y"]);
   });
-  it("axisProb desc", () => {
+  it("axisProb desc / asc", () => {
     expect(sortRaces(races, "axisProb", "desc", ctx).map((r) => r.race_id)).toEqual(["c", "a", "b", "d"]);
+    expect(sortRaces(races, "axisProb", "asc", ctx).map((r) => r.race_id)).toEqual(["d", "b", "a", "c"]);
   });
   it("status は正準の固定順で dir を反映しない（UI 側も状態列はトグルしない前提）", () => {
     expect(sortRaces(races, "status", "desc", ctx).map((r) => r.race_id)).toEqual(
@@ -394,6 +401,17 @@ describe("filterRaces", () => {
   });
   it("all/all は全件通す", () => {
     expect(filterRaces(races, { status: "all", verdict: "all" }, ctx)).toHaveLength(4);
+  });
+});
+
+describe("hasUpcomingRaces", () => {
+  it("未発走（post 不明含む）が 1 件でもあれば true", () => {
+    expect(hasUpcomingRaces([raceView({ post_time: "13:00" })], DATE, NOON)).toBe(true);
+    expect(hasUpcomingRaces([raceView({ post_time: null })], DATE, NOON)).toBe(true);
+  });
+  it("全レース発走済みなら false（空配列も false）", () => {
+    expect(hasUpcomingRaces([raceView({ post_time: "11:00" })], DATE, NOON)).toBe(false);
+    expect(hasUpcomingRaces([], DATE, NOON)).toBe(false);
   });
 });
 
