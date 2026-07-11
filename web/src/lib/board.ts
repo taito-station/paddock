@@ -5,6 +5,21 @@ import type { components } from "../api/schema";
 
 export type BoardHorse = components["schemas"]["BoardHorseSchema"];
 
+// CLI predict / recommendations の既定 race_budget と揃える（盤と執行パネルで共有）。
+export const DEFAULT_RACE_BUDGET = 5000;
+
+// 実効上限 cap。セッション無し（balance=null）は予算がそのまま上限（閲覧・検討用）、
+// セッションがあれば実弾の残高で頭打ちにする。
+export function effectiveCap(applied: number, balance: number | null): number {
+  return balance == null ? applied : Math.min(applied, balance);
+}
+
+// board API へ渡す予算。budget=0 はサーバが 400 を返すため、cap が 0 以下でも
+// 既定予算で盤自体は描画する（買い目の執行側は cap<=0 を縮退表示で扱う）。
+export function boardBudget(cap: number): number {
+  return cap > 0 ? cap : DEFAULT_RACE_BUDGET;
+}
+
 // 印スラッグ → 表示記号。無印（null）は空文字。
 export const MARK_SYMBOL: Record<string, string> = {
   honmei: "◎",

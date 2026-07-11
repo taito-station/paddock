@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_RACE_BUDGET,
+  boardBudget,
+  effectiveCap,
   heatColor,
   heatIntensity,
   markSymbol,
@@ -7,6 +10,29 @@ import {
   sortByModelRank,
   type BoardHorse,
 } from "./board";
+
+describe("effectiveCap", () => {
+  it("セッション無し（balance=null）は予算そのまま（閲覧・検討用）", () => {
+    expect(effectiveCap(5000, null)).toBe(5000);
+  });
+  it("セッションありは残高で頭打ち", () => {
+    expect(effectiveCap(5000, 3000)).toBe(3000);
+    expect(effectiveCap(5000, 8000)).toBe(5000);
+  });
+  it("残高 0 は cap=0（執行側は縮退表示）", () => {
+    expect(effectiveCap(5000, 0)).toBe(0);
+  });
+});
+
+describe("boardBudget", () => {
+  it("正の cap はそのまま board API へ", () => {
+    expect(boardBudget(3000)).toBe(3000);
+  });
+  it("cap<=0 は既定予算に倒す（budget=0 はサーバが 400 を返すため）", () => {
+    expect(boardBudget(0)).toBe(DEFAULT_RACE_BUDGET);
+    expect(boardBudget(-100)).toBe(DEFAULT_RACE_BUDGET);
+  });
+});
 
 describe("markSymbol", () => {
   it("maps slugs to symbols and null to empty", () => {
