@@ -4,6 +4,7 @@ import type { Schemas } from "../api/client";
 import { SURFACE_JP } from "./format";
 import {
   liveQueryParams,
+  parseLiveQuery,
   postMinutes,
   raceStarted,
   type LiveFilter,
@@ -160,6 +161,15 @@ export function dashboardQueryParams(
   const sp = liveQueryParams(q);
   if (date) sp.set("date", date);
   return sp;
+}
+
+// 盤の「← レース一覧」戻り先を組む（#380）。盤 URL の back=（ライブの絞り込み状態）を
+// 盤の date と合成して /?… を復元する。back は searchParams 由来のユーザ制御値なので
+// parseLiveQuery で再検証し、whitelist 値のみ復元する（不正な back は既定へ正規化）。
+export function backToDashboardHref(back: string, date: string): string {
+  const q = parseLiveQuery(new URLSearchParams(back));
+  const qs = dashboardQueryParams(q, date).toString();
+  return qs ? `/?${qs}` : "/";
 }
 
 // 距離馬場列の表示（"芝1200" / "ダ1700"）。未知 surface は slug をそのまま出す。

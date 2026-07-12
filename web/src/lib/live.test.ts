@@ -13,6 +13,7 @@ import {
   tierShort,
   roughnessChip,
   boardHref,
+  backParam,
   raceStarted,
   isPastDate,
   isSoon,
@@ -80,6 +81,44 @@ describe("boardHref", () => {
   it("encodes hostile date (URL クエリ経由のユーザ制御値によるクエリ注入防止)", () => {
     expect(boardHref("202602050811", "2026-07-08&sort=roi#x")).toBe(
       "/races/202602050811/board?date=2026-07-08%26sort%3Droi%23x",
+    );
+  });
+  it("carries back= (絞り込み状態) URL エンコードして持ち回る（#380）", () => {
+    expect(boardHref("202602050811", "2026-07-08", "sort=roi&status=upcoming")).toBe(
+      "/races/202602050811/board?date=2026-07-08&back=sort%3Droi%26status%3Dupcoming",
+    );
+  });
+  it("omits back when empty (素の盤 URL を保つ)", () => {
+    expect(boardHref("202602050811", "2026-07-08", "")).toBe(
+      "/races/202602050811/board?date=2026-07-08",
+    );
+  });
+  it("back のみで date 無しでも組める（直リンク相当）", () => {
+    expect(boardHref("202602050811", "", "sort=roi")).toBe(
+      "/races/202602050811/board?back=sort%3Droi",
+    );
+  });
+  it("back を decode → parseLiveQuery で round-trip する（whitelist 復元）", () => {
+    const q: LiveQuery = { sort: "roi", dir: "desc", status: "upcoming", verdict: "bet" };
+    const href = boardHref("202602050811", "2026-07-08", backParam(q));
+    // 盤が受け取る側の復元経路を再現（URL → back → LiveQuery）。
+    const sp = new URLSearchParams(href.split("?")[1]);
+    expect(parseLiveQuery(new URLSearchParams(sp.get("back") ?? ""))).toEqual(q);
+  });
+});
+
+describe("backParam", () => {
+  it("既定クエリは空文字（素の一覧に戻す）", () => {
+    expect(backParam(DEFAULT_LIVE_QUERY)).toBe("");
+  });
+  it("既定方向の dir は省略し sort/filter のみ直列化する", () => {
+    expect(
+      backParam({ sort: "roi", dir: "desc", status: "upcoming", verdict: "bet" }),
+    ).toBe("sort=roi&status=upcoming&verdict=bet");
+  });
+  it("date は含めない（盤 URL の ?date= が正本）", () => {
+    expect(backParam({ ...DEFAULT_LIVE_QUERY, status: "finished" })).toBe(
+      "status=finished",
     );
   });
 });

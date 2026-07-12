@@ -49,15 +49,24 @@ export function jstHm(iso: string | null | undefined): string {
 
 // レース詳細盤（RaceBoard）への遷移先 URL を組む単一の生成源。
 // date は戻り先 /?date= の復元に使う。空なら省略（RaceBoard は盤レスポンスの date に
-// フォールバックできる）。旧 from=live は /live 廃止（#378）に伴い撤去 — 既存の
-// from=live 付き URL は盤が単に無視する（戻り先は常に一覧で正しい）。
-export function boardHref(raceId: string, date: string): string {
-  // raceId / date とも URL 経由でユーザ制御可能な値になりうる（旧ルートのリダイレクトは
-  // useParams のデコード済み値を渡す）ため、必ずエンコードして埋める
+// フォールバックできる）。back はライブ一覧の絞り込み状態（sort/filter）を URL エンコードで
+// 持ち回り、盤の「← レース一覧」で復元する（#380）。空なら省略。旧 from=live は /live 廃止
+//（#378）に伴い撤去 — 既存の from=live 付き URL は盤が単に無視する。
+export function boardHref(raceId: string, date: string, back?: string): string {
+  // raceId / date / back とも URL 経由でユーザ制御可能な値になりうる（旧ルートのリダイレクトは
+  // useParams のデコード済み値を渡す。back は searchParams 由来）ため、必ずエンコードして埋める
   //（& / # / %2F 等によるクエリ注入・パス操作・URL 破壊の防止）。
-  return `/races/${encodeURIComponent(raceId)}/board${
-    date ? `?date=${encodeURIComponent(date)}` : ""
-  }`;
+  const qs: string[] = [];
+  if (date) qs.push(`date=${encodeURIComponent(date)}`);
+  if (back) qs.push(`back=${encodeURIComponent(back)}`);
+  return `/races/${encodeURIComponent(raceId)}/board${qs.length ? `?${qs.join("&")}` : ""}`;
+}
+
+// ライブ一覧の絞り込み状態を盤 URL の back= に載せる文字列にする（#380）。date は盤 URL の
+// ?date= が正本なので含めない（戻り時に盤の date と合成 = backToDashboardHref）。生成は
+// liveQueryParams（検証済み LiveQuery からの直列化）経由に限り、任意文字列を埋めない。
+export function backParam(query: LiveQuery): string {
+  return liveQueryParams(query).toString();
 }
 
 // 「断然人気」とみなす◎の単勝オッズ上限。この値以下は過剰人気として見送り理由に明記する

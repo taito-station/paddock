@@ -7,6 +7,7 @@ import {
   sortRows,
   filterRows,
   dashboardQueryParams,
+  backToDashboardHref,
   surfaceDistance,
   type DashboardRow,
 } from "./dashboard";
@@ -243,6 +244,38 @@ describe("dashboardQueryParams", () => {
     const sp = dashboardQueryParams(q, DATE);
     expect(sp.get("date")).toBe(DATE);
     expect(parseLiveQuery(sp)).toEqual(q); // date は parseLiveQuery が読まないため衝突しない
+  });
+});
+
+describe("backToDashboardHref", () => {
+  it("空 back は素の一覧（date のみ）に戻す", () => {
+    expect(backToDashboardHref("", DATE)).toBe(`/?date=${DATE}`);
+  });
+  it("date も back も空なら素の /", () => {
+    expect(backToDashboardHref("", "")).toBe("/");
+  });
+  it("back の絞り込み状態を盤の date と合成して復元する", () => {
+    expect(backToDashboardHref("sort=roi&status=upcoming&verdict=bet", DATE)).toBe(
+      `/?sort=roi&status=upcoming&verdict=bet&date=${DATE}`,
+    );
+    // 復元後を parseLiveQuery で読み直すと元の状態に一致する（round-trip）。
+    const q = parseLiveQuery(
+      new URLSearchParams("sort=roi&status=upcoming&verdict=bet"),
+    );
+    const href = backToDashboardHref("sort=roi&status=upcoming&verdict=bet", DATE);
+    expect(parseLiveQuery(new URLSearchParams(href.split("?")[1]))).toEqual(q);
+  });
+  it("不正な back は whitelist 正規化して既定へ倒す（任意文字列を埋めない）", () => {
+    // 未知 sort/status/verdict は parseLiveQuery が既定に落とすため date だけが残る。
+    expect(
+      backToDashboardHref("sort=bogus&status=zzz&verdict=maybe&evil=1", DATE),
+    ).toBe(`/?date=${DATE}`);
+  });
+  it("back に混入した date は無視し、盤の date を正本にする（backParam は date 非含有）", () => {
+    // parseLiveQuery は date キーを読まず、dashboardQueryParams が盤の date で上書きする。
+    expect(backToDashboardHref("sort=roi&date=2020-01-01", DATE)).toBe(
+      `/?sort=roi&date=${DATE}`,
+    );
   });
 });
 

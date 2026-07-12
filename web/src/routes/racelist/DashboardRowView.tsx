@@ -28,6 +28,7 @@ import { Badge } from "./Badge";
 export function DashboardRowView({
   row,
   date,
+  back,
   now,
   badge,
   slipOpen,
@@ -35,6 +36,7 @@ export function DashboardRowView({
 }: {
   row: DashboardRow;
   date: string;
+  back: string;
   now: Date;
   badge: RaceBadge;
   slipOpen: boolean;
@@ -108,7 +110,7 @@ export function DashboardRowView({
         <td>
           <Link
             className="live-race-link"
-            to={boardHref(race.race_id, date)}
+            to={boardHref(race.race_id, date, back)}
             title="全頭盤・top5理由を見る"
           >
             <strong>

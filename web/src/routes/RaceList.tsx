@@ -19,6 +19,7 @@ import {
 } from "../lib/dashboard";
 import {
   STALE_MINUTES,
+  backParam,
   boardHref,
   defaultDir,
   freshness,
@@ -42,17 +43,19 @@ import { DashboardRowView } from "./racelist/DashboardRowView";
 function StaticRow({
   row,
   date,
+  back,
   badge,
 }: {
   row: DashboardRow;
   date: string;
+  back: string;
   badge: RaceBadge;
 }) {
   const r = row.race;
   return (
     <tr>
       <td>
-        <Link to={boardHref(r.race_id, date)}>{r.race_num}</Link>
+        <Link to={boardHref(r.race_id, date, back)}>{r.race_num}</Link>
       </td>
       <td>{VENUE_JP[r.venue] ?? r.venue}</td>
       {/* 発走時刻は race_cards 正本（#391）。未取得は "—"（不明扱い）。 */}
@@ -74,6 +77,9 @@ export function RaceList() {
   // 開催日・ソート・絞り込みは URL クエリが正（リロード・共有耐性）。date 省略時は JST の今日。
   const date = searchParams.get("date") || todayJst();
   const query = parseLiveQuery(searchParams);
+  // 盤へ引き継ぐ絞り込み状態（#380）。盤の「← レース一覧」で復元する。date は盤 URL の
+  // ?date= が別途持つため back には含めない（backParam は sort/filter のみ直列化）。
+  const back = backParam(query);
 
   // 発走済み判定・鮮度の相対時刻用の「現在」。30 秒刻みで更新（純粋関数側は now 引数のまま）。
   const [now, setNow] = useState(() => new Date());
@@ -308,6 +314,7 @@ export function RaceList() {
                 key={row.race.race_id}
                 row={row}
                 date={date}
+                back={back}
                 badge={badgeOf(row.bought)}
               />
             ))}
@@ -375,6 +382,7 @@ export function RaceList() {
                     key={row.race.race_id}
                     row={row}
                     date={date}
+                    back={back}
                     now={now}
                     badge={badgeOf(row.bought)}
                     slipOpen={

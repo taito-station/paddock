@@ -15,12 +15,16 @@ import {
 } from "../lib/board";
 import { toAmount } from "../lib/bets";
 import { boardHref } from "../lib/live";
+import { backToDashboardHref } from "../lib/dashboard";
 import { ExecutionPanel } from "./board/ExecutionPanel";
 
 export function RaceBoard() {
   const { raceId = "" } = useParams();
   const [searchParams] = useSearchParams();
   const dateParam = searchParams.get("date") ?? "";
+  // ライブ一覧の絞り込み状態（sort/filter）。「← レース一覧」と場/R 切替リンクに引き継ぎ、
+  // 盤から戻ったときにソート/フィルタを復元する（#380）。直リンク（back 無し）は空。
+  const back = searchParams.get("back") ?? "";
   // 旧 ?from=live は /live 廃止（#378）で読まなくなった。付いていても無視される。
   // クリックで馬書評（詳細パネル）を開く馬番。同じ馬を再クリック or 閉じるで null に戻す。
   const [selectedHorse, setSelectedHorse] = useState<number | null>(null);
@@ -158,8 +162,9 @@ export function RaceBoard() {
             : raceId}
         </h2>
         {d?.post_time && <span className="muted">発走 {d.post_time}</span>}
-        {/* date は ?date= 由来のユーザ制御値になりうるため必ずエンコード（boardHref と同基準） */}
-        <Link to={`/?date=${encodeURIComponent(date)}`}>← レース一覧</Link>
+        {/* 戻り先は盤の date と back=（ライブの絞り込み状態）を合成して復元する（#380）。
+            date/back とも whitelist 再検証・エンコード込みで backToDashboardHref が組む。 */}
+        <Link to={backToDashboardHref(back, date)}>← レース一覧</Link>
         {date && (
           <Link to={`/sessions/${encodeURIComponent(date)}`}>収支</Link>
         )}
@@ -187,7 +192,7 @@ export function RaceBoard() {
               <Link
                 key={r.race_id}
                 className="chip venue-link"
-                to={boardHref(r.race_id, date)}
+                to={boardHref(r.race_id, date, back)}
               >
                 {label}
               </Link>
@@ -209,7 +214,7 @@ export function RaceBoard() {
               <Link
                 key={r.race_id}
                 className="chip venue-link"
-                to={boardHref(r.race_id, date)}
+                to={boardHref(r.race_id, date, back)}
               >
                 {r.race_num}
               </Link>
