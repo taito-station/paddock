@@ -21,9 +21,7 @@ export function RaceBoard() {
   const { raceId = "" } = useParams();
   const [searchParams] = useSearchParams();
   const dateParam = searchParams.get("date") ?? "";
-  // ライブ日次ボード（/live/:date）から来たか。来た場合は戻り導線をライブに向け、
-  // 盤内の場内/R切替でも from を引き継いで戻り先を保つ。
-  const fromLive = searchParams.get("from") === "live";
+  // 旧 ?from=live は /live 廃止（#378）で読まなくなった。付いていても無視される。
   // クリックで馬書評（詳細パネル）を開く馬番。同じ馬を再クリック or 閉じるで null に戻す。
   const [selectedHorse, setSelectedHorse] = useState<number | null>(null);
   // フォーカス管理（a11y）: パネルを開いた馬カラム（trigger）を覚えておき、閉じたら戻す。
@@ -161,11 +159,7 @@ export function RaceBoard() {
             : raceId}
         </h2>
         {d?.post_time && <span className="muted">発走 {d.post_time}</span>}
-        {fromLive && date ? (
-          <Link to={`/live/${date}`}>← ライブに戻る</Link>
-        ) : (
-          <Link to={`/?date=${date}`}>← レース一覧</Link>
-        )}
+        <Link to={`/?date=${date}`}>← レース一覧</Link>
         {date && <Link to={`/sessions/${date}`}>収支</Link>}
         {session.data && (
           <span className="session-balance">
@@ -191,7 +185,7 @@ export function RaceBoard() {
               <Link
                 key={r.race_id}
                 className="chip venue-link"
-                to={boardHref(r.race_id, date, { fromLive })}
+                to={boardHref(r.race_id, date)}
               >
                 {label}
               </Link>
@@ -213,7 +207,7 @@ export function RaceBoard() {
               <Link
                 key={r.race_id}
                 className="chip venue-link"
-                to={boardHref(r.race_id, date, { fromLive })}
+                to={boardHref(r.race_id, date)}
               >
                 {r.race_num}
               </Link>
