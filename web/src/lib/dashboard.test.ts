@@ -219,6 +219,18 @@ describe("filterRows", () => {
       filterRows(rs, { status: "upcoming", verdict: "all" }, ctx).map((r) => r.race.race_id),
     ).toEqual(["up-nolive", "unknown"]);
   });
+  it("race.post_time と live.post_time が食い違うとき分類も race 正本を優先する（#391）", () => {
+    // race=過去(10:00) / live=未来(16:00)。rowPostTime が race 側を採るため発走済みに分類される。
+    const rs = [
+      row({ race_id: "race-past", post_time: "10:00" }, { post_time: "16:00", verdict: "skip" }),
+    ];
+    expect(
+      filterRows(rs, { status: "finished", verdict: "all" }, ctx).map((r) => r.race.race_id),
+    ).toEqual(["race-past"]);
+    expect(
+      filterRows(rs, { status: "upcoming", verdict: "all" }, ctx).map((r) => r.race.race_id),
+    ).toEqual([]);
+  });
 });
 
 describe("dashboardQueryParams", () => {
