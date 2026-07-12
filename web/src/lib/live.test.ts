@@ -121,6 +121,21 @@ describe("postMinutes", () => {
     expect(postMinutes(null)).toBe(Number.POSITIVE_INFINITY);
     expect(postMinutes("--")).toBe(Number.POSITIVE_INFINITY);
   });
+  it("rejects loose minutes to the tail (厳格 regex に一本化・#385)", () => {
+    // 分 1 桁（"12:5"）や余分な要素（"12:05:30"）は不正扱い＝+∞。
+    // postDate（raceStarted 系）の厳格解釈と判定が割れないことを担保する。
+    expect(postMinutes("12:5")).toBe(Number.POSITIVE_INFINITY);
+    expect(postMinutes("12:05:30")).toBe(Number.POSITIVE_INFINITY);
+    // 一方、厳格でも通る正常系は従来どおり分に化ける。
+    expect(postMinutes("12:05")).toBe(725);
+  });
+  it("範囲外は末尾送り（postDate と判定を割らない・#385）", () => {
+    // 時 24+・分 60+ は postDate 側でも不明扱い。postMinutes だけ有限ソート値にしない。
+    expect(postMinutes("24:00")).toBe(Number.POSITIVE_INFINITY);
+    expect(postMinutes("12:60")).toBe(Number.POSITIVE_INFINITY);
+    // 境界（23:59）は正常。
+    expect(postMinutes("23:59")).toBe(1439);
+  });
 });
 
 describe("maru", () => {
@@ -283,6 +298,11 @@ describe("raceStarted", () => {
   });
   it("accepts non-zero-padded hours (\"9:30\")", () => {
     expect(raceStarted(DATE, "9:30", NOON)).toBe(true);
+  });
+  it("緩い分表記は不明(null)に倒す（postMinutes と厳格解釈を共有・#385）", () => {
+    // 分 1 桁・余分な要素は postDate 側でも不明扱い。postMinutes との判定割れを防ぐ。
+    expect(raceStarted(DATE, "12:5", NOON)).toBeNull();
+    expect(raceStarted(DATE, "12:05:30", NOON)).toBeNull();
   });
   it("非正規形の date（エンジン依存解釈）は不明(null)に倒す", () => {
     expect(raceStarted("2026-7-11", "9:30", NOON)).toBeNull();
