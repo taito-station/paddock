@@ -444,15 +444,32 @@ button:disabled {
 .board-scroll {
   overflow-x: auto;
   padding-bottom: 0.5rem;
+  /* 馬盤の帯だけ app-main(960px) を抜けてビューポート全幅を使う（#383）。
+     ツールバー/執行/書評は 960px のまま。full-bleed: 中央寄せ親の中で
+     100vw に広げ、app-main と同じ左右余白を内側 padding で戻す。
+     PC(Mac・オーバーレイスクロールバー)前提のため 100vw の端数は無視できる。 */
+  width: 100vw;
+  margin-left: calc(50% - 50vw);
+  margin-right: calc(50% - 50vw);
+  padding-left: 1.25rem;
+  padding-right: 1.25rem;
 }
 .board-row {
   display: flex;
   gap: 6px;
+  /* 広い時は列を伸ばして帯を充填し、min-content(=列 min-width 総和)を下回る
+     幅でのみ board-scroll が横スクロールする境界になる。 */
   min-width: min-content;
 }
 .horse-col {
-  flex: 0 0 92px;
-  width: 92px;
+  /* 可変幅（#383）。basis 0 + grow/shrink で残り幅を均等配分し、min–max で
+     読みやすさの下限と間延び上限を挟む。min-width 78px は stats 最長ラベル
+     （「市場勝率」→「市場」短縮後の最長は「連対率」「複勝率」）が旧 92px 相当の
+     余裕で収まる下限。18頭は概ね 1540px 以上でスクロールなし、それ未満でも固定
+     92px（要 1758px）より大幅減。少頭数は max 108px まで広がり一覧性が上がる。 */
+  flex: 1 1 0;
+  min-width: 78px;
+  max-width: 108px;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 6px;

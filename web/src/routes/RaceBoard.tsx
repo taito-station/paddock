@@ -337,8 +337,8 @@ export function RaceBoard() {
                       <dt>複勝率</dt>
                       <dd>{pct(h.show_prob)}</dd>
                     </div>
-                    <div title="単勝オッズから逆算した市場推定の勝率（胴元の控除を抜いた実力評価）。モデル勝率と比べて乖離＝妙味">
-                      <dt>市場勝率</dt>
+                    <div title="市場勝率＝単勝オッズから逆算した市場推定の勝率（胴元の控除を抜いた実力評価）。モデル勝率と比べて乖離＝妙味。狭幅時の重なり回避のため列見出しは「市場」に短縮（#383）">
+                      <dt>市場</dt>
                       <dd>{h.market_implied == null ? "-" : pct(h.market_implied)}</dd>
                     </div>
                     <div>
