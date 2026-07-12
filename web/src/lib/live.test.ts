@@ -121,6 +121,14 @@ describe("postMinutes", () => {
     expect(postMinutes(null)).toBe(Number.POSITIVE_INFINITY);
     expect(postMinutes("--")).toBe(Number.POSITIVE_INFINITY);
   });
+  it("rejects loose minutes to the tail (厳格 regex に一本化・#385)", () => {
+    // 分 1 桁（"12:5"）や余分な要素（"12:05:30"）は不正扱い＝+∞。
+    // postDate（raceStarted 系）の厳格解釈と判定が割れないことを担保する。
+    expect(postMinutes("12:5")).toBe(Number.POSITIVE_INFINITY);
+    expect(postMinutes("12:05:30")).toBe(Number.POSITIVE_INFINITY);
+    // 一方、厳格でも通る正常系は従来どおり分に化ける。
+    expect(postMinutes("12:05")).toBe(725);
+  });
 });
 
 describe("maru", () => {
