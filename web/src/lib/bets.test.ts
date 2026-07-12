@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   betKey,
+  canRecordOutcome,
   effStake,
   effPayout,
   isRaceRecorded,
@@ -82,6 +83,22 @@ describe("isRaceRecorded", () => {
   it("痕跡が無ければ未記録（スキップ記録は痕跡が残らない仕様）", () => {
     expect(isRaceRecorded(sessionBets, "2026-1-hakodate-9-12R")).toBe(false);
     expect(isRaceRecorded([], "2026-1-hakodate-9-1R")).toBe(false);
+  });
+});
+
+describe("canRecordOutcome", () => {
+  it("セッションあり×未完了×未記録×非実行中のみ true", () => {
+    expect(
+      canRecordOutcome({ hasSession: true, completed: false, bought: false, pending: false }),
+    ).toBe(true);
+  });
+  it.each([
+    ["セッション無し", { hasSession: false, completed: false, bought: false, pending: false }],
+    ["完了済みセッション", { hasSession: true, completed: true, bought: false, pending: false }],
+    ["記録済みレース", { hasSession: true, completed: false, bought: true, pending: false }],
+    ["mutation 実行中", { hasSession: true, completed: false, bought: false, pending: true }],
+  ] as const)("%s は false", (_label, opts) => {
+    expect(canRecordOutcome(opts)).toBe(false);
   });
 });
 

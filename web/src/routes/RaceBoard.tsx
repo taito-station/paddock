@@ -7,6 +7,7 @@ import {
   DEFAULT_RACE_BUDGET,
   boardBudget,
   effectiveCap,
+  keepBoardPlaceholder,
   heatColor,
   markSymbol,
   placeOddsLabel,
@@ -64,6 +65,11 @@ export function RaceBoard() {
   // するが、session（下）は board より先に宣言する必要があるため、フォールバック値は
   // board 到着後に state 経由で伝搬させる（board は budget=f(session) に依存する循環の解消）。
   const [fallbackDate, setFallbackDate] = useState("");
+  // レース遷移で残留させない（別開催日の盤へ移った際、新 board 到着まで旧日付の
+  // session を参照する transient の解消。?date= 無し直リンクのケースのみ影響）。
+  useEffect(() => {
+    setFallbackDate("");
+  }, [raceId]);
   const sessionDate = dateParam || fallbackDate;
 
   // セッション（残高・記録済み判定）。未作成は 404 → null に倒す（RaceList と同流儀）。
@@ -94,11 +100,11 @@ export function RaceBoard() {
     // budget は可変（#377）。stale キャッシュを避けるため queryKey に必ず含める。
     queryKey: ["board", raceId, queryBudget],
     enabled: !!raceId,
-    // 予算変更時に盤全体（馬カラム）がスピナーへ戻るチラつきを防ぐ。**同一レースに限定**
-    // すること: 無条件 `(prev) => prev` だと場/R 切替でも前レースの盤・買い目が placeholder
-    // 表示され、ロード完了前に前レースの買い目を新レースとして記録できてしまう。
+    // 予算変更時に盤全体（馬カラム）がスピナーへ戻るチラつきを防ぐ。ガードの意味論
+    //（同一レース限定＝前レースの買い目を新レースとして記録できる事故の防止）は
+    // keepBoardPlaceholder（lib/board.ts・テスト済み）が持つ。
     placeholderData: (prev, prevQuery) =>
-      prevQuery?.queryKey[1] === raceId ? prev : undefined,
+      keepBoardPlaceholder(prevQuery?.queryKey, raceId) ? prev : undefined,
     queryFn: async () => {
       const { data, error } = await api.GET("/api/races/{race_id}/board", {
         params: {
@@ -447,6 +453,7 @@ export function RaceBoard() {
             oddsAvailable={d.odds_available}
             session={session.data}
             sessionError={session.isError}
+            refreshing={board.isPlaceholderData}
             cap={cap}
           />
           <p className="muted" style={{ marginTop: "0.5rem" }}>

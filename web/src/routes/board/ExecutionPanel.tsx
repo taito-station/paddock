@@ -12,6 +12,7 @@ import {
   type Edits,
   betKey,
   buildOutcomeBets,
+  canRecordOutcome,
   effPayout,
   effStake,
   isRaceRecorded,
@@ -30,6 +31,7 @@ export function ExecutionPanel({
   oddsAvailable,
   session,
   sessionError = false,
+  refreshing = false,
   cap,
 }: {
   raceId: string;
@@ -40,6 +42,9 @@ export function ExecutionPanel({
   session: SessionSummary | null | undefined;
   // 取得エラー時は「読込中…」を出し続けない（エラー表示はヘッダ側が担う）。
   sessionError?: boolean;
+  // 盤が placeholder（旧予算の bets）を表示中か。key=raceId:cap の再マウント後も
+  // 再フェッチ完了までは旧予算の bets prop が渡る窓があるため、その間は記録を止める。
+  refreshing?: boolean;
   cap: number;
 }) {
   const qc = useQueryClient();
@@ -85,8 +90,12 @@ export function ExecutionPanel({
   // ないため、超過判定は残高基準にする（編集で残高内まで増やすのは許容）。
   const overBudget = total > balance;
   // 完了済み・記録済みは記録不可（バックエンドも 409 等で拒否するが UI でも無効化）。
-  const canRecord =
-    !!session && !session.completed && !bought && !record.isPending;
+  const canRecord = canRecordOutcome({
+    hasSession: !!session,
+    completed: session?.completed ?? false,
+    bought,
+    pending: record.isPending,
+  });
 
   const setEdit = (b: RecommendationBet, patch: Partial<Edits[string]>) =>
     setEdits((prev) => {
@@ -284,11 +293,17 @@ export function ExecutionPanel({
           <span className={overBudget ? "error" : "muted"}>
             賭け合計 {yen(total)} / 残高 {yen(balance)}
           </span>
+          {/* refreshing 中の bets は旧予算の placeholder。skipRace（空配列）は bets 非依存
+              なので無効化しない。 */}
           <button
             onClick={() => record.mutate(buildOutcomeBets(bets, edits))}
-            disabled={overBudget || !canRecord}
+            disabled={overBudget || !canRecord || refreshing}
           >
-            {total === 0 ? "スキップとして記録" : "記録する"}
+            {refreshing
+              ? "再計算中…"
+              : total === 0
+                ? "スキップとして記録"
+                : "記録する"}
           </button>
           {record.isError && (
             <span className="error">{(record.error as Error).message}</span>

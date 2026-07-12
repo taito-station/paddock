@@ -31,6 +31,17 @@ export function isRaceRecorded(
   return bets.some((b) => b.race_id === raceId);
 }
 
+// 記録操作が可能か。セッションあり × 未完了 × このレース未記録 × mutation 非実行中。
+// 金銭操作のガードなので純粋関数に置きテーブルテストで退行を検知する。
+export function canRecordOutcome(opts: {
+  hasSession: boolean;
+  completed: boolean;
+  bought: boolean;
+  pending: boolean;
+}): boolean {
+  return opts.hasSession && !opts.completed && !opts.bought && !opts.pending;
+}
+
 // outcome 記録の payload。賭け金 > 0 の脚のみ送る（空配列 = スキップ相当）。
 export function buildOutcomeBets(
   bets: RecommendationBet[],
