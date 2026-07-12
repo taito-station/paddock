@@ -4,7 +4,9 @@ use chrono::{NaiveDate, NaiveTime};
 use serde::Serialize;
 use utoipa::ToSchema;
 
-use paddock_domain::{BetCombination, HorseEntry, HorseProbability, Portfolio, Race, RaceCard};
+use paddock_domain::{
+    BetCombination, HorseEntry, HorseProbability, Portfolio, Race, RaceCard, RaceId,
+};
 use paddock_use_case::RaceBoard;
 
 /// レース一覧の 1 要素（出走前の諸元のみ。results は含まない）。
@@ -29,7 +31,7 @@ pub struct RaceSummary {
 
 impl RaceSummary {
     /// レース諸元＋発走時刻（`race_id → post_time` マップから引き当て）で組み立てる。
-    pub fn new(r: &Race, post_times: &HashMap<String, NaiveTime>) -> Self {
+    pub fn new(r: &Race, post_times: &HashMap<RaceId, NaiveTime>) -> Self {
         Self {
             race_id: r.race_id.value().to_string(),
             date: r.date,
@@ -38,7 +40,7 @@ impl RaceSummary {
             distance: r.distance,
             surface: r.surface.as_str().to_string(),
             post_time: post_times
-                .get(r.race_id.value())
+                .get(&r.race_id)
                 .map(|t| t.format("%H:%M").to_string()),
         }
     }

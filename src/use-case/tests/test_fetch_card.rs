@@ -234,8 +234,8 @@ impl RaceCardRepository for RecordingRepo {
     async fn find_post_times_by_date(
         &self,
         _date: chrono::NaiveDate,
-    ) -> Result<std::collections::HashMap<String, chrono::NaiveTime>> {
-        Ok(std::collections::HashMap::new())
+    ) -> Result<std::collections::HashMap<RaceId, chrono::NaiveTime>> {
+        unimplemented!()
     }
 }
 

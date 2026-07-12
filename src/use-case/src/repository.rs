@@ -777,7 +777,7 @@ pub trait RaceCardRepository: Send + Sync {
     fn find_post_times_by_date(
         &self,
         date: NaiveDate,
-    ) -> impl Future<Output = Result<HashMap<String, NaiveTime>>> + Send;
+    ) -> impl Future<Output = Result<HashMap<RaceId, NaiveTime>>> + Send;
 }
 
 /// レースオッズ（`race_odds`）の保存・取得。

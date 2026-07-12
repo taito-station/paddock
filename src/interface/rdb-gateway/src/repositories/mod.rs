@@ -300,7 +300,7 @@ impl RaceCardRepository for PostgresRepository {
     async fn find_post_times_by_date(
         &self,
         date: NaiveDate,
-    ) -> UcResult<HashMap<String, NaiveTime>> {
+    ) -> UcResult<HashMap<RaceId, NaiveTime>> {
         find_post_times_by_date::find_post_times_by_date(&self.pool, date)
             .await
             .map_err(Into::into)
