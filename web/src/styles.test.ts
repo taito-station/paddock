@@ -18,7 +18,9 @@ function hexLiteralsOutsideRoot(css: string): string[] {
   const withoutComments = css.replace(/\/\*[\s\S]*?\*\//g, "");
   // :root { ... } を除去（CSS のトークン定義は入れ子の中括弧を持たない前提で [^}]* で足りる）。
   const withoutRoot = withoutComments.replace(/:root\s*\{[^}]*\}/g, "");
-  return withoutRoot.match(/#[0-9a-fA-F]{3,8}\b/g) ?? [];
+  // CSS で有効な hex 長（3/4/6/8 桁）だけを拾う。長い順の交替で 5/7 桁の
+  // 中途半端な一致を避け、色リテラルでない #id 等の誤検出面を狭める。
+  return withoutRoot.match(/#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{4}|[0-9a-fA-F]{3})\b/g) ?? [];
 }
 
 // styles.css ヘッダの但し書きが認める例外どおり #fff のみ（純白は意味名が立たない）。
@@ -34,6 +36,8 @@ describe("styles.css hex guard", () => {
   });
 
   it("ヘルパは :root 外の非 allowlist hex を検出する（ガードの自己検証）", () => {
+    // ヘルパは生の hex 検出のみ担う。allowlist（#fff）の除外は呼び出し側の責務なので、
+    // ここでは #fff も「検出される」のが正しい（上のガード本体で初めて除外される）。
     const sample = `:root { --x: #123456; }\n.foo { color: #abcdef; background: #fff; }`;
     expect(hexLiteralsOutsideRoot(sample)).toEqual(["#abcdef", "#fff"]);
   });

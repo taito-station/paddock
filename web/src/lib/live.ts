@@ -64,15 +64,19 @@ export function boardHref(raceId: string, date: string): string {
 // （CLAUDE.md「断然人気は EV がマイナスになりがち」。実運用の単勝 1.4 例をカバーする保守値）。
 export const DANZEN_WIN_ODDS_MAX = 1.9;
 
-// "HH:MM"（分は 2 桁必須）を {h, m} に厳格パースする。緩い解釈（"12:5"）は不正扱いで null。
-// postMinutes（ソート）と postDate（Date 化）で post_time の解釈を一本化する唯一の入口（#385）。
-// 時 1〜2 桁を許すのはゼロ埋めが崩れた供給値（"9:30"）を救うため。範囲（h≤23 等）は
-// 呼び出し側の用途に委ねる（postDate は Date 化で 24:00 等を NaN→null に落とす）。
+// "HH:MM"（分は 2 桁必須）を {h, m} に厳格パースする。緩い解釈（"12:5"）や範囲外
+// （"24:00"・"12:60"）は不正扱いで null。postMinutes（ソート）と postDate（Date 化）で
+// post_time の解釈を一本化する唯一の入口（#385）。時 1〜2 桁を許すのはゼロ埋めが崩れた
+// 供給値（"9:30"）を救うため。範囲（時 0–23・分 0–59）まで検証し、両者の判定が割れない
+// ようにする（postMinutes だけ範囲外を有限ソート値にしてしまうのを防ぐ）。
 function parseHm(t: string | null | undefined): { h: number; m: number } | null {
   if (!t) return null;
-  const m = /^(\d{1,2}):(\d{2})$/.exec(t);
-  if (!m) return null;
-  return { h: Number(m[1]), m: Number(m[2]) };
+  const mt = /^(\d{1,2}):(\d{2})$/.exec(t);
+  if (!mt) return null;
+  const h = Number(mt[1]);
+  const m = Number(mt[2]);
+  if (h > 23 || m > 59) return null;
+  return { h, m };
 }
 
 // "HH:MM" を分に数値化する。欠落・不正は +∞（末尾送り）。文字列辞書順だとゼロ埋めが

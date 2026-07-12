@@ -129,6 +129,13 @@ describe("postMinutes", () => {
     // 一方、厳格でも通る正常系は従来どおり分に化ける。
     expect(postMinutes("12:05")).toBe(725);
   });
+  it("範囲外は末尾送り（postDate と判定を割らない・#385）", () => {
+    // 時 24+・分 60+ は postDate 側でも不明扱い。postMinutes だけ有限ソート値にしない。
+    expect(postMinutes("24:00")).toBe(Number.POSITIVE_INFINITY);
+    expect(postMinutes("12:60")).toBe(Number.POSITIVE_INFINITY);
+    // 境界（23:59）は正常。
+    expect(postMinutes("23:59")).toBe(1439);
+  });
 });
 
 describe("maru", () => {
