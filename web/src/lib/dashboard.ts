@@ -3,7 +3,6 @@
 import type { Schemas } from "../api/client";
 import { SURFACE_JP } from "./format";
 import {
-  DEFAULT_LIVE_QUERY,
   liveQueryParams,
   postMinutes,
   raceStarted,
@@ -46,9 +45,8 @@ export function evVisible(row: DashboardRow): boolean {
   return row.live != null && row.live.tier !== "hidden";
 }
 
-// 行の発走時刻（分）。EV 非表示行（live 無し・hidden）でも post_time 自体は
-// snapshot にあれば使う…と言いたいところだが、hidden の post_time は無害な事実情報
-// なのでソート・発走列には使う（マスクするのは EV 系の数値のみ）。live 無しは +∞。
+// 行の発走時刻。hidden でも post_time は無害な事実情報なので表示・ソートに使う
+//（マスクするのは EV 系の数値のみ）。live 無しは null（不明）。
 export function rowPostTime(row: DashboardRow): string | null {
   return row.live?.post_time ?? null;
 }
@@ -151,8 +149,6 @@ export function dashboardQueryParams(
   if (date) sp.set("date", date);
   return sp;
 }
-
-export { DEFAULT_LIVE_QUERY };
 
 // 距離馬場列の表示（"芝1200" / "ダ1700"）。未知 surface は slug をそのまま出す。
 export function surfaceDistance(surface: string, distance: number): string {

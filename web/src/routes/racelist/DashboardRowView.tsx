@@ -137,8 +137,13 @@ export function DashboardRowView({
           {showEv && live ? roiPct(live.roi) : "—"}
         </td>
         <td>
+          {/* 単勝オッズを併記（ズレ増額 ADR 0060 の判断材料。専用列は幅の都合で置かない） */}
           {showEv && live
-            ? `◎${maru(live.axis)} (${live.axis_prob.toFixed(0)}%)`
+            ? `◎${maru(live.axis)} (${live.axis_prob.toFixed(0)}%)${
+                live.axis_win_odds != null
+                  ? ` @${live.axis_win_odds.toFixed(1)}`
+                  : ""
+              }`
             : "—"}
         </td>
         <td>

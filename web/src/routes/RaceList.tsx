@@ -121,7 +121,10 @@ export function RaceList() {
     refetchInterval: (q) => {
       const rs = q.state.data?.races;
       const t = new Date();
-      // スイープ開始前（データ未取得・races 0 件）は判定材料が無いので、
+      // 非開催日（DB レース 0 件が確定）は snapshot が来る見込みが無いので止める
+      //（トップページ常駐でも無駄打ちしない）。races ロード中は判定を保留して継続。
+      if (races.data != null && races.data.races.length === 0) return false;
+      // スイープ開始前（snapshot 未取得・races 0 件）は判定材料が無いので、
       // 過去日でなければポーリングを続けて初回スナップショットを自動で拾う。
       if (!rs || rs.length === 0) {
         return isPastDate(date, t) ? false : 60_000;
@@ -240,9 +243,11 @@ export function RaceList() {
             )}
           </>
         )}
-        {/* 開催前日など JST でその日が始まる前は predict-watch 停止が正常なので警告しない。 */}
+        {/* 開催前日など JST でその日が始まる前、および非開催日（DB レース 0 件）は
+            predict-watch 停止が正常なので警告しない（既定トップページの誤警報防止）。 */}
         {fresh?.state === "stale" &&
-          raceStarted(date, "0:00", now) === true && (
+          raceStarted(date, "0:00", now) === true &&
+          (races.data?.races.length ?? 0) > 0 && (
             <span className="live-stale">
               {/* label "—" = 更新時刻が読めていない（null/不正。経過時間の主張はできない） */}
               {fresh.label === "—"
@@ -255,9 +260,14 @@ export function RaceList() {
         )}
       </div>
 
-      {/* ライブ EV の取得失敗はページを壊さず注記に縮退（一覧・購入状態は表示を続ける）。 */}
+      {/* ライブ EV の取得失敗はページを壊さず注記に縮退。前回データを保持したまま
+          再取得に失敗した場合は「前回のまま」と明示する（鮮度の誤認防止）。 */}
       {live.isError && (
-        <p className="live-stale">ライブ EV の取得に失敗 — 一覧のみ表示</p>
+        <p className="live-stale">
+          {liveMode
+            ? "ライブ EV の再取得に失敗しました（表示は前回取得のまま）"
+            : "ライブ EV の取得に失敗 — 一覧のみ表示"}
+        </p>
       )}
       {liveMode && live.data && (
         <p className="live-summary">{summaryLine(live.data.summary)}</p>
