@@ -30,7 +30,7 @@ fn race(race_id: &str, race_num: u32) -> Race {
     }
 }
 
-/// 出馬表の発走時刻（#235 の往復検証に使う）。
+/// 出馬表の発走時刻（#235 の往復検証・#391 の post_time 一括取得テストで共用）。
 fn pt() -> NaiveTime {
     NaiveTime::from_hms_opt(15, 40, 0).unwrap()
 }
