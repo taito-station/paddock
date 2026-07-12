@@ -271,6 +271,12 @@ describe("backToDashboardHref", () => {
       backToDashboardHref("sort=bogus&status=zzz&verdict=maybe&evil=1", DATE),
     ).toBe(`/?date=${DATE}`);
   });
+  it("back に混入した date は無視し、盤の date を正本にする（backParam は date 非含有）", () => {
+    // parseLiveQuery は date キーを読まず、dashboardQueryParams が盤の date で上書きする。
+    expect(backToDashboardHref("sort=roi&date=2020-01-01", DATE)).toBe(
+      `/?sort=roi&date=${DATE}`,
+    );
+  });
 });
 
 describe("surfaceDistance", () => {
