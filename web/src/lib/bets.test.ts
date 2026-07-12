@@ -3,6 +3,7 @@ import {
   betKey,
   effStake,
   effPayout,
+  isRaceRecorded,
   totalStake,
   buildOutcomeBets,
   toAmount,
@@ -66,6 +67,21 @@ describe("buildOutcomeBets", () => {
     const edits = { [betKey(BETS[1])]: { stake: 200, payout: 900 } };
     const out = buildOutcomeBets(BETS, edits);
     expect(out.find((b) => b.combination === "1-3")?.payout).toBe(900);
+  });
+});
+
+describe("isRaceRecorded", () => {
+  const sessionBets = [
+    { race_id: "2026-1-hakodate-9-1R" },
+    { race_id: "2026-1-hakodate-9-1R" },
+    { race_id: "2026-2-kokura-5-3R" },
+  ];
+  it("明細に痕跡があれば記録済み", () => {
+    expect(isRaceRecorded(sessionBets, "2026-1-hakodate-9-1R")).toBe(true);
+  });
+  it("痕跡が無ければ未記録（スキップ記録は痕跡が残らない仕様）", () => {
+    expect(isRaceRecorded(sessionBets, "2026-1-hakodate-9-12R")).toBe(false);
+    expect(isRaceRecorded([], "2026-1-hakodate-9-1R")).toBe(false);
   });
 });
 

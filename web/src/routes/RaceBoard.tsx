@@ -4,14 +4,17 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { pct, yen, SURFACE_JP, VENUE_JP } from "../lib/format";
 import {
+  DEFAULT_RACE_BUDGET,
+  boardBudget,
+  effectiveCap,
   heatColor,
   markSymbol,
   placeOddsLabel,
   sortByModelRank,
 } from "../lib/board";
+import { toAmount } from "../lib/bets";
 import { boardHref } from "../lib/live";
-
-const DEFAULT_RACE_BUDGET = 5000; // CLI predict / recommendations の既定 race_budget と揃える。
+import { ExecutionPanel } from "./board/ExecutionPanel";
 
 export function RaceBoard() {
   const { raceId = "" } = useParams();
@@ -42,16 +45,65 @@ export function RaceBoard() {
     triggerRef.current?.focus();
   };
 
+  // 入力中の文字列と、盤/買い目の再計算に使う確定値を分離する。入力ごとの再取得
+  //（重い盤 API）を避け、確定（blur / Enter / 再計算ボタン）で appliedBudget に反映する。
+  const [budgetInput, setBudgetInput] = useState(String(DEFAULT_RACE_BUDGET));
+  const [appliedBudget, setAppliedBudget] = useState(DEFAULT_RACE_BUDGET);
+  const applyBudget = () => {
+    const n = toAmount(budgetInput);
+    if (n > 0) {
+      if (n !== appliedBudget) setAppliedBudget(n);
+      setBudgetInput(String(n)); // 入力を正規化（先頭ゼロ等）して表示と適用値を揃える。
+    } else {
+      // 不正入力（空・0 以下）は適用値へ巻き戻し、表示と適用値の乖離を残さない。
+      setBudgetInput(String(appliedBudget));
+    }
+  };
+
+  // 開催日は ?date= を優先。直リンク（クエリ無し）は盤レスポンスの date にフォールバック
+  // するが、session（下）は board より先に宣言する必要があるため、フォールバック値は
+  // board 到着後に state 経由で伝搬させる（board は budget=f(session) に依存する循環の解消）。
+  const [fallbackDate, setFallbackDate] = useState("");
+  const sessionDate = dateParam || fallbackDate;
+
+  // セッション（残高・記録済み判定）。未作成は 404 → null に倒す（RaceList と同流儀）。
+  const session = useQuery({
+    queryKey: ["session", sessionDate],
+    enabled: !!sessionDate,
+    retry: false,
+    queryFn: async () => {
+      const { data, error, response } = await api.GET("/api/sessions/{date}", {
+        params: { path: { date: sessionDate } },
+      });
+      if (response.status === 404) return null;
+      if (error) throw new Error("セッションの取得に失敗しました");
+      return data;
+    },
+  });
+
+  // 実効上限 cap = min(予算, 残高)。セッション無し（null/ロード中）は予算そのまま。
+  // session ロード前は cap が予算のままなので、残高 < 予算 のときだけ session 到着後に
+  // board の 2 回目フェッチが走る（軽微・許容）。
+  const cap = effectiveCap(
+    appliedBudget,
+    session.data ? session.data.balance : null,
+  );
+  const queryBudget = boardBudget(cap);
+
   const board = useQuery({
-    // budget/blend_alpha は現状固定（5000 / 既定 α）。将来これらを可変にする際は
-    // stale キャッシュを避けるため queryKey に必ず含めること。
-    queryKey: ["board", raceId],
+    // budget は可変（#377）。stale キャッシュを避けるため queryKey に必ず含める。
+    queryKey: ["board", raceId, queryBudget],
     enabled: !!raceId,
+    // 予算変更時に盤全体（馬カラム）がスピナーへ戻るチラつきを防ぐ。**同一レースに限定**
+    // すること: 無条件 `(prev) => prev` だと場/R 切替でも前レースの盤・買い目が placeholder
+    // 表示され、ロード完了前に前レースの買い目を新レースとして記録できてしまう。
+    placeholderData: (prev, prevQuery) =>
+      prevQuery?.queryKey[1] === raceId ? prev : undefined,
     queryFn: async () => {
       const { data, error } = await api.GET("/api/races/{race_id}/board", {
         params: {
           path: { race_id: raceId },
-          query: { budget: DEFAULT_RACE_BUDGET },
+          query: { budget: queryBudget },
         },
       });
       if (error) throw new Error("盤の取得に失敗しました");
@@ -59,9 +111,11 @@ export function RaceBoard() {
     },
   });
 
-  // 開催日は ?date= を優先しつつ、直リンク（クエリ無し）でも盤レスポンスの date に
-  // フォールバックして場/R切替と「← レース一覧」リンクを維持する。
   const date = dateParam || board.data?.date || "";
+  // ?date= 無しの直リンクで盤が返した開催日を session 取得へ伝搬する。
+  useEffect(() => {
+    if (!dateParam && board.data?.date) setFallbackDate(board.data.date);
+  }, [dateParam, board.data?.date]);
 
   // 同開催日の全レースを引き、同じ R の他場（函館⇄福島⇄小倉…）へ場内切替する。
   const races = useQuery({
@@ -105,6 +159,15 @@ export function RaceBoard() {
           <Link to={`/live/${date}`}>← ライブに戻る</Link>
         ) : (
           <Link to={`/?date=${date}`}>← レース一覧</Link>
+        )}
+        {date && <Link to={`/sessions/${date}`}>収支</Link>}
+        {session.data && (
+          <span className="session-balance">
+            残高 {yen(session.data.balance)}
+          </span>
+        )}
+        {session.isError && (
+          <span className="error">セッションの取得に失敗しました</span>
         )}
       </div>
 
@@ -352,36 +415,40 @@ export function RaceBoard() {
               );
             })()}
 
-          {/* 買い目（/recommendations と同経路・相手 top5 不変） */}
+          {/* 買い目＋執行（/recommendations と同経路・相手 top5 不変。#377 で RaceDetail を統合） */}
           <h3 style={{ marginTop: "1.25rem" }}>買い目</h3>
-          {!d.odds_available ? (
-            <p className="muted">オッズ未取得のため買い目は組めません。</p>
-          ) : d.bets.length === 0 ? (
-            <p className="muted">予算内で組める買い目がありません。</p>
-          ) : (
-            <table className="grid">
-              <thead>
-                <tr>
-                  <th>券種</th>
-                  <th>組合せ</th>
-                  <th>オッズ</th>
-                  <th>EV</th>
-                  <th>賭け金</th>
-                </tr>
-              </thead>
-              <tbody>
-                {d.bets.map((b) => (
-                  <tr key={`${b.bet_type}-${b.combination}`}>
-                    <td>{b.bet_type}</td>
-                    <td>{b.combination}</td>
-                    <td>{b.odds == null ? "-" : b.odds.toFixed(1)}</td>
-                    <td>{b.ev.toFixed(2)}</td>
-                    <td>{yen(b.stake)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
+          <div className="toolbar">
+            <label>
+              予算/R{" "}
+              <input
+                type="number"
+                min={100}
+                step={100}
+                value={budgetInput}
+                onChange={(e) => setBudgetInput(e.target.value)}
+                onBlur={applyBudget}
+                onKeyDown={(e) => e.key === "Enter" && applyBudget()}
+              />
+              円
+            </label>
+            <button onClick={applyBudget}>再計算</button>
+            {session.data && (
+              <span className="muted">
+                実上限 {yen(cap)}（min(予算, 残高)）
+              </span>
+            )}
+          </div>
+          {/* key でレース遷移・予算変更時に編集状態（edits/mutation）を初期化する。 */}
+          <ExecutionPanel
+            key={`${raceId}:${cap}`}
+            raceId={raceId}
+            date={date}
+            bets={d.bets}
+            oddsAvailable={d.odds_available}
+            session={session.data}
+            sessionError={session.isError}
+            cap={cap}
+          />
           <p className="muted" style={{ marginTop: "0.5rem" }}>
             {d.field_size}頭立て。買い目の相手は top5 固定（相手は広げない）。全頭盤で妙味馬・複勝圏馬を手動で拾う。
           </p>
