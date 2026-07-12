@@ -121,8 +121,10 @@ export function RaceList() {
     refetchInterval: (q) => {
       const rs = q.state.data?.races;
       const t = new Date();
-      // 非開催日（DB レース 0 件が確定）は snapshot が来る見込みが無いので止める
-      //（トップページ常駐でも無駄打ちしない）。races ロード中は判定を保留して継続。
+      // 非開催日（DB レース 0 件が確定）と races 取得エラー時は snapshot を追っても
+      // 得るものが無いので止める（トップページ常駐でも無駄打ちしない）。
+      // races ロード中は判定を保留して継続。
+      if (races.isError) return false;
       if (races.data != null && races.data.races.length === 0) return false;
       // スイープ開始前（snapshot 未取得・races 0 件）は判定材料が無いので、
       // 過去日でなければポーリングを続けて初回スナップショットを自動で拾う。

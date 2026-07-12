@@ -75,10 +75,15 @@ export function sortRows(
       const pb = postMinutes(rowPostTime(b));
       // 両方 post 不明（∞ === ∞）は R 番号 → 会場で明示フォールバック。
       if (pa !== pb) return pa - pb;
-      return (
-        a.race.race_num - b.race.race_num ||
-        a.race.venue.localeCompare(b.race.venue)
-      );
+      if (a.race.race_num !== b.race.race_num) {
+        return a.race.race_num - b.race.race_num;
+      }
+      // venue slug は ASCII のため、ロケール非依存の単純比較で決定性を担保する。
+      return a.race.venue < b.race.venue
+        ? -1
+        : a.race.venue > b.race.venue
+          ? 1
+          : 0;
     });
     return arr;
   }

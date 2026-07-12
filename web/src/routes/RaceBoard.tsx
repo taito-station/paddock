@@ -63,11 +63,6 @@ export function RaceBoard() {
   // するが、session（下）は board より先に宣言する必要があるため、フォールバック値は
   // board 到着後に state 経由で伝搬させる（board は budget=f(session) に依存する循環の解消）。
   const [fallbackDate, setFallbackDate] = useState("");
-  // レース遷移で残留させない（別開催日の盤へ移った際、新 board 到着まで旧日付の
-  // session を参照する transient の解消。?date= 無し直リンクのケースのみ影響）。
-  useEffect(() => {
-    setFallbackDate("");
-  }, [raceId]);
   const sessionDate = dateParam || fallbackDate;
 
   // セッション（残高・記録済み判定）。未作成は 404 → null に倒す（RaceList と同流儀）。
@@ -117,9 +112,13 @@ export function RaceBoard() {
 
   const date = dateParam || board.data?.date || "";
   // ?date= 無しの直リンクで盤が返した開催日を session 取得へ伝搬する。
+  // クリア（レース遷移時の旧日付 transient 解消）と再設定は単一 effect で行うこと:
+  // 分離すると「raceId 変更＋キャッシュ済み board が同一開催日」のとき再設定側の deps が
+  // 変わらず、fallbackDate が空のまま session が無効化されて固着する。raceId は
+  // その再評価トリガーとして deps に含める。
   useEffect(() => {
-    if (!dateParam && board.data?.date) setFallbackDate(board.data.date);
-  }, [dateParam, board.data?.date]);
+    setFallbackDate(!dateParam && board.data?.date ? board.data.date : "");
+  }, [raceId, dateParam, board.data?.date]);
 
   // 同開催日の全レースを引き、同じ R の他場（函館⇄福島⇄小倉…）へ場内切替する。
   const races = useQuery({

@@ -77,6 +77,11 @@ describe("boardHref", () => {
   it("omits date when empty (盤レスポンスの date にフォールバックさせる)", () => {
     expect(boardHref("202602050811", "")).toBe("/races/202602050811/board");
   });
+  it("encodes hostile date (URL クエリ経由のユーザ制御値によるクエリ注入防止)", () => {
+    expect(boardHref("202602050811", "2026-07-08&sort=roi#x")).toBe(
+      "/races/202602050811/board?date=2026-07-08%26sort%3Droi%23x",
+    );
+  });
 });
 
 describe("tierBadge", () => {

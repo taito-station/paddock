@@ -293,8 +293,9 @@ export function ExecutionPanel({
           <span className={overBudget ? "error" : "muted"}>
             賭け合計 {yen(total)} / 残高 {yen(balance)}
           </span>
-          {/* refreshing 中の bets は旧予算の placeholder。skipRace（空配列）は bets 非依存
-              なので無効化しない。 */}
+          {/* refreshing 中の bets は旧予算の placeholder のため記録を止める。
+              上方の各分岐にある「このレースをスキップ」（skipRace＝空配列）は bets 非依存
+              なので refreshing では無効化していない。 */}
           <button
             onClick={() => record.mutate(buildOutcomeBets(bets, edits))}
             disabled={overBudget || !canRecord || refreshing}

@@ -141,6 +141,14 @@ describe("sortRows", () => {
     expect(sortRows(rows, "roi", "desc", ctx).map((r) => r.race.race_id)).toEqual(["b", "a", "c", "d", "e"]);
     expect(sortRows(rows, "roi", "asc", ctx).map((r) => r.race.race_id)).toEqual(["c", "a", "b", "d", "e"]);
   });
+  it("post: 欠落（live 無し）は方向に関わらず末尾", () => {
+    expect(sortRows(rows, "post", "asc", ctx).map((r) => r.race.race_id)).toEqual(["b", "c", "e", "a", "d"]);
+    expect(sortRows(rows, "post", "desc", ctx).map((r) => r.race.race_id)).toEqual(["a", "e", "c", "b", "d"]);
+  });
+  it("rough: null・EV 非表示行は方向に関わらず末尾", () => {
+    expect(sortRows(rows, "rough", "desc", ctx).map((r) => r.race.race_id)).toEqual(["a", "c", "b", "d", "e"]);
+    expect(sortRows(rows, "rough", "asc", ctx).map((r) => r.race.race_id)).toEqual(["c", "a", "b", "d", "e"]);
+  });
   it("race: live 無し行も RaceSummary から正しく混在ソート", () => {
     expect(sortRows(rows, "race", "asc", ctx).map((r) => r.race.race_id))
       // fukushima-03(d) → fukushima-08(e) → hakodate-05(b) → hakodate-09(c) → kokura-07(a)
