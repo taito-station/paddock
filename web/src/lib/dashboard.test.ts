@@ -149,6 +149,10 @@ describe("sortRows", () => {
     expect(sortRows(rows, "rough", "desc", ctx).map((r) => r.race.race_id)).toEqual(["a", "c", "b", "d", "e"]);
     expect(sortRows(rows, "rough", "asc", ctx).map((r) => r.race.race_id)).toEqual(["c", "a", "b", "d", "e"]);
   });
+  it("axisProb: desc/asc とも EV 非表示行は末尾", () => {
+    expect(sortRows(rows, "axisProb", "desc", ctx).map((r) => r.race.race_id)).toEqual(["c", "a", "b", "d", "e"]);
+    expect(sortRows(rows, "axisProb", "asc", ctx).map((r) => r.race.race_id)).toEqual(["b", "a", "c", "d", "e"]);
+  });
   it("race: live 無し行も RaceSummary から正しく混在ソート", () => {
     expect(sortRows(rows, "race", "asc", ctx).map((r) => r.race.race_id))
       // fukushima-03(d) → fukushima-08(e) → hakodate-05(b) → hakodate-09(c) → kokura-07(a)

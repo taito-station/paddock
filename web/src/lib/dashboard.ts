@@ -42,7 +42,13 @@ export function joinRaces(
 // live 無しは情報が無い。tier=hidden は当日 ROI 分布の floor 未満＝「在庫は出すが
 // 買いに見せない」（#344）ため数値を見せない。
 export function evVisible(row: DashboardRow): boolean {
-  return row.live != null && row.live.tier !== "hidden";
+  return visibleLive(row) != null;
+}
+
+// EV を見せてよい行の live（narrowing ヘルパ。boolean 判定だと呼び出し側で
+// non-null assertion が要るため、null 込みで返して ?. で辿らせる）。
+export function visibleLive(row: DashboardRow): LiveRaceView | null {
+  return row.live != null && row.live.tier !== "hidden" ? row.live : null;
 }
 
 // 行の発走時刻。hidden でも post_time は無害な事実情報なので表示・ソートに使う
@@ -93,11 +99,11 @@ export function sortRows(
       case "post":
         return postMinutes(rowPostTime(r));
       case "roi":
-        return evVisible(r) ? r.live!.roi : null;
+        return visibleLive(r)?.roi ?? null;
       case "axisProb":
-        return evVisible(r) ? r.live!.axis_prob : null;
+        return visibleLive(r)?.axis_prob ?? null;
       case "rough":
-        return evVisible(r) ? (r.live!.roughness ?? null) : null;
+        return visibleLive(r)?.roughness ?? null;
       case "race":
         return `${r.race.venue}-${String(r.race.race_num).padStart(2, "0")}`;
       default:
@@ -136,8 +142,8 @@ export function filterRows(
       if (f.status === "finished" ? !finished : finished) return false;
     }
     if (f.verdict !== "all") {
-      if (!evVisible(r)) return false;
-      if (r.live!.verdict !== f.verdict) return false;
+      const live = visibleLive(r);
+      if (live == null || live.verdict !== f.verdict) return false;
     }
     return true;
   });

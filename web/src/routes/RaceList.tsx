@@ -87,6 +87,7 @@ export function RaceList() {
 
   const races = useQuery({
     queryKey: ["races", date],
+    // date は todayJst フォールバックで常に非空だが、queryKey の前提を守る防御として残す。
     enabled: !!date,
     queryFn: async () => {
       const { data, error } = await api.GET("/api/races", {
