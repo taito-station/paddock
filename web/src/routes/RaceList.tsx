@@ -35,7 +35,8 @@ import {
 } from "../lib/live";
 import { SortTh } from "./racelist/SortTh";
 import { FilterChip } from "./racelist/FilterChip";
-import { Badge, DashboardRowView } from "./racelist/DashboardRowView";
+import { Badge } from "./racelist/Badge";
+import { DashboardRowView } from "./racelist/DashboardRowView";
 
 // 縮退モードの 1 行（旧 RaceList 相当。snapshot の無い日はこの静的一覧を出す）。
 function StaticRow({
@@ -276,11 +277,13 @@ export function RaceList() {
         <p className="live-summary">{summaryLine(live.data.summary)}</p>
       )}
 
-      {races.isPending || (live.isPending && !live.isError) ? (
-        // 列構成が静的 → ライブへジャンプするチラつきを防ぐため、両クエリの決着を待つ。
-        <p>読み込み中…</p>
-      ) : races.isError ? (
+      {races.isError ? (
+        // races の確定エラーは live の決着を待たず即表示する。
         <p className="error">{(races.error as Error).message}</p>
+      ) : races.isPending || live.isPending ? (
+        // 列構成が静的 → ライブへジャンプするチラつきを防ぐため、両クエリの決着を待つ
+        //（v5 の status は排他なので isPending 中に isError は立たない）。
+        <p>読み込み中…</p>
       ) : rows.length === 0 ? (
         <p className="muted">この開催日のレースはありません。</p>
       ) : !liveMode ? (

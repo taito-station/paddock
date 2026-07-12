@@ -52,9 +52,12 @@ export function jstHm(iso: string | null | undefined): string {
 // フォールバックできる）。旧 from=live は /live 廃止（#378）に伴い撤去 — 既存の
 // from=live 付き URL は盤が単に無視する（戻り先は常に一覧で正しい）。
 export function boardHref(raceId: string, date: string): string {
-  // date は URL クエリ経由でユーザ制御可能な値のため、必ずエンコードして埋める
-  //（& や # を含む値によるクエリ注入・URL 破壊の防止）。
-  return `/races/${raceId}/board${date ? `?date=${encodeURIComponent(date)}` : ""}`;
+  // raceId / date とも URL 経由でユーザ制御可能な値になりうる（旧ルートのリダイレクトは
+  // useParams のデコード済み値を渡す）ため、必ずエンコードして埋める
+  //（& / # / %2F 等によるクエリ注入・パス操作・URL 破壊の防止）。
+  return `/races/${encodeURIComponent(raceId)}/board${
+    date ? `?date=${encodeURIComponent(date)}` : ""
+  }`;
 }
 
 // 「断然人気」とみなす◎の単勝オッズ上限。この値以下は過剰人気として見送り理由に明記する
