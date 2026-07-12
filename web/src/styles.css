@@ -61,6 +61,10 @@
   --comment-accent: #3f7d68;
   --selected-edge: #4fae90;
 
+  /* レイアウト左右余白の単一ソース。.app-main の padding と、盤帯 full-bleed で
+     内側に戻す padding を同値に保つため共有する（#383）。 */
+  --gutter: 1.25rem;
+
   font-family: system-ui, -apple-system, "Hiragino Sans", sans-serif;
   color: var(--text);
   background: var(--bg);
@@ -108,7 +112,7 @@ body {
 }
 
 .app-main {
-  padding: 1.25rem;
+  padding: var(--gutter);
   max-width: 960px;
   margin: 0 auto;
 }
@@ -444,15 +448,39 @@ button:disabled {
 .board-scroll {
   overflow-x: auto;
   padding-bottom: 0.5rem;
+  /* 馬盤の帯だけ app-main(960px) を抜けてビューポート全幅を使う（#383）。
+     ツールバー/執行/書評は 960px のまま。full-bleed: 中央寄せ親の中で 100vw に
+     広げ、app-main と同じ左右余白（--gutter）を内側 padding で戻す。
+     依存: この式の正しさは親チェーン（.app-main の中央寄せ＋padding、.board-view の
+     margin:-1rem/padding:1rem が相殺し content-box 幅・左端が app-main と一致すること）
+     に依る。親の box を変えると full-bleed が黙ってズレるので合わせて要調整。
+     スクロールバー: Mac のオーバーレイ（占有幅0）では帯とビューポートが一致し body 横
+     スクロールは出ない。クラシックスクロールバー環境（Windows/Linux 等）では縦バー幅
+     ぶん 100vw がはみ出し body 横スクロールが出るが、本盤は PC(Mac) 運用前提のため許容。 */
+  width: 100vw;
+  margin-left: calc(50% - 50vw);
+  margin-right: calc(50% - 50vw);
+  padding-left: var(--gutter);
+  padding-right: var(--gutter);
 }
 .board-row {
   display: flex;
   gap: 6px;
+  /* 広い時は列を伸ばして帯を充填し、min-content(=列 min-width 総和)を下回る
+     幅でのみ board-scroll が横スクロールする境界になる。 */
   min-width: min-content;
 }
 .horse-col {
-  flex: 0 0 92px;
-  width: 92px;
+  /* 可変幅（#383）。basis 0 + grow/shrink で残り幅を均等配分し、min–max で
+     読みやすさの下限と間延び上限を挟む。min-width 78px は stats 最長ラベル
+     （「市場勝率」→「市場」短縮後の最長は「連対率」「複勝率」）が旧 92px 相当の
+     余裕で収まる下限。18頭は概ね 1540px 以上でスクロールなし、それ未満でも固定
+     92px（要 1758px）より大幅減。少頭数は max 108px まで広がり一覧性が上がる。
+     下限 78px は stats の font-size(0.68rem)・padding 前提の実測値。stats の文字サイズや
+     余白、ラベル文字数を変えたら重なり閾値が動くので min-width を再測すること。 */
+  flex: 1 1 0;
+  min-width: 78px;
+  max-width: 108px;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 6px;
