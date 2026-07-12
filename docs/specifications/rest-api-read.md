@@ -64,7 +64,7 @@ API なので **OpenAPI 仕様を一級の成果物として整備する**。uto
 GET /api/races?date=YYYY-MM-DD
 ```
 
-- use-case: `races_by_date(date)`（既存。race_num 昇順、`results` は読まない。実体は `repository.find_races_by_date`）
+- use-case: `races_by_date(date)`（既存。race_num 昇順、`results` は読まない。実体は `repository.find_races_by_date`）＋ `post_times_by_date(date)`（#391。`race_cards.post_time` の一括引き当て。実体は `repository.find_post_times_by_date`）
 - `date` 必須・`YYYY-MM-DD`。不正フォーマットは `400`。
 - レスポンス: レース配列
 
@@ -72,10 +72,12 @@ GET /api/races?date=YYYY-MM-DD
 {
   "date": "2026-03-28",
   "races": [
-    { "race_id": "...", "venue": "nakayama", "race_num": 1, "distance": 1800, "surface": "turf" }
+    { "race_id": "...", "venue": "nakayama", "race_num": 1, "distance": 1800, "surface": "turf", "post_time": "15:45" }
   ]
 }
 ```
+
+- `post_time` は `HH:MM`（race_cards 由来）。出馬表未取得・post_time 未保存のレースは `null`。SPA のライブ一覧はこれを発走時刻・状態判定（未発走/終了）の一次ソースにする（watch 判定記録の有無に依存させない、#391）。
 
 > 状態バッジ（未処理 / 購入済み / オッズ未取得 等）はセッション(#53)・オッズ(#51) の情報を要するため #33 では返さない。SPA 側が複数 read を合成して表示する（web-spa.md 参照）。
 

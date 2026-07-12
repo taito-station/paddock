@@ -58,6 +58,8 @@ function StaticRow({
         <Link to={boardHref(r.race_id, date, back)}>{r.race_num}</Link>
       </td>
       <td>{VENUE_JP[r.venue] ?? r.venue}</td>
+      {/* 発走時刻は race_cards 正本（#391）。未取得は "—"（不明扱い）。 */}
+      <td>{r.post_time ?? "—"}</td>
       <td>{r.distance}m</td>
       <td>{SURFACE_JP[r.surface] ?? r.surface}</td>
       <td>
@@ -300,6 +302,7 @@ export function RaceList() {
             <tr>
               <th>R</th>
               <th>開催</th>
+              <th>発走</th>
               <th>距離</th>
               <th>馬場</th>
               <th>状態</th>

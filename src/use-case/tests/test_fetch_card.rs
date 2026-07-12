@@ -231,6 +231,12 @@ impl RaceCardRepository for RecordingRepo {
     async fn find_race_card(&self, _race_id: &RaceId) -> Result<Option<RaceCard>> {
         unimplemented!()
     }
+    async fn find_post_times_by_date(
+        &self,
+        _date: chrono::NaiveDate,
+    ) -> Result<std::collections::HashMap<RaceId, chrono::NaiveTime>> {
+        unimplemented!()
+    }
 }
 
 impl OddsRepository for RecordingRepo {

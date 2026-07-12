@@ -30,7 +30,7 @@ fn race(race_id: &str, race_num: u32) -> Race {
     }
 }
 
-/// 出馬表の発走時刻（#235 の往復検証に使う）。
+/// 出馬表の発走時刻（#235 の往復検証・#391 の post_time 一括取得テストで共用）。
 fn pt() -> NaiveTime {
     NaiveTime::from_hms_opt(15, 40, 0).unwrap()
 }
@@ -159,4 +159,67 @@ async fn find_race_card_post_time_none_round_trips(pool: sqlx::PgPool) {
 
     let loaded = repo.find_race_card(&id).await.unwrap().unwrap();
     assert_eq!(loaded.post_time, None, "post_time 未設定は None で往復する");
+}
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn find_post_times_by_date_maps_only_saved_post_times(pool: sqlx::PgPool) {
+    // #391: 指定日の post_time を race_id → NaiveTime で一括取得。NULL 行は含まれない。
+    let repo = PostgresRepository::new(pool);
+    repo.save_race_card(&card("2026-3-nakayama-8-1R", 1))
+        .await
+        .unwrap();
+    repo.save_race_card(&card("2026-3-nakayama-8-2R", 2))
+        .await
+        .unwrap();
+    let mut no_post = card("2026-3-nakayama-8-3R", 3);
+    no_post.post_time = None;
+    repo.save_race_card(&no_post).await.unwrap();
+
+    let map = repo.find_post_times_by_date(d()).await.unwrap();
+    assert_eq!(map.len(), 2, "post_time が保存済みのレースだけ含まれる");
+    let id = |s: &str| RaceId::try_from(s).unwrap();
+    assert_eq!(map.get(&id("2026-3-nakayama-8-1R")), Some(&pt()));
+    assert_eq!(map.get(&id("2026-3-nakayama-8-2R")), Some(&pt()));
+    assert!(!map.contains_key(&id("2026-3-nakayama-8-3R")));
+
+    // 別日は空マップ。
+    let other = NaiveDate::from_ymd_opt(2026, 5, 31).unwrap();
+    assert!(
+        repo.find_post_times_by_date(other)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn find_post_times_by_date_skips_unparsable_rows(pool: sqlx::PgPool) {
+    // #391: HH:MM や race_id として解釈できない行は warn で縮退（無言破棄しない・全体は落とさない）。
+    // save_race_card 経由では常に正規形になるため、破損データは生 SQL で直接作る。
+    let repo = PostgresRepository::new(pool.clone());
+    repo.save_race_card(&card("2026-3-nakayama-8-1R", 1))
+        .await
+        .unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO race_cards (race_id, venue, round, day, race_num, surface, distance, date, post_time)
+        VALUES ('2026-3-nakayama-8-2R', 'nakayama', 3, 8, 2, 'turf', 1800, $1, 'invalid'),
+               ('bad_race_id', 'nakayama', 3, 8, 3, 'turf', 1800, $1, '15:40')
+        "#,
+    )
+    .bind(d().format("%Y-%m-%d").to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let map = repo.find_post_times_by_date(d()).await.unwrap();
+    assert_eq!(
+        map.len(),
+        1,
+        "解釈不能な post_time / race_id の行は除外され正常行は残る"
+    );
+    assert_eq!(
+        map.get(&RaceId::try_from("2026-3-nakayama-8-1R").unwrap()),
+        Some(&pt())
+    );
 }

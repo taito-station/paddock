@@ -2741,6 +2741,13 @@
             "description": "距離[m]。",
             "minimum": 0
           },
+          "post_time": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "発走時刻（`HH:MM`、race_cards 由来。未保存なら `null`）。\nライブ一覧の状態判定（未発走/終了）の一次ソース（#391）。"
+          },
           "race_id": {
             "type": "string",
             "description": "レース ID（`RaceId` の文字列表現）。"

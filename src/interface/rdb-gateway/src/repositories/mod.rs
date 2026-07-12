@@ -5,6 +5,7 @@ mod find_finished_races_between;
 mod find_jockey_recent_runs;
 mod find_live_ev_by_date;
 mod find_matching_names;
+mod find_post_times_by_date;
 mod find_race_card;
 mod find_race_odds;
 mod find_races_by_date;
@@ -26,7 +27,7 @@ mod update_results;
 
 use std::collections::HashMap;
 
-use chrono::{DateTime, NaiveDate, Utc};
+use chrono::{DateTime, NaiveDate, NaiveTime, Utc};
 use paddock_domain::{
     HorseId, HorseName, JockeyFormRun, JockeyName, PadPrediction, Race, RaceCard, RaceId, RaceOdds,
     RecentRun, StandardTimes, Surface, TrainerName, Venue,
@@ -292,6 +293,15 @@ impl RaceCardRepository for PostgresRepository {
 
     async fn find_race_card(&self, race_id: &RaceId) -> UcResult<Option<RaceCard>> {
         find_race_card::find_race_card(&self.pool, race_id)
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn find_post_times_by_date(
+        &self,
+        date: NaiveDate,
+    ) -> UcResult<HashMap<RaceId, NaiveTime>> {
+        find_post_times_by_date::find_post_times_by_date(&self.pool, date)
             .await
             .map_err(Into::into)
     }
