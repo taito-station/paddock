@@ -158,8 +158,11 @@ export function RaceBoard() {
             : raceId}
         </h2>
         {d?.post_time && <span className="muted">発走 {d.post_time}</span>}
-        <Link to={`/?date=${date}`}>← レース一覧</Link>
-        {date && <Link to={`/sessions/${date}`}>収支</Link>}
+        {/* date は ?date= 由来のユーザ制御値になりうるため必ずエンコード（boardHref と同基準） */}
+        <Link to={`/?date=${encodeURIComponent(date)}`}>← レース一覧</Link>
+        {date && (
+          <Link to={`/sessions/${encodeURIComponent(date)}`}>収支</Link>
+        )}
         {session.data && (
           <span className="session-balance">
             残高 {yen(session.data.balance)}

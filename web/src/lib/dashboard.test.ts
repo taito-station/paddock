@@ -174,6 +174,11 @@ describe("filterRows", () => {
       filterRows(rows, { status: "upcoming", verdict: "all" }, ctx).map((r) => r.race.race_id),
     ).toEqual(["up-bet", "up-skip", "nolive", "hidden-bet"]);
   });
+  it("status=finished: 発走済みのみ（post 不明は未発走扱いで除外）", () => {
+    expect(
+      filterRows(rows, { status: "finished", verdict: "all" }, ctx).map((r) => r.race.race_id),
+    ).toEqual(["done-bet"]);
+  });
   it("verdict=bet: EV 非表示行（live 無し・hidden）は除外", () => {
     expect(
       filterRows(rows, { status: "all", verdict: "bet" }, ctx).map((r) => r.race.race_id),

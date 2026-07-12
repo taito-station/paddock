@@ -229,7 +229,8 @@ export function RaceList() {
         ) : (
           <span className="muted">セッション未作成</span>
         )}
-        <Link to={`/sessions/${date}`}>収支</Link>
+        {/* date は ?date= 由来のユーザ制御値になりうるため必ずエンコード（boardHref と同基準） */}
+        <Link to={`/sessions/${encodeURIComponent(date)}`}>収支</Link>
         {liveMode && (
           <>
             {/* API 再取得のみ（スナップショット自体は predict-watch が更新する）ため「再読込」。 */}
