@@ -292,6 +292,11 @@ describe("raceStarted", () => {
   it("accepts non-zero-padded hours (\"9:30\")", () => {
     expect(raceStarted(DATE, "9:30", NOON)).toBe(true);
   });
+  it("緩い分表記は不明(null)に倒す（postMinutes と厳格解釈を共有・#385）", () => {
+    // 分 1 桁・余分な要素は postDate 側でも不明扱い。postMinutes との判定割れを防ぐ。
+    expect(raceStarted(DATE, "12:5", NOON)).toBeNull();
+    expect(raceStarted(DATE, "12:05:30", NOON)).toBeNull();
+  });
   it("非正規形の date（エンジン依存解釈）は不明(null)に倒す", () => {
     expect(raceStarted("2026-7-11", "9:30", NOON)).toBeNull();
     expect(raceStarted("nonsense", "9:30", NOON)).toBeNull();

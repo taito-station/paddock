@@ -21,7 +21,9 @@ function hexLiteralsOutsideRoot(css: string): string[] {
   return withoutRoot.match(/#[0-9a-fA-F]{3,8}\b/g) ?? [];
 }
 
-const ALLOWLIST = new Set(["#fff", "#ffffff"]);
+// styles.css ヘッダの但し書きが認める例外どおり #fff のみ（純白は意味名が立たない）。
+// 現状 #ffffff 表記は無く、増やす動機も無いので文書と一致させ 1 エントリに絞る（YAGNI）。
+const ALLOWLIST = new Set(["#fff"]);
 
 describe("styles.css hex guard", () => {
   it(":root 外に allowlist 以外の生 hex を持たない", () => {
