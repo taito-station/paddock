@@ -160,3 +160,33 @@ async fn find_race_card_post_time_none_round_trips(pool: sqlx::PgPool) {
     let loaded = repo.find_race_card(&id).await.unwrap().unwrap();
     assert_eq!(loaded.post_time, None, "post_time 未設定は None で往復する");
 }
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn find_post_times_by_date_maps_only_saved_post_times(pool: sqlx::PgPool) {
+    // #391: 指定日の post_time を race_id → NaiveTime で一括取得。NULL 行は含まれない。
+    let repo = PostgresRepository::new(pool);
+    repo.save_race_card(&card("2026-3-nakayama-8-1R", 1))
+        .await
+        .unwrap();
+    repo.save_race_card(&card("2026-3-nakayama-8-2R", 2))
+        .await
+        .unwrap();
+    let mut no_post = card("2026-3-nakayama-8-3R", 3);
+    no_post.post_time = None;
+    repo.save_race_card(&no_post).await.unwrap();
+
+    let map = repo.find_post_times_by_date(d()).await.unwrap();
+    assert_eq!(map.len(), 2, "post_time が保存済みのレースだけ含まれる");
+    assert_eq!(map.get("2026-3-nakayama-8-1R"), Some(&pt()));
+    assert_eq!(map.get("2026-3-nakayama-8-2R"), Some(&pt()));
+    assert!(!map.contains_key("2026-3-nakayama-8-3R"));
+
+    // 別日は空マップ。
+    let other = NaiveDate::from_ymd_opt(2026, 5, 31).unwrap();
+    assert!(
+        repo.find_post_times_by_date(other)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}

@@ -1,7 +1,7 @@
 use core::future::Future;
 use std::collections::HashMap;
 
-use chrono::{DateTime, NaiveDate, Utc};
+use chrono::{DateTime, NaiveDate, NaiveTime, Utc};
 use paddock_domain::{
     BetType, HorseId, HorseName, JockeyFormRun, JockeyName, Mark, OrderedPair, OrderedTriple,
     PadPrediction, Pair, Race, RaceCard, RaceId, RaceOdds, RecentRun, StandardTimes, Surface,
@@ -771,6 +771,13 @@ pub trait RaceCardRepository: Send + Sync {
         &self,
         race_id: &RaceId,
     ) -> impl Future<Output = Result<Option<RaceCard>>> + Send;
+
+    /// 指定日の全レースの発走時刻を `race_id → post_time` で返す（`race_cards` 由来）。
+    /// post_time 未保存のレースはマップに含まれない（#391）。
+    fn find_post_times_by_date(
+        &self,
+        date: NaiveDate,
+    ) -> impl Future<Output = Result<HashMap<String, NaiveTime>>> + Send;
 }
 
 /// レースオッズ（`race_odds`）の保存・取得。

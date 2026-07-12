@@ -104,9 +104,14 @@ where
         Error::BadRequest(format!("invalid date '{}' (YYYY-MM-DD): {e}", query.date))
     })?;
     let races = interactor.races_by_date(date).await?;
+    // 発走時刻は race_cards を一次ソースに一括で引き当てる（watch 判定記録に依存させない、#391）。
+    let post_times = interactor.post_times_by_date(date).await?;
     let body = RaceListResponse {
         date,
-        races: races.iter().map(RaceSummary::from).collect(),
+        races: races
+            .iter()
+            .map(|r| RaceSummary::new(r, &post_times))
+            .collect(),
     };
     Ok(HttpResponse::Ok().json(body))
 }

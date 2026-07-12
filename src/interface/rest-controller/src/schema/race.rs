@@ -1,4 +1,6 @@
-use chrono::NaiveDate;
+use std::collections::HashMap;
+
+use chrono::{NaiveDate, NaiveTime};
 use serde::Serialize;
 use utoipa::ToSchema;
 
@@ -20,10 +22,14 @@ pub struct RaceSummary {
     pub distance: u32,
     /// 芝/ダート（`turf` / `dirt`）。
     pub surface: String,
+    /// 発走時刻（`HH:MM`、race_cards 由来。未保存なら `null`）。
+    /// ライブ一覧の状態判定（未発走/終了）の一次ソース（#391）。
+    pub post_time: Option<String>,
 }
 
-impl From<&Race> for RaceSummary {
-    fn from(r: &Race) -> Self {
+impl RaceSummary {
+    /// レース諸元＋発走時刻（`race_id → post_time` マップから引き当て）で組み立てる。
+    pub fn new(r: &Race, post_times: &HashMap<String, NaiveTime>) -> Self {
         Self {
             race_id: r.race_id.value().to_string(),
             date: r.date,
@@ -31,6 +37,9 @@ impl From<&Race> for RaceSummary {
             race_num: r.race_num,
             distance: r.distance,
             surface: r.surface.as_str().to_string(),
+            post_time: post_times
+                .get(r.race_id.value())
+                .map(|t| t.format("%H:%M").to_string()),
         }
     }
 }

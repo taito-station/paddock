@@ -137,6 +137,30 @@ async fn list_races_returns_seeded_race(pool: sqlx::PgPool) {
     assert_eq!(races[0]["race_id"], RACE_ID);
     assert_eq!(races[0]["venue"], "nakayama");
     assert_eq!(races[0]["surface"], "turf");
+    // 出馬表（race_cards）未保存なら post_time は null（#391）。
+    assert!(races[0]["post_time"].is_null());
+}
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn list_races_includes_post_time_from_race_cards(pool: sqlx::PgPool) {
+    // #391: 発走時刻は race_cards を一次ソースに HH:MM で返す（watch 判定記録に依存しない）。
+    let repo = PostgresRepository::new(pool.clone());
+    repo.save_race(&sample_race()).await.unwrap();
+    let mut card = sample_card();
+    card.post_time = Some(chrono::NaiveTime::from_hms_opt(15, 45, 0).unwrap());
+    repo.save_race_card(&card).await.unwrap();
+    let app = build_service!(pool);
+
+    let req = test::TestRequest::get()
+        .uri("/api/races?date=2026-03-28")
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert!(resp.status().is_success(), "status: {}", resp.status());
+
+    let json = body_json(resp).await;
+    let races = json["races"].as_array().unwrap();
+    assert_eq!(races.len(), 1);
+    assert_eq!(races[0]["post_time"], "15:45");
 }
 
 #[sqlx::test(migrations = "../../../deployments/db/migrations")]
