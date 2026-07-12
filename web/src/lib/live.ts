@@ -1,5 +1,8 @@
-// ライブ EV 買い目ビュー（LiveBets）の表示用純粋関数群（ユニットテスト対象）。
-// EV/伝票の計算・永続化は Rust predict-watch が正本（#346・ADR 0064 追補）。ここは描画整形のみ。
+// ライブ EV 表示用の純粋関数群（ユニットテスト対象）。日次ダッシュボード（RaceList）と
+// lib/dashboard.ts から使う。EV/伝票の計算・永続化は Rust predict-watch が正本
+//（#346・ADR 0064 追補）。ここは描画整形のみ。
+// NOTE: sortRaces / filterRaces は旧 /live（LiveBets）専用で #378 統合後はデッドコード。
+// dashboard.ts の sortRows / filterRows が正。テスト（live.test.ts）ごと後続 issue で撤去する。
 import type { Schemas } from "../api/client";
 
 type SlipLeg = Schemas["SlipLeg"];
@@ -45,20 +48,16 @@ export function jstHm(iso: string | null | undefined): string {
 }
 
 // レース詳細盤（RaceBoard）への遷移先 URL を組む単一の生成源。
-// - fromLive=true: ライブ日次ボード由来。盤側で「← ライブに戻る」導線を出す（LiveBets 行／
-//   ライブ経由の盤内 場内・R 切替リンクで使う）。
-// - date: 戻り先 /live/:date の復元に使う。空なら省略（RaceBoard は盤レスポンスの date に
-//   フォールバックできる）。
-export function boardHref(
-  raceId: string,
-  date: string,
-  opts: { fromLive?: boolean } = {},
-): string {
-  const params = new URLSearchParams();
-  if (opts.fromLive) params.set("from", "live");
-  if (date) params.set("date", date);
-  const qs = params.toString();
-  return `/races/${raceId}/board${qs ? `?${qs}` : ""}`;
+// date は戻り先 /?date= の復元に使う。空なら省略（RaceBoard は盤レスポンスの date に
+// フォールバックできる）。旧 from=live は /live 廃止（#378）に伴い撤去 — 既存の
+// from=live 付き URL は盤が単に無視する（戻り先は常に一覧で正しい）。
+export function boardHref(raceId: string, date: string): string {
+  // raceId / date とも URL 経由でユーザ制御可能な値になりうる（旧ルートのリダイレクトは
+  // useParams のデコード済み値を渡す）ため、必ずエンコードして埋める
+  //（& / # / %2F 等によるクエリ注入・パス操作・URL 破壊の防止）。
+  return `/races/${encodeURIComponent(raceId)}/board${
+    date ? `?date=${encodeURIComponent(date)}` : ""
+  }`;
 }
 
 // 「断然人気」とみなす◎の単勝オッズ上限。この値以下は過剰人気として見送り理由に明記する

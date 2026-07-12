@@ -7,6 +7,7 @@ import {
   DEFAULT_RACE_BUDGET,
   boardBudget,
   effectiveCap,
+  keepBoardPlaceholder,
   heatColor,
   markSymbol,
   placeOddsLabel,
@@ -20,9 +21,7 @@ export function RaceBoard() {
   const { raceId = "" } = useParams();
   const [searchParams] = useSearchParams();
   const dateParam = searchParams.get("date") ?? "";
-  // ライブ日次ボード（/live/:date）から来たか。来た場合は戻り導線をライブに向け、
-  // 盤内の場内/R切替でも from を引き継いで戻り先を保つ。
-  const fromLive = searchParams.get("from") === "live";
+  // 旧 ?from=live は /live 廃止（#378）で読まなくなった。付いていても無視される。
   // クリックで馬書評（詳細パネル）を開く馬番。同じ馬を再クリック or 閉じるで null に戻す。
   const [selectedHorse, setSelectedHorse] = useState<number | null>(null);
   // フォーカス管理（a11y）: パネルを開いた馬カラム（trigger）を覚えておき、閉じたら戻す。
@@ -94,11 +93,11 @@ export function RaceBoard() {
     // budget は可変（#377）。stale キャッシュを避けるため queryKey に必ず含める。
     queryKey: ["board", raceId, queryBudget],
     enabled: !!raceId,
-    // 予算変更時に盤全体（馬カラム）がスピナーへ戻るチラつきを防ぐ。**同一レースに限定**
-    // すること: 無条件 `(prev) => prev` だと場/R 切替でも前レースの盤・買い目が placeholder
-    // 表示され、ロード完了前に前レースの買い目を新レースとして記録できてしまう。
+    // 予算変更時に盤全体（馬カラム）がスピナーへ戻るチラつきを防ぐ。ガードの意味論
+    //（同一レース限定＝前レースの買い目を新レースとして記録できる事故の防止）は
+    // keepBoardPlaceholder（lib/board.ts・テスト済み）が持つ。
     placeholderData: (prev, prevQuery) =>
-      prevQuery?.queryKey[1] === raceId ? prev : undefined,
+      keepBoardPlaceholder(prevQuery?.queryKey, raceId) ? prev : undefined,
     queryFn: async () => {
       const { data, error } = await api.GET("/api/races/{race_id}/board", {
         params: {
@@ -113,9 +112,13 @@ export function RaceBoard() {
 
   const date = dateParam || board.data?.date || "";
   // ?date= 無しの直リンクで盤が返した開催日を session 取得へ伝搬する。
+  // クリア（レース遷移時の旧日付 transient 解消）と再設定は単一 effect で行うこと:
+  // 分離すると「raceId 変更＋キャッシュ済み board が同一開催日」のとき再設定側の deps が
+  // 変わらず、fallbackDate が空のまま session が無効化されて固着する。raceId は
+  // その再評価トリガーとして deps に含める。
   useEffect(() => {
-    if (!dateParam && board.data?.date) setFallbackDate(board.data.date);
-  }, [dateParam, board.data?.date]);
+    setFallbackDate(!dateParam && board.data?.date ? board.data.date : "");
+  }, [raceId, dateParam, board.data?.date]);
 
   // 同開催日の全レースを引き、同じ R の他場（函館⇄福島⇄小倉…）へ場内切替する。
   const races = useQuery({
@@ -155,12 +158,11 @@ export function RaceBoard() {
             : raceId}
         </h2>
         {d?.post_time && <span className="muted">発走 {d.post_time}</span>}
-        {fromLive && date ? (
-          <Link to={`/live/${date}`}>← ライブに戻る</Link>
-        ) : (
-          <Link to={`/?date=${date}`}>← レース一覧</Link>
+        {/* date は ?date= 由来のユーザ制御値になりうるため必ずエンコード（boardHref と同基準） */}
+        <Link to={`/?date=${encodeURIComponent(date)}`}>← レース一覧</Link>
+        {date && (
+          <Link to={`/sessions/${encodeURIComponent(date)}`}>収支</Link>
         )}
-        {date && <Link to={`/sessions/${date}`}>収支</Link>}
         {session.data && (
           <span className="session-balance">
             残高 {yen(session.data.balance)}
@@ -185,7 +187,7 @@ export function RaceBoard() {
               <Link
                 key={r.race_id}
                 className="chip venue-link"
-                to={boardHref(r.race_id, date, { fromLive })}
+                to={boardHref(r.race_id, date)}
               >
                 {label}
               </Link>
@@ -207,7 +209,7 @@ export function RaceBoard() {
               <Link
                 key={r.race_id}
                 className="chip venue-link"
-                to={boardHref(r.race_id, date, { fromLive })}
+                to={boardHref(r.race_id, date)}
               >
                 {r.race_num}
               </Link>
@@ -447,6 +449,7 @@ export function RaceBoard() {
             oddsAvailable={d.odds_available}
             session={session.data}
             sessionError={session.isError}
+            refreshing={board.isPlaceholderData}
             cap={cap}
           />
           <p className="muted" style={{ marginTop: "0.5rem" }}>

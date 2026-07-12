@@ -20,6 +20,16 @@ export function boardBudget(cap: number): number {
   return cap > 0 ? cap : DEFAULT_RACE_BUDGET;
 }
 
+// board query の placeholderData を維持してよいか。**同一レース（queryKey[1]===raceId）の
+// 予算変更に限って** 前データを残す。レース跨ぎで残すと、盤ロード完了前に前レースの
+// 買い目を新レースの outcome として記録できてしまう（#386 レビューで塞いだ実弾バグの退行防御）。
+export function keepBoardPlaceholder(
+  prevKey: readonly unknown[] | undefined,
+  raceId: string,
+): boolean {
+  return prevKey?.[1] === raceId;
+}
+
 // 印スラッグ → 表示記号。無印（null）は空文字。
 export const MARK_SYMBOL: Record<string, string> = {
   honmei: "◎",

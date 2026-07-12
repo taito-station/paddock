@@ -3,6 +3,7 @@ import {
   DEFAULT_RACE_BUDGET,
   boardBudget,
   effectiveCap,
+  keepBoardPlaceholder,
   heatColor,
   heatIntensity,
   markSymbol,
@@ -31,6 +32,17 @@ describe("boardBudget", () => {
   it("cap<=0 は既定予算に倒す（budget=0 はサーバが 400 を返すため）", () => {
     expect(boardBudget(0)).toBe(DEFAULT_RACE_BUDGET);
     expect(boardBudget(-100)).toBe(DEFAULT_RACE_BUDGET);
+  });
+});
+
+describe("keepBoardPlaceholder", () => {
+  it("同一レース（queryKey[1] が一致）のみ placeholder を維持", () => {
+    expect(keepBoardPlaceholder(["board", "race-a", 5000], "race-a")).toBe(true);
+    expect(keepBoardPlaceholder(["board", "race-a", 5000], "race-b")).toBe(false);
+  });
+  it("prevKey 無し・要素不足は維持しない（レース跨ぎ記録バグの退行防御）", () => {
+    expect(keepBoardPlaceholder(undefined, "race-a")).toBe(false);
+    expect(keepBoardPlaceholder(["board"], "race-a")).toBe(false);
   });
 });
 
