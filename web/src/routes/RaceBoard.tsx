@@ -244,7 +244,7 @@ export function RaceBoard() {
               </span>
             )}
             {!d.odds_available && (
-              <span className="chip chip-warn">オッズ未取得</span>
+              <span className="chip chip-danger">オッズ未取得</span>
             )}
           </div>
 
