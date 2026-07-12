@@ -222,6 +222,12 @@ impl RaceCardRepository for MockRepo {
     async fn find_race_card(&self, _: &RaceId) -> Result<Option<RaceCard>> {
         Ok(self.card.clone())
     }
+    async fn find_post_times_by_date(
+        &self,
+        _date: chrono::NaiveDate,
+    ) -> Result<std::collections::HashMap<RaceId, chrono::NaiveTime>> {
+        unimplemented!()
+    }
 }
 
 impl OddsRepository for MockRepo {

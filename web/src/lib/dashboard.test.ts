@@ -3,6 +3,7 @@ import type { Schemas } from "../api/client";
 import {
   joinRaces,
   evVisible,
+  rowPostTime,
   sortRows,
   filterRows,
   dashboardQueryParams,
@@ -101,6 +102,17 @@ describe("joinRaces", () => {
   });
 });
 
+describe("rowPostTime", () => {
+  it("races API（race_cards 正本）を一次ソースにする（#391）", () => {
+    expect(rowPostTime(row({ post_time: "15:45" }, { post_time: "15:40" }))).toBe("15:45");
+  });
+  it("race 側が無ければ live へ fallback、両方無ければ null", () => {
+    expect(rowPostTime(row({}, { post_time: "15:40" }))).toBe("15:40");
+    expect(rowPostTime(row({ post_time: null }, { post_time: "15:40" }))).toBe("15:40");
+    expect(rowPostTime(row({}, null))).toBe(null);
+  });
+});
+
 describe("evVisible", () => {
   it("live 無し・tier=hidden は false（#344 買いに見せない）", () => {
     expect(evVisible(row({}, null))).toBe(false);
@@ -192,6 +204,32 @@ describe("filterRows", () => {
     expect(
       filterRows(rows, { status: "upcoming", verdict: "bet" }, ctx).map((r) => r.race.race_id),
     ).toEqual(["up-bet"]);
+  });
+  it("live 無しでも race.post_time が過去なら発走済みに分類する（#391）", () => {
+    const rs = [
+      row({ race_id: "done-nolive", post_time: "10:00" }, null),
+      row({ race_id: "up-nolive", post_time: "16:00" }, null),
+      row({ race_id: "unknown", post_time: null }, null),
+    ];
+    expect(
+      filterRows(rs, { status: "finished", verdict: "all" }, ctx).map((r) => r.race.race_id),
+    ).toEqual(["done-nolive"]);
+    // post 不明は従来どおり未発走側（終了と断定しない）。
+    expect(
+      filterRows(rs, { status: "upcoming", verdict: "all" }, ctx).map((r) => r.race.race_id),
+    ).toEqual(["up-nolive", "unknown"]);
+  });
+  it("race.post_time と live.post_time が食い違うとき分類も race 正本を優先する（#391）", () => {
+    // race=過去(10:00) / live=未来(16:00)。rowPostTime が race 側を採るため発走済みに分類される。
+    const rs = [
+      row({ race_id: "race-past", post_time: "10:00" }, { post_time: "16:00", verdict: "skip" }),
+    ];
+    expect(
+      filterRows(rs, { status: "finished", verdict: "all" }, ctx).map((r) => r.race.race_id),
+    ).toEqual(["race-past"]);
+    expect(
+      filterRows(rs, { status: "upcoming", verdict: "all" }, ctx).map((r) => r.race.race_id),
+    ).toEqual([]);
   });
 });
 

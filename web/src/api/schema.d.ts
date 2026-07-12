@@ -833,6 +833,11 @@ export interface components {
              * @description 距離[m]。
              */
             distance: number;
+            /**
+             * @description 発走時刻（`HH:MM`、race_cards 由来。未保存なら `null`）。
+             *     ライブ一覧の状態判定（未発走/終了）の一次ソース（#391）。
+             */
+            post_time?: string | null;
             /** @description レース ID（`RaceId` の文字列表現）。 */
             race_id: string;
             /**

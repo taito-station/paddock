@@ -51,10 +51,11 @@ export function visibleLive(row: DashboardRow): LiveRaceView | null {
   return row.live != null && row.live.tier !== "hidden" ? row.live : null;
 }
 
-// 行の発走時刻。hidden でも post_time は無害な事実情報なので表示・ソートに使う
-//（マスクするのは EV 系の数値のみ）。live 無しは null（不明）。
+// 行の発走時刻。races API（race_cards 正本）を一次ソースにし、live（snapshot 時点の複写）は
+// fallback（#391。watch 未判定レースでも発走時刻・状態を出す）。hidden でも post_time は
+// 無害な事実情報なので表示・ソートに使う（マスクするのは EV 系の数値のみ）。
 export function rowPostTime(row: DashboardRow): string | null {
-  return row.live?.post_time ?? null;
+  return row.race.post_time ?? row.live?.post_time ?? null;
 }
 
 // ソート。live.ts の sortRaces と同じ意味論を DashboardRow に拡張する。
