@@ -1420,6 +1420,8 @@
           "place_prob",
           "show_prob",
           "pure_win_prob",
+          "pure_place_prob",
+          "pure_show_prob",
           "model_rank",
           "is_overlay",
           "is_value",
@@ -1519,10 +1521,19 @@
             "description": "単勝人気（1=1番人気。単勝未取得なら `null`）。乖離判定の市場順位も兼ねる。",
             "minimum": 0
           },
+          "pure_place_prob": {
+            "type": "number",
+            "format": "double",
+            "description": "純モデル α=1.0 の連対率/複勝率 [0,1]（#373）。"
+          },
+          "pure_show_prob": {
+            "type": "number",
+            "format": "double"
+          },
           "pure_win_prob": {
             "type": "number",
             "format": "double",
-            "description": "EV 視点（純モデル α=1.0）の勝率 [0,1]。"
+            "description": "EV 視点（純モデル α=1.0・市場非依存）の勝率 [0,1]。連対/複勝は下記（#373 盤の3系統表示）。"
           },
           "show_prob": {
             "type": "number",

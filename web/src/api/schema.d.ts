@@ -375,7 +375,14 @@ export interface components {
             popularity?: number | null;
             /**
              * Format: double
-             * @description EV 視点（純モデル α=1.0）の勝率 [0,1]。
+             * @description 純モデル α=1.0 の連対率/複勝率 [0,1]（#373）。
+             */
+            pure_place_prob: number;
+            /** Format: double */
+            pure_show_prob: number;
+            /**
+             * Format: double
+             * @description EV 視点（純モデル α=1.0・市場非依存）の勝率 [0,1]。連対/複勝は下記（#373 盤の3系統表示）。
              */
             pure_win_prob: number;
             /** Format: double */

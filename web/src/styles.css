@@ -445,6 +445,22 @@ button:disabled {
   text-align: center;
 }
 
+/* 確率表示の切替（#373）。盤の直前に置く小さなコントロール行。 */
+.board-controls {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  margin: 0.25rem 0 0.5rem;
+}
+.board-controls .model-toggle {
+  display: inline-flex;
+  gap: 0.35rem;
+  align-items: center;
+  font-size: 0.85rem;
+  color: var(--muted);
+  cursor: pointer;
+}
+
 .board-scroll {
   overflow-x: auto;
   padding-bottom: 0.5rem;
@@ -472,8 +488,8 @@ button:disabled {
 }
 .horse-col {
   /* 可変幅（#383）。basis 0 + grow/shrink で残り幅を均等配分し、min–max で
-     読みやすさの下限と間延び上限を挟む。min-width 78px は stats 最長ラベル
-     （「市場勝率」→「市場」短縮後の最長は「連対率」「複勝率」）が旧 92px 相当の
+     読みやすさの下限と間延び上限を挟む。min-width 78px は stats ラベル
+     （#373 で全 2 文字化: ブ勝/ブ連/ブ複・モ勝/モ連/モ複・市勝）と値が旧 92px 相当の
      余裕で収まる下限。18頭は概ね 1540px 以上でスクロールなし、それ未満でも固定
      92px（要 1758px）より大幅減。少頭数は max 108px まで広がり一覧性が上がる。
      下限 78px は stats の font-size(0.68rem)・padding 前提の実測値。stats の文字サイズや
