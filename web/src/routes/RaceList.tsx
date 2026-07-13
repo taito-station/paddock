@@ -191,8 +191,10 @@ export function RaceList() {
 
   // ソート・絞り込み・日付は URL クエリに反映（既定値は省略）。replace は意図的:
   // チップ連打で履歴を汚さない。date の併存は dashboardQueryParams がマージする。
-  const applyQuery = (next: LiveQuery, nextDate: string = date) =>
-    setSearchParams(dashboardQueryParams(next, nextDate), { replace: true });
+  // 日付切替はヘッダ常駐ピッカーへ一本化済み（#379）。ここは sort/filter のみ更新し、
+  // date は現在値を dashboardQueryParams でマージ保持する。
+  const applyQuery = (next: LiveQuery) =>
+    setSearchParams(dashboardQueryParams(next, date), { replace: true });
   const onSort = (key: SortKey) =>
     applyQuery(
       // 状態列は固定順（sortRows が dir 非対応）なのでトグルせず既定に戻すだけ。

@@ -65,6 +65,11 @@ describe("currentHeaderDate", () => {
     expect(currentHeaderDate(sp(""), "/analyze")).toBe(todayJst());
     expect(currentHeaderDate(sp(""), "/races/abc/board")).toBe(todayJst());
   });
+
+  it("キーありの空値 /?date= は当日へフォールバックする", () => {
+    // input[type=date] の空クリア導線で ?date= が空になりうるエッジ。
+    expect(currentHeaderDate(sp("date="), "/")).toBe(todayJst());
+  });
 });
 
 describe("raceListHref / analyzeHref", () => {
