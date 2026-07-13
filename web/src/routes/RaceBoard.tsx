@@ -351,7 +351,7 @@ export function RaceBoard() {
                   <div
                     className="heat"
                     style={{ background: heatColor(h.win_prob, maxWin) }}
-                    title={`モデル勝率 ${pct(h.win_prob)}`}
+                    title={`ブレンド勝率 ${pct(h.win_prob)}`}
                   >
                     <span className="rank">{h.model_rank}</span>
                   </div>

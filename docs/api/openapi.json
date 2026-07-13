@@ -1523,7 +1523,8 @@
           },
           "pure_place_prob": {
             "type": "number",
-            "format": "double"
+            "format": "double",
+            "description": "純モデル α=1.0 の連対率/複勝率 [0,1]（#373）。"
           },
           "pure_show_prob": {
             "type": "number",
@@ -1532,7 +1533,7 @@
           "pure_win_prob": {
             "type": "number",
             "format": "double",
-            "description": "EV 視点（純モデル α=1.0）の勝率/連対率/複勝率 [0,1]（#373 盤の3系統表示）。"
+            "description": "EV 視点（純モデル α=1.0・市場非依存）の勝率 [0,1]。連対/複勝は下記（#373 盤の3系統表示）。"
           },
           "show_prob": {
             "type": "number",

@@ -251,8 +251,9 @@ pub struct BoardHorseSchema {
     pub win_prob: f64,
     pub place_prob: f64,
     pub show_prob: f64,
-    /// EV 視点（純モデル α=1.0）の勝率/連対率/複勝率 [0,1]（#373 盤の3系統表示）。
+    /// EV 視点（純モデル α=1.0・市場非依存）の勝率 [0,1]。連対/複勝は下記（#373 盤の3系統表示）。
     pub pure_win_prob: f64,
+    /// 純モデル α=1.0 の連対率/複勝率 [0,1]（#373）。
     pub pure_place_prob: f64,
     pub pure_show_prob: f64,
     /// 市場implied 勝率（フィールド内 `1/単勝` 正規化。単勝未取得なら `null`）。

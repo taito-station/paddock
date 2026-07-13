@@ -86,8 +86,9 @@ pub struct BoardHorse {
     pub win_prob: f64,
     pub place_prob: f64,
     pub show_prob: f64,
-    /// EV 視点（純モデル α=1.0）の勝率/連対率/複勝率 [0,1]（#373 盤の3系統表示）。
+    /// EV 視点（純モデル α=1.0・市場非依存）の勝率 [0,1]。連対/複勝は下記（#373 盤の3系統表示）。
     pub pure_win_prob: f64,
+    /// 純モデル α=1.0 の連対率/複勝率 [0,1]（#373）。
     pub pure_place_prob: f64,
     pub pure_show_prob: f64,
     /// 市場implied 勝率（フィールド内 `1/単勝` 正規化。単勝未取得なら `None`）。
@@ -476,8 +477,10 @@ mod tests {
     #[test]
     fn pure_place_show_come_from_pure_not_blended() {
         // #373: 純モデルの連対率/複勝率は pure 由来（表示の勝/連/複＝ブレンドとは別系統）。
-        let blended = vec![hp(1, 0.40)]; // hp: place=win*2, show=win*3 → place 0.80 / show 1.0
-        let pure = vec![hp(1, 0.20)]; //                                   place 0.40 / show 0.60
+        // hp: place=win*2, show=(win*3).min(1.0)。blended=0.40→place 0.80/show 1.0(クランプ)、
+        // pure=0.20→place 0.40/show 0.60。表示系(ブ)と純系(モ)が別値になる組で弁別する。
+        let blended = vec![hp(1, 0.40)];
+        let pure = vec![hp(1, 0.20)];
         let horses = build_board_horses(&blended, &pure, None, None);
         let h = &horses[0];
         assert!((h.win_prob - 0.40).abs() < 1e-9, "表示勝率はブレンド");
