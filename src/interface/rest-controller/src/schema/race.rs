@@ -293,6 +293,8 @@ pub struct RaceBoardResponse {
     /// 保存オッズ（#51）の有無。false のとき `bets` は必ず空。
     pub odds_available: bool,
     /// 買い目の軸。記録軸（`recorded_axis`）があればそれに固定、無ければライブ再計算（`live_axis`）。
+    /// ただし保存オッズが無い（`odds_available=false`）ときは買い目が組めず `axis=null`
+    /// （`recorded_axis` は残る＝盤の軸ロック表示はオッズ無しでも出る）。
     pub axis: Option<u32>,
     /// predict 記録済みの本命◎（軸ロックの正, #388）。未 predict・取消時は `null`。
     /// `axis` はこれがあればこれに一致する（買い目軸を記録軸に固定する）。

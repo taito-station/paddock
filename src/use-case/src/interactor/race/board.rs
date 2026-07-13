@@ -399,6 +399,7 @@ fn derive_mark(model_rank: u32, is_value: bool) -> Option<Mark> {
 /// する（取消等で非出走なら失効＝ライブ再計算へフォールバック）。未 predict・◎不在は `None`。
 fn recorded_axis_of(pad: Option<&PadPrediction>, blended: &[HorseProbability]) -> Option<u32> {
     pad.and_then(|p| {
+        // ◎は人手予想で 1 頭前提。異常データで複数あっても記録（Vec）順の先頭を採る。
         p.horses
             .iter()
             .find(|h| h.mark == Some(Mark::Honmei))

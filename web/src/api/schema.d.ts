@@ -771,6 +771,8 @@ export interface components {
             /**
              * Format: int32
              * @description 買い目の軸。記録軸（`recorded_axis`）があればそれに固定、無ければライブ再計算（`live_axis`）。
+             *     ただし保存オッズが無い（`odds_available=false`）ときは買い目が組めず `axis=null`
+             *     （`recorded_axis` は残る＝盤の軸ロック表示はオッズ無しでも出る）。
              */
             axis?: number | null;
             bets: components["schemas"]["RecommendationBet"][];

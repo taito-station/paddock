@@ -680,6 +680,49 @@ mod tests {
     }
 
     #[test]
+    fn forced_axis_in_konsen_locks_nagashi_but_box_stays_band_ordered() {
+        // #388: 混戦時も nagashi（軸ながし）は記録軸に固定される一方、印馬3連複ボックスは
+        // blended band（forced_axis 非依存）で組む——この非対称を回帰として固定する。
+        // konsen_sample: ◎=1、band=[1,2,3,4]（0.70×0.30=0.21 以上）。軸を band 内の非首位 3 に固定。
+        let (probs, o) = konsen_sample();
+        let config = PortfolioConfig {
+            partners: 5,
+            alloc: (1, 1, 1),
+            forced_axis: Some(horse(3)),
+        };
+        let pf = build_portfolio(&probs, &probs, &o, 5000, &config);
+        assert_eq!(pf.axis, Some(horse(3)), "軸は記録軸3に固定");
+        assert!(pf.konsen, "混戦判定は軸固定に影響されない（band ベース）");
+        // 相手は軸を除く blended 上位（1,2,4,5）。
+        assert_eq!(pf.partners, vec![horse(1), horse(2), horse(4), horse(5)]);
+        // ◎軸ながしの三連複は必ず軸3を含む。
+        let nagashi_trio: Vec<_> = pf
+            .bets
+            .iter()
+            .filter(|b| b.combination.type_label() == "trio" && b.method == BetMethod::Nagashi)
+            .collect();
+        assert!(!nagashi_trio.is_empty());
+        assert!(
+            nagashi_trio
+                .iter()
+                .all(|b| b.combination.horse_nums().contains(&3)),
+            "軸ながし三連複は全点が軸3絡み"
+        );
+        // 印馬ボックスは blended band 上位（[1,2,3,4] の C(4,3)=4）で forced_axis に依存しない。
+        let box_bets: Vec<_> = pf
+            .bets
+            .iter()
+            .filter(|b| b.method == BetMethod::Box)
+            .collect();
+        assert_eq!(
+            box_bets.len(),
+            4,
+            "box は band 上位の C(4,3)=4 点（軸固定に非依存）"
+        );
+        assert!(pf.total_stake <= 5000);
+    }
+
+    #[test]
     fn ev_uses_ev_probs_while_ranking_uses_rank_probs() {
         // 循環断ち（#272）の非トートロジー検証: 軸/相手は rank_probs、EV/的中は ev_probs で評価される。
         // rank と ev に**逆向きの win 分布**を与え、両者が別系統で使われることを実証する。
