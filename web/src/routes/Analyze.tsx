@@ -1,7 +1,9 @@
 import { useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api, type GroupStat } from "../api/client";
-import { pct, SURFACE_JP } from "../lib/format";
+import { pct, SURFACE_JP, todayJst } from "../lib/format";
+import { raceListHref } from "../lib/header-date";
 
 type Kind = "horse" | "jockey" | "trainer" | "course";
 
@@ -51,9 +53,15 @@ function StatTable({ title, rows }: { title: string; rows: GroupStat[] }) {
 
 export function Analyze() {
   const [kind, setKind] = useState<Kind>("horse");
+  const [searchParams] = useSearchParams();
+  // 分析は全期間統計（date でフィルタしない）。ヘッダの開催日を戻る導線に引き継ぐだけ。
+  const date = searchParams.get("date") || todayJst();
 
   return (
     <section>
+      <div className="toolbar">
+        <Link to={raceListHref(date)}>← レース一覧へ</Link>
+      </div>
       <div className="tabs">
         {(Object.keys(KIND_LABEL) as Kind[]).map((k) => (
           <button

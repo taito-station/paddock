@@ -3,6 +3,7 @@ import { useParams, Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { recoveryRate, yen } from "../lib/format";
+import { raceListHref } from "../lib/header-date";
 
 export function SessionSummary() {
   const { date = "" } = useParams();
@@ -52,7 +53,7 @@ export function SessionSummary() {
     <section>
       <div className="toolbar">
         <h2>収支 {date}</h2>
-        <Link to={`/?date=${date}`}>← レース一覧へ</Link>
+        <Link to={raceListHref(date)}>← レース一覧へ</Link>
       </div>
 
       {session.isPending && <p>読み込み中…</p>}
