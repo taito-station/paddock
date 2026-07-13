@@ -28,6 +28,9 @@ export function RaceBoard() {
   // 旧 ?from=live は /live 廃止（#378）で読まなくなった。付いていても無視される。
   // クリックで馬書評（詳細パネル）を開く馬番。同じ馬を再クリック or 閉じるで null に戻す。
   const [selectedHorse, setSelectedHorse] = useState<number | null>(null);
+  // 純モデル（α=1.0）の 勝/連/複 を各馬カードに表示するか（#373）。既定 OFF＝ブレンド＋市場のみで
+  // 情報過多を避ける。ON でモデル列（モ勝/モ連/モ複）を展開し、ブレンドとの乖離を読めるようにする。
+  const [showModel, setShowModel] = useState(false);
   // フォーカス管理（a11y）: パネルを開いた馬カラム（trigger）を覚えておき、閉じたら戻す。
   // 開いたらパネル内（閉じるボタン）へフォーカスを移す。
   const triggerRef = useRef<HTMLElement | null>(null);
@@ -277,6 +280,18 @@ export function RaceBoard() {
             <p className="race-comment">{d.race_comment}</p>
           )}
 
+          {/* 確率表示の切替（#373）: 既定はブレンド＋市場。ON で純モデル（モ勝/モ連/モ複）を各カードに展開。 */}
+          <div className="board-controls">
+            <label className="model-toggle">
+              <input
+                type="checkbox"
+                checked={showModel}
+                onChange={(e) => setShowModel(e.target.checked)}
+              />
+              モデル値（純 α=1.0）を表示
+            </label>
+          </div>
+
           {/* 全頭横並び盤（モデル勝率順・truncate しない） */}
           <div className="board-scroll">
             <div className="board-row">
@@ -348,23 +363,40 @@ export function RaceBoard() {
                     {h.horse_name}
                   </div>
                   <div className="jockey">{h.jockey ?? "-"}</div>
+                  {/* 確率は出所ごとに 2 文字ラベルで明示（#373）: ブ=ブレンド(本番α=0.2)・
+                      モ=モデル(純α=1.0)・市=市場implied。狭幅カラムに合わせ full 名は title に退避。
+                      市場は単勝オッズ由来のため勝率のみ（連対/複勝の市場 implied は出さない）。 */}
                   <dl className="stats">
-                    <div title="1着になる確率（勝率）">
-                      <dt>勝率</dt>
+                    <div title="ブレンド勝率＝本番 α=0.2（市場ブレンド）で 1 着になる確率">
+                      <dt>ブ勝</dt>
                       <dd>{pct(h.win_prob)}</dd>
                     </div>
-                    <div title="2着以内に入る確率（連対率）">
-                      <dt>連対率</dt>
+                    <div title="ブレンド連対率＝本番 α=0.2 で 2 着以内に入る確率">
+                      <dt>ブ連</dt>
                       <dd>{pct(h.place_prob)}</dd>
                     </div>
-                    <div title="3着以内に入る確率（複勝率）">
-                      <dt>複勝率</dt>
+                    <div title="ブレンド複勝率＝本番 α=0.2 で 3 着以内に入る確率">
+                      <dt>ブ複</dt>
                       <dd>{pct(h.show_prob)}</dd>
                     </div>
-                    {/* 見出しは狭幅で値と重ならないよう「市場」に短縮。正式名「市場勝率」と
-                        意味は title（ツールチップ）で担保する（#383）。 */}
-                    <div title="市場勝率＝単勝オッズから逆算した市場推定の勝率（胴元の控除を抜いた実力評価）。モデル勝率と比べて乖離＝妙味">
-                      <dt>市場</dt>
+                    {showModel && (
+                      <>
+                        <div title="モデル勝率＝純モデル α=1.0（市場非依存）で 1 着になる確率">
+                          <dt>モ勝</dt>
+                          <dd>{pct(h.pure_win_prob)}</dd>
+                        </div>
+                        <div title="モデル連対率＝純モデル α=1.0 で 2 着以内に入る確率">
+                          <dt>モ連</dt>
+                          <dd>{pct(h.pure_place_prob)}</dd>
+                        </div>
+                        <div title="モデル複勝率＝純モデル α=1.0 で 3 着以内に入る確率">
+                          <dt>モ複</dt>
+                          <dd>{pct(h.pure_show_prob)}</dd>
+                        </div>
+                      </>
+                    )}
+                    <div title="市場勝率＝単勝オッズから逆算した市場推定の勝率（胴元の控除を抜いた実力評価）。モデル/ブレンド勝率と比べて乖離＝妙味">
+                      <dt>市勝</dt>
                       <dd>{h.market_implied == null ? "-" : pct(h.market_implied)}</dd>
                     </div>
                     <div>

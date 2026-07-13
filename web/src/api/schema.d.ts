@@ -373,9 +373,13 @@ export interface components {
              * @description 単勝人気（1=1番人気。単勝未取得なら `null`）。乖離判定の市場順位も兼ねる。
              */
             popularity?: number | null;
+            /** Format: double */
+            pure_place_prob: number;
+            /** Format: double */
+            pure_show_prob: number;
             /**
              * Format: double
-             * @description EV 視点（純モデル α=1.0）の勝率 [0,1]。
+             * @description EV 視点（純モデル α=1.0）の勝率/連対率/複勝率 [0,1]（#373 盤の3系統表示）。
              */
             pure_win_prob: number;
             /** Format: double */

@@ -86,8 +86,10 @@ pub struct BoardHorse {
     pub win_prob: f64,
     pub place_prob: f64,
     pub show_prob: f64,
-    /// EV 視点（純モデル α=1.0）の勝率 [0,1]。
+    /// EV 視点（純モデル α=1.0）の勝率/連対率/複勝率 [0,1]（#373 盤の3系統表示）。
     pub pure_win_prob: f64,
+    pub pure_place_prob: f64,
+    pub pure_show_prob: f64,
     /// 市場implied 勝率（フィールド内 `1/単勝` 正規化。単勝未取得なら `None`）。
     pub market_implied: Option<f64>,
     pub win_odds: Option<f64>,
@@ -235,11 +237,10 @@ fn build_board_horses(
             // pure と blended は同一 predict_race_views 由来で常に同じ馬集合。見つからないのは
             // 到達しないが、防御的に blended 値へフォールバックする（純モデル列に無警告で混入しない
             // よう、本来は同集合であることを前提とする）。
-            let pure_win_prob = pure
-                .iter()
-                .find(|p| p.horse_num == hp.horse_num)
-                .map(|p| p.win_prob)
-                .unwrap_or(hp.win_prob);
+            let pure_hp = pure.iter().find(|p| p.horse_num == hp.horse_num);
+            let pure_win_prob = pure_hp.map(|p| p.win_prob).unwrap_or(hp.win_prob);
+            let pure_place_prob = pure_hp.map(|p| p.place_prob).unwrap_or(hp.place_prob);
+            let pure_show_prob = pure_hp.map(|p| p.show_prob).unwrap_or(hp.show_prob);
             let entry = card.and_then(|c| c.entries.iter().find(|e| e.horse_num == hp.horse_num));
             let win_odds = odds
                 .and_then(|o| o.win.get(&hp.horse_num))
@@ -266,6 +267,8 @@ fn build_board_horses(
                 place_prob: hp.place_prob,
                 show_prob: hp.show_prob,
                 pure_win_prob,
+                pure_place_prob,
+                pure_show_prob,
                 market_implied: implied.get(&num).copied(),
                 win_odds,
                 place_odds_low: place.map(|p| p.low.value()),
@@ -468,6 +471,20 @@ mod tests {
         assert_eq!(r[&2], 1); // 同率 0.30 は馬番昇順 → 2 が上位
         assert_eq!(r[&3], 2);
         assert_eq!(r[&1], 3);
+    }
+
+    #[test]
+    fn pure_place_show_come_from_pure_not_blended() {
+        // #373: 純モデルの連対率/複勝率は pure 由来（表示の勝/連/複＝ブレンドとは別系統）。
+        let blended = vec![hp(1, 0.40)]; // hp: place=win*2, show=win*3 → place 0.80 / show 1.0
+        let pure = vec![hp(1, 0.20)]; //                                   place 0.40 / show 0.60
+        let horses = build_board_horses(&blended, &pure, None, None);
+        let h = &horses[0];
+        assert!((h.win_prob - 0.40).abs() < 1e-9, "表示勝率はブレンド");
+        assert!((h.place_prob - 0.80).abs() < 1e-9, "表示連対率はブレンド");
+        assert!((h.pure_win_prob - 0.20).abs() < 1e-9, "モ勝は純モデル");
+        assert!((h.pure_place_prob - 0.40).abs() < 1e-9, "モ連は純モデル");
+        assert!((h.pure_show_prob - 0.60).abs() < 1e-9, "モ複は純モデル");
     }
 
     #[test]

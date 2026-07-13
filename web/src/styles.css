@@ -445,6 +445,22 @@ button:disabled {
   text-align: center;
 }
 
+/* 確率表示の切替（#373）。盤の直前に置く小さなコントロール行。 */
+.board-controls {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  margin: 0.25rem 0 0.5rem;
+}
+.board-controls .model-toggle {
+  display: inline-flex;
+  gap: 0.35rem;
+  align-items: center;
+  font-size: 0.85rem;
+  color: var(--muted);
+  cursor: pointer;
+}
+
 .board-scroll {
   overflow-x: auto;
   padding-bottom: 0.5rem;

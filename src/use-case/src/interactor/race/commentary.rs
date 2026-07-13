@@ -205,6 +205,8 @@ mod tests {
             place_prob: 0.0,
             show_prob: 0.0,
             pure_win_prob: win_prob,
+            pure_place_prob: 0.0,
+            pure_show_prob: 0.0,
             market_implied: None,
             win_odds: None,
             place_odds_low: None,
