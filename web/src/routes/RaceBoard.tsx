@@ -292,7 +292,7 @@ export function RaceBoard() {
             </label>
           </div>
 
-          {/* 全頭横並び盤（モデル勝率順・truncate しない） */}
+          {/* 全頭横並び盤（ブレンド勝率順＝model_rank・truncate しない） */}
           <div className="board-scroll">
             <div className="board-row">
               {horses.map((h) => {
@@ -414,12 +414,12 @@ export function RaceBoard() {
                   </dl>
                   <div className="flags">
                     {h.is_overlay && (
-                      <span className="chip chip-overlay" title="モデル勝率1位×人気1位＝ほぼ複勝圏">
+                      <span className="chip chip-overlay" title="ブレンド勝率1位×人気1位＝ほぼ複勝圏">
                         複勝圏
                       </span>
                     )}
                     {h.is_value && (
-                      <span className="chip chip-value" title="モデル上位×市場人気低＝妙味・ワイドボックス候補">
+                      <span className="chip chip-value" title="ブレンド上位×市場人気低＝妙味・ワイドボックス候補">
                         妙味
                       </span>
                     )}
