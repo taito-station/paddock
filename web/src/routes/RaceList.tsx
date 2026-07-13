@@ -219,14 +219,7 @@ export function RaceList() {
   return (
     <section>
       <div className="toolbar">
-        <label>
-          開催日{" "}
-          <input
-            type="date"
-            value={date}
-            onChange={(e) => applyQuery(query, e.target.value)}
-          />
-        </label>
+        {/* 開催日の切替はヘッダ常駐ピッカーに一本化（#379）。ここでは残高等のみ表示。 */}
         {session.isError ? (
           // 404 は queryFn が null に倒す。ここに来るのは 500・ネットワーク断などの
           // 実障害なので「未作成」と取り違えず失敗を明示する。
