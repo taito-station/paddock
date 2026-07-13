@@ -768,7 +768,10 @@ export interface components {
          *     `roi`/`hit_prob`）は `/recommendations` と同経路・同値で、保存オッズが無ければ `odds_available=false`。
          */
         RaceBoardResponse: {
-            /** Format: int32 */
+            /**
+             * Format: int32
+             * @description 買い目の軸。記録軸（`recorded_axis`）があればそれに固定、無ければライブ再計算（`live_axis`）。
+             */
             axis?: number | null;
             bets: components["schemas"]["RecommendationBet"][];
             confusion: components["schemas"]["ConfusionSchema"];
@@ -781,6 +784,11 @@ export interface components {
             /** Format: double */
             hit_prob?: number | null;
             horses: components["schemas"]["BoardHorseSchema"][];
+            /**
+             * Format: int32
+             * @description ライブ再計算の軸＝市場ブレンド首位（機械◎）。`recorded_axis` と異なるとき UI は乖離警告を出す（#388）。
+             */
+            live_axis?: number | null;
             /** @description 保存オッズ（#51）の有無。false のとき `bets` は必ず空。 */
             odds_available: boolean;
             partners: number[];
@@ -791,6 +799,12 @@ export interface components {
             race_id: string;
             /** Format: int32 */
             race_num: number;
+            /**
+             * Format: int32
+             * @description predict 記録済みの本命◎（軸ロックの正, #388）。未 predict・取消時は `null`。
+             *     `axis` はこれがあればこれに一致する（買い目軸を記録軸に固定する）。
+             */
+            recorded_axis?: number | null;
             /** Format: double */
             roi?: number | null;
             surface: string;

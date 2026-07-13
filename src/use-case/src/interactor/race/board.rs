@@ -10,8 +10,9 @@
 use chrono::NaiveDate;
 
 use paddock_domain::{
-    HorseExplanation, HorseProbability, KONSEN_BAND_RATIO, KONSEN_MIN_HORSES, Mark, PadPrediction,
-    Portfolio, PortfolioConfig, RaceId, RaceOdds, TrackCondition, build_portfolio, konsen_band,
+    HorseExplanation, HorseNum, HorseProbability, KONSEN_BAND_RATIO, KONSEN_MIN_HORSES, Mark,
+    PadPrediction, Portfolio, PortfolioConfig, RaceId, RaceOdds, TrackCondition, build_portfolio,
+    konsen_band,
 };
 
 use crate::error::Result;
@@ -45,7 +46,14 @@ pub struct RaceBoard {
     /// 発走時刻 `HH:MM`（出馬表 PDF 経路など未取得は `None`）。
     pub post_time: Option<String>,
     /// 買い目ポートフォリオ（保存オッズが無ければ `None`＝買い目は組めない。盤は確率だけで描ける）。
+    /// 軸は記録軸（`recorded_axis`）があればそれに固定される（#388・軸ロック）。
     pub portfolio: Option<Portfolio>,
+    /// predict 記録済みの本命◎（軸ロックの正）。pad の Honmei 印がその馬が出走している場合のみ。
+    /// 未 predict・取消時は `None`（＝買い目軸はライブ再計算 `live_axis` にフォールバック, #388）。
+    pub recorded_axis: Option<u32>,
+    /// ライブ再計算の軸＝blended（市場ブレンド α=0.2）首位（機械◎, `model_rank==1`）。
+    /// 記録軸との乖離警告に使う。直前オッズで動くのはこちら（#388）。
+    pub live_axis: Option<u32>,
     pub confusion: Confusion,
     /// レース書評（混戦度・◎の狙いどころ・妙味）。人手 `PadPrediction.commentary` があれば優先、
     /// 無ければルールベース生成（#348）。◎が無い等で生成できなければ `None`。
@@ -138,14 +146,22 @@ impl<
             None => None,
         };
 
-        // 買い目は既存経路そのまま（相手 top5 不変）。オッズ無しなら組まない。
+        // 軸ロック（#388）: 記録軸＝pad の◎、ライブ再計算軸＝blended 首位。純関数に切り出し単体テスト可能に。
+        let recorded_axis = recorded_axis_of(pad.as_ref(), &views.blended);
+        let live_axis = live_axis_of(&views.blended);
+
+        // 買い目は既存経路（相手 top5 不変）。軸は記録軸があればそれに固定（#388）。オッズ無しなら組まない。
+        let forced_axis = recorded_axis.and_then(|n| HorseNum::try_from(n).ok());
         let portfolio = odds.as_ref().map(|o| {
             build_portfolio(
                 &views.blended,
                 &views.pure,
                 o,
                 budget,
-                &PortfolioConfig::default(),
+                &PortfolioConfig {
+                    forced_axis,
+                    ..PortfolioConfig::default()
+                },
             )
         });
 
@@ -191,6 +207,8 @@ impl<
             field_size: views.blended.len() as u32,
             post_time,
             portfolio,
+            recorded_axis,
+            live_axis,
             confusion,
             race_comment,
             horses,
@@ -377,6 +395,27 @@ fn derive_mark(model_rank: u32, is_value: bool) -> Option<Mark> {
     }
 }
 
+/// 記録軸（#388 軸ロック）: `pad` の◎(Honmei) 馬番。ただし出走集合 `blended` に在るときだけ有効に
+/// する（取消等で非出走なら失効＝ライブ再計算へフォールバック）。未 predict・◎不在は `None`。
+fn recorded_axis_of(pad: Option<&PadPrediction>, blended: &[HorseProbability]) -> Option<u32> {
+    pad.and_then(|p| {
+        p.horses
+            .iter()
+            .find(|h| h.mark == Some(Mark::Honmei))
+            .map(|h| h.horse_num)
+            .filter(|&n| blended.iter().any(|hp| hp.horse_num.value() == n))
+    })
+}
+
+/// ライブ再計算軸（#388）: `blended`（市場ブレンド α=0.2）首位＝機械◎（`model_rank==1`）。
+/// 記録軸との乖離警告に使う（直前オッズで動くのはこちら）。空なら `None`。
+fn live_axis_of(blended: &[HorseProbability]) -> Option<u32> {
+    model_ranks(blended)
+        .into_iter()
+        .find(|(_, rank)| *rank == 1)
+        .map(|(num, _)| num)
+}
+
 /// 混戦判定（CLAUDE.md）: ◎（勝率1位）の勝率 × 0.70 以上の馬が ◎含め 4 頭以上。
 /// 判定ロジックは domain の [`konsen_band`]（`build_portfolio` の混戦分岐と同一の真実源）を再利用し、
 /// 盤面表示に要る `axis_win_prob` / `threshold`（母集団しきい値）だけをここで補う。
@@ -520,6 +559,66 @@ mod tests {
         let b = vec![hp(1, 0.50), hp(2, 0.10), hp(3, 0.08), hp(4, 0.07)];
         let c = compute_confusion(&b);
         assert!(!c.is_confused);
+    }
+
+    /// ◎(Honmei) を `honmei` に置いた pad（#388 テスト用）。
+    fn pad_axis(honmei: u32) -> PadPrediction {
+        PadPrediction {
+            date: NaiveDate::default(),
+            venue: Venue::Hakodate,
+            race_num: 1,
+            title: None,
+            budget: None,
+            strategy_note: None,
+            commentary: None,
+            horses: vec![PredictionHorse {
+                horse_num: honmei,
+                horse_name: format!("馬{honmei}"),
+                jockey: None,
+                mark: Some(Mark::Honmei),
+                win_odds: None,
+                popularity: None,
+                win_prob: None,
+                place_prob: None,
+                show_prob: None,
+                comment: None,
+            }],
+            bets: vec![],
+            result: None,
+        }
+    }
+
+    #[test]
+    fn recorded_axis_reads_honmei_in_field() {
+        // ◎=8 が出走集合に居る → 記録軸=8（blended 首位 5 とは別＝ロックが効く条件）。
+        let blended = vec![hp(5, 0.30), hp(8, 0.25), hp(1, 0.10)];
+        assert_eq!(recorded_axis_of(Some(&pad_axis(8)), &blended), Some(8));
+    }
+
+    #[test]
+    fn recorded_axis_none_when_honmei_scratched() {
+        // ◎=8 が非出走（取消でblendedに不在）→ 失効して None（ライブ再計算へフォールバック）。
+        let blended = vec![hp(5, 0.30), hp(1, 0.10)];
+        assert_eq!(recorded_axis_of(Some(&pad_axis(8)), &blended), None);
+    }
+
+    #[test]
+    fn recorded_axis_none_without_pad_or_mark() {
+        let blended = vec![hp(5, 0.30)];
+        assert_eq!(recorded_axis_of(None, &blended), None);
+        // pad はあるが◎印なし（pad_with は mark=None）→ None。
+        assert_eq!(
+            recorded_axis_of(Some(&pad_with(5, None, None)), &blended),
+            None
+        );
+    }
+
+    #[test]
+    fn live_axis_is_blended_top() {
+        // 機械◎(model_rank==1)＝blended 首位。同率は馬番昇順。
+        let blended = vec![hp(5, 0.30), hp(8, 0.25), hp(1, 0.10)];
+        assert_eq!(live_axis_of(&blended), Some(5));
+        assert_eq!(live_axis_of(&[]), None);
     }
 
     #[test]

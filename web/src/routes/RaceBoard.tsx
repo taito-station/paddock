@@ -243,6 +243,25 @@ export function RaceBoard() {
                 軸 {d.axis} → 相手 {d.partners.join(",")}
               </span>
             )}
+            {/* 軸ロック（#388）: predict 記録済みの◎があれば買い目軸はそれに固定済み。ライブ再計算軸
+                （live_axis＝市場ブレンド首位）と乖離したら警告し、直前オッズによる軸の無言フリップを可視化する
+                （CLAUDE.md 軸ロック運用・ADR 0055/0060）。 */}
+            {d.recorded_axis != null &&
+              (d.live_axis != null && d.live_axis !== d.recorded_axis ? (
+                <span
+                  className="chip chip-danger"
+                  title="買い目の軸は predict 記録済みの◎に固定しています。ライブ再計算（市場ブレンド）の首位はこれと異なりますが、軸ロック運用により差し替えません（乖離は増額判断の材料）。"
+                >
+                  ⚠ 記録軸 {d.recorded_axis} 固定（ライブ再計算は {d.live_axis}）
+                </span>
+              ) : (
+                <span
+                  className="chip"
+                  title="買い目の軸は predict 記録済みの◎に固定しています（直前オッズで軸をフリップさせない）。"
+                >
+                  🔒 記録軸 {d.recorded_axis} 固定
+                </span>
+              ))}
             {d.roi != null && d.hit_prob != null && (
               <span className={d.roi >= 1 ? "chip chip-plus" : "muted"}>
                 ROI {(d.roi * 100).toFixed(1)}% / 的中 {(d.hit_prob * 100).toFixed(1)}%
