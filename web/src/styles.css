@@ -111,6 +111,16 @@ body {
   font-weight: 600;
 }
 
+/* 開催日セレクタはヘッダ右端に常駐（#379）。 */
+.app-header .date-picker {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
 .app-main {
   padding: var(--gutter);
   max-width: 960px;

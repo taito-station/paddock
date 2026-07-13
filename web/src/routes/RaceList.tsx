@@ -191,8 +191,10 @@ export function RaceList() {
 
   // ソート・絞り込み・日付は URL クエリに反映（既定値は省略）。replace は意図的:
   // チップ連打で履歴を汚さない。date の併存は dashboardQueryParams がマージする。
-  const applyQuery = (next: LiveQuery, nextDate: string = date) =>
-    setSearchParams(dashboardQueryParams(next, nextDate), { replace: true });
+  // 日付切替はヘッダ常駐ピッカーへ一本化済み（#379）。ここは sort/filter のみ更新し、
+  // date は現在値を dashboardQueryParams でマージ保持する。
+  const applyQuery = (next: LiveQuery) =>
+    setSearchParams(dashboardQueryParams(next, date), { replace: true });
   const onSort = (key: SortKey) =>
     applyQuery(
       // 状態列は固定順（sortRows が dir 非対応）なのでトグルせず既定に戻すだけ。
@@ -219,14 +221,7 @@ export function RaceList() {
   return (
     <section>
       <div className="toolbar">
-        <label>
-          開催日{" "}
-          <input
-            type="date"
-            value={date}
-            onChange={(e) => applyQuery(query, e.target.value)}
-          />
-        </label>
+        {/* 開催日の切替はヘッダ常駐ピッカーに一本化（#379）。ここでは残高等のみ表示。 */}
         {session.isError ? (
           // 404 は queryFn が null に倒す。ここに来るのは 500・ネットワーク断などの
           // 実障害なので「未作成」と取り違えず失敗を明示する。
