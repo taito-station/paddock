@@ -46,16 +46,22 @@ pub struct PortfolioConfig {
     /// 予算配分の相対重み `(連系ペア, ワイド, 三連複)`。連系ペアは常に馬連
     /// （#271 で馬単置換 `pick_pair_leg` を撤去・ADR 0043 棄却）。
     pub alloc: (u32, u32, u32),
+    /// 軸ロック（#388）: predict 記録済みの本命◎を軸として固定する。`Some` かつその馬が
+    /// 出走確率に存在するとき、`win_prob` 首位ではなくこの馬を軸に据える（相手は軸を除く
+    /// `win_prob` 上位 N 頭）。直前オッズの市場ブレンド再計算で軸が無言フリップするのを防ぐ
+    /// （CLAUDE.md 軸ロック運用・ADR 0055/0060）。`None`（既定）は従来通り `win_prob` 首位＝軸。
+    pub forced_axis: Option<HorseNum>,
 }
 
 impl Default for PortfolioConfig {
-    /// 既定。相手 5 頭・馬連:ワイド:三連複 = 1:1:1。
+    /// 既定。相手 5 頭・馬連:ワイド:三連複 = 1:1:1・軸ロックなし（`win_prob` 首位を軸）。
     /// 既定値は PR1 の戦略評価ハーネス（`scripts/predict-check/strategy_eval.py`）で
     /// 後追い検証・調整する（相手頭数・配分の感度は同ハーネスで出せる）。
     fn default() -> Self {
         Self {
             partners: 5,
             alloc: (1, 1, 1),
+            forced_axis: None,
         }
     }
 }
@@ -113,9 +119,14 @@ fn same_field(rank_probs: &[HorseProbability], ev_probs: &[HorseProbability]) ->
 
 /// win_prob 降順（同率は馬番昇順）で軸＝本命と相手上位 `partners` 頭を選ぶ。出走確率が空なら `None`。
 /// `build_portfolio` と `pair_ev_diagnostics` で共用し、軸・相手の決め方を一元化する。
+///
+/// `forced_axis`（#388 軸ロック）が `Some` かつその馬が `probs` に存在するときは、`win_prob` 首位では
+/// なくその馬を軸に固定し、相手は「軸を除く `win_prob` 上位 `partners` 頭」にする。`None` または
+/// 指定馬が非出走（取消等で `probs` に不在）なら従来通り `win_prob` 首位を軸にフォールバックする。
 fn rank_axis_partners(
     probs: &[HorseProbability],
     partners: usize,
+    forced_axis: Option<HorseNum>,
 ) -> Option<(HorseNum, Vec<HorseNum>)> {
     let mut ranked: Vec<&HorseProbability> = probs.iter().collect();
     ranked.sort_by(|a, b| {
@@ -124,6 +135,16 @@ fn rank_axis_partners(
             .unwrap_or(std::cmp::Ordering::Equal)
             .then(a.horse_num.value().cmp(&b.horse_num.value()))
     });
+    // 軸ロック: 指定馬が出走集合にいればそれを軸に固定し、相手は軸を除く上位 N 頭。
+    if let Some(axis) = forced_axis.filter(|a| ranked.iter().any(|p| p.horse_num == *a)) {
+        let ps = ranked
+            .iter()
+            .filter(|p| p.horse_num != axis)
+            .take(partners)
+            .map(|p| p.horse_num)
+            .collect();
+        return Some((axis, ps));
+    }
     let (axis_hp, rest) = ranked.split_first()?;
     let ps = rest.iter().take(partners).map(|p| p.horse_num).collect();
     Some((axis_hp.horse_num, ps))
@@ -166,7 +187,8 @@ pub fn pair_ev_diagnostics(
         "rank_probs と ev_probs は同一馬集合でなければならない"
     );
     // 軸・相手は rank_probs（市場ブレンド）で選び、EV は ev_probs（純モデル）で評価する（循環断ち, #272）。
-    let Some((axis, partner_nums)) = rank_axis_partners(rank_probs, partners) else {
+    // 診断は軸ロック非対象（常に win_prob 首位）。
+    let Some((axis, partner_nums)) = rank_axis_partners(rank_probs, partners, None) else {
         return PairEvDiagnostics {
             axis: None,
             rows: Vec::new(),
@@ -284,8 +306,11 @@ pub fn build_portfolio(
         "rank_probs と ev_probs は同一馬集合でなければならない"
     );
     // 軸・相手は rank_probs（市場ブレンド α=0.2）で選ぶ＝解像度の高い本命選定（Phase A: 純モデルは
-    // 本命をフラットにしか出せない, #272）。win_prob 降順（同率は馬番昇順）。
-    let Some((axis, partners)) = rank_axis_partners(rank_probs, config.partners) else {
+    // 本命をフラットにしか出せない, #272）。win_prob 降順（同率は馬番昇順）。ただし軸ロック
+    // （`config.forced_axis`, #388）指定時はその馬を軸に固定する（相手は軸を除く上位 N 頭）。
+    let Some((axis, partners)) =
+        rank_axis_partners(rank_probs, config.partners, config.forced_axis)
+    else {
         return Portfolio {
             axis: None,
             partners: Vec::new(),
@@ -590,10 +615,111 @@ mod tests {
         let config = PortfolioConfig {
             partners: 3,
             alloc: (1, 1, 1),
+            forced_axis: None,
         };
         let pf = build_portfolio(&probs, &probs, &o, 5000, &config);
         assert_eq!(pf.axis, Some(horse(1)));
         assert_eq!(pf.partners, vec![horse(2), horse(3), horse(4)]);
+    }
+
+    #[test]
+    fn forced_axis_locks_axis_and_excludes_it_from_partners() {
+        // #388 軸ロック: 軸を win_prob 3位の馬3 に固定 → 相手は軸を除く上位＝馬1,2,4。
+        let (probs, o) = sample();
+        let config = PortfolioConfig {
+            partners: 3,
+            alloc: (1, 1, 1),
+            forced_axis: Some(horse(3)),
+        };
+        let pf = build_portfolio(&probs, &probs, &o, 5000, &config);
+        assert_eq!(pf.axis, Some(horse(3)), "軸は記録軸に固定");
+        assert_eq!(
+            pf.partners,
+            vec![horse(1), horse(2), horse(4)],
+            "相手は軸を除く win_prob 上位 N 頭"
+        );
+        // 三連複ながしは軸(馬3)を必ず含む。
+        assert!(
+            pf.bets
+                .iter()
+                .any(|b| b.combination.horse_nums().contains(&3))
+        );
+    }
+
+    #[test]
+    fn forced_axis_absent_from_field_falls_back_to_win_prob_top() {
+        // 記録軸が非出走（取消等で probs に不在）ならフォールバックで win_prob 首位を軸にする。
+        let (probs, o) = sample();
+        let config = PortfolioConfig {
+            partners: 3,
+            alloc: (1, 1, 1),
+            forced_axis: Some(horse(9)), // 出走馬は 1..5。馬9 は不在。
+        };
+        let pf = build_portfolio(&probs, &probs, &o, 5000, &config);
+        assert_eq!(
+            pf.axis,
+            Some(horse(1)),
+            "不在の記録軸は無視し win_prob 首位"
+        );
+        assert_eq!(pf.partners, vec![horse(2), horse(3), horse(4)]);
+    }
+
+    #[test]
+    fn forced_axis_equal_to_top_matches_unforced() {
+        // 記録軸が win_prob 首位と一致するときは非固定と同一結果（現行挙動を壊さない）。
+        let (probs, o) = sample();
+        let mk = |fa| PortfolioConfig {
+            partners: 3,
+            alloc: (1, 1, 1),
+            forced_axis: fa,
+        };
+        let base = build_portfolio(&probs, &probs, &o, 5000, &mk(None));
+        let forced = build_portfolio(&probs, &probs, &o, 5000, &mk(Some(horse(1))));
+        assert_eq!(base.axis, forced.axis);
+        assert_eq!(base.partners, forced.partners);
+    }
+
+    #[test]
+    fn forced_axis_in_konsen_locks_nagashi_but_box_stays_band_ordered() {
+        // #388: 混戦時も nagashi（軸ながし）は記録軸に固定される一方、印馬3連複ボックスは
+        // blended band（forced_axis 非依存）で組む——この非対称を回帰として固定する。
+        // konsen_sample: ◎=1、band=[1,2,3,4]（0.70×0.30=0.21 以上）。軸を band 内の非首位 3 に固定。
+        let (probs, o) = konsen_sample();
+        let config = PortfolioConfig {
+            partners: 5,
+            alloc: (1, 1, 1),
+            forced_axis: Some(horse(3)),
+        };
+        let pf = build_portfolio(&probs, &probs, &o, 5000, &config);
+        assert_eq!(pf.axis, Some(horse(3)), "軸は記録軸3に固定");
+        assert!(pf.konsen, "混戦判定は軸固定に影響されない（band ベース）");
+        // 相手は軸を除く blended 上位（1,2,4,5）。
+        assert_eq!(pf.partners, vec![horse(1), horse(2), horse(4), horse(5)]);
+        // ◎軸ながしの三連複は必ず軸3を含む。
+        let nagashi_trio: Vec<_> = pf
+            .bets
+            .iter()
+            .filter(|b| b.combination.type_label() == "trio" && b.method == BetMethod::Nagashi)
+            .collect();
+        assert!(!nagashi_trio.is_empty());
+        assert!(
+            nagashi_trio
+                .iter()
+                .all(|b| b.combination.horse_nums().contains(&3)),
+            "軸ながし三連複は全点が軸3絡み"
+        );
+        // 印馬ボックスは blended band 上位（[1,2,3,4] の C(4,3)=4）で forced_axis に依存しない。
+        let box_bets: Vec<_> = pf
+            .bets
+            .iter()
+            .filter(|b| b.method == BetMethod::Box)
+            .collect();
+        assert_eq!(
+            box_bets.len(),
+            4,
+            "box は band 上位の C(4,3)=4 点（軸固定に非依存）"
+        );
+        assert!(pf.total_stake <= 5000);
     }
 
     #[test]
@@ -612,6 +738,7 @@ mod tests {
         let config = PortfolioConfig {
             partners: 3,
             alloc: (1, 1, 1),
+            forced_axis: None,
         };
         let pf = build_portfolio(&rank, &ev, &o, 5000, &config);
 
@@ -648,6 +775,7 @@ mod tests {
         let config = PortfolioConfig {
             partners: 3,
             alloc: (1, 1, 1),
+            forced_axis: None,
         };
         let pf = build_portfolio(&probs, &probs, &o, 5000, &config);
 
@@ -674,6 +802,7 @@ mod tests {
         let config = PortfolioConfig {
             partners: 1,
             alloc: (1, 1, 1),
+            forced_axis: None,
         };
         let pf = build_portfolio(&probs, &probs, &o, 5000, &config);
         // 相手 1 頭では三連複は組めない（C(1,2)=0）。馬連・ワイドは 1 点ずつ。
@@ -689,6 +818,7 @@ mod tests {
         let config = PortfolioConfig {
             partners: 3,
             alloc: (1, 1, 1),
+            forced_axis: None,
         };
         let pf = build_portfolio(&probs, &probs, &o, 5000, &config);
         let trio: Vec<_> = pf
@@ -919,6 +1049,7 @@ mod tests {
         let config = PortfolioConfig {
             partners: 3,
             alloc: (1, 1, 1),
+            forced_axis: None,
         };
         let pf = build_portfolio(&probs, &probs, &o, 5000, &config);
         let ev = pf.ev.expect("ev should be Some when priced legs exist");
@@ -973,6 +1104,7 @@ mod tests {
         let config = PortfolioConfig {
             partners: 3,
             alloc: (1, 0, 0),
+            forced_axis: None,
         };
         let pf = build_portfolio(&probs, &probs, &o, 200, &config);
         let quinella: Vec<_> = pf
@@ -1002,6 +1134,7 @@ mod tests {
         let config = PortfolioConfig {
             partners: 3,
             alloc: (1, 0, 0), // 連系ペアのみに絞って検証
+            forced_axis: None,
         };
         let pf = build_portfolio(&probs, &probs, &o, 5000, &config);
         assert!(
@@ -1076,6 +1209,7 @@ mod tests {
         let config = PortfolioConfig {
             partners: 3,
             alloc: (1, 0, 0),
+            forced_axis: None,
         };
         let pf = build_portfolio(&probs, &probs, &o, 5000, &config);
         let leg = pf.bets.iter().find(|b| {

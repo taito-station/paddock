@@ -2550,6 +2550,7 @@
               "null"
             ],
             "format": "int32",
+            "description": "買い目の軸。記録軸（`recorded_axis`）があればそれに固定、無ければライブ再計算（`live_axis`）。\nただし保存オッズが無い（`odds_available=false`）ときは買い目が組めず `axis=null`\n（`recorded_axis` は残る＝盤の軸ロック表示はオッズ無しでも出る）。",
             "minimum": 0
           },
           "bets": {
@@ -2588,6 +2589,15 @@
               "$ref": "#/components/schemas/BoardHorseSchema"
             }
           },
+          "live_axis": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "ライブ再計算の軸＝市場ブレンド首位（機械◎）。`recorded_axis` と異なるとき UI は乖離警告を出す（#388）。",
+            "minimum": 0
+          },
           "odds_available": {
             "type": "boolean",
             "description": "保存オッズ（#51）の有無。false のとき `bets` は必ず空。"
@@ -2620,6 +2630,15 @@
           "race_num": {
             "type": "integer",
             "format": "int32",
+            "minimum": 0
+          },
+          "recorded_axis": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "predict 記録済みの本命◎（軸ロックの正, #388）。未 predict・取消時は `null`。\n`axis` はこれがあればこれに一致する（買い目軸を記録軸に固定する）。",
             "minimum": 0
           },
           "roi": {

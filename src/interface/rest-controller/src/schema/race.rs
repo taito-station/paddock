@@ -292,7 +292,15 @@ pub struct RaceBoardResponse {
     pub post_time: Option<String>,
     /// 保存オッズ（#51）の有無。false のとき `bets` は必ず空。
     pub odds_available: bool,
+    /// 買い目の軸。記録軸（`recorded_axis`）があればそれに固定、無ければライブ再計算（`live_axis`）。
+    /// ただし保存オッズが無い（`odds_available=false`）ときは買い目が組めず `axis=null`
+    /// （`recorded_axis` は残る＝盤の軸ロック表示はオッズ無しでも出る）。
     pub axis: Option<u32>,
+    /// predict 記録済みの本命◎（軸ロックの正, #388）。未 predict・取消時は `null`。
+    /// `axis` はこれがあればこれに一致する（買い目軸を記録軸に固定する）。
+    pub recorded_axis: Option<u32>,
+    /// ライブ再計算の軸＝市場ブレンド首位（機械◎）。`recorded_axis` と異なるとき UI は乖離警告を出す（#388）。
+    pub live_axis: Option<u32>,
     pub partners: Vec<u32>,
     pub bets: Vec<RecommendationBet>,
     pub total_stake: u64,
@@ -341,6 +349,8 @@ impl From<RaceBoard> for RaceBoardResponse {
             post_time: b.post_time,
             odds_available,
             axis,
+            recorded_axis: b.recorded_axis,
+            live_axis: b.live_axis,
             partners,
             bets,
             total_stake,
