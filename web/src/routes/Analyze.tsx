@@ -3,7 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api, type GroupStat } from "../api/client";
 import { pct, SURFACE_JP, todayJst } from "../lib/format";
-import { raceListHref } from "../lib/header-date";
+import { isIsoDate, raceListHref } from "../lib/header-date";
 
 type Kind = "horse" | "jockey" | "trainer" | "course";
 
@@ -55,7 +55,10 @@ export function Analyze() {
   const [kind, setKind] = useState<Kind>("horse");
   const [searchParams] = useSearchParams();
   // 分析は全期間統計（date でフィルタしない）。ヘッダの開催日を戻る導線に引き継ぐだけ。
-  const date = searchParams.get("date") || todayJst();
+  // 不正な ?date= は当日へ倒し、ヘッダの currentHeaderDate と検証方針を揃える
+  // （汚染 date を戻り導線→RaceList→API へ伝播させない）。
+  const dateParam = searchParams.get("date");
+  const date = isIsoDate(dateParam) ? dateParam : todayJst();
 
   return (
     <section>

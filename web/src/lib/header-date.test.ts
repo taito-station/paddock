@@ -46,6 +46,12 @@ describe("currentHeaderDate", () => {
     );
   });
 
+  it("ネスト path /sessions/:date/races/:raceId でも第1セグメントの date を取る", () => {
+    expect(currentHeaderDate(sp(""), "/sessions/2026-07-14/races/abc")).toBe(
+      "2026-07-14",
+    );
+  });
+
   it("path param も不正なら todayJst() へフォールバックする", () => {
     expect(currentHeaderDate(sp(""), "/sessions/bad")).toBe(todayJst());
   });
