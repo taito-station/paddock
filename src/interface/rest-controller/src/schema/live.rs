@@ -16,7 +16,7 @@ pub struct LiveResponse {
     pub races: Vec<LiveRaceViewSchema>,
 }
 
-/// 一望サマリ（張る本数・監視数・最終更新時刻）。
+/// 一望サマリ（張る本数・監視数・最終更新時刻＋サーバ現在時刻）。
 #[derive(Debug, Serialize, ToSchema)]
 pub struct LiveSummary {
     /// 最新サイクルが `verdict='bet'` の race 数。
@@ -25,6 +25,9 @@ pub struct LiveSummary {
     pub watched_race_count: u32,
     /// 全 race 中の最新 `captured_at` の最大値。無ければ null。
     pub last_updated: Option<String>,
+    /// レスポンス生成時のサーバ現在時刻（UTC rfc3339, #382）。web はこれと `last_updated` の差で
+    /// 経過を較正し、クライアント時計のズレによる鮮度誤判定を避ける。
+    pub server_now: String,
 }
 
 /// 1 レースの最新サイクル本体＋伝票＋フリップ。
@@ -109,7 +112,9 @@ impl LiveResponse {
     /// use-case の [`LiveView`] を API レスポンスへ写像する。slip 伝票は JSON テキストで
     /// 運ばれるため、ここで [`SlipView`] にデシリアライズする（不正 JSON は永続化側の不整合
     /// なので `Err` を返し、handler が 500 に倒す）。
-    pub fn from_view(view: LiveView) -> serde_json::Result<Self> {
+    /// `server_now`（rfc3339 UTC）は handler がレスポンス生成時の壁時計から注入する（#382）。
+    /// view は DB 由来データなので現在時刻を持たず、ここで受け取って summary に載せる。
+    pub fn from_view(view: LiveView, server_now: String) -> serde_json::Result<Self> {
         let races = view
             .races
             .into_iter()
@@ -117,18 +122,19 @@ impl LiveResponse {
             .collect::<serde_json::Result<Vec<_>>>()?;
         Ok(Self {
             date: view.date.format("%Y-%m-%d").to_string(),
-            summary: LiveSummary::from(view.summary),
+            summary: LiveSummary::from_view(view.summary, server_now),
             races,
         })
     }
 }
 
-impl From<LiveSummaryView> for LiveSummary {
-    fn from(s: LiveSummaryView) -> Self {
+impl LiveSummary {
+    fn from_view(s: LiveSummaryView, server_now: String) -> Self {
         Self {
             bet_race_count: s.bet_race_count,
             watched_race_count: s.watched_race_count,
             last_updated: s.last_updated,
+            server_now,
         }
     }
 }

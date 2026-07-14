@@ -1,5 +1,5 @@
 use actix_web::{HttpResponse, web};
-use chrono::NaiveDate;
+use chrono::{NaiveDate, SecondsFormat, Utc};
 
 use paddock_use_case::Interactor;
 use paddock_use_case::pdf_fetcher::PdfFetcher;
@@ -39,8 +39,10 @@ where
 {
     let date = parse_date(&path.into_inner())?;
     let view = interactor.find_live_by_date(date).await?;
+    // 鮮度較正用のサーバ現在時刻（#382）。captured_at と同じ UTC rfc3339（秒精度）で載せる。
+    let server_now = Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true);
     // slip 伝票 JSON の復元失敗は永続化側の不整合。詳細はログにのみ出し 500 に倒す。
-    let body = LiveResponse::from_view(view)
+    let body = LiveResponse::from_view(view, server_now)
         .map_err(|e| Error::Internal(format!("slip 伝票の復元に失敗しました: {e}")))?;
     Ok(HttpResponse::Ok().json(body))
 }

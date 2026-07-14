@@ -5,7 +5,7 @@
 //! Postgres 非接続環境ではコンパイルのみ確認できる（`cargo test --no-run`）。
 
 use actix_web::{App, test, web};
-use chrono::{NaiveDate, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use serde_json::Value;
 
 use api_server::app::configure_routes;
@@ -671,6 +671,34 @@ async fn analyze_candidates_partial_match(pool: sqlx::PgPool) {
     let tjson = body_json(tresp).await;
     assert_eq!(tjson["names"], serde_json::json!([]));
     assert_eq!(tjson["truncated"], false);
+}
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn live_summary_includes_server_now(pool: sqlx::PgPool) {
+    // snapshot 無しの日でも 200（races 空）。summary.server_now が rfc3339 で載ることを検証（#382）。
+    let app = build_service!(pool);
+    let before = Utc::now();
+    let req = test::TestRequest::get()
+        .uri("/api/live/2026-07-11")
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert!(resp.status().is_success(), "status: {}", resp.status());
+    let json = body_json(resp).await;
+    assert!(json["races"].as_array().unwrap().is_empty());
+    let server_now = json["summary"]["server_now"]
+        .as_str()
+        .expect("server_now は文字列");
+    let parsed = DateTime::parse_from_rfc3339(server_now)
+        .unwrap_or_else(|e| panic!("server_now が rfc3339 でない: {server_now} ({e})"));
+    // レスポンス生成時刻はリクエスト前後の妥当な範囲に収まる（秒精度なので下限は 1 秒緩める）。
+    assert!(
+        parsed.with_timezone(&Utc) >= before - chrono::Duration::seconds(1),
+        "server_now {server_now} が before {before} より前"
+    );
+    assert!(
+        parsed.with_timezone(&Utc) <= Utc::now(),
+        "server_now {server_now} が現在より未来"
+    );
 }
 
 #[sqlx::test(migrations = "../../../deployments/db/migrations")]
