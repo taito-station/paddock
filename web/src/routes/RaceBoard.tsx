@@ -156,13 +156,16 @@ export function RaceBoard() {
         .sort((a, b) => a.race_num - b.race_num)
     : [];
 
+  // レース名(グレード)。raceTitle は名前が無ければ "" を返すので、前置スペースだけ条件付きにする。
+  const headTitle = d ? raceTitle(d.race_name, d.race_class) : "";
+
   return (
     <section className="board-view">
       <div className="toolbar">
         <h2>
           {d
             ? `${VENUE_JP[d.venue] ?? d.venue} ${d.race_num}R ${SURFACE_JP[d.surface] ?? d.surface}${d.distance}m${
-                d.race_name ? ` ${raceTitle(d.race_name, d.race_class)}` : ""
+                headTitle ? ` ${headTitle}` : ""
               }`
             : raceId}
         </h2>

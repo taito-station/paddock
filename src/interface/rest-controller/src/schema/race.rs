@@ -118,7 +118,7 @@ impl From<RaceCard> for RaceCardResponse {
             race_num: c.race_num,
             surface: c.surface.as_str().to_string(),
             distance: c.distance,
-            race_name: c.race_name.clone(),
+            race_name: c.race_name,
             race_class: c.race_class.map(|rc| rc.as_str().to_string()),
             entries: c.entries.iter().map(HorseEntrySchema::from).collect(),
         }
