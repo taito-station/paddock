@@ -130,9 +130,12 @@ GET /api/races/{race_id}/prediction[?track_condition=&blend_alpha=]
 ### 4. 分析統計
 
 ```
-GET /api/analyze/horse?name=<馬名>
+GET /api/analyze/horse?name=<馬名>                     # 完全一致（正規化後）で統計
 GET /api/analyze/jockey?name=<騎手名>
 GET /api/analyze/trainer?name=<調教師名>
+GET /api/analyze/horse/candidates?q=<部分>              # 部分一致候補（#401）
+GET /api/analyze/jockey/candidates?q=<部分>
+GET /api/analyze/trainer/candidates?q=<部分>
 GET /api/analyze/course?venue=<場>&distance=<m>&surface=<turf|dirt>
 ```
 
@@ -153,7 +156,10 @@ GET /api/analyze/course?venue=<場>&distance=<m>&surface=<turf|dirt>
 }
 ```
 
-> 名前あいまい検索（部分一致・カタカナ正規化, #50）は本 Issue では扱わない。完全一致でドメイン値に変換できた名前のみ受ける。
+- **名前あいまい検索（部分一致・カタカナ正規化, #50）は `/candidates` として露出済み（#401）**。`?q=` を
+  正規化（取り込み時と共有の normalizer）してから `results` を中間一致 LIKE で引き、`{ names, truncated }` を返す
+  （名前昇順・上限 20 件、超過は `truncated=true`）。呼び出し側は 1 件なら `?name=` で統計を引き、多数なら一覧提示する。
+  統計本体の `?name=` は従来どおり**完全一致**（正規化後にドメイン値へ変換できた名前のみ、不正は `400`）。
 
 ## OpenAPI（utoipa コードファースト）
 
@@ -207,6 +213,6 @@ API の仕様乖離を防ぐため、OpenAPI はコードから生成する（sp
 
 - #33 本 Issue（read 基盤）
 - #53 セッション write API / #34 SPA / #35 docker-compose
-- #51 単複オッズ永続化（recommendations の前提）/ #40 確定結果自動取得 / #50 名前あいまい検索
+- #51 単複オッズ永続化（recommendations の前提）/ #40 確定結果自動取得 / #50 名前あいまい検索（REST 露出は #401 で完了）
 - `~/.claude/rules/rust/architecture.md`・`conventions.md`（クリーンアーキテクチャ／コーディング規約）
 - ADR: `docs/adr/0022-rest-api-read-server.md`
