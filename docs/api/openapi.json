@@ -92,7 +92,7 @@
           {
             "name": "name",
             "in": "query",
-            "description": "対象の名前（完全一致。あいまい検索は #50）。",
+            "description": "対象の名前（完全一致。部分一致候補は `/candidates`・#401）。",
             "required": true,
             "schema": {
               "type": "string"
@@ -133,6 +133,58 @@
         }
       }
     },
+    "/api/analyze/horse/candidates": {
+      "get": {
+        "tags": [
+          "analyze"
+        ],
+        "summary": "馬名の部分一致候補（#401）。",
+        "operationId": "analyze_horse_candidates",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "description": "検索語（中間一致。正規化は取り込み時と共有・#50）。",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "馬名の部分一致候補",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalyzeCandidatesResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "名前不正",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "内部エラー",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/analyze/jockey": {
       "get": {
         "tags": [
@@ -144,7 +196,7 @@
           {
             "name": "name",
             "in": "query",
-            "description": "対象の名前（完全一致。あいまい検索は #50）。",
+            "description": "対象の名前（完全一致。部分一致候補は `/candidates`・#401）。",
             "required": true,
             "schema": {
               "type": "string"
@@ -185,6 +237,58 @@
         }
       }
     },
+    "/api/analyze/jockey/candidates": {
+      "get": {
+        "tags": [
+          "analyze"
+        ],
+        "summary": "騎手名の部分一致候補（#401）。",
+        "operationId": "analyze_jockey_candidates",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "description": "検索語（中間一致。正規化は取り込み時と共有・#50）。",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "騎手名の部分一致候補",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalyzeCandidatesResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "名前不正",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "内部エラー",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/analyze/trainer": {
       "get": {
         "tags": [
@@ -196,7 +300,7 @@
           {
             "name": "name",
             "in": "query",
-            "description": "対象の名前（完全一致。あいまい検索は #50）。",
+            "description": "対象の名前（完全一致。部分一致候補は `/candidates`・#401）。",
             "required": true,
             "schema": {
               "type": "string"
@@ -210,6 +314,58 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/TrainerStatsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "名前不正",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "内部エラー",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/analyze/trainer/candidates": {
+      "get": {
+        "tags": [
+          "analyze"
+        ],
+        "summary": "調教師名の部分一致候補（#401）。",
+        "operationId": "analyze_trainer_candidates",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "description": "検索語（中間一致。正規化は取り込み時と共有・#50）。",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "調教師名の部分一致候補",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalyzeCandidatesResponse"
                 }
               }
             }
@@ -1374,6 +1530,27 @@
   },
   "components": {
     "schemas": {
+      "AnalyzeCandidatesResponse": {
+        "type": "object",
+        "description": "`GET /api/analyze/{horse,jockey,trainer}/candidates?q=` のレスポンス（部分一致候補・#401）。\n\n名前の中間一致（正規化は取り込み時と共有・#50）で引いた候補名の一覧。上限を超えたときは\n`truncated=true`（＝「N 件以上」相当）。呼び出し側は 1 件なら stats を引き、多数なら一覧提示する。",
+        "required": [
+          "names",
+          "truncated"
+        ],
+        "properties": {
+          "names": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "一致した名前（正規化済み・昇順・最大 `limit` 件）。"
+          },
+          "truncated": {
+            "type": "boolean",
+            "description": "上限を超えて打ち切られたか（true のとき候補はさらにある）。"
+          }
+        }
+      },
       "BetInput": {
         "type": "object",
         "description": "outcome 記録の 1 買い目（リクエスト）。race_id はパスから取るため含めない。",

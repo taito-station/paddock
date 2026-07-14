@@ -3,8 +3,8 @@ use utoipa::OpenApi;
 use crate::error::{ErrorBody, ErrorDetail};
 use crate::handler;
 use crate::schema::analyze::{
-    CourseStatsResponse, GroupStatSchema, HorseStatsResponse, JockeyStatsResponse,
-    TrainerStatsResponse,
+    AnalyzeCandidatesResponse, CourseStatsResponse, GroupStatSchema, HorseStatsResponse,
+    JockeyStatsResponse, TrainerStatsResponse,
 };
 use crate::schema::live::{
     LiveFlip, LiveRaceViewSchema, LiveResponse, LiveSummary, SlipLeg, SlipView,
@@ -41,8 +41,11 @@ use crate::schema::session::{
         handler::race::get_recommendations,
         handler::race::get_race_board,
         handler::analyze::analyze_horse,
+        handler::analyze::analyze_horse_candidates,
         handler::analyze::analyze_jockey,
+        handler::analyze::analyze_jockey_candidates,
         handler::analyze::analyze_trainer,
+        handler::analyze::analyze_trainer_candidates,
         handler::analyze::analyze_course,
         handler::prediction::search_predictions,
         handler::prediction::get_prediction_detail,
@@ -71,6 +74,7 @@ use crate::schema::session::{
         CourseStatsResponse,
         JockeyStatsResponse,
         TrainerStatsResponse,
+        AnalyzeCandidatesResponse,
         PredictionSummarySchema,
         PredictionSearchResponse,
         PredictionHorseSchema,
