@@ -2,10 +2,17 @@ import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api, type GroupStat } from "../api/client";
-import { pct, SURFACE_JP, todayJst } from "../lib/format";
+import { pct, SURFACE_JP, VENUE_JP, todayJst } from "../lib/format";
 import { isIsoDate, raceListHref } from "../lib/header-date";
-
-type Kind = "horse" | "jockey" | "trainer" | "course";
+import {
+  parseKind,
+  parseAnalyzeParams,
+  analyzeSearchParams,
+  completeCourse,
+  type Kind,
+  type NameKind,
+  type CourseParams,
+} from "../lib/analyze";
 
 const KIND_LABEL: Record<Kind, string> = {
   horse: "馬",
@@ -13,6 +20,9 @@ const KIND_LABEL: Record<Kind, string> = {
   trainer: "調教師",
   course: "コース",
 };
+
+// JRA 場順で会場セレクトの option を出す（VENUE_JP のキー順に一致）。
+const VENUE_SLUGS = Object.keys(VENUE_JP);
 
 function StatTable({ title, rows }: { title: string; rows: GroupStat[] }) {
   if (rows.length === 0) return null;
@@ -51,14 +61,65 @@ function StatTable({ title, rows }: { title: string; rows: GroupStat[] }) {
   );
 }
 
+// name 系タブの lift 状態。
+type NameSlot = { input: string; submitted: string };
+type NameState = Record<NameKind, NameSlot>;
+// course タブの lift 状態（form=編集中 / submitted=確定した検索）。
+type CourseState = { form: CourseParams; submitted: CourseParams | null };
+
 export function Analyze() {
-  const [kind, setKind] = useState<Kind>("horse");
-  const [searchParams] = useSearchParams();
-  // 分析は全期間統計（date でフィルタしない）。ヘッダの開催日を戻る導線に引き継ぐだけ。
-  // 不正な ?date= は当日へ倒し、ヘッダの currentHeaderDate と検証方針を揃える
-  // （汚染 date を戻り導線→RaceList→API へ伝播させない）。
+  const [searchParams, setSearchParams] = useSearchParams();
+  // 分析は全期間統計（date でフィルタしない）。ヘッダの開催日を戻る導線に引き継ぐだけ（#379）。
   const dateParam = searchParams.get("date");
   const date = isIsoDate(dateParam) ? dateParam : todayJst();
+  // アクティブタブは URL 正（?kind=）。既定 horse。
+  const kind = parseKind(searchParams.get("kind"));
+
+  // 各タブの検索状態は Analyze に lift して切替で保持する（#384。key 再マウント廃止）。
+  // 初期値は URL からアクティブタブ分を hydrate する（リロード/共有復元）。hydrate は初回のみ
+  // で、以降は searchParams 変化に追従しない（全 setSearchParams が replace 運用のため
+  // back/forward で analyze 内の state 履歴は生成されない。kind だけは毎レンダー URL 由来）。
+  const [names, setNames] = useState<NameState>(() => {
+    const init = parseAnalyzeParams(searchParams);
+    const q = init.kind !== "course" ? init.name : "";
+    const slot = (k: NameKind): NameSlot =>
+      init.kind === k ? { input: q, submitted: q } : { input: "", submitted: "" };
+    return { horse: slot("horse"), jockey: slot("jockey"), trainer: slot("trainer") };
+  });
+  const [course, setCourse] = useState<CourseState>(() => {
+    const init = parseAnalyzeParams(searchParams);
+    return {
+      form: init.course,
+      submitted: init.kind === "course" ? completeCourse(init.course) : null,
+    };
+  });
+
+  // アクティブタブの状態を URL に反映（date+kind+検索語）。履歴は汚さない。
+  const writeUrl = (k: Kind, ns: NameState, cs: CourseState) => {
+    const active =
+      k === "course" ? { course: cs.submitted } : { name: ns[k as NameKind].submitted };
+    setSearchParams(analyzeSearchParams(k, active, date), { replace: true });
+  };
+
+  const goKind = (k: Kind) => writeUrl(k, names, course);
+
+  const onNameInput = (k: NameKind, input: string) =>
+    setNames((s) => ({ ...s, [k]: { ...s[k], input } }));
+  // submit 系は URL 反映（writeUrl）に確定後の値を同期的に渡す必要があるため、
+  // クロージャの現在値から next を組んで state と URL を一度に更新する。
+  const onNameSubmit = (k: NameKind, submitted: string) => {
+    const next: NameState = { ...names, [k]: { input: submitted, submitted } };
+    setNames(next);
+    writeUrl(k, next, course);
+  };
+
+  const onCourseForm = (form: CourseParams) =>
+    setCourse((s) => ({ ...s, form }));
+  const onCourseSubmit = (form: CourseParams) => {
+    const next: CourseState = { form, submitted: form };
+    setCourse(next);
+    writeUrl("course", names, next);
+  };
 
   return (
     <section>
@@ -70,26 +131,46 @@ export function Analyze() {
           <button
             key={k}
             className={k === kind ? "tab tab-active" : "tab"}
-            onClick={() => setKind(k)}
+            onClick={() => goKind(k)}
           >
             {KIND_LABEL[k]}
           </button>
         ))}
       </div>
       {kind === "course" ? (
-        <CourseAnalyze />
+        // 状態は親が保持（lift）。key を付けずタブ切替でも入力・結果を維持する。
+        <CourseAnalyze
+          form={course.form}
+          submitted={course.submitted}
+          onForm={onCourseForm}
+          onSubmit={onCourseSubmit}
+        />
       ) : (
-        // key で kind ごとにインスタンスを分け、タブ切替で入力・結果をリセットする。
-        <NameAnalyze key={kind} kind={kind} />
+        <NameAnalyze
+          kind={kind}
+          input={names[kind].input}
+          submitted={names[kind].submitted}
+          onInput={(v) => onNameInput(kind, v)}
+          onSubmit={(v) => onNameSubmit(kind, v)}
+        />
       )}
     </section>
   );
 }
 
-function NameAnalyze({ kind }: { kind: "horse" | "jockey" | "trainer" }) {
-  const [input, setInput] = useState("");
-  const [name, setName] = useState("");
-
+function NameAnalyze({
+  kind,
+  input,
+  submitted,
+  onInput,
+  onSubmit,
+}: {
+  kind: NameKind;
+  input: string;
+  submitted: string;
+  onInput: (v: string) => void;
+  onSubmit: (v: string) => void;
+}) {
   const path = (
     {
       horse: "/api/analyze/horse",
@@ -99,11 +180,12 @@ function NameAnalyze({ kind }: { kind: "horse" | "jockey" | "trainer" }) {
   )[kind];
 
   const q = useQuery({
-    queryKey: ["analyze", kind, name],
-    enabled: name.length > 0,
+    // queryKey に submitted を含めることでタブ毎に結果がキャッシュされ、切替で即再表示される。
+    queryKey: ["analyze", kind, submitted],
+    enabled: submitted.length > 0,
     queryFn: async () => {
       const { data, error } = await api.GET(path, {
-        params: { query: { name } },
+        params: { query: { name: submitted } },
       });
       if (error) throw new Error("統計の取得に失敗しました（名前を確認）");
       return data;
@@ -116,19 +198,21 @@ function NameAnalyze({ kind }: { kind: "horse" | "jockey" | "trainer" }) {
         className="toolbar"
         onSubmit={(e) => {
           e.preventDefault();
-          setName(input.trim());
+          onSubmit(input.trim());
         }}
       >
+        {/* 名前検索は完全一致（REST が未露出。部分一致・カナ正規化ロジックは #50 で CLI/repo に実装済、
+            REST/web への露出は #401）。 */}
         <input
           type="text"
           placeholder={`${KIND_LABEL[kind]}名（完全一致）`}
           value={input}
-          onChange={(e) => setInput(e.target.value)}
+          onChange={(e) => onInput(e.target.value)}
         />
         <button type="submit">検索</button>
       </form>
 
-      {q.isPending && name.length > 0 && <p>読み込み中…</p>}
+      {q.isPending && submitted.length > 0 && <p>読み込み中…</p>}
       {q.isError && <p className="error">{q.error.message}</p>}
       {q.data && (
         <>
@@ -159,10 +243,17 @@ function NameAnalyze({ kind }: { kind: "horse" | "jockey" | "trainer" }) {
   );
 }
 
-function CourseAnalyze() {
-  const [form, setForm] = useState({ venue: "", distance: "", surface: "turf" });
-  const [submitted, setSubmitted] = useState<typeof form | null>(null);
-
+function CourseAnalyze({
+  form,
+  submitted,
+  onForm,
+  onSubmit,
+}: {
+  form: CourseParams;
+  submitted: CourseParams | null;
+  onForm: (f: CourseParams) => void;
+  onSubmit: (f: CourseParams) => void;
+}) {
   const q = useQuery({
     queryKey: ["analyze", "course", submitted],
     enabled: submitted !== null,
@@ -187,31 +278,39 @@ function CourseAnalyze() {
         className="toolbar"
         onSubmit={(e) => {
           e.preventDefault();
-          setSubmitted(form);
+          onSubmit(form);
         }}
       >
-        <input
-          type="text"
-          placeholder="開催場（例: nakayama）"
+        {/* 会場は VENUE_JP マスタのセレクト（value=slug, label=日本語）。slug 手入力を廃止（#384）。 */}
+        <select
           value={form.venue}
-          onChange={(e) => setForm({ ...form, venue: e.target.value })}
-        />
+          onChange={(e) => onForm({ ...form, venue: e.target.value })}
+        >
+          <option value="">開催場を選択</option>
+          {VENUE_SLUGS.map((slug) => (
+            <option key={slug} value={slug}>
+              {VENUE_JP[slug]}
+            </option>
+          ))}
+        </select>
         <input
           type="number"
           placeholder="距離[m]"
           min={1000}
           step={100}
           value={form.distance}
-          onChange={(e) => setForm({ ...form, distance: e.target.value })}
+          onChange={(e) => onForm({ ...form, distance: e.target.value })}
         />
         <select
           value={form.surface}
-          onChange={(e) => setForm({ ...form, surface: e.target.value })}
+          onChange={(e) =>
+            onForm({ ...form, surface: e.target.value === "dirt" ? "dirt" : "turf" })
+          }
         >
           <option value="turf">芝</option>
           <option value="dirt">ダート</option>
         </select>
-        <button type="submit" disabled={!form.venue || !form.distance}>
+        <button type="submit" disabled={completeCourse(form) === null}>
           検索
         </button>
       </form>
@@ -221,7 +320,7 @@ function CourseAnalyze() {
       {q.data && (
         <>
           <h2>
-            {q.data.venue} {q.data.distance}m{" "}
+            {VENUE_JP[q.data.venue] ?? q.data.venue} {q.data.distance}m{" "}
             {SURFACE_JP[q.data.surface] ?? q.data.surface}
           </h2>
           <StatTable title="枠順別" rows={q.data.by_gate_group} />
