@@ -68,7 +68,9 @@ fn sample_card() -> RaceCard {
         race_num: 1,
         surface: Surface::Turf,
         distance: 1800,
-        race_class: None,
+        race_class: Some(paddock_domain::RaceClass::G3),
+        // レース名（#389）。card / board / list レスポンスに載ることを検証する。
+        race_name: Some("サンプルステークス".to_string()),
         entries: vec![
             entry(1, 1, "ウマA"),
             entry(2, 2, "ウマB"),
@@ -195,6 +197,8 @@ async fn list_races_includes_post_time_from_race_cards(pool: sqlx::PgPool) {
     let races = json["races"].as_array().unwrap();
     assert_eq!(races.len(), 1);
     assert_eq!(races[0]["post_time"], "15:45");
+    // レース名も race_cards 由来で一覧に載る（#389）。
+    assert_eq!(races[0]["race_name"], "サンプルステークス");
 }
 
 #[sqlx::test(migrations = "../../../deployments/db/migrations")]
@@ -224,6 +228,9 @@ async fn race_card_found_and_not_found(pool: sqlx::PgPool) {
     assert!(resp.status().is_success());
     let json = body_json(resp).await;
     assert_eq!(json["entries"].as_array().unwrap().len(), 3);
+    // レース名・格付けが出馬表レスポンスに載る（#389）。
+    assert_eq!(json["race_name"], "サンプルステークス");
+    assert_eq!(json["race_class"], "g3");
 
     let req = test::TestRequest::get()
         .uri("/api/races/2026-1-nakayama-1-R9")

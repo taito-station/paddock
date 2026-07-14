@@ -27,11 +27,17 @@ pub struct RaceSummary {
     /// 発走時刻（`HH:MM`、race_cards 由来。未保存なら `null`）。
     /// ライブ一覧の状態判定（未発走/終了）の一次ソース（#391）。
     pub post_time: Option<String>,
+    /// 表示用レース名（race_cards 由来。重賞・特別戦名。未保存/PDF 経路なら `null`。#389）。
+    pub race_name: Option<String>,
 }
 
 impl RaceSummary {
-    /// レース諸元＋発走時刻（`race_id → post_time` マップから引き当て）で組み立てる。
-    pub fn new(r: &Race, post_times: &HashMap<RaceId, NaiveTime>) -> Self {
+    /// レース諸元＋発走時刻・レース名（`race_id → …` マップから引き当て）で組み立てる。
+    pub fn new(
+        r: &Race,
+        post_times: &HashMap<RaceId, NaiveTime>,
+        race_names: &HashMap<RaceId, String>,
+    ) -> Self {
         Self {
             race_id: r.race_id.value().to_string(),
             date: r.date,
@@ -42,6 +48,7 @@ impl RaceSummary {
             post_time: post_times
                 .get(&r.race_id)
                 .map(|t| t.format("%H:%M").to_string()),
+            race_name: race_names.get(&r.race_id).cloned(),
         }
     }
 }
@@ -93,6 +100,10 @@ pub struct RaceCardResponse {
     pub race_num: u32,
     pub surface: String,
     pub distance: u32,
+    /// 表示用レース名（race_cards 由来。重賞・特別戦名。未保存/PDF 経路なら `null`。#389）。
+    pub race_name: Option<String>,
+    /// 格付けスラッグ（`g1`/`g2`/`g3`/`listed`/`open`/`win3`… 由来 #345。未判定/PDF 経路なら `null`）。
+    pub race_class: Option<String>,
     pub entries: Vec<HorseEntrySchema>,
 }
 
@@ -107,6 +118,8 @@ impl From<RaceCard> for RaceCardResponse {
             race_num: c.race_num,
             surface: c.surface.as_str().to_string(),
             distance: c.distance,
+            race_name: c.race_name.clone(),
+            race_class: c.race_class.map(|rc| rc.as_str().to_string()),
             entries: c.entries.iter().map(HorseEntrySchema::from).collect(),
         }
     }
@@ -293,6 +306,10 @@ pub struct RaceBoardResponse {
     pub field_size: u32,
     /// 発走時刻 `HH:MM`（未取得は `null`）。
     pub post_time: Option<String>,
+    /// 表示用レース名（重賞・特別戦名。未保存/PDF 経路なら `null`。#389）。
+    pub race_name: Option<String>,
+    /// 格付けスラッグ（`g1`/`g2`/`g3`/`listed`/`open`… #345。盤ヘッダのグレード表記に使う。未判定は `null`）。
+    pub race_class: Option<String>,
     /// 保存オッズ（#51）の有無。false のとき `bets` は必ず空。
     pub odds_available: bool,
     /// 買い目の軸。記録軸（`recorded_axis`）があればそれに固定、無ければライブ再計算（`live_axis`）。
@@ -350,6 +367,8 @@ impl From<RaceBoard> for RaceBoardResponse {
             distance: b.distance,
             field_size: b.field_size,
             post_time: b.post_time,
+            race_name: b.race_name,
+            race_class: b.race_class,
             odds_available,
             axis,
             recorded_axis: b.recorded_axis,

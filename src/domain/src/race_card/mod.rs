@@ -24,6 +24,10 @@ pub struct RaceCard {
     /// `RaceData02` 条件から導出。出馬表 PDF パーサは未対応のため PDF 経路は `None`。
     /// netkeiba 経路でも表記から判定できない場合は `None`。
     pub race_class: Option<RaceClass>,
+    /// 表示用のレース名（#389）。netkeiba 出馬表の `h1.RaceName`（例「七夕賞」「響灘特別」
+    /// 「3歳上1勝クラス」。グレード表記は含まない＝グレードは `race_class`）。出馬表 PDF パーサは
+    /// 未対応のため PDF 経路は `None`。取得できない場合も `None`（best-effort・カード保存は止めない）。
+    pub race_name: Option<String>,
     pub entries: Vec<HorseEntry>,
 }
 

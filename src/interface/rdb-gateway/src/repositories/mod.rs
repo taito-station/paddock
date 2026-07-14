@@ -7,6 +7,7 @@ mod find_live_ev_by_date;
 mod find_matching_names;
 mod find_post_times_by_date;
 mod find_race_card;
+mod find_race_names_by_date;
 mod find_race_odds;
 mod find_races_by_date;
 mod find_recent_runs;
@@ -302,6 +303,12 @@ impl RaceCardRepository for PostgresRepository {
         date: NaiveDate,
     ) -> UcResult<HashMap<RaceId, NaiveTime>> {
         find_post_times_by_date::find_post_times_by_date(&self.pool, date)
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn find_race_names_by_date(&self, date: NaiveDate) -> UcResult<HashMap<RaceId, String>> {
+        find_race_names_by_date::find_race_names_by_date(&self.pool, date)
             .await
             .map_err(Into::into)
     }

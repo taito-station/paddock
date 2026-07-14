@@ -48,6 +48,7 @@ fn make_race_card(race_id: &str) -> RaceCard {
         surface: Surface::Turf,
         distance: 2000,
         race_class: None,
+        race_name: None,
         entries: vec![
             HorseEntry {
                 gate_num: GateNum::try_from(1u32).unwrap(),
@@ -226,6 +227,12 @@ impl RaceCardRepository for MockRepo {
         &self,
         _date: chrono::NaiveDate,
     ) -> Result<std::collections::HashMap<RaceId, chrono::NaiveTime>> {
+        unimplemented!()
+    }
+    async fn find_race_names_by_date(
+        &self,
+        _date: chrono::NaiveDate,
+    ) -> Result<std::collections::HashMap<RaceId, String>> {
         unimplemented!()
     }
 }

@@ -22,4 +22,10 @@ impl<R: RaceCardRepository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
     pub async fn post_times_by_date(&self, date: NaiveDate) -> Result<HashMap<RaceId, NaiveTime>> {
         self.repository.find_post_times_by_date(date).await
     }
+
+    /// 指定日の全レースの表示用レース名（`race_id → race_name`、race_cards 由来）を返す（#389）。
+    /// レース一覧 API が重賞・特別戦名をヘッダに出すために使う。
+    pub async fn race_names_by_date(&self, date: NaiveDate) -> Result<HashMap<RaceId, String>> {
+        self.repository.find_race_names_by_date(date).await
+    }
 }
