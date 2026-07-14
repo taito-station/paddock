@@ -7,6 +7,7 @@ import {
   VENUE_JP,
   SURFACE_JP,
   raceBadge,
+  raceTitle,
 } from "./format";
 
 describe("todayJst", () => {
@@ -82,5 +83,24 @@ describe("raceBadge", () => {
     expect(
       raceBadge({ bought: false, hasSession: false, completed: false }),
     ).toBe("none");
+  });
+});
+
+describe("raceTitle", () => {
+  it("重賞・L はグレードを付す", () => {
+    expect(raceTitle("七夕賞", "g3")).toBe("七夕賞(G3)");
+    expect(raceTitle("安田記念", "g1")).toBe("安田記念(G1)");
+    expect(raceTitle("洛陽ステークス", "listed")).toBe("洛陽ステークス(L)");
+  });
+  it("条件クラス（open/win*/未判定）はレース名のみ（グレード付与なし）", () => {
+    expect(raceTitle("響灘特別", "open")).toBe("響灘特別");
+    expect(raceTitle("3歳上1勝クラス", "win1")).toBe("3歳上1勝クラス");
+    expect(raceTitle("響灘特別", null)).toBe("響灘特別");
+    expect(raceTitle("響灘特別", undefined)).toBe("響灘特別");
+  });
+  it("race_name が無ければ空文字（呼び出し側で条件表示のみにフォールバック）", () => {
+    expect(raceTitle(null, "g1")).toBe("");
+    expect(raceTitle(undefined, "g1")).toBe("");
+    expect(raceTitle("", "g1")).toBe("");
   });
 });

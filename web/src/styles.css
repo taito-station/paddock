@@ -287,6 +287,12 @@ button:disabled {
 .live-race-link:focus-visible {
   text-decoration: underline;
 }
+/* レース名（重賞・特別戦名）の副次表示（#389）。会場R の下に控えめに出す。 */
+.race-name-sub {
+  display: block;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
 .live-roi {
   font-weight: 600;
   color: var(--accent);

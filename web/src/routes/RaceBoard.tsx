@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
-import { pct, yen, SURFACE_JP, VENUE_JP } from "../lib/format";
+import { pct, yen, raceTitle, SURFACE_JP, VENUE_JP } from "../lib/format";
 import {
   DEFAULT_RACE_BUDGET,
   boardBudget,
@@ -161,7 +161,9 @@ export function RaceBoard() {
       <div className="toolbar">
         <h2>
           {d
-            ? `${VENUE_JP[d.venue] ?? d.venue} ${d.race_num}R ${SURFACE_JP[d.surface] ?? d.surface}${d.distance}m`
+            ? `${VENUE_JP[d.venue] ?? d.venue} ${d.race_num}R ${SURFACE_JP[d.surface] ?? d.surface}${d.distance}m${
+                d.race_name ? ` ${raceTitle(d.race_name, d.race_class)}` : ""
+              }`
             : raceId}
         </h2>
         {d?.post_time && <span className="muted">発走 {d.post_time}</span>}

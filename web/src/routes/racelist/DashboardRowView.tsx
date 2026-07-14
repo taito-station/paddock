@@ -117,6 +117,10 @@ export function DashboardRowView({
               {VENUE_JP[race.venue] ?? race.venue}
               {race.race_num}R
             </strong>
+            {/* レース名（重賞・特別戦名）。ライブ監視中の識別性向上（#389）。無ければ出さない。 */}
+            {race.race_name && (
+              <span className="race-name-sub">{race.race_name}</span>
+            )}
           </Link>
         </td>
         <td>{post ?? "—"}</td>
