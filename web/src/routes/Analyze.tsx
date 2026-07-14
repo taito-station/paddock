@@ -248,7 +248,9 @@ function NameAnalyze({
         <p>「{submitted}」に一致する{KIND_LABEL[kind]}が見つかりません。</p>
       )}
 
-      {/* 複数ヒット時は候補一覧を提示（クリックで確定）。1 件のみは自動確定するので一覧は出さない。 */}
+      {/* 複数ヒット時は候補一覧を提示（クリックで確定）。1 件のみは自動確定するので一覧は出さない。
+          選択後も一覧は畳まず統計と併存させる（別候補へ選び直せるように意図的に残す。選択中は
+          candidate-active + aria-pressed で示す）。 */}
       {names.length > 1 && (
         <div className="candidates">
           <p>
@@ -261,6 +263,7 @@ function NameAnalyze({
                 <button
                   type="button"
                   className={n === selected ? "candidate candidate-active" : "candidate"}
+                  aria-pressed={n === selected}
                   onClick={() => onSelect(n)}
                 >
                   {n}

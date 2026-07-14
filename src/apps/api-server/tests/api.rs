@@ -659,6 +659,18 @@ async fn analyze_candidates_partial_match(pool: sqlx::PgPool) {
     assert!(jresp.status().is_success(), "status: {}", jresp.status());
     let jjson = body_json(jresp).await;
     assert_eq!(jjson["names"], serde_json::json!(["ルメール"]));
+
+    // trainer/candidates の結線確認 + 0 件（該当なし）の封筒。seed に trainer は無いので
+    // 任意語でも空。3 ハンドラは同型なので trainer は結線と空応答の代表として最小検証する
+    // （truncated=true は handler ユニット over_limit_is_truncated で担保）。"ゾゾ" = 該当なし。
+    let treq = test::TestRequest::get()
+        .uri("/api/analyze/trainer/candidates?q=%E3%82%BE%E3%82%BE")
+        .to_request();
+    let tresp = test::call_service(&app, treq).await;
+    assert!(tresp.status().is_success(), "status: {}", tresp.status());
+    let tjson = body_json(tresp).await;
+    assert_eq!(tjson["names"], serde_json::json!([]));
+    assert_eq!(tjson["truncated"], false);
 }
 
 #[sqlx::test(migrations = "../../../deployments/db/migrations")]
