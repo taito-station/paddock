@@ -18,7 +18,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VENV_PY="$ROOT/tools/mdq/.venv/bin/python"
 
 if [ ! -x "$VENV_PY" ]; then
-  echo "mdq venv が未作成です。次を実行してください:" >&2
+  echo "mdq venv が未作成です。次を実行してください（python3 は 3.11 以上）:" >&2
   echo "  python3 -m venv tools/mdq/.venv && tools/mdq/.venv/bin/pip install -r tools/mdq/requirements.txt" >&2
   exit 1
 fi

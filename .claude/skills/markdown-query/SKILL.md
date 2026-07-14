@@ -31,11 +31,11 @@ scripts/mdq search --q "<質問の主要キーワード>" --top-k 5 --max-tokens
 scripts/mdq get --chunk-id <返ってきた ID>                    # snippet で足りないときだけ本文取得
 ```
 
-初回のみ venv セットアップ:
+初回のみ venv セットアップ（**Python >= 3.11 必須**。config が標準ライブラリ `tomllib` を使うため）:
 
 ```sh
-python3 -m venv tools/mdq/.venv
-tools/mdq/.venv/bin/pip install -r tools/mdq/requirements.txt
+python3 -m venv tools/mdq/.venv   # python3 は 3.11 以上
+tools/mdq/.venv/bin/pip install -r tools/mdq/requirements.txt   # rank_bm25 / PyYAML のみ
 ```
 
 ## 使い方の要点
@@ -54,5 +54,8 @@ tools/mdq/.venv/bin/pip install -r tools/mdq/requirements.txt
 - 索引対象は `.md` のみ。コード検索は serena、非 Markdown は通常ツールを使う。
 
 ## 補足
-- semantic_paragraph / watch は追加依存（fastembed/nltk/numpy/watchdog）が必要で既定未導入。BM25 で運用する。
+- **Python >= 3.11 必須**（`tomllib` 依存）。semantic_paragraph / watch は追加依存
+  （fastembed/nltk/numpy/watchdog）が必要で既定未導入。BM25 で運用する。
 - 索引 DB(.mdq/) はコミットしない。ブランチ切替・環境更新後は `scripts/mdq index` で作り直す。
+- 検索クエリは `.mdq/usage.jsonl`（gitignore・ローカルのみ・リポジトリ外に出ない）に利用ログとして
+  記録される。停止スイッチは未実装（将来 issue）。
