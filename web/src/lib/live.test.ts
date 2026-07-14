@@ -232,6 +232,7 @@ describe("summaryLine", () => {
         bet_race_count: 1,
         watched_race_count: 3,
         last_updated: null,
+        server_now: "2026-07-11T03:00:00Z",
       }),
     ).toBe("🟢張る 1レース（監視中 3R）");
   });
@@ -241,6 +242,7 @@ describe("summaryLine", () => {
         bet_race_count: 0,
         watched_race_count: 3,
         last_updated: null,
+        server_now: "2026-07-11T03:00:00Z",
       }),
     ).toBe("張り無し（監視中 3R）");
   });
@@ -520,30 +522,60 @@ describe("parseLiveQuery / liveQueryParams", () => {
 });
 
 describe("freshness", () => {
+  // server_now = NOON（クライアント now と一致）・fetchedAt = NOON（fetch 直後で補間 0）に固定すると、
+  // 経過 = NOON − last_updated となり較正前の従来意図を保つ。SNOW/AT はその固定値（#382）。
+  const SNOW = "2026-07-11T03:00:00Z"; // = NOON
+  const AT = NOON.getTime();
   it("fresh within STALE_MINUTES (未発走あり)", () => {
     // NOON = 12:00 JST。3 分前更新 → fresh
-    expect(freshness("2026-07-11T02:57:00Z", true, NOON)).toEqual({ label: "3分前", state: "fresh" });
-    expect(freshness("2026-07-11T02:59:30Z", true, NOON)).toEqual({ label: "たった今", state: "fresh" });
+    expect(freshness("2026-07-11T02:57:00Z", SNOW, true, NOON, AT)).toEqual({ label: "3分前", state: "fresh" });
+    expect(freshness("2026-07-11T02:59:30Z", SNOW, true, NOON, AT)).toEqual({ label: "たった今", state: "fresh" });
   });
   it("stale beyond STALE_MINUTES when upcoming races remain", () => {
-    expect(freshness("2026-07-11T02:49:00Z", true, NOON)).toEqual({ label: "11分前", state: "stale" });
+    expect(freshness("2026-07-11T02:49:00Z", SNOW, true, NOON, AT)).toEqual({ label: "11分前", state: "stale" });
   });
   it("boundary: ちょうど STALE_MINUTES は fresh、1 秒超過で stale（生 ms 比較）", () => {
-    expect(freshness("2026-07-11T02:50:00Z", true, NOON).state).toBe("fresh");
-    expect(freshness("2026-07-11T02:49:59Z", true, NOON)).toEqual({
+    expect(freshness("2026-07-11T02:50:00Z", SNOW, true, NOON, AT).state).toBe("fresh");
+    expect(freshness("2026-07-11T02:49:59Z", SNOW, true, NOON, AT)).toEqual({
       label: "10分前",
       state: "stale",
     });
   });
   it("done when no upcoming races (警告は出さない)", () => {
-    expect(freshness("2026-07-11T01:00:00Z", false, NOON).state).toBe("done");
+    expect(freshness("2026-07-11T01:00:00Z", SNOW, false, NOON, AT).state).toBe("done");
   });
   it("null / invalid last_updated with upcoming races → stale (警戒に倒す)", () => {
-    expect(freshness(null, true, NOON)).toEqual({ label: "—", state: "stale" });
-    expect(freshness("nonsense", true, NOON).state).toBe("stale");
+    expect(freshness(null, SNOW, true, NOON, AT)).toEqual({ label: "—", state: "stale" });
+    expect(freshness("nonsense", SNOW, true, NOON, AT).state).toBe("stale");
   });
   it("hours label beyond 60 minutes", () => {
-    expect(freshness("2026-07-11T01:00:00Z", true, NOON).label).toBe("2時間前");
+    expect(freshness("2026-07-11T01:00:00Z", SNOW, true, NOON, AT).label).toBe("2時間前");
+  });
+
+  // --- サーバ時刻較正（#382）---
+  it("クライアント時計が進んでいても server_now 基準で経過を出す（skew で誤 stale にしない）", () => {
+    // last_updated は server_now の 3 分前。クライアント now は +5 分進んでいる（fetch も同じ skew now）。
+    // 較正: base = server_now − last_updated = 3分、localDelta = now − fetchedAt = 0 → 「3分前」fresh。
+    // 較正前（now 基準）なら 8 分で誤って stale 手前まで膨らむが、それを起こさない。
+    const skewedNow = new Date("2026-07-11T03:05:00Z");
+    const fetchedAtSkewed = skewedNow.getTime();
+    expect(
+      freshness("2026-07-11T02:57:00Z", SNOW, true, skewedNow, fetchedAtSkewed),
+    ).toEqual({ label: "3分前", state: "fresh" });
+  });
+  it("fetch 後は now−fetchedAt で経過を補間し閾値を跨ぐ", () => {
+    // fetch 時点: server_now − last_updated = 8分（fresh）。その後クライアント now が 3 分進む
+    // （now = fetchedAt + 3分）→ 8+3 = 11分 → stale。tick による補間が効くことを示す。
+    const fetchedAt = new Date("2026-07-11T03:00:00Z").getTime();
+    const later = new Date("2026-07-11T03:03:00Z"); // fetchedAt + 3分
+    expect(
+      freshness("2026-07-11T02:52:00Z", SNOW, true, later, fetchedAt),
+    ).toEqual({ label: "11分前", state: "stale" });
+  });
+  it("server_now が null/不正ならクライアント時計にフォールバック（従来挙動）", () => {
+    // フォールバック: 経過 = now − last_updated。fetchedAt は無視。now=NOON、3分前 → 「3分前」fresh。
+    expect(freshness("2026-07-11T02:57:00Z", null, true, NOON, AT)).toEqual({ label: "3分前", state: "fresh" });
+    expect(freshness("2026-07-11T02:57:00Z", "nonsense", true, NOON, AT).state).toBe("fresh");
   });
 });
 

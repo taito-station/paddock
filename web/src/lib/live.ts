@@ -457,17 +457,32 @@ export type Freshness = {
 
 // スナップショット鮮度（#372）。stale = STALE_MINUTES 超過かつ未発走レース残存
 // （= predict-watch が動いていない疑い）。未発走ゼロなら監視終了（done、警告なし）。
+//
+// 経過はサーバ時刻基準で較正する（#382）。基準経過は `serverNow − lastUpdated`（ともにサーバ由来で
+// クライアント時計のズレを含まない）で取り、fetch 後の経過は `now − fetchedAt`（ともにクライアント時計の
+// 相対差なので絶対オフセットは相殺）で補間する（30 秒 tick で表示だけ進む）。`serverNow` が読めない
+// 旧サーバ等はクライアント時計（`now − lastUpdated`）にフォールバックする（従来挙動）。
 export function freshness(
   lastUpdated: string | null | undefined,
+  serverNow: string | null | undefined,
   hasUpcoming: boolean,
   now: Date,
+  fetchedAt: number,
 ): Freshness {
   let label = "—";
   let diffMs: number | null = null;
   if (lastUpdated) {
     const t = new Date(lastUpdated);
     if (!Number.isNaN(t.getTime())) {
-      diffMs = Math.max(0, now.getTime() - t.getTime());
+      const s = serverNow ? new Date(serverNow) : null;
+      const serverOk = s != null && !Number.isNaN(s.getTime());
+      // 基準経過: サーバ時刻差（skew-free）。serverNow 欠落/不正時はクライアント時計へフォールバック。
+      const base = serverOk
+        ? s.getTime() - t.getTime()
+        : now.getTime() - t.getTime();
+      // fetch 後の経過: クライアント相対差で補間（フォールバック時は now が基準なので加算しない）。
+      const localDelta = serverOk ? now.getTime() - fetchedAt : 0;
+      diffMs = Math.max(0, base + localDelta);
       const mins = Math.floor(diffMs / 60_000);
       label =
         mins < 1
