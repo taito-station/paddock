@@ -4,6 +4,7 @@ import {
   isVenueSlug,
   parseAnalyzeParams,
   analyzeSearchParams,
+  completeCourse,
   DEFAULT_COURSE,
   type CourseParams,
 } from "./analyze";
@@ -107,15 +108,35 @@ describe("analyzeSearchParams", () => {
   });
 });
 
+describe("completeCourse", () => {
+  it("会場 slug + 距離が揃えば同値を返す", () => {
+    const c: CourseParams = { venue: "kyoto", distance: "1800", surface: "turf" };
+    expect(completeCourse(c)).toEqual(c);
+  });
+  it("会場・距離が欠ける/不正なら null", () => {
+    expect(completeCourse({ venue: "", distance: "1800", surface: "turf" })).toBeNull();
+    expect(completeCourse({ venue: "kyoto", distance: "", surface: "turf" })).toBeNull();
+    expect(completeCourse({ venue: "oi", distance: "1800", surface: "turf" })).toBeNull();
+    expect(completeCourse({ venue: "kyoto", distance: "x", surface: "turf" })).toBeNull();
+  });
+});
+
 describe("round-trip: parse ∘ serialize = 恒等（アクティブタブ分）", () => {
   it("name タブ", () => {
     const url = analyzeSearchParams("trainer", { name: "藤沢和雄" }, "2026-07-14");
     const back = parseAnalyzeParams(new URLSearchParams(url.toString()));
     expect(back).toEqual({ kind: "trainer", name: "藤沢和雄", course: DEFAULT_COURSE });
   });
-  it("course タブ", () => {
+  it("course タブ（dirt）", () => {
     const c: CourseParams = { venue: "hanshin", distance: "1200", surface: "dirt" };
     const url = analyzeSearchParams("course", { course: c }, "2026-07-14");
+    const back = parseAnalyzeParams(new URLSearchParams(url.toString()));
+    expect(back).toEqual({ kind: "course", name: "", course: c });
+  });
+  it("course タブ（既定 turf は URL 省略→parse で復元）", () => {
+    const c: CourseParams = { venue: "tokyo", distance: "2000", surface: "turf" };
+    const url = analyzeSearchParams("course", { course: c }, "2026-07-14");
+    expect(url.get("surface")).toBeNull(); // turf は省略されている
     const back = parseAnalyzeParams(new URLSearchParams(url.toString()));
     expect(back).toEqual({ kind: "course", name: "", course: c });
   });

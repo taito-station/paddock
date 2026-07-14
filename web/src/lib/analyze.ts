@@ -61,6 +61,13 @@ export function parseAnalyzeParams(sp: URLSearchParams): AnalyzeState {
   return { kind, name, course };
 }
 
+// course 検索が実行可能か（会場 slug + 距離が揃うか）の単一判定源。揃えば同値を、
+// 欠ければ null を返す。URL からの hydrate と submit 可否の両方でこれを使い、
+// 検証の二重実装を避ける。
+export function completeCourse(c: CourseParams): CourseParams | null {
+  return isVenueSlug(c.venue) && isDistance(c.distance) ? c : null;
+}
+
 // 状態 → URL。date + kind + アクティブタブの検索語を載せる。既定値・空は省略
 // （parseLiveQuery と同流儀。kind=horse・surface=turf は出さない）。
 export function analyzeSearchParams(

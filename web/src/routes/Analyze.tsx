@@ -8,7 +8,7 @@ import {
   parseKind,
   parseAnalyzeParams,
   analyzeSearchParams,
-  isVenueSlug,
+  completeCourse,
   type Kind,
   type NameKind,
   type CourseParams,
@@ -76,7 +76,9 @@ export function Analyze() {
   const kind = parseKind(searchParams.get("kind"));
 
   // 各タブの検索状態は Analyze に lift して切替で保持する（#384。key 再マウント廃止）。
-  // 初期値は URL からアクティブタブ分を hydrate（リロード/共有復元）。
+  // 初期値は URL からアクティブタブ分を hydrate する（リロード/共有復元）。hydrate は初回のみ
+  // で、以降は searchParams 変化に追従しない（全 setSearchParams が replace 運用のため
+  // back/forward で analyze 内の state 履歴は生成されない。kind だけは毎レンダー URL 由来）。
   const [names, setNames] = useState<NameState>(() => {
     const init = parseAnalyzeParams(searchParams);
     const q = init.kind !== "course" ? init.name : "";
@@ -86,10 +88,10 @@ export function Analyze() {
   });
   const [course, setCourse] = useState<CourseState>(() => {
     const init = parseAnalyzeParams(searchParams);
-    const c = init.course;
-    const valid =
-      init.kind === "course" && isVenueSlug(c.venue) && /^\d+$/.test(c.distance);
-    return { form: c, submitted: valid ? c : null };
+    return {
+      form: init.course,
+      submitted: init.kind === "course" ? completeCourse(init.course) : null,
+    };
   });
 
   // アクティブタブの状態を URL に反映（date+kind+検索語）。履歴は汚さない。
@@ -103,6 +105,8 @@ export function Analyze() {
 
   const onNameInput = (k: NameKind, input: string) =>
     setNames((s) => ({ ...s, [k]: { ...s[k], input } }));
+  // submit 系は URL 反映（writeUrl）に確定後の値を同期的に渡す必要があるため、
+  // クロージャの現在値から next を組んで state と URL を一度に更新する。
   const onNameSubmit = (k: NameKind, submitted: string) => {
     const next: NameState = { ...names, [k]: { input: submitted, submitted } };
     setNames(next);
@@ -305,7 +309,7 @@ function CourseAnalyze({
           <option value="turf">芝</option>
           <option value="dirt">ダート</option>
         </select>
-        <button type="submit" disabled={!isVenueSlug(form.venue) || !form.distance}>
+        <button type="submit" disabled={completeCourse(form) === null}>
           検索
         </button>
       </form>
