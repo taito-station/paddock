@@ -12,7 +12,8 @@ use api_server::app::configure_routes;
 use api_server::setup::{UnusedFetcher, UnusedParser};
 use netkeiba_scraper::UreqNetkeibaScraper;
 use paddock_domain::{
-    GateNum, HorseEntry, HorseName, HorseNum, Race, RaceCard, RaceId, Surface, Venue,
+    FinishingPosition, GateNum, HorseEntry, HorseName, HorseNum, HorseResult, JockeyName, Race,
+    RaceCard, RaceId, ResultStatus, Surface, Venue,
 };
 use paddock_use_case::Interactor;
 use paddock_use_case::repository::{
@@ -73,6 +74,39 @@ fn sample_card() -> RaceCard {
             entry(2, 2, "ウマB"),
             entry(3, 3, "ウマC"),
         ],
+    }
+}
+
+/// 部分一致候補（#401）検証用に `results` へ 1 頭分の成績を積む Race。horse/jockey は正規化を通る。
+fn result_race(race_id: &str, horse: &str, jockey: &str) -> Race {
+    Race {
+        race_id: RaceId::try_from(race_id).unwrap(),
+        date: date(),
+        venue: Venue::Tokyo,
+        round: 3,
+        day: 2,
+        race_num: 1,
+        surface: Surface::Turf,
+        distance: 2000,
+        track_condition: None,
+        weather: None,
+        results: vec![HorseResult {
+            finishing_position: Some(FinishingPosition::try_from(1u32).unwrap()),
+            status: ResultStatus::Finished,
+            gate_num: GateNum::try_from(1u32).unwrap(),
+            horse_num: HorseNum::try_from(1u32).unwrap(),
+            horse_name: HorseName::try_from(horse).unwrap(),
+            horse_id: None,
+            jockey: Some(JockeyName::try_from(jockey).unwrap()),
+            trainer: None,
+            time_seconds: None,
+            margin: None,
+            odds: None,
+            horse_weight: None,
+            weight_change: None,
+            weight_carried: None,
+            popularity: None,
+        }],
     }
 }
 
@@ -581,6 +615,62 @@ async fn analyze_horse_returns_stats(pool: sqlx::PgPool) {
     let json = body_json(resp).await;
     assert_eq!(json["horse_name"], "ウマA");
     assert!(json["overall"].is_object());
+}
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn analyze_candidates_partial_match(pool: sqlx::PgPool) {
+    // results に "ダイワ" を含む 2 頭 + 騎手を seed（#401）。ルート結線・q 正規化・{names,truncated} 形を検証。
+    let repo = PostgresRepository::new(pool.clone());
+    repo.save_race(&result_race(
+        "2026-3-tokyo-2-1R",
+        "ダイワスカーレット",
+        "ルメール",
+    ))
+    .await
+    .unwrap();
+    repo.save_race(&result_race(
+        "2026-3-tokyo-2-2R",
+        "ダイワメジャー",
+        "横山和生",
+    ))
+    .await
+    .unwrap();
+
+    let app = build_service!(pool);
+
+    // "ダイワ"（部分）→ 名前昇順で 2 件・truncated=false。q の非 ASCII は percent-encode する。
+    let req = test::TestRequest::get()
+        .uri("/api/analyze/horse/candidates?q=%E3%83%80%E3%82%A4%E3%83%AF")
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert!(resp.status().is_success(), "status: {}", resp.status());
+    let json = body_json(resp).await;
+    assert_eq!(
+        json["names"],
+        serde_json::json!(["ダイワスカーレット", "ダイワメジャー"])
+    );
+    assert_eq!(json["truncated"], false);
+
+    // 騎手も同経路で候補が引ける（/jockey/candidates のルート結線確認）。"ルメ" → ["ルメール"]。
+    let jreq = test::TestRequest::get()
+        .uri("/api/analyze/jockey/candidates?q=%E3%83%AB%E3%83%A1")
+        .to_request();
+    let jresp = test::call_service(&app, jreq).await;
+    assert!(jresp.status().is_success(), "status: {}", jresp.status());
+    let jjson = body_json(jresp).await;
+    assert_eq!(jjson["names"], serde_json::json!(["ルメール"]));
+
+    // trainer/candidates の結線確認 + 0 件（該当なし）の封筒。seed に trainer は無いので
+    // 任意語でも空。3 ハンドラは同型なので trainer は結線と空応答の代表として最小検証する
+    // （truncated=true は handler ユニット over_limit_is_truncated で担保）。"ゾゾ" = 該当なし。
+    let treq = test::TestRequest::get()
+        .uri("/api/analyze/trainer/candidates?q=%E3%82%BE%E3%82%BE")
+        .to_request();
+    let tresp = test::call_service(&app, treq).await;
+    assert!(tresp.status().is_success(), "status: {}", tresp.status());
+    let tjson = body_json(tresp).await;
+    assert_eq!(tjson["names"], serde_json::json!([]));
+    assert_eq!(tjson["truncated"], false);
 }
 
 #[sqlx::test(migrations = "../../../deployments/db/migrations")]

@@ -20,12 +20,24 @@ where
                 web::get().to(handler::analyze::analyze_horse::<R, P, F>),
             )
             .route(
+                "/horse/candidates",
+                web::get().to(handler::analyze::analyze_horse_candidates::<R, P, F>),
+            )
+            .route(
                 "/jockey",
                 web::get().to(handler::analyze::analyze_jockey::<R, P, F>),
             )
             .route(
+                "/jockey/candidates",
+                web::get().to(handler::analyze::analyze_jockey_candidates::<R, P, F>),
+            )
+            .route(
                 "/trainer",
                 web::get().to(handler::analyze::analyze_trainer::<R, P, F>),
+            )
+            .route(
+                "/trainer/candidates",
+                web::get().to(handler::analyze::analyze_trainer_candidates::<R, P, F>),
             )
             .route(
                 "/course",

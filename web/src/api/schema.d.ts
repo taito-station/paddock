@@ -38,6 +38,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/analyze/horse/candidates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 馬名の部分一致候補（#401）。 */
+        get: operations["analyze_horse_candidates"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/analyze/jockey": {
         parameters: {
             query?: never;
@@ -55,6 +72,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/analyze/jockey/candidates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 騎手名の部分一致候補（#401）。 */
+        get: operations["analyze_jockey_candidates"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/analyze/trainer": {
         parameters: {
             query?: never;
@@ -64,6 +98,23 @@ export interface paths {
         };
         /** 調教師の成績統計。 */
         get: operations["analyze_trainer"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/analyze/trainer/candidates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 調教師名の部分一致候補（#401）。 */
+        get: operations["analyze_trainer_candidates"];
         put?: never;
         post?: never;
         delete?: never;
@@ -309,6 +360,18 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * @description `GET /api/analyze/{horse,jockey,trainer}/candidates?q=` のレスポンス（部分一致候補・#401）。
+         *
+         *     名前の中間一致（正規化は取り込み時と共有・#50）で引いた候補名の一覧。上限を超えたときは
+         *     `truncated=true`（＝「N 件以上」相当）。呼び出し側は 1 件なら stats を引き、多数なら一覧提示する。
+         */
+        AnalyzeCandidatesResponse: {
+            /** @description 一致した名前（正規化済み・昇順・最大 `limit` 件）。 */
+            names: string[];
+            /** @description 上限を超えて打ち切られたか（true のとき候補はさらにある）。 */
+            truncated: boolean;
+        };
         /** @description outcome 記録の 1 買い目（リクエスト）。race_id はパスから取るため含めない。 */
         BetInput: {
             /** @description 馬券種ラベル（例 `単勝` / `馬連`）。 */
@@ -1086,7 +1149,7 @@ export interface operations {
     analyze_horse: {
         parameters: {
             query: {
-                /** @description 対象の名前（完全一致。あいまい検索は #50）。 */
+                /** @description 対象の名前（完全一致。部分一致候補は `/candidates`・#401）。 */
                 name: string;
             };
             header?: never;
@@ -1124,10 +1187,51 @@ export interface operations {
             };
         };
     };
+    analyze_horse_candidates: {
+        parameters: {
+            query: {
+                /** @description 検索語（中間一致。正規化は取り込み時と共有・#50）。 */
+                q: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 馬名の部分一致候補 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalyzeCandidatesResponse"];
+                };
+            };
+            /** @description 名前不正 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description 内部エラー */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
     analyze_jockey: {
         parameters: {
             query: {
-                /** @description 対象の名前（完全一致。あいまい検索は #50）。 */
+                /** @description 対象の名前（完全一致。部分一致候補は `/candidates`・#401）。 */
                 name: string;
             };
             header?: never;
@@ -1165,10 +1269,51 @@ export interface operations {
             };
         };
     };
+    analyze_jockey_candidates: {
+        parameters: {
+            query: {
+                /** @description 検索語（中間一致。正規化は取り込み時と共有・#50）。 */
+                q: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 騎手名の部分一致候補 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalyzeCandidatesResponse"];
+                };
+            };
+            /** @description 名前不正 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description 内部エラー */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
     analyze_trainer: {
         parameters: {
             query: {
-                /** @description 対象の名前（完全一致。あいまい検索は #50）。 */
+                /** @description 対象の名前（完全一致。部分一致候補は `/candidates`・#401）。 */
                 name: string;
             };
             header?: never;
@@ -1184,6 +1329,47 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TrainerStatsResponse"];
+                };
+            };
+            /** @description 名前不正 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description 内部エラー */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    analyze_trainer_candidates: {
+        parameters: {
+            query: {
+                /** @description 検索語（中間一致。正規化は取り込み時と共有・#50）。 */
+                q: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 調教師名の部分一致候補 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalyzeCandidatesResponse"];
                 };
             };
             /** @description 名前不正 */

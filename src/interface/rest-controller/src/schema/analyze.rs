@@ -63,6 +63,18 @@ impl From<HorseStatsRow> for HorseStatsResponse {
     }
 }
 
+/// `GET /api/analyze/{horse,jockey,trainer}/candidates?q=` のレスポンス（部分一致候補・#401）。
+///
+/// 名前の中間一致（正規化は取り込み時と共有・#50）で引いた候補名の一覧。上限を超えたときは
+/// `truncated=true`（＝「N 件以上」相当）。呼び出し側は 1 件なら stats を引き、多数なら一覧提示する。
+#[derive(Debug, Serialize, ToSchema)]
+pub struct AnalyzeCandidatesResponse {
+    /// 一致した名前（正規化済み・昇順・最大 `limit` 件）。
+    pub names: Vec<String>,
+    /// 上限を超えて打ち切られたか（true のとき候補はさらにある）。
+    pub truncated: bool,
+}
+
 /// `GET /api/analyze/course?venue=&distance=&surface=` のレスポンス。
 #[derive(Debug, Serialize, ToSchema)]
 pub struct CourseStatsResponse {

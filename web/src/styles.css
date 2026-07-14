@@ -222,6 +222,28 @@ button:disabled {
   border-color: var(--overlay-border);
 }
 
+/* 部分一致の複数ヒット候補（#401）。見た目は .tab / .tab-active を流用する。 */
+.candidate-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 1rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+.candidate {
+  background: var(--surface-2);
+  border: 1px solid var(--border-2);
+  color: var(--text);
+}
+
+.candidate-active {
+  background: var(--overlay-bg);
+  color: var(--overlay-text);
+  border-color: var(--overlay-border);
+}
+
 .stat-block {
   margin-bottom: 1.5rem;
 }
