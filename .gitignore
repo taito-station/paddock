@@ -29,5 +29,9 @@ logs/
 # Serena MCP のローカルキャッシュ・ローカル上書き設定（バージョン管理対象外）
 .serena/
 
+# mdq (Markdown Query) の索引 DB と venv（セッション毎に再ビルド前提・共有しない）
+.mdq/
+tools/mdq/.venv/
+
 # late_money_probe.py の netkeiba 結果ページローカルキャッシュ（#315）
 scripts/predict-check/.cache_nk_results/

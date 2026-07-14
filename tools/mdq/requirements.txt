@@ -1,0 +1,5 @@
+# mdq (Markdown Query) の実行に必要な依存。BM25(語彙検索)のみ・完全ローカル。
+# semantic_paragraph / watch を使う場合の fastembed/nltk/numpy/watchdog は含めない。
+rank_bm25>=0.2.2
+tiktoken>=0.7.0
+PyYAML>=6.0
