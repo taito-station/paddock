@@ -1,0 +1,6 @@
+# mdq (Markdown Query) の実行に必要な依存。BM25(語彙検索)のみ・完全ローカル。
+# 必須ランタイム: Python >= 3.11（config.py が標準ライブラリ tomllib を使うため。3.10 以下は不可）。
+# semantic_paragraph / watch を使う場合の fastembed/nltk/numpy/watchdog は含めない。
+# トークン見積りは chars/4 ヒューリスティックのため tiktoken は不要。
+rank_bm25>=0.2.2
+PyYAML>=6.0

@@ -1,0 +1,16 @@
+mdq (Markdown Query) — vendored into paddock
+
+このディレクトリ配下の `mdq/` パッケージは以下のプロジェクトから取り込んだもの（vendoring）です。
+
+  Source : dahatake/HypervelocityEngineering (HVE)
+           https://github.com/dahatake/HypervelocityEngineering
+  License: MIT License (see ./LICENSE)
+  Copyright (c) 2026 Daiyu Hatakeyama
+
+改変点:
+- BM25（語彙検索）による完全ローカル利用に絞って取り込み。外部 API・埋め込みは使わない。
+- HVE 本体に結合するモジュール `usage_stats.py`（`from hve import run_journal`）は取り込んでいない。
+- semantic_paragraph / watch などの任意機能のファイルは同梱するが、必要な追加依存
+  （fastembed / nltk / numpy / watchdog）は既定でインストールしない（requirements.txt 参照）。
+
+MIT ライセンスの条件に従い、上記著作権表示と LICENSE 全文を本ディレクトリに保持しています。

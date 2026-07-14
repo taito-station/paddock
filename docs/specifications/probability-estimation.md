@@ -1,4 +1,26 @@
+---
+# knowledge 規約に基づくメタデータ（docs/knowledge/README.md）。specifications はその場で
+# knowledge に昇格（ADR 履歴・相互リンクを壊さないため物理移動しない）。
+status: Confirmed
+kind: knowledge
+sources:
+  - docs/adr/0007-probability-monotonicity-jockey.md
+  - docs/adr/0009-recent-form-feature.md
+  - docs/adr/0011-track-condition-feature.md
+  - docs/adr/0012-trainer-stats-feature.md
+  - docs/adr/0014-none-baseline-exclusion.md
+  - docs/adr/0016-shrinkage-and-recency.md
+  - docs/adr/0042-win-power-calibration-adopted.md
+  - docs/adr/0056-feature-reweight-course-gate-jockey.md
+  - docs/adr/0057-impute-missing-factors-field-mean.md
+distilled_from_sha: "a81421b"
+updated: "2026-07-14"
+---
+
 # 着順確率推定モデル仕様書
+
+> このドキュメントは knowledge（確定済みドメイン知）です。決定の経緯は frontmatter `sources` の
+> ADR を参照。変更時は末尾「変更履歴」に追記し `updated`/`distilled_from_sha` を更新すること。
 
 Issue #11 対応。DB に蓄積された過去成績をもとに、出走馬ごとの 1 着・2 着・3 着確率を推定する。
 
@@ -400,3 +422,9 @@ paddock-analyze predict <race_id>
 - 全馬スタッツ皆無の均等フォールバック時は place/show が高め（小頭数では show=1.0）に出るため、
   複勝 EV（`show_prob` 使用）がオッズ次第で買い目を誘発しうる。情報ゼロ時の買い目抑制は将来課題
 - 確率の絶対値より**レース内の相対的な傾向**を見るための参考値として使うこと
+
+---
+
+## 変更履歴
+
+- 2026-07-14: knowledge 規約（status/sources/参照SHA）に基づき frontmatter を付与し knowledge へ昇格（内容変更なし・pilot 移行）。物理移動はせず ADR 履歴/相互リンクを維持。詳細は [docs/knowledge/README.md](../knowledge/README.md)。

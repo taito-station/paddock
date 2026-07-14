@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# mdq (Markdown Query) ラッパ。リポジトリ内の docs を BM25 で横断検索する（完全ローカル）。
+# 実体は tools/mdq/mdq（HVE 由来・MIT。tools/mdq/NOTICE 参照）。
+#
+# 初回セットアップ:
+#   python3 -m venv tools/mdq/.venv
+#   tools/mdq/.venv/bin/pip install -r tools/mdq/requirements.txt
+#
+# 使い方:
+#   scripts/mdq index                                   # 索引を作成/更新（増分）
+#   scripts/mdq search --q "キーワード" --top-k 5       # 検索（既定 --strategy auto）
+#   scripts/mdq get --chunk-id <ID>                     # チャンク本文を取得
+#   scripts/mdq stats                                   # 索引統計
+set -euo pipefail
+
+# リポジトリルート（mdq.toml と .mdq/ の基準）。
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+VENV_PY="$ROOT/tools/mdq/.venv/bin/python"
+
+if [ ! -x "$VENV_PY" ]; then
+  echo "mdq venv が未作成です。次を実行してください（python3 は 3.11 以上）:" >&2
+  echo "  python3 -m venv tools/mdq/.venv && tools/mdq/.venv/bin/pip install -r tools/mdq/requirements.txt" >&2
+  exit 1
+fi
+
+# mdq.toml を cwd=ROOT で発見させ、tools/mdq を import パスに通す。
+cd "$ROOT"
+exec env PYTHONPATH="$ROOT/tools/mdq" "$VENV_PY" -m mdq "$@"

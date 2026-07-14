@@ -1,0 +1,10 @@
+# mdq (Markdown Query) の索引対象。BM25・完全ローカル。詳細は tools/mdq/mdq/config.py。
+# 存在しないディレクトリは自動スキップされる（knowledge/qa/original-docs は段階導入）。
+[index]
+roots = [
+  "docs/adr",
+  "docs/specifications",
+  "docs/knowledge",
+  "docs/qa",
+  "docs/original-docs",
+]
