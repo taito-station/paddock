@@ -174,6 +174,7 @@ async fn save_race_card_reingest_removes_only_absent_entries(pool: sqlx::PgPool)
         surface: Surface::Turf,
         distance: 1800,
         race_class: None,
+        race_name: None,
         entries,
     };
 
@@ -211,6 +212,7 @@ async fn save_race_card_coalesce_keeps_trainer_from_netkeiba(pool: sqlx::PgPool)
         surface: Surface::Turf,
         distance: 1800,
         race_class: None,
+        race_name: None,
         entries: vec![HorseEntry {
             gate_num: GateNum::try_from(1u32).unwrap(),
             horse_num: HorseNum::try_from(1u32).unwrap(),
@@ -295,6 +297,7 @@ async fn save_race_card_normalizes_trainer_abbr_to_full_name(pool: sqlx::PgPool)
         surface: Surface::Turf,
         distance: 1800,
         race_class: None,
+        race_name: None,
         entries: vec![HorseEntry {
             gate_num: GateNum::try_from(1u32).unwrap(),
             horse_num: HorseNum::try_from(1u32).unwrap(),
@@ -371,6 +374,7 @@ async fn save_race_card_normalizes_trainer_via_same_race_join(pool: sqlx::PgPool
         surface: Surface::Turf,
         distance: 2000,
         race_class: None,
+        race_name: None,
         entries: vec![HorseEntry {
             gate_num: GateNum::try_from(1u32).unwrap(),
             horse_num: HorseNum::try_from(1u32).unwrap(),
@@ -412,6 +416,7 @@ async fn save_race_card_keeps_trainer_when_no_results_match(pool: sqlx::PgPool) 
         surface: Surface::Turf,
         distance: 1800,
         race_class: None,
+        race_name: None,
         entries: vec![HorseEntry {
             gate_num: GateNum::try_from(1u32).unwrap(),
             horse_num: HorseNum::try_from(1u32).unwrap(),
@@ -490,6 +495,7 @@ async fn save_race_card_keeps_ambiguous_trainer_abbr(pool: sqlx::PgPool) {
         surface: Surface::Turf,
         distance: 1800,
         race_class: None,
+        race_name: None,
         entries: vec![HorseEntry {
             gate_num: GateNum::try_from(1u32).unwrap(),
             horse_num: HorseNum::try_from(1u32).unwrap(),
@@ -531,6 +537,7 @@ async fn save_race_card_round_trips_race_class(pool: sqlx::PgPool) {
         surface: Surface::Turf,
         distance: 2000,
         race_class,
+        race_name: None,
         entries: vec![HorseEntry {
             gate_num: GateNum::try_from(1u32).unwrap(),
             horse_num: HorseNum::try_from(1u32).unwrap(),
@@ -571,6 +578,63 @@ async fn save_race_card_round_trips_race_class(pool: sqlx::PgPool) {
 }
 
 #[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn save_race_card_round_trips_race_name(pool: sqlx::PgPool) {
+    // race_name（#389）が保存 → 取得で往復すること、かつ netkeiba が入れたレース名を
+    // 後続の PDF 経路（race_name=None）が COALESCE で消さないことを検証する（race_class と同方針）。
+    let repo = PostgresRepository::new(pool);
+    let rid = "2026-3-nakayama-8-11R";
+    let make_card = |race_name: Option<&str>| RaceCard {
+        race_id: RaceId::try_from(rid).unwrap(),
+        date: d(),
+        post_time: None,
+        venue: Venue::Nakayama,
+        round: 3,
+        day: 8,
+        race_num: 11,
+        surface: Surface::Turf,
+        distance: 2000,
+        race_class: None,
+        race_name: race_name.map(|s| s.to_string()),
+        entries: vec![HorseEntry {
+            gate_num: GateNum::try_from(1u32).unwrap(),
+            horse_num: HorseNum::try_from(1u32).unwrap(),
+            horse_name: HorseName::try_from("ウマZ").unwrap(),
+            jockey: None,
+            trainer: None,
+            weight_carried: None,
+        }],
+    };
+
+    // netkeiba 経路がレース名を書く。
+    repo.save_race_card(&make_card(Some("七夕賞")))
+        .await
+        .unwrap();
+    let loaded = repo
+        .find_race_card(&RaceId::try_from(rid).unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        loaded.race_name.as_deref(),
+        Some("七夕賞"),
+        "保存したレース名が往復する"
+    );
+
+    // 後続の PDF 経路（race_name=None）が上書きしてもレース名は保持される（COALESCE）。
+    repo.save_race_card(&make_card(None)).await.unwrap();
+    let loaded = repo
+        .find_race_card(&RaceId::try_from(rid).unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        loaded.race_name.as_deref(),
+        Some("七夕賞"),
+        "PDF 経路の None は netkeiba のレース名を消さない"
+    );
+}
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
 async fn save_race_card_persists_all_race_class_variants(pool: sqlx::PgPool) {
     // migration の CHECK 制約のスラッグ集合と RaceClass::as_str の drift を検知する（#345）。
     // 全 10 変種を保存 → 取得で往復し、CHECK 漏れなら save 時に落ちる。新変種を追加して
@@ -601,6 +665,7 @@ async fn save_race_card_persists_all_race_class_variants(pool: sqlx::PgPool) {
             surface: Surface::Turf,
             distance: 1800,
             race_class: Some(*rc),
+            race_name: None,
             entries: vec![HorseEntry {
                 gate_num: GateNum::try_from(1u32).unwrap(),
                 horse_num: HorseNum::try_from(1u32).unwrap(),

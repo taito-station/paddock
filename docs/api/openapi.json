@@ -2810,6 +2810,13 @@
             ],
             "description": "発走時刻 `HH:MM`（未取得は `null`）。"
           },
+          "race_class": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "格付けスラッグ（`g1`/`g2`/`g3`/`listed`/`open`… #345。盤ヘッダのグレード表記に使う。未判定は `null`）。"
+          },
           "race_comment": {
             "type": [
               "string",
@@ -2819,6 +2826,13 @@
           },
           "race_id": {
             "type": "string"
+          },
+          "race_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "表示用レース名（重賞・特別戦名。未保存/PDF 経路なら `null`。#389）。"
           },
           "race_num": {
             "type": "integer",
@@ -2889,8 +2903,22 @@
               "$ref": "#/components/schemas/HorseEntrySchema"
             }
           },
+          "race_class": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "格付けスラッグ（`g1`/`g2`/`g3`/`listed`/`open`/`win3`… 由来 #345。未判定/PDF 経路なら `null`）。"
+          },
           "race_id": {
             "type": "string"
+          },
+          "race_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "表示用レース名（race_cards 由来。重賞・特別戦名。未保存/PDF 経路なら `null`。#389）。"
           },
           "race_num": {
             "type": "integer",
@@ -2963,6 +2991,13 @@
           "race_id": {
             "type": "string",
             "description": "レース ID（`RaceId` の文字列表現）。"
+          },
+          "race_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "表示用レース名（race_cards 由来。重賞・特別戦名。未保存/PDF 経路なら `null`。#389）。"
           },
           "race_num": {
             "type": "integer",

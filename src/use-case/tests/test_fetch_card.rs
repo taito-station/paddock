@@ -136,6 +136,7 @@ impl NetkeibaScraper for FakeScraper {
             surface: Surface::Turf,
             distance: 1600,
             race_class: None,
+            race_name: None,
             entries: vec![
                 entry(1, 1, "ウマエー", "戸崎圭", "藤沢和"),
                 entry(2, 2, "ウマビー", "武豊", "友道康"),
@@ -235,6 +236,12 @@ impl RaceCardRepository for RecordingRepo {
         &self,
         _date: chrono::NaiveDate,
     ) -> Result<std::collections::HashMap<RaceId, chrono::NaiveTime>> {
+        unimplemented!()
+    }
+    async fn find_race_names_by_date(
+        &self,
+        _date: chrono::NaiveDate,
+    ) -> Result<std::collections::HashMap<RaceId, String>> {
         unimplemented!()
     }
 }

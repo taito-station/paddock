@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
-import { pct, yen, SURFACE_JP, VENUE_JP } from "../lib/format";
+import { pct, yen, raceTitle, SURFACE_JP, VENUE_JP } from "../lib/format";
 import {
   DEFAULT_RACE_BUDGET,
   boardBudget,
@@ -156,12 +156,17 @@ export function RaceBoard() {
         .sort((a, b) => a.race_num - b.race_num)
     : [];
 
+  // レース名(グレード)。raceTitle は名前が無ければ "" を返すので、前置スペースだけ条件付きにする。
+  const headTitle = d ? raceTitle(d.race_name, d.race_class) : "";
+
   return (
     <section className="board-view">
       <div className="toolbar">
         <h2>
           {d
-            ? `${VENUE_JP[d.venue] ?? d.venue} ${d.race_num}R ${SURFACE_JP[d.surface] ?? d.surface}${d.distance}m`
+            ? `${VENUE_JP[d.venue] ?? d.venue} ${d.race_num}R ${SURFACE_JP[d.surface] ?? d.surface}${d.distance}m${
+                headTitle ? ` ${headTitle}` : ""
+              }`
             : raceId}
         </h2>
         {d?.post_time && <span className="muted">発走 {d.post_time}</span>}

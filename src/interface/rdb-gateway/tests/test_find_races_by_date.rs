@@ -48,6 +48,7 @@ fn card(race_id: &str, race_num: u32) -> RaceCard {
         surface: Surface::Turf,
         distance: 1800,
         race_class: None,
+        race_name: None,
         entries: vec![HorseEntry {
             gate_num: GateNum::try_from(1u32).unwrap(),
             horse_num: HorseNum::try_from(1u32).unwrap(),
@@ -186,6 +187,44 @@ async fn find_post_times_by_date_maps_only_saved_post_times(pool: sqlx::PgPool) 
     let other = NaiveDate::from_ymd_opt(2026, 5, 31).unwrap();
     assert!(
         repo.find_post_times_by_date(other)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn find_race_names_by_date_maps_only_saved_names(pool: sqlx::PgPool) {
+    // #389: 指定日の race_name を race_id → String で一括取得。NULL 行（未設定）は含まれない。
+    let repo = PostgresRepository::new(pool);
+    let mut c1 = card("2026-3-nakayama-8-1R", 1);
+    c1.race_name = Some("七夕賞".to_string());
+    repo.save_race_card(&c1).await.unwrap();
+    let mut c2 = card("2026-3-nakayama-8-2R", 2);
+    c2.race_name = Some("響灘特別".to_string());
+    repo.save_race_card(&c2).await.unwrap();
+    // race_name 未設定（None）のレースはマップに含まれない。
+    repo.save_race_card(&card("2026-3-nakayama-8-3R", 3))
+        .await
+        .unwrap();
+
+    let map = repo.find_race_names_by_date(d()).await.unwrap();
+    assert_eq!(map.len(), 2, "race_name が保存済みのレースだけ含まれる");
+    let id = |s: &str| RaceId::try_from(s).unwrap();
+    assert_eq!(
+        map.get(&id("2026-3-nakayama-8-1R")).map(String::as_str),
+        Some("七夕賞")
+    );
+    assert_eq!(
+        map.get(&id("2026-3-nakayama-8-2R")).map(String::as_str),
+        Some("響灘特別")
+    );
+    assert!(!map.contains_key(&id("2026-3-nakayama-8-3R")));
+
+    // 別日は空マップ。
+    let other = NaiveDate::from_ymd_opt(2026, 5, 31).unwrap();
+    assert!(
+        repo.find_race_names_by_date(other)
             .await
             .unwrap()
             .is_empty()

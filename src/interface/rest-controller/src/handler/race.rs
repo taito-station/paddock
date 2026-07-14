@@ -106,11 +106,13 @@ where
     let races = interactor.races_by_date(date).await?;
     // 発走時刻は race_cards を一次ソースに一括で引き当てる（watch 判定記録に依存させない、#391）。
     let post_times = interactor.post_times_by_date(date).await?;
+    // レース名も race_cards から一括で引き当てる（重賞・特別戦名をヘッダに出す、#389）。
+    let race_names = interactor.race_names_by_date(date).await?;
     let body = RaceListResponse {
         date,
         races: races
             .iter()
-            .map(|r| RaceSummary::new(r, &post_times))
+            .map(|r| RaceSummary::new(r, &post_times, &race_names))
             .collect(),
     };
     Ok(HttpResponse::Ok().json(body))

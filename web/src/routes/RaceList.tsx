@@ -57,7 +57,11 @@ function StaticRow({
       <td>
         <Link to={boardHref(r.race_id, date, back)}>{r.race_num}</Link>
       </td>
-      <td>{VENUE_JP[r.venue] ?? r.venue}</td>
+      <td>
+        {VENUE_JP[r.venue] ?? r.venue}
+        {/* レース名（重賞・特別戦名）。無ければ出さない（#389）。 */}
+        {r.race_name && <span className="race-name-sub">{r.race_name}</span>}
+      </td>
       {/* 発走時刻は race_cards 正本（#391）。未取得は "—"（不明扱い）。 */}
       <td>{r.post_time ?? "—"}</td>
       <td>{r.distance}m</td>

@@ -871,9 +871,13 @@ export interface components {
             partners: number[];
             /** @description 発走時刻 `HH:MM`（未取得は `null`）。 */
             post_time?: string | null;
+            /** @description 格付けスラッグ（`g1`/`g2`/`g3`/`listed`/`open`… #345。盤ヘッダのグレード表記に使う。未判定は `null`）。 */
+            race_class?: string | null;
             /** @description レース書評（混戦度・◎の狙いどころ・妙味）。人手優先・無ければルールベース生成（#348）。`null` 可。 */
             race_comment?: string | null;
             race_id: string;
+            /** @description 表示用レース名（重賞・特別戦名。未保存/PDF 経路なら `null`。#389）。 */
+            race_name?: string | null;
             /** Format: int32 */
             race_num: number;
             /**
@@ -898,7 +902,11 @@ export interface components {
             /** Format: int32 */
             distance: number;
             entries: components["schemas"]["HorseEntrySchema"][];
+            /** @description 格付けスラッグ（`g1`/`g2`/`g3`/`listed`/`open`/`win3`… 由来 #345。未判定/PDF 経路なら `null`）。 */
+            race_class?: string | null;
             race_id: string;
+            /** @description 表示用レース名（race_cards 由来。重賞・特別戦名。未保存/PDF 経路なら `null`。#389）。 */
+            race_name?: string | null;
             /** Format: int32 */
             race_num: number;
             /** Format: int32 */
@@ -931,6 +939,8 @@ export interface components {
             post_time?: string | null;
             /** @description レース ID（`RaceId` の文字列表現）。 */
             race_id: string;
+            /** @description 表示用レース名（race_cards 由来。重賞・特別戦名。未保存/PDF 経路なら `null`。#389）。 */
+            race_name?: string | null;
             /**
              * Format: int32
              * @description レース番号（1..=12）。

@@ -45,6 +45,10 @@ pub struct RaceBoard {
     pub field_size: u32,
     /// 発走時刻 `HH:MM`（出馬表 PDF 経路など未取得は `None`）。
     pub post_time: Option<String>,
+    /// 表示用レース名（#389。例「七夕賞」。netkeiba 経路のみ、無ければ `None`）。
+    pub race_name: Option<String>,
+    /// 格付けスラッグ（#345。例 `g3` / `open`。無ければ `None`）。盤ヘッダのグレード表記に使う。
+    pub race_class: Option<String>,
     /// 買い目ポートフォリオ（保存オッズが無ければ `None`＝買い目は組めない。盤は確率だけで描ける）。
     /// 軸は記録軸（`recorded_axis`）があればそれに固定される（#388・軸ロック）。
     pub portfolio: Option<Portfolio>,
@@ -180,25 +184,30 @@ impl<
             &horses,
         );
 
-        let (venue, surface, distance, race_num, date, post_time) = match card.as_ref() {
-            Some(c) => (
-                c.venue.as_slug().to_string(),
-                c.surface.as_str().to_string(),
-                c.distance,
-                c.race_num,
-                c.date,
-                c.post_time.map(|t| t.format("%H:%M").to_string()),
-            ),
-            // 出馬表が無ければ predict_race_views で NotFound になるのでここには基本到達しない。
-            None => (
-                String::new(),
-                String::new(),
-                0,
-                0,
-                NaiveDate::default(),
-                None,
-            ),
-        };
+        let (venue, surface, distance, race_num, date, post_time, race_name, race_class) =
+            match card.as_ref() {
+                Some(c) => (
+                    c.venue.as_slug().to_string(),
+                    c.surface.as_str().to_string(),
+                    c.distance,
+                    c.race_num,
+                    c.date,
+                    c.post_time.map(|t| t.format("%H:%M").to_string()),
+                    c.race_name.clone(),
+                    c.race_class.map(|rc| rc.as_str().to_string()),
+                ),
+                // 出馬表が無ければ predict_race_views で NotFound になるのでここには基本到達しない。
+                None => (
+                    String::new(),
+                    String::new(),
+                    0,
+                    0,
+                    NaiveDate::default(),
+                    None,
+                    None,
+                    None,
+                ),
+            };
 
         Ok(RaceBoard {
             race_id: race_id.clone(),
@@ -209,6 +218,8 @@ impl<
             distance,
             field_size: views.blended.len() as u32,
             post_time,
+            race_name,
+            race_class,
             portfolio,
             recorded_axis,
             live_axis,

@@ -105,6 +105,8 @@ pub struct FetchedCard {
     /// レースの格付け／条件クラス（#345）。`<title>` のグレード表記と `RaceData02` の
     /// 条件から判定。判定できなければ `None`。
     pub race_class: Option<RaceClass>,
+    /// 表示用のレース名（#389）。`h1.RaceName`（グレード表記は含まない）。取得できなければ `None`。
+    pub race_name: Option<String>,
     pub entries: Vec<FetchedEntry>,
 }
 

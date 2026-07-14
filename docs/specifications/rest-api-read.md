@@ -64,7 +64,7 @@ API なので **OpenAPI 仕様を一級の成果物として整備する**。uto
 GET /api/races?date=YYYY-MM-DD
 ```
 
-- use-case: `races_by_date(date)`（既存。race_num 昇順、`results` は読まない。実体は `repository.find_races_by_date`）＋ `post_times_by_date(date)`（#391。`race_cards.post_time` の一括引き当て。実体は `repository.find_post_times_by_date`）
+- use-case: `races_by_date(date)`（既存。race_num 昇順、`results` は読まない。実体は `repository.find_races_by_date`）＋ `post_times_by_date(date)`（#391。`race_cards.post_time` の一括引き当て。実体は `repository.find_post_times_by_date`）＋ `race_names_by_date(date)`（#389。`race_cards.race_name` の一括引き当て。実体は `repository.find_race_names_by_date`）
 - `date` 必須・`YYYY-MM-DD`。不正フォーマットは `400`。
 - レスポンス: レース配列
 
@@ -72,12 +72,13 @@ GET /api/races?date=YYYY-MM-DD
 {
   "date": "2026-03-28",
   "races": [
-    { "race_id": "...", "venue": "nakayama", "race_num": 1, "distance": 1800, "surface": "turf", "post_time": "15:45" }
+    { "race_id": "...", "venue": "nakayama", "race_num": 1, "distance": 1800, "surface": "turf", "post_time": "15:45", "race_name": "響灘特別" }
   ]
 }
 ```
 
 - `post_time` は `HH:MM`（race_cards 由来）。出馬表未取得・post_time 未保存のレースは `null`。SPA のライブ一覧はこれを発走時刻・状態判定（未発走/終了）の一次ソースにする（watch 判定記録の有無に依存させない、#391）。
+- `race_name` は表示用レース名（race_cards 由来。重賞・特別戦名。未保存/PDF 経路は `null`、#389）。
 
 > 状態バッジ（未処理 / 購入済み / オッズ未取得 等）はセッション(#53)・オッズ(#51) の情報を要するため #33 では返さない。SPA 側が複数 read を合成して表示する（web-spa.md 参照）。
 
@@ -97,6 +98,8 @@ GET /api/races/{race_id}
   "venue": "nakayama",
   "distance": 1800,
   "surface": "turf",
+  "race_name": "七夕賞",
+  "race_class": "g3",
   "entries": [
     { "gate_num": 1, "horse_num": 1, "horse_name": "…", "jockey": "…", "trainer": "…", "weight_carried": 55.0 }
   ]
@@ -104,6 +107,7 @@ GET /api/races/{race_id}
 ```
 
 `jockey` / `trainer` / `weight_carried` は出典により欠落しうる（PDF 出馬表は騎手・調教師・斤量が無い）ため `null` 許容。
+`race_name`（#389）/ `race_class`（#345・スラッグ）も netkeiba 経路のみで、PDF 経路・未判定は `null`。盤（`/board`）レスポンスにも同 2 フィールドを載せ、web はヘッダを「会場 R 馬場距離 レース名(グレード)」で組む（グレード付与は g1/g2/g3/listed のみ）。
 
 ### 3. 確率推定
 

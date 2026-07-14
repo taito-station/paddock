@@ -778,6 +778,13 @@ pub trait RaceCardRepository: Send + Sync {
         &self,
         date: NaiveDate,
     ) -> impl Future<Output = Result<HashMap<RaceId, NaiveTime>>> + Send;
+
+    /// 指定日の全レースの表示用レース名を `race_id → race_name` で返す（`race_cards` 由来）。
+    /// race_name 未保存のレースはマップに含まれない（#389）。
+    fn find_race_names_by_date(
+        &self,
+        date: NaiveDate,
+    ) -> impl Future<Output = Result<HashMap<RaceId, String>>> + Send;
 }
 
 /// レースオッズ（`race_odds`）の保存・取得。

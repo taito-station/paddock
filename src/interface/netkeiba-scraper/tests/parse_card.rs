@@ -21,6 +21,8 @@ fn parses_card_meta_and_entries() {
     assert_eq!(card.post_time, NaiveTime::from_hms_opt(15, 40, 0));
     // レースクラス（#345）。<title>「安田記念(G1)」のグレード表記から G1 と判定する。
     assert_eq!(card.race_class, Some(RaceClass::G1));
+    // レース名（#389）。h1.RaceName「安田記念」から取得（グレード表記は含まない）。
+    assert_eq!(card.race_name.as_deref(), Some("安田記念"));
 
     assert_eq!(card.entries.len(), 17);
 
@@ -43,6 +45,17 @@ fn parses_card_meta_and_entries() {
     // 馬番が 1..=17 で漏れなく並ぶ。
     let nums: Vec<u32> = card.entries.iter().map(|e| e.horse_num.value()).collect();
     assert_eq!(nums, (1..=17).collect::<Vec<_>>());
+}
+
+// レース名は best-effort（#389）。h1.RaceName が無ければ None（他メタ・保存は止めない）。
+#[test]
+fn race_name_is_none_when_absent() {
+    let html = FIXTURE.replace(r#"class="RaceName""#, r#"class="RaceNameGone""#);
+    let card = parse_card(&html, RACE_ID).expect("parse card");
+    assert_eq!(card.race_name, None);
+    // 他メタは通常どおり取れる。
+    assert_eq!(card.distance, 1600);
+    assert_eq!(card.entries.len(), 17);
 }
 
 // グレードが <title> に無いレースは RaceData02 の条件表記からクラスを取る（#345）。安田記念

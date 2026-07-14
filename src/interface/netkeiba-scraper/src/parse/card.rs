@@ -50,6 +50,7 @@ pub fn parse_card(html: &str, netkeiba_race_id: &str) -> Result<FetchedCard> {
     let date = extract_date(&doc, year)?;
     let post_time = extract_post_time(&doc);
     let race_class = extract_race_class(&doc);
+    let race_name = extract_race_name(&doc);
     let entries = extract_entries(&doc)?;
 
     Ok(FetchedCard {
@@ -62,8 +63,25 @@ pub fn parse_card(html: &str, netkeiba_race_id: &str) -> Result<FetchedCard> {
         surface,
         distance,
         race_class,
+        race_name,
         entries,
     })
+}
+
+/// 表示用レース名を `h1.RaceName` から読む（#389）。例「七夕賞」「響灘特別」「3歳上1勝クラス」。
+/// グレード表記（(G1) 等）は含まない（`<title>` 側にあり、格付けは `extract_race_class` が担う）。
+/// 取れない・空なら `None`（best-effort：レース名はカード取得の必須項目ではなく、欠けても保存を止めない）。
+fn extract_race_name(doc: &Html) -> Option<String> {
+    let name = sel("h1.RaceName")
+        .ok()
+        .and_then(|s| doc.select(&s).next().map(|h| h.text().collect::<String>()))
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty());
+    if name.is_none() {
+        // h1.RaceName が空／取得失敗。netkeiba のレイアウト変更の切り分けに使えるよう debug で可視化する。
+        tracing::debug!("h1.RaceName からレース名を読めませんでした");
+    }
+    name
 }
 
 /// `<title>` のグレード表記（例「安田記念(G1)」）と `div.RaceData02` の条件表記

@@ -25,6 +25,27 @@ export function recoveryRate(totalPayout: number, totalBet: number): number | nu
 
 export const SURFACE_JP: Record<string, string> = { turf: "芝", dirt: "ダ" };
 
+// 重賞グレードの表示ラベル（race_class スラッグ→表記）。#389。
+// グレード付き（重賞・L）のみ対象。open/win*/maiden 等の条件クラスは race_name 自体が
+// 「響灘特別」「3歳上1勝クラス」で自己完結するため、名前へのグレード付与はしない。
+export const RACE_CLASS_JP: Record<string, string> = {
+  g1: "G1",
+  g2: "G2",
+  g3: "G3",
+  listed: "L",
+};
+
+// 表示用レース名を組み立てる（#389）。重賞・L は `七夕賞(G3)` のようにグレードを付す。
+// race_name が無ければ空文字（呼び出し側で条件表示のみにフォールバック）。
+export function raceTitle(
+  race_name?: string | null,
+  race_class?: string | null,
+): string {
+  if (!race_name) return "";
+  const grade = race_class ? RACE_CLASS_JP[race_class] : undefined;
+  return grade ? `${race_name}(${grade})` : race_name;
+}
+
 // レース一覧の状態バッジ判定（表示と分離してテスト可能にする）。
 //   bought=購入済み / skipped=見送り(完了セッションで未購入) / pending=未処理(進行中) /
 //   none=セッション未作成で購入状況不明

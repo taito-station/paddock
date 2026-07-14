@@ -29,12 +29,13 @@ struct CardRow {
     surface: String,
     distance: i64,
     race_class: Option<String>,
+    race_name: Option<String>,
 }
 
 pub async fn find_race_card(pool: &PgPool, race_id: &RaceId) -> Result<Option<RaceCard>> {
     let card_row: Option<CardRow> = sqlx::query_as(
         r#"
-        SELECT race_id, date, post_time, venue, round, day, race_num, surface, distance, race_class
+        SELECT race_id, date, post_time, venue, round, day, race_num, surface, distance, race_class, race_name
         FROM race_cards
         WHERE race_id = $1
         "#,
@@ -57,6 +58,7 @@ pub async fn find_race_card(pool: &PgPool, race_id: &RaceId) -> Result<Option<Ra
         surface: surface_str,
         distance,
         race_class: race_class_str,
+        race_name,
     } = row;
 
     let entry_rows: Vec<EntryRow> = sqlx::query_as(
@@ -132,6 +134,9 @@ pub async fn find_race_card(pool: &PgPool, race_id: &RaceId) -> Result<Option<Ra
         surface,
         distance: distance as u32,
         race_class,
+        // race_name は #389 で追加。自由テキストのため往復バリデーション不要（そのまま載せる）。
+        // netkeiba 経路のみ埋め、PDF 経路・旧データは NULL。
+        race_name,
         entries,
     }))
 }
