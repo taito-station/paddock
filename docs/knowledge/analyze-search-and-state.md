@@ -16,11 +16,15 @@ updated: "2026-07-14"
 `/analyze`（`web/src/routes/Analyze.tsx`）の検索・状態設計の確定知。#384 の qa を蒸留したもの。
 決定の経緯・根拠は frontmatter `sources` を参照。
 
-## (a) 名前検索は完全一致（部分一致は #50 待ち）
+## (a) 名前検索は完全一致（REST 未露出。露出は #401）
 
-- 分析統計 API（`/api/analyze/{horse,jockey,trainer}`）の `name` は**完全一致**。部分一致・カタカナ
-  正規化は **#50（API 側対応）** に依存し、Analyze はそれに追従する（`web-spa.md §[4]` / `rest-api-read.md §4`）。
-- したがって web 完結の改修（#384）では**完全一致を維持**する。部分一致/サジェストは #50 の follow-up。
+- REST `GET /api/analyze/{horse,jockey,trainer}` の `name` は**完全一致**（2026-07-14 経験的に確認:
+  部分入力 `カップ`/`松山` は starts=0）。web はこの REST を叩くため完全一致。
+- 部分一致・カタカナ正規化ロジック自体は **#50（CLOSED/COMPLETED）で CLI `analyze` +
+  `horse_stats`/`jockey_stats` repository 層に実装済み**。だが **REST API がそれを使っておらず未露出**。
+  仕様書 `rest-api-read.md §4`・`web-spa.md §[4]` の「#50 に追従」は stale。
+- したがって web 完結の #384 では**完全一致を維持**。REST/web への露出は新規 issue **#401**（#50 の既存
+  normalizer を再利用）で行う。
 
 ## (b) タブ状態保持は「URL 正 + 各タブ lift」
 
@@ -39,3 +43,5 @@ updated: "2026-07-14"
 ## 変更履歴
 
 - 2026-07-14: #384 の qa（[QA-analyze-384](../qa/QA-analyze-384.md)）を蒸留し新規作成（status=Confirmed）。
+- 2026-07-14: (a) を是正。#50 は CLOSED/COMPLETED（CLI/repo に実装済）で REST が未露出、が正確な状態。
+  REST/web 露出は #401 に切り出し。当初「#50 待ち」と記したのは stale な spec 記述の鵜呑みだった。

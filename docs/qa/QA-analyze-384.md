@@ -5,9 +5,12 @@
 
 ## Q1: 馬/騎手/調教師の名前検索を部分一致・サジェスト化できるか（API 側の対応要否）
 
-- 観測/根拠: `rest-api-read.md §4 分析統計`「名前あいまい検索（部分一致・カタカナ正規化, #50）は本 Issue では扱わない。完全一致で…」、`web-spa.md §[4]`「馬名・騎手名検索は #50 に追従」。分析統計 API のクエリは `name`（完全一致）で、部分一致・カタカナ正規化は横断検索側の #50（`prediction-search-api.md`「馬名の正規化」）に依存。
-- 回答: **本 #384（`feat(web)`・web 完結）では扱わない。完全一致を維持し、部分一致/サジェストは #50（API 側対応）に追従する follow-up とする。**
-- 反映先: `Analyze.tsx` は完全一致のまま（placeholder「（完全一致）」維持）。#50 の follow-up として PR に明記。
+- 観測/根拠:
+  - 仕様書 `rest-api-read.md §4`・`web-spa.md §[4]` は「#50 に追従」と記すが、**この記述は stale**（下記）。
+  - **#50 は CLOSED/COMPLETED（2026-06-09）**: 部分一致・カタカナ正規化を **CLI `analyze` + `horse_stats`/`jockey_stats` repository 層に実装済み**。
+  - **ただし REST `GET /api/analyze/{horse,jockey}` は未露出で経験的に完全一致**（2026-07-14 検証: `name=カップ`（`カップッチョ` の部分）→ starts=0、`name=松山`（`松山弘平`）→ starts=0）。web はこの REST を叩くため完全一致。
+- 回答: **本 #384（`feat(web)`・web 完結）では扱わない（REST 側の対応が要るため）。REST/web への露出は新規 issue #401 に切り出す（#50 の既存 normalizer を再利用する方針）。**
+- 反映先: `Analyze.tsx` は完全一致のまま（placeholder「（完全一致）」維持）。露出は #401。stale な spec 記述の是正も #401 に含める。
 
 ## Q2: タブ状態保持は URL クエリ化か state リフトアップか
 

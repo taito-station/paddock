@@ -22,12 +22,18 @@ feat(web): Analyzeの検索状態保持と会場セレクト化
 
 ## 2. 調査で観測した一次情報（2026-07-14 時点・引用）
 
-### 2.1 Analyze API は完全一致のみ（部分一致は #50）
-- `docs/specifications/rest-api-read.md` §4 分析統計:
-  > 名前あいまい検索（部分一致・カタカナ正規化, #50）は本 Issue では扱わない。完全一致でドメ…（略）
-- `docs/specifications/web-spa.md` §[4] 分析ビュー:
-  > 馬名・騎手名検索は #50（部分一致・カタカナ正規化）に追従する。
-- `docs/specifications/prediction-search-api.md`「馬名の正規化（#50 流用）」に正規化の設計あり（横断検索 API 側）。
+### 2.1 Analyze API の名前検索（doc 記述 と 実測は食い違う）
+- doc（**stale**の可能性・下記実測参照）:
+  - `docs/specifications/rest-api-read.md` §4 分析統計:
+    > 名前あいまい検索（部分一致・カタカナ正規化, #50）は本 Issue では扱わない。完全一致でドメ…（略）
+  - `docs/specifications/web-spa.md` §[4] 分析ビュー:
+    > 馬名・騎手名検索は #50（部分一致・カタカナ正規化）に追従する。
+  - `docs/specifications/prediction-search-api.md`「馬名の正規化（#50 流用）」に正規化の設計あり（横断検索 API 側）。
+- **#50 の実状態（gh 確認）**: #50 は **CLOSED / COMPLETED（2026-06-09）**。タイトル「feat(analyze): 馬名/騎手名の
+  部分一致・カタカナ正規化検索を追加」。対象は `src/apps/analyze` と `horse_stats`/`jockey_stats` repository。
+- **REST の実測（2026-07-14, api-server 直叩き）**: `GET /api/analyze/horse?name=カップ`（`カップッチョ` の部分）
+  → `starts=0`。`GET /api/analyze/jockey?name=松山`（`松山弘平`）→ `starts=0`。**REST は完全一致のまま**
+  （#50 の正規化/部分一致は CLI/repo 止まりで REST 未露出）。→ REST/web 露出は #401 に切り出し。
 
 ### 2.2 会場マスタ
 - `web/src/lib/format.ts` に `VENUE_JP: Record<string,string>`（JRA 10 場、slug→日本語。sapporo/hakodate/fukushima/niigata/tokyo/nakayama/chukyo/kyoto/hanshin/kokura）が既存。

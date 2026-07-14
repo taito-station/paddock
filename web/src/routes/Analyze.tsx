@@ -201,7 +201,8 @@ function NameAnalyze({
           onSubmit(input.trim());
         }}
       >
-        {/* 名前検索は完全一致（部分一致・カタカナ正規化は #50・API 側対応待ち）。 */}
+        {/* 名前検索は完全一致（REST が未露出。部分一致・カナ正規化ロジックは #50 で CLI/repo に実装済、
+            REST/web への露出は #401）。 */}
         <input
           type="text"
           placeholder={`${KIND_LABEL[kind]}名（完全一致）`}
