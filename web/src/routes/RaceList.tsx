@@ -185,8 +185,17 @@ export function RaceList() {
     snapshotRaces.length === 0
       ? !isPastDate(date, now)
       : hasUpcomingRaces(snapshotRaces, date, now);
+  // 鮮度はサーバ時刻で較正（#382）。fetch 後の経過補間には React Query の dataUpdatedAt
+  //（＝データ受領時のクライアント時計 ms）を渡す。now（30 秒 tick）との差が fetch 後経過。
+  // live.data が truthy のときだけ計算するので dataUpdatedAt は受領時刻で 0 でない（未取得 0 の罠を回避）。
   const fresh = live.data
-    ? freshness(live.data.summary.last_updated, hasUpcoming, now)
+    ? freshness(
+        live.data.summary.last_updated,
+        live.data.summary.server_now,
+        hasUpcoming,
+        now,
+        live.dataUpdatedAt,
+      )
     : null;
 
   // ソート・絞り込み・日付は URL クエリに反映（既定値は省略）。replace は意図的:

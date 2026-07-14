@@ -669,7 +669,7 @@ export interface components {
             races: components["schemas"]["LiveRaceViewSchema"][];
             summary: components["schemas"]["LiveSummary"];
         };
-        /** @description 一望サマリ（張る本数・監視数・最終更新時刻）。 */
+        /** @description 一望サマリ（張る本数・監視数・最終更新時刻＋サーバ現在時刻）。 */
         LiveSummary: {
             /**
              * Format: int32
@@ -678,6 +678,11 @@ export interface components {
             bet_race_count: number;
             /** @description 全 race 中の最新 `captured_at` の最大値。無ければ null。 */
             last_updated?: string | null;
+            /**
+             * @description レスポンス生成時のサーバ現在時刻（UTC rfc3339, #382）。web はこれと `last_updated` の差で
+             *     経過を較正し、クライアント時計のズレによる鮮度誤判定を避ける。
+             */
+            server_now: string;
             /**
              * Format: int32
              * @description 監視レース数（= `races.len()`）。

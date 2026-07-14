@@ -2238,10 +2238,11 @@
       },
       "LiveSummary": {
         "type": "object",
-        "description": "一望サマリ（張る本数・監視数・最終更新時刻）。",
+        "description": "一望サマリ（張る本数・監視数・最終更新時刻＋サーバ現在時刻）。",
         "required": [
           "bet_race_count",
-          "watched_race_count"
+          "watched_race_count",
+          "server_now"
         ],
         "properties": {
           "bet_race_count": {
@@ -2256,6 +2257,10 @@
               "null"
             ],
             "description": "全 race 中の最新 `captured_at` の最大値。無ければ null。"
+          },
+          "server_now": {
+            "type": "string",
+            "description": "レスポンス生成時のサーバ現在時刻（UTC rfc3339, #382）。web はこれと `last_updated` の差で\n経過を較正し、クライアント時計のズレによる鮮度誤判定を避ける。"
           },
           "watched_race_count": {
             "type": "integer",
