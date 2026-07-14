@@ -65,6 +65,8 @@ https://race.netkeiba.com/race/shutuba.html?race_id=<netkeiba_race_id>
 | 騎手 | `HorseEntry.jockey` | horse_entries | 出馬表 HTML(`td.Jockey a`) |
 | 芝/ダ・距離 | `RaceCard.surface` / `distance` | race_cards | 出馬表 HTML(`div.RaceData01`) |
 | 開催日 | `RaceCard.date` | race_cards | 出馬表 HTML(`YYYY年M月D日`) |
+| レース名 | `RaceCard.race_name`（#389・best-effort） | race_cards | 出馬表 HTML(`h1.RaceName`。グレードは含まない) |
+| 格付け | `RaceCard.race_class`（#345・best-effort） | race_cards | 出馬表 HTML(`<title>`グレード＋`div.RaceData02`条件) |
 | (斤量・性齢) | — | 破棄(スコープ外) | — |
 
 `RaceCard.venue` / `round` / `day` / `race_num` は race_id（12桁）から導出する。
