@@ -481,7 +481,9 @@ export function freshness(
         ? s.getTime() - t.getTime()
         : now.getTime() - t.getTime();
       // fetch 後の経過: クライアント相対差で補間（フォールバック時は now が基準なので加算しない）。
-      const localDelta = serverOk ? now.getTime() - fetchedAt : 0;
+      // refetch 直後は fetchedAt(=dataUpdatedAt) が更新される一方 now は 30 秒 tick で古いままになりうる。
+      // 前置クランプで負の補間を弾き、一過性に「base より若く」見えるのを防ぐ（次 tick 前でも base 以上を保つ）。
+      const localDelta = serverOk ? Math.max(0, now.getTime() - fetchedAt) : 0;
       diffMs = Math.max(0, base + localDelta);
       const mins = Math.floor(diffMs / 60_000);
       label =

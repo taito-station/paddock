@@ -577,6 +577,16 @@ describe("freshness", () => {
     expect(freshness("2026-07-11T02:57:00Z", null, true, NOON, AT)).toEqual({ label: "3分前", state: "fresh" });
     expect(freshness("2026-07-11T02:57:00Z", "nonsense", true, NOON, AT).state).toBe("fresh");
   });
+  it("base 負（server_now が last_updated より前）は 0 クランプで「たった今」fresh", () => {
+    // 異常系だが数式の下限を固定: last_updated が server_now より後 → base<0 → max(0,…)=0。
+    expect(freshness("2026-07-11T03:02:00Z", SNOW, true, NOON, AT)).toEqual({ label: "たった今", state: "fresh" });
+  });
+  it("localDelta 負（fetchedAt が now より未来）は前置クランプで base に等しい", () => {
+    // refetch 直後に dataUpdatedAt が now より進むケース。localDelta を 0 にクランプ → 経過 = base。
+    // base = server_now − last_updated = 3分。fetchedAt = now + 5分でも「3分前」を保つ（過少表示しない）。
+    const future = NOON.getTime() + 5 * 60_000;
+    expect(freshness("2026-07-11T02:57:00Z", SNOW, true, NOON, future)).toEqual({ label: "3分前", state: "fresh" });
+  });
 });
 
 describe("flipNotes", () => {

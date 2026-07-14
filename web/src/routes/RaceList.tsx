@@ -187,6 +187,7 @@ export function RaceList() {
       : hasUpcomingRaces(snapshotRaces, date, now);
   // 鮮度はサーバ時刻で較正（#382）。fetch 後の経過補間には React Query の dataUpdatedAt
   //（＝データ受領時のクライアント時計 ms）を渡す。now（30 秒 tick）との差が fetch 後経過。
+  // live.data が truthy のときだけ計算するので dataUpdatedAt は受領時刻で 0 でない（未取得 0 の罠を回避）。
   const fresh = live.data
     ? freshness(
         live.data.summary.last_updated,
