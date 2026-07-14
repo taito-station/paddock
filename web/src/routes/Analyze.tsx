@@ -61,8 +61,9 @@ function StatTable({ title, rows }: { title: string; rows: GroupStat[] }) {
   );
 }
 
-// name 系タブの lift 状態。
-type NameSlot = { input: string; submitted: string };
+// name 系タブの lift 状態。submitted=確定した検索語（部分一致）、selected=一覧から確定した名前。
+// 同一 NameAnalyze インスタンスがタブ間で使い回されるため、選択は kind 別に親が保持する（#401）。
+type NameSlot = { input: string; submitted: string; selected: string };
 type NameState = Record<NameKind, NameSlot>;
 // course タブの lift 状態（form=編集中 / submitted=確定した検索）。
 type CourseState = { form: CourseParams; submitted: CourseParams | null };
@@ -83,7 +84,9 @@ export function Analyze() {
     const init = parseAnalyzeParams(searchParams);
     const q = init.kind !== "course" ? init.name : "";
     const slot = (k: NameKind): NameSlot =>
-      init.kind === k ? { input: q, submitted: q } : { input: "", submitted: "" };
+      init.kind === k
+        ? { input: q, submitted: q, selected: "" }
+        : { input: "", submitted: "", selected: "" };
     return { horse: slot("horse"), jockey: slot("jockey"), trainer: slot("trainer") };
   });
   const [course, setCourse] = useState<CourseState>(() => {
@@ -107,11 +110,15 @@ export function Analyze() {
     setNames((s) => ({ ...s, [k]: { ...s[k], input } }));
   // submit 系は URL 反映（writeUrl）に確定後の値を同期的に渡す必要があるため、
   // クロージャの現在値から next を組んで state と URL を一度に更新する。
+  // 新しい検索語では前回の候補選択（selected）を破棄する。
   const onNameSubmit = (k: NameKind, submitted: string) => {
-    const next: NameState = { ...names, [k]: { input: submitted, submitted } };
+    const next: NameState = { ...names, [k]: { input: submitted, submitted, selected: "" } };
     setNames(next);
     writeUrl(k, next, course);
   };
+  // 候補一覧からの確定名（部分一致で複数ヒットしたときの選択）。URL は検索語のみ持つため反映しない。
+  const onNameSelect = (k: NameKind, selected: string) =>
+    setNames((s) => ({ ...s, [k]: { ...s[k], selected } }));
 
   const onCourseForm = (form: CourseParams) =>
     setCourse((s) => ({ ...s, form }));
@@ -150,44 +157,68 @@ export function Analyze() {
           kind={kind}
           input={names[kind].input}
           submitted={names[kind].submitted}
+          selected={names[kind].selected}
           onInput={(v) => onNameInput(kind, v)}
           onSubmit={(v) => onNameSubmit(kind, v)}
+          onSelect={(v) => onNameSelect(kind, v)}
         />
       )}
     </section>
   );
 }
 
+// 名前系タブの API パス。部分一致は `/candidates?q=`（#401）、確定名の統計は `?name=`（完全一致）。
+const NAME_PATHS = {
+  horse: { candidates: "/api/analyze/horse/candidates", stats: "/api/analyze/horse" },
+  jockey: { candidates: "/api/analyze/jockey/candidates", stats: "/api/analyze/jockey" },
+  trainer: { candidates: "/api/analyze/trainer/candidates", stats: "/api/analyze/trainer" },
+} as const;
+
 function NameAnalyze({
   kind,
   input,
   submitted,
+  selected,
   onInput,
   onSubmit,
+  onSelect,
 }: {
   kind: NameKind;
   input: string;
   submitted: string;
+  selected: string;
   onInput: (v: string) => void;
   onSubmit: (v: string) => void;
+  onSelect: (v: string) => void;
 }) {
-  const path = (
-    {
-      horse: "/api/analyze/horse",
-      jockey: "/api/analyze/jockey",
-      trainer: "/api/analyze/trainer",
-    } as const
-  )[kind];
+  const paths = NAME_PATHS[kind];
 
-  const q = useQuery({
-    // queryKey に submitted を含めることでタブ毎に結果がキャッシュされ、切替で即再表示される。
-    queryKey: ["analyze", kind, submitted],
+  // 部分一致の候補（#401）。中間一致・カナ正規化は取り込み時と共有（#50）。
+  const cand = useQuery({
+    queryKey: ["analyze-candidates", kind, submitted],
     enabled: submitted.length > 0,
     queryFn: async () => {
-      const { data, error } = await api.GET(path, {
-        params: { query: { name: submitted } },
+      const { data, error } = await api.GET(paths.candidates, {
+        params: { query: { q: submitted } },
       });
-      if (error) throw new Error("統計の取得に失敗しました（名前を確認）");
+      if (error) throw new Error("候補の取得に失敗しました");
+      return data;
+    },
+  });
+
+  // 確定名: 明示選択 > 候補が 1 件だけならそれを自動確定（CLI の 0/1/多数 と同じ挙動）。
+  const names = cand.data?.names ?? [];
+  const resolved = selected || (names.length === 1 ? names[0] : "");
+
+  // 確定名の統計（完全一致 stats を再利用）。
+  const stats = useQuery({
+    queryKey: ["analyze", kind, resolved],
+    enabled: resolved.length > 0,
+    queryFn: async () => {
+      const { data, error } = await api.GET(paths.stats, {
+        params: { query: { name: resolved } },
+      });
+      if (error) throw new Error("統計の取得に失敗しました");
       return data;
     },
   });
@@ -201,42 +232,70 @@ function NameAnalyze({
           onSubmit(input.trim());
         }}
       >
-        {/* 名前検索は完全一致（REST が未露出。部分一致・カナ正規化ロジックは #50 で CLI/repo に実装済、
-            REST/web への露出は #401）。 */}
+        {/* 部分一致・カナ正規化（#50 の normalizer を REST に露出・#401）。表記ゆれ/部分入力でも拾う。 */}
         <input
           type="text"
-          placeholder={`${KIND_LABEL[kind]}名（完全一致）`}
+          placeholder={`${KIND_LABEL[kind]}名（部分一致）`}
           value={input}
           onChange={(e) => onInput(e.target.value)}
         />
         <button type="submit">検索</button>
       </form>
 
-      {q.isPending && submitted.length > 0 && <p>読み込み中…</p>}
-      {q.isError && <p className="error">{q.error.message}</p>}
-      {q.data && (
+      {cand.isPending && submitted.length > 0 && <p>読み込み中…</p>}
+      {cand.isError && <p className="error">{cand.error.message}</p>}
+      {cand.data && names.length === 0 && (
+        <p>「{submitted}」に一致する{KIND_LABEL[kind]}が見つかりません。</p>
+      )}
+
+      {/* 複数ヒット時は候補一覧を提示（クリックで確定）。1 件のみは自動確定するので一覧は出さない。 */}
+      {names.length > 1 && (
+        <div className="candidates">
+          <p>
+            「{submitted}」に一致する{KIND_LABEL[kind]}が {names.length}
+            {cand.data?.truncated ? " 件以上" : " 件"}あります。選択してください:
+          </p>
+          <ul className="candidate-list">
+            {names.map((n) => (
+              <li key={n}>
+                <button
+                  type="button"
+                  className={n === selected ? "candidate candidate-active" : "candidate"}
+                  onClick={() => onSelect(n)}
+                >
+                  {n}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {stats.isPending && resolved.length > 0 && <p>読み込み中…</p>}
+      {stats.isError && <p className="error">{stats.error.message}</p>}
+      {stats.data && (
         <>
           <h2>
-            {"horse_name" in q.data
-              ? q.data.horse_name
-              : "jockey_name" in q.data
-                ? q.data.jockey_name
-                : q.data.trainer_name}
+            {"horse_name" in stats.data
+              ? stats.data.horse_name
+              : "jockey_name" in stats.data
+                ? stats.data.jockey_name
+                : stats.data.trainer_name}
           </h2>
-          <StatTable title="通算" rows={[q.data.overall]} />
-          {"by_surface" in q.data && (
-            <StatTable title="芝ダ別" rows={q.data.by_surface} />
+          <StatTable title="通算" rows={[stats.data.overall]} />
+          {"by_surface" in stats.data && (
+            <StatTable title="芝ダ別" rows={stats.data.by_surface} />
           )}
-          {"by_distance_band" in q.data && (
-            <StatTable title="距離帯別" rows={q.data.by_distance_band} />
+          {"by_distance_band" in stats.data && (
+            <StatTable title="距離帯別" rows={stats.data.by_distance_band} />
           )}
-          {"by_popularity_band" in q.data && (
-            <StatTable title="人気帯別" rows={q.data.by_popularity_band} />
+          {"by_popularity_band" in stats.data && (
+            <StatTable title="人気帯別" rows={stats.data.by_popularity_band} />
           )}
-          {"by_track_condition" in q.data && (
-            <StatTable title="馬場状態別" rows={q.data.by_track_condition} />
+          {"by_track_condition" in stats.data && (
+            <StatTable title="馬場状態別" rows={stats.data.by_track_condition} />
           )}
-          <StatTable title="枠順別" rows={q.data.by_gate_group} />
+          <StatTable title="枠順別" rows={stats.data.by_gate_group} />
         </>
       )}
     </div>
