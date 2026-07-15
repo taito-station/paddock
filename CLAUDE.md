@@ -48,7 +48,7 @@ paddock-analyze predict <race_id> --blend-alpha 0.2
 ```
 
 - 本番モデル: 市場単勝 α=0.2 ブレンド・m=10 縮約。
-- race_odds に古い `odds=0.0` 行が残ると `find_race_odds` で predict が全停止する。**暫定回避策**: `DELETE FROM race_odds WHERE odds = 0.0`（`0.0` 限定。< 1.0 では誤削除リスクあり）。
+- race_odds の `odds=0.0` 等の値域違反は #114 で恒久対処済み（手動 DELETE は不要）。保存側 `save_race_odds` が `OddsValue::try_from`（有限かつ ≥1.0）委譲ガードで無効行の INSERT を弾き、読み側 `find_race_odds` は値域違反のスカラー行を warn+skip して継続する（predict は全停止しない）。band 券種（ワイド等）の構造不正〈`odds_high` NULL / low>high〉のみ意図的に stop する（残骸ではなくバグ検知）。golden DB に残骸は無く、旧 SQLite 由来のダンプを取り込む等で残骸を抱えた DB に限り `DELETE FROM race_odds WHERE odds < 1.0` で掃除する。
 
 ### 3. EV 判定 → 買い目決定
 
