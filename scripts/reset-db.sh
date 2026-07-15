@@ -46,28 +46,36 @@ fi
 command -v psql >/dev/null || { echo "psql が見つからない" >&2; exit 1; }
 
 # 対象 URL から database 名と管理用 URL（同サーバの postgres DB）を導出する。
+# scheme://authority/dbname の dbname を取り出す。`##*/` は scheme の "//" までしか剥がせず、
+# パス無し URL（postgres://host:port）では authority を返してしまうため、まず "://" を剥がした
+# 残り（authority[/db]）にパス区切り "/" が在るかで db 名の有無を判定する。
 to_noq="${TO_URL%%\?*}"
-target_db="${to_noq##*/}"
+to_rest="${to_noq#*://}"        # authority[/db]（scheme が無ければ全体）
+target_db="${to_rest#*/}"       # db[/...]（"/" 無しなら to_rest のまま）
+target_db="${target_db%%/*}"    # 最初のパスセグメント = database 名
 admin_url="${to_noq%/*}/postgres"
-if [[ -z "$target_db" || "$target_db" == "$to_noq" ]]; then
+if [[ "$to_rest" != */* || -z "$target_db" ]]; then
     echo "対象 URL から database 名を取得できない: $TO_URL" >&2
     exit 1
 fi
 
-# golden への誤爆を防ぐ。localhost と 127.0.0.1 のようなホスト表記揺れで URL 文字列一致の
-# ガードをすり抜けるのを防ぐため、URL 完全一致だけでなく **database 名の一致** でも判定する。
-# 各 worktree は golden とは別の database 名で分離される（seed-db.sh 参照）ため、golden と同名の
-# database は golden 本体とみなして守る。別サーバの同名 DB を意図的に reset する場合は --force。
+# golden への誤爆を防ぐ。golden 既定は @localhost だが #212 は 127.0.0.1 表記を案内しており、
+# URL 文字列一致だけのガードはこのホスト表記揺れですり抜ける。そこで **database 名の一致** で
+# 判定する（host を問わず golden と同名の DB は golden 本体とみなして守る）。各 worktree は golden
+# とは別の database 名で分離される（seed-db.sh 参照）ため誤爆しない。別サーバの同名 DB を意図的に
+# reset する場合は --force。URL 完全一致は名前一致に包含されるため、名前だけで判定する。
 golden_noq="${GOLDEN_URL%%\?*}"
-golden_db="${golden_noq##*/}"
+golden_rest="${golden_noq#*://}"
+golden_db="${golden_rest#*/}"
+golden_db="${golden_db%%/*}"
 if [[ "$FORCE" -ne 1 ]]; then
-    # golden URL から database 名を取れない（末尾スラッシュ等の不正 URL）と、名前ベースの保護が
-    # 黙って無効化される。破壊ガードの片肺が沈黙で外れるのを避けるため fail-closed で中断する。
-    if [[ -z "$golden_db" || "$golden_db" == "$golden_noq" ]]; then
+    # golden URL から database 名を取れない（パス無し / 末尾スラッシュ等の不正 URL）と、名前ベースの
+    # 保護が黙って無効化される。破壊ガードの片肺が沈黙で外れるのを避けるため fail-closed で中断する。
+    if [[ "$golden_rest" != */* || -z "$golden_db" ]]; then
         echo "golden URL から database 名を取得できない: ${GOLDEN_URL}（PADDOCK_GOLDEN_DB_URL を確認）" >&2
         exit 1
     fi
-    if [[ "$to_noq" == "$golden_noq" ]] || [[ "$target_db" == "$golden_db" ]]; then
+    if [[ "$target_db" == "$golden_db" ]]; then
         echo "対象が golden DB（database 名: ${target_db}）: ${TO_URL}。全 worktree の seed 元を失うため既定では中断する。" >&2
         echo "意図的なら --force を付ける" >&2
         exit 1

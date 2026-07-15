@@ -50,29 +50,34 @@ if [[ -z "$TO_URL" ]]; then
     exit 1
 fi
 # 配置先 URL / golden URL から database 名と管理用 URL（同サーバの postgres DB）を導出する。
-# クエリ文字列（?sslmode=... 等）を剥がす。ガードと DROP/CREATE で共用する。
-from_noq="${FROM_URL%%\?*}"
-to_noq="${TO_URL%%\?*}"          # クエリ文字列を除去
-golden_db="${from_noq##*/}"      # golden の database 名
-target_db="${to_noq##*/}"        # 配置先の末尾セグメント = database 名
+# scheme://authority/dbname の dbname を取り出す。`##*/` は scheme の "//" までしか剥がせず、
+# パス無し URL（postgres://host:port）では authority を返すため、まず "://" を剥がした残り
+# （authority[/db]）にパス区切り "/" が在るかで db 名の有無を判定する。ガードと DROP/CREATE で共用。
+from_noq="${FROM_URL%%\?*}"      # クエリ文字列（?sslmode=... 等）を除去
+to_noq="${TO_URL%%\?*}"
+from_rest="${from_noq#*://}"     # authority[/db]
+to_rest="${to_noq#*://}"
+golden_db="${from_rest#*/}"; golden_db="${golden_db%%/*}"   # golden の database 名
+target_db="${to_rest#*/}";   target_db="${target_db%%/*}"   # 配置先の database 名
 admin_url="${to_noq%/*}/postgres"
-if [[ -z "$target_db" || "$target_db" == "$to_noq" ]]; then
+if [[ "$to_rest" != */* || -z "$target_db" ]]; then
     echo "配置先 URL から database 名を取得できない: $TO_URL" >&2
     exit 1
 fi
-# golden URL から database 名を取れない（末尾スラッシュ等の不正 URL）と、名前ベースの保護が
-# 黙って無効化される。破壊ガードの片肺が沈黙で外れるのを避けるため fail-closed で中断する。
-if [[ -z "$golden_db" || "$golden_db" == "$from_noq" ]]; then
+# golden URL から database 名を取れない（パス無し / 末尾スラッシュ等の不正 URL）と、名前ベースの
+# 保護が黙って無効化される。破壊ガードの片肺が沈黙で外れるのを避けるため fail-closed で中断する。
+if [[ "$from_rest" != */* || -z "$golden_db" ]]; then
     echo "golden URL から database 名を取得できない: ${FROM_URL}（PADDOCK_GOLDEN_DB_URL を確認）" >&2
     exit 1
 fi
 
-# golden への誤爆を防ぐ（reset-db.sh の golden ガードと対称）。localhost と 127.0.0.1 のような
-# ホスト表記揺れで URL 文字列一致をすり抜けるのを防ぐため、URL 完全一致だけでなく golden と
-# 同名の database 名でも中断する。各 worktree は golden と別 database 名で分離されるため、
-# golden と同名の配置先は誤爆（golden を上書き）とみなす。seed は同一サーバ前提（別サーバからの
-# 複製は非対応・usage 参照）のため、reset-db のような --force バイパスは設けない。
-if [[ "$from_noq" == "$to_noq" ]] || [[ "$target_db" == "$golden_db" ]]; then
+# golden への誤爆を防ぐ（reset-db.sh の golden ガードと対称）。golden 既定は @localhost だが #212 は
+# 127.0.0.1 表記を案内しており、URL 文字列一致だけのガードはこのホスト表記揺れですり抜ける。そこで
+# **database 名の一致** で中断する（URL 完全一致は名前一致に包含される）。各 worktree は golden と
+# 別 database 名で分離されるため、golden と同名の配置先は必ず誤爆（golden を上書き）とみなす。この
+# 「golden 同名の配置先は正当ケースが無い」前提と、seed が同一サーバ前提（別サーバからの複製は
+# 非対応・usage 参照）であることから、reset-db のような --force バイパスは設けない。
+if [[ "$target_db" == "$golden_db" ]]; then
     echo "配置先が golden と同一 DB（database 名: ${target_db}）: ${TO_URL}。別 database を配置先にする" >&2
     exit 1
 fi
