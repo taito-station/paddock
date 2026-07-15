@@ -4,8 +4,9 @@
 
 > **更新（#407・2026-07 / 本番買い目は build_portfolio に置換）**: 本仕様が当初 #13 設計で採った
 > **「Kelly 配分で推奨額を算出し `Kelly=…%` 列を表示する」買い目まわりの記述は退役した**。本番 `predict` の
-> 買い目配分は `build_portfolio`（ワイド・馬連・三連複の◎軸ながし、券種固定予算を確率重みで最大剰余法・
-> 100 円単位配分。`src/domain/src/portfolio/mod.rs`）に置き換わっており（[ADR 0019](../adr/0019-portfolio-generator.md)）、
+> 買い目配分は `build_portfolio`（ワイド・馬連・三連複の◎軸ながし、券種予算を 100 円単位で均等配分。
+> `src/domain/src/portfolio/mod.rs`）に置き換わっており（[ADR 0019](../adr/0019-portfolio-generator.md)。券種内の均等配分は
+> [ADR 0046](../adr/0046-allocation-prob-weight-no-floor-rejected.md) で確率重み化を棄却し維持）、
 > Kelly 配分は 71R walk-forward で回収率が現行ヒューリスティックに劣後し **棄却済み**（[ADR 0054](../adr/0054-kelly-staking-rejected.md)。
 > `select_bets`/Kelly は backtest 評価専用）。**以下本文のうち買い目推奨の表示例（`Kelly=…%` 列）・`y` の
 > 「Kelly 配分で算出」動作・「Kelly 値の表示と推奨額の算出」節は #13 当時の歴史的記録**であり、上記のとおり
