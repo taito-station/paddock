@@ -29,6 +29,8 @@ seed-db.sh - 並走 worktree の DB に golden DB を複製する（Postgres）
 
 前提: golden と配置先は同一 PG サーバ上にある想定（配置先の DROP/CREATE には配置先サーバの
 postgres DB へ管理接続する）。別サーバの golden から複製する用途は非対応。
+配置先が golden と同名の database だと必ず中断する（reset-db.sh の --force に相当する
+バイパスは設けない。worktree は golden と別名で分離され、golden 同名の配置先は誤爆のため）。
 EOF
 }
 
@@ -49,10 +51,38 @@ if [[ -z "$TO_URL" ]]; then
     echo "配置先が未指定: PADDOCK_DB_URL を .env で設定するか --to <url> を渡す" >&2
     exit 1
 fi
-# クエリ文字列（?sslmode=... 等）を剥がして比較する（reset-db.sh の golden ガードと対称）。
-# 同一 DB をクエリだけ違う URL で指したときに golden を上書きしないため。
-if [[ "${FROM_URL%%\?*}" == "${TO_URL%%\?*}" ]]; then
-    echo "golden と配置先が同一 DB: $TO_URL。別 database を配置先にする" >&2
+# 配置先 URL / golden URL から database 名と管理用 URL（同サーバの postgres DB）を導出する。
+# scheme://authority/dbname の dbname を取り出す。`##*/` は scheme の "//" までしか剥がせず、
+# パス無し URL（postgres://host:port）では authority を返すため、まず "://" を剥がした残り
+# （authority[/db]）にパス区切り "/" が在るかで db 名の有無を判定する。ガードと DROP/CREATE で共用。
+from_noq="${FROM_URL%%\?*}"      # クエリ文字列（?sslmode=... 等）を除去
+to_noq="${TO_URL%%\?*}"
+from_rest="${from_noq#*://}"     # authority[/db]
+to_rest="${to_noq#*://}"
+golden_db="${from_rest#*/}"; golden_db="${golden_db%%/*}"   # golden の database 名
+target_db="${to_rest#*/}";   target_db="${target_db%%/*}"   # 配置先の database 名
+# 管理接続先（同サーバの postgres DB）。postgres URI は単一 dbname 前提のため末尾セグメント除去で
+# authority を得る。パス無し URL は下の空判定で弾くので、ここに来る時点で "/db" が 1 つある。
+admin_url="${to_noq%/*}/postgres"
+if [[ "$to_rest" != */* || -z "$target_db" ]]; then
+    echo "配置先 URL から database 名を取得できない: $TO_URL" >&2
+    exit 1
+fi
+# golden URL から database 名を取れない（パス無し / 末尾スラッシュ等の不正 URL）と、名前ベースの
+# 保護が黙って無効化される。破壊ガードの片肺が沈黙で外れるのを避けるため fail-closed で中断する。
+if [[ "$from_rest" != */* || -z "$golden_db" ]]; then
+    echo "golden URL から database 名を取得できない: ${FROM_URL}（PADDOCK_GOLDEN_DB_URL を確認）" >&2
+    exit 1
+fi
+
+# golden への誤爆を防ぐ（reset-db.sh の golden ガードと対称）。golden 既定は @localhost だが #212 は
+# 127.0.0.1 表記を案内しており、URL 文字列一致だけのガードはこのホスト表記揺れですり抜ける。そこで
+# **database 名の一致** で中断する（URL 完全一致は名前一致に包含される）。各 worktree は golden と
+# 別 database 名で分離されるため、golden と同名の配置先は必ず誤爆（golden を上書き）とみなす。この
+# 「golden 同名の配置先は正当ケースが無い」前提と、seed が同一サーバ前提（別サーバからの複製は
+# 非対応・usage 参照）であることから、reset-db のような --force バイパスは設けない。
+if [[ "$target_db" == "$golden_db" ]]; then
+    echo "配置先が golden と同一 DB（database 名: ${target_db}）: ${TO_URL}。別 database を配置先にする" >&2
     exit 1
 fi
 
@@ -63,15 +93,6 @@ command -v pg_dump >/dev/null || { echo "pg_dump が見つからない" >&2; exi
 races="$(psql "$FROM_URL" -tAc 'SELECT COUNT(*) FROM races;' 2>/dev/null || true)"
 if ! [[ "$races" =~ ^[0-9]+$ ]] || [[ "$races" -eq 0 ]]; then
     echo "golden に races が無い（空 / 未マイグレート / 接続不可の可能性）: $FROM_URL" >&2
-    exit 1
-fi
-
-# 配置先 URL から database 名と管理用 URL（同サーバの postgres DB）を導出する。
-to_noq="${TO_URL%%\?*}"          # クエリ文字列を除去
-target_db="${to_noq##*/}"        # 末尾セグメント = database 名
-admin_url="${to_noq%/*}/postgres"
-if [[ -z "$target_db" || "$target_db" == "$to_noq" ]]; then
-    echo "配置先 URL から database 名を取得できない: $TO_URL" >&2
     exit 1
 fi
 
