@@ -3,6 +3,14 @@
 Issue #12 対応。推定確率とオッズから期待値（EV）を計算し、馬連重視で買い目を選択、
 Kelly 基準で賭け額を決定する。
 
+> **用途の限定（#407・2026-07）**: 本仕様の `select_bets` ＋ Kelly 配分は **本番の買い目配分では使われていない**。
+> 本番 `predict` の配分は `build_portfolio`（ワイド・馬連・三連複の◎軸ながし、券種予算を 100 円単位で均等配分。
+> [ADR 0019](../adr/0019-portfolio-generator.md)。券種内の均等配分は [ADR 0046](../adr/0046-allocation-prob-weight-no-floor-rejected.md) で
+> 確率重み化を棄却し維持）で、Kelly 配分は 71R walk-forward で回収率が現行に劣後し **棄却済み**
+> （[ADR 0054](../adr/0054-kelly-staking-rejected.md)）。**`select_bets` は現在 backtest 評価（`analyze backtest`）でのみ現用**、
+> `kelly_fraction` は本番では curation の `min_kelly` フィルタ（薄い買い目除外）にのみ用いる。本文の buy-selection /
+> Kelly 賭け額ロジックはこの限定用途の仕様として読むこと。
+
 ## 概要
 
 ![期待値・Kelly配分フロー](diagrams/ev-kelly-flow.svg)
