@@ -13,6 +13,11 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# GITHUB_TOKEN を最小権限に絞る。全ジョブ（ci / web / adr / ocr-pdf）は checkout と
+# ビルド・テストのみで、コミット・コメント・リリース等の書き込みを一切行わないため読取だけで足りる。
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
 
