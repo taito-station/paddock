@@ -81,6 +81,46 @@ jobs:
       - name: Test (Postgres 接続テストを含むため直列実行 / OCR・PDF クレートを除く)
         run: cargo test --locked --workspace --exclude pdf-ocr --exclude pdf-parser -- --test-threads=1
 
+  # web/（React + TypeScript）の検査。Rust の ci ジョブとは独立させて並列で回す（Node/npm しか
+  # 要らず Postgres も不要）。tsc 型検査・vitest・openapi.json → schema.d.ts の生成ドリフト検証・
+  # Vite ビルドをまとめて実行し、フロントの破壊が main へ素通りするのを防ぐ（#405）。
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Install Node.js
+        # 外部 action はサプライチェーン対策で commit SHA にピン（コメントは対応タグ）。
+        # Node 22 LTS。Vite 7 の要求下限（20.19 / 22.12）を満たす。
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test (vitest)
+        run: npm test
+
+      # docs/api/openapi.json（Rust 側 utoipa が生成する API の正本）から schema.d.ts を再生成し、
+      # コミット済みと差分が無いことを確認する。API 変更時に web 型の再生成を忘れるドリフトを検出する。
+      - name: Verify generated API types are up to date
+        run: |
+          npm run gen:api
+          git diff --exit-code -- src/api/schema.d.ts
+
+      - name: Build (vite)
+        run: npm run build
+
   # ADR 番号（docs/adr/NNNN-*.md）の重複検出（#254）。並行クローン/worktree 運用で番号が
   # 二重取得される事故（#251 と #253 が同時に 0040 採番）の再発防止。Rust/Postgres 不要の
   # 軽量チェックなので独立ジョブにして並列で即終わらせる（ci / ocr-pdf には影響させない）。
