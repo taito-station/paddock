@@ -53,6 +53,8 @@ to_noq="${TO_URL%%\?*}"
 to_rest="${to_noq#*://}"        # authority[/db]（scheme が無ければ全体）
 target_db="${to_rest#*/}"       # db[/...]（"/" 無しなら to_rest のまま）
 target_db="${target_db%%/*}"    # 最初のパスセグメント = database 名
+# 管理接続先（同サーバの postgres DB）。postgres URI は単一 dbname 前提のため末尾セグメント除去で
+# authority を得る。パス無し URL は下の空判定で弾くので、ここに来る時点で "/db" が 1 つある。
 admin_url="${to_noq%/*}/postgres"
 if [[ "$to_rest" != */* || -z "$target_db" ]]; then
     echo "対象 URL から database 名を取得できない: $TO_URL" >&2

@@ -29,6 +29,8 @@ seed-db.sh - 並走 worktree の DB に golden DB を複製する（Postgres）
 
 前提: golden と配置先は同一 PG サーバ上にある想定（配置先の DROP/CREATE には配置先サーバの
 postgres DB へ管理接続する）。別サーバの golden から複製する用途は非対応。
+配置先が golden と同名の database だと必ず中断する（reset-db.sh の --force に相当する
+バイパスは設けない。worktree は golden と別名で分離され、golden 同名の配置先は誤爆のため）。
 EOF
 }
 
@@ -59,6 +61,8 @@ from_rest="${from_noq#*://}"     # authority[/db]
 to_rest="${to_noq#*://}"
 golden_db="${from_rest#*/}"; golden_db="${golden_db%%/*}"   # golden の database 名
 target_db="${to_rest#*/}";   target_db="${target_db%%/*}"   # 配置先の database 名
+# 管理接続先（同サーバの postgres DB）。postgres URI は単一 dbname 前提のため末尾セグメント除去で
+# authority を得る。パス無し URL は下の空判定で弾くので、ここに来る時点で "/db" が 1 つある。
 admin_url="${to_noq%/*}/postgres"
 if [[ "$to_rest" != */* || -z "$target_db" ]]; then
     echo "配置先 URL から database 名を取得できない: $TO_URL" >&2
