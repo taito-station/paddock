@@ -49,10 +49,24 @@ if [[ -z "$TO_URL" ]]; then
     echo "配置先が未指定: PADDOCK_DB_URL を .env で設定するか --to <url> を渡す" >&2
     exit 1
 fi
-# クエリ文字列（?sslmode=... 等）を剥がして比較する（reset-db.sh の golden ガードと対称）。
-# 同一 DB をクエリだけ違う URL で指したときに golden を上書きしないため。
-if [[ "${FROM_URL%%\?*}" == "${TO_URL%%\?*}" ]]; then
-    echo "golden と配置先が同一 DB: $TO_URL。別 database を配置先にする" >&2
+# 配置先 URL / golden URL から database 名と管理用 URL（同サーバの postgres DB）を導出する。
+# クエリ文字列（?sslmode=... 等）を剥がす。ガードと DROP/CREATE で共用する。
+from_noq="${FROM_URL%%\?*}"
+to_noq="${TO_URL%%\?*}"          # クエリ文字列を除去
+golden_db="${from_noq##*/}"      # golden の database 名
+target_db="${to_noq##*/}"        # 配置先の末尾セグメント = database 名
+admin_url="${to_noq%/*}/postgres"
+if [[ -z "$target_db" || "$target_db" == "$to_noq" ]]; then
+    echo "配置先 URL から database 名を取得できない: $TO_URL" >&2
+    exit 1
+fi
+
+# golden への誤爆を防ぐ（reset-db.sh の golden ガードと対称）。localhost と 127.0.0.1 のような
+# ホスト表記揺れで URL 文字列一致をすり抜けるのを防ぐため、URL 完全一致だけでなく golden と
+# 同名の database 名でも中断する。各 worktree は golden と別 database 名で分離されるため、
+# golden と同名の配置先は誤爆（golden を上書き）とみなす。
+if [[ "$from_noq" == "$to_noq" ]] || [[ "$target_db" == "$golden_db" ]]; then
+    echo "配置先が golden と同一 DB（database 名: ${target_db}）: ${TO_URL}。別 database を配置先にする" >&2
     exit 1
 fi
 
@@ -63,15 +77,6 @@ command -v pg_dump >/dev/null || { echo "pg_dump が見つからない" >&2; exi
 races="$(psql "$FROM_URL" -tAc 'SELECT COUNT(*) FROM races;' 2>/dev/null || true)"
 if ! [[ "$races" =~ ^[0-9]+$ ]] || [[ "$races" -eq 0 ]]; then
     echo "golden に races が無い（空 / 未マイグレート / 接続不可の可能性）: $FROM_URL" >&2
-    exit 1
-fi
-
-# 配置先 URL から database 名と管理用 URL（同サーバの postgres DB）を導出する。
-to_noq="${TO_URL%%\?*}"          # クエリ文字列を除去
-target_db="${to_noq##*/}"        # 末尾セグメント = database 名
-admin_url="${to_noq%/*}/postgres"
-if [[ -z "$target_db" || "$target_db" == "$to_noq" ]]; then
-    echo "配置先 URL から database 名を取得できない: $TO_URL" >&2
     exit 1
 fi
 
