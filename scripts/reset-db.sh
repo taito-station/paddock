@@ -60,10 +60,18 @@ fi
 # database は golden 本体とみなして守る。別サーバの同名 DB を意図的に reset する場合は --force。
 golden_noq="${GOLDEN_URL%%\?*}"
 golden_db="${golden_noq##*/}"
-if [[ "$FORCE" -ne 1 ]] && { [[ "$to_noq" == "$golden_noq" ]] || [[ "$target_db" == "$golden_db" ]]; }; then
-    echo "対象が golden DB（database 名: ${target_db}）: ${TO_URL}。全 worktree の seed 元を失うため既定では中断する。" >&2
-    echo "意図的なら --force を付ける" >&2
-    exit 1
+if [[ "$FORCE" -ne 1 ]]; then
+    # golden URL から database 名を取れない（末尾スラッシュ等の不正 URL）と、名前ベースの保護が
+    # 黙って無効化される。破壊ガードの片肺が沈黙で外れるのを避けるため fail-closed で中断する。
+    if [[ -z "$golden_db" || "$golden_db" == "$golden_noq" ]]; then
+        echo "golden URL から database 名を取得できない: ${GOLDEN_URL}（PADDOCK_GOLDEN_DB_URL を確認）" >&2
+        exit 1
+    fi
+    if [[ "$to_noq" == "$golden_noq" ]] || [[ "$target_db" == "$golden_db" ]]; then
+        echo "対象が golden DB（database 名: ${target_db}）: ${TO_URL}。全 worktree の seed 元を失うため既定では中断する。" >&2
+        echo "意図的なら --force を付ける" >&2
+        exit 1
+    fi
 fi
 
 psql "$admin_url" -v ON_ERROR_STOP=1 -q \

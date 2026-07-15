@@ -60,11 +60,18 @@ if [[ -z "$target_db" || "$target_db" == "$to_noq" ]]; then
     echo "配置先 URL から database 名を取得できない: $TO_URL" >&2
     exit 1
 fi
+# golden URL から database 名を取れない（末尾スラッシュ等の不正 URL）と、名前ベースの保護が
+# 黙って無効化される。破壊ガードの片肺が沈黙で外れるのを避けるため fail-closed で中断する。
+if [[ -z "$golden_db" || "$golden_db" == "$from_noq" ]]; then
+    echo "golden URL から database 名を取得できない: ${FROM_URL}（PADDOCK_GOLDEN_DB_URL を確認）" >&2
+    exit 1
+fi
 
 # golden への誤爆を防ぐ（reset-db.sh の golden ガードと対称）。localhost と 127.0.0.1 のような
 # ホスト表記揺れで URL 文字列一致をすり抜けるのを防ぐため、URL 完全一致だけでなく golden と
 # 同名の database 名でも中断する。各 worktree は golden と別 database 名で分離されるため、
-# golden と同名の配置先は誤爆（golden を上書き）とみなす。
+# golden と同名の配置先は誤爆（golden を上書き）とみなす。seed は同一サーバ前提（別サーバからの
+# 複製は非対応・usage 参照）のため、reset-db のような --force バイパスは設けない。
 if [[ "$from_noq" == "$to_noq" ]] || [[ "$target_db" == "$golden_db" ]]; then
     echo "配置先が golden と同一 DB（database 名: ${target_db}）: ${TO_URL}。別 database を配置先にする" >&2
     exit 1
