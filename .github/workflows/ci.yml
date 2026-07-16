@@ -113,6 +113,11 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      # ESLint（#413）。react-hooks/exhaustive-deps 等の hooks 検査を CI ゲート化し、
+      # 依存配列の退行が人力レビューを素通りするのを防ぐ。--max-warnings 0 は lint スクリプト側で指定。
+      - name: Lint (eslint)
+        run: npm run lint
+
       - name: Test (vitest)
         run: npm test
 
