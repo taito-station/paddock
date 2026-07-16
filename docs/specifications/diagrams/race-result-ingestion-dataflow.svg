@@ -1,0 +1,89 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="560" viewBox="0 0 960 560" font-family="'Helvetica Neue',Arial,sans-serif" font-size="13">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,3 L0,6 z" fill="#555"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="960" height="560" fill="#ffffff"/>
+  <text x="480" y="28" text-anchor="middle" font-size="17" font-weight="bold">レース結果の同日取り込みと UI 自動反映（#381）</text>
+
+  <!-- external source -->
+  <rect x="30" y="70" width="180" height="60" rx="6" fill="#f5f5f5" stroke="#888"/>
+  <text x="120" y="95" text-anchor="middle" font-weight="bold">netkeiba</text>
+  <text x="120" y="114" text-anchor="middle">race/result.html</text>
+
+  <!-- web trigger -->
+  <rect x="30" y="200" width="180" height="80" rx="6" fill="#dae8fc" stroke="#6c8ebf"/>
+  <text x="120" y="228" text-anchor="middle" font-weight="bold">web (SPA)</text>
+  <text x="120" y="248" text-anchor="middle">発走後・未確定が残る間</text>
+  <text x="120" y="266" text-anchor="middle">30–60s ポーリング</text>
+
+  <!-- refresh endpoint -->
+  <rect x="290" y="200" width="200" height="80" rx="6" fill="#e1d5e7" stroke="#9673a6"/>
+  <text x="390" y="226" text-anchor="middle" font-weight="bold">POST /api/results/</text>
+  <text x="390" y="244" text-anchor="middle" font-weight="bold">{date}:refresh</text>
+  <text x="390" y="266" text-anchor="middle">（旧 sessions 版は委譲）</text>
+
+  <!-- ResultsInteractor -->
+  <rect x="560" y="120" width="360" height="240" rx="6" fill="#fff2cc" stroke="#d6b656"/>
+  <text x="740" y="146" text-anchor="middle" font-weight="bold">ResultsInteractor::refresh(date)  【冪等】</text>
+  <text x="580" y="172">対象 = post_time 経過 かつ 未確定のレース</text>
+  <text x="580" y="192">（発走前・確定済みは netkeiba を叩かない）</text>
+  <rect x="580" y="206" width="320" height="60" rx="4" fill="#ffffff" stroke="#d6b656"/>
+  <text x="590" y="226">① result.html を 1 レース 1 回だけ取得</text>
+  <text x="590" y="246">② parse_race_result（着順）</text>
+  <text x="590" y="262">   ＋ parse_race_payouts（払戻）を同一 HTML から</text>
+  <rect x="580" y="278" width="320" height="60" rx="4" fill="#ffffff" stroke="#d6b656"/>
+  <text x="590" y="298">③ upsert_results → results（着順・INSERT 経路）</text>
+  <text x="590" y="316">④ session あれば settle_bet で精算</text>
+  <text x="590" y="332">   （②の払戻を in-memory 再利用・再取得しない）</text>
+
+  <!-- DB -->
+  <rect x="620" y="410" width="140" height="70" rx="6" fill="#d5e8d4" stroke="#82b366"/>
+  <text x="690" y="436" text-anchor="middle" font-weight="bold">results</text>
+  <text x="690" y="456" text-anchor="middle">着順 upsert</text>
+  <text x="690" y="472" text-anchor="middle">source='netkeiba'</text>
+
+  <rect x="790" y="410" width="150" height="70" rx="6" fill="#d5e8d4" stroke="#82b366"/>
+  <text x="865" y="436" text-anchor="middle" font-weight="bold">predict_sessions</text>
+  <text x="865" y="456" text-anchor="middle">predict_bets.payout</text>
+  <text x="865" y="472" text-anchor="middle">収支・回収率</text>
+
+  <!-- race_cards補完 -->
+  <rect x="440" y="410" width="150" height="70" rx="6" fill="#f5f5f5" stroke="#888"/>
+  <text x="515" y="436" text-anchor="middle" font-weight="bold">race_cards</text>
+  <text x="515" y="456" text-anchor="middle">gate_num/horse_name</text>
+  <text x="515" y="472" text-anchor="middle">補完</text>
+
+  <!-- read APIs -->
+  <rect x="290" y="330" width="200" height="130" rx="6" fill="#e1d5e7" stroke="#9673a6"/>
+  <text x="390" y="354" text-anchor="middle" font-weight="bold">read API（相乗り）</text>
+  <text x="300" y="378">GET /api/races</text>
+  <text x="310" y="395" font-size="12">result_confirmed, finish_order</text>
+  <text x="300" y="416">GET /races/{id}/board</text>
+  <text x="310" y="433" font-size="12">finishing_position, confirmed</text>
+  <text x="300" y="452">GET /api/live/{date}</text>
+
+  <!-- web reflect -->
+  <rect x="30" y="330" width="180" height="130" rx="6" fill="#dae8fc" stroke="#6c8ebf"/>
+  <text x="120" y="354" text-anchor="middle" font-weight="bold">web 自動反映</text>
+  <text x="45" y="380">・「⚫終」= confirmed</text>
+  <text x="45" y="400">　（post_time 推定を置換）</text>
+  <text x="45" y="420">・着順表示</text>
+  <text x="45" y="440">・的中○/✗・払戻額</text>
+  <text x="45" y="456" font-size="12">　（sessions.bets.payout）</text>
+
+  <!-- arrows -->
+  <line x1="120" y1="130" x2="120" y2="200" stroke="#555" marker-end="url(#arrow)"/>
+  <text x="128" y="168" font-size="11">結果ページ</text>
+  <line x1="210" y1="240" x2="290" y2="240" stroke="#555" marker-end="url(#arrow)"/>
+  <line x1="490" y1="235" x2="560" y2="235" stroke="#555" marker-end="url(#arrow)"/>
+  <line x1="120" y1="200" x2="120" y2="140" stroke="#555" marker-end="url(#arrow)"/>
+  <line x1="690" y1="360" x2="690" y2="410" stroke="#555" marker-end="url(#arrow)"/>
+  <line x1="820" y1="360" x2="850" y2="410" stroke="#555" marker-end="url(#arrow)"/>
+  <line x1="590" y1="445" x2="620" y2="445" stroke="#555" marker-end="url(#arrow)"/>
+  <line x1="620" y1="360" x2="490" y2="390" stroke="#555" marker-end="url(#arrow)"/>
+  <text x="500" y="368" font-size="11">read</text>
+  <line x1="290" y1="395" x2="210" y2="395" stroke="#555" marker-end="url(#arrow)"/>
+  <text x="740" y="118" text-anchor="middle" font-size="11" fill="#666">全レース確定で web ポーリング停止（netkeiba 無駄打ち回避）</text>
+</svg>
