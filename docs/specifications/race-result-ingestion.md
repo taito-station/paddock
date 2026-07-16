@@ -14,7 +14,7 @@
 
 ## 設計方針（ADR 0068）
 
-**結果確定処理（着順・払戻の同日取り込み）を 1 つの冪等ユースケース `ResultsInteractor::refresh(date)` に集約し、UI は既存 read クエリに結果フィールドを相乗りさせ、web ポーリングで自動反映する。**
+**結果確定処理（着順・払戻の同日取り込み）を 1 つの冪等ユースケース `ResultsInteractor::refresh(date, force)` に集約し、UI は既存 read クエリに結果フィールドを相乗りさせ、web ポーリングで自動反映する。**
 
 - **結果確定フラグ `result_confirmed` は派生値**。専用カラム/専用テーブルを増やさず、「当該レースが着順を持つ `results` 行を持つか」で表す。これで**賭けていない・スキップしたレースも**確定でき、着順表示もできる。
 - **netkeiba は 1 レース 1 パス 1 取得**。着順と払戻は同一結果ページに載るため、`fetch` 1 回で両方をパースする。`post_time` 前・確定済みは取得しない gating と、取得の pacing・リトライ規律（ADR 0021 タイムアウト＋リトライ・0029 fetcher 集約、運用 pacing は CLAUDE.md）を守る。
@@ -22,7 +22,7 @@
 
 ## サーバ設計
 
-### `ResultsInteractor::refresh(date)`（新規 use-case）
+### `ResultsInteractor::refresh(date, force)`（新規 use-case）
 
 `PayoutFetcher` に加えて着順取得（`fetch_race_result`）と `results` upsert・`race_cards` 参照が要るため、`SettleInteractor` 同様にメイン `Interactor` へは載せない専用 interactor として切り出す。
 
