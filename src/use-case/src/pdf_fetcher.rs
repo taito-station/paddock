@@ -1,4 +1,4 @@
-use crate::error::Result;
+use crate::error::{Error, Result};
 
 /// Outcome of probing a URL with [`PdfFetcher::fetch_if_exists`]. Distinguishes a
 /// present PDF from an absent one while keeping the HTTP status that made it
@@ -25,4 +25,24 @@ pub trait PdfFetcher: Send + Sync {
     /// treating "not published yet" as a hard failure, while keeping the status so
     /// a boundary absence can be persisted as a retryable `failed` row.
     fn fetch_if_exists(&self, url: &str) -> Result<FetchProbe>;
+}
+
+/// PDF を扱わない bin 向けの no-op スタブ（#410・[`crate::pdf_parser::NoopParser`] と対）。
+/// これらの bin は PDF 系ユースケースを呼ばないため `fetch` / `fetch_if_exists` は決して実行されない。
+/// 誤って呼ばれた場合はサイレントな空成功にせず `InvalidArgument` で明示的に失敗させる
+/// （従来 5 apps が各自定義していた `UnusedFetcher` を集約）。
+pub struct NoopFetcher;
+
+impl PdfFetcher for NoopFetcher {
+    fn fetch(&self, _url: &str) -> Result<Vec<u8>> {
+        Err(Error::InvalidArgument(
+            "this binary does not fetch PDFs".into(),
+        ))
+    }
+
+    fn fetch_if_exists(&self, _url: &str) -> Result<FetchProbe> {
+        Err(Error::InvalidArgument(
+            "this binary does not fetch PDFs".into(),
+        ))
+    }
 }

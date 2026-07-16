@@ -9,14 +9,13 @@ use chrono::{NaiveDate, Utc};
 use serde_json::Value;
 
 use api_server::app::configure_routes;
-use api_server::setup::{UnusedFetcher, UnusedParser};
 use netkeiba_scraper::UreqNetkeibaScraper;
 use paddock_domain::{
     Mark, PadPrediction, PredictionBet, PredictionHorse, PredictionResult, Race, RaceId, Surface,
     Venue,
 };
-use paddock_use_case::Interactor;
 use paddock_use_case::repository::{PadPredictionRepository, RaceRepository};
+use paddock_use_case::{Interactor, NoopFetcher, NoopParser};
 use rdb_gateway::PostgresRepository;
 
 type Repo = PostgresRepository;
@@ -24,13 +23,13 @@ type Repo = PostgresRepository;
 macro_rules! build_service {
     ($pool:expr) => {{
         let repo = PostgresRepository::new($pool);
-        let interactor = Interactor::new(repo, UnusedParser, UnusedFetcher);
+        let interactor = Interactor::new(repo, NoopParser, NoopFetcher);
         let data = web::Data::new(interactor);
         test::init_service(App::new().app_data(data).configure(
             configure_routes::<
                 Repo,
-                UnusedParser,
-                UnusedFetcher,
+                NoopParser,
+                NoopFetcher,
                 UreqNetkeibaScraper,
                 UreqNetkeibaScraper,
             >,
