@@ -8,6 +8,8 @@ import {
   totalStake,
   buildOutcomeBets,
   toAmount,
+  isUnit100,
+  hasInvalidStakeUnit,
 } from "./bets";
 import type { RecommendationBet } from "../api/client";
 
@@ -113,5 +115,40 @@ describe("toAmount", () => {
   });
   it("floors decimals", () => {
     expect(toAmount("150.9")).toBe(150);
+  });
+  it("払戻等の非 100 倍数はそのまま通す（100 円単位強制は toAmount では行わない）", () => {
+    expect(toAmount("720")).toBe(720);
+    expect(toAmount("150")).toBe(150);
+  });
+});
+
+describe("isUnit100", () => {
+  it("100 の倍数は true（0 はスキップ相当で許容）", () => {
+    expect(isUnit100(0)).toBe(true);
+    expect(isUnit100(100)).toBe(true);
+    expect(isUnit100(5000)).toBe(true);
+  });
+  it("端数・負値・非整数は false", () => {
+    expect(isUnit100(150)).toBe(false);
+    expect(isUnit100(99)).toBe(false);
+    expect(isUnit100(-100)).toBe(false);
+    expect(isUnit100(100.5)).toBe(false);
+  });
+});
+
+describe("hasInvalidStakeUnit", () => {
+  it("推奨のまま（100 円単位）は違反なし", () => {
+    expect(hasInvalidStakeUnit(BETS, {})).toBe(false);
+  });
+  it("手編集で端数賭け金が入ると違反", () => {
+    const edits = { [betKey(BETS[0])]: { stake: 150, payout: 0 } };
+    expect(hasInvalidStakeUnit(BETS, edits)).toBe(true);
+  });
+  it("賭け金 0（スキップ）は違反にしない。払戻の端数は賭け金判定に無関係", () => {
+    const edits = {
+      [betKey(BETS[0])]: { stake: 0, payout: 720 },
+      [betKey(BETS[1])]: { stake: 200, payout: 240 },
+    };
+    expect(hasInvalidStakeUnit(BETS, edits)).toBe(false);
   });
 });
