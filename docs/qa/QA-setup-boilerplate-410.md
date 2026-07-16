@@ -3,6 +3,7 @@
 > 質問票+回答（[docs/qa/README.md](README.md)）。一次資料は issue #410（全体レビュー 2026-07-15 由来）。
 > 関連: クリーンアーキテクチャ規約 `~/.claude/rules/rust/architecture.md`（依存方向 Apps→Interface→Use-Case→Domain。ADR 0022 / specifications 群と同じ参照形式）。
 > 純リファクタ（挙動不変）。集約先がレイヤ違反を作らないことが要件。
+> **蒸留済み**（PR-B 完了・2026-07-17）: 確定知は [docs/knowledge/app-bootstrap.md](../knowledge/app-bootstrap.md) へ。
 
 ## 観測（精密マップ）
 

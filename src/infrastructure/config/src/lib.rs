@@ -1,5 +1,6 @@
 use serde::Deserialize;
 use thiserror::Error;
+use tracing_subscriber::{EnvFilter, fmt};
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -47,6 +48,19 @@ impl Config {
     pub fn from_env() -> Result<Self> {
         let _ = dotenvy::dotenv();
         envy::from_env::<Config>().map_err(|e| Error::Env(e.to_string()))
+    }
+
+    /// tracing subscriber を `paddock_log` フィルタで初期化する（#410）。全 app の build_app が
+    /// 同一の `fmt().with_env_filter(...).try_init()` を重複していたのを集約する。フィルタが不正な
+    /// 文字列（typo 等）なら `info` にフォールバックする（#238 の html5ever 抑止が黙って無効化されるのを
+    /// 防ぐ回帰は default_log_filter_is_valid_env_filter で担保）。`try_init` のため二重初期化は無害に無視。
+    pub fn init_tracing(&self) {
+        let _ = fmt()
+            .with_env_filter(
+                EnvFilter::try_new(self.paddock_log.clone())
+                    .unwrap_or_else(|_| EnvFilter::new("info")),
+            )
+            .try_init();
     }
 }
 

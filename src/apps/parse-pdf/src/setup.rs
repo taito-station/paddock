@@ -7,7 +7,6 @@ use paddock_config::Config;
 use paddock_use_case::Interactor;
 use pdf_parser::HybridParser;
 use rdb_gateway::{PostgresRepository, pool};
-use tracing_subscriber::{EnvFilter, fmt};
 
 pub type App = Interactor<PostgresRepository, HybridParser, JraFetcher>;
 
@@ -22,19 +21,13 @@ pub struct Built {
 /// outbound JRA requests (from `fetch --max-rps`); `None` imposes no cap.
 pub async fn build_app(fetch_min_interval: Option<Duration>) -> anyhow::Result<Built> {
     let config = Config::from_env().context("load config")?;
-    let _ = fmt()
-        .with_env_filter(
-            EnvFilter::try_new(config.paddock_log.clone())
-                .unwrap_or_else(|_| EnvFilter::new("info")),
-        )
-        .try_init();
+    config.init_tracing();
 
     pdf_ocr::ensure_available("jpn").context("tesseract preflight")?;
 
-    let pool = pool::connect(&config.paddock_db_url)
+    let pool = pool::connect_and_migrate(&config.paddock_db_url)
         .await
-        .context("connect Postgres pool")?;
-    pool::migrate(&pool).await.context("apply migrations")?;
+        .context("connect and migrate Postgres")?;
     let repo = PostgresRepository::new(pool);
     let app = Interactor::new(
         repo,
