@@ -27,7 +27,7 @@
 
 ### 1. 同日結果取り込み（サーバ）
 
-新ユースケース `ResultsInteractor::refresh(date)` を追加する。対象は **開催日のレースのうち `post_time` を過ぎ、かつ未確定**のもの（発走前・確定済みは netkeiba を叩かずスキップ）。
+新ユースケース `ResultsInteractor::refresh(date, force)` を追加する（`force` は §2 書き込み口参照・既定 false）。対象は **開催日のレースのうち `post_time` を過ぎ、かつ未確定**のもの（発走前・確定済みは netkeiba を叩かずスキップ。`force=true` は post_time gating を緩和）。
 
 1. 各対象レースにつき netkeiba 結果ページ（`race/result.html`）を **1 回だけ取得**し、同一 HTML から着順（`parse_race_result`）と払戻（`parse_race_payouts`）を **両方**パースする。結果ページに双方が載るため往復を二重化しない。ただし既存 `fetch_race_result` と `fetch_race_payouts` は各々が独立に GET する 2 メソッドのため、**HTML を 1 回取得して両パーサに渡す新 scraper メソッド**（例 `fetch_race_result_page`）を追加する（実装点）。取得の pacing・リトライ規律は ADR 0021（HTTP タイムアウト＋リトライ）・0029（fetcher 集約）＋運用 pacing（CLAUDE.md）に準拠。
 2. **`races` 行の担保**: `results.race_id` は `races(race_id)` への FK だが、当日フロー（`paddock-fetch-card` → `card/ingest.rs`）は `race_cards`/`horse_entries`/`race_odds` のみ保存し `races` 行を作らない（`races` の INSERT は PDF ingest 経路＝`save_race` のみ）。よって着順 upsert の前に、`race_cards` から `races` 行を派生 upsert して FK を満たす。
@@ -46,7 +46,7 @@
 - `GET /api/races`（`RaceSummary`）: `result_confirmed: bool` と `finish_order: [{position, horse_num, horse_name}]`（上位 3）を追加。ライブ一覧の「終」バッジ・着順表示の一次ソース。
 - `GET /api/races/{race_id}/board`（`BoardHorseSchema`）: `finishing_position: Option<u32>` を各馬に、`result_confirmed: bool` を盤に追加。1 レース盤の結果反映。
 - `GET /api/live/{date}`（`LiveRaceViewSchema`）: `result_confirmed: bool` を追加（「⚫終」を推定から確定へ置換）。的中/払戻は既存 `GET /api/sessions/{date}` の `bets[].payout` から web が算出する（別ソースを増やさない）。
-- 書き込み口: `POST /api/results/{date}:refresh`（`?force=` 付き）を新設し `ResultsInteractor::refresh(date, force)` を起動。自動ポーリングは `force=false`（post_time gating あり）、手動フォールバックは `force=true`（gating 緩和で post_time 欠損レースも救済）。既存 `POST /api/sessions/{date}/results:refresh` は本フローへ委譲するエイリアスに変更。**レスポンス互換は保つが、着順の `results` upsert という副作用が新たに加わる**（純粋な後方互換ではない点を明示）。
+- 書き込み口: `POST /api/results/{date}:refresh`（`?force=` 付き）を新設し `ResultsInteractor::refresh(date, force)` を起動。自動ポーリングは `force=false`（post_time gating あり）、手動フォールバックは `force=true`（gating 緩和で post_time 欠損レースも救済）。既存 `POST /api/sessions/{date}/results:refresh` は本フローへ委譲するエイリアスに変更し、**同じく `?force=` を受理・転送する**（手動ボタンはこのエイリアス経由で `force=true` を渡す。`force` 既定 false のため旧 CLI 呼び出しは無指定で従来挙動）。**レスポンス互換は保つが、着順の `results` upsert という副作用が新たに加わる**（純粋な後方互換ではない点を明示）。
 - **OpenAPI を一級成果物**とする（utoipa コードファースト＋`openapi.json` スナップショット更新・検証を DoD 化）。
 
 ### 3. UI 自動反映（web）
@@ -73,7 +73,7 @@
 
 ## 影響
 
-- **新規**: use-case `ResultsInteractor::refresh(date)`（結果取り込み＋精算の集約・`RefreshReport` 返却）／HTML を 1 回取得して着順・払戻を両パースする scraper メソッド（既存 2 メソッドの二重 GET を避ける）／repo `upsert_results`（INSERT ON CONFLICT・当日着順の INSERT 経路）＋ `race_cards` からの `races` 行派生 upsert（FK 担保）／`POST /api/results/{date}:refresh`（rest-controller・router・api-server 配線）＋サーバ側の取得 debounce/in-flight ガード／read DTO 3 種への結果フィールド追加（`RaceSummary`・`BoardHorseSchema`＋盤・`LiveRaceViewSchema`）＋ OpenAPI スナップショット更新／web のポーリング＋「終」判定置換＋着順・的中/払戻表示／`web-spa.md` 鮮度方針の改訂（当日・未確定に限り自動ポーリング許可）。
+- **新規**: use-case `ResultsInteractor::refresh(date, force)`（結果取り込み＋精算の集約・`RefreshReport` 返却）／HTML を 1 回取得して着順・払戻を両パースする scraper メソッド（既存 2 メソッドの二重 GET を避ける）／repo `upsert_results`（INSERT ON CONFLICT・当日着順の INSERT 経路）＋ `race_cards` からの `races` 行派生 upsert（FK 担保）／`POST /api/results/{date}:refresh`（rest-controller・router・api-server 配線）＋サーバ側の取得 debounce/in-flight ガード／read DTO 3 種への結果フィールド追加（`RaceSummary`・`BoardHorseSchema`＋盤・`LiveRaceViewSchema`）＋ OpenAPI スナップショット更新／web のポーリング＋「終」判定置換＋着順・的中/払戻表示／`web-spa.md` 鮮度方針の改訂（当日・未確定に限り自動ポーリング許可）。
 - **不変**: `settle_bet`／`parse_race_payouts`／`SettleInteractor` の精算ロジック（冪等・返還優先・#131 全額返還）／確率モデル・EV 層（ADR 0055）・軸ロック（ADR 0060）／`paddock-fetch-results`（過去レース UPDATE・ADR 0015）／`results` スキーマ（列追加なし）。
 - **後方互換**: `POST /api/sessions/{date}/results:refresh` は本フローへ委譲するエイリアスとして維持。手動「精算」ボタンはフォールバックとして残す。
 - レース結果照合の手作業（netkeiba 直接確認・手動精算）が消え、UI が「発走済み → 着順・的中/払戻・収支」まで自動で追従する。あくまで結果照合の自動化であり、買い方判断（decision-support）は人間側に残る。
