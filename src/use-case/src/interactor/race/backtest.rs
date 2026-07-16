@@ -10,8 +10,8 @@ use paddock_domain::{
 use crate::error::Result;
 use crate::interactor::Interactor;
 use crate::interactor::race::predict::{
-    RaceContext, TREND_WEIGHTS, build_factors, field_mean_weight, recent_form_from_runs,
-    running_style_from_runs,
+    HorseSignals, RaceContext, TREND_WEIGHTS, build_factors, field_mean_weight,
+    recent_form_from_runs, resolve_shared_factors, running_style_from_runs,
 };
 use crate::pdf_fetcher::PdfFetcher;
 use crate::pdf_parser::PdfParser;
@@ -274,20 +274,22 @@ impl<R: StatsRepository + OddsRepository, P: PdfParser, F: PdfFetcher> Interacto
                         .and_then(|runs| paddock_domain::jockey_recent_form_score(runs));
                     // 脚質（先行度, #329 Phase1）。predict と同じ純粋関数で近走から算出（重み 0 で挙動不変）。
                     let running_style = running_style_from_runs(recent_runs);
-                    let factors = build_factors(
-                        &entry,
-                        &course,
-                        horse,
-                        jockey,
-                        trainer,
-                        &race_ctx,
+                    // predict と同じ共有 factor 解決＋組み立て（#409）。recency 有効時は build_factors 内で
+                    // horse 3 因子を時間減衰レートに上書きする（backtest の as-of 経路）。
+                    let shared =
+                        resolve_shared_factors(&entry, &course, horse, jockey, trainer, &race_ctx);
+                    let signals = HorseSignals {
                         recent_form,
-                        recency,
-                        race.date,
-                        &config,
                         jockey_recent_form,
                         running_style,
-                    );
+                        // 確定成績の斤量と field 平均斤量の相対シグナル（#135）。両方あるときのみ項を立てる。
+                        weight_carried: entry
+                            .weight_carried
+                            .zip(race_ctx.mean_weight)
+                            .map(|(w, mean)| paddock_domain::prediction::weight_factor(w, mean)),
+                    };
+                    let factors =
+                        build_factors(&shared, &race_ctx, &signals, recency, race.date, &config);
                     entry_factors.push((entry, factors));
                 }
 

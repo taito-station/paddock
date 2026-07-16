@@ -13,8 +13,8 @@ sources:
   - docs/adr/0042-win-power-calibration-adopted.md
   - docs/adr/0056-feature-reweight-course-gate-jockey.md
   - docs/adr/0057-impute-missing-factors-field-mean.md
-distilled_from_sha: "a81421b"
-updated: "2026-07-14"
+distilled_from_sha: "c00d97f"
+updated: "2026-07-16"
 ---
 
 # 着順確率推定モデル仕様書
@@ -363,15 +363,21 @@ pub struct HorseFactors {
 
 ### Use-Case (`use_case::interactor::race::predict`)
 
-```rust
-pub async fn predict_race(&self, race_id: &RaceId) -> Result<Vec<HorseProbability>>
-```
+確率推定の入口は `predict_race`（確率のみ）と `predict_race_views`（確率＋根拠・純/ブレンド 2 系統, #272）。
+両者は内部ヘルパ `collect_race_factors` を共有し、出馬表取得と各馬の factor / 予想根拠の構築を一元化する。
 
 1. `find_race_card(race_id)` → RaceCard 取得
-2. 各 HorseEntry に対してスタッツを **逐次取得**（デフォルト）。性能要件が出た場合に `join_all` 等で並列化可
-3. `domain::prediction::estimate_probabilities` を呼ぶ
+2. コース統計・標準タイム表・全馬/騎手/調教師の stats・近走を **バッチ取得**（per-horse N+1 を解消, #205）
+3. 各 HorseEntry に対し `resolve_shared_factors` で条件別成績（ラベル解決＋集計レート 10 スロット）を **1 回だけ** 解決し、
+   `build_factors`（score 用 `HorseFactors`）と `build_explanation`（根拠 `HorseExplanation`）が **同一の共有入力を読む**（#409）。
+   従来は両者がラベル選択・`stat_to_triple_opt` を二重実装して手動同期していた（factor 追加時に両方更新）欠陥を単一化した。
+   recency（時間減衰）有効時に horse 3 因子（芝ダ/距離/馬場）を集計レートから上書きする「score と根拠の乖離」は
+   `build_factors` 1 箇所に閉じ込める（本番は `recency: None` で両者一致）。
+4. `domain::prediction::estimate_probabilities_with_config` で確率へ合成（市場ブレンド・冪変換は後段）
 
-Repository に `find_race_card` メソッドを追加する。
+`with_explanation=false`（通常の `predict_race`）は根拠を組まず無駄な String 割当てを避ける。backtest
+（`use_case::interactor::race::backtest`）も同じ `resolve_shared_factors` / `build_factors` を共有する
+（as-of 統計・recency 有効の walk-forward、ADR 0014）。Repository には `find_race_card` を持つ。
 
 ### Interface (rdb-gateway)
 
