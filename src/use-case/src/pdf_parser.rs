@@ -11,6 +11,7 @@ pub trait PdfParser: Send + Sync {
 /// 要求するため注入するが、これらの bin は PDF 系ユースケース（`ingest_pdf` / `fetch_meeting`）を
 /// 呼ばないため `parse` は決して実行されない。誤って呼ばれた場合はサイレントな空成功にせず
 /// `InvalidArgument` で明示的に失敗させる（従来 5 apps が各自定義していた `UnusedParser` を集約）。
+/// 取得側の対スタブは [`crate::pdf_fetcher::NoopFetcher`]。
 pub struct NoopParser;
 
 impl PdfParser for NoopParser {
