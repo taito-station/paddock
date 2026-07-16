@@ -36,4 +36,10 @@ export default tseslint.config(
       ],
     },
   },
+  {
+    // Vite 設定ファイルはブラウザではなく Node 環境で実行される（process.env 等）。
+    // ブラウザ globals だけだと環境宣言が実態とズレるため、Node globals を追加する。
+    files: ["*.config.ts"],
+    languageOptions: { globals: globals.node },
+  },
 );
