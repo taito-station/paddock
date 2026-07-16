@@ -1,41 +1,12 @@
 use anyhow::Context;
 use paddock_config::Config;
-use paddock_use_case::Interactor;
+use paddock_use_case::{Interactor, NoopFetcher, NoopParser};
 use rdb_gateway::{PostgresRepository, pool};
 use tracing_subscriber::{EnvFilter, fmt};
 
-/// Stub PdfParser/PdfFetcher used by the analyze bin (it never ingests).
-pub struct UnusedParser;
-
-impl paddock_use_case::pdf_parser::PdfParser for UnusedParser {
-    fn parse(&self, _bytes: &[u8]) -> paddock_use_case::Result<Vec<paddock_domain::Race>> {
-        Err(paddock_use_case::Error::InvalidArgument(
-            "analyze bin does not parse PDFs".into(),
-        ))
-    }
-}
-
-pub struct UnusedFetcher;
-
-impl paddock_use_case::pdf_fetcher::PdfFetcher for UnusedFetcher {
-    fn fetch(&self, _url: &str) -> paddock_use_case::Result<Vec<u8>> {
-        Err(paddock_use_case::Error::InvalidArgument(
-            "analyze bin does not fetch PDFs".into(),
-        ))
-    }
-
-    fn fetch_if_exists(
-        &self,
-        _url: &str,
-    ) -> paddock_use_case::Result<paddock_use_case::pdf_fetcher::FetchProbe> {
-        Err(paddock_use_case::Error::InvalidArgument(
-            "analyze bin does not fetch PDFs".into(),
-        ))
-    }
-}
-
 pub struct App {
-    pub interactor: Interactor<PostgresRepository, UnusedParser, UnusedFetcher>,
+    // analyze bin は PDF を扱わないため PDF 系ジェネリクスは use-case 共通の Noop スタブ（#410）。
+    pub interactor: Interactor<PostgresRepository, NoopParser, NoopFetcher>,
 }
 
 pub async fn build_app() -> anyhow::Result<App> {
@@ -52,6 +23,6 @@ pub async fn build_app() -> anyhow::Result<App> {
         .context("connect Postgres pool")?;
     pool::migrate(&pool).await.context("apply migrations")?;
     let repo = PostgresRepository::new(pool);
-    let interactor = Interactor::new(repo, UnusedParser, UnusedFetcher);
+    let interactor = Interactor::new(repo, NoopParser, NoopFetcher);
     Ok(App { interactor })
 }

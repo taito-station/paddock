@@ -1,42 +1,13 @@
 use anyhow::Context;
 use netkeiba_scraper::UreqNetkeibaScraper;
 use paddock_config::Config;
-use paddock_use_case::{Interactor, OddsInteractor, SettleInteractor};
+use paddock_use_case::{Interactor, NoopFetcher, NoopParser, OddsInteractor, SettleInteractor};
 use rdb_gateway::{PostgresRepository, pool};
 use tracing_subscriber::{EnvFilter, fmt};
 
-/// predict バイナリは PDF 解析・取得を使わないため no-op を注入する（analyze と同パターン）。
-pub struct UnusedParser;
-
-impl paddock_use_case::pdf_parser::PdfParser for UnusedParser {
-    fn parse(&self, _bytes: &[u8]) -> paddock_use_case::Result<Vec<paddock_domain::Race>> {
-        Err(paddock_use_case::Error::InvalidArgument(
-            "predict bin does not parse PDFs".into(),
-        ))
-    }
-}
-
-pub struct UnusedFetcher;
-
-impl paddock_use_case::pdf_fetcher::PdfFetcher for UnusedFetcher {
-    fn fetch(&self, _url: &str) -> paddock_use_case::Result<Vec<u8>> {
-        Err(paddock_use_case::Error::InvalidArgument(
-            "predict bin does not fetch PDFs".into(),
-        ))
-    }
-
-    fn fetch_if_exists(
-        &self,
-        _url: &str,
-    ) -> paddock_use_case::Result<paddock_use_case::pdf_fetcher::FetchProbe> {
-        Err(paddock_use_case::Error::InvalidArgument(
-            "predict bin does not fetch PDFs".into(),
-        ))
-    }
-}
-
 pub struct App {
-    pub interactor: Interactor<PostgresRepository, UnusedParser, UnusedFetcher>,
+    // predict bin は PDF を扱わないため PDF 系ジェネリクスは use-case 共通の Noop スタブ（#410）。
+    pub interactor: Interactor<PostgresRepository, NoopParser, NoopFetcher>,
     /// オッズは read-through で取得する（保存済み参照 → 無ければスクレイプして保存、#51/ADR 0010）。
     pub odds: OddsInteractor<UreqNetkeibaScraper, PostgresRepository>,
     /// 確定払戻の自動精算（#40、`--settle`）。netkeiba 結果ページから払戻を取得する。
@@ -66,7 +37,7 @@ pub async fn build_app() -> anyhow::Result<App> {
         PostgresRepository::new(pool.clone()),
     );
     let repo = PostgresRepository::new(pool);
-    let interactor = Interactor::new(repo, UnusedParser, UnusedFetcher);
+    let interactor = Interactor::new(repo, NoopParser, NoopFetcher);
     Ok(App {
         interactor,
         odds,

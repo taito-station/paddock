@@ -7,9 +7,8 @@ use actix_web::{App, test, web};
 use serde_json::{Value, json};
 
 use api_server::app::configure_routes;
-use api_server::setup::{UnusedFetcher, UnusedParser};
 use netkeiba_scraper::UreqNetkeibaScraper;
-use paddock_use_case::Interactor;
+use paddock_use_case::{Interactor, NoopFetcher, NoopParser};
 use rdb_gateway::PostgresRepository;
 
 type Repo = PostgresRepository;
@@ -19,13 +18,12 @@ const RACE_ID: &str = "2026-1-nakayama-1-R1";
 
 macro_rules! build_service {
     ($pool:expr) => {{
-        let interactor =
-            Interactor::new(PostgresRepository::new($pool), UnusedParser, UnusedFetcher);
+        let interactor = Interactor::new(PostgresRepository::new($pool), NoopParser, NoopFetcher);
         test::init_service(App::new().app_data(web::Data::new(interactor)).configure(
             configure_routes::<
                 Repo,
-                UnusedParser,
-                UnusedFetcher,
+                NoopParser,
+                NoopFetcher,
                 UreqNetkeibaScraper,
                 UreqNetkeibaScraper,
             >,

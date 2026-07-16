@@ -3,44 +3,15 @@ use std::time::Duration;
 use anyhow::Context;
 use netkeiba_scraper::UreqNetkeibaScraper;
 use paddock_config::Config;
-use paddock_use_case::{Interactor, OddsInteractor};
+use paddock_use_case::{Interactor, NoopFetcher, NoopParser, OddsInteractor};
 use rdb_gateway::{PostgresRepository, pool};
 use tracing_subscriber::{EnvFilter, fmt};
-
-/// predict-watch は PDF 解析・取得を使わないため no-op を注入する（predict/analyze と同パターン）。
-pub struct UnusedParser;
-
-impl paddock_use_case::pdf_parser::PdfParser for UnusedParser {
-    fn parse(&self, _bytes: &[u8]) -> paddock_use_case::Result<Vec<paddock_domain::Race>> {
-        Err(paddock_use_case::Error::InvalidArgument(
-            "predict-watch bin does not parse PDFs".into(),
-        ))
-    }
-}
-
-pub struct UnusedFetcher;
-
-impl paddock_use_case::pdf_fetcher::PdfFetcher for UnusedFetcher {
-    fn fetch(&self, _url: &str) -> paddock_use_case::Result<Vec<u8>> {
-        Err(paddock_use_case::Error::InvalidArgument(
-            "predict-watch bin does not fetch PDFs".into(),
-        ))
-    }
-
-    fn fetch_if_exists(
-        &self,
-        _url: &str,
-    ) -> paddock_use_case::Result<paddock_use_case::pdf_fetcher::FetchProbe> {
-        Err(paddock_use_case::Error::InvalidArgument(
-            "predict-watch bin does not fetch PDFs".into(),
-        ))
-    }
-}
 
 /// 監視に必要な依存だけを束ねる。買い目記録系の interactor を持たない＝predict のセッション記録
 /// （predict_sessions / predict_bets）に触れないことを構造で担保する。オッズの再取得・保存は行う。
 pub struct App {
-    pub interactor: Interactor<PostgresRepository, UnusedParser, UnusedFetcher>,
+    // predict-watch bin は PDF を扱わないため PDF 系ジェネリクスは use-case 共通の Noop スタブ（#410）。
+    pub interactor: Interactor<PostgresRepository, NoopParser, NoopFetcher>,
     /// オッズは `refresh_race_odds` で**毎回再スクレイプ**する（read-through キャッシュは使わない、#257）。
     pub odds: OddsInteractor<UreqNetkeibaScraper, PostgresRepository>,
 }
@@ -65,6 +36,6 @@ pub async fn build_app(scrape_delay_ms: u64) -> anyhow::Result<App> {
         UreqNetkeibaScraper::with_delay(Duration::from_millis(scrape_delay_ms)),
         PostgresRepository::new(pool.clone()),
     );
-    let interactor = Interactor::new(PostgresRepository::new(pool), UnusedParser, UnusedFetcher);
+    let interactor = Interactor::new(PostgresRepository::new(pool), NoopParser, NoopFetcher);
     Ok(App { interactor, odds })
 }
