@@ -28,9 +28,10 @@
 
 処理:
 
-1. 開催日 `date` のレースのうち **`post_time` を過ぎ、かつ未確定**のものを対象に選ぶ。
+1. 開催日 `date` のレースのうち **`post_time` を過ぎ、かつ未確定**のものを対象に選ぶ（`force=false` の既定）。
    - 発走前（`post_time` 未到達）・確定済み（`result_confirmed=true`）は **netkeiba を叩かずスキップ**。
-   - `post_time` が未取得（`race_cards` に無い）のレースは「終了と断定しない」（#391 の縮退方針を踏襲）→ 対象外。
+   - `post_time` が未取得（`race_cards` に無い）のレースは「終了と断定しない」（#391 の縮退方針を踏襲）→ 既定では対象外。
+   - **`force=true`（手動フォールバック）** のときは post_time gating を無効化し、post_time 未到達/欠損の未確定レースも取得対象にする（確定済みは `force` でもスキップ）。
 2. 各対象レースにつき `race/result.html` を **1 回**取得し、同一 HTML から着順（`parse_race_result` → `Vec<ResultRow>`）と払戻（`parse_race_payouts` → `RacePayouts`）を **両方**パースする。既存の `fetch_race_result` / `fetch_race_payouts` は各々が独立に GET する 2 メソッドのため、**HTML を 1 回取得して両パーサへ渡す新 scraper メソッド**（例 `fetch_race_result_page`）を追加する。
    - 取得失敗（ネット断・BAN 等）・未生成（結果ページ未生成）は当該レースを **pending 据え置き**にして継続（1 レースの失敗で他レースを巻き添えにしない）。既存 `settle_session` の失敗ハンドリングと同方針。
 3. **`races` 行を担保**してから着順を `results` へ **upsert**（後述 `upsert_results`）。`source='netkeiba'`。
@@ -60,6 +61,7 @@ ON CONFLICT (race_id, horse_num) DO UPDATE SET
 
 - **FK `races` の担保**: `results.race_id` は `races(race_id)` への FK。当日フロー（`card/ingest.rs`）は `race_cards`/`horse_entries`/`race_odds` のみ保存し **`races` 行を作らない**（`races` の INSERT は PDF ingest 経路の `save_race` のみ）。よって `upsert_results` の前に `race_cards` から `races` 行を派生 upsert し FK を満たす。
 - **NOT NULL 補完（常時）**: `results.gate_num` / `results.horse_name` は NOT NULL だが **`ResultRow` に含まれない**（結果ページからは取得しない・フィールド自体が無い）。よって `(race_id, horse_num)` で `race_cards`（出馬表・当日取得済み）から **常に**補完する。`race_cards` が無いレース（出馬表未取得）は補完不能のため当該レースを pending 据え置きにし、着順を書かない。
+- **`horse_id` は NULL 許容**: `results.horse_id`（`TEXT`・netkeiba 馬 ID）は nullable で、`ResultRow` にも含まれないため当日 upsert では **NULL のまま INSERT**（近走リンク用の任意列・PDF 経路でも None）。NOT NULL 補完の対象は `gate_num`/`horse_name` の 2 列のみ。
 - **スキーマ変更なし**: `results` に列は足さない。`result_confirmed` は下記の派生クエリで判定。
 
 ### 結果確定フラグ（派生）
@@ -90,8 +92,8 @@ SELECT EXISTS (
 
 ### 書き込み口
 
-- **新設** `POST /api/results/{date}:refresh` → `ResultsInteractor::refresh(date)` を起動し `RefreshReport` を返す。
-- **エイリアス** `POST /api/sessions/{date}/results:refresh` は本フローへ委譲する（既存 web「精算」ボタン・CLI 経路のレスポンス互換は保つ）。ただし委譲後は着順 `results` upsert という**副作用が新たに加わる**点で純粋な後方互換ではない（旧経路は精算のみ・着順保存なしだった）。
+- **新設** `POST /api/results/{date}:refresh` → `ResultsInteractor::refresh(date, force)` を起動し `RefreshReport` を返す。`force`（クエリ `?force=true`・既定 false）は **手動フォールバック専用の gating 緩和フラグ**。既定（自動ポーリング）は「`post_time` 経過 かつ 未確定」を対象とするが、`force=true` では **post_time gating を無効化**し、`post_time` 未取得（#391 で対象外にした欠損レース）を含む未確定レースも取得対象にする（確定済みは `force` でもスキップ）。
+- **エイリアス** `POST /api/sessions/{date}/results:refresh` は本フローへ委譲する（既存 web「精算」ボタン・CLI 経路のレスポンス互換は保つ）。ただし委譲後は着順 `results` upsert という**副作用が新たに加わる**点で純粋な後方互換ではない（旧経路は精算のみ・着順保存なしだった）。手動ボタンはこのエイリアス経由で `force=true` を渡す。
 
 エラー写像（use-case Error → HTTP）は既存規約どおり（`NotFound`→404 等）。セッション不在の日でも着順取り込みは走るため、`results:refresh`（新）はセッション不在を 404 にせず「精算 0・確定 N」を返す。
 
@@ -102,7 +104,7 @@ SELECT EXISTS (
 - **対象画面**: ライブ一覧（`RaceList.tsx`）／収支サマリ（`SessionSummary.tsx`）。
 - **条件**: 表示日が当日で、**`post_time` を過ぎ、かつ未確定（`result_confirmed=false`）のレースが 1 件以上残る間だけ** `POST /api/results/{date}:refresh` を 30–60 秒間隔でポーリング。当日でも全レースが発走前（対象 0）なら**ポーリングしない**（空振りさせない）。
 - **停止**: 対象日の全レースが確定したらポーリングを止める（netkeiba への無駄打ち・pacing 逸脱を防ぐ）。前日・過去日は静的表示（ポーリングしない）。
-- **フォールバック**: 手動「精算」ボタンは残す（ポーリング失敗・手動再精算の入口）。`post_time` 欠損レース（#391 で対象外にした未確定レース）は自動確定されないため、手動ボタン経由での救済対象とする（手動起動時は post_time gating を緩め、当該レースの結果取得を試みる）。
+- **フォールバック**: 手動「精算」ボタンは残す（ポーリング失敗・手動再精算の入口）。`post_time` 欠損レース（#391 で対象外にした未確定レース）は自動ポーリングでは確定されないため、手動ボタンは **`force=true`**（前述の書き込み口）を渡して post_time gating を緩め、当該レースの結果取得を試みる（自動ポーリングは常に `force=false`）。
 - **鮮度方針の改訂**: `web-spa.md` は現状「SPA は自動ポーリングしない・再現性重視・自動更新なし」と規定しポーリングを非対象に挙げている。本設計はこれを**「当日・未確定レースに限り自動ポーリングを許可」と明示的に上書き**する（ADR 0068・過去日/確定済みは従来どおり自動更新しない）。`web-spa.md` の該当記述も本 PR 承認後の実装 PR で改訂する。
 
 ### 表示

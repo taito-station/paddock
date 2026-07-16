@@ -46,7 +46,7 @@
 - `GET /api/races`（`RaceSummary`）: `result_confirmed: bool` と `finish_order: [{position, horse_num, horse_name}]`（上位 3）を追加。ライブ一覧の「終」バッジ・着順表示の一次ソース。
 - `GET /api/races/{race_id}/board`（`BoardHorseSchema`）: `finishing_position: Option<u32>` を各馬に、`result_confirmed: bool` を盤に追加。1 レース盤の結果反映。
 - `GET /api/live/{date}`（`LiveRaceViewSchema`）: `result_confirmed: bool` を追加（「⚫終」を推定から確定へ置換）。的中/払戻は既存 `GET /api/sessions/{date}` の `bets[].payout` から web が算出する（別ソースを増やさない）。
-- 書き込み口: `POST /api/results/{date}:refresh` を新設し `ResultsInteractor::refresh` を起動。既存 `POST /api/sessions/{date}/results:refresh` は本フローへ委譲するエイリアスに変更。**レスポンス互換は保つが、着順の `results` upsert という副作用が新たに加わる**（純粋な後方互換ではない点を明示）。
+- 書き込み口: `POST /api/results/{date}:refresh`（`?force=` 付き）を新設し `ResultsInteractor::refresh(date, force)` を起動。自動ポーリングは `force=false`（post_time gating あり）、手動フォールバックは `force=true`（gating 緩和で post_time 欠損レースも救済）。既存 `POST /api/sessions/{date}/results:refresh` は本フローへ委譲するエイリアスに変更。**レスポンス互換は保つが、着順の `results` upsert という副作用が新たに加わる**（純粋な後方互換ではない点を明示）。
 - **OpenAPI を一級成果物**とする（utoipa コードファースト＋`openapi.json` スナップショット更新・検証を DoD 化）。
 
 ### 3. UI 自動反映（web）
