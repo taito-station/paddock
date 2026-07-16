@@ -237,31 +237,31 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: 
                 .and_then(|runs| paddock_domain::jockey_recent_form_score(runs));
             // 脚質（先行度, #329 Phase1）。近走のコーナー通過順位＋頭数から算出（本番は重み 0 で挙動不変）。
             let running_style = running_style_from_runs(recent_runs);
-            let factors = build_factors(
-                entry,
-                &course,
-                horse,
-                jockey,
-                trainer,
-                &race_ctx,
+            // build_factors と build_explanation が共有する条件別成績を 1 回だけ解決する（#409）。
+            let shared = resolve_shared_factors(entry, &course, horse, jockey, trainer, &race_ctx);
+            let signals = HorseSignals {
                 recent_form,
-                None, // recency: production() では無効
-                card.date,
-                config,
                 jockey_recent_form,
                 running_style,
+                // 斤量のレース内相対シグナル（#135）。当該馬の斤量と field 平均斤量の両方があるときのみ項を立てる。
+                // PDF 出馬表（斤量なし）・field 平均が出せないレースは None（母数除外）。
+                weight_carried: entry
+                    .weight_carried
+                    .zip(race_ctx.mean_weight)
+                    .map(|(w, mean)| paddock_domain::prediction::weight_factor(w, mean)),
+            };
+            let factors = build_factors(
+                &shared, &race_ctx, &signals, None, // recency: production() では無効
+                card.date, config,
             );
-            // 予想根拠（#274）。確率推定と同じ factor レート・前走から作る。runs は date 降順なので
+            // 予想根拠（#274）。確率推定と同じ共有 factor レート・前走から作る。runs は date 降順なので
             // index 0 が最新（前走）。本番経路は recency: None なので集計レート（build_factors と同源）。
             // with_explanation=false（通常の predict_race）では組まずに無駄な String 割当てを避ける。
             if with_explanation {
                 explanations.push(build_explanation(
+                    &shared,
                     entry,
-                    &course,
                     conditional_gate.as_ref(),
-                    horse,
-                    jockey,
-                    trainer,
                     &race_ctx,
                     recent_form,
                     recent_runs.first(),
@@ -425,73 +425,73 @@ pub(crate) struct RaceContext {
     pub mean_weight: Option<f64>,
 }
 
-/// 取得済みの stats 行と前走フォームから `HorseFactors` を組み立てる純粋変換。本番 predict
-/// （全期間統計）とバックテスト（as-of 統計）の両方から共有する。`recent_form` は呼び出し側が
-/// 前走から算出して渡す（#31）。
-///
-/// `config.recency = Some(rc)` かつ `recency` が渡されたとき、馬自身の 3 factor（芝ダ・距離帯・
-/// 馬場状態）は集計レートの代わりに日付付き系列を時間減衰した recency 重み付きレートで評価する
-/// （#75 Phase B）。`as_of_date` は減衰の基準日（predict は出馬表日、backtest はレース日）。
-/// course/jockey/trainer は従来の集計レートのまま。
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn build_factors(
+/// build_factors（score）と build_explanation（根拠）が共有する、ラベル解決済みの条件別成績（#409）。
+/// 両関数が同一の (stat 行, label) → `stat_to_triple_opt` を二重評価し、手動同期でズレていた欠陥を解消する。
+/// `collect_race_factors` / backtest のループで馬ごとに [`resolve_shared_factors`] で 1 回だけ構築し、
+/// `&SharedFactorStats` を両関数へ渡す。10 スロットは recency 無効時の集計レート（本番・explanation はこれを使う）。
+pub(crate) struct SharedFactorStats {
+    // 解決済みラベル（build_explanation が FactorExplanation の label に使う。build_factors は recency 上書きに使う）。
+    surf_label: &'static str,
+    dist_label: &'static str,
+    gate_label: &'static str,
+    venue_label: &'static str,
+    // 10 スロットの集計 FactorStat（母数 0・欠落・欠員は None）。
+    course_gate: Option<FactorStat>,
+    horse_surface: Option<FactorStat>,
+    horse_distance: Option<FactorStat>,
+    horse_track_condition: Option<FactorStat>,
+    jockey_surface: Option<FactorStat>,
+    trainer_surface: Option<FactorStat>,
+    jockey_venue: Option<FactorStat>,
+    jockey_distance: Option<FactorStat>,
+    jockey_horse_combo: Option<FactorStat>,
+    horse_venue: Option<FactorStat>,
+}
+
+/// build_factors に渡す per-horse のスカラー signal（共有の条件別 stat 以外）。#409 で引数を束ねる。
+/// いずれも [0,1]（0.5=中立）または None（母数除外）。ループ側で近走・斤量から算出する。
+pub(crate) struct HorseSignals {
+    pub(crate) recent_form: Option<f64>,
+    pub(crate) jockey_recent_form: Option<f64>,
+    pub(crate) running_style: Option<f64>,
+    pub(crate) weight_carried: Option<f64>,
+}
+
+/// 取得済みの stats 行から、build_factors と build_explanation が共有する条件別成績を解決する（#409）。
+/// ラベル選択（`*_label`）と `stat_to_triple_opt` の組をここに集約し、両者の二重実装・手動同期を単一化する。
+/// 本番 predict（全期間統計）とバックテスト（as-of 統計）の両方から共有する（ADR 0014）。
+pub(crate) fn resolve_shared_factors(
     entry: &HorseEntry,
     course: &CourseStatsRow,
     horse: &HorseStatsRow,
     jockey: Option<&JockeyStatsRow>,
     trainer: Option<&TrainerStatsRow>,
     race: &RaceContext,
-    recent_form: Option<f64>,
-    recency: Option<&HorseRecencyStats>,
-    as_of_date: NaiveDate,
-    config: &EstimationConfig,
-    jockey_recent_form: Option<f64>,
-    running_style: Option<f64>,
-) -> HorseFactors {
+) -> SharedFactorStats {
     let gate_label = gate_group_label(entry.gate_num.value());
     let surf_label = surface_label(race.surface);
     let dist_label = distance_band_label(race.distance);
     // #350 相性 factor の照合キー: 競馬場は日本語場名（by_venue のラベル＝races.venue の値と一致）。
     let venue_label = race.venue.as_jp();
 
-    // recency 有効時は horse 系 factor を日付系列の時間減衰で評価する。無効時・系列なしは集計レート。
-    let recency_cfg = config.recency.zip(recency);
-    let horse_surface = match recency_cfg {
-        Some((rc, r)) => recency_factor(&r.by_surface, surf_label, as_of_date, rc.half_life_days),
-        None => stat_to_triple_opt(&horse.by_surface, surf_label),
-    };
-    let horse_distance = match recency_cfg {
-        Some((rc, r)) => recency_factor(
-            &r.by_distance_band,
-            dist_label,
-            as_of_date,
-            rc.half_life_days,
-        ),
-        None => stat_to_triple_opt(&horse.by_distance_band, dist_label),
-    };
-    let horse_track_condition = race.track_condition.and_then(|tc| match recency_cfg {
-        Some((rc, r)) => recency_factor(
-            &r.by_track_condition,
-            tc.as_str(),
-            as_of_date,
-            rc.half_life_days,
-        ),
-        None => stat_to_triple_opt(&horse.by_track_condition, tc.as_str()),
-    });
-
     // 全 factor で「実績なし」を None（母数除外）に統一する（#81/ADR 0014）。一致なし・出走 0 件は
     // stat_to_triple_opt が None を返し、0 レート（＝全敗）と区別される。jockey/trainer は
     // 騎手・調教師欠落（and_then の外側 None）と「実績なし」（内側 None）を二段で畳む。
-    HorseFactors {
+    SharedFactorStats {
+        surf_label,
+        dist_label,
+        gate_label,
+        venue_label,
         course_gate: stat_to_triple_opt(&course.by_gate_group, gate_label),
-        horse_surface,
-        horse_distance,
+        horse_surface: stat_to_triple_opt(&horse.by_surface, surf_label),
+        horse_distance: stat_to_triple_opt(&horse.by_distance_band, dist_label),
+        // 馬場状態が未確定のレース・該当馬場での出走実績が無い馬は None（#73）。
+        horse_track_condition: race
+            .track_condition
+            .and_then(|tc| stat_to_triple_opt(&horse.by_track_condition, tc.as_str())),
         jockey_surface: jockey.and_then(|j| stat_to_triple_opt(&j.by_surface, surf_label)),
         trainer_surface: trainer.and_then(|t| stat_to_triple_opt(&t.by_surface, surf_label)),
-        // 馬場状態が未確定のレース・該当馬場での出走実績が無い馬は None（#73）。
-        horse_track_condition,
-        // #350 相性 factor（measure-first・本番は重み 0 で挙動不変）。既存 stat factor と同じ流儀で
-        // 母数 0・欠落は None（stat_to_triple_opt）。騎手系は騎手未登録も None（and_then の外側）。
+        // #350 相性 factor（measure-first・本番は重み 0 で挙動不変）。母数 0・欠落は None。騎手系は騎手未登録も None。
         jockey_venue: jockey.and_then(|j| stat_to_triple_opt(&j.by_venue, venue_label)),
         jockey_distance: jockey.and_then(|j| stat_to_triple_opt(&j.by_distance_band, dist_label)),
         // 騎手×馬コンビ: この馬の騎手別成績（horse.by_jockey）を現騎手名で引く。騎手未登録は None。
@@ -500,69 +500,109 @@ pub(crate) fn build_factors(
             .as_ref()
             .and_then(|jn| stat_to_triple_opt(&horse.by_jockey, jn.value())),
         horse_venue: stat_to_triple_opt(&horse.by_venue, venue_label),
-        recent_form,
-        // 斤量のレース内相対シグナル（#135）。当該馬の斤量と field 平均斤量の両方があるときのみ項を立てる。
-        // PDF 出馬表（斤量なし）・field 平均が出せないレースは None（母数除外）。
-        weight_carried: entry
-            .weight_carried
-            .zip(race.mean_weight)
-            .map(|(w, mean)| paddock_domain::prediction::weight_factor(w, mean)),
-        jockey_recent_form,
-        running_style,
+    }
+}
+
+/// 共有済み条件別成績（[`SharedFactorStats`]）と per-horse signal から `HorseFactors` を組み立てる純粋変換。
+///
+/// `config.recency = Some(rc)` かつ `recency` が渡されたとき、馬自身の 3 factor（芝ダ・距離帯・馬場状態）は
+/// 集計レート（`shared`）の代わりに日付付き系列を時間減衰した recency 重み付きレートで評価する（#75 Phase B）。
+/// `as_of_date` は減衰の基準日（predict は出馬表日、backtest はレース日）。course/jockey/trainer・相性 factor は
+/// `shared` の集計レートのまま。**recency による score と根拠の乖離点はこの 1 箇所に閉じ込める**（#409）。
+pub(crate) fn build_factors(
+    shared: &SharedFactorStats,
+    race: &RaceContext,
+    signals: &HorseSignals,
+    recency: Option<&HorseRecencyStats>,
+    as_of_date: NaiveDate,
+    config: &EstimationConfig,
+) -> HorseFactors {
+    // recency 有効時は horse 系 factor を日付系列の時間減衰で評価する。無効時・系列なしは共有の集計レート。
+    let recency_cfg = config.recency.zip(recency);
+    let horse_surface = match recency_cfg {
+        Some((rc, r)) => recency_factor(
+            &r.by_surface,
+            shared.surf_label,
+            as_of_date,
+            rc.half_life_days,
+        ),
+        None => shared.horse_surface,
+    };
+    let horse_distance = match recency_cfg {
+        Some((rc, r)) => recency_factor(
+            &r.by_distance_band,
+            shared.dist_label,
+            as_of_date,
+            rc.half_life_days,
+        ),
+        None => shared.horse_distance,
+    };
+    let horse_track_condition = match recency_cfg {
+        Some((rc, r)) => race.track_condition.and_then(|tc| {
+            recency_factor(
+                &r.by_track_condition,
+                tc.as_str(),
+                as_of_date,
+                rc.half_life_days,
+            )
+        }),
+        None => shared.horse_track_condition,
+    };
+
+    HorseFactors {
+        course_gate: shared.course_gate,
+        horse_surface,
+        horse_distance,
+        jockey_surface: shared.jockey_surface,
+        trainer_surface: shared.trainer_surface,
+        // 馬場状態が未確定のレース・該当馬場での出走実績が無い馬は None（#73）。
+        horse_track_condition,
+        jockey_venue: shared.jockey_venue,
+        jockey_distance: shared.jockey_distance,
+        jockey_horse_combo: shared.jockey_horse_combo,
+        horse_venue: shared.horse_venue,
+        recent_form: signals.recent_form,
+        weight_carried: signals.weight_carried,
+        jockey_recent_form: signals.jockey_recent_form,
+        running_style: signals.running_style,
     }
 }
 
 /// 取得済みの stats 行・前走から各馬の予想根拠 [`HorseExplanation`] を組み立てる純粋変換（#274）。
-/// `build_factors` と同じ素材（同一ラベルの集計レート・前走）を使うが、score への合成ではなく
-/// 「人が読める条件別成績」へ写像する。本番経路は recency: None なので集計レート（build_factors と
-/// 同源）を使い、確率推定と根拠の数値が一致する。`prev_run` は最新走（runs の index 0）。
-///
-/// **build_factors との同期が前提**: ラベル選択（`*_label`）と `stat_to_triple_opt` の組は
-/// `build_factors` と揃えて「根拠の数値＝score の入力」を保つ。factor を増やす際は両方を更新する。
-/// 確率自体は `predict_race` と `predict_race_views` が同一の `collect_race_factors`＋
-/// `estimate_and_blend` を通るため構造的に一致する（`with_explanation` フラグは根拠生成の有無だけを
-/// 切り替え、`entry_factors` には影響しない）。
-/// 既知の乖離点: `config.recency = Some(..)` を有効化すると build_factors は時間減衰レート・本関数は
-/// 集計レートになり数値がズレる。現 production は recency None のため実害なし（有効化時に追従が必要）。
-#[allow(clippy::too_many_arguments)]
+/// `build_factors` と同じ [`SharedFactorStats`]（同一ラベルの集計レート）を読み、score への合成ではなく
+/// 「人が読める条件別成績」へ写像する。共有構造体を両者で読むため「根拠の数値＝score の入力」が構造的に
+/// 一致し、かつてのラベル選択・集計の手動同期（factor 追加時に両方更新）は不要になった（#409）。
+/// `prev_run` は最新走（runs の index 0）。conditional_gate（枠バイアス・提示専用）と prev_run は根拠固有
+/// のため本関数が自前で扱う（score には投入しない）。
 fn build_explanation(
+    shared: &SharedFactorStats,
     entry: &HorseEntry,
-    course: &CourseStatsRow,
     conditional_gate: Option<&ConditionalGateStatsRow>,
-    horse: &HorseStatsRow,
-    jockey: Option<&JockeyStatsRow>,
-    trainer: Option<&TrainerStatsRow>,
     race: &RaceContext,
     recent_form: Option<f64>,
     prev_run: Option<&RecentRun>,
 ) -> HorseExplanation {
-    let gate_label = gate_group_label(entry.gate_num.value());
-    let surf_label = surface_label(race.surface);
-    let dist_label = distance_band_label(race.distance);
-    // #350/#366(b) 相性 factor の照合キー: 競馬場は日本語場名（build_factors と同一）。
-    let venue_label = race.venue.as_jp();
-
     let mut factors: Vec<FactorExplanation> = Vec::new();
-    // 馬の条件別成績（芝ダ・距離帯）。一致なし・出走 0 件は stat_to_triple_opt が None（母数除外と同じ欠落扱い）。
-    if let Some(fs) = stat_to_triple_opt(&horse.by_surface, surf_label) {
+    // 馬の条件別成績（芝ダ・距離帯）。共有の集計 FactorStat をそのまま使う（None は母数除外の欠落扱い）。
+    if let Some(fs) = shared.horse_surface {
         factors.push(FactorExplanation::new(
             ExplainCategory::Surface,
-            surf_label.to_string(),
+            shared.surf_label.to_string(),
             fs.rate,
             fs.starts,
         ));
     }
-    if let Some(fs) = stat_to_triple_opt(&horse.by_distance_band, dist_label) {
+    if let Some(fs) = shared.horse_distance {
         factors.push(FactorExplanation::new(
             ExplainCategory::Distance,
-            dist_label.to_string(),
+            shared.dist_label.to_string(),
             fs.rate,
             fs.starts,
         ));
     }
-    // 馬場状態は当日値が確定しているレースのみ（未確定なら根拠に含めない）。
+    // 馬場状態は当日値が確定しているレースのみ（未確定なら shared.horse_track_condition が None）。
     if let Some(tc) = race.track_condition
-        && let Some(fs) = stat_to_triple_opt(&horse.by_track_condition, tc.as_str())
+        && let Some(fs) = shared.horse_track_condition
     {
         factors.push(FactorExplanation::new(
             ExplainCategory::TrackCondition,
@@ -571,11 +611,11 @@ fn build_explanation(
             fs.starts,
         ));
     }
-    // コース×枠（場×距離×馬場の枠順別）。全馬共通の course から。
-    if let Some(fs) = stat_to_triple_opt(&course.by_gate_group, gate_label) {
+    // コース×枠（場×距離×馬場の枠順別）。全馬共通の course から（shared.course_gate）。
+    if let Some(fs) = shared.course_gate {
         factors.push(FactorExplanation::new(
             ExplainCategory::CourseGate,
-            gate_label.to_string(),
+            shared.gate_label.to_string(),
             fs.rate,
             fs.starts,
         ));
@@ -588,7 +628,7 @@ fn build_explanation(
     {
         let track_label = gate_track_cond2_label(tc.as_str());
         let field_label = gate_field_band_label(race.field_size as u32);
-        if let Some(cell) = cg.cell(track_label, field_label, gate_label)
+        if let Some(cell) = cg.cell(track_label, field_label, shared.gate_label)
             && cell.stat.starts > 0
         {
             factors.push(FactorExplanation::new(
@@ -612,8 +652,8 @@ fn build_explanation(
             }
         }
     }
-    // 騎手・調教師（芝ダ別）。未登録・実績なしは項を立てない。ラベルは entry の名前を使う。
-    if let Some(fs) = jockey.and_then(|j| stat_to_triple_opt(&j.by_surface, surf_label)) {
+    // 騎手・調教師（芝ダ別）。未登録・実績なしは項を立てない（shared が None）。ラベルは entry の名前を使う。
+    if let Some(fs) = shared.jockey_surface {
         let label = entry
             .jockey
             .as_ref()
@@ -626,7 +666,7 @@ fn build_explanation(
             fs.starts,
         ));
     }
-    if let Some(fs) = trainer.and_then(|t| stat_to_triple_opt(&t.by_surface, surf_label)) {
+    if let Some(fs) = shared.trainer_surface {
         let label = entry
             .trainer
             .as_ref()
@@ -642,25 +682,25 @@ fn build_explanation(
     // #366(b) 相性 factor を書評の根拠に載せる（描画層のみ・本番 weight は不変）。build_factors と同じ
     // 照合キー・`stat_to_triple_opt` を使い「実績がある時だけ書く」欠落扱い（母数 0・欠落は項を立てない）。
     // coverage が薄い combo/horse_venue も starts>0 の時だけ出る。率のみ提示（verdict=None）。
-    if let Some(fs) = jockey.and_then(|j| stat_to_triple_opt(&j.by_venue, venue_label)) {
+    if let Some(fs) = shared.jockey_venue {
         factors.push(FactorExplanation::new(
             ExplainCategory::JockeyVenue,
-            venue_label.to_string(),
+            shared.venue_label.to_string(),
             fs.rate,
             fs.starts,
         ));
     }
-    if let Some(fs) = jockey.and_then(|j| stat_to_triple_opt(&j.by_distance_band, dist_label)) {
+    if let Some(fs) = shared.jockey_distance {
         factors.push(FactorExplanation::new(
             ExplainCategory::JockeyDistance,
-            dist_label.to_string(),
+            shared.dist_label.to_string(),
             fs.rate,
             fs.starts,
         ));
     }
-    // 馬×騎手コンビ: この馬の騎手別成績（horse.by_jockey）を現騎手名で引く（build_factors と同源）。
+    // 馬×騎手コンビ: この馬の騎手別成績（horse.by_jockey）を現騎手名で引く（shared と同源）。ラベルは現騎手名。
     if let Some(jn) = entry.jockey.as_ref()
-        && let Some(fs) = stat_to_triple_opt(&horse.by_jockey, jn.value())
+        && let Some(fs) = shared.jockey_horse_combo
     {
         factors.push(FactorExplanation::new(
             ExplainCategory::JockeyHorseCombo,
@@ -669,10 +709,10 @@ fn build_explanation(
             fs.starts,
         ));
     }
-    if let Some(fs) = stat_to_triple_opt(&horse.by_venue, venue_label) {
+    if let Some(fs) = shared.horse_venue {
         factors.push(FactorExplanation::new(
             ExplainCategory::HorseVenue,
-            venue_label.to_string(),
+            shared.venue_label.to_string(),
             fs.rate,
             fs.starts,
         ));
@@ -794,7 +834,10 @@ mod tests {
         race_card::HorseEntry,
     };
 
-    use super::{RaceContext, build_explanation, recent_form_from_runs, running_style_from_runs};
+    use super::{
+        RaceContext, build_explanation, recent_form_from_runs, resolve_shared_factors,
+        running_style_from_runs,
+    };
     use crate::repository::{CourseStatsRow, GroupStat, HorseStatsRow, JockeyStatsRow};
 
     fn ymd(y: i32, m: u32, d: u32) -> NaiveDate {
@@ -882,17 +925,8 @@ mod tests {
             field_size: None,
         };
 
-        let ex = build_explanation(
-            &entry,
-            &course,
-            None,
-            &horse,
-            None,
-            None,
-            &race,
-            Some(0.7),
-            Some(&prev),
-        );
+        let shared = resolve_shared_factors(&entry, &course, &horse, None, None, &race);
+        let ex = build_explanation(&shared, &entry, None, &race, Some(0.7), Some(&prev));
 
         // jockey/trainer/馬場 は None なので factor は 芝・距離・枠 の 3 本。
         assert_eq!(ex.factors.len(), 3);
@@ -955,17 +989,8 @@ mod tests {
             mean_weight: None,
         };
 
-        let ex = build_explanation(
-            &entry,
-            &course,
-            None,
-            &horse,
-            Some(&jockey),
-            None,
-            &race,
-            None,
-            None,
-        );
+        let shared = resolve_shared_factors(&entry, &course, &horse, Some(&jockey), None, &race);
+        let ex = build_explanation(&shared, &entry, None, &race, None, None);
 
         let cats: Vec<_> = ex
             .factors
@@ -1015,17 +1040,9 @@ mod tests {
             field_size: 8,
             mean_weight: None,
         };
-        let ex = build_explanation(
-            &entry,
-            &course,
-            None,
-            &empty_horse_stats(),
-            None,
-            None,
-            &race,
-            None,
-            None,
-        );
+        let horse = empty_horse_stats();
+        let shared = resolve_shared_factors(&entry, &course, &horse, None, None, &race);
+        let ex = build_explanation(&shared, &entry, None, &race, None, None);
         assert!(ex.factors.is_empty());
         assert!(ex.prev_run.is_none());
         assert_eq!(ex.weight_carried, None);
@@ -1071,17 +1088,9 @@ mod tests {
             field_size: 16,
             mean_weight: None,
         };
-        let ex = build_explanation(
-            &entry,
-            &course,
-            Some(&cg),
-            &empty_horse_stats(),
-            None,
-            None,
-            &race,
-            None,
-            None,
-        );
+        let horse = empty_horse_stats();
+        let shared = resolve_shared_factors(&entry, &course, &horse, None, None, &race);
+        let ex = build_explanation(&shared, &entry, Some(&cg), &race, None, None);
         let f = ex
             .factors
             .iter()
@@ -1136,17 +1145,9 @@ mod tests {
             field_size: 16,
             mean_weight: None,
         };
-        let ex = build_explanation(
-            &entry,
-            &course,
-            Some(&cg),
-            &empty_horse_stats(),
-            None,
-            None,
-            &race,
-            None,
-            None,
-        );
+        let horse = empty_horse_stats();
+        let shared = resolve_shared_factors(&entry, &course, &horse, None, None, &race);
+        let ex = build_explanation(&shared, &entry, Some(&cg), &race, None, None);
         assert!(
             !ex.factors
                 .iter()
