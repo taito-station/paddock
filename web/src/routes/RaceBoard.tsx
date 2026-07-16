@@ -498,7 +498,12 @@ export function RaceBoard() {
                 min={100}
                 step={100}
                 value={budgetInput}
-                onChange={(e) => setBudgetInput(e.target.value)}
+                // 入力を編集し始めたらエラーは即座に落とす（賭け金側のライブ挙動と揃える）。
+                // 再検証は commit 境界（blur / Enter / 再計算）で applyBudget が行う。
+                onChange={(e) => {
+                  setBudgetInput(e.target.value);
+                  if (budgetUnitError) setBudgetUnitError(false);
+                }}
                 onBlur={applyBudget}
                 onKeyDown={(e) => e.key === "Enter" && applyBudget()}
               />
