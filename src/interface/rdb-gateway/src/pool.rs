@@ -18,3 +18,11 @@ pub async fn migrate(pool: &PgPool) -> Result<()> {
         .await?;
     Ok(())
 }
+
+/// connect → migrate をまとめて実行し、マイグレーション適用済みの [`PgPool`] を返す（#410）。
+/// 全 app の build_app が同一の「接続してからマイグレート」シーケンスを重複していたのを集約する。
+pub async fn connect_and_migrate(database_url: &str) -> Result<PgPool> {
+    let pool = connect(database_url).await?;
+    migrate(&pool).await?;
+    Ok(pool)
+}

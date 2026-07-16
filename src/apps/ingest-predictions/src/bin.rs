@@ -21,10 +21,9 @@ async fn main() -> Result<()> {
     let args = cli::Cli::parse();
     let config = Config::from_env().context("load config")?;
 
-    let pool = pool::connect(&config.paddock_db_url)
+    let pool = pool::connect_and_migrate(&config.paddock_db_url)
         .await
-        .context("connect Postgres pool")?;
-    pool::migrate(&pool).await.context("apply migrations")?;
+        .context("connect and migrate Postgres")?;
     let repo = PostgresRepository::new(pool);
 
     if args.render {

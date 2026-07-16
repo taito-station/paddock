@@ -3,7 +3,6 @@ use netkeiba_scraper::UreqNetkeibaScraper;
 use paddock_config::Config;
 use paddock_use_case::{Interactor, NoopFetcher, NoopParser, OddsInteractor, SettleInteractor};
 use rdb_gateway::{PostgresRepository, pool};
-use tracing_subscriber::{EnvFilter, fmt};
 
 /// api-server が DI で組み立てる Interactor の具象型。read 専用 API で PDF は扱わないため、
 /// PDF 系ジェネリクスは use-case 共通の Noop スタブ（#410）。
@@ -25,17 +24,11 @@ pub struct Setup {
 /// プールは sqlx の Arc ベースで安価に clone でき、read/odds/settle で共有する（predict と同流儀）。
 pub async fn build() -> anyhow::Result<Setup> {
     let config = Config::from_env().context("load config")?;
-    let _ = fmt()
-        .with_env_filter(
-            EnvFilter::try_new(config.paddock_log.clone())
-                .unwrap_or_else(|_| EnvFilter::new("info")),
-        )
-        .try_init();
+    config.init_tracing();
 
-    let pool = pool::connect(&config.paddock_db_url)
+    let pool = pool::connect_and_migrate(&config.paddock_db_url)
         .await
-        .context("connect Postgres pool")?;
-    pool::migrate(&pool).await.context("apply migrations")?;
+        .context("connect and migrate Postgres")?;
 
     let odds = OddsInteractor::new(
         UreqNetkeibaScraper::new(),

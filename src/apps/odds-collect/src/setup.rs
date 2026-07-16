@@ -5,7 +5,6 @@ use netkeiba_scraper::UreqNetkeibaScraper;
 use paddock_config::Config;
 use paddock_use_case::{Interactor, NoopFetcher, NoopParser, OddsInteractor};
 use rdb_gateway::{PostgresRepository, pool};
-use tracing_subscriber::{EnvFilter, fmt};
 
 /// 収集に必要な依存だけを束ねる。predict/EV/買い目・セッション記録の interactor を呼ばない
 /// ＝**確率（モデル）と収集を分離**した純粋なデータ収集（predict_sessions/predict_bets に触れない）。
@@ -20,17 +19,11 @@ pub struct App {
 /// `scrape_delay_ms` はオッズスクレイパの 1 リクエストごとの待機（netkeiba への礼節・[[jra-fetch-pacing]]）。
 pub async fn build_app(scrape_delay_ms: u64) -> anyhow::Result<App> {
     let config = Config::from_env().context("load config")?;
-    let _ = fmt()
-        .with_env_filter(
-            EnvFilter::try_new(config.paddock_log.clone())
-                .unwrap_or_else(|_| EnvFilter::new("info")),
-        )
-        .try_init();
+    config.init_tracing();
 
-    let pool = pool::connect(&config.paddock_db_url)
+    let pool = pool::connect_and_migrate(&config.paddock_db_url)
         .await
-        .context("connect Postgres pool")?;
-    pool::migrate(&pool).await.context("apply migrations")?;
+        .context("connect and migrate Postgres")?;
 
     // PgPool は Arc backed なので clone は安価。odds / interactor で同一 DB を共有する。
     let odds = OddsInteractor::new(
