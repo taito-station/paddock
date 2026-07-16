@@ -13,7 +13,7 @@ import {
   placeOddsLabel,
   sortByModelRank,
 } from "../lib/board";
-import { toAmount } from "../lib/bets";
+import { isUnit100, toAmount } from "../lib/bets";
 import { boardHref } from "../lib/live";
 import { backToDashboardHref } from "../lib/dashboard";
 import { ExecutionPanel } from "./board/ExecutionPanel";
@@ -55,8 +55,16 @@ export function RaceBoard() {
   //（重い盤 API）を避け、確定（blur / Enter / 再計算ボタン）で appliedBudget に反映する。
   const [budgetInput, setBudgetInput] = useState(String(DEFAULT_RACE_BUDGET));
   const [appliedBudget, setAppliedBudget] = useState(DEFAULT_RACE_BUDGET);
+  // 予算/R が 100 円単位でないときの明示エラー（買い方ルール・#412）。黙って丸めず入力を残す。
+  const [budgetUnitError, setBudgetUnitError] = useState(false);
   const applyBudget = () => {
     const n = toAmount(budgetInput);
+    if (n > 0 && !isUnit100(n)) {
+      // 100 円単位でない端数（150 等）は適用せず明示エラー。入力は残して修正を促す。
+      setBudgetUnitError(true);
+      return;
+    }
+    setBudgetUnitError(false);
     if (n > 0) {
       if (n !== appliedBudget) setAppliedBudget(n);
       setBudgetInput(String(n)); // 入力を正規化（先頭ゼロ等）して表示と適用値を揃える。
@@ -490,13 +498,21 @@ export function RaceBoard() {
                 min={100}
                 step={100}
                 value={budgetInput}
-                onChange={(e) => setBudgetInput(e.target.value)}
+                // 入力を編集し始めたらエラーは即座に落とす（賭け金側のライブ挙動と揃える）。
+                // 再検証は commit 境界（blur / Enter / 再計算）で applyBudget が行う。
+                onChange={(e) => {
+                  setBudgetInput(e.target.value);
+                  if (budgetUnitError) setBudgetUnitError(false);
+                }}
                 onBlur={applyBudget}
                 onKeyDown={(e) => e.key === "Enter" && applyBudget()}
               />
               円
             </label>
             <button onClick={applyBudget}>再計算</button>
+            {budgetUnitError && (
+              <span className="error">予算は 100 円単位で入力してください</span>
+            )}
             {session.data && (
               <span className="muted">
                 実上限 {yen(cap)}（min(予算, 残高)）

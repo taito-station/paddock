@@ -15,6 +15,7 @@ import {
   canRecordOutcome,
   effPayout,
   effStake,
+  hasInvalidStakeUnit,
   isRaceRecorded,
   toAmount,
   totalStake as sumStake,
@@ -89,6 +90,9 @@ export function ExecutionPanel({
   // 残高が実弾の制約。「予算/R」(appliedBudget) は推奨額の算出ヒントであって手編集の上限では
   // ないため、超過判定は残高基準にする（編集で残高内まで増やすのは許容）。
   const overBudget = total > balance;
+  // 賭け金は 100 円単位（端数不可）。手編集で 150 円等が入ったら記録を止める（買い方ルール）。
+  // 払戻は 10 円単位のため対象外。サーバ検証頼みにせず UI でも弾く（#412）。
+  const stakeUnitError = hasInvalidStakeUnit(bets, edits);
   // 完了済み・記録済みは記録不可（バックエンドも 409 等で拒否するが UI でも無効化）。
   const canRecord = canRecordOutcome({
     hasSession: !!session,
@@ -293,12 +297,15 @@ export function ExecutionPanel({
           <span className={overBudget ? "error" : "muted"}>
             賭け合計 {yen(total)} / 残高 {yen(balance)}
           </span>
+          {stakeUnitError && (
+            <span className="error">賭け金は 100 円単位で入力してください</span>
+          )}
           {/* refreshing 中の bets は旧予算の placeholder のため記録を止める。
               上方の各分岐にある「このレースをスキップ」（skipRace＝空配列）は bets 非依存
               なので refreshing では無効化していない。 */}
           <button
             onClick={() => record.mutate(buildOutcomeBets(bets, edits))}
-            disabled={overBudget || !canRecord || refreshing}
+            disabled={overBudget || stakeUnitError || !canRecord || refreshing}
           >
             {refreshing
               ? "再計算中…"

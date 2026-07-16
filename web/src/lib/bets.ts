@@ -59,7 +59,24 @@ export function buildOutcomeBets(
 }
 
 // 数値入力のサニタイズ。空文字・NaN・負値は 0 に倒し、整数（円）に丸める。
+// 賭け金・払戻・予算の全入力で共用するため、ここでは 100 円単位の強制はしない
+// （払戻＝JRA 払戻は 10 円単位で 100 の倍数とは限らないため。単位強制は isUnit100 で個別に行う）。
 export function toAmount(v: string): number {
   const n = Number(v);
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+}
+
+// 100 円単位（端数不可）か。買い方ルール「馬券は必ず 100 円単位」の判定で、
+// 賭け金・予算に用いる。0 は許容（スキップ相当）。払戻は対象外（10 円単位のため）。
+export function isUnit100(n: number): boolean {
+  return Number.isInteger(n) && n >= 0 && n % 100 === 0;
+}
+
+// 編集後の賭け金に 100 円単位違反があるか。UI の記録ガードに使う（払戻は対象外）。
+// 推奨額は build_portfolio が 100 円単位で組むため、実質は手編集の端数を検出する。
+export function hasInvalidStakeUnit(
+  bets: RecommendationBet[],
+  edits: Edits,
+): boolean {
+  return bets.some((b) => !isUnit100(effStake(b, edits)));
 }
