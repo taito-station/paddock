@@ -6,7 +6,7 @@
 
 ## ファイル命名
 
-- `QA-<topic>-<YYYYMMDD|Issue-N>.md`（例: `QA-late-money-20260714.md` / `QA-konsen-Issue-180.md`）
+- `QA-<topic>-<YYYYMMDD|Issue番号>.md`（例: `QA-late-money-20260714.md` / `QA-analyze-384.md`）
 
 ## 書き方
 
