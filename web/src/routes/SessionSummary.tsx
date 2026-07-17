@@ -66,8 +66,14 @@ export function SessionSummary() {
       if (error) throw new Error("確定結果の取得に失敗しました");
       return data;
     },
-    // 精算で残高・払戻が変わるためセッションを再取得する。
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["session", date] }),
+    // 精算で残高・払戻が変わるためセッションを再取得する。着順取り込みで races/live の
+    // result_confirmed も変わるため併せて無効化し、ポーリング gate（hasUnsettledRaces）と
+    // 一覧表示を即時同期する（手動精算後にポーリングが止まらない stale gate を防ぐ）。
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["session", date] });
+      void qc.invalidateQueries({ queryKey: ["races", date] });
+      void qc.invalidateQueries({ queryKey: ["live", date] });
+    },
   });
 
   // 結果確定を検知して自動精算する（#381）。ライブ一覧と同じ gate（発走済み・未確定が残る間だけ）に
