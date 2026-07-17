@@ -57,8 +57,9 @@ paddock-fetch-card <12桁race_id>
 - **fetch-card は必須**。parse-entries（出馬表 PDF）だけだと `horse_past_runs` が空になり前走フォーム特徴量が使えない
 - **当日朝は再 fetch**。前日取得時はオッズ未発売（「オッズ: 未確定のため保存なし」と出る）。EV 計算は当日朝の再取得後に行う
 
-**ハマりやすい罠**:
-- `race_odds` に `odds=0.0` の行が残ると `find_race_odds` で predict が全停止する。症状: エラーなく止まる。**回避策**: `DELETE FROM race_odds WHERE odds = 0.0`（`= 0.0` 限定。`< 1.0` は誤削除リスクあり）
+**オッズ値域（#114 で恒久対処済み・通常は手動対応不要）**:
+- 保存側 `save_race_odds` が値域ガード（有限かつ ≥1.0）で無効行の INSERT を弾き、読み側 `find_race_odds` は値域違反のスカラー行を warn+skip して継続する（predict は全停止しない）。band 券種（ワイド等）の構造不正〈`odds_high` NULL / low>high〉のみ意図的に stop。golden DB に残骸は無い。
+- 旧 SQLite 由来のダンプ取り込み等で残骸を抱えた DB に限り `DELETE FROM race_odds WHERE odds < 1.0` で掃除する（CLAUDE.md「予想実行」の記述が正）。
 
 ---
 
