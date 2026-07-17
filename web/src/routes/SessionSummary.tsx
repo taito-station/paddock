@@ -6,6 +6,7 @@ import { recoveryRate, yen } from "../lib/format";
 import { raceListHref } from "../lib/header-date";
 import { hasUnsettledRaces } from "../lib/dashboard";
 import { useResultsRefresh } from "../lib/useResultsRefresh";
+import { isUnitOf } from "../lib/bets";
 
 export function SessionSummary() {
   const { date = "" } = useParams();
@@ -83,6 +84,16 @@ export function SessionSummary() {
     now,
   });
 
+  // セッション総予算は 1000 円単位（input の step と一致）。有限・下限・単位を満たすときだけ
+  // 作成できる。submit と disabled の両方でこの判定を使う（HTML の step はヒントに過ぎず、
+  // 1500 等の非 1000 倍数が payload に素通りするのを防ぐ。#412 と方針を揃える・#424）。
+  const budgetNum = Number(budget);
+  // 下限（1000 円以上）を満たすか。NaN・非有限は比較が false になり弾かれる。
+  const budgetInRange = budgetNum >= 1000;
+  const budgetValid = budgetInRange && isUnitOf(budgetNum, 1000);
+  // 下限は満たすが 1000 円単位でない端数（1500 等）は黙って丸めず明示エラーを出し、入力は残す。
+  const budgetUnitError = budgetInRange && !isUnitOf(budgetNum, 1000);
+
   return (
     <section>
       <div className="toolbar">
@@ -100,9 +111,8 @@ export function SessionSummary() {
           className="toolbar"
           onSubmit={(e) => {
             e.preventDefault();
-            const n = Number(budget);
-            // 予算は 1000 円単位（input の step と一致）。下限・有限性を確認して送る。
-            if (Number.isFinite(n) && n >= 1000) create.mutate(n);
+            // 有限・下限・1000 円単位を満たすときだけ送る（防御として disabled と二重化）。
+            if (budgetValid) create.mutate(budgetNum);
           }}
         >
           <span className="muted">この開催日のセッションは未作成です。</span>
@@ -119,16 +129,12 @@ export function SessionSummary() {
             />
             円
           </label>
-          <button
-            type="submit"
-            disabled={
-              create.isPending ||
-              !Number.isFinite(Number(budget)) ||
-              Number(budget) < 1000
-            }
-          >
+          <button type="submit" disabled={create.isPending || !budgetValid}>
             セッション開始
           </button>
+          {budgetUnitError && (
+            <span className="error">予算は 1000 円単位で入力してください</span>
+          )}
           {create.isError && (
             <span className="error">{(create.error as Error).message}</span>
           )}

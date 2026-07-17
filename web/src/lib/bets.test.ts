@@ -8,6 +8,7 @@ import {
   totalStake,
   buildOutcomeBets,
   toAmount,
+  isUnitOf,
   isUnit100,
   hasInvalidStakeUnit,
 } from "./bets";
@@ -119,6 +120,25 @@ describe("toAmount", () => {
   it("払戻等の非 100 倍数はそのまま通す（100 円単位強制は toAmount では行わない）", () => {
     expect(toAmount("720")).toBe(720);
     expect(toAmount("150")).toBe(150);
+  });
+});
+
+describe("isUnitOf", () => {
+  it.each([
+    // [n, unit, expected]
+    [0, 1000, true], // 0 はスキップ相当で許容
+    [1000, 1000, true],
+    [10000, 1000, true],
+    [1500, 1000, false], // 下限は満たすが端数（#424 の実害ケース）
+    [999, 1000, false],
+    [-1000, 1000, false],
+    [1000.5, 1000, false], // 非整数
+    [100, 100, true],
+    [150, 100, false],
+    [100, 0, false], // unit<=0 は誤用として false（n % 0 === NaN 依存にしない）
+    [100, -100, false],
+  ])("isUnitOf(%d, %d) === %s", (n, unit, expected) => {
+    expect(isUnitOf(n, unit)).toBe(expected);
   });
 });
 
