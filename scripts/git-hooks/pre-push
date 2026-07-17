@@ -6,13 +6,17 @@
 #
 # このフックはリポジトリ管理下（scripts/git-hooks/）に置き、scripts/install-git-hooks.sh で
 # core.hooksPath を張って配線する（#414）。clone・並走 clone ごとに一度配線が要る。
+# git はフックを作業ツリー最上位を CWD にして起動するため、下の scripts/check-adr-numbers.sh は
+# 相対解決できる。なお相対 core.hooksPath の性質上、scripts/git-hooks/ を含まないブランチ/worktree
+# をチェックアウトした状態では git は「フック無し＝何もしない」で扱い、このチェックは走らない。
 set -euo pipefail
 
 echo "[pre-push] cargo fmt --all --check"
 cargo fmt --all --check
 
-echo "[pre-push] cargo clippy --workspace --all-targets -- -D warnings"
-cargo clippy --workspace --all-targets -- -D warnings
+# clippy は CI（.github/workflows/ci.yml）と厳密一致させる（--locked 込み。Cargo.lock ドリフトを手元で拾う）。
+echo "[pre-push] cargo clippy --locked --workspace --all-targets -- -D warnings"
+cargo clippy --locked --workspace --all-targets -- -D warnings
 
 echo "[pre-push] scripts/check-adr-numbers.sh（ADR 番号の重複検出 #254）"
 bash scripts/check-adr-numbers.sh

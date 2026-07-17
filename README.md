@@ -67,13 +67,15 @@ cargo build --release
 
 ### Git フック
 
-push 前に CI 相当の高速チェック（`cargo fmt --all --check` / `cargo clippy -D warnings` / ADR 番号の重複検出）を走らせる pre-push フックをリポジトリ管理下（`scripts/git-hooks/`）に置いている。`core.hooksPath` はローカル設定でコミットされないため、**clone・並走 clone ごとに一度だけ配線する**:
+push 前に CI 相当の高速チェック（`cargo fmt --all --check` / `cargo clippy --locked --workspace --all-targets -- -D warnings` / ADR 番号の重複検出）を走らせる pre-push フックをリポジトリ管理下（`scripts/git-hooks/`）に置いている。`core.hooksPath` はローカル設定でコミットされないため、**clone・並走 clone ごとに一度だけ配線する**:
 
 ```bash
 scripts/install-git-hooks.sh
 ```
 
-緊急時の意図的バイパスは `git push --no-verify`（規約上、明示意図があるときのみ）。
+- 配線後は `core.hooksPath` のみが参照され、旧 `.git/hooks/pre-push` は無効化される（二重実行なし）。
+- 相対 `core.hooksPath` の性質上、`scripts/git-hooks/` を含まないブランチ/worktree をチェックアウトした状態ではフックは走らない（git が「フック無し」として扱う）。
+- 緊急時の意図的バイパスは `git push --no-verify`（規約上、明示意図があるときのみ）。
 
 ### DB（Postgres）
 
