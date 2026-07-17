@@ -16,6 +16,10 @@ members = [
     "src/apps/api-server",
 ]
 
+# バージョンは caret 指定（bare version = 暗黙の caret）に統一する。1.x 系は major のみ
+# （例 "1"=^1）、0.x 系は破壊境界の minor まで（例 "0.4"=^0.4）で書く。minor 下限は
+# 意図的に固定せず、実際に使う版の固定は Cargo.lock に一任する（再現性は CI の --locked
+# で担保）。ワイルドカード（x.y.*）は semver 互換の minor 更新を排除するため使わない（#416）。
 [workspace.dependencies]
 anyhow             = { version = "1" }
 actix-web          = { version = "4" }
