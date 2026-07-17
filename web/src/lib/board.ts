@@ -67,12 +67,3 @@ export function sortByModelRank(horses: BoardHorse[]): BoardHorse[] {
     (a, b) => a.model_rank - b.model_rank || a.horse_num - b.horse_num,
   );
 }
-
-// 複勝オッズ帯の表示（"1.6-2.0"）。未取得は "-"。
-export function placeOddsLabel(
-  low: number | null | undefined,
-  high: number | null | undefined,
-): string {
-  if (low == null || high == null) return "-";
-  return `${low.toFixed(1)}-${high.toFixed(1)}`;
-}

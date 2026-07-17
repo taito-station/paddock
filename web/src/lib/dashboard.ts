@@ -94,7 +94,7 @@ export function rowPostTime(row: DashboardRow): string | null {
   return row.race.post_time ?? row.live?.post_time ?? null;
 }
 
-// ソート。live.ts の sortRaces と同じ意味論を DashboardRow に拡張する。
+// DashboardRow のソート。発走時刻・状態にもとづく意味論は以下の通り。
 // - status（既定）: 未発走（post 不明含む）→ 発走済み。各グループ内は post 昇順、
 //   post 不明同士は race_num → venue slug で安定タイブレーク
 // - roi / axisProb / rough: evVisible=false の行は欠落値として方向に関わらず末尾

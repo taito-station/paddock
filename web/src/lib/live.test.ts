@@ -9,7 +9,6 @@ import {
   groupLegs,
   skipReason,
   flipNotes,
-  tierBadge,
   tierShort,
   roughnessChip,
   boardHref,
@@ -17,8 +16,6 @@ import {
   raceStarted,
   isPastDate,
   isSoon,
-  sortRaces,
-  filterRaces,
   parseLiveQuery,
   liveQueryParams,
   freshness,
@@ -121,18 +118,6 @@ describe("backParam", () => {
     expect(backParam({ ...DEFAULT_LIVE_QUERY, status: "finished" })).toBe(
       "status=finished",
     );
-  });
-});
-
-describe("tierBadge", () => {
-  it("maps tier slugs to badges", () => {
-    expect(tierBadge("buy")).toBe("🟢買い");
-    expect(tierBadge("close")).toBe("🟡惜しい");
-    expect(tierBadge("watch")).toBe("⚪様子見");
-    expect(tierBadge("hidden")).toBe("非表示");
-  });
-  it("falls back to the raw slug when unknown", () => {
-    expect(tierBadge("bogus")).toBe("bogus");
   });
 });
 
@@ -386,63 +371,6 @@ describe("tierShort", () => {
   });
 });
 
-describe("sortRaces", () => {
-  const ctx = { date: DATE, now: NOON };
-  const races = [
-    raceView({ race_id: "a", venue: "kokura", race_no: 7, post_time: "13:00", roi: 90, axis_prob: 40, roughness: 0.9 }),
-    raceView({ race_id: "b", venue: "hakodate", race_no: 5, post_time: "11:30", roi: 120, axis_prob: 30, roughness: null }),
-    raceView({ race_id: "c", venue: "hakodate", race_no: 9, post_time: "12:30", roi: 70, axis_prob: 55, roughness: 0.4 }),
-    raceView({ race_id: "d", venue: "fukushima", race_no: 3, post_time: null, roi: 100, axis_prob: 10, roughness: 0.7 }),
-  ];
-
-  it("default status sort: 未発走を発走昇順で上、発走済みは下、post 不明は未発走側の末尾", () => {
-    const ids = sortRaces(races, "status", "asc", ctx).map((r) => r.race_id);
-    // c(12:30 未発走) → a(13:00 未発走) → d(post 不明) → b(11:30 発走済み)
-    expect(ids).toEqual(["c", "a", "d", "b"]);
-  });
-  it("roi desc / asc", () => {
-    expect(sortRaces(races, "roi", "desc", ctx).map((r) => r.race_id)).toEqual(["b", "d", "a", "c"]);
-    expect(sortRaces(races, "roi", "asc", ctx).map((r) => r.race_id)).toEqual(["c", "a", "d", "b"]);
-  });
-  it("rough: null は方向に関わらず末尾", () => {
-    expect(sortRaces(races, "rough", "desc", ctx).map((r) => r.race_id)).toEqual(["a", "d", "c", "b"]);
-    expect(sortRaces(races, "rough", "asc", ctx).map((r) => r.race_id)).toEqual(["c", "d", "a", "b"]);
-  });
-  it("post: 欠落は方向に関わらず末尾", () => {
-    expect(sortRaces(races, "post", "asc", ctx).map((r) => r.race_id)).toEqual(["b", "c", "a", "d"]);
-    expect(sortRaces(races, "post", "desc", ctx).map((r) => r.race_id)).toEqual(["a", "c", "b", "d"]);
-  });
-  it("race: 会場→R 番号（2 桁ゼロ埋めで 10R>9R が正しく並ぶ）", () => {
-    const rs = [
-      raceView({ race_id: "x", venue: "hakodate", race_no: 10 }),
-      raceView({ race_id: "y", venue: "hakodate", race_no: 9 }),
-    ];
-    expect(sortRaces(rs, "race", "asc", ctx).map((r) => r.race_id)).toEqual(["y", "x"]);
-    expect(sortRaces(rs, "race", "desc", ctx).map((r) => r.race_id)).toEqual(["x", "y"]);
-  });
-  it("axisProb desc / asc", () => {
-    expect(sortRaces(races, "axisProb", "desc", ctx).map((r) => r.race_id)).toEqual(["c", "a", "b", "d"]);
-    expect(sortRaces(races, "axisProb", "asc", ctx).map((r) => r.race_id)).toEqual(["d", "b", "a", "c"]);
-  });
-  it("status は正準の固定順で dir を反映しない（UI 側も状態列はトグルしない前提）", () => {
-    expect(sortRaces(races, "status", "desc", ctx).map((r) => r.race_id)).toEqual(
-      sortRaces(races, "status", "asc", ctx).map((r) => r.race_id),
-    );
-  });
-  it("status: post 不明同士は R 番号順（NaN に依存しない明示フォールバック）", () => {
-    const rs = [
-      raceView({ race_id: "n2", race_no: 8, post_time: null }),
-      raceView({ race_id: "n1", race_no: 2, post_time: null }),
-    ];
-    expect(sortRaces(rs, "status", "asc", ctx).map((r) => r.race_id)).toEqual(["n1", "n2"]);
-  });
-  it("does not mutate the input array", () => {
-    const before = races.map((r) => r.race_id);
-    sortRaces(races, "roi", "desc", ctx);
-    expect(races.map((r) => r.race_id)).toEqual(before);
-  });
-});
-
 describe("defaultDir", () => {
   it("数値系は desc スタート、それ以外は asc", () => {
     expect(defaultDir("roi")).toBe("desc");
@@ -451,32 +379,6 @@ describe("defaultDir", () => {
     expect(defaultDir("post")).toBe("asc");
     expect(defaultDir("race")).toBe("asc");
     expect(defaultDir("status")).toBe("asc");
-  });
-});
-
-describe("filterRaces", () => {
-  const ctx = { date: DATE, now: NOON };
-  const races = [
-    raceView({ race_id: "done-bet", post_time: "11:00", verdict: "bet" }),
-    raceView({ race_id: "up-bet", post_time: "13:00", verdict: "bet" }),
-    raceView({ race_id: "up-skip", post_time: "14:00", verdict: "skip" }),
-    raceView({ race_id: "unknown-skip", post_time: null, verdict: "skip" }),
-  ];
-
-  it("status=upcoming: 発走済みを除外、post 不明は未発走扱い", () => {
-    expect(filterRaces(races, { status: "upcoming", verdict: "all" }, ctx).map((r) => r.race_id))
-      .toEqual(["up-bet", "up-skip", "unknown-skip"]);
-  });
-  it("status=finished: 発走済みのみ", () => {
-    expect(filterRaces(races, { status: "finished", verdict: "all" }, ctx).map((r) => r.race_id))
-      .toEqual(["done-bet"]);
-  });
-  it("verdict=bet と status の併用（未発走 かつ 張り）", () => {
-    expect(filterRaces(races, { status: "upcoming", verdict: "bet" }, ctx).map((r) => r.race_id))
-      .toEqual(["up-bet"]);
-  });
-  it("all/all は全件通す", () => {
-    expect(filterRaces(races, { status: "all", verdict: "all" }, ctx)).toHaveLength(4);
   });
 });
 

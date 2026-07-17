@@ -1,8 +1,6 @@
 // ライブ EV 表示用の純粋関数群（ユニットテスト対象）。日次ダッシュボード（RaceList）と
 // lib/dashboard.ts から使う。EV/伝票の計算・永続化は Rust predict-watch が正本
 //（#346・ADR 0064 追補）。ここは描画整形のみ。
-// NOTE: sortRaces / filterRaces は旧 /live（LiveBets）専用で #378 統合後はデッドコード。
-// dashboard.ts の sortRows / filterRows が正。テスト（live.test.ts）ごと後続 issue で撤去する。
 import type { Schemas } from "../api/client";
 
 type SlipLeg = Schemas["SlipLeg"];
@@ -102,18 +100,6 @@ export function summaryLine(s: LiveSummary): string {
       ? `🟢張る ${s.bet_race_count}レース`
       : "張り無し";
   return `${head}（監視中 ${s.watched_race_count}R）`;
-}
-
-// 段階 ROI tier のバッジ表記（買い強度）。買いは ROI≥100 のみ、以下は当日分布の相対位置（#344）。
-export const TIER_BADGE: Record<string, string> = {
-  buy: "🟢買い",
-  close: "🟡惜しい",
-  watch: "⚪様子見",
-  hidden: "非表示",
-};
-
-export function tierBadge(tier: string): string {
-  return TIER_BADGE[tier] ?? tier;
 }
 
 // tier の描画順位（買い強度の高い順）。ボードの一次ソートキー。未知 tier は末尾。#344
@@ -283,7 +269,7 @@ export function isSoon(
   return diffMin > 0 && diffMin <= SOON_MINUTES;
 }
 
-// 状態列の短縮バッジ（テーブルの幅節約用。tierBadge のフル表記と対）。
+// 状態列の短縮バッジ（テーブルの幅節約用）。
 const TIER_SHORT: Record<string, string> = {
   buy: "🟢張",
   close: "🟡惜",
@@ -304,95 +290,15 @@ export function hasUpcomingRaces(
 
 export type SortKey = "status" | "post" | "roi" | "axisProb" | "rough" | "race";
 export type SortDir = "asc" | "desc";
-export type LiveSortCtx = { date: string; now: Date };
 
 // 列の初回クリック方向。数値の大きさに関心がある列（ROI・軸勝率・荒れ度）は降順スタート。
 export function defaultDir(key: SortKey): SortDir {
   return key === "roi" || key === "axisProb" || key === "rough" ? "desc" : "asc";
 }
 
-function sortValue(r: LiveRaceView, key: SortKey): number | string | null {
-  switch (key) {
-    case "post":
-      return postMinutes(r.post_time); // 欠落は +∞（下の null 末尾処理に合流）
-    case "roi":
-      return r.roi;
-    case "axisProb":
-      return r.axis_prob;
-    case "rough":
-      return r.roughness ?? null;
-    case "race":
-      // 会場 slug → R 番号。R は 2 桁ゼロ埋めで辞書順と数値順を一致させる。
-      // slug（英字）順は日本語表示名の音順とは一致しないが、目的は「同一会場の
-      // R をまとめて並べる」ことでありグルーピングが安定していれば足りる。
-      return `${r.venue}-${String(r.race_no).padStart(2, "0")}`;
-    default:
-      return null;
-  }
-}
-
-// ソート。既定 "status" は「未発走を発走時刻昇順で上、発走済みは下」（今なにをすべきかを先頭に）。
-// status は正準の固定順で dir を反映しない（UI 側も状態列は方向トグルさせない）。
-// その他の列は dir 指定でトグル。null / 欠落値は方向に関わらず常に末尾。
-export function sortRaces(
-  races: LiveRaceView[],
-  key: SortKey,
-  dir: SortDir,
-  ctx: LiveSortCtx,
-): LiveRaceView[] {
-  const arr = [...races];
-  if (key === "status") {
-    arr.sort((a, b) => {
-      const fa = raceStarted(ctx.date, a.post_time, ctx.now) === true ? 1 : 0;
-      const fb = raceStarted(ctx.date, b.post_time, ctx.now) === true ? 1 : 0;
-      if (fa !== fb) return fa - fb;
-      const pa = postMinutes(a.post_time);
-      const pb = postMinutes(b.post_time);
-      // post 不明（+∞）は同状態グループの末尾。両方不明（∞ === ∞）は R 番号順に
-      // 明示フォールバック（∞−∞=NaN の falsy に依存しない）。
-      if (pa !== pb) return pa - pb;
-      return a.race_no - b.race_no;
-    });
-    return arr;
-  }
-  const sign = dir === "asc" ? 1 : -1;
-  arr.sort((a, b) => {
-    const va = sortValue(a, key);
-    const vb = sortValue(b, key);
-    const missA = va == null || va === Number.POSITIVE_INFINITY;
-    const missB = vb == null || vb === Number.POSITIVE_INFINITY;
-    if (missA && missB) return 0;
-    if (missA) return 1;
-    if (missB) return -1;
-    if (typeof va === "string" && typeof vb === "string") {
-      // slug ベースの ASCII 文字列なので、ロケール非依存の単純比較で決定性を担保する。
-      return sign * (va < vb ? -1 : va > vb ? 1 : 0);
-    }
-    return sign * ((va as number) - (vb as number));
-  });
-  return arr;
-}
-
 export type StatusFilter = "all" | "upcoming" | "finished";
 export type VerdictFilter = "all" | "bet" | "skip";
 export type LiveFilter = { status: StatusFilter; verdict: VerdictFilter };
-
-// 絞り込み。post_time 不明（raceStarted=null）は「未発走」側に寄せる（終了と断定しない）。
-// tier=hidden の除外（#344 の floor 非表示）は従来通り呼び出し側で先に行う。
-export function filterRaces(
-  races: LiveRaceView[],
-  f: LiveFilter,
-  ctx: LiveSortCtx,
-): LiveRaceView[] {
-  return races.filter((r) => {
-    if (f.status !== "all") {
-      const finished = raceStarted(ctx.date, r.post_time, ctx.now) === true;
-      if (f.status === "finished" ? !finished : finished) return false;
-    }
-    if (f.verdict !== "all" && r.verdict !== f.verdict) return false;
-    return true;
-  });
-}
 
 export type LiveQuery = {
   sort: SortKey;
