@@ -178,7 +178,7 @@ export function ExecutionPanel({
         <span className="muted">残高・予算が 0 のため推奨を出せません。</span>
         {canRecord && <button onClick={skipRace}>このレースをスキップ</button>}
         {record.isError && (
-          <span className="error">{(record.error as Error).message}</span>
+          <span className="error">{record.error.message}</span>
         )}
       </div>
     );
@@ -205,10 +205,10 @@ export function ExecutionPanel({
             <span className="error">オッズ未公開（取得できませんでした）</span>
           )}
           {oddsRefresh.isError && (
-            <span className="error">{(oddsRefresh.error as Error).message}</span>
+            <span className="error">{oddsRefresh.error.message}</span>
           )}
           {record.isError && (
-            <span className="error">{(record.error as Error).message}</span>
+            <span className="error">{record.error.message}</span>
           )}
         </div>
       </>
@@ -227,7 +227,7 @@ export function ExecutionPanel({
             <button onClick={skipRace}>このレースをスキップ</button>
           )}
           {record.isError && (
-            <span className="error">{(record.error as Error).message}</span>
+            <span className="error">{record.error.message}</span>
           )}
         </div>
       </>
@@ -265,7 +265,7 @@ export function ExecutionPanel({
                     onChange={(e) =>
                       setEdit(b, { stake: toAmount(e.target.value) })
                     }
-                    style={{ width: "6rem" }}
+                    className="amount-input"
                   />
                 ) : (
                   yen(b.stake)
@@ -281,7 +281,7 @@ export function ExecutionPanel({
                     onChange={(e) =>
                       setEdit(b, { payout: toAmount(e.target.value) })
                     }
-                    style={{ width: "6rem" }}
+                    className="amount-input"
                   />
                 </td>
               )}
@@ -291,7 +291,7 @@ export function ExecutionPanel({
       </table>
 
       {canOperate && (
-        <div className="toolbar" style={{ marginTop: "0.75rem" }}>
+        <div className="toolbar mt-md">
           <button onClick={() => setEdits({})}>推奨通り</button>
           <button onClick={skipAll}>スキップ</button>
           <span className={overBudget ? "error" : "muted"}>
@@ -314,7 +314,7 @@ export function ExecutionPanel({
                 : "記録する"}
           </button>
           {record.isError && (
-            <span className="error">{(record.error as Error).message}</span>
+            <span className="error">{record.error.message}</span>
           )}
         </div>
       )}
