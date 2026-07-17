@@ -8,15 +8,15 @@ import {
   boardBudget,
   effectiveCap,
   keepBoardPlaceholder,
-  heatColor,
-  markSymbol,
-  placeOddsLabel,
   sortByModelRank,
 } from "../lib/board";
 import { isUnit100, toAmount } from "../lib/bets";
 import { boardHref } from "../lib/live";
 import { backToDashboardHref } from "../lib/dashboard";
+import { useSessionQuery, useRacesQuery } from "../lib/queries";
 import { ExecutionPanel } from "./board/ExecutionPanel";
+import { HorseCard } from "./board/HorseCard";
+import { HorseDetailPanel } from "./board/HorseDetailPanel";
 
 export function RaceBoard() {
   const { raceId = "" } = useParams();
@@ -51,6 +51,18 @@ export function RaceBoard() {
     triggerRef.current?.focus();
   };
 
+  // 馬カード（HorseCard）のクリック/キー操作で書評パネルを開閉する。開く時は trigger 要素を
+  // 覚えてパネルからフォーカスを戻せるようにする（ref 代入は state updater の外＝純粋な updater を
+  // 保ち StrictMode の二重実行対策）。同じ馬の再選択で閉じる。
+  const handleSelect = (horseNum: number, trigger: HTMLElement) => {
+    if (selectedHorse === horseNum) {
+      setSelectedHorse(null);
+    } else {
+      triggerRef.current = trigger;
+      setSelectedHorse(horseNum);
+    }
+  };
+
   // 入力中の文字列と、盤/買い目の再計算に使う確定値を分離する。入力ごとの再取得
   //（重い盤 API）を避け、確定（blur / Enter / 再計算ボタン）で appliedBudget に反映する。
   const [budgetInput, setBudgetInput] = useState(String(DEFAULT_RACE_BUDGET));
@@ -80,20 +92,8 @@ export function RaceBoard() {
   const [fallbackDate, setFallbackDate] = useState("");
   const sessionDate = dateParam || fallbackDate;
 
-  // セッション（残高・記録済み判定）。未作成は 404 → null に倒す（RaceList と同流儀）。
-  const session = useQuery({
-    queryKey: ["session", sessionDate],
-    enabled: !!sessionDate,
-    retry: false,
-    queryFn: async () => {
-      const { data, error, response } = await api.GET("/api/sessions/{date}", {
-        params: { path: { date: sessionDate } },
-      });
-      if (response.status === 404) return null;
-      if (error) throw new Error("セッションの取得に失敗しました");
-      return data;
-    },
-  });
+  // セッション（残高・記録済み判定）。未作成は 404 → null に倒す（RaceList と同流儀・#411 で共通化）。
+  const session = useSessionQuery(sessionDate);
 
   // 実効上限 cap = min(予算, 残高)。セッション無し（null/ロード中）は予算そのまま。
   // session ロード前は cap が予算のままなので、残高 < 予算 のときだけ session 到着後に
@@ -136,21 +136,16 @@ export function RaceBoard() {
   }, [raceId, dateParam, board.data?.date]);
 
   // 同開催日の全レースを引き、同じ R の他場（函館⇄福島⇄小倉…）へ場内切替する。
-  const races = useQuery({
-    queryKey: ["races", date],
-    enabled: !!date,
-    queryFn: async () => {
-      const { data, error } = await api.GET("/api/races", {
-        params: { query: { date } },
-      });
-      if (error) throw new Error("レース一覧の取得に失敗しました");
-      return data;
-    },
-  });
+  const races = useRacesQuery(date);
 
   const d = board.data;
   const maxWin = d ? Math.max(0, ...d.horses.map((h) => h.win_prob)) : 0;
   const horses = d ? sortByModelRank(d.horses) : [];
+  // 詳細パネル対象の馬を selectedHorse から解決（IIFE を解消し props で受け渡す・#411）。
+  const selectedHorseData =
+    selectedHorse != null
+      ? horses.find((x) => x.horse_num === selectedHorse)
+      : undefined;
   // 同じレース番号の他場（スラッグ辞書順で安定ソート）。
   const siblings = d
     ? (races.data?.races ?? [])
@@ -308,194 +303,27 @@ export function RaceBoard() {
           {/* 全頭横並び盤（ブレンド勝率順＝model_rank・truncate しない） */}
           <div className="board-scroll">
             <div className="board-row">
-              {horses.map((h) => {
-                // detail_lines はスキーマ上必須（string[]）。comment または根拠行があれば展開可。
-                const hasDetail = !!h.comment || h.detail_lines.length > 0;
-                // 開く時は trigger 要素を覚えてパネルからフォーカスを戻せるようにする。
-                // ref 代入は updater の外（純粋な updater を保つ・StrictMode の二重実行対策）。
-                const toggleDetail = (el: HTMLElement) => {
-                  if (selectedHorse === h.horse_num) {
-                    setSelectedHorse(null);
-                  } else {
-                    triggerRef.current = el;
-                    setSelectedHorse(h.horse_num);
-                  }
-                };
-                return (
-                <div
+              {horses.map((h) => (
+                <HorseCard
                   key={h.horse_num}
-                  className={
-                    "horse-col" +
-                    (h.is_overlay ? " is-overlay" : "") +
-                    (h.is_value ? " is-value" : "") +
-                    (hasDetail ? " has-detail" : "") +
-                    (selectedHorse === h.horse_num ? " is-selected" : "")
-                  }
-                  role={hasDetail ? "button" : undefined}
-                  tabIndex={hasDetail ? 0 : undefined}
-                  aria-label={
-                    hasDetail
-                      ? `${h.horse_num} ${h.horse_name} の書評を開く`
-                      : undefined
-                  }
-                  aria-expanded={hasDetail ? selectedHorse === h.horse_num : undefined}
-                  aria-controls={
-                    hasDetail && selectedHorse === h.horse_num
-                      ? "horse-detail-panel"
-                      : undefined
-                  }
-                  title={
-                    hasDetail ? "クリック / Enter / Space で書評を表示" : undefined
-                  }
-                  onClick={
-                    hasDetail ? (e) => toggleDetail(e.currentTarget) : undefined
-                  }
-                  onKeyDown={
-                    hasDetail
-                      ? (e) => {
-                          if (e.key === "Enter" || e.key === " ") {
-                            e.preventDefault();
-                            toggleDetail(e.currentTarget);
-                          }
-                        }
-                      : undefined
-                  }
-                >
-                  <div
-                    className="heat"
-                    style={{ background: heatColor(h.win_prob, maxWin) }}
-                    title={`ブレンド勝率 ${pct(h.win_prob)}`}
-                  >
-                    <span className="rank">{h.model_rank}</span>
-                  </div>
-                  <div className="num-mark">
-                    <span className="num">{h.horse_num}</span>
-                    <span className="mark">{markSymbol(h.mark)}</span>
-                    {/* 確定着順（#381。results 由来。除外/中止・未確定は null で非表示）。 */}
-                    {h.finishing_position != null && (
-                      <span
-                        className="finish-pos"
-                        title={`確定 ${h.finishing_position} 着`}
-                      >
-                        {h.finishing_position}着
-                      </span>
-                    )}
-                  </div>
-                  <div className="hname" title={h.horse_name}>
-                    {h.horse_name}
-                  </div>
-                  <div className="jockey">{h.jockey ?? "-"}</div>
-                  {/* 確率は出所ごとに 2 文字ラベルで明示（#373）: ブ=ブレンド(本番α=0.2)・
-                      モ=モデル(純α=1.0)・市=市場implied。狭幅カラムに合わせ full 名は title に退避。
-                      市場は単勝オッズ由来のため勝率のみ（連対/複勝の市場 implied は出さない）。 */}
-                  <dl className="stats">
-                    <div title="ブレンド勝率＝本番 α=0.2（市場ブレンド）で 1 着になる確率">
-                      <dt>ブ勝</dt>
-                      <dd>{pct(h.win_prob)}</dd>
-                    </div>
-                    <div title="ブレンド連対率＝本番 α=0.2 で 2 着以内に入る確率">
-                      <dt>ブ連</dt>
-                      <dd>{pct(h.place_prob)}</dd>
-                    </div>
-                    <div title="ブレンド複勝率＝本番 α=0.2 で 3 着以内に入る確率">
-                      <dt>ブ複</dt>
-                      <dd>{pct(h.show_prob)}</dd>
-                    </div>
-                    {showModel && (
-                      <>
-                        <div title="モデル勝率＝純モデル α=1.0（市場非依存）で 1 着になる確率">
-                          <dt>モ勝</dt>
-                          <dd>{pct(h.pure_win_prob)}</dd>
-                        </div>
-                        <div title="モデル連対率＝純モデル α=1.0 で 2 着以内に入る確率">
-                          <dt>モ連</dt>
-                          <dd>{pct(h.pure_place_prob)}</dd>
-                        </div>
-                        <div title="モデル複勝率＝純モデル α=1.0 で 3 着以内に入る確率">
-                          <dt>モ複</dt>
-                          <dd>{pct(h.pure_show_prob)}</dd>
-                        </div>
-                      </>
-                    )}
-                    <div title="市場勝率＝単勝オッズから逆算した市場推定の勝率（胴元の控除を抜いた実力評価）。モデル/ブレンド勝率と比べて乖離＝妙味">
-                      <dt>市勝</dt>
-                      <dd>{h.market_implied == null ? "-" : pct(h.market_implied)}</dd>
-                    </div>
-                    <div>
-                      <dt>単勝</dt>
-                      <dd>{h.win_odds == null ? "-" : h.win_odds.toFixed(1)}</dd>
-                    </div>
-                    <div>
-                      <dt>複勝</dt>
-                      <dd>{placeOddsLabel(h.place_odds_low, h.place_odds_high)}</dd>
-                    </div>
-                    <div>
-                      <dt>人気</dt>
-                      <dd>{h.popularity ?? "-"}</dd>
-                    </div>
-                  </dl>
-                  <div className="flags">
-                    {h.is_overlay && (
-                      <span className="chip chip-overlay" title="ブレンド勝率1位×人気1位＝ほぼ複勝圏">
-                        複勝圏
-                      </span>
-                    )}
-                    {h.is_value && (
-                      <span className="chip chip-value" title="ブレンド上位×市場人気低＝妙味・ワイドボックス候補">
-                        妙味
-                      </span>
-                    )}
-                    {hasDetail && <span className="chip chip-note">書評</span>}
-                  </div>
-                </div>
-                );
-              })}
+                  horse={h}
+                  maxWin={maxWin}
+                  showModel={showModel}
+                  isSelected={selectedHorse === h.horse_num}
+                  onSelect={handleSelect}
+                />
+              ))}
             </div>
           </div>
 
-          {/* 馬書評（クリックで展開する詳細パネル）。数値密度を保ちつつ掘りたい馬だけ開く */}
-          {selectedHorse != null &&
-            (() => {
-              const h = horses.find((x) => x.horse_num === selectedHorse);
-              if (!h) return null;
-              return (
-                <div
-                  className="horse-detail"
-                  id="horse-detail-panel"
-                  role="region"
-                  aria-label={`${h.horse_num} ${h.horse_name} の書評`}
-                  onKeyDown={(e) => {
-                    if (e.key === "Escape") closePanel();
-                  }}
-                >
-                  <div className="horse-detail-head">
-                    <span className="mark">{markSymbol(h.mark)}</span>
-                    <strong>
-                      {h.horse_num} {h.horse_name}
-                    </strong>
-                    <span className="muted">{h.jockey ?? "-"}</span>
-                    <button
-                      ref={closeBtnRef}
-                      className="detail-close"
-                      onClick={closePanel}
-                      aria-label="閉じる"
-                    >
-                      ×
-                    </button>
-                  </div>
-                  {h.comment && <p className="horse-detail-lead">{h.comment}</p>}
-                  {/* パネルは hasDetail(=comment もしくは detail_lines あり)でのみ開くため、
-                      detail_lines 空のとき comment は必ず存在する（lead 表示済み・追加表示は不要）。 */}
-                  {h.detail_lines.length > 0 && (
-                    <ul className="horse-detail-lines">
-                      {h.detail_lines.map((line, i) => (
-                        <li key={`${i}-${line}`}>{line}</li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              );
-            })()}
+          {/* 馬書評（クリックで展開する詳細パネル）。数値密度を保ちつつ掘りたい馬だけ開く。
+              selectedHorse から対象馬を持ち上げて解決し（IIFE を解消）、パネル本体は
+              board/HorseDetailPanel へ分離（#411）。未選択・未解決は panel 側で null 返し。 */}
+          <HorseDetailPanel
+            horse={selectedHorseData}
+            onClose={closePanel}
+            closeBtnRef={closeBtnRef}
+          />
 
           {/* 買い目＋執行（/recommendations と同経路・相手 top5 不変。#377 で RaceDetail を統合） */}
           <h3 style={{ marginTop: "1.25rem" }}>買い目</h3>
