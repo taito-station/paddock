@@ -1,3 +1,15 @@
+---
+# knowledge 規約に基づくメタデータ（docs/knowledge/README.md）。specifications はその場で
+# knowledge に昇格（ADR 履歴・相互リンクを壊さないため物理移動しない）。
+status: Confirmed
+kind: knowledge
+sources:
+  - docs/adr/0008-netkeiba-same-day-datasource.md
+  - docs/adr/0048-retire-jra-odds-scraper-for-netkeiba.md
+distilled_from_sha: "f765be7"
+updated: "2026-07-17"
+---
+
 # netkeiba 当日データソース取り込み 仕様書
 
 Issue #28 対応。当日（これから走る）レースの **出馬表と単勝オッズ・人気** を netkeiba から取得し、

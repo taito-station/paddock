@@ -1,3 +1,17 @@
+---
+# knowledge 規約に基づくメタデータ（docs/knowledge/README.md）。specifications はその場で
+# knowledge に昇格（ADR 履歴・相互リンクを壊さないため物理移動しない）。
+status: Confirmed
+kind: knowledge
+sources:
+  - docs/adr/0003-ev-kelly-bet-selection.md
+  - docs/adr/0019-portfolio-generator.md
+  - docs/adr/0046-allocation-prob-weight-no-floor-rejected.md
+  - docs/adr/0054-kelly-staking-rejected.md
+distilled_from_sha: "f765be7"
+updated: "2026-07-17"
+---
+
 # 期待値計算・買い目選択・Kelly 配分ロジック仕様書
 
 Issue #12 対応。推定確率とオッズから期待値（EV）を計算し、馬連重視で買い目を選択、

@@ -1,3 +1,19 @@
+---
+# knowledge 規約に基づくメタデータ（docs/knowledge/README.md）。specifications はその場で
+# knowledge に昇格（ADR 履歴・相互リンクを壊さないため物理移動しない）。
+status: Tentative
+kind: knowledge
+sources:
+  - docs/adr/0027-accuracy-lever-is-market-blend-not-data-volume.md
+  - docs/adr/0042-win-power-calibration-adopted.md
+  - docs/adr/0047-place-show-power-decompression-adopted.md
+  - docs/adr/0050-placeshow-raw-score-retune-rejected.md
+  - docs/adr/0051-placeshow-power-knee-confirmed-keep-2.md
+  - docs/adr/0052-alpha-blend-removal-rejected.md
+distilled_from_sha: "f765be7"
+updated: "2026-07-17"
+---
+
 # 学習型モデル評価ハーネス 設計（#272 土台 / #309 受け皿）
 
 手作り線形 `raw_score` を学習ランカー（#309）へ置換する前提として、**リーク無しで訓練・評価でき、

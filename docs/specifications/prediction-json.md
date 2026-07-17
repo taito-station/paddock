@@ -1,3 +1,15 @@
+---
+# knowledge 規約に基づくメタデータ（docs/knowledge/README.md）。specifications はその場で
+# knowledge に昇格（ADR 履歴・相互リンクを壊さないため物理移動しない）。
+status: Confirmed
+kind: knowledge
+sources:
+  - docs/adr/0025-prediction-search-api.md
+  - docs/adr/0032-bets-in-gen-predictions-model-based.md
+distilled_from_sha: "f765be7"
+updated: "2026-07-17"
+---
+
 # 予想 JSON 仕様（ingest-predictions 入力契約）
 
 予想（印・短評・買い目・結果）を DB に保存するための JSON。**DB が正で、pad の MD はこの

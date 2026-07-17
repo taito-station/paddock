@@ -1,3 +1,15 @@
+---
+# knowledge 規約に基づくメタデータ（docs/knowledge/README.md）。specifications はその場で
+# knowledge に昇格（ADR 履歴・相互リンクを壊さないため物理移動しない）。
+status: Confirmed
+kind: knowledge
+sources:
+  - docs/adr/0023-session-write-api.md
+  - docs/api/openapi.json
+distilled_from_sha: "f765be7"
+updated: "2026-07-17"
+---
+
 # 予想セッション write 系 REST API: 設計仕様
 
 [Issue #53](https://github.com/taito-station/paddock/issues/53) / 依存: [#33 REST API read 基盤](https://github.com/taito-station/paddock/issues/33)・[#51 オッズ永続化](https://github.com/taito-station/paddock/issues/51)・[#40 確定結果自動取得](https://github.com/taito-station/paddock/issues/40) / 消費側: [#34 Web SPA](https://github.com/taito-station/paddock/issues/34)

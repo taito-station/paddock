@@ -1,3 +1,20 @@
+---
+# knowledge 規約に基づくメタデータ（docs/knowledge/README.md）。specifications はその場で
+# knowledge に昇格（ADR 履歴・相互リンクを壊さないため物理移動しない）。
+status: Confirmed
+kind: knowledge
+sources:
+  - docs/adr/0004-predict-session-binary.md
+  - docs/adr/0005-wire-odds-into-predict.md
+  - docs/adr/0013-persist-track-condition.md
+  - docs/adr/0019-portfolio-generator.md
+  - docs/adr/0046-allocation-prob-weight-no-floor-rejected.md
+  - docs/adr/0048-retire-jra-odds-scraper-for-netkeiba.md
+  - docs/adr/0054-kelly-staking-rejected.md
+distilled_from_sha: "f765be7"
+updated: "2026-07-17"
+---
+
 # predict バイナリ: 対話型レーシングセッション
 
 [Issue #13](https://github.com/taito-station/paddock/issues/13)

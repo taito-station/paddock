@@ -1,3 +1,16 @@
+---
+# knowledge 規約に基づくメタデータ（docs/knowledge/README.md）。specifications はその場で
+# knowledge に昇格（ADR 履歴・相互リンクを壊さないため物理移動しない）。
+status: Confirmed
+kind: knowledge
+sources:
+  - docs/adr/0006-backtest-evaluation.md
+  - docs/adr/0002-probability-estimation.md
+  - docs/adr/0003-ev-kelly-bet-selection.md
+distilled_from_sha: "f765be7"
+updated: "2026-07-17"
+---
+
 # 予想精度バックテスト/評価基盤 仕様書
 
 Issue #30 対応。DB に蓄積された過去の `races`/`results` に対して予想ロジック

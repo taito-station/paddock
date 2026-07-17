@@ -1,3 +1,15 @@
+---
+# knowledge 規約に基づくメタデータ（docs/knowledge/README.md）。specifications はその場で
+# knowledge に昇格（ADR 履歴・相互リンクを壊さないため物理移動しない）。
+status: Confirmed
+kind: knowledge
+sources:
+  - docs/adr/0025-prediction-search-api.md
+  - docs/api/openapi.json
+distilled_from_sha: "f765be7"
+updated: "2026-07-17"
+---
+
 # 予想の横断検索 API: 設計仕様
 
 [Issue #145](https://github.com/taito-station/paddock/issues/145) / 関連: [#144 予想の DB 永続化](https://github.com/taito-station/paddock/issues/144)・[#33 REST API(read)](https://github.com/taito-station/paddock/issues/33)・[#34 Web SPA](https://github.com/taito-station/paddock/issues/34)・[#50 名前あいまい検索](https://github.com/taito-station/paddock/issues/50)・[rest-api-read.md](rest-api-read.md)

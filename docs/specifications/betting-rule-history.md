@@ -1,3 +1,25 @@
+---
+# knowledge 規約に基づくメタデータ（docs/knowledge/README.md）。specifications はその場で
+# knowledge に昇格（ADR 履歴・相互リンクを壊さないため物理移動しない）。
+status: Confirmed
+kind: knowledge
+sources:
+  - docs/adr/0028-konsen-odds-trigger-rejected.md
+  - docs/adr/0030-konsen-trio-partner-width-rejected.md
+  - docs/adr/0033-conditional-win-bet-rejected.md
+  - docs/adr/0039-formation-2axis-rejected.md
+  - docs/adr/0040-ev-gate-threshold-lowering-rejected.md
+  - docs/adr/0041-umaren-only-strategy-rejected.md
+  - docs/adr/0042-win-power-calibration-adopted.md
+  - docs/adr/0043-exacta-in-portfolio-rejected.md
+  - docs/adr/0044-calibrated-ev-gate-anti-predictive.md
+  - docs/adr/0046-allocation-prob-weight-no-floor-rejected.md
+  - docs/adr/0054-kelly-staking-rejected.md
+  - docs/adr/0065-wide-partners-top5-alignment.md
+distilled_from_sha: "f765be7"
+updated: "2026-07-17"
+---
+
 # 買い方ルールの決定根拠・棄却記録・バックテスト履歴
 
 現行の買い方ルールが「なぜこの形なのか」を残すアーカイブ。**運用ルール本体ではない**ので予想実行時に読む必要はなく、ルール変更を検討する時にだけ参照する。
