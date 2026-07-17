@@ -66,10 +66,16 @@ export function toAmount(v: string): number {
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
 }
 
+// n が unit 円単位（端数不可）か。金銭ガード（賭け金・予算/R の 100 円単位、セッション総予算の
+// 1000 円単位）に共用する純関数。0 は許容（スキップ相当）。unit は正の整数を想定。
+export function isUnitOf(n: number, unit: number): boolean {
+  return Number.isInteger(n) && n >= 0 && n % unit === 0;
+}
+
 // 100 円単位（端数不可）か。買い方ルール「馬券は必ず 100 円単位」の判定で、
 // 賭け金・予算に用いる。0 は許容（スキップ相当）。払戻は対象外（10 円単位のため）。
 export function isUnit100(n: number): boolean {
-  return Number.isInteger(n) && n >= 0 && n % 100 === 0;
+  return isUnitOf(n, 100);
 }
 
 // 編集後の賭け金に 100 円単位違反があるか。UI の記録ガードに使う（払戻は対象外）。
