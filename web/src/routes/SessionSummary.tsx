@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { recoveryRate, yen } from "../lib/format";
 import { raceListHref } from "../lib/header-date";
+import { useResultsRefresh } from "../lib/useResultsRefresh";
 
 export function SessionSummary() {
   const { date = "" } = useParams();
@@ -47,6 +48,12 @@ export function SessionSummary() {
     },
     // 精算で残高・払戻が変わるためセッションを再取得する。
     onSuccess: () => qc.invalidateQueries({ queryKey: ["session", date] }),
+  });
+
+  // 結果確定を検知して自動精算する（#381）。未完了セッションの当日のみポーリング（過去日・
+  // 全確定で停止）。手動「精算」ボタンはフォールバックとして残す。
+  useResultsRefresh(date, {
+    enabled: !!session.data && !session.data.completed,
   });
 
   return (

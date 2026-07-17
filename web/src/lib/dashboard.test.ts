@@ -6,6 +6,9 @@ import {
   rowPostTime,
   sortRows,
   filterRows,
+  raceFinished,
+  outcomeByRace,
+  hasUnsettledRaces,
   dashboardQueryParams,
   backToDashboardHref,
   surfaceDistance,
@@ -19,7 +22,6 @@ type LiveRaceView = Schemas["LiveRaceViewSchema"];
 const DATE = "2026-07-12";
 // JST 12:00 = UTC 03:00（マシン TZ 非依存を検証するため UTC 指定で固定）
 const NOON = new Date("2026-07-12T03:00:00Z");
-const ctx = { date: DATE, now: NOON };
 
 function race(over: Partial<RaceSummary> = {}): RaceSummary {
   return {
@@ -132,7 +134,8 @@ describe("evVisible", () => {
 describe("sortRows", () => {
   const rows = [
     row({ race_id: "a", venue: "kokura", race_num: 7 }, { post_time: "13:00", roi: 90, axis_prob: 40, roughness: 0.9 }),
-    row({ race_id: "b", venue: "hakodate", race_num: 5 }, { post_time: "11:30", roi: 120, axis_prob: 30, roughness: null }),
+    // b は結果確定（#381 で「終了」判定は result_confirmed）。
+    row({ race_id: "b", venue: "hakodate", race_num: 5, result_confirmed: true }, { post_time: "11:30", roi: 120, axis_prob: 30, roughness: null }),
     row({ race_id: "c", venue: "hakodate", race_num: 9 }, { post_time: "12:30", roi: 70, axis_prob: 55, roughness: 0.4 }),
     // live 無し（post も EV も不明）
     row({ race_id: "d", venue: "fukushima", race_num: 3 }, null),
@@ -140,9 +143,9 @@ describe("sortRows", () => {
     row({ race_id: "e", venue: "fukushima", race_num: 8 }, { post_time: "12:45", tier: "hidden", roi: 999 }),
   ];
 
-  it("status 既定順: 未発走を発走昇順で上、post 不明は未発走側末尾、発走済みは下", () => {
-    expect(sortRows(rows, "status", "asc", ctx).map((r) => r.race.race_id))
-      // c(12:30) → e(12:45 hidden でも post は使う) → a(13:00) → d(不明) → b(11:30 発走済み)
+  it("status 既定順: 未確定を発走昇順で上、post 不明は末尾、確定（⚫終）は下（#381）", () => {
+    expect(sortRows(rows, "status", "asc").map((r) => r.race.race_id))
+      // 未確定を post 昇順: c(12:30) → e(12:45) → a(13:00) → d(不明) → 確定 b は最下段
       .toEqual(["c", "e", "a", "d", "b"]);
   });
   it("status: post 不明同士は R 番号 → 会場のタイブレーク", () => {
@@ -151,89 +154,146 @@ describe("sortRows", () => {
       row({ race_id: "x", venue: "fukushima", race_num: 3 }, null),
       row({ race_id: "z", venue: "fukushima", race_num: 2 }, null),
     ];
-    expect(sortRows(rs, "status", "asc", ctx).map((r) => r.race.race_id)).toEqual(["z", "x", "y"]);
+    expect(sortRows(rs, "status", "asc").map((r) => r.race.race_id)).toEqual(["z", "x", "y"]);
   });
   it("roi: EV 非表示行（live 無し・hidden）は方向に関わらず末尾", () => {
-    expect(sortRows(rows, "roi", "desc", ctx).map((r) => r.race.race_id)).toEqual(["b", "a", "c", "d", "e"]);
-    expect(sortRows(rows, "roi", "asc", ctx).map((r) => r.race.race_id)).toEqual(["c", "a", "b", "d", "e"]);
+    expect(sortRows(rows, "roi", "desc").map((r) => r.race.race_id)).toEqual(["b", "a", "c", "d", "e"]);
+    expect(sortRows(rows, "roi", "asc").map((r) => r.race.race_id)).toEqual(["c", "a", "b", "d", "e"]);
   });
   it("post: 欠落（live 無し）は方向に関わらず末尾", () => {
-    expect(sortRows(rows, "post", "asc", ctx).map((r) => r.race.race_id)).toEqual(["b", "c", "e", "a", "d"]);
-    expect(sortRows(rows, "post", "desc", ctx).map((r) => r.race.race_id)).toEqual(["a", "e", "c", "b", "d"]);
+    expect(sortRows(rows, "post", "asc").map((r) => r.race.race_id)).toEqual(["b", "c", "e", "a", "d"]);
+    expect(sortRows(rows, "post", "desc").map((r) => r.race.race_id)).toEqual(["a", "e", "c", "b", "d"]);
   });
   it("rough: null・EV 非表示行は方向に関わらず末尾", () => {
-    expect(sortRows(rows, "rough", "desc", ctx).map((r) => r.race.race_id)).toEqual(["a", "c", "b", "d", "e"]);
-    expect(sortRows(rows, "rough", "asc", ctx).map((r) => r.race.race_id)).toEqual(["c", "a", "b", "d", "e"]);
+    expect(sortRows(rows, "rough", "desc").map((r) => r.race.race_id)).toEqual(["a", "c", "b", "d", "e"]);
+    expect(sortRows(rows, "rough", "asc").map((r) => r.race.race_id)).toEqual(["c", "a", "b", "d", "e"]);
   });
   it("axisProb: desc/asc とも EV 非表示行は末尾", () => {
-    expect(sortRows(rows, "axisProb", "desc", ctx).map((r) => r.race.race_id)).toEqual(["c", "a", "b", "d", "e"]);
-    expect(sortRows(rows, "axisProb", "asc", ctx).map((r) => r.race.race_id)).toEqual(["b", "a", "c", "d", "e"]);
+    expect(sortRows(rows, "axisProb", "desc").map((r) => r.race.race_id)).toEqual(["c", "a", "b", "d", "e"]);
+    expect(sortRows(rows, "axisProb", "asc").map((r) => r.race.race_id)).toEqual(["b", "a", "c", "d", "e"]);
   });
   it("race: live 無し行も RaceSummary から正しく混在ソート", () => {
-    expect(sortRows(rows, "race", "asc", ctx).map((r) => r.race.race_id))
+    expect(sortRows(rows, "race", "asc").map((r) => r.race.race_id))
       // fukushima-03(d) → fukushima-08(e) → hakodate-05(b) → hakodate-09(c) → kokura-07(a)
       .toEqual(["d", "e", "b", "c", "a"]);
   });
   it("入力配列を破壊しない", () => {
     const before = rows.map((r) => r.race.race_id);
-    sortRows(rows, "roi", "desc", ctx);
+    sortRows(rows, "roi", "desc");
     expect(rows.map((r) => r.race.race_id)).toEqual(before);
   });
 });
 
 describe("filterRows", () => {
   const rows = [
-    row({ race_id: "done-bet" }, { post_time: "11:00", verdict: "bet" }),
+    // done-bet は結果確定（#381 で「終了」判定は result_confirmed）。
+    row({ race_id: "done-bet", result_confirmed: true }, { post_time: "11:00", verdict: "bet" }),
     row({ race_id: "up-bet" }, { post_time: "13:00", verdict: "bet" }),
     row({ race_id: "up-skip" }, { post_time: "14:00", verdict: "skip" }),
     row({ race_id: "nolive" }, null),
     row({ race_id: "hidden-bet" }, { post_time: "13:30", verdict: "bet", tier: "hidden" }),
   ];
-  it("status=upcoming: 発走済みを除外、post 不明（live 無し）は未発走扱い", () => {
+  it("status=upcoming: 確定を除外、未確定（走行中・未発走）は含む", () => {
     expect(
-      filterRows(rows, { status: "upcoming", verdict: "all" }, ctx).map((r) => r.race.race_id),
+      filterRows(rows, { status: "upcoming", verdict: "all" }).map((r) => r.race.race_id),
     ).toEqual(["up-bet", "up-skip", "nolive", "hidden-bet"]);
   });
-  it("status=finished: 発走済みのみ（post 不明は未発走扱いで除外）", () => {
+  it("status=finished: 結果確定のみ（未確定は除外）", () => {
     expect(
-      filterRows(rows, { status: "finished", verdict: "all" }, ctx).map((r) => r.race.race_id),
+      filterRows(rows, { status: "finished", verdict: "all" }).map((r) => r.race.race_id),
     ).toEqual(["done-bet"]);
   });
   it("verdict=bet: EV 非表示行（live 無し・hidden）は除外", () => {
     expect(
-      filterRows(rows, { status: "all", verdict: "bet" }, ctx).map((r) => r.race.race_id),
+      filterRows(rows, { status: "all", verdict: "bet" }).map((r) => r.race.race_id),
     ).toEqual(["done-bet", "up-bet"]);
   });
   it("status × verdict の併用", () => {
     expect(
-      filterRows(rows, { status: "upcoming", verdict: "bet" }, ctx).map((r) => r.race.race_id),
+      filterRows(rows, { status: "upcoming", verdict: "bet" }).map((r) => r.race.race_id),
     ).toEqual(["up-bet"]);
   });
-  it("live 無しでも race.post_time が過去なら発走済みに分類する（#391）", () => {
+  it("post_time が過去でも result_confirmed=false なら未発走側（走行中/結果待ち）、確定で終了（#381）", () => {
     const rs = [
-      row({ race_id: "done-nolive", post_time: "10:00" }, null),
-      row({ race_id: "up-nolive", post_time: "16:00" }, null),
-      row({ race_id: "unknown", post_time: null }, null),
+      // post は過去だが未確定（走行中）→ 終了にしない。
+      row({ race_id: "running", post_time: "10:00", result_confirmed: false }, null),
+      // 確定 → post_time に依存せず終了。
+      row({ race_id: "done", post_time: "10:00", result_confirmed: true }, null),
+      row({ race_id: "upcoming", post_time: "16:00" }, null),
     ];
     expect(
-      filterRows(rs, { status: "finished", verdict: "all" }, ctx).map((r) => r.race.race_id),
-    ).toEqual(["done-nolive"]);
-    // post 不明は従来どおり未発走側（終了と断定しない）。
+      filterRows(rs, { status: "finished", verdict: "all" }).map((r) => r.race.race_id),
+    ).toEqual(["done"]);
+    // 走行中・未発走はいずれも未確定＝未発走側。
     expect(
-      filterRows(rs, { status: "upcoming", verdict: "all" }, ctx).map((r) => r.race.race_id),
-    ).toEqual(["up-nolive", "unknown"]);
+      filterRows(rs, { status: "upcoming", verdict: "all" }).map((r) => r.race.race_id),
+    ).toEqual(["running", "upcoming"]);
   });
-  it("race.post_time と live.post_time が食い違うとき分類も race 正本を優先する（#391）", () => {
-    // race=過去(10:00) / live=未来(16:00)。rowPostTime が race 側を採るため発走済みに分類される。
-    const rs = [
-      row({ race_id: "race-past", post_time: "10:00" }, { post_time: "16:00", verdict: "skip" }),
-    ];
+});
+
+describe("raceFinished", () => {
+  it("result_confirmed を一次ソースにする（post_time 非依存・#381）", () => {
+    // post 未来でも確定なら終了。post 過去でも未確定なら未終了（走行中/結果待ち）。
     expect(
-      filterRows(rs, { status: "finished", verdict: "all" }, ctx).map((r) => r.race.race_id),
-    ).toEqual(["race-past"]);
+      raceFinished(row({ result_confirmed: true, post_time: "16:00" }, null)),
+    ).toBe(true);
     expect(
-      filterRows(rs, { status: "upcoming", verdict: "all" }, ctx).map((r) => r.race.race_id),
-    ).toEqual([]);
+      raceFinished(row({ result_confirmed: false, post_time: "10:00" }, null)),
+    ).toBe(false);
+  });
+});
+
+describe("outcomeByRace", () => {
+  const bet = (
+    race_id: string,
+    stake: number,
+    payout: number,
+  ): Schemas["SummaryBet"] => ({
+    race_id,
+    bet_type: "win",
+    combination: "1",
+    stake,
+    payout,
+    ev: 1,
+  });
+  it("race_id 別に stake/payout を集計し payout>0 を hit とする（#381）", () => {
+    const m = outcomeByRace([
+      bet("a", 1000, 0),
+      bet("a", 500, 1400),
+      bet("b", 300, 0),
+    ]);
+    expect(m.get("a")).toEqual({ stake: 1500, payout: 1400, hit: true });
+    expect(m.get("b")).toEqual({ stake: 300, payout: 0, hit: false });
+    expect(m.has("c")).toBe(false);
+  });
+  it("空配列は空 Map", () => {
+    expect(outcomeByRace([]).size).toBe(0);
+  });
+});
+
+describe("hasUnsettledRaces", () => {
+  // NOON = JST 12:00。post 10:00=発走済み / 16:00=未発走。
+  it("発走済み(post 経過)かつ未確定が 1 件でもあれば true（#381 ポーリング gate）", () => {
+    expect(
+      hasUnsettledRaces(
+        [race({ post_time: "10:00", result_confirmed: false })],
+        DATE,
+        NOON,
+      ),
+    ).toBe(true);
+  });
+  it("全確定・全未発走・post 不明のみは false（ポーリング停止）", () => {
+    expect(
+      hasUnsettledRaces(
+        [
+          race({ post_time: "10:00", result_confirmed: true }), // 確定
+          race({ post_time: "16:00", result_confirmed: false }), // 未発走
+          race({ post_time: null, result_confirmed: false }), // post 不明（発走済みと断定しない）
+        ],
+        DATE,
+        NOON,
+      ),
+    ).toBe(false);
   });
 });
 

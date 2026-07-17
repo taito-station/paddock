@@ -362,6 +362,21 @@ button:disabled {
   display: block;
 }
 
+/* 確定行の着順（#381）。live-tag ベースに note 系の色で他タグと区別する。 */
+.live-tag.finish-order {
+  background: var(--note-bg);
+  color: var(--note-text);
+}
+
+/* 購入済み確定行の的中/不的中（#381）。的中は accent（緑）、不的中は muted で控えめに。 */
+.result-hit {
+  color: var(--accent);
+  font-weight: 600;
+}
+.result-miss {
+  color: var(--muted);
+}
+
 /* まもなく発走（SOON_MINUTES 以内）: 「今なにをすべきか」を左端の帯で示す。 */
 .live-board tr.live-row-soon > td:first-child {
   box-shadow: inset 3px 0 0 var(--accent);
@@ -575,6 +590,12 @@ button:disabled {
 .num-mark .mark {
   font-size: 1rem;
   color: var(--value-text);
+}
+/* 確定着順（#381）。盤の各馬に控えめな緑バッジで出す。 */
+.num-mark .finish-pos {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--accent);
 }
 .hname {
   font-size: 0.72rem;

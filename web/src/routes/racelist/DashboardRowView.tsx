@@ -1,10 +1,11 @@
 import { Link } from "react-router-dom";
-import { VENUE_JP, type RaceBadge } from "../../lib/format";
+import { VENUE_JP, yen, type RaceBadge } from "../../lib/format";
 import {
   evVisible,
   rowPostTime,
   surfaceDistance,
   type DashboardRow,
+  type RaceOutcome,
 } from "../../lib/dashboard";
 import {
   DANZEN_WIN_ODDS_MAX,
@@ -33,6 +34,7 @@ export function DashboardRowView({
   badge,
   slipOpen,
   onToggle,
+  outcome,
 }: {
   row: DashboardRow;
   date: string;
@@ -41,12 +43,22 @@ export function DashboardRowView({
   badge: RaceBadge;
   slipOpen: boolean;
   onToggle: () => void;
+  outcome?: RaceOutcome;
 }) {
   const { race, live } = row;
   const showEv = evVisible(row);
   const post = rowPostTime(row);
+  // 「⚫終」は結果確定（#381）。post_time 経過だが未確定（走行中/結果待ち）は終了扱いにしない。
+  const finished = race.result_confirmed;
   const started = raceStarted(date, post, now) === true;
   const soon = !started && isSoon(date, post, now);
+  // 確定行の着順（上位）を馬番の丸数字で（例「着 ①④⑦」）。
+  const finishMaru = finished
+    ? [...race.finish_order]
+        .sort((a, b) => a.position - b.position)
+        .map((f) => maru(f.horse_num))
+        .join("")
+    : "";
   const notes =
     showEv && live
       ? flipNotes(live.flip, {
@@ -60,7 +72,7 @@ export function DashboardRowView({
   const chip = showEv && live ? roughnessChip(live.roughness, live.roughness_label) : null;
   const rowClass =
     [
-      started ? "live-row-done" : "",
+      finished ? "live-row-done" : "",
       soon ? "live-row-soon" : "",
       isBuy ? "live-row-buy" : "",
     ]
@@ -94,7 +106,7 @@ export function DashboardRowView({
               {slipOpen ? "▼" : "▶"}
             </button>
           )}
-          {started && "⚫終 "}
+          {finished && "⚫終 "}
           {showEv && live ? (
             <>
               {tierShort(live.tier)}
@@ -147,6 +159,16 @@ export function DashboardRowView({
           <Badge kind={badge} />
         </td>
         <td className="live-notes">
+          {/* 確定行の着順（上位）。post_time 推定でなく結果確定で出す（#381）。 */}
+          {finished && finishMaru && (
+            <span className="live-tag finish-order">着 {finishMaru}</span>
+          )}
+          {/* 購入済み確定行の的中○/✗・払戻額（session bets の per-race 集計・#381）。 */}
+          {finished && outcome && (
+            <span className={outcome.hit ? "result-hit" : "result-miss"}>
+              {outcome.hit ? `○ ${yen(outcome.payout)}` : "✗"}
+            </span>
+          )}
           {notes.map((n) => (
             <span key={n} className="live-flip">
               🔶 {n}

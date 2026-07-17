@@ -13,10 +13,13 @@ import {
 import {
   dashboardQueryParams,
   filterRows,
+  hasUnsettledRaces,
   joinRaces,
+  outcomeByRace,
   sortRows,
   type DashboardRow,
 } from "../lib/dashboard";
+import { useResultsRefresh } from "../lib/useResultsRefresh";
 import {
   STALE_MINUTES,
   backParam,
@@ -166,7 +169,17 @@ export function RaceList() {
   const liveRaces = live.data?.races;
   // snapshot が 1 件でもあればライブモード（統合テーブル）。無い日は静的一覧に縮退。
   const liveMode = !!liveRaces && liveRaces.length > 0;
-  const ctx = useMemo(() => ({ date, now }), [date, now]);
+
+  // 購入済みレースの的中/払戻を per-race 集計（#381。確定行の的中○/✗・払戻額表示に使う）。
+  const outcomes = useMemo(
+    () => outcomeByRace(session.data?.bets ?? []),
+    [session.data],
+  );
+  // 結果確定を検知して自動精算する（#381）。発走済み・未確定が残る間だけポーリング（過去日・
+  // 全確定で停止。停止条件は useResultsRefresh 側と enabled で二重に担保）。
+  useResultsRefresh(date, {
+    enabled: hasUnsettledRaces(races.data?.races ?? [], date, now),
+  });
   const rows = useMemo(
     () => joinRaces(races.data?.races ?? [], liveRaces, boughtRaceIds),
     [races.data, liveRaces, boughtRaceIds],
@@ -174,12 +187,11 @@ export function RaceList() {
   const visible = useMemo(
     () =>
       sortRows(
-        filterRows(rows, { status: query.status, verdict: query.verdict }, ctx),
+        filterRows(rows, { status: query.status, verdict: query.verdict }),
         query.sort,
         query.dir,
-        ctx,
       ),
-    [rows, query.status, query.verdict, query.sort, query.dir, ctx],
+    [rows, query.status, query.verdict, query.sort, query.dir],
   );
 
   // 鮮度（#372）。snapshot が空（スイープ開始前）のときは refetchInterval と同じ基準
@@ -398,6 +410,7 @@ export function RaceList() {
                       !collapsed.has(row.race.race_id)
                     }
                     onToggle={() => toggleSlip(row.race.race_id)}
+                    outcome={outcomes.get(row.race.race_id)}
                   />
                 ))}
               </tbody>
