@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# CI 相当の高速チェックを push 前に走らせ、落ちたら push を中断する（#178 で fmt 落ちを
+# 手元で拾えなかった反省）。CI（.github/workflows/ci.yml）の fmt / clippy ステップを再現する。
+# test は --test-threads=1 で時間がかかるため含めず、push 後の CI 確認で担保する。
+# 緊急時の意図的バイパスは `git push --no-verify`（規約上は明示意図があるときのみ）。
+#
+# このフックはリポジトリ管理下（scripts/git-hooks/）に置き、scripts/install-git-hooks.sh で
+# core.hooksPath を張って配線する（#414）。clone・並走 clone ごとに一度配線が要る。
+# git はフックを作業ツリー最上位を CWD にして起動するため、下の scripts/check-adr-numbers.sh は
+# 相対解決できる。なお相対 core.hooksPath の性質上、scripts/git-hooks/ を含まないブランチ/worktree
+# をチェックアウトした状態では git は「フック無し＝何もしない」で扱い、このチェックは走らない。
+set -euo pipefail
+
+echo "[pre-push] cargo fmt --all --check"
+cargo fmt --all --check
+
+# clippy は CI（.github/workflows/ci.yml）と厳密一致させる（--locked 込み。Cargo.lock ドリフトを手元で拾う）。
+echo "[pre-push] cargo clippy --locked --workspace --all-targets -- -D warnings"
+cargo clippy --locked --workspace --all-targets -- -D warnings
+
+echo "[pre-push] scripts/check-adr-numbers.sh（ADR 番号の重複検出 #254）"
+bash scripts/check-adr-numbers.sh
+
+echo "[pre-push] OK（fmt / clippy / ADR 番号 通過）"
