@@ -16,31 +16,35 @@ members = [
     "src/apps/api-server",
 ]
 
+# バージョンは caret 指定（bare version = 暗黙の caret）に統一する。1.x 系は major のみ
+# （例 "1"=^1）、0.x 系は破壊境界の minor まで（例 "0.4"=^0.4）で書く。minor 下限は
+# 意図的に固定せず、実際に使う版の固定は Cargo.lock に一任する（再現性は CI の --locked
+# で担保）。ワイルドカード（x.y.*）は semver 互換の minor 更新を排除するため使わない（#416）。
 [workspace.dependencies]
-anyhow             = { version = "1.0.*" }
-actix-web          = { version = "4.*" }
-ordered-float      = { version = "5.*" }
-pulldown-cmark     = { version = "0.12.*", default-features = false, features = ["html"] }
-chrono             = { version = "0.4.*", features = ["serde"] }
-clap               = { version = "4.6.*", features = ["derive"] }
-dotenvy            = { version = "0.15.*" }
-encoding_rs        = { version = "0.8.*" }
-envy               = { version = "0.4.*" }
-regex              = { version = "1.12.*" }
-scraper            = { version = "0.27.*" }
-serde              = { version = "1.0.*", features = ["derive"] }
-serde_json         = { version = "1.0.*" }
-sqlx               = { version = "0.9.*", features = ["runtime-tokio", "tls-native-tls", "postgres", "chrono", "migrate", "macros"] }
-strum_macros       = { version = "0.28.*" }
-thiserror          = { version = "2.0.*" }
-tempfile           = { version = "3.*" }
-tokio              = { version = "1.*", features = ["macros", "rt-multi-thread", "fs", "sync", "time"] }
-tracing            = { version = "0.1.*" }
-tracing-log        = { version = "0.2.*" }
-tracing-subscriber = { version = "0.3.*", features = ["env-filter"] }
-ureq               = { version = "3.*", default-features = false, features = ["rustls"] }
-utoipa             = { version = "5.*", features = ["actix_extras", "chrono"] }
-utoipa-swagger-ui  = { version = "8.*", features = ["actix-web"] }
+anyhow             = { version = "1" }
+actix-web          = { version = "4" }
+ordered-float      = { version = "5" }
+pulldown-cmark     = { version = "0.13", default-features = false, features = ["html"] }
+chrono             = { version = "0.4", features = ["serde"] }
+clap               = { version = "4", features = ["derive"] }
+dotenvy            = { version = "0.15" }
+encoding_rs        = { version = "0.8" }
+envy               = { version = "0.4" }
+regex              = { version = "1" }
+scraper            = { version = "0.27" }
+serde              = { version = "1", features = ["derive"] }
+serde_json         = { version = "1" }
+sqlx               = { version = "0.9", features = ["runtime-tokio", "tls-native-tls", "postgres", "chrono", "migrate", "macros"] }
+strum_macros       = { version = "0.28" }
+thiserror          = { version = "2" }
+tempfile           = { version = "3" }
+tokio              = { version = "1", features = ["macros", "rt-multi-thread", "fs", "sync", "time"] }
+tracing            = { version = "0.1" }
+tracing-log        = { version = "0.2" }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+ureq               = { version = "3", default-features = false, features = ["rustls"] }
+utoipa             = { version = "5", features = ["actix_extras", "chrono"] }
+utoipa-swagger-ui  = { version = "9", features = ["actix-web"] }
 
 paddock-domain     = { path = "src/domain" }
 paddock-use-case   = { path = "src/use-case" }
