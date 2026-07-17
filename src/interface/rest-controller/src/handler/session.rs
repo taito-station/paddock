@@ -5,12 +5,11 @@ use paddock_domain::RaceId;
 use paddock_use_case::pdf_fetcher::PdfFetcher;
 use paddock_use_case::pdf_parser::PdfParser;
 use paddock_use_case::repository::{PredictBetRecord, Repository};
-use paddock_use_case::{Interactor, OddsInteractor, OddsScraper, PayoutFetcher, SettleInteractor};
+use paddock_use_case::{Interactor, OddsInteractor, OddsScraper};
 
 use crate::error::{Error, Result};
 use crate::schema::session::{
     CreateSessionRequest, OddsRefreshResponse, RecordOutcomeRequest, SessionSummaryResponse,
-    SettleReportResponse,
 };
 
 fn parse_date(s: &str) -> Result<NaiveDate> {
@@ -166,40 +165,5 @@ where
     Ok(HttpResponse::Ok().json(OddsRefreshResponse {
         race_id: race_id.value().to_string(),
         fetched,
-    }))
-}
-
-/// 確定結果を取得して払戻を自動補完（#40, 冪等）。
-#[utoipa::path(
-    post,
-    path = "/api/sessions/{date}/results:refresh",
-    params(("date" = String, Path, description = "開催日 YYYY-MM-DD")),
-    responses(
-        (status = 200, description = "精算レポート（pending_races に未確定が出る）", body = SettleReportResponse),
-        (status = 400, description = "日付不正", body = crate::error::ErrorBody),
-        (status = 404, description = "未作成のセッション", body = crate::error::ErrorBody),
-        (status = 500, description = "内部エラー", body = crate::error::ErrorBody),
-    ),
-    tag = "sessions",
-)]
-pub async fn results_refresh<S, R>(
-    settle: web::Data<SettleInteractor<S, R>>,
-    path: web::Path<String>,
-) -> Result<HttpResponse>
-where
-    S: PayoutFetcher + Send + Sync + 'static,
-    R: Repository + 'static,
-{
-    let date = parse_date(&path.into_inner())?;
-    let report = settle.settle_session(date).await?;
-    Ok(HttpResponse::Ok().json(SettleReportResponse {
-        settled_races: report.settled_races as u32,
-        pending_races: report.pending_races as u32,
-        voided_races: report.voided_races as u32,
-        refunded_bets: report.refunded_bets as u32,
-        total_bet: report.total_bet,
-        total_payout: report.total_payout,
-        balance: report.balance,
-        roi: report.roi,
     }))
 }

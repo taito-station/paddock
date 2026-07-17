@@ -10,6 +10,7 @@ pub mod odds;
 pub mod pdf;
 pub mod prediction;
 pub mod race;
+pub mod results;
 pub mod settle;
 pub mod trainer;
 

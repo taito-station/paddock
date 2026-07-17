@@ -12,7 +12,7 @@ async fn main() -> anyhow::Result<()> {
     let addr = s.server_addr.clone();
     let interactor = web::Data::new(s.interactor);
     let odds = web::Data::new(s.odds);
-    let settle = web::Data::new(s.settle);
+    let results = web::Data::new(s.results);
 
     tracing::info!("paddock api-server listening on http://{addr} (docs: /docs)");
 
@@ -20,7 +20,7 @@ async fn main() -> anyhow::Result<()> {
         App::new()
             .app_data(interactor.clone())
             .app_data(odds.clone())
-            .app_data(settle.clone())
+            .app_data(results.clone())
             .configure(
                 app::configure_routes::<
                     PostgresRepository,

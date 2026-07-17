@@ -21,7 +21,8 @@ use crate::interactor::race::commentary::{horse_detail_lines, horse_headline, ra
 use crate::pdf_fetcher::PdfFetcher;
 use crate::pdf_parser::PdfParser;
 use crate::repository::{
-    OddsRepository, PadPredictionRepository, RaceCardRepository, StatsRepository,
+    OddsRepository, PadPredictionRepository, RaceCardRepository, RaceResultRepository,
+    StatsRepository,
 };
 
 /// 乖離馬（妙味・ワイドボックス候補）の判定に使う「人気順 − モデル順」の下限。
@@ -62,6 +63,8 @@ pub struct RaceBoard {
     /// レース書評（混戦度・◎の狙いどころ・妙味）。人手 `PadPrediction.commentary` があれば優先、
     /// 無ければルールベース生成（#348）。◎が無い等で生成できなければ `None`。
     pub race_comment: Option<String>,
+    /// 結果確定フラグ（#381。`results` に着順ありの行が 1 件以上）。web の「⚫終」判定・着順表示に使う。
+    pub result_confirmed: bool,
     /// 全出走馬（truncate しない）。盤面順（`blended` と同順）。
     pub horses: Vec<BoardHorse>,
 }
@@ -110,6 +113,8 @@ pub struct BoardHorse {
     pub is_overlay: bool,
     /// 乖離馬（モデル上位×市場人気低＝妙味・ワイドボックス候補）。
     pub is_value: bool,
+    /// 確定着順（#381。`results` 由来。未確定・除外/中止で着順なしは `None`）。
+    pub finishing_position: Option<u32>,
     /// 馬書評の一行寸評（headline）。人手 `PredictionHorse.comment` があれば優先、無ければ
     /// ルールベース生成（#348）。特筆材料が無ければ `None`。
     pub comment: Option<String>,
@@ -118,7 +123,11 @@ pub struct BoardHorse {
 }
 
 impl<
-    R: StatsRepository + RaceCardRepository + OddsRepository + PadPredictionRepository,
+    R: StatsRepository
+        + RaceCardRepository
+        + OddsRepository
+        + PadPredictionRepository
+        + RaceResultRepository,
     P: PdfParser,
     F: PdfFetcher,
 > Interactor<R, P, F>
@@ -174,6 +183,12 @@ impl<
 
         let mut horses =
             build_board_horses(&views.blended, &views.pure, odds.as_ref(), card.as_ref());
+        // 確定着順（#381）を results から後付けする。着順ありの行が 1 件でもあれば結果確定。
+        let finishing = self.repository.find_finishing_positions(race_id).await?;
+        let result_confirmed = !finishing.is_empty();
+        for h in horses.iter_mut() {
+            h.finishing_position = finishing.get(&h.horse_num).copied();
+        }
         let confusion = compute_confusion(&views.blended);
         enrich_commentary(&mut horses, &views.explanations, pad.as_ref());
 
@@ -225,6 +240,7 @@ impl<
             live_axis,
             confusion,
             race_comment,
+            result_confirmed,
             horses,
         })
     }
@@ -290,6 +306,8 @@ fn build_board_horses(
                 mark,
                 is_overlay,
                 is_value,
+                // 着順は race_board で results から後付けする（build_board_horses は IO 非依存の純関数に保つ）。
+                finishing_position: None,
                 // 書評は enrich_commentary で後付けする（build_board_horses は IO 非依存の純関数に保つ）。
                 comment: None,
                 detail_lines: Vec::new(),

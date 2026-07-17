@@ -216,6 +216,7 @@ mod tests {
             mark: None,
             is_overlay: false,
             is_value,
+            finishing_position: None,
             comment: None,
             detail_lines: Vec::new(),
         }

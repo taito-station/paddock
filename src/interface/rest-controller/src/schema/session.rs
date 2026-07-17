@@ -96,17 +96,3 @@ pub struct OddsRefreshResponse {
     /// オッズを取得できたか（false = 未公開・取得失敗で未取得。HTTP は 200）。
     pub fetched: bool,
 }
-
-/// `POST .../results:refresh` のレスポンス（`SettleReport` の写像）。
-#[derive(Debug, Serialize, ToSchema)]
-pub struct SettleReportResponse {
-    pub settled_races: u32,
-    pub pending_races: u32,
-    pub voided_races: u32,
-    pub refunded_bets: u32,
-    pub total_bet: u64,
-    pub total_payout: u64,
-    pub balance: u64,
-    /// 回収率(%)。総賭け金 0 なら null。
-    pub roi: Option<f64>,
-}

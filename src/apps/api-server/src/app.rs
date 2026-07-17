@@ -3,10 +3,11 @@ use actix_web::{HttpRequest, web};
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
+use paddock_use_case::OddsScraper;
 use paddock_use_case::pdf_fetcher::PdfFetcher;
 use paddock_use_case::pdf_parser::PdfParser;
 use paddock_use_case::repository::Repository;
-use paddock_use_case::{OddsScraper, PayoutFetcher};
+use paddock_use_case::result_page_fetcher::ResultPageFetcher;
 use rest_controller::error::Error as ApiError;
 use rest_controller::openapi::ApiDoc;
 
@@ -25,14 +26,14 @@ fn bad_request<E: std::fmt::Display>(err: E, _req: &HttpRequest) -> actix_web::E
 ///   Swagger UI / openapi.json は `/api` の外に置いており、現状この認証フックの対象外
 ///   （将来 docs を保護したい場合は配置・wrap を見直す）。
 ///
-/// ジェネリクス: `R/P/F`=メイン Interactor、`O`=OddsInteractor（odds:refresh）、`S`=SettleInteractor（results:refresh）。
+/// ジェネリクス: `R/P/F`=メイン Interactor、`O`=OddsInteractor（odds:refresh）、`S`=ResultsInteractor（results:refresh, #381）。
 pub fn configure_routes<R, P, F, O, S>(cfg: &mut web::ServiceConfig)
 where
     R: Repository + 'static,
     P: PdfParser + Send + Sync + 'static,
     F: PdfFetcher + Send + Sync + 'static,
     O: OddsScraper + Send + Sync + 'static,
-    S: PayoutFetcher + Send + Sync + 'static,
+    S: ResultPageFetcher + Send + Sync + 'static,
 {
     // 抽出エラーを ErrorBody 封筒へ正規化する（actix 既定のプレーンテキスト 400 を避ける）。
     cfg.app_data(web::QueryConfig::default().error_handler(bad_request));
@@ -47,6 +48,7 @@ where
                 srv.call(req)
             })
             .configure(rest_controller::router::configure::<R, P, F>)
+            .configure(rest_controller::router::results::configure::<S, R>)
             .configure(rest_controller::router::session::configure::<R, P, F, O, S>),
     );
 

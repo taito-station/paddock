@@ -108,11 +108,14 @@ where
     let post_times = interactor.post_times_by_date(date).await?;
     // レース名も race_cards から一括で引き当てる（重賞・特別戦名をヘッダに出す、#389）。
     let race_names = interactor.race_names_by_date(date).await?;
+    // 結果確定フラグ・上位着順を results から一括で引き当てる（「⚫終」判定・着順表示、#381）。
+    let confirmed = interactor.result_confirmed_by_date(date).await?;
+    let finishes = interactor.top_finishes_by_date(date).await?;
     let body = RaceListResponse {
         date,
         races: races
             .iter()
-            .map(|r| RaceSummary::new(r, &post_times, &race_names))
+            .map(|r| RaceSummary::new(r, &post_times, &race_names, &confirmed, &finishes))
             .collect(),
     };
     Ok(HttpResponse::Ok().json(body))

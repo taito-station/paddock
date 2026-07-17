@@ -1091,6 +1091,39 @@ pub trait PadPredictionRepository: Send + Sync {
     ) -> impl Future<Output = Result<Vec<MarkStatRow>>> + Send;
 }
 
+/// レース結果の上位着順 1 行（read 用・#381）。ライブ一覧の着順表示に使う。
+#[derive(Debug, Clone)]
+pub struct FinishEntry {
+    pub position: u32,
+    pub horse_num: u32,
+    pub horse_name: String,
+}
+
+/// レース結果（`results` の着順）の read（#381）。同日取り込み・PDF 取り込みいずれの由来でも、
+/// 「着順が入っているか（結果確定）」「上位着順」「馬番→着順」を read する。書き込み（同日取り込み）は
+/// [`RaceRepository::save_race`] を再利用するため本トレイトは read 専用。
+pub trait RaceResultRepository: Send + Sync {
+    /// 指定日の各レースの結果確定フラグ（`results` に `finishing_position IS NOT NULL` 行が 1 件以上）。
+    /// 確定レースのみを `race_id → true` で返す（未確定はマップに含まれず、呼び出し側は false 既定）。
+    fn find_result_confirmed_by_date(
+        &self,
+        date: NaiveDate,
+    ) -> impl Future<Output = Result<HashMap<RaceId, bool>>> + Send;
+
+    /// 指定日の各レースの上位着順（`finishing_position <= 3`。3 着同着で 4 件以上返りうる＝件数可変）。
+    /// 着順昇順。確定レースのみマップに含まれる。
+    fn find_top_finishes_by_date(
+        &self,
+        date: NaiveDate,
+    ) -> impl Future<Output = Result<HashMap<RaceId, Vec<FinishEntry>>>> + Send;
+
+    /// 指定レースの `馬番 → 着順`（board 用）。着順が入っている馬のみ含む。
+    fn find_finishing_positions(
+        &self,
+        race_id: &RaceId,
+    ) -> impl Future<Output = Result<HashMap<u32, u32>>> + Send;
+}
+
 /// 後方互換のための集約スーパートレイト。全 sub-trait を満たす型に blanket 実装される。
 /// `Send + Sync` は各 sub-trait が既に要求するため、ここでは再列挙しない。
 pub trait Repository:
@@ -1104,6 +1137,7 @@ pub trait Repository:
     + PredictSessionRepository
     + PadPredictionRepository
     + LiveEvRepository
+    + RaceResultRepository
 {
 }
 
@@ -1118,5 +1152,6 @@ impl<T> Repository for T where
         + PredictSessionRepository
         + PadPredictionRepository
         + LiveEvRepository
+        + RaceResultRepository
 {
 }

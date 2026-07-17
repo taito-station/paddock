@@ -7,7 +7,7 @@ use crate::error::Result;
 use crate::interactor::Interactor;
 use crate::pdf_fetcher::PdfFetcher;
 use crate::pdf_parser::PdfParser;
-use crate::repository::{RaceCardRepository, RaceRepository};
+use crate::repository::{FinishEntry, RaceCardRepository, RaceRepository, RaceResultRepository};
 
 impl<R: RaceRepository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
     /// 指定日のレース一覧を race_num 昇順で取得する。
@@ -27,5 +27,26 @@ impl<R: RaceCardRepository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
     /// レース一覧 API が重賞・特別戦名をヘッダに出すために使う。
     pub async fn race_names_by_date(&self, date: NaiveDate) -> Result<HashMap<RaceId, String>> {
         self.repository.find_race_names_by_date(date).await
+    }
+}
+
+impl<R: RaceResultRepository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
+    /// 指定日の各レースの結果確定フラグ（`race_id → true`。確定レースのみ）を返す（#381）。
+    /// ライブ一覧・レース盤で「⚫終」を post_time 推定でなく着順確定で判定するために使う。
+    pub async fn result_confirmed_by_date(&self, date: NaiveDate) -> Result<HashMap<RaceId, bool>> {
+        self.repository.find_result_confirmed_by_date(date).await
+    }
+
+    /// 指定日の各レースの上位着順（`race_id → Vec<FinishEntry>`）を返す（#381）。
+    pub async fn top_finishes_by_date(
+        &self,
+        date: NaiveDate,
+    ) -> Result<HashMap<RaceId, Vec<FinishEntry>>> {
+        self.repository.find_top_finishes_by_date(date).await
+    }
+
+    /// 指定レースの `馬番 → 着順`（board 用）を返す（#381）。
+    pub async fn finishing_positions(&self, race_id: &RaceId) -> Result<HashMap<u32, u32>> {
+        self.repository.find_finishing_positions(race_id).await
     }
 }
