@@ -1,10 +1,6 @@
 import { pct } from "../../lib/format";
-import {
-  type BoardHorse,
-  heatColor,
-  markSymbol,
-  placeOddsLabel,
-} from "../../lib/board";
+import { type BoardHorse, heatColor, markSymbol } from "../../lib/board";
+import { placeBand } from "../../lib/live";
 
 // 全頭横並び盤の 1 馬カラム（#411 で RaceBoard から抽出）。数値密度を保ちつつ、書評のある馬は
 // クリック / Enter / Space で詳細パネルを開閉できる。開閉状態（selectedHorse）と trigger 要素の
@@ -120,7 +116,7 @@ export function HorseCard({
         </div>
         <div>
           <dt>複勝</dt>
-          <dd>{placeOddsLabel(h.place_odds_low, h.place_odds_high)}</dd>
+          <dd>{placeBand(h.place_odds_low, h.place_odds_high)}</dd>
         </div>
         <div>
           <dt>人気</dt>

@@ -7,7 +7,6 @@ import {
   heatColor,
   heatIntensity,
   markSymbol,
-  placeOddsLabel,
   sortByModelRank,
   type BoardHorse,
 } from "./board";
@@ -72,14 +71,6 @@ describe("heatColor", () => {
     const hot = heatColor(0.2, 0.2); // t=1 → hue 30
     expect(cool).toBe("hsl(200, 70%, 26%)");
     expect(hot).toBe("hsl(30, 70%, 46%)");
-  });
-});
-
-describe("placeOddsLabel", () => {
-  it("formats a band or dash when missing", () => {
-    expect(placeOddsLabel(1.6, 2.0)).toBe("1.6-2.0");
-    expect(placeOddsLabel(null, 2.0)).toBe("-");
-    expect(placeOddsLabel(1.6, null)).toBe("-");
   });
 });
 

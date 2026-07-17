@@ -146,11 +146,12 @@ export function RaceBoard() {
     selectedHorse != null
       ? horses.find((x) => x.horse_num === selectedHorse)
       : undefined;
-  // 同じレース番号の他場（スラッグ辞書順で安定ソート）。
+  // 同じレース番号の他場（スラッグ辞書順で安定ソート）。venue slug は ASCII のため、
+  // 他所（dashboard.ts / live.ts の並べ替え）と同じロケール非依存の単純比較で決定性を担保する。
   const siblings = d
     ? (races.data?.races ?? [])
         .filter((r) => r.race_num === d.race_num)
-        .sort((a, b) => a.venue.localeCompare(b.venue))
+        .sort((a, b) => (a.venue < b.venue ? -1 : a.venue > b.venue ? 1 : 0))
     : [];
   // 同じ開催場の各レース番号（1R→12R 昇順）。R 間のトグル移動用。
   const venueRaces = d
