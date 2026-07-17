@@ -1021,3 +1021,68 @@ async fn results_refresh_endpoint_routes_and_ingests(pool: sqlx::PgPool) {
         resp2.status()
     );
 }
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn upsert_results_preserves_races_meta_and_absent_rows(pool: sqlx::PgPool) {
+    // #381 回帰防止: 同日 upsert は save_race と違い races メタ（track_condition/weather）を
+    // NULL 上書きせず、出馬表に無い馬番の既存着順行も消さない（過去日 refresh でのデータ欠損防止）。
+    let repo = PostgresRepository::new(pool.clone());
+    let race_id = RaceId::try_from(RESULTS_RACE_ID).unwrap();
+    let hr = |pos: u32, num: u32, name: &str| HorseResult {
+        finishing_position: Some(FinishingPosition::try_from(pos).unwrap()),
+        status: ResultStatus::Finished,
+        gate_num: GateNum::try_from(num).unwrap(),
+        horse_num: HorseNum::try_from(num).unwrap(),
+        horse_name: HorseName::try_from(name).unwrap(),
+        horse_id: None,
+        jockey: None,
+        trainer: None,
+        time_seconds: None,
+        margin: None,
+        odds: None,
+        horse_weight: None,
+        weight_change: None,
+        weight_carried: None,
+        popularity: None,
+    };
+    // 既存: PDF 由来相当の races 行（3 頭の着順）。
+    let existing = Race {
+        race_id: race_id.clone(),
+        date: date(),
+        venue: Venue::Tokyo,
+        round: 4,
+        day: 1,
+        race_num: 1,
+        surface: Surface::Turf,
+        distance: 1600,
+        track_condition: None,
+        weather: None,
+        results: vec![hr(1, 1, "ウマA"), hr(2, 2, "ウマB"), hr(3, 3, "ウマC")],
+    };
+    repo.save_race(&existing).await.unwrap();
+    // 馬場・天候を後付け（結果ページには載る一方 ResultRow には無い列＝温存対象）。
+    sqlx::query("UPDATE races SET track_condition = 'good', weather = 'sunny' WHERE race_id = $1")
+        .bind(RESULTS_RACE_ID)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    // 同日 upsert を 1 頭分だけで実行（他 2 頭は「今回集合に無い」）。
+    repo.upsert_results(&results_card(None), &[result_row(1, 1)])
+        .await
+        .unwrap();
+
+    // races メタが温存される（NULL 上書きされない）。
+    let (tc, wx): (Option<String>, Option<String>) =
+        sqlx::query_as("SELECT track_condition, weather FROM races WHERE race_id = $1")
+            .bind(RESULTS_RACE_ID)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(tc.as_deref(), Some("good"), "track_condition 温存");
+    assert_eq!(wx.as_deref(), Some("sunny"), "weather 温存");
+
+    // 出馬表に無い馬番の既存着順行が消えない（delete_absent なし）→ 3 頭のまま。
+    let positions = repo.find_finishing_positions(&race_id).await.unwrap();
+    assert_eq!(positions.len(), 3, "既存着順が削除されない");
+}

@@ -26,6 +26,7 @@ mod sql;
 mod standard_times;
 mod trainer_stats;
 mod update_results;
+mod upsert_results;
 
 use std::collections::HashMap;
 
@@ -288,6 +289,16 @@ impl RaceRepository for PostgresRepository {
 }
 
 impl RaceResultRepository for PostgresRepository {
+    async fn upsert_results(
+        &self,
+        card: &RaceCard,
+        rows: &[paddock_use_case::netkeiba_scraper::ResultRow],
+    ) -> UcResult<u64> {
+        upsert_results::upsert_results(&self.pool, card, rows)
+            .await
+            .map_err(Into::into)
+    }
+
     async fn find_result_confirmed_by_date(
         &self,
         date: NaiveDate,

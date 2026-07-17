@@ -44,9 +44,4 @@ impl<R: RaceResultRepository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
     ) -> Result<HashMap<RaceId, Vec<FinishEntry>>> {
         self.repository.find_top_finishes_by_date(date).await
     }
-
-    /// 指定レースの `馬番 → 着順`（board 用）を返す（#381）。
-    pub async fn finishing_positions(&self, race_id: &RaceId) -> Result<HashMap<u32, u32>> {
-        self.repository.find_finishing_positions(race_id).await
-    }
 }

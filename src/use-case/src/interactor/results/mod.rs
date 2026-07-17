@@ -1,12 +1,11 @@
 use std::collections::HashMap;
 
 use chrono::{FixedOffset, NaiveDate, NaiveDateTime, Utc};
-use paddock_domain::{HorseResult, Race, RaceCard, RaceId};
+use paddock_domain::RaceId;
 
 use crate::error::Result;
 use crate::interactor::settle::{RacePayoutOutcome, classify_payouts, settle_and_summarize};
 use crate::netkeiba_race_id::netkeiba_race_id_from_paddock;
-use crate::netkeiba_scraper::ResultRow;
 use crate::repository::{
     PredictSessionRepository, RaceCardRepository, RaceRepository, RaceResultRepository,
 };
@@ -104,21 +103,17 @@ where
             // 着順が 1 件も無い（結果ページ未生成・中止で成績表なし）: 着順を書かず pending 据え置き。
             // 払戻ブロックの有無（Voided/Pending）は精算入力として記録し、全額返還レースは精算に反映する。
             if !rows.is_empty() {
-                let card = match self.repository.find_race_card(race_id).await? {
-                    Some(c) => c,
-                    None => {
-                        // gate_num/horse_name を補完できない（出馬表未取得）。着順を書かず pending。
-                        tracing::warn!(
-                            race_id = race_id.value(),
-                            "race_card が無く gate_num/horse_name を補完できないため着順を書かない"
-                        );
-                        outcome_by_race
-                            .insert(race_id.value().to_string(), classify_payouts(payouts));
-                        continue;
-                    }
+                // gate_num/horse_name の補完に出馬表が要る。無ければ着順を書かず pending。
+                let Some(card) = self.repository.find_race_card(race_id).await? else {
+                    tracing::warn!(
+                        race_id = race_id.value(),
+                        "race_card が無く gate_num/horse_name を補完できないため着順を書かない"
+                    );
+                    outcome_by_race.insert(race_id.value().to_string(), classify_payouts(payouts));
+                    continue;
                 };
-                let ingest = build_race(race, &card, &rows);
-                self.repository.save_race(&ingest).await?;
+                // 破壊的上書き・DELETE をしない専用 upsert（races メタ・他馬の既存着順を温存）。
+                self.repository.upsert_results(&card, &rows).await?;
                 confirmed_race_ids.push(race_id.clone());
             }
 
@@ -196,52 +191,6 @@ where
             newly_confirmed_races,
             confirmed_race_ids,
         })
-    }
-}
-
-/// 出馬表メタ（`race`）＋出馬表エントリ（`card`）由来の gate_num/horse_name で着順行を補完し、
-/// `save_race` に渡す `Race` を組み立てる。card エントリに無い馬番の着順行は落とす（NOT NULL 補完不能）。
-fn build_race(race: &Race, card: &RaceCard, rows: &[ResultRow]) -> Race {
-    let mut results = Vec::with_capacity(rows.len());
-    for row in rows {
-        let Some(entry) = card.entries.iter().find(|e| e.horse_num == row.horse_num) else {
-            tracing::warn!(
-                race_id = race.race_id.value(),
-                horse_num = row.horse_num.value(),
-                "結果の馬番が出馬表に無く gate_num/horse_name を補完できないため着順行を除外"
-            );
-            continue;
-        };
-        results.push(HorseResult {
-            finishing_position: row.finishing_position,
-            status: row.status,
-            gate_num: entry.gate_num,
-            horse_num: row.horse_num,
-            horse_name: entry.horse_name.clone(),
-            horse_id: None,
-            jockey: row.jockey.clone(),
-            trainer: row.trainer.clone(),
-            time_seconds: row.time_seconds,
-            margin: None,
-            odds: row.odds,
-            horse_weight: row.horse_weight,
-            weight_change: row.weight_change,
-            weight_carried: row.weight_carried,
-            popularity: row.popularity,
-        });
-    }
-    Race {
-        race_id: race.race_id.clone(),
-        date: race.date,
-        venue: race.venue,
-        round: race.round,
-        day: race.day,
-        race_num: race.race_num,
-        surface: race.surface,
-        distance: race.distance,
-        track_condition: None,
-        weather: None,
-        results,
     }
 }
 

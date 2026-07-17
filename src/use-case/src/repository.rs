@@ -1099,10 +1099,18 @@ pub struct FinishEntry {
     pub horse_name: String,
 }
 
-/// レース結果（`results` の着順）の read（#381）。同日取り込み・PDF 取り込みいずれの由来でも、
-/// 「着順が入っているか（結果確定）」「上位着順」「馬番→着順」を read する。書き込み（同日取り込み）は
-/// [`RaceRepository::save_race`] を再利用するため本トレイトは read 専用。
+/// レース結果（`results` の着順）の read＋同日 upsert（#381）。「着順が入っているか（結果確定）」
+/// 「上位着順」「馬番→着順」を read し、同日取り込みで着順を upsert する。
 pub trait RaceResultRepository: Send + Sync {
+    /// 同日取り込み: `races` 行を出馬表メタから upsert（FK 担保）し、着順を `results` へ upsert する。
+    /// 値カラムは COALESCE で既存値を温存し、`races` の track_condition/weather や他馬の既存着順を
+    /// 破壊しない（`save_race` の無条件上書き・DELETE と異なる）。upsert した着順行数を返す。
+    fn upsert_results(
+        &self,
+        card: &RaceCard,
+        rows: &[crate::netkeiba_scraper::ResultRow],
+    ) -> impl Future<Output = Result<u64>> + Send;
+
     /// 指定日の各レースの結果確定フラグ（`results` に `finishing_position IS NOT NULL` 行が 1 件以上）。
     /// 確定レースのみを `race_id → true` で返す（未確定はマップに含まれず、呼び出し側は false 既定）。
     fn find_result_confirmed_by_date(
