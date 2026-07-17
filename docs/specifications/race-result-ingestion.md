@@ -34,7 +34,7 @@
    - **`force=true`（手動フォールバック）** のときは post_time gating を無効化し、post_time 未到達/欠損の未確定レースも取得対象にする（確定済みは `force` でもスキップ）。
 2. 各対象レースにつき `race/result.html` を **1 回**取得し、同一 HTML から着順（`parse_race_result` → `Vec<ResultRow>`）と払戻（`parse_race_payouts` → `RacePayouts`）を **両方**パースする。既存の `fetch_race_result` / `fetch_race_payouts` は各々が独立に GET する 2 メソッドのため、**HTML を 1 回取得して両パーサへ渡す新 scraper メソッド**（例 `fetch_race_result_page`）を追加する。
    - 取得失敗（ネット断・BAN 等）・未生成（結果ページ未生成）は当該レースを **pending 据え置き**にして継続（1 レースの失敗で他レースを巻き添えにしない）。既存 `settle_session` の失敗ハンドリングと同方針。
-3. **`races` 行を担保**してから着順を `results` へ **upsert**（後述 `upsert_results`）。`source='netkeiba'`。
+3. **`races` 行を担保**してから着順を `results` へ **upsert**（後述 `upsert_results`）。`races`・`results` とも `source` は **既定の `'pdf'`**（＝実レースのバケット。実装で確定。理由は下記 FK 節）。
 4. **セッションがあれば**、②で取得済みの `RacePayouts` を使い `settle_bet` で各 bet を精算し、payout・収支・回収率を再計算する（冪等・返還優先・全額返還 #131 を踏襲）。セッションが無い日は着順取り込みのみ行う。
 5. `RefreshReport`（`SettleReport` を拡張し、新規確定レース数・確定 `race_id` 一覧を加えた型）を返す。
 
@@ -48,18 +48,18 @@
 
 ```sql
 INSERT INTO results
-  (race_id, finishing_position, gate_num, horse_num, horse_name,
+  (race_id, finishing_position, status, gate_num, horse_num, horse_name,
    jockey, trainer, time_seconds, odds, horse_weight, weight_change,
-   weight_carried, popularity, status, source, horse_id)
+   weight_carried, popularity)                 -- source/horse_id/margin は書かない（DEFAULT/NULL）
 VALUES (...)
 ON CONFLICT (race_id, horse_num) DO UPDATE SET
-  finishing_position = EXCLUDED.finishing_position,
-  status             = EXCLUDED.status,
+  finishing_position = COALESCE(EXCLUDED.finishing_position, results.finishing_position),
+  status             = EXCLUDED.status,        -- netkeiba は常に値を持つため無条件上書き
   jockey             = COALESCE(EXCLUDED.jockey, results.jockey),
   ...  -- 列集合は update_results と同一。パース失敗(NULL)は既存値を温存（COALESCE）
 ```
 
-- **FK `races` の担保**: `results.race_id` は `races(race_id)` への FK。当日フロー（`card/ingest.rs`）は `race_cards`/`horse_entries`/`race_odds` のみ保存し **`races` 行を作らない**（`races` の INSERT は PDF ingest 経路の `save_race` のみ）。よって `upsert_results` の前に `race_cards` から `races` 行を派生 upsert し FK を満たす。
+- **FK `races` の担保 と `source` 値**: `results.race_id` は `races(race_id)` への FK。当日フロー（`card/ingest.rs`）は `race_cards`/`horse_entries`/`race_odds` のみ保存し **`races` 行を作らない**（`races` の INSERT は PDF ingest 経路の `save_race` のみ）。よって `upsert_results` の前に `race_cards` メタから `races` 行を upsert し FK を満たす。この `races`／`results` 行は **`source` を書かず既定の `'pdf'`（実レースのバケット）** とする。`'netkeiba'`（近走由来の合成レース用）を採ると `find_races_by_date` の UNION（`races WHERE source='pdf'` ∪ `races` に無い `race_cards`）から当該レースが漏れて `/api/races` から消えるため。`races` メタ（track_condition/weather）は破壊的上書きせず既存 PDF 値を温存する（過去日を手動 refresh してもデータを消さない・`delete_absent_horse_nums` も呼ばない。`save_race` との差分）。
 - **NOT NULL 補完（常時）**: `results.gate_num` / `results.horse_name` は NOT NULL だが **`ResultRow` に含まれない**（結果ページからは取得しない・フィールド自体が無い）。よって `(race_id, horse_num)` で `race_cards`（出馬表・当日取得済み）から **常に**補完する。`race_cards` が無いレース（出馬表未取得）は補完不能のため当該レースを pending 据え置きにし、着順を書かない。
 - **`horse_id` は NULL 許容**: `results.horse_id`（`TEXT`・netkeiba 馬 ID）は nullable で、`ResultRow` にも含まれないため当日 upsert では **NULL のまま INSERT**（近走リンク用の任意列・PDF 経路でも None）。NOT NULL 補完の対象は `gate_num`/`horse_name` の 2 列のみ。
 - **スキーマ変更なし**: `results` に列は足さない。`result_confirmed` は下記の派生クエリで判定。
