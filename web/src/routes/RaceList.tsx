@@ -179,6 +179,7 @@ export function RaceList() {
   // 全確定で停止。停止条件は useResultsRefresh 側と enabled で二重に担保）。
   useResultsRefresh(date, {
     enabled: hasUnsettledRaces(races.data?.races ?? [], date, now),
+    now,
   });
   const rows = useMemo(
     () => joinRaces(races.data?.races ?? [], liveRaces, boughtRaceIds),

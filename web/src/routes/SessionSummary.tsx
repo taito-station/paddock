@@ -1,15 +1,22 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { recoveryRate, yen } from "../lib/format";
 import { raceListHref } from "../lib/header-date";
+import { hasUnsettledRaces } from "../lib/dashboard";
 import { useResultsRefresh } from "../lib/useResultsRefresh";
 
 export function SessionSummary() {
   const { date = "" } = useParams();
   const qc = useQueryClient();
   const [budget, setBudget] = useState("10000");
+  // 発走済み判定・ポーリング gate 用の現在時刻（30 秒 tick）。
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 30_000);
+    return () => clearInterval(id);
+  }, []);
 
   const session = useQuery({
     queryKey: ["session", date],
@@ -21,6 +28,19 @@ export function SessionSummary() {
       });
       if (response.status === 404) return null;
       if (error) throw new Error("セッションの取得に失敗しました");
+      return data;
+    },
+  });
+
+  // 自動精算ポーリングの gate に使うレース一覧（post_time・result_confirmed）。
+  const races = useQuery({
+    queryKey: ["races", date],
+    enabled: !!date,
+    queryFn: async () => {
+      const { data, error } = await api.GET("/api/races", {
+        params: { query: { date } },
+      });
+      if (error) throw new Error("レース一覧の取得に失敗しました");
       return data;
     },
   });
@@ -50,10 +70,11 @@ export function SessionSummary() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["session", date] }),
   });
 
-  // 結果確定を検知して自動精算する（#381）。未完了セッションの当日のみポーリング（過去日・
-  // 全確定で停止）。手動「精算」ボタンはフォールバックとして残す。
+  // 結果確定を検知して自動精算する（#381）。ライブ一覧と同じ gate（発走済み・未確定が残る間だけ）に
+  // 揃え、発走前の空回りを避ける（過去日・全確定で停止）。手動「精算」ボタンはフォールバックとして残す。
   useResultsRefresh(date, {
-    enabled: !!session.data && !session.data.completed,
+    enabled: hasUnsettledRaces(races.data?.races ?? [], date, now),
+    now,
   });
 
   return (

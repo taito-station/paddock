@@ -14,12 +14,13 @@ import { isPastDate } from "./live";
 // フォールバックとして別途残す。
 export function useResultsRefresh(
   date: string,
-  { enabled }: { enabled: boolean },
+  { enabled, now }: { enabled: boolean; now: Date },
 ): void {
   const qc = useQueryClient();
   useQuery({
     queryKey: ["results-refresh", date],
-    enabled: enabled && !!date && !isPastDate(date, new Date()),
+    // 過去日は常に停止。時刻源は呼び出し側の tick（now）に一元化する。
+    enabled: enabled && !!date && !isPastDate(date, now),
     retry: false,
     // 45 秒間隔。enabled が false になれば react-query が停止する（発火は enabled 中のみ）。
     refetchInterval: 45_000,

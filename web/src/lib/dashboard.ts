@@ -39,9 +39,10 @@ export function outcomeByRace(bets: SummaryBet[]): Map<string, RaceOutcome> {
     const cur = m.get(b.race_id) ?? { stake: 0, payout: 0, hit: false };
     cur.stake += b.stake;
     cur.payout += b.payout;
-    cur.hit = cur.payout > 0;
     m.set(b.race_id, cur);
   }
+  // hit は集計後の総払戻で確定する（1 点でも払戻があれば的中表示）。
+  for (const o of m.values()) o.hit = o.payout > 0;
   return m;
 }
 

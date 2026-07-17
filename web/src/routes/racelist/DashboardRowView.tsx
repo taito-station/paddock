@@ -159,8 +159,9 @@ export function DashboardRowView({
           <Badge kind={badge} />
         </td>
         <td className="live-notes">
-          {/* 確定行の着順（上位）。post_time 推定でなく結果確定で出す（#381）。 */}
-          {finished && finishMaru && (
+          {/* 確定行の着順（上位）。post_time 推定でなく結果確定で出す（#381）。
+              finishMaru は finished のときのみ非空なので、これだけで確定行に限定される。 */}
+          {finishMaru && (
             <span className="live-tag finish-order">着 {finishMaru}</span>
           )}
           {/* 購入済み確定行の的中○/✗・払戻額（session bets の per-race 集計・#381）。 */}
