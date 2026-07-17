@@ -38,6 +38,10 @@ import {
   type VerdictFilter,
 } from "../lib/live";
 import { useSessionQuery, useRacesQuery } from "../lib/queries";
+import {
+  CLOCK_TICK_INTERVAL_MS,
+  RACE_LIST_POLL_INTERVAL_MS,
+} from "../lib/constants";
 import { SortTh } from "./racelist/SortTh";
 import { FilterChip } from "./racelist/FilterChip";
 import { Badge } from "./racelist/Badge";
@@ -92,7 +96,7 @@ export function RaceList() {
   // 発走済み判定・鮮度の相対時刻用の「現在」。30 秒刻みで更新（純粋関数側は now 引数のまま）。
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
-    const id = setInterval(() => setNow(new Date()), 30_000);
+    const id = setInterval(() => setNow(new Date()), CLOCK_TICK_INTERVAL_MS);
     return () => clearInterval(id);
   }, []);
   // 買い行の伝票は既定展開。「ユーザーが畳んだもの」だけ持つ（refetch で状態が飛ばない）。
@@ -124,9 +128,9 @@ export function RaceList() {
       // スイープ開始前（snapshot 未取得・races 0 件）は判定材料が無いので、
       // 過去日でなければポーリングを続けて初回スナップショットを自動で拾う。
       if (!rs || rs.length === 0) {
-        return isPastDate(date, t) ? false : 60_000;
+        return isPastDate(date, t) ? false : RACE_LIST_POLL_INTERVAL_MS;
       }
-      return hasUpcomingRaces(rs, date, t) ? 60_000 : false;
+      return hasUpcomingRaces(rs, date, t) ? RACE_LIST_POLL_INTERVAL_MS : false;
     },
     queryFn: async () => {
       const { data, error } = await api.GET("/api/live/{date}", {
@@ -287,7 +291,7 @@ export function RaceList() {
 
       {races.isError ? (
         // races の確定エラーは live の決着を待たず即表示する。
-        <p className="error">{(races.error as Error).message}</p>
+        <p className="error">{races.error.message}</p>
       ) : races.isPending || live.isPending ? (
         // 列構成が静的 → ライブへジャンプするチラつきを防ぐため、両クエリの決着を待つ
         //（v5 の status は排他なので isPending 中に isError は立たない）。

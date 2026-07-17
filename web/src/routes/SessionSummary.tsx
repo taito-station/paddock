@@ -8,15 +8,19 @@ import { hasUnsettledRaces } from "../lib/dashboard";
 import { useResultsRefresh } from "../lib/useResultsRefresh";
 import { useSessionQuery, useRacesQuery } from "../lib/queries";
 import { isUnitOf } from "../lib/bets";
+import {
+  CLOCK_TICK_INTERVAL_MS,
+  DEFAULT_SESSION_BUDGET,
+} from "../lib/constants";
 
 export function SessionSummary() {
   const { date = "" } = useParams();
   const qc = useQueryClient();
-  const [budget, setBudget] = useState("10000");
+  const [budget, setBudget] = useState(DEFAULT_SESSION_BUDGET);
   // 発走済み判定・ポーリング gate 用の現在時刻（30 秒 tick）。
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
-    const id = setInterval(() => setNow(new Date()), 30_000);
+    const id = setInterval(() => setNow(new Date()), CLOCK_TICK_INTERVAL_MS);
     return () => clearInterval(id);
   }, []);
 
@@ -82,7 +86,7 @@ export function SessionSummary() {
 
       {session.isPending && <p>読み込み中…</p>}
       {session.isError && (
-        <p className="error">{(session.error as Error).message}</p>
+        <p className="error">{session.error.message}</p>
       )}
 
       {session.isSuccess && session.data === null && (
@@ -115,7 +119,7 @@ export function SessionSummary() {
             <span className="error">予算は 1000 円単位で入力してください</span>
           )}
           {create.isError && (
-            <span className="error">{(create.error as Error).message}</span>
+            <span className="error">{create.error.message}</span>
           )}
         </form>
       )}
@@ -166,12 +170,12 @@ export function SessionSummary() {
             </tbody>
           </table>
 
-          <div className="toolbar" style={{ marginTop: "1rem" }}>
+          <div className="toolbar mt-lg">
             <button onClick={() => settle.mutate()} disabled={settle.isPending}>
               確定結果で精算（最新取得）
             </button>
             {settle.isError && (
-              <span className="error">{(settle.error as Error).message}</span>
+              <span className="error">{settle.error.message}</span>
             )}
             {settle.isSuccess && (
               <span className="muted">
@@ -181,7 +185,7 @@ export function SessionSummary() {
             )}
           </div>
 
-          <h3 style={{ marginTop: "1.5rem" }}>買い目明細</h3>
+          <h3 className="mt-2xl">買い目明細</h3>
           {session.data.bets.length === 0 ? (
             <p className="muted">まだ買い目がありません。</p>
           ) : (

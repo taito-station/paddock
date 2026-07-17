@@ -735,3 +735,27 @@ button:disabled {
 .board-view .grid td {
   border-color: var(--border);
 }
+
+/* 執行パネルの賭け金/払戻の数値入力（幅を揃える）。 */
+.amount-input {
+  width: 6rem;
+}
+
+/* ===== 上マージンのユーティリティ（旧インライン style の移設先・#417） =====
+   静的な margin-top だけをクラス化し、インライン style を排する。値は元の
+   インライン指定を寸分違わず踏襲する（見た目不変）。 */
+.mt-sm {
+  margin-top: 0.5rem;
+}
+.mt-md {
+  margin-top: 0.75rem;
+}
+.mt-lg {
+  margin-top: 1rem;
+}
+.mt-xl {
+  margin-top: 1.25rem;
+}
+.mt-2xl {
+  margin-top: 1.5rem;
+}

@@ -236,7 +236,7 @@ export function RaceBoard() {
       )}
 
       {board.isPending && <p>読み込み中…</p>}
-      {board.isError && <p className="error">{(board.error as Error).message}</p>}
+      {board.isError && <p className="error">{board.error.message}</p>}
 
       {d && (
         <>
@@ -327,7 +327,7 @@ export function RaceBoard() {
           />
 
           {/* 買い目＋執行（/recommendations と同経路・相手 top5 不変。#377 で RaceDetail を統合） */}
-          <h3 style={{ marginTop: "1.25rem" }}>買い目</h3>
+          <h3 className="mt-xl">買い目</h3>
           <div className="toolbar">
             <label>
               予算/R{" "}
@@ -369,7 +369,7 @@ export function RaceBoard() {
             refreshing={board.isPlaceholderData}
             cap={cap}
           />
-          <p className="muted" style={{ marginTop: "0.5rem" }}>
+          <p className="muted mt-sm">
             {d.field_size}頭立て。買い目の相手は top5 固定（相手は広げない）。全頭盤で妙味馬・複勝圏馬を手動で拾う。
           </p>
         </>
