@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { recoveryRate, yen } from "../lib/format";
 import { raceListHref } from "../lib/header-date";
 import { hasUnsettledRaces } from "../lib/dashboard";
 import { useResultsRefresh } from "../lib/useResultsRefresh";
+import { useSessionQuery, useRacesQuery } from "../lib/queries";
 import { isUnitOf } from "../lib/bets";
 
 export function SessionSummary() {
@@ -19,32 +20,10 @@ export function SessionSummary() {
     return () => clearInterval(id);
   }, []);
 
-  const session = useQuery({
-    queryKey: ["session", date],
-    enabled: !!date,
-    retry: false,
-    queryFn: async () => {
-      const { data, error, response } = await api.GET("/api/sessions/{date}", {
-        params: { path: { date } },
-      });
-      if (response.status === 404) return null;
-      if (error) throw new Error("セッションの取得に失敗しました");
-      return data;
-    },
-  });
+  const session = useSessionQuery(date);
 
   // 自動精算ポーリングの gate に使うレース一覧（post_time・result_confirmed）。
-  const races = useQuery({
-    queryKey: ["races", date],
-    enabled: !!date,
-    queryFn: async () => {
-      const { data, error } = await api.GET("/api/races", {
-        params: { query: { date } },
-      });
-      if (error) throw new Error("レース一覧の取得に失敗しました");
-      return data;
-    },
-  });
+  const races = useRacesQuery(date);
 
   const create = useMutation({
     mutationFn: async (budgetYen: number) => {

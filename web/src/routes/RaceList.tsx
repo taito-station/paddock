@@ -37,6 +37,7 @@ import {
   type StatusFilter,
   type VerdictFilter,
 } from "../lib/live";
+import { useSessionQuery, useRacesQuery } from "../lib/queries";
 import { SortTh } from "./racelist/SortTh";
 import { FilterChip } from "./racelist/FilterChip";
 import { Badge } from "./racelist/Badge";
@@ -100,34 +101,11 @@ export function RaceList() {
     setCollapsed(new Set());
   }, [date]);
 
-  const races = useQuery({
-    queryKey: ["races", date],
-    // date は todayJst フォールバックで常に非空だが、queryKey の前提を守る防御として残す。
-    enabled: !!date,
-    queryFn: async () => {
-      const { data, error } = await api.GET("/api/races", {
-        params: { query: { date } },
-      });
-      if (error) throw new Error("レース一覧の取得に失敗しました");
-      return data;
-    },
-  });
+  const races = useRacesQuery(date);
 
-  // セッションは未作成だと 404。404 のみ「残高表示なし」に倒し、それ以外の障害は
-  // 握り潰さず投げる（500・ネットワーク断を「未作成」と取り違えないため）。
-  const session = useQuery({
-    queryKey: ["session", date],
-    enabled: !!date,
-    retry: false,
-    queryFn: async () => {
-      const { data, error, response } = await api.GET("/api/sessions/{date}", {
-        params: { path: { date } },
-      });
-      if (response.status === 404) return null;
-      if (error) throw new Error("セッション収支の取得に失敗しました");
-      return data;
-    },
-  });
+  // セッションは未作成だと 404 → null（残高表示なし）。それ以外の障害は握り潰さず投げる
+  // （500・ネットワーク断を「未作成」と取り違えないため）。文言は本画面の表記を保つ。
+  const session = useSessionQuery(date, "セッション収支の取得に失敗しました");
 
   const live = useQuery({
     queryKey: ["live", date],
