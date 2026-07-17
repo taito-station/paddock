@@ -135,6 +135,8 @@ describe("isUnitOf", () => {
     [1000.5, 1000, false], // 非整数
     [100, 100, true],
     [150, 100, false],
+    [100, 0, false], // unit<=0 は誤用として false（n % 0 === NaN 依存にしない）
+    [100, -100, false],
   ])("isUnitOf(%d, %d) === %s", (n, unit, expected) => {
     expect(isUnitOf(n, unit)).toBe(expected);
   });

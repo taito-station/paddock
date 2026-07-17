@@ -88,13 +88,11 @@ export function SessionSummary() {
   // 作成できる。submit と disabled の両方でこの判定を使う（HTML の step はヒントに過ぎず、
   // 1500 等の非 1000 倍数が payload に素通りするのを防ぐ。#412 と方針を揃える・#424）。
   const budgetNum = Number(budget);
-  const budgetValid =
-    Number.isFinite(budgetNum) && budgetNum >= 1000 && isUnitOf(budgetNum, 1000);
+  // 下限（1000 円以上）を満たすか。NaN・非有限は比較が false になり弾かれる。
+  const budgetInRange = budgetNum >= 1000;
+  const budgetValid = budgetInRange && isUnitOf(budgetNum, 1000);
   // 下限は満たすが 1000 円単位でない端数（1500 等）は黙って丸めず明示エラーを出し、入力は残す。
-  const budgetUnitError =
-    Number.isFinite(budgetNum) &&
-    budgetNum >= 1000 &&
-    !isUnitOf(budgetNum, 1000);
+  const budgetUnitError = budgetInRange && !isUnitOf(budgetNum, 1000);
 
   return (
     <section>

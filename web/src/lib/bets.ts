@@ -67,13 +67,15 @@ export function toAmount(v: string): number {
 }
 
 // n が unit 円単位（端数不可）か。金銭ガード（賭け金・予算/R の 100 円単位、セッション総予算の
-// 1000 円単位）に共用する純関数。0 は許容（スキップ相当）。unit は正の整数を想定。
+// 1000 円単位）に共用する純関数。0 は許容（スキップ相当）。unit は正の整数のみ有効
+// （unit<=0 は誤用として false を返す）。
 export function isUnitOf(n: number, unit: number): boolean {
-  return Number.isInteger(n) && n >= 0 && n % unit === 0;
+  return unit > 0 && Number.isInteger(n) && n >= 0 && n % unit === 0;
 }
 
-// 100 円単位（端数不可）か。買い方ルール「馬券は必ず 100 円単位」の判定で、
-// 賭け金・予算に用いる。0 は許容（スキップ相当）。払戻は対象外（10 円単位のため）。
+// 100 円単位（端数不可）か。買い方ルール「馬券は必ず 100 円単位」の判定で、賭け金・レース予算
+// （100 円単位）に用いる。セッション総予算（1000 円単位）は isUnitOf(n, 1000) を直接使う。
+// 0 は許容（スキップ相当）。払戻は対象外（10 円単位のため）。
 export function isUnit100(n: number): boolean {
   return isUnitOf(n, 100);
 }
