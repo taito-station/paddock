@@ -4,9 +4,9 @@
 # DB は compose の postgres サービスへ接続するため bind mount は使わない。
 
 # ---- build stage ----
-# rust:1.96 系イメージ。正確なパッチ版（1.96.0）は COPY した rust-toolchain.toml を
+# rust:1.97 系イメージ。正確なパッチ版（1.97.1）は COPY した rust-toolchain.toml を
 # rustup が強制するため、再現性はイメージのタグではなく rust-toolchain.toml が担保する。
-FROM rust:1.96-slim-bookworm AS builder
+FROM rust:1.97-slim-bookworm AS builder
 # sqlx の tls-native-tls が openssl を要求する。utoipa-swagger-ui の build script は
 # Swagger UI 資産を curl で取得する（https のため CA 証明書も要る）。
 RUN apt-get update && apt-get install -y --no-install-recommends \
