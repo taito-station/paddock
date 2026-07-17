@@ -11,6 +11,7 @@ mod find_race_names_by_date;
 mod find_race_odds;
 mod find_races_by_date;
 mod find_recent_runs;
+mod find_result_reads;
 mod horse_history;
 mod horse_stats;
 mod jockey_stats;
@@ -25,6 +26,7 @@ mod sql;
 mod standard_times;
 mod trainer_stats;
 mod update_results;
+mod upsert_results;
 
 use std::collections::HashMap;
 
@@ -33,6 +35,7 @@ use paddock_domain::{
     HorseId, HorseName, JockeyFormRun, JockeyName, PadPrediction, Race, RaceCard, RaceId, RaceOdds,
     RecentRun, StandardTimes, Surface, TrainerName, Venue,
 };
+use paddock_use_case::FinishEntry;
 use paddock_use_case::Result as UcResult;
 use paddock_use_case::repository::{
     ConditionalGateStatsRow, CourseStatsRow, FetchDownload, FetchFailure, FetchRecord,
@@ -41,7 +44,7 @@ use paddock_use_case::repository::{
     MarkStatsFilter, NameMatchRepository, OddsRepository, PadPredictionRepository,
     PredictBetRecord, PredictRaceConditionRecord, PredictSessionRecord, PredictSessionRepository,
     PredictionFilter, PredictionSearchResult, RaceCardRepository, RaceOddsRecord, RaceRepository,
-    StatsRepository, TrainerStatsRow,
+    RaceResultRepository, StatsRepository, TrainerStatsRow,
 };
 
 use crate::pool::PgPool;
@@ -280,6 +283,42 @@ impl RaceRepository for PostgresRepository {
 
     async fn find_races_by_date(&self, date: NaiveDate) -> UcResult<Vec<Race>> {
         find_races_by_date::find_races_by_date(&self.pool, date)
+            .await
+            .map_err(Into::into)
+    }
+}
+
+impl RaceResultRepository for PostgresRepository {
+    async fn upsert_results(
+        &self,
+        card: &RaceCard,
+        rows: &[paddock_use_case::netkeiba_scraper::ResultRow],
+    ) -> UcResult<u64> {
+        upsert_results::upsert_results(&self.pool, card, rows)
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn find_result_confirmed_by_date(
+        &self,
+        date: NaiveDate,
+    ) -> UcResult<HashMap<RaceId, bool>> {
+        find_result_reads::find_result_confirmed_by_date(&self.pool, date)
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn find_top_finishes_by_date(
+        &self,
+        date: NaiveDate,
+    ) -> UcResult<HashMap<RaceId, Vec<FinishEntry>>> {
+        find_result_reads::find_top_finishes_by_date(&self.pool, date)
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn find_finishing_positions(&self, race_id: &RaceId) -> UcResult<HashMap<u32, u32>> {
+        find_result_reads::find_finishing_positions(&self.pool, race_id)
             .await
             .map_err(Into::into)
     }

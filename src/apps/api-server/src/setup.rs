@@ -1,7 +1,7 @@
 use anyhow::Context;
 use netkeiba_scraper::UreqNetkeibaScraper;
 use paddock_config::Config;
-use paddock_use_case::{Interactor, NoopFetcher, NoopParser, OddsInteractor, SettleInteractor};
+use paddock_use_case::{Interactor, NoopFetcher, NoopParser, OddsInteractor, ResultsInteractor};
 use rdb_gateway::{PostgresRepository, pool};
 
 /// api-server が DI で組み立てる Interactor の具象型。read 専用 API で PDF は扱わないため、
@@ -9,19 +9,19 @@ use rdb_gateway::{PostgresRepository, pool};
 pub type ApiInteractor = Interactor<PostgresRepository, NoopParser, NoopFetcher>;
 /// オッズ read-through 取得用（#51, odds:refresh）。
 pub type ApiOddsInteractor = OddsInteractor<UreqNetkeibaScraper, PostgresRepository>;
-/// 確定払戻の自動精算用（#40, results:refresh）。
-pub type ApiSettleInteractor = SettleInteractor<UreqNetkeibaScraper, PostgresRepository>;
+/// 同日結果取り込み＋自動精算用（#381, results:refresh）。`UreqNetkeibaScraper` が `ResultPageFetcher`。
+pub type ApiResultsInteractor = ResultsInteractor<UreqNetkeibaScraper, PostgresRepository>;
 
 pub struct Setup {
     pub interactor: ApiInteractor,
     pub odds: ApiOddsInteractor,
-    pub settle: ApiSettleInteractor,
+    pub results: ApiResultsInteractor,
     /// bind アドレス（`host:port`）。
     pub server_addr: String,
 }
 
 /// ロガー初期化 → Postgres プール → 各 Interactor を組み立てる。
-/// プールは sqlx の Arc ベースで安価に clone でき、read/odds/settle で共有する（predict と同流儀）。
+/// プールは sqlx の Arc ベースで安価に clone でき、read/odds/results で共有する（predict と同流儀）。
 pub async fn build() -> anyhow::Result<Setup> {
     let config = Config::from_env().context("load config")?;
     config.init_tracing();
@@ -34,7 +34,7 @@ pub async fn build() -> anyhow::Result<Setup> {
         UreqNetkeibaScraper::new(),
         PostgresRepository::new(pool.clone()),
     );
-    let settle = SettleInteractor::new(
+    let results = ResultsInteractor::new(
         UreqNetkeibaScraper::new(),
         PostgresRepository::new(pool.clone()),
     );
@@ -42,7 +42,7 @@ pub async fn build() -> anyhow::Result<Setup> {
     Ok(Setup {
         interactor,
         odds,
-        settle,
+        results,
         server_addr: config.paddock_server_addr,
     })
 }

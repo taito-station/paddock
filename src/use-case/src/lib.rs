@@ -9,6 +9,7 @@ pub mod payout_fetcher;
 pub mod pdf_fetcher;
 pub mod pdf_parser;
 pub mod repository;
+pub mod result_page_fetcher;
 
 pub use dto::horse_history::fetch::FetchHorseHistoryResponse;
 pub use entry_parser::EntryParser;
@@ -21,6 +22,7 @@ pub use interactor::live::{LiveFlip, LiveRaceView, LiveSummary, LiveView};
 pub use interactor::odds::OddsInteractor;
 pub use interactor::race::board::{BoardHorse, Confusion, RaceBoard};
 pub use interactor::race::predict::PredictionViews;
+pub use interactor::results::{RefreshReport, ResultsInteractor};
 pub use interactor::settle::{SettleInteractor, SettleReport};
 pub use netkeiba_race_id::{
     build_race_ids, netkeiba_race_id_from_paddock, paddock_race_id_from_netkeiba,
@@ -34,11 +36,12 @@ pub use payout_fetcher::PayoutFetcher;
 pub use pdf_fetcher::{FetchProbe, NoopFetcher, PdfFetcher};
 pub use pdf_parser::{NoopParser, PdfParser};
 pub use repository::{
-    CourseStatsRow, FetchDownload, FetchFailure, FetchRecord, FetchStatus, GroupStat,
+    CourseStatsRow, FetchDownload, FetchFailure, FetchRecord, FetchStatus, FinishEntry, GroupStat,
     HorseStatsRow, JockeyStatsRow, MarkStatRow, MarkStatsFilter, OddsRow, PredictBetRecord,
     PredictRaceConditionRecord, PredictSessionRecord, PredictionFilter, PredictionSearchResult,
-    PredictionSummaryRow, RaceOddsRecord, Repository,
+    PredictionSummaryRow, RaceOddsRecord, RaceResultRepository, Repository,
 };
+pub use result_page_fetcher::ResultPageFetcher;
 
 /// `--trend-n` に指定できる最大値（= TREND_WEIGHTS の要素数）。
 /// backtest CLI バリデーションと TREND_WEIGHTS の要素数を一致させるために参照する。

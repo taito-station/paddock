@@ -39,10 +39,17 @@ where
 {
     let date = parse_date(&path.into_inner())?;
     let view = interactor.find_live_by_date(date).await?;
+    // 結果確定フラグ（#381）: 「⚫終」を post_time 推定でなく着順確定で判定するため race_id で引けるようにする。
+    let confirmed: std::collections::HashMap<String, bool> = interactor
+        .result_confirmed_by_date(date)
+        .await?
+        .into_iter()
+        .map(|(k, v)| (k.value().to_string(), v))
+        .collect();
     // 鮮度較正用のサーバ現在時刻（#382）。captured_at と同じ UTC rfc3339（秒精度）で載せる。
     let server_now = Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true);
     // slip 伝票 JSON の復元失敗は永続化側の不整合。詳細はログにのみ出し 500 に倒す。
-    let body = LiveResponse::from_view(view, server_now)
+    let body = LiveResponse::from_view(view, server_now, &confirmed)
         .map_err(|e| Error::Internal(format!("slip 伝票の復元に失敗しました: {e}")))?;
     Ok(HttpResponse::Ok().json(body))
 }

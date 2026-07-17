@@ -12,12 +12,15 @@ use api_server::app::configure_routes;
 use netkeiba_scraper::UreqNetkeibaScraper;
 use paddock_domain::{
     FinishingPosition, GateNum, HorseEntry, HorseName, HorseNum, HorseResult, JockeyName, Race,
-    RaceCard, RaceId, ResultStatus, Surface, Venue,
+    RaceCard, RaceId, RacePayouts, ResultStatus, Surface, Venue,
 };
+use paddock_use_case::netkeiba_scraper::ResultRow;
 use paddock_use_case::repository::{
-    OddsRepository, OddsRow, RaceCardRepository, RaceOddsRecord, RaceRepository,
+    OddsRepository, OddsRow, PredictBetRecord, PredictSessionRecord, PredictSessionRepository,
+    RaceCardRepository, RaceOddsRecord, RaceRepository, RaceResultRepository,
 };
-use paddock_use_case::{Interactor, NoopFetcher, NoopParser};
+use paddock_use_case::result_page_fetcher::ResultPageFetcher;
+use paddock_use_case::{Interactor, NoopFetcher, NoopParser, ResultsInteractor};
 use rdb_gateway::PostgresRepository;
 
 type Repo = PostgresRepository;
@@ -719,4 +722,367 @@ async fn extraction_error_returns_error_body(pool: sqlx::PgPool) {
     assert_eq!(resp.status().as_u16(), 400);
     let json = body_json(resp).await;
     assert_eq!(json["error"]["code"], "bad_request");
+}
+
+// --- #381 レース結果の同日取り込み・API 公開 -----------------------------------
+
+/// 着順付き Race（`results` を seed）。finishing_position 1..=3 を horse_num 1..=3 に割り当てる。
+fn sample_race_with_results() -> Race {
+    let hr = |pos: u32, num: u32, name: &str| HorseResult {
+        finishing_position: Some(FinishingPosition::try_from(pos).unwrap()),
+        status: ResultStatus::Finished,
+        gate_num: GateNum::try_from(num).unwrap(),
+        horse_num: HorseNum::try_from(num).unwrap(),
+        horse_name: HorseName::try_from(name).unwrap(),
+        horse_id: None,
+        jockey: None,
+        trainer: None,
+        time_seconds: None,
+        margin: None,
+        odds: None,
+        horse_weight: None,
+        weight_change: None,
+        weight_carried: None,
+        popularity: None,
+    };
+    Race {
+        results: vec![hr(1, 1, "ウマA"), hr(2, 2, "ウマB"), hr(3, 3, "ウマC")],
+        ..sample_race()
+    }
+}
+
+/// 結果ページ取得のフェイク（着順 rows ＋ 確定払戻を canned で返す）。id は無視する（テストは 1 レース）。
+struct FakeResultPage {
+    rows: Vec<ResultRow>,
+    payouts: RacePayouts,
+}
+
+impl ResultPageFetcher for FakeResultPage {
+    fn fetch_race_result_page(
+        &self,
+        _netkeiba_race_id: &str,
+    ) -> paddock_use_case::Result<(Vec<ResultRow>, RacePayouts)> {
+        Ok((self.rows.clone(), self.payouts.clone()))
+    }
+}
+
+/// refresh 系テスト用 race_id。`netkeiba_race_id_from_paddock` が変換できる形式（末尾 `{num}R`）。
+/// （読み取り系テストの `RACE_ID`＝`...-R1` は RaceId としては有効だが netkeiba 変換不可のため別立て。）
+const RESULTS_RACE_ID: &str = "2026-4-tokyo-1-1R";
+
+/// refresh 系テスト用の出馬表（`RESULTS_RACE_ID`・出走 3 頭）。`post_time` は引数で差し替える。
+fn results_card(post_time: Option<chrono::NaiveTime>) -> RaceCard {
+    RaceCard {
+        race_id: RaceId::try_from(RESULTS_RACE_ID).unwrap(),
+        date: date(),
+        post_time,
+        venue: Venue::Tokyo,
+        round: 4,
+        day: 1,
+        race_num: 1,
+        surface: Surface::Turf,
+        distance: 1600,
+        race_class: None,
+        race_name: None,
+        entries: vec![
+            entry(1, 1, "ウマA"),
+            entry(2, 2, "ウマB"),
+            entry(3, 3, "ウマC"),
+        ],
+    }
+}
+
+fn result_row(num: u32, pos: u32) -> ResultRow {
+    ResultRow {
+        horse_num: HorseNum::try_from(num).unwrap(),
+        finishing_position: Some(FinishingPosition::try_from(pos).unwrap()),
+        status: ResultStatus::Finished,
+        jockey: None,
+        trainer: None,
+        time_seconds: None,
+        odds: None,
+        horse_weight: None,
+        weight_change: None,
+        weight_carried: None,
+        popularity: None,
+    }
+}
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn list_races_exposes_result_confirmed_and_finish_order(pool: sqlx::PgPool) {
+    // #381: 着順が入っていれば result_confirmed=true・finish_order に上位着順が出る。
+    PostgresRepository::new(pool.clone())
+        .save_race(&sample_race_with_results())
+        .await
+        .unwrap();
+    let app = build_service!(pool);
+
+    let req = test::TestRequest::get()
+        .uri("/api/races?date=2026-03-28")
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert!(resp.status().is_success(), "status: {}", resp.status());
+    let json = body_json(resp).await;
+    let race = &json["races"][0];
+    assert_eq!(race["result_confirmed"], true);
+    let finish = race["finish_order"].as_array().unwrap();
+    assert_eq!(finish.len(), 3);
+    assert_eq!(finish[0]["position"], 1);
+    assert_eq!(finish[0]["horse_num"], 1);
+    assert_eq!(finish[0]["horse_name"], "ウマA");
+}
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn list_races_result_confirmed_false_without_results(pool: sqlx::PgPool) {
+    // 着順が無いレース（出馬表のみ）は result_confirmed=false・finish_order 空。
+    PostgresRepository::new(pool.clone())
+        .save_race_card(&sample_card())
+        .await
+        .unwrap();
+    let app = build_service!(pool);
+
+    let req = test::TestRequest::get()
+        .uri("/api/races?date=2026-03-28")
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    let json = body_json(resp).await;
+    let race = &json["races"][0];
+    assert_eq!(race["result_confirmed"], false);
+    assert_eq!(race["finish_order"].as_array().unwrap().len(), 0);
+}
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn board_exposes_finishing_position_and_result_confirmed(pool: sqlx::PgPool) {
+    // #381: 盤の各馬に確定着順・盤に result_confirmed が出る（出馬表＋着順を seed）。
+    let repo = PostgresRepository::new(pool.clone());
+    repo.save_race_card(&sample_card()).await.unwrap();
+    repo.save_race(&sample_race_with_results()).await.unwrap();
+    let app = build_service!(pool);
+
+    let req = test::TestRequest::get()
+        .uri(&format!("/api/races/{RACE_ID}/board"))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert!(resp.status().is_success(), "status: {}", resp.status());
+    let json = body_json(resp).await;
+    assert_eq!(json["result_confirmed"], true);
+    let horses = json["horses"].as_array().unwrap();
+    // 各馬に finishing_position が付く（horse_num == finishing_position で seed）。
+    for h in horses {
+        let num = h["horse_num"].as_u64().unwrap();
+        assert_eq!(
+            h["finishing_position"].as_u64().unwrap(),
+            num,
+            "horse {num} finishing_position"
+        );
+    }
+}
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn results_interactor_ingests_and_settles(pool: sqlx::PgPool) {
+    // #381: 同日取り込み＋自動精算のエンドツーエンド（実 PostgresRepository ＋ フェイク結果取得）。
+    let repo = PostgresRepository::new(pool.clone());
+    // 出馬表（発走時刻は過去日 2026-03-28 の 10:00 → 発走済み扱い）。
+    repo.save_race_card(&results_card(Some(
+        chrono::NaiveTime::from_hms_opt(10, 0, 0).unwrap(),
+    )))
+    .await
+    .unwrap();
+    // セッション＋単勝①の買い目（stake 1000）。
+    let race_id = RaceId::try_from(RESULTS_RACE_ID).unwrap();
+    let session = PredictSessionRecord {
+        date: date(),
+        budget: 10000,
+        balance: 9000,
+        total_bet: 1000,
+        total_payout: 0,
+        completed: false,
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+    };
+    repo.save_predict_session(&session).await.unwrap();
+    let bets = vec![PredictBetRecord {
+        race_id: race_id.clone(),
+        bet_type: "win".to_string(),
+        combination: "1".to_string(),
+        stake: 1000,
+        payout: 0,
+        ev: 1.5,
+    }];
+    repo.save_race_outcome(&session, &race_id, &bets)
+        .await
+        .unwrap();
+
+    // フェイク: ①が1着、単勝①の払戻 250（＝2.5倍）。
+    let rows = vec![result_row(1, 1), result_row(2, 2), result_row(3, 3)];
+    let mut payouts = RacePayouts::empty(race_id.clone());
+    payouts.insert("win", "1", 250);
+    let interactor = ResultsInteractor::new(
+        FakeResultPage { rows, payouts },
+        PostgresRepository::new(pool.clone()),
+    );
+
+    let report = interactor.refresh(date(), false).await.unwrap();
+    assert_eq!(report.newly_confirmed_races, 1);
+    assert_eq!(report.settled_races, 1);
+    assert_eq!(report.pending_races, 0);
+    // 単勝 1000/100*250 = 2500。
+    assert_eq!(report.total_payout, 2500);
+    assert_eq!(report.balance, 10000 - 1000 + 2500);
+
+    // 着順が results に入り、確定フラグが立つ。
+    let confirmed = repo.find_result_confirmed_by_date(date()).await.unwrap();
+    assert_eq!(confirmed.get(&race_id), Some(&true));
+    let positions = repo.find_finishing_positions(&race_id).await.unwrap();
+    assert_eq!(positions.get(&1), Some(&1));
+
+    // 冪等: 2 回目は確定済みで netkeiba を叩かず、集計は同値・新規確定 0。
+    let report2 = interactor.refresh(date(), false).await.unwrap();
+    assert_eq!(report2.newly_confirmed_races, 0);
+    assert_eq!(report2.settled_races, 1, "AlreadySettled は settled に算入");
+    assert_eq!(report2.total_payout, 2500);
+    assert_eq!(report2.balance, 10000 - 1000 + 2500);
+}
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn results_interactor_skips_post_time_missing_without_force(pool: sqlx::PgPool) {
+    // post_time 未取得は「発走済みと断定しない」（#391）→ force=false で対象外、force=true で救済取り込み。
+    let repo = PostgresRepository::new(pool.clone());
+    repo.save_race_card(&results_card(None)).await.unwrap();
+    let race_id = RaceId::try_from(RESULTS_RACE_ID).unwrap();
+    let rows = vec![result_row(1, 1), result_row(2, 2), result_row(3, 3)];
+    let payouts = RacePayouts::empty(race_id.clone());
+    let interactor = ResultsInteractor::new(
+        FakeResultPage { rows, payouts },
+        PostgresRepository::new(pool.clone()),
+    );
+
+    // force=false: post_time 欠損は対象外 → 未確定のまま。
+    let report = interactor.refresh(date(), false).await.unwrap();
+    assert_eq!(report.newly_confirmed_races, 0);
+    assert!(
+        !repo
+            .find_result_confirmed_by_date(date())
+            .await
+            .unwrap()
+            .contains_key(&race_id)
+    );
+
+    // force=true: gating 緩和で取り込む。
+    let report2 = interactor.refresh(date(), true).await.unwrap();
+    assert_eq!(report2.newly_confirmed_races, 1);
+}
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn results_refresh_endpoint_routes_and_ingests(pool: sqlx::PgPool) {
+    // HTTP レベルで `POST /api/results/{date}:refresh`（混在セグメント）の経路解決＋レスポンスを検証。
+    // フェイク結果取得を注入した ResultsInteractor を app_data に載せる。
+    let repo = PostgresRepository::new(pool.clone());
+    repo.save_race_card(&results_card(Some(
+        chrono::NaiveTime::from_hms_opt(10, 0, 0).unwrap(),
+    )))
+    .await
+    .unwrap();
+
+    let main = web::Data::new(Interactor::new(
+        PostgresRepository::new(pool.clone()),
+        NoopParser,
+        NoopFetcher,
+    ));
+    let rows = vec![result_row(1, 1), result_row(2, 2), result_row(3, 3)];
+    let payouts = RacePayouts::empty(RaceId::try_from(RESULTS_RACE_ID).unwrap());
+    let results = web::Data::new(ResultsInteractor::new(
+        FakeResultPage { rows, payouts },
+        PostgresRepository::new(pool.clone()),
+    ));
+    let app = test::init_service(App::new().app_data(main).app_data(results).configure(
+        configure_routes::<Repo, NoopParser, NoopFetcher, UreqNetkeibaScraper, FakeResultPage>,
+    ))
+    .await;
+
+    // 新エンドポイント（既定 force=false・post_time 過去で発走済み）。
+    let req = test::TestRequest::post()
+        .uri("/api/results/2026-03-28:refresh")
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert!(resp.status().is_success(), "status: {}", resp.status());
+    let json = body_json(resp).await;
+    assert_eq!(json["newly_confirmed_races"], 1);
+    assert_eq!(json["confirmed_race_ids"][0], RESULTS_RACE_ID);
+
+    // エイリアス（/sessions/{date}/results:refresh・force=true 委譲）も経路解決する。
+    let req2 = test::TestRequest::post()
+        .uri("/api/sessions/2026-03-28/results:refresh")
+        .to_request();
+    let resp2 = test::call_service(&app, req2).await;
+    assert!(
+        resp2.status().is_success(),
+        "alias status: {}",
+        resp2.status()
+    );
+}
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn upsert_results_preserves_races_meta_and_absent_rows(pool: sqlx::PgPool) {
+    // #381 回帰防止: 同日 upsert は save_race と違い races メタ（track_condition/weather）を
+    // NULL 上書きせず、出馬表に無い馬番の既存着順行も消さない（過去日 refresh でのデータ欠損防止）。
+    let repo = PostgresRepository::new(pool.clone());
+    let race_id = RaceId::try_from(RESULTS_RACE_ID).unwrap();
+    let hr = |pos: u32, num: u32, name: &str| HorseResult {
+        finishing_position: Some(FinishingPosition::try_from(pos).unwrap()),
+        status: ResultStatus::Finished,
+        gate_num: GateNum::try_from(num).unwrap(),
+        horse_num: HorseNum::try_from(num).unwrap(),
+        horse_name: HorseName::try_from(name).unwrap(),
+        horse_id: None,
+        jockey: None,
+        trainer: None,
+        time_seconds: None,
+        margin: None,
+        odds: None,
+        horse_weight: None,
+        weight_change: None,
+        weight_carried: None,
+        popularity: None,
+    };
+    // 既存: PDF 由来相当の races 行（3 頭の着順）。
+    let existing = Race {
+        race_id: race_id.clone(),
+        date: date(),
+        venue: Venue::Tokyo,
+        round: 4,
+        day: 1,
+        race_num: 1,
+        surface: Surface::Turf,
+        distance: 1600,
+        track_condition: None,
+        weather: None,
+        results: vec![hr(1, 1, "ウマA"), hr(2, 2, "ウマB"), hr(3, 3, "ウマC")],
+    };
+    repo.save_race(&existing).await.unwrap();
+    // 馬場・天候を後付け（結果ページには載る一方 ResultRow には無い列＝温存対象）。
+    sqlx::query("UPDATE races SET track_condition = 'good', weather = 'sunny' WHERE race_id = $1")
+        .bind(RESULTS_RACE_ID)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    // 同日 upsert を 1 頭分だけで実行（他 2 頭は「今回集合に無い」）。
+    repo.upsert_results(&results_card(None), &[result_row(1, 1)])
+        .await
+        .unwrap();
+
+    // races メタが温存される（NULL 上書きされない）。
+    let (tc, wx): (Option<String>, Option<String>) =
+        sqlx::query_as("SELECT track_condition, weather FROM races WHERE race_id = $1")
+            .bind(RESULTS_RACE_ID)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(tc.as_deref(), Some("good"), "track_condition 温存");
+    assert_eq!(wx.as_deref(), Some("sunny"), "weather 温存");
+
+    // 出馬表に無い馬番の既存着順行が消えない（delete_absent なし）→ 3 頭のまま。
+    let positions = repo.find_finishing_positions(&race_id).await.unwrap();
+    assert_eq!(positions.len(), 3, "既存着順が削除されない");
 }

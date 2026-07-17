@@ -15,13 +15,14 @@ use crate::schema::prediction::{
     PredictionSummarySchema,
 };
 use crate::schema::race::{
-    BoardHorseSchema, ConfusionSchema, HorseEntrySchema, HorseProbabilitySchema,
+    BoardHorseSchema, ConfusionSchema, FinishEntrySchema, HorseEntrySchema, HorseProbabilitySchema,
     PredictionResponse, RaceBoardResponse, RaceCardResponse, RaceListResponse, RaceSummary,
     RecommendationBet, RecommendationResponse,
 };
+use crate::schema::results::RefreshReportResponse;
 use crate::schema::session::{
     BetInput, CreateSessionRequest, OddsRefreshResponse, RecordOutcomeRequest,
-    SessionSummaryResponse, SettleReportResponse, SummaryBet,
+    SessionSummaryResponse, SummaryBet,
 };
 
 /// paddock REST API（read + session write, #33 / #53）の OpenAPI ドキュメント。
@@ -55,7 +56,8 @@ use crate::schema::session::{
         handler::session::get_session_summary,
         handler::session::record_outcome,
         handler::session::odds_refresh,
-        handler::session::results_refresh,
+        handler::results::refresh,
+        handler::results::session_alias_refresh,
     ),
     components(schemas(
         RaceSummary,
@@ -69,6 +71,7 @@ use crate::schema::session::{
         ConfusionSchema,
         BoardHorseSchema,
         RaceBoardResponse,
+        FinishEntrySchema,
         GroupStatSchema,
         HorseStatsResponse,
         CourseStatsResponse,
@@ -95,7 +98,7 @@ use crate::schema::session::{
         SummaryBet,
         SessionSummaryResponse,
         OddsRefreshResponse,
-        SettleReportResponse,
+        RefreshReportResponse,
         ErrorBody,
         ErrorDetail,
     )),
@@ -104,6 +107,7 @@ use crate::schema::session::{
         (name = "analyze", description = "馬 / 騎手 / 調教師 / コースの成績統計"),
         (name = "predictions", description = "予想の横断検索 / 個別取得 / 印別的中率集計"),
         (name = "sessions", description = "予想セッション（作成 / 収支 / 賭け金・払戻記録 / オッズ・結果更新）"),
+        (name = "results", description = "レース結果の同日取り込み＋自動精算（#381）"),
         (name = "live", description = "ライブEV買い目（今これを買え）"),
     )
 )]

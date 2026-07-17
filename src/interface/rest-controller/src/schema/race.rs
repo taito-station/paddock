@@ -7,7 +7,7 @@ use utoipa::ToSchema;
 use paddock_domain::{
     BetCombination, HorseEntry, HorseProbability, Portfolio, Race, RaceCard, RaceId,
 };
-use paddock_use_case::RaceBoard;
+use paddock_use_case::{FinishEntry, RaceBoard};
 
 /// レース一覧の 1 要素（出走前の諸元のみ。results は含まない）。
 #[derive(Debug, Serialize, ToSchema)]
@@ -29,14 +29,31 @@ pub struct RaceSummary {
     pub post_time: Option<String>,
     /// 表示用レース名（race_cards 由来。重賞・特別戦名。未保存/PDF 経路なら `null`。#389）。
     pub race_name: Option<String>,
+    /// 結果確定フラグ（#381。`results` に着順ありの行が 1 件以上）。web の「⚫終」判定を post_time
+    /// 推定でなく着順確定で行うための一次ソース。未確定・未取得は false。
+    pub result_confirmed: bool,
+    /// 上位着順（#381。`finishing_position <= 3`・着順昇順。3 着同着で 4 件以上ありうる＝件数可変）。
+    /// 未確定レースは空配列。
+    pub finish_order: Vec<FinishEntrySchema>,
+}
+
+/// レース結果の上位着順 1 行（#381）。ライブ一覧の着順表示に使う。
+#[derive(Debug, Serialize, ToSchema)]
+pub struct FinishEntrySchema {
+    /// 着順（1..）。3 着同着なら同じ position が複数行。
+    pub position: u32,
+    pub horse_num: u32,
+    pub horse_name: String,
 }
 
 impl RaceSummary {
-    /// レース諸元＋発走時刻・レース名（`race_id → …` マップから引き当て）で組み立てる。
+    /// レース諸元＋発走時刻・レース名・結果確定/上位着順（`race_id → …` マップから引き当て）で組み立てる。
     pub fn new(
         r: &Race,
         post_times: &HashMap<RaceId, NaiveTime>,
         race_names: &HashMap<RaceId, String>,
+        confirmed: &HashMap<RaceId, bool>,
+        finishes: &HashMap<RaceId, Vec<FinishEntry>>,
     ) -> Self {
         Self {
             race_id: r.race_id.value().to_string(),
@@ -49,6 +66,19 @@ impl RaceSummary {
                 .get(&r.race_id)
                 .map(|t| t.format("%H:%M").to_string()),
             race_name: race_names.get(&r.race_id).cloned(),
+            result_confirmed: confirmed.get(&r.race_id).copied().unwrap_or(false),
+            finish_order: finishes
+                .get(&r.race_id)
+                .map(|v| {
+                    v.iter()
+                        .map(|f| FinishEntrySchema {
+                            position: f.position,
+                            horse_num: f.horse_num,
+                            horse_name: f.horse_name.clone(),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
         }
     }
 }
@@ -284,6 +314,8 @@ pub struct BoardHorseSchema {
     pub is_overlay: bool,
     /// 乖離馬（モデル上位×市場人気低＝妙味・ワイドボックス候補）。
     pub is_value: bool,
+    /// 確定着順（#381。`results` 由来。未確定・除外/中止で着順なしは `null`）。
+    pub finishing_position: Option<u32>,
     /// 馬書評の一行寸評（人手優先・無ければルールベース生成, #348）。特筆材料なしは `null`。
     pub comment: Option<String>,
     /// 展開パネル用の根拠 bullet（条件別 factor・枠 lift・近走・前走・斤量）。空配列＝根拠情報なし。
@@ -329,6 +361,8 @@ pub struct RaceBoardResponse {
     pub confusion: ConfusionSchema,
     /// レース書評（混戦度・◎の狙いどころ・妙味）。人手優先・無ければルールベース生成（#348）。`null` 可。
     pub race_comment: Option<String>,
+    /// 結果確定フラグ（#381。`results` に着順ありの行が 1 件以上）。web の「⚫終」判定に使う。
+    pub result_confirmed: bool,
     pub horses: Vec<BoardHorseSchema>,
 }
 
@@ -385,6 +419,7 @@ impl From<RaceBoard> for RaceBoardResponse {
                 qualifying_count: b.confusion.qualifying_count,
             },
             race_comment: b.race_comment,
+            result_confirmed: b.result_confirmed,
             horses: b
                 .horses
                 .into_iter()
@@ -408,6 +443,7 @@ impl From<RaceBoard> for RaceBoardResponse {
                     mark: h.mark,
                     is_overlay: h.is_overlay,
                     is_value: h.is_value,
+                    finishing_position: h.finishing_position,
                     comment: h.comment,
                     detail_lines: h.detail_lines,
                 })

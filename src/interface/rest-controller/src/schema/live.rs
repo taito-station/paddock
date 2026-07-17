@@ -63,6 +63,9 @@ pub struct LiveRaceViewSchema {
     pub axis_place_odds_high: Option<f64>,
     /// 一部買い目のオッズ欠落（ROI 過小評価の可能性）。
     pub odds_missing: bool,
+    /// 結果確定フラグ（#381。`results` に着順ありの行が 1 件以上）。web の「⚫終」判定を post_time
+    /// 推定でなく着順確定で行う。未確定は false。
+    pub result_confirmed: bool,
     pub slip: SlipView,
     pub flip: LiveFlip,
 }
@@ -114,11 +117,18 @@ impl LiveResponse {
     /// なので `Err` を返し、handler が 500 に倒す）。
     /// `server_now`（rfc3339 UTC）は handler がレスポンス生成時の壁時計から注入する（#382）。
     /// view は DB 由来データなので現在時刻を持たず、ここで受け取って summary に載せる。
-    pub fn from_view(view: LiveView, server_now: String) -> serde_json::Result<Self> {
+    pub fn from_view(
+        view: LiveView,
+        server_now: String,
+        confirmed: &std::collections::HashMap<String, bool>,
+    ) -> serde_json::Result<Self> {
         let races = view
             .races
             .into_iter()
-            .map(LiveRaceViewSchema::from_view)
+            .map(|r| {
+                let is_confirmed = confirmed.get(&r.race_id).copied().unwrap_or(false);
+                LiveRaceViewSchema::from_view(r, is_confirmed)
+            })
             .collect::<serde_json::Result<Vec<_>>>()?;
         Ok(Self {
             date: view.date.format("%Y-%m-%d").to_string(),
@@ -140,7 +150,7 @@ impl LiveSummary {
 }
 
 impl LiveRaceViewSchema {
-    fn from_view(r: LiveRaceView) -> serde_json::Result<Self> {
+    fn from_view(r: LiveRaceView, result_confirmed: bool) -> serde_json::Result<Self> {
         let slip: SlipView = serde_json::from_str(&r.slip_json)?;
         Ok(Self {
             race_id: r.race_id,
@@ -160,6 +170,7 @@ impl LiveRaceViewSchema {
             axis_place_odds_low: r.axis_place_odds_low,
             axis_place_odds_high: r.axis_place_odds_high,
             odds_missing: r.odds_missing,
+            result_confirmed,
             slip,
             flip: LiveFlip::from(r.flip),
         })
