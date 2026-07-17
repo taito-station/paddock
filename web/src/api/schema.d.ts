@@ -287,6 +287,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/results/{date}:refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 同日のレース結果（着順・確定払戻）を取り込み、セッションがあれば自動精算する（#381・冪等）。
+         * @description 対象は「発走済み かつ 未確定」のレース。`?force=true` で post_time gating を緩和する（手動救済）。
+         */
+        post: operations["refresh"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/sessions/{date}": {
         parameters: {
             query?: never;
@@ -348,8 +368,13 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 確定結果を取得して払戻を自動補完（#40, 冪等）。 */
-        post: operations["results_refresh"];
+        /**
+         * 後方互換エイリアス `POST /api/sessions/{date}/results:refresh`（#40 の入口）。
+         * @description 本フロー（`ResultsInteractor::refresh`）へ委譲し、手動フォールバックとして `force=true` で叩く。
+         *     レスポンスは上位互換（従来の精算集計フィールド＋着順取り込みの確定情報）。着順 upsert という
+         *     副作用が加わる点が純粋な後方互換との差（ADR 0068）。
+         */
+        post: operations["session_alias_refresh"];
         delete?: never;
         options?: never;
         head?: never;
@@ -400,6 +425,11 @@ export interface components {
             comment?: string | null;
             /** @description 展開パネル用の根拠 bullet（条件別 factor・枠 lift・近走・前走・斤量）。空配列＝根拠情報なし。 */
             detail_lines: string[];
+            /**
+             * Format: int32
+             * @description 確定着順（#381。`results` 由来。未確定・除外/中止で着順なしは `null`）。
+             */
+            finishing_position?: number | null;
             /**
              * Format: int32
              * @description 枠番（出馬表に無ければ `null`）。
@@ -503,6 +533,17 @@ export interface components {
             code: string;
             /** @description 人間可読なエラーメッセージ。 */
             message: string;
+        };
+        /** @description レース結果の上位着順 1 行（#381）。ライブ一覧の着順表示に使う。 */
+        FinishEntrySchema: {
+            horse_name: string;
+            /** Format: int32 */
+            horse_num: number;
+            /**
+             * Format: int32
+             * @description 着順（1..）。3 着同着なら同じ position が複数行。
+             */
+            position: number;
         };
         /** @description あるカテゴリ 1 区分の成績（出走数＋勝/連対/複勝の件数とレート）。 */
         GroupStatSchema: {
@@ -640,6 +681,11 @@ export interface components {
             race_id: string;
             /** Format: int32 */
             race_no: number;
+            /**
+             * @description 結果確定フラグ（#381。`results` に着順ありの行が 1 件以上）。web の「⚫終」判定を post_time
+             *     推定でなく着順確定で行う。未確定は false。
+             */
+            result_confirmed: boolean;
             /**
              * Format: double
              * @description 全 3 券種 ROI[%]。
@@ -886,6 +932,8 @@ export interface components {
              *     `axis` はこれがあればこれに一致する（買い目軸を記録軸に固定する）。
              */
             recorded_axis?: number | null;
+            /** @description 結果確定フラグ（#381。`results` に着順ありの行が 1 件以上）。web の「⚫終」判定に使う。 */
+            result_confirmed: boolean;
             /** Format: double */
             roi?: number | null;
             surface: string;
@@ -933,6 +981,11 @@ export interface components {
              */
             distance: number;
             /**
+             * @description 上位着順（#381。`finishing_position <= 3`・着順昇順。3 着同着で 4 件以上ありうる＝件数可変）。
+             *     未確定レースは空配列。
+             */
+            finish_order: components["schemas"]["FinishEntrySchema"][];
+            /**
              * @description 発走時刻（`HH:MM`、race_cards 由来。未保存なら `null`）。
              *     ライブ一覧の状態判定（未発走/終了）の一次ソース（#391）。
              */
@@ -946,6 +999,11 @@ export interface components {
              * @description レース番号（1..=12）。
              */
             race_num: number;
+            /**
+             * @description 結果確定フラグ（#381。`results` に着順ありの行が 1 件以上）。web の「⚫終」判定を post_time
+             *     推定でなく着順確定で行うための一次ソース。未確定・未取得は false。
+             */
+            result_confirmed: boolean;
             /** @description 芝/ダート（`turf` / `dirt`）。 */
             surface: string;
             /** @description 開催場（英字スラッグ。例 `nakayama`）。 */
@@ -1012,6 +1070,39 @@ export interface components {
             /** @description このレースで購入した買い目（空 = スキップ相当）。 */
             bets: components["schemas"]["BetInput"][];
         };
+        /**
+         * @description `POST /api/results/{date}:refresh`（およびエイリアス `.../sessions/{date}/results:refresh`）の
+         *     レスポンス（#381）。同日結果取り込み＋自動精算の結果。精算集計（`settled_races`〜`roi`）は
+         *     従来の `SettleReportResponse` と同一で、着順取り込みの確定レース情報を加える（レスポンス上位互換）。
+         */
+        RefreshReportResponse: {
+            /** Format: int64 */
+            balance: number;
+            /** @description 当パスで新規に確定したレースの `race_id`（昇順）。 */
+            confirmed_race_ids: string[];
+            /**
+             * Format: int32
+             * @description 当パスで新規に着順を取り込んで確定したレース数（#381）。
+             */
+            newly_confirmed_races: number;
+            /** Format: int32 */
+            pending_races: number;
+            /** Format: int32 */
+            refunded_bets: number;
+            /**
+             * Format: double
+             * @description 回収率(%)。総賭け金 0 なら null。
+             */
+            roi?: number | null;
+            /** Format: int32 */
+            settled_races: number;
+            /** Format: int64 */
+            total_bet: number;
+            /** Format: int64 */
+            total_payout: number;
+            /** Format: int32 */
+            voided_races: number;
+        };
         /** @description セッション収支サマリ（作成 / outcome / GET summary 共通のレスポンス）。 */
         SessionSummaryResponse: {
             /** Format: int64 */
@@ -1031,28 +1122,6 @@ export interface components {
             total_bet: number;
             /** Format: int64 */
             total_payout: number;
-        };
-        /** @description `POST .../results:refresh` のレスポンス（`SettleReport` の写像）。 */
-        SettleReportResponse: {
-            /** Format: int64 */
-            balance: number;
-            /** Format: int32 */
-            pending_races: number;
-            /** Format: int32 */
-            refunded_bets: number;
-            /**
-             * Format: double
-             * @description 回収率(%)。総賭け金 0 なら null。
-             */
-            roi?: number | null;
-            /** Format: int32 */
-            settled_races: number;
-            /** Format: int64 */
-            total_bet: number;
-            /** Format: int64 */
-            total_payout: number;
-            /** Format: int32 */
-            voided_races: number;
         };
         /** @description 伝票の 1 leg（式別×方式×軸×組番×点数×金額の「そのまま買える形」）。 */
         SlipLeg: {
@@ -1855,6 +1924,50 @@ export interface operations {
             };
         };
     };
+    refresh: {
+        parameters: {
+            query?: {
+                /** @description true で post_time gating を緩和し、post_time 未取得・未発走の未確定レースも取得対象にする。 */
+                force?: boolean;
+            };
+            header?: never;
+            path: {
+                /** @description 開催日 YYYY-MM-DD */
+                date: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 取り込み＋精算レポート（pending_races に未確定が出る） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RefreshReportResponse"];
+                };
+            };
+            /** @description 日付不正 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description 内部エラー */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
     get_session_summary: {
         parameters: {
             query?: never;
@@ -2076,7 +2189,7 @@ export interface operations {
             };
         };
     };
-    results_refresh: {
+    session_alias_refresh: {
         parameters: {
             query?: never;
             header?: never;
@@ -2088,26 +2201,17 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description 精算レポート（pending_races に未確定が出る） */
+            /** @description 取り込み＋精算レポート（pending_races に未確定が出る） */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SettleReportResponse"];
+                    "application/json": components["schemas"]["RefreshReportResponse"];
                 };
             };
             /** @description 日付不正 */
             400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorBody"];
-                };
-            };
-            /** @description 未作成のセッション */
-            404: {
                 headers: {
                     [name: string]: unknown;
                 };

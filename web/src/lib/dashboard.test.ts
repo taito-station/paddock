@@ -29,6 +29,8 @@ function race(over: Partial<RaceSummary> = {}): RaceSummary {
     race_num: 1,
     distance: 1200,
     surface: "turf",
+    result_confirmed: false,
+    finish_order: [],
     ...over,
   };
 }
@@ -52,6 +54,7 @@ function liveView(over: Partial<LiveRaceView> = {}): LiveRaceView {
     axis_place_odds_low: null,
     axis_place_odds_high: null,
     odds_missing: false,
+    result_confirmed: false,
     slip: { legs: [], race_budget: 5000 },
     flip: {
       axis_changed: false,
