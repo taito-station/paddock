@@ -9,19 +9,54 @@ import {
   raceStarted,
   type LiveFilter,
   type LiveQuery,
-  type LiveSortCtx,
   type SortDir,
   type SortKey,
 } from "./live";
 
 type RaceSummary = Schemas["RaceSummary"];
 type LiveRaceView = Schemas["LiveRaceViewSchema"];
+type SummaryBet = Schemas["SummaryBet"];
 
 export type DashboardRow = {
   race: RaceSummary; // 正: /api/races（DB が正本）
   live: LiveRaceView | null; // race_id 突合。snapshot 未収載は null
   bought: boolean; // セッション明細に痕跡があるか
 };
+
+// レースが「終了（結果確定）」か。#381 で「⚫終」判定を post_time 推定（raceStarted）から
+// 着順確定（result_confirmed）へ移す一次ソース。post_time 経過でも未確定なら false（走行中/結果待ち）。
+export function raceFinished(row: DashboardRow): boolean {
+  return row.race.result_confirmed;
+}
+
+// 購入済みレースの的中/払戻（session bets を per-race に集計）。#381。
+// hit は「そのレースの総払戻 > 0」（1 点でも払戻があれば的中表示）。返還（payout=stake）も payout>0。
+export type RaceOutcome = { stake: number; payout: number; hit: boolean };
+
+export function outcomeByRace(bets: SummaryBet[]): Map<string, RaceOutcome> {
+  const m = new Map<string, RaceOutcome>();
+  for (const b of bets) {
+    const cur = m.get(b.race_id) ?? { stake: 0, payout: 0, hit: false };
+    cur.stake += b.stake;
+    cur.payout += b.payout;
+    m.set(b.race_id, cur);
+  }
+  // hit は集計後の総払戻で確定する（1 点でも払戻があれば的中表示）。
+  for (const o of m.values()) o.hit = o.payout > 0;
+  return m;
+}
+
+// 自動精算ポーリングの継続条件。発走済み（post_time 経過）かつ未確定のレースが 1 件以上あるか。
+// これが false になれば（＝当日の発走済みレースが全確定）ポーリングを止める（#381）。
+export function hasUnsettledRaces(
+  races: RaceSummary[],
+  date: string,
+  now: Date,
+): boolean {
+  return races.some(
+    (r) => raceStarted(date, r.post_time, now) === true && !r.result_confirmed,
+  );
+}
 
 // 3 ソースの突合。races が正で、live は Map で引く。live にだけ存在する race_id は捨てる
 // （races API は DB 全件を返すため通常起きない。起きたら snapshot 側の異常であり一覧の正は DB）。
@@ -65,19 +100,18 @@ export function rowPostTime(row: DashboardRow): string | null {
 // - roi / axisProb / rough: evVisible=false の行は欠落値として方向に関わらず末尾
 // - post: post 不明（live 無し含む）は方向に関わらず末尾
 // - race: venue slug → R 番号（live 無し行も RaceSummary から算出でき正しく混在する）
+// #381 で status 判定を post_time 推定から result_confirmed へ移したため、date/now（旧 ctx）は不要。
 export function sortRows(
   rows: DashboardRow[],
   key: SortKey,
   dir: SortDir,
-  ctx: LiveSortCtx,
 ): DashboardRow[] {
   const arr = [...rows];
   if (key === "status") {
     arr.sort((a, b) => {
-      const fa =
-        raceStarted(ctx.date, rowPostTime(a), ctx.now) === true ? 1 : 0;
-      const fb =
-        raceStarted(ctx.date, rowPostTime(b), ctx.now) === true ? 1 : 0;
+      // 「終了」は結果確定（#381）。未発走・走行中（post 経過だが未確定）は上、確定は下。
+      const fa = raceFinished(a) ? 1 : 0;
+      const fb = raceFinished(b) ? 1 : 0;
       if (fa !== fb) return fa - fb;
       const pa = postMinutes(rowPostTime(a));
       const pb = postMinutes(rowPostTime(b));
@@ -132,15 +166,11 @@ export function sortRows(
 // 絞り込み。status: post 不明（live 無し含む）は「未発走」側（終了と断定しない・live.ts と
 // 同規約）。verdict: bet/skip 指定時、EV 非表示行（live 無し・hidden）は verdict を
 // 持たない（見せない）ため除外する。
-export function filterRows(
-  rows: DashboardRow[],
-  f: LiveFilter,
-  ctx: LiveSortCtx,
-): DashboardRow[] {
+export function filterRows(rows: DashboardRow[], f: LiveFilter): DashboardRow[] {
   return rows.filter((r) => {
     if (f.status !== "all") {
-      const finished =
-        raceStarted(ctx.date, rowPostTime(r), ctx.now) === true;
+      // 「終了」は結果確定（#381）。post_time 経過でも未確定は「未発走」側に残す（走行中/結果待ち）。
+      const finished = raceFinished(r);
       if (f.status === "finished" ? !finished : finished) return false;
     }
     if (f.verdict !== "all") {

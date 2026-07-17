@@ -1,14 +1,22 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { recoveryRate, yen } from "../lib/format";
 import { raceListHref } from "../lib/header-date";
+import { hasUnsettledRaces } from "../lib/dashboard";
+import { useResultsRefresh } from "../lib/useResultsRefresh";
 
 export function SessionSummary() {
   const { date = "" } = useParams();
   const qc = useQueryClient();
   const [budget, setBudget] = useState("10000");
+  // 発走済み判定・ポーリング gate 用の現在時刻（30 秒 tick）。
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 30_000);
+    return () => clearInterval(id);
+  }, []);
 
   const session = useQuery({
     queryKey: ["session", date],
@@ -20,6 +28,19 @@ export function SessionSummary() {
       });
       if (response.status === 404) return null;
       if (error) throw new Error("セッションの取得に失敗しました");
+      return data;
+    },
+  });
+
+  // 自動精算ポーリングの gate に使うレース一覧（post_time・result_confirmed）。
+  const races = useQuery({
+    queryKey: ["races", date],
+    enabled: !!date,
+    queryFn: async () => {
+      const { data, error } = await api.GET("/api/races", {
+        params: { query: { date } },
+      });
+      if (error) throw new Error("レース一覧の取得に失敗しました");
       return data;
     },
   });
@@ -45,8 +66,21 @@ export function SessionSummary() {
       if (error) throw new Error("確定結果の取得に失敗しました");
       return data;
     },
-    // 精算で残高・払戻が変わるためセッションを再取得する。
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["session", date] }),
+    // 精算で残高・払戻が変わるためセッションを再取得する。着順取り込みで races/live の
+    // result_confirmed も変わるため併せて無効化し、ポーリング gate（hasUnsettledRaces）と
+    // 一覧表示を即時同期する（手動精算後にポーリングが止まらない stale gate を防ぐ）。
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["session", date] });
+      void qc.invalidateQueries({ queryKey: ["races", date] });
+      void qc.invalidateQueries({ queryKey: ["live", date] });
+    },
+  });
+
+  // 結果確定を検知して自動精算する（#381）。ライブ一覧と同じ gate（発走済み・未確定が残る間だけ）に
+  // 揃え、発走前の空回りを避ける（過去日・全確定で停止）。手動「精算」ボタンはフォールバックとして残す。
+  useResultsRefresh(date, {
+    enabled: hasUnsettledRaces(races.data?.races ?? [], date, now),
+    now,
   });
 
   return (

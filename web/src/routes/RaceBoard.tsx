@@ -371,6 +371,15 @@ export function RaceBoard() {
                   <div className="num-mark">
                     <span className="num">{h.horse_num}</span>
                     <span className="mark">{markSymbol(h.mark)}</span>
+                    {/* 確定着順（#381。results 由来。除外/中止・未確定は null で非表示）。 */}
+                    {h.finishing_position != null && (
+                      <span
+                        className="finish-pos"
+                        title={`確定 ${h.finishing_position} 着`}
+                      >
+                        {h.finishing_position}着
+                      </span>
+                    )}
                   </div>
                   <div className="hname" title={h.horse_name}>
                     {h.horse_name}
