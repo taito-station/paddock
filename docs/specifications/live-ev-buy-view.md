@@ -1,3 +1,20 @@
+---
+# knowledge 規約に基づくメタデータ（docs/knowledge/README.md）。specifications はその場で
+# knowledge に昇格（ADR 履歴・相互リンクを壊さないため物理移動しない）。
+status: Confirmed
+kind: knowledge
+sources:
+  - docs/adr/0064-live-ev-buy-view.md
+  - docs/adr/0028-konsen-odds-trigger-rejected.md
+  - docs/adr/0030-konsen-trio-partner-width-rejected.md
+  - docs/adr/0046-allocation-prob-weight-no-floor-rejected.md
+  - docs/adr/0055-ev-layer-separation-circular-break.md
+  - docs/adr/0060-betting-axis-lock-preclose-topup.md
+  - docs/adr/0066-live-ev-per-race-budget.md
+distilled_from_sha: "f765be7"
+updated: "2026-07-17"
+---
+
 # ライブ EV 買い目ビュー（今これを買え）: 機能仕様
 
 [Issue #260](https://github.com/taito-station/paddock/issues/260) / 依存: [#33 REST API（read 基盤）](https://github.com/taito-station/paddock/issues/33)・[#34 Web SPA](https://github.com/taito-station/paddock/issues/34) / 関連 ADR: [0064](../adr/0064-live-ev-buy-view.md)

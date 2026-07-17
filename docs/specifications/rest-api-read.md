@@ -1,3 +1,15 @@
+---
+# knowledge 規約に基づくメタデータ（docs/knowledge/README.md）。specifications はその場で
+# knowledge に昇格（ADR 履歴・相互リンクを壊さないため物理移動しない）。
+status: Confirmed
+kind: knowledge
+sources:
+  - docs/adr/0022-rest-api-read-server.md
+  - docs/api/openapi.json
+distilled_from_sha: "f765be7"
+updated: "2026-07-17"
+---
+
 # REST API（read 基盤）: 設計仕様
 
 [Issue #33](https://github.com/taito-station/paddock/issues/33) / 関連: [#34 Web SPA](https://github.com/taito-station/paddock/issues/34)・[#53 セッション write API](https://github.com/taito-station/paddock/issues/53)・[web-spa.md](web-spa.md)

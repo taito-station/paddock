@@ -1,3 +1,21 @@
+---
+# knowledge 規約に基づくメタデータ（docs/knowledge/README.md）。specifications はその場で
+# knowledge に昇格（ADR 履歴・相互リンクを壊さないため物理移動しない）。
+status: Tentative
+kind: knowledge
+sources:
+  - docs/adr/0009-recent-form-feature.md
+  - docs/adr/0016-shrinkage-and-recency.md
+  - docs/adr/0017-jockey-shrinkage-evaluation.md
+  - docs/adr/0034-alpha-retune-recency-rejected.md
+  - docs/adr/0035-recent-form-weight-retune-rejected.md
+  - docs/adr/0036-recent-form-trend-n-rejected.md
+  - docs/adr/0037-place-show-exotic-market-blend-rejected.md
+  - docs/adr/0038-jockey-recent-form-rejected.md
+distilled_from_sha: "f765be7"
+updated: "2026-07-17"
+---
+
 # 騎手直近フォーム特徴量仕様書
 
 Issue #221 対応。現行の `jockey_surface`（騎手の通算芝ダ別勝率）は直近の好不調を捉えられないため、
