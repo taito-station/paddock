@@ -10,6 +10,7 @@ sources:
   - docs/adr/0039-formation-2axis-rejected.md
   - docs/adr/0040-ev-gate-threshold-lowering-rejected.md
   - docs/adr/0041-umaren-only-strategy-rejected.md
+  - docs/adr/0042-win-power-calibration-adopted.md
   - docs/adr/0043-exacta-in-portfolio-rejected.md
   - docs/adr/0044-calibrated-ev-gate-anti-predictive.md
   - docs/adr/0046-allocation-prob-weight-no-floor-rejected.md
