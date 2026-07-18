@@ -144,6 +144,24 @@ jobs:
       - name: Check ADR number duplicates (#254)
         run: bash scripts/check-adr-numbers.sh
 
+  # predict-check の Python テスト（scripts/predict-check/test_*.py）。各ファイルは unittest ではなく
+  # `def test_*()` + assert を末尾の main() が集めて実行する「自走式」で、標準ライブラリのみに依存する
+  # （numpy/scipy を要する harness 側テストはスコープ外）。ubuntu-latest 同梱の python3 で走らせ、
+  # setup-python/pip を挟まない軽量ジョブにする（Rust/Postgres 不要なので独立させ並列で即終わる。#416）。
+  predict-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Run predict-check python tests (stdlib のみ・自走式)
+        # 各テストは自走式（__main__ で全 test_* を実行し assert 失敗で非 0 終了）なので、
+        # unittest discover は 0 件になる。ファイルごとに python3 で実行し 1 本でも落ちたら fail。
+        run: |
+          for f in scripts/predict-check/test_*.py; do
+            echo "== $f"
+            python3 "$f"
+          done
+
   # pdf-ocr / pdf-parser の統合テスト（test_render / test_parse）は mutool(mupdf) のテキスト/画像
   # 抽出に依存し、mupdf >= 1.25 が必要（ubuntu-latest の apt mupdf は 1.23 でサンプル解析が 0 件に
   # なり失敗する。検証結果・方針は ADR0026）。mupdf 1.25 を apt で得られる debian:trixie コンテナで
