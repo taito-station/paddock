@@ -147,3 +147,15 @@ def test_sim_bankroll_kelly_round_unit():
     assert n == 1
     _ret, stake = rows[0]
     assert stake % 100 == 0
+
+
+def main():
+    tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
+    for t in tests:
+        t()
+        print(f"ok  {t.__name__}")
+    print(f"\n{len(tests)} passed")
+
+
+if __name__ == "__main__":
+    main()

@@ -9,12 +9,14 @@ on:
 
 # 同一 PR への連続 push で進行中の旧 run を打ち切り、CI 時間とランナーを節約する。
 # ワークフロー名を group に含め、将来ワークフローが増えても ref 衝突しないようにする。
+# ただし main への push（連続マージ）では打ち切らない。旧 run を切ると「どのコミットが main を
+# 壊したか」の CI 信号が失われるため、main だけは全 run を完走させる（#416）。
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
-# GITHUB_TOKEN を最小権限に絞る。全ジョブ（ci / web / adr / ocr-pdf）は checkout と
-# ビルド・テストのみで、コミット・コメント・リリース等の書き込みを一切行わないため読取だけで足りる。
+# GITHUB_TOKEN を最小権限に絞る。全ジョブ（ci / web / adr / predict-check / shellcheck / ocr-pdf）は
+# checkout とビルド・テストのみで、コミット・コメント・リリース等の書き込みを一切行わないため読取だけで足りる。
 permissions:
   contents: read
 
@@ -141,6 +143,41 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Check ADR number duplicates (#254)
         run: bash scripts/check-adr-numbers.sh
+
+  # predict-check の Python テスト（scripts/predict-check/test_*.py）。各ファイルは unittest ではなく
+  # `def test_*()` + assert を末尾の main() が集めて実行する「自走式」で、標準ライブラリのみに依存する
+  # （numpy/scipy を要する harness 側テストはスコープ外）。ubuntu-latest 同梱の python3 で走らせ、
+  # setup-python/pip を挟まない軽量ジョブにする（Rust/Postgres 不要なので独立させ並列で即終わる。#416）。
+  predict-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Run predict-check python tests (stdlib のみ・自走式)
+        # 各テストは自走式（__main__ で全 test_* を実行し assert 失敗で非 0 終了）なので、
+        # unittest discover は 0 件になる。ファイルごとに python3 で実行し 1 本でも落ちたら fail。
+        run: |
+          for f in scripts/predict-check/test_*.py; do
+            echo "== $f"
+            python3 "$f"
+          done
+
+  # scripts/ のシェルスクリプトを shellcheck で機械検査する（#416）。従来は人力レビューのみで
+  # 機械検査ゼロだった。ubuntu-latest 同梱の shellcheck で、拡張子 .sh に加え shebang スクリプト
+  # （scripts/mdq / git-hooks/pre-push）も対象にする。--severity=warning の軽量ゲート
+  # （info 級の SC2086/2012/2015 は各行で意図をコメント済みのため除外し、warning/error 級の
+  # 退行だけを止める）。Rust/Postgres 不要なので独立ジョブで並列に即終わらせる。
+  shellcheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Run shellcheck (--severity=warning)
+        # 拡張子で拾えない shebang スクリプトは明示追加。git ls-files で追跡対象のみに絞り、
+        # xargs で渡す（$(...) 展開は SC2046 の word-splitting 警告になるため避ける）。
+        run: |
+          git ls-files '*.sh' scripts/mdq scripts/git-hooks/pre-push \
+            | xargs -r shellcheck --severity=warning
 
   # pdf-ocr / pdf-parser の統合テスト（test_render / test_parse）は mutool(mupdf) のテキスト/画像
   # 抽出に依存し、mupdf >= 1.25 が必要（ubuntu-latest の apt mupdf は 1.23 でサンプル解析が 0 件に
