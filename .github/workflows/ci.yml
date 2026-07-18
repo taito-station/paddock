@@ -15,8 +15,8 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
-# GITHUB_TOKEN を最小権限に絞る。全ジョブ（ci / web / adr / ocr-pdf）は checkout と
-# ビルド・テストのみで、コミット・コメント・リリース等の書き込みを一切行わないため読取だけで足りる。
+# GITHUB_TOKEN を最小権限に絞る。全ジョブ（ci / web / adr / predict-check / shellcheck / ocr-pdf）は
+# checkout とビルド・テストのみで、コミット・コメント・リリース等の書き込みを一切行わないため読取だけで足りる。
 permissions:
   contents: read
 
@@ -177,7 +177,7 @@ jobs:
         # xargs で渡す（$(...) 展開は SC2046 の word-splitting 警告になるため避ける）。
         run: |
           git ls-files '*.sh' scripts/mdq scripts/git-hooks/pre-push \
-            | xargs shellcheck --severity=warning
+            | xargs -r shellcheck --severity=warning
 
   # pdf-ocr / pdf-parser の統合テスト（test_render / test_parse）は mutool(mupdf) のテキスト/画像
   # 抽出に依存し、mupdf >= 1.25 が必要（ubuntu-latest の apt mupdf は 1.23 でサンプル解析が 0 件に
