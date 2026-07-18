@@ -23,6 +23,16 @@ if [ ! -x "$VENV_PY" ]; then
   exit 1
 fi
 
+# venv の Python が 3.11 以上か検査する（config.py が標準ライブラリ tomllib を使うため。3.10 以下は
+# import 時に落ちる）。3.10 以下の python3 で venv を作ってしまった取り違えを、実行時に早期検知する。
+if ! "$VENV_PY" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)'; then
+  ver="$("$VENV_PY" -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null || echo '不明')"
+  echo "mdq の venv Python が $ver で、要求下限 3.11 を満たしません（tomllib 不在）。" >&2
+  echo "3.11 以上の python3 で venv を作り直してください:" >&2
+  echo "  rm -rf tools/mdq/.venv && python3 -m venv tools/mdq/.venv && tools/mdq/.venv/bin/pip install -r tools/mdq/requirements.txt" >&2
+  exit 1
+fi
+
 # mdq.toml を cwd=ROOT で発見させ、tools/mdq を import パスに通す。
 cd "$ROOT"
 exec env PYTHONPATH="$ROOT/tools/mdq" "$VENV_PY" -m mdq "$@"
