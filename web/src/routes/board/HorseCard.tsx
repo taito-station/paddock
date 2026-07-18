@@ -92,7 +92,10 @@ export function HorseCard({
         </div>
         {showModel && (
           <>
-            <div title="モデル勝率＝純モデル α=1.0（市場非依存）で 1 着になる確率">
+            <div
+              className="group-sep"
+              title="モデル勝率＝純モデル α=1.0（市場非依存）で 1 着になる確率"
+            >
               <dt>モ勝</dt>
               <dd>{pct(h.pure_win_prob)}</dd>
             </div>
@@ -106,11 +109,14 @@ export function HorseCard({
             </div>
           </>
         )}
-        <div title="市場勝率＝単勝オッズから逆算した市場推定の勝率（胴元の控除を抜いた実力評価）。モデル/ブレンド勝率と比べて乖離＝妙味">
+        <div
+          className="group-sep"
+          title="市場勝率＝単勝オッズから逆算した市場推定の勝率（胴元の控除を抜いた実力評価）。モデル/ブレンド勝率と比べて乖離＝妙味"
+        >
           <dt>市勝</dt>
           <dd>{h.market_implied == null ? "-" : pct(h.market_implied)}</dd>
         </div>
-        <div>
+        <div className="group-sep">
           <dt>単勝</dt>
           <dd>{h.win_odds == null ? "-" : h.win_odds.toFixed(1)}</dd>
         </div>

@@ -28,9 +28,10 @@ export function RaceBoard() {
   // 旧 ?from=live は /live 廃止（#378）で読まなくなった。付いていても無視される。
   // クリックで馬書評（詳細パネル）を開く馬番。同じ馬を再クリック or 閉じるで null に戻す。
   const [selectedHorse, setSelectedHorse] = useState<number | null>(null);
-  // 純モデル（α=1.0）の 勝/連/複 を各馬カードに表示するか（#373）。既定 OFF＝ブレンド＋市場のみで
-  // 情報過多を避ける。ON でモデル列（モ勝/モ連/モ複）を展開し、ブレンドとの乖離を読めるようにする。
-  const [showModel, setShowModel] = useState(false);
+  // 純モデル（α=1.0）の 勝/連/複 を各馬カードに表示するか（#373）。既定 ON＝モデル列（モ勝/モ連/モ複）を
+  // 常時表示し、市場・ブレンドと並べて乖離を読めるようにする。モデル勝率が予想の主眼のため隠さない。
+  // OFF にするとブレンド＋市場のみに畳める（情報量を絞りたいとき用）。
+  const [showModel, setShowModel] = useState(true);
   // フォーカス管理（a11y）: パネルを開いた馬カラム（trigger）を覚えておき、閉じたら戻す。
   // 開いたらパネル内（閉じるボタン）へフォーカスを移す。
   const triggerRef = useRef<HTMLElement | null>(null);
@@ -289,7 +290,7 @@ export function RaceBoard() {
             <p className="race-comment">{d.race_comment}</p>
           )}
 
-          {/* 確率表示の切替（#373）: 既定はブレンド＋市場。ON で純モデル（モ勝/モ連/モ複）を各カードに展開。 */}
+          {/* 確率表示の切替（#373）: 既定 ON でモデル＋市場＋ブレンドを併記。OFF でモデル列を畳みブレンド＋市場のみに絞る。 */}
           <div className="board-controls">
             <label className="model-toggle">
               <input
