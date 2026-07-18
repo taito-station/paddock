@@ -62,7 +62,8 @@ deployments/launchd/uninstall.sh
 `StartInterval=300`（5 分間隔）。prefetch/keep-awake は開催日だけ走らせたい場合、開催日朝に install、
 夜に uninstall する運用でよい（常時 load でも対象 0 件なら no-op）。**backup-db は常駐**（毎日 23:30）で、
 `uninstall.sh` では外れない。止めるときは手動で
-`launchctl unload ~/Library/LaunchAgents/com.paddock.backup-db.plist && rm ~/Library/LaunchAgents/com.paddock.backup-db.plist`。
+`launchctl bootout gui/$UID/com.paddock.backup-db && rm ~/Library/LaunchAgents/com.paddock.backup-db.plist`
+（BACKUP.md のアンインストール手順と同一）。
 
 ## 手動・検証
 
