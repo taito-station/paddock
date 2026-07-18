@@ -9,9 +9,11 @@ on:
 
 # 同一 PR への連続 push で進行中の旧 run を打ち切り、CI 時間とランナーを節約する。
 # ワークフロー名を group に含め、将来ワークフローが増えても ref 衝突しないようにする。
+# ただし main への push（連続マージ）では打ち切らない。旧 run を切ると「どのコミットが main を
+# 壊したか」の CI 信号が失われるため、main だけは全 run を完走させる（#416）。
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 # GITHUB_TOKEN を最小権限に絞る。全ジョブ（ci / web / adr / ocr-pdf）は checkout と
 # ビルド・テストのみで、コミット・コメント・リリース等の書き込みを一切行わないため読取だけで足りる。
