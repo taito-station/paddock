@@ -759,3 +759,28 @@ button:disabled {
 .mt-2xl {
   margin-top: 1.5rem;
 }
+
+/* ===== ErrorBoundary fallback（ルート直下の白画面防止・#417）=====
+   基底 button のトークン配色を引き継ぐため、ここでは追加の見た目のみ定義する。 */
+.error-boundary {
+  max-width: 32rem;
+  margin: 4rem auto;
+  padding: 1.5rem;
+  background: var(--surface);
+  border: 1px solid var(--danger-border);
+  border-radius: 8px;
+  color: var(--text);
+}
+.error-boundary h1 {
+  margin: 0 0 0.75rem;
+  font-size: 1.25rem;
+  color: var(--danger-text);
+}
+.error-boundary p {
+  margin: 0 0 1rem;
+  color: var(--muted);
+  line-height: 1.6;
+}
+.error-boundary-reload:hover {
+  background: var(--venue-hover-bg);
+}
