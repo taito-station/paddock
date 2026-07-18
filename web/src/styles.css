@@ -624,6 +624,13 @@ button:disabled {
   font-size: 0.68rem;
   padding: 0.05rem 0;
 }
+/* 確率の出所（ブレンド / モデル / 市場 / 単複人気）の境目に区切り線を入れ、群を視認しやすくする。
+   群の先頭行に付与（モ勝＝モデル群・市勝＝市場・単勝＝オッズ群）。破線で .stats の実線 border-top と差別化。 */
+.horse-col .stats > div.group-sep {
+  border-top: 1px dashed var(--border);
+  margin-top: 0.15rem;
+  padding-top: 0.2rem;
+}
 .horse-col .stats dt {
   color: var(--muted-2);
 }
