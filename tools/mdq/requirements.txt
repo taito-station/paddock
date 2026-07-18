@@ -2,5 +2,9 @@
 # 必須ランタイム: Python >= 3.11（config.py が標準ライブラリ tomllib を使うため。3.10 以下は不可）。
 # semantic_paragraph / watch を使う場合の fastembed/nltk/numpy/watchdog は含めない。
 # トークン見積りは chars/4 ヒューリスティックのため tiktoken は不要。
-rank_bm25>=0.2.2
-PyYAML>=6.0
+#
+# 上限を次 major/minor 境界で固定する（#416）。venv をセッション毎に作り直す運用のため、
+# 下限のみだと upstream の破壊的リリースで全セッションが一斉に壊れる。実際に使う版の固定は
+# 環境側（作り直し時の最新解決）に委ね、ここでは破壊境界だけを塞ぐ。
+rank_bm25>=0.2.2,<0.3
+PyYAML>=6.0,<7
