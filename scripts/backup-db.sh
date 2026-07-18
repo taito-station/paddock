@@ -116,12 +116,21 @@ fi
 # iCloud の蓄積を terminal 実行時に真に KEEP まで reconcile できる）。launchd 下では iCloud 列挙が
 # 空を返すためミラー側は自然に no-op（＝溜まる。terminal で回収する）。ローカルは常に KEEP に bounded。
 # macOS 既定の /bin/bash 3.2（launchd もこれを使う）に mapfile が無いため while-read で読む。
+# 列挙は ls -1t のパース（出力パース忌避・空 dir で glob 非展開の罠あり）を避け、find でファイルのみを
+# 厳密に収集し、BSD stat（macOS 前提）で mtime を前置して整列する（新しい順）。find -exec ... + は対象
+# 0 件なら stat を呼ばず空を返すため、空 dir でもエラーにならない。ソートキーは第1=mtime 数値降順、
+# 第2=行残余（=パス。ファイル名に生成時刻 YYYYMMDD-HHMMSS を含む）降順で、同 mtime 時も決定的かつ
+# 新しい世代を先頭に固定する（cp 等で mtime が揃った dump でも剪定対象がブレない）。iCloud の既定パスは
+# 空白を含むが、-t' ' + -k2 は第2キーを行末まで一括で見るためパスは分断されない。
 prune_dir() {
     local dir="$1" label="$2"
     local files=() f i=0
     while IFS= read -r f; do
         [[ -n "$f" ]] && files+=("$f")
-    done < <(ls -1t "$dir"/paddock-*.dump 2>/dev/null || true)
+    done < <(
+        find "$dir" -maxdepth 1 -type f -name 'paddock-*.dump' -exec stat -f '%m %N' {} + 2>/dev/null \
+            | sort -t' ' -k1,1rn -k2r | cut -d' ' -f2-
+    )
     if (( ${#files[@]} > KEEP )); then
         for f in "${files[@]}"; do
             if (( i >= KEEP )); then
