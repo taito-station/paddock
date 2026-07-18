@@ -9,7 +9,7 @@
 # 使い方: bash scripts/test-db-guards.sh   （全ケース PASS で exit 0）
 set -uo pipefail
 
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/.." || exit 1
 export PGCONNECT_TIMEOUT=2
 # ロケール非依存で全角混じりメッセージを扱う。呼び出し元の PADDOCK_* 汚染を避ける。
 export LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8

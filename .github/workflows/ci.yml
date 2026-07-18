@@ -162,6 +162,23 @@ jobs:
             python3 "$f"
           done
 
+  # scripts/ のシェルスクリプトを shellcheck で機械検査する（#416）。従来は人力レビューのみで
+  # 機械検査ゼロだった。ubuntu-latest 同梱の shellcheck で、拡張子 .sh に加え shebang スクリプト
+  # （scripts/mdq / git-hooks/pre-push）も対象にする。--severity=warning の軽量ゲート
+  # （info 級の SC2086/2012/2015 は各行で意図をコメント済みのため除外し、warning/error 級の
+  # 退行だけを止める）。Rust/Postgres 不要なので独立ジョブで並列に即終わらせる。
+  shellcheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Run shellcheck (--severity=warning)
+        # 拡張子で拾えない shebang スクリプトは明示追加。git ls-files で追跡対象のみに絞り、
+        # xargs で渡す（$(...) 展開は SC2046 の word-splitting 警告になるため避ける）。
+        run: |
+          git ls-files '*.sh' scripts/mdq scripts/git-hooks/pre-push \
+            | xargs shellcheck --severity=warning
+
   # pdf-ocr / pdf-parser の統合テスト（test_render / test_parse）は mutool(mupdf) のテキスト/画像
   # 抽出に依存し、mupdf >= 1.25 が必要（ubuntu-latest の apt mupdf は 1.23 でサンプル解析が 0 件に
   # なり失敗する。検証結果・方針は ADR0026）。mupdf 1.25 を apt で得られる debian:trixie コンテナで
