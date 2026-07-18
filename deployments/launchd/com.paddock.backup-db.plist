@@ -3,12 +3,10 @@
   paddock DB の日次バックアップ LaunchAgent（#265）。
   scripts/backup-db.sh を毎日 23:30 に実行し、full DB dump を退避先へ退避＋世代管理する。
 
-  インストール（deployments/db/BACKUP.md 参照）:
-    1. __PADDOCK_REPO__（リポの絶対パス）と __HOME__（$HOME）を実値へ置換
-       例: sed -e "s#__PADDOCK_REPO__#$PWD#g" -e "s#__HOME__#$HOME#g" \
-             deployments/launchd/com.paddock.backup-db.plist \
-             > ~/Library/LaunchAgents/com.paddock.backup-db.plist
-    2. launchctl load ~/Library/LaunchAgents/com.paddock.backup-db.plist
+  インストール: deployments/launchd/install.sh がまとめて配置・load する（プレースホルダ
+  __REPO_ROOT__=リポの絶対パス / __HOME__=$HOME を実値へ置換）。手動手順は deployments/db/BACKUP.md 参照。
+  __REPO_ROOT__ は prefetch/keep-awake plist と共通のプレースホルダ名（install.sh が一括置換）。
+  __HOME__ はログ出力先用で backup-db 固有（launchd は StandardOutPath で $HOME を展開しないため実値へ置換する）。
   PATH は launchd の最小環境で docker を解決するため明示する（Intel の /usr/local/bin と
   Apple Silicon の /opt/homebrew/bin の両方を含める。docker/colima の brew prefix が環境で異なる）。
 -->
@@ -20,7 +18,7 @@
     <key>ProgramArguments</key>
     <array>
         <string>/bin/bash</string>
-        <string>__PADDOCK_REPO__/scripts/backup-db.sh</string>
+        <string>__REPO_ROOT__/scripts/backup-db.sh</string>
     </array>
 
     <key>EnvironmentVariables</key>

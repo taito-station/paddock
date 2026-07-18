@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
 # 締切前 prefetch（#237）と keep-awake（#264）の launchd エージェントを停止・除去する。
+# backup-db（#265）は install.sh で一括配置するが、ここでは意図的に外さない（非対称）。
+# prefetch/keep-awake は開催日限定運用（朝 install・夜 uninstall）だが、backup-db は常駐で
+# 毎日 23:30 に発火するため。夜の uninstall で backup-db まで外すと、新データを ingest した
+# 開催日ほど当夜のバックアップが飛ぶ。backup-db を止めたいときは手動で
+# `launchctl unload ~/Library/LaunchAgents/com.paddock.backup-db.plist && rm` する（#416）。
 set -euo pipefail
 
 LABELS=(com.paddock.prefetch-odds com.paddock.keep-awake)
