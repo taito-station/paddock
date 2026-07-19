@@ -71,7 +71,11 @@ pub async fn find_race_odds_morning(
     pool: &PgPool,
     race_id: &RaceId,
 ) -> Result<Option<MorningRaceOdds>> {
-    // 現時点（最新スイープ）の取得時刻。snapshot 0 件なら NULL → 比較なし。
+    // 現時点（最新スイープ）の取得時刻＝snapshots の最大 fetched_at。盤の現時点 ROI は
+    // find_race_odds(.., None)（race_odds 最新キャッシュ）から算出するが、save_race_odds は
+    // race_odds と race_odds_snapshots を同一トランザクションで書くため、最新保存の時刻は両者で一致し
+    // latest_at は「最新にオッズが更新された時刻」を正しく表す（現時点ラベル現{latest_at}の根拠）。
+    // snapshot 0 件なら NULL → 比較なし。
     let latest_at: Option<String> =
         sqlx::query_scalar("SELECT MAX(fetched_at) FROM race_odds_snapshots WHERE race_id = $1")
             .bind(race_id.value())

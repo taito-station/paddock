@@ -85,7 +85,10 @@ export function winOddsMove(
   morning: number | null | undefined,
   current: number | null | undefined,
 ): OddsMove | null {
-  if (morning == null || current == null || !(morning > 0)) return null;
+  // 朝・現とも正のオッズが揃っている時だけ判定する（DB は ≥1.0 保証だが対称に防御）。
+  if (morning == null || current == null || !(morning > 0) || !(current > 0)) {
+    return null;
+  }
   // 実オッズ刻み未満のノイズ（1% 未満の変化）は「動いていない」扱いにする。
   if (Math.abs(current / morning - 1) < 0.01) return null;
   return current < morning

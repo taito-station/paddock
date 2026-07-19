@@ -99,10 +99,11 @@ describe("winOddsMove", () => {
   it("変化が刻み未満（1%未満）は矢印なし", () => {
     expect(winOddsMove(4.0, 4.02)).toBeNull();
   });
-  it("朝・現いずれか欠落は null", () => {
+  it("朝・現いずれか欠落・非正値は null（両側を対称にガード）", () => {
     expect(winOddsMove(null, 4.0)).toBeNull();
     expect(winOddsMove(4.0, undefined)).toBeNull();
     expect(winOddsMove(0, 4.0)).toBeNull();
+    expect(winOddsMove(4.0, 0)).toBeNull();
   });
 });
 

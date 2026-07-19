@@ -202,6 +202,9 @@ impl<
         // 朝↔現比較（#448）: 確率・軸・budget は現時点と同一のまま、参照オッズだけ朝 snapshot に
         // 差し替えてポートフォリオを再計算する（＝軸ロック思想の可視化: 軸は動かさずオッズのズレだけ見る）。
         // 各馬には朝時点の単勝オッズを後付けする。snapshot が複数ある発走前レースのみ働く。
+        // 朝 snapshot は complete 保証（find_race_odds_morning）なので通常 morning_roi/hit_prob は Some。
+        // 万一 ev が組めなくても両値 None に縮退するだけ（朝単勝列は残る。フロントは朝ROI行を別途
+        // morning_roi!=null で守る）。
         let (morning_at, current_at, morning_roi, morning_hit_prob) = match morning.as_ref() {
             Some(m) => {
                 let morning_portfolio = build_portfolio(
