@@ -132,7 +132,7 @@ export function HorseCard({
         {/* 朝時点の単勝オッズ＋朝→現の変動矢印（#448）。朝比較 ON かつ朝 snapshot がある時のみ。
             ▲＝オッズ下落＝人気化（妙味減）／△＝上昇＝過小人気化（妙味）。 */}
         {showMorning && h.morning_win_odds != null && (
-          <div title="朝時点（初回スイープ）の単勝オッズと、朝→現の変動。▲人気化（妙味減）／△妙味（過小人気化）">
+          <div title="朝時点（最初にフル盤成立した snapshot）の単勝オッズと、朝→現の変動。▲人気化（妙味減）／△妙味（過小人気化）">
             <dt>朝単</dt>
             <dd>
               {h.morning_win_odds.toFixed(1)}
