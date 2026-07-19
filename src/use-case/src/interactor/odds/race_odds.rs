@@ -218,6 +218,12 @@ mod tests {
             self.saved.lock().unwrap().push(record.clone());
             Ok(())
         }
+        async fn find_race_odds_morning(
+            &self,
+            _race_id: &RaceId,
+        ) -> Result<Option<crate::repository::MorningRaceOdds>> {
+            Ok(None)
+        }
         async fn purge_race_odds_snapshots(&self, _before: NaiveDate) -> Result<u64> {
             Ok(0)
         }

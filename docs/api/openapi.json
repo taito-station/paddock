@@ -1733,6 +1733,14 @@
             "description": "モデル勝率順位（1=最上位）。",
             "minimum": 0
           },
+          "morning_win_odds": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "朝時点（初回スイープ）の単勝オッズ（#448）。`win_odds` との差で「▲人気化／△妙味」を出す。\n朝 snapshot が無い（`morning_at=null`）・当該馬が朝未取得なら `null`。"
+          },
           "place_odds_high": {
             "type": [
               "number",
@@ -2848,6 +2856,13 @@
           "confusion": {
             "$ref": "#/components/schemas/ConfusionSchema"
           },
+          "current_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "現時点（最新スイープ）の取得時刻 RFC3339（#448）。`morning_at` と対。"
+          },
           "date": {
             "type": "string",
             "format": "date"
@@ -2883,6 +2898,29 @@
             "format": "int32",
             "description": "ライブ再計算の軸＝市場ブレンド首位（機械◎）。`recorded_axis` と異なるとき UI は乖離警告を出す（#388）。",
             "minimum": 0
+          },
+          "morning_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "朝時点（初回スイープ）の取得時刻 RFC3339（#448）。snapshot が複数ある発走前レースのみ非 `null`。\nUI はこれが非 `null` の時だけ「朝↔現比較」を出す（`null` は従来どおり現時点のみ）。"
+          },
+          "morning_hit_prob": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "朝時点オッズで再計算したポートフォリオ的中確率（#448）。"
+          },
+          "morning_roi": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "朝時点オッズで再計算したポートフォリオ ROI（#448。確率・軸・budget は現時点と同一）。"
           },
           "odds_available": {
             "type": "boolean",

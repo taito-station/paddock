@@ -787,6 +787,20 @@ pub trait RaceCardRepository: Send + Sync {
     ) -> impl Future<Output = Result<HashMap<RaceId, String>>> + Send;
 }
 
+/// 朝時点（初回スイープ）オッズと、その取得時刻・最新取得時刻（#448 朝↔現比較）。
+///
+/// `odds` は `race_odds_snapshots` の最小 `fetched_at` 行群を再構成したもの。`morning_at`/`latest_at`
+/// は UTC(RFC3339) 文字列（表示は呼び出し側で JST 整形）。snapshot が 1 本のみ（morning==latest）で
+/// 比較の意味が無い場合はそもそも `Some` を返さない運用（[`OddsRepository::find_race_odds_morning`]）。
+#[derive(Debug, Clone)]
+pub struct MorningRaceOdds {
+    pub odds: RaceOdds,
+    /// 初回スイープ（＝朝時点）の取得時刻。
+    pub morning_at: String,
+    /// 最新スイープ（＝現時点）の取得時刻。
+    pub latest_at: String,
+}
+
 /// レースオッズ（`race_odds`）の保存・取得。
 pub trait OddsRepository: Send + Sync {
     /// 1 レース分のオッズ（行単位）を upsert する。`race_odds` の主キー
@@ -802,6 +816,13 @@ pub trait OddsRepository: Send + Sync {
         race_id: &RaceId,
         as_of: Option<NaiveDate>,
     ) -> impl Future<Output = Result<Option<RaceOdds>>> + Send;
+
+    /// 朝時点（初回スイープ）オッズを `race_odds_snapshots` の最小 `fetched_at` から復元する（#448）。
+    /// 盤の「朝↔現比較」用。snapshot が 0 件、または 1 本のみ（朝==現で比較不能）なら `None`。
+    fn find_race_odds_morning(
+        &self,
+        race_id: &RaceId,
+    ) -> impl Future<Output = Result<Option<MorningRaceOdds>>> + Send;
 
     /// `race_odds_snapshots`（append-only 履歴, #232）のうち `fetched_at` の日付が `before`
     /// より前の行を削除し、削除行数を返す（retention/パージ, #234）。最新キャッシュ `race_odds` は

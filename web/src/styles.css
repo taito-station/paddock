@@ -639,6 +639,21 @@ button:disabled {
   font-variant-numeric: tabular-nums;
   color: var(--text);
 }
+/* 朝→現の単勝変動矢印（#448）。▲人気化＝妙味減（警告色）／△妙味＝過小人気化（アクセント色）。 */
+.horse-col .stats .odds-move {
+  margin-left: 0.25rem;
+  font-weight: 700;
+}
+.odds-move.odds-pop {
+  color: var(--warn);
+}
+.odds-move.odds-value {
+  color: var(--accent);
+}
+/* 盤サマリの朝ROI→現ROI 比較（#448）。 */
+.board-summary .morning-roi {
+  font-variant-numeric: tabular-nums;
+}
 .flags {
   display: flex;
   flex-wrap: wrap;

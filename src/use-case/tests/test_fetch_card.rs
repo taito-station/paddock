@@ -258,6 +258,12 @@ impl OddsRepository for RecordingRepo {
     ) -> Result<Option<paddock_domain::RaceOdds>> {
         unimplemented!()
     }
+    async fn find_race_odds_morning(
+        &self,
+        _race_id: &RaceId,
+    ) -> Result<Option<paddock_use_case::repository::MorningRaceOdds>> {
+        Ok(None)
+    }
     async fn purge_race_odds_snapshots(&self, _before: NaiveDate) -> Result<u64> {
         Ok(0)
     }
