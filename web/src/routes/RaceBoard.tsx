@@ -329,7 +329,7 @@ export function RaceBoard() {
               />
               モデル値（純 α=1.0）を表示
             </label>
-            {/* 朝比較トグル（#448）。朝 snapshot がある発走前レースのみ描く（無ければ列自体が出ない）。 */}
+            {/* 朝比較トグル（#448）。朝 complete snapshot があるレースのみ描く（無ければ列自体が出ない）。 */}
             {d.morning_at != null && (
               <label className="model-toggle">
                 <input
