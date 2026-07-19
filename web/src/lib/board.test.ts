@@ -7,7 +7,9 @@ import {
   heatColor,
   heatIntensity,
   markSymbol,
+  snapshotClock,
   sortByModelRank,
+  winOddsMove,
   type BoardHorse,
 } from "./board";
 
@@ -80,5 +82,39 @@ describe("sortByModelRank", () => {
       ({ horse_num: num, model_rank: rank }) as BoardHorse;
     const sorted = sortByModelRank([h(5, 3), h(2, 1), h(9, 1)]);
     expect(sorted.map((x) => x.horse_num)).toEqual([2, 9, 5]);
+  });
+});
+
+describe("winOddsMove", () => {
+  it("オッズ下落＝人気化（▲・妙味減）", () => {
+    const m = winOddsMove(4.0, 3.0);
+    expect(m?.symbol).toBe("▲");
+    expect(m?.cls).toBe("odds-pop");
+  });
+  it("オッズ上昇＝過小人気化（△・妙味）", () => {
+    const m = winOddsMove(3.0, 4.0);
+    expect(m?.symbol).toBe("△");
+    expect(m?.cls).toBe("odds-value");
+  });
+  it("変化が刻み未満（1%未満）は矢印なし", () => {
+    expect(winOddsMove(4.0, 4.02)).toBeNull();
+  });
+  it("朝・現いずれか欠落・非正値は null（両側を対称にガード）", () => {
+    expect(winOddsMove(null, 4.0)).toBeNull();
+    expect(winOddsMove(4.0, undefined)).toBeNull();
+    expect(winOddsMove(0, 4.0)).toBeNull();
+    expect(winOddsMove(4.0, 0)).toBeNull();
+  });
+});
+
+describe("snapshotClock", () => {
+  it("RFC3339(UTC) を JST の HH:MM に整形", () => {
+    // 00:05 UTC = 09:05 JST
+    expect(snapshotClock("2026-07-19T00:05:00Z")).toBe("09:05");
+  });
+  it("空・不正入力は空文字（表記を壊さない）", () => {
+    expect(snapshotClock(null)).toBe("");
+    expect(snapshotClock(undefined)).toBe("");
+    expect(snapshotClock("not-a-date")).toBe("");
   });
 });

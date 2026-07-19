@@ -65,6 +65,17 @@ pub struct RaceBoard {
     pub race_comment: Option<String>,
     /// 結果確定フラグ（#381。`results` に着順ありの行が 1 件以上）。web の「⚫終」判定・着順表示に使う。
     pub result_confirmed: bool,
+    /// 朝時点（最初にフル盤成立した snapshot）の取得時刻 RFC3339（#448）。朝 complete と最新が別時刻の
+    /// レースで `Some`（発走前が主用途だが、終了レースでも複数時点の完全 snapshot があれば朝→確定の
+    /// 比較として出る）。単複のみ履歴・snapshot 0/1 本（比較不能）・非開催は `None`＝盤は現時点のみ。
+    pub morning_at: Option<String>,
+    /// 現時点（最新スイープ）の取得時刻 RFC3339（#448）。`morning_at` と対で `Some`。
+    pub current_at: Option<String>,
+    /// 朝時点オッズで再計算したポートフォリオ ROI（#448）。確率・軸・budget は現時点と同一、
+    /// 参照オッズだけ朝 snapshot に差し替えたもの。`morning_at` が `Some` かつ買い目が組めた時のみ `Some`。
+    pub morning_roi: Option<f64>,
+    /// 朝時点オッズで再計算したポートフォリオ的中確率（#448）。`morning_roi` と対。
+    pub morning_hit_prob: Option<f64>,
     /// 全出走馬（truncate しない）。盤面順（`blended` と同順）。
     pub horses: Vec<BoardHorse>,
 }
@@ -101,6 +112,9 @@ pub struct BoardHorse {
     /// 市場implied 勝率（フィールド内 `1/単勝` 正規化。単勝未取得なら `None`）。
     pub market_implied: Option<f64>,
     pub win_odds: Option<f64>,
+    /// 朝時点（最初にフル盤成立した snapshot）の単勝オッズ（#448）。現時点 `win_odds` との差で「▲人気化／△妙味」を出す。
+    /// 朝 snapshot が無い（`RaceBoard::morning_at` が `None`）・当該馬が朝時点未取得なら `None`。
+    pub morning_win_odds: Option<f64>,
     pub place_odds_low: Option<f64>,
     pub place_odds_high: Option<f64>,
     /// 単勝人気（オッズ昇順ランク・1=1番人気。単勝未取得なら `None`）。乖離判定の市場順位も兼ねる。
@@ -151,6 +165,8 @@ impl<
             .await?;
         let card = self.race_card(race_id).await?;
         let odds = self.repository.find_race_odds(race_id, None).await?;
+        // 朝時点（最初にフル盤成立した snapshot）オッズ。複数時点の完全 snapshot があるレースで Some（#448）。
+        let morning = self.repository.find_race_odds_morning(race_id).await?;
 
         // 人手予想（印・短評）があれば overlay の材料に取得する（未保存なら None）。
         let pad = match card.as_ref() {
@@ -183,6 +199,40 @@ impl<
 
         let mut horses =
             build_board_horses(&views.blended, &views.pure, odds.as_ref(), card.as_ref());
+
+        // 朝↔現比較（#448）: 確率・軸・budget は現時点と同一のまま、参照オッズだけ朝 snapshot に
+        // 差し替えてポートフォリオを再計算する（＝軸ロック思想の可視化: 軸は動かさずオッズのズレだけ見る）。
+        // 各馬には朝時点の単勝オッズを後付けする。複数時点の完全 snapshot があるレースで働く。
+        // 朝 snapshot は complete 保証（find_race_odds_morning）なので通常 morning_roi/hit_prob は Some。
+        // 万一 ev が組めなくても両値 None に縮退するだけ（朝単勝列は残る。フロントは朝ROI行を別途
+        // morning_roi!=null で守る）。
+        let (morning_at, current_at, morning_roi, morning_hit_prob) = match morning.as_ref() {
+            Some(m) => {
+                let morning_portfolio = build_portfolio(
+                    &views.blended,
+                    &views.pure,
+                    &m.odds,
+                    budget,
+                    &PortfolioConfig {
+                        forced_axis,
+                        ..PortfolioConfig::default()
+                    },
+                );
+                for h in horses.iter_mut() {
+                    if let Ok(num) = HorseNum::try_from(h.horse_num) {
+                        h.morning_win_odds = m.odds.win.get(&num).map(|v| v.value());
+                    }
+                }
+                (
+                    Some(m.morning_at.clone()),
+                    Some(m.latest_at.clone()),
+                    morning_portfolio.ev.as_ref().map(|e| e.roi),
+                    morning_portfolio.ev.as_ref().map(|e| e.hit_prob),
+                )
+            }
+            None => (None, None, None, None),
+        };
+
         // 確定着順（#381）を results から後付けする。着順ありの行が 1 件でもあれば結果確定。
         let finishing = self.repository.find_finishing_positions(race_id).await?;
         let result_confirmed = !finishing.is_empty();
@@ -241,6 +291,10 @@ impl<
             confusion,
             race_comment,
             result_confirmed,
+            morning_at,
+            current_at,
+            morning_roi,
+            morning_hit_prob,
             horses,
         })
     }
@@ -299,6 +353,8 @@ fn build_board_horses(
                 pure_show_prob,
                 market_implied: implied.get(&num).copied(),
                 win_odds,
+                // 朝時点オッズは race_board で朝 snapshot から後付けする（純関数は現時点のみ扱う）。
+                morning_win_odds: None,
                 place_odds_low: place.map(|p| p.low.value()),
                 place_odds_high: place.map(|p| p.high.value()),
                 popularity: pop,

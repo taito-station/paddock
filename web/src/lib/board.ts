@@ -61,6 +61,42 @@ export function heatColor(value: number, max: number): string {
   return `hsl(${hue.toFixed(0)}, 70%, ${light.toFixed(0)}%)`;
 }
 
+// 朝↔現比較（#448）。snapshot 取得時刻（RFC3339・UTC）を JST の HH:MM に整形。
+// 盤の「朝 09:05 → 現 14:30」表記に使う。不正な文字列は空を返し表記を壊さない。
+export function snapshotClock(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const t = new Date(iso);
+  if (Number.isNaN(t.getTime())) return "";
+  return t.toLocaleTimeString("ja-JP", {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Asia/Tokyo",
+  });
+}
+
+// 朝→現の単勝オッズ変動（#448）。オッズ下落＝人気化（▲・妙味減）、上昇＝妙味（△・過小人気化）。
+// 朝または現オッズ欠落、もしくは変化が刻み未満（1% 未満）のときは矢印を出さない（null）。
+export type OddsMove = {
+  symbol: "▲" | "△";
+  cls: "odds-pop" | "odds-value";
+  label: string;
+};
+export function winOddsMove(
+  morning: number | null | undefined,
+  current: number | null | undefined,
+): OddsMove | null {
+  // 朝・現とも正のオッズが揃っている時だけ判定する（DB は ≥1.0 保証だが対称に防御）。
+  if (morning == null || current == null || !(morning > 0) || !(current > 0)) {
+    return null;
+  }
+  // 相対 1% 未満の変化はノイズ床として「動いていない」扱いにする（単勝の刻みはオッズ帯で
+  // 異なるため、tick 厳密ではなく相対しきい値で近似する）。
+  if (Math.abs(current / morning - 1) < 0.01) return null;
+  return current < morning
+    ? { symbol: "▲", cls: "odds-pop", label: "朝より人気化（オッズ下落＝妙味減）" }
+    : { symbol: "△", cls: "odds-value", label: "朝より過小人気化（オッズ上昇＝妙味）" };
+}
+
 // モデル勝率順（昇順=1位が先頭）。同順位は馬番昇順で安定。
 export function sortByModelRank(horses: BoardHorse[]): BoardHorse[] {
   return [...horses].sort(

@@ -8,6 +8,7 @@ import {
   boardBudget,
   effectiveCap,
   keepBoardPlaceholder,
+  snapshotClock,
   sortByModelRank,
 } from "../lib/board";
 import { isUnit100, toAmount } from "../lib/bets";
@@ -32,6 +33,10 @@ export function RaceBoard() {
   // 常時表示し、市場・ブレンドと並べて乖離を読めるようにする。モデル勝率が予想の主眼のため隠さない。
   // OFF にするとブレンド＋市場のみに畳める（情報量を絞りたいとき用）。
   const [showModel, setShowModel] = useState(true);
+  // 朝↔現比較（#448）: 各馬の朝単勝＋変動矢印と、朝ROI→現ROI を出すか。既定 ON。
+  // ただし朝 snapshot が無い（morning_at=null＝非開催・スイープ前・1本のみ）レースでは列自体を出さない
+  // （トグルも描かない）ので、既存の見え方は壊れない。
+  const [showMorning, setShowMorning] = useState(true);
   // フォーカス管理（a11y）: パネルを開いた馬カラム（trigger）を覚えておき、閉じたら戻す。
   // 開いたらパネル内（閉じるボタン）へフォーカスを移す。
   const triggerRef = useRef<HTMLElement | null>(null);
@@ -280,6 +285,30 @@ export function RaceBoard() {
                 ROI {(d.roi * 100).toFixed(1)}% / 的中 {(d.hit_prob * 100).toFixed(1)}%
               </span>
             )}
+            {/* 朝↔現の ROI 比較（#448）。軸・確率・予算は固定のまま、参照オッズだけ朝 snapshot に
+                差し替えて再計算した ROI。朝の +EV が直前で剥がれる/妙味が出るのを数値で体感する補助
+                （判断の一次データは現時点＝唯一の正。ADR 0055/0060）。 */}
+            {showMorning &&
+              d.morning_at != null &&
+              d.morning_roi != null &&
+              d.roi != null && (
+                <span
+                  className="muted morning-roi"
+                  title={`朝 ${snapshotClock(d.morning_at)} → 現 ${snapshotClock(
+                    d.current_at,
+                  )}。軸・確率・予算を固定し参照オッズだけ朝時点に差し替えた ROI。判断は現時点の値で。`}
+                >
+                  朝ROI {(d.morning_roi * 100).toFixed(1)}% → 現ROI{" "}
+                  {(d.roi * 100).toFixed(1)}%
+                  {d.morning_hit_prob != null && d.hit_prob != null && (
+                    <>
+                      {" "}
+                      / 的中 {(d.morning_hit_prob * 100).toFixed(1)}% →{" "}
+                      {(d.hit_prob * 100).toFixed(1)}%
+                    </>
+                  )}
+                </span>
+              )}
             {!d.odds_available && (
               <span className="chip chip-danger">オッズ未取得</span>
             )}
@@ -300,6 +329,18 @@ export function RaceBoard() {
               />
               モデル値（純 α=1.0）を表示
             </label>
+            {/* 朝比較トグル（#448）。朝 complete snapshot があるレースのみ描く（無ければ列自体が出ない）。 */}
+            {d.morning_at != null && (
+              <label className="model-toggle">
+                <input
+                  type="checkbox"
+                  checked={showMorning}
+                  onChange={(e) => setShowMorning(e.target.checked)}
+                />
+                朝との比較（朝{snapshotClock(d.morning_at)}→現
+                {snapshotClock(d.current_at)}）
+              </label>
+            )}
           </div>
 
           {/* 全頭横並び盤（ブレンド勝率順＝model_rank・truncate しない） */}
@@ -311,6 +352,7 @@ export function RaceBoard() {
                   horse={h}
                   maxWin={maxWin}
                   showModel={showModel}
+                  showMorning={showMorning && d.morning_at != null}
                   isSelected={selectedHorse === h.horse_num}
                   onSelect={handleSelect}
                 />

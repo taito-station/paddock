@@ -41,7 +41,7 @@ use paddock_use_case::repository::{
     ConditionalGateStatsRow, CourseStatsRow, FetchDownload, FetchFailure, FetchRecord,
     FetchRepository, FetchStatus, HorseHistoryRepository, HorseRecencyStats, HorseStatsRow,
     JockeyStatsRow, LiveEvRepository, LiveEvSnapshot, LiveEvSnapshotRecord, MarkStatRow,
-    MarkStatsFilter, NameMatchRepository, OddsRepository, PadPredictionRepository,
+    MarkStatsFilter, MorningRaceOdds, NameMatchRepository, OddsRepository, PadPredictionRepository,
     PredictBetRecord, PredictRaceConditionRecord, PredictSessionRecord, PredictSessionRepository,
     PredictionFilter, PredictionSearchResult, RaceCardRepository, RaceOddsRecord, RaceRepository,
     RaceResultRepository, StatsRepository, TrainerStatsRow,
@@ -366,6 +366,12 @@ impl OddsRepository for PostgresRepository {
         as_of: Option<NaiveDate>,
     ) -> UcResult<Option<RaceOdds>> {
         find_race_odds::find_race_odds(&self.pool, race_id, as_of)
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn find_race_odds_morning(&self, race_id: &RaceId) -> UcResult<Option<MorningRaceOdds>> {
+        find_race_odds::find_race_odds_morning(&self.pool, race_id)
             .await
             .map_err(Into::into)
     }

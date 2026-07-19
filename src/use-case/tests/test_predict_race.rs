@@ -248,6 +248,12 @@ impl OddsRepository for MockRepo {
     ) -> Result<Option<paddock_domain::RaceOdds>> {
         Ok(self.odds.clone())
     }
+    async fn find_race_odds_morning(
+        &self,
+        _: &RaceId,
+    ) -> Result<Option<paddock_use_case::repository::MorningRaceOdds>> {
+        Ok(None)
+    }
     async fn purge_race_odds_snapshots(&self, _: chrono::NaiveDate) -> Result<u64> {
         Ok(0)
     }

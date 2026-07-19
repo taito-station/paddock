@@ -302,6 +302,9 @@ pub struct BoardHorseSchema {
     /// 市場implied 勝率（フィールド内 `1/単勝` 正規化。単勝未取得なら `null`）。
     pub market_implied: Option<f64>,
     pub win_odds: Option<f64>,
+    /// 朝時点（最初にフル盤成立した snapshot）の単勝オッズ（#448）。`win_odds` との差で「▲人気化／△妙味」を出す。
+    /// 朝 snapshot が無い（`morning_at=null`）・当該馬が朝未取得なら `null`。
+    pub morning_win_odds: Option<f64>,
     pub place_odds_low: Option<f64>,
     pub place_odds_high: Option<f64>,
     /// 単勝人気（1=1番人気。単勝未取得なら `null`）。乖離判定の市場順位も兼ねる。
@@ -363,6 +366,16 @@ pub struct RaceBoardResponse {
     pub race_comment: Option<String>,
     /// 結果確定フラグ（#381。`results` に着順ありの行が 1 件以上）。web の「⚫終」判定に使う。
     pub result_confirmed: bool,
+    /// 朝時点（最初にフル盤成立した snapshot）の取得時刻 RFC3339（#448）。朝 complete と最新が別時刻の
+    /// レースで非 `null`（発走前が主用途だが、終了レースでも複数時点の完全 snapshot があれば出る）。
+    /// UI はこれが非 `null` の時だけ「朝↔現比較」を出す（`null` は従来どおり現時点のみ）。
+    pub morning_at: Option<String>,
+    /// 現時点（最新スイープ）の取得時刻 RFC3339（#448）。`morning_at` と対。
+    pub current_at: Option<String>,
+    /// 朝時点オッズで再計算したポートフォリオ ROI（#448。確率・軸・budget は現時点と同一）。
+    pub morning_roi: Option<f64>,
+    /// 朝時点オッズで再計算したポートフォリオ的中確率（#448）。
+    pub morning_hit_prob: Option<f64>,
     pub horses: Vec<BoardHorseSchema>,
 }
 
@@ -420,6 +433,10 @@ impl From<RaceBoard> for RaceBoardResponse {
             },
             race_comment: b.race_comment,
             result_confirmed: b.result_confirmed,
+            morning_at: b.morning_at,
+            current_at: b.current_at,
+            morning_roi: b.morning_roi,
+            morning_hit_prob: b.morning_hit_prob,
             horses: b
                 .horses
                 .into_iter()
@@ -436,6 +453,7 @@ impl From<RaceBoard> for RaceBoardResponse {
                     pure_show_prob: h.pure_show_prob,
                     market_implied: h.market_implied,
                     win_odds: h.win_odds,
+                    morning_win_odds: h.morning_win_odds,
                     place_odds_low: h.place_odds_low,
                     place_odds_high: h.place_odds_high,
                     popularity: h.popularity,

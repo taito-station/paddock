@@ -288,6 +288,12 @@ impl OddsRepository for MockRepo {
     async fn save_race_odds(&self, _: &paddock_use_case::repository::RaceOddsRecord) -> Result<()> {
         unimplemented!()
     }
+    async fn find_race_odds_morning(
+        &self,
+        _race_id: &RaceId,
+    ) -> Result<Option<paddock_use_case::repository::MorningRaceOdds>> {
+        Ok(None)
+    }
     async fn purge_race_odds_snapshots(&self, _: NaiveDate) -> Result<u64> {
         Ok(0)
     }

@@ -455,6 +455,12 @@ export interface components {
              * @description モデル勝率順位（1=最上位）。
              */
             model_rank: number;
+            /**
+             * Format: double
+             * @description 朝時点（最初にフル盤成立した snapshot）の単勝オッズ（#448）。`win_odds` との差で「▲人気化／△妙味」を出す。
+             *     朝 snapshot が無い（`morning_at=null`）・当該馬が朝未取得なら `null`。
+             */
+            morning_win_odds?: number | null;
             /** Format: double */
             place_odds_high?: number | null;
             /** Format: double */
@@ -898,6 +904,8 @@ export interface components {
             axis?: number | null;
             bets: components["schemas"]["RecommendationBet"][];
             confusion: components["schemas"]["ConfusionSchema"];
+            /** @description 現時点（最新スイープ）の取得時刻 RFC3339（#448）。`morning_at` と対。 */
+            current_at?: string | null;
             /** Format: date */
             date: string;
             /** Format: int32 */
@@ -912,6 +920,22 @@ export interface components {
              * @description ライブ再計算の軸＝市場ブレンド首位（機械◎）。`recorded_axis` と異なるとき UI は乖離警告を出す（#388）。
              */
             live_axis?: number | null;
+            /**
+             * @description 朝時点（最初にフル盤成立した snapshot）の取得時刻 RFC3339（#448）。朝 complete と最新が別時刻の
+             *     レースで非 `null`（発走前が主用途だが、終了レースでも複数時点の完全 snapshot があれば出る）。
+             *     UI はこれが非 `null` の時だけ「朝↔現比較」を出す（`null` は従来どおり現時点のみ）。
+             */
+            morning_at?: string | null;
+            /**
+             * Format: double
+             * @description 朝時点オッズで再計算したポートフォリオ的中確率（#448）。
+             */
+            morning_hit_prob?: number | null;
+            /**
+             * Format: double
+             * @description 朝時点オッズで再計算したポートフォリオ ROI（#448。確率・軸・budget は現時点と同一）。
+             */
+            morning_roi?: number | null;
             /** @description 保存オッズ（#51）の有無。false のとき `bets` は必ず空。 */
             odds_available: boolean;
             partners: number[];

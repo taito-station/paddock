@@ -3,6 +3,7 @@ use paddock_domain::{
     BetType, HorseNum, OddsValue, OrderedPair, OrderedTriple, Pair, PlaceOdds, RaceId, RaceOdds,
     Triple,
 };
+use paddock_use_case::repository::MorningRaceOdds;
 use sqlx::PgPool;
 
 use crate::error::{Error, Result};
@@ -49,6 +50,94 @@ pub async fn find_race_odds(
     .fetch_all(pool)
     .await?;
 
+    rows_to_race_odds(race_id, rows)
+}
+
+/// 朝時点オッズを `race_odds_snapshots`（append-only 履歴, #232）から復元する。
+///
+/// 「朝↔現の比較」（#448）用。朝時点＝**最初にフル盤（買い目が組める完全なオッズ）が成立した
+/// スナップショット**を採る。単純な最小 `fetched_at` を採らないのは、早朝の odds-collect スイープが
+/// 単複のみ（exotic 無し）で、それだと [`build_portfolio`](paddock_domain::build_portfolio) の EV/ROI が
+/// 組めず朝 ROI が出ないため。exotic は fetch-card が全券種を 1 トランザクションで保存する（＝ある時刻に
+/// exotic があれば同時刻に win＋全 exotic が揃い [`RaceOdds::is_complete`] を満たす）ので、trio を持つ
+/// 最古 `fetched_at` から昇順に見て最初に complete になる時刻を朝時点とする。**現時点の盤が ROI を
+/// 出せる（＝どこかで fetch-card 済み）なら、その保存は snapshots にも積まれるため朝 complete も必ず存在する。**
+///
+/// 現時点の [`find_race_odds`]（`race_odds` 最新キャッシュ）と同じ行変換（[`rows_to_race_odds`]）を共有する。
+/// 朝 complete が無い（単複しか履歴が無い＝現時点も ROI を出せない）レース、または朝 complete の時刻が
+/// 最新取得時刻と同一（比較する「差」が無い）場合は `None`（UI は縮退し比較を出さない）。
+/// `fetched_at` は UTC(RFC3339)・辞書順＝時刻順。
+pub async fn find_race_odds_morning(
+    pool: &PgPool,
+    race_id: &RaceId,
+) -> Result<Option<MorningRaceOdds>> {
+    // 現時点（最新スイープ）の取得時刻＝snapshots の全券種横断の最大 fetched_at。盤の現時点 ROI は
+    // find_race_odds(.., None)（race_odds 最新キャッシュ・キー単位 UPSERT のマージ）から算出する。
+    // 最後の save が全券種（fetch-card）なら現 ROI の全オッズが latest_at 時刻で揃うが、最後が単複のみ
+    // スイープ（odds-collect）だと exotic 行は前回 fetch-card 時刻のまま latest_at だけ進む。つまり
+    // latest_at は「最後にオッズが更新された時刻」で、現時点ラベル現{latest_at}の根拠として妥当だが
+    // 全券種がその時刻とは限らない（表示ラベルの限界。win 中心のズレ可視化が主眼で ROI 値の正しさには
+    // 影響しない）。snapshot 0 件なら NULL → 比較なし。
+    let latest_at: Option<String> =
+        sqlx::query_scalar("SELECT MAX(fetched_at) FROM race_odds_snapshots WHERE race_id = $1")
+            .bind(race_id.value())
+            .fetch_one(pool)
+            .await?;
+    let Some(latest_at) = latest_at else {
+        return Ok(None);
+    };
+
+    // フル盤成立の候補時刻＝trio（is_complete 必須券種）を持つ fetched_at を古い順に。
+    // 単複のみの早朝スイープは exotic を持たないので候補から自然に外れる（走査を最小化）。
+    let candidate_times: Vec<String> = sqlx::query_scalar(
+        r#"
+        SELECT DISTINCT fetched_at
+        FROM race_odds_snapshots
+        WHERE race_id = $1 AND bet_type = 'trio'
+        ORDER BY fetched_at ASC
+        "#,
+    )
+    .bind(race_id.value())
+    .fetch_all(pool)
+    .await?;
+
+    for morning_at in candidate_times {
+        let rows: Vec<OddsRow> = sqlx::query_as(
+            r#"
+            SELECT bet_type, combination_key, odds, odds_high
+            FROM race_odds_snapshots
+            WHERE race_id = $1 AND fetched_at = $2
+            "#,
+        )
+        .bind(race_id.value())
+        .bind(&morning_at)
+        .fetch_all(pool)
+        .await?;
+
+        let Some(odds) = rows_to_race_odds(race_id, rows)? else {
+            continue;
+        };
+        // 買い目が組める完全なオッズになった最初の時刻を朝時点とする。
+        if !odds.is_complete() {
+            continue;
+        }
+        // 朝 complete が最新取得時刻と同一（比較する「差」が無い）なら縮退。
+        if morning_at == latest_at {
+            return Ok(None);
+        }
+        return Ok(Some(MorningRaceOdds {
+            odds,
+            morning_at,
+            latest_at,
+        }));
+    }
+    Ok(None)
+}
+
+/// `race_odds` / `race_odds_snapshots` の券種行を [`RaceOdds`] に再構成する共有ロジック。
+/// 行が空なら `None`。未知 `bet_type` の読み飛ばし・値域違反の warn+skip・band 構造不正の stop は
+/// [`find_race_odds`] の doc の通り（現時点/朝時点で挙動を揃えるためここに集約）。
+fn rows_to_race_odds(race_id: &RaceId, rows: Vec<OddsRow>) -> Result<Option<RaceOdds>> {
     if rows.is_empty() {
         return Ok(None);
     }

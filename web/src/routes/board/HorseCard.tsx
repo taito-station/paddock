@@ -1,5 +1,10 @@
 import { pct } from "../../lib/format";
-import { type BoardHorse, heatColor, markSymbol } from "../../lib/board";
+import {
+  type BoardHorse,
+  heatColor,
+  markSymbol,
+  winOddsMove,
+} from "../../lib/board";
 import { placeBand } from "../../lib/live";
 
 // 全頭横並び盤の 1 馬カラム（#411 で RaceBoard から抽出）。数値密度を保ちつつ、書評のある馬は
@@ -9,17 +14,21 @@ export function HorseCard({
   horse: h,
   maxWin,
   showModel,
+  showMorning,
   isSelected,
   onSelect,
 }: {
   horse: BoardHorse;
   maxWin: number;
   showModel: boolean;
+  showMorning: boolean;
   isSelected: boolean;
   onSelect: (horseNum: number, trigger: HTMLElement) => void;
 }) {
   // detail_lines はスキーマ上必須（string[]）。comment または根拠行があれば展開可。
   const hasDetail = !!h.comment || h.detail_lines.length > 0;
+  // 朝↔現の単勝変動（#448）。朝 snapshot が無い馬は null（矢印を出さない）。
+  const oddsMove = winOddsMove(h.morning_win_odds, h.win_odds);
   return (
     <div
       className={
@@ -120,6 +129,24 @@ export function HorseCard({
           <dt>単勝</dt>
           <dd>{h.win_odds == null ? "-" : h.win_odds.toFixed(1)}</dd>
         </div>
+        {/* 朝時点の単勝オッズ＋朝→現の変動矢印（#448）。朝比較 ON かつ朝 snapshot がある時のみ。
+            ▲＝オッズ下落＝人気化（妙味減）／△＝上昇＝過小人気化（妙味）。 */}
+        {showMorning && h.morning_win_odds != null && (
+          <div title="朝時点（最初にフル盤成立した snapshot）の単勝オッズと、朝→現の変動。▲人気化（妙味減）／△妙味（過小人気化）">
+            <dt>朝単</dt>
+            <dd>
+              {h.morning_win_odds.toFixed(1)}
+              {oddsMove && (
+                <span
+                  className={`odds-move ${oddsMove.cls}`}
+                  title={oddsMove.label}
+                >
+                  {oddsMove.symbol}
+                </span>
+              )}
+            </dd>
+          </div>
+        )}
         <div>
           <dt>複勝</dt>
           <dd>{placeBand(h.place_odds_low, h.place_odds_high)}</dd>

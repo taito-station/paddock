@@ -756,6 +756,131 @@ async fn purge_deletes_old_snapshots_keeps_recent(pool: sqlx::PgPool) {
     assert!((odds.win.get(&horse(1)).unwrap().value() - 4.0).abs() < 1e-9);
 }
 
+/// 指定 UTC 日時に「フル盤成立」の完全なオッズ（win + 全 exotic）を保存する（#448 朝↔現比較テスト用）。
+/// win 1 頭ぶんの値を可変にし、朝↔現でどの値が採られるかを弁別できるようにする。
+async fn save_complete_at(repo: &PostgresRepository, at: DateTime<Utc>, win1: f64) {
+    let pair = Pair::try_from((horse(1), horse(2))).unwrap();
+    let opair = OrderedPair::try_from((horse(3), horse(1))).unwrap();
+    let triple = Triple::try_from((horse(1), horse(2), horse(3))).unwrap();
+    let otriple = OrderedTriple::try_from((horse(5), horse(2), horse(7))).unwrap();
+    repo.save_race_odds(&RaceOddsRecord {
+        race_id: race_id(),
+        fetched_at: at,
+        rows: vec![
+            OddsRow {
+                bet_type: "win".to_string(),
+                combination_key: "1".to_string(),
+                odds: win1,
+                odds_high: None,
+                popularity: None,
+            },
+            OddsRow::quinella(pair, 12.4),
+            OddsRow::wide(pair, 3.1, 4.8),
+            OddsRow::exacta(opair, 25.0),
+            OddsRow::trio(triple, 88.0),
+            OddsRow::trifecta(otriple, 410.0),
+        ],
+    })
+    .await
+    .unwrap();
+}
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn morning_returns_earliest_complete_snapshot_with_bounds(pool: sqlx::PgPool) {
+    // #448: 朝時点＝最初にフル盤（買い目が組める完全なオッズ）が成立したスナップショット。
+    // 単複のみの早朝スイープは skip し、win+全 exotic が揃った最古時刻の win 値を返す。
+    let repo = PostgresRepository::new(pool);
+    // 早朝の単複のみスイープ(00:30)は朝時点に採られない（exotic 無し）。
+    save_win_at(
+        &repo,
+        Utc.with_ymd_and_hms(2026, 4, 19, 0, 30, 0).unwrap(),
+        9.9,
+    )
+    .await;
+    // フル盤成立(01:00 UTC=10:00 JST) win#1=3.5 ＝これが朝時点。
+    save_complete_at(
+        &repo,
+        Utc.with_ymd_and_hms(2026, 4, 19, 1, 0, 0).unwrap(),
+        3.5,
+    )
+    .await;
+    // 現時点(07:00 UTC=16:00 JST)は単複のみの後続スイープでもよい（latest_at を進める）。
+    save_win_at(
+        &repo,
+        Utc.with_ymd_and_hms(2026, 4, 19, 7, 0, 0).unwrap(),
+        6.0,
+    )
+    .await;
+
+    let m = repo
+        .find_race_odds_morning(&race_id())
+        .await
+        .unwrap()
+        .expect("フル盤成立スナップショットがあるので Some");
+    assert!(
+        (m.odds.win.get(&horse(1)).unwrap().value() - 3.5).abs() < 1e-9,
+        "朝時点は最初に complete になった 01:00 の win(3.5)。単複のみ 00:30 でも最新 07:00 でもない"
+    );
+    assert!(
+        m.odds.is_complete(),
+        "朝時点オッズは買い目が組める complete"
+    );
+    assert!(m.morning_at.starts_with("2026-04-19T01:00:00"));
+    assert!(m.latest_at.starts_with("2026-04-19T07:00:00"));
+}
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn morning_is_none_when_only_win_place_history(pool: sqlx::PgPool) {
+    // 単複しか履歴が無い（fetch-card 未実施＝現時点も ROI を出せない）レースは朝比較なし → None。
+    let repo = PostgresRepository::new(pool);
+    save_win_at(
+        &repo,
+        Utc.with_ymd_and_hms(2026, 4, 19, 1, 0, 0).unwrap(),
+        3.5,
+    )
+    .await;
+    save_win_at(
+        &repo,
+        Utc.with_ymd_and_hms(2026, 4, 19, 7, 0, 0).unwrap(),
+        6.0,
+    )
+    .await;
+    assert!(
+        repo.find_race_odds_morning(&race_id())
+            .await
+            .unwrap()
+            .is_none(),
+        "complete スナップショットが無ければ None"
+    );
+}
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn morning_is_none_on_single_complete_snapshot(pool: sqlx::PgPool) {
+    // フル盤が 1 時刻のみ（朝 complete == 最新）＝比較する「差」が無いので None。
+    let repo = PostgresRepository::new(pool);
+    save_complete_at(&repo, fetched_at(), 3.5).await;
+    assert!(
+        repo.find_race_odds_morning(&race_id())
+            .await
+            .unwrap()
+            .is_none(),
+        "朝 complete が最新と同一なら None"
+    );
+}
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn morning_is_none_when_absent(pool: sqlx::PgPool) {
+    // スナップショット 0 件（非開催・スイープ前）は None。
+    let repo = PostgresRepository::new(pool);
+    assert!(
+        repo.find_race_odds_morning(&race_id())
+            .await
+            .unwrap()
+            .is_none(),
+        "0 件は None"
+    );
+}
+
 #[sqlx::test(migrations = "../../../deployments/db/migrations")]
 async fn purge_is_strict_before_cutoff(pool: sqlx::PgPool) {
     // cutoff 当日（date(fetched_at) == cutoff）は残す（厳密 `<`）。翌日 cutoff で削除される。

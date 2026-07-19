@@ -209,6 +209,7 @@ mod tests {
             pure_show_prob: 0.0,
             market_implied: None,
             win_odds: None,
+            morning_win_odds: None,
             place_odds_low: None,
             place_odds_high: None,
             popularity: is_value.then_some(8),
