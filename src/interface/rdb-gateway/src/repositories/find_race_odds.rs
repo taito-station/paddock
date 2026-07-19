@@ -71,11 +71,13 @@ pub async fn find_race_odds_morning(
     pool: &PgPool,
     race_id: &RaceId,
 ) -> Result<Option<MorningRaceOdds>> {
-    // 現時点（最新スイープ）の取得時刻＝snapshots の最大 fetched_at。盤の現時点 ROI は
-    // find_race_odds(.., None)（race_odds 最新キャッシュ）から算出するが、save_race_odds は
-    // race_odds と race_odds_snapshots を同一トランザクションで書くため、最新保存の時刻は両者で一致し
-    // latest_at は「最新にオッズが更新された時刻」を正しく表す（現時点ラベル現{latest_at}の根拠）。
-    // snapshot 0 件なら NULL → 比較なし。
+    // 現時点（最新スイープ）の取得時刻＝snapshots の全券種横断の最大 fetched_at。盤の現時点 ROI は
+    // find_race_odds(.., None)（race_odds 最新キャッシュ・キー単位 UPSERT のマージ）から算出する。
+    // 最後の save が全券種（fetch-card）なら現 ROI の全オッズが latest_at 時刻で揃うが、最後が単複のみ
+    // スイープ（odds-collect）だと exotic 行は前回 fetch-card 時刻のまま latest_at だけ進む。つまり
+    // latest_at は「最後にオッズが更新された時刻」で、現時点ラベル現{latest_at}の根拠として妥当だが
+    // 全券種がその時刻とは限らない（表示ラベルの限界。win 中心のズレ可視化が主眼で ROI 値の正しさには
+    // 影響しない）。snapshot 0 件なら NULL → 比較なし。
     let latest_at: Option<String> =
         sqlx::query_scalar("SELECT MAX(fetched_at) FROM race_odds_snapshots WHERE race_id = $1")
             .bind(race_id.value())

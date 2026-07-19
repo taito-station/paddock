@@ -89,7 +89,8 @@ export function winOddsMove(
   if (morning == null || current == null || !(morning > 0) || !(current > 0)) {
     return null;
   }
-  // 実オッズ刻み未満のノイズ（1% 未満の変化）は「動いていない」扱いにする。
+  // 相対 1% 未満の変化はノイズ床として「動いていない」扱いにする（単勝の刻みはオッズ帯で
+  // 異なるため、tick 厳密ではなく相対しきい値で近似する）。
   if (Math.abs(current / morning - 1) < 0.01) return null;
   return current < morning
     ? { symbol: "▲", cls: "odds-pop", label: "朝より人気化（オッズ下落＝妙味減）" }
