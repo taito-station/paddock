@@ -65,8 +65,9 @@ pub struct RaceBoard {
     pub race_comment: Option<String>,
     /// 結果確定フラグ（#381。`results` に着順ありの行が 1 件以上）。web の「⚫終」判定・着順表示に使う。
     pub result_confirmed: bool,
-    /// 朝時点（初回スイープ）の取得時刻 RFC3339（#448）。snapshot が複数ある発走前レースのみ `Some`。
-    /// snapshot 0/1 本（比較不能）・非開催は `None`＝盤は現時点のみ（従来の見え方）。
+    /// 朝時点（最初にフル盤成立した snapshot）の取得時刻 RFC3339（#448）。朝 complete と最新が別時刻の
+    /// レースで `Some`（発走前が主用途だが、終了レースでも複数時点の完全 snapshot があれば朝→確定の
+    /// 比較として出る）。単複のみ履歴・snapshot 0/1 本（比較不能）・非開催は `None`＝盤は現時点のみ。
     pub morning_at: Option<String>,
     /// 現時点（最新スイープ）の取得時刻 RFC3339（#448）。`morning_at` と対で `Some`。
     pub current_at: Option<String>,
@@ -164,7 +165,7 @@ impl<
             .await?;
         let card = self.race_card(race_id).await?;
         let odds = self.repository.find_race_odds(race_id, None).await?;
-        // 朝時点（初回スイープ）オッズ。snapshot が複数ある発走前レースのみ Some（#448）。
+        // 朝時点（最初にフル盤成立した snapshot）オッズ。複数時点の完全 snapshot があるレースで Some（#448）。
         let morning = self.repository.find_race_odds_morning(race_id).await?;
 
         // 人手予想（印・短評）があれば overlay の材料に取得する（未保存なら None）。
@@ -201,7 +202,7 @@ impl<
 
         // 朝↔現比較（#448）: 確率・軸・budget は現時点と同一のまま、参照オッズだけ朝 snapshot に
         // 差し替えてポートフォリオを再計算する（＝軸ロック思想の可視化: 軸は動かさずオッズのズレだけ見る）。
-        // 各馬には朝時点の単勝オッズを後付けする。snapshot が複数ある発走前レースのみ働く。
+        // 各馬には朝時点の単勝オッズを後付けする。複数時点の完全 snapshot があるレースで働く。
         // 朝 snapshot は complete 保証（find_race_odds_morning）なので通常 morning_roi/hit_prob は Some。
         // 万一 ev が組めなくても両値 None に縮退するだけ（朝単勝列は残る。フロントは朝ROI行を別途
         // morning_roi!=null で守る）。

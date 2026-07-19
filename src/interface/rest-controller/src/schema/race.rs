@@ -366,7 +366,8 @@ pub struct RaceBoardResponse {
     pub race_comment: Option<String>,
     /// 結果確定フラグ（#381。`results` に着順ありの行が 1 件以上）。web の「⚫終」判定に使う。
     pub result_confirmed: bool,
-    /// 朝時点（初回スイープ）の取得時刻 RFC3339（#448）。snapshot が複数ある発走前レースのみ非 `null`。
+    /// 朝時点（最初にフル盤成立した snapshot）の取得時刻 RFC3339（#448）。朝 complete と最新が別時刻の
+    /// レースで非 `null`（発走前が主用途だが、終了レースでも複数時点の完全 snapshot があれば出る）。
     /// UI はこれが非 `null` の時だけ「朝↔現比較」を出す（`null` は従来どおり現時点のみ）。
     pub morning_at: Option<String>,
     /// 現時点（最新スイープ）の取得時刻 RFC3339（#448）。`morning_at` と対。
