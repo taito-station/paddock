@@ -457,7 +457,7 @@ export interface components {
             model_rank: number;
             /**
              * Format: double
-             * @description 朝時点（初回スイープ）の単勝オッズ（#448）。`win_odds` との差で「▲人気化／△妙味」を出す。
+             * @description 朝時点（最初にフル盤成立した snapshot）の単勝オッズ（#448）。`win_odds` との差で「▲人気化／△妙味」を出す。
              *     朝 snapshot が無い（`morning_at=null`）・当該馬が朝未取得なら `null`。
              */
             morning_win_odds?: number | null;

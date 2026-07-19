@@ -302,7 +302,7 @@ pub struct BoardHorseSchema {
     /// 市場implied 勝率（フィールド内 `1/単勝` 正規化。単勝未取得なら `null`）。
     pub market_implied: Option<f64>,
     pub win_odds: Option<f64>,
-    /// 朝時点（初回スイープ）の単勝オッズ（#448）。`win_odds` との差で「▲人気化／△妙味」を出す。
+    /// 朝時点（最初にフル盤成立した snapshot）の単勝オッズ（#448）。`win_odds` との差で「▲人気化／△妙味」を出す。
     /// 朝 snapshot が無い（`morning_at=null`）・当該馬が朝未取得なら `null`。
     pub morning_win_odds: Option<f64>,
     pub place_odds_low: Option<f64>,
