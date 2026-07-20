@@ -309,7 +309,8 @@ async fn invalid_odds_row_is_skipped_not_errored(pool: sqlx::PgPool) {
     // combination_key は妥当だが odds が OddsValue の下限(>=1.0)を割る。
     // #468 で値域 CHECK を追加したため、「制約導入前の残骸 / 旧ダンプ取り込み由来の不正行」を
     // 抱えた DB を再現すべく、値域制約を一時的に外してから残骸を植え付ける（read 側 warn+skip は
-    // その種の DB のための多重防御であり、その経路をここで担保する）。
+    // その種の DB のための多重防御であり、その経路をここで担保する）。odds のみ違反させるため
+    // odds_range だけ外す（odds_high は NULL で odds_high_range を通るため DROP 不要）。
     sqlx::query("ALTER TABLE race_odds DROP CONSTRAINT ck_race_odds_odds_range")
         .execute(&repo.pool)
         .await
@@ -343,6 +344,7 @@ async fn band_invalid_odds_row_is_skipped_not_errored(pool: sqlx::PgPool) {
     // parse_band の値域違反 skip 経路（Ok(None)）を担保する: 構造不正(odds_high NULL/low>high)の Err
     // とは別経路で、当該行のみ読み飛ばしセッションを止めないこと(#114)。
     // #468 の値域 CHECK 導入後は残骸を植え付けられないため、制約導入前の DB を再現すべく一時的に外す。
+    // odds のみ違反（odds_high=2.0 は値域内で odds_high_range を通る）ため odds_range だけ外せば足りる。
     sqlx::query("ALTER TABLE race_odds DROP CONSTRAINT ck_race_odds_odds_range")
         .execute(&repo.pool)
         .await
@@ -985,4 +987,57 @@ async fn db_check_rejects_out_of_range_race_odds(pool: sqlx::PgPool) {
     insert_win(&pool, "band", 5.0, Some(3.0))
         .await
         .expect("band 逆転（値域内）は値域制約では弾かれない");
+}
+
+/// #468: race_odds_snapshots 側の値域 CHECK も同型で張られていることを直接担保する
+/// （race_odds とは別テーブルのため、コピペ時の張り忘れ・カラム名タイポを検知する）。
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn db_check_rejects_out_of_range_race_odds_snapshots(pool: sqlx::PgPool) {
+    // race_odds_snapshots は PK に fetched_at を含む。combination_key で行を分ける。
+    async fn insert_snapshot(
+        pool: &sqlx::PgPool,
+        key: &str,
+        odds: f64,
+        odds_high: Option<f64>,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "INSERT INTO race_odds_snapshots \
+             (race_id, bet_type, combination_key, odds, odds_high, popularity, fetched_at) \
+             VALUES ($1, 'win', $2, $3, $4, NULL, '2026-04-19T10:00:00+00:00')",
+        )
+        .bind(race_id().value())
+        .bind(key)
+        .bind(odds)
+        .bind(odds_high)
+        .execute(pool)
+        .await
+        .map(|_| ())
+    }
+
+    // 正常値は通る。
+    insert_snapshot(&pool, "ok", 3.0, None)
+        .await
+        .expect("odds=3.0 は通る");
+
+    // 下限違反・Infinity・NaN は odds_range で拒否。
+    for (key, odds) in [("low", 0.5), ("inf", f64::INFINITY), ("nan", f64::NAN)] {
+        let err = insert_snapshot(&pool, key, odds, None)
+            .await
+            .expect_err("値域違反は拒否される");
+        assert!(
+            err.to_string()
+                .contains("ck_race_odds_snapshots_odds_range"),
+            "{key}: snapshots の値域違反は ck_race_odds_snapshots_odds_range で弾かれる: {err}"
+        );
+    }
+
+    // odds_high の上限違反は odds_high_range で拒否。
+    let err = insert_snapshot(&pool, "high_inf", 2.0, Some(f64::INFINITY))
+        .await
+        .expect_err("odds_high=Infinity は拒否される");
+    assert!(
+        err.to_string()
+            .contains("ck_race_odds_snapshots_odds_high_range"),
+        "snapshots の odds_high 上限違反は ck_race_odds_snapshots_odds_high_range で弾かれる: {err}"
+    );
 }

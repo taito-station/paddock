@@ -25,7 +25,8 @@
 -- 二段階（NOT VALID → VALIDATE CONSTRAINT）にする必要はないと判断し、最小構成の直接追加とする。
 --
 -- Postgres には ADD CONSTRAINT IF NOT EXISTS が無いため、再実行可能にするよう
--- 先に DROP CONSTRAINT IF EXISTS してから ADD する（#344/#345 の CHECK 制約 migration と同パターン）。
+-- 先に DROP CONSTRAINT IF EXISTS してから ADD する（issue #344/#345 の CHECK 制約 migration
+-- = 20260708000001_add_race_cards_race_class / 20260708000002_add_live_ev_snapshots_roughness と同パターン）。
 
 -- ---- race_odds ----
 
