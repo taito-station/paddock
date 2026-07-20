@@ -307,6 +307,13 @@ async fn invalid_odds_row_is_skipped_not_errored(pool: sqlx::PgPool) {
     save_sample(&repo).await; // win/place を投入
     // 旧版スクレイパの残骸を模した値域違反行（三連単 odds=0.0）を直接 INSERT する(#114)。
     // combination_key は妥当だが odds が OddsValue の下限(>=1.0)を割る。
+    // #468 で値域 CHECK を追加したため、「制約導入前の残骸 / 旧ダンプ取り込み由来の不正行」を
+    // 抱えた DB を再現すべく、値域制約を一時的に外してから残骸を植え付ける（read 側 warn+skip は
+    // その種の DB のための多重防御であり、その経路をここで担保する）。
+    sqlx::query("ALTER TABLE race_odds DROP CONSTRAINT ck_race_odds_odds_range")
+        .execute(&repo.pool)
+        .await
+        .unwrap();
     sqlx::query(
         "INSERT INTO race_odds (race_id, bet_type, combination_key, odds, odds_high, popularity, fetched_at) \
          VALUES ($1, 'trifecta', '3>1>2', 0.0, NULL, NULL, $2)",
@@ -335,6 +342,11 @@ async fn band_invalid_odds_row_is_skipped_not_errored(pool: sqlx::PgPool) {
     // 幅 odds（複勝）の下限が値域違反（odds=0.0）だが odds_high は有効、というケースを直接 INSERT する。
     // parse_band の値域違反 skip 経路（Ok(None)）を担保する: 構造不正(odds_high NULL/low>high)の Err
     // とは別経路で、当該行のみ読み飛ばしセッションを止めないこと(#114)。
+    // #468 の値域 CHECK 導入後は残骸を植え付けられないため、制約導入前の DB を再現すべく一時的に外す。
+    sqlx::query("ALTER TABLE race_odds DROP CONSTRAINT ck_race_odds_odds_range")
+        .execute(&repo.pool)
+        .await
+        .unwrap();
     sqlx::query(
         "INSERT INTO race_odds (race_id, bet_type, combination_key, odds, odds_high, popularity, fetched_at) \
          VALUES ($1, 'place', '5', 0.0, 2.0, NULL, $2)",
@@ -899,4 +911,78 @@ async fn purge_is_strict_before_cutoff(pool: sqlx::PgPool) {
     let next_day = NaiveDate::from_ymd_opt(2026, 6, 2).unwrap();
     assert_eq!(repo.purge_race_odds_snapshots(next_day).await.unwrap(), 1);
     assert_eq!(snapshots_count(&repo).await, 0, "翌日 cutoff で削除される");
+}
+
+/// #468: DB の値域 CHECK 制約が、アプリ層（save_race_odds）を経由しない生 INSERT の
+/// 値域違反を弾くことを担保する回帰テスト。save_race_odds は無効行を skip するため、
+/// ここでは生 SQL で DB の最終防衛線（ck_race_odds_*）そのものを検証する。
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn db_check_rejects_out_of_range_race_odds(pool: sqlx::PgPool) {
+    // race_odds に単勝 1 行を生 INSERT し、成否だけを返すヘルパ（combination_key で行を分ける）。
+    async fn insert_win(
+        pool: &sqlx::PgPool,
+        key: &str,
+        odds: f64,
+        odds_high: Option<f64>,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "INSERT INTO race_odds \
+             (race_id, bet_type, combination_key, odds, odds_high, popularity, fetched_at) \
+             VALUES ($1, 'win', $2, $3, $4, NULL, '2026-04-19T10:00:00+00:00')",
+        )
+        .bind(race_id().value())
+        .bind(key)
+        .bind(odds)
+        .bind(odds_high)
+        .execute(pool)
+        .await
+        .map(|_| ())
+    }
+
+    // 正常値（有限 かつ >= 1.0）は通る。
+    insert_win(&pool, "ok", 3.0, None)
+        .await
+        .expect("odds=3.0 は通る");
+
+    // 下限違反（< 1.0）。
+    let err = insert_win(&pool, "low", 0.5, None)
+        .await
+        .expect_err("odds=0.5 は拒否される");
+    assert!(
+        err.to_string().contains("ck_race_odds_odds_range"),
+        "下限違反は ck_race_odds_odds_range で弾かれる: {err}"
+    );
+
+    // +Infinity（上限で排除）。
+    let err = insert_win(&pool, "inf", f64::INFINITY, None)
+        .await
+        .expect_err("Infinity は拒否される");
+    assert!(
+        err.to_string().contains("ck_race_odds_odds_range"),
+        "Infinity は ck_race_odds_odds_range で弾かれる: {err}"
+    );
+
+    // NaN（Postgres では NaN < 'Infinity' が FALSE のため上限で排除）。
+    let err = insert_win(&pool, "nan", f64::NAN, None)
+        .await
+        .expect_err("NaN は拒否される");
+    assert!(
+        err.to_string().contains("ck_race_odds_odds_range"),
+        "NaN は ck_race_odds_odds_range で弾かれる: {err}"
+    );
+
+    // odds_high の上限違反（odds は値域内、odds_high=Infinity）。
+    let err = insert_win(&pool, "high_inf", 2.0, Some(f64::INFINITY))
+        .await
+        .expect_err("odds_high=Infinity は拒否される");
+    assert!(
+        err.to_string().contains("ck_race_odds_odds_high_range"),
+        "odds_high の上限違反は ck_race_odds_odds_high_range で弾かれる: {err}"
+    );
+
+    // band 逆転（odds_high < odds、両値とも単体では値域内）は DB 制約化しない設計のため保存できる。
+    // 構造不正は読み取り側 parse_band が stop 検知する（save_keeps_inverted_band_which_read_rejects 参照）。
+    insert_win(&pool, "band", 5.0, Some(3.0))
+        .await
+        .expect("band 逆転（値域内）は値域制約では弾かれない");
 }
