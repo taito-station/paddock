@@ -25,6 +25,18 @@
 #   PADDOCK_BACKUP_MIRROR_DIR="" scripts/backup-db.sh   # ミラー無効（ローカルのみ）
 set -euo pipefail
 
+log() { echo "[$(date '+%Y-%m-%dT%H:%M:%S%z')] $*"; }
+
+notify() {
+    osascript -e "display notification \"$1\" with title \"paddock backup\"" >/dev/null 2>&1 || true
+}
+
+# 一時ファイルパス（未確定の段階は空文字。EXIT ハンドラで rm -f しても無害）。
+_tmp=""
+# 終了コード（shellcheck SC2154 対策でスクリプト冒頭で初期化。実値は EXIT ハンドラ内で $? から取る）。
+_rc=0
+trap '_rc=$?; [ -n "$_tmp" ] && rm -f "$_tmp"; if [ "$_rc" -ne 0 ]; then log "FAIL: backup-db exited rc=$_rc"; notify "backup FAILED (rc=$_rc)"; fi' EXIT
+
 usage() {
     cat <<'EOF'
 backup-db.sh - paddock DB を durable な場所へ退避する（#265）
@@ -82,30 +94,30 @@ mkdir -p "$BACKUP_DIR"
 ts="$(date +%Y%m%d-%H%M%S)"
 base="paddock-$ts.dump"
 final="$BACKUP_DIR/$base"
-tmp="$final.part"
-trap 'rm -f "$tmp"' EXIT
+_tmp="$final.part"
 
 # container 内 pg_dump（バージョン一致）で full DB を custom-format 退避。stdout をホストファイルへ。
 # 一時ファイル(.part)に書き、成功＋非空を確認してから最終名へ mv（中断で壊れた dump を残さない）。
-if ! docker exec "$CONTAINER" pg_dump -U "$PG_USER" -d "$PG_DB" -Fc --no-owner --no-privileges > "$tmp"; then
+if ! docker exec "$CONTAINER" pg_dump -U "$PG_USER" -d "$PG_DB" -Fc --no-owner --no-privileges > "$_tmp"; then
     echo "pg_dump に失敗（container=$CONTAINER）" >&2
     exit 1
 fi
-if [[ ! -s "$tmp" ]]; then
+if [[ ! -s "$_tmp" ]]; then
     echo "dump が空（pg_dump は成功したが 0 バイト）" >&2
     exit 1
 fi
-mv "$tmp" "$final"
-trap - EXIT
+mv "$_tmp" "$final"
+# mv 成功後は一時ファイルが存在しないので _tmp をリセット（EXIT ハンドラで rm しない）。
+_tmp=""
 
 size="$(du -h "$final" | cut -f1)"
-echo "退避完了: $final ($size)"
+log "退避完了: $final ($size)"
 
 # off-machine ミラー（best-effort）。cp はパス指定の書き込みなので launchd 下でも効く。失敗しても
 # ローカル退避は成功しているので警告に留める（ログで検知する）。
 if [[ -n "$MIRROR_DIR" ]]; then
     if mkdir -p "$MIRROR_DIR" && cp -f "$final" "$MIRROR_DIR/$base"; then
-        echo "ミラー完了: $MIRROR_DIR/$base"
+        log "ミラー完了: $MIRROR_DIR/$base"
     else
         echo "警告: ミラーに失敗（ローカル退避は成功。$MIRROR_DIR を確認）" >&2
     fi
@@ -135,13 +147,13 @@ prune_dir() {
         for f in "${files[@]}"; do
             if (( i >= KEEP )); then
                 rm -f "$f"
-                echo "古い世代を削除($label): $(basename "$f")"
+                log "古い世代を削除($label): $(basename "$f")"
             fi
             i=$((i + 1))
         done
     fi
     local kept=$(( ${#files[@]} > KEEP ? KEEP : ${#files[@]} ))
-    echo "保持世代数($label): $kept / KEEP=$KEEP  $dir"
+    log "保持世代数($label): $kept / KEEP=$KEEP  $dir"
 }
 
 prune_dir "$BACKUP_DIR" "権威"
