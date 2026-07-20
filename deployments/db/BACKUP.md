@@ -55,6 +55,10 @@ rm ~/Library/LaunchAgents/com.paddock.backup-db.plist
 
 ## 復元
 
+> **前提**: 復元コマンドはすべて docker を使う。実行前に **colima（docker ランタイム）が起動していること**を
+> 確認する。起動していない場合は `colima start`（または `brew services start colima`）を先に実行する。
+> 詳細は [README「必要環境」の docker ランタイム項](../../README.md#セットアップ) を参照。
+
 ### 全体復元（災害時・volume 喪失後）
 
 新しい空の DB（マイグレーション前）へ dump を流し込む。`--clean --if-exists` で既存オブジェクトを
