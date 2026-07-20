@@ -37,9 +37,13 @@ notify() {
 _tmp=""
 # 終了コード（shellcheck SC2154 対策でスクリプト冒頭で初期化。実値は EXIT ハンドラ内で $? から取る）。
 _rc=0
-# rc=2 は使い方/入力エラー（引数ミス・KEEP 値不正）であって「バックアップ失敗」ではないため
-# FAIL 通知の対象外。rc=1（docker/pg_dump/空 dump 等の実失敗）のみ通知する。
-trap '_rc=$?; [ -n "$_tmp" ] && rm -f "$_tmp"; if [ "$_rc" -ne 0 ] && [ "$_rc" -ne 2 ]; then log "FAIL: backup-db exited rc=$_rc"; notify "backup FAILED (rc=$_rc)"; fi' EXIT
+# 入力検証（引数・KEEP 値）を通過したら 1 にする。使い方/入力エラーの exit 2 は必ず検証完了前
+# に起きる（_validated=0）ので、それだけを FAIL 通知から除外する。検証通過後（_validated=1）に
+# 何らかの理由で rc=2 が出た場合は実失敗として通知する（偶発 rc=2 の握りつぶし防止）。
+_validated=0
+# rc=1（docker/pg_dump/空 dump 等の実失敗）は常に通知。rc=2 は _validated=0 のとき（使い方
+# エラー）のみ通知対象外。
+trap '_rc=$?; [ -n "$_tmp" ] && rm -f "$_tmp"; if [ "$_rc" -ne 0 ] && { [ "$_rc" -ne 2 ] || [ "$_validated" -eq 1 ]; }; then log "FAIL: backup-db exited rc=$_rc"; notify "backup FAILED (rc=$_rc)"; fi' EXIT
 
 usage() {
     cat <<'EOF'
@@ -84,6 +88,9 @@ if ! [[ "$KEEP" =~ ^[1-9][0-9]*$ ]]; then
     echo "PADDOCK_BACKUP_KEEP は正整数である必要がある: $KEEP" >&2
     exit 2
 fi
+
+# ここまでで入力検証は完了。以降の非ゼロ終了は実失敗として FAIL 通知の対象にする。
+_validated=1
 
 command -v docker >/dev/null || { echo "docker が見つからない（PATH を確認）" >&2; exit 1; }
 # 起動確認。パイプ+grep -q は pipefail 下で SIGPIPE により誤判定しうるため、一旦変数へ受けてから
