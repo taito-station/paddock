@@ -17,8 +17,10 @@
   [`deployments/db/BACKUP.md`](../db/BACKUP.md)）。
   - 本体: [`scripts/backup-db.sh`](../../scripts/backup-db.sh)
 - **backup-staleness（#490）**: バックアップの欠落日（「実行されなかった」日）を検知する鮮度監視。
-  毎時 1 回（StartInterval=3600）＋ロード時・スリープ復帰時（RunAtLoad=true）に発火し、最新 dump が
-  36h を超えて古ければ osascript 通知とログ（STALE マーカー）で警告する。backup-db の失敗通知（FAIL
+  毎時 1 回（StartInterval=3600）＋ロード時（RunAtLoad=true）に発火し、最新 dump が
+  36h を超えて古ければ osascript 通知とログ（STALE マーカー）で警告する。スリープ復帰時は
+  StartInterval が coalesce して発火し catch-up 検知する（launchd はスリープ中の Mac を起こさないため
+  検知は次に Mac が起きたとき）。backup-db の失敗通知（FAIL
   マーカー）は「実行されたが失敗した」場合にしか発報しないため、Mac スリープ/colima 停止による
   無言欠落は本 agent が補完する。backup-db と対になって常駐し、`uninstall.sh` では外れない。
   - 本体: [`scripts/backup-staleness-check.sh`](../../scripts/backup-staleness-check.sh)

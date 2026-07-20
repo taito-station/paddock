@@ -13,12 +13,16 @@
 # 環境変数:
 #   PADDOCK_BACKUP_DIR      バックアップの権威ディレクトリ（既定: ~/paddock-backups）
 #   STALE_THRESHOLD_HOURS   この時間（時間単位）を超えた最新 dump を古いとみなす（既定: 36）
+#
+# 注: mtime 取得に `stat -f`（BSD/macOS の書式）を使う。本スクリプトは launchd 配下＝macOS 専用
+# 運用のため移植性は考慮しない（Linux の GNU stat では `-f` はファイルシステム情報になり動作が異なる）。
 set -euo pipefail
 
 log() { echo "[$(date '+%Y-%m-%dT%H:%M:%S%z')] $*"; }
 
 notify() {
-    osascript -e "display notification \"$1\" with title \"paddock backup\"" >/dev/null 2>&1 || true
+    # メッセージは argv 経由で AppleScript に渡す（パス/ファイル名の " や \ で文字列が壊れないように）。
+    osascript -e 'on run {msg}' -e 'display notification msg with title "paddock backup"' -e 'end run' -- "$1" >/dev/null 2>&1 || true
 }
 
 BACKUP_DIR="${PADDOCK_BACKUP_DIR:-$HOME/paddock-backups}"
@@ -60,7 +64,8 @@ age_hours=$(( age_secs / 3600 ))
 
 if [ "$age_secs" -gt "$STALE_THRESHOLD_SECS" ]; then
     basename_latest="$(basename "$latest")"
-    msg="最新 dump が ${age_hours}h 前: $basename_latest (閾値 ${STALE_THRESHOLD_HOURS}h)"
+    # age_hours は切り捨て表示のため境界では閾値と同値に見える。判定は秒単位（age_secs>閾値）で厳密。
+    msg="最新 dump が鮮度閾値 ${STALE_THRESHOLD_HOURS}h を超過（約 ${age_hours}h 経過）: $basename_latest"
     log "STALE: $msg"
     notify "$msg"
 else

@@ -7,7 +7,10 @@
   backup-db.sh の失敗通知（FAIL マーカー）では「そもそも実行されなかった」欠落を拾えないため、
   独立した鮮度監視として新設した（Mac スリープ/colima 停止で無言欠落する問題を検知）。
 
-  RunAtLoad=true にすることでスリープ復帰時の catch-up 発火を利用し、長期停止を検知する。
+  スリープ復帰時の catch-up は StartInterval タイマの coalescing が担う（launchd はスリープ中に
+  逃した毎時発火を復帰時に 1 回まとめて実行する）。RunAtLoad=true は install/login/再起動直後の
+  初回発火用（StartInterval だけだと次の 1 時間後まで待つため）。なお launchd はスリープ中の Mac を
+  起こさない（#264）ので、検知は「Mac が次に起きたとき」になる。
 
   osascript 通知は表示セッション依存でベストエフォート（launchd 配下では表示されないことがある）。
   ログ（StandardOutPath）の STALE/FAIL マーカーが一次情報。

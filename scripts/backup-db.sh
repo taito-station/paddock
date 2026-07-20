@@ -28,14 +28,18 @@ set -euo pipefail
 log() { echo "[$(date '+%Y-%m-%dT%H:%M:%S%z')] $*"; }
 
 notify() {
-    osascript -e "display notification \"$1\" with title \"paddock backup\"" >/dev/null 2>&1 || true
+    # メッセージは argv 経由で AppleScript に渡す（文字列補間だと、パスやファイル名に含まれる
+    # " / \ で AppleScript 文字列が壊れて通知が化けるため）。表示不可環境でも本処理は止めない。
+    osascript -e 'on run {msg}' -e 'display notification msg with title "paddock backup"' -e 'end run' -- "$1" >/dev/null 2>&1 || true
 }
 
 # 一時ファイルパス（未確定の段階は空文字。EXIT ハンドラで rm -f しても無害）。
 _tmp=""
 # 終了コード（shellcheck SC2154 対策でスクリプト冒頭で初期化。実値は EXIT ハンドラ内で $? から取る）。
 _rc=0
-trap '_rc=$?; [ -n "$_tmp" ] && rm -f "$_tmp"; if [ "$_rc" -ne 0 ]; then log "FAIL: backup-db exited rc=$_rc"; notify "backup FAILED (rc=$_rc)"; fi' EXIT
+# rc=2 は使い方/入力エラー（引数ミス・KEEP 値不正）であって「バックアップ失敗」ではないため
+# FAIL 通知の対象外。rc=1（docker/pg_dump/空 dump 等の実失敗）のみ通知する。
+trap '_rc=$?; [ -n "$_tmp" ] && rm -f "$_tmp"; if [ "$_rc" -ne 0 ] && [ "$_rc" -ne 2 ]; then log "FAIL: backup-db exited rc=$_rc"; notify "backup FAILED (rc=$_rc)"; fi' EXIT
 
 usage() {
     cat <<'EOF'
