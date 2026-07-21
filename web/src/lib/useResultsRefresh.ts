@@ -12,12 +12,16 @@ import { isPastDate } from "./live";
 //
 // 手動「精算」ボタン（`/sessions/{date}/results:refresh` エイリアス＝サーバ側 force=true）は
 // フォールバックとして別途残す。
+//
+// 返り値 `isError`: ポーリングが失敗継続中か（retry:false なので直近試行の失敗をそのまま露出）。
+// 呼び出し側はこれを消費して「自動精算が止まった」注記を出す（#478。無言停止の解消）。
+// enabled=false（停止）に戻ると react-query が状態をリセットし isError も false へ戻る。
 export function useResultsRefresh(
   date: string,
   { enabled, now }: { enabled: boolean; now: Date },
-): void {
+): { isError: boolean } {
   const qc = useQueryClient();
-  useQuery({
+  const { isError } = useQuery({
     queryKey: ["results-refresh", date],
     // 過去日は常に停止。時刻源は呼び出し側の tick（now）に一元化する。
     enabled: enabled && !!date && !isPastDate(date, now),
@@ -37,4 +41,5 @@ export function useResultsRefresh(
       return data;
     },
   });
+  return { isError };
 }

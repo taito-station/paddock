@@ -159,7 +159,7 @@ export function RaceList() {
   );
   // 結果確定を検知して自動精算する（#381）。発走済み・未確定が残る間だけポーリング（過去日・
   // 全確定で停止。停止条件は useResultsRefresh 側と enabled で二重に担保）。
-  useResultsRefresh(date, {
+  const settlePoll = useResultsRefresh(date, {
     enabled: hasUnsettledRaces(races.data?.races ?? [], date, now),
     now,
   });
@@ -283,6 +283,14 @@ export function RaceList() {
           {liveMode
             ? "ライブ EV の再取得に失敗しました（表示は前回取得のまま）"
             : "ライブ EV の取得に失敗 — 一覧のみ表示"}
+        </p>
+      )}
+      {/* 自動精算ポーリングの失敗を明示（#478）。無言停止を避け、手動精算への導線を示す。
+          predict-watch の stale 警告と同じ控えめな注記トーンに揃える。 */}
+      {settlePoll.isError && (
+        <p className="live-stale">
+          ⚠ 自動精算に失敗しています（着順・払戻の反映が止まっている可能性。
+          収支ページの手動精算で再試行できます）
         </p>
       )}
       {liveMode && live.data && (
