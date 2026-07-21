@@ -38,7 +38,7 @@ kind: knowledge
 sources:                 # 由来（ADR / qa / original-docs のパス）。決定の「なぜ」を辿れるように
   - docs/adr/NNNN-....md
 distilled_from_sha: "<short-sha>"  # この知が反映するリポジトリ状態の git SHA（トレーサビリティ）
-updated: "YYYY-MM-DD"    # 最終内容更新日（YAML の date 型を避けるため必ずクォート）
+updated: "YYYY-MM-DD"    # 内容を実質更新した日（YAML の date 型を避けるため必ずクォート。詳細な履歴は git log を正とする）
 ---
 ```
 
@@ -51,7 +51,11 @@ updated: "YYYY-MM-DD"    # 最終内容更新日（YAML の date 型を避ける
   原則は**この知を蒸留した時点のリポジトリ HEAD** を `git rev-parse --short HEAD` で記録する
   （pilot の `probability-estimation.md` もこの方式）。特定の由来ファイル版に紐付けたいときは
   `git log -1 --format=%h -- <path>` を使う。いずれも「いつ時点の知か」を辿れるようにするのが目的。
-- **変更履歴**: 本文末尾に `## 変更履歴` を置き、更新のたびに 1 行追記して `updated` を更新する。
+- **変更履歴**: **git log を正とする**（変更の追跡は履歴で辿る）。内容を実質更新したら `updated` と
+  `distilled_from_sha` を更新すれば足りる。本文末尾の `## 変更履歴` セクションは**任意**——
+  節目や意図を人間可読に残したいときだけ置く（一括後付けはしない）。既に `## 変更履歴` を持つ 2 本
+  （[`docs/specifications/probability-estimation.md`](../specifications/probability-estimation.md) /
+  [`docs/knowledge/analyze-search-and-state.md`](analyze-search-and-state.md)）はそのまま維持してよい。
 
 ## 昇格・更新の運用（Claude が回す蒸留）
 
