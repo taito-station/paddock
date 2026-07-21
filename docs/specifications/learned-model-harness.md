@@ -144,5 +144,5 @@ ADR 0052（α blend 廃止＝純モデル化の棄却）の通り、純 P_model 
 ## 関連
 
 - Issue: #272（予測フロー再設計・親・**CLOSED**）/ #309（学習モデル実装・**CLOSED**）/ #305（純モデル value シグナル検証の提起元・クローズ済、検証は本ハーネス #272/#309 へ継承）/ #263（較正後 EV ゲートの逆予測性）
-- ADR: 0027（精度のレバーは市場ブレンド）/ 0042（win_power）/ 0047（place/show 冪変換の採用＝`place_show_power=2.0` の根拠）/ 0050（place/show raw_score 再調整の棄却）/ 0051（place/show 冪 γ の knee 確定）/ 0052（α blend 廃止の棄却）/ **0053（学習型 fundamental モデルの棄却＝#309 の結論・本路線 close）** / **0058（純 resolution 天井）** / **0059（市場較正補正の棄却＝市場側も sub-takeout で exploitable でない）**
+- ADR: 0027（精度のレバーは市場ブレンド）/ 0042（win_power）/ 0047（place/show 冪変換の採用＝`place_show_power=2.0` の根拠）/ 0050（place/show raw_score 再調整の棄却）/ 0051（place/show 冪 γ の knee 確定）/ 0052（α blend 廃止の棄却）/ **0053（学習型 fundamental モデルの棄却＝#309 の結論・本路線 close）** / **0058（純 resolution 天井）** / **0059（市場較正補正の棄却＝市場側も sub-takeout で exploitable でない）** / **0055（EV 層分離＝執行エッジの土台）** / **0060（軸ロック＋ズレ増額＝残るエッジの置き所）**
 - 既存: `scripts/predict-check/live_ev.py`（EV/買い方ロジック）/ `docs/specifications/backtest.md` / `probability-estimation.md`
