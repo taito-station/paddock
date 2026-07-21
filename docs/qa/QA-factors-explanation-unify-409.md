@@ -16,6 +16,7 @@
   - build_factors は共有 10 スロットを読み、**recency 有効時のみ horse 3 因子を上書き**（乖離点をこの 1 箇所に閉じ込め、doc の「両方更新」欠陥を解消）。
   - build_explanation は共有 10 スロット＋ラベルから `FactorExplanation` を組み、conditional_gate/prev_run は従来通り自前で扱う。
 - 反映先: `src/use-case/src/interactor/race/predict.rs`、knowledge（scoring 経路の factor 収集構造）。
+  → 蒸留完了: [`docs/knowledge/scoring-factor-collection.md`](../knowledge/scoring-factor-collection.md)（#487）。
 
 ## Q2: too_many_arguments allow の対象範囲（issue のカウントと実態の乖離）
 
