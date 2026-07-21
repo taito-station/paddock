@@ -142,8 +142,9 @@ if [[ -n "$MIRROR_DIR" ]]; then
     rm -f "$mirror_warn_marker"
 else
     log "警告: off-machine ミラー未設定（PADDOCK_BACKUP_MIRROR_DIR 空）。ディスク障害時に off-machine 冗長なし。実ファイルシステム（外付け/NAS 等）を指定して有効化を推奨。"
-    # 初回（マーカ無し）または前回通知から 7 日超なら通知し、マーカの mtime を更新する。
-    if [[ ! -e "$mirror_warn_marker" ]] || [[ -n "$(find "$mirror_warn_marker" -mtime +7 2>/dev/null)" ]]; then
+    # 初回（マーカ無し）または前回通知から 7 日以上経過なら通知し、マーカの mtime を更新する。
+    # find -mtime +6 は「経過日数（切り捨て）> 6」＝ age >= 7 日でマッチ（+7 だと実質 8 日超になるため +6）。
+    if [[ ! -e "$mirror_warn_marker" ]] || [[ -n "$(find "$mirror_warn_marker" -mtime +6 2>/dev/null)" ]]; then
         notify "off-machine ミラー未設定：ディスク障害時に冗長なし。PADDOCK_BACKUP_MIRROR_DIR に外付け/NAS を設定してください。"
         : > "$mirror_warn_marker"
     fi
