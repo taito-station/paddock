@@ -281,6 +281,13 @@ async fn unknown_bet_type_row_is_skipped_not_errored(pool: sqlx::PgPool) {
     // 将来券種を書く新版を模した未知 bet_type 行を直接 INSERT する。ラベルは BetType が将来
     // 拡張されても衝突しないダミーにする（実在馬券名を使うと拡張時にテストが意図せず壊れる）。
     // combination_key はラベルが未知の時点で評価されず skip されるので、内容は問わない。
+    // #472 で bet_type 列挙 CHECK を追加したため、「制約導入前 / 旧ダンプ取り込み由来の未知列挙値行」を
+    // 抱えた legacy DB を再現すべく、列挙制約を一時的に外してから未知行を植え付ける（read 側の
+    // 未知 bet_type 読み飛ばしは、その種の DB のための多重防御であり、その経路をここで担保する）。
+    sqlx::query("ALTER TABLE race_odds DROP CONSTRAINT ck_race_odds_bet_type")
+        .execute(&repo.pool)
+        .await
+        .unwrap();
     sqlx::query(
         "INSERT INTO race_odds (race_id, bet_type, combination_key, odds, odds_high, popularity, fetched_at) \
          VALUES ($1, '__unknown__', '1-2-3-4-5', 100.0, NULL, NULL, $2)",
