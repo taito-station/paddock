@@ -40,8 +40,9 @@ pub struct PredictionQuery {
     /// 馬場状態（`良` / `稍重` / `重` / `不良`。略記 `稍` / `不` も可）。未指定なら馬場項なし。
     pub track_condition: Option<String>,
     /// 市場オッズ（単勝）とのブレンド係数 `[0,1]`。未指定は本番ブレンド α=0.2。素モデルは `1.0` を明示。
-    // utoipa の attribute は const 展開不可のためリテラル 0.2 を据え置く。
-    // 値は RECOMMENDED_MARKET_BLEND_ALPHA と一致させること（snapshot テストがドリフト検知）。
+    // 値は RECOMMENDED_MARKET_BLEND_ALPHA と一致させること。
+    // utoipa の #[param] はリテラルのみ受理し定数展開できないため、この定数との乖離は
+    // 自動検知されない（手動で整合させる）。
     #[param(default = 0.2, minimum = 0.0, maximum = 1.0)]
     pub blend_alpha: Option<f64>,
 }
@@ -57,8 +58,9 @@ pub struct RecommendationQuery {
     /// 馬場状態（`良` / `稍重` / `重` / `不良`。略記 `稍` / `不` も可）。未指定なら馬場項なし。
     pub track_condition: Option<String>,
     /// 市場オッズ（単勝）とのブレンド係数 `[0,1]`。未指定は本番ブレンド α=0.2。素モデルは `1.0` を明示（`/prediction` と同義）。
-    // utoipa の attribute は const 展開不可のためリテラル 0.2 を据え置く。
-    // 値は RECOMMENDED_MARKET_BLEND_ALPHA と一致させること（snapshot テストがドリフト検知）。
+    // 値は RECOMMENDED_MARKET_BLEND_ALPHA と一致させること。
+    // utoipa の #[param] はリテラルのみ受理し定数展開できないため、この定数との乖離は
+    // 自動検知されない（手動で整合させる）。
     #[param(default = 0.2, minimum = 0.0, maximum = 1.0)]
     pub blend_alpha: Option<f64>,
 }
@@ -72,8 +74,9 @@ pub struct BoardQuery {
     /// 馬場状態（`良` / `稍重` / `重` / `不良`。略記 `稍` / `不` も可）。未指定なら馬場項なし。
     pub track_condition: Option<String>,
     /// 市場オッズ（単勝）とのブレンド係数 `[0,1]`。未指定は本番ブレンド α=0.2。素モデルは `1.0` を明示。
-    // utoipa の attribute は const 展開不可のためリテラル 0.2 を据え置く。
-    // 値は RECOMMENDED_MARKET_BLEND_ALPHA と一致させること（snapshot テストがドリフト検知）。
+    // 値は RECOMMENDED_MARKET_BLEND_ALPHA と一致させること。
+    // utoipa の #[param] はリテラルのみ受理し定数展開できないため、この定数との乖離は
+    // 自動検知されない（手動で整合させる）。
     #[param(default = 0.2, minimum = 0.0, maximum = 1.0)]
     pub blend_alpha: Option<f64>,
 }
