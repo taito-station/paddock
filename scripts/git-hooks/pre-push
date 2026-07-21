@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # CI 相当の高速チェックを push 前に走らせ、落ちたら push を中断する（#178 で fmt 落ちを
-# 手元で拾えなかった反省）。CI（.github/workflows/ci.yml）の fmt / clippy ステップを再現する。
+# 手元で拾えなかった反省）。CI（.github/workflows/ci.yml）の fmt / clippy / web ステップを再現する。
 # test は --test-threads=1 で時間がかかるため含めず、push 後の CI 確認で担保する。
+# web/ の型エラー・lint 違反が CI まで到達するのを防ぐため、push 差分に web/ が含まれる場合に
+# typecheck / lint を実行する（#463）。gen:api ドリフト検証は schema.d.ts を再生成して
+# ワーキングツリーを汚すため pre-push には含めず、CI の web ジョブ（git diff --exit-code）で担保する。
 # 緊急時の意図的バイパスは `git push --no-verify`（規約上は明示意図があるときのみ）。
 #
 # このフックはリポジトリ管理下（scripts/git-hooks/）に置き、scripts/install-git-hooks.sh で
@@ -21,4 +24,48 @@ cargo clippy --locked --workspace --all-targets -- -D warnings
 echo "[pre-push] scripts/check-adr-numbers.sh（ADR 番号の重複検出 #254）"
 bash scripts/check-adr-numbers.sh
 
-echo "[pre-push] OK（fmt / clippy / ADR 番号 通過）"
+# web/ 差分がある push のときだけ typecheck / lint を走らせる（#463）。
+# stdin から "local_ref local_sha remote_ref remote_sha" を読み取り、push 範囲の全コミットの
+# 変更ファイルを確認する。remote_sha が 0000...（新規リモートブランチ）の場合は分岐元からの
+# 全差分で判定する（先頭 1 コミットだけ見ると N コミット一括 push で中間の web 変更を取りこぼす）。
+# local_sha が 0000...（delete push）は web 検査をスキップする。
+web_changed=false
+zero="0000000000000000000000000000000000000000"
+while read -r _local_ref local_sha _remote_ref remote_sha; do
+  # delete push（ブランチ削除）は検査対象外
+  if [ "$local_sha" = "$zero" ]; then
+    continue
+  fi
+  if [ "$remote_sha" = "$zero" ]; then
+    # 新規リモートブランチ: 分岐元（origin/main → main → root）からの全差分で web/ を判定する。
+    # origin/main が無い環境（新規 clone 直後等）は main、それも無ければ root commit まで遡る。
+    base=$(git merge-base "$local_sha" origin/main 2>/dev/null \
+           || git merge-base "$local_sha" main 2>/dev/null \
+           || git rev-list --max-parents=0 "$local_sha" | tail -1)
+    diff_files=$(git diff --name-only "$base".."$local_sha" 2>/dev/null || true)
+  else
+    diff_files=$(git diff --name-only "$remote_sha".."$local_sha" 2>/dev/null || true)
+  fi
+  if echo "$diff_files" | grep -q '^web/'; then
+    web_changed=true
+    break
+  fi
+done
+
+if [ "$web_changed" = true ]; then
+  # node_modules が未インストールなら警告してスキップ（npm install を強制しない）。
+  # typecheck / lint は CI でも担保されるため、手元環境が未セットアップの場合は pass through する。
+  if [ ! -d "web/node_modules" ]; then
+    echo "[pre-push] web/node_modules が見つかりません（npm install 未実施？）。web の typecheck/lint をスキップします。"
+    echo "[pre-push] CI の web ジョブが担保します。手元で確認するには: cd web && npm ci"
+  else
+    echo "[pre-push] web/ 差分あり: npm run typecheck"
+    npm --prefix web run typecheck
+    echo "[pre-push] web/ 差分あり: npm run lint"
+    npm --prefix web run lint
+  fi
+else
+  echo "[pre-push] web/ 差分なし: typecheck/lint スキップ"
+fi
+
+echo "[pre-push] OK（fmt / clippy / ADR 番号 / web 通過）"
