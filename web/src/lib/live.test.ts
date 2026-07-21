@@ -19,6 +19,8 @@ import {
   parseLiveQuery,
   liveQueryParams,
   freshness,
+  boardFreshness,
+  relativeTimeLabel,
   hasUpcomingRaces,
   DEFAULT_LIVE_QUERY,
   defaultDir,
@@ -489,6 +491,55 @@ describe("freshness", () => {
     // base = server_now − last_updated = 3分。fetchedAt = now + 5分でも「3分前」を保つ（過少表示しない）。
     const future = NOON.getTime() + 5 * 60_000;
     expect(freshness("2026-07-11T02:57:00Z", SNOW, true, NOON, future)).toEqual({ label: "3分前", state: "fresh" });
+  });
+});
+
+describe("boardFreshness", () => {
+  // NOON = 12:00 JST 2026-07-11。current_at と now(NOON) の差だけで判定する簡易版（server_now 無し）。
+  it("fresh within STALE_MINUTES (未発走)", () => {
+    expect(boardFreshness("2026-07-11T02:57:00Z", true, NOON)).toEqual({ label: "3分前", state: "fresh" });
+    expect(boardFreshness("2026-07-11T02:59:30Z", true, NOON)).toEqual({ label: "たった今", state: "fresh" });
+  });
+  it("stale beyond STALE_MINUTES when upcoming", () => {
+    expect(boardFreshness("2026-07-11T02:49:00Z", true, NOON)).toEqual({ label: "11分前", state: "stale" });
+  });
+  it("boundary: ちょうど STALE_MINUTES は fresh、1 秒超過で stale（生 ms 比較）", () => {
+    expect(boardFreshness("2026-07-11T02:50:00Z", true, NOON).state).toBe("fresh");
+    expect(boardFreshness("2026-07-11T02:49:59Z", true, NOON)).toEqual({ label: "10分前", state: "stale" });
+  });
+  it("発走済み（upcoming=false）は done で警告しない", () => {
+    expect(boardFreshness("2026-07-11T01:00:00Z", false, NOON).state).toBe("done");
+  });
+  it("null / 不正 current_at かつ未発走 → 鮮度なし・警告なし（M1: 単一 snapshot を stale に倒さない）", () => {
+    // current_at=null は #448 の朝↔現比較材料が無いだけで「オッズ未取得」信号ではない。stale にせず
+    // state=fresh（label="—" は present ゲートで非表示）を返す。真のオッズ有無は odds_available が担う。
+    expect(boardFreshness(null, true, NOON)).toEqual({ label: "—", state: "fresh" });
+    expect(boardFreshness("nonsense", true, NOON)).toEqual({ label: "—", state: "fresh" });
+    expect(boardFreshness(undefined, true, NOON)).toEqual({ label: "—", state: "fresh" });
+  });
+  it("null current_at でも発走済みなら done（警告しない）", () => {
+    expect(boardFreshness(null, false, NOON)).toEqual({ label: "—", state: "done" });
+  });
+  it("60 分超は時間表記", () => {
+    expect(boardFreshness("2026-07-11T01:00:00Z", true, NOON).label).toBe("2時間前");
+  });
+  it("current_at が now より未来でも 0 クランプで「たった今」", () => {
+    expect(boardFreshness("2026-07-11T03:02:00Z", true, NOON)).toEqual({ label: "たった今", state: "fresh" });
+  });
+});
+
+describe("relativeTimeLabel", () => {
+  it("1 分未満は「たった今」", () => {
+    expect(relativeTimeLabel(0)).toBe("たった今");
+    expect(relativeTimeLabel(59_000)).toBe("たった今");
+  });
+  it("1〜59 分は「N分前」", () => {
+    expect(relativeTimeLabel(60_000)).toBe("1分前");
+    expect(relativeTimeLabel(59 * 60_000)).toBe("59分前");
+  });
+  it("60 分以上は「N時間前」", () => {
+    expect(relativeTimeLabel(60 * 60_000)).toBe("1時間前");
+    expect(relativeTimeLabel(150 * 60_000)).toBe("2時間前");
   });
 });
 

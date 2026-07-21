@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
@@ -215,13 +215,16 @@ export function RaceList() {
   const setStatus = (status: StatusFilter) => applyQuery({ ...query, status });
   const setVerdict = (verdict: VerdictFilter) =>
     applyQuery({ ...query, verdict });
-  const toggleSlip = (raceId: string) =>
+  // useCallback で参照を安定させ、React.memo 化した DashboardRowView の onToggle prop が
+  // ポーリング/時計 tick の再描画ごとに変わらないようにする（#475）。setCollapsed は安定なので deps 空。
+  const toggleSlip = useCallback((raceId: string) => {
     setCollapsed((prev) => {
       const next = new Set(prev);
       if (next.has(raceId)) next.delete(raceId);
       else next.add(raceId);
       return next;
     });
+  }, []);
 
   const badgeOf = (bought: boolean) =>
     raceBadge({ bought, hasSession, completed: sessionCompleted });
@@ -402,7 +405,7 @@ export function RaceList() {
                       row.live?.tier === "buy" &&
                       !collapsed.has(row.race.race_id)
                     }
-                    onToggle={() => toggleSlip(row.race.race_id)}
+                    onToggle={toggleSlip}
                     outcome={outcomes.get(row.race.race_id)}
                   />
                 ))}

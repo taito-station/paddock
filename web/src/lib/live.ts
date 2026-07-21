@@ -361,6 +361,15 @@ export type Freshness = {
   state: "fresh" | "stale" | "done";
 };
 
+// 経過 ms を相対表記にする（"たった今" / "N分前" / "N時間前"）。freshness と boardFreshness の
+// ラベル整形を一本化する共通ヘルパ（#475 レビュー Reviewer B の重複指摘に対応）。
+export function relativeTimeLabel(diffMs: number): string {
+  const mins = Math.floor(diffMs / 60_000);
+  if (mins < 1) return "たった今";
+  if (mins < 60) return `${mins}分前`;
+  return `${Math.floor(mins / 60)}時間前`;
+}
+
 // スナップショット鮮度（#372）。stale = STALE_MINUTES 超過かつ未発走レース残存
 // （= predict-watch が動いていない疑い）。未発走ゼロなら監視終了（done、警告なし）。
 //
@@ -391,13 +400,7 @@ export function freshness(
       // 前置クランプで負の補間を弾き、一過性に「base より若く」見えるのを防ぐ（次 tick 前でも base 以上を保つ）。
       const localDelta = serverOk ? Math.max(0, now.getTime() - fetchedAt) : 0;
       diffMs = Math.max(0, base + localDelta);
-      const mins = Math.floor(diffMs / 60_000);
-      label =
-        mins < 1
-          ? "たった今"
-          : mins < 60
-            ? `${mins}分前`
-            : `${Math.floor(mins / 60)}時間前`;
+      label = relativeTimeLabel(diffMs);
     }
   }
   if (!hasUpcoming) return { label, state: "done" };
@@ -407,6 +410,41 @@ export function freshness(
     return { label, state: "stale" };
   }
   return { label, state: "fresh" };
+}
+
+// 1レース盤（RaceBoard）のオッズ鮮度（#475）。盤レスポンスは server_now を持たないため、
+// snapshot 取得時刻（current_at・RFC3339 UTC）とクライアント now の差だけで判定する簡易版。
+// stale = STALE_MINUTES 超過かつ未発走（＝発走直前に古いオッズで EV/ROI を判断させない警告）。
+// 発走済み（upcoming=false）は監視終了扱い（done）で警告しない。
+//
+// 【freshness と別関数にする理由（#475 レビュー S1）】: 盤の `current_at` は #448 の朝↔現比較用で、
+// 「朝 snapshot と最新が別時刻で 2 つ存在する」ときだけ Some になる（board.rs:72/209-234）。
+// 単一 snapshot（前日 prefetch のみ・当日 fetch-card 1 回等）ではオッズが正常に在っても null になるため、
+// **null を「オッズ未取得＝stale」に倒してはならない**（M1）。これは RaceList の freshness が採る
+// 「lastUpdated 欠落＝snapshot 未取得＝stale に倒す」意味論と正反対。よって null 時は stale 判定を
+// スキップし state=fresh（＝警告なし）を返す。真のオッズ有無は odds_available が担う（盤ヘッダのチップ）。
+// ラベル整形（relativeTimeLabel）だけ freshness と共通化して重複を除いた。
+export function boardFreshness(
+  currentAt: string | null | undefined,
+  upcoming: boolean,
+  now: Date,
+): Freshness {
+  let label = "—";
+  let diffMs: number | null = null;
+  if (currentAt) {
+    const t = new Date(currentAt);
+    if (!Number.isNaN(t.getTime())) {
+      diffMs = Math.max(0, now.getTime() - t.getTime());
+      label = relativeTimeLabel(diffMs);
+    }
+  }
+  if (!upcoming) return { label, state: "done" };
+  // current_at が読めない（null/不正＝単一 snapshot 等）ときは経過を主張できないので stale に倒さない。
+  // 鮮度不明として state=fresh（警告なし）を返し、オッズ有無の判断は odds_available に委ねる（M1）。
+  if (diffMs == null) return { label, state: "fresh" };
+  return diffMs > STALE_MINUTES * 60_000
+    ? { label, state: "stale" }
+    : { label, state: "fresh" };
 }
 
 // フリップ注記。axis_changed / ev_reversed を独立に評価し、真の側のみ返す（片側 false を誤強調しない）。
