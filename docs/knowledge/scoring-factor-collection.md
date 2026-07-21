@@ -16,13 +16,17 @@ updated: "2026-07-21"
 
 ## 全体構造
 
-`collect_race_factors`（`predict.rs:127`）のループ内で、馬ごとに以下の順序で factor を組み立てる:
+`collect_race_factors`（`predict.rs:128`）のループ内で、馬ごとに以下の順序で factor を組み立てる:
 
 1. `resolve_shared_factors(...)` を **1 回だけ** 呼び `SharedFactorStats` を構築
 2. `build_factors(&shared, ...)` → `HorseFactors`（score 計算の入力）
 3. `build_explanation(&shared, ...)` → `HorseExplanation`（UI 表示用の根拠）
 
 **同一の `SharedFactorStats` を両関数に渡す**ことで、ラベル選択と `stat_to_triple_opt` の評価が 1 回に統一されている。
+
+`predict_race`（確率のみ）と `predict_race_views`（確率＋根拠）が `collect_race_factors` を共有し
+factor 収集を DB 二重取得なく **1 回に統一**する設計（#274）は、EV 層の循環を断つ ADR 0055 の
+方針（推定と根拠で同一 factor 評価を保証する）に連なる。
 
 ## SharedFactorStats（`predict.rs:427-448`）
 
@@ -51,6 +55,11 @@ updated: "2026-07-21"
 ```
 
 母数 0・欠落・欠員はすべて `None`（ADR 0014 の None 母数除外）。jockey/trainer 未登録は outer `None`、実績なしは inner `None` の二段で畳む。
+
+> QA-409 は解決済みラベルに `tc_opt`（馬場状態ラベル）を含めて 5 本と記していたが、実装にラベル
+> フィールドは **4 本のみ**。馬場状態は `horse_track_condition`（10 スロットの集計 FactorStat）として
+> 扱われ、ラベル文字列は `race.track_condition` からその場生成されるため専用フィールドを持たない。
+> 本 knowledge の「4 本」が実装に沿う（QA の記述を蒸留時に補正した）。
 
 ## resolve_shared_factors（`predict.rs:459-503`）
 
