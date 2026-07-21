@@ -113,7 +113,7 @@ _tmp="$final.part"
 # container 内 pg_dump（バージョン一致）で full DB を custom-format 退避。stdout をホストファイルへ。
 # 一時ファイル(.part)に書き、成功＋非空を確認してから最終名へ mv（中断で壊れた dump を残さない）。
 if ! docker exec "$CONTAINER" pg_dump -U "$PG_USER" -d "$PG_DB" -Fc --no-owner --no-privileges > "$_tmp"; then
-    echo "pg_dump に失敗（container=$CONTAINER）" >&2
+    echo "pg_dump に失敗（container=${CONTAINER}）" >&2
     exit 1
 fi
 if [[ ! -s "$_tmp" ]]; then
