@@ -124,6 +124,16 @@ mv "$_tmp" "$final"
 # mv 成功後は一時ファイルが存在しないので _tmp をリセット（EXIT ハンドラで rm しない）。
 _tmp=""
 
+# dump 構造チェック（-Fc custom-format の整合検証）。
+# pg_restore --list はアーカイブヘッダのみ読むため数秒で完了し、container 内 PG17 を使う必要もない。
+# ホスト側 pg_restore が v14 以下でも -Fc ヘッダ検証は互換的に動作する（バイナリプロトコルは不変）。
+# 壊れた dump（書き込み中断・転送破損等）はここで即検知して失敗させる。
+if ! docker exec -i "$CONTAINER" pg_restore --list < "$final" > /dev/null; then
+    echo "dump 構造チェック失敗（pg_restore --list が異常終了。dump が壊れている可能性あり）: $final" >&2
+    exit 1
+fi
+log "dump 構造チェック OK: $final"
+
 size="$(du -h "$final" | cut -f1)"
 log "退避完了: $final ($size)"
 
