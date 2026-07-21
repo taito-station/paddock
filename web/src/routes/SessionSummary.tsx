@@ -62,7 +62,7 @@ export function SessionSummary() {
 
   // 結果確定を検知して自動精算する（#381）。ライブ一覧と同じ gate（発走済み・未確定が残る間だけ）に
   // 揃え、発走前の空回りを避ける（過去日・全確定で停止）。手動「精算」ボタンはフォールバックとして残す。
-  useResultsRefresh(date, {
+  const settlePoll = useResultsRefresh(date, {
     enabled: hasUnsettledRaces(races.data?.races ?? [], date, now),
     now,
   });
@@ -169,6 +169,13 @@ export function SessionSummary() {
               </tr>
             </tbody>
           </table>
+
+          {/* 自動精算ポーリングの失敗を明示（#478）。無言停止を避け、直下の手動精算ボタンへ誘導する。 */}
+          {settlePoll.isError && (
+            <p className="live-stale mt-lg">
+              ⚠ 自動精算に失敗しています。下の「確定結果で精算」で手動再試行できます。
+            </p>
+          )}
 
           <div className="toolbar mt-lg">
             <button onClick={() => settle.mutate()} disabled={settle.isPending}>
