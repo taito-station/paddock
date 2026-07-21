@@ -2,8 +2,6 @@
 //! 馬・買い目の子行は delete→insert で冪等にする。`predict_session.rs` のトランザクション
 //! 流儀に倣う。
 
-use std::collections::HashMap;
-
 use chrono::{DateTime, NaiveDate, Utc};
 use paddock_domain::{
     Mark, PadPrediction, PredictionBet, PredictionHorse, PredictionResult, Surface, Venue,
@@ -313,62 +311,6 @@ pub async fn find_pad_prediction(
         }
         None => Ok(None),
     }
-}
-
-pub async fn list_pad_predictions(pool: &PgPool) -> Result<Vec<PadPrediction>> {
-    let headers: Vec<PredictionHeaderRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-        "SELECT {HEADER_COLUMNS} FROM predictions ORDER BY date ASC, venue ASC, race_num ASC"
-    )))
-    .fetch_all(pool)
-    .await?;
-
-    if headers.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    // 子行は全件まとめて取得し prediction_id でグルーピングする（N+1 回避）。
-    let mut horses_by: HashMap<i64, Vec<PredictionHorse>> = HashMap::new();
-    let horse_rows = sqlx::query(
-        r#"
-        SELECT prediction_id, horse_num, horse_name, jockey, mark, win_odds, popularity,
-               win_prob, place_prob, show_prob, comment
-        FROM prediction_horses
-        ORDER BY prediction_id ASC, horse_num ASC
-        "#,
-    )
-    .fetch_all(pool)
-    .await?;
-    for row in &horse_rows {
-        let pid: i64 = row.try_get("prediction_id")?;
-        horses_by.entry(pid).or_default().push(row_to_horse(row)?);
-    }
-
-    let mut bets_by: HashMap<i64, Vec<PredictionBet>> = HashMap::new();
-    let bet_rows: Vec<(i64, String, String, i64)> = sqlx::query_as(
-        r#"
-        SELECT prediction_id, bet_type, combination, amount
-        FROM prediction_bets
-        ORDER BY prediction_id ASC, ordinal ASC
-        "#,
-    )
-    .fetch_all(pool)
-    .await?;
-    for (pid, bet_type, combination, amount) in bet_rows {
-        bets_by.entry(pid).or_default().push(PredictionBet {
-            bet_type,
-            combination,
-            amount: amount as u64,
-        });
-    }
-
-    let mut out = Vec::with_capacity(headers.len());
-    for h in headers {
-        let pid = h.prediction_id;
-        let horses = horses_by.remove(&pid).unwrap_or_default();
-        let bets = bets_by.remove(&pid).unwrap_or_default();
-        out.push(build_prediction(h, horses, bets)?);
-    }
-    Ok(out)
 }
 
 /// 主キー（`prediction_id`）で予想 1 件を取得する（#145・個別予想ビュー）。

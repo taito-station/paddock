@@ -1093,9 +1093,6 @@ pub trait PadPredictionRepository: Send + Sync {
         race_num: u32,
     ) -> impl Future<Output = Result<Option<PadPrediction>>> + Send;
 
-    /// 保存済みの全予想を date / venue / race_num 昇順で返す（生成・検証用）。
-    fn list_pad_predictions(&self) -> impl Future<Output = Result<Vec<PadPrediction>>> + Send;
-
     /// 予想を横断検索する（#145）。`filter` の指定軸のみ AND で絞り、`date DESC, venue, race_num`
     /// 昇順・`limit`/`offset` でページングしたサマリと、フィルタ適用後の総件数を返す。
     fn search_predictions(

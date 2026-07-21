@@ -11,7 +11,6 @@ members = [
     "src/apps/fetch-card",
     "src/apps/fetch-results",
     "src/apps/simulate",
-    "src/apps/web-viewer",
     "src/apps/ingest-predictions",
     "src/apps/api-server",
 ]
@@ -24,7 +23,6 @@ members = [
 anyhow             = { version = "1" }
 actix-web          = { version = "4" }
 ordered-float      = { version = "5" }
-pulldown-cmark     = { version = "0.13", default-features = false, features = ["html"] }
 chrono             = { version = "0.4", features = ["serde"] }
 clap               = { version = "4", features = ["derive"] }
 dotenvy            = { version = "0.15" }
