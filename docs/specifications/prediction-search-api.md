@@ -6,8 +6,8 @@ kind: knowledge
 sources:
   - docs/adr/0025-prediction-search-api.md
   - docs/api/openapi.json
-distilled_from_sha: "f765be7"
-updated: "2026-07-17"
+distilled_from_sha: "f0ee7a3"
+updated: "2026-07-21"
 ---
 
 # 予想の横断検索 API: 設計仕様

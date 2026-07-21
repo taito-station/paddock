@@ -7,7 +7,7 @@ sources:
   - docs/adr/0022-rest-api-read-server.md
   - docs/adr/0069-drop-icloud-writes-browser-only-viewing.md
   - docs/api/openapi.json
-distilled_from_sha: "f765be7"
+distilled_from_sha: "f0ee7a3"
 updated: "2026-07-21"
 ---
 
@@ -177,6 +177,73 @@ GET /api/analyze/course?venue=<場>&distance=<m>&surface=<turf|dirt>
   正規化（取り込み時と共有の normalizer）してから `results` を中間一致 LIKE で引き、`{ names, truncated }` を返す
   （名前昇順・上限 20 件、超過は `truncated=true`）。呼び出し側は 1 件なら `?name=` で統計を引き、多数なら一覧提示する。
   統計本体の `?name=` は従来どおり**完全一致**（正規化後にドメイン値へ変換できた名前のみ、不正は `400`）。
+
+### 5. ライブ盤（race board）
+
+```
+GET /api/races/{race_id}/board[?budget=&track_condition=&blend_alpha=]
+```
+
+- use-case: `race_board(race_id, budget, blend_alpha, track_condition)`
+- 全出走馬（truncate なし）＋ 買い目推奨（`/recommendations` と同経路・同値）＋ 混戦/乖離/重なり 判定を 1 レスポンスで返す（#373 盤の統合エンドポイント）。
+- クエリパラメータ（すべて任意）:
+  - `budget`: 予算（円、1 以上、既定 5000）。買い目組成の上限。
+  - `track_condition`: 馬場状態（`良`/`稍重`/`重`/`不良` または略記）。未指定は馬場項なし。
+  - `blend_alpha`: 市場ブレンド係数 `[0,1]`。未指定は本番ブレンド α=0.2。
+- レスポンス: `RaceBoardResponse`（スキーマは `docs/api/openapi.json` コンポーネント参照）
+
+レスポンスの主要フィールド:
+
+| フィールド | 型 | 説明 |
+|---|---|---|
+| `race_id` / `venue` / `race_num` / `date` | string/int | レース識別子 |
+| `race_name` / `race_class` | string\|null | 重賞名・格付けスラッグ（未保存は `null`、#389/#345） |
+| `surface` / `distance` / `field_size` | string/int | 馬場・距離・出走頭数 |
+| `post_time` | string\|null | 発走時刻 `HH:MM`（未取得は `null`） |
+| `odds_available` | bool | 保存オッズ（#51）の有無。`false` のとき `bets` は空 |
+| `axis` | int\|null | 買い目の軸。`recorded_axis` があればそれ、無ければ `live_axis` |
+| `recorded_axis` | int\|null | predict 記録済みの本命◎（#388）。未 predict・取消時は `null` |
+| `live_axis` | int\|null | ライブ再計算の軸（市場ブレンド首位）。`recorded_axis` と乖離時に UI 警告 |
+| `roi` / `hit_prob` | number\|null | 現時点オッズ基準のポートフォリオ ROI / 的中確率 |
+| `result_confirmed` | bool | 結果確定フラグ（#381）。web の「⚫終」判定に使う |
+| `horses` | array | `BoardHorseSchema[]`（後述） |
+| `bets` | array | 買い目（券種・組合せ・EV・推奨額） |
+| `confusion` | object\|null | 混戦判定オブジェクト |
+
+**`BoardHorseSchema` の主要フィールド:**
+
+| フィールド | 型 | 説明 |
+|---|---|---|
+| `horse_num` / `horse_name` / `gate_num` | int/string | 馬番・馬名・枠番 |
+| `jockey` | string\|null | 騎手（出馬表未取得は `null`） |
+| `win_prob` / `place_prob` / `show_prob` | number | ブレンド勝率・連対率・複勝率 |
+| `pure_win_prob` / `pure_place_prob` / `pure_show_prob` | number | 純モデル α=1.0 の各確率（#373） |
+| `win_odds` | number\|null | 単勝オッズ（未取得は `null`） |
+| `market_implied` | number\|null | 市場 implied 勝率（`1/単勝` 正規化） |
+| `popularity` | int\|null | 単勝人気順（1=1番人気） |
+| `model_rank` | int | モデル勝率順位（1=最上位） |
+| `mark` | string\|null | 機械印スラッグ（honmei/taikou/tanana/hoshi）。無印は `null` |
+| `is_value` | bool | 乖離馬（モデル上位×市場人気低＝妙味候補） |
+| `is_overlay` | bool | 重なり馬（モデル勝率 1 位 かつ 単勝人気 1 位） |
+| `comment` | string\|null | 馬書評の一行寸評（#348） |
+| `detail_lines` | array | 展開パネル用の根拠 bullet（条件別 factor・枠 lift・近走・前走・斤量） |
+| `finishing_position` | int\|null | 確定着順（#381。未確定・除外/中止は `null`） |
+| `morning_win_odds` | number\|null | **朝時点の単勝オッズ**（後述「朝比較」参照）。朝 snapshot 無し・当該馬未取得は `null` |
+
+#### 朝比較フィールド（#448）
+
+`RaceBoardResponse` の以下フィールドが朝比較機能（ADR 0055/0060 の可視化）を担う:
+
+| フィールド | 型 | 説明 |
+|---|---|---|
+| `morning_at` | string\|null | 朝時点 snapshot の取得時刻（RFC3339）。朝 complete と最新が別時刻のレースで非 `null`。UI はこれが非 `null` の時だけ「朝↔現比較」を表示する |
+| `current_at` | string\|null | 現時点（最新スイープ）の取得時刻（RFC3339）。`morning_at` と対 |
+| `morning_roi` | number\|null | 朝時点オッズで再計算したポートフォリオ ROI（確率・軸・budget は現時点と同一） |
+| `morning_hit_prob` | number\|null | 朝時点オッズで再計算したポートフォリオ的中確率 |
+
+「朝時点」の定義: is_complete を満たす最古の snapshot（早朝の単複のみ snapshot は is_complete=false なので含まれない）。buy `morning_win_odds`（`BoardHorseSchema`）は各馬のこの snapshot での単勝オッズ。
+
+**設計意図（ADR 0055/0060）**: 「確率・軸を固定したまま、参照する snapshot だけを朝↔現で差し替えて ROI/hit_prob を再計算する」apples-to-apples 方式。「朝 +EV が発走直前に剥がれる」を数値で体感できるようにするための可視化。軸（◎）は朝比較によって変更しない（軸ロック思想の UI 体現）。
 
 ## OpenAPI（utoipa コードファースト）
 
