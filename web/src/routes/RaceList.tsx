@@ -290,7 +290,9 @@ export function RaceList() {
       {settlePoll.isError && (
         <p className="live-stale">
           ⚠ 自動精算に失敗しています（着順・払戻の反映が止まっている可能性。
-          収支ページの手動精算で再試行できます）
+          {/* date は ?date= 由来のユーザ制御値になりうるため必ずエンコード（上の「収支」リンクと同基準） */}
+          <Link to={`/sessions/${encodeURIComponent(date)}`}>収支ページ</Link>
+          の手動精算で再試行できます）
         </p>
       )}
       {liveMode && live.data && (
