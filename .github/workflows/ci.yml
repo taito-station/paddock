@@ -67,6 +67,11 @@ jobs:
           toml_channel=$(grep -E '^channel\s*=' rust-toolchain.toml | sed 's/.*= *"\(.*\)"/\1/')
           echo "rust-toolchain.toml channel: ${toml_channel}"
           echo "env.RUST_TOOLCHAIN:           ${RUST_TOOLCHAIN}"
+          # channel を読み取れなければ fail-closed（空のまま比較すると理由がメッセージから読めない）。
+          if [ -z "${toml_channel}" ]; then
+            echo "::error::rust-toolchain.toml から channel を読み取れなかった（ファイル形式の変化？）。#466 参照"
+            exit 1
+          fi
           if [ "${toml_channel}" != "${RUST_TOOLCHAIN}" ]; then
             echo "::error::rust-toolchain.toml の channel (${toml_channel}) と env.RUST_TOOLCHAIN (${RUST_TOOLCHAIN}) が一致しません。両方を同時に更新してください（#466）"
             exit 1
