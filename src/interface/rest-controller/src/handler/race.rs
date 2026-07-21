@@ -3,7 +3,7 @@ use chrono::NaiveDate;
 use serde::Deserialize;
 use utoipa::IntoParams;
 
-use paddock_domain::{RaceId, TrackCondition};
+use paddock_domain::{RECOMMENDED_MARKET_BLEND_ALPHA, RaceId, TrackCondition};
 use paddock_use_case::Interactor;
 use paddock_use_case::pdf_fetcher::PdfFetcher;
 use paddock_use_case::pdf_parser::PdfParser;
@@ -22,18 +22,14 @@ pub struct RaceListQuery {
     pub date: String,
 }
 
-/// 本番モデルの市場オッズブレンド係数（ADR 0027 → 0031 → 0034）。
-/// `blend_alpha` 省略時のデフォルト。`blend_alpha=1.0` を明示すれば素モデルを参照できる。
-pub(crate) const PRODUCTION_BLEND_ALPHA: f64 = 0.2;
-
 /// クエリの `blend_alpha` を検証してハンドラが使う値に正規化する。
-/// 省略（`None`）は [`PRODUCTION_BLEND_ALPHA`] にフォールバック。範囲外は `BadRequest`。
+/// 省略（`None`）は [`RECOMMENDED_MARKET_BLEND_ALPHA`]（domain 単一正本）にフォールバック。範囲外は `BadRequest`。
 fn resolve_blend_alpha(raw: Option<f64>) -> Result<Option<f64>> {
     match raw {
         Some(a) if !(0.0..=1.0).contains(&a) => Err(Error::BadRequest(format!(
             "blend_alpha must be within [0, 1], got {a}"
         ))),
-        None => Ok(Some(PRODUCTION_BLEND_ALPHA)),
+        None => Ok(RECOMMENDED_MARKET_BLEND_ALPHA),
         other => Ok(other), // Some(0.0..=1.0): 明示値をそのまま使う
     }
 }
@@ -44,6 +40,9 @@ pub struct PredictionQuery {
     /// 馬場状態（`良` / `稍重` / `重` / `不良`。略記 `稍` / `不` も可）。未指定なら馬場項なし。
     pub track_condition: Option<String>,
     /// 市場オッズ（単勝）とのブレンド係数 `[0,1]`。未指定は本番ブレンド α=0.2。素モデルは `1.0` を明示。
+    // 値は RECOMMENDED_MARKET_BLEND_ALPHA と一致させること。
+    // utoipa の #[param] はリテラルのみ受理し定数展開できないため、この定数との乖離は
+    // 自動検知されない（手動で整合させる）。
     #[param(default = 0.2, minimum = 0.0, maximum = 1.0)]
     pub blend_alpha: Option<f64>,
 }
@@ -59,6 +58,9 @@ pub struct RecommendationQuery {
     /// 馬場状態（`良` / `稍重` / `重` / `不良`。略記 `稍` / `不` も可）。未指定なら馬場項なし。
     pub track_condition: Option<String>,
     /// 市場オッズ（単勝）とのブレンド係数 `[0,1]`。未指定は本番ブレンド α=0.2。素モデルは `1.0` を明示（`/prediction` と同義）。
+    // 値は RECOMMENDED_MARKET_BLEND_ALPHA と一致させること。
+    // utoipa の #[param] はリテラルのみ受理し定数展開できないため、この定数との乖離は
+    // 自動検知されない（手動で整合させる）。
     #[param(default = 0.2, minimum = 0.0, maximum = 1.0)]
     pub blend_alpha: Option<f64>,
 }
@@ -72,6 +74,9 @@ pub struct BoardQuery {
     /// 馬場状態（`良` / `稍重` / `重` / `不良`。略記 `稍` / `不` も可）。未指定なら馬場項なし。
     pub track_condition: Option<String>,
     /// 市場オッズ（単勝）とのブレンド係数 `[0,1]`。未指定は本番ブレンド α=0.2。素モデルは `1.0` を明示。
+    // 値は RECOMMENDED_MARKET_BLEND_ALPHA と一致させること。
+    // utoipa の #[param] はリテラルのみ受理し定数展開できないため、この定数との乖離は
+    // 自動検知されない（手動で整合させる）。
     #[param(default = 0.2, minimum = 0.0, maximum = 1.0)]
     pub blend_alpha: Option<f64>,
 }
