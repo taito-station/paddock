@@ -22,6 +22,9 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  # Rust toolchain の単一ソース（#466）。ci.yml 内の toolchain 指定はすべてここを参照する。
+  # バージョンを上げるときはここ 1 行と rust-toolchain.toml:channel の 2 箇所を変える。
+  RUST_TOOLCHAIN: "1.97.1"
 
 jobs:
   ci:
@@ -56,12 +59,31 @@ jobs:
       # third-party / 外部 action はサプライチェーン対策で commit SHA にピンする（コメントは対応タグ）。
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
+      # rust-toolchain.toml の channel と env.RUST_TOOLCHAIN の一致を確認する（#466）。
+      # 不一致ならここで即 fail し、サイレントなバージョン乖離を防ぐ。
+      # toml を single source として読み出し、ci.yml の RUST_TOOLCHAIN 変数と比較する。
+      - name: Assert rust-toolchain.toml と RUST_TOOLCHAIN の一致 (#466)
+        run: |
+          toml_channel=$(grep -E '^channel\s*=' rust-toolchain.toml | sed 's/.*= *"\(.*\)"/\1/')
+          echo "rust-toolchain.toml channel: ${toml_channel}"
+          echo "env.RUST_TOOLCHAIN:           ${RUST_TOOLCHAIN}"
+          # channel を読み取れなければ fail-closed（空のまま比較すると理由がメッセージから読めない）。
+          if [ -z "${toml_channel}" ]; then
+            echo "::error::rust-toolchain.toml から channel を読み取れなかった（ファイル形式の変化？）。#466 参照"
+            exit 1
+          fi
+          if [ "${toml_channel}" != "${RUST_TOOLCHAIN}" ]; then
+            echo "::error::rust-toolchain.toml の channel (${toml_channel}) と env.RUST_TOOLCHAIN (${RUST_TOOLCHAIN}) が一致しません。両方を同時に更新してください（#466）"
+            exit 1
+          fi
+
       - name: Install Rust toolchain
         # サプライチェーン対策で commit SHA にピン（dtolnay/rust-toolchain は version タグを
-        # 切らないため master の 2026-03-27 時点を固定）。toolchain は input で 1.97.1 に固定。
+        # 切らないため master の 2026-03-27 時点を固定）。
+        # toolchain は env.RUST_TOOLCHAIN を参照（単一ソース化 #466）。
         uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
         with:
-          toolchain: "1.97.1" # rust-toolchain.toml と一致させる
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
           components: rustfmt, clippy
 
       - name: Cache cargo build
@@ -242,10 +264,11 @@ jobs:
 
       - name: Install Rust toolchain
         # 本体 ci ジョブと同じ SHA ピン（dtolnay/rust-toolchain は version タグを切らないため
-        # master の 2026-03-27 時点を固定）。toolchain は input で 1.97.1 に固定。
+        # master の 2026-03-27 時点を固定）。
+        # toolchain は env.RUST_TOOLCHAIN を参照（単一ソース化 #466）。
         uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
         with:
-          toolchain: "1.97.1" # rust-toolchain.toml と一致させる
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
 
       - name: Cache cargo build
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
