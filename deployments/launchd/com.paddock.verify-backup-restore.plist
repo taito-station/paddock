@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  paddock backup restore 週次検証 LaunchAgent（#474）。
+  scripts/verify-backup-restore.sh を毎週日曜 04:00 に実行し、最新 dump を scratch DB へ
+  復元して主要テーブルの行数を golden DB と突合する（「復元できない dump を守っていた」を検知）。
+
+  race_odds_snapshots は再取得不能資産で、restore 可能性こそがバックアップの本体（#474）。
+
+  インストール: deployments/launchd/install.sh がまとめて配置・load する（プレースホルダ
+  __REPO_ROOT__=リポの絶対パス / __HOME__=$HOME を実値へ置換）。
+  __HOME__ はログ出力先用（backup-db / backup-staleness と同一ログファイルに集約）。
+  PATH は launchd の最小環境で docker を解決するため明示する（Intel の /usr/local/bin と
+  Apple Silicon の /opt/homebrew/bin の両方を含める）。
+
+  アンインストール（backup-db・backup-staleness と同様に常駐。uninstall.sh では外さない）:
+    launchctl bootout gui/$UID/com.paddock.verify-backup-restore
+    rm ~/Library/LaunchAgents/com.paddock.verify-backup-restore.plist
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.paddock.verify-backup-restore</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>__REPO_ROOT__/scripts/verify-backup-restore.sh</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
+
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Weekday</key>
+        <integer>0</integer>
+        <key>Hour</key>
+        <integer>4</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>__HOME__/Library/Logs/paddock-backup.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/Library/Logs/paddock-backup.log</string>
+</dict>
+</plist>

@@ -31,26 +31,40 @@ PADDOCK_BACKUP_DIR=/path/to/dir PADDOCK_BACKUP_KEEP=30 scripts/backup-db.sh
 PADDOCK_BACKUP_MIRROR_DIR=/Volumes/ext/paddock-backups scripts/backup-db.sh
 ```
 
-## 日次スケジュール（launchd）のインストール
+## launchd スケジュールのインストール
 
-backup-db は prefetch / keep-awake と同じ `install.sh` でまとめて配置する（#416 で二重規約を解消）。
+backup-db / backup-staleness / verify-backup-restore は prefetch / keep-awake と同じ `install.sh`
+でまとめて配置する（#416 で二重規約を解消）。
 `install.sh` が plist の `__REPO_ROOT__`（リポパス）と `__HOME__`（ログ出力先）を実値へ置換し load する。
 
 ```sh
-deployments/launchd/install.sh                                      # 3 エージェントを配置（backup-db は毎日 23:30）
-launchctl kickstart -k gui/$UID/com.paddock.backup-db               # 即時実行（動作確認）
-tail -f ~/Library/Logs/paddock-backup.log                           # ログ確認
+deployments/launchd/install.sh                                      # 5 エージェントを配置
+launchctl kickstart -k gui/$UID/com.paddock.backup-db               # backup-db 即時実行（動作確認）
+launchctl kickstart -k gui/$UID/com.paddock.verify-backup-restore   # restore 検証 即時実行（動作確認）
+tail -f ~/Library/Logs/paddock-backup.log                           # ログ確認（3エージェント集約）
 ```
+
+スケジュール一覧:
+
+| エージェント | スケジュール |
+|---|---|
+| `com.paddock.backup-db` | 毎日 23:30 |
+| `com.paddock.backup-staleness` | 毎時 + 起動時 |
+| `com.paddock.verify-backup-restore` | 毎週日曜 04:00（#474） |
 
 > `kickstart` の 1 回実行で launchd の最小環境から docker まで到達できるか（PATH / docker context）を
 > 必ず確認する。docker を `DOCKER_HOST` 環境変数で指している場合は launchd に引き継がれないため、
 > plist の `EnvironmentVariables` に `DOCKER_HOST` を追記する（docker context 経由なら不要）。
 
-アンインストール（backup-db は常駐のため `uninstall.sh` では外れない。手動で bootout する）:
+アンインストール（backup-db / backup-staleness / verify-backup-restore は常駐のため `uninstall.sh`
+では外れない。手動で bootout する）:
 
 ```sh
 launchctl bootout gui/$UID/com.paddock.backup-db
 rm ~/Library/LaunchAgents/com.paddock.backup-db.plist
+# verify-backup-restore を止める場合:
+launchctl bootout gui/$UID/com.paddock.verify-backup-restore
+rm ~/Library/LaunchAgents/com.paddock.verify-backup-restore.plist
 ```
 
 ## 復元
@@ -87,7 +101,37 @@ docker exec -i paddock-postgres pg_restore -U paddock -d paddock \
 
 ## 復元検証（dump→restore の 1 サイクル・live DB を汚さない）
 
-scratch DB へ復元して行数が一致するか確認する。
+`scripts/verify-backup-restore.sh` が自動化している（`install.sh` で配置し毎週日曜 04:00 に実行・#474）。
+手動実行は以下:
+
+```sh
+# 最新 dump を自動選択して検証（golden DB は read-only・scratch は使い捨て）
+scripts/verify-backup-restore.sh
+
+# 特定 dump を指定する場合
+PADDOCK_VERIFY_DUMP=~/paddock-backups/paddock-YYYYMMDD-HHMMSS.dump \
+    scripts/verify-backup-restore.sh
+
+# ログ確認
+tail -f ~/Library/Logs/paddock-backup.log
+```
+
+**突合テーブル**（既定: `race_odds_snapshots,races,horses`）:
+
+- `race_odds_snapshots`: 再取得不能資産。行数不一致は致命的
+- `races` / `horses`: スキーマ構造の sanity check
+
+**突合の基準は live golden ではなくサイドカー**（`<dump>.rowcounts`）。`backup-db.sh` が dump 生成と
+ほぼ同時刻の各テーブル `COUNT(*)` を `paddock-YYYYMMDD-HHMMSS.dump.rowcounts` に記録し、検証側は
+その記録値と scratch 復元行数を厳密比較する。live golden と比べると、検証（日 04:00）が dump 生成
+（土 23:30）から数時間ズレる間に golden へ INSERT が入り「scratch < golden」で**偽 FAIL** する。
+サイドカー方式なら時刻ズレが原理的に無く、行の増加も欠落も正しく判定できる（race-free）。
+サイドカーが無い旧 dump は行数突合を skip（構造健全性は `backup-db.sh` の `pg_restore --list` で担保）。
+
+突合テーブルのカスタマイズは **`backup-db.sh` 側の** `PADDOCK_VERIFY_TABLES`（サイドカー生成時に反映）:
+`PADDOCK_VERIFY_TABLES=race_odds_snapshots,race_odds scripts/backup-db.sh`
+
+### 手動検証手順（スクリプト非使用の場合）
 
 ```sh
 DUMP=~/paddock-backups/paddock-YYYYMMDD-HHMMSS.dump   # ミラーを有効化しているならミラー側のパスでも可
