@@ -41,7 +41,9 @@ impl<O: OddsScraper, R: OddsRepository> OddsInteractor<O, R> {
 
         // 2. complete でなければ（未保存 or 部分スナップショット）ライブスクレイプ。
         //    部分スナップショットの取り直しが #294 の中核ケース。空/失敗は従来どおりスキップ(None)。
-        match self.scraper.scrape(race_id) {
+        //    scrape は async（#458）。api-server 経路では実装が spawn_blocking へ逃がすため
+        //    ここで await しても actix worker を同期ブロッキングで塞がない。
+        match self.scraper.scrape(race_id).await {
             Ok(odds) if odds.is_empty() => {
                 // 取得は成功したが全馬券種が空（未公開）。スクレイプ失敗（warn）と
                 // 区別できるよう debug で記録し、運用時に原因を切り分けられるようにする。
@@ -71,7 +73,7 @@ impl<O: OddsScraper, R: OddsRepository> OddsInteractor<O, R> {
     /// 戻り値の意味は `race_odds()` と揃える: 取得できれば `Some(odds)`、未取得（スクレイプ
     /// 失敗・全券種空＝未公開）は `None`。監視 1 レースの取得失敗で全体を止めない。
     pub async fn refresh_race_odds(&self, race_id: &RaceId) -> Result<Option<RaceOdds>> {
-        match self.scraper.scrape(race_id) {
+        match self.scraper.scrape(race_id).await {
             Ok(odds) if odds.is_empty() => {
                 tracing::debug!(race_id = %race_id, "オッズ再取得成功だが全馬券種が空（未公開）、スキップ");
                 Ok(None)
@@ -95,7 +97,7 @@ impl<O: OddsScraper, R: OddsRepository> OddsInteractor<O, R> {
     /// 貯めるため netkeiba への負荷を最小化する。戻り値の意味は `refresh_race_odds` と揃える
     /// （取得できれば `Some`、未公開/失敗は `None`・1 レースの失敗で収集ループを止めない）。
     pub async fn refresh_win_place_odds(&self, race_id: &RaceId) -> Result<Option<RaceOdds>> {
-        match self.scraper.scrape_win_place(race_id) {
+        match self.scraper.scrape_win_place(race_id).await {
             Ok(odds) if odds.is_empty() => {
                 tracing::debug!(race_id = %race_id, "単複再取得成功だが空（未公開）、スキップ");
                 Ok(None)
@@ -193,7 +195,7 @@ mod tests {
     }
 
     impl OddsScraper for FakeScraper {
-        fn scrape(&self, race_id: &RaceId) -> Result<RaceOdds> {
+        async fn scrape(&self, race_id: &RaceId) -> Result<RaceOdds> {
             *self.calls.lock().unwrap() += 1;
             (self.result)(race_id)
         }

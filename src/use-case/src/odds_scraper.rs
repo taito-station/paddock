@@ -1,3 +1,5 @@
+use std::future::Future;
+
 use paddock_domain::{RaceId, RaceOdds};
 
 use crate::error::Result;
@@ -9,8 +11,14 @@ use crate::error::Result;
 /// per race with no caching. The live implementation is `UreqNetkeibaScraper`
 /// over the netkeiba odds API (UTF-8 JSON); the former JRA `accessO.html` path
 /// was unverified (ADR 0001) and removed in #287.
+///
+/// メソッドは **async**（#458）。実装は同期ブロッキング I/O（`std::thread::sleep` + 同期 ureq
+/// GET）を伴うため、async ハンドラ（api-server の actix worker）の経路では実装側で
+/// `tokio::task::spawn_blocking` に逃がしてワーカースレッドを塞がないようにする。CLI 各 app は
+/// 実質単一タスクなのでオフロードの有無に関わらず挙動は変わらない。戻り値の Future に `Send` を
+/// 課すのは actix-web のマルチスレッドランタイム越しに握るため（conventions.md）。
 pub trait OddsScraper: Send + Sync {
-    fn scrape(&self, race_id: &RaceId) -> Result<RaceOdds>;
+    fn scrape(&self, race_id: &RaceId) -> impl Future<Output = Result<RaceOdds>> + Send;
 
     /// 単勝・複勝**のみ**を取得する軽量経路（オッズ時系列コレクタ用・#odds-collect）。
     ///
@@ -19,11 +27,13 @@ pub trait OddsScraper: Send + Sync {
     ///
     /// デフォルト実装は `scrape` の結果から win/place だけを残す（正しいが軽量でない）。
     /// ネットワーク実装（`UreqNetkeibaScraper`）は type=1 の 1 GET だけを打つよう **override** する。
-    fn scrape_win_place(&self, race_id: &RaceId) -> Result<RaceOdds> {
-        let full = self.scrape(race_id)?;
-        let mut wp = RaceOdds::empty(race_id.clone());
-        wp.win = full.win;
-        wp.place = full.place;
-        Ok(wp)
+    fn scrape_win_place(&self, race_id: &RaceId) -> impl Future<Output = Result<RaceOdds>> + Send {
+        async move {
+            let full = self.scrape(race_id).await?;
+            let mut wp = RaceOdds::empty(race_id.clone());
+            wp.win = full.win;
+            wp.place = full.place;
+            Ok(wp)
+        }
     }
 }
