@@ -6,3 +6,4 @@ edition = "2024"
 [dependencies]
 encoding_rs = { workspace = true }
 tracing     = { workspace = true }
+ureq        = { workspace = true }
