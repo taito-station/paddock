@@ -22,11 +22,12 @@
 --   正当行を弾く恐れがあるため意図的に除外する（FK 同様、別途検討）。
 --
 -- 【verdict の許容集合＝bet / skip】
--- live_ev_snapshots.verdict の書き込み経路は 2 つだけで、いずれも ROI ゲートで 'bet'/'skip' の
+-- live_ev_snapshots.verdict へ DB 保存する経路は Rust 1 本のみで、ROI ゲートで 'bet'/'skip' の
 -- 二値しか出さない:
 --   * src/apps/predict-watch/src/snapshot.rs: `if ev.roi >= 1.0 { "bet" } else { "skip" }`
---   * scripts/predict-check/live_ev.py: `"bet" if roi >= 100 else "skip"`
--- （domain の Verdict enum = Strong/Weak/Neutral は factor 説明用の別物で、この列には保存しない）。
+-- （scripts/predict-check/live_ev.py も `"bet" if roi >= 100 else "skip"` と同語彙を emit するが、
+--  自身の docstring どおり DB 永続化は退役済みで live_ev_snapshots を書かない＝許容集合には影響しない。
+--  domain の Verdict enum = Strong/Weak/Neutral は factor 説明用の別物で、この列には保存しない）。
 -- golden DB の DISTINCT verdict も 'skip' のみ（'bet' も有効）で、既存行は本 CHECK に違反しない。
 --
 -- 【ロックについて】NOT VALID を付けない ADD CONSTRAINT は ACCESS EXCLUSIVE ロック下で既存行を
