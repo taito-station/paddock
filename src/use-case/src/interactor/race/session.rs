@@ -61,53 +61,27 @@ impl<R: PredictSessionRepository, P: PdfParser, F: PdfFetcher> Interactor<R, P, 
         Ok(session)
     }
 
-    /// 1 レース分の買い目・払戻を記録し残高/累計を更新する（REST API #53）。残高ガード
-    /// （`Σstake ≤ balance`、超過は `InvalidArgument` で状態不変）を強制し、セッションヘッダ更新と
-    /// 当該レースの買い目追記を 1 トランザクション（`save_race_outcome`）で保存する。更新後レコードを返す。
-    /// セッション未作成は `NotFound`。`balance` は u64 で常に 0 以上に保たれる（ガードにより underflow しない）。
+    /// 1 レース分の買い目・払戻を記録し残高/累計を更新する（REST API #53）。二重記録ガード
+    /// （当該レースへ買い目ありで再記録は `Conflict`）・残高ガード（`Σstake ≤ balance`、超過は
+    /// `InvalidArgument` で状態不変）を強制し、判定・残高計算・セッションヘッダ更新・買い目追記を
+    /// リポジトリが `SELECT ... FOR UPDATE` でロックした 1 トランザクション内でアトミックに行う（#469）。
+    /// 更新後レコードを返す。セッション未作成は `NotFound`。`balance` は u64 で常に 0 以上に保たれる
+    /// （ガードにより underflow しない）。時刻（`updated_at`）はこの層で注入する。
     pub async fn record_race_outcome(
         &self,
         date: NaiveDate,
         race_id: &RaceId,
         bets: Vec<PredictBetRecord>,
     ) -> Result<PredictSessionRecord> {
-        let mut session = self
-            .repository
-            .find_predict_session(date)
-            .await?
-            .ok_or_else(|| Error::NotFound(format!("session for {date} not found")))?;
-
-        // 二重記録ガード: `save_race_outcome` は買い目を追記し、残高も都度差し引くため、同一レースへ
-        // 再 POST すると買い目重複＋残高二重適用で収支が壊れる。当該レースの記録済み買い目があれば
-        // `Conflict` で弾く（買い目なし＝スキップの再 POST は無害なので許容する）。
-        let existing = self.repository.find_predict_bets(date).await?;
-        if !bets.is_empty() && existing.iter().any(|b| &b.race_id == race_id) {
-            return Err(Error::Conflict(format!(
-                "outcome for race {} already recorded",
-                race_id.value()
-            )));
-        }
-
-        let total_stake: u64 = bets.iter().map(|b| b.stake).sum();
-        if total_stake > session.balance {
-            return Err(Error::InvalidArgument(format!(
-                "total stake {total_stake} exceeds balance {}",
-                session.balance
-            )));
-        }
-        let total_payout: u64 = bets.iter().map(|b| b.payout).sum();
-
-        // 残高ガード（`total_stake <= balance`）後なので `balance - total_stake` は underflow しない。
-        // 念のため saturating で累計のオーバーフローも安全側に倒す（現実の金額では到達しない防御）。
-        session.balance = (session.balance - total_stake).saturating_add(total_payout);
-        session.total_bet = session.total_bet.saturating_add(total_stake);
-        session.total_payout = session.total_payout.saturating_add(total_payout);
-        session.updated_at = Utc::now();
-
+        // 二重記録ガード（当該レースの記録済み買い目チェック）・残高ガード（`Σstake ≤ balance`）・
+        // 残高/累計計算・セッション upsert・買い目追記を、リポジトリが `SELECT ... FOR UPDATE` で
+        // 対象セッション行をロックした 1 トランザクション内でアトミックに行う（#469）。ここで read-then-write
+        // に分けると同時 POST／リトライで買い目重複＋残高二重適用の TOCTOU が起きるため、判定と更新を
+        // 分離しない。ガード違反はリポジトリが `NotFound` / `Conflict` / `InvalidArgument` を返し、
+        // これらはそのまま HTTP ステータスへマップされる。時刻（`updated_at`）はこの層で注入する。
         self.repository
-            .save_race_outcome(&session, race_id, &bets)
-            .await?;
-        Ok(session)
+            .save_race_outcome(date, race_id, &bets, Utc::now())
+            .await
     }
 
     /// 指定日のセッション収支と買い目明細をまとめて返す（REST API #53 のサマリ）。未作成は `NotFound`。

@@ -928,15 +928,25 @@ pub trait PredictSessionRepository: Send + Sync {
         session: &PredictSessionRecord,
     ) -> impl Future<Output = Result<()>> + Send;
 
-    /// 1 レース分の確定結果を 1 トランザクションで保存する。
-    /// セッション行を upsert（残高・累計・completed・updated_at を更新）し、
-    /// その race の買い目 `bets` を追記する。
+    /// 1 レース分の確定結果を 1 トランザクションでアトミックに記録する（#469）。
+    ///
+    /// tx 冒頭で `SELECT ... FROM predict_sessions WHERE date = $1 FOR UPDATE` により対象
+    /// セッション行をロックし、二重記録ガード（当該レースの記録済み買い目の有無）・残高ガード
+    /// （`Σstake ≤ balance`）・残高/累計計算・セッション upsert・買い目追記を **すべてロック下で**
+    /// 行う。これにより同時 POST／リトライでの買い目重複＋残高二重適用（TOCTOU）を防ぐ。
+    ///
+    /// - セッション未作成: `NotFound`
+    /// - 当該レースへ買い目ありで再記録: `Conflict`（買い目なしの再 POST はスキップの冪等再送として許容）
+    /// - `Σstake > balance`: `InvalidArgument`（状態不変）
+    ///
+    /// 成功時は更新後のセッションレコードを返す。`updated_at` として `now` を注入する。
     fn save_race_outcome(
         &self,
-        session: &PredictSessionRecord,
+        date: NaiveDate,
         race_id: &RaceId,
         bets: &[PredictBetRecord],
-    ) -> impl Future<Output = Result<()>> + Send;
+        now: DateTime<Utc>,
+    ) -> impl Future<Output = Result<PredictSessionRecord>> + Send;
 
     /// 指定日のセッションで記録済みの馬場入力を返す（`--resume` 時のデフォルト提示用）。
     /// `track_condition` が `None` の行は「不明として入力済み」を表す。

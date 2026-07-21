@@ -888,13 +888,14 @@ async fn results_interactor_ingests_and_settles(pool: sqlx::PgPool) {
     )))
     .await
     .unwrap();
-    // セッション＋単勝①の買い目（stake 1000）。
+    // セッション＋単勝①の買い目（stake 1000）。save_race_outcome が FOR UPDATE 下で残高を
+    // 計算するため、セッションは賭け前の状態（balance=budget・total_bet=0）で作成する。
     let race_id = RaceId::try_from(RESULTS_RACE_ID).unwrap();
     let session = PredictSessionRecord {
         date: date(),
         budget: 10000,
-        balance: 9000,
-        total_bet: 1000,
+        balance: 10000,
+        total_bet: 0,
         total_payout: 0,
         completed: false,
         created_at: Utc::now(),
@@ -909,9 +910,13 @@ async fn results_interactor_ingests_and_settles(pool: sqlx::PgPool) {
         payout: 0,
         ev: 1.5,
     }];
-    repo.save_race_outcome(&session, &race_id, &bets)
+    // 記録後は balance=9000・total_bet=1000（賭け金を差し引いた状態）。
+    let recorded = repo
+        .save_race_outcome(date(), &race_id, &bets, Utc::now())
         .await
         .unwrap();
+    assert_eq!(recorded.balance, 9000);
+    assert_eq!(recorded.total_bet, 1000);
 
     // フェイク: ①が1着、単勝①の払戻 250（＝2.5倍）。
     let rows = vec![result_row(1, 1), result_row(2, 2), result_row(3, 3)];

@@ -53,7 +53,7 @@ async fn session_header_round_trips(pool: sqlx::PgPool) {
 async fn save_race_outcome_updates_balance_and_persists_bets(pool: sqlx::PgPool) {
     let repo = PostgresRepository::new(pool);
     let now = Utc::now();
-    let mut session = PredictSessionRecord {
+    let session = PredictSessionRecord {
         date: date(),
         budget: 10_000,
         balance: 10_000,
@@ -66,19 +66,20 @@ async fn save_race_outcome_updates_balance_and_persists_bets(pool: sqlx::PgPool)
     repo.save_predict_session(&session).await.unwrap();
 
     // 単勝3 ¥1000（外れ）＋ 馬連1-5 ¥500（払戻¥2500）
-    // 残高: 10000 - 1000 - 500 + 2500 = 11000
-    session.balance = 11_000;
-    session.total_bet = 1_500;
-    session.total_payout = 2_500;
-    session.updated_at = Utc::now();
+    // 残高: 10000 - 1000 - 500 + 2500 = 11000（残高計算は save_race_outcome が FOR UPDATE 下で行う）
     let race_id = RaceId::try_from("2026-3-nakayama-8-1R").unwrap();
     let bets = vec![
         bet("win", "3", 1_000, 0, 1.5),
         bet("quinella", "1-5", 500, 2_500, 1.8),
     ];
-    repo.save_race_outcome(&session, &race_id, &bets)
+    let updated = repo
+        .save_race_outcome(date(), &race_id, &bets, Utc::now())
         .await
         .unwrap();
+    // 返り値の更新後セッションが残高計算済みであること。
+    assert_eq!(updated.balance, 11_000);
+    assert_eq!(updated.total_bet, 1_500);
+    assert_eq!(updated.total_payout, 2_500);
 
     let loaded = repo.find_predict_session(date()).await.unwrap().unwrap();
     assert_eq!(loaded.balance, 11_000);
@@ -113,26 +114,33 @@ async fn completed_flag_and_multi_race_append(pool: sqlx::PgPool) {
     };
     repo.save_predict_session(&session).await.unwrap();
 
+    // R1: 単勝3 ¥1000（外れ）→ 残高 9000 / total_bet 1000
     let r1 = RaceId::try_from("2026-3-nakayama-8-1R").unwrap();
-    session.balance = 9_000;
-    session.total_bet = 1_000;
-    repo.save_race_outcome(&session, &r1, &[bet("win", "3", 1_000, 0, 1.5)])
+    let after_r1 = repo
+        .save_race_outcome(date(), &r1, &[bet("win", "3", 1_000, 0, 1.5)], Utc::now())
         .await
         .unwrap();
+    assert_eq!(after_r1.balance, 9_000);
+    assert_eq!(after_r1.total_bet, 1_000);
 
+    // R2: 複勝7 ¥800（払戻¥1200）→ 残高 9400 / total_bet 1800 / total_payout 1200
     let r2 = RaceId::try_from("2026-3-nakayama-8-2R").unwrap();
     let mut b2 = bet("place", "7", 800, 1_200, 1.3);
     b2.race_id = r2.clone();
-    session.balance = 9_400;
-    session.total_bet = 1_800;
-    session.total_payout = 1_200;
-    repo.save_race_outcome(&session, &r2, &[b2]).await.unwrap();
+    let after_r2 = repo
+        .save_race_outcome(date(), &r2, &[b2], Utc::now())
+        .await
+        .unwrap();
+    assert_eq!(after_r2.balance, 9_400);
+    assert_eq!(after_r2.total_bet, 1_800);
+    assert_eq!(after_r2.total_payout, 1_200);
 
     // 2 レース分の買い目が蓄積される
     let saved = repo.find_predict_bets(date()).await.unwrap();
     assert_eq!(saved.len(), 2);
 
-    // 完了マーク
+    // 完了マーク（save_race_outcome の返り値をベースにヘッダのみ更新）
+    session = after_r2;
     session.completed = true;
     session.updated_at = Utc::now();
     repo.save_predict_session(&session).await.unwrap();
@@ -140,6 +148,132 @@ async fn completed_flag_and_multi_race_append(pool: sqlx::PgPool) {
     assert!(loaded.completed);
     assert_eq!(loaded.total_bet, 1_800);
     assert_eq!(loaded.total_payout, 1_200);
+}
+
+/// #469 の回帰: 二重記録ガード・残高ガード・未作成ガードが FOR UPDATE トランザクション内で
+/// 効くこと（check-then-act の分離をなくしたこと）を DB 往復で固定する。
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn save_race_outcome_enforces_guards_atomically(pool: sqlx::PgPool) {
+    use paddock_use_case::Error as UcError;
+
+    let repo = PostgresRepository::new(pool);
+
+    // 未作成セッションへの記録は NotFound（HTTP 404）。
+    let r1 = RaceId::try_from("2026-3-nakayama-8-1R").unwrap();
+    let err = repo
+        .save_race_outcome(date(), &r1, &[bet("win", "3", 1_000, 0, 1.5)], Utc::now())
+        .await
+        .unwrap_err();
+    assert!(matches!(err, UcError::NotFound(_)), "got {err:?}");
+
+    let now = Utc::now();
+    repo.save_predict_session(&PredictSessionRecord {
+        date: date(),
+        budget: 10_000,
+        balance: 10_000,
+        total_bet: 0,
+        total_payout: 0,
+        completed: false,
+        created_at: now,
+        updated_at: now,
+    })
+    .await
+    .unwrap();
+
+    // 残高超過は InvalidArgument（HTTP 400）で状態不変。
+    let err = repo
+        .save_race_outcome(date(), &r1, &[bet("win", "3", 15_000, 0, 1.5)], Utc::now())
+        .await
+        .unwrap_err();
+    assert!(matches!(err, UcError::InvalidArgument(_)), "got {err:?}");
+    let loaded = repo.find_predict_session(date()).await.unwrap().unwrap();
+    assert_eq!(loaded.balance, 10_000, "残高超過拒否後はセッション不変");
+    assert!(repo.find_predict_bets(date()).await.unwrap().is_empty());
+
+    // 正常記録（残高 10000 - 1000 = 9000）。
+    repo.save_race_outcome(date(), &r1, &[bet("win", "3", 1_000, 0, 1.5)], Utc::now())
+        .await
+        .unwrap();
+
+    // 同一レースへ買い目ありで再記録すると Conflict（HTTP 409・買い目重複＋残高二重適用を防ぐ）。
+    let err = repo
+        .save_race_outcome(date(), &r1, &[bet("win", "3", 500, 0, 1.5)], Utc::now())
+        .await
+        .unwrap_err();
+    assert!(matches!(err, UcError::Conflict(_)), "got {err:?}");
+
+    // Conflict 後も残高・買い目は 1 回分のまま（二重適用されていない）。
+    let loaded = repo.find_predict_session(date()).await.unwrap().unwrap();
+    assert_eq!(loaded.balance, 9_000);
+    assert_eq!(loaded.total_bet, 1_000);
+    assert_eq!(repo.find_predict_bets(date()).await.unwrap().len(), 1);
+
+    // 買い目なしの再送はスキップの冪等再送として許容（Conflict にしない）。
+    repo.save_race_outcome(date(), &r1, &[], Utc::now())
+        .await
+        .unwrap();
+}
+
+/// #469 の核心: 同一レースへの並行記録を 2 本同時に走らせても、FOR UPDATE で直列化され
+/// 片方のみ成功・もう片方は Conflict になる（買い目重複＋残高二重適用が起きない）。
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn concurrent_record_same_race_serializes_and_rejects_duplicate(pool: sqlx::PgPool) {
+    use paddock_use_case::Error as UcError;
+
+    let repo = PostgresRepository::new(pool.clone());
+    let now = Utc::now();
+    repo.save_predict_session(&PredictSessionRecord {
+        date: date(),
+        budget: 10_000,
+        balance: 10_000,
+        total_bet: 0,
+        total_payout: 0,
+        completed: false,
+        created_at: now,
+        updated_at: now,
+    })
+    .await
+    .unwrap();
+
+    let r1 = RaceId::try_from("2026-3-nakayama-8-1R").unwrap();
+    // 2 つの独立したリポジトリ（別コネクション）から同一レースへ同時 POST を再現する。
+    let repo_a = PostgresRepository::new(pool.clone());
+    let repo_b = PostgresRepository::new(pool.clone());
+    let r_a = r1.clone();
+    let r_b = r1.clone();
+    let t_a = tokio::spawn(async move {
+        repo_a
+            .save_race_outcome(date(), &r_a, &[bet("win", "3", 1_000, 0, 1.5)], Utc::now())
+            .await
+    });
+    let t_b = tokio::spawn(async move {
+        repo_b
+            .save_race_outcome(date(), &r_b, &[bet("win", "3", 1_000, 0, 1.5)], Utc::now())
+            .await
+    });
+    let res_a = t_a.await.unwrap();
+    let res_b = t_b.await.unwrap();
+
+    // ちょうど 1 本が成功し、もう 1 本は Conflict（二重記録拒否）。
+    let ok_count = [&res_a, &res_b].iter().filter(|r| r.is_ok()).count();
+    assert_eq!(
+        ok_count, 1,
+        "並行記録は 1 本のみ成功: a={res_a:?} b={res_b:?}"
+    );
+    let conflict_count = [&res_a, &res_b]
+        .iter()
+        .filter(|r| matches!(r, Err(UcError::Conflict(_))))
+        .count();
+    assert_eq!(
+        conflict_count, 1,
+        "もう 1 本は Conflict: a={res_a:?} b={res_b:?}"
+    );
+
+    // 残高は 1 回分（10000 - 1000 = 9000）のみ・買い目も 1 件のみ（二重適用なし）。
+    let loaded = repo.find_predict_session(date()).await.unwrap().unwrap();
+    assert_eq!(loaded.balance, 9_000);
+    assert_eq!(loaded.total_bet, 1_000);
+    assert_eq!(repo.find_predict_bets(date()).await.unwrap().len(), 1);
 }
 
 /// セッションヘッダを先に作る（predict_race_conditions.session_date の FK 充足）。

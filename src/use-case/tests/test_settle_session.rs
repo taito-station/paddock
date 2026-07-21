@@ -93,10 +93,11 @@ impl PredictSessionRepository for MockRepo {
     }
     async fn save_race_outcome(
         &self,
-        _: &PredictSessionRecord,
+        _: NaiveDate,
         _: &RaceId,
         _: &[PredictBetRecord],
-    ) -> Result<()> {
+        _: DateTime<Utc>,
+    ) -> Result<PredictSessionRecord> {
         unimplemented!()
     }
     async fn find_predict_race_conditions(
@@ -456,10 +457,11 @@ async fn missing_session_returns_not_found() {
         }
         async fn save_race_outcome(
             &self,
-            _: &PredictSessionRecord,
+            _: NaiveDate,
             _: &RaceId,
             _: &[PredictBetRecord],
-        ) -> Result<()> {
+            _: DateTime<Utc>,
+        ) -> Result<PredictSessionRecord> {
             unimplemented!()
         }
         async fn find_predict_race_conditions(
