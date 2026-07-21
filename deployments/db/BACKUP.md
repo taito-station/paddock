@@ -9,6 +9,7 @@
 - **退避先**:
   - **ローカル権威**（`PADDOCK_BACKUP_DIR`・既定 `~/paddock-backups`）: dump 本体。**世代管理（列挙→剪定）はここで行う**。launchd 下でも確実に列挙・削除でき、常に KEEP 世代に bounded。主脅威の Colima volume 喪失（reset / `docker volume rm`）はこのローカル退避だけで外れる。
   - **off-machine ミラー**（`PADDOCK_BACKUP_MIRROR_DIR`・**既定は空=無効**・オプトイン）: 指定すると各 dump をそこへコピーしディスク障害にも備える。**実ファイルシステム（外付け/NAS 等）を指定する**。iCloud Drive は使わない（下記）。
+- **ミラー未設定時の警告（#507）**: 既定（ミラー無効）ではディスク障害でローカル権威も失うと復元不能になる。これに気づけるよう、`backup-db.sh` は未設定時に **ログへ毎回警告を残し**（`~/Library/Logs/paddock-backup.log`）、**macOS 通知は 7 日に 1 回**へ間引いて出す（間引き状態は `~/paddock-backups/.mirror-unset-warned` の mtime で管理。ミラー有効化で自動解除）。
 - **形式 / 世代**: `paddock-YYYYMMDD-HHMMSS.dump`（`pg_dump -Fc` custom-format・圧縮込み）。既定で直近 14 世代を保持（`PADDOCK_BACKUP_KEEP`）。
 
 > **iCloud をミラー先にしない理由（#494）**: launchd から実行すると **iCloud への "列挙" も "削除" も信頼
