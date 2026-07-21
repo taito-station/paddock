@@ -63,8 +63,8 @@ services:
     build:
       context: ..
       dockerfile: deployments/web.Dockerfile
-    image: paddock-web
-    container_name: paddock-web
+    image: paddock-web-spa
+    container_name: paddock-web-spa
     depends_on:
       api:
         condition: service_healthy
