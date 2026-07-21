@@ -200,28 +200,113 @@ pub async fn save_predict_session(pool: &PgPool, session: &PredictSessionRecord)
     Ok(())
 }
 
-/// セッション upsert と当該レースの買い目追記を 1 トランザクションで行う。
+/// 1 レース分の確定結果を 1 トランザクションでアトミックに記録する（#469）。
+///
+/// tx 冒頭で対象セッション行を `SELECT ... FOR UPDATE` でロックし、二重記録ガード・残高ガード・
+/// 残高/累計計算・セッション upsert・買い目追記を **すべてロック下で** 行う。これにより同時 POST／
+/// リトライでの買い目重複＋残高二重適用（check-then-act の TOCTOU）を防ぐ。ロックは同一 `date` を
+/// 対象とする並行トランザクションを直列化し、後続は先行がコミットして解放するまで待つため、
+/// 二重記録チェックは常に確定済みの最新状態に対して行われる。
+///
+/// - セッション未作成: `Error::NotFound`
+/// - 当該レースへ買い目ありで再記録: `Error::Conflict`（買い目なしの再送は無害なので許容）
+/// - `Σstake > balance`: `Error::InvalidArgument`（状態不変・ロールバック）
+///
+/// 成功時は更新後のセッションレコードを返す。`updated_at` として `now` を用いる。
 pub async fn save_race_outcome(
     pool: &PgPool,
-    session: &PredictSessionRecord,
+    date: NaiveDate,
     race_id: &RaceId,
     bets: &[PredictBetRecord],
-) -> Result<()> {
-    let date_str = date_key(session.date);
+    now: DateTime<Utc>,
+) -> Result<PredictSessionRecord> {
+    let date_str = date_key(date);
     let mut tx = pool.begin().await?;
+
+    // セッション行をロック取得（存在しなければ NotFound）。以降の判定・更新はこのロック下で行う。
+    let locked: Option<SessionRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+        "SELECT {SESSION_COLUMNS} FROM predict_sessions WHERE date = $1 FOR UPDATE"
+    )))
+    .bind(&date_str)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let Some((
+        date_s,
+        budget,
+        balance,
+        total_bet,
+        total_payout,
+        completed,
+        created_at,
+        _updated_at,
+    )) = locked
+    else {
+        return Err(Error::NotFound(format!("session for {date} not found")));
+    };
+
+    // 二重記録ガード（ロック下・確定済み状態に対して判定）: 当該レースの記録済み買い目があり、かつ
+    // 今回買い目ありなら弾く。買い目なし＝スキップの再送は無害なので許容する。
+    if !bets.is_empty() {
+        // 存在確認のみ。`bet_id`（BIGINT → i64）を 1 行取得できれば記録済み。
+        // `SELECT 1` は Postgres で INT4 になり `(i64,)` デコードに失敗するため列を明示する。
+        let already: Option<(i64,)> = sqlx::query_as(
+            r#"
+            SELECT bet_id
+            FROM predict_bets
+            WHERE session_date = $1 AND race_id = $2
+            LIMIT 1
+            "#,
+        )
+        .bind(&date_str)
+        .bind(race_id.value())
+        .fetch_optional(&mut *tx)
+        .await?;
+        if already.is_some() {
+            return Err(Error::Conflict(format!(
+                "outcome for race {} already recorded",
+                race_id.value()
+            )));
+        }
+    }
+
+    // 残高ガード（`Σstake ≤ balance`）をロック済み残高に対して判定する。
+    let balance = balance as u64;
+    let total_stake: u64 = bets.iter().map(|b| b.stake).sum();
+    if total_stake > balance {
+        return Err(Error::InvalidArgument(format!(
+            "total stake {total_stake} exceeds balance {balance}"
+        )));
+    }
+    let payout_sum: u64 = bets.iter().map(|b| b.payout).sum();
+
+    // 残高ガード後なので `balance - total_stake` は underflow しない。累計は saturating で
+    // オーバーフローを安全側に倒す（現実の金額では到達しない防御）。
+    let new_balance = (balance - total_stake).saturating_add(payout_sum);
+    let new_total_bet = (total_bet as u64).saturating_add(total_stake);
+    let new_total_payout = (total_payout as u64).saturating_add(payout_sum);
+
+    let session = PredictSessionRecord {
+        date: parse_date(&date_s)?,
+        budget: budget as u64,
+        balance: new_balance,
+        total_bet: new_total_bet,
+        total_payout: new_total_payout,
+        completed: completed != 0,
+        created_at: parse_dt(&created_at)?,
+        updated_at: now,
+    };
 
     bind_session(
         sqlx::query(UPSERT_SESSION_SQL),
         &date_str,
-        session,
+        &session,
         session.created_at.to_rfc3339(),
         session.updated_at.to_rfc3339(),
     )
     .execute(&mut *tx)
     .await?;
 
-    // 買い目はレース確定と同時に記録されるため、created_at はそのレース確定時刻
-    // （= session.updated_at）を用いる。
+    // 買い目はレース確定と同時に記録されるため、created_at はそのレース確定時刻（= updated_at）を用いる。
     let created_at = session.updated_at.to_rfc3339();
     for bet in bets {
         sqlx::query(
@@ -244,7 +329,7 @@ pub async fn save_race_outcome(
     }
 
     tx.commit().await?;
-    Ok(())
+    Ok(session)
 }
 
 /// 指定日のセッションで記録済みの馬場入力を race_id 昇順で返す（`--resume` のデフォルト提示用）。

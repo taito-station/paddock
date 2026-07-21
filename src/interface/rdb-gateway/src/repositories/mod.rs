@@ -482,11 +482,12 @@ impl PredictSessionRepository for PostgresRepository {
 
     async fn save_race_outcome(
         &self,
-        session: &PredictSessionRecord,
+        date: NaiveDate,
         race_id: &RaceId,
         bets: &[PredictBetRecord],
-    ) -> UcResult<()> {
-        predict_session::save_race_outcome(&self.pool, session, race_id, bets)
+        now: DateTime<Utc>,
+    ) -> UcResult<PredictSessionRecord> {
+        predict_session::save_race_outcome(&self.pool, date, race_id, bets, now)
             .await
             .map_err(Into::into)
     }

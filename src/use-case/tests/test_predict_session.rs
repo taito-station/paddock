@@ -57,15 +57,53 @@ impl PredictSessionRepository for MockRepo {
         Ok(())
     }
 
+    /// 実 DB の FOR UPDATE トランザクション（#469）と同じガード・残高計算を in-memory で再現する。
+    /// セッション未作成は NotFound、当該レースの二重記録は Conflict、Σstake > balance は InvalidArgument。
     async fn save_race_outcome(
         &self,
-        session: &PredictSessionRecord,
-        _: &RaceId,
+        _date: NaiveDate,
+        race_id: &RaceId,
         bets: &[PredictBetRecord],
-    ) -> Result<()> {
+        now: DateTime<Utc>,
+    ) -> Result<PredictSessionRecord> {
+        let mut session = self
+            .session
+            .lock()
+            .unwrap()
+            .clone()
+            .ok_or_else(|| Error::NotFound("session not found".into()))?;
+
+        if !bets.is_empty()
+            && self
+                .bets
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|b| &b.race_id == race_id)
+        {
+            return Err(Error::Conflict(format!(
+                "outcome for race {} already recorded",
+                race_id.value()
+            )));
+        }
+
+        let total_stake: u64 = bets.iter().map(|b| b.stake).sum();
+        if total_stake > session.balance {
+            return Err(Error::InvalidArgument(format!(
+                "total stake {total_stake} exceeds balance {}",
+                session.balance
+            )));
+        }
+        let total_payout: u64 = bets.iter().map(|b| b.payout).sum();
+
+        session.balance = (session.balance - total_stake).saturating_add(total_payout);
+        session.total_bet = session.total_bet.saturating_add(total_stake);
+        session.total_payout = session.total_payout.saturating_add(total_payout);
+        session.updated_at = now;
+
         *self.session.lock().unwrap() = Some(session.clone());
         self.bets.lock().unwrap().extend_from_slice(bets);
-        Ok(())
+        Ok(session)
     }
 
     // --- 以降はこのテストでは未使用 ---
