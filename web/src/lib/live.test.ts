@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   maru,
   roiPct,
+  boardRoiPct,
   placeBand,
   jstHm,
   postMinutes,
@@ -184,6 +185,27 @@ describe("roiPct", () => {
   });
   it("1 decimal for fractions", () => {
     expect(roiPct(78.9)).toBe("78.9%");
+  });
+});
+
+describe("boardRoiPct", () => {
+  // 【単位退行の回帰防止（PR #519）】盤の d.roi は domain Ev.roi＝比率（1.03=103%。
+  // REST 層 race.rs:266 が ×100 せず素通し）。roiPct は ×100 しないため、比率を直に
+  // roiPct へ渡すと 1.03→"1%" に化ける。boardRoiPct が比率→% 変換を担い、この退行を防ぐ。
+  it("比率入力を %化して roiPct と同じ桁方針で整形する", () => {
+    expect(boardRoiPct(1.03)).toBe("103%"); // 整数% は 0 桁
+    expect(boardRoiPct(1.789)).toBe("178.9%"); // 端数% は 1 桁
+    expect(boardRoiPct(0.8)).toBe("80%");
+  });
+  it("比率をそのまま roiPct に渡す退行（1.03→'1%'）を起こさない", () => {
+    // ここが等しくなったら比率→% 変換が失われた証拠（＝盤 ROI が 103%→1% に化ける退行）。
+    expect(boardRoiPct(1.03)).not.toBe(roiPct(1.03));
+  });
+  it("盤の比率と list の % 保存値が同一 ROI なら同一表記になる（画面間一本化のゴール）", () => {
+    // 盤: 比率 1.04（Ev.roi）／ list: % 保存 104.0（snapshot.rs の ev.roi*100）→ ともに "104%"。
+    const boardRatio = 1.04;
+    const listPct = 104.0;
+    expect(boardRoiPct(boardRatio)).toBe(roiPct(listPct));
   });
 });
 
