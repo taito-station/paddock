@@ -1,0 +1,13 @@
+-- via:no-schema-check: DROP INDEX は非破壊的 DDL。
+-- idx_horse_entries_race_id（baseline 20260618000001 line 80 で定義）を削除する（#471）。
+--
+-- 【冗長の根拠】
+-- horse_entries には UNIQUE(race_id, horse_num)（baseline line 78）があり、これが暗黙に
+-- 複合 B-tree インデックス (race_id, horse_num) を生成する。B-tree は先頭列からの前方一致で
+-- 利用できるため、`WHERE race_id = $1` 単独のクエリはこの UNIQUE インデックスの先頭列
+-- (race_id) で完全にカバーされる。したがって別途の単列 idx_horse_entries_race_id は
+-- 検索経路として一切追加価値を持たず、fetch-card の UPSERT ごとに維持コストだけを払う純冗長。
+--
+-- 対象は (race_id) 単独の index に限る。idx_horse_entries_horse_name(horse_name) は先頭列が
+-- 異なるため UNIQUE(race_id, horse_num) ではカバーされず、削除しない。
+DROP INDEX IF EXISTS idx_horse_entries_race_id;
