@@ -1,7 +1,7 @@
 ---
 # knowledge 規約に基づくメタデータ（docs/knowledge/README.md）。specifications はその場で
 # knowledge に昇格（ADR 履歴・相互リンクを壊さないため物理移動しない）。
-status: Tentative
+status: Confirmed
 kind: knowledge
 sources:
   - docs/adr/0027-accuracy-lever-is-market-blend-not-data-volume.md
@@ -10,11 +10,29 @@ sources:
   - docs/adr/0050-placeshow-raw-score-retune-rejected.md
   - docs/adr/0051-placeshow-power-knee-confirmed-keep-2.md
   - docs/adr/0052-alpha-blend-removal-rejected.md
+  - docs/adr/0053-learned-fundamental-model-rejected.md
+  - docs/adr/0055-ev-layer-separation-circular-break.md
+  - docs/adr/0058-pedigree-sire-feature-rejected.md
+  - docs/adr/0059-market-calibration-correction-rejected.md
+  - docs/adr/0060-betting-axis-lock-preclose-topup.md
 distilled_from_sha: "f765be7"
-updated: "2026-07-17"
+updated: "2026-07-21"
 ---
 
 # 学習型モデル評価ハーネス 設計（#272 土台 / #309 受け皿）
+
+> **現在の位置づけ（検証終了・Confirmed / 2026-07-21）**: 本ハーネス（`analyze backtest --dump-features`
+> の as-of 特徴量ダンプ＋Python 評価）は **PR #310/#311/#312 で整備済み・現存**する。一方、これを受け皿と
+> した **学習型 fundamental モデル路線（#272/#309）は closed**：#272・#309 とも CLOSED、学習ランカー
+> （条件付きロジット/PL・非線形 GBM）は OOS で α=0.2 baseline を超えられず
+> [ADR 0053](../adr/0053-learned-fundamental-model-rejected.md) で棄却された。純モデルの resolution は
+> 天井（[ADR 0058](../adr/0058-pedigree-sire-feature-rejected.md)）、市場自体の較正補正も sub-takeout で
+> exploitable でない（[ADR 0059](../adr/0059-market-calibration-correction-rejected.md)）＝「市場より上手く
+> 当てる」路線は全域 closed。残るエッジは執行規律（軸ロック＋ズレ増額・[ADR 0055](../adr/0055-ev-layer-separation-circular-break.md)/[ADR 0060](../adr/0060-betting-axis-lock-preclose-topup.md)）に置く。
+> したがって本書は **忠実性ハーネスの設計記録**として Confirmed（`--dump-features` 経路・as-of 忠実性
+> サニティは現存の資産）だが、④ サービング以降の「学習モデル採用」節は ADR 0053 により**発動しない**
+> 設計案として残す。（旧 status: Tentative は #272/#309 路線 close 後の位置づけが本文に無かったのが理由で、
+> 本追記で解消。）
 
 手作り線形 `raw_score` を学習ランカー（#309）へ置換する前提として、**リーク無しで訓練・評価でき、
 任意のモデルを production の EV/買い方ロジックで対市場評価できる共通基盤**の設計。本書は #272 の土台
@@ -125,6 +143,6 @@ ADR 0052（α blend 廃止＝純モデル化の棄却）の通り、純 P_model 
 
 ## 関連
 
-- Issue: #272（予測フロー再設計・親）/ #309（学習モデル実装）/ #305（純モデル value シグナル検証の提起元・クローズ済、検証は本ハーネス #272/#309 へ継承）/ #263（較正後 EV ゲートの逆予測性）
-- ADR: 0027（精度のレバーは市場ブレンド）/ 0042（win_power）/ 0047（place/show 冪変換の採用＝`place_show_power=2.0` の根拠）/ 0050（place/show raw_score 再調整の棄却）/ 0051（place/show 冪 γ の knee 確定）/ 0052（α blend 廃止の棄却）
+- Issue: #272（予測フロー再設計・親・**CLOSED**）/ #309（学習モデル実装・**CLOSED**）/ #305（純モデル value シグナル検証の提起元・クローズ済、検証は本ハーネス #272/#309 へ継承）/ #263（較正後 EV ゲートの逆予測性）
+- ADR: 0027（精度のレバーは市場ブレンド）/ 0042（win_power）/ 0047（place/show 冪変換の採用＝`place_show_power=2.0` の根拠）/ 0050（place/show raw_score 再調整の棄却）/ 0051（place/show 冪 γ の knee 確定）/ 0052（α blend 廃止の棄却）/ **0053（学習型 fundamental モデルの棄却＝#309 の結論・本路線 close）** / **0058（純 resolution 天井）** / **0059（市場較正補正の棄却＝市場側も sub-takeout で exploitable でない）** / **0055（EV 層分離＝執行エッジの土台）** / **0060（軸ロック＋ズレ増額＝残るエッジの置き所）**
 - 既存: `scripts/predict-check/live_ev.py`（EV/買い方ロジック）/ `docs/specifications/backtest.md` / `probability-estimation.md`

@@ -1,7 +1,7 @@
 ---
 # knowledge 規約に基づくメタデータ（docs/knowledge/README.md）。specifications はその場で
 # knowledge に昇格（ADR 履歴・相互リンクを壊さないため物理移動しない）。
-status: Tentative
+status: Confirmed
 kind: knowledge
 sources:
   - docs/adr/0009-recent-form-feature.md
@@ -13,13 +13,22 @@ sources:
   - docs/adr/0037-place-show-exotic-market-blend-rejected.md
   - docs/adr/0038-jockey-recent-form-rejected.md
 distilled_from_sha: "f765be7"
-updated: "2026-07-17"
+updated: "2026-07-21"
 ---
 
 # 騎手直近フォーム特徴量仕様書
 
+> **結論（検証終了・Confirmed / 2026-07-21）**: 本特徴量は backtest weight スイープの結果
+> **棄却された**（[ADR 0038](../adr/0038-jockey-recent-form-rejected.md)）。
+> `JOCKEY_RECENT_FORM_WEIGHT = 0.0`（無効）で production は本 factor を有効化しない。
+> 算出機構（`jockey_recent_form_score` / `find_jockey_recent_runs` / `jockey_recent_runs_batch`）・
+> SQL・`--jockey-form-weight` CLI フラグ・`idx_horse_past_runs_jockey` インデックスは将来の再評価用に
+> **残置**している。以下の設計・実装仕様は「棄却されたが weight 調整で残置」の記録として保持する。
+> （旧 status: Tentative は「backtest sweep 後に ADR 0038 として棄却/採用を記録する」の未了を理由に
+> していたが、その ADR は起票済みで検証は完了したため Confirmed に解消。）
+
 Issue #221 対応。現行の `jockey_surface`（騎手の通算芝ダ別勝率）は直近の好不調を捉えられないため、
-騎手の直近 N 走フォームスコアを新特徴量として追加する。
+騎手の直近 N 走フォームスコアを新特徴量として追加する提案の設計仕様（**結論は上記の通り棄却・残置**）。
 
 ## 概要
 
@@ -350,7 +359,7 @@ pub(crate) const JOCKEY_RECENT_FORM_LIMIT: u32 = 10; // backtest sweep で 5 / 1
 - [ ] テストが 5 タプル destructure でコンパイルが通ることを確認する
 - [ ] rdb-gateway の `jockey_recent_runs_batch` バッチ SQL に対して `EXPLAIN ANALYZE` を実行し、`deduped` CTE の `NOT EXISTS` サブクエリが想定外の重複スキャンをしていないことを確認する
 - [ ] `domain/src/prediction/scoring.rs` の `jockey_recent_form_score` に対するユニットテストを追加する（境界条件: 空スライス=None / 全欠損=None / pos=pop=clamp中央値 / 最低人気激走=clamp上限 / 大人気大敗=clamp下限）
-- [ ] バックテスト sweep 後にメトリクスを記録し ADR 0038 として棄却または採用を記録する（次の ADR 番号は 0038。0035=recent_form_weight #217 / 0036=trend-n #220 / 0037=place/show・exotic 市場ブレンド棄却 で消費済み。作成時に最新の空き番号を再確認すること）
+- [x] バックテスト sweep 後にメトリクスを記録し ADR 0038 として棄却または採用を記録する → **完了: [ADR 0038](../adr/0038-jockey-recent-form-rejected.md) に棄却を記録（weight 全域で Brier/LogLoss が単調悪化・weight=0.0 が最良、1561R）**
 - [ ] （任意）`JockeyFormRun.finishing_position` / `popularity` の型として `Option<NonZeroU32>` の採用を検討する（0 着順・0 人気を型レベルで弾けるが、DB の `BIGINT` からの変換コストを考慮する）
 - [ ] バックテスト評価期間: 既存 sweep との比較可能性のため `2026-03-28〜2026-05-31` を基準期間とする。ただし実施時点でより多くの開催が蓄積されている場合は最新 as-of まで延ばして標本を増やしてよい（その場合は ADR に実際の評価期間を明記すること）
 
@@ -366,4 +375,4 @@ pub(crate) const JOCKEY_RECENT_FORM_LIMIT: u32 = 10; // backtest sweep で 5 / 1
 - ADR 0035（recent_form_weight 再調整棄却, #217）
 - ADR 0036（直近 N 走トレンド加重平均棄却, #220）
 - ADR 0037（place/show・exotic 市場オッズブレンド棄却）
-- ADR 0038（未作成・backtest sweep 後に騎手直近フォームの棄却または採用を記録予定）
+- ADR 0038（**棄却済み**・backtest sweep で騎手直近フォームを棄却＝`JOCKEY_RECENT_FORM_WEIGHT = 0.0`）
