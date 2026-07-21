@@ -8,6 +8,8 @@ sources:
   - docs/adr/0019-portfolio-generator.md
   - docs/adr/0046-allocation-prob-weight-no-floor-rejected.md
   - docs/adr/0054-kelly-staking-rejected.md
+  - docs/adr/0055-ev-layer-separation-circular-break.md
+  - docs/adr/0060-betting-axis-lock-preclose-topup.md
 distilled_from_sha: "f0ee7a3"
 updated: "2026-07-21"
 ---

@@ -6,6 +6,8 @@ kind: knowledge
 sources:
   - docs/adr/0022-rest-api-read-server.md
   - docs/adr/0069-drop-icloud-writes-browser-only-viewing.md
+  - docs/adr/0055-ev-layer-separation-circular-break.md
+  - docs/adr/0060-betting-axis-lock-preclose-topup.md
   - docs/api/openapi.json
 distilled_from_sha: "f0ee7a3"
 updated: "2026-07-21"
@@ -241,7 +243,7 @@ GET /api/races/{race_id}/board[?budget=&track_condition=&blend_alpha=]
 | `morning_roi` | number\|null | 朝時点オッズで再計算したポートフォリオ ROI（確率・軸・budget は現時点と同一） |
 | `morning_hit_prob` | number\|null | 朝時点オッズで再計算したポートフォリオ的中確率 |
 
-「朝時点」の定義: is_complete を満たす最古の snapshot（早朝の単複のみ snapshot は is_complete=false なので含まれない）。buy `morning_win_odds`（`BoardHorseSchema`）は各馬のこの snapshot での単勝オッズ。
+「朝時点」の定義: is_complete を満たす最古の snapshot（早朝の単複のみ snapshot は is_complete=false なので含まれない）。なお `morning_win_odds`（`BoardHorseSchema`）は各馬のこの snapshot での単勝オッズ。
 
 **設計意図（ADR 0055/0060）**: 「確率・軸を固定したまま、参照する snapshot だけを朝↔現で差し替えて ROI/hit_prob を再計算する」apples-to-apples 方式。「朝 +EV が発走直前に剥がれる」を数値で体感できるようにするための可視化。軸（◎）は朝比較によって変更しない（軸ロック思想の UI 体現）。
 
