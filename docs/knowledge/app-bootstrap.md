@@ -3,8 +3,9 @@ status: Confirmed
 kind: knowledge
 sources:
   - docs/qa/QA-setup-boilerplate-410.md
+  - docs/adr/0069-drop-icloud-writes-browser-only-viewing.md
 distilled_from_sha: "a311589"
-updated: "2026-07-17"
+updated: "2026-07-21"
 ---
 
 # app bootstrap（DI・起動シーケンス）の共通化
@@ -33,5 +34,4 @@ let pool = pool::connect_and_migrate(&config.paddock_db_url)
 
 ## 対象外
 
-- **web-viewer**: `PadConfig`（`paddock_config::Config` でない）・`RUST_LOG`（`EnvFilter::try_from_default_env`）ベースの別フィルタで、DB pool も使わない。`init_tracing`（`paddock_log` ベース）に寄せると filter ソースが変わる（挙動変更）ため集約対象外。
 - **PDF を実際に扱う bin**（parse-pdf / parse-entries / fetch-card 系）: 本物の `HybridParser` / `MutoolEntryParser` / `JraFetcher` を注入する（Noop ではない）。

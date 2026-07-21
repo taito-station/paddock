@@ -106,10 +106,21 @@ async fn re_save_is_idempotent_and_replaces_children(pool: sqlx::PgPool) {
     p2.bets.clear();
     repo.save_pad_prediction(&p2, Utc::now()).await.unwrap();
 
-    let all = repo.list_pad_predictions().await.unwrap();
-    assert_eq!(all.len(), 1, "同キー再保存で予想が重複してはならない");
-    assert_eq!(all[0].horses.len(), 1, "馬の子行が置き換わる");
-    assert_eq!(all[0].bets.len(), 0, "買い目の子行が置き換わる");
+    // 予想ヘッダが重複していないこと（同キー再保存で 1 行のまま）。
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM predictions")
+        .fetch_one(&repo.pool)
+        .await
+        .unwrap();
+    assert_eq!(count, 1, "同キー再保存で予想が重複してはならない");
+
+    // 子行が置き換わっていること。
+    let got = repo
+        .find_pad_prediction(p2.date, p2.venue, p2.race_num)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(got.horses.len(), 1, "馬の子行が置き換わる");
+    assert_eq!(got.bets.len(), 0, "買い目の子行が置き換わる");
 }
 
 #[sqlx::test(migrations = "../../../deployments/db/migrations")]

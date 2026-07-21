@@ -132,7 +132,7 @@ GET /api/predictions
 
 #### 動的 WHERE の組み立て（安全性）
 
-指定された軸のみ AND する都合上、WHERE 句は動的生成になる。既存 `find_pad_prediction` / `list_pad_predictions` は `sqlx::query_as(sqlx::AssertSqlSafe(format!(...)))` で SQL 文字列を組むが、**`format!` に混ぜてよいのは静的な句フラグメント（カラム名・固定の述語）のみ**とし、**ユーザー入力値は一切文字列連結せず必ず `.bind()` 経由**にする（プレースホルダ `$1, $2 ..` を動的に採番）。`~/.claude/rules/sql/queries.md` のプレースホルダ必須に従い、SQL インジェクションを排除する。
+指定された軸のみ AND する都合上、WHERE 句は動的生成になる。既存 `find_pad_prediction` は `sqlx::query_as(sqlx::AssertSqlSafe(format!(...)))` で SQL 文字列を組むが、**`format!` に混ぜてよいのは静的な句フラグメント（カラム名・固定の述語）のみ**とし、**ユーザー入力値は一切文字列連結せず必ず `.bind()` 経由**にする（プレースホルダ `$1, $2 ..` を動的に採番）。`~/.claude/rules/sql/queries.md` のプレースホルダ必須に従い、SQL インジェクションを排除する。
 
 レスポンス例:
 

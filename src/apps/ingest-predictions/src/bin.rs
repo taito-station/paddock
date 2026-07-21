@@ -1,6 +1,5 @@
 mod cli;
 mod input;
-mod render;
 
 use std::io::Read;
 use std::path::PathBuf;
@@ -12,10 +11,6 @@ use paddock_config::Config;
 use paddock_use_case::repository::PadPredictionRepository;
 use rdb_gateway::{PostgresRepository, pool};
 
-/// 既定の pad ルート（web-viewer と同じ iCloud Obsidian vault）。`PADDOCK_PAD_DIR` で上書き可。
-const DEFAULT_PAD_DIR: &str =
-    "/Users/ito-taito/Library/Mobile Documents/iCloud~md~obsidian/Documents/default/pad";
-
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = cli::Cli::parse();
@@ -25,10 +20,6 @@ async fn main() -> Result<()> {
         .await
         .context("connect and migrate Postgres")?;
     let repo = PostgresRepository::new(pool);
-
-    if args.render {
-        return render_all(&repo, args.pad_dir).await;
-    }
 
     ingest(&repo, args.input, args.dry_run).await
 }
@@ -75,23 +66,5 @@ async fn ingest(repo: &PostgresRepository, input: Option<PathBuf>, dry_run: bool
             .with_context(|| format!("保存失敗: {} {}{}R", p.date, p.venue.as_jp(), p.race_num))?;
     }
     println!("ingest: {} 件を保存しました", predictions.len());
-    Ok(())
-}
-
-async fn render_all(repo: &PostgresRepository, pad_dir: Option<PathBuf>) -> Result<()> {
-    let pad_root = pad_dir
-        .or_else(|| std::env::var("PADDOCK_PAD_DIR").ok().map(PathBuf::from))
-        .unwrap_or_else(|| PathBuf::from(DEFAULT_PAD_DIR));
-
-    let predictions = repo.list_pad_predictions().await?;
-    for p in &predictions {
-        let path = render::write_md(&pad_root, p)?;
-        println!("  生成: {}", path.display());
-    }
-    println!(
-        "render: {} 件の MD を {} に出力しました",
-        predictions.len(),
-        pad_root.display()
-    );
     Ok(())
 }

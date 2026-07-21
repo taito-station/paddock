@@ -6,23 +6,23 @@
 # custom-format（-Fc・圧縮込み）で dump しタイムスタンプ付きで退避＋世代管理する。
 # 復元手順は deployments/db/BACKUP.md。日次実行は deployments/launchd/com.paddock.backup-db.plist。
 #
-# 二段構成（launchd 対策）:
-#   - BACKUP_DIR（ローカル・権威）: dump 本体を置き、世代管理（列挙→剪定）はここで行う。launchd から
-#     でもローカル dir は確実に列挙・削除できるため、権威側は常に KEEP 世代に bounded。主脅威である
-#     Colima volume 喪失（reset / docker volume rm）はこのローカル退避だけで自動的に外せる。
-#   - MIRROR_DIR（iCloud 等・off-machine durable）: 各 dump を cp してディスク障害にも備える。
-#   注意: launchd から実行すると **iCloud への "列挙" も "削除" も信頼できない**（書き込み=cp は効くが
-#   ls/glob は空を返し rm も反映されない macOS file-provider の癖・検証で確認）。そのため iCloud ミラーの
-#   剪定は best-effort（terminal 実行時のみ確実に効き、launchd 下では no-op で溜まる）。iCloud を KEEP に
-#   揃えたいときは時々 terminal から本スクリプトを実行して reconcile する。権威（ローカル）は常に bounded。
+# 退避先: BACKUP_DIR（ローカル・権威）に dump 本体を置き、世代管理（列挙→剪定）を行う。launchd から
+# でもローカル dir は確実に列挙・削除できるため、権威側は常に KEEP 世代に bounded。主脅威である
+# Colima volume 喪失（reset / docker volume rm）はこのローカル退避だけで自動的に外せる。
+#
+# off-machine ミラー（既定 off・オプトイン）: PADDOCK_BACKUP_MIRROR_DIR を指定すると各 dump をそこへ
+# cp してディスク障害にも備える。ミラー先には **実ファイルシステム（外付け/NAS 等）** を使うこと。
+# iCloud Drive は使わない: launchd から実行すると iCloud への "列挙" も "削除" も信頼できず（書き込み=
+# cp は効くが ls/glob は空を返し rm も反映されない macOS file-provider の癖・検証で確認）、剪定が no-op
+# になって無制限に溜まるため（#494）。既定はミラー無効でローカル権威のみ。
 #
 # 重要: host の pg_dump が PG17 サーバより古い（v14 等）とダンプを拒否するため、**dump は
 # container 内の pg_dump（バージョン一致）を docker exec で実行**する（host に pg17 client 不要）。
 #
 # 使い方:
-#   scripts/backup-db.sh                 # ローカルへ退避＋iCloud へミラー
+#   scripts/backup-db.sh                                        # ローカル権威のみへ退避（既定）
 #   PADDOCK_BACKUP_DIR=/path scripts/backup-db.sh
-#   PADDOCK_BACKUP_MIRROR_DIR="" scripts/backup-db.sh   # ミラー無効（ローカルのみ）
+#   PADDOCK_BACKUP_MIRROR_DIR=/Volumes/ext/paddock-backups scripts/backup-db.sh  # off-machine ミラー有効
 set -euo pipefail
 
 log() { echo "[$(date '+%Y-%m-%dT%H:%M:%S%z')] $*"; }
@@ -50,14 +50,15 @@ usage() {
 backup-db.sh - paddock DB を durable な場所へ退避する（#265）
 
 使い方:
-  scripts/backup-db.sh            # ローカル権威 dir へ退避＋世代管理し、iCloud へミラー
+  scripts/backup-db.sh            # ローカル権威 dir へ退避＋世代管理（既定・ミラー無効）
   scripts/backup-db.sh -h|--help
 
 環境変数:
   PADDOCK_BACKUP_DIR         ローカル権威の退避先（列挙・剪定はここで行う）
                              （既定: ~/paddock-backups）
-  PADDOCK_BACKUP_MIRROR_DIR  off-machine ミラー先（ディスク障害対策）。空文字で無効
-                             （既定: ~/Library/Mobile Documents/com~apple~CloudDocs/paddock-backups）
+  PADDOCK_BACKUP_MIRROR_DIR  off-machine ミラー先（ディスク障害対策・オプトイン）。既定は空=無効。
+                             実ファイルシステム（外付け/NAS 等）を指定する。iCloud は使わない
+                             （launchd 下で剪定が no-op になり溜まるため。#494）
   PADDOCK_BACKUP_KEEP        保持する世代数（既定: 14。超過分の古い dump をローカル/ミラー両方から削除）
   PADDOCK_PG_CONTAINER       Postgres コンテナ名（既定: paddock-postgres）
   PADDOCK_PG_USER            DB ユーザ（既定: paddock）
@@ -72,7 +73,7 @@ case "${1:-}" in
 esac
 
 BACKUP_DIR="${PADDOCK_BACKUP_DIR:-$HOME/paddock-backups}"
-MIRROR_DIR="${PADDOCK_BACKUP_MIRROR_DIR-$HOME/Library/Mobile Documents/com~apple~CloudDocs/paddock-backups}"
+MIRROR_DIR="${PADDOCK_BACKUP_MIRROR_DIR:-}"
 KEEP="${PADDOCK_BACKUP_KEEP:-14}"
 CONTAINER="${PADDOCK_PG_CONTAINER:-paddock-postgres}"
 PG_USER="${PADDOCK_PG_USER:-paddock}"
@@ -135,16 +136,14 @@ if [[ -n "$MIRROR_DIR" ]]; then
 fi
 
 # 世代管理: 指定 dir を独立に列挙し新しい順に KEEP 個を残して超過分を削除する。権威(ローカル)と
-# ミラー(iCloud)の両方に同じロジックを適用する（ミラーも独立列挙するので、launchd 下で溜まった
-# iCloud の蓄積を terminal 実行時に真に KEEP まで reconcile できる）。launchd 下では iCloud 列挙が
-# 空を返すためミラー側は自然に no-op（＝溜まる。terminal で回収する）。ローカルは常に KEEP に bounded。
+# ミラー(指定時)の両方に同じロジックを適用する（各 dir を独立列挙）。ローカルは常に KEEP に bounded。
 # macOS 既定の /bin/bash 3.2（launchd もこれを使う）に mapfile が無いため while-read で読む。
 # 列挙は ls -1t のパース（出力パース忌避・空 dir で glob 非展開の罠あり）を避け、find でファイルのみを
 # 厳密に収集し、BSD stat（macOS 前提）で mtime を前置して整列する（新しい順）。find -exec ... + は対象
 # 0 件なら stat を呼ばず空を返すため、空 dir でもエラーにならない。ソートキーは第1=mtime 数値降順、
 # 第2=行残余（=パス。ファイル名に生成時刻 YYYYMMDD-HHMMSS を含む）降順で、同 mtime 時も決定的かつ
-# 新しい世代を先頭に固定する（cp 等で mtime が揃った dump でも剪定対象がブレない）。iCloud の既定パスは
-# 空白を含むが、-t' ' + -k2 は第2キーを行末まで一括で見るためパスは分断されない。
+# 新しい世代を先頭に固定する（cp 等で mtime が揃った dump でも剪定対象がブレない）。パスに空白を含んでも
+# -t' ' + -k2 は第2キーを行末まで一括で見るため分断されない。
 prune_dir() {
     local dir="$1" label="$2"
     local files=() f i=0

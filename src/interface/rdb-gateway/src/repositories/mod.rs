@@ -548,12 +548,6 @@ impl PadPredictionRepository for PostgresRepository {
             .map_err(Into::into)
     }
 
-    async fn list_pad_predictions(&self) -> UcResult<Vec<PadPrediction>> {
-        pad_prediction::list_pad_predictions(&self.pool)
-            .await
-            .map_err(Into::into)
-    }
-
     async fn search_predictions(
         &self,
         filter: &PredictionFilter,
