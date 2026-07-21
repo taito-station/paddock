@@ -212,14 +212,22 @@ impl paddock_use_case::PayoutFetcher for UreqNetkeibaScraper {
 }
 
 impl paddock_use_case::ResultPageFetcher for UreqNetkeibaScraper {
-    fn fetch_race_result_page(
+    /// **#458**: 結果ページ取得は同期 sleep + ureq GET を含むため `spawn_blocking` に逃がす。
+    /// `results:refresh`（web が 45 秒間隔で自動ポーリング）は未確定レース数ぶんの取得を直列で
+    /// 回すため、actix worker 上で同期ブロッキングすると同 worker の盤 UI リクエストが無応答になる。
+    /// tokio の blocking pool へオフロードして worker を解放する。CLI（fetch-results 等）は単一
+    /// タスクのため挙動は変わらない。
+    async fn fetch_race_result_page(
         &self,
         netkeiba_race_id: &str,
     ) -> UcResult<(
         Vec<paddock_use_case::netkeiba_scraper::ResultRow>,
         paddock_domain::RacePayouts,
     )> {
-        UreqNetkeibaScraper::fetch_race_result_page(self, netkeiba_race_id)
+        let this = self.clone_for_blocking();
+        let netkeiba_race_id = netkeiba_race_id.to_owned();
+        run_blocking(move || UreqNetkeibaScraper::fetch_race_result_page(&this, &netkeiba_race_id))
+            .await
     }
 }
 
@@ -327,10 +335,18 @@ pub(crate) fn assemble_netkeiba(
     out
 }
 
-impl OddsScraper for UreqNetkeibaScraper {
-    /// 内部 `RaceId` を netkeiba 12 桁へ変換し、単複・組合せ券種オッズ API（UTF-8 JSON）から
-    /// ライブオッズを取得して [`RaceOdds`] を組み立てる。旧 JRA `accessO.html` cname 経路
-    /// （ADR 0001 で未検証・実質機能せず #287 で撤去）を置き換え、fetch-card と同一の取得経路に統一する。
+impl UreqNetkeibaScraper {
+    /// spawn_blocking に move するための軽量クローン（#458）。`ureq::Agent` は内部 `Arc` 共有で
+    /// clone が安価、`delay` は `Copy`。`'static` な自己コピーを作ってブロッキング処理へ渡す。
+    fn clone_for_blocking(&self) -> Self {
+        Self {
+            agent: self.agent.clone(),
+            delay: self.delay,
+        }
+    }
+
+    /// blocking 版の full scrape（単複＋組合せ券種）。同期 sleep + ureq GET を含む。
+    /// async な [`OddsScraper::scrape`] からは `spawn_blocking` 経由で呼ぶ（#458）。
     ///
     /// 失敗の扱いは券種の重要度で分ける:
     /// - **単複(type=1)は EV/ROI と市場単勝 α ブレンドの基礎**。取得失敗を握り潰して win 欠落の
@@ -342,7 +358,7 @@ impl OddsScraper for UreqNetkeibaScraper {
     ///   畳むため `fetch_exotic_odds` は実質常に `Ok`）。1 券種の欠落で単複ベースの判定を巻き添えにしない。
     ///
     /// RaceId が JRA 形式でない（合成 `nk-` 等）場合は変換エラーをそのまま伝播する。
-    fn scrape(&self, race_id: &RaceId) -> UcResult<RaceOdds> {
+    fn scrape_blocking(&self, race_id: &RaceId) -> UcResult<RaceOdds> {
         let netkeiba_id = netkeiba_race_id_from_paddock(race_id)?;
         let odds = self.fetch_win_place_odds(&netkeiba_id)?;
         // 現状 `fetch_exotic_odds` は券種ごとに Err を空 Vec へ畳むため常に Ok だが、将来エラー伝播へ
@@ -351,10 +367,9 @@ impl OddsScraper for UreqNetkeibaScraper {
         Ok(assemble_netkeiba(&odds, &exotic, race_id.clone()))
     }
 
-    /// 単複のみ（type=1・1 GET）の軽量取得。オッズ時系列コレクタが全レースを終日高頻度で
-    /// スナップするため、組合せ券種を打たず netkeiba への負荷を最小化する（trait 既定の
-    /// 「full scrape して win/place を残す」を 1 GET へ override）。
-    fn scrape_win_place(&self, race_id: &RaceId) -> UcResult<RaceOdds> {
+    /// blocking 版の単複のみ（type=1・1 GET）取得。オッズ時系列コレクタが全レースを終日高頻度で
+    /// スナップするため、組合せ券種を打たず netkeiba への負荷を最小化する。
+    fn scrape_win_place_blocking(&self, race_id: &RaceId) -> UcResult<RaceOdds> {
         let netkeiba_id = netkeiba_race_id_from_paddock(race_id)?;
         let odds = self.fetch_win_place_odds(&netkeiba_id)?;
         Ok(assemble_netkeiba(
@@ -362,6 +377,50 @@ impl OddsScraper for UreqNetkeibaScraper {
             &FetchedExoticOdds::default(),
             race_id.clone(),
         ))
+    }
+}
+
+impl OddsScraper for UreqNetkeibaScraper {
+    /// 内部 `RaceId` を netkeiba 12 桁へ変換し、単複・組合せ券種オッズ API（UTF-8 JSON）から
+    /// ライブオッズを取得して [`RaceOdds`] を組み立てる。旧 JRA `accessO.html` cname 経路
+    /// （ADR 0001 で未検証・実質機能せず #287 で撤去）を置き換え、fetch-card と同一の取得経路に統一する。
+    ///
+    /// **#458**: 同期 sleep + ureq GET は `spawn_blocking` に逃がす。actix worker（単一スレッド
+    /// ランタイム）の経路で同期ブロッキングすると同 worker の全接続が止まるため、ブロッキング処理を
+    /// tokio の blocking pool へオフロードして worker を解放する。CLI 各 app は単一タスクのため
+    /// オフロードの有無で挙動は変わらない。失敗伝播・ベストエフォートの方針は
+    /// [`Self::scrape_blocking`] を参照。
+    async fn scrape(&self, race_id: &RaceId) -> UcResult<RaceOdds> {
+        let this = self.clone_for_blocking();
+        let race_id = race_id.clone();
+        run_blocking(move || this.scrape_blocking(&race_id)).await
+    }
+
+    /// 単複のみ（type=1・1 GET）の軽量取得。オッズ時系列コレクタが全レースを終日高頻度で
+    /// スナップするため、組合せ券種を打たず netkeiba への負荷を最小化する（trait 既定の
+    /// 「full scrape して win/place を残す」を 1 GET へ override）。#458 で同期部を `spawn_blocking` 化。
+    async fn scrape_win_place(&self, race_id: &RaceId) -> UcResult<RaceOdds> {
+        let this = self.clone_for_blocking();
+        let race_id = race_id.clone();
+        run_blocking(move || this.scrape_win_place_blocking(&race_id)).await
+    }
+}
+
+/// ブロッキング処理を tokio の blocking pool で実行し、結果を await 可能にする（#458）。
+///
+/// 呼び出しは常に tokio ランタイム内（api-server の `#[actix_web::main]` / CLI の `#[tokio::main]`）
+/// で行われるため `spawn_blocking` は有効。join エラー（blocking タスクの panic 等）は
+/// [`Error::Fetch`] に写像して呼び出し側へ伝える（use-case 側で当該レース skip に倒れる）。
+async fn run_blocking<T, F>(f: F) -> UcResult<T>
+where
+    F: FnOnce() -> UcResult<T> + Send + 'static,
+    T: Send + 'static,
+{
+    match tokio::task::spawn_blocking(f).await {
+        Ok(res) => res,
+        Err(join_err) => {
+            Err(Error::Fetch(format!("blocking scrape task failed: {join_err}")).into())
+        }
     }
 }
 
@@ -473,15 +532,16 @@ mod tests {
         assert!(got.is_empty());
     }
 
-    #[test]
-    fn scrape_propagates_conversion_error_for_non_jra_race_id() {
+    #[tokio::test]
+    async fn scrape_propagates_conversion_error_for_non_jra_race_id() {
         // scrape() の glue 回帰ガード: 馬個別成績由来の合成 race_id `nk-<12桁>` は paddock RaceId の
         // `{year}-{round}-{slug}-{day}-{race_num}R` 構造でなく（末尾 R も無い）、
         // netkeiba_race_id_from_paddock が変換段で Err を返してネットワークへ出る前に伝播する
         // （OddsInteractor 側で skip(None) になる）。ネットワーク非依存で変換分岐のみを検証する。
+        // #458 で scrape() は spawn_blocking 経由の async になったため await して検証する。
         let scraper = UreqNetkeibaScraper::new();
         let synthetic = RaceId::try_from("nk-202602010605").unwrap();
-        assert!(scraper.scrape(&synthetic).is_err());
+        assert!(scraper.scrape(&synthetic).await.is_err());
     }
 
     // --- transient リトライ（#288） ---------------------------------------

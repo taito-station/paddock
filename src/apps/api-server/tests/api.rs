@@ -758,7 +758,7 @@ struct FakeResultPage {
 }
 
 impl ResultPageFetcher for FakeResultPage {
-    fn fetch_race_result_page(
+    async fn fetch_race_result_page(
         &self,
         _netkeiba_race_id: &str,
     ) -> paddock_use_case::Result<(Vec<ResultRow>, RacePayouts)> {

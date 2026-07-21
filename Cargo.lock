@@ -1644,6 +1644,7 @@ dependencies = [
  "scraper-util",
  "serde_json",
  "thiserror",
+ "tokio",
  "tracing",
  "ureq",
 ]

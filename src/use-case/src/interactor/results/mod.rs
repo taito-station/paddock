@@ -88,7 +88,9 @@ where
             }
 
             let netkeiba_id = netkeiba_race_id_from_paddock(race_id)?;
-            let (rows, payouts) = match self.scraper.fetch_race_result_page(&netkeiba_id) {
+            // fetch_race_result_page は async（#458）。api-server 経路では実装が spawn_blocking へ
+            // 逃がすため、未確定レース数ぶんの直列 sleep+GET で actix worker を塞がない。
+            let (rows, payouts) = match self.scraper.fetch_race_result_page(&netkeiba_id).await {
                 Ok(pair) => pair,
                 Err(e) => {
                     tracing::warn!(
