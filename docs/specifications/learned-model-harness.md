@@ -11,6 +11,7 @@ sources:
   - docs/adr/0051-placeshow-power-knee-confirmed-keep-2.md
   - docs/adr/0052-alpha-blend-removal-rejected.md
   - docs/adr/0053-learned-fundamental-model-rejected.md
+  - docs/adr/0058-pedigree-sire-feature-rejected.md
   - docs/adr/0059-market-calibration-correction-rejected.md
 distilled_from_sha: "f765be7"
 updated: "2026-07-21"
