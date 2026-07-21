@@ -16,8 +16,19 @@ export function maru(n: number): string {
 }
 
 // ROI[%] 表記。整数は小数を出さず、端数があるときだけ 1 桁（80%→"80%" / 78.9→"78.9%"）。
+// 入力 n は既に % 単位（104.0=104%）。list 側 live.roi は snapshot が % 保存
+// （predict-watch snapshot.rs:39「roi 列は ev.roi*100」）なのでそのまま渡す。
 export function roiPct(n: number): string {
   return `${Number.isInteger(n) ? n.toFixed(0) : n.toFixed(1)}%`;
+}
+
+// 盤（RaceBoard）の ROI 表記。盤の d.roi / d.morning_roi は domain の Ev.roi＝**比率**
+// （1.03=103%）で、REST 層 race.rs:266/403 が `roi: p.ev.roi` と ×100 せず素通しするため、
+// 表示側で ×100 して % 化してから roiPct（桁方針: 整数0桁・端数1桁）に載せる。roiPct は ×100
+// しないので、比率をそのまま roiPct に渡すと 1.03→"1%" に化ける（PR #519 の退行を固定するため
+// ここに変換を閉じ込め、list の roiPct(live.roi) と同一表記に揃える）。
+export function boardRoiPct(ratio: number): string {
+  return roiPct(ratio * 100);
 }
 
 // ◎の複勝オッズ帯を "Y.Y–Z.Z" 表記にする（#346）。low/high のどちらかでも欠ければ "—"

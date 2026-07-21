@@ -16,9 +16,9 @@ import {
   STALE_MINUTES,
   boardFreshness,
   boardHref,
+  boardRoiPct,
   jstHm,
   raceStarted,
-  roiPct,
 } from "../lib/live";
 import { backToDashboardHref } from "../lib/dashboard";
 import { useSessionQuery, useRacesQuery } from "../lib/queries";
@@ -348,7 +348,9 @@ export function RaceBoard() {
               ))}
             {d.roi != null && d.hit_prob != null && (
               <span className={d.roi >= 1 ? "chip chip-plus" : "muted"}>
-                ROI {roiPct(d.roi)} / 的中 {pct(d.hit_prob)}
+                {/* d.roi は比率（1.03=103%）。boardRoiPct が ×100→roiPct で %化する（比率→%
+                    変換を単一の入口に閉じ込め、単位退行を防ぐ。list 側 roiPct(live.roi) と同一表記）。 */}
+                ROI {boardRoiPct(d.roi)} / 的中 {pct(d.hit_prob)}
               </span>
             )}
             {/* 朝↔現の ROI 比較（#448）。軸・確率・予算は固定のまま、参照オッズだけ朝 snapshot に
@@ -364,8 +366,9 @@ export function RaceBoard() {
                     d.current_at,
                   )}。軸・確率・予算を固定し参照オッズだけ朝時点に差し替えた ROI。判断は現時点の値で。`}
                 >
-                  朝ROI {roiPct(d.morning_roi)} → 現ROI{" "}
-                  {roiPct(d.roi)}
+                  {/* morning_roi / roi はいずれも比率（domain Ev.roi）。boardRoiPct で %化する。 */}
+                  朝ROI {boardRoiPct(d.morning_roi)} → 現ROI{" "}
+                  {boardRoiPct(d.roi)}
                   {d.morning_hit_prob != null && d.hit_prob != null && (
                     <>
                       {" "}
