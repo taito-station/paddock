@@ -15,6 +15,8 @@
 # iCloud Drive は使わない: launchd から実行すると iCloud への "列挙" も "削除" も信頼できず（書き込み=
 # cp は効くが ls/glob は空を返し rm も反映されない macOS file-provider の癖・検証で確認）、剪定が no-op
 # になって無制限に溜まるため（#494）。既定はミラー無効でローカル権威のみ。
+# 未設定時は off-machine 冗長が無い旨をログに毎回残し、macOS 通知は 7 日に 1 回へ間引いて運用者に
+# 気づかせる（#507。ディスク障害でローカル権威も失うと復元不能なため）。
 #
 # 重要: host の pg_dump が PG17 サーバより古い（v14 等）とダンプを拒否するため、**dump は
 # container 内の pg_dump（バージョン一致）を docker exec で実行**する（host に pg17 client 不要）。
@@ -127,11 +129,23 @@ log "退避完了: $final ($size)"
 
 # off-machine ミラー（best-effort）。cp はパス指定の書き込みなので launchd 下でも効く。失敗しても
 # ローカル退避は成功しているので警告に留める（ログで検知する）。
+# 未設定（既定）なら off-machine 冗長が無いことを運用者に気づかせる（#507）: ログには毎回残し
+# （tail で検知可能）、macOS 通知は 7 日に 1 回へ間引く（毎日 nag しない）。マーカファイルの mtime で
+# 間引きを判定し、ミラー有効化時はマーカを消して次回未設定時に通知を再武装する。
+mirror_warn_marker="$BACKUP_DIR/.mirror-unset-warned"
 if [[ -n "$MIRROR_DIR" ]]; then
     if mkdir -p "$MIRROR_DIR" && cp -f "$final" "$MIRROR_DIR/$base"; then
         log "ミラー完了: $MIRROR_DIR/$base"
     else
         echo "警告: ミラーに失敗（ローカル退避は成功。$MIRROR_DIR を確認）" >&2
+    fi
+    rm -f "$mirror_warn_marker"
+else
+    log "警告: off-machine ミラー未設定（PADDOCK_BACKUP_MIRROR_DIR 空）。ディスク障害時に off-machine 冗長なし。実ファイルシステム（外付け/NAS 等）を指定して有効化を推奨。"
+    # 初回（マーカ無し）または前回通知から 7 日超なら通知し、マーカの mtime を更新する。
+    if [[ ! -e "$mirror_warn_marker" ]] || [[ -n "$(find "$mirror_warn_marker" -mtime +7 2>/dev/null)" ]]; then
+        notify "off-machine ミラー未設定：ディスク障害時に冗長なし。PADDOCK_BACKUP_MIRROR_DIR に外付け/NAS を設定してください。"
+        : > "$mirror_warn_marker"
     fi
 fi
 
