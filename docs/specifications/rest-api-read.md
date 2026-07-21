@@ -5,9 +5,10 @@ status: Confirmed
 kind: knowledge
 sources:
   - docs/adr/0022-rest-api-read-server.md
+  - docs/adr/0069-drop-icloud-writes-browser-only-viewing.md
   - docs/api/openapi.json
 distilled_from_sha: "f765be7"
-updated: "2026-07-17"
+updated: "2026-07-21"
 ---
 
 # REST API（read 基盤）: 設計仕様
@@ -44,9 +45,9 @@ API なので **OpenAPI 仕様を一級の成果物として整備する**。uto
 - フロントエンド（SPA）→ #34
 - DB バックエンドの変更（現状の **PostgreSQL** を継続。`PADDOCK_DB_URL` で接続先を切替可能なまま。別 DB への移行はしない）
 
-### 既存 `apps/web-viewer` との関係
+### `apps/web-viewer` の退役
 
-既に actix-web ベースの常駐バイナリ `apps/web-viewer`（`paddock-web`）が存在するが、これは予想 Markdown を HTML レンダリングして閲覧する**静的ビューア**であり、本 API（JSON で予想・分析データを返す read API）とは責務が異なる。本フェーズでは**両者を別バイナリとして併存**させる（web-viewer は変更しない）。将来 SPA（#34）が本 API を消費する形に一本化された段階で web-viewer の要否を再検討するが、本 Issue のスコープ外とする。
+かつては予想 Markdown を HTML レンダリングして閲覧する静的ビューア `apps/web-viewer`（`paddock-web`）が併存していたが、SPA（#34）が本 API を消費する形へ一本化されたため、pad MD 書き出しパイプラインとともに退役した（ADR 0069）。予想の閲覧は本 read API + SPA が唯一の経路。
 
 ## レイヤー構成と依存方向
 

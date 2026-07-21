@@ -6,15 +6,16 @@ kind: knowledge
 sources:
   - docs/adr/0025-prediction-search-api.md
   - docs/adr/0032-bets-in-gen-predictions-model-based.md
+  - docs/adr/0069-drop-icloud-writes-browser-only-viewing.md
 distilled_from_sha: "f765be7"
-updated: "2026-07-17"
+updated: "2026-07-21"
 ---
 
 # 予想 JSON 仕様（ingest-predictions 入力契約）
 
-予想（印・短評・買い目・結果）を DB に保存するための JSON。**DB が正で、pad の MD はこの
-レコードから生成する**（`--render`）。予想を作るときはこの JSON を吐いて
-`paddock-ingest-predictions` に渡せばよく、MD を手書きする必要はない。
+予想（印・短評・買い目・結果）を DB に保存するための JSON。**DB が正**。予想を作るときはこの
+JSON を吐いて `paddock-ingest-predictions` に渡せばよい。閲覧は REST API + SPA（`api-server` /
+`web/`）で行う（pad MD 書き出しは ADR 0069 で廃止）。
 
 ## 取り込み
 
@@ -25,8 +26,6 @@ cat pred.json | cargo run -p ingest-predictions
 cargo run -p ingest-predictions -- --input pred.json
 # パース・検証のみ（保存しない）
 cargo run -p ingest-predictions -- --input pred.json --dry-run
-# DB の全予想を pad の MD に生成
-cargo run -p ingest-predictions -- --render
 ```
 
 単一オブジェクト・オブジェクト配列のどちらでも受け付ける。
