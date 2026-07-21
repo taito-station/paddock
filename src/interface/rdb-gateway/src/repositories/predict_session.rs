@@ -247,9 +247,11 @@ pub async fn save_race_outcome(
     // 二重記録ガード（ロック下・確定済み状態に対して判定）: 当該レースの記録済み買い目があり、かつ
     // 今回買い目ありなら弾く。買い目なし＝スキップの再送は無害なので許容する。
     if !bets.is_empty() {
+        // 存在確認のみ。`bet_id`（BIGINT → i64）を 1 行取得できれば記録済み。
+        // `SELECT 1` は Postgres で INT4 になり `(i64,)` デコードに失敗するため列を明示する。
         let already: Option<(i64,)> = sqlx::query_as(
             r#"
-            SELECT 1
+            SELECT bet_id
             FROM predict_bets
             WHERE session_date = $1 AND race_id = $2
             LIMIT 1
