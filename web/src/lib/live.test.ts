@@ -20,6 +20,7 @@ import {
   liveQueryParams,
   freshness,
   boardFreshness,
+  relativeTimeLabel,
   hasUpcomingRaces,
   DEFAULT_LIVE_QUERY,
   defaultDir,
@@ -509,9 +510,12 @@ describe("boardFreshness", () => {
   it("発走済み（upcoming=false）は done で警告しない", () => {
     expect(boardFreshness("2026-07-11T01:00:00Z", false, NOON).state).toBe("done");
   });
-  it("null / 不正 current_at かつ未発走 → stale（オッズ未取得の疑いに倒す）", () => {
-    expect(boardFreshness(null, true, NOON)).toEqual({ label: "—", state: "stale" });
-    expect(boardFreshness("nonsense", true, NOON).state).toBe("stale");
+  it("null / 不正 current_at かつ未発走 → 鮮度なし・警告なし（M1: 単一 snapshot を stale に倒さない）", () => {
+    // current_at=null は #448 の朝↔現比較材料が無いだけで「オッズ未取得」信号ではない。stale にせず
+    // state=fresh（label="—" は present ゲートで非表示）を返す。真のオッズ有無は odds_available が担う。
+    expect(boardFreshness(null, true, NOON)).toEqual({ label: "—", state: "fresh" });
+    expect(boardFreshness("nonsense", true, NOON)).toEqual({ label: "—", state: "fresh" });
+    expect(boardFreshness(undefined, true, NOON)).toEqual({ label: "—", state: "fresh" });
   });
   it("null current_at でも発走済みなら done（警告しない）", () => {
     expect(boardFreshness(null, false, NOON)).toEqual({ label: "—", state: "done" });
@@ -521,6 +525,21 @@ describe("boardFreshness", () => {
   });
   it("current_at が now より未来でも 0 クランプで「たった今」", () => {
     expect(boardFreshness("2026-07-11T03:02:00Z", true, NOON)).toEqual({ label: "たった今", state: "fresh" });
+  });
+});
+
+describe("relativeTimeLabel", () => {
+  it("1 分未満は「たった今」", () => {
+    expect(relativeTimeLabel(0)).toBe("たった今");
+    expect(relativeTimeLabel(59_000)).toBe("たった今");
+  });
+  it("1〜59 分は「N分前」", () => {
+    expect(relativeTimeLabel(60_000)).toBe("1分前");
+    expect(relativeTimeLabel(59 * 60_000)).toBe("59分前");
+  });
+  it("60 分以上は「N時間前」", () => {
+    expect(relativeTimeLabel(60 * 60_000)).toBe("1時間前");
+    expect(relativeTimeLabel(150 * 60_000)).toBe("2時間前");
   });
 });
 

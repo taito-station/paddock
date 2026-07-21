@@ -74,8 +74,9 @@ export function RaceBoard() {
   // 覚えてパネルからフォーカスを戻せるようにする（ref 代入は state updater の外＝純粋な updater を
   // 保ち StrictMode の二重実行対策）。同じ馬の再選択で閉じる。
   // useCallback で参照を安定させ、React.memo 化した HorseCard の onSelect prop が
-  // ポーリング/予算入力の再描画ごとに変わらないようにする（#475）。selectedHorse に依存するため
-  // 選択が変わったときだけ再生成される（開いている馬のみ再描画される許容範囲）。
+  // ポーリング/予算入力の再描画ホットパスで変わらないようにする（#475 の主目的＝この抑止）。
+  // ただし selectedHorse に依存するため選択の切替時は identity が変わり全 18 頭が一度再描画される
+  //（N1: 「開いている馬のみ」ではない）。選択切替はホットパスではなく実害ゼロなので許容する。
   const handleSelect = useCallback(
     (horseNum: number, trigger: HTMLElement) => {
       if (selectedHorse === horseNum) {
@@ -240,17 +241,20 @@ export function RaceBoard() {
             >
               {board.isFetching ? "再読込中…" : "再読込"}
             </button>
+            {/* current_at が present のときだけ鮮度を出す。null（単一 snapshot＝#448 比較材料なし。
+                board.rs:209-234）はオッズ有無の信号ではないので鮮度を出さず、判断は odds_available チップに委ねる（M1）。 */}
             {fresh && d.current_at && fresh.label !== "—" && (
               <span className="muted">
                 オッズ {jstHm(d.current_at)}（{fresh.label}）
               </span>
             )}
-            {/* stale 警告（未発走なのに STALE_MINUTES 超・または current_at 欠落）。RaceList と閾値・トーンを揃える。 */}
+            {/* stale 警告。M1 により current_at present かつ STALE_MINUTES 超のときだけ立つ（null は stale に
+                ならない）。盤 API は保存 snapshot を返すため真因は client 再読込でなく predict-watch のスイープ
+                停止。RaceList と同じ remedy 文言（稼働確認）に寄せる（A-Should）。 */}
             {fresh?.state === "stale" && (
               <span className="live-stale">
-                {fresh.label === "—"
-                  ? "⚠ オッズ未取得 — 再読込で最新オッズを取得してください"
-                  : `⚠ オッズ更新から${STALE_MINUTES}分以上経過 — 再読込で最新化を推奨`}
+                ⚠ オッズ更新から{STALE_MINUTES}分以上経過 —
+                predict-watch の稼働を確認
               </span>
             )}
           </>
