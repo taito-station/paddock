@@ -11,8 +11,10 @@ sources:
   - docs/adr/0051-placeshow-power-knee-confirmed-keep-2.md
   - docs/adr/0052-alpha-blend-removal-rejected.md
   - docs/adr/0053-learned-fundamental-model-rejected.md
+  - docs/adr/0055-ev-layer-separation-circular-break.md
   - docs/adr/0058-pedigree-sire-feature-rejected.md
   - docs/adr/0059-market-calibration-correction-rejected.md
+  - docs/adr/0060-betting-axis-lock-preclose-topup.md
 distilled_from_sha: "f765be7"
 updated: "2026-07-21"
 ---
@@ -26,7 +28,7 @@ updated: "2026-07-21"
 > [ADR 0053](../adr/0053-learned-fundamental-model-rejected.md) で棄却された。純モデルの resolution は
 > 天井（[ADR 0058](../adr/0058-pedigree-sire-feature-rejected.md)）、市場自体の較正補正も sub-takeout で
 > exploitable でない（[ADR 0059](../adr/0059-market-calibration-correction-rejected.md)）＝「市場より上手く
-> 当てる」路線は全域 closed。残るエッジは執行規律（軸ロック＋ズレ増額・ADR 0055/0060）に置く。
+> 当てる」路線は全域 closed。残るエッジは執行規律（軸ロック＋ズレ増額・[ADR 0055](../adr/0055-ev-layer-separation-circular-break.md)/[ADR 0060](../adr/0060-betting-axis-lock-preclose-topup.md)）に置く。
 > したがって本書は **忠実性ハーネスの設計記録**として Confirmed（`--dump-features` 経路・as-of 忠実性
 > サニティは現存の資産）だが、④ サービング以降の「学習モデル採用」節は ADR 0053 により**発動しない**
 > 設計案として残す。（旧 status: Tentative は #272/#309 路線 close 後の位置づけが本文に無かったのが理由で、
