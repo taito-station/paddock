@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
@@ -12,9 +12,16 @@ import {
   sortByModelRank,
 } from "../lib/board";
 import { isUnit100, toAmount } from "../lib/bets";
-import { boardHref } from "../lib/live";
+import {
+  STALE_MINUTES,
+  boardFreshness,
+  boardHref,
+  jstHm,
+  raceStarted,
+} from "../lib/live";
 import { backToDashboardHref } from "../lib/dashboard";
 import { useSessionQuery, useRacesQuery } from "../lib/queries";
+import { BOARD_POLL_INTERVAL_MS, CLOCK_TICK_INTERVAL_MS } from "../lib/constants";
 import { ExecutionPanel } from "./board/ExecutionPanel";
 import { HorseCard } from "./board/HorseCard";
 import { HorseDetailPanel } from "./board/HorseDetailPanel";
@@ -37,6 +44,12 @@ export function RaceBoard() {
   // ただし朝 snapshot が無い（morning_at=null＝非開催・スイープ前・1本のみ）レースでは列自体を出さない
   // （トグルも描かない）ので、既存の見え方は壊れない。
   const [showMorning, setShowMorning] = useState(true);
+  // 発走済み判定・鮮度の相対時刻用の「現在」。30 秒刻みで更新（RaceList と同基準・#475）。
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), CLOCK_TICK_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, []);
   // フォーカス管理（a11y）: パネルを開いた馬カラム（trigger）を覚えておき、閉じたら戻す。
   // 開いたらパネル内（閉じるボタン）へフォーカスを移す。
   const triggerRef = useRef<HTMLElement | null>(null);
@@ -60,14 +73,20 @@ export function RaceBoard() {
   // 馬カード（HorseCard）のクリック/キー操作で書評パネルを開閉する。開く時は trigger 要素を
   // 覚えてパネルからフォーカスを戻せるようにする（ref 代入は state updater の外＝純粋な updater を
   // 保ち StrictMode の二重実行対策）。同じ馬の再選択で閉じる。
-  const handleSelect = (horseNum: number, trigger: HTMLElement) => {
-    if (selectedHorse === horseNum) {
-      setSelectedHorse(null);
-    } else {
-      triggerRef.current = trigger;
-      setSelectedHorse(horseNum);
-    }
-  };
+  // useCallback で参照を安定させ、React.memo 化した HorseCard の onSelect prop が
+  // ポーリング/予算入力の再描画ごとに変わらないようにする（#475）。selectedHorse に依存するため
+  // 選択が変わったときだけ再生成される（開いている馬のみ再描画される許容範囲）。
+  const handleSelect = useCallback(
+    (horseNum: number, trigger: HTMLElement) => {
+      if (selectedHorse === horseNum) {
+        setSelectedHorse(null);
+      } else {
+        triggerRef.current = trigger;
+        setSelectedHorse(horseNum);
+      }
+    },
+    [selectedHorse],
+  );
 
   // 入力中の文字列と、盤/買い目の再計算に使う確定値を分離する。入力ごとの再取得
   //（重い盤 API）を避け、確定（blur / Enter / 再計算ボタン）で appliedBudget に反映する。
@@ -114,6 +133,18 @@ export function RaceBoard() {
     // budget は可変（#377）。stale キャッシュを避けるため queryKey に必ず含める。
     queryKey: ["board", raceId, queryBudget],
     enabled: !!raceId,
+    // 本命画面は発走直前のフレッシュなオッズで判断する（CLAUDE.md「EV/ROI 判定は発走直前で」）。
+    // 未発走の間だけ自動再取得して単勝・ROI・軸ロック警告を更新する（#475）。発走済み・post_time
+    // 不明（判定不能で発走扱いにできない安全側）は停止。RaceList のポーリングと同じ「未発走ゲート」。
+    refetchInterval: (q) => {
+      const d = q.state.data;
+      // d.date は盤レスポンス由来（?date= の有無に依らず必ず入る）。raceStarted!==true=未発走
+      //（不明も含む＝未発走側に倒す）の間だけポーリングを続ける。
+      if (!d) return false;
+      return raceStarted(d.date, d.post_time, new Date()) !== true
+        ? BOARD_POLL_INTERVAL_MS
+        : false;
+    },
     // 予算変更時に盤全体（馬カラム）がスピナーへ戻るチラつきを防ぐ。ガードの意味論
     //（同一レース限定＝前レースの買い目を新レースとして記録できる事故の防止）は
     // keepBoardPlaceholder（lib/board.ts・テスト済み）が持つ。
@@ -169,6 +200,11 @@ export function RaceBoard() {
   // レース名(グレード)。raceTitle は名前が無ければ "" を返すので、前置スペースだけ条件付きにする。
   const headTitle = d ? raceTitle(d.race_name, d.race_class) : "";
 
+  // オッズ鮮度（#475）。current_at（最新スイープ取得時刻）と now の差で判定。未発走のときだけ
+  // stale 警告を出す（発走済みは done で無警告）。ポーリングと同じ「未発走ゲート」で不整合を作らない。
+  const upcoming = d ? raceStarted(d.date, d.post_time, now) !== true : false;
+  const fresh = d ? boardFreshness(d.current_at, upcoming, now) : null;
+
   return (
     <section className="board-view">
       <div className="toolbar">
@@ -193,6 +229,31 @@ export function RaceBoard() {
         )}
         {session.isError && (
           <span className="error">セッションの取得に失敗しました</span>
+        )}
+        {/* オッズ再読込＋鮮度表示（#475）。盤 API を再取得し current_at を最新化する。
+            未発走中は refetchInterval で自動更新も走るが、直前判断で即時更新したい局面のため手動導線も置く。 */}
+        {d && (
+          <>
+            <button
+              onClick={() => board.refetch()}
+              disabled={board.isFetching}
+            >
+              {board.isFetching ? "再読込中…" : "再読込"}
+            </button>
+            {fresh && d.current_at && fresh.label !== "—" && (
+              <span className="muted">
+                オッズ {jstHm(d.current_at)}（{fresh.label}）
+              </span>
+            )}
+            {/* stale 警告（未発走なのに STALE_MINUTES 超・または current_at 欠落）。RaceList と閾値・トーンを揃える。 */}
+            {fresh?.state === "stale" && (
+              <span className="live-stale">
+                {fresh.label === "—"
+                  ? "⚠ オッズ未取得 — 再読込で最新オッズを取得してください"
+                  : `⚠ オッズ更新から${STALE_MINUTES}分以上経過 — 再読込で最新化を推奨`}
+              </span>
+            )}
+          </>
         )}
       </div>
 

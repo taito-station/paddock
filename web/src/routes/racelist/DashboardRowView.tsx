@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { Link } from "react-router-dom";
 import { VENUE_JP, yen, type RaceBadge } from "../../lib/format";
 import {
@@ -26,7 +27,10 @@ import { Badge } from "./Badge";
 // EV 情報（ROI/軸/荒れ/伝票/フリップ）は evVisible=true のときだけ出す:
 // live 無しは "—"、tier=hidden は「圏外」（数値を見せない = #344）。post_time は
 // 無害な事実情報なので hidden でも表示・ソートに使う。
-export function DashboardRowView({
+//
+// onToggle は raceId を引数に取る（親で useCallback により参照を安定させ、React.memo を効かせるため・
+// #475）。行内部で自分の race_id を渡して呼ぶので、行ごとに別クロージャを作らずに済む。
+function DashboardRowViewImpl({
   row,
   date,
   back,
@@ -42,7 +46,7 @@ export function DashboardRowView({
   now: Date;
   badge: RaceBadge;
   slipOpen: boolean;
-  onToggle: () => void;
+  onToggle: (raceId: string) => void;
   outcome?: RaceOutcome;
 }) {
   const { race, live } = row;
@@ -86,7 +90,7 @@ export function DashboardRowView({
         onClick={(e) => {
           // レース名リンク等のクリックは行トグルにしない（買い行のみトグル対象）。
           if (!isBuy || (e.target as HTMLElement).closest("a")) return;
-          onToggle();
+          onToggle(race.race_id);
         }}
       >
         <td className="live-status">
@@ -100,7 +104,7 @@ export function DashboardRowView({
               onClick={(e) => {
                 // 行クリックのトグルと二重発火させない。
                 e.stopPropagation();
-                onToggle();
+                onToggle(race.race_id);
               }}
             >
               {slipOpen ? "▼" : "▶"}
@@ -198,3 +202,8 @@ export function DashboardRowView({
     </>
   );
 }
+
+// メモ化して一覧の 60 秒ポーリング/時計 tick 由来の再描画で全行が無駄に再レンダリングされるのを防ぐ（#475）。
+// props は row（query データ由来で参照安定）・now（tick で変わる＝時刻依存表示は正しく更新）・onToggle
+// （親で useCallback 済み）等で、実データが変わらない限り再描画をスキップする。
+export const DashboardRowView = memo(DashboardRowViewImpl);

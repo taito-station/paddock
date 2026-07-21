@@ -409,6 +409,38 @@ export function freshness(
   return { label, state: "fresh" };
 }
 
+// 1レース盤（RaceBoard）のオッズ鮮度（#475）。盤レスポンスは server_now を持たないため、
+// snapshot 取得時刻（current_at・RFC3339 UTC）とクライアント now の差だけで判定する簡易版。
+// stale = STALE_MINUTES 超過かつ未発走（＝発走直前に古いオッズで EV/ROI を判断させない警告）。
+// 発走済み・不正時刻・upcoming=false は監視終了扱い（done）で警告しない。current_at 欠落は
+// 未発走なら stale（オッズ未取得の疑い）に倒す。RaceList の freshness と閾値・状態語を揃える。
+export function boardFreshness(
+  currentAt: string | null | undefined,
+  upcoming: boolean,
+  now: Date,
+): Freshness {
+  let label = "—";
+  let diffMs: number | null = null;
+  if (currentAt) {
+    const t = new Date(currentAt);
+    if (!Number.isNaN(t.getTime())) {
+      diffMs = Math.max(0, now.getTime() - t.getTime());
+      const mins = Math.floor(diffMs / 60_000);
+      label =
+        mins < 1
+          ? "たった今"
+          : mins < 60
+            ? `${mins}分前`
+            : `${Math.floor(mins / 60)}時間前`;
+    }
+  }
+  if (!upcoming) return { label, state: "done" };
+  if (diffMs == null || diffMs > STALE_MINUTES * 60_000) {
+    return { label, state: "stale" };
+  }
+  return { label, state: "fresh" };
+}
+
 // フリップ注記。axis_changed / ev_reversed を独立に評価し、真の側のみ返す（片側 false を誤強調しない）。
 export function flipNotes(
   flip: LiveFlip,

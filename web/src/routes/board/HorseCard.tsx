@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { pct } from "../../lib/format";
 import {
   type BoardHorse,
@@ -10,7 +11,11 @@ import { placeBand } from "../../lib/live";
 // 全頭横並び盤の 1 馬カラム（#411 で RaceBoard から抽出）。数値密度を保ちつつ、書評のある馬は
 // クリック / Enter / Space で詳細パネルを開閉できる。開閉状態（selectedHorse）と trigger 要素の
 // フォーカス管理は親（RaceBoard）が持ち、カードは onSelect で馬番と trigger 要素だけ通知する。
-export function HorseCard({
+//
+// React.memo 化（#475）: オッズ自動ポーリング＋予算入力の毎キーストロークで親が再描画されるため、
+// props（horse は query データ由来で参照安定・showModel/showMorning/isSelected は primitive・onSelect は
+// 親で useCallback 済み）が変わらない限り再描画をスキップし、全 18 頭カードの無駄再描画を防ぐ。
+function HorseCardImpl({
   horse: h,
   maxWin,
   showModel,
@@ -178,3 +183,6 @@ export function HorseCard({
     </div>
   );
 }
+
+// メモ化して親（RaceBoard）のポーリング/予算入力の再描画で全頭が再レンダリングされるのを防ぐ（#475）。
+export const HorseCard = memo(HorseCardImpl);
