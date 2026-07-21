@@ -125,14 +125,49 @@ mv "$_tmp" "$final"
 _tmp=""
 
 # dump 構造チェック（-Fc custom-format の整合検証）。
-# pg_restore --list はアーカイブヘッダのみ読むため数秒で完了し、container 内 PG17 を使う必要もない。
-# ホスト側 pg_restore が v14 以下でも -Fc ヘッダ検証は互換的に動作する（バイナリプロトコルは不変）。
+# pg_restore --list はアーカイブヘッダ（TOC）のみ読むため数秒で完了する安価な検証。
+# host の pg_restore が PG17 サーバより古い（v14 等）と拒否されるため、退避と同じく
+# container 内（PG17・バージョン一致）の pg_restore を docker exec で実行する（dump 生成の
+# pg_dump と対称。host に pg17 client 不要）。dump は stdin から流し込む（-i で TTY を切る）。
 # 壊れた dump（書き込み中断・転送破損等）はここで即検知して失敗させる。
 if ! docker exec -i "$CONTAINER" pg_restore --list < "$final" > /dev/null; then
     echo "dump 構造チェック失敗（pg_restore --list が異常終了。dump が壊れている可能性あり）: $final" >&2
     exit 1
 fi
 log "dump 構造チェック OK: $final"
+
+# 行数サイドカー記録（#474・restore 検証の race-free 突合用）。
+# restore 検証（verify-backup-restore.sh）は「この dump が主張する行数どおり復元できたか」を
+# 確認したい。だが検証はバックアップから数時間後（例: dump=土23:30 / 検証=日04:00）に走るため、
+# その間 live golden へ INSERT が入ると「scratch(dump時点) < golden(検証時点)」で偽 FAIL する。
+# それを防ぐため dump 生成とほぼ同時刻の行数をここで dump と対になるサイドカー
+# (<dump>.rowcounts) に記録し、検証側は live golden ではなくこの記録値と厳密突合する（race-free）。
+# COUNT(*) を使う（pg_stat の n_live_tup は VACUUM 依存の推定値で厳密な行欠け検知に使えないため）。
+# pg_dump とは別接続だが両者は連続実行で差はミリ秒オーダー・実用上 dump 時点の行数とみなせる。
+# 記録は best-effort: 失敗しても dump 本体は成功しているので警告に留める（サイドカー無しの
+# 旧 dump は検証側が skip にフォールバックする）。書式は "table<TAB>count" の 1 行/テーブル。
+# 突合テーブルは検証側の既定と一致させる（PADDOCK_VERIFY_TABLES で上書き可・カンマ区切り）。
+rowcounts_file="$final.rowcounts"
+verify_tables="${PADDOCK_VERIFY_TABLES:-race_odds_snapshots,races,horses}"
+# 各テーブルの COUNT(*) を UNION ALL で 1 クエリにまとめて取得する（テーブルごとに docker exec を
+# 起こさない）。テーブル名は識別子として直挿しするが、値は運用者制御の env（PADDOCK_VERIFY_TABLES）
+# 由来で外部入力ではないため注入面のリスクは無い。書式は psql -t -A -F'\t' で "table<TAB>count"。
+# カンマ区切りを配列へ（read -ra で明示的に分割。無クォート展開の単語分割に頼らない）。
+IFS=',' read -ra _verify_table_arr <<<"$verify_tables"
+count_selects=""
+for t in "${_verify_table_arr[@]}"; do
+    [[ -z "$t" ]] && continue
+    [[ -n "$count_selects" ]] && count_selects+=" UNION ALL "
+    count_selects+="SELECT '$t' AS t, COUNT(*) AS c FROM $t"
+done
+if [[ -n "$count_selects" ]] \
+    && rc_out="$(docker exec "$CONTAINER" psql -U "$PG_USER" -d "$PG_DB" -t -A -F $'\t' \
+        -c "$count_selects" 2>/dev/null)"; then
+    printf '%s\n' "$rc_out" > "$rowcounts_file"
+    log "行数サイドカー記録: $rowcounts_file"
+else
+    echo "警告: 行数サイドカー記録に失敗（dump 本体は成功。検証側は skip フォールバック）: $rowcounts_file" >&2
+fi
 
 size="$(du -h "$final" | cut -f1)"
 log "退避完了: $final ($size)"

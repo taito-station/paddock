@@ -121,7 +121,15 @@ tail -f ~/Library/Logs/paddock-backup.log
 - `race_odds_snapshots`: 再取得不能資産。行数不一致は致命的
 - `races` / `horses`: スキーマ構造の sanity check
 
-カスタマイズ: `PADDOCK_VERIFY_TABLES=race_odds_snapshots,race_odds scripts/verify-backup-restore.sh`
+**突合の基準は live golden ではなくサイドカー**（`<dump>.rowcounts`）。`backup-db.sh` が dump 生成と
+ほぼ同時刻の各テーブル `COUNT(*)` を `paddock-YYYYMMDD-HHMMSS.dump.rowcounts` に記録し、検証側は
+その記録値と scratch 復元行数を厳密比較する。live golden と比べると、検証（日 04:00）が dump 生成
+（土 23:30）から数時間ズレる間に golden へ INSERT が入り「scratch < golden」で**偽 FAIL** する。
+サイドカー方式なら時刻ズレが原理的に無く、行の増加も欠落も正しく判定できる（race-free）。
+サイドカーが無い旧 dump は行数突合を skip（構造健全性は `backup-db.sh` の `pg_restore --list` で担保）。
+
+突合テーブルのカスタマイズは **`backup-db.sh` 側の** `PADDOCK_VERIFY_TABLES`（サイドカー生成時に反映）:
+`PADDOCK_VERIFY_TABLES=race_odds_snapshots,race_odds scripts/backup-db.sh`
 
 ### 手動検証手順（スクリプト非使用の場合）
 
