@@ -15,7 +15,7 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
-# GITHUB_TOKEN を最小権限に絞る。全ジョブ（ci / web / adr / predict-check / shellcheck / ocr-pdf）は
+# GITHUB_TOKEN を最小権限に絞る。全ジョブ（ci / web / adr / predict-check / shellcheck / db-guards / ocr-pdf）は
 # checkout とビルド・テストのみで、コミット・コメント・リリース等の書き込みを一切行わないため読取だけで足りる。
 permissions:
   contents: read
@@ -178,6 +178,25 @@ jobs:
         run: |
           git ls-files '*.sh' scripts/mdq scripts/git-hooks/pre-push \
             | xargs -r shellcheck --severity=warning
+
+  # reset-db.sh / seed-db.sh の golden DB 保護ガードの回帰テスト（scripts/test-db-guards.sh・#406/#465）。
+  # ガードが退行すると「golden DB を DROP しうる」最悪級の事故に直結するため、テストが存在するのに
+  # CI で回っていない状態を解消する。テスト本体は到達不能ポート :1 を使い実 DB を一切触らないので
+  # Postgres サービスは不要。ただし対象スクリプトは golden ガード判定の手前で `command -v psql` を
+  # 確認し、psql が無いとガード到達前に exit する（BLOCK ケースがガードメッセージに届かず落ちる）。
+  # ubuntu-latest には psql 同梱だが、ランナーイメージのドリフトで欠けても即座に気づけるよう
+  # postgresql-client を明示導入する。Rust/Postgres サーバ不要なので独立ジョブで並列に即終わる。
+  db-guards:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Install psql client (golden ガード手前の command -v psql を満たす)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends postgresql-client
+      - name: Run golden DB guard regression test (#406/#465)
+        run: bash scripts/test-db-guards.sh
 
   # pdf-ocr / pdf-parser の統合テスト（test_render / test_parse）は mutool(mupdf) のテキスト/画像
   # 抽出に依存し、mupdf >= 1.25 が必要（ubuntu-latest の apt mupdf は 1.23 でサンプル解析が 0 件に
