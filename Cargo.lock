@@ -1447,6 +1447,7 @@ name = "jra-fetcher"
 version = "0.1.0"
 dependencies = [
  "paddock-use-case",
+ "scraper-util",
  "tracing",
  "ureq",
 ]
@@ -2310,6 +2311,7 @@ version = "0.1.0"
 dependencies = [
  "encoding_rs",
  "tracing",
+ "ureq",
 ]
 
 [[package]]

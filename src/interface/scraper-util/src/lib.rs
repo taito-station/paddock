@@ -1,7 +1,69 @@
 //! スクレイパ共通ユーティリティ。JRA / netkeiba のレスポンス処理で重複しがちな
-//! エンコーディング変換などを集約する。
+//! エンコーディング変換やリトライポリシーなどを集約する。
+
+use std::time::Duration;
 
 use encoding_rs::{EUC_JP, Encoding};
+
+/// 一時障害に対する総試行回数（初回 1 + リトライ 2）。ADR 0021/0029 で JRA に導入した
+/// policy を netkeiba（#288）にも展開し、ここへ一元化した（#460）。
+const MAX_ATTEMPTS: u32 = 3;
+/// 指数バックオフの基準値。試行 N は `BASE * 2^(N-1)`（1s, 2s, …）だけ待つ。
+const RETRY_BASE_BACKOFF: Duration = Duration::from_secs(1);
+
+/// 再試行する価値のある一時障害かを判定する。transport hiccup（接続リセット os error 54 =
+/// `Io`・タイムアウト・接続失敗・名前解決失敗・不完全 HTTP 応答）と 5xx を transient とし、
+/// 4xx（JRA の 403/404 "absent" 応答を含む）とリクエスト不正は非 transient（即返し）とする。
+///
+/// 4xx の扱い差分（JRA は 403/404 を absent に、netkeiba は即エラー）は本判定の外側、
+/// 各呼び出し元のレスポンス処理で注入する。ここでは「リトライすべきか」だけを一元判定する。
+pub fn is_transient(err: &ureq::Error) -> bool {
+    match err {
+        ureq::Error::Timeout(_)
+        | ureq::Error::Io(_)
+        | ureq::Error::ConnectionFailed
+        | ureq::Error::HostNotFound
+        | ureq::Error::Protocol(_) => true,
+        ureq::Error::StatusCode(code) => *code >= 500,
+        _ => false,
+    }
+}
+
+/// `attempt_fn` を実行し、transient 失敗時は指数バックオフ（1s/2s）で最大 [`MAX_ATTEMPTS`]
+/// 回まで再試行する共通リトライループ（ADR 0021/0029・#288 を #460 で統合）。
+///
+/// リトライ回数・バックオフ・transient 判定・warn ログ形式をここへ一元化し、JRA / netkeiba
+/// 双方が同一ポリシーを共有する。各呼び出し元は `attempt_fn` に「1 回分の GET」（UA 付与・
+/// レート制御・ボディ抽出など経路固有の処理）を渡し、`url` は warn ログのラベルに使う。
+///
+/// レスポンスヘッダ取得（`.call()` 相当）のみを再試行する用途を想定する。ボディ読取中の失敗を
+/// リトライしたくない場合は、`attempt_fn` 側でヘッダ取得だけを行い、ボディ読取は本関数の外で行う。
+pub fn call_with_retry<T>(
+    url: &str,
+    mut attempt_fn: impl FnMut() -> Result<T, ureq::Error>,
+) -> Result<T, ureq::Error> {
+    let mut attempt = 0;
+    loop {
+        attempt += 1;
+        match attempt_fn() {
+            Ok(value) => return Ok(value),
+            Err(err) if attempt < MAX_ATTEMPTS && is_transient(&err) => {
+                // saturating で MAX_ATTEMPTS を増やしても shift/乗算が panic しないようにする。
+                let backoff = RETRY_BASE_BACKOFF.saturating_mul(2u32.saturating_pow(attempt - 1));
+                tracing::warn!(
+                    url,
+                    attempt,
+                    max_attempts = MAX_ATTEMPTS,
+                    backoff_ms = backoff.as_millis() as u64,
+                    error = %err,
+                    "transient fetch error; retrying after backoff"
+                );
+                std::thread::sleep(backoff);
+            }
+            Err(err) => return Err(err),
+        }
+    }
+}
 
 /// EUC-JP のレスポンスボディを UTF-8 文字列へデコードする。
 ///
@@ -73,7 +135,79 @@ pub fn charset_from_content_type(content_type: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
+    use std::time::Instant;
+
     use super::*;
+
+    #[test]
+    fn is_transient_classifies_retryable_errors() {
+        // 5xx and transport hiccups are retried.
+        assert!(is_transient(&ureq::Error::StatusCode(500)));
+        assert!(is_transient(&ureq::Error::StatusCode(503)));
+        assert!(is_transient(&ureq::Error::ConnectionFailed));
+        assert!(is_transient(&ureq::Error::HostNotFound));
+        assert!(is_transient(&ureq::Error::Io(std::io::Error::new(
+            std::io::ErrorKind::ConnectionReset,
+            "reset"
+        ))));
+        // 4xx (including the "absent" 403/404) and client mistakes are not.
+        assert!(!is_transient(&ureq::Error::StatusCode(404)));
+        assert!(!is_transient(&ureq::Error::StatusCode(403)));
+        assert!(!is_transient(&ureq::Error::StatusCode(400)));
+        assert!(!is_transient(&ureq::Error::BadUri("nope".into())));
+    }
+
+    #[test]
+    fn call_with_retry_retries_transient_then_succeeds() {
+        // 503, 503, 200 → 3 回試行して成功。バックオフ（1s + 2s = 3s）分だけ待つ。
+        let attempts = Cell::new(0u32);
+        let start = Instant::now();
+        let result: Result<&str, ureq::Error> = call_with_retry("http://test/x", || {
+            let n = attempts.get();
+            attempts.set(n + 1);
+            if n < 2 {
+                Err(ureq::Error::StatusCode(503))
+            } else {
+                Ok("ok")
+            }
+        });
+        assert_eq!(result.unwrap(), "ok");
+        assert_eq!(attempts.get(), 3, "2 リトライ後に成功するはず");
+        assert!(
+            start.elapsed() >= Duration::from_secs(3),
+            "1s + 2s のバックオフを待つはず、実測 {:?}",
+            start.elapsed()
+        );
+    }
+
+    #[test]
+    fn call_with_retry_gives_up_after_max_attempts() {
+        // 恒常 5xx → MAX_ATTEMPTS 回ちょうどで打ち切り、最後のエラーを返す（無限ループしない）。
+        let attempts = Cell::new(0u32);
+        let result: Result<&str, ureq::Error> = call_with_retry("http://test/x", || {
+            attempts.set(attempts.get() + 1);
+            Err(ureq::Error::StatusCode(503))
+        });
+        assert!(result.is_err(), "恒常 5xx はエラーとして返る");
+        assert_eq!(
+            attempts.get(),
+            MAX_ATTEMPTS,
+            "MAX_ATTEMPTS 回ちょうど試行して諦めるはず"
+        );
+    }
+
+    #[test]
+    fn call_with_retry_does_not_retry_non_transient() {
+        // 404（非 transient）は即返し。リトライしない。
+        let attempts = Cell::new(0u32);
+        let result: Result<&str, ureq::Error> = call_with_retry("http://test/x", || {
+            attempts.set(attempts.get() + 1);
+            Err(ureq::Error::StatusCode(404))
+        });
+        assert!(result.is_err());
+        assert_eq!(attempts.get(), 1, "404 は 1 回で即返し（リトライ無し）");
+    }
 
     #[test]
     fn decodes_euc_jp_body_without_utf8_error() {

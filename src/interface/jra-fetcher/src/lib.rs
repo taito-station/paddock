@@ -18,10 +18,6 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 /// thread forever: a bulk `parse-pdf fetch` once hung ~8.7h on a single
 /// mid-run network stall before this was added. See issue #152.
 const GLOBAL_TIMEOUT: Duration = Duration::from_secs(60);
-/// Total attempts (1 initial + 2 retries) for a transient failure.
-const MAX_ATTEMPTS: u32 = 3;
-/// Base backoff; attempt N waits `BASE * 2^(N-1)` (1s, 2s, …).
-const RETRY_BASE_BACKOFF: Duration = Duration::from_secs(1);
 
 /// Global minimum spacing between outbound JRA requests, shared across every
 /// concurrent fetch task (a single [`JraFetcher`] is shared via `Arc`). A `None`
@@ -67,21 +63,6 @@ impl RateGate {
             }
         }
         *last = Some(Instant::now());
-    }
-}
-
-/// Whether an error is worth retrying: transport-level hiccups and 5xx are
-/// transient; 4xx (including the 403/404 "absent" answers) and malformed
-/// requests are not.
-fn is_transient(err: &ureq::Error) -> bool {
-    match err {
-        ureq::Error::Timeout(_)
-        | ureq::Error::Io(_)
-        | ureq::Error::ConnectionFailed
-        | ureq::Error::HostNotFound
-        | ureq::Error::Protocol(_) => true,
-        ureq::Error::StatusCode(code) => *code >= 500,
-        _ => false,
     }
 }
 
@@ -131,6 +112,10 @@ impl JraFetcher {
     /// backoff. The rate gate is honored before every attempt (each retry is a
     /// fresh network request and must stay within the JRA pacing cap).
     ///
+    /// The retry count, backoff, transient classification, and warn log are the
+    /// shared `scraper_util::call_with_retry` policy (consolidated in #460); this
+    /// wrapper injects the rate gate and body extraction per attempt.
+    ///
     /// Only the response head is retried here; the body is read by the caller
     /// (`read_body`), so a stall mid-download is still bounded by the agent's
     /// `timeout_global` but surfaces as a one-shot error (mapped to
@@ -138,30 +123,10 @@ impl JraFetcher {
     /// as-is: `fetch_if_exists` maps 403/404 to "absent", while `fetch` surfaces
     /// them as errors.
     fn get_with_retry(&self, url: &str) -> std::result::Result<ureq::Body, ureq::Error> {
-        let mut attempt = 0;
-        loop {
-            attempt += 1;
+        scraper_util::call_with_retry(url, || {
             self.gate.wait();
-            match self.agent.get(url).call() {
-                Ok(resp) => return Ok(resp.into_body()),
-                Err(err) if attempt < MAX_ATTEMPTS && is_transient(&err) => {
-                    // Saturating so bumping MAX_ATTEMPTS can never overflow the
-                    // shift or the Duration multiply into a panic.
-                    let backoff =
-                        RETRY_BASE_BACKOFF.saturating_mul(2u32.saturating_pow(attempt - 1));
-                    tracing::warn!(
-                        url,
-                        attempt,
-                        max_attempts = MAX_ATTEMPTS,
-                        backoff_ms = backoff.as_millis() as u64,
-                        error = %err,
-                        "transient fetch error; retrying after backoff"
-                    );
-                    std::thread::sleep(backoff);
-                }
-                Err(err) => return Err(err),
-            }
-        }
+            self.agent.get(url).call().map(|resp| resp.into_body())
+        })
     }
 }
 
@@ -236,24 +201,6 @@ mod tests {
             "an unlimited gate must not sleep, took {:?}",
             start.elapsed()
         );
-    }
-
-    #[test]
-    fn is_transient_classifies_retryable_errors() {
-        // 5xx and transport hiccups are retried.
-        assert!(is_transient(&ureq::Error::StatusCode(500)));
-        assert!(is_transient(&ureq::Error::StatusCode(503)));
-        assert!(is_transient(&ureq::Error::ConnectionFailed));
-        assert!(is_transient(&ureq::Error::HostNotFound));
-        assert!(is_transient(&ureq::Error::Io(std::io::Error::new(
-            std::io::ErrorKind::ConnectionReset,
-            "reset"
-        ))));
-        // 4xx (including the "absent" 403/404) and client mistakes are not.
-        assert!(!is_transient(&ureq::Error::StatusCode(404)));
-        assert!(!is_transient(&ureq::Error::StatusCode(403)));
-        assert!(!is_transient(&ureq::Error::StatusCode(400)));
-        assert!(!is_transient(&ureq::Error::BadUri("nope".into())));
     }
 
     #[test]
@@ -355,8 +302,10 @@ mod tests {
     #[test]
     fn gives_up_after_max_attempts_on_persistent_5xx() {
         // 503 on every attempt → retries are exhausted and fetch returns an
-        // error after exactly MAX_ATTEMPTS tries (no infinite loop).
-        let (url, count, handle) = serve(vec![R_503; MAX_ATTEMPTS as usize]);
+        // error after exactly the shared MAX_ATTEMPTS (3) tries (no infinite
+        // loop). The count is the scraper_util policy consolidated in #460.
+        const MAX_ATTEMPTS: usize = 3;
+        let (url, count, handle) = serve(vec![R_503; MAX_ATTEMPTS]);
         let fetcher = JraFetcher::default();
         assert!(
             fetcher.fetch(&url).is_err(),
@@ -364,7 +313,7 @@ mod tests {
         );
         assert_eq!(
             count.load(Ordering::SeqCst),
-            MAX_ATTEMPTS as usize,
+            MAX_ATTEMPTS,
             "should attempt exactly MAX_ATTEMPTS times then give up"
         );
         handle.join().unwrap();
