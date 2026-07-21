@@ -915,6 +915,42 @@ async fn purge_is_strict_before_cutoff(pool: sqlx::PgPool) {
     assert_eq!(snapshots_count(&repo).await, 0, "翌日 cutoff で削除される");
 }
 
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn purge_keeps_midnight_boundary_of_cutoff_day(pool: sqlx::PgPool) {
+    // #473: substr 述語→直接比較 `fetched_at < $1` の同値性を、境界日の真夜中
+    // `2026-06-01T00:00:00+00:00`（cutoff の日付部と先頭 10 文字が一致する最小時刻）で担保する。
+    // 直接比較では `'2026-06-01T00:00:00+00:00'`（25 文字）と cutoff `'2026-06-01'`（10 文字）を比べ、
+    // 共通接頭辞 `'2026-06-01'` の後に `'T…'` が続く分だけ fetched_at が「後」に並ぶ（長い方が後）ため
+    // `fetched_at < '2026-06-01'` は false → 残る。旧 `substr(...,1,10)='2026-06-01' < '2026-06-01'`（=false）
+    // と同一集合を削除することを実 Postgres で検証する。
+    let repo = PostgresRepository::new(pool);
+    save_win_at(
+        &repo,
+        Utc.with_ymd_and_hms(2026, 6, 1, 0, 0, 0).unwrap(),
+        3.5,
+    )
+    .await;
+
+    let cutoff = NaiveDate::from_ymd_opt(2026, 6, 1).unwrap();
+    // dry-run(count) も 0（真夜中でも cutoff 当日は削除対象に入らない）。
+    assert_eq!(
+        repo.count_race_odds_snapshots_before(cutoff).await.unwrap(),
+        0,
+        "cutoff 当日の真夜中 T00:00:00+00:00 は削除対象外"
+    );
+    assert_eq!(repo.purge_race_odds_snapshots(cutoff).await.unwrap(), 0);
+    assert_eq!(
+        snapshots_count(&repo).await,
+        1,
+        "cutoff 当日 00:00:00+00:00 は残る（直接比較でも旧 substr と同値）"
+    );
+
+    // 翌日 cutoff にすると真夜中の行も対象になり削除される。
+    let next_day = NaiveDate::from_ymd_opt(2026, 6, 2).unwrap();
+    assert_eq!(repo.purge_race_odds_snapshots(next_day).await.unwrap(), 1);
+    assert_eq!(snapshots_count(&repo).await, 0, "翌日 cutoff で削除される");
+}
+
 /// #468: DB の値域 CHECK 制約が、アプリ層（save_race_odds）を経由しない生 INSERT の
 /// 値域違反を弾くことを担保する回帰テスト。save_race_odds は無効行を skip するため、
 /// ここでは生 SQL で DB の最終防衛線（ck_race_odds_*）そのものを検証する。
