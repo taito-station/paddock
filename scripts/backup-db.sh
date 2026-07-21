@@ -25,6 +25,26 @@
 #   PADDOCK_BACKUP_MIRROR_DIR="" scripts/backup-db.sh   # ミラー無効（ローカルのみ）
 set -euo pipefail
 
+log() { echo "[$(date '+%Y-%m-%dT%H:%M:%S%z')] $*"; }
+
+notify() {
+    # メッセージは argv 経由で AppleScript に渡す（文字列補間だと、パスやファイル名に含まれる
+    # " / \ で AppleScript 文字列が壊れて通知が化けるため）。表示不可環境でも本処理は止めない。
+    osascript -e 'on run {msg}' -e 'display notification msg with title "paddock backup"' -e 'end run' -- "$1" >/dev/null 2>&1 || true
+}
+
+# 一時ファイルパス（未確定の段階は空文字。EXIT ハンドラで rm -f しても無害）。
+_tmp=""
+# 終了コード（shellcheck SC2154 対策でスクリプト冒頭で初期化。実値は EXIT ハンドラ内で $? から取る）。
+_rc=0
+# 入力検証（引数・KEEP 値）を通過したら 1 にする。使い方/入力エラーの exit 2 は必ず検証完了前
+# に起きる（_validated=0）ので、それだけを FAIL 通知から除外する。検証通過後（_validated=1）に
+# 何らかの理由で rc=2 が出た場合は実失敗として通知する（偶発 rc=2 の握りつぶし防止）。
+_validated=0
+# rc=1（docker/pg_dump/空 dump 等の実失敗）は常に通知。rc=2 は _validated=0 のとき（使い方
+# エラー）のみ通知対象外。
+trap '_rc=$?; [ -n "$_tmp" ] && rm -f "$_tmp"; if [ "$_rc" -ne 0 ] && { [ "$_rc" -ne 2 ] || [ "$_validated" -eq 1 ]; }; then log "FAIL: backup-db exited rc=$_rc"; notify "backup FAILED (rc=$_rc)"; fi' EXIT
+
 usage() {
     cat <<'EOF'
 backup-db.sh - paddock DB を durable な場所へ退避する（#265）
@@ -69,6 +89,9 @@ if ! [[ "$KEEP" =~ ^[1-9][0-9]*$ ]]; then
     exit 2
 fi
 
+# ここまでで入力検証は完了。以降の非ゼロ終了は実失敗として FAIL 通知の対象にする。
+_validated=1
+
 command -v docker >/dev/null || { echo "docker が見つからない（PATH を確認）" >&2; exit 1; }
 # 起動確認。パイプ+grep -q は pipefail 下で SIGPIPE により誤判定しうるため、一旦変数へ受けてから
 # 固定文字列(-F)・完全一致(-x)で照合する。
@@ -82,30 +105,30 @@ mkdir -p "$BACKUP_DIR"
 ts="$(date +%Y%m%d-%H%M%S)"
 base="paddock-$ts.dump"
 final="$BACKUP_DIR/$base"
-tmp="$final.part"
-trap 'rm -f "$tmp"' EXIT
+_tmp="$final.part"
 
 # container 内 pg_dump（バージョン一致）で full DB を custom-format 退避。stdout をホストファイルへ。
 # 一時ファイル(.part)に書き、成功＋非空を確認してから最終名へ mv（中断で壊れた dump を残さない）。
-if ! docker exec "$CONTAINER" pg_dump -U "$PG_USER" -d "$PG_DB" -Fc --no-owner --no-privileges > "$tmp"; then
+if ! docker exec "$CONTAINER" pg_dump -U "$PG_USER" -d "$PG_DB" -Fc --no-owner --no-privileges > "$_tmp"; then
     echo "pg_dump に失敗（container=$CONTAINER）" >&2
     exit 1
 fi
-if [[ ! -s "$tmp" ]]; then
+if [[ ! -s "$_tmp" ]]; then
     echo "dump が空（pg_dump は成功したが 0 バイト）" >&2
     exit 1
 fi
-mv "$tmp" "$final"
-trap - EXIT
+mv "$_tmp" "$final"
+# mv 成功後は一時ファイルが存在しないので _tmp をリセット（EXIT ハンドラで rm しない）。
+_tmp=""
 
 size="$(du -h "$final" | cut -f1)"
-echo "退避完了: $final ($size)"
+log "退避完了: $final ($size)"
 
 # off-machine ミラー（best-effort）。cp はパス指定の書き込みなので launchd 下でも効く。失敗しても
 # ローカル退避は成功しているので警告に留める（ログで検知する）。
 if [[ -n "$MIRROR_DIR" ]]; then
     if mkdir -p "$MIRROR_DIR" && cp -f "$final" "$MIRROR_DIR/$base"; then
-        echo "ミラー完了: $MIRROR_DIR/$base"
+        log "ミラー完了: $MIRROR_DIR/$base"
     else
         echo "警告: ミラーに失敗（ローカル退避は成功。$MIRROR_DIR を確認）" >&2
     fi
@@ -135,13 +158,13 @@ prune_dir() {
         for f in "${files[@]}"; do
             if (( i >= KEEP )); then
                 rm -f "$f"
-                echo "古い世代を削除($label): $(basename "$f")"
+                log "古い世代を削除($label): $(basename "$f")"
             fi
             i=$((i + 1))
         done
     fi
     local kept=$(( ${#files[@]} > KEEP ? KEEP : ${#files[@]} ))
-    echo "保持世代数($label): $kept / KEEP=$KEEP  $dir"
+    log "保持世代数($label): $kept / KEEP=$KEEP  $dir"
 }
 
 prune_dir "$BACKUP_DIR" "権威"

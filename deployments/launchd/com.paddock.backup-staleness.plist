@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  paddock バックアップ鮮度監視 LaunchAgent（#490）。
+  scripts/backup-staleness-check.sh を毎時 1 回（StartInterval=3600）＋ロード時（RunAtLoad=true）に
+  実行し、最新 dump が 36h を超えて古ければ osascript 通知とログ出力（STALE マーカー）で警告する。
+
+  backup-db.sh の失敗通知（FAIL マーカー）では「そもそも実行されなかった」欠落を拾えないため、
+  独立した鮮度監視として新設した（Mac スリープ/colima 停止で無言欠落する問題を検知）。
+
+  スリープ復帰時の catch-up は StartInterval タイマの coalescing が担う（launchd はスリープ中に
+  逃した毎時発火を復帰時に 1 回まとめて実行する）。RunAtLoad=true は install/login/再起動直後の
+  初回発火用（StartInterval だけだと次の 1 時間後まで待つため）。なお launchd はスリープ中の Mac を
+  起こさない（#264）ので、検知は「Mac が次に起きたとき」になる。
+
+  osascript 通知は表示セッション依存でベストエフォート（launchd 配下では表示されないことがある）。
+  ログ（StandardOutPath）の STALE/FAIL マーカーが一次情報。
+
+  インストール: deployments/launchd/install.sh がまとめて配置・load する（プレースホルダ
+  __REPO_ROOT__=リポの絶対パス / __HOME__=$HOME を実値へ置換）。
+  __HOME__ はログ出力先用（backup-db と同じログファイルに集約）。
+  PATH は launchd の最小環境で bash を解決するため明示する（Intel の /usr/local/bin と
+  Apple Silicon の /opt/homebrew/bin の両方を含める）。
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.paddock.backup-staleness</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>__REPO_ROOT__/scripts/backup-staleness-check.sh</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
+
+    <key>StartInterval</key>
+    <integer>3600</integer>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>__HOME__/Library/Logs/paddock-backup.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/Library/Logs/paddock-backup.log</string>
+</dict>
+</plist>

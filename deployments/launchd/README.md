@@ -1,6 +1,6 @@
-# 締切前 live オッズ自動 prefetch（#237）＋ keep-awake（#264）＋ 日次 DB バックアップ（#265）
+# 締切前 live オッズ自動 prefetch（#237）＋ keep-awake（#264）＋ 日次 DB バックアップ（#265）＋ バックアップ鮮度監視（#490）
 
-3 つの launchd エージェントを `install.sh` でまとめて配置する:
+4 つの launchd エージェントを `install.sh` でまとめて配置する:
 
 - **prefetch（#237）**: 発走 N 分前のレースの最新オッズを定期取得し、`race_odds_snapshots`（#232）に
   締切前 live スナップショットを蓄積する。これが回ると #218（live オッズで α 再校正）や #248
@@ -16,6 +16,17 @@
   では**外れない**（開催日夜に uninstall しても当夜のバックアップを守るため。詳細は下記と
   [`deployments/db/BACKUP.md`](../db/BACKUP.md)）。
   - 本体: [`scripts/backup-db.sh`](../../scripts/backup-db.sh)
+- **backup-staleness（#490）**: バックアップの欠落日（「実行されなかった」日）を検知する鮮度監視。
+  毎時 1 回（StartInterval=3600）＋ロード時（RunAtLoad=true）に発火し、最新 dump が
+  36h を超えて古ければ osascript 通知とログ（STALE マーカー）で警告する。スリープ復帰時は
+  StartInterval が coalesce して発火し catch-up 検知する（launchd はスリープ中の Mac を起こさないため
+  検知は次に Mac が起きたとき）。backup-db の失敗通知（FAIL
+  マーカー）は「実行されたが失敗した」場合にしか発報しないため、Mac スリープ/colima 停止による
+  無言欠落は本 agent が補完する。backup-db と対になって常駐し、`uninstall.sh` では外れない。
+  - 本体: [`scripts/backup-staleness-check.sh`](../../scripts/backup-staleness-check.sh)
+  - ログ先: `~/Library/Logs/paddock-backup.log`（backup-db と同じファイルに集約）
+  - 注意: osascript 通知は表示セッション依存でベストエフォート（launchd 配下では表示されないことがある）。
+    ログの STALE/FAIL マーカーが一次情報。
 
 ## ⚠ スリープ取りこぼしと keep-awake の限界（#264）
 
@@ -45,24 +56,27 @@
 ## macOS（launchd, 推奨）
 
 ```sh
-# 有効化（prefetch / keep-awake / backup-db の 3 エージェントを配置して load。
-# __REPO_ROOT__ は実パスに、backup-db の __HOME__ はログ出力先へ置換される）
+# 有効化（prefetch / keep-awake / backup-db / backup-staleness の 4 エージェントを配置して load。
+# __REPO_ROOT__ は実パスに、backup-db / backup-staleness の __HOME__ はログ出力先へ置換される）
 deployments/launchd/install.sh
 
 # 状態確認 / ログ（launchd 経由は WORKDIR 固定）
 launchctl list | grep com.paddock
 tail -f /tmp/paddock-prefetch/logs/prefetch.log
 tail -f /tmp/paddock-keep-awake/logs/keep-awake.log
+# backup-db（毎日 23:30）と backup-staleness（毎時 + 起動時）のログは同じファイルに集約
 tail -f "$HOME/Library/Logs/paddock-backup.log"
 
-# 無効化（prefetch / keep-awake のみ。backup-db は常駐で外れない）
+# 無効化（prefetch / keep-awake のみ。backup-db / backup-staleness は常駐で外れない）
 deployments/launchd/uninstall.sh
 ```
 
 `StartInterval=300`（5 分間隔）。prefetch/keep-awake は開催日だけ走らせたい場合、開催日朝に install、
-夜に uninstall する運用でよい（常時 load でも対象 0 件なら no-op）。**backup-db は常駐**（毎日 23:30）で、
-`uninstall.sh` では外れない。止めるときは手動で
-`launchctl bootout gui/$UID/com.paddock.backup-db && rm ~/Library/LaunchAgents/com.paddock.backup-db.plist`
+夜に uninstall する運用でよい（常時 load でも対象 0 件なら no-op）。**backup-db と backup-staleness は
+常駐**で、`uninstall.sh` では外れない。backup-db を止めるときは手動で
+`launchctl bootout gui/$UID/com.paddock.backup-db && rm ~/Library/LaunchAgents/com.paddock.backup-db.plist`、
+backup-staleness を止めるときは同様に
+`launchctl bootout gui/$UID/com.paddock.backup-staleness && rm ~/Library/LaunchAgents/com.paddock.backup-staleness.plist`
 （BACKUP.md のアンインストール手順と同一）。
 
 ## 手動・検証
