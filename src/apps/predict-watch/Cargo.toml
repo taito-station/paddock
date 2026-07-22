@@ -15,6 +15,7 @@ paddock-config     = { workspace = true }
 paddock-domain     = { workspace = true }
 paddock-use-case   = { workspace = true }
 netkeiba-scraper   = { workspace = true }
+monitor-loop       = { workspace = true }
 predict-format     = { workspace = true }
 rdb-gateway        = { workspace = true }
 tokio              = { workspace = true }

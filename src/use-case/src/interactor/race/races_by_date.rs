@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use chrono::{NaiveDate, NaiveTime};
-use paddock_domain::{Race, RaceId};
+use paddock_domain::{Race, RaceClass, RaceId};
 
 use crate::error::Result;
 use crate::interactor::Interactor;
@@ -27,6 +27,16 @@ impl<R: RaceCardRepository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
     /// レース一覧 API が重賞・特別戦名をヘッダに出すために使う。
     pub async fn race_names_by_date(&self, date: NaiveDate) -> Result<HashMap<RaceId, String>> {
         self.repository.find_race_names_by_date(date).await
+    }
+
+    /// 指定日の全レースのレースクラス（`race_id → race_class`、race_cards 由来）を返す（#459）。
+    /// 監視ループ（predict-watch）の G1 裏レース検出のため、per-race `race_card`（N+1）を
+    /// 日付一括に置き換えて使う。
+    pub async fn race_classes_by_date(
+        &self,
+        date: NaiveDate,
+    ) -> Result<HashMap<RaceId, RaceClass>> {
+        self.repository.find_race_classes_by_date(date).await
     }
 }
 

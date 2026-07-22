@@ -4,8 +4,8 @@ use std::collections::HashMap;
 use chrono::{DateTime, NaiveDate, NaiveTime, Utc};
 use paddock_domain::{
     BetType, HorseId, HorseName, JockeyFormRun, JockeyName, Mark, OrderedPair, OrderedTriple,
-    PadPrediction, Pair, Race, RaceCard, RaceId, RaceOdds, RecentRun, StandardTimes, Surface,
-    TrackCondition, TrainerName, Triple, Venue,
+    PadPrediction, Pair, Race, RaceCard, RaceClass, RaceId, RaceOdds, RecentRun, StandardTimes,
+    Surface, TrackCondition, TrainerName, Triple, Venue,
 };
 
 use crate::error::Result;
@@ -785,6 +785,13 @@ pub trait RaceCardRepository: Send + Sync {
         &self,
         date: NaiveDate,
     ) -> impl Future<Output = Result<HashMap<RaceId, String>>> + Send;
+
+    /// 指定日の全レースのレースクラスを `race_id → race_class` で返す（`race_cards` 由来）。
+    /// race_class 未保存のレースはマップに含まれない（#459・監視ループの G1 裏検出用一括取得）。
+    fn find_race_classes_by_date(
+        &self,
+        date: NaiveDate,
+    ) -> impl Future<Output = Result<HashMap<RaceId, RaceClass>>> + Send;
 }
 
 /// 朝時点オッズと、その取得時刻・最新取得時刻（#448 朝↔現比較）。

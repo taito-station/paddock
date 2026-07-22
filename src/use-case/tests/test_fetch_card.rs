@@ -244,6 +244,12 @@ impl RaceCardRepository for RecordingRepo {
     ) -> Result<std::collections::HashMap<RaceId, String>> {
         unimplemented!()
     }
+    async fn find_race_classes_by_date(
+        &self,
+        _date: chrono::NaiveDate,
+    ) -> Result<std::collections::HashMap<RaceId, paddock_domain::RaceClass>> {
+        unimplemented!()
+    }
 }
 
 impl OddsRepository for RecordingRepo {
