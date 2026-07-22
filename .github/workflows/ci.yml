@@ -57,7 +57,7 @@ jobs:
 
     steps:
       # third-party / 外部 action はサプライチェーン対策で commit SHA にピンする（コメントは対応タグ）。
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
 
       # rust-toolchain.toml の channel と env.RUST_TOOLCHAIN の一致を確認する（#466）。
       # 不一致ならここで即 fail し、サイレントなバージョン乖離を防ぐ。
@@ -120,7 +120,7 @@ jobs:
       run:
         working-directory: web
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
 
       - name: Install Node.js
         # 外部 action はサプライチェーン対策で commit SHA にピン（コメントは対応タグ）。
@@ -162,7 +162,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
       - name: Check ADR number duplicates (#254)
         run: bash scripts/check-adr-numbers.sh
 
@@ -174,7 +174,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
       - name: Run predict-check python tests (stdlib のみ・自走式)
         # 各テストは自走式（__main__ で全 test_* を実行し assert 失敗で非 0 終了）なので、
         # unittest discover は 0 件になる。ファイルごとに python3 で実行し 1 本でも落ちたら fail。
@@ -193,7 +193,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
       - name: Run shellcheck (--severity=warning)
         # 拡張子で拾えない shebang スクリプトは明示追加。git ls-files で追跡対象のみに絞り、
         # xargs で渡す（$(...) 展開は SC2046 の word-splitting 警告になるため避ける）。
@@ -212,7 +212,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
       - name: Install psql client (golden ガード手前の command -v psql を満たす)
         run: |
           sudo apt-get update
@@ -260,7 +260,7 @@ jobs:
             exit 1
           fi
 
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
 
       - name: Install Rust toolchain
         # 本体 ci ジョブと同じ SHA ピン（dtolnay/rust-toolchain は version タグを切らないため
