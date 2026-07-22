@@ -27,6 +27,7 @@ on:
 
 permissions:
   contents: read
+  checks: write # rustsec/audit-check が Check Runs API で結果を投稿するのに必須
 
 jobs:
   # ──────────────────────────────────────────────
@@ -42,7 +43,7 @@ jobs:
       # rustsec/audit-check は Cargo.lock を読み RustSec Advisory DB を照合する。
       # Rust toolchain のインストールは不要（audit-check が内部で処理）。
       - name: cargo audit
-        uses: rustsec/audit-check@f38e2b15a7e4dda68de7b53c61e5c9d6bbc6a0e3 # v2.0.0
+        uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2.0.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           # 恒常 red になる advisory を除外する場合はここに追記（理由と RUSTSEC ID を必ず明記）:
@@ -73,6 +74,7 @@ jobs:
 
       # --audit-level=moderate: critical/high/moderate を fail にし、low は許容する。
       # devDependencies の低危険度 advisory による恒常 red を避けるバランス設定。
-      # 恒常 red になる advisory は npm audit --ignore（npm >= 10）で個別除外し、理由を明記する。
+      # npm には advisory 単位の無視フラグが無いため、恒常 red になる特定 advisory は
+      # package.json の overrides でパッチ版に固定するか、閾値（--audit-level）で調整する（理由を明記）。
       - name: npm audit
         run: npm audit --audit-level=moderate
