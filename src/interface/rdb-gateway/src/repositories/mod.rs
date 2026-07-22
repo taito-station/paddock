@@ -7,6 +7,7 @@ mod find_live_ev_by_date;
 mod find_matching_names;
 mod find_post_times_by_date;
 mod find_race_card;
+mod find_race_classes_by_date;
 mod find_race_names_by_date;
 mod find_race_odds;
 mod find_races_by_date;
@@ -32,8 +33,8 @@ use std::collections::HashMap;
 
 use chrono::{DateTime, NaiveDate, NaiveTime, Utc};
 use paddock_domain::{
-    HorseId, HorseName, JockeyFormRun, JockeyName, PadPrediction, Race, RaceCard, RaceId, RaceOdds,
-    RecentRun, StandardTimes, Surface, TrainerName, Venue,
+    HorseId, HorseName, JockeyFormRun, JockeyName, PadPrediction, Race, RaceCard, RaceClass,
+    RaceId, RaceOdds, RecentRun, StandardTimes, Surface, TrainerName, Venue,
 };
 use paddock_use_case::FinishEntry;
 use paddock_use_case::Result as UcResult;
@@ -348,6 +349,15 @@ impl RaceCardRepository for PostgresRepository {
 
     async fn find_race_names_by_date(&self, date: NaiveDate) -> UcResult<HashMap<RaceId, String>> {
         find_race_names_by_date::find_race_names_by_date(&self.pool, date)
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn find_race_classes_by_date(
+        &self,
+        date: NaiveDate,
+    ) -> UcResult<HashMap<RaceId, RaceClass>> {
+        find_race_classes_by_date::find_race_classes_by_date(&self.pool, date)
             .await
             .map_err(Into::into)
     }

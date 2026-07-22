@@ -1616,6 +1616,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "monitor-loop"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "paddock-domain",
+ "tokio",
+]
+
+[[package]]
 name = "native-tls"
 version = "0.2.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1686,6 +1696,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "clap",
+ "monitor-loop",
  "netkeiba-scraper",
  "paddock-config",
  "paddock-domain",
@@ -2005,6 +2016,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "clap",
+ "monitor-loop",
  "netkeiba-scraper",
  "paddock-config",
  "paddock-domain",

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
-use std::time::Duration as StdDuration;
 
-use chrono::{Duration, Local, NaiveTime, Offset, Utc};
+use chrono::{Duration, NaiveTime, Utc};
+use monitor_loop::{RaceStatus, Sweeper, has_result, run_monitor_loop, warn_if_not_today_jst_now};
 use paddock_domain::{
     BetMethod, Portfolio, PortfolioConfig, RECOMMENDED_MARKET_BLEND_ALPHA, Race, RaceClass, RaceId,
     Venue, build_portfolio, race_roughness,
@@ -12,44 +12,6 @@ use predict_format::{format_explanations, format_probs, format_probs_with_market
 use crate::cli::Cli;
 use crate::setup::App;
 use crate::snapshot::{SnapshotContext, build_snapshot_record};
-
-/// `now` 時点でのレースの発走状態。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RaceStatus {
-    /// 発走前で先読み窓内 → オッズ再取得＆EV 再計算の対象。
-    Due,
-    /// 発走前だが窓より先 → まだ対象外（次スイープ以降に Due 化）。
-    NotYet,
-    /// 発走済み（結果取込済み or 発走時刻超過）→ 対象外。
-    Started,
-    /// 発走時刻不明（post_time 無し）→ 判定不能、対象外。
-    Unknown,
-}
-
-/// `now` 時点でのレース発走状態を判定する純関数（単体テスト対象）。
-///
-/// - post_time 無し → `Unknown`
-/// - 結果取込済み（`has_result`）または発走時刻超過（`now > post`）→ `Started`
-/// - 発走前で残り時間が `window` 以内 → `Due`、それより先 → `NotYet`
-pub fn classify(
-    now: NaiveTime,
-    post_time: Option<NaiveTime>,
-    has_result: bool,
-    window: Duration,
-) -> RaceStatus {
-    let Some(post) = post_time else {
-        return RaceStatus::Unknown;
-    };
-    if has_result || now > post {
-        return RaceStatus::Started;
-    }
-    // ここで now <= post。発走まで (post - now)。窓内なら Due。
-    if post - now <= window {
-        RaceStatus::Due
-    } else {
-        RaceStatus::NotYet
-    }
-}
 
 /// 通知（検証候補）閾値の既定値。買う閾値を下回る帯を 🔍 として残す（#345）。
 const DEFAULT_NOTIFY_GATE: f64 = 0.7;
@@ -136,22 +98,6 @@ pub fn is_g1_ura(
     !g1_at_this_venue
 }
 
-/// 監視を継続すべきか（発走前のレースが残っているか）を判定する純関数（単体テスト対象）。
-/// Due か NotYet が 1 つでもあれば継続、無ければ終了。
-pub fn should_continue(statuses: &[RaceStatus]) -> bool {
-    statuses
-        .iter()
-        .any(|s| matches!(s, RaceStatus::Due | RaceStatus::NotYet))
-}
-
-/// 結果取込済み（＝確実に発走済み）か。`races_by_date` は発走前レースを race_cards 由来で
-/// track_condition=NULL・results 空として返す（fact-check 済みの不変条件）ため、この経路では
-/// track_condition/results は「成績取込が済んだ＝確実に過去のレース」を指す早期シグナル。
-/// 成績取込前でも発走済みになる通常遷移（発走直後）は classify の `now > post` 側が捕捉する。
-fn has_result(race: &Race) -> bool {
-    race.track_condition.is_some() || !race.results.is_empty()
-}
-
 /// `--race-budget-override <race_id>=<円>` の並びを `race_id → 予算(円)` マップにパースする（#342）。
 /// 各要素は 1 個の `=` で分割し、左辺は `RaceId` として**不正文字を早期に弾く**（`_` 等。ただし
 /// valid-format な pid 取り違えは形式検証を通るため runtime の unmatched 警告で検出する二段構え）、
@@ -221,14 +167,18 @@ struct Slot {
 }
 
 /// 指定日の全レースを取得し、各レースの post_time / race_class（race_card 由来）を引き当てる。
+///
+/// #459 で per-race `race_card`（N+1）を日付一括クエリ 2 本（post_time / race_class）に置き換えた。
+/// races_by_date の各レースに対し、一括マップから引く（マップに無い＝未保存 NULL は None＝旧 per-card
+/// 経路で `card.post_time`/`card.race_class` が None だったのと同一集合になる）。
 async fn load_slots(app: &App, date: chrono::NaiveDate) -> anyhow::Result<Vec<Slot>> {
     let races = app.interactor.races_by_date(date).await?;
+    let post_times = app.interactor.post_times_by_date(date).await?;
+    let race_classes = app.interactor.race_classes_by_date(date).await?;
     let mut slots = Vec::with_capacity(races.len());
     for race in races {
-        // race_card は 1 回だけ引き、post_time と race_class の両方を取り出す。
-        let card = app.interactor.race_card(&race.race_id).await?;
-        let post_time = card.as_ref().and_then(|c| c.post_time);
-        let race_class = card.and_then(|c| c.race_class);
+        let post_time = post_times.get(&race.race_id).copied();
+        let race_class = race_classes.get(&race.race_id).copied();
         slots.push(Slot {
             race,
             post_time,
@@ -502,6 +452,94 @@ fn print_buy_targets(p: &Portfolio) {
     println!("     賭け計 ¥{}", p.total_stake);
 }
 
+/// 監視ループを駆動する [`Sweeper`]（#459）。共通の骨格（[`run_monitor_loop`]）へ predict-watch 固有の
+/// slots ロード（post_time / race_class）・EV スイープ・windowed 設定・per-race override の初回チェックを注入する。
+struct WatchSweeper<'a> {
+    app: &'a App,
+    cli: &'a Cli,
+    window: Duration,
+    notify_gate: f64,
+    blend_alpha: Option<f64>,
+    race_budget_overrides: HashMap<String, u64>,
+    /// per-race override の pid が当日レースに 1 件も一致しないケースを 1 度だけ警告するためのフラグ。
+    overrides_checked: bool,
+}
+
+impl Sweeper for WatchSweeper<'_> {
+    type Slot = Slot;
+
+    async fn load_slots(&self) -> anyhow::Result<Vec<Slot>> {
+        load_slots(self.app, self.cli.date).await
+    }
+
+    fn post_time(slot: &Slot) -> Option<NaiveTime> {
+        slot.post_time
+    }
+
+    fn has_result(slot: &Slot) -> bool {
+        has_result(&slot.race)
+    }
+
+    fn window(&self) -> Option<Duration> {
+        Some(self.window)
+    }
+
+    fn date(&self) -> chrono::NaiveDate {
+        self.cli.date
+    }
+
+    fn once(&self) -> bool {
+        self.cli.once
+    }
+
+    fn interval_minutes(&self) -> u64 {
+        self.cli.interval
+    }
+
+    fn finish_noun(&self) -> &str {
+        "監視"
+    }
+
+    async fn sweep(&mut self, slots: &[Slot], statuses: &[RaceStatus], now: NaiveTime) {
+        // per-race override の pid が当日レースに 1 件も一致しなければ、タイプミス等の可能性を 1 度だけ
+        // 警告する（黙って未適用のまま監視が進むのを防ぐ。#342）。slots が空の巡はまだ判定材料が無いので
+        // 次巡に持ち越す（overrides_checked を立てない）。
+        if !self.overrides_checked && !self.race_budget_overrides.is_empty() && !slots.is_empty() {
+            let present: std::collections::HashSet<&str> =
+                slots.iter().map(|s| s.race.race_id.value()).collect();
+            let unmatched: Vec<&String> = self
+                .race_budget_overrides
+                .keys()
+                .filter(|pid| !present.contains(pid.as_str()))
+                .collect();
+            if !unmatched.is_empty() {
+                let list = unmatched
+                    .iter()
+                    .map(|s| s.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                println!(
+                    "⚠ per-race 予算 override の race_id が当日（{}）のレースに一致しません（初回スイープの出馬表基準・未適用）: {list}。pid を確認してください（card 未取得なら fetch-card 後に再実行）。",
+                    self.cli.date
+                );
+            }
+            self.overrides_checked = true;
+        }
+
+        // 監視サイクル境界時刻（1 スイープ 1 値・UTC rfc3339 秒精度 Z 終端）。同一サイクルの全レースが
+        // 同一 captured_at を共有し、live_ev_snapshots の「辞書順＝時刻順」「(race_id, captured_at) 冪等」
+        // 契約を満たす（旧 refresh_ev.sh の `date -u +%Y-%m-%dT%H:%M:%SZ` と同表記）。
+        let captured_at = Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
+        let ctx = SweepCtx {
+            cli: self.cli,
+            notify_gate: self.notify_gate,
+            blend_alpha: self.blend_alpha,
+            race_budget_overrides: &self.race_budget_overrides,
+        };
+        sweep(self.app, slots, statuses, now, &captured_at, ctx).await;
+    }
+}
+
 /// 監視ループ。発走前のレースが残っている間スキャンを繰り返し、全レース発走で自動終了する。
 pub async fn run(app: &App, cli: &Cli) -> anyhow::Result<()> {
     // 連続再取得（busy loop）で JRA を叩き続けないよう、間隔・窓は 1 分以上を要求する。
@@ -544,129 +582,26 @@ pub async fn run(app: &App, cli: &Cli) -> anyhow::Result<()> {
             race_budget_overrides.len()
         );
     }
-    let mut overrides_checked = false;
 
-    // 発走状態は実行マシンの現在時刻と post_time の「時刻」だけで判定するため、(1) 当日以外の date、
-    // (2) JST 以外の TZ では判定が無意味になる。誤用に早期に気づけるよう起動時に警告する。
-    const JST_OFFSET_SECS: i32 = 9 * 3600;
-    let now_local = Local::now();
-    let today = now_local.date_naive();
-    if cli.date != today {
-        println!(
-            "⚠ --date {} は本日（{today}）と異なります。発走状態は現在時刻と post_time の時刻のみで \
-             判定するため、当日以外の指定では Due/Started 判定が正しく機能しません。",
-            cli.date,
-        );
-    }
-    let tz_offset = now_local.offset().fix().local_minus_utc();
-    if tz_offset != JST_OFFSET_SECS {
-        // 半端な TZ（例 +05:30）も正しく出せるよう ±HH:MM 表記にする。
-        let sign = if tz_offset < 0 { '-' } else { '+' };
-        let abs = tz_offset.abs();
-        println!(
-            "⚠ 実行マシンのタイムゾーンが JST(+09:00) ではありません（現在 UTC{sign}{:02}:{:02}）。\
-             post_time は JST 起算のため、発走状態判定がオフセットぶんずれます。JST マシンで実行してください。",
-            abs / 3600,
-            (abs % 3600) / 60,
-        );
-    }
+    // 発走状態は実行マシンの現在時刻と post_time の「時刻」だけで判定するため、当日以外の date や
+    // JST 以外の TZ では判定が無意味になる。誤用に早期に気づけるよう起動時に警告する（#459 で共通化）。
+    warn_if_not_today_jst_now(cli.date, "発走状態");
 
-    loop {
-        // 継続監視中の一時的 DB エラーでプロセスを落とすと「唯一エッジのある局面」を取りこぼす。
-        // evaluate_race と同じく握って次スイープへ続行する（--once 時のみ伝播して非ゼロ終了）。
-        let slots = match load_slots(app, cli.date).await {
-            Ok(s) => s,
-            Err(e) if cli.once => return Err(e),
-            Err(e) => {
-                println!("⚠ レース一覧の取得に失敗（次スイープで再試行）: {e}");
-                tokio::time::sleep(StdDuration::from_secs(cli.interval * 60)).await;
-                continue;
-            }
-        };
-        // per-race override の pid が当日レースに 1 件も一致しなければ、タイプミス等の可能性を 1 度だけ
-        // 警告する（黙って未適用のまま監視が進むのを防ぐ。#342）。slots が空の巡はまだ判定材料が無いので
-        // 次巡に持ち越す（overrides_checked を立てない）。
-        if !overrides_checked && !race_budget_overrides.is_empty() && !slots.is_empty() {
-            let present: std::collections::HashSet<&str> =
-                slots.iter().map(|s| s.race.race_id.value()).collect();
-            let unmatched: Vec<&String> = race_budget_overrides
-                .keys()
-                .filter(|pid| !present.contains(pid.as_str()))
-                .collect();
-            if !unmatched.is_empty() {
-                let list = unmatched
-                    .iter()
-                    .map(|s| s.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                println!(
-                    "⚠ per-race 予算 override の race_id が当日（{}）のレースに一致しません（初回スイープの出馬表基準・未適用）: {list}。pid を確認してください（card 未取得なら fetch-card 後に再実行）。",
-                    cli.date
-                );
-            }
-            overrides_checked = true;
-        }
-        let now = Local::now().time();
-        // 監視サイクル境界時刻（1 スイープ 1 値・UTC rfc3339 秒精度 Z 終端）。同一サイクルの全レースが
-        // 同一 captured_at を共有し、live_ev_snapshots の「辞書順＝時刻順」「(race_id, captured_at) 冪等」
-        // 契約を満たす（旧 refresh_ev.sh の `date -u +%Y-%m-%dT%H:%M:%SZ` と同表記）。
-        let captured_at = Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
-        // 発走状態は 1 スイープ 1 回だけ算出し、sweep 表示と終了判定で共有する。
-        let statuses: Vec<RaceStatus> = slots
-            .iter()
-            .map(|s| classify(now, s.post_time, has_result(&s.race), window))
-            .collect();
-
-        // 防御: 発走前（now <= post）なのに結果取込済みのレースは、races_by_date の不変条件
-        //（発走前＝race_cards 由来で track_condition=NULL）が崩れた兆候。放置すると Started 誤判定で
-        // 監視が無言の no-op 化するため、検出したら警告して気づけるようにする。
-        let started_before_post = slots
-            .iter()
-            .filter(|s| has_result(&s.race) && s.post_time.is_some_and(|p| now <= p))
-            .count();
-        if started_before_post > 0 {
-            println!(
-                "⚠ 発走前なのに結果取込済みのレースが {started_before_post} 件あります。発走状態判定の前提が \
-                 崩れている可能性があり、対象から外れます（fetch-card / 成績取込の状態を確認してください）。"
-            );
-        }
-
-        let ctx = SweepCtx {
-            cli,
-            notify_gate,
-            blend_alpha,
-            race_budget_overrides: &race_budget_overrides,
-        };
-        sweep(app, &slots, &statuses, now, &captured_at, ctx).await;
-
-        if !should_continue(&statuses) {
-            if statuses.is_empty() {
-                println!("── 監視終了: 本日（{}）は対象開催がありません。", cli.date);
-            } else if statuses.iter().all(|s| *s == RaceStatus::Unknown) {
-                println!(
-                    "── 監視終了: 全レースで発走時刻（post_time）が不明です。fetch-card 済みか確認してください。"
-                );
-            } else {
-                println!("── 監視終了: 発走前のレースが残っていません。");
-            }
-            break;
-        }
-        if cli.once {
-            println!("── --once 指定のため 1 スイープで終了します。");
-            break;
-        }
-        tokio::time::sleep(StdDuration::from_secs(cli.interval * 60)).await;
-    }
-    Ok(())
+    let mut sweeper = WatchSweeper {
+        app,
+        cli,
+        window,
+        notify_gate,
+        blend_alpha,
+        race_budget_overrides,
+        overrides_checked: false,
+    };
+    run_monitor_loop(&mut sweeper).await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn t(h: u32, m: u32) -> NaiveTime {
-        NaiveTime::from_hms_opt(h, m, 0).unwrap()
-    }
 
     #[test]
     fn is_g1_ura_detects_other_venue_nongraded_on_g1_day() {
@@ -824,71 +759,5 @@ mod tests {
         assert_eq!(mark_for(0.85, 0.7, 1.0), "🔍", "検証候補帯");
         assert_eq!(mark_for(0.70, 0.7, 1.0), "🔍", "通知閾値ちょうども 🔍");
         assert_eq!(mark_for(0.69, 0.7, 1.0), "・", "通知閾値未満は低シグナル");
-    }
-
-    #[test]
-    fn unknown_when_no_post_time() {
-        assert_eq!(
-            classify(t(15, 0), None, false, Duration::minutes(40)),
-            RaceStatus::Unknown
-        );
-    }
-
-    #[test]
-    fn started_when_result_present() {
-        // 結果取込済みは発走前の時刻でも Started（再取得しない）。
-        assert_eq!(
-            classify(t(14, 0), Some(t(15, 0)), true, Duration::minutes(40)),
-            RaceStatus::Started
-        );
-    }
-
-    #[test]
-    fn started_when_now_past_post() {
-        assert_eq!(
-            classify(t(15, 1), Some(t(15, 0)), false, Duration::minutes(40)),
-            RaceStatus::Started
-        );
-    }
-
-    #[test]
-    fn due_within_window_inclusive_boundary() {
-        // 残り 40 分ちょうどは窓内（境界を含む）。
-        assert_eq!(
-            classify(t(14, 20), Some(t(15, 0)), false, Duration::minutes(40)),
-            RaceStatus::Due
-        );
-        // 残り 1 分も Due。
-        assert_eq!(
-            classify(t(14, 59), Some(t(15, 0)), false, Duration::minutes(40)),
-            RaceStatus::Due
-        );
-        // 発走時刻ちょうど（残り 0 分）も発走前扱いで Due。
-        assert_eq!(
-            classify(t(15, 0), Some(t(15, 0)), false, Duration::minutes(40)),
-            RaceStatus::Due
-        );
-    }
-
-    #[test]
-    fn not_yet_when_outside_window() {
-        // 残り 41 分は窓の外。
-        assert_eq!(
-            classify(t(14, 19), Some(t(15, 0)), false, Duration::minutes(40)),
-            RaceStatus::NotYet
-        );
-    }
-
-    #[test]
-    fn should_continue_while_due_or_not_yet_remains() {
-        use RaceStatus::*;
-        // Due か NotYet が 1 つでもあれば継続。
-        assert!(should_continue(&[Started, Due, Started]));
-        assert!(should_continue(&[Started, NotYet]));
-        // 全て発走済み or 不明なら終了。
-        assert!(!should_continue(&[Started, Started, Unknown]));
-        assert!(!should_continue(&[Unknown]));
-        // 空（その日に開催なし）も終了。
-        assert!(!should_continue(&[]));
     }
 }

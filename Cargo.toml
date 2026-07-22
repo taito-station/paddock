@@ -52,6 +52,7 @@ pdf-ocr            = { path = "src/interface/pdf-ocr" }
 pdf-parser         = { path = "src/interface/pdf-parser" }
 netkeiba-scraper   = { path = "src/interface/netkeiba-scraper" }
 scraper-util       = { path = "src/interface/scraper-util" }
+monitor-loop       = { path = "src/interface/monitor-loop" }
 rdb-gateway        = { path = "src/interface/rdb-gateway" }
 jra-fetcher        = { path = "src/interface/jra-fetcher" }
 rest-controller    = { path = "src/interface/rest-controller" }
