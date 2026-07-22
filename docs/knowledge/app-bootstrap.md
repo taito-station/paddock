@@ -4,8 +4,8 @@ kind: knowledge
 sources:
   - docs/qa/QA-setup-boilerplate-410.md
   - docs/adr/0069-drop-icloud-writes-browser-only-viewing.md
-distilled_from_sha: "a311589"
-updated: "2026-07-21"
+distilled_from_sha: "8f8be21"
+updated: "2026-07-22"
 ---
 
 # app bootstrap（DI・起動シーケンス）の共通化

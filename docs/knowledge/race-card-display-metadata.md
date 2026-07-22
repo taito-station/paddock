@@ -6,8 +6,8 @@ sources:
   - docs/original-docs/389-race-name.md
   - docs/specifications/netkeiba-datasource.md
   - docs/specifications/rest-api-read.md
-distilled_from_sha: "17457a1"
-updated: "2026-07-15"
+distilled_from_sha: "8f8be21"
+updated: "2026-07-22"
 ---
 
 # 出馬表の表示メタ（レース名・格付け）の取得〜表示
