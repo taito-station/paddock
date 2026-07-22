@@ -167,6 +167,110 @@ async fn duplicate_outcome_for_same_race_conflicts(pool: sqlx::PgPool) {
 }
 
 #[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn skip_is_persisted_and_surfaced_in_summary(pool: sqlx::PgPool) {
+    // #481: 見送り（空 bets の outcome）をサーバ保存し、outcome レスポンスと GET summary の
+    // 双方で skipped_race_ids に載る（＝リロード後も「見送り済み」を再現できる）ことを固定する。
+    let app = build_service!(pool);
+    test::call_service(
+        &app,
+        test::TestRequest::post()
+            .uri(&format!("/api/sessions/{DATE}"))
+            .set_json(json!({ "budget": 10000 }))
+            .to_request(),
+    )
+    .await;
+
+    // 空 bets = 見送り記録。残高は不変で skipped_race_ids に当該レースが載る。
+    let resp = test::call_service(
+        &app,
+        test::TestRequest::post()
+            .uri(&format!("/api/sessions/{DATE}/races/{RACE_ID}/outcome"))
+            .set_json(json!({ "bets": [] }))
+            .to_request(),
+    )
+    .await;
+    assert!(resp.status().is_success());
+    let json = body_json(resp).await;
+    assert_eq!(json["balance"], 10000);
+    assert_eq!(json["bets"].as_array().unwrap().len(), 0);
+    assert_eq!(
+        json["skipped_race_ids"].as_array().unwrap(),
+        &vec![Value::from(RACE_ID)]
+    );
+
+    // 再取得（リロード相当）でも skipped_race_ids が維持される。
+    let summary = test::call_service(
+        &app,
+        test::TestRequest::get()
+            .uri(&format!("/api/sessions/{DATE}"))
+            .to_request(),
+    )
+    .await;
+    let json = body_json(summary).await;
+    assert_eq!(
+        json["skipped_race_ids"].as_array().unwrap(),
+        &vec![Value::from(RACE_ID)]
+    );
+
+    // 空 bets の再 POST は冪等（重複せず 1 件のまま・成功）。
+    let again = test::call_service(
+        &app,
+        test::TestRequest::post()
+            .uri(&format!("/api/sessions/{DATE}/races/{RACE_ID}/outcome"))
+            .set_json(json!({ "bets": [] }))
+            .to_request(),
+    )
+    .await;
+    assert!(again.status().is_success());
+    let json = body_json(again).await;
+    assert_eq!(
+        json["skipped_race_ids"].as_array().unwrap(),
+        &vec![Value::from(RACE_ID)]
+    );
+}
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn recording_bets_clears_prior_skip(pool: sqlx::PgPool) {
+    // 見送り→後から購入の遷移で skip 痕跡が残らず、購入は bets 側にのみ現れる（#481）。
+    let app = build_service!(pool);
+    test::call_service(
+        &app,
+        test::TestRequest::post()
+            .uri(&format!("/api/sessions/{DATE}"))
+            .set_json(json!({ "budget": 10000 }))
+            .to_request(),
+    )
+    .await;
+
+    // まず見送り。
+    test::call_service(
+        &app,
+        test::TestRequest::post()
+            .uri(&format!("/api/sessions/{DATE}/races/{RACE_ID}/outcome"))
+            .set_json(json!({ "bets": [] }))
+            .to_request(),
+    )
+    .await;
+
+    // 同レースを買い目ありで記録（二重記録ガードは空 bets 済みなので通過する）。
+    let resp = test::call_service(
+        &app,
+        test::TestRequest::post()
+            .uri(&format!("/api/sessions/{DATE}/races/{RACE_ID}/outcome"))
+            .set_json(json!({
+                "bets": [ { "bet_type": "単勝", "combination": "1", "stake": 1000, "payout": 0, "ev": 1.0 } ]
+            }))
+            .to_request(),
+    )
+    .await;
+    assert!(resp.status().is_success());
+    let json = body_json(resp).await;
+    assert_eq!(json["bets"].as_array().unwrap().len(), 1);
+    // skip 痕跡は消えている（購入済みが正・見送りではない）。
+    assert!(json["skipped_race_ids"].as_array().unwrap().is_empty());
+}
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
 async fn outcome_rejects_stake_over_balance_without_state_change(pool: sqlx::PgPool) {
     let app = build_service!(pool);
     test::call_service(

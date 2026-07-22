@@ -86,6 +86,11 @@ export function ExecutionPanel({
 
   const balance = session?.balance ?? 0;
   const bought = !!session && isRaceRecorded(session.bets, raceId);
+  // 見送り記録済みか（#481）。スキップは outcome を空 bets で POST するとサーバが痕跡を保存し、
+  // レスポンス（および GET summary）の skipped_race_ids に載る。これでリロード・再訪しても
+  // 「見送り済み」を判別でき、record.isSuccess のローカル表示に頼らずに済む（旧既知制約の解消）。
+  const skipped =
+    !!session && (session.skipped_race_ids ?? []).includes(raceId);
   const total = sumStake(bets, edits);
   // 残高が実弾の制約。「予算/R」(appliedBudget) は推奨額の算出ヒントであって手編集の上限では
   // ないため、超過判定は残高基準にする（編集で残高内まで増やすのは許容）。
@@ -148,12 +153,13 @@ export function ExecutionPanel({
     );
   }
 
-  // --- スキップ記録直後（痕跡が残らないためローカル表示。リロードで未処理に戻るのは
-  //     RaceDetail と同等の既知制約・スキップ再記録は無害）。 ---
-  if (record.isSuccess) {
+  // --- 見送り記録済み: サーバ保存の痕跡（skipped_race_ids）で判定するため、リロード・再訪でも
+  //     「見送り済み」を維持する（#481。旧: record.isSuccess のローカル表示で、リロードで未処理に
+  //     戻る既知制約があった）。 ---
+  if (skipped) {
     return (
       <div className="toolbar">
-        <span className="chip">見送りとして記録しました</span>
+        <span className="chip">見送り済み</span>
         <Link to={`/sessions/${date}`}>収支を見る</Link>
       </div>
     );

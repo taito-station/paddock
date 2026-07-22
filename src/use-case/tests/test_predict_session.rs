@@ -120,6 +120,9 @@ impl PredictSessionRepository for MockRepo {
     ) -> Result<()> {
         unimplemented!()
     }
+    async fn find_predict_race_skips(&self, _: NaiveDate) -> Result<Vec<RaceId>> {
+        unimplemented!()
+    }
     async fn find_predict_race_conditions(
         &self,
         _: NaiveDate,

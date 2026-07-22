@@ -43,7 +43,8 @@ where
 {
     let date = parse_date(&path.into_inner())?;
     let session = interactor.create_predict_session(date, body.budget).await?;
-    Ok(HttpResponse::Created().json(SessionSummaryResponse::new(&session, &[])))
+    // 新規作成直後は買い目も見送りも空。
+    Ok(HttpResponse::Created().json(SessionSummaryResponse::new(&session, &[], &[])))
 }
 
 /// セッション収支サマリ + 明細。
@@ -70,7 +71,8 @@ where
 {
     let date = parse_date(&path.into_inner())?;
     let (session, bets) = interactor.session_summary(date).await?;
-    Ok(HttpResponse::Ok().json(SessionSummaryResponse::new(&session, &bets)))
+    let skips = interactor.find_predict_race_skips(date).await?;
+    Ok(HttpResponse::Ok().json(SessionSummaryResponse::new(&session, &bets, &skips)))
 }
 
 /// 1 レース分の賭け金・払戻を記録（残高ガード・1 トランザクション）。
@@ -119,10 +121,11 @@ where
         })
         .collect();
 
-    // record_race_outcome が更新後 session を返すので再取得せず、明細 bets のみ取り直す。
+    // record_race_outcome が更新後 session を返すので再取得せず、明細 bets と見送り痕跡のみ取り直す。
     let session = interactor.record_race_outcome(date, &race_id, bets).await?;
     let all_bets = interactor.find_predict_bets(date).await?;
-    Ok(HttpResponse::Ok().json(SessionSummaryResponse::new(&session, &all_bets)))
+    let skips = interactor.find_predict_race_skips(date).await?;
+    Ok(HttpResponse::Ok().json(SessionSummaryResponse::new(&session, &all_bets, &skips)))
 }
 
 /// オッズをライブ取得して保存（#51, read-through）。

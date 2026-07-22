@@ -492,6 +492,12 @@ impl PredictSessionRepository for PostgresRepository {
             .map_err(Into::into)
     }
 
+    async fn find_predict_race_skips(&self, date: NaiveDate) -> UcResult<Vec<RaceId>> {
+        predict_session::find_predict_race_skips(&self.pool, date)
+            .await
+            .map_err(Into::into)
+    }
+
     async fn find_predict_race_conditions(
         &self,
         date: NaiveDate,

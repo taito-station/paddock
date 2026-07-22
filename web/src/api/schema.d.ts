@@ -1142,6 +1142,12 @@ export interface components {
              * @description 損益（`total_payout − total_bet`。負もあるため i64）。
              */
             pnl: number;
+            /**
+             * @description 「見送り（スキップ）」として記録済みのレース ID（#481）。買い目ありで記録した
+             *     レースは `bets` 側に現れるためここには含まれない。web 盤が再訪時に「見送り済み」
+             *     バッジを出す判定に使う。
+             */
+            skipped_race_ids: string[];
             /** Format: int64 */
             total_bet: number;
             /** Format: int64 */

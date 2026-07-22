@@ -23,6 +23,11 @@ impl<R: PredictSessionRepository, P: PdfParser, F: PdfFetcher> Interactor<R, P, 
         self.repository.find_predict_bets(date).await
     }
 
+    /// 指定日のセッションで「見送り（スキップ）」として記録済みのレース ID を取得する（#481）。
+    pub async fn find_predict_race_skips(&self, date: NaiveDate) -> Result<Vec<RaceId>> {
+        self.repository.find_predict_race_skips(date).await
+    }
+
     /// 予想セッションを新規作成する（REST API #53）。不変条件を use-case で強制する（現状 REST API が
     /// 利用。CLI predict の同経路への移行は #164）。budget は 1 以上（0 は `InvalidArgument`）、
     /// 同一開催日の二重作成は `Conflict`。

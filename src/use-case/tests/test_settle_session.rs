@@ -100,6 +100,9 @@ impl PredictSessionRepository for MockRepo {
     ) -> Result<PredictSessionRecord> {
         unimplemented!()
     }
+    async fn find_predict_race_skips(&self, _: NaiveDate) -> Result<Vec<RaceId>> {
+        unimplemented!()
+    }
     async fn find_predict_race_conditions(
         &self,
         _: NaiveDate,
@@ -462,6 +465,9 @@ async fn missing_session_returns_not_found() {
             _: &[PredictBetRecord],
             _: DateTime<Utc>,
         ) -> Result<PredictSessionRecord> {
+            unimplemented!()
+        }
+        async fn find_predict_race_skips(&self, _: NaiveDate) -> Result<Vec<RaceId>> {
             unimplemented!()
         }
         async fn find_predict_race_conditions(

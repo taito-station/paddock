@@ -308,6 +308,37 @@ pub async fn save_race_outcome(
 
     // 買い目はレース確定と同時に記録されるため、created_at はそのレース確定時刻（= updated_at）を用いる。
     let created_at = session.updated_at.to_rfc3339();
+    if bets.is_empty() {
+        // 買い目なし＝「このレースを見送り」。痕跡を per-race で残し、リロード後も web 盤が
+        // 「見送り済み」を再現できるようにする（#481）。空 bets の再 POST はスキップの冪等再送
+        // なので、既存行は created_at を保持したまま何もしない（ON CONFLICT DO NOTHING）。
+        // 既に買い目ありで記録済みのレース（＝購入済み）には skip 痕跡を付けない
+        // （WHERE NOT EXISTS。購入済みを誤って「見送り」に落とさない防御）。
+        sqlx::query(
+            r#"
+            INSERT INTO predict_race_skips (session_date, race_id, created_at)
+            SELECT $1, $2, $3
+            WHERE NOT EXISTS (
+                SELECT 1 FROM predict_bets
+                WHERE session_date = $1 AND race_id = $2
+            )
+            ON CONFLICT(session_date, race_id) DO NOTHING
+            "#,
+        )
+        .bind(&date_str)
+        .bind(race_id.value())
+        .bind(&created_at)
+        .execute(&mut *tx)
+        .await?;
+    } else {
+        // 買い目ありで記録するレースは「見送り」ではないため、先に見送り痕跡があれば消す
+        // （見送り→後から購入の遷移で skip 行が残らないようにする。二重記録ガードは上流で通過済み）。
+        sqlx::query("DELETE FROM predict_race_skips WHERE session_date = $1 AND race_id = $2")
+            .bind(&date_str)
+            .bind(race_id.value())
+            .execute(&mut *tx)
+            .await?;
+    }
     for bet in bets {
         sqlx::query(
             r#"
@@ -367,6 +398,29 @@ pub async fn find_predict_race_conditions(
         });
     }
     Ok(records)
+}
+
+/// 指定日のセッションで「見送り（スキップ）」として記録済みのレース ID を race_id 昇順で返す（#481）。
+/// 買い目ありで記録されたレースは predict_bets 側に残るため、この表には現れない。
+pub async fn find_predict_race_skips(pool: &PgPool, date: NaiveDate) -> Result<Vec<RaceId>> {
+    let date_str = date_key(date);
+    let rows: Vec<(String,)> = sqlx::query_as(
+        r#"
+        SELECT race_id
+        FROM predict_race_skips
+        WHERE session_date = $1
+        ORDER BY race_id ASC
+        "#,
+    )
+    .bind(&date_str)
+    .fetch_all(pool)
+    .await?;
+
+    let mut race_ids = Vec::with_capacity(rows.len());
+    for (race_id,) in rows {
+        race_ids.push(RaceId::try_from(race_id.as_str())?);
+    }
+    Ok(race_ids)
 }
 
 /// 1 レース分の馬場入力を upsert する。`(session_date, race_id)` で衝突した行は
