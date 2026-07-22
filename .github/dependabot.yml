@@ -1,0 +1,68 @@
+# dependabot.yml — 依存の鮮度・脆弱性監視（#462）
+#
+# 3 エコシステムを週次で監視する:
+#   1. cargo   — Rust クレート（/ の Cargo.toml/Cargo.lock）
+#   2. npm     — フロント JS/TS（/web の package.json/package-lock.json）
+#   3. github-actions — ワークフロー中の action の SHA ピン追随
+#
+# PR 洪水抑制のため groups（minor/patch をまとめる）と open-pull-requests-limit を設定。
+# major 更新は個別 PR にして破壊的変更を見落とさないようにする。
+version: 2
+
+updates:
+  # ──────────────────────────────────────────────
+  # 1. Rust クレート (cargo)
+  # ──────────────────────────────────────────────
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Asia/Tokyo
+    # minor/patch を 1 PR にまとめ PR 洪水を防ぐ。major は別途個別 PR で破壊的変更を確認する。
+    groups:
+      cargo-minor-patch:
+        update-types:
+          - minor
+          - patch
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - rust
+
+  # ──────────────────────────────────────────────
+  # 2. npm (web/ フロント)
+  # ──────────────────────────────────────────────
+  - package-ecosystem: npm
+    directory: /web
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Asia/Tokyo
+    groups:
+      npm-minor-patch:
+        update-types:
+          - minor
+          - patch
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - javascript
+
+  # ──────────────────────────────────────────────
+  # 3. GitHub Actions（ワークフロー内の SHA ピン追随）
+  # ──────────────────────────────────────────────
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Asia/Tokyo
+    # actions は少数かつ major ごとに動作が変わりうるため個別 PR のまま。grouping は見送り。
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - github-actions

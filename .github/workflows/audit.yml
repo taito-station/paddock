@@ -1,0 +1,80 @@
+# audit.yml — 依存の脆弱性監視（#462）
+#
+# 【別ワークフローとした理由】
+#   ci.yml（push/PR トリガ）に audit を混ぜると、無関係な PR が RustSec 未修正 advisory で
+#   ブロックされる恐れがある。audit は schedule 主体・情報提供に留めるのが穏当なため独立させた。
+#
+# 【失敗許容方針】
+#   cargo audit / npm audit は「脆弱性が見つかると exit 1」が既定動作。
+#   ただし RUSTSEC の未修正 advisory（upstream 修正待ち等）で恒常 red になることがある。
+#   そのため:
+#     - continue-on-error: false（デフォルト=厳格 fail）で運用を始める。
+#     - 恒常 red になる advisory が出たら cargo audit の --ignore フラグで個別除外し、
+#       コメントに除外理由と RUSTSEC ID を明記する（無音 ignore は禁止）。
+#     - npm audit は --audit-level=moderate で中程度以上の脆弱性のみ fail にする
+#       （devDependencies の低危険度 advisory でのノイズを避ける）。
+#
+# 【手動実行】
+#   Actions タブ → "Security Audit" → Run workflow で即時実行できる。
+
+name: Security Audit
+
+on:
+  schedule:
+    # 毎週月曜 09:15 JST（UTC 00:15）に実行。dependabot PR 生成（09:00）の後に走るよう時差をつける。
+    - cron: "15 0 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  checks: write # rustsec/audit-check が Check Runs API で結果を投稿するのに必須
+
+jobs:
+  # ──────────────────────────────────────────────
+  # Rust: cargo audit
+  # ──────────────────────────────────────────────
+  cargo-audit:
+    name: cargo audit (RustSec)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      # rustsec/audit-check は Cargo.lock を読み RustSec Advisory DB を照合する。
+      # Rust toolchain のインストールは不要（audit-check が内部で処理）。
+      - name: cargo audit
+        uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          # 恒常 red になる advisory を除外する場合はここに追記（理由と RUSTSEC ID を必ず明記）:
+          # args: --ignore RUSTSEC-XXXX-YYYY  # 理由: ...
+
+  # ──────────────────────────────────────────────
+  # npm: npm audit (web/)
+  # ──────────────────────────────────────────────
+  npm-audit:
+    name: npm audit (web/)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Install Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # --audit-level=moderate: critical/high/moderate を fail にし、low は許容する。
+      # devDependencies の低危険度 advisory による恒常 red を避けるバランス設定。
+      # npm には advisory 単位の無視フラグが無いため、恒常 red になる特定 advisory は
+      # package.json の overrides でパッチ版に固定するか、閾値（--audit-level）で調整する（理由を明記）。
+      - name: npm audit
+        run: npm audit --audit-level=moderate
