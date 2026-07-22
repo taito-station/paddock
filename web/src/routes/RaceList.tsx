@@ -147,6 +147,11 @@ export function RaceList() {
     () => new Set(session.data?.bets.map((b) => b.race_id) ?? []),
     [session.data],
   );
+  // 見送り記録済みレース（#481）。サーバ保存された痕跡で、リロード後も「見送り」バッジを出す。
+  const skippedRaceIds = useMemo(
+    () => new Set(session.data?.skipped_race_ids ?? []),
+    [session.data],
+  );
 
   const liveRaces = live.data?.races;
   // snapshot が 1 件でもあればライブモード（統合テーブル）。無い日は静的一覧に縮退。
@@ -226,8 +231,13 @@ export function RaceList() {
     });
   }, []);
 
-  const badgeOf = (bought: boolean) =>
-    raceBadge({ bought, hasSession, completed: sessionCompleted });
+  const badgeOf = (raceId: string, bought: boolean) =>
+    raceBadge({
+      bought,
+      hasSession,
+      completed: sessionCompleted,
+      skipped: skippedRaceIds.has(raceId),
+    });
 
   return (
     <section>
@@ -331,7 +341,7 @@ export function RaceList() {
                 row={row}
                 date={date}
                 back={back}
-                badge={badgeOf(row.bought)}
+                badge={badgeOf(row.race.race_id, row.bought)}
               />
             ))}
           </tbody>
@@ -400,7 +410,7 @@ export function RaceList() {
                     date={date}
                     back={back}
                     now={now}
-                    badge={badgeOf(row.bought)}
+                    badge={badgeOf(row.race.race_id, row.bought)}
                     slipOpen={
                       row.live?.tier === "buy" &&
                       !collapsed.has(row.race.race_id)

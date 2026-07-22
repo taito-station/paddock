@@ -2,6 +2,7 @@ use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
+use paddock_domain::RaceId;
 use paddock_use_case::repository::{PredictBetRecord, PredictSessionRecord};
 
 /// `POST /api/sessions/{date}` のリクエスト。
@@ -72,10 +73,18 @@ pub struct SessionSummaryResponse {
     pub pnl: i64,
     pub completed: bool,
     pub bets: Vec<SummaryBet>,
+    /// 「見送り（スキップ）」として記録済みのレース ID（#481）。買い目ありで記録した
+    /// レースは `bets` 側に現れるためここには含まれない。web 盤が再訪時に「見送り済み」
+    /// バッジを出す判定に使う。
+    pub skipped_race_ids: Vec<String>,
 }
 
 impl SessionSummaryResponse {
-    pub fn new(session: &PredictSessionRecord, bets: &[PredictBetRecord]) -> Self {
+    pub fn new(
+        session: &PredictSessionRecord,
+        bets: &[PredictBetRecord],
+        skipped: &[RaceId],
+    ) -> Self {
         Self {
             date: session.date,
             budget: session.budget,
@@ -85,6 +94,7 @@ impl SessionSummaryResponse {
             pnl: session.total_payout as i64 - session.total_bet as i64,
             completed: session.completed,
             bets: bets.iter().map(SummaryBet::from).collect(),
+            skipped_race_ids: skipped.iter().map(|r| r.value().to_string()).collect(),
         }
     }
 }

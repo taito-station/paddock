@@ -212,6 +212,69 @@ async fn save_race_outcome_enforces_guards_atomically(pool: sqlx::PgPool) {
     repo.save_race_outcome(date(), &r1, &[], Utc::now())
         .await
         .unwrap();
+    // 購入済みレースに空 bets を送っても skip 痕跡は付かない（購入済みが正・見送りではない）。
+    assert!(
+        repo.find_predict_race_skips(date())
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
+
+/// #481: 空 bets の見送りを skip 表に per-race 保存し、往復・冪等・購入への遷移で正しく振る舞う。
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn skip_round_trips_and_clears_on_purchase(pool: sqlx::PgPool) {
+    let repo = PostgresRepository::new(pool);
+    seed_session(&repo).await;
+    let r1 = RaceId::try_from("2026-1-nakayama-1-R1").unwrap();
+    let r2 = RaceId::try_from("2026-1-nakayama-1-R2").unwrap();
+
+    assert!(
+        repo.find_predict_race_skips(date())
+            .await
+            .unwrap()
+            .is_empty()
+    );
+
+    // r1 を見送り。残高は不変・bets は増えない・skip 表に載る。
+    let s = repo
+        .save_race_outcome(date(), &r1, &[], Utc::now())
+        .await
+        .unwrap();
+    assert_eq!(s.balance, 10_000);
+    assert!(repo.find_predict_bets(date()).await.unwrap().is_empty());
+    let skips = repo.find_predict_race_skips(date()).await.unwrap();
+    assert_eq!(skips, vec![r1.clone()]);
+
+    // 空 bets の再送は冪等（重複しない）。
+    repo.save_race_outcome(date(), &r1, &[], Utc::now())
+        .await
+        .unwrap();
+    assert_eq!(
+        repo.find_predict_race_skips(date()).await.unwrap(),
+        vec![r1.clone()]
+    );
+
+    // r1 を後から買い目ありで記録すると skip 痕跡は消え、bets 側に現れる。
+    repo.save_race_outcome(date(), &r1, &[bet("win", "3", 1_000, 0, 1.5)], Utc::now())
+        .await
+        .unwrap();
+    assert!(
+        repo.find_predict_race_skips(date())
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(repo.find_predict_bets(date()).await.unwrap().len(), 1);
+
+    // 別レース r2 の見送りは独立して載る（race_id 昇順で返る）。
+    repo.save_race_outcome(date(), &r2, &[], Utc::now())
+        .await
+        .unwrap();
+    assert_eq!(
+        repo.find_predict_race_skips(date()).await.unwrap(),
+        vec![r2.clone()]
+    );
 }
 
 /// #469 の核心: 同一レースへの並行記録を 2 本同時に走らせても、FOR UPDATE で直列化され

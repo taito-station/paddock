@@ -74,6 +74,27 @@ describe("raceBadge", () => {
       raceBadge({ bought: false, hasSession: true, completed: true }),
     ).toBe("skipped");
   });
+  it("in-progress session + explicit skip = skipped (#481)", () => {
+    // 進行中でも見送り記録済みなら skipped（リロード後も判別できる）。
+    expect(
+      raceBadge({
+        bought: false,
+        hasSession: true,
+        completed: false,
+        skipped: true,
+      }),
+    ).toBe("skipped");
+  });
+  it("bought wins over skipped", () => {
+    expect(
+      raceBadge({
+        bought: true,
+        hasSession: true,
+        completed: false,
+        skipped: true,
+      }),
+    ).toBe("bought");
+  });
   it("in-progress session + not bought = pending", () => {
     expect(
       raceBadge({ bought: false, hasSession: true, completed: false }),

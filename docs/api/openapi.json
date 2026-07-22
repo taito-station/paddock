@@ -3367,7 +3367,8 @@
           "total_payout",
           "pnl",
           "completed",
-          "bets"
+          "bets",
+          "skipped_race_ids"
         ],
         "properties": {
           "balance": {
@@ -3397,6 +3398,13 @@
             "type": "integer",
             "format": "int64",
             "description": "損益（`total_payout − total_bet`。負もあるため i64）。"
+          },
+          "skipped_race_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "「見送り（スキップ）」として記録済みのレース ID（#481）。買い目ありで記録した\nレースは `bets` 側に現れるためここには含まれない。web 盤が再訪時に「見送り済み」\nバッジを出す判定に使う。"
           },
           "total_bet": {
             "type": "integer",

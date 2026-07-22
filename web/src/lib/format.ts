@@ -47,15 +47,19 @@ export function raceTitle(
 }
 
 // レース一覧の状態バッジ判定（表示と分離してテスト可能にする）。
-//   bought=購入済み / skipped=見送り(完了セッションで未購入) / pending=未処理(進行中) /
+//   bought=購入済み / skipped=見送り / pending=未処理(進行中) /
 //   none=セッション未作成で購入状況不明
+// skipped は「明示的に見送り記録した（進行中でも）」か「完了セッションで未購入」の
+// いずれかで付く（#481: 見送り痕跡をサーバ保存し、リロード後も判別できるようにした）。
 export type RaceBadge = "bought" | "skipped" | "pending" | "none";
 export function raceBadge(opts: {
   bought: boolean;
   hasSession: boolean;
   completed: boolean;
+  skipped?: boolean;
 }): RaceBadge {
   if (opts.bought) return "bought";
+  if (opts.skipped) return "skipped";
   if (opts.completed) return "skipped";
   if (opts.hasSession) return "pending";
   return "none";

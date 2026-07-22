@@ -955,6 +955,14 @@ pub trait PredictSessionRepository: Send + Sync {
         now: DateTime<Utc>,
     ) -> impl Future<Output = Result<PredictSessionRecord>> + Send;
 
+    /// 指定日のセッションで「見送り（スキップ）」として記録済みのレース ID を返す（#481）。
+    /// 買い目ありで記録されたレースは `find_predict_bets` 側に現れるため、ここには含まれない。
+    /// web 盤の再訪時に「見送り済み」バッジを出す判定に使う。
+    fn find_predict_race_skips(
+        &self,
+        date: NaiveDate,
+    ) -> impl Future<Output = Result<Vec<RaceId>>> + Send;
+
     /// 指定日のセッションで記録済みの馬場入力を返す（`--resume` 時のデフォルト提示用）。
     /// `track_condition` が `None` の行は「不明として入力済み」を表す。
     fn find_predict_race_conditions(
