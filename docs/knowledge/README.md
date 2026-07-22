@@ -64,3 +64,6 @@ updated: "YYYY-MM-DD"    # 内容を実質更新した日（YAML の date 型を
 3. 回答済み qa と original-docs を突き合わせ、差分を knowledge に**差分マージ**（全書き換えしない・冪等）。
 4. 矛盾は `status: Conflict` で明示し、解消してから `Confirmed` に上げる。
 5. 決定を伴うものは ADR を別途起票し、knowledge の `sources` から参照する。
+6. **sources 追従**: knowledge の `sources` に列挙されたファイルを変更する PR は、参照元 knowledge の
+   `distilled_from_sha` と `updated` を現 HEAD に更新する。本文が変わる場合は差分マージを行い、
+   変わらない場合は sha と日付の bump のみで足りる。

@@ -6,8 +6,8 @@ sources:
   - docs/original-docs/382-live-server-now.md
   - docs/specifications/live-ev-buy-view.md
   - docs/adr/0064-live-ev-buy-view.md
-distilled_from_sha: "9f35d93"
-updated: "2026-07-14"
+distilled_from_sha: "8f8be21"
+updated: "2026-07-22"
 ---
 
 # ライブ盤 鮮度判定のサーバ時刻較正（#382）

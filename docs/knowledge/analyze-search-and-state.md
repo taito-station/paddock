@@ -9,8 +9,8 @@ sources:
   - docs/specifications/web-spa.md
   - docs/specifications/rest-api-read.md
   - docs/specifications/prediction-search-api.md
-distilled_from_sha: "27012d2"
-updated: "2026-07-14"
+distilled_from_sha: "8f8be21"
+updated: "2026-07-22"
 ---
 
 # 分析画面（Analyze）の検索・状態設計知
