@@ -12,6 +12,14 @@ use predict_format::{format_explanations, format_probs, format_probs_with_market
 
 use crate::setup::App;
 
+/// レース処理のモードフラグをまとめる（引数肥大の回避・#274/#479）。
+/// `explain` は予想根拠の表示、`skip_all` は非対話一括スキップ（stdin を読まない）。
+#[derive(Debug, Clone, Copy)]
+struct RaceRunOptions {
+    explain: bool,
+    skip_all: bool,
+}
+
 /// 1 日分のレースを順番に処理する対話セッション。
 ///
 /// 新規開始時は `budget` 必須でセッションを作成し、レース確定ごとに DB へ保存する。
@@ -23,6 +31,7 @@ pub async fn run_session(
     race_budget: u64,
     resume: bool,
     explain: bool,
+    skip_all: bool,
 ) -> anyhow::Result<()> {
     let races = app.interactor.races_by_date(date).await?;
     if races.is_empty() {
@@ -87,6 +96,7 @@ pub async fn run_session(
         .map(|r| (r.race_id.value().to_string(), r.track_condition))
         .collect();
     let mut last_input: Option<TrackCondition> = None;
+    let options = RaceRunOptions { explain, skip_all };
 
     for race in &races {
         if processed.contains(race.race_id.value()) {
@@ -99,7 +109,7 @@ pub async fn run_session(
             race_budget,
             &recorded,
             &mut last_input,
-            explain,
+            options,
         )
         .await?;
     }
@@ -121,8 +131,9 @@ async fn run_race(
     race_budget: u64,
     recorded: &HashMap<String, Option<TrackCondition>>,
     last_input: &mut Option<TrackCondition>,
-    explain: bool,
+    options: RaceRunOptions,
 ) -> anyhow::Result<()> {
+    let RaceRunOptions { explain, skip_all } = options;
     println!();
     println!(
         "--- レース {}: {} {} {}m ---",
@@ -142,7 +153,17 @@ async fn run_race(
         *last_input,
         race.track_condition,
     );
-    let track_condition = read_track_condition(&mut io::stdin().lock(), default)?;
+    // --skip-all（#479）は非対話。馬場入力を読まずデフォルトを採用し、採用値を表示だけする
+    // （対話時の read_track_condition と同じ default 決定・空入力採用の畳み方を stdin なしで再現）。
+    let track_condition = if skip_all {
+        match default {
+            Some(tc) => println!("馬場状態: {tc}（--skip-all: デフォルト採用）"),
+            None => println!("馬場状態: 不明（--skip-all: デフォルト採用）"),
+        }
+        default
+    } else {
+        read_track_condition(&mut io::stdin().lock(), default)?
+    };
     // 入力値は買い目の有無に依存せず記録し、「どの馬場前提で予想したか」を再現可能にする（#80）。
     // ただし resume 等で記録済みと同値なら、updated_at の無駄な更新（監査ノイズ）と
     // 冗長な書き込みを避けて保存を省く。`recorded` は run_session 冒頭でロードした不変の
@@ -198,7 +219,10 @@ async fn run_race(
     let Some(odds) = app.odds.race_odds(&race.race_id).await? else {
         println!();
         println!("オッズ未取得 — このレースはスキップします");
-        let _ = read_line(&mut io::stdin().lock(), "Enter で次のレースへ > ")?;
+        // --skip-all（#479）は Enter 待ちを省いて即次レースへ。
+        if !skip_all {
+            let _ = read_line(&mut io::stdin().lock(), "Enter で次のレースへ > ")?;
+        }
         return Ok(());
     };
 
@@ -296,6 +320,12 @@ async fn run_race(
     print_pair_ev_diagnostics(diag.axis, &blended, &diag.rows);
 
     println!();
+    // --skip-all（#479）は購入方法プロンプトを読まず s（スキップ）相当で即次レースへ。
+    // 買い目は記録しない（読み取り専用フロー・python ワンライナーの s 連打を置換）。
+    if skip_all {
+        println!("--skip-all: このレースはスキップします");
+        return Ok(());
+    }
     let bet_amounts: Vec<u64> = match read_choice(&mut io::stdin().lock())? {
         's' => return Ok(()),
         'y' => suggested.clone(),

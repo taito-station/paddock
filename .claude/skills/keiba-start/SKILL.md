@@ -85,8 +85,8 @@ paddock-odds-collect --date YYYY-MM-DD
 # 全レース一括（通常フロー）
 paddock-predict --date YYYY-MM-DD --budget 5000
 
-# 全レースをスキップして predict を完走させ EV 一覧を先に把握したい場合（R は実際のレース数に合わせる）
-R=12; python3 -c "print('\ns\n' * $R, end='')" | paddock-predict --date YYYY-MM-DD --budget 5000
+# 全レースをスキップして predict を完走させ EV 一覧を先に把握したい場合（#479: --skip-all で非対話・stdin 不要）
+paddock-predict --date YYYY-MM-DD --budget 5000 --skip-all
 
 # 個別レース確認（ライブ EV 更新・オッズ変動追跡）
 # ワイドオッズ（type=5）はこのコマンドが自動取得して EV に反映するため手動取得不要

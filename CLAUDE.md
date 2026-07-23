@@ -44,8 +44,11 @@ paddock-odds-collect --date YYYY-MM-DD   # fetch-card 済みが前提（post_tim
 ```sh
 # 1日全レースを予想（通常の予想フロー）
 # 対話起動し、各レースのプロンプトで s+Enter（スキップ）か確認入力を繰り返す
-# 一括スキップ例: R=12; python3 -c "print('\ns\n' * $R, end='')" | paddock-predict ...
 paddock-predict --date YYYY-MM-DD --budget 5000
+
+# 一括スキップ（予想・買い目推奨だけ流して確認）: --skip-all で非対話（stdin を一切読まない・#479）
+# 全レース s 相当・馬場はデフォルト採用（表示のみ）・買い目は記録しない読み取り専用フロー
+paddock-predict --date YYYY-MM-DD --budget 5000 --skip-all
 
 # 個別レースのモデル勝率確認（EV 算出・オッズ確認時）
 # ワイドオッズ（netkeiba type=5）はこのコマンドが自動取得して EV に反映するため手動取得不要

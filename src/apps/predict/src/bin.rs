@@ -26,6 +26,7 @@ async fn main() -> anyhow::Result<()> {
             args.race_budget,
             args.resume,
             args.explain,
+            args.skip_all,
         )
         .await?;
     }
