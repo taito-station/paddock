@@ -29,34 +29,41 @@ function StatTable({ title, rows }: { title: string; rows: GroupStat[] }) {
   return (
     <div className="stat-block">
       <h3>{title}</h3>
-      <table className="grid">
-        <thead>
-          <tr>
-            <th>区分</th>
-            <th>出走</th>
-            <th>勝</th>
-            <th>連対</th>
-            <th>複勝</th>
-            <th>勝率</th>
-            <th>連対率</th>
-            <th>複勝率</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((g) => (
-            <tr key={g.label}>
-              <td>{g.label}</td>
-              <td>{g.starts}</td>
-              <td>{g.wins}</td>
-              <td>{g.places}</td>
-              <td>{g.shows}</td>
-              <td>{pct(g.win_rate)}</td>
-              <td>{pct(g.place_rate)}</td>
-              <td>{pct(g.show_rate)}</td>
+      <div
+        className="table-scroll"
+        role="region"
+        aria-label={`${title}（横スクロール可）`}
+        tabIndex={0}
+      >
+        <table className="grid">
+          <thead>
+            <tr>
+              <th>区分</th>
+              <th>出走</th>
+              <th>勝</th>
+              <th>連対</th>
+              <th>複勝</th>
+              <th>勝率</th>
+              <th>連対率</th>
+              <th>複勝率</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {rows.map((g) => (
+              <tr key={g.label}>
+                <td>{g.label}</td>
+                <td>{g.starts}</td>
+                <td>{g.wins}</td>
+                <td>{g.places}</td>
+                <td>{g.shows}</td>
+                <td>{pct(g.win_rate)}</td>
+                <td>{pct(g.place_rate)}</td>
+                <td>{pct(g.show_rate)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

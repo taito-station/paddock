@@ -196,30 +196,37 @@ export function SessionSummary() {
           {session.data.bets.length === 0 ? (
             <p className="muted">まだ買い目がありません。</p>
           ) : (
-            <table className="grid">
-              <thead>
-                <tr>
-                  <th>レース</th>
-                  <th>券種</th>
-                  <th>組合せ</th>
-                  <th>賭け金</th>
-                  <th>払戻</th>
-                  <th>EV</th>
-                </tr>
-              </thead>
-              <tbody>
-                {session.data.bets.map((b, i) => (
-                  <tr key={`${b.race_id}-${b.bet_type}-${b.combination}-${i}`}>
-                    <td>{b.race_id}</td>
-                    <td>{b.bet_type}</td>
-                    <td>{b.combination}</td>
-                    <td>{yen(b.stake)}</td>
-                    <td>{yen(b.payout)}</td>
-                    <td>{b.ev.toFixed(2)}</td>
+            <div
+              className="table-scroll"
+              role="region"
+              aria-label="買い目明細（横スクロール可）"
+              tabIndex={0}
+            >
+              <table className="grid">
+                <thead>
+                  <tr>
+                    <th>レース</th>
+                    <th>券種</th>
+                    <th>組合せ</th>
+                    <th>賭け金</th>
+                    <th>払戻</th>
+                    <th>EV</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {session.data.bets.map((b, i) => (
+                    <tr key={`${b.race_id}-${b.bet_type}-${b.combination}-${i}`}>
+                      <td>{b.race_id}</td>
+                      <td>{b.bet_type}</td>
+                      <td>{b.combination}</td>
+                      <td>{yen(b.stake)}</td>
+                      <td>{yen(b.payout)}</td>
+                      <td>{b.ev.toFixed(2)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </>
       )}
