@@ -29,7 +29,12 @@ function StatTable({ title, rows }: { title: string; rows: GroupStat[] }) {
   return (
     <div className="stat-block">
       <h3>{title}</h3>
-      <div className="table-scroll">
+      <div
+        className="table-scroll"
+        role="region"
+        aria-label={`${title}（横スクロール可）`}
+        tabIndex={0}
+      >
         <table className="grid">
           <thead>
             <tr>

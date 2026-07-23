@@ -324,7 +324,13 @@ export function RaceList() {
       ) : !liveMode ? (
         // ---- 縮退: snapshot の無い日は現行相当の静的一覧 ----
         // 狭幅で body ごと横スクロールしないよう表を overflow ラッパで囲む（#476）。
-        <div className="table-scroll">
+        // キーボードのみのユーザが横スクロールできるよう focus 可能領域にする（WCAG 2.1.1）。
+        <div
+          className="table-scroll"
+          role="region"
+          aria-label="レース一覧（横スクロール可）"
+          tabIndex={0}
+        >
           <table className="grid">
             <thead>
               <tr>
@@ -393,7 +399,13 @@ export function RaceList() {
             // 列を増減したら racelist/SlipRow.tsx の DASHBOARD_COLS も更新すること。
             // 9 列と幅広なので狭幅では overflow ラッパ内で横スクロールさせ、
             // body ごと横スクロールするのを防ぐ（#476）。
-            <div className="table-scroll">
+            // キーボードのみのユーザが横スクロールできるよう focus 可能領域にする（WCAG 2.1.1）。
+            <div
+              className="table-scroll"
+              role="region"
+              aria-label="ライブボード（横スクロール可）"
+              tabIndex={0}
+            >
               <table className="grid live-board">
                 <thead>
                   <tr>

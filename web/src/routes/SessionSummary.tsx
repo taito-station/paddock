@@ -196,7 +196,12 @@ export function SessionSummary() {
           {session.data.bets.length === 0 ? (
             <p className="muted">まだ買い目がありません。</p>
           ) : (
-            <div className="table-scroll">
+            <div
+              className="table-scroll"
+              role="region"
+              aria-label="買い目明細（横スクロール可）"
+              tabIndex={0}
+            >
               <table className="grid">
                 <thead>
                   <tr>

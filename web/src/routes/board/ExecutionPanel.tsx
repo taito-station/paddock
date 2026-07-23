@@ -129,7 +129,12 @@ export function ExecutionPanel({
           <span className="chip chip-plus">購入済み</span>
           <Link to={`/sessions/${date}`}>収支を見る</Link>
         </div>
-        <div className="table-scroll">
+        <div
+          className="table-scroll"
+          role="region"
+          aria-label="購入済み買い目（横スクロール可）"
+          tabIndex={0}
+        >
           <table className="grid">
             <thead>
               <tr>
@@ -245,7 +250,12 @@ export function ExecutionPanel({
   return (
     <>
       {sessionNote}
-      <div className="table-scroll">
+      <div
+        className="table-scroll"
+        role="region"
+        aria-label="推奨買い目（横スクロール可）"
+        tabIndex={0}
+      >
         <table className="grid">
           <thead>
             <tr>
