@@ -657,19 +657,51 @@ button:disabled {
 
 /* タッチでも読める展開注記（#477）。軸ロック乖離警告・朝ROI 説明を title（hover）依存から
    details/summary のクリック展開に変える。summary は各々の既存チップ/muted 見た目を踏襲し、
-   list marker を消してテキストだけに寄せる（chip 側は pill を保つ）。 */
+   ネイティブの list marker は消して自前 .caret（下記）に統一する（chip 側は pill を保つ）。 */
 .axis-lock-note,
 .morning-roi-note {
   cursor: pointer;
 }
 .axis-lock-note > summary,
-.morning-roi-note > summary {
+.morning-roi-note > summary,
+.board-legend > summary {
   list-style: none;
   cursor: pointer;
 }
 .axis-lock-note > summary::-webkit-details-marker,
-.morning-roi-note > summary::-webkit-details-marker {
+.morning-roi-note > summary::-webkit-details-marker,
+.board-legend > summary::-webkit-details-marker {
   display: none;
+}
+
+/* 開閉インジケータ（#477）。ネイティブ marker を消したので「タップで開く」ことを視覚的に示す
+   自前の caret を付ける。CSS 三角形（border-color:currentColor＝生 hex なし・summary の文字色に追従）。
+   [open] で 90° 回転させ開いた状態が分かるようにする。aria-hidden の装飾要素。 */
+.axis-lock-note > summary .caret,
+.morning-roi-note > summary .caret,
+.board-legend > summary .caret {
+  display: inline-block;
+  width: 0;
+  height: 0;
+  margin-right: 0.35rem;
+  vertical-align: middle;
+  border-top: 0.32em solid transparent;
+  border-bottom: 0.32em solid transparent;
+  border-left: 0.4em solid currentColor;
+  transition: transform 0.15s ease;
+}
+.axis-lock-note[open] > summary .caret,
+.morning-roi-note[open] > summary .caret,
+.board-legend[open] > summary .caret {
+  transform: rotate(90deg);
+}
+/* 動きを抑えたいユーザーには回転アニメを無効化（状態自体は保つ）。 */
+@media (prefers-reduced-motion: reduce) {
+  .axis-lock-note > summary .caret,
+  .morning-roi-note > summary .caret,
+  .board-legend > summary .caret {
+    transition: none;
+  }
 }
 /* chip をベースにした summary（軸ロック警告）は pill 内で改行しないよう inline に保つ。 */
 .axis-lock-note {
