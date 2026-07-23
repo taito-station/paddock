@@ -15,8 +15,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
-# GITHUB_TOKEN を最小権限に絞る。全ジョブ（ci / web / adr / predict-check / shellcheck / db-guards / ocr-pdf）は
-# checkout とビルド・テストのみで、コミット・コメント・リリース等の書き込みを一切行わないため読取だけで足りる。
+# GITHUB_TOKEN を最小権限に絞る。全ジョブ（ci / web / adr / predict-check / shellcheck / db-guards /
+# ocr-pdf / docker-build）は checkout とビルド・テストのみで、コミット・コメント・リリース等の書き込みを
+# 一切行わないため読取だけで足りる（docker-build も push しない＝レジストリ書込なし）。
 permissions:
   contents: read
 
@@ -280,3 +281,96 @@ jobs:
       # `--test-threads=1`: 複数テストバイナリの並行 JRA 取得を避け、出力を決定的にするため直列化する。
       - name: Test pdf-ocr / pdf-parser (mupdf-backed 統合テストを含む)
         run: cargo test --locked -p pdf-ocr -p pdf-parser -- --test-threads=1
+
+  # deployments/ の Dockerfile 3 本（api / web / importer）の builder ステージが CI で検証されておらず、
+  # デプロイ（compose up --build）時に初めて壊れる問題への早期検知ゲート（#467）。builder ステージの
+  # apt 依存や COPY パスがソース変更・ベースイメージ更新でロットしても、ここで止める。
+  #
+  # 設計判断:
+  #   - `--target builder` 止め: runtime ステージまで作らず「ソースが image 内で compile / npm build できるか」
+  #     だけを見る。builder が壊れる主因（apt 依存欠落・COPY パスずれ・cargo/npm ビルド失敗）はここで全て
+  #     捕捉でき、フルビルドの重い runtime レイヤ（不変な apt install 等）を省ける。
+  #   - GHA キャッシュ（cache-from/to=gha）で cargo/npm レイヤと buildx のマウントを run 間で使い回し、
+  #     2 回目以降を軽くする。push/load はしない（レジストリにも Docker daemon にも成果物を残さない）。
+  #   - matrix で 3 本を並列。1 本の破壊が他をマスクしないよう fail-fast=false。
+  #   - トリガ: この job は必須チェック（ci/web/adr/predict-check/shellcheck/ocr-pdf）に含めない（#461 ruleset
+  #     には追加しない）。GitHub の "必須 + paths 未マッチ" は status 未報告で PR を無限ブロックするため、
+  #     必須化と paths ゲートは両立しない。代わりに changes ジョブで関連パスの変更有無を判定し、無関係な
+  #     PR（docs のみ等）では build 本体を skip する（ランナー節約）。非必須なので skip でも PR は通る。
+  docker-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        # dockerfile: 検証対象の Dockerfile。すべて builder ステージ止めでビルドする。
+        # build context はリポジトリルート（.）＝compose.yaml の api/web/importer と同じ context: ..。
+        dockerfile:
+          - deployments/api.Dockerfile
+          - deployments/web.Dockerfile
+          - deployments/importer.Dockerfile
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
+        with:
+          # 全履歴を取得する。既定の shallow（fetch-depth: 1）だと後段の 3-dot diff
+          # （マージベース必須）や push の HEAD^ が解決できず git diff が失敗し、
+          # 常時 fail-open（skip が効かない）に退化するため。
+          fetch-depth: 0
+
+      # 関連ファイルが変わった PR でだけ重いビルドを回す（無関係 PR ではランナーを使わない）。
+      # dorny/paths-filter 等の外部 action を足さず、git diff で in-house 判定する。
+      #   - PR: base（origin/<base>）との 3-dot diff で変更ファイルを列挙。
+      #   - push（main）: 直前コミットとの diff。取れなければ（初回コミット等）安全側で「変更あり」にする。
+      # 判定対象: 全 Dockerfile / compose.yaml / web.nginx.conf / importer-entrypoint.sh / Rust ソース
+      # （src/・Cargo.toml・Cargo.lock・rust-toolchain.toml）/ web/ / 本 workflow 自身。
+      - name: Detect relevant changes
+        id: changes
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          if [ "${EVENT_NAME}" = "pull_request" ]; then
+            # base の remote-tracking ref を用意（checkout は fetch-depth: 0 で全履歴済み。
+            # ここは深さを絞らない＝マージベースを潰さない）。
+            git fetch --no-tags origin "${BASE_REF}"
+            # PR は base との 3-dot diff（マージベース以降の変更）。単一引数。
+            range=("origin/${BASE_REF}...HEAD")
+          else
+            # push イベント。親コミットとの 2-dot diff（引数 2 個）。親が無い（初回）等で
+            # diff が取れなければ後段で fail-open。配列で持って word-split 事故を避ける。
+            range=("HEAD^" "HEAD")
+          fi
+          if ! files=$(git diff --name-only "${range[@]}" 2>/dev/null); then
+            echo "diff を取得できなかったため fail-open（ビルドする）"
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "変更ファイル:"; echo "${files}"
+          # 関連パスに 1 つでも該当すれば run=true。egrep パターンに合わせて grep -E で判定する。
+          if echo "${files}" | grep -Eq \
+            '^(deployments/|src/|web/|Cargo\.toml$|Cargo\.lock$|rust-toolchain\.toml$|\.github/workflows/ci\.yml$)'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "関連パスの変更なし → docker builder ビルドを skip"
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # 外部 action はサプライチェーン対策で commit SHA にピン（コメントは対応タグ）。
+      - name: Set up Docker Buildx
+        if: steps.changes.outputs.run == 'true'
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      # builder ステージまでビルド（runtime は作らない）。push/load せず、成否だけを見る。
+      # GHA キャッシュで cargo/npm レイヤを run 間で再利用する。scope を Dockerfile ごとに分け、
+      # 3 本のキャッシュが互いを上書きしないようにする。
+      - name: Build builder stage (${{ matrix.dockerfile }})
+        if: steps.changes.outputs.run == 'true'
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          target: builder
+          push: false
+          load: false
+          cache-from: type=gha,scope=${{ matrix.dockerfile }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.dockerfile }}
