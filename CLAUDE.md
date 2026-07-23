@@ -33,6 +33,11 @@ paddock-fetch-card <12桁race_id>
 - **fetch-card は必須**。parse-entries（出馬表 PDF）だけだと近走が埋まらず前走フォーム特徴量が使えない。
 - fetch-card が完走すると card + 単勝オッズ + 近走（horse_past_runs）がすべて DB に入る。
 - 前日取得時はオッズ未発売で「オッズ: 未確定のため保存なし」になる。EV 計算は当日朝に再取得してから。
+- **当日は fetch-card 後にオッズ時系列コレクタをバックグラウンド起動**し、終日 15 分毎に全レースの単複オッズを `race_odds_snapshots` に貯める（"ズレ増額" 判断の実データ・全レース発走で自動終了。keiba-start スキル非発火のセッションでも忘れず立てる）:
+
+```sh
+paddock-odds-collect --date YYYY-MM-DD   # fetch-card 済みが前提（post_time 依存）・15分毎・終日
+```
 
 ### 2. 予想実行
 
