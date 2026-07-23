@@ -27,6 +27,19 @@ import { ExecutionPanel } from "./board/ExecutionPanel";
 import { HorseCard } from "./board/HorseCard";
 import { HorseDetailPanel } from "./board/HorseDetailPanel";
 
+// 軸ロック乖離警告の理由（#477）。summary の title（PC hover 補助）と展開 <p>（タッチ到達）で
+// 同一文言を共有し、片方だけ直して乖離するのを防ぐ（DRY）。
+const AXIS_LOCK_REASON =
+  "買い目の軸は predict 記録済みの◎に固定しています。ライブ再計算（市場ブレンド）の首位はこれと異なりますが、軸ロック運用により差し替えません（乖離は増額判断の材料）。";
+
+// 朝ROI→現ROI 説明（#448/#477）。snapshotClock を挟むため関数で組み、title と展開 <p> で共有する。
+function morningRoiReason(
+  morningAt: string | null | undefined,
+  currentAt: string | null | undefined,
+): string {
+  return `朝 ${snapshotClock(morningAt)} → 現 ${snapshotClock(currentAt)}。軸・確率・予算を固定し参照オッズだけ朝時点に差し替えた ROI。判断は現時点の値で。`;
+}
+
 export function RaceBoard() {
   const { raceId = "" } = useParams();
   const [searchParams] = useSearchParams();
@@ -332,12 +345,14 @@ export function RaceBoard() {
                 （CLAUDE.md 軸ロック運用・ADR 0055/0060）。 */}
             {d.recorded_axis != null &&
               (d.live_axis != null && d.live_axis !== d.recorded_axis ? (
-                <span
-                  className="chip chip-danger"
-                  title="買い目の軸は predict 記録済みの◎に固定しています。ライブ再計算（市場ブレンド）の首位はこれと異なりますが、軸ロック運用により差し替えません（乖離は増額判断の材料）。"
-                >
-                  ⚠ 記録軸 {d.recorded_axis} 固定（ライブ再計算は {d.live_axis}）
-                </span>
+                // 乖離時は理由をクリック/タップで展開できる注記にする（#477。title は summary へ付け PC hover 補助）。
+                <details className="axis-lock-note chip chip-danger">
+                  <summary title={AXIS_LOCK_REASON}>
+                    <span className="caret" aria-hidden="true" />⚠ 記録軸{" "}
+                    {d.recorded_axis} 固定（ライブ再計算は {d.live_axis}）
+                  </summary>
+                  <p className="axis-lock-reason">{AXIS_LOCK_REASON}</p>
+                </details>
               ) : (
                 <span
                   className="chip"
@@ -360,23 +375,25 @@ export function RaceBoard() {
               d.morning_at != null &&
               d.morning_roi != null &&
               d.roi != null && (
-                <span
-                  className="muted morning-roi"
-                  title={`朝 ${snapshotClock(d.morning_at)} → 現 ${snapshotClock(
-                    d.current_at,
-                  )}。軸・確率・予算を固定し参照オッズだけ朝時点に差し替えた ROI。判断は現時点の値で。`}
-                >
-                  {/* morning_roi / roi はいずれも比率（domain Ev.roi）。boardRoiPct で %化する。 */}
-                  朝ROI {boardRoiPct(d.morning_roi)} → 現ROI{" "}
-                  {boardRoiPct(d.roi)}
-                  {d.morning_hit_prob != null && d.hit_prob != null && (
-                    <>
-                      {" "}
-                      / 的中 {pct(d.morning_hit_prob)} →{" "}
-                      {pct(d.hit_prob)}
-                    </>
-                  )}
-                </span>
+                // 意味説明（判断は現時点の値で）を title だけでなくクリック/タップで展開できる注記にする（#477）。
+                <details className="morning-roi-note muted morning-roi">
+                  {/* morning_roi / roi はいずれも比率（domain Ev.roi）。boardRoiPct で %化する。
+                      title は summary へ付け PC hover 補助。展開 <p> と文言を morningRoiReason で共有する。 */}
+                  <summary title={morningRoiReason(d.morning_at, d.current_at)}>
+                    <span className="caret" aria-hidden="true" />朝ROI{" "}
+                    {boardRoiPct(d.morning_roi)} → 現ROI {boardRoiPct(d.roi)}
+                    {d.morning_hit_prob != null && d.hit_prob != null && (
+                      <>
+                        {" "}
+                        / 的中 {pct(d.morning_hit_prob)} →{" "}
+                        {pct(d.hit_prob)}
+                      </>
+                    )}
+                  </summary>
+                  <p className="morning-roi-reason">
+                    {morningRoiReason(d.morning_at, d.current_at)}
+                  </p>
+                </details>
               )}
             {!d.odds_available && (
               <span className="chip chip-danger">オッズ未取得</span>
@@ -484,6 +501,43 @@ export function RaceBoard() {
           <p className="muted mt-sm">
             {d.field_size}頭立て。買い目の相手は top5 固定（相手は広げない）。全頭盤で妙味馬・複勝圏馬を手動で拾う。
           </p>
+
+          {/* 記号凡例（#477）。盤の記号・略号の意味は従来 title（hover）依存でタッチ端末から読めなかった。
+              盤下部に折りたたみ注記として常設し、モバイルでもタップで定義を参照できるようにする
+              （title は PC の hover 補助として各所に残す）。 */}
+          <details className="board-legend mt-sm">
+            <summary>
+              <span className="caret" aria-hidden="true" />記号の凡例
+            </summary>
+            <dl className="board-legend-body">
+              <div>
+                <dt>ブ勝 / ブ連 / ブ複</dt>
+                <dd>ブレンド勝率・連対率・複勝率＝本番 α=0.2（市場ブレンド）。</dd>
+              </div>
+              <div>
+                <dt>モ勝 / モ連 / モ複</dt>
+                <dd>モデル勝率・連対率・複勝率＝純モデル α=1.0（市場非依存）。</dd>
+              </div>
+              <div>
+                <dt>市勝</dt>
+                <dd>
+                  市場勝率＝単勝オッズから逆算した市場推定（控除抜き）。モデル/ブレンドとの乖離＝妙味。
+                </dd>
+              </div>
+              <div>
+                <dt>朝単 ▲ / △</dt>
+                <dd>
+                  朝→現の単勝変動。▲＝人気化（オッズ下落＝妙味減）／△＝過小人気化（オッズ上昇＝妙味）。
+                </dd>
+              </div>
+              <div>
+                <dt>複勝圏 / 妙味 / 書評</dt>
+                <dd>
+                  複勝圏＝ブレンド1位×人気1位／妙味＝ブレンド上位×市場人気低／書評＝クリックで根拠を展開。
+                </dd>
+              </div>
+            </dl>
+          </details>
         </>
       )}
     </section>
