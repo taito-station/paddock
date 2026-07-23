@@ -311,6 +311,11 @@ jobs:
           - deployments/importer.Dockerfile
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
+        with:
+          # 全履歴を取得する。既定の shallow（fetch-depth: 1）だと後段の 3-dot diff
+          # （マージベース必須）や push の HEAD^ が解決できず git diff が失敗し、
+          # 常時 fail-open（skip が効かない）に退化するため。
+          fetch-depth: 0
 
       # 関連ファイルが変わった PR でだけ重いビルドを回す（無関係 PR ではランナーを使わない）。
       # dorny/paths-filter 等の外部 action を足さず、git diff で in-house 判定する。
@@ -325,7 +330,9 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
         run: |
           if [ "${EVENT_NAME}" = "pull_request" ]; then
-            git fetch --no-tags --depth=1 origin "${BASE_REF}"
+            # base の remote-tracking ref を用意（checkout は fetch-depth: 0 で全履歴済み。
+            # ここは深さを絞らない＝マージベースを潰さない）。
+            git fetch --no-tags origin "${BASE_REF}"
             # PR は base との 3-dot diff（マージベース以降の変更）。単一引数。
             range=("origin/${BASE_REF}...HEAD")
           else
