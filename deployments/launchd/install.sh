@@ -27,8 +27,8 @@ for LABEL in "${LABELS[@]}"; do
   TEMPLATE="$SCRIPT_DIR/$LABEL.plist"
   DEST="$DEST_DIR/$LABEL.plist"
   # __REPO_ROOT__ / __HOME__ を実パスに置換して配置（| 区切りで sed に渡しパス中の / を気にしない）。
-  # __HOME__ は backup-db / backup-staleness / verify-backup-restore plist が持ち、他には無いので
-  # -e 追加は no-op（無害）。
+  # __HOME__ は backup-db / backup-staleness / verify-backup-restore / purge-snapshots plist が
+  # 持ち、prefetch / keep-awake には無いので -e 追加は no-op（無害）。
   sed -e "s|__REPO_ROOT__|$REPO_ROOT|g" -e "s|__HOME__|$HOME|g" "$TEMPLATE" > "$DEST"
   # 既存ロードがあれば外してから入れ直す（更新を確実に反映）。配置は legacy の load/unload を
   # 意図的に使う（unload→load は再ロードで冪等。modern の bootstrap は既ロード時に非ゼロ終了して
