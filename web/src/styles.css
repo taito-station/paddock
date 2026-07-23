@@ -919,3 +919,69 @@ button:disabled {
 .error-boundary-reload:hover {
   background: var(--venue-hover-bg);
 }
+
+/* ===== テーブル横スクロールラッパ（#476）=====
+   多列テーブル（ライブボード9列・分析8列・買い目明細・執行パネル等）を狭幅で
+   body ごと横スクロールさせず、ラッパ内だけで横スクロールに収める。PC 幅では
+   min-content がラッパ幅に収まるためスクロールバーは出ず従来レイアウトのまま。
+   タッチ端末で慣性スクロールを効かせる（-webkit-overflow-scrolling）。 */
+.table-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* ===== モバイル/レスポンシブ対応（#476）=====
+   これまで PC(Mac) 運用前提で @media が無く、狭幅ではテーブルはみ出し・極小フォント・
+   full-bleed の 100vw はみ出しが起きていた。640px 以下でだけ調整し、PC 表示は不変。 */
+@media (max-width: 640px) {
+  /* 左右余白を詰めて本文の実効幅を稼ぐ（--gutter は full-bleed の戻し padding と
+     共有のため、狭幅では小さめの値に上書きして両者を揃える）。 */
+  :root {
+    --gutter: 0.75rem;
+  }
+
+  /* ヘッダは縦積みにして日付ピッカーの押し出しを防ぐ。 */
+  .app-header {
+    flex-wrap: wrap;
+    gap: 0.5rem 1rem;
+    padding: 0.6rem 0.75rem;
+  }
+  .app-header .date-picker {
+    margin-left: 0;
+    width: 100%;
+  }
+
+  /* full-bleed の盤帯（#383）はクラシックスクロールバー環境で 100vw が縦バー幅ぶん
+     はみ出し body 横スクロールを起こす。狭幅ではこのトリックを解除し、通常フローの
+     100% 幅に戻す（board-scroll 自身の overflow-x で横スクロールは維持される）。 */
+  .board-scroll {
+    width: auto;
+    margin-left: 0;
+    margin-right: 0;
+    padding-left: 0;
+    padding-right: 0;
+  }
+
+  /* 盤の負マージン full-bleed（margin:-1rem）も詰めて画面外へのはみ出しを抑える。 */
+  .board-view {
+    margin: -0.5rem;
+    padding: 0.5rem;
+  }
+
+  /* テーブルセルの余白を詰めて狭幅でも読める密度にする。極小化はしない
+     （font-size は詰めても 0.8rem 下限に留め、styles.css:624 の 0.68rem より可読）。 */
+  .grid th,
+  .grid td {
+    padding: 0.3rem 0.4rem;
+    font-size: 0.8rem;
+  }
+
+  /* 馬盤（.horse-col）の min-width(78px)・stats font-size(0.68rem) は styles.css:549 の
+     実測で重なり閾値が決まっているため、狭幅でも変えない（変えると重なる）。
+     盤は .board-scroll の overflow-x で横スクロールに収まるので縮小は不要。 */
+
+  /* 買い目伝票の見出しなど、狭幅での折返しを許容する。 */
+  .live-status {
+    white-space: normal;
+  }
+}

@@ -323,29 +323,32 @@ export function RaceList() {
         <p className="muted">この開催日のレースはありません。</p>
       ) : !liveMode ? (
         // ---- 縮退: snapshot の無い日は現行相当の静的一覧 ----
-        <table className="grid">
-          <thead>
-            <tr>
-              <th>R</th>
-              <th>開催</th>
-              <th>発走</th>
-              <th>距離</th>
-              <th>馬場</th>
-              <th>状態</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => (
-              <StaticRow
-                key={row.race.race_id}
-                row={row}
-                date={date}
-                back={back}
-                badge={badgeOf(row.race.race_id, row.bought)}
-              />
-            ))}
-          </tbody>
-        </table>
+        // 狭幅で body ごと横スクロールしないよう表を overflow ラッパで囲む（#476）。
+        <div className="table-scroll">
+          <table className="grid">
+            <thead>
+              <tr>
+                <th>R</th>
+                <th>開催</th>
+                <th>発走</th>
+                <th>距離</th>
+                <th>馬場</th>
+                <th>状態</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                <StaticRow
+                  key={row.race.race_id}
+                  row={row}
+                  date={date}
+                  back={back}
+                  badge={badgeOf(row.race.race_id, row.bought)}
+                />
+              ))}
+            </tbody>
+          </table>
+        </div>
       ) : (
         // ---- ライブモード: 統合ダッシュボード ----
         <>
@@ -388,39 +391,43 @@ export function RaceList() {
             <p className="muted">絞り込み条件に該当するレースなし</p>
           ) : (
             // 列を増減したら racelist/SlipRow.tsx の DASHBOARD_COLS も更新すること。
-            <table className="grid live-board">
-              <thead>
-                <tr>
-                  <SortTh label="状態" col="status" query={query} onSort={onSort} />
-                  <SortTh label="レース" col="race" query={query} onSort={onSort} />
-                  <SortTh label="発走" col="post" query={query} onSort={onSort} />
-                  <th>距離</th>
-                  <SortTh label="ROI" col="roi" query={query} onSort={onSort} />
-                  <SortTh label="軸" col="axisProb" query={query} onSort={onSort} />
-                  <SortTh label="荒れ" col="rough" query={query} onSort={onSort} />
-                  <th>購入</th>
-                  <th>注記</th>
-                </tr>
-              </thead>
-              <tbody>
-                {visible.map((row) => (
-                  <DashboardRowView
-                    key={row.race.race_id}
-                    row={row}
-                    date={date}
-                    back={back}
-                    now={now}
-                    badge={badgeOf(row.race.race_id, row.bought)}
-                    slipOpen={
-                      row.live?.tier === "buy" &&
-                      !collapsed.has(row.race.race_id)
-                    }
-                    onToggle={toggleSlip}
-                    outcome={outcomes.get(row.race.race_id)}
-                  />
-                ))}
-              </tbody>
-            </table>
+            // 9 列と幅広なので狭幅では overflow ラッパ内で横スクロールさせ、
+            // body ごと横スクロールするのを防ぐ（#476）。
+            <div className="table-scroll">
+              <table className="grid live-board">
+                <thead>
+                  <tr>
+                    <SortTh label="状態" col="status" query={query} onSort={onSort} />
+                    <SortTh label="レース" col="race" query={query} onSort={onSort} />
+                    <SortTh label="発走" col="post" query={query} onSort={onSort} />
+                    <th>距離</th>
+                    <SortTh label="ROI" col="roi" query={query} onSort={onSort} />
+                    <SortTh label="軸" col="axisProb" query={query} onSort={onSort} />
+                    <SortTh label="荒れ" col="rough" query={query} onSort={onSort} />
+                    <th>購入</th>
+                    <th>注記</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {visible.map((row) => (
+                    <DashboardRowView
+                      key={row.race.race_id}
+                      row={row}
+                      date={date}
+                      back={back}
+                      now={now}
+                      badge={badgeOf(row.race.race_id, row.bought)}
+                      slipOpen={
+                        row.live?.tier === "buy" &&
+                        !collapsed.has(row.race.race_id)
+                      }
+                      onToggle={toggleSlip}
+                      outcome={outcomes.get(row.race.race_id)}
+                    />
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </>
       )}

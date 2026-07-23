@@ -129,26 +129,28 @@ export function ExecutionPanel({
           <span className="chip chip-plus">購入済み</span>
           <Link to={`/sessions/${date}`}>収支を見る</Link>
         </div>
-        <table className="grid">
-          <thead>
-            <tr>
-              <th>券種</th>
-              <th>組合せ</th>
-              <th>賭け金</th>
-              <th>払戻</th>
-            </tr>
-          </thead>
-          <tbody>
-            {recorded.map((b) => (
-              <tr key={`${b.bet_type}-${b.combination}`}>
-                <td>{b.bet_type}</td>
-                <td>{b.combination}</td>
-                <td>{yen(b.stake)}</td>
-                <td>{yen(b.payout)}</td>
+        <div className="table-scroll">
+          <table className="grid">
+            <thead>
+              <tr>
+                <th>券種</th>
+                <th>組合せ</th>
+                <th>賭け金</th>
+                <th>払戻</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {recorded.map((b) => (
+                <tr key={`${b.bet_type}-${b.combination}`}>
+                  <td>{b.bet_type}</td>
+                  <td>{b.combination}</td>
+                  <td>{yen(b.stake)}</td>
+                  <td>{yen(b.payout)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </>
     );
   }
@@ -243,58 +245,60 @@ export function ExecutionPanel({
   return (
     <>
       {sessionNote}
-      <table className="grid">
-        <thead>
-          <tr>
-            <th>券種</th>
-            <th>組合せ</th>
-            <th>オッズ</th>
-            <th>EV</th>
-            <th>賭け金</th>
-            {canOperate && <th>払戻</th>}
-          </tr>
-        </thead>
-        <tbody>
-          {bets.map((b) => (
-            <tr key={betKey(b)}>
-              <td>{b.bet_type}</td>
-              <td>{b.combination}</td>
-              <td>{b.odds == null ? "-" : b.odds.toFixed(1)}</td>
-              <td>{b.ev.toFixed(2)}</td>
-              <td>
-                {canOperate ? (
-                  <input
-                    type="number"
-                    min={0}
-                    step={100}
-                    value={effStake(b, edits)}
-                    onChange={(e) =>
-                      setEdit(b, { stake: toAmount(e.target.value) })
-                    }
-                    className="amount-input"
-                  />
-                ) : (
-                  yen(b.stake)
-                )}
-              </td>
-              {canOperate && (
-                <td>
-                  <input
-                    type="number"
-                    min={0}
-                    step={100}
-                    value={effPayout(b, edits)}
-                    onChange={(e) =>
-                      setEdit(b, { payout: toAmount(e.target.value) })
-                    }
-                    className="amount-input"
-                  />
-                </td>
-              )}
+      <div className="table-scroll">
+        <table className="grid">
+          <thead>
+            <tr>
+              <th>券種</th>
+              <th>組合せ</th>
+              <th>オッズ</th>
+              <th>EV</th>
+              <th>賭け金</th>
+              {canOperate && <th>払戻</th>}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {bets.map((b) => (
+              <tr key={betKey(b)}>
+                <td>{b.bet_type}</td>
+                <td>{b.combination}</td>
+                <td>{b.odds == null ? "-" : b.odds.toFixed(1)}</td>
+                <td>{b.ev.toFixed(2)}</td>
+                <td>
+                  {canOperate ? (
+                    <input
+                      type="number"
+                      min={0}
+                      step={100}
+                      value={effStake(b, edits)}
+                      onChange={(e) =>
+                        setEdit(b, { stake: toAmount(e.target.value) })
+                      }
+                      className="amount-input"
+                    />
+                  ) : (
+                    yen(b.stake)
+                  )}
+                </td>
+                {canOperate && (
+                  <td>
+                    <input
+                      type="number"
+                      min={0}
+                      step={100}
+                      value={effPayout(b, edits)}
+                      onChange={(e) =>
+                        setEdit(b, { payout: toAmount(e.target.value) })
+                      }
+                      className="amount-input"
+                    />
+                  </td>
+                )}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
 
       {canOperate && (
         <div className="toolbar mt-md">
