@@ -1,5 +1,6 @@
 mod cli;
 mod input;
+mod setup;
 
 use std::io::Read;
 use std::path::PathBuf;
@@ -7,24 +8,21 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use chrono::Utc;
 use clap::Parser;
-use paddock_config::Config;
-use paddock_use_case::repository::PadPredictionRepository;
-use rdb_gateway::{PostgresRepository, pool};
+use paddock_use_case::{Interactor, NoopFetcher, NoopParser};
+use rdb_gateway::PostgresRepository;
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = cli::Cli::parse();
-    let config = Config::from_env().context("load config")?;
-
-    let pool = pool::connect_and_migrate(&config.paddock_db_url)
-        .await
-        .context("connect and migrate Postgres")?;
-    let repo = PostgresRepository::new(pool);
-
-    ingest(&repo, args.input, args.dry_run).await
+    let app = setup::build_app().await?;
+    ingest(&app.interactor, args.input, args.dry_run).await
 }
 
-async fn ingest(repo: &PostgresRepository, input: Option<PathBuf>, dry_run: bool) -> Result<()> {
+async fn ingest(
+    interactor: &Interactor<PostgresRepository, NoopParser, NoopFetcher>,
+    input: Option<PathBuf>,
+    dry_run: bool,
+) -> Result<()> {
     let raw = match &input {
         Some(path) => std::fs::read_to_string(path)
             .with_context(|| format!("入力 JSON を読めません: {}", path.display()))?,
@@ -61,7 +59,8 @@ async fn ingest(repo: &PostgresRepository, input: Option<PathBuf>, dry_run: bool
 
     let now = Utc::now();
     for p in &predictions {
-        repo.save_pad_prediction(p, now)
+        interactor
+            .ingest_pad_prediction(p, now)
             .await
             .with_context(|| format!("保存失敗: {} {}{}R", p.date, p.venue.as_jp(), p.race_num))?;
     }
