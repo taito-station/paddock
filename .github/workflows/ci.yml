@@ -167,20 +167,29 @@ jobs:
       - name: Check ADR number duplicates (#254)
         run: bash scripts/check-adr-numbers.sh
 
-  # predict-check の Python テスト（scripts/predict-check/test_*.py）。各ファイルは unittest ではなく
-  # `def test_*()` + assert を末尾の main() が集めて実行する「自走式」で、標準ライブラリのみに依存する
-  # （numpy/scipy を要する harness 側テストはスコープ外）。ubuntu-latest 同梱の python3 で走らせ、
-  # setup-python/pip を挟まない軽量ジョブにする（Rust/Postgres 不要なので独立させ並列で即終わる。#416）。
+  # stdlib のみの Python テストを ubuntu-latest 同梱の python3 で走らせる軽量ジョブ（#416 / #464）。
+  # 対象は 2 群:
+  #   1. scripts/predict-check/test_*.py — unittest ではなく `def test_*()` + assert を末尾の
+  #      main() が集めて実行する「自走式」。
+  #   2. scripts/harness/test_faithfulness.py — 忠実性ゲート（check_faithfulness.sh の集計ロジック）の
+  #      unittest 単体テスト。faithfulness.py もこのテストも stdlib のみ（README・requirements.txt に明記）。
+  # いずれも `python3 <file>` 実行で assert / unittest 失敗時に非 0 終了する。
+  # setup-python/pip を挟まない（Rust/Postgres 不要なので独立させ並列で即終わる）。
+  # スコープ外（このジョブで走らせない）: scripts/harness/test_train_pl.py / test_train_gbm.py。
+  #   これらは numpy/scipy/scikit-learn 依存（requirements.txt の venv 必須）で、pip インストールが
+  #   重い。学習モデル路線は #309 Phase B で棄却（ADR 0053）済みのため、依存を要するこの 2 本を
+  #   CI に載せる費用対効果は低く、意図的にスコープ外とする（再検討は学習モデル再開時）。
   predict-check:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
-      - name: Run predict-check python tests (stdlib のみ・自走式)
-        # 各テストは自走式（__main__ で全 test_* を実行し assert 失敗で非 0 終了）なので、
-        # unittest discover は 0 件になる。ファイルごとに python3 で実行し 1 本でも落ちたら fail。
+      - name: Run stdlib-only python tests (predict-check 自走式 + harness 忠実性)
+        # predict-check の各テストは自走式（__main__ で全 test_* を実行し assert 失敗で非 0 終了）、
+        # harness/test_faithfulness.py は unittest.main() 実行（失敗で非 0 終了）。どちらも
+        # python3 <file> でそのまま走り、1 本でも落ちたら fail する。
         run: |
-          for f in scripts/predict-check/test_*.py; do
+          for f in scripts/predict-check/test_*.py scripts/harness/test_faithfulness.py; do
             echo "== $f"
             python3 "$f"
           done
