@@ -12,8 +12,8 @@ use predict_format::{format_explanations, format_probs, format_probs_with_market
 
 use crate::setup::App;
 
-/// レース処理のモードフラグをまとめる（引数肥大の回避・#274/#479）。
-/// `explain` は予想根拠の表示、`skip_all` は非対話一括スキップ（stdin を読まない）。
+/// レース処理のモードフラグをまとめる（引数肥大の回避・#479）。
+/// `explain` は予想根拠の表示（#274 由来）、`skip_all` は非対話一括スキップ（stdin を読まない・#479）。
 #[derive(Debug, Clone, Copy)]
 struct RaceRunOptions {
     explain: bool,
@@ -153,8 +153,9 @@ async fn run_race(
         *last_input,
         race.track_condition,
     );
-    // --skip-all（#479）は非対話。馬場入力を読まずデフォルトを採用し、採用値を表示だけする
+    // --skip-all（#479）は非対話。馬場入力プロンプトを出さずデフォルトを採用し、採用値を表示する
     // （対話時の read_track_condition と同じ default 決定・空入力採用の畳み方を stdin なしで再現）。
+    // ここで決めた馬場条件は下の #80 ブロックで対話時と同様に保存されうる（表示のみ＝保存しない、ではない）。
     let track_condition = if skip_all {
         match default {
             Some(tc) => println!("馬場状態: {tc}（--skip-all: デフォルト採用）"),
@@ -321,7 +322,8 @@ async fn run_race(
 
     println!();
     // --skip-all（#479）は購入方法プロンプトを読まず s（スキップ）相当で即次レースへ。
-    // 買い目は記録しない（読み取り専用フロー・python ワンライナーの s 連打を置換）。
+    // 買い目（bet_records）は記録しない（python ワンライナーの s 連打を置換）。馬場条件は上の
+    // #80 ブロックで対話時同様に保存されうる点に注意（「一切記録しない」ではない）。
     if skip_all {
         println!("--skip-all: このレースはスキップします");
         return Ok(());

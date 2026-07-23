@@ -47,7 +47,8 @@ paddock-odds-collect --date YYYY-MM-DD   # fetch-card 済みが前提（post_tim
 paddock-predict --date YYYY-MM-DD --budget 5000
 
 # 一括スキップ（予想・買い目推奨だけ流して確認）: --skip-all で非対話（stdin を一切読まない・#479）
-# 全レース s 相当・馬場はデフォルト採用（表示のみ）・買い目は記録しない読み取り専用フロー
+# 全レース s 相当・馬場はデフォルト採用（プロンプトなしで表示）・買い目は記録しない
+# （馬場条件だけは #80 に従い対話時同様に保存されうる。買い目 bet_records のみ非記録）
 paddock-predict --date YYYY-MM-DD --budget 5000 --skip-all
 
 # 個別レースのモデル勝率確認（EV 算出・オッズ確認時）
