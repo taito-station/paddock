@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# 締切前 prefetch（#237）と keep-awake（#264）の launchd エージェントを停止・除去する。
+# 締切前 prefetch（#237）・keep-awake（#264）・snapshot-coverage（#493）の launchd
+# エージェントを停止・除去する（いずれも開催日限定＝朝 install・夜 uninstall の運用）。
 # backup-db（#265）・backup-staleness（#490）・verify-backup-restore（#474）・
 # purge-snapshots（#492）は install.sh で一括配置するが、ここでは意図的に外さない（非対称）。
 # backup-staleness は backup-db を見張る監視で backup-db と対になって常駐する。
@@ -12,7 +13,7 @@
 # のように bootout + rm する（BACKUP.md のアンインストール手順と同一。#416）。
 set -euo pipefail
 
-LABELS=(com.paddock.prefetch-odds com.paddock.keep-awake)
+LABELS=(com.paddock.prefetch-odds com.paddock.keep-awake com.paddock.snapshot-coverage)
 for LABEL in "${LABELS[@]}"; do
   DEST="$HOME/Library/LaunchAgents/$LABEL.plist"
   if [ -f "$DEST" ]; then

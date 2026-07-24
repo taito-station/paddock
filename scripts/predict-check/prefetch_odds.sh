@@ -13,8 +13,13 @@
 # 環境変数:
 #   PADDOCK_DB_URL  Postgres 接続 URL（既定: postgres://paddock:paddock@127.0.0.1:5432/paddock）
 #                   host は 127.0.0.1 を使う（#212, localhost の ::1 先解決で別 postgres 事故回避）。
-#   WORKDIR         ログ出力先（既定: $TMPDIR/paddock-prefetch）
+#   WORKDIR         scratch 作業ディレクトリ（既定: $TMPDIR/paddock-prefetch。lock は別途固定 /tmp）
+#   PADDOCK_PREFETCH_LOG  本体ログの出力先ファイル（既定: ~/Library/Logs/paddock-prefetch.log。
+#                   /tmp は再起動・periodic clean で消えるため、取りこぼし調査に残る永続パスへ出す #493）
 #   WINDOW_MIN      発走まで何分以内を対象にするか（既定 30。引数 --window-min が優先）
+#
+# 終了コード: 全レース成功 or 対象0件で 0。fetch/変換に 1 件でも失敗したら非 0（#493）。
+#   発走直前オッズ snapshot は再取得不能資産のため、失敗を exit 0 に握り潰さず launchd 側へ伝える。
 #
 # 前提: その日の出馬表（post_time 入り）は朝の paddock-fetch-card 運用で投入済みであること。
 # 未投入なら対象 0 件で no-op（正常終了）。
@@ -44,8 +49,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 DB_URL="${PADDOCK_DB_URL:-postgres://paddock:paddock@127.0.0.1:5432/paddock}"
 WORKDIR="${WORKDIR:-${TMPDIR:-/tmp}/paddock-prefetch}"
-mkdir -p "$WORKDIR/logs"
-LOG="$WORKDIR/logs/prefetch.log"
+mkdir -p "$WORKDIR"
+# 本体ログは永続パス（~/Library/Logs）へ。/tmp は再起動・periodic clean で消え、取りこぼしの
+# 事後調査ができなくなる（#493）。PADDOCK_PREFETCH_LOG で上書き可。ディレクトリは作成する。
+LOG="${PADDOCK_PREFETCH_LOG:-$HOME/Library/Logs/paddock-prefetch.log}"
+mkdir -p "$(dirname "$LOG")"
 
 log() { echo "[$(date '+%Y-%m-%dT%H:%M:%S%z')] $*" | tee -a "$LOG"; }
 
@@ -153,7 +161,10 @@ for pid in "${PIDS[@]}"; do
 done
 
 if [ "${#FAILED[@]}" -gt 0 ]; then
+  # 発走直前 snapshot は再取得不能。失敗を exit 0 に握り潰すと launchd/監視は外形正常のまま
+  # 資産を丸ごと失う（stale バイナリ・netkeiba 変化で毎サイクル失敗しても気付けない #493）。
+  # ログ追記に加えて非 0 終了で失敗を上位（launchd の err ログ・cron の $?）へ伝える。
   log "prefetch 完了（${#FAILED[@]} 件失敗: ${FAILED[*]}）"
-else
-  log "prefetch 完了（全 ${#PIDS[@]} レース成功）"
+  exit 1
 fi
+log "prefetch 完了（全 ${#PIDS[@]} レース成功）"

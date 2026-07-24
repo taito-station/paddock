@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# 締切前 prefetch（#237）・keep-awake（#264）・日次 DB バックアップ（#265）・
-# バックアップ鮮度監視（#490）・restore 検証（#474）・snapshot retention（#492）の launchd
+# 締切前 prefetch（#237）・keep-awake（#264）・snapshot 取りこぼし検知（#493）・
+# 日次 DB バックアップ（#265）・バックアップ鮮度監視（#490）・restore 検証（#474）・
+# snapshot retention（#492）の launchd
 # エージェントを ~/Library/LaunchAgents/ に配置して有効化する。
 # 各 plist テンプレートの __REPO_ROOT__（リポジトリパス）と
 # __HOME__（$HOME・ログ出力先。backup-db / backup-staleness / verify-backup-restore /
@@ -10,13 +11,15 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 DEST_DIR="$HOME/Library/LaunchAgents"
-# prefetch（オッズ取得）・keep-awake（スリープ抑止）・backup-db（日次 DB バックアップ）・
-# backup-staleness（鮮度監視）・verify-backup-restore（週次 restore 検証）・
-# purge-snapshots（snapshot retention）の 6 エージェントをまとめて配置する。
+# prefetch（オッズ取得）・keep-awake（スリープ抑止）・snapshot-coverage（取りこぼし検知）・
+# backup-db（日次 DB バックアップ）・backup-staleness（鮮度監視）・
+# verify-backup-restore（週次 restore 検証）・purge-snapshots（snapshot retention）の
+# 7 エージェントをまとめて配置する。
 # backup-db / backup-staleness / verify-backup-restore / purge-snapshots は常駐で、
 # 開催日限定の uninstall では外さない
-# （uninstall.sh は prefetch/keep-awake のみ除去する。#416 で二重規約を解消し install に統合）。
-LABELS=(com.paddock.prefetch-odds com.paddock.keep-awake com.paddock.backup-db com.paddock.backup-staleness com.paddock.verify-backup-restore com.paddock.purge-snapshots)
+# （uninstall.sh は prefetch/keep-awake/snapshot-coverage のみ除去する。#416 で二重規約を解消し
+# install に統合。snapshot-coverage は開催日限定＝発走後の検知なので prefetch/keep-awake と同扱い #493）。
+LABELS=(com.paddock.prefetch-odds com.paddock.keep-awake com.paddock.snapshot-coverage com.paddock.backup-db com.paddock.backup-staleness com.paddock.verify-backup-restore com.paddock.purge-snapshots)
 
 mkdir -p "$DEST_DIR"
 # 先に全テンプレートの存在を検証してから load を始める（片方 load 済みで他方欠落＝部分インストールを防ぐ）。
@@ -39,10 +42,13 @@ for LABEL in "${LABELS[@]}"; do
 done
 
 echo "確認: launchctl list | grep com.paddock"
-echo "ログ: prefetch=/tmp/paddock-prefetch/logs/prefetch.log / keep-awake=/tmp/paddock-keep-awake/logs/keep-awake.log"
+echo "ログ: prefetch / snapshot-coverage=$HOME/Library/Logs/paddock-prefetch.log（永続・集約 #493）"
+echo "      keep-awake=/tmp/paddock-keep-awake/logs/keep-awake.log"
 echo "      backup-db / backup-staleness / verify-backup-restore / purge-snapshots=$HOME/Library/Logs/paddock-backup.log"
 echo "      （集約ログ。backup-db: 毎日 23:30 / staleness: 毎時 + 起動時 / verify: 毎週日曜 04:00 / purge-snapshots: 毎日 04:30）"
+echo "      snapshot-coverage: 5 分間隔・全レース発走後に一度だけ取りこぼし検知（gap/none で通知）"
 echo "      backup-db 詳細は deployments/db/BACKUP.md"
 echo "注意: 当日カード（post_time 入り）は朝の paddock-fetch-card で投入済みであること。"
 echo "      release バイナリ未ビルドなら: cargo build --release --bin paddock-fetch-card"
-echo "取りこぼし確認: python3 scripts/predict-check/snapshot_coverage.py --date <YYYY-MM-DD>"
+echo "取りこぼし確認（手動）: python3 scripts/predict-check/snapshot_coverage.py --date <YYYY-MM-DD>"
+echo "      （snapshot-coverage agent が全レース発走後に自動実行・通知するため通常は不要 #493）"
