@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 # 締切前 prefetch（#237）と keep-awake（#264）の launchd エージェントを停止・除去する。
-# backup-db（#265）と backup-staleness（#490）は install.sh で一括配置するが、
-# ここでは意図的に外さない（非対称）。backup-staleness は backup-db を見張る監視であり、
-# backup-db と対になって常駐するため uninstall の対象から外す。
+# backup-db（#265）・backup-staleness（#490）・verify-backup-restore（#474）・
+# purge-snapshots（#492）は install.sh で一括配置するが、ここでは意図的に外さない（非対称）。
+# backup-staleness は backup-db を見張る監視で backup-db と対になって常駐する。
+# purge-snapshots は snapshot retention を開催日に依らず日次で回す必要があるため常駐にする
+# （夜の uninstall で外すと肥大が再開する）。
 # prefetch/keep-awake は開催日限定運用（朝 install・夜 uninstall）だが、backup-db は常駐で
 # 毎日 23:30 に発火するため。夜の uninstall で backup-db まで外すと、新データを ingest した
-# 開催日ほど当夜のバックアップが飛ぶ。backup-db を止めたいときは手動で
+# 開催日ほど当夜のバックアップが飛ぶ。常駐エージェントを止めたいときは手動で
 # `launchctl bootout gui/$UID/com.paddock.backup-db && rm ~/Library/LaunchAgents/com.paddock.backup-db.plist`
-# する（BACKUP.md のアンインストール手順と同一。#416）。
+# のように bootout + rm する（BACKUP.md のアンインストール手順と同一。#416）。
 set -euo pipefail
 
 LABELS=(com.paddock.prefetch-odds com.paddock.keep-awake)

@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  paddock race_odds_snapshots retention LaunchAgent（#492）。
+  scripts/purge-snapshots.sh を毎日 04:30 に実行し、保持月数（既定 6）より古い snapshot を
+  paddock-analyze purge-snapshots で削除する。race_odds_snapshots は ≈30MB/日・年 ≈11GB で
+  単調増加するため、放置すると Colima VM ディスクと dump サイズ（backup 時間・off-machine
+  転送量に直結）が黙って肥大する。それを日次の retention で bounded に保つ。
+
+  実行時刻 04:30 は backup-db（毎日 23:30）より後に置く。これにより当夜の dump は purge 前の
+  状態を退避してから翌朝に古い snapshot を削る順序になり、backup が消える前の snapshot を保持する。
+  週次 verify（日曜 04:00）とも 30 分ずらして同一 DB への同時アクセスを避ける。
+
+  backup-db・backup-staleness・verify-backup-restore と同様に常駐エージェントで、
+  uninstall.sh では外さない（retention は開催日に依らず日次で回す必要があるため。非対称設計）。
+
+  インストール: deployments/launchd/install.sh がまとめて配置・load する（プレースホルダ
+  __REPO_ROOT__=リポの絶対パス / __HOME__=$HOME を実値へ置換）。
+  __HOME__ はログ出力先用（backup-db と同じログファイルに集約）。
+  PATH は launchd の最小環境で bash / release バイナリの依存を解決するため明示する（Intel の
+  /usr/local/bin と Apple Silicon の /opt/homebrew/bin の両方を含める）。
+
+  アンインストール（常駐。uninstall.sh では外さない）:
+    launchctl bootout gui/$UID/com.paddock.purge-snapshots
+    rm ~/Library/LaunchAgents/com.paddock.purge-snapshots.plist
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.paddock.purge-snapshots</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>__REPO_ROOT__/scripts/purge-snapshots.sh</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
+
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>4</integer>
+        <key>Minute</key>
+        <integer>30</integer>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>__HOME__/Library/Logs/paddock-backup.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/Library/Logs/paddock-backup.log</string>
+</dict>
+</plist>

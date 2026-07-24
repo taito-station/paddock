@@ -1,6 +1,6 @@
-# 締切前 live オッズ自動 prefetch（#237）＋ keep-awake（#264）＋ 日次 DB バックアップ（#265）＋ バックアップ鮮度監視（#490）
+# 締切前 live オッズ自動 prefetch（#237）＋ keep-awake（#264）＋ 日次 DB バックアップ（#265）＋ バックアップ鮮度監視（#490）＋ snapshot retention（#492）
 
-4 つの launchd エージェントを `install.sh` でまとめて配置する:
+6 つの launchd エージェントを `install.sh` でまとめて配置する:
 
 - **prefetch（#237）**: 発走 N 分前のレースの最新オッズを定期取得し、`race_odds_snapshots`（#232）に
   締切前 live スナップショットを蓄積する。これが回ると #218（live オッズで α 再校正）や #248
@@ -27,6 +27,23 @@
   - ログ先: `~/Library/Logs/paddock-backup.log`（backup-db と同じファイルに集約）
   - 注意: osascript 通知は表示セッション依存でベストエフォート（launchd 配下では表示されないことがある）。
     ログの STALE/FAIL マーカーが一次情報。
+- **verify-backup-restore（#474）**: 毎週日曜 04:00 に最新 dump を scratch DB へ復元し主要テーブルの
+  行数を golden と突合する週次 restore 検証（「復元できない dump を守っていた」を検知）。backup-db と
+  対になって**常駐**し、`uninstall.sh` では外れない。
+  - 本体: [`scripts/verify-backup-restore.sh`](../../scripts/verify-backup-restore.sh)
+  - ログ先: `~/Library/Logs/paddock-backup.log`（backup-db と同じファイルに集約）
+- **purge-snapshots（#492）**: 毎日 04:30 に `race_odds_snapshots` の retention を適用する常駐
+  エージェント。`race_odds_snapshots` は締切前 live オッズを 15 分毎に append する再取得不能資産だが
+  ≈30MB/日・年 ≈11GB で単調増加するため、放置すると Colima VM ディスクと dump サイズ（backup 時間・
+  off-machine 転送量に直結）が黙って肥大する。保持月数（既定 **6 ヶ月**）より古い snapshot を日次で
+  削除して bounded に保つ。実行時刻 04:30 は backup-db（23:30）の**後**に置き、当夜の dump は purge 前の
+  状態を退避してから翌朝に古い snapshot を削る順序にする。backup-db と対になって**常駐**し、
+  `uninstall.sh` では外れない（retention は開催日に依らず日次で回す必要があるため）。
+  - 本体: [`scripts/purge-snapshots.sh`](../../scripts/purge-snapshots.sh)
+    （`paddock-analyze purge-snapshots --months <N>` を実行。保持月数は `PADDOCK_PURGE_MONTHS` で上書き可）
+  - ログ先: `~/Library/Logs/paddock-backup.log`（backup-db と同じファイルに集約）
+  - 保持月数の既定 6 ヶ月: #218（live オッズで α 再校正）が要する直近 3〜6 ヶ月の上端。CLI 既定の 12 は
+    安全側の天井だが、6 ヶ月でも #218 の要件を満たしつつ定常ディスクを ≈5.4GB（12 ヶ月の約半分）に抑える。
 
 ## ⚠ スリープ取りこぼしと keep-awake の限界（#264）
 
@@ -56,28 +73,31 @@
 ## macOS（launchd, 推奨）
 
 ```sh
-# 有効化（prefetch / keep-awake / backup-db / backup-staleness の 4 エージェントを配置して load。
-# __REPO_ROOT__ は実パスに、backup-db / backup-staleness の __HOME__ はログ出力先へ置換される）
+# 有効化（prefetch / keep-awake / backup-db / backup-staleness / verify-backup-restore /
+# purge-snapshots の 6 エージェントを配置して load。__REPO_ROOT__ は実パスに、常駐エージェントの
+# __HOME__ はログ出力先へ置換される）
 deployments/launchd/install.sh
 
 # 状態確認 / ログ（launchd 経由は WORKDIR 固定）
 launchctl list | grep com.paddock
 tail -f /tmp/paddock-prefetch/logs/prefetch.log
 tail -f /tmp/paddock-keep-awake/logs/keep-awake.log
-# backup-db（毎日 23:30）と backup-staleness（毎時 + 起動時）のログは同じファイルに集約
+# backup-db（毎日 23:30）/ backup-staleness（毎時 + 起動時）/ verify（日曜 04:00）/
+# purge-snapshots（毎日 04:30）のログは同じファイルに集約
 tail -f "$HOME/Library/Logs/paddock-backup.log"
 
-# 無効化（prefetch / keep-awake のみ。backup-db / backup-staleness は常駐で外れない）
+# 無効化（prefetch / keep-awake のみ。backup-db / backup-staleness / verify-backup-restore /
+# purge-snapshots は常駐で外れない）
 deployments/launchd/uninstall.sh
 ```
 
 `StartInterval=300`（5 分間隔）。prefetch/keep-awake は開催日だけ走らせたい場合、開催日朝に install、
-夜に uninstall する運用でよい（常時 load でも対象 0 件なら no-op）。**backup-db と backup-staleness は
-常駐**で、`uninstall.sh` では外れない。backup-db を止めるときは手動で
-`launchctl bootout gui/$UID/com.paddock.backup-db && rm ~/Library/LaunchAgents/com.paddock.backup-db.plist`、
-backup-staleness を止めるときは同様に
-`launchctl bootout gui/$UID/com.paddock.backup-staleness && rm ~/Library/LaunchAgents/com.paddock.backup-staleness.plist`
-（BACKUP.md のアンインストール手順と同一）。
+夜に uninstall する運用でよい（常時 load でも対象 0 件なら no-op）。**backup-db・backup-staleness・
+verify-backup-restore・purge-snapshots は常駐**で、`uninstall.sh` では外れない。個別に止めるときは手動で
+`launchctl bootout gui/$UID/com.paddock.<label> && rm ~/Library/LaunchAgents/com.paddock.<label>.plist`
+する（`<label>` = `backup-db` / `backup-staleness` / `verify-backup-restore` / `purge-snapshots`。
+BACKUP.md のアンインストール手順と同一）。purge-snapshots の保持月数は `PADDOCK_PURGE_MONTHS`（既定 6）で
+上書きできる。
 
 ## 手動・検証
 
