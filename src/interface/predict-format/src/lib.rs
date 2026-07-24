@@ -8,8 +8,8 @@
 use std::collections::HashMap;
 
 use paddock_domain::{
-    ExplainCategory, FactorExplanation, HorseExplanation, HorseNum, HorseProbability,
-    PrevRunSummary, Surface, Verdict,
+    BetMethod, ExplainCategory, FactorExplanation, HorseExplanation, HorseNum, HorseProbability,
+    Portfolio, PrevRunSummary, Surface, Verdict,
 };
 
 /// 確率テーブル（馬番/馬名/勝率/連対率/複勝率）を盤面順のまま行に整形する。先頭はヘッダ行。
@@ -239,6 +239,89 @@ pub fn surface_jp(s: Surface) -> &'static str {
         Surface::Turf => "芝",
         Surface::Dirt => "ダート",
     }
+}
+
+/// [`format_portfolio`] の app 別表示オプション（#452）。買い目本体（軸/相手・混戦注記・各点）の整形は
+/// 共有しつつ、app 固有の見た目差だけをここで吸収する。predict（対話）と predict-watch（ライブ監視）で
+/// インデント幅・0 円脚の扱い・未取得脚の EV 表示が異なるため、その差を明示的なフラグとして持つ。
+#[derive(Debug, Clone, Copy)]
+pub struct PortfolioFormat {
+    /// 各行頭のインデント（predict は 2 スペース、predict-watch は 5 スペース）。
+    pub indent: &'static str,
+    /// `stake == 0` の脚を出力から落とすか（predict-watch は落とす。predict は 0 円脚を出さない
+    /// 前提で全脚を出す＝現行挙動を保つ）。
+    pub skip_zero_stake: bool,
+    /// オッズ未取得（`odds == None`）の脚に `EV={:.2}` を付けるか（predict は付ける、
+    /// predict-watch は付けない＝現行の各 app 出力をバイト単位で保つ）。
+    pub ev_on_unpriced: bool,
+}
+
+/// ポートフォリオを「そのまま買える形」（CLAUDE.md 表記規約: 方式/軸/相手/各点=式別×金額）に整形し、
+/// 行の羅列（`Vec<String>`）で返す（#452）。predict と predict-watch のほぼ同一だったインライン整形を
+/// 一本化したもの。ヘッダ（券種予算行）・フッタ（賭け計 / 期待回収率）や軸なし・買い目なしの注記は
+/// app 側で前後に付ける（それらは app 固有で重複していないため共有しない）。
+///
+/// 出力する行:
+/// 1. 軸行 `軸 {axis} → 相手 {p1},{p2},...`（`axis` が `Some` のときのみ）
+/// 2. 混戦注記 `混戦: 印馬3連複ボックス（軸なし）を併用`（Box 方式の脚が 1 つでもあるとき）
+/// 3. 各買い目行 `[{方式}] {組合せ} ¥{金額} {オッズ|未取得} 的中{:.1}%[ EV={:.2}]`
+///
+/// 方式は `ながし`（軸流し）/ `ボックス`（軸なし総当たり）を明示し、CLAUDE.md の「ながし/ボックス/
+/// フォーメーションを正しく区別する」表記規約に従う。金額は domain 側で 100 円単位に整えられている。
+pub fn format_portfolio(p: &Portfolio, fmt: &PortfolioFormat) -> Vec<String> {
+    let indent = fmt.indent;
+    let mut lines = Vec::new();
+    if let Some(axis) = p.axis {
+        let partners = p
+            .partners
+            .iter()
+            .map(|h| h.value().to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        lines.push(format!("{indent}軸 {} → 相手 {}", axis.value(), partners));
+    }
+    // 方式（ながし/ボックス）を明示する。box は軸を持たない印馬総当たりで、「軸流し」枠の脚と
+    // 混同しないよう区別表示する（CLAUDE.md 表記規約）。
+    if p.bets.iter().any(|b| b.method == BetMethod::Box) {
+        lines.push(format!("{indent}混戦: 印馬3連複ボックス（軸なし）を併用"));
+    }
+    for bet in &p.bets {
+        if fmt.skip_zero_stake && bet.stake == 0 {
+            continue;
+        }
+        let method = match bet.method {
+            BetMethod::Nagashi => "ながし",
+            BetMethod::Box => "ボックス",
+        };
+        let label = bet.combination.label_ja();
+        match bet.odds {
+            Some(o) => lines.push(format!(
+                "{indent}[{}] {} ¥{} オッズ{:.1} 的中{:.1}% EV={:.2}",
+                method,
+                label,
+                bet.stake,
+                o,
+                bet.hit_prob * 100.0,
+                bet.ev,
+            )),
+            None if fmt.ev_on_unpriced => lines.push(format!(
+                "{indent}[{}] {} ¥{} オッズ未取得 的中{:.1}% EV={:.2}",
+                method,
+                label,
+                bet.stake,
+                bet.hit_prob * 100.0,
+                bet.ev,
+            )),
+            None => lines.push(format!(
+                "{indent}[{}] {} ¥{} オッズ未取得 的中{:.1}%",
+                method,
+                label,
+                bet.stake,
+                bet.hit_prob * 100.0,
+            )),
+        }
+    }
+    lines
 }
 
 #[cfg(test)]
@@ -474,6 +557,150 @@ mod tests {
     fn surface_jp_maps_both_surfaces() {
         assert_eq!(surface_jp(Surface::Turf), "芝");
         assert_eq!(surface_jp(Surface::Dirt), "ダート");
+    }
+
+    // --- format_portfolio（#452） ---
+    use super::{PortfolioFormat, format_portfolio};
+    use paddock_domain::{BetCombination, BetMethod, Pair, Portfolio, PortfolioBet, Triple};
+
+    fn pf_bet(
+        combo: BetCombination,
+        method: BetMethod,
+        stake: u64,
+        odds: Option<f64>,
+    ) -> PortfolioBet {
+        PortfolioBet {
+            combination: combo,
+            method,
+            stake,
+            odds,
+            ev: 1.23,
+            hit_prob: 0.25,
+        }
+    }
+
+    /// predict 側の設定（2 スペース・0 円脚も出す・未取得脚にも EV）。
+    fn predict_fmt() -> PortfolioFormat {
+        PortfolioFormat {
+            indent: "  ",
+            skip_zero_stake: false,
+            ev_on_unpriced: true,
+        }
+    }
+
+    /// predict-watch 側の設定（5 スペース・0 円脚を落とす・未取得脚に EV なし）。
+    fn watch_fmt() -> PortfolioFormat {
+        PortfolioFormat {
+            indent: "     ",
+            skip_zero_stake: true,
+            ev_on_unpriced: false,
+        }
+    }
+
+    #[test]
+    fn format_portfolio_predict_axis_partners_and_priced_leg() {
+        let quinella = BetCombination::Quinella(Pair::try_from((horse(1), horse(5))).unwrap());
+        let pf = Portfolio {
+            axis: Some(horse(1)),
+            partners: vec![horse(5), horse(3)],
+            konsen: false,
+            bets: vec![pf_bet(quinella, BetMethod::Nagashi, 300, Some(4.2))],
+            total_stake: 300,
+            ev: None,
+        };
+        let lines = format_portfolio(&pf, &predict_fmt());
+        assert_eq!(lines[0], "  軸 1 → 相手 5,3");
+        // priced 脚: [方式] 組合せ ¥金額 オッズX.X 的中Y% EV=Z（predict/watch 共通の priced 書式）。
+        assert_eq!(
+            lines[1],
+            "  [ながし] 馬連 1-5 ¥300 オッズ4.2 的中25.0% EV=1.23"
+        );
+        assert_eq!(lines.len(), 2, "軸なし・空注記・フッタは app 側で付す");
+    }
+
+    #[test]
+    fn format_portfolio_konsen_note_and_box_method() {
+        let trio = BetCombination::Trio(Triple::try_from((horse(1), horse(2), horse(3))).unwrap());
+        let pf = Portfolio {
+            axis: Some(horse(1)),
+            partners: vec![horse(2)],
+            konsen: true,
+            bets: vec![pf_bet(trio, BetMethod::Box, 100, Some(30.0))],
+            total_stake: 100,
+            ev: None,
+        };
+        let lines = format_portfolio(&pf, &predict_fmt());
+        assert_eq!(lines[0], "  軸 1 → 相手 2");
+        // Box 脚が 1 つでもあれば混戦注記を出す（ながし/ボックスの区別＝表記規約）。
+        assert_eq!(lines[1], "  混戦: 印馬3連複ボックス（軸なし）を併用");
+        assert_eq!(
+            lines[2],
+            "  [ボックス] 三連複 1-2-3 ¥100 オッズ30.0 的中25.0% EV=1.23"
+        );
+    }
+
+    #[test]
+    fn format_portfolio_unpriced_ev_toggle_differs_by_app() {
+        let quinella = BetCombination::Quinella(Pair::try_from((horse(1), horse(4))).unwrap());
+        let pf = Portfolio {
+            axis: Some(horse(1)),
+            partners: vec![horse(4)],
+            konsen: false,
+            bets: vec![pf_bet(quinella, BetMethod::Nagashi, 200, None)],
+            total_stake: 200,
+            ev: None,
+        };
+        // predict: 未取得脚にも EV を付ける。
+        let predict = format_portfolio(&pf, &predict_fmt());
+        assert_eq!(
+            predict[1],
+            "  [ながし] 馬連 1-4 ¥200 オッズ未取得 的中25.0% EV=1.23"
+        );
+        // predict-watch: 未取得脚は EV を付けず 5 スペースインデント。
+        let watch = format_portfolio(&pf, &watch_fmt());
+        assert_eq!(
+            watch[1],
+            "     [ながし] 馬連 1-4 ¥200 オッズ未取得 的中25.0%"
+        );
+    }
+
+    #[test]
+    fn format_portfolio_watch_skips_zero_stake_predict_keeps_it() {
+        let a = BetCombination::Quinella(Pair::try_from((horse(1), horse(2))).unwrap());
+        let b = BetCombination::Quinella(Pair::try_from((horse(1), horse(3))).unwrap());
+        let pf = Portfolio {
+            axis: Some(horse(1)),
+            partners: vec![horse(2), horse(3)],
+            konsen: false,
+            bets: vec![
+                pf_bet(a, BetMethod::Nagashi, 0, Some(5.0)),
+                pf_bet(b, BetMethod::Nagashi, 100, Some(5.0)),
+            ],
+            total_stake: 100,
+            ev: None,
+        };
+        // predict は 0 円脚も出す（2 脚）。
+        let predict = format_portfolio(&pf, &predict_fmt());
+        assert_eq!(predict.len(), 3, "軸行 + 2 脚");
+        // predict-watch は 0 円脚を落とす（1 脚だけ）。
+        let watch = format_portfolio(&pf, &watch_fmt());
+        assert_eq!(watch.len(), 2, "軸行 + 100 円脚のみ");
+        assert!(watch[1].contains("¥100"));
+    }
+
+    #[test]
+    fn format_portfolio_no_axis_emits_no_lines() {
+        // 軸 None（確率推定が空）は共有整形からは何も出さない（app 側が注記を付す）。
+        let pf = Portfolio {
+            axis: None,
+            partners: vec![],
+            konsen: false,
+            bets: vec![],
+            total_stake: 0,
+            ev: None,
+        };
+        assert!(format_portfolio(&pf, &predict_fmt()).is_empty());
+        assert!(format_portfolio(&pf, &watch_fmt()).is_empty());
     }
 
     #[test]

@@ -3,12 +3,15 @@ use std::io::{self, BufRead, Write};
 
 use chrono::{NaiveDate, Utc};
 use paddock_domain::{
-    BetCombination, BetMethod, HorseNum, HorseProbability, PairEvDiagnostic, PortfolioBet,
-    PortfolioConfig, RECOMMENDED_MARKET_BLEND_ALPHA, Race, RaceId, TrackCondition, build_portfolio,
+    BetCombination, HorseNum, HorseProbability, PairEvDiagnostic, PortfolioBet, PortfolioConfig,
+    RECOMMENDED_MARKET_BLEND_ALPHA, Race, RaceId, TrackCondition, build_portfolio,
     pair_ev_diagnostics,
 };
 use paddock_use_case::{PredictBetRecord, PredictSessionRecord, PredictionViews};
-use predict_format::{format_explanations, format_probs, format_probs_with_market, surface_jp};
+use predict_format::{
+    PortfolioFormat, format_explanations, format_portfolio, format_probs, format_probs_with_market,
+    surface_jp,
+};
 
 use crate::setup::App;
 
@@ -255,44 +258,25 @@ async fn run_race(
 
     println!();
     println!("【市場EV視点：買い目推奨（軸流し, 予算¥{race_cap}/R・EV=純モデル×odds）】");
-    match portfolio.axis {
-        Some(axis) => {
-            let partners = portfolio
-                .partners
-                .iter()
-                .map(|h| h.value().to_string())
-                .collect::<Vec<_>>()
-                .join(",");
-            println!("  軸 {} → 相手 {}", axis.value(), partners);
-        }
-        None => println!("  確率推定が空のため買い目なし"),
+    // 軸/相手・混戦注記・各点の「そのまま買える形」整形は predict-watch と共有する
+    // `predict_format::format_portfolio` に委譲する（#452）。predict は 2 スペースインデント・
+    // 0 円脚も出す・未取得脚にも EV を付ける設定（現行出力をバイト単位で保つ）。軸なし・買い目なしの
+    // 注記と期待回収率フッタは predict 固有なので前後に付す。
+    if portfolio.axis.is_none() {
+        println!("  確率推定が空のため買い目なし");
     }
-    if portfolio.bets.iter().any(|b| b.method == BetMethod::Box) {
-        println!("  混戦: 印馬3連複ボックス（軸なし）を併用");
+    for line in format_portfolio(
+        &portfolio,
+        &PortfolioFormat {
+            indent: "  ",
+            skip_zero_stake: false,
+            ev_on_unpriced: true,
+        },
+    ) {
+        println!("{line}");
     }
     if portfolio.bets.is_empty() {
         println!("  予算内で組める買い目なし");
-    }
-    for bet in &portfolio.bets {
-        let odds = match bet.odds {
-            Some(o) => format!("オッズ{o:.1}"),
-            None => "オッズ未取得".to_string(),
-        };
-        // 方式（ながし/ボックス）を明示する。box は軸を持たない印馬総当たりで、
-        // 「軸流し」枠の脚と混同しないよう区別表示する（CLAUDE.md 表記規約）。
-        let method = match bet.method {
-            BetMethod::Nagashi => "ながし",
-            BetMethod::Box => "ボックス",
-        };
-        println!(
-            "  [{}] {} ¥{} {} 的中{:.1}% EV={:.2}",
-            method,
-            bet.combination.label_ja(),
-            bet.stake,
-            odds,
-            bet.hit_prob * 100.0,
-            bet.ev,
-        );
     }
     if let Some(ev) = &portfolio.ev {
         // 期待回収率・的中率はオッズ取得済みの脚についての値（未取得脚は払戻を見積もれず除外）。

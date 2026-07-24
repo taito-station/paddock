@@ -3,11 +3,13 @@ use std::collections::HashMap;
 use chrono::{Duration, NaiveTime, Utc};
 use monitor_loop::{RaceStatus, Sweeper, has_result, run_monitor_loop, warn_if_not_today_jst_now};
 use paddock_domain::{
-    BetMethod, Portfolio, PortfolioConfig, RECOMMENDED_MARKET_BLEND_ALPHA, Race, RaceClass, RaceId,
-    Venue, build_portfolio, race_roughness,
+    Portfolio, PortfolioConfig, RECOMMENDED_MARKET_BLEND_ALPHA, Race, RaceClass, RaceId, Venue,
+    build_portfolio, race_roughness,
 };
 use paddock_use_case::PredictionViews;
-use predict_format::{format_explanations, format_probs, format_probs_with_market};
+use predict_format::{
+    PortfolioFormat, format_explanations, format_portfolio, format_probs, format_probs_with_market,
+};
 
 use crate::cli::Cli;
 use crate::setup::App;
@@ -407,47 +409,19 @@ async fn evaluate_race(app: &App, slot: &Slot, is_ura: bool, captured_at: &str, 
     }
 }
 
-/// 張り候補の買い目を「そのまま買える形」で出力する（軸/相手＋各点）。
+/// 張り候補の買い目を「そのまま買える形」で出力する（軸/相手＋各点）。整形は predict と共有する
+/// `predict_format::format_portfolio` に委譲し（#452）、賭け計フッタだけ predict-watch 固有で付す。
+/// predict-watch は 5 スペースインデント・0 円脚を落とす・未取得脚に EV を付けない設定。
 fn print_buy_targets(p: &Portfolio) {
-    if let Some(axis) = p.axis {
-        let rel = p
-            .partners
-            .iter()
-            .map(|h| h.value().to_string())
-            .collect::<Vec<_>>()
-            .join(",");
-        println!("     軸 {} → 相手 {}", axis.value(), rel);
-    }
-    if p.bets.iter().any(|b| b.method == BetMethod::Box) {
-        println!("     混戦: 印馬3連複ボックス（軸なし）を併用");
-    }
-    for bet in &p.bets {
-        if bet.stake == 0 {
-            continue;
-        }
-        // 方式（ながし/ボックス）を明示。box は軸なしの印馬総当たりで「軸流し」枠と区別する（表記規約）。
-        let method = match bet.method {
-            BetMethod::Nagashi => "ながし",
-            BetMethod::Box => "ボックス",
-        };
-        match bet.odds {
-            Some(o) => println!(
-                "     [{}] {} ¥{} オッズ{:.1} 的中{:.1}% EV={:.2}",
-                method,
-                bet.combination.label_ja(),
-                bet.stake,
-                o,
-                bet.hit_prob * 100.0,
-                bet.ev,
-            ),
-            None => println!(
-                "     [{}] {} ¥{} オッズ未取得 的中{:.1}%",
-                method,
-                bet.combination.label_ja(),
-                bet.stake,
-                bet.hit_prob * 100.0,
-            ),
-        }
+    for line in format_portfolio(
+        p,
+        &PortfolioFormat {
+            indent: "     ",
+            skip_zero_stake: true,
+            ev_on_unpriced: false,
+        },
+    ) {
+        println!("{line}");
     }
     println!("     賭け計 ¥{}", p.total_stake);
 }
