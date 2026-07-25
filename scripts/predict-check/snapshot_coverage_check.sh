@@ -68,7 +68,7 @@ run_coverage() {
   local out rc
   out="$(PADDOCK_DB_URL="$DB_URL" python3 "$SCRIPT_DIR/snapshot_coverage.py" \
           --date "$DATE" --max-lag-min "$MAX_LAG" --fail-on-gap 2>&1)" && rc=0 || rc=$?
-  printf '%s\n' "$out" | tee -a "$LOG" >/dev/null
+  printf '%s\n' "$out" | tee -a "$LOG" >/dev/null || true
   if [ "$rc" -eq 0 ]; then
     log "OK: snapshot 全レース網羅（${DATE}・最終 snapshot 発走 ${MAX_LAG} 分前以内）"
     return
