@@ -282,6 +282,9 @@ pub fn format_portfolio(p: &Portfolio, fmt: &PortfolioFormat) -> Vec<String> {
     }
     // 方式（ながし/ボックス）を明示する。box は軸を持たない印馬総当たりで、「軸流し」枠の脚と
     // 混同しないよう区別表示する（CLAUDE.md 表記規約）。
+    // 混戦注記は `Portfolio.konsen` フラグではなく Box 脚の有無で判定する。旧 predict/predict-watch
+    // 両実装がこの条件だったため、出力をバイト単位で保つべく踏襲する（混戦でも予算不足で Box 脚が
+    // 0 点なら注記を出さない、という現行挙動を変えない。konsen へ差し替えないこと）。
     if p.bets.iter().any(|b| b.method == BetMethod::Box) {
         lines.push(format!("{indent}混戦: 印馬3連複ボックス（軸なし）を併用"));
     }

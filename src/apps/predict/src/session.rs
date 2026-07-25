@@ -275,6 +275,8 @@ async fn run_race(
     ) {
         println!("{line}");
     }
+    // `予算内で組める買い目なし` と format_portfolio の各点行は `bets.is_empty()` で排他
+    // （空なら各点行ゼロ・非空なら本注記が fire しない）。よって注記を各点行の後に置いても順序は不変。
     if portfolio.bets.is_empty() {
         println!("  予算内で組める買い目なし");
     }
