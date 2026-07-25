@@ -1,6 +1,6 @@
-# 締切前 live オッズ自動 prefetch（#237）＋ keep-awake（#264）＋ 日次 DB バックアップ（#265）＋ バックアップ鮮度監視（#490）＋ snapshot retention（#492）
+# 締切前 live オッズ自動 prefetch（#237）＋ keep-awake（#264）＋ snapshot 取りこぼし検知（#493）＋ 日次 DB バックアップ（#265）＋ バックアップ鮮度監視（#490）＋ snapshot retention（#492）
 
-6 つの launchd エージェントを `install.sh` でまとめて配置する:
+7 つの launchd エージェントを `install.sh` でまとめて配置する:
 
 - **prefetch（#237）**: 発走 N 分前のレースの最新オッズを定期取得し、`race_odds_snapshots`（#232）に
   締切前 live スナップショットを蓄積する。これが回ると #218（live オッズで α 再校正）や #248
@@ -8,9 +8,25 @@
   - 本体: [`scripts/predict-check/prefetch_odds.sh`](../../scripts/predict-check/prefetch_odds.sh)
   - レース選択: [`scripts/predict-check/upcoming_races_db.py`](../../scripts/predict-check/upcoming_races_db.py)
     （#235 の `race_cards.post_time` を DB 参照。netkeiba 都度スクレイプ無し）
+  - 本体ログ先: `~/Library/Logs/paddock-prefetch.log`（永続。`/tmp` は再起動・periodic clean で消え
+    取りこぼしの事後調査ができなくなるため #493。`PADDOCK_PREFETCH_LOG` で上書き可）
+  - **終了コード**: fetch/race_id 変換に 1 件でも失敗したら非 0 で終了する（#493）。発走直前 snapshot は
+    再取得不能資産のため、stale バイナリ・netkeiba 変化での失敗を `exit 0` に握り潰さず launchd の
+    err ログ（`/tmp/paddock-prefetch.launchd.err.log`）へ伝える。全成功・対象 0 件は 0。
 - **keep-awake（#264）**: 開催日の発走ウィンドウ中、`caffeinate -i` で Mac のアイドルスリープを
   抑止し、上記 prefetch の 5 分タイマーが寝て止まる取りこぼしを防ぐ。
   - 本体: [`scripts/predict-check/keep_awake.sh`](../../scripts/predict-check/keep_awake.sh)
+- **snapshot-coverage（#493）**: 開催日の全レース発走後に snapshot 取りこぼしを**自動検知**する。
+  `keep_awake.sh` の END 判定と同じ基準（当日の最終 `post_time` + buffer 10 分）で「全レース発走済み」を
+  検出したタイミングで一度だけ [`snapshot_coverage.py --fail-on-gap`](../../scripts/predict-check/snapshot_coverage.py)
+  を実行し、gap/none/bad_ts が残るレースがあれば osascript 通知する。prefetch が Mac スリープ・stale
+  バイナリ・netkeiba 変化で毎サイクル失敗しても launchd は正常発火し続けるため（外形無事）、その日のうちに
+  欠落を検知する。発走ウィンドウ中・開催外は no-op、最終発走後の初回だけ実走し当日 marker
+  （`~/Library/Logs/.snapshot-coverage-done.<date>`）で二度実行しない（通知連投を防ぐ）。prefetch /
+  keep-awake と同じ**開催日限定**エージェントで `uninstall.sh` で外れる。
+  - 本体: [`scripts/predict-check/snapshot_coverage_check.sh`](../../scripts/predict-check/snapshot_coverage_check.sh)
+  - ログ先: `~/Library/Logs/paddock-prefetch.log`（prefetch と同じファイルに集約。`PADDOCK_COVERAGE_LOG` で上書き可）
+  - 注意: osascript 通知は表示セッション依存でベストエフォート。ログの `GAP` マーカーが一次情報。
 - **backup-db（#265）**: 毎日 23:30 に full DB dump を退避先へ退避＋世代管理する常駐エージェント。
   prefetch/keep-awake が開催日限定（朝 install・夜 uninstall）なのに対し**常駐**で、`uninstall.sh`
   では**外れない**（開催日夜に uninstall しても当夜のバックアップを守るため。詳細は下記と
@@ -55,12 +71,15 @@
   **既にスリープ中の Mac を起こすこともできない**（朝に keep-awake が発火する時点で起きている必要）。
 - **完全な堅牢化**は常時稼働ホスト（RasPi / 小型クラウド VM 等）へ prefetch を移設して
   ローカル Mac の電源・スリープ状態に依存させないこと（構成変更が大きいため別途）。
-- **取りこぼしの事後検知**: 開催後に
-  [`scripts/predict-check/snapshot_coverage.py`](../../scripts/predict-check/snapshot_coverage.py)
-  で「最終 snapshot が発走の何分前で止まっているか」を一覧し、gap/none のレースを洗い出す。
+- **取りこぼしの当日検知（自動・#493）**: 上記 snapshot-coverage agent が全レース発走後に
+  [`snapshot_coverage.py --fail-on-gap`](../../scripts/predict-check/snapshot_coverage.py)
+  を自動実行し、gap/none のレースがあればその日のうちに通知する（`/tmp` に消えていた prefetch ログの
+  永続化＋失敗の非 0 終了と合わせ、取りこぼしを事後まで気付けない穴を塞ぐ）。手動で再確認する場合:
   ```sh
   python3 scripts/predict-check/snapshot_coverage.py --date <YYYY-MM-DD>   # 既定 max-lag 10 分
   python3 scripts/predict-check/snapshot_coverage.py --date <YYYY-MM-DD> --fail-on-gap  # 監視用に exit 1
+  # agent ラッパを手動発火（発走ウィンドウ判定を無視して即実行）
+  scripts/predict-check/snapshot_coverage_check.sh --date <YYYY-MM-DD> --force
   ```
 
 ## 前提
@@ -73,26 +92,26 @@
 ## macOS（launchd, 推奨）
 
 ```sh
-# 有効化（prefetch / keep-awake / backup-db / backup-staleness / verify-backup-restore /
-# purge-snapshots の 6 エージェントを配置して load。__REPO_ROOT__ は実パスに、常駐エージェントの
-# __HOME__ はログ出力先へ置換される）
+# 有効化（prefetch / keep-awake / snapshot-coverage / backup-db / backup-staleness /
+# verify-backup-restore / purge-snapshots の 7 エージェントを配置して load。__REPO_ROOT__ は
+# 実パスに、常駐エージェントの __HOME__ はログ出力先へ置換される）
 deployments/launchd/install.sh
 
 # 状態確認 / ログ（launchd 経由は WORKDIR 固定）
 launchctl list | grep com.paddock
-tail -f /tmp/paddock-prefetch/logs/prefetch.log
+tail -f "$HOME/Library/Logs/paddock-prefetch.log"   # prefetch / snapshot-coverage（永続・集約 #493）
 tail -f /tmp/paddock-keep-awake/logs/keep-awake.log
 # backup-db（毎日 23:30）/ backup-staleness（毎時 + 起動時）/ verify（日曜 04:00）/
 # purge-snapshots（毎日 04:30）のログは同じファイルに集約
 tail -f "$HOME/Library/Logs/paddock-backup.log"
 
-# 無効化（prefetch / keep-awake のみ。backup-db / backup-staleness / verify-backup-restore /
-# purge-snapshots は常駐で外れない）
+# 無効化（prefetch / keep-awake / snapshot-coverage のみ。backup-db / backup-staleness /
+# verify-backup-restore / purge-snapshots は常駐で外れない）
 deployments/launchd/uninstall.sh
 ```
 
-`StartInterval=300`（5 分間隔）。prefetch/keep-awake は開催日だけ走らせたい場合、開催日朝に install、
-夜に uninstall する運用でよい（常時 load でも対象 0 件なら no-op）。**backup-db・backup-staleness・
+`StartInterval=300`（5 分間隔）。prefetch/keep-awake/snapshot-coverage は開催日だけ走らせたい場合、
+開催日朝に install、夜に uninstall する運用でよい（常時 load でも対象 0 件なら no-op）。**backup-db・backup-staleness・
 verify-backup-restore・purge-snapshots は常駐**で、`uninstall.sh` では外れない。個別に止めるときは手動で
 `launchctl bootout gui/$UID/com.paddock.<label> && rm ~/Library/LaunchAgents/com.paddock.<label>.plist`
 する（`<label>` = `backup-db` / `backup-staleness` / `verify-backup-restore` / `purge-snapshots`。
@@ -112,7 +131,11 @@ scripts/predict-check/prefetch_odds.sh
 # keep-awake: 当日の発走ウィンドウ算出を確認（caffeinate は起動しない）
 scripts/predict-check/keep_awake.sh --dry-run
 scripts/predict-check/keep_awake.sh --at 08:00 --dry-run    # 現在時刻を上書きして検証
-```
+
+# snapshot-coverage: 発走ウィンドウ判定を確認（--at で現在時刻上書き。END 前は no-op）
+scripts/predict-check/snapshot_coverage_check.sh --at 08:00    # 発走前 → まだ検知しない
+# 発走ウィンドウ/marker を無視して即 coverage 実行（DB 要・通知含む挙動確認）
+scripts/predict-check/snapshot_coverage_check.sh --date <YYYY-MM-DD> --force
 
 ## cron 代替（任意）
 

@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  開催日の全レース発走後に snapshot 取りこぼしを自動検知する LaunchAgent（#493）。
+  scripts/predict-check/snapshot_coverage_check.sh を 5 分間隔で発火し、keep_awake.sh の END 判定と
+  同じ基準（当日の最終 post_time + buffer）で「全レース発走済み」を検出したタイミングで一度だけ
+  snapshot_coverage.py --fail-on-gap を実行する。gap/none/bad_ts が残れば osascript で通知する。
+
+  prefetch（#237）が Mac スリープ・stale バイナリ・netkeiba 変化で毎サイクル失敗しても launchd は
+  正常発火し続けるため、発走直前オッズ snapshot（再取得不能資産）を丸ごと失っても事後まで気付けない。
+  本 agent はその日のうちに欠落を検知して通知する。発走ウィンドウ中・開催外は no-op、最終発走後の
+  初回だけ実走し当日 marker で二度実行しない（通知連投を防ぐ）。
+
+  __REPO_ROOT__ は install.sh が実リポジトリパスへ置換する（プレースホルダのまま load しない）。
+  StartInterval=300（5 分間隔）。prefetch / keep-awake と同じ開催日限定エージェントで、
+  uninstall.sh で prefetch / keep-awake とともに外れる（backup 系のような常駐ではない）。
+
+  ログは snapshot_coverage_check.sh 側が永続パス ~/Library/Logs/paddock-prefetch.log へ集約する
+  （prefetch と同じファイル。/tmp は再起動で消えるため #493）。
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.paddock.snapshot-coverage</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>__REPO_ROOT__/scripts/predict-check/snapshot_coverage_check.sh</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>__REPO_ROOT__</string>
+
+    <!-- launchd は最小 PATH なので psql / python3 / osascript を探せるよう補う（prefetch と同方針）。
+         Homebrew は Intel(/usr/local) と Apple Silicon(/opt/homebrew) の両方を入れておく。 -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+
+    <key>StartInterval</key>
+    <integer>300</integer>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- launchd の捕捉する stdout/stderr は常に存在する /tmp 直下へ出す（リポジトリ直下に
+         未追跡ファイルを生成しない。本体の詳細ログは ~/Library/Logs/paddock-prefetch.log）。 -->
+    <key>StandardOutPath</key>
+    <string>/tmp/paddock-snapshot-coverage.launchd.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/paddock-snapshot-coverage.launchd.err.log</string>
+</dict>
+</plist>

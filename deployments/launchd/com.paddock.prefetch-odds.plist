@@ -21,8 +21,9 @@
 
     <!-- launchd は最小 PATH なので psql / python3 / cargo 産物を探せるよう補う。
          Homebrew は Intel(/usr/local) と Apple Silicon(/opt/homebrew) の両方を入れておく。
-         WORKDIR を固定し、launchd 起動でも本体ログが決まった場所（/tmp/paddock-prefetch/logs/）に
-         出るようにする（README の確認パスと一致させる。$TMPDIR は launchd と対話シェルでズレうる）。 -->
+         WORKDIR を固定し scratch（lock 等）の場所を launchd と対話シェルで揃える
+         （$TMPDIR は launchd と対話シェルでズレうる）。本体ログは prefetch_odds.sh 側が
+         永続パス ~/Library/Logs/paddock-prefetch.log へ出す（/tmp は再起動で消えるため #493）。 -->
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
