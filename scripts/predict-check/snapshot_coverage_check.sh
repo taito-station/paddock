@@ -51,7 +51,9 @@ DB_URL="${PADDOCK_DB_URL:-postgres://paddock:paddock@127.0.0.1:5432/paddock}"
 MAX_LAG="${PADDOCK_COVERAGE_MAX_LAG:-10}"
 LOG="${PADDOCK_COVERAGE_LOG:-$HOME/Library/Logs/paddock-prefetch.log}"
 mkdir -p "$(dirname "$LOG")"
-log() { echo "[$(date '+%Y-%m-%dT%H:%M:%S%z')] $*" | tee -a "$LOG"; }
+# tee 失敗（ログ先書込不可等）を握る。set -e 下では tee の非0が log 行でスクリプトを中断し、
+# marker 書込や後続判定を飛ばしうる。ログ出力の副作用失敗で制御フローを乱さない（prefetch と同方針）。
+log() { echo "[$(date '+%Y-%m-%dT%H:%M:%S%z')] $*" | tee -a "$LOG" || true; }
 
 notify() {
   # メッセージは argv 経由で AppleScript に渡す（" や \ で壊れない。backup-staleness と同方式）。
@@ -67,16 +69,24 @@ run_coverage() {
   out="$(PADDOCK_DB_URL="$DB_URL" python3 "$SCRIPT_DIR/snapshot_coverage.py" \
           --date "$DATE" --max-lag-min "$MAX_LAG" --fail-on-gap 2>&1)" && rc=0 || rc=$?
   printf '%s\n' "$out" | tee -a "$LOG" >/dev/null
-  if [ "$rc" -ne 0 ]; then
-    # 末尾の「要確認 NR: ...」行を通知に載せる（無ければ汎用文言）。
-    local detail
-    detail="$(printf '%s\n' "$out" | grep '要確認' | tail -1)"
-    [ -n "$detail" ] || detail="snapshot 取りこぼし検知（${DATE}）。詳細はログ参照。"
-    log "GAP: snapshot 取りこぼしあり（${DATE}）: $detail"
-    notify "$detail"
-  else
+  if [ "$rc" -eq 0 ]; then
     log "OK: snapshot 全レース網羅（${DATE}・最終 snapshot 発走 ${MAX_LAG} 分前以内）"
+    return
   fi
+  # rc≠0 は「取りこぼし(gap/none/bad_ts)」と「DB 取得失敗」の両方を含む（py は接続失敗でも exit 1）。
+  # 通常経路は事前 psql チェックで守られるが --force は事前チェックなしで直接ここへ来るため、DB
+  # ダウン中の --force を「取りこぼし」と誤通知しないよう、py の DB 失敗痕跡を先に分けて扱う。
+  if printf '%s\n' "$out" | grep -q 'DB 取得に失敗'; then
+    log "ERROR: snapshot coverage が DB 取得に失敗（${DATE}）。取りこぼし判定は保留"
+    notify "snapshot coverage: DB エラーで判定不能（${DATE}）。詳細はログ参照。"
+    return
+  fi
+  # 末尾の「要確認 NR: ...」行を通知に載せる（無ければ汎用文言）。
+  local detail
+  detail="$(printf '%s\n' "$out" | grep '要確認' | tail -1)"
+  [ -n "$detail" ] || detail="snapshot 取りこぼし検知（${DATE}）。詳細はログ参照。"
+  log "GAP: snapshot 取りこぼしあり（${DATE}）: $detail"
+  notify "$detail"
 }
 
 if [ "$FORCE" -eq 1 ]; then

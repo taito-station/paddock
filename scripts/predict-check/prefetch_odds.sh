@@ -55,7 +55,10 @@ mkdir -p "$WORKDIR"
 LOG="${PADDOCK_PREFETCH_LOG:-$HOME/Library/Logs/paddock-prefetch.log}"
 mkdir -p "$(dirname "$LOG")"
 
-log() { echo "[$(date '+%Y-%m-%dT%H:%M:%S%z')] $*" | tee -a "$LOG"; }
+# tee 失敗（~/Library/Logs 書込不可等）を握る。set -e 下では tee の非0が log 呼び出し行で
+# スクリプトを中断し、全成功パスでも exit≠0＝launchd err に誤警報が乗る（#493 レビュー指摘）。
+# ログ出力の副作用失敗で本体（fetch 成否）の戻り値を汚さない。
+log() { echo "[$(date '+%Y-%m-%dT%H:%M:%S%z')] $*" | tee -a "$LOG" || true; }
 
 # 多重起動防止。launchd の StartInterval と前回実行（ハング含む）が重なっても二重 fetch しない。
 # 素の macOS に flock は同梱されないため、flock 不在時は mkdir の原子性で排他するフォールバックを
@@ -168,3 +171,5 @@ if [ "${#FAILED[@]}" -gt 0 ]; then
   exit 1
 fi
 log "prefetch 完了（全 ${#PIDS[@]} レース成功）"
+# 正常系（全成功）は明示 exit 0 で締める（keep_awake.sh 流儀。tee 失敗は log() 側で握る二重防御）。
+exit 0
