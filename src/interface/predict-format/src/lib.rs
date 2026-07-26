@@ -36,12 +36,19 @@ pub fn format_probs(probs: &[HorseProbability]) -> Vec<String> {
 /// してしまうのを防ぐ注記が目的で、表示自体は従来どおり続ける（呼び出し側が確率テーブルの前に出す）。
 ///
 /// `field_size` は出走頭数、`horses_with_runs` は近走を 1 走以上持つ頭数。判定閾値は
-/// **全頭ゼロ**（より強い文言）と **過半で欠損**（Issue #552 の提案どおり）。どちらでもなければ `None`。
+/// **全頭ゼロ**（より強い文言）と **過半で欠損**（`without * 2 > field_size`＝厳密過半。
+/// 半数ちょうどは非警告）。どちらでもなければ `None`。Issue #552 の提案どおり。
 /// 新馬戦か取得失敗かは DB 状態だけでは確実に区別できないため、文言は両者を併記する。
 pub fn format_recent_runs_warning(field_size: usize, horses_with_runs: usize) -> Option<String> {
     if field_size == 0 {
         return None;
     }
+    // 集計は use-case（entries.len() を上限に加算）由来なので通常この不変条件は保たれる。
+    // 破れた場合でも下の saturating_sub で without=0 に畳んで誤警告しない。
+    debug_assert!(
+        horses_with_runs <= field_size,
+        "horses_with_runs ({horses_with_runs}) が field_size ({field_size}) を超えている"
+    );
     let without = field_size.saturating_sub(horses_with_runs);
     if horses_with_runs == 0 {
         Some(format!(
@@ -51,7 +58,7 @@ pub fn format_recent_runs_warning(field_size: usize, horses_with_runs: usize) ->
     } else if without * 2 > field_size {
         Some(format!(
             "⚠️ 近走データ欠損: 全 {field_size} 頭中 {without} 頭が近走ゼロ（新馬戦/近走取得失敗）。\
-             確率・回収率の信頼性は低い。"
+             確率・買い目・回収率の信頼性は低い（回収率だけで候補入り判断しない）。"
         ))
     } else {
         None

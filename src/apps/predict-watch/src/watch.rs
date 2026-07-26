@@ -327,6 +327,8 @@ async fn evaluate_race(app: &App, slot: &Slot, is_ura: bool, captured_at: &str, 
         recent_runs_coverage.field_size,
         recent_runs_coverage.horses_with_runs,
     ) {
+        // 密な監視ログでも埋もれないよう前に 1 行空けて浮かせる（他経路と同様に確率テーブル直前）。
+        println!();
         println!("  {label}: {warn}");
     }
 
