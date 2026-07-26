@@ -51,6 +51,13 @@ paddock-predict --date YYYY-MM-DD --budget 5000
 # （馬場条件だけは #80 に従い対話時同様に保存されうる。買い目 bet_records のみ非記録）
 paddock-predict --date YYYY-MM-DD --budget 5000 --skip-all
 
+# EV 一覧の再表示（#551）: --skip-all の一過性 stdout を後から何度でも見返す
+# 完了済みセッションでも当日オッズで EV 一覧（確率・買い目推奨・回収率）を再計算して表示する。
+# 予想セッション状態（セッション・買い目・馬場条件）は書き込まない（predict_sessions の手動 DELETE 不要）。
+# オッズは skip-all 同様 read-through（不完全キャッシュのレースは再スクレイプし race_odds を更新しうる）。
+# 予算上限は各レース --race-budget（残高で絞らない）。--budget は不要。
+paddock-predict --date YYYY-MM-DD --overview
+
 # 個別レースのモデル勝率確認（EV 算出・オッズ確認時）
 # ワイドオッズ（netkeiba type=5）はこのコマンドが自動取得して EV に反映するため手動取得不要
 paddock-analyze predict <race_id> --blend-alpha 0.2

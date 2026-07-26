@@ -8,7 +8,12 @@ use clap::Parser;
 async fn main() -> anyhow::Result<()> {
     let args = cli::Cli::parse();
     let app = setup::build_app().await?;
-    if args.summary {
+    if args.overview {
+        if args.budget.is_some() {
+            println!("注意: --overview では --budget は無視されます（予算は --race-budget）。");
+        }
+        session::run_overview(&app, args.date, args.race_budget, args.explain).await?;
+    } else if args.summary {
         if args.budget.is_some() {
             println!("注意: --summary では --budget は無視されます。");
         }

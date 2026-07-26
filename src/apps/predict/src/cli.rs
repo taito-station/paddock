@@ -47,6 +47,15 @@ pub struct Cli {
     /// `--summary` / `--settle` は run_session を経由しないため排他とする（誤用を無視でなくエラーに）。
     #[arg(long, conflicts_with_all = ["summary", "settle"])]
     pub skip_all: bool,
+
+    /// EV 一覧（確率テーブル・買い目推奨・期待回収率）を再表示する（#551）。完了済みセッションでも
+    /// 当日オッズで再計算して表示する。予想セッション状態（セッション・買い目・馬場条件）は書き込まない
+    /// ため、--skip-all の一過性 stdout を `predict_sessions` の手動 DELETE なしで何度でも見返せる。
+    /// オッズは他の予想コマンド同様 read-through（保存済みが complete なら再取得せず、不完全なら
+    /// 再スクレイプして `race_odds` を更新しうる＝skip-all と同じ副作用）。予算上限は各レース
+    /// `--race-budget`（残高で絞らない）。他モードとは排他。
+    #[arg(long, conflicts_with_all = ["resume", "summary", "settle", "skip_all"])]
+    pub overview: bool,
 }
 
 #[cfg(test)]
@@ -88,5 +97,65 @@ mod tests {
             "--settle",
         ]);
         assert!(res.is_err(), "--skip-all と --settle は排他であるべき");
+    }
+
+    #[test]
+    fn overview_defaults_to_false() {
+        let cli = Cli::parse_from(["paddock-predict", "--date", "2026-07-22"]);
+        assert!(!cli.overview);
+    }
+
+    #[test]
+    fn overview_flag_is_parsed() {
+        let cli = Cli::parse_from(["paddock-predict", "--date", "2026-07-22", "--overview"]);
+        assert!(cli.overview);
+    }
+
+    #[test]
+    fn overview_conflicts_with_skip_all() {
+        let res = Cli::try_parse_from([
+            "paddock-predict",
+            "--date",
+            "2026-07-22",
+            "--overview",
+            "--skip-all",
+        ]);
+        assert!(res.is_err(), "--overview と --skip-all は排他であるべき");
+    }
+
+    #[test]
+    fn overview_conflicts_with_summary() {
+        let res = Cli::try_parse_from([
+            "paddock-predict",
+            "--date",
+            "2026-07-22",
+            "--overview",
+            "--summary",
+        ]);
+        assert!(res.is_err(), "--overview と --summary は排他であるべき");
+    }
+
+    #[test]
+    fn overview_conflicts_with_resume() {
+        let res = Cli::try_parse_from([
+            "paddock-predict",
+            "--date",
+            "2026-07-22",
+            "--overview",
+            "--resume",
+        ]);
+        assert!(res.is_err(), "--overview と --resume は排他であるべき");
+    }
+
+    #[test]
+    fn overview_conflicts_with_settle() {
+        let res = Cli::try_parse_from([
+            "paddock-predict",
+            "--date",
+            "2026-07-22",
+            "--overview",
+            "--settle",
+        ]);
+        assert!(res.is_err(), "--overview と --settle は排他であるべき");
     }
 }
