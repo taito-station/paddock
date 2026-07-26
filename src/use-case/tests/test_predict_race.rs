@@ -7,8 +7,8 @@ use std::collections::HashMap;
 
 use paddock_domain::horse_result::{GateNum, HorseName, HorseNum};
 use paddock_domain::{
-    HorseEntry, JockeyFormRun, JockeyName, Race, RaceCard, RaceId, RecentRun, StandardTimes,
-    Surface, TrackCondition, TrainerName, Venue,
+    FinishingPosition, HorseEntry, HorseResult, JockeyFormRun, JockeyName, Race, RaceCard, RaceId,
+    RecentRun, ResultStatus, StandardTimes, Surface, TrackCondition, TrainerName, Venue,
 };
 use paddock_use_case::repository::{
     CourseStatsRow, GroupStat, HorseStatsRow, JockeyStatsRow, OddsRepository, RaceCardRepository,
@@ -124,6 +124,8 @@ struct MockRepo {
     trainer_surface_stats: HashMap<String, Vec<GroupStat>>,
     /// 騎手名 → by_surface スタッツ（#205 のテスト用。未登録は空 = 実績なし）。
     jockey_surface_stats: HashMap<String, Vec<GroupStat>>,
+    /// 馬名 → 近走（#552 の近走被覆テスト用。未登録馬は空 = 近走なし）。
+    recent_runs: HashMap<String, Vec<RecentRun>>,
 }
 
 impl StatsRepository for MockRepo {
@@ -195,11 +197,15 @@ impl StatsRepository for MockRepo {
 
     async fn find_recent_runs(
         &self,
-        _name: &HorseName,
+        name: &HorseName,
         _before: chrono::NaiveDate,
         _limit: u32,
     ) -> Result<Vec<RecentRun>> {
-        Ok(Vec::new())
+        Ok(self
+            .recent_runs
+            .get(name.value())
+            .cloned()
+            .unwrap_or_default())
     }
 
     async fn find_jockey_recent_runs(
@@ -293,6 +299,7 @@ fn interactor(card: Option<RaceCard>) -> Interactor<MockRepo, NullParser, NullFe
             track_condition_stats: HashMap::new(),
             trainer_surface_stats: HashMap::new(),
             jockey_surface_stats: HashMap::new(),
+            recent_runs: HashMap::new(),
         },
         NullParser,
         NullFetcher,
@@ -310,6 +317,7 @@ fn interactor_with_odds(
             track_condition_stats: HashMap::new(),
             trainer_surface_stats: HashMap::new(),
             jockey_surface_stats: HashMap::new(),
+            recent_runs: HashMap::new(),
         },
         NullParser,
         NullFetcher,
@@ -327,6 +335,7 @@ fn interactor_with_tc_stats(
             track_condition_stats,
             trainer_surface_stats: HashMap::new(),
             jockey_surface_stats: HashMap::new(),
+            recent_runs: HashMap::new(),
         },
         NullParser,
         NullFetcher,
@@ -344,6 +353,7 @@ fn interactor_with_trainer_stats(
             track_condition_stats: HashMap::new(),
             trainer_surface_stats,
             jockey_surface_stats: HashMap::new(),
+            recent_runs: HashMap::new(),
         },
         NullParser,
         NullFetcher,
@@ -361,10 +371,58 @@ fn interactor_with_jockey_stats(
             track_condition_stats: HashMap::new(),
             trainer_surface_stats: HashMap::new(),
             jockey_surface_stats,
+            recent_runs: HashMap::new(),
         },
         NullParser,
         NullFetcher,
     )
+}
+
+/// #552: 一部の馬にだけ近走を持たせた MockRepo を組む（近走被覆の部分カウント検証用）。
+fn interactor_with_recent_runs(
+    card: Option<RaceCard>,
+    recent_runs: HashMap<String, Vec<RecentRun>>,
+) -> Interactor<MockRepo, NullParser, NullFetcher> {
+    Interactor::new(
+        MockRepo {
+            card,
+            odds: None,
+            track_condition_stats: HashMap::new(),
+            trainer_surface_stats: HashMap::new(),
+            jockey_surface_stats: HashMap::new(),
+            recent_runs,
+        },
+        NullParser,
+        NullFetcher,
+    )
+}
+
+/// #552: 近走被覆テスト用の最小 RecentRun（中身は被覆カウントに無関係。非空であることだけが要点）。
+fn sample_recent_run() -> RecentRun {
+    RecentRun {
+        date: chrono::NaiveDate::from_ymd_opt(2025, 12, 1).unwrap(),
+        surface: Surface::Turf,
+        distance: 1600,
+        result: HorseResult {
+            finishing_position: Some(FinishingPosition::try_from(1u32).unwrap()),
+            status: ResultStatus::Finished,
+            gate_num: GateNum::try_from(1u32).unwrap(),
+            horse_num: HorseNum::try_from(1u32).unwrap(),
+            horse_name: HorseName::try_from("ウマA").unwrap(),
+            horse_id: None,
+            jockey: None,
+            trainer: None,
+            time_seconds: None,
+            margin: None,
+            odds: None,
+            horse_weight: None,
+            weight_change: None,
+            weight_carried: None,
+            popularity: None,
+        },
+        corner_positions: None,
+        field_size: None,
+    }
 }
 
 // --- tests ------------------------------------------------------------------
@@ -644,6 +702,39 @@ async fn predict_race_views_omits_explanations_when_flag_false() {
     );
     assert_eq!(views.blended.len(), 2);
     assert_eq!(views.pure.len(), 2);
+}
+
+#[tokio::test]
+async fn predict_race_views_reports_recent_runs_coverage_all_missing() {
+    // #552: MockRepo は find_recent_runs が常に空 = 全馬が近走ゼロ（新馬戦相当）。
+    // views.recent_runs_coverage が出走頭数と「近走あり頭数=0」を正しく集計することを検証する
+    // （出力側はこの集計値で信頼性低の警告を出す）。
+    let race_id_str = "2026-1-tokyo-1-R1";
+    let card = make_race_card(race_id_str);
+    let rid = RaceId::try_from(race_id_str).unwrap();
+    let views = interactor(Some(card))
+        .predict_race_views(&rid, Some(0.2), None, false)
+        .await
+        .unwrap();
+    assert_eq!(views.recent_runs_coverage.field_size, 2);
+    assert_eq!(views.recent_runs_coverage.horses_with_runs, 0);
+}
+
+#[tokio::test]
+async fn predict_race_views_counts_partial_recent_runs_coverage() {
+    // #552: 一部の馬（ウマA）だけ近走あり → horses_with_runs=1 / field_size=2。
+    // horses_with_runs の加算経路（近走ありでインクリメント）を回帰検知する。
+    let race_id_str = "2026-1-tokyo-1-R1";
+    let card = make_race_card(race_id_str);
+    let mut runs = HashMap::new();
+    runs.insert("ウマA".to_string(), vec![sample_recent_run()]);
+    let rid = RaceId::try_from(race_id_str).unwrap();
+    let views = interactor_with_recent_runs(Some(card), runs)
+        .predict_race_views(&rid, Some(0.2), None, false)
+        .await
+        .unwrap();
+    assert_eq!(views.recent_runs_coverage.field_size, 2);
+    assert_eq!(views.recent_runs_coverage.horses_with_runs, 1);
 }
 
 #[tokio::test]

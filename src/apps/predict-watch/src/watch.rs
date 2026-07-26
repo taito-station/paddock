@@ -9,6 +9,7 @@ use paddock_domain::{
 use paddock_use_case::PredictionViews;
 use predict_format::{
     PortfolioFormat, format_explanations, format_portfolio, format_probs, format_probs_with_market,
+    format_recent_runs_warning,
 };
 
 use crate::cli::Cli;
@@ -307,6 +308,7 @@ async fn evaluate_race(app: &App, slot: &Slot, is_ura: bool, captured_at: &str, 
         blended,
         pure,
         explanations,
+        recent_runs_coverage,
     } = match app
         .interactor
         .predict_race_views(rid, blend_alpha, slot.race.track_condition, true)
@@ -318,6 +320,17 @@ async fn evaluate_race(app: &App, slot: &Slot, is_ura: bool, captured_at: &str, 
             return;
         }
     };
+
+    // 近走データ皆無/過半欠損の警告（#552）。監視は ROI を出す decision-support なので、
+    // 新馬戦・近走取得全滅レースは信頼性低を明示して回収率だけの候補入りを防ぐ。
+    if let Some(warn) = format_recent_runs_warning(
+        recent_runs_coverage.field_size,
+        recent_runs_coverage.horses_with_runs,
+    ) {
+        // 密な監視ログでも埋もれないよう前に 1 行空けて浮かせる（他経路と同様に確率テーブル直前）。
+        println!();
+        println!("  {label}: {warn}");
+    }
 
     // 過去データ視点（純モデルの順位＋根拠）。EV に依らず常に出す。エッジが無い窓でも「なぜこの順位か」を提示。
     println!("  ── {label} 過去データ視点（純モデル）");
