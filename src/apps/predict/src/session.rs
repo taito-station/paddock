@@ -3,8 +3,8 @@ use std::io::{self, BufRead, Write};
 
 use chrono::{NaiveDate, Utc};
 use paddock_domain::{
-    BetCombination, HorseNum, HorseProbability, PairEvDiagnostic, PortfolioBet, PortfolioConfig,
-    RECOMMENDED_MARKET_BLEND_ALPHA, Race, RaceId, TrackCondition, build_portfolio,
+    BetCombination, HorseNum, HorseProbability, PairEvDiagnostic, Portfolio, PortfolioBet,
+    PortfolioConfig, RECOMMENDED_MARKET_BLEND_ALPHA, Race, RaceId, TrackCondition, build_portfolio,
     pair_ev_diagnostics,
 };
 use paddock_use_case::{PredictBetRecord, PredictSessionRecord, PredictionViews};
@@ -180,131 +180,25 @@ async fn run_race(
     // 保存成功後に直前入力を更新する（保存失敗時は `?` で中断し、更新しない）。
     *last_input = track_condition;
 
-    // 確率は 2 視点で取る（#272 確率分離）。順位付け（軸/相手）は blended（市場ブレンド・解像度が
-    // 高い）、EV は pure（純モデル α=1.0・市場非依存）で計算し EV=P_blended×odds の循環を断つ。
-    // --explain 時は根拠も返す（with_explanation）。
-    let views = match app
-        .interactor
-        .predict_race_views(
-            &race.race_id,
-            RECOMMENDED_MARKET_BLEND_ALPHA,
-            track_condition,
-            explain,
-        )
-        .await
-    {
-        Ok(v) => v,
-        // 出馬表未登録（NotFound）はそのレースのみスキップ。DB 障害等は継続不能なため伝播して中断する。
-        Err(paddock_use_case::Error::NotFound(msg)) => {
-            println!("出馬表が見つかりません（{msg}）。スキップします。");
-            return Ok(());
-        }
-        Err(e) => return Err(e.into()),
-    };
-    let PredictionViews {
-        blended,
-        pure,
-        explanations,
-    } = views;
-
-    // 過去データ視点（#272 ④）: 純モデルの順位＋根拠。市場に依らない「公開データだけの読み」。
-    println!();
-    println!("【過去データ視点（純モデル）】");
-    for line in format_probs(&pure) {
-        println!("{line}");
-    }
-    if explain {
-        for line in format_explanations(&pure, &explanations) {
-            println!("{line}");
-        }
-    }
-
-    // オッズ未取得（None）はスキップのみ受付。OddsInteractor が都度ライブスクレイプし、未公開は None に畳む。
-    let Some(odds) = app.odds.race_odds(&race.race_id).await? else {
-        println!();
-        println!("オッズ未取得 — このレースはスキップします");
-        // --skip-all（#479）は Enter 待ちを省いて即次レースへ。
-        if !skip_all {
-            let _ = read_line(&mut io::stdin().lock(), "Enter で次のレースへ > ")?;
-        }
-        return Ok(());
-    };
-
-    // 市場 implied との比較（過去データ視点に市場列を添える）。差＝純勝率−市場implied で割安/割高を読む。
-    let market_win: HashMap<HorseNum, f64> =
-        odds.win.iter().map(|(num, o)| (*num, o.value())).collect();
-    // 条件依存枠バイアスの複勝 lift（#343・提示専用）。枠妙味フラグ（枠有利∧市場過小）の判定に使う。
-    let gate_lift: HashMap<HorseNum, f64> = explanations
-        .iter()
-        .filter_map(|e| e.gate_bias_lift.map(|l| (e.horse_num, l)))
-        .collect();
-    println!();
-    println!("【純モデル vs 市場implied】");
-    for line in format_probs_with_market(&pure, &market_win, &gate_lift) {
-        println!("{line}");
-    }
-
-    // 軸流しポートフォリオ（馬連＋ワイド＋三連複）を予算内・100 円単位で生成する。軸/相手は blended、
-    // EV/的中は pure（循環断ち, #272）。上限は per-race 予算と残高の小さい方。配分・相手頭数は既定（#122）。
+    // 確率テーブル・市場比較・買い目推奨・EV 診断の表示は副作用のない `render_race_prediction` に
+    // 委譲する（--overview の read-only 再表示と共有・#551）。返り値の portfolio を買い目入力に使う。
     let race_cap = race_budget.min(session.balance);
-    let portfolio = build_portfolio(
-        &blended,
-        &pure,
-        &odds,
-        race_cap,
-        &PortfolioConfig::default(),
-    );
-    let suggested: Vec<u64> = portfolio.bets.iter().map(|b| b.stake).collect();
-
-    println!();
-    println!("【市場EV視点：買い目推奨（軸流し, 予算¥{race_cap}/R・EV=純モデル×odds）】");
-    // 軸/相手・混戦注記・各点の「そのまま買える形」整形は predict-watch と共有する
-    // `predict_format::format_portfolio` に委譲する（#452）。predict は 2 スペースインデント・
-    // 0 円脚も出す・未取得脚にも EV を付ける設定（現行出力をバイト単位で保つ）。軸なし・買い目なしの
-    // 注記と期待回収率フッタは predict 固有なので前後に付す。
-    if portfolio.axis.is_none() {
-        println!("  確率推定が空のため買い目なし");
-    }
-    for line in format_portfolio(
-        &portfolio,
-        &PortfolioFormat {
-            indent: "  ",
-            skip_zero_stake: false,
-            ev_on_unpriced: true,
-        },
-    ) {
-        println!("{line}");
-    }
-    // `予算内で組める買い目なし` と format_portfolio の各点行は `bets.is_empty()` で排他
-    // （空なら各点行ゼロ・非空なら本注記が fire しない）。よって注記を各点行の後に置いても順序は不変。
-    if portfolio.bets.is_empty() {
-        println!("  予算内で組める買い目なし");
-    }
-    if let Some(ev) = &portfolio.ev {
-        // 期待回収率・的中率はオッズ取得済みの脚についての値（未取得脚は払戻を見積もれず除外）。
-        let unpriced = portfolio.bets.iter().filter(|b| b.odds.is_none()).count();
-        // 回収率・的中率はオッズ取得済の脚のみで算出する一方、賭け計は未取得脚も含む全脚の合計
-        // （基準が異なる）。未取得脚があるときはその非対称を明示する。
-        let note = if unpriced > 0 {
-            format!(
-                "（回収率・的中率はオッズ取得済の脚基準、賭け計は未取得 {unpriced} 点を含む全脚）"
-            )
-        } else {
-            String::new()
+    let (portfolio, suggested) =
+        match render_race_prediction(app, race, track_condition, race_cap, explain).await? {
+            // 出馬表未登録（NotFound）はそのレースのみスキップ（Enter 待ちなし・現行挙動を踏襲）。
+            RaceView::NoEntries => return Ok(()),
+            // オッズ未取得はスキップのみ受付。--skip-all は Enter 待ちを省いて即次レースへ（#479）。
+            RaceView::NoOdds => {
+                if !skip_all {
+                    let _ = read_line(&mut io::stdin().lock(), "Enter で次のレースへ > ")?;
+                }
+                return Ok(());
+            }
+            RaceView::Shown(portfolio) => {
+                let suggested: Vec<u64> = portfolio.bets.iter().map(|b| b.stake).collect();
+                (portfolio, suggested)
+            }
         };
-        println!(
-            "  ポートフォリオ期待回収率 {:.1}% / 的中率 {:.1}% / 賭け計 ¥{}（モデル単独視点）{}",
-            ev.roi * 100.0,
-            ev.hit_prob * 100.0,
-            portfolio.total_stake,
-            note,
-        );
-    }
-
-    // 馬連 vs 馬単(両方向) EV 診断（#246-C）。「穴は1着にならない」読みのとき本命→穴の馬単が
-    // 同ペアの馬連より EV 優位になりうる。買い目選択の判断材料として並べて表示する。
-    let diag = pair_ev_diagnostics(&blended, &pure, &odds, PortfolioConfig::default().partners);
-    print_pair_ev_diagnostics(diag.axis, &blended, &diag.rows);
 
     println!();
     // --skip-all（#479）は購入方法プロンプトを読まず s（スキップ）相当で即次レースへ。
@@ -392,6 +286,211 @@ async fn run_race(
     );
     println!("残高: ¥{}", session.balance);
 
+    Ok(())
+}
+
+/// `render_race_prediction` の結果。表示（副作用なし）の後に呼び出し側が取る分岐を伝える。
+enum RaceView {
+    /// 出馬表未登録（NotFound）。当該レースのみスキップ（Enter 待ちなし）。
+    NoEntries,
+    /// オッズ未取得。スキップのみ受付（対話時のみ Enter 待ち、--skip-all/--overview は即次へ）。
+    NoOdds,
+    /// 通常表示完了。表示に用いた買い目推奨（軸流しポートフォリオ）を返す。
+    Shown(Portfolio),
+}
+
+/// 1 レースの予想ビュー（過去データ視点の確率テーブル・市場implied比較・買い目推奨・期待回収率・
+/// 馬連vs馬単EV診断）を stdout に描画する読み取り専用関数。DB への書き込み（馬場保存・買い目記録・
+/// セッション更新）は一切行わない。run_race（対話/--skip-all）と run_overview（--overview 再表示・
+/// #551）で共有し、表示ロジックの重複と drift を防ぐ。`race_cap` は買い目推奨の予算上限、
+/// `track_condition` は予想に用いる馬場前提（呼び出し側が解決済み）。
+async fn render_race_prediction(
+    app: &App,
+    race: &Race,
+    track_condition: Option<TrackCondition>,
+    race_cap: u64,
+    explain: bool,
+) -> anyhow::Result<RaceView> {
+    // 確率は 2 視点で取る（#272 確率分離）。順位付け（軸/相手）は blended（市場ブレンド・解像度が
+    // 高い）、EV は pure（純モデル α=1.0・市場非依存）で計算し EV=P_blended×odds の循環を断つ。
+    // --explain 時は根拠も返す（with_explanation）。
+    let views = match app
+        .interactor
+        .predict_race_views(
+            &race.race_id,
+            RECOMMENDED_MARKET_BLEND_ALPHA,
+            track_condition,
+            explain,
+        )
+        .await
+    {
+        Ok(v) => v,
+        // 出馬表未登録（NotFound）はそのレースのみスキップ。DB 障害等は継続不能なため伝播して中断する。
+        Err(paddock_use_case::Error::NotFound(msg)) => {
+            println!("出馬表が見つかりません（{msg}）。スキップします。");
+            return Ok(RaceView::NoEntries);
+        }
+        Err(e) => return Err(e.into()),
+    };
+    let PredictionViews {
+        blended,
+        pure,
+        explanations,
+    } = views;
+
+    // 過去データ視点（#272 ④）: 純モデルの順位＋根拠。市場に依らない「公開データだけの読み」。
+    println!();
+    println!("【過去データ視点（純モデル）】");
+    for line in format_probs(&pure) {
+        println!("{line}");
+    }
+    if explain {
+        for line in format_explanations(&pure, &explanations) {
+            println!("{line}");
+        }
+    }
+
+    // オッズ未取得（None）はスキップのみ受付。OddsInteractor が都度ライブスクレイプし、未公開は None に畳む。
+    let Some(odds) = app.odds.race_odds(&race.race_id).await? else {
+        println!();
+        println!("オッズ未取得 — このレースはスキップします");
+        return Ok(RaceView::NoOdds);
+    };
+
+    // 市場 implied との比較（過去データ視点に市場列を添える）。差＝純勝率−市場implied で割安/割高を読む。
+    let market_win: HashMap<HorseNum, f64> =
+        odds.win.iter().map(|(num, o)| (*num, o.value())).collect();
+    // 条件依存枠バイアスの複勝 lift（#343・提示専用）。枠妙味フラグ（枠有利∧市場過小）の判定に使う。
+    let gate_lift: HashMap<HorseNum, f64> = explanations
+        .iter()
+        .filter_map(|e| e.gate_bias_lift.map(|l| (e.horse_num, l)))
+        .collect();
+    println!();
+    println!("【純モデル vs 市場implied】");
+    for line in format_probs_with_market(&pure, &market_win, &gate_lift) {
+        println!("{line}");
+    }
+
+    // 軸流しポートフォリオ（馬連＋ワイド＋三連複）を予算内・100 円単位で生成する。軸/相手は blended、
+    // EV/的中は pure（循環断ち, #272）。上限は呼び出し側が決めた race_cap。配分・相手頭数は既定（#122）。
+    let portfolio = build_portfolio(
+        &blended,
+        &pure,
+        &odds,
+        race_cap,
+        &PortfolioConfig::default(),
+    );
+
+    println!();
+    println!("【市場EV視点：買い目推奨（軸流し, 予算¥{race_cap}/R・EV=純モデル×odds）】");
+    // 軸/相手・混戦注記・各点の「そのまま買える形」整形は predict-watch と共有する
+    // `predict_format::format_portfolio` に委譲する（#452）。predict は 2 スペースインデント・
+    // 0 円脚も出す・未取得脚にも EV を付ける設定（現行出力をバイト単位で保つ）。軸なし・買い目なしの
+    // 注記と期待回収率フッタは predict 固有なので前後に付す。
+    if portfolio.axis.is_none() {
+        println!("  確率推定が空のため買い目なし");
+    }
+    for line in format_portfolio(
+        &portfolio,
+        &PortfolioFormat {
+            indent: "  ",
+            skip_zero_stake: false,
+            ev_on_unpriced: true,
+        },
+    ) {
+        println!("{line}");
+    }
+    // `予算内で組める買い目なし` と format_portfolio の各点行は `bets.is_empty()` で排他
+    // （空なら各点行ゼロ・非空なら本注記が fire しない）。よって注記を各点行の後に置いても順序は不変。
+    if portfolio.bets.is_empty() {
+        println!("  予算内で組める買い目なし");
+    }
+    if let Some(ev) = &portfolio.ev {
+        // 期待回収率・的中率はオッズ取得済みの脚についての値（未取得脚は払戻を見積もれず除外）。
+        let unpriced = portfolio.bets.iter().filter(|b| b.odds.is_none()).count();
+        // 回収率・的中率はオッズ取得済の脚のみで算出する一方、賭け計は未取得脚も含む全脚の合計
+        // （基準が異なる）。未取得脚があるときはその非対称を明示する。
+        let note = if unpriced > 0 {
+            format!(
+                "（回収率・的中率はオッズ取得済の脚基準、賭け計は未取得 {unpriced} 点を含む全脚）"
+            )
+        } else {
+            String::new()
+        };
+        println!(
+            "  ポートフォリオ期待回収率 {:.1}% / 的中率 {:.1}% / 賭け計 ¥{}（モデル単独視点）{}",
+            ev.roi * 100.0,
+            ev.hit_prob * 100.0,
+            portfolio.total_stake,
+            note,
+        );
+    }
+
+    // 馬連 vs 馬単(両方向) EV 診断（#246-C）。「穴は1着にならない」読みのとき本命→穴の馬単が
+    // 同ペアの馬連より EV 優位になりうる。買い目選択の判断材料として並べて表示する。
+    let diag = pair_ev_diagnostics(&blended, &pure, &odds, PortfolioConfig::default().partners);
+    print_pair_ev_diagnostics(diag.axis, &blended, &diag.rows);
+
+    Ok(RaceView::Shown(portfolio))
+}
+
+/// EV 一覧を読み取り専用で再表示する（--overview、#551）。セッション・買い目・馬場条件を一切
+/// 書き込まず、各レースの確率テーブル・買い目推奨・期待回収率を当日オッズで再計算して表示する。
+/// --skip-all の一過性 stdout を DB を直接触らず何度でも見返せるようにするのが狙い。
+///
+/// 予算上限は各レース `race_budget`（残高で絞らない）。--skip-all セッションは買い目を記録せず
+/// 残高が減らないため race_cap=race_budget と一致し、朝の --skip-all 出力を忠実に再現する。
+/// 馬場前提は記録済み（--skip-all/対話が保存した値）→ races の確定値の順で解決するのみ（書かない）。
+pub async fn run_overview(
+    app: &App,
+    date: NaiveDate,
+    race_budget: u64,
+    explain: bool,
+) -> anyhow::Result<()> {
+    let races = app.interactor.races_by_date(date).await?;
+    let date_str = date.format("%Y-%m-%d").to_string();
+    if races.is_empty() {
+        println!("この日の開催はありません: {date_str}");
+        return Ok(());
+    }
+
+    // 記録済みの馬場入力を読むだけ（書かない）。--skip-all/対話セッションが #80 で保存した値を
+    // 引き当て、「どの馬場前提で予想したか」を再現する。未記録レースは races の確定値へフォールバック。
+    let recorded: HashMap<String, Option<TrackCondition>> = app
+        .interactor
+        .find_predict_race_conditions(date)
+        .await?
+        .into_iter()
+        .map(|r| (r.race_id.value().to_string(), r.track_condition))
+        .collect();
+
+    println!(
+        "=== {date_str} EV 一覧（再表示・読み取り専用） — {} レース ===",
+        races.len()
+    );
+    for race in &races {
+        println!();
+        println!(
+            "--- レース {}: {} {} {}m ---",
+            race.race_num,
+            race.venue.as_jp(),
+            surface_jp(race.surface),
+            race.distance
+        );
+        // 再表示は非対話。記録済み → 確定値 の順で馬場前提を解決する（対話の直前入力引き継ぎは
+        // セッション内限定の概念のため使わない）。採用値を表示のみ（保存しない）。
+        let track_condition = resolve_track_condition_default(
+            recorded.get(race.race_id.value()).copied(),
+            None,
+            race.track_condition,
+        );
+        match track_condition {
+            Some(tc) => println!("馬場状態: {tc}"),
+            None => println!("馬場状態: 不明"),
+        }
+        // race_cap は残高で絞らない（読み取り専用・セッション非依存）。表示結果は破棄する。
+        let _ = render_race_prediction(app, race, track_condition, race_budget, explain).await?;
+    }
     Ok(())
 }
 
