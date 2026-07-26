@@ -1,4 +1,4 @@
-import { Navigate, useParams, useSearchParams } from "react-router-dom";
+import { Navigate, useParams, useSearchParams } from "react-router";
 import { boardHref } from "../lib/live";
 
 // 旧 RaceDetail（#377 で盤に統合・廃止）のブックマーク・履歴互換リダイレクト。
