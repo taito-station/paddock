@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { api, type GroupStat } from "../api/client";
 import { pct, SURFACE_JP, VENUE_JP, todayJst } from "../lib/format";
