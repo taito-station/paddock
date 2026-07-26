@@ -289,7 +289,7 @@ async fn run_race(
     Ok(())
 }
 
-/// `render_race_prediction` の結果。表示（副作用なし）の後に呼び出し側が取る分岐を伝える。
+/// `render_race_prediction` の結果。表示の後に呼び出し側が取る分岐を伝える。
 enum RaceView {
     /// 出馬表未登録（NotFound）。当該レースのみスキップ（Enter 待ちなし）。
     NoEntries,
@@ -300,10 +300,12 @@ enum RaceView {
 }
 
 /// 1 レースの予想ビュー（過去データ視点の確率テーブル・市場implied比較・買い目推奨・期待回収率・
-/// 馬連vs馬単EV診断）を stdout に描画する読み取り専用関数。DB への書き込み（馬場保存・買い目記録・
-/// セッション更新）は一切行わない。run_race（対話/--skip-all）と run_overview（--overview 再表示・
-/// #551）で共有し、表示ロジックの重複と drift を防ぐ。`race_cap` は買い目推奨の予算上限、
-/// `track_condition` は予想に用いる馬場前提（呼び出し側が解決済み）。
+/// 馬連vs馬単EV診断）を stdout に描画する。予想セッション状態（馬場保存・買い目記録・セッション更新）は
+/// 書き込まない（ただしオッズは `app.odds.race_odds` の read-through 経由で、保存済みが不完全な
+/// レースのみ再スクレイプして `race_odds` を更新しうる＝skip-all/対話と同じ副作用）。
+/// run_race（対話/--skip-all）と run_overview（--overview 再表示・#551）で表示ロジックを共有し、
+/// 重複と drift を防ぐ。`race_cap` は買い目推奨の予算上限、`track_condition` は予想に用いる馬場前提
+/// （呼び出し側が解決済み）。
 async fn render_race_prediction(
     app: &App,
     race: &Race,
@@ -434,12 +436,15 @@ async fn render_race_prediction(
     Ok(RaceView::Shown(portfolio))
 }
 
-/// EV 一覧を読み取り専用で再表示する（--overview、#551）。セッション・買い目・馬場条件を一切
+/// EV 一覧を再表示する（--overview、#551）。予想セッション状態（セッション・買い目・馬場条件）は
 /// 書き込まず、各レースの確率テーブル・買い目推奨・期待回収率を当日オッズで再計算して表示する。
-/// --skip-all の一過性 stdout を DB を直接触らず何度でも見返せるようにするのが狙い。
+/// --skip-all の一過性 stdout を `predict_sessions` の手動 DELETE なしで見返せるようにするのが狙い。
+/// オッズは run_race と同じ read-through（`app.odds.race_odds`）で取得するため、保存済みが不完全な
+/// レースは再スクレイプして `race_odds` を更新しうる（skip-all と同じ副作用・予想セッションには非干渉）。
 ///
-/// 予算上限は各レース `race_budget`（残高で絞らない）。--skip-all セッションは買い目を記録せず
-/// 残高が減らないため race_cap=race_budget と一致し、朝の --skip-all 出力を忠実に再現する。
+/// 予算上限は各レース `race_budget`（残高で絞らない）。残高がレース予算以上のセッションでは
+/// race_cap=race_budget が一致し朝の --skip-all 出力を再現するが、--budget を race_budget 未満で
+/// 開始したセッションは skip-all 側が残高でクランプされるため買い目金額に差異が出うる。
 /// 馬場前提は記録済み（--skip-all/対話が保存した値）→ races の確定値の順で解決するのみ（書かない）。
 pub async fn run_overview(
     app: &App,
@@ -488,7 +493,7 @@ pub async fn run_overview(
             Some(tc) => println!("馬場状態: {tc}"),
             None => println!("馬場状態: 不明"),
         }
-        // race_cap は残高で絞らない（読み取り専用・セッション非依存）。表示結果は破棄する。
+        // race_cap は残高で絞らない（セッション非依存の再表示のため）。表示結果は破棄する。
         let _ = render_race_prediction(app, race, track_condition, race_budget, explain).await?;
     }
     Ok(())
