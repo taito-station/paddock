@@ -647,6 +647,22 @@ async fn predict_race_views_omits_explanations_when_flag_false() {
 }
 
 #[tokio::test]
+async fn predict_race_views_reports_recent_runs_coverage_all_missing() {
+    // #552: MockRepo は find_recent_runs が常に空 = 全馬が近走ゼロ（新馬戦相当）。
+    // views.recent_runs_coverage が出走頭数と「近走あり頭数=0」を正しく集計することを検証する
+    // （出力側はこの集計値で信頼性低の警告を出す）。
+    let race_id_str = "2026-1-tokyo-1-R1";
+    let card = make_race_card(race_id_str);
+    let rid = RaceId::try_from(race_id_str).unwrap();
+    let views = interactor(Some(card))
+        .predict_race_views(&rid, Some(0.2), None, false)
+        .await
+        .unwrap();
+    assert_eq!(views.recent_runs_coverage.field_size, 2);
+    assert_eq!(views.recent_runs_coverage.horses_with_runs, 0);
+}
+
+#[tokio::test]
 async fn predict_race_trainer_lifts_horse_with_strong_record() {
     // ウマB だけ調教師（出馬表由来の entry.trainer）に芝の好成績を持たせる。trainer 統計が
     // 無い場合（実績なし）と比べて ウマB の win_prob が上がり、ウマA は相対的に下がる（#74）。

@@ -28,6 +28,21 @@ pub struct PredictionViews {
     pub pure: Vec<HorseProbability>,
     /// 予想根拠（`with_explanation=false` なら空）。`pure`/`blended` と同じ盤面順。
     pub explanations: Vec<HorseExplanation>,
+    /// 近走データ（`horse_past_runs`）の被覆（#552）。新馬戦・近走取得全滅など「近走ゼロ」の
+    /// レースを出力側が信頼性低として警告するための集計値。確率・買い目は従来どおり出力する。
+    pub recent_runs_coverage: RecentRunsCoverage,
+}
+
+/// 近走データ（`horse_past_runs`）の被覆の集計値（#552）。新馬戦（構造上ゼロ）・近走取得全滅の
+/// いずれも近走フォーム特徴量が欠損し確率の信頼性が下がるため、出力側が警告判定に使う。
+/// 判定閾値（何頭欠損で警告するか）と文言は presentation（`predict_format`）に置き、ここは
+/// 生の集計値のみを運ぶ（新馬か取得失敗かは DB 状態だけでは確実に区別できないため区別しない）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RecentRunsCoverage {
+    /// 出走頭数。
+    pub field_size: usize,
+    /// 近走が 1 走以上ある頭数。
+    pub horses_with_runs: usize,
 }
 
 impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: PdfFetcher>
@@ -47,7 +62,7 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: 
         // with_explanation=false: 通常経路では根拠を組まず無駄な String 割当てを避ける（#274 レビュー）。
         // config は本番設定を 1 度だけ生成し factor 収集と推定で共有する（単一情報源, #274 レビュー）。
         let config = EstimationConfig::production();
-        let (entry_factors, _) = self
+        let (entry_factors, _, _) = self
             .collect_race_factors(race_id, track_condition, false, &config)
             .await?;
         self.estimate_and_blend(&entry_factors, race_id, blend_alpha, &config)
@@ -93,7 +108,7 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: 
         with_explanation: bool,
         config: &EstimationConfig,
     ) -> Result<PredictionViews> {
-        let (entry_factors, explanations) = self
+        let (entry_factors, explanations, recent_runs_coverage) = self
             .collect_race_factors(race_id, track_condition, with_explanation, config)
             .await?;
         let blended = self
@@ -122,6 +137,7 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: 
             blended,
             pure,
             explanations,
+            recent_runs_coverage,
         })
     }
 
@@ -137,7 +153,11 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: 
         track_condition: Option<TrackCondition>,
         with_explanation: bool,
         config: &EstimationConfig,
-    ) -> Result<(Vec<(HorseEntry, HorseFactors)>, Vec<HorseExplanation>)> {
+    ) -> Result<(
+        Vec<(HorseEntry, HorseFactors)>,
+        Vec<HorseExplanation>,
+        RecentRunsCoverage,
+    )> {
         let card = self
             .repository
             .find_race_card(race_id)
@@ -211,6 +231,8 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: 
 
         let mut entry_factors: Vec<(HorseEntry, HorseFactors)> = Vec::new();
         let mut explanations: Vec<HorseExplanation> = Vec::new();
+        // 近走被覆（#552）: 近走を 1 走以上持つ頭数を数える。field_size は出走頭数。
+        let mut horses_with_runs = 0usize;
         for entry in &card.entries {
             // ok_or_else: batch 契約上 None になることはないが、rdb-gateway の override
             // バグを panic ではなく error として伝播させるため backtest の expect とは意図的に非対称。
@@ -228,6 +250,9 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: 
                 .get(&entry.horse_name)
                 .map(Vec::as_slice)
                 .unwrap_or(&[]);
+            if !recent_runs.is_empty() {
+                horses_with_runs += 1;
+            }
             let recent_form =
                 recent_form_from_runs(recent_runs, card.date, &standard_times, config.trend_n);
             let jockey_recent_form = entry
@@ -270,7 +295,11 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: 
             entry_factors.push((entry.clone(), factors));
         }
 
-        Ok((entry_factors, explanations))
+        let recent_runs_coverage = RecentRunsCoverage {
+            field_size: card.entries.len(),
+            horses_with_runs,
+        };
+        Ok((entry_factors, explanations, recent_runs_coverage))
     }
 
     /// 構築済みの `entry_factors` から確率を推定し、市場オッズブレンド・冪変換まで適用する（#72/#246）。

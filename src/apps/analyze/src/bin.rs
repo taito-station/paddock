@@ -12,7 +12,7 @@ use paddock_domain::{
     Venue, pair_ev_diagnostics,
 };
 use paddock_use_case::{PredictionViews, TREND_N_MAX};
-use predict_format::{format_probs, format_probs_with_market};
+use predict_format::{format_probs, format_probs_with_market, format_recent_runs_warning};
 
 /// 部分一致候補の表示上限。これを超える場合も先頭から打ち切って提示する。
 const CANDIDATE_LIMIT: u32 = 20;
@@ -215,7 +215,17 @@ async fn main() -> anyhow::Result<()> {
                 blended,
                 pure,
                 explanations: _,
+                recent_runs_coverage,
             } = views;
+
+            // 近走データ皆無/過半欠損の警告（#552）。新馬戦・近走取得全滅は確率・EV の信頼性が低い。
+            if let Some(warn) = format_recent_runs_warning(
+                recent_runs_coverage.field_size,
+                recent_runs_coverage.horses_with_runs,
+            ) {
+                println!("{warn}");
+                println!();
+            }
 
             // 過去データ視点（純モデル）: 市場に依らない公開データだけの読み。
             println!("【過去データ視点（純モデル）】");

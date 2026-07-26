@@ -10,7 +10,7 @@ use paddock_domain::{
 use paddock_use_case::{PredictBetRecord, PredictSessionRecord, PredictionViews};
 use predict_format::{
     PortfolioFormat, format_explanations, format_portfolio, format_probs, format_probs_with_market,
-    surface_jp,
+    format_recent_runs_warning, surface_jp,
 };
 
 use crate::setup::App;
@@ -338,7 +338,19 @@ async fn render_race_prediction(
         blended,
         pure,
         explanations,
+        recent_runs_coverage,
     } = views;
+
+    // 近走データ皆無/過半欠損の警告（#552）。新馬戦・近走取得全滅は確率の信頼性が低いので、
+    // 確率テーブルの前に注記して「回収率だけ見て候補入り」を防ぐ（表示自体は従来どおり続ける）。
+    // render 共有により対話 predict・--skip-all・--overview のすべてで同じ警告が出る。
+    if let Some(warn) = format_recent_runs_warning(
+        recent_runs_coverage.field_size,
+        recent_runs_coverage.horses_with_runs,
+    ) {
+        println!();
+        println!("{warn}");
+    }
 
     // 過去データ視点（#272 ④）: 純モデルの順位＋根拠。市場に依らない「公開データだけの読み」。
     println!();

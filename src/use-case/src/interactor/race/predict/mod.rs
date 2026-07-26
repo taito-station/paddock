@@ -11,7 +11,7 @@ pub mod explain;
 pub mod features;
 pub mod orchestrate;
 
-pub use orchestrate::PredictionViews;
+pub use orchestrate::{PredictionViews, RecentRunsCoverage};
 
 // backtest.rs が `crate::interactor::race::predict::{...}` で参照する特徴量関数・型（#196 共有）。
 pub(crate) use features::{

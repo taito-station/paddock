@@ -31,6 +31,33 @@ pub fn format_probs(probs: &[HorseProbability]) -> Vec<String> {
     lines
 }
 
+/// 近走データ（`horse_past_runs`）欠損の警告行を組む（#552）。新馬戦（構造上ゼロ）・近走取得全滅の
+/// いずれも近走フォーム特徴量が欠損し、確率・買い目・回収率の信頼性が下がる。回収率だけを見て候補入り
+/// してしまうのを防ぐ注記が目的で、表示自体は従来どおり続ける（呼び出し側が確率テーブルの前に出す）。
+///
+/// `field_size` は出走頭数、`horses_with_runs` は近走を 1 走以上持つ頭数。判定閾値は
+/// **全頭ゼロ**（より強い文言）と **過半で欠損**（Issue #552 の提案どおり）。どちらでもなければ `None`。
+/// 新馬戦か取得失敗かは DB 状態だけでは確実に区別できないため、文言は両者を併記する。
+pub fn format_recent_runs_warning(field_size: usize, horses_with_runs: usize) -> Option<String> {
+    if field_size == 0 {
+        return None;
+    }
+    let without = field_size.saturating_sub(horses_with_runs);
+    if horses_with_runs == 0 {
+        Some(format!(
+            "⚠️ 近走データ皆無（新馬戦/近走取得失敗）: 全 {field_size} 頭が近走ゼロ。\
+             確率・買い目・回収率の信頼性は極めて低い（回収率だけで候補入り判断しない）。"
+        ))
+    } else if without * 2 > field_size {
+        Some(format!(
+            "⚠️ 近走データ欠損: 全 {field_size} 頭中 {without} 頭が近走ゼロ（新馬戦/近走取得失敗）。\
+             確率・回収率の信頼性は低い。"
+        ))
+    } else {
+        None
+    }
+}
+
 /// 条件依存枠バイアスの複勝 lift がこの値以上で「枠有利」とみなし、市場過小評価と重なれば枠妙味を光らせる
 /// 閾値（#343）。lift は複勝ベース・市場差分は単勝ベースの近似併用（下記 doc 参照）。
 /// TODO(#343 後続): この 0.05 は measure-first の暫定値。backtest lift 掃引（`--gate-bias-weight` 相当）で
@@ -330,8 +357,8 @@ pub fn format_portfolio(p: &Portfolio, fmt: &PortfolioFormat) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        factor_phrase, format_explanations, format_probs, gate_label_jp, prev_run_phrase,
-        recent_form_phrase, surface_jp,
+        factor_phrase, format_explanations, format_probs, format_recent_runs_warning,
+        gate_label_jp, prev_run_phrase, recent_form_phrase, surface_jp,
     };
     use paddock_domain::horse_result::HorseNum;
     use paddock_domain::{
@@ -384,6 +411,45 @@ mod tests {
             weight_carried: None,
             field_mean_weight: None,
         }
+    }
+
+    #[test]
+    fn recent_runs_warning_all_missing_is_strong() {
+        // 全頭ゼロ（新馬戦/取得全滅）は「皆無」の強い文言。
+        let w = format_recent_runs_warning(16, 0).unwrap();
+        assert!(w.contains("皆無"), "全欠損は皆無文言: {w}");
+        assert!(w.contains("全 16 頭"));
+    }
+
+    #[test]
+    fn recent_runs_warning_majority_missing() {
+        // 過半（16頭中9頭欠損）で警告。文言に欠損頭数を含む。
+        let w = format_recent_runs_warning(16, 7).unwrap();
+        assert!(w.contains("欠損"), "過半欠損は欠損文言: {w}");
+        assert!(w.contains("9 頭が近走ゼロ"), "欠損頭数を明示: {w}");
+    }
+
+    #[test]
+    fn recent_runs_warning_exactly_half_is_none() {
+        // 半数ちょうど（過半ではない）は警告しない（without*2 > field で判定）。
+        assert_eq!(format_recent_runs_warning(16, 8), None);
+    }
+
+    #[test]
+    fn recent_runs_warning_minority_missing_is_none() {
+        // 欠損が少数（16頭中1頭）は通常レース扱いで警告なし。
+        assert_eq!(format_recent_runs_warning(16, 15), None);
+    }
+
+    #[test]
+    fn recent_runs_warning_full_coverage_is_none() {
+        assert_eq!(format_recent_runs_warning(12, 12), None);
+    }
+
+    #[test]
+    fn recent_runs_warning_zero_field_is_none() {
+        // 出走頭数 0 は判定対象外（0除算・偽陽性を避ける）。
+        assert_eq!(format_recent_runs_warning(0, 0), None);
     }
 
     #[test]
