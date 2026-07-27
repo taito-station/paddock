@@ -1,6 +1,6 @@
-mod cli;
-mod session;
-mod setup;
+// lib（src/lib.rs）側の実体を使う。`mod` で再宣言すると同じソースが lib と bin で
+// 二重コンパイルされ、unit test も 2 回走ってしまう（#555）。
+use predict::{cli, session, setup};
 
 use clap::Parser;
 
