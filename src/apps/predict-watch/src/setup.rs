@@ -20,9 +20,9 @@ pub async fn build_app(scrape_delay_ms: u64) -> anyhow::Result<App> {
     let config = Config::from_env().context("load config")?;
     config.init_tracing();
 
-    let pool = pool::connect_and_migrate(&config.paddock_db_url)
+    let pool = pool::connect_checked(&config.paddock_db_url, config.paddock_auto_migrate)
         .await
-        .context("connect and migrate Postgres")?;
+        .context("connect Postgres")?;
 
     // PgPool は Arc backed なので clone は安価。odds / interactor で同一 DB を共有する。
     let odds = OddsInteractor::new(

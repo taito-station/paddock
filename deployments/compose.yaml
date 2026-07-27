@@ -27,7 +27,7 @@ services:
     restart: unless-stopped
 
   # REST API（api-server, #33）の常駐サービス（#35）。postgres 健全化後に起動し、
-  # マイグレーションは API 自身が起動時に適用する（pool::migrate）。
+  # マイグレーションは API 自身が起動時に適用する（PADDOCK_AUTO_MIGRATE=true 有効時の pool::migrate。#470）。
   api:
     build:
       context: ..
@@ -43,6 +43,8 @@ services:
       # コンテナ外の公開ポートから到達するため全 IF で bind する（既定 127.0.0.1 はコンテナ内のみ）。
       PADDOCK_SERVER_ADDR: 0.0.0.0:8080
       PADDOCK_LOG: info
+      # 起動時 auto-migrate は既定 OFF（#470）。prod では自身が起動時に migrate を適用するため true にする。
+      PADDOCK_AUTO_MIGRATE: "true"
     # ローカル限定で公開（LAN へ晒さない。postgres と同方針）。
     ports:
       - "127.0.0.1:8080:8080"
@@ -90,6 +92,8 @@ services:
       # 開発専用の固定資格情報（本番流用禁止）。同一 compose ネットワークの postgres へ接続（bind mount 不要）。
       PADDOCK_DB_URL: postgres://paddock:paddock@postgres:5432/paddock
       PADDOCK_LOG: info
+      # 起動時 auto-migrate は既定 OFF（#470）。prod では自身が起動時に migrate を適用するため true にする。
+      PADDOCK_AUTO_MIGRATE: "true"
     # CPU 使用量を制限し、取り込み中もホストの dev を軽く保つ。docker compose v2 は
     # deploy.resources.limits.cpus を honor する（run/up とも NanoCpus に反映。検証済み）。
     # 明示したい場合は `docker compose run --cpus 2 importer ...` でも上書きできる。
