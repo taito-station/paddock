@@ -6,6 +6,8 @@
 //!
 //! ここで公開している item は bin と自クレートの統合テストのための内部公開であり、
 //! 外部クレート向けのサポート対象 API ではない（後方互換を保証しない）。
+//! lib 化により `pub` item は `dead_code` 検知の対象外になるので、bin / 統合テストが
+//! 実際に必要としない item は `pub(crate)` に留めて公開面を膨らませないこと。
 pub mod cli;
 pub mod session;
 pub mod setup;
