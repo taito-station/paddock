@@ -122,6 +122,14 @@ fn write_feature_dump(path: &str, rows: &[FeatureRow]) -> anyhow::Result<()> {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args = cli::Cli::parse();
+
+    // `migrate` は明示適用の入口（#470）なので、起動時 auto-migrate を止めた `build_app`
+    // （`connect_checked` は未初期化/未適用 DB で Err 停止する）を経由すると自家中毒する。
+    // migrate だけは素の `pool::connect` で pool を得て、整合チェック or 適用を直接行う。
+    if let cli::Command::Migrate { dry_run } = args.command {
+        return run_migrate(dry_run).await;
+    }
+
     let app = setup::build_app().await?;
 
     match args.command {
@@ -320,6 +328,10 @@ async fn main() -> anyhow::Result<()> {
                 println!("特徴量ダンプ: {} 行を {path} に書き出し", rows.len());
             }
         }
+        cli::Command::Migrate { .. } => {
+            // main 冒頭で run_migrate に委譲済み（build_app を経由しない）。ここには到達しない。
+            unreachable!("Migrate は build_app 前に処理される");
+        }
         cli::Command::PurgeSnapshots { months, dry_run } => {
             // 0 ヶ月は当日以降のみ保持＝ほぼ全削除で #218 の蓄積を壊すため弾く。
             if months == 0 {
@@ -346,6 +358,63 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
+    Ok(())
+}
+
+/// `paddock-analyze migrate`（#470）: 共有 DB へ未適用マイグレーションを明示適用する入口。
+///
+/// 起動時 auto-migrate を止めた `build_app`（`connect_checked`）は未初期化/未適用 DB で停止するため、
+/// migrate 経路は素の `pool::connect` で pool を得る。未初期化 DB でも `migrate` を適用できる必要があるため
+/// ここで自家中毒（Uninitialized 停止）を回避する。`--dry-run` は `check_migration_status` の結果を
+/// 人間可読に表示するだけで DDL を打たない。
+async fn run_migrate(dry_run: bool) -> anyhow::Result<()> {
+    use anyhow::Context;
+    use paddock_config::Config;
+    use rdb_gateway::pool::{self, MigrationStatus};
+
+    let config = Config::from_env().context("load config")?;
+    config.init_tracing();
+
+    // 未初期化 DB でも動く必要があるため、整合チェックで停止する connect_checked ではなく素の connect を使う。
+    let pool = pool::connect(&config.paddock_db_url)
+        .await
+        .context("connect Postgres")?;
+
+    if dry_run {
+        match pool::check_migration_status(&pool)
+            .await
+            .context("check migration status")?
+        {
+            MigrationStatus::UpToDate => {
+                println!("マイグレーションは最新です（未適用なし）。");
+            }
+            MigrationStatus::Pending(v) => {
+                println!("未適用マイグレーションがあります（{} 件）:", v.len());
+                for version in v {
+                    println!("  - {version}");
+                }
+                println!("`paddock-analyze migrate` で適用してください。");
+            }
+            MigrationStatus::StaleBinary(v) => {
+                println!(
+                    "DB に未知のマイグレーションが適用済みです（このバイナリが古い可能性・{} 件）:",
+                    v.len()
+                );
+                for version in v {
+                    println!("  - {version}");
+                }
+                println!("最新ブランチで cargo build --release し直してください。");
+            }
+            MigrationStatus::Uninitialized => {
+                println!("DB 未初期化（_sqlx_migrations テーブルが存在しません）。");
+                println!("`paddock-analyze migrate` で初期化・適用してください。");
+            }
+        }
+        return Ok(());
+    }
+
+    pool::migrate(&pool).await.context("apply migrations")?;
+    println!("マイグレーションを適用しました（DB は最新です）。");
     Ok(())
 }
 

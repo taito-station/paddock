@@ -10,9 +10,9 @@ pub async fn build_app() -> anyhow::Result<App> {
     let config = Config::from_env().context("load config")?;
     config.init_tracing();
 
-    let pool = pool::connect_and_migrate(&config.paddock_db_url)
+    let pool = pool::connect_checked(&config.paddock_db_url, config.paddock_auto_migrate)
         .await
-        .context("connect and migrate Postgres")?;
+        .context("connect Postgres")?;
     let repo = PostgresRepository::new(pool);
     Ok(HorseHistoryInteractor::new(
         repo,

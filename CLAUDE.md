@@ -18,6 +18,11 @@ paddock の文書は HVE（dahatake/HypervelocityEngineering, MIT）の蒸留モ
   索引 `.mdq/` は gitignore・セッション毎に `scripts/mdq index` で再ビルド（初回は
   `python3 -m venv tools/mdq/.venv && tools/mdq/.venv/bin/pip install -r tools/mdq/requirements.txt`）。
 
+## DB 運用
+
+- **migration 追加後は共有 DB へ `paddock-analyze migrate` で明示適用する**（起動時は自動適用されない・#470/ADR 0070）。`--dry-run` で未適用一覧のみ確認できる。
+- app 起動時は既定で auto-migrate しない（read-only 整合チェックのみ）。未適用/未初期化 DB は起動が停止するので `paddock-analyze migrate` を先に流す。**stale binary の warn**（DB が先行）が出たら最新ブランチで再ビルドする。
+
 ## 予想ワークフロー
 
 競馬予想を行うセッションでは以下の手順で進める。毎回この流れを守る。

@@ -37,5 +37,6 @@ USER apiserver
 # コンテナ外へ公開するには PADDOCK_SERVER_ADDR=0.0.0.0:8080 で bind する
 # （既定の 127.0.0.1 はコンテナ内ループバックのみで、公開ポートから到達できない）。
 EXPOSE 8080
-# 起動時に自身が pool::migrate でマイグレーションを適用する（compose の depends_on で postgres 健全化を待つ）。
+# 起動時 auto-migrate は既定 OFF（#470）。prod では compose の PADDOCK_AUTO_MIGRATE=true で有効化し、
+# 自身が pool::migrate でマイグレーションを適用する（compose の depends_on で postgres 健全化を待つ）。
 ENTRYPOINT ["/usr/local/bin/paddock-api"]

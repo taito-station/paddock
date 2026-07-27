@@ -17,9 +17,9 @@ pub async fn build_app() -> anyhow::Result<App> {
     let config = Config::from_env().context("load config")?;
     config.init_tracing();
 
-    let pool = pool::connect_and_migrate(&config.paddock_db_url)
+    let pool = pool::connect_checked(&config.paddock_db_url, config.paddock_auto_migrate)
         .await
-        .context("connect and migrate Postgres")?;
+        .context("connect Postgres")?;
     // オッズ参照用にプールを共有する（sqlx の PgPool は Arc ベースで安価に clone 可能）。
     let odds = OddsInteractor::new(
         UreqNetkeibaScraper::new(),

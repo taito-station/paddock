@@ -21,6 +21,12 @@ pub struct Config {
     /// REST API サーバ（api-server, #33）の bind アドレス（`host:port`）。
     #[serde(default = "default_server_addr")]
     pub paddock_server_addr: String,
+    /// 起動時に DB マイグレーションを自動適用するか（#470）。既定 `false`＝自動適用しない。
+    /// 共有 golden DB を複数 worktree/バイナリが叩くため、既定では起動時に DDL を発行せず
+    /// read-only 整合チェックのみ行い、明示適用（`paddock-analyze migrate`）に一本化する。
+    /// prod（compose の `PADDOCK_AUTO_MIGRATE=true`）だけ従来どおり起動時 auto-migrate を有効化する。
+    #[serde(default = "default_auto_migrate")]
+    pub paddock_auto_migrate: bool,
 }
 
 fn default_db_url() -> String {
@@ -42,6 +48,11 @@ fn default_log_filter() -> String {
 
 fn default_server_addr() -> String {
     "127.0.0.1:8080".to_string()
+}
+
+/// 起動時 auto-migrate の既定（#470）。既定は `false`＝起動時に自動適用しない。
+fn default_auto_migrate() -> bool {
+    false
 }
 
 impl Config {
@@ -82,5 +93,11 @@ mod tests {
     fn default_log_filter_suppresses_html5ever() {
         let filter = default_log_filter();
         assert!(filter.contains("html5ever=off"), "got: {filter}");
+    }
+
+    /// 起動時 auto-migrate の既定は false（#470）。共有 DB へ起動時に無条件 DDL を打たない。
+    #[test]
+    fn default_auto_migrate_is_false() {
+        assert!(!default_auto_migrate());
     }
 }

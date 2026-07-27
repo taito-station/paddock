@@ -37,4 +37,5 @@ RUN chmod +x /usr/local/bin/importer-entrypoint.sh \
 USER importer
 
 # 起動時 preflight（tesseract + jpn パック）は paddock-parse-pdf 自身が行う。
+# 起動時 auto-migrate は既定 OFF（#470）。prod では compose の PADDOCK_AUTO_MIGRATE=true で有効化する。
 ENTRYPOINT ["/usr/local/bin/importer-entrypoint.sh"]

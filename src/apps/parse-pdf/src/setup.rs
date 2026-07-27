@@ -25,9 +25,9 @@ pub async fn build_app(fetch_min_interval: Option<Duration>) -> anyhow::Result<B
 
     pdf_ocr::ensure_available("jpn").context("tesseract preflight")?;
 
-    let pool = pool::connect_and_migrate(&config.paddock_db_url)
+    let pool = pool::connect_checked(&config.paddock_db_url, config.paddock_auto_migrate)
         .await
-        .context("connect and migrate Postgres")?;
+        .context("connect Postgres")?;
     let repo = PostgresRepository::new(pool);
     let app = Interactor::new(
         repo,
