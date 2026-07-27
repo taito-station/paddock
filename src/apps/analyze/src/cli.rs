@@ -138,6 +138,12 @@ pub enum Command {
         #[arg(long)]
         dump_features: Option<String>,
     },
+    /// 共有 DB へ未適用マイグレーションを明示適用する（#470）。起動時 auto-migrate は既定 OFF。
+    Migrate {
+        /// 適用せず未適用マイグレーションの一覧のみ表示する。
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// 古い race_odds_snapshots を保持期間でパージする（#234）。最新キャッシュ race_odds は消さない。
     /// cutoff = 実行日(UTC) − months。fetched_at の日付が cutoff より前の行を削除する。
     PurgeSnapshots {
