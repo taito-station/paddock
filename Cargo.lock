@@ -1996,6 +1996,7 @@ dependencies = [
  "paddock-use-case",
  "predict-format",
  "rdb-gateway",
+ "sqlx",
  "tokio",
  "tracing",
  "tracing-subscriber",
