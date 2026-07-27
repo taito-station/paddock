@@ -25,6 +25,7 @@ paddock の全 app（predict / api-server / predict-watch / fetch-card / odds-co
    - `StaleBinary`（DB が先行＝このバイナリが古い可能性）→ warn して **継続**。DB が進んでいるだけで当該バイナリの動作は成立しうるため、止めずに「最新ブランチで再ビルドを」と促す。
    - `Pending`（バイナリが知るが DB 未適用）→ warn して **`Err` で停止**。未適用のまま動くと不整合。
    - `Uninitialized`（`_sqlx_migrations` 不在）→ warn して **`Err` で停止**。初回セットアップ未実施。
+   - **pending と stale が同時**（別 worktree が別々に migration を足して交差した状態）→ `Pending` を**優先して停止**する。自バイナリの未適用 migration があるうちは（stale であっても）そのバイナリのクエリが壊れうるため動かさず、`paddock-analyze migrate` で自分の分を適用させる。適用済み判定は `_sqlx_migrations.success = true` の行のみ（dirty＝前回失敗した行は未適用扱い）。
 3. **明示入口 `paddock-analyze migrate`** を新設する。共有 DB へ未適用マイグレーションを適用する唯一の入口。`--dry-run` で未適用一覧のみ表示する。未初期化 DB でも動く必要があるため、この経路だけは `connect_checked`（Uninitialized で停止する）を経由せず素の `pool::connect` で pool を得る（migrate が自家中毒しない）。
 4. **prod は従来どおり起動時 auto-migrate を有効化する**。[compose.yaml](../../deployments/compose.yaml) の `api` / `importer` サービスに `PADDOCK_AUTO_MIGRATE=true` を設定し、コンテナは起動時に自身が `pool::migrate` を適用する（`depends_on` で postgres 健全化を待つ）。Config に `PADDOCK_AUTO_MIGRATE`（既定 `false`）を追加した。
 

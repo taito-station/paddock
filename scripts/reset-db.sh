@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # 対象 worktree の DB を空に戻す（再 seed / 再 ingest 前提）(#36 Postgres 版)。
 #
-# 対象 database を DROP/CREATE して空にする。次回のアプリ起動（pool::migrate）でスキーマが
-# 再生成される。seed-db.sh と対称に、golden（既定: 同サーバの paddock DB）への reset は
+# 対象 database を DROP/CREATE して空にする。起動時 auto-migrate は既定 OFF（#470/ADR 0070）なので、
+# reset 後は `paddock-analyze migrate` でスキーマを明示適用してから使う（アプリ起動だけでは再生成されない）。
+# seed-db.sh と対称に、golden（既定: 同サーバの paddock DB）への reset は
 # 既定で中断する（--force で明示的に許可）。
 #
 # 前提: psql（libpq クライアント）が要る。対象 DB を使用中のアプリは停止しておく。
@@ -16,7 +17,8 @@ usage() {
     cat <<'EOF'
 reset-db.sh - 対象 worktree の DB を空に戻す（Postgres）
 
-対象 database を DROP/CREATE して空にする。次回のアプリ起動で自動マイグレートされる。
+対象 database を DROP/CREATE して空にする。reset 後は `paddock-analyze migrate` で明示適用する
+（起動時 auto-migrate は既定 OFF・#470）。
 
 使い方:
   scripts/reset-db.sh                 # $PADDOCK_DB_URL の database を空に戻す

@@ -4,8 +4,9 @@ kind: knowledge
 sources:
   - docs/qa/QA-setup-boilerplate-410.md
   - docs/adr/0069-drop-icloud-writes-browser-only-viewing.md
+  - docs/adr/0070-explicit-migration-no-auto-on-startup.md
 distilled_from_sha: "8f8be21"
-updated: "2026-07-22"
+updated: "2026-07-27"
 ---
 
 # app bootstrap（DI・起動シーケンス）の共通化
@@ -14,7 +15,7 @@ updated: "2026-07-22"
 
 ## 共通ヘルパ（重複を書かない）
 
-- **接続＋マイグレート**: `rdb_gateway::pool::connect_and_migrate(&config.paddock_db_url)` を使う。`connect` → `migrate` を各 app で個別に呼ばない（pool 責務として rdb-gateway に集約済み）。
+- **接続＋整合チェック**: `rdb_gateway::pool::connect_checked(&config.paddock_db_url, config.paddock_auto_migrate)` を使う（#470/ADR 0070）。起動時 auto-migrate は既定 OFF で、`connect_checked` は read-only 整合チェックのみ（未適用/未初期化なら停止・DB 先行の stale は warn 継続）。prod（compose の `PADDOCK_AUTO_MIGRATE=true`）だけ従来どおり起動時 `migrate` を適用する。マイグレーションの明示適用は `paddock-analyze migrate`。`connect` / `migrate` / `connect_and_migrate` を各 app で個別に呼ばない（pool 責務として rdb-gateway に集約済み）。
 - **tracing 初期化**: `config.init_tracing()` を使う（`paddock_config::Config` のメソッド）。`paddock_log` フィルタで `fmt().with_env_filter(...).try_init()` を実行し、不正フィルタは `info` にフォールバック（#238 の html5ever 抑止の回帰は `default_log_filter_is_valid_env_filter` で担保）。各 app で `tracing_subscriber::fmt()...` を直書きしない。tracing は DB 層の責務でないため rdb-gateway でなく paddock-config（ログ設定 `paddock_log` の持ち主）に置く。
 
 典型的な build_app:
@@ -22,9 +23,9 @@ updated: "2026-07-22"
 ```rust
 let config = Config::from_env().context("load config")?;
 config.init_tracing();
-let pool = pool::connect_and_migrate(&config.paddock_db_url)
+let pool = pool::connect_checked(&config.paddock_db_url, config.paddock_auto_migrate)
     .await
-    .context("connect and migrate Postgres")?;
+    .context("connect Postgres")?;
 // あとは各 app 固有の Interactor 組み立て（scrape delay 等の差分は引数で吸収）
 ```
 

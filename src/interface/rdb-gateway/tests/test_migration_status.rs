@@ -89,3 +89,68 @@ async fn check_is_read_only_and_creates_no_table(pool: sqlx::PgPool) {
         "check_migration_status がテーブルを作ってはいけない"
     );
 }
+
+/// 全適用後に適用済み version を 1 つ削除＝「バイナリが知るが DB 未適用」を作ると Pending。
+/// connect_checked(false) が Err 停止する主経路の実証（従来テストに欠けていた単独ケース）。
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn missing_applied_version_is_pending(pool: sqlx::PgPool) {
+    let removed: i64 = sqlx::query_scalar(
+        "DELETE FROM _sqlx_migrations WHERE version = (SELECT MAX(version) FROM _sqlx_migrations) \
+         RETURNING version",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let status = pool::check_migration_status(&pool).await.unwrap();
+    assert_eq!(status, MigrationStatus::Pending(vec![removed]));
+}
+
+/// pending と stale が同時に存在する（別 worktree が別々に migration を足して交差した状態）ときは、
+/// Pending を優先して停止側に倒す（自バイナリの未適用 migration があるうちは動かさない）。
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn pending_takes_priority_over_stale(pool: sqlx::PgPool) {
+    let phantom: i64 = 99990101000000;
+    // stale: 埋め込みに無い架空の適用済み。
+    sqlx::query(
+        "INSERT INTO _sqlx_migrations (version, description, success, checksum, execution_time) \
+         VALUES ($1, 'phantom future migration', true, $2, 0)",
+    )
+    .bind(phantom)
+    .bind(vec![0u8; 48])
+    .execute(&pool)
+    .await
+    .unwrap();
+    // pending: 実 version（phantom を除く最大）を 1 つ削除。
+    let removed: i64 = sqlx::query_scalar(
+        "DELETE FROM _sqlx_migrations \
+         WHERE version = (SELECT MAX(version) FROM _sqlx_migrations WHERE version <> $1) \
+         RETURNING version",
+    )
+    .bind(phantom)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let status = pool::check_migration_status(&pool).await.unwrap();
+    assert_eq!(
+        status,
+        MigrationStatus::Pending(vec![removed]),
+        "pending があるうちは stale より優先して停止側（Pending）に倒す"
+    );
+}
+
+/// dirty 行（`success=false`＝前回失敗）は未適用扱いになり Pending に落ちる（`WHERE success=true` の実証）。
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn dirty_row_is_treated_as_unapplied(pool: sqlx::PgPool) {
+    let dirtied: i64 = sqlx::query_scalar(
+        "UPDATE _sqlx_migrations SET success = false \
+         WHERE version = (SELECT MAX(version) FROM _sqlx_migrations) RETURNING version",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let status = pool::check_migration_status(&pool).await.unwrap();
+    assert_eq!(status, MigrationStatus::Pending(vec![dirtied]));
+}

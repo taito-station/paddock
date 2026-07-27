@@ -48,8 +48,10 @@ pub async fn connect_and_migrate(database_url: &str) -> Result<PgPool> {
 /// - `Migrator::run` や `ensure_migrations_table` は呼ばない（起動時の無条件 auto-migrate をやめるため、
 ///   共有 DB に副作用を残さない read-only チェックに徹する）。
 /// - `_sqlx_migrations` が無い（未初期化 DB）は SQLSTATE `42P01` を握って [`MigrationStatus::Uninitialized`]。
-/// - `stale`（DB にあるがバイナリが知らない）を最優先で [`MigrationStatus::StaleBinary`]、次いで
-///   `pending`（バイナリが知るが DB 未適用）を [`MigrationStatus::Pending`]、両方空なら [`MigrationStatus::UpToDate`]。
+/// - 適用済みは `success=true` の行のみを数える（dirty＝前回失敗の行は未適用扱い）。
+/// - `pending`（バイナリが知るが DB 未適用）を最優先で [`MigrationStatus::Pending`]（当該バイナリのクエリが
+///   未適用スキーマを参照して壊れうるため、stale と同時でも停止側に倒す）、次いで `stale`（DB にあるが
+///   バイナリが知らない）を [`MigrationStatus::StaleBinary`]、両方空なら [`MigrationStatus::UpToDate`]。
 pub async fn check_migration_status(pool: &PgPool) -> Result<MigrationStatus> {
     // バイナリが知る version（up マイグレーションのみ。down は適用単位ではない）。
     let embedded: BTreeSet<i64> = sqlx::migrate!("../../../deployments/db/migrations")
@@ -58,27 +60,31 @@ pub async fn check_migration_status(pool: &PgPool) -> Result<MigrationStatus> {
         .map(|m| m.version)
         .collect();
 
-    // DB 適用済み version。テーブル不在（未初期化）は Uninitialized に落とす。
-    let applied: BTreeSet<i64> =
-        match sqlx::query_scalar::<_, i64>("SELECT version FROM _sqlx_migrations ORDER BY version")
-            .fetch_all(pool)
-            .await
-        {
-            Ok(rows) => rows.into_iter().collect(),
-            Err(sqlx::Error::Database(e)) if e.code().as_deref() == Some("42P01") => {
-                return Ok(MigrationStatus::Uninitialized);
-            }
-            Err(e) => return Err(e.into()),
-        };
+    // DB 適用済み version（`success=true` のみ＝dirty な失敗行は未適用扱い）。
+    // テーブル不在（未初期化）は Uninitialized に落とす。
+    let applied: BTreeSet<i64> = match sqlx::query_scalar::<_, i64>(
+        "SELECT version FROM _sqlx_migrations WHERE success = true ORDER BY version",
+    )
+    .fetch_all(pool)
+    .await
+    {
+        Ok(rows) => rows.into_iter().collect(),
+        Err(sqlx::Error::Database(e)) if e.code().as_deref() == Some("42P01") => {
+            return Ok(MigrationStatus::Uninitialized);
+        }
+        Err(e) => return Err(e.into()),
+    };
 
     let pending: Vec<i64> = embedded.difference(&applied).copied().collect();
     let stale: Vec<i64> = applied.difference(&embedded).copied().collect();
 
-    // stale は「このバイナリでは未知の適用済み」＝バイナリ側が古い疑い。pending より優先で報告する。
-    if !stale.is_empty() {
-        Ok(MigrationStatus::StaleBinary(stale))
-    } else if !pending.is_empty() {
+    // pending（バイナリが知るが DB 未適用）は、そのまま起動すると当該バイナリのクエリが未適用スキーマを
+    // 参照して壊れうるため最優先で停止側に倒す（stale と同時でも pending を優先）。次いで stale（DB にのみ
+    // 適用済み＝バイナリが古い疑い）は warn 継続にとどめる。両方空なら UpToDate。
+    if !pending.is_empty() {
         Ok(MigrationStatus::Pending(pending))
+    } else if !stale.is_empty() {
+        Ok(MigrationStatus::StaleBinary(stale))
     } else {
         Ok(MigrationStatus::UpToDate)
     }
