@@ -11,7 +11,7 @@ sources:
   - docs/adr/0046-allocation-prob-weight-no-floor-rejected.md
   - docs/adr/0048-retire-jra-odds-scraper-for-netkeiba.md
   - docs/adr/0054-kelly-staking-rejected.md
-distilled_from_sha: "99c939f"
+distilled_from_sha: "d8cc0e4"
 updated: "2026-07-27"
 ---
 

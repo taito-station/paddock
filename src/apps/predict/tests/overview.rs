@@ -18,26 +18,29 @@
 //! （`app.odds.race_odds` → `UreqNetkeibaScraper`）はその return より後ろなので到達しない。
 //! `race_cards` を seed すると CI が netkeiba へ実通信するテストになる。
 //!
-//! この前提は 2 段で機械的に見張る。[`assert_preconditions`] が `run_overview` の **実行前** に
-//! `race_cards` 0 件（不変条件そのもの）を確認し、[`assert_no_odds_read_through`] が実行後に
-//! `race_odds` 0 件（到達のカナリア）を確認する。`race_cards` を事後に見るだけだと
-//! 「落ちたときには既に netkeiba へ通信済み」になるため、こちらは必ず実行前に止める。
+//! この前提は 2 段で見張るが、守備範囲が違うので混同しないこと。
+//! [`assert_no_race_cards`] は `run_overview` の **実行前** に `race_cards` 0 件を確認し、
+//! 「seed に `race_cards` を足した」タイプのドリフトを通信が起きる前に止める。
+//! [`assert_no_odds_read_through`] は実行後に `race_odds` 0 件を確認するカナリアで、
+//! `render_race_prediction` の呼び出し順が壊れた場合を捕まえる狙いだが、
+//! **スクレイプが失敗すると行が増えないため素通りする**。完全な網ではない。
 //!
 //! ## テストが空回りしないための前提 assert
 //!
 //! `races` の列挙は `source='pdf'` に依存しており、`save_race` はこの列を bind せず
 //! 列 DEFAULT に頼っている。既定が変わるとレースが 0 件になり、非干渉 assert は
 //! 「何も起きていないので一致」で緑のまま空回りする。それを防ぐため各テストは
-//! `run_overview` の前に「対象日が N レース列挙される」ことを assert する。
+//! `run_overview` の前に [`assert_race_count`] で期待件数を固定する。
 //!
 //! ## このテストがカバーしないこと
 //!
 //! `RaceView::NoOdds` / `Shown` 経路（出馬表とオッズが揃ったレースの EV 表示）。
-//! そこへ後から書き込みが足された場合は検知できない。EV 表示経路を張るには
-//! `App` のスクレイパ（`UreqNetkeibaScraper` 具象固定）をジェネリック化して
-//! フェイクを注入する必要があり、本 issue のスコープ外。EV 表示経路そのものの回帰は、
-//! 全 repository を mock した `src/use-case/tests/test_predict_race.rs` が
-//! DB・ネットワーク非依存で担う。
+//! そこへ後から書き込みが足された場合は検知できない。`--explain` の固有分岐
+//! （`conditional_gate_stats`）も NoEntries 経路では到達しないので同様。
+//! これらを張るには `App` のスクレイパ（`UreqNetkeibaScraper` 具象固定）を
+//! ジェネリック化してフェイクを注入する必要があり、本 issue のスコープ外。
+//! EV 表示経路そのものの回帰は、全 repository を mock した
+//! `src/use-case/tests/test_predict_race.rs` が DB・ネットワーク非依存で担う。
 
 use chrono::{DateTime, NaiveDate, TimeZone, Utc};
 use netkeiba_scraper::UreqNetkeibaScraper;
@@ -66,6 +69,10 @@ const RACE_UNRECORDED: &str = "2026-3-nakayama-8-3R";
 /// 別日（[`other_date`]）のレース。session 対象日の race_id を使い回すと
 /// 「同じ race_id が 2 つの日付を指す」状態になって読みにくいので分ける。
 const RACE_OTHER_DAY: &str = "2026-3-nakayama-9-1R";
+
+/// 1 レースあたりの予算。`cli.rs` の `--race-budget` 既定値に合わせている
+/// （`--overview` は残高で絞らずこの値をそのまま各レースに使う）。
+const RACE_BUDGET: u64 = 5_000;
 
 /// 予想セッションを張る対象日。
 fn date() -> NaiveDate {
@@ -306,17 +313,10 @@ async fn snapshot(pool: &PgPool) -> Snapshot {
     }
 }
 
-/// `run_overview` を呼ぶ **前** に必ず確認する前提。
+/// `run_overview` を呼ぶ **前** に確認する、ネットワークに出ないための不変条件。
 ///
-/// - `race_cards` 0 件: 冒頭の「ネットワークに出ない設計」の不変条件そのもの。事後に検出しても
-///   「落ちたときには既に netkeiba へ通信済み」なので、実行前に止める。
-/// - レース列挙数: `races` が 0 件に退化すると非干渉 assert が空回りしたまま緑になるのを防ぐ。
-async fn assert_preconditions(
-    repo: &PostgresRepository,
-    pool: &PgPool,
-    on: NaiveDate,
-    races: usize,
-) {
+/// 事後に検出しても「落ちたときには既に netkeiba へ通信済み」なので、必ず実行前に止める。
+async fn assert_no_race_cards(pool: &PgPool) {
     let cards: i64 = sqlx::query_scalar("SELECT count(*) FROM race_cards")
         .fetch_one(pool)
         .await
@@ -326,12 +326,18 @@ async fn assert_preconditions(
         "race_cards を seed してはならない。入れると predict_race_views が成功し、\
          オッズ read-through 経由で CI が netkeiba へ実通信する（冒頭の設計注記参照）"
     );
+}
 
+/// `run_overview` を呼ぶ **前** に確認する、テストが空回りしていないことの前提。
+///
+/// `races` の列挙が退化して 0 件になると、非干渉の比較が「何も起きていないので一致」で
+/// 自明に成立してしまう。期待件数を明示して固定する。
+async fn assert_race_count(repo: &PostgresRepository, on: NaiveDate, expected_races: usize) {
     let found = repo.find_races_by_date(on).await.unwrap();
     assert_eq!(
         found.len(),
-        races,
-        "前提: {on} のレースが {races} 件列挙される（0 件だと非干渉 assert が空回りする）"
+        expected_races,
+        "前提: {on} のレースが {expected_races} 件列挙される"
     );
 }
 
@@ -366,51 +372,32 @@ fn assert_seeded_session(before: &Snapshot) {
 }
 
 /// 記録済みセッションがあるレースを `--overview` で再表示しても 4 テーブルは 1 行も変わらない。
+///
+/// `explain` の有無は 1 つの一時DBで両方回す。NoEntries 経路では `explain` を消費する分岐
+/// （`conditional_gate_stats`）に到達しないため、これを別テストに分けても増分の検知力は無く
+/// `#[sqlx::test]` の一時DB作成＋全 migration 適用が 1 サイクル増えるだけ（CI は直列実行）。
+/// ここで固定できるのは「explain 引数の配線が書き込みを増やさない」ことまで。
 #[sqlx::test(migrations = "../../../deployments/db/migrations")]
 async fn overview_does_not_touch_predict_session_tables(pool: PgPool) {
     let repo = PostgresRepository::new(pool.clone());
     seed_races_on_date(&repo).await;
     seed_recorded_session(&repo).await;
-    assert_preconditions(&repo, &pool, date(), 3).await;
+    assert_no_race_cards(&pool).await;
+    assert_race_count(&repo, date(), 3).await;
 
     let before = snapshot(&pool).await;
     assert_seeded_session(&before);
 
-    run_overview(&test_app(&pool), date(), 5_000, false)
-        .await
-        .unwrap();
+    for explain in [false, true] {
+        run_overview(&test_app(&pool), date(), RACE_BUDGET, explain)
+            .await
+            .unwrap();
+    }
 
     assert_eq!(
         before,
         snapshot(&pool).await,
-        "--overview は予想セッション 4 テーブルを一切書き換えない（#555）"
-    );
-    assert_no_odds_read_through(&pool).await;
-}
-
-/// `--explain` を立てても非干渉。
-///
-/// NoEntries 経路では `explain` を消費する分岐（`conditional_gate_stats`）まで到達しないので、
-/// ここで固定できるのは「`run_overview` の explain 引数の配線が書き込みを増やさない」ことだけ。
-/// explain 固有ロジックそのもののカバレッジは主張しない（冒頭「カバーしないこと」参照）。
-#[sqlx::test(migrations = "../../../deployments/db/migrations")]
-async fn overview_with_explain_does_not_touch_predict_session_tables(pool: PgPool) {
-    let repo = PostgresRepository::new(pool.clone());
-    seed_races_on_date(&repo).await;
-    seed_recorded_session(&repo).await;
-    assert_preconditions(&repo, &pool, date(), 3).await;
-
-    let before = snapshot(&pool).await;
-    assert_seeded_session(&before);
-
-    run_overview(&test_app(&pool), date(), 5_000, true)
-        .await
-        .unwrap();
-
-    assert_eq!(
-        before,
-        snapshot(&pool).await,
-        "--overview --explain も予想セッション 4 テーブルを書き換えない（#555）"
+        "--overview は explain の有無によらず予想セッション 4 テーブルを一切書き換えない（#555）"
     );
     assert_no_odds_read_through(&pool).await;
 }
@@ -424,7 +411,8 @@ async fn overview_with_explain_does_not_touch_predict_session_tables(pool: PgPoo
 async fn overview_does_not_create_a_session_when_none_exists(pool: PgPool) {
     let repo = PostgresRepository::new(pool.clone());
     seed_races_on_date(&repo).await;
-    assert_preconditions(&repo, &pool, date(), 3).await;
+    assert_no_race_cards(&pool).await;
+    assert_race_count(&repo, date(), 3).await;
 
     let before = snapshot(&pool).await;
     assert!(
@@ -432,7 +420,7 @@ async fn overview_does_not_create_a_session_when_none_exists(pool: PgPool) {
         "前提: この日のセッションは存在しない"
     );
 
-    run_overview(&test_app(&pool), date(), 5_000, false)
+    run_overview(&test_app(&pool), date(), RACE_BUDGET, false)
         .await
         .unwrap();
 
@@ -457,13 +445,14 @@ async fn overview_returns_ok_and_writes_nothing_when_no_races_on_date(pool: PgPo
         .await
         .unwrap();
     seed_recorded_session(&repo).await;
-    assert_preconditions(&repo, &pool, date(), 0).await;
-    assert_preconditions(&repo, &pool, other_date(), 1).await;
+    assert_no_race_cards(&pool).await;
+    assert_race_count(&repo, date(), 0).await;
+    assert_race_count(&repo, other_date(), 1).await;
 
     let before = snapshot(&pool).await;
     assert_seeded_session(&before);
 
-    run_overview(&test_app(&pool), date(), 5_000, false)
+    run_overview(&test_app(&pool), date(), RACE_BUDGET, false)
         .await
         .expect("開催なし日でもエラーにせず早期 return する");
 

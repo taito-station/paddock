@@ -33,8 +33,8 @@ jobs:
     # 無言の無限ハング（DB 接続待ち・retry のこじれ等）を防ぐ安全弁。
     timeout-minutes: 30
 
-    # `#[sqlx::test]`（rdb-gateway / api-server / ingest-predictions / predict の統合テスト）が
-    # 接続する Postgres。
+    # 複数クレートに散在する `#[sqlx::test]`（統合テスト）が接続する Postgres。
+    # クレート名は列挙しない（増減のたびに更新漏れが起きるため。下の test ステップと同じ理由）。
     # ローカル開発（deployments/compose.yaml）と同じ postgres:17-alpine・同じ固定資格情報を使う。
     services:
       postgres:
@@ -98,7 +98,7 @@ jobs:
         run: cargo clippy --locked --workspace --all-targets -- -D warnings
 
       # 大半のクレートを 1 ステップで実行する。実 Postgres 接続テスト（#[sqlx::test]）は
-      # rdb-gateway / api-server / ingest-predictions / predict に散在し単一サーバを共有するため、
+      # 複数クレートに散在し単一サーバを共有するため、
       # --test-threads=1 で直列実行する（stock cargo test はテストバイナリ"間"を逐次実行し、
       # --test-threads=1 が各バイナリ"内"も 1 スレッドにするので、両者で全体が直列になる）。
       # 非 DB テストも同じ直列実行に含まれるが
