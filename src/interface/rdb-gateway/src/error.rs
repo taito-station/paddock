@@ -23,6 +23,10 @@ pub enum Error {
     /// use-case の `InvalidArgument`（HTTP 400）にマップする。
     #[error("invalid argument: {0}")]
     InvalidArgument(String),
+    /// 起動時に auto-migrate せず整合チェックした結果、未適用マイグレーションまたは未初期化 DB を
+    /// 検出して停止するとき（#470）。`paddock-analyze migrate` での明示適用を促す。
+    #[error("migration required: {0}")]
+    MigrationRequired(String),
 }
 
 pub type Result<A> = std::result::Result<A, Error>;
