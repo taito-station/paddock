@@ -4,10 +4,10 @@ use std::io::{self, BufRead, Write};
 use chrono::{NaiveDate, Utc};
 use paddock_domain::{
     BetCombination, HorseNum, HorseProbability, PairEvDiagnostic, Portfolio, PortfolioBet,
-    PortfolioConfig, RECOMMENDED_MARKET_BLEND_ALPHA, Race, RaceId, TrackCondition, build_portfolio,
+    PortfolioConfig, RECOMMENDED_MARKET_BLEND_ALPHA, Race, RaceId, TrackCondition,
     pair_ev_diagnostics,
 };
-use paddock_use_case::{PredictBetRecord, PredictSessionRecord, PredictionViews};
+use paddock_use_case::{PredictBetRecord, PredictSessionRecord, compose_portfolio};
 use predict_format::{
     PortfolioFormat, format_explanations, format_portfolio, format_probs, format_probs_with_market,
     format_recent_runs_warning, surface_jp,
@@ -334,19 +334,13 @@ async fn render_race_prediction(
         }
         Err(e) => return Err(e.into()),
     };
-    let PredictionViews {
-        blended,
-        pure,
-        explanations,
-        recent_runs_coverage,
-    } = views;
 
     // 近走データ皆無/過半欠損の警告（#552）。新馬戦・近走取得全滅は確率の信頼性が低いので、
     // 確率テーブルの前に注記して「回収率だけ見て候補入り」を防ぐ（表示自体は従来どおり続ける）。
     // render 共有により対話 predict・--skip-all・--overview のすべてで同じ警告が出る。
     if let Some(warn) = format_recent_runs_warning(
-        recent_runs_coverage.field_size,
-        recent_runs_coverage.horses_with_runs,
+        views.recent_runs_coverage.field_size,
+        views.recent_runs_coverage.horses_with_runs,
     ) {
         println!();
         println!("{warn}");
@@ -355,11 +349,11 @@ async fn render_race_prediction(
     // 過去データ視点（#272 ④）: 純モデルの順位＋根拠。市場に依らない「公開データだけの読み」。
     println!();
     println!("【過去データ視点（純モデル）】");
-    for line in format_probs(&pure) {
+    for line in format_probs(&views.pure) {
         println!("{line}");
     }
     if explain {
-        for line in format_explanations(&pure, &explanations) {
+        for line in format_explanations(&views.pure, &views.explanations) {
             println!("{line}");
         }
     }
@@ -375,25 +369,20 @@ async fn render_race_prediction(
     let market_win: HashMap<HorseNum, f64> =
         odds.win.iter().map(|(num, o)| (*num, o.value())).collect();
     // 条件依存枠バイアスの複勝 lift（#343・提示専用）。枠妙味フラグ（枠有利∧市場過小）の判定に使う。
-    let gate_lift: HashMap<HorseNum, f64> = explanations
+    let gate_lift: HashMap<HorseNum, f64> = views
+        .explanations
         .iter()
         .filter_map(|e| e.gate_bias_lift.map(|l| (e.horse_num, l)))
         .collect();
     println!();
     println!("【純モデル vs 市場implied】");
-    for line in format_probs_with_market(&pure, &market_win, &gate_lift) {
+    for line in format_probs_with_market(&views.pure, &market_win, &gate_lift) {
         println!("{line}");
     }
 
     // 軸流しポートフォリオ（馬連＋ワイド＋三連複）を予算内・100 円単位で生成する。軸/相手は blended、
     // EV/的中は pure（循環断ち, #272）。上限は呼び出し側が決めた race_cap。配分・相手頭数は既定（#122）。
-    let portfolio = build_portfolio(
-        &blended,
-        &pure,
-        &odds,
-        race_cap,
-        &PortfolioConfig::default(),
-    );
+    let portfolio = compose_portfolio(&views, &odds, race_cap, None);
 
     println!();
     println!("【市場EV視点：買い目推奨（軸流し, 予算¥{race_cap}/R・EV=純モデル×odds）】");
@@ -442,8 +431,13 @@ async fn render_race_prediction(
 
     // 馬連 vs 馬単(両方向) EV 診断（#246-C）。「穴は1着にならない」読みのとき本命→穴の馬単が
     // 同ペアの馬連より EV 優位になりうる。買い目選択の判断材料として並べて表示する。
-    let diag = pair_ev_diagnostics(&blended, &pure, &odds, PortfolioConfig::default().partners);
-    print_pair_ev_diagnostics(diag.axis, &blended, &diag.rows);
+    let diag = pair_ev_diagnostics(
+        &views.blended,
+        &views.pure,
+        &odds,
+        PortfolioConfig::default().partners,
+    );
+    print_pair_ev_diagnostics(diag.axis, &views.blended, &diag.rows);
 
     Ok(RaceView::Shown(portfolio))
 }

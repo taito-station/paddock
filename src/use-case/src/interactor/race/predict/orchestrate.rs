@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 
 use paddock_domain::{
-    EstimationConfig, HorseEntry, HorseExplanation, HorseFactors, HorseName, HorseProbability,
-    JockeyName, RaceId, RaceOdds, TrackCondition, TrainerName,
+    EstimationConfig, HorseEntry, HorseExplanation, HorseFactors, HorseName, HorseNum,
+    HorseProbability, JockeyName, Portfolio, PortfolioConfig, RaceId, RaceOdds, TrackCondition,
+    TrainerName, build_portfolio,
 };
 
 use crate::error::{Error, Result};
@@ -31,6 +32,28 @@ pub struct PredictionViews {
     /// 近走データ（`horse_past_runs`）の被覆（#552）。新馬戦・近走取得全滅など「近走ゼロ」の
     /// レースを出力側が信頼性低として警告するための集計値。確率・買い目は従来どおり出力する。
     pub recent_runs_coverage: RecentRunsCoverage,
+}
+
+/// 買い目組成の唯一の合成点（#450）。#272 循環断ち＝rank_probs=blended / ev_probs=pure を
+/// ここだけで対応づけ、呼び出し元が引数順を取り違える余地を無くす。`PortfolioConfig` の構築
+/// （既定＋forced_axis）も集約する。odds 供給ポリシー（refresh/read-through/保存済み/morning）は
+/// 呼び出し元の責務でここには持ち込まない。build_portfolio への委譲のみで挙動は不変。
+pub fn compose_portfolio(
+    views: &PredictionViews,
+    odds: &RaceOdds,
+    race_budget: u64,
+    forced_axis: Option<HorseNum>,
+) -> Portfolio {
+    build_portfolio(
+        &views.blended,
+        &views.pure,
+        odds,
+        race_budget,
+        &PortfolioConfig {
+            forced_axis,
+            ..PortfolioConfig::default()
+        },
+    )
 }
 
 /// 近走データ（`horse_past_runs`）の被覆の集計値（#552）。新馬戦（構造上ゼロ）・近走取得全滅の
@@ -374,5 +397,123 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: 
             .await?;
         let odds = self.repository.find_race_odds(race_id, None).await?;
         Ok((views, odds))
+    }
+}
+
+#[cfg(test)]
+mod compose_portfolio_tests {
+    use super::*;
+    use paddock_domain::{OddsValue, Pair, PlaceOdds, Triple, build_portfolio};
+
+    fn horse(n: u32) -> HorseNum {
+        HorseNum::try_from(n).unwrap()
+    }
+
+    fn prob(n: u32, win: f64) -> HorseProbability {
+        HorseProbability {
+            horse_num: horse(n),
+            horse_name: HorseName::try_from(format!("ウマ{n}")).unwrap(),
+            win_prob: win,
+            place_prob: 0.0,
+            show_prob: 0.0,
+        }
+    }
+
+    fn odds(v: f64) -> OddsValue {
+        OddsValue::try_from(v).unwrap()
+    }
+
+    /// blended と pure を別々の win_prob 列にして「rank=blended / ev=pure」対応づけを弁別可能にする。
+    /// 馬集合は同一（build_portfolio の同一馬集合 debug_assert を満たす）。
+    fn views_with(blended: Vec<HorseProbability>, pure: Vec<HorseProbability>) -> PredictionViews {
+        let field_size = blended.len();
+        PredictionViews {
+            blended,
+            pure,
+            explanations: Vec::new(),
+            recent_runs_coverage: RecentRunsCoverage {
+                field_size,
+                horses_with_runs: field_size,
+            },
+        }
+    }
+
+    /// 軸=馬1・相手=馬2..5、全券種オッズありのサンプル odds（domain の build_portfolio テストと同型）。
+    fn sample_odds() -> RaceOdds {
+        let mut o = RaceOdds::empty(RaceId::try_from("202506040101".to_string()).unwrap());
+        for p in 2..=5 {
+            o.quinella
+                .insert(Pair::try_from((horse(1), horse(p))).unwrap(), odds(5.0));
+            o.wide.insert(
+                Pair::try_from((horse(1), horse(p))).unwrap(),
+                PlaceOdds::try_from((odds(2.0), odds(3.0))).unwrap(),
+            );
+        }
+        for i in 2..=5 {
+            for j in (i + 1)..=5 {
+                o.trio.insert(
+                    Triple::try_from((horse(1), horse(i), horse(j))).unwrap(),
+                    odds(20.0),
+                );
+            }
+        }
+        o
+    }
+
+    /// Portfolio / BetCombination は PartialEq を持たないので、軸・各点(組合せコード+賭金)・
+    /// 総賭金で等価判定する（`combination_code()` は組合せの安定な文字列キー）。
+    fn assert_same_portfolio(a: &Portfolio, b: &Portfolio) {
+        assert_eq!(a.axis, b.axis, "軸が一致");
+        assert_eq!(a.total_stake, b.total_stake, "総賭金が一致");
+        let legs = |p: &Portfolio| -> Vec<(String, u64)> {
+            p.bets
+                .iter()
+                .map(|bet| (bet.combination.combination_code(), bet.stake))
+                .collect()
+        };
+        assert_eq!(legs(a), legs(b), "各点(組合せ+賭金)が一致");
+    }
+
+    #[test]
+    fn compose_portfolio_equals_direct_build_portfolio() {
+        // 委譲等価: blended/pure を別列にしても compose_portfolio は build_portfolio(default) と同結果。
+        let blended = vec![
+            prob(1, 0.40),
+            prob(2, 0.25),
+            prob(3, 0.18),
+            prob(4, 0.10),
+            prob(5, 0.07),
+        ];
+        let pure = vec![
+            prob(1, 0.30),
+            prob(2, 0.28),
+            prob(3, 0.20),
+            prob(4, 0.12),
+            prob(5, 0.10),
+        ];
+        let odds = sample_odds();
+        let views = views_with(blended.clone(), pure.clone());
+
+        let composed = compose_portfolio(&views, &odds, 5000, None);
+        let direct = build_portfolio(&blended, &pure, &odds, 5000, &PortfolioConfig::default());
+        assert_same_portfolio(&composed, &direct);
+    }
+
+    #[test]
+    fn compose_portfolio_applies_forced_axis() {
+        // 軸ロック: blended 首位でない馬3 を forced_axis に渡すと軸が馬3 に固定される。
+        let blended = vec![
+            prob(1, 0.40),
+            prob(2, 0.25),
+            prob(3, 0.18),
+            prob(4, 0.10),
+            prob(5, 0.07),
+        ];
+        let pure = blended.clone();
+        let odds = sample_odds();
+        let views = views_with(blended, pure);
+
+        let pf = compose_portfolio(&views, &odds, 5000, Some(horse(3)));
+        assert_eq!(pf.axis, Some(horse(3)), "軸ロックが効き軸=馬3");
     }
 }
