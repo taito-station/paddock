@@ -35,7 +35,10 @@ pub struct PredictionViews {
 }
 
 /// 買い目組成の唯一の合成点（#450）。#272 循環断ち＝rank_probs=blended / ev_probs=pure を
-/// ここだけで対応づけ、呼び出し元が引数順を取り違える余地を無くす。`PortfolioConfig` の構築
+/// ここだけで対応づける。`build_portfolio` の第1・第2引数はどちらも `&[HorseProbability]` で
+/// 型が同一なため blended/pure を取り違えてもコンパイルが通る（旧来は 5 箇所で各自が正しい順で
+/// 呼ぶ前提だった）。`PredictionViews` のフィールド名に縛ることでこの取り違えを構造的に排除する。
+/// `PortfolioConfig` の構築
 /// （既定＋forced_axis）も集約する。odds 供給ポリシー（refresh/read-through/保存済み/morning）は
 /// 呼び出し元の責務でここには持ち込まない。build_portfolio への委譲のみで挙動は不変。
 pub fn compose_portfolio(
@@ -509,7 +512,15 @@ mod compose_portfolio_tests {
             prob(4, 0.10),
             prob(5, 0.07),
         ];
-        let pure = blended.clone();
+        // pure は blended と別列（EV 用系統が軸選定に混ざらない＝軸は blended/forced_axis のみで
+        // 決まることを弁別）。
+        let pure = vec![
+            prob(1, 0.30),
+            prob(2, 0.28),
+            prob(3, 0.20),
+            prob(4, 0.12),
+            prob(5, 0.10),
+        ];
         let odds = sample_odds();
         let views = views_with(blended, pure);
 
