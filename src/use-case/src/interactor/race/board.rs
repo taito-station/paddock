@@ -11,10 +11,10 @@ use chrono::NaiveDate;
 
 use paddock_domain::{
     HorseExplanation, HorseNum, HorseProbability, KONSEN_BAND_RATIO, KONSEN_MIN_HORSES, Mark,
-    PadPrediction, Portfolio, PortfolioConfig, RaceId, RaceOdds, TrackCondition, build_portfolio,
-    konsen_band,
+    PadPrediction, Portfolio, RaceId, RaceOdds, TrackCondition, konsen_band,
 };
 
+use crate::compose_portfolio;
 use crate::error::Result;
 use crate::interactor::Interactor;
 use crate::interactor::race::commentary::{horse_detail_lines, horse_headline, race_commentary};
@@ -184,18 +184,9 @@ impl<
 
         // 買い目は既存経路（相手 top5 不変）。軸は記録軸があればそれに固定（#388）。オッズ無しなら組まない。
         let forced_axis = recorded_axis.and_then(|n| HorseNum::try_from(n).ok());
-        let portfolio = odds.as_ref().map(|o| {
-            build_portfolio(
-                &views.blended,
-                &views.pure,
-                o,
-                budget,
-                &PortfolioConfig {
-                    forced_axis,
-                    ..PortfolioConfig::default()
-                },
-            )
-        });
+        let portfolio = odds
+            .as_ref()
+            .map(|o| compose_portfolio(&views, o, budget, forced_axis));
 
         let mut horses =
             build_board_horses(&views.blended, &views.pure, odds.as_ref(), card.as_ref());
@@ -208,16 +199,7 @@ impl<
         // morning_roi!=null で守る）。
         let (morning_at, current_at, morning_roi, morning_hit_prob) = match morning.as_ref() {
             Some(m) => {
-                let morning_portfolio = build_portfolio(
-                    &views.blended,
-                    &views.pure,
-                    &m.odds,
-                    budget,
-                    &PortfolioConfig {
-                        forced_axis,
-                        ..PortfolioConfig::default()
-                    },
-                );
+                let morning_portfolio = compose_portfolio(&views, &m.odds, budget, forced_axis);
                 for h in horses.iter_mut() {
                     if let Ok(num) = HorseNum::try_from(h.horse_num) {
                         h.morning_win_odds = m.odds.win.get(&num).map(|v| v.value());

@@ -1,5 +1,6 @@
-use paddock_domain::{Portfolio, PortfolioConfig, RaceId, TrackCondition, build_portfolio};
+use paddock_domain::{Portfolio, RaceId, TrackCondition};
 
+use crate::compose_portfolio;
 use crate::error::Result;
 use crate::interactor::Interactor;
 use crate::pdf_fetcher::PdfFetcher;
@@ -30,12 +31,6 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: 
         let Some(odds) = self.repository.find_race_odds(race_id, None).await? else {
             return Ok(None);
         };
-        Ok(Some(build_portfolio(
-            &views.blended,
-            &views.pure,
-            &odds,
-            budget,
-            &PortfolioConfig::default(),
-        )))
+        Ok(Some(compose_portfolio(&views, &odds, budget, None)))
     }
 }

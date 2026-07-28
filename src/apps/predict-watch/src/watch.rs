@@ -3,10 +3,9 @@ use std::collections::HashMap;
 use chrono::{Duration, NaiveTime, Utc};
 use monitor_loop::{RaceStatus, Sweeper, has_result, run_monitor_loop, warn_if_not_today_jst_now};
 use paddock_domain::{
-    Portfolio, PortfolioConfig, RECOMMENDED_MARKET_BLEND_ALPHA, Race, RaceClass, RaceId, Venue,
-    build_portfolio, race_roughness,
+    Portfolio, RECOMMENDED_MARKET_BLEND_ALPHA, Race, RaceClass, RaceId, Venue, race_roughness,
 };
-use paddock_use_case::PredictionViews;
+use paddock_use_case::compose_portfolio;
 use predict_format::{
     PortfolioFormat, format_explanations, format_portfolio, format_probs, format_probs_with_market,
     format_recent_runs_warning,
@@ -304,12 +303,7 @@ async fn evaluate_race(app: &App, slot: &Slot, is_ura: bool, captured_at: &str, 
     //    odds と同一データだが読み出し経路は別。persist 失敗時（warn のみで継続）は旧スナップショットを
     //    見るため、その回だけ買い目側と確率側でオッズ集合が食い違いうる（次スイープで解消する一時的劣化）。
     //    track_condition は発走前レースでは None のため、監視は当日の馬場状態を反映しない。
-    let PredictionViews {
-        blended,
-        pure,
-        explanations,
-        recent_runs_coverage,
-    } = match app
+    let views = match app
         .interactor
         .predict_race_views(rid, blend_alpha, slot.race.track_condition, true)
         .await
@@ -324,8 +318,8 @@ async fn evaluate_race(app: &App, slot: &Slot, is_ura: bool, captured_at: &str, 
     // 近走データ皆無/過半欠損の警告（#552）。監視は ROI を出す decision-support なので、
     // 新馬戦・近走取得全滅レースは信頼性低を明示して回収率だけの候補入りを防ぐ。
     if let Some(warn) = format_recent_runs_warning(
-        recent_runs_coverage.field_size,
-        recent_runs_coverage.horses_with_runs,
+        views.recent_runs_coverage.field_size,
+        views.recent_runs_coverage.horses_with_runs,
     ) {
         // 密な監視ログでも埋もれないよう前に 1 行空けて浮かせる（他経路と同様に確率テーブル直前）。
         println!();
@@ -334,32 +328,27 @@ async fn evaluate_race(app: &App, slot: &Slot, is_ura: bool, captured_at: &str, 
 
     // 過去データ視点（純モデルの順位＋根拠）。EV に依らず常に出す。エッジが無い窓でも「なぜこの順位か」を提示。
     println!("  ── {label} 過去データ視点（純モデル）");
-    for line in format_probs(&pure) {
+    for line in format_probs(&views.pure) {
         println!("    {line}");
     }
-    for line in format_explanations(&pure, &explanations) {
+    for line in format_explanations(&views.pure, &views.explanations) {
         println!("    {line}");
     }
     // 純モデル vs 市場implied（差で割安/割高の向きを読む）。
     let market_win: std::collections::HashMap<_, _> =
         odds.win.iter().map(|(num, o)| (*num, o.value())).collect();
     // 条件依存枠バイアスの複勝 lift（#343）。枠妙味フラグ（枠有利∧市場過小）判定に使う。
-    let gate_lift: std::collections::HashMap<_, _> = explanations
+    let gate_lift: std::collections::HashMap<_, _> = views
+        .explanations
         .iter()
         .filter_map(|e| e.gate_bias_lift.map(|l| (e.horse_num, l)))
         .collect();
-    for line in format_probs_with_market(&pure, &market_win, &gate_lift) {
+    for line in format_probs_with_market(&views.pure, &market_win, &gate_lift) {
         println!("    {line}");
     }
 
     // 3) 市場EV視点: 軸/相手は blended、EV/的中は pure（循環断ち, #272）。
-    let portfolio = build_portfolio(
-        &blended,
-        &pure,
-        &odds,
-        race_budget,
-        &PortfolioConfig::default(),
-    );
+    let portfolio = compose_portfolio(&views, &odds, race_budget, None);
     let Some(ev) = &portfolio.ev else {
         println!("  {label}: 買い目を組成できず（オッズ不足）、スキップ");
         return;
@@ -385,7 +374,8 @@ async fn evaluate_race(app: &App, slot: &Slot, is_ura: bool, captured_at: &str, 
         // ◎の model 勝率[%]は blended（順位付け視点）の軸馬から採る。axis は build_portfolio が
         // blended の勝率最上位から選ぶため必ず blended に含まれる。unwrap_or(0.0) は到達しない前提の
         // 防御で、万一の不整合でも監視を止めず 0% として記録する（無言のクラッシュより望ましい）。
-        let axis_prob = blended
+        let axis_prob = views
+            .blended
             .iter()
             .find(|hp| hp.horse_num == axis)
             .map(|hp| hp.win_prob * 100.0)
@@ -398,7 +388,8 @@ async fn evaluate_race(app: &App, slot: &Slot, is_ura: bool, captured_at: &str, 
             .unwrap_or((None, None));
         let post_time = slot.post_time.map(|t| t.format("%H:%M").to_string());
         // 荒れ度は純モデル勝率（odds 非依存のレース形状）から算出する（#344）。ROI とは別軸。
-        let roughness = race_roughness(&pure.iter().map(|hp| hp.win_prob).collect::<Vec<_>>());
+        let roughness =
+            race_roughness(&views.pure.iter().map(|hp| hp.win_prob).collect::<Vec<_>>());
 
         let ctx = SnapshotContext {
             date: cli.date,
