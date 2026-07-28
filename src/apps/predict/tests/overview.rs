@@ -70,8 +70,9 @@ const RACE_UNRECORDED: &str = "2026-3-nakayama-8-3R";
 /// 「同じ race_id が 2 つの日付を指す」状態になって読みにくいので分ける。
 const RACE_OTHER_DAY: &str = "2026-3-nakayama-9-1R";
 
-/// 1 レースあたりの予算。`cli.rs` の `--race-budget` 既定値に合わせている
-/// （`--overview` は残高で絞らずこの値をそのまま各レースに使う）。
+/// 1 レースあたりの予算。**本テストの経路（NoEntries）では使われない**
+/// （`race_cap` は買い目構築まで届かない）。`cli.rs` の `--race-budget` 既定値と
+/// 同じ 5,000 にしてあるのは読み手の混乱を避けるためで、一致は強制していない。
 const RACE_BUDGET: u64 = 5_000;
 
 /// 予想セッションを張る対象日。
@@ -95,6 +96,14 @@ fn race_id(value: &str) -> RaceId {
 
 /// 成績(`races`)行。**`race_cards` は作らない**（冒頭の「ネットワークに出ない設計」参照）。
 fn race(on: NaiveDate, id: &str, day: u32, race_num: u32) -> Race {
+    // race_id は day / race_num を内包しているので二重管理になる。片方だけ書き換えたときに
+    // 気づけるよう突き合わせる（race_num は find_races_by_date の ORDER BY キーで、
+    // ズレても落ちずに並び順だけ静かに変わる）。
+    assert_eq!(
+        id,
+        format!("2026-3-nakayama-{day}-{race_num}R"),
+        "race_id と day / race_num が食い違っている"
+    );
     Race {
         race_id: race_id(id),
         date: on,
@@ -328,12 +337,16 @@ async fn assert_no_race_cards(pool: &PgPool) {
     );
 }
 
-/// `run_overview` を呼ぶ **前** に確認する、テストが空回りしていないことの前提。
+/// `run_overview` を呼ぶ **前** に、その日のレース列挙件数を期待値で固定する。
 ///
-/// `races` の列挙が退化して 0 件になると、非干渉の比較が「何も起きていないので一致」で
-/// 自明に成立してしまう。期待件数を明示して固定する。
-async fn assert_race_count(repo: &PostgresRepository, on: NaiveDate, expected_races: usize) {
-    let found = repo.find_races_by_date(on).await.unwrap();
+/// 2 つの用途を兼ねる。(1) レースありのテストで列挙が退化して 0 件になると、非干渉の比較が
+/// 「何も起きていないので一致」で自明に成立してしまうのを防ぐ。(2) 開催なし日のテストで
+/// 「対象日は確かに 0 件」であることを前提として明示する。
+///
+/// `run_overview` と同じ入口（`Interactor::races_by_date`）を通す。repository を直接叩くと、
+/// interactor 側にフィルタが入ったときに前提と実経路が乖離する。
+async fn assert_race_count(app: &App, on: NaiveDate, expected_races: usize) {
+    let found = app.interactor.races_by_date(on).await.unwrap();
     assert_eq!(
         found.len(),
         expected_races,
@@ -380,26 +393,28 @@ fn assert_seeded_session(before: &Snapshot) {
 #[sqlx::test(migrations = "../../../deployments/db/migrations")]
 async fn overview_does_not_touch_predict_session_tables(pool: PgPool) {
     let repo = PostgresRepository::new(pool.clone());
+    let app = test_app(&pool);
     seed_races_on_date(&repo).await;
     seed_recorded_session(&repo).await;
     assert_no_race_cards(&pool).await;
-    assert_race_count(&repo, date(), 3).await;
+    assert_race_count(&app, date(), 3).await;
 
     let before = snapshot(&pool).await;
     assert_seeded_session(&before);
 
+    // 比較はループの中に置く。外に 1 回だけ置くと、どちらの explain が書いたか切り分けられず、
+    // かつ 1 回目が書き込んだ状態のまま 2 回目を走らせてしまう（fail-fast を失う）。
     for explain in [false, true] {
-        run_overview(&test_app(&pool), date(), RACE_BUDGET, explain)
+        run_overview(&app, date(), RACE_BUDGET, explain)
             .await
             .unwrap();
+        assert_eq!(
+            before,
+            snapshot(&pool).await,
+            "--overview は予想セッション 4 テーブルを一切書き換えない（explain={explain}, #555）"
+        );
+        assert_no_odds_read_through(&pool).await;
     }
-
-    assert_eq!(
-        before,
-        snapshot(&pool).await,
-        "--overview は explain の有無によらず予想セッション 4 テーブルを一切書き換えない（#555）"
-    );
-    assert_no_odds_read_through(&pool).await;
 }
 
 /// セッション未作成の日を `--overview` しても、セッションを勝手に作らない。
@@ -410,9 +425,10 @@ async fn overview_does_not_touch_predict_session_tables(pool: PgPool) {
 #[sqlx::test(migrations = "../../../deployments/db/migrations")]
 async fn overview_does_not_create_a_session_when_none_exists(pool: PgPool) {
     let repo = PostgresRepository::new(pool.clone());
+    let app = test_app(&pool);
     seed_races_on_date(&repo).await;
     assert_no_race_cards(&pool).await;
-    assert_race_count(&repo, date(), 3).await;
+    assert_race_count(&app, date(), 3).await;
 
     let before = snapshot(&pool).await;
     assert!(
@@ -420,7 +436,7 @@ async fn overview_does_not_create_a_session_when_none_exists(pool: PgPool) {
         "前提: この日のセッションは存在しない"
     );
 
-    run_overview(&test_app(&pool), date(), RACE_BUDGET, false)
+    run_overview(&app, date(), RACE_BUDGET, false)
         .await
         .unwrap();
 
@@ -440,19 +456,20 @@ async fn overview_does_not_create_a_session_when_none_exists(pool: PgPool) {
 #[sqlx::test(migrations = "../../../deployments/db/migrations")]
 async fn overview_returns_ok_and_writes_nothing_when_no_races_on_date(pool: PgPool) {
     let repo = PostgresRepository::new(pool.clone());
+    let app = test_app(&pool);
     // races は別日にだけ置く（DB を空にせず、対象日だけ 0 件にする）。
     repo.save_race(&race(other_date(), RACE_OTHER_DAY, 9, 1))
         .await
         .unwrap();
     seed_recorded_session(&repo).await;
     assert_no_race_cards(&pool).await;
-    assert_race_count(&repo, date(), 0).await;
-    assert_race_count(&repo, other_date(), 1).await;
+    assert_race_count(&app, date(), 0).await;
+    assert_race_count(&app, other_date(), 1).await;
 
     let before = snapshot(&pool).await;
     assert_seeded_session(&before);
 
-    run_overview(&test_app(&pool), date(), RACE_BUDGET, false)
+    run_overview(&app, date(), RACE_BUDGET, false)
         .await
         .expect("開催なし日でもエラーにせず早期 return する");
 
