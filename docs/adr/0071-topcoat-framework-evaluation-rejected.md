@@ -41,7 +41,7 @@
   Static export、Authentication 等が並ぶ。**下記の見送り理由 2 と 3 は、このうち
   `topcoat-runtime` / Islands と `OpenAPI` endpoints が実装されれば直接崩れる**——再評価の観測点はここに置く。
 
-### paddock 側の非 Rust 部分の棚卸し（tracked files）
+### paddock 側の非 Rust 部分の棚卸し（tracked files・実測基準 `main` = `409e4a4`）
 
 | 領域 | 規模 | Topcoat の射程 |
 |---|---|---|
@@ -53,6 +53,9 @@
 
 Python 行の件数は `.py` のみの数（tracked 総数は順に 43 / 20 / 10）。最終行はディレクトリ横断のカテゴリで、
 上のディレクトリ行と一部重なる。**Topcoat の射程に入るのは `web/` だけ**で、検討対象は SPA 一点に絞られる。
+
+本 ADR に載せた LOC / ファイル数は**すべて `main` = `409e4a4` 時点のスナップショット**である
+（ADR は不変記録なので後続の変更で追随させない。再測するときはこの基準 commit と比較する）。
 
 ## 決定
 
@@ -85,7 +88,7 @@ Python 行の件数は `.py` のみの数（tracked 総数は順に 43 / 20 / 10
    （なお `web/src/lib/useResultsRefresh.ts` はオッズではなく `POST /api/results/{date}:refresh` の
    着順取り込み／自動精算ポーリングであり、これも SSR 化すると作り直しになる。）
 3. **DB 直読み構成を採ると OpenAPI 一級成果物の方針と衝突する**。`src/interface/rest-controller`
-   （.rs 2,806 LOC・`src/openapi.rs` を含む）と、`src/apps/api-server/tests/openapi.rs` /
+   （.rs 2,730 LOC・`src/openapi.rs` を含む）と、`src/apps/api-server/tests/openapi.rs` /
    `openapi_route_parity.rs` の契約テスト 2 本は、utoipa コードファーストで API 契約を担保するための投資
    （方針の出典は ADR [0022](0022-rest-api-read-server.md)）。**SSR コンポーネントが DB を直読みする構成では
    この契約自体が消える**。SPA を捨てるだけでなく actix-web + utoipa の資産を捨てる判断になる。
