@@ -8,8 +8,8 @@ use crate::handler;
 
 /// `/sessions` 配下の write 系ルートを登録する（呼び出し側が `/api` スコープにマウントする）。
 ///
-/// ジェネリクスは多いが役割が分かれる:
-/// - `R/P/F`: メイン `Interactor`（作成・サマリ・outcome・odds:refresh のセッション存在チェック）
+/// ジェネリクスは役割が分かれる:
+/// - `R`: メイン `Interactor<R>`（作成・サマリ・outcome・odds:refresh のセッション存在チェック）
 /// - `O`: `OddsInteractor<O, R>`（odds:refresh のライブ取得）
 /// - `S`: `ResultsInteractor<S, R>`（results:refresh の同日取り込み＋自動精算。#381 でエイリアス委譲）
 pub fn configure<R, O, S>(cfg: &mut web::ServiceConfig)
