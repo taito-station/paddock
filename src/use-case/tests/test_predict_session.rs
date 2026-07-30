@@ -139,25 +139,8 @@ impl PredictSessionRepository for MockRepo {
     }
 }
 
-struct NullParser;
-impl paddock_use_case::PdfParser for NullParser {
-    fn parse(&self, _: &[u8]) -> Result<Vec<paddock_domain::Race>> {
-        unimplemented!()
-    }
-}
-
-struct NullFetcher;
-impl paddock_use_case::PdfFetcher for NullFetcher {
-    fn fetch(&self, _: &str) -> Result<Vec<u8>> {
-        unimplemented!()
-    }
-    fn fetch_if_exists(&self, _: &str) -> Result<paddock_use_case::FetchProbe> {
-        unimplemented!()
-    }
-}
-
-fn interactor() -> Interactor<MockRepo, NullParser, NullFetcher> {
-    Interactor::new(MockRepo::default(), NullParser, NullFetcher)
+fn interactor() -> Interactor<MockRepo> {
+    Interactor::new(MockRepo::default())
 }
 
 // --- create_predict_session -------------------------------------------------

@@ -302,56 +302,31 @@ impl OddsRepository for MockRepo {
     }
 }
 
-struct NullParser;
-impl paddock_use_case::PdfParser for NullParser {
-    fn parse(&self, _: &[u8]) -> Result<Vec<Race>> {
-        unimplemented!()
-    }
-}
-
-struct NullFetcher;
-impl paddock_use_case::PdfFetcher for NullFetcher {
-    fn fetch(&self, _: &str) -> Result<Vec<u8>> {
-        unimplemented!()
-    }
-    fn fetch_if_exists(&self, _: &str) -> Result<paddock_use_case::FetchProbe> {
-        unimplemented!()
-    }
-}
-
-fn interactor(races: Vec<Race>) -> Interactor<MockRepo, NullParser, NullFetcher> {
+fn interactor(races: Vec<Race>) -> Interactor<MockRepo> {
     interactor_with_odds(races, HashMap::new())
 }
 
 fn interactor_with_odds(
     races: Vec<Race>,
     race_odds: HashMap<String, RaceOdds>,
-) -> Interactor<MockRepo, NullParser, NullFetcher> {
-    Interactor::new(
-        MockRepo {
-            races,
-            race_odds,
-            horse_stats_batch_calls: Arc::new(AtomicUsize::new(0)),
-        },
-        NullParser,
-        NullFetcher,
-    )
+) -> Interactor<MockRepo> {
+    Interactor::new(MockRepo {
+        races,
+        race_odds,
+        horse_stats_batch_calls: Arc::new(AtomicUsize::new(0)),
+    })
 }
 
 /// バッチ呼び出し回数を外部から観察できる interactor。日付単位バッチ化の効果検証に使う（#223）。
 fn interactor_with_batch_counter(
     races: Vec<Race>,
     counter: Arc<AtomicUsize>,
-) -> Interactor<MockRepo, NullParser, NullFetcher> {
-    Interactor::new(
-        MockRepo {
-            races,
-            race_odds: HashMap::new(),
-            horse_stats_batch_calls: counter,
-        },
-        NullParser,
-        NullFetcher,
-    )
+) -> Interactor<MockRepo> {
+    Interactor::new(MockRepo {
+        races,
+        race_odds: HashMap::new(),
+        horse_stats_batch_calls: counter,
+    })
 }
 
 /// 1 頭分の単勝オッズだけを持つ RaceOdds を作る（当時オッズ参照テスト用）。

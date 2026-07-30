@@ -274,127 +274,86 @@ impl OddsRepository for MockRepo {
     }
 }
 
-struct NullParser;
-impl paddock_use_case::PdfParser for NullParser {
-    fn parse(&self, _: &[u8]) -> Result<Vec<Race>> {
-        unimplemented!()
-    }
-}
-
-struct NullFetcher;
-impl paddock_use_case::PdfFetcher for NullFetcher {
-    fn fetch(&self, _: &str) -> Result<Vec<u8>> {
-        unimplemented!()
-    }
-    fn fetch_if_exists(&self, _: &str) -> Result<paddock_use_case::FetchProbe> {
-        unimplemented!()
-    }
-}
-
-fn interactor(card: Option<RaceCard>) -> Interactor<MockRepo, NullParser, NullFetcher> {
-    Interactor::new(
-        MockRepo {
-            card,
-            odds: None,
-            track_condition_stats: HashMap::new(),
-            trainer_surface_stats: HashMap::new(),
-            jockey_surface_stats: HashMap::new(),
-            recent_runs: HashMap::new(),
-        },
-        NullParser,
-        NullFetcher,
-    )
+fn interactor(card: Option<RaceCard>) -> Interactor<MockRepo> {
+    Interactor::new(MockRepo {
+        card,
+        odds: None,
+        track_condition_stats: HashMap::new(),
+        trainer_surface_stats: HashMap::new(),
+        jockey_surface_stats: HashMap::new(),
+        recent_runs: HashMap::new(),
+    })
 }
 
 fn interactor_with_odds(
     card: Option<RaceCard>,
     odds: paddock_domain::RaceOdds,
-) -> Interactor<MockRepo, NullParser, NullFetcher> {
-    Interactor::new(
-        MockRepo {
-            card,
-            odds: Some(odds),
-            track_condition_stats: HashMap::new(),
-            trainer_surface_stats: HashMap::new(),
-            jockey_surface_stats: HashMap::new(),
-            recent_runs: HashMap::new(),
-        },
-        NullParser,
-        NullFetcher,
-    )
+) -> Interactor<MockRepo> {
+    Interactor::new(MockRepo {
+        card,
+        odds: Some(odds),
+        track_condition_stats: HashMap::new(),
+        trainer_surface_stats: HashMap::new(),
+        jockey_surface_stats: HashMap::new(),
+        recent_runs: HashMap::new(),
+    })
 }
 
 fn interactor_with_tc_stats(
     card: Option<RaceCard>,
     track_condition_stats: HashMap<String, Vec<GroupStat>>,
-) -> Interactor<MockRepo, NullParser, NullFetcher> {
-    Interactor::new(
-        MockRepo {
-            card,
-            odds: None,
-            track_condition_stats,
-            trainer_surface_stats: HashMap::new(),
-            jockey_surface_stats: HashMap::new(),
-            recent_runs: HashMap::new(),
-        },
-        NullParser,
-        NullFetcher,
-    )
+) -> Interactor<MockRepo> {
+    Interactor::new(MockRepo {
+        card,
+        odds: None,
+        track_condition_stats,
+        trainer_surface_stats: HashMap::new(),
+        jockey_surface_stats: HashMap::new(),
+        recent_runs: HashMap::new(),
+    })
 }
 
 fn interactor_with_trainer_stats(
     card: Option<RaceCard>,
     trainer_surface_stats: HashMap<String, Vec<GroupStat>>,
-) -> Interactor<MockRepo, NullParser, NullFetcher> {
-    Interactor::new(
-        MockRepo {
-            card,
-            odds: None,
-            track_condition_stats: HashMap::new(),
-            trainer_surface_stats,
-            jockey_surface_stats: HashMap::new(),
-            recent_runs: HashMap::new(),
-        },
-        NullParser,
-        NullFetcher,
-    )
+) -> Interactor<MockRepo> {
+    Interactor::new(MockRepo {
+        card,
+        odds: None,
+        track_condition_stats: HashMap::new(),
+        trainer_surface_stats,
+        jockey_surface_stats: HashMap::new(),
+        recent_runs: HashMap::new(),
+    })
 }
 
 fn interactor_with_jockey_stats(
     card: Option<RaceCard>,
     jockey_surface_stats: HashMap<String, Vec<GroupStat>>,
-) -> Interactor<MockRepo, NullParser, NullFetcher> {
-    Interactor::new(
-        MockRepo {
-            card,
-            odds: None,
-            track_condition_stats: HashMap::new(),
-            trainer_surface_stats: HashMap::new(),
-            jockey_surface_stats,
-            recent_runs: HashMap::new(),
-        },
-        NullParser,
-        NullFetcher,
-    )
+) -> Interactor<MockRepo> {
+    Interactor::new(MockRepo {
+        card,
+        odds: None,
+        track_condition_stats: HashMap::new(),
+        trainer_surface_stats: HashMap::new(),
+        jockey_surface_stats,
+        recent_runs: HashMap::new(),
+    })
 }
 
 /// #552: 一部の馬にだけ近走を持たせた MockRepo を組む（近走被覆の部分カウント検証用）。
 fn interactor_with_recent_runs(
     card: Option<RaceCard>,
     recent_runs: HashMap<String, Vec<RecentRun>>,
-) -> Interactor<MockRepo, NullParser, NullFetcher> {
-    Interactor::new(
-        MockRepo {
-            card,
-            odds: None,
-            track_condition_stats: HashMap::new(),
-            trainer_surface_stats: HashMap::new(),
-            jockey_surface_stats: HashMap::new(),
-            recent_runs,
-        },
-        NullParser,
-        NullFetcher,
-    )
+) -> Interactor<MockRepo> {
+    Interactor::new(MockRepo {
+        card,
+        odds: None,
+        track_condition_stats: HashMap::new(),
+        trainer_surface_stats: HashMap::new(),
+        jockey_surface_stats: HashMap::new(),
+        recent_runs,
+    })
 }
 
 /// #552: 近走被覆テスト用の最小 RecentRun（中身は被覆カウントに無関係。非空であることだけが要点）。

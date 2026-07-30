@@ -2,8 +2,6 @@ use actix_web::{HttpResponse, web};
 use chrono::NaiveDate;
 
 use paddock_domain::RaceId;
-use paddock_use_case::pdf_fetcher::PdfFetcher;
-use paddock_use_case::pdf_parser::PdfParser;
 use paddock_use_case::repository::{PredictBetRecord, Repository};
 use paddock_use_case::{Interactor, OddsInteractor, OddsScraper};
 
@@ -31,15 +29,13 @@ fn parse_date(s: &str) -> Result<NaiveDate> {
     ),
     tag = "sessions",
 )]
-pub async fn create_session<R, P, F>(
-    interactor: web::Data<Interactor<R, P, F>>,
+pub async fn create_session<R>(
+    interactor: web::Data<Interactor<R>>,
     path: web::Path<String>,
     body: web::Json<CreateSessionRequest>,
 ) -> Result<HttpResponse>
 where
     R: Repository + 'static,
-    P: PdfParser + Send + Sync + 'static,
-    F: PdfFetcher + Send + Sync + 'static,
 {
     let date = parse_date(&path.into_inner())?;
     let session = interactor.create_predict_session(date, body.budget).await?;
@@ -60,14 +56,12 @@ where
     ),
     tag = "sessions",
 )]
-pub async fn get_session_summary<R, P, F>(
-    interactor: web::Data<Interactor<R, P, F>>,
+pub async fn get_session_summary<R>(
+    interactor: web::Data<Interactor<R>>,
     path: web::Path<String>,
 ) -> Result<HttpResponse>
 where
     R: Repository + 'static,
-    P: PdfParser + Send + Sync + 'static,
-    F: PdfFetcher + Send + Sync + 'static,
 {
     let date = parse_date(&path.into_inner())?;
     let (session, bets) = interactor.session_summary(date).await?;
@@ -93,15 +87,13 @@ where
     ),
     tag = "sessions",
 )]
-pub async fn record_outcome<R, P, F>(
-    interactor: web::Data<Interactor<R, P, F>>,
+pub async fn record_outcome<R>(
+    interactor: web::Data<Interactor<R>>,
     path: web::Path<(String, String)>,
     body: web::Json<RecordOutcomeRequest>,
 ) -> Result<HttpResponse>
 where
     R: Repository + 'static,
-    P: PdfParser + Send + Sync + 'static,
-    F: PdfFetcher + Send + Sync + 'static,
 {
     let (date_str, race_id_str) = path.into_inner();
     let date = parse_date(&date_str)?;
@@ -144,15 +136,13 @@ where
     ),
     tag = "sessions",
 )]
-pub async fn odds_refresh<R, P, F, O>(
-    interactor: web::Data<Interactor<R, P, F>>,
+pub async fn odds_refresh<R, O>(
+    interactor: web::Data<Interactor<R>>,
     odds: web::Data<OddsInteractor<O, R>>,
     path: web::Path<(String, String)>,
 ) -> Result<HttpResponse>
 where
     R: Repository + 'static,
-    P: PdfParser + Send + Sync + 'static,
-    F: PdfFetcher + Send + Sync + 'static,
     O: OddsScraper + Send + Sync + 'static,
 {
     let (date_str, race_id_str) = path.into_inner();

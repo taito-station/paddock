@@ -18,8 +18,6 @@ use crate::compose_portfolio;
 use crate::error::Result;
 use crate::interactor::Interactor;
 use crate::interactor::race::commentary::{horse_detail_lines, horse_headline, race_commentary};
-use crate::pdf_fetcher::PdfFetcher;
-use crate::pdf_parser::PdfParser;
 use crate::repository::{
     OddsRepository, PadPredictionRepository, RaceCardRepository, RaceResultRepository,
     StatsRepository,
@@ -142,9 +140,7 @@ impl<
         + OddsRepository
         + PadPredictionRepository
         + RaceResultRepository,
-    P: PdfParser,
-    F: PdfFetcher,
-> Interactor<R, P, F>
+> Interactor<R>
 {
     /// 1レース盤（全頭 ＋ 買い目 ＋ 混戦/乖離/重なり）を組んで返す。
     ///

@@ -4,11 +4,11 @@ use std::time::Duration;
 use anyhow::Context;
 use jra_fetcher::JraFetcher;
 use paddock_config::Config;
-use paddock_use_case::Interactor;
+use paddock_use_case::PdfInteractor;
 use pdf_parser::HybridParser;
 use rdb_gateway::{PostgresRepository, pool};
 
-pub type App = Interactor<PostgresRepository, HybridParser, JraFetcher>;
+pub type App = PdfInteractor<PostgresRepository, HybridParser, JraFetcher>;
 
 /// The built app together with the configured PDF root (`paddock_pdfs_dir`), from
 /// which Stage1 derives the results inbox dir (`<root>/results/inbox`).
@@ -29,7 +29,7 @@ pub async fn build_app(fetch_min_interval: Option<Duration>) -> anyhow::Result<B
         .await
         .context("connect Postgres")?;
     let repo = PostgresRepository::new(pool);
-    let app = Interactor::new(
+    let app = PdfInteractor::new(
         repo,
         HybridParser::new(),
         JraFetcher::new(fetch_min_interval),

@@ -8,8 +8,6 @@ use paddock_domain::{
 
 use crate::error::{Error, Result};
 use crate::interactor::Interactor;
-use crate::pdf_fetcher::PdfFetcher;
-use crate::pdf_parser::PdfParser;
 use crate::repository::{OddsRepository, RaceCardRepository, StatsRepository};
 
 use super::explain::build_explanation;
@@ -71,9 +69,7 @@ pub struct RecentRunsCoverage {
     pub horses_with_runs: usize,
 }
 
-impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: PdfFetcher>
-    Interactor<R, P, F>
-{
+impl<R: StatsRepository + RaceCardRepository + OddsRepository> Interactor<R> {
     /// 出馬表から各馬の win/place/show 確率を推定する。`blend_alpha = Some(α)` のとき、
     /// 当日の市場オッズ（単勝, `find_race_odds(.., None)` の最新スナップショット）の implied 確率と
     /// α（モデル重み）でブレンドする（#72）。`None` はモデルのみ（市場オッズを取得しない）。

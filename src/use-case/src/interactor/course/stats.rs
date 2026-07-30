@@ -2,11 +2,9 @@ use paddock_domain::{Surface, Venue};
 
 use crate::error::Result;
 use crate::interactor::Interactor;
-use crate::pdf_fetcher::PdfFetcher;
-use crate::pdf_parser::PdfParser;
 use crate::repository::{CourseStatsRow, StatsRepository};
 
-impl<R: StatsRepository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
+impl<R: StatsRepository> Interactor<R> {
     pub async fn course_stats(
         &self,
         venue: Venue,

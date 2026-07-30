@@ -20,6 +20,7 @@ pub use interactor::entry::EntryInteractor;
 pub use interactor::horse_history::HorseHistoryInteractor;
 pub use interactor::live::{LiveFlip, LiveRaceView, LiveSummary, LiveView};
 pub use interactor::odds::OddsInteractor;
+pub use interactor::pdf::PdfInteractor;
 pub use interactor::race::board::{BoardHorse, Confusion, RaceBoard};
 pub use interactor::race::predict::{PredictionViews, RecentRunsCoverage, compose_portfolio};
 pub use interactor::results::{RefreshReport, ResultsInteractor};
@@ -33,8 +34,8 @@ pub use netkeiba_scraper::{
 pub use odds_scraper::OddsScraper;
 pub use paddock_domain::{HorseFactors, HorseProbability, RateTriple};
 pub use payout_fetcher::PayoutFetcher;
-pub use pdf_fetcher::{FetchProbe, NoopFetcher, PdfFetcher};
-pub use pdf_parser::{NoopParser, PdfParser};
+pub use pdf_fetcher::{FetchProbe, PdfFetcher};
+pub use pdf_parser::PdfParser;
 pub use repository::{
     CourseStatsRow, FetchDownload, FetchFailure, FetchRecord, FetchStatus, FinishEntry, GroupStat,
     HorseStatsRow, JockeyStatsRow, MarkStatRow, MarkStatsFilter, OddsRow, PredictBetRecord,

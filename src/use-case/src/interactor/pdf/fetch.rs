@@ -8,14 +8,14 @@ use crate::dto::pdf::fetch::{
     MeetingSpec, ROUND_CAP,
 };
 use crate::error::Result;
-use crate::interactor::Interactor;
+use crate::interactor::pdf::PdfInteractor;
 use crate::pdf_fetcher::{FetchProbe, PdfFetcher};
 use crate::pdf_parser::PdfParser;
 use crate::repository::{
     FetchDownload, FetchFailure, FetchRecord, FetchRepository, FetchStatus, RaceRepository,
 };
 
-impl<R: RaceRepository + FetchRepository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
+impl<R: RaceRepository + FetchRepository, P: PdfParser, F: PdfFetcher> PdfInteractor<R, P, F> {
     /// Fetch a single JRA meeting-day result PDF.
     ///
     /// Two stages share this method, selected by `inbox` (#147):
