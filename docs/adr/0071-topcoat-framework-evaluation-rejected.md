@@ -176,7 +176,8 @@ Python 行の件数は `.py` のみの数（tracked 総数は順に 43 / 20 / 10
   **なお web-spa.md の鮮度方針は「既定は自動ポーリングしない／恒常的な全画面ポーリングはやらない。例外は
   `results:refresh`（#381・ADR [0068](0068-race-result-ingestion-ui-reflection.md)）だけ」となっており、実装済みの RaceBoard（#475）・RaceList（#372）の
   オッズ追従ポーリングを反映していない（spec が stale ＝ CLAUDE.md の `Conflict` 相当）**。本 ADR の
-  見送り理由 2 は実装側を事実として採っている。この spec 更新は本 ADR のスコープ外なので別途解消する。
+  見送り理由 2 は実装側を事実として採っている。この spec 更新は本 ADR のスコープ外なので
+  **追跡 Issue [#567](https://github.com/taito-station/paddock/issues/567) で解消する**。
 - API 契約の方針: ADR [0022](0022-rest-api-read-server.md)（OpenAPI を一級成果物とし、utoipa コードファースト＋
   `docs/api/openapi.json` のスナップショット検証で担保する決定）。実装は `src/interface/rest-controller/`。
 - 買い方ロジックの二重実装: ADR [0064](0064-live-ev-buy-view.md) は**当時の正本を `live_ev.py` に一本化**し、
