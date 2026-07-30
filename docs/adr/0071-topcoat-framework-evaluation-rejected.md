@@ -140,7 +140,7 @@ Python 行の件数は `.py` のみの数（tracked 総数は順に 43 / 20 / 10
 - **段階移行（Topcoat と SPA を並走させ画面単位で移す）**。2 つ目の HTTP スタック・2 系統のスタイル体系・
   2 系統のテスト基盤を維持期間中ずっと抱えることになり、「一時的な修正をしない」に反する。
   0.x の breaking change を並走期間中に被り続けるのも悪い。
-- **Python 部分（`scripts/predict-check/` ・`tools/mdq/`）の Rust 化を Topcoat 起点で進める**。
+- **Python 部分（`scripts/predict-check/`・`tools/mdq/`）の Rust 化を Topcoat 起点で進める**。
   これらは Web でなく Topcoat と無関係。Rust 化の是非は独立した論点であり、本 ADR で混ぜない。
 
 ## 再評価の条件（reject-for-now）
