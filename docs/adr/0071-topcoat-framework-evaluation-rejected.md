@@ -39,7 +39,7 @@
 - README のロードマップには **`OpenAPI` endpoints**、**(More) reactivity（`topcoat-runtime`）**、**Islands**、
   Streaming SSR / Suspense、Client-side navigation + prefetching、Toasty（tokio-rs の ORM）統合の強化、
   Static export、Authentication 等が並ぶ。**下記の見送り理由 2 と 3 は、このうち
-  `topcoat-runtime` / Islands と `OpenAPI` endpoints が実装されれば直接崩れる**——再評価の観測点はここに置く。
+  `topcoat-runtime` / Islands と `OpenAPI` endpoints が実装されれば弱まる**——再評価の観測点はここに置く。
 
 ### paddock 側の非 Rust 部分の棚卸し（tracked files・実測基準 `main` = `409e4a4`）
 
@@ -87,8 +87,9 @@ Python 行の件数は `.py` のみの数（tracked 総数は順に 43 / 20 / 10
    `RaceList` のソート・フィルタ（`SortTh` / `FilterChip`）。HTMX へフォールバックして書き直す価値は薄い。
    （なお `web/src/lib/useResultsRefresh.ts` はオッズではなく `POST /api/results/{date}:refresh` の
    着順取り込み／自動精算ポーリングであり、これも SSR 化すると作り直しになる。）
-3. **DB 直読み構成を採ると OpenAPI 一級成果物の方針と衝突する**。`src/interface/rest-controller`
-   （.rs 2,730 LOC・`src/openapi.rs` を含む）と、`src/apps/api-server/tests/openapi.rs` /
+3. **DB 直読み構成を採ると OpenAPI 一級成果物の方針と衝突する**（＝理由 4 後段とは排他の分岐で、
+   こちらは api-server を廃止する側）。`src/interface/rest-controller`
+   （.rs 2,730 LOC。この LOC には同 crate の `src/openapi.rs` も含む）と、`src/apps/api-server/tests/openapi.rs` /
    `openapi_route_parity.rs` の契約テスト 2 本は、utoipa コードファーストで API 契約を担保するための投資
    （方針の出典は ADR [0022](0022-rest-api-read-server.md)）。**SSR コンポーネントが DB を直読みする構成では
    この契約自体が消える**。SPA を捨てるだけでなく actix-web + utoipa の資産を捨てる判断になる。
@@ -98,7 +99,9 @@ Python 行の件数は `.py` のみの数（tracked 総数は順に 43 / 20 / 10
    （ADR 0064 は同じ構造を「rest-controller・use-case・rdb-gateway・api-server の 4 層」と呼んでいる）、
    Topcoat の推奨形 `module_router!` は「app モジュール木＝URL 木」を要求する
    （明示パス属性で回避はできるが、その場合は推奨形から外れる）。
-   加えて Topcoat は自前ルータを持つため、actix-web の api-server と共存させると **HTTP スタックを 2 本抱える**。
+   加えて **api-server を残す分岐（＝理由 3 とは排他）では HTTP スタックを 2 本抱える**。Topcoat は自前ルータを持ち、
+   optional な `tower` feature で組み込めるのは tower service（axum router 等）であって
+   **actix-web はこれに該当しないため、feature では 1 本に畳めない**。
 5. **Tailwind 前提の同梱 UI が旨味にならない**。paddock の web は `web/src/styles.css` 1 枚の手書き
    ダークライブ盤で Tailwind を使っていない。同梱コンポーネント群は活かせず、新しいスタイル toolchain だけが増える。
 6. **移行の実利が小さい——フロントは薄い**。`web/src/lib/bets.ts` は API が返す `RecommendationBet`
@@ -117,10 +120,11 @@ Python 行の件数は `.py` のみの数（tracked 総数は順に 43 / 20 / 10
 - **中間案: Topcoat の SSR から既存 REST API を叩き、OpenAPI 契約を保ったまま SPA だけ置き換える**。
   見送り理由 3（契約の消滅）は回避でき、**利点 2・4（Node 依存木・CI の SPA 依存）は取れる**。
   一方で **利点 3（プロセス 1 本化）は原理的に得られない**——Topcoat サーバと actix-web の api-server で
-  dev / prod とも 2 プロセスが残る。そして **最大の旨味である利点 1（型境界の消滅）も実質得られない**：
+  dev / prod とも 2 プロセスが残る。そして **最大の旨味である利点 1（型境界の消滅）は部分的にしか得られない**：
   両端が Rust なので `src/interface/rest-controller/src/schema/*`（utoipa の Rust 型）を crate 依存で
-  共有すれば codegen 自体は消せるが、**in-process 呼び出しでない限り HTTP シリアライズ境界と
-  2 プロセスの運用は残る**（＝「DB〜画面まで単一の型検査」にはならない）。
+  共有すれば **codegen（`openapi-typescript` → `schema.d.ts`）自体は消せる**。ただし
+  **in-process 呼び出しでない限り HTTP シリアライズ境界と 2 プロセスの運用は残る**ため、
+  利点 1 の本体である「DB〜画面まで単一の型検査」には届かない。
   対価として 0.x の breaking change・Tailwind toolchain・HTTP スタック 2 本・クライアント反応性の弱さ
   （見送り理由 1・2・4・5）は全部残る。費用対効果が逆なので却下。
 - **段階移行（Topcoat と SPA を並走させ画面単位で移す）**。2 つ目の HTTP スタック・2 系統のスタイル体系・
@@ -131,7 +135,8 @@ Python 行の件数は `.py` のみの数（tracked 総数は順に 43 / 20 / 10
 
 ## 再評価の条件（reject-for-now）
 
-以下の **いずれか** が満たされたら再評価する。それまでは棄却を維持する。
+**再評価の起点になるのは 1 または 2 のいずれか**（3 は単独では起点にせず、1 / 2 と併せて見る補助的観測点）。
+それまでは棄却を維持する。
 
 1. **Topcoat が 1.0 に到達**（breaking change の頻度が収まる）。
 2. **クライアント反応性が SPA 相当になる**。観測点はロードマップの
@@ -169,7 +174,7 @@ Python 行の件数は `.py` のみの数（tracked 総数は順に 43 / 20 / 10
 - 置き換え対象の仕様: [docs/specifications/web-spa.md](../specifications/web-spa.md)（`status: Confirmed`）、
   ADR [0069](0069-drop-icloud-writes-browser-only-viewing.md)（iCloud 書き出しを全廃し閲覧を REST API + SPA に一本化）。
   **なお web-spa.md の鮮度方針は「既定は自動ポーリングしない／恒常的な全画面ポーリングはやらない。例外は
-  `results:refresh`（#381・ADR 0068）だけ」となっており、実装済みの RaceBoard（#475）・RaceList（#372）の
+  `results:refresh`（#381・ADR [0068](0068-race-result-ingestion-ui-reflection.md)）だけ」となっており、実装済みの RaceBoard（#475）・RaceList（#372）の
   オッズ追従ポーリングを反映していない（spec が stale ＝ CLAUDE.md の `Conflict` 相当）**。本 ADR の
   見送り理由 2 は実装側を事実として採っている。この spec 更新は本 ADR のスコープ外なので別途解消する。
 - API 契約の方針: ADR [0022](0022-rest-api-read-server.md)（OpenAPI を一級成果物とし、utoipa コードファースト＋
