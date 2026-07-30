@@ -2,8 +2,6 @@ use actix_web::{HttpResponse, web};
 use chrono::{NaiveDate, SecondsFormat, Utc};
 
 use paddock_use_case::Interactor;
-use paddock_use_case::pdf_fetcher::PdfFetcher;
-use paddock_use_case::pdf_parser::PdfParser;
 use paddock_use_case::repository::Repository;
 
 use crate::error::{Error, Result};
@@ -28,14 +26,12 @@ fn parse_date(s: &str) -> Result<NaiveDate> {
     ),
     tag = "live",
 )]
-pub async fn get_live<R, P, F>(
-    interactor: web::Data<Interactor<R, P, F>>,
+pub async fn get_live<R>(
+    interactor: web::Data<Interactor<R>>,
     path: web::Path<String>,
 ) -> Result<HttpResponse>
 where
     R: Repository + 'static,
-    P: PdfParser + Send + Sync + 'static,
-    F: PdfFetcher + Send + Sync + 'static,
 {
     let date = parse_date(&path.into_inner())?;
     let view = interactor.find_live_by_date(date).await?;

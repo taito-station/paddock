@@ -1,6 +1,5 @@
 use actix_web::{App, HttpServer, web};
 use netkeiba_scraper::UreqNetkeibaScraper;
-use paddock_use_case::{NoopFetcher, NoopParser};
 use rdb_gateway::PostgresRepository;
 
 use api_server::app;
@@ -24,8 +23,6 @@ async fn main() -> anyhow::Result<()> {
             .configure(
                 app::configure_routes::<
                     PostgresRepository,
-                    NoopParser,
-                    NoopFetcher,
                     UreqNetkeibaScraper,
                     UreqNetkeibaScraper,
                 >,

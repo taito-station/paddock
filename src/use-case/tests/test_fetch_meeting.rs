@@ -14,7 +14,7 @@ use paddock_use_case::pdf_parser::PdfParser;
 use paddock_use_case::repository::{
     FetchDownload, FetchFailure, FetchRecord, FetchRepository, FetchStatus, RaceRepository,
 };
-use paddock_use_case::{Error, Interactor, Result};
+use paddock_use_case::{Error, PdfInteractor, Result};
 
 #[test]
 fn source_key_and_url_follow_jra_layout() {
@@ -172,7 +172,7 @@ fn spec() -> MeetingSpec {
 
 #[tokio::test]
 async fn ingests_and_records_history_when_new() {
-    let interactor = Interactor::new(
+    let interactor = PdfInteractor::new(
         MockRepo::default(),
         OneRaceParser,
         MockFetcher {
@@ -204,7 +204,7 @@ async fn ingests_and_records_history_when_new() {
 
 #[tokio::test]
 async fn skips_without_fetching_when_already_in_history() {
-    let interactor = Interactor::new(
+    let interactor = PdfInteractor::new(
         MockRepo {
             contains: true,
             ..Default::default()
@@ -228,7 +228,7 @@ async fn skips_without_fetching_when_already_in_history() {
 
 #[tokio::test]
 async fn force_refetches_even_when_in_history() {
-    let interactor = Interactor::new(
+    let interactor = PdfInteractor::new(
         MockRepo {
             contains: true,
             ..Default::default()
@@ -248,7 +248,7 @@ async fn force_refetches_even_when_in_history() {
 
 #[tokio::test]
 async fn reports_not_found_and_records_nothing_on_404() {
-    let interactor = Interactor::new(
+    let interactor = PdfInteractor::new(
         MockRepo::default(),
         OneRaceParser,
         MockFetcher {
@@ -277,7 +277,7 @@ async fn reports_empty_and_records_nothing_when_zero_races_parsed() {
     // The PDF is fetched (Some bytes) but the parser extracts no race. The
     // meeting must NOT be recorded in history, so a later run can re-fetch it
     // instead of being self-blocked as a "successful" 0-race ingest (#149).
-    let interactor = Interactor::new(
+    let interactor = PdfInteractor::new(
         MockRepo::default(),
         ZeroRaceParser,
         MockFetcher {
@@ -304,7 +304,7 @@ async fn reports_empty_and_records_nothing_when_zero_races_parsed() {
 #[tokio::test]
 async fn download_only_writes_inbox_and_records_without_parsing() {
     let inbox = tempfile::tempdir().unwrap();
-    let interactor = Interactor::new(
+    let interactor = PdfInteractor::new(
         MockRepo::default(),
         // PanicParser proves the PDF is never parsed in Stage1.
         PanicParser,
@@ -340,7 +340,7 @@ async fn download_only_writes_inbox_and_records_without_parsing() {
 async fn download_only_skips_when_already_downloaded_or_ingested() {
     for status in [FetchStatus::Downloaded, FetchStatus::Ingested] {
         let inbox = tempfile::tempdir().unwrap();
-        let interactor = Interactor::new(
+        let interactor = PdfInteractor::new(
             MockRepo {
                 status: Some(status),
                 ..Default::default()
@@ -367,7 +367,7 @@ async fn download_only_skips_when_already_downloaded_or_ingested() {
 #[tokio::test]
 async fn download_only_reports_not_found_and_writes_nothing_on_404() {
     let inbox = tempfile::tempdir().unwrap();
-    let interactor = Interactor::new(
+    let interactor = PdfInteractor::new(
         MockRepo::default(),
         PanicParser,
         MockFetcher {
@@ -401,7 +401,7 @@ async fn ingesting_an_inbox_meeting_records_ingested_and_removes_the_pdf() {
     let pdf = inbox.join("2026-3nakayama6.pdf");
     std::fs::write(&pdf, vec![1, 2, 3]).unwrap();
 
-    let interactor = Interactor::new(MockRepo::default(), OneRaceParser, MockFetcher::default());
+    let interactor = PdfInteractor::new(MockRepo::default(), OneRaceParser, MockFetcher::default());
 
     let resp = interactor.ingest_pdf(pdf.to_str().unwrap()).await.unwrap();
 
@@ -423,7 +423,8 @@ async fn ingesting_a_zero_race_inbox_pdf_keeps_it_and_records_nothing() {
     let pdf = inbox.join("2026-3nakayama6.pdf");
     std::fs::write(&pdf, vec![1, 2, 3]).unwrap();
 
-    let interactor = Interactor::new(MockRepo::default(), ZeroRaceParser, MockFetcher::default());
+    let interactor =
+        PdfInteractor::new(MockRepo::default(), ZeroRaceParser, MockFetcher::default());
 
     let resp = interactor.ingest_pdf(pdf.to_str().unwrap()).await.unwrap();
 
@@ -565,7 +566,7 @@ async fn round_wide_stops_at_first_missing_day() {
     let existing: HashSet<String> = (1..=3)
         .map(|d| url_for(2026, 3, Venue::Nakayama, d))
         .collect();
-    let interactor = Interactor::new(
+    let interactor = PdfInteractor::new(
         HistoryRepo::default(),
         OneRaceParser,
         ExistingUrlsFetcher { existing },
@@ -595,7 +596,7 @@ async fn year_wide_enumerates_every_venue() {
     let existing: HashSet<String> = (1..=2)
         .map(|d| url_for(2026, 1, Venue::Nakayama, d))
         .collect();
-    let interactor = Interactor::new(
+    let interactor = PdfInteractor::new(
         HistoryRepo::default(),
         OneRaceParser,
         ExistingUrlsFetcher { existing },
@@ -636,7 +637,7 @@ async fn already_ingested_days_are_skipped_and_enumeration_continues() {
             .source_key()
         })
         .collect();
-    let interactor = Interactor::new(
+    let interactor = PdfInteractor::new(
         HistoryRepo {
             history,
             ..Default::default()
@@ -679,7 +680,7 @@ async fn force_refetches_history_entries() {
     let existing: HashSet<String> = (1..=3)
         .map(|d| url_for(2026, 3, Venue::Nakayama, d))
         .collect();
-    let interactor = Interactor::new(
+    let interactor = PdfInteractor::new(
         HistoryRepo {
             history,
             ..Default::default()
@@ -707,7 +708,7 @@ async fn force_refetches_history_entries() {
 #[tokio::test]
 async fn fully_specified_range_is_one_meeting() {
     let existing: HashSet<String> = [url_for(2026, 3, Venue::Nakayama, 6)].into_iter().collect();
-    let interactor = Interactor::new(
+    let interactor = PdfInteractor::new(
         HistoryRepo::default(),
         OneRaceParser,
         ExistingUrlsFetcher { existing },
@@ -732,7 +733,7 @@ async fn fully_specified_range_is_one_meeting() {
 #[tokio::test]
 async fn errors_are_counted_and_do_not_abort_the_range() {
     // Round 1, days 1-2 error (network failure); day 3 is 404 and stops the round.
-    let interactor = Interactor::new(
+    let interactor = PdfInteractor::new(
         HistoryRepo::default(),
         OneRaceParser,
         ErrorOnDayFetcher {
@@ -773,7 +774,7 @@ async fn empty_meetings_are_counted_and_enumeration_continues() {
     let existing: HashSet<String> = (1..=3)
         .map(|d| url_for(2026, 3, Venue::Nakayama, d))
         .collect();
-    let interactor = Interactor::new(
+    let interactor = PdfInteractor::new(
         HistoryRepo::default(),
         ZeroRaceParser,
         ExistingUrlsFetcher { existing },
@@ -809,7 +810,7 @@ async fn empty_day1_does_not_stop_round_enumeration() {
     ]
     .into_iter()
     .collect();
-    let interactor = Interactor::new(
+    let interactor = PdfInteractor::new(
         HistoryRepo::default(),
         ZeroRaceParser,
         ExistingUrlsFetcher { existing },
@@ -844,7 +845,7 @@ async fn boundary_absence_after_successes_is_recorded_as_failed() {
     let existing: HashSet<String> = (1..=3)
         .map(|d| url_for(2026, 3, Venue::Nakayama, d))
         .collect();
-    let interactor = Interactor::new(
+    let interactor = PdfInteractor::new(
         HistoryRepo::default(),
         OneRaceParser,
         ExistingUrlsFetcher { existing },
@@ -878,7 +879,7 @@ async fn boundary_403_after_successes_records_failed_with_403_status() {
     let existing: HashSet<String> = (1..=2)
         .map(|d| url_for(2026, 3, Venue::Nakayama, d))
         .collect();
-    let interactor = Interactor::new(
+    let interactor = PdfInteractor::new(
         HistoryRepo::default(),
         OneRaceParser,
         AbsentStatusFetcher {
@@ -918,7 +919,7 @@ async fn absent_round_day1_is_not_recorded_as_junk() {
     let existing: HashSet<String> = (1..=2)
         .map(|d| url_for(2026, 1, Venue::Nakayama, d))
         .collect();
-    let interactor = Interactor::new(
+    let interactor = PdfInteractor::new(
         HistoryRepo::default(),
         OneRaceParser,
         ExistingUrlsFetcher { existing },
@@ -955,7 +956,7 @@ async fn download_only_does_not_skip_a_failed_row() {
     // A `failed` row is a re-fetch candidate, not a skip: Stage1 dedup matches only
     // Downloaded/Ingested, so a Failed status re-fetches (永久スキップ防止, #170).
     let inbox = tempfile::tempdir().unwrap();
-    let interactor = Interactor::new(
+    let interactor = PdfInteractor::new(
         MockRepo {
             status: Some(FetchStatus::Failed),
             ..Default::default()

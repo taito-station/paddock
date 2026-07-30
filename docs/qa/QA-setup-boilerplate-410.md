@@ -14,6 +14,7 @@
 
 - 観測/根拠: トレイトは use-case 定義。`Interactor<R,P,F>` は PDF 系ユースケース（ingest_pdf / fetch_meeting）でのみ P/F を使う。
 - 回答: **確定（ユーザー決定 2026-07-16）。use-case に `NoopParser` / `NoopFetcher` を提供**（pdf_parser.rs / pdf_fetcher.rs のトレイト近傍）。5 apps の重複を use-case 側 ~10 行に集約し、各 app は `Interactor::new(repo, NoopParser, NoopFetcher)` を呼ぶだけにする。**これはレイヤ違反ではない**（自層トレイトの null-object 実装を自層で提供するだけ）。Interactor のジェネリクス分割は挙動不変要件下で全 impl・全 app DI を触る大改修になり不採用。
+- **【追記・#453 で覆る】** この「ジェネリクス分割は不採用」判断は #453（PDF ジェネリクス分離）で覆り、`Interactor<R>` ＋ `PdfInteractor<R, P, F>` への分割を実施。`NoopParser` / `NoopFetcher` スタブは削除された（本 QA の Q1 集約は #453 の分割に置き換えられた）。build_app 集約（Q2）は有効なまま。
 - 反映先: `src/use-case/src/pdf_parser.rs` / `pdf_fetcher.rs`、5 apps の setup.rs。
 
 ## Q2: build_app 共通シーケンスの集約先（rdb-gateway か新 support crate か）

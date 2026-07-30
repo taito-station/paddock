@@ -5,8 +5,6 @@ use utoipa::IntoParams;
 
 use paddock_domain::{HorseName, Mark, Surface, Venue};
 use paddock_use_case::Interactor;
-use paddock_use_case::pdf_fetcher::PdfFetcher;
-use paddock_use_case::pdf_parser::PdfParser;
 use paddock_use_case::repository::{MarkStatsFilter, PredictionFilter, Repository};
 
 use crate::error::{Error, Result};
@@ -86,14 +84,12 @@ fn parse_mark(value: &str) -> Result<Mark> {
     ),
     tag = "predictions",
 )]
-pub async fn search_predictions<R, P, F>(
-    interactor: web::Data<Interactor<R, P, F>>,
+pub async fn search_predictions<R>(
+    interactor: web::Data<Interactor<R>>,
     query: web::Query<PredictionSearchQuery>,
 ) -> Result<HttpResponse>
 where
     R: Repository + 'static,
-    P: PdfParser + Send + Sync + 'static,
-    F: PdfFetcher + Send + Sync + 'static,
 {
     let q = query.into_inner();
 
@@ -185,14 +181,12 @@ where
     ),
     tag = "predictions",
 )]
-pub async fn get_prediction_detail<R, P, F>(
-    interactor: web::Data<Interactor<R, P, F>>,
+pub async fn get_prediction_detail<R>(
+    interactor: web::Data<Interactor<R>>,
     path: web::Path<i64>,
 ) -> Result<HttpResponse>
 where
     R: Repository + 'static,
-    P: PdfParser + Send + Sync + 'static,
-    F: PdfFetcher + Send + Sync + 'static,
 {
     let prediction_id = path.into_inner();
     let prediction = interactor
@@ -217,14 +211,12 @@ where
     ),
     tag = "predictions",
 )]
-pub async fn prediction_mark_stats<R, P, F>(
-    interactor: web::Data<Interactor<R, P, F>>,
+pub async fn prediction_mark_stats<R>(
+    interactor: web::Data<Interactor<R>>,
     query: web::Query<MarkStatsQuery>,
 ) -> Result<HttpResponse>
 where
     R: Repository + 'static,
-    P: PdfParser + Send + Sync + 'static,
-    F: PdfFetcher + Send + Sync + 'static,
 {
     let q = query.into_inner();
     let date_from = q

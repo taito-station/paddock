@@ -5,12 +5,12 @@ use chrono::Utc;
 use crate::dto::pdf::fetch::MeetingSpec;
 use crate::dto::pdf::ingest::IngestPdfResponse;
 use crate::error::Result;
-use crate::interactor::Interactor;
+use crate::interactor::pdf::PdfInteractor;
 use crate::pdf_fetcher::PdfFetcher;
 use crate::pdf_parser::PdfParser;
 use crate::repository::{FetchRecord, FetchRepository, RaceRepository};
 
-impl<R: RaceRepository + FetchRepository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
+impl<R: RaceRepository + FetchRepository, P: PdfParser, F: PdfFetcher> PdfInteractor<R, P, F> {
     pub async fn ingest_pdf(&self, source: &str) -> Result<IngestPdfResponse> {
         let bytes = if source.starts_with("http://") || source.starts_with("https://") {
             self.pdf_fetcher.fetch(source)?

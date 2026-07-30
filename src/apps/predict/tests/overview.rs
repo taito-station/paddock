@@ -49,7 +49,7 @@ use paddock_use_case::repository::{
     PredictBetRecord, PredictRaceConditionRecord, PredictSessionRecord, PredictSessionRepository,
     RaceRepository,
 };
-use paddock_use_case::{Interactor, NoopFetcher, NoopParser, OddsInteractor, SettleInteractor};
+use paddock_use_case::{Interactor, OddsInteractor, SettleInteractor};
 use predict::session::run_overview;
 use predict::setup::App;
 use rdb_gateway::PostgresRepository;
@@ -127,11 +127,7 @@ fn race(on: NaiveDate, id: &str, day: u32, race_num: u32) -> Race {
 /// 本テストは NoEntries 経路しか通らないため呼ばれない。
 fn test_app(pool: &PgPool) -> App {
     App {
-        interactor: Interactor::new(
-            PostgresRepository::new(pool.clone()),
-            NoopParser,
-            NoopFetcher,
-        ),
+        interactor: Interactor::new(PostgresRepository::new(pool.clone())),
         odds: OddsInteractor::new(
             UreqNetkeibaScraper::new(),
             PostgresRepository::new(pool.clone()),

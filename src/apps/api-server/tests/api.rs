@@ -20,7 +20,7 @@ use paddock_use_case::repository::{
     RaceCardRepository, RaceOddsRecord, RaceRepository, RaceResultRepository,
 };
 use paddock_use_case::result_page_fetcher::ResultPageFetcher;
-use paddock_use_case::{Interactor, NoopFetcher, NoopParser, ResultsInteractor};
+use paddock_use_case::{Interactor, ResultsInteractor};
 use rdb_gateway::PostgresRepository;
 
 type Repo = PostgresRepository;
@@ -134,17 +134,13 @@ fn sample_win_odds() -> RaceOddsRecord {
 macro_rules! build_service {
     ($pool:expr) => {{
         let repo = PostgresRepository::new($pool);
-        let interactor = Interactor::new(repo, NoopParser, NoopFetcher);
+        let interactor = Interactor::new(repo);
         let data = web::Data::new(interactor);
-        test::init_service(App::new().app_data(data).configure(
-            configure_routes::<
-                Repo,
-                NoopParser,
-                NoopFetcher,
-                UreqNetkeibaScraper,
-                UreqNetkeibaScraper,
-            >,
-        ))
+        test::init_service(
+            App::new()
+                .app_data(data)
+                .configure(configure_routes::<Repo, UreqNetkeibaScraper, UreqNetkeibaScraper>),
+        )
         .await
     }};
 }
@@ -989,20 +985,19 @@ async fn results_refresh_endpoint_routes_and_ingests(pool: sqlx::PgPool) {
     .await
     .unwrap();
 
-    let main = web::Data::new(Interactor::new(
-        PostgresRepository::new(pool.clone()),
-        NoopParser,
-        NoopFetcher,
-    ));
+    let main = web::Data::new(Interactor::new(PostgresRepository::new(pool.clone())));
     let rows = vec![result_row(1, 1), result_row(2, 2), result_row(3, 3)];
     let payouts = RacePayouts::empty(RaceId::try_from(RESULTS_RACE_ID).unwrap());
     let results = web::Data::new(ResultsInteractor::new(
         FakeResultPage { rows, payouts },
         PostgresRepository::new(pool.clone()),
     ));
-    let app = test::init_service(App::new().app_data(main).app_data(results).configure(
-        configure_routes::<Repo, NoopParser, NoopFetcher, UreqNetkeibaScraper, FakeResultPage>,
-    ))
+    let app = test::init_service(
+        App::new()
+            .app_data(main)
+            .app_data(results)
+            .configure(configure_routes::<Repo, UreqNetkeibaScraper, FakeResultPage>),
+    )
     .await;
 
     // 新エンドポイント（既定 force=false・post_time 過去で発走済み）。

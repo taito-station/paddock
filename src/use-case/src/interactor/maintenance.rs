@@ -2,11 +2,9 @@ use chrono::NaiveDate;
 
 use crate::error::Result;
 use crate::interactor::Interactor;
-use crate::pdf_fetcher::PdfFetcher;
-use crate::pdf_parser::PdfParser;
 use crate::repository::OddsRepository;
 
-impl<R: OddsRepository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
+impl<R: OddsRepository> Interactor<R> {
     /// `race_odds_snapshots`（append-only 履歴, #232）のうち `fetched_at` の日付が `before`
     /// より前の行をパージする（retention, #234）。`dry_run = true` のときは削除せず該当行数を
     /// 返す。返り値はどちらの場合も「対象（削除した or 削除予定の）行数」。

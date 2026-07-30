@@ -5,18 +5,16 @@ use paddock_domain::{Race, RaceClass, RaceId};
 
 use crate::error::Result;
 use crate::interactor::Interactor;
-use crate::pdf_fetcher::PdfFetcher;
-use crate::pdf_parser::PdfParser;
 use crate::repository::{FinishEntry, RaceCardRepository, RaceRepository, RaceResultRepository};
 
-impl<R: RaceRepository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
+impl<R: RaceRepository> Interactor<R> {
     /// 指定日のレース一覧を race_num 昇順で取得する。
     pub async fn races_by_date(&self, date: NaiveDate) -> Result<Vec<Race>> {
         self.repository.find_races_by_date(date).await
     }
 }
 
-impl<R: RaceCardRepository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
+impl<R: RaceCardRepository> Interactor<R> {
     /// 指定日の全レースの発走時刻（`race_id → post_time`、race_cards 由来）を返す（#391）。
     /// レース一覧 API が watch 判定記録に依存せず発走時刻・状態を出すために使う。
     pub async fn post_times_by_date(&self, date: NaiveDate) -> Result<HashMap<RaceId, NaiveTime>> {
@@ -40,7 +38,7 @@ impl<R: RaceCardRepository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
     }
 }
 
-impl<R: RaceResultRepository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
+impl<R: RaceResultRepository> Interactor<R> {
     /// 指定日の各レースの結果確定フラグ（`race_id → true`。確定レースのみ）を返す（#381）。
     /// ライブ一覧・レース盤で「⚫終」を post_time 推定でなく着順確定で判定するために使う。
     pub async fn result_confirmed_by_date(&self, date: NaiveDate) -> Result<HashMap<RaceId, bool>> {

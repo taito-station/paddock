@@ -1,12 +1,12 @@
 use anyhow::Context;
 use netkeiba_scraper::UreqNetkeibaScraper;
 use paddock_config::Config;
-use paddock_use_case::{Interactor, NoopFetcher, NoopParser, OddsInteractor, ResultsInteractor};
+use paddock_use_case::{Interactor, OddsInteractor, ResultsInteractor};
 use rdb_gateway::{PostgresRepository, pool};
 
 /// api-server が DI で組み立てる Interactor の具象型。read 専用 API で PDF は扱わないため、
-/// PDF 系ジェネリクスは use-case 共通の Noop スタブ（#410）。
-pub type ApiInteractor = Interactor<PostgresRepository, NoopParser, NoopFetcher>;
+/// PDF 系ユースケース（`PdfInteractor`）は持たず Repository のみ（#453 で P/F ジェネリクスを解消）。
+pub type ApiInteractor = Interactor<PostgresRepository>;
 /// オッズ read-through 取得用（#51, odds:refresh）。
 pub type ApiOddsInteractor = OddsInteractor<UreqNetkeibaScraper, PostgresRepository>;
 /// 同日結果取り込み＋自動精算用（#381, results:refresh）。`UreqNetkeibaScraper` が `ResultPageFetcher`。
@@ -38,7 +38,7 @@ pub async fn build() -> anyhow::Result<Setup> {
         UreqNetkeibaScraper::new(),
         PostgresRepository::new(pool.clone()),
     );
-    let interactor = Interactor::new(PostgresRepository::new(pool), NoopParser, NoopFetcher);
+    let interactor = Interactor::new(PostgresRepository::new(pool));
     Ok(Setup {
         interactor,
         odds,
