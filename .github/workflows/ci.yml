@@ -33,7 +33,9 @@ jobs:
     # 無言の無限ハング（DB 接続待ち・retry のこじれ等）を防ぐ安全弁。
     timeout-minutes: 30
 
-    # `#[sqlx::test]`（rdb-gateway / api-server / ingest-predictions の統合テスト）が接続する Postgres。
+    # 複数クレートに散在する `#[sqlx::test]`（統合テスト）が接続する Postgres。
+    # ここでクレート名を固定列挙しないのは、増減のたびに更新漏れが起きるため
+    # （下の test ステップがクレート単位でステップを分割しないのと同根の理由）。
     # ローカル開発（deployments/compose.yaml）と同じ postgres:17-alpine・同じ固定資格情報を使う。
     services:
       postgres:
@@ -96,11 +98,10 @@ jobs:
       - name: Clippy
         run: cargo clippy --locked --workspace --all-targets -- -D warnings
 
-      # 大半のクレートを 1 ステップで実行する。実 Postgres 接続テスト（#[sqlx::test]）は
-      # rdb-gateway / api-server / ingest-predictions に散在し単一サーバを共有するため、
-      # --test-threads=1 で直列実行する（stock cargo test はテストバイナリ"間"を逐次実行し、
-      # --test-threads=1 が各バイナリ"内"も 1 スレッドにするので、両者で全体が直列になる）。
-      # 非 DB テストも同じ直列実行に含まれるが
+      # 大半のクレートを 1 ステップで実行する。実 Postgres 接続テスト（#[sqlx::test]）は複数
+      # クレートに散在し単一サーバを共有するため、--test-threads=1 で直列実行する（stock cargo
+      # test はテストバイナリ"間"を逐次実行し、--test-threads=1 が各バイナリ"内"も 1 スレッドに
+      # するので、両者で全体が直列になる）。非 DB テストも同じ直列実行に含まれるが
       # （DATABASE_URL は無視される）、スイートは小さく直列でも十分速い。DB クレートを列挙して
       # 分割する方式は、将来別クレートに #[sqlx::test] が増えると取りこぼすため採らない。
       #

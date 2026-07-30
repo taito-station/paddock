@@ -11,8 +11,8 @@ sources:
   - docs/adr/0046-allocation-prob-weight-no-floor-rejected.md
   - docs/adr/0048-retire-jra-odds-scraper-for-netkeiba.md
   - docs/adr/0054-kelly-staking-rejected.md
-distilled_from_sha: "f765be7"
-updated: "2026-07-17"
+distilled_from_sha: "d8cc0e4"
+updated: "2026-07-27"
 ---
 
 # predict バイナリ: 対話型レーシングセッション
@@ -154,15 +154,23 @@ P&L:       +¥3,300
 ```
 src/apps/predict/
 ├── Cargo.toml
-└── src/
-    ├── bin.rs       # エントリポイント、tokio::main
-    ├── cli.rs       # clap 引数定義
-    ├── session.rs   # 対話セッションループ
-    └── setup.rs     # DI 構築（analyze と同パターン）
+├── src/
+│   ├── lib.rs       # モジュール公開（bin と統合テストの共通実体）
+│   ├── bin.rs       # エントリポイント、tokio::main
+│   ├── cli.rs       # clap 引数定義
+│   ├── session.rs   # 対話セッションループ
+│   └── setup.rs     # DI 構築（analyze と同パターン）
+└── tests/
+    └── overview.rs  # --overview の予想セッション非干渉（#555）
 ```
 
-`Cargo.toml` の `[[bin]]` 名は `paddock-predict`。  
+`Cargo.toml` の `[[bin]]` 名は `paddock-predict`、`[lib]` 名は `predict`。  
 ワークスペース `Cargo.toml` の `members` に `"src/apps/predict"` を追加する。
+
+lib+bin 構成にしているのは、統合テスト（`tests/` は別クレートとしてコンパイルされる）から
+`session::run_overview` 等を呼ぶため（#555）。`src/apps/api-server` と同型。
+lib の公開 item は bin と自クレートの統合テストのための内部公開で、外部クレート向けの
+サポート対象 API ではない。
 
 ### セッション状態（App 層）
 
