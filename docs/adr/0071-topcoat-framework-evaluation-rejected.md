@@ -25,10 +25,17 @@
   Leptos / Dioxus（WASM 系）とは狙う対話性の水準が違うと明言。限界時は HTMX / Alpine.js 統合にフォールバック。
 - 同梱: `topcoat` CLI（dev server / `fmt` / `ui` / asset bundling）、content-hash ベースの asset pipeline、
   Tailwind ベースの shadcn/ui 風コンポーネント群、Fontsource / Iconify 統合、request-level memoization。
-- **ランタイムに Node 不要**（`tailwind.md`: "It does not run Node, `PostCSS`, or a Vite-style asset pipeline"）。
-  ただし**ビルド時は既定で GitHub から standalone Tailwind CLI を `OUT_DIR` にダウンロードする**。
-  `BuildConfig::executable()` で preinstalled CLI を指定すれば "no download happens and no network access is needed"。
-  外部 action を commit SHA でピンし cargo を `--locked` で固定する本 repo の CI 規律とは、この一点で評価が必要になる。
+- **ランタイムに Node 不要**（完全サーバレンダリング＋WASM 非使用という上記 2 点の帰結）。
+- **Tailwind 統合は default 外の opt-in feature**。crates.io 0.5.0 の `default` は
+  `asset` / `compression` / `cookie` / `font` / `icon` / `router` / `runtime` / `serve` / `session` / `view` / `discover` で、
+  `tailwind` は `dep:topcoat-tailwind` の optional（`tailwind.md`:「Enable the `tailwind` feature for both your
+  runtime dependency and your build dependency」＋ `build.rs` の追加が必要）。
+  **この feature を有効にした場合に限り**、ビルド時に既定で GitHub から standalone Tailwind CLI を
+  `OUT_DIR` にダウンロードする（Tailwind 統合は "a thin Rust wrapper around the standalone Tailwind CSS CLI" で
+  "It does not run Node, `PostCSS`, or a Vite-style asset pipeline"）。`BuildConfig::executable()` で
+  preinstalled CLI を指定すれば "no download happens and no network access is needed"。
+  外部 action を commit SHA でピンし cargo を `--locked` で固定する本 repo の CI 規律との擦り合わせが必要なのは、
+  **`tailwind` feature を使う場合だけ**である。
 - ルーティングは **既定は明示パス属性**（`#[page("/users/{id}")]`）。加えて `module_router!` マクロが
   "the recommended way to define routes" として提供され、こちらは **URL をモジュール木から導出**する
   （README の例: `src/app/posts/id.rs` → `/posts/{post_id}`）。**モジュール木＝URL は推奨形であって必須ではない**。
@@ -45,7 +52,7 @@
 
 | 領域 | 規模 | Topcoat の射程 |
 |---|---|---|
-| `web/` React 19 + TS + Vite SPA | `web/src` 39 files・8,904 LOC（.tsx 16 / .ts 22 / .css 1）。内訳は 生成物 `web/src/api/schema.d.ts` 2,263 ／ 手書き CSS `web/src/styles.css` 990 ／ テスト `*.test.ts` 1,692 ／ **手書きアプリコード 3,959 LOC**。ほかに `web/` 直下の設定 7 files（`package.json` / `vite.config.ts` / `eslint.config.js` / `tsconfig.json` / `index.html` / `package-lock.json` / `.gitignore`） | ◎ 唯一の候補 |
+| `web/` React 19 + TS + Vite SPA | `web/src` 39 files・8,904 LOC（.tsx 16 / .ts 22 / .css 1）。内訳は生成物 `web/src/api/schema.d.ts` 2,263 ／ 手書き CSS `web/src/styles.css` 990 ／ テスト `*.test.ts` 1,692 ／ **手書きアプリコード 3,959 LOC**。ほかに `web/` 直下の設定 7 files（`package.json` / `vite.config.ts` / `eslint.config.js` / `tsconfig.json` / `index.html` / `package-lock.json` / `.gitignore`） | ◎ 唯一の候補 |
 | `scripts/predict-check/` | `.py` 37 files（オフライン EV レポート・backtest データ生成・各種 probe） | × Web でない |
 | `tools/mdq/` | `.py` 17 files（BM25 ローカル索引・検索） | × 無関係 |
 | `scripts/harness/` | `.py` 6 files（faithfulness チェック等） | × 無関係 |
@@ -96,14 +103,17 @@ Python 行の件数は `.py` のみの数（tracked 総数は順に 43 / 20 / 10
    （Topcoat のロードマップには `OpenAPI` endpoints があるため、実装されればこの理由は弱まる。現状は未実装。）
 4. **推奨形のルーティングがレイヤ構成と当たり、HTTP スタックが 2 本になる**。paddock は
    `src/` 直下を domain / use-case / interface / infrastructure / apps の 5 層に分けており
-   （ADR 0064 は同じ構造を「rest-controller・use-case・rdb-gateway・api-server の 4 層」と呼んでいる）、
+   （ADR 0064 の「rest-controller・use-case・rdb-gateway・api-server の 4 層」は read API 1 本が貫く
+   crate の列挙で、この 5 層とは別の切り口）、
    Topcoat の推奨形 `module_router!` は「app モジュール木＝URL 木」を要求する
    （明示パス属性で回避はできるが、その場合は推奨形から外れる）。
    加えて **api-server を残す分岐（＝理由 3 とは排他）では HTTP スタックを 2 本抱える**。Topcoat は自前ルータを持ち、
    optional な `tower` feature で組み込めるのは tower service（axum router 等）であって
    **actix-web はこれに該当しないため、feature では 1 本に畳めない**。
 5. **Tailwind 前提の同梱 UI が旨味にならない**。paddock の web は `web/src/styles.css` 1 枚の手書き
-   ダークライブ盤で Tailwind を使っていない。同梱コンポーネント群は活かせず、新しいスタイル toolchain だけが増える。
+   ダークライブ盤で Tailwind を使っていない。同梱の shadcn/ui 風コンポーネント群は活かせないので、
+   **"batteries-included" の売りのうちこの分は利点 0**。ただし `tailwind` feature は default 外なので、
+   切っておけばコスト増にはならない——これは減点ではなく「移行の動機が 1 つ減る」という意味に留める。
 6. **移行の実利が小さい——フロントは薄い**。`web/src/lib/bets.ts` は API が返す `RecommendationBet`
    （＝Rust `build_portfolio` の出力）に UI 編集と 100 円単位ガードを重ねる純関数層であり、
    **買い方ロジックの second source にはなっていない**（詳細は下記「関連」）。
@@ -125,8 +135,8 @@ Python 行の件数は `.py` のみの数（tracked 総数は順に 43 / 20 / 10
   共有すれば **codegen（`openapi-typescript` → `schema.d.ts`）自体は消せる**。ただし
   **in-process 呼び出しでない限り HTTP シリアライズ境界と 2 プロセスの運用は残る**ため、
   利点 1 の本体である「DB〜画面まで単一の型検査」には届かない。
-  対価として 0.x の breaking change・Tailwind toolchain・HTTP スタック 2 本・クライアント反応性の弱さ
-  （見送り理由 1・2・4・5）は全部残る。費用対効果が逆なので却下。
+  対価として 0.x の breaking change・HTTP スタック 2 本・クライアント反応性の弱さ
+  （見送り理由 1・2・4）は全部残る。費用対効果が逆なので却下。
 - **段階移行（Topcoat と SPA を並走させ画面単位で移す）**。2 つ目の HTTP スタック・2 系統のスタイル体系・
   2 系統のテスト基盤を維持期間中ずっと抱えることになり、「一時的な修正をしない」に反する。
   0.x の breaking change を並走期間中に被り続けるのも悪い。
@@ -151,8 +161,9 @@ Python 行の件数は `.py` のみの数（tracked 総数は順に 43 / 20 / 10
 
 - ランタイムに Node なしで動くか。
 - domain / use-case レイヤをまたいで呼べるか（推奨形 `module_router!` と両立するか）。
-- **ビルド時の Tailwind CLI をピン供給できるか**（`BuildConfig::executable()` で GitHub からの
-  ダウンロードを止め、外部 action を SHA ピンする CI 規律と揃えられるか）。
+- **`tailwind` feature を切ったまま成立するか**（paddock は手書き CSS なのでこれが既定路線）。
+  使う判断になった場合のみ、**ビルド時の Tailwind CLI をピン供給できるか**を確認する
+  （`BuildConfig::executable()` で GitHub からのダウンロードを止め、外部 action を SHA ピンする CI 規律と揃えられるか）。
 
 ## 影響
 
