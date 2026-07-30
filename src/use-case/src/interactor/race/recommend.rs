@@ -3,13 +3,9 @@ use paddock_domain::{Portfolio, RaceId, TrackCondition};
 use crate::compose_portfolio;
 use crate::error::Result;
 use crate::interactor::Interactor;
-use crate::pdf_fetcher::PdfFetcher;
-use crate::pdf_parser::PdfParser;
 use crate::repository::{OddsRepository, RaceCardRepository, StatsRepository};
 
-impl<R: StatsRepository + RaceCardRepository + OddsRepository, P: PdfParser, F: PdfFetcher>
-    Interactor<R, P, F>
-{
+impl<R: StatsRepository + RaceCardRepository + OddsRepository> Interactor<R> {
     /// 予算内・軸流しポートフォリオ（馬連＋ワイド＋三連複）の買い目推奨を返す（#122 と同経路）。
     ///
     /// 確率は [`Self::predict_race`] と同じ推定（`blend_alpha` / `track_condition` も同義）。

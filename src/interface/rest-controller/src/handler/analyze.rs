@@ -4,8 +4,6 @@ use utoipa::IntoParams;
 
 use paddock_domain::{HorseName, JockeyName, Surface, TrainerName, Venue};
 use paddock_use_case::Interactor;
-use paddock_use_case::pdf_fetcher::PdfFetcher;
-use paddock_use_case::pdf_parser::PdfParser;
 use paddock_use_case::repository::Repository;
 
 use crate::error::Result;
@@ -54,14 +52,12 @@ pub struct CourseQuery {
     ),
     tag = "analyze",
 )]
-pub async fn analyze_horse<R, P, F>(
-    interactor: web::Data<Interactor<R, P, F>>,
+pub async fn analyze_horse<R>(
+    interactor: web::Data<Interactor<R>>,
     query: web::Query<NameQuery>,
 ) -> Result<HttpResponse>
 where
     R: Repository + 'static,
-    P: PdfParser + Send + Sync + 'static,
-    F: PdfFetcher + Send + Sync + 'static,
 {
     let name = HorseName::try_from(query.name.as_str())?;
     let stats = interactor.horse_stats(&name).await?;
@@ -80,14 +76,12 @@ where
     ),
     tag = "analyze",
 )]
-pub async fn analyze_jockey<R, P, F>(
-    interactor: web::Data<Interactor<R, P, F>>,
+pub async fn analyze_jockey<R>(
+    interactor: web::Data<Interactor<R>>,
     query: web::Query<NameQuery>,
 ) -> Result<HttpResponse>
 where
     R: Repository + 'static,
-    P: PdfParser + Send + Sync + 'static,
-    F: PdfFetcher + Send + Sync + 'static,
 {
     let name = JockeyName::try_from(query.name.as_str())?;
     let stats = interactor.jockey_stats(&name).await?;
@@ -106,14 +100,12 @@ where
     ),
     tag = "analyze",
 )]
-pub async fn analyze_trainer<R, P, F>(
-    interactor: web::Data<Interactor<R, P, F>>,
+pub async fn analyze_trainer<R>(
+    interactor: web::Data<Interactor<R>>,
     query: web::Query<NameQuery>,
 ) -> Result<HttpResponse>
 where
     R: Repository + 'static,
-    P: PdfParser + Send + Sync + 'static,
-    F: PdfFetcher + Send + Sync + 'static,
 {
     let name = TrainerName::try_from(query.name.as_str())?;
     let stats = interactor.trainer_stats(&name).await?;
@@ -139,14 +131,12 @@ fn truncate_candidates(mut names: Vec<String>) -> AnalyzeCandidatesResponse {
     ),
     tag = "analyze",
 )]
-pub async fn analyze_horse_candidates<R, P, F>(
-    interactor: web::Data<Interactor<R, P, F>>,
+pub async fn analyze_horse_candidates<R>(
+    interactor: web::Data<Interactor<R>>,
     query: web::Query<CandidateQuery>,
 ) -> Result<HttpResponse>
 where
     R: Repository + 'static,
-    P: PdfParser + Send + Sync + 'static,
-    F: PdfFetcher + Send + Sync + 'static,
 {
     let needle = HorseName::try_from(query.q.as_str())?;
     let names = interactor
@@ -167,14 +157,12 @@ where
     ),
     tag = "analyze",
 )]
-pub async fn analyze_jockey_candidates<R, P, F>(
-    interactor: web::Data<Interactor<R, P, F>>,
+pub async fn analyze_jockey_candidates<R>(
+    interactor: web::Data<Interactor<R>>,
     query: web::Query<CandidateQuery>,
 ) -> Result<HttpResponse>
 where
     R: Repository + 'static,
-    P: PdfParser + Send + Sync + 'static,
-    F: PdfFetcher + Send + Sync + 'static,
 {
     let needle = JockeyName::try_from(query.q.as_str())?;
     let names = interactor
@@ -195,14 +183,12 @@ where
     ),
     tag = "analyze",
 )]
-pub async fn analyze_trainer_candidates<R, P, F>(
-    interactor: web::Data<Interactor<R, P, F>>,
+pub async fn analyze_trainer_candidates<R>(
+    interactor: web::Data<Interactor<R>>,
     query: web::Query<CandidateQuery>,
 ) -> Result<HttpResponse>
 where
     R: Repository + 'static,
-    P: PdfParser + Send + Sync + 'static,
-    F: PdfFetcher + Send + Sync + 'static,
 {
     let needle = TrainerName::try_from(query.q.as_str())?;
     let names = interactor
@@ -223,14 +209,12 @@ where
     ),
     tag = "analyze",
 )]
-pub async fn analyze_course<R, P, F>(
-    interactor: web::Data<Interactor<R, P, F>>,
+pub async fn analyze_course<R>(
+    interactor: web::Data<Interactor<R>>,
     query: web::Query<CourseQuery>,
 ) -> Result<HttpResponse>
 where
     R: Repository + 'static,
-    P: PdfParser + Send + Sync + 'static,
-    F: PdfFetcher + Send + Sync + 'static,
 {
     let venue = Venue::try_from(query.venue.as_str())?;
     let surface = Surface::try_from(query.surface.as_str())?;

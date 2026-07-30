@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use chrono::Utc;
 use clap::Parser;
-use paddock_use_case::{Interactor, NoopFetcher, NoopParser};
+use paddock_use_case::Interactor;
 use rdb_gateway::PostgresRepository;
 
 #[tokio::main]
@@ -19,7 +19,7 @@ async fn main() -> Result<()> {
 }
 
 async fn ingest(
-    interactor: &Interactor<PostgresRepository, NoopParser, NoopFetcher>,
+    interactor: &Interactor<PostgresRepository>,
     input: Option<PathBuf>,
     dry_run: bool,
 ) -> Result<()> {

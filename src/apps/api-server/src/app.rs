@@ -4,8 +4,6 @@ use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
 use paddock_use_case::OddsScraper;
-use paddock_use_case::pdf_fetcher::PdfFetcher;
-use paddock_use_case::pdf_parser::PdfParser;
 use paddock_use_case::repository::Repository;
 use paddock_use_case::result_page_fetcher::ResultPageFetcher;
 use rest_controller::error::Error as ApiError;
@@ -75,12 +73,11 @@ fn bad_request<E: std::fmt::Display>(err: E, _req: &HttpRequest) -> actix_web::E
 ///   Swagger UI / openapi.json は `/api` の外に置いており、現状この認証フックの対象外
 ///   （将来 docs を保護したい場合は配置・wrap を見直す）。
 ///
-/// ジェネリクス: `R/P/F`=メイン Interactor、`O`=OddsInteractor（odds:refresh）、`S`=ResultsInteractor（results:refresh, #381）。
-pub fn configure_routes<R, P, F, O, S>(cfg: &mut web::ServiceConfig)
+/// ジェネリクス: `R`=メイン Interactor、`O`=OddsInteractor（odds:refresh）、`S`=ResultsInteractor（results:refresh, #381）。
+/// PDF 系ユースケースは api-server の scope 外のため P/F ジェネリクスは持たない（#453）。
+pub fn configure_routes<R, O, S>(cfg: &mut web::ServiceConfig)
 where
     R: Repository + 'static,
-    P: PdfParser + Send + Sync + 'static,
-    F: PdfFetcher + Send + Sync + 'static,
     O: OddsScraper + Send + Sync + 'static,
     S: ResultPageFetcher + Send + Sync + 'static,
 {
@@ -96,9 +93,9 @@ where
                 // 将来ここでトークン検証を行い、未認証なら 401 を返す。
                 srv.call(req)
             })
-            .configure(rest_controller::router::configure::<R, P, F>)
+            .configure(rest_controller::router::configure::<R>)
             .configure(rest_controller::router::results::configure::<S, R>)
-            .configure(rest_controller::router::session::configure::<R, P, F, O, S>),
+            .configure(rest_controller::router::session::configure::<R, O, S>),
     );
 
     cfg.service(SwaggerUi::new("/docs/{_:.*}").url("/api-docs/openapi.json", ApiDoc::openapi()));

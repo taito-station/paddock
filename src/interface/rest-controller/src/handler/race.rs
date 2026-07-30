@@ -5,8 +5,6 @@ use utoipa::IntoParams;
 
 use paddock_domain::{RECOMMENDED_MARKET_BLEND_ALPHA, RaceId, TrackCondition};
 use paddock_use_case::Interactor;
-use paddock_use_case::pdf_fetcher::PdfFetcher;
-use paddock_use_case::pdf_parser::PdfParser;
 use paddock_use_case::repository::Repository;
 
 use crate::error::{Error, Result};
@@ -96,14 +94,12 @@ pub(crate) const DEFAULT_RACE_BUDGET: u64 = 5000;
     ),
     tag = "races",
 )]
-pub async fn list_races<R, P, F>(
-    interactor: web::Data<Interactor<R, P, F>>,
+pub async fn list_races<R>(
+    interactor: web::Data<Interactor<R>>,
     query: web::Query<RaceListQuery>,
 ) -> Result<HttpResponse>
 where
     R: Repository + 'static,
-    P: PdfParser + Send + Sync + 'static,
-    F: PdfFetcher + Send + Sync + 'static,
 {
     let date = NaiveDate::parse_from_str(&query.date, "%Y-%m-%d").map_err(|e| {
         Error::BadRequest(format!("invalid date '{}' (YYYY-MM-DD): {e}", query.date))
@@ -139,14 +135,12 @@ where
     ),
     tag = "races",
 )]
-pub async fn get_race_card<R, P, F>(
-    interactor: web::Data<Interactor<R, P, F>>,
+pub async fn get_race_card<R>(
+    interactor: web::Data<Interactor<R>>,
     path: web::Path<String>,
 ) -> Result<HttpResponse>
 where
     R: Repository + 'static,
-    P: PdfParser + Send + Sync + 'static,
-    F: PdfFetcher + Send + Sync + 'static,
 {
     let race_id = RaceId::try_from(path.into_inner())?;
     let card = interactor
@@ -172,15 +166,13 @@ where
     ),
     tag = "races",
 )]
-pub async fn get_prediction<R, P, F>(
-    interactor: web::Data<Interactor<R, P, F>>,
+pub async fn get_prediction<R>(
+    interactor: web::Data<Interactor<R>>,
     path: web::Path<String>,
     query: web::Query<PredictionQuery>,
 ) -> Result<HttpResponse>
 where
     R: Repository + 'static,
-    P: PdfParser + Send + Sync + 'static,
-    F: PdfFetcher + Send + Sync + 'static,
 {
     let race_id = RaceId::try_from(path.into_inner())?;
 
@@ -219,15 +211,13 @@ where
     ),
     tag = "races",
 )]
-pub async fn get_recommendations<R, P, F>(
-    interactor: web::Data<Interactor<R, P, F>>,
+pub async fn get_recommendations<R>(
+    interactor: web::Data<Interactor<R>>,
     path: web::Path<String>,
     query: web::Query<RecommendationQuery>,
 ) -> Result<HttpResponse>
 where
     R: Repository + 'static,
-    P: PdfParser + Send + Sync + 'static,
-    F: PdfFetcher + Send + Sync + 'static,
 {
     let race_id = RaceId::try_from(path.into_inner())?;
 
@@ -271,15 +261,13 @@ where
     ),
     tag = "races",
 )]
-pub async fn get_race_board<R, P, F>(
-    interactor: web::Data<Interactor<R, P, F>>,
+pub async fn get_race_board<R>(
+    interactor: web::Data<Interactor<R>>,
     path: web::Path<String>,
     query: web::Query<BoardQuery>,
 ) -> Result<HttpResponse>
 where
     R: Repository + 'static,
-    P: PdfParser + Send + Sync + 'static,
-    F: PdfFetcher + Send + Sync + 'static,
 {
     let race_id = RaceId::try_from(path.into_inner())?;
 

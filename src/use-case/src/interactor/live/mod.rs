@@ -5,8 +5,6 @@ use paddock_domain::{StageTier, stage_tier};
 
 use crate::error::Result;
 use crate::interactor::Interactor;
-use crate::pdf_fetcher::PdfFetcher;
-use crate::pdf_parser::PdfParser;
 use crate::repository::{LiveEvRepository, LiveEvSnapshot, LiveEvSnapshotRecord};
 
 /// `GET /api/live/{date}` が返すライブ EV ビュー（use-case 側の view 型）。
@@ -67,7 +65,7 @@ pub struct LiveFlip {
     pub prev_roi: Option<f64>,
 }
 
-impl<R: LiveEvRepository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
+impl<R: LiveEvRepository> Interactor<R> {
     /// 指定開催日の race ごと最新サイクル＋伝票を返す（read-only, #260 / ADR 0064）。
     ///
     /// repository はフラットな `rank<=2` 行（`(race_id, rank)` 昇順）を返すので、

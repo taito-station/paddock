@@ -14,21 +14,15 @@ pub mod results;
 pub mod settle;
 pub mod trainer;
 
-use crate::pdf_fetcher::PdfFetcher;
-use crate::pdf_parser::PdfParser;
-
-pub struct Interactor<R, P: PdfParser, F: PdfFetcher> {
+/// 非 PDF ユースケース（race/predict/board/live/stats 等）の facade（#453）。
+/// PDF 取得・解析は [`pdf::PdfInteractor`] に分離済みで、ここは Repository のみを持つ
+/// （かつての `Interactor<R, P: PdfParser, F: PdfFetcher>` から P/F ジェネリクスと Noop スタブを解消）。
+pub struct Interactor<R> {
     pub repository: R,
-    pub pdf_parser: P,
-    pub pdf_fetcher: F,
 }
 
-impl<R, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
-    pub fn new(repository: R, pdf_parser: P, pdf_fetcher: F) -> Self {
-        Self {
-            repository,
-            pdf_parser,
-            pdf_fetcher,
-        }
+impl<R> Interactor<R> {
+    pub fn new(repository: R) -> Self {
+        Self { repository }
     }
 }

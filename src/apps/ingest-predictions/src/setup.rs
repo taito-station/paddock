@@ -1,11 +1,10 @@
 use anyhow::Context;
 use paddock_config::Config;
-use paddock_use_case::{Interactor, NoopFetcher, NoopParser};
+use paddock_use_case::Interactor;
 use rdb_gateway::{PostgresRepository, pool};
 
 pub struct App {
-    // ingest-predictions は PDF を扱わないため PDF 系ジェネリクスは use-case 共通の Noop スタブ（#410）。
-    pub interactor: Interactor<PostgresRepository, NoopParser, NoopFetcher>,
+    pub interactor: Interactor<PostgresRepository>,
 }
 
 pub async fn build_app() -> anyhow::Result<App> {
@@ -16,6 +15,6 @@ pub async fn build_app() -> anyhow::Result<App> {
         .await
         .context("connect Postgres")?;
     let repo = PostgresRepository::new(pool);
-    let interactor = Interactor::new(repo, NoopParser, NoopFetcher);
+    let interactor = Interactor::new(repo);
     Ok(App { interactor })
 }

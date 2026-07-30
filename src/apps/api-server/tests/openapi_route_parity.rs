@@ -17,7 +17,7 @@ use utoipa::OpenApi;
 use api_server::app::{REGISTERED_ROUTES, configure_routes};
 use netkeiba_scraper::UreqNetkeibaScraper;
 use paddock_use_case::result_page_fetcher::ResultPageFetcher;
-use paddock_use_case::{Interactor, NoopFetcher, NoopParser, ResultsInteractor};
+use paddock_use_case::{Interactor, ResultsInteractor};
 use rdb_gateway::PostgresRepository;
 use rest_controller::openapi::ApiDoc;
 
@@ -152,20 +152,18 @@ async fn every_registered_route_is_wired() {
     let pool = PgPoolOptions::new()
         .connect_lazy("postgres://paddock:paddock@127.0.0.1:5432/paddock")
         .expect("build lazy pool");
-    let interactor = web::Data::new(Interactor::new(
-        PostgresRepository::new(pool.clone()),
-        NoopParser,
-        NoopFetcher,
-    ));
+    let interactor = web::Data::new(Interactor::new(PostgresRepository::new(pool.clone())));
     let results = web::Data::new(ResultsInteractor::new(
         NoopResultPage,
         PostgresRepository::new(pool.clone()),
     ));
-    let app =
-        actix_test::init_service(App::new().app_data(interactor).app_data(results).configure(
-            configure_routes::<Repo, NoopParser, NoopFetcher, UreqNetkeibaScraper, NoopResultPage>,
-        ))
-        .await;
+    let app = actix_test::init_service(
+        App::new()
+            .app_data(interactor)
+            .app_data(results)
+            .configure(configure_routes::<Repo, UreqNetkeibaScraper, NoopResultPage>),
+    )
+    .await;
 
     // 負のコントロール: 未登録パスは解決されない（本文空 404）。
     assert!(

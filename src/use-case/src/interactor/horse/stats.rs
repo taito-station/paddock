@@ -2,11 +2,9 @@ use paddock_domain::HorseName;
 
 use crate::error::Result;
 use crate::interactor::Interactor;
-use crate::pdf_fetcher::PdfFetcher;
-use crate::pdf_parser::PdfParser;
 use crate::repository::{HorseStatsRow, NameMatchRepository, StatsRepository};
 
-impl<R: StatsRepository + NameMatchRepository, P: PdfParser, F: PdfFetcher> Interactor<R, P, F> {
+impl<R: StatsRepository + NameMatchRepository> Interactor<R> {
     pub async fn horse_stats(&self, name: &HorseName) -> Result<HorseStatsRow> {
         self.repository.horse_stats(name, None).await
     }
