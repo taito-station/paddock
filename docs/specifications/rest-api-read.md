@@ -9,8 +9,8 @@ sources:
   - docs/adr/0055-ev-layer-separation-circular-break.md
   - docs/adr/0060-betting-axis-lock-preclose-topup.md
   - docs/api/openapi.json
-distilled_from_sha: "f0ee7a3"
-updated: "2026-07-21"
+distilled_from_sha: "21e6076"
+updated: "2026-07-30"
 ---
 
 # REST API（read 基盤）: 設計仕様
@@ -290,7 +290,7 @@ API の仕様乖離を防ぐため、OpenAPI はコードから生成する（sp
 
 ## テスト方針
 
-- 統合テスト `src/apps/api-server/tests/`（規約どおり `helper/mod.rs` に seed・`App` 構築を集約）。DB は既存の統合テスト（`apps/ingest-predictions/tests/`）と同じく **`#[sqlx::test]` の一時 Postgres DB** を使う（実 PostgreSQL に接続するため `--test-threads=1` で直列実行）。
+- 統合テスト `src/apps/api-server/tests/`（seed・service 構築は各テストファイル内のローカル `fn`／マクロに置く。共通の `helper/mod.rs` は置かない。例: `session.rs` / `prediction.rs` の `build_service!` マクロ、`prediction.rs` の `async fn seed`）。DB は既存の統合テスト（`apps/ingest-predictions/tests/`）と同じく **`#[sqlx::test]` の一時 Postgres DB** を使う（実 PostgreSQL に接続するため `--test-threads=1` で直列実行）。
   - 各 read エンドポイントの正常系（200 + JSON 形状）、`404`（未存在 race_id）、`400`（不正クエリ）。
   - OpenAPI: `GET /api-docs/openapi.json` が 200 で返り、コミット済み `docs/api/openapi.json` と一致すること。
 - 既存の CLI 群（parse-pdf / predict / analyze 等）はバッチ用途として変更しない。

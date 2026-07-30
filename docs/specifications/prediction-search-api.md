@@ -6,8 +6,8 @@ kind: knowledge
 sources:
   - docs/adr/0025-prediction-search-api.md
   - docs/api/openapi.json
-distilled_from_sha: "f0ee7a3"
-updated: "2026-07-21"
+distilled_from_sha: "21e6076"
+updated: "2026-07-30"
 ---
 
 # 予想の横断検索 API: 設計仕様
@@ -239,7 +239,7 @@ GET /api/predictions/stats/by-mark
 
 ## テスト方針
 
-API なのでブラウザ UI は無い。`tests/browser-test-cases/` は追加せず、**統合テスト**（`src/apps/api-server/tests/`、`#[sqlx::test]` の一時 Postgres）で各エンドポイントを検証する。`helper/mod.rs` に予想 seed（結果あり/なし・複数開催場・距離芝ダ違い・各印）を用意する。
+API なのでブラウザ UI は無い。`tests/browser-test-cases/` は追加せず、**統合テスト**（`src/apps/api-server/tests/`、`#[sqlx::test]` の一時 Postgres）で各エンドポイントを検証する。予想 seed（結果あり/なし・複数開催場・距離芝ダ違い・各印）は各テストファイル内のローカル `fn`（例: `prediction.rs` の `async fn seed`）に用意する（共通の `helper/mod.rs` は置かない）。
 
 | ケース | 観点 | 期待 |
 |---|---|---|
