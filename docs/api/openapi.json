@@ -393,6 +393,28 @@
         }
       }
     },
+    "/api/health": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "summary": "稼働中プロセスの世代（git sha / ビルド時刻）を返す（#570）。",
+        "description": "長期稼働した api-server が古い成果物を配信し続けても外形監視（HTTP 200）では気づけない。\n`git_sha` を現在の checkout と突き合わせることで世代ずれを検知できるようにする。\nDB 非依存・Repository 非依存なので、DB 未接続でも 200 を返す（liveness プローブも兼ねる）。",
+        "operationId": "health",
+        "responses": {
+          "200": {
+            "description": "稼働中プロセスの世代情報（git sha / ビルド時刻）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/live/{date}": {
       "get": {
         "tags": [
@@ -1978,6 +2000,29 @@
             "type": "integer",
             "format": "int32",
             "minimum": 0
+          }
+        }
+      },
+      "HealthResponse": {
+        "type": "object",
+        "description": "`GET /api/health` のレスポンス（#570）。稼働中プロセスの世代を自己申告する。\n`git_sha` を現在の checkout（`git rev-parse --short HEAD`）と突き合わせれば陳腐化を機械検知できる。",
+        "required": [
+          "status",
+          "git_sha",
+          "build_time"
+        ],
+        "properties": {
+          "build_time": {
+            "type": "string",
+            "description": "ビルド時刻（UTC rfc3339, 秒精度）。"
+          },
+          "git_sha": {
+            "type": "string",
+            "description": "ビルド元の git sha（短縮）。未コミット変更ありのビルドは `-dirty` 付き。`.git` 不在時は `unknown`。"
+          },
+          "status": {
+            "type": "string",
+            "description": "常に `\"ok\"`（プロセスが応答できている＝liveness）。"
           }
         }
       },
@@ -3585,6 +3630,10 @@
     {
       "name": "live",
       "description": "ライブEV買い目（今これを買え）"
+    },
+    {
+      "name": "health",
+      "description": "稼働中プロセスの世代（git sha / ビルド時刻）"
     }
   ]
 }
