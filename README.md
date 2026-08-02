@@ -446,7 +446,8 @@ React SPA。盤面（`/races/{race_id}/board`）で確率・オッズ・印・�
 # API サーバ（既定 127.0.0.1:8080。PADDOCK_SERVER_ADDR で変更）
 cargo run -p api-server
 
-# Web SPA（Vite dev server。http://localhost:5173 を開く）
+# Web SPA（Vite dev server。http://127.0.0.1:5173 を開く。
+# localhost は環境により IPv6 解決で不通のことがあるため 127.0.0.1 を第一に）
 cd web && npm install && npm run dev
 
 # 起動後の接続確認（127.0.0.1 で 200 が返れば OK。ポートは起動ログの表示に合わせる）
