@@ -10,7 +10,10 @@ const apiTarget = process.env.PADDOCK_API_TARGET?.trim() || "http://localhost:80
 // 名前解決が IPv4 を先に返す環境では `http://127.0.0.1:5173/` が接続拒否になる(#569)。
 // dev の loopback 用途に限るため既定は IPv4 ループバックに固定し、LAN へは露出しない。
 // env PADDOCK_DEV_HOST で上書き可（例: 全 IF へ公開したいときは `true`／`0.0.0.0`）。
-const devHost = process.env.PADDOCK_DEV_HOST?.trim() || "127.0.0.1";
+// `true` は Vite が boolean で解釈して全 IF(0.0.0.0)へ bind する挙動なので、env の
+// 文字列 `"true"` は boolean へ正規化する（文字列のままだとホスト名扱いで解決に失敗する）。
+const rawDevHost = process.env.PADDOCK_DEV_HOST?.trim();
+const devHost = rawDevHost === "true" ? true : rawDevHost || "127.0.0.1";
 export default defineConfig({
   plugins: [react()],
   server: {

@@ -449,7 +449,7 @@ cargo run -p api-server
 # Web SPA（Vite dev server。http://localhost:5173 を開く）
 cd web && npm install && npm run dev
 
-# 起動後の接続確認（127.0.0.1 で 200 が返れば OK）
+# 起動後の接続確認（127.0.0.1 で 200 が返れば OK。ポートは起動ログの表示に合わせる）
 curl -o /dev/null -w "%{http_code}\n" http://127.0.0.1:5173/
 ```
 
