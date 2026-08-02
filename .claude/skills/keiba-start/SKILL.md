@@ -1,9 +1,9 @@
 ---
 name: keiba-start
 description: >
-  paddock で競馬予想セッションを始めるときのスキル。おっちゃん人格への切り替え・データ取得
-  （fetch-card）・オッズ時系列コレクタ起動・予想実行（predict）・EV/ROI 判定・買い目決定・
-  ライブ監視の手順を 1 か所に集約。「今日の予想始めます」「予想して」「今日のレース見て」等の
+  paddock で競馬予想セッションを始めるときのスキル。おっちゃん人格への切り替え・起動時のビルド
+  最新化とスリープ抑止・データ取得（fetch-card）・オッズ時系列コレクタ起動・予想実行（predict）・
+  EV/ROI 判定・買い目決定・ライブ監視の手順を 1 か所に集約。「今日の予想始めます」「予想して」「今日のレース見て」等の
   予想セッション開始発言、または /keiba-start の直接呼び出しで起動する。競馬の実レース予想
   セッションに限る。バックテスト・計測・実装作業では起動しない。
 metadata:
@@ -41,55 +41,94 @@ paddock で競馬予想セッションを始めるときのスキル。
 
 ---
 
-### Step 0.4: 時刻確認（最優先）
+### Step 0.1: 時刻確認（最優先）
 
-**何よりも先に現在時刻と第 1 レースの発走時刻を確認し、間に合う対象に絞る。** 以降の Step 0.5 は full build で 8 分前後かかるため、確認せず走らせると最初の監視窓を食い潰す。
+**何よりも先に現在時刻を見て、Step 0.2 の full build（実測 ~8 分）を挟んでも第 1 レースに間に合うかを判断する。**
 
 ```sh
 date "+%Y-%m-%d %H:%M %A"
 ```
 
-間に合わないときは Step 0.5 を crate 限定に絞る（後述）。
+発走時刻はこの時点でまだ DB に無い（`post_time` は Step 1 の fetch-card で入る）。当日の発走時刻は netkeiba の開催一覧で見る:
+
+```sh
+curl -s -A "Mozilla/5.0" "https://race.netkeiba.com/top/race_list_sub.html?kaisai_date=$(date +%Y%m%d)" \
+  | grep -oE 'race_id=[0-9]{12}' | sort -u | head
+```
+
+間に合わないときは Step 0.2 のビルドを `--bin` で絞る（後述）。
 
 ---
 
-### Step 0.5: ビルド最新化と常駐プロセスの世代リセット（必須）
+### Step 0.2: ビルド最新化と常駐プロセスの世代リセット（必須）
 
-**予想セッション開始時は、使うバイナリ・フロントを必ず最新へ作り直す。** 「動いているから大丈夫」で古い成果物を使い続けない。
+**同一セッションで既に実施済みなら Step 0.1〜0.3 を丸ごとスキップする。** このスキルは「予想して」等でセッション途中に再発火しうる。毎回 8 分のビルドと api/Vite 再起動を走らせると、Step 0.1 で守ろうとした監視窓を自分で潰す。
 
 **前提**: primary チェックアウト（`main`・作業ツリーがクリーン）で実行する。worktree 内や未コミット変更があると `git switch` / `--ff-only` が失敗するので、先に解消してから予想を始める。
 
 ```sh
 git switch main && git pull --ff-only     # 最新 main を取る（失敗したら解消してから進む）
-cargo build --release                     # 全バイナリ（実測 ~8 分）。時間が無ければ
-                                          #   cargo build --release --bin paddock-fetch-card \
-                                          #     --bin paddock-predict-watch --bin paddock-odds-collect
-./target/release/paddock-analyze migrate --dry-run   # 未適用 migration の確認
-./target/release/paddock-analyze migrate             # 未適用が出たときだけ適用（CLAUDE.md「DB 運用」）
+cargo build --release                     # 全バイナリ（実測 ~8 分）
+(cd web && npm ci)                        # フロント依存も追随させる（lock 変化が無ければ高速）
 ```
 
-**未適用 migration を放置しない。** 未適用のままだとアプリ側が起動拒否になり、以降の Step が全部止まる。
+時間が無ければ `--bin` で絞る。**`paddock-analyze` は必ず含める**（直後の migrate に使う。旧 analyze で共有 DB に migrate を打つと事故る）:
 
-**バイナリは `./target/release/<bin>` で叩く。** PATH 上の裸コマンドを使わない——`~/.local/bin/paddock-odds-collect` は release からの**実体コピー**で `cargo build` では更新されず、リビルドしたつもりが古い成果物を動かすことになる（他の `paddock-*` は PATH に無い）。
+```sh
+cargo build --release --bin paddock-analyze --bin paddock-fetch-card \
+  --bin paddock-predict-watch --bin paddock-odds-collect --bin paddock-predict
+```
+
+**バイナリは `~/.local/bin` の symlink 経由で裸コマンドとして叩く。** リンクが `target/release` を指していれば `cargo build --release` だけで全部最新化される。実体コピーが混ざっていると「リビルドしたのに古い成果物が動く」ので、リンクであることを確認する:
+
+```sh
+ls -l ~/.local/bin/paddock-* | grep -v '^l' && echo '⚠ 実体コピーが混ざっている（要リンク化）'
+
+# リンク化（実体コピーが混ざっていた場合・新しい bin が増えた場合）
+for b in "$PWD"/target/release/paddock-*; do
+  [ -f "$b" ] && [ -x "$b" ] && ln -sfn "$b" ~/.local/bin/"$(basename "$b")"
+done
+```
+
+**migration の確認と適用は分けて実行する**（未適用が無いのに `migrate` を流さない。共有 golden DB への無条件 DDL を避ける）:
+
+```sh
+paddock-analyze migrate --dry-run   # まず未適用の有無だけ見る
+```
+
+```sh
+paddock-analyze migrate             # 上で未適用が出たときだけ流す（CLAUDE.md「DB 運用」）
+```
+
+未適用のままだとアプリ側が起動拒否になり、以降の Step が全部止まる。放置しない。
 
 **古い常駐プロセスは落としてから立て直す。** 長期稼働したプロセスは新しい成果物を配信せず、しかも HTTP 200 を返し続けるので外形からは正常に見える（#570）。
 
 ```sh
-# まず一覧で世代を見る（etime が長い＝古い）。pkill でまとめて落とさない
-pgrep -fl 'paddock-predict-watch|paddock-odds-collect'
-ps -eo pid,etime,command | grep -E 'paddock-api|node.*vite' | grep -v grep
+# 世代を見る（ELAPSED が長い＝古い）。pkill でまとめて落とさない
+ps -eo pid,etime,command | grep -E 'paddock-(predict-watch|odds-collect|api)|node.*vite' | grep -v grep
 
-# 前日以前のものだけ pid 指定で落とす
+# 落とすのは前日以前のものだけ。pid 指定で落とす
 kill <pid>
-
-# api-server / Vite を最新で立て直す
-nohup ./target/release/paddock-api > /tmp/paddock-api.log 2>&1 &        # 既定 :8080（PADDOCK_SERVER_ADDR で変更可）
-(cd web && nohup npm run dev -- --host 127.0.0.1 --port 5173 --strictPort > /tmp/paddock-vite.log 2>&1 &)
-curl -s -o /dev/null -w '%{http_code}\n' "http://127.0.0.1:5173/api/live/$(date +%F)"   # 200 を確認
+lsof -ti tcp:5173 | xargs -r kill    # Vite は npm ラッパの子が残るのでポートで確実に落とす
 ```
 
-- **当日分の監視が既に動いているなら落とさない。** このスキルは「予想して」等でセッション途中に再発火しうる。稼働中の `predict-watch` / `odds-collect` を黙って落とすと #568 と同じ「監視が止まったのに気づかない」状態を作る
-- Vite の `--host 127.0.0.1` は #569（IPv6 のみに bind して 127.0.0.1 から開けない）の回避。#569 が入ったら不要になる
+```sh
+# api-server / Vite を最新で立て直す（ログは追記・~/Library/Logs に集約）
+nohup paddock-api >> ~/Library/Logs/paddock-api.log 2>&1 &          # 既定 :8080（PADDOCK_SERVER_ADDR で変更可）
+(cd web && PADDOCK_API_TARGET=http://127.0.0.1:8080 \
+  nohup npm run dev -- --host 127.0.0.1 --port 5173 --strictPort >> ~/Library/Logs/paddock-vite.log 2>&1 &)
+```
+
+**立ち上がりを確認する。**「HTTP 200」は疎通確認にしかならない（#570 のとおり**古いプロセスでも 200 を返す**）。世代の確認は起動時刻で行う:
+
+```sh
+until curl -sf -o /dev/null "http://127.0.0.1:5173/api/live/$(date +%F)"; do sleep 1; done   # 起動待ち
+ps -o pid,lstart,command -p "$(lsof -ti tcp:8080)" "$(lsof -ti tcp:5173)"                    # 起動時刻が今か
+```
+
+- Vite の `--host 127.0.0.1` と `PADDOCK_API_TARGET` の IPv4 明示は #569（IPv6 のみに bind して 127.0.0.1 から開けない）の回避。両端を IPv4 に揃えないと proxy 側だけ IPv6 で ECONNREFUSED になる。#569 が入ったら不要になる
+- `--strictPort` は旧 Vite が生きていると新 Vite が即死する。**必ず先に `lsof -ti tcp:5173` で落としてから**起動する（落とさないと旧 Vite が 200 を返して合格に見える）
 
 **理由**: 2026-08-02 に api-server と Vite が **15 日前起動のまま**残存し、リビルド済みの成果物が反映されていなかった（#570）。DB 側の migration が進まない限り stale binary 警告は出ないため、この種の陳腐化は起動時ガードでは検知できない。
 
@@ -97,27 +136,20 @@ curl -s -o /dev/null -w '%{http_code}\n' "http://127.0.0.1:5173/api/live/$(date 
 
 ---
 
-### Step 0.6: スリープ抑止（launchd の keep-awake を使う）
+### Step 0.3: スリープ抑止の方針決め（実施は Step 1.6）
 
-**監視は macOS のスリープで止まり、復帰後も再開しない（#568）。** ただし**抑止機構はリポジトリに既にある**（`com.paddock.keep-awake`・#264）。新しく caffeinate を張る前に、まずこれが load されているか確認する。
+**監視は macOS のスリープで止まり、復帰後も再開しない（#568）。** ただし**抑止機構はリポジトリに既にある**（`com.paddock.keep-awake`・#264）。まず load 済みかを確認しておく。
 
 ```sh
 launchctl list | grep -i paddock     # com.paddock.keep-awake が無ければ未 install
-deployments/launchd/install.sh       # 開催日の朝に流す（prefetch / keep-awake / snapshot-coverage 等）
-# 開催日の夜に deployments/launchd/uninstall.sh（常駐エージェントは外れない）
 ```
 
-仕様と限界は [`deployments/launchd/README.md`](../../../deployments/launchd/README.md) の「⚠ スリープ取りこぼしと keep-awake の限界（#264）」が単一ソース（クラムシェル・`pmset` スケジュールスリープ・既にスリープ中の Mac は起こせない）。ここでは再掲しない。
-
-**launchd を使わないセッション（アドホック起動）では fallback として手動で紐づける。** 対象は predict-watch と odds-collect の**両方**——コレクタは朝から終日動くので、Step 5 まで無防備にしない。
-
-```sh
-nohup caffeinate -i -w "$WATCH_PID" > /dev/null 2>&1 &   # pid の取り方は Step 1.5 / Step 5 を参照
-pmset -g | grep -i 'sleep'                               # "sleep prevented by caffeinate" を確認
-```
-
-- `caffeinate -w` は**対象 pid が既に消えていると即 exit して黙って無効化される**。起動直後に上記 `pmset` で効いていることを必ず確かめる
+- **install/実効確認は Step 1.6 で行う**。`keep_awake.sh` は当日の `post_time` が DB に無いと no-op で終了するため、fetch-card（Step 1）より前に流しても必ず不発になる
+- `deployments/launchd/install.sh` は **primary チェックアウトから実行する**（リポジトリパスを plist に焼き込むため、worktree から流すと消えるパスを launchd が参照し続ける）。7 エージェントを配置し、うち backup-db / backup-staleness / verify-backup-restore / purge-snapshots の 4 つは常駐で `uninstall.sh` では外れない
+- 仕様と限界は [`deployments/launchd/README.md`](../../../deployments/launchd/README.md) の「⚠ スリープ取りこぼしと keep-awake の限界（#264）」が単一ソース（クラムシェル・`pmset` スケジュールスリープ・既にスリープ中の Mac は起こせない）。ここでは再掲しない
 - 実害の記録: 2026-08-01 は 14:38 のスリープで監視が止まり、14:50〜18:30 発走の約 12 レースが完全に未監視だった（通知ゼロが「妙味なし」と誤読される静かな失敗）
+
+> #568 の恒久対策（復帰後の自動再開・スイープ途切れの警告）が入ったら、Step 1.6 の手動 fallback は削除する。
 
 > #568 の恒久対策（復帰後の自動再開・スイープ途切れの警告）が入ったら、この節の手動 fallback は削除する。
 
@@ -148,14 +180,19 @@ paddock-fetch-card <12桁race_id>
 
 **このスキルを読んだら（＝おっちゃん起動時）、fetch-card 済みの当日オッズ時系列コレクタをバックグラウンドで起動する。** 終日 15 分毎に全レースの単複オッズを貯め（`race_odds_snapshots` に append）、"ズレ増額" 判断の実データと将来のオッズ変動分析の母数にする。発走済みは順次対象外・全レース発走で自動終了する。
 
+起動とスリープ抑止の紐づけは**同一コマンド内で完結させる**。シェル変数は Bash 呼び出しをまたいで残らないため、pid を別ブロックで参照すると空になり、`caffeinate -i -w ""` が黙って失敗する（#568 と同型の静かな失敗）。
+
 ```sh
 # バックグラウンド起動（既定: 15分毎・終日・全発走で自動終了）
-# PATH の裸コマンドは古い実体コピーなので使わない（Step 0.5 参照）
-COLLECT_LOG=/tmp/paddock-odds-collect-$(date +%Y%m%d).log
-nohup ./target/release/paddock-odds-collect --date YYYY-MM-DD > "$COLLECT_LOG" 2>&1 &
-COLLECT_PID=$!
-nohup caffeinate -i -w "$COLLECT_PID" > /dev/null 2>&1 &   # Step 0.6（launchd 未使用時の fallback）
-tail -n 3 "$COLLECT_LOG"                                   # 稼働確認
+nohup paddock-odds-collect --date YYYY-MM-DD >> ~/Library/Logs/paddock-odds-collect-$(date +%Y%m%d).log 2>&1 & \
+  nohup caffeinate -i -w $! > /dev/null 2>&1 &
+```
+
+```sh
+# 稼働確認（起動直後はログが空なのでリトライする）
+until [ -s ~/Library/Logs/paddock-odds-collect-$(date +%Y%m%d).log ]; do sleep 1; done
+tail -n 3 ~/Library/Logs/paddock-odds-collect-$(date +%Y%m%d).log
+pmset -g | grep -i 'sleep'    # "sleep prevented by caffeinate" が出ていること
 ```
 
 **前提・注意**:
@@ -163,6 +200,30 @@ tail -n 3 "$COLLECT_LOG"                                   # 稼働確認
 - モデル非依存の専用バイナリで predict セッション記録には触れない（確率と買い方の分離を構造で体現・ADR 0055/0060）。
 - 予想フロー（Step 2 以降）と並行してバックグラウンドで回す。手動 cron/launchd は不要——おっちゃん起動のたびにここで立ち上げる。
 - retention は launchd で自動化済み（手動運用不要）。`com.paddock.purge-snapshots` が毎日 04:30 に `scripts/purge-snapshots.sh`（既定 6 ヶ月保持・`PADDOCK_PURGE_MONTHS` で上書き可）を回し、古い snapshot を `paddock-analyze purge-snapshots` で削除する。`deployments/launchd/install.sh` で常駐配置され `uninstall.sh` では外れない（#492）。
+
+---
+
+### Step 1.6: スリープ抑止を実効化（#568）
+
+fetch-card で `post_time` が DB に入った**後**に実施する（Step 0.3 参照。それより前だと `keep_awake.sh` は no-op で終わる）。
+
+```sh
+deployments/launchd/install.sh          # primary チェックアウトから実行。開催日の朝に流す
+```
+
+```sh
+# 実効確認（load 確認だけでは不十分。caffeinate が実際に起きているかを見る）
+pmset -g | grep -i 'sleep'              # "sleep prevented by caffeinate" が出ていること
+tail -n 3 /tmp/paddock-keep-awake/logs/keep-awake.log
+```
+
+launchd を使わないアドホック運用では、Step 1.5 と Step 5 の起動ブロックに含めた `caffeinate -i -w $!` が fallback になる（両方に紐づける。コレクタは朝から終日動くので Step 5 まで無防備にしない）。
+
+**開催終了後は片付ける**:
+
+```sh
+deployments/launchd/uninstall.sh        # prefetch / keep-awake / snapshot-coverage を外す（常駐 4 本は残る）
+```
 
 ---
 
@@ -214,24 +275,26 @@ ROI = Σ_i(賭金_i × 的中確率_i × 払戻倍率_i) / 総賭金 を算出�
 
 発走前レースを定期スキャンし、毎回オッズを再取得して ROI を再計算し、ROI≥ゲートを買い目付きで通知する（Step 3 の朝判定をここで再判定する）。
 
-```sh
-# ログ出力先と pid を確保して起動する（pid もログも無いと Step 0.6 の紐づけと生存確認ができない）
-WATCH_LOG=/tmp/predict-watch-$(date +%Y%m%d).log
-nohup ./target/release/paddock-predict-watch --date YYYY-MM-DD > "$WATCH_LOG" 2>&1 &
-WATCH_PID=$!
-nohup caffeinate -i -w "$WATCH_PID" > /dev/null 2>&1 &   # Step 0.6（launchd 未使用時の fallback）
-
-./target/release/paddock-predict-watch --date YYYY-MM-DD --once   # 1スイープのみ（cron 等）
-```
-
-既定は 窓 40 分 / 間隔 5 分 / ROI ゲート 100% / α=本番 0.2。
-
-**起動したらスリープ抑止を必ず効かせる**（launchd の keep-awake が load 済みならそれで足りる・未 load なら上記 fallback。#568）。**そのうえで定期的に最終スイープ時刻を確認する**——沈黙は「妙味なし」と「死んでいる」の区別がつかない。
+既定は 窓 40 分 / 間隔 5 分 / ROI ゲート 100% / α=本番 0.2。**常駐起動と `--once` はどちらか一方**を使う。
 
 ```sh
-grep 'スイープ:' "$WATCH_LOG" | tail -1   # 最終スイープ時刻。間隔（既定 5 分）以上空いていたら止まっている
-pmset -g | grep -i 'sleep'                # 抑止が効いているか
+# 終日監視（常駐）。起動とスリープ抑止の紐づけを同一コマンド内で完結させる
+nohup paddock-predict-watch --date YYYY-MM-DD >> ~/Library/Logs/paddock-predict-watch-$(date +%Y%m%d).log 2>&1 & \
+  nohup caffeinate -i -w $! > /dev/null 2>&1 &
 ```
+
+```sh
+paddock-predict-watch --date YYYY-MM-DD --once   # 1スイープのみ（cron 等）
+```
+
+**定期的に最終スイープ時刻を確認する**——沈黙は「妙味なし」と「死んでいる」の区別がつかない。
+
+```sh
+grep 'スイープ:' ~/Library/Logs/paddock-predict-watch-$(date +%Y%m%d).log | tail -1
+pmset -g | grep -i 'sleep'    # 抑止が効いているか
+```
+
+- 出力される時刻は**スイープ開始時刻**。次の開始までは 間隔（既定 5 分）＋ スイープ所要（`--scrape-delay` 既定 3000ms × 対象レース × 券種）かかるため、多頭数の時間帯は 5 分超が常態。**2×間隔（=10 分）以上空いていたら止まっていると判断する**
 
 predict-watch は **decision-support（判断材料）** で自動 go/no-go ではない。張る/見送り/増額は人間が決め、**軸は監視中も動かさない**。監視中のコミュニケーション規律（毎サイクル冒頭 1 行の現況明示・ズレ警告必須・唯一の正＝最新サイクル・◎ の差し替え禁止）は CLAUDE.md「買い方ルール > ライブ監視時のコミュニケーション規律」および「軸ロックとズレ増額」（ADR 0055・0060）が正。
 
