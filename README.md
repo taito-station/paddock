@@ -448,8 +448,13 @@ cargo run -p api-server
 
 # Web SPA（Vite dev server。http://localhost:5173 を開く）
 cd web && npm install && npm run dev
+
+# 起動後の接続確認（127.0.0.1 で 200 が返れば OK）
+curl -o /dev/null -w "%{http_code}\n" http://127.0.0.1:5173/
 ```
 
+- dev server は IPv4 ループバック（`127.0.0.1`）に bind する。bind 先は `PADDOCK_DEV_HOST` で
+  変更できる（既定 `127.0.0.1`。LAN へ公開したいときは `true` / `0.0.0.0`）。
 - API は `/api/*`（races / board / predictions / analyze / live / sessions 等）。`/docs` に Swagger UI、
   `/api-docs/openapi.json` に OpenAPI ドキュメントを配信する。
 - OpenAPI は utoipa のコードファーストで、スナップショットを `docs/api/openapi.json` に保持する。
