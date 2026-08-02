@@ -17,7 +17,7 @@ const apiTarget = process.env.PADDOCK_API_TARGET?.trim() || "http://localhost:80
 // localhost 挙動に戻り #569 の IPv6-only bind が再発するため、あえて特別扱いしない。
 // 未指定・空文字・空白のみ（`PADDOCK_DEV_HOST=` / `" "`）はすべて既定へフォールバック。
 const rawDevHost = process.env.PADDOCK_DEV_HOST?.trim();
-const devHost = rawDevHost === "true" ? true : rawDevHost || "127.0.0.1";
+const devHost = rawDevHost?.toLowerCase() === "true" ? true : rawDevHost || "127.0.0.1";
 export default defineConfig({
   plugins: [react()],
   server: {
