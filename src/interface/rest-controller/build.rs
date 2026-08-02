@@ -34,6 +34,9 @@ fn main() {
     // 無関係なので `--untracked-files=no` で除外する。git() は空文字（＝クリーン）も status 取得
     // 失敗も None にするため、この分岐は「追跡変更あり」のときだけ通る（取得失敗時は dirty 判定
     // 不能につきクリーン扱い＝何も足さない）。
+    // 注意: この `-dirty` は build.rs 実行時（＝下記 rerun 対象の ref が動いた時）の作業ツリー状態の
+    // スナップショット。ref を動かさずソースだけ編集した再ビルドには追従しないため厳密ではない。
+    // 世代検知の主キーは commit sha で、そちらは ref 監視により確実に更新される（build_info.rs 参照）。
     if git(&["status", "--porcelain", "--untracked-files=no"]).is_some() {
         sha.push_str("-dirty");
     }
@@ -62,6 +65,7 @@ fn main() {
     if let Some(common_dir) = common_dir {
         watch(&format!("{common_dir}/packed-refs"));
         // symbolic-ref は `refs/heads/<branch>` を返す（detached HEAD なら None＝loose ref 無し）。
+        // detached HEAD での commit は HEAD ファイル自体（sha 直書き）が動くので上の HEAD watch で拾える。
         if let Some(head_ref) = git(&["symbolic-ref", "--quiet", "HEAD"]) {
             watch(&format!("{common_dir}/{head_ref}"));
         }
