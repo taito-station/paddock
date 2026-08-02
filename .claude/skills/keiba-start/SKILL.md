@@ -47,15 +47,16 @@ paddock で競馬予想セッションを始めるときのスキル。
 
 **何よりも先に現在時刻を見て、Step 0.2 の full build（実測 ~8 分）を挟んでも第 1 レースに間に合うかを判断する。**
 
-発走時刻はこの時点でまだ DB に無い（`post_time` は Step 1 の fetch-card で入る）。当日の発走時刻は netkeiba の開催一覧から取る:
+発走時刻はこの時点でまだ DB に無い（`post_time` は Step 1 の fetch-card で入る）。netkeiba の開催一覧から取るが、**既存パーサを使う**——ad-hoc な grep は second source になり、HTML 構造が変わったときに無言で空を返す（`nk.py` は取得 0 件を warn する）:
 
 ```sh
 date "+%Y-%m-%d %H:%M %A"
-curl -s -A "Mozilla/5.0" "https://race.netkeiba.com/top/race_list_sub.html?kaisai_date=$(date +%Y%m%d)" \
-  | grep -oE 'RaceList_Itemtime">[0-9]{1,2}:[0-9]{2}' | grep -oE '[0-9]{1,2}:[0-9]{2}' | sort | head -1
+python3 scripts/predict-check/upcoming_races.py "$(date +%Y%m%d)" --all | head -3
 ```
 
-間に合わないときは Step 0.2 のビルドを `--bin` で絞る（後述）。
+出力は TAB 区切りで `netkeiba race_id / 発走 HH:MM / 内部 race_id`、発走順に並ぶ。**1 行目が第 1 レース**。
+
+間に合わないときは Step 0.2 のビルドを `--bin` で絞る（後述）。ただし共有依存グラフのコンパイルは削れないので短縮幅は限定的。**それでも間に合わないなら Step 0.2 ごと見送り、既存バイナリのまま監視だけ先に立てる**（古い成果物で回るリスクより、監視窓を落とす方が痛い）。
 
 ---
 
@@ -64,8 +65,8 @@ curl -s -A "Mozilla/5.0" "https://race.netkeiba.com/top/race_list_sub.html?kaisa
 **前提**: primary チェックアウトの `main` で、作業ツリーがクリーンであること。改変ソースからビルドしたバイナリで当日の張り判断をしないため、散文で済ませず確認する（dirty なら中止して解消する）:
 
 ```sh
-[ -z "$(git status --porcelain)" ] || echo '⚠ 未コミット変更あり。解消してから進む'
-git switch main && git pull --ff-only
+[ -z "$(git status --porcelain)" ] && git switch main && git pull --ff-only \
+  || echo '⚠ 中止: 未コミット変更あり（または switch/pull 失敗）。解消してから進む'
 ```
 
 **先に古い常駐プロセスを落とす。** 長期稼働したプロセスは新しい成果物を配信せず、しかも HTTP 200 を返し続けるので外形からは正常に見える（#570）。**判定基準は「今回のビルドより前に起動したもの」**——「前日以前」ではない。同じ日の朝に起動したプロセスも、リビルド後は等しく古い。
@@ -74,12 +75,13 @@ git switch main && git pull --ff-only
 # 世代を見る（ELAPSED が長い＝古い）。pkill でまとめて落とさない
 ps -eo pid,etime,command | grep -E 'paddock-(predict-watch|odds-collect|api)|node.*vite' | grep -v grep
 
-# 落とす前に対象を確認してから pid 指定で落とす
-ps -p <pid> -o command=
-kill <pid>
+# Vite は npm ラッパの子が残るので LISTEN しているものを確認する（まだ落とさない）
+lsof -ti tcp:5173 -sTCP:LISTEN | xargs -I{} ps -p {} -o pid=,command=
+```
 
-# Vite は npm ラッパの子が残るので LISTEN しているものをポートで落とす
-lsof -ti tcp:5173 -sTCP:LISTEN | while read -r p; do ps -p "$p" -o command=; kill "$p"; done
+```sh
+# 上で本 PJ のものだと確認できた pid だけを指定して落とす
+kill <pid>
 ```
 
 - **当日分の監視（`predict-watch` / `odds-collect`）が動いているなら落とさない。** 落とすと #568 と同じ「監視が止まったのに気づかない」状態を作る。監視だけは古くても走らせ続け、次のセッション開始時に入れ替える
@@ -101,19 +103,26 @@ cargo build --release --bin paddock-analyze --bin paddock-api --bin paddock-fetc
 
 **バイナリは `~/.local/bin` の symlink 経由で裸コマンドとして叩く。** リンクが primary の `target/release` を指していれば `cargo build --release` だけで全部最新化される。**実体コピーや worktree を指すリンクが混ざると「リビルドしたのに古い成果物が動く」**ので、リンク先まで確認する:
 
+**参照先は必ず primary チェックアウトの `target/release`。** worktree から実行すると `--show-toplevel` は worktree を返すため、**使い捨て worktree を指すリンクを作ってしまう**（消えた瞬間に裸コマンドが全滅する）。primary は `--git-common-dir` から解決する:
+
 ```sh
-ROOT=$(git rev-parse --show-toplevel)
-ls -l ~/.local/bin/paddock-* | grep -v -- "-> $ROOT/target/release/" \
-  && echo "⚠ 実体コピー or 別ツリー参照が混ざっている（要リンク化）" \
-  || echo "OK: 全て $ROOT/target/release を指す symlink"
+ROOT=$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")   # worktree からでも primary を返す
+n=$(ls -l ~/.local/bin | grep -c 'paddock-')
+if [ "$n" -eq 0 ]; then echo "⚠ 1 本もリンクされていない（要リンク化）"
+elif ls -l ~/.local/bin | grep 'paddock-' | grep -v -- "-> $ROOT/target/release/"; then
+  echo "⚠ 実体コピー or 別ツリー参照が混ざっている（要リンク化）"
+else echo "OK: $n 本すべて $ROOT/target/release を指す symlink"; fi
 ```
 
 ```sh
-# リンク化（primary チェックアウトから実行する）
-ROOT=$(git rev-parse --show-toplevel); mkdir -p ~/.local/bin
-for b in "$ROOT"/target/release/paddock-*; do
-  [ -f "$b" ] && [ -x "$b" ] && ln -sfn "$b" ~/.local/bin/"$(basename "$b")"
-done
+# リンク化。cargo が宣言している bin だけを対象にする（削除済みターゲットの残骸を拾わない）
+ROOT=$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)"); mkdir -p ~/.local/bin
+cargo metadata --no-deps --format-version 1 --manifest-path "$ROOT/Cargo.toml" \
+  | python3 -c "import json,sys;[print(t['name']) for p in json.load(sys.stdin)['packages'] for t in p['targets'] if 'bin' in t['kind']]" \
+  | while read -r name; do
+      [ -x "$ROOT/target/release/$name" ] && ln -sfn "$ROOT/target/release/$name" ~/.local/bin/"$name" \
+        || echo "⚠ 未ビルド: $name"
+    done
 ```
 
 **migration の確認と適用は分けて実行する**（未適用が無いのに `migrate` を流さない。共有 golden DB への無条件 DDL を避ける）:
@@ -139,15 +148,18 @@ nohup paddock-api >> ~/Library/Logs/paddock-api-$(date +%Y%m%d).log 2>&1 &   # �
 **立ち上がりを確認する。**「HTTP 200」は疎通確認にしかならない（#570 のとおり**古いプロセスでも 200 を返す**）。世代の確認は起動時刻で行う:
 
 ```sh
-for i in $(seq 30); do curl -sf -o /dev/null "http://127.0.0.1:5173/api/live/$(date +%F)" && break; sleep 1; done
+ok=0
+for i in $(seq 30); do curl -sf -o /dev/null "http://127.0.0.1:5173/api/live/$(date +%F)" && { ok=1; break; }; sleep 1; done
+[ "$ok" = 1 ] || echo '⚠ Vite→api の proxy が応答しない（PADDOCK_API_TARGET / 旧 Vite 残存を疑う）'
 for port in 8080 5173; do
   pid=$(lsof -ti tcp:$port -sTCP:LISTEN | head -1)
-  [ -n "$pid" ] && ps -o pid,lstart,command -p "$pid" || echo "⚠ :$port が LISTEN していない"
+  if [ -n "$pid" ]; then ps -o pid,lstart,command -p "$pid"; else echo "⚠ :$port が LISTEN していない"; fi
 done
 ```
 
 - Vite の bind は `web/vite.config.ts` が既定で IPv4（`127.0.0.1`）に固定済み（#569 修正済み・上書きは env `PADDOCK_DEV_HOST`）。**`PADDOCK_API_TARGET` の IPv4 明示は依然必要**——proxy 先の既定は `http://localhost:8080` で、Node が `::1` を先に引くと proxy 側だけ ECONNREFUSED になる
 - `--strictPort` は旧 Vite が生きていると新 Vite が即死する。**必ず先に 5173 を落としてから**起動する（落とさないと旧 Vite が 200 を返して合格に見える）
+- api/Vite のログは**実行日**で切る（常駐の寿命がセッション単位のため）。監視系（Step 1.5 / Step 5）は**対象開催日**で切る（前夜に仕込む場合があるため）。前夜起動時は両者の日付がずれる
 
 **理由**: 2026-08-02 に api-server と Vite が **15 日前起動のまま**残存し、リビルド済みの成果物が反映されていなかった（#570）。DB 側の migration が進まない限り stale binary 警告は出ないため、この種の陳腐化は起動時ガードでは検知できない。
 
@@ -163,7 +175,7 @@ done
 launchctl list | grep -i paddock     # com.paddock.keep-awake が無ければ未 install
 ```
 
-- **install/実効確認は Step 1.6 で行う**。`keep_awake.sh` は当日の `post_time` が DB に無いと no-op で終了するため、fetch-card（Step 1）より前に流しても必ず不発になる
+- **install/実効確認は Step 1.6 で行う**。`keep_awake.sh` は当日の `post_time` が DB に無いと no-op で終了する。plist は `StartInterval=300` なので fetch-card 後 5 分以内に自己回復するが、**確実性を優先して fetch-card の後に実施する**（`keep_awake.sh` は lock+PID で caffeinate の多重起動を防ぐので常時 load でも害はない）
 - 仕様と限界は [`deployments/launchd/README.md`](../../../deployments/launchd/README.md) の「⚠ スリープ取りこぼしと keep-awake の限界（#264）」が単一ソース（クラムシェル・`pmset` スケジュールスリープ・既にスリープ中の Mac は起こせない）。ここでは再掲しない
 - 実害の記録: 2026-08-01 は 14:38 のスリープで監視が止まり、14:50〜18:30 発走の約 12 レースが完全に未監視だった（通知ゼロが「妙味なし」と誤読される静かな失敗）
 
@@ -199,7 +211,7 @@ paddock-fetch-card <12桁race_id>
 **二重起動しない。** このスキルはセッション途中に再発火しうる。多重起動は netkeiba への二重スクレイプ（ペーシング違反）と snapshot 重複を招く（`odds-collect` 側に多重起動ガードは無い）。
 
 ```sh
-pgrep -fl 'paddock-odds-collect --date' && echo '⚠ 既に稼働中。起動しない'
+pgrep -fl 'paddock-odds-collect --date' && echo '⚠ 既に稼働中。起動しない' || echo 'OK: 未稼働。起動してよい'
 ```
 
 起動とスリープ抑止の紐づけは**同一コマンド内で完結させる**。シェル変数は Bash 呼び出しをまたいで残らないため、pid を別ブロックで参照すると空になり、`caffeinate -i -w ""` が黙って失敗する（#568 と同型の静かな失敗）。`caffeinate` は launchd の keep-awake と併用しても無害なので、有無にかかわらず張っておく。
@@ -212,13 +224,14 @@ nohup paddock-odds-collect --date "$D" >> ~/Library/Logs/paddock-odds-collect-${
 ```
 
 ```sh
-# 稼働確認（ログは追記なので「行数が増えたか」で見る。-s だと前回分で即通過する）
+# 稼働確認。ログは追記なので -s も行数比較も前回分で誤判定する。プロセス生存＋今日のスイープ行で見る
 D=YYYY-MM-DD; LOG=~/Library/Logs/paddock-odds-collect-${D//-/}.log
-before=$(wc -l < "$LOG" 2>/dev/null || echo 0)
-for i in $(seq 30); do [ "$(wc -l < "$LOG")" -gt "$before" ] && break; sleep 1; done
-tail -n 3 "$LOG"
-pmset -g | grep -i 'prevented'    # "sleep prevented by … caffeinate" が出ること（grep 'sleep' だと常にヒットする）
+pgrep -f "paddock-odds-collect --date $D" > /dev/null && echo '生存: OK' || echo '⚠ 起動に失敗している'
+tail -n 3 "$LOG"                                        # 起動直後に 1 スイープ出る。時刻が今か確認する
+pmset -g | grep -i 'prevented by.*caffeinate'           # 他プロセスの assertion でも 'prevented' は出るので caffeinate まで絞る
 ```
+
+- 収集は 15 分間隔なので、初回スイープの後は 30 秒待っても新しい行は出ない。**「行が増えたか」ではなく「プロセスが生きているか＋最終行の時刻」で判断する**
 
 **前提・注意**:
 - post_time は `race_cards`（Step 1 の fetch-card 由来）に依存。**fetch-card 済みが前提**（post_time 無しレースは Unknown＝skip）。
@@ -232,25 +245,29 @@ pmset -g | grep -i 'prevented'    # "sleep prevented by … caffeinate" が出�
 
 fetch-card で `post_time` が DB に入った**後**に実施する（Step 0.3 参照。それより前だと `keep_awake.sh` は no-op で終わる）。
 
+**primary チェックアウトの install.sh を実行する。** plist に焼き込まれるリポジトリパスは「どのコピーのスクリプトを実行したか」で決まる（cwd は無関係）。worktree の install.sh を叩くと、その worktree が消えた瞬間に keep-awake が無言で死ぬ。
+
 ```sh
-# リポジトリルートから実行する（plist にリポジトリパスを焼き込むため、worktree から流すと消えるパスを参照し続ける）
-"$(git rev-parse --show-toplevel)"/deployments/launchd/install.sh
+ROOT=$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")   # primary を解決
+"$ROOT"/deployments/launchd/install.sh
 ```
 
-- **副作用**: このスクリプトは keep-awake 単体ではなく **7 エージェントを配置・load** する。うち backup-db（23:30 に共有 DB を dump）/ backup-staleness / verify-backup-restore / **purge-snapshots（毎日 04:30 に古い snapshot を削除）** の 4 本は**常駐で `uninstall.sh` では外れない**。初回実行は削除系を含む恒久ジョブを有効化することを理解した上で流す。keep-awake だけ欲しいなら該当 plist を個別に `launchctl load` する
+- **副作用**: このスクリプトは keep-awake 単体ではなく **7 エージェントを配置・load** する。うち backup-db（23:30 に共有 DB を dump）/ backup-staleness / verify-backup-restore / **purge-snapshots（毎日 04:30 に古い snapshot を削除）** の 4 本は**常駐で `uninstall.sh` では外れない**。さらに **prefetch-odds（5 分毎に netkeiba をスクレイプ）** も load されるため、odds-collect（15 分）・predict-watch（5 分）と合わせてスクレイプ経路が 3 本になる。削除系を含む恒久ジョブが有効化されることを理解した上で流す
+- リポジトリ内の plist は `__REPO_ROOT__` を含む**テンプレート**で、install.sh の `sed` 置換を経て初めて有効になる。**生の plist を個別に `launchctl load` してはいけない**——壊れたパスのジョブが登録され、`launchctl list` には出るのに一度も走らない（本 Step が潰そうとしている静かな失敗そのもの）
 
 ```sh
 # 実効確認（load 確認だけでは不十分。caffeinate が実際に起きているかを見る）
-pmset -g | grep -i 'prevented'          # "sleep prevented by … caffeinate" が出ること
-tail -n 3 /tmp/paddock-keep-awake/logs/keep-awake.log
+pmset -g | grep -i 'prevented by.*caffeinate'   # 他プロセスの assertion でも 'prevented' は出るので caffeinate まで絞る
+tail -n 3 /tmp/paddock-keep-awake/logs/keep-awake.log   # このパスは launchd 経由（plist が WORKDIR を固定）のときの位置
 ```
 
-Step 1.5 と Step 5 の起動ブロックに含めた `caffeinate -i -w $!` は、launchd の有無にかかわらず張っておく（冪等・二重でも無害）。コレクタは朝から終日動くので Step 5 まで無防備にしない。
+Step 1.5 と Step 5 の起動ブロックに含めた `caffeinate -i -w $!` は、launchd の有無にかかわらず張っておく（二重でも無害。ただし起動のたびにプロセスは増える）。コレクタは朝から終日動くので Step 5 まで無防備にしない。
 
 **開催終了後は片付ける**:
 
 ```sh
-"$(git rev-parse --show-toplevel)"/deployments/launchd/uninstall.sh   # prefetch / keep-awake / snapshot-coverage の 3 本を外す（常駐 4 本は残る）
+ROOT=$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")
+"$ROOT"/deployments/launchd/uninstall.sh   # prefetch / keep-awake / snapshot-coverage の 3 本を外す（常駐 4 本は残る）
 ```
 
 ---
@@ -306,7 +323,7 @@ ROI = Σ_i(賭金_i × 的中確率_i × 払戻倍率_i) / 総賭金 を算出�
 既定は 窓 40 分 / 間隔 5 分 / ROI ゲート 100% / α=本番 0.2。**常駐起動と `--once` はどちらか一方**を使う。Step 1.5 同様、**既に稼働中なら起動しない**:
 
 ```sh
-pgrep -fl 'paddock-predict-watch --date' && echo '⚠ 既に稼働中。起動しない'
+pgrep -fl 'paddock-predict-watch --date' && echo '⚠ 既に稼働中。起動しない' || echo 'OK: 未稼働。起動してよい'
 ```
 
 ```sh
@@ -325,12 +342,14 @@ paddock-predict-watch --date YYYY-MM-DD --once   # 1スイープのみ（cron �
 ```sh
 D=YYYY-MM-DD; LOG=~/Library/Logs/paddock-predict-watch-${D//-/}.log
 grep -E '🔶|🔍' "$LOG" | grep -v 'スイープ: 対象' | tail -20   # ゲート通過の本文（凡例行は除外）
+grep '終了: 発走前のレースが残っていません' "$LOG" | tail -1   # 正常終了しているか（先に見る）
 grep 'スイープ:' "$LOG" | tail -1                              # 最終スイープ時刻＝生存確認
-pmset -g | grep -i 'prevented'                                 # 抑止が効いているか
+pmset -g | grep -i 'prevented by.*caffeinate'                  # 抑止が効いているか
 ```
 
 - スイープ見出しの凡例には 🔶 🔍 が含まれるため、**ゲート通過の抽出では見出し行を除外する**（除外しないと毎スイープ誤検知する）
-- 出力される時刻は**スイープ開始時刻**。次の開始までは 間隔（既定 5 分）＋ スイープ所要（`--scrape-delay` 既定 3000ms × 対象レース × 券種）かかるため、多頭数の時間帯は 5 分超が常態。**2×間隔（=10 分）以上空いていたら止まっていると判断する**
+- **正常終了行を先に見る。** 全レース発走後は `── 監視終了: 発走前のレースが残っていません。` を出して終わる。この行がある状態でスイープ間隔だけ見ると、正常終了を「止まった」と誤警報する
+- 出力される時刻は**スイープ開始時刻**。次の開始までは 間隔（既定 5 分）＋ スイープ所要（`--scrape-delay` 既定 3000ms × 対象レース × 券種）かかるため、多頭数の時間帯は 5 分超が常態。**正常終了行が無いまま 2×間隔（=10 分）以上空いていたら止まっていると判断する**
 
 predict-watch は **decision-support（判断材料）** で自動 go/no-go ではない。張る/見送り/増額は人間が決め、**軸は監視中も動かさない**。監視中のコミュニケーション規律（毎サイクル冒頭 1 行の現況明示・ズレ警告必須・唯一の正＝最新サイクル・◎ の差し替え禁止）は CLAUDE.md「買い方ルール > ライブ監視時のコミュニケーション規律」および「軸ロックとズレ増額」（ADR 0055・0060）が正。
 
