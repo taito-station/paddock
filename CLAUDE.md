@@ -44,6 +44,9 @@ paddock-fetch-card <12桁race_id>
 paddock-odds-collect --date YYYY-MM-DD   # fetch-card 済みが前提（post_time 依存）・15分毎・終日
 ```
 
+- **起動はスリープ抑止とセットで行う**（macOS がスリープすると監視・収集が止まり復帰後も再開しない・#568）。ログ出力先・`caffeinate` の紐づけ・二重起動ガードを含む具体手順は [.claude/skills/keiba-start/SKILL.md](.claude/skills/keiba-start/SKILL.md) の Step 1.5 / 1.6 / 5 が正。スキル非発火のセッションでもこの手順に従う。
+- **セッション開始時はバイナリを最新化する**（`~/.local/bin/paddock-*` は primary の `target/release` への symlink。`cargo build --release` で全部最新になる）。長期稼働した api-server / Vite が古い成果物を配信し続ける問題を含め、手順は同スキル Step 0.1〜0.2 が正（#570）。
+
 ### 2. 予想実行
 
 ```sh
