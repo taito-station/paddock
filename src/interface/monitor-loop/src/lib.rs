@@ -13,11 +13,28 @@
 //! - **防御チェック（[`count_started_before_post`]）**: 発走前（`now <= post`）なのに結果取込済みの
 //!   レースは上記不変条件が崩れた兆候。放置すると Started 誤判定で監視が無言 no-op 化するため、両 app で
 //!   検出・警告する（#459 以前は predict-watch のみにあり odds-collect に無い非対称だった）。
+//! - **発走状態判定は「時刻」だけを見る（[`classify`]）**: `now` も `post_time` も `NaiveTime` で、
+//!   日付を持たない。当日の監視ではこれで十分だが、**日付を跨ぐと翌日の `now` が全レースの
+//!   `post_time` より前に戻り、昨日のレースが再び発走前と判定される**。時刻軸だけでは終われないため、
+//!   終了判定に wall-clock の日付（[`should_stop_by_date`]）を併用する（#568）。
+//!
+//! ## スリープ耐性（#568）
+//!
+//! 監視は終日バックグラウンドで回るため、ホスト（macOS）のスリープを跨ぐ。単発の長い sleep で
+//! 次スイープを待つとスリープ中にタイマーが進まず、復帰後も残りを待ち続けて**無言で監視が止まる**。
+//! 沈黙は「妙味なし」と誤読されるため、以下 3 点で耐性を持たせる:
+//!
+//! 1. 次スイープの待機は wall-clock の期限で刻んで待つ（[`driver`] 内）。復帰時点で期限を過ぎていれば
+//!    即座に次スイープへ進む＝**自動再開**。
+//! 2. 待機の実経過が想定間隔を大きく超えたら [`detect_sweep_gap`] で検知して警告する
+//!    （沈黙＝正常に見える問題の解消）。
+//! 3. 監視プロセス自身がアイドルスリープを抑止する（[`keep_awake`]・macOS の `caffeinate -i -w <pid>`）。
 
-use chrono::{DateTime, Duration, Local, NaiveTime, Offset, TimeZone};
+use chrono::{DateTime, Duration, Local, NaiveDate, NaiveTime, Offset, TimeZone};
 use paddock_domain::Race;
 
 mod driver;
+mod keep_awake;
 pub use driver::{Sweeper, run_monitor_loop};
 
 /// `now` 時点でのレースの発走状態（windowed / windowless 共通）。
@@ -136,6 +153,35 @@ pub fn count_started_before_post<S>(
         .iter()
         .filter(|s| has_result(s) && post_time(s).is_some_and(|p| now <= p))
         .count()
+}
+
+/// スイープが「途切れた」と見なす倍率。待機の実経過が想定間隔のこの倍数を超えたら、
+/// 通常のスケジューリング揺らぎではなくホストのスリープ/停止で監視サイクルが飛んだと判断する。
+const SWEEP_GAP_FACTOR: i32 = 2;
+
+/// 次スイープ待機の「想定間隔」と「実経過（wall-clock）」から、監視サイクルが飛んだかを判定する
+/// 純関数（#568・単体テスト対象）。
+///
+/// 飛んでいれば実経過の分数を `Some` で返す（呼び出し側が警告に使う）。想定内なら `None`。
+/// スリープ復帰直後は期限を大きく超過して待機が明けるため、ここで検知して**沈黙のまま監視が
+/// 途切れていた事実**を必ずログに残す。`interval_minutes = 0`（本来 CLI が弾く）は判定不能として
+/// `None`（毎スイープ警告が出る誤報を避ける）。
+pub fn detect_sweep_gap(interval_minutes: u64, actual: Duration) -> Option<i64> {
+    if interval_minutes == 0 {
+        return None;
+    }
+    // i64 変換は飽和させる（現実の interval では起こらないが、キャストで負値へ回さない）。
+    let planned = Duration::minutes(i64::try_from(interval_minutes).unwrap_or(i64::MAX));
+    (actual > planned * SWEEP_GAP_FACTOR).then(|| actual.num_minutes())
+}
+
+/// wall-clock の日付で監視を終了すべきか判定する純関数（#568・単体テスト対象）。
+///
+/// 発走状態判定（[`classify`]）は時刻（`NaiveTime`）だけを見るため、日付を跨ぐと昨日のレースが
+/// 再び「発走前」に見え [`should_continue`] が永久に true を返す（実測: 最終レース発走から
+/// 14 時間経ってもプロセスが生存し続けた）。対象日を過ぎたら時刻軸の判定に関わらず終了する。
+pub fn should_stop_by_date(target: NaiveDate, now_date: NaiveDate) -> bool {
+    now_date > target
 }
 
 #[cfg(test)]
@@ -268,6 +314,65 @@ mod tests {
             S(None, true),            // post_time 不明（対象外）
         ];
         assert_eq!(count_started_before_post(&slots, now, |s| s.0, |s| s.1), 1);
+    }
+
+    // --- detect_sweep_gap: スリープ等でサイクルが飛んだかの判定（#568） ---
+
+    #[test]
+    fn no_gap_when_elapsed_is_within_expected_interval() {
+        // 想定どおり（5 分間隔で 5 分待った）。
+        assert_eq!(detect_sweep_gap(5, Duration::minutes(5)), None);
+        // 多少の遅れ（スクレイプ待ち等）は通常の揺らぎとして許容する。
+        assert_eq!(detect_sweep_gap(5, Duration::minutes(9)), None);
+    }
+
+    #[test]
+    fn no_gap_at_factor_boundary_but_gap_just_above() {
+        // 境界（想定の 2 倍ちょうど）は警告しない。
+        assert_eq!(detect_sweep_gap(5, Duration::minutes(10)), None);
+        // 境界を 1 秒でも超えたら警告する（分数は切り捨てで 10 分）。
+        assert_eq!(
+            detect_sweep_gap(5, Duration::minutes(10) + Duration::seconds(1)),
+            Some(10)
+        );
+    }
+
+    #[test]
+    fn gap_reports_actual_elapsed_minutes_after_long_sleep() {
+        // 2026-08-01 の実測相当: 14:32 の次スイープが翌朝まで飛んだ（想定 5 分・実経過 234 分）。
+        assert_eq!(detect_sweep_gap(5, Duration::minutes(234)), Some(234));
+        // odds-collect の既定間隔（15 分）でも同様に検知する。
+        assert_eq!(detect_sweep_gap(15, Duration::minutes(240)), Some(240));
+    }
+
+    #[test]
+    fn no_gap_when_interval_is_zero() {
+        // interval=0 は CLI が弾く想定。判定不能として誤報を出さない。
+        assert_eq!(detect_sweep_gap(0, Duration::minutes(120)), None);
+    }
+
+    // --- should_stop_by_date: wall-clock の日付による終了判定（#568） ---
+
+    #[test]
+    fn keep_running_while_still_on_target_date() {
+        let target = chrono::NaiveDate::from_ymd_opt(2026, 8, 1).unwrap();
+        assert!(!should_stop_by_date(target, target));
+    }
+
+    #[test]
+    fn stop_once_the_date_has_rolled_over() {
+        let target = chrono::NaiveDate::from_ymd_opt(2026, 8, 1).unwrap();
+        // 日付が変わると classify は昨日のレースを再び「発走前」と見るため、ここで止める。
+        let next_day = chrono::NaiveDate::from_ymd_opt(2026, 8, 2).unwrap();
+        assert!(should_stop_by_date(target, next_day));
+    }
+
+    #[test]
+    fn keep_running_when_target_date_is_still_ahead() {
+        // 前日起動（--date が明日）は対象日前なので終了させない。
+        let target = chrono::NaiveDate::from_ymd_opt(2026, 8, 2).unwrap();
+        let today = chrono::NaiveDate::from_ymd_opt(2026, 8, 1).unwrap();
+        assert!(!should_stop_by_date(target, today));
     }
 
     #[test]
