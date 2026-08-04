@@ -6,6 +6,7 @@ use crate::schema::analyze::{
     AnalyzeCandidatesResponse, CourseStatsResponse, GroupStatSchema, HorseStatsResponse,
     JockeyStatsResponse, TrainerStatsResponse,
 };
+use crate::schema::health::HealthResponse;
 use crate::schema::live::{
     LiveFlip, LiveRaceViewSchema, LiveResponse, LiveSummary, SlipLeg, SlipView,
 };
@@ -52,6 +53,7 @@ use crate::schema::session::{
         handler::prediction::get_prediction_detail,
         handler::prediction::prediction_mark_stats,
         handler::live::get_live,
+        handler::health::health,
         handler::session::create_session,
         handler::session::get_session_summary,
         handler::session::record_outcome,
@@ -92,6 +94,7 @@ use crate::schema::session::{
         SlipView,
         SlipLeg,
         LiveFlip,
+        HealthResponse,
         CreateSessionRequest,
         BetInput,
         RecordOutcomeRequest,
@@ -109,6 +112,7 @@ use crate::schema::session::{
         (name = "sessions", description = "予想セッション（作成 / 収支 / 賭け金・払戻記録 / オッズ・結果更新）"),
         (name = "results", description = "レース結果の同日取り込み＋自動精算（#381）"),
         (name = "live", description = "ライブEV買い目（今これを買え）"),
+        (name = "health", description = "稼働中プロセスの世代（git sha / ビルド時刻）"),
     )
 )]
 pub struct ApiDoc;

@@ -1,4 +1,5 @@
 pub mod analyze;
+pub mod health;
 pub mod live;
 pub mod prediction;
 pub mod race;

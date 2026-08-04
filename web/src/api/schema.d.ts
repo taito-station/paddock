@@ -123,6 +123,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 稼働中プロセスの世代（git sha / ビルド時刻）を返す（#570）。
+         * @description 長期稼働した api-server が古い成果物を配信し続けても外形監視（HTTP 200）では気づけない。
+         *     `git_sha` を現在の checkout と突き合わせることで世代ずれを検知できるようにする。
+         *     DB 非依存・Repository 非依存なので、DB 未接続でも 200 を返す（liveness プローブも兼ねる）。
+         */
+        get: operations["health"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/live/{date}": {
         parameters: {
             query?: never;
@@ -568,6 +590,18 @@ export interface components {
             win_rate: number;
             /** Format: int32 */
             wins: number;
+        };
+        /**
+         * @description `GET /api/health` のレスポンス（#570）。稼働中プロセスの世代を自己申告する。
+         *     `git_sha` を現在の checkout（`git rev-parse --short HEAD`）と突き合わせれば陳腐化を機械検知できる。
+         */
+        HealthResponse: {
+            /** @description ビルド時刻（UTC rfc3339, 秒精度）。 */
+            build_time: string;
+            /** @description ビルド元の git sha（短縮）。未コミット変更ありのビルドは `-dirty` 付き。`.git` 不在時は `unknown`。 */
+            git_sha: string;
+            /** @description 常に `"ok"`（プロセスが応答できている＝liveness）。 */
+            status: string;
         };
         /** @description 出馬表の 1 頭。 */
         HorseEntrySchema: {
@@ -1502,6 +1536,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    health: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 稼働中プロセスの世代情報（git sha / ビルド時刻） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HealthResponse"];
                 };
             };
         };

@@ -48,6 +48,8 @@ pub const REGISTERED_ROUTES: &[(&str, &str)] = &[
     ("GET", "/api/predictions/{prediction_id}"),
     // live（read）
     ("GET", "/api/live/{date}"),
+    // health（read・世代確認 #570）
+    ("GET", "/api/health"),
     // sessions（write）
     ("POST", "/api/sessions/{date}"),
     ("GET", "/api/sessions/{date}"),
