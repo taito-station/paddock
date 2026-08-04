@@ -185,7 +185,14 @@ done
 
 ### Step 0.3: スリープ抑止の方針決め（実施は Step 1.6）
 
-**監視は macOS のスリープで止まり、復帰後も再開しない（#568）。** ただし**抑止機構はリポジトリに既にある**（`com.paddock.keep-awake`・#264）。まず load 済みかを確認しておく。
+**監視バイナリ自身がスリープ耐性を持つ（#568・ADR 0072）。** `predict-watch` / `odds-collect` は
+起動時に自分で `caffeinate -i -w <自分の pid>` を確保し、待機は wall-clock 基準なので**スリープから
+復帰すると自動で再スイープし、途切れた分を警告する**（`⚠ スイープが N 分途切れました…`）。
+手動で `caffeinate` を被せる必要はない（**Step 1.5 / Step 5 の起動ブロックに手動 caffeinate を足さない**）。
+
+- **前提: 最新ビルドで起動していること**。#568 以前のバイナリは自己抑止も自動再開もしない。
+  ビルド最新化（Step 0.2）を飛ばさない
+- launchd の `com.paddock.keep-awake`（#264）は**締切前 prefetch 用**として引き続き必要。load 済みか確認しておく:
 
 ```sh
 launchctl list | grep -i paddock     # com.paddock.keep-awake が無ければ未 install
@@ -193,9 +200,7 @@ launchctl list | grep -i paddock     # com.paddock.keep-awake が無ければ未
 
 - **install/実効確認は Step 1.6 で行う**。`keep_awake.sh` は当日の `post_time` が DB に無いと no-op で終了する。plist は `StartInterval=300` なので fetch-card 後 5 分以内に自己回復するが、**確実性を優先して fetch-card の後に実施する**（`keep_awake.sh` は lock+PID で caffeinate の多重起動を防ぐので常時 load でも害はない）
 - 仕様と限界は [`deployments/launchd/README.md`](../../../deployments/launchd/README.md) の「⚠ スリープ取りこぼしと keep-awake の限界（#264）」が単一ソース（クラムシェル・`pmset` スケジュールスリープ・既にスリープ中の Mac は起こせない）。ここでは再掲しない
-- 実害の記録: 2026-08-01 は 14:38 のスリープで監視が止まり、14:50〜18:30 発走の約 12 レースが完全に未監視だった（通知ゼロが「妙味なし」と誤読される静かな失敗）
-
-> #568 の恒久対策（復帰後の自動再開・スイープ途切れの警告）が入ったら、Step 1.6 の手動 fallback は削除する。
+- **蓋を閉じたら全部無効**。2026-08-01 の実害（14:38 のスリープで 14:50〜18:30 発走の約 12 レースが完全に未監視）は 13:23 の clamshell sleep が起点で、`caffeinate -i` の守備範囲外だった。#568 の修正で「復帰後は再開する・途切れは warn される」ようになったが、**寝ている間のスイープは取り返せない**。外出中に監視を当てにするなら蓋を閉じない
 
 ---
 
@@ -233,20 +238,14 @@ D=$(date +%F)   # 前夜に翌日分を仕込むときだけ手入力する
 pgrep -fl "paddock-odds-collect --date $D" && echo '⚠ 既に稼働中。起動しない' || echo 'OK: 未稼働。起動してよい'
 ```
 
-既に稼働中でスキップする場合は、**そのプロセスにスリープ抑止を張り直す**（前セッションが本手順以前に起動していると無防備なまま終日走る）:
-
-```sh
-pid=$(pgrep -f "paddock-odds-collect --date $D" | head -1)
-[ -n "$pid" ] && nohup caffeinate -i -w "$pid" > /dev/null 2>&1 &
-```
-
-起動とスリープ抑止の紐づけは**同一コマンド内で完結させる**。シェル変数は Bash 呼び出しをまたいで残らないため、pid を別ブロックで参照すると空になり、`caffeinate -i -w ""` が黙って失敗する（#568 と同型の静かな失敗）。`caffeinate` は launchd の keep-awake と併用しても無害なので、有無にかかわらず張っておく。
+既に稼働中でスキップする場合、**それが #568 以前のバイナリなら自己抑止も自動再開も無い**。ログ冒頭に
+`── アイドルスリープ抑止を確保しました` が無ければ古いプロセスなので、止めて最新ビルドで起動し直す。
 
 ```sh
 # バックグラウンド起動（既定: 15分毎・終日・全発走で自動終了）。D は対象開催日
+# スリープ抑止はバイナリが自分で確保する（#568）。手動 caffeinate は不要
 D=$(date +%F)
-nohup paddock-odds-collect --date "$D" >> ~/Library/Logs/paddock-odds-collect-${D//-/}.log 2>&1 & \
-  nohup caffeinate -i -w $! > /dev/null 2>&1 &
+nohup paddock-odds-collect --date "$D" >> ~/Library/Logs/paddock-odds-collect-${D//-/}.log 2>&1 &
 ```
 
 ```sh
@@ -287,7 +286,7 @@ pmset -g | grep -i 'prevented by.*caffeinate' || echo '⚠ caffeinate による�
 tail -n 3 /tmp/paddock-keep-awake/logs/keep-awake.log   # このパスは launchd 経由（plist が WORKDIR を固定）のときの位置
 ```
 
-Step 1.5 と Step 5 の起動ブロックに含めた `caffeinate -i -w $!` は、launchd の有無にかかわらず張っておく（二重でも無害。ただし起動のたびにプロセスは増える）。コレクタは朝から終日動くので Step 5 まで無防備にしない。
+監視バイナリ側の自己抑止（#568）とこの launchd の keep-awake は**別物で、併用してよい**。前者は監視プロセスの生存期間、後者は締切前 prefetch のタイマー用。二重に `caffeinate` が立っても無害。
 
 **開催終了後は片付ける**:
 
@@ -353,13 +352,12 @@ D=$(date +%F)   # 前夜に翌日分を仕込むときだけ手入力する
 pgrep -fl "paddock-predict-watch --date $D" && echo '⚠ 既に稼働中。起動しない' || echo 'OK: 未稼働。起動してよい'
 ```
 
-スキップする場合は Step 1.5 同様、**稼働中の pid にスリープ抑止を張り直す**。
+スキップする場合は Step 1.5 同様、**ログ冒頭の `── アイドルスリープ抑止を確保しました` で最新ビルドか確認する**。
 
 ```sh
-# 終日監視（常駐）。起動とスリープ抑止の紐づけを同一コマンド内で完結させる
+# 終日監視（常駐）。スリープ抑止はバイナリが自分で確保する（#568）。手動 caffeinate は不要
 D=$(date +%F)
-nohup paddock-predict-watch --date "$D" >> ~/Library/Logs/paddock-predict-watch-${D//-/}.log 2>&1 & \
-  nohup caffeinate -i -w $! > /dev/null 2>&1 &
+nohup paddock-predict-watch --date "$D" >> ~/Library/Logs/paddock-predict-watch-${D//-/}.log 2>&1 &
 ```
 
 ```sh
@@ -371,16 +369,20 @@ paddock-predict-watch --date YYYY-MM-DD --once   # 1スイープのみ（cron �
 ```sh
 D=$(date +%F); LOG=~/Library/Logs/paddock-predict-watch-${D//-/}.log
 pgrep -f "paddock-predict-watch --date $D" > /dev/null && echo '生存: OK' || echo '停止している（下の終了行で理由を確認）'
-grep -E '── .*終了:' "$LOG" | tail -1                          # 終了理由（3 種ある。下記参照）
+grep -E '── .*終了:' "$LOG" | tail -1                          # 終了理由（4 種ある。下記参照）
 grep -E '🔶|🔍' "$LOG" | grep -v 'スイープ: 対象' | tail -20   # ゲート通過の本文（凡例行は除外）
 grep 'スイープ:' "$LOG" | tail -1                              # 最終スイープ時刻
+grep '途切れました' "$LOG"                                     # スリープ等で監視が飛んだ区間（#568）
 pmset -g | grep -i 'prevented by.*caffeinate' || echo '⚠ caffeinate による抑止が効いていない'
 ```
 
-- **終了理由は 3 種類あり、意味が違う**。生存確認より先にこれを見る:
+- **`⚠ スイープが N 分途切れました` が出ていたら、その間に発走したレースは評価されていない**（#568）。
+  この行がある日の「通知ゼロ」は**妙味なしの根拠にならない**。途切れの原因（蓋閉じ等）を潰す
+- **終了理由は 4 種類あり、意味が違う**。生存確認より先にこれを見る:
   - `発走前のレースが残っていません` = 全レース発走済みの**正常完走**
   - `本日（…）は対象開催がありません` = 開催なし（日付指定ミスも疑う）
   - `全レースで発走時刻（post_time）が不明です` = **fetch-card 未実施**。Step 1 に戻る
+  - `対象日（…）を過ぎました` = 日付を跨いだ（#568）。前日から回しっぱなしなら正常な後始末
 - スイープ見出しの凡例には 🔶 🔍 が含まれるため、**ゲート通過の抽出では見出し行を除外する**（除外しないと毎スイープ誤検知する）
 - 終了行が無いのにスイープが止まっているときだけ「落ちた」と判断する。正常終了をスイープ間隔だけで見ると誤警報になる
 - 出力される時刻は**スイープ開始時刻**。次の開始までは 間隔（既定 5 分）＋ スイープ所要（`--scrape-delay` 既定 3000ms × 対象レース × 券種）かかるため、多頭数の時間帯は 5 分超が常態。**正常終了行が無いまま 2×間隔（=10 分）以上空いていたら止まっていると判断する**
