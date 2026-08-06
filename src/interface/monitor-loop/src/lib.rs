@@ -24,11 +24,13 @@
 //! 次スイープを待つとスリープ中にタイマーが進まず、復帰後も残りを待ち続けて**無言で監視が止まる**。
 //! 沈黙は「妙味なし」と誤読されるため、以下 3 点で耐性を持たせる:
 //!
-//! 1. 次スイープの待機は wall-clock の期限で刻んで待つ（[`driver`] 内）。復帰時点で期限を過ぎていれば
+//! 1. 次スイープの待機は wall-clock の期限で刻んで待つ（`driver` 内）。復帰時点で期限を過ぎていれば
 //!    即座に次スイープへ進む＝**自動再開**。
-//! 2. 待機の実経過が想定間隔を大きく超えたら [`detect_sweep_gap`] で検知して警告する
-//!    （沈黙＝正常に見える問題の解消）。
-//! 3. 監視プロセス自身がアイドルスリープを抑止する（[`keep_awake`]・macOS の `caffeinate -i -w <pid>`）。
+//! 2. スイープ開始どうしの間隔が想定を大きく超えたら [`detect_sweep_gap`] で検知して警告する
+//!    （沈黙＝正常に見える問題の解消）。待機区間ではなくスイープ間隔で測るのは、スイープ実行中に
+//!    寝られたケースを取りこぼさないため。
+//! 3. 監視プロセス自身がアイドルスリープを抑止する（`keep_awake` モジュール・macOS の
+//!    `caffeinate -i -w <pid>`）。best-effort で、蓋閉じスリープは抑止できない。
 
 use chrono::{DateTime, Duration, Local, NaiveDate, NaiveTime, Offset, TimeZone};
 use paddock_domain::Race;
@@ -155,24 +157,41 @@ pub fn count_started_before_post<S>(
         .count()
 }
 
-/// スイープが「途切れた」と見なす倍率。待機の実経過が想定間隔のこの倍数を超えたら、
-/// 通常のスケジューリング揺らぎではなくホストのスリープ/停止で監視サイクルが飛んだと判断する。
+/// スイープ間隔が「途切れた」と見なす倍率。スイープ開始どうしの実間隔が想定間隔のこの倍数を
+/// 超えたら、通常のスケジューリング揺らぎではなくホストのスリープ/停止で監視サイクルが飛んだと判断する。
 const SWEEP_GAP_FACTOR: i32 = 2;
 
-/// 次スイープ待機の「想定間隔」と「実経過（wall-clock）」から、監視サイクルが飛んだかを判定する
-/// 純関数（#568・単体テスト対象）。
+/// 分を `Duration` にする。`chrono` の `Duration::minutes` は範囲外で **panic** するため、
+/// 変換できない大きさは `Duration::MAX` に丸める（監視ループを panic で落とさない）。
+///
+/// CLI の `--interval` は下限（1 分以上）しか持たないので、桁を打ち間違えた巨大値でも
+/// 「事実上終わらない待機」になるだけで異常終了はしない。
+pub(crate) fn minutes_or_max(minutes: u64) -> Duration {
+    i64::try_from(minutes)
+        .ok()
+        .and_then(Duration::try_minutes)
+        .unwrap_or(Duration::MAX)
+}
+
+/// 「想定間隔」と「前スイープ開始からの実経過（wall-clock）」から、監視サイクルが飛んだかを
+/// 判定する純関数（#568・単体テスト対象）。
 ///
 /// 飛んでいれば実経過の分数を `Some` で返す（呼び出し側が警告に使う）。想定内なら `None`。
-/// スリープ復帰直後は期限を大きく超過して待機が明けるため、ここで検知して**沈黙のまま監視が
-/// 途切れていた事実**を必ずログに残す。`interval_minutes = 0`（本来 CLI が弾く）は判定不能として
-/// `None`（毎スイープ警告が出る誤報を避ける）。
+/// スリープを跨ぐとスイープ間隔が想定を大きく超えるため、ここで検知して**沈黙のまま監視が
+/// 途切れていた事実**を必ずログに残す。
+///
+/// 測る区間を「待機」ではなく「スイープ開始どうし」にしているのは、スイープ実行中に寝られた
+/// ケースを取りこぼさないため（待機だけを測ると、その後の待機は想定どおりに見えてしまう）。
+/// `interval_minutes = 0`（本来 CLI が弾く）は判定不能として `None`（毎スイープ誤報を避ける）。
 pub fn detect_sweep_gap(interval_minutes: u64, actual: Duration) -> Option<i64> {
     if interval_minutes == 0 {
         return None;
     }
-    // i64 変換は飽和させる（現実の interval では起こらないが、キャストで負値へ回さない）。
-    let planned = Duration::minutes(i64::try_from(interval_minutes).unwrap_or(i64::MAX));
-    (actual > planned * SWEEP_GAP_FACTOR).then(|| actual.num_minutes())
+    // 乗算も範囲外で panic するため checked_mul で受ける（閾値が飽和すれば警告が出ないだけ）。
+    let threshold = minutes_or_max(interval_minutes)
+        .checked_mul(SWEEP_GAP_FACTOR)
+        .unwrap_or(Duration::MAX);
+    (actual > threshold).then(|| actual.num_minutes())
 }
 
 /// wall-clock の日付で監視を終了すべきか判定する純関数（#568・単体テスト対象）。
@@ -316,13 +335,14 @@ mod tests {
         assert_eq!(count_started_before_post(&slots, now, |s| s.0, |s| s.1), 1);
     }
 
-    // --- detect_sweep_gap: スリープ等でサイクルが飛んだかの判定（#568） ---
+    // --- detect_sweep_gap: スリープ等でサイクルが飛んだかの判定（#568）。
+    //     引数の Duration は「前スイープ開始から今スイープ開始まで」の実間隔。 ---
 
     #[test]
-    fn no_gap_when_elapsed_is_within_expected_interval() {
-        // 想定どおり（5 分間隔で 5 分待った）。
+    fn no_gap_when_interval_is_close_to_expected() {
+        // 想定どおり（5 分間隔でスイープ間隔も 5 分）。
         assert_eq!(detect_sweep_gap(5, Duration::minutes(5)), None);
-        // 多少の遅れ（スクレイプ待ち等）は通常の揺らぎとして許容する。
+        // スイープ自体の所要（スクレイプ待ち等）で多少伸びるのは通常の揺らぎとして許容する。
         assert_eq!(detect_sweep_gap(5, Duration::minutes(9)), None);
     }
 
@@ -338,8 +358,9 @@ mod tests {
     }
 
     #[test]
-    fn gap_reports_actual_elapsed_minutes_after_long_sleep() {
-        // 2026-08-01 の実測相当: 14:32 の次スイープが翌朝まで飛んだ（想定 5 分・実経過 234 分）。
+    fn gap_reports_the_whole_silent_span_between_sweeps() {
+        // 2026-08-01 の実測相当: 14:32 のスイープを最後に翌朝まで飛んだ（想定 5 分・実間隔 234 分）。
+        // 返すのは「前スイープからの空き時間」そのもの＝運用が知りたい沈黙の長さ。
         assert_eq!(detect_sweep_gap(5, Duration::minutes(234)), Some(234));
         // odds-collect の既定間隔（15 分）でも同様に検知する。
         assert_eq!(detect_sweep_gap(15, Duration::minutes(240)), Some(240));
@@ -349,6 +370,16 @@ mod tests {
     fn no_gap_when_interval_is_zero() {
         // interval=0 は CLI が弾く想定。判定不能として誤報を出さない。
         assert_eq!(detect_sweep_gap(0, Duration::minutes(120)), None);
+    }
+
+    #[test]
+    fn absurd_interval_does_not_panic() {
+        // CLI の --interval は下限しか持たないので桁を打ち間違えた巨大値が来うる。
+        // chrono の Duration::minutes は範囲外で panic するため、丸めて panic させないこと。
+        assert_eq!(minutes_or_max(u64::MAX), Duration::MAX);
+        assert_eq!(minutes_or_max(i64::MAX as u64), Duration::MAX);
+        // 判定側（乗算含む）も panic しない。閾値が飽和するので警告は出ない。
+        assert_eq!(detect_sweep_gap(u64::MAX, Duration::minutes(240)), None);
     }
 
     // --- should_stop_by_date: wall-clock の日付による終了判定（#568） ---
@@ -369,7 +400,9 @@ mod tests {
 
     #[test]
     fn keep_running_when_target_date_is_still_ahead() {
-        // 前日起動（--date が明日）は対象日前なので終了させない。
+        // 対象日より前（--date が未来）は、この判定では終了させない。
+        // 注: ループ全体では別要因で終わりうる（前夜起動だと now > 全 post_time で全 Started になり
+        // should_continue が false）。ここで担保するのは日付判定が未来日を殺さないことだけ。
         let target = chrono::NaiveDate::from_ymd_opt(2026, 8, 2).unwrap();
         let today = chrono::NaiveDate::from_ymd_opt(2026, 8, 1).unwrap();
         assert!(!should_stop_by_date(target, today));

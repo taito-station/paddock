@@ -21,11 +21,21 @@
 
 use std::process::Child;
 
+/// `caffeinate` の絶対パス。PATH 解決にすると、書き込み可能なディレクトリが PATH 前方にある環境で
+/// 監視プロセスの権限・環境変数（DB URL 等）を継承した別バイナリが起動しうる。常駐プロセスから
+/// 外部コマンドを spawn するので固定パスにする。
+#[cfg(target_os = "macos")]
+const CAFFEINATE: &str = "/usr/bin/caffeinate";
+
 /// 監視中のアイドルスリープ抑止を確保する（macOS のみ・best-effort）。
 ///
 /// 返り値の [`Child`] は `caffeinate -i -w <自分の pid>`。**自プロセスを見張らせる**ことで、
-/// 監視がどう終わっても（正常終了・パニック・kill）抑止が確実に解放される＝解放忘れが構造上ない。
-/// 呼び出し側は返り値を保持するだけでよく、明示的な後始末を書かない。
+/// 監視がどう終わっても（正常終了・パニック・kill）抑止が解放される＝解放忘れが構造上ない。
+///
+/// 解放を担うのは `-w` の pid 監視であって、この [`Child`] の drop ではない（`std` の `Child` は
+/// drop で kill も wait もしない）。呼び出し側が返り値を保持するのは「監視中は確保したままにする」
+/// という意図の表明で、早く drop しても抑止は続く。逆に caffeinate が外部から kill された場合は
+/// 抑止だけが静かに失われる（wait していないのでゾンビが 1 つ残るが、監視の終了で回収される）。
 ///
 /// 確保できなければ `None`。macOS 以外、または `caffeinate` 不在の環境では何もしない。
 #[cfg(target_os = "macos")]
@@ -33,7 +43,7 @@ pub fn acquire() -> Option<Child> {
     use std::process::{Command, Stdio};
 
     let pid = std::process::id().to_string();
-    match Command::new("caffeinate")
+    match Command::new(CAFFEINATE)
         .args(["-i", "-w", &pid])
         // 監視の標準出力に caffeinate の出力を混ぜない。stdin も切って端末を掴ませない。
         .stdin(Stdio::null())

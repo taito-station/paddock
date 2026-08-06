@@ -87,7 +87,7 @@ paddock-predict-watch --date YYYY-MM-DD          # 既定: 窓40分 / 間隔5分
 paddock-predict-watch --date YYYY-MM-DD --once   # 1スイープのみ（cron 等）
 ```
 
-- **通知ゼロを「妙味なし」と読む前にログの `⚠ スイープが N 分途切れました` を確認する**（#568/ADR 0072）。監視は wall-clock 基準でスリープから自動再開し、飛んだ区間を必ず警告する。この行がある日は、その間に発走したレースが未評価なので判断材料が欠けている。抑止（`caffeinate -i -w <自 pid>`）はバイナリが自分で確保するが**蓋閉じスリープは止められない**——外出中に監視を当てにするなら蓋を閉じない。詳細は [docs/knowledge/monitor-loop-sleep-resilience.md](docs/knowledge/monitor-loop-sleep-resilience.md)
+- **通知ゼロを「妙味なし」と読む前にログの `⚠ 前回スイープから N 分空きました` を確認する**（#568/ADR 0072）。監視は wall-clock 基準でスリープから自動再開し、飛んだ区間を必ず警告する。この行がある日は、その間に発走したレースが未評価なので判断材料が欠けている。抑止（`caffeinate -i -w <自 pid>`）はバイナリが自分で確保するが**蓋閉じスリープは止められない**——外出中に監視を当てにするなら蓋を閉じない。詳細は [docs/knowledge/monitor-loop-sleep-resilience.md](docs/knowledge/monitor-loop-sleep-resilience.md)
 
 ### 4. 結果取得
 
