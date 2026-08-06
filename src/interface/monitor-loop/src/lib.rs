@@ -173,6 +173,24 @@ pub(crate) fn minutes_or_max(minutes: u64) -> Duration {
         .unwrap_or(Duration::MAX)
 }
 
+/// 1 回の待機に許す上限。`--interval` は下限しか持たないので、桁を打ち間違えた巨大値をここで丸める。
+/// **`DateTime + Duration` は範囲外で panic する**（chrono の `Add` は `checked_add_signed().expect()`）ので、
+/// 期限を作る前に必ずこの関数を通す。1 日待つ時点で当日監視としては無意味なので上限は 1 日で足りる。
+pub(crate) fn capped_wait(interval_minutes: u64) -> Duration {
+    minutes_or_max(interval_minutes).min(Duration::days(1))
+}
+
+/// JST での「今日」。日付終了判定に使う。
+///
+/// `post_time` は JST 起算なので、日付の境目もホストのタイムゾーンではなく JST で取る。ホスト日付を
+/// 使うと、JST より東のホスト（UTC+10 以降）では開催日の途中で日付が変わって自己終了し、西のホスト
+/// （UTC 等）では終了が最大 9 時間遅れる。実行環境が JST から外れていること自体は
+/// [`warn_if_not_today_jst`] が起動時に警告するが、警告は挙動を正さないのでここで吸収する。
+pub(crate) fn jst_date<Tz: TimeZone>(now: DateTime<Tz>) -> NaiveDate {
+    let jst = chrono::FixedOffset::east_opt(JST_OFFSET_SECS).expect("JST offset は定数で常に有効");
+    now.with_timezone(&jst).date_naive()
+}
+
 /// 「想定間隔」と「前スイープ開始からの実経過（wall-clock）」から、監視サイクルが飛んだかを
 /// 判定する純関数（#568・単体テスト対象）。
 ///
@@ -182,16 +200,23 @@ pub(crate) fn minutes_or_max(minutes: u64) -> Duration {
 ///
 /// 測る区間を「待機」ではなく「スイープ開始どうし」にしているのは、スイープ実行中に寝られた
 /// ケースを取りこぼさないため（待機だけを測ると、その後の待機は想定どおりに見えてしまう）。
-/// `interval_minutes = 0`（本来 CLI が弾く）は判定不能として `None`（毎スイープ誤報を避ける）。
-pub fn detect_sweep_gap(interval_minutes: u64, actual: Duration) -> Option<i64> {
+/// そのぶん閾値には**前スイープの所要時間**を足す。スイープ自体が長い日（predict-watch は
+/// `scrape_delay` × 対象レース）に毎サイクル誤警告が出ると、警告そのものが無視されるため。
+/// `interval_minutes = 0`（両 app とも CLI/起動時チェックが弾く）は判定不能として `None`。
+pub(crate) fn detect_sweep_gap(
+    interval_minutes: u64,
+    since_last_sweep_start: Duration,
+    last_sweep_took: Duration,
+) -> Option<i64> {
     if interval_minutes == 0 {
         return None;
     }
-    // 乗算も範囲外で panic するため checked_mul で受ける（閾値が飽和すれば警告が出ないだけ）。
+    // 乗算・加算も範囲外で panic するため checked_* で受ける（閾値が飽和すれば警告が出ないだけ）。
     let threshold = minutes_or_max(interval_minutes)
         .checked_mul(SWEEP_GAP_FACTOR)
+        .and_then(|t| t.checked_add(&last_sweep_took))
         .unwrap_or(Duration::MAX);
-    (actual > threshold).then(|| actual.num_minutes())
+    (since_last_sweep_start > threshold).then(|| since_last_sweep_start.num_minutes())
 }
 
 /// wall-clock の日付で監視を終了すべきか判定する純関数（#568・単体テスト対象）。
@@ -199,7 +224,8 @@ pub fn detect_sweep_gap(interval_minutes: u64, actual: Duration) -> Option<i64> 
 /// 発走状態判定（[`classify`]）は時刻（`NaiveTime`）だけを見るため、日付を跨ぐと昨日のレースが
 /// 再び「発走前」に見え [`should_continue`] が永久に true を返す（実測: 最終レース発走から
 /// 14 時間経ってもプロセスが生存し続けた）。対象日を過ぎたら時刻軸の判定に関わらず終了する。
-pub fn should_stop_by_date(target: NaiveDate, now_date: NaiveDate) -> bool {
+/// `now_date` は [`jst_date`] で求めること（post_time が JST 起算のため）。
+pub(crate) fn should_stop_by_date(target: NaiveDate, now_date: NaiveDate) -> bool {
     now_date > target
 }
 
@@ -338,22 +364,43 @@ mod tests {
     // --- detect_sweep_gap: スリープ等でサイクルが飛んだかの判定（#568）。
     //     引数の Duration は「前スイープ開始から今スイープ開始まで」の実間隔。 ---
 
+    /// 前スイープ所要 0 での判定（所要の影響を見るテストと分けるための薄いヘルパ）。
+    fn gap(interval: u64, since: Duration) -> Option<i64> {
+        detect_sweep_gap(interval, since, Duration::zero())
+    }
+
     #[test]
     fn no_gap_when_interval_is_close_to_expected() {
         // 想定どおり（5 分間隔でスイープ間隔も 5 分）。
-        assert_eq!(detect_sweep_gap(5, Duration::minutes(5)), None);
-        // スイープ自体の所要（スクレイプ待ち等）で多少伸びるのは通常の揺らぎとして許容する。
-        assert_eq!(detect_sweep_gap(5, Duration::minutes(9)), None);
+        assert_eq!(gap(5, Duration::minutes(5)), None);
+        // 多少の遅れは通常の揺らぎとして許容する。
+        assert_eq!(gap(5, Duration::minutes(9)), None);
     }
 
     #[test]
     fn no_gap_at_factor_boundary_but_gap_just_above() {
         // 境界（想定の 2 倍ちょうど）は警告しない。
-        assert_eq!(detect_sweep_gap(5, Duration::minutes(10)), None);
+        assert_eq!(gap(5, Duration::minutes(10)), None);
         // 境界を 1 秒でも超えたら警告する（分数は切り捨てで 10 分）。
         assert_eq!(
-            detect_sweep_gap(5, Duration::minutes(10) + Duration::seconds(1)),
+            gap(5, Duration::minutes(10) + Duration::seconds(1)),
             Some(10)
+        );
+    }
+
+    #[test]
+    fn threshold_absorbs_the_previous_sweep_duration() {
+        // スイープ所要が長い日（predict-watch は scrape_delay × 対象レース）に毎サイクル誤警告が
+        // 出ると警告が無視されるようになるため、閾値に前スイープの所要を足す。
+        assert_eq!(gap(5, Duration::minutes(18)), Some(18));
+        assert_eq!(
+            detect_sweep_gap(5, Duration::minutes(18), Duration::minutes(9)),
+            None
+        );
+        // 所要を足しても越える空きは検知する。
+        assert_eq!(
+            detect_sweep_gap(5, Duration::minutes(40), Duration::minutes(9)),
+            Some(40)
         );
     }
 
@@ -361,25 +408,50 @@ mod tests {
     fn gap_reports_the_whole_silent_span_between_sweeps() {
         // 2026-08-01 の実測相当: 14:32 のスイープを最後に翌朝まで飛んだ（想定 5 分・実間隔 234 分）。
         // 返すのは「前スイープからの空き時間」そのもの＝運用が知りたい沈黙の長さ。
-        assert_eq!(detect_sweep_gap(5, Duration::minutes(234)), Some(234));
+        assert_eq!(gap(5, Duration::minutes(234)), Some(234));
         // odds-collect の既定間隔（15 分）でも同様に検知する。
-        assert_eq!(detect_sweep_gap(15, Duration::minutes(240)), Some(240));
+        assert_eq!(gap(15, Duration::minutes(240)), Some(240));
     }
 
     #[test]
     fn no_gap_when_interval_is_zero() {
-        // interval=0 は CLI が弾く想定。判定不能として誤報を出さない。
-        assert_eq!(detect_sweep_gap(0, Duration::minutes(120)), None);
+        // interval=0 は odds-collect が clap で、predict-watch が起動時チェックで弾く。
+        // 万一届いても判定不能として誤報を出さない。
+        assert_eq!(gap(0, Duration::minutes(120)), None);
     }
 
     #[test]
     fn absurd_interval_does_not_panic() {
         // CLI の --interval は下限しか持たないので桁を打ち間違えた巨大値が来うる。
-        // chrono の Duration::minutes は範囲外で panic するため、丸めて panic させないこと。
+        // chrono の Duration::minutes / 乗算 / 加算は範囲外で panic するため、丸めて panic させない。
         assert_eq!(minutes_or_max(u64::MAX), Duration::MAX);
         assert_eq!(minutes_or_max(i64::MAX as u64), Duration::MAX);
-        // 判定側（乗算含む）も panic しない。閾値が飽和するので警告は出ない。
-        assert_eq!(detect_sweep_gap(u64::MAX, Duration::minutes(240)), None);
+        // 待機の期限計算に使う側は 1 日で頭打ちにする（DateTime + Duration の overflow 回避）。
+        assert_eq!(capped_wait(u64::MAX), Duration::days(1));
+        assert_eq!(capped_wait(5), Duration::minutes(5));
+        // 判定側（乗算・加算含む）も panic しない。閾値が飽和するので警告は出ない。
+        assert_eq!(
+            detect_sweep_gap(u64::MAX, Duration::minutes(240), Duration::MAX),
+            None
+        );
+    }
+
+    #[test]
+    fn jst_date_is_used_instead_of_host_timezone() {
+        // post_time は JST 起算なので、日付の境目も JST で取る。ホスト TZ で取ると JST より東の
+        // ホストでは開催日の途中で日付が変わって自己終了し、西のホストでは終了が遅れる。
+        let utc = chrono::Utc.with_ymd_and_hms(2026, 8, 1, 16, 30, 0).unwrap(); // JST 8/2 01:30
+        assert_eq!(
+            jst_date(utc),
+            chrono::NaiveDate::from_ymd_opt(2026, 8, 2).unwrap()
+        );
+        // JST 23:59 はまだ当日（UTC では 14:59 で前日扱いになる時間帯）。
+        let jst = FixedOffset::east_opt(9 * 3600).unwrap();
+        let late = jst.with_ymd_and_hms(2026, 8, 1, 23, 59, 0).unwrap();
+        assert_eq!(
+            jst_date(late),
+            chrono::NaiveDate::from_ymd_opt(2026, 8, 1).unwrap()
+        );
     }
 
     // --- should_stop_by_date: wall-clock の日付による終了判定（#568） ---

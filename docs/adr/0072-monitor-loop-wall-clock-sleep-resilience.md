@@ -41,14 +41,19 @@ decision-support であり、**終日バックグラウンドで回り続ける�
    決め、30 秒刻みで現在時刻と期限を比べ直す。復帰時点で期限を過ぎていればループを抜ける
    ＝ **即座に次スイープが走る**（自動再開）。刻み幅 30 秒は最短スイープ間隔 1 分でも 2 ティックは
    刻める粒度（既定なら predict-watch 5 分＝10 ティック / odds-collect 15 分＝30 ティック）。
-2. **途切れを検知して必ず警告する**。**スイープ開始どうしの実間隔**が想定の 2 倍を超えていたら
-   `detect_sweep_gap` が検知して `⚠ 前回スイープから N 分空きました…` を出す。待機区間ではなく
-   スイープ間隔で測るのは、スイープ実行中に寝られたケース（predict-watch のスイープは
-   scrape_delay × 対象レースぶん数分かかる）を取りこぼさないため。
-3. **wall-clock の日付で終了する**。`should_stop_by_date(対象日, 現在日)` を **ループ先頭**で評価し、
+2. **途切れを検知して必ず警告する**。**スイープ開始どうしの実間隔**が
+   `想定間隔 × 2 ＋ 前スイープの所要時間` を超えていたら `⚠ 前回スイープから N 分空きました…` を出す。
+   待機区間ではなくスイープ間隔で測るのは、スイープ実行中に寝られたケースを取りこぼさないため。
+   閾値に前スイープ所要を足すのは、スイープ自体が長い日（predict-watch は scrape_delay × 対象レース）に
+   毎サイクル誤警告が出て警告が無視されるのを避けるため。
+   **この警告は継続時だけでなく終了時にも通す**。日付を跨いで復帰したケースは 3 の終了経路に入るので、
+   そこで黙ると「丸一日未監視だった日」が警告なしの正常終了に見える（＝潰したい静かな失敗そのもの）。
+3. **wall-clock の日付で終了する**。`should_stop_by_date(対象日, JST の現在日)` を **ループ先頭**で評価し、
    対象日を過ぎたら時刻軸の判定に関わらず終了する。先頭に置くのは (a) 前日レースを再スクレイプして
    オッズ時系列を汚す 1 巡を作らないため、(b) `load_slots` が失敗し続ける経路（握って `continue`）でも
-   必ず判定を通すため。`--once` は「明示的に 1 スイープだけ回す」指定なので日付では止めない。
+   必ず判定を通すため。現在日は**ホスト TZ ではなく JST** で取る（post_time が JST 起算。ホスト TZ だと
+   JST より東のホストで開催途中に自己終了し、西のホストでは終了が最大 9 時間遅れる）。
+   `--once` は「明示的に 1 スイープだけ回す」指定なので日付では止めないが、過去日なら警告する。
 4. **監視プロセス自身がアイドルスリープを抑止する**。`run_monitor_loop` の冒頭で
    `caffeinate -i -w <自分の pid>` を spawn する（macOS のみ・`--once` では確保しない）。
    自プロセスを見張らせるので、監視がどう終わっても抑止が解放される＝解放忘れが構造上ない。
@@ -88,9 +93,11 @@ decision-support であり、**終日バックグラウンドで回り続ける�
 
 ## 影響
 
-- **追加**: `monitor_loop::detect_sweep_gap`（途切れ判定・純関数）/ `monitor_loop::should_stop_by_date`
-  （日付終了判定・純関数）/ crate 内部の `keep_awake` モジュール（macOS の caffeinate 確保・非公開）。
-  `driver` 内に `sleep_until_with_tick` / `wait_until_next_sweep`。
+- **追加**: いずれも crate 内部（`pub(crate)` 以下）。`detect_sweep_gap`（途切れ判定・純関数）/
+  `should_stop_by_date`（日付終了判定・純関数）/ `capped_wait`・`minutes_or_max`（chrono の
+  範囲外 panic 回避）/ `jst_date`（JST 基準の現在日）/ `keep_awake` モジュール（macOS の caffeinate 確保）。
+  `driver` 内に `sleep_until_with_tick` / `next_deadline` / `wait_until_next_sweep` / `sweep_gap_notice`。
+  predict-watch / odds-collect が使う公開 API は従来どおり `Sweeper` と `run_monitor_loop` だけ。
 - **不変**: `classify` / `should_continue` / `count_started_before_post` / `Sweeper` トレイトの
   シグネチャは変えない。predict-watch / odds-collect 側のコード変更は無い（骨格の差し替えのみで効く）。
 - **新しい終了経路**: 対象日を過ぎると
@@ -100,8 +107,10 @@ decision-support であり、**終日バックグラウンドで回り続ける�
 - **トレードオフ**: 時間軸を wall-clock に移したことで、NTP のステップ補正や手動の時刻/TZ 変更に
   感度を持つ（前進すれば偽の途切れ警告、後退すれば待機延長）。単調タイマーにはこの弱点が無かったが、
   ホストのスリープで監視が丸ごと死ぬ方が実害が大きいので受け入れる。
-- **副作用**: 非 `--once` の起動時に `caffeinate` 子プロセスが 1 つ増える（macOS のみ）。
-  監視の終了で自動的に消える。非 macOS / `caffeinate` 不在では no-op。
+- **副作用**: 非 `--once` の起動時に `caffeinate` 子プロセスが 1 つ増える（macOS のみ・`/usr/bin` 固定・
+  `env_clear` 済み）。監視の終了で自動的に消える。非 macOS / `caffeinate` 不在では no-op。
+  外部から kill された場合はスイープごとの `try_wait` で検出して 1 度だけ警告する
+  （抑止が静かに失われないようにする）。
 - **検証**: 実機の `pmset sleepnow` を跨ぐ手動テスト
   `cargo test -p monitor-loop -- --ignored --nocapture crosses_real_host_sleep` を同梱した
   （DB / netkeiba 非依存。CI では `--ignored` でスキップされるがコンパイルは通るので腐らない）。

@@ -45,6 +45,8 @@ pub fn acquire() -> Option<Child> {
     let pid = std::process::id().to_string();
     match Command::new(CAFFEINATE)
         .args(["-i", "-w", &pid])
+        // caffeinate は環境変数を必要としない。DB 接続 URL 等を子へ渡す理由が無いので落とす。
+        .env_clear()
         // 監視の標準出力に caffeinate の出力を混ぜない。stdin も切って端末を掴ませない。
         .stdin(Stdio::null())
         .stdout(Stdio::null())
