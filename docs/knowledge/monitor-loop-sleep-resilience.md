@@ -6,8 +6,8 @@ sources:
   - docs/adr/0060-betting-axis-lock-preclose-topup.md
   - docs/qa/QA-monitor-sleep-568.md
   - docs/original-docs/568-monitor-sleep-gap.md
-distilled_from_sha: "18aed60"
-updated: "2026-08-04"
+distilled_from_sha: "90afa7e"
+updated: "2026-08-07"
 ---
 
 # 監視ループのスリープ耐性（predict-watch / odds-collect）
