@@ -113,7 +113,9 @@ pub fn warn_if_not_today_jst<Tz: TimeZone>(
 ) where
     Tz::Offset: std::fmt::Display,
 {
-    let today = now_local.date_naive();
+    // 終了判定（should_stop_by_date）と同じ JST 基準で「本日」を取る。ここだけホスト TZ にすると
+    // 「警告は出ないのに終了する」「警告は出るのに終了しない」の食い違いが起きる。
+    let today = jst_date(&now_local);
     if date != today {
         println!(
             "⚠ --date {date} は本日（{today}）と異なります。発走状態は現在時刻と post_time の時刻のみで \
@@ -177,7 +179,11 @@ pub(crate) fn minutes_or_max(minutes: u64) -> Duration {
 /// **`DateTime + Duration` は範囲外で panic する**（chrono の `Add` は `checked_add_signed().expect()`）ので、
 /// 期限を作る前に必ずこの関数を通す。1 日待つ時点で当日監視としては無意味なので上限は 1 日で足りる。
 pub(crate) fn capped_wait(interval_minutes: u64) -> Duration {
-    minutes_or_max(interval_minutes).min(Duration::days(1))
+    // 下限 1 分は骨格側の礼節ガード。両 app とも 0 を弾くので現状は到達しないが、待機ゼロの
+    // 連続スイープ（netkeiba への連打）だけは骨格単独でも起こさない。
+    minutes_or_max(interval_minutes)
+        .min(Duration::days(1))
+        .max(Duration::minutes(1))
 }
 
 /// JST での「今日」。日付終了判定に使う。
@@ -186,7 +192,7 @@ pub(crate) fn capped_wait(interval_minutes: u64) -> Duration {
 /// 使うと、JST より東のホスト（UTC+10 以降）では開催日の途中で日付が変わって自己終了し、西のホスト
 /// （UTC 等）では終了が最大 9 時間遅れる。実行環境が JST から外れていること自体は
 /// [`warn_if_not_today_jst`] が起動時に警告するが、警告は挙動を正さないのでここで吸収する。
-pub(crate) fn jst_date<Tz: TimeZone>(now: DateTime<Tz>) -> NaiveDate {
+pub(crate) fn jst_date<Tz: TimeZone>(now: &DateTime<Tz>) -> NaiveDate {
     let jst = chrono::FixedOffset::east_opt(JST_OFFSET_SECS).expect("JST offset は定数で常に有効");
     now.with_timezone(&jst).date_naive()
 }
@@ -405,6 +411,22 @@ mod tests {
     }
 
     #[test]
+    fn sleeping_during_a_sweep_is_still_detected() {
+        // 呼び出し側は所要を**単調時計**で測る（ホストのスリープ中は進まない）。よって
+        // 「14:00 開始のスイープ中に 4 時間寝て 18:00 に完走」は
+        //   実間隔 = 245 分（壁時計・スリープ込み）/ 所要 = 5 分（単調・スリープ除く）
+        // となり検知できる。所要を壁時計で測ると 245 分が閾値に吸われて沈黙する（＝退行）。
+        assert_eq!(
+            detect_sweep_gap(5, Duration::minutes(245), Duration::minutes(5)),
+            Some(245)
+        );
+        assert_eq!(
+            detect_sweep_gap(5, Duration::minutes(245), Duration::minutes(240)),
+            None
+        );
+    }
+
+    #[test]
     fn gap_reports_the_whole_silent_span_between_sweeps() {
         // 2026-08-01 の実測相当: 14:32 のスイープを最後に翌朝まで飛んだ（想定 5 分・実間隔 234 分）。
         // 返すのは「前スイープからの空き時間」そのもの＝運用が知りたい沈黙の長さ。
@@ -429,6 +451,8 @@ mod tests {
         // 待機の期限計算に使う側は 1 日で頭打ちにする（DateTime + Duration の overflow 回避）。
         assert_eq!(capped_wait(u64::MAX), Duration::days(1));
         assert_eq!(capped_wait(5), Duration::minutes(5));
+        // 下限 1 分（待機ゼロの連続スイープを骨格単独でも起こさない）。
+        assert_eq!(capped_wait(0), Duration::minutes(1));
         // 判定側（乗算・加算含む）も panic しない。閾値が飽和するので警告は出ない。
         assert_eq!(
             detect_sweep_gap(u64::MAX, Duration::minutes(240), Duration::MAX),
@@ -442,14 +466,14 @@ mod tests {
         // ホストでは開催日の途中で日付が変わって自己終了し、西のホストでは終了が遅れる。
         let utc = chrono::Utc.with_ymd_and_hms(2026, 8, 1, 16, 30, 0).unwrap(); // JST 8/2 01:30
         assert_eq!(
-            jst_date(utc),
+            jst_date(&utc),
             chrono::NaiveDate::from_ymd_opt(2026, 8, 2).unwrap()
         );
         // JST 23:59 はまだ当日（UTC では 14:59 で前日扱いになる時間帯）。
         let jst = FixedOffset::east_opt(9 * 3600).unwrap();
         let late = jst.with_ymd_and_hms(2026, 8, 1, 23, 59, 0).unwrap();
         assert_eq!(
-            jst_date(late),
+            jst_date(&late),
             chrono::NaiveDate::from_ymd_opt(2026, 8, 1).unwrap()
         );
     }
