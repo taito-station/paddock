@@ -179,8 +179,22 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
+
+      # ランナー同梱の rustup は rust-toolchain.toml のピン版を都度ダウンロードするが
+      # clippy コンポーネントは入らない。ci ジョブと同じ action で明示的に揃える（#466 と同方針）。
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          components: clippy
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+
       - name: Clippy (monitor-loop, macOS 分岐込み)
         run: cargo clippy --locked -p monitor-loop --all-targets -- -D warnings
+
+      # 監視ループは実時刻に依存するので、CI ランナーの TZ（UTC）でも通ることを併せて確認する。
       - name: Test (monitor-loop)
         run: cargo test --locked -p monitor-loop
 
