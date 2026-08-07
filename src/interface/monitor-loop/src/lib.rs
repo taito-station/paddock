@@ -16,7 +16,7 @@
 //! - **発走状態判定は「時刻」だけを見る（[`classify`]）**: `now` も `post_time` も `NaiveTime` で、
 //!   日付を持たない。当日の監視ではこれで十分だが、**日付を跨ぐと翌日の `now` が全レースの
 //!   `post_time` より前に戻り、昨日のレースが再び発走前と判定される**。時刻軸だけでは終われないため、
-//!   終了判定に wall-clock の日付（[`should_stop_by_date`]）を併用する（#568）。
+//!   終了判定に wall-clock の日付（`should_stop_by_date`）を併用する（#568）。
 //!
 //! ## スリープ耐性（#568）
 //!
@@ -26,7 +26,7 @@
 //!
 //! 1. 次スイープの待機は wall-clock の期限で刻んで待つ（`driver` 内）。復帰時点で期限を過ぎていれば
 //!    即座に次スイープへ進む＝**自動再開**。
-//! 2. スイープ開始どうしの間隔が想定を大きく超えたら [`detect_sweep_gap`] で検知して警告する
+//! 2. スイープ開始どうしの間隔が想定を大きく超えたら `detect_sweep_gap` で検知して警告する
 //!    （沈黙＝正常に見える問題の解消）。待機区間ではなくスイープ間隔で測るのは、スイープ実行中に
 //!    寝られたケースを取りこぼさないため。
 //! 3. 監視プロセス自身がアイドルスリープを抑止する（`keep_awake` モジュール・macOS の
@@ -178,6 +178,13 @@ pub(crate) fn minutes_or_max(minutes: u64) -> Duration {
 /// 1 回の待機に許す上限。`--interval` は下限しか持たないので、桁を打ち間違えた巨大値をここで丸める。
 /// **`DateTime + Duration` は範囲外で panic する**（chrono の `Add` は `checked_add_signed().expect()`）ので、
 /// 期限を作る前に必ずこの関数を通す。1 日待つ時点で当日監視としては無意味なので上限は 1 日で足りる。
+/// 丸めた後の実効スイープ間隔（分）。待機（[`capped_wait`]）と途切れ判定（[`detect_sweep_gap`]）で
+/// **同じ値**を使うための単一ソース。片方だけ丸めると、例えば `--interval 2000` は実際には 1 日間隔で
+/// 回るのに閾値だけ 4000 分となり、途切れを一切検知しなくなる。
+pub(crate) fn effective_interval_minutes(interval_minutes: u64) -> u64 {
+    u64::try_from(capped_wait(interval_minutes).num_minutes()).unwrap_or(1)
+}
+
 pub(crate) fn capped_wait(interval_minutes: u64) -> Duration {
     // 下限 1 分は骨格側の礼節ガード。両 app とも 0 を弾くので現状は到達しないが、待機ゼロの
     // 連続スイープ（netkeiba への連打）だけは骨格単独でも起こさない。
@@ -502,6 +509,30 @@ mod tests {
         let target = chrono::NaiveDate::from_ymd_opt(2026, 8, 2).unwrap();
         let today = chrono::NaiveDate::from_ymd_opt(2026, 8, 1).unwrap();
         assert!(!should_stop_by_date(target, today));
+    }
+
+    #[test]
+    fn warn_uses_jst_not_host_timezone_for_today() {
+        // 終了判定（should_stop_by_date）と基準を揃えるため「本日」は JST で取る。
+        // UTC 16:30（= JST 翌 01:30）に、JST の翌日を --date に渡しても「本日と異なる」とは扱わない。
+        let utc = chrono::Utc.with_ymd_and_hms(2026, 8, 1, 16, 30, 0).unwrap();
+        assert_eq!(
+            jst_date(&utc),
+            chrono::NaiveDate::from_ymd_opt(2026, 8, 2).unwrap()
+        );
+        // ホスト TZ 基準なら 8/1 が「本日」になり、判定基準が終了判定と割れる。
+        assert_ne!(jst_date(&utc), utc.date_naive());
+        // 呼び出し自体も panic しない（出力は検証しない）。
+        warn_if_not_today_jst(jst_date(&utc), utc, "発走状態");
+    }
+
+    #[test]
+    fn effective_interval_matches_the_capped_wait() {
+        // 待機の丸めと途切れ判定の閾値が同じ値を見ること（片方だけ丸めると検知が死ぬ）。
+        assert_eq!(effective_interval_minutes(5), 5);
+        assert_eq!(effective_interval_minutes(2000), 24 * 60);
+        assert_eq!(effective_interval_minutes(u64::MAX), 24 * 60);
+        assert_eq!(effective_interval_minutes(0), 1);
     }
 
     #[test]

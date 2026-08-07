@@ -4,8 +4,8 @@ use std::time::{Duration as StdDuration, Instant};
 use chrono::{DateTime, Duration, Local, NaiveDate, NaiveTime};
 
 use crate::{
-    RaceStatus, capped_wait, classify, count_started_before_post, detect_sweep_gap, jst_date,
-    keep_awake, should_continue, should_stop_by_date,
+    RaceStatus, capped_wait, classify, count_started_before_post, detect_sweep_gap,
+    effective_interval_minutes, jst_date, keep_awake, should_continue, should_stop_by_date,
 };
 
 /// アイドルスリープ抑止を確保する関数。実運用は `keep_awake::acquire`、テストは何もしない実装を
@@ -17,10 +17,15 @@ type AcquireKeepAwake = fn() -> Option<Child>;
 type Clock = fn() -> DateTime<Local>;
 
 /// wall-clock 期限を待つときの刻み幅。単発の長い sleep はホストのスリープを跨げないため、この
-/// 間隔で現在時刻と期限を比べ直す（#568）。短くするほど復帰検知は速いが空回りが増えるので、
-/// 最短スイープ間隔（1 分）でも 2 ティックは刻める 30 秒に置く（既定間隔なら
-/// predict-watch 5 分＝10 ティック / odds-collect 15 分＝30 ティック。いずれも無視できる負荷）。
-const WAKE_CHECK_TICK: StdDuration = StdDuration::from_secs(30);
+/// 間隔で現在時刻と期限を比べ直す（#568）。
+///
+/// **5 秒に置く根拠は 8/1 の実事象**（`docs/original-docs/568-monitor-sleep-gap.md`）。`tokio::time::sleep`
+/// は単調時計基準で、ホストのスリープ中は進まない＝ティックは「起きている時間」でしか消化されない。
+/// あの日の Standby は **7 秒の DarkWake が 4 回（累計 28 秒）** だったので、30 秒刻みでは 1 ティックも
+/// 満了せず再スイープに到達しない。5 秒なら DarkWake 1 回ごとに満了し、期限超過を検知できる。
+/// 空回りのコストは最短間隔 1 分で 12 回 / 既定なら predict-watch 5 分＝60 回・odds-collect 15 分＝180 回。
+/// 1 回あたりは時刻比較のみなので無視できる。
+const WAKE_CHECK_TICK: StdDuration = StdDuration::from_secs(5);
 
 /// wall-clock の期限まで `tick` 刻みで待つ（#568）。
 ///
@@ -62,9 +67,9 @@ async fn wait_until_next_sweep(interval_minutes: u64, now: Clock) {
 fn sweep_gap_notice(
     interval_minutes: u64,
     since_last_sweep_start: Duration,
-    last_sweep_took: Duration,
+    last_cycle_took: Duration,
 ) -> Option<String> {
-    detect_sweep_gap(interval_minutes, since_last_sweep_start, last_sweep_took).map(|minutes| {
+    detect_sweep_gap(interval_minutes, since_last_sweep_start, last_cycle_took).map(|minutes| {
         format!(
             "⚠ 前回スイープから {minutes} 分空きました（想定 {interval_minutes} 分間隔）。ホストのスリープ/停止、\
              またはレース一覧の取得失敗が続いた可能性があります。空いていた間に発走したレースは評価されていません。"
@@ -85,14 +90,20 @@ fn date_stop_lines(
     now: DateTime<Local>,
 ) -> Vec<String> {
     let mut lines = Vec::new();
-    if let Some((prev, took)) = last_sweep {
-        if let Some(notice) = sweep_gap_notice(interval_minutes, now - prev, took) {
-            lines.push(notice);
+    match last_sweep {
+        Some((prev, took)) => {
+            if let Some(notice) = sweep_gap_notice(interval_minutes, now - prev, took) {
+                lines.push(notice);
+            }
+            lines.push(format!("   （最終スイープ: {}）", prev.format("%m-%d %H:%M")));
         }
-        lines.push(format!(
-            "   （最終スイープ: {}）",
-            prev.format("%m-%d %H:%M")
-        ));
+        // スイープ 0 回のまま日付を跨いだ＝丸一日レースを評価できていない。ここを黙ると
+        // 終了行だけになり、正常な後始末と見分けがつかない（#568 と同型の静かな失敗）。
+        None => lines.push(
+            "⚠ 対象日中に一度もスイープできませんでした（レース一覧の取得が続けて失敗した可能性）。\
+             この日のレースは 1 つも評価されていません。"
+                .to_string(),
+        ),
     }
     lines.push(format!(
         "── {noun}終了: 対象日（{date}）を過ぎました。発走状態は時刻のみで判定するため、日付を跨いだら終了します。"
@@ -161,7 +172,7 @@ pub trait Sweeper {
 /// 発走前なのに結果取込済みのレース（[`count_started_before_post`]）を検出したら警告する（両 app 共通の防御）。
 ///
 /// ホストのスリープを跨いでも監視が死なないよう、待機は wall-clock 期限で刻み（`sleep_until_with_tick`）、
-/// スイープ間隔の途切れを検知して警告し、日付を跨いだら終了する（[`should_stop_by_date`]・#568）。
+/// スイープ間隔の途切れを検知して警告し、日付を跨いだら終了する（`should_stop_by_date`・#568）。
 pub async fn run_monitor_loop<S: Sweeper>(sweeper: &mut S) -> anyhow::Result<()> {
     run_monitor_loop_with(sweeper, keep_awake::acquire, Local::now).await
 }
@@ -173,7 +184,14 @@ async fn run_monitor_loop_with<S: Sweeper>(
 ) -> anyhow::Result<()> {
     let date = sweeper.date();
     let once = sweeper.once();
-    let interval = sweeper.interval_minutes();
+    // 待機と途切れ判定で同じ値を使う（片方だけ丸めると閾値が実間隔に追随せず検知が死ぬ）。
+    let requested_interval = sweeper.interval_minutes();
+    let interval = effective_interval_minutes(requested_interval);
+    if interval != requested_interval {
+        println!(
+            "⚠ --interval {requested_interval} 分は上限を超えるため {interval} 分として扱います。"
+        );
+    }
     let window = sweeper.window();
     let noun = sweeper.finish_noun().to_string();
     let fetch_card_hint = sweeper.fetch_card_hint().to_string();
@@ -182,23 +200,24 @@ async fn run_monitor_loop_with<S: Sweeper>(
     //（待機区間だけを測るとスイープ実行中に寝られたケースを取りこぼす）。所要時間は閾値に足して、
     // スイープが長い日に毎サイクル誤警告が出るのを防ぐ。
     let mut last_sweep_started: Option<DateTime<Local>> = None;
-    let mut last_sweep_took = Duration::zero();
+    let mut last_cycle_took = Duration::zero();
     // アイドルスリープ抑止は最初の日付判定を通ってから確保する（過去日指定で「確保しました」→
     // 直後に「対象日を過ぎました」という無意味なログ対を出さないため）。
-    let mut keep_awake: Option<Child> = None;
+    let mut keep_awake_child: Option<Child> = None;
+    // --once は単発なので抑止を確保しない（初手から「試行済み」にしてスキップする）。
     let mut keep_awake_attempted = once;
 
     loop {
         // 抑止が外部から kill された場合を検出する（沈黙させない）。1 度出したら黙る。
         // try_wait の Err は一過性でありうるので「死んだ」とは扱わない（Child も捨てない）。
-        if let Some(child) = keep_awake.as_mut()
+        if let Some(child) = keep_awake_child.as_mut()
             && matches!(child.try_wait(), Ok(Some(_)))
         {
             println!(
                 "⚠ アイドルスリープ抑止（caffeinate）が終了しています。ホストが寝ると監視が空きます\
                  （復帰後は自動再開し、空いた分は警告します）。"
             );
-            keep_awake = None;
+            keep_awake_child = None;
         }
 
         // 日付跨ぎの終了判定は「ループ先頭」に置く（#568）。発走状態判定（classify）は時刻だけを
@@ -222,7 +241,7 @@ async fn run_monitor_loop_with<S: Sweeper>(
                     &noun,
                     date,
                     interval,
-                    last_sweep_started.map(|prev| (prev, last_sweep_took)),
+                    last_sweep_started.map(|prev| (prev, last_cycle_took)),
                     cycle_started,
                 ) {
                     println!("{line}");
@@ -233,12 +252,23 @@ async fn run_monitor_loop_with<S: Sweeper>(
 
         if !keep_awake_attempted {
             keep_awake_attempted = true;
-            keep_awake = acquire_keep_awake();
+            keep_awake_child = acquire_keep_awake();
         }
 
         // サイクル所要は**単調時計**で測る。ホストのスリープ中は進まないので、スリープぶんが
         // 「スイープ所要」として閾値に吸われない（吸われると sleep 中の沈黙を検知できなくなる）。
         let cycle_clock = Instant::now();
+
+        // 前スイープからの間隔が想定を大きく超えていたら、その間 監視が止まっていた事実を必ず出す。
+        // **load_slots より前**に置く: DB 障害が続くサイクルでも空きを報告するため（ホスト復帰直後に
+        // Postgres がまだ上がっていない状況は常態で、そこで黙ると「何時間飛んだか」を知る術がない）。
+        // last_sweep_started の更新はスイープが実際に走ったときだけなので、復旧までは毎巡
+        // 「累積した空き」を報告し続ける。
+        if let Some(prev) = last_sweep_started
+            && let Some(notice) = sweep_gap_notice(interval, cycle_started - prev, last_cycle_took)
+        {
+            println!("{notice}");
+        }
 
         // 継続監視中の一時的 DB エラーでプロセスを落とすと取りこぼす。握って次スイープへ続行する
         //（--once 時のみ伝播して非ゼロ終了）。
@@ -251,13 +281,6 @@ async fn run_monitor_loop_with<S: Sweeper>(
                 continue;
             }
         };
-
-        // 前スイープからの間隔が想定を大きく超えていたら、その間 監視が止まっていた事実を必ず出す。
-        if let Some(prev) = last_sweep_started
-            && let Some(notice) = sweep_gap_notice(interval, cycle_started - prev, last_sweep_took)
-        {
-            println!("{notice}");
-        }
         last_sweep_started = Some(cycle_started);
 
         // 発走状態判定に渡す時刻（Clock の `now` と紛れないよう別名にする）。
@@ -283,7 +306,7 @@ async fn run_monitor_loop_with<S: Sweeper>(
         sweeper.sweep(&slots, &statuses, now_time).await;
         // 次巡の途切れ判定に使う。長いサイクル（DB ロード＋スイープ）を「途切れ」と誤検知しないよう
         // 閾値へ足すが、単調時計で測るのでホストのスリープぶんは含まれない。
-        last_sweep_took =
+        last_cycle_took =
             Duration::from_std(cycle_clock.elapsed()).unwrap_or_else(|_| Duration::zero());
 
         if !should_continue(&statuses) {
@@ -361,6 +384,8 @@ mod tests {
         verbose: bool,
         /// post_time の算出に使う時計（ループへ渡すものと揃える）。
         now: Clock,
+        /// `--once` 相当（単発実行）か。
+        once: bool,
     }
 
     impl FakeSweeper {
@@ -369,6 +394,7 @@ mod tests {
             Self {
                 date,
                 now: Local::now,
+                once: false,
                 // 日付判定で抜けるので待機には入らない。入ってしまったらテストが遅延して気づける。
                 interval_minutes: 60,
                 max_sweeps: usize::MAX,
@@ -424,7 +450,7 @@ mod tests {
         }
 
         fn once(&self) -> bool {
-            false
+            self.once
         }
 
         fn interval_minutes(&self) -> u64 {
@@ -561,20 +587,101 @@ mod tests {
             .expect("固定値");
         let lines = date_stop_lines("監視", date, 5, Some((prev, Duration::zero())), now);
         assert!(!lines[0].contains("分空きました"), "{lines:?}");
-        // スイープが 1 度も無い（起動直後に過去日と判明）なら終了行だけ。
-        let only = date_stop_lines("収集", date, 5, None, now);
-        assert_eq!(only.len(), 1, "{only:?}");
+    }
+
+    #[test]
+    fn date_stop_output_flags_a_day_without_any_sweep() {
+        // 対象日中に一度もスイープできないまま日付を跨いだ日（DB 障害が続いた等）。
+        // 終了行だけだと「正常な後始末」と見分けがつかないので、必ず警告を添える。
+        let date = chrono::NaiveDate::from_ymd_opt(2026, 8, 1).unwrap();
+        let now = at_jst(2026, 8, 2, 0, 1);
+        let lines = date_stop_lines("収集", date, 5, None, now);
+        assert!(
+            lines[0].contains("一度もスイープできませんでした"),
+            "{lines:?}"
+        );
+        assert_eq!(lines.len(), 2, "{lines:?}");
+    }
+
+    /// 抑止確保が「何回呼ばれたか」を数える fake（呼ばれても実プロセスは起こさない）。
+    fn counting_keep_awake() -> Option<Child> {
+        KEEP_AWAKE_CALLS.with(|c| c.set(c.get() + 1));
+        None
+    }
+
+    thread_local! {
+        static KEEP_AWAKE_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    }
+
+    fn keep_awake_calls() -> usize {
+        KEEP_AWAKE_CALLS.with(|c| c.get())
+    }
+
+    #[tokio::test]
+    async fn does_not_acquire_keep_awake_for_a_past_date() {
+        // 過去日は最初の日付判定で抜けるので、抑止を確保しない（無意味な確保→即解放を作らない）。
+        KEEP_AWAKE_CALLS.with(|c| c.set(0));
+        let mut sweeper = FakeSweeper::new(jst_date(&(Local::now() - Duration::days(1))));
+        tokio::time::timeout(
+            StdDuration::from_secs(10),
+            run_monitor_loop_with(&mut sweeper, counting_keep_awake, Local::now),
+        )
+        .await
+        .expect("日付跨ぎで終了すること")
+        .unwrap();
+        assert_eq!(keep_awake_calls(), 0);
+    }
+
+    #[tokio::test]
+    async fn once_sweeps_a_past_date_without_acquiring_keep_awake() {
+        // --once は日付では止めない（cron / 検証用の明示指定）。警告を出したうえで 1 スイープ走り、
+        // 単発なので抑止は確保しない。ADR 0072 が「--once はこの保護の対象外」と決めた挙動。
+        KEEP_AWAKE_CALLS.with(|c| c.set(0));
+        let mut sweeper = FakeSweeper {
+            once: true,
+            ..FakeSweeper::new(jst_date(&(Local::now() - Duration::days(1))))
+        };
+        tokio::time::timeout(
+            StdDuration::from_secs(10),
+            run_monitor_loop_with(&mut sweeper, counting_keep_awake, Local::now),
+        )
+        .await
+        .expect("--once は 1 スイープで終了すること")
+        .unwrap();
+        assert_eq!(sweeper.sweeps.load(Ordering::SeqCst), 1);
+        assert_eq!(keep_awake_calls(), 0);
     }
 
     // --- 偽時計でループ全体の日付跨ぎ経路を踏む（実時間を待たない） ---
 
-    /// 読むたびに 1 時間進む偽時計の現在値（epoch 秒）。この時計を使うテストは 1 本だけなので
-    /// グローバルでも競合しない。
-    static FAKE_EPOCH: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+    thread_local! {
+        /// 読むたびに 1 時間進む偽時計の現在値（epoch 秒）。**thread_local** にしてあるので、
+        /// この時計を使うテストが増えても並列実行で相互汚染しない（`#[tokio::test]` は
+        /// current_thread ランタイムなので、ループ内の await も同じスレッドで走る）。
+        static FAKE_EPOCH: std::cell::Cell<i64> = const { std::cell::Cell::new(0) };
+    }
+
+    fn set_fake_clock(at: DateTime<Local>) {
+        FAKE_EPOCH.with(|c| c.set(at.timestamp()));
+    }
 
     fn fake_clock() -> DateTime<Local> {
-        let secs = FAKE_EPOCH.fetch_add(3600, Ordering::SeqCst);
+        let secs = FAKE_EPOCH.with(|c| {
+            let v = c.get();
+            c.set(v + 3600);
+            v
+        });
         Local.timestamp_opt(secs, 0).single().expect("有効な epoch")
+    }
+
+    /// JST の絶対時刻から `DateTime<Local>` を作る（ホスト TZ に依存しない起点）。
+    fn at_jst(y: i32, m: u32, d: u32, hh: u32, mm: u32) -> DateTime<Local> {
+        chrono::FixedOffset::east_opt(9 * 3600)
+            .expect("固定値")
+            .with_ymd_and_hms(y, m, d, hh, mm, 0)
+            .single()
+            .expect("固定値")
+            .with_timezone(&Local)
     }
 
     #[tokio::test]
@@ -583,13 +690,8 @@ mod tests {
         //（偽時計が期限を追い越すので待機は即座に抜ける）。
         // 起点は **JST の絶対時刻**で作る。ホスト TZ 依存で作ると、本体が jst_date で比較する
         // 都合上ランナーの TZ しだいで前提が崩れる（この PR の 3 巡目で実際に CI を落とした罠）。
-        let jst = chrono::FixedOffset::east_opt(9 * 3600).expect("固定値");
-        let base = jst
-            .with_ymd_and_hms(2026, 8, 1, 20, 0, 0)
-            .single()
-            .expect("固定値")
-            .with_timezone(&Local);
-        FAKE_EPOCH.store(base.timestamp(), Ordering::SeqCst);
+        let base = at_jst(2026, 8, 1, 20, 0);
+        set_fake_clock(base);
         let mut sweeper = FakeSweeper {
             interval_minutes: 60,
             now: fake_clock,
@@ -609,18 +711,26 @@ mod tests {
     #[tokio::test]
     async fn keeps_running_while_still_on_target_date() {
         // 当日は日付判定で止まらないこと（判定をループ先頭へ移した際に「当日でも即終了」させて
-        // しまう退行を検出する）。1 スイープして次の待機に入る＝時間上限で打ち切られるのが正しい。
-        let mut sweeper = FakeSweeper::new(jst_date(&Local::now()));
-        let outcome = tokio::time::timeout(
-            StdDuration::from_millis(500),
-            run_monitor_loop_with(&mut sweeper, no_keep_awake, Local::now),
+        // しまう退行を検出する）。偽時計を朝に固定し、対象日を跨がない範囲でスイープを重ねる。
+        // 実時計だと JST 00:00 跨ぎや CI 負荷で結果が揺れるため使わない。
+        let base = at_jst(2026, 8, 1, 6, 0);
+        set_fake_clock(base);
+        let mut sweeper = FakeSweeper {
+            interval_minutes: 60,
+            now: fake_clock,
+            // 3 スイープしたら slots を空にして正常終了させる（当日中に終わる経路）。
+            max_sweeps: 3,
+            ..FakeSweeper::new(jst_date(&base))
+        };
+        tokio::time::timeout(
+            StdDuration::from_secs(10),
+            run_monitor_loop_with(&mut sweeper, no_keep_awake, fake_clock),
         )
-        .await;
-        assert!(
-            outcome.is_err(),
-            "当日なのに監視が終了した（日付判定の位置が誤っている）"
-        );
-        assert_eq!(sweeper.sweeps.load(Ordering::SeqCst), 1);
+        .await
+        .expect("当日中に正常終了すること")
+        .unwrap();
+        // 日付判定で即終了していれば 0 回。当日として回れば 3 回走る。
+        assert_eq!(sweeper.sweeps.load(Ordering::SeqCst), 3);
     }
 
     /// 実機のスリープ跨ぎを目視で確認する手動テスト（#568）。DB / netkeiba を一切使わず、
