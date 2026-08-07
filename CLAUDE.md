@@ -87,6 +87,8 @@ paddock-predict-watch --date YYYY-MM-DD          # 既定: 窓40分 / 間隔5分
 paddock-predict-watch --date YYYY-MM-DD --once   # 1スイープのみ（cron 等）
 ```
 
+- **通知ゼロを「妙味なし」と読む前にログの `⚠ 前回スイープから N 分空きました` を確認する**（#568/ADR 0072）。監視は wall-clock 基準でスリープから自動再開し、飛んだ区間を警告する（例外: プロセスがハング/死亡したまま・時計が後退した場合は警告が出ない。詳細は下記 knowledge）。この行がある日は、その間に発走したレースが未評価なので判断材料が欠けている。スリープ抑止は launchd の keep-awake（#264・開催日ごとに install が要る）に一本化されており、**蓋閉じスリープはどちらにせよ止められない**——外出中に監視を当てにするなら蓋を閉じない。詳細は [docs/knowledge/monitor-loop-sleep-resilience.md](docs/knowledge/monitor-loop-sleep-resilience.md)
+
 ### 4. 結果取得
 
 手動で netkeiba から直接確認する（fetch-results はレース結果ページが生成されるまで使用不可。レース終了後も数分〜十数分かかることがある）:
