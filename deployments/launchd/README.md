@@ -71,13 +71,13 @@
   **既にスリープ中の Mac を起こすこともできない**（朝に keep-awake が発火する時点で起きている必要）。
 - **完全な堅牢化**は常時稼働ホスト（RasPi / 小型クラウド VM 等）へ prefetch を移設して
   ローカル Mac の電源・スリープ状態に依存させないこと（構成変更が大きいため別途）。
-- **この keep-awake エージェントは prefetch 用**。`predict-watch` / `odds-collect` は #568 以降
-  **自分で** `caffeinate -i -w <自分の pid>` を確保するので、この launchd ジョブの install を
-  忘れていても監視プロセス自身は無防備にならない（監視の終了で自動解放される）。加えて監視ループは
-  wall-clock 基準になり、スリープを跨いでも復帰後に自動再開して途切れを警告する
-  （[ADR 0072](../../docs/adr/0072-monitor-loop-wall-clock-sleep-resilience.md) /
-  [監視ループのスリープ耐性](../../docs/knowledge/monitor-loop-sleep-resilience.md)）。
-  ただし **蓋閉じスリープは依然として止められない**——外出中に監視を当てにするなら蓋を閉じないこと。
+- **この keep-awake は predict-watch / odds-collect の抑止も兼ねる**。監視バイナリ側は抑止を持たない
+  （#568 / [ADR 0072](../../docs/adr/0072-monitor-loop-wall-clock-sleep-resilience.md) で
+  「抑止は #264 に一本化」と決めた）。ただし監視ループ自体は wall-clock 基準なので、**スリープを
+  跨いでも復帰後に自動再開し、空いた区間を警告する**
+  （[監視ループのスリープ耐性](../../docs/knowledge/monitor-loop-sleep-resilience.md)）。
+  install を忘れても監視は死なないが、抑止はゼロになる。**蓋閉じスリープはどちらにせよ止められない**
+  ——外出中に監視を当てにするなら蓋を閉じないこと。
 - **取りこぼしの当日検知（自動・#493）**: 上記 snapshot-coverage agent が全レース発走後に
   [`snapshot_coverage.py --fail-on-gap`](../../scripts/predict-check/snapshot_coverage.py)
   を自動実行し、gap/none のレースがあればその日のうちに通知する（`/tmp` に消えていた prefetch ログの

@@ -17,6 +17,8 @@
 //!   日付を持たない。当日の監視ではこれで十分だが、**日付を跨ぐと翌日の `now` が全レースの
 //!   `post_time` より前に戻り、昨日のレースが再び発走前と判定される**。時刻軸だけでは終われないため、
 //!   終了判定に wall-clock の日付（`should_stop_by_date`）を併用する（#568）。
+//!   日付はホストのローカル日付で取る。**JST 前提**は [`warn_if_not_today_jst`] が起動時に点検する
+//!   （運用ホストは JST 固定なので、判定側に TZ 変換を持ち込まない）。
 //!
 //! ## スリープ耐性（#568）
 //!
@@ -29,14 +31,15 @@
 //! 2. スイープ開始どうしの間隔が想定を大きく超えたら `detect_sweep_gap` で検知して警告する
 //!    （沈黙＝正常に見える問題の解消）。待機区間ではなくスイープ間隔で測るのは、スイープ実行中に
 //!    寝られたケースを取りこぼさないため。
-//! 3. 監視プロセス自身がアイドルスリープを抑止する（`keep_awake` モジュール・macOS の
-//!    `caffeinate -i -w <pid>`）。best-effort で、蓋閉じスリープは抑止できない。
+//!
+//! なお**スリープ抑止そのものは骨格の責務にしない**。`caffeinate -i` はアイドルスリープしか止められず、
+//! 2026-08-01 の事象（蓋閉じ＝clamshell sleep が起点）は防げなかった。抑止は launchd の
+//! `com.paddock.keep-awake`（#264）に一本化し、骨格は「寝ても壊れない」ことだけに責任を持つ。
 
 use chrono::{DateTime, Duration, Local, NaiveDate, NaiveTime, Offset, TimeZone};
 use paddock_domain::Race;
 
 mod driver;
-mod keep_awake;
 pub use driver::{Sweeper, run_monitor_loop};
 
 /// `now` 時点でのレースの発走状態（windowed / windowless 共通）。
@@ -113,9 +116,7 @@ pub fn warn_if_not_today_jst<Tz: TimeZone>(
 ) where
     Tz::Offset: std::fmt::Display,
 {
-    // 終了判定（should_stop_by_date）と同じ JST 基準で「本日」を取る。ここだけホスト TZ にすると
-    // 「警告は出ないのに終了する」「警告は出るのに終了しない」の食い違いが起きる。
-    let today = jst_date(&now_local);
+    let today = now_local.date_naive();
     if date != today {
         println!(
             "⚠ --date {date} は本日（{today}）と異なります。発走状態は現在時刻と post_time の時刻のみで \
@@ -175,9 +176,6 @@ pub(crate) fn minutes_or_max(minutes: u64) -> Duration {
         .unwrap_or(Duration::MAX)
 }
 
-/// 1 回の待機に許す上限。`--interval` は下限しか持たないので、桁を打ち間違えた巨大値をここで丸める。
-/// **`DateTime + Duration` は範囲外で panic する**（chrono の `Add` は `checked_add_signed().expect()`）ので、
-/// 期限を作る前に必ずこの関数を通す。1 日待つ時点で当日監視としては無意味なので上限は 1 日で足りる。
 /// 丸めた後の実効スイープ間隔（分）。待機（[`capped_wait`]）と途切れ判定（[`detect_sweep_gap`]）で
 /// **同じ値**を使うための単一ソース。片方だけ丸めると、例えば `--interval 2000` は実際には 1 日間隔で
 /// 回るのに閾値だけ 4000 分となり、途切れを一切検知しなくなる。
@@ -185,23 +183,15 @@ pub(crate) fn effective_interval_minutes(interval_minutes: u64) -> u64 {
     u64::try_from(capped_wait(interval_minutes).num_minutes()).unwrap_or(1)
 }
 
+/// 1 回の待機に許す上限（と下限）。`--interval` は上限を持たないので、桁を打ち間違えた巨大値をここで丸める。
+/// **`DateTime + Duration` は範囲外で panic する**（chrono の `Add` は `checked_add_signed().expect()`）ので、
+/// 期限を作る前に必ずこの関数を通す。1 日待つ時点で当日監視としては無意味なので上限は 1 日で足りる。
 pub(crate) fn capped_wait(interval_minutes: u64) -> Duration {
     // 下限 1 分は骨格側の礼節ガード。両 app とも 0 を弾くので現状は到達しないが、待機ゼロの
     // 連続スイープ（netkeiba への連打）だけは骨格単独でも起こさない。
     minutes_or_max(interval_minutes)
         .min(Duration::days(1))
         .max(Duration::minutes(1))
-}
-
-/// JST での「今日」。日付終了判定に使う。
-///
-/// `post_time` は JST 起算なので、日付の境目もホストのタイムゾーンではなく JST で取る。ホスト日付を
-/// 使うと、JST より東のホスト（UTC+10 以降）では開催日の途中で日付が変わって自己終了し、西のホスト
-/// （UTC 等）では終了が最大 9 時間遅れる。実行環境が JST から外れていること自体は
-/// [`warn_if_not_today_jst`] が起動時に警告するが、警告は挙動を正さないのでここで吸収する。
-pub(crate) fn jst_date<Tz: TimeZone>(now: &DateTime<Tz>) -> NaiveDate {
-    let jst = chrono::FixedOffset::east_opt(JST_OFFSET_SECS).expect("JST offset は定数で常に有効");
-    now.with_timezone(&jst).date_naive()
 }
 
 /// 「想定間隔」と「前スイープ開始からの実経過（wall-clock）」から、監視サイクルが飛んだかを
@@ -237,7 +227,7 @@ pub(crate) fn detect_sweep_gap(
 /// 発走状態判定（[`classify`]）は時刻（`NaiveTime`）だけを見るため、日付を跨ぐと昨日のレースが
 /// 再び「発走前」に見え [`should_continue`] が永久に true を返す（実測: 最終レース発走から
 /// 14 時間経ってもプロセスが生存し続けた）。対象日を過ぎたら時刻軸の判定に関わらず終了する。
-/// `now_date` は [`jst_date`] で求めること（post_time が JST 起算のため）。
+/// `now_date` はホストのローカル日付（運用ホストは JST 固定。前提の点検は [`warn_if_not_today_jst`]）。
 pub(crate) fn should_stop_by_date(target: NaiveDate, now_date: NaiveDate) -> bool {
     now_date > target
 }
@@ -468,26 +458,6 @@ mod tests {
     }
 
     #[test]
-    fn jst_date_is_used_instead_of_host_timezone() {
-        // post_time は JST 起算なので、日付の境目も JST で取る。ホスト TZ で取ると JST より東の
-        // ホストでは開催日の途中で日付が変わって自己終了し、西のホストでは終了が遅れる。
-        let utc = chrono::Utc.with_ymd_and_hms(2026, 8, 1, 16, 30, 0).unwrap(); // JST 8/2 01:30
-        assert_eq!(
-            jst_date(&utc),
-            chrono::NaiveDate::from_ymd_opt(2026, 8, 2).unwrap()
-        );
-        // JST 23:59 はまだ当日（UTC では 14:59 で前日扱いになる時間帯）。
-        let jst = FixedOffset::east_opt(9 * 3600).unwrap();
-        let late = jst.with_ymd_and_hms(2026, 8, 1, 23, 59, 0).unwrap();
-        assert_eq!(
-            jst_date(&late),
-            chrono::NaiveDate::from_ymd_opt(2026, 8, 1).unwrap()
-        );
-    }
-
-    // --- should_stop_by_date: wall-clock の日付による終了判定（#568） ---
-
-    #[test]
     fn keep_running_while_still_on_target_date() {
         let target = chrono::NaiveDate::from_ymd_opt(2026, 8, 1).unwrap();
         assert!(!should_stop_by_date(target, target));
@@ -509,21 +479,6 @@ mod tests {
         let target = chrono::NaiveDate::from_ymd_opt(2026, 8, 2).unwrap();
         let today = chrono::NaiveDate::from_ymd_opt(2026, 8, 1).unwrap();
         assert!(!should_stop_by_date(target, today));
-    }
-
-    #[test]
-    fn warn_uses_jst_not_host_timezone_for_today() {
-        // 終了判定（should_stop_by_date）と基準を揃えるため「本日」は JST で取る。
-        // UTC 16:30（= JST 翌 01:30）に、JST の翌日を --date に渡しても「本日と異なる」とは扱わない。
-        let utc = chrono::Utc.with_ymd_and_hms(2026, 8, 1, 16, 30, 0).unwrap();
-        assert_eq!(
-            jst_date(&utc),
-            chrono::NaiveDate::from_ymd_opt(2026, 8, 2).unwrap()
-        );
-        // ホスト TZ 基準なら 8/1 が「本日」になり、判定基準が終了判定と割れる。
-        assert_ne!(jst_date(&utc), utc.date_naive());
-        // 呼び出し自体も panic しない（出力は検証しない）。
-        warn_if_not_today_jst(jst_date(&utc), utc, "発走状態");
     }
 
     #[test]

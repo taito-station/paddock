@@ -169,35 +169,6 @@ jobs:
       - name: Check ADR number duplicates (#254)
         run: bash scripts/check-adr-numbers.sh
 
-  # monitor-loop の macOS 専用コード（#568・アイドルスリープ抑止の caffeinate spawn）を
-  # コンパイル・lint する軽量ジョブ。他ジョブは全て ubuntu なので、`#[cfg(target_os = "macos")]`
-  # 側は **実際に動く唯一のプラットフォームで一度も検証されない**（Linux では no-op 分岐だけが通る）。
-  # 本番の張り判断を支える常駐プロセスが唯一 spawn するコードなので、腐らせない。
-  # DB もフロントも要らないので monitor-loop クレートだけに絞って短時間で終わらせる。
-  macos-monitor-loop:
-    runs-on: macos-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
-
-      # ランナー同梱の rustup は rust-toolchain.toml のピン版を都度ダウンロードするが
-      # clippy コンポーネントは入らない。ci ジョブと同じ action で明示的に揃える（#466 と同方針）。
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
-        with:
-          toolchain: ${{ env.RUST_TOOLCHAIN }}
-          components: clippy
-
-      - name: Cache cargo build
-        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-
-      - name: Clippy (monitor-loop, macOS 分岐込み)
-        run: cargo clippy --locked -p monitor-loop --all-targets -- -D warnings
-
-      # 監視ループは実時刻に依存するので、CI ランナーの TZ（UTC）でも通ることを併せて確認する。
-      - name: Test (monitor-loop)
-        run: cargo test --locked -p monitor-loop
-
   # stdlib のみの Python テストを ubuntu-latest 同梱の python3 で走らせる軽量ジョブ（#416 / #464）。
   # 対象は 2 群:
   #   1. scripts/predict-check/test_*.py — unittest ではなく `def test_*()` + assert を末尾の

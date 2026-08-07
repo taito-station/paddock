@@ -185,14 +185,13 @@ done
 
 ### Step 0.3: スリープ抑止の方針決め（実施は Step 1.6）
 
-**監視バイナリ自身がスリープ耐性を持つ（#568・ADR 0072）。** `predict-watch` / `odds-collect` は
-起動時に自分で `caffeinate -i -w <自分の pid>` を確保し、待機は wall-clock 基準なので**スリープから
-復帰すると自動で再スイープし、空いた分を警告する**（`⚠ 前回スイープから N 分空きました…`）。
-手動で `caffeinate` を被せる必要はない（**Step 1.5 / Step 5 の起動ブロックに手動 caffeinate を足さない**）。
+**監視ループはスリープを跨いでも壊れない（#568・ADR 0072）。** `predict-watch` / `odds-collect` は
+待機が wall-clock 基準なので**スリープから復帰すると自動で再スイープし、空いた分を警告する**
+（`⚠ 前回スイープから N 分空きました…`）。日付を跨いだら終了する。
 
-- **前提: 最新ビルドで起動していること**。#568 以前のバイナリは自己抑止も自動再開もしない。
-  ビルド最新化（Step 0.2）を飛ばさない
-- launchd の `com.paddock.keep-awake`（#264）は**締切前 prefetch 用**として引き続き必要。load 済みか確認しておく:
+**ただしスリープ抑止は監視バイナリに入っていない。** 抑止は launchd の `com.paddock.keep-awake`
+（#264）に一本化されており、**開催日ごとに install が要る**（Step 1.6）。install を忘れると抑止ゼロで
+走るが、監視自体は復帰して空きを警告する。まず load 済みかを確認しておく。
 
 ```sh
 launchctl list | grep -i paddock     # com.paddock.keep-awake が無ければ未 install
@@ -238,14 +237,12 @@ D=$(date +%F)   # 前夜に翌日分を仕込むときだけ手入力する
 pgrep -fl "paddock-odds-collect --date $D" && echo '⚠ 既に稼働中。起動しない' || echo 'OK: 未稼働。起動してよい'
 ```
 
-既に稼働中でスキップする場合、**それが #568 以前のバイナリなら自己抑止も自動再開も無い**。ログ冒頭に
-`── アイドルスリープ抑止を確保しました` **も** `⚠ アイドルスリープ抑止を確保できませんでした` **も**
-無ければ古いプロセスなので、止めて最新ビルドで起動し直す（⚠ 側が出ているなら最新ビルドだが
-抑止に失敗している＝別の対処が要る）。
+既に稼働中でスキップする場合、**それが #568 以前のバイナリなら自動再開も途切れ警告も無い**。
+起動時刻が今回のビルドより前なら古いプロセスなので、止めて最新ビルドで起動し直す。
 
 ```sh
 # バックグラウンド起動（既定: 15分毎・終日・全発走で自動終了）。D は対象開催日
-# スリープ抑止はバイナリが自分で確保する（#568）。手動 caffeinate は不要
+# スリープ抑止は launchd の keep-awake（Step 1.6）に任せる
 D=$(date +%F)
 nohup paddock-odds-collect --date "$D" >> ~/Library/Logs/paddock-odds-collect-${D//-/}.log 2>&1 &
 ```
@@ -288,7 +285,7 @@ pmset -g | grep -i 'prevented by.*caffeinate' || echo '⚠ caffeinate による�
 tail -n 3 /tmp/paddock-keep-awake/logs/keep-awake.log   # このパスは launchd 経由（plist が WORKDIR を固定）のときの位置
 ```
 
-監視バイナリ側の自己抑止（#568）とこの launchd の keep-awake は**別物で、併用してよい**。前者は監視プロセスの生存期間、後者は締切前 prefetch のタイマー用。二重に `caffeinate` が立っても無害。
+この keep-awake は締切前 prefetch（#237）と監視の両方を支える**唯一の抑止手段**（#568 の監視バイナリは抑止を持たない）。install を忘れると抑止ゼロになるので、開催日は必ず実施する。
 
 **開催終了後は片付ける**:
 
@@ -354,10 +351,10 @@ D=$(date +%F)   # 前夜に翌日分を仕込むときだけ手入力する
 pgrep -fl "paddock-predict-watch --date $D" && echo '⚠ 既に稼働中。起動しない' || echo 'OK: 未稼働。起動してよい'
 ```
 
-スキップする場合は Step 1.5 同様、**ログ冒頭の抑止行（`──` 確保 / `⚠` 確保失敗のいずれか）で最新ビルドか確認する**。
+スキップする場合は Step 1.5 同様、**起動時刻で最新ビルドかを確認する**。
 
 ```sh
-# 終日監視（常駐）。スリープ抑止はバイナリが自分で確保する（#568）。手動 caffeinate は不要
+# 終日監視（常駐）。スリープ抑止は launchd の keep-awake（Step 1.6）に任せる
 D=$(date +%F)
 nohup paddock-predict-watch --date "$D" >> ~/Library/Logs/paddock-predict-watch-${D//-/}.log 2>&1 &
 ```
