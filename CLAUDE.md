@@ -18,10 +18,11 @@ paddock の文書は HVE（dahatake/HypervelocityEngineering, MIT）の蒸留モ
   **⚠ 移行中（ADR 0073 / #579）**: 写しは未着手（knowledge は 8 本で ADR 73 本の決定を含まない。
   例外は [docs/knowledge/product-goals.md](docs/knowledge/product-goals.md) で、棄却 ADR 24 本の
   「採らなかったこと」だけは索引として畳んである）。
-  当面は **ADR 原本（`docs/original-docs/0NNN-*.md`）も併せて読む**。stale の機械検査は配線済みだが
-  判定は当面 warning（未解消 6 件を #580 で消化してから error へ）。**既存 ADR の一括写しは
-  それが 0 件になってから着手する**（担保のないまま写すと stale 面積だけが先に増え、ADR 0073 が
-  解こうとしている問題を自分で拡大する）。新規 ADR の写しは起票と同時に行ってよい。
+  当面は **ADR 原本（`docs/original-docs/0NNN-*.md`）も併せて読む**。stale の機械検査は配線済みで、
+  **判定は error**（未解消 6 件を #580 で消化して warning から昇格）。**既存 ADR の写しに着手して
+  よい状態になった**（担保が無いまま写すと stale 面積だけ増える、という前提条件は解消済み）。
+  `sources` に挙げたファイルを内容ごと変更したら、参照元の `distilled_from_sha` / `updated` を
+  同じ PR で追従させる（追従漏れは CI が落とす）。
 - **`docs/original-docs/` の命名は 2 系統**: ADR = **0 埋め 4 桁**（`0055-...`）/ issue 由来の一次資料 =
   **issue 番号・0 埋めしない**（`382-...`）。これが ADR 番号重複検出の判定根拠なので破らない。
 - **status**: `Confirmed`（運用の前提にしてよい）/ `Tentative`（暫定）/ `Conflict`（矛盾・放置せず解消）。

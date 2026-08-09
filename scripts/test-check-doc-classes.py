@@ -263,8 +263,12 @@ def test_warn_only_exits_zero() -> None:
         shutil.rmtree(repo)
 
 
-def test_stale_source_is_warning_not_error() -> None:
-    """source が distilled より後に内容変更されたら stale 警告。ただし exit 0（当面 warning）。"""
+def test_stale_source_is_error() -> None:
+    """source が distilled より後に内容変更されたら stale として **error**（#580 で warning から昇格）。
+
+    「ADR の内容は knowledge へ全部写す」（ADR 0073 決定 2）の担保はこの検査だけなので、
+    warning のままだと写した量に比例して追従漏れが静かに溜まる。
+    """
     repo = new_repo()
     try:
         baseline(repo)
@@ -272,7 +276,22 @@ def test_stale_source_is_warning_not_error() -> None:
         p.write_text(p.read_text(encoding="utf-8") + "\n追記。\n", encoding="utf-8")
         commit_all(repo, "source を実質更新")
         code, out = check(repo)
-        assert code == 0, f"stale は warning のはず: {out}"
+        assert code == 1, f"stale は error のはず: {out}"
+        assert "STALE" in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_stale_is_suppressed_by_warn_only() -> None:
+    """`--warn-only` なら stale でも 0 で終える（既存の逃げ道が効くことを固定する）。"""
+    repo = new_repo()
+    try:
+        baseline(repo)
+        p = repo / "docs/original-docs/0001-first.md"
+        p.write_text(p.read_text(encoding="utf-8") + "\n追記。\n", encoding="utf-8")
+        commit_all(repo, "source を実質更新")
+        code, out = check(repo, "--warn-only")
+        assert code == 0, out
         assert "STALE" in out, out
     finally:
         shutil.rmtree(repo)
@@ -431,7 +450,7 @@ def test_body_change_is_stale() -> None:
         p.write_text(p.read_text(encoding="utf-8") + "\n本文の追記。\n", encoding="utf-8")
         commit_all(repo, "本文を変更")
         code, out = check(repo)
-        assert code == 0, out
+        assert code == 1, out
         assert "STALE" in out, f"本文の変更を検出できていない:\n{out}"
     finally:
         shutil.rmtree(repo)
