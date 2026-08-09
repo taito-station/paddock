@@ -4,9 +4,10 @@ knowledge を蒸留する**元になる資料**を置く場所。**ここのフ�
 （HVE の original-docs と同じ思想。source は改変せず、蒸留は knowledge 側で行う）。
 全体像は [docs/knowledge/README.md](../knowledge/README.md)。
 
-> 例外は 2 つだけ。(1) ディレクトリ移設に伴うパス表記の是正（実績は ADR 0073 の 1 件——
+> 例外は 3 つだけ。(1) ディレクトリ移設に伴うパス表記の是正（実績は ADR 0073 の 1 件——
 > `0062-workout-cyokyo-feature-rejected.md` の本文中にあった `docs/adr/0061` の表記）。
 > (2) 下記の `<!-- not-an-adr -->` マーカーの付与（判定用メタデータであって本文ではない）。
+> (3) **GitHub Issue 本文の転記章の削除**（ADR 0074。実績は `382`/`384`/`389`/`401` の 4 本）。
 > 内容の訂正・追記はしない——古い記述は「その時点で何を知っていたか」の記録として残す。
 
 ADR 0073 で ADR をここへ統合した。ADR も生素材も「一度置いたら書き換えない（RO）」という
@@ -57,6 +58,21 @@ ADR の採番は `scripts/check-adr-numbers.sh next`（並行 clone / worktree �
 
 ## 何を置かないか
 
+- **GitHub Issue 本文の転記**（ADR 0074）。原本は GitHub 側にあり、**転記は必ず原本と乖離する**
+  （実測: 4 本すべてが 25〜38% の逐語コピーで、うち 3 本は改変・章削除により原本として機能して
+  いなかった）。しかも GitHub 側の編集は git に現れないので、`sources` 追従のような機械検査が
+  原理的に効かない。代わりにリンクと取得コマンドだけを置く:
+
+  ```markdown
+  ## 発端の Issue
+
+  原本は [#382](https://github.com/taito-station/paddock/issues/382)（**転記しない**・ADR 0074）。
+  本文は `gh issue view 382` で取得する。
+  ```
+
+  issue 本文の内容が蒸留に必要なら、**qa / knowledge 側に「その時点の要求」として日付付きで引用する**。
+  一方、**調査所見・実測・生ログは転記ではない**——GitHub には無くここにしか存在しないので、
+  それこそがこの層の中身（下記「何を置くか」）。
 - 確定した運用ルール・ドメイン知 → `docs/knowledge/` or `docs/specifications/`
 - 質問票と回答 → `docs/qa/`
 - コード・設定（リポジトリ本体で管理）
@@ -67,9 +83,9 @@ ADR の採番は `scripts/check-adr-numbers.sh next`（並行 clone / worktree �
 2. Claude が読んで欠落/不整合を検出し、`docs/qa/` に質問票を起票。
 3. 回答済み qa と ADR を knowledge に差分マージ。**ADR の内容は knowledge へ全部写す**
    （読む入口を knowledge に一本化する）。original-docs 自体は残す（トレーサビリティ）。
-   **※ 既存 ADR 73 本の一括写しは stale 機械検査の未解消（#580）が 0 件になるまで開始しない**
-   （ADR 0073 / [docs/knowledge/README.md](../knowledge/README.md) の移行中ブロック参照）。
-   それまでは knowledge だけでなく ADR 原本も読む運用。
+   写した先の追従漏れは **stale 検査が error で止める**（#580 で warning から昇格）。
+   `sources` に挙げたファイルを内容ごと変更したら、参照元の `distilled_from_sha` / `updated` を
+   同じ PR で追従させること。
 
 > 一次資料は mdq の索引対象（`mdq.toml`）に含まれるので、`scripts/mdq search` で横断検索できる。
 > ADR だけに絞るなら `--paths "docs/original-docs/0*"`。
