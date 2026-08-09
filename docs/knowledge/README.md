@@ -31,7 +31,8 @@ docs/knowledge/ ＋ docs/specifications/   status 付き確定知（＝この層
   >   pre-push）。ただし判定は当面 **warning**——移設以前から累積していた未追従が 6 件あり、
   >   error にすると常時 red になる。[#580](https://github.com/taito-station/paddock/issues/580)
   >   で消化して 0 件になったら error へ切り替える。
-  > - **ADR の写しは未着手**。knowledge は 7 本で、`docs/original-docs/` の ADR 73 本の決定は
+  > - **ADR の写しは未着手**（例外は [product-goals.md](product-goals.md)。棄却 ADR 24 本の
+  >   「採らなかったこと」だけは索引として畳んである）。knowledge は 8 本で、`docs/original-docs/` の ADR 73 本の決定は
   >   含まれない。**当面は knowledge だけでなく ADR 原本（`docs/original-docs/0NNN-*.md`）も読む**。
   >   mdq は両方を索引しているので `scripts/mdq search` は今でも横断で当たる。
   >
@@ -91,6 +92,63 @@ updated: "YYYY-MM-DD"    # 内容を実質更新した日（YAML の date 型を
   節目や意図を人間可読に残したいときだけ置く（一括後付けはしない）。既に `## 変更履歴` を持つ 2 本
   （[`docs/specifications/probability-estimation.md`](../specifications/probability-estimation.md) /
   [`docs/knowledge/analyze-search-and-state.md`](analyze-search-and-state.md)）はそのまま維持してよい。
+
+## REQ-ID（要件 ID）の規約
+
+要件・成功条件に**安定した参照子**を与える。ADR・issue・PR から `REQ-D01-004` の 1 語で名指しでき、
+文書を書き換えても参照が壊れない。初出は [product-goals.md](product-goals.md)（D01 の成功条件）。
+
+```markdown
+<!-- REQ:begin D01 -->
+| REQ-ID | 要件 | 検証手段 | 出典 | status |
+|---|---|---|---|---|
+| REQ-D01-001 | 張るレースは ROI ≥ 100% のものだけに限る | `paddock-predict --overview` の ROI | [ADR 0040](...) | Confirmed |
+<!-- REQ:end D01 -->
+```
+
+- **形式は `REQ-D{NN}-{NNN}`**。`D{NN}` は [doc-classes.md](doc-classes.md) の文書クラス、`{NNN}` は
+  3 桁ゼロ埋めの連番。クラスは**その要件を載せている文書のクラス＝番号空間の持ち主**を表す
+  （関心事の分類ではない。買い方に関わる要件でも、D01 のプロダクト目標に載っていれば `REQ-D01-NNN`）。
+- **一意性はクラス内グローバル**。同じ `D{NN}` の番号はリポジトリ全体で 1 つ。文書をまたいでも
+  重複させない（同じクラスの REQ 表が複数文書に分かれてもよいが、番号空間は 1 つ）。
+- **番号は再利用しない**。廃止した要件は行を消さず `status: Retired` にして残す。消して番号を空けると、
+  過去の ADR / issue が指す `REQ-D01-003` が別の要件を指すようになる。
+- **マーカーで囲む**。`<!-- REQ:begin D{NN} -->` … `<!-- REQ:end D{NN} -->`。表の位置を本文構造に
+  依存させないため（見出しを変えても検査が壊れない）。マーカーのクラスは**その文書の `doc_class` に
+  含まれていること**——他クラスの要件を勝手に抱え込ませない。
+- **列は 5 列固定**（`REQ-ID | 要件 | 検証手段 | 出典 | status`）。**見出し行と区切り行も必須**で、
+  順序も変えない。列は位置で意味付けして読むので、順序が入れ替わると下記の Confirmed 検査が別の列に
+  当たる。書式が崩れた行は黙って落とさず error にする（落とすと一意性検査から消えて重複が通る）。
+  セル内にパイプを書くときは GFM どおり `\|` とエスケープする。
+- **`status` は `Confirmed` / `Tentative` / `Conflict` / `Retired`**。前 3 つは frontmatter の `status` と
+  同じ意味で、`Retired` は「かつて要件だったが取り下げた」。
+- **`要件` と `出典` は空にできない**。`出典` と `検証手段` に書く Markdown リンクは**実在すること**
+  （絶対パス・リポジトリ外は不可。リポジトリ内なら `docs/` の外＝`scripts/` 等でもよい）——由来を
+  辿れない要件は根拠を確認できない。インラインコード（`` `…` ``）の中はコマンドとして扱い、検査しない。
+- **検証手段が空なら `Confirmed` にできない**。「達成した」と言えるのは測り方が決まっているときだけで、
+  検証手段の無い Confirmed は願望と区別が付かない。空欄のほか
+  `-` / `–` / `—` / `TBD` / `UNKNOWN` / `n/a` / `未定` / `なし` / `未整備` も空扱い（大小文字は問わない）。
+
+### 何が機械検査されるか
+
+`scripts/check-doc-classes.py` が **error** で検査するのは次の範囲:
+
+- マーカーの対応と書式、**マーカーの外にある REQ 表**、**行頭 `|` を欠いた REQ 行**、
+  コードフェンスの閉じ忘れ（いずれも「表が丸ごと無検査になる」経路なので塞いである）
+- 見出し行・区切り行・列数、REQ-ID の形式、ID のクラス部とブロックのクラスの一致
+- ブロックのクラスが定義済みで、かつその文書の `doc_class` に含まれること
+- 番号の重複、`status` の値域、`要件` / `出典` の非空、Confirmed の検証手段、リンク先の実在
+
+一方、**次の 3 つは機械検査できない**ので人手の規律に残る:
+
+- **番号の再利用禁止**。検査が見るのは現時点のスナップショットだけなので、`Retired` 行ごと削除して
+  同じ番号を別の要件に振り直しても検出されない。
+- **`docs/knowledge/` と `docs/specifications/` の直下以外にある REQ 表**。検査対象はこの 2 ディレクトリの
+  直下のみ（`README.md` を除く）で、`docs/original-docs/` や `CLAUDE.md` に REQ 表を置いても一意性の
+  台帳には載らない。**REQ 表はこの 2 ディレクトリの中に置く**こと。
+- **コードフェンスで囲んだ REQ ブロック**。フェンス内は「規約の見本」として全面的に無視する
+  （この節の例がまさにそれ）。囲まれた表は GitHub でも表として描画されないので、実データを
+  そこに置くことは無い前提。
 
 ## 昇格・更新の運用（Claude が回す蒸留）
 
