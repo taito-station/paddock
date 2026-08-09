@@ -15,14 +15,18 @@ paddock の文書は HVE（dahatake/HypervelocityEngineering, MIT）の蒸留モ
   改変しない**——決定を変えるときは新しい ADR で supersede する。
 - **読む入口は knowledge**。ADR の決定・理由・却下案・影響は knowledge に**全部写す**。重複を許す
   代わりに、`sources` の更新に蒸留が追従しているかは機械検査で担保する（人手の規律に委ねない）。
-  **⚠ 移行中（ADR 0073 / #579）**: 写しは未着手（knowledge は 5 本で ADR 72 本の決定を含まない）、
-  stale の機械検査も未配線。当面は **ADR 原本（`docs/original-docs/0NNN-*.md`）も併せて読む**。
-  **既存 ADR の一括写しは機械検査の配線が完了するまで着手しない**（担保のないまま写すと stale 面積
-  だけが先に増え、ADR 0073 が解こうとしている問題を自分で拡大する）。新規 ADR の写しは起票と同時に
-  行ってよい。
+  **⚠ 移行中（ADR 0073 / #579）**: 写しは未着手（knowledge は 7 本で ADR 73 本の決定を含まない）。
+  当面は **ADR 原本（`docs/original-docs/0NNN-*.md`）も併せて読む**。stale の機械検査は配線済みだが
+  判定は当面 warning（未解消 6 件を #580 で消化してから error へ）。**既存 ADR の一括写しは
+  それが 0 件になってから着手する**（担保のないまま写すと stale 面積だけが先に増え、ADR 0073 が
+  解こうとしている問題を自分で拡大する）。新規 ADR の写しは起票と同時に行ってよい。
 - **`docs/original-docs/` の命名は 2 系統**: ADR = **0 埋め 4 桁**（`0055-...`）/ issue 由来の一次資料 =
   **issue 番号・0 埋めしない**（`382-...`）。これが ADR 番号重複検出の判定根拠なので破らない。
 - **status**: `Confirmed`（運用の前提にしてよい）/ `Tentative`（暫定）/ `Conflict`（矛盾・放置せず解消）。
+- **文書クラス**: knowledge/specifications は frontmatter に `doc_class`（+ mdq 用ミラーの `tags`）を持つ。
+  定義の正本は [docs/knowledge/doc-classes.md](docs/knowledge/doc-classes.md)（HVE の D01〜D21 ＋ paddock 固有の
+  D22 予測モデル / D23 買い方 / D24 実験・棄却証跡）。`scripts/mdq search --tags D23` でクラス絞り込みができる。
+  整合は `scripts/check-doc-classes.py` が CI と pre-push で検査する。
 - **探索規律 — 生読み前に mdq 検索**: docs 内の答えを探すときは、まず
   `scripts/mdq search --q "..."`（BM25・ローカル・[.claude/skills/markdown-query/SKILL.md](.claude/skills/markdown-query/SKILL.md)）
   でヒットチャンクだけ取り、必要時のみ生ファイルへ。コード探索は従来通り serena（`mcp__serena__*`）。

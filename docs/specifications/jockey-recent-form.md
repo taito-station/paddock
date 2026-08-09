@@ -3,6 +3,8 @@
 # knowledge に昇格（ADR 履歴・相互リンクを壊さないため物理移動しない）。
 status: Confirmed
 kind: knowledge
+doc_class: [D22, D24]
+tags: [D22, D24]
 sources:
   - docs/original-docs/0009-recent-form-feature.md
   - docs/original-docs/0016-shrinkage-and-recency.md

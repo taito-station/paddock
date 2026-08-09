@@ -1,12 +1,14 @@
 ---
 status: Confirmed
 kind: knowledge
+doc_class: [D11, D10]
+tags: [D11, D10]
 sources:
   - docs/qa/QA-live-freshness-382.md
   - docs/original-docs/382-live-server-now.md
   - docs/specifications/live-ev-buy-view.md
   - docs/original-docs/0064-live-ev-buy-view.md
-distilled_from_sha: "8f8be21"
+distilled_from_sha: "9538782"
 updated: "2026-07-22"
 ---
 

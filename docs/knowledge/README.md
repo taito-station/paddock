@@ -25,16 +25,18 @@ docs/knowledge/ ＋ docs/specifications/   status 付き確定知（＝この層
 - **確定知を読む入口は knowledge**。ADR の決定・理由・却下案・影響は knowledge に**全部写す**。
   重複を許す代わりに、同期切れ（`sources` が更新されたのに蒸留が追従していない状態）は
   **機械検査で検出する**——写した量に比例して stale 面積が増えるため、人手の規律には委ねない。
-- > **⚠ 移行中（ADR 0073 の段階導入）**。上の 2 つはまだ完成していない:
+- > **⚠ 移行中（ADR 0073 の段階導入）**:
   >
-  > - **stale の機械検査は未配線**（ADR 0073 の後続 PR で導入）。それまでは下記「sources 追従」を
-  >   人手で守る。
-  > - **ADR の写しは未着手**。現在 knowledge にあるのは 5 本で、`docs/original-docs/` の ADR 72 本の
-  >   決定は含まれない。**当面は knowledge だけでなく ADR 原本（`docs/original-docs/0NNN-*.md`）も読む**。
+  > - **stale の機械検査は配線済み**（`scripts/check-doc-classes.py`・CI の `adr` ジョブと
+  >   pre-push）。ただし判定は当面 **warning**——移設以前から累積していた未追従が 6 件あり、
+  >   error にすると常時 red になる。[#580](https://github.com/taito-station/paddock/issues/580)
+  >   で消化して 0 件になったら error へ切り替える。
+  > - **ADR の写しは未着手**。knowledge は 7 本で、`docs/original-docs/` の ADR 73 本の決定は
+  >   含まれない。**当面は knowledge だけでなく ADR 原本（`docs/original-docs/0NNN-*.md`）も読む**。
   >   mdq は両方を索引しているので `scripts/mdq search` は今でも横断で当たる。
   >
   > **順序は「機械検査の配線が先、写しは後」**。写した量に比例して stale 面積が増えるのが
-  > ADR 0073 の出発点なので、担保のないまま 72 本ぶんの写しを始めると解こうとしている問題を
+  > ADR 0073 の出発点なので、担保のないまま 73 本ぶんの写しを始めると解こうとしている問題を
   > 自分で拡大することになる。移行が完了したらこのブロックを削除する。
 - **`docs/original-docs/` の命名は 2 系統**（`check-adr-numbers.sh` の判定根拠。
   詳細は [docs/original-docs/README.md](../original-docs/README.md)）:
@@ -58,6 +60,8 @@ docs/knowledge/ ＋ docs/specifications/   status 付き確定知（＝この層
 ---
 status: Confirmed        # Confirmed（確定）/ Tentative（暫定）/ Conflict（矛盾・要解消）
 kind: knowledge
+doc_class: [D22, D24]    # 文書クラス。第 1 要素が主クラス。定義は docs/knowledge/doc-classes.md
+tags: [D22, D24]         # doc_class の mdq 用ミラー（完全一致。checker が強制）
 sources:                 # 由来（ADR / qa / original-docs のパス）。決定の「なぜ」を辿れるように
   - docs/original-docs/0NNN-....md   # ADR は 0 埋め 4 桁
   - docs/qa/QA-....md
@@ -68,6 +72,13 @@ updated: "YYYY-MM-DD"    # 内容を実質更新した日（YAML の date 型を
 
 > **注意**: `updated` は必ずダブルクォートで囲む。クォートしないと YAML が `date` 型に解釈し、mdq の
 > 索引化（frontmatter を JSON 化）が `Object of type date is not JSON serializable` で失敗する。
+
+- **`doc_class` / `tags`**: 文書クラス（D01〜D24）の宣言。**定義とクラス一覧の正本は
+  [doc-classes.md](doc-classes.md)**（書式・N/A 宣言・充足ギャップもそこ）。`tags` へのミラーは
+  mdq が frontmatter を検索に使わず `tags` しか見ないため（`scripts/mdq search --tags D23`）。
+  二重管理の drift は `scripts/check-doc-classes.py` が防ぐ。
+- **機械検査**: 上記スクリプトが CI（`adr` ジョブ）と pre-push で走る。クラスの整合・`tags` の一致・
+  `sources` の実在は **error**、stale と充足ギャップは **warning**。
 
 - **status**: `Confirmed`=検証済みで運用の前提にしてよい / `Tentative`=検証中・暫定 /
   `Conflict`=source 間で矛盾があり要解消（放置しない）。
@@ -104,10 +115,23 @@ updated: "YYYY-MM-DD"    # 内容を実質更新した日（YAML の date 型を
      `distilled_from_sha` を進めると「その SHA 時点で蒸留し直した」という偽の主張になり、
      `updated`（＝内容を実質更新した日）の定義とも矛盾する。ADR 0073 の ADR 移動がこのケースで、
      20 本の `sources` パスを書き換えたが sha / 日付は据え置いた。
-     機械検査は **rename-only のコミット（`git diff --diff-filter=R` で内容差分ゼロ）を
-     比較対象から除外する**ことでこの例外を吸収する。`git log --follow` では吸収できない——
-     `--follow` はリネームより前へ履歴を遡らせるだけで、「最終コミット」がリネームコミットに
-     なる事実は変わらないため、そのまま比較すると 20 本すべてが stale 判定になる。
+     機械検査は **`R100`（内容差分ゼロのリネーム）のコミットを飛ばして実質の変更点まで遡る**
+     ことでこの例外を吸収する。`git log --follow` 単体では吸収できない——`--follow` はリネームより
+     前へ履歴を遡らせるだけで、「最終コミット」がリネームコミットになる事実は変わらないため、
+     そのまま比較すると 20 本すべてが stale 判定になる。
+   - **例外 1b: frontmatter のメタデータだけの変更は「内容変更」と見なさない**。
+     `doc_class` / `tags` / `sources` / `distilled_from_sha` / `updated` のいずれかが変わっても、
+     本文が同一ならその文書の内容は変わっていない。移設に伴う `sources` のパス追従や文書クラスの
+     付与がこれで、除外しないと**それらを `sources` に持つ knowledge が軒並み stale になる**
+     （実測: ADR 移設で 7 件、文書クラス付与で 6 件）。機械検査は本文と frontmatter を分けて
+     比較し、差分がメタデータキーだけなら遡る。`status` / `kind` は除外しない——
+     `Confirmed → Conflict` は下流へ伝えるべき信号なので、内容変更として扱う。
+   - **例外 1c: それでも残る移設由来の stale は `distilled_from_sha` を再ベースラインする**
+     （`updated` は触らない）。本文中の相対リンクまで書き換わった場合は 1b では吸収できない。
+     内容が実質変わっていないなら、`distilled_from_sha` を移設後の HEAD へ進めるのが正確
+     （その SHA の状態を反映しているのは事実）。`updated` は内容更新日なので据え置く。
+     **再ベースラインしてよいのは、stale の原因が移設だけの文書に限る**——ほかに実質更新が
+     混じっているものを一緒に進めると、本物の信号を消してしまう。
    - **例外 2: `status: Conflict` の宣言だけを足すときは `updated` のみ bump し、
      `distilled_from_sha` は据え置く**。「乖離に気づいた」ことを記録するだけで、再蒸留は
      していないため。sha を進めると「その SHA の状態を反映している」ことになり、

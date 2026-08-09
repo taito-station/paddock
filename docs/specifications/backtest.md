@@ -3,6 +3,8 @@
 # knowledge に昇格（ADR 履歴・相互リンクを壊さないため物理移動しない）。
 status: Confirmed
 kind: knowledge
+doc_class: [D24, D17, D19]
+tags: [D24, D17, D19]
 sources:
   - docs/original-docs/0006-backtest-evaluation.md
   - docs/original-docs/0002-probability-estimation.md

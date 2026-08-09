@@ -1,11 +1,13 @@
 ---
 status: Confirmed
 kind: knowledge
+doc_class: [D22, D19]
+tags: [D22, D19]
 sources:
   - docs/qa/QA-factors-explanation-unify-409.md
   - docs/original-docs/0014-none-baseline-exclusion.md
   - docs/original-docs/0055-ev-layer-separation-circular-break.md
-distilled_from_sha: "5886f61"
+distilled_from_sha: "9538782"
 updated: "2026-07-21"
 ---
 

@@ -3,6 +3,8 @@
 # knowledge に昇格（ADR 履歴・相互リンクを壊さないため物理移動しない）。
 status: Confirmed
 kind: knowledge
+doc_class: [D10, D08, D19]
+tags: [D10, D08, D19]
 sources:
   - docs/original-docs/0025-prediction-search-api.md
   - docs/api/openapi.json
