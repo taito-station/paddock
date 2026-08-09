@@ -6,10 +6,13 @@ kind: knowledge
 doc_class: [D10, D08, D09]
 tags: [D10, D08, D09]
 sources:
+  - docs/original-docs/0001-jra-odds-scraper.md
   - docs/original-docs/0008-netkeiba-same-day-datasource.md
+  - docs/original-docs/0010-persist-and-reference-odds.md
   - docs/original-docs/0048-retire-jra-odds-scraper-for-netkeiba.md
-distilled_from_sha: "f765be7"
-updated: "2026-07-17"
+  - docs/original-docs/0049-netkeiba-odds-transient-retry-and-degraded-exit.md
+distilled_from_sha: "6b74f57"
+updated: "2026-08-10"
 ---
 
 # netkeiba 当日データソース取り込み 仕様書
@@ -141,7 +144,7 @@ paddock 内部の `RaceId` も同じ 12 桁構成要素から導出する（既�
 | カラム | 型 | 説明 |
 |--------|----|----|
 | `race_id` | TEXT | レース識別子(paddock RaceId) |
-| `bet_type` | TEXT | 券種(`win` / 将来 `place` / `quinella` / `wide` / `trio` …) |
+| `bet_type` | TEXT | 券種(`win` / `place` / `quinella` / `wide` / `exacta` / `trio` / `trifecta`) |
 | `combination_key` | TEXT | 組合せキー。単勝は馬番。組合せ券種は昇順連結(例 `03-07`) |
 | `odds` | REAL | オッズ(ワイド/複勝は下限) |
 | `odds_high` | REAL NULL | オッズ上限(ワイド/複勝のバンド用、単勝は NULL) |
@@ -152,6 +155,57 @@ paddock 内部の `RaceId` も同じ 12 桁構成要素から導出する（既�
 - オッズは時々刻々変動するため、**取得のたびに最新値で upsert(上書き)** する。履歴保持はスコープ外。
 - ドメイン `RaceOdds.win`(`HashMap<HorseNum, OddsValue>`)は人気を持たないため、人気は本テーブルのカラムとして
   scrape 結果から直接保存する（ドメイン型は変更しない）。
+
+### 保存したオッズの読み出しと read-through（ADR 0010）
+
+書き込み（fetch-card → `race_odds`）だけがあって読み出しが無い状態を解消した決定。
+
+- **`Repository::find_race_odds(race_id, as_of)`**: `race_odds` をドメイン `RaceOdds` に再構成する。
+  `as_of = Some(d)` は `date(fetched_at) <= d` のスナップショットに限定し（**backtest のリーク防止**）、
+  `None` は時刻制約なし（predict）。
+- **predict は read-through**: 保存済みがあればそれを返し、無ければライブスクレイプして保存してから返す。
+- **backtest は当時オッズ優先・PDF フォールバック**: `find_race_odds(race_id, Some(race.date))` の win が
+  あればそれ、無ければ PDF 確定成績の単勝を使う。保存オッズが無い過去レースでも既存の長期バックテストが
+  壊れない（移行コストゼロ）。
+- **cache-hit 判定は `RaceOdds::is_complete()`**（win + 組合せ 5 券種がそろう）。当初の「保存済みが空でない」
+  判定では、組合せ券種の一部が欠けた**部分スナップショット**が cache-hit してしまい、欠落券種が当日ずっと
+  取り直されなかった（#294 で強化）。`race_odds` は単一行 UPSERT なので、再スクレイプは欠けていた行を
+  足すだけで既存行を消さない＝保存済み券種は単調に埋まり complete に収束する（自己修復）。
+- **`place` は cache-hit 条件に含めない**。netkeiba は win と同梱で複勝を返すため通常そろうが、発走前の
+  複勝未公開で再スクレイプが無限化するのを避ける。
+- 当初は win+place 限定だったが、**#38 で全券種**（馬連・ワイド・馬単・3連複・3連単）に拡張済み。
+  `combination_key` の規約はドメイン型の `to_key`/`from_key` が単一情報源（昇順 `-` 連結、順序付きは `>` 連結）。
+  `BetType` で解釈できない未知ラベルの行は読み飛ばす（新版が書いた券種を旧版で読む過渡期でも止めない）。
+- **時刻比較の粗さ**: 当時オッズ参照は `date(fetched_at)`(UTC) と `race.date`(JST 開催日) の日付比較。
+  TZ 境界は厳密でないが、fetch-card / predict をレース前に走らせる運用前提で実害は小さい。
+
+### transient リトライと degraded（ADR 0049）
+
+「取れなかった」を**未発売**と**一過性障害**に機械的に分ける。混同すると、本来取れるはずのオッズの
+欠落がサイレントに握り潰される。
+
+- **共有 GET ヘルパ `call_with_retry`** が transient 失敗時に最大 3 回（初回 + 2 回）・指数バックオフ
+  （1s / 2s）で再試行する。transient は `Timeout` / `Io` / `ConnectionFailed` / `HostNotFound` /
+  `Protocol` / 5xx。リトライは I/O 層の性質として `fetch_utf8` / `fetch_decoded` の双方に効かせる
+  （オッズ以外の出馬表・近走・払戻も同時に resilience が上がる）。
+- **netkeiba に 403/404=absent の概念は無い**。未発売は 200 + JSON status で返るため、4xx は単純に
+  非 transient として扱う。
+- **未発売は best-effort**（出馬表・近走を巻き添えにせず継続）、**transient は degraded**。degraded では
+  **オッズ保存をまるごとスキップする**——win 欠落の部分スナップショットを永続化すると predict が
+  「オッズ有り・win 無し」で誤判定するため。保存しない方が「オッズ未取得」として扱われ、再取得で正される。
+- **degraded は専用 exit code = 3**。`fetch-card` は主目的（近走取り込み）まで終えてから 3 を返すので、
+  呼び出し側はハード失敗（=1）と「単複だけ未取得・要再取得」を区別でき、win 欠落レースだけ再取得できる。
+
+### スクレイパー実装の型（ADR 0001 由来）
+
+JRA 版スクレイパーは ADR 0048 で退役したが、そこで確立した設計は netkeiba 版にも引き継いでいる。
+
+- **HTTP クライアントは同期 `ureq` に統一**する（async ランタイムと 2 系統の HTTP スタックを混在させない）。
+- **レイヤー配置は依存方向 Apps → Interface → Use-Case → Domain を厳守**する。ドメイン型
+  （`BetType` / `OddsValue` / `PlaceOdds` / `Pair` / `OrderedPair` / `Triple` / `OrderedTriple` / `RaceOdds`）は
+  domain、port トレイトは use-case、HTML/JSON パースと遷移層は interface の専用クレート。
+- **検証は保存 fixture に対する純粋関数で行う**。ライブの遷移はサイト改変で壊れやすく開催日にしか
+  実地検証できないため、価値の中心であるパース／ドメイン変換を純粋関数として切り出して決定論的に検証する。
 
 ---
 
@@ -171,7 +225,8 @@ paddock 内部の `RaceId` も同じ 12 桁構成要素から導出する（既�
 |--------|------|
 | 単勝オッズ未確定(レース前で空欄) | win を populate せず空のまま。出馬表の保存は継続 |
 | 不正な race_id(桁数・競馬場コード不正) | バリデーションエラーを stderr に出力し exit code 1。パニックしない |
-| ページ取得失敗(ネットワーク/404) | エラーとして報告。パニックしない |
+| ページ取得失敗(ネットワーク/5xx 等の transient) | `call_with_retry` が最大 3 回リトライ。残ったら **degraded**（オッズ保存をスキップし exit 3）。ADR 0049 |
+| ページ取得失敗(4xx・非 transient) | エラーとして報告。パニックしない |
 | EUC-JP 不正バイト | `encoding_rs` の置換に委ね、可能な範囲で parse を継続 |
 
 ---
@@ -207,6 +262,10 @@ paddock-fetch-card --year 2026 --venue 東京 --round 3 --day 2 --race 11
 
 ## 関連
 
-- ADR: [0008 netkeiba を当日データソースに採用](../original-docs/0008-netkeiba-same-day-datasource.md)
+- ADR: [0008 netkeiba を当日データソースに採用](../original-docs/0008-netkeiba-same-day-datasource.md) /
+  [0001 JRA オッズスクレイパー](../original-docs/0001-jra-odds-scraper.md)（設計の型・0048 で退役）/
+  [0010 オッズの永続化と参照](../original-docs/0010-persist-and-reference-odds.md) /
+  [0048 JRA スクレイパー退役](../original-docs/0048-retire-jra-odds-scraper-for-netkeiba.md) /
+  [0049 transient リトライと degraded exit](../original-docs/0049-netkeiba-odds-transient-retry-and-degraded-exit.md)
 - 関連 Issue: #25(オッズ→predict 結線)、#38(組合せ券種オッズ)、#40(結果自動精算)、#31(未活用特徴量)
 - CLI テストケース: `tests/cli-test-cases/fetch-card-command.md`

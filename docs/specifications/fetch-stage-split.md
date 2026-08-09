@@ -6,9 +6,13 @@ kind: knowledge
 doc_class: [D19, D08, D15]
 tags: [D19, D08, D15]
 sources:
+  - docs/original-docs/0018-pdf-numeric-columns-without-ocr.md
+  - docs/original-docs/0020-zero-race-parse-not-recorded.md
+  - docs/original-docs/0021-fetch-timeout-and-retry.md
   - docs/original-docs/0024-fetch-stage-split-acquisition-state.md
-distilled_from_sha: "f765be7"
-updated: "2026-07-17"
+  - docs/original-docs/0029-shared-jra-fetcher-crate.md
+distilled_from_sha: "6b74f57"
+updated: "2026-08-10"
 ---
 
 # fetch/parse ステージ分割 + 取得状態管理 仕様書
@@ -168,6 +172,66 @@ JRA は「開催が無い」ときだけでなく**レート制限/IP ブロッ�
     `failed(403)` として残し、**次回 fetch で再試行**する。これにより「ブロックで全滅 → 永久スキップ」
     を避けつつ、正常時の境界 discovery を保つ。
 - 成功 → `downloaded`（Stage1）/ `ingested`（Stage2）として記録。
+
+### 取得層の実装（ADR 0021 / 0029）
+
+**無限ハングを構造的に起こさない**ことと、**transient と permanent を分けて不在判定を壊さない**ことが要点。
+
+- **全体タイムアウトを必須にする**（両フェッチャ共通）。設定済み `ureq::Agent` を再利用し、
+  `timeout_connect = 10s` / `timeout_global = 60s`（接続〜ボディ読み取りまでのデッドライン）。
+  stall は最長 60s で `Timeout` になり、無限待機は起きない。**根治にはタイムアウトが必須十分**で、
+  リトライはその上の resilience。
+- **transient は最大 3 回（初回 + 2 回）指数バックオフ（1s / 2s）で再試行**する。transient は
+  `Timeout` / `Io` / `ConnectionFailed` / `HostNotFound` / `Protocol` / 5xx。
+- **`403` / `404` は「PDF 不在」として即返す**（再試行しない）。JRA は未公開日を 404、存在しない
+  回/日や非開催会場を 403 で返すため、両者を不在として扱う契約を維持する——ここを transient 扱いに
+  すると上記の境界 discovery が壊れる。
+- **リトライ時も毎回 `RateGate` を通す**。礼儀ペーシング（`--max-rps` 等）の上限はリトライで破らない。
+- **取得ロジックは共有 crate `src/interface/jra-fetcher` に集約**する（ADR 0029）。タイムアウト定数・
+  リトライと `is_transient` 分類・不在判定・`RateGate` が単一実装で、`parse-pdf` / `parse-entries` の
+  両アプリが `JraFetcher` を直接使う。`pdf_parser` は本来パーサであり fetcher の同居は偶発的だった。
+  `JraFetcher::new(min_interval)` は単発（entries）が `None`、バルクが `--max-rps` 由来の interval。
+- **エラー分類**: `paddock_use_case::Error` に `Fetch(String)` / `Timeout(String)` を持ち、ureq エラーを
+  timeout → `Timeout` / その他 → `Fetch` にマップする（`Internal` への丸めを廃止）。ネットワーク障害を
+  内部バグと区別してログ・監視できる。
+- 最悪所要は `60s × 3 + backoff(1s+2s)` 程度に上振れするが、**ハングは消える**。健全時（〜700KB・即時応答）
+  には影響しない。
+
+### 0 レース parse を成功として記録しない（ADR 0020）
+
+**「成功＝DB に races が入った」を不変条件にする。** 0 レースを成功として `fetch_history` に記録すると、
+パーサ未対応の PDF が**自己ブロック**して二度と再取得されなくなる。
+
+- `fetch_meeting` は parse 結果が 0 レースなら `record_fetch` を**呼ばず**、`FetchMeetingOutcome::Empty`
+  を返す。履歴に行を残さないので再取得の対象に残り続ける。
+- `empty` は `failed` とは**別カウンタ**にする。「PDF は存在するがパーサが空」は fetch エラーと性質が
+  異なり、運用上の切り分け（再 fetch すべきか / パーサを直すべきか）に効く。range 列挙では Empty を
+  計上しつつ round/day の境界（NotFound）とは扱わず列挙を継続する。
+- 単一指定 fetch は Empty を**非ゼロ終了**で報告し（明示対象の取得失敗）、range fetch では done 行に
+  `empty` 件数を出す（best-effort スイープなので恒久 fail にはしない）。
+- 実例: 2025 秋 PDF はレース見出しの正規表現（`\d{5}\s+` → `\s*`）と天候クラス（`[晴曇雨雪]` →
+  `[晴曇雨雪小]`＝`小雨`/`小雪`）の 2 点で 0 レースになっていた。修正で 0 → 12 レースに復旧している。
+
+---
+
+## PDF 数値列の抽出方針（ADR 0018）
+
+**OCR・EdiF グリフ復号・image クレートを一切使わず、読める CID テキストと順位から決定的に取得する。**
+
+| 項目 | 取得方法 |
+|---|---|
+| 斤量 | `stext.json` の座標索引。馬番アンカー＋x オフセット帯（92–117）にある妥当域（48.0–63.5kg）の数値トークン |
+| 人気 | **単勝オッズ（読める）の昇順順位から算出**。人気はオッズ順位そのものなので EdiF 復号が要らない |
+| 着順 | mutool の行順（完走順）。元から OCR 非依存で 100% |
+
+- 索引に無い行は従来挙動へフォールバックする（後退させない）。
+- **同オッズの人気**は同順位（`1,2,2,4`）に丸める。JRA の印刷人気は同オッズでも枠順等で一意の番号を
+  振る運用があるため、将来 EdiF 人気列を実値復号して照合する場合に微差が出る（実害は無いが留意点）。
+- **LLM / MCP を採らない理由**: LLM ホストの無い単一バッチ CLI に MCP は過剰。全件 LLM はコスト・
+  非決定性・サイレント汚染・オフライン性喪失を招く。CID テキストと順位で決定的に解ける。
+- レイアウト定数は実測ハードコードなので、開催場・年度差の退行は `parse_weights` の 0 件ログと
+  統合テスト（充足率・既知値）で気づく前提（騎手・調教師の抽出と同じ運用）。
+- **上り 3F は依然 EdiF で未対応**（`HorseResult` に該当フィールドが無い）。
 
 ---
 

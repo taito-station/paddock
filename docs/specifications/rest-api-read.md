@@ -7,12 +7,13 @@ doc_class: [D10, D19, D09]
 tags: [D10, D19, D09]
 sources:
   - docs/original-docs/0022-rest-api-read-server.md
+  - docs/original-docs/0031-api-blend-alpha-default.md
   - docs/original-docs/0069-drop-icloud-writes-browser-only-viewing.md
   - docs/original-docs/0055-ev-layer-separation-circular-break.md
   - docs/original-docs/0060-betting-axis-lock-preclose-topup.md
   - docs/api/openapi.json
-distilled_from_sha: "3a7e875"
-updated: "2026-08-09"
+distilled_from_sha: "6b74f57"
+updated: "2026-08-10"
 ---
 
 # REST API（read 基盤）: 設計仕様
@@ -133,9 +134,14 @@ GET /api/races/{race_id}/prediction[?track_condition=&blend_alpha=]
 ```
 
 - use-case: `predict_race(race_id, blend_alpha, track_condition)`
-- 既定は **モデルのみ**（`blend_alpha=None`）・馬場未指定（`track_condition=None`）。本番 predict と同じ `EstimationConfig::production()` 経路。
+- 既定は **本番ブレンド**（`blend_alpha` 省略時は `RECOMMENDED_MARKET_BLEND_ALPHA` = α 0.2 にフォールバック。ADR 0031）・馬場未指定（`track_condition=None`）。本番 predict と同じ `EstimationConfig::production()` 経路。
 - `track_condition`（任意）: `good|good_to_firm|...`（`TrackCondition` の文字列表現）。不正値は `400`。
-- `blend_alpha`（任意）: `0.0..=1.0` の f64。市場オッズ（単勝）とのブレンド係数（#72）。範囲外・非有限は `400`。`alpha < 1.0` を指定しても**当該レースの保存オッズが無ければブレンドは行われずモデル確率をそのまま返す**（#51 未完環境での既定挙動。`predict_race` の実装どおり）。
+- `blend_alpha`（任意）: `0.0..=1.0` の f64。市場オッズ（単勝）とのブレンド係数（#72）。範囲外・非有限は `400`。
+  **省略時の既定はサーバが持つ**（ADR 0031）。クライアント側にハードコードしない——省略時の解釈が
+  呼び出し元ごとに割れると本命が食い違う。素モデルが欲しいときは `blend_alpha=1.0` を明示する
+  （省略を「素モデルを望む」とは解釈しない）。既定値の単一正本は domain の
+  `RECOMMENDED_MARKET_BLEND_ALPHA` で、ADR 0031 当時の 0.3 から **ADR 0034 で 0.2 に更新**されている
+  （ハンドラは定数を参照するだけなので、本番 α の変更が API 既定へ自動追従する）。`alpha < 1.0` を指定しても**当該レースの保存オッズが無ければブレンドは行われずモデル確率をそのまま返す**（#51 未完環境での既定挙動。`predict_race` の実装どおり）。
 - 出馬表が無い `race_id` は内部で `NotFound` → `404`。
 - レスポンス: 馬ごとの win/place/show 確率（`win ≤ place ≤ show` 単調性は use-case が保証）
 
