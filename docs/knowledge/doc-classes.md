@@ -3,7 +3,7 @@ status: Confirmed
 kind: knowledge
 sources:
   - docs/original-docs/0073-adr-into-original-docs-and-doc-classes.md
-distilled_from_sha: "9538782"
+distilled_from_sha: "b24173e"
 updated: "2026-08-09"
 ---
 
@@ -53,7 +53,7 @@ scripts/mdq search --q "EV ゲート" --tags D23 --top-k 5   # クラスで絞�
 <!-- doc-classes:begin -->
 | クラス | 名称 | 状態 | 現行 |
 |---|---|---|---|
-| D01 | 事業意図・成功条件定義書 | active | 0 |
+| D01 | 事業意図・成功条件定義書 | active | 1 |
 | D02 | スコープ・対象境界定義書 | active | 1 |
 | D03 | ステークホルダー・承認権限・責任分担表 | n/a | 0 |
 | D04 | 業務プロセス仕様書 | active | 1 |
@@ -98,7 +98,7 @@ blended 確率、EV は純モデル確率 × 市場オッズ）を、文書ク�
 ## N/A 宣言（D03 / D12 / D13 / D14 / D20）
 
 適用外を**明示的に閉じる**。「まだ書いていない」と「そもそも要らない」を区別しないと、充足ギャップの
-警告が恒久的なノイズになり、本当の欠落（D01 / D07 / D21）が埋もれる。
+警告が恒久的なノイズになり、本当の欠落（D07 / D21）が埋もれる。
 
 <!-- doc-classes-na:begin -->
 | クラス | N/A の理由 | 再開条件 |
@@ -119,7 +119,6 @@ D 体系を採用する最大の実利は、**書くべきなのに無い文書�
 
 | クラス | 現状 | 対応 |
 |---|---|---|
-| **D01** 事業意図・成功条件 | プロダクトの目標・成功条件・非目標を書いた文書が `docs/` に 1 本も無い。方向性は ADR 73 本を読み解くことでしか復元できない | [#579](https://github.com/taito-station/paddock/issues/579) の PR3 で `product-goals.md` を新設 |
 | **D07** 用語集・ドメインモデル | 用語定義が各仕様書に散在している（`win_prob` / `place_prob` / `raw_score` / `blended` / `軸ロック` 等を `probability-estimation.md`・`backtest.md`・`ev-kelly-bet-selection.md` がそれぞれ独自に定義） | 横断的な用語集を 1 本作る |
 | **D21** CI/CD・供給網 | `.github/workflows/ci.yml` に 10 ジョブが実在するが、その設計意図（必須チェックの構成・ジョブ分割の理由・shellcheck の範囲）を書いた文書が無い | ADR は個別に存在（0026 等）。横断的な 1 本が要る |
 | **D05** ユースケース | `README.md` の「何ができるか」が最も近いが、UC カタログの形では無い | 優先度低 |
@@ -132,8 +131,13 @@ D 体系を採用する最大の実利は、**書くべきなのに無い文書�
 プロジェクトルートの `CLAUDE.md`「買い方ルール」節にあり、`docs/` 側の D23 文書
 （`betting-rule-history.md` / `live-ev-buy-view.md` / `ev-kelly-bet-selection.md`）は
 **根拠・棄却記録・画面契約**に留まる。`CLAUDE.md` は毎セッション読まれる運用指示なので現状で機能して
-いるが、「クラスの主文書がクラス体系の外にある」状態ではある。D01 を作るとき（#579 の PR3）に
-併せて整理を検討する。
+いるが、「クラスの主文書がクラス体系の外にある」状態ではある。
+
+D01（[product-goals.md](product-goals.md)）を作る際に改めて検討し、**現状維持**とした。買い方ルールは
+毎セッション自動で読まれることが実効性の source で、`docs/` へ移すと「読まれる保証」を失う代わりに
+得られるのが `doc_class` 付与だけになる。D01 側は買い方の**目標と非目標**（REQ-D01-001/003/007・
+非目標 C 群）を持ち、`CLAUDE.md` は**現行ルールの運用指示**を持つ、という役割分担で閉じている。
+将来 `docs/` 側へ寄せるなら決定を伴うので ADR を起こす。
 
 ## 割当の一覧
 
@@ -149,6 +153,7 @@ D 体系を採用する最大の実利は、**書くべきなのに無い文書�
 | knowledge/app-bootstrap.md | [D19, D15] |
 | knowledge/live-freshness-calibration.md | [D11, D10] |
 | knowledge/monitor-loop-sleep-resilience.md | [D15, D19] |
+| knowledge/product-goals.md | [D01] |
 | knowledge/race-card-display-metadata.md | [D08, D10, D11] |
 | knowledge/scoring-factor-collection.md | [D22, D19] |
 | specifications/backtest.md | [D24, D17, D19] |

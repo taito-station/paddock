@@ -92,6 +92,39 @@ updated: "YYYY-MM-DD"    # 内容を実質更新した日（YAML の date 型を
   （[`docs/specifications/probability-estimation.md`](../specifications/probability-estimation.md) /
   [`docs/knowledge/analyze-search-and-state.md`](analyze-search-and-state.md)）はそのまま維持してよい。
 
+## REQ-ID（要件 ID）の規約
+
+要件・成功条件に**安定した参照子**を与える。ADR・issue・PR から `REQ-D01-004` の 1 語で名指しでき、
+文書を書き換えても参照が壊れない。初出は [product-goals.md](product-goals.md)（D01 の成功条件）。
+
+```markdown
+<!-- REQ:begin D01 -->
+| REQ-ID | 要件 | 検証手段 | 出典 | status |
+|---|---|---|---|---|
+| REQ-D01-001 | 張るレースは ROI ≥ 100% のものだけに限る | `paddock-predict --overview` の ROI | [ADR 0040](...) | Confirmed |
+<!-- REQ:end D01 -->
+```
+
+- **形式は `REQ-D{NN}-{NNN}`**。`D{NN}` は [doc-classes.md](doc-classes.md) の文書クラス、`{NNN}` は
+  3 桁ゼロ埋めの連番。クラスを ID に含めるのは、要件が「どの関心事のものか」を参照子だけで判別する
+  ため（`REQ-D23-007` なら買い方の要件）。
+- **一意性はクラス内グローバル**。同じ `D{NN}` の番号はリポジトリ全体で 1 つ。文書をまたいでも
+  重複させない（同じクラスの REQ 表が複数文書に分かれてもよいが、番号空間は 1 つ）。
+- **番号は再利用しない**。廃止した要件は行を消さず `status: Retired` にして残す。消して番号を空けると、
+  過去の ADR / issue が指す `REQ-D01-003` が別の要件を指すようになる。
+- **マーカーで囲む**。`<!-- REQ:begin D{NN} -->` … `<!-- REQ:end D{NN} -->`。表の位置を本文構造に
+  依存させないため（見出しを変えても検査が壊れない）。マーカーのクラスは**その文書の `doc_class` に
+  含まれていること**——他クラスの要件を勝手に抱え込ませない。
+- **列は 5 列固定**（`REQ-ID | 要件 | 検証手段 | 出典 | status`）。順序も変えない。書式が崩れた行は
+  黙って落とさず error にする（落とすと一意性検査から消えて重複が通る）。
+- **`status` は `Confirmed` / `Tentative` / `Conflict` / `Retired`**。前 3 つは frontmatter の `status` と
+  同じ意味で、`Retired` は「かつて要件だったが取り下げた」。
+- **検証手段が空なら `Confirmed` にできない**。「達成した」と言えるのは測り方が決まっているときだけで、
+  検証手段の無い Confirmed は願望と区別が付かない。空欄・`-` ・`TBD` ・`UNKNOWN` はいずれも空扱い。
+
+`scripts/check-doc-classes.py` が上記すべて（書式・クラス一致・一意性・番号形式・status の値域・
+Confirmed の検証手段）を **error** で検査する。
+
 ## 昇格・更新の運用（Claude が回す蒸留）
 
 1. 一次資料は `docs/original-docs/` に置く（RO・書き換えない）。
