@@ -10,7 +10,7 @@ paddock は HVE（dahatake/HypervelocityEngineering, MIT）の 3 層蒸留モデ
 
 ### 層の重複が実害を出している
 
-#568 の 4 点セット（original-docs / qa / knowledge / ADR、合計 515 行）を全文照合した結果（**測定時点では #576 が未マージのため、`docs/knowledge/monitor-loop-sleep-resilience.md` と ADR 0072 は本ブランチには存在しない**。両ファイルは #576 で追加される）:
+#568 の 4 点セット（original-docs / qa / knowledge / ADR、合計 515 行）を全文照合した結果（測定は #576 のマージ前に同 PR のブランチ上で実施。#576 マージ後は `docs/knowledge/monitor-loop-sleep-resilience.md` と ADR 0072 として本リポジトリで参照できる）:
 
 - `docs/knowledge/monitor-loop-sleep-resilience.md` の本文 103 行のうち **88 行（85%）が ADR 0072 と 1:1 対応**し、knowledge が追加した決定は **0 件**。固有の価値は運用者向けの読み方 6 行に集約されていた。
 - 「5 秒刻みの根拠（DarkWake 累計 28 秒）」「単調時計で所要を測る理由」「JST 変換を持ち込まない理由」は、いずれも **qa / knowledge / ADR の 3 箇所に語順までほぼ同一**で存在した。
@@ -111,7 +111,9 @@ D01〜D21 は番号・名称を変えず採用する（HVE との語彙互換を
 - **追加**: `scripts/test-check-adr-numbers.sh`（fail-closed 分岐の回帰テスト）と CI `adr` ジョブへの配線。本番検査より**前**に走らせる（本番検査が落ちたとき、ADR が本当に重複しているのか判定器が壊れているのかを切り分けられるようにするため）。
 - **不変**: ADR の採番方式、CI ジョブ ID `adr`（ruleset #461 の必須チェックなので改名しない）。ADR 本文は 71 本中 **70 本がバイト同一**で移動した。唯一の例外は `0062-workout-cyokyo-feature-rejected.md` で、本文のコードブロック内に自ディレクトリの絶対パス表記（`docs/adr/0061`）があったため 1 行だけ機械置換の対象になっている。「ADR は改変しない」規約に対する意図的な例外——旧パスのまま残すとリンクではないにせよ存在しないディレクトリを指し続けるため、パス表記の正確性を優先した。
 - **運用**: 新しい ADR は `docs/original-docs/0NNN-*.md` に置く（採番は `scripts/check-adr-numbers.sh next`）。issue 由来の一次資料は 0 埋めしない。mdq で ADR だけに絞るなら `--paths "docs/original-docs/0*"`。既存の索引を持つ環境は一度だけ `rm -rf .mdq && scripts/mdq index` で作り直す（prune は roots 配下しか消さないため、旧 `docs/adr/*` のチャンクが居残る）。
-- **統合前に分岐した PR への影響**: 本統合より前に分岐した PR が `docs/adr/` に新しい ADR を足していると、パスが異なるため git は競合を報告せず**どちらの順でマージしても無言で通る**。結果 `docs/adr/` が復活し、その ADR は `check-adr-numbers.sh` の走査先（`docs/original-docs`）から見えず番号重複検出が穴あきになる。これを防ぐため、**`docs/adr/` 配下に `*.md` が置かれていることを致命扱いにするガード**を同スクリプトに入れた（該当 PR がマージされた時点で CI が落ち、対処手順を出力する）。ディレクトリの存在ではなく中身で判定するのは、git が空ディレクトリを追跡しないため——空の `docs/adr` は `.DS_Store` 等が居るローカル環境でしか現れず、そこで落としても防ぎたい事故は何も防げずに pre-push が詰まるだけになる。本統合の時点では #576 が `docs/adr/0072-monitor-loop-wall-clock-sleep-resilience.md` を持つオープン PR として該当する。
+- **統合前に分岐した PR への影響**: 本統合より前に分岐した PR が `docs/adr/` に新しい ADR を足していると、パスが異なるため git は競合を報告せず**どちらの順でマージしても無言で通る**。結果 `docs/adr/` が復活し、その ADR は `check-adr-numbers.sh` の走査先（`docs/original-docs`）から見えず番号重複検出が穴あきになる。これを防ぐため、**`docs/adr/` 配下に `*.md` が置かれていることを致命扱いにするガード**を同スクリプトに入れた（該当 PR がマージされた時点で CI が落ち、対処手順を出力する）。ディレクトリの存在ではなく中身で判定するのは、git が空ディレクトリを追跡しないため——空の `docs/adr` は `.DS_Store` 等が居るローカル環境でしか現れず、そこで落としても防ぎたい事故は何も防げずに pre-push が詰まるだけになる。
+
+実例: #576 が `docs/adr/0072-monitor-loop-wall-clock-sleep-resilience.md` を旧パスに追加した状態で先にマージされた。本統合を rebase したところ git が `file location` conflict として検出し（「rename されたディレクトリ内に追加された」）、0072 も本統合の移動対象に含めて解決した。あわせて `docs/knowledge/monitor-loop-sleep-resilience.md` の `sources` と `deployments/launchd/README.md` のリンクを新パスへ追従させている。**git が conflict として拾えたのは rename を含むコミットを rebase したからで、マージ順序によっては無言で通る**——ガードはその場合の保険として残す。
 - **後続（追跡: [#579](https://github.com/taito-station/paddock/issues/579)）**: stale 機械検査と D クラス体系（PR2）、プロダクト目標と REQ-ID 規約（PR3）、質問票 skill の汎用改修（PR4・dotclaude 側）。既存 ADR の REQ-ID 遡及紐付けと knowledge への全写しの実施は段階的に進める。**写しは機械検査の配線後**（順序は決定 2 参照）。
 - 関連: #254（ADR 番号重複検出）／ADR 0064（second source を戒める）／[docs/knowledge/README.md](../knowledge/README.md)（蒸留規約の正）。
 

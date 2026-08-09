@@ -72,7 +72,7 @@
 - **完全な堅牢化**は常時稼働ホスト（RasPi / 小型クラウド VM 等）へ prefetch を移設して
   ローカル Mac の電源・スリープ状態に依存させないこと（構成変更が大きいため別途）。
 - **この keep-awake は predict-watch / odds-collect の抑止も兼ねる**。監視バイナリ側は抑止を持たない
-  （#568 / [ADR 0072](../../docs/adr/0072-monitor-loop-wall-clock-sleep-resilience.md) で
+  （#568 / [ADR 0072](../../docs/original-docs/0072-monitor-loop-wall-clock-sleep-resilience.md) で
   「抑止は #264 に一本化」と決めた）。ただし監視ループ自体は wall-clock 基準なので、**スリープを
   跨いでも復帰後に自動再開し、空いた区間を警告する**
   （[監視ループのスリープ耐性](../../docs/knowledge/monitor-loop-sleep-resilience.md)）。
