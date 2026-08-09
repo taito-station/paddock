@@ -774,6 +774,145 @@ def test_req_marker_in_code_fence_is_ignored() -> None:
         shutil.rmtree(repo)
 
 
+def test_req_row_outside_block_is_error() -> None:
+    """マーカーを付け忘れた REQ 表を素通りさせない（表ごと無検査になる経路）。"""
+    repo = new_repo()
+    try:
+        baseline(repo)
+        path = repo / "docs/knowledge/a.md"
+        path.write_text(path.read_text(encoding="utf-8") + "\n" + VALID_ROW + "\n",
+                        encoding="utf-8")
+        code, out = check(repo)
+        assert code == 1, out
+        assert "REQ ブロックの外にある" in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_req_malformed_marker_is_error() -> None:
+    """begin/end が揃って綴り違いだと、従来は表ごと無検査で exit 0 になっていた。"""
+    repo = new_repo()
+    try:
+        baseline(repo)
+        path = repo / "docs/knowledge/a.md"
+        path.write_text(
+            path.read_text(encoding="utf-8")
+            + "\n<!-- REQ:begin D1 -->\n" + VALID_ROW + "\n<!-- REQ:end D1 -->\n",
+            encoding="utf-8",
+        )
+        code, out = check(repo)
+        assert code == 1, out
+        assert "マーカーの書式が不正" in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_req_missing_header_is_error() -> None:
+    repo = new_repo()
+    try:
+        baseline(repo)
+        append_req_block(repo, "docs/knowledge/a.md", "D19", [VALID_ROW], header=False)
+        code, out = check(repo)
+        assert code == 1, out
+        assert "見出し行が" in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_req_header_order_swapped_is_error() -> None:
+    """列は位置で読むので、順序が入れ替わると Confirmed 検査が別の列に当たる。"""
+    repo = new_repo()
+    try:
+        baseline(repo)
+        append_req_block(
+            repo, "docs/knowledge/a.md", "D19",
+            ["| REQ-ID | 要件 | 出典 | 検証手段 | status |",
+             "|---|---|---|---|---|",
+             VALID_ROW],
+            header=False,
+        )
+        code, out = check(repo)
+        assert code == 1, out
+        assert "見出し行が" in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_req_absolute_link_is_error() -> None:
+    """絶対パスを許すと Path 連結が root を捨て、リポジトリ外が実在扱いで通る。"""
+    repo = new_repo()
+    try:
+        baseline(repo)
+        append_req_block(repo, "docs/knowledge/a.md", "D19",
+                         ["| REQ-D19-001 | 何か | `cargo test` "
+                          "| [外](/etc/hosts) | Confirmed |"])
+        code, out = check(repo)
+        assert code == 1, out
+        assert "相対パスで書く" in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_req_link_outside_repo_is_error() -> None:
+    repo = new_repo()
+    try:
+        baseline(repo)
+        append_req_block(repo, "docs/knowledge/a.md", "D19",
+                         ["| REQ-D19-001 | 何か | `cargo test` "
+                          "| [外](../../../../etc/hosts) | Confirmed |"])
+        code, out = check(repo)
+        assert code == 1, out
+        assert "リポジトリ外" in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_req_escaped_pipe_in_cell_is_accepted() -> None:
+    """検証手段にはコマンドを書く。`\\|` を割ると正当なセルが列数エラーに化ける。"""
+    repo = new_repo()
+    try:
+        baseline(repo)
+        append_req_block(repo, "docs/knowledge/a.md", "D19",
+                         [r"| REQ-D19-001 | 何か | `cargo test \| tail -1` "
+                          r"| ADR 0001 | Confirmed |"])
+        code, out = check(repo)
+        assert code == 0, f"エスケープされたパイプで落ちた: {out}"
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_req_single_dash_separator_is_accepted() -> None:
+    """`|-|-|-|-|-|` は GFM で正当。データ行と誤認して落とさない。"""
+    repo = new_repo()
+    try:
+        baseline(repo)
+        append_req_block(
+            repo, "docs/knowledge/a.md", "D19",
+            ["| REQ-ID | 要件 | 検証手段 | 出典 | status |", "|-|-|-|-|-|", VALID_ROW],
+            header=False,
+        )
+        code, out = check(repo)
+        assert code == 0, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_req_unclosed_code_fence_is_error() -> None:
+    """フェンスが開いたままだと、以降の REQ 表がフェンス内扱いで無検査になる。"""
+    repo = new_repo()
+    try:
+        baseline(repo)
+        path = repo / "docs/knowledge/a.md"
+        path.write_text(path.read_text(encoding="utf-8") + "\n```sh\necho 未完\n",
+                        encoding="utf-8")
+        append_req_block(repo, "docs/knowledge/a.md", "D19", [VALID_ROW])
+        code, out = check(repo)
+        assert code == 1, out
+        assert "コードフェンスが閉じられていない" in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
 def main() -> int:
     if not TARGET.is_file():
         print(f"テスト対象が見つからない: {TARGET}", file=sys.stderr)

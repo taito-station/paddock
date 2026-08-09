@@ -103,12 +103,12 @@ def extract_block(text: str, name: str) -> list[str]:
     return text.split(begin, 1)[1].split(end, 1)[0].splitlines()
 
 
-def parse_frontmatter(path: Path) -> dict:
+def parse_frontmatter(text: str) -> dict:
     """frontmatter を dict で返す。無ければ空 dict。
 
     `---` 直後の `#` 始まり行（specifications が持つ YAML コメント）は読み飛ばす。
     """
-    lines = path.read_text(encoding="utf-8").splitlines()
+    lines = text.splitlines()
     if not lines or lines[0].strip() != "---":
         return {}
     out: dict = {}
@@ -261,9 +261,16 @@ def last_content_change(path: str, limit: int = 40, max_renames: int = 10) -> "s
 # 依存させないため、範囲はマーカーで宣言する（doc-classes.md の表と同じ方式）。
 RE_REQ_BEGIN = re.compile(r"^<!--\s*REQ:begin\s+(D\d{2})\s*-->$")
 RE_REQ_END = re.compile(r"^<!--\s*REQ:end\s+(D\d{2})\s*-->$")
+# 「マーカーのつもりで書かれた行」を緩く拾う。厳密形（D + 2 桁）から外れた綴りを
+# 黙って地の文として扱うと、begin と end が揃って外れたときに REQ 表が丸ごと
+# 無検査になる（実測: `<!-- REQ:begin D1 -->` で表全体が素通りする fail-open）。
+RE_REQ_MARKER_LOOSE = re.compile(r"^<!--\s*REQ\s*:?\s*(?:begin|end)\b.*-->$", re.IGNORECASE)
+# ブロック外に取り残された REQ 行の検出用。マーカーを付け忘れた表を可視化する。
+RE_REQ_ROW = re.compile(r"^\|\s*REQ[-\s]", re.IGNORECASE)
+RE_FENCE = re.compile(r"^(`{3,}|~{3,})")
 RE_REQ_ID = re.compile(r"^REQ-(D\d{2})-(\d{3})$")
 RE_MD_LINK = re.compile(r"\[[^\]]*\]\(([^)\s]+)\)")
-RE_TABLE_SEP_CELL = re.compile(r"^:?-{2,}:?$")
+RE_TABLE_SEP_CELL = re.compile(r"^:?-+:?$")
 
 REQ_COLUMNS = ("REQ-ID", "要件", "検証手段", "出典", "status")
 # Confirmed / Tentative / Conflict は frontmatter の status と同義。Retired は
@@ -275,36 +282,65 @@ EMPTY_CELLS = {"", "-", "–", "—", "tbd", "unknown", "n/a", "未定", "なし
 
 
 def split_row(line: str) -> list[str]:
-    return [c.strip() for c in line.strip().strip("|").split("|")]
+    """GFM の表行をセルへ分割する。
+
+    エスケープされたパイプ（`\\|`）では割らない。検証手段の列にはコマンドを書くので、
+    素朴に `split("|")` すると `... | jq` のような正当なセルが「列数が 5 でない」に化ける。
+    """
+    body = line.strip()
+    if body.startswith("|"):
+        body = body[1:]
+    if body.endswith("|") and not body.endswith(r"\|"):
+        body = body[:-1]
+    return [c.strip().replace(r"\|", "|") for c in re.split(r"(?<!\\)\|", body)]
 
 
 def parse_req_blocks(text: str) -> "tuple[list[tuple[str, list[list[str]]]], list[str]]":
     """REQ ブロックを (クラス, 表の行) のリストに切り出す。第 2 戻り値は構造エラー。
 
     マーカーの対応崩れは「REQ 表が丸ごと検査対象から消える」経路（fail-open）なので、
-    黙って無視せず error として返す。コードフェンス内のマーカー・表は規約の説明文が
-    持つため無視する。
+    黙って無視せず error として返す。塞ぐ経路は 4 つ:
+
+      1. マーカーを付け忘れた REQ 表      → ブロック外の REQ 行を検出する
+      2. マーカーの綴り違い（`D1` 等）    → 緩い正規表現で拾って書式不正にする
+      3. コードフェンスの閉じ忘れ         → 走査終了時に開いたままなら error
+      4. begin / end の対応崩れ           → 従来どおり error
+
+    コードフェンス内のマーカー・表は規約の説明文が持つため無視する（同種・同長以上の
+    フェンスでのみ閉じる＝``` の中の ~~~ で誤って閉じない）。
     """
     blocks: list[tuple[str, list[list[str]]]] = []
     errors: list[str] = []
     cls: "str | None" = None
     rows: list[list[str]] = []
-    fenced = False
-    for line in text.splitlines():
+    fence: "str | None" = None
+    for lineno, line in enumerate(text.splitlines(), 1):
         stripped = line.strip()
-        if stripped.startswith("```"):
-            fenced = not fenced
+        opener = RE_FENCE.match(stripped)
+        if opener:
+            token = opener.group(1)
+            if fence is None:
+                fence = token[0]
+            elif token[0] == fence:
+                fence = None
             continue
-        if fenced:
+        if fence is not None:
             continue
+
         begin = RE_REQ_BEGIN.match(stripped)
+        end = RE_REQ_END.match(stripped)
+        if not begin and not end and RE_REQ_MARKER_LOOSE.match(stripped):
+            errors.append(
+                f"{lineno} 行目: REQ マーカーの書式が不正 → {stripped}"
+                "（<!-- REQ:begin D<NN> --> / <!-- REQ:end D<NN> --> のみ）"
+            )
+            continue
         if begin:
             if cls is not None:
                 errors.append(f"REQ ブロック（{cls}）が閉じられないまま次の begin がある")
                 blocks.append((cls, rows))
             cls, rows = begin.group(1), []
             continue
-        end = RE_REQ_END.match(stripped)
         if end:
             if cls is None:
                 errors.append(f"対応する begin の無い REQ:end がある（{end.group(1)}）")
@@ -316,8 +352,18 @@ def parse_req_blocks(text: str) -> "tuple[list[tuple[str, list[list[str]]]], lis
                 blocks.append((cls, rows))
             cls, rows = None, []
             continue
-        if cls is not None and stripped.startswith("|"):
-            rows.append(split_row(stripped))
+
+        if cls is not None:
+            if stripped.startswith("|"):
+                rows.append(split_row(stripped))
+        elif RE_REQ_ROW.match(stripped):
+            errors.append(
+                f"{lineno} 行目: REQ 行が REQ ブロックの外にある → {stripped}"
+                "（マーカーで囲まないと一意性・status の検査から丸ごと漏れる）"
+            )
+
+    if fence is not None:
+        errors.append("コードフェンスが閉じられていない（以降の REQ 表が無検査になる）")
     if cls is not None:
         errors.append(f"REQ ブロック（{cls}）が閉じられていない")
         blocks.append((cls, rows))
@@ -348,13 +394,23 @@ def check_req_blocks(
                 f"（doc_class={doc_classes}）"
             )
 
-        data = [
-            cells
-            for cells in rows
-            if cells
-            and cells[0] != REQ_COLUMNS[0]
-            and not all(RE_TABLE_SEP_CELL.match(c) for c in cells)
-        ]
+        # 見出し行は必須で、列名も順序も固定。位置で意味付けして読む（下の unpack）ので、
+        # 順序が入れ替わると「Confirmed には検証手段が必須」の検査が別の列に当たる。
+        if len(rows) < 2 or rows[0] != list(REQ_COLUMNS):
+            errors.append(
+                f"{rel}: REQ ブロック（{cls}）の見出し行が "
+                f"`| {' | '.join(REQ_COLUMNS)} |` でない"
+            )
+            continue
+        if len(rows[1]) != len(REQ_COLUMNS) or not all(
+            RE_TABLE_SEP_CELL.match(c) for c in rows[1]
+        ):
+            errors.append(
+                f"{rel}: REQ ブロック（{cls}）の区切り行が {len(REQ_COLUMNS)} 列になっていない"
+            )
+            continue
+
+        data = [cells for cells in rows[2:] if cells and any(cells)]
         if not data:
             errors.append(f"{rel}: REQ ブロック（{cls}）に要件行が 1 つも無い")
             continue
@@ -404,8 +460,21 @@ def check_req_blocks(
             for target in RE_MD_LINK.findall(origin) + RE_MD_LINK.findall(verification):
                 if target.startswith(("http://", "https://", "mailto:", "#")):
                     continue
-                resolved = (root / rel).parent / target.split("#", 1)[0]
-                if not resolved.is_file():
+                cleaned = target.split("#", 1)[0]
+                # sources 検査（下）と同じ理由でリポジトリ外を弾く。絶対パスを許すと
+                # Path 連結が左辺を捨てて外を指し、「由来はリポジトリ内で辿れる」という
+                # 前提が崩れる（`[外](/etc/hosts)` が実在扱いで通る）。
+                if cleaned.startswith("/"):
+                    errors.append(
+                        f"{rel}: {req_id} のリンクは文書からの相対パスで書く → {target}"
+                    )
+                    continue
+                resolved = ((root / rel).parent / cleaned).resolve()
+                if not resolved.is_relative_to(root.resolve()):
+                    errors.append(
+                        f"{rel}: {req_id} のリンクがリポジトリ外を指している → {target}"
+                    )
+                elif not resolved.is_file():
                     errors.append(f"{rel}: {req_id} のリンク先が実在しない → {target}")
 
 
@@ -479,7 +548,8 @@ def main(argv: list[str]) -> int:
     req_seen: dict[str, str] = {}
     for path in targets:
         rel = path.relative_to(root).as_posix()
-        fm = parse_frontmatter(path)
+        text = path.read_text(encoding="utf-8")
+        fm = parse_frontmatter(text)
         if not fm:
             errors.append(f"{rel}: frontmatter が無い")
             continue
@@ -506,10 +576,7 @@ def main(argv: list[str]) -> int:
                     )
 
         # (8) REQ 表
-        check_req_blocks(
-            rel, path.read_text(encoding="utf-8"), fm.get("doc_class"),
-            declared, req_seen, root, errors,
-        )
+        check_req_blocks(rel, text, fm.get("doc_class"), declared, req_seen, root, errors)
 
         # (4) sources の実在
         sources = fm.get("sources", [])
