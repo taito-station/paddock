@@ -4,16 +4,16 @@
 status: Confirmed
 kind: knowledge
 sources:
-  - docs/adr/0068-race-result-ingestion-ui-reflection.md
-  - docs/adr/0015-netkeiba-result-source.md
-  - docs/adr/0064-live-ev-buy-view.md
+  - docs/original-docs/0068-race-result-ingestion-ui-reflection.md
+  - docs/original-docs/0015-netkeiba-result-source.md
+  - docs/original-docs/0064-live-ev-buy-view.md
 distilled_from_sha: "f765be7"
 updated: "2026-07-17"
 ---
 
 # レース結果の同日取り込みと UI 自動反映: 設計仕様
 
-[Issue #381](https://github.com/taito-station/paddock/issues/381) / 依存: [#40 確定結果の自動精算](https://github.com/taito-station/paddock/issues/40)・[#33 REST API read 基盤](https://github.com/taito-station/paddock/issues/33)・[#34 Web SPA](https://github.com/taito-station/paddock/issues/34) / 関連 ADR: [0068](../adr/0068-race-result-ingestion-ui-reflection.md)・[0015](../adr/0015-netkeiba-result-source.md)・[0064](../adr/0064-live-ev-buy-view.md)
+[Issue #381](https://github.com/taito-station/paddock/issues/381) / 依存: [#40 確定結果の自動精算](https://github.com/taito-station/paddock/issues/40)・[#33 REST API read 基盤](https://github.com/taito-station/paddock/issues/33)・[#34 Web SPA](https://github.com/taito-station/paddock/issues/34) / 関連 ADR: [0068](../original-docs/0068-race-result-ingestion-ui-reflection.md)・[0015](../original-docs/0015-netkeiba-result-source.md)・[0064](../original-docs/0064-live-ev-buy-view.md)
 
 ## 概要
 

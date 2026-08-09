@@ -2,7 +2,7 @@
 # 存在しないディレクトリは自動スキップされる（knowledge/qa/original-docs は段階導入）。
 [index]
 roots = [
-  # ADR は ADR 0073 で docs/original-docs に統合した（一次資料層）。ここに "docs/adr" を残すと
+  # ADR は ADR 0073 で旧 "docs/adr" から docs/original-docs へ統合した（一次資料層）。旧 root を残すと
   # 同一ファイルを 2 root から索引しに行くため（iter_markdown は roots を重複除去しない）追加しない。
   "docs/specifications",
   "docs/knowledge",

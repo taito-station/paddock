@@ -14,7 +14,7 @@ knowledge を蒸留する**元になる未整理の一次資料**を置く場所
 ## 何を置かないか
 
 - 確定した運用ルール・ドメイン知 → `docs/knowledge/` or `docs/specifications/`
-- 決定とその根拠 → `docs/adr/`
+- 決定とその根拠 → `docs/original-docs/`
 - コード・設定（リポジトリ本体で管理）
 
 ## 運用

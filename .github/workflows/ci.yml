@@ -158,7 +158,7 @@ jobs:
       - name: Build (vite)
         run: npm run build
 
-  # ADR 番号（docs/adr/NNNN-*.md）の重複検出（#254）。並行クローン/worktree 運用で番号が
+  # ADR 番号（docs/original-docs/NNNN-*.md）の重複検出（#254）。並行クローン/worktree 運用で番号が
   # 二重取得される事故（#251 と #253 が同時に 0040 採番）の再発防止。Rust/Postgres 不要の
   # 軽量チェックなので独立ジョブにして並列で即終わらせる（ci / ocr-pdf には影響させない）。
   adr:

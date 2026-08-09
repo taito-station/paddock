@@ -17,7 +17,7 @@ docs/knowledge/ ＋ docs/specifications/   status 付き確定知（＝この層
 
 - **横断検索**は mdq（Markdown Query, BM25・ローカル）で全 docs を索引する。生ファイルを読む前に
   `scripts/mdq search` を使う（[.claude/skills/markdown-query/SKILL.md](../../.claude/skills/markdown-query/SKILL.md)）。
-- **ADR（`docs/adr/`）は不変の決定記録**として据え置く。knowledge は決定の「なぜ」を frontmatter
+- **ADR（`docs/original-docs/`）は不変の決定記録**として据え置く。knowledge は決定の「なぜ」を frontmatter
   `sources` と本文リンクで ADR へ参照する（ADR は移動・改変しない）。
 
 ## knowledge はどこにあるか
@@ -36,7 +36,7 @@ docs/knowledge/ ＋ docs/specifications/   status 付き確定知（＝この層
 status: Confirmed        # Confirmed（確定）/ Tentative（暫定）/ Conflict（矛盾・要解消）
 kind: knowledge
 sources:                 # 由来（ADR / qa / original-docs のパス）。決定の「なぜ」を辿れるように
-  - docs/adr/NNNN-....md
+  - docs/original-docs/NNNN-....md
 distilled_from_sha: "<short-sha>"  # この知が反映するリポジトリ状態の git SHA（トレーサビリティ）
 updated: "YYYY-MM-DD"    # 内容を実質更新した日（YAML の date 型を避けるため必ずクォート。詳細な履歴は git log を正とする）
 ---

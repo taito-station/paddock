@@ -5,7 +5,7 @@
 # されうる（実例: #251 と #253 が同時に 0040 を採番）。GitHub Issue 番号と違いサーバ採番では
 # ないため人手では再発が防げない。本スクリプトを CI / pre-push で走らせて重複を弾く。
 #
-# 走査先は docs/original-docs（ADR 0073 で docs/adr から統合。ADR は一次資料層に属する）。
+# 走査先は docs/original-docs（ADR 0073 で旧 docs/adr から統合。ADR は一次資料層に属する）。
 # このディレクトリには ADR と GitHub issue 由来の一次資料（382-*.md 等）が混在するため、
 # ファイル名で両者を分離する。分離規約は docs/original-docs/README.md が正:
 #   - ADR     : 0 埋め 4 桁で始まる（0001〜0999）。先頭文字が必ず '0'。

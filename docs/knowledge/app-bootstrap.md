@@ -3,8 +3,8 @@ status: Confirmed
 kind: knowledge
 sources:
   - docs/qa/QA-setup-boilerplate-410.md
-  - docs/adr/0069-drop-icloud-writes-browser-only-viewing.md
-  - docs/adr/0070-explicit-migration-no-auto-on-startup.md
+  - docs/original-docs/0069-drop-icloud-writes-browser-only-viewing.md
+  - docs/original-docs/0070-explicit-migration-no-auto-on-startup.md
 distilled_from_sha: "8f8be21"
 updated: "2026-07-27"
 ---

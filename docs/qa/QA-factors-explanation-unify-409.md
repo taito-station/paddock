@@ -1,8 +1,8 @@
 # QA: #409 build_factors / build_explanation の二重実装単一化
 
 > 質問票+回答（[docs/qa/README.md](README.md)）。一次資料は issue #409（全体レビュー 2026-07-15 由来）。
-> 関連確定知: [ADR 0014](../adr/0014-none-baseline-exclusion.md)（predict・backtest は同じ `build_factors`/`estimate_probabilities` を共有）、
-> [ADR 0055](../adr/0055-ev-layer-separation-circular-break.md)（`predict_race_views` は factor 収集 1 回）。
+> 関連確定知: [ADR 0014](../original-docs/0014-none-baseline-exclusion.md)（predict・backtest は同じ `build_factors`/`estimate_probabilities` を共有）、
+> [ADR 0055](../original-docs/0055-ev-layer-separation-circular-break.md)（`predict_race_views` は factor 収集 1 回）。
 > 回答確定後、純リファクタで新規決定を伴わなければ ADR 起票は不要。設計上の含意は knowledge へ蒸留する。
 
 ## Q1: 共有中間構造体に何を持たせ、recency の乖離点をどう扱うか

@@ -526,7 +526,7 @@ scripts/reset-db.sh --to <target_url>    # 対象 DB を明示
 - `scripts/backup-db.sh`: DB 全体を custom-format dump でタイムスタンプ付き退避＋世代管理する
   （`race_odds_snapshots` 等の再取得不能な蓄積資産を volume 喪失から守る）。復元手順は
   `deployments/db/BACKUP.md`、日次実行などの launchd ジョブは `deployments/launchd/` を参照。
-- `scripts/check-adr-numbers.sh`: ADR 番号（`docs/adr/NNNN-*.md`）の重複を機械検出する（CI / pre-push 用）。
+- `scripts/check-adr-numbers.sh`: ADR 番号（`docs/original-docs/NNNN-*.md`）の重複を機械検出する（CI / pre-push 用）。
 - `scripts/harness/`: 学習型モデル評価ハーネス（backtest の忠実性ゲート等。`scripts/harness/README.md` 参照）。
 
 ## 開発
@@ -549,7 +549,7 @@ cargo clippy --all-targets
 
 ドキュメント:
 
-- `docs/adr/` … アーキテクチャ・ルール変更の決定記録（ADR。棄却した案も記録する）
+- `docs/original-docs/` … アーキテクチャ・ルール変更の決定記録（ADR。棄却した案も記録する）
 - `docs/specifications/` … 確率推定・backtest・買い目選定・予想 JSON などの仕様書
 - `docs/api/openapi.json` … REST API の OpenAPI スナップショット（utoipa コードファースト。web の型生成の入力）
 

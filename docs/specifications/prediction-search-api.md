@@ -4,7 +4,7 @@
 status: Confirmed
 kind: knowledge
 sources:
-  - docs/adr/0025-prediction-search-api.md
+  - docs/original-docs/0025-prediction-search-api.md
   - docs/api/openapi.json
 distilled_from_sha: "21e6076"
 updated: "2026-07-30"
@@ -262,4 +262,4 @@ API なのでブラウザ UI は無い。`tests/browser-test-cases/` は追加�
 - #145 本 Issue（横断検索） / 依存: #144（予想 DB 永続化, 完了）
 - #34 Web SPA（一覧 → 個別の画面遷移・分析ビュー） / #33 REST API(read, 完了) / #50 名前あいまい検索（完了, 正規化流用）
 - `~/.claude/rules/rust/architecture.md`・`conventions.md` / `~/.claude/rules/sql/{queries,schema,migrations}.md`
-- ADR: `docs/adr/0025-prediction-search-api.md`
+- ADR: `docs/original-docs/0025-prediction-search-api.md`

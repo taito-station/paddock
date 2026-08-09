@@ -49,7 +49,7 @@
 ## 再現
 
 ```sh
-# 1. 純 dump（18ヶ月・production 相当）: docs/adr/0061 と同じ
+# 1. 純 dump（18ヶ月・production 相当）: docs/original-docs/0061 と同じ
 ./target/release/paddock-analyze backtest --from 2025-01-01 --to 2026-06-30 \
   --blend-alpha 1.0 --shrinkage-m 10 --win-power 1.25 --place-show-power 2.0 \
   --dump-features /tmp/pa/pure_long.tsv

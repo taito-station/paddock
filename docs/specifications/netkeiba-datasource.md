@@ -4,8 +4,8 @@
 status: Confirmed
 kind: knowledge
 sources:
-  - docs/adr/0008-netkeiba-same-day-datasource.md
-  - docs/adr/0048-retire-jra-odds-scraper-for-netkeiba.md
+  - docs/original-docs/0008-netkeiba-same-day-datasource.md
+  - docs/original-docs/0048-retire-jra-odds-scraper-for-netkeiba.md
 distilled_from_sha: "f765be7"
 updated: "2026-07-17"
 ---
@@ -205,6 +205,6 @@ paddock-fetch-card --year 2026 --venue 東京 --round 3 --day 2 --race 11
 
 ## 関連
 
-- ADR: [0008 netkeiba を当日データソースに採用](../adr/0008-netkeiba-same-day-datasource.md)
+- ADR: [0008 netkeiba を当日データソースに採用](../original-docs/0008-netkeiba-same-day-datasource.md)
 - 関連 Issue: #25(オッズ→predict 結線)、#38(組合せ券種オッズ)、#40(結果自動精算)、#31(未活用特徴量)
 - CLI テストケース: `tests/cli-test-cases/fetch-card-command.md`

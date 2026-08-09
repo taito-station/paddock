@@ -4,15 +4,15 @@
 status: Confirmed
 kind: knowledge
 sources:
-  - docs/adr/0007-probability-monotonicity-jockey.md
-  - docs/adr/0009-recent-form-feature.md
-  - docs/adr/0011-track-condition-feature.md
-  - docs/adr/0012-trainer-stats-feature.md
-  - docs/adr/0014-none-baseline-exclusion.md
-  - docs/adr/0016-shrinkage-and-recency.md
-  - docs/adr/0042-win-power-calibration-adopted.md
-  - docs/adr/0056-feature-reweight-course-gate-jockey.md
-  - docs/adr/0057-impute-missing-factors-field-mean.md
+  - docs/original-docs/0007-probability-monotonicity-jockey.md
+  - docs/original-docs/0009-recent-form-feature.md
+  - docs/original-docs/0011-track-condition-feature.md
+  - docs/original-docs/0012-trainer-stats-feature.md
+  - docs/original-docs/0014-none-baseline-exclusion.md
+  - docs/original-docs/0016-shrinkage-and-recency.md
+  - docs/original-docs/0042-win-power-calibration-adopted.md
+  - docs/original-docs/0056-feature-reweight-course-gate-jockey.md
+  - docs/original-docs/0057-impute-missing-factors-field-mean.md
 distilled_from_sha: "c00d97f"
 updated: "2026-07-16"
 ---

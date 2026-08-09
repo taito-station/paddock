@@ -40,10 +40,10 @@ tools/mdq/.venv/bin/pip install -r tools/mdq/requirements.txt   # rank_bm25 / Py
 
 ## 使い方の要点
 
-1. **索引**: `scripts/mdq index`。`mdq.toml` の `[index].roots`（docs/adr, docs/specifications,
+1. **索引**: `scripts/mdq index`。`mdq.toml` の `[index].roots`（docs/original-docs, docs/specifications,
    docs/knowledge, docs/qa, docs/original-docs）を走査。存在しない dir は自動スキップ。増分更新。
 2. **検索**: `scripts/mdq search --q "クエリ" --top-k 5 --max-tokens 800`。出力は JSONL（1 行 1 ヒット、
-   `path` / `heading_path` / `lines` / `score` / `snippet`）。`--paths "docs/adr/*"` で絞ると精度向上。
+   `path` / `heading_path` / `lines` / `score` / `snippet`）。`--paths "docs/original-docs/*"` で絞ると精度向上。
    `--mode grep` で完全一致に切替。
 3. **本文取得**: `scripts/mdq get --chunk-id <ID>`（必要時のみ）。
 4. 結果は**そのまま使う**（生 Markdown を読み直さない）。

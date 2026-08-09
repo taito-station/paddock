@@ -4,7 +4,7 @@
 status: Confirmed
 kind: knowledge
 sources:
-  - docs/adr/0024-fetch-stage-split-acquisition-state.md
+  - docs/original-docs/0024-fetch-stage-split-acquisition-state.md
 distilled_from_sha: "f765be7"
 updated: "2026-07-17"
 ---
