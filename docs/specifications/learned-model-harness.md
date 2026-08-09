@@ -8,6 +8,7 @@ tags: [D24, D22, D19]
 sources:
   - docs/original-docs/0027-accuracy-lever-is-market-blend-not-data-volume.md
   - docs/original-docs/0042-win-power-calibration-adopted.md
+  - docs/original-docs/0045-ev-pipeline-joint-reverification-framework.md
   - docs/original-docs/0047-place-show-power-decompression-adopted.md
   - docs/original-docs/0050-placeshow-raw-score-retune-rejected.md
   - docs/original-docs/0051-placeshow-power-knee-confirmed-keep-2.md
@@ -17,8 +18,8 @@ sources:
   - docs/original-docs/0058-pedigree-sire-feature-rejected.md
   - docs/original-docs/0059-market-calibration-correction-rejected.md
   - docs/original-docs/0060-betting-axis-lock-preclose-topup.md
-distilled_from_sha: "f765be7"
-updated: "2026-07-21"
+distilled_from_sha: "6b74f57"
+updated: "2026-08-10"
 ---
 
 # 学習型モデル評価ハーネス 設計（#272 土台 / #309 受け皿）
@@ -128,6 +129,32 @@ ADR 0052（α blend 廃止＝純モデル化の棄却）の通り、純 P_model 
   サニティ**してから学習モデルに使う（ハーネス自体のバグ・設定差を検出する回帰）。
 - production 構成は常に明示（m=10 / win_power=1.25 / place_show_power=2.0 / α=0.2）。
 
+### 純 Python での鏡映（α×γ 同時掃引・ADR 0045）
+
+パラメータを振るたびに Rust binary を再実行するのは非現実的なので、**本番パイプラインを純 Python で
+厳密に鏡映**し、**α=1.0 の実行 1 本から `p_model` を復元**して (α, γ) グリッドを掃引する
+（`scripts/predict-check/umaren_backtest.py`）。
+
+処理順は Rust 本番（`PRODUCTION_BLEND_ALPHA`）を 1:1 でなぞる:
+
+1. `market_implied(win_odds)`: `raw = 1/odds` → `overround = Σraw`（オッズのある全頭）→ `implied = raw/overround`
+2. `recompute_p_final(p_model, implied, α, γ)`: `blended = α·model + (1−α)·implied`（**implied に居る馬のみ**。
+   オッズ欠落馬は model 据置）→ Σ1 正規化 → `powered = blended^γ` → Σ1 正規化
+3. `recover_p_model(p_final, γ)`: α=1.0 の出力（市場補正なし＝`normalize(model^γ)`）から逆算して `p_model` を復元
+
+**この鏡映は「速く回すための近似」ではなく厳密な等価**でなければ意味が無い。上の
+「忠実性をサニティで担保」と同じ理由で、不変量テスト（`test_umaren_backtest.py`）で固定してある。
+
+- **知見であって確定チューニングではない**。71R・赤字窓（無ゲート 71〜75% < 100%）で α・γ を同時に
+  振れば**過学習が確実**で、α=0.5 で Spearman が正に転じるのも n_gate=2〜3 の小標本。本番定数
+  （m=10 / α=0.2 / γ=1.25）は本 ADR では一切変更していない。確定は #248 の年間蓄積（正の母集団を
+  含む窓）後に先送りしている。
+- **model-EV ゲートの逆予測は ADR 0044 / 0041 / 0033 と同型**（額面 model EV の閾値抽出は較正不良ゾーンで
+  ノイズを掴む）。盤面オッズ→締切ドリフトの残存相関はゲートを実際より良く見せる方向に働くので、
+  それでも逆予測する以上、結論はより頑健。
+- m 軸は #282 で追加して 3 軸化した（m は `p_model` に焼き込み済みのため、m の再検証には binary 再生成が要る）。
+- `--p-model-dir` を指定したときだけ掃引を出力し、未指定なら既存挙動は完全に不変。
+
 ## 段階（Phase）
 
 | Phase | 内容 | issue |
@@ -146,5 +173,5 @@ ADR 0052（α blend 廃止＝純モデル化の棄却）の通り、純 P_model 
 ## 関連
 
 - Issue: #272（予測フロー再設計・親・**CLOSED**）/ #309（学習モデル実装・**CLOSED**）/ #305（純モデル value シグナル検証の提起元・クローズ済、検証は本ハーネス #272/#309 へ継承）/ #263（較正後 EV ゲートの逆予測性）
-- ADR: 0027（精度のレバーは市場ブレンド）/ 0042（win_power）/ 0047（place/show 冪変換の採用＝`place_show_power=2.0` の根拠）/ 0050（place/show raw_score 再調整の棄却）/ 0051（place/show 冪 γ の knee 確定）/ 0052（α blend 廃止の棄却）/ **0053（学習型 fundamental モデルの棄却＝#309 の結論・本路線 close）** / **0058（純 resolution 天井）** / **0059（市場較正補正の棄却＝市場側も sub-takeout で exploitable でない）** / **0055（EV 層分離＝執行エッジの土台）** / **0060（軸ロック＋ズレ増額＝残るエッジの置き所）**
+- ADR: 0027（精度のレバーは市場ブレンド）/ 0042（win_power）/ **0045（α×γ 同時再検証フレームワーク＝純 Python 鏡映・暫定知見）**/ 0047（place/show 冪変換の採用＝`place_show_power=2.0` の根拠）/ 0050（place/show raw_score 再調整の棄却）/ 0051（place/show 冪 γ の knee 確定）/ 0052（α blend 廃止の棄却）/ **0053（学習型 fundamental モデルの棄却＝#309 の結論・本路線 close）** / **0058（純 resolution 天井）** / **0059（市場較正補正の棄却＝市場側も sub-takeout で exploitable でない）** / **0055（EV 層分離＝執行エッジの土台）** / **0060（軸ロック＋ズレ増額＝残るエッジの置き所）**
 - 既存: `scripts/predict-check/live_ev.py`（EV/買い方ロジック）/ `docs/specifications/backtest.md` / `probability-estimation.md`
