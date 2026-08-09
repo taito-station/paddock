@@ -3,6 +3,8 @@
 # knowledge に昇格（ADR 履歴・相互リンクを壊さないため物理移動しない）。
 status: Confirmed
 kind: knowledge
+doc_class: [D10, D08, D09]
+tags: [D10, D08, D09]
 sources:
   - docs/original-docs/0008-netkeiba-same-day-datasource.md
   - docs/original-docs/0048-retire-jra-odds-scraper-for-netkeiba.md

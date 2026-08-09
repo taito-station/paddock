@@ -3,6 +3,8 @@
 # knowledge に昇格（ADR 履歴・相互リンクを壊さないため物理移動しない）。
 status: Confirmed
 kind: knowledge
+doc_class: [D04, D10, D11]
+tags: [D04, D10, D11]
 sources:
   - docs/original-docs/0068-race-result-ingestion-ui-reflection.md
   - docs/original-docs/0015-netkeiba-result-source.md

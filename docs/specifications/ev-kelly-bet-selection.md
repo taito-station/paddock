@@ -3,6 +3,8 @@
 # knowledge に昇格（ADR 履歴・相互リンクを壊さないため物理移動しない）。
 status: Confirmed
 kind: knowledge
+doc_class: [D23, D22]
+tags: [D23, D22]
 sources:
   - docs/original-docs/0003-ev-kelly-bet-selection.md
   - docs/original-docs/0019-portfolio-generator.md

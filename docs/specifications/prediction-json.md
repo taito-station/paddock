@@ -3,6 +3,8 @@
 # knowledge に昇格（ADR 履歴・相互リンクを壊さないため物理移動しない）。
 status: Confirmed
 kind: knowledge
+doc_class: [D10, D08]
+tags: [D10, D08]
 sources:
   - docs/original-docs/0025-prediction-search-api.md
   - docs/original-docs/0032-bets-in-gen-predictions-model-based.md

@@ -3,6 +3,8 @@
 # knowledge に昇格（ADR 履歴・相互リンクを壊さないため物理移動しない）。
 status: Confirmed
 kind: knowledge
+doc_class: [D22, D19]
+tags: [D22, D19]
 sources:
   - docs/original-docs/0007-probability-monotonicity-jockey.md
   - docs/original-docs/0009-recent-form-feature.md

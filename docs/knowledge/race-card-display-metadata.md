@@ -1,12 +1,14 @@
 ---
 status: Confirmed
 kind: knowledge
+doc_class: [D08, D10, D11]
+tags: [D08, D10, D11]
 sources:
   - docs/qa/QA-race-name-389.md
   - docs/original-docs/389-race-name.md
   - docs/specifications/netkeiba-datasource.md
   - docs/specifications/rest-api-read.md
-distilled_from_sha: "8f8be21"
+distilled_from_sha: "9538782"
 updated: "2026-07-22"
 ---
 

@@ -3,6 +3,8 @@
 # knowledge に昇格（ADR 履歴・相互リンクを壊さないため物理移動しない）。
 status: Confirmed
 kind: knowledge
+doc_class: [D24, D22]
+tags: [D24, D22]
 sources:
   - docs/original-docs/0027-accuracy-lever-is-market-blend-not-data-volume.md
   - docs/original-docs/0055-ev-layer-separation-circular-break.md

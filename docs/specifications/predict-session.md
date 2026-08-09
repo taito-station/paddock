@@ -3,6 +3,8 @@
 # knowledge に昇格（ADR 履歴・相互リンクを壊さないため物理移動しない）。
 status: Confirmed
 kind: knowledge
+doc_class: [D11, D19, D08]
+tags: [D11, D19, D08]
 sources:
   - docs/original-docs/0004-predict-session-binary.md
   - docs/original-docs/0005-wire-odds-into-predict.md

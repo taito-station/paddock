@@ -1,6 +1,8 @@
 ---
 status: Confirmed
 kind: knowledge
+doc_class: [D15, D19]
+tags: [D15, D19]
 sources:
   - docs/original-docs/0072-monitor-loop-wall-clock-sleep-resilience.md
   - docs/original-docs/0060-betting-axis-lock-preclose-topup.md

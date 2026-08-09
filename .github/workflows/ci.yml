@@ -168,6 +168,10 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
+        with:
+          # check-doc-classes.py の stale 判定が git log / merge-base を使うため全履歴が要る。
+          # shallow のままだと git log -- <path> が空を返し、判定が黙って通る（fail-open）。
+          fetch-depth: 0
       # 判定器の健全性を先に確認する。本番検査が落ちたときに「ADR が本当に重複しているのか、
       # 判定器が壊れているのか」を切り分けられるようにするため（本番検査を先に置くと、それが
       # 落ちた時点でジョブが止まり判定器のシグナルを同時に失う）。
@@ -176,8 +180,15 @@ jobs:
       # 正常なので気づけない。使い捨て fixture で各分岐の終了コードと文言を固定する。
       - name: Regression test for check-adr-numbers.sh (ADR 0073)
         run: bash scripts/test-check-adr-numbers.sh
+      - name: Regression test for check-doc-classes.py (ADR 0073)
+        run: python3 scripts/test-check-doc-classes.py
       - name: Check ADR number duplicates (#254)
         run: bash scripts/check-adr-numbers.sh
+      # 文書クラスと sources 追従の検査（ADR 0073 決定 2・3）。stale 判定が git 履歴を辿るため
+      # fetch-depth: 0 が要る（既定の shallow だと git log -- <path> が空を返し、検査が常時
+      # fail-open に退化する）。stale は当面 warning（既知の未解消 6 件は #580）。
+      - name: Check document classes / sources (ADR 0073)
+        run: python3 scripts/check-doc-classes.py
 
   # stdlib のみの Python テストを ubuntu-latest 同梱の python3 で走らせる軽量ジョブ（#416 / #464）。
   # 対象は 2 群:

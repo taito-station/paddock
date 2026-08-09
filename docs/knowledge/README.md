@@ -58,6 +58,8 @@ docs/knowledge/ ＋ docs/specifications/   status 付き確定知（＝この層
 ---
 status: Confirmed        # Confirmed（確定）/ Tentative（暫定）/ Conflict（矛盾・要解消）
 kind: knowledge
+doc_class: [D22, D24]    # 文書クラス。第 1 要素が主クラス。定義は docs/knowledge/doc-classes.md
+tags: [D22, D24]         # doc_class の mdq 用ミラー（完全一致。checker が強制）
 sources:                 # 由来（ADR / qa / original-docs のパス）。決定の「なぜ」を辿れるように
   - docs/original-docs/0NNN-....md   # ADR は 0 埋め 4 桁
   - docs/qa/QA-....md
@@ -68,6 +70,13 @@ updated: "YYYY-MM-DD"    # 内容を実質更新した日（YAML の date 型を
 
 > **注意**: `updated` は必ずダブルクォートで囲む。クォートしないと YAML が `date` 型に解釈し、mdq の
 > 索引化（frontmatter を JSON 化）が `Object of type date is not JSON serializable` で失敗する。
+
+- **`doc_class` / `tags`**: 文書クラス（D01〜D24）の宣言。**定義とクラス一覧の正本は
+  [doc-classes.md](doc-classes.md)**（書式・N/A 宣言・充足ギャップもそこ）。`tags` へのミラーは
+  mdq が frontmatter を検索に使わず `tags` しか見ないため（`scripts/mdq search --tags D23`）。
+  二重管理の drift は `scripts/check-doc-classes.py` が防ぐ。
+- **機械検査**: 上記スクリプトが CI（`adr` ジョブ）と pre-push で走る。クラスの整合・`tags` の一致・
+  `sources` の実在は **error**、stale と充足ギャップは **warning**。
 
 - **status**: `Confirmed`=検証済みで運用の前提にしてよい / `Tentative`=検証中・暫定 /
   `Conflict`=source 間で矛盾があり要解消（放置しない）。
@@ -104,10 +113,18 @@ updated: "YYYY-MM-DD"    # 内容を実質更新した日（YAML の date 型を
      `distilled_from_sha` を進めると「その SHA 時点で蒸留し直した」という偽の主張になり、
      `updated`（＝内容を実質更新した日）の定義とも矛盾する。ADR 0073 の ADR 移動がこのケースで、
      20 本の `sources` パスを書き換えたが sha / 日付は据え置いた。
-     機械検査は **rename-only のコミット（`git diff --diff-filter=R` で内容差分ゼロ）を
-     比較対象から除外する**ことでこの例外を吸収する。`git log --follow` では吸収できない——
-     `--follow` はリネームより前へ履歴を遡らせるだけで、「最終コミット」がリネームコミットに
-     なる事実は変わらないため、そのまま比較すると 20 本すべてが stale 判定になる。
+     機械検査は **`R100`（内容差分ゼロのリネーム）のコミットを飛ばして実質の変更点まで遡る**
+     ことでこの例外を吸収する。`git log --follow` 単体では吸収できない——`--follow` はリネームより
+     前へ履歴を遡らせるだけで、「最終コミット」がリネームコミットになる事実は変わらないため、
+     そのまま比較すると 20 本すべてが stale 判定になる。
+   - **例外 1b: リポジトリ全体の機械的な移設のあとは `distilled_from_sha` を再ベースラインする**
+     （`updated` は触らない）。例外 1 は「`sources` のファイル自体が移動した」場合を吸収するが、
+     「`sources` のファイルは残ったまま、その中身のパス表記が一斉に書き換わった」場合は
+     内容変更として検出される。ADR 0073 の移設では後者で 7 件が誤検知した。
+     内容が実質変わっていないなら、`distilled_from_sha` を移設後の HEAD へ進めるのが正確
+     （その SHA の状態を反映しているのは事実）。`updated` は内容更新日なので据え置く。
+     **再ベースラインしてよいのは、stale の原因が移設だけの文書に限る**——ほかに実質更新が
+     混じっているものを一緒に進めると、本物の信号を消してしまう。
    - **例外 2: `status: Conflict` の宣言だけを足すときは `updated` のみ bump し、
      `distilled_from_sha` は据え置く**。「乖離に気づいた」ことを記録するだけで、再蒸留は
      していないため。sha を進めると「その SHA の状態を反映している」ことになり、

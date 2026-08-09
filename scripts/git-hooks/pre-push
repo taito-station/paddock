@@ -24,6 +24,17 @@ cargo clippy --locked --workspace --all-targets -- -D warnings
 echo "[pre-push] scripts/check-adr-numbers.sh（ADR 番号の重複検出 #254）"
 bash scripts/check-adr-numbers.sh
 
+# 文書クラスと sources 追従の検査（ADR 0073）。差分ではなくリポジトリ全体の状態を見るので
+# stdin は読まない（下の web 判定が stdin を消費するため、ここで読むと web 検査が壊れる）。
+# python3 が無い環境では警告のみでスキップする。未セットアップで push を止めない既存方針に倣う
+# （CI の adr ジョブが必ず走るのでゲートは維持される）。
+if command -v python3 >/dev/null 2>&1; then
+    echo "[pre-push] scripts/check-doc-classes.py（文書クラス / sources 追従 ADR 0073）"
+    python3 scripts/check-doc-classes.py
+else
+    echo "[pre-push] python3 が無いので check-doc-classes.py はスキップ（CI の adr ジョブが担保します）"
+fi
+
 # web/ 差分がある push のときだけ typecheck / lint を走らせる（#463）。
 # stdin から "local_ref local_sha remote_ref remote_sha" を読み取り、push 範囲の全コミットの
 # 変更ファイルを確認する。remote_sha が 0000...（新規リモートブランチ）の場合は分岐元からの
@@ -68,4 +79,4 @@ else
   echo "[pre-push] web/ 差分なし: typecheck/lint スキップ"
 fi
 
-echo "[pre-push] OK（fmt / clippy / ADR 番号 / web 通過）"
+echo "[pre-push] OK（fmt / clippy / ADR 番号 / 文書クラス / web 通過）"

@@ -1,6 +1,8 @@
 ---
 status: Confirmed
 kind: knowledge
+doc_class: [D11, D10]
+tags: [D11, D10]
 sources:
   - docs/qa/QA-analyze-384.md
   - docs/qa/QA-analyze-401.md
@@ -9,7 +11,7 @@ sources:
   - docs/specifications/web-spa.md
   - docs/specifications/rest-api-read.md
   - docs/specifications/prediction-search-api.md
-distilled_from_sha: "8f8be21"
+distilled_from_sha: "9538782"
 updated: "2026-07-22"
 ---
 

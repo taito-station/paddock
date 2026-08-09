@@ -1,6 +1,8 @@
 ---
 status: Conflict   # 本文が実装と乖離（下記）。解消するまで運用の前提にしない
 kind: knowledge
+doc_class: [D19, D15]
+tags: [D19, D15]
 sources:
   - docs/qa/QA-setup-boilerplate-410.md
   - docs/original-docs/0069-drop-icloud-writes-browser-only-viewing.md

@@ -3,6 +3,8 @@
 # knowledge に昇格（ADR 履歴・相互リンクを壊さないため物理移動しない）。
 status: Confirmed
 kind: knowledge
+doc_class: [D24, D23]
+tags: [D24, D23]
 sources:
   - docs/original-docs/0028-konsen-odds-trigger-rejected.md
   - docs/original-docs/0030-konsen-trio-partner-width-rejected.md

@@ -3,6 +3,8 @@
 # knowledge に昇格（ADR 履歴・相互リンクを壊さないため物理移動しない）。
 status: Confirmed
 kind: knowledge
+doc_class: [D10, D19, D09]
+tags: [D10, D19, D09]
 sources:
   - docs/original-docs/0022-rest-api-read-server.md
   - docs/original-docs/0069-drop-icloud-writes-browser-only-viewing.md
