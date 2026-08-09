@@ -4,6 +4,10 @@ knowledge を蒸留する**元になる資料**を置く場所。**ここのフ�
 （HVE の original-docs と同じ思想。source は改変せず、蒸留は knowledge 側で行う）。
 全体像は [docs/knowledge/README.md](../knowledge/README.md)。
 
+> 例外はディレクトリ移設に伴うパス表記の是正のみ。実績は ADR 0073 の 1 件
+> （`0062-workout-cyokyo-feature-rejected.md` の本文中にあった `docs/adr/0061` の表記）。
+> 内容の訂正・追記はしない——古い記述は「その時点で何を知っていたか」の記録として残す。
+
 ADR 0073 で ADR をここへ統合した。ADR も生素材も「一度置いたら書き換えない（RO）」という
 性質が同じで、`ADR → knowledge` の写しを規約どおりの蒸留として扱えるため。
 
@@ -17,8 +21,13 @@ ADR 0073 で ADR をここへ統合した。ADR も生素材も「一度置い�
 | **ADR**（決定記録） | **0 埋め 4 桁** + kebab（`0001`〜`0999`） | `0055-ev-layer-separation-circular-break.md` |
 | **issue 由来の一次資料** | **GitHub issue 番号（0 埋めしない）** + kebab | `382-live-server-now.md` |
 
-先頭 1 文字が `0` か否かだけで両者は排他に分かれる。ADR の採番は
-`scripts/check-adr-numbers.sh next`（並行 clone / worktree での二重採番を機械検出する）。
+判定は「`0` + 3 桁で始まるか」（`^0[0-9]{3}`）。issue 番号は 0 埋めしないので両者は排他に分かれる。
+**上限は 0999**——4 桁を超える採番が必要になったら、この規約と `check-adr-numbers.sh` の判定を
+併せて見直す（今の実装では `1000-*.md` は「ADR に見えるのに 0 埋め 4 桁でない」として弾かれる）。
+ADR の採番は `scripts/check-adr-numbers.sh next`（並行 clone / worktree での二重採番を機械検出する）。
+
+**ADR は必ずこのディレクトリの直下にフラットに置く。** サブディレクトリを切ると重複検出と採番の
+両方から不可視になるため、`check-adr-numbers.sh` が階層配置を致命として弾く。
 
 ## 何を置くか
 

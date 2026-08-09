@@ -42,16 +42,27 @@ ADR 71 本（0001〜0071）を `docs/adr/` から `docs/original-docs/` へ移�
 
 | 種別 | 命名 | 例 |
 |---|---|---|
-| ADR | **0 埋め 4 桁**（0001〜0999） | `0055-ev-layer-separation-circular-break.md` |
+| ADR | **0 埋め 4 桁**（`0001`〜`0999`。上限は 0999 で、超えるときは判定と規約を併せて見直す） | `0055-ev-layer-separation-circular-break.md` |
 | issue 由来の一次資料 | **issue 番号・0 埋めしない** | `382-live-server-now.md` |
 
-`scripts/check-adr-numbers.sh` は走査先を `docs/original-docs` に変え、先頭 1 文字が `0` かで ADR を分離する。非 ADR は**黙ってスキップ**する（警告に載せると本来見るべき重複検出が埋もれる）。ただし 0 埋めを忘れた ADR を取りこぼすと重複検出が静かに無効化されるため、H1 が ADR 書式（`# ADR 0001: …` / `# 0071. …` の 2 系統）に見えるファイルは**致命（exit 1）**で拾う。ADR 0 件も、従来の `exit 0`（fail-open）から `exit 1` へ変える。
+`scripts/check-adr-numbers.sh` は走査先を `docs/original-docs` に変え、ファイル名が `0` + 3 桁（`^0[0-9]{3}`）で始まるかで ADR を分離する。非 ADR は**黙ってスキップ**する（警告に載せると本来見るべき重複検出が埋もれる）。
+
+そのうえで、**「黙って緑になる」経路を 4 つ塞ぐ**。fail-closed の判定は壊れても本番データが正常なら気づけないため、使い捨て fixture による回帰テスト（`scripts/test-check-adr-numbers.sh`）で各分岐の終了コードと文言を固定し、CI で本番検査より先に走らせる。
+
+1. **0 埋めを忘れた ADR**（`74-foo.md`）— 主判定の網から漏れて重複検出を無効化する。判定は H1 の書式ではなく**本文構造**（`## ステータス` と `## 決定` が、コードフェンスの外の行頭に同時存在）で行う。H1 は `# ADR 0001: …` と `# 0071. …` の 2 系統に割れているうえ、番号の桁数でマッチさせると 2 桁 ADR を取りこぼし、逆に一次資料の H1 が `# 401: …` 形式になると誤検知して CI を全停止させる。フェンスと行頭を絞るのは、original-docs が issue 本文や外部資料を逐語転記する層で、引用やコードフェンスの中に ADR 雛形が現れうるため。実測で ADR 72/72 がこの構造を満たし、一次資料 4/4 が満たさない。
+2. **ADR 0 件** — 従来の `exit 0`（fail-open）から `exit 1` へ。
+3. **旧 `docs/adr/` に ADR が置かれている** — 決定 1 の「統合前に分岐した PR」対策（下記「影響」参照）。判定はディレクトリ存在ではなく中の `*.md` の有無で行う（git は空ディレクトリを追跡しないので、空の `docs/adr` はローカル残骸でしか現れず、そこで落とすと pre-push が恒久的に詰まるだけ）。
+4. **サブディレクトリへの配置** — 走査は直下限定なので、`docs/original-docs/adr/0001-x.md` のような階層を切られると重複検出・採番の両方から不可視になる。
+
+いずれの致命チェックも **`check` だけでなく `next`（採番を配る経路）にも効かせる**。走査が壊れた状態で `next` が番号を返すと、既存 ADR と衝突する採番をそのまま配ってしまうため。番号の重複判定には「先頭の連続数字」をそのままキーに使い、規約外の桁数（`00401-*.md`）でも重複が漏れないようにする。
 
 ### 2. ADR の内容は knowledge へ全部写す。同期は機械検査で担保する
 
 読む入口を knowledge に一本化する。ADR の決定・理由・却下案・影響を knowledge に写し、ADR 自体は一次資料として不変のまま残す。
 
 重複を許す代わりに、`sources` に列挙されたファイルの最終コミットが `distilled_from_sha` の子孫かを機械検査する（`git merge-base --is-ancestor`）。CI と pre-push の両方に配線する。
+
+**順序は「機械検査の配線が先、写しは後」**。写した量に比例して stale 面積が増えるのが本 ADR の出発点（`app-bootstrap.md` の事故）なので、担保のないまま 72 本ぶんの写しを始めると、解こうとしている問題を自分で拡大することになる。移行が完了するまでは knowledge だけでなく ADR 原本も読む運用とし、その旨を `CLAUDE.md` と `docs/knowledge/README.md` に移行中ブロックとして明示する。
 
 ### 3. HVE の D01〜D21 文書クラスを採用し、D22〜D24 を追加する
 
@@ -91,7 +102,8 @@ D01〜D21 は番号・名称を変えず採用する（HVE との語彙互換を
 
 - **移動**: ADR 71 本が `docs/adr/` → `docs/original-docs/`。`docs/adr/` は消滅。
 - **変更（機械置換 187 箇所 / 33 ファイル）**: frontmatter `sources` のパス、本文の相対リンク、規約文。`git grep` / `git ls-files` に限定して実施した（`.claude/worktrees/` の並走 worktree 3 本がそれぞれ完全な `docs/adr/` を持つため、`grep -r` では別ブランチの作業コピーを破壊する）。
-- **変更**: `scripts/check-adr-numbers.sh`（走査先・ADR 分離・fail-closed 化）、`mdq.toml`（`docs/adr` root 削除。`iter_markdown` は roots を重複除去しないため、併記すると同一ファイルを 2 回索引しに行く）。
+- **変更**: `scripts/check-adr-numbers.sh`（走査先・ADR 分離・fail-closed 化）、`mdq.toml`（`docs/adr` root を削除。実体が消えているので `iter_markdown` の `base.exists()` で skip され残しても無害だが、死んだ設定は残さない）。
+- **追加**: `scripts/test-check-adr-numbers.sh`（fail-closed 分岐の回帰テスト）と CI `adr` ジョブへの配線。本番検査より**前**に走らせる（本番検査が落ちたとき、ADR が本当に重複しているのか判定器が壊れているのかを切り分けられるようにするため）。
 - **不変**: ADR の採番方式、CI ジョブ ID `adr`（ruleset #461 の必須チェックなので改名しない）。ADR 本文は 71 本中 **70 本がバイト同一**で移動した。唯一の例外は `0062-workout-cyokyo-feature-rejected.md` で、本文のコードブロック内に自ディレクトリの絶対パス表記（`docs/adr/0061`）があったため 1 行だけ機械置換の対象になっている。「ADR は改変しない」規約に対する意図的な例外——旧パスのまま残すとリンクではないにせよ存在しないディレクトリを指し続けるため、パス表記の正確性を優先した。
 - **運用**: 新しい ADR は `docs/original-docs/0NNN-*.md` に置く（採番は `scripts/check-adr-numbers.sh next`）。issue 由来の一次資料は 0 埋めしない。mdq で ADR だけに絞るなら `--paths "docs/original-docs/0*"`。既存の索引を持つ環境は一度だけ `rm -rf .mdq && scripts/mdq index` で作り直す（prune は roots 配下しか消さないため、旧 `docs/adr/*` のチャンクが居残る）。
 - **統合前に分岐した PR への影響**: 本統合より前に分岐した PR が `docs/adr/` に新しい ADR を足していると、パスが異なるため git は競合を報告せず**どちらの順でマージしても無言で通る**。結果 `docs/adr/` が復活し、その ADR は `check-adr-numbers.sh` の走査先（`docs/original-docs`）から見えず番号重複検出が穴あきになる。これを防ぐため、**`docs/adr/` ディレクトリの存在自体を致命扱いにするガード**を同スクリプトに入れた（該当 PR がマージされた時点で CI が落ち、対処手順を出力する）。本統合の時点では #576 が `docs/adr/0072-monitor-loop-wall-clock-sleep-resilience.md` を持つオープン PR として該当する。
@@ -101,13 +113,14 @@ D01〜D21 は番号・名称を変えず採用する（HVE との語彙互換を
 ## 再現方法
 
 ```sh
-# ADR の重複検出（71 件・次番号）
+# ADR の重複検出（72 件・次番号）
 bash scripts/check-adr-numbers.sh
 
-# 0 埋めを忘れた ADR が致命として拾われること（fail-closed の実証）
-mv docs/original-docs/0071-topcoat-framework-evaluation-rejected.md docs/original-docs/71-topcoat.md
-bash scripts/check-adr-numbers.sh   # → ✗ … exit 1
-git checkout -- docs/original-docs/
+# fail-closed の全分岐（0 埋め忘れ / 2 桁 / ADR 0 件 / 旧 docs/adr / サブディレクトリ /
+# 引用・コードフェンスでの誤検知なし / 引数処理）は回帰テストで固定してある。
+# 手で fixture を作らずにこれを走らせるのが正（手動 mv は untracked ファイルが残って
+# リポジトリを壊れた状態にしやすい）。
+bash scripts/test-check-adr-numbers.sh
 
 # 旧パスへの「参照」が 0 件であること。
 # docs/adr という文字列自体は「旧 docs/adr から統合した」という履歴参照や、復活検出ガードの

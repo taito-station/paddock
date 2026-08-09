@@ -26,12 +26,16 @@ docs/knowledge/ ＋ docs/specifications/   status 付き確定知（＝この層
   重複を許す代わりに、同期切れ（`sources` が更新されたのに蒸留が追従していない状態）は
   **機械検査で検出する**——写した量に比例して stale 面積が増えるため、人手の規律には委ねない。
 - > **⚠ 移行中（ADR 0073 の段階導入）**。上の 2 つはまだ完成していない:
+  >
+  > - **stale の機械検査は未配線**（ADR 0073 の後続 PR で導入）。それまでは下記「sources 追従」を
+  >   人手で守る。
   > - **ADR の写しは未着手**。現在 knowledge にあるのは 5 本で、`docs/original-docs/` の ADR 72 本の
   >   決定は含まれない。**当面は knowledge だけでなく ADR 原本（`docs/original-docs/0NNN-*.md`）も読む**。
   >   mdq は両方を索引しているので `scripts/mdq search` は今でも横断で当たる。
-  > - **stale の機械検査は未配線**（ADR 0073 の後続 PR で導入）。それまでは下記「sources 追従」を
-  >   人手で守る。
-  > 移行が完了したらこのブロックを削除する。
+  >
+  > **順序は「機械検査の配線が先、写しは後」**。写した量に比例して stale 面積が増えるのが
+  > ADR 0073 の出発点なので、担保のないまま 72 本ぶんの写しを始めると解こうとしている問題を
+  > 自分で拡大することになる。移行が完了したらこのブロックを削除する。
 - **`docs/original-docs/` の命名は 2 系統**（`check-adr-numbers.sh` の判定根拠。
   詳細は [docs/original-docs/README.md](../original-docs/README.md)）:
   - ADR = **0 埋め 4 桁**（`0001-`〜`0999-`）
@@ -41,7 +45,7 @@ docs/knowledge/ ＋ docs/specifications/   status 付き確定知（＝この層
 
 - **`docs/specifications/`**: 既存のドメイン/機能知。**その場で knowledge に昇格**する（frontmatter を
   付与）。多数の相互リンクを持つため物理移動しない。
-- **`docs/knowledge/`**: qa パイプライン由来の**新規・横断的な蒸留知**の置き場。既存 spec に属さない
+- **`docs/knowledge/`**: qa および ADR 由来の**新規・横断的な蒸留知**の置き場。既存 spec に属さない
   ものはここに置く。
 
 どちらも下記 frontmatter 規約に従い、mdq の索引対象（`mdq.toml`）に含める。
@@ -89,9 +93,14 @@ updated: "YYYY-MM-DD"    # 内容を実質更新した日（YAML の date 型を
    行い、変わらない場合は sha と日付の bump のみで足りる。**この追従は機械検査の対象**（実例:
    [`app-bootstrap.md`](app-bootstrap.md) が `status: Confirmed` のまま、qa 側で「#453 で覆る」と
    追記済みの `NoopParser` を推奨し続けた事故がある。人手の規律だけでは守れない）。
-   - **例外: パス移動のみ（内容不変）は bump しない**。`sources` の行が指す先が同じ内容のまま
+   - **例外 1: パス移動のみ（内容不変）は bump しない**。`sources` の行が指す先が同じ内容のまま
      別パスへ移っただけなら、その knowledge が反映するリポジトリ状態は変わっていない。ここで
      `distilled_from_sha` を進めると「その SHA 時点で蒸留し直した」という偽の主張になり、
      `updated`（＝内容を実質更新した日）の定義とも矛盾する。ADR 0073 の ADR 移動がこのケースで、
      20 本の `sources` パスを書き換えたが sha / 日付は据え置いた。
      機械検査もリネームを追跡する（`git log --follow`）ことでこの例外を吸収する。
+   - **例外 2: `status: Conflict` の宣言だけを足すときは `updated` のみ bump し、
+     `distilled_from_sha` は据え置く**。「乖離に気づいた」ことを記録するだけで、再蒸留は
+     していないため。sha を進めると「その SHA の状態を反映している」ことになり、
+     まさに乖離しているという事実と矛盾する。`Confirmed` に戻すとき（＝実際に差分マージした
+     とき）に sha を現 HEAD へ進める。実例は [`app-bootstrap.md`](app-bootstrap.md)（解消は #578）。

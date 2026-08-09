@@ -38,18 +38,19 @@ EOF
 }
 
 # 引数は git 解決・走査より前に検証する（-h/--help と不正引数はリポジトリ外でも応答したい）。
+# 受理するのはサブコマンド 1 つだけ。余分な後続引数は黙殺せず弾く（不明引数と同じ厳格さ）。
+# 個数チェックは -h の処理より前に置く。後ろに置くと `-h bogus` が黙って成功してしまう。
+if [[ $# -gt 1 ]]; then
+    echo "引数が多すぎる（受理は check / next / -h のいずれか 1 つ）: $*" >&2
+    usage >&2
+    exit 2
+fi
 cmd="${1:-check}"
 case "$cmd" in
     -h|--help) usage; exit 0 ;;
     next | check) ;;
     *) echo "不明な引数: $cmd" >&2; usage >&2; exit 2 ;;
 esac
-# 受理するのはサブコマンド 1 つだけ。余分な後続引数は黙殺せず弾く（不明引数と同じ厳格さ）。
-if [[ $# -gt 1 ]]; then
-    echo "引数が多すぎる（受理は check / next / -h のいずれか 1 つ）: $*" >&2
-    usage >&2
-    exit 2
-fi
 
 # どの cwd から呼んでも docs/original-docs を解決できるようリポジトリルート起点にする。
 if ! repo_root="$(git rev-parse --show-toplevel 2>/dev/null)"; then
@@ -64,30 +65,59 @@ if [[ ! -d "$adr_dir" ]]; then
     exit 1
 fi
 
+# コードフェンス（``` / ~~~ で囲まれた範囲）を落とした本文を返す。フェンスの中に貼られた
+# ADR 雛形を「本物の見出し」と取り違えないようにするため。
+strip_code_fences() {
+    awk '/^[[:space:]]*(```|~~~)/ { in_fence = !in_fence; next } !in_fence { print }' "$1"
+}
+
 # 旧 docs/adr が復活していたら落とす。ADR 0073 でこのディレクトリは廃止したが、統合前に
 # 分岐した PR が新しい ADR を docs/adr に足すと、パスが異なるため git は競合を報告せず
 # 無言でマージされる。復活した ADR は本スクリプトの走査先（docs/original-docs）から見えず、
-# 番号重複検出が穴あきのまま静かに通ってしまうため、ディレクトリの存在自体を致命扱いにする。
-if [[ -d "$legacy_adr_dir" ]]; then
-    echo "✗ 廃止済みの $legacy_adr_dir が復活している（ADR 0073 で docs/original-docs へ統合済み）:" >&2
-    shopt -s nullglob
-    for stray in "$legacy_adr_dir"/*.md; do
-        echo "    $(basename "$stray")" >&2
-    done
-    shopt -u nullglob
+# 番号重複検出が穴あきのまま静かに通ってしまうため、致命扱いにする。
+#
+# 判定はディレクトリ存在ではなく **中の *.md の有無** で行う。git は空ディレクトリを追跡
+# しないので、空の docs/adr が現れるのは .DS_Store やマージ残骸が居るローカル環境だけ。
+# そこで落とすと pre-push が恒久的にブロックされるだけで、防ぎたい事故は何も防げない。
+shopt -s nullglob
+declare -a legacy_adrs=()
+for stray in "$legacy_adr_dir"/*.md; do
+    legacy_adrs+=("$(basename "$stray")")
+done
+shopt -u nullglob
+if [[ ${#legacy_adrs[@]} -gt 0 ]]; then
+    echo "✗ 廃止済みの $legacy_adr_dir に ADR が置かれている（ADR 0073 で docs/original-docs へ統合済み）:" >&2
+    printf '    %s\n' "${legacy_adrs[@]}" >&2
     echo "" >&2
     echo "  対処: 上記を docs/original-docs/ へ git mv し、参照元の frontmatter sources と" >&2
     echo "        本文リンクの docs/adr/ を docs/original-docs/ に書き換える" >&2
     exit 1
 fi
 
+# サブディレクトリに置かれた ADR も落とす。走査は docs/original-docs 直下限定なので、
+# docs/original-docs/adr/0001-x.md のような階層を切られると重複検出・採番の両方から
+# 完全に不可視になる（fail-open）。ADR 0073 で「フラットに置く」と決めた以上、階層は事故。
+shopt -s nullglob
+declare -a nested_adrs=()
+while IFS= read -r nested; do
+    [[ -n "$nested" ]] && nested_adrs+=("${nested#"$adr_dir"/}")
+done < <(find "$adr_dir" -mindepth 2 -name '0*.md' -print 2>/dev/null | sort)
+shopt -u nullglob
+if [[ ${#nested_adrs[@]} -gt 0 ]]; then
+    echo "✗ サブディレクトリに ADR が置かれている（docs/original-docs 直下にフラットに置く）:" >&2
+    printf '    %s\n' "${nested_adrs[@]}" >&2
+    echo "" >&2
+    echo "  対処: docs/original-docs/ 直下へ移す。階層に置かれた ADR は重複検出・採番から見えない" >&2
+    exit 1
+fi
+
 # docs/original-docs 直下の *.md を走査する。まず「ADR かどうか」をファイル名の先頭 '0' で
 # 分離し、非 ADR（一次資料・README）は黙ってスキップする（警告に載せるとノイズで本来見る
-# べき重複検出が埋もれる）。ADR と判定したものの番号抽出は「先頭 4 桁」という緩いパターンで
-# 行い、kebab 規約（0NNN-kebab-title.md）への適合は別軸の警告として扱う。番号抽出を規約
-# 適合と同じ厳格パターンに縛ると、規約外ファイル（例: 0040-Foo.md, 0040_foo.md）が重複
-# していても検出網から漏れ、コア保証（番号の重複を必ず弾く）が崩れるため。
-declare -a numbers=()        # 重複検出・next 算出に使う 4 桁番号（緩いパターンで抽出）
+# べき重複検出が埋もれる）。番号は「先頭の連続数字」をそのままキーにする。4 桁に切り詰めると
+# 5 桁（00401-foo.md）を 0040 と誤抽出して偽の重複を出すし、逆に 4 桁以外を検出網から外すと
+# 規約外ファイルの重複が漏れてコア保証（番号の重複を必ず弾く）が崩れるため。
+declare -a dup_keys=()       # 重複検出に使う番号キー（先頭の連続数字そのまま。桁数を問わない）
+declare -a numbers=()        # next 算出に使う 4 桁番号（規約どおりのものだけ）
 declare -a nonconforming=()  # ADR だが kebab 規約に外れるファイル名（警告のみ）
 declare -a misnamed_adr=()   # ADR に見えるのに 0 埋め 4 桁で始まらない（致命）
 shopt -s nullglob
@@ -106,16 +136,28 @@ for path in "$adr_dir"/*.md; do
         # 「# 0071. …」の 2 系統に割れているうえ、番号の桁数でマッチさせると (a) 2 桁 ADR
         # （`# 74. …`）を取りこぼし、(b) 一次資料の H1 が `# 401: …` 形式になった途端に
         # 誤検知して CI を全停止させる——fail-closed の誤検知は実害が大きい。
-        # ADR テンプレートの必須見出しである「## ステータス」と「## 決定」の同時存在は、
-        # 実測で ADR 72/72 が満たし、一次資料 4/4 が満たさない（誤検知・取りこぼしとも 0）。
-        if grep -qF '## ステータス' "$path" && grep -qF '## 決定' "$path"; then
+        #
+        # 見出しは **行頭に錨を打ち、コードフェンスの中身を除いてから** 見る。original-docs は
+        # issue 本文や外部資料の逐語転記を置く層なので、引用（`> ## ステータス`）やコード
+        # フェンス（```markdown の中に ADR 雛形を貼る）で見出し文字列に言及することが現実に
+        # ある。素の部分一致だとそれだけで致命判定になり、CI と pre-push が全停止する。
+        # 実測で現行 ADR 72 本は「フェンス外・行頭」形式を 72/72 満たすため、絞っても
+        # 取りこぼしは増えない。
+        #
+        # 限界（現行コーパスに対する実測であって一般的保証ではない）: 「## ステータス」だけ
+        # 書いて「## 決定」が無い下書きや、英語見出し（## Status / ## Decision）の ADR は
+        # 素通りする。テンプレートを変えるときはこの判定も併せて見直すこと。
+        body_outside_fences="$(strip_code_fences "$path")"
+        if grep -qE '^## ステータス' <<<"$body_outside_fences" \
+            && grep -qE '^## 決定' <<<"$body_outside_fences"; then
             misnamed_adr+=("$base")
         fi
         continue
     fi
-    # 「先頭 4 桁 + 直後が非数字（または終端）」を番号として抽出する。直後を非数字に限定する
-    # ことで 5 桁番号（例: 00401-foo.md）を 0040 と誤抽出して偽の重複を出すのを防ぎつつ、
-    # ダッシュ無し（0043dup.md）等の規約外も重複検出網には載せる（コア保証を死守）。
+    # 先頭の連続数字をそのまま番号キーにする（0055-x.md → 0055 / 00401-x.md → 00401）。
+    # 桁数の違うもの同士は別キーになるので偽の重複は出ず、同桁の重複は必ず検出できる。
+    [[ "$base" =~ ^(0[0-9]+) ]] && dup_keys+=("${BASH_REMATCH[1]}")
+    # next の算出には規約どおりの 4 桁だけを使う（5 桁以上を混ぜると採番が壊れる）。
     if [[ "$base" =~ ^(0[0-9]{3})([^0-9]|$) ]]; then
         numbers+=("${BASH_REMATCH[1]}")
         # 番号は取れるが kebab 規約に外れるものは警告対象にする（重複検出からは漏らさない）。
@@ -123,7 +165,8 @@ for path in "$adr_dir"/*.md; do
             nonconforming+=("$base")
         fi
     else
-        # 先頭は 0 だが 4 桁境界を満たさない（00401-foo.md 等）。ADR 疑いなので警告に載せる。
+        # 先頭は 0 だが 4 桁境界を満たさない（00401-foo.md 等）。ADR 疑いなので警告に載せる
+        # （dup_keys には載っているので重複検出網からは漏れない）。
         nonconforming+=("$base")
     fi
 done
@@ -171,8 +214,9 @@ if [[ ${#nonconforming[@]} -gt 0 ]]; then
     printf '  %s\n' "${nonconforming[@]}" >&2
 fi
 
-# 重複番号を抽出する。出現回数 >= 2 の番号を集める。
-dups="$(printf '%s\n' "${numbers[@]}" | sort | uniq -d)"
+# 重複番号を抽出する。出現回数 >= 2 の番号を集める。規約外の桁数（00401-*.md 等）も
+# dup_keys に載っているので、コア保証（番号の重複を必ず弾く）は命名の揺れに影響されない。
+dups="$(printf '%s\n' "${dup_keys[@]}" | sort | uniq -d)"
 
 if [[ -n "$dups" ]]; then
     echo "✗ ADR 番号の重複を検出:" >&2

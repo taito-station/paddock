@@ -557,11 +557,15 @@ HVE（dahatake/HypervelocityEngineering, MIT）由来の 3 層蒸留モデルで
 - `docs/original-docs/` … **一次資料層（RO・書き換えない）**。ADR（アーキテクチャ・ルール変更の決定記録。
   棄却した案も同じ厚みで記録する。`0NNN-*.md`）と、issue 由来の生素材・調査ノート（`382-*.md` 等）
 - `docs/qa/` … 質問票 + 回答。knowledge への入力となる中間層
-- `docs/knowledge/` … qa パイプライン由来の新規・横断的な確定知（**読む入口**）
+- `docs/knowledge/` … qa および ADR 由来の新規・横断的な確定知（**読む入口**）
 - `docs/specifications/` … 確率推定・backtest・買い目選定・予想 JSON などの仕様書（その場で knowledge に昇格）
 - `docs/api/openapi.json` … REST API の OpenAPI スナップショット（utoipa コードファースト。web の型生成の入力）
 
-横断検索は mdq（BM25・完全ローカル）で行う: `scripts/mdq search --q "..."`。
+> **⚠ 移行中**（ADR 0073 の段階導入）: ADR の内容を knowledge へ写す作業は未着手で、現在 knowledge に
+> あるのは 5 本。**当面は knowledge だけでなく ADR 原本（`docs/original-docs/0NNN-*.md`）も読む**。
+
+横断検索は mdq（BM25・完全ローカル）で行う: `scripts/mdq search --q "..."`。ADR だけに絞るなら
+`--paths "docs/original-docs/0*"`。
 
 ## 予想ワークフロー全体像
 
