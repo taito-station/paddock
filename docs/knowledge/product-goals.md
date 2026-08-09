@@ -74,7 +74,7 @@ paddock が何を目指し、何を達成したら成功で、**何をやらな�
 | REQ-D01-005 | 同構成のトップ選好馬の複勝的中率が 60% を下回らない（890R 実測 64.5%） | 同上（`show_hit_rate`） | [ADR 0052](../original-docs/0052-alpha-blend-removal-rejected.md) | Confirmed |
 | REQ-D01-006 | 手動ハンデ軸精査を伴う実運用セッションの単勝的中率が、同構成のバックテスト水準（29.9%）を上回る＝エッジが実在することを実測で示す | 実運用セッションの `bet_records` と結果照合を 200R 以上貯め、`◎` の単勝的中率をバックテストと同じ定義で集計する（現状の観測は 1 開催日規模で母数が足りず、確定知にできる水準にない） | [ADR 0055](../original-docs/0055-ev-layer-separation-circular-break.md)（エッジ＝手動ハンデ軸精査という主張の出所） | Tentative |
 | REQ-D01-007 | 買い目は「そのまま買える形」で提示する（式別 / 方式 / 軸 / 相手 / 点数 / 金額・100 円単位） | `build_portfolio` の単体テストと [live-ev-buy-view.md](../specifications/live-ev-buy-view.md) の画面契約 | [ADR 0064](../original-docs/0064-live-ev-buy-view.md) | Confirmed |
-| REQ-D01-008 | 予想と買い目はブラウザから閲覧できる（ローカル完結・外部ストレージに依存しない） | `docs/api/openapi.json` のスナップショット検証と web の E2E（`/races/{id}/board`） | [ADR 0069](../original-docs/0069-drop-icloud-writes-browser-only-viewing.md) | Confirmed |
+| REQ-D01-008 | 予想と買い目はブラウザから閲覧できる（ローカル完結・外部ストレージに依存しない） | `docs/api/openapi.json` のスナップショット検証（`src/apps/api-server/tests/openapi.rs`）と `web/src/lib/board.test.ts`、および [tests/browser-test-cases/](../../tests/browser-test-cases/race-list-dashboard.md) の手動ブラウザ手順 | [ADR 0069](../original-docs/0069-drop-icloud-writes-browser-only-viewing.md) | Confirmed |
 <!-- REQ:end D01 -->
 
 ## エッジの所在

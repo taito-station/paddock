@@ -264,12 +264,19 @@ RE_REQ_END = re.compile(r"^<!--\s*REQ:end\s+(D\d{2})\s*-->$")
 # 「マーカーのつもりで書かれた行」を緩く拾う。厳密形（D + 2 桁）から外れた綴りを
 # 黙って地の文として扱うと、begin と end が揃って外れたときに REQ 表が丸ごと
 # 無検査になる（実測: `<!-- REQ:begin D1 -->` で表全体が素通りする fail-open）。
-RE_REQ_MARKER_LOOSE = re.compile(r"^<!--\s*REQ\s*:?\s*(?:begin|end)\b.*-->$", re.IGNORECASE)
-# ブロック外に取り残された REQ 行の検出用。マーカーを付け忘れた表を可視化する。
-RE_REQ_ROW = re.compile(r"^\|\s*REQ[-\s]", re.IGNORECASE)
+RE_REQ_MARKER_LOOSE = re.compile(r"^<!--\s*REQ\s*:\s*(?:begin|end)\b.*-->$", re.IGNORECASE)
+# ブロック外に取り残された表の検出用。REQ-ID の厳密形か見出し行だけを見る——
+# 地の文が REQ-ID に言及するだけ（`REQ-D01-004 を参照`）で落とすと使い物にならない。
+RE_REQ_ID_ANY = re.compile(r"REQ-D\d{2}-\d{3}")
+RE_REQ_HEADER = re.compile(r"^\|?\s*REQ-ID\s*\|")
 RE_FENCE = re.compile(r"^(`{3,}|~{3,})")
 RE_REQ_ID = re.compile(r"^REQ-(D\d{2})-(\d{3})$")
-RE_MD_LINK = re.compile(r"\[[^\]]*\]\(([^)\s]+)\)")
+# タイトル付き `[x](path "題")` と山括弧付き `[x](<path>)` も拾う。素朴な
+# `\(([^)\s]+)\)` だとタイトルを付けるだけで実在検査・絶対パス拒否を全部迂回できる。
+RE_MD_LINK = re.compile(r"""\[[^\]]*\]\(\s*<?([^)\s>]+)>?(?:\s+[^)]*)?\)""")
+# インラインコード。検証手段の列にはコマンドを書くので、その中のリンク様文字列
+# （`grep '[x](nope.md)' file` 等）を実リンクとして検査すると偽陽性になる。
+RE_INLINE_CODE = re.compile(r"`[^`]*`")
 RE_TABLE_SEP_CELL = re.compile(r"^:?-+:?$")
 
 REQ_COLUMNS = ("REQ-ID", "要件", "検証手段", "出典", "status")
@@ -313,15 +320,17 @@ def parse_req_blocks(text: str) -> "tuple[list[tuple[str, list[list[str]]]], lis
     errors: list[str] = []
     cls: "str | None" = None
     rows: list[list[str]] = []
-    fence: "str | None" = None
+    # (フェンス文字, 長さ)。同種かつ**同長以上**でのみ閉じる（GFM）。長さを見ないと、
+    # ```` で囲んで ``` の見本を書く定番の書き方で内側が誤って閉じ、見本が実データに化ける。
+    fence: "tuple[str, int] | None" = None
     for lineno, line in enumerate(text.splitlines(), 1):
         stripped = line.strip()
         opener = RE_FENCE.match(stripped)
         if opener:
             token = opener.group(1)
             if fence is None:
-                fence = token[0]
-            elif token[0] == fence:
+                fence = (token[0], len(token))
+            elif token[0] == fence[0] and len(token) >= fence[1]:
                 fence = None
             continue
         if fence is not None:
@@ -356,9 +365,18 @@ def parse_req_blocks(text: str) -> "tuple[list[tuple[str, list[list[str]]]], lis
         if cls is not None:
             if stripped.startswith("|"):
                 rows.append(split_row(stripped))
-        elif RE_REQ_ROW.match(stripped):
+            elif RE_REQ_ID_ANY.search(stripped):
+                # GFM は行頭パイプを省いても表になる。黙って捨てると、その要件が
+                # 一意性・status・空セルの検査から丸ごと消える（重複が通る）。
+                errors.append(
+                    f"{lineno} 行目: REQ ブロック内に表の行として読めない REQ 行がある"
+                    f" → {stripped}（行頭を `|` で始める）"
+                )
+        elif RE_REQ_HEADER.match(stripped) or (
+            "|" in stripped and RE_REQ_ID_ANY.search(stripped)
+        ):
             errors.append(
-                f"{lineno} 行目: REQ 行が REQ ブロックの外にある → {stripped}"
+                f"{lineno} 行目: REQ 表がマーカーの外にある → {stripped}"
                 "（マーカーで囲まないと一意性・status の検査から丸ごと漏れる）"
             )
 
@@ -410,7 +428,8 @@ def check_req_blocks(
             )
             continue
 
-        data = [cells for cells in rows[2:] if cells and any(cells)]
+        # 空セルだけの行も落とさない（落とすと有効行に紛れた 1 本が無言で消える）。
+        data = [cells for cells in rows[2:] if cells]
         if not data:
             errors.append(f"{rel}: REQ ブロック（{cls}）に要件行が 1 つも無い")
             continue
@@ -457,7 +476,8 @@ def check_req_blocks(
 
             # 出典・検証手段が指すリポジトリ内リンクの実在。frontmatter の sources と
             # 同じ理由——由来を辿れないなら要件の根拠を確認できない。
-            for target in RE_MD_LINK.findall(origin) + RE_MD_LINK.findall(verification):
+            linked = RE_INLINE_CODE.sub(" ", origin) + " " + RE_INLINE_CODE.sub(" ", verification)
+            for target in RE_MD_LINK.findall(linked):
                 if target.startswith(("http://", "https://", "mailto:", "#")):
                     continue
                 cleaned = target.split("#", 1)[0]

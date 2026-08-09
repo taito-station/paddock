@@ -784,7 +784,7 @@ def test_req_row_outside_block_is_error() -> None:
                         encoding="utf-8")
         code, out = check(repo)
         assert code == 1, out
-        assert "REQ ブロックの外にある" in out, out
+        assert "マーカーの外にある" in out, out
     finally:
         shutil.rmtree(repo)
 
@@ -909,6 +909,175 @@ def test_req_unclosed_code_fence_is_error() -> None:
         code, out = check(repo)
         assert code == 1, out
         assert "コードフェンスが閉じられていない" in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def append_raw(repo: Path, rel: str, text: str) -> None:
+    path = repo / rel
+    path.write_text(path.read_text(encoding="utf-8") + text, encoding="utf-8")
+
+
+def test_req_row_without_leading_pipe_is_error() -> None:
+    """GFM は行頭パイプを省いても表になる。捨てると一意性検査から消えて重複が通る。"""
+    repo = new_repo()
+    try:
+        baseline(repo)
+        append_req_block(repo, "docs/knowledge/a.md", "D19",
+                         [VALID_ROW, "REQ-D19-001 | 別の要件 | `cargo test` | ADR 0001 | Confirmed |"])
+        code, out = check(repo)
+        assert code == 1, out
+        assert "表の行として読めない" in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_req_unmarked_table_without_leading_pipe_is_error() -> None:
+    repo = new_repo()
+    try:
+        baseline(repo)
+        append_raw(repo, "docs/knowledge/a.md",
+                   "\nREQ-ID | 要件 | 検証手段 | 出典 | status\n"
+                   "---|---|---|---|---\n"
+                   "REQ-D19-001 | 何か | `cargo test` | ADR 0001 | Confirmed\n")
+        code, out = check(repo)
+        assert code == 1, out
+        assert "マーカーの外にある" in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_req_prose_mention_is_not_error() -> None:
+    """地の文の REQ-ID 言及で落とすと、規約文も目標文書も書けなくなる。"""
+    repo = new_repo()
+    try:
+        baseline(repo)
+        append_req_block(repo, "docs/knowledge/a.md", "D19", [VALID_ROW])
+        append_raw(repo, "docs/knowledge/a.md", "\n詳細は REQ-D19-001 を参照する。\n")
+        code, out = check(repo)
+        assert code == 0, f"地の文の言及で落ちた: {out}"
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_req_nested_fence_is_not_closed_early() -> None:
+    """```` の中の ``` で閉じると、見本が実データに化けて偽陽性になる。"""
+    repo = new_repo()
+    try:
+        baseline(repo)
+        append_raw(repo, "docs/knowledge/a.md",
+                   "\n````markdown\n```\n| REQ-D19-999 | 見本 | | | Bogus |\n```\n````\n")
+        code, out = check(repo)
+        assert code == 0, f"入れ子フェンスで落ちた: {out}"
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_req_link_with_title_is_checked() -> None:
+    """タイトル付きリンクを取りこぼすと、それだけで実在検査を迂回できる。"""
+    repo = new_repo()
+    try:
+        baseline(repo)
+        append_req_block(repo, "docs/knowledge/a.md", "D19",
+                         ['| REQ-D19-001 | 何か | `cargo test` '
+                          '| [ADR 0099](../original-docs/0099-nope.md "題") | Confirmed |'])
+        code, out = check(repo)
+        assert code == 1, out
+        assert "リンク先が実在しない" in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_req_link_inside_inline_code_is_ignored() -> None:
+    """検証手段はコマンドを書く列。コード内のリンク様文字列は検査しない。"""
+    repo = new_repo()
+    try:
+        baseline(repo)
+        append_req_block(repo, "docs/knowledge/a.md", "D19",
+                         ["| REQ-D19-001 | 何か | `grep '[x](nope.md)' file` "
+                          "| ADR 0001 | Confirmed |"])
+        code, out = check(repo)
+        assert code == 0, f"コード内のリンク様文字列で落ちた: {out}"
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_req_empty_requirement_is_error() -> None:
+    repo = new_repo()
+    try:
+        baseline(repo)
+        append_req_block(repo, "docs/knowledge/a.md", "D19",
+                         ["| REQ-D19-001 | - | `cargo test` | ADR 0001 | Confirmed |"])
+        code, out = check(repo)
+        assert code == 1, out
+        assert "要件が空" in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_req_empty_origin_is_error() -> None:
+    repo = new_repo()
+    try:
+        baseline(repo)
+        append_req_block(repo, "docs/knowledge/a.md", "D19",
+                         ["| REQ-D19-001 | 何か | `cargo test` | TBD | Confirmed |"])
+        code, out = check(repo)
+        assert code == 1, out
+        assert "出典が空" in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_req_orphan_end_marker_is_error() -> None:
+    repo = new_repo()
+    try:
+        baseline(repo)
+        append_raw(repo, "docs/knowledge/a.md", "\n<!-- REQ:end D19 -->\n")
+        code, out = check(repo)
+        assert code == 1, out
+        assert "begin の無い" in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_req_retired_status_is_accepted() -> None:
+    """番号を再利用しないための唯一の逃げ道なので、通る側も固定する。"""
+    repo = new_repo()
+    try:
+        baseline(repo)
+        append_req_block(repo, "docs/knowledge/a.md", "D19",
+                         ["| REQ-D19-001 | かつての要件 | - | ADR 0001 | Retired |"])
+        code, out = check(repo)
+        assert code == 0, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_req_undefined_block_class_is_error() -> None:
+    repo = new_repo()
+    try:
+        baseline(repo)
+        append_req_block(repo, "docs/knowledge/a.md", "D99",
+                         ["| REQ-D99-001 | 何か | `cargo test` | ADR 0001 | Confirmed |"])
+        code, out = check(repo)
+        assert code == 1, out
+        assert "定義が無い" in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_req_separator_column_count_is_error() -> None:
+    repo = new_repo()
+    try:
+        baseline(repo)
+        append_req_block(
+            repo, "docs/knowledge/a.md", "D19",
+            ["| REQ-ID | 要件 | 検証手段 | 出典 | status |", "|---|---|", VALID_ROW],
+            header=False,
+        )
+        code, out = check(repo)
+        assert code == 1, out
+        assert "区切り行が" in out, out
     finally:
         shutil.rmtree(repo)
 
