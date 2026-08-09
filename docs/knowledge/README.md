@@ -27,18 +27,19 @@ docs/knowledge/ ＋ docs/specifications/   status 付き確定知（＝この層
   **機械検査で検出する**——写した量に比例して stale 面積が増えるため、人手の規律には委ねない。
 - > **⚠ 移行中（ADR 0073 の段階導入）**:
   >
-  > - **stale の機械検査は配線済み**（`scripts/check-doc-classes.py`・CI の `adr` ジョブと
-  >   pre-push）。ただし判定は当面 **warning**——移設以前から累積していた未追従が 6 件あり、
-  >   error にすると常時 red になる。[#580](https://github.com/taito-station/paddock/issues/580)
-  >   で消化して 0 件になったら error へ切り替える。
+  > - **stale の機械検査は配線済み・判定は error**（`scripts/check-doc-classes.py`・CI の `adr`
+  >   ジョブと pre-push）。移設以前から累積していた未追従 6 件を
+  >   [#580](https://github.com/taito-station/paddock/issues/580) で消化し、warning から昇格した。
+  >   **これで「ADR の内容を knowledge へ全部写す」の担保が揃った**——写した先が追従漏れを
+  >   起こせば CI が落ちる。
   > - **ADR の写しは未着手**（例外は [product-goals.md](product-goals.md)。棄却 ADR 24 本の
   >   「採らなかったこと」だけは索引として畳んである）。knowledge は 8 本で、`docs/original-docs/` の ADR 73 本の決定は
   >   含まれない。**当面は knowledge だけでなく ADR 原本（`docs/original-docs/0NNN-*.md`）も読む**。
   >   mdq は両方を索引しているので `scripts/mdq search` は今でも横断で当たる。
   >
   > **順序は「機械検査の配線が先、写しは後」**。写した量に比例して stale 面積が増えるのが
-  > ADR 0073 の出発点なので、担保のないまま 73 本ぶんの写しを始めると解こうとしている問題を
-  > 自分で拡大することになる。移行が完了したらこのブロックを削除する。
+  > ADR 0073 の出発点だった。**その前提条件（stale の error 化）は #580 で満たされた**ので、
+  > 既存 ADR の写しに着手してよい。移行が完了したらこのブロックを削除する。
 - **`docs/original-docs/` の命名は 2 系統**（`check-adr-numbers.sh` の判定根拠。
   詳細は [docs/original-docs/README.md](../original-docs/README.md)）:
   - ADR = **0 埋め 4 桁**（`0001-`〜`0999-`）
@@ -79,7 +80,8 @@ updated: "YYYY-MM-DD"    # 内容を実質更新した日（YAML の date 型を
   mdq が frontmatter を検索に使わず `tags` しか見ないため（`scripts/mdq search --tags D23`）。
   二重管理の drift は `scripts/check-doc-classes.py` が防ぐ。
 - **機械検査**: 上記スクリプトが CI（`adr` ジョブ）と pre-push で走る。クラスの整合・`tags` の一致・
-  `sources` の実在は **error**、stale と充足ギャップは **warning**。
+  `sources` の実在・**stale** は **error**（stale は #580 で warning から昇格）、充足ギャップのみ
+  **warning**。どうしても止められないときの逃げ道は `--warn-only` だけ。
 
 - **status**: `Confirmed`=検証済みで運用の前提にしてよい / `Tentative`=検証中・暫定 /
   `Conflict`=source 間で矛盾があり要解消（放置しない）。

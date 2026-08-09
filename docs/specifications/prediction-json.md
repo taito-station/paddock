@@ -9,7 +9,7 @@ sources:
   - docs/original-docs/0025-prediction-search-api.md
   - docs/original-docs/0032-bets-in-gen-predictions-model-based.md
   - docs/original-docs/0069-drop-icloud-writes-browser-only-viewing.md
-distilled_from_sha: "f765be7"
+distilled_from_sha: "3a7e875"
 updated: "2026-07-21"
 ---
 

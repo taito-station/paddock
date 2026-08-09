@@ -11,8 +11,8 @@ sources:
   - docs/original-docs/0055-ev-layer-separation-circular-break.md
   - docs/original-docs/0060-betting-axis-lock-preclose-topup.md
   - docs/api/openapi.json
-distilled_from_sha: "21e6076"
-updated: "2026-07-30"
+distilled_from_sha: "3a7e875"
+updated: "2026-08-09"
 ---
 
 # REST API（read 基盤）: 設計仕様
@@ -67,9 +67,9 @@ API なので **OpenAPI 仕様を一級の成果物として整備する**。uto
 
 ### Interactor のジェネリクス（実装上の注意）
 
-現行の `Interactor` は `Interactor<R: Repository, P: PdfParser, F: PdfFetcher>` の 3 ジェネリクスを持つ。read エンドポイントは `R`（Repository）しか使わないが、型としては `P` / `F` も必要になる。**既存の `apps/predict`・`apps/analyze` の `setup.rs` が同じ `Interactor<R,P,F>` を構築済み**なので、api-server の DI もそれを踏襲して同じ具象型を組み立てる（read 経路では P/F は呼ばれない）。
+**現行（#453 以降）の `Interactor` は `Interactor<R: Repository>` で、Repository のみを持つ**。read エンドポイントに余計なジェネリクスは要らず、api-server の DI は `Interactor<PostgresRepository>` を組み立てるだけでよい（`setup.rs` の `ApiInteractor`）。オッズ read-through（#51）と結果取り込み（#381）はそれぞれ `OddsInteractor` / `ResultsInteractor` の別 facade。
 
-> P/F を read 用途で型から外す（read 専用トレイトへ分離する）リファクタは有効だが影響範囲が広いため本 Issue では行わず、必要になった時点で別 Issue とする。
+> **旧記述の訂正**: #33 当時は `Interactor<R, P: PdfParser, F: PdfFetcher>` の 3 ジェネリクスで、read 経路でも `P`/`F` の具象型（no-op スタブ）を注入していた。「read 用途で P/F を型から外すリファクタは影響範囲が広いので別 Issue」としていたそれは **#453 で実施済み**で、PDF 系ユースケースは `PdfInteractor<R, P, F>` に分離された（[app-bootstrap.md](../knowledge/app-bootstrap.md)）。
 
 ## エンドポイント仕様
 
@@ -248,6 +248,22 @@ GET /api/races/{race_id}/board[?budget=&track_condition=&blend_alpha=]
 「朝時点」の定義: is_complete を満たす最古の snapshot（早朝の単複のみ snapshot は is_complete=false なので含まれない）。なお `morning_win_odds`（`BoardHorseSchema`）は各馬のこの snapshot での単勝オッズ。
 
 **設計意図（ADR 0055/0060）**: 「確率・軸を固定したまま、参照する snapshot だけを朝↔現で差し替えて ROI/hit_prob を再計算する」apples-to-apples 方式。「朝 +EV が発走直前に剥がれる」を数値で体感できるようにするための可視化。軸（◎）は朝比較によって変更しない（軸ロック思想の UI 体現）。
+
+### 6. ヘルスチェック（稼働プロセスの世代）
+
+```
+GET /api/health
+```
+
+- **DB 非依存・Repository 非依存**。DB 未接続でも 200 を返すので liveness プローブも兼ねる。
+- レスポンス: `HealthResponse`（`{ status, git_sha, build_time }`）
+
+```json
+{ "status": "ok", "git_sha": "6fd6400", "build_time": "1754176250" }
+```
+
+- `git_sha` / `build_time` は `rest-controller/build.rs` が `cargo:rustc-env` で埋め込む（git CLI + std のみ。`.git` 不在時は `unknown`）。sha は短縮形で、作業ツリーが dirty ならその旨が付く。
+- **用途**: 長期稼働した api-server が古い成果物を配信し続けても HTTP 200 のままで外形監視に映らない、という #570 の穴を塞ぐ。`git_sha` を現在の checkout（`git rev-parse --short HEAD`）と突き合わせれば世代ずれを機械検知できる。同じ情報は起動ログにも出る。
 
 ## OpenAPI（utoipa コードファースト）
 

@@ -12,7 +12,7 @@ docs/knowledge/app-bootstrap.md が status: Confirmed のまま存在しない N
   3. tags が doc_class と完全一致するか（値も順序も）                        [error]
   4. sources に列挙されたパスが実在するか                                     [error]
   5. doc-classes.md の「現行」列が実態と一致するか                            [error]
-  6. stale: sources の最終「内容変更」が distilled_from_sha に含まれているか  [warning]
+  6. stale: sources の最終「内容変更」が distilled_from_sha に含まれているか  [error]
   7. active なのに文書 0 本のクラス（充足ギャップ）                           [warning]
   8. REQ 表（要件 ID）の書式・一意性・status・Confirmed の検証手段            [error]
 
@@ -656,7 +656,10 @@ def main(argv: list[str]) -> int:
                 warnings.append(f"{rel}: {src} の履歴を辿れず stale 判定を実施できなかった")
                 continue
             if git("merge-base", "--is-ancestor", changed, distilled_full).returncode != 0:
-                warnings.append(
+                # #580 で warning → error に昇格。「ADR の内容は knowledge へ全部写す」
+                # （ADR 0073 決定 2）の担保はこの検査だけで、warning のままだと写した量に
+                # 比例して追従漏れが静かに溜まる。逃げ道は --warn-only のみ。
+                errors.append(
                     f"{rel}: STALE ← {src} が distilled_from_sha({distilled}) より後に更新されている"
                     f"（{changed[:7]}）。差分マージして sha/日付を更新する"
                 )
