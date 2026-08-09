@@ -31,7 +31,8 @@ docs/knowledge/ ＋ docs/specifications/   status 付き確定知（＝この層
   >   pre-push）。ただし判定は当面 **warning**——移設以前から累積していた未追従が 6 件あり、
   >   error にすると常時 red になる。[#580](https://github.com/taito-station/paddock/issues/580)
   >   で消化して 0 件になったら error へ切り替える。
-  > - **ADR の写しは未着手**。knowledge は 7 本で、`docs/original-docs/` の ADR 73 本の決定は
+  > - **ADR の写しは未着手**（例外は [product-goals.md](product-goals.md)。棄却 ADR 24 本の
+  >   「採らなかったこと」だけは索引として畳んである）。knowledge は 8 本で、`docs/original-docs/` の ADR 73 本の決定は
   >   含まれない。**当面は knowledge だけでなく ADR 原本（`docs/original-docs/0NNN-*.md`）も読む**。
   >   mdq は両方を索引しているので `scripts/mdq search` は今でも横断で当たる。
   >
@@ -106,8 +107,8 @@ updated: "YYYY-MM-DD"    # 内容を実質更新した日（YAML の date 型を
 ```
 
 - **形式は `REQ-D{NN}-{NNN}`**。`D{NN}` は [doc-classes.md](doc-classes.md) の文書クラス、`{NNN}` は
-  3 桁ゼロ埋めの連番。クラスを ID に含めるのは、要件が「どの関心事のものか」を参照子だけで判別する
-  ため（`REQ-D23-007` なら買い方の要件）。
+  3 桁ゼロ埋めの連番。クラスは**その要件を載せている文書のクラス＝番号空間の持ち主**を表す
+  （関心事の分類ではない。買い方に関わる要件でも、D01 のプロダクト目標に載っていれば `REQ-D01-NNN`）。
 - **一意性はクラス内グローバル**。同じ `D{NN}` の番号はリポジトリ全体で 1 つ。文書をまたいでも
   重複させない（同じクラスの REQ 表が複数文書に分かれてもよいが、番号空間は 1 つ）。
 - **番号は再利用しない**。廃止した要件は行を消さず `status: Retired` にして残す。消して番号を空けると、

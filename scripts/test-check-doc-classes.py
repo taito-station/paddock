@@ -960,6 +960,47 @@ def test_req_prose_mention_is_not_error() -> None:
         shutil.rmtree(repo)
 
 
+def test_req_prose_with_pipe_is_not_error() -> None:
+    """地の文が REQ-ID に言及し、コマンド例にパイプが混じるだけでは落とさない。"""
+    repo = new_repo()
+    try:
+        baseline(repo)
+        append_req_block(repo, "docs/knowledge/a.md", "D19", [VALID_ROW])
+        append_raw(repo, "docs/knowledge/a.md",
+                   "\nREQ-D19-001 の検証は `cargo test | tail -1` で行う。\n")
+        code, out = check(repo)
+        assert code == 0, f"地の文＋パイプで落ちた: {out}"
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_req_inline_code_mention_in_block_is_not_error() -> None:
+    """ブロック内の注記がインラインコードで REQ-ID に触れるだけでは落とさない。"""
+    repo = new_repo()
+    try:
+        baseline(repo)
+        append_req_block(repo, "docs/knowledge/a.md", "D19",
+                         [VALID_ROW, "`REQ-D19-001` は #123 で見直す予定。"])
+        code, out = check(repo)
+        assert code == 0, f"インラインコードの言及で落ちた: {out}"
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_req_traceability_table_is_not_error() -> None:
+    """REQ-ID を右の列で参照するだけの表は REQ 表ではない（第 1 セルで判定する）。"""
+    repo = new_repo()
+    try:
+        baseline(repo)
+        append_req_block(repo, "docs/knowledge/a.md", "D19", [VALID_ROW])
+        append_raw(repo, "docs/knowledge/a.md",
+                   "\n| 実装 | 対応 REQ |\n|---|---|\n| build_portfolio | REQ-D19-001 |\n")
+        code, out = check(repo)
+        assert code == 0, f"トレーサビリティ表で落ちた: {out}"
+    finally:
+        shutil.rmtree(repo)
+
+
 def test_req_nested_fence_is_not_closed_early() -> None:
     """```` の中の ``` で閉じると、見本が実データに化けて偽陽性になる。"""
     repo = new_repo()

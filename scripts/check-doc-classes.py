@@ -302,6 +302,20 @@ def split_row(line: str) -> list[str]:
     return [c.strip().replace(r"\|", "|") for c in re.split(r"(?<!\\)\|", body)]
 
 
+def looks_like_req_row(line: str) -> bool:
+    """表の行として **第 1 セルが REQ-ID** かを見る。
+
+    地の文が REQ-ID に言及するだけ（``REQ-D01-004 の検証は `cmd | tail -1` で行う``）や、
+    REQ-ID を右側の列で参照するトレーサビリティ表（`| 予想 | REQ-D01-004 |`）を
+    落とさないための絞り込み。REQ 表は第 1 列が REQ-ID と規約で決まっているので、
+    「第 1 セルがちょうど REQ-ID」だけを REQ 表の行と見なす。
+    """
+    if "|" not in line:
+        return False
+    cells = split_row(line)
+    return bool(cells) and RE_REQ_ID.match(cells[0]) is not None
+
+
 def parse_req_blocks(text: str) -> "tuple[list[tuple[str, list[list[str]]]], list[str]]":
     """REQ ブロックを (クラス, 表の行) のリストに切り出す。第 2 戻り値は構造エラー。
 
@@ -365,16 +379,14 @@ def parse_req_blocks(text: str) -> "tuple[list[tuple[str, list[list[str]]]], lis
         if cls is not None:
             if stripped.startswith("|"):
                 rows.append(split_row(stripped))
-            elif RE_REQ_ID_ANY.search(stripped):
+            elif RE_REQ_ID_ANY.search(RE_INLINE_CODE.sub(" ", stripped)):
                 # GFM は行頭パイプを省いても表になる。黙って捨てると、その要件が
                 # 一意性・status・空セルの検査から丸ごと消える（重複が通る）。
                 errors.append(
                     f"{lineno} 行目: REQ ブロック内に表の行として読めない REQ 行がある"
                     f" → {stripped}（行頭を `|` で始める）"
                 )
-        elif RE_REQ_HEADER.match(stripped) or (
-            "|" in stripped and RE_REQ_ID_ANY.search(stripped)
-        ):
+        elif RE_REQ_HEADER.match(stripped) or looks_like_req_row(stripped):
             errors.append(
                 f"{lineno} 行目: REQ 表がマーカーの外にある → {stripped}"
                 "（マーカーで囲まないと一意性・status の検査から丸ごと漏れる）"

@@ -18,6 +18,7 @@ sources:
   - docs/original-docs/0041-umaren-only-strategy-rejected.md
   - docs/original-docs/0043-exacta-in-portfolio-rejected.md
   - docs/original-docs/0046-allocation-prob-weight-no-floor-rejected.md
+  - docs/original-docs/0047-place-show-power-decompression-adopted.md
   - docs/original-docs/0050-placeshow-raw-score-retune-rejected.md
   - docs/original-docs/0052-alpha-blend-removal-rejected.md
   - docs/original-docs/0053-learned-fundamental-model-rejected.md
@@ -70,11 +71,11 @@ paddock が何を目指し、何を達成したら成功で、**何をやらな�
 | REQ-D01-001 | 張るレースは ROI ≥ 100% のものだけに限る。閾値は引き下げない | `paddock-predict --overview` / `paddock-predict-watch` が算出する ROI と、ADR 0040 のゲート検証を再実行する | [ADR 0040](../original-docs/0040-ev-gate-threshold-lowering-rejected.md) | Confirmed |
 | REQ-D01-002 | 順位付けは blended 確率、EV は純モデル確率 × 市場オッズで計算する（確率と買い方の層分離） | `cargo test -p paddock-domain` の EV 層テスト（純モデル確率が EV 経路に渡ることを固定） | [ADR 0055](../original-docs/0055-ev-layer-separation-circular-break.md) | Confirmed |
 | REQ-D01-003 | 軸は事前データで確定し、直前オッズでは動かさない（用途はズレ増額のみ・軸フリップ禁止） | 予想セッションのログ（`predict-watch` 出力と実際の買い目）を突き合わせ、軸の変更が新情報起因のときだけ起きていることを確認する | [ADR 0060](../original-docs/0060-betting-axis-lock-preclose-topup.md) | Confirmed |
-| REQ-D01-004 | 本番構成（α=0.2 / m=10）のトップ選好馬の単勝的中率が 28% を下回らない（890R 実測 29.9%） | `paddock-analyze backtest --blend-alpha 0.2 --shrinkage-m 10 --win-power 1.25 --place-show-power 2.0` | [ADR 0052](../original-docs/0052-alpha-blend-removal-rejected.md) | Confirmed |
-| REQ-D01-005 | 同構成のトップ選好馬の複勝的中率が 60% を下回らない（890R 実測 64.5%） | 同上（`show_hit_rate`） | [ADR 0052](../original-docs/0052-alpha-blend-removal-rejected.md) | Confirmed |
+| REQ-D01-004 | ADR 0052 と同一条件（α=0.2・縮約 / 冪較正フラグなし）のトップ選好馬の単勝的中率が 28% を下回らない（890R 実測 29.9%） | `paddock-analyze backtest --from 2026-03-15 --to 2026-06-21 --blend-alpha 0.2` の `win_hit_rate`（ADR 0052 の再現方法と同じコマンド。`backtest` は m / 冪較正を既定適用しないので、本番構成で測るならフラグを明示したうえで閾値ごと測り直す） | [ADR 0052](../original-docs/0052-alpha-blend-removal-rejected.md) | Confirmed |
+| REQ-D01-005 | 同条件のトップ選好馬の複勝的中率が 60% を下回らない（890R 実測 64.5%） | 同上（`show_hit_rate`） | [ADR 0052](../original-docs/0052-alpha-blend-removal-rejected.md) | Confirmed |
 | REQ-D01-006 | 手動ハンデ軸精査を伴う実運用セッションの単勝的中率が、同構成のバックテスト水準（29.9%）を上回る＝エッジが実在することを実測で示す | 実運用セッションの `bet_records` と結果照合を 200R 以上貯め、`◎` の単勝的中率をバックテストと同じ定義で集計する（現状の観測は 1 開催日規模で母数が足りず、確定知にできる水準にない） | [ADR 0055](../original-docs/0055-ev-layer-separation-circular-break.md)（エッジ＝手動ハンデ軸精査という主張の出所） | Tentative |
-| REQ-D01-007 | 買い目は「そのまま買える形」で提示する（式別 / 方式 / 軸 / 相手 / 点数 / 金額・100 円単位） | `build_portfolio` の単体テストと [live-ev-buy-view.md](../specifications/live-ev-buy-view.md) の画面契約 | [ADR 0064](../original-docs/0064-live-ev-buy-view.md) | Confirmed |
-| REQ-D01-008 | 予想と買い目はブラウザから閲覧できる（ローカル完結・外部ストレージに依存しない） | `docs/api/openapi.json` のスナップショット検証（`src/apps/api-server/tests/openapi.rs`）と `web/src/lib/board.test.ts`、および [tests/browser-test-cases/](../../tests/browser-test-cases/race-list-dashboard.md) の手動ブラウザ手順 | [ADR 0069](../original-docs/0069-drop-icloud-writes-browser-only-viewing.md) | Confirmed |
+| REQ-D01-007 | 買い目は「そのまま買える形」で提示する（式別 / 方式 / 軸 / 相手 / 点数 / 金額・100 円単位） | `build_portfolio` の単体テスト（配分の正）と [live-ev-buy-view.md](../specifications/live-ev-buy-view.md) の**表示形式**の契約（同文書は Python `live_ev.py` の出力契約なので、配分方式の正ではない） | [ADR 0064](../original-docs/0064-live-ev-buy-view.md) | Confirmed |
+| REQ-D01-008 | 予想と買い目はブラウザから閲覧できる（ローカル完結・外部ストレージに依存しない） | `docs/api/openapi.json` のスナップショット検証（`src/apps/api-server/tests/openapi.rs`）と `web/src/lib/board.test.ts`、および [race-list-dashboard.md](../../tests/browser-test-cases/race-list-dashboard.md) の手動ブラウザ手順 | [ADR 0069](../original-docs/0069-drop-icloud-writes-browser-only-viewing.md) | Confirmed |
 <!-- REQ:end D01 -->
 
 ## エッジの所在
@@ -102,7 +103,7 @@ paddock が何を目指し、何を達成したら成功で、**何をやらな�
 | ADR | 採らなかったこと | 棄却の理由（要約） |
 |---|---|---|
 | [0034](../original-docs/0034-alpha-retune-recency-rejected.md) | recency（時間減衰）重み | Brier/LogLoss が変わらず ROI も誤差範囲。複雑性だけ増える |
-| [0035](../original-docs/0035-recent-form-weight-retune-rejected.md) | `recent_form_weight` の再チューニング | 4891R で 0.25 を上回る値が無い |
+| [0035](../original-docs/0035-recent-form-weight-retune-rejected.md) | `recent_form_weight` の再チューニング | 4891R で 0.25 を**有意に**上回る値が無い（最良でも LogLoss 差 0.0001〜0.0003 で過剰適合リスクに見合わない） |
 | [0036](../original-docs/0036-recent-form-trend-n-rejected.md) | 直近 N 走のトレンド加重平均 | 893R で N=1（前走のみ）を上回らない |
 | [0038](../original-docs/0038-jockey-recent-form-rejected.md) | 騎手の直近フォーム factor | 重み 0 が最良。機構だけ残す |
 | [0050](../original-docs/0050-placeshow-raw-score-retune-rejected.md) | place/show 素スコアの m×recency×form joint retune | 脱圧縮は ADR 0047 の冪変換で足り、joint retune に上積みが無い |
@@ -152,6 +153,10 @@ paddock が何を目指し、何を達成したら成功で、**何をやらな�
 
 - **目標が変わったとき**、および**非目標が覆ったとき**（＝棄却 ADR を supersede する新しい ADR が
   承認されたとき）に更新する。棄却の再提案そのものは ADR 側で行い、ここには結果だけを写す。
-- 成功条件の数値は、母数を更新したバックテストが出たら `検証手段` の再実行結果で置き換える。
+- 成功条件の数値は、母数を更新したバックテストが出たら `検証手段` の再実行結果で置き換える
+  （窓を変えたら閾値も併せて測り直す）。
+- **本文は棄却 ADR の索引であって写しではない**。`sources` が 31 本あるのは網羅の宣言で、
+  追従が要るのは**出典の決定が変わったとき**（supersede）だけ。ADR は不変なので、機械置換のような
+  内容を変えない変更で stale が出た場合は [README.md](README.md) の例外 1/1b/1c に従う。
 - 関連: [doc-classes.md](doc-classes.md)（クラス体系）/ [README.md](README.md)（蒸留規約・REQ-ID 規約）/
   [betting-rule-history.md](../specifications/betting-rule-history.md)（買い方ルールの決定根拠と棄却履歴）

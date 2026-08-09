@@ -15,7 +15,9 @@ paddock の文書は HVE（dahatake/HypervelocityEngineering, MIT）の蒸留モ
   改変しない**——決定を変えるときは新しい ADR で supersede する。
 - **読む入口は knowledge**。ADR の決定・理由・却下案・影響は knowledge に**全部写す**。重複を許す
   代わりに、`sources` の更新に蒸留が追従しているかは機械検査で担保する（人手の規律に委ねない）。
-  **⚠ 移行中（ADR 0073 / #579）**: 写しは未着手（knowledge は 7 本で ADR 73 本の決定を含まない）。
+  **⚠ 移行中（ADR 0073 / #579）**: 写しは未着手（knowledge は 8 本で ADR 73 本の決定を含まない。
+  例外は [docs/knowledge/product-goals.md](docs/knowledge/product-goals.md) で、棄却 ADR 24 本の
+  「採らなかったこと」だけは索引として畳んである）。
   当面は **ADR 原本（`docs/original-docs/0NNN-*.md`）も併せて読む**。stale の機械検査は配線済みだが
   判定は当面 warning（未解消 6 件を #580 で消化してから error へ）。**既存 ADR の一括写しは
   それが 0 件になってから着手する**（担保のないまま写すと stale 面積だけが先に増え、ADR 0073 が
