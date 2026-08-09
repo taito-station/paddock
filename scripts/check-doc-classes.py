@@ -28,6 +28,7 @@ frontmatter は限定的な構造しか取らないため正規表現で足り�
   scripts/check-doc-classes.py --warn-only   # error も警告として報告し常に 0 で終了
 """
 
+import functools
 import re
 import subprocess
 import sys
@@ -58,7 +59,9 @@ EXCLUDED_FROM_DOC_CLASS = {"README.md", "doc-classes.md"}
 EXCLUDED_ENTIRELY = {"README.md"}
 
 # frontmatter は限定的な構造しか取らないので正規表現で読む。書式は doc-classes.md が規定。
-RE_FLOW_LIST = re.compile(r"^(doc_class|tags):\s*\[([^\]]*)\]\s*$")
+# 行末のインラインコメントを許す（規約が示すテンプレ自身がコメント付きで書かれているため、
+# 許さないと「正本のテンプレをコピペすると checker が落ちる」という破綻が起きる）。
+RE_FLOW_LIST = re.compile(r"^(doc_class|tags):\s*\[([^\]]*)\]\s*(?:#.*)?$")
 RE_SOURCES_HEAD = re.compile(r"^sources:\s*$")
 RE_SOURCES_ITEM = re.compile(r"^\s+-\s+(\S+)")
 RE_SCALAR = re.compile(r'^(status|kind|distilled_from_sha|updated):\s*"?([^"#]*?)"?\s*(?:#.*)?$')
@@ -67,15 +70,28 @@ RE_CLASS_ROW = re.compile(r"^\|\s*(D\d{2})\s*\|([^|]*)\|\s*(active|n/a)\s*\|\s*(
 RE_NA_ROW = re.compile(r"^\|\s*(D\d{2})\s*\|")
 
 
+# git コマンドの実行ディレクトリ。repo_root() で確定させる。
+# **必ずリポジトリルートで実行する**。cwd 依存にすると `git log -- docs/...` の pathspec が
+# cwd 相対に解決され、ルート以外から呼んだときに stale 判定が全件無言でスキップされて
+# 「✓ 整合を確認」と表示したまま exit 0 する（fail-open）。
+_ROOT: Path = Path(".")
+
+
 def git(*args: str) -> "subprocess.CompletedProcess[str]":
-    return subprocess.run(["git", *args], capture_output=True, text=True)
+    return subprocess.run(["git", *args], cwd=_ROOT, capture_output=True, text=True)
 
 
 def repo_root() -> Path:
-    proc = git("rev-parse", "--show-toplevel")
+    proc = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True
+    )
     if proc.returncode != 0:
         sys.exit("git リポジトリ外では実行できない")
     return Path(proc.stdout.strip())
+
+
+def is_shallow() -> bool:
+    return git("rev-parse", "--is-shallow-repository").stdout.strip() == "true"
 
 
 def extract_block(text: str, name: str) -> list[str]:
@@ -122,30 +138,120 @@ def parse_frontmatter(path: Path) -> dict:
     return out
 
 
-def last_content_change(path: str, limit: int = 30) -> "str | None":
-    """path の内容が最後に変わったコミットの SHA。rename-only のコミットは飛ばす。
+def split_frontmatter(text: str) -> "tuple[str | None, str]":
+    """(frontmatter 本体, それ以降の本文) を返す。frontmatter が無ければ (None, 全文)。"""
+    lines = text.splitlines(keepends=True)
+    if not lines or lines[0].strip() != "---":
+        return None, text
+    for i in range(1, len(lines)):
+        if lines[i].strip() == "---":
+            return "".join(lines[1:i]), "".join(lines[i + 1 :])
+    return None, text
 
-    ディレクトリ移設（ADR 0073 の ADR 移動など）で sources のパスだけが変わった場合、
-    その rename コミットを「最終コミット」と見なすと全件が stale になる。内容が同一なら
-    その knowledge が反映するリポジトリ状態は変わっていないので、遡って実質の変更点を探す。
+
+def frontmatter_blocks(fm: str) -> "dict[str, str]":
+    """frontmatter を「キー → そのキーに属する行のかたまり」に分解する。"""
+    out: dict[str, str] = {}
+    key = None
+    for line in fm.splitlines():
+        head = re.match(r"^([A-Za-z_][A-Za-z0-9_]*):", line)
+        if head:
+            key = head.group(1)
+            out[key] = line + "\n"
+        elif key is not None:
+            out[key] += line + "\n"
+    return out
+
+
+# 変わっても「その文書の内容が変わった」とは見なさないキー。すべてトレーサビリティ用の
+# メタデータで、下流の knowledge が読み直すべき理由にならない。status / kind の変更は
+# 意味を持つので、ここには入れない（例: Confirmed → Conflict は下流に伝えるべき信号）。
+METADATA_KEYS = {"doc_class", "tags", "sources", "distilled_from_sha", "updated"}
+
+
+def is_metadata_only_change(sha: str, path: str) -> bool:
+    """そのコミットの変更が frontmatter のメタデータだけかを判定する。
+
+    ADR 0073 の移設は sources のパス表記を一斉に書き換えた。本文は 1 文字も変わって
+    いないのに「内容変更」と見なすと、それを sources に持つ knowledge が軒並み stale に
+    なる（実測 7 件）。文書クラスの付与も同じ形で自己ノイズを生む。
     """
-    proc = git("log", f"--max-count={limit}", "--format=%H", "--follow", "--", path)
-    if proc.returncode != 0:
-        return None
-    for sha in proc.stdout.split():
-        # name-status に **パス指定を渡さない**。渡すとリネーム元が絞り込みから外れて対に
-        # ならず、R100 ではなく A（新規追加）として報告される（実測）。コミット全体の
-        # name-status を取り、対象パスを終点とする行だけを見る。
-        shown = git("show", "--format=", "--name-status", "-M100%", sha).stdout
-        status = None
-        for line in shown.splitlines():
-            parts = line.split("\t")
-            if len(parts) >= 2 and parts[-1] == path:
-                status = parts[0]
+    new = git("show", f"{sha}:{path}")
+    old = git("show", f"{sha}^:{path}")
+    if new.returncode != 0 or old.returncode != 0:
+        return False  # 初回追加や親を辿れない場合は判定しない（内容変更として扱う）
+    new_fm, new_body = split_frontmatter(new.stdout)
+    old_fm, old_body = split_frontmatter(old.stdout)
+    if new_fm is None or old_fm is None or new_body != old_body:
+        return False
+    new_blocks, old_blocks = frontmatter_blocks(new_fm), frontmatter_blocks(old_fm)
+    changed = {k for k in set(new_blocks) | set(old_blocks) if new_blocks.get(k) != old_blocks.get(k)}
+    return bool(changed) and changed <= METADATA_KEYS
+
+
+def path_status(sha: str, path: str) -> "tuple[str | None, str | None]":
+    """コミット sha における path の (status, リネーム元) を返す。
+
+    name-status に **パス指定を渡さない**。渡すとリネーム元が絞り込みから外れて対にならず、
+    R100 ではなく A（新規追加）として報告される（実測）。コミット全体の name-status を取り、
+    対象パスを終点とする行だけを見る。
+    core.quotePath=false を明示するのは、既定だと非 ASCII パスが "\\346\\234\\200..." の
+    クォート表記になり終点一致が外れて R100 除外が破れるため。
+    """
+    shown = git(
+        "-c", "core.quotePath=false", "show", "--format=", "--name-status", "-M100%", sha
+    ).stdout
+    for line in shown.splitlines():
+        parts = line.split("\t")
+        if len(parts) >= 2 and parts[-1] == path:
+            status = parts[0]
+            src = parts[1] if status.startswith("R") and len(parts) >= 3 else None
+            return status, src
+    return None, None
+
+
+@functools.lru_cache(maxsize=None)
+def last_content_change(path: str, limit: int = 40, max_renames: int = 10) -> "str | None":
+    """path の**内容**が最後に変わったコミットの SHA。
+
+    次の 2 種類は「内容変更ではない」として遡る:
+      - R100（内容差分ゼロのリネーム）。ディレクトリ移設で全件が stale になるのを防ぐ
+      - frontmatter のメタデータだけの変更（sources のパス追従・doc_class 付与など）
+
+    **`--follow` は使わない。** `--follow` はリネームで履歴を打ち切ることがあり（実測:
+    ADR 0036 は移設コミット 1 件しか返さず、それ以前の起票コミットへ辿れなかった）、
+    そこで打ち切られると「履歴を辿れない＝判定不能」に落ちる。代わりに、R100 を見つけたら
+    **そのコミットの親からリネーム元のパスで履歴を取り直す**。リネームが何段重なっても効く。
+    """
+    current = path
+    tip = "HEAD"
+    for _ in range(max_renames):
+        proc = git("log", f"--max-count={limit}", "--format=%H", tip, "--", current)
+        if proc.returncode != 0:
+            return None
+        shas = proc.stdout.split()
+        if not shas:
+            return None
+        renamed = False
+        for sha in shas:
+            status, rename_src = path_status(sha, current)
+            if status is None:
+                # そのコミットは current を（この名前では）触っていない。マージコミットは
+                # git show が既定で差分を出さないためここに来る。実際の変更は親側のコミットに
+                # 現れ、それも log の対象なので飛ばして問題ない。
+                continue
+            if status == "R100":
+                if not rename_src:
+                    return sha  # リネーム元を取れない＝判定できないので内容変更扱い
+                current = rename_src
+                tip = f"{sha}^"
+                renamed = True
                 break
-        if status == "R100":
-            continue  # 純粋なリネーム。内容は変わっていないので更に遡る
-        return sha
+            if is_metadata_only_change(sha, current):
+                continue
+            return sha
+        if not renamed:
+            return None  # この系列は全部「内容変更ではない」だった
     return None
 
 
@@ -164,7 +270,9 @@ def main(argv: list[str]) -> int:
         return 2
     warn_only = arg == "--warn-only"
 
-    root = repo_root()
+    global _ROOT
+    _ROOT = repo_root()
+    root = _ROOT
     registry_path = root / REGISTRY
     if not registry_path.is_file():
         print(f"クラス定義が見つからない: {REGISTRY}", file=sys.stderr)
@@ -177,9 +285,14 @@ def main(argv: list[str]) -> int:
     registry_text = registry_path.read_text(encoding="utf-8")
     declared: dict[str, dict] = {}
     for line in extract_block(registry_text, "doc-classes"):
-        row = RE_CLASS_ROW.match(line.strip())
+        stripped = line.strip()
+        row = RE_CLASS_ROW.match(stripped)
         if row:
             declared[row.group(1)] = {"state": row.group(3), "count": int(row.group(4))}
+        elif RE_NA_ROW.match(stripped):
+            # クラス行に見えるのに書式が崩れている。黙って落とすとそのクラスが「未定義」に
+            # なり、参照している文書が全部 error になって原因が分からなくなる。
+            errors.append(f"{REGISTRY}: クラス一覧の書式が崩れている行がある → {stripped}")
     na_declared = {
         m.group(1)
         for line in extract_block(registry_text, "doc-classes-na")
@@ -197,9 +310,15 @@ def main(argv: list[str]) -> int:
         errors.append(f"{REGISTRY}: {cls} は N/A 宣言表にあるが一覧の状態が n/a になっていない")
 
     # --- 対象ファイルを走査 ---
+    shallow = is_shallow()
     targets: list[Path] = []
     for d in TARGET_DIRS:
         targets.extend(sorted(p for p in (root / d).glob("*.md") if p.name not in EXCLUDED_ENTIRELY))
+        # glob は非再帰。サブディレクトリに .md を置かれると無検査域になるので可視化する
+        # （現状 docs/specifications/diagrams/ に .md は無い）。
+        nested = sorted(p.relative_to(root).as_posix() for p in (root / d).glob("*/**/*.md"))
+        for n in nested:
+            warnings.append(f"{n}: サブディレクトリの .md は検査対象外（直下に置く）")
 
     actual_count: dict[str, int] = {cls: 0 for cls in declared}
     for path in targets:
@@ -215,6 +334,8 @@ def main(argv: list[str]) -> int:
             if not classes:
                 errors.append(f"{rel}: doc_class が無い（書式は {REGISTRY} 参照）")
             else:
+                if len(set(classes)) != len(classes):
+                    errors.append(f"{rel}: doc_class に重複がある → {classes}")
                 for cls in classes:
                     if cls not in declared:
                         errors.append(f"{rel}: 未定義のクラス {cls}")
@@ -233,7 +354,11 @@ def main(argv: list[str]) -> int:
         if not sources:
             errors.append(f"{rel}: sources が空（由来を辿れない）")
         for src in sources:
-            if not (root / src).is_file():
+            # 絶対パスや .. を許すと Path(root) / "/etc/hosts" が root を捨てて外を指し、
+            # 「由来はリポジトリ内で辿れる」という検査の前提が崩れる。
+            if src.startswith("/") or ".." in Path(src).parts:
+                errors.append(f"{rel}: sources はリポジトリ相対パスで書く → {src}")
+            elif not (root / src).is_file():
                 errors.append(f"{rel}: sources のパスが実在しない → {src}")
 
         # (6) stale
@@ -243,9 +368,15 @@ def main(argv: list[str]) -> int:
             continue
         resolved = git("rev-parse", "--verify", "--quiet", f"{distilled}^{{commit}}")
         if resolved.returncode != 0:
-            warnings.append(
+            # shallow clone なら履歴が無いだけなので警告に留める。full clone で解決できない
+            # のは frontmatter の誤りで、放置すると **その文書の stale 判定が丸ごと消える**
+            # （fail-open）。CI は fetch-depth: 0 なので通常は error 側に来る。
+            message = (
                 f"{rel}: distilled_from_sha '{distilled}' を解決できない"
-                "（shallow clone か、rebase で失われた SHA の可能性）"
+                "（この文書の stale 判定は行われない）"
+            )
+            (warnings if shallow else errors).append(
+                message + "。shallow clone のため" if shallow else message
             )
             continue
         distilled_full = resolved.stdout.strip()
@@ -254,6 +385,9 @@ def main(argv: list[str]) -> int:
                 continue  # 実在チェックで既に error にしている
             changed = last_content_change(src)
             if changed is None:
+                # 履歴を辿れなかった（未コミット・打ち切り等）。黙って通すと fail-open に
+                # なるので可視化する。
+                warnings.append(f"{rel}: {src} の履歴を辿れず stale 判定を実施できなかった")
                 continue
             if git("merge-base", "--is-ancestor", changed, distilled_full).returncode != 0:
                 warnings.append(

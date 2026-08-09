@@ -67,7 +67,7 @@ ADR の採番は `scripts/check-adr-numbers.sh next`（並行 clone / worktree �
 2. Claude が読んで欠落/不整合を検出し、`docs/qa/` に質問票を起票。
 3. 回答済み qa と ADR を knowledge に差分マージ。**ADR の内容は knowledge へ全部写す**
    （読む入口を knowledge に一本化する）。original-docs 自体は残す（トレーサビリティ）。
-   **※ 既存 ADR 72 本の一括写しは stale 機械検査の配線が完了するまで開始しない**
+   **※ 既存 ADR 73 本の一括写しは stale 機械検査の未解消（#580）が 0 件になるまで開始しない**
    （ADR 0073 / [docs/knowledge/README.md](../knowledge/README.md) の移行中ブロック参照）。
    それまでは knowledge だけでなく ADR 原本も読む運用。
 

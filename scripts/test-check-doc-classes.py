@@ -343,14 +343,195 @@ def test_readme_is_excluded() -> None:
 
 
 def test_gap_is_warning() -> None:
-    """active なのに 0 本のクラスは充足ギャップとして警告（error にはしない）。"""
+    """active なのに 0 本のクラスは充足ギャップとして警告（error にはしない）。
+
+    n/a のクラス（D12）は 0 本でも警告しない。ここを `or` で繋ぐと第 1 項が常に真になって
+    第 2 項が評価されず、判定を `state` 抜きに変異させてもテストが通ってしまう。
+    """
     repo = new_repo()
     try:
         baseline(repo)
         code, out = check(repo)
         assert code == 0, out
         assert "D08 は active だが該当文書が 0 本" in out, out
-        assert "D12" not in out.split("充足ギャップ")[0] or "D12 は active" not in out, out
+        assert "D12 は active" not in out, f"n/a クラスを充足ギャップとして警告している:\n{out}"
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_rename_chain_is_not_stale() -> None:
+    """**最重要の 2 段目**: リネームが 2 回以上重なっても stale と誤判定しない。
+
+    R100 を飛ばすときに追跡パスをリネーム元へ巻き戻さないと、2 回目の移設で name-status の
+    終点が一致せず判定が壊れる（1 段しか効かない）。`--follow` はリネームで履歴を打ち切る
+    ことがあるので、log の取り直しで辿る実装であることも併せて固定する。
+    """
+    repo = new_repo()
+    try:
+        baseline(repo)
+        for old, new in [("0001-first.md", "0001-r1.md"), ("0001-r1.md", "0001-r2.md")]:
+            run_git(repo, "mv", f"docs/original-docs/{old}", f"docs/original-docs/{new}")
+            commit_all(repo, f"パス移動のみ {old} → {new}")
+        sha_before = None
+        for line in (repo / "docs/knowledge/a.md").read_text(encoding="utf-8").splitlines():
+            if line.startswith("distilled_from_sha:"):
+                sha_before = line.split('"')[1]
+        write_doc(repo, "docs/knowledge/a.md", ["D19"],
+                  ["docs/original-docs/0001-r2.md"], sha_before)
+        reg = repo / "docs/knowledge/doc-classes.md"
+        reg.write_text(reg.read_text(encoding="utf-8").replace("0001-first.md", "0001-r2.md"),
+                       encoding="utf-8")
+        commit_all(repo, "sources のパスを追従")
+        code, out = check(repo)
+        assert code == 0, out
+        assert "STALE" not in out, f"2 段のリネームを stale と誤判定した:\n{out}"
+        assert "履歴を辿れず" not in out, f"履歴を辿れなくなっている:\n{out}"
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_frontmatter_only_change_is_not_stale() -> None:
+    """source の frontmatter メタデータだけが変わった場合は stale にしない。
+
+    ADR 移設の sources パス追従や doc_class の付与がこれ。本文が 1 文字も変わっていないのに
+    「内容変更」と見なすと、それを sources に持つ knowledge が軒並み stale になる。
+    """
+    repo = new_repo()
+    try:
+        sha = baseline(repo)
+        write_doc(repo, "docs/specifications/s.md", ["D19"],
+                  ["docs/original-docs/0001-first.md"], sha)
+        write_registry(repo, sha, d19=2)
+        write_doc(repo, "docs/knowledge/a.md", ["D19"],
+                  ["docs/specifications/s.md", "docs/original-docs/0001-first.md"], sha)
+        added = commit_all(repo, "s.md を追加して a.md の source にする")
+        # s.md の作成コミット自体は a.md の distill より後になるので、まず追従させる
+        # （そうしないと「source が新しい」という正しい stale を拾ってしまう）。
+        write_doc(repo, "docs/knowledge/a.md", ["D19"],
+                  ["docs/specifications/s.md", "docs/original-docs/0001-first.md"], added)
+        commit_all(repo, "a.md を s.md の追加時点まで追従")
+        # s.md の frontmatter だけを変える（doc_class 追加相当）。本文は不変。
+        write_doc(repo, "docs/specifications/s.md", ["D19", "D22"],
+                  ["docs/original-docs/0001-first.md"], sha)
+        write_registry(repo, sha, d19=2, d22=1)
+        commit_all(repo, "s.md の frontmatter だけ変更")
+        code, out = check(repo)
+        assert code == 0, out
+        assert "STALE" not in out, f"frontmatter のみの変更を stale と誤判定した:\n{out}"
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_body_change_is_stale() -> None:
+    """対照: 本文が変われば（frontmatter が同じでも）stale になる。"""
+    repo = new_repo()
+    try:
+        baseline(repo)
+        p = repo / "docs/original-docs/0001-first.md"
+        p.write_text(p.read_text(encoding="utf-8") + "\n本文の追記。\n", encoding="utf-8")
+        commit_all(repo, "本文を変更")
+        code, out = check(repo)
+        assert code == 0, out
+        assert "STALE" in out, f"本文の変更を検出できていない:\n{out}"
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_runs_from_subdirectory() -> None:
+    """リポジトリルート以外を cwd にしても結果が変わらない。
+
+    git をルートで実行しないと pathspec が cwd 相対に解決され、stale 判定が全件無音で
+    スキップされたまま「✓ 整合を確認」と表示して exit 0 する（fail-open）。
+    """
+    repo = new_repo()
+    try:
+        baseline(repo)
+        p = repo / "docs/original-docs/0001-first.md"
+        p.write_text(p.read_text(encoding="utf-8") + "\n本文の追記。\n", encoding="utf-8")
+        commit_all(repo, "本文を変更")
+        proc = subprocess.run(
+            [sys.executable, str(TARGET)], cwd=repo / "docs", capture_output=True, text=True
+        )
+        out = proc.stdout + proc.stderr
+        assert "STALE" in out, f"サブディレクトリから実行すると stale 判定が消える:\n{out}"
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_unresolvable_sha_is_error() -> None:
+    """full clone で distilled_from_sha を解決できないのは error（その文書の判定が消えるため）。"""
+    repo = new_repo()
+    try:
+        baseline(repo)
+        write_doc(repo, "docs/knowledge/a.md", ["D19"],
+                  ["docs/original-docs/0001-first.md"], "deadbee")
+        code, out = check(repo)
+        assert code == 1, f"解決不能な sha を素通りさせている:\n{out}"
+        assert "を解決できない" in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_absolute_source_path_is_error() -> None:
+    """sources の絶対パスは error。Path(root) / "/etc/x" は root を捨てて外を指す。"""
+    repo = new_repo()
+    try:
+        sha = baseline(repo)
+        write_doc(repo, "docs/knowledge/a.md", ["D19"], ["/etc/hosts"], sha)
+        code, out = check(repo)
+        assert code == 1, out
+        assert "リポジトリ相対パスで書く" in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_duplicate_class_is_error() -> None:
+    """doc_class の重複は「現行」列を二重計上するので error。"""
+    repo = new_repo()
+    try:
+        sha = baseline(repo)
+        write_doc(repo, "docs/knowledge/a.md", ["D19", "D19"],
+                  ["docs/original-docs/0001-first.md"], sha)
+        code, out = check(repo)
+        assert code == 1, out
+        assert "doc_class に重複がある" in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_inline_comment_in_flow_list_is_accepted() -> None:
+    """規約が示すテンプレはインラインコメント付き。それを許さないと正本が正本を通らない。"""
+    repo = new_repo()
+    try:
+        sha = baseline(repo)
+        (repo / "docs/knowledge/a.md").write_text(
+            f'---\nstatus: Confirmed\nkind: knowledge\n'
+            f'doc_class: [D19]   # 第 1 要素が主クラス\ntags: [D19]        # mdq 用ミラー\n'
+            f'sources:\n  - docs/original-docs/0001-first.md\n'
+            f'distilled_from_sha: "{sha}"\nupdated: "2026-08-09"\n---\n\n# a\n',
+            encoding="utf-8",
+        )
+        code, out = check(repo)
+        assert code == 0, f"インラインコメント付きのテンプレが通らない:\n{out}"
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_malformed_class_row_is_error() -> None:
+    """クラス一覧の書式が崩れた行を黙って落とすと、そのクラスが「未定義」になって原因が読めない。"""
+    repo = new_repo()
+    try:
+        baseline(repo)
+        reg = repo / "docs/knowledge/doc-classes.md"
+        reg.write_text(
+            reg.read_text(encoding="utf-8").replace(
+                "| D08 | データモデル | active | 0 |", "| D08 | データモデル | **active** | 0 |"
+            ),
+            encoding="utf-8",
+        )
+        code, out = check(repo)
+        assert code == 1, out
+        assert "クラス一覧の書式が崩れている" in out, out
     finally:
         shutil.rmtree(repo)
 

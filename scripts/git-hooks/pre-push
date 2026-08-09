@@ -27,12 +27,12 @@ bash scripts/check-adr-numbers.sh
 # 文書クラスと sources 追従の検査（ADR 0073）。差分ではなくリポジトリ全体の状態を見るので
 # stdin は読まない（下の web 判定が stdin を消費するため、ここで読むと web 検査が壊れる）。
 # python3 が無い環境では警告のみでスキップする。未セットアップで push を止めない既存方針に倣う
-# （CI の adr ジョブが必ず走るのでゲートは維持される）。
+# （CI の adr ジョブでも同じ検査が走るので、その場合は PR 上で検出される）。
 if command -v python3 >/dev/null 2>&1; then
     echo "[pre-push] scripts/check-doc-classes.py（文書クラス / sources 追従 ADR 0073）"
     python3 scripts/check-doc-classes.py
 else
-    echo "[pre-push] python3 が無いので check-doc-classes.py はスキップ（CI の adr ジョブが担保します）"
+    echo "[pre-push] python3 が無いので check-doc-classes.py はスキップ（CI の adr ジョブで検出されます）"
 fi
 
 # web/ 差分がある push のときだけ typecheck / lint を走らせる（#463）。
