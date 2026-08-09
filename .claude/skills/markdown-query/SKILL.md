@@ -42,6 +42,9 @@ tools/mdq/.venv/bin/pip install -r tools/mdq/requirements.txt   # rank_bm25 / Py
 
 1. **索引**: `scripts/mdq index`。`mdq.toml` の `[index].roots`（docs/specifications, docs/knowledge,
    docs/qa, docs/original-docs）を走査。存在しない dir は自動スキップ。増分更新。
+   **ADR 統合（ADR 0073）より前の索引を持つ環境は一度だけ `rm -rf .mdq && scripts/mdq index`**。
+   増分の prune は roots 配下しか消さないため、旧 `docs/adr/*` のチャンクが居残り、存在しない
+   パスが検索結果に出続ける。
 2. **検索**: `scripts/mdq search --q "クエリ" --top-k 5 --max-tokens 800`。出力は JSONL（1 行 1 ヒット、
    `path` / `heading_path` / `lines` / `score` / `snippet`）。`--paths` で絞ると精度向上——
    **ADR だけに絞るなら `--paths "docs/original-docs/0*"`**（同ディレクトリの issue 由来一次資料は

@@ -28,6 +28,9 @@ paddock の文書は HVE（dahatake/HypervelocityEngineering, MIT）の蒸留モ
   でヒットチャンクだけ取り、必要時のみ生ファイルへ。コード探索は従来通り serena（`mcp__serena__*`）。
   索引 `.mdq/` は gitignore・セッション毎に `scripts/mdq index` で再ビルド（初回は
   `python3 -m venv tools/mdq/.venv && tools/mdq/.venv/bin/pip install -r tools/mdq/requirements.txt`）。
+  **ADR 統合（ADR 0073）より前の索引を持つ環境は一度だけ `rm -rf .mdq && scripts/mdq index`**
+  で作り直す。増分の prune は roots 配下しか消さないため、旧 `docs/adr/*` のチャンクが居残って
+  存在しないパスが検索結果に出続ける。
 
 ## DB 運用
 

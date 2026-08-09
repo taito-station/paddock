@@ -40,11 +40,12 @@ case "${1:-}" in
         ;;
 esac
 
-if ! repo_root="$(git rev-parse --show-toplevel 2>/dev/null)"; then
-    echo "git リポジトリ外では実行できない" >&2
-    exit 1
-fi
-target="$repo_root/scripts/check-adr-numbers.sh"
+# テスト対象は **自スクリプトと同じディレクトリ** から解決する。CWD の git ルート起点にすると、
+# 別 worktree を CWD にしたまま絶対パスで起動したときに黙って別のコピーを検査してしまう
+# （このリポジトリは .claude/worktrees/ を多用するので現実に起こる）。「検査対象を取り違えて
+# 緑になる」のは本スクリプトが塞いでいる silent-green と同型なので、ここも取り違えない形にする。
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+target="$script_dir/check-adr-numbers.sh"
 if [[ ! -f "$target" ]]; then
     echo "テスト対象が見つからない: $target" >&2
     exit 1
