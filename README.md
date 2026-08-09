@@ -528,7 +528,9 @@ scripts/reset-db.sh --to <target_url>    # 対象 DB を明示
   `deployments/db/BACKUP.md`、日次実行などの launchd ジョブは `deployments/launchd/` を参照。
 - `scripts/check-adr-numbers.sh`: ADR 番号（`docs/original-docs/0NNN-*.md` の先頭 4 桁）の重複を機械検出する
   （CI / pre-push 用）。同ディレクトリに同居する issue 由来の一次資料（`382-*.md` 等）は 0 埋めしない
-  命名で分離されており、走査対象から外れる。
+  命名で分離され、番号の重複検出・採番からは外れる。ただし「0 埋めを忘れた ADR」を取りこぼさない
+  よう、非 ADR 名のファイルも本文構造（`## ステータス` と `## 決定`）は検査される。
+- `scripts/test-check-adr-numbers.sh`: 上記の fail-closed 分岐の回帰テスト（CI の `adr` ジョブで実行）。
 - `scripts/harness/`: 学習型モデル評価ハーネス（backtest の忠実性ゲート等。`scripts/harness/README.md` 参照）。
 
 ## 開発

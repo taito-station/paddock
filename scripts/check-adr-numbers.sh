@@ -67,8 +67,33 @@ fi
 
 # コードフェンス（``` / ~~~ で囲まれた範囲）を落とした本文を返す。フェンスの中に貼られた
 # ADR 雛形を「本物の見出し」と取り違えないようにするため。
+#
+# フェンス行が奇数のとき（閉じ忘れ）は **何も落とさず全文を返す**。単純にトグルすると最後の
+# フェンス以降が丸ごと消え、そこにある見出しを見落として fail-open になる。判定を緩める側に
+# 倒れるくらいなら、誤検知の可能性を受け入れて全文を見る（fail-closed 側に倒す）。
 strip_code_fences() {
-    awk '/^[[:space:]]*(```|~~~)/ { in_fence = !in_fence; next } !in_fence { print }' "$1"
+    awk '
+        { lines[NR] = $0 }
+        /^[[:space:]]*(```|~~~)/ { fences++ }
+        END {
+            if (fences % 2 == 1) {
+                for (i = 1; i <= NR; i++) { print lines[i] }
+                exit
+            }
+            for (i = 1; i <= NR; i++) {
+                if (lines[i] ~ /^[[:space:]]*(```|~~~)/) { in_fence = !in_fence; continue }
+                if (!in_fence) { print lines[i] }
+            }
+        }
+    ' "$1"
+}
+
+# ファイルが ADR の本文構造（コードフェンスの外の行頭に「## ステータス」と「## 決定」が
+# 同時に存在する）を持つか。0 埋めを忘れた ADR を名前以外の手がかりで拾うための判定。
+looks_like_adr() {
+    local body
+    body="$(strip_code_fences "$1")"
+    grep -qE '^## ステータス' <<<"$body" && grep -qE '^## 決定' <<<"$body"
 }
 
 # 旧 docs/adr が復活していたら落とす。ADR 0073 でこのディレクトリは廃止したが、統合前に
@@ -79,12 +104,12 @@ strip_code_fences() {
 # 判定はディレクトリ存在ではなく **中の *.md の有無** で行う。git は空ディレクトリを追跡
 # しないので、空の docs/adr が現れるのは .DS_Store やマージ残骸が居るローカル環境だけ。
 # そこで落とすと pre-push が恒久的にブロックされるだけで、防ぎたい事故は何も防げない。
-shopt -s nullglob
+# 直下グロブではなく find で階層ごと見る。直下だけを見ると docs/adr/nested/0072-x.md が
+# 素通りし、「復活したら落とす」という保証が名ばかりになる。
 declare -a legacy_adrs=()
-for stray in "$legacy_adr_dir"/*.md; do
-    legacy_adrs+=("$(basename "$stray")")
-done
-shopt -u nullglob
+while IFS= read -r stray; do
+    [[ -n "$stray" ]] && legacy_adrs+=("${stray#"$legacy_adr_dir"/}")
+done < <(find "$legacy_adr_dir" -name '*.md' -print 2>/dev/null | sort)
 if [[ ${#legacy_adrs[@]} -gt 0 ]]; then
     echo "✗ 廃止済みの $legacy_adr_dir に ADR が置かれている（ADR 0073 で docs/original-docs へ統合済み）:" >&2
     printf '    %s\n' "${legacy_adrs[@]}" >&2
@@ -97,12 +122,17 @@ fi
 # サブディレクトリに置かれた ADR も落とす。走査は docs/original-docs 直下限定なので、
 # docs/original-docs/adr/0001-x.md のような階層を切られると重複検出・採番の両方から
 # 完全に不可視になる（fail-open）。ADR 0073 で「フラットに置く」と決めた以上、階層は事故。
-shopt -s nullglob
+#
+# 対象は「0 埋め 4 桁の名前」だけでなく「ADR の本文構造を持つもの」も含める。名前だけで
+# 絞ると、0 埋めを忘れた ADR をサブディレクトリに置いたとき（sub/74-foo.md）に、階層ガード
+# にも 0 埋め忘れガード（走査が直下限定）にも掛からず完全に不可視になる。
 declare -a nested_adrs=()
 while IFS= read -r nested; do
-    [[ -n "$nested" ]] && nested_adrs+=("${nested#"$adr_dir"/}")
-done < <(find "$adr_dir" -mindepth 2 -name '0*.md' -print 2>/dev/null | sort)
-shopt -u nullglob
+    [[ -z "$nested" ]] && continue
+    if [[ "$(basename "$nested")" =~ ^0[0-9]{3} ]] || looks_like_adr "$nested"; then
+        nested_adrs+=("${nested#"$adr_dir"/}")
+    fi
+done < <(find "$adr_dir" -mindepth 2 -name '*.md' -print 2>/dev/null | sort)
 if [[ ${#nested_adrs[@]} -gt 0 ]]; then
     echo "✗ サブディレクトリに ADR が置かれている（docs/original-docs 直下にフラットに置く）:" >&2
     printf '    %s\n' "${nested_adrs[@]}" >&2
@@ -147,9 +177,7 @@ for path in "$adr_dir"/*.md; do
         # 限界（現行コーパスに対する実測であって一般的保証ではない）: 「## ステータス」だけ
         # 書いて「## 決定」が無い下書きや、英語見出し（## Status / ## Decision）の ADR は
         # 素通りする。テンプレートを変えるときはこの判定も併せて見直すこと。
-        body_outside_fences="$(strip_code_fences "$path")"
-        if grep -qE '^## ステータス' <<<"$body_outside_fences" \
-            && grep -qE '^## 決定' <<<"$body_outside_fences"; then
+        if looks_like_adr "$path"; then
             misnamed_adr+=("$base")
         fi
         continue
@@ -180,6 +208,14 @@ compute_next() {
         # 10# で 8 進数誤解釈（先頭 0）を防ぐ。
         ((10#$n > max)) && max=$((10#$n))
     done
+    # 0 埋め 4 桁（0001〜0999）の上限に達したら番号を配らない。1000 を返しても、その名前で
+    # ファイルを作った瞬間に「ADR に見えるが 0 埋め 4 桁で始まらない」で恒久的に落ちる
+    # ＝使えない番号を配ることになる。規約と判定を併せて見直すのが正しい対処。
+    if [[ $max -ge 999 ]]; then
+        echo "✗ ADR 番号が上限 0999 に達した（現在の最大: $(printf '%04d' "$max")）" >&2
+        echo "  桁数の規約（docs/original-docs/README.md）と本スクリプトの判定を併せて見直す" >&2
+        exit 1
+    fi
     printf '%04d\n' $((max + 1))
 }
 

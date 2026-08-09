@@ -8,7 +8,8 @@ paddock の文書は HVE（dahatake/HypervelocityEngineering, MIT）の蒸留モ
 - **3 層**: `docs/original-docs/`（RO 一次資料・生素材 ＋ **ADR**）→ `docs/qa/`（質問票+回答）→
   `docs/knowledge/` ＋ `docs/specifications/`（status 付き確定知）。蒸留は Claude が回す。
 - **specifications はその場で knowledge**（frontmatter: `status`/`kind`/`sources`/`distilled_from_sha`/`updated`）。
-  多数の相互リンクを持つため物理移動しない。新規の横断的蒸留知は `docs/knowledge/` へ。
+  frontmatter を付けた時点で確定知層として機能するので、移動する実利が無い。新規の横断的蒸留知は
+  `docs/knowledge/` へ。
 - **ADR は一次資料層（`docs/original-docs/`）の不変の決定記録**（ADR 0073 で旧 `docs/adr/` から統合）。
   決定を伴う変更は ADR を起票する（採番は `scripts/check-adr-numbers.sh next`）。**一度置いた ADR は
   改変しない**——決定を変えるときは新しい ADR で supersede する。

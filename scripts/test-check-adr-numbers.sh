@@ -168,12 +168,20 @@ write_adr "$work/repo/docs/original-docs/00401-a.md" "00401. A"
 write_adr "$work/repo/docs/original-docs/00401-b.md" "00401. B"
 expect_exit_with "5 桁の同番号を重複として検出する" 1 "番号 00401" bash scripts/check-adr-numbers.sh
 
-echo "[6] 規約外の命名は警告のみで落とさない"
+echo "[6] 規約外の命名は警告のみで落とさない（重複が無ければ成功パスまで到達する）"
 reset_fixture
 write_adr "$work/repo/docs/original-docs/0001-first.md" "0001. 最初の決定"
 write_adr "$work/repo/docs/original-docs/0042-Foo_Bar.md" "0042. 大文字とアンダースコア"
-expect_exit_with "kebab 規約違反は警告どまり" 0 "ADR 命名規約" bash scripts/check-adr-numbers.sh
-expect_exit_with "4 桁の重複判定は壊れない（0043 は別番号）" 0 "重複なし" bash scripts/check-adr-numbers.sh
+expect_exit_with "kebab 規約違反は警告に載る" 0 "ADR 命名規約" bash scripts/check-adr-numbers.sh
+expect_exit_with "警告が出ても重複なし判定まで到達する" 0 "重複なし" bash scripts/check-adr-numbers.sh
+
+echo "[6b] 規約外の命名でも重複検出網からは漏れない（コア保証）"
+reset_fixture
+write_adr "$work/repo/docs/original-docs/0001-first.md" "0001. 最初の決定"
+write_adr "$work/repo/docs/original-docs/0043-normal.md" "0043. 正常な命名"
+# ダッシュ無し。kebab 規約には外れるが 0043 として重複検出網に載らなければならない。
+write_adr "$work/repo/docs/original-docs/0043dup.md" "0043. ダッシュ無しの重複"
+expect_exit_with "ダッシュ無しの同番号を重複として検出する" 1 "番号 0043" bash scripts/check-adr-numbers.sh
 
 echo "[7] 0 埋めを忘れた ADR を致命で拾う（fail-closed）"
 reset_fixture
@@ -202,7 +210,14 @@ write_adr "$work/repo/docs/adr/0072-stray.md" "0072. 別 PR が旧パスに足�
 expect_exit_with "check が落ちる" 1 "廃止済み" bash scripts/check-adr-numbers.sh
 expect_exit_with "next も落ちる" 1 "廃止済み" bash scripts/check-adr-numbers.sh next
 
-echo "[11] 空の docs/adr では落ちない（ローカル残骸で pre-push を止めない）"
+echo "[11] 旧 docs/adr のサブディレクトリに置かれても拾う"
+reset_fixture
+write_adr "$work/repo/docs/original-docs/0001-first.md" "0001. 最初の決定"
+mkdir -p "$work/repo/docs/adr/nested"
+write_adr "$work/repo/docs/adr/nested/0072-stray.md" "0072. 階層に隠された ADR"
+expect_exit_with "階層に隠れていても落ちる" 1 "廃止済み" bash scripts/check-adr-numbers.sh
+
+echo "[11b] 空の docs/adr では落ちない（ローカル残骸で pre-push を止めない）"
 reset_fixture
 write_adr "$work/repo/docs/original-docs/0001-first.md" "0001. 最初の決定"
 mkdir -p "$work/repo/docs/adr"
@@ -216,6 +231,30 @@ mkdir -p "$work/repo/docs/original-docs/adr"
 write_adr "$work/repo/docs/original-docs/adr/0001-nested-dup.md" "0001. 階層に置かれた重複"
 expect_exit_with "check が落ちる" 1 "サブディレクトリ" bash scripts/check-adr-numbers.sh
 expect_exit_with "next も落ちる" 1 "サブディレクトリ" bash scripts/check-adr-numbers.sh next
+
+echo "[12b] 0 埋め忘れ ADR がサブディレクトリにあっても拾う（2 つのガードの盲点）"
+reset_fixture
+write_adr "$work/repo/docs/original-docs/0001-first.md" "0001. 最初の決定"
+mkdir -p "$work/repo/docs/original-docs/sub"
+# 名前だけで絞ると、階層ガード（0*.md 限定）にも 0 埋め忘れガード（直下限定）にも掛からない。
+write_adr "$work/repo/docs/original-docs/sub/74-nested.md" "74. 階層に置かれた 0 埋め忘れ"
+expect_exit_with "本文構造で拾って落ちる" 1 "サブディレクトリ" bash scripts/check-adr-numbers.sh
+
+echo "[12c] 閉じ忘れコードフェンスで判定が無効化されない（fail-closed 側に倒す）"
+reset_fixture
+write_adr "$work/repo/docs/original-docs/0001-first.md" "0001. 最初の決定"
+# フェンス行が奇数。単純にトグルすると最後のフェンス以降が丸ごと落ち、見出しを見落とす。
+{
+    printf '# 74. 閉じ忘れフェンス\n\n'
+    printf '```markdown\n'
+    printf '## ステータス\n承認済み\n\n## 決定\nこうする\n'
+} >"$work/repo/docs/original-docs/74-odd-fence.md"
+expect_exit_with "見落とさずに致命判定する" 1 "0 埋め 4 桁で始まらない" bash scripts/check-adr-numbers.sh
+
+echo "[12d] 採番の上限 0999 で next が番号を配らない"
+reset_fixture
+write_adr "$work/repo/docs/original-docs/0999-max.md" "0999. 上限"
+expect_exit_with "next が上限到達で落ちる" 1 "上限 0999 に達した" bash scripts/check-adr-numbers.sh next
 
 echo "[13] docs/original-docs 自体が無ければ落ちる"
 reset_fixture
@@ -236,7 +275,10 @@ rm -rf "$work/nogit"
 mkdir -p "$work/nogit"
 cp "$target" "$work/nogit/check-adr-numbers.sh"
 nogit_status=0
-nogit_out="$( cd "$work/nogit" && bash ./check-adr-numbers.sh 2>&1 )" || nogit_status=$?
+# GIT_CEILING_DIRECTORIES で上位への探索を止める。TMPDIR が git リポジトリ配下に向いている
+# 環境（Linux の mktemp は TMPDIR を尊重する）だと、これが無いと git が上位リポジトリを
+# 拾ってしまい「リポジトリ外」の検証にならない。
+nogit_out="$( cd "$work/nogit" && GIT_CEILING_DIRECTORIES="$work" bash ./check-adr-numbers.sh 2>&1 )" || nogit_status=$?
 if [[ "$nogit_status" -eq 1 && "$nogit_out" == *"git リポジトリ外"* ]]; then
     echo "  ✓ git リポジトリ外は exit 1"
 else

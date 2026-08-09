@@ -44,7 +44,9 @@ docs/knowledge/ ＋ docs/specifications/   status 付き確定知（＝この層
 ## knowledge はどこにあるか
 
 - **`docs/specifications/`**: 既存のドメイン/機能知。**その場で knowledge に昇格**する（frontmatter を
-  付与）。多数の相互リンクを持つため物理移動しない。
+  付与）。物理移動はしない——frontmatter を付けた時点で確定知層として機能し、`docs/knowledge/` へ
+  移しても得られるものが無いため（ADR 0073 で実証したとおり移動コスト自体は小さいので、
+  「リンクが多いから動かせない」わけではない）。
 - **`docs/knowledge/`**: qa および ADR 由来の**新規・横断的な蒸留知**の置き場。既存 spec に属さない
   ものはここに置く。
 
@@ -88,6 +90,10 @@ updated: "YYYY-MM-DD"    # 内容を実質更新した日（YAML の date 型を
 5. 決定を伴うものは ADR を `docs/original-docs/0NNN-*.md` に起票し（採番は
    `scripts/check-adr-numbers.sh next`）、knowledge の `sources` から参照する。**ADR の決定・理由・
    却下案・影響は knowledge へ全部写す**（読む入口を knowledge に一本化するため）。
+   **※ 既存 ADR の一括写しは stale 機械検査の配線が完了するまで開始しない**（上の移行中ブロック
+   参照。担保のないまま写すと stale 面積だけが先に増える）。新規 ADR の写しは検査の有無に
+   関わらず起票と同時に行ってよい——増える stale 面積が 1 本ぶんで、書いた本人が同じ PR 内に
+   いるため。
 6. **sources 追従**: knowledge の `sources` に列挙されたファイルを**内容ごと**変更する PR は、参照元
    knowledge の `distilled_from_sha` と `updated` を現 HEAD に更新する。本文が変わる場合は差分マージを
    行い、変わらない場合は sha と日付の bump のみで足りる。**この追従は機械検査の対象**（実例:
@@ -98,7 +104,10 @@ updated: "YYYY-MM-DD"    # 内容を実質更新した日（YAML の date 型を
      `distilled_from_sha` を進めると「その SHA 時点で蒸留し直した」という偽の主張になり、
      `updated`（＝内容を実質更新した日）の定義とも矛盾する。ADR 0073 の ADR 移動がこのケースで、
      20 本の `sources` パスを書き換えたが sha / 日付は据え置いた。
-     機械検査もリネームを追跡する（`git log --follow`）ことでこの例外を吸収する。
+     機械検査は **rename-only のコミット（`git diff --diff-filter=R` で内容差分ゼロ）を
+     比較対象から除外する**ことでこの例外を吸収する。`git log --follow` では吸収できない——
+     `--follow` はリネームより前へ履歴を遡らせるだけで、「最終コミット」がリネームコミットに
+     なる事実は変わらないため、そのまま比較すると 20 本すべてが stale 判定になる。
    - **例外 2: `status: Conflict` の宣言だけを足すときは `updated` のみ bump し、
      `distilled_from_sha` は据え置く**。「乖離に気づいた」ことを記録するだけで、再蒸留は
      していないため。sha を進めると「その SHA の状態を反映している」ことになり、
