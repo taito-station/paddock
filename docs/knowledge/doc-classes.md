@@ -3,8 +3,8 @@ status: Confirmed
 kind: knowledge
 sources:
   - docs/original-docs/0073-adr-into-original-docs-and-doc-classes.md
-distilled_from_sha: "b24173e"
-updated: "2026-08-09"
+distilled_from_sha: "6b74f57"
+updated: "2026-08-10"
 ---
 
 # 文書クラス D01〜D24 レジストリ
@@ -69,11 +69,11 @@ scripts/mdq search --q "EV ゲート" --tags D23 --top-k 5   # クラスで絞�
 | D14 | 国際化・地域差分仕様書 | n/a | 0 |
 | D15 | 非機能・運用・監視・DR 仕様書 | active | 3 |
 | D16 | 移行・導入・ロールアウト計画書 | active | 0 |
-| D17 | 品質保証・UAT・受入パッケージ | active | 1 |
+| D17 | 品質保証・UAT・受入パッケージ | active | 2 |
 | D18 | Prompt ガバナンス・入力統制パック | active | 0 |
-| D19 | ソフトウェアアーキテクチャ・ADR パック | active | 10 |
+| D19 | ソフトウェアアーキテクチャ・ADR パック | active | 11 |
 | D20 | セキュア設計・実装ガードレール | n/a | 0 |
-| D21 | CI/CD・ビルド・リリース・供給網管理仕様書 | active | 0 |
+| D21 | CI/CD・ビルド・リリース・供給網管理仕様書 | active | 1 |
 | D22 | 予測モデル・特徴量仕様 | active | 6 |
 | D23 | 買い方・資金配分ルール | active | 3 |
 | D24 | 実験・検証記録／棄却証跡 | active | 5 |
@@ -98,7 +98,7 @@ blended 確率、EV は純モデル確率 × 市場オッズ）を、文書ク�
 ## N/A 宣言（D03 / D12 / D13 / D14 / D20）
 
 適用外を**明示的に閉じる**。「まだ書いていない」と「そもそも要らない」を区別しないと、充足ギャップの
-警告が恒久的なノイズになり、本当の欠落（D07 / D21）が埋もれる。
+警告が恒久的なノイズになり、本当の欠落（D07）が埋もれる。
 
 <!-- doc-classes-na:begin -->
 | クラス | N/A の理由 | 再開条件 |
@@ -120,7 +120,6 @@ D 体系を採用する最大の実利は、**書くべきなのに無い文書�
 | クラス | 現状 | 対応 |
 |---|---|---|
 | **D07** 用語集・ドメインモデル | 用語定義が各仕様書に散在している（`win_prob` / `place_prob` / `raw_score` / `blended` / `軸ロック` 等を `probability-estimation.md`・`backtest.md`・`ev-kelly-bet-selection.md` がそれぞれ独自に定義） | 横断的な用語集を 1 本作る |
-| **D21** CI/CD・供給網 | `.github/workflows/ci.yml` に 10 ジョブが実在するが、その設計意図（必須チェックの構成・ジョブ分割の理由・shellcheck の範囲）を書いた文書が無い | ADR は個別に存在（0026 等）。横断的な 1 本が要る |
 | **D05** ユースケース | `README.md` の「何ができるか」が最も近いが、UC カタログの形では無い | 優先度低 |
 | **D16** 移行・導入 | ADR 0070（DB マイグレーション運用）が近いが移行計画書ではない | 優先度低 |
 | **D18** Prompt ガバナンス | 実質は [`docs/knowledge/README.md`](README.md)（3 層モデル・SoT の優先順位）と `CLAUDE.md` が担っている | 名前だけ空。当面このままでよい |
@@ -151,6 +150,7 @@ D01（[product-goals.md](product-goals.md)）を作った時点では**移して
 |---|---|
 | knowledge/analyze-search-and-state.md | [D11, D10] |
 | knowledge/app-bootstrap.md | [D19, D15] |
+| knowledge/ci-pipeline.md | [D21, D19, D17] |
 | knowledge/live-freshness-calibration.md | [D11, D10] |
 | knowledge/monitor-loop-sleep-resilience.md | [D15, D19] |
 | knowledge/product-goals.md | [D01] |
