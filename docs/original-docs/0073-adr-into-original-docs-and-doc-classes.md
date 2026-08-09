@@ -92,8 +92,9 @@ D01〜D21 は番号・名称を変えず採用する（HVE との語彙互換を
 - **移動**: ADR 71 本が `docs/adr/` → `docs/original-docs/`。`docs/adr/` は消滅。
 - **変更（機械置換 187 箇所 / 33 ファイル）**: frontmatter `sources` のパス、本文の相対リンク、規約文。`git grep` / `git ls-files` に限定して実施した（`.claude/worktrees/` の並走 worktree 3 本がそれぞれ完全な `docs/adr/` を持つため、`grep -r` では別ブランチの作業コピーを破壊する）。
 - **変更**: `scripts/check-adr-numbers.sh`（走査先・ADR 分離・fail-closed 化）、`mdq.toml`（`docs/adr` root 削除。`iter_markdown` は roots を重複除去しないため、併記すると同一ファイルを 2 回索引しに行く）。
-- **不変**: ADR 本文（71 本すべてバイト同一で移動）、ADR の採番方式、CI ジョブ ID `adr`（ruleset #461 の必須チェックなので改名しない）。
-- **運用**: 新しい ADR は `docs/original-docs/0NNN-*.md` に置く（採番は `scripts/check-adr-numbers.sh next`）。issue 由来の一次資料は 0 埋めしない。mdq で ADR だけに絞るなら `--paths "docs/original-docs/0*"`。
+- **不変**: ADR の採番方式、CI ジョブ ID `adr`（ruleset #461 の必須チェックなので改名しない）。ADR 本文は 71 本中 **70 本がバイト同一**で移動した。唯一の例外は `0062-workout-cyokyo-feature-rejected.md` で、本文のコードブロック内に自ディレクトリの絶対パス表記（`docs/adr/0061`）があったため 1 行だけ機械置換の対象になっている。「ADR は改変しない」規約に対する意図的な例外——旧パスのまま残すとリンクではないにせよ存在しないディレクトリを指し続けるため、パス表記の正確性を優先した。
+- **運用**: 新しい ADR は `docs/original-docs/0NNN-*.md` に置く（採番は `scripts/check-adr-numbers.sh next`）。issue 由来の一次資料は 0 埋めしない。mdq で ADR だけに絞るなら `--paths "docs/original-docs/0*"`。既存の索引を持つ環境は一度だけ `rm -rf .mdq && scripts/mdq index` で作り直す（prune は roots 配下しか消さないため、旧 `docs/adr/*` のチャンクが居残る）。
+- **統合前に分岐した PR への影響**: 本統合より前に分岐した PR が `docs/adr/` に新しい ADR を足していると、パスが異なるため git は競合を報告せず**どちらの順でマージしても無言で通る**。結果 `docs/adr/` が復活し、その ADR は `check-adr-numbers.sh` の走査先（`docs/original-docs`）から見えず番号重複検出が穴あきになる。これを防ぐため、**`docs/adr/` ディレクトリの存在自体を致命扱いにするガード**を同スクリプトに入れた（該当 PR がマージされた時点で CI が落ち、対処手順を出力する）。本統合の時点では #576 が `docs/adr/0072-monitor-loop-wall-clock-sleep-resilience.md` を持つオープン PR として該当する。
 - **後続**: D クラス体系と機械検査（PR2）、プロダクト目標と REQ-ID 規約（PR3）、質問票 skill の汎用改修（PR4・dotclaude 側）。既存 71 ADR の REQ-ID 遡及紐付けと knowledge への全写しの実施は段階的に進める。
 - 関連: #254（ADR 番号重複検出）／ADR 0064（second source を戒める）／[docs/knowledge/README.md](../knowledge/README.md)（蒸留規約の正）。
 
@@ -108,9 +109,13 @@ mv docs/original-docs/0071-topcoat-framework-evaluation-rejected.md docs/origina
 bash scripts/check-adr-numbers.sh   # → ✗ … exit 1
 git checkout -- docs/original-docs/
 
-# 旧パスの残存が無いこと（履歴参照コメント 2 件を除く）
-git grep -n 'docs/adr' -- .
-git grep -n '\.\./adr/' -- .
+# 旧パスへの「参照」が 0 件であること。
+# docs/adr という文字列自体は「旧 docs/adr から統合した」という履歴参照や、復活検出ガードの
+# エラーメッセージとして意図的に残るため、素の grep 件数は不変条件にしない。
+# 参照として意味を持つ 3 形態がゼロであることを見る。
+git grep -n '\.\./adr/' -- .                  # 兄弟相対リンク           → 0 行
+git grep -nE '\]\(.*docs/adr/' -- .           # Markdown リンクの宛先    → 0 行
+git grep -nE '^  - docs/adr/' -- docs         # frontmatter sources     → 0 行
 
 # mdq 再索引と ADR 絞り込み
 scripts/mdq index

@@ -2,8 +2,11 @@
 # 存在しないディレクトリは自動スキップされる（knowledge/qa/original-docs は段階導入）。
 [index]
 roots = [
-  # ADR は ADR 0073 で旧 "docs/adr" から docs/original-docs へ統合した（一次資料層）。旧 root を残すと
-  # 同一ファイルを 2 root から索引しに行くため（iter_markdown は roots を重複除去しない）追加しない。
+  # ADR は ADR 0073 で旧 "docs/adr" から docs/original-docs へ統合した（一次資料層）。旧 root は
+  # 実体が消えており iter_markdown が base.exists() で skip するため書いても無害だが、死んだ設定は
+  # 残さない。なお indexer の prune は roots 配下のチャンクしか消さないので、統合前に作った索引を
+  # 持っている環境は一度だけ `rm -rf .mdq && scripts/mdq index` で作り直す（旧 docs/adr/* の
+  # チャンクが居残り、存在しないパスが検索結果に出続けるため）。
   "docs/specifications",
   "docs/knowledge",
   "docs/qa",

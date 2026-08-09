@@ -7,11 +7,12 @@ paddock に導入したもの。**蒸留は Claude Code が担う**（HVE 本体
 
 ```
 docs/original-docs/  読み取り専用の一次資料（生素材 + ADR）
-        │  [Claude が読取・欠落/不整合を検出]
-        ▼
-docs/qa/             質問票 + 回答（人間 or Claude が回答）
-        │  [Claude が差分マージ]
-        ▼
+        │                              │
+        │ [Claude が読取・欠落/不整合を検出]  │ ADR は qa を経由しない
+        ▼                              │ （決定は既に確定しているため）
+docs/qa/             質問票 + 回答       │
+        │  [Claude が差分マージ]          │
+        ▼                              ▼
 docs/knowledge/ ＋ docs/specifications/   status 付き確定知（＝この層。読むのはここ）
 ```
 
@@ -24,6 +25,13 @@ docs/knowledge/ ＋ docs/specifications/   status 付き確定知（＝この層
 - **確定知を読む入口は knowledge**。ADR の決定・理由・却下案・影響は knowledge に**全部写す**。
   重複を許す代わりに、同期切れ（`sources` が更新されたのに蒸留が追従していない状態）は
   **機械検査で検出する**——写した量に比例して stale 面積が増えるため、人手の規律には委ねない。
+- > **⚠ 移行中（ADR 0073 の段階導入）**。上の 2 つはまだ完成していない:
+  > - **ADR の写しは未着手**。現在 knowledge にあるのは 5 本で、`docs/original-docs/` の ADR 72 本の
+  >   決定は含まれない。**当面は knowledge だけでなく ADR 原本（`docs/original-docs/0NNN-*.md`）も読む**。
+  >   mdq は両方を索引しているので `scripts/mdq search` は今でも横断で当たる。
+  > - **stale の機械検査は未配線**（ADR 0073 の後続 PR で導入）。それまでは下記「sources 追従」を
+  >   人手で守る。
+  > 移行が完了したらこのブロックを削除する。
 - **`docs/original-docs/` の命名は 2 系統**（`check-adr-numbers.sh` の判定根拠。
   詳細は [docs/original-docs/README.md](../original-docs/README.md)）:
   - ADR = **0 埋め 4 桁**（`0001-`〜`0999-`）
@@ -76,8 +84,14 @@ updated: "YYYY-MM-DD"    # 内容を実質更新した日（YAML の date 型を
 5. 決定を伴うものは ADR を `docs/original-docs/0NNN-*.md` に起票し（採番は
    `scripts/check-adr-numbers.sh next`）、knowledge の `sources` から参照する。**ADR の決定・理由・
    却下案・影響は knowledge へ全部写す**（読む入口を knowledge に一本化するため）。
-6. **sources 追従**: knowledge の `sources` に列挙されたファイルを変更する PR は、参照元 knowledge の
-   `distilled_from_sha` と `updated` を現 HEAD に更新する。本文が変わる場合は差分マージを行い、
-   変わらない場合は sha と日付の bump のみで足りる。**この追従は機械検査の対象**（実例: 
+6. **sources 追従**: knowledge の `sources` に列挙されたファイルを**内容ごと**変更する PR は、参照元
+   knowledge の `distilled_from_sha` と `updated` を現 HEAD に更新する。本文が変わる場合は差分マージを
+   行い、変わらない場合は sha と日付の bump のみで足りる。**この追従は機械検査の対象**（実例:
    [`app-bootstrap.md`](app-bootstrap.md) が `status: Confirmed` のまま、qa 側で「#453 で覆る」と
    追記済みの `NoopParser` を推奨し続けた事故がある。人手の規律だけでは守れない）。
+   - **例外: パス移動のみ（内容不変）は bump しない**。`sources` の行が指す先が同じ内容のまま
+     別パスへ移っただけなら、その knowledge が反映するリポジトリ状態は変わっていない。ここで
+     `distilled_from_sha` を進めると「その SHA 時点で蒸留し直した」という偽の主張になり、
+     `updated`（＝内容を実質更新した日）の定義とも矛盾する。ADR 0073 の ADR 移動がこのケースで、
+     20 本の `sources` パスを書き換えたが sha / 日付は据え置いた。
+     機械検査もリネームを追跡する（`git log --follow`）ことでこの例外を吸収する。

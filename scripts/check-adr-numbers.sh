@@ -57,15 +57,33 @@ if ! repo_root="$(git rev-parse --show-toplevel 2>/dev/null)"; then
     exit 1
 fi
 adr_dir="$repo_root/docs/original-docs"
+legacy_adr_dir="$repo_root/docs/adr"
 
 if [[ ! -d "$adr_dir" ]]; then
     echo "ADR ディレクトリが見つからない: $adr_dir" >&2
     exit 1
 fi
 
-# docs/original-docs 直下の *.md を走査する。まず「ADR かどうか」を先頭 '0' で分離し、
-# 非 ADR（一次資料・README）は黙ってスキップする（警告に載せるとノイズで本来見るべき
-# 重複検出が埋もれる）。ADR と判定したものの番号抽出は「先頭 4 桁」という緩いパターンで
+# 旧 docs/adr が復活していたら落とす。ADR 0073 でこのディレクトリは廃止したが、統合前に
+# 分岐した PR が新しい ADR を docs/adr に足すと、パスが異なるため git は競合を報告せず
+# 無言でマージされる。復活した ADR は本スクリプトの走査先（docs/original-docs）から見えず、
+# 番号重複検出が穴あきのまま静かに通ってしまうため、ディレクトリの存在自体を致命扱いにする。
+if [[ -d "$legacy_adr_dir" ]]; then
+    echo "✗ 廃止済みの $legacy_adr_dir が復活している（ADR 0073 で docs/original-docs へ統合済み）:" >&2
+    shopt -s nullglob
+    for stray in "$legacy_adr_dir"/*.md; do
+        echo "    $(basename "$stray")" >&2
+    done
+    shopt -u nullglob
+    echo "" >&2
+    echo "  対処: 上記を docs/original-docs/ へ git mv し、参照元の frontmatter sources と" >&2
+    echo "        本文リンクの docs/adr/ を docs/original-docs/ に書き換える" >&2
+    exit 1
+fi
+
+# docs/original-docs 直下の *.md を走査する。まず「ADR かどうか」をファイル名の先頭 '0' で
+# 分離し、非 ADR（一次資料・README）は黙ってスキップする（警告に載せるとノイズで本来見る
+# べき重複検出が埋もれる）。ADR と判定したものの番号抽出は「先頭 4 桁」という緩いパターンで
 # 行い、kebab 規約（0NNN-kebab-title.md）への適合は別軸の警告として扱う。番号抽出を規約
 # 適合と同じ厳格パターンに縛ると、規約外ファイル（例: 0040-Foo.md, 0040_foo.md）が重複
 # していても検出網から漏れ、コア保証（番号の重複を必ず弾く）が崩れるため。
@@ -75,12 +93,22 @@ declare -a misnamed_adr=()   # ADR に見えるのに 0 埋め 4 桁で始まら
 shopt -s nullglob
 for path in "$adr_dir"/*.md; do
     base="$(basename "$path")"
+    # 既知の非 ADR ファイルは対象外（README / テンプレを置いても誤検知しないように）。
+    case "$base" in
+        README.md | template.md | TEMPLATE.md) continue ;;
+    esac
     if [[ ! "$base" =~ ^0[0-9]{3} ]]; then
-        # 非 ADR（一次資料 / README / テンプレ）。黙ってスキップする。
+        # 非 ADR（issue 由来の一次資料）。黙ってスキップする。
         # ただし 0 埋めを忘れた ADR を取りこぼすと重複検出が静かに無効化される（fail-open）
-        # ため、H1 が ADR 書式に見えるものだけは致命として拾う。実在の H1 は 2 系統:
-        # 「# ADR 0001: …」と「# 0071. …」。
-        if head -n 5 "$path" | grep -qE '^#[[:space:]]+(ADR[[:space:]]+)?[0-9]{3,4}[.:：]'; then
+        # ため、ADR に見えるものだけは致命として拾う。
+        #
+        # 判定は H1 の書式ではなく **本文の構造** で行う。H1 は「# ADR 0001: …」と
+        # 「# 0071. …」の 2 系統に割れているうえ、番号の桁数でマッチさせると (a) 2 桁 ADR
+        # （`# 74. …`）を取りこぼし、(b) 一次資料の H1 が `# 401: …` 形式になった途端に
+        # 誤検知して CI を全停止させる——fail-closed の誤検知は実害が大きい。
+        # ADR テンプレートの必須見出しである「## ステータス」と「## 決定」の同時存在は、
+        # 実測で ADR 72/72 が満たし、一次資料 4/4 が満たさない（誤検知・取りこぼしとも 0）。
+        if grep -qF '## ステータス' "$path" && grep -qF '## 決定' "$path"; then
             misnamed_adr+=("$base")
         fi
         continue
@@ -112,10 +140,10 @@ compute_next() {
     printf '%04d\n' $((max + 1))
 }
 
-if [[ "$cmd" == next ]]; then
-    compute_next
-    exit 0
-fi
+# --- 致命チェックは next / check の両方に効かせる（ここより前に置く）---
+# next は「次に使うべき番号」を配る経路なので、check だけを fail-closed にしても不十分。
+# 走査が壊れている状態（0 埋め忘れの ADR が網から漏れている・ADR 0 件）で next が番号を
+# 返すと、既存 ADR と衝突する採番をそのまま配ってしまう。
 
 # 0 埋めを外した ADR は主判定（先頭 '0'）の網から漏れ、重複検出を静かに無効化する。
 # 警告では見逃されるので致命扱いにする（fail-closed）。
@@ -125,17 +153,22 @@ if [[ ${#misnamed_adr[@]} -gt 0 ]]; then
     exit 1
 fi
 
-# 規約に合致しないファイルは警告のみ（README 等の非 ADR が将来増える可能性を許容）。
-if [[ ${#nonconforming[@]} -gt 0 ]]; then
-    echo "警告: ADR 命名規約（0NNN-kebab-title.md）に合致しないファイル:" >&2
-    printf '  %s\n' "${nonconforming[@]}" >&2
-fi
-
 if [[ ${#numbers[@]} -eq 0 ]]; then
-    # ADR が 0 件になることはありえない（71 本が docs/original-docs にある）。0 件＝判定条件か
+    # ADR が 0 件になることはありえない（docs/original-docs に 72 本ある）。0 件＝判定条件か
     # ディレクトリの取り違えなので、静かに緑にせず落とす（旧実装は exit 0 で fail-open だった）。
     echo "ADR ファイルが見つからない（docs/original-docs/0NNN-*.md）。判定条件かディレクトリを確認する" >&2
     exit 1
+fi
+
+if [[ "$cmd" == next ]]; then
+    compute_next
+    exit 0
+fi
+
+# 規約に合致しないファイルは警告のみ（命名の揺れは重複検出を壊さないため）。
+if [[ ${#nonconforming[@]} -gt 0 ]]; then
+    echo "警告: ADR 命名規約（0NNN-kebab-title.md）に合致しないファイル:" >&2
+    printf '  %s\n' "${nonconforming[@]}" >&2
 fi
 
 # 重複番号を抽出する。出現回数 >= 2 の番号を集める。

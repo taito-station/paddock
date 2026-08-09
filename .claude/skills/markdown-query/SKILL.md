@@ -1,8 +1,8 @@
 ---
 name: markdown-query
 description: >
-  ローカルの Markdown ドキュメント（docs/ 配下: adr / specifications / knowledge / qa /
-  original-docs）から、ファイル全体を読まずに関連チャンクだけを取り出して答える。完全ローカル
+  ローカルの Markdown ドキュメント（docs/ 配下: original-docs〈ADR 含む〉/ specifications /
+  knowledge / qa）から、ファイル全体を読まずに関連チャンクだけを取り出して答える。完全ローカル
   （外部 API なし・BM25 語彙検索）。USE FOR: プロジェクト文書からの回答、仕様・ADR・knowledge の
   検索、要件やバックテスト履歴の探索、対象ファイルパスが未知の横断検索。PREFER OVER: 対象が
   Markdown で複数ファイル横断・関連度順ヒットが欲しいときは Read/cat/grep より先にこれを試す。
