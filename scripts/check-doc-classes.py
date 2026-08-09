@@ -14,6 +14,7 @@ docs/knowledge/app-bootstrap.md が status: Confirmed のまま存在しない N
   5. doc-classes.md の「現行」列が実態と一致するか                            [error]
   6. stale: sources の最終「内容変更」が distilled_from_sha に含まれているか  [warning]
   7. active なのに文書 0 本のクラス（充足ギャップ）                           [warning]
+  8. REQ 表（要件 ID）の書式・一意性・status・Confirmed の検証手段            [error]
 
 6 は rename-only のコミット（内容差分ゼロ）を比較対象から除外する。これが無いと ADR 0073 の
 ADR 移動だけで 20 本が一斉に stale 判定になる。git log --follow では吸収できない——--follow は
@@ -255,6 +256,159 @@ def last_content_change(path: str, limit: int = 40, max_renames: int = 10) -> "s
     return None
 
 
+# --- REQ（要件 ID）の検査 ---------------------------------------------------
+# 規約は docs/knowledge/README.md「REQ-ID（要件 ID）の規約」。表の位置を見出し構造に
+# 依存させないため、範囲はマーカーで宣言する（doc-classes.md の表と同じ方式）。
+RE_REQ_BEGIN = re.compile(r"^<!--\s*REQ:begin\s+(D\d{2})\s*-->$")
+RE_REQ_END = re.compile(r"^<!--\s*REQ:end\s+(D\d{2})\s*-->$")
+RE_REQ_ID = re.compile(r"^REQ-(D\d{2})-(\d{3})$")
+RE_MD_LINK = re.compile(r"\[[^\]]*\]\(([^)\s]+)\)")
+RE_TABLE_SEP_CELL = re.compile(r"^:?-{2,}:?$")
+
+REQ_COLUMNS = ("REQ-ID", "要件", "検証手段", "出典", "status")
+# Confirmed / Tentative / Conflict は frontmatter の status と同義。Retired は
+# 「かつて要件だったが取り下げた」——番号を再利用しないため行は残す。
+REQ_STATUSES = ("Confirmed", "Tentative", "Conflict", "Retired")
+# 「空」と見なすセル表記。空欄だけを弾くと `-` や TBD で素通りし、検証手段の無い
+# Confirmed（＝願望と区別が付かない要件）を通してしまう。
+EMPTY_CELLS = {"", "-", "–", "—", "tbd", "unknown", "n/a", "未定", "なし", "未整備"}
+
+
+def split_row(line: str) -> list[str]:
+    return [c.strip() for c in line.strip().strip("|").split("|")]
+
+
+def parse_req_blocks(text: str) -> "tuple[list[tuple[str, list[list[str]]]], list[str]]":
+    """REQ ブロックを (クラス, 表の行) のリストに切り出す。第 2 戻り値は構造エラー。
+
+    マーカーの対応崩れは「REQ 表が丸ごと検査対象から消える」経路（fail-open）なので、
+    黙って無視せず error として返す。コードフェンス内のマーカー・表は規約の説明文が
+    持つため無視する。
+    """
+    blocks: list[tuple[str, list[list[str]]]] = []
+    errors: list[str] = []
+    cls: "str | None" = None
+    rows: list[list[str]] = []
+    fenced = False
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("```"):
+            fenced = not fenced
+            continue
+        if fenced:
+            continue
+        begin = RE_REQ_BEGIN.match(stripped)
+        if begin:
+            if cls is not None:
+                errors.append(f"REQ ブロック（{cls}）が閉じられないまま次の begin がある")
+                blocks.append((cls, rows))
+            cls, rows = begin.group(1), []
+            continue
+        end = RE_REQ_END.match(stripped)
+        if end:
+            if cls is None:
+                errors.append(f"対応する begin の無い REQ:end がある（{end.group(1)}）")
+            else:
+                if end.group(1) != cls:
+                    errors.append(
+                        f"REQ ブロックの begin({cls}) と end({end.group(1)}) でクラスが違う"
+                    )
+                blocks.append((cls, rows))
+            cls, rows = None, []
+            continue
+        if cls is not None and stripped.startswith("|"):
+            rows.append(split_row(stripped))
+    if cls is not None:
+        errors.append(f"REQ ブロック（{cls}）が閉じられていない")
+        blocks.append((cls, rows))
+    return blocks, errors
+
+
+def check_req_blocks(
+    rel: str,
+    text: str,
+    doc_classes: "list[str] | None",
+    declared: dict,
+    seen: "dict[str, str]",
+    root: Path,
+    errors: list[str],
+) -> None:
+    """1 文書ぶんの REQ 表を検査する。`seen` は REQ-ID → 初出パスの全体台帳。"""
+    blocks, structural = parse_req_blocks(text)
+    for msg in structural:
+        errors.append(f"{rel}: {msg}")
+
+    for cls, rows in blocks:
+        if cls not in declared:
+            errors.append(f"{rel}: REQ ブロックのクラス {cls} は {REGISTRY} に定義が無い")
+        elif not doc_classes or cls not in doc_classes:
+            # 他クラスの要件を勝手に抱え込ませない（番号空間の持ち主を文書クラスで固定する）。
+            errors.append(
+                f"{rel}: REQ ブロックのクラス {cls} がこの文書の doc_class に含まれていない"
+                f"（doc_class={doc_classes}）"
+            )
+
+        data = [
+            cells
+            for cells in rows
+            if cells
+            and cells[0] != REQ_COLUMNS[0]
+            and not all(RE_TABLE_SEP_CELL.match(c) for c in cells)
+        ]
+        if not data:
+            errors.append(f"{rel}: REQ ブロック（{cls}）に要件行が 1 つも無い")
+            continue
+
+        for cells in data:
+            if len(cells) != len(REQ_COLUMNS):
+                errors.append(
+                    f"{rel}: REQ 表の列数が {len(REQ_COLUMNS)} でない"
+                    f"（{' | '.join(REQ_COLUMNS)}）→ {' | '.join(cells)}"
+                )
+                continue
+            req_id, requirement, verification, origin, status = cells
+
+            matched = RE_REQ_ID.match(req_id)
+            if not matched:
+                errors.append(f"{rel}: REQ-ID の形式が不正 → {req_id}（REQ-D<NN>-<NNN>）")
+                continue
+            if matched.group(1) != cls:
+                errors.append(
+                    f"{rel}: {req_id} のクラスが REQ ブロック（{cls}）と一致しない"
+                )
+            if req_id in seen:
+                errors.append(
+                    f"{rel}: {req_id} が重複している（初出 {seen[req_id]}）。"
+                    "番号は文書をまたいでクラス内で一意・再利用しない"
+                )
+            else:
+                seen[req_id] = rel
+
+            if requirement.lower() in EMPTY_CELLS:
+                errors.append(f"{rel}: {req_id} の要件が空")
+            if origin.lower() in EMPTY_CELLS:
+                errors.append(f"{rel}: {req_id} の出典が空（由来を辿れない）")
+            if status not in REQ_STATUSES:
+                errors.append(
+                    f"{rel}: {req_id} の status が不正 → {status}"
+                    f"（{' / '.join(REQ_STATUSES)}）"
+                )
+            elif status == "Confirmed" and verification.lower() in EMPTY_CELLS:
+                errors.append(
+                    f"{rel}: {req_id} は検証手段が空のまま Confirmed になっている"
+                    "（測り方の決まっていない要件は Confirmed にできない）"
+                )
+
+            # 出典・検証手段が指すリポジトリ内リンクの実在。frontmatter の sources と
+            # 同じ理由——由来を辿れないなら要件の根拠を確認できない。
+            for target in RE_MD_LINK.findall(origin) + RE_MD_LINK.findall(verification):
+                if target.startswith(("http://", "https://", "mailto:", "#")):
+                    continue
+                resolved = (root / rel).parent / target.split("#", 1)[0]
+                if not resolved.is_file():
+                    errors.append(f"{rel}: {req_id} のリンク先が実在しない → {target}")
+
+
 def main(argv: list[str]) -> int:
     if len(argv) > 1:
         print("引数が多すぎる（受理は check / --warn-only / -h のいずれか 1 つ）", file=sys.stderr)
@@ -321,6 +475,8 @@ def main(argv: list[str]) -> int:
             warnings.append(f"{n}: サブディレクトリの .md は検査対象外（直下に置く）")
 
     actual_count: dict[str, int] = {cls: 0 for cls in declared}
+    # REQ-ID → 初出パス。一意性はクラス内グローバル（文書をまたいで 1 つ）なので台帳は全体で 1 つ。
+    req_seen: dict[str, str] = {}
     for path in targets:
         rel = path.relative_to(root).as_posix()
         fm = parse_frontmatter(path)
@@ -348,6 +504,12 @@ def main(argv: list[str]) -> int:
                         f"{rel}: tags が doc_class と一致しない"
                         f"（doc_class={classes} / tags={fm.get('tags')}）"
                     )
+
+        # (8) REQ 表
+        check_req_blocks(
+            rel, path.read_text(encoding="utf-8"), fm.get("doc_class"),
+            declared, req_seen, root, errors,
+        )
 
         # (4) sources の実在
         sources = fm.get("sources", [])

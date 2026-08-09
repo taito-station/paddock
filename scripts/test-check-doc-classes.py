@@ -549,6 +549,231 @@ def test_argument_handling() -> None:
         shutil.rmtree(repo)
 
 
+# --- REQ（要件 ID）の検査 ---------------------------------------------------
+# 規約は docs/knowledge/README.md「REQ-ID（要件 ID）の規約」。番号の一意性と
+# 「検証手段の無い Confirmed を作らせない」が本体で、どちらも壊れても本番 docs は
+# 正常なまま静かに素通りする（＝ fixture で固定する価値がある）。
+
+
+def append_req_block(repo: Path, rel: str, cls: str, rows: "list[str]",
+                     header: bool = True, close: "str | None" = "same") -> None:
+    """既存文書の末尾に REQ ブロックを足す。close=None なら閉じない。"""
+    text = (repo / rel).read_text(encoding="utf-8")
+    block = [f"<!-- REQ:begin {cls} -->"]
+    if header:
+        block += ["| REQ-ID | 要件 | 検証手段 | 出典 | status |", "|---|---|---|---|---|"]
+    block += rows
+    if close is not None:
+        block.append(f"<!-- REQ:end {cls if close == 'same' else close} -->")
+    (repo / rel).write_text(text + "\n" + "\n".join(block) + "\n", encoding="utf-8")
+
+
+VALID_ROW = "| REQ-D19-001 | 何かを満たす | `cargo test` で固定 | ADR 0001 | Confirmed |"
+
+
+def test_req_valid_block_passes() -> None:
+    repo = new_repo()
+    try:
+        baseline(repo)
+        append_req_block(repo, "docs/knowledge/a.md", "D19", [VALID_ROW])
+        code, out = check(repo)
+        assert code == 0, f"正当な REQ 表で落ちた: {out}"
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_req_duplicate_id_is_error() -> None:
+    repo = new_repo()
+    try:
+        sha = baseline(repo)
+        write_doc(repo, "docs/knowledge/b.md", ["D19"], ["docs/original-docs/0001-first.md"], sha)
+        write_registry(repo, sha, d19=2)
+        append_req_block(repo, "docs/knowledge/a.md", "D19", [VALID_ROW])
+        append_req_block(repo, "docs/knowledge/b.md", "D19", [VALID_ROW])
+        code, out = check(repo)
+        assert code == 1, out
+        assert "重複" in out and "REQ-D19-001" in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_req_malformed_id_is_error() -> None:
+    repo = new_repo()
+    try:
+        baseline(repo)
+        append_req_block(repo, "docs/knowledge/a.md", "D19",
+                         ["| REQ-D19-1 | 何か | `cargo test` | ADR 0001 | Confirmed |"])
+        code, out = check(repo)
+        assert code == 1, out
+        assert "REQ-ID の形式が不正" in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_req_class_mismatch_is_error() -> None:
+    repo = new_repo()
+    try:
+        baseline(repo)
+        append_req_block(repo, "docs/knowledge/a.md", "D19",
+                         ["| REQ-D22-001 | 何か | `cargo test` | ADR 0001 | Confirmed |"])
+        code, out = check(repo)
+        assert code == 1, out
+        assert "クラスが REQ ブロック" in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_req_block_class_outside_doc_class_is_error() -> None:
+    repo = new_repo()
+    try:
+        baseline(repo)
+        append_req_block(repo, "docs/knowledge/a.md", "D22",
+                         ["| REQ-D22-001 | 何か | `cargo test` | ADR 0001 | Confirmed |"])
+        code, out = check(repo)
+        assert code == 1, out
+        assert "doc_class に含まれていない" in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_req_confirmed_without_verification_is_error() -> None:
+    repo = new_repo()
+    try:
+        baseline(repo)
+        append_req_block(repo, "docs/knowledge/a.md", "D19",
+                         ["| REQ-D19-001 | 何か | - | ADR 0001 | Confirmed |"])
+        code, out = check(repo)
+        assert code == 1, out
+        assert "検証手段が空のまま Confirmed" in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_req_tentative_without_verification_is_ok() -> None:
+    """検証手段が無いこと自体は許す。禁じるのは「測り方が無いのに Confirmed」だけ。"""
+    repo = new_repo()
+    try:
+        baseline(repo)
+        append_req_block(repo, "docs/knowledge/a.md", "D19",
+                         ["| REQ-D19-001 | 何か | - | ADR 0001 | Tentative |"])
+        code, out = check(repo)
+        assert code == 0, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_req_unknown_status_is_error() -> None:
+    repo = new_repo()
+    try:
+        baseline(repo)
+        append_req_block(repo, "docs/knowledge/a.md", "D19",
+                         ["| REQ-D19-001 | 何か | `cargo test` | ADR 0001 | Approved |"])
+        code, out = check(repo)
+        assert code == 1, out
+        assert "status が不正" in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_req_wrong_column_count_is_error() -> None:
+    """列が欠けた行を黙って落とすと、その要件が一意性検査から消えて重複が通る。"""
+    repo = new_repo()
+    try:
+        baseline(repo)
+        append_req_block(repo, "docs/knowledge/a.md", "D19",
+                         ["| REQ-D19-001 | 何か | `cargo test` | Confirmed |"])
+        code, out = check(repo)
+        assert code == 1, out
+        assert "列数が 5 でない" in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_req_unclosed_block_is_error() -> None:
+    repo = new_repo()
+    try:
+        baseline(repo)
+        append_req_block(repo, "docs/knowledge/a.md", "D19", [VALID_ROW], close=None)
+        code, out = check(repo)
+        assert code == 1, out
+        assert "閉じられていない" in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_req_end_class_mismatch_is_error() -> None:
+    repo = new_repo()
+    try:
+        baseline(repo)
+        append_req_block(repo, "docs/knowledge/a.md", "D19", [VALID_ROW], close="D22")
+        code, out = check(repo)
+        assert code == 1, out
+        assert "クラスが違う" in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_req_empty_block_is_error() -> None:
+    repo = new_repo()
+    try:
+        baseline(repo)
+        append_req_block(repo, "docs/knowledge/a.md", "D19", [])
+        code, out = check(repo)
+        assert code == 1, out
+        assert "要件行が 1 つも無い" in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_req_broken_link_is_error() -> None:
+    repo = new_repo()
+    try:
+        baseline(repo)
+        append_req_block(
+            repo, "docs/knowledge/a.md", "D19",
+            ["| REQ-D19-001 | 何か | `cargo test` "
+             "| [ADR 0099](../original-docs/0099-nope.md) | Confirmed |"],
+        )
+        code, out = check(repo)
+        assert code == 1, out
+        assert "リンク先が実在しない" in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_req_link_to_existing_file_passes() -> None:
+    repo = new_repo()
+    try:
+        baseline(repo)
+        append_req_block(
+            repo, "docs/knowledge/a.md", "D19",
+            ["| REQ-D19-001 | 何か | `cargo test` "
+             "| [ADR 0001](../original-docs/0001-first.md) | Confirmed |"],
+        )
+        code, out = check(repo)
+        assert code == 0, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_req_marker_in_code_fence_is_ignored() -> None:
+    """規約の説明文（コードフェンス内の見本）を実データとして検査しない。"""
+    repo = new_repo()
+    try:
+        baseline(repo)
+        path = repo / "docs/knowledge/a.md"
+        path.write_text(
+            path.read_text(encoding="utf-8")
+            + "\n```markdown\n<!-- REQ:begin D22 -->\n"
+            + "| REQ-D99-9 | 見本 |  |  | Bogus |\n<!-- REQ:end D22 -->\n```\n",
+            encoding="utf-8",
+        )
+        code, out = check(repo)
+        assert code == 0, f"フェンス内の見本で落ちた: {out}"
+    finally:
+        shutil.rmtree(repo)
+
+
 def main() -> int:
     if not TARGET.is_file():
         print(f"テスト対象が見つからない: {TARGET}", file=sys.stderr)
