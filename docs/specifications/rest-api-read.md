@@ -4,10 +4,10 @@
 status: Confirmed
 kind: knowledge
 sources:
-  - docs/adr/0022-rest-api-read-server.md
-  - docs/adr/0069-drop-icloud-writes-browser-only-viewing.md
-  - docs/adr/0055-ev-layer-separation-circular-break.md
-  - docs/adr/0060-betting-axis-lock-preclose-topup.md
+  - docs/original-docs/0022-rest-api-read-server.md
+  - docs/original-docs/0069-drop-icloud-writes-browser-only-viewing.md
+  - docs/original-docs/0055-ev-layer-separation-circular-break.md
+  - docs/original-docs/0060-betting-axis-lock-preclose-topup.md
   - docs/api/openapi.json
 distilled_from_sha: "21e6076"
 updated: "2026-07-30"
@@ -301,4 +301,4 @@ API の仕様乖離を防ぐため、OpenAPI はコードから生成する（sp
 - #53 セッション write API / #34 SPA / #35 docker-compose
 - #51 単複オッズ永続化（recommendations の前提）/ #40 確定結果自動取得 / #50 名前あいまい検索（REST 露出は #401 で完了）
 - `~/.claude/rules/rust/architecture.md`・`conventions.md`（クリーンアーキテクチャ／コーディング規約）
-- ADR: `docs/adr/0022-rest-api-read-server.md`
+- ADR: `docs/original-docs/0022-rest-api-read-server.md`

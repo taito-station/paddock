@@ -2,8 +2,8 @@
 status: Confirmed
 kind: knowledge
 sources:
-  - docs/adr/0072-monitor-loop-wall-clock-sleep-resilience.md
-  - docs/adr/0060-betting-axis-lock-preclose-topup.md
+  - docs/original-docs/0072-monitor-loop-wall-clock-sleep-resilience.md
+  - docs/original-docs/0060-betting-axis-lock-preclose-topup.md
   - docs/qa/QA-monitor-sleep-568.md
   - docs/original-docs/568-monitor-sleep-gap.md
 distilled_from_sha: "90afa7e"

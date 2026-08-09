@@ -4,20 +4,20 @@
 status: Confirmed
 kind: knowledge
 sources:
-  - docs/adr/0064-live-ev-buy-view.md
-  - docs/adr/0028-konsen-odds-trigger-rejected.md
-  - docs/adr/0030-konsen-trio-partner-width-rejected.md
-  - docs/adr/0046-allocation-prob-weight-no-floor-rejected.md
-  - docs/adr/0055-ev-layer-separation-circular-break.md
-  - docs/adr/0060-betting-axis-lock-preclose-topup.md
-  - docs/adr/0066-live-ev-per-race-budget.md
+  - docs/original-docs/0064-live-ev-buy-view.md
+  - docs/original-docs/0028-konsen-odds-trigger-rejected.md
+  - docs/original-docs/0030-konsen-trio-partner-width-rejected.md
+  - docs/original-docs/0046-allocation-prob-weight-no-floor-rejected.md
+  - docs/original-docs/0055-ev-layer-separation-circular-break.md
+  - docs/original-docs/0060-betting-axis-lock-preclose-topup.md
+  - docs/original-docs/0066-live-ev-per-race-budget.md
 distilled_from_sha: "f765be7"
 updated: "2026-07-17"
 ---
 
 # ライブ EV 買い目ビュー（今これを買え）: 機能仕様
 
-[Issue #260](https://github.com/taito-station/paddock/issues/260) / 依存: [#33 REST API（read 基盤）](https://github.com/taito-station/paddock/issues/33)・[#34 Web SPA](https://github.com/taito-station/paddock/issues/34) / 関連 ADR: [0064](../adr/0064-live-ev-buy-view.md)
+[Issue #260](https://github.com/taito-station/paddock/issues/260) / 依存: [#33 REST API（read 基盤）](https://github.com/taito-station/paddock/issues/33)・[#34 Web SPA](https://github.com/taito-station/paddock/issues/34) / 関連 ADR: [0064](../original-docs/0064-live-ev-buy-view.md)
 
 > **更新（#346・2026-07 / ライブ writer を Rust に一本化）**: 本仕様が当初採った
 > 「EV/伝票の正本は Python `live_ev.py`・`refresh_ev.sh` が `live_ev_snapshots` へ永続化」という
@@ -26,7 +26,7 @@ updated: "2026-07-17"
 > **以下の本文（データフロー図・設計方針〈Approach C〉・emit-json・永続化・実装 PR 分割 など各節）は
 > 当初 #260 設計の歴史的記録**であり、writer に関する記述は上記のとおり読み替えること（個別の節に
 > 退役注記が無くても本バナーが優先する。理由と現行構成は
-> [ADR 0064 の「追補（#346）」](../adr/0064-live-ev-buy-view.md) を参照）。read API `GET /api/live/{date}`・
+> [ADR 0064 の「追補（#346）」](../original-docs/0064-live-ev-buy-view.md) を参照）。read API `GET /api/live/{date}`・
 > `live_ev_snapshots` スキーマ・SPA `LiveBets`・slip 契約は不変で、Rust writer が同一契約を満たす。
 > `live_ev.py` 本体はオフライン用途で温存。
 
@@ -137,7 +137,7 @@ updated: "2026-07-17"
 
 ## 永続化（`refresh_ev.sh` を拡張）
 
-> **更新（#346・2026-07）**: 以下の Python 永続化経路（`live_ev.py --emit-json` → `refresh_ev.sh` → `persist_live_ev.py` → `live_ev_snapshots`）は退役した。ライブ writer は Rust の `predict-watch` に一本化され、`captured_at` 供給・冪等 upsert・複勝オッズ書き込みも Rust 側が担う。理由と現行構成は [ADR 0064 の「追補（#346）」](../adr/0064-live-ev-buy-view.md) を参照。以下は当初設計の歴史的記録として残す。
+> **更新（#346・2026-07）**: 以下の Python 永続化経路（`live_ev.py --emit-json` → `refresh_ev.sh` → `persist_live_ev.py` → `live_ev_snapshots`）は退役した。ライブ writer は Rust の `predict-watch` に一本化され、`captured_at` 供給・冪等 upsert・複勝オッズ書き込みも Rust 側が担う。理由と現行構成は [ADR 0064 の「追補（#346）」](../original-docs/0064-live-ev-buy-view.md) を参照。以下は当初設計の歴史的記録として残す。
 
 - `refresh_ev.sh`（既に Postgres アクセスを持つオーケストレータ）の最後に、`live_ev.py --emit-json` の JSON を `live_ev_snapshots` へ upsert する 1 ステップを追加する（小さな `persist_live_ev.py` か psql）。
 - **`race_id`・`date`・`post_time` の補完**: persist ステップが各 `pid` から DB を引いて paddock `race_id`・`date`（開催日）・`post_time` を注入する（`live_ev.py` は pid ローカル値のみ出力するため）。`pid`→`race_id` の対応は `refresh_ev.sh` が既に保持している（TSV 生成時の race 列挙）。

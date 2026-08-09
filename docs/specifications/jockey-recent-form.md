@@ -4,14 +4,14 @@
 status: Confirmed
 kind: knowledge
 sources:
-  - docs/adr/0009-recent-form-feature.md
-  - docs/adr/0016-shrinkage-and-recency.md
-  - docs/adr/0017-jockey-shrinkage-evaluation.md
-  - docs/adr/0034-alpha-retune-recency-rejected.md
-  - docs/adr/0035-recent-form-weight-retune-rejected.md
-  - docs/adr/0036-recent-form-trend-n-rejected.md
-  - docs/adr/0037-place-show-exotic-market-blend-rejected.md
-  - docs/adr/0038-jockey-recent-form-rejected.md
+  - docs/original-docs/0009-recent-form-feature.md
+  - docs/original-docs/0016-shrinkage-and-recency.md
+  - docs/original-docs/0017-jockey-shrinkage-evaluation.md
+  - docs/original-docs/0034-alpha-retune-recency-rejected.md
+  - docs/original-docs/0035-recent-form-weight-retune-rejected.md
+  - docs/original-docs/0036-recent-form-trend-n-rejected.md
+  - docs/original-docs/0037-place-show-exotic-market-blend-rejected.md
+  - docs/original-docs/0038-jockey-recent-form-rejected.md
 distilled_from_sha: "f765be7"
 updated: "2026-07-21"
 ---
@@ -19,7 +19,7 @@ updated: "2026-07-21"
 # 騎手直近フォーム特徴量仕様書
 
 > **結論（検証終了・Confirmed / 2026-07-21）**: 本特徴量は backtest weight スイープの結果
-> **棄却された**（[ADR 0038](../adr/0038-jockey-recent-form-rejected.md)）。
+> **棄却された**（[ADR 0038](../original-docs/0038-jockey-recent-form-rejected.md)）。
 > `JOCKEY_RECENT_FORM_WEIGHT = 0.0`（無効）で production は本 factor を有効化しない。
 > 算出機構（`jockey_recent_form_score` / `find_jockey_recent_runs` / `jockey_recent_runs_batch`）・
 > SQL・`--jockey-form-weight` CLI フラグ・`idx_horse_past_runs_jockey` インデックスは将来の再評価用に
@@ -359,7 +359,7 @@ pub(crate) const JOCKEY_RECENT_FORM_LIMIT: u32 = 10; // backtest sweep で 5 / 1
 - [ ] テストが 5 タプル destructure でコンパイルが通ることを確認する
 - [ ] rdb-gateway の `jockey_recent_runs_batch` バッチ SQL に対して `EXPLAIN ANALYZE` を実行し、`deduped` CTE の `NOT EXISTS` サブクエリが想定外の重複スキャンをしていないことを確認する
 - [ ] `domain/src/prediction/scoring.rs` の `jockey_recent_form_score` に対するユニットテストを追加する（境界条件: 空スライス=None / 全欠損=None / pos=pop=clamp中央値 / 最低人気激走=clamp上限 / 大人気大敗=clamp下限）
-- [x] バックテスト sweep 後にメトリクスを記録し ADR 0038 として棄却または採用を記録する → **完了: [ADR 0038](../adr/0038-jockey-recent-form-rejected.md) に棄却を記録（weight 全域で Brier/LogLoss が単調悪化・weight=0.0 が最良、1561R）**
+- [x] バックテスト sweep 後にメトリクスを記録し ADR 0038 として棄却または採用を記録する → **完了: [ADR 0038](../original-docs/0038-jockey-recent-form-rejected.md) に棄却を記録（weight 全域で Brier/LogLoss が単調悪化・weight=0.0 が最良、1561R）**
 - [ ] （任意）`JockeyFormRun.finishing_position` / `popularity` の型として `Option<NonZeroU32>` の採用を検討する（0 着順・0 人気を型レベルで弾けるが、DB の `BIGINT` からの変換コストを考慮する）
 - [ ] バックテスト評価期間: 既存 sweep との比較可能性のため `2026-03-28〜2026-05-31` を基準期間とする。ただし実施時点でより多くの開催が蓄積されている場合は最新 as-of まで延ばして標本を増やしてよい（その場合は ADR に実際の評価期間を明記すること）
 

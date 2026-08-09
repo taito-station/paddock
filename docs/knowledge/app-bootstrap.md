@@ -1,15 +1,26 @@
 ---
-status: Confirmed
+status: Conflict   # 本文が実装と乖離（下記）。解消するまで運用の前提にしない
 kind: knowledge
 sources:
   - docs/qa/QA-setup-boilerplate-410.md
-  - docs/adr/0069-drop-icloud-writes-browser-only-viewing.md
-  - docs/adr/0070-explicit-migration-no-auto-on-startup.md
-distilled_from_sha: "8f8be21"
-updated: "2026-07-27"
+  - docs/original-docs/0069-drop-icloud-writes-browser-only-viewing.md
+  - docs/original-docs/0070-explicit-migration-no-auto-on-startup.md
+distilled_from_sha: "8f8be21"   # 内容はこの時点のまま。Conflict 解消時に現 HEAD へ進める
+updated: "2026-08-09"
 ---
 
 # app bootstrap（DI・起動シーケンス）の共通化
+
+> **⚠ status: Conflict — この文書の一部は現在の実装と一致しない。**
+>
+> `sources` の [`docs/qa/QA-setup-boilerplate-410.md`](../qa/QA-setup-boilerplate-410.md) に
+> 「【追記・#453 で覆る】`NoopParser` / `NoopFetcher` スタブは削除された」とあるが、本文（下記
+> 「PDF を使わない bin」節）はいまだにその注入を推奨している。実測でも `NoopParser` は
+> ソースツリーに存在せず、現行は `Interactor<R>` と `PdfInteractor<R, P, F>` に分離済み。
+>
+> **この節を運用の前提にしない**。実装の正は `src/use-case/` を直接見ること。
+> ADR 0073 が「knowledge を信じると存在しない API を書く」実例として参照しているのがこの乖離で、
+> 本文の差分マージは **#578** で行う（`distilled_from_sha` はそのときに現 HEAD へ進める）。
 
 新規 app（`src/apps/<bin>`）の `setup.rs` / `bin.rs` を書くときの確定知。#410 で横断的ボイラープレートを既存 crate に集約した（ADR/新規決定は伴わない純リファクタ）。集約先は `~/.claude/rules/rust/architecture.md` の依存方向 Apps→Interface→Use-Case→Domain を崩さない。
 

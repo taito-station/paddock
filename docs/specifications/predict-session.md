@@ -4,13 +4,13 @@
 status: Confirmed
 kind: knowledge
 sources:
-  - docs/adr/0004-predict-session-binary.md
-  - docs/adr/0005-wire-odds-into-predict.md
-  - docs/adr/0013-persist-track-condition.md
-  - docs/adr/0019-portfolio-generator.md
-  - docs/adr/0046-allocation-prob-weight-no-floor-rejected.md
-  - docs/adr/0048-retire-jra-odds-scraper-for-netkeiba.md
-  - docs/adr/0054-kelly-staking-rejected.md
+  - docs/original-docs/0004-predict-session-binary.md
+  - docs/original-docs/0005-wire-odds-into-predict.md
+  - docs/original-docs/0013-persist-track-condition.md
+  - docs/original-docs/0019-portfolio-generator.md
+  - docs/original-docs/0046-allocation-prob-weight-no-floor-rejected.md
+  - docs/original-docs/0048-retire-jra-odds-scraper-for-netkeiba.md
+  - docs/original-docs/0054-kelly-staking-rejected.md
 distilled_from_sha: "d8cc0e4"
 updated: "2026-07-27"
 ---
@@ -22,9 +22,9 @@ updated: "2026-07-27"
 > **更新（#407・2026-07 / 本番買い目は build_portfolio に置換）**: 本仕様が当初 #13 設計で採った
 > **「Kelly 配分で推奨額を算出し `Kelly=…%` 列を表示する」買い目まわりの記述は退役した**。本番 `predict` の
 > 買い目配分は `build_portfolio`（ワイド・馬連・三連複の◎軸ながし、券種予算を 100 円単位で均等配分。
-> `src/domain/src/portfolio/mod.rs`）に置き換わっており（[ADR 0019](../adr/0019-portfolio-generator.md)。券種内の均等配分は
-> [ADR 0046](../adr/0046-allocation-prob-weight-no-floor-rejected.md) で確率重み化を棄却し維持）、
-> Kelly 配分は 71R walk-forward で回収率が現行ヒューリスティックに劣後し **棄却済み**（[ADR 0054](../adr/0054-kelly-staking-rejected.md)。
+> `src/domain/src/portfolio/mod.rs`）に置き換わっており（[ADR 0019](../original-docs/0019-portfolio-generator.md)。券種内の均等配分は
+> [ADR 0046](../original-docs/0046-allocation-prob-weight-no-floor-rejected.md) で確率重み化を棄却し維持）、
+> Kelly 配分は 71R walk-forward で回収率が現行ヒューリスティックに劣後し **棄却済み**（[ADR 0054](../original-docs/0054-kelly-staking-rejected.md)。
 > `select_bets`/Kelly は backtest 評価専用）。**以下本文のうち買い目推奨の表示例（`Kelly=…%` 列）・`y` の
 > 「Kelly 配分で算出」動作・「Kelly 値の表示と推奨額の算出」節は #13 当時の歴史的記録**であり、上記のとおり
 > 読み替えること（個別の節に注記が無くても本バナーが優先）。CLI インターフェース・終了コード・セッションの
@@ -359,7 +359,7 @@ fn save_predict_race_condition(
 ## Kelly 値の表示と推奨額の算出
 
 > ⚠️ **退役（#407）**: 本節の Kelly 配分による推奨額算出は本番 `predict` では使われていない（冒頭バナー参照）。
-> 本番配分は `build_portfolio`（[ADR 0019](../adr/0019-portfolio-generator.md) / [ADR 0054](../adr/0054-kelly-staking-rejected.md)）。以下は #13 当時の歴史的記録。
+> 本番配分は `build_portfolio`（[ADR 0019](../original-docs/0019-portfolio-generator.md) / [ADR 0054](../original-docs/0054-kelly-staking-rejected.md)）。以下は #13 当時の歴史的記録。
 
 `BettingRecommendation.kelly_fraction` は 0.0〜1.0 の小数。表示時は `kelly_fraction * 100` で百分率に変換し `Kelly=15%` のように表示する。
 
@@ -378,5 +378,5 @@ fn save_predict_race_condition(
 
 ## ADR
 
-- [ADR-0004](../adr/0004-predict-session-binary.md) — 予想セッションバイナリ
-- [ADR-0013](../adr/0013-persist-track-condition.md) — 馬場入力の永続化（Issue #80）
+- [ADR-0004](../original-docs/0004-predict-session-binary.md) — 予想セッションバイナリ
+- [ADR-0013](../original-docs/0013-persist-track-condition.md) — 馬場入力の永続化（Issue #80）

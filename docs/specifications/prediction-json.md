@@ -4,9 +4,9 @@
 status: Confirmed
 kind: knowledge
 sources:
-  - docs/adr/0025-prediction-search-api.md
-  - docs/adr/0032-bets-in-gen-predictions-model-based.md
-  - docs/adr/0069-drop-icloud-writes-browser-only-viewing.md
+  - docs/original-docs/0025-prediction-search-api.md
+  - docs/original-docs/0032-bets-in-gen-predictions-model-based.md
+  - docs/original-docs/0069-drop-icloud-writes-browser-only-viewing.md
 distilled_from_sha: "f765be7"
 updated: "2026-07-21"
 ---

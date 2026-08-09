@@ -4,7 +4,7 @@
 status: Confirmed
 kind: knowledge
 sources:
-  - docs/adr/0023-session-write-api.md
+  - docs/original-docs/0023-session-write-api.md
   - docs/api/openapi.json
 distilled_from_sha: "f0ee7a3"
 updated: "2026-07-21"
@@ -139,5 +139,5 @@ read API（#33）は `InvalidArgument`/`NotFound`/`Internal`（+ `Fetch`/`Timeou
 ## 関連
 
 - 正本: [`predict-session.md`](predict-session.md)（CLI セッションの不変条件）・[`web-spa.md`](web-spa.md)（API 一覧）・[`rest-api-read.md`](rest-api-read.md)（read 基盤）
-- ADR: `docs/adr/0023-session-write-api.md`
+- ADR: `docs/original-docs/0023-session-write-api.md`
 - 依存 Issue: #33（基盤）/ #51（odds:refresh）/ #40（results:refresh）

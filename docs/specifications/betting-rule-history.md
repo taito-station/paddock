@@ -4,18 +4,18 @@
 status: Confirmed
 kind: knowledge
 sources:
-  - docs/adr/0028-konsen-odds-trigger-rejected.md
-  - docs/adr/0030-konsen-trio-partner-width-rejected.md
-  - docs/adr/0033-conditional-win-bet-rejected.md
-  - docs/adr/0039-formation-2axis-rejected.md
-  - docs/adr/0040-ev-gate-threshold-lowering-rejected.md
-  - docs/adr/0041-umaren-only-strategy-rejected.md
-  - docs/adr/0042-win-power-calibration-adopted.md
-  - docs/adr/0043-exacta-in-portfolio-rejected.md
-  - docs/adr/0044-calibrated-ev-gate-anti-predictive.md
-  - docs/adr/0046-allocation-prob-weight-no-floor-rejected.md
-  - docs/adr/0054-kelly-staking-rejected.md
-  - docs/adr/0065-wide-partners-top5-alignment.md
+  - docs/original-docs/0028-konsen-odds-trigger-rejected.md
+  - docs/original-docs/0030-konsen-trio-partner-width-rejected.md
+  - docs/original-docs/0033-conditional-win-bet-rejected.md
+  - docs/original-docs/0039-formation-2axis-rejected.md
+  - docs/original-docs/0040-ev-gate-threshold-lowering-rejected.md
+  - docs/original-docs/0041-umaren-only-strategy-rejected.md
+  - docs/original-docs/0042-win-power-calibration-adopted.md
+  - docs/original-docs/0043-exacta-in-portfolio-rejected.md
+  - docs/original-docs/0044-calibrated-ev-gate-anti-predictive.md
+  - docs/original-docs/0046-allocation-prob-weight-no-floor-rejected.md
+  - docs/original-docs/0054-kelly-staking-rejected.md
+  - docs/original-docs/0065-wide-partners-top5-alignment.md
 distilled_from_sha: "f765be7"
 updated: "2026-07-17"
 ---
@@ -37,7 +37,7 @@ updated: "2026-07-17"
 - 結果: **box-off（混戦なし）84.0% ≧ baseline（band≥4）83.9%**。オッズ条件は baseline を上回る閾値が一つも無かった。
 - 追加発動した閾値（odds≥3.0/3.5 × band≥2/3）はいずれも回収を悪化させ **79.5〜81.5%**。唯一 odds≥4.0 は葵S（◎3.8倍）が閾値未満で追加発動 0 件 → **baseline 83.9% に退化（改善なし）**。band≥2 まで緩めると 13〜20R を混戦化し −3〜4pt。動機だった葵S は band=2 でボックスが組成不能（3頭未満）となり ¥1,500 が空振り。
 - **結論**: オッズ条件は入れない。現行の `band≥4`（model 勝率 0.70 倍以上が ◎含め 4 頭以上）を維持。エンハンスは「回収を改善する証拠」が出てから入れる。
-- 詳細: [docs/adr/0028-konsen-odds-trigger-rejected.md](../adr/0028-konsen-odds-trigger-rejected.md)（関連 Issue: #180）
+- 詳細: [docs/original-docs/0028-konsen-odds-trigger-rejected.md](../original-docs/0028-konsen-odds-trigger-rejected.md)（関連 Issue: #180）
 
 ### ② 混戦時の 3連複の相手拡大（top5 → top7/全頭）（棄却 / 2026-06-20 / ADR 0030）
 
@@ -49,7 +49,7 @@ updated: "2026-07-17"
   - 全体 ROI: 87.7% → 82.4〜84.7%
 - 均等重みでも改善せず。広げるほど外れ目に資金が分散し、当たり 1 点が薄くなる（典型的な「高的中・低配当」）。
 - **結論**: 現行 top5 を維持。単発の取りこぼしで恒久ルール化しない。
-- 詳細: [docs/adr/0030-konsen-trio-partner-width-rejected.md](../adr/0030-konsen-trio-partner-width-rejected.md)
+- 詳細: [docs/original-docs/0030-konsen-trio-partner-width-rejected.md](../original-docs/0030-konsen-trio-partner-width-rejected.md)
 
 ### ③ 条件付き単勝（単勝EV≥閾値の馬だけ）の追加（棄却 / 2026-06-21 / ADR 0033）
 
@@ -69,7 +69,7 @@ updated: "2026-07-17"
   | +win≥120%/split | 74.5% | −5.0pt | 327 回 |
 
 - **結論**: 単勝は追加しない。発動頻度が高すぎ（71R で平均 4.6〜4.9 頭）、閾値上げても改善なし。単勝市場はモデルの win prob と高相関でエッジが出なかった。
-- 詳細: [docs/adr/0033-conditional-win-bet-rejected.md](../adr/0033-conditional-win-bet-rejected.md)（関連 Issue: #208）
+- 詳細: [docs/original-docs/0033-conditional-win-bet-rejected.md](../original-docs/0033-conditional-win-bet-rejected.md)（関連 Issue: #208）
 
 ### ④ 上位近接時の2軸フォーメーション（棄却 / 2026-06-27 / ADR 0039）
 
@@ -80,7 +80,7 @@ updated: "2026-07-17"
   - **pair2（◎○両方必須・AND）は全閾値で壊滅**（発動部分集合 ROI 31〜39%・的中 11〜15%）。近接＝拮抗ほど両崩れしやすく、AND 集中は最悪。
   - **union2（◎脚∪○脚に予算折半・OR）は回収率が改善せず**。部分集合 ROI は θ=0.80 で +3.4pt（65.7→69.1）だが θ=0.85 で −5.3pt・θ=0.90 でフラットと符号反転（小標本ノイズ）。的中率は 42%→72〜89% に激増・分散は半減するが、回収が伴わない典型的な「高的中・低配当」。動機の福島R7 が属する θ=0.90 帯でも baseline とフラット。
 - **結論**: フォーメーションは採用しない。現行の ◎1頭軸ながしを維持。的中率・分散の改善は回収率を伴わなければ無価値（ADR 0030「相手拡大」棄却と同型）。
-- 詳細: [docs/adr/0039-formation-2axis-rejected.md](../adr/0039-formation-2axis-rejected.md)（関連 Issue: #241）
+- 詳細: [docs/original-docs/0039-formation-2axis-rejected.md](../original-docs/0039-formation-2axis-rejected.md)（関連 Issue: #241）
 
 ### ⑤ EV ゲート閾値（ROI≥100%）の引き下げ（棄却 / 2026-06-27 / ADR 0040）
 
@@ -89,7 +89,7 @@ updated: "2026-07-17"
 - 検証: DB 保存オッズ＋ `live_ev.py`（全3券種の期待 ROI）で再評価。ワイド込みで厳密評価できたのは 06-21・06-27 の **69R**（+EV **0本**・最高 ROI 97%・**平均 ROI 73.1%**）。α=0.2/0.3 とも +EV 0本。
 - 結果: **ROI 100% が損益分岐・>100% が +EV** で、下げる＝−EV を承知で買う＝長期で負け。平均 ROI 73.1% は本戦略が使う券種の JRA 控除率（ワイド・馬連 22.5%／3連複 25%）由来のフェア ROI ≈ 75〜77.5% を数 pt 下回り（やや負側）、モデルに平均的なエッジは無い（=市場とほぼ等価＝フェア値をやや下回る。予測 vs 実現の真の較正は別問題で未検証）。+EV は控除率を食い破る稀な歪みだけで構造的に稀＝買い目が来ないのは仕様どおり。閾値直下に「買うべきレース」が溜まる兆候は無し（結果のある 71R の実現 ROI も baseline 83.9%／box-off 84.0%＝ADR 0028 で 100% 未満）。
 - **結論**: ROI≥100% を維持。閾値引き下げは不採用。唯一意味のある検証＝推定 ROI の較正（予測 vs 実現）は本検証に足る標本がまだ無い（DB 単一ストアではワイドと結果が同居せず、06-21 の 35R のみ結果を netkeiba 取得すれば予備的に可能だが単日・小標本・非確定オッズで確証不足）→ #248 のデータ蓄積後に #249 で実施（保留）。
-- 詳細: [docs/adr/0040-ev-gate-threshold-lowering-rejected.md](../adr/0040-ev-gate-threshold-lowering-rejected.md)（関連 Issue: #248 / #249）
+- 詳細: [docs/original-docs/0040-ev-gate-threshold-lowering-rejected.md](../original-docs/0040-ev-gate-threshold-lowering-rejected.md)（関連 Issue: #248 / #249）
 
 ### ⑥ 馬連特化（馬連 EV≥閾値）買い目戦略（棄却 / 2026-06-27 / ADR 0041）
 
@@ -102,7 +102,7 @@ updated: "2026-07-17"
   - オッズ上限で穴を除外しても ROI≥100% を意味ある鞍数で満たす構成なし（cap30/θ1.0 が最良で 13 鞍・93.1%。cap20/θ1.0 は 242% だが 5 鞍の小標本ノイズ）。
 - 原因: EV フィルタは全鞍で極端な穴（オッズ 76〜720 倍・モデル勝率 0.6〜2%）を選抜する。モデルの穴過大評価（#246）で「偽の +EV」が量産され、張れる鞍が増えても −EV ノイズを買っているだけ。
 - **結論**: 馬連特化は採用しない。現行3券種ポートフォリオを維持。frequency 課題は券種選択ではなく**モデル較正（#246）に依存**することが定量的に裏付けられた。#246 完了後に再検討する。
-- 詳細: [docs/adr/0041-umaren-only-strategy-rejected.md](../adr/0041-umaren-only-strategy-rejected.md)（関連 Issue: #250, #241, #246）
+- 詳細: [docs/original-docs/0041-umaren-only-strategy-rejected.md](../original-docs/0041-umaren-only-strategy-rejected.md)（関連 Issue: #250, #241, #246）
 
 ### ⑦ 較正後 model-EV ROI≥100% ゲートの精度検証（知見・ルール変更は保留 / 2026-06-27 / ADR 0044）
 
@@ -112,7 +112,7 @@ updated: "2026-07-17"
 - 結果（**同一ポートフォリオで発動判定だけ変更**）: 無ゲート全鞍 **75.5%**（71鞍）→ gate≥100% **24.5%**（13鞍）→ gate≥110% **0%**（5鞍）→ gate≥120% 0%（1鞍）。**ゲートを課すほど実 ROI が単調に悪化＝逆予測的**。◎単勝オッズ下限でも回復せず（gate≥100% ◎O≥3 で 5鞍・36.7%）。無フィルタ馬連 top5（78.7%）がゲート版より一貫して良い。
 - 診断: 通過 13 鞍・非通過 58 鞍とも ◎平均人気 1.0（α=0.2 の帰結で model の ◎ はほぼ全て市場最上位）＝**人気度は通過を分けない**。較正で ◎ アンカーのポートフォリオ model EV が水増しされ、実配当を伴わないまま 100% を超えるのが実態。なお無ゲート universe 自体が 75.5%＜100% の赤字窓のため、本件は赤字 universe 内の相対比較＝#248 蓄積後の追検証が前提。
 - **結論（知見）**: 較正後 model-EV ゲートを「+EV レース選別器」として信頼するのは妥当でない。根本原因はゲート閾値でなく EV 入力の較正（ADR 0042）。**CLAUDE.md の実ルールは本件では変更せず**、EV 再校正（別 issue）と #248 蓄積後の追検証を経て判断する。ADR 0040（ゲート閾値の引き下げ棄却）と関連。
-- 詳細: [docs/adr/0044-calibrated-ev-gate-anti-predictive.md](../adr/0044-calibrated-ev-gate-anti-predictive.md)（関連 Issue: #263, #252, #246）
+- 詳細: [docs/original-docs/0044-calibrated-ev-gate-anti-predictive.md](../original-docs/0044-calibrated-ev-gate-anti-predictive.md)（関連 Issue: #263, #252, #246）
 
 ### ⑧ 馬単（exacta）特化・順序プレミアム（棄却 / 2026-06-27 / ADR 0043 / #271 で revert 済み）
 
@@ -122,7 +122,7 @@ updated: "2026-07-17"
 - **順序プレミアムは単独でもエッジにならない**: 無フィルタでも馬単 ≤ 馬連（top5 67.6% < 78.7% / 全頭 60.9% < 66.4%）。両方向買いは外れ向きが必ず死に、着順固定配当でも倍化カバレッジを賄えない。
 - **馬単 EV フィルタは逆予測**（馬連 ⑥ と同型・より顕著）: 無フィルタ 60.9% → EV≥θ フィルタ最良 33.3%。⑥ が小標本で見せた >100% アーティファクトすら皆無。
 - **結論**: 順序プレミアムは #246 較正後の 71R では model EV シグナル経由で取り出せない。馬連→馬単の置換は無効化すべき → **#271 で `pick_pair_leg` を撤去し連系ペアを常に馬連へ revert 済み（ADR 0043 棄却）**。馬単オッズ取得・診断表示の下地は将来の再検証用に温存。
-- 詳細: [docs/adr/0043-exacta-in-portfolio-rejected.md](../adr/0043-exacta-in-portfolio-rejected.md)「71R 検証（#262）」（関連 Issue: #262, #252, #246, #271）
+- 詳細: [docs/original-docs/0043-exacta-in-portfolio-rejected.md](../original-docs/0043-exacta-in-portfolio-rejected.md)「71R 検証（#262）」（関連 Issue: #262, #252, #246, #271）
 
 ### ⑨ 配分の確率重み化＋脚ごと最低¥100撤廃（棄却 / 2026-06-28 / ADR 0046）
 
@@ -132,7 +132,7 @@ updated: "2026-07-17"
 - 結果: **現行（proxy重み+最低¥100）75.5% / 均等割り（現行コード実挙動）75.5% に対し、真確率重み+最低¥100撤廃は 66.3% に悪化**（−9pt）。最低¥100 撤廃だけで −9pt、重み基準を真確率にするだけで −4pt。的中率は全方式 48% で不変。
 - 原因: 三連複の薄い穴目への ¥100 ずつが「たまの高配当を拾うミニボックス」として効く。本命集中（低配当寄せ）に変えると一発を取り逃す。**解釈の正しさと回収率が逆を向く**。
 - **結論**: 配分は現状の均等割りを維持。確率重み化＋最低¥100撤廃は採用しない。#272 では各買い目の的中確率 `hit_prob` を**表示**する（判断材料）のみ追加し、配分は不変。
-- 詳細: [docs/adr/0046-allocation-prob-weight-no-floor-rejected.md](../adr/0046-allocation-prob-weight-no-floor-rejected.md)（関連 Issue: #272）
+- 詳細: [docs/original-docs/0046-allocation-prob-weight-no-floor-rejected.md](../original-docs/0046-allocation-prob-weight-no-floor-rejected.md)（関連 Issue: #272）
 
 ### ⑩ ワイド相手を top3 に絞る（不採用＝top5 に統一 / 2026-07-06 / ADR 0065）
 
@@ -141,7 +141,7 @@ CLAUDE.md は「ワイドは相手 top3」と定めていたが、本番 `build_
 - 検証: `strategy_eval.py` に `--wide-partners` を追加し、馬連・三連複 top5 固定・ワイドだけ top3/top5 を比較（予測確率不変＝相対比較はリーク中立）。窓 A=71R / 窓 B=262R（12 開催日）を開催日ごとに集計。
 - 結果: **有意差なし**。窓 A（71R）は top3 +4.0pt だが単勝 ROI 594% の幸運な小標本で、窓 B（262R）に広げると **符号反転して top5 +3.9pt**。日別では **top5 ≥ top3 が 6/12 日・top3 > top5 が 6/12 日＝五分**で、B 集計の top5 優位は単一外れ日（2026-06-27 Δ−32pt）が牽引。どちらの優位も標本ノイズ。
 - **結論**: 有意差が無いので最小変更を採る。`build_portfolio` は無変更（既に top5）、CLAUDE.md を「3 券種とも top5」に修正。「ワイド top3」の縛りは撤去（＝top3 に絞る案は再提案しない）。top5 は ADR 0030 の上限内で矛盾なし。なお計測中に **2 つ目の買い目エンジン `live_ev.py`（ライブ伝票）もワイド top3** だったと判明し、これも top5 に統一（両エンジン＋doc が top5 で一致）。
-- 詳細: [docs/adr/0065-wide-partners-top5-alignment.md](../adr/0065-wide-partners-top5-alignment.md)（関連 Issue: #347）
+- 詳細: [docs/original-docs/0065-wide-partners-top5-alignment.md](../original-docs/0065-wide-partners-top5-alignment.md)（関連 Issue: #347）
 
 ## バックテスト/実績ログ（ADR 未収録）
 
@@ -171,15 +171,15 @@ ADR 化していないが、現行ルール（確率配分・混戦ボックス�
 ## 関連
 
 - 現行ルール本体: `CLAUDE.md`「買い方ルール」
-- [docs/adr/0028-konsen-odds-trigger-rejected.md](../adr/0028-konsen-odds-trigger-rejected.md)
-- [docs/adr/0030-konsen-trio-partner-width-rejected.md](../adr/0030-konsen-trio-partner-width-rejected.md)
-- [docs/adr/0033-conditional-win-bet-rejected.md](../adr/0033-conditional-win-bet-rejected.md)
-- [docs/adr/0039-formation-2axis-rejected.md](../adr/0039-formation-2axis-rejected.md)
-- [docs/adr/0040-ev-gate-threshold-lowering-rejected.md](../adr/0040-ev-gate-threshold-lowering-rejected.md)
-- [docs/adr/0041-umaren-only-strategy-rejected.md](../adr/0041-umaren-only-strategy-rejected.md)
-- [docs/adr/0043-exacta-in-portfolio-rejected.md](../adr/0043-exacta-in-portfolio-rejected.md) — 連系ペアは常に馬連（#271 で馬単置換 `pick_pair_leg` を撤去・ADR 0043 棄却。#262 の 71R 検証で純損と確定）
-- [docs/adr/0044-calibrated-ev-gate-anti-predictive.md](../adr/0044-calibrated-ev-gate-anti-predictive.md) — 較正後 model-EV ROI≥100% ゲートは 71R で逆予測的（#263, 知見・ルール変更は保留）
-- [docs/adr/0046-allocation-prob-weight-no-floor-rejected.md](../adr/0046-allocation-prob-weight-no-floor-rejected.md) — 配分の確率重み化＋最低¥100撤廃は 71R で実 ROI 悪化（#272, 棄却。配分は均等割り維持）
-- [docs/adr/0054-kelly-staking-rejected.md](../adr/0054-kelly-staking-rejected.md) — fractional Kelly 配分は 71R で現行に劣る（#316, 棄却。定額土俵で ROI 75.5%→65.9%・σ 悪化、full Kelly は破産率 100%、λ=0.25 の資金温存は「賭けない方向への縮小」で配分改善でない。現行ヒューリスティック維持）
+- [docs/original-docs/0028-konsen-odds-trigger-rejected.md](../original-docs/0028-konsen-odds-trigger-rejected.md)
+- [docs/original-docs/0030-konsen-trio-partner-width-rejected.md](../original-docs/0030-konsen-trio-partner-width-rejected.md)
+- [docs/original-docs/0033-conditional-win-bet-rejected.md](../original-docs/0033-conditional-win-bet-rejected.md)
+- [docs/original-docs/0039-formation-2axis-rejected.md](../original-docs/0039-formation-2axis-rejected.md)
+- [docs/original-docs/0040-ev-gate-threshold-lowering-rejected.md](../original-docs/0040-ev-gate-threshold-lowering-rejected.md)
+- [docs/original-docs/0041-umaren-only-strategy-rejected.md](../original-docs/0041-umaren-only-strategy-rejected.md)
+- [docs/original-docs/0043-exacta-in-portfolio-rejected.md](../original-docs/0043-exacta-in-portfolio-rejected.md) — 連系ペアは常に馬連（#271 で馬単置換 `pick_pair_leg` を撤去・ADR 0043 棄却。#262 の 71R 検証で純損と確定）
+- [docs/original-docs/0044-calibrated-ev-gate-anti-predictive.md](../original-docs/0044-calibrated-ev-gate-anti-predictive.md) — 較正後 model-EV ROI≥100% ゲートは 71R で逆予測的（#263, 知見・ルール変更は保留）
+- [docs/original-docs/0046-allocation-prob-weight-no-floor-rejected.md](../original-docs/0046-allocation-prob-weight-no-floor-rejected.md) — 配分の確率重み化＋最低¥100撤廃は 71R で実 ROI 悪化（#272, 棄却。配分は均等割り維持）
+- [docs/original-docs/0054-kelly-staking-rejected.md](../original-docs/0054-kelly-staking-rejected.md) — fractional Kelly 配分は 71R で現行に劣る（#316, 棄却。定額土俵で ROI 75.5%→65.9%・σ 悪化、full Kelly は破産率 100%、λ=0.25 の資金温存は「賭けない方向への縮小」で配分改善でない。現行ヒューリスティック維持）
 - [docs/specifications/ev-kelly-bet-selection.md](ev-kelly-bet-selection.md) — 期待値計算・買い目選択・Kelly 配分ロジック
 - [docs/specifications/backtest.md](backtest.md) — 予想精度バックテスト/評価基盤

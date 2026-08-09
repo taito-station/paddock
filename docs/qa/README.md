@@ -22,4 +22,5 @@
 - 回答が確定したら、対応する knowledge に差分反映し、その knowledge の `updated`/`変更履歴`/
   `distilled_from_sha` を更新する。
 - 矛盾が出たら反映先 knowledge を `status: Conflict` にして解消する。
-- **qa 自体は生ファイル**。運用ルールや確定知を qa に書き残さない（それは knowledge/ADR の役割）。
+- **qa 自体は生ファイル**。運用ルールや確定知を qa に書き残さない（確定知は knowledge、決定は
+  ADR＝`docs/original-docs/0NNN-*.md` の役割。ADR 0073 以降、ADR は一次資料層に属する）。

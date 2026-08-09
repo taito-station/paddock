@@ -4,14 +4,14 @@
 status: Confirmed
 kind: knowledge
 sources:
-  - docs/adr/0027-accuracy-lever-is-market-blend-not-data-volume.md
-  - docs/adr/0055-ev-layer-separation-circular-break.md
-  - docs/adr/0056-feature-reweight-course-gate-jockey.md
-  - docs/adr/0057-impute-missing-factors-field-mean.md
-  - docs/adr/0058-pedigree-sire-feature-rejected.md
-  - docs/adr/0059-market-calibration-correction-rejected.md
-  - docs/adr/0012-trainer-stats-feature.md
-  - docs/adr/0034-alpha-retune-recency-rejected.md
+  - docs/original-docs/0027-accuracy-lever-is-market-blend-not-data-volume.md
+  - docs/original-docs/0055-ev-layer-separation-circular-break.md
+  - docs/original-docs/0056-feature-reweight-course-gate-jockey.md
+  - docs/original-docs/0057-impute-missing-factors-field-mean.md
+  - docs/original-docs/0058-pedigree-sire-feature-rejected.md
+  - docs/original-docs/0059-market-calibration-correction-rejected.md
+  - docs/original-docs/0012-trainer-stats-feature.md
+  - docs/original-docs/0034-alpha-retune-recency-rejected.md
 distilled_from_sha: "f765be7"
 updated: "2026-07-17"
 ---

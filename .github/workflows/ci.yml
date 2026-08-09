@@ -158,14 +158,24 @@ jobs:
       - name: Build (vite)
         run: npm run build
 
-  # ADR 番号（docs/adr/NNNN-*.md）の重複検出（#254）。並行クローン/worktree 運用で番号が
+  # ADR 番号（docs/original-docs/0NNN-*.md）の重複検出（#254）。並行クローン/worktree 運用で番号が
   # 二重取得される事故（#251 と #253 が同時に 0040 採番）の再発防止。Rust/Postgres 不要の
   # 軽量チェックなので独立ジョブにして並列で即終わらせる（ci / ocr-pdf には影響させない）。
+  # ジョブ ID `adr` は ruleset #461 の必須チェック名なので改名しない（下の docker-build の
+  # コメント参照。改名すると status 未報告で全 PR がブロックされる）。
   adr:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
+      # 判定器の健全性を先に確認する。本番検査が落ちたときに「ADR が本当に重複しているのか、
+      # 判定器が壊れているのか」を切り分けられるようにするため（本番検査を先に置くと、それが
+      # 落ちた時点でジョブが止まり判定器のシグナルを同時に失う）。
+      # ADR 0073 で fail-closed 化した分岐（0 埋め忘れ / ADR 0 件 / 旧 docs/adr の復活 /
+      # サブディレクトリ配置）は壊れると「黙って緑」に退化し、本番の docs/original-docs は
+      # 正常なので気づけない。使い捨て fixture で各分岐の終了コードと文言を固定する。
+      - name: Regression test for check-adr-numbers.sh (ADR 0073)
+        run: bash scripts/test-check-adr-numbers.sh
       - name: Check ADR number duplicates (#254)
         run: bash scripts/check-adr-numbers.sh
 

@@ -4,9 +4,9 @@
 status: Confirmed
 kind: knowledge
 sources:
-  - docs/adr/0006-backtest-evaluation.md
-  - docs/adr/0002-probability-estimation.md
-  - docs/adr/0003-ev-kelly-bet-selection.md
+  - docs/original-docs/0006-backtest-evaluation.md
+  - docs/original-docs/0002-probability-estimation.md
+  - docs/original-docs/0003-ev-kelly-bet-selection.md
 distilled_from_sha: "f765be7"
 updated: "2026-07-17"
 ---

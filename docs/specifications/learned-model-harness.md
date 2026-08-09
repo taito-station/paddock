@@ -4,17 +4,17 @@
 status: Confirmed
 kind: knowledge
 sources:
-  - docs/adr/0027-accuracy-lever-is-market-blend-not-data-volume.md
-  - docs/adr/0042-win-power-calibration-adopted.md
-  - docs/adr/0047-place-show-power-decompression-adopted.md
-  - docs/adr/0050-placeshow-raw-score-retune-rejected.md
-  - docs/adr/0051-placeshow-power-knee-confirmed-keep-2.md
-  - docs/adr/0052-alpha-blend-removal-rejected.md
-  - docs/adr/0053-learned-fundamental-model-rejected.md
-  - docs/adr/0055-ev-layer-separation-circular-break.md
-  - docs/adr/0058-pedigree-sire-feature-rejected.md
-  - docs/adr/0059-market-calibration-correction-rejected.md
-  - docs/adr/0060-betting-axis-lock-preclose-topup.md
+  - docs/original-docs/0027-accuracy-lever-is-market-blend-not-data-volume.md
+  - docs/original-docs/0042-win-power-calibration-adopted.md
+  - docs/original-docs/0047-place-show-power-decompression-adopted.md
+  - docs/original-docs/0050-placeshow-raw-score-retune-rejected.md
+  - docs/original-docs/0051-placeshow-power-knee-confirmed-keep-2.md
+  - docs/original-docs/0052-alpha-blend-removal-rejected.md
+  - docs/original-docs/0053-learned-fundamental-model-rejected.md
+  - docs/original-docs/0055-ev-layer-separation-circular-break.md
+  - docs/original-docs/0058-pedigree-sire-feature-rejected.md
+  - docs/original-docs/0059-market-calibration-correction-rejected.md
+  - docs/original-docs/0060-betting-axis-lock-preclose-topup.md
 distilled_from_sha: "f765be7"
 updated: "2026-07-21"
 ---
@@ -25,10 +25,10 @@ updated: "2026-07-21"
 > の as-of 特徴量ダンプ＋Python 評価）は **PR #310/#311/#312 で整備済み・現存**する。一方、これを受け皿と
 > した **学習型 fundamental モデル路線（#272/#309）は closed**：#272・#309 とも CLOSED、学習ランカー
 > （条件付きロジット/PL・非線形 GBM）は OOS で α=0.2 baseline を超えられず
-> [ADR 0053](../adr/0053-learned-fundamental-model-rejected.md) で棄却された。純モデルの resolution は
-> 天井（[ADR 0058](../adr/0058-pedigree-sire-feature-rejected.md)）、市場自体の較正補正も sub-takeout で
-> exploitable でない（[ADR 0059](../adr/0059-market-calibration-correction-rejected.md)）＝「市場より上手く
-> 当てる」路線は全域 closed。残るエッジは執行規律（軸ロック＋ズレ増額・[ADR 0055](../adr/0055-ev-layer-separation-circular-break.md)/[ADR 0060](../adr/0060-betting-axis-lock-preclose-topup.md)）に置く。
+> [ADR 0053](../original-docs/0053-learned-fundamental-model-rejected.md) で棄却された。純モデルの resolution は
+> 天井（[ADR 0058](../original-docs/0058-pedigree-sire-feature-rejected.md)）、市場自体の較正補正も sub-takeout で
+> exploitable でない（[ADR 0059](../original-docs/0059-market-calibration-correction-rejected.md)）＝「市場より上手く
+> 当てる」路線は全域 closed。残るエッジは執行規律（軸ロック＋ズレ増額・[ADR 0055](../original-docs/0055-ev-layer-separation-circular-break.md)/[ADR 0060](../original-docs/0060-betting-axis-lock-preclose-topup.md)）に置く。
 > したがって本書は **忠実性ハーネスの設計記録**として Confirmed（`--dump-features` 経路・as-of 忠実性
 > サニティは現存の資産）だが、④ サービング以降の「学習モデル採用」節は ADR 0053 により**発動しない**
 > 設計案として残す。（旧 status: Tentative は #272/#309 路線 close 後の位置づけが本文に無かったのが理由で、
