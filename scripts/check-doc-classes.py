@@ -270,6 +270,9 @@ RE_REQ_MARKER_LOOSE = re.compile(r"^<!--\s*REQ\s*:\s*(?:begin|end)\b.*-->$", re.
 RE_REQ_ID_ANY = re.compile(r"REQ-D\d{2}-\d{3}")
 RE_REQ_HEADER = re.compile(r"^\|?\s*REQ-ID\s*\|")
 RE_FENCE = re.compile(r"^(`{3,}|~{3,})")
+# 引用（blockquote）の行頭記号。剥がしてから判定しないと、`> ` を付けるだけで
+# マーカーも表も全部の検査を素通りする（GitHub は引用内でも表として描画する）。
+RE_BLOCKQUOTE = re.compile(r"^(?:>\s*)+")
 RE_REQ_ID = re.compile(r"^REQ-(D\d{2})-(\d{3})$")
 # タイトル付き `[x](path "題")` と山括弧付き `[x](<path>)` も拾う。素朴な
 # `\(([^)\s]+)\)` だとタイトルを付けるだけで実在検査・絶対パス拒否を全部迂回できる。
@@ -338,7 +341,7 @@ def parse_req_blocks(text: str) -> "tuple[list[tuple[str, list[list[str]]]], lis
     # ```` で囲んで ``` の見本を書く定番の書き方で内側が誤って閉じ、見本が実データに化ける。
     fence: "tuple[str, int] | None" = None
     for lineno, line in enumerate(text.splitlines(), 1):
-        stripped = line.strip()
+        stripped = RE_BLOCKQUOTE.sub("", line.strip())
         opener = RE_FENCE.match(stripped)
         if opener:
             token = opener.group(1)
@@ -506,7 +509,9 @@ def check_req_blocks(
                     errors.append(
                         f"{rel}: {req_id} のリンクがリポジトリ外を指している → {target}"
                     )
-                elif not resolved.is_file():
+                elif not resolved.exists():
+                    # ディレクトリへの相対リンクも正当（README が `scripts/` 等への
+                    # リンクを誘導している）。sources は「1 ファイル＝1 出典」なので非対称。
                     errors.append(f"{rel}: {req_id} のリンク先が実在しない → {target}")
 
 

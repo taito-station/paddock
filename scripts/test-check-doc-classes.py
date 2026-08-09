@@ -1001,6 +1001,38 @@ def test_req_traceability_table_is_not_error() -> None:
         shutil.rmtree(repo)
 
 
+def test_req_block_in_blockquote_is_checked() -> None:
+    """`> ` を付けるだけで全検査を素通りさせない（GitHub は引用内でも表として描く）。"""
+    repo = new_repo()
+    try:
+        baseline(repo)
+        append_raw(repo, "docs/knowledge/a.md",
+                   "\n> <!-- REQ:begin D19 -->\n"
+                   "> | REQ-ID | 要件 | 検証手段 | 出典 | status |\n"
+                   "> |---|---|---|---|---|\n"
+                   "> | REQ-D19-001 | 何か | - | ADR 0001 | Confirmed |\n"
+                   "> <!-- REQ:end D19 -->\n")
+        code, out = check(repo)
+        assert code == 1, out
+        assert "検証手段が空のまま Confirmed" in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_req_link_to_directory_is_accepted() -> None:
+    """ディレクトリへの相対リンクも正当な Markdown（`scripts/` 等を引ける）。"""
+    repo = new_repo()
+    try:
+        baseline(repo)
+        append_req_block(repo, "docs/knowledge/a.md", "D19",
+                         ["| REQ-D19-001 | 何か | `cargo test` "
+                          "| [一次資料](../original-docs/) | Confirmed |"])
+        code, out = check(repo)
+        assert code == 0, f"ディレクトリリンクで落ちた: {out}"
+    finally:
+        shutil.rmtree(repo)
+
+
 def test_req_nested_fence_is_not_closed_early() -> None:
     """```` の中の ``` で閉じると、見本が実データに化けて偽陽性になる。"""
     repo = new_repo()
