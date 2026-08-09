@@ -251,10 +251,29 @@ write_adr "$work/repo/docs/original-docs/0001-first.md" "0001. 最初の決定"
 } >"$work/repo/docs/original-docs/74-odd-fence.md"
 expect_exit_with "見落とさずに致命判定する" 1 "0 埋め 4 桁で始まらない" bash scripts/check-adr-numbers.sh
 
-echo "[12d] 採番の上限 0999 で next が番号を配らない"
+echo "[12d] 採番の上限 0999 で番号を配らない（check / next の両方）"
 reset_fixture
 write_adr "$work/repo/docs/original-docs/0999-max.md" "0999. 上限"
 expect_exit_with "next が上限到達で落ちる" 1 "上限 0999 に達した" bash scripts/check-adr-numbers.sh next
+# check 側も落ちること。上限判定を compute_next の中に置くと、$(compute_next) のコマンド置換
+# サブシェルで exit が消え、check は「✗ 上限に達した」を出しながら番号が空欄の成功行を
+# 出して exit 0 になる（＝このスクリプトが塞いでいる「黙って緑」そのもの）。
+expect_exit_with "check も上限到達で落ちる" 1 "上限 0999 に達した" bash scripts/check-adr-numbers.sh
+
+echo "[12e] not-an-adr マーカーで一次資料の誤検知を回避できる"
+reset_fixture
+write_adr "$work/repo/docs/original-docs/0001-first.md" "0001. 最初の決定"
+# ADR 草案を含む issue の逐語転記。転記内容は RO なので書き換えられず、マーカーだけが逃げ道。
+{
+    printf '<!-- not-an-adr -->\n\n'
+    printf '# 原資料: #500 ADR 草案を含む issue の転記\n\n'
+    printf '## ステータス\n\n提案中。\n\n## 決定\n\nこうしたい。\n'
+} >"$work/repo/docs/original-docs/500-issue-verbatim.md"
+expect_exit "マーカーがあれば非 ADR として扱う" 0 bash scripts/check-adr-numbers.sh
+# マーカーを消すと致命判定に戻ることも固定する（逃げ道が効いていることの対照）。
+sed '1,2d' "$work/repo/docs/original-docs/500-issue-verbatim.md" >"$work/repo/docs/original-docs/500-tmp" \
+    && mv "$work/repo/docs/original-docs/500-tmp" "$work/repo/docs/original-docs/500-issue-verbatim.md"
+expect_exit_with "マーカーが無ければ致命判定に戻る" 1 "0 埋め 4 桁で始まらない" bash scripts/check-adr-numbers.sh
 
 echo "[13] docs/original-docs 自体が無ければ落ちる"
 reset_fixture

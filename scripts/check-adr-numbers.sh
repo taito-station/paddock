@@ -90,7 +90,18 @@ strip_code_fences() {
 
 # ファイルが ADR の本文構造（コードフェンスの外の行頭に「## ステータス」と「## 決定」が
 # 同時に存在する）を持つか。0 埋めを忘れた ADR を名前以外の手がかりで拾うための判定。
+#
+# 逃げ道: 先頭付近に `<!-- not-an-adr -->` があれば非 ADR として扱う。original-docs は
+# issue 本文や外部資料を逐語転記する層なので、ADR 草案を含む issue をそのまま置くと構造判定に
+# 引っかかる。かつ同層は「内容の訂正・追記はしない（RO）」なので、マーカーという逃げ道が
+# 無いと CI と pre-push が恒久的に red のまま脱出できなくなる。マーカーは本文ではなく判定用の
+# メタデータなので RO 原則には抵触しない（docs/original-docs/README.md に明記）。
 looks_like_adr() {
+    # マーカーは先頭 10 行以内に限る。転記本文の奥に紛れ込んだ同一文字列で判定が
+    # 無効化されるのを防ぐため（意図的な宣言だけを受け付ける）。
+    if head -n 10 "$1" | grep -qF '<!-- not-an-adr -->'; then
+        return 1
+    fi
     local body
     body="$(strip_code_fences "$1")"
     grep -qE '^## ステータス' <<<"$body" && grep -qE '^## 決定' <<<"$body"
@@ -200,23 +211,20 @@ for path in "$adr_dir"/*.md; do
 done
 shopt -u nullglob
 
-# 最大番号+1 を 4 桁で返す（ADR が無ければ 0001）。
+# 走査で見つかった最大番号（10 進）。上限判定と compute_next の両方で使う。
+max_number=0
+for n in "${numbers[@]:-}"; do
+    [[ -z "$n" ]] && continue
+    # 10# で 8 進数誤解釈（先頭 0）を防ぐ。
+    ((10#$n > max_number)) && max_number=$((10#$n))
+done
+
+# 最大番号+1 を 4 桁で返す。**純粋な文字列生成に徹する**（ここで exit してはならない）。
+# 本関数は `$(compute_next)` のコマンド置換から呼ばれるため、内部の exit はサブシェルしか
+# 殺さず、呼び出し元は何事もなかったように成功メッセージを出し続ける——まさに本スクリプトが
+# 塞いでいる「黙って緑」になる。致命判定は呼び出し元の本体側に置く。
 compute_next() {
-    local max=0 n
-    for n in "${numbers[@]:-}"; do
-        [[ -z "$n" ]] && continue
-        # 10# で 8 進数誤解釈（先頭 0）を防ぐ。
-        ((10#$n > max)) && max=$((10#$n))
-    done
-    # 0 埋め 4 桁（0001〜0999）の上限に達したら番号を配らない。1000 を返しても、その名前で
-    # ファイルを作った瞬間に「ADR に見えるが 0 埋め 4 桁で始まらない」で恒久的に落ちる
-    # ＝使えない番号を配ることになる。規約と判定を併せて見直すのが正しい対処。
-    if [[ $max -ge 999 ]]; then
-        echo "✗ ADR 番号が上限 0999 に達した（現在の最大: $(printf '%04d' "$max")）" >&2
-        echo "  桁数の規約（docs/original-docs/README.md）と本スクリプトの判定を併せて見直す" >&2
-        exit 1
-    fi
-    printf '%04d\n' $((max + 1))
+    printf '%04d\n' $((max_number + 1))
 }
 
 # --- 致命チェックは next / check の両方に効かせる（ここより前に置く）---
@@ -236,6 +244,15 @@ if [[ ${#numbers[@]} -eq 0 ]]; then
     # ADR が 0 件になることはありえない（docs/original-docs に 72 本ある）。0 件＝判定条件か
     # ディレクトリの取り違えなので、静かに緑にせず落とす（旧実装は exit 0 で fail-open だった）。
     echo "ADR ファイルが見つからない（docs/original-docs/0NNN-*.md）。判定条件かディレクトリを確認する" >&2
+    exit 1
+fi
+
+# 0 埋め 4 桁（0001〜0999）の上限。1000 を配っても、その名前でファイルを作った瞬間に
+# 「ADR に見えるが 0 埋め 4 桁で始まらない」で恒久的に落ちる＝使えない番号を配ることになる。
+# 規約と判定を併せて見直すのが正しい対処なので、check / next の両方で落とす。
+if [[ $max_number -ge 999 ]]; then
+    echo "✗ ADR 番号が上限 0999 に達した（現在の最大: $(printf '%04d' "$max_number")）" >&2
+    echo "  桁数の規約（docs/original-docs/README.md）と本スクリプトの判定を併せて見直す" >&2
     exit 1
 fi
 

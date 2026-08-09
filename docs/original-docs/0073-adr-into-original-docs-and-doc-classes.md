@@ -62,6 +62,11 @@ ADR 71 本（0001〜0071）を `docs/adr/` から `docs/original-docs/` へ移�
 
 重複を許す代わりに、`sources` に列挙されたファイルの最終コミットが `distilled_from_sha` の子孫かを機械検査する（`git merge-base --is-ancestor`）。CI と pre-push の両方に配線する。
 
+検査には**例外を 2 つ**設ける（詳細と理由は [docs/knowledge/README.md](../knowledge/README.md) の「sources 追従」）。素朴に実装すると本 ADR の移動自体で全件が誤検知するので、実装時に必ず織り込む。
+
+1. **rename-only のコミット（内容差分ゼロ）は比較対象から除外する**。`git log --follow` では吸収できない——`--follow` はリネームより前へ履歴を遡らせるだけで、「最終コミット」がリネームコミットになる事実は変わらないため、そのままだと本 ADR で `sources` パスを書き換えた 20 本すべてが stale 判定になる。
+2. **`status: Conflict` の宣言だけを足したときは `distilled_from_sha` を据え置く**（`updated` のみ bump）。乖離に気づいた記録であって再蒸留ではないため。`Confirmed` に戻すとき（＝実際に差分マージしたとき）に現 HEAD へ進める。
+
 **順序は「機械検査の配線が先、写しは後」**。写した量に比例して stale 面積が増えるのが本 ADR の出発点（`app-bootstrap.md` の事故）なので、担保のないまま 72 本ぶんの写しを始めると、解こうとしている問題を自分で拡大することになる。移行が完了するまでは knowledge だけでなく ADR 原本も読む運用とし、その旨を `CLAUDE.md` と `docs/knowledge/README.md` に移行中ブロックとして明示する。
 
 ### 3. HVE の D01〜D21 文書クラスを採用し、D22〜D24 を追加する
