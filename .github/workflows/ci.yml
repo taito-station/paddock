@@ -84,7 +84,7 @@ jobs:
         # サプライチェーン対策で commit SHA にピン（dtolnay/rust-toolchain は version タグを
         # 切らないため master の 2026-03-27 時点を固定）。
         # toolchain は env.RUST_TOOLCHAIN を参照（単一ソース化 #466）。
-        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
           components: rustfmt, clippy
@@ -300,7 +300,7 @@ jobs:
         # 本体 ci ジョブと同じ SHA ピン（dtolnay/rust-toolchain は version タグを切らないため
         # master の 2026-03-27 時点を固定）。
         # toolchain は env.RUST_TOOLCHAIN を参照（単一ソース化 #466）。
-        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
 
