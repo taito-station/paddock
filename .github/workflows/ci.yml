@@ -90,7 +90,7 @@ jobs:
           components: rustfmt, clippy
 
       - name: Cache cargo build
-        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
       - name: Format check
         run: cargo fmt --all --check
@@ -305,7 +305,7 @@ jobs:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
 
       - name: Cache cargo build
-        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
       # lib（OCR 非依存ユニット）+ 統合（test_render の PNG 化 / test_parse の解析値）をまとめて実走。
       # サンプル PDF は JRA 著作物で repo に含めない（gitignore）。フィクスチャが JRA から取得を試み、
