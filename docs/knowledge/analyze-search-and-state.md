@@ -11,7 +11,7 @@ sources:
   - docs/specifications/web-spa.md
   - docs/specifications/rest-api-read.md
   - docs/specifications/prediction-search-api.md
-distilled_from_sha: "7468c5f"
+distilled_from_sha: "e2201f3"
 updated: "2026-07-22"
 ---
 
