@@ -269,7 +269,7 @@ GET /api/health
 { "status": "ok", "git_sha": "6fd6400", "build_time": "2026-08-03T00:30:50Z" }
 ```
 
-- `build_time` は **UTC rfc3339・秒精度**（`build_info::build_time_rfc3339()`。埋め込まれる env は epoch 秒だが、レスポンスでは rfc3339 に変換する）。`git_sha` / ビルド時刻は `rest-controller/build.rs` が `cargo:rustc-env` で埋め込む（git CLI + std のみ。`.git` 不在時は `unknown`）。sha は短縮形で、作業ツリーが dirty ならその旨が付く。
+- `build_time` は **UTC rfc3339・秒精度**（`build_info::build_time_rfc3339()`。埋め込まれる env は epoch 秒だが、レスポンスでは rfc3339 に変換する）。`git_sha` / ビルド時刻は `rest-controller/build.rs` が `cargo:rustc-env` で埋め込む（git CLI + std のみ。`.git` 不在時に `unknown` へ落ちるのは `git_sha` だけで、ビルド時刻は常に入る）。sha は短縮形で、作業ツリーが dirty ならその旨が付く。
 - **用途**: 長期稼働した api-server が古い成果物を配信し続けても HTTP 200 のままで外形監視に映らない、という #570 の穴を塞ぐ。`git_sha` を現在の checkout（`git rev-parse --short HEAD`）と突き合わせれば世代ずれを機械検知できる。同じ情報は起動ログにも出る。
 
 ## OpenAPI（utoipa コードファースト）

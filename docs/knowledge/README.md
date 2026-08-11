@@ -32,7 +32,9 @@ docs/knowledge/ ＋ docs/specifications/   status 付き確定知（＝この層
   >   [#580](https://github.com/taito-station/paddock/issues/580) で消化し、warning から昇格した。
   >   **これで「ADR の内容を knowledge へ全部写す」の担保が揃った**——写した先が追従漏れを
   >   起こせば CI が落ちる。
-  > - **ADR の写しは一巡した**（#588）。ADR 74 本のうち、棄却 24 本は
+  > - **ADR の写しは一巡した**（#588）。**例外は ADR 0074 自身**——その決定（issue 本文を転記しない）は
+  >   [docs/original-docs/README.md](../original-docs/README.md) の規約として反映済みだが、`sources` を持つ
+  >   knowledge からは参照していないので stale 検査の対象外。ADR 74 本のうち、棄却 24 本は
   >   [product-goals.md](product-goals.md) が索引し、採用側はいずれかの knowledge / specifications が
   >   `sources` で参照して決定を写している。knowledge は 9 本。
   >   ただし**写しの粒度は一様ではない**ので、決定の細部（却下した代替案・数値の前提）が要るときは
@@ -142,7 +144,7 @@ updated: "YYYY-MM-DD"    # 内容を実質更新した日（YAML の date 型を
 |---|---|---|
 | D01 | [product-goals.md](product-goals.md) | 目標の成功条件（ROI ゲート・層分離・軸ロック・精度水準・提示形式） |
 | D22 | [probability-estimation.md](../specifications/probability-estimation.md) | 本番構成の定数（α / m / 冪較正 / trend_n / 各 factor の重み） |
-| D23 | [ev-kelly-bet-selection.md](../specifications/ev-kelly-bet-selection.md) | 買い方（券種構成・相手幅・配分・混戦判定・軸ロック・正の所在） |
+| D23 | [ev-kelly-bet-selection.md](../specifications/ev-kelly-bet-selection.md) | 買い方の具体（券種構成・相手幅・配分・Kelly の用途・混戦判定・Python の禁止用途）。**ROI ゲート / 軸ロック / 提示形式は D01 が正本** |
 
 **ADR 側に REQ-ID は書かない。** ADR は RO なので後から ID を差し込めない——紐付けは knowledge 側の
 `出典` 列が担う（ADR → REQ ではなく REQ → ADR の一方向）。

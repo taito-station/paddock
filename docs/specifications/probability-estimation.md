@@ -415,13 +415,16 @@ paddock-analyze predict <race_id>
 knowledge 側に置く**（規約は [docs/knowledge/README.md](../knowledge/README.md) の「REQ-ID の規約」）。
 定数を変えるときは、まず対応する REQ の**検証手段を再実行**して閾値ごと更新する。
 
-検証手段の共通前提: `paddock-analyze backtest` は m / 冪較正を**既定適用しない**ので、production の
-再現には 4 フラグを明示する（付け忘れで ADR を 1 本破棄した実績がある。上記「変更履歴」参照）。
+検証手段の共通前提: `paddock-analyze backtest` の既定は `EstimationConfig::default()` 相当で、
+**m・冪較正・欠落補完のいずれも production とは違う**。production を再現するには **5 フラグ**を明示する
+（`--impute-missing-factors` は `production()` が `true`・backtest 既定が `false`。付け忘れで ADR を
+1 本破棄した実績がある。上記「変更履歴」参照）。
 
 ```sh
 # 掃引しない軸を固定する base。**掃引する軸は base に含めない**
 # （clap は同じフラグの重複指定を拒否するため、base に入れたまま足すと実行できない）。
-BT_BASE="paddock-analyze backtest --shrinkage-m 10 --win-power 1.25 --place-show-power 2.0"
+BT_BASE="paddock-analyze backtest --shrinkage-m 10 --win-power 1.25 \
+         --place-show-power 2.0 --impute-missing-factors"
 # 例: α を振る（--blend-alpha は base に入れず、掃引側で与える）
 for a in 0.2 0.3 0.4; do
   $BT_BASE --from 2025-01-05 --to 2026-06-14 --blend-alpha "$a"
@@ -440,7 +443,7 @@ done
 | REQ-D22-005 | 近走トレンドは前走のみ（`trend_n = 1`）。N=2/3 は全指標が悪化する | `$BT_BASE --from 2026-03-01 --to 2026-05-31 --blend-alpha 0.2 --trend-n $n`（n ∈ {1,2,3}・893R）で N=1 を上回らないこと | [ADR 0036](../original-docs/0036-recent-form-trend-n-rejected.md) | Confirmed |
 | REQ-D22-006 | 時間減衰（recency）は無効（`recency: None`）。Brier / LogLoss が変わらず ROI も誤差範囲で、複雑性だけが増える | `$BT_BASE --from 2025-01-05 --to 2026-06-14 --blend-alpha 0.2 --recency-half-life $h`（h ∈ {30, 60, 90} 日）を無効時と比較 | [ADR 0034](../original-docs/0034-alpha-retune-recency-rejected.md) | Confirmed |
 | REQ-D22-007 | 騎手直近フォームの重みは 0（`jockey_recent_form_weight: None`）。算出機構と `--jockey-form-weight` は再評価用に残す | `$BT_BASE --from 2026-01-01 --to 2026-06-14 --blend-alpha 0.2 --jockey-form-weight $w` の掃引 | [ADR 0038](../original-docs/0038-jockey-recent-form-rejected.md) | Confirmed |
-| REQ-D22-008 | 相性 factor（騎手×場 / 騎手×距離 / 騎手×馬 / 馬×場）は production 非組込（重み 0）。measure-first で lift を測ってから採否を決める | `$BT_BASE --blend-alpha 0.2` に `--jockey-venue-weight` / `--jockey-distance-weight` / `--jockey-horse-combo-weight` / `--horse-venue-weight` を足して cheap screen（本命 top1 精度を主指標にする） | [#350](https://github.com/taito-station/paddock/issues/350)（measure-first で保留中。採否の ADR は未起票） | Tentative |
+| REQ-D22-008 | 相性 factor（騎手×場 / 騎手×距離 / 騎手×馬 / 馬×場）は production 非組込（重み 0）。measure-first で lift を測ってから採否を決める | `$BT_BASE --from 2025-01-05 --to 2026-06-14 --blend-alpha 0.2` に `--jockey-venue-weight` / `--jockey-distance-weight` / `--jockey-horse-combo-weight` / `--horse-venue-weight` を足して cheap screen（本命 top1 精度を主指標にする） | [#350](https://github.com/taito-station/paddock/issues/350)（measure-first で保留中。採否の ADR は未起票） | Tentative |
 | REQ-D22-009 | 脚質（先行度）factor は production 非組込（`running_style_weight: None`）。純モデルの AUC / 校正は微改善するが本命 top1 が全 weight で劣化する | **CLI 未露出**（`--running-style-weight` は無い）。測るには `analyze backtest --dump-features` の 18 ヶ月ダンプ ＋ Python 鏡映で `EstimationConfig.running_style_weight` を振る（ADR 0061 の手順） | [ADR 0061](../original-docs/0061-running-style-feature-rejected.md) | Confirmed |
 | REQ-D22-010 | `win ≤ place ≤ show` の単調性を出力で保証する（累積 max で単調化。冪変換を入れた後も再是正する） | `cargo test -p paddock-domain` の単調性テスト | [ADR 0007](../original-docs/0007-probability-monotonicity-jockey.md)（単調化の決定）/ [0047](../original-docs/0047-place-show-power-decompression-adopted.md)（冪変換後の再是正） | Confirmed |
 <!-- REQ:end D22 -->
