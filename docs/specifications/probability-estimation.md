@@ -12,11 +12,17 @@ sources:
   - docs/original-docs/0012-trainer-stats-feature.md
   - docs/original-docs/0014-none-baseline-exclusion.md
   - docs/original-docs/0016-shrinkage-and-recency.md
+  - docs/original-docs/0034-alpha-retune-recency-rejected.md
+  - docs/original-docs/0036-recent-form-trend-n-rejected.md
+  - docs/original-docs/0038-jockey-recent-form-rejected.md
   - docs/original-docs/0042-win-power-calibration-adopted.md
+  - docs/original-docs/0047-place-show-power-decompression-adopted.md
+  - docs/original-docs/0051-placeshow-power-knee-confirmed-keep-2.md
   - docs/original-docs/0056-feature-reweight-course-gate-jockey.md
   - docs/original-docs/0057-impute-missing-factors-field-mean.md
-distilled_from_sha: "c00d97f"
-updated: "2026-07-16"
+  - docs/original-docs/0061-running-style-feature-rejected.md
+distilled_from_sha: "b0c270b"
+updated: "2026-08-11"
 ---
 
 # 着順確率推定モデル仕様書
@@ -402,6 +408,34 @@ paddock-analyze predict <race_id>
 ```
 
 ---
+
+## 本番構成の要件（REQ・D22）
+
+`EstimationConfig::production()` が採る値と、それを決めた ADR の対応。**ADR は RO なので REQ-ID は
+knowledge 側に置く**（規約は [docs/knowledge/README.md](../knowledge/README.md) の「REQ-ID の規約」）。
+定数を変えるときは、まず対応する REQ の**検証手段を再実行**して閾値ごと更新する。
+
+検証手段の共通前提: `paddock-analyze backtest` は m / 冪較正を**既定適用しない**ので、production の
+再現には 4 フラグを明示する（付け忘れで ADR を 1 本破棄した実績がある。上記「変更履歴」参照）。
+
+```sh
+BT="paddock-analyze backtest --from 2025-01-05 --to 2026-06-14 \
+    --blend-alpha 0.2 --shrinkage-m 10 --win-power 1.25 --place-show-power 2.0"
+```
+
+<!-- REQ:begin D22 -->
+| REQ-ID | 要件 | 検証手段 | 出典 | status |
+|---|---|---|---|---|
+| REQ-D22-001 | 市場オッズ（単勝）ブレンドのモデル重みは α=0.2（`RECOMMENDED_MARKET_BLEND_ALPHA`）。市場オッズが無いレースはモデルのみへ自動フォールバックする | `$BT` の `--blend-alpha` を 0.0 / 0.2 / 1.0 で振り、単勝 Brier / LogLoss が 0.2 で最良であること（4891R） | [ADR 0034](../original-docs/0034-alpha-retune-recency-rejected.md) | Confirmed |
+| REQ-D22-002 | ベイズ縮約の擬似カウントは m=10（`RECOMMENDED_SHRINKAGE_M`）。backtest の既定は縮約 off なので production 再現には `--shrinkage-m 10` を明示する | `$BT` の `--shrinkage-m` スイープ | [ADR 0016](../original-docs/0016-shrinkage-and-recency.md) | Confirmed |
+| REQ-D22-003 | win_prob の冪変換は γ=1.25（`RECOMMENDED_WIN_POWER`）。γ≥1.5 は LogLoss / Brier 悪化と人気馬の過剰補正で採らない | `$BT` の `--win-power` スイープで単勝 LogLoss が 1.25 で最良（0.1974 → 0.1954・4891R） | [ADR 0042](../original-docs/0042-win-power-calibration-adopted.md) | Confirmed |
+| REQ-D22-004 | place/show の冪変換は γ=2.0（`RECOMMENDED_PLACE_SHOW_POWER`）。純校正の knee は γ=3.0 だが複勝買い目 ROI が net 改善しないため 2.0 を維持する | `$BT` の `--place-show-power` スイープ（place/show Brier・人気帯校正・複勝 ROI を併せて見る） | [ADR 0047](../original-docs/0047-place-show-power-decompression-adopted.md) / [0051](../original-docs/0051-placeshow-power-knee-confirmed-keep-2.md) | Confirmed |
+| REQ-D22-005 | 近走トレンドは前走のみ（`trend_n = 1`）。N=2/3 は全指標が悪化する | `paddock-analyze backtest --trend-n <N>`（893R で N=1 を上回らないこと） | [ADR 0036](../original-docs/0036-recent-form-trend-n-rejected.md) | Confirmed |
+| REQ-D22-006 | 時間減衰（recency）は無効（`recency: None`）。Brier / LogLoss が変わらず ROI も誤差範囲で、複雑性だけが増える | `$BT` に `--recency-half-life` を付けて baseline と比較 | [ADR 0034](../original-docs/0034-alpha-retune-recency-rejected.md) | Confirmed |
+| REQ-D22-007 | 騎手直近フォームの重みは 0（`jockey_recent_form_weight: None`）。算出機構と `--jockey-form-weight` は再評価用に残す | `paddock-analyze backtest --jockey-form-weight <w>` のスイープ | [ADR 0038](../original-docs/0038-jockey-recent-form-rejected.md) | Confirmed |
+| REQ-D22-008 | 脚質・相性 factor は production 非組込（重み 0）。measure-first で lift を測ってから採否を決める | 各 `--*-weight` フラグでの cheap screen（本命 top1 精度を主指標にする） | [ADR 0061](../original-docs/0061-running-style-feature-rejected.md) | Confirmed |
+| REQ-D22-009 | `win ≤ place ≤ show` の単調性を出力で保証する（冪変換後も累積 max で再是正する） | `cargo test -p paddock-domain` の単調性テスト | [ADR 0047](../original-docs/0047-place-show-power-decompression-adopted.md) | Confirmed |
+<!-- REQ:end D22 -->
 
 ## 既知の制約
 

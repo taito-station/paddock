@@ -131,6 +131,19 @@ updated: "YYYY-MM-DD"    # 内容を実質更新した日（YAML の date 型を
   検証手段の無い Confirmed は願望と区別が付かない。空欄のほか
   `-` / `–` / `—` / `TBD` / `UNKNOWN` / `n/a` / `未定` / `なし` / `未整備` も空扱い（大小文字は問わない）。
 
+### REQ 表のある文書（索引）
+
+番号空間はクラス内グローバルなので、**新しい REQ を採番する前にここを見る**。
+
+| クラス | 文書 | 範囲 |
+|---|---|---|
+| D01 | [product-goals.md](product-goals.md) | 目標の成功条件（ROI ゲート・層分離・軸ロック・精度水準・提示形式） |
+| D22 | [probability-estimation.md](../specifications/probability-estimation.md) | 本番構成の定数（α / m / 冪較正 / trend_n / 各 factor の重み） |
+| D23 | [ev-kelly-bet-selection.md](../specifications/ev-kelly-bet-selection.md) | 買い方（券種構成・相手幅・配分・混戦判定・軸ロック・正の所在） |
+
+**ADR 側に REQ-ID は書かない。** ADR は RO なので後から ID を差し込めない——紐付けは knowledge 側の
+`出典` 列が担う（ADR → REQ ではなく REQ → ADR の一方向）。
+
 ### 何が機械検査されるか
 
 `scripts/check-doc-classes.py` が **error** で検査するのは次の範囲:
