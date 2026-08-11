@@ -34,7 +34,7 @@ docs/knowledge/ ＋ docs/specifications/   status 付き確定知（＝この層
   >   起こせば CI が落ちる。
   > - **ADR の写しは一巡した**（#588）。**例外は ADR 0074 自身**——その決定（issue 本文を転記しない）は
   >   [docs/original-docs/README.md](../original-docs/README.md) の規約として反映済みだが、`sources` を持つ
-  >   knowledge からは参照していないので stale 検査の対象外。ADR 74 本のうち、棄却 24 本は
+  >   knowledge からは参照していないので stale 検査の対象外。ADR 75 本のうち、棄却 24 本は
   >   [product-goals.md](product-goals.md) が索引し、採用側はいずれかの knowledge / specifications が
   >   `sources` で参照して決定を写している。knowledge は 9 本。
   >   ただし**写しの粒度は一様ではない**ので、決定の細部（却下した代替案・数値の前提）が要るときは
