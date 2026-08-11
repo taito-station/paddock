@@ -505,6 +505,39 @@ def test_frontmatter_only_change_is_not_stale() -> None:
         shutil.rmtree(repo)
 
 
+def test_status_change_in_source_is_stale() -> None:
+    """`status` / `kind` は METADATA_KEYS から**意図的に外している**ことを固定する。
+
+    `Confirmed → Conflict` は「この知はもう信じるな」という下流へ伝えるべき信号なので、
+    frontmatter だけの変更でも stale にする（例外 1b の対象外）。`METADATA_KEYS` に
+    `status` が紛れ込んでも、この対照が無いと全テストが緑のまま通る。
+    """
+    repo = new_repo()
+    try:
+        baseline(repo)
+        src = repo / "docs/original-docs/0001-first.md"
+        body = src.read_text(encoding="utf-8")
+        # source 側に frontmatter がある状態を作り、そこまでを蒸留済みとして pin する
+        # （frontmatter の新規追加そのものは「本文以外の差分」ではなく追加なので内容変更になる）。
+        src.write_text("---\nstatus: Confirmed\nkind: original\n---\n\n" + body, encoding="utf-8")
+        sha = commit_all(repo, "source に frontmatter を付ける")
+        write_registry(repo, sha)
+        write_doc(repo, "docs/knowledge/a.md", ["D19"], ["docs/original-docs/0001-first.md"], sha)
+        commit_all(repo, "pin sha")
+        assert check(repo)[0] == 0, "前提: ここでは stale でない"
+
+        # ここから status だけを変える（本文・他キーは不変）
+        src.write_text(
+            "---\nstatus: Conflict\nkind: original\n---\n\n" + body, encoding="utf-8"
+        )
+        commit_all(repo, "source の status だけを Conflict にする")
+        code, out = check(repo)
+        assert code == 1, f"status の変更は stale にするべき: {out}"
+        assert "STALE" in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
 def test_body_change_is_stale() -> None:
     """対照: 本文が変われば（frontmatter が同じでも）stale になる。"""
     repo = new_repo()
