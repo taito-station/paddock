@@ -11,8 +11,9 @@ sources:
   - docs/original-docs/0010-persist-and-reference-odds.md
   - docs/original-docs/0048-retire-jra-odds-scraper-for-netkeiba.md
   - docs/original-docs/0049-netkeiba-odds-transient-retry-and-degraded-exit.md
-distilled_from_sha: "6b74f57"
-updated: "2026-08-10"
+  - docs/original-docs/0075-unsupported-race-skip-exit-zero.md
+distilled_from_sha: "cdb893e"
+updated: "2026-08-11"
 ---
 
 # netkeiba 当日データソース取り込み 仕様書
@@ -196,6 +197,22 @@ paddock 内部の `RaceId` も同じ 12 桁構成要素から導出する（既�
 - **degraded は専用 exit code = 3**。`fetch-card` は主目的（近走取り込み）まで終えてから 3 を返すので、
   呼び出し側はハード失敗（=1）と「単複だけ未取得・要再取得」を区別でき、win 欠落レースだけ再取得できる。
 
+### 取り込み対象外レース（障害）のスキップ（ADR 0075）
+
+「対応外だからスキップした」と「netkeiba 側で失敗した」を、**終了コードと stdout で区別できる**形にする。
+混同すると、開催日の全レースをループ取得したとき 1 件の欠落が無視してよいものか取り込み失敗かを
+件数 diff でしか判別できない。
+
+- **障害レース（`障NNNNm`）は取り込み対象外**。`parse_card` は `Error::Unsupported` を返し、
+  実障害（`Error::Parse` → `Internal` → exit 1）とは別 variant で ingest / CLI まで伝わる。
+- **ingest はカード・オッズ・近走のすべてを打ち切る**（DB は一切変更しない）。カード無しでオッズだけ
+  保存すると `race_cards` に対応行の無い孤児オッズが残り、近走取り込みは障害レースでも成功して
+  しまうため。
+- **CLI は理由を stdout に明示して exit 0**。専用 exit code は作らない——消費側
+  （`scripts/predict-check/refresh_ev.sh`）が exit≠0 を一律 FAIL 扱いするため、専用コードでは対応外
+  レースが取り込み失敗に計上されてしまう。
+- 未知の馬場記号・`RaceData01` 欠落は従来どおり実障害（exit 1）。**「対応外」は広げない**。
+
 ### スクレイパー実装の型（ADR 0001 由来）
 
 JRA 版スクレイパーは ADR 0048 で退役したが、そこで確立した設計は netkeiba 版にも引き継いでいる。
@@ -225,6 +242,7 @@ JRA 版スクレイパーは ADR 0048 で退役したが、そこで確立した
 |--------|------|
 | 単勝オッズ未確定(レース前で空欄) | win を populate せず空のまま。出馬表の保存は継続 |
 | 不正な race_id(桁数・競馬場コード不正) | バリデーションエラーを stderr に出力し exit code 1。パニックしない |
+| 障害レース(取り込み対象外) | 取り込みを行わず理由を **stdout** に出して **exit 0**。DB は無変更。実障害(1/3)と区別する。ADR 0075 |
 | ページ取得失敗(ネットワーク/5xx 等の transient) | `call_with_retry` が最大 3 回リトライ。残ったら **degraded**（オッズ保存をスキップし exit 3）。ADR 0049 |
 | ページ取得失敗(4xx・非 transient) | エラーとして報告。パニックしない |
 | EUC-JP 不正バイト | `encoding_rs` の置換に委ね、可能な範囲で parse を継続 |
@@ -247,6 +265,20 @@ paddock-fetch-card --year 2026 --venue 東京 --round 3 --day 2 --race 11
 | `--interval` | netkeiba への連続リクエスト間隔(秒、既定値あり) |
 
 スクレイピング対象は公開ページ。既定ウェイトを入れ netkeiba 側へ配慮する。
+
+### 終了コード
+
+呼び出し側（開催日の全レースを回すループ・`scripts/predict-check/refresh_ev.sh` 等）が
+「本物の失敗」だけを FAIL として扱えるようにするための一次情報。
+
+| コード | 意味 |
+|--------|------|
+| 0 | 正常終了（**取り込み対象外レース（障害）のスキップを含む**。ADR 0075） |
+| 1 | ハード失敗（不正な race_id・ページ取得失敗・パース失敗・DB エラー） |
+| 3 | degraded（単複オッズ未取得。card は保存済みで要再取得。ADR 0049） |
+
+- **exit≠0 は本物の失敗だけ**。対応外レースは異常ではないため exit 0 とし、理由は **stdout** に出力する
+  （`predict` の「開催なし日付」と同じ規約。[predict-session.md](predict-session.md) 参照）。
 
 ---
 
