@@ -12,7 +12,7 @@ sources:
   - docs/original-docs/0048-retire-jra-odds-scraper-for-netkeiba.md
   - docs/original-docs/0049-netkeiba-odds-transient-retry-and-degraded-exit.md
   - docs/original-docs/0075-unsupported-race-skip-exit-zero.md
-distilled_from_sha: "cdb893e"
+distilled_from_sha: "c43f579"
 updated: "2026-08-11"
 ---
 
@@ -302,6 +302,7 @@ paddock-fetch-card --year 2026 --venue 東京 --round 3 --day 2 --race 11
   [0001 JRA オッズスクレイパー](../original-docs/0001-jra-odds-scraper.md)（設計の型・0048 で退役）/
   [0010 オッズの永続化と参照](../original-docs/0010-persist-and-reference-odds.md) /
   [0048 JRA スクレイパー退役](../original-docs/0048-retire-jra-odds-scraper-for-netkeiba.md) /
-  [0049 transient リトライと degraded exit](../original-docs/0049-netkeiba-odds-transient-retry-and-degraded-exit.md)
-- 関連 Issue: #25(オッズ→predict 結線)、#38(組合せ券種オッズ)、#40(結果自動精算)、#31(未活用特徴量)
+  [0049 transient リトライと degraded exit](../original-docs/0049-netkeiba-odds-transient-retry-and-degraded-exit.md) /
+  [0075 対応外レースは exit 0 + stdout 明示でスキップ](../original-docs/0075-unsupported-race-skip-exit-zero.md)
+- 関連 Issue: #25(オッズ→predict 結線)、#38(組合せ券種オッズ)、#40(結果自動精算)、#31(未活用特徴量)、#586(対応外レースのスキップ)
 - CLI テストケース: `tests/cli-test-cases/fetch-card-command.md`
