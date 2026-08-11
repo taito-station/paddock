@@ -131,6 +131,10 @@ fn extract_post_time(doc: &Html) -> Option<NaiveTime> {
 
 /// `div.RaceData01` のテキストから `芝1600m` 等を読み、Surface と距離(m)に変換する。
 /// 障害(障)は取り込み対象外として `Error::Unsupported`（実障害の `Parse` とは別物）。
+///
+/// 障害レースの実表記は `障3000m (芝)` で、**`captures()` の最左マッチ**が先頭の `障` を拾うことで
+/// 対象外判定が成立する（後続の `(芝)` を先に拾うと平地として取り込まれてしまう）。この順序依存は
+/// `jump_race_with_trailing_surface_note_still_unsupported` で固定している。
 fn extract_surface_distance(doc: &Html) -> Result<(Surface, u32)> {
     let data_sel = sel("div.RaceData01")?;
     let text = doc

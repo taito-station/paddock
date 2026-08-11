@@ -121,6 +121,20 @@ fn jump_race_returns_unsupported() {
     assert!(err.to_string().contains("障害"), "理由が読める: {err}");
 }
 
+// 実際の netkeiba は障害レースの RaceData01 を `障3000m (芝)` の形で描画する（202607020609 で確認）。
+// `SURFACE_DISTANCE_RE` は**最左マッチ**なので、後続の `(芝)` ではなく先頭の `障` を拾う——この
+// 順序依存の上に「障害は必ずスキップ」の契約が乗っているため、実表記の並びで固定しておく。
+// 並びが逆転する表記が現れたら平地として取り込まれるので、ここが落ちて気付ける。
+#[test]
+fn jump_race_with_trailing_surface_note_still_unsupported() {
+    let html = FIXTURE.replace("芝1600m", "障3000m (芝)");
+    let err = parse_card(&html, RACE_ID).expect_err("障害レースは取り込み対象外");
+    assert!(
+        matches!(err, Error::Unsupported(_)),
+        "後ろの (芝) を先に拾って平地扱いしない: {err}"
+    );
+}
+
 // 「対応外」を広げない担保（#586）。馬場・距離表記が読めないのは netkeiba のレイアウト変更
 // ＝実障害なので、従来どおり `Parse`（→ use-case Internal → exit 1）に落ち、exit 0 の
 // スキップに紛れない。`Unsupported` に落ちるのは障害レースだけであることを対で固定する。

@@ -10,21 +10,35 @@ use clap::Parser;
 /// 出す）が win 欠落レースだけ再取得対象として識別できるようにする（#288, ADR 0049）。
 const EXIT_WIN_ODDS_DEGRADED: u8 = 3;
 
-/// ingest のエラーを「取り込み対象外（＝設計どおりのスキップ）」と「実障害」に振り分ける。
-/// 対象外なら理由文字列を `Ok`、それ以外はエラーをそのまま `Err` で返す。
-///
-/// 分類を純関数に切り出すのは、**この写像そのものが本コマンドの受入条件**（対象外=exit 0 /
-/// 実障害=exit 1）だから。DB・ネットワークを要する `main` の制御フローに埋めたままだと
-/// CI で回帰を検出できない（#586, ADR 0075）。
-fn unsupported_reason(err: paddock_use_case::Error) -> Result<String, paddock_use_case::Error> {
+/// ingest のエラーの扱い。「取り込み対象外＝設計どおりのスキップ（exit 0）」と
+/// 「実障害（exit 1）」を取り違えないことが本コマンドの受入条件（#586, ADR 0075）。
+enum IngestFailure {
+    /// 仕様として取り込み対象外（障害レース）。理由を stdout に出して正常終了する。
+    Skip(String),
+    /// 実障害。呼び出し側へそのまま返し anyhow 経由で exit 1 にする。
+    Fail(paddock_use_case::Error),
+}
+
+/// エラーを上記 2 つに振り分ける。分類を純関数に切り出すのは、**この写像そのものが受入条件**
+/// だから。DB・ネットワークを要する `main` の制御フローに埋めたままだと CI で回帰を検出できない。
+fn classify_failure(err: paddock_use_case::Error) -> IngestFailure {
     match err {
-        paddock_use_case::Error::Unsupported(reason) => Ok(reason),
-        other => Err(other),
+        paddock_use_case::Error::Unsupported(reason) => IngestFailure::Skip(reason),
+        other => IngestFailure::Fail(other),
     }
 }
 
+/// スキップ時に stdout へ出す 1 行。**行頭 `スキップ: ` は消費側が読む契約**
+/// （`scripts/predict-check/README.md` の判定例・仕様書の終了コード節）。文言を変えると
+/// 呼び出し側の判定が無言で壊れるため、テストで固定する。
+fn skip_message(reason: &str, race_id: &str, netkeiba_id: &str) -> String {
+    format!(
+        "スキップ: {reason}（取り込み失敗ではありません。race_id={race_id}, netkeiba={netkeiba_id}）"
+    )
+}
+
 /// 取り込みが成功したときの終了コード。degraded（単複だけ未取得）のみ非 0 にする。
-/// 対象外スキップは本関数に到達せず 0 を返す（上の `unsupported_reason` 側で早期 return）。
+/// 対象外スキップは本関数に到達しない（`classify_failure` の `Skip` 側で早期 return する）。
 fn exit_code_for(win_odds_degraded: bool) -> u8 {
     if win_odds_degraded {
         EXIT_WIN_ODDS_DEGRADED
@@ -45,24 +59,18 @@ async fn main() -> anyhow::Result<ExitCode> {
         .await
     {
         Ok(resp) => resp,
-        Err(e) => match unsupported_reason(e) {
-            // 仕様として取り込み対象外のレース（障害）。netkeiba 側の実障害ではなく設計どおりの
-            // スキップなので、理由を stdout に明示して exit 0 で終える（#586, ADR 0075）。
-            // 専用 exit code を作らないのは、exit≠0 を一律 FAIL 扱いする消費側で対応外レースが
-            // 「取り込み失敗」に計上されてしまうため（開催日の全レースを netkeiba 一覧から回す
-            // ループがこれに当たる。scripts/predict-check/README.md の手順）。
-            // degraded(=3) とは排他: ingest はオッズ取得より前に打ち切るので両立しない。
-            //
-            // 通知は stdout のみ。stderr へ出すと refresh_ev.sh が「fetch-card stderr あり」を
-            // 異常として警告するため、正常な結果を警告に化けさせない。tracing も既定 writer が
-            // stdout なので冗長にしかならない（stdout を捨てる消費側からは追えない。ADR 0075）。
-            Ok(reason) => {
+        // 取り込み対象外（障害レース）は設計どおりのスキップなので、理由を stdout に出して
+        // exit 0 で終える。専用 exit code を作らない理由・stderr / tracing を使わない理由は
+        // ADR 0075 に一本化してある（決定を変えるときの参照先を 1 か所に保つ）。
+        Err(e) => match classify_failure(e) {
+            IngestFailure::Skip(reason) => {
                 println!(
-                    "スキップ: {reason}（取り込み失敗ではありません。race_id={race_id}, netkeiba={netkeiba_id}）"
+                    "{}",
+                    skip_message(&reason, &race_id.to_string(), &netkeiba_id)
                 );
                 return Ok(ExitCode::SUCCESS);
             }
-            Err(e) => return Err(e.into()),
+            IngestFailure::Fail(e) => return Err(e.into()),
         },
     };
 
@@ -142,15 +150,19 @@ async fn run_history(
 mod tests {
     use super::*;
 
-    // 対応外（障害レース）は理由を取り出せる＝ stdout に出して exit 0 に倒す経路へ入る（#586）。
+    // 対応外（障害レース）は Skip に振り分け、理由をそのまま持ち回る（#586）。
     #[test]
-    fn unsupported_yields_reason_for_skip() {
+    fn unsupported_is_classified_as_skip() {
         let err = paddock_use_case::Error::Unsupported("障害レースは取り込み対象外です".into());
-        assert_eq!(
-            unsupported_reason(err).expect("対応外として扱う"),
-            "障害レースは取り込み対象外です",
-            "理由は前置き無しでそのまま stdout に載る"
-        );
+        match classify_failure(err) {
+            IngestFailure::Skip(reason) => {
+                assert_eq!(
+                    reason, "障害レースは取り込み対象外です",
+                    "理由は前置き無しでそのまま stdout に載る"
+                );
+            }
+            IngestFailure::Fail(e) => panic!("対応外として扱うこと: {e}"),
+        }
     }
 
     // 実障害は対象外に紛れさせない。ここが崩れると取り込み失敗が exit 0 で黙って通る。
@@ -165,10 +177,25 @@ mod tests {
         ] {
             let label = err.to_string();
             assert!(
-                unsupported_reason(err).is_err(),
+                matches!(classify_failure(err), IngestFailure::Fail(_)),
                 "実障害はスキップ扱いにしない: {label}"
             );
         }
+    }
+
+    // 行頭 `スキップ: ` は消費側が読む契約（README の判定例・仕様書の終了コード節）。
+    // 既存の「出馬表: 取得済みのためスキップ」と紛れないよう、行頭であることまで固定する。
+    #[test]
+    fn skip_message_starts_with_machine_readable_prefix() {
+        let msg = skip_message(
+            "障害レースは取り込み対象外です",
+            "2026-2-chukyo-6-9R",
+            "202607020609",
+        );
+        assert!(msg.starts_with("スキップ: "), "msg={msg}");
+        assert!(msg.contains("障害レースは取り込み対象外です"), "msg={msg}");
+        assert!(msg.contains("2026-2-chukyo-6-9R"), "msg={msg}");
+        assert!(msg.contains("202607020609"), "msg={msg}");
     }
 
     // 終了コードの契約（0 / 3）。degraded だけが非 0（ADR 0049）。

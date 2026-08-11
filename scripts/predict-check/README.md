@@ -26,9 +26,15 @@ python3 scripts/predict-check/list_races.py $DATE $VENUES
 # 1. カード＋単勝オッズ取得（ブラインド＝結果は入れない）
 for rid in $(python3 scripts/predict-check/list_races.py $DATE $VENUES | cut -f1); do
   # 障害レースは exit 0 で終わり stdout に `スキップ: ...` を出す（取り込み失敗ではない・ADR 0075）。
-  # 区別が要るなら `| grep -q '^スキップ: '` で判定する（`出馬表: 取得済みのためスキップ` と紛れない
-  # よう行頭まで見る）。exit≠0 は本物の失敗だけ。
+  # exit≠0 は本物の失敗だけ。
   target/release/paddock-fetch-card "$rid"
+  # 取り込んだ／対象外でスキップした を区別したいときは出力を捕まえてから判定する
+  # （パイプすると $? が grep のものになり exit code が消える）。行頭まで見るのは
+  # 「出馬表: 取得済みのためスキップ」と紛れないため。
+  #   out=$(target/release/paddock-fetch-card "$rid"); rc=$?
+  #   printf '%s\n' "$out"
+  #   case "$out" in 'スキップ: '*) echo "  skip $rid";; esac
+  #   [ "$rc" -ne 0 ] && echo "  FAIL $rid (exit=$rc)"
 done
 
 # 1.5. 古い無効オッズ行で predict が落ちるのを回避（#114）

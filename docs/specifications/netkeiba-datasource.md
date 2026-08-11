@@ -275,8 +275,8 @@ paddock-fetch-card --year 2026 --venue 東京 --round 3 --day 2 --race 11
 
 ### 終了コード
 
-呼び出し側（開催日の全レースを回すループ・`scripts/predict-check/refresh_ev.sh` 等）が
-「本物の失敗」だけを FAIL として扱えるようにするための一次情報。
+呼び出し側——netkeiba の開催一覧からレースを列挙して回すループ（`scripts/predict-check/README.md`
+の手順）——が「本物の失敗」だけを FAIL として扱えるようにするための一次情報。
 
 | コード | 意味 |
 |--------|------|
