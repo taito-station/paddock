@@ -32,3 +32,36 @@ impl From<Error> for paddock_use_case::Error {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // `Unsupported` だけ理由文字列を前置き無しで渡す非対称を固定する（#586, ADR 0075）。
+    // ここが `value.to_string()` に戻ると CLI の stdout が
+    // 「スキップ: netkeiba unsupported: 障害…」と二重前置きになる。
+    #[test]
+    fn unsupported_passes_reason_without_prefix() {
+        let converted = paddock_use_case::Error::from(Error::Unsupported(
+            "障害レースは取り込み対象外です".into(),
+        ));
+        match converted {
+            paddock_use_case::Error::Unsupported(reason) => {
+                assert_eq!(reason, "障害レースは取り込み対象外です");
+            }
+            other => panic!("Unsupported に写すこと: {other}"),
+        }
+    }
+
+    // 対になる担保: 実障害（Parse）は従来どおり Internal で、Display の前置きを保つ。
+    #[test]
+    fn parse_stays_internal_with_prefix() {
+        let converted = paddock_use_case::Error::from(Error::Parse("boom".into()));
+        match converted {
+            paddock_use_case::Error::Internal(msg) => {
+                assert_eq!(msg, "netkeiba parse failed: boom");
+            }
+            other => panic!("Internal に写すこと: {other}"),
+        }
+    }
+}

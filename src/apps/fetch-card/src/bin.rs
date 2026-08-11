@@ -10,6 +10,29 @@ use clap::Parser;
 /// 出す）が win 欠落レースだけ再取得対象として識別できるようにする（#288, ADR 0049）。
 const EXIT_WIN_ODDS_DEGRADED: u8 = 3;
 
+/// ingest のエラーを「取り込み対象外（＝設計どおりのスキップ）」と「実障害」に振り分ける。
+/// 対象外なら理由文字列を `Ok`、それ以外はエラーをそのまま `Err` で返す。
+///
+/// 分類を純関数に切り出すのは、**この写像そのものが本コマンドの受入条件**（対象外=exit 0 /
+/// 実障害=exit 1）だから。DB・ネットワークを要する `main` の制御フローに埋めたままだと
+/// CI で回帰を検出できない（#586, ADR 0075）。
+fn unsupported_reason(err: paddock_use_case::Error) -> Result<String, paddock_use_case::Error> {
+    match err {
+        paddock_use_case::Error::Unsupported(reason) => Ok(reason),
+        other => Err(other),
+    }
+}
+
+/// 取り込みが成功したときの終了コード。degraded（単複だけ未取得）のみ非 0 にする。
+/// 対象外スキップは本関数に到達せず 0 を返す（上の `unsupported_reason` 側で早期 return）。
+fn exit_code_for(win_odds_degraded: bool) -> u8 {
+    if win_odds_degraded {
+        EXIT_WIN_ODDS_DEGRADED
+    } else {
+        0
+    }
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<ExitCode> {
     let args = cli::Cli::parse();
@@ -22,22 +45,25 @@ async fn main() -> anyhow::Result<ExitCode> {
         .await
     {
         Ok(resp) => resp,
-        // 仕様として取り込み対象外のレース（障害）。netkeiba 側の実障害ではなく設計どおりの
-        // スキップなので、理由を stdout に明示して exit 0 で終える（#586, ADR 0075）。
-        // 専用 exit code を作らないのは、exit≠0 を一律 FAIL 扱いする消費側で対応外レースが
-        // 「取り込み失敗」に計上されてしまうため（開催日の全レースを netkeiba 一覧から回す
-        // ループがこれに当たる。scripts/predict-check/README.md の手順・keiba-start Step 1）。
-        // degraded(=3) とは排他: ingest はオッズ取得より前に打ち切るので両立しない。
-        Err(paddock_use_case::Error::Unsupported(reason)) => {
-            // stdout は消費側で捨てられることがある（refresh_ev.sh は `> /dev/null`）。
-            // ログだけが残る実行でもスキップを追えるよう tracing にも 1 本残す。
-            tracing::info!(%netkeiba_id, %race_id, %reason, "取り込み対象外のためスキップ");
-            println!(
-                "スキップ: {reason}（取り込み失敗ではありません。race_id={race_id}, netkeiba={netkeiba_id}）"
-            );
-            return Ok(ExitCode::SUCCESS);
-        }
-        Err(e) => return Err(e.into()),
+        Err(e) => match unsupported_reason(e) {
+            // 仕様として取り込み対象外のレース（障害）。netkeiba 側の実障害ではなく設計どおりの
+            // スキップなので、理由を stdout に明示して exit 0 で終える（#586, ADR 0075）。
+            // 専用 exit code を作らないのは、exit≠0 を一律 FAIL 扱いする消費側で対応外レースが
+            // 「取り込み失敗」に計上されてしまうため（開催日の全レースを netkeiba 一覧から回す
+            // ループがこれに当たる。scripts/predict-check/README.md の手順）。
+            // degraded(=3) とは排他: ingest はオッズ取得より前に打ち切るので両立しない。
+            //
+            // 通知は stdout のみ。stderr へ出すと refresh_ev.sh が「fetch-card stderr あり」を
+            // 異常として警告するため、正常な結果を警告に化けさせない。tracing も既定 writer が
+            // stdout なので冗長にしかならない（stdout を捨てる消費側からは追えない。ADR 0075）。
+            Ok(reason) => {
+                println!(
+                    "スキップ: {reason}（取り込み失敗ではありません。race_id={race_id}, netkeiba={netkeiba_id}）"
+                );
+                return Ok(ExitCode::SUCCESS);
+            }
+            Err(e) => return Err(e.into()),
+        },
     };
 
     if resp.card_saved {
@@ -75,10 +101,7 @@ async fn main() -> anyhow::Result<ExitCode> {
     // predict-check/refresh_ev.sh は exit≠0 を FAIL 扱いし「古いオッズ警告」を出す）が区別でき、
     // win 欠落レースだけ再取得を回せる（#288, ADR 0049）。`process::exit` ではなく `ExitCode` を
     // 返し、tokio ランタイム・DB プール等の Drop を走らせてから終了する。
-    if resp.win_odds_degraded {
-        return Ok(ExitCode::from(EXIT_WIN_ODDS_DEGRADED));
-    }
-    Ok(ExitCode::SUCCESS)
+    Ok(ExitCode::from(exit_code_for(resp.win_odds_degraded)))
 }
 
 /// 出走各馬の過去走を取り込み、予想の馬個体 factor（recent_form / horse_stats）を生かす（#103）。
@@ -113,4 +136,45 @@ async fn run_history(
     let filled = app.history.backfill_horse_ids().await?;
     println!("horse_id 紐付け: {filled} 行");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // 対応外（障害レース）は理由を取り出せる＝ stdout に出して exit 0 に倒す経路へ入る（#586）。
+    #[test]
+    fn unsupported_yields_reason_for_skip() {
+        let err = paddock_use_case::Error::Unsupported("障害レースは取り込み対象外です".into());
+        assert_eq!(
+            unsupported_reason(err).expect("対応外として扱う"),
+            "障害レースは取り込み対象外です",
+            "理由は前置き無しでそのまま stdout に載る"
+        );
+    }
+
+    // 実障害は対象外に紛れさせない。ここが崩れると取り込み失敗が exit 0 で黙って通る。
+    #[test]
+    fn real_failures_are_not_treated_as_skip() {
+        for err in [
+            paddock_use_case::Error::Internal("netkeiba parse failed: boom".into()),
+            paddock_use_case::Error::Fetch("connection reset".into()),
+            paddock_use_case::Error::Timeout("timed out".into()),
+            paddock_use_case::Error::InvalidArgument("bad race_id".into()),
+            paddock_use_case::Error::NotFound("no such race".into()),
+        ] {
+            let label = err.to_string();
+            assert!(
+                unsupported_reason(err).is_err(),
+                "実障害はスキップ扱いにしない: {label}"
+            );
+        }
+    }
+
+    // 終了コードの契約（0 / 3）。degraded だけが非 0（ADR 0049）。
+    #[test]
+    fn exit_code_is_zero_unless_degraded() {
+        assert_eq!(exit_code_for(false), 0);
+        assert_eq!(exit_code_for(true), EXIT_WIN_ODDS_DEGRADED);
+    }
 }

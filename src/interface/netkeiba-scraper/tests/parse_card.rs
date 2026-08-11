@@ -133,8 +133,10 @@ fn unparsable_surface_distance_stays_parse_error() {
     let html = FIXTURE.replace("芝1600m", "芝1600メートル");
     let err = parse_card(&html, RACE_ID).expect_err("距離表記を読めない");
     assert!(matches!(err, Error::Parse(_)), "err={err}");
+    // 「読めません」だけだと race_id 由来の別エラー（回/日/R・年）でも通ってしまうため、
+    // 馬場/距離の読み取り失敗であることまで絞る。
     assert!(
-        err.to_string().contains("読めません"),
+        err.to_string().contains("芝/ダ/距離を読めません"),
         "馬場/距離の読み取り失敗として落ちる: {err}"
     );
 }

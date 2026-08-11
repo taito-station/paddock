@@ -53,10 +53,14 @@ $ echo $?
 規約であり、対応外レースも同じく異常ではない。
 
 加えて、**障害レースが実際に到達する消費側は「netkeiba の開催一覧からレースを列挙して回すループ」**
-であり（`scripts/predict-check/README.md` の手順が使う `list_races.py`、および keiba-start Step 1 の
-全レース取得）、これらは exit code だけを見てレース単位の成否を判断する。専用 exit code を作ると、
-対応外レースが取り込み失敗として計上され、**本 issue の目的（実障害だけを FAIL にする）を達成できない**。
-exit 0 なら「exit≠0 = 本物の失敗」と単純に扱える。
+であり（`scripts/predict-check/README.md` の手順が使う `list_races.py`。開催日の全レース取得も同型）、
+exit code だけを見てレース単位の成否を判断する。専用 exit code を作ると、対応外レースが取り込み失敗
+として計上され、**本 issue の目的（実障害だけを FAIL にする）を達成できない**。exit 0 なら
+「exit≠0 = 本物の失敗」と単純に扱える。
+
+ただし正直に記しておくと、**リポジトリ内で自動化されている消費側**（`refresh_ev.sh` / `prefetch_odds.sh`）は
+いずれも対象を DB（`race_cards`）由来で作るため障害レースに到達しない。本決定が守るのは、上記の
+netkeiba 一覧を列挙する手動・半自動のループと、今後書かれる同型のループである。
 
 なお `scripts/predict-check/refresh_ev.sh` も exit≠0 を一律 FAIL 扱いして「古いオッズ警告」を出すが、
 同スクリプトの対象レースは `SELECT race_id FROM race_cards` で作られるため、**カードが保存されない
@@ -92,13 +96,17 @@ exit 0 なら「exit≠0 = 本物の失敗」と単純に扱える。
   `paddock_use_case::Error` の網羅マッチは `rest-controller` の `From<UseCaseError>` のみで、
   そこは `BadRequest` に 1 arm 追加する（REST 経路からは現状到達しないが、到達してもサーバ内部の
   異常ではなく「その資源は扱わない」ため 400 が妥当）。
-- `paddock-fetch-card` の終了コードは **0 / 1 / 3 の 3 値のまま**（新設なし）。障害レースが 1 → 0 へ移る。
+- `paddock-fetch-card` がアプリとして返す終了コードは **0 / 1 / 3 のまま**（新設なし。ほかに `clap` 由来の
+  引数形式不正 = 2 がある）。障害レースが 1 → 0 へ移る。
 - 障害レースを渡した実行は DB を一切変更しない（冪等）。**裏返しとして `fetch_history` にも記録が残らない
   ため、開催日ループを再実行するたびに障害レースの出馬表ページを 1 回取りに行く**。1 開催日あたり数レース
   規模なので許容するが、netkeiba へのペーシングを詰める際はここが対象になる。
 - **スキップの識別には stdout の読み取りが要る**（exit code だけでは正常取り込みと区別できない）。
-  stdout を捨てる消費側でも追えるよう `tracing::info!` にも 1 本残すが、degraded が stderr なのに対し
-  対象外は stdout という非対称は残る（degraded は「要再取得」の警告、対象外は「正常な結果」のため）。
+  行頭は `スキップ: ` 固定。**stdout を捨てる消費側からは追えない**——これは受容する。stderr に出すと
+  `refresh_ev.sh` が「fetch-card stderr あり」を異常として警告するため、正常な結果を警告に化けさせて
+  しまう。`tracing` も `Config::init_tracing` が既定 writer（stdout）で初期化するので代替にならない。
+  degraded が stderr なのに対し対象外が stdout なのは、前者が「要再取得」の警告、後者が「正常な結果」
+  だからで、この非対称は意図的。
 
 ## スコープ外
 
