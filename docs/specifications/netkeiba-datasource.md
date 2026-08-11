@@ -211,7 +211,11 @@ paddock 内部の `RaceId` も同じ 12 桁構成要素から導出する（既�
 - **CLI は理由を stdout に明示して exit 0**。専用 exit code は作らない——消費側
   （`scripts/predict-check/refresh_ev.sh`）が exit≠0 を一律 FAIL 扱いするため、専用コードでは対応外
   レースが取り込み失敗に計上されてしまう。
-- 未知の馬場記号・`RaceData01` 欠落は従来どおり実障害（exit 1）。**「対応外」は広げない**。
+- 馬場・距離表記が読めない場合や `RaceData01` 欠落は従来どおり実障害（exit 1）。**「対応外」は広げない**。
+- **スキップの識別には stdout の読み取りが要る**（exit code だけでは正常取り込みと区別できない）。
+  stdout を捨てる消費側でも追えるよう `tracing::info!` にも 1 本残している。
+- 却下案（ADR 0075 に詳細）: 専用 exit code の新設 / `IngestCardResponse` にフラグを足す（degraded と同型）/
+  エラー文言の照合 / 障害レースを `Surface::Jump` として取り込む——いずれも採らない。
 
 ### スクレイパー実装の型（ADR 0001 由来）
 

@@ -25,7 +25,7 @@ python3 scripts/predict-check/list_races.py $DATE $VENUES
 
 # 1. カード＋単勝オッズ取得（ブラインド＝結果は入れない）
 for rid in $(python3 scripts/predict-check/list_races.py $DATE $VENUES | cut -f1); do
-  target/release/paddock-fetch-card "$rid"   # 障害レースは exit 1（スキップ可）
+  target/release/paddock-fetch-card "$rid"   # 障害レースは exit 0＋stdout に「スキップ:」（ADR 0075）
 done
 
 # 1.5. 古い無効オッズ行で predict が落ちるのを回避（#114）

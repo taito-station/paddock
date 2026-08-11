@@ -24,12 +24,16 @@ async fn main() -> anyhow::Result<ExitCode> {
         Ok(resp) => resp,
         // 仕様として取り込み対象外のレース（障害）。netkeiba 側の実障害ではなく設計どおりの
         // スキップなので、理由を stdout に明示して exit 0 で終える（#586, ADR 0075）。
-        // 専用 exit code を作らないのは、消費側（scripts/predict-check/refresh_ev.sh）が
-        // exit≠0 を一律 FAIL 扱いし、対応外レースが「取り込み失敗」に計上されてしまうため。
+        // 専用 exit code を作らないのは、exit≠0 を一律 FAIL 扱いする消費側で対応外レースが
+        // 「取り込み失敗」に計上されてしまうため（開催日の全レースを netkeiba 一覧から回す
+        // ループがこれに当たる。scripts/predict-check/README.md の手順・keiba-start Step 1）。
         // degraded(=3) とは排他: ingest はオッズ取得より前に打ち切るので両立しない。
         Err(paddock_use_case::Error::Unsupported(reason)) => {
+            // stdout は消費側で捨てられることがある（refresh_ev.sh は `> /dev/null`）。
+            // ログだけが残る実行でもスキップを追えるよう tracing にも 1 本残す。
+            tracing::info!(%netkeiba_id, %race_id, %reason, "取り込み対象外のためスキップ");
             println!(
-                "対応外レースのためスキップしました（{reason}）。取り込み失敗ではありません（race_id={race_id}, netkeiba={netkeiba_id}）"
+                "スキップ: {reason}（取り込み失敗ではありません。race_id={race_id}, netkeiba={netkeiba_id}）"
             );
             return Ok(ExitCode::SUCCESS);
         }

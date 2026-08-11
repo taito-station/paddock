@@ -43,6 +43,8 @@ struct FakeScraper {
     card_unsupported: bool,
     /// fetch_card が呼ばれた回数。
     card_fetches: Mutex<usize>,
+    /// fetch_win_place_odds が呼ばれた回数（対応外で打ち切ったとき単複も叩かないことの検証用）。
+    win_fetches: Mutex<usize>,
     /// fetch_exotic_odds が呼ばれた回数（degraded 時に exotic を叩かないことの検証用）。
     exotic_fetches: Mutex<usize>,
 }
@@ -58,6 +60,7 @@ impl FakeScraper {
             win_transient_err: false,
             card_unsupported: false,
             card_fetches: Mutex::new(0),
+            win_fetches: Mutex::new(0),
             exotic_fetches: Mutex::new(0),
         }
     }
@@ -160,6 +163,7 @@ impl NetkeibaScraper for FakeScraper {
         })
     }
     fn fetch_win_place_odds(&self, _race_id: &str) -> Result<FetchedOdds> {
+        *self.win_fetches.lock().unwrap() += 1;
         if self.win_transient_err {
             // 実経路（netkeiba-scraper Error::Fetch → use-case Error::Fetch、scraper 内リトライ後も
             // 残る接続リセット）と同じ variant・文言で模す。ingest は degraded 分岐へ回す。
@@ -586,9 +590,19 @@ async fn unsupported_card_aborts_ingest_without_any_write() {
         "取得済み記録も残さない（次回 --force 無しでも同じ判定になる）"
     );
     assert_eq!(
+        *interactor.scraper.card_fetches.lock().unwrap(),
+        1,
+        "カード取得は 1 回だけ試みる（リトライしない）"
+    );
+    assert_eq!(
+        *interactor.scraper.win_fetches.lock().unwrap(),
+        0,
+        "後続の単複オッズ取得は走らない"
+    );
+    assert_eq!(
         *interactor.scraper.exotic_fetches.lock().unwrap(),
         0,
-        "後続のオッズ取得は走らない"
+        "後続の組合せ券種オッズ取得も走らない"
     );
 }
 

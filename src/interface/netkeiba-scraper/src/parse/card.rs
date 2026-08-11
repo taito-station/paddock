@@ -153,7 +153,9 @@ fn extract_surface_distance(doc: &Html) -> Result<(Surface, u32)> {
                 "障害レースは取り込み対象外です".to_string(),
             ));
         }
-        // 未知の馬場記号は netkeiba のレイアウト変更＝実障害。`Unsupported` を広げない。
+        // `SURFACE_DISTANCE_RE` のキャプチャ群が `[芝ダ障]` に限定されているため到達しない。
+        // 網羅性のための防御アーム。正規表現を広げた場合でも「未知の記号＝netkeiba の
+        // レイアウト変更＝実障害」であり `Parse` に落とす（`Unsupported` を広げない）。
         other => return Err(Error::Parse(format!("unknown surface marker: {other}"))),
     };
     let distance: u32 = caps[2]

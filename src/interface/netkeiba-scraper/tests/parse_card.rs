@@ -121,11 +121,20 @@ fn jump_race_returns_unsupported() {
     assert!(err.to_string().contains("障害"), "理由が読める: {err}");
 }
 
-// 「対応外」を広げない担保（#586）。未知の馬場記号は netkeiba のレイアウト変更＝実障害なので
-// 従来どおり `Parse`（→ use-case Internal → exit 1）に落ち、exit 0 のスキップに紛れない。
+// 「対応外」を広げない担保（#586）。馬場・距離表記が読めないのは netkeiba のレイアウト変更
+// ＝実障害なので、従来どおり `Parse`（→ use-case Internal → exit 1）に落ち、exit 0 の
+// スキップに紛れない。`Unsupported` に落ちるのは障害レースだけであることを対で固定する。
+//
+// なお `SURFACE_DISTANCE_RE` のキャプチャ群は `[芝ダ障]` に限定されており、`extract_surface_distance`
+// の `other =>` アーム（未知の馬場記号）はテストから到達できない（防御アーム）。ここで踏むのは
+// 「正規表現に一致しない＝距離表記が変わった」経路。
 #[test]
-fn unknown_surface_marker_stays_parse_error() {
+fn unparsable_surface_distance_stays_parse_error() {
     let html = FIXTURE.replace("芝1600m", "芝1600メートル");
     let err = parse_card(&html, RACE_ID).expect_err("距離表記を読めない");
     assert!(matches!(err, Error::Parse(_)), "err={err}");
+    assert!(
+        err.to_string().contains("読めません"),
+        "馬場/距離の読み取り失敗として落ちる: {err}"
+    );
 }
