@@ -1,5 +1,9 @@
 ---
 # knowledge 規約に基づくメタデータ（docs/knowledge/README.md）。specifications はその場で
+
+> **要件 ID**: 本書は決定根拠と棄却の実測を持つ。要件そのもの（何を守るか）と検証手段は
+> [ev-kelly-bet-selection.md](ev-kelly-bet-selection.md) の **REQ-D23-001〜006** と
+> [product-goals.md](../knowledge/product-goals.md) の **REQ-D01-001 / 003 / 007**。
 # knowledge に昇格（ADR 履歴・相互リンクを壊さないため物理移動しない）。
 status: Confirmed
 kind: knowledge
