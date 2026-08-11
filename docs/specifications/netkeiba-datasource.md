@@ -192,6 +192,8 @@ paddock 内部の `RaceId` も同じ 12 桁構成要素から導出する（既�
   非 transient として扱う。
 - **degraded になるのは単複オッズ取得の失敗だけ**。それ以外はハード失敗か best-effort に分かれる:
   - **card 取得段の出馬表**（`fetch_card`）の失敗 → ハード失敗（exit 1）
+  - **組合せ券種（exotic）オッズ**の失敗 → **警告のみ・単複だけ保存して exit 0**。部分スナップショットは
+    cache-hit 判定 `is_complete()` が false のままなので、次回 read-through で欠けた券種が埋まる（自己修復）
   - **近走取り込み段**（`horse_history`）で引く出馬表・馬ページの失敗 → **警告のみ・exit 0**
     （`shutuba_failed` / `horses_failed` に計上）。card / オッズ保存まで成功した実行を近走の失敗で
     巻き添えにしない。**card 取得済みで再実行すると必ずこの経路を通る**ので、近走が 1 件も
@@ -233,6 +235,7 @@ JRA 版スクレイパーは ADR 0048 で退役したが、そこで確立した
 | 不正な race_id(桁数・競馬場コード不正) | バリデーションエラーを stderr に出力し exit code 1。パニックしない |
 | **単複オッズ**の取得失敗（transient・リトライ後も残る） | **degraded**。オッズ保存をまるごとスキップし exit 3（出馬表・近走は保存済み）。ADR 0049 |
 | **単複オッズ**の取得失敗（4xx 等の非 transient） | 同じく degraded 分岐（オッズ未保存・exit 3）。netkeiba に 403/404=absent の概念が無いため 4xx も「取れなかった」として扱う |
+| **組合せ券種オッズ**の取得失敗 | warn して単複のみ保存・**exit 0**。`is_complete()` が false なので次回再取得で埋まる |
 | **出馬表**ページの取得失敗（card 取得段） | `call_with_retry` のリトライ後も残ればハード失敗（exit 1）。degraded にはしない |
 | **近走取り込み段**の取得失敗（出馬表・馬ページとも） | warn + skip して `shutuba_failed` / `horses_failed` に計上。**exit 0 のまま**（best-effort）。前走フォーム特徴量が欠けるので、ログの失敗件数を見る |
 | EUC-JP 不正バイト | `encoding_rs` の置換に委ね、可能な範囲で parse を継続 |

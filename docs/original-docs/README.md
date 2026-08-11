@@ -86,8 +86,8 @@ ADR の採番は `scripts/check-adr-numbers.sh next`（並行 clone / worktree �
 3. 回答済み qa と ADR を knowledge に差分マージ。**ADR の内容は knowledge へ全部写す**
    （読む入口を knowledge に一本化する）。original-docs 自体は残す（トレーサビリティ）。
    写した先の追従漏れは **stale 検査が error で止める**（#580 で warning から昇格）。
-   `sources` に挙げたファイルを内容ごと変更したら、参照元の `distilled_from_sha` / `updated` を
-   同じ PR で追従させること。
+   `sources` に挙げたファイルを内容ごと変更したら、参照元の **`distilled_from_sha`** を同じ PR で
+   追従させること（`updated` は下流の本文が実質変わったときだけ進める。機械検査の対象外）。
 
 > 一次資料は mdq の索引対象（`mdq.toml`）に含まれるので、`scripts/mdq search` で横断検索できる。
 > ADR だけに絞るなら `--paths "docs/original-docs/0*"`。

@@ -20,8 +20,8 @@ paddock の文書は HVE（dahatake/HypervelocityEngineering, MIT）の蒸留モ
   knowledge / specifications が `sources` で参照している（knowledge は 9 本）。ただし**粒度は一様でない**
   ので、決定の細部（却下案・数値の前提）が要るときは **ADR 原本（`docs/original-docs/0NNN-*.md`）も読む**。
   stale の機械検査は **error**（未解消 6 件を #580 で消化して warning から昇格）。`sources` に挙げた
-  ファイルを内容ごと変更したら、参照元の `distilled_from_sha` / `updated` を同じ PR で追従させる
-  （追従漏れは CI が落とす）。
+  ファイルを内容ごと変更したら、参照元の **`distilled_from_sha` を同じ PR で追従させる**（追従漏れは
+  CI が落とす）。`updated` は**下流の本文が実質変わったときだけ**進める（機械検査の対象外）。
 - **`docs/original-docs/` の命名は 2 系統**: ADR = **0 埋め 4 桁**（`0055-...`）/ issue 由来の一次資料 =
   **issue 番号・0 埋めしない**（`382-...`）。これが ADR 番号重複検出の判定根拠なので破らない。
 - **status**: `Confirmed`（運用の前提にしてよい）/ `Tentative`（暫定）/ `Conflict`（矛盾・放置せず解消）。

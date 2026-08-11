@@ -25,7 +25,7 @@ docs/knowledge/ ＋ docs/specifications/   status 付き確定知（＝この層
 - **確定知を読む入口は knowledge**。ADR の決定・理由・却下案・影響は knowledge に**全部写す**。
   重複を許す代わりに、同期切れ（`sources` が更新されたのに蒸留が追従していない状態）は
   **機械検査で検出する**——写した量に比例して stale 面積が増えるため、人手の規律には委ねない。
-- > **⚠ 移行中（ADR 0073 の段階導入）**:
+- > **現状（ADR 0073 の段階導入の到達点）**:
   >
   > - **stale の機械検査は配線済み・判定は error**（`scripts/check-doc-classes.py`・CI の `adr`
   >   ジョブと pre-push）。移設以前から累積していた未追従 6 件を
@@ -189,7 +189,7 @@ updated: "YYYY-MM-DD"    # 内容を実質更新した日（YAML の date 型を
    いるうちに写すのが最も安い。既存 ADR の一括写しは #588 で一巡済み（差し止め条件だった stale の
    error 化は #580 で解消）。
 6. **sources 追従**: knowledge の `sources` に列挙されたファイルを**内容ごと**変更する PR は、参照元
-   knowledge の `distilled_from_sha` と `updated` を現 HEAD に更新する。本文が変わる場合は差分マージを
+   knowledge の `distilled_from_sha` を現 HEAD に更新する（**機械検査の対象はこちらだけ**）。本文が変わる場合は差分マージを
    行って `updated` も進め、**本文が変わらない場合は `distilled_from_sha` の bump のみ**（`updated` は
    「内容を実質更新した日」なので据え置く。例外 1c と同じ理屈で、下流の本文に効かない上流変更まで
    日付を進めると「いつ確定した知か」の信号が濁る）。**この追従は機械検査の対象**（実例:

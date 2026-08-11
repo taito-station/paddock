@@ -186,7 +186,8 @@ jobs:
       - name: Check ADR number duplicates (#254)
         run: bash scripts/check-adr-numbers.sh
       # 文書クラスと sources 追従の検査（ADR 0073 決定 2・3）。上の checkout の fetch-depth: 0 が
-      # 前提（shallow だと `git log -- <path>` が空を返し、stale 判定が全件 warning に退化する）。
+      # 前提（shallow だと `distilled_from_sha` を解決できず、全文書の stale 判定が warning に
+      # 退化して丸ごと飛ぶ）。
       # stale は **error**（移設以前から累積していた未解消 6 件を #580 で消化し warning から昇格）。
       - name: Check document classes / sources (ADR 0073)
         run: python3 scripts/check-doc-classes.py

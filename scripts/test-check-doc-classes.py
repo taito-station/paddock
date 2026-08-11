@@ -342,6 +342,25 @@ def test_shallow_clone_downgrades_unresolvable_sha_to_warning() -> None:
         shutil.rmtree(shallow, ignore_errors=True)
 
 
+def test_subdirectory_md_is_reported_as_unchecked() -> None:
+    """サブディレクトリの `.md` は**完全に無検査**。3 つの warning 経路のうち最も危険なので固定する。
+
+    glob が非再帰なので、`docs/knowledge/sub/x.md` は doc_class も sources も stale も
+    一切検査されない。可視化の warning が消えると、文書がまるごと検査対象外になったことに
+    誰も気づけなくなる。
+    """
+    repo = new_repo()
+    try:
+        baseline(repo)
+        (repo / "docs/knowledge/sub").mkdir()
+        (repo / "docs/knowledge/sub/x.md").write_text("# 検査対象外\n", encoding="utf-8")
+        code, out = check(repo)
+        assert code == 0, f"サブディレクトリ配置は error にしない: {out}"
+        assert "サブディレクトリの .md は検査対象外" in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
 def test_rename_only_is_not_stale() -> None:
     """**最重要**: パス移動のみのコミットを stale と見なさない。
 
