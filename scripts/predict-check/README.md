@@ -27,15 +27,14 @@ python3 scripts/predict-check/list_races.py $DATE $VENUES
 for rid in $(python3 scripts/predict-check/list_races.py $DATE $VENUES | cut -f1); do
   # 障害レースは exit 0 で終わり stdout に `スキップ: ...` の行を出す（取り込み失敗ではない・ADR 0075）。
   # exit 0 = 正常（対象外スキップを含む）/ 1 = ハード失敗 / 3 = degraded（card は保存済み・オッズ要再取得）。
-  target/release/paddock-fetch-card "$rid"
-  # 取り込んだ／対象外でスキップした を区別したいときは、上の 1 行の代わりに次を使う。
-  # ・出力を捕まえてから判定する（パイプすると $? が grep のものになり exit code が消える）
-  # ・`grep '^スキップ: '` と行アンカーで見る。stdout には tracing のログ行（stale binary warn 等）が
-  #   先行しうるので出力全体の先頭では一致しない。「出馬表: 取得済みのためスキップ」とも紛れない
-  #   out=$(target/release/paddock-fetch-card "$rid"); rc=$?
-  #   printf '%s\n' "$out"
-  #   printf '%s\n' "$out" | grep -q '^スキップ: ' && echo "  skip $rid"
-  #   [ "$rc" -ne 0 ] && echo "  FAIL $rid (exit=$rc)"
+  # 出力を捕まえてから判定する（パイプすると $? が grep のものになり exit code が消える）。
+  # `grep '^スキップ: '` と行アンカーで見るのは、stdout に tracing のログ行（stale binary warn 等）が
+  # 先行しうるため／「出馬表: 取得済みのためスキップ」と紛れないため。
+  out=$(target/release/paddock-fetch-card "$rid"); rc=$?
+  printf '%s\n' "$out"
+  printf '%s\n' "$out" | grep -q '^スキップ: ' && echo "  skip $rid（対象外・失敗ではない）"
+  [ "$rc" -eq 1 ] && echo "  FAIL $rid"
+  [ "$rc" -eq 3 ] && echo "  DEGRADED $rid（card は保存済み・オッズのみ要再取得）"
 done
 
 # 1.5. 古い無効オッズ行で predict が落ちるのを回避（#114）

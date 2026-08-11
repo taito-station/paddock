@@ -13,7 +13,7 @@ sources:
   - docs/original-docs/0049-netkeiba-odds-transient-retry-and-degraded-exit.md
   - docs/original-docs/0075-unsupported-race-skip-exit-zero.md
 distilled_from_sha: "1c5bf69"
-updated: "2026-08-11"
+updated: "2026-08-12"
 ---
 
 # netkeiba 当日データソース取り込み 仕様書
@@ -203,7 +203,9 @@ paddock 内部の `RaceId` も同じ 12 桁構成要素から導出する（既�
 混同すると、開催日の全レースをループ取得したとき 1 件の欠落が無視してよいものか取り込み失敗かを
 件数 diff でしか判別できない。
 
-- **障害レース（`障NNNNm`）は取り込み対象外**。`parse_card` は `Error::Unsupported` を返し、
+- **障害レースは取り込み対象外**。判定は `RaceData01` の**距離付き馬場マーカー**で行い、`障3000m`・
+  `障芝3000m`・`障ダ2900m` のいずれの表記でも拾う（単文字クラスだと `障芝3000m` で `芝3000m` に
+  マッチし、障害レースが芝レースとして黙って取り込まれる）。`parse_card` は `Error::Unsupported` を返し、
   実障害（`Error::Parse` → `Internal` → exit 1）とは別 variant で ingest / CLI まで伝わる。
 - **ingest はカード・オッズ・近走のすべてを打ち切る**（DB は一切変更しない）。カード無しでオッズだけ
   保存すると `race_cards` に対応行の無い孤児オッズが残り、近走取り込みは障害レースでも成功して
