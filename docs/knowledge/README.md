@@ -84,8 +84,10 @@ updated: "YYYY-MM-DD"    # 内容を実質更新した日（YAML の date 型を
   mdq が frontmatter を検索に使わず `tags` しか見ないため（`scripts/mdq search --tags D23`）。
   二重管理の drift は `scripts/check-doc-classes.py` が防ぐ。
 - **機械検査**: 上記スクリプトが CI（`adr` ジョブ）と pre-push で走る。クラスの整合・`tags` の一致・
-  `sources` の実在・**stale** は **error**（stale は #580 で warning から昇格）、充足ギャップのみ
-  **warning**。CI を止めずに通す明示的な逃げ道は `--warn-only` だけ（ただし下記「機械検査できない」
+  `sources` の実在・**stale** は **error**（stale は #580 で warning から昇格）。**warning** は
+  充足ギャップと、**判定不能を可視化する 3 経路**（サブディレクトリに置かれた `.md`＝無検査 /
+  `sources` の履歴を辿れない / shallow clone で `distilled_from_sha` を解決できない）。
+  CI を止めずに通す明示的な逃げ道は `--warn-only` だけ（ただし下記「機械検査できない」
   の 4 つ目に注意——`sources` から行を消せば stale も消える）。
 
 - **status**: `Confirmed`=検証済みで運用の前提にしてよい / `Tentative`=検証中・暫定 /
@@ -188,7 +190,9 @@ updated: "YYYY-MM-DD"    # 内容を実質更新した日（YAML の date 型を
    error 化は #580 で解消）。
 6. **sources 追従**: knowledge の `sources` に列挙されたファイルを**内容ごと**変更する PR は、参照元
    knowledge の `distilled_from_sha` と `updated` を現 HEAD に更新する。本文が変わる場合は差分マージを
-   行い、変わらない場合は sha と日付の bump のみで足りる。**この追従は機械検査の対象**（実例:
+   行って `updated` も進め、**本文が変わらない場合は `distilled_from_sha` の bump のみ**（`updated` は
+   「内容を実質更新した日」なので据え置く。例外 1c と同じ理屈で、下流の本文に効かない上流変更まで
+   日付を進めると「いつ確定した知か」の信号が濁る）。**この追従は機械検査の対象**（実例:
    [`app-bootstrap.md`](app-bootstrap.md) が `status: Confirmed` のまま、qa 側で「#453 で覆る」と
    追記済みの `NoopParser` を推奨し続けた事故がある。人手の規律だけでは守れない）。
    - **例外 1: パス移動のみ（内容不変）は bump しない**。`sources` の行が指す先が同じ内容のまま

@@ -74,7 +74,7 @@ ADR の採番は `scripts/check-adr-numbers.sh next`（並行 clone / worktree �
 
   issue 本文の内容が蒸留に必要なら、**qa / knowledge 側に「その時点の要求」として日付付きで引用する**。
   一方、**調査所見・実測・生ログは転記ではない**——GitHub には無くここにしか存在しないので、
-  それこそがこの層の中身（下記「何を置くか」）。
+  それこそがこの層の中身（上の「何を置くか」）。
 - 確定した運用ルール・ドメイン知 → `docs/knowledge/` or `docs/specifications/`
 - 質問票と回答 → `docs/qa/`
 - コード・設定（リポジトリ本体で管理）
