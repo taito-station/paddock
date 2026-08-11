@@ -99,6 +99,12 @@ impl From<UseCaseError> for Error {
             // pending）に畳むため通常ここには来ない。畳まれずに伝播した Fetch/Timeout は 500 に倒す
             // （詳細は error_response 側でログにのみ出す）。
             UseCaseError::Fetch(m) | UseCaseError::Timeout(m) => Error::Internal(m),
+            // 取り込み対象外のリソース（障害レース等・#586）。現状 REST 経路からは到達しない防御 arm。
+            // 到達してもサーバ内部の異常ではなく「その資源は扱わない」ので 4xx に倒す。厳密には
+            // 422/501 の方が意味は近いが、クライアント側の扱いを増やさないため既存の 400 に寄せる。
+            // 理由文字列はそのままレスポンス body に載るため、`Unsupported` に内部パス・URL 等を
+            // 入れないこと（現状は固定文言のみ）。
+            UseCaseError::Unsupported(m) => Error::BadRequest(m),
         }
     }
 }

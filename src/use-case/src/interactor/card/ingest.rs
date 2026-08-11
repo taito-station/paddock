@@ -52,6 +52,10 @@ impl<R: RaceCardRepository + OddsRepository + FetchRepository, S: NetkeibaScrape
         if already && !force {
             tracing::info!(%netkeiba_id, "card already fetched, skipping (use --force to refetch)");
         } else {
+            // 取り込み対象外（障害レース = `Error::Unsupported`）はここで伝播させ ingest 全体を打ち切る（#586）。
+            // カードが無いのにオッズ・近走だけ保存する状態を作らないため、後続を一切走らせない
+            // （オッズの best-effort・degraded 分岐はカードが取れた場合の話）。呼び出し側（bin）が
+            // 実障害と区別して exit 0 に倒す。ここまでに DB 書き込みは無い（fetch_history_contains は read-only）。
             let fetched = self.scraper.fetch_card(netkeiba_id)?;
             horse_ids = fetched
                 .entries
@@ -129,6 +133,11 @@ impl<R: RaceCardRepository + OddsRepository + FetchRepository, S: NetkeibaScrape
             // 排除した「win 欠落の部分永続化」と同型に見えるが、netkeiba は単複と組合せをほぼ同時発売する
             // ため win=未発売のときは exotic も未発売（空）→ rows 空 → 保存スキップとなり実質到達しない。
             // よって Parse 経路に degraded 同等の保存スキップ強制は課さない（既存挙動を温存）。
+            //
+            // なお `Unsupported`（取り込み対象外・#586）はこの catch-all に到達しない——
+            // 対象外の判定は card 経路（`parse_card`）にしかなく、そこで既に打ち切られている。
+            // 将来オッズ側にも対象外の概念を持ち込むなら、ここで握り潰さず伝播させること
+            // （ADR 0075 の「対象外は打ち切る」原則を無言で失わないため）。
             Err(e) => {
                 tracing::warn!(%netkeiba_id, error = %e, "単複オッズの取得に失敗（未発売/想定外status）、オッズ無しで card+近走取り込みを継続");
                 Default::default()
