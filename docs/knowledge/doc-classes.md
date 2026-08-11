@@ -127,9 +127,10 @@ D 体系を採用する最大の実利は、**書くべきなのに無い文書�
 ## 体系側の既知の穴
 
 **D23（買い方・資金配分ルール）の一次定義がリポジトリの `docs/` 配下に無い。** 現行ルールの本体は
-プロジェクトルートの `CLAUDE.md`「買い方ルール」節にあり、`docs/` 側の D23 文書
-（`betting-rule-history.md` / `live-ev-buy-view.md` / `ev-kelly-bet-selection.md`）は
-**根拠・棄却記録・画面契約**に留まる。`CLAUDE.md` は毎セッション読まれる運用指示なので現状で機能して
+プロジェクトルートの `CLAUDE.md`「買い方ルール」節にあり、`docs/` 側の D23 文書のうち
+`betting-rule-history.md` / `live-ev-buy-view.md` は**根拠・棄却記録・画面契約**に留まるが、
+`ev-kelly-bet-selection.md` は #594 で **D23 の REQ 表（要件と検証手段）** を持つようになった
+——「何を守るか」と「どう測るか」は docs 側、「今どう張るか」の運用指示は `CLAUDE.md` 側、という分担。`CLAUDE.md` は毎セッション読まれる運用指示なので現状で機能して
 いるが、「クラスの主文書がクラス体系の外にある」状態ではある。
 
 D01（[product-goals.md](product-goals.md)）を作った時点では**移していない**（検討経緯は #582）。

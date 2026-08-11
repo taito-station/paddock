@@ -35,8 +35,8 @@ sources:
   - docs/original-docs/0069-drop-icloud-writes-browser-only-viewing.md
   - docs/original-docs/0071-topcoat-framework-evaluation-rejected.md
   - docs/original-docs/0073-adr-into-original-docs-and-doc-classes.md
-distilled_from_sha: "b24173e"
-updated: "2026-08-09"
+distilled_from_sha: "b0c270b"
+updated: "2026-08-11"
 ---
 
 # プロダクト目標・成功条件・非目標（D01）
@@ -68,7 +68,7 @@ paddock が何を目指し、何を達成したら成功で、**何をやらな�
 <!-- REQ:begin D01 -->
 | REQ-ID | 要件 | 検証手段 | 出典 | status |
 |---|---|---|---|---|
-| REQ-D01-001 | 張るレースは ROI ≥ 100% のものだけに限る。閾値は引き下げない | `paddock-predict --overview` / `paddock-predict-watch` が算出する ROI と、ADR 0040 のゲート検証を再実行する | [ADR 0040](../original-docs/0040-ev-gate-threshold-lowering-rejected.md) | Confirmed |
+| REQ-D01-001 | 張るレースは ROI ≥ 100% のものだけに限る。閾値は引き下げない | ADR 0040 の再現方法（保存済み `race_odds` に `analyze predict --blend-alpha 0.2` と `scripts/predict-check/live_ev.py` を当てて全 3 券種の ROI 分布を出す。**`analyze predict` は集計統計に `as_of=None` を使うので過去レース再評価ではリークする**——ただし +EV を多く見せる向きなので「+EV 帯が薄い」という結論には保守的）を再実行し、**閾値を下げると −EV を買うことになる**——すなわち +EV 帯が薄い——ことを確認する。ADR 0040 時点の実測は 69R で平均 ROI 73.1% / 最高 97% / +EV(≥100%) 0 本 | [ADR 0040](../original-docs/0040-ev-gate-threshold-lowering-rejected.md) | Confirmed |
 | REQ-D01-002 | 順位付けは blended 確率、EV は純モデル確率 × 市場オッズで計算する（確率と買い方の層分離） | `cargo test -p paddock-domain` の EV 層テスト（純モデル確率が EV 経路に渡ることを固定） | [ADR 0055](../original-docs/0055-ev-layer-separation-circular-break.md) | Confirmed |
 | REQ-D01-003 | 軸は事前データで確定し、直前オッズでは動かさない（用途はズレ増額のみ・軸フリップ禁止） | 予想セッションのログ（`predict-watch` 出力と実際の買い目）を突き合わせ、軸の変更が新情報起因のときだけ起きていることを確認する | [ADR 0060](../original-docs/0060-betting-axis-lock-preclose-topup.md) | Confirmed |
 | REQ-D01-004 | ADR 0052 と同一条件（α=0.2・縮約 / 冪較正フラグなし）のトップ選好馬の単勝的中率が 28% を下回らない（890R 実測 29.9%） | `paddock-analyze backtest --from 2026-03-15 --to 2026-06-21 --blend-alpha 0.2` の `win_hit_rate`（ADR 0052 の再現方法と同じコマンド。`backtest` は m / 冪較正を既定適用しないので、本番構成で測るならフラグを明示したうえで閾値ごと測り直す） | [ADR 0052](../original-docs/0052-alpha-blend-removal-rejected.md) | Confirmed |

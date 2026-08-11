@@ -297,6 +297,70 @@ def test_stale_is_suppressed_by_warn_only() -> None:
         shutil.rmtree(repo)
 
 
+def test_untracked_source_is_warning_not_silent() -> None:
+    """履歴を辿れない source は判定不能。黙って通す（fail-open）のではなく可視化する。
+
+    stale を error へ昇格させた（#580）あとは、この warning 分岐が数少ない
+    「検査が効かないまま緑になる」経路なので、消えていないことを固定する。
+    """
+    repo = new_repo()
+    try:
+        sha = baseline(repo)
+        # コミットしない source を sources に足す（git log が空 → last_content_change が None）
+        (repo / "docs/original-docs/9999-untracked.md").write_text("# 未コミット\n", encoding="utf-8")
+        write_doc(repo, "docs/knowledge/a.md", ["D19"],
+                  ["docs/original-docs/0001-first.md", "docs/original-docs/9999-untracked.md"], sha)
+        code, out = check(repo)
+        assert code == 0, f"判定不能は error にしない: {out}"
+        assert "履歴を辿れず" in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_shallow_clone_downgrades_unresolvable_sha_to_warning() -> None:
+    """shallow clone では sha 未解決を warning に落とす（履歴が無いだけなので）。
+
+    ただしその文書の stale 判定は丸ごと飛ぶ。CI は fetch-depth: 0 でこの経路に入らない。
+    """
+    repo = new_repo()
+    shallow = Path(tempfile.mkdtemp(prefix="doc-classes-shallow-"))
+    try:
+        baseline(repo)
+        # 追加コミットを重ねてから深さ 1 で clone すると、pin した sha が clone 側に存在しない
+        p = repo / "docs/original-docs/0001-first.md"
+        p.write_text(p.read_text(encoding="utf-8") + "\n追記。\n", encoding="utf-8")
+        commit_all(repo, "2 つ目のコミット")
+        dest = shallow / "clone"
+        subprocess.run(["git", "clone", "-q", "--depth", "1", f"file://{repo}", str(dest)],
+                       capture_output=True, text=True, check=True)
+        assert run_git(dest, "rev-parse", "--is-shallow-repository") == "true"
+        code, out = check(dest)
+        assert code == 0, f"shallow では error にしない: {out}"
+        assert "shallow clone のため" in out, out
+    finally:
+        shutil.rmtree(repo)
+        shutil.rmtree(shallow, ignore_errors=True)
+
+
+def test_subdirectory_md_is_reported_as_unchecked() -> None:
+    """サブディレクトリの `.md` は**完全に無検査**。3 つの warning 経路のうち最も危険なので固定する。
+
+    glob が非再帰なので、`docs/knowledge/sub/x.md` は doc_class も sources も stale も
+    一切検査されない。可視化の warning が消えると、文書がまるごと検査対象外になったことに
+    誰も気づけなくなる。
+    """
+    repo = new_repo()
+    try:
+        baseline(repo)
+        (repo / "docs/knowledge/sub").mkdir()
+        (repo / "docs/knowledge/sub/x.md").write_text("# 検査対象外\n", encoding="utf-8")
+        code, out = check(repo)
+        assert code == 0, f"サブディレクトリ配置は error にしない: {out}"
+        assert "サブディレクトリの .md は検査対象外" in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
 def test_rename_only_is_not_stale() -> None:
     """**最重要**: パス移動のみのコミットを stale と見なさない。
 
@@ -437,6 +501,39 @@ def test_frontmatter_only_change_is_not_stale() -> None:
         code, out = check(repo)
         assert code == 0, out
         assert "STALE" not in out, f"frontmatter のみの変更を stale と誤判定した:\n{out}"
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_status_change_in_source_is_stale() -> None:
+    """`status` / `kind` は METADATA_KEYS から**意図的に外している**ことを固定する。
+
+    `Confirmed → Conflict` は「この知はもう信じるな」という下流へ伝えるべき信号なので、
+    frontmatter だけの変更でも stale にする（例外 1b の対象外）。`METADATA_KEYS` に
+    `status` が紛れ込んでも、この対照が無いと全テストが緑のまま通る。
+    """
+    repo = new_repo()
+    try:
+        baseline(repo)
+        src = repo / "docs/original-docs/0001-first.md"
+        body = src.read_text(encoding="utf-8")
+        # source 側に frontmatter がある状態を作り、そこまでを蒸留済みとして pin する
+        # （frontmatter の新規追加そのものは「本文以外の差分」ではなく追加なので内容変更になる）。
+        src.write_text("---\nstatus: Confirmed\nkind: original\n---\n\n" + body, encoding="utf-8")
+        sha = commit_all(repo, "source に frontmatter を付ける")
+        write_registry(repo, sha)
+        write_doc(repo, "docs/knowledge/a.md", ["D19"], ["docs/original-docs/0001-first.md"], sha)
+        commit_all(repo, "pin sha")
+        assert check(repo)[0] == 0, "前提: ここでは stale でない"
+
+        # ここから status だけを変える（本文・他キーは不変）
+        src.write_text(
+            "---\nstatus: Conflict\nkind: original\n---\n\n" + body, encoding="utf-8"
+        )
+        commit_all(repo, "source の status だけを Conflict にする")
+        code, out = check(repo)
+        assert code == 1, f"status の変更は stale にするべき: {out}"
+        assert "STALE" in out, out
     finally:
         shutil.rmtree(repo)
 

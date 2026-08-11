@@ -7,8 +7,8 @@ sources:
   - docs/original-docs/0026-ocr-pdf-ci-mupdf-pin.md
   - docs/original-docs/0073-adr-into-original-docs-and-doc-classes.md
   - .github/workflows/ci.yml
-distilled_from_sha: "6b74f57"
-updated: "2026-08-10"
+distilled_from_sha: "ea9a198"
+updated: "2026-08-11"
 ---
 
 # CI パイプラインの構成と設計意図（D21）
@@ -28,7 +28,7 @@ D21（CI/CD・ビルド・リリース・供給網管理）の充足ギャップ
 | `adr` | ubuntu-latest | ADR 番号重複と文書クラス・sources の検査（**回帰テスト → 本番検査**の順） |
 | `predict-check` | ubuntu-latest | stdlib のみの Python テスト（自走式 + ハーネス忠実性） |
 | `shellcheck` | ubuntu-latest | `shellcheck --severity=warning` |
-| `db-guards` | ubuntu-latest ＋ postgres | golden DB ガードの回帰テスト（#406/#465） |
+| `db-guards` | ubuntu-latest（**postgres サービス無し**・`postgresql-client` のみ） | golden DB ガードの回帰テスト（#406/#465）。到達不能ポートを使い実 DB を一切触らない設計なので DB サービスが要らない |
 | `ocr-pdf` | ubuntu-latest ＋ **`debian:trixie-slim` コンテナ** | mupdf 依存の `pdf-ocr` / `pdf-parser` 統合テスト |
 | `docker-build` | ubuntu-latest（matrix 3） | api / importer / web の Dockerfile の builder ステージをビルド |
 

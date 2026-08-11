@@ -8,12 +8,13 @@ tags: [D10, D19, D09]
 sources:
   - docs/original-docs/0022-rest-api-read-server.md
   - docs/original-docs/0031-api-blend-alpha-default.md
+  - docs/original-docs/0034-alpha-retune-recency-rejected.md
   - docs/original-docs/0069-drop-icloud-writes-browser-only-viewing.md
   - docs/original-docs/0055-ev-layer-separation-circular-break.md
   - docs/original-docs/0060-betting-axis-lock-preclose-topup.md
   - docs/api/openapi.json
-distilled_from_sha: "6b74f57"
-updated: "2026-08-10"
+distilled_from_sha: "b0c270b"
+updated: "2026-08-11"
 ---
 
 # REST API（read 基盤）: 設計仕様
@@ -265,10 +266,10 @@ GET /api/health
 - レスポンス: `HealthResponse`（`{ status, git_sha, build_time }`）
 
 ```json
-{ "status": "ok", "git_sha": "6fd6400", "build_time": "1754176250" }
+{ "status": "ok", "git_sha": "6fd6400", "build_time": "2026-08-02T22:30:50Z" }
 ```
 
-- `git_sha` / `build_time` は `rest-controller/build.rs` が `cargo:rustc-env` で埋め込む（git CLI + std のみ。`.git` 不在時は `unknown`）。sha は短縮形で、作業ツリーが dirty ならその旨が付く。
+- `build_time` は **UTC rfc3339・秒精度**（`build_info::build_time_rfc3339()`。埋め込まれる env は epoch 秒だが、レスポンスでは rfc3339 に変換する）。`git_sha` / ビルド時刻は `rest-controller/build.rs` が `cargo:rustc-env` で埋め込む（git CLI + std のみ。`.git` 不在時に `unknown` へ落ちるのは `git_sha` だけで、ビルド時刻は常に入る）。sha は短縮形で、作業ツリーが dirty ならその旨が付く。
 - **用途**: 長期稼働した api-server が古い成果物を配信し続けても HTTP 200 のままで外形監視に映らない、という #570 の穴を塞ぐ。`git_sha` を現在の checkout（`git rev-parse --short HEAD`）と突き合わせれば世代ずれを機械検知できる。同じ情報は起動ログにも出る。
 
 ## OpenAPI（utoipa コードファースト）

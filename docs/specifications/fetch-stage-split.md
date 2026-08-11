@@ -11,8 +11,8 @@ sources:
   - docs/original-docs/0021-fetch-timeout-and-retry.md
   - docs/original-docs/0024-fetch-stage-split-acquisition-state.md
   - docs/original-docs/0029-shared-jra-fetcher-crate.md
-distilled_from_sha: "6b74f57"
-updated: "2026-08-10"
+distilled_from_sha: "faa62d6"
+updated: "2026-08-11"
 ---
 
 # fetch/parse ステージ分割 + 取得状態管理 仕様書
@@ -209,8 +209,11 @@ JRA は「開催が無い」ときだけでなく**レート制限/IP ブロッ�
   計上しつつ round/day の境界（NotFound）とは扱わず列挙を継続する。
 - 単一指定 fetch は Empty を**非ゼロ終了**で報告し（明示対象の取得失敗）、range fetch では done 行に
   `empty` 件数を出す（best-effort スイープなので恒久 fail にはしない）。
-- 実例: 2025 秋 PDF はレース見出しの正規表現（`\d{5}\s+` → `\s*`）と天候クラス（`[晴曇雨雪]` →
-  `[晴曇雨雪小]`＝`小雨`/`小雪`）の 2 点で 0 レースになっていた。修正で 0 → 12 レースに復旧している。
+- 実例（**2 つの別々の不具合**）: 2025 秋 PDF が **0 レース**になっていた根本原因はレース見出しの
+  正規表現（`\d{5}\s+` → `\s*`。コードと日付の間の空白が無い版に当たらなかった）。天候クラス
+  （`[晴曇雨雪]` → `[晴曇雨雪小]`）が起こしていたのは別の不具合で、`小雨` / `小雪` のレースが
+  前ブロックへ併合される＝**1 開催あたり 1 レース欠落**。**「0 → 12 レース」は両方を直した後の数字**
+  （当該 PDF は `小雨` のレースを含むため、正規表現だけなら 11 レース）。
 
 ---
 

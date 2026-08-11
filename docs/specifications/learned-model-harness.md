@@ -18,8 +18,8 @@ sources:
   - docs/original-docs/0058-pedigree-sire-feature-rejected.md
   - docs/original-docs/0059-market-calibration-correction-rejected.md
   - docs/original-docs/0060-betting-axis-lock-preclose-topup.md
-distilled_from_sha: "6b74f57"
-updated: "2026-08-10"
+distilled_from_sha: "b0c270b"
+updated: "2026-08-11"
 ---
 
 # 学習型モデル評価ハーネス 設計（#272 土台 / #309 受け皿）
@@ -43,7 +43,7 @@ updated: "2026-08-10"
 
 ## 背景：なぜ必要か（value シグナルの実証）
 
-リーク無し `analyze backtest`・production 構成（m=10 / win_power=1.25 / place_show_power=2.0）・4891R で
+リーク無し `analyze backtest`・production 構成（m=10 / win_power=1.25 / place_show_power=2.0。当時は impute 無し）・4891R で
 α∈{0.0, 0.2, 1.0} を比較した（#272 コメント）:
 
 | α | 単勝的中 | フラット回収率 | EV選抜 win 買い目 |
@@ -127,7 +127,10 @@ ADR 0052（α blend 廃止＝純モデル化の棄却）の通り、純 P_model 
 - 特徴量は**必ず backtest と同じ as_of 経路**で emit（別計算で再現しない）。
 - ③ の Python 評価は、**まず内蔵モデルの予測を①の出力から再評価し、`analyze backtest` の数値と一致することを
   サニティ**してから学習モデルに使う（ハーネス自体のバグ・設定差を検出する回帰）。
-- production 構成は常に明示（m=10 / win_power=1.25 / place_show_power=2.0 / α=0.2）。
+- production 構成は常に明示（**5 フラグ**: m=10 / win_power=1.25 / place_show_power=2.0 /
+  impute_missing_factors=true / α=0.2）。`analyze backtest` の既定はどれも production と違う
+  （`--impute-missing-factors` は ADR 0057 で production 側だけ true になった）。
+  検証手段の書き方は [probability-estimation.md](probability-estimation.md) の「本番構成の要件（REQ）」を正とする。
 
 ### 純 Python での鏡映（α×γ 同時掃引・ADR 0045）
 
@@ -135,7 +138,7 @@ ADR 0052（α blend 廃止＝純モデル化の棄却）の通り、純 P_model 
 厳密に鏡映**し、**α=1.0 の実行 1 本から `p_model` を復元**して (α, γ) グリッドを掃引する
 （`scripts/predict-check/umaren_backtest.py`）。
 
-処理順は Rust 本番（`PRODUCTION_BLEND_ALPHA`）を 1:1 でなぞる:
+処理順は Rust 本番を 1:1 でなぞる（本番 α の定数は `RECOMMENDED_MARKET_BLEND_ALPHA`。ADR 0045 本文の `PRODUCTION_BLEND_ALPHA` は当時の名称で、現在その名前の定数は存在しない）:
 
 1. `market_implied(win_odds)`: `raw = 1/odds` → `overround = Σraw`（オッズのある全頭）→ `implied = raw/overround`
 2. `recompute_p_final(p_model, implied, α, γ)`: `blended = α·model + (1−α)·implied`（**implied に居る馬のみ**。

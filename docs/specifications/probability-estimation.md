@@ -12,11 +12,17 @@ sources:
   - docs/original-docs/0012-trainer-stats-feature.md
   - docs/original-docs/0014-none-baseline-exclusion.md
   - docs/original-docs/0016-shrinkage-and-recency.md
+  - docs/original-docs/0034-alpha-retune-recency-rejected.md
+  - docs/original-docs/0036-recent-form-trend-n-rejected.md
+  - docs/original-docs/0038-jockey-recent-form-rejected.md
   - docs/original-docs/0042-win-power-calibration-adopted.md
+  - docs/original-docs/0047-place-show-power-decompression-adopted.md
+  - docs/original-docs/0051-placeshow-power-knee-confirmed-keep-2.md
   - docs/original-docs/0056-feature-reweight-course-gate-jockey.md
   - docs/original-docs/0057-impute-missing-factors-field-mean.md
-distilled_from_sha: "c00d97f"
-updated: "2026-07-16"
+  - docs/original-docs/0061-running-style-feature-rejected.md
+distilled_from_sha: "b0c270b"
+updated: "2026-08-11"
 ---
 
 # 着順確率推定モデル仕様書
@@ -402,6 +408,40 @@ paddock-analyze predict <race_id>
 ```
 
 ---
+
+## 本番構成の要件（REQ・D22）
+
+`EstimationConfig::production()` が採る値と、それを決めた ADR の対応。**ADR は RO なので REQ-ID は
+knowledge 側に置く**（規約は [docs/knowledge/README.md](../knowledge/README.md) の「REQ-ID の規約」）。
+定数を変えるときは、まず対応する REQ の**検証手段を再実行**して閾値ごと更新する。
+
+検証手段の共通前提: `paddock-analyze backtest` の既定は `EstimationConfig::default()` 相当で、
+**m・冪較正・欠落補完・市場ブレンドのいずれも production とは違う**。production を再現するには
+**5 フラグ**を明示する（`--blend-alpha 0.2 --shrinkage-m 10 --win-power 1.25 --place-show-power 2.0
+--impute-missing-factors`）。フラグの付け忘れと zsh の単語分割で計測を誤り ADR を 1 本破棄した経緯は
+[learned-model-harness.md](learned-model-harness.md) の「最重要原則：忠実性をサニティで担保」を参照。
+
+**下表は各行に完全なコマンドを書く**（共通 base を変数やシェル関数に括り出さない。clap は同じフラグの
+重複指定を拒否するので「base から 1 軸だけ外す」が書けず、変数展開は zsh で単語分割されない）。
+
+**測定条件が出典 ADR と違う行がある**（ADR は当時の構成で測っている）。その場合は絶対値の一致では
+なく順序関係で見る旨を各行に書く。
+
+<!-- REQ:begin D22 -->
+| REQ-ID | 要件 | 検証手段 | 出典 | status |
+|---|---|---|---|---|
+| REQ-D22-001 | 市場オッズ（単勝）ブレンドのモデル重みは α=0.2（`RECOMMENDED_MARKET_BLEND_ALPHA`）。市場オッズが無いレースはモデルのみへ自動フォールバックする | `for a in 0.2 0.3 0.4; do paddock-analyze backtest --from 2025-01-05 --to 2026-06-14 --shrinkage-m 10 --win-power 1.25 --place-show-power 2.0 --impute-missing-factors --blend-alpha "$a"; done`（4891R）で**単勝 Brier / LogLoss が α 方向に単調で 0.2 が最良**であること。ADR 0034 は冪較正・impute 以前の測定なので**絶対値は一致せず順序関係で見る**。α=0.0（純市場）は掃引対象外——純市場との比較は ADR 0052 が扱う | [ADR 0034](../original-docs/0034-alpha-retune-recency-rejected.md) | Confirmed |
+| REQ-D22-002 | ベイズ縮約の擬似カウントは m=10（`RECOMMENDED_SHRINKAGE_M`）。backtest の既定は縮約 off なので production 再現には `--shrinkage-m 10` を明示する | ADR 0016 の m 掃引は **α を指定しない純モデル測定**（backtest の既定がブレンド無し。本番は当時すでに α=0.3）なので、α・冪較正・impute をすべて外して回す。off は `paddock-analyze backtest --from 2026-03-28 --to 2026-05-31`（**`--shrinkage-m off` とは書けない・フラグ自体を省く**）、残りは `for m in 5 10 20 50; do paddock-analyze backtest --from 2026-03-28 --to 2026-05-31 --shrinkage-m "$m"; done`（計 5 通り・144R）。**off 比で単勝 Brier / LogLoss が改善し m=10 が最良・m=50 は過縮約で劣化**すること（0016 実測: LogLoss 0.2718 → 0.2506・単勝的中 9.7 → 13.2%）。**α=0.2 を掛けると m 方向の差は消える**（ADR 0034 の 4891R で m=5/10/20 が Brier 0.0544・LogLoss 0.1974 と同値）ので、production 構成では「m を変えても悪化しない」ことの追認にしかならない | [ADR 0016](../original-docs/0016-shrinkage-and-recency.md) / [0034](../original-docs/0034-alpha-retune-recency-rejected.md) | Confirmed |
+| REQ-D22-003 | win_prob の冪変換は γ=1.25（`RECOMMENDED_WIN_POWER`）。γ≥1.5 は LogLoss / Brier 悪化と人気馬の過剰補正で採らない | `for g in 1.0 1.25 1.5 2.0; do paddock-analyze backtest --from 2025-01-01 --to 2026-06-30 --blend-alpha 0.2 --shrinkage-m 10 --place-show-power 2.0 --impute-missing-factors --win-power "$g"; done`（4891R）で単勝 LogLoss が 1.25 で最良であること（ADR 0042 実測 0.1974 → 0.1954。当時は impute 無しなので**絶対値は一致せず順序関係で見る**） | [ADR 0042](../original-docs/0042-win-power-calibration-adopted.md) | Confirmed |
+| REQ-D22-004 | place/show の冪変換は γ=2.0（`RECOMMENDED_PLACE_SHOW_POWER`）。純校正の knee は γ=3.0 だが複勝買い目 ROI が net 改善しないため 2.0 を維持する | knee の観測は ADR 0051 の窓・グリッドで行う: `for g in 1.5 2.0 2.5 3.0 3.5; do paddock-analyze backtest --from 2025-01-05 --to 2026-06-14 --blend-alpha 0.2 --shrinkage-m 10 --win-power 1.25 --impute-missing-factors --place-show-power "$g"; done`。**γ=3.0 で純校正（place/show Brier・LogLoss）は最良になるが複勝買い目 ROI が γ=2.0 を上回らないこと**。ADR 0047 / 0051 とも impute 以前の測定なので順序関係で見る | [ADR 0047](../original-docs/0047-place-show-power-decompression-adopted.md)（採用）/ [0051](../original-docs/0051-placeshow-power-knee-confirmed-keep-2.md)（knee 確認・2.0 維持） | Confirmed |
+| REQ-D22-005 | 近走トレンドは前走のみ（`trend_n = 1`）。N=2/3 は全指標が悪化する | ADR 0036 も**純モデル測定**（単勝的中 13.5% 水準・α 指定なし）なので `for n in 1 2 3; do paddock-analyze backtest --from 2026-03-01 --to 2026-05-31 --shrinkage-m 10 --trend-n "$n"; done`（893R）で N=2/3 が N=1 を上回らないこと。α=0.2 を掛けるとモデル側の差が希釈されて判定が出ない | [ADR 0036](../original-docs/0036-recent-form-trend-n-rejected.md) | Confirmed |
+| REQ-D22-006 | 時間減衰（recency）は無効（`recency: None`）。Brier / LogLoss が変わらず ROI も誤差範囲で、複雑性だけが増える | `for h in 30 60 90; do paddock-analyze backtest --from 2025-01-05 --to 2026-06-14 --blend-alpha 0.2 --shrinkage-m 10 --win-power 1.25 --place-show-power 2.0 --impute-missing-factors --recency-half-life "$h"; done` を無効時と比較し、**差が出ないこと**。**ADR 0034 の recency 表は α=0.3 固定・冪較正 impute 以前**なので数値は一致しない | [ADR 0034](../original-docs/0034-alpha-retune-recency-rejected.md) | Confirmed |
+| REQ-D22-007 | 騎手直近フォームの重みは 0（`jockey_recent_form_weight: None`）。算出機構と `--jockey-form-weight` は再評価用に残す | `for w in 0.0 0.1 0.25 0.5 1.0; do paddock-analyze backtest --from 2026-01-01 --to 2026-06-14 --blend-alpha 0.2 --shrinkage-m 10 --win-power 1.25 --place-show-power 2.0 --impute-missing-factors --jockey-form-weight "$w"; done`（1561R）で **w>0 が全指標で w=0 を上回らないこと**。ADR 0038 は α=0.2 / m=10 だが冪較正・impute 以前なので順序関係で見る | [ADR 0038](../original-docs/0038-jockey-recent-form-rejected.md) | Confirmed |
+| REQ-D22-008 | 相性 factor（騎手×場 / 騎手×距離 / 騎手×馬 / 馬×場）は production 非組込（重み 0）。measure-first で lift を測ってから採否を決める | **lift は純モデルで測る**（`analyze backtest` は AUC / top1 を出力しないので `--dump-features` のダンプを Python で評価する。同型案件の ADR 0057 / 0061 も α=1.0 で測っている）: `for w in 0.0 0.5 1.0; do paddock-analyze backtest --from 2025-01-05 --to 2026-06-14 --blend-alpha 1.0 --shrinkage-m 10 --win-power 1.25 --place-show-power 2.0 --impute-missing-factors --jockey-venue-weight "$w" --jockey-distance-weight "$w" --jockey-horse-combo-weight "$w" --horse-venue-weight "$w" --dump-features "/tmp/affinity-$w.tsv"; done`。**純 top1 が baseline を lift 閾値ぶん上回ること**が採用条件（ADR 0061 は同型案件で純 top1 +0.010〜0.015 のゲートを置いた。閾値と最終的な掃引値は #350 で確定）。**α=0.2 での実行は別基準**——ブレンドを掛けるとモデル側の差は消えるので（REQ-D22-002 / 005 と同じ理屈）、そちらは「blended が非回帰であること」の確認に使う | [#350](https://github.com/taito-station/paddock/issues/350)（measure-first で保留中。採否の ADR は未起票） | Tentative |
+| REQ-D22-009 | 脚質（先行度）factor は production 非組込（`running_style_weight: None`）。純モデルの AUC / 校正は微改善するが本命 top1 が全 weight で劣化する | **CLI 未露出**（`--running-style-weight` は無い）ので、ダンプまでを `paddock-analyze backtest --from 2025-01-01 --to 2026-06-30 --blend-alpha 1.0 --shrinkage-m 10 --win-power 1.25 --place-show-power 2.0 --dump-features /tmp/rs.tsv` で作り、weight を振る部分は Python 側で鏡映する（**掃引スクリプトは ADR 0061 が「本番外の使い捨て scratch でリポに残さない」と宣言しており現存しない**——`scripts/predict-check/feature_resolution_diag.py` を土台に再実装するか、CLI にフラグを足す）。合否は **全 weight で純 top1 が baseline（0.1683）を上回らないこと**（0061 のゲート＝純 top1 +0.010〜0.015 に届かないこと）。**母数は `running_style` 非空の covered subset**（全体の 17.3%・11,809 馬 / 3,827 レース。全馬母数で回すと 0061 と比較できない）。0061 の再現に合わせて `--impute-missing-factors` は付けない。**決定自体は ADR 0061 で確定済み**で、`Tentative` にしていないのはそのため——暫定なのは要件ではなく**再測定の手段**（ハーネスが現存しない） | [ADR 0061](../original-docs/0061-running-style-feature-rejected.md) | Confirmed |
+| REQ-D22-010 | 欠落 stat factor はレース内 field mean で補完する（`impute_missing_factors: true`）。scalar 項（`recent_form` / `weight_carried` / `jockey_recent_form`）は補完せず従来どおり drop する | 純モデルのダンプを 1 本作り（`paddock-analyze backtest --from 2025-01-05 --to 2026-06-14 --blend-alpha 1.0 --shrinkage-m 10 --win-power 1.25 --place-show-power 2.0 --dump-features /tmp/impute.tsv`）、**drop と補完の比較は `scripts/predict-check/impute_prototype.py --tsv /tmp/impute.tsv` で行う**（素性レート列から両方を再計算するのでダンプは 1 本でよい。`analyze backtest` は AUC / top1 を出力しない）。blended 非回帰は `paddock-analyze backtest --from 2025-01-05 --to 2026-06-14 --blend-alpha 0.2 --shrinkage-m 10 --win-power 1.25 --place-show-power 2.0 --impute-missing-factors` を有無で比較。合否は **純 AUC / top1 が改善し、blended（α=0.2）が非回帰であること**（ADR 0057 実測: 純 AUC 0.671→0.678・top1 0.182→0.197・全 6 四半期で改善／blended 単勝的中 31.3%→31.2% で実質フラット） | [ADR 0057](../original-docs/0057-impute-missing-factors-field-mean.md) | Confirmed |
+| REQ-D22-011 | `win ≤ place ≤ show` の単調性を出力で保証する（累積 max で単調化。冪変換を入れた後も再是正する） | `cargo test -p paddock-domain` の単調性テスト | [ADR 0007](../original-docs/0007-probability-monotonicity-jockey.md)（単調化の決定）/ [0047](../original-docs/0047-place-show-power-decompression-adopted.md)（冪変換後の再是正） | Confirmed |
+<!-- REQ:end D22 -->
 
 ## 既知の制約
 
