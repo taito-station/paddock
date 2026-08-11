@@ -2,16 +2,12 @@
 
 > 一次資料（RO 生素材）。蒸留は QA（[QA-analyze-401](../qa/QA-analyze-401.md)）→ knowledge で行う。
 
-## Issue #401 概要
+## 発端の Issue
 
-REST の分析統計エンドポイント `GET /api/analyze/{horse,jockey,trainer}`（web の `/analyze` が使用）は
-馬名・騎手名を**完全一致でしか検索できない**。表記ゆれ・部分入力で 0 件になり取りこぼす。
+原本は [#401](https://github.com/taito-station/paddock/issues/401)（**転記しない**・ADR 0074）。
+本文は `gh issue view 401` で取得する。
 
-部分一致・カタカナ正規化のロジックは **#50（CLOSED/COMPLETED, 2026-06-09）で CLI `analyze` +
-`horse_stats`/`jockey_stats` repository 層に実装済み**だが、**REST API がそれを使っておらず web から活用できない**。
-#50 の既存実装を REST/web に露出させる。
-
-### 現状の確認（2026-07-14, 経験的）
+## 現状の確認（2026-07-14, 実測）
 - `GET /api/analyze/horse?name=カップッチョ`（完全一致）→ 200・統計あり。
 - `GET /api/analyze/horse?name=カップ`（部分）→ starts=0（未ヒット）。
 - `GET /api/analyze/jockey?name=松山`（部分）→ starts=0（未ヒット）。

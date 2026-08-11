@@ -2,20 +2,10 @@
 
 > 一次資料（RO 生素材）。蒸留は QA（[QA-live-freshness-382](../qa/QA-live-freshness-382.md)）→ knowledge で行う。
 
-## Issue #382 概要
+## 発端の Issue
 
-ライブボードの鮮度判定（`freshness`, `web/src/lib/live.ts`）は `summary.last_updated`（サーバ保存時刻）と
-**クライアント時計**の比較で行っており、クライアント時計のズレで誤判定しうる（遅れ側は誤 stale 警告、
-進み側は 0 クランプで fresh に倒れる設計済み）。サーバ時刻を基準に較正する。
-
-### 要件
-- `GET /api/live/{date}` のレスポンス（summary）にサーバ現在時刻（`server_now` 等、rfc3339）を追加
-- web 側は `server_now - last_updated` で経過を計算し、クライアント時計は相対表示の補間（30 秒 tick）にのみ使う
-- `freshness` のシグネチャ変更とユニットテスト更新
-
-### 補足
-- PR #376 セルフレビューの follow-up（現状は「警告過多側=安全方向」として現状維持と判断したもの）
-- 関連: #372（鮮度バッジ・自動ポーリング）, #376
+原本は [#382](https://github.com/taito-station/paddock/issues/382)（**転記しない**・ADR 0074）。
+本文は `gh issue view 382` で取得する。
 
 ## コード調査所見（2026-07-14, worktree paddock-382 = main 9f35d93 起点）
 

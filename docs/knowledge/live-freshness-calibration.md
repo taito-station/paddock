@@ -8,7 +8,7 @@ sources:
   - docs/original-docs/382-live-server-now.md
   - docs/specifications/live-ev-buy-view.md
   - docs/original-docs/0064-live-ev-buy-view.md
-distilled_from_sha: "9538782"
+distilled_from_sha: "f2bb73a"
 updated: "2026-07-22"
 ---
 
