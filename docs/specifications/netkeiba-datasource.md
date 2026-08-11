@@ -214,7 +214,8 @@ paddock 内部の `RaceId` も同じ 12 桁構成要素から導出する（既�
   計上されてしまう。
 - 馬場・距離表記が読めない場合や `RaceData01` 欠落は従来どおり実障害（exit 1）。**「対応外」は広げない**。
 - **スキップの識別には stdout の読み取りが要る**（exit code だけでは正常取り込みと区別できない）。
-  行頭は `スキップ: ` 固定。**stdout を捨てる消費側（`refresh_ev.sh` は `> /dev/null`）からは追えない**——
+  当該**行の行頭**が `スキップ: ` 固定（tracing のログ行が同じ stdout に混ざるため行単位で照合する）。
+  **stdout を捨てる消費側（`refresh_ev.sh` は `> /dev/null`）からは追えない**——
   stderr には出さない（同スクリプトが「stderr あり」を異常として警告するため、正常な結果を警告に
   化けさせない）。tracing も既定 writer が stdout なので代替にならない。
 - 却下案（ADR 0075 に詳細）: 専用 exit code の新設 / `IngestCardResponse` にフラグを足す（degraded と同型）/
@@ -285,10 +286,13 @@ paddock-fetch-card --year 2026 --venue 東京 --round 3 --day 2 --race 11
 | 2 | 引数の形式不正（`clap` が stderr にエラーを出力。アプリのコードは関与しない） |
 | 3 | degraded（単複オッズ未取得。card は保存済みで要再取得。ADR 0049） |
 
-- **exit≠0 は本物の失敗だけ**。対応外レースは異常ではないため exit 0 とし、理由は **stdout** に出力する
-  （`predict` の「開催なし日付」と同じ規約。[predict-session.md](predict-session.md) 参照）。
+- **exit 0 は正常終了（対象外スキップを含む）**。対応外レースは異常ではないため exit 0 とし、理由は
+  **stdout** に出力する（`predict` の「開催なし日付」と同じ規約。[predict-session.md](predict-session.md) 参照）。
+  **取り込み失敗として数えてよいのは 1 だけ**——3 は card 保存済みでオッズのみ要再取得なので、
+  FAIL に丸めると「win だけ再取得すればよい」判断を落とす。
 - ただし **exit 0 だけでは「取り込んだ」と「対象外でスキップした」を区別できない**。区別が要る消費側は
-  stdout の `スキップ: ` 行を読む。
+  stdout を**行単位**で見て `スキップ: ` で始まる行を探す（stdout には tracing のログ行が先行しうるため、
+  出力全体の先頭で照合しない）。
 
 ---
 

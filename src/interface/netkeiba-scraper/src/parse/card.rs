@@ -132,9 +132,11 @@ fn extract_post_time(doc: &Html) -> Option<NaiveTime> {
 /// `div.RaceData01` のテキストから `芝1600m` 等を読み、Surface と距離(m)に変換する。
 /// 障害(障)は取り込み対象外として `Error::Unsupported`（実障害の `Parse` とは別物）。
 ///
-/// 障害レースの実表記は `障3000m (芝)` で、**`captures()` の最左マッチ**が先頭の `障` を拾うことで
-/// 対象外判定が成立する（後続の `(芝)` を先に拾うと平地として取り込まれてしまう）。この順序依存は
-/// `jump_race_with_trailing_surface_note_still_unsupported` で固定している。
+/// 障害の判定は**正規表現より先に `障` の有無で行う**。`SURFACE_DISTANCE_RE` はマーカー直後に距離を
+/// 要求するため、`障芝3000m` のような表記では `障` が候補にならず `芝3000m` にマッチしてしまい、
+/// 障害レースが芝レースとして黙って取り込まれる（実表記の `障3000m (芝)` では正しく拾えるが、
+/// 表記揺れに対して脆い）。近走側 `horse_history::parse_surface_distance` は先頭 1 文字判定で同じ
+/// 入力を正しく除外しており、card 経路だけが弱かった（#586・4 巡目レビュー）。
 fn extract_surface_distance(doc: &Html) -> Result<(Surface, u32)> {
     let data_sel = sel("div.RaceData01")?;
     let text = doc
@@ -143,6 +145,14 @@ fn extract_surface_distance(doc: &Html) -> Result<(Surface, u32)> {
         .map(|e| e.text().collect::<String>())
         .ok_or_else(|| Error::Parse("RaceData01 が見つかりません".to_string()))?;
 
+    // 馬場・距離の記載に `障` が現れたら表記の並びによらず対象外とする。RaceData01 は
+    // 発走時刻・馬場距離・天候・馬場状態のフィールドで、`障` が他の意味で現れることはない。
+    if text.contains('障') {
+        return Err(Error::Unsupported(
+            "障害レースは取り込み対象外です".to_string(),
+        ));
+    }
+
     let caps = SURFACE_DISTANCE_RE
         .captures(&text)
         .ok_or_else(|| Error::Parse(format!("芝/ダ/距離を読めません: {text:?}")))?;
@@ -150,9 +160,8 @@ fn extract_surface_distance(doc: &Html) -> Result<(Surface, u32)> {
     let surface = match &caps[1] {
         "芝" => Surface::Turf,
         "ダ" => Surface::Dirt,
+        // 上の `text.contains('障')` で先に弾いているため到達しない防御アーム（#586, ADR 0075）。
         "障" => {
-            // 仕様として取り込み対象外。パース失敗（実障害）とは別 variant にし、呼び出し側が
-            // 「設計どおりのスキップ」と区別して exit 0 に倒せるようにする（#586, ADR 0075）。
             return Err(Error::Unsupported(
                 "障害レースは取り込み対象外です".to_string(),
             ));

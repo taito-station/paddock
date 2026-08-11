@@ -174,6 +174,7 @@ mod tests {
             paddock_use_case::Error::Timeout("timed out".into()),
             paddock_use_case::Error::InvalidArgument("bad race_id".into()),
             paddock_use_case::Error::NotFound("no such race".into()),
+            paddock_use_case::Error::Conflict("already exists".into()),
         ] {
             let label = err.to_string();
             assert!(

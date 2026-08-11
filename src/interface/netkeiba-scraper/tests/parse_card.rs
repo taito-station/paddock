@@ -121,18 +121,20 @@ fn jump_race_returns_unsupported() {
     assert!(err.to_string().contains("障害"), "理由が読める: {err}");
 }
 
-// 実際の netkeiba は障害レースの RaceData01 を `障3000m (芝)` の形で描画する（202607020609 で確認）。
-// `SURFACE_DISTANCE_RE` は**最左マッチ**なので、後続の `(芝)` ではなく先頭の `障` を拾う——この
-// 順序依存の上に「障害は必ずスキップ」の契約が乗っているため、実表記の並びで固定しておく。
-// 並びが逆転する表記が現れたら平地として取り込まれるので、ここが落ちて気付ける。
+// 障害レースの表記揺れに対する担保（#586・4 巡目レビュー）。`SURFACE_DISTANCE_RE` はマーカー直後に
+// 距離を要求するため、`障芝3000m` では `障` が候補にならず `芝3000m` にマッチする。正規表現だけに
+// 頼ると**障害レースが芝 3000m として黙って取り込まれる**ので、`障` の有無を先に見て弾いている。
+// 実表記 `障3000m (芝)`（202607020609 で確認）と併せて両方の並びを固定する。
 #[test]
-fn jump_race_with_trailing_surface_note_still_unsupported() {
-    let html = FIXTURE.replace("芝1600m", "障3000m (芝)");
-    let err = parse_card(&html, RACE_ID).expect_err("障害レースは取り込み対象外");
-    assert!(
-        matches!(err, Error::Unsupported(_)),
-        "後ろの (芝) を先に拾って平地扱いしない: {err}"
-    );
+fn jump_race_notation_variants_are_all_unsupported() {
+    for surface in ["障3000m (芝)", "障芝3000m", "(芝) 障3000m"] {
+        let html = FIXTURE.replace("芝1600m", surface);
+        let err = parse_card(&html, RACE_ID).expect_err("障害レースは取り込み対象外");
+        assert!(
+            matches!(err, Error::Unsupported(_)),
+            "平地として取り込まない（表記 {surface}）: {err}"
+        );
+    }
 }
 
 // 「対応外」を広げない担保（#586）。馬場・距離表記が読めないのは netkeiba のレイアウト変更

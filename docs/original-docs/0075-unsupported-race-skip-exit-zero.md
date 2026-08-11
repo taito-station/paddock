@@ -37,8 +37,11 @@ $ echo $?
 
 1. `netkeiba_scraper::Error::Unsupported(String)` を新設し、`parse_card` の障害判定はこれを返す。
    馬場・距離表記が読めない場合や `RaceData01` 欠落は従来どおり `Parse`（**「対応外」を広げない**）。
-   なお `SURFACE_DISTANCE_RE` のキャプチャ群は `[芝ダ障]` に限定されているため、`match` の
-   「未知の馬場記号」アームは**到達不能な防御アーム**である（正規表現を広げたときのための保険）。
+   **障害の判定は正規表現より先に `RaceData01` に `障` を含むかで行う**——`SURFACE_DISTANCE_RE` は
+   マーカー直後に距離を要求するため、`障芝3000m` のような表記では `障` が候補にならず `芝3000m` に
+   マッチし、**障害レースが芝レースとして黙って取り込まれる**（実表記 `障3000m (芝)` では拾えるが
+   表記揺れに脆い）。近走側 `horse_history::parse_surface_distance` は先頭 1 文字判定で同じ入力を
+   正しく除外しており、card 経路だけが弱かった。`match` の各アームは到達不能な防御アームになる。
 2. `paddock_use_case::Error::Unsupported(String)` を新設する。`From` は理由文字列を前置き無しで渡す
    （利用者向け stdout メッセージにそのまま載せるため）。
 3. `CardInteractor::ingest` はこれを捕まえず伝播させ、**カード・オッズ・近走のすべてを打ち切る**。
