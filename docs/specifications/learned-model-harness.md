@@ -43,7 +43,7 @@ updated: "2026-08-11"
 
 ## 背景：なぜ必要か（value シグナルの実証）
 
-リーク無し `analyze backtest`・production 構成（m=10 / win_power=1.25 / place_show_power=2.0）・4891R で
+リーク無し `analyze backtest`・production 構成（m=10 / win_power=1.25 / place_show_power=2.0。当時は impute 無し）・4891R で
 α∈{0.0, 0.2, 1.0} を比較した（#272 コメント）:
 
 | α | 単勝的中 | フラット回収率 | EV選抜 win 買い目 |
@@ -127,7 +127,10 @@ ADR 0052（α blend 廃止＝純モデル化の棄却）の通り、純 P_model 
 - 特徴量は**必ず backtest と同じ as_of 経路**で emit（別計算で再現しない）。
 - ③ の Python 評価は、**まず内蔵モデルの予測を①の出力から再評価し、`analyze backtest` の数値と一致することを
   サニティ**してから学習モデルに使う（ハーネス自体のバグ・設定差を検出する回帰）。
-- production 構成は常に明示（m=10 / win_power=1.25 / place_show_power=2.0 / α=0.2）。
+- production 構成は常に明示（**5 フラグ**: m=10 / win_power=1.25 / place_show_power=2.0 /
+  impute_missing_factors=true / α=0.2）。`analyze backtest` の既定はどれも production と違う
+  （`--impute-missing-factors` は ADR 0057 で production 側だけ true になった）。
+  検証手段の書き方は [probability-estimation.md](probability-estimation.md) の「本番構成の要件（REQ）」を正とする。
 
 ### 純 Python での鏡映（α×γ 同時掃引・ADR 0045）
 

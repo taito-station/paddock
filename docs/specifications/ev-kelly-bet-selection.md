@@ -11,12 +11,10 @@ sources:
   - docs/original-docs/0028-konsen-odds-trigger-rejected.md
   - docs/original-docs/0030-konsen-trio-partner-width-rejected.md
   - docs/original-docs/0033-conditional-win-bet-rejected.md
-  - docs/original-docs/0040-ev-gate-threshold-lowering-rejected.md
   - docs/original-docs/0041-umaren-only-strategy-rejected.md
   - docs/original-docs/0043-exacta-in-portfolio-rejected.md
   - docs/original-docs/0046-allocation-prob-weight-no-floor-rejected.md
   - docs/original-docs/0054-kelly-staking-rejected.md
-  - docs/original-docs/0060-betting-axis-lock-preclose-topup.md
   - docs/original-docs/0064-live-ev-buy-view.md
   - docs/original-docs/0065-wide-partners-top5-alignment.md
 distilled_from_sha: "faa62d6"
