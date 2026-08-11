@@ -297,6 +297,51 @@ def test_stale_is_suppressed_by_warn_only() -> None:
         shutil.rmtree(repo)
 
 
+def test_untracked_source_is_warning_not_silent() -> None:
+    """履歴を辿れない source は判定不能。黙って通す（fail-open）のではなく可視化する。
+
+    stale を error へ昇格させた（#580）あとは、この warning 分岐が数少ない
+    「検査が効かないまま緑になる」経路なので、消えていないことを固定する。
+    """
+    repo = new_repo()
+    try:
+        sha = baseline(repo)
+        # コミットしない source を sources に足す（git log が空 → last_content_change が None）
+        (repo / "docs/original-docs/9999-untracked.md").write_text("# 未コミット\n", encoding="utf-8")
+        write_doc(repo, "docs/knowledge/a.md", ["D19"],
+                  ["docs/original-docs/0001-first.md", "docs/original-docs/9999-untracked.md"], sha)
+        code, out = check(repo)
+        assert code == 0, f"判定不能は error にしない: {out}"
+        assert "履歴を辿れず" in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_shallow_clone_downgrades_unresolvable_sha_to_warning() -> None:
+    """shallow clone では sha 未解決を warning に落とす（履歴が無いだけなので）。
+
+    ただしその文書の stale 判定は丸ごと飛ぶ。CI は fetch-depth: 0 でこの経路に入らない。
+    """
+    repo = new_repo()
+    shallow = Path(tempfile.mkdtemp(prefix="doc-classes-shallow-"))
+    try:
+        baseline(repo)
+        # 追加コミットを重ねてから深さ 1 で clone すると、pin した sha が clone 側に存在しない
+        p = repo / "docs/original-docs/0001-first.md"
+        p.write_text(p.read_text(encoding="utf-8") + "\n追記。\n", encoding="utf-8")
+        commit_all(repo, "2 つ目のコミット")
+        dest = shallow / "clone"
+        subprocess.run(["git", "clone", "-q", "--depth", "1", f"file://{repo}", str(dest)],
+                       capture_output=True, text=True, check=True)
+        assert run_git(dest, "rev-parse", "--is-shallow-repository") == "true"
+        code, out = check(dest)
+        assert code == 0, f"shallow では error にしない: {out}"
+        assert "shallow clone のため" in out, out
+    finally:
+        shutil.rmtree(repo)
+        shutil.rmtree(shallow, ignore_errors=True)
+
+
 def test_rename_only_is_not_stale() -> None:
     """**最重要**: パス移動のみのコミットを stale と見なさない。
 

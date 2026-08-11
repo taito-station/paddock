@@ -15,14 +15,13 @@ paddock の文書は HVE（dahatake/HypervelocityEngineering, MIT）の蒸留モ
   改変しない**——決定を変えるときは新しい ADR で supersede する。
 - **読む入口は knowledge**。ADR の決定・理由・却下案・影響は knowledge に**全部写す**。重複を許す
   代わりに、`sources` の更新に蒸留が追従しているかは機械検査で担保する（人手の規律に委ねない）。
-  **⚠ 移行中（ADR 0073 / #579）**: 写しは未着手（knowledge は 8 本で ADR 73 本の決定を含まない。
-  例外は [docs/knowledge/product-goals.md](docs/knowledge/product-goals.md) で、棄却 ADR 24 本の
-  「採らなかったこと」だけは索引として畳んである）。
-  当面は **ADR 原本（`docs/original-docs/0NNN-*.md`）も併せて読む**。stale の機械検査は配線済みで、
-  **判定は error**（未解消 6 件を #580 で消化して warning から昇格）。**既存 ADR の写しに着手して
-  よい状態になった**（担保が無いまま写すと stale 面積だけ増える、という前提条件は解消済み）。
-  `sources` に挙げたファイルを内容ごと変更したら、参照元の `distilled_from_sha` / `updated` を
-  同じ PR で追従させる（追従漏れは CI が落とす）。
+  **写しは一巡済み（#588）**: ADR 74 本のうち棄却 24 本は
+  [docs/knowledge/product-goals.md](docs/knowledge/product-goals.md) が索引し、採用側はいずれかの
+  knowledge / specifications が `sources` で参照している（knowledge は 9 本）。ただし**粒度は一様でない**
+  ので、決定の細部（却下案・数値の前提）が要るときは **ADR 原本（`docs/original-docs/0NNN-*.md`）も読む**。
+  stale の機械検査は **error**（未解消 6 件を #580 で消化して warning から昇格）。`sources` に挙げた
+  ファイルを内容ごと変更したら、参照元の `distilled_from_sha` / `updated` を同じ PR で追従させる
+  （追従漏れは CI が落とす）。
 - **`docs/original-docs/` の命名は 2 系統**: ADR = **0 埋め 4 桁**（`0055-...`）/ issue 由来の一次資料 =
   **issue 番号・0 埋めしない**（`382-...`）。これが ADR 番号重複検出の判定根拠なので破らない。
 - **status**: `Confirmed`（運用の前提にしてよい）/ `Tentative`（暫定）/ `Conflict`（矛盾・放置せず解消）。

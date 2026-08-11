@@ -7,7 +7,7 @@
 原本は [#401](https://github.com/taito-station/paddock/issues/401)（**転記しない**・ADR 0074）。
 本文は `gh issue view 401` で取得する。
 
-## 現状の確認（2026-07-14, 実測）
+## 現状の確認（2026-07-14, 経験的）
 - `GET /api/analyze/horse?name=カップッチョ`（完全一致）→ 200・統計あり。
 - `GET /api/analyze/horse?name=カップ`（部分）→ starts=0（未ヒット）。
 - `GET /api/analyze/jockey?name=松山`（部分）→ starts=0（未ヒット）。

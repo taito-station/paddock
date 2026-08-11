@@ -419,22 +419,30 @@ knowledge 側に置く**（規約は [docs/knowledge/README.md](../knowledge/REA
 再現には 4 フラグを明示する（付け忘れで ADR を 1 本破棄した実績がある。上記「変更履歴」参照）。
 
 ```sh
-BT="paddock-analyze backtest --from 2025-01-05 --to 2026-06-14 \
-    --blend-alpha 0.2 --shrinkage-m 10 --win-power 1.25 --place-show-power 2.0"
+# 掃引しない軸を固定する base。**掃引する軸は base に含めない**
+# （clap は同じフラグの重複指定を拒否するため、base に入れたまま足すと実行できない）。
+BT_BASE="paddock-analyze backtest --shrinkage-m 10 --win-power 1.25 --place-show-power 2.0"
+# 例: α を振る（--blend-alpha は base に入れず、掃引側で与える）
+for a in 0.2 0.3 0.4; do
+  $BT_BASE --from 2025-01-05 --to 2026-06-14 --blend-alpha "$a"
+done
 ```
+
+**窓（`--from` / `--to`）は REQ ごとに違う**（各 ADR が測った窓を使う）。下表の「検証手段」に明記する。
 
 <!-- REQ:begin D22 -->
 | REQ-ID | 要件 | 検証手段 | 出典 | status |
 |---|---|---|---|---|
-| REQ-D22-001 | 市場オッズ（単勝）ブレンドのモデル重みは α=0.2（`RECOMMENDED_MARKET_BLEND_ALPHA`）。市場オッズが無いレースはモデルのみへ自動フォールバックする | `$BT` の `--blend-alpha` を 0.0 / 0.2 / 1.0 で振り、単勝 Brier / LogLoss が 0.2 で最良であること（4891R） | [ADR 0034](../original-docs/0034-alpha-retune-recency-rejected.md) | Confirmed |
-| REQ-D22-002 | ベイズ縮約の擬似カウントは m=10（`RECOMMENDED_SHRINKAGE_M`）。backtest の既定は縮約 off なので production 再現には `--shrinkage-m 10` を明示する | `$BT` の `--shrinkage-m` スイープ | [ADR 0016](../original-docs/0016-shrinkage-and-recency.md) | Confirmed |
-| REQ-D22-003 | win_prob の冪変換は γ=1.25（`RECOMMENDED_WIN_POWER`）。γ≥1.5 は LogLoss / Brier 悪化と人気馬の過剰補正で採らない | `$BT` の `--win-power` スイープで単勝 LogLoss が 1.25 で最良（0.1974 → 0.1954・4891R） | [ADR 0042](../original-docs/0042-win-power-calibration-adopted.md) | Confirmed |
-| REQ-D22-004 | place/show の冪変換は γ=2.0（`RECOMMENDED_PLACE_SHOW_POWER`）。純校正の knee は γ=3.0 だが複勝買い目 ROI が net 改善しないため 2.0 を維持する | `$BT` の `--place-show-power` スイープ（place/show Brier・人気帯校正・複勝 ROI を併せて見る） | [ADR 0047](../original-docs/0047-place-show-power-decompression-adopted.md) / [0051](../original-docs/0051-placeshow-power-knee-confirmed-keep-2.md) | Confirmed |
-| REQ-D22-005 | 近走トレンドは前走のみ（`trend_n = 1`）。N=2/3 は全指標が悪化する | `paddock-analyze backtest --trend-n <N>`（893R で N=1 を上回らないこと） | [ADR 0036](../original-docs/0036-recent-form-trend-n-rejected.md) | Confirmed |
-| REQ-D22-006 | 時間減衰（recency）は無効（`recency: None`）。Brier / LogLoss が変わらず ROI も誤差範囲で、複雑性だけが増える | `$BT` に `--recency-half-life` を付けて baseline と比較 | [ADR 0034](../original-docs/0034-alpha-retune-recency-rejected.md) | Confirmed |
-| REQ-D22-007 | 騎手直近フォームの重みは 0（`jockey_recent_form_weight: None`）。算出機構と `--jockey-form-weight` は再評価用に残す | `paddock-analyze backtest --jockey-form-weight <w>` のスイープ | [ADR 0038](../original-docs/0038-jockey-recent-form-rejected.md) | Confirmed |
-| REQ-D22-008 | 脚質・相性 factor は production 非組込（重み 0）。measure-first で lift を測ってから採否を決める | 各 `--*-weight` フラグでの cheap screen（本命 top1 精度を主指標にする） | [ADR 0061](../original-docs/0061-running-style-feature-rejected.md) | Confirmed |
-| REQ-D22-009 | `win ≤ place ≤ show` の単調性を出力で保証する（冪変換後も累積 max で再是正する） | `cargo test -p paddock-domain` の単調性テスト | [ADR 0047](../original-docs/0047-place-show-power-decompression-adopted.md) | Confirmed |
+| REQ-D22-001 | 市場オッズ（単勝）ブレンドのモデル重みは α=0.2（`RECOMMENDED_MARKET_BLEND_ALPHA`）。市場オッズが無いレースはモデルのみへ自動フォールバックする | `$BT_BASE --from 2025-01-05 --to 2026-06-14 --blend-alpha $a`（a ∈ {0.2, 0.3, 0.4}・4891R）で単勝 Brier / LogLoss が α 方向に単調で 0.2 が最良であること。**α=0.0（純市場）は掃引対象外**——ADR 0034 は 0.2〜0.4 を測っており、純市場との比較は ADR 0052 が別途扱う | [ADR 0034](../original-docs/0034-alpha-retune-recency-rejected.md) | Confirmed |
+| REQ-D22-002 | ベイズ縮約の擬似カウントは m=10（`RECOMMENDED_SHRINKAGE_M`）。backtest の既定は縮約 off なので production 再現には `--shrinkage-m 10` を明示する | `--shrinkage-m` を base から外し m ∈ {5, 10, 20} を α=0.2 固定で掃引（同 4891R 窓） | [ADR 0016](../original-docs/0016-shrinkage-and-recency.md) / [0034](../original-docs/0034-alpha-retune-recency-rejected.md) | Confirmed |
+| REQ-D22-003 | win_prob の冪変換は γ=1.25（`RECOMMENDED_WIN_POWER`）。γ≥1.5 は LogLoss / Brier 悪化と人気馬の過剰補正で採らない | `--win-power` を base から外して掃引（ADR 0042 の窓 2025-01-01〜2026-06-30・4891R）。単勝 LogLoss が 1.25 で最良（0.1974 → 0.1954） | [ADR 0042](../original-docs/0042-win-power-calibration-adopted.md) | Confirmed |
+| REQ-D22-004 | place/show の冪変換は γ=2.0（`RECOMMENDED_PLACE_SHOW_POWER`）。純校正の knee は γ=3.0 だが複勝買い目 ROI が net 改善しないため 2.0 を維持する | `--place-show-power` を base から外して掃引（ADR 0047 の窓）。place/show Brier・人気帯校正・**複勝 ROI を併せて**見る（校正だけで決めない） | [ADR 0047](../original-docs/0047-place-show-power-decompression-adopted.md) / [0051](../original-docs/0051-placeshow-power-knee-confirmed-keep-2.md) | Confirmed |
+| REQ-D22-005 | 近走トレンドは前走のみ（`trend_n = 1`）。N=2/3 は全指標が悪化する | `$BT_BASE --from 2026-03-01 --to 2026-05-31 --blend-alpha 0.2 --trend-n $n`（n ∈ {1,2,3}・893R）で N=1 を上回らないこと | [ADR 0036](../original-docs/0036-recent-form-trend-n-rejected.md) | Confirmed |
+| REQ-D22-006 | 時間減衰（recency）は無効（`recency: None`）。Brier / LogLoss が変わらず ROI も誤差範囲で、複雑性だけが増える | `$BT_BASE --from 2025-01-05 --to 2026-06-14 --blend-alpha 0.2 --recency-half-life $h`（h ∈ {30, 60, 90} 日）を無効時と比較 | [ADR 0034](../original-docs/0034-alpha-retune-recency-rejected.md) | Confirmed |
+| REQ-D22-007 | 騎手直近フォームの重みは 0（`jockey_recent_form_weight: None`）。算出機構と `--jockey-form-weight` は再評価用に残す | `$BT_BASE --from 2026-01-01 --to 2026-06-14 --blend-alpha 0.2 --jockey-form-weight $w` の掃引 | [ADR 0038](../original-docs/0038-jockey-recent-form-rejected.md) | Confirmed |
+| REQ-D22-008 | 相性 factor（騎手×場 / 騎手×距離 / 騎手×馬 / 馬×場）は production 非組込（重み 0）。measure-first で lift を測ってから採否を決める | `$BT_BASE --blend-alpha 0.2` に `--jockey-venue-weight` / `--jockey-distance-weight` / `--jockey-horse-combo-weight` / `--horse-venue-weight` を足して cheap screen（本命 top1 精度を主指標にする） | [#350](https://github.com/taito-station/paddock/issues/350)（measure-first で保留中。採否の ADR は未起票） | Tentative |
+| REQ-D22-009 | 脚質（先行度）factor は production 非組込（`running_style_weight: None`）。純モデルの AUC / 校正は微改善するが本命 top1 が全 weight で劣化する | **CLI 未露出**（`--running-style-weight` は無い）。測るには `analyze backtest --dump-features` の 18 ヶ月ダンプ ＋ Python 鏡映で `EstimationConfig.running_style_weight` を振る（ADR 0061 の手順） | [ADR 0061](../original-docs/0061-running-style-feature-rejected.md) | Confirmed |
+| REQ-D22-010 | `win ≤ place ≤ show` の単調性を出力で保証する（累積 max で単調化。冪変換を入れた後も再是正する） | `cargo test -p paddock-domain` の単調性テスト | [ADR 0007](../original-docs/0007-probability-monotonicity-jockey.md)（単調化の決定）/ [0047](../original-docs/0047-place-show-power-decompression-adopted.md)（冪変換後の再是正） | Confirmed |
 <!-- REQ:end D22 -->
 
 ## 既知の制約

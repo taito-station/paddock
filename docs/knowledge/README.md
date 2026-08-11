@@ -32,14 +32,16 @@ docs/knowledge/ ＋ docs/specifications/   status 付き確定知（＝この層
   >   [#580](https://github.com/taito-station/paddock/issues/580) で消化し、warning から昇格した。
   >   **これで「ADR の内容を knowledge へ全部写す」の担保が揃った**——写した先が追従漏れを
   >   起こせば CI が落ちる。
-  > - **ADR の写しは未着手**（例外は [product-goals.md](product-goals.md)。棄却 ADR 24 本の
-  >   「採らなかったこと」だけは索引として畳んである）。knowledge は 8 本で、`docs/original-docs/` の ADR 73 本の決定は
-  >   含まれない。**当面は knowledge だけでなく ADR 原本（`docs/original-docs/0NNN-*.md`）も読む**。
-  >   mdq は両方を索引しているので `scripts/mdq search` は今でも横断で当たる。
+  > - **ADR の写しは一巡した**（#588）。ADR 74 本のうち、棄却 24 本は
+  >   [product-goals.md](product-goals.md) が索引し、採用側はいずれかの knowledge / specifications が
+  >   `sources` で参照して決定を写している。knowledge は 9 本。
+  >   ただし**写しの粒度は一様ではない**ので、決定の細部（却下した代替案・数値の前提）が要るときは
+  >   **ADR 原本（`docs/original-docs/0NNN-*.md`）も読む**。mdq は両方を索引しているので
+  >   `scripts/mdq search` は横断で当たる。
   >
-  > **順序は「機械検査の配線が先、写しは後」**。写した量に比例して stale 面積が増えるのが
-  > ADR 0073 の出発点だった。**その前提条件（stale の error 化）は #580 で満たされた**ので、
-  > 既存 ADR の写しに着手してよい。移行が完了したらこのブロックを削除する。
+  > **順序は「機械検査の配線が先、写しは後」だった**。写した量に比例して stale 面積が増えるのが
+  > ADR 0073 の出発点で、その前提条件（stale の error 化）は #580 で満たし、写しは #588 で一巡した。
+  > 残るのは粒度を上げる作業なので、このブロックは「写しは一巡・粒度は不均一」の注記として残す。
 - **`docs/original-docs/` の命名は 2 系統**（`check-adr-numbers.sh` の判定根拠。
   詳細は [docs/original-docs/README.md](../original-docs/README.md)）:
   - ADR = **0 埋め 4 桁**（`0001-`〜`0999-`）
@@ -81,7 +83,8 @@ updated: "YYYY-MM-DD"    # 内容を実質更新した日（YAML の date 型を
   二重管理の drift は `scripts/check-doc-classes.py` が防ぐ。
 - **機械検査**: 上記スクリプトが CI（`adr` ジョブ）と pre-push で走る。クラスの整合・`tags` の一致・
   `sources` の実在・**stale** は **error**（stale は #580 で warning から昇格）、充足ギャップのみ
-  **warning**。どうしても止められないときの逃げ道は `--warn-only` だけ。
+  **warning**。CI を止めずに通す明示的な逃げ道は `--warn-only` だけ（ただし下記「機械検査できない」
+  の 4 つ目に注意——`sources` から行を消せば stale も消える）。
 
 - **status**: `Confirmed`=検証済みで運用の前提にしてよい / `Tentative`=検証中・暫定 /
   `Conflict`=source 間で矛盾があり要解消（放置しない）。
@@ -154,7 +157,7 @@ updated: "YYYY-MM-DD"    # 内容を実質更新した日（YAML の date 型を
 - ブロックのクラスが定義済みで、かつその文書の `doc_class` に含まれること
 - 番号の重複、`status` の値域、`要件` / `出典` の非空、Confirmed の検証手段、リンク先の実在
 
-一方、**次の 3 つは機械検査できない**ので人手の規律に残る:
+一方、**次の 4 つは機械検査できない**ので人手の規律に残る:
 
 - **番号の再利用禁止**。検査が見るのは現時点のスナップショットだけなので、`Retired` 行ごと削除して
   同じ番号を別の要件に振り直しても検出されない。
@@ -164,6 +167,10 @@ updated: "YYYY-MM-DD"    # 内容を実質更新した日（YAML の date 型を
 - **コードフェンスで囲んだ REQ ブロック**。フェンス内は「規約の見本」として全面的に無視する
   （この節の例がまさにそれ）。囲まれた表は GitHub でも表として描画されないので、実データを
   そこに置くことは無い前提。
+- **`sources` の網羅性**。stale 検査は「挙げた出典」に追従しているかしか見ないので、**`sources` から
+  行を消せば stale も消える**（`sources` の変更自体はメタデータ扱いで下流にも伝播しない）。
+  つまり「出典を消す」が最も安い回避策になっている。**出典は減らさない**——減らすときは、その知が
+  もうその ADR に依存していないことを本文で示す。
 
 ## 昇格・更新の運用（Claude が回す蒸留）
 
@@ -174,10 +181,9 @@ updated: "YYYY-MM-DD"    # 内容を実質更新した日（YAML の date 型を
 5. 決定を伴うものは ADR を `docs/original-docs/0NNN-*.md` に起票し（採番は
    `scripts/check-adr-numbers.sh next`）、knowledge の `sources` から参照する。**ADR の決定・理由・
    却下案・影響は knowledge へ全部写す**（読む入口を knowledge に一本化するため）。
-   **※ 既存 ADR の一括写しは stale 機械検査の配線が完了するまで開始しない**（上の移行中ブロック
-   参照。担保のないまま写すと stale 面積だけが先に増える）。新規 ADR の写しは検査の有無に
-   関わらず起票と同時に行ってよい——増える stale 面積が 1 本ぶんで、書いた本人が同じ PR 内に
-   いるため。
+   **新規 ADR の写しは起票と同じ PR で行う**——増える stale 面積が 1 本ぶんで、書いた本人がその場に
+   いるうちに写すのが最も安い。既存 ADR の一括写しは #588 で一巡済み（差し止め条件だった stale の
+   error 化は #580 で解消）。
 6. **sources 追従**: knowledge の `sources` に列挙されたファイルを**内容ごと**変更する PR は、参照元
    knowledge の `distilled_from_sha` と `updated` を現 HEAD に更新する。本文が変わる場合は差分マージを
    行い、変わらない場合は sha と日付の bump のみで足りる。**この追従は機械検査の対象**（実例:

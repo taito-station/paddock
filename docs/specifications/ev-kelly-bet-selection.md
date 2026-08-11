@@ -231,13 +231,18 @@ Domain 層に純粋関数として実装し、IO・状態なし。`PlaceOdds` �
 <!-- REQ:begin D23 -->
 | REQ-ID | 要件 | 検証手段 | 出典 | status |
 |---|---|---|---|---|
-| REQ-D23-001 | 張るのは ROI ≥ 100% のレースだけ。閾値は引き下げない（ROI 100% が損益分岐そのもの） | ADR 0040 のゲート検証を再実行し、閾値を下げた variant が baseline を上回らないこと | [ADR 0040](../original-docs/0040-ev-gate-threshold-lowering-rejected.md) | Confirmed |
-| REQ-D23-002 | 券種は 3 つ（ワイド / 馬連 / 3 連複）に固定する。単勝・馬単・馬連特化は追加しない | 各棄却 ADR のバックテスト（71R）を再実行し、3 券種 baseline を上回らないこと | [ADR 0033](../original-docs/0033-conditional-win-bet-rejected.md) / [0041](../original-docs/0041-umaren-only-strategy-rejected.md) / [0043](../original-docs/0043-exacta-in-portfolio-rejected.md) | Confirmed |
-| REQ-D23-003 | 相手は 3 券種とも model top5。広げない（的中率は上がるが回収率が下がる） | ADR 0030 の相手幅スイープ（top5 / top7 / 全頭）を再実行 | [ADR 0030](../original-docs/0030-konsen-trio-partner-width-rejected.md) / [0065](../original-docs/0065-wide-partners-top5-alignment.md) | Confirmed |
+| REQ-D23-002 | 券種は 3 つ（ワイド / 馬連 / 3 連複）に固定する。単勝・馬単・馬連特化は追加しない | 各棄却 ADR のバックテスト（71R・α=0.2 / m=10）を再実行し、3 券種 baseline を上回らないこと | [ADR 0033](../original-docs/0033-conditional-win-bet-rejected.md) / [0041](../original-docs/0041-umaren-only-strategy-rejected.md) / [0043](../original-docs/0043-exacta-in-portfolio-rejected.md) | Confirmed |
+| REQ-D23-003 | 相手は 3 券種とも model top5。広げない | **3 連複**は ADR 0030 の相手幅スイープ（top5 / top7 / 全頭・90R）で回収率が下がること。**ワイド**は ADR 0065 の 262R（12 開催日）比較で top3 と top5 に有意差が無いこと（実装側の top5 に寄せた） | [ADR 0030](../original-docs/0030-konsen-trio-partner-width-rejected.md)（3 連複）/ [0065](../original-docs/0065-wide-partners-top5-alignment.md)（ワイド） | Confirmed |
 | REQ-D23-004 | 各点の金額は券種予算内の 100 円単位**均等配分**（`build_portfolio` / `distribute`）。確率重み化と脚ごと最低 ¥100 の撤廃は採らない | ADR 0046 の 71R 実 ROI 比較を再実行（薄い脚への少額 spread を外すと悪化すること） | [ADR 0046](../original-docs/0046-allocation-prob-weight-no-floor-rejected.md) | Confirmed |
-| REQ-D23-005 | fractional Kelly は賭け額配分に使わない。`betting/kelly.rs` は EV 候補選抜（`min_kelly` の curation）に留める | ADR 0054 の同一土俵比較（定額 vs Kelly）を再実行 | [ADR 0054](../original-docs/0054-kelly-staking-rejected.md) | Confirmed |
+| REQ-D23-005 | fractional Kelly は賭け額配分に使わない。`betting/kelly.rs` は EV 候補選抜（`min_kelly` の curation）に留める | ADR 0054 の同一土俵比較（定額 vs Kelly・71R walk-forward）を再実行 | [ADR 0054](../original-docs/0054-kelly-staking-rejected.md) | Confirmed |
 | REQ-D23-006 | 混戦判定は「◎の model 勝率の 0.70 倍以上が ◎含め 4 頭以上」。**オッズ条件を併用しない** | ADR 0028 のオッズ閾値スイープを再実行（baseline を上回る閾値が無いこと） | [ADR 0028](../original-docs/0028-konsen-odds-trigger-rejected.md) | Confirmed |
-| REQ-D23-007 | 軸（◎と買い目構造）は事前データで確定し、直前オッズでは動かさない。直前オッズの用途は**軸を含む既存買い目の増額のみ**で、点数（相手）は増やさない | 予想セッションのログと `predict-watch` 出力を突き合わせ、軸の変更が新情報起因のときだけ起きていること | [ADR 0060](../original-docs/0060-betting-axis-lock-preclose-topup.md) | Confirmed |
-| REQ-D23-008 | 買い方の正は Rust `build_portfolio`。`scripts/predict-check/` の Python はオフライン EV レポート専用で、張る買い目の配分には使わない（second source を作らない） | `build_portfolio` の単体テストと、`predict` / `predict-watch` が同一関数を通ること | [ADR 0064](../original-docs/0064-live-ev-buy-view.md) | Confirmed |
+| REQ-D23-008 | 買い方の正は Rust `build_portfolio`。`scripts/predict-check/` の Python はオフライン EV レポート専用で、張る買い目の配分には使わない（second source を作らない） | `build_portfolio` の単体テストと、`predict` / `predict-watch` が同一関数を通ること | [ADR 0064 の追補（#346）](../original-docs/0064-live-ev-buy-view.md)——**0064 本体の決定は逆**（当時はライブ writer を Python `live_ev.py` に一本化するとしていた）。Rust に一本化したのは追補側 | Confirmed |
 <!-- REQ:end D23 -->
+
+**D01 と重複させない。** 「ROI ≥ 100% のレースだけ張る」と「軸ロック＋ズレ増額」は
+[product-goals.md](../knowledge/product-goals.md) の **REQ-D01-001 / REQ-D01-003** が正本で、ここでは
+採番し直さない（同じ要件に ID が 2 つあると、片方だけ更新されても機械検査は検出できない——
+ADR 0073 / 0074 が排除したい二重管理そのものになる）。本表はその下で**買い方の具体**を決める要件に限る。
+
+> 欠番の REQ-D23-001 / 007 は上記の重複解消で撤回した。**番号は再利用しない**（規約どおり）。
 
