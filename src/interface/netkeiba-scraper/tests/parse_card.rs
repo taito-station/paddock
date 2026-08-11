@@ -1,4 +1,5 @@
 use chrono::{NaiveDate, NaiveTime};
+use netkeiba_scraper::Error;
 use netkeiba_scraper::parse::parse_card;
 use paddock_domain::{RaceClass, Surface, Venue};
 
@@ -108,4 +109,50 @@ fn post_time_is_none_when_absent() {
     // 発走時刻が無くても他のメタ・出走馬は通常どおり取れる（カード保存を止めない）。
     assert_eq!(card.distance, 1600);
     assert_eq!(card.entries.len(), 17);
+}
+
+// 障害レースは取り込み対象外（#586, ADR 0075）。`Parse`（実障害）ではなく `Unsupported` を返し、
+// 呼び出し側が「設計どおりのスキップ」と netkeiba 側の実障害を区別して exit 0 に倒せるようにする。
+#[test]
+fn jump_race_returns_unsupported() {
+    let html = FIXTURE.replace("芝1600m", "障3000m");
+    let err = parse_card(&html, RACE_ID).expect_err("障害レースは取り込み対象外");
+    assert!(matches!(err, Error::Unsupported(_)), "err={err}");
+    assert!(err.to_string().contains("障害"), "理由が読める: {err}");
+}
+
+// 障害レースの表記揺れに対する担保（#586）。`SURFACE_DISTANCE_RE` の交替は `障` を先頭に置き
+// `障芝` / `障ダ` の複合表記まで 1 トークンとして拾う。単文字クラス `[芝ダ障]` だと `障芝3000m` で
+// `障` が候補にならず `芝3000m` にマッチし、**障害レースが芝 3000m として黙って取り込まれる**。
+// 実表記 `障3000m (芝)`（202607020609 で確認）と併せて、並びと複合表記の両方を固定する。
+#[test]
+fn jump_race_notation_variants_are_all_unsupported() {
+    for surface in ["障3000m (芝)", "障芝3000m", "障ダ2900m", "(芝) 障3000m"] {
+        let html = FIXTURE.replace("芝1600m", surface);
+        let err = parse_card(&html, RACE_ID).expect_err("障害レースは取り込み対象外");
+        assert!(
+            matches!(err, Error::Unsupported(_)),
+            "平地として取り込まない（表記 {surface}）: {err}"
+        );
+    }
+}
+
+// 「対応外」を広げない担保（#586）。馬場・距離表記が読めないのは netkeiba のレイアウト変更
+// ＝実障害なので、従来どおり `Parse`（→ use-case Internal → exit 1）に落ち、exit 0 の
+// スキップに紛れない。`Unsupported` に落ちるのは障害レースだけであることを対で固定する。
+//
+// なお `SURFACE_DISTANCE_RE` のキャプチャ群は `[芝ダ障]` に限定されており、`extract_surface_distance`
+// の `other =>` アーム（未知の馬場記号）はテストから到達できない（防御アーム）。ここで踏むのは
+// 「正規表現に一致しない＝距離表記が変わった」経路。
+#[test]
+fn unparsable_surface_distance_stays_parse_error() {
+    let html = FIXTURE.replace("芝1600m", "芝1600メートル");
+    let err = parse_card(&html, RACE_ID).expect_err("距離表記を読めない");
+    assert!(matches!(err, Error::Parse(_)), "err={err}");
+    // 「読めません」だけだと race_id 由来の別エラー（回/日/R・年）でも通ってしまうため、
+    // 馬場/距離の読み取り失敗であることまで絞る。
+    assert!(
+        err.to_string().contains("芝/ダ/距離を読めません"),
+        "馬場/距離の読み取り失敗として落ちる: {err}"
+    );
 }

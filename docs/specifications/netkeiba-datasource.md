@@ -11,8 +11,9 @@ sources:
   - docs/original-docs/0010-persist-and-reference-odds.md
   - docs/original-docs/0048-retire-jra-odds-scraper-for-netkeiba.md
   - docs/original-docs/0049-netkeiba-odds-transient-retry-and-degraded-exit.md
-distilled_from_sha: "faa62d6"
-updated: "2026-08-11"
+  - docs/original-docs/0075-unsupported-race-skip-exit-zero.md
+distilled_from_sha: "MERGE_SHA"
+updated: "2026-08-12"
 ---
 
 # netkeiba 当日データソース取り込み 仕様書
@@ -204,6 +205,32 @@ paddock 内部の `RaceId` も同じ 12 桁構成要素から導出する（既�
 - **degraded は専用 exit code = 3**。`fetch-card` は主目的（近走取り込み）まで終えてから 3 を返すので、
   呼び出し側はハード失敗（=1）と「単複だけ未取得・要再取得」を区別でき、win 欠落レースだけ再取得できる。
 
+### 取り込み対象外レース（障害）のスキップ（ADR 0075）
+
+「対応外だからスキップした」と「netkeiba 側で失敗した」を、**終了コードと stdout で区別できる**形にする。
+混同すると、開催日の全レースをループ取得したとき 1 件の欠落が無視してよいものか取り込み失敗かを
+件数 diff でしか判別できない。
+
+- **障害レースは取り込み対象外**。判定は `RaceData01` の**距離付き馬場マーカー**で行い、`障3000m`・
+  `障芝3000m`・`障ダ2900m` のいずれの表記でも拾う（単文字クラスだと `障芝3000m` で `芝3000m` に
+  マッチし、障害レースが芝レースとして黙って取り込まれる）。`parse_card` は `Error::Unsupported` を返し、
+  実障害（`Error::Parse` → `Internal` → exit 1）とは別 variant で ingest / CLI まで伝わる。
+- **ingest はカード・オッズ・近走のすべてを打ち切る**（DB は一切変更しない）。カード無しでオッズだけ
+  保存すると `race_cards` に対応行の無い孤児オッズが残り、近走取り込みは障害レースでも成功して
+  しまうため。
+- **CLI は理由を stdout に明示して exit 0**。専用 exit code は作らない——障害レースが実際に到達する
+  消費側は「netkeiba の開催一覧からレースを列挙して回すループ」（`scripts/predict-check/README.md` の
+  手順）で、exit code だけでレース単位の成否を判断するため、専用コードでは対応外レースが取り込み失敗に
+  計上されてしまう。
+- 馬場・距離表記が読めない場合や `RaceData01` 欠落は従来どおり実障害（exit 1）。**「対応外」は広げない**。
+- **スキップの識別には stdout の読み取りが要る**（exit code だけでは正常取り込みと区別できない）。
+  当該**行の行頭**が `スキップ: ` 固定（tracing のログ行が同じ stdout に混ざるため行単位で照合する）。
+  **stdout を捨てる消費側（`refresh_ev.sh` は `> /dev/null`）からは追えない**——
+  stderr には出さない（同スクリプトが「stderr あり」を異常として警告するため、正常な結果を警告に
+  化けさせない）。tracing も既定 writer が stdout なので代替にならない。
+- 却下案（ADR 0075 に詳細）: 専用 exit code の新設 / `IngestCardResponse` にフラグを足す（degraded と同型）/
+  エラー文言の照合 / 障害レースを `Surface::Jump` として取り込む——いずれも採らない。
+
 ### スクレイパー実装の型（ADR 0001 由来）
 
 JRA 版スクレイパーは ADR 0048 で退役したが、そこで確立した設計は netkeiba 版にも引き継いでいる。
@@ -233,6 +260,7 @@ JRA 版スクレイパーは ADR 0048 で退役したが、そこで確立した
 |--------|------|
 | 単勝オッズ未確定(レース前で空欄) | win を populate せず空のまま。出馬表の保存は継続 |
 | 不正な race_id(桁数・競馬場コード不正) | バリデーションエラーを stderr に出力し exit code 1。パニックしない |
+| 障害レース(取り込み対象外) | 取り込みを行わず理由を **stdout** に出して **exit 0**。DB は無変更。ハード失敗(1)・degraded(3) と区別する。ADR 0075 |
 | **単複オッズ**の取得失敗（transient・リトライ後も残る） | **degraded**。オッズ保存をまるごとスキップし exit 3（出馬表・近走は保存済み）。ADR 0049 |
 | **単複オッズ**の取得失敗（4xx 等の非 transient） | 同じく degraded 分岐（オッズ未保存・exit 3）。netkeiba に 403/404=absent の概念が無いため 4xx も「取れなかった」として扱う |
 | **組合せ券種オッズ**の取得失敗 | warn して単複のみ保存・**exit 0**。`is_complete()` が false なので次回再取得で埋まる |
@@ -259,6 +287,26 @@ paddock-fetch-card --year 2026 --venue 東京 --round 3 --day 2 --race 11
 
 スクレイピング対象は公開ページ。既定ウェイトを入れ netkeiba 側へ配慮する。
 
+### 終了コード
+
+呼び出し側——netkeiba の開催一覧からレースを列挙して回すループ（`scripts/predict-check/README.md`
+の手順）——が「本物の失敗」だけを FAIL として扱えるようにするための一次情報。
+
+| コード | 意味 |
+|--------|------|
+| 0 | 正常終了（**取り込み対象外レース（障害）のスキップを含む**。ADR 0075） |
+| 1 | ハード失敗（不正な race_id・ページ取得失敗・パース失敗・DB エラー） |
+| 2 | 引数の形式不正（`clap` が stderr にエラーを出力。アプリのコードは関与しない） |
+| 3 | degraded（単複オッズ未取得。card は保存済みで要再取得。ADR 0049） |
+
+- **exit 0 は正常終了（対象外スキップを含む）**。対応外レースは異常ではないため exit 0 とし、理由は
+  **stdout** に出力する（`predict` の「開催なし日付」と同じ規約。[predict-session.md](predict-session.md) 参照）。
+  **取り込み失敗として数えてよいのは 1 だけ**——3 は card 保存済みでオッズのみ要再取得なので、
+  FAIL に丸めると「win だけ再取得すればよい」判断を落とす。
+- ただし **exit 0 だけでは「取り込んだ」と「対象外でスキップした」を区別できない**。区別が要る消費側は
+  stdout を**行単位**で見て `スキップ: ` で始まる行を探す（stdout には tracing のログ行が先行しうるため、
+  出力全体の先頭で照合しない）。
+
 ---
 
 ## 留意（既知の前提）
@@ -277,6 +325,7 @@ paddock-fetch-card --year 2026 --venue 東京 --round 3 --day 2 --race 11
   [0001 JRA オッズスクレイパー](../original-docs/0001-jra-odds-scraper.md)（設計の型・0048 で退役）/
   [0010 オッズの永続化と参照](../original-docs/0010-persist-and-reference-odds.md) /
   [0048 JRA スクレイパー退役](../original-docs/0048-retire-jra-odds-scraper-for-netkeiba.md) /
-  [0049 transient リトライと degraded exit](../original-docs/0049-netkeiba-odds-transient-retry-and-degraded-exit.md)
-- 関連 Issue: #25(オッズ→predict 結線)、#38(組合せ券種オッズ)、#40(結果自動精算)、#31(未活用特徴量)
+  [0049 transient リトライと degraded exit](../original-docs/0049-netkeiba-odds-transient-retry-and-degraded-exit.md) /
+  [0075 対応外レースは exit 0 + stdout 明示でスキップ](../original-docs/0075-unsupported-race-skip-exit-zero.md)
+- 関連 Issue: #25(オッズ→predict 結線)、#38(組合せ券種オッズ)、#40(結果自動精算)、#31(未活用特徴量)、#586(対応外レースのスキップ)
 - CLI テストケース: `tests/cli-test-cases/fetch-card-command.md`

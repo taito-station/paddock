@@ -13,8 +13,17 @@ use super::{cell_text, round_day_racenum, venue_from_race_id};
 use crate::error::{Error, Result};
 
 /// `芝1600m` 等から馬場と距離を取る正規表現（呼び出しごとの再コンパイルを避け static 化）。
-static SURFACE_DISTANCE_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"([芝ダ障])\s*(\d{3,4})m").expect("valid surface/distance regex"));
+///
+/// 障害の `障` を交替の先頭に置き、`障芝` / `障ダ` の複合表記まで 1 トークンとして拾う（#586）。
+/// `[芝ダ障]` の単文字クラスだと `障芝3000m` で `障` が候補にならず `芝3000m` にマッチし、
+/// **障害レースが芝レースとして黙って取り込まれる**。
+static SURFACE_DISTANCE_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(障[芝ダ]?|[芝ダ])\s*(\d{3,4})m").expect("valid surface/distance regex")
+});
+
+/// 障害レースを対象外として弾くときの理由。stdout にそのまま載る利用者向け文言なので、
+/// アーム間で割れないよう 1 か所に括る（#586, ADR 0075）。
+const JUMP_RACE_UNSUPPORTED: &str = "障害レースは取り込み対象外です";
 
 /// `YYYY年M月D日` の開催日表記を取る正規表現。
 static DATE_RE: LazyLock<Regex> =
@@ -130,7 +139,13 @@ fn extract_post_time(doc: &Html) -> Option<NaiveTime> {
 }
 
 /// `div.RaceData01` のテキストから `芝1600m` 等を読み、Surface と距離(m)に変換する。
-/// 障害(障)は対応外として parse error。
+/// 障害(障)は取り込み対象外として `Error::Unsupported`（実障害の `Parse` とは別物）。
+///
+/// 障害の判定は `SURFACE_DISTANCE_RE` のマーカーで行う。交替の先頭に `障` を置き `障芝` / `障ダ` の
+/// 複合表記まで拾うため、`障3000m (芝)`（実表記）・`障芝3000m`・`(芝) 障3000m` のいずれでも対象外に
+/// 落ちる。判定を**距離付きマーカーに限定**するのが要点で、テキスト全体の `障` の有無で弾くと、
+/// 将来 `障` が別文脈で現れたとき平地レースが黙ってスキップされる（実障害の見逃しと同じ害）。
+/// 近走側 `horse_history::parse_surface_distance` も先頭 1 文字判定で障害を除外している（#586）。
 fn extract_surface_distance(doc: &Html) -> Result<(Surface, u32)> {
     let data_sel = sel("div.RaceData01")?;
     let text = doc
@@ -146,9 +161,14 @@ fn extract_surface_distance(doc: &Html) -> Result<(Surface, u32)> {
     let surface = match &caps[1] {
         "芝" => Surface::Turf,
         "ダ" => Surface::Dirt,
-        "障" => {
-            return Err(Error::Parse("障害レースは対応外です".to_string()));
+        // 障害は仕様として取り込み対象外。パース失敗（実障害）とは別 variant にし、呼び出し側が
+        // 「設計どおりのスキップ」と区別して exit 0 に倒せるようにする（#586, ADR 0075）。
+        "障" | "障芝" | "障ダ" => {
+            return Err(Error::Unsupported(JUMP_RACE_UNSUPPORTED.to_string()));
         }
+        // `SURFACE_DISTANCE_RE` の交替が上記 5 種に限定されているため到達しない防御アーム。
+        // 正規表現を広げた場合でも「未知の記号＝netkeiba のレイアウト変更＝実障害」であり
+        // `Parse` に落とす（`Unsupported` を広げない）。
         other => return Err(Error::Parse(format!("unknown surface marker: {other}"))),
     };
     let distance: u32 = caps[2]
