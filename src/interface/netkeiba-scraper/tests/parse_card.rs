@@ -1,4 +1,5 @@
 use chrono::{NaiveDate, NaiveTime};
+use netkeiba_scraper::Error;
 use netkeiba_scraper::parse::parse_card;
 use paddock_domain::{RaceClass, Surface, Venue};
 
@@ -108,4 +109,23 @@ fn post_time_is_none_when_absent() {
     // 発走時刻が無くても他のメタ・出走馬は通常どおり取れる（カード保存を止めない）。
     assert_eq!(card.distance, 1600);
     assert_eq!(card.entries.len(), 17);
+}
+
+// 障害レースは取り込み対象外（#586, ADR 0075）。`Parse`（実障害）ではなく `Unsupported` を返し、
+// 呼び出し側が「設計どおりのスキップ」と netkeiba 側の実障害を区別して exit 0 に倒せるようにする。
+#[test]
+fn jump_race_returns_unsupported() {
+    let html = FIXTURE.replace("芝1600m", "障3000m");
+    let err = parse_card(&html, RACE_ID).expect_err("障害レースは取り込み対象外");
+    assert!(matches!(err, Error::Unsupported(_)), "err={err}");
+    assert!(err.to_string().contains("障害"), "理由が読める: {err}");
+}
+
+// 「対応外」を広げない担保（#586）。未知の馬場記号は netkeiba のレイアウト変更＝実障害なので
+// 従来どおり `Parse`（→ use-case Internal → exit 1）に落ち、exit 0 のスキップに紛れない。
+#[test]
+fn unknown_surface_marker_stays_parse_error() {
+    let html = FIXTURE.replace("芝1600m", "芝1600メートル");
+    let err = parse_card(&html, RACE_ID).expect_err("距離表記を読めない");
+    assert!(matches!(err, Error::Parse(_)), "err={err}");
 }

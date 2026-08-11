@@ -16,10 +16,25 @@ async fn main() -> anyhow::Result<ExitCode> {
     let (netkeiba_id, race_id) = args.resolve_race_id()?;
 
     let app = setup::build_app(args.interval).await?;
-    let resp = app
+    let resp = match app
         .card
         .ingest(&netkeiba_id, race_id.clone(), args.force)
-        .await?;
+        .await
+    {
+        Ok(resp) => resp,
+        // 仕様として取り込み対象外のレース（障害）。netkeiba 側の実障害ではなく設計どおりの
+        // スキップなので、理由を stdout に明示して exit 0 で終える（#586, ADR 0075）。
+        // 専用 exit code を作らないのは、消費側（scripts/predict-check/refresh_ev.sh）が
+        // exit≠0 を一律 FAIL 扱いし、対応外レースが「取り込み失敗」に計上されてしまうため。
+        // degraded(=3) とは排他: ingest はオッズ取得より前に打ち切るので両立しない。
+        Err(paddock_use_case::Error::Unsupported(reason)) => {
+            println!(
+                "対応外レースのためスキップしました（{reason}）。取り込み失敗ではありません（race_id={race_id}, netkeiba={netkeiba_id}）"
+            );
+            return Ok(ExitCode::SUCCESS);
+        }
+        Err(e) => return Err(e.into()),
+    };
 
     if resp.card_saved {
         println!(

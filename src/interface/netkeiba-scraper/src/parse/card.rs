@@ -130,7 +130,7 @@ fn extract_post_time(doc: &Html) -> Option<NaiveTime> {
 }
 
 /// `div.RaceData01` のテキストから `芝1600m` 等を読み、Surface と距離(m)に変換する。
-/// 障害(障)は対応外として parse error。
+/// 障害(障)は取り込み対象外として `Error::Unsupported`（実障害の `Parse` とは別物）。
 fn extract_surface_distance(doc: &Html) -> Result<(Surface, u32)> {
     let data_sel = sel("div.RaceData01")?;
     let text = doc
@@ -147,8 +147,13 @@ fn extract_surface_distance(doc: &Html) -> Result<(Surface, u32)> {
         "芝" => Surface::Turf,
         "ダ" => Surface::Dirt,
         "障" => {
-            return Err(Error::Parse("障害レースは対応外です".to_string()));
+            // 仕様として取り込み対象外。パース失敗（実障害）とは別 variant にし、呼び出し側が
+            // 「設計どおりのスキップ」と区別して exit 0 に倒せるようにする（#586, ADR 0075）。
+            return Err(Error::Unsupported(
+                "障害レースは取り込み対象外です".to_string(),
+            ));
         }
+        // 未知の馬場記号は netkeiba のレイアウト変更＝実障害。`Unsupported` を広げない。
         other => return Err(Error::Parse(format!("unknown surface marker: {other}"))),
     };
     let distance: u32 = caps[2]

@@ -21,6 +21,11 @@ pub enum Error {
     /// `Fetch` so a stalled-network signal stands out in logs/metrics.
     #[error("fetch timed out: {0}")]
     Timeout(String),
+    /// 仕様として取り込み対象外のリソース（例: 障害レースの出馬表）。取得元は正常で、
+    /// paddock 側が意図的に扱わないケース。実障害（`Internal` / `Fetch`）と分けることで、
+    /// 呼び出し側が「設計どおりのスキップ」を失敗として数えずに済む（#586）。
+    #[error("unsupported: {0}")]
+    Unsupported(String),
 }
 
 pub type Result<A> = std::result::Result<A, Error>;

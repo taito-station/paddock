@@ -38,6 +38,9 @@ struct FakeScraper {
     /// true なら fetch_win_place_odds が transient な `Error::Fetch` を返す（接続リセット等、
     /// リトライ後も残る一時障害を模す。#288 の degraded 分岐検証用）。
     win_transient_err: bool,
+    /// true なら fetch_card が「取り込み対象外」（障害レース）を返す。実障害と区別して
+    /// ingest を打ち切ることの検証用（#586）。
+    card_unsupported: bool,
     /// fetch_card が呼ばれた回数。
     card_fetches: Mutex<usize>,
     /// fetch_exotic_odds が呼ばれた回数（degraded 時に exotic を叩かないことの検証用）。
@@ -53,6 +56,7 @@ impl FakeScraper {
             exotic_err: false,
             win_err: false,
             win_transient_err: false,
+            card_unsupported: false,
             card_fetches: Mutex::new(0),
             exotic_fetches: Mutex::new(0),
         }
@@ -80,6 +84,11 @@ impl FakeScraper {
 
     fn with_win_transient_err(mut self) -> Self {
         self.win_transient_err = true;
+        self
+    }
+
+    fn with_card_unsupported(mut self) -> Self {
+        self.card_unsupported = true;
         self
     }
 }
@@ -126,6 +135,13 @@ impl NetkeibaScraper for FakeScraper {
     }
     fn fetch_card(&self, _race_id: &str) -> Result<FetchedCard> {
         *self.card_fetches.lock().unwrap() += 1;
+        if self.card_unsupported {
+            // 実経路（netkeiba-scraper の `Error::Unsupported` → use-case `Error::Unsupported`。
+            // 対応外は理由文字列を前置き無しでそのまま渡す）と同じ variant・文言で模す。
+            return Err(paddock_use_case::Error::Unsupported(
+                "障害レースは取り込み対象外です".into(),
+            ));
+        }
         Ok(FetchedCard {
             date: NaiveDate::from_ymd_opt(2026, 6, 7).unwrap(),
             post_time: chrono::NaiveTime::from_hms_opt(15, 40, 0),
@@ -538,6 +554,42 @@ async fn win_place_transient_error_marks_degraded_and_skips_odds_save() {
         "degraded 時は exotic API を叩かない（無駄な 5 リクエストを避ける）"
     );
     assert_eq!(resp.horse_ids, vec!["2020000001", "2020000002"]);
+}
+
+#[tokio::test]
+async fn unsupported_card_aborts_ingest_without_any_write() {
+    // 障害レース（#586, ADR 0075）。カードが取れない以上オッズも近走も意味を持たないので、ingest は
+    // 打ち切って `Unsupported` を伝播する（bin が exit 0 + stdout 明示に倒す）。degraded と違い
+    // 部分成功ですらないため、DB へは一切書かず、後続のオッズ取得も走らせない。
+    let scraper = FakeScraper::new(vec![win_odds(1, 7.9, 3)]).with_card_unsupported();
+    let interactor = CardInteractor::new(RecordingRepo::with_already(false), scraper);
+
+    let err = interactor
+        .ingest(NK_ID, race_id(), false)
+        .await
+        .unwrap_err();
+
+    assert!(
+        matches!(err, paddock_use_case::Error::Unsupported(_)),
+        "実障害(Internal)ではなく対応外として伝播する: {err}"
+    );
+    assert!(
+        interactor.repo.saved_cards.lock().unwrap().is_empty(),
+        "card を保存しない"
+    );
+    assert!(
+        interactor.repo.saved_odds.lock().unwrap().is_empty(),
+        "オッズを保存しない（card 無しの孤児行を作らない）"
+    );
+    assert!(
+        interactor.repo.fetch_records.lock().unwrap().is_empty(),
+        "取得済み記録も残さない（次回 --force 無しでも同じ判定になる）"
+    );
+    assert_eq!(
+        *interactor.scraper.exotic_fetches.lock().unwrap(),
+        0,
+        "後続のオッズ取得は走らない"
+    );
 }
 
 #[tokio::test]

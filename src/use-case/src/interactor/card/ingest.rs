@@ -52,6 +52,10 @@ impl<R: RaceCardRepository + OddsRepository + FetchRepository, S: NetkeibaScrape
         if already && !force {
             tracing::info!(%netkeiba_id, "card already fetched, skipping (use --force to refetch)");
         } else {
+            // 取り込み対象外（障害レース = `Error::Unsupported`）はここで伝播させ ingest 全体を打ち切る（#586）。
+            // カードが無いのにオッズ・近走だけ保存する状態を作らないため、後続を一切走らせない
+            // （オッズの best-effort・degraded 分岐はカードが取れた場合の話）。呼び出し側（bin）が
+            // 実障害と区別して exit 0 に倒す。ここまでに DB 書き込みは無い（fetch_history_contains は read-only）。
             let fetched = self.scraper.fetch_card(netkeiba_id)?;
             horse_ids = fetched
                 .entries
