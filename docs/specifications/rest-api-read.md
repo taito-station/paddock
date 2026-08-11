@@ -266,7 +266,7 @@ GET /api/health
 - レスポンス: `HealthResponse`（`{ status, git_sha, build_time }`）
 
 ```json
-{ "status": "ok", "git_sha": "6fd6400", "build_time": "2026-08-03T00:30:50Z" }
+{ "status": "ok", "git_sha": "6fd6400", "build_time": "2026-08-02T22:30:50Z" }
 ```
 
 - `build_time` は **UTC rfc3339・秒精度**（`build_info::build_time_rfc3339()`。埋め込まれる env は epoch 秒だが、レスポンスでは rfc3339 に変換する）。`git_sha` / ビルド時刻は `rest-controller/build.rs` が `cargo:rustc-env` で埋め込む（git CLI + std のみ。`.git` 不在時に `unknown` へ落ちるのは `git_sha` だけで、ビルド時刻は常に入る）。sha は短縮形で、作業ツリーが dirty ならその旨が付く。
