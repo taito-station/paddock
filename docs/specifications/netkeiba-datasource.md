@@ -12,7 +12,7 @@ sources:
   - docs/original-docs/0048-retire-jra-odds-scraper-for-netkeiba.md
   - docs/original-docs/0049-netkeiba-odds-transient-retry-and-degraded-exit.md
   - docs/original-docs/0075-unsupported-race-skip-exit-zero.md
-distilled_from_sha: "1c5bf69"
+distilled_from_sha: "db148d0"
 updated: "2026-08-12"
 ---
 
