@@ -28,7 +28,8 @@ sources:
   - docs/original-docs/0060-betting-axis-lock-preclose-topup.md
   - docs/original-docs/0064-live-ev-buy-view.md
   - docs/original-docs/0075-unsupported-race-skip-exit-zero.md
-  - docs/original-docs/0076-glossary-index-and-sources-scope.md
+  - docs/original-docs/0076-roi-gate-uncalibrated-under-ev-layer-separation.md
+  - docs/original-docs/0077-glossary-index-and-sources-scope.md
 distilled_from_sha: "9f0532c"
 updated: "2026-08-12"
 ---
@@ -48,7 +49,7 @@ paddock 横断の用語索引。**この文書は定義の正本ではなく、�
   [doc-classes.md](doc-classes.md)「体系側の既知の穴」が記録済みの状態で、本文書もそこを指す。
 
 収録と参照の基準（追加・改訂時はこれに従う。決定の記録は
-[ADR 0076](../original-docs/0076-glossary-index-and-sources-scope.md)）:
+[ADR 0077](../original-docs/0077-glossary-index-and-sources-scope.md)）:
 
 - **収録するのは複数の文書・コードにまたがって使われる語だけ**。1 つの文書の中で閉じて使われる語は
   その文書の `## 用語定義` 節に置き、ここへは持ってこない。
@@ -62,8 +63,10 @@ paddock 横断の用語索引。**この文書は定義の正本ではなく、�
 - **`sources` に入れる基準は「その文書の本文が動いたら、ここの要約の見直しが要るか」**。
   確定知層（specifications / knowledge）も対象で、引いた ADR も入れる。上流が動けば追従コミット
   （`distilled_from_sha` の bump）が要るが、見直しの強制が狙いなのでこれは仕様。
-- **`sources` に入れないもの 3 つ**: `CLAUDE.md` / ソースコード / 文書運用の規約文書
-  （[README.md](README.md)・[doc-classes.md](doc-classes.md)）。`CLAUDE.md` は frontmatter を
+- **本文書が `sources` に入れないもの 3 つ**: `CLAUDE.md` / ソースコード / 文書運用の規約文書
+  （[README.md](README.md)・[doc-classes.md](doc-classes.md)）。**これは用語集での適用**で、
+  リポジトリ全体の禁止ではない（主題そのものが対象ファイルなら入れてよい。例: `ci-pipeline.md`
+  → `ci.yml`、API 系 3 本 → `openapi.json`）。`CLAUDE.md` は frontmatter を
   持たないため stale 検査の免除機構（frontmatter だけの変更の除外）が**構造的に効かず**、かつ
   大半の改訂が用語と無関係なので、入れるとすべての `CLAUDE.md` 編集に 2 コミットを強制して
   追従が儀式化する。コードの追従はそれを仕様として持つ文書側の責務、規約文書は本文書の主題では
@@ -75,13 +78,23 @@ paddock 横断の用語索引。**この文書は定義の正本ではなく、�
 - **対象領域は確率推定・評価・買い方・データ取得の運用**。web / API / 監視まわりの横断語
   （board・鮮度バッジ・keep-awake 等）は**まだ収録していない**（方針としての除外ではなく未着手）。
 
+採らなかった案（[ADR 0077](../original-docs/0077-glossary-index-and-sources-scope.md) の却下記録の写し）:
+
+- **定義を集約して書き下ろす**: 読みやすいが仕様書と同じ定義が 2 箇所に並び、片方だけの更新を
+  機械検査が検出できない（ADR 0064 の second source と同型）。
+- **`CLAUDE.md` を `sources` に入れる**: 依存としては正しく一度入れたが、全 `CLAUDE.md` 編集に
+  追従コミットを強制するコストが、得られる検査価値に見合わない。
+- **買い方ルールを `docs/` へ移して依存を消す**: 毎セッション自動で読まれることが実効性の source
+  なので移すと「読まれる保証」を失う。移すか否かは別の ADR の仕事。
+- **用語集に REQ 表を持たせる**: 用語集に要件は無い。REQ-ID は各語の正本側が持つ。
+
 ## 確率とスコア
 
 | 用語 | 要約 | 正本 |
 |---|---|---|
 | `win_prob` | 勝率＝1 着以内確率。レース内合計 1.0 へ正規化 | [probability-estimation.md](../specifications/probability-estimation.md) 用語定義・ステップ 3 |
-| `place_prob` | 連対率＝2 着以内確率（日本競馬の「連対」＝top-2）。合計 2.0 へ正規化 | 同上 |
-| `show_prob` | 複勝率＝3 着以内確率（日本競馬の「複勝」＝top-3）。合計 3.0 へ正規化 | 同上 |
+| `place_prob` | 連対率＝2 着以内確率（日本競馬の「連対」＝top-2）。合計 2.0 へ正規化（小頭数では上限クランプで下回りうる） | 同上 |
+| `show_prob` | 複勝率＝3 着以内確率（日本競馬の「複勝」＝top-3）。合計 3.0 へ正規化（同上のクランプあり） | 同上 |
 | ⚠ 確率のスケール | 2 系統ある。**確率推定パイプライン**（`HorseProbability` / board / analyze / `HorseProbabilitySchema`）は `[0.0, 1.0]`。**予想 JSON 系統**は百分率の表示値（例 `25.4`）で、`ingest-predictions` が変換せずそのまま保持するため `prediction_horses` テーブルと prediction-search API まで百分率が伝播する | [prediction-json.md](../specifications/prediction-json.md)（入力）/ [prediction-search-api.md](../specifications/prediction-search-api.md)（DB 列・レスポンス） |
 | 単調化 | 馬ごとの累積 max で `win_prob ≤ place_prob ≤ show_prob` を保証する後処理。冪変換の後も再是正する | [probability-estimation.md](../specifications/probability-estimation.md) REQ-D22-011 / [ADR 0007](../original-docs/0007-probability-monotonicity-jockey.md) |
 | factor | 生スコアを構成する素性。stat 系 6 つ（`course_gate` / `horse_surface` / `horse_distance` / `jockey_surface` / `trainer_surface` / `horse_track_condition`）と scalar 系 3 つ（`recent_form` / `weight_carried` / `jockey_recent_form`）。`jockey_recent_form` は**重み 0 で実質不参加**（機構だけ残す・REQ-D22-007） | [probability-estimation.md](../specifications/probability-estimation.md) ステップ 2 |
@@ -112,9 +125,9 @@ paddock 横断の用語索引。**この文書は定義の正本ではなく、�
 | 想定回収率 | `Σ payout / Σ stake`。各レース 100 円をトップ選好馬の単勝に賭けた仮定値。**実際の買い方（3 券種）とは別物** | 同上 |
 | `ev`（期待値） | `probability × odds`。1.0 を超えると理論的にプラス期待値 | [ev-kelly-bet-selection.md](../specifications/ev-kelly-bet-selection.md) 用語定義 |
 | ROI（レース単位） | `Σ_i(賭金_i × 的中確率_i × 払戻倍率_i) / 総賭金`。買い目全体で見た期待回収率 | [CLAUDE.md](../../CLAUDE.md)「3. EV 判定 → 買い目決定」 |
-| ROI ゲート | **ROI ≥ 100% のレースだけ張る**という判定基準。100% が損益分岐で、下げる＝−EV を承知で買う | [product-goals.md](product-goals.md) REQ-D01-001 / [ADR 0040](../original-docs/0040-ev-gate-threshold-lowering-rejected.md) |
+| ⚠ ROI ゲート | **ROI ≥ 100% のレースだけ張る**という判定基準。100% が損益分岐で、下げる＝−EV を承知で買う。**ただし現行の参考 ROI はゲート指標として機能していない**（182R 実測でゲート通過 0 件・判定 ROI と実現 ROI の相関は無情報）——緩める根拠にはならないので閾値は下げない | [product-goals.md](product-goals.md) REQ-D01-001・「ゲートの現況」/ [ADR 0040](../original-docs/0040-ev-gate-threshold-lowering-rejected.md)（閾値）/ [ADR 0076](../original-docs/0076-roi-gate-uncalibrated-under-ev-layer-separation.md)（現況） |
 | フェア ROI | JRA 控除率（ワイド・馬連 22.5% / 3 連複 25%）由来の期待値上限 ≈ 75〜77.5%。エッジが無ければ ROI はこの近辺に落ちる | [betting-rule-history.md](../specifications/betting-rule-history.md) ⑤ |
-| `ev_threshold` / `trifecta_ev_threshold` | 推奨候補に入れる EV の閾値（既定 1.0 / 三連単のみ 2.0）。判定は strict なので**閾値ちょうどは除外**される | [ev-kelly-bet-selection.md](../specifications/ev-kelly-bet-selection.md) 用語定義 |
+| `ev_threshold` / `trifecta_ev_threshold` | 推奨候補に入れる EV の閾値（既定 1.0 / 三連単のみ 2.0）。判定は strict なので**閾値ちょうどは除外**される（用語定義の「これ以上の EV」は不正確で、「3. EV フィルタ」が正） | [ev-kelly-bet-selection.md](../specifications/ev-kelly-bet-selection.md)「3. EV フィルタ」（判定）/ 用語定義（既定値） |
 | ⚠ `kelly_fraction` / `kelly_cap` | 総資金に対する賭け割合と、その上限（既定 0.25）。**本番の賭け額配分には使わない**——用途は薄い買い目を落とす `min_kelly` の curation だけで、配分は均等割り | [ev-kelly-bet-selection.md](../specifications/ev-kelly-bet-selection.md) 用語定義（既定値）/ REQ-D23-004（用途制限） |
 
 ## 買い方・運用ルール

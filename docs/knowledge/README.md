@@ -34,7 +34,7 @@ docs/knowledge/ ＋ docs/specifications/   status 付き確定知（＝この層
   >   起こせば CI が落ちる。
   > - **ADR の写しは一巡した**（#588）。**例外は ADR 0074 自身**——その決定（issue 本文を転記しない）は
   >   [docs/original-docs/README.md](../original-docs/README.md) の規約として反映済みだが、`sources` を持つ
-  >   knowledge からは参照していないので stale 検査の対象外。ADR 75 本のうち、棄却 24 本は
+  >   knowledge からは参照していないので stale 検査の対象外。ADR 77 本のうち、棄却 24 本は
   >   [product-goals.md](product-goals.md) が索引し、採用側はいずれかの knowledge / specifications が
   >   `sources` で参照して決定を写している。knowledge は 10 本。
   >   ただし**写しの粒度は一様ではない**ので、決定の細部（却下した代替案・数値の前提）が要るときは
@@ -70,8 +70,9 @@ status: Confirmed        # Confirmed（確定）/ Tentative（暫定）/ Conflic
 kind: knowledge
 doc_class: [D22, D24]    # 文書クラス。第 1 要素が主クラス。定義は docs/knowledge/doc-classes.md
 tags: [D22, D24]         # doc_class の mdq 用ミラー（完全一致。checker が強制）
-sources:                 # 由来（ADR / qa / original-docs のパス）。決定の「なぜ」を辿れるように
-                         # 確定知層（specifications / knowledge）も由来に取ってよい（ADR 0076）
+sources:                 # 由来。ADR / qa / original-docs のほか、確定知層（specifications /
+                         # knowledge）や主題そのものであるファイル（ci.yml・openapi.json）も可。
+                         # 判定は「その文書の本文が動いたら、この知の見直しが要るか」（ADR 0077）
   - docs/original-docs/0NNN-....md   # ADR は 0 埋め 4 桁
   - docs/qa/QA-....md
 distilled_from_sha: "<short-sha>"  # この知が反映するリポジトリ状態の git SHA（トレーサビリティ）

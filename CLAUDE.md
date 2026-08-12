@@ -15,7 +15,7 @@ paddock の文書は HVE（dahatake/HypervelocityEngineering, MIT）の蒸留モ
   改変しない**——決定を変えるときは新しい ADR で supersede する。
 - **読む入口は knowledge**。ADR の決定・理由・却下案・影響は knowledge に**全部写す**。重複を許す
   代わりに、`sources` の更新に蒸留が追従しているかは機械検査で担保する（人手の規律に委ねない）。
-  **写しは一巡済み（#588・ADR 0074 自身を除く）**: ADR 75 本のうち棄却 24 本は
+  **写しは一巡済み（#588・ADR 0074 自身を除く）**: ADR 77 本のうち棄却 24 本は
   [docs/knowledge/product-goals.md](docs/knowledge/product-goals.md) が索引し、採用側はいずれかの
   knowledge / specifications が `sources` で参照している（knowledge は 10 本）。ただし**粒度は一様でない**
   ので、決定の細部（却下案・数値の前提）が要るときは **ADR 原本（`docs/original-docs/0NNN-*.md`）も読む**。
@@ -99,6 +99,9 @@ paddock-analyze predict <race_id> --blend-alpha 0.2
 
 ### 3. EV 判定 → 買い目決定
 
+> ROI の定義は用語集（[docs/knowledge/glossary.md](docs/knowledge/glossary.md)）が本節から写している。
+> 変えたら同ファイルの ROI 行も見直すこと（機械検査は鳴らない・ADR 0077）。
+
 各レースの ROI = Σ_i(賭金_i × 的中確率_i × 払戻倍率_i) / 総賭金 を算出し、**ROI ≥ 100% のレースだけ張る**。判定基準の詳細は下記「レース選択基準」参照。
 
 **朝の +EV は発走直前に剥がれる**（市場が締まると妙味が消える）。EV/ROI 判定は発走直前のフレッシュなオッズで行う。これを自動化する監視コマンド:
@@ -130,9 +133,9 @@ https://race.netkeiba.com/race/result.html?race_id=<12桁>
 ## 買い方ルール
 
 > **この節を変えたら [docs/knowledge/glossary.md](docs/knowledge/glossary.md)（D07）の買い方まわりの
-> 行も見直すこと。** 用語集は 印 / 軸 / ながし・ボックス / ROI / 混戦の配分 / second source /
-> decision-support の要約を本節から写しているが、`CLAUDE.md` は `sources` に入らない設計（ADR 0076）
-> なので**機械検査は鳴らない**。
+> 行も見直すこと。** 用語集は 印 / 軸 / 混戦の配分 / ながし / ボックス / フォーメーション /
+> second source / decision-support の 8 語の要約を本節から写しているが、`CLAUDE.md` は `sources` に
+> 入らない設計（ADR 0077）なので**機械検査は鳴らない**。
 
 > 現行ルールの決定根拠・棄却記録・バックテスト履歴: [docs/specifications/betting-rule-history.md](docs/specifications/betting-rule-history.md)（ルール変更を検討する時だけ参照。予想実行時は読まなくてよい）
 >
