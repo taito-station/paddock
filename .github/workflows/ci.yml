@@ -82,15 +82,16 @@ jobs:
 
       - name: Install Rust toolchain
         # サプライチェーン対策で commit SHA にピン（dtolnay/rust-toolchain は version タグを
-        # 切らないため master の 2026-03-27 時点を固定）。
+        # 切らないため master の特定コミットを固定する）。更新は dependabot の PR で行い、
+        # 固定した日付はここに書かない（SHA を上げるたびに腐るため。日付は git 履歴が正）。
         # toolchain は env.RUST_TOOLCHAIN を参照（単一ソース化 #466）。
-        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
           components: rustfmt, clippy
 
       - name: Cache cargo build
-        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
       - name: Format check
         run: cargo fmt --all --check
@@ -298,15 +299,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
 
       - name: Install Rust toolchain
-        # 本体 ci ジョブと同じ SHA ピン（dtolnay/rust-toolchain は version タグを切らないため
-        # master の 2026-03-27 時点を固定）。
+        # 本体 ci ジョブと同じ SHA ピン（両ジョブで同じ値を使う。片方だけ上げない）。
         # toolchain は env.RUST_TOOLCHAIN を参照（単一ソース化 #466）。
-        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
 
       - name: Cache cargo build
-        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
       # lib（OCR 非依存ユニット）+ 統合（test_render の PNG 化 / test_parse の解析値）をまとめて実走。
       # サンプル PDF は JRA 著作物で repo に含めない（gitignore）。フィクスチャが JRA から取得を試み、
