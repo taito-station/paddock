@@ -9,7 +9,7 @@ sources:
   - docs/original-docs/0025-prediction-search-api.md
   - docs/api/openapi.json
 distilled_from_sha: "3a7e875"
-updated: "2026-07-30"
+updated: "2026-08-12"
 ---
 
 # 予想の横断検索 API: 設計仕様
@@ -68,6 +68,12 @@ updated: "2026-07-30"
 - `races(race_id PK, date, venue, race_num, surface, distance, ...)`、index: `idx_races_course(venue, distance, surface)`
 
 `predictions.race_id` は `races` 照合で解決できた時のみ入る（**NULL あり**）。距離・芝ダは `predictions` に持たないため `races` 結合で得る。
+
+> **`prediction_horses.win_prob` / `place_prob` / `show_prob` の単位は百分率の表示値**（例 `25.4` = 25.4%）。
+> 入力の予想 JSON（[prediction-json.md](prediction-json.md)）が百分率で、`ingest-predictions` が変換せず
+> そのまま保存するため、本 API のレスポンスまで百分率のまま出る。**確率推定パイプラインの
+> `HorseProbability`（`/races/{id}/board` 等）は `[0.0, 1.0]`** で別スケールなので、両者を同じ軸で
+> 比較しない。
 
 ### マイグレーション
 

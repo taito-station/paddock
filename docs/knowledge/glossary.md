@@ -10,6 +10,7 @@ sources:
   - docs/specifications/ev-kelly-bet-selection.md
   - docs/specifications/betting-rule-history.md
   - docs/specifications/prediction-json.md
+  - docs/specifications/prediction-search-api.md
   - docs/specifications/feature-resolution-diagnosis.md
   - docs/specifications/netkeiba-datasource.md
   - docs/original-docs/0007-probability-monotonicity-jockey.md
@@ -52,15 +53,23 @@ paddock 横断の用語索引。**この文書は定義の正本ではなく、�
 - **正本列は「現行値を所有している文書」を指す**。要件として固定された値（本番の α・m・γ 等）は
   REQ-ID を指し、決定の経緯だけが要るものは ADR を指す。ADR は決定時点の RO 記録なので、
   値が改訂されても動かない——**現行値の確認は REQ 表、経緯は ADR** と読み分ける。
-- **値を書くのは、その値を知らないと語の意味が決まらないときだけ**（例: 混戦の「0.70 倍・4 頭」、
-  ブレンドの α）。実装の既定値やチューニング済みパラメータの羅列はしない——正本を指す。
+- **値を書くときは、その値を所有する正本を必ず併記する**（要件として固定された本番値は REQ-ID、
+  既定値は仕様書の該当節）。値だけを書き写して出所を書かないと、改訂されたときに気づけない。
+  逆に、正本を辿れば済む実装詳細（クランプの ε・リトライ回数など）は書かない。
 - **`sources` に入れるのは `docs/` 配下の可変な蒸留元と、要約の根拠として引いた ADR**。
   上流が動いたら stale 検査で本文書の見直しが強制されるのが狙い。
+  可変な下流文書を入れている以上、それらが動けば追従コミット（`distilled_from_sha` の bump）が
+  要る——見直しの強制が狙いなので、これはコストではなく仕様。
   **`CLAUDE.md` とソースコードは正本列で指すが `sources` には入れない**——`CLAUDE.md` は
   frontmatter を持たず metadata-only の免除が効かないため、用語と無関係な節（DB 運用・予想
   ワークフロー等）の 1 行修正でも stale error になり、追従が儀式化する。コードの追従は
   それを仕様として持つ文書側の責務。
-- **戻りリンク（正本 → 用語集）を置くのは `## 用語定義` 節を持つ文書だけ**（現在 3 本）。
+  **ただし本文書の `CLAUDE.md` への依存は現に残っている**（買い方まわりの数語）。
+  [README.md](README.md) の「出典は減らさない」が求める「依存が無くなったことを示す」条件は
+  満たしていない——維持コストを理由に外した例外で、依存そのものは
+  [doc-classes.md](doc-classes.md)「体系側の既知の穴」（D23 の一次定義が `docs/` 配下に無い）が
+  解消されるまで残る。
+- **戻りリンク（正本 → 用語集）を置くのは `## 用語定義` 節を持つ文書だけ**。
   節が無い文書のどこに置くかは恣意的になるため。**追従対象を決めるのは `sources` であって
   戻りリンクではない**ので、戻りリンクの無い正本も stale 検査の対象になりうる。
 - **対象領域は確率推定・評価・買い方・データ取得の運用**。web / API / 監視まわりの横断語
@@ -73,18 +82,18 @@ paddock 横断の用語索引。**この文書は定義の正本ではなく、�
 | `win_prob` | 勝率＝1 着以内確率。レース内合計 1.0 へ正規化 | [probability-estimation.md](../specifications/probability-estimation.md) 用語定義・ステップ 3 |
 | `place_prob` | 連対率＝2 着以内確率（日本競馬の「連対」＝top-2）。合計 2.0 へ正規化 | 同上 |
 | `show_prob` | 複勝率＝3 着以内確率（日本競馬の「複勝」＝top-3）。合計 3.0 へ正規化 | 同上 |
-| ⚠ 確率のスケール | 2 系統ある。**確率推定パイプライン**（`HorseProbability` / board / analyze / `HorseProbabilitySchema`）は `[0.0, 1.0]`。**予想 JSON 系統**は百分率の表示値（例 `25.4`）で、`ingest-predictions` が変換せずそのまま保持するため `prediction_horses` テーブルと prediction-search API まで百分率が伝播する | [prediction-json.md](../specifications/prediction-json.md) |
+| ⚠ 確率のスケール | 2 系統ある。**確率推定パイプライン**（`HorseProbability` / board / analyze / `HorseProbabilitySchema`）は `[0.0, 1.0]`。**予想 JSON 系統**は百分率の表示値（例 `25.4`）で、`ingest-predictions` が変換せずそのまま保持するため `prediction_horses` テーブルと prediction-search API まで百分率が伝播する | [prediction-json.md](../specifications/prediction-json.md)（入力）/ [prediction-search-api.md](../specifications/prediction-search-api.md)（DB 列・レスポンス） |
 | 単調化 | 馬ごとの累積 max で `win_prob ≤ place_prob ≤ show_prob` を保証する後処理。冪変換の後も再是正する | [probability-estimation.md](../specifications/probability-estimation.md) REQ-D22-011 / [ADR 0007](../original-docs/0007-probability-monotonicity-jockey.md) |
 | factor | 生スコアを構成する素性。stat 系 6 つ（`course_gate` / `horse_surface` / `horse_distance` / `jockey_surface` / `trainer_surface` / `horse_track_condition`）と scalar 系 3 つ（`recent_form` / `weight_carried` / `jockey_recent_form`）。`jockey_recent_form` は**重み 0 で実質不参加**（機構だけ残す・REQ-D22-007） | [probability-estimation.md](../specifications/probability-estimation.md) ステップ 2 |
-| `raw_score` | **存在する factor のみ**の重み付き平均。欠落項は重みごと母数から除外し、0 埋め（＝全敗扱い）にしない | [ADR 0014](../original-docs/0014-none-baseline-exclusion.md) |
+| `raw_score` | **存在する factor のみ**の重み付き平均。欠落項は重みごと母数から除外し、0 埋め（＝全敗扱い）にしない。**この drop は `Default` の挙動で、本番は下記 impute 後の値で計算する** | [probability-estimation.md](../specifications/probability-estimation.md) ステップ 2 / [ADR 0014](../original-docs/0014-none-baseline-exclusion.md) |
 | impute（field mean 補完） | 欠落した stat factor を同レース内 present 馬の縮約後レート平均で埋める。scalar 項 3 つは対象外。`production()` は有効 | [probability-estimation.md](../specifications/probability-estimation.md) REQ-D22-010 / [ADR 0057](../original-docs/0057-impute-missing-factors-field-mean.md) |
 | ベイズ縮約 / 擬似カウント `m` | `smoothed = (k·rate + m·prior) / (k + m)`。少データ馬の極端なレートを prior へ引き寄せる。**本番 predict は m=10**（`RECOMMENDED_SHRINKAGE_M`。backtest の既定は縮約 off） | [probability-estimation.md](../specifications/probability-estimation.md) REQ-D22-002 |
 | prior（基準率） | 縮約の引き寄せ先。出走頭数 ~14 由来で win=1/14・place=2/14・show=3/14 | [probability-estimation.md](../specifications/probability-estimation.md) ステップ 2.5 |
 | recency（リーセンシー重み） | 過去成績を `0.5^(days_ago/half_life)` で時間減衰させる集計。**既定は無効**（改善が確認できず、機構だけ残す） | [probability-estimation.md](../specifications/probability-estimation.md) REQ-D22-006 / [ADR 0016](../original-docs/0016-shrinkage-and-recency.md) |
-| ⚠ 冪変換 γ | 2 か所ある別物。`place_show_power` は**正規化前**の place/show に掛ける脱圧縮（本番 **2.0**）、`win_power` は**ブレンド後**の win に掛ける校正（本番 **1.25**） | [probability-estimation.md](../specifications/probability-estimation.md) REQ-D22-004 / REQ-D22-003 |
+| ⚠ 冪変換 γ | 2 か所ある別物。`place_show_power` は**正規化前**の place/show に掛ける脱圧縮（本番 **2.0**）、`win_power` は**ブレンド後**の win に掛ける校正（本番 **1.25**） | [probability-estimation.md](../specifications/probability-estimation.md) REQ-D22-004 / REQ-D22-003（経緯は [ADR 0047](../original-docs/0047-place-show-power-decompression-adopted.md) / [ADR 0042](../original-docs/0042-win-power-calibration-adopted.md)） |
 | implied 確率 | 単勝オッズの逆数 `1 / odds`。控除率を含んだままの生値 | [probability-estimation.md](../specifications/probability-estimation.md) ステップ 4 |
 | overround（控除率分の超過） | `Σ implied > 1.0` の超過分。合計 1.0 へ正規化して除いたものが市場確率 | 同上 |
-| `blended` | `blended = α·model + (1−α)·market`。**α はモデル重み**で、α=1.0 が純モデル・α=0.0 が市場のみ。**本番既定 α=0.2**（`RECOMMENDED_MARKET_BLEND_ALPHA`。オッズが無いレースはモデルのみへ自動フォールバック） | [probability-estimation.md](../specifications/probability-estimation.md) REQ-D22-001 |
+| `blended` | `blended = α·model + (1−α)·market`。**α はモデル重み**で、α=1.0 が純モデル・α=0.0 が市場のみ。**本番既定 α=0.2**（`RECOMMENDED_MARKET_BLEND_ALPHA`。オッズが無いレースはモデルのみへ自動フォールバック） | [probability-estimation.md](../specifications/probability-estimation.md) REQ-D22-001（採用の経緯は [ADR 0034](../original-docs/0034-alpha-retune-recency-rejected.md)） |
 | ⚠ 純モデル確率（pure） | ブレンド前のモデル確率。**順位付けは `blended`、EV 計算は pure** という層分離を守る | [ADR 0055](../original-docs/0055-ev-layer-separation-circular-break.md) / [product-goals.md](product-goals.md) REQ-D01-002 |
 | resolution（判別力） | 「どの馬が勝つか」を見分けるランクの強さ。AUC・top1 で測る。純モデルは市場に劣ることが確定済み | [feature-resolution-diagnosis.md](../specifications/feature-resolution-diagnosis.md) |
 | calibration（較正） | 予測確率と実測頻度の一致度。Brier・LogLoss・reliability 曲線で測る。**resolution とは別軸**（較正しても判別力は生まれない） | 同上 / [backtest.md](../specifications/backtest.md) |
@@ -113,10 +122,10 @@ paddock 横断の用語索引。**この文書は定義の正本ではなく、�
 | 用語 | 要約 | 正本 |
 |---|---|---|
 | 印 | 予想の格付け記号。**運用で打つのは ◎○▲☆**（◎が本命＝軸。印を打った馬は必ず買い目に絡める＝相手を top5 まで広げる主因）だが、**データモデルは △・注 を含む 6 種**（`honmei`/`taikou`/`tanana`/`renge`/`hoshi`/`chui`） | [CLAUDE.md](../../CLAUDE.md)「予算・配分（既定）」「混戦判定と配分」 / [prediction-json.md](../specifications/prediction-json.md)（6 種） |
-| 軸 | ◎に据えて買い目の中心に固定する馬 | [CLAUDE.md](../../CLAUDE.md)「軸ロックとズレ増額」「軸の選び方」 |
+| 軸 | ◎に据えて買い目の中心に固定する馬 | [CLAUDE.md](../../CLAUDE.md)「軸ロックとズレ増額（確率と買い方の分離）」「軸の選び方」 |
 | 軸ロック | **軸と基本の買い目構造を事前データで確定し、直前のオッズ変動でひっくり返さない**規律。見直すのは取消・馬場激変などの新情報が出たときだけ | [ADR 0060](../original-docs/0060-betting-axis-lock-preclose-topup.md) / [product-goals.md](product-goals.md) REQ-D01-003 |
 | ズレ増額 | 軸が自モデル確率より過小人気にズレたとき、**既存の買い目の金額だけを上げる**こと。点数（相手）は増やさない | 同上 |
-| 混戦 | ◎の model 勝率の **0.70 倍以上の馬が ◎含め 4 頭以上**いる状態。3 連複ボックスを含む別配分に切り替える | [ev-kelly-bet-selection.md](../specifications/ev-kelly-bet-selection.md) REQ-D23-005 |
+| 混戦 | ◎の model 勝率の **0.70 倍以上の馬が ◎含め 4 頭以上**いる状態（判定条件）。この状態で 3 連複ボックスを含む別配分に切り替える | [ev-kelly-bet-selection.md](../specifications/ev-kelly-bet-selection.md) REQ-D23-005（判定）/ [CLAUDE.md](../../CLAUDE.md)「混戦判定と配分」（配分） |
 | 相手 top5 | 3 券種とも model 確率上位 5 頭を相手に取る既定幅。**広げない**（上限側を直接測ったのは 3 連複のみ＝[ADR 0030](../original-docs/0030-konsen-trio-partner-width-rejected.md)。既定の 5 頭自体は [ADR 0019](../original-docs/0019-portfolio-generator.md) が置いた設計値） | [ev-kelly-bet-selection.md](../specifications/ev-kelly-bet-selection.md) REQ-D23-002（status: Tentative） |
 | ながし | 軸馬を固定し、相手すべてと組み合わせる方式（軸が必須） | [CLAUDE.md](../../CLAUDE.md)「表記規約（最優先）」 |
 | ボックス | 選んだ全馬を総当たりする方式（軸は不要） | 同上 |
