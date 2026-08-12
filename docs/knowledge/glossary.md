@@ -28,7 +28,7 @@ sources:
   - docs/original-docs/0060-betting-axis-lock-preclose-topup.md
   - docs/original-docs/0064-live-ev-buy-view.md
   - docs/original-docs/0075-unsupported-race-skip-exit-zero.md
-distilled_from_sha: "4115c98"
+distilled_from_sha: "2721f9a"
 updated: "2026-08-12"
 ---
 
