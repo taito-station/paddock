@@ -65,6 +65,10 @@ TARGET_DIRS = ("docs/knowledge", "docs/specifications")
 #   doc-classes.md: クラス定義そのもの。doc_class は持たない（sources/stale だけ検査する）。
 EXCLUDED_FROM_DOC_CLASS = {"README.md", "doc-classes.md"}
 EXCLUDED_ENTIRELY = {"README.md"}
+# 全検査からは外すが、**本文リンクだけは見る**文書（規約の正本を唯一の無検査域にしない）。
+# EXCLUDED_ENTIRELY と別に持つ: 将来ノイズ回避で除外を増やしたときに、意図せずリンク検査へ
+# 引き込まれたり逆に外れたりしないため。
+LINK_CHECK_ONLY = {"README.md"}
 
 # frontmatter は限定的な構造しか取らないので正規表現で読む。書式は doc-classes.md が規定。
 # 行末のインラインコメントを許す（規約が示すテンプレ自身がコメント付きで書かれているため、
@@ -426,6 +430,19 @@ def unfenced_lines(text: str) -> "tuple[list[tuple[int, str]], bool]":
     return kept, fence is not None
 
 
+def check_body_links(
+    rel: str, root: Path, text: str, errors: list[str], link_seen: "set[str] | None" = None
+) -> None:
+    """frontmatter を除いた本文のリンクを、行番号付きで検査する。"""
+    fm, body = split_frontmatter(text)
+    # frontmatter のぶんだけ行番号がずれるので足し戻す（`---` 2 行 + 中身）。
+    offset = 0 if fm is None else len(fm.splitlines()) + 2
+    for lineno, line in unfenced_lines(body)[0]:
+        check_links(
+            rel, root, line, errors, label=f"本文（{lineno + offset} 行目）の", seen=link_seen
+        )
+
+
 def strip_fenced_blocks(text: str) -> str:
     """フェンス内を落とした本文を返す（リンク走査用）。
 
@@ -434,12 +451,26 @@ def strip_fenced_blocks(text: str) -> str:
     return "\n".join(line for _, line in unfenced_lines(text)[0])
 
 
-def case_exact(path: Path) -> bool:
-    """実ファイル名と大文字小文字まで一致するかを見る（case-insensitive FS 対策）。"""
+def case_exact(path: Path, root: Path) -> bool:
+    """root から path までの**全成分**が実在の名前と大文字小文字まで一致するかを見る。
+
+    macOS(APFS) は大文字小文字を区別しないので `exists()` が通り、Linux の CI だけが
+    落ちる。最終成分だけ見るとディレクトリ名の大小違い（`../Specifications/x.md`）が
+    素通りするので、1 階層ずつ照合する。
+    """
     try:
-        return path.name in {p.name for p in path.parent.iterdir()}
-    except OSError:
-        return True  # 読めないディレクトリは判定しない（他の検査に委ねる）
+        rel_parts = path.relative_to(root).parts
+    except ValueError:
+        return True  # リポジトリ外は別の error で扱う
+    current = root
+    for part in rel_parts:
+        try:
+            if part not in {entry.name for entry in current.iterdir()}:
+                return False
+        except OSError:
+            return True  # 読めないディレクトリは判定しない（他の検査に委ねる）
+        current = current / part
+    return True
 
 
 def check_links(
@@ -484,7 +515,7 @@ def check_links(
             # ディレクトリへの相対リンクも正当（README が `scripts/` 等への
             # リンクを誘導している）。sources は「1 ファイル＝1 出典」なので非対称。
             errors.append(f"{rel}: {label}リンク先が実在しない → {target}")
-        elif not case_exact(resolved):
+        elif not case_exact(resolved, root.resolve()):
             # macOS(APFS) は大文字小文字を区別しないので exists() が通る。Linux の CI
             # だけが落ちる非対称を pre-push の時点で潰す。
             errors.append(f"{rel}: {label}リンク先の大文字小文字が実ファイルと違う → {target}")
@@ -674,12 +705,11 @@ def main(argv: list[str]) -> int:
     # **リンクだけは見る**。規約の正本が唯一無検査という穴を残さない——見本のリンクは
     # コードフェンスの中にあるので除外済み。
     for d in TARGET_DIRS:
-        for name in sorted(EXCLUDED_ENTIRELY):
+        for name in sorted(LINK_CHECK_ONLY):
             readme = root / d / name
             if readme.is_file():
                 rel = readme.relative_to(root).as_posix()
-                body = strip_fenced_blocks(split_frontmatter(readme.read_text(encoding="utf-8"))[1])
-                check_links(rel, root, body, errors, label="本文の", seen=set())
+                check_body_links(rel, root, readme.read_text(encoding="utf-8"), errors, set())
 
     actual_count: dict[str, int] = {cls: 0 for cls in declared}
     # REQ-ID → 初出パス。一意性はクラス内グローバル（文書をまたいで 1 つ）なので台帳は全体で 1 つ。
@@ -727,8 +757,9 @@ def main(argv: list[str]) -> int:
         # (9) 本文の相対リンク。REQ 表の外は無検査だったので、索引や相互参照で
         # できた文書（用語集など）は指し先が消えても CI が緑のままだった（#604）。
         # 未閉じフェンスの error は parse_req_blocks が出すのでここでは出さない。
-        body_text = strip_fenced_blocks(split_frontmatter(text)[1])
-        check_links(rel, root, body_text, errors, label="本文の", seen=link_seen)
+        # **行単位で回して行番号を載せる**（40 本超の相互参照を持つ文書で 1 件出たとき、
+        # 行番号が無いと捜索コストがそのまま運用コストになる）。
+        check_body_links(rel, root, text, errors, link_seen)
 
         # (4) sources の実在
         sources = fm.get("sources", [])
@@ -774,6 +805,8 @@ def main(argv: list[str]) -> int:
                 # #580 で warning → error に昇格。「ADR の内容は knowledge へ全部写す」
                 # （ADR 0073 決定 2）の担保はこの検査だけで、warning のままだと写した量に
                 # 比例して追従漏れが静かに溜まる。逃げ道は --warn-only のみ。
+                # **この文言は scripts/bump-distilled-sha.py の --all-stale がパースする契約**
+                # （`✗ <path>: STALE ← <src>`）。整えるときは向こうの RE_STALE_LINE も直す。
                 errors.append(
                     f"{rel}: STALE ← {src} が distilled_from_sha({distilled}) より後に更新されている"
                     f"（{changed[:7]}）。差分マージして sha/日付を更新する"
@@ -790,11 +823,15 @@ def main(argv: list[str]) -> int:
         elif actual is None:
             # 「ファイルが無い」と「ファイルはあるが doc_class を読めない」は原因が別。
             # 後者は本体側で別の error を出しているので、索引側で誤誘導しない。
-            reason = (
-                "対応する検査対象の文書が無い"
-                if f"docs/{key}" not in scanned_rels
-                else "対応する文書の doc_class を読めない（上の error を先に直す）"
-            )
+            name = Path(key).name
+            if name in EXCLUDED_FROM_DOC_CLASS:
+                # doc_class を持たない設計の文書（規約・クラス定義そのもの）。
+                # 索引は doc_class の一覧なので、そもそも行を置かない。
+                reason = "doc_class を持たない文書なので索引に載せない"
+            elif f"docs/{key}" not in scanned_rels:
+                reason = "対応する検査対象の文書が無い"
+            else:
+                reason = "対応する文書の doc_class を読めない（上の error を先に直す）"
             errors.append(f"{REGISTRY}: 割当索引の {key} は{reason}")
         elif listed != canonical:
             errors.append(

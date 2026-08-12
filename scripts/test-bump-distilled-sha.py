@@ -207,6 +207,83 @@ def test_updated_is_not_touched() -> None:
         shutil.rmtree(repo)
 
 
+def test_sha_option_writes_resolved_sha() -> None:
+    """`--sha HEAD` を literal で書くと、その文書の stale 判定が恒久的に無効化される。"""
+    repo = new_repo()
+    try:
+        baseline(repo)
+        code, out = run(repo, "--sha", "HEAD", "docs/knowledge/a.md")
+        assert code == 0, out
+        written = distilled_of(repo, "docs/knowledge/a.md")
+        assert written != "HEAD", f"可変参照をそのまま書いた: {written}"
+        assert len(written) >= 7, written
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_duplicate_distilled_lines_are_refused() -> None:
+    """checker は最後の行、bump は最初の行を見る。放置すると bump しても STALE が消えない。"""
+    repo = new_repo()
+    try:
+        baseline(repo)
+        path = repo / "docs/knowledge/a.md"
+        text = path.read_text(encoding="utf-8")
+        dup = 'distilled_from_sha: "deadbee"\nupdated:'
+        path.write_text(text.replace("updated:", dup, 1), encoding="utf-8")
+        code, out = run(repo, "docs/knowledge/a.md")
+        assert code == 1, out
+        assert "distilled_from_sha が 2 行ある" in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_no_args_is_fail_closed() -> None:
+    repo = new_repo()
+    try:
+        baseline(repo)
+        code, out = run(repo)
+        assert code == 2, out
+        assert "引数が無い" in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_other_errors_are_not_reported_as_resolved() -> None:
+    """STALE と他の error が同居するとき、bump 後に 0 を返して「解消した」と読ませない。"""
+    repo = new_repo()
+    try:
+        baseline(repo)
+        make_stale(repo)
+        write_doc(repo, "docs/knowledge/a.md", ["D19"],
+                  ["docs/original-docs/9999-nope.md", "docs/original-docs/0001-first.md"],
+                  distilled_of(repo, "docs/knowledge/a.md"))
+        commit_all(repo, "存在しない source を足す（別の error）")
+        code, out = run(repo, "--all-stale")
+        assert code == 1, out
+        assert "STALE 以外の error も残っている" in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_body_template_after_frontmatter_without_sha_is_refused() -> None:
+    """frontmatter に sha 行が無く、本文のフェンス内にだけ見本がある場合を弾く。"""
+    repo = new_repo()
+    try:
+        baseline(repo)
+        (repo / "docs/knowledge/tmpl.md").write_text(
+            '---\nstatus: Confirmed\nkind: knowledge\n---\n\n'
+            '# テンプレ\n\n```yaml\ndistilled_from_sha: "<short-sha>"\n```\n',
+            encoding="utf-8",
+        )
+        code, out = run(repo, "docs/knowledge/tmpl.md")
+        assert code == 1, out
+        assert "distilled_from_sha の行が無い" in out, out
+        body = (repo / "docs/knowledge/tmpl.md").read_text(encoding="utf-8")
+        assert '"<short-sha>"' in body, "本文のテンプレを書き換えた"
+    finally:
+        shutil.rmtree(repo)
+
+
 def main() -> int:
     if not TARGET.is_file():
         print(f"テスト対象が見つからない: {TARGET}", file=sys.stderr)

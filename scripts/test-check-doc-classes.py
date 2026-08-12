@@ -1310,7 +1310,7 @@ def test_body_broken_link_is_error() -> None:
         append_raw(repo, "docs/knowledge/a.md", "\n[出典](../original-docs/9999-nope.md)\n")
         code, out = check(repo)
         assert code == 1, out
-        assert "本文のリンク先が実在しない" in out, out
+        assert "のリンク先が実在しない" in out, out
     finally:
         shutil.rmtree(repo)
 
@@ -1345,7 +1345,7 @@ def test_body_absolute_link_is_error() -> None:
         append_raw(repo, "docs/knowledge/a.md", "\n[外](/etc/hosts)\n")
         code, out = check(repo)
         assert code == 1, out
-        assert "本文のリンクは文書からの相対パスで書く" in out, out
+        assert "リンクは文書からの相対パスで書く" in out, out
     finally:
         shutil.rmtree(repo)
 
@@ -1357,7 +1357,7 @@ def test_body_link_outside_repo_is_error() -> None:
         append_raw(repo, "docs/knowledge/a.md", "\n[外](../../../etc/hosts)\n")
         code, out = check(repo)
         assert code == 1, out
-        assert "本文のリンクがリポジトリ外を指している" in out, out
+        assert "リンクがリポジトリ外を指している" in out, out
     finally:
         shutil.rmtree(repo)
 
@@ -1520,7 +1520,7 @@ def test_body_link_after_stray_backtick_is_still_checked() -> None:
         )
         code, out = check(repo)
         assert code == 1, out
-        assert "本文のリンク先が実在しない" in out, out
+        assert "のリンク先が実在しない" in out, out
     finally:
         shutil.rmtree(repo)
 
@@ -1586,9 +1586,14 @@ def test_body_image_link_is_checked() -> None:
         append_raw(repo, "docs/knowledge/a.md", "\n![図](diagrams/nope.svg)\n")
         code, out = check(repo)
         assert code == 1, out
-        assert "本文のリンク先が実在しない" in out, out
+        assert "のリンク先が実在しない" in out, out
     finally:
         shutil.rmtree(repo)
+
+
+def _case_insensitive_fs(repo: Path) -> bool:
+    """fixture を置いた FS が大文字小文字を区別しないか（macOS か Linux か）。"""
+    return (repo / "docs/original-docs/0001-FIRST.md").exists()
 
 
 def test_body_link_case_mismatch_is_error() -> None:
@@ -1599,7 +1604,28 @@ def test_body_link_case_mismatch_is_error() -> None:
         append_raw(repo, "docs/knowledge/a.md", "\n[大小](../original-docs/0001-FIRST.md)\n")
         code, out = check(repo)
         assert code == 1, out
-        assert ("大文字小文字が実ファイルと違う" in out) or ("実在しない" in out), out
+        if _case_insensitive_fs(repo):
+            # ここを OR で緩めると、case-sensitive な CI では新分岐が一度も実行されず
+            # case_exact を丸ごと消しても緑のままになる。
+            assert "大文字小文字が実ファイルと違う" in out, out
+        else:
+            assert "実在しない" in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_body_link_directory_case_mismatch_is_error() -> None:
+    """ディレクトリ成分の大小違いも見る（最終成分だけ照合すると素通りする）。"""
+    repo = new_repo()
+    try:
+        baseline(repo)
+        append_raw(repo, "docs/knowledge/a.md", "\n[大小](../Original-docs/0001-first.md)\n")
+        code, out = check(repo)
+        assert code == 1, out
+        if _case_insensitive_fs(repo):
+            assert "大文字小文字が実ファイルと違う" in out, out
+        else:
+            assert "実在しない" in out, out
     finally:
         shutil.rmtree(repo)
 
@@ -1667,7 +1693,7 @@ def test_readme_body_link_is_checked() -> None:
         )
         code, out = check(repo)
         assert code == 1, out
-        assert "docs/knowledge/README.md: 本文のリンク先が実在しない" in out, out
+        assert "docs/knowledge/README.md: 本文（" in out and "実在しない" in out, out
     finally:
         shutil.rmtree(repo)
 

@@ -37,6 +37,8 @@ RE_DISTILLED = re.compile(
 # checker の STALE 行から対象文書を拾う。書式は
 #   ✗ docs/knowledge/x.md: STALE ← docs/... が distilled_from_sha(abc1234) より後に更新されている
 RE_STALE_LINE = re.compile(r"^✗\s+(\S+?):\s+STALE\s+←\s+(\S+)")
+# 末尾の集計行（`✗ 3 件の不整合（警告 1 件）`）。個別の error と区別する。
+RE_SUMMARY_LINE = re.compile(r"^✗\s+\d+\s*件の不整合")
 
 
 def repo_root() -> Path:
@@ -59,7 +61,7 @@ def head_sha(root: Path) -> str:
     return proc.stdout.strip()
 
 
-def stale_targets(root: Path) -> "dict[str, set[str]]":
+def stale_targets(root: Path) -> "tuple[dict[str, set[str]], bool]":
     """checker を実行し、STALE と報告された文書 → その原因 sources を返す。
 
     **checker が STALE 以外の理由で落ちたときに「STALE 無し」で 0 終了しない**。
@@ -71,15 +73,21 @@ def stale_targets(root: Path) -> "dict[str, set[str]]":
     )
     output = proc.stdout + proc.stderr
     found: dict[str, set[str]] = {}
+    others = False
     for line in output.splitlines():
-        matched = RE_STALE_LINE.match(line.strip())
+        stripped = line.strip()
+        matched = RE_STALE_LINE.match(stripped)
         if matched:
             found.setdefault(matched.group(1), set()).add(matched.group(2))
+        elif stripped.startswith("✗ ") and not RE_SUMMARY_LINE.match(stripped):
+            others = True  # STALE 以外の error（bump では消えない）
     if not found and proc.returncode != 0:
         sys.exit(
             "checker が STALE 以外の理由で落ちている。先にそちらを直す:\n" + output.rstrip()
         )
-    return found
+    # STALE と他の error が同居することもある。bump で消えるのは STALE だけなので、
+    # 「解消した」と読める 0 終了にはしない。
+    return found, others
 
 
 def frontmatter_span(text: str) -> "tuple[int, int] | None":
@@ -99,21 +107,27 @@ def frontmatter_span(text: str) -> "tuple[int, int] | None":
     return None
 
 
-def find_distilled(text: str) -> "re.Match[str] | None":
+def find_distilled(text: str) -> "list[re.Match[str]]":
+    """frontmatter 内の `distilled_from_sha` 行を全部返す（重複の検出用）。"""
     span = frontmatter_span(text)
     if span is None:
-        return None
+        return []
     start, end = span
-    matched = RE_DISTILLED.search(text, start, end)
-    return matched
+    return list(RE_DISTILLED.finditer(text, start, end))
 
 
-def bump(path: Path, sha: str) -> "tuple[str, str] | None":
-    """frontmatter の sha を書き換える。(旧 sha, 新 sha) を返す。変更不要なら None。"""
-    text = path.read_text(encoding="utf-8")
-    matched = find_distilled(text)
-    if not matched:
-        sys.exit(f"{path}: frontmatter に distilled_from_sha の行が見つからない")
+def read_doc(path: Path) -> str:
+    # newline="" で改行コードを保つ。既定だと CRLF の文書が丸ごと LF に正規化され、
+    # 1 行のはずの差分が全行差分に化ける。
+    return path.read_text(encoding="utf-8", newline="")
+
+
+def bump(path: Path, text: str, matched: "re.Match[str]", sha: str) -> "tuple[str, str] | None":
+    """frontmatter の sha を書き換える。(旧 sha, 新 sha) を返す。変更不要なら None。
+
+    `text` / `matched` は事前検証で読んだものを持ち回る（検証した内容と書く内容を
+    別読みにしない）。
+    """
     old = matched.group(2)
     if old == sha:
         return None
@@ -122,14 +136,20 @@ def bump(path: Path, sha: str) -> "tuple[str, str] | None":
         + f'{matched.group(1)}"{sha}"{matched.group(3)}'
         + text[matched.end() :]
     )
-    path.write_text(updated, encoding="utf-8")
+    path.write_text(updated, encoding="utf-8", newline="")
     return old, sha
 
 
 def main(argv: list[str]) -> int:
-    if not argv or argv[0] in ("-h", "--help"):
+    if argv and argv[0] in ("-h", "--help"):
         print(USAGE)
         return 0
+    if not argv:
+        # 引数ゼロで 0 終了すると `bump.py $(...)` が空を返したとき「何もせず成功」に
+        # なる。このスクリプトの他の分岐と同じく fail-closed に倒す。
+        print("引数が無い（対象の文書、または --all-stale を指定する）", file=sys.stderr)
+        print(USAGE, file=sys.stderr)
+        return 2
 
     sha = ""
     all_stale = False
@@ -159,8 +179,9 @@ def main(argv: list[str]) -> int:
 
     root = repo_root()
     reasons: dict[str, set[str]] = {}
+    others_remain = False
     if all_stale:
-        reasons = stale_targets(root)
+        reasons, others_remain = stale_targets(root)
         rels.extend(r for r in reasons if r not in rels)
         if not rels:
             print("STALE な文書は無い")
@@ -171,36 +192,48 @@ def main(argv: list[str]) -> int:
         return 2
 
     if sha:
-        verified = subprocess.run(
-            ["git", "-C", str(root), "rev-parse", "--verify", "--quiet", f"{sha}^{{commit}}"],
+        # **解決結果を書く**。ユーザ入力をそのまま書くと `--sha HEAD` で
+        # `distilled_from_sha: "HEAD"` になり、その文書の stale 判定が恒久的に無効化される
+        # （HEAD は常に「今」を指すので何を変えても STALE にならない）。
+        resolved = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "--short", "--verify", f"{sha}^{{commit}}"],
             capture_output=True,
             text=True,
         )
-        if verified.returncode != 0:
+        if resolved.returncode != 0:
             print(f"--sha が解決できない: {sha}", file=sys.stderr)
             return 2
-    target_sha = sha or head_sha(root)
+        target_sha = resolved.stdout.strip()
+    else:
+        target_sha = head_sha(root)
 
     # **書く前に全部の対象を検証する**。途中で abort すると、先行ファイルだけ書き換わった
     # 半端な状態が残り、何が起きたか読めなくなる。
-    targets: list[tuple[str, Path]] = []
+    targets: list[tuple[str, Path, str, "re.Match[str]"]] = []
     for rel in rels:
         candidates = [Path(rel)] if Path(rel).is_absolute() else [Path.cwd() / rel, root / rel]
         path = next((c for c in candidates if c.is_file()), None)
         if path is None:
             print(f"✗ {rel}: ファイルが無い", file=sys.stderr)
             return 1
-        if find_distilled(path.read_text(encoding="utf-8")) is None:
+        text = read_doc(path)
+        found = find_distilled(text)
+        if not found:
             print(f"✗ {rel}: frontmatter に distilled_from_sha の行が無い", file=sys.stderr)
             return 1
-        targets.append((rel, path))
+        if len(found) > 1:
+            # checker（parse_frontmatter）は最後の行を採用し、こちらは最初の行を書く。
+            # 放置すると「bump しても STALE が消えない」無言のループになる。
+            print(f"✗ {rel}: frontmatter に distilled_from_sha が {len(found)} 行ある", file=sys.stderr)
+            return 1
+        targets.append((rel, path, text, found[0]))
 
-    for rel, path in targets:
+    for rel, path, text, matched in targets:
         why = "".join(f"\n    ← {s}" for s in sorted(reasons.get(rel, ())))
         if dry_run:
             print(f"（dry-run）{rel} → {target_sha}{why}")
             continue
-        result = bump(path, target_sha)
+        result = bump(path, text, matched, target_sha)
         if result is None:
             print(f"= {rel}: 既に {target_sha}（変更なし）")
         else:
@@ -209,6 +242,14 @@ def main(argv: list[str]) -> int:
     if not dry_run:
         print("")
         print("updated は触っていない。下流の本文が実質変わったなら手で進める。")
+    if others_remain:
+        print("", file=sys.stderr)
+        print(
+            "注意: checker には STALE 以外の error も残っている（bump では解消しない）。"
+            "`scripts/check-doc-classes.py` を実行して確認する。",
+            file=sys.stderr,
+        )
+        return 1
     return 0
 
 
