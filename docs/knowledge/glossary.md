@@ -31,7 +31,8 @@ sources:
   - docs/original-docs/0076-roi-gate-uncalibrated-under-ev-layer-separation.md
   - docs/original-docs/0077-glossary-index-and-sources-scope.md
   - docs/original-docs/0079-roi-gate-display-kept-with-unreachable-note.md
-distilled_from_sha: "3574b38"
+  - docs/original-docs/0080-default-allocation-yen-denominated.md
+distilled_from_sha: "77c5471"
 updated: "2026-08-12"
 ---
 
@@ -144,7 +145,7 @@ paddock 横断の用語索引。**この文書は定義の正本ではなく、�
 | ながし | 軸馬を固定し、相手すべてと組み合わせる方式（軸が必須） | [CLAUDE.md](../../CLAUDE.md)「表記規約（最優先）」 |
 | ボックス | 選んだ全馬を総当たりする方式（軸は不要） | 同上 |
 | フォーメーション | 軸グループ×相手グループで組む方式。**このプロジェクトでは基本不使用** | 同上 |
-| 均等割り配分 | 券種予算を脚数で割った 100 円単位の等額配分。賄えない端数の脚は ¥0。実装 `build_portfolio` が正 | [ev-kelly-bet-selection.md](../specifications/ev-kelly-bet-selection.md) REQ-D23-003 |
+| 均等割り配分 | 券種予算を脚数で割った 100 円単位の等額配分。賄えない端数の脚は ¥0。実装 `build_portfolio` が正。**券種予算の既定は円建て（馬連 1500 / ワイド 1500 / 3連複 2000）** で、¥5,000・相手 5 頭なら予算ちょうど張り切る | [ev-kelly-bet-selection.md](../specifications/ev-kelly-bet-selection.md) REQ-D23-003（経緯は [ADR 0080](../original-docs/0080-default-allocation-yen-denominated.md)） |
 | ⚠ second source（買い方の二重実装） | 張るのは Rust `build_portfolio`（均等割り）の買い目。`scripts/predict-check/live_ev.py` は確率重み＋最低 ¥100 の別方式で、オフライン EV レポート専用 | [ev-kelly-bet-selection.md](../specifications/ev-kelly-bet-selection.md) REQ-D23-006 / [CLAUDE.md](../../CLAUDE.md)「予算・配分（既定）」 |
 
 ## 実行・運用
