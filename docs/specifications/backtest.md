@@ -10,7 +10,7 @@ sources:
   - docs/original-docs/0002-probability-estimation.md
   - docs/original-docs/0003-ev-kelly-bet-selection.md
 distilled_from_sha: "f765be7"
-updated: "2026-07-17"
+updated: "2026-08-12"
 ---
 
 # 予想精度バックテスト/評価基盤 仕様書
@@ -38,6 +38,8 @@ Issue #30 対応。DB に蓄積された過去の `races`/`results` に対して
 | as-of 統計 | レース日 D に対し `races.date < D` の成績のみで集計した統計（リーク防止） |
 | walk-forward | 各評価レースで「その時点までに得られた情報のみ」を使う時系列評価方式 |
 | トップ選好馬 | `win_prob` が最大の馬（単勝の本命として扱う） |
+
+> 横断の用語索引は [用語集](../knowledge/glossary.md)（D07）。定義の正本は本節で、用語集はここを指す。
 
 ---
 
