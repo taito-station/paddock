@@ -7,8 +7,8 @@ sources:
   - docs/original-docs/0026-ocr-pdf-ci-mupdf-pin.md
   - docs/original-docs/0073-adr-into-original-docs-and-doc-classes.md
   - .github/workflows/ci.yml
-distilled_from_sha: "a5cfa46"
-updated: "2026-08-11"
+distilled_from_sha: "378efda"
+updated: "2026-08-12"
 ---
 
 # CI パイプラインの構成と設計意図（D21）
@@ -54,6 +54,13 @@ D21（CI/CD・ビルド・リリース・供給網管理）の充足ギャップ
 外部 action は SHA ピンするが、**コンテナイメージは tag 参照**にする（`ci` の `postgres:17-alpine` と
 同じ扱い）。OS イメージはセキュリティ更新を取り込みたく、digest 固定は陳腐化と手動更新の負担が大きい。
 版ドリフトの実害（mupdf が下限割れ）は上記の assert gate が検知するので、ピンで防ぐ必要が無い。
+
+### stdlib スクリプトは CI の python3（ubuntu-latest 同梱・版はピンしない）で動くこと
+
+`scripts/*.py`（checker・bump・各回帰テスト）は CI では **ubuntu-latest 同梱の python3** で走る
+（`setup-python` を使っていないので版はイメージ任せ）。手元の macOS の方が新しいと、新しい版で
+入った API（例: `Path.read_text(newline=...)` は 3.13 以降）を使ってもローカルは緑のまま CI だけが
+落ちる。**新しい stdlib API を使うときは追加バージョンを確認する**（#604 で実際に踏んだ）。
 
 ### `adr` ジョブは回帰テストを本番検査より先に走らせる
 

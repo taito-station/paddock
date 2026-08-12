@@ -150,10 +150,18 @@ D01（[product-goals.md](product-goals.md)）を作った時点では**移して
 
 各文書の `doc_class` は **frontmatter が正**で、この表は読みやすさのための索引。
 
-> checker が突き合わせるのは上の一覧の**クラス別集計数だけ**で、この索引表は読んでいない。
-> 主クラスの順序入替や 2 文書間のクラス交換は集計が変わらないので検出されない。
-> `doc_class` を変えたらこの表も手で直すこと。
+> **この索引表は checker が frontmatter と 1 対 1 で突き合わせる**（#604）。行の欠落・余剰・値の
+> 不一致（順序違いを含む）はいずれも error。上の一覧の**クラス別集計数**だけでは、主クラスの
+> 順序入替や 2 文書間のクラス交換が検出できないため、索引側で塞いでいる。
+> **knowledge / specifications を 1 本足す・消す・`doc_class` を変える**ときは、同じ PR でこの表も直す。
+>
+> 表の書式も checker がパースする契約。`| knowledge/glossary.md | [D07] |` の **2 列**で、
+> 左は `docs/` を剥がした**素のパス**（リンク化しない）、右は `[D11, D10]`（`, ` 区切り・**順序込み**）。
+> 崩れた行は「割当索引の書式が崩れている行がある」として error にする。
+> 表の範囲はマーカー（`doc-classes-index`）で切り出すので、マーカーの内側に行を書く
+> （マーカーを消すと検査が成立しないため、`--warn-only` でも落ちる）。
 
+<!-- doc-classes-index:begin -->
 | 文書 | doc_class |
 |---|---|
 | knowledge/analyze-search-and-state.md | [D11, D10] |
@@ -182,3 +190,4 @@ D01（[product-goals.md](product-goals.md)）を作った時点では**移して
 | specifications/rest-api-read.md | [D10, D19, D09] |
 | specifications/session-write-api.md | [D10, D06] |
 | specifications/web-spa.md | [D11, D02, D10] |
+<!-- doc-classes-index:end -->

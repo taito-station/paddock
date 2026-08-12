@@ -15,6 +15,8 @@ docs/knowledge/app-bootstrap.md が status: Confirmed のまま存在しない N
   6. stale: sources の最終「内容変更」が distilled_from_sha に含まれているか  [error]
   7. active なのに文書 0 本のクラス（充足ギャップ）                           [warning]
   8. REQ 表（要件 ID）の書式・一意性・status・Confirmed の検証手段            [error]
+  9. 本文中の相対リンクが実在するか（REQ 表の外も見る）                       [error]
+ 10. doc-classes.md の割当索引と実ファイルの doc_class の突合                 [error]
 
 6 は rename-only のコミット（内容差分ゼロ）を比較対象から除外する。これが無いと ADR 0073 の
 ADR 移動だけで 20 本が一斉に stale 判定になる。git log --follow では吸収できない——--follow は
@@ -27,12 +29,15 @@ frontmatter は限定的な構造しか取らないため正規表現で足り�
   scripts/check-doc-classes.py               # 検査（error があれば非ゼロ終了）
   scripts/check-doc-classes.py check         # 同上
   scripts/check-doc-classes.py --warn-only   # error も警告として報告し常に 0 で終了
+                                             # （例外: マーカー欠落は fail-closed で 1）
 """
 
+import bisect
 import functools
 import re
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 USAGE = """check-doc-classes.py - 文書クラスと sources 追従の機械検査（ADR 0073）
@@ -41,6 +46,8 @@ USAGE = """check-doc-classes.py - 文書クラスと sources 追従の機械検�
   scripts/check-doc-classes.py               # 検査（error があれば非ゼロ終了）
   scripts/check-doc-classes.py check         # 同上
   scripts/check-doc-classes.py --warn-only   # error も警告扱いにして常に 0 で終了
+                                             # （例外: doc-classes.md のマーカー欠落は
+                                             #  表の範囲を切り出せないので 1 で落とす）
 
 オプション:
   -h, --help   このヘルプ
@@ -54,10 +61,17 @@ TARGET_DIRS = ("docs/knowledge", "docs/specifications")
 
 # 走査から外すファイル。
 #   README.md    : 規約そのもの。frontmatter のテンプレート例（0NNN-....md 等の
-#                  存在しないパス）を含むため、走査すると必ず偽陽性になる。
+#                  存在しないパス）を含むため、frontmatter 系の検査は必ず偽陽性になる。
+#                  ただし**本文リンクだけは検査する**（見本はコードフェンス内なので
+#                  除外済み。規約の正本を唯一の無検査域にしない・#604）。
 #   doc-classes.md: クラス定義そのもの。doc_class は持たない（sources/stale だけ検査する）。
 EXCLUDED_FROM_DOC_CLASS = {"README.md", "doc-classes.md"}
+# frontmatter 系の検査からは外すが、**本文リンクだけは必ず見る**（除外した文書が
+# 唯一の無検査域にならないように、この集合をそのままリンク検査へ回す）。
 EXCLUDED_ENTIRELY = {"README.md"}
+# TARGET_DIRS の外だが**リンクだけは見る**ファイル。CLAUDE.md は毎セッション読まれる運用指示で、
+# 用語集や仕様書への相対リンクを多数持つのに、ディレクトリ基準の走査からは外れていた。
+EXTRA_LINK_TARGETS = ("CLAUDE.md",)
 
 # frontmatter は限定的な構造しか取らないので正規表現で読む。書式は doc-classes.md が規定。
 # 行末のインラインコメントを許す（規約が示すテンプレ自身がコメント付きで書かれているため、
@@ -279,8 +293,13 @@ RE_REQ_ID = re.compile(r"^REQ-(D\d{2})-(\d{3})$")
 RE_MD_LINK = re.compile(r"""\[[^\]]*\]\(\s*<?([^)\s>]+)>?(?:\s+[^)]*)?\)""")
 # インラインコード。検証手段の列にはコマンドを書くので、その中のリンク様文字列
 # （`grep '[x](nope.md)' file` 等）を実リンクとして検査すると偽陽性になる。
-RE_INLINE_CODE = re.compile(r"`[^`]*`")
+# **改行を跨がせない**。本文を 1 文字列で走査するので、散文中の単独バッククォートが
+# 次のインラインコードと対になり、その間のリンクを黙って飲み込む（実測で再現した
+# fail-open。検査の目的そのものを裏切る）。
+RE_INLINE_CODE = re.compile(r"`[^`\n]*`")
 RE_TABLE_SEP_CELL = re.compile(r"^:?-+:?$")
+# スキーム付き URI（http / https / mailto / ftp / tel …）。リンク検査の対象外。
+RE_URI_SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
 
 REQ_COLUMNS = ("REQ-ID", "要件", "検証手段", "出典", "status")
 # Confirmed / Tentative / Conflict は frontmatter の status と同義。Retired は
@@ -337,22 +356,8 @@ def parse_req_blocks(text: str) -> "tuple[list[tuple[str, list[list[str]]]], lis
     errors: list[str] = []
     cls: "str | None" = None
     rows: list[list[str]] = []
-    # (フェンス文字, 長さ)。同種かつ**同長以上**でのみ閉じる（GFM）。長さを見ないと、
-    # ```` で囲んで ``` の見本を書く定番の書き方で内側が誤って閉じ、見本が実データに化ける。
-    fence: "tuple[str, int] | None" = None
-    for lineno, line in enumerate(text.splitlines(), 1):
-        stripped = RE_BLOCKQUOTE.sub("", line.strip())
-        opener = RE_FENCE.match(stripped)
-        if opener:
-            token = opener.group(1)
-            if fence is None:
-                fence = (token[0], len(token))
-            elif token[0] == fence[0] and len(token) >= fence[1]:
-                fence = None
-            continue
-        if fence is not None:
-            continue
-
+    lines, unclosed_fence = unfenced_lines(text)
+    for lineno, stripped in lines:
         begin = RE_REQ_BEGIN.match(stripped)
         end = RE_REQ_END.match(stripped)
         if not begin and not end and RE_REQ_MARKER_LOOSE.match(stripped):
@@ -395,12 +400,163 @@ def parse_req_blocks(text: str) -> "tuple[list[tuple[str, list[list[str]]]], lis
                 "（マーカーで囲まないと一意性・status の検査から丸ごと漏れる）"
             )
 
-    if fence is not None:
+    if unclosed_fence:
         errors.append("コードフェンスが閉じられていない（以降の REQ 表が無検査になる）")
     if cls is not None:
         errors.append(f"REQ ブロック（{cls}）が閉じられていない")
         blocks.append((cls, rows))
     return blocks, errors
+
+
+def unfenced_lines(text: str) -> "tuple[list[tuple[int, str]], bool]":
+    """フェンス外の (行番号, blockquote を剥がした行) と、未閉じフェンスの有無を返す。
+
+    コードフェンスは同種かつ**同長以上**でのみ閉じる（GFM）。長さを見ないと、```` で
+    囲んで ``` の見本を書く定番の書き方で内側が誤って閉じ、見本が実データに化ける。
+    REQ 表の走査と本文リンクの走査で**判定規則を 2 箇所に持たない**ようここへ集約する。
+    blockquote を剥がすのは、`> ` を付けるだけで全検査を素通りさせないため。
+    """
+    kept: list[tuple[int, str]] = []
+    fence: "tuple[str, int] | None" = None
+    for lineno, line in enumerate(text.splitlines(), 1):
+        stripped = RE_BLOCKQUOTE.sub("", line.strip())
+        opener = RE_FENCE.match(stripped)
+        if opener:
+            token = opener.group(1)
+            if fence is None:
+                fence = (token[0], len(token))
+            elif token[0] == fence[0] and len(token) >= fence[1]:
+                fence = None
+            continue
+        if fence is None:
+            kept.append((lineno, stripped))
+    return kept, fence is not None
+
+
+def check_body_links(
+    rel: str,
+    root: Path,
+    text: str,
+    errors: list[str],
+    link_seen: "set[str] | None" = None,
+    report_unclosed: bool = False,
+) -> None:
+    """frontmatter を除いた本文のリンクを、行番号付きで検査する。
+
+    **行ごとに切って走査しない**。`[ラベルが\n改行を跨ぐ](path.md)` のような正当な
+    Markdown が黙って無検査になる（1 巡目に潰した「改行跨ぎのインラインコードが
+    リンクを飲み込む」と同種の silent-green 経路）。フェンス外の行を連結して
+    まとめて走査し、マッチ位置から行番号を引く。
+    """
+    fm, body = split_frontmatter(text)
+    # frontmatter のぶんだけ行番号がずれるので足し戻す（`---` 2 行 + 中身）。
+    offset = 0 if fm is None else len(fm.splitlines()) + 2
+    lines, unclosed = unfenced_lines(body)
+    if unclosed and report_unclosed:
+        # 走査対象の文書は parse_req_blocks が同じ error を出すので二重に出さない。
+        # README / CLAUDE.md はこの経路しか通らず、閉じ忘れ以降のリンクが丸ごと
+        # 無検査のまま exit 0 になる（本 PR が潰している silent-green と同型）。
+        errors.append(f"{rel}: コードフェンスが閉じられていない（以降のリンクが無検査になる）")
+    if not lines:
+        return
+    joined = "\n".join(line for _, line in lines)
+    # 連結後のオフセット → 元の行番号。インラインコードの除去は行内で完結する
+    # （改行を跨がない正規表現）ので、置換後も行の対応はずれない。
+    starts: list[int] = []
+    pos = 0
+    for _, line in lines:
+        starts.append(pos)
+        pos += len(line) + 1
+
+    def label_at(index: int) -> str:
+        i = bisect.bisect_right(starts, index) - 1
+        return f"本文（{lines[max(i, 0)][0] + offset} 行目）の"
+
+    check_links(rel, root, joined, errors, seen=link_seen, label_at=label_at)
+
+
+def case_exact(path: Path, root: Path) -> bool:
+    """root から path までの**全成分**が実在の名前と大文字小文字まで一致するかを見る。
+
+    macOS(APFS) は大文字小文字を区別しないので `exists()` が通り、Linux の CI だけが
+    落ちる。最終成分だけ見るとディレクトリ名の大小違い（`../Specifications/x.md`）が
+    素通りするので、1 階層ずつ照合する。
+    """
+    try:
+        rel_parts = path.relative_to(root).parts
+    except ValueError:
+        return True  # リポジトリ外は別の error で扱う
+    current = root
+    for part in rel_parts:
+        try:
+            if part not in {entry.name for entry in current.iterdir()}:
+                return False
+        except OSError:
+            return True  # 読めないディレクトリは判定しない（他の検査に委ねる）
+        current = current / part
+    return True
+
+
+# 成功行に出す「実在を検査したリンク数」。スキーム付き URI・アンカー・同一先の重複は
+# 数えない（#604 (c) の「まず数える」を後から同じ定義で再現するためのベースライン）。
+LINK_COUNT = 0
+
+
+def check_links(
+    rel: str,
+    root: Path,
+    fragment: str,
+    errors: list[str],
+    *,
+    label: str = "",
+    seen: "set[str] | None" = None,
+    label_at: "Callable[[int], str] | None" = None,
+) -> None:
+    """`fragment` に含まれる Markdown リンクの実在を検査する。
+
+    REQ 表の出典・検証手段と本文の双方から呼ぶ。`seen` を渡すと同じリンク先を
+    二重に報告しない（REQ 表の行は本文にも含まれるため、渡さないと同じ 1 本の
+    リンク切れが 2 件の error になる）。`label_at` を渡すと、マッチ位置から
+    ラベル（本文なら行番号入り）を作る。
+    """
+    # **長さを保存して置換する**。`sub(" ", ...)` だと除去のぶんだけ後続の位置が前へずれ、
+    # `label_at` が引く行番号が過少になる（実測で 223 本中 210 本が誤り）。
+    masked = RE_INLINE_CODE.sub(lambda m: " " * len(m.group(0)), fragment)
+    global LINK_COUNT
+    for matched in RE_MD_LINK.finditer(masked):
+        target = matched.group(1)
+        here = label_at(matched.start()) if label_at else label
+        # スキーム付き URI（http/https/mailto に限らず ftp・tel 等）と protocol-relative、
+        # 同一文書内アンカーは対象外。ホワイトリストにすると新しいスキームを足すたびに
+        # 誤検知が出る。
+        if target.startswith(("#", "//")) or RE_URI_SCHEME.match(target):
+            continue
+        cleaned = target.split("#", 1)[0]
+        if not cleaned:
+            continue
+        # 同じファイルへのリンクは #anchor 違いでも 1 件に畳む（同じ欠落を何度も報告しない）。
+        if seen is not None:
+            if cleaned in seen:
+                continue
+            seen.add(cleaned)
+        LINK_COUNT += 1  # ここから先が実在検査。skip / 重複は数えない
+        # sources 検査（main）と同じ理由でリポジトリ外を弾く。絶対パスを許すと
+        # Path 連結が左辺を捨てて外を指し、「参照先はリポジトリ内で辿れる」という
+        # 前提が崩れる（`[外](/etc/hosts)` が実在扱いで通る）。
+        if cleaned.startswith("/"):
+            errors.append(f"{rel}: {here}リンクは文書からの相対パスで書く → {target}")
+            continue
+        resolved = ((root / rel).parent / cleaned).resolve()
+        if not resolved.is_relative_to(root.resolve()):
+            errors.append(f"{rel}: {here}リンクがリポジトリ外を指している → {target}")
+        elif not resolved.exists():
+            # ディレクトリへの相対リンクも正当（README が `scripts/` 等への
+            # リンクを誘導している）。sources は「1 ファイル＝1 出典」なので非対称。
+            errors.append(f"{rel}: {here}リンク先が実在しない → {target}")
+        elif not case_exact(resolved, root.resolve()):
+            # macOS(APFS) は大文字小文字を区別しないので exists() が通る。Linux の CI
+            # だけが落ちる非対称を pre-push の時点で潰す。
+            errors.append(f"{rel}: {here}リンク先の大文字小文字が実ファイルと違う → {target}")
 
 
 def check_req_blocks(
@@ -411,6 +567,7 @@ def check_req_blocks(
     seen: "dict[str, str]",
     root: Path,
     errors: list[str],
+    link_seen: "set[str] | None" = None,
 ) -> None:
     """1 文書ぶんの REQ 表を検査する。`seen` は REQ-ID → 初出パスの全体台帳。"""
     blocks, structural = parse_req_blocks(text)
@@ -490,29 +647,13 @@ def check_req_blocks(
                 )
 
             # 出典・検証手段が指すリポジトリ内リンクの実在。frontmatter の sources と
-            # 同じ理由——由来を辿れないなら要件の根拠を確認できない。
-            linked = RE_INLINE_CODE.sub(" ", origin) + " " + RE_INLINE_CODE.sub(" ", verification)
-            for target in RE_MD_LINK.findall(linked):
-                if target.startswith(("http://", "https://", "mailto:", "#")):
-                    continue
-                cleaned = target.split("#", 1)[0]
-                # sources 検査（下）と同じ理由でリポジトリ外を弾く。絶対パスを許すと
-                # Path 連結が左辺を捨てて外を指し、「由来はリポジトリ内で辿れる」という
-                # 前提が崩れる（`[外](/etc/hosts)` が実在扱いで通る）。
-                if cleaned.startswith("/"):
-                    errors.append(
-                        f"{rel}: {req_id} のリンクは文書からの相対パスで書く → {target}"
-                    )
-                    continue
-                resolved = ((root / rel).parent / cleaned).resolve()
-                if not resolved.is_relative_to(root.resolve()):
-                    errors.append(
-                        f"{rel}: {req_id} のリンクがリポジトリ外を指している → {target}"
-                    )
-                elif not resolved.exists():
-                    # ディレクトリへの相対リンクも正当（README が `scripts/` 等への
-                    # リンクを誘導している）。sources は「1 ファイル＝1 出典」なので非対称。
-                    errors.append(f"{rel}: {req_id} のリンク先が実在しない → {target}")
+            # 同じ理由——由来を辿れないなら要件の根拠を確認できない。セルごとに
+            # 渡すのは、インラインコードの除去をセルを跨いで行うと閉じていない
+            # バッククォートが隣のセルと対になって本物のリンクを消すため。
+            for fragment in (origin, verification):
+                check_links(
+                    rel, root, fragment, errors, label=f"{req_id} の", seen=link_seen
+                )
 
 
 def main(argv: list[str]) -> int:
@@ -569,6 +710,24 @@ def main(argv: list[str]) -> int:
     for cls in sorted(na_declared - na_in_table):
         errors.append(f"{REGISTRY}: {cls} は N/A 宣言表にあるが一覧の状態が n/a になっていない")
 
+    # 割当索引を先に読む。走査後に読むと、マーカー欠落の sys.exit がそれまでに
+    # 溜めた errors / warnings を捨てて落ちる（重い git 走査も無駄になる）。
+    indexed: dict[str, str] = {}
+    for line in extract_block(registry_text, "doc-classes-index"):
+        stripped = line.strip()
+        if not stripped.startswith("|"):
+            continue
+        cells = split_row(stripped)
+        if len(cells) != 2:
+            errors.append(f"{REGISTRY}: 割当索引の書式が崩れている行がある → {stripped}")
+            continue
+        if cells[0] == "文書" or RE_TABLE_SEP_CELL.match(cells[0]):
+            continue
+        if cells[0] in indexed:
+            # 後勝ちで上書きすると、片方が実態とズレていても無言で通る。
+            errors.append(f"{REGISTRY}: 割当索引に {cells[0]} の行が 2 つある")
+        indexed[cells[0]] = cells[1]
+
     # --- 対象ファイルを走査 ---
     shallow = is_shallow()
     targets: list[Path] = []
@@ -580,13 +739,42 @@ def main(argv: list[str]) -> int:
         for n in nested:
             warnings.append(f"{n}: サブディレクトリの .md は検査対象外（直下に置く）")
 
+    # 全検査から外している README（テンプレート例が frontmatter 検査で必ず偽陽性になる）も、
+    # **リンクだけは見る**。規約の正本が唯一無検査という穴を残さない——見本のリンクは
+    # コードフェンスの中にあるので除外済み。
+    for d in TARGET_DIRS:
+        for name in sorted(EXCLUDED_ENTIRELY):
+            excluded = root / d / name
+            if excluded.is_file():
+                rel = excluded.relative_to(root).as_posix()
+                check_body_links(
+                    rel, root, excluded.read_text(encoding="utf-8"), errors, set(),
+                    report_unclosed=True,
+                )
+
+    for extra in EXTRA_LINK_TARGETS:
+        path = root / extra
+        if path.is_file():
+            check_body_links(
+                extra, root, path.read_text(encoding="utf-8"), errors, set(), report_unclosed=True
+            )
+
     actual_count: dict[str, int] = {cls: 0 for cls in declared}
     # REQ-ID → 初出パス。一意性はクラス内グローバル（文書をまたいで 1 つ）なので台帳は全体で 1 つ。
     req_seen: dict[str, str] = {}
+    # 割当索引の突合用。キーは索引表と同じ `knowledge/x.md` 形式（docs/ を剥がす）。
+    doc_class_by_rel: dict[str, list[str]] = {}
+    scanned_rels: set[str] = set()
     for path in targets:
         rel = path.relative_to(root).as_posix()
+        scanned_rels.add(rel)
         text = path.read_text(encoding="utf-8")
         fm = parse_frontmatter(text)
+        # frontmatter が無くてもリンクだけは見る（下の continue で丸ごと飛ばさない）。
+        # fm が無い文書は REQ 走査（未閉じフェンスの報告元）まで到達しないので、
+        # そのときだけこちらでフェンス閉じ忘れを報告する。
+        link_seen: set[str] = set()
+        check_body_links(rel, root, text, errors, link_seen, report_unclosed=not fm)
         if not fm:
             errors.append(f"{rel}: frontmatter が無い")
             continue
@@ -611,9 +799,13 @@ def main(argv: list[str]) -> int:
                         f"{rel}: tags が doc_class と一致しない"
                         f"（doc_class={classes} / tags={fm.get('tags')}）"
                     )
+                doc_class_by_rel[rel.removeprefix("docs/")] = classes
 
-        # (8) REQ 表
-        check_req_blocks(rel, text, fm.get("doc_class"), declared, req_seen, root, errors)
+        # (8) REQ 表。リンクの台帳は上の本文検査と共有していて、本文で報告済みの
+        # リンク先は REQ 側で二重に報告しない（REQ 表の行は本文にも含まれるため）。
+        check_req_blocks(
+            rel, text, fm.get("doc_class"), declared, req_seen, root, errors, link_seen
+        )
 
         # (4) sources の実在
         sources = fm.get("sources", [])
@@ -659,10 +851,39 @@ def main(argv: list[str]) -> int:
                 # #580 で warning → error に昇格。「ADR の内容は knowledge へ全部写す」
                 # （ADR 0073 決定 2）の担保はこの検査だけで、warning のままだと写した量に
                 # 比例して追従漏れが静かに溜まる。逃げ道は --warn-only のみ。
+                # **この文言は scripts/bump-distilled-sha.py の --all-stale がパースする契約**
+                # （`✗ <path>: STALE ← <src>`）。整えるときは向こうの RE_STALE_LINE も直す。
                 errors.append(
                     f"{rel}: STALE ← {src} が distilled_from_sha({distilled}) より後に更新されている"
                     f"（{changed[:7]}）。差分マージして sha/日付を更新する"
                 )
+
+    # (10) 割当索引と実ファイルの突合。上の (5) はクラス別の集計数しか見ないので、
+    # 主クラスの順序入替や 2 文書間のクラス交換は素通りする（索引を突き合わせて塞ぐ）。
+    for key in sorted(set(indexed) | set(doc_class_by_rel)):
+        actual = doc_class_by_rel.get(key)
+        listed = indexed.get(key)
+        canonical = f"[{', '.join(actual)}]" if actual else None
+        if listed is None:
+            errors.append(f"{REGISTRY}: 割当索引に {key} の行が無い（実際は {canonical}）")
+        elif actual is None:
+            # 「ファイルが無い」と「ファイルはあるが doc_class を読めない」は原因が別。
+            # 後者は本体側で別の error を出しているので、索引側で誤誘導しない。
+            name = Path(key).name
+            if name in EXCLUDED_FROM_DOC_CLASS:
+                # doc_class を持たない設計の文書（規約・クラス定義そのもの）。
+                # 索引は doc_class の一覧なので、そもそも行を置かない。
+                reason = "doc_class を持たない文書なので索引に載せない"
+            elif f"docs/{key}" not in scanned_rels:
+                reason = "対応する検査対象の文書が無い"
+            else:
+                reason = "対応する文書の doc_class を読めない（上の error を先に直す）"
+            errors.append(f"{REGISTRY}: 割当索引の {key} は{reason}")
+        elif listed != canonical:
+            errors.append(
+                f"{REGISTRY}: 割当索引の {key} が frontmatter と一致しない"
+                f"（索引={listed} / 実際={canonical}）"
+            )
 
     # (5) レジストリの「現行」列と実態
     for cls, meta in sorted(declared.items()):
@@ -690,7 +911,8 @@ def main(argv: list[str]) -> int:
         return 1
 
     print(
-        f"✓ 文書クラス・sources 整合を確認（{len(targets)} 本 / 警告 {len(warnings)} 件）"
+        f"✓ 文書クラス・sources 整合を確認"
+        f"（{len(targets)} 本 / 実在を検査したリンク {LINK_COUNT} 本 / 警告 {len(warnings)} 件）"
     )
     return 0
 

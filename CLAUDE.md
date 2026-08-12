@@ -20,7 +20,7 @@ paddock の文書は HVE（dahatake/HypervelocityEngineering, MIT）の蒸留モ
   knowledge / specifications が `sources` で参照している（knowledge は 10 本）。ただし**粒度は一様でない**
   ので、決定の細部（却下案・数値の前提）が要るときは **ADR 原本（`docs/original-docs/0NNN-*.md`）も読む**。
   stale の機械検査は **error**（未解消 6 件を #580 で消化して warning から昇格）。`sources` に挙げた
-  ファイルを内容ごと変更したら、参照元の **`distilled_from_sha` を同じ PR で追従させる**（追従漏れは
+  ファイルを内容ごと変更したら、参照元の **`distilled_from_sha` を同じ PR で追従させる**（`scripts/bump-distilled-sha.py --all-stale` で一括。`updated` は触らないので実質更新の有無は自分で判断する。追従漏れは
   CI が落とす）。`updated` は**下流の本文が実質変わったときだけ**進める（機械検査の対象外）。
 - **用語で迷ったら [docs/knowledge/glossary.md](docs/knowledge/glossary.md)（D07）**。`win_prob` の
   スケール・`blended` の α・`軸ロック` / `混戦` / `ながし` などの**定義の正本がどこにあるか**を引ける
@@ -31,7 +31,7 @@ paddock の文書は HVE（dahatake/HypervelocityEngineering, MIT）の蒸留モ
 - **文書クラス**: knowledge/specifications は frontmatter に `doc_class`（+ mdq 用ミラーの `tags`）を持つ。
   定義の正本は [docs/knowledge/doc-classes.md](docs/knowledge/doc-classes.md)（HVE の D01〜D21 ＋ paddock 固有の
   D22 予測モデル / D23 買い方 / D24 実験・棄却証跡）。`scripts/mdq search --tags D23` でクラス絞り込みができる。
-  整合は `scripts/check-doc-classes.py` が CI と pre-push で検査する。
+  整合は `scripts/check-doc-classes.py` が CI と pre-push で検査する（本文の相対リンクの実在と、`doc-classes.md` の割当索引との 1 対 1 突合も error）。**knowledge / specifications を 1 本足す・消す・`doc_class` を変えるときは、同じ PR で `doc-classes.md` のクラス一覧の「現行」列と割当索引も直す**。
 - **探索規律 — 生読み前に mdq 検索**: docs 内の答えを探すときは、まず
   `scripts/mdq search --q "..."`（BM25・ローカル・[.claude/skills/markdown-query/SKILL.md](.claude/skills/markdown-query/SKILL.md)）
   でヒットチャンクだけ取り、必要時のみ生ファイルへ。コード探索は従来通り serena（`mcp__serena__*`）。
