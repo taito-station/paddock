@@ -65,6 +65,40 @@ pub fn mark_for(roi: f64, notify_gate: f64, buy_gate: f64) -> &'static str {
     }
 }
 
+/// 参考ROI の読み方を起動時に 1 回だけ示す注記を組む（#602 / ADR 0079・単体テスト対象）。
+///
+/// **🔶（買い妙味）は構造的に到達不能**——ADR 0076 が 182 レース / 839 スイープを確定払戻で精算し、
+/// 通過 0 件・`Spearman(判定ROI, 実現ROI) = +0.002`（＝実現ROI に対する選別力なし）と測っている。
+/// マーク自体は残す（🔍 帯は生きており結果照合の目印になる）が、**出ないものを待たせない**ために
+/// 到達不能であることを明示する。閾値は動かさない——「意味のある閾値が無い」と測った以上、
+/// 別の値へ動かすのは実測に反する（ADR 0040 の引き下げ棄却も ADR 0076 で支持されている）。
+///
+/// 文字列を返す純関数にしてあるのは、文言が実測（182R・0 件）と結びついているため
+/// テストで固定するのが目的。表示は呼び出し側の `println!`。
+fn gate_caveat_lines(roi_gate: f64, notify_gate: f64) -> Vec<String> {
+    let mut out = vec![format!(
+        "── 参考ROI の読み方: 🔶（≥{:.0}%）は 182R / 839 スイープの実測で到達 0 件。判定ROI に実現ROI の選別力は無い（ADR 0076）。",
+        roi_gate * 100.0
+    )];
+    if notify_gate < roi_gate {
+        out.push(format!(
+            "   🔍（≥{:.0}%）は結果照合のための目印で、張り推奨ではない。",
+            notify_gate * 100.0
+        ));
+    }
+    out.push(
+        "   張る/見送りは参考ROIでは決めない——手動のハンデ精査と執行の規律（軸ロック＋ズレ増額）で決める（ADR 0055/0060）。"
+            .to_string(),
+    );
+    out
+}
+
+fn print_gate_caveat(roi_gate: f64, notify_gate: f64) {
+    for line in gate_caveat_lines(roi_gate, notify_gate) {
+        println!("{line}");
+    }
+}
+
 /// 当該レースが「G1 裏」（G1 開催日・別場の非重賞）かを判定する純関数（#345・単体テスト対象）。
 ///
 /// 当日どこかで G1 が行われ、かつ当該レースが (a) 非重賞（G1/G2/G3 以外）かつ (b) その G1
@@ -748,6 +782,10 @@ pub async fn run(app: &App, cli: &Cli) -> anyhow::Result<()> {
     // JST 以外の TZ では判定が無意味になる。誤用に早期に気づけるよう起動時に警告する（#459 で共通化）。
     warn_if_not_today_jst_now(cli.date, "発走状態");
 
+    // 参考ROI の読み方（#602 / ADR 0079）。**起動時 1 回だけ**出す——スイープごとに出すと
+    // 1 開催日で 80 回を超え、肝心の判定行が埋もれる（#584 が問題にした「ログに埋もれる」の再生産）。
+    print_gate_caveat(cli.roi_gate, notify_gate);
+
     let mut sweeper = WatchSweeper {
         app,
         cli,
@@ -829,6 +867,28 @@ mod tests {
         assert_eq!(jst_hhmm("2026-08-09T09:27:37+00:00"), "18:27");
         // 解釈できない値でも監視を止めず、そのまま出して人が気づけるようにする。
         assert_eq!(jst_hhmm("not-a-time"), "not-a-time");
+    }
+
+    /// 起動注記は「到達 0 件」と ADR 0076 を必ず含む（実測に紐づく文言なので落とさない）。
+    #[test]
+    fn gate_caveat_states_unreachable_with_evidence() {
+        let lines = gate_caveat_lines(1.0, 0.7);
+        let joined = lines.join("\n");
+        assert!(joined.contains("到達 0 件"), "{joined}");
+        assert!(joined.contains("ADR 0076"), "{joined}");
+        assert!(joined.contains("≥100%"), "roi_gate を反映する: {joined}");
+        assert!(joined.contains("≥70%"), "notify_gate を反映する: {joined}");
+        // 張る判断の拠り所（手動精査＋執行の規律）まで書いて初めて「当てにしない」が伝わる。
+        assert!(joined.contains("軸ロック"), "{joined}");
+    }
+
+    /// `notify_gate == roi_gate` のとき 🔍 帯は構造的に空なので、その行は出さない
+    /// （出ないマークを案内しない＝スイープヘッダの既存規約と揃える）。
+    #[test]
+    fn gate_caveat_omits_notify_line_when_band_is_empty() {
+        let joined = gate_caveat_lines(1.0, 1.0).join("\n");
+        assert!(!joined.contains("🔍"), "{joined}");
+        assert!(joined.contains("到達 0 件"), "{joined}");
     }
 
     #[test]
