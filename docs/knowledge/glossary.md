@@ -29,7 +29,7 @@ sources:
   - docs/original-docs/0064-live-ev-buy-view.md
   - docs/original-docs/0075-unsupported-race-skip-exit-zero.md
   - docs/original-docs/0076-glossary-index-and-sources-scope.md
-distilled_from_sha: "2721f9a"
+distilled_from_sha: "9f0532c"
 updated: "2026-08-12"
 ---
 
