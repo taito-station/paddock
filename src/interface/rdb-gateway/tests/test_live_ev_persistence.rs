@@ -205,3 +205,121 @@ async fn place_odds_null_when_absent(pool: sqlx::PgPool) {
     assert_eq!(rows[0].axis_place_odds_low, None);
     assert_eq!(rows[0].axis_place_odds_high, None);
 }
+
+// --- 買い目固定の読み出し（#601 軸ロック） -------------------------------------
+
+/// 相手・混戦 band を持つレコードを組む。`method` / `bet_type` の組み合わせから
+/// 固定（軸・相手・band）を復元できるかを見るためのフィクスチャ。
+fn record_with_legs(
+    captured_at: &str,
+    axis: u32,
+    partners: &[u32],
+    box_horses: &[u32],
+) -> LiveEvSnapshotRecord {
+    let mut rec = record(captured_at, 90.0, "skip");
+    rec.axis = axis;
+    rec.konsen = box_horses.len() >= 4;
+    rec.legs = Vec::new();
+    // 馬連・ワイドは「軸×相手」のながし。相手はこの 2 券種の和集合から復元される。
+    for (i, p) in partners.iter().enumerate() {
+        let mut combo = vec![axis, *p];
+        combo.sort_unstable();
+        // ワイド脚を 1 本だけ意図的に落とし、片方の券種が予算端数で欠けても
+        // もう片方から相手を拾えることを確かめる。
+        if i != 0 {
+            rec.legs.push(SlipLegRecord {
+                bet_type: "wide".to_string(),
+                method: "nagashi".to_string(),
+                axis: Some(axis),
+                combo: combo.clone(),
+                points: 1,
+                amount: 300,
+            });
+        }
+        rec.legs.push(SlipLegRecord {
+            bet_type: "quinella".to_string(),
+            method: "nagashi".to_string(),
+            axis: Some(axis),
+            combo,
+            points: 1,
+            amount: 300,
+        });
+    }
+    // 印馬 3 連複ボックス（混戦時のみ）。band はこの脚の和集合から復元される。
+    for i in 0..box_horses.len() {
+        for j in (i + 1)..box_horses.len() {
+            for k in (j + 1)..box_horses.len() {
+                let mut combo = vec![box_horses[i], box_horses[j], box_horses[k]];
+                combo.sort_unstable();
+                rec.legs.push(SlipLegRecord {
+                    bet_type: "trio".to_string(),
+                    method: "box".to_string(),
+                    axis: None,
+                    combo,
+                    points: 1,
+                    amount: 100,
+                });
+            }
+        }
+    }
+    rec
+}
+
+/// 固定は **その日の初回スイープ**から採る。最新（`find_live_ev_by_date` が返す方）ではない。
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn pins_return_the_earliest_sweep_not_the_latest(pool: sqlx::PgPool) {
+    let repo = PostgresRepository::new(pool);
+    // 3 スイープ。時刻が進むにつれ軸も相手も動く＝#601 が直そうとしている現象そのもの。
+    for (at, axis, partners) in [
+        ("2026-07-06T00:10:00Z", 6, [3, 8, 11]),
+        ("2026-07-06T05:20:00Z", 9, [1, 2, 3]),
+        ("2026-07-06T06:20:00Z", 9, [1, 2, 5]),
+    ] {
+        repo.save_live_ev_snapshot(&record_with_legs(at, axis, &partners, &[]))
+            .await
+            .unwrap();
+    }
+
+    let pins = repo.find_live_ev_pins_by_date(date()).await.unwrap();
+    assert_eq!(pins.len(), 1, "レースごとに 1 件");
+    let pin = &pins[0];
+    assert_eq!(pin.race_id, "202602020611");
+    assert_eq!(pin.axis, 6, "最古（初回スイープ）の軸。最新の 9 ではない");
+    assert_eq!(
+        pin.partners,
+        vec![3, 8, 11],
+        "最古の相手（馬番昇順）。ワイド脚を 1 本落としても馬連側で拾える"
+    );
+    assert_eq!(pin.captured_at, "2026-07-06T00:10:00Z");
+    assert!(pin.konsen_band.is_empty(), "box 脚が無い＝非混戦で固定");
+}
+
+/// 混戦だった初回スイープは box 脚から印馬 band を復元する（配分ごと固定するために要る）。
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn pins_restore_konsen_band_from_box_legs(pool: sqlx::PgPool) {
+    let repo = PostgresRepository::new(pool);
+    repo.save_live_ev_snapshot(&record_with_legs(
+        "2026-07-06T00:10:00Z",
+        6,
+        &[3, 8, 11],
+        &[6, 3, 8, 11],
+    ))
+    .await
+    .unwrap();
+
+    let pins = repo.find_live_ev_pins_by_date(date()).await.unwrap();
+    assert_eq!(pins.len(), 1);
+    assert_eq!(
+        pins[0].konsen_band,
+        vec![3, 6, 8, 11],
+        "box 脚の和集合＝印馬 band（馬番昇順）"
+    );
+}
+
+/// まだ 1 度も評価していない日は固定なし＝そのスイープで選定が決まる。
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn pins_are_empty_when_no_sweep_recorded(pool: sqlx::PgPool) {
+    let repo = PostgresRepository::new(pool);
+    let pins = repo.find_live_ev_pins_by_date(date()).await.unwrap();
+    assert!(pins.is_empty());
+}

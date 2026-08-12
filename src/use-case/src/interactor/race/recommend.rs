@@ -1,4 +1,4 @@
-use paddock_domain::{Portfolio, RaceId, TrackCondition};
+use paddock_domain::{PinnedSelection, Portfolio, RaceId, TrackCondition};
 
 use crate::compose_portfolio;
 use crate::error::Result;
@@ -27,6 +27,11 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository> Interactor<R> {
         let Some(odds) = self.repository.find_race_odds(race_id, None).await? else {
             return Ok(None);
         };
-        Ok(Some(compose_portfolio(&views, &odds, budget, None)))
+        Ok(Some(compose_portfolio(
+            &views,
+            &odds,
+            budget,
+            &PinnedSelection::default(),
+        )))
     }
 }

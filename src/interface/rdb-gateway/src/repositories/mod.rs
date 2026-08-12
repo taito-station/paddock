@@ -4,6 +4,7 @@ mod fetch_history;
 mod find_finished_races_between;
 mod find_jockey_recent_runs;
 mod find_live_ev_by_date;
+mod find_live_ev_pins_by_date;
 mod find_matching_names;
 mod find_post_times_by_date;
 mod find_race_card;
@@ -41,7 +42,7 @@ use paddock_use_case::Result as UcResult;
 use paddock_use_case::repository::{
     ConditionalGateStatsRow, CourseStatsRow, FetchDownload, FetchFailure, FetchRecord,
     FetchRepository, FetchStatus, HorseHistoryRepository, HorseRecencyStats, HorseStatsRow,
-    JockeyStatsRow, LiveEvRepository, LiveEvSnapshot, LiveEvSnapshotRecord, MarkStatRow,
+    JockeyStatsRow, LiveEvPin, LiveEvRepository, LiveEvSnapshot, LiveEvSnapshotRecord, MarkStatRow,
     MarkStatsFilter, MorningRaceOdds, NameMatchRepository, OddsRepository, PadPredictionRepository,
     PredictBetRecord, PredictRaceConditionRecord, PredictSessionRecord, PredictSessionRepository,
     PredictionFilter, PredictionSearchResult, RaceCardRepository, RaceOddsRecord, RaceRepository,
@@ -532,6 +533,12 @@ impl PredictSessionRepository for PostgresRepository {
 impl LiveEvRepository for PostgresRepository {
     async fn find_live_ev_by_date(&self, date: NaiveDate) -> UcResult<Vec<LiveEvSnapshot>> {
         find_live_ev_by_date::find_live_ev_by_date(&self.pool, date)
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn find_live_ev_pins_by_date(&self, date: NaiveDate) -> UcResult<Vec<LiveEvPin>> {
+        find_live_ev_pins_by_date::find_live_ev_pins_by_date(&self.pool, date)
             .await
             .map_err(Into::into)
     }

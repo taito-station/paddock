@@ -30,7 +30,7 @@ sources:
   - docs/original-docs/0075-unsupported-race-skip-exit-zero.md
   - docs/original-docs/0076-roi-gate-uncalibrated-under-ev-layer-separation.md
   - docs/original-docs/0077-glossary-index-and-sources-scope.md
-distilled_from_sha: "059625e"
+distilled_from_sha: "afa1591"
 updated: "2026-08-12"
 ---
 
@@ -136,7 +136,7 @@ paddock 横断の用語索引。**この文書は定義の正本ではなく、�
 |---|---|---|
 | 印 | 予想の格付け記号。**運用で打つのは ◎○▲☆**（◎が本命＝軸。印を打った馬は必ず買い目に絡める＝相手を top5 まで広げる主因）だが、**データモデルは △・注 を含む 6 種**（`honmei`/`taikou`/`tanana`/`renge`/`hoshi`/`chui`） | [CLAUDE.md](../../CLAUDE.md)「予算・配分（既定）」「混戦判定と配分」 / [prediction-json.md](../specifications/prediction-json.md)（6 種） |
 | 軸 | ◎に据えて買い目の中心に固定する馬 | [CLAUDE.md](../../CLAUDE.md)「軸ロックとズレ増額（確率と買い方の分離）」「軸の選び方」 |
-| 軸ロック | **軸と基本の買い目構造を事前データで確定し、直前のオッズ変動でひっくり返さない**規律。見直すのは取消・馬場激変などの新情報が出たときだけ | [ADR 0060](../original-docs/0060-betting-axis-lock-preclose-topup.md) / [product-goals.md](product-goals.md) REQ-D01-003 |
+| 軸ロック | **軸と基本の買い目構造（軸・相手・混戦判定）を事前データで確定し、直前のオッズ変動でひっくり返さない**規律。見直すのは取消・馬場激変などの新情報が出たときだけ。`predict-watch` の実装では**その日の初回スイープ**で確定する | [ADR 0060](../original-docs/0060-betting-axis-lock-preclose-topup.md)（規律）/ [ADR 0078](../original-docs/0078-pin-bet-selection-across-sweeps.md)（実装）/ [product-goals.md](product-goals.md) REQ-D01-003 / [ev-kelly-bet-selection.md](../specifications/ev-kelly-bet-selection.md) REQ-D23-007 |
 | ズレ増額 | 軸が自モデル確率より過小人気にズレたとき、**既存の買い目の金額だけを上げる**こと。点数（相手）は増やさない | 同上 |
 | 混戦 | ◎の model 勝率の **0.70 倍以上の馬が ◎含め 4 頭以上**いる状態（判定条件）。この状態で 3 連複ボックスを含む別配分に切り替える | [ev-kelly-bet-selection.md](../specifications/ev-kelly-bet-selection.md) REQ-D23-005（判定）/ [CLAUDE.md](../../CLAUDE.md)「混戦判定と配分」（配分） |
 | 相手 top5 | 3 券種とも model 確率上位 5 頭を相手に取る既定幅。**広げない**（上限側を直接測ったのは 3 連複のみ＝[ADR 0030](../original-docs/0030-konsen-trio-partner-width-rejected.md)。既定の 5 頭自体は [ADR 0019](../original-docs/0019-portfolio-generator.md) が置いた設計値） | [ev-kelly-bet-selection.md](../specifications/ev-kelly-bet-selection.md) REQ-D23-002（status: Tentative） |

@@ -31,7 +31,8 @@ pub use pad_prediction::{Mark, PadPrediction, PredictionBet, PredictionHorse, Pr
 pub use payout::{RacePayouts, Settlement, settle_bet};
 pub use portfolio::{
     BetMethod, KONSEN_BAND_RATIO, KONSEN_MIN_HORSES, PairEvDiagnostic, PairEvDiagnostics,
-    Portfolio, PortfolioBet, PortfolioConfig, build_portfolio, konsen_band, pair_ev_diagnostics,
+    PinnedSelection, Portfolio, PortfolioBet, PortfolioConfig, build_portfolio, konsen_band,
+    pair_ev_diagnostics,
 };
 pub use prediction::{
     DatedCounts, EstimationConfig, ExplainCategory, FactorExplanation, FactorStat,

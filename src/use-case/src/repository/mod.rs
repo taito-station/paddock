@@ -12,7 +12,7 @@ pub mod stats;
 
 pub use fetch::HorseHistoryRepository;
 pub use fetch::{FetchDownload, FetchFailure, FetchRecord, FetchRepository, FetchStatus};
-pub use live::{LiveEvRepository, LiveEvSnapshot, LiveEvSnapshotRecord, SlipLegRecord};
+pub use live::{LiveEvPin, LiveEvRepository, LiveEvSnapshot, LiveEvSnapshotRecord, SlipLegRecord};
 pub use odds::{MorningRaceOdds, OddsRepository, OddsRow, RaceOddsRecord};
 pub use race::{FinishEntry, RaceCardRepository, RaceRepository, RaceResultRepository};
 pub use session::{
