@@ -7,7 +7,7 @@ sources:
   - docs/original-docs/0026-ocr-pdf-ci-mupdf-pin.md
   - docs/original-docs/0073-adr-into-original-docs-and-doc-classes.md
   - .github/workflows/ci.yml
-distilled_from_sha: "ea9a198"
+distilled_from_sha: "a5cfa46"
 updated: "2026-08-11"
 ---
 
