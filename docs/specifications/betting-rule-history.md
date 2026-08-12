@@ -18,7 +18,9 @@ sources:
   - docs/original-docs/0046-allocation-prob-weight-no-floor-rejected.md
   - docs/original-docs/0054-kelly-staking-rejected.md
   - docs/original-docs/0065-wide-partners-top5-alignment.md
-distilled_from_sha: "49c9239"
+  - docs/original-docs/0076-roi-gate-uncalibrated-under-ev-layer-separation.md
+  - docs/original-docs/571-roi-gate-calibration.md
+distilled_from_sha: "3163427"
 updated: "2026-08-12"
 ---
 
@@ -148,6 +150,17 @@ CLAUDE.md は「ワイドは相手 top3」と定めていたが、本番 `build_
 - 結果: **有意差なし**。窓 A（71R）は top3 +4.0pt だが単勝 ROI 594% の幸運な小標本で、窓 B（262R）に広げると **符号反転して top5 +3.9pt**。日別では **top5 ≥ top3 が 6/12 日・top3 > top5 が 6/12 日＝五分**で、B 集計の top5 優位は単一外れ日（2026-06-27 Δ−32pt）が牽引。どちらの優位も標本ノイズ。
 - **結論**: 有意差が無いので最小変更を採る。`build_portfolio` は無変更（既に top5）、CLAUDE.md を「3 券種とも top5」に修正。「ワイド top3」の縛りは撤去（＝top3 に絞る案は再提案しない）。top5 は ADR 0030 の上限内で矛盾なし。なお計測中に **2 つ目の買い目エンジン `live_ev.py`（ライブ伝票）もワイド top3** だったと判明し、これも top5 に統一（両エンジン＋doc が top5 で一致）。
 - 詳細: [docs/original-docs/0065-wide-partners-top5-alignment.md](../original-docs/0065-wide-partners-top5-alignment.md)（関連 Issue: #347）
+
+### ⑪ EV 層分離後の参考ROIをゲート指標として使う（知見・ルール変更は保留 / 2026-08-12 / ADR 0076）
+
+⑦（ADR 0044）は**分離前**の EV 定義（blended α=0.2・ワイド抜き・確率重み配分）を測ったもの。ADR 0055 で EV は pure（α=1.0）× 市場オッズに変わったが、その定義での較正は未測定のままゲートだけ 100% に据え置かれていた（#571。#249 の予測ROI vs 実現ROI バケット較正を本件に統合）。
+
+- 検証: `gate_calibration.py`（新規）で `live_ev_snapshots` の**記録済み判定ROIと買い目伝票**（182R / 839 スイープ / 8 開催日・2026-07-11〜08-09）を netkeiba 確定払戻で精算。伝票は Rust `build_portfolio` の出力そのもので、Python で組み直していない（second source を作らない・ADR 0064）。循環回避は ⑦ 同様（判定＝盤面オッズ／清算＝実払戻）。
+- 結果: **ゲート通過 0 件**（判定ROI 平均 23.2% / 最大 76.8%）。無ゲート実現ROI **69.5%**（bootstrap 95% CI 56.6〜83.2%・上位 5 鞍を除くと 60.7%）。**判定ROI ÷ 市場整合ROI(=1−控除率 77.0%) = 0.30**。**Spearman(判定ROI, 実現ROI) = +0.002**。閾値表は非単調で、実現ROIが安定して 100% を超える θ は存在しない（θ=30% で 37 鞍・80.7% が最良）。
+- 診断: 買い目の脚は blended（市場優位）で選ぶのに EV は市場情報を捨てた pure 確率で値付けするため、選ばれた脚が構造的に低く出る＝**閾値のズレではなく定義の不整合**。⑦ の分離前定義（Spearman −0.167＝逆予測的）と違い、分離後は**無情報**（EV 層分離は病理を消したが選別力は与えていない）。無ゲート 69.5% は市場整合 77.0% と CI 内で区別がつかず、この窓にモデルの実証エッジは無い（⑦ の 71R 窓 75.5% と同水準）。
+- **結論（知見）**: #571 要件の (a) 閾値較正・(b) 較正済みROI 併記はいずれも測定に支持されない（該当する θ が無い／Spearman ≈ 0 で写像の前提が無い）。(c) 現行維持も「滅多に発火しない」ではなく「構造的に到達不能」なので不誠実。**CLAUDE.md と `predict-watch` の実装は本件では変更せず**、ゲートの実変更は別 issue。ADR 0040（閾値引き下げの棄却）は本測定でも支持される（θ を下げても実現ROIは 100% に届かない）。
+- 付随して判明した別件（ROI＝比を動かさないので本結論には影響しない・別 issue）: **予算執行率 80%**（`PortfolioConfig::default().alloc=(1,1,1)` が本書の 3:3:4 と乖離＋2 段階の 100 円切り捨てで ¥5,000 中 ¥4,000 しか張らない）と、**軸フリップ 18%**（発走前 2 スイープ以上の 154R 中 28R で軸が入れ替わる＝REQ-D01-003 軸ロック違反。#388 は盤面側のみ `forced_axis` で対処済み）。
+- 詳細: [docs/original-docs/0076-roi-gate-uncalibrated-under-ev-layer-separation.md](../original-docs/0076-roi-gate-uncalibrated-under-ev-layer-separation.md) / 生資料 [571-roi-gate-calibration.md](../original-docs/571-roi-gate-calibration.md)（関連 Issue: #571, #249, #248）
 
 ## バックテスト/実績ログ（ADR 未収録）
 
