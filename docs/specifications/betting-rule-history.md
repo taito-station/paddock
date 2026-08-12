@@ -20,7 +20,7 @@ sources:
   - docs/original-docs/0065-wide-partners-top5-alignment.md
   - docs/original-docs/0076-roi-gate-uncalibrated-under-ev-layer-separation.md
   - docs/original-docs/571-roi-gate-calibration.md
-distilled_from_sha: "3163427"
+distilled_from_sha: "9e83e33"
 updated: "2026-08-12"
 ---
 

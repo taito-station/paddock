@@ -36,7 +36,7 @@ sources:
   - docs/original-docs/0071-topcoat-framework-evaluation-rejected.md
   - docs/original-docs/0073-adr-into-original-docs-and-doc-classes.md
   - docs/original-docs/0076-roi-gate-uncalibrated-under-ev-layer-separation.md
-distilled_from_sha: "3163427"
+distilled_from_sha: "9e83e33"
 updated: "2026-08-12"
 ---
 
