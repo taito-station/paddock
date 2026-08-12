@@ -4,10 +4,10 @@
 
 ## Q1: 測定の母集団をどこまで広げるか
 
-- 観測/根拠: 連系 3 券種のオッズ履歴があるのは `race_odds` で 559 レース、`race_odds_snapshots` で
-  432 レース。一方、**判定ROIと買い目伝票が記録されているのは `live_ev_snapshots` の 182 レース**
-  （2026-07-11〜08-09）だけ。判定ROIが記録されていないレースで測るには、過去オッズから
-  `build_portfolio` をリークなしに再生成する経路（`analyze backtest` への新設）が要る。
+- 観測/根拠: 連系 3 券種（馬連・ワイド・3連複）のオッズが揃うのは `race_odds` で 467 レース、
+  `race_odds_snapshots` で 432 レース。一方、**判定ROIと買い目伝票が記録されているのは
+  `live_ev_snapshots` の 182 レース**（2026-07-11〜08-09）だけ。判定ROIが記録されていないレースで
+  測るには、過去オッズから `build_portfolio` をリークなしに再生成する経路（`analyze backtest` への新設）が要る。
 - 回答: **確定。182R に限る。** production が実際に出した判定と伝票をそのまま精算するので、
   買い方ロジックの second source（ADR 0064）を作らずに済み、`analyze predict` の as_of リーク
   （`project_alpha_sign_and_predict_leak`）も構造的に起きない。182R は ADR 0044/0045 の 71R の 2.5 倍で、
