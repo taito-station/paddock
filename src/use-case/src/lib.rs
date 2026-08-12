@@ -21,7 +21,7 @@ pub use interactor::horse_history::HorseHistoryInteractor;
 pub use interactor::live::{LiveFlip, LiveRaceView, LiveSummary, LiveView};
 pub use interactor::odds::OddsInteractor;
 pub use interactor::pdf::PdfInteractor;
-pub use interactor::race::board::{BoardHorse, Confusion, RaceBoard};
+pub use interactor::race::board::{BoardHorse, Confusion, RaceBoard, recorded_axis_of};
 pub use interactor::race::predict::{PredictionViews, RecentRunsCoverage, compose_portfolio};
 pub use interactor::results::{RefreshReport, ResultsInteractor};
 pub use interactor::settle::{SettleInteractor, SettleReport};

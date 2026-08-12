@@ -100,6 +100,29 @@ pub struct SlipLegRecord {
     pub amount: u64,
 }
 
+/// その日の**初回スイープ**で確定した買い目選定（#601 軸ロック）。
+///
+/// `predict-watch` はスイープのたびに軸・相手・混戦判定を `rank_probs`（市場ブレンド α=0.2）から
+/// 選び直すため、固定しないと選定がオッズに追随して動く（実測 154R 中 軸 28R・相手 62R）。
+/// 2 スイープ目以降はこの pin を `PortfolioConfig` の固定フィールドへ渡して買い目を据え置き、
+/// オッズで動かすのは EV/ROI と金額だけにする（CLAUDE.md 軸ロック・REQ-D01-003 / ADR 0060）。
+///
+/// **プロセスの再起動や `--once`（cron）を跨いでも効く**ように、in-memory ではなく
+/// 既にアーカイブしている `live_ev_snapshots` から読み戻す（マイグレーション不要）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LiveEvPin {
+    pub race_id: String,
+    /// 初回スイープの軸（◎）。
+    pub axis: u32,
+    /// 初回スイープの相手。馬番昇順。
+    pub partners: Vec<u32>,
+    /// 初回スイープの混戦 band（印馬）。**空 `Vec` は「非混戦だった」を意味する**
+    /// （`Option` にすると「未取得」と区別できず、混戦の反転を止められない）。
+    pub konsen_band: Vec<u32>,
+    /// 初回スイープの時刻（UTC rfc3339）。固定を適用した旨をログに出すために持つ。
+    pub captured_at: String,
+}
+
 /// ライブ EV スナップショット（`live_ev_snapshots`, #260 / ADR 0064）の取得・書き込み。
 /// 書き込みは #346 で Rust（predict-watch）に一本化した。旧 Python writer（`persist_live_ev.py` /
 /// `refresh_ev.sh` の永続化ステップ）は #346 PR-3 で退役済み。`live_ev.py` 本体はオフライン用途で温存。
@@ -110,6 +133,14 @@ pub trait LiveEvRepository: Send + Sync {
         &self,
         date: NaiveDate,
     ) -> impl Future<Output = Result<Vec<LiveEvSnapshot>>> + Send;
+
+    /// 指定開催日の race ごとに **`captured_at` 最古**（＝その日の初回スイープ）の選定を返す（#601）。
+    /// 該当行が無ければ空 `Vec`（＝まだ 1 度も評価していない＝固定なし）。
+    /// [`find_live_ev_by_date`](Self::find_live_ev_by_date) は最新 2 件を返す別用途なので混同しない。
+    fn find_live_ev_pins_by_date(
+        &self,
+        date: NaiveDate,
+    ) -> impl Future<Output = Result<Vec<LiveEvPin>>> + Send;
 
     /// ライブ EV スナップショット 1 レコードを upsert する（`(race_id, captured_at)` 冪等）。
     /// 監視ループから best-effort で呼ぶため、失敗は呼び出し側が握って監視を継続する。

@@ -3,8 +3,8 @@ use std::io::{self, BufRead, Write};
 
 use chrono::{NaiveDate, Utc};
 use paddock_domain::{
-    BetCombination, HorseNum, HorseProbability, PairEvDiagnostic, Portfolio, PortfolioBet,
-    PortfolioConfig, RECOMMENDED_MARKET_BLEND_ALPHA, Race, RaceId, TrackCondition,
+    BetCombination, HorseNum, HorseProbability, PairEvDiagnostic, PinnedSelection, Portfolio,
+    PortfolioBet, PortfolioConfig, RECOMMENDED_MARKET_BLEND_ALPHA, Race, RaceId, TrackCondition,
     pair_ev_diagnostics,
 };
 use paddock_use_case::{PredictBetRecord, PredictSessionRecord, compose_portfolio};
@@ -382,7 +382,7 @@ async fn render_race_prediction(
 
     // 軸流しポートフォリオ（馬連＋ワイド＋三連複）を予算内・100 円単位で生成する。軸/相手は blended、
     // EV/的中は pure（循環断ち, #272）。上限は呼び出し側が決めた race_cap。配分・相手頭数は既定（#122）。
-    let portfolio = compose_portfolio(&views, &odds, race_cap, None);
+    let portfolio = compose_portfolio(&views, &odds, race_cap, &PinnedSelection::default());
 
     println!();
     println!("【市場EV視点：買い目推奨（軸流し, 予算¥{race_cap}/R・EV=純モデル×odds）】");

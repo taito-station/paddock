@@ -3,9 +3,12 @@ use std::collections::HashMap;
 use chrono::{Duration, NaiveTime, Utc};
 use monitor_loop::{RaceStatus, Sweeper, has_result, run_monitor_loop, warn_if_not_today_jst_now};
 use paddock_domain::{
-    Portfolio, RECOMMENDED_MARKET_BLEND_ALPHA, Race, RaceClass, RaceId, Venue, race_roughness,
+    HorseNum, PinnedSelection, Portfolio, RECOMMENDED_MARKET_BLEND_ALPHA, Race, RaceClass, RaceId,
+    Venue, race_roughness,
 };
 use paddock_use_case::compose_portfolio;
+use paddock_use_case::recorded_axis_of;
+use paddock_use_case::repository::{LiveEvPin, LiveEvRepository, PadPredictionRepository};
 use predict_format::{
     PortfolioFormat, format_explanations, format_portfolio, format_probs, format_probs_with_market,
     format_recent_runs_warning,
@@ -158,6 +161,140 @@ struct SweepCtx<'a> {
     notify_gate: f64,
     blend_alpha: Option<f64>,
     race_budget_overrides: &'a HashMap<String, u64>,
+    /// その日の初回スイープで確定した買い目選定（#601 軸ロック）。`race_id` 引き。
+    /// スイープ開始時に 1 回だけ引いて全レースで使い回す（レースごとに引くと N+1 になる）。
+    /// 未評価のレースは不在＝このスイープで選定が確定する。
+    pins: &'a HashMap<String, LiveEvPin>,
+}
+
+/// レース 1 件について「何を固定するか」を決める（#601）。
+///
+/// 優先順:
+/// 1. **記録◎**（pad の Honmei）。CLAUDE.md「軸は事前データで確定」の本来の姿で、盤面 #388 と揃う。
+///    ただし相手・混戦の記録は pad に無いので、固定できるのは軸だけ。
+/// 2. **その日の初回スイープ**（`live_ev_snapshots` の最古行）。軸・相手・混戦をまとめて固定する。
+/// 3. どちらも無ければ固定なし＝このスイープで選定が決まり、次スイープ以降は 2 が効く。
+///
+/// 1 と 2 が両方あるときは **軸だけ 1 で上書き**する。記録◎は人手のハンデ精査（＝ADR 0055 が
+/// エッジと位置づけるもの）の産物で、機械が初回スイープで選んだ軸より優先されるべきため。
+/// 相手・混戦は 2 のまま（pad は相手を持たない）。
+fn resolve_pinned(recorded_axis: Option<HorseNum>, pin: Option<&LiveEvPin>) -> PinnedSelection {
+    let Some(pin) = pin else {
+        return PinnedSelection::axis_only(recorded_axis);
+    };
+    let to_nums = |v: &[u32]| -> Vec<HorseNum> {
+        v.iter()
+            .filter_map(|n| HorseNum::try_from(*n).ok())
+            .collect()
+    };
+    PinnedSelection {
+        axis: recorded_axis.or_else(|| HorseNum::try_from(pin.axis).ok()),
+        partners: Some(to_nums(&pin.partners)),
+        konsen_band: Some(to_nums(&pin.konsen_band)),
+    }
+}
+
+/// UTC rfc3339（`live_ev_snapshots.captured_at`）を JST `HH:MM` にする。解釈できなければそのまま返す。
+fn jst_hhmm(rfc3339: &str) -> String {
+    chrono::DateTime::parse_from_rfc3339(rfc3339)
+        .ok()
+        .and_then(|dt| {
+            chrono::FixedOffset::east_opt(9 * 3600)
+                .map(|jst| dt.with_timezone(&jst).format("%H:%M").to_string())
+        })
+        .unwrap_or_else(|| rfc3339.to_string())
+}
+
+fn nums(v: &[HorseNum]) -> String {
+    v.iter()
+        .map(|n| n.value().to_string())
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+/// 固定の適用状況を 1 行で出す（#601）。**固定されていないことも読めるようにする**のが要点で、
+/// 従来のログは選定が毎回作り直されている事実がどこにも出ていなかった。
+fn print_pin_status(
+    label: &str,
+    pinned: &PinnedSelection,
+    pin: Option<&LiveEvPin>,
+    recorded_axis: Option<HorseNum>,
+) {
+    if pinned.is_empty() {
+        println!("  🆕 {label}: このスイープで買い目を確定（以降のスイープでは固定）");
+        return;
+    }
+    let axis = pinned
+        .axis
+        .map(|a| a.value().to_string())
+        .unwrap_or_else(|| "-".to_string());
+    let partners = pinned.partners.as_deref().map(nums).unwrap_or_default();
+    let source = match (recorded_axis.is_some(), pin) {
+        (true, Some(p)) => format!("記録◎ ＋ 初回スイープ {}", jst_hhmm(&p.captured_at)),
+        (true, None) => "記録◎".to_string(),
+        (false, Some(p)) => format!("初回スイープ {}", jst_hhmm(&p.captured_at)),
+        (false, None) => "固定なし".to_string(),
+    };
+    let konsen = match pinned.konsen_band.as_deref() {
+        Some(b) if b.len() >= 4 => format!(" 混戦[{}]", nums(b)),
+        Some(_) => " 非混戦".to_string(),
+        None => String::new(),
+    };
+    println!("  🔒 {label}: 軸{axis} 相手{partners}{konsen} 固定（{source}）");
+}
+
+/// 固定と現在のライブ再計算との乖離を出す（#601）。**軸は動かさず、乖離だけ知らせる**
+/// （CLAUDE.md 軸ロック: オッズが動いただけで ◎ を見直さない）。
+fn print_pin_drift(
+    label: &str,
+    pinned: &PinnedSelection,
+    portfolio: &Portfolio,
+    blended: &[paddock_domain::HorseProbability],
+) {
+    // ライブ再計算の首位（＝固定しなければ軸になっていた馬）。
+    let live_top = blended
+        .iter()
+        .max_by(|a, b| {
+            a.win_prob
+                .partial_cmp(&b.win_prob)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .map(|p| p.horse_num);
+    if let (Some(fixed), Some(live)) = (pinned.axis, live_top)
+        && fixed != live
+    {
+        println!(
+            "  ⚠ {label}: ライブ再計算の首位は{}（軸は固定の{}のまま。見直すのは新情報が出たときだけ）",
+            live.value(),
+            fixed.value()
+        );
+    }
+    // 固定した軸が非出走（取消）なら build_portfolio がライブ首位へフォールバックしている。
+    if let (Some(fixed), Some(actual)) = (pinned.axis, portfolio.axis)
+        && fixed != actual
+    {
+        println!(
+            "  ⚠ {label}: 固定軸{}が非出走のため、ライブ首位{}へフォールバックした（取消＝新情報）",
+            fixed.value(),
+            actual.value()
+        );
+    }
+    // 固定した相手のうち非出走の馬は落とし、ライブ順位からの補充はしない（点数が減る）。
+    if let Some(fixed) = pinned.partners.as_deref()
+        && portfolio.partners.len() < fixed.len()
+    {
+        let dropped: Vec<String> = fixed
+            .iter()
+            .filter(|n| !portfolio.partners.contains(n))
+            .map(|n| n.value().to_string())
+            .collect();
+        println!(
+            "  ⚠ {label}: 固定相手{}が非出走のため除外（点数 {}→{}・補充はしない）",
+            dropped.join(","),
+            fixed.len(),
+            portfolio.partners.len()
+        );
+    }
 }
 
 /// 発走時刻付きのレース 1 件（races_by_date の Race ＋ race_card の post_time / race_class）。
@@ -275,6 +412,7 @@ async fn evaluate_race(app: &App, slot: &Slot, is_ura: bool, captured_at: &str, 
         notify_gate,
         blend_alpha,
         race_budget_overrides,
+        pins,
     } = ctx;
     let rid = &slot.race.race_id;
     let label = race_label(slot);
@@ -347,12 +485,37 @@ async fn evaluate_race(app: &App, slot: &Slot, is_ura: bool, captured_at: &str, 
         println!("    {line}");
     }
 
-    // 3) 市場EV視点: 軸/相手は blended、EV/的中は pure（循環断ち, #272）。
-    let portfolio = compose_portfolio(&views, &odds, race_budget, None);
+    // 3) 買い目選定の固定（#601 軸ロック）。rank_probs（市場ブレンド α=0.2）は市場 odds を含むため、
+    //    固定しないとスイープごとに軸・相手・混戦判定が動く（実測 154R 中 60% しか終日一定でなかった）。
+    //    記録◎（pad）は pin がまだ無いときだけ引く——pin があるならその軸に既に反映済みで、
+    //    毎スイープ引くと Due レース数ぶんの N+1 になるため。
+    let pin = pins.get(rid.value());
+    let recorded_axis = match pin {
+        Some(_) => None,
+        None => app
+            .interactor
+            .repository
+            .find_pad_prediction(cli.date, slot.race.venue, slot.race.race_num)
+            .await
+            .unwrap_or_else(|e| {
+                // 記録◎が引けなくても監視は続ける（固定はライブ選定にフォールバックする）。
+                println!("  {label}: 記録◎の取得に失敗（固定なしで継続）: {e}");
+                None
+            })
+            .as_ref()
+            .and_then(|pad| recorded_axis_of(Some(pad), &views.blended))
+            .and_then(|n| HorseNum::try_from(n).ok()),
+    };
+    let pinned = resolve_pinned(recorded_axis, pin);
+    print_pin_status(&label, &pinned, pin, recorded_axis);
+
+    // 4) 市場EV視点: 軸/相手は blended（固定があればそれを優先）、EV/的中は pure（循環断ち, #272）。
+    let portfolio = compose_portfolio(&views, &odds, race_budget, &pinned);
     let Some(ev) = &portfolio.ev else {
         println!("  {label}: 買い目を組成できず（オッズ不足）、スキップ");
         return;
     };
+    print_pin_drift(&label, &pinned, &portfolio, &views.blended);
 
     // decision-support（#272）: 自動の張る/見送り判定はしない。純モデル EV/ROI は「市場に対しモデルが
     // 割安と見るか」の参考情報で、最終判断は人間のハンデ精査に委ねる。買う閾値（roi_gate）以上は 🔶、
@@ -367,7 +530,8 @@ async fn evaluate_race(app: &App, slot: &Slot, is_ura: bool, captured_at: &str, 
     );
     print_buy_targets(&portfolio);
 
-    // 4) ライブ EV ビュー/アーカイブ（live_ev_snapshots）へ best-effort で永続化（#346 / ADR 0064）。
+    // 5) ライブ EV ビュー/アーカイブ（live_ev_snapshots）へ best-effort で永続化（#346 / ADR 0064）。
+    //    ここに書いた選定が、次スイープ以降の固定（#601・`find_live_ev_pins_by_date`）の元になる。
     //    ここは decision-support のスナップショット記録であり、predict のセッション記録
     //    （predict_sessions / predict_bets）には触れない。保存失敗で監視ループは止めない。
     if let Some(axis) = portfolio.axis {
@@ -508,11 +672,30 @@ impl Sweeper for WatchSweeper<'_> {
         // 同一 captured_at を共有し、live_ev_snapshots の「辞書順＝時刻順」「(race_id, captured_at) 冪等」
         // 契約を満たす（旧 refresh_ev.sh の `date -u +%Y-%m-%dT%H:%M:%SZ` と同表記）。
         let captured_at = Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
+        // 買い目選定の固定（#601）: その日の初回スイープの選定を **1 スイープにつき 1 回**引く
+        // （レースごとに引くと Due レース数ぶんの N+1 になる）。取得に失敗しても監視は止めず、
+        // 固定なし＝従来どおりライブ選定へ縮退する（ただしその事実はログに残す）。
+        let pins: HashMap<String, LiveEvPin> = match self
+            .app
+            .interactor
+            .repository
+            .find_live_ev_pins_by_date(self.cli.date)
+            .await
+        {
+            Ok(v) => v.into_iter().map(|p| (p.race_id.clone(), p)).collect(),
+            Err(e) => {
+                println!(
+                    "⚠ 買い目固定の読み出しに失敗しました（このスイープは固定なしで評価します）: {e}"
+                );
+                HashMap::new()
+            }
+        };
         let ctx = SweepCtx {
             cli: self.cli,
             notify_gate: self.notify_gate,
             blend_alpha: self.blend_alpha,
             race_budget_overrides: &self.race_budget_overrides,
+            pins: &pins,
         };
         sweep(self.app, slots, statuses, now, &captured_at, ctx).await;
     }
@@ -580,6 +763,73 @@ pub async fn run(app: &App, cli: &Cli) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn pin(axis: u32, partners: &[u32], band: &[u32]) -> LiveEvPin {
+        LiveEvPin {
+            race_id: "202602020611".to_string(),
+            axis,
+            partners: partners.to_vec(),
+            konsen_band: band.to_vec(),
+            captured_at: "2026-08-09T00:15:03Z".to_string(),
+        }
+    }
+
+    fn hn(n: u32) -> HorseNum {
+        HorseNum::try_from(n).unwrap()
+    }
+
+    /// 固定が無い（その日の初回スイープ）ときは何も固定しない＝このスイープで選定が決まる。
+    #[test]
+    fn resolve_pinned_is_empty_on_first_sweep() {
+        assert!(resolve_pinned(None, None).is_empty());
+    }
+
+    /// pin があれば軸・相手・混戦の 3 つとも固定する。
+    #[test]
+    fn resolve_pinned_takes_all_three_from_pin() {
+        let p = pin(6, &[3, 8, 11], &[3, 6, 8, 11]);
+        let got = resolve_pinned(None, Some(&p));
+        assert_eq!(got.axis, Some(hn(6)));
+        assert_eq!(got.partners, Some(vec![hn(3), hn(8), hn(11)]));
+        assert_eq!(got.konsen_band, Some(vec![hn(3), hn(6), hn(8), hn(11)]));
+    }
+
+    /// 記録◎（人手のハンデ精査の産物）は初回スイープの機械軸より優先する。
+    /// ただし相手・混戦は pin のまま——pad は相手を持たないため。
+    #[test]
+    fn resolve_pinned_prefers_recorded_axis_over_pin_axis() {
+        let p = pin(6, &[3, 8, 11], &[]);
+        let got = resolve_pinned(Some(hn(8)), Some(&p));
+        assert_eq!(got.axis, Some(hn(8)), "記録◎が優先される");
+        assert_eq!(
+            got.partners,
+            Some(vec![hn(3), hn(8), hn(11)]),
+            "相手は pin のまま（pad は相手を持たない）"
+        );
+    }
+
+    /// pin が無く記録◎だけあるときは軸だけ固定する（盤面 #388 と同じ形）。
+    #[test]
+    fn resolve_pinned_with_recorded_axis_only_pins_axis() {
+        let got = resolve_pinned(Some(hn(4)), None);
+        assert_eq!(got.axis, Some(hn(4)));
+        assert!(got.partners.is_none() && got.konsen_band.is_none());
+    }
+
+    /// 非混戦だった初回スイープは空 band で固定される（＝混戦へ反転しない）。
+    #[test]
+    fn resolve_pinned_keeps_non_konsen_as_empty_band() {
+        let got = resolve_pinned(None, Some(&pin(6, &[3, 8], &[])));
+        assert_eq!(got.konsen_band, Some(Vec::new()), "空 band＝非混戦で固定");
+    }
+
+    #[test]
+    fn jst_hhmm_converts_utc_and_passes_through_garbage() {
+        assert_eq!(jst_hhmm("2026-08-09T00:15:03Z"), "09:15");
+        assert_eq!(jst_hhmm("2026-08-09T09:27:37+00:00"), "18:27");
+        // 解釈できない値でも監視を止めず、そのまま出して人が気づけるようにする。
+        assert_eq!(jst_hhmm("not-a-time"), "not-a-time");
+    }
 
     #[test]
     fn is_g1_ura_detects_other_venue_nongraded_on_g1_day() {

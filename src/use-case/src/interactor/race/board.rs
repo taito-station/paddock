@@ -11,7 +11,7 @@ use chrono::NaiveDate;
 
 use paddock_domain::{
     HorseExplanation, HorseNum, HorseProbability, KONSEN_BAND_RATIO, KONSEN_MIN_HORSES, Mark,
-    PadPrediction, Portfolio, RaceId, RaceOdds, TrackCondition, konsen_band,
+    PadPrediction, PinnedSelection, Portfolio, RaceId, RaceOdds, TrackCondition, konsen_band,
 };
 
 use crate::compose_portfolio;
@@ -178,11 +178,15 @@ impl<
         let recorded_axis = recorded_axis_of(pad.as_ref(), &views.blended);
         let live_axis = live_axis_of(&views.blended);
 
-        // 買い目は既存経路（相手 top5 不変）。軸は記録軸があればそれに固定（#388）。オッズ無しなら組まない。
-        let forced_axis = recorded_axis.and_then(|n| HorseNum::try_from(n).ok());
+        // 軸は記録軸があればそれに固定する（#388）。オッズ無しなら組まない。
+        // **相手（top5）は固定しない**——盤面は on-demand の再計算ビューで、`predict-watch` のような
+        // 「その日の初回スイープ」に相当する基準を持たないため。したがって相手は blended（市場ブレンド）
+        // から毎回選び直され、オッズが動けば入れ替わりうる（#601 で predict-watch 側のみ固定した）。
+        let pinned =
+            PinnedSelection::axis_only(recorded_axis.and_then(|n| HorseNum::try_from(n).ok()));
         let portfolio = odds
             .as_ref()
-            .map(|o| compose_portfolio(&views, o, budget, forced_axis));
+            .map(|o| compose_portfolio(&views, o, budget, &pinned));
 
         let mut horses =
             build_board_horses(&views.blended, &views.pure, odds.as_ref(), card.as_ref());
@@ -195,7 +199,7 @@ impl<
         // morning_roi!=null で守る）。
         let (morning_at, current_at, morning_roi, morning_hit_prob) = match morning.as_ref() {
             Some(m) => {
-                let morning_portfolio = compose_portfolio(&views, &m.odds, budget, forced_axis);
+                let morning_portfolio = compose_portfolio(&views, &m.odds, budget, &pinned);
                 for h in horses.iter_mut() {
                     if let Ok(num) = HorseNum::try_from(h.horse_num) {
                         h.morning_win_odds = m.odds.win.get(&num).map(|v| v.value());
@@ -464,7 +468,9 @@ fn derive_mark(model_rank: u32, is_value: bool) -> Option<Mark> {
 
 /// 記録軸（#388 軸ロック）: `pad` の◎(Honmei) 馬番。ただし出走集合 `blended` に在るときだけ有効に
 /// する（取消等で非出走なら失効＝ライブ再計算へフォールバック）。未 predict・◎不在は `None`。
-fn recorded_axis_of(pad: Option<&PadPrediction>, blended: &[HorseProbability]) -> Option<u32> {
+///
+/// 盤面（`race_board`）と `predict-watch`（#601 の初回スイープ固定）の双方が使うので pub にしている。
+pub fn recorded_axis_of(pad: Option<&PadPrediction>, blended: &[HorseProbability]) -> Option<u32> {
     pad.and_then(|p| {
         // ◎は人手予想で 1 頭前提。異常データで複数あっても記録（Vec）順の先頭を採る。
         p.horses

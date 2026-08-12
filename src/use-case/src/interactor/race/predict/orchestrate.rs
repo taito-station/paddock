@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use paddock_domain::{
-    EstimationConfig, HorseEntry, HorseExplanation, HorseFactors, HorseName, HorseNum,
-    HorseProbability, JockeyName, Portfolio, PortfolioConfig, RaceId, RaceOdds, TrackCondition,
+    EstimationConfig, HorseEntry, HorseExplanation, HorseFactors, HorseName, HorseProbability,
+    JockeyName, PinnedSelection, Portfolio, PortfolioConfig, RaceId, RaceOdds, TrackCondition,
     TrainerName, build_portfolio,
 };
 
@@ -36,14 +36,16 @@ pub struct PredictionViews {
 /// ここだけで対応づける。`build_portfolio` の第1・第2引数はどちらも `&[HorseProbability]` で
 /// 型が同一なため blended/pure を取り違えてもコンパイルが通る（旧来は 5 箇所で各自が正しい順で
 /// 呼ぶ前提だった）。`PredictionViews` のフィールド名に縛ることでこの取り違えを構造的に排除する。
-/// `PortfolioConfig` の構築
-/// （既定＋forced_axis）も集約する。odds 供給ポリシー（refresh/read-through/保存済み/morning）は
-/// 呼び出し元の責務でここには持ち込まない。build_portfolio への委譲のみで挙動は不変。
+/// `PortfolioConfig` の構築（既定 ＋ [`PinnedSelection`] の展開）も集約する。
+/// odds 供給ポリシー（refresh/read-through/保存済み/morning）は呼び出し元の責務でここには持ち込まない。
+///
+/// `pinned` は「買い目選定のどこを固定するか」（#388 軸 / #601 相手・混戦）。
+/// [`PinnedSelection::default()`] なら従来どおり毎回ライブ確率から選ぶ。
 pub fn compose_portfolio(
     views: &PredictionViews,
     odds: &RaceOdds,
     race_budget: u64,
-    forced_axis: Option<HorseNum>,
+    pinned: &PinnedSelection,
 ) -> Portfolio {
     build_portfolio(
         &views.blended,
@@ -51,7 +53,9 @@ pub fn compose_portfolio(
         odds,
         race_budget,
         &PortfolioConfig {
-            forced_axis,
+            forced_axis: pinned.axis,
+            forced_partners: pinned.partners.clone(),
+            forced_konsen_band: pinned.konsen_band.clone(),
             ..PortfolioConfig::default()
         },
     )
@@ -402,7 +406,7 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository> Interactor<R> {
 #[cfg(test)]
 mod compose_portfolio_tests {
     use super::*;
-    use paddock_domain::{OddsValue, Pair, PlaceOdds, Triple, build_portfolio};
+    use paddock_domain::{HorseNum, OddsValue, Pair, PlaceOdds, Triple, build_portfolio};
 
     fn horse(n: u32) -> HorseNum {
         HorseNum::try_from(n).unwrap()
@@ -493,7 +497,7 @@ mod compose_portfolio_tests {
         let odds = sample_odds();
         let views = views_with(blended.clone(), pure.clone());
 
-        let composed = compose_portfolio(&views, &odds, 5000, None);
+        let composed = compose_portfolio(&views, &odds, 5000, &PinnedSelection::default());
         let direct = build_portfolio(&blended, &pure, &odds, 5000, &PortfolioConfig::default());
         assert_same_portfolio(&composed, &direct);
     }
@@ -520,7 +524,41 @@ mod compose_portfolio_tests {
         let odds = sample_odds();
         let views = views_with(blended, pure);
 
-        let pf = compose_portfolio(&views, &odds, 5000, Some(horse(3)));
+        let pf = compose_portfolio(
+            &views,
+            &odds,
+            5000,
+            &PinnedSelection::axis_only(Some(horse(3))),
+        );
         assert_eq!(pf.axis, Some(horse(3)), "軸ロックが効き軸=馬3");
+        // 軸だけ固定した場合、相手はライブ順位（blended）から選ばれる＝盤面（#388）の挙動。
+        assert_eq!(pf.partners, vec![horse(1), horse(2), horse(4), horse(5)]);
+    }
+
+    /// #601: `PinnedSelection` の相手・混戦も `compose_portfolio` 経由で `build_portfolio` へ届く。
+    /// 委譲の取りこぼし（軸だけ渡して相手を落とす等）を型でなく振る舞いで固定する。
+    #[test]
+    fn compose_portfolio_applies_pinned_partners_and_konsen() {
+        let blended = vec![
+            prob(1, 0.40),
+            prob(2, 0.25),
+            prob(3, 0.18),
+            prob(4, 0.10),
+            prob(5, 0.07),
+        ];
+        let pure = blended.clone();
+        let odds = sample_odds();
+        let views = views_with(blended, pure);
+
+        // ライブ順位の相手は 2,3,4,5。固定で 3,5 だけに絞れることを確認する。
+        let pinned = PinnedSelection {
+            axis: Some(horse(1)),
+            partners: Some(vec![horse(3), horse(5)]),
+            konsen_band: Some(Vec::new()),
+        };
+        let pf = compose_portfolio(&views, &odds, 5000, &pinned);
+        assert_eq!(pf.axis, Some(horse(1)));
+        assert_eq!(pf.partners, vec![horse(3), horse(5)], "固定相手が届く");
+        assert!(!pf.konsen, "空 band＝非混戦で固定が届く");
     }
 }

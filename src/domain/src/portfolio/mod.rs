@@ -38,6 +38,33 @@ pub const KONSEN_MIN_HORSES: usize = 4;
 /// Python `live_ev.py` の `alloc(konsen)=(box1500, wide1000, quinella1000, trio1500)` と等価。
 const KONSEN_ALLOC: (u32, u32, u32, u32) = (1000, 1000, 1500, 1500);
 
+/// 買い目選定の固定（#388 軸 / #601 相手・混戦）。呼び出し側が「何を固定するか」を 1 つにまとめて運ぶ。
+///
+/// すべて `None`（[`Default`]）なら従来どおり毎回ライブ確率から選ぶ。盤面（`board`）は記録◎に
+/// 寄せるだけなので `axis` のみ、`predict-watch` はスイープ間で買い目を据え置くため 3 つとも埋める。
+/// 各フィールドの意味は [`PortfolioConfig`] の同名フィールドに書いてある。
+#[derive(Debug, Clone, Default)]
+pub struct PinnedSelection {
+    pub axis: Option<HorseNum>,
+    pub partners: Option<Vec<HorseNum>>,
+    pub konsen_band: Option<Vec<HorseNum>>,
+}
+
+impl PinnedSelection {
+    /// 軸だけ固定する（盤面 #388 の用途）。
+    pub fn axis_only(axis: Option<HorseNum>) -> Self {
+        Self {
+            axis,
+            ..Self::default()
+        }
+    }
+
+    /// 何も固定しない（＝毎回ライブ確率から選ぶ）か。ログ分岐に使う。
+    pub fn is_empty(&self) -> bool {
+        self.axis.is_none() && self.partners.is_none() && self.konsen_band.is_none()
+    }
+}
+
 /// ポートフォリオ生成の方針。
 #[derive(Debug, Clone)]
 pub struct PortfolioConfig {
@@ -51,6 +78,22 @@ pub struct PortfolioConfig {
     /// `win_prob` 上位 N 頭）。直前オッズの市場ブレンド再計算で軸が無言フリップするのを防ぐ
     /// （CLAUDE.md 軸ロック運用・ADR 0055/0060）。`None`（既定）は従来通り `win_prob` 首位＝軸。
     pub forced_axis: Option<HorseNum>,
+    /// 相手ロック（#601）: 相手（流す先）を固定する。`Some` のとき `win_prob` 上位 N 頭では
+    /// なくこの集合を相手にする。**非出走の馬は落とすが、空いた分をライブ順位で補充しない**
+    /// ——補充すると点数の中身が入れ替わり、CLAUDE.md「点数（相手）は増やさない」の趣旨から外れる。
+    /// 並び順は表示のために現在の `win_prob` 降順へ並べ替えるが、**集合は動かない**。
+    /// `None`（既定）は従来通り軸を除く `win_prob` 上位 `partners` 頭。
+    ///
+    /// 軸だけ固定して相手はライブ順位で選ぶ（`forced_axis` のみ指定）ことも意図的に許す
+    /// ——盤面（`board`）は記録◎に軸を寄せるだけで、相手固定の材料を持たないため。
+    pub forced_partners: Option<Vec<HorseNum>>,
+    /// 混戦ロック（#601）: 混戦判定の母集団（印馬 band）を固定する。`Some` のとき
+    /// [`konsen_band`] をライブ確率から作り直さず、この集合を band として扱う
+    /// （混戦か否かは従来どおり `band.len() >= KONSEN_MIN_HORSES` で導く）。
+    /// **`Some(vec![])` は「非混戦で固定」を意味する**（band が空＝混戦不成立）。
+    /// 混戦判定が直前オッズで反転すると券種配分ごと（3 レイヤー ↔ 4 レイヤー）変わってしまうため、
+    /// 買い目構造を固定するには軸・相手に加えてこれも要る。`None`（既定）は毎回ライブ確率から作る。
+    pub forced_konsen_band: Option<Vec<HorseNum>>,
 }
 
 impl Default for PortfolioConfig {
@@ -62,6 +105,8 @@ impl Default for PortfolioConfig {
             partners: 5,
             alloc: (1, 1, 1),
             forced_axis: None,
+            forced_partners: None,
+            forced_konsen_band: None,
         }
     }
 }
@@ -127,6 +172,7 @@ fn rank_axis_partners(
     probs: &[HorseProbability],
     partners: usize,
     forced_axis: Option<HorseNum>,
+    forced_partners: Option<&[HorseNum]>,
 ) -> Option<(HorseNum, Vec<HorseNum>)> {
     let mut ranked: Vec<&HorseProbability> = probs.iter().collect();
     ranked.sort_by(|a, b| {
@@ -135,19 +181,31 @@ fn rank_axis_partners(
             .unwrap_or(std::cmp::Ordering::Equal)
             .then(a.horse_num.value().cmp(&b.horse_num.value()))
     });
-    // 軸ロック: 指定馬が出走集合にいればそれを軸に固定し、相手は軸を除く上位 N 頭。
-    if let Some(axis) = forced_axis.filter(|a| ranked.iter().any(|p| p.horse_num == *a)) {
-        let ps = ranked
+    // 軸ロック: 指定馬が出走集合にいればそれを軸に固定。非出走（取消等）ならライブ首位へフォールバック。
+    let axis = match forced_axis.filter(|a| ranked.iter().any(|p| p.horse_num == *a)) {
+        Some(a) => a,
+        None => ranked.first()?.horse_num,
+    };
+    let ps = match forced_partners {
+        // 相手ロック（#601）: 固定集合のうち出走している馬だけを、現在の順位（ranked）順に並べる。
+        // ranked 側を走査して絞ることで並び順が win_prob 降順になり、非出走馬は自然に落ちる。
+        // **落ちた分をライブ順位で補充しない**（点数の中身が入れ替わるのを防ぐ）。軸が固定集合に
+        // 混じっていても除く（軸は相手ではない）。`partners` 上限も掛けて、固定側の異常データで
+        // 点数が既定幅を超えないようにする。
+        Some(fixed) => ranked
+            .iter()
+            .filter(|p| p.horse_num != axis && fixed.contains(&p.horse_num))
+            .take(partners)
+            .map(|p| p.horse_num)
+            .collect(),
+        None => ranked
             .iter()
             .filter(|p| p.horse_num != axis)
             .take(partners)
             .map(|p| p.horse_num)
-            .collect();
-        return Some((axis, ps));
-    }
-    let (axis_hp, rest) = ranked.split_first()?;
-    let ps = rest.iter().take(partners).map(|p| p.horse_num).collect();
-    Some((axis_hp.horse_num, ps))
+            .collect(),
+    };
+    Some((axis, ps))
 }
 
 /// 軸-相手 1 ペアの「馬連 vs 馬単(両方向)」EV 診断 1 行（#246-C）。
@@ -188,7 +246,7 @@ pub fn pair_ev_diagnostics(
     );
     // 軸・相手は rank_probs（市場ブレンド）で選び、EV は ev_probs（純モデル）で評価する（循環断ち, #272）。
     // 診断は軸ロック非対象（常に win_prob 首位）。
-    let Some((axis, partner_nums)) = rank_axis_partners(rank_probs, partners, None) else {
+    let Some((axis, partner_nums)) = rank_axis_partners(rank_probs, partners, None, None) else {
         return PairEvDiagnostics {
             axis: None,
             rows: Vec::new(),
@@ -307,10 +365,15 @@ pub fn build_portfolio(
     );
     // 軸・相手は rank_probs（市場ブレンド α=0.2）で選ぶ＝解像度の高い本命選定（Phase A: 純モデルは
     // 本命をフラットにしか出せない, #272）。win_prob 降順（同率は馬番昇順）。ただし軸ロック
-    // （`config.forced_axis`, #388）指定時はその馬を軸に固定する（相手は軸を除く上位 N 頭）。
-    let Some((axis, partners)) =
-        rank_axis_partners(rank_probs, config.partners, config.forced_axis)
-    else {
+    // （`config.forced_axis`, #388）／相手ロック（`config.forced_partners`, #601）指定時は
+    // その固定を優先する。rank_probs は市場 odds を含むため、固定しないとスイープごとに
+    // 選定が動く（#601 実測: 154R 中 軸 28R・相手 62R が入れ替わっていた）。
+    let Some((axis, partners)) = rank_axis_partners(
+        rank_probs,
+        config.partners,
+        config.forced_axis,
+        config.forced_partners.as_deref(),
+    ) else {
         return Portfolio {
             axis: None,
             partners: Vec::new(),
@@ -322,8 +385,13 @@ pub fn build_portfolio(
     };
 
     // 混戦判定（◎の win_prob 0.70 倍以上が ◎含め 4 頭以上）。band は軸選定と同じ rank_probs で作る
-    // （◎=band[0] を保つ）。Python `live_ev.py:is_konsen` と等価。
-    let band = konsen_band(rank_probs);
+    // （◎=band[0] を保つ）。Python `live_ev.py:is_konsen` と等価。混戦ロック（#601）指定時は
+    // ライブ確率から作り直さず固定 band を使う（`Some(vec![])` は非混戦で固定＝len 0 < 4）。
+    // 混戦が反転すると券種配分ごと変わるので、買い目構造の固定にはここも要る。
+    let band = match config.forced_konsen_band.as_deref() {
+        Some(fixed) => fixed.to_vec(),
+        None => konsen_band(rank_probs),
+    };
     let konsen = band.len() >= KONSEN_MIN_HORSES;
 
     // EV・的中確率は ev_probs（純モデル α=1.0）で評価する＝循環断ち（市場 odds と独立な確率で
@@ -616,6 +684,7 @@ mod tests {
             partners: 3,
             alloc: (1, 1, 1),
             forced_axis: None,
+            ..PortfolioConfig::default()
         };
         let pf = build_portfolio(&probs, &probs, &o, 5000, &config);
         assert_eq!(pf.axis, Some(horse(1)));
@@ -630,6 +699,7 @@ mod tests {
             partners: 3,
             alloc: (1, 1, 1),
             forced_axis: Some(horse(3)),
+            ..PortfolioConfig::default()
         };
         let pf = build_portfolio(&probs, &probs, &o, 5000, &config);
         assert_eq!(pf.axis, Some(horse(3)), "軸は記録軸に固定");
@@ -654,6 +724,7 @@ mod tests {
             partners: 3,
             alloc: (1, 1, 1),
             forced_axis: Some(horse(9)), // 出走馬は 1..5。馬9 は不在。
+            ..PortfolioConfig::default()
         };
         let pf = build_portfolio(&probs, &probs, &o, 5000, &config);
         assert_eq!(
@@ -664,6 +735,213 @@ mod tests {
         assert_eq!(pf.partners, vec![horse(2), horse(3), horse(4)]);
     }
 
+    // --- 相手ロック / 混戦ロック（#601 軸ロック違反の解消） ---------------------------
+
+    /// 相手ロックはライブ順位より優先される。固定しない場合と結果が変わることまで assert し、
+    /// 「たまたま同じ」で通るテストにしない。
+    #[test]
+    fn forced_partners_overrides_live_ranking() {
+        let (probs, o) = sample();
+        let mk = |fp: Option<Vec<HorseNum>>| PortfolioConfig {
+            partners: 3,
+            alloc: (1, 1, 1),
+            forced_partners: fp,
+            ..PortfolioConfig::default()
+        };
+        // ライブ順位の相手 top3 は 馬2,3,4（win_prob 降順）。
+        let live = build_portfolio(&probs, &probs, &o, 5000, &mk(None));
+        assert_eq!(live.partners, vec![horse(2), horse(3), horse(4)]);
+
+        // 固定集合に 馬5 を含め 馬4 を外す。固定が効けば相手は 2,3,5 になる。
+        let pinned = build_portfolio(
+            &probs,
+            &probs,
+            &o,
+            5000,
+            &mk(Some(vec![horse(2), horse(3), horse(5)])),
+        );
+        assert_eq!(
+            pinned.partners,
+            vec![horse(2), horse(3), horse(5)],
+            "固定集合が採られる（並びは win_prob 降順）"
+        );
+        assert_ne!(
+            live.partners, pinned.partners,
+            "固定の有無で結果が変わる（テストが恒真でないことの担保）"
+        );
+        assert_eq!(
+            pinned.axis,
+            Some(horse(1)),
+            "軸は固定していないので首位のまま"
+        );
+    }
+
+    /// 固定相手が非出走（取消）なら落とすが、**ライブ順位から補充しない**。
+    /// 補充すると点数の中身が入れ替わり CLAUDE.md「点数（相手）は増やさない」の趣旨から外れる。
+    #[test]
+    fn forced_partners_drops_scratched_without_backfill() {
+        let (probs, o) = sample();
+        let config = PortfolioConfig {
+            partners: 3,
+            alloc: (1, 1, 1),
+            // 馬9 は出走していない（出走は 1..5）。
+            forced_partners: Some(vec![horse(2), horse(3), horse(9)]),
+            ..PortfolioConfig::default()
+        };
+        let pf = build_portfolio(&probs, &probs, &o, 5000, &config);
+        assert_eq!(
+            pf.partners,
+            vec![horse(2), horse(3)],
+            "非出走の 馬9 は落ちる"
+        );
+        assert!(
+            !pf.partners.contains(&horse(4)) && !pf.partners.contains(&horse(5)),
+            "空いた 1 枠をライブ順位（馬4/馬5）で補充しない: {:?}",
+            pf.partners
+        );
+    }
+
+    /// 固定集合に軸が混じっていても軸は相手にしない。並びは現在の win_prob 降順に正規化する。
+    #[test]
+    fn forced_partners_excludes_axis_and_sorts_by_win_prob() {
+        let (probs, o) = sample();
+        let config = PortfolioConfig {
+            partners: 5,
+            alloc: (1, 1, 1),
+            // 軸（馬1）を含め、順序もバラバラに与える。
+            forced_partners: Some(vec![horse(4), horse(1), horse(2)]),
+            ..PortfolioConfig::default()
+        };
+        let pf = build_portfolio(&probs, &probs, &o, 5000, &config);
+        assert_eq!(pf.axis, Some(horse(1)));
+        assert_eq!(
+            pf.partners,
+            vec![horse(2), horse(4)],
+            "軸は除き、win_prob 降順に並べ直す"
+        );
+    }
+
+    /// 混戦ロック: `Some(band)` で混戦判定と box 構成が固定され、`Some(vec![])` は非混戦で固定される。
+    #[test]
+    fn forced_konsen_band_pins_konsen_decision() {
+        // ライブ確率では 4 頭が ◎の 0.70 倍以上＝混戦になる盤面。
+        let probs = vec![
+            prob(1, 0.30),
+            prob(2, 0.28),
+            prob(3, 0.26),
+            prob(4, 0.24),
+            prob(5, 0.05),
+        ];
+        let (_, o) = sample();
+        let mk = |band: Option<Vec<HorseNum>>| PortfolioConfig {
+            partners: 3,
+            alloc: (1, 1, 1),
+            forced_konsen_band: band,
+            ..PortfolioConfig::default()
+        };
+        let live = build_portfolio(&probs, &probs, &o, 5000, &mk(None));
+        assert!(live.konsen, "固定なしではライブ確率で混戦と判定される");
+
+        // 空 band を渡すと非混戦で固定される（len 0 < KONSEN_MIN_HORSES）。
+        let not_konsen = build_portfolio(&probs, &probs, &o, 5000, &mk(Some(Vec::new())));
+        assert!(
+            !not_konsen.konsen,
+            "Some(vec![]) は「非混戦で固定」を意味する"
+        );
+        assert!(
+            !not_konsen.bets.iter().any(|b| b.method == BetMethod::Box),
+            "非混戦固定では box レイヤーを重ねない"
+        );
+
+        // 4 頭の band を渡せば、ライブ確率に関わらず混戦として固定される。
+        let pinned = build_portfolio(
+            &probs,
+            &probs,
+            &o,
+            5000,
+            &mk(Some(vec![horse(1), horse(2), horse(3), horse(4)])),
+        );
+        assert!(pinned.konsen);
+        assert!(
+            pinned.bets.iter().any(|b| b.method == BetMethod::Box),
+            "固定 band から box レイヤーが組まれる"
+        );
+    }
+
+    /// #601 の本丸: **オッズが動いても固定した選定は動かない**。逆に固定しなければ動く。
+    /// 実測では 154R 中 軸 28R・相手 62R がスイープ間で入れ替わっていた。
+    #[test]
+    fn pinned_selection_survives_market_movement_while_roi_moves() {
+        // pure（EV 用）は市場非依存なので両スイープで不変。rank（市場ブレンド）だけが動く。
+        let ev_probs = vec![
+            prob(1, 0.30),
+            prob(2, 0.22),
+            prob(3, 0.20),
+            prob(4, 0.16),
+            prob(5, 0.12),
+        ];
+        // スイープ1: 相手上位は 馬2,3,4。スイープ2: 市場が動き 馬5 が 馬4 を抜く。
+        let rank_1 = vec![
+            prob(1, 0.40),
+            prob(2, 0.25),
+            prob(3, 0.18),
+            prob(4, 0.10),
+            prob(5, 0.07),
+        ];
+        let rank_2 = vec![
+            prob(1, 0.40),
+            prob(2, 0.25),
+            prob(3, 0.18),
+            prob(4, 0.07),
+            prob(5, 0.10),
+        ];
+        let (_, odds_1) = sample();
+        // スイープ2 は同じ組番でオッズだけ上がった盤面（＝ROI は動くべき）。
+        let mut odds_2 = odds_1.clone();
+        for v in odds_2.quinella.values_mut() {
+            *v = odds(20.0);
+        }
+
+        let pinned = PortfolioConfig {
+            partners: 3,
+            alloc: (1, 1, 1),
+            forced_axis: Some(horse(1)),
+            forced_partners: Some(vec![horse(2), horse(3), horse(4)]),
+            forced_konsen_band: Some(Vec::new()),
+        };
+        let s1 = build_portfolio(&rank_1, &ev_probs, &odds_1, 5000, &pinned);
+        let s2 = build_portfolio(&rank_2, &ev_probs, &odds_2, 5000, &pinned);
+        assert_eq!(s1.axis, s2.axis, "軸は動かない");
+        assert_eq!(s1.partners, s2.partners, "相手も動かない");
+        assert_eq!(s1.konsen, s2.konsen, "混戦判定も動かない");
+        assert_eq!(
+            s2.partners,
+            vec![horse(2), horse(3), horse(4)],
+            "市場で 馬5 が 馬4 を抜いても相手は固定のまま"
+        );
+
+        // 固定しすぎて EV まで凍っていないこと（オッズが上がれば ROI は上がる）。
+        let roi_1 = s1.ev.as_ref().expect("ev1").roi;
+        let roi_2 = s2.ev.as_ref().expect("ev2").roi;
+        assert!(
+            roi_2 > roi_1,
+            "オッズが動けば ROI は動く（{roi_1} → {roi_2}）"
+        );
+
+        // 固定しなければ相手は市場に追随して動く＝上の assert が恒真でないことの担保。
+        let unpinned = PortfolioConfig {
+            partners: 3,
+            alloc: (1, 1, 1),
+            ..PortfolioConfig::default()
+        };
+        let u1 = build_portfolio(&rank_1, &ev_probs, &odds_1, 5000, &unpinned);
+        let u2 = build_portfolio(&rank_2, &ev_probs, &odds_2, 5000, &unpinned);
+        assert_ne!(
+            u1.partners, u2.partners,
+            "固定しなければ相手が入れ替わる（これが #601 の欠陥）"
+        );
+    }
+
     #[test]
     fn forced_axis_equal_to_top_matches_unforced() {
         // 記録軸が win_prob 首位と一致するときは非固定と同一結果（現行挙動を壊さない）。
@@ -672,6 +950,7 @@ mod tests {
             partners: 3,
             alloc: (1, 1, 1),
             forced_axis: fa,
+            ..PortfolioConfig::default()
         };
         let base = build_portfolio(&probs, &probs, &o, 5000, &mk(None));
         let forced = build_portfolio(&probs, &probs, &o, 5000, &mk(Some(horse(1))));
@@ -689,6 +968,7 @@ mod tests {
             partners: 5,
             alloc: (1, 1, 1),
             forced_axis: Some(horse(3)),
+            ..PortfolioConfig::default()
         };
         let pf = build_portfolio(&probs, &probs, &o, 5000, &config);
         assert_eq!(pf.axis, Some(horse(3)), "軸は記録軸3に固定");
@@ -739,6 +1019,7 @@ mod tests {
             partners: 3,
             alloc: (1, 1, 1),
             forced_axis: None,
+            ..PortfolioConfig::default()
         };
         let pf = build_portfolio(&rank, &ev, &o, 5000, &config);
 
@@ -776,6 +1057,7 @@ mod tests {
             partners: 3,
             alloc: (1, 1, 1),
             forced_axis: None,
+            ..PortfolioConfig::default()
         };
         let pf = build_portfolio(&probs, &probs, &o, 5000, &config);
 
@@ -803,6 +1085,7 @@ mod tests {
             partners: 1,
             alloc: (1, 1, 1),
             forced_axis: None,
+            ..PortfolioConfig::default()
         };
         let pf = build_portfolio(&probs, &probs, &o, 5000, &config);
         // 相手 1 頭では三連複は組めない（C(1,2)=0）。馬連・ワイドは 1 点ずつ。
@@ -819,6 +1102,7 @@ mod tests {
             partners: 3,
             alloc: (1, 1, 1),
             forced_axis: None,
+            ..PortfolioConfig::default()
         };
         let pf = build_portfolio(&probs, &probs, &o, 5000, &config);
         let trio: Vec<_> = pf
@@ -1050,6 +1334,7 @@ mod tests {
             partners: 3,
             alloc: (1, 1, 1),
             forced_axis: None,
+            ..PortfolioConfig::default()
         };
         let pf = build_portfolio(&probs, &probs, &o, 5000, &config);
         let ev = pf.ev.expect("ev should be Some when priced legs exist");
@@ -1105,6 +1390,7 @@ mod tests {
             partners: 3,
             alloc: (1, 0, 0),
             forced_axis: None,
+            ..PortfolioConfig::default()
         };
         let pf = build_portfolio(&probs, &probs, &o, 200, &config);
         let quinella: Vec<_> = pf
@@ -1135,6 +1421,7 @@ mod tests {
             partners: 3,
             alloc: (1, 0, 0), // 連系ペアのみに絞って検証
             forced_axis: None,
+            ..PortfolioConfig::default()
         };
         let pf = build_portfolio(&probs, &probs, &o, 5000, &config);
         assert!(
@@ -1210,6 +1497,7 @@ mod tests {
             partners: 3,
             alloc: (1, 0, 0),
             forced_axis: None,
+            ..PortfolioConfig::default()
         };
         let pf = build_portfolio(&probs, &probs, &o, 5000, &config);
         let leg = pf.bets.iter().find(|b| {
