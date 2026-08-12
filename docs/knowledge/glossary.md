@@ -29,6 +29,7 @@ sources:
   - docs/original-docs/0064-live-ev-buy-view.md
   - docs/original-docs/0075-unsupported-race-skip-exit-zero.md
   - docs/original-docs/0076-roi-gate-uncalibrated-under-ev-layer-separation.md
+  - docs/original-docs/0079-roi-gate-display-kept-with-unreachable-note.md
   - docs/original-docs/0077-glossary-index-and-sources-scope.md
 distilled_from_sha: "afa1591"
 updated: "2026-08-12"
@@ -125,7 +126,7 @@ paddock 横断の用語索引。**この文書は定義の正本ではなく、�
 | 想定回収率 | `Σ payout / Σ stake`。各レース 100 円をトップ選好馬の単勝に賭けた仮定値。**実際の買い方（3 券種）とは別物** | 同上 |
 | `ev`（期待値） | `probability × odds`。1.0 を超えると理論的にプラス期待値 | [ev-kelly-bet-selection.md](../specifications/ev-kelly-bet-selection.md) 用語定義 |
 | ROI（レース単位） | `Σ_i(賭金_i × 的中確率_i × 払戻倍率_i) / 総賭金`。買い目全体で見た期待回収率 | [CLAUDE.md](../../CLAUDE.md)「3. EV 判定 → 買い目決定」 |
-| ⚠ ROI ゲート | **ROI ≥ 100% のレースだけ張る**という判定基準。100% が損益分岐で、下げる＝−EV を承知で買う。**ただし現行の参考 ROI はゲート指標として機能していない**（182R 実測でゲート通過 0 件・判定 ROI と実現 ROI の相関は無情報）——緩める根拠にはならないので閾値は下げない | [product-goals.md](product-goals.md) REQ-D01-001・「ゲートの現況」/ [ADR 0040](../original-docs/0040-ev-gate-threshold-lowering-rejected.md)（閾値）/ [ADR 0076](../original-docs/0076-roi-gate-uncalibrated-under-ev-layer-separation.md)（現況） |
+| ⚠ ROI ゲート | 元は「**ROI ≥ 100% のレースだけ張る**」という判定基準（100% が損益分岐）。**現在は参考 ROI をこの判定に使わない**——182R 実測でゲート通過 0 件・判定 ROI と実現 ROI は無情報だったため（張る/見送りは手動のハンデ精査と執行の規律で決める）。**それでも閾値は下げない**（下げる＝−EV を承知で買う。θ を下げても実現 ROI は 100% に届かない）。`predict-watch` は 🔶 / 🔍 のマークを残したまま、起動時に到達不能である旨を注記する | [product-goals.md](product-goals.md) REQ-D01-001・「ゲートの現況」/ [ADR 0040](../original-docs/0040-ev-gate-threshold-lowering-rejected.md)（閾値）/ [ADR 0076](../original-docs/0076-roi-gate-uncalibrated-under-ev-layer-separation.md)（現況）/ [ADR 0079](../original-docs/0079-roi-gate-display-kept-with-unreachable-note.md)（表示と運用記述） |
 | フェア ROI | JRA 控除率（ワイド・馬連 22.5% / 3 連複 25%）由来の期待値上限 ≈ 75〜77.5%。エッジが無ければ ROI はこの近辺に落ちる | [betting-rule-history.md](../specifications/betting-rule-history.md) ⑤ |
 | `ev_threshold` / `trifecta_ev_threshold` | 推奨候補に入れる EV の閾値（既定 1.0 / 三連単のみ 2.0）。判定は strict なので**閾値ちょうどは除外**される（用語定義の「これ以上の EV」は不正確で、「3. EV フィルタ」が正） | [ev-kelly-bet-selection.md](../specifications/ev-kelly-bet-selection.md)「3. EV フィルタ」（判定）/ 用語定義（既定値） |
 | ⚠ `kelly_fraction` / `kelly_cap` | 総資金に対する賭け割合と、その上限（既定 0.25）。**本番の賭け額配分には使わない**——用途は薄い買い目を落とす `min_kelly` の curation だけで、配分は均等割り | [ev-kelly-bet-selection.md](../specifications/ev-kelly-bet-selection.md) 用語定義（既定値）/ REQ-D23-004（用途制限） |
