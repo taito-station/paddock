@@ -1489,6 +1489,21 @@ def test_index_swap_between_docs_is_error() -> None:
         shutil.rmtree(repo)
 
 
+def test_index_marker_missing_is_fatal_even_with_warn_only() -> None:
+    """逃げ道（--warn-only）でも落ちること。表の範囲を切り出せず検査が成立しないため。"""
+    repo = new_repo()
+    try:
+        baseline(repo)
+        registry = repo / "docs/knowledge/doc-classes.md"
+        text = registry.read_text(encoding="utf-8")
+        registry.write_text(text.replace("<!-- doc-classes-index:begin -->", ""), encoding="utf-8")
+        code, out = check(repo, "--warn-only")
+        assert code == 1, out
+        assert "doc-classes-index:begin" in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
 def test_index_marker_missing_is_fatal() -> None:
     """マーカーを消して検査を素通りさせる経路を塞ぐ（fail-closed）。"""
     repo = new_repo()
@@ -1827,6 +1842,27 @@ def test_document_without_frontmatter_still_gets_link_check() -> None:
         assert code == 1, out
         assert "docs/knowledge/b.md: frontmatter が無い" in out, out
         assert "docs/knowledge/b.md: 本文（" in out and "実在しない" in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_req_cell_link_is_backstop_for_body_scan() -> None:
+    """セルを跨ぐバッククォートで本文走査が飲み込むリンクを、REQ のセル単位走査が拾う。
+
+    本文は 1 文字列として走査するので、`検証手段` セルの開きバッククォートと `出典` セルの
+    閉じバッククォートが対になると、その間のリンクがインラインコード扱いで消える。
+    セル単位の走査はこの backstop で、消すとこの経路が丸ごと無検査になる。
+    """
+    repo = new_repo()
+    try:
+        baseline(repo)
+        append_req_block(
+            repo, "docs/knowledge/a.md", "D19",
+            ["| REQ-D19-001 | 要件 | `cmd | [ADR](../original-docs/9999-nope.md)` | Confirmed |"],
+        )
+        code, out = check(repo)
+        assert code == 1, out
+        assert "REQ-D19-001 のリンク先が実在しない" in out, out
     finally:
         shutil.rmtree(repo)
 

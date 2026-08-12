@@ -142,9 +142,13 @@ def bump(path: Path, text: str, matched: "re.Match[str]", sha: str) -> "tuple[st
     head = matched.group(1)
     if not head.endswith((" ", "\t")):
         head += " "
+    # 行末コメントの直前にも空白が要る（`"sha"# 未定` は YAML 仕様上コメントにならない）。
+    tail = matched.group(3)
+    if tail.startswith("#"):
+        tail = " " + tail
     updated = (
         text[: matched.start()]
-        + f'{head}"{sha}"{matched.group(3)}'
+        + f'{head}"{sha}"{tail}'
         + text[matched.end() :]
     )
     with path.open("w", encoding="utf-8", newline="") as f:

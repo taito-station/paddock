@@ -497,6 +497,8 @@ def case_exact(path: Path, root: Path) -> bool:
     return True
 
 
+# 成功行に出す「実在を検査したリンク数」。スキーム付き URI・アンカー・同一先の重複は
+# 数えない（#604 (c) の「まず数える」を後から同じ定義で再現するためのベースライン）。
 LINK_COUNT = 0
 
 
@@ -523,7 +525,6 @@ def check_links(
     global LINK_COUNT
     for matched in RE_MD_LINK.finditer(masked):
         target = matched.group(1)
-        LINK_COUNT += 1
         here = label_at(matched.start()) if label_at else label
         # スキーム付き URI（http/https/mailto に限らず ftp・tel 等）と protocol-relative、
         # 同一文書内アンカーは対象外。ホワイトリストにすると新しいスキームを足すたびに
@@ -538,6 +539,7 @@ def check_links(
             if cleaned in seen:
                 continue
             seen.add(cleaned)
+        LINK_COUNT += 1  # ここから先が実在検査。skip / 重複は数えない
         # sources 検査（main）と同じ理由でリポジトリ外を弾く。絶対パスを許すと
         # Path 連結が左辺を捨てて外を指し、「参照先はリポジトリ内で辿れる」という
         # 前提が崩れる（`[外](/etc/hosts)` が実在扱いで通る）。
@@ -769,8 +771,10 @@ def main(argv: list[str]) -> int:
         text = path.read_text(encoding="utf-8")
         fm = parse_frontmatter(text)
         # frontmatter が無くてもリンクだけは見る（下の continue で丸ごと飛ばさない）。
+        # fm が無い文書は REQ 走査（未閉じフェンスの報告元）まで到達しないので、
+        # そのときだけこちらでフェンス閉じ忘れを報告する。
         link_seen: set[str] = set()
-        check_body_links(rel, root, text, errors, link_seen)
+        check_body_links(rel, root, text, errors, link_seen, report_unclosed=not fm)
         if not fm:
             errors.append(f"{rel}: frontmatter が無い")
             continue
@@ -908,7 +912,7 @@ def main(argv: list[str]) -> int:
 
     print(
         f"✓ 文書クラス・sources 整合を確認"
-        f"（{len(targets)} 本 / リンク {LINK_COUNT} 本 / 警告 {len(warnings)} 件）"
+        f"（{len(targets)} 本 / 実在を検査したリンク {LINK_COUNT} 本 / 警告 {len(warnings)} 件）"
     )
     return 0
 

@@ -103,9 +103,20 @@ updated: "YYYY-MM-DD"    # 内容を実質更新した日（YAML の date 型を
   原則は**この知を蒸留した時点のリポジトリ HEAD** を `git rev-parse --short HEAD` で記録する
   （pilot の `probability-estimation.md` もこの方式）。特定の由来ファイル版に紐付けたいときは
   `git log -1 --format=%h -- <path>` を使う。いずれも「いつ時点の知か」を辿れるようにするのが目的。
-  **sha 追従だけのコミットは subject を `chore(sha):` で始める**——stale が「何件鳴って、
-  そのうち何件が本文修正を伴ったか」を後から `git log --grep '^chore(sha):'` で数えるため
-  （#604 (e) の測定。道具で手数が下がったぶん、儀式化していないかを測れるようにしておく）。
+  **儀式化していないかは差分で数える**（#604 (e)）。subject の規約に頼ると取りこぼす——
+  実際に main の sha 追従コミットは `docs(knowledge):` / `chore:` / `chore(spec):` と割れている。
+  「`distilled_from_sha` 行しか触っていないコミット」＝見直しを伴わなかった追従として、
+  過去に遡って数えられる:
+
+  ```sh
+  # docs 配下を触ったコミットのうち、sha 行しか変えていないものを列挙する
+  # （--no-merges は必須。マージコミットは既定で差分が空になり、全部ヒットしてしまう）
+  git log --no-merges --format=%H -- docs | while read -r c; do
+    body=$(git show --format= --unified=0 "$c" -- docs \
+      | grep -E '^[+-]' | grep -vE '^(\+\+\+|---)' | grep -v '^[+-]distilled_from_sha:')
+    [ -z "$body" ] && echo "$c"
+  done
+  ```
   追従は `scripts/bump-distilled-sha.py <file>...`（`--all-stale` で STALE 全件）で 1 コマンドにできる
   ——**`updated` は触らない**ので、下流の本文が実質変わったかは自分で判断して手で進める。
   なお**同一コミットに自分の sha は書けない**ので、上流を触った PR は「本文コミット →
