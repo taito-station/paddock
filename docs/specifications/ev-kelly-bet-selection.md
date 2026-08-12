@@ -17,7 +17,8 @@ sources:
   - docs/original-docs/0054-kelly-staking-rejected.md
   - docs/original-docs/0064-live-ev-buy-view.md
   - docs/original-docs/0065-wide-partners-top5-alignment.md
-distilled_from_sha: "faa62d6"
+  - docs/original-docs/0078-pin-bet-selection-across-sweeps.md
+distilled_from_sha: "3ad8f2f"
 updated: "2026-08-12"
 ---
 
@@ -241,6 +242,7 @@ Domain 層に純粋関数として実装し、IO・状態なし。`PlaceOdds` �
 | REQ-D23-004 | fractional Kelly は賭け額配分に使わない。`betting/kelly.rs` は EV 候補選抜（`min_kelly` の curation）に留める | ADR 0054 の同一土俵比較（定額 vs Kelly・71R walk-forward）を再実行し、**定額土俵で Kelly 重みが ADR 0054 当時の対照（Python `live_ev.py` のヒューリスティック＝確率重み＋最低 ¥100 の最大剰余法・ROI 75.5%・σ 92.5）を上回らないこと**（**production の配分は均等割り**＝REQ-D23-003。0054 の「現行」は当時の Python 土俵を指す）、および **bankroll 土俵で full Kelly が破産すること** | [ADR 0054](../original-docs/0054-kelly-staking-rejected.md) | Confirmed |
 | REQ-D23-005 | 混戦判定は「◎の model 勝率の 0.70 倍以上が ◎含め 4 頭以上」。**オッズ条件を併用しない** | ADR 0028 のオッズ閾値スイープを再実行（baseline を上回る閾値が無いこと） | [ADR 0028](../original-docs/0028-konsen-odds-trigger-rejected.md) | Confirmed |
 | REQ-D23-006 | `scripts/predict-check/` の Python（`live_ev.py`）を**張る買い目の配分に使わない**。オフライン EV レポート専用（配分方式の正が `build_portfolio` であることは REQ-D01-007。ここはその裏返しの禁止事項） | `build_portfolio` の単体テストと、`predict` / `predict-watch` が同一関数を通ること | [ADR 0064 の追補（#346）](../original-docs/0064-live-ev-buy-view.md)——**0064 本体の決定は逆**（当時はライブ writer を Python `live_ev.py` に一本化するとしていた）。Rust に一本化したのは追補側 | Confirmed |
+| REQ-D23-007 | `predict-watch` の買い目選定（軸・相手・混戦判定）は**当日の初回スイープで確定し、以後オッズで動かさない**。固定した相手が取消なら落とすが**ライブ順位で補充しない**（点数が減る）。固定の優先順は 記録◎ → その日の初回スイープ → 固定なし | `cargo test -p paddock-domain` の `pinned_selection_survives_market_movement_while_roi_moves`（オッズを差し替えた 2 スイープで選定が一致し ROI は動く／固定しなければ動く）・`forced_partners_drops_scratched_without_backfill`、`cargo test -p rdb-gateway --test test_live_ev_persistence` の `pins_return_the_earliest_sweep_not_the_latest`（**最古**を返すこと）、および開催日に `scripts/predict-check/gate_calibration.py` の「軸（◎）の安定性」節が `0/N` になること | [ADR 0078](../original-docs/0078-pin-bet-selection-across-sweeps.md) | Confirmed |
 <!-- REQ:end D23 -->
 
 **D01 と重複させない。** 「ROI ≥ 100% のレースだけ張る」「軸ロック＋ズレ増額」「買い目の提示形式と
