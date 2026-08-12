@@ -136,6 +136,73 @@ def settle(legs, payouts):
     return stake, ret, hit_legs, dict(by_type)
 
 
+# --- 配分の入れ替え（#600 / ADR 0080） ----------------------------------------
+# 券種の並びは Rust `PortfolioConfig.alloc` と同じ (連系ペア, ワイド, 三連複)。
+ALLOC_TYPES = ("quinella", "wide", "trio")
+
+
+def distribute(type_budget, n):
+    """券種予算を n 点へ 100 円単位で均等配分する。Rust `portfolio::distribute` の鏡映。
+
+    全点に ¥100 すら置けないときは賄える点数ぶんだけ ¥100 を置く（残りは ¥0＝買わない）。
+    **買い方ロジックの second source を作らないため、脚の選定には一切触れない**——
+    ここでやるのは「同じ脚に別の金額を置いたらどうだったか」の再計算だけ（ADR 0064）。
+    """
+    if n <= 0 or type_budget < 100:
+        return [0] * max(n, 0)
+    per = type_budget // n // 100 * 100
+    if per >= 100:
+        return [per] * n
+    affordable = min(type_budget // 100, n)
+    return [100] * affordable + [0] * (n - affordable)
+
+
+def realloc_and_settle(legs, payouts, alloc, race_budget):
+    """記録済みの脚をそのままに、配分だけ変えて確定払戻で再精算する。
+
+    `alloc` は (連系ペア, ワイド, 三連複) の相対重み。Rust `build_portfolio` と同じ
+    「券種予算を 100 円単位に floor → 券種内を 100 円単位で均等配分」の 2 段 floor を通す。
+    返り値は (stake, ret, by_type)。**混戦（box 脚を含む）レースは対象外**——
+    混戦は `KONSEN_ALLOC`（4 レイヤー）で組まれており 3 要素の alloc では再現できない。
+    """
+    by_type = defaultdict(list)
+    for leg in legs:
+        by_type[leg.get("bet_type")].append(leg)
+    total_w = sum(alloc)
+    if total_w <= 0:
+        return 0.0, 0.0, {}
+    stake = ret = 0.0
+    per_type = {}
+    for bt, w in zip(ALLOC_TYPES, alloc):
+        group = by_type.get(bt) or []
+        type_budget = race_budget * w // total_w // 100 * 100
+        s = r = 0.0
+        for leg, amount in zip(group, distribute(type_budget, len(group))):
+            if amount <= 0:
+                continue
+            pay = float((payouts.get(bt) or {}).get(combo_key(leg.get("combo") or []), 0) or 0)
+            s += amount
+            r += amount / 100.0 * pay
+        stake += s
+        ret += r
+        per_type[bt] = (s, r)
+    return stake, ret, per_type
+
+
+def parse_alloc(text):
+    """`1500,1500,2000` を (連系ペア, ワイド, 三連複) の重みタプルへ。"""
+    parts = [p.strip() for p in text.split(",")]
+    if len(parts) != 3:
+        raise ValueError(f"--compare-alloc は 3 つの重みをカンマ区切りで指定する（馬連,ワイド,3連複）: {text!r}")
+    try:
+        weights = tuple(int(p) for p in parts)
+    except ValueError as e:
+        raise ValueError(f"--compare-alloc の重みは整数で指定する: {text!r}") from e
+    if any(w < 0 for w in weights) or sum(weights) <= 0:
+        raise ValueError(f"--compare-alloc の重みは非負で合計が正であること: {text!r}")
+    return weights
+
+
 # --- 市場整合 ROI -------------------------------------------------------------
 def market_fair_roi(legs, odds_by_type):
     """同じ伝票を market-implied 確率で評価した ROI（＝おおむね 1−控除率）。
@@ -391,6 +458,42 @@ def axis_stability(by_race):
     return multi, flipped
 
 
+def report_alloc_comparison(races, allocs, out=sys.stdout):
+    """券種配分を入れ替えたときの実現ROI・1レース賭金を並べる（#600 / ADR 0080）。
+
+    脚（どの組番を買ったか）は記録どおりで動かさず、**金額だけ**を再計算する。
+    比較の基準は「記録どおり」＝実際に張られた金額で、これが現行実装の挙動そのもの。
+    混戦レースは `KONSEN_ALLOC`（4 レイヤー）で組まれており 3 要素の alloc では
+    再現できないので母集団から外し、その件数を明示する（黙って落とすと母数が食い違う）。
+    """
+    p = lambda *a: print(*a, file=out)
+    target = [r for r in races if not r["has_box"] and r["race_budget"]]
+    excluded = len(races) - len(target)
+    p(f"\n=== 券種配分の比較（非混戦 {len(target)} レース"
+      f"{f'・混戦/予算不明 {excluded} レースを除外' if excluded else ''}）===")
+    if not target:
+        p("  比較対象なし")
+        return
+    p(f"{'配分 (馬連,ワイド,3連複)':>26} | {'賭金':>10} | {'払戻':>10} | {'実現ROI':>8} | {'1R平均':>8}")
+    p("-" * 76)
+
+    def line(label, stake, ret):
+        roi = f"{ret / stake * 100:.1f}%" if stake > 0 else "—"
+        avg = f"¥{stake / len(target):,.0f}" if target else "—"
+        p(f"{label:>26} | ¥{stake:>9,.0f} | ¥{ret:>9,.0f} | {roi:>8} | {avg:>8}")
+
+    # 記録どおり（＝実際に張られた金額）。
+    line("記録どおり", sum(r["stake"] for r in target), sum(r["ret"] for r in target))
+    for alloc in allocs:
+        stake = ret = 0.0
+        for r in target:
+            s, t, _ = realloc_and_settle(r["legs"], r["payouts"], alloc, r["race_budget"])
+            stake += s
+            ret += t
+        line(",".join(str(w) for w in alloc), stake, ret)
+    p("  ※ 脚（どの組番を買うか）は記録どおりで固定し、金額だけ入れ替えている。")
+
+
 def report_axis_stability(by_race, out=sys.stdout):
     from nk import SLUG2JP
     p = lambda *a: print(*a, file=out)
@@ -531,6 +634,9 @@ def build_races(by_race, payouts, odds, use_ever=False):
             "konsen": row["konsen"], "race_budget": (row["slip"] or {}).get("race_budget"),
             "market_fair": market_fair_roi(legs, nearest_odds(odds.get(rid, {}),
                                                              row["captured_at"])),
+            # 配分の入れ替え（#600）用。脚と払戻をそのまま持ち、金額だけ再計算できるようにする。
+            "legs": legs, "payouts": pay,
+            "has_box": any(leg.get("method") == "box" for leg in legs),
         })
     return races, dict(skipped)
 
@@ -547,6 +653,9 @@ def main():
     ap.add_argument("--ever", action="store_true",
                     help="発走前最終スイープではなく全スイープ中の最大 ROI で評価する")
     ap.add_argument("--dump-races", help="レース単位の評価を TSV で書き出す")
+    ap.add_argument("--compare-alloc", action="append", default=[], metavar="馬連,ワイド,3連複",
+                    help="券種配分を入れ替えたときの実現ROIを比較する（脚は記録どおり・金額だけ再計算）。"
+                         "複数回指定可。例: --compare-alloc 1500,1500,2000 --compare-alloc 1,1,1")
     args = ap.parse_args()
 
     payouts = load_payouts_dir(args.payouts_dir)
@@ -563,6 +672,8 @@ def main():
         return 1
 
     report(races, [float(x) for x in args.buckets.split(",") if x.strip()])
+    if args.compare_alloc:
+        report_alloc_comparison(races, [parse_alloc(a) for a in args.compare_alloc])
     report_axis_stability(by_race)
 
     if args.dump_races:

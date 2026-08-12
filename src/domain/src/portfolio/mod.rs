@@ -72,6 +72,16 @@ pub struct PortfolioConfig {
     pub partners: usize,
     /// 予算配分の相対重み `(連系ペア, ワイド, 三連複)`。連系ペアは常に馬連
     /// （#271 で馬単置換 `pick_pair_leg` を撤去・ADR 0043 棄却）。
+    ///
+    /// 既定は **円建て**の `(1500, 1500, 2000)`（#600 / ADR 0080）。`race_budget` にスケールする
+    /// 相対重みなので、¥5,000 なら CLAUDE.md「予算・配分（既定）」の
+    /// 馬連 ¥1,500 / ワイド ¥1,500 / 3連複 ¥2,000 にそのまま一致する。[`KONSEN_ALLOC`] も同じ
+    /// 円建て表現で揃えてある。
+    ///
+    /// **旧既定 `(1, 1, 1)`（ADR 0019）では ¥5,000 を張り切れなかった**——`5000/3=1666→1600`
+    /// と `1600/10=160→100`（3 連複 10 点）の 2 段 floor で、実賭金が ¥4,000 に留まっていた
+    /// （#600 実測: 839 スイープ中 835 本が ¥4,000）。相手 5 頭・3 券種・100 円単位で ¥5,000 を
+    /// 割り切れる配分は 3:3:4 だけなので、doc 側に寄せると端数の取りこぼしも同時に消える。
     pub alloc: (u32, u32, u32),
     /// 軸ロック（#388）: predict 記録済みの本命◎を軸として固定する。`Some` かつその馬が
     /// 出走確率に存在するとき、`win_prob` 首位ではなくこの馬を軸に据える（相手は軸を除く
@@ -97,13 +107,13 @@ pub struct PortfolioConfig {
 }
 
 impl Default for PortfolioConfig {
-    /// 既定。相手 5 頭・馬連:ワイド:三連複 = 1:1:1・軸ロックなし（`win_prob` 首位を軸）。
-    /// 既定値は PR1 の戦略評価ハーネス（`scripts/predict-check/strategy_eval.py`）で
-    /// 後追い検証・調整する（相手頭数・配分の感度は同ハーネスで出せる）。
+    /// 既定。相手 5 頭・馬連:ワイド:三連複 = **1500:1500:2000**（円建て・ADR 0080）・
+    /// 軸ロックなし（`win_prob` 首位を軸）。¥5,000 で CLAUDE.md「予算・配分（既定）」に一致する。
+    /// 相手頭数・配分の感度は `scripts/predict-check/strategy_eval.py` で後追い検証できる。
     fn default() -> Self {
         Self {
             partners: 5,
-            alloc: (1, 1, 1),
+            alloc: (1500, 1500, 2000),
             forced_axis: None,
             forced_partners: None,
             forced_konsen_band: None,
@@ -1116,13 +1126,123 @@ mod tests {
 
     #[test]
     fn default_config_stays_within_budget() {
-        // 既定 PortfolioConfig（相手 5・配分 1:1:1）でも 100 円単位・予算以内に収まる。
+        // 既定 PortfolioConfig でも 100 円単位・予算以内に収まる。
+        // 5 頭立て＝相手 4 頭なので端数が出る盤面（¥5,000 ちょうどにはならない）。
+        // 予算を張り切れることの検証は `default_alloc_spends_the_whole_budget` が担う。
         let (probs, o) = sample();
         let pf = build_portfolio(&probs, &probs, &o, 5000, &PortfolioConfig::default());
         assert!(pf.bets.iter().all(|b| b.stake % 100 == 0 && b.stake > 0));
         assert!(pf.total_stake <= 5000, "stake {} <= 5000", pf.total_stake);
         // 相手 4 頭（馬5まで）→ 馬連4・ワイド4・三連複 C(4,2)=6。
         assert_eq!(pf.partners.len(), 4);
+    }
+
+    /// 6 頭立て（相手 5 頭）・全券種オッズあり。既定構成での予算執行を測るための盤面。
+    fn full_field_sample() -> (Vec<HorseProbability>, RaceOdds) {
+        let probs = vec![
+            prob(1, 0.35),
+            prob(2, 0.22),
+            prob(3, 0.16),
+            prob(4, 0.12),
+            prob(5, 0.09),
+            prob(6, 0.06),
+        ];
+        let mut o = RaceOdds::empty(RaceId::try_from("202506040101".to_string()).unwrap());
+        for p in 2..=6 {
+            o.quinella
+                .insert(Pair::try_from((horse(1), horse(p))).unwrap(), odds(8.0));
+            o.wide.insert(
+                Pair::try_from((horse(1), horse(p))).unwrap(),
+                PlaceOdds::try_from((odds(2.0), odds(3.0))).unwrap(),
+            );
+        }
+        for i in 2..=6 {
+            for j in (i + 1)..=6 {
+                o.trio.insert(
+                    Triple::try_from((horse(1), horse(i), horse(j))).unwrap(),
+                    odds(40.0),
+                );
+            }
+        }
+        (probs, o)
+    }
+
+    /// #600: 既定配分は **¥5,000 を張り切る**。
+    ///
+    /// 旧既定 `(1,1,1)` では `5000/3=1666→1600` と `1600/10=160→100`（3 連複 10 点）の
+    /// 2 段 floor で実賭金が ¥4,000 に留まっていた（実測 839 スイープ中 835 本）。
+    /// **既存テストは `<= 5000` の構造 assert しか持たず、この 20% の取りこぼしを検出できなかった**
+    /// ——だから等号で固定する。
+    #[test]
+    fn default_alloc_spends_the_whole_budget() {
+        let (probs, o) = full_field_sample();
+        let pf = build_portfolio(&probs, &probs, &o, 5000, &PortfolioConfig::default());
+        assert_eq!(pf.partners.len(), 5, "相手 5 頭（既定 partners）");
+        assert!(!pf.konsen, "この盤面は非混戦（既定 alloc の検証が目的）");
+        assert_eq!(
+            pf.total_stake, 5000,
+            "既定配分は予算ちょうど張る（旧 (1,1,1) は 4000 だった）"
+        );
+        assert!(pf.bets.iter().all(|b| b.stake % 100 == 0 && b.stake > 0));
+
+        // 券種ごとの合計が CLAUDE.md「予算・配分（既定）」と一致すること。
+        let sum = |f: &dyn Fn(&BetCombination) -> bool| -> u64 {
+            pf.bets
+                .iter()
+                .filter(|b| f(&b.combination))
+                .map(|b| b.stake)
+                .sum()
+        };
+        assert_eq!(
+            sum(&|c| matches!(c, BetCombination::Quinella(_))),
+            1500,
+            "馬連 ¥1,500"
+        );
+        assert_eq!(
+            sum(&|c| matches!(c, BetCombination::Wide(_))),
+            1500,
+            "ワイド ¥1,500"
+        );
+        assert_eq!(
+            sum(&|c| matches!(c, BetCombination::Trio(_))),
+            2000,
+            "3連複 ¥2,000"
+        );
+    }
+
+    /// 混戦時は `config.alloc` を使わず [`KONSEN_ALLOC`] を用いるので、
+    /// **既定 alloc を変えても混戦の配分は 1 円も動かない**（#600 の回帰）。
+    /// 旧既定 `(1,1,1)` と新既定 `(1500,1500,2000)` の結果を直接突き合わせて示す。
+    #[test]
+    fn konsen_alloc_is_unaffected_by_default_alloc_change() {
+        let (probs, o) = konsen_sample();
+        let new_default = build_portfolio(&probs, &probs, &o, 5000, &PortfolioConfig::default());
+        let old_default = build_portfolio(
+            &probs,
+            &probs,
+            &o,
+            5000,
+            &PortfolioConfig {
+                alloc: (1, 1, 1), // ADR 0019 の旧既定
+                ..PortfolioConfig::default()
+            },
+        );
+        assert!(new_default.konsen && old_default.konsen);
+        assert_eq!(
+            new_default.total_stake, old_default.total_stake,
+            "混戦は config.alloc を見ない"
+        );
+        let stakes = |pf: &Portfolio| -> Vec<(String, u64)> {
+            pf.bets
+                .iter()
+                .map(|b| (format!("{:?}", b.combination), b.stake))
+                .collect()
+        };
+        assert_eq!(
+            stakes(&new_default),
+            stakes(&old_default),
+            "脚ごとの金額まで一致する"
+        );
     }
 
     /// 混戦サンプル: ◎=馬1、0.70×0.30=0.21 以上が 4 頭（馬1..4）→ konsen。馬5(0.05) は band 外。

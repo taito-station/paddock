@@ -216,6 +216,79 @@ def test_load_odds_uses_wide_band_midpoint():
     assert approx(tbl["quinella"]["1-2"], 200.9)
 
 
+# --- 券種配分の入れ替え（#600 / ADR 0080） ------------------------------------
+
+def test_distribute_mirrors_rust_two_stage_floor():
+    # 券種内は 100 円単位の均等配分。5 点 ¥1,500 → 300 円ずつ。
+    assert G.distribute(1500, 5) == [300] * 5
+    # 10 点 ¥1,600 → 160 → 100 円ずつ（旧既定 1:1:1 で 3 連複が ¥1,000 に潰れていた経路）。
+    assert G.distribute(1600, 10) == [100] * 10
+    # 10 点 ¥2,000 → 200 円ずつ（新既定なら潰れない）。
+    assert G.distribute(2000, 10) == [200] * 10
+    # 全点に ¥100 すら置けないときは賄える点数ぶんだけ置き、残りは ¥0＝買わない。
+    assert G.distribute(300, 5) == [100, 100, 100, 0, 0]
+    # 予算 100 円未満・点数ゼロは全部 ¥0。
+    assert G.distribute(50, 3) == [0, 0, 0]
+    assert G.distribute(1000, 0) == []
+
+
+def _legs_5partners(axis=1, partners=(2, 3, 4, 5, 6)):
+    """馬連 5・ワイド 5・3連複 C(5,2)=10 の標準構成（相手 5 頭・非混戦）。"""
+    legs = []
+    for p in partners:
+        for bt in ("quinella", "wide"):
+            legs.append({"bet_type": bt, "method": "nagashi", "combo": [axis, p], "amount": 0})
+    for i in range(len(partners)):
+        for j in range(i + 1, len(partners)):
+            legs.append({"bet_type": "trio", "method": "nagashi",
+                         "combo": [axis, partners[i], partners[j]], "amount": 0})
+    return legs
+
+
+def test_realloc_reproduces_recorded_amounts_for_old_default():
+    """旧既定 (1,1,1) で再配分すると **記録どおりの ¥4,000** になる＝鏡映が正しい担保。
+
+    実データでも「記録どおり」行と「1,1,1」行が完全一致することを確認済み。
+    ここが合わないと配分比較そのものが信用できない。
+    """
+    legs = _legs_5partners()
+    stake, ret, per_type = G.realloc_and_settle(legs, {}, (1, 1, 1), 5000)
+    assert stake == 4000, stake
+    assert per_type["quinella"][0] == 1500
+    assert per_type["wide"][0] == 1500
+    assert per_type["trio"][0] == 1000, "2 段 floor で 3 連複が ¥1,000 に潰れる（#600 の欠陥）"
+    assert ret == 0.0, "払戻が空なら回収ゼロ"
+
+
+def test_realloc_documented_ratio_spends_the_whole_budget():
+    legs = _legs_5partners()
+    stake, _, per_type = G.realloc_and_settle(legs, {}, (1500, 1500, 2000), 5000)
+    assert stake == 5000, "3:3:4 は ¥5,000 を割り切れる唯一の配分"
+    assert per_type["quinella"][0] == 1500
+    assert per_type["wide"][0] == 1500
+    assert per_type["trio"][0] == 2000
+
+
+def test_realloc_settles_hits_with_payouts():
+    # 馬連 1-2 が的中（¥1,240/100円）。3:3:4 なら馬連 5 点 × ¥300。
+    legs = _legs_5partners()
+    payouts = {"quinella": {"1-2": 1240}}
+    stake, ret, _ = G.realloc_and_settle(legs, payouts, (1500, 1500, 2000), 5000)
+    assert stake == 5000
+    assert approx(ret, 300 / 100 * 1240)
+
+
+def test_parse_alloc_validates_shape_and_values():
+    assert G.parse_alloc("1500,1500,2000") == (1500, 1500, 2000)
+    assert G.parse_alloc(" 1 , 1 , 1 ") == (1, 1, 1)
+    for bad in ("1,1", "1,1,1,1", "a,1,1", "-1,1,1", "0,0,0"):
+        try:
+            G.parse_alloc(bad)
+        except ValueError:
+            continue
+        raise AssertionError(f"不正な alloc を通してしまった: {bad!r}")
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for t in tests:
