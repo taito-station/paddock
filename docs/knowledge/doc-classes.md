@@ -4,7 +4,7 @@ kind: knowledge
 sources:
   - docs/original-docs/0073-adr-into-original-docs-and-doc-classes.md
 distilled_from_sha: "6b74f57"
-updated: "2026-08-10"
+updated: "2026-08-12"
 ---
 
 # 文書クラス D01〜D24 レジストリ
@@ -59,7 +59,7 @@ scripts/mdq search --q "EV ゲート" --tags D23 --top-k 5   # クラスで絞�
 | D04 | 業務プロセス仕様書 | active | 1 |
 | D05 | ユースケース・シナリオカタログ | active | 0 |
 | D06 | 業務ルール・判定表仕様書 | active | 1 |
-| D07 | 用語集・ドメインモデル定義書 | active | 0 |
+| D07 | 用語集・ドメインモデル定義書 | active | 1 |
 | D08 | データモデル・SoR/SoT・データ品質仕様書 | active | 6 |
 | D09 | システムコンテキスト・責任境界・再利用方針書 | active | 2 |
 | D10 | API / Event / File 連携契約パック | active | 11 |
@@ -98,7 +98,7 @@ blended 確率、EV は純モデル確率 × 市場オッズ）を、文書ク�
 ## N/A 宣言（D03 / D12 / D13 / D14 / D20）
 
 適用外を**明示的に閉じる**。「まだ書いていない」と「そもそも要らない」を区別しないと、充足ギャップの
-警告が恒久的なノイズになり、本当の欠落（D07）が埋もれる。
+警告が恒久的なノイズになり、本当の欠落が埋もれる（D07 用語集がその実例で、#598 で解消した）。
 
 <!-- doc-classes-na:begin -->
 | クラス | N/A の理由 | 再開条件 |
@@ -119,12 +119,19 @@ D 体系を採用する最大の実利は、**書くべきなのに無い文書�
 
 | クラス | 現状 | 対応 |
 |---|---|---|
-| **D07** 用語集・ドメインモデル | 用語定義が各仕様書に散在している（`win_prob` / `place_prob` / `raw_score` / `blended` / `軸ロック` 等を `probability-estimation.md`・`backtest.md`・`ev-kelly-bet-selection.md` がそれぞれ独自に定義） | 横断的な用語集を 1 本作る |
 | **D05** ユースケース | `README.md` の「何ができるか」が最も近いが、UC カタログの形では無い | 優先度低 |
 | **D16** 移行・導入 | ADR 0070（DB マイグレーション運用）が近いが移行計画書ではない | 優先度低 |
 | **D18** Prompt ガバナンス | 実質は [`docs/knowledge/README.md`](README.md)（3 層モデル・SoT の優先順位）と `CLAUDE.md` が担っている | 名前だけ空。当面このままでよい |
 
 ## 体系側の既知の穴
+
+**D07 は用語集だけで、ドメインモデル定義書が無い。** [glossary.md](glossary.md)（#598）が満たしたのは
+クラス名の前半（用語集）で、後半——**エンティティ相互の関係を横断で示した文書**——は D07 にも D08 にも
+無い（個別の構造は各仕様書が持つ。例: `race_id` の 12 桁構成は
+[netkeiba-datasource.md](../specifications/netkeiba-datasource.md) の「race_id 構築規則」）。**「現行 1」で充足ギャップの warning は消えるので、
+機械検査はこの穴を報せない**。埋めるかどうかは未決（現状 6 本の D08 文書が個別のデータ仕様を
+持っており、横断のモデル図が要る局面がまだ出ていない）。用語集そのものの収録範囲にも未着手の領域がある（[glossary.md](glossary.md)
+「収録と参照の基準」が正）。
 
 **D23（買い方・資金配分ルール）の一次定義がリポジトリの `docs/` 配下に無い。** 現行ルールの本体は
 プロジェクトルートの `CLAUDE.md`「買い方ルール」節にあり、`docs/` 側の D23 文書のうち
@@ -152,6 +159,7 @@ D01（[product-goals.md](product-goals.md)）を作った時点では**移して
 | knowledge/analyze-search-and-state.md | [D11, D10] |
 | knowledge/app-bootstrap.md | [D19, D15] |
 | knowledge/ci-pipeline.md | [D21, D19, D17] |
+| knowledge/glossary.md | [D07] |
 | knowledge/live-freshness-calibration.md | [D11, D10] |
 | knowledge/monitor-loop-sleep-resilience.md | [D15, D19] |
 | knowledge/product-goals.md | [D01] |

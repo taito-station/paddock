@@ -18,7 +18,7 @@ sources:
   - docs/original-docs/0064-live-ev-buy-view.md
   - docs/original-docs/0065-wide-partners-top5-alignment.md
 distilled_from_sha: "faa62d6"
-updated: "2026-08-11"
+updated: "2026-08-12"
 ---
 
 # 期待値計算・買い目選択・Kelly 配分ロジック仕様書
@@ -52,6 +52,8 @@ Kelly 基準で賭け額を決定する。
 | `ev_threshold` | EV 閾値 | これ以上の EV を持つ買い目のみ推奨候補にする（デフォルト 1.0） |
 | `trifecta_ev_threshold` | 三連単 EV 閾値 | 三連単専用のより高い閾値（デフォルト 2.0） |
 | `kelly_cap` | Kelly 上限 | kelly_fraction の最大値（デフォルト 0.25 = 25%） |
+
+> 横断の用語索引は [用語集](../knowledge/glossary.md)（D07）。定義の正本は本書で、用語集はここを指す。
 
 ---
 

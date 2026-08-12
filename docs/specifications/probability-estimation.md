@@ -22,7 +22,7 @@ sources:
   - docs/original-docs/0057-impute-missing-factors-field-mean.md
   - docs/original-docs/0061-running-style-feature-rejected.md
 distilled_from_sha: "b0c270b"
-updated: "2026-08-11"
+updated: "2026-08-12"
 ---
 
 # 着順確率推定モデル仕様書
@@ -50,6 +50,8 @@ Issue #11 対応。DB に蓄積された過去成績をもとに、出走馬ご�
 | `win_prob` | 勝率 | 1 着以内確率 |
 | `place_prob` | 連対率 | 2 着以内確率（日本競馬の「連対」＝top-2） |
 | `show_prob` | 複勝率 | 3 着以内確率（日本競馬の「複勝」＝top-3） |
+
+> 横断の用語索引は [用語集](../knowledge/glossary.md)（D07）。定義の正本は本書で、用語集はここを指す。
 
 ---
 
