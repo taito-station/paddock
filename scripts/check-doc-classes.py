@@ -66,11 +66,9 @@ TARGET_DIRS = ("docs/knowledge", "docs/specifications")
 #                  除外済み。規約の正本を唯一の無検査域にしない・#604）。
 #   doc-classes.md: クラス定義そのもの。doc_class は持たない（sources/stale だけ検査する）。
 EXCLUDED_FROM_DOC_CLASS = {"README.md", "doc-classes.md"}
+# frontmatter 系の検査からは外すが、**本文リンクだけは必ず見る**（除外した文書が
+# 唯一の無検査域にならないように、この集合をそのままリンク検査へ回す）。
 EXCLUDED_ENTIRELY = {"README.md"}
-# 全検査からは外すが、**本文リンクだけは見る**文書（規約の正本を唯一の無検査域にしない）。
-# EXCLUDED_ENTIRELY と別に持つ: 将来ノイズ回避で除外を増やしたときに、意図せずリンク検査へ
-# 引き込まれたり逆に外れたりしないため。
-LINK_CHECK_ONLY = {"README.md"}
 # TARGET_DIRS の外だが**リンクだけは見る**ファイル。CLAUDE.md は毎セッション読まれる運用指示で、
 # 用語集や仕様書への相対リンクを多数持つのに、ディレクトリ基準の走査からは外れていた。
 EXTRA_LINK_TARGETS = ("CLAUDE.md",)
@@ -436,7 +434,12 @@ def unfenced_lines(text: str) -> "tuple[list[tuple[int, str]], bool]":
 
 
 def check_body_links(
-    rel: str, root: Path, text: str, errors: list[str], link_seen: "set[str] | None" = None
+    rel: str,
+    root: Path,
+    text: str,
+    errors: list[str],
+    link_seen: "set[str] | None" = None,
+    report_unclosed: bool = False,
 ) -> None:
     """frontmatter を除いた本文のリンクを、行番号付きで検査する。
 
@@ -448,7 +451,12 @@ def check_body_links(
     fm, body = split_frontmatter(text)
     # frontmatter のぶんだけ行番号がずれるので足し戻す（`---` 2 行 + 中身）。
     offset = 0 if fm is None else len(fm.splitlines()) + 2
-    lines = unfenced_lines(body)[0]
+    lines, unclosed = unfenced_lines(body)
+    if unclosed and report_unclosed:
+        # 走査対象の文書は parse_req_blocks が同じ error を出すので二重に出さない。
+        # README / CLAUDE.md はこの経路しか通らず、閉じ忘れ以降のリンクが丸ごと
+        # 無検査のまま exit 0 になる（本 PR が潰している silent-green と同型）。
+        errors.append(f"{rel}: コードフェンスが閉じられていない（以降のリンクが無検査になる）")
     if not lines:
         return
     joined = "\n".join(line for _, line in lines)
@@ -489,6 +497,9 @@ def case_exact(path: Path, root: Path) -> bool:
     return True
 
 
+LINK_COUNT = 0
+
+
 def check_links(
     rel: str,
     root: Path,
@@ -506,8 +517,13 @@ def check_links(
     リンク切れが 2 件の error になる）。`label_at` を渡すと、マッチ位置から
     ラベル（本文なら行番号入り）を作る。
     """
-    for matched in RE_MD_LINK.finditer(RE_INLINE_CODE.sub(" ", fragment)):
+    # **長さを保存して置換する**。`sub(" ", ...)` だと除去のぶんだけ後続の位置が前へずれ、
+    # `label_at` が引く行番号が過少になる（実測で 223 本中 210 本が誤り）。
+    masked = RE_INLINE_CODE.sub(lambda m: " " * len(m.group(0)), fragment)
+    global LINK_COUNT
+    for matched in RE_MD_LINK.finditer(masked):
         target = matched.group(1)
+        LINK_COUNT += 1
         here = label_at(matched.start()) if label_at else label
         # スキーム付き URI（http/https/mailto に限らず ftp・tel 等）と protocol-relative、
         # 同一文書内アンカーは対象外。ホワイトリストにすると新しいスキームを足すたびに
@@ -725,18 +741,21 @@ def main(argv: list[str]) -> int:
     # **リンクだけは見る**。規約の正本が唯一無検査という穴を残さない——見本のリンクは
     # コードフェンスの中にあるので除外済み。
     for d in TARGET_DIRS:
-        # 走査対象に残っている文書は本体側でリンク検査済み。ここで重ねると同じ
-        # 壊れリンクが 2 件の error になるので、全検査除外のものだけを回す。
-        for name in sorted(LINK_CHECK_ONLY & EXCLUDED_ENTIRELY):
-            readme = root / d / name
-            if readme.is_file():
-                rel = readme.relative_to(root).as_posix()
-                check_body_links(rel, root, readme.read_text(encoding="utf-8"), errors, set())
+        for name in sorted(EXCLUDED_ENTIRELY):
+            excluded = root / d / name
+            if excluded.is_file():
+                rel = excluded.relative_to(root).as_posix()
+                check_body_links(
+                    rel, root, excluded.read_text(encoding="utf-8"), errors, set(),
+                    report_unclosed=True,
+                )
 
     for extra in EXTRA_LINK_TARGETS:
         path = root / extra
         if path.is_file():
-            check_body_links(extra, root, path.read_text(encoding="utf-8"), errors, set())
+            check_body_links(
+                extra, root, path.read_text(encoding="utf-8"), errors, set(), report_unclosed=True
+            )
 
     actual_count: dict[str, int] = {cls: 0 for cls in declared}
     # REQ-ID → 初出パス。一意性はクラス内グローバル（文書をまたいで 1 つ）なので台帳は全体で 1 つ。
@@ -749,6 +768,9 @@ def main(argv: list[str]) -> int:
         scanned_rels.add(rel)
         text = path.read_text(encoding="utf-8")
         fm = parse_frontmatter(text)
+        # frontmatter が無くてもリンクだけは見る（下の continue で丸ごと飛ばさない）。
+        link_seen: set[str] = set()
+        check_body_links(rel, root, text, errors, link_seen)
         if not fm:
             errors.append(f"{rel}: frontmatter が無い")
             continue
@@ -775,18 +797,11 @@ def main(argv: list[str]) -> int:
                     )
                 doc_class_by_rel[rel.removeprefix("docs/")] = classes
 
-        # (8) REQ 表 / (9) 本文リンク。同じリンク先を二重に報告しないよう台帳を共有する。
-        link_seen: set[str] = set()
+        # (8) REQ 表。リンクの台帳は上の本文検査と共有していて、本文で報告済みの
+        # リンク先は REQ 側で二重に報告しない（REQ 表の行は本文にも含まれるため）。
         check_req_blocks(
             rel, text, fm.get("doc_class"), declared, req_seen, root, errors, link_seen
         )
-
-        # (9) 本文の相対リンク。REQ 表の外は無検査だったので、索引や相互参照で
-        # できた文書（用語集など）は指し先が消えても CI が緑のままだった（#604）。
-        # 未閉じフェンスの error は parse_req_blocks が出すのでここでは出さない。
-        # **行単位で回して行番号を載せる**（40 本超の相互参照を持つ文書で 1 件出たとき、
-        # 行番号が無いと捜索コストがそのまま運用コストになる）。
-        check_body_links(rel, root, text, errors, link_seen)
 
         # (4) sources の実在
         sources = fm.get("sources", [])
@@ -892,7 +907,8 @@ def main(argv: list[str]) -> int:
         return 1
 
     print(
-        f"✓ 文書クラス・sources 整合を確認（{len(targets)} 本 / 警告 {len(warnings)} 件）"
+        f"✓ 文書クラス・sources 整合を確認"
+        f"（{len(targets)} 本 / リンク {LINK_COUNT} 本 / 警告 {len(warnings)} 件）"
     )
     return 0
 

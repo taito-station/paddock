@@ -136,9 +136,15 @@ def bump(path: Path, text: str, matched: "re.Match[str]", sha: str) -> "tuple[st
     old = matched.group(2)
     if old == sha:
         return None
+    # 値が空（`distilled_from_sha:`）の場合、group 1 はコロンで終わるので空白を補う。
+    # 補わないと `distilled_from_sha:"abc"` という YAML として壊れた行を書く
+    # （checker の RE_SCALAR は許容するので無言で通ってしまう）。
+    head = matched.group(1)
+    if not head.endswith((" ", "\t")):
+        head += " "
     updated = (
         text[: matched.start()]
-        + f'{matched.group(1)}"{sha}"{matched.group(3)}'
+        + f'{head}"{sha}"{matched.group(3)}'
         + text[matched.end() :]
     )
     with path.open("w", encoding="utf-8", newline="") as f:

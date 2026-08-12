@@ -1781,6 +1781,56 @@ def test_claude_md_body_link_is_checked() -> None:
         shutil.rmtree(repo)
 
 
+def test_line_number_is_correct_after_inline_code() -> None:
+    """インラインコードの手前があると位置がずれる（長さ保存で置換していないと過少になる）。"""
+    repo = new_repo()
+    try:
+        baseline(repo)
+        append_raw(
+            repo, "docs/knowledge/a.md",
+            "\n`とても長いインラインコードの行`\n\n`もう一つ長いインラインコード`\n\n"
+            "[壊れ](../original-docs/9999-nope.md)\n",
+        )
+        code, out = check(repo)
+        assert code == 1, out
+        lineno = _reported_line(out)
+        lines = (repo / "docs/knowledge/a.md").read_text(encoding="utf-8").splitlines()
+        assert "9999-nope.md" in lines[lineno - 1], f"{lineno} 行目は {lines[lineno - 1]!r}"
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_unclosed_fence_in_readme_is_error() -> None:
+    """README / CLAUDE.md は REQ 走査を通らないので、閉じ忘れを自前で報告する必要がある。"""
+    repo = new_repo()
+    try:
+        baseline(repo)
+        (repo / "docs/knowledge/README.md").write_text(
+            "# 規約\n\n```md\n[見本](../original-docs/0NNN-....md)\n", encoding="utf-8"
+        )
+        code, out = check(repo)
+        assert code == 1, out
+        assert "コードフェンスが閉じられていない" in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_document_without_frontmatter_still_gets_link_check() -> None:
+    """frontmatter が無い文書でも本文リンクは見る（continue で丸ごと飛ばさない）。"""
+    repo = new_repo()
+    try:
+        baseline(repo)
+        (repo / "docs/knowledge/b.md").write_text(
+            "# b\n\n[壊れ](../original-docs/9999-nope.md)\n", encoding="utf-8"
+        )
+        code, out = check(repo)
+        assert code == 1, out
+        assert "docs/knowledge/b.md: frontmatter が無い" in out, out
+        assert "docs/knowledge/b.md: 本文（" in out and "実在しない" in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
 def main() -> int:
     if not TARGET.is_file():
         print(f"テスト対象が見つからない: {TARGET}", file=sys.stderr)

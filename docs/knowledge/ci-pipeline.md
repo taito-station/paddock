@@ -55,12 +55,12 @@ D21（CI/CD・ビルド・リリース・供給網管理）の充足ギャップ
 同じ扱い）。OS イメージはセキュリティ更新を取り込みたく、digest 固定は陳腐化と手動更新の負担が大きい。
 版ドリフトの実害（mupdf が下限割れ）は上記の assert gate が検知するので、ピンで防ぐ必要が無い。
 
-### stdlib スクリプトは ubuntu-latest 同梱の python3（3.12 系）で動くこと
+### stdlib スクリプトは CI の python3（ubuntu-latest 同梱・版はピンしない）で動くこと
 
-`scripts/*.py`（checker・bump・各回帰テスト）は CI では **ubuntu-latest 同梱の python3** で走る。
-手元の macOS が 3.13 系だと、3.13 で入った API（例: `Path.read_text(newline=...)`）を使っても
-ローカルは緑のまま CI だけが落ちる。**新しい stdlib API を使うときは追加バージョンを確認する**
-（#604 で実際に踏んだ）。
+`scripts/*.py`（checker・bump・各回帰テスト）は CI では **ubuntu-latest 同梱の python3** で走る
+（`setup-python` を使っていないので版はイメージ任せ）。手元の macOS の方が新しいと、新しい版で
+入った API（例: `Path.read_text(newline=...)` は 3.13 以降）を使ってもローカルは緑のまま CI だけが
+落ちる。**新しい stdlib API を使うときは追加バージョンを確認する**（#604 で実際に踏んだ）。
 
 ### `adr` ジョブは回帰テストを本番検査より先に走らせる
 

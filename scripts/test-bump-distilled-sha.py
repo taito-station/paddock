@@ -16,6 +16,7 @@ fixture 生成は `test-check-doc-classes.py` の関数を再利用する（同�
 """
 
 import importlib.util
+import re
 import shutil
 import subprocess
 import sys
@@ -301,6 +302,26 @@ def test_crlf_document_is_bumped_in_place() -> None:
             after = f.read()
         assert f'distilled_from_sha: "{head}"' in after, after[:200]
         assert after.count("\n") == after.count("\r\n") > 0, "改行コードが LF へ正規化された"
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_empty_value_gets_a_space_after_colon() -> None:
+    """値が空の行を bump しても YAML として壊れた `key:"v"` を書かない。"""
+    repo = new_repo()
+    try:
+        baseline(repo)
+        path = repo / "docs/knowledge/a.md"
+        text = path.read_text(encoding="utf-8")
+        path.write_text(
+            re.sub(r'^distilled_from_sha: ".*"$', "distilled_from_sha:", text, count=1, flags=re.M),
+            encoding="utf-8",
+        )
+        code, out = run(repo, "docs/knowledge/a.md")
+        assert code == 0, out
+        after = path.read_text(encoding="utf-8")
+        assert 'distilled_from_sha: "' in after, after[:200]
+        assert 'distilled_from_sha:"' not in after, "コロン直後に空白が無い"
     finally:
         shutil.rmtree(repo)
 
