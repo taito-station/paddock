@@ -88,7 +88,8 @@ updated: "YYYY-MM-DD"    # 内容を実質更新した日（YAML の date 型を
   mdq が frontmatter を検索に使わず `tags` しか見ないため（`scripts/mdq search --tags D23`）。
   二重管理の drift は `scripts/check-doc-classes.py` が防ぐ。
 - **機械検査**: 上記スクリプトが CI（`adr` ジョブ）と pre-push で走る。クラスの整合・`tags` の一致・
-  `sources` の実在・**stale** は **error**（stale は #580 で warning から昇格）。**warning** は
+  `sources` の実在・**stale**・**本文の相対リンクの実在**・**[doc-classes.md](doc-classes.md) の
+  割当索引と実ファイルの突合**は **error**（stale は #580 で warning から昇格。後ろ 2 つは #604）。**warning** は
   充足ギャップと、**判定不能を可視化する 3 経路**（サブディレクトリに置かれた `.md`＝無検査 /
   `sources` の履歴を辿れない / shallow clone で `distilled_from_sha` を解決できない）。
   CI を止めずに通す明示的な逃げ道は `--warn-only` だけ（ただし下記「機械検査できない」
@@ -100,6 +101,10 @@ updated: "YYYY-MM-DD"    # 内容を実質更新した日（YAML の date 型を
   原則は**この知を蒸留した時点のリポジトリ HEAD** を `git rev-parse --short HEAD` で記録する
   （pilot の `probability-estimation.md` もこの方式）。特定の由来ファイル版に紐付けたいときは
   `git log -1 --format=%h -- <path>` を使う。いずれも「いつ時点の知か」を辿れるようにするのが目的。
+  追従は `scripts/bump-distilled-sha.py <file>...`（`--all-stale` で STALE 全件）で 1 コマンドにできる
+  ——**`updated` は触らない**ので、下流の本文が実質変わったかは自分で判断して手で進める。
+  なお**同一コミットに自分の sha は書けない**ので、上流を触った PR は「本文コミット →
+  sha 追従コミット」の 2 コミットになる。
 - **変更履歴**: **git log を正とする**（変更の追跡は履歴で辿る）。内容を実質更新したら `updated` と
   `distilled_from_sha` を更新すれば足りる。本文末尾の `## 変更履歴` セクションは**任意**——
   節目や意図を人間可読に残したいときだけ置く（一括後付けはしない）。既に `## 変更履歴` を持つ 2 本
@@ -164,6 +169,7 @@ updated: "YYYY-MM-DD"    # 内容を実質更新した日（YAML の date 型を
 - 見出し行・区切り行・列数、REQ-ID の形式、ID のクラス部とブロックのクラスの一致
 - ブロックのクラスが定義済みで、かつその文書の `doc_class` に含まれること
 - 番号の重複、`status` の値域、`要件` / `出典` の非空、Confirmed の検証手段、リンク先の実在
+  （リンクの実在検査は #604 で**本文にも**広げた。REQ 表の内外を問わず、相対リンクは実在必須）
 
 一方、**次の 4 つは機械検査できない**ので人手の規律に残る:
 
