@@ -119,7 +119,10 @@ def find_distilled(text: str) -> "list[re.Match[str]]":
 def read_doc(path: Path) -> str:
     # newline="" で改行コードを保つ。既定だと CRLF の文書が丸ごと LF に正規化され、
     # 1 行のはずの差分が全行差分に化ける。
-    return path.read_text(encoding="utf-8", newline="")
+    # **`Path.read_text(newline=...)` は Python 3.13 以降**なので open() を使う
+    # （CI の python3 は 3.12 系。手元 3.13 だけ緑になる非対称を作らない）。
+    with path.open(encoding="utf-8", newline="") as f:
+        return f.read()
 
 
 def bump(path: Path, text: str, matched: "re.Match[str]", sha: str) -> "tuple[str, str] | None":
@@ -136,7 +139,8 @@ def bump(path: Path, text: str, matched: "re.Match[str]", sha: str) -> "tuple[st
         + f'{matched.group(1)}"{sha}"{matched.group(3)}'
         + text[matched.end() :]
     )
-    path.write_text(updated, encoding="utf-8", newline="")
+    with path.open("w", encoding="utf-8", newline="") as f:
+        f.write(updated)
     return old, sha
 
 
