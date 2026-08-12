@@ -30,7 +30,7 @@ sources:
   - docs/original-docs/0075-unsupported-race-skip-exit-zero.md
   - docs/original-docs/0076-roi-gate-uncalibrated-under-ev-layer-separation.md
   - docs/original-docs/0077-glossary-index-and-sources-scope.md
-distilled_from_sha: "9f0532c"
+distilled_from_sha: "059625e"
 updated: "2026-08-12"
 ---
 
