@@ -20,7 +20,7 @@ paddock の文書は HVE（dahatake/HypervelocityEngineering, MIT）の蒸留モ
   knowledge / specifications が `sources` で参照している（knowledge は 10 本）。ただし**粒度は一様でない**
   ので、決定の細部（却下案・数値の前提）が要るときは **ADR 原本（`docs/original-docs/0NNN-*.md`）も読む**。
   stale の機械検査は **error**（未解消 6 件を #580 で消化して warning から昇格）。`sources` に挙げた
-  ファイルを内容ごと変更したら、参照元の **`distilled_from_sha` を同じ PR で追従させる**（追従漏れは
+  ファイルを内容ごと変更したら、参照元の **`distilled_from_sha` を同じ PR で追従させる**（`scripts/bump-distilled-sha.py --all-stale` で一括。`updated` は触らないので実質更新の有無は自分で判断する。追従漏れは
   CI が落とす）。`updated` は**下流の本文が実質変わったときだけ**進める（機械検査の対象外）。
 - **用語で迷ったら [docs/knowledge/glossary.md](docs/knowledge/glossary.md)（D07）**。`win_prob` の
   スケール・`blended` の α・`軸ロック` / `混戦` / `ながし` などの**定義の正本がどこにあるか**を引ける
