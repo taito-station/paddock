@@ -29,9 +29,9 @@ sources:
   - docs/original-docs/0064-live-ev-buy-view.md
   - docs/original-docs/0075-unsupported-race-skip-exit-zero.md
   - docs/original-docs/0076-roi-gate-uncalibrated-under-ev-layer-separation.md
-  - docs/original-docs/0079-roi-gate-display-kept-with-unreachable-note.md
   - docs/original-docs/0077-glossary-index-and-sources-scope.md
-distilled_from_sha: "afa1591"
+  - docs/original-docs/0079-roi-gate-display-kept-with-unreachable-note.md
+distilled_from_sha: "3574b38"
 updated: "2026-08-12"
 ---
 
