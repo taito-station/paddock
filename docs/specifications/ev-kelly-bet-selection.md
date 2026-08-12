@@ -53,7 +53,7 @@ Kelly 基準で賭け額を決定する。
 | `trifecta_ev_threshold` | 三連単 EV 閾値 | 三連単専用のより高い閾値（デフォルト 2.0） |
 | `kelly_cap` | Kelly 上限 | kelly_fraction の最大値（デフォルト 0.25 = 25%） |
 
-> 横断の用語索引は [用語集](../knowledge/glossary.md)（D07）。定義の正本は本節で、用語集はここを指す。
+> 横断の用語索引は [用語集](../knowledge/glossary.md)（D07）。定義の正本は本書で、用語集はここを指す。
 
 ---
 
