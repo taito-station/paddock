@@ -18,7 +18,8 @@ sources:
   - docs/original-docs/0064-live-ev-buy-view.md
   - docs/original-docs/0065-wide-partners-top5-alignment.md
   - docs/original-docs/0078-pin-bet-selection-across-sweeps.md
-distilled_from_sha: "3ad8f2f"
+  - docs/original-docs/0080-default-allocation-yen-denominated.md
+distilled_from_sha: "e89d727"
 updated: "2026-08-12"
 ---
 

@@ -19,8 +19,9 @@ sources:
   - docs/original-docs/0054-kelly-staking-rejected.md
   - docs/original-docs/0065-wide-partners-top5-alignment.md
   - docs/original-docs/0076-roi-gate-uncalibrated-under-ev-layer-separation.md
+  - docs/original-docs/0080-default-allocation-yen-denominated.md
   - docs/original-docs/571-roi-gate-calibration.md
-distilled_from_sha: "9e83e33"
+distilled_from_sha: "e89d727"
 updated: "2026-08-12"
 ---
 
