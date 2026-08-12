@@ -17,7 +17,9 @@ paddock の文書は HVE（dahatake/HypervelocityEngineering, MIT）の蒸留モ
   代わりに、`sources` の更新に蒸留が追従しているかは機械検査で担保する（人手の規律に委ねない）。
   **写しは一巡済み（#588・ADR 0074 自身を除く）**: ADR 75 本のうち棄却 24 本は
   [docs/knowledge/product-goals.md](docs/knowledge/product-goals.md) が索引し、採用側はいずれかの
-  knowledge / specifications が `sources` で参照している（knowledge は 10 本）。ただし**粒度は一様でない**
+  knowledge / specifications が `sources` で参照している（knowledge は 10 本。うち
+  [docs/knowledge/glossary.md](docs/knowledge/glossary.md) は決定の写しではなく**用語の索引**で、
+  `win_prob` / `raw_score` / `blended` / `軸ロック` 等の定義の正本がどこかを引ける）。ただし**粒度は一様でない**
   ので、決定の細部（却下案・数値の前提）が要るときは **ADR 原本（`docs/original-docs/0NNN-*.md`）も読む**。
   stale の機械検査は **error**（未解消 6 件を #580 で消化して warning から昇格）。`sources` に挙げた
   ファイルを内容ごと変更したら、参照元の **`distilled_from_sha` を同じ PR で追従させる**（追従漏れは
