@@ -15,6 +15,7 @@
   scripts/test-check-doc-classes.py
 """
 
+import re
 import shutil
 import subprocess
 import sys
@@ -1310,7 +1311,7 @@ def test_body_broken_link_is_error() -> None:
         append_raw(repo, "docs/knowledge/a.md", "\n[出典](../original-docs/9999-nope.md)\n")
         code, out = check(repo)
         assert code == 1, out
-        assert "のリンク先が実在しない" in out, out
+        assert "本文（" in out and "リンク先が実在しない" in out, out
     finally:
         shutil.rmtree(repo)
 
@@ -1345,7 +1346,7 @@ def test_body_absolute_link_is_error() -> None:
         append_raw(repo, "docs/knowledge/a.md", "\n[外](/etc/hosts)\n")
         code, out = check(repo)
         assert code == 1, out
-        assert "リンクは文書からの相対パスで書く" in out, out
+        assert "本文（" in out and "リンクは文書からの相対パスで書く" in out, out
     finally:
         shutil.rmtree(repo)
 
@@ -1357,7 +1358,7 @@ def test_body_link_outside_repo_is_error() -> None:
         append_raw(repo, "docs/knowledge/a.md", "\n[外](../../../etc/hosts)\n")
         code, out = check(repo)
         assert code == 1, out
-        assert "リンクがリポジトリ外を指している" in out, out
+        assert "本文（" in out and "リンクがリポジトリ外を指している" in out, out
     finally:
         shutil.rmtree(repo)
 
@@ -1520,7 +1521,7 @@ def test_body_link_after_stray_backtick_is_still_checked() -> None:
         )
         code, out = check(repo)
         assert code == 1, out
-        assert "のリンク先が実在しない" in out, out
+        assert "本文（" in out and "リンク先が実在しない" in out, out
     finally:
         shutil.rmtree(repo)
 
@@ -1586,7 +1587,7 @@ def test_body_image_link_is_checked() -> None:
         append_raw(repo, "docs/knowledge/a.md", "\n![図](diagrams/nope.svg)\n")
         code, out = check(repo)
         assert code == 1, out
-        assert "のリンク先が実在しない" in out, out
+        assert "本文（" in out and "リンク先が実在しない" in out, out
     finally:
         shutil.rmtree(repo)
 
@@ -1708,6 +1709,74 @@ def test_readme_template_in_fence_is_ignored() -> None:
         )
         code, out = check(repo)
         assert code == 0, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def _reported_line(out: str) -> int:
+    matched = re.search(r"本文（(\d+) 行目）", out)
+    assert matched, out
+    return int(matched.group(1))
+
+
+def test_body_link_line_number_matches_file() -> None:
+    """報告した行番号の実ファイル行に、そのリンクがあること（frontmatter 分のオフセット）。"""
+    repo = new_repo()
+    try:
+        baseline(repo)
+        append_raw(repo, "docs/knowledge/a.md",
+                   "\n埋草。\n\n[壊れ](../original-docs/9999-nope.md)\n")
+        code, out = check(repo)
+        assert code == 1, out
+        lineno = _reported_line(out)
+        lines = (repo / "docs/knowledge/a.md").read_text(encoding="utf-8").splitlines()
+        assert "9999-nope.md" in lines[lineno - 1], f"{lineno} 行目は {lines[lineno - 1]!r}"
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_readme_link_line_number_matches_file() -> None:
+    """frontmatter を持たない文書ではオフセット 0（README）。"""
+    repo = new_repo()
+    try:
+        baseline(repo)
+        (repo / "docs/knowledge/README.md").write_text(
+            "# 規約\n\n埋草。\n\n[壊れ](../original-docs/9999-nope.md)\n", encoding="utf-8"
+        )
+        code, out = check(repo)
+        assert code == 1, out
+        lineno = _reported_line(out)
+        lines = (repo / "docs/knowledge/README.md").read_text(encoding="utf-8").splitlines()
+        assert "9999-nope.md" in lines[lineno - 1], f"{lineno} 行目は {lines[lineno - 1]!r}"
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_body_link_with_label_across_lines_is_checked() -> None:
+    """ラベルが改行を跨ぐリンクも拾う（行単位で切ると黙って無検査になる）。"""
+    repo = new_repo()
+    try:
+        baseline(repo)
+        append_raw(repo, "docs/knowledge/a.md",
+                   "\n[長いラベルの\n続き](../original-docs/9999-nope.md)\n")
+        code, out = check(repo)
+        assert code == 1, out
+        assert "9999-nope.md" in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_claude_md_body_link_is_checked() -> None:
+    """毎セッション読まれる CLAUDE.md も（ディレクトリ走査の外だが）リンクだけは見る。"""
+    repo = new_repo()
+    try:
+        baseline(repo)
+        (repo / "CLAUDE.md").write_text(
+            "# 運用指示\n\n[用語集](docs/knowledge/nope.md)\n", encoding="utf-8"
+        )
+        code, out = check(repo)
+        assert code == 1, out
+        assert "CLAUDE.md: 本文（" in out and "実在しない" in out, out
     finally:
         shutil.rmtree(repo)
 

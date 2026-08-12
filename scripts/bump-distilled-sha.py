@@ -31,8 +31,10 @@ USAGE = __doc__
 CHECKER = Path(__file__).resolve().parent / "check-doc-classes.py"
 # 行内だけを見る（`\s*` は改行を食うので使わない——値が空のとき次行を巻き込み、
 # `distilled_from_sha:"abc"` という YAML として壊れた行を書き出す）。
+# `\r?` を末尾に置くのは CRLF の文書のため。newline="" で読む（改行コードを保つ）ので、
+# これが無いと CRLF 文書で 1 件もマッチせず「distilled_from_sha の行が無い」と誤報する。
 RE_DISTILLED = re.compile(
-    r'^(distilled_from_sha:[ \t]*)"?([^"\s#]*)"?([ \t]*(?:#.*)?)$', re.MULTILINE
+    r'^(distilled_from_sha:[ \t]*)"?([^"\s#]*)"?([ \t]*(?:#.*)?\r?)$', re.MULTILINE
 )
 # checker の STALE 行から対象文書を拾う。書式は
 #   ✗ docs/knowledge/x.md: STALE ← docs/... が distilled_from_sha(abc1234) より後に更新されている

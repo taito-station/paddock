@@ -284,6 +284,27 @@ def test_body_template_after_frontmatter_without_sha_is_refused() -> None:
         shutil.rmtree(repo)
 
 
+def test_crlf_document_is_bumped_in_place() -> None:
+    """CRLF の文書でも frontmatter を見つけ、改行コードを壊さない。"""
+    repo = new_repo()
+    try:
+        baseline(repo)
+        path = repo / "docs/knowledge/a.md"
+        with path.open(encoding="utf-8", newline="") as f:
+            lf_text = f.read()
+        with path.open("w", encoding="utf-8", newline="") as f:
+            f.write(lf_text.replace("\n", "\r\n"))
+        head = commit_all(repo, "CRLF へ変換")
+        code, out = run(repo, "docs/knowledge/a.md")
+        assert code == 0, out
+        with path.open(encoding="utf-8", newline="") as f:
+            after = f.read()
+        assert f'distilled_from_sha: "{head}"' in after, after[:200]
+        assert after.count("\n") == after.count("\r\n") > 0, "改行コードが LF へ正規化された"
+    finally:
+        shutil.rmtree(repo)
+
+
 def main() -> int:
     if not TARGET.is_file():
         print(f"テスト対象が見つからない: {TARGET}", file=sys.stderr)

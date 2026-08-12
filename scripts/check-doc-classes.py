@@ -32,10 +32,12 @@ frontmatter は限定的な構造しか取らないため正規表現で足り�
                                              # （例外: マーカー欠落は fail-closed で 1）
 """
 
+import bisect
 import functools
 import re
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 USAGE = """check-doc-classes.py - 文書クラスと sources 追従の機械検査（ADR 0073）
@@ -69,6 +71,9 @@ EXCLUDED_ENTIRELY = {"README.md"}
 # EXCLUDED_ENTIRELY と別に持つ: 将来ノイズ回避で除外を増やしたときに、意図せずリンク検査へ
 # 引き込まれたり逆に外れたりしないため。
 LINK_CHECK_ONLY = {"README.md"}
+# TARGET_DIRS の外だが**リンクだけは見る**ファイル。CLAUDE.md は毎セッション読まれる運用指示で、
+# 用語集や仕様書への相対リンクを多数持つのに、ディレクトリ基準の走査からは外れていた。
+EXTRA_LINK_TARGETS = ("CLAUDE.md",)
 
 # frontmatter は限定的な構造しか取らないので正規表現で読む。書式は doc-classes.md が規定。
 # 行末のインラインコメントを許す（規約が示すテンプレ自身がコメント付きで書かれているため、
@@ -433,22 +438,33 @@ def unfenced_lines(text: str) -> "tuple[list[tuple[int, str]], bool]":
 def check_body_links(
     rel: str, root: Path, text: str, errors: list[str], link_seen: "set[str] | None" = None
 ) -> None:
-    """frontmatter を除いた本文のリンクを、行番号付きで検査する。"""
+    """frontmatter を除いた本文のリンクを、行番号付きで検査する。
+
+    **行ごとに切って走査しない**。`[ラベルが\n改行を跨ぐ](path.md)` のような正当な
+    Markdown が黙って無検査になる（1 巡目に潰した「改行跨ぎのインラインコードが
+    リンクを飲み込む」と同種の silent-green 経路）。フェンス外の行を連結して
+    まとめて走査し、マッチ位置から行番号を引く。
+    """
     fm, body = split_frontmatter(text)
     # frontmatter のぶんだけ行番号がずれるので足し戻す（`---` 2 行 + 中身）。
     offset = 0 if fm is None else len(fm.splitlines()) + 2
-    for lineno, line in unfenced_lines(body)[0]:
-        check_links(
-            rel, root, line, errors, label=f"本文（{lineno + offset} 行目）の", seen=link_seen
-        )
+    lines = unfenced_lines(body)[0]
+    if not lines:
+        return
+    joined = "\n".join(line for _, line in lines)
+    # 連結後のオフセット → 元の行番号。インラインコードの除去は行内で完結する
+    # （改行を跨がない正規表現）ので、置換後も行の対応はずれない。
+    starts: list[int] = []
+    pos = 0
+    for _, line in lines:
+        starts.append(pos)
+        pos += len(line) + 1
 
+    def label_at(index: int) -> str:
+        i = bisect.bisect_right(starts, index) - 1
+        return f"本文（{lines[max(i, 0)][0] + offset} 行目）の"
 
-def strip_fenced_blocks(text: str) -> str:
-    """フェンス内を落とした本文を返す（リンク走査用）。
-
-    未閉じフェンスの error は `parse_req_blocks` が出すのでここでは扱わない。
-    """
-    return "\n".join(line for _, line in unfenced_lines(text)[0])
+    check_links(rel, root, joined, errors, seen=link_seen, label_at=label_at)
 
 
 def case_exact(path: Path, root: Path) -> bool:
@@ -481,14 +497,18 @@ def check_links(
     *,
     label: str = "",
     seen: "set[str] | None" = None,
+    label_at: "Callable[[int], str] | None" = None,
 ) -> None:
     """`fragment` に含まれる Markdown リンクの実在を検査する。
 
     REQ 表の出典・検証手段と本文の双方から呼ぶ。`seen` を渡すと同じリンク先を
     二重に報告しない（REQ 表の行は本文にも含まれるため、渡さないと同じ 1 本の
-    リンク切れが 2 件の error になる）。
+    リンク切れが 2 件の error になる）。`label_at` を渡すと、マッチ位置から
+    ラベル（本文なら行番号入り）を作る。
     """
-    for target in RE_MD_LINK.findall(RE_INLINE_CODE.sub(" ", fragment)):
+    for matched in RE_MD_LINK.finditer(RE_INLINE_CODE.sub(" ", fragment)):
+        target = matched.group(1)
+        here = label_at(matched.start()) if label_at else label
         # スキーム付き URI（http/https/mailto に限らず ftp・tel 等）と protocol-relative、
         # 同一文書内アンカーは対象外。ホワイトリストにすると新しいスキームを足すたびに
         # 誤検知が出る。
@@ -506,19 +526,19 @@ def check_links(
         # Path 連結が左辺を捨てて外を指し、「参照先はリポジトリ内で辿れる」という
         # 前提が崩れる（`[外](/etc/hosts)` が実在扱いで通る）。
         if cleaned.startswith("/"):
-            errors.append(f"{rel}: {label}リンクは文書からの相対パスで書く → {target}")
+            errors.append(f"{rel}: {here}リンクは文書からの相対パスで書く → {target}")
             continue
         resolved = ((root / rel).parent / cleaned).resolve()
         if not resolved.is_relative_to(root.resolve()):
-            errors.append(f"{rel}: {label}リンクがリポジトリ外を指している → {target}")
+            errors.append(f"{rel}: {here}リンクがリポジトリ外を指している → {target}")
         elif not resolved.exists():
             # ディレクトリへの相対リンクも正当（README が `scripts/` 等への
             # リンクを誘導している）。sources は「1 ファイル＝1 出典」なので非対称。
-            errors.append(f"{rel}: {label}リンク先が実在しない → {target}")
+            errors.append(f"{rel}: {here}リンク先が実在しない → {target}")
         elif not case_exact(resolved, root.resolve()):
             # macOS(APFS) は大文字小文字を区別しないので exists() が通る。Linux の CI
             # だけが落ちる非対称を pre-push の時点で潰す。
-            errors.append(f"{rel}: {label}リンク先の大文字小文字が実ファイルと違う → {target}")
+            errors.append(f"{rel}: {here}リンク先の大文字小文字が実ファイルと違う → {target}")
 
 
 def check_req_blocks(
@@ -705,11 +725,18 @@ def main(argv: list[str]) -> int:
     # **リンクだけは見る**。規約の正本が唯一無検査という穴を残さない——見本のリンクは
     # コードフェンスの中にあるので除外済み。
     for d in TARGET_DIRS:
-        for name in sorted(LINK_CHECK_ONLY):
+        # 走査対象に残っている文書は本体側でリンク検査済み。ここで重ねると同じ
+        # 壊れリンクが 2 件の error になるので、全検査除外のものだけを回す。
+        for name in sorted(LINK_CHECK_ONLY & EXCLUDED_ENTIRELY):
             readme = root / d / name
             if readme.is_file():
                 rel = readme.relative_to(root).as_posix()
                 check_body_links(rel, root, readme.read_text(encoding="utf-8"), errors, set())
+
+    for extra in EXTRA_LINK_TARGETS:
+        path = root / extra
+        if path.is_file():
+            check_body_links(extra, root, path.read_text(encoding="utf-8"), errors, set())
 
     actual_count: dict[str, int] = {cls: 0 for cls in declared}
     # REQ-ID → 初出パス。一意性はクラス内グローバル（文書をまたいで 1 つ）なので台帳は全体で 1 つ。
