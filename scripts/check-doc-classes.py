@@ -15,6 +15,8 @@ docs/knowledge/app-bootstrap.md が status: Confirmed のまま存在しない N
   6. stale: sources の最終「内容変更」が distilled_from_sha に含まれているか  [error]
   7. active なのに文書 0 本のクラス（充足ギャップ）                           [warning]
   8. REQ 表（要件 ID）の書式・一意性・status・Confirmed の検証手段            [error]
+  9. 本文中の相対リンクが実在するか（REQ 表の外も見る）                       [error]
+ 10. doc-classes.md の割当索引と実ファイルの doc_class の突合                 [error]
 
 6 は rename-only のコミット（内容差分ゼロ）を比較対象から除外する。これが無いと ADR 0073 の
 ADR 移動だけで 20 本が一斉に stale 判定になる。git log --follow では吸収できない——--follow は
@@ -403,6 +405,71 @@ def parse_req_blocks(text: str) -> "tuple[list[tuple[str, list[list[str]]]], lis
     return blocks, errors
 
 
+def strip_fenced_blocks(text: str) -> "tuple[str, bool]":
+    """コードフェンスで囲まれた範囲を落とした本文と、未閉じフェンスの有無を返す。
+
+    開閉の判定規則は `parse_req_blocks` と同じ（同種かつ**同長以上**でのみ閉じる）。
+    規約の見本として書かれたリンク（`docs/knowledge/README.md` のテンプレートが
+    持つ存在しないパス等）を実データとして検査しないための除外で、判定規則を
+    2 箇所に持たせないようここへ集約する。
+    """
+    kept: list[str] = []
+    fence: "tuple[str, int] | None" = None
+    for line in text.splitlines():
+        stripped = RE_BLOCKQUOTE.sub("", line.strip())
+        opener = RE_FENCE.match(stripped)
+        if opener:
+            token = opener.group(1)
+            if fence is None:
+                fence = (token[0], len(token))
+            elif token[0] == fence[0] and len(token) >= fence[1]:
+                fence = None
+            continue
+        if fence is None:
+            kept.append(line)
+    return "\n".join(kept), fence is not None
+
+
+def check_links(
+    rel: str,
+    root: Path,
+    fragment: str,
+    errors: list[str],
+    *,
+    label: str = "",
+    seen: "set[str] | None" = None,
+) -> None:
+    """`fragment` に含まれる Markdown リンクの実在を検査する。
+
+    REQ 表の出典・検証手段と本文の双方から呼ぶ。`seen` を渡すと同じリンク先を
+    二重に報告しない（REQ 表の行は本文にも含まれるため、渡さないと同じ 1 本の
+    リンク切れが 2 件の error になる）。
+    """
+    for target in RE_MD_LINK.findall(RE_INLINE_CODE.sub(" ", fragment)):
+        if target.startswith(("http://", "https://", "mailto:", "#")):
+            continue
+        if seen is not None:
+            if target in seen:
+                continue
+            seen.add(target)
+        cleaned = target.split("#", 1)[0]
+        if not cleaned:
+            continue
+        # sources 検査（main）と同じ理由でリポジトリ外を弾く。絶対パスを許すと
+        # Path 連結が左辺を捨てて外を指し、「参照先はリポジトリ内で辿れる」という
+        # 前提が崩れる（`[外](/etc/hosts)` が実在扱いで通る）。
+        if cleaned.startswith("/"):
+            errors.append(f"{rel}: {label}リンクは文書からの相対パスで書く → {target}")
+            continue
+        resolved = ((root / rel).parent / cleaned).resolve()
+        if not resolved.is_relative_to(root.resolve()):
+            errors.append(f"{rel}: {label}リンクがリポジトリ外を指している → {target}")
+        elif not resolved.exists():
+            # ディレクトリへの相対リンクも正当（README が `scripts/` 等への
+            # リンクを誘導している）。sources は「1 ファイル＝1 出典」なので非対称。
+            errors.append(f"{rel}: {label}リンク先が実在しない → {target}")
+
+
 def check_req_blocks(
     rel: str,
     text: str,
@@ -411,6 +478,7 @@ def check_req_blocks(
     seen: "dict[str, str]",
     root: Path,
     errors: list[str],
+    link_seen: "set[str] | None" = None,
 ) -> None:
     """1 文書ぶんの REQ 表を検査する。`seen` は REQ-ID → 初出パスの全体台帳。"""
     blocks, structural = parse_req_blocks(text)
@@ -490,29 +558,13 @@ def check_req_blocks(
                 )
 
             # 出典・検証手段が指すリポジトリ内リンクの実在。frontmatter の sources と
-            # 同じ理由——由来を辿れないなら要件の根拠を確認できない。
-            linked = RE_INLINE_CODE.sub(" ", origin) + " " + RE_INLINE_CODE.sub(" ", verification)
-            for target in RE_MD_LINK.findall(linked):
-                if target.startswith(("http://", "https://", "mailto:", "#")):
-                    continue
-                cleaned = target.split("#", 1)[0]
-                # sources 検査（下）と同じ理由でリポジトリ外を弾く。絶対パスを許すと
-                # Path 連結が左辺を捨てて外を指し、「由来はリポジトリ内で辿れる」という
-                # 前提が崩れる（`[外](/etc/hosts)` が実在扱いで通る）。
-                if cleaned.startswith("/"):
-                    errors.append(
-                        f"{rel}: {req_id} のリンクは文書からの相対パスで書く → {target}"
-                    )
-                    continue
-                resolved = ((root / rel).parent / cleaned).resolve()
-                if not resolved.is_relative_to(root.resolve()):
-                    errors.append(
-                        f"{rel}: {req_id} のリンクがリポジトリ外を指している → {target}"
-                    )
-                elif not resolved.exists():
-                    # ディレクトリへの相対リンクも正当（README が `scripts/` 等への
-                    # リンクを誘導している）。sources は「1 ファイル＝1 出典」なので非対称。
-                    errors.append(f"{rel}: {req_id} のリンク先が実在しない → {target}")
+            # 同じ理由——由来を辿れないなら要件の根拠を確認できない。セルごとに
+            # 渡すのは、インラインコードの除去をセルを跨いで行うと閉じていない
+            # バッククォートが隣のセルと対になって本物のリンクを消すため。
+            for fragment in (origin, verification):
+                check_links(
+                    rel, root, fragment, errors, label=f"{req_id} の", seen=link_seen
+                )
 
 
 def main(argv: list[str]) -> int:
@@ -583,6 +635,8 @@ def main(argv: list[str]) -> int:
     actual_count: dict[str, int] = {cls: 0 for cls in declared}
     # REQ-ID → 初出パス。一意性はクラス内グローバル（文書をまたいで 1 つ）なので台帳は全体で 1 つ。
     req_seen: dict[str, str] = {}
+    # 割当索引の突合用。キーは索引表と同じ `knowledge/x.md` 形式（docs/ を剥がす）。
+    doc_class_by_rel: dict[str, list[str]] = {}
     for path in targets:
         rel = path.relative_to(root).as_posix()
         text = path.read_text(encoding="utf-8")
@@ -611,9 +665,19 @@ def main(argv: list[str]) -> int:
                         f"{rel}: tags が doc_class と一致しない"
                         f"（doc_class={classes} / tags={fm.get('tags')}）"
                     )
+                doc_class_by_rel[rel.removeprefix("docs/")] = classes
 
-        # (8) REQ 表
-        check_req_blocks(rel, text, fm.get("doc_class"), declared, req_seen, root, errors)
+        # (8) REQ 表 / (9) 本文リンク。同じリンク先を二重に報告しないよう台帳を共有する。
+        link_seen: set[str] = set()
+        check_req_blocks(
+            rel, text, fm.get("doc_class"), declared, req_seen, root, errors, link_seen
+        )
+
+        # (9) 本文の相対リンク。REQ 表の外は無検査だったので、索引や相互参照で
+        # できた文書（用語集など）は指し先が消えても CI が緑のままだった（#604）。
+        # 未閉じフェンスの error は parse_req_blocks が出すのでここでは出さない。
+        body_text, _unclosed = strip_fenced_blocks(split_frontmatter(text)[1])
+        check_links(rel, root, body_text, errors, label="本文の", seen=link_seen)
 
         # (4) sources の実在
         sources = fm.get("sources", [])
@@ -663,6 +727,34 @@ def main(argv: list[str]) -> int:
                     f"{rel}: STALE ← {src} が distilled_from_sha({distilled}) より後に更新されている"
                     f"（{changed[:7]}）。差分マージして sha/日付を更新する"
                 )
+
+    # (10) 割当索引と実ファイルの突合。下の (5) はクラス別の集計数しか見ないので、
+    # 主クラスの順序入替や 2 文書間のクラス交換は素通りする（索引を突き合わせて塞ぐ）。
+    indexed: dict[str, str] = {}
+    for line in extract_block(registry_text, "doc-classes-index"):
+        stripped = line.strip()
+        if not stripped.startswith("|"):
+            continue
+        cells = split_row(stripped)
+        if len(cells) != 2:
+            errors.append(f"{REGISTRY}: 割当索引の書式が崩れている行がある → {stripped}")
+            continue
+        if cells[0] == "文書" or RE_TABLE_SEP_CELL.match(cells[0]):
+            continue
+        indexed[cells[0]] = cells[1]
+    for key in sorted(set(indexed) | set(doc_class_by_rel)):
+        actual = doc_class_by_rel.get(key)
+        listed = indexed.get(key)
+        canonical = f"[{', '.join(actual)}]" if actual else None
+        if listed is None:
+            errors.append(f"{REGISTRY}: 割当索引に {key} の行が無い（実際は {canonical}）")
+        elif actual is None:
+            errors.append(f"{REGISTRY}: 割当索引の {key} に対応する検査対象の文書が無い")
+        elif listed != canonical:
+            errors.append(
+                f"{REGISTRY}: 割当索引の {key} が frontmatter と一致しない"
+                f"（索引={listed} / 実際={canonical}）"
+            )
 
     # (5) レジストリの「現行」列と実態
     for cls, meta in sorted(declared.items()):

@@ -48,6 +48,14 @@ updated: "2026-08-09"
 |---|---|---|
 | D12 | 認証認可を持たない | 外部公開するとき |
 <!-- doc-classes-na:end -->
+
+## 割当の一覧
+
+<!-- doc-classes-index:begin -->
+| 文書 | doc_class |
+|---|---|
+{index}
+<!-- doc-classes-index:end -->
 """
 
 DOC_TEMPLATE = """---
@@ -95,9 +103,24 @@ def new_repo() -> Path:
     return repo
 
 
-def write_registry(repo: Path, sha: str, d08: int = 0, d19: int = 1, d22: int = 0) -> None:
+def write_registry(
+    repo: Path,
+    sha: str,
+    d08: int = 0,
+    d19: int = 1,
+    d22: int = 0,
+    docs: "list[tuple[str, list[str]]] | None" = None,
+) -> None:
+    """レジストリを書く。`docs` は割当索引の行（既定は baseline の 1 本）。
+
+    索引は checker が実ファイルと 1 対 1 で突き合わせるので、文書を足すテストは
+    ここにも行を足す必要がある。
+    """
+    rows = docs if docs is not None else [("knowledge/a.md", ["D19"])]
+    index = "\n".join(f"| {rel} | [{', '.join(classes)}] |" for rel, classes in rows)
     (repo / "docs/knowledge/doc-classes.md").write_text(
-        REGISTRY_TEMPLATE.format(sha=sha, d08=d08, d19=d19, d22=d22), encoding="utf-8"
+        REGISTRY_TEMPLATE.format(sha=sha, d08=d08, d19=d19, d22=d22, index=index),
+        encoding="utf-8",
     )
 
 
@@ -484,7 +507,8 @@ def test_frontmatter_only_change_is_not_stale() -> None:
         sha = baseline(repo)
         write_doc(repo, "docs/specifications/s.md", ["D19"],
                   ["docs/original-docs/0001-first.md"], sha)
-        write_registry(repo, sha, d19=2)
+        write_registry(repo, sha, d19=2,
+                       docs=[("knowledge/a.md", ["D19"]), ("specifications/s.md", ["D19"])])
         write_doc(repo, "docs/knowledge/a.md", ["D19"],
                   ["docs/specifications/s.md", "docs/original-docs/0001-first.md"], sha)
         added = commit_all(repo, "s.md を追加して a.md の source にする")
@@ -496,7 +520,9 @@ def test_frontmatter_only_change_is_not_stale() -> None:
         # s.md の frontmatter だけを変える（doc_class 追加相当）。本文は不変。
         write_doc(repo, "docs/specifications/s.md", ["D19", "D22"],
                   ["docs/original-docs/0001-first.md"], sha)
-        write_registry(repo, sha, d19=2, d22=1)
+        write_registry(repo, sha, d19=2, d22=1,
+                       docs=[("knowledge/a.md", ["D19"]),
+                             ("specifications/s.md", ["D19", "D22"])])
         commit_all(repo, "s.md の frontmatter だけ変更")
         code, out = check(repo)
         assert code == 0, out
@@ -1267,6 +1293,211 @@ def test_req_separator_column_count_is_error() -> None:
         code, out = check(repo)
         assert code == 1, out
         assert "区切り行が" in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
+# --- (9) 本文の相対リンク（#604）。REQ 表の外は無検査だった ---
+
+
+def test_body_broken_link_is_error() -> None:
+    repo = new_repo()
+    try:
+        baseline(repo)
+        append_raw(repo, "docs/knowledge/a.md", "\n[出典](../original-docs/9999-nope.md)\n")
+        code, out = check(repo)
+        assert code == 1, out
+        assert "本文のリンク先が実在しない" in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_body_link_to_existing_file_passes() -> None:
+    repo = new_repo()
+    try:
+        baseline(repo)
+        append_raw(repo, "docs/knowledge/a.md", "\n[出典](../original-docs/0001-first.md)\n")
+        code, out = check(repo)
+        assert code == 0, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_body_link_to_directory_is_accepted() -> None:
+    """ディレクトリへの相対リンクは正当（sources の is_file とは意図的に非対称）。"""
+    repo = new_repo()
+    try:
+        baseline(repo)
+        append_raw(repo, "docs/knowledge/a.md", "\n[一次資料](../original-docs/)\n")
+        code, out = check(repo)
+        assert code == 0, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_body_absolute_link_is_error() -> None:
+    repo = new_repo()
+    try:
+        baseline(repo)
+        append_raw(repo, "docs/knowledge/a.md", "\n[外](/etc/hosts)\n")
+        code, out = check(repo)
+        assert code == 1, out
+        assert "本文のリンクは文書からの相対パスで書く" in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_body_link_outside_repo_is_error() -> None:
+    repo = new_repo()
+    try:
+        baseline(repo)
+        append_raw(repo, "docs/knowledge/a.md", "\n[外](../../../etc/hosts)\n")
+        code, out = check(repo)
+        assert code == 1, out
+        assert "本文のリンクがリポジトリ外を指している" in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_body_link_in_code_fence_is_ignored() -> None:
+    """規約の見本（テンプレート）を実データとして検査しない。"""
+    repo = new_repo()
+    try:
+        baseline(repo)
+        append_raw(
+            repo, "docs/knowledge/a.md",
+            "\n```md\n[見本](../original-docs/0NNN-....md)\n```\n",
+        )
+        code, out = check(repo)
+        assert code == 0, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_body_link_inside_inline_code_is_ignored() -> None:
+    repo = new_repo()
+    try:
+        baseline(repo)
+        append_raw(repo, "docs/knowledge/a.md", "\n`grep '[x](nope.md)' file` を実行する\n")
+        code, out = check(repo)
+        assert code == 0, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_body_external_link_is_skipped() -> None:
+    repo = new_repo()
+    try:
+        baseline(repo)
+        append_raw(repo, "docs/knowledge/a.md", "\n[外部](https://example.invalid/x)\n")
+        code, out = check(repo)
+        assert code == 0, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_broken_link_in_req_table_is_reported_once() -> None:
+    """REQ 表の行は本文にも含まれる。台帳を共有して同じリンクを二重報告しない。"""
+    repo = new_repo()
+    try:
+        baseline(repo)
+        append_req_block(
+            repo, "docs/knowledge/a.md", "D19",
+            ["| REQ-D19-001 | 要件 | `cargo test` | [ADR](../original-docs/9999-nope.md) |"
+             " Confirmed |"],
+        )
+        code, out = check(repo)
+        assert code == 1, out
+        assert out.count("9999-nope.md") == 1, f"同じリンクが二重に報告された:\n{out}"
+    finally:
+        shutil.rmtree(repo)
+
+
+# --- (10) 割当索引と実ファイルの突合（#604） ---
+
+
+def test_index_missing_row_is_error() -> None:
+    repo = new_repo()
+    try:
+        sha = baseline(repo)
+        write_registry(repo, sha, docs=[])
+        code, out = check(repo)
+        assert code == 1, out
+        assert "割当索引に knowledge/a.md の行が無い" in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_index_ghost_row_is_error() -> None:
+    repo = new_repo()
+    try:
+        sha = baseline(repo)
+        write_registry(repo, sha,
+                       docs=[("knowledge/a.md", ["D19"]), ("knowledge/ghost.md", ["D19"])])
+        code, out = check(repo)
+        assert code == 1, out
+        assert "割当索引の knowledge/ghost.md に対応する検査対象の文書が無い" in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_index_value_mismatch_is_error() -> None:
+    repo = new_repo()
+    try:
+        sha = baseline(repo)
+        write_registry(repo, sha, docs=[("knowledge/a.md", ["D08"])])
+        code, out = check(repo)
+        assert code == 1, out
+        assert "割当索引の knowledge/a.md が frontmatter と一致しない" in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_index_class_order_mismatch_is_error() -> None:
+    """第 1 要素が主クラスなので順序違いも不一致。集計数では検出できない経路。"""
+    repo = new_repo()
+    try:
+        sha = baseline(repo)
+        write_doc(repo, "docs/knowledge/a.md", ["D19", "D22"],
+                  ["docs/original-docs/0001-first.md"], sha)
+        write_registry(repo, sha, d19=1, d22=1, docs=[("knowledge/a.md", ["D22", "D19"])])
+        code, out = check(repo)
+        assert code == 1, out
+        assert "索引=[D22, D19] / 実際=[D19, D22]" in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_index_swap_between_docs_is_error() -> None:
+    """2 文書間でクラスを交換しても集計数は変わらない。索引だけが気づける。"""
+    repo = new_repo()
+    try:
+        sha = baseline(repo)
+        write_doc(repo, "docs/knowledge/b.md", ["D22"],
+                  ["docs/original-docs/0001-first.md"], sha)
+        write_registry(repo, sha, d19=1, d22=1,
+                       docs=[("knowledge/a.md", ["D22"]), ("knowledge/b.md", ["D19"])])
+        code, out = check(repo)
+        assert code == 1, out
+        assert "割当索引の knowledge/a.md が frontmatter と一致しない" in out, out
+        assert "割当索引の knowledge/b.md が frontmatter と一致しない" in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_index_marker_missing_is_fatal() -> None:
+    """マーカーを消して検査を素通りさせる経路を塞ぐ（fail-closed）。"""
+    repo = new_repo()
+    try:
+        sha = baseline(repo)
+        registry = repo / "docs/knowledge/doc-classes.md"
+        text = registry.read_text(encoding="utf-8")
+        assert "<!-- doc-classes-index:begin -->" in text
+        registry.write_text(text.replace("<!-- doc-classes-index:begin -->", ""), encoding="utf-8")
+        code, out = check(repo)
+        assert code == 1, out
+        assert "doc-classes-index:begin" in out, out
+        assert sha  # baseline の SHA は使わないが、pin 済みであることを明示
     finally:
         shutil.rmtree(repo)
 
