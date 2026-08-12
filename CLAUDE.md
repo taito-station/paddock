@@ -17,8 +17,7 @@ paddock の文書は HVE（dahatake/HypervelocityEngineering, MIT）の蒸留モ
   代わりに、`sources` の更新に蒸留が追従しているかは機械検査で担保する（人手の規律に委ねない）。
   **写しは一巡済み（#588・ADR 0074 自身を除く）**: ADR 75 本のうち棄却 24 本は
   [docs/knowledge/product-goals.md](docs/knowledge/product-goals.md) が索引し、採用側はいずれかの
-  knowledge / specifications が `sources` で参照している（本数と内訳は
-  [docs/knowledge/doc-classes.md](docs/knowledge/doc-classes.md) の割当索引が正）。ただし**粒度は一様でない**
+  knowledge / specifications が `sources` で参照している（knowledge は 10 本）。ただし**粒度は一様でない**
   ので、決定の細部（却下案・数値の前提）が要るときは **ADR 原本（`docs/original-docs/0NNN-*.md`）も読む**。
   stale の機械検査は **error**（未解消 6 件を #580 で消化して warning から昇格）。`sources` に挙げた
   ファイルを内容ごと変更したら、参照元の **`distilled_from_sha` を同じ PR で追従させる**（追従漏れは
@@ -129,6 +128,11 @@ https://race.netkeiba.com/race/result.html?race_id=<12桁>
 - `db.netkeiba.com`（horse/result=近走）: **EUC-JP**
 
 ## 買い方ルール
+
+> **この節を変えたら [docs/knowledge/glossary.md](docs/knowledge/glossary.md)（D07）の買い方まわりの
+> 行も見直すこと。** 用語集は 印 / 軸 / ながし・ボックス / ROI / 混戦の配分 / second source /
+> decision-support の要約を本節から写しているが、`CLAUDE.md` は `sources` に入らない設計（ADR 0076）
+> なので**機械検査は鳴らない**。
 
 > 現行ルールの決定根拠・棄却記録・バックテスト履歴: [docs/specifications/betting-rule-history.md](docs/specifications/betting-rule-history.md)（ルール変更を検討する時だけ参照。予想実行時は読まなくてよい）
 >

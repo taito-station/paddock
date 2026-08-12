@@ -28,6 +28,7 @@ sources:
   - docs/original-docs/0060-betting-axis-lock-preclose-topup.md
   - docs/original-docs/0064-live-ev-buy-view.md
   - docs/original-docs/0075-unsupported-race-skip-exit-zero.md
+  - docs/original-docs/0076-glossary-index-and-sources-scope.md
 distilled_from_sha: "2721f9a"
 updated: "2026-08-12"
 ---
@@ -46,7 +47,8 @@ paddock 横断の用語索引。**この文書は定義の正本ではなく、�
   [CLAUDE.md](../../CLAUDE.md)「買い方ルール」にある。これは
   [doc-classes.md](doc-classes.md)「体系側の既知の穴」が記録済みの状態で、本文書もそこを指す。
 
-収録と参照の基準（追加・改訂時はこれに従う）:
+収録と参照の基準（追加・改訂時はこれに従う。決定の記録は
+[ADR 0076](../original-docs/0076-glossary-index-and-sources-scope.md)）:
 
 - **収録するのは複数の文書・コードにまたがって使われる語だけ**。1 つの文書の中で閉じて使われる語は
   その文書の `## 用語定義` 節に置き、ここへは持ってこない。
@@ -55,20 +57,18 @@ paddock 横断の用語索引。**この文書は定義の正本ではなく、�
   値が改訂されても動かない——**現行値の確認は REQ 表、経緯は ADR** と読み分ける。
 - **値を書くときは、その値を所有する正本を必ず併記する**（要件として固定された本番値は REQ-ID、
   既定値は仕様書の該当節）。値だけを書き写して出所を書かないと、改訂されたときに気づけない。
-  逆に、正本を辿れば済む実装詳細（クランプの ε・リトライ回数など）は書かない。
-- **`sources` に入れるのは `docs/` 配下の可変な蒸留元と、要約の根拠として引いた ADR**。
-  上流が動いたら stale 検査で本文書の見直しが強制されるのが狙い。
-  可変な下流文書を入れている以上、それらが動けば追従コミット（`distilled_from_sha` の bump）が
-  要る——見直しの強制が狙いなので、これはコストではなく仕様。
-  **`CLAUDE.md` とソースコードは正本列で指すが `sources` には入れない**——`CLAUDE.md` は
-  frontmatter を持たず metadata-only の免除が効かないため、用語と無関係な節（DB 運用・予想
-  ワークフロー等）の 1 行修正でも stale error になり、追従が儀式化する。コードの追従は
-  それを仕様として持つ文書側の責務。
-  **ただし本文書の `CLAUDE.md` への依存は現に残っている**（買い方まわりの数語）。
-  [README.md](README.md) の「出典は減らさない」が求める「依存が無くなったことを示す」条件は
-  満たしていない——維持コストを理由に外した例外で、依存そのものは
-  [doc-classes.md](doc-classes.md)「体系側の既知の穴」（D23 の一次定義が `docs/` 配下に無い）が
-  解消されるまで残る。
+  **分類の列挙**（transient に含まれるエラー種別など）は、それ自体が語の定義なので書く。
+  逆に、正本を辿れば済む調整値（クランプの ε・リトライ回数など）は書かない。
+- **`sources` に入れる基準は「その文書の本文が動いたら、ここの要約の見直しが要るか」**。
+  確定知層（specifications / knowledge）も対象で、引いた ADR も入れる。上流が動けば追従コミット
+  （`distilled_from_sha` の bump）が要るが、見直しの強制が狙いなのでこれは仕様。
+- **`sources` に入れないもの 3 つ**: `CLAUDE.md` / ソースコード / 文書運用の規約文書
+  （[README.md](README.md)・[doc-classes.md](doc-classes.md)）。`CLAUDE.md` は frontmatter を
+  持たないため stale 検査の免除機構（frontmatter だけの変更の除外）が**構造的に効かず**、かつ
+  大半の改訂が用語と無関係なので、入れるとすべての `CLAUDE.md` 編集に 2 コミットを強制して
+  追従が儀式化する。コードの追従はそれを仕様として持つ文書側の責務、規約文書は本文書の主題では
+  なく運用の参照。**`CLAUDE.md` への依存自体は残る**ので、その補償として `CLAUDE.md`
+  「買い方ルール」節に人手のトリップワイヤを置いてある。
 - **戻りリンク（正本 → 用語集）を置くのは `## 用語定義` 節を持つ文書だけ**。
   節が無い文書のどこに置くかは恣意的になるため。**追従対象を決めるのは `sources` であって
   戻りリンクではない**ので、戻りリンクの無い正本も stale 検査の対象になりうる。
@@ -114,7 +114,7 @@ paddock 横断の用語索引。**この文書は定義の正本ではなく、�
 | ROI（レース単位） | `Σ_i(賭金_i × 的中確率_i × 払戻倍率_i) / 総賭金`。買い目全体で見た期待回収率 | [CLAUDE.md](../../CLAUDE.md)「3. EV 判定 → 買い目決定」 |
 | ROI ゲート | **ROI ≥ 100% のレースだけ張る**という判定基準。100% が損益分岐で、下げる＝−EV を承知で買う | [product-goals.md](product-goals.md) REQ-D01-001 / [ADR 0040](../original-docs/0040-ev-gate-threshold-lowering-rejected.md) |
 | フェア ROI | JRA 控除率（ワイド・馬連 22.5% / 3 連複 25%）由来の期待値上限 ≈ 75〜77.5%。エッジが無ければ ROI はこの近辺に落ちる | [betting-rule-history.md](../specifications/betting-rule-history.md) ⑤ |
-| `ev_threshold` / `trifecta_ev_threshold` | 推奨候補に入れる EV の下限（既定 1.0 / 三連単のみ 2.0） | [ev-kelly-bet-selection.md](../specifications/ev-kelly-bet-selection.md) 用語定義 |
+| `ev_threshold` / `trifecta_ev_threshold` | 推奨候補に入れる EV の閾値（既定 1.0 / 三連単のみ 2.0）。判定は strict なので**閾値ちょうどは除外**される | [ev-kelly-bet-selection.md](../specifications/ev-kelly-bet-selection.md) 用語定義 |
 | ⚠ `kelly_fraction` / `kelly_cap` | 総資金に対する賭け割合と、その上限（既定 0.25）。**本番の賭け額配分には使わない**——用途は薄い買い目を落とす `min_kelly` の curation だけで、配分は均等割り | [ev-kelly-bet-selection.md](../specifications/ev-kelly-bet-selection.md) 用語定義（既定値）/ REQ-D23-004（用途制限） |
 
 ## 買い方・運用ルール
@@ -138,9 +138,9 @@ paddock 横断の用語索引。**この文書は定義の正本ではなく、�
 | 用語 | 要約 | 正本 |
 |---|---|---|
 | ⚠ degraded | **単複オッズの取得失敗だけ**が該当する状態。オッズ保存をまるごとスキップして **exit 3** を返す（出馬表・近走は保存済み） | [ADR 0049](../original-docs/0049-netkeiba-odds-transient-retry-and-degraded-exit.md) / [netkeiba-datasource.md](../specifications/netkeiba-datasource.md) |
-| ⚠ 対象外スキップ | 障害レース等の取り込み対象外。DB 無変更で理由を stdout に出し **exit 0**。degraded（3）ともハード失敗（1）とも別 | [ADR 0075](../original-docs/0075-unsupported-race-skip-exit-zero.md) |
+| ⚠ 対象外スキップ | 障害レース等の取り込み対象外。DB 無変更で理由を stdout に出し **exit 0**。degraded（3）ともハード失敗（1）とも別 | [netkeiba-datasource.md](../specifications/netkeiba-datasource.md)（終了コード）/ [ADR 0075](../original-docs/0075-unsupported-race-skip-exit-zero.md)（経緯） |
 | best-effort | 失敗しても全体を巻き添えにしない経路（オッズ**未発売**・近走取り込み・組合せ券種オッズ）。**exit 0 のまま**なので件数はログで見る | [netkeiba-datasource.md](../specifications/netkeiba-datasource.md) |
-| transient | リトライ対象の一過性障害（`Timeout` / `Io` / `ConnectionFailed` / `HostNotFound` / `Protocol` / 5xx）。回数とバックオフは正本 | [ADR 0049](../original-docs/0049-netkeiba-odds-transient-retry-and-degraded-exit.md) |
+| transient | リトライ対象の一過性障害（`Timeout` / `Io` / `ConnectionFailed` / `HostNotFound` / `Protocol` / 5xx）。回数とバックオフは正本 | [netkeiba-datasource.md](../specifications/netkeiba-datasource.md)「transient リトライと degraded」/ [ADR 0049](../original-docs/0049-netkeiba-odds-transient-retry-and-degraded-exit.md)（経緯） |
 | decision-support | ツールは判断材料を出すだけで、**張る / 見送り / 増額の最終判断は人間**という位置づけ。`predict-watch` の設計原則 | [ADR 0055](../original-docs/0055-ev-layer-separation-circular-break.md) / [ADR 0060](../original-docs/0060-betting-axis-lock-preclose-topup.md) / [CLAUDE.md](../../CLAUDE.md)「ライブ監視時のコミュニケーション規律」 |
 
 ## 文書運用の用語
