@@ -42,7 +42,9 @@ tracing-log        = { version = "0.2" }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 ureq               = { version = "3", default-features = false, features = ["rustls"] }
 utoipa             = { version = "5", features = ["actix_extras", "chrono"] }
-utoipa-swagger-ui  = { version = "9", features = ["actix-web"] }
+# vendored: Swagger UI 資産を crate に埋め込んだものを使い、**ビルド時の外部取得をやめる**
+# （ADR 0082）。既定の build script は zip を curl で落とすためネットワーク障害でビルドが落ちる。
+utoipa-swagger-ui  = { version = "9", features = ["actix-web", "vendored"] }
 
 paddock-domain     = { path = "src/domain" }
 paddock-use-case   = { path = "src/use-case" }
