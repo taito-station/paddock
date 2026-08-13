@@ -234,7 +234,8 @@ updated: "YYYY-MM-DD"    # 内容を実質更新した日（YAML の date 型を
   実際の記述とずれることがある（実在判定自体は誤らない）。
 - **リンク検査の適用範囲**。見るのは `docs/knowledge/` と `docs/specifications/` の**直下**
   （＋ 各ディレクトリの `README.md` と、リポジトリルートの `CLAUDE.md`）だけ。**`docs/original-docs/`（ADR 原本）と `docs/qa/` は無検査**、
-  サブディレクトリの `.md` は warning 止まり。実在判定はファイルシステムを見るので、
+  サブディレクトリの `.md` も走査対象外（**置くこと自体が error**＝上記「機械検査」の項が正。
+  severity をここに二重に書かない）。実在判定はファイルシステムを見るので、
   **git 管理外のパス**（生成物・gitignore 対象）へのリンクは手元で通り CI（fresh clone）で落ちる。
 - **この README 自身の記述の鮮度**。README は frontmatter を持たない（`sources` も
   `distilled_from_sha` も無い）ので、`scripts/check-doc-classes.py` を書き換えても
