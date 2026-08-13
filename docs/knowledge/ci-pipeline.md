@@ -8,7 +8,7 @@ sources:
   - docs/original-docs/0073-adr-into-original-docs-and-doc-classes.md
   - docs/original-docs/0082-swagger-ui-vendored.md
   - .github/workflows/ci.yml
-distilled_from_sha: "378efda"
+distilled_from_sha: "fd34f64"
 updated: "2026-08-13"
 ---
 
@@ -148,7 +148,8 @@ ADR 0026 のスコープ外として記録されたまま**未確認**。将来 
 ## 関連
 
 - ADR: [0026 OCR/PDF 統合テストを CI で実走（mupdf 版固定）](../original-docs/0026-ocr-pdf-ci-mupdf-pin.md) /
-  [0073 ADR 統合と文書クラス・機械検査](../original-docs/0073-adr-into-original-docs-and-doc-classes.md)
+  [0073 ADR 統合と文書クラス・機械検査](../original-docs/0073-adr-into-original-docs-and-doc-classes.md) /
+  [0082 Swagger UI を vendored にしてビルド時ダウンロードを消す](../original-docs/0082-swagger-ui-vendored.md)
 - 必須チェックの ruleset は #461（ジョブ ID `adr` は必須チェック名なので改名しない）
 - pre-push は CI 相当の高速チェックを手元で再現する（`scripts/git-hooks/pre-push`。配線は
   `scripts/install-git-hooks.sh` で clone ごとに一度）
