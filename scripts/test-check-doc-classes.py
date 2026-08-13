@@ -942,7 +942,14 @@ def test_reusable_workflow_pin_change_is_stale() -> None:
 
 
 def test_crlf_only_change_in_workflow_is_stale() -> None:
-    """対照: 改行コードだけの変更は差分行 0 件になるので内容変更として扱う（保守側）。"""
+    """対照: 改行コードだけの変更も内容変更として扱う（保守側）。
+
+    機序は「差分行が 0 件」ではない——LF → CRLF では**全行が `\\r` 付きで差分になり**、
+    その差分行が `RE_USES_PIN` に合わないので免除されない（hex も動いていない）。
+    なお**このケースはバイト列比較の mutation 検出力を持たない**（`text=True` に戻しても
+    hex が動いていないので非免除のまま）。バイト取得を固定するのは
+    `test_crlf_conversion_with_pin_bump_is_stale`。
+    """
     repo = new_repo()
     try:
         workflow_baseline(repo)

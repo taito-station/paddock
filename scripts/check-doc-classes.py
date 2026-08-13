@@ -100,11 +100,7 @@ def git(*args: str) -> "subprocess.CompletedProcess[str]":
 
 
 def git_raw(*args: str) -> "subprocess.CompletedProcess[bytes]":
-    """git の出力を**バイト列**で取る。
-
-    `text=True` は universal newlines を通すので `\\r\\n` が `\\n` に潰れる。ファイルの中身を
-    行ごとに比べる用途（blob_at）では、それをやると **CRLF 変換が差分として見えなくなる**。
-    """
+    """git の出力を**バイト列**で取る（理由は blob_at の docstring）。"""
     return subprocess.run(["git", *args], cwd=_ROOT, capture_output=True)
 
 
@@ -197,8 +193,6 @@ METADATA_KEYS = {"doc_class", "tags", "sources", "distilled_from_sha", "updated"
 
 
 # 「内容変更ではない」を判定する述語が同じ (sha, path) の前後ブロブを見るので共有する。
-# 有界にするのは、再利用が「1 コミットにつき前後 2 本」の局所パターンだけで、無制限だと
-# 走査したコミットぶんのファイル全文をプロセス寿命のあいだ抱え続けるため。
 @functools.lru_cache(maxsize=32)
 def blob_at(sha: str, path: str) -> "bytes | None":
     """コミット sha 時点の path の中身（**バイト列**）。取れなければ None。
@@ -263,7 +257,7 @@ RE_WORKFLOW_PATH = re.compile(r"^\.github/workflows/[^/]+\.ya?ml$")
 # 同一パス内でも `run: |` のブロックスカラに同じ形の行があれば拾ってしまうが、
 # 対象をワークフローに絞ってあるので実害は「自リポの CI スクリプト本文」に限られる。
 RE_USES_PIN = re.compile(
-    r"^(\s*(?:-\s+)?uses:\s+)([^@\s/]+/[^@\s/]+)@([0-9a-fA-F]{40})(\s+#\s*v?\d[0-9A-Za-z._+-]*)?$"
+    r"^(\s*(?:-\s+)?uses:\s+)([^@\s/]+/[^@\s/]+)@([0-9a-fA-F]{40})([ \t]+#[ \t]*v?[0-9][0-9A-Za-z._+-]*)?$"
 )
 
 
