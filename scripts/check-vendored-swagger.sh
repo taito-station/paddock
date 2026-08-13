@@ -19,13 +19,24 @@ cd "$root"
 
 fail=0
 
-if ! grep -qE '^utoipa-swagger-ui[[:space:]]*=.*"vendored"' Cargo.toml; then
-    echo "✗ Cargo.toml: utoipa-swagger-ui の features に \"vendored\" が無い" >&2
+# **主たる判定は Cargo.lock**。optional な依存は feature で活性化されない限りロックに載らないので、
+# `utoipa-swagger-ui-vendored` の在否がそのまま「feature が効いているか」を表す。書式にも依存しない。
+# ci / clippy が `--locked` で走るためロックの鮮度も担保される。
+if ! grep -q '^name = "utoipa-swagger-ui-vendored"$' Cargo.lock; then
+    echo "✗ Cargo.lock: utoipa-swagger-ui-vendored が解決されていない（feature が効いていない）" >&2
     fail=1
 fi
 
-if ! grep -q '^name = "utoipa-swagger-ui-vendored"$' Cargo.lock; then
-    echo "✗ Cargo.lock: utoipa-swagger-ui-vendored が解決されていない（feature が効いていない）" >&2
+# 宣言側も見る（ロックだけだと「宣言を消したがロックを再生成していない」状態を見逃す）。
+# **1 行に限定しない**——`features` を複数行に整形するのは正当なので、宣言の開始行から最初の `}` まで
+# を切り出して探す。単一行の grep にすると整形だけで検査が落ちる（偽陽性）。
+decl=$(awk '/^utoipa-swagger-ui[[:space:]]*=/ { found = 1 }
+            found { print; if (/\}/) exit }' Cargo.toml)
+if [ -z "$decl" ]; then
+    echo "✗ Cargo.toml: utoipa-swagger-ui の依存宣言が見つからない（この検査の前提が崩れている）" >&2
+    fail=1
+elif ! printf '%s\n' "$decl" | grep -q '"vendored"'; then
+    echo "✗ Cargo.toml: utoipa-swagger-ui の features に \"vendored\" が無い" >&2
     fail=1
 fi
 

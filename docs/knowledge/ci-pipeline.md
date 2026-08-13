@@ -150,6 +150,10 @@ OpenAPI 仕様を描画する開発者向け UI なので、埋め込み版の�
   ジョブと pre-push）。feature が外れると build script は無警告でダウンロード分岐へ戻り、GitHub
   ランナーには curl があるので **required の `ci` は黙って外部取得を再開**する（落ちるのは非必須の
   `docker-build` だけ・原因の分かりにくいエラーで）。Dockerfile のコメントは人手の規律にすぎない。
+  **主たる根拠は `Cargo.lock`**（optional な依存は feature で活性化されない限りロックに載らないので、
+  在否がそのまま feature の効き方を表す・書式非依存・`--locked` で鮮度も担保）。宣言側も見るのは
+  「宣言を消したがロックを再生成していない」状態を拾うためで、**照合は単一行に限定しない**
+  （`features` の複数行整形は正当なので、単一行 grep だと整形だけで落ちる＝偽陽性になる）。
 - **`-vv` のログの読み方**: `SWAGGER_UI_DOWNLOAD_URL: <url>` は **vendored でも印字される**ので
   ダウンロードの証拠にならない。実際に取得したかは `using vendored Swagger UI`（vendored 経路）と
   `start download to`（ダウンロード経路）のどちらが出るかで見る。
