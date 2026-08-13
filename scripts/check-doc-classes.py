@@ -99,6 +99,15 @@ def git(*args: str) -> "subprocess.CompletedProcess[str]":
     return subprocess.run(["git", *args], cwd=_ROOT, capture_output=True, text=True)
 
 
+def git_raw(*args: str) -> "subprocess.CompletedProcess[bytes]":
+    """git の出力を**バイト列**で取る。
+
+    `text=True` は universal newlines を通すので `\\r\\n` が `\\n` に潰れる。ファイルの中身を
+    行ごとに比べる用途（blob_at）では、それをやると **CRLF 変換が差分として見えなくなる**。
+    """
+    return subprocess.run(["git", *args], cwd=_ROOT, capture_output=True)
+
+
 def repo_root() -> Path:
     proc = subprocess.run(
         ["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True
@@ -187,17 +196,18 @@ def frontmatter_blocks(fm: str) -> "dict[str, str]":
 METADATA_KEYS = {"doc_class", "tags", "sources", "distilled_from_sha", "updated"}
 
 
-@functools.lru_cache(maxsize=None)
-def blob(sha: str, path: str) -> "str | None":
+# 「内容変更ではない」を判定する述語が同じ (sha, path) の前後ブロブを見るので共有する。
+# 有界にするのは、再利用が「1 コミットにつき前後 2 本」の局所パターンだけで、無制限だと
+# 走査したコミットぶんのファイル全文をプロセス寿命のあいだ抱え続けるため。
+@functools.lru_cache(maxsize=32)
+def blob_at(sha: str, path: str) -> "str | None":
     """コミット sha 時点の path の中身。取れなければ None。
 
-    「内容変更ではない」を判定する述語（is_metadata_only_change / is_pin_only_change）が
-    同じ (sha, path) の前後ブロブを見るので、ここで共有してキャッシュする。分けておくと
-    候補コミット 1 件あたり git show が 4 本になり、107 KB の openapi.json のような
-    大きい sources で無駄が目立つ。
+    **改行コードは潰さない**（git_raw のとおり）。CRLF ⇄ LF の変換を「差分なし」と
+    見なすと、変換とピン更新が同居したコミットが例外 1d に乗ってしまう。
     """
-    proc = git("show", f"{sha}:{path}")
-    return proc.stdout if proc.returncode == 0 else None
+    proc = git_raw("show", f"{sha}:{path}")
+    return proc.stdout.decode("utf-8", "replace") if proc.returncode == 0 else None
 
 
 def is_metadata_only_change(sha: str, path: str) -> bool:
@@ -207,7 +217,7 @@ def is_metadata_only_change(sha: str, path: str) -> bool:
     いないのに「内容変更」と見なすと、それを sources に持つ knowledge が軒並み stale に
     なる（実測 7 件）。文書クラスの付与も同じ形で自己ノイズを生む。
     """
-    new_text, old_text = blob(sha, path), blob(f"{sha}^", path)
+    new_text, old_text = blob_at(sha, path), blob_at(f"{sha}^", path)
     if new_text is None or old_text is None:
         return False  # 初回追加や親を辿れない場合は判定しない（内容変更として扱う）
     new_fm, new_body = split_frontmatter(new_text)
@@ -231,11 +241,12 @@ RE_WORKFLOW_PATH = re.compile(r"^\.github/workflows/[^/]+\.ya?ml$")
 #     変わる更新を免除してしまう。
 #   - group(4) は**版注記の形だけ**許す。dependabot が hex と一緒に `# v4` → `# v7.0.0` の
 #     ように注記も書き換えることがあるため（実例 884f982 = actions/setup-node）。任意の
-#     コメントを許すと、注記を無関係な散文へ差し替えた変更まで免除される。
+#     コメントを許すと、注記を無関係な散文へ差し替えた変更まで免除される。`#` の前に空白を
+#     必須にするのは、`@<40hex>#v4` は YAML ではコメントにならず ref の一部だから。
 # 同一パス内でも `run: |` のブロックスカラに同じ形の行があれば拾ってしまうが、
 # 対象をワークフローに絞ってあるので実害は「自リポの CI スクリプト本文」に限られる。
 RE_USES_PIN = re.compile(
-    r"^(\s*(?:-\s+)?uses:\s+)([^@\s/]+/[^@\s/]+)@([0-9a-fA-F]{40})(\s*#\s*v?\d[\w.+-]*)?$"
+    r"^(\s*(?:-\s+)?uses:\s+)([^@\s/]+/[^@\s/]+)@([0-9a-fA-F]{40})(\s+#\s*v?\d[\w.+-]*)?$"
 )
 
 
@@ -249,10 +260,13 @@ def is_pin_only_change(sha: str, path: str) -> bool:
     """
     if not RE_WORKFLOW_PATH.match(path):
         return False
-    new_text, old_text = blob(sha, path), blob(f"{sha}^", path)
+    new_text, old_text = blob_at(sha, path), blob_at(f"{sha}^", path)
     if new_text is None or old_text is None:
         return False  # 初回追加や親を辿れない場合は判定しない（内容変更として扱う）
-    new_lines, old_lines = new_text.splitlines(), old_text.splitlines()
+    # splitlines() ではなく "\n" で割る。splitlines() は \r や \x0b でも切るので、CRLF 変換や
+    # 制御文字の混入が「差分なし」に見えてしまう。行末の \r を残せば正規表現に合わなくなり、
+    # 内容変更として扱われる（保守側）。
+    new_lines, old_lines = new_text.split("\n"), old_text.split("\n")
     if len(new_lines) != len(old_lines):
         return False  # 行の増減はジョブ・ステップの追加削除なので内容変更
     changed = 0
@@ -272,7 +286,8 @@ def is_pin_only_change(sha: str, path: str) -> bool:
         if new_pin.group(3) != old_pin.group(3):
             hex_changed = True
     # 注記だけを書き換えたコミットは免除しない（「ピン留め SHA 更新のみ」が例外の条件）。
-    return changed > 0 and hex_changed
+    # hex_changed は差分行の中でしか立たないので、これだけで「差分が 1 行以上ある」も兼ねる。
+    return hex_changed
 
 
 def path_status(sha: str, path: str) -> "tuple[str | None, str | None]":
@@ -296,6 +311,12 @@ def path_status(sha: str, path: str) -> "tuple[str | None, str | None]":
     return None, None
 
 
+# last_content_change が「走査を打ち切った」ことを表す番兆。40 hex にならない形にしてあるので
+# SHA と混ざらない。**None（履歴を辿れない）と区別する**のが目的で、打ち切りは検査側の都合
+# なので警告で流さず error にする（履歴が無いのは環境の都合なので警告のまま）。
+SCAN_TRUNCATED = "<scan-truncated>"
+
+
 @functools.lru_cache(maxsize=None)
 def last_content_change(
     path: str, limit: int = 40, max_renames: int = 10, max_pages: int = 25
@@ -316,13 +337,24 @@ def last_content_change(
     落として stale 判定をスキップする（fail-open）ので、「窓の中が全部除外対象だった」だけで
     None を返すと、除外対象のコミットを積むほど検査が消える経路になる。例外 1d で機械が
     量産するコミットが除外対象になった以上これは現実的なので、**取れた件数が limit に達して
-    いたら次のページへ進む**（履歴が尽きた場合だけ None）。
+    いたら次のページへ進む**。
+
+    戻り値は 3 通り。**「打ち切った」を「履歴が無い」に混ぜないこと**が要点で、混ぜると
+    予算の枯渇が warning に落ちて同じ fail-open が一段外側で再現する。
+
+      - SHA        : 内容が最後に変わったコミット
+      - None       : 履歴を辿れない（未コミット・git log 失敗・履歴が尽きた・shallow）
+      - SCAN_TRUNCATED : 走査予算を使い切った（ページ数 max_pages / リネーム段数 max_renames）
     """
     current = path
     tip = "HEAD"
     skip = 0
     renames = 0
-    for _ in range(max_renames * max_pages):
+    pages = 0
+    while True:
+        if pages >= max_pages:
+            return SCAN_TRUNCATED
+        pages += 1
         proc = git(
             "log", f"--max-count={limit}", f"--skip={skip}", "--format=%H", tip, "--", current
         )
@@ -345,22 +377,24 @@ def last_content_change(
                 current = rename_src
                 tip = f"{sha}^"
                 skip = 0  # パスが変わったので窓の位置も取り直す
+                pages = 0  # ページ予算も新しいパスに対して取り直す
                 renames += 1
                 renamed = True
                 break
-            if is_metadata_only_change(sha, current):
-                continue
+            # ワークフローの判定を先に置く。こちらはパスで即棄却できるので、.yml に対して
+            # frontmatter の分解を試みる無駄が消える。
             if is_pin_only_change(sha, current):
+                continue
+            if is_metadata_only_change(sha, current):
                 continue
             return sha
         if renamed:
             if renames >= max_renames:
-                return None  # リネームを辿りすぎ＝判定不能
+                return SCAN_TRUNCATED  # リネームを辿りすぎ＝走査を打ち切った
             continue
         if len(shas) < limit:
             return None  # この系列は全部「内容変更ではない」で、履歴も尽きた
         skip += limit  # 窓を使い切っただけ。まだ先に履歴があるので次のページへ
-    return None
 
 
 # --- REQ（要件 ID）の検査 ---------------------------------------------------
@@ -935,9 +969,18 @@ def main(argv: list[str]) -> int:
             if not (root / src).is_file():
                 continue  # 実在チェックで既に error にしている
             changed = last_content_change(src)
+            if changed == SCAN_TRUNCATED:
+                # 走査予算の枯渇。**warning にしない**——これは環境の都合ではなく検査側の
+                # 都合で、warning に落とすと「除外対象のコミットを積めば検査が消える」
+                # fail-open が一段外側で再現する（この PR が塞いだのと同じ形）。
+                errors.append(
+                    f"{rel}: {src} の履歴走査を打ち切った（除外対象が続きすぎ）。"
+                    "stale 判定が行われていないので limit / max_pages を見直す"
+                )
+                continue
             if changed is None:
-                # 履歴を辿れなかった（未コミット・打ち切り等）。黙って通すと fail-open に
-                # なるので可視化する。
+                # 履歴を辿れなかった（未コミット・git log 失敗・履歴の尽き・shallow）。
+                # 黙って通すと fail-open になるので可視化する。
                 warnings.append(f"{rel}: {src} の履歴を辿れず stale 判定を実施できなかった")
                 continue
             if git("merge-base", "--is-ancestor", changed, distilled_full).returncode != 0:

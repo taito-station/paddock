@@ -15,6 +15,10 @@
   scripts/test-check-doc-classes.py
 """
 
+import contextlib
+import importlib.util
+import io
+import os
 import re
 import shutil
 import subprocess
@@ -94,6 +98,10 @@ def new_repo() -> Path:
     run_git(repo, "init", "-q")
     run_git(repo, "config", "user.email", "test@example.invalid")
     run_git(repo, "config", "user.name", "test")
+    # 改行コードを git に触らせない。global 設定が autocrlf=true/input の環境だと add 時に
+    # 正規化され、CRLF のケースが「nothing to commit」で例外になってスイートごと落ちる。
+    run_git(repo, "config", "core.autocrlf", "false")
+    run_git(repo, "config", "core.safecrlf", "false")
     (repo / "docs/knowledge").mkdir(parents=True)
     (repo / "docs/specifications").mkdir(parents=True)
     (repo / "docs/original-docs").mkdir(parents=True)
@@ -852,17 +860,23 @@ def test_pin_change_with_comment_edit_is_stale() -> None:
 
 
 def test_action_repo_change_is_stale() -> None:
-    """対照: owner/repo の差し替えは別の action を呼ぶこと＝ジョブの意味が変わる。"""
+    """対照: owner/repo の差し替えは別の action を呼ぶこと＝ジョブの意味が変わる。
+
+    **hex も同時に変える。** 据え置くと hex_changed が立たない側で弾かれてしまい、
+    owner/repo の同一性判定（group(1, 2) の比較）を固定できない（実際の差し替えも
+    ピン更新と同居する形になる）。
+    """
     repo = new_repo()
     try:
         workflow_baseline(repo)
         path = repo / WORKFLOW_REL
         path.write_text(
             path.read_text(encoding="utf-8").replace(
-                "dtolnay/rust-toolchain@", "actions-rust-lang/setup-rust-toolchain@"),
+                f"dtolnay/rust-toolchain@{PIN_TOOLCHAIN_OLD}",
+                f"actions-rust-lang/setup-rust-toolchain@{PIN_TOOLCHAIN_NEW}"),
             encoding="utf-8",
         )
-        commit_all(repo, "toolchain の action を差し替え")
+        commit_all(repo, "toolchain の action を差し替え（ピン更新と同居）")
         code, out = check(repo)
         assert code == 1, out
         assert "STALE" in out, f"action の差し替えを検出できていない:\n{out}"
@@ -870,19 +884,146 @@ def test_action_repo_change_is_stale() -> None:
         shutil.rmtree(repo)
 
 
-def test_workflow_line_added_is_stale() -> None:
-    """対照: 行の増減（ステップ追加）は内容変更。"""
+def test_workflow_line_added_with_pin_bump_is_stale() -> None:
+    """対照: 行の増減（ステップ追加）は内容変更。
+
+    **ピン更新と同居させる。** 追加だけだと zip が短い側で切れて差分行 0 件になり、
+    行数一致ガードの有無に関係なく非免除になる＝ガードを固定できない。ガードが無いと
+    「ピン更新＋ステップ追加」が免除されてしまうので、そこを突く形にする。
+    """
     repo = new_repo()
     try:
         workflow_baseline(repo)
+        write_workflow(repo, toolchain=PIN_TOOLCHAIN_NEW)
         path = repo / WORKFLOW_REL
         path.write_text(
             path.read_text(encoding="utf-8") + "      - run: cargo test\n", encoding="utf-8"
         )
-        commit_all(repo, "ステップを追加")
+        commit_all(repo, "ピン更新とステップ追加")
         code, out = check(repo)
         assert code == 1, out
-        assert "STALE" in out, f"ステップ追加を検出できていない:\n{out}"
+        assert "STALE" in out, f"ピン更新＋ステップ追加を免除してしまっている:\n{out}"
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_trailing_blank_line_with_pin_bump_is_stale() -> None:
+    """対照: 行数一致ガードを固定する唯一の形（末尾に空行 1 行＋ピン更新）。
+
+    末尾に**内容のある**行を足す形ではガードを固定できない——`zip` が短い側で切れて
+    末尾がズレ、そこに非ピン差分が生まれるのでガードが無くても内容変更に落ちる。
+    空行なら zip の範囲内が完全一致するため、**ガードだけが唯一の防壁**になる。
+    """
+    repo = new_repo()
+    try:
+        workflow_baseline(repo)
+        write_workflow(repo, toolchain=PIN_TOOLCHAIN_NEW)
+        path = repo / WORKFLOW_REL
+        path.write_text(path.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+        commit_all(repo, "ピン更新と末尾の空行追加")
+        code, out = check(repo)
+        assert code == 1, out
+        assert "STALE" in out, f"行数の増加を免除してしまっている:\n{out}"
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_crlf_conversion_with_pin_bump_is_stale() -> None:
+    """対照: CRLF 変換とピン更新が同居しても免除しない。
+
+    blob 取得が universal newlines を通ると `\\r` が消えて「ピン行だけの差分」に見える。
+    `run:` ブロックの改行コードは shell の挙動を変えうるので、内容変更として扱う。
+    """
+    repo = new_repo()
+    try:
+        workflow_baseline(repo)
+        write_workflow(repo, toolchain=PIN_TOOLCHAIN_NEW)
+        path = repo / WORKFLOW_REL
+        path.write_bytes(path.read_text(encoding="utf-8").replace("\n", "\r\n").encode("utf-8"))
+        commit_all(repo, "ピン更新と CRLF 変換")
+        code, out = check(repo)
+        assert code == 1, out
+        assert "STALE" in out, f"CRLF 変換込みのピン更新を免除してしまっている:\n{out}"
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_pin_bump_with_note_only_line_is_not_stale() -> None:
+    """免除する形の明文化: 1 行は hex 更新、別の 1 行は注記だけの変更。
+
+    hex_changed は「どこか 1 行で hex が動いた」なので、同じコミット内の別のピン行が
+    注記だけの変更でも免除される。意図した挙動なので固定しておく。
+    """
+    repo = new_repo()
+    try:
+        workflow_baseline(repo)
+        write_workflow(repo, toolchain=PIN_TOOLCHAIN_NEW, cache_tag="v2.9.2")
+        commit_all(repo, "片方は hex 更新・片方は注記だけ")
+        code, out = check(repo)
+        assert code == 0, out
+        assert "STALE" not in out, f"混在した免除対象を stale と誤判定した:\n{out}"
+        assert "履歴を辿れず" not in out, f"stale 判定が丸ごとスキップされている:\n{out}"
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_pin_change_in_yaml_extension_workflow_is_not_stale() -> None:
+    """`.yaml` 拡張子のワークフローも例外 1d の対象（RE_WORKFLOW_PATH の `ya?ml`）。"""
+    repo = new_repo()
+    try:
+        sha = baseline(repo)
+        rel = ".github/workflows/audit.yaml"
+        sources = [rel, "docs/original-docs/0001-first.md"]
+        (repo / rel).parent.mkdir(parents=True, exist_ok=True)
+        (repo / rel).write_text(
+            f"name: audit\non: [push]\njobs:\n  a:\n    steps:\n"
+            f"      - uses: actions/checkout@{PIN_CHECKOUT}\n",
+            encoding="utf-8",
+        )
+        write_doc(repo, "docs/knowledge/a.md", ["D19"], sources, sha)
+        added = commit_all(repo, "audit.yaml を source にする")
+        write_doc(repo, "docs/knowledge/a.md", ["D19"], sources, added)
+        commit_all(repo, "追従")
+        assert check(repo)[0] == 0, "前提: ここでは stale でない"
+
+        (repo / rel).write_text(
+            (repo / rel).read_text(encoding="utf-8").replace(PIN_CHECKOUT, PIN_TOOLCHAIN_NEW),
+            encoding="utf-8",
+        )
+        commit_all(repo, "audit.yaml のピンを更新")
+        code, out = check(repo)
+        assert code == 0, out
+        assert "STALE" not in out, f".yaml 拡張子が例外 1d の対象から外れている:\n{out}"
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_pin_change_in_non_workflow_yml_is_stale() -> None:
+    """対照: ワークフロー以外の `.yml`（compose 等）は例外 1d の対象外。"""
+    repo = new_repo()
+    try:
+        sha = baseline(repo)
+        rel = "deployments/compose.yml"
+        sources = [rel, "docs/original-docs/0001-first.md"]
+        (repo / rel).parent.mkdir(parents=True, exist_ok=True)
+        (repo / rel).write_text(
+            f"services:\n  a:\n    steps:\n      - uses: actions/checkout@{PIN_CHECKOUT}\n",
+            encoding="utf-8",
+        )
+        write_doc(repo, "docs/knowledge/a.md", ["D19"], sources, sha)
+        added = commit_all(repo, "compose.yml を source にする")
+        write_doc(repo, "docs/knowledge/a.md", ["D19"], sources, added)
+        commit_all(repo, "追従")
+        assert check(repo)[0] == 0, "前提: ここでは stale でない"
+
+        (repo / rel).write_text(
+            (repo / rel).read_text(encoding="utf-8").replace(PIN_CHECKOUT, PIN_TOOLCHAIN_NEW),
+            encoding="utf-8",
+        )
+        commit_all(repo, "compose.yml のピン形の行を更新")
+        code, out = check(repo)
+        assert code == 1, out
+        assert "STALE" in out, f"ワークフロー以外の .yml を免除してしまっている:\n{out}"
     finally:
         shutil.rmtree(repo)
 
@@ -902,6 +1043,171 @@ def test_pin_to_tag_change_is_stale() -> None:
         code, out = check(repo)
         assert code == 1, out
         assert "STALE" in out, f"ピンからタグへの緩和を検出できていない:\n{out}"
+    finally:
+        shutil.rmtree(repo)
+
+
+# --- 走査窓のページングとリネームの相互作用 -----------------------------------
+# ここだけは checker をモジュールとして読み込んで `last_content_change` を直接叩く。
+# limit / max_pages を小さくできるので、窓の枯渇や打ち切りを 40 コミット積まずに固定できる。
+# **テストごとに読み込み直す**のが要点で、`last_content_change` の lru_cache はキーに
+# リポジトリを含まないため、モジュールを共有すると別の一時リポの結果を引いてしまう。
+
+
+def load_checker(repo: Path):
+    spec = importlib.util.spec_from_file_location("checker_under_test", TARGET)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    module._ROOT = repo
+    return module
+
+
+def write_moved_workflow(repo: Path, rel: str, toolchain: str, comment: str) -> None:
+    (repo / rel).write_text(
+        WORKFLOW_TEMPLATE.format(comment=comment, checkout=PIN_CHECKOUT, toolchain=toolchain,
+                                 cache=PIN_CACHE_OLD, cache_tag="v2", reusable=PIN_REUSABLE_OLD),
+        encoding="utf-8",
+    )
+
+
+def test_paging_finds_content_change_beyond_window() -> None:
+    """除外対象が窓を埋めても、その先の内容変更を見つける。"""
+    repo = new_repo()
+    try:
+        m = load_checker(repo)
+        write_workflow(repo)
+        commit_all(repo, "ワークフローを追加")
+        write_workflow(repo, comment="説明を書き換える")
+        commit_all(repo, "説明を実質変更")
+        real = run_git(repo, "rev-parse", "HEAD")
+        for i in range(5):
+            write_workflow(repo, toolchain=f"{i:040x}", comment="説明を書き換える")
+            commit_all(repo, f"ピン更新 {i}")
+        got = m.last_content_change(WORKFLOW_REL, limit=2, max_pages=10)
+        assert got == real, f"窓の先にある内容変更を見失っている: {got} != {real}"
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_metadata_only_commits_beyond_window_do_not_hide_stale() -> None:
+    """ページングは例外 1b（frontmatter のみの変更）にも効く。"""
+    repo = new_repo()
+    try:
+        m = load_checker(repo)
+        rel = "docs/specifications/s.md"
+        write_doc(repo, rel, ["D19"], ["docs/original-docs/0001-first.md"], "HEAD")
+        commit_all(repo, "s.md を追加")
+        p = repo / rel
+        p.write_text(p.read_text(encoding="utf-8") + "\n本文の追記。\n", encoding="utf-8")
+        commit_all(repo, "s.md の本文を変更")
+        real = run_git(repo, "rev-parse", "HEAD")
+        for i in range(5):
+            p.write_text(
+                re.sub(r'distilled_from_sha: "[^"]*"', f'distilled_from_sha: "{i:07x}"',
+                       p.read_text(encoding="utf-8")),
+                encoding="utf-8",
+            )
+            commit_all(repo, f"sha だけ更新 {i}")
+        got = m.last_content_change(rel, limit=2, max_pages=10)
+        assert got == real, f"frontmatter のみのコミットで窓が埋まると見失う: {got} != {real}"
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_scan_truncation_is_distinguished_from_missing_history() -> None:
+    """予算を使い切ったら SCAN_TRUNCATED を返す（None＝履歴を辿れない とは別物）。
+
+    ここを None に混ぜると、呼び出し側が warning に落として stale 判定をスキップし、
+    「除外対象のコミットを積めば検査が消える」fail-open が一段外側で再現する。
+    """
+    repo = new_repo()
+    try:
+        m = load_checker(repo)
+        write_workflow(repo)
+        commit_all(repo, "ワークフローを追加")
+        write_workflow(repo, comment="説明を書き換える")
+        commit_all(repo, "説明を実質変更")
+        for i in range(6):
+            write_workflow(repo, toolchain=f"{i:040x}", comment="説明を書き換える")
+            commit_all(repo, f"ピン更新 {i}")
+        got = m.last_content_change(WORKFLOW_REL, limit=2, max_pages=2)
+        assert got == m.SCAN_TRUNCATED, f"打ち切りを履歴の尽きと混同している: {got!r}"
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_rename_limit_is_reported_as_truncation() -> None:
+    """リネーム段数の上限で打ち切ったときも SCAN_TRUNCATED（None に混ぜない）。
+
+    ページ予算の枝とは別の経路なので、片方だけ直しても他方が warning に落ちる。
+    """
+    repo = new_repo()
+    try:
+        m = load_checker(repo)
+        write_workflow(repo)
+        commit_all(repo, "ワークフローを追加")
+        first = ".github/workflows/ci-1.yml"
+        second = ".github/workflows/ci-2.yml"
+        run_git(repo, "mv", WORKFLOW_REL, first)
+        commit_all(repo, "1 回目の改名（内容不変）")
+        run_git(repo, "mv", first, second)
+        commit_all(repo, "2 回目の改名（内容不変）")
+        got = m.last_content_change(second, limit=5, max_renames=1)
+        assert got == m.SCAN_TRUNCATED, f"リネーム上限の打ち切りを None に混ぜている: {got!r}"
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_truncation_is_reported_as_error_not_warning() -> None:
+    """打ち切りは **error**（warning に落とすと fail-open が一段外側で再現する）。
+
+    既定の予算（limit=40 × max_pages=25）を実リポジトリで使い切らせるのは非現実的なので、
+    `last_content_change` を差し替えて呼び出し側の分岐だけを固定する。
+    """
+    repo = new_repo()
+    try:
+        m = load_checker(repo)
+        baseline(repo)
+        m.last_content_change = lambda *a, **k: m.SCAN_TRUNCATED
+        cwd = Path.cwd()
+        out = io.StringIO()
+        try:
+            os.chdir(repo)
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+                code = m.main(["check"])
+        finally:
+            os.chdir(cwd)
+        text = out.getvalue()
+        assert code == 1, f"打ち切りが error になっていない（exit {code}）:\n{text}"
+        assert "打ち切った" in text, f"打ち切りの理由が出力されていない:\n{text}"
+        assert "履歴を辿れず" not in text, f"打ち切りを履歴の尽きと同じ文言で流している:\n{text}"
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_window_position_resets_after_rename() -> None:
+    """リネームを辿るときに窓の位置（skip）を取り直す。
+
+    取り直さないと、改名前のパスの履歴を skip 件ぶん飛ばして読み始め、実質の変更点を
+    丸ごと通り過ぎる（結果は None＝fail-open）。
+    """
+    repo = new_repo()
+    try:
+        m = load_checker(repo)
+        write_workflow(repo)
+        commit_all(repo, "ワークフローを追加")
+        write_workflow(repo, comment="説明を書き換える")
+        commit_all(repo, "説明を実質変更")
+        real = run_git(repo, "rev-parse", "HEAD")
+        moved = ".github/workflows/ci-renamed.yml"
+        run_git(repo, "mv", WORKFLOW_REL, moved)
+        commit_all(repo, "ワークフローを改名（内容不変）")
+        # 改名後のパスでピン更新を積み、リネームが 2 ページ目に来る形にする。
+        for i in range(3):
+            write_moved_workflow(repo, moved, f"{i:040x}", "説明を書き換える")
+            commit_all(repo, f"改名後のピン更新 {i}")
+        got = m.last_content_change(moved, limit=2, max_pages=10)
+        assert got == real, f"リネーム後に窓の位置を取り直せていない: {got} != {real}"
     finally:
         shutil.rmtree(repo)
 
