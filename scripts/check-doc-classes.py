@@ -187,6 +187,19 @@ def frontmatter_blocks(fm: str) -> "dict[str, str]":
 METADATA_KEYS = {"doc_class", "tags", "sources", "distilled_from_sha", "updated"}
 
 
+@functools.lru_cache(maxsize=None)
+def blob(sha: str, path: str) -> "str | None":
+    """コミット sha 時点の path の中身。取れなければ None。
+
+    「内容変更ではない」を判定する述語（is_metadata_only_change / is_pin_only_change）が
+    同じ (sha, path) の前後ブロブを見るので、ここで共有してキャッシュする。分けておくと
+    候補コミット 1 件あたり git show が 4 本になり、107 KB の openapi.json のような
+    大きい sources で無駄が目立つ。
+    """
+    proc = git("show", f"{sha}:{path}")
+    return proc.stdout if proc.returncode == 0 else None
+
+
 def is_metadata_only_change(sha: str, path: str) -> bool:
     """そのコミットの変更が frontmatter のメタデータだけかを判定する。
 
@@ -194,12 +207,11 @@ def is_metadata_only_change(sha: str, path: str) -> bool:
     いないのに「内容変更」と見なすと、それを sources に持つ knowledge が軒並み stale に
     なる（実測 7 件）。文書クラスの付与も同じ形で自己ノイズを生む。
     """
-    new = git("show", f"{sha}:{path}")
-    old = git("show", f"{sha}^:{path}")
-    if new.returncode != 0 or old.returncode != 0:
+    new_text, old_text = blob(sha, path), blob(f"{sha}^", path)
+    if new_text is None or old_text is None:
         return False  # 初回追加や親を辿れない場合は判定しない（内容変更として扱う）
-    new_fm, new_body = split_frontmatter(new.stdout)
-    old_fm, old_body = split_frontmatter(old.stdout)
+    new_fm, new_body = split_frontmatter(new_text)
+    old_fm, old_body = split_frontmatter(old_text)
     if new_fm is None or old_fm is None or new_body != old_body:
         return False
     new_blocks, old_blocks = frontmatter_blocks(new_fm), frontmatter_blocks(old_fm)
@@ -207,33 +219,44 @@ def is_metadata_only_change(sha: str, path: str) -> bool:
     return bool(changed) and changed <= METADATA_KEYS
 
 
+# 例外 1d の対象パス。**ワークフローだけに絞る**。判定は行単位・字面ベースで YAML 構造を
+# 見ないので、絞らないと Markdown のコードフェンス内に書いた `uses:` の見本を書き換えただけで
+# その文書の stale 検査が消える（README / ADR 0081 も「対象はワークフロー」として書いている）。
+RE_WORKFLOW_PATH = re.compile(r"^\.github/workflows/[^/]+\.ya?ml$")
+
 # GitHub Actions の `uses:` 行。サプライチェーン対策でピン留めしている 40 hex を捕まえる。
-# group(1)=インデントと `uses:` / group(2)=owner/repo / group(3)=40 hex / group(4)=末尾の注記。
-# 末尾注記まで許すのは dependabot が hex と一緒に `# v2` → `# v2.9.2` も書き換えるため
-# （#607 の a5cfa46 で実測）。ここを許さないと Swatinem/rust-cache 系を取りこぼす。
-RE_USES_PIN = re.compile(r"^(\s*(?:-\s+)?uses:\s+)([^@\s]+)@([0-9a-fA-F]{40})(\s*#.*)?$")
+# group(1)=インデントと `uses:` / group(2)=owner/repo / group(3)=40 hex / group(4)=末尾の版注記。
+#   - group(2) は `/` を含まない 2 要素に限る。緩めると再利用可能ワークフロー参照
+#     （`owner/repo/.github/workflows/x.yml@<sha>`）まで拾い、呼び先のジョブ構成ごと
+#     変わる更新を免除してしまう。
+#   - group(4) は**版注記の形だけ**許す。dependabot が hex と一緒に `# v4` → `# v7.0.0` の
+#     ように注記も書き換えることがあるため（実例 884f982 = actions/setup-node）。任意の
+#     コメントを許すと、注記を無関係な散文へ差し替えた変更まで免除される。
+# 同一パス内でも `run: |` のブロックスカラに同じ形の行があれば拾ってしまうが、
+# 対象をワークフローに絞ってあるので実害は「自リポの CI スクリプト本文」に限られる。
+RE_USES_PIN = re.compile(
+    r"^(\s*(?:-\s+)?uses:\s+)([^@\s/]+/[^@\s/]+)@([0-9a-fA-F]{40})(\s*#\s*v?\d[\w.+-]*)?$"
+)
 
 
 def is_pin_only_change(sha: str, path: str) -> bool:
-    """そのコミットの変更が `uses:` のピン留め SHA 更新だけかを判定する。
+    """そのコミットの変更が `uses:` のピン留め SHA 更新だけかを判定する（例外 1d）。
 
-    .github/workflows/ci.yml は ci-pipeline.md の sources なので、ci.yml を触る PR は
-    すべて stale になる。dependabot は下流の distilled_from_sha を更新できないため、
-    Actions のピン更新 PR が構造的に永久に赤だった（#590 / #591 が 2 日以上塞がれ、#607 で
-    人が手で 1 本に統合して追従させた）。ピンの hex が上がっても ci-pipeline.md の本文が
-    語るジョブ構成は変わらないので、下流が読み直す理由にならない。
-
-    is_metadata_only_change はここでは効かない。あちらは split_frontmatter に依存しており、
+    規約と背景は docs/knowledge/README.md の例外 1d と ADR 0081。要点は、ピンの hex が
+    上がっても下流 knowledge が語るジョブ構成は変わらないので読み直す理由が無いこと。
+    例外 1b では吸収できない——is_metadata_only_change は split_frontmatter に依存しており、
     先頭が `---` でない .yml は常に「内容変更」と判定される。
     """
-    new = git("show", f"{sha}:{path}")
-    old = git("show", f"{sha}^:{path}")
-    if new.returncode != 0 or old.returncode != 0:
+    if not RE_WORKFLOW_PATH.match(path):
+        return False
+    new_text, old_text = blob(sha, path), blob(f"{sha}^", path)
+    if new_text is None or old_text is None:
         return False  # 初回追加や親を辿れない場合は判定しない（内容変更として扱う）
-    new_lines, old_lines = new.stdout.splitlines(), old.stdout.splitlines()
+    new_lines, old_lines = new_text.splitlines(), old_text.splitlines()
     if len(new_lines) != len(old_lines):
         return False  # 行の増減はジョブ・ステップの追加削除なので内容変更
     changed = 0
+    hex_changed = False
     for new_line, old_line in zip(new_lines, old_lines):
         if new_line == old_line:
             continue
@@ -241,12 +264,15 @@ def is_pin_only_change(sha: str, path: str) -> bool:
         new_pin, old_pin = RE_USES_PIN.match(new_line), RE_USES_PIN.match(old_line)
         if not new_pin or not old_pin:
             return False
-        # 変わってよいのは 40 hex と末尾注記だけ。owner/repo の差し替えは別の action を
+        # 変わってよいのは 40 hex と末尾の版注記だけ。owner/repo の差し替えは別の action を
         # 呼ぶことなのでジョブの意味が変わる＝内容変更。タグ → hex のような形式変更も
         # 片側が RE_USES_PIN に合わないので上で弾かれる。
         if new_pin.group(1, 2) != old_pin.group(1, 2):
             return False
-    return changed > 0
+        if new_pin.group(3) != old_pin.group(3):
+            hex_changed = True
+    # 注記だけを書き換えたコミットは免除しない（「ピン留め SHA 更新のみ」が例外の条件）。
+    return changed > 0 and hex_changed
 
 
 def path_status(sha: str, path: str) -> "tuple[str | None, str | None]":
@@ -271,7 +297,9 @@ def path_status(sha: str, path: str) -> "tuple[str | None, str | None]":
 
 
 @functools.lru_cache(maxsize=None)
-def last_content_change(path: str, limit: int = 40, max_renames: int = 10) -> "str | None":
+def last_content_change(
+    path: str, limit: int = 40, max_renames: int = 10, max_pages: int = 25
+) -> "str | None":
     """path の**内容**が最後に変わったコミットの SHA。
 
     次の 3 種類は「内容変更ではない」として遡る（規約は docs/knowledge/README.md の例外 1 / 1b / 1d）:
@@ -283,16 +311,26 @@ def last_content_change(path: str, limit: int = 40, max_renames: int = 10) -> "s
     ADR 0036 は移設コミット 1 件しか返さず、それ以前の起票コミットへ辿れなかった）、
     そこで打ち切られると「履歴を辿れない＝判定不能」に落ちる。代わりに、R100 を見つけたら
     **そのコミットの親からリネーム元のパスで履歴を取り直す**。リネームが何段重なっても効く。
+
+    **窓（limit）の使い切りと履歴の尽きを混同しない。** 呼び出し側は None を warning に
+    落として stale 判定をスキップする（fail-open）ので、「窓の中が全部除外対象だった」だけで
+    None を返すと、除外対象のコミットを積むほど検査が消える経路になる。例外 1d で機械が
+    量産するコミットが除外対象になった以上これは現実的なので、**取れた件数が limit に達して
+    いたら次のページへ進む**（履歴が尽きた場合だけ None）。
     """
     current = path
     tip = "HEAD"
-    for _ in range(max_renames):
-        proc = git("log", f"--max-count={limit}", "--format=%H", tip, "--", current)
+    skip = 0
+    renames = 0
+    for _ in range(max_renames * max_pages):
+        proc = git(
+            "log", f"--max-count={limit}", f"--skip={skip}", "--format=%H", tip, "--", current
+        )
         if proc.returncode != 0:
             return None
         shas = proc.stdout.split()
         if not shas:
-            return None
+            return None  # 履歴が尽きた
         renamed = False
         for sha in shas:
             status, rename_src = path_status(sha, current)
@@ -306,6 +344,8 @@ def last_content_change(path: str, limit: int = 40, max_renames: int = 10) -> "s
                     return sha  # リネーム元を取れない＝判定できないので内容変更扱い
                 current = rename_src
                 tip = f"{sha}^"
+                skip = 0  # パスが変わったので窓の位置も取り直す
+                renames += 1
                 renamed = True
                 break
             if is_metadata_only_change(sha, current):
@@ -313,8 +353,13 @@ def last_content_change(path: str, limit: int = 40, max_renames: int = 10) -> "s
             if is_pin_only_change(sha, current):
                 continue
             return sha
-        if not renamed:
-            return None  # この系列は全部「内容変更ではない」だった
+        if renamed:
+            if renames >= max_renames:
+                return None  # リネームを辿りすぎ＝判定不能
+            continue
+        if len(shas) < limit:
+            return None  # この系列は全部「内容変更ではない」で、履歴も尽きた
+        skip += limit  # 窓を使い切っただけ。まだ先に履歴があるので次のページへ
     return None
 
 

@@ -592,6 +592,8 @@ PIN_TOOLCHAIN_OLD = "b" * 40
 PIN_TOOLCHAIN_NEW = "c" * 40
 PIN_CACHE_OLD = "d" * 40
 PIN_CACHE_NEW = "e" * 40
+PIN_REUSABLE_OLD = "f" * 40
+PIN_REUSABLE_NEW = "9" * 40
 PIN_COMMENT = "サプライチェーン対策で commit SHA にピン留めする。"
 
 WORKFLOW_TEMPLATE = """\
@@ -607,16 +609,19 @@ jobs:
         uses: dtolnay/rust-toolchain@{toolchain}
       - name: Cache cargo build
         uses: Swatinem/rust-cache@{cache} # {cache_tag}
+  call:
+    uses: acme/shared/.github/workflows/reusable.yml@{reusable}
 """
 
 
 def write_workflow(repo: Path, toolchain: str = PIN_TOOLCHAIN_OLD, cache: str = PIN_CACHE_OLD,
-                   cache_tag: str = "v2", comment: str = PIN_COMMENT) -> None:
+                   cache_tag: str = "v2", comment: str = PIN_COMMENT,
+                   checkout: str = PIN_CHECKOUT, reusable: str = PIN_REUSABLE_OLD) -> None:
     path = repo / WORKFLOW_REL
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
-        WORKFLOW_TEMPLATE.format(comment=comment, checkout=PIN_CHECKOUT, toolchain=toolchain,
-                                 cache=cache, cache_tag=cache_tag),
+        WORKFLOW_TEMPLATE.format(comment=comment, checkout=checkout, toolchain=toolchain,
+                                 cache=cache, cache_tag=cache_tag, reusable=reusable),
         encoding="utf-8",
     )
 
@@ -644,6 +649,9 @@ def test_pin_hex_only_change_is_not_stale() -> None:
         code, out = check(repo)
         assert code == 0, out
         assert "STALE" not in out, f"ピン hex のみの更新を stale と誤判定した:\n{out}"
+        # 「履歴を辿れず」warning に退化しても STALE は出ないので、緑の意味を取り違えない
+        # ように fail-open 経路も塞ぐ（このリポジトリが最も嫌う silent-green）。
+        assert "履歴を辿れず" not in out, f"stale 判定が丸ごとスキップされている:\n{out}"
     finally:
         shutil.rmtree(repo)
 
@@ -658,6 +666,168 @@ def test_pin_bump_with_version_comment_is_not_stale() -> None:
         code, out = check(repo)
         assert code == 0, out
         assert "STALE" not in out, f"末尾注記込みのピン更新を stale と誤判定した:\n{out}"
+        assert "履歴を辿れず" not in out, f"stale 判定が丸ごとスキップされている:\n{out}"
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_multiple_pins_updated_at_once_is_not_stale() -> None:
+    """1 コミットで複数のピンを同時更新（#590 と #591 を 1 本にまとめた実際の形）。"""
+    repo = new_repo()
+    try:
+        workflow_baseline(repo)
+        write_workflow(repo, toolchain=PIN_TOOLCHAIN_NEW, cache=PIN_CACHE_NEW, cache_tag="v2.9.2")
+        commit_all(repo, "rust-toolchain と rust-cache を同時に更新")
+        code, out = check(repo)
+        assert code == 0, out
+        assert "STALE" not in out, f"複数ピンの同時更新を stale と誤判定した:\n{out}"
+        assert "履歴を辿れず" not in out, f"stale 判定が丸ごとスキップされている:\n{out}"
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_pin_comment_only_change_is_stale() -> None:
+    """対照: hex が 1 文字も変わらず末尾注記だけ書き換えた変更は免除しない。
+
+    例外の条件は「ピン留め SHA 更新のみ」なので、SHA が動いていない差分は対象外。
+    """
+    repo = new_repo()
+    try:
+        workflow_baseline(repo)
+        write_workflow(repo, cache_tag="v2.9.2")  # hex は据え置き、注記だけ変える
+        commit_all(repo, "注記だけを書き換え")
+        code, out = check(repo)
+        assert code == 1, out
+        assert "STALE" in out, f"hex 不変の注記変更を免除してしまっている:\n{out}"
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_pin_note_replaced_by_prose_is_stale() -> None:
+    """対照: 末尾注記を版の形でない散文へ差し替えたら内容変更。
+
+    group(4) を任意コメントにすると、ピン更新に紛れて注記へ何を書いても免除される。
+    """
+    repo = new_repo()
+    try:
+        workflow_baseline(repo)
+        write_workflow(repo, cache=PIN_CACHE_NEW, cache_tag="この版は上げない（暫定）")
+        commit_all(repo, "ピン更新と注記の散文化")
+        code, out = check(repo)
+        assert code == 1, out
+        assert "STALE" in out, f"版注記でない末尾コメントを免除してしまっている:\n{out}"
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_pin_indent_change_is_stale() -> None:
+    """対照: ピン行のインデントが変わったら内容変更（group(1) の比較を消すと通る）。"""
+    repo = new_repo()
+    try:
+        workflow_baseline(repo)
+        path = repo / WORKFLOW_REL
+        path.write_text(
+            path.read_text(encoding="utf-8").replace(
+                f"        uses: dtolnay/rust-toolchain@{PIN_TOOLCHAIN_OLD}",
+                f"          uses: dtolnay/rust-toolchain@{PIN_TOOLCHAIN_NEW}"),
+            encoding="utf-8",
+        )
+        commit_all(repo, "ピン更新とインデント変更")
+        code, out = check(repo)
+        assert code == 1, out
+        assert "STALE" in out, f"インデント変更を免除してしまっている:\n{out}"
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_reusable_workflow_pin_change_is_stale() -> None:
+    """対照: 再利用可能ワークフロー参照の SHA 更新は呼び先のジョブ構成ごと変わる。
+
+    owner/repo を 2 要素に絞らないと `owner/repo/.github/workflows/x.yml@<sha>` まで拾う。
+    """
+    repo = new_repo()
+    try:
+        workflow_baseline(repo)
+        write_workflow(repo, reusable=PIN_REUSABLE_NEW)
+        commit_all(repo, "再利用可能ワークフローのピンを更新")
+        code, out = check(repo)
+        assert code == 1, out
+        assert "STALE" in out, f"再利用可能ワークフローの更新を免除してしまっている:\n{out}"
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_crlf_only_change_in_workflow_is_stale() -> None:
+    """対照: 改行コードだけの変更は差分行 0 件になるので内容変更として扱う（保守側）。"""
+    repo = new_repo()
+    try:
+        workflow_baseline(repo)
+        path = repo / WORKFLOW_REL
+        path.write_bytes(path.read_text(encoding="utf-8").replace("\n", "\r\n").encode("utf-8"))
+        commit_all(repo, "改行コードを CRLF にする")
+        code, out = check(repo)
+        assert code == 1, out
+        assert "STALE" in out, f"改行コードのみの変更を免除してしまっている:\n{out}"
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_pin_form_in_markdown_source_is_stale() -> None:
+    """対照: 例外 1d の対象はワークフローだけ。Markdown 中のピン形の行は免除しない。
+
+    絞らないと、コードフェンスに書いた `uses:` の見本を書き換えただけでその文書の
+    stale 検査が消える（判定は行単位・字面ベースで YAML 構造を見ないため）。
+    """
+    repo = new_repo()
+    try:
+        baseline(repo)
+        src = repo / "docs/original-docs/0001-first.md"
+        fence = f"\n```yaml\n      - uses: actions/checkout@{PIN_CHECKOUT}\n```\n"
+        src.write_text(src.read_text(encoding="utf-8") + fence, encoding="utf-8")
+        sha = commit_all(repo, "source にワークフローの見本を足す")
+        write_registry(repo, sha)
+        write_doc(repo, "docs/knowledge/a.md", ["D19"], ["docs/original-docs/0001-first.md"], sha)
+        commit_all(repo, "pin sha")
+        assert check(repo)[0] == 0, "前提: ここでは stale でない"
+
+        src.write_text(
+            src.read_text(encoding="utf-8").replace(PIN_CHECKOUT, PIN_TOOLCHAIN_NEW),
+            encoding="utf-8",
+        )
+        commit_all(repo, "見本の hex だけを書き換え")
+        code, out = check(repo)
+        assert code == 1, out
+        assert "STALE" in out, f"Markdown 中のピン形の行を免除してしまっている:\n{out}"
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_pin_commits_beyond_window_do_not_hide_stale() -> None:
+    """走査窓（limit=40）をピン更新で埋めても、その先の実内容変更を見失わない。
+
+    None は呼び出し側で warning になり stale 判定がスキップされる（fail-open）。免除対象が
+    機械生成のコミットになった以上、「窓を埋めれば検査が消える」経路を残せない。
+    """
+    repo = new_repo()
+    try:
+        workflow_baseline(repo)
+        # 追従させない実内容変更。これが「最後の内容変更」であり続けるべき。
+        path = repo / WORKFLOW_REL
+        path.write_text(
+            path.read_text(encoding="utf-8").replace(PIN_COMMENT, "説明を書き換える"),
+            encoding="utf-8",
+        )
+        commit_all(repo, "ワークフローの説明を実質変更")
+        assert "STALE" in check(repo)[1], "前提: ここで stale になる"
+
+        # 窓（40 件）を超える数のピン更新を積む。
+        for i in range(41):
+            write_workflow(repo, toolchain=f"{i:040x}", comment="説明を書き換える")
+            commit_all(repo, f"ピン更新 {i}")
+        code, out = check(repo)
+        assert code == 1, out
+        assert "STALE" in out, f"窓の枯渇で stale 判定が消えている（fail-open）:\n{out}"
+        assert "履歴を辿れず" not in out, f"窓の枯渇を履歴の尽きと混同している:\n{out}"
     finally:
         shutil.rmtree(repo)
 
