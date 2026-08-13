@@ -4,7 +4,7 @@ kind: knowledge
 sources:
   - docs/original-docs/0073-adr-into-original-docs-and-doc-classes.md
   - docs/original-docs/0082-sources-coverage-checks.md
-distilled_from_sha: "48e2f5f"
+distilled_from_sha: "722d987"
 updated: "2026-08-13"
 ---
 
