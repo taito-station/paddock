@@ -5,7 +5,7 @@ sources:
   - docs/original-docs/0073-adr-into-original-docs-and-doc-classes.md
   - docs/original-docs/0082-sources-coverage-checks.md
   - docs/qa/QA-sources-coverage-checks-596.md
-distilled_from_sha: "f1857c4"
+distilled_from_sha: "6e86780"
 updated: "2026-08-13"
 ---
 
