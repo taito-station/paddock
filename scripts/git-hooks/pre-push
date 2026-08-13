@@ -25,7 +25,10 @@ echo "[pre-push] scripts/check-adr-numbers.sh（ADR 番号の重複検出 #254�
 bash scripts/check-adr-numbers.sh
 
 # Swagger UI の vendored feature が落ちるとビルド時の外部取得へ静かに戻る（ADR 0082）。
-# 手元では curl があるので気づけない＝機械で固定する。
+# 手元では curl があるので気づけない＝機械で固定する。検査自身の回帰テストを先に走らせる
+# （`adr` ジョブと同じ順序。検査が壊れているのか本体が壊れたのかを切り分けられるようにする）。
+echo "[pre-push] scripts/test-check-vendored-swagger.sh（検査自身の回帰）"
+bash scripts/test-check-vendored-swagger.sh
 echo "[pre-push] scripts/check-vendored-swagger.sh（Swagger UI の vendored 固定 ADR 0082）"
 bash scripts/check-vendored-swagger.sh
 
@@ -84,4 +87,4 @@ else
   echo "[pre-push] web/ 差分なし: typecheck/lint スキップ"
 fi
 
-echo "[pre-push] OK（fmt / clippy / ADR 番号 / 文書クラス / web 通過）"
+echo "[pre-push] OK（fmt / clippy / ADR 番号 / Swagger UI vendored / 文書クラス / web 通過）"

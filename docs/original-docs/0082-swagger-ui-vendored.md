@@ -20,7 +20,7 @@
 渡しておらず、build script 側にも再試行が無いので `build.rs:216` の
 `download_file(...).expect("failed to download Swagger UI")` で **1 回失敗＝即 panic** する。
 
-### 実害（2026-08-12〜13。以下の時刻は UTC）
+### 実害（2026-08-12。以下の時刻はすべて UTC）
 
 配分定数と Python・ドキュメントしか触っていない PR（#611）が `docker-build (api)` で
 2 回連続失敗した。エラーは 2 回ともネットワーク層だが、**壊れ方が違う**。
@@ -44,7 +44,7 @@
 当初は「main はレイヤキャッシュで緑になるので上流障害を検知できない」と分析したが、**これは誤り**
 だった。切り分けのため main の最後の成功 run を**再実行**したところ `cargo build` のレイヤが
 `#14 CACHED` になり、そこから「main はダウンロードを実行しない」と読んでしまったもの。実測では
-main への push は毎回**実ビルド**している。
+**関連パスを触った push は main でも実ビルド**している。
 
 | main のコミット | `docker-build (api)` | ログ |
 |---|---|---|
@@ -60,6 +60,12 @@ main の CI も落ちる**。
 `--mount=type=cache` の中身が `type=gha` のレイヤキャッシュに載らないこと自体は事実だが、それは
 「RUN が実行された場合に crate 取得を省けない」理由であって、main / PR の非対称の理由ではない。
 
+**ただし「実ビルド」は関連パスを触った push に限る。** `docker-build` は自前の変更検出を持ち
+（`deployments/` / `src/` / `web/` / `Cargo.toml` / `Cargo.lock` / `rust-toolchain.toml` / `ci.yml`）、
+これに触らない push は `run=false` でスキップして数秒で緑になる。**緑の `docker-build` を読むときは
+「実ビルドで緑」と「対象外でスキップ」を所要時間で見分ける**（前者は分単位、後者は 10 秒未満）
+——この区別を落とすと同じ誤読が再生産される。
+
 **この誤読自体が「ビルド時に外部から取ってくる」構造のコストだった**——一過性の失敗を前に、
 再実行の結果を根拠に「PR の変更が原因ではないか」と疑う方向へ 3 回の再実行と追試を費やした。
 外部取得が無ければこの切り分けは発生しない。
@@ -72,10 +78,11 @@ main の CI も落ちる**。
   コメントにも明記がある）。したがってこのジョブの赤は merge をブロックしない——実害は
   「赤いノイズ＋切り分けコスト」。issue の案 (d)「required から外す」は**既に満たされている**。
 - **一方でより深刻な経路がある。** required の `ci` ジョブは api-server をビルドするため、
-  `Swatinem/rust-cache` が miss すれば **required check が同じダウンロードで落ちる**。実際に
-  build script を先に走らせるのは `cargo clippy --locked --workspace --all-targets`（テストより前）で、
-  その後 `cargo test --locked --workspace --exclude pdf-ocr --exclude pdf-parser -- --test-threads=1`
-  が続く。根治の動機は issue 本文より強い。
+  `Swatinem/rust-cache` が miss すれば **required check が同じダウンロードで落ちる**。build script を
+  最初に走らせるのは `cargo clippy --locked --workspace --all-targets` で、その後
+  `cargo test --locked --workspace --exclude pdf-ocr --exclude pdf-parser -- --test-threads=1` が続く
+  （本 ADR で足す vendored 検査はそれより前・cargo を使わないテキスト検査）。
+  根治の動機は issue 本文より強い。
 
 ## 決定
 
@@ -91,10 +98,11 @@ crate が持つ埋め込みバイト列（`SWAGGER_UI_VENDORED`）を使う。`f
 https で叩くので `ca-certificates` は引き続き要る）。
 
 **「取得をやめた」のではなく「検証とリトライのある経路へ載せ替えた」のが本質。** 旧経路は
-`curl -sSL`（`-f` を付けない）で落としたバイト列を**ハッシュ検証なしに** unzip してバイナリへ
-埋め込む TOFU（trust on first use）だった——だから HTTP エラーボディが zip として保存され
-`Could not find EOCD` が出た。新経路は `Cargo.lock` に記録された sha256 で検証され、取得失敗は
-cargo の transient retry に乗る。**同じ資産を、検証のある経路で取る**ようになる。
+`curl -sSL`（`-f` を付けない）で落としたバイト列を**ハッシュを一切固定せず・検証もせず** unzip して
+バイナリへ埋め込んでいた——だから HTTP エラーボディが zip として保存され上記の `InvalidArchive` が
+出た（TOFU ですらない。TOFU は初回接触時に固定して以降の変化を検出する仕組みだが、旧経路は
+何も固定していない）。新経路は `Cargo.lock` に記録された sha256 で検証され、取得失敗は cargo の
+transient retry に乗る。**同じ資産を、検証のある経路で取る**ようになる。
 
 併せて `deployments/api.Dockerfile` の builder ステージから **`curl` を外す**。`ca-certificates` は
 **base の `rust:1.97-slim-bookworm` に同梱済み**なので明示指定は冗長だが（`importer.Dockerfile` の
@@ -139,7 +147,7 @@ API 定義（`utoipa` 本体が生成）には影響しない。
 ## 影響
 
 - `ci` / `docker-build` の両方でビルド時ダウンロードが消え、**上流の稼働状況に依存しなくなる**
-  （main も PR も等しく実ビルドしているので、以前は上流が落ちればどちらも落ちていた）。
+  （実ビルドが走る run は main / PR を問わず落ちていたので、両方が救われる）。
   併せて「一過性の失敗を再実行で切り分ける」作業自体が不要になる——上で述べたとおり、その
   切り分けで再実行のキャッシュヒットを誤読したのが今回の遠回りの原因だった。
 - 依存が 1 本増える（`utoipa-swagger-ui-vendored` 0.1.2・依存ゼロ・build script なし・
@@ -153,6 +161,10 @@ API 定義（`utoipa` 本体が生成）には影響しない。
   ので vendored でも効く）か feature を一時的に外すこと。(2) dependabot が届くのは
   **`0.1.x` の範囲内だけ**——`utoipa-swagger-ui` 側の build-dependency 要件が `version = "0.1"`
   なので、上流が `0.2.0` で Swagger UI を上げても親が要件を上げるまで伝わらない。
+  (3) **検知手段はゼロではない**: `.github/workflows/audit.yml` の `cargo audit`（週次・
+  `rustsec/audit-check` が `Cargo.lock` を照合）は新しい crate も射程に入るので、RustSec に
+  advisory が立てば拾える。**ただし Swagger UI 本体（JS）の CVE は RustSec に載らないので届かない**
+  ——これは vendored 化の前後で変わらない（旧経路も版を固定してダウンロードしていた）。
 - **`vendored` が落ちる退行を機械で固定する**（`scripts/check-vendored-swagger.sh`。required の
   `ci` ジョブと pre-push で走る）。feature が外れると build script は**無警告で**ダウンロード分岐へ
   戻り、GitHub ランナーには curl があるので **required の `ci` は黙って外部取得を再開**し、落ちるのは
