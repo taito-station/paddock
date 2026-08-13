@@ -8,7 +8,7 @@ sources:
   - docs/original-docs/0073-adr-into-original-docs-and-doc-classes.md
   - docs/original-docs/0082-swagger-ui-vendored.md
   - .github/workflows/ci.yml
-distilled_from_sha: "fd34f64"
+distilled_from_sha: "cdffc99"
 updated: "2026-08-13"
 ---
 
@@ -134,8 +134,9 @@ OpenAPI 仕様を描画する開発者向け UI なので、埋め込み版の�
 
 **影響**:
 
-- `ci` / `docker-build` の両方でビルド時ダウンロードが消え、上流の稼働状況に依存しなくなる
-  （「main はキャッシュで緑・PR だけ落ちる」の非対称も消える）。
+- `ci` / `docker-build` の両方でビルド時ダウンロードが消え、**上流の稼働状況に依存しなくなる**
+  （main も PR も等しく実ビルドするので、以前は上流が落ちればどちらも落ちていた）。併せて
+  「一過性の失敗を再実行で切り分ける」作業自体が不要になる。
 - 依存が 1 本増える（`utoipa-swagger-ui-vendored` 0.1.2・依存ゼロ・build script なし・ライセンスは
   親と同じ `MIT OR Apache-2.0`）。**出荷されるバイナリのサイズは変わらない**（埋め込む dist が旧経路と
   同一なので）。増えるのは `target/` 内の build script バイナリ（+4.4 MB）で、crates.io からの +4.4 MB は
