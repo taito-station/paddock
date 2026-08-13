@@ -17,6 +17,12 @@ docs/knowledge/app-bootstrap.md が status: Confirmed のまま存在しない N
   8. REQ 表（要件 ID）の書式・一意性・status・Confirmed の検証手段            [error]
   9. 本文中の相対リンクが実在するか（REQ 表の外も見る）                       [error]
  10. doc-classes.md の割当索引と実ファイルの doc_class の突合                 [error]
+ 11. REQ 表の出典が名指しした一次資料が frontmatter の sources にも有るか     [error]
+
+11 は stale 検査（6）の網羅性の穴を塞ぐ（ADR 0082）。stale は sources に**挙がっている**行しか
+見ないので、本文で根拠に挙げた ADR を sources に載せ忘れると、その ADR が更新されても誰も
+気づかない。出典列は「その要件の根拠」と定義された唯一の機械可読な場所なので、ここだけは
+sources に載っていることを保証する。
 
 6 は rename-only のコミット（内容差分ゼロ）を比較対象から除外する。これが無いと ADR 0073 の
 ADR 移動だけで 20 本が一斉に stale 判定になる。git log --follow では吸収できない——--follow は
@@ -58,6 +64,12 @@ REGISTRY = Path("docs/knowledge/doc-classes.md")
 
 # 検査対象のディレクトリ。両方とも「その場で knowledge」として frontmatter を持つ。
 TARGET_DIRS = ("docs/knowledge", "docs/specifications")
+
+# 一次資料層。`sources` が watch すべき蒸留元はここに限る（ADR 0082）。
+ORIGINAL_DOCS = "docs/original-docs"
+# ADR のファイル名は **0 埋め 4 桁**。issue 由来の一次資料（`382-...`）は 0 埋めしない規約なので、
+# この 1 本の正規表現が「ADR かどうか」の判定根拠になる（CLAUDE.md「命名は 2 系統」）。
+RE_ADR_FILENAME = re.compile(r"^\d{4}-.*\.md$")
 
 # 走査から外すファイル。
 #   README.md    : 規約そのもの。frontmatter のテンプレート例（0NNN-....md 等の
@@ -502,6 +514,50 @@ def case_exact(path: Path, root: Path) -> bool:
 LINK_COUNT = 0
 
 
+def is_external_link(target: str) -> bool:
+    """リポジトリ内のパスとして解決すべきでないリンク先か。
+
+    スキーム付き URI（http/https/mailto に限らず ftp・tel 等）と protocol-relative、
+    同一文書内アンカーが該当する。ホワイトリストにすると新しいスキームを足すたびに
+    誤検知が出るので、スキームの有無で判定する。
+
+    **リンクを拾う検査はすべてこの 1 本を通す**（check_links / repo_relative_targets）。
+    同じ skip 規則を 2 か所に書くと、片方だけ直したときに「実在検査はしたが
+    sources 突合はしていない」といった非対称が静かに生まれる。
+    """
+    return target.startswith(("#", "//")) or bool(RE_URI_SCHEME.match(target))
+
+
+def repo_relative_targets(rel: str, root: Path, fragment: str) -> "list[str]":
+    """`fragment` の Markdown リンクのうち、リポジトリ内を指すものをルート相対で返す。
+
+    `sources` との突合用。`sources` はリポジトリルート相対、本文・REQ 表のリンクは
+    文書からの相対なので、**比較の前に必ずここを通して基準を揃える**（ADR 0082）。
+
+    **実在するファイルだけを返す。** リンク切れ・リポジトリ外・絶対パスは check_links が
+    別の error として報告する担当で、ここで拾うと 1 本のリンク切れに対して
+    「実在しない」と「sources に無い」の 2 件が出る。しかも `sources` は実在するファイルしか
+    受け付けない（検査 4）ので、「sources に足せ」は壊れたリンクへの助言として誤り。
+    """
+    out: list[str] = []
+    masked = RE_INLINE_CODE.sub(lambda m: " " * len(m.group(0)), fragment)
+    for matched in RE_MD_LINK.finditer(masked):
+        target = matched.group(1)
+        if is_external_link(target):
+            continue
+        cleaned = target.split("#", 1)[0]
+        if not cleaned or cleaned.startswith("/"):
+            continue
+        resolved = ((root / rel).parent / cleaned).resolve()
+        if not resolved.is_file():
+            continue
+        try:
+            out.append(resolved.relative_to(root.resolve()).as_posix())
+        except ValueError:
+            continue  # リポジトリ外
+    return out
+
+
 def check_links(
     rel: str,
     root: Path,
@@ -526,10 +582,7 @@ def check_links(
     for matched in RE_MD_LINK.finditer(masked):
         target = matched.group(1)
         here = label_at(matched.start()) if label_at else label
-        # スキーム付き URI（http/https/mailto に限らず ftp・tel 等）と protocol-relative、
-        # 同一文書内アンカーは対象外。ホワイトリストにすると新しいスキームを足すたびに
-        # 誤検知が出る。
-        if target.startswith(("#", "//")) or RE_URI_SCHEME.match(target):
+        if is_external_link(target):
             continue
         cleaned = target.split("#", 1)[0]
         if not cleaned:
@@ -567,10 +620,17 @@ def check_req_blocks(
     seen: "dict[str, str]",
     root: Path,
     errors: list[str],
+    sources: "set[str]",
     link_seen: "set[str] | None" = None,
 ) -> None:
-    """1 文書ぶんの REQ 表を検査する。`seen` は REQ-ID → 初出パスの全体台帳。"""
+    """1 文書ぶんの REQ 表を検査する。`seen` は REQ-ID → 初出パスの全体台帳。
+
+    `sources` はこの文書の frontmatter の `sources`（ルート相対）。出典セルが名指しした
+    一次資料がここに載っているかを突き合わせる（検査 11）。
+    """
     blocks, structural = parse_req_blocks(text)
+    # 同じ出典を複数の REQ が挙げていても、未収載の報告は文書内で 1 回に畳む。
+    origin_reported: set[str] = set()
     for msg in structural:
         errors.append(f"{rel}: {msg}")
 
@@ -653,6 +713,23 @@ def check_req_blocks(
             for fragment in (origin, verification):
                 check_links(
                     rel, root, fragment, errors, label=f"{req_id} の", seen=link_seen
+                )
+
+            # (11) 出典が名指しした一次資料は frontmatter の sources にも載っていること。
+            # stale 検査は sources に**挙がっている**行しか見ないので、載せ忘れると
+            # 「本文では根拠に挙げたのに、その根拠が更新されても誰も気づかない」状態に
+            # なる（ADR 0082）。sources から行を消せば stale も消えるという穴の片側。
+            for src in repo_relative_targets(rel, root, origin):
+                # 兄弟の knowledge / specifications への相互リンクは蒸留元ではないので
+                # 対象外。載せると sources の意味が壊れ、無関係な理由で stale が発火する。
+                if not src.startswith(f"{ORIGINAL_DOCS}/"):
+                    continue
+                if src in sources or src in origin_reported:
+                    continue
+                origin_reported.add(src)
+                errors.append(
+                    f"{rel}: {req_id} の出典 {src} が frontmatter の sources に無い"
+                    "（出典は減らさず sources 側を足す）"
                 )
 
 
@@ -801,14 +878,17 @@ def main(argv: list[str]) -> int:
                     )
                 doc_class_by_rel[rel.removeprefix("docs/")] = classes
 
-        # (8) REQ 表。リンクの台帳は上の本文検査と共有していて、本文で報告済みの
+        # sources は REQ 表の出典突合（11）でも使うので、REQ 走査より先に読む。
+        sources = fm.get("sources", [])
+
+        # (8)(11) REQ 表。リンクの台帳は上の本文検査と共有していて、本文で報告済みの
         # リンク先は REQ 側で二重に報告しない（REQ 表の行は本文にも含まれるため）。
         check_req_blocks(
-            rel, text, fm.get("doc_class"), declared, req_seen, root, errors, link_seen
+            rel, text, fm.get("doc_class"), declared, req_seen, root, errors,
+            set(sources), link_seen,
         )
 
         # (4) sources の実在
-        sources = fm.get("sources", [])
         if not sources:
             errors.append(f"{rel}: sources が空（由来を辿れない）")
         for src in sources:

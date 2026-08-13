@@ -1867,6 +1867,117 @@ def test_req_cell_link_is_backstop_for_body_scan() -> None:
         shutil.rmtree(repo)
 
 
+# --- 検査 11: REQ 表の出典 ⊆ frontmatter の sources（#597 / ADR 0082） ---
+
+FIRST_ADR = "docs/original-docs/0001-first.md"
+SECOND_ADR = "docs/original-docs/0002-second.md"
+
+
+def add_adr(repo: Path, name: str) -> str:
+    """一次資料を 1 本足す。返り値はリポジトリ相対パス（sources に書く形式）。"""
+    rel = f"docs/original-docs/{name}"
+    (repo / rel).write_text(
+        f"# {name.split('-')[0]}. テスト用の決定\n\n## 決定\n\nこうする。\n", encoding="utf-8"
+    )
+    return rel
+
+
+def repin(repo: Path, entries: "list[tuple[str, list[str], list[str]]]", **registry_kw) -> str:
+    """`entries`（rel, classes, sources）とレジストリを書き、baseline と同じ 2 段コミットで
+    frontmatter の sha を確定させる。
+
+    新しい一次資料を足したあとに使う。1 段だと「一次資料の最終内容変更」が
+    distilled_from_sha の子孫になり、狙いと無関係な STALE で落ちる。
+
+    第 2 引数を `docs` にしないのは、`write_registry(docs=...)` へ素通しする
+    `registry_kw` と名前が衝突するため（`repin(..., docs=[...])` が TypeError になる）。
+    """
+    for rel, classes, sources in entries:
+        write_doc(repo, rel, classes, sources, "HEAD")
+    write_registry(repo, "HEAD", **registry_kw)
+    sha = commit_all(repo, "add primary docs")
+    for rel, classes, sources in entries:
+        write_doc(repo, rel, classes, sources, sha)
+    write_registry(repo, sha, **registry_kw)
+    return commit_all(repo, "pin sha")
+
+
+def origin_row(origin: str, req_id: str = "REQ-D19-001") -> str:
+    return f"| {req_id} | 何かを満たす | `cargo test` で固定 | {origin} | Confirmed |"
+
+
+def test_req_origin_in_sources_passes() -> None:
+    """出典が名指しした ADR が sources にも載っていれば通る。"""
+    repo = new_repo()
+    try:
+        baseline(repo)
+        add_adr(repo, "0002-second.md")
+        repin(repo, [("docs/knowledge/a.md", ["D19"], [FIRST_ADR, SECOND_ADR])])
+        append_req_block(repo, "docs/knowledge/a.md", "D19",
+                         [origin_row("[ADR 0002](../original-docs/0002-second.md)")])
+        code, out = check(repo)
+        assert code == 0, f"出典が sources にあるのに落ちた: {out}"
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_req_origin_missing_from_sources_is_error() -> None:
+    """出典で名指ししたのに sources に無ければ落とす（sources から消せば stale も消える穴）。"""
+    repo = new_repo()
+    try:
+        baseline(repo)
+        add_adr(repo, "0002-second.md")
+        # b.md が 0002 を sources に持つので orphan 検査（12）には引っかからない。
+        # a.md だけが出典で 0002 を名指ししていて sources に無い、という状況を作る。
+        repin(
+            repo,
+            [
+                ("docs/knowledge/a.md", ["D19"], [FIRST_ADR]),
+                ("docs/knowledge/b.md", ["D19"], [FIRST_ADR, SECOND_ADR]),
+            ],
+            d19=2,
+            docs=[("knowledge/a.md", ["D19"]), ("knowledge/b.md", ["D19"])],
+        )
+        append_req_block(repo, "docs/knowledge/a.md", "D19",
+                         [origin_row("[ADR 0002](../original-docs/0002-second.md)")])
+        code, out = check(repo)
+        assert code == 1, out
+        assert "sources に無い" in out and SECOND_ADR in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_req_origin_external_url_is_skipped() -> None:
+    """出典が GitHub issue の絶対 URL だけなら対象外（一次資料ファイルではない）。"""
+    repo = new_repo()
+    try:
+        baseline(repo)
+        append_req_block(
+            repo, "docs/knowledge/a.md", "D19",
+            [origin_row("[#350](https://github.com/taito-station/paddock/issues/350)")],
+        )
+        code, out = check(repo)
+        assert code == 0, f"外部 URL の出典で落ちた: {out}"
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_req_origin_sibling_doc_link_is_skipped() -> None:
+    """出典が兄弟の knowledge を指すときは対象外（蒸留元ではないので sources に載せない）。"""
+    repo = new_repo()
+    try:
+        sha = baseline(repo)
+        write_doc(repo, "docs/knowledge/b.md", ["D19"], [FIRST_ADR], sha)
+        write_registry(repo, sha, d19=2,
+                       docs=[("knowledge/a.md", ["D19"]), ("knowledge/b.md", ["D19"])])
+        append_req_block(repo, "docs/knowledge/a.md", "D19",
+                         [origin_row("[b の定義](b.md)")])
+        code, out = check(repo)
+        assert code == 0, f"兄弟文書へのリンクで落ちた: {out}"
+    finally:
+        shutil.rmtree(repo)
+
+
 def main() -> int:
     if not TARGET.is_file():
         print(f"テスト対象が見つからない: {TARGET}", file=sys.stderr)
