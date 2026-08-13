@@ -12,7 +12,10 @@ paddock の文書は HVE（dahatake/HypervelocityEngineering, MIT）の蒸留モ
   `docs/knowledge/` へ。
 - **ADR は一次資料層（`docs/original-docs/`）の不変の決定記録**（ADR 0073 で旧 `docs/adr/` から統合）。
   決定を伴う変更は ADR を起票する（採番は `scripts/check-adr-numbers.sh next`）。**一度置いた ADR は
-  改変しない**——決定を変えるときは新しい ADR で supersede する。
+  改変しない**——決定を変えるときは新しい ADR で supersede する。**新設した ADR は同じ PR で
+  どこかの knowledge / specifications の `sources` に載せる**（載っていない ADR は
+  orphan 検査が error にする・ADR 0082）。写す先が無い ADR は `doc-classes.md` の
+  `adr-orphan-exceptions` 表に理由付きで登録する。
 - **読む入口は knowledge**。ADR の決定・理由・却下案・影響は knowledge に**全部写す**。重複を許す
   代わりに、`sources` の更新に蒸留が追従しているかは機械検査で担保する（人手の規律に委ねない）。
   **写しは一巡済み（#588・ADR 0074 自身を除く）**: ADR 77 本のうち棄却 24 本は
@@ -31,7 +34,7 @@ paddock の文書は HVE（dahatake/HypervelocityEngineering, MIT）の蒸留モ
 - **文書クラス**: knowledge/specifications は frontmatter に `doc_class`（+ mdq 用ミラーの `tags`）を持つ。
   定義の正本は [docs/knowledge/doc-classes.md](docs/knowledge/doc-classes.md)（HVE の D01〜D21 ＋ paddock 固有の
   D22 予測モデル / D23 買い方 / D24 実験・棄却証跡）。`scripts/mdq search --tags D23` でクラス絞り込みができる。
-  整合は `scripts/check-doc-classes.py` が CI と pre-push で検査する（本文の相対リンクの実在と、`doc-classes.md` の割当索引との 1 対 1 突合も error）。**knowledge / specifications を 1 本足す・消す・`doc_class` を変えるときは、同じ PR で `doc-classes.md` のクラス一覧の「現行」列と割当索引も直す**。
+  整合は `scripts/check-doc-classes.py` が CI と pre-push で検査する（本文の相対リンクの実在、`doc-classes.md` の割当索引との 1 対 1 突合、**REQ 表の `出典` が `sources` にも載っているか**、**どの `sources` からも参照されない ADR の検出**——いずれも error）。**knowledge / specifications を 1 本足す・消す・`doc_class` を変えるときは、同じ PR で `doc-classes.md` のクラス一覧の「現行」列と割当索引も直す**。
 - **探索規律 — 生読み前に mdq 検索**: docs 内の答えを探すときは、まず
   `scripts/mdq search --q "..."`（BM25・ローカル・[.claude/skills/markdown-query/SKILL.md](.claude/skills/markdown-query/SKILL.md)）
   でヒットチャンクだけ取り、必要時のみ生ファイルへ。コード探索は従来通り serena（`mcp__serena__*`）。

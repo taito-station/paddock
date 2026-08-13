@@ -18,11 +18,13 @@ docs/knowledge/app-bootstrap.md が status: Confirmed のまま存在しない N
   9. 本文中の相対リンクが実在するか（REQ 表の外も見る）                       [error]
  10. doc-classes.md の割当索引と実ファイルの doc_class の突合                 [error]
  11. REQ 表の出典が名指しした一次資料が frontmatter の sources にも有るか     [error]
+ 12. ADR がどこかの sources から参照されているか（orphan ADR）               [error]
 
-11 は stale 検査（6）の網羅性の穴を塞ぐ（ADR 0082）。stale は sources に**挙がっている**行しか
-見ないので、本文で根拠に挙げた ADR を sources に載せ忘れると、その ADR が更新されても誰も
-気づかない。出典列は「その要件の根拠」と定義された唯一の機械可読な場所なので、ここだけは
-sources に載っていることを保証する。
+11・12 は stale 検査（6）の網羅性の穴を両側から塞ぐ（ADR 0082）。stale は sources に
+**挙がっている**行しか見ないので、`sources` から行を消せば stale も消えるし、ADR を足したときに
+載せ忘れても何も起きない。11 は「本文で根拠に挙げた ADR」、12 は「ADR 全体」を watch 対象に
+入れることを保証する。12 の例外は doc-classes.md の宣言表（`adr-orphan-exceptions`）で持つ——
+スクリプト内の定数にすると、例外を増やす行為が文書レビューに乗らない。
 
 6 は rename-only のコミット（内容差分ゼロ）を比較対象から除外する。これが無いと ADR 0073 の
 ADR 移動だけで 20 本が一斉に stale 判定になる。git log --follow では吸収できない——--follow は
@@ -805,6 +807,28 @@ def main(argv: list[str]) -> int:
             errors.append(f"{REGISTRY}: 割当索引に {cells[0]} の行が 2 つある")
         indexed[cells[0]] = cells[1]
 
+    # orphan ADR 検査（12）の例外。理由必須の 2 列表で、パスは sources と同じリポジトリ
+    # ルート相対（比較相手に形式を合わせる・ADR 0082）。スクリプト内の定数ではなく
+    # レジストリに置くのは、例外を増やす行為を文書レビューに乗せるため。
+    orphan_exceptions: dict[str, str] = {}
+    for line in extract_block(registry_text, "adr-orphan-exceptions"):
+        stripped = line.strip()
+        if not stripped.startswith("|"):
+            continue
+        cells = split_row(stripped)
+        if len(cells) != 2:
+            errors.append(f"{REGISTRY}: orphan 例外表の書式が崩れている行がある → {stripped}")
+            continue
+        if cells[0] == "ADR" or RE_TABLE_SEP_CELL.match(cells[0]):
+            continue
+        if cells[0] in orphan_exceptions:
+            errors.append(f"{REGISTRY}: orphan 例外表に {cells[0]} の行が 2 つある")
+        if cells[1].lower() in EMPTY_CELLS:
+            # 理由の無い例外は「なぜ写せないのか」を失うので、次に見た人が消してよいか
+            # 判断できない。N/A 宣言表が理由列を必須にしているのと同じ理屈。
+            errors.append(f"{REGISTRY}: orphan 例外表の {cells[0]} に理由が書かれていない")
+        orphan_exceptions[cells[0]] = cells[1]
+
     # --- 対象ファイルを走査 ---
     shallow = is_shallow()
     targets: list[Path] = []
@@ -842,6 +866,10 @@ def main(argv: list[str]) -> int:
     # 割当索引の突合用。キーは索引表と同じ `knowledge/x.md` 形式（docs/ を剥がす）。
     doc_class_by_rel: dict[str, list[str]] = {}
     scanned_rels: set[str] = set()
+    # 全文書の sources の和集合。orphan ADR 検査（12）が「誰からも参照されていない ADR」を
+    # 判定する材料。走査対象から外した README.md の sources は数えない——テンプレート例として
+    # 存在しないパスを並べているので、数えると偽の被参照が生まれる。
+    referenced_sources: set[str] = set()
     for path in targets:
         rel = path.relative_to(root).as_posix()
         scanned_rels.add(rel)
@@ -880,6 +908,7 @@ def main(argv: list[str]) -> int:
 
         # sources は REQ 表の出典突合（11）でも使うので、REQ 走査より先に読む。
         sources = fm.get("sources", [])
+        referenced_sources.update(sources)
 
         # (8)(11) REQ 表。リンクの台帳は上の本文検査と共有していて、本文で報告済みの
         # リンク先は REQ 側で二重に報告しない（REQ 表の行は本文にも含まれるため）。
@@ -937,6 +966,37 @@ def main(argv: list[str]) -> int:
                     f"{rel}: STALE ← {src} が distilled_from_sha({distilled}) より後に更新されている"
                     f"（{changed[:7]}）。差分マージして sha/日付を更新する"
                 )
+
+    # (12) orphan ADR。「ADR は必ずどこかの knowledge / specifications の sources から
+    # 参照される」という不変条件を機械で守る（ADR 0082）。ここが空いていると、ADR を
+    # 足した誰かが sources への登録を忘れただけで、その ADR は永久に watch 対象外になる。
+    adr_dir = root / ORIGINAL_DOCS
+    adrs = sorted(
+        p.relative_to(root).as_posix()
+        for p in adr_dir.glob("*.md")
+        if RE_ADR_FILENAME.match(p.name)
+    ) if adr_dir.is_dir() else []
+    for adr in adrs:
+        if adr in referenced_sources or adr in orphan_exceptions:
+            continue
+        errors.append(
+            f"{adr}: どの knowledge / specifications の sources からも参照されていない"
+            f"（ADR は必ずどこかへ写す。写せない ADR は {REGISTRY} の例外表に理由付きで登録する）"
+        )
+    # 例外表そのものの健全性。腐った例外を残すと、次に本物の orphan が出たときに
+    # 「例外表にあるから安心」と誤読される（N/A 宣言表と一覧の相互突合と同じ理屈）。
+    known_adrs = set(adrs)
+    for adr in sorted(orphan_exceptions):
+        if adr not in known_adrs:
+            errors.append(
+                f"{REGISTRY}: orphan 例外表の {adr} は ADR として実在しない"
+                f"（パスは sources と同じリポジトリルート相対・0 埋め 4 桁）"
+            )
+        elif adr in referenced_sources:
+            errors.append(
+                f"{REGISTRY}: orphan 例外表の {adr} は実際には sources から参照されている"
+                "（不要になった例外は消す）"
+            )
 
     # (10) 割当索引と実ファイルの突合。上の (5) はクラス別の集計数しか見ないので、
     # 主クラスの順序入替や 2 文書間のクラス交換は素通りする（索引を突き合わせて塞ぐ）。
