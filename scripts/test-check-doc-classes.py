@@ -24,6 +24,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import types
 from pathlib import Path
 
 TARGET = Path(__file__).resolve().parent / "check-doc-classes.py"
@@ -100,8 +101,11 @@ def new_repo() -> Path:
     run_git(repo, "config", "user.name", "test")
     # 改行コードを git に触らせない。global 設定が autocrlf=true/input の環境だと add 時に
     # 正規化され、CRLF のケースが「nothing to commit」で例外になってスイートごと落ちる。
+    # `core.attributesFile` に `* text=auto` を置いている環境もあるので .gitattributes で
+    # 上書きする（リポジトリ内の指定が global の attributes より強い）。
     run_git(repo, "config", "core.autocrlf", "false")
     run_git(repo, "config", "core.safecrlf", "false")
+    (repo / ".gitattributes").write_text("* -text\n", encoding="utf-8")
     (repo / "docs/knowledge").mkdir(parents=True)
     (repo / "docs/specifications").mkdir(parents=True)
     (repo / "docs/original-docs").mkdir(parents=True)
@@ -542,6 +546,42 @@ def test_frontmatter_only_change_is_not_stale() -> None:
         shutil.rmtree(repo)
 
 
+def test_invalid_utf8_body_change_with_metadata_is_stale() -> None:
+    """例外 1b 側の対照: 不正バイトの本文差分がメタデータ変更に相乗りしない。
+
+    `is_metadata_only_change` は**復号後の本文を文字列で比べる**ので、復号が
+    `errors="replace"` だと異なる不正バイトが同じ U+FFFD に潰れて「本文は同一」と
+    判定され、frontmatter だけの変更として免除される。往復可能な surrogateescape なら
+    相違が保存される。
+    """
+    repo = new_repo()
+    try:
+        baseline(repo)
+        src = repo / "docs/original-docs/0001-first.md"
+        body = src.read_text(encoding="utf-8")
+        src.write_bytes(
+            ("---\nstatus: Confirmed\ntags: [D19]\n---\n\n" + body).encode("utf-8")
+            + b"\n\xff\xfe end\n"
+        )
+        sha = commit_all(repo, "source に frontmatter と不正バイトを置く")
+        write_registry(repo, sha)
+        write_doc(repo, "docs/knowledge/a.md", ["D19"], ["docs/original-docs/0001-first.md"], sha)
+        commit_all(repo, "pin sha")
+        assert check(repo)[0] == 0, "前提: ここでは stale でない"
+
+        # frontmatter のメタデータ（tags）だけを変えつつ、本文の不正バイトを差し替える。
+        raw = src.read_bytes()
+        raw = raw.replace(b"tags: [D19]", b"tags: [D19, D22]")
+        raw = raw.replace(b"\xff\xfe end", b"\xfe\xff end")
+        src.write_bytes(raw)
+        commit_all(repo, "メタデータ変更と不正バイトの差し替え")
+        code, out = check(repo)
+        assert code == 1, out
+        assert "STALE" in out, f"不正バイトの本文差分が U+FFFD に潰れて免除されている:\n{out}"
+    finally:
+        shutil.rmtree(repo)
+
+
 def test_status_change_in_source_is_stale() -> None:
     """`status` / `kind` は METADATA_KEYS から**意図的に外している**ことを固定する。
 
@@ -707,6 +747,70 @@ def test_pin_comment_only_change_is_stale() -> None:
         code, out = check(repo)
         assert code == 1, out
         assert "STALE" in out, f"hex 不変の注記変更を免除してしまっている:\n{out}"
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_pin_note_without_space_is_stale() -> None:
+    """対照: `@<40hex>#v4`（`#` の前に空白なし）は YAML のコメントではないので免除しない。
+
+    正規表現を `\\s+#` から `\\s*#` に緩めると、ref の一部を注記と誤認して免除される。
+    """
+    repo = new_repo()
+    try:
+        sha = baseline(repo)
+        rel = WORKFLOW_REL
+        sources = [rel, "docs/original-docs/0001-first.md"]
+        (repo / rel).parent.mkdir(parents=True, exist_ok=True)
+        (repo / rel).write_text(
+            f"name: CI\non: [push]\njobs:\n  a:\n    steps:\n"
+            f"      - uses: actions/checkout@{PIN_CHECKOUT}#v4\n",
+            encoding="utf-8",
+        )
+        write_doc(repo, "docs/knowledge/a.md", ["D19"], sources, sha)
+        added = commit_all(repo, "空白なし注記のワークフローを source にする")
+        write_doc(repo, "docs/knowledge/a.md", ["D19"], sources, added)
+        commit_all(repo, "追従")
+        assert check(repo)[0] == 0, "前提: ここでは stale でない"
+
+        (repo / rel).write_text(
+            (repo / rel).read_text(encoding="utf-8").replace(PIN_CHECKOUT, PIN_TOOLCHAIN_NEW),
+            encoding="utf-8",
+        )
+        commit_all(repo, "空白なし注記のまま hex を更新")
+        code, out = check(repo)
+        assert code == 1, out
+        assert "STALE" in out, f"`#` 前の空白なしを版注記として免除している:\n{out}"
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_invalid_utf8_change_with_pin_bump_is_stale() -> None:
+    """対照: 不正 UTF-8 バイトの差分がピン更新に相乗りしない。
+
+    復号を `errors="replace"` で行うと、異なる不正バイトが同じ U+FFFD に潰れて
+    「行が一致」に見え、バイト列で取得した意味が消える。
+    """
+    repo = new_repo()
+    try:
+        workflow_baseline(repo)
+        path = repo / WORKFLOW_REL
+        # 非 pin 行に不正バイトを埋めた状態を「前」とする。
+        base = path.read_text(encoding="utf-8").encode("utf-8")
+        path.write_bytes(base.replace(PIN_COMMENT.encode("utf-8"), b"\xff\xfe note"))
+        pinned = commit_all(repo, "非 pin 行に不正バイトを置く")
+        write_doc(repo, "docs/knowledge/a.md", ["D19"],
+                  [WORKFLOW_REL, "docs/original-docs/0001-first.md"], pinned)
+        commit_all(repo, "追従")
+        assert check(repo)[0] == 0, "前提: ここでは stale でない"
+
+        # ピン更新と同時に、不正バイトだけを別の不正バイトへ差し替える。
+        raw = path.read_bytes().replace(b"\xff\xfe note", b"\xfe\xff note")
+        path.write_bytes(raw.replace(PIN_TOOLCHAIN_OLD.encode(), PIN_TOOLCHAIN_NEW.encode()))
+        commit_all(repo, "ピン更新と不正バイトの差し替え")
+        code, out = check(repo)
+        assert code == 1, out
+        assert "STALE" in out, f"不正バイトの差分が U+FFFD に潰れて免除されている:\n{out}"
     finally:
         shutil.rmtree(repo)
 
@@ -885,11 +989,11 @@ def test_action_repo_change_is_stale() -> None:
 
 
 def test_workflow_line_added_with_pin_bump_is_stale() -> None:
-    """対照: 行の増減（ステップ追加）は内容変更。
+    """挙動の固定: ステップ追加とピン更新が同居しても内容変更。
 
-    **ピン更新と同居させる。** 追加だけだと zip が短い側で切れて差分行 0 件になり、
-    行数一致ガードの有無に関係なく非免除になる＝ガードを固定できない。ガードが無いと
-    「ピン更新＋ステップ追加」が免除されてしまうので、そこを突く形にする。
+    **これは行数一致ガードの mutation 検出ではない。** 末尾に内容のある行を足すと `zip` が
+    短い側で切れて末尾がズレ、そこに非ピン差分が生まれるのでガードが無くても非免除になる。
+    ガードそのものを固定するのは `test_trailing_blank_line_with_pin_bump_is_stale`。
     """
     repo = new_repo()
     try:
@@ -1054,8 +1158,9 @@ def test_pin_to_tag_change_is_stale() -> None:
 # リポジトリを含まないため、モジュールを共有すると別の一時リポの結果を引いてしまう。
 
 
-def load_checker(repo: Path):
+def load_checker(repo: Path) -> "types.ModuleType":
     spec = importlib.util.spec_from_file_location("checker_under_test", TARGET)
+    assert spec is not None and spec.loader is not None, TARGET
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     module._ROOT = repo
@@ -1114,8 +1219,8 @@ def test_metadata_only_commits_beyond_window_do_not_hide_stale() -> None:
         shutil.rmtree(repo)
 
 
-def test_scan_truncation_is_distinguished_from_missing_history() -> None:
-    """予算を使い切ったら SCAN_TRUNCATED を返す（None＝履歴を辿れない とは別物）。
+def test_page_budget_exhaustion_is_reported_as_aborted() -> None:
+    """ページ予算を使い切ったら ScanAborted を返す（None＝履歴が無い とは別物）。
 
     ここを None に混ぜると、呼び出し側が warning に落として stale 判定をスキップし、
     「除外対象のコミットを積めば検査が消える」fail-open が一段外側で再現する。
@@ -1131,15 +1236,17 @@ def test_scan_truncation_is_distinguished_from_missing_history() -> None:
             write_workflow(repo, toolchain=f"{i:040x}", comment="説明を書き換える")
             commit_all(repo, f"ピン更新 {i}")
         got = m.last_content_change(WORKFLOW_REL, limit=2, max_pages=2)
-        assert got == m.SCAN_TRUNCATED, f"打ち切りを履歴の尽きと混同している: {got!r}"
+        assert isinstance(got, m.ScanAborted), f"打ち切りを履歴の尽きと混同している: {got!r}"
+        assert "max_pages" in got.reason, f"原因がページ予算だと分からない: {got.reason}"
     finally:
         shutil.rmtree(repo)
 
 
-def test_rename_limit_is_reported_as_truncation() -> None:
-    """リネーム段数の上限で打ち切ったときも SCAN_TRUNCATED（None に混ぜない）。
+def test_rename_budget_exhaustion_is_reported_as_aborted() -> None:
+    """リネーム予算の上限で打ち切ったときも ScanAborted（None に混ぜない）。
 
     ページ予算の枝とは別の経路なので、片方だけ直しても他方が warning に落ちる。
+    原因の取り違えを防ぐため、reason にどちらの予算かを載せることも固定する。
     """
     repo = new_repo()
     try:
@@ -1153,13 +1260,86 @@ def test_rename_limit_is_reported_as_truncation() -> None:
         run_git(repo, "mv", first, second)
         commit_all(repo, "2 回目の改名（内容不変）")
         got = m.last_content_change(second, limit=5, max_renames=1)
-        assert got == m.SCAN_TRUNCATED, f"リネーム上限の打ち切りを None に混ぜている: {got!r}"
+        assert isinstance(got, m.ScanAborted), f"リネーム上限の打ち切りを None に混ぜている: {got!r}"
+        assert "max_renames" in got.reason, f"原因がリネーム予算だと分からない: {got.reason}"
     finally:
         shutil.rmtree(repo)
 
 
-def test_truncation_is_reported_as_error_not_warning() -> None:
-    """打ち切りは **error**（warning に落とすと fail-open が一段外側で再現する）。
+def test_rename_within_budget_still_finds_change() -> None:
+    """境界の対照: 予算内のリネームは打ち切らず、改名前の内容変更まで辿る。"""
+    repo = new_repo()
+    try:
+        m = load_checker(repo)
+        write_workflow(repo)
+        commit_all(repo, "ワークフローを追加")
+        write_workflow(repo, comment="説明を書き換える")
+        commit_all(repo, "説明を実質変更")
+        real = run_git(repo, "rev-parse", "HEAD")
+        moved = ".github/workflows/ci-1.yml"
+        run_git(repo, "mv", WORKFLOW_REL, moved)
+        commit_all(repo, "1 回だけ改名（内容不変）")
+        got = m.last_content_change(moved, limit=5, max_renames=2)
+        assert got == real, f"予算内のリネームで打ち切っている: {got!r}"
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_git_log_failure_is_reported_as_aborted() -> None:
+    """`git log` 自体の失敗は警告に落とさない（検査が回っていないので error 側）。"""
+    repo = new_repo()
+    try:
+        m = load_checker(repo)
+        write_workflow(repo)
+        commit_all(repo, "ワークフローを追加")
+        real_git = m.git
+
+        def failing_git(*args: str):
+            if args and args[0] == "log":
+                return subprocess.CompletedProcess(list(args), 128, "", "fatal: 壊れた")
+            return real_git(*args)
+
+        m.git = failing_git
+        got = m.last_content_change(WORKFLOW_REL)
+        assert isinstance(got, m.ScanAborted), f"git log の失敗を None に落としている: {got!r}"
+        assert "git log" in got.reason, f"原因が git log の失敗だと分からない: {got.reason}"
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_page_budget_resets_after_rename() -> None:
+    """リネームを辿るときはページ予算も取り直す。
+
+    取り直さないと、改名後のパスでページを消費した分だけ改名前の走査が短くなり、
+    予算内で見つかるはずの内容変更が「打ち切り」に化ける。
+    """
+    repo = new_repo()
+    try:
+        m = load_checker(repo)
+        write_workflow(repo)
+        commit_all(repo, "ワークフローを追加")
+        write_workflow(repo, comment="説明を書き換える")
+        commit_all(repo, "説明を実質変更")
+        real = run_git(repo, "rev-parse", "HEAD")
+        # 改名前のパスに、1 ページ（limit=2）で足りないだけのピン更新を積む。
+        for i in range(2):
+            write_workflow(repo, toolchain=f"{i:040x}", comment="説明を書き換える")
+            commit_all(repo, f"改名前のピン更新 {i}")
+        moved = ".github/workflows/ci-renamed.yml"
+        run_git(repo, "mv", WORKFLOW_REL, moved)
+        commit_all(repo, "改名（内容不変）")
+        # 改名後のパスでもページを使わせる（リネームが 2 ページ目に来る）。
+        for i in range(2):
+            write_moved_workflow(repo, moved, f"{i + 10:040x}", "説明を書き換える")
+            commit_all(repo, f"改名後のピン更新 {i}")
+        got = m.last_content_change(moved, limit=2, max_pages=2)
+        assert got == real, f"リネーム後にページ予算を取り直せていない: {got!r}"
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_aborted_scan_is_reported_as_error_not_warning() -> None:
+    """走査の未完遂は **error**（warning に落とすと fail-open が一段外側で再現する）。
 
     既定の予算（limit=40 × max_pages=25）を実リポジトリで使い切らせるのは非現実的なので、
     `last_content_change` を差し替えて呼び出し側の分岐だけを固定する。
@@ -1168,7 +1348,7 @@ def test_truncation_is_reported_as_error_not_warning() -> None:
     try:
         m = load_checker(repo)
         baseline(repo)
-        m.last_content_change = lambda *a, **k: m.SCAN_TRUNCATED
+        m.last_content_change = lambda *a, **k: m.ScanAborted("テスト用の打ち切り")
         cwd = Path.cwd()
         out = io.StringIO()
         try:
@@ -1178,8 +1358,8 @@ def test_truncation_is_reported_as_error_not_warning() -> None:
         finally:
             os.chdir(cwd)
         text = out.getvalue()
-        assert code == 1, f"打ち切りが error になっていない（exit {code}）:\n{text}"
-        assert "打ち切った" in text, f"打ち切りの理由が出力されていない:\n{text}"
+        assert code == 1, f"走査の未完遂が error になっていない（exit {code}）:\n{text}"
+        assert "テスト用の打ち切り" in text, f"打ち切りの理由が出力されていない:\n{text}"
         assert "履歴を辿れず" not in text, f"打ち切りを履歴の尽きと同じ文言で流している:\n{text}"
     finally:
         shutil.rmtree(repo)

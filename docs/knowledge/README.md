@@ -89,9 +89,13 @@ updated: "YYYY-MM-DD"    # 内容を実質更新した日（YAML の date 型を
   二重管理の drift は `scripts/check-doc-classes.py` が防ぐ。
 - **機械検査**: 上記スクリプトが CI（`adr` ジョブ）と pre-push で走る。クラスの整合・`tags` の一致・
   `sources` の実在・**stale**・**本文の相対リンクの実在**・**[doc-classes.md](doc-classes.md) の
-  割当索引と実ファイルの突合**は **error**（stale は #580 で warning から昇格。後ろ 2 つは #604）。**warning** は
-  充足ギャップと、**判定不能を可視化する 3 経路**（サブディレクトリに置かれた `.md`＝無検査 /
-  `sources` の履歴を辿れない / shallow clone で `distilled_from_sha` を解決できない）。
+  割当索引と実ファイルの突合**・**`sources` の履歴走査を完遂できなかったこと**は **error**
+  （stale は #580 で warning から昇格。リンクと割当索引は #604、履歴走査の未完遂は ADR 0081）。
+  **warning** は充足ギャップと、**判定不能を可視化する 3 経路**（サブディレクトリに置かれた
+  `.md`＝無検査 / `sources` の履歴が無い＝未コミット・履歴の尽き / shallow clone で
+  `distilled_from_sha` を解決できない）。**「履歴が無い（warning）」と「走査を完遂できなかった
+  （error）」は別物**——前者は環境の都合だが、後者は検査が回っていないので、warning に落とすと
+  除外対象のコミットを積むほど検査が消える fail-open になる。
   `--warn-only` は**ローカルで全件を眺めるための確認用**で、CI（`adr` ジョブ）も pre-push も
   フラグ無しで呼ぶので**これで CI を通すことはできない**（`doc-classes.md` のマーカー欠落だけは
   `--warn-only` でも 1 で落ちる。表の範囲を切り出せず検査そのものが成立しないため）。
