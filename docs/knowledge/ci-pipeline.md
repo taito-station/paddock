@@ -8,7 +8,7 @@ sources:
   - docs/original-docs/0073-adr-into-original-docs-and-doc-classes.md
   - docs/original-docs/0082-swagger-ui-vendored.md
   - .github/workflows/ci.yml
-distilled_from_sha: "aa73bdb"
+distilled_from_sha: "6e127d0"
 updated: "2026-08-13"
 ---
 
