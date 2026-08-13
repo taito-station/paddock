@@ -350,7 +350,7 @@ def test_untracked_source_is_warning_not_silent() -> None:
                   ["docs/original-docs/0001-first.md", "docs/original-docs/9999-untracked.md"], sha)
         code, out = check(repo)
         assert code == 0, f"判定不能は error にしない: {out}"
-        assert "履歴を辿れず" in out, out
+        assert "履歴が無く" in out, out
     finally:
         shutil.rmtree(repo)
 
@@ -506,7 +506,7 @@ def test_rename_chain_is_not_stale() -> None:
         code, out = check(repo)
         assert code == 0, out
         assert "STALE" not in out, f"2 段のリネームを stale と誤判定した:\n{out}"
-        assert "履歴を辿れず" not in out, f"履歴を辿れなくなっている:\n{out}"
+        assert "履歴が無く" not in out, f"履歴を辿れなくなっている:\n{out}"
     finally:
         shutil.rmtree(repo)
 
@@ -699,7 +699,7 @@ def test_pin_hex_only_change_is_not_stale() -> None:
         assert "STALE" not in out, f"ピン hex のみの更新を stale と誤判定した:\n{out}"
         # 「履歴を辿れず」warning に退化しても STALE は出ないので、緑の意味を取り違えない
         # ように fail-open 経路も塞ぐ（このリポジトリが最も嫌う silent-green）。
-        assert "履歴を辿れず" not in out, f"stale 判定が丸ごとスキップされている:\n{out}"
+        assert "履歴が無く" not in out, f"stale 判定が丸ごとスキップされている:\n{out}"
     finally:
         shutil.rmtree(repo)
 
@@ -714,7 +714,7 @@ def test_pin_bump_with_version_comment_is_not_stale() -> None:
         code, out = check(repo)
         assert code == 0, out
         assert "STALE" not in out, f"末尾注記込みのピン更新を stale と誤判定した:\n{out}"
-        assert "履歴を辿れず" not in out, f"stale 判定が丸ごとスキップされている:\n{out}"
+        assert "履歴が無く" not in out, f"stale 判定が丸ごとスキップされている:\n{out}"
     finally:
         shutil.rmtree(repo)
 
@@ -729,7 +729,7 @@ def test_multiple_pins_updated_at_once_is_not_stale() -> None:
         code, out = check(repo)
         assert code == 0, out
         assert "STALE" not in out, f"複数ピンの同時更新を stale と誤判定した:\n{out}"
-        assert "履歴を辿れず" not in out, f"stale 判定が丸ごとスキップされている:\n{out}"
+        assert "履歴が無く" not in out, f"stale 判定が丸ごとスキップされている:\n{out}"
     finally:
         shutil.rmtree(repo)
 
@@ -786,10 +786,12 @@ def test_pin_note_without_space_is_stale() -> None:
 
 
 def test_invalid_utf8_change_with_pin_bump_is_stale() -> None:
-    """対照: 不正 UTF-8 バイトの差分がピン更新に相乗りしない。
+    """対照: 非 pin 行の不正バイトの差分がピン更新に相乗りしない。
 
-    復号を `errors="replace"` で行うと、異なる不正バイトが同じ U+FFFD に潰れて
-    「行が一致」に見え、バイト列で取得した意味が消える。
+    ここが固定するのは `blob_at` の**バイト取得**（行比較がバイトなので差分が見える）。
+    復号の往復可能性を固定するのは、`uses:` 行の owner/repo に不正バイトを置く
+    `test_invalid_utf8_in_owner_repo_is_stale` と、例外 1b 側の
+    `test_invalid_utf8_body_change_with_metadata_is_stale`。
     """
     repo = new_repo()
     try:
@@ -811,6 +813,76 @@ def test_invalid_utf8_change_with_pin_bump_is_stale() -> None:
         code, out = check(repo)
         assert code == 1, out
         assert "STALE" in out, f"不正バイトの差分が U+FFFD に潰れて免除されている:\n{out}"
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_invalid_utf8_in_owner_repo_is_stale() -> None:
+    """対照: owner/repo に不正バイトがある行の差し替えを免除しない。
+
+    ここが `decode_preserving` の往復可能性を固定する。`errors="replace"` だと
+    `a\\xff/b` と `a\\xfe/b` がどちらも `a\\ufffd/b` に潰れ、**group(2) が一致して
+    「owner/repo は同じ・hex だけ変わった」に見えるので免除される**。
+    """
+    repo = new_repo()
+    try:
+        sha = baseline(repo)
+        rel = WORKFLOW_REL
+        sources = [rel, "docs/original-docs/0001-first.md"]
+        (repo / rel).parent.mkdir(parents=True, exist_ok=True)
+        head = b"name: CI\non: [push]\njobs:\n  a:\n    steps:\n      - uses: a"
+        (repo / rel).write_bytes(head + b"\xff/b@" + PIN_CHECKOUT.encode() + b"\n")
+        write_doc(repo, "docs/knowledge/a.md", ["D19"], sources, sha)
+        added = commit_all(repo, "owner に不正バイトを含むワークフローを source にする")
+        write_doc(repo, "docs/knowledge/a.md", ["D19"], sources, added)
+        commit_all(repo, "追従")
+        assert check(repo)[0] == 0, "前提: ここでは stale でない"
+
+        # owner の不正バイトを別の不正バイトへ変えつつ hex も更新する。
+        (repo / rel).write_bytes(head + b"\xfe/b@" + PIN_TOOLCHAIN_NEW.encode() + b"\n")
+        commit_all(repo, "owner の不正バイトと hex を同時に変更")
+        code, out = check(repo)
+        assert code == 1, out
+        assert "STALE" in out, f"owner/repo の不正バイト差分が潰れて免除されている:\n{out}"
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_pin_note_with_prose_suffix_is_stale() -> None:
+    """対照: 版注記のあとに散文が続く形（`# v4だがこの版は使わない`）は免除しない。
+
+    `\\w` は Unicode を含むので、文字クラスを ASCII に絞らないと「版注記の形」として通る。
+    """
+    repo = new_repo()
+    try:
+        workflow_baseline(repo)
+        write_workflow(repo, cache=PIN_CACHE_NEW, cache_tag="v2.9.2だがこの版は使わない")
+        commit_all(repo, "ピン更新と注記への散文追記")
+        code, out = check(repo)
+        assert code == 1, out
+        assert "STALE" in out, f"版注記のあとの散文を免除してしまっている:\n{out}"
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_pin_shortened_to_short_sha_is_stale() -> None:
+    """対照: 40 hex から短縮 SHA への緩和はサプライチェーン対策の後退なので内容変更。
+
+    量指定子を `{7,40}` のように緩めると通ってしまうので固定する。
+    """
+    repo = new_repo()
+    try:
+        workflow_baseline(repo)
+        path = repo / WORKFLOW_REL
+        path.write_text(
+            path.read_text(encoding="utf-8").replace(
+                f"dtolnay/rust-toolchain@{PIN_TOOLCHAIN_OLD}", "dtolnay/rust-toolchain@abc1234"),
+            encoding="utf-8",
+        )
+        commit_all(repo, "ピンを短縮 SHA へ緩める")
+        code, out = check(repo)
+        assert code == 1, out
+        assert "STALE" in out, f"短縮 SHA への緩和を免除してしまっている:\n{out}"
     finally:
         shutil.rmtree(repo)
 
@@ -939,7 +1011,7 @@ def test_pin_commits_beyond_window_do_not_hide_stale() -> None:
         code, out = check(repo)
         assert code == 1, out
         assert "STALE" in out, f"窓の枯渇で stale 判定が消えている（fail-open）:\n{out}"
-        assert "履歴を辿れず" not in out, f"窓の枯渇を履歴の尽きと混同している:\n{out}"
+        assert "履歴が無く" not in out, f"窓の枯渇を履歴の尽きと混同している:\n{out}"
     finally:
         shutil.rmtree(repo)
 
@@ -1066,7 +1138,7 @@ def test_pin_bump_with_note_only_line_is_not_stale() -> None:
         code, out = check(repo)
         assert code == 0, out
         assert "STALE" not in out, f"混在した免除対象を stale と誤判定した:\n{out}"
-        assert "履歴を辿れず" not in out, f"stale 判定が丸ごとスキップされている:\n{out}"
+        assert "履歴が無く" not in out, f"stale 判定が丸ごとスキップされている:\n{out}"
     finally:
         shutil.rmtree(repo)
 
@@ -1098,6 +1170,7 @@ def test_pin_change_in_yaml_extension_workflow_is_not_stale() -> None:
         code, out = check(repo)
         assert code == 0, out
         assert "STALE" not in out, f".yaml 拡張子が例外 1d の対象から外れている:\n{out}"
+        assert "履歴が無く" not in out, f"stale 判定が丸ごとスキップされている:\n{out}"
     finally:
         shutil.rmtree(repo)
 
@@ -1307,11 +1380,12 @@ def test_git_log_failure_is_reported_as_aborted() -> None:
         shutil.rmtree(repo)
 
 
-def test_page_budget_resets_after_rename() -> None:
-    """リネームを辿るときはページ予算も取り直す。
+def test_page_budget_is_shared_across_renames() -> None:
+    """ページ予算は**走査全体**で数える（リネームで取り直さない）。
 
-    取り直さないと、改名後のパスでページを消費した分だけ改名前の走査が短くなり、
-    予算内で見つかるはずの内容変更が「打ち切り」に化ける。
+    パス単位にすると実際の上限が `max_renames × max_pages` に膨らみ、宣言した値と乖離する。
+    ここでは改名後のパスで予算を使い切らせ、改名前へ移った直後に打ち切られること
+    （＝`None` に落ちて warning で流れるのではなく error になること）を固定する。
     """
     repo = new_repo()
     try:
@@ -1320,20 +1394,43 @@ def test_page_budget_resets_after_rename() -> None:
         commit_all(repo, "ワークフローを追加")
         write_workflow(repo, comment="説明を書き換える")
         commit_all(repo, "説明を実質変更")
-        real = run_git(repo, "rev-parse", "HEAD")
-        # 改名前のパスに、1 ページ（limit=2）で足りないだけのピン更新を積む。
-        for i in range(2):
-            write_workflow(repo, toolchain=f"{i:040x}", comment="説明を書き換える")
-            commit_all(repo, f"改名前のピン更新 {i}")
         moved = ".github/workflows/ci-renamed.yml"
         run_git(repo, "mv", WORKFLOW_REL, moved)
         commit_all(repo, "改名（内容不変）")
-        # 改名後のパスでもページを使わせる（リネームが 2 ページ目に来る）。
-        for i in range(2):
+        # 改名後のパスでページ予算（limit=2 × max_pages=2）を使い切らせる。
+        for i in range(3):
             write_moved_workflow(repo, moved, f"{i + 10:040x}", "説明を書き換える")
             commit_all(repo, f"改名後のピン更新 {i}")
         got = m.last_content_change(moved, limit=2, max_pages=2)
-        assert got == real, f"リネーム後にページ予算を取り直せていない: {got!r}"
+        assert isinstance(got, m.ScanAborted), f"予算を使い切ったのに打ち切っていない: {got!r}"
+        assert "max_pages" in got.reason, got.reason
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_git_show_failure_is_reported_as_aborted() -> None:
+    """`git show --name-status` の失敗も warning に落とさない。
+
+    失敗を「このコミットは対象パスを触っていない」と同じ扱いにすると、最後の内容変更
+    コミットが黙って飛んで **より古い SHA が返り stale 検査が静かに通る**。`git log` の
+    失敗だけを error にしても、走査中に最も多く呼ぶこちらが飲み込めば意味がない。
+    """
+    repo = new_repo()
+    try:
+        m = load_checker(repo)
+        write_workflow(repo)
+        commit_all(repo, "ワークフローを追加")
+        real_git = m.git
+
+        def failing_git(*args: str):
+            if "--name-status" in args:
+                return subprocess.CompletedProcess(list(args), 128, "", "fatal: 壊れた")
+            return real_git(*args)
+
+        m.git = failing_git
+        got = m.last_content_change(WORKFLOW_REL)
+        assert isinstance(got, m.ScanAborted), f"git show の失敗を飲み込んでいる: {got!r}"
+        assert "name-status" in got.reason, f"原因が分からない: {got.reason}"
     finally:
         shutil.rmtree(repo)
 
@@ -1360,7 +1457,7 @@ def test_aborted_scan_is_reported_as_error_not_warning() -> None:
         text = out.getvalue()
         assert code == 1, f"走査の未完遂が error になっていない（exit {code}）:\n{text}"
         assert "テスト用の打ち切り" in text, f"打ち切りの理由が出力されていない:\n{text}"
-        assert "履歴を辿れず" not in text, f"打ち切りを履歴の尽きと同じ文言で流している:\n{text}"
+        assert "履歴が無く" not in text, f"打ち切りを履歴の尽きと同じ文言で流している:\n{text}"
     finally:
         shutil.rmtree(repo)
 

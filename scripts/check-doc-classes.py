@@ -215,14 +215,15 @@ def blob_at(sha: str, path: str) -> "bytes | None":
     return proc.stdout if proc.returncode == 0 else None
 
 
-def decode_line(line: bytes) -> str:
-    """行を正規表現に当てるために復号する。**往復可能な形で**（差分を潰さない）。
+def decode_preserving(raw: bytes) -> str:
+    """git から取ったバイト列（行でもブロブ全体でも）を**往復可能な形で**復号する。
 
-    `errors="replace"` は異なる不正バイトを同じ U+FFFD に潰すので使わない。
-    surrogateescape なら不正バイトが 1 バイトずつ別のサロゲートに写るため、
-    復号後の比較でも相違が保存される。
+    `errors="replace"` は異なる不正バイトを同じ U+FFFD に潰すので使わない。潰すと、
+    復号後に比べる箇所（frontmatter の本文比較・`uses:` 行の owner/repo 比較）で
+    別内容が「一致」に見える。surrogateescape なら不正バイトが 1 バイトずつ別の
+    サロゲートに写るため、相違が保存される。
     """
-    return line.decode("utf-8", "surrogateescape")
+    return raw.decode("utf-8", "surrogateescape")
 
 
 def is_metadata_only_change(sha: str, path: str) -> bool:
@@ -235,7 +236,7 @@ def is_metadata_only_change(sha: str, path: str) -> bool:
     new_raw, old_raw = blob_at(sha, path), blob_at(f"{sha}^", path)
     if new_raw is None or old_raw is None:
         return False  # 初回追加や親を辿れない場合は判定しない（内容変更として扱う）
-    new_text, old_text = decode_line(new_raw), decode_line(old_raw)
+    new_text, old_text = decode_preserving(new_raw), decode_preserving(old_raw)
     new_fm, new_body = split_frontmatter(new_text)
     old_fm, old_body = split_frontmatter(old_text)
     if new_fm is None or old_fm is None or new_body != old_body:
@@ -262,7 +263,7 @@ RE_WORKFLOW_PATH = re.compile(r"^\.github/workflows/[^/]+\.ya?ml$")
 # 同一パス内でも `run: |` のブロックスカラに同じ形の行があれば拾ってしまうが、
 # 対象をワークフローに絞ってあるので実害は「自リポの CI スクリプト本文」に限られる。
 RE_USES_PIN = re.compile(
-    r"^(\s*(?:-\s+)?uses:\s+)([^@\s/]+/[^@\s/]+)@([0-9a-fA-F]{40})(\s+#\s*v?\d[\w.+-]*)?$"
+    r"^(\s*(?:-\s+)?uses:\s+)([^@\s/]+/[^@\s/]+)@([0-9a-fA-F]{40})(\s+#\s*v?\d[0-9A-Za-z._+-]*)?$"
 )
 
 
@@ -289,8 +290,8 @@ def is_pin_only_change(sha: str, path: str) -> bool:
     for new_line, old_line in zip(new_lines, old_lines):
         if new_line == old_line:
             continue
-        new_pin = RE_USES_PIN.match(decode_line(new_line))
-        old_pin = RE_USES_PIN.match(decode_line(old_line))
+        new_pin = RE_USES_PIN.match(decode_preserving(new_line))
+        old_pin = RE_USES_PIN.match(decode_preserving(old_line))
         if not new_pin or not old_pin:
             return False
         # 変わってよいのは 40 hex と末尾の版注記だけ。owner/repo の差し替えは別の action を
@@ -306,6 +307,15 @@ def is_pin_only_change(sha: str, path: str) -> bool:
     return hex_changed
 
 
+class GitFailed(Exception):
+    """git コマンドそのものが失敗した。
+
+    走査の途中で握り潰すと「そのコミットは対象パスを触っていない」と同じ扱いになり、
+    最後の内容変更コミットが黙って飛んで stale 検査が静かに通る（fail-open）。上位で
+    ScanAborted に変換して error にする。
+    """
+
+
 def path_status(sha: str, path: str) -> "tuple[str | None, str | None]":
     """コミット sha における path の (status, リネーム元) を返す。
 
@@ -314,11 +324,16 @@ def path_status(sha: str, path: str) -> "tuple[str | None, str | None]":
     対象パスを終点とする行だけを見る。
     core.quotePath=false を明示するのは、既定だと非 ASCII パスが "\\346\\234\\200..." の
     クォート表記になり終点一致が外れて R100 除外が破れるため。
+
+    **失敗を (None, None) に混ぜない。** それは「このコミットは触っていない」と同義で、
+    走査を続けると検査が黙ってスキップされる。
     """
-    shown = git(
+    proc = git(
         "-c", "core.quotePath=false", "show", "--format=", "--name-status", "-M100%", sha
-    ).stdout
-    for line in shown.splitlines():
+    )
+    if proc.returncode != 0:
+        raise GitFailed(f"git show --name-status が失敗した（{proc.stderr.strip()[:200]}）")
+    for line in proc.stdout.splitlines():
         parts = line.split("\t")
         if len(parts) >= 2 and parts[-1] == path:
             status = parts[0]
@@ -349,6 +364,16 @@ class ScanAborted:
 def last_content_change(
     path: str, limit: int = 40, max_renames: int = 10, max_pages: int = 25
 ) -> "str | ScanAborted | None":
+    """path の内容が最後に変わったコミットの SHA（git の失敗は ScanAborted に寄せる）。"""
+    try:
+        return scan_last_content_change(path, limit, max_renames, max_pages)
+    except GitFailed as exc:
+        return ScanAborted(str(exc))
+
+
+def scan_last_content_change(
+    path: str, limit: int, max_renames: int, max_pages: int
+) -> "str | ScanAborted | None":
     """path の**内容**が最後に変わったコミットの SHA。
 
     次の 3 種類は「内容変更ではない」として遡る（規約は docs/knowledge/README.md の例外 1 / 1b / 1d）:
@@ -372,11 +397,12 @@ def last_content_change(
 
       - SHA         : 内容が最後に変わったコミット
       - None        : **履歴が無い**（未コミット・履歴が尽きた・shallow）→ 呼び出し側は warning
-      - ScanAborted : **走査を完遂できなかった**（ページ予算 / リネーム予算 / git log の失敗）
+      - ScanAborted : **走査を完遂できなかった**（ページ予算 / リネーム予算 / git の失敗）
                       → 呼び出し側は error
 
-    予算は**パス単位**。`max_pages` は 1 つのパスに対するページ数で、リネームを辿るとパスが
-    変わるので取り直す。したがって全体の上限は `max_renames × max_pages` ページになる。
+    `max_pages` は**走査全体**のページ数（リネームを辿っても取り直さない）。パス単位にすると
+    実際の上限が `max_renames × max_pages` に膨らみ、宣言した値と乖離するうえ、病的な履歴では
+    `adr` ジョブの timeout が先に来て「打ち切りを error にする」意図が届かない。
     `max_renames=N` のとき実際に辿れるリネームは **N-1 段**（N 段目を見つけた時点で打ち切る）。
     """
     current = path
@@ -405,21 +431,22 @@ def last_content_change(
             status, rename_src = path_status(sha, current)
             if status is None:
                 # そのコミットは current を（この名前では）触っていない。マージコミットは
-                # git show が既定で差分を出さないためここに来る。実際の変更は親側のコミットに
-                # 現れ、それも log の対象なので飛ばして問題ない。
+                # git show が既定で差分を出さないためここに来る。通常の変更は親側のコミットにも
+                # 現れ、それも log の対象なので飛ばして問題ない。**例外は evil merge**
+                # （マージコミット自身だけが内容を変える形）で、これは恒久的に不可視になる。
+                # 既存の限界で本 ADR の対象外（docs/knowledge/ci-pipeline.md に記録）。
                 continue
             if status == "R100":
                 if not rename_src:
                     return sha  # リネーム元を取れない＝判定できないので内容変更扱い
                 current = rename_src
                 tip = f"{sha}^"
-                skip = 0  # パスが変わったので窓の位置も取り直す
-                pages = 0  # ページ予算も新しいパスに対して取り直す
+                skip = 0  # パスが変わったので窓の位置は取り直す（ページ予算は全体で数える）
                 renames += 1
                 renamed = True
                 break
-            # ワークフローの判定を先に置く。こちらはパスで即棄却できるので、.yml に対して
-            # frontmatter の分解を試みる無駄が消える。
+            # ワークフローの判定を先に置く。免除に当たったときに frontmatter の分解を
+            # 試みる無駄が消える（.md 側は RE_WORKFLOW_PATH で即 False になる）。
             if is_pin_only_change(sha, current):
                 continue
             if is_metadata_only_change(sha, current):
@@ -1020,7 +1047,10 @@ def main(argv: list[str]) -> int:
             if changed is None:
                 # 履歴が無い（未コミット・履歴の尽き・shallow）。黙って通すと fail-open に
                 # なるので可視化する。
-                warnings.append(f"{rel}: {src} の履歴を辿れず stale 判定を実施できなかった")
+                warnings.append(
+                    f"{rel}: {src} の履歴が無く stale 判定を実施できなかった"
+                    "（未コミット / 履歴の尽き / shallow）"
+                )
                 continue
             if git("merge-base", "--is-ancestor", changed, distilled_full).returncode != 0:
                 # #580 で warning → error に昇格。「ADR の内容は knowledge へ全部写す」
