@@ -8,7 +8,7 @@ sources:
   - docs/original-docs/0073-adr-into-original-docs-and-doc-classes.md
   - docs/original-docs/0081-pin-only-diff-is-not-content-change.md
   - .github/workflows/ci.yml
-distilled_from_sha: "c74537e"
+distilled_from_sha: "0341cc4"
 updated: "2026-08-13"
 ---
 
