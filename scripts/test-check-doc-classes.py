@@ -1920,7 +1920,7 @@ def repin(repo: Path, entries: "list[tuple[str, list[str], list[str]]]", **regis
     return commit_all(repo, "pin sha")
 
 
-def origin_row(origin: str, req_id: str = "REQ-D19-001") -> str:
+def origin_row(origin: str, req_id: str = "REQ-D19-001") -> str:  # noqa: D401
     return f"| {req_id} | 何かを満たす | `cargo test` で固定 | {origin} | Confirmed |"
 
 
@@ -2240,6 +2240,226 @@ def test_malformed_orphan_exception_row_is_error() -> None:
         code, out = check(repo)
         assert code == 1, out
         assert "orphan 例外表の書式が崩れている" in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
+# --- 2 巡目レビューの変異テストで「消しても緑のまま」と判明した契約の pin ---
+# 以下は実装から該当行を削っても 127 ケースが全通過してしまった分岐。挙動そのものは
+# 正しかったが、テストが 1 本も見ていなかったので退行を検出できない状態だった。
+
+
+def test_req_origin_same_missing_source_reported_once() -> None:
+    """同じ未収載出典を複数の REQ が挙げても、報告は文書内で 1 回に畳む。"""
+    repo = new_repo()
+    try:
+        baseline(repo)
+        add_adr(repo, "0002-second.md")
+        repin(
+            repo,
+            [
+                ("docs/knowledge/a.md", ["D19"], [FIRST_ADR]),
+                ("docs/knowledge/b.md", ["D19"], [FIRST_ADR, SECOND_ADR]),
+            ],
+            d19=2,
+            docs=[("knowledge/a.md", ["D19"]), ("knowledge/b.md", ["D19"])],
+        )
+        link = "[ADR 0002](../original-docs/0002-second.md)"
+        append_req_block(repo, "docs/knowledge/a.md", "D19",
+                         [origin_row(link, "REQ-D19-001"), origin_row(link, "REQ-D19-002")])
+        code, out = check(repo)
+        assert code == 1, out
+        # 件数まで assert しないと dedup を消しても緑のまま（変異テストで実証済み）。
+        assert out.count("sources に無い") == 1, f"同じ出典が二重に報告された:\n{out}"
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_req_verification_link_is_not_checked_against_sources() -> None:
+    """突合の対象は `出典` 列だけ。`検証手段` 列は測り方であって蒸留元ではない。"""
+    repo = new_repo()
+    try:
+        baseline(repo)
+        add_adr(repo, "0002-second.md")
+        repin(
+            repo,
+            [
+                ("docs/knowledge/a.md", ["D19"], [FIRST_ADR]),
+                ("docs/knowledge/b.md", ["D19"], [FIRST_ADR, SECOND_ADR]),
+            ],
+            d19=2,
+            docs=[("knowledge/a.md", ["D19"]), ("knowledge/b.md", ["D19"])],
+        )
+        append_req_block(
+            repo, "docs/knowledge/a.md", "D19",
+            ["| REQ-D19-001 | 何かを満たす | "
+             "[ADR 0002](../original-docs/0002-second.md) の手順で再実行 | ADR 0001 | Confirmed |"],
+        )
+        code, out = check(repo)
+        assert code == 0, f"検証手段の列を sources と突合した: {out}"
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_noncanonical_source_is_error() -> None:
+    """`./docs/...` のような非正規形の sources を弾く。
+
+    非正規形は実在検査を通るのに stale 判定の突合から静かに外れる（path_status が
+    `git show --name-status` の出力と終点一致で突き合わせるため）。形式を 1 つに
+    強制することで、4 / 6 / 11 / 12 が同じ文字列を見ることを保証する。
+    """
+    repo = new_repo()
+    try:
+        sha = baseline(repo)
+        write_doc(repo, "docs/knowledge/a.md", ["D19"], ["./" + FIRST_ADR], sha)
+        code, out = check(repo)
+        assert code == 1, out
+        assert "sources は正規形で書く" in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_noncanonical_orphan_exception_is_error() -> None:
+    """例外表のパスも正規形を強制する（非正規形を黙って落とすと誤診断が出る）。"""
+    repo = new_repo()
+    try:
+        sha = baseline(repo)
+        add_adr(repo, "0002-second.md")
+        write_registry(repo, sha, orphan_exceptions=[("./" + SECOND_ADR, ORPHAN_REASON)])
+        code, out = check(repo)
+        assert code == 1, out
+        assert "例外表のパスは sources と同じ正規形で書く" in out, out
+        # 1 巡目で足した「誤誘導しない」分岐が非正規形で裏返らないこと。
+        assert "ADR ではない" not in out, f"事実と逆の診断が出た:\n{out}"
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_orphan_exception_header_row_must_be_canonical() -> None:
+    """見出し行の列名は契約。変えると見出しがデータ行として読まれて原因が読めなくなる。"""
+    repo = new_repo()
+    try:
+        sha = baseline(repo)
+        add_adr(repo, "0002-second.md")
+        write_registry(repo, sha, orphan_exceptions=[(SECOND_ADR, ORPHAN_REASON)])
+        registry = repo / "docs/knowledge/doc-classes.md"
+        text = registry.read_text(encoding="utf-8")
+        registry.write_text(
+            text.replace("| ADR | 例外の理由 |", "| 対象 ADR | 例外の理由 |"), encoding="utf-8"
+        )
+        code, out = check(repo)
+        assert code == 1, out
+        assert "見出し行が" in out, out
+        assert "実在しない" not in out, f"見出し行を例外エントリとして読んだ:\n{out}"
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_orphan_exception_with_empty_adr_cell_is_error() -> None:
+    """ADR 列が空の行を黙って通すと、パスが空欄のまま報告されて行を特定できない。"""
+    repo = new_repo()
+    try:
+        sha = baseline(repo)
+        add_adr(repo, "0002-second.md")
+        write_registry(repo, sha, orphan_exceptions=[("", ORPHAN_REASON)])
+        code, out = check(repo)
+        assert code == 1, out
+        assert "ADR 列が空の行がある" in out, out
+        assert "orphan 例外表の  は" not in out, f"空パス混じりの報告が出た:\n{out}"
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_orphan_exception_with_placeholder_reason_is_error() -> None:
+    """理由が `-` / `TBD` / `未定` のようなプレースホルダでも「理由なし」として落とす。"""
+    for placeholder in ("-", "TBD", "未定"):
+        repo = new_repo()
+        try:
+            sha = baseline(repo)
+            add_adr(repo, "0002-second.md")
+            write_registry(repo, sha, orphan_exceptions=[(SECOND_ADR, placeholder)])
+            code, out = check(repo)
+            assert code == 1, f"理由 {placeholder!r} が通った: {out}"
+            assert "理由が書かれていない" in out, out
+        finally:
+            shutil.rmtree(repo)
+
+
+def test_zero_padded_five_digit_is_still_treated_as_adr() -> None:
+    """`00401-...` のような採番ミス ADR も母集合に入る（check-adr-numbers.sh と同一述語）。
+
+    末尾に `-` を要求する（`^0\\d{3}-`）へ絞ると、採番ミス ADR が orphan 検査から
+    静かに外れる。1 巡目で潰した `^\\d{4}` 退行の裏返し方向。
+    """
+    repo = new_repo()
+    try:
+        baseline(repo)
+        add_adr(repo, "00401-mis-numbered.md")
+        code, out = check(repo)
+        assert code == 1, out
+        assert "00401-mis-numbered.md" in out and "sources からも参照されていない" in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_adr_in_subdirectory_is_not_orphan_checked() -> None:
+    """階層に置いた ADR は orphan 検査の対象外（そちらは check-adr-numbers.sh の担当）。"""
+    repo = new_repo()
+    try:
+        baseline(repo)
+        (repo / "docs/original-docs/legacy").mkdir()
+        (repo / "docs/original-docs/legacy/0002-second.md").write_text(
+            "# 0002. 階層に置いた決定\n", encoding="utf-8"
+        )
+        code, out = check(repo)
+        assert code == 0, f"階層 ADR を orphan 扱いした: {out}"
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_readme_sources_do_not_satisfy_orphan_check() -> None:
+    """README の sources では orphan を満たせない（テンプレート例で偽の被参照が生まれる）。"""
+    repo = new_repo()
+    try:
+        sha = baseline(repo)
+        add_adr(repo, "0002-second.md")
+        (repo / "docs/knowledge/README.md").write_text(
+            f'---\nstatus: Confirmed\nkind: knowledge\nsources:\n  - {SECOND_ADR}\n'
+            f'distilled_from_sha: "{sha}"\nupdated: "2026-08-13"\n---\n\n# 規約\n',
+            encoding="utf-8",
+        )
+        code, out = check(repo)
+        assert code == 1, out
+        assert SECOND_ADR in out and "sources からも参照されていない" in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_orphan_and_req_origin_are_suppressed_by_warn_only() -> None:
+    """検査 11 / 12 の「違反」は --warn-only で 0 になる（逃げ道の運用契約を固定する）。"""
+    repo = new_repo()
+    try:
+        baseline(repo)
+        add_adr(repo, "0002-second.md")
+        code, out = check(repo, "--warn-only")
+        assert code == 0, f"--warn-only で落ちた: {out}"
+        assert "sources からも参照されていない" in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_no_adr_at_all_is_fatal_even_with_warn_only() -> None:
+    """ADR 0 件は「違反」ではなく「検査が成立していない」ので --warn-only でも落ちる。"""
+    repo = new_repo()
+    try:
+        baseline(repo)
+        primary = add_adr(repo, "382-live-server-now.md")
+        (repo / FIRST_ADR).unlink()
+        repin(repo, [("docs/knowledge/a.md", ["D19"], [primary])], sources=[primary])
+        code, out = check(repo, "--warn-only")
+        assert code == 1, f"--warn-only で握り潰された: {out}"
+        assert "ADR（0 埋め 4 桁）が 1 件も無い" in out, out
+        assert "検査が成立していないため" in out, out
     finally:
         shutil.rmtree(repo)
 

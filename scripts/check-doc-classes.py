@@ -80,6 +80,9 @@ ORIGINAL_DOCS = "docs/original-docs"
 # 母集合に入れる。採番の是正は check-adr-numbers.sh の担当で、こちらは被参照だけを見る）。
 RE_ADR_FILENAME = re.compile(r"^0\d{3}")
 
+# orphan 例外表の列。見出し行を完全一致で要求する（列名を変えるとデータ行として読まれる）。
+ORPHAN_EXCEPTION_COLUMNS = ("ADR", "例外の理由")
+
 # 走査から外すファイル。
 #   README.md    : 規約そのもの。frontmatter のテンプレート例（0NNN-....md 等の
 #                  存在しないパス）を含むため、frontmatter 系の検査は必ず偽陽性になる。
@@ -528,13 +531,20 @@ def is_external_link(target: str) -> bool:
 
     スキーム付き URI（http/https/mailto に限らず ftp・tel 等）と protocol-relative、
     同一文書内アンカーが該当する。ホワイトリストにすると新しいスキームを足すたびに
-    誤検知が出るので、スキームの有無で判定する。
-
-    **リンクを拾う検査はすべてこの 1 本を通す**（check_links / repo_relative_targets）。
-    同じ skip 規則を 2 か所に書くと、片方だけ直したときに「実在検査はしたが
-    sources 突合はしていない」といった非対称が静かに生まれる。
+    誤検知が出るので、スキームの有無で判定する。呼び出し元は iter_links だけ。
     """
     return target.startswith(("#", "//")) or bool(RE_URI_SCHEME.match(target))
+
+
+def is_canonical_repo_path(raw: str) -> bool:
+    """`sources` / 例外表に書けるリポジトリ相対パスの正規形か。
+
+    `docs/original-docs/0073-x.md` は真、`./docs/...` や `docs//x.md` は偽。
+    **`Path(...).as_posix()` の語彙的正規化だけで判定する**——`os.path.normpath` や
+    `Path.resolve()` を使うと `..` まで畳んでしまい、呼び出し側の「`..` を拒否する」検査が
+    静かに効かなくなる（`docs/original-docs/../../etc/hosts` が通る）。
+    """
+    return Path(raw).as_posix() == raw
 
 
 def iter_links(fragment: str) -> "Iterator[tuple[int, str, str]]":
@@ -651,6 +661,15 @@ def check_req_blocks(
 
     `sources` はこの文書の frontmatter の `sources`（ルート相対）。出典セルが名指しした
     一次資料がここに載っているかを突き合わせる（検査 11）。
+
+    唯一の参照元からその ADR を落とすと、検査 11 と orphan 検査（12）の両方が鳴る。
+    **この重複は意図的**——言っていることが違う（「この文書が根拠を watch していない」と
+    「誰もこの ADR を watch していない」）。片方を抑止すると、参照元が複数ある場合に
+    orphan 側が鳴らない事実が見えなくなる。リンク切れの二重報告
+    （repo_relative_targets の docstring）とは別の話で、あちらは同じ 1 つの欠陥の重複だった。
+
+    突合の対象は `出典` 列だけで、`検証手段` 列は見ない（そこに挙がるのは測り方であって
+    蒸留元ではない・ADR 0082 の意図的スコープ）。
     """
     blocks, structural = parse_req_blocks(text)
     # 同じ出典を複数の REQ が挙げていても、未収載の報告は文書内で 1 回に畳む。
@@ -755,12 +774,6 @@ def check_req_blocks(
                     f"{rel}: {req_id} の出典 {src} が frontmatter の sources に無い"
                     "（出典は減らさず sources 側を足す）"
                 )
-            # 唯一の参照元からその ADR を落とすと、ここと orphan 検査（12）の両方が鳴る。
-            # **この重複は意図的**——言っていることが違う（「この文書が根拠を watch して
-            # いない」と「誰もこの ADR を watch していない」）。片方を抑止すると、
-            # 参照元が複数ある場合に orphan 側が鳴らない事実が見えなくなる。
-            # リンク切れの二重報告（repo_relative_targets の docstring）とは別の話で、
-            # あちらは同じ 1 つの欠陥に対する重複だった。
 
 
 def main(argv: list[str]) -> int:
@@ -788,6 +801,10 @@ def main(argv: list[str]) -> int:
 
     errors: list[str] = []
     warnings: list[str] = []
+    # 「違反があるから落とす」（--warn-only で抑止できる）と「検査そのものが成立していない
+    # から落とす」（抑止できない）の二分法をコード上で明示する。後者はマーカー欠落
+    # （extract_block の sys.exit）と ADR 0 件。
+    fail_closed = False
 
     # --- レジストリを読む ---
     registry_text = registry_path.read_text(encoding="utf-8")
@@ -839,15 +856,42 @@ def main(argv: list[str]) -> int:
     # ルート相対（比較相手に形式を合わせる・ADR 0082）。スクリプト内の定数ではなく
     # レジストリに置くのは、例外を増やす行為を文書レビューに乗せるため。
     orphan_exceptions: dict[str, str] = {}
+    header_seen = False
     for line in extract_block(registry_text, "adr-orphan-exceptions"):
         stripped = line.strip()
         if not stripped.startswith("|"):
             continue
         cells = split_row(stripped)
         if len(cells) != 2:
-            errors.append(f"{REGISTRY}: orphan 例外表の書式が崩れている行がある → {stripped}")
+            errors.append(
+                f"{REGISTRY}: orphan 例外表の書式が崩れている行がある → {stripped}"
+                "（2 列。セル内の `|` は `\\|` でエスケープする）"
+            )
             continue
-        if cells[0] == "ADR" or RE_TABLE_SEP_CELL.match(cells[0]):
+        if RE_TABLE_SEP_CELL.match(cells[0]):
+            continue
+        if not header_seen:
+            # **先頭のデータ行は見出しでなければならない。** 見出しを別の列名にすると、
+            # その行が「例外エントリ」として読まれ「ファイルが実在しない」という
+            # 原因の読めない error になる（実測）。列名は checker がパースする契約。
+            header_seen = True
+            if cells != list(ORPHAN_EXCEPTION_COLUMNS):
+                errors.append(
+                    f"{REGISTRY}: orphan 例外表の見出し行が "
+                    f"`| {' | '.join(ORPHAN_EXCEPTION_COLUMNS)} |` でない → {stripped}"
+                )
+            continue
+        if not cells[0]:
+            # 空セルを黙って通すと `orphan 例外表の  は…` とパスが空欄のまま報告され、
+            # どの行のことか分からなくなる。
+            errors.append(f"{REGISTRY}: orphan 例外表に ADR 列が空の行がある → {stripped}")
+            continue
+        if not is_canonical_repo_path(cells[0]):
+            # sources と同じ形式に揃えて突合するので、非正規形は比較から外れる。
+            # 黙って落とすと「ADR ではない」という事実と逆の診断が出る（実測）。
+            errors.append(
+                f"{REGISTRY}: orphan 例外表のパスは sources と同じ正規形で書く → {cells[0]}"
+            )
             continue
         if cells[0] in orphan_exceptions:
             errors.append(f"{REGISTRY}: orphan 例外表に {cells[0]} の行が 2 つある")
@@ -866,7 +910,11 @@ def main(argv: list[str]) -> int:
         # （現状 docs/specifications/diagrams/ に .md は無い）。
         nested = sorted(p.relative_to(root).as_posix() for p in (root / d).glob("*/**/*.md"))
         for n in nested:
-            warnings.append(f"{n}: サブディレクトリの .md は検査対象外（直下に置く）")
+            warnings.append(
+                f"{n}: サブディレクトリの .md は検査対象外（直下に置く）。"
+                "**この文書の sources は orphan 検査に数えられない**ので、"
+                "ここからしか参照されていない ADR は orphan と誤判定される"
+            )
 
     # 全検査から外している README（テンプレート例が frontmatter 検査で必ず偽陽性になる）も、
     # **リンクだけは見る**。規約の正本が唯一無検査という穴を残さない——見本のリンクは
@@ -935,17 +983,16 @@ def main(argv: list[str]) -> int:
                 doc_class_by_rel[rel.removeprefix("docs/")] = classes
 
         # sources は REQ 表の出典突合（11）でも使うので、REQ 走査より先に読む。
+        # **正規化層を挟まず、生の文字列のまま 4 / 6 / 11 / 12 の全部が同じ値を見る**
+        # （非正規形は下の (4) が弾く。理由はそこに書いた）。
         sources = fm.get("sources", [])
-        # 突合用は正規化する。`./docs/...` のような非正規形は実在検査（4）を通るのに
-        # 文字列一致からは外れ、「sources にあるのに sources に無いと言われる」偽 error になる。
-        normalized_sources = {Path(src).as_posix() for src in sources}
-        referenced_sources.update(normalized_sources)
+        referenced_sources.update(sources)
 
         # (8)(11) REQ 表。リンクの台帳は上の本文検査と共有していて、本文で報告済みの
         # リンク先は REQ 側で二重に報告しない（REQ 表の行は本文にも含まれるため）。
         check_req_blocks(
             rel, text, fm.get("doc_class"), declared, req_seen, root, errors,
-            normalized_sources, link_seen,
+            set(sources), link_seen,
         )
 
         # (4) sources の実在
@@ -956,6 +1003,17 @@ def main(argv: list[str]) -> int:
             # 「由来はリポジトリ内で辿れる」という検査の前提が崩れる。
             if src.startswith("/") or ".." in Path(src).parts:
                 errors.append(f"{rel}: sources はリポジトリ相対パスで書く → {src}")
+            elif not is_canonical_repo_path(src):
+                # `./docs/...` や `docs//x.md` は **実在検査だけ通って stale 判定から静かに
+                # 外れる**。path_status が git show --name-status の出力と終点一致で
+                # 突き合わせるため、`./` 付きは永久に一致せず「履歴を辿れず」の warning に
+                # 退化する（実測）。突合用に正規化した集合を別に持つ手もあるが、それだと
+                # 「どちらの形式か」を持つ場所が増える——ADR 0082 が例外表のパス形式で
+                # 却下したのと同じ理由で、**形式を 1 つに強制する**方を採る。
+                errors.append(
+                    f"{rel}: sources は正規形で書く（`./` や重複スラッシュを使わない）→ {src}"
+                    "。非正規形はこの検査を通っても stale 判定から静かに外れる"
+                )
             elif not (root / src).is_file():
                 errors.append(f"{rel}: sources のパスが実在しない → {src}")
 
@@ -1012,12 +1070,15 @@ def main(argv: list[str]) -> int:
     )
     if not adrs:
         # ADR が 0 件になることはありえない。0 件＝判定条件かパスの取り違えなので、
-        # 静かに緑にせず落とす（`if not declared: return 1` と check-adr-numbers.sh の
-        # 同型ガードに揃える。ここが無いと検査 12 が丸ごと無言で無効化される fail-open）。
+        # 静かに緑にせず落とす（ここが無いと検査 12 が丸ごと無言で無効化される fail-open）。
+        # **`--warn-only` でも抑止しない**——これは「違反がある」ではなく「検査が成立して
+        # いない」側の失敗で、マーカー欠落と同じクラス。ただし sys.exit はしない
+        # （それまでに溜めた errors / warnings を捨てるため。割当索引を先に読む理由と同じ）。
         errors.append(
             f"{ORIGINAL_DOCS}/ に ADR（0 埋め 4 桁）が 1 件も無い"
             "（判定条件かディレクトリを確認する。orphan 検査が丸ごと効いていない）"
         )
+        fail_closed = True
     for adr in adrs:
         if adr in referenced_sources or adr in orphan_exceptions:
             continue
@@ -1094,9 +1155,11 @@ def main(argv: list[str]) -> int:
             print(f"✗ {e}", file=sys.stderr)
         print("", file=sys.stderr)
         print(f"✗ {len(errors)} 件の不整合（警告 {len(warnings)} 件）", file=sys.stderr)
-        if warn_only:
+        if warn_only and not fail_closed:
             print("  --warn-only のため 0 で終了する", file=sys.stderr)
             return 0
+        if warn_only:
+            print("  検査が成立していないため --warn-only でも 1 で終了する", file=sys.stderr)
         return 1
 
     print(

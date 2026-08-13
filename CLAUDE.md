@@ -14,9 +14,11 @@ paddock の文書は HVE（dahatake/HypervelocityEngineering, MIT）の蒸留モ
   決定を伴う変更は ADR を起票する（採番は `scripts/check-adr-numbers.sh next`）。**一度置いた ADR は
   改変しない**——決定を変えるときは新しい ADR で supersede する。**新設した ADR は同じ PR で
   どこかの knowledge / specifications の `sources` に載せる**（載っていない ADR は
-  orphan 検査が error にする・ADR 0082）。写す先が無い ADR（規約そのものを定めた ADR /
-  supersede されて下流が後継だけを見るようになった ADR）は `doc-classes.md` の
-  `adr-orphan-exceptions` 表に理由付きで登録する。
+  orphan 検査が error にする・ADR 0082）。**載せた時点で必ず STALE が出る**ので本文コミットの後に
+  `scripts/bump-distilled-sha.py --all-stale` で追従コミットを積む。写す先が無い ADR（規約そのものを
+  定めた ADR / supersede されて下流が後継だけを見るようになった ADR）は `doc-classes.md` の
+  `adr-orphan-exceptions` 表に理由付きで登録する。**knowledge / specifications を消す・統合する
+  ときは、その文書の `sources` にある ADR を別文書へ移すか例外表に登録する**（同じ PR で）。
 - **読む入口は knowledge**。ADR の決定・理由・却下案・影響は knowledge に**全部写す**。重複を許す
   代わりに、`sources` の更新に蒸留が追従しているかは機械検査で担保する（人手の規律に委ねない）。
   **写しは一巡済み**: 棄却された ADR は
