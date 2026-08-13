@@ -99,6 +99,12 @@ jobs:
       - name: Clippy
         run: cargo clippy --locked --workspace --all-targets -- -D warnings
 
+      # ビルド時の外部取得へ静かに戻るのを防ぐ（ADR 0082）。**この required ジョブに置くのが要点**
+      # ——feature が落ちても GitHub ランナーには curl があるのでビルドは通ってしまい、落ちるのは
+      # 非必須の docker-build だけになる（原因の分かりにくいエラーで）。
+      - name: Check Swagger UI is vendored (ADR 0082)
+        run: bash scripts/check-vendored-swagger.sh
+
       # 大半のクレートを 1 ステップで実行する。実 Postgres 接続テスト（#[sqlx::test]）は複数
       # クレートに散在し単一サーバを共有するため、--test-threads=1 で直列実行する（stock cargo
       # test はテストバイナリ"間"を逐次実行し、--test-threads=1 が各バイナリ"内"も 1 スレッドに

@@ -68,25 +68,43 @@ D21（CI/CD・ビルド・リリース・供給網管理）の充足ギャップ
 検査が落ちたとき、**ADR が本当に重複しているのか判定器が壊れているのか**を切り分けられるようにする
 （ADR 0073）。fail-closed を謳う検査ほど、壊れても本番データが正常なら気づけない。
 
-### ビルド時に外部から資産を取ってこない（Swagger UI は vendored・ADR 0082）
+### build script が lock/checksum 外の資産を取ってこない（Swagger UI は vendored・ADR 0082）
 
 `api-server` が依存する `utoipa-swagger-ui` の **build script は Swagger UI の zip をビルド時に
-外部から取得していた**（`curl -sSL` の起動。**リトライ機構は無く 1 回失敗＝即 panic**）。上流が
-不調だと `docker-build (api)` が落ち、2026-08-12 には配分定数と Python しか触っていない PR（#611）が
-2 回連続で失敗した（`InvalidArchive("Could not find EOCD")` と `curl exit status 56`——`-f` を付けない
-curl が HTTP エラーボディを zip として保存するため症状が 2 通りに出る）。
+外部から取得していた**（`curl -sSL -o <path> <url>` の起動。**`--retry` も build script 側の再試行も
+無く `build.rs:216` で 1 回失敗＝即 panic**）。上流が不調だと `docker-build (api)` が落ち、
+2026-08-12〜13（UTC）には配分定数と Python しか触っていない PR（#611）が 2 回連続で失敗した。
+**壊れ方は 2 通り**で、1 回目は curl が exit 0 のまま壊れた本体を保存し（`-f` 無しなので HTTP
+エラーを失敗と扱わない）`ZipArchive::new` が EOCD を見つけられず panic、2 回目は curl 自身が
+非 0（56）で終了して `download_file` が Err を返した（こちらは `-f` の有無に関係なく落ちる）。
 
-**いちばん厄介なのは main が緑のままになること。** main の run では `cargo build` のレイヤが
-`CACHED` でダウンロードを一度も実行しない。`--mount=type=cache` の中身は `type=gha` の
-レイヤキャッシュに載らないので、Rust ソースを触る PR 側だけが実ダウンロードを踏む。結果
-「main は緑なのに PR だけ落ちる」（PR の変更が疑われるが無関係）と「上流が壊れていても main の
-CI は緑を出し続ける」の 2 つの誤誘導が起きる。
+**「main はキャッシュで緑になるから上流障害を検知できない」という当初の分析は誤りだった。**
+実測では main への push は毎回**実ビルド**している（`5ae6466` は `docker-build (api)` 3m45s で
+ログに `Downloaded utoipa-swagger-ui v9.0.2` / `#14 DONE 177.2s`、`ae8e33b` は 4m00s）。
+`#14 CACHED` が出たのは**すでにビルド済みの同一コミットを再実行したとき**だけ（`eb9b9ce` の
+再実行・40s）。レイヤキャッシュはビルドコンテキストの内容でキー付けされ、GHA のキャッシュは
+スコープが分離されていて main が PR ブランチ発の cache を読むこともないので、**main / PR の
+非対称は存在せず上流が落ちれば main も落ちる**。`--mount=type=cache` の中身が `type=gha` に
+載らないのは「RUN が走ったときに crate 取得を省けない」理由であって、非対称の理由ではない。
+**この誤読自体が外部取得のコスト**だった——一過性の失敗を前に、再実行の結果を根拠に「PR の
+変更が原因では」と疑う方向へ 3 回の再実行と追試を費やした。
 
 **決定**: `vendored` feature を有効にして外部取得をやめる。build script は
 `CARGO_FEATURE_VENDORED` を最優先で分岐し、`utoipa-swagger-ui-vendored` の埋め込みバイト列を
-使うので curl も CA 証明書もネットワークも要らない。併せて `api.Dockerfile` の builder から
-`curl` を外す（`ca-certificates` は cargo の crates.io 取得に要るので残す）。`/docs` と
-`/api-docs/openapi.json` の挙動は変わらない。
+使うので **build script は curl を起動せずネットワークにも出ない**（cargo 自体は crates.io を https で
+叩くので CA 証明書は要る）。併せて `api.Dockerfile` の builder から `curl` を外す。`ca-certificates` は
+**base の `rust:1.97-slim-bookworm` に同梱済み**で明示指定は冗長だが（`importer.Dockerfile` の builder は
+入れずに通っている）、base が絞られたときの保険として残す。
+
+**「取得をやめた」のではなく「検証とリトライのある経路へ載せ替えた」のが本質。** 旧経路は
+`curl -sSL`（`-f` なし）で落としたバイト列を**ハッシュ検証なしに** unzip してバイナリへ埋め込む
+TOFU で、だから HTTP エラーボディが zip として保存され上記の `InvalidArchive` が出た。新経路は
+`Cargo.lock` の sha256 で検証され、取得失敗は cargo の transient retry に乗る。
+
+**埋め込み版は従来のダウンロード版と同一**（実測）: `utoipa-swagger-ui-vendored` 0.1.2 は
+`res/v5.17.14.zip` を同梱し `src/lib.rs` に "Swagger UI version: `5.17.14`" と明記していて、既定の
+`SWAGGER_UI_DOWNLOAD_URL_DEFAULT` も同じ v5.17.14 タグを指す。**`/docs` の資産は 1 バイトも
+変わらない。**
 
 **理由**: ビルドの再現性を上流の稼働状況から切り離すのがいちばん安い（ADR 0026 で mupdf の版を
 イメージタグで固定したのと同じ判断）。feature 1 つでコードは 1 行も変わらない。Swagger UI は
@@ -103,21 +121,39 @@ OpenAPI 仕様を描画する開発者向け UI なので、埋め込み版の�
   Dockerfile と CI に配線する必要がある。vendored crate なら Cargo が同じことを管理する。
 - **`docker-build` を required から外す**: **既に非必須**（ruleset の contexts は `ci` / `web` /
   `adr` / `predict-check` / `shellcheck` / `ocr-pdf` の 6 本）。かつ required の `ci` が
-  `cargo test --locked --workspace` で api-server をビルドするため同じダウンロードを踏む——
+  `cargo test --locked --workspace --exclude pdf-ocr --exclude pdf-parser -- --test-threads=1` で
+  api-server をビルドするため同じダウンロードを踏む——
   `Swatinem/rust-cache` が miss すれば required check が上流障害で落ちる。**根治の動機はこちら。**
-- **Swagger UI を dev feature に隔離して本番バイナリから外す**: `/docs` は compose の
-  `127.0.0.1:8080` 限定公開で `deployments/web.nginx.conf` は `/api/` しか proxy しない＝外部露出が
-  無い。同梱の害が実質ないのに既定ビルドで `/docs` が消えるコストのほうが大きい（YAGNI）。
+- **Swagger UI を dev feature に隔離して本番バイナリから外す**: 現状は外部露出が無いので同梱の害が
+  実質ない。既定ビルドで `/docs` が消えるコストのほうが大きい（YAGNI）。**ただし「露出が無い」は
+  (1) compose が api を `127.0.0.1:8080` に束縛していること、(2) `web.nginx.conf` が `/api/` しか
+  proxy しないこと に依存する前提条件つきの結論**なので、崩れたら再検討する。`/docs` は `app.rs` の
+  `/api` スコープの外なので、将来 `/api` に認証を入れても保護されない。
 - **失敗時のメッセージだけ改善する**: 切り分けは楽になるが落ちる事実は残る。根治が feature 1 つで
   済むので緩和策を選ぶ理由が無い。
 
-**影響**: `ci` / `docker-build` の両方でビルド時ダウンロードが消え、上流の稼働状況に依存しなくなる
-（「main はキャッシュで緑・PR だけ落ちる」の非対称も消える）。依存が 1 本増え、埋め込み zip のぶん
-取得サイズとビルド成果物が増えるが実行時の挙動は不変。**Swagger UI の版は vendored crate が決める**
-ので既定のダウンロード先（v5.17.14）と一致しない可能性があり、`/docs` の描画はブラウザで目視確認する
-（以降の版更新は dependabot の cargo エコシステム経由）。builder から `curl` が消えたので、将来
-ビルド時に curl が必要な依存を足すときは戻す（Dockerfile のコメントに理由を残した）。
-`docker-build` が非必須である事実は変えない——required にするかは別の判断。
+**影響**:
+
+- `ci` / `docker-build` の両方でビルド時ダウンロードが消え、上流の稼働状況に依存しなくなる
+  （「main はキャッシュで緑・PR だけ落ちる」の非対称も消える）。
+- 依存が 1 本増える（`utoipa-swagger-ui-vendored` 0.1.2・依存ゼロ・build script なし・ライセンスは
+  親と同じ `MIT OR Apache-2.0`）。**出荷されるバイナリのサイズは変わらない**（埋め込む dist が旧経路と
+  同一なので）。増えるのは `target/` 内の build script バイナリ（+4.4 MB）で、crates.io からの +4.4 MB は
+  同サイズの GitHub ダウンロードを置き換えるため cold build の取得量はほぼ相殺する。
+- **CVE が出たときの更新経路が変わる**。vendored 有効時は `SWAGGER_UI_DOWNLOAD_URL` が**無警告で
+  完全に無視される**ので「修正版の URL を差す」緊急回避は使えない（残る手は
+  `SWAGGER_UI_OVERWRITE_FOLDER` か feature を一時的に外すこと）。dependabot が届くのも
+  **`0.1.x` の範囲内だけ**——`utoipa-swagger-ui` の build-dependency 要件が `version = "0.1"` なので、
+  上流が `0.2.0` で Swagger UI を上げても親が要件を上げるまで伝わらない。
+- **`vendored` が落ちる退行は機械で固定する**（`scripts/check-vendored-swagger.sh`。required の `ci`
+  ジョブと pre-push）。feature が外れると build script は無警告でダウンロード分岐へ戻り、GitHub
+  ランナーには curl があるので **required の `ci` は黙って外部取得を再開**する（落ちるのは非必須の
+  `docker-build` だけ・原因の分かりにくいエラーで）。Dockerfile のコメントは人手の規律にすぎない。
+- **`-vv` のログの読み方**: `SWAGGER_UI_DOWNLOAD_URL: <url>` は **vendored でも印字される**ので
+  ダウンロードの証拠にならない。実際に取得したかは `using vendored Swagger UI`（vendored 経路）と
+  `start download to`（ダウンロード経路）のどちらが出るかで見る。
+- builder から `curl` が消えたので、将来ビルド時に curl が必要な依存を足すときは戻す。
+- `docker-build` が非必須である事実は変えない——required にするかは別の判断。
 
 ### `test_extract.rs`（tesseract OCR）は `#[ignore]` のまま
 

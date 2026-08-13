@@ -5,9 +5,10 @@ ADR [0082](../../docs/original-docs/0082-swagger-ui-vendored.md) / knowledge
 [ci-pipeline.md](../../docs/knowledge/ci-pipeline.md)。
 
 **この 2 ケースの目的は「ビルド時ダウンロードをやめても `/docs` が従来どおり動く」ことの確認**。
-`utoipa-swagger-ui` の `vendored` feature は **Swagger UI の版を vendored crate 側が決める**ため、
-既定のダウンロード先（v5.17.14）と一致しない可能性がある。バイナリが起動して 200 を返すだけでは
-「資産が壊れていない」の証明にならないので、**描画とエンドポイント一覧を目視する**。
+埋め込み版は従来のダウンロード版と**同一**（`utoipa-swagger-ui-vendored` 0.1.2 が同梱する
+`res/v5.17.14.zip` ＝既定のダウンロード先と同じ v5.17.14 タグ）なので資産が変わる理屈は無いが、
+**バイナリが起動して 200 を返すだけでは「資産が壊れていない」の証明にならない**ので、描画と
+エンドポイント一覧を目視する（埋め込みの取り込みに失敗すれば空の UI やスクリプトエラーになる）。
 
 検証環境は Playwright MCP 不在のため **headless Chrome + puppeteer-core** で代替する
 （`reference_browser_test_fallback`）。api-server は golden DB を read-only 参照でソースから起動し、
@@ -22,7 +23,7 @@ ADR [0082](../../docs/original-docs/0082-swagger-ui-vendored.md) / knowledge
 | 画面 | `http://127.0.0.1:8081/docs/` |
 | 操作 | ページを開き、描画完了を待つ。スクリーンショットを撮る。タグ（`races` 等）を 1 つ展開する |
 | 期待結果 | Swagger UI の外枠（トップバー・タイトル）が描画される。**paddock の API のパスが 1 件以上一覧される**（空の "No operations defined in spec!" ではない）。タグを展開するとオペレーションの詳細が開く |
-| 確認ポイント | ブラウザコンソールに 4xx/5xx やスクリプトエラーが出ていないこと（vendored の資産欠落はここに出る）。埋め込み版の Swagger UI バージョン表記を記録し、ADR の「版は vendored crate が決める」の実測値として残す |
+| 確認ポイント | ブラウザコンソールに 4xx/5xx やスクリプトエラーが出ていないこと（vendored の資産欠落はここに出る。`favicon.ico` の 404 は vendored とは無関係の既存事象） |
 
 ### TC-02: `/api-docs/openapi.json` が 200 で JSON を返し、UI の描画元と一致する
 | 項目 | 内容 |
