@@ -88,13 +88,16 @@ updated: "YYYY-MM-DD"    # 内容を実質更新した日（YAML の date 型を
   mdq が frontmatter を検索に使わず `tags` しか見ないため（`scripts/mdq search --tags D23`）。
   二重管理の drift は `scripts/check-doc-classes.py` が防ぐ。
 - **機械検査**: 上記スクリプトが CI（`adr` ジョブ）と pre-push で走る。クラスの整合・`tags` の一致・
-  `sources` の実在・**stale**・**本文の相対リンクの実在**・**[doc-classes.md](doc-classes.md) の
-  割当索引と実ファイルの突合**は **error**（stale は #580 で warning から昇格。後ろ 2 つは #604）。**warning** は
-  充足ギャップと、**判定不能を可視化する 3 経路**（サブディレクトリに置かれた `.md`＝無検査 /
-  `sources` の履歴を辿れない / shallow clone で `distilled_from_sha` を解決できない）。
+  `sources` の実在と表記の正規形・**stale**・**本文の相対リンクの実在**・**[doc-classes.md](doc-classes.md) の
+  割当索引と実ファイルの突合**・**REQ 表の `出典` ⊆ `sources`**・**orphan ADR** は **error**
+  （stale は #580 で warning から昇格。リンクと割当索引は #604、後ろ 2 つは #596 / #597）。
+  **サブディレクトリに置かれた `.md`** も error（ADR 0082 で warning から昇格。1 階層下げるだけで
+  その文書が丸ごと無検査になり、`sources` も orphan 検査に数えられなくなるため）。
+  **warning** は充足ギャップと、**判定不能を可視化する 2 経路**（`sources` の履歴を辿れない /
+  shallow clone で `distilled_from_sha` を解決できない）。
   `--warn-only` は**ローカルで全件を眺めるための確認用**で、CI（`adr` ジョブ）も pre-push も
-  フラグ無しで呼ぶので**これで CI を通すことはできない**（`doc-classes.md` のマーカー欠落だけは
-  `--warn-only` でも 1 で落ちる。表の範囲を切り出せず検査そのものが成立しないため）。
+  フラグ無しで呼ぶので**これで CI を通すことはできない**（**検査そのものが成立しない 2 つ**——
+  `doc-classes.md` のマーカー欠落と、ADR が 0 件——は `--warn-only` でも 1 で落ちる）。
   なお下記「機械検査できない」の `sources` の網羅性に注意——`sources` から行を消せば stale も消える。
 
 - **status**: `Confirmed`=検証済みで運用の前提にしてよい / `Tentative`=検証中・暫定 /
@@ -256,9 +259,9 @@ updated: "YYYY-MM-DD"    # 内容を実質更新した日（YAML の date 型を
    **`sources` に載せた時点で必ず STALE が出る**（自分の sha を同じコミットには書けない）ので、
    本文コミットの後に `scripts/bump-distilled-sha.py --all-stale` で追従コミットを積む。
    **knowledge / specifications を消す・統合する PR では、その文書の `sources` にある ADR を
-   別文書へ移すか例外表に登録する**（割当索引と「現行」列の更新と同じ PR で）。単一の文書からしか
-   参照されていない ADR は 32 本あり、ホームは `product-goals.md`（34 本）/ `glossary.md`（19）/
-   `probability-estimation.md`（15）に集中しているので、1 文書を消すと一度に大量の orphan が出る。
+   別文書へ移すか例外表に登録する**（割当索引と「現行」列の更新と同じ PR で）。消さなくても、
+   1 文書の `sources` から ADR を落とすだけで orphan になりうる（導入時点で**単独参照の ADR が
+   32 本**。ホーム自体は分散していて 1 文書あたり最大 5 本）。
 6. **sources 追従**: knowledge の `sources` に列挙されたファイルを**内容ごと**変更する PR は、参照元
    knowledge の `distilled_from_sha` を現 HEAD に更新する（**機械検査の対象はこちらだけ**）。本文が変わる場合は差分マージを
    行って `updated` も進め、**本文が変わらない場合は `distilled_from_sha` の bump のみ**（`updated` は

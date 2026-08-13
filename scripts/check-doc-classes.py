@@ -37,7 +37,8 @@ frontmatter は限定的な構造しか取らないため正規表現で足り�
   scripts/check-doc-classes.py               # 検査（error があれば非ゼロ終了）
   scripts/check-doc-classes.py check         # 同上
   scripts/check-doc-classes.py --warn-only   # error も警告として報告し常に 0 で終了
-                                             # （例外: マーカー欠落は fail-closed で 1）
+                                             # （例外: 検査が成立しない 2 つ——マーカー欠落と
+                                             #   ADR 0 件——は fail-closed で 1）
 """
 
 import bisect
@@ -54,8 +55,10 @@ USAGE = """check-doc-classes.py - 文書クラスと sources 追従の機械検�
   scripts/check-doc-classes.py               # 検査（error があれば非ゼロ終了）
   scripts/check-doc-classes.py check         # 同上
   scripts/check-doc-classes.py --warn-only   # error も警告扱いにして常に 0 で終了
-                                             # （例外: doc-classes.md のマーカー欠落は
-                                             #  表の範囲を切り出せないので 1 で落とす）
+                                             # （例外: 検査そのものが成立しない 2 つは 1 で
+                                             #  落とす——doc-classes.md のマーカー欠落
+                                             #  〈表の範囲を切り出せない〉と ADR 0 件
+                                             #  〈orphan 検査が丸ごと効いていない〉）
 
 オプション:
   -h, --help   このヘルプ
@@ -536,15 +539,30 @@ def is_external_link(target: str) -> bool:
     return target.startswith(("#", "//")) or bool(RE_URI_SCHEME.match(target))
 
 
-def is_canonical_repo_path(raw: str) -> bool:
-    """`sources` / 例外表に書けるリポジトリ相対パスの正規形か。
+def repo_relative_path_error(raw: str) -> "str | None":
+    """`sources` / orphan 例外表に書けるパスでない理由を返す（正常なら None）。
 
-    `docs/original-docs/0073-x.md` は真、`./docs/...` や `docs//x.md` は偽。
-    **`Path(...).as_posix()` の語彙的正規化だけで判定する**——`os.path.normpath` や
-    `Path.resolve()` を使うと `..` まで畳んでしまい、呼び出し側の「`..` を拒否する」検査が
+    **`sources` と例外表で同じ 1 本を通す。** 片方だけにガードがあると、同じ形式を
+    要求しているのに一方だけ非正規形・リポジトリ外を素通りさせ、後段の突合で
+    「ADR ではない」のような**事実と逆の診断**が出る（実測）。
+
+    正規形の判定は **`Path(...).as_posix()` の語彙的正規化だけ**で行う——`os.path.normpath`
+    や `Path.resolve()` を使うと `..` まで畳んでしまい、直前の「`..` を拒否する」判定が
     静かに効かなくなる（`docs/original-docs/../../etc/hosts` が通る）。
     """
-    return Path(raw).as_posix() == raw
+    if raw.startswith("/") or ".." in Path(raw).parts:
+        # 絶対パスや .. を許すと Path(root) / "/etc/hosts" が root を捨てて外を指し、
+        # 「由来はリポジトリ内で辿れる」という検査の前提が崩れる。
+        return "リポジトリ相対パスで書く（絶対パス・`..` は使わない）"
+    if Path(raw).as_posix() != raw:
+        # `./docs/...` や `docs//x.md` は **実在検査だけ通って stale 判定から静かに外れる**。
+        # path_status が git show --name-status の出力と終点一致で突き合わせるため、
+        # `./` 付きは永久に一致せず「履歴を辿れず」の warning に退化する（実測）。
+        # 突合用に正規化した集合を別に持つ手もあるが、それだと「どちらの形式か」を持つ
+        # 場所が増える——ADR 0082 が例外表のパス形式で却下したのと同じ理由で、
+        # **形式を 1 つに強制する**方を採る。
+        return "正規形で書く（`./` や重複スラッシュを使わない）"
+    return None
 
 
 def iter_links(fragment: str) -> "Iterator[tuple[int, str, str]]":
@@ -886,12 +904,27 @@ def main(argv: list[str]) -> int:
             # どの行のことか分からなくなる。
             errors.append(f"{REGISTRY}: orphan 例外表に ADR 列が空の行がある → {stripped}")
             continue
-        if not is_canonical_repo_path(cells[0]):
-            # sources と同じ形式に揃えて突合するので、非正規形は比較から外れる。
+        # **パスの形式 → 置き場所の順に見る。** 逆にすると `./docs/original-docs/...` が
+        # 「配下のパスで書く」と報告され、直すべき点（`./`）が分からない。
+        path_error = repo_relative_path_error(cells[0])
+        if path_error:
+            # sources と同じ文字列で突合するので、非正規形やリポジトリ外は比較から外れる。
             # 黙って落とすと「ADR ではない」という事実と逆の診断が出る（実測）。
-            errors.append(
-                f"{REGISTRY}: orphan 例外表のパスは sources と同じ正規形で書く → {cells[0]}"
-            )
+            errors.append(f"{REGISTRY}: orphan 例外表のパスは{path_error} → {cells[0]}")
+            continue
+        if not cells[0].startswith(f"{ORIGINAL_DOCS}/"):
+            # ADR 列にパス以外（見出しの貼り直し・散文行）が来たとき、そのまま突合へ流すと
+            # 「ファイルが実在しない」という原因の読めない error になる（実測）。
+            if cells[0] == ORPHAN_EXCEPTION_COLUMNS[0]:
+                errors.append(
+                    f"{REGISTRY}: orphan 例外表に見出し行が 2 つある"
+                    "（マーカーブロック内の表は 1 つ）"
+                )
+            else:
+                errors.append(
+                    f"{REGISTRY}: orphan 例外表の ADR 列は {ORIGINAL_DOCS}/ 配下のパスで書く"
+                    f" → {cells[0]}"
+                )
             continue
         if cells[0] in orphan_exceptions:
             errors.append(f"{REGISTRY}: orphan 例外表に {cells[0]} の行が 2 つある")
@@ -910,10 +943,15 @@ def main(argv: list[str]) -> int:
         # （現状 docs/specifications/diagrams/ に .md は無い）。
         nested = sorted(p.relative_to(root).as_posix() for p in (root / d).glob("*/**/*.md"))
         for n in nested:
-            warnings.append(
+            # #580 で stale を warning → error に上げたのと同じ理由で error にする（ADR 0082）。
+            # 文書を 1 階層下げるだけで frontmatter 系・stale・REQ の一意台帳・sources の
+            # 被参照が**丸ごと**外れ、警告 1 行のまま exit 0 になる（実測）。orphan 検査が
+            # 入った今は「その文書の sources が数えられない」＝他の ADR の誤判定にも波及する。
+            # 導入時点で該当 0 件（docs/specifications/diagrams/ に .md は無い）。
+            errors.append(
                 f"{n}: サブディレクトリの .md は検査対象外（直下に置く）。"
-                "**この文書の sources は orphan 検査に数えられない**ので、"
-                "ここからしか参照されていない ADR は orphan と誤判定される"
+                "この文書は doc_class も sources も stale も一切検査されず、"
+                "sources は orphan 検査の被参照にも数えられない"
             )
 
     # 全検査から外している README（テンプレート例が frontmatter 検査で必ず偽陽性になる）も、
@@ -999,23 +1037,16 @@ def main(argv: list[str]) -> int:
         if not sources:
             errors.append(f"{rel}: sources が空（由来を辿れない）")
         for src in sources:
-            # 絶対パスや .. を許すと Path(root) / "/etc/hosts" が root を捨てて外を指し、
-            # 「由来はリポジトリ内で辿れる」という検査の前提が崩れる。
-            if src.startswith("/") or ".." in Path(src).parts:
-                errors.append(f"{rel}: sources はリポジトリ相対パスで書く → {src}")
-            elif not is_canonical_repo_path(src):
-                # `./docs/...` や `docs//x.md` は **実在検査だけ通って stale 判定から静かに
-                # 外れる**。path_status が git show --name-status の出力と終点一致で
-                # 突き合わせるため、`./` 付きは永久に一致せず「履歴を辿れず」の warning に
-                # 退化する（実測）。突合用に正規化した集合を別に持つ手もあるが、それだと
-                # 「どちらの形式か」を持つ場所が増える——ADR 0082 が例外表のパス形式で
-                # 却下したのと同じ理由で、**形式を 1 つに強制する**方を採る。
-                errors.append(
-                    f"{rel}: sources は正規形で書く（`./` や重複スラッシュを使わない）→ {src}"
-                    "。非正規形はこの検査を通っても stale 判定から静かに外れる"
-                )
+            path_error = repo_relative_path_error(src)
+            if path_error:
+                errors.append(f"{rel}: sources は{path_error} → {src}")
             elif not (root / src).is_file():
                 errors.append(f"{rel}: sources のパスが実在しない → {src}")
+            elif not case_exact((root / src).resolve(), root.resolve()):
+                # macOS(APFS) は大文字小文字を区別しないので is_file() が通り、Linux の CI
+                # だけが落ちる。しかも手元では stale 判定が「履歴を辿れず」の warning に
+                # 退化する（`./` 形式と同じ silent-green）。本文リンク側は既に見ている。
+                errors.append(f"{rel}: sources の大文字小文字が実ファイルと違う → {src}")
 
         # (6) stale
         distilled = fm.get("distilled_from_sha", "")

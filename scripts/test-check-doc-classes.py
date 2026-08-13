@@ -386,12 +386,13 @@ def test_shallow_clone_downgrades_unresolvable_sha_to_warning() -> None:
         shutil.rmtree(shallow, ignore_errors=True)
 
 
-def test_subdirectory_md_is_reported_as_unchecked() -> None:
-    """サブディレクトリの `.md` は**完全に無検査**。3 つの warning 経路のうち最も危険なので固定する。
+def test_subdirectory_md_is_error() -> None:
+    """サブディレクトリの `.md` は**完全に無検査**なので error（ADR 0082 で warning から昇格）。
 
     glob が非再帰なので、`docs/knowledge/sub/x.md` は doc_class も sources も stale も
-    一切検査されない。可視化の warning が消えると、文書がまるごと検査対象外になったことに
-    誰も気づけなくなる。
+    一切検査されない。文書を 1 階層下げるだけで検査域から丸ごと外せてしまい、しかも
+    orphan 検査が入った今は「その文書の sources が数えられない」＝他の ADR の誤判定にも
+    波及する。#580 が stale を warning → error に上げたのと同じ理由。
     """
     repo = new_repo()
     try:
@@ -399,7 +400,7 @@ def test_subdirectory_md_is_reported_as_unchecked() -> None:
         (repo / "docs/knowledge/sub").mkdir()
         (repo / "docs/knowledge/sub/x.md").write_text("# 検査対象外\n", encoding="utf-8")
         code, out = check(repo)
-        assert code == 0, f"サブディレクトリ配置は error にしない: {out}"
+        assert code == 1, f"サブディレクトリ配置を通した: {out}"
         assert "サブディレクトリの .md は検査対象外" in out, out
     finally:
         shutil.rmtree(repo)
@@ -2328,9 +2329,102 @@ def test_noncanonical_orphan_exception_is_error() -> None:
         write_registry(repo, sha, orphan_exceptions=[("./" + SECOND_ADR, ORPHAN_REASON)])
         code, out = check(repo)
         assert code == 1, out
-        assert "例外表のパスは sources と同じ正規形で書く" in out, out
+        assert "例外表のパスは正規形で書く" in out, out
         # 1 巡目で足した「誤誘導しない」分岐が非正規形で裏返らないこと。
         assert "ADR ではない" not in out, f"事実と逆の診断が出た:\n{out}"
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_orphan_exception_with_parent_traversal_is_error() -> None:
+    """`..` 経由で実在 ADR を指す例外も弾く（通すと「ADR ではない」と事実と逆に言う）。"""
+    repo = new_repo()
+    try:
+        sha = baseline(repo)
+        add_adr(repo, "0002-second.md")
+        write_registry(
+            repo, sha,
+            orphan_exceptions=[("docs/knowledge/../original-docs/0002-second.md", ORPHAN_REASON)],
+        )
+        code, out = check(repo)
+        assert code == 1, out
+        assert "リポジトリ相対パスで書く" in out, out
+        assert "ADR ではない" not in out, f"実在する ADR に「ADR ではない」と報告した:\n{out}"
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_orphan_exception_with_absolute_path_is_error() -> None:
+    """絶対パスの例外も弾く（root を捨ててリポジトリ外を stat しにいく）。"""
+    repo = new_repo()
+    try:
+        sha = baseline(repo)
+        add_adr(repo, "0002-second.md")
+        write_registry(repo, sha, orphan_exceptions=[("/etc/hosts", ORPHAN_REASON)])
+        code, out = check(repo)
+        assert code == 1, out
+        assert "リポジトリ相対パスで書く" in out, out
+        assert "ADR ではない" not in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_duplicate_orphan_exception_header_is_error() -> None:
+    """見出し行が 2 回出たら専用 error（2 本目をエントリとして読むと原因が読めない）。"""
+    repo = new_repo()
+    try:
+        sha = baseline(repo)
+        add_adr(repo, "0002-second.md")
+        write_registry(repo, sha, orphan_exceptions=[(SECOND_ADR, ORPHAN_REASON)])
+        registry = repo / "docs/knowledge/doc-classes.md"
+        text = registry.read_text(encoding="utf-8")
+        registry.write_text(
+            text.replace(f"| {SECOND_ADR} | {ORPHAN_REASON} |",
+                         f"| ADR | 例外の理由 |\n| {SECOND_ADR} | {ORPHAN_REASON} |"),
+            encoding="utf-8",
+        )
+        code, out = check(repo)
+        assert code == 1, out
+        assert "見出し行が 2 つある" in out, out
+        assert "ファイルが実在しない" not in out, f"見出しをエントリとして読んだ:\n{out}"
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_orphan_exception_non_original_docs_path_is_error() -> None:
+    """ADR 列に original-docs 配下でないパス・散文が来たら、原因の読める error にする。"""
+    repo = new_repo()
+    try:
+        sha = baseline(repo)
+        add_adr(repo, "0002-second.md")
+        write_registry(repo, sha,
+                       orphan_exceptions=[("knowledge/glossary.md", ORPHAN_REASON)])
+        code, out = check(repo)
+        assert code == 1, out
+        assert "配下のパスで書く" in out, out
+        assert "ファイルが実在しない" not in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_source_case_mismatch_is_error() -> None:
+    """sources の大文字小文字違いを弾く。
+
+    macOS(APFS) では is_file() が通ってしまい、Linux の CI だけが落ちる。しかも手元では
+    stale 判定が「履歴を辿れず」の warning に退化する（`./` 形式と同じ silent-green）。
+    """
+    repo = new_repo()
+    try:
+        sha = baseline(repo)
+        write_doc(repo, "docs/knowledge/a.md", ["D19"],
+                  ["docs/original-docs/0001-FIRST.md"], sha)
+        code, out = check(repo)
+        assert code == 1, out
+        if (repo / "docs/original-docs/0001-FIRST.md").exists():
+            # 大文字小文字を区別しない FS（macOS）。区別する FS では実在しない側に落ちる。
+            assert "sources の大文字小文字が実ファイルと違う" in out, out
+        else:
+            assert "sources のパスが実在しない" in out, out
     finally:
         shutil.rmtree(repo)
 
