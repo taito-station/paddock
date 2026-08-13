@@ -45,7 +45,7 @@ import functools
 import re
 import subprocess
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 USAGE = """check-doc-classes.py - 文書クラスと sources 追従の機械検査（ADR 0073）
@@ -69,9 +69,16 @@ TARGET_DIRS = ("docs/knowledge", "docs/specifications")
 
 # 一次資料層。`sources` が watch すべき蒸留元はここに限る（ADR 0082）。
 ORIGINAL_DOCS = "docs/original-docs"
-# ADR のファイル名は **0 埋め 4 桁**。issue 由来の一次資料（`382-...`）は 0 埋めしない規約なので、
-# この 1 本の正規表現が「ADR かどうか」の判定根拠になる（CLAUDE.md「命名は 2 系統」）。
-RE_ADR_FILENAME = re.compile(r"^\d{4}-.*\.md$")
+# ADR のファイル名は **0 埋め 4 桁**。issue 由来の一次資料（`382-...`）は 0 埋めしない規約
+# （CLAUDE.md「命名は 2 系統」）。
+#
+# **`scripts/check-adr-numbers.sh` の `^0[0-9]{3}` と同一の述語**。意図して同じ形にしてある——
+# 先頭 0 を落として `^\d{4}` にすると、issue 番号が 4 桁に届いた時点で `1024-foo.md` のような
+# 一次資料が ADR と誤判定され、「例外表に登録しろ」という誤った助言つきで CI が落ちる
+# （現在 issue は #613）。judge が 2 本に割れているのが、この PR 自身が塞いでいる second source。
+# 末尾に `-` を要求しないのも向こうに合わせている（`00401-...` のような 0 埋めを誤った ADR も
+# 母集合に入れる。採番の是正は check-adr-numbers.sh の担当で、こちらは被参照だけを見る）。
+RE_ADR_FILENAME = re.compile(r"^0\d{3}")
 
 # 走査から外すファイル。
 #   README.md    : 規約そのもの。frontmatter のテンプレート例（0NNN-....md 等の
@@ -530,8 +537,35 @@ def is_external_link(target: str) -> bool:
     return target.startswith(("#", "//")) or bool(RE_URI_SCHEME.match(target))
 
 
+def iter_links(fragment: str) -> "Iterator[tuple[int, str, str]]":
+    """`fragment` の Markdown リンクを (マッチ開始位置, 生のリンク先, アンカーを剥がしたパス) で返す。
+
+    **リンクを拾う検査はすべてこの 1 本を通す**（check_links / repo_relative_targets）。
+    インラインコードのマスク・`RE_MD_LINK` の走査・外部リンクの除外・アンカー剥がしを
+    2 か所に書くと、リンク書式を足したときに片方だけ直す事故が起きる——「実在は検査したが
+    sources 突合はしていない」という非対称が静かに生まれる。
+
+    **実在するか / どれを error にするかは呼び出し側の責務**（そこは意図して非対称:
+    check_links は絶対パス・リポジトリ外・実在しないを error にしてディレクトリを許す。
+    repo_relative_targets は `sources` に載せうるもの＝実在するファイルだけを黙って選ぶ）。
+
+    インラインコードは**長さを保存して**マスクする。除去すると後続のマッチ位置が前へずれ、
+    呼び出し側が引く行番号が過少になる（実測で 223 本中 210 本が誤り）。
+    """
+    masked = RE_INLINE_CODE.sub(lambda m: " " * len(m.group(0)), fragment)
+    for matched in RE_MD_LINK.finditer(masked):
+        target = matched.group(1)
+        # スキーム付き URI・protocol-relative・同一文書内アンカーはリポジトリ内のパスでない。
+        if is_external_link(target):
+            continue
+        cleaned = target.split("#", 1)[0]
+        if not cleaned:
+            continue
+        yield matched.start(), target, cleaned
+
+
 def repo_relative_targets(rel: str, root: Path, fragment: str) -> "list[str]":
-    """`fragment` の Markdown リンクのうち、リポジトリ内を指すものをルート相対で返す。
+    """`fragment` の Markdown リンクのうち、リポジトリ内の**実在するファイル**をルート相対で返す。
 
     `sources` との突合用。`sources` はリポジトリルート相対、本文・REQ 表のリンクは
     文書からの相対なので、**比較の前に必ずここを通して基準を揃える**（ADR 0082）。
@@ -542,14 +576,9 @@ def repo_relative_targets(rel: str, root: Path, fragment: str) -> "list[str]":
     受け付けない（検査 4）ので、「sources に足せ」は壊れたリンクへの助言として誤り。
     """
     out: list[str] = []
-    masked = RE_INLINE_CODE.sub(lambda m: " " * len(m.group(0)), fragment)
-    for matched in RE_MD_LINK.finditer(masked):
-        target = matched.group(1)
-        if is_external_link(target):
-            continue
-        cleaned = target.split("#", 1)[0]
-        if not cleaned or cleaned.startswith("/"):
-            continue
+    for _, _, cleaned in iter_links(fragment):
+        if cleaned.startswith("/"):
+            continue  # 絶対パスは check_links が error にする
         resolved = ((root / rel).parent / cleaned).resolve()
         if not resolved.is_file():
             continue
@@ -577,18 +606,11 @@ def check_links(
     リンク切れが 2 件の error になる）。`label_at` を渡すと、マッチ位置から
     ラベル（本文なら行番号入り）を作る。
     """
-    # **長さを保存して置換する**。`sub(" ", ...)` だと除去のぶんだけ後続の位置が前へずれ、
-    # `label_at` が引く行番号が過少になる（実測で 223 本中 210 本が誤り）。
-    masked = RE_INLINE_CODE.sub(lambda m: " " * len(m.group(0)), fragment)
+    # リンクの抽出・外部リンクの除外・アンカー剥がしは iter_links に集約している
+    # （sources 突合と同じ 1 本を通す。片方だけ書式を足す事故を防ぐため）。
     global LINK_COUNT
-    for matched in RE_MD_LINK.finditer(masked):
-        target = matched.group(1)
-        here = label_at(matched.start()) if label_at else label
-        if is_external_link(target):
-            continue
-        cleaned = target.split("#", 1)[0]
-        if not cleaned:
-            continue
+    for start, target, cleaned in iter_links(fragment):
+        here = label_at(start) if label_at else label
         # 同じファイルへのリンクは #anchor 違いでも 1 件に畳む（同じ欠落を何度も報告しない）。
         if seen is not None:
             if cleaned in seen:
@@ -733,6 +755,12 @@ def check_req_blocks(
                     f"{rel}: {req_id} の出典 {src} が frontmatter の sources に無い"
                     "（出典は減らさず sources 側を足す）"
                 )
+            # 唯一の参照元からその ADR を落とすと、ここと orphan 検査（12）の両方が鳴る。
+            # **この重複は意図的**——言っていることが違う（「この文書が根拠を watch して
+            # いない」と「誰もこの ADR を watch していない」）。片方を抑止すると、
+            # 参照元が複数ある場合に orphan 側が鳴らない事実が見えなくなる。
+            # リンク切れの二重報告（repo_relative_targets の docstring）とは別の話で、
+            # あちらは同じ 1 つの欠陥に対する重複だった。
 
 
 def main(argv: list[str]) -> int:
@@ -908,13 +936,16 @@ def main(argv: list[str]) -> int:
 
         # sources は REQ 表の出典突合（11）でも使うので、REQ 走査より先に読む。
         sources = fm.get("sources", [])
-        referenced_sources.update(sources)
+        # 突合用は正規化する。`./docs/...` のような非正規形は実在検査（4）を通るのに
+        # 文字列一致からは外れ、「sources にあるのに sources に無いと言われる」偽 error になる。
+        normalized_sources = {Path(src).as_posix() for src in sources}
+        referenced_sources.update(normalized_sources)
 
         # (8)(11) REQ 表。リンクの台帳は上の本文検査と共有していて、本文で報告済みの
         # リンク先は REQ 側で二重に報告しない（REQ 表の行は本文にも含まれるため）。
         check_req_blocks(
             rel, text, fm.get("doc_class"), declared, req_seen, root, errors,
-            set(sources), link_seen,
+            normalized_sources, link_seen,
         )
 
         # (4) sources の実在
@@ -970,12 +1001,23 @@ def main(argv: list[str]) -> int:
     # (12) orphan ADR。「ADR は必ずどこかの knowledge / specifications の sources から
     # 参照される」という不変条件を機械で守る（ADR 0082）。ここが空いていると、ADR を
     # 足した誰かが sources への登録を忘れただけで、その ADR は永久に watch 対象外になる。
+    # glob は存在しないディレクトリでも例外を出さず空を返すので is_dir() ガードは要らない。
+    # 非再帰なのでサブディレクトリの ADR は見えないが、そちらは check-adr-numbers.sh が
+    # 階層 ADR を落とす担当（判定を二重に持たない）。
     adr_dir = root / ORIGINAL_DOCS
     adrs = sorted(
         p.relative_to(root).as_posix()
         for p in adr_dir.glob("*.md")
         if RE_ADR_FILENAME.match(p.name)
-    ) if adr_dir.is_dir() else []
+    )
+    if not adrs:
+        # ADR が 0 件になることはありえない。0 件＝判定条件かパスの取り違えなので、
+        # 静かに緑にせず落とす（`if not declared: return 1` と check-adr-numbers.sh の
+        # 同型ガードに揃える。ここが無いと検査 12 が丸ごと無言で無効化される fail-open）。
+        errors.append(
+            f"{ORIGINAL_DOCS}/ に ADR（0 埋め 4 桁）が 1 件も無い"
+            "（判定条件かディレクトリを確認する。orphan 検査が丸ごと効いていない）"
+        )
     for adr in adrs:
         if adr in referenced_sources or adr in orphan_exceptions:
             continue
@@ -988,10 +1030,17 @@ def main(argv: list[str]) -> int:
     known_adrs = set(adrs)
     for adr in sorted(orphan_exceptions):
         if adr not in known_adrs:
-            errors.append(
-                f"{REGISTRY}: orphan 例外表の {adr} は ADR として実在しない"
-                f"（パスは sources と同じリポジトリルート相対・0 埋め 4 桁）"
-            )
+            # 「ファイルが無い」と「ファイルはあるが ADR 名でない」は原因が別。混ぜると
+            # issue 由来の一次資料（0 埋めしない番号）を登録したときに「実在しない」と
+            # 出て、実在するファイルを探し回らせてしまう。
+            if (root / adr).is_file():
+                reason = (
+                    "ADR ではない（0 埋め 4 桁のみが ADR。issue 由来の一次資料は"
+                    "orphan 検査の対象外なので例外に挙げる必要が無い）"
+                )
+            else:
+                reason = "ファイルが実在しない（パスは sources と同じリポジトリルート相対）"
+            errors.append(f"{REGISTRY}: orphan 例外表の {adr} は{reason}")
         elif adr in referenced_sources:
             errors.append(
                 f"{REGISTRY}: orphan 例外表の {adr} は実際には sources から参照されている"

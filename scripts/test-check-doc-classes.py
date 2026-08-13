@@ -28,7 +28,7 @@ REGISTRY_TEMPLATE = """---
 status: Confirmed
 kind: knowledge
 sources:
-  - docs/original-docs/0001-first.md
+{sources}
 distilled_from_sha: "{sha}"
 updated: "2026-08-09"
 ---
@@ -120,6 +120,7 @@ def write_registry(
     d22: int = 0,
     docs: "list[tuple[str, list[str]]] | None" = None,
     orphan_exceptions: "list[tuple[str, str]] | None" = None,
+    sources: "list[str] | None" = None,
 ) -> None:
     """レジストリを書く。`docs` は割当索引の行（既定は baseline の 1 本）。
 
@@ -133,9 +134,10 @@ def write_registry(
     rows = docs if docs is not None else [("knowledge/a.md", ["D19"])]
     index = "\n".join(f"| {rel} | [{', '.join(classes)}] |" for rel, classes in rows)
     orphan = "\n".join(f"| {adr} | {reason} |" for adr, reason in (orphan_exceptions or []))
+    src_lines = "\n".join(f"  - {s}" for s in (sources or ["docs/original-docs/0001-first.md"]))
     (repo / "docs/knowledge/doc-classes.md").write_text(
         REGISTRY_TEMPLATE.format(
-            sha=sha, d08=d08, d19=d19, d22=d22, index=index, orphan=orphan
+            sha=sha, d08=d08, d19=d19, d22=d22, index=index, orphan=orphan, sources=src_lines
         ),
         encoding="utf-8",
     )
@@ -1978,6 +1980,36 @@ def test_req_origin_external_url_is_skipped() -> None:
         shutil.rmtree(repo)
 
 
+def test_req_origin_issue_derived_primary_doc_is_checked() -> None:
+    """検査 11 の対象は `docs/original-docs/` 配下**全体**（4 桁 ADR に限らない）。
+
+    QA Q4 の意図的なスコープ判断を pin する。実装が ADR 限定へ退行しても、
+    このテストが無いと 4 桁 ADR しか使わない他の 3 本は全部通ってしまう。
+    """
+    repo = new_repo()
+    try:
+        baseline(repo)
+        primary = add_adr(repo, "382-live-server-now.md")
+        # b.md が 382 を sources に持つ（orphan 検査は 4 桁のみが対象なので元々無関係だが、
+        # 一次資料が誰からも参照されない状態を作らないでおく）。a.md の出典だけが未収載。
+        repin(
+            repo,
+            [
+                ("docs/knowledge/a.md", ["D19"], [FIRST_ADR]),
+                ("docs/knowledge/b.md", ["D19"], [FIRST_ADR, primary]),
+            ],
+            d19=2,
+            docs=[("knowledge/a.md", ["D19"]), ("knowledge/b.md", ["D19"])],
+        )
+        append_req_block(repo, "docs/knowledge/a.md", "D19",
+                         [origin_row("[#382](../original-docs/382-live-server-now.md)")])
+        code, out = check(repo)
+        assert code == 1, out
+        assert "sources に無い" in out and primary in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
 def test_req_origin_sibling_doc_link_is_skipped() -> None:
     """出典が兄弟の knowledge を指すときは対象外（蒸留元ではないので sources に載せない）。"""
     repo = new_repo()
@@ -2078,7 +2110,107 @@ def test_nonexistent_orphan_exception_is_error() -> None:
                        orphan_exceptions=[("docs/original-docs/9999-nope.md", ORPHAN_REASON)])
         code, out = check(repo)
         assert code == 1, out
-        assert "ADR として実在しない" in out, out
+        assert "ファイルが実在しない" in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_orphan_exception_for_existing_non_adr_says_why() -> None:
+    """実在するが ADR でないファイルを例外に挙げたとき「実在しない」と誤誘導しない。"""
+    repo = new_repo()
+    try:
+        sha = baseline(repo)
+        primary = add_adr(repo, "382-live-server-now.md")
+        write_registry(repo, sha, orphan_exceptions=[(primary, ORPHAN_REASON)])
+        code, out = check(repo)
+        assert code == 1, out
+        assert "ADR ではない" in out, out
+        assert "実在しない" not in out, f"実在するファイルに「実在しない」と報告した:\n{out}"
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_four_digit_without_zero_padding_is_not_adr() -> None:
+    """0 埋めでない 4 桁（issue 番号が 4 桁に達した一次資料）を ADR と誤判定しない。
+
+    判定は scripts/check-adr-numbers.sh の `^0[0-9]{3}` と同一でなければならない。
+    先頭 0 を落とすと issue #1000 台の一次資料が orphan error になり、しかも
+    「例外表に登録しろ」という誤った助言が付く。
+    """
+    repo = new_repo()
+    try:
+        baseline(repo)
+        add_adr(repo, "1024-some-issue.md")
+        code, out = check(repo)
+        assert code == 0, f"0 埋めでない 4 桁を ADR 扱いした: {out}"
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_duplicate_orphan_exception_row_is_error() -> None:
+    """例外表に同じ ADR の行が 2 つあったら落とす（後勝ちで黙って上書きしない）。"""
+    repo = new_repo()
+    try:
+        sha = baseline(repo)
+        add_adr(repo, "0002-second.md")
+        write_registry(repo, sha,
+                       orphan_exceptions=[(SECOND_ADR, ORPHAN_REASON),
+                                          (SECOND_ADR, "別の理由")])
+        code, out = check(repo)
+        assert code == 1, out
+        assert "orphan 例外表に" in out and "行が 2 つある" in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_orphan_exception_marker_missing_is_fatal() -> None:
+    """マーカーを消して orphan 検査を素通りさせる経路を塞ぐ（fail-closed）。"""
+    repo = new_repo()
+    try:
+        baseline(repo)
+        registry = repo / "docs/knowledge/doc-classes.md"
+        text = registry.read_text(encoding="utf-8")
+        assert "<!-- adr-orphan-exceptions:begin -->" in text
+        registry.write_text(
+            text.replace("<!-- adr-orphan-exceptions:begin -->", ""), encoding="utf-8"
+        )
+        code, out = check(repo)
+        assert code == 1, out
+        assert "adr-orphan-exceptions:begin" in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_orphan_exception_marker_missing_is_fatal_even_with_warn_only() -> None:
+    """逃げ道（--warn-only）でも落ちること。表の範囲を切り出せず検査が成立しないため。"""
+    repo = new_repo()
+    try:
+        baseline(repo)
+        registry = repo / "docs/knowledge/doc-classes.md"
+        text = registry.read_text(encoding="utf-8")
+        registry.write_text(
+            text.replace("<!-- adr-orphan-exceptions:begin -->", ""), encoding="utf-8"
+        )
+        code, out = check(repo, "--warn-only")
+        assert code == 1, out
+        assert "adr-orphan-exceptions:begin" in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_no_adr_at_all_is_error() -> None:
+    """ADR が 1 件も見つからないのは判定条件の壊れ。静かに緑にしない（fail-open を塞ぐ）。"""
+    repo = new_repo()
+    try:
+        sha = baseline(repo)
+        # a.md / レジストリの sources を非 ADR の一次資料へ移して、ADR を 0 件にする。
+        primary = add_adr(repo, "382-live-server-now.md")
+        (repo / FIRST_ADR).unlink()
+        repin(repo, [("docs/knowledge/a.md", ["D19"], [primary])], sources=[primary])
+        code, out = check(repo)
+        assert code == 1, out
+        assert "ADR（0 埋め 4 桁）が 1 件も無い" in out, out
+        assert sha
     finally:
         shutil.rmtree(repo)
 
