@@ -582,6 +582,160 @@ def test_body_change_is_stale() -> None:
         shutil.rmtree(repo)
 
 
+# --- 例外 1d: `uses:` のピン留め SHA 更新だけの差分 --------------------------
+# ワークフローを sources に持つ文書（実物は ci-pipeline.md ← .github/workflows/ci.yml）で、
+# dependabot の Actions 更新 PR が構造的に stale にならないことを固定する。
+
+WORKFLOW_REL = ".github/workflows/ci.yml"
+PIN_CHECKOUT = "a" * 40
+PIN_TOOLCHAIN_OLD = "b" * 40
+PIN_TOOLCHAIN_NEW = "c" * 40
+PIN_CACHE_OLD = "d" * 40
+PIN_CACHE_NEW = "e" * 40
+PIN_COMMENT = "サプライチェーン対策で commit SHA にピン留めする。"
+
+WORKFLOW_TEMPLATE = """\
+name: CI
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      # {comment}
+      - uses: actions/checkout@{checkout}
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@{toolchain}
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@{cache} # {cache_tag}
+"""
+
+
+def write_workflow(repo: Path, toolchain: str = PIN_TOOLCHAIN_OLD, cache: str = PIN_CACHE_OLD,
+                   cache_tag: str = "v2", comment: str = PIN_COMMENT) -> None:
+    path = repo / WORKFLOW_REL
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        WORKFLOW_TEMPLATE.format(comment=comment, checkout=PIN_CHECKOUT, toolchain=toolchain,
+                                 cache=cache, cache_tag=cache_tag),
+        encoding="utf-8",
+    )
+
+
+def workflow_baseline(repo: Path) -> None:
+    """a.md が sources にワークフローを持ち、error 0 で通る状態を作る。"""
+    sha = baseline(repo)
+    sources = [WORKFLOW_REL, "docs/original-docs/0001-first.md"]
+    write_workflow(repo)
+    write_doc(repo, "docs/knowledge/a.md", ["D19"], sources, sha)
+    added = commit_all(repo, "ワークフローを a.md の source にする")
+    # ワークフロー追加コミット自体が a.md の distill より後になるので、まず追従させる。
+    write_doc(repo, "docs/knowledge/a.md", ["D19"], sources, added)
+    commit_all(repo, "a.md をワークフロー追加時点まで追従")
+    assert check(repo)[0] == 0, "前提: ここでは error 0 で通る"
+
+
+def test_pin_hex_only_change_is_not_stale() -> None:
+    """hex だけの更新（タグを切らない action。実物は dtolnay/rust-toolchain）。"""
+    repo = new_repo()
+    try:
+        workflow_baseline(repo)
+        write_workflow(repo, toolchain=PIN_TOOLCHAIN_NEW)
+        commit_all(repo, "rust-toolchain のピンを更新")
+        code, out = check(repo)
+        assert code == 0, out
+        assert "STALE" not in out, f"ピン hex のみの更新を stale と誤判定した:\n{out}"
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_pin_bump_with_version_comment_is_not_stale() -> None:
+    """hex ＋末尾のバージョン注記（`# v2` → `# v2.9.2`）。dependabot が実際に出す形。"""
+    repo = new_repo()
+    try:
+        workflow_baseline(repo)
+        write_workflow(repo, cache=PIN_CACHE_NEW, cache_tag="v2.9.2")
+        commit_all(repo, "rust-cache のピンと注記を更新")
+        code, out = check(repo)
+        assert code == 0, out
+        assert "STALE" not in out, f"末尾注記込みのピン更新を stale と誤判定した:\n{out}"
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_pin_change_with_comment_edit_is_stale() -> None:
+    """対照: ピン更新に説明コメントの改訂が同居したら内容変更（#607 の a5cfa46 がこの形）。
+
+    例外が広すぎないことの担保。ここが緑のまま通ると「ci.yml を触った PR は何でも
+    stale にならない」に退行する。
+    """
+    repo = new_repo()
+    try:
+        workflow_baseline(repo)
+        write_workflow(repo, toolchain=PIN_TOOLCHAIN_NEW,
+                       comment="ピンの更新は dependabot の PR で行い、固定した日付はここに書かない。")
+        commit_all(repo, "ピン更新と説明コメントの改訂")
+        code, out = check(repo)
+        assert code == 1, out
+        assert "STALE" in out, f"コメント改訂込みの変更を検出できていない:\n{out}"
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_action_repo_change_is_stale() -> None:
+    """対照: owner/repo の差し替えは別の action を呼ぶこと＝ジョブの意味が変わる。"""
+    repo = new_repo()
+    try:
+        workflow_baseline(repo)
+        path = repo / WORKFLOW_REL
+        path.write_text(
+            path.read_text(encoding="utf-8").replace(
+                "dtolnay/rust-toolchain@", "actions-rust-lang/setup-rust-toolchain@"),
+            encoding="utf-8",
+        )
+        commit_all(repo, "toolchain の action を差し替え")
+        code, out = check(repo)
+        assert code == 1, out
+        assert "STALE" in out, f"action の差し替えを検出できていない:\n{out}"
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_workflow_line_added_is_stale() -> None:
+    """対照: 行の増減（ステップ追加）は内容変更。"""
+    repo = new_repo()
+    try:
+        workflow_baseline(repo)
+        path = repo / WORKFLOW_REL
+        path.write_text(
+            path.read_text(encoding="utf-8") + "      - run: cargo test\n", encoding="utf-8"
+        )
+        commit_all(repo, "ステップを追加")
+        code, out = check(repo)
+        assert code == 1, out
+        assert "STALE" in out, f"ステップ追加を検出できていない:\n{out}"
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_pin_to_tag_change_is_stale() -> None:
+    """対照: 40 hex → タグへの緩和はサプライチェーン対策の後退なので内容変更。"""
+    repo = new_repo()
+    try:
+        workflow_baseline(repo)
+        path = repo / WORKFLOW_REL
+        path.write_text(
+            path.read_text(encoding="utf-8").replace(f"actions/checkout@{PIN_CHECKOUT}",
+                                                     "actions/checkout@v4"),
+            encoding="utf-8",
+        )
+        commit_all(repo, "checkout のピンをタグへ緩める")
+        code, out = check(repo)
+        assert code == 1, out
+        assert "STALE" in out, f"ピンからタグへの緩和を検出できていない:\n{out}"
+    finally:
+        shutil.rmtree(repo)
+
+
 def test_runs_from_subdirectory() -> None:
     """リポジトリルート以外を cwd にしても結果が変わらない。
 

@@ -18,9 +18,12 @@ docs/knowledge/app-bootstrap.md が status: Confirmed のまま存在しない N
   9. 本文中の相対リンクが実在するか（REQ 表の外も見る）                       [error]
  10. doc-classes.md の割当索引と実ファイルの doc_class の突合                 [error]
 
-6 は rename-only のコミット（内容差分ゼロ）を比較対象から除外する。これが無いと ADR 0073 の
-ADR 移動だけで 20 本が一斉に stale 判定になる。git log --follow では吸収できない——--follow は
-リネームより前へ履歴を遡らせるだけで、「最終コミット」がリネームコミットになる事実は変わらない。
+6 は「内容が変わっていないコミット」を比較対象から除外する（規約は docs/knowledge/README.md
+の例外 1 / 1b / 1d）。rename-only（内容差分ゼロ）を除外しないと ADR 0073 の ADR 移動だけで
+20 本が一斉に stale 判定になる。git log --follow では吸収できない——--follow はリネームより
+前へ履歴を遡らせるだけで、「最終コミット」がリネームコミットになる事実は変わらない。
+frontmatter のメタデータだけの変更（例外 1b）と、`uses:` のピン留め SHA 更新だけの変更
+（例外 1d）も同様に遡る。後者が無いと dependabot の Actions 更新 PR が構造的に永久に赤になる。
 
 依存は標準ライブラリのみ（PyYAML を使わない）。CI の predict-check ジョブと同じ前提で、
 frontmatter は限定的な構造しか取らないため正規表現で足りる。
@@ -204,6 +207,48 @@ def is_metadata_only_change(sha: str, path: str) -> bool:
     return bool(changed) and changed <= METADATA_KEYS
 
 
+# GitHub Actions の `uses:` 行。サプライチェーン対策でピン留めしている 40 hex を捕まえる。
+# group(1)=インデントと `uses:` / group(2)=owner/repo / group(3)=40 hex / group(4)=末尾の注記。
+# 末尾注記まで許すのは dependabot が hex と一緒に `# v2` → `# v2.9.2` も書き換えるため
+# （#607 の a5cfa46 で実測）。ここを許さないと Swatinem/rust-cache 系を取りこぼす。
+RE_USES_PIN = re.compile(r"^(\s*(?:-\s+)?uses:\s+)([^@\s]+)@([0-9a-fA-F]{40})(\s*#.*)?$")
+
+
+def is_pin_only_change(sha: str, path: str) -> bool:
+    """そのコミットの変更が `uses:` のピン留め SHA 更新だけかを判定する。
+
+    .github/workflows/ci.yml は ci-pipeline.md の sources なので、ci.yml を触る PR は
+    すべて stale になる。dependabot は下流の distilled_from_sha を更新できないため、
+    Actions のピン更新 PR が構造的に永久に赤だった（#590 / #591 が 2 日以上塞がれ、#607 で
+    人が手で 1 本に統合して追従させた）。ピンの hex が上がっても ci-pipeline.md の本文が
+    語るジョブ構成は変わらないので、下流が読み直す理由にならない。
+
+    is_metadata_only_change はここでは効かない。あちらは split_frontmatter に依存しており、
+    先頭が `---` でない .yml は常に「内容変更」と判定される。
+    """
+    new = git("show", f"{sha}:{path}")
+    old = git("show", f"{sha}^:{path}")
+    if new.returncode != 0 or old.returncode != 0:
+        return False  # 初回追加や親を辿れない場合は判定しない（内容変更として扱う）
+    new_lines, old_lines = new.stdout.splitlines(), old.stdout.splitlines()
+    if len(new_lines) != len(old_lines):
+        return False  # 行の増減はジョブ・ステップの追加削除なので内容変更
+    changed = 0
+    for new_line, old_line in zip(new_lines, old_lines):
+        if new_line == old_line:
+            continue
+        changed += 1
+        new_pin, old_pin = RE_USES_PIN.match(new_line), RE_USES_PIN.match(old_line)
+        if not new_pin or not old_pin:
+            return False
+        # 変わってよいのは 40 hex と末尾注記だけ。owner/repo の差し替えは別の action を
+        # 呼ぶことなのでジョブの意味が変わる＝内容変更。タグ → hex のような形式変更も
+        # 片側が RE_USES_PIN に合わないので上で弾かれる。
+        if new_pin.group(1, 2) != old_pin.group(1, 2):
+            return False
+    return changed > 0
+
+
 def path_status(sha: str, path: str) -> "tuple[str | None, str | None]":
     """コミット sha における path の (status, リネーム元) を返す。
 
@@ -229,9 +274,10 @@ def path_status(sha: str, path: str) -> "tuple[str | None, str | None]":
 def last_content_change(path: str, limit: int = 40, max_renames: int = 10) -> "str | None":
     """path の**内容**が最後に変わったコミットの SHA。
 
-    次の 2 種類は「内容変更ではない」として遡る:
+    次の 3 種類は「内容変更ではない」として遡る（規約は docs/knowledge/README.md の例外 1 / 1b / 1d）:
       - R100（内容差分ゼロのリネーム）。ディレクトリ移設で全件が stale になるのを防ぐ
       - frontmatter のメタデータだけの変更（sources のパス追従・doc_class 付与など）
+      - `uses:` のピン留め SHA 更新だけの変更（dependabot の Actions 更新 PR）
 
     **`--follow` は使わない。** `--follow` はリネームで履歴を打ち切ることがあり（実測:
     ADR 0036 は移設コミット 1 件しか返さず、それ以前の起票コミットへ辿れなかった）、
@@ -263,6 +309,8 @@ def last_content_change(path: str, limit: int = 40, max_renames: int = 10) -> "s
                 renamed = True
                 break
             if is_metadata_only_change(sha, current):
+                continue
+            if is_pin_only_change(sha, current):
                 continue
             return sha
         if not renamed:
