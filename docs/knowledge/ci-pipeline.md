@@ -8,9 +8,11 @@ sources:
   - docs/original-docs/0073-adr-into-original-docs-and-doc-classes.md
   - docs/original-docs/0081-pin-only-diff-is-not-content-change.md
   - docs/original-docs/0082-swagger-ui-vendored.md
+  - docs/original-docs/0084-evil-merge-is-visible-to-stale-check.md
+  - docs/qa/QA-evil-merge-615.md
   - .github/workflows/ci.yml
 distilled_from_sha: "e5543ca"
-updated: "2026-08-13"
+updated: "2026-08-14"
 ---
 
 # CI パイプラインの構成と設計意図（D21）
@@ -163,10 +165,27 @@ universal newlines が `\r\n` を `\n` に潰し、**CRLF 変換とピン更新�
 - 走査窓のページングは例外 1 / 1b にも効く代わりに、除外対象が長く続く履歴では `git log` の呼び出しが
   走査全体で最大 `max_pages`（25）回まで増える（＝最大 1000 コミット。現実の `ci.yml`＝46 コミットでは
   1〜2 ページで終わる）。
-- **既知の限界**（どちらも fail-closed 側なので実害はないが、調査の手間を省くために記録する）:
-  (1) マージコミット自身だけが内容を変える evil merge は `git show` が既定でマージの差分を出さない
-  ため恒久的に不可視、(2) CRLF で保存されたワークフローは行末の `\r` で正規表現が外れるので例外 1d が
-  一切効かない。
+- **既知の限界**（fail-closed 側なので実害はないが、調査の手間を省くために記録する）:
+  CRLF で保存されたワークフローは行末の `\r` で正規表現が外れるので例外 1d が一切効かない
+  （ADR 0081 の「既知の限界 (2)」）。
+  もう 1 つ、**マージコミット内での純粋なリネームは免除が効かず偽の STALE になる**——
+  combined diff はリネームを `RR` として出し `R100` にならないため（ADR 0084 決定 3）。
+- **evil merge は不可視ではない**（ADR 0084。ADR 0081 の「既知の限界 (1)」の訂正）。
+  `git show` はマージに対し**既定で combined diff（`--cc`）**を出し、`--cc` は
+  「**全ての親と異なる**パス」を列挙する——これは evil merge（マージ自身だけが内容を変える形）の
+  定義そのもの。片親と同じ内容になったマージは列挙されないが、その内容を作ったコミットが
+  **祖先に実在する**ので飛ばしてよく、`git log` の TREESAME 単純化も同じ基準で辿る。
+  **対象集合が一致するので穴が無い。**
+  - 実測（main `d46ace4`）: `git log -- <path>` が列挙したマージ × `sources` パス **7 組すべて**を
+    `path_status` が検出（`MM` / `MA` / `AA`）、**不可視 0 組**。合成 fixture では 2 親の
+    evil merge が `MM`、octopus（3 親）が `MMM` で検出できることも確認した。
+  - evil merge は日常的に起きる。**PR ブランチが main を取り込んでコンフリクトを手で解消**すると、
+    どちらの親にも無い内容がマージコミットに生まれる（`8ec61a18` が実例）。
+  - **この `--cc` 依存は契約**。`--first-parent` を足す・`git diff-tree`（`-c` 無し）へ置き換える、
+    といった変更で黙って失われるので、`test_evil_merge_is_detected_as_content_change` が
+    その退行で落ちるようにしてある（対照群は `test_pin_only_merge_is_not_stale`）。
+    **両親の変更を免除対象で挟む**のが要点で、そうしないとマージが不可視になっても親側の変更が
+    STALE を出してテストが何も識別しない。
 - **将来 dependabot の auto-merge を入れるなら、ピン差分の監査を別に持つ必要がある。** この例外は
   `adr` ジョブから「`ci.yml` が変わった」という自動シグナルを外す。owner/repo が同一でも、hex が
   同一リポジトリの未マージ PR の SHA を指せば任意コードが走る既知の攻撃面がある。現状

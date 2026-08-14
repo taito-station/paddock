@@ -348,6 +348,17 @@ def path_status(sha: str, path: str) -> "tuple[str | None, str | None]":
 
     **失敗を (None, None) に混ぜない。** それは「このコミットは触っていない」と同義で、
     走査を続けると検査が黙ってスキップされる。
+
+    **マージに対する `git show` の既定＝combined diff（`--cc`）は契約**（ADR 0084）。
+    `--cc` は「**全ての親と異なる**パス」を列挙するので、evil merge（マージ自身だけが内容を
+    変える形）がここで拾える。`--first-parent` を足したり `git diff-tree`（`-c` 無し）へ
+    置き換えるとマージが無出力になり、stale 検査に恒久的な穴が開く——
+    `test_evil_merge_is_detected_as_content_change` がその退行で落ちる。
+
+    **既知の限界**: combined diff はリネームを `RR` として出し `R100` にならないので、
+    **マージ内での純粋なリネームは免除が効かず偽の STALE になる**（`-M100%` はマージに
+    効かず、リネーム元も取れない）。fail-closed 側なので塞いでいない（ADR 0084 決定 3・
+    `test_rename_inside_merge_is_treated_as_content_change` が現状の挙動を pin している）。
     """
     proc = git(
         "-c", "core.quotePath=false", "show", "--format=", "--name-status", "-M100%", sha
@@ -451,11 +462,14 @@ def scan_last_content_change(
         for sha in shas:
             status, rename_src = path_status(sha, current)
             if status is None:
-                # そのコミットは current を（この名前では）触っていない。マージコミットは
-                # git show が既定で差分を出さないためここに来る。通常の変更は親側のコミットにも
-                # 現れ、それも log の対象なので飛ばして問題ない。**例外は evil merge**
-                # （マージコミット自身だけが内容を変える形）で、これは恒久的に不可視になる。
-                # 既存の限界で本 ADR の対象外（docs/knowledge/ci-pipeline.md に記録）。
+                # そのコミットは current を（この名前では）触っていない。マージがここに来るのは
+                # **いずれかの親と同じ内容になった**とき（`--cc` が「全親と異なるパス」しか
+                # 出さないため）で、その内容を作ったコミットは祖先に実在するので飛ばしてよい。
+                # `git log` の TREESAME 単純化も同じ基準でそちらを辿る。
+                #
+                # **evil merge（マージ自身だけが内容を変える形）はここに来ない**——全親と
+                # 異なるので `--cc` が列挙する（ADR 0084 で実測。2 親も octopus も検出できる）。
+                # ADR 0081 が「既知の限界」として記録した「恒久的に不可視」は誤りだった。
                 continue
             if status == "R100":
                 if not rename_src:

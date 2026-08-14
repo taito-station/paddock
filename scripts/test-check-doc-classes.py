@@ -3472,6 +3472,152 @@ def test_no_adr_at_all_is_fatal_even_with_warn_only() -> None:
         shutil.rmtree(repo)
 
 
+# --- マージコミットに対する stale 判定（#615 (a) / ADR 0084） ---
+#
+# `path_status` は `git show --format= --name-status -M100% <sha>` を使う。git はマージに対して
+# **既定で combined diff（`--cc`）**を出し、`--cc` は「**全ての親と異なる**パス」を列挙する
+# ——これは evil merge（マージ自身だけが内容を変える形）の定義そのもの。したがって
+# evil merge は検出できている。**この `--cc` 依存は契約**なので、`--first-parent` の追加や
+# `git diff-tree` への置換で壊れることを下のテストで固定する。
+
+
+def git_allow_fail(repo: Path, *args: str) -> "subprocess.CompletedProcess[str]":
+    """`run_git` と違い失敗を許す。コンフリクトする `git merge` は 1 を返すため。"""
+    return subprocess.run(["git", *args], cwd=repo, capture_output=True, text=True)
+
+
+PIN_TOOLCHAIN_RIVAL = "f" * 40
+
+
+def test_evil_merge_is_detected_as_content_change() -> None:
+    """マージ自身だけが内容を変える evil merge を stale 判定が見落とさない。
+
+    **両親の変更を「免除対象」（ピン更新のみ）にするのが要点。** そうしないと、マージが
+    不可視になっても親側の変更が STALE を出してしまい、テストが何も識別しない
+    （実際に一度そう書いてしまい、`path_status` がマージで `(None, None)` を返す変異を
+    注入しても緑のままだった）。免除対象で挟めば、**マージが見えなくなった瞬間に緑へ転ぶ**。
+
+    `path_status` が `git show` の combined diff（`--cc`）に依存している事実の契約テスト。
+    `git diff-tree`（`-c` 無し）への置換など、マージで無出力になる変更が入ると落ちる。
+    """
+    repo = new_repo()
+    try:
+        workflow_baseline(repo)
+        pinned = run_git(repo, "rev-parse", "--short", "HEAD")
+        base = run_git(repo, "rev-parse", "--abbrev-ref", "HEAD")
+
+        # 両側が「同じピンを別の hex へ」動かす＝どちらも免除対象、かつ必ずコンフリクトする。
+        run_git(repo, "checkout", "-q", "-b", "side")
+        write_workflow(repo, toolchain=PIN_TOOLCHAIN_NEW)
+        commit_all(repo, "side: ピン更新のみ")
+        run_git(repo, "checkout", "-q", base)
+        write_workflow(repo, toolchain=PIN_TOOLCHAIN_RIVAL)
+        commit_all(repo, "base: ピン更新のみ")
+
+        conflicted = git_allow_fail(repo, "merge", "side")
+        assert conflicted.returncode != 0, "前提: 同じ行を両側で変えたのでコンフリクトする"
+        # 解決のついでにステップ名を変える＝**どちらの親にも無い内容変更**。
+        write_workflow(repo, toolchain=PIN_TOOLCHAIN_NEW, comment="解決時に書き換えた注記")
+        merge = commit_all(repo, "evil merge")
+        assert len(run_git(repo, "rev-parse", f"{merge}^@").split()) == 2, "前提: 2 親のマージ"
+
+        # a.md の distill は両親より前に固定したまま。
+        code, out = check(repo)
+        assert code == 1, (
+            f"evil merge が見落とされた（git show の combined diff を失っていないか）:\n{out}"
+        )
+        assert "STALE" in out and merge[:7] in out, out
+        assert pinned  # 免除対象で挟んでいることの明示
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_pin_only_merge_is_not_stale() -> None:
+    """上のテストの対照群。マージの解決が**免除対象のまま**なら STALE にならない。
+
+    これが無いと `test_evil_merge_is_detected_as_content_change` の exit 1 が
+    「マージだから」なのか「内容が変わったから」なのか区別できない。
+    """
+    repo = new_repo()
+    try:
+        workflow_baseline(repo)
+        base = run_git(repo, "rev-parse", "--abbrev-ref", "HEAD")
+        run_git(repo, "checkout", "-q", "-b", "side")
+        write_workflow(repo, toolchain=PIN_TOOLCHAIN_NEW)
+        commit_all(repo, "side: ピン更新のみ")
+        run_git(repo, "checkout", "-q", base)
+        write_workflow(repo, toolchain=PIN_TOOLCHAIN_RIVAL)
+        commit_all(repo, "base: ピン更新のみ")
+        git_allow_fail(repo, "merge", "side")
+        write_workflow(repo, toolchain=PIN_TOOLCHAIN_NEW)  # 片側の hex を採るだけ
+        commit_all(repo, "merge: ピンを片側に寄せただけ")
+        code, out = check(repo)
+        assert code == 0, f"ピン更新だけのマージで STALE になった:\n{out}"
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_merge_taking_one_side_is_attributed_to_ancestor() -> None:
+    """片親の内容をそのまま採るマージは、マージではなく**祖先コミット**に帰属する。
+
+    こちらは `git log` の TREESAME 単純化がマージを飛ばすのが正しい——その内容を作った
+    コミットが祖先に実在するため。evil merge との対比で固定する。
+    """
+    repo = new_repo()
+    try:
+        baseline(repo)
+        base = run_git(repo, "rev-parse", "--abbrev-ref", "HEAD")
+        run_git(repo, "checkout", "-q", "-b", "side")
+        (repo / FIRST_ADR).write_text("# 0001\n\nside が作った内容\n", encoding="utf-8")
+        side = commit_all(repo, "side change")
+        run_git(repo, "checkout", "-q", base)
+        (repo / "unrelated.md").write_text("x\n", encoding="utf-8")
+        first_parent = commit_all(repo, "unrelated")
+        run_git(repo, "merge", "-q", "side", "-m", "merge taking side")
+        merge = run_git(repo, "rev-parse", "--short", "HEAD")
+        write_doc(repo, "docs/knowledge/a.md", ["D19"], [FIRST_ADR], first_parent)
+        write_registry(repo, first_parent)
+        code, out = check(repo)
+        assert code == 1, out
+        # 報告されるのはマージではなく side のコミット。
+        assert side[:7] in out, f"祖先ではなくマージに帰属した:\n{out}"
+        assert merge[:7] not in out, f"マージに帰属した:\n{out}"
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_rename_inside_merge_is_treated_as_content_change() -> None:
+    """マージ内での純粋なリネームは R100 免除が効かず、偽の STALE になる（既知の限界）。
+
+    combined diff はリネームを `RR` として出す（`R100` ではない）ので `scan_last_content_change`
+    の免除分岐に当たらず、リネーム元も取れない。fail-closed 側なので実害は小さいが、
+    ADR 0073 規模の移設をマージコミット内でやると大量に発火する。ADR 0084 で
+    「塞がず記録する」と決めたので、**現状の挙動として** pin する
+    （将来塞ぐなら、このテストを反転させるのが正しい入口）。
+    """
+    repo = new_repo()
+    try:
+        baseline(repo)
+        renamed = "docs/original-docs/0003-renamed.md"
+        base = run_git(repo, "rev-parse", "--abbrev-ref", "HEAD")
+        run_git(repo, "checkout", "-q", "-b", "side")
+        (repo / "unrelated.md").write_text("s\n", encoding="utf-8")
+        commit_all(repo, "side unrelated")
+        run_git(repo, "checkout", "-q", base)
+        (repo / "other.md").write_text("m\n", encoding="utf-8")
+        first_parent = commit_all(repo, "main unrelated")
+        run_git(repo, "merge", "-q", "side", "--no-commit")
+        run_git(repo, "mv", FIRST_ADR, renamed)  # 内容は変えない
+        merge = commit_all(repo, "merge with rename")
+        write_doc(repo, "docs/knowledge/a.md", ["D19"], [renamed], first_parent)
+        write_registry(repo, first_parent)
+        code, out = check(repo)
+        assert code == 1, f"現状はリネーム免除が効かず STALE になるはず:\n{out}"
+        assert "STALE" in out and merge[:7] in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
 def main() -> int:
     if not TARGET.is_file():
         print(f"テスト対象が見つからない: {TARGET}", file=sys.stderr)
