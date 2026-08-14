@@ -11,7 +11,7 @@ sources:
   - docs/original-docs/0084-evil-merge-is-visible-to-stale-check.md
   - docs/qa/QA-evil-merge-615.md
   - .github/workflows/ci.yml
-distilled_from_sha: "af8802b"
+distilled_from_sha: "49b08cf"
 updated: "2026-08-14"
 ---
 
