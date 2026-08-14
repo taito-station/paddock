@@ -12,7 +12,7 @@ sources:
   - docs/original-docs/616-docs-serving-checks.md
   - docs/qa/QA-evil-merge-615.md
   - .github/workflows/ci.yml
-distilled_from_sha: "f144fe1"
+distilled_from_sha: "0ea19f9"
 updated: "2026-08-14"
 ---
 
