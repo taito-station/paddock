@@ -12,12 +12,21 @@ paddock の文書は HVE（dahatake/HypervelocityEngineering, MIT）の蒸留モ
   `docs/knowledge/` へ。
 - **ADR は一次資料層（`docs/original-docs/`）の不変の決定記録**（ADR 0073 で旧 `docs/adr/` から統合）。
   決定を伴う変更は ADR を起票する（採番は `scripts/check-adr-numbers.sh next`）。**一度置いた ADR は
-  改変しない**——決定を変えるときは新しい ADR で supersede する。
+  改変しない**——決定を変えるときは新しい ADR で supersede する。**新設した ADR は同じ PR で
+  どこかの knowledge / specifications の `sources` に載せる**（載っていない ADR は
+  orphan 検査が error にする・ADR 0083）。**載せた時点で必ず STALE が出る**ので本文コミットの後に
+  `scripts/bump-distilled-sha.py --all-stale` で追従コミットを積む。写す先が無い ADR（規約そのものを
+  定めた ADR / supersede されて下流が後継だけを見るようになった ADR）は `doc-classes.md` の
+  `adr-orphan-exceptions` 表に理由付きで登録する。**knowledge / specifications を消す・統合する
+  ときは、その文書の `sources` にある ADR を別文書へ移すか例外表に登録する**（同じ PR で）。
 - **読む入口は knowledge**。ADR の決定・理由・却下案・影響は knowledge に**全部写す**。重複を許す
   代わりに、`sources` の更新に蒸留が追従しているかは機械検査で担保する（人手の規律に委ねない）。
-  **写しは一巡済み（#588・ADR 0074 自身を除く）**: ADR 81 本のうち棄却 24 本は
+  **写しは一巡済み（#588・例外は `doc-classes.md` の `adr-orphan-exceptions` 表が正）**: 棄却された ADR は
   [docs/knowledge/product-goals.md](docs/knowledge/product-goals.md) が索引し、採用側はいずれかの
-  knowledge / specifications が `sources` で参照している（knowledge は 10 本）。ただし**粒度は一様でない**
+  knowledge / specifications が `sources` で参照している。**「全 ADR がどこかの `sources` に居る」は
+  機械検査になった**（ADR 0083。例外は `doc-classes.md` の `adr-orphan-exceptions` 表が正）ので、
+  本数を手で数えて書かない。**ただし機械が見ているのは `sources` への登録までで、本文へ写したか
+  ではない**。**粒度も一様でない**
   ので、決定の細部（却下案・数値の前提）が要るときは **ADR 原本（`docs/original-docs/0NNN-*.md`）も読む**。
   stale の機械検査は **error**（未解消 6 件を #580 で消化して warning から昇格）。`sources` に挙げた
   ファイルを内容ごと変更したら、参照元の **`distilled_from_sha` を同じ PR で追従させる**（`scripts/bump-distilled-sha.py --all-stale` で一括。`updated` は触らないので実質更新の有無は自分で判断する。追従漏れは
@@ -31,7 +40,7 @@ paddock の文書は HVE（dahatake/HypervelocityEngineering, MIT）の蒸留モ
 - **文書クラス**: knowledge/specifications は frontmatter に `doc_class`（+ mdq 用ミラーの `tags`）を持つ。
   定義の正本は [docs/knowledge/doc-classes.md](docs/knowledge/doc-classes.md)（HVE の D01〜D21 ＋ paddock 固有の
   D22 予測モデル / D23 買い方 / D24 実験・棄却証跡）。`scripts/mdq search --tags D23` でクラス絞り込みができる。
-  整合は `scripts/check-doc-classes.py` が CI と pre-push で検査する（本文の相対リンクの実在と、`doc-classes.md` の割当索引との 1 対 1 突合も error）。**knowledge / specifications を 1 本足す・消す・`doc_class` を変えるときは、同じ PR で `doc-classes.md` のクラス一覧の「現行」列と割当索引も直す**。
+  整合は `scripts/check-doc-classes.py` が CI と pre-push で検査する（本文の相対リンクの実在、`doc-classes.md` の割当索引との 1 対 1 突合、**REQ 表の `出典` が `sources` にも載っているか**、**どの `sources` からも参照されない ADR の検出**——いずれも error）。**knowledge / specifications を 1 本足す・消す・`doc_class` を変えるときは、同じ PR で `doc-classes.md` のクラス一覧の「現行」列と割当索引も直す**。
 - **探索規律 — 生読み前に mdq 検索**: docs 内の答えを探すときは、まず
   `scripts/mdq search --q "..."`（BM25・ローカル・[.claude/skills/markdown-query/SKILL.md](.claude/skills/markdown-query/SKILL.md)）
   でヒットチャンクだけ取り、必要時のみ生ファイルへ。コード探索は従来通り serena（`mcp__serena__*`）。

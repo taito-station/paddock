@@ -3,8 +3,10 @@ status: Confirmed
 kind: knowledge
 sources:
   - docs/original-docs/0073-adr-into-original-docs-and-doc-classes.md
-distilled_from_sha: "6b74f57"
-updated: "2026-08-12"
+  - docs/original-docs/0083-sources-coverage-checks.md
+  - docs/qa/QA-sources-coverage-checks-596.md
+distilled_from_sha: "b1aea90"
+updated: "2026-08-13"
 ---
 
 # 文書クラス D01〜D24 レジストリ
@@ -191,3 +193,121 @@ D01（[product-goals.md](product-goals.md)）を作った時点では**移して
 | specifications/session-write-api.md | [D10, D06] |
 | specifications/web-spa.md | [D11, D02, D10] |
 <!-- doc-classes-index:end -->
+
+## `sources` の網羅性検査（ADR 0083）
+
+stale 検査（`sources` に挙げた一次資料への追従）の**前提**を守る 2 つの検査。どちらも
+「`sources` の中身が正しいか」を見る側で、片方だけでは穴が残る。
+
+### ADR の被参照（orphan 検査）
+
+**ADR は必ずどこかの knowledge / specifications の `sources` から参照される。** これが
+「ADR の内容は knowledge へ全部写す」（ADR 0073 決定 2）を機械で担保する前提になっている——
+stale 検査が見るのは `sources` に**挙がっている**行だけなので、載せ忘れた ADR は更新されても
+誰も気づかない。**`sources` から行を消せば stale も消える**、という網羅性の穴の片側。
+
+checker は `docs/original-docs/` の **0 埋め 4 桁の ADR** を列挙し、全 knowledge /
+specifications の `sources` の和集合に含まれないものを error にする（ADR 0083）。issue 由来の
+一次資料（`382-...` のように 0 埋めしない番号）は蒸留先を持つとは限らないので対象外。
+**判定は `scripts/check-adr-numbers.sh` の `^0[0-9]{3}` と同一の述語**——先頭 0 を落として
+「4 桁」で判定すると、issue 番号が 4 桁に届いた時点で `1024-foo.md` が ADR と誤判定される。
+
+**ADR を新設したら、同じ PR でどこかの `sources` に載せる。** 載せられない ADR は下の例外表に
+**理由付きで**登録するのが正規の逃げ道（`--warn-only` は逃げ道に数えない）。**塞がるのは
+「`sources` への登録を後続 PR に回すこと」まで**で、本文の写しを後回しにする運用は機械では
+止まらない（下記「保証しないこと」）。
+
+**正当な例外は 2 カテゴリ**:
+
+1. **規約そのものを定めた ADR** で、確定知として写す先が無いもの（現行の 0074）
+2. **supersede された ADR** で、下流が後継 ADR だけを参照するようになったもの。旧 ADR を
+   `sources` から落とすのは正しい操作だが、落とした瞬間に orphan になる。**supersede する PR で
+   例外表に「ADR NNNN に supersede された」と書く**（CLAUDE.md「決定を変えるときは新しい ADR で
+   supersede する」と直交する必然）
+
+> 表の書式も checker がパースする契約。**先頭のデータ行を見出しとして読む**（位置で判定する。
+> 割当索引が列名の内容で判定するのとは方式が違う）。列名が `| ADR | 例外の理由 |` でなければ
+> error にして、その行は例外エントリとして扱わない。データ行は
+> `| docs/original-docs/0074-....md | 理由 |`
+> の **2 列**で、左は **`sources` と同じリポジトリルート相対パス**（上の割当索引は `docs/` を
+> 剥がすが、**この表の比較相手は `sources` なので敢えて揃えていない**。正規化を 1 段挟むほど
+> 「どちらの形式か」の取り違えが増える）。理由の空欄は error。
+> パスは **`sources` と同じ正規形の `docs/original-docs/` 配下**（`./docs/...` のような
+> 非正規形・絶対パス・`..` 経由・`original-docs/` 配下でないパスはいずれも error。非正規形は
+> 実在検査を通っても stale 判定の突合から静かに外れるため、形式を 1 つに強制している）。
+> セル内の `|` は `\|` でエスケープする（素の `|` は列数不一致＝書式崩れ error。割当索引も同じ）。
+> **例外表そのものも検査する**——実在しない ADR / 実在するが ADR ではないファイル / 実際は
+> `sources` から参照されている（＝不要になった例外）/ 行の重複 / ADR 列の空 / 見出し行の
+> 列名違い / 行の書式崩れはいずれも error。腐った例外を残すと、次に本物の orphan が出たとき
+> 「例外表にあるから安心」と誤読される。
+> マーカーを消すと検査が成立しないので `--warn-only` でも落ちる。**ADR が 0 件のとき**も
+> 同じ扱い（判定条件の取り違えで検査が丸ごと無効化される fail-open を塞ぐ）。
+
+<!-- adr-orphan-exceptions:begin -->
+| ADR | 例外の理由 |
+|---|---|
+| docs/original-docs/0074-no-issue-body-transcription.md | 文書運用の規約そのものを定めた ADR で、蒸留先の knowledge を持たない。決定内容（issue 本文を転記しない）は `docs/original-docs/README.md` の「何を置かないか」と本ファイルの運用規約が実効しており、確定知として写す先が無い |
+<!-- adr-orphan-exceptions:end -->
+
+### REQ 表の出典も `sources` に載せる
+
+同じ穴のもう片側。**REQ 表の `出典` 列が名指しした `docs/original-docs/` 配下のファイルは、
+その文書の `sources` にも載っている**ことを checker が error で保証する（ADR 0083 決定 2）。
+`出典` 列は「その要件の根拠」と定義された唯一の機械可読な場所なので、ここが指した一次資料だけは
+必ず watch 対象に入る。
+
+- **基準パスはリポジトリルート相対に正規化してから比較する。** `出典` 列は文書からの相対
+  （`../original-docs/0055-....md`）、`sources` はルート相対で、揃えないと必ず食い違う。
+- **対象は `docs/original-docs/` 配下全体**（4 桁 ADR に限らない。issue 由来の一次資料も蒸留元）。
+- **対象外**: 外部 URL（GitHub issue 等。一次資料ファイルではないので `sources` に載せられない）/
+  兄弟の knowledge・specifications へのリンク（蒸留元ではなく相互リンク）/ リンク切れ
+  （本文リンク検査が別に報告する担当。ここで拾うと 1 本の切れリンクに 2 件の error が出るうえ、
+  `sources` は実在ファイルしか受け付けないので「`sources` に足せ」が誤った助言になる）。
+
+導入時の実測（main `5ae6466`）は **ADR 80 本中 orphan 1 本（0074 のみ）/ REQ 行 26・出典の
+リポ内リンク 37 本中 未収載 0 件**。真であるうちに機械化した、というのが ADR 0083 の判断。
+
+### この 2 検査が保証しないこと
+
+**機械化できたのは「`sources` への登録」までで、「knowledge へ写したか」ではない。** ADR を
+任意の文書の `sources` に 1 行足せば検査 12 は通る（[product-goals.md](product-goals.md) は
+34 本の ADR を索引目的で `sources` に並べている）。**写しの中身——決定・理由・却下案・影響を
+実際に書いたか——は人手の規律に残る。** ここを誇張して読むと「機械が見ているから大丈夫」という
+誤った安心になる。
+
+**参照元が複数ある ADR には、元の穴（`sources` から行を消せば stale も消える）が開いたまま。**
+導入時点（`ffdace0`）で **ADR 83 本のうち 48 本（58%）が 2 文書以上から参照**されている。
+これらは 1 つの文書の
+`sources` から落としても検査 12 は鳴らず（他がまだ参照している）、その文書の REQ `出典` に
+載っていなければ検査 11 も鳴らない。塞げたのは**「最後の 1 本を落とす」ケースと「REQ が根拠として
+名指しした出典」だけ**で、中間は人手の規律に残る。
+
+**検査 11 と 12 のスコープは非対称**（意図的）。11 は `docs/original-docs/` 配下**全体**、
+12 は **0 埋め 4 桁 ADR だけ**。この結果、非 ADR 一次資料（導入時点で
+`601-axis-flip-in-predict-watch.md` の 1 本）と `docs/qa/` の 2 本（`QA-axis-lock-601.md` /
+`QA-roi-gate-calibration-571.md`）はどの `sources` からも参照されていなくても鳴らない。
+
+**この文書自身は `doc_class` を持たない**（クラス定義そのものなので）。したがって ADR 0083 の
+写しは `scripts/mdq search --tags D..` の絞り込みからは引けない——運用規約として探すときは
+[README.md](README.md) の「昇格・更新の運用」と「機械検査できない」節を入口にする。
+
+**検査 11 は `出典` セルの Markdown リンクしか見ない。** 出典をプレーンテキストや
+インラインコードで書けば突合されないので、**最も安い回避策は「出典のリンクを外す」**になった
+（塞いだ「`sources` から行を消す」より安い）。一律必須にしなかったのは、既存の出典に
+`ADR 0001` のような素のテキスト表記と外部 URL のみの行が実在するため。
+
+### なぜ error か / なぜ例外を文書側に置くか（ADR 0083 の理由と却下案）
+
+- **error にする理由**: #580 が stale を warning → error に昇格させたのは「warning のままだと
+  写した量に比例して追従漏れが静かに溜まる」を実測したため。同じ検査系に warning を混ぜると
+  その 1 項目だけが同じ経路で腐る。現状の違反が 0〜1 件なので導入コストを払わずに error にできた。
+- **却下**: スクリプト内の定数リストで例外を持つ（例外の追加が「Python の変更」になり文書
+  レビューの視界から外れる）/ どちらかを warning に留める（上記の理由）/ `sources` を
+  append-only にする（穴は塞がるが文書の分割・統合で消せなくなり `sources` が単調増加する）/
+  本文の相対リンク全部を `sources` と突合する（用語集や兄弟仕様への相互リンクまで載せることに
+  なり、`sources` の意味＝蒸留元が壊れる）/ orphan 判定に `CLAUDE.md` からの参照も数える
+  （ADR 0077 で `CLAUDE.md` は `sources` に入らない設計にしたので、「`CLAUDE.md` に書いたから
+  写しは不要」という抜け道ができる）。
+- **影響**: ADR を先に置いて `sources` への登録を後続 PR に回す運用は塞がる。`--warn-only` は
+  逃げ道に数えない（CI では使わない）。既存 10 項目の検査・`scripts/bump-distilled-sha.py` が
+  パースする STALE 行の文言は変えていない。
