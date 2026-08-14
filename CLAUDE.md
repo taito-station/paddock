@@ -14,7 +14,7 @@ paddock の文書は HVE（dahatake/HypervelocityEngineering, MIT）の蒸留モ
   決定を伴う変更は ADR を起票する（採番は `scripts/check-adr-numbers.sh next`）。**一度置いた ADR は
   改変しない**——決定を変えるときは新しい ADR で supersede する。**新設した ADR は同じ PR で
   どこかの knowledge / specifications の `sources` に載せる**（載っていない ADR は
-  orphan 検査が error にする・ADR 0082）。**載せた時点で必ず STALE が出る**ので本文コミットの後に
+  orphan 検査が error にする・ADR 0083）。**載せた時点で必ず STALE が出る**ので本文コミットの後に
   `scripts/bump-distilled-sha.py --all-stale` で追従コミットを積む。写す先が無い ADR（規約そのものを
   定めた ADR / supersede されて下流が後継だけを見るようになった ADR）は `doc-classes.md` の
   `adr-orphan-exceptions` 表に理由付きで登録する。**knowledge / specifications を消す・統合する
@@ -24,7 +24,7 @@ paddock の文書は HVE（dahatake/HypervelocityEngineering, MIT）の蒸留モ
   **写しは一巡済み**: 棄却された ADR は
   [docs/knowledge/product-goals.md](docs/knowledge/product-goals.md) が索引し、採用側はいずれかの
   knowledge / specifications が `sources` で参照している。**「全 ADR がどこかの `sources` に居る」は
-  機械検査になった**（ADR 0082。例外は `doc-classes.md` の `adr-orphan-exceptions` 表が正）ので、
+  機械検査になった**（ADR 0083。例外は `doc-classes.md` の `adr-orphan-exceptions` 表が正）ので、
   本数を手で数えて書かない。**ただし機械が見ているのは `sources` への登録までで、本文へ写したか
   ではない**。**粒度も一様でない**
   ので、決定の細部（却下案・数値の前提）が要るときは **ADR 原本（`docs/original-docs/0NNN-*.md`）も読む**。

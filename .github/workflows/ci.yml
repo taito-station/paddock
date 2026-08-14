@@ -93,6 +93,17 @@ jobs:
       - name: Cache cargo build
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
+      # ビルド時の外部取得へ静かに戻るのを防ぐ（ADR 0082）。**この required ジョブに置くのが要点**
+      # ——feature が落ちても GitHub ランナーには curl があるのでビルドは通ってしまい、落ちるのは
+      # 非必須の docker-build だけになる（原因の分かりにくいエラーで）。
+      # 1 秒のテキスト検査なので fmt / clippy より前に置き、feature 落ちを最短で報告する。
+      # 回帰テストを本番検査より先に走らせるのは `adr` ジョブと同じ理由（検査自身の壊れを切り分ける）。
+      - name: Test the vendored-Swagger-UI guard
+        run: bash scripts/test-check-vendored-swagger.sh
+
+      - name: Check Swagger UI is vendored (ADR 0082)
+        run: bash scripts/check-vendored-swagger.sh
+
       - name: Format check
         run: cargo fmt --all --check
 

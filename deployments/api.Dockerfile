@@ -7,10 +7,14 @@
 # rust:1.97 系イメージ。正確なパッチ版（1.97.1）は COPY した rust-toolchain.toml を
 # rustup が強制するため、再現性はイメージのタグではなく rust-toolchain.toml が担保する。
 FROM rust:1.97-slim-bookworm AS builder
-# sqlx の tls-native-tls が openssl を要求する。utoipa-swagger-ui の build script は
-# Swagger UI 資産を curl で取得する（https のため CA 証明書も要る）。
+# sqlx の tls-native-tls が openssl を要求する。**curl は入れない**——かつて utoipa-swagger-ui の
+# build script が Swagger UI 資産を curl で取得していたが、vendored feature に切り替えてビルド時の
+# 外部取得をやめた（ADR 0082。上流が不調だとこのビルドが落ちていた）。
+# ca-certificates は base の rust:1.97-slim-bookworm に同梱済みで明示指定は冗長だが
+# （importer.Dockerfile の builder は入れずに cargo ビルドが通っている）、base が絞られたときの
+# 保険として残す。
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        pkg-config libssl-dev curl ca-certificates \
+        pkg-config libssl-dev ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY . .

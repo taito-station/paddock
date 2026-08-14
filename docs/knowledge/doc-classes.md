@@ -3,7 +3,7 @@ status: Confirmed
 kind: knowledge
 sources:
   - docs/original-docs/0073-adr-into-original-docs-and-doc-classes.md
-  - docs/original-docs/0082-sources-coverage-checks.md
+  - docs/original-docs/0083-sources-coverage-checks.md
   - docs/qa/QA-sources-coverage-checks-596.md
 distilled_from_sha: "6e86780"
 updated: "2026-08-13"
@@ -194,7 +194,7 @@ D01（[product-goals.md](product-goals.md)）を作った時点では**移して
 | specifications/web-spa.md | [D11, D02, D10] |
 <!-- doc-classes-index:end -->
 
-## `sources` の網羅性検査（ADR 0082）
+## `sources` の網羅性検査（ADR 0083）
 
 stale 検査（`sources` に挙げた一次資料への追従）の**前提**を守る 2 つの検査。どちらも
 「`sources` の中身が正しいか」を見る側で、片方だけでは穴が残る。
@@ -207,7 +207,7 @@ stale 検査が見るのは `sources` に**挙がっている**行だけなの�
 誰も気づかない。**`sources` から行を消せば stale も消える**、という網羅性の穴の片側。
 
 checker は `docs/original-docs/` の **0 埋め 4 桁の ADR** を列挙し、全 knowledge /
-specifications の `sources` の和集合に含まれないものを error にする（ADR 0082）。issue 由来の
+specifications の `sources` の和集合に含まれないものを error にする（ADR 0083）。issue 由来の
 一次資料（`382-...` のように 0 埋めしない番号）は蒸留先を持つとは限らないので対象外。
 **判定は `scripts/check-adr-numbers.sh` の `^0[0-9]{3}` と同一の述語**——先頭 0 を落として
 「4 桁」で判定すると、issue 番号が 4 桁に届いた時点で `1024-foo.md` が ADR と誤判定される。
@@ -252,7 +252,7 @@ specifications の `sources` の和集合に含まれないものを error に�
 ### REQ 表の出典も `sources` に載せる
 
 同じ穴のもう片側。**REQ 表の `出典` 列が名指しした `docs/original-docs/` 配下のファイルは、
-その文書の `sources` にも載っている**ことを checker が error で保証する（ADR 0082 決定 2）。
+その文書の `sources` にも載っている**ことを checker が error で保証する（ADR 0083 決定 2）。
 `出典` 列は「その要件の根拠」と定義された唯一の機械可読な場所なので、ここが指した一次資料だけは
 必ず watch 対象に入る。
 
@@ -265,7 +265,7 @@ specifications の `sources` の和集合に含まれないものを error に�
   `sources` は実在ファイルしか受け付けないので「`sources` に足せ」が誤った助言になる）。
 
 導入時の実測（main `5ae6466`）は **ADR 80 本中 orphan 1 本（0074 のみ）/ REQ 行 26・出典の
-リポ内リンク 37 本中 未収載 0 件**。真であるうちに機械化した、というのが ADR 0082 の判断。
+リポ内リンク 37 本中 未収載 0 件**。真であるうちに機械化した、というのが ADR 0083 の判断。
 
 ### この 2 検査が保証しないこと
 
@@ -286,7 +286,7 @@ specifications の `sources` の和集合に含まれないものを error に�
 `601-axis-flip-in-predict-watch.md` の 1 本）と `docs/qa/` の 2 本（`QA-axis-lock-601.md` /
 `QA-roi-gate-calibration-571.md`）はどの `sources` からも参照されていなくても鳴らない。
 
-**この文書自身は `doc_class` を持たない**（クラス定義そのものなので）。したがって ADR 0082 の
+**この文書自身は `doc_class` を持たない**（クラス定義そのものなので）。したがって ADR 0083 の
 写しは `scripts/mdq search --tags D..` の絞り込みからは引けない——運用規約として探すときは
 [README.md](README.md) の「昇格・更新の運用」と「機械検査できない」節を入口にする。
 
@@ -295,7 +295,7 @@ specifications の `sources` の和集合に含まれないものを error に�
 （塞いだ「`sources` から行を消す」より安い）。一律必須にしなかったのは、既存の出典に
 `ADR 0001` のような素のテキスト表記と外部 URL のみの行が実在するため。
 
-### なぜ error か / なぜ例外を文書側に置くか（ADR 0082 の理由と却下案）
+### なぜ error か / なぜ例外を文書側に置くか（ADR 0083 の理由と却下案）
 
 - **error にする理由**: #580 が stale を warning → error に昇格させたのは「warning のままだと
   写した量に比例して追従漏れが静かに溜まる」を実測したため。同じ検査系に warning を混ぜると
