@@ -21,7 +21,7 @@ paddock の文書は HVE（dahatake/HypervelocityEngineering, MIT）の蒸留モ
   ときは、その文書の `sources` にある ADR を別文書へ移すか例外表に登録する**（同じ PR で）。
 - **読む入口は knowledge**。ADR の決定・理由・却下案・影響は knowledge に**全部写す**。重複を許す
   代わりに、`sources` の更新に蒸留が追従しているかは機械検査で担保する（人手の規律に委ねない）。
-  **写しは一巡済み**: 棄却された ADR は
+  **写しは一巡済み（#588・例外は `doc-classes.md` の `adr-orphan-exceptions` 表が正）**: 棄却された ADR は
   [docs/knowledge/product-goals.md](docs/knowledge/product-goals.md) が索引し、採用側はいずれかの
   knowledge / specifications が `sources` で参照している。**「全 ADR がどこかの `sources` に居る」は
   機械検査になった**（ADR 0083。例外は `doc-classes.md` の `adr-orphan-exceptions` 表が正）ので、
