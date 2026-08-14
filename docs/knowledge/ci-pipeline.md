@@ -9,7 +9,7 @@ sources:
   - docs/original-docs/0081-pin-only-diff-is-not-content-change.md
   - docs/original-docs/0082-swagger-ui-vendored.md
   - .github/workflows/ci.yml
-distilled_from_sha: "9640b41"
+distilled_from_sha: "e5543ca"
 updated: "2026-08-13"
 ---
 
