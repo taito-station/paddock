@@ -3697,16 +3697,20 @@ def test_rename_inside_merge_is_treated_as_content_change() -> None:
         run_git(repo, "mv", FIRST_ADR, renamed)  # 内容は変えない
         merge = commit_all(repo, "merge with rename")
         write_doc(repo, "docs/knowledge/a.md", ["D19"], [renamed], first_parent)
-        write_registry(repo, first_parent)
+        # **レジストリの sources もリネーム後へ追従させる。** 既定のままだと消えたパスを
+        # 指して「sources のパスが実在しない」が必ず出るので、`code == 1` が挙動によらず
+        # 常に成立し、下の assert のメッセージが一度も表示されない（4 巡目レビューで実測）。
+        write_registry(repo, first_parent, sources=[renamed])
         code, out = check(repo)
-        assert code == 1, (
-            "現状はリネーム免除が効かず STALE になるはず"
-            "（path_status を第 1 親比較〈--first-parent / -m〉へ変えていないか。"
-            "その場合リネームが R100 に見えて免除が効くが、代わりに片親を採るマージが"
-            "偽 STALE になる——既知の限界が直ったのではなく別の穴が開いている）:\n"
+        regressed = (
+            "マージ内リネームが STALE にならなかった。**`path_status` を第 1 親比較"
+            "（`--first-parent` / `-m`）へ変えていないか。** その場合リネームが `R100` に見えて"
+            "免除が効き **STALE が消える＝fail-open**（実測。片側だけの変更で偽 STALE は出ない）。"
+            "既知の限界が直った合図ではないので、このテストを反転させてはいけない:\n"
             f"{out}"
         )
-        assert "STALE" in out and merge[:7] in out, out
+        assert code == 1, regressed
+        assert "STALE" in out and merge[:7] in out, regressed
     finally:
         shutil.rmtree(repo)
 
