@@ -57,7 +57,17 @@ evil merge は現に起きている——例えば `8ec61a18`（#613 の main �
    親側の変更が STALE を出してしまい、テストが何も識別しない（実際に一度そう書き、
    `path_status` がマージで `(None, None)` を返す変異を注入しても緑のままだった）。
    対照群として `test_pin_only_merge_is_not_stale` を置き、exit 1 が「マージだから」ではなく
-   「内容が変わったから」であることを分離する。
+   「内容が変わったから」であることを分離する。**対照群は解決に第 3 の hex を書く**——
+   片親の hex をそのまま採ると対象パスについてその親と TREESAME になり、`git log` が
+   マージを列挙せず `path_status` も免除分岐も一度も呼ばれない空テストになる。
+
+   **壊し方は 2 種類あり、落ちるテストが違う**（実測。混同すると誤った安心を生む）:
+
+   | 変更 | 出力 | 落ちるテスト |
+   |---|---|---|
+   | `git diff-tree`（`-c` 無し）/ `--diff-merges=off` | **マージが無出力** | `test_evil_merge_is_detected_as_content_change` |
+   | `--first-parent` / `-m`（`git show` 側） | 第 1 親との差分が出る（**無出力ではない**） | `test_rename_inside_merge_is_treated_as_content_change` |
+   | `--first-parent`（`git log` 側） | — | `test_merge_taking_one_side_is_attributed_to_ancestor` |
 3. **マージ内リネームの偽 STALE（実測 C）は塞がず記録する。** combined diff はリネームを
    `RR` として出す（`R100` ではない）ので免除分岐に当たらず、リネーム元も取れない。
    `test_rename_inside_merge_is_treated_as_content_change` で**現状の挙動として** pin する。
@@ -102,8 +112,11 @@ evil merge は現に起きている——例えば `8ec61a18`（#613 の main �
   **挙動は一切変えていない。**
 - **不変**: 検査項目・severity・`--warn-only` の扱い・`scripts/bump-distilled-sha.py` が
   パースする STALE 行の文言。
-- **運用**: `path_status` の `git show` 呼び出しにフラグを足すときは、上記の契約テストが
-  落ちないかを見る。落ちるなら stale 検査に穴が開いている。
+- **運用**: `path_status` の `git show` 呼び出しにフラグを足すときは、決定 2 の表で
+  **どのテストが落ちるはずか**を先に確かめる。`test_evil_merge_...` が落ちたなら穴が開いており、
+  `test_rename_inside_merge_...` が落ちたなら「既知の偽陽性がたまたま消えた」ように見えるが
+  実際には対象集合が第 1 親比較へ変わって別の偽 STALE が生まれている——**反転させてよい合図
+  ではない**。
 - 関連: ADR 0081（例外 1d と `ScanAborted` の error 昇格）/ ADR 0073（機械検査の導入）/
   ADR 0083（`sources` の網羅性検査）/ #612 / #615。
 

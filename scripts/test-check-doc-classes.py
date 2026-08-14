@@ -3487,6 +3487,7 @@ def git_allow_fail(repo: Path, *args: str) -> "subprocess.CompletedProcess[str]"
 
 
 PIN_TOOLCHAIN_RIVAL = "f" * 40
+PIN_TOOLCHAIN_THIRD = "1" * 40
 
 
 def test_evil_merge_is_detected_as_content_change() -> None:
@@ -3533,10 +3534,16 @@ def test_evil_merge_is_detected_as_content_change() -> None:
 
 
 def test_pin_only_merge_is_not_stale() -> None:
-    """上のテストの対照群。マージの解決が**免除対象のまま**なら STALE にならない。
+    """上のテストの対照群。マージ自身が内容を変えても、それが**免除対象**なら STALE にならない。
 
     これが無いと `test_evil_merge_is_detected_as_content_change` の exit 1 が
     「マージだから」なのか「内容が変わったから」なのか区別できない。
+
+    **解決に第 3 の hex を書くのが要点。** 片親の hex をそのまま採ると対象パスについて
+    その親と TREESAME になり、`git log` がマージを列挙しないので `path_status` も
+    免除分岐も**一度も呼ばれない**——「マージが免除された」ではなく「マージが最初から
+    見えない」ことを確かめるだけの空テストになる（1 巡目レビューで実測・指摘された）。
+    第 3 の hex なら全親と異なるのでマージが走査に載り、そのうえで免除が効くことを見られる。
     """
     repo = new_repo()
     try:
@@ -3548,9 +3555,17 @@ def test_pin_only_merge_is_not_stale() -> None:
         run_git(repo, "checkout", "-q", base)
         write_workflow(repo, toolchain=PIN_TOOLCHAIN_RIVAL)
         commit_all(repo, "base: ピン更新のみ")
-        git_allow_fail(repo, "merge", "side")
-        write_workflow(repo, toolchain=PIN_TOOLCHAIN_NEW)  # 片側の hex を採るだけ
-        commit_all(repo, "merge: ピンを片側に寄せただけ")
+
+        conflicted = git_allow_fail(repo, "merge", "side")
+        assert conflicted.returncode != 0, "前提: 同じ行を両側で変えたのでコンフリクトする"
+        # どちらの親とも違う hex で解決する＝マージ自身が内容を変えるが、免除対象のまま。
+        write_workflow(repo, toolchain=PIN_TOOLCHAIN_THIRD)
+        merge = commit_all(repo, "merge: 第 3 の hex で解決（ピン更新のみ）")
+        assert len(run_git(repo, "rev-parse", f"{merge}^@").split()) == 2, "前提: 2 親のマージ"
+        assert merge[:7] in run_git(repo, "log", "--format=%h", "--", WORKFLOW_REL), (
+            "前提: マージが走査に載っていること（載らないと免除分岐を一度も通らない）"
+        )
+
         code, out = check(repo)
         assert code == 0, f"ピン更新だけのマージで STALE になった:\n{out}"
     finally:
@@ -3612,7 +3627,13 @@ def test_rename_inside_merge_is_treated_as_content_change() -> None:
         write_doc(repo, "docs/knowledge/a.md", ["D19"], [renamed], first_parent)
         write_registry(repo, first_parent)
         code, out = check(repo)
-        assert code == 1, f"現状はリネーム免除が効かず STALE になるはず:\n{out}"
+        assert code == 1, (
+            "現状はリネーム免除が効かず STALE になるはず"
+            "（path_status を第 1 親比較〈--first-parent / -m〉へ変えていないか。"
+            "その場合リネームが R100 に見えて免除が効くが、代わりに片親を採るマージが"
+            "偽 STALE になる——既知の限界が直ったのではなく別の穴が開いている）:\n"
+            f"{out}"
+        )
         assert "STALE" in out and merge[:7] in out, out
     finally:
         shutil.rmtree(repo)

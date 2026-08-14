@@ -351,9 +351,16 @@ def path_status(sha: str, path: str) -> "tuple[str | None, str | None]":
 
     **マージに対する `git show` の既定＝combined diff（`--cc`）は契約**（ADR 0084）。
     `--cc` は「**全ての親と異なる**パス」を列挙するので、evil merge（マージ自身だけが内容を
-    変える形）がここで拾える。`--first-parent` を足したり `git diff-tree`（`-c` 無し）へ
-    置き換えるとマージが無出力になり、stale 検査に恒久的な穴が開く——
-    `test_evil_merge_is_detected_as_content_change` がその退行で落ちる。
+    変える形）がここで拾える。壊し方は 2 種類あり、**落ちるテストが違う**（実測）:
+
+      - **マージが無出力になる変更**（`git diff-tree`（`-c` 無し）/ `--diff-merges=off`）
+        → stale 検査に恒久的な穴が開く。
+        `test_evil_merge_is_detected_as_content_change` が落ちる。
+      - **第 1 親比較へ変える変更**（`--first-parent` / `-m`）→ **無出力にはならない**
+        （第 1 親との差分が出るので evil merge は依然見える）。壊れるのは対象集合の方で、
+        片親を採るマージまで「内容変更」に化けて偽 STALE を量産する。
+        `git show` 側なら `test_rename_inside_merge_is_treated_as_content_change`、
+        `git log` 側なら `test_merge_taking_one_side_is_attributed_to_ancestor` が落ちる。
 
     **既知の限界**: combined diff はリネームを `RR` として出し `R100` にならないので、
     **マージ内での純粋なリネームは免除が効かず偽の STALE になる**（`-M100%` はマージに

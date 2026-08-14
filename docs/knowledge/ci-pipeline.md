@@ -181,11 +181,20 @@ universal newlines が `\r\n` を `\n` に潰し、**CRLF 変換とピン更新�
     evil merge が `MM`、octopus（3 親）が `MMM` で検出できることも確認した。
   - evil merge は日常的に起きる。**PR ブランチが main を取り込んでコンフリクトを手で解消**すると、
     どちらの親にも無い内容がマージコミットに生まれる（`8ec61a18` が実例）。
-  - **この `--cc` 依存は契約**。`--first-parent` を足す・`git diff-tree`（`-c` 無し）へ置き換える、
-    といった変更で黙って失われるので、`test_evil_merge_is_detected_as_content_change` が
-    その退行で落ちるようにしてある（対照群は `test_pin_only_merge_is_not_stale`）。
-    **両親の変更を免除対象で挟む**のが要点で、そうしないとマージが不可視になっても親側の変更が
-    STALE を出してテストが何も識別しない。
+  - **この `--cc` 依存は契約**。壊し方は 2 種類あり、**落ちるテストが違う**（実測）:
+    - **マージが無出力になる変更**（`git diff-tree`（`-c` 無し）/ `--diff-merges=off`）
+      → stale 検査に恒久的な穴が開く。`test_evil_merge_is_detected_as_content_change` が落ちる。
+    - **第 1 親比較へ変える変更**（`--first-parent` / `-m`）→ **無出力にはならない**
+      （第 1 親との差分が出るので evil merge は依然見える）。壊れるのは対象集合の方で、
+      片親を採るマージまで「内容変更」に化けて偽 STALE を量産する。`git show` 側なら
+      `test_rename_inside_merge_is_treated_as_content_change`、`git log` 側なら
+      `test_merge_taking_one_side_is_attributed_to_ancestor` が落ちる。
+  - **テストの組み立ての要点**（ここを外すと何も識別しない空テストになる）:
+    - **両親の変更を免除対象（ピン更新のみ）で挟む**。そうしないとマージが不可視になっても
+      親側の変更が STALE を出し、exit code が変わらない。
+    - 対照群 `test_pin_only_merge_is_not_stale` は**解決に第 3 の hex を書く**。片親の hex を
+      そのまま採ると対象パスについてその親と TREESAME になり、`git log` がマージを列挙せず
+      `path_status` も免除分岐も一度も呼ばれない。
 - **将来 dependabot の auto-merge を入れるなら、ピン差分の監査を別に持つ必要がある。** この例外は
   `adr` ジョブから「`ci.yml` が変わった」という自動シグナルを外す。owner/repo が同一でも、hex が
   同一リポジトリの未マージ PR の SHA を指せば任意コードが走る既知の攻撃面がある。現状
