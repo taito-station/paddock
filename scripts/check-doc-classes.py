@@ -469,17 +469,24 @@ def scan_last_content_change(
         for sha in shas:
             status, rename_src = path_status(sha, current)
             if status is None:
-                # **防御的な分岐で、実際には到達しない**（ADR 0084 で計測。実リポジトリの
-                # 全 `sources`・全履歴でも 183 ケースのテストでも 0 回）。`git log` の既定の
-                # 単純化は「辿る親に対して当該パスを変えたコミット」しか返さず、`git show` の
-                # `--cc` は「全親と異なるパス」を必ず出すので、両者が食い違わないため。
-                #   - 片親と同じ内容になったマージは `git log` が**そもそも列挙しない**
-                #     （TREESAME な親を辿る）。ここへは来ない。
-                #   - evil merge（全親と異なる）は `--cc` が列挙するので status が付く。
-                #     ADR 0081 が「既知の限界」として記録した「恒久的に不可視」は誤りだった。
-                # 到達しないと分かっていても落とさないのは、`git log` 側のオプションを足すと
-                # （`--full-history` 等）前提が崩れるため。**この分岐を「内容変更」に変える
-                # 変異はどのテストでも落ちない**——テストで守れない代わりに、ここに理由を書く。
+                # `git log` は当該パスを列挙したが `git show --name-status` の**終点**が
+                # 一致しなかった、という状態。**マージとは関係が無い**（ADR 0084 で実測）。
+                # 起きるのは次の 2 つで、どちらも非マージのコミットで起きる:
+                #   - **リネーム元としてしか現れないコミット**。`R100 <path> <新パス>` の
+                #     終点は新パスなので `parts[-1] == path` が外れる。`git log -- <path>` は
+                #     このコミットを列挙するので、ここへ来る。
+                #   - **`sources` が非正規形**（`./docs/...`）のとき。pathspec は正規化して
+                #     当たるが `git show` は正規形で出力するので終点一致が外れる
+                #     （こちらは検査 4 が別に error にするので production では踏まない）。
+                #
+                # **この `continue` は load-bearing。** `return sha` に変えると、上の純粋
+                # リネーム地点を「内容変更」と誤認して**偽の STALE** を出す（正しい答えは
+                # その前の実変更コミット）。`test_rename_source_commit_is_skipped_not_attributed`
+                # が pin していて、`return sha` への変異で落ちる。
+                #
+                # なお **evil merge はここへ来ない**——全親と異なるので `--cc` が列挙し、
+                # status が付く。ADR 0081 が「既知の限界」として記録した「恒久的に不可視」は
+                # 誤りだった（ADR 0084）。
                 continue
             if status == "R100":
                 if not rename_src:

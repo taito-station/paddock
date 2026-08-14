@@ -3601,6 +3601,71 @@ def test_merge_taking_one_side_is_attributed_to_ancestor() -> None:
         shutil.rmtree(repo)
 
 
+def test_rename_source_commit_is_skipped_not_attributed() -> None:
+    """パスを**リネーム元としてしか含まない**コミットを「内容変更」と誤認しない。
+
+    `git log -- <path>` は純粋リネームのコミットを列挙するが、`git show --name-status` の
+    出力は `R100 <path> <新パス>` で**終点が新パス**なので `path_status` の終点一致
+    （`parts[-1] == path`）が外れて `(None, None)` になる。`scan_last_content_change` は
+    そこを `continue` で飛ばす——**この `continue` は load-bearing で、`return sha` に
+    変えると偽の STALE が出る**（ADR 0084 実測 4）。
+
+    構成（**両側と解決を免除対象にするのが要点**。そうしないと走査がリネーム地点へ届かない）:
+    `c1` が frontmatter 付きの一次資料 `src` を作る / mainline が `src` を別名へ**純粋リネーム** /
+    side は `src` の frontmatter だけ動かす（例外 1b で免除）/ マージは side を第 1 親にして
+    `src` を残し frontmatter だけ動かす（免除）。走査は マージ → side → **mainline のリネーム
+    （ここで status is None）** → `c1` と進み、正しい答えは `c1`。
+    """
+    repo = new_repo()
+    try:
+        baseline(repo)
+        base = run_git(repo, "rev-parse", "--abbrev-ref", "HEAD")
+        src = "docs/original-docs/0005-with-frontmatter.md"
+        moved = "docs/original-docs/0009-moved.md"
+
+        def write_src(updated: str) -> None:
+            (repo / src).parent.mkdir(parents=True, exist_ok=True)
+            (repo / src).write_text(
+                f'---\nstatus: Confirmed\nkind: knowledge\nupdated: "{updated}"\n---\n\n'
+                "# 0005. 一次資料\n\n本文（この巡では一切変えない）。\n",
+                encoding="utf-8",
+            )
+
+        write_src("2026-01-01")
+        c1 = commit_all(repo, "c1: 一次資料を作る")
+
+        run_git(repo, "checkout", "-q", "-b", "side")
+        write_src("2026-01-02")  # frontmatter だけ＝免除対象
+        commit_all(repo, "side: updated だけ動かす")
+
+        run_git(repo, "checkout", "-q", base)
+        run_git(repo, "mv", src, moved)
+        commit_all(repo, "base: 純粋リネーム")
+
+        # **side を第 1 親にする**（base を第 1 親にすると、その木に src が無いので
+        # is_metadata_only_change が比較できず免除が効かない）。
+        run_git(repo, "checkout", "-q", "side")
+        git_allow_fail(repo, "merge", "--no-commit", base)
+        run_git(repo, "rm", "-q", "-f", "--ignore-unmatch", moved)
+        write_src("2026-01-03")  # 解決も frontmatter だけ＝免除対象
+        merge = commit_all(repo, "merge: 元の名前を残す")
+        assert len(run_git(repo, "rev-parse", f"{merge}^@").split()) == 2, "前提: 2 親のマージ"
+
+        listed = run_git(repo, "log", "--format=%H", "--", src).split()
+        assert len(listed) >= 4, f"前提: リネームコミットまで列挙されること: {listed}"
+
+        write_doc(repo, "docs/knowledge/a.md", ["D19"], [FIRST_ADR, src], c1)
+        write_registry(repo, c1)
+        code, out = check(repo)
+        # c1 が答えなら「distilled の祖先」なので STALE にならない。
+        assert code == 0, (
+            "リネーム元としてしか現れないコミットを内容変更と誤認した"
+            f"（continue を return sha にしていないか）:\n{out}"
+        )
+    finally:
+        shutil.rmtree(repo)
+
+
 def test_rename_inside_merge_is_treated_as_content_change() -> None:
     """マージ内での純粋なリネームは R100 免除が効かず、偽の STALE になる（既知の限界）。
 
