@@ -358,9 +358,12 @@ def path_status(sha: str, path: str) -> "tuple[str | None, str | None]":
         `test_evil_merge_is_detected_as_content_change` が落ちる。
       - **第 1 親比較へ変える変更**（`--first-parent` / `-m`）→ **無出力にはならない**
         （第 1 親との差分が出るので evil merge は依然見える）。壊れるのは対象集合の方で、
-        片親を採るマージまで「内容変更」に化けて偽 STALE を量産する。
-        `git show` 側なら `test_rename_inside_merge_is_treated_as_content_change`、
-        `git log` 側なら `test_merge_taking_one_side_is_attributed_to_ancestor` が落ちる。
+        **片側だけ変えるとどちらも fail-open**（STALE が消える）になる（実測）:
+          * `git show` 側だけ → マージ内リネームが `R100` に見えて免除が効き、STALE が消える。
+            `test_rename_inside_merge_is_treated_as_content_change` が落ちる。
+          * `git log` 側だけ → 片親を採るマージの実変更コミットへ辿り着けず STALE が消える。
+            `test_merge_taking_one_side_is_attributed_to_ancestor` が落ちる。
+          * **偽 STALE が出るのは両方を同時に変えたときだけ**（マージ自身に帰属する）。
 
     **既知の限界**: combined diff はリネームを `RR` として出し `R100` にならないので、
     **マージ内での純粋なリネームは免除が効かず偽の STALE になる**（`-M100%` はマージに

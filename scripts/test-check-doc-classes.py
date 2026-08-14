@@ -3618,7 +3618,7 @@ def test_rename_source_commit_is_skipped_not_attributed() -> None:
     """
     repo = new_repo()
     try:
-        baseline(repo)
+        pre = baseline(repo)  # c1 の 1 つ前。ここに distill を固定して「答えが c1」を正で見る
         base = run_git(repo, "rev-parse", "--abbrev-ref", "HEAD")
         src = "docs/original-docs/0005-with-frontmatter.md"
         moved = "docs/original-docs/0009-moved.md"
@@ -3654,13 +3654,20 @@ def test_rename_source_commit_is_skipped_not_attributed() -> None:
         listed = run_git(repo, "log", "--format=%H", "--", src).split()
         assert len(listed) >= 4, f"前提: リネームコミットまで列挙されること: {listed}"
 
-        write_doc(repo, "docs/knowledge/a.md", ["D19"], [FIRST_ADR, src], c1)
-        write_registry(repo, c1)
+        # **distill を c1 の手前に置き、「答えが c1」を正の assert で見る。**
+        # `code == 0`（＝c1 は祖先なので STALE にならない）だけで見ると、
+        # `continue` を `return None` に変える **fail-open 変異**（stale 判定が丸ごと
+        # スキップされて warning に落ちる）と区別が付かない——実測で 184 ケース全通過した。
+        write_doc(repo, "docs/knowledge/a.md", ["D19"], [FIRST_ADR, src], pre)
+        write_registry(repo, pre)
         code, out = check(repo)
-        # c1 が答えなら「distilled の祖先」なので STALE にならない。
-        assert code == 0, (
-            "リネーム元としてしか現れないコミットを内容変更と誤認した"
-            f"（continue を return sha にしていないか）:\n{out}"
+        assert code == 1, f"c1 が答えなら distill(pre) より後なので STALE になるはず:\n{out}"
+        assert c1[:7] in out, (
+            "答えが c1 になっていない（continue を return sha にしていないか。"
+            f"その場合リネーム元としてしか現れないコミットに帰属する）:\n{out}"
+        )
+        assert "履歴が無く" not in out, (
+            f"stale 判定が丸ごとスキップされている（continue を return None にしていないか）:\n{out}"
         )
     finally:
         shutil.rmtree(repo)

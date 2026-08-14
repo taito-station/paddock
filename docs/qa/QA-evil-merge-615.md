@@ -107,6 +107,35 @@
   比較対象を取れず免除が効かない）。
 - 反映先: ADR 0084 実測 4 / `scan_last_content_change` のコメント / `ci-pipeline.md`
 
+## Q4d: pin テストは fail-open 側も塞げているか（3 巡目レビューでの訂正）
+
+- 観測/根拠: Q4c で足した `test_rename_source_commit_is_skipped_not_attributed` は
+  `assert code == 0` しか見ておらず、**`continue` → `return None` の fail-open 変異で
+  184 ケース全通過**した（実測）。「答えが c1 だった」と「stale 判定が丸ごとスキップされて
+  warning に落ちた」を区別できていなかった。同じファイルには
+  `assert "履歴が無く" not in out` という既存の慣行が 8 か所あった。
+  併せて、到達回数の記載（回帰テスト 1 回）が**この pin テストを足す前の値**のままだった
+  ——追加後は **2 回**（非正規形 fixture ＋ 新テストが意図的に踏む 1 回）。
+- 回答: **確定。distill を c1 の手前に置き、「答えが c1」を正の assert で見る形にした。**
+  `assert code == 1` ＋ `assert c1[:7] in out` ＋ `assert "履歴が無く" not in out` の 3 本で、
+  `return None` / `return sha` の**両方向**の変異を kill できることを実測で確認した。
+- 反映先: `test_rename_source_commit_is_skipped_not_attributed` / ADR 0084 実測 4 / `ci-pipeline.md`
+
+## Q4e: `--first-parent` は偽 STALE を量産するのか（3 巡目レビューでの訂正）
+
+- 観測/根拠: 1 巡目で「片側だけの変更は無出力にならず、対象集合が変わって**偽 STALE を量産**する」
+  と書いたが、実測では逆だった。`git show` 側だけ `--first-parent` → マージ内リネームが `R100` に
+  見えて免除が効き **STALE が消える**（exit 0）。`git log` 側だけ → 片親を採るマージの実変更
+  コミットへ辿り着けず **STALE が消える**（exit 0）。**偽 STALE が出るのは両方を同時に変えたときだけ。**
+  構造的にもそうなる——`git log` の既定の単純化は全親と異なるマージしか列挙せず、そのマージは
+  `--cc` でも列挙されるので、`git show` 側だけを第 1 親比較にしても STALE が増えることはない。
+- 回答: **確定。片側だけの変更は fail-open。** ADR 0084 の「却下した代替案」は元から
+  「**併用**して」と書いていたので正しく、誤っていたのは docstring と `ci-pipeline.md` の
+  機構説明、および影響節の運用指示の理由付け。3 か所を訂正した。
+  結論（「反転させてよい合図ではない」）は維持し、理由を「別の偽 STALE が生まれる」から
+  「片側だけでも fail-open 側に穴が開く」へ差し替えた。
+- 反映先: `path_status` docstring / `ci-pipeline.md` / ADR 0084 影響節
+
 ## Q5: ADR 0081 の誤りをどう扱うか
 
 - 観測/根拠: CLAUDE.md は「一度置いた ADR は改変しない——決定を変えるときは新しい ADR で

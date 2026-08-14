@@ -180,7 +180,8 @@ universal newlines が `\r\n` を `\n` に潰し、**CRLF 変換とピン更新�
   リネーム元としてしか現れないコミット（`R100 <path> <新パス>` の終点は新パス）と、
   `sources` が非正規形（`./docs/...`）のとき。**この `continue` は load-bearing で、
   `return sha` に変えると純粋リネーム地点を内容変更と誤認して偽の STALE を出す。**
-  到達回数の実測は実リポジトリ 0 回 / 回帰テスト 1 回（非正規形 fixture の副作用）。
+  到達回数の実測は実リポジトリ 0 回 / 回帰テスト **2 回**（非正規形 fixture の副作用 1 回 ＋
+  下記の pin テストが意図的に踏む 1 回。pin テストを足す前は 1 回だった）。
   当初これを pin するテストが無かったので
   `test_rename_source_commit_is_skipped_not_attributed` を足した。
   - 実測（main `d46ace4`）: `git log -- <path>` が列挙したマージ × `sources` パス **7 組すべて**を
@@ -193,9 +194,10 @@ universal newlines が `\r\n` を `\n` に潰し、**CRLF 変換とピン更新�
       → stale 検査に恒久的な穴が開く。`test_evil_merge_is_detected_as_content_change` が落ちる。
     - **第 1 親比較へ変える変更**（`--first-parent` / `-m`）→ **無出力にはならない**
       （第 1 親との差分が出るので evil merge は依然見える）。壊れるのは対象集合の方で、
-      片親を採るマージまで「内容変更」に化けて偽 STALE を量産する。`git show` 側なら
-      `test_rename_inside_merge_is_treated_as_content_change`、`git log` 側なら
-      `test_merge_taking_one_side_is_attributed_to_ancestor` が落ちる。
+      **片側だけ変えるとどちらも fail-open**（STALE が消える。実測）——`git show` 側だけなら
+      マージ内リネームが `R100` に見えて免除が効き `test_rename_inside_merge_...` が、
+      `git log` 側だけなら片親を採るマージの実変更コミットへ辿り着けず
+      `test_merge_taking_one_side_...` が落ちる。**偽 STALE が出るのは両方を同時に変えたときだけ。**
   - **テストの組み立ての要点**（ここを外すと何も識別しない空テストになる）:
     - **両親の変更を免除対象（ピン更新のみ）で挟む**。そうしないとマージが不可視になっても
       親側の変更が STALE を出し、exit code が変わらない。
