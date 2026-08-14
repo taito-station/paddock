@@ -14,7 +14,7 @@ sources:
   - docs/original-docs/0060-betting-axis-lock-preclose-topup.md
   - docs/api/openapi.json
 distilled_from_sha: "b0c270b"
-updated: "2026-08-11"
+updated: "2026-08-14"
 ---
 
 # REST API（read 基盤）: 設計仕様
@@ -280,7 +280,7 @@ API の仕様乖離を防ぐため、OpenAPI はコードから生成する（sp
 - **スキーマ注釈**: `schema/` の request/response 型に `#[derive(ToSchema)]`、handler に `#[utoipa::path(...)]` を付け、`#[derive(OpenApi)]` の `ApiDoc` に paths/components を集約する。
 - **配信**: api-server が
   - `GET /api-docs/openapi.json` … OpenAPI ドキュメント（JSON）
-  - `GET /docs` … Swagger UI
+  - `GET /docs/` … Swagger UI（末尾スラッシュが要る。`/docs` は 404）
   をマウントする。
 - **リポジトリへのコミットと同期チェック**: `ApiDoc::openapi()` をシリアライズした `docs/api/openapi.json`（配置先は新設。`docs/` 直下ではなくサブディレクトリ）をコミットする。`api-server` の統合テスト（または `cargo test`）に「生成結果が `docs/api/openapi.json` と一致する」スナップショットテストを置き、差分があれば失敗させる（仕様の更新漏れを CI で検出）。
   - **生成 JSON の安定化**: 偽陽性 fail を避けるため、serde の構造体定義順を正本とし `serde_json::to_string_pretty` の整形のみで安定化する（`preserve_order` 等のフィールド順入れ替えには依存しない）。utoipa のバージョン更新で生成差が出た場合は再生成して差分をレビューする。
@@ -305,7 +305,7 @@ API の仕様乖離を防ぐため、OpenAPI はコードから生成する（sp
 
 - 設定: DB 接続は既存の共有 crate `src/infrastructure/config`（`paddock-config`）の `Config { paddock_db_url, .. }` / `from_env()` を**再利用**する（規約 `architecture.md` どおり config は Infrastructure 層に集約し、app ローカルで `PADDOCK_DB_URL` を再実装しない）。ログ設定は同 crate の `paddock_log` を流用する。bind アドレス/ポート（`SERVER_*`）は `paddock-config` に無いため同 crate を拡張して足す。
 - `setup.rs`: ロガー初期化 → Postgres プール（`PgPool`, sqlx）→ `PostgresRepository`（Repository 実装）→ `Interactor<R,P,F>` 構築（predict/analyze と同じ具象 P/F）。
-- `app.rs`: `configure_routes<R,P,F>` で rest-controller の各 router を `/api` 配下にマウント。**認証ミドルウェアの差し込み口を 1 箇所**用意（現状 no-op：素通し。将来ここに JWT 検証を挿す）。OpenAPI（`/docs`・`/api-docs/openapi.json`）もここでマウント。
+- `app.rs`: `configure_routes<R,P,F>` で rest-controller の各 router を `/api` 配下にマウント。**認証ミドルウェアの差し込み口を 1 箇所**用意（現状 no-op：素通し。将来ここに JWT 検証を挿す）。OpenAPI（`/docs/`・`/api-docs/openapi.json`）もここでマウント。
 - `bin.rs`: エントリポイント（`HttpServer` 起動）。
 
 ## マルチユーザー化への布石（今は実装しない）
