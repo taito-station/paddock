@@ -348,6 +348,27 @@ def path_status(sha: str, path: str) -> "tuple[str | None, str | None]":
 
     **失敗を (None, None) に混ぜない。** それは「このコミットは触っていない」と同義で、
     走査を続けると検査が黙ってスキップされる。
+
+    **マージに対する `git show` の既定＝combined diff（`--cc`）は契約**（ADR 0084）。
+    `--cc` は「**全ての親と異なる**パス」を列挙するので、evil merge（マージ自身だけが内容を
+    変える形）がここで拾える。壊し方は 2 種類あり、**落ちるテストが違う**（実測）:
+
+      - **マージが無出力になる変更**（`git diff-tree`（`-c` 無し）/ `--diff-merges=off`）
+        → stale 検査に恒久的な穴が開く。
+        `test_evil_merge_is_detected_as_content_change` が落ちる。
+      - **第 1 親比較へ変える変更**（`--first-parent` / `-m`）→ **無出力にはならない**
+        （第 1 親との差分が出るので evil merge は依然見える）。壊れるのは対象集合の方で、
+        **片側だけ変えるとどちらも fail-open**（STALE が消える）になる（実測）:
+          * `git show` 側だけ → マージ内リネームが `R100` に見えて免除が効き、STALE が消える。
+            `test_rename_inside_merge_is_treated_as_content_change` が落ちる。
+          * `git log` 側だけ → 片親を採るマージの実変更コミットへ辿り着けず STALE が消える。
+            `test_merge_taking_one_side_is_attributed_to_ancestor` が落ちる。
+          * **偽 STALE が出るのは両方を同時に変えたときだけ**（マージ自身に帰属する）。
+
+    **既知の限界**: combined diff はリネームを `RR` として出し `R100` にならないので、
+    **マージ内での純粋なリネームは免除が効かず偽の STALE になる**（`-M100%` はマージに
+    効かず、リネーム元も取れない）。fail-closed 側なので塞いでいない（ADR 0084 決定 3・
+    `test_rename_inside_merge_is_treated_as_content_change` が現状の挙動を pin している）。
     """
     proc = git(
         "-c", "core.quotePath=false", "show", "--format=", "--name-status", "-M100%", sha
@@ -451,11 +472,24 @@ def scan_last_content_change(
         for sha in shas:
             status, rename_src = path_status(sha, current)
             if status is None:
-                # そのコミットは current を（この名前では）触っていない。マージコミットは
-                # git show が既定で差分を出さないためここに来る。通常の変更は親側のコミットにも
-                # 現れ、それも log の対象なので飛ばして問題ない。**例外は evil merge**
-                # （マージコミット自身だけが内容を変える形）で、これは恒久的に不可視になる。
-                # 既存の限界で本 ADR の対象外（docs/knowledge/ci-pipeline.md に記録）。
+                # `git log` は当該パスを列挙したが `git show --name-status` の**終点**が
+                # 一致しなかった、という状態。**マージとは関係が無い**（ADR 0084 で実測）。
+                # 起きるのは次の 2 つで、どちらも非マージのコミットで起きる:
+                #   - **リネーム元としてしか現れないコミット**。`R100 <path> <新パス>` の
+                #     終点は新パスなので `parts[-1] == path` が外れる。`git log -- <path>` は
+                #     このコミットを列挙するので、ここへ来る。
+                #   - **`sources` が非正規形**（`./docs/...`）のとき。pathspec は正規化して
+                #     当たるが `git show` は正規形で出力するので終点一致が外れる
+                #     （こちらは検査 4 が別に error にするので production では踏まない）。
+                #
+                # **この `continue` は load-bearing。** `return sha` に変えると、上の純粋
+                # リネーム地点を「内容変更」と誤認して**偽の STALE** を出す（正しい答えは
+                # その前の実変更コミット）。`test_rename_source_commit_is_skipped_not_attributed`
+                # が pin していて、`return sha` への変異で落ちる。
+                #
+                # なお **evil merge はここへ来ない**——全親と異なるので `--cc` が列挙し、
+                # status が付く。ADR 0081 が「既知の限界」として記録した「恒久的に不可視」は
+                # 誤りだった（ADR 0084）。
                 continue
             if status == "R100":
                 if not rename_src:

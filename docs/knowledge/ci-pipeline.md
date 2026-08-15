@@ -8,9 +8,11 @@ sources:
   - docs/original-docs/0073-adr-into-original-docs-and-doc-classes.md
   - docs/original-docs/0081-pin-only-diff-is-not-content-change.md
   - docs/original-docs/0082-swagger-ui-vendored.md
+  - docs/original-docs/0084-evil-merge-is-visible-to-stale-check.md
+  - docs/qa/QA-evil-merge-615.md
   - .github/workflows/ci.yml
-distilled_from_sha: "e5543ca"
-updated: "2026-08-13"
+distilled_from_sha: "f144fe1"
+updated: "2026-08-14"
 ---
 
 # CI パイプラインの構成と設計意図（D21）
@@ -163,10 +165,45 @@ universal newlines が `\r\n` を `\n` に潰し、**CRLF 変換とピン更新�
 - 走査窓のページングは例外 1 / 1b にも効く代わりに、除外対象が長く続く履歴では `git log` の呼び出しが
   走査全体で最大 `max_pages`（25）回まで増える（＝最大 1000 コミット。現実の `ci.yml`＝46 コミットでは
   1〜2 ページで終わる）。
-- **既知の限界**（どちらも fail-closed 側なので実害はないが、調査の手間を省くために記録する）:
-  (1) マージコミット自身だけが内容を変える evil merge は `git show` が既定でマージの差分を出さない
-  ため恒久的に不可視、(2) CRLF で保存されたワークフローは行末の `\r` で正規表現が外れるので例外 1d が
-  一切効かない。
+- **既知の限界**（fail-closed 側なので実害はないが、調査の手間を省くために記録する）:
+  CRLF で保存されたワークフローは行末の `\r` で正規表現が外れるので例外 1d が一切効かない
+  （ADR 0081 の「既知の限界 (2)」）。
+  もう 1 つ、**マージコミット内での純粋なリネームは免除が効かず偽の STALE になる**——
+  combined diff はリネームを `RR` として出し `R100` にならないため（ADR 0084 決定 3）。
+- **evil merge は不可視ではない**（ADR 0084。ADR 0081 の「既知の限界 (1)」の訂正）。
+  `git show` はマージに対し**既定で combined diff（`--cc`）**を出し、`--cc` は
+  「**全ての親と異なる**パス」を列挙する——これは evil merge（マージ自身だけが内容を変える形）の
+  定義そのもの。片親と同じ内容になったマージは `--cc` が列挙しないが、**`git log` の既定の
+  単純化もそのマージを列挙しない**（TREESAME な親を辿る）ので、走査がそこへ来ることが無い。
+- **`status is None` の分岐はマージとは無関係**（ADR 0084 実測 4）。原因は `path_status` が
+  name-status の**終点一致**しか見ないことで、**非マージのコミットで起きる**——
+  リネーム元としてしか現れないコミット（`R100 <path> <新パス>` の終点は新パス）と、
+  `sources` が非正規形（`./docs/...`）のとき。**この `continue` は load-bearing で、
+  `return sha` に変えると純粋リネーム地点を内容変更と誤認して偽の STALE を出す。**
+  到達回数の実測は実リポジトリ 0 回 / 回帰テスト **2 回**（非正規形 fixture の副作用 1 回 ＋
+  下記の pin テストが意図的に踏む 1 回。pin テストを足す前は 1 回だった）。
+  当初これを pin するテストが無かったので
+  `test_rename_source_commit_is_skipped_not_attributed` を足した。
+  - 実測（main `d46ace4`）: `git log -- <path>` が列挙したマージ × `sources` パス **7 組すべて**を
+    `path_status` が検出（`MM` / `MA` / `AA`）、**不可視 0 組**。合成 fixture では 2 親の
+    evil merge が `MM`、octopus（3 親）が `MMM` で検出できることも確認した。
+  - evil merge は日常的に起きる。**PR ブランチが main を取り込んでコンフリクトを手で解消**すると、
+    どちらの親にも無い内容がマージコミットに生まれる（`8ec61a18` が実例）。
+  - **この `--cc` 依存は契約**。壊し方は 2 種類あり、**落ちるテストが違う**（実測）:
+    - **マージが無出力になる変更**（`git diff-tree`（`-c` 無し）/ `--diff-merges=off`）
+      → stale 検査に恒久的な穴が開く。`test_evil_merge_is_detected_as_content_change` が落ちる。
+    - **第 1 親比較へ変える変更**（`--first-parent` / `-m`）→ **無出力にはならない**
+      （第 1 親との差分が出るので evil merge は依然見える）。壊れるのは対象集合の方で、
+      **片側だけ変えるとどちらも fail-open**（STALE が消える。実測）——`git show` 側だけなら
+      マージ内リネームが `R100` に見えて免除が効き `test_rename_inside_merge_...` が、
+      `git log` 側だけなら片親を採るマージの実変更コミットへ辿り着けず
+      `test_merge_taking_one_side_...` が落ちる。**偽 STALE が出るのは両方を同時に変えたときだけ。**
+  - **テストの組み立ての要点**（ここを外すと何も識別しない空テストになる）:
+    - **両親の変更を免除対象（ピン更新のみ）で挟む**。そうしないとマージが不可視になっても
+      親側の変更が STALE を出し、exit code が変わらない。
+    - 対照群 `test_pin_only_merge_is_not_stale` は**解決に第 3 の hex を書く**。片親の hex を
+      そのまま採ると対象パスについてその親と TREESAME になり、`git log` がマージを列挙せず
+      `path_status` も免除分岐も一度も呼ばれない。
 - **将来 dependabot の auto-merge を入れるなら、ピン差分の監査を別に持つ必要がある。** この例外は
   `adr` ジョブから「`ci.yml` が変わった」という自動シグナルを外す。owner/repo が同一でも、hex が
   同一リポジトリの未マージ PR の SHA を指せば任意コードが走る既知の攻撃面がある。現状
