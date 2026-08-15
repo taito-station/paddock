@@ -456,8 +456,9 @@ curl -o /dev/null -w "%{http_code}\n" http://127.0.0.1:5173/
 
 - dev server は IPv4 ループバック（`127.0.0.1`）に bind する。bind 先は `PADDOCK_DEV_HOST` で
   変更できる（既定 `127.0.0.1`。LAN へ公開したいときは `true` / `0.0.0.0`）。
-- API は `/api/*`（races / board / predictions / analyze / live / sessions 等）。`/docs` に Swagger UI、
-  `/api-docs/openapi.json` に OpenAPI ドキュメントを配信する。
+- API は `/api/*`（races / board / predictions / analyze / live / sessions 等）。`/docs/` に Swagger UI、
+  `/api-docs/openapi.json` に OpenAPI ドキュメントを配信する（**末尾スラッシュが要る**。`/docs` は 404 で、
+  リダイレクトを足すかは #619 で見直す）。
 - OpenAPI は utoipa のコードファーストで、スナップショットを `docs/api/openapi.json` に保持する。
   web の TypeScript 型はここから `npm run gen:api` で生成する。
 - dev では Vite が `/api` を API サーバへ proxy する（同一オリジン化で CORS 不要）。proxy 先は

@@ -4,11 +4,12 @@
 ADR [0082](../../docs/original-docs/0082-swagger-ui-vendored.md) / knowledge
 [ci-pipeline.md](../../docs/knowledge/ci-pipeline.md)。
 
-**この 2 ケースの目的は「ビルド時ダウンロードをやめても `/docs` が従来どおり動く」ことの確認**。
-埋め込み版は従来のダウンロード版と**同一**（`utoipa-swagger-ui-vendored` 0.1.2 が同梱する
-`res/v5.17.14.zip` ＝既定のダウンロード先と同じ v5.17.14 タグ）なので資産が変わる理屈は無いが、
-**バイナリが起動して 200 を返すだけでは「資産が壊れていない」の証明にならない**ので、描画と
-エンドポイント一覧を目視する（埋め込みの取り込みに失敗すれば空の UI やスクリプトエラーになる）。
+**HTTP 層は機械検査が見る**（`src/apps/api-server/tests/docs_ui.rs`・#616）。`index.html` /
+`swagger-initializer.js` / UI 本体 JS / `openapi.json` の配信と本文、および未知の資産が 404 になること
+までは CI で毎回固定されるので、**手動で見直す必要はない**。
+
+**このケースに残る役割は、機械検査では見られない「JS を実行した後」だけ**——資産が配信されていても
+UI が組み上がるとは限らないため、描画結果とブラウザコンソールを目視する。
 
 検証環境は Playwright MCP 不在のため **headless Chrome + puppeteer-core** で代替する
 （`reference_browser_test_fallback`）。api-server は golden DB を read-only 参照でソースから起動し、
@@ -21,15 +22,10 @@ ADR [0082](../../docs/original-docs/0082-swagger-ui-vendored.md) / knowledge
 |------|------|
 | 前提 | `cargo run -p api-server`（`PADDOCK_SERVER_ADDR=127.0.0.1:8081`）が起動済み。`vendored` feature 有効でビルドされている |
 | 画面 | `http://127.0.0.1:8081/docs/` |
-| 操作 | ページを開き、描画完了を待つ。スクリーンショットを撮る。タグ（`races` 等）を 1 つ展開する |
+| 操作 | ① ページを開き描画完了を待つ ② スクリーンショットを撮る ③ タグ（`races` 等）を 1 つ展開する ④ `http://127.0.0.1:8081/api-docs/openapi.json` を別タブで開く（または DevTools のネットワークログから当該レスポンスを拾う）——**④ は下の突合に使う比較材料の取得であって、spec 単体の検査ではない**（200・JSON・`paths` 非空は機械検査済み） |
 | 期待結果 | Swagger UI の外枠（トップバー・タイトル）が描画される。**paddock の API のパスが 1 件以上一覧される**（空の "No operations defined in spec!" ではない）。タグを展開するとオペレーションの詳細が開く |
-| 確認ポイント | ブラウザコンソールに 4xx/5xx やスクリプトエラーが出ていないこと（vendored の資産欠落はここに出る。`favicon.ico` の 404 は vendored とは無関係の既存事象） |
+| 確認ポイント | ブラウザコンソールに 4xx/5xx やスクリプトエラーが出ていないこと（`favicon.ico` の 404 は vendored とは無関係の既存事象）。一覧されたパスが `/api-docs/openapi.json` の `paths` と一致すること（UI が別の spec を読んでいないことの確認・旧 TC-02 の残り） |
 
-### TC-02: `/api-docs/openapi.json` が 200 で JSON を返し、UI の描画元と一致する
-| 項目 | 内容 |
-|------|------|
-| 前提 | TC-01 と同じ |
-| 画面 | `http://127.0.0.1:8081/api-docs/openapi.json` |
-| 操作 | 直接開く（または TC-01 のページ読み込み時のネットワークログから当該リクエストを拾う） |
-| 期待結果 | HTTP 200・`Content-Type` が JSON。`openapi` / `paths` キーを持ち、`paths` が空でない |
-| 確認ポイント | TC-01 で一覧されたパスと `paths` のキーが一致すること（UI が別の spec を読んでいないことの確認）。`cargo test -p api-server` の openapi スナップショットが検証しているのは仕様生成側なので、**配信経路の確認はここで行う** |
+> **`/api-docs/openapi.json` の配信確認（旧 TC-02）は機械検査へ移した**（#616）。200・JSON・`paths`
+> 非空は `docs_ui.rs` が毎回見るので、**単体検査としては**開き直す必要はない（比較材料として開くのは操作 ④ のとおり）。UI に一覧されたパスが spec と
+> 一致するか（＝UI が別の spec を読んでいないか）だけは JS 描画後の話なので TC-01 の観点に含める。

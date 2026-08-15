@@ -9,9 +9,10 @@ sources:
   - docs/original-docs/0081-pin-only-diff-is-not-content-change.md
   - docs/original-docs/0082-swagger-ui-vendored.md
   - docs/original-docs/0084-evil-merge-is-visible-to-stale-check.md
+  - docs/original-docs/616-docs-serving-checks.md
   - docs/qa/QA-evil-merge-615.md
   - .github/workflows/ci.yml
-distilled_from_sha: "f144fe1"
+distilled_from_sha: "0ea19f9"
 updated: "2026-08-14"
 ---
 
@@ -314,9 +315,25 @@ OpenAPI 仕様を描画する開発者向け UI なので、埋め込み版の�
   在否がそのまま feature の効き方を表す・書式非依存・`--locked` で鮮度も担保）。宣言側も見るのは
   「宣言を消したがロックを再生成していない」状態を拾うためで、**照合は単一行に限定しない**
   （`features` の複数行整形は正当なので、単一行 grep だと整形だけで落ちる＝偽陽性になる）。
-- `/docs` の配信そのものは手動のブラウザテストで見る
-  （[api-docs-swagger-ui.md](../../tests/browser-test-cases/api-docs-swagger-ui.md) の TC-01 / TC-02）。
-  埋め込み資産が壊れれば空の UI やスクリプトエラーになるので、200 が返るだけでは足りない。
+- **`/docs` の配信そのものも機械で固定する**（`src/apps/api-server/tests/docs_ui.rs`・#616）。
+  feature 検査（`check-vendored-swagger.sh`）が見るのは**宣言**で、配信側は別の退行になる。
+  **ただし「資産の取り込みに失敗する」ケースはここには来ない**——zip の展開失敗は上流の build script が
+  `expect` で panic するので**コンパイル時に落ちる**。この検査が押さえるのは **(a) 上流の版が上がった
+  ときの資産名・構造のドリフト**、**(b) `SwaggerUi` の配線ミス**（マウント先・spec URL・別 `ApiDoc` の
+  混線）、**(c) 描画元に外部オリジンが混ざる逆戻り**（`vendored` feature の脱落自体は配信 HTML が
+  同一なので検知できない——そちらは `check-vendored-swagger.sh` の担当）。いずれも
+  資産が「在る」まま UI だけが壊れる。だから **200 が返るだけでは足りない**:
+  `index.html` が**参照する資産名**と、その資産が**実体を伴って配信されるか**を両側から見る
+  （片側だけだと「index.html だけ新しくなって資産名が変わった」を取り逃がす）。加えて配信された
+  spec が `ApiDoc::openapi()` と一致することも見る——生成側の検査（`openapi.rs`）は配信物を見ないので、
+  別の `ApiDoc` が `SwaggerUi::url` に配線される退行はここでしか捕まらない。
+  個々のアサーションは `docs_ui.rs` の doc コメントが正（ここに列挙すると実装とドリフトする）。
+  **このテストは「docs を無認証で配信してよい」を要件として承認したものではない**——`/api` の外に
+  あるという現状の追認にすぎず、保護を入れる判断とは独立（`app::configure_routes` の doc 参照）。
+  **案内する URL は `/docs/`**——テイルマッチなので末尾スラッシュ無しの `/docs` は 404（扱いは #619）。
+  本文中の他の `/docs` 表記は配信経路を指す一般参照で、叩く URL ではない。
+  **手動のブラウザテストに残るのは JS 実行後の描画結果とコンソールエラーだけ**
+  （[api-docs-swagger-ui.md](../../tests/browser-test-cases/api-docs-swagger-ui.md) の TC-01）。
 - **`-vv` のログの読み方**: `SWAGGER_UI_DOWNLOAD_URL: <url>` は **vendored でも印字される**ので
   ダウンロードの証拠にならない。実際に取得したかは `using vendored Swagger UI`（vendored 経路）と
   `start download to`（ダウンロード経路）のどちらが出るかで見る。

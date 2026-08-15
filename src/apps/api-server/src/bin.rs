@@ -14,7 +14,7 @@ async fn main() -> anyhow::Result<()> {
     let results = web::Data::new(s.results);
 
     tracing::info!(
-        "paddock api-server listening on http://{addr} (docs: /docs) — git {} built {} (#570: /api/health で世代確認)",
+        "paddock api-server listening on http://{addr} (docs: /docs/) — git {} built {} (#570: /api/health で世代確認)",
         rest_controller::build_info::GIT_SHA,
         rest_controller::build_info::build_time_rfc3339(),
     );
