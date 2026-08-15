@@ -114,6 +114,10 @@ pub async fn run_session(
         conditions: &recorded,
         post_times: &post_times,
     };
+    // [発走済] の基準を対話・--skip-all でも明示する（ADR 0085 決定 3。マークだけ配って
+    // 但し書きを配らない非対称にしない）。判定時刻はレースごとなので、--overview のように
+    // 一覧全体の基準時刻は書かない。
+    println!("※ [発走済] は表示時点で発走済み（結果確定の有無とは別）");
     let mut last_input: Option<TrackCondition> = None;
     let options = RaceRunOptions { explain, skip_all };
 
@@ -157,14 +161,10 @@ async fn run_race(
     println!();
     // 発走時刻と発走済み表示（#587）。対話・--skip-all は 1 日を跨いで動き続けるため、
     // 判定時刻はレースごとに取り直す（セッション開始時刻で固定しない）。
-    let post_time = lookups.post_times.get(&race.race_id).copied();
-    let started = is_started_at(
-        race.date,
-        Local::now().naive_local(),
-        post_time,
-        has_result(race),
+    println!(
+        "{}",
+        race_heading_with(race, lookups.post_times, Local::now().naive_local())
     );
-    println!("{}", race_heading(race, post_time, started));
     println!("残高: ¥{}", session.balance);
 
     // 当日の馬場状態（#73）。未確定レースの race.track_condition は構造的に None
@@ -507,9 +507,7 @@ pub async fn run_overview(
     println!("{}", overview_note(date, now));
     for race in &races {
         println!();
-        let post_time = post_times.get(&race.race_id).copied();
-        let started = is_started_at(race.date, now, post_time, has_result(race));
-        println!("{}", race_heading(race, post_time, started));
+        println!("{}", race_heading_with(race, &post_times, now));
         // 再表示は非対話。記録済み → 確定値 の順で馬場前提を解決する（対話の直前入力引き継ぎは
         // セッション内限定の概念のため使わない）。採用値を表示のみ（保存しない）。
         let track_condition = resolve_track_condition_default(
@@ -768,22 +766,47 @@ fn read_choice<R: BufRead>(reader: &mut R) -> anyhow::Result<char> {
 ///
 /// - 開催日が過ぎている → 発走時刻が不明でも発走済み（日付が過ぎた事実で言い切れる）
 /// - 開催日が未来 → 未発走
-/// - 当日 → `classify` に委譲（`now == post_time` はまだ未発走・`has_result` なら発走済み）
+/// - 当日 → 結果取込済みなら発走済み、でなければ `classify` に委譲
+///   （`now == post_time` はまだ未発走）
 ///
-/// post_time 不明（当日）は `Unknown` となり発走済みと断定しない（`web-spa.md` の方針と同じ）。
+/// 当日の post_time 不明は `Unknown` となり発走済みと断定しない（`web-spa.md` の方針と同じ）。
+/// ただし結果が入っていれば発走済みと言い切れるので、`result_present` は `classify` より前に見る
+/// ——`classify` は post_time が `None` の時点で `has_result` を見ずに `Unknown` を返す
+/// （監視側は「発走時刻不明＝収集対象外」で足りるため）。時刻軸の判定自体は `classify` のまま。
+///
+/// `result_present` は `monitor_loop::has_result`（`track_condition` か着順の有無）を想定する。
+/// これは「発走前のレースは `race_cards` 由来で track_condition=NULL」という `races_by_date` の
+/// 不変条件に乗った早期シグナルで、崩れると発走前に `[発走済]` が付きうる。
 fn is_started_at(
     target: NaiveDate,
     now: NaiveDateTime,
     post_time: Option<NaiveTime>,
-    has_result: bool,
+    result_present: bool,
 ) -> bool {
     match target.cmp(&now.date()) {
         std::cmp::Ordering::Less => true,
         std::cmp::Ordering::Greater => false,
         std::cmp::Ordering::Equal => {
-            classify(now.time(), post_time, has_result, None) == RaceStatus::Started
+            result_present
+                || classify(now.time(), post_time, result_present, None) == RaceStatus::Started
         }
     }
+}
+
+/// 日単位の発走時刻マップから、そのレースの見出し 1 行を組み立てる（#587）。
+/// post_time の引き当て → 発走判定 → 見出し文字列を 1 本にまとめ、`run_race` と `run_overview`
+/// の両経路で共有する（引き当てを取り違えても片方だけ壊れる、という形にしないため）。
+fn race_heading_with(
+    race: &Race,
+    post_times: &HashMap<RaceId, NaiveTime>,
+    now: NaiveDateTime,
+) -> String {
+    let post_time = post_times.get(&race.race_id).copied();
+    race_heading(
+        race,
+        post_time,
+        is_started_at(race.date, now, post_time, has_result(race)),
+    )
 }
 
 /// EV 一覧のヘッダに出す注記を組み立てる純関数（#587）。
@@ -893,14 +916,16 @@ fn read_u64<R: BufRead>(
 #[cfg(test)]
 mod tests {
     use super::{
-        is_started_at, make_bet_record, overview_note, race_heading, read_choice,
-        read_edited_amounts, read_track_condition, read_u64, resolve_track_condition_default,
+        is_started_at, make_bet_record, overview_note, race_heading, race_heading_with,
+        read_choice, read_edited_amounts, read_track_condition, read_u64,
+        resolve_track_condition_default,
     };
     use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
     use paddock_domain::horse_result::HorseNum;
     use paddock_domain::{
         BetCombination, BetMethod, PortfolioBet, Race, RaceId, Surface, TrackCondition, Venue,
     };
+    use std::collections::HashMap;
     use std::io::Cursor;
 
     fn horse(n: u32) -> HorseNum {
@@ -908,9 +933,11 @@ mod tests {
     }
 
     /// 開催日 2026-08-09・新潟 芝 2000m のレース（発走時刻は Race に持たないので引数で渡す）。
+    /// race_id は race_num と揃える——`race_heading_with` は race_id をキーに発走時刻を引くため、
+    /// ここが固定だと「別レースの発走時刻を引いても気づけない」テストになる。
     fn race(race_num: u32) -> Race {
         Race {
-            race_id: RaceId::try_from("2026-2-niigata-4-1R").unwrap(),
+            race_id: RaceId::try_from(format!("2026-2-niigata-4-{race_num}R")).unwrap(),
             date: race_date(),
             venue: Venue::Niigata,
             round: 2,
@@ -959,6 +986,39 @@ mod tests {
         // post_time 不明は --:-- とし、発走済みとは断定しない（web-spa と同方針）。
         assert_eq!(
             race_heading(&race(8), None, false),
+            "--- レース 8: 新潟 芝 2000m（発走 --:--）---"
+        );
+    }
+
+    #[test]
+    fn heading_marks_started_even_when_post_time_unknown() {
+        // 過去日は post_time 不明でも発走済み（is_started_at の Less 分岐）。その組み合わせも
+        // 見出しとして成立することを固定する。
+        assert_eq!(
+            race_heading(&race(8), None, true),
+            "--- レース 8: 新潟 芝 2000m（発走 --:--）[発走済] ---"
+        );
+    }
+
+    #[test]
+    fn heading_with_looks_up_post_time_by_race_id() {
+        // 引き当て（race_id → post_time）から見出しまでの配線を張る。別レースの発走時刻を
+        // 引いていないこと・マップに無いレースが --:-- になることを同時に見る。
+        let post_times: HashMap<RaceId, NaiveTime> =
+            [(race(1).race_id, t(9, 40)), (race(5).race_id, t(12, 25))]
+                .into_iter()
+                .collect();
+        let now = today_at(10, 0);
+        assert_eq!(
+            race_heading_with(&race(1), &post_times, now),
+            "--- レース 1: 新潟 芝 2000m（発走 09:40）[発走済] ---"
+        );
+        assert_eq!(
+            race_heading_with(&race(5), &post_times, now),
+            "--- レース 5: 新潟 芝 2000m（発走 12:25）---"
+        );
+        assert_eq!(
+            race_heading_with(&race(8), &post_times, now),
             "--- レース 8: 新潟 芝 2000m（発走 --:--）---"
         );
     }
@@ -1042,6 +1102,24 @@ mod tests {
     fn today_unknown_post_time_is_not_marked_started() {
         // post_time 不明（当日）は判定不能。発走済みと断定しない。
         assert!(!is_started_at(race_date(), today_at(23, 0), None, false));
+    }
+
+    #[test]
+    fn today_result_present_wins_over_unknown_post_time() {
+        // post_time 不明でも結果が入っていれば発走済み。classify は post_time が None の時点で
+        // has_result を見ずに Unknown を返すので、その手前で拾えていることを固定する。
+        assert!(is_started_at(race_date(), today_at(9, 0), None, true));
+    }
+
+    #[test]
+    fn heading_with_uses_result_when_post_time_is_missing() {
+        // 上を見出し側からも張る（引き当てに無い＝時刻不明でも [発走済] が付く）。
+        let mut race = race(3);
+        race.track_condition = Some(TrackCondition::Good);
+        assert_eq!(
+            race_heading_with(&race, &HashMap::new(), today_at(9, 0)),
+            "--- レース 3: 新潟 芝 2000m（発走 --:--）[発走済] ---"
+        );
     }
 
     #[test]

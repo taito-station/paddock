@@ -99,7 +99,8 @@ def p_pair_top3(probs, a, b):
 # --- 入力パース ---
 def parse_pred(path):
     text = Path(path).read_text()
-    blocks = re.split(r"--- レース (\d+): (\S+) (\S+) (\d+)m ---", text)
+    # 距離の後ろは緩く受ける（#587 の「（発走 09:40）」「[発走済]」を許容・旧形式も可）。
+    blocks = re.split(r"--- レース (\d+): (\S+) (\S+) (\d+)m[^\n]*---", text)
     out = {}
     i = 1
     while i + 4 < len(blocks):

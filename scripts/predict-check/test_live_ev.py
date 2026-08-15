@@ -71,16 +71,29 @@ def test_parse_pred():
         "\n"
         "--- レース 7: hanshin ダート 1800m ---\n"
         "  10 ベツノウマ                25.0%    40.0%    55.0%\n"
+        "\n"
+        # #587: 見出し末尾に「（発走 HH:MM）」「[発走済]」が付く新形式。発走時刻不明の
+        # 「--:--」はハイフンを含むので、末尾を素朴に切ると壊れる最悪ケースとして固定する。
+        "--- レース 8: kokura 芝 1200m（発走 15:30）---\n"
+        "   3 シンケイシキ              40.0%    50.0%    60.0%\n"
+        "\n"
+        "--- レース 9: chukyo ダート 1400m（発走 --:--）[発走済] ---\n"
+        "   4 ハッソウフメイ            18.0%    30.0%    45.0%\n"
     )
     fd, path = tempfile.mkstemp(suffix=".txt")
     try:
         with os.fdopen(fd, "w") as f:
             f.write(sample)
         out = L.parse_pred(path)
-        assert set(out) == {("tokyo", 6), ("hanshin", 7)}, list(out)
+        assert set(out) == {("tokyo", 6), ("hanshin", 7), ("kokura", 8), ("chukyo", 9)}, list(out)
         assert out[("tokyo", 6)]["probs"] == {1: 33.6, 2: 12.1}, out[("tokyo", 6)]
         assert out[("tokyo", 6)]["surface"] == "芝" and out[("tokyo", 6)]["dist"] == 1600
         assert out[("hanshin", 7)]["probs"] == {10: 25.0}
+        # 新形式でも 場/馬場/距離 の取り出しが従来どおりであること（末尾の付加情報に汚染されない）
+        assert out[("kokura", 8)]["surface"] == "芝" and out[("kokura", 8)]["dist"] == 1200
+        assert out[("kokura", 8)]["probs"] == {3: 40.0}
+        assert out[("chukyo", 9)]["surface"] == "ダート" and out[("chukyo", 9)]["dist"] == 1400
+        assert out[("chukyo", 9)]["probs"] == {4: 18.0}
     finally:
         os.unlink(path)
 

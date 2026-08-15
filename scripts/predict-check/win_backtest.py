@@ -97,7 +97,8 @@ def parse_pred(path):
     #   --- レース N: 場名 芝|ダート 距離m ---
     #      馬番 馬名 勝率% ...
     text = Path(path).read_text()
-    blocks = re.split(r"--- レース (\d+): (\S+) \S+ \d+m ---", text)
+    # 距離の後ろは緩く受ける（#587 の「（発走 09:40）」「[発走済]」を許容・旧形式も可）。
+    blocks = re.split(r"--- レース (\d+): (\S+) \S+ \d+m[^\n]*---", text)
     out = {}
     i = 1
     while i + 2 < len(blocks):

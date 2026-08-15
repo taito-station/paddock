@@ -88,7 +88,8 @@ def parse_pred(path):
     """predict 出力から (venue_jp, race_num) -> {umaban: win_prob} を抽出。"""
     text = Path(path).read_text()
     # 2 つのキャプチャ群 (race_num, venue) を持つため split の stride は 3（num, venue, body）。
-    blocks = re.split(r"--- レース (\d+): (\S+) \S+ \d+m ---", text)
+    # 距離の後ろは緩く受ける（#587 の「（発走 09:40）」「[発走済]」を許容・旧形式も可）。
+    blocks = re.split(r"--- レース (\d+): (\S+) \S+ \d+m[^\n]*---", text)
     out = {}
     i = 1
     while i + 2 < len(blocks):
