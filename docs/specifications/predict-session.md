@@ -114,7 +114,8 @@ $ paddock-predict --date 2026-06-01 --budget 10000
 ### レース見出し（発走時刻・発走済み表示）
 
 > **追加（#587・[ADR 0085](../original-docs/0085-cli-started-race-marking.md)）**。
-> 見出しは対話 / `--skip-all` / `--overview` の 3 経路で共通（`race_heading`）。
+> 見出しは対話 / `--skip-all` / `--overview` の 3 経路で共通（`race_heading_with` が発走時刻の
+> 引き当てと発走判定を含み、文字列組み立ては `race_heading`）。
 
 ```
 --- レース 1: 新潟 芝 2000m（発走 09:40）[発走済] ---
