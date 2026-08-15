@@ -14,7 +14,7 @@ sources:
   - docs/original-docs/0048-retire-jra-odds-scraper-for-netkeiba.md
   - docs/original-docs/0054-kelly-staking-rejected.md
   - docs/original-docs/0085-cli-started-race-marking.md
-distilled_from_sha: "d8cc0e4"
+distilled_from_sha: "5774c22"
 updated: "2026-08-15"
 ---
 
