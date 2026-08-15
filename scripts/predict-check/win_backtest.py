@@ -26,7 +26,7 @@ import sys
 from itertools import combinations
 from pathlib import Path
 
-from pred_header import HEADER_NUM_VENUE, split_by_header
+from pred_header import HEADER_NUM_VENUE, NoHeaderFound, split_by_header
 
 BUDGET = 5000
 WIN_BUDGET = 500  # 条件付き単勝の 1 発動あたり予算（発動馬が複数なら均等分配）
@@ -329,4 +329,9 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    # 見出しが取れない異常は案内文だけを出して非 0 終了する（#587）。traceback だと
+    # せっかく 1 本化した案内が埋もれる。
+    try:
+        main()
+    except NoHeaderFound as e:
+        sys.exit(str(e))

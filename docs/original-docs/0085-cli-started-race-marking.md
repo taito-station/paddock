@@ -57,7 +57,8 @@
    過去日の `--overview` では classify 単体だと「未発走」に見える。
    過去日 → 発走済 / 未来日 → 未発走 / 当日 → 結果取込済みなら発走済み、でなければ
    `classify(now, post_time, false, None)`（結果は手前で見終わっているので、classify には
-   時刻軸だけを判定させる）。
+   時刻軸だけを判定させる）。**境界は classify に従い `now > post` で発走済み**——発走時刻
+   ちょうどはまだ未発走として扱う（監視側と同じ境界に揃える）。
 
    **当日に `has_result` を classify より先に見る**のは、classify が `post_time` が `None` の
    時点で `has_result` を見ずに `Unknown` を返すため（監視側は「発走時刻不明＝収集対象外」で
@@ -111,7 +112,9 @@
   崩れると**発走前のレースに `[発走済]` が付く**——#587 が消したい誤読の逆向き（張れるレースを
   見送る）になる。監視側と同じ `count_started_before_post` で件数を数え、1 件以上なら警告する。
   時刻比較は同日でしか意味を持たないので**当日のみ**点検する（過去日の見返しでは大半のレースが
-  該当してしまい警告が総鳴りする）。
+  該当してしまい警告が総鳴りする）。**`post_time` 不明のレースは monitor-loop 側の防御が数えない**
+  （classify は Unknown として監視対象外にするため）が、CLI は post_time 不明でも結果があれば
+  `[発走済]` を出すので、その CLI 固有の経路は predict 側で別途数える。
 - `--overview` の判定時刻は実行開始時に 1 回だけ取る。オッズ read-through を含む一覧実行が
   数分かかると、その間に発走したレースは未発走のまま表示される。注記が「一覧作成開始 …時点」と
   明示するので誤読には至らない（一覧全体を同一時刻で判定する一貫性を優先した）。
@@ -134,7 +137,9 @@
   `src/apps/predict/testdata/pred_header_samples.txt` を生成側（`include_str!` で読む Rust の
   `heading_samples_match_the_shared_golden`）と解析側（`test_pred_header.py`。マッチだけでなく
   どの値がどのフィールドに入るかまで見る）の双方が参照し、片方だけ変えれば必ずどちらかが落ちる
-  ようにした。**置き場所を predict crate 内にした**のは、`include_str!` が crate の外を指すと
+  ようにした。golden には**最も落としやすい組み合わせ**（発走時刻不明 `--:--` × `[発走済]`）を
+  必ず入れる。なお `refresh_ev.sh` / `gen_win_backtest_data.sh` は見出しを自前 `echo` する
+  **生成側のコピー**で、golden には拘束されない（旧形式なので現行 regex は受ける）。**置き場所を predict crate 内にした**のは、`include_str!` が crate の外を指すと
   sparse checkout / パッケージングでテストがコンパイルできなくなるため（Python 側はリポジトリ内の
   相対参照で読めばよく、制約が緩い）。
 - 診断メッセージ（不変条件の警告・TZ 警告）は **stderr** に出す。stdout は上記パーサが読む

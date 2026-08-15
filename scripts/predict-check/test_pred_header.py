@@ -94,11 +94,12 @@ def test_shared_golden_is_parsed_with_the_expected_fields():
     # 「マッチはする」ので、regex 一致だけでは正しい組を保証できない）。
     with open(GOLDEN_PATH, encoding="utf-8") as f:
         lines = [ln for ln in f.read().splitlines() if ln.strip()]
-    assert len(lines) == 4, lines
+    assert len(lines) == 5, lines
     expected = [
         ("1", "新潟", "芝", "2000"),
         ("5", "新潟", "芝", "2000"),
         ("8", "新潟", "芝", "2000"),
+        ("9", "新潟", "芝", "2000"),
         ("1", "東京", "芝", "1600"),
     ]
     for ln, want in zip(lines, expected):

@@ -545,24 +545,4 @@ mod tests {
         assert!(west.contains("UTC-05:00"), "{west}");
         assert!(west.contains("収集対象"), "{west}");
     }
-
-    #[test]
-    fn warn_if_not_jst_does_not_look_at_the_date() {
-        // TZ だけを見る版（--overview の過去日見返しから呼べることが導入理由）。判定内容は
-        // jst_offset_warning のテストが張るので、ここは日付によらず経路が通ることだけ見る。
-        let jst = FixedOffset::east_opt(9 * 3600).unwrap();
-        warn_if_not_jst(
-            &jst.with_ymd_and_hms(2026, 7, 22, 12, 0, 0).unwrap(),
-            "発走状態",
-        );
-        warn_if_not_jst(
-            &jst.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
-            "発走状態",
-        );
-        let ist = FixedOffset::east_opt(5 * 3600 + 30 * 60).unwrap();
-        warn_if_not_jst(
-            &ist.with_ymd_and_hms(2026, 7, 22, 12, 0, 0).unwrap(),
-            "発走状態",
-        );
-    }
 }

@@ -61,8 +61,25 @@ def looks_like_pred_table(text):
     開催の無い日の `paddock-predict` は「この日の開催はありません: <date>」の 1 行だけを出す。
     これは**正当な 0 レース**なので、見出しが無いことを異常にしてはいけない。逆に馬行があるのに
     見出しが取れないのは、入力違いか見出し形式の変化（#587 の無言死）。
+
+    **これは heuristic**。馬行の書式まで同時に変わった入力では偽陰性になり、元の
+    「静かに 0 件」に戻る。見出しと馬行が同時に変わる改修では、このガードを当てにしないこと。
     """
     return bool(RACE_ROW.search(text))
+
+
+def ensure_header_found(text, found, source):
+    """見出しが 1 件も取れていない異常を検出する共通判定（#587）。
+
+    判定そのものを 1 か所に置く（`split_by_header` を通せない `extract_preds` と条件が
+    ズレると、片方だけ静かに素通りする——この PR が潰した複製と同じ構図になる）。
+
+    **このガードが捕まえるのは「全滅」だけ**。一部のレースの見出しだけが変わった場合は
+    その分だけ静かに減る、という同じクラスの故障が残る（`--- レース ` 行の総数と突き合わせる
+    案もあるが、行の書式自体が契約なので二重の脆さになる）。
+    """
+    if found == 0 and looks_like_pred_table(text):
+        raise NoHeaderFound(source)
 
 
 def split_by_header(text, pattern, source):
@@ -73,6 +90,5 @@ def split_by_header(text, pattern, source):
     `re.split` は見出しが 1 つも無いと要素 1 個のリストを返すので、そこを判定に使う。
     """
     blocks = re.split(pattern, text)
-    if len(blocks) == 1 and looks_like_pred_table(text):
-        raise NoHeaderFound(source)
+    ensure_header_found(text, len(blocks) - 1, source)
     return blocks
