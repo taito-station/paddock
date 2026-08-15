@@ -526,9 +526,9 @@ mod tests {
     }
 
     #[test]
-    fn warn_if_not_jst_does_not_look_at_the_date() {
-        // #587: TZ だけを見る版。当日以外でも panic せず、日付は判定に使わない
-        // （--overview の過去日見返しから呼べることが導入理由）。
+    fn warn_if_not_jst_does_not_panic_for_any_date() {
+        // #587: TZ だけを見る版。出力（println）は検証しないが、当日・過去日・非 JST の
+        // いずれでも panic しないことを担保する（--overview の過去日見返しから呼べることが導入理由）。
         let jst = FixedOffset::east_opt(9 * 3600).unwrap();
         warn_if_not_jst(
             &jst.with_ymd_and_hms(2026, 7, 22, 12, 0, 0).unwrap(),

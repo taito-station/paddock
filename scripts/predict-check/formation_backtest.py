@@ -37,7 +37,7 @@ import statistics
 from itertools import combinations
 from pathlib import Path
 
-from pred_header import HEADER_NUM_VENUE
+from pred_header import HEADER_NUM_VENUE, split_by_header
 
 
 def largest_remainder(weights, units, minu=1):
@@ -91,7 +91,7 @@ def parse_winodds(path):
 def parse_pred(path):
     """predict 出力から (venue_jp, race_num) -> {umaban: win_prob} を抽出。"""
     text = Path(path).read_text()
-    blocks = re.split(HEADER_NUM_VENUE, text)
+    blocks = split_by_header(text, HEADER_NUM_VENUE, path)
     out = {}
     i = 1
     while i + 2 < len(blocks):

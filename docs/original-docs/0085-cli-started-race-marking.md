@@ -56,7 +56,8 @@
    日付を持たない（日付跨ぎは監視側の `should_stop_by_date` が別担当・ADR 0072）ため、
    過去日の `--overview` では classify 単体だと「未発走」に見える。
    過去日 → 発走済 / 未来日 → 未発走 / 当日 → 結果取込済みなら発走済み、でなければ
-   `classify(now, post_time, has_result, None)`。
+   `classify(now, post_time, false, None)`（結果は手前で見終わっているので、classify には
+   時刻軸だけを判定させる）。
 
    **当日に `has_result` を classify より先に見る**のは、classify が `post_time` が `None` の
    時点で `has_result` を見ずに `Unknown` を返すため（監視側は「発走時刻不明＝収集対象外」で
@@ -122,6 +123,15 @@
   `scripts/predict-check/pred_header.py` に 1 本化して 6 本が import する形にした。
   回帰は `test_pred_header.py` が旧形式 / 発走時刻付き / `--:--`＋`[発走済]` の 3 形式で張る
   （`--:--` はハイフンを含むため、末尾を素朴に切る regex だとこれだけ落ちる）。
+- **無言死そのものを塞ぐ**。regex の 1 本化は Python 内の複製を消すだけで、「壊れたら 0 件で
+  正常終了する」挙動は変わらない。**中身があるのに見出しが 1 件も取れなければ非 0 終了**する
+  （`pred_header.split_by_header` / `extract_preds.py`）。空入力は正当な 0 件なので落とさない。
+- **言語をまたぐ契約は golden で結ぶ**。regex を 1 本化しても、Rust の出力と Python の期待値が
+  リテラル一致頼みである限り、見出しを変えたとき**両方のテストが緑のままパイプラインだけ壊れる**。
+  `scripts/predict-check/testdata/pred_header_samples.txt` を生成側（`include_str!` で読む Rust の
+  `heading_samples_match_the_shared_golden`）と解析側（`test_pred_header.py`）の双方が参照し、
+  片方だけ変えれば必ずどちらかが落ちるようにした。
+- 診断メッセージ（不変条件の警告）は **stderr** に出す。stdout は上記パーサが読むデータチャネル。
 
 ## 関連
 

@@ -96,6 +96,9 @@ paddock-predict --date YYYY-MM-DD --budget 5000 --skip-all
 # 予想セッション状態（セッション・買い目・馬場条件）は書き込まない（predict_sessions の手動 DELETE 不要）。
 # オッズは skip-all 同様 read-through（不完全キャッシュのレースは再スクレイプし race_odds を更新しうる）。
 # 予算上限は各レース --race-budget（残高で絞らない）。--budget は不要。
+# 見出しに発走時刻が出て、実行時刻に発走済みのレースは [発走済] が付く（#587）。**発走済みは
+# 除外せず区別するだけ**なので、朝の候補探しでは [発走済] の行を読み飛ばす。この表示は対話 /
+# --skip-all にも出る。判定は post_time 経過であって結果確定ではない（SPA の ⚫終とは別基準）。
 paddock-predict --date YYYY-MM-DD --overview
 
 # 個別レースのモデル勝率確認（EV 算出・オッズ確認時）

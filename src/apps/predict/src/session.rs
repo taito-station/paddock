@@ -162,6 +162,10 @@ async fn run_race(
 ) -> anyhow::Result<()> {
     let RaceRunOptions { explain, skip_all } = options;
     let recorded = lookups.conditions;
+    debug_assert_eq!(
+        race.date, session.date,
+        "races_by_date がセッション日以外の日付を返した"
+    );
     println!();
     // 発走時刻と発走済み表示（#587）。対話・--skip-all は 1 日を跨いで動き続けるため、
     // 判定時刻はレースごとに取り直す（セッション開始時刻で固定しない）。
@@ -511,8 +515,16 @@ pub async fn run_overview(
         races.len()
     );
     println!("{}", overview_note(date, now));
+    // 警告はヘッダ・注記の後に出す（対話側と順序を揃える）。出力先は stderr。
+    warn_if_result_before_post(&races, &post_times, date, now);
     for race in &races {
         println!();
+        // 発走判定は race.date、注記と不変条件チェックは --date が基準。races_by_date が
+        // 日付で絞るので必ず一致するが、崩れれば注記と行のマークが食い違うので固定しておく。
+        debug_assert_eq!(
+            race.date, date,
+            "races_by_date が --date 以外の日付を返した"
+        );
         println!("{}", race_heading_with(race, &post_times, now));
         // 再表示は非対話。記録済み → 確定値 の順で馬場前提を解決する（対話の直前入力引き継ぎは
         // セッション内限定の概念のため使わない）。採用値を表示のみ（保存しない）。
@@ -527,6 +539,16 @@ pub async fn run_overview(
         }
         // race_cap は残高で絞らない（セッション非依存の再表示のため）。表示結果は破棄する。
         let _ = render_race_prediction(app, race, track_condition, race_budget, explain).await?;
+    }
+    // 当日はオッズ read-through で一覧の作成に数分かかることがあり、その間に発走したレースは
+    // 未発走のまま出ている。開始と完了の差を出して「いつ時点の判定か」を読み手に渡す。
+    if meeting_phase(date, now.date()) == MeetingPhase::Today {
+        println!();
+        println!(
+            "※ 一覧作成完了 {}（判定基準は開始時刻 {} のまま。この間に発走した分は未発走表示）",
+            Local::now().format("%H:%M"),
+            now.format("%H:%M")
+        );
     }
     Ok(())
 }
@@ -792,23 +814,36 @@ fn meeting_phase(date: NaiveDate, today: NaiveDate) -> MeetingPhase {
 ///
 /// 時刻比較は同日でしか意味を持たないので当日のみ点検する（過去日の見返しでは、結果取込済みかつ
 /// `now.time() <= post_time` のレースが大量に該当してしまい、警告が総鳴りする）。
+fn result_before_post_count(
+    races: &[Race],
+    post_times: &HashMap<RaceId, NaiveTime>,
+    date: NaiveDate,
+    now: NaiveDateTime,
+) -> usize {
+    if meeting_phase(date, now.date()) != MeetingPhase::Today {
+        return 0;
+    }
+    count_started_before_post(
+        races,
+        now.time(),
+        |race: &Race| post_times.get(&race.race_id).copied(),
+        has_result,
+    )
+}
+
+/// [`result_before_post_count`] の結果を警告として出す。
+///
+/// 出力先は **stderr**。stdout は `scripts/predict-check` が機械パースするデータチャネルなので、
+/// 診断メッセージを混ぜない（現行の見出し regex では素通りするが、混ぜない方が安全）。
 fn warn_if_result_before_post(
     races: &[Race],
     post_times: &HashMap<RaceId, NaiveTime>,
     date: NaiveDate,
     now: NaiveDateTime,
 ) {
-    if meeting_phase(date, now.date()) != MeetingPhase::Today {
-        return;
-    }
-    let broken = count_started_before_post(
-        races,
-        now.time(),
-        |race: &Race| post_times.get(&race.race_id).copied(),
-        has_result,
-    );
+    let broken = result_before_post_count(races, post_times, date, now);
     if broken > 0 {
-        println!(
+        eprintln!(
             "⚠ 発走前なのに結果が取り込まれているレースが {broken} 件あります。\
              これらは実際には未発走でも [発走済] と表示されます。"
         );
@@ -876,28 +911,35 @@ fn race_heading_with(
 /// 当日だけ判定時刻を**日付込み**で出す。これは一覧全体を貫く基準時刻＝作成開始時刻であって、
 /// 実行が終わった時刻ではない（オッズ再取得を伴うと数分かかり、その間に発走した分は反映されない）。
 fn overview_note(date: NaiveDate, now: NaiveDateTime) -> String {
-    match meeting_phase(date, now.date()) {
-        MeetingPhase::Over => "※ この開催は終了しています（全レース発走済）".to_string(),
-        MeetingPhase::Ahead => "※ この開催はまだ実施されていません（全レース未発走）".to_string(),
-        MeetingPhase::Today => format!(
+    phase_note(meeting_phase(date, now.date()), Some(now))
+}
+
+/// 注記の文言（#587）。当日以外の 2 文は `--overview` と対話で共通なので、ここに 1 本化する
+/// （見出しで潰したのと同じ drift をここで作らない）。`at` は当日の基準時刻——`Some` なら
+/// その時刻で一覧全体を判定したこと、`None` ならレースごとに判定し直すことを意味する。
+fn phase_note(phase: MeetingPhase, at: Option<NaiveDateTime>) -> String {
+    match (phase, at) {
+        (MeetingPhase::Over, _) => "※ この開催は終了しています（全レース発走済）".to_string(),
+        (MeetingPhase::Ahead, _) => {
+            "※ この開催はまだ実施されていません（全レース未発走）".to_string()
+        }
+        (MeetingPhase::Today, Some(at)) => format!(
             "※ 一覧作成開始 {} 時点の判定。[発走済] はその時刻に発走済み（結果確定の有無とは別）",
-            now.format("%Y-%m-%d %H:%M")
+            at.format("%Y-%m-%d %H:%M")
         ),
+        (MeetingPhase::Today, None) => {
+            "※ [発走済] は表示時点で発走済み（結果確定の有無とは別）".to_string()
+        }
     }
 }
 
 /// 対話セッション（対話 / `--skip-all`）のヘッダに出す注記（#587）。
 ///
 /// `[発走済]` の基準を `--overview` だけでなくこちらでも明示する（マークだけ配って但し書きを
-/// 配らない非対称にしない・ADR 0085 決定 3）。判定時刻はレースごとに取り直すので、
+/// 配らない非対称にしない・ADR 0085 決定 5）。判定時刻はレースごとに取り直すので、
 /// 当日は一覧のような基準時刻を書かない。
 fn session_note(date: NaiveDate, today: NaiveDate) -> String {
-    match meeting_phase(date, today) {
-        MeetingPhase::Over => "※ この開催は終了しています（全レース発走済）",
-        MeetingPhase::Ahead => "※ この開催はまだ実施されていません（全レース未発走）",
-        MeetingPhase::Today => "※ [発走済] は表示時点で発走済み（結果確定の有無とは別）",
-    }
-    .to_string()
+    phase_note(meeting_phase(date, today), None)
 }
 
 /// レース見出しの 1 行を組み立てる純関数（#587）。`run_race`（対話 / `--skip-all`）と
@@ -992,7 +1034,7 @@ mod tests {
     use super::{
         is_started_at, make_bet_record, overview_note, race_heading, race_heading_with,
         read_choice, read_edited_amounts, read_track_condition, read_u64,
-        resolve_track_condition_default, session_note,
+        resolve_track_condition_default, result_before_post_count, session_note,
     };
     use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
     use paddock_domain::horse_result::HorseNum;
@@ -1074,6 +1116,27 @@ mod tests {
         );
     }
 
+    /// 生成側（Rust）と解析側（Python）が同じ見出しを見ていることを固定する golden（#587）。
+    /// `include_str!` なのでファイルが消えればコンパイルが通らない。詳細は
+    /// `scripts/predict-check/testdata/README.md`。
+    const HEADER_GOLDEN: &str =
+        include_str!("../../../../scripts/predict-check/testdata/pred_header_samples.txt");
+
+    #[test]
+    fn heading_samples_match_the_shared_golden() {
+        // 解析側（scripts/predict-check）はこのファイルをパースできることを張っている。
+        // 見出しを変えたのに golden を直さなければここで落ち、直せば Python 側が落ちる
+        // ——言語をまたいだ契約のズレを、どちらかのテストで必ず捕まえるための結び目。
+        let lines: Vec<&str> = HEADER_GOLDEN.lines().collect();
+        assert_eq!(lines[0], race_heading(&race(1), Some(t(9, 40)), true));
+        assert_eq!(lines[1], race_heading(&race(5), Some(t(12, 25)), false));
+        assert_eq!(lines[2], race_heading(&race(8), None, false));
+        // 4 行目は #587 以前の旧形式。Rust はもう生成しないので、ここでは生成物と比較しない
+        // （解析側だけが後方互換のために使う）。
+        assert_eq!(lines[3], "--- レース 1: 東京 芝 1600m ---");
+        assert_eq!(lines.len(), 4);
+    }
+
     #[test]
     fn heading_with_looks_up_post_time_by_race_id() {
         // 引き当て（race_id → post_time）から見出しまでの配線を張る。別レースの発走時刻を
@@ -1124,6 +1187,33 @@ mod tests {
         assert_eq!(
             overview_note(race_date(), day_before),
             "※ この開催はまだ実施されていません（全レース未発走）"
+        );
+    }
+
+    #[test]
+    fn result_before_post_is_counted_only_for_today() {
+        // 発走前（now <= post）なのに結果取込済み＝ races_by_date の不変条件が崩れた兆候。
+        let post_times: HashMap<RaceId, NaiveTime> =
+            [(race(1).race_id, t(15, 0))].into_iter().collect();
+        let mut broken = race(1);
+        broken.track_condition = Some(TrackCondition::Good); // has_result = true
+        let races = vec![broken];
+
+        // 当日・発走前 → 検知する。
+        assert_eq!(
+            result_before_post_count(&races, &post_times, race_date(), today_at(10, 0)),
+            1
+        );
+        // 当日・発走後 → 正常な遷移なので 0。
+        assert_eq!(
+            result_before_post_count(&races, &post_times, race_date(), today_at(16, 0)),
+            0
+        );
+        // 過去日の見返しは時刻比較が無意味。ここが 0 にならないと、見返しのたびに警告が総鳴りする。
+        let next_day = race_date().succ_opt().unwrap().and_time(t(10, 0));
+        assert_eq!(
+            result_before_post_count(&races, &post_times, race_date(), next_day),
+            0
         );
     }
 

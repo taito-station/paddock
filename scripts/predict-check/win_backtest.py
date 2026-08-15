@@ -26,7 +26,7 @@ import sys
 from itertools import combinations
 from pathlib import Path
 
-from pred_header import HEADER_NUM_VENUE
+from pred_header import HEADER_NUM_VENUE, split_by_header
 
 BUDGET = 5000
 WIN_BUDGET = 500  # 条件付き単勝の 1 発動あたり予算（発動馬が複数なら均等分配）
@@ -101,7 +101,7 @@ def parse_pred(path):
     # paddock-predict の stdout を直接渡す場合、見出し末尾に `（発走 09:40）` `[発走済]` が
     # 付きうる（#587）。契約は pred_header.HEADER_NUM_VENUE が持つ。
     text = Path(path).read_text()
-    blocks = re.split(HEADER_NUM_VENUE, text)
+    blocks = split_by_header(text, HEADER_NUM_VENUE, path)
     out = {}
     i = 1
     while i + 2 < len(blocks):

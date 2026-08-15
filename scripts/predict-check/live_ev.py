@@ -21,7 +21,7 @@ import sys
 from itertools import combinations, permutations
 from pathlib import Path
 
-from pred_header import HEADER
+from pred_header import HEADER, split_by_header
 
 CJ = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱"
 BET_LABEL: dict[str, str] = {"wide": "ワイド", "quinella": "馬連", "trio": "3連複"}
@@ -102,7 +102,7 @@ def p_pair_top3(probs, a, b):
 # --- 入力パース ---
 def parse_pred(path):
     text = Path(path).read_text()
-    blocks = re.split(HEADER, text)
+    blocks = split_by_header(text, HEADER, path)
     out = {}
     i = 1
     while i + 4 < len(blocks):

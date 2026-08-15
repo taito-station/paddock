@@ -16,7 +16,7 @@ import subprocess
 import sys
 import tempfile
 
-from pred_header import HEADER, HEADER_NUM_VENUE
+from pred_header import GOLDEN_PATH, HEADER, HEADER_NUM_VENUE, split_by_header
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -77,6 +77,49 @@ def test_extract_preds_script_reads_every_form():
         assert [r["race_num"] for r in races] == [1, 2, 3], races
         assert [r["venue"] for r in races] == ["東京", "新潟", "中京"], races
         assert all(len(r["horses"]) == 2 for r in races), races
+    finally:
+        os.unlink(path)
+
+
+def test_shared_golden_is_parsed_by_both_patterns():
+    # 生成側（Rust の race_heading）が同じファイルと突き合わせている（session.rs の
+    # heading_samples_match_the_shared_golden）。片方だけ見出しを変えると、必ずどちらかが落ちる。
+    with open(os.path.join(HERE, GOLDEN_PATH), encoding="utf-8") as f:
+        lines = [ln for ln in f.read().splitlines() if ln.strip()]
+    assert len(lines) == 4, lines
+    for ln in lines:
+        assert re.match("^" + HEADER, ln), ln
+        assert re.match("^" + HEADER_NUM_VENUE, ln), ln
+
+
+def test_split_by_header_exits_when_nothing_matches():
+    # 無言死の直接の塞ぎ。中身があるのに 0 件なら SystemExit（非 0 終了）にする。
+    try:
+        split_by_header("なにか本文\nだが見出しは無い\n", HEADER, "dummy")
+    except SystemExit as e:
+        assert e.code and "見出しが 1 件も見つかりません" in str(e.code), e.code
+    else:
+        raise AssertionError("見出し 0 件なのに落ちなかった")
+
+
+def test_split_by_header_allows_empty_input():
+    # 空入力は異常ではない（正当に 0 レース）。ここまで落とすと通常運用が壊れる。
+    assert split_by_header("   \n", HEADER, "dummy") == ["   \n"]
+
+
+def test_extract_preds_script_exits_when_header_is_unrecognized():
+    # スクリプト側の同じ塞ぎ。空配列を吐いて exit 0 する挙動に戻ったらここで落ちる。
+    fd, path = tempfile.mkstemp(suffix=".txt")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write("--- レース 1: 東京 芝 2000m ===\n   1 ウマ  10.0%  20.0%  30.0%\n")
+        proc = subprocess.run(
+            [sys.executable, os.path.join(HERE, "extract_preds.py"), path],
+            capture_output=True,
+            text=True,
+        )
+        assert proc.returncode != 0, proc.stdout
+        assert "見出しが 1 件も見つかりません" in proc.stderr, proc.stderr
     finally:
         os.unlink(path)
 
