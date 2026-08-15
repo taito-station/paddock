@@ -114,7 +114,7 @@ $ paddock-predict --date 2026-06-01 --budget 10000
 ### レース見出し（発走時刻・発走済み表示）
 
 > **追加（#587・[ADR 0085](../original-docs/0085-cli-started-race-marking.md)）**。
-> 見出しは対話 / `--skip-all` / `--overview` の 3 経路で共通（`race_heading_with` が発走時刻の
+> 見出しは対話 / `--skip-all` / `--overview` の 3 経路で共通（`race_heading_for_day` が発走時刻の
 > 引き当てと発走判定を含み、文字列組み立ては `race_heading`）。
 
 ```
@@ -174,11 +174,11 @@ $ paddock-predict --date 2026-06-01 --budget 10000
 壊れても例外を出さず 0 件になる（無言死）。末尾を緩く受ける形へ直したうえで、**同じ regex の
 6 コピーが再発経路そのもの**なので解析契約を `scripts/predict-check/pred_header.py` に 1 本化した
 （`test_pred_header.py` が旧形式 / 発走時刻付き / `--:--`＋`[発走済]` の 3 形式を張る）。さらに
-**中身があるのに見出しが 0 件なら非 0 終了**させ（空入力は正当な 0 件なので落とさない）、
-**言語をまたぐ契約は golden `scripts/predict-check/testdata/pred_header_samples.txt` で結ぶ**
-——生成側（Rust が `include_str!` で読む）と解析側が同じファイルを見るので、片方だけ変えれば
-必ずどちらかのテストが落ちる。診断メッセージは stdout（パーサのデータチャネル）を汚さないよう
-stderr へ出す。
+**確率テーブルらしい入力なのに見出しが 0 件なら非 0 終了**させ（判定は馬行の有無。開催の無い日の
+「この日の開催はありません」は正当な 0 件なので落とさない）、**言語をまたぐ契約は golden
+`src/apps/predict/testdata/pred_header_samples.txt` で結ぶ**——生成側（Rust が `include_str!` で
+読む）と解析側が同じファイルを見るので、片方だけ変えれば必ずどちらかのテストが落ちる。
+診断メッセージは stdout（パーサのデータチャネル）を汚さないよう stderr へ出す。
 
 ### e（編集）モード
 

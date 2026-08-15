@@ -11,7 +11,7 @@ import sys
 import re
 import json
 
-from pred_header import GOLDEN_PATH, HEADER
+from pred_header import HEADER, looks_like_pred_table, no_header_message
 
 if len(sys.argv) < 2:
     print(__doc__, file=sys.stderr)
@@ -37,14 +37,11 @@ for ln in lines:
                 "num": int(r.group(1)), "name": r.group(2),
                 "win": float(r.group(3)), "place": float(r.group(4)), "show": float(r.group(5))})
 
-# 中身があるのに 1 レースも取れないのは、入力違いか見出し形式の変化（#587）。ここで落とさないと
-# 空配列を吐いて exit 0 し、下流の回収率検証が「0 件で成功」として静かに回る。
-if not races and any(ln.strip() for ln in lines):
-    sys.exit(
-        f"[extract_preds] {sys.argv[1]}: レース見出しが 1 件も見つかりません。"
-        "入力が predict の確率テーブルか、見出し形式が変わっていないか確認してください"
-        f"（期待する形: {GOLDEN_PATH} 参照）。"
-    )
+# 確率テーブルらしい入力なのに 1 レースも取れないのは、入力違いか見出し形式の変化（#587）。
+# ここで落とさないと空配列を吐いて exit 0 し、下流の回収率検証が「0 件で成功」として静かに回る。
+# 開催の無い日（「この日の開催はありません: …」の 1 行）は馬行が無いので通常どおり [] を返す。
+if not races and looks_like_pred_table("\n".join(lines)):
+    sys.exit(no_header_message(sys.argv[1]))
 
 json.dump(races, sys.stdout, ensure_ascii=False)
 print(f"# {len(races)} races", file=sys.stderr)

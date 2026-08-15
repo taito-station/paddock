@@ -16,7 +16,13 @@ import subprocess
 import sys
 import tempfile
 
-from pred_header import GOLDEN_PATH, HEADER, HEADER_NUM_VENUE, split_by_header
+from pred_header import (
+    GOLDEN_PATH,
+    HEADER,
+    HEADER_NUM_VENUE,
+    NoHeaderFound,
+    split_by_header,
+)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -81,23 +87,32 @@ def test_extract_preds_script_reads_every_form():
         os.unlink(path)
 
 
-def test_shared_golden_is_parsed_by_both_patterns():
+def test_shared_golden_is_parsed_with_the_expected_fields():
     # 生成側（Rust の race_heading）が同じファイルと突き合わせている（session.rs の
     # heading_samples_match_the_shared_golden）。片方だけ見出しを変えると、必ずどちらかが落ちる。
-    with open(os.path.join(HERE, GOLDEN_PATH), encoding="utf-8") as f:
+    # マッチするだけでなく **どの値がどのフィールドに入るか** まで見る（場と馬場が入れ替わっても
+    # 「マッチはする」ので、regex 一致だけでは正しい組を保証できない）。
+    with open(GOLDEN_PATH, encoding="utf-8") as f:
         lines = [ln for ln in f.read().splitlines() if ln.strip()]
     assert len(lines) == 4, lines
-    for ln in lines:
-        assert re.match("^" + HEADER, ln), ln
-        assert re.match("^" + HEADER_NUM_VENUE, ln), ln
+    expected = [
+        ("1", "新潟", "芝", "2000"),
+        ("5", "新潟", "芝", "2000"),
+        ("8", "新潟", "芝", "2000"),
+        ("1", "東京", "芝", "1600"),
+    ]
+    for ln, want in zip(lines, expected):
+        assert re.match("^" + HEADER, ln).groups() == want, ln
+        assert re.match("^" + HEADER_NUM_VENUE, ln).groups() == want[:2], ln
 
 
-def test_split_by_header_exits_when_nothing_matches():
-    # 無言死の直接の塞ぎ。中身があるのに 0 件なら SystemExit（非 0 終了）にする。
+def test_split_by_header_raises_when_a_pred_table_has_no_header():
+    # 無言死の直接の塞ぎ。確率テーブルなのに 0 件なら例外（＝呼び出し側は非 0 終了）。
+    body = "   1 サンプルウマ  33.6%  40.0%  50.0%\n   2 テストホース  12.1%  20.0%  28.0%\n"
     try:
-        split_by_header("なにか本文\nだが見出しは無い\n", HEADER, "dummy")
-    except SystemExit as e:
-        assert e.code and "見出しが 1 件も見つかりません" in str(e.code), e.code
+        split_by_header(body, HEADER, "dummy")
+    except NoHeaderFound as e:
+        assert "見出しが 1 件も見つかりません" in str(e), e
     else:
         raise AssertionError("見出し 0 件なのに落ちなかった")
 
@@ -105,6 +120,13 @@ def test_split_by_header_exits_when_nothing_matches():
 def test_split_by_header_allows_empty_input():
     # 空入力は異常ではない（正当に 0 レース）。ここまで落とすと通常運用が壊れる。
     assert split_by_header("   \n", HEADER, "dummy") == ["   \n"]
+
+
+def test_split_by_header_allows_the_no_meeting_message():
+    # 開催の無い日の predict は 1 行だけ出す。これは正当な 0 レースなので落としてはいけない
+    # （落とすと「見出し形式が変わった」と誤誘導することになる）。
+    text = "この日の開催はありません: 2026-08-13\n"
+    assert split_by_header(text, HEADER, "dummy") == [text]
 
 
 def test_extract_preds_script_exits_when_header_is_unrecognized():
@@ -120,6 +142,23 @@ def test_extract_preds_script_exits_when_header_is_unrecognized():
         )
         assert proc.returncode != 0, proc.stdout
         assert "見出しが 1 件も見つかりません" in proc.stderr, proc.stderr
+    finally:
+        os.unlink(path)
+
+
+def test_extract_preds_script_allows_the_no_meeting_message():
+    # 開催の無い日は従来どおり [] / exit 0（スクリプト側も同じ規律）。
+    fd, path = tempfile.mkstemp(suffix=".txt")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write("この日の開催はありません: 2026-08-13\n")
+        proc = subprocess.run(
+            [sys.executable, os.path.join(HERE, "extract_preds.py"), path],
+            capture_output=True,
+            text=True,
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert json.loads(proc.stdout) == [], proc.stdout
     finally:
         os.unlink(path)
 

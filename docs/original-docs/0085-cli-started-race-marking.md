@@ -65,7 +65,7 @@
    手前に置く。時刻軸の判定自体は classify のまま＝second source にはならない。
 
 5. **表示は `--overview` だけでなく `run_race`（対話 / `--skip-all`）にも出す。**
-   見出しは純関数 `race_heading` / `race_heading_with`（発走時刻の引き当てを含む）に抽出して
+   見出しは純関数 `race_heading` / `race_heading_for_day`（発走時刻の引き当てを含む）に抽出して
    両経路で共有する（同一フォーマットの重複を解消）。**注記も両経路に出す**——マークだけ配って
    基準の但し書きを配らない非対称にしない。対話側は判定時刻がレースごとなので、一覧全体の
    基準時刻は書かず `※ [発走済] は表示時点で発走済み（結果確定の有無とは別）` の 1 行に留める。
@@ -124,14 +124,25 @@
   回帰は `test_pred_header.py` が旧形式 / 発走時刻付き / `--:--`＋`[発走済]` の 3 形式で張る
   （`--:--` はハイフンを含むため、末尾を素朴に切る regex だとこれだけ落ちる）。
 - **無言死そのものを塞ぐ**。regex の 1 本化は Python 内の複製を消すだけで、「壊れたら 0 件で
-  正常終了する」挙動は変わらない。**中身があるのに見出しが 1 件も取れなければ非 0 終了**する
-  （`pred_header.split_by_header` / `extract_preds.py`）。空入力は正当な 0 件なので落とさない。
+  正常終了する」挙動は変わらない。**確率テーブルらしい入力なのに見出しが 1 件も取れなければ
+  非 0 終了**する（`pred_header.split_by_header` は例外を投げ、終了コードへの変換は各スクリプトの
+  入口が行う）。「らしさ」は馬行（`  3 ウマ 12.3% …`）の有無で見る——**開催の無い日の
+  `この日の開催はありません: <date>` は正当な 0 レース**なので、ここを異常にすると
+  「見出し形式が変わった」と誤誘導することになる。
 - **言語をまたぐ契約は golden で結ぶ**。regex を 1 本化しても、Rust の出力と Python の期待値が
   リテラル一致頼みである限り、見出しを変えたとき**両方のテストが緑のままパイプラインだけ壊れる**。
-  `scripts/predict-check/testdata/pred_header_samples.txt` を生成側（`include_str!` で読む Rust の
-  `heading_samples_match_the_shared_golden`）と解析側（`test_pred_header.py`）の双方が参照し、
-  片方だけ変えれば必ずどちらかが落ちるようにした。
-- 診断メッセージ（不変条件の警告）は **stderr** に出す。stdout は上記パーサが読むデータチャネル。
+  `src/apps/predict/testdata/pred_header_samples.txt` を生成側（`include_str!` で読む Rust の
+  `heading_samples_match_the_shared_golden`）と解析側（`test_pred_header.py`。マッチだけでなく
+  どの値がどのフィールドに入るかまで見る）の双方が参照し、片方だけ変えれば必ずどちらかが落ちる
+  ようにした。**置き場所を predict crate 内にした**のは、`include_str!` が crate の外を指すと
+  sparse checkout / パッケージングでテストがコンパイルできなくなるため（Python 側はリポジトリ内の
+  相対参照で読めばよく、制約が緩い）。
+- 診断メッセージ（不変条件の警告・TZ 警告）は **stderr** に出す。stdout は上記パーサが読む
+  データチャネル。`warn_if_not_today_jst` の日付警告だけは predict-watch / odds-collect の既存の
+  ログ運用を変えないため stdout に据え置く。
+- **ヘッダ出力と警告は 1 関数（`print_overview_header` / `print_session_header`）に閉じる。**
+  出力順を直したときに元の呼び出しを消し忘れ、同じ警告が 2 度出る事故を実際に踏んだ。
+  呼び出し箇所を 1 つにして構造的に防ぐ。
 
 ## 関連
 
