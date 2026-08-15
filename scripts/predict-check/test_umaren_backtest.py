@@ -367,9 +367,10 @@ def test_recover_p_models_reads_dir_and_recovers():
     final = U.recompute_p_final(pm, {}, alpha=1.0, gamma=U.PRODUCTION_GAMMA)
     names = {1: "ウマA", 2: "ウマB", 3: "ウマC", 4: "ウマD"}
     # parse_pred フォーマット: 「--- レース N: 場 馬場 距離m ---」ヘッダ + 「馬番 名前 勝率% ...」行。
-    # 見出し末尾には #587 で「（発走 HH:MM）」「[発走済]」が付きうるので、その形で固定する
-    # （regex は末尾を緩く受けるだけなので旧形式も通る）。
-    body = "--- レース 1: 東京 芝 2000m（発走 10:35）[発走済] ---\n" + "".join(
+    # ここは **旧形式** で固定する。実入力（archived な bt_pred_*.txt と gen_win_backtest_data.sh の
+    # 生成分）が旧形式なので、その担保をテストから落とさない。#587 の新形式（「（発走 HH:MM）」
+    # 「[発走済]」）は test_pred_header.py が 3 形式まとめて張る。
+    body = "--- レース 1: 東京 芝 2000m ---\n" + "".join(
         f"  {um} {names[um]} {final[um]:.1f}% 0.0% 0.0%\n" for um in sorted(final))
     d = tempfile.mkdtemp()
     with open(os.path.join(d, "bt_pred_2026-01-01.txt"), "w") as f:

@@ -26,6 +26,8 @@ import sys
 from itertools import combinations
 from pathlib import Path
 
+from pred_header import HEADER_NUM_VENUE
+
 BUDGET = 5000
 WIN_BUDGET = 500  # 条件付き単勝の 1 発動あたり予算（発動馬が複数なら均等分配）
 
@@ -96,9 +98,10 @@ def parse_pred(path):
     # 期待フォーマット（gen_win_backtest_data.sh が生成）:
     #   --- レース N: 場名 芝|ダート 距離m ---
     #      馬番 馬名 勝率% ...
+    # paddock-predict の stdout を直接渡す場合、見出し末尾に `（発走 09:40）` `[発走済]` が
+    # 付きうる（#587）。契約は pred_header.HEADER_NUM_VENUE が持つ。
     text = Path(path).read_text()
-    # 距離の後ろは緩く受ける（#587 の「（発走 09:40）」「[発走済]」を許容・旧形式も可）。
-    blocks = re.split(r"--- レース (\d+): (\S+) \S+ \d+m[^\n]*---", text)
+    blocks = re.split(HEADER_NUM_VENUE, text)
     out = {}
     i = 1
     while i + 2 < len(blocks):

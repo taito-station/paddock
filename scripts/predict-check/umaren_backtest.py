@@ -68,6 +68,8 @@ import unicodedata
 from itertools import combinations, permutations
 from pathlib import Path
 
+from pred_header import HEADER_NUM_VENUE
+
 
 def largest_remainder(weights, units, minu=1):
     """重み比で units 口を整数配分（各目に最低 minu 口）。formation/konsen_backtest と同一実装。"""
@@ -148,8 +150,7 @@ def parse_races(path):
 def parse_pred(path):
     """predict 出力から (venue_jp, race_num) -> {umaban: win_prob(%)} を抽出。"""
     text = Path(path).read_text()
-    # 距離の後ろは緩く受ける（#587 の「（発走 09:40）」「[発走済]」を許容・旧形式も可）。
-    blocks = re.split(r"--- レース (\d+): (\S+) \S+ \d+m[^\n]*---", text)
+    blocks = re.split(HEADER_NUM_VENUE, text)
     out = {}
     i = 1
     while i + 2 < len(blocks):

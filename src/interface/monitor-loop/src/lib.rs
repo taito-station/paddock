@@ -123,6 +123,20 @@ pub fn warn_if_not_today_jst<Tz: TimeZone>(
              判定するため、当日以外の指定では{kind}判定が正しく機能しません。",
         );
     }
+    warn_if_not_jst(&now_local, kind);
+}
+
+/// 実行環境の TZ が JST(+09:00) か**だけ**を点検して警告する（#587 で [`warn_if_not_today_jst`]
+/// から分離）。
+///
+/// 「当日か」の点検を伴わないので、**当日以外の指定が正常な用途**からも呼べる
+/// （例: `predict --overview` の過去日見返し。ここで `warn_if_not_today_jst` を使うと
+/// 日付警告が毎回鳴って無意味になる）。TZ 前提そのものは同じ——post_time は JST 起算で、
+/// 発走状態は実行マシンの現在時刻の「時刻」とだけ比較するため、オフセットがずれると判定も狂う。
+pub fn warn_if_not_jst<Tz: TimeZone>(now_local: &DateTime<Tz>, kind: &str)
+where
+    Tz::Offset: std::fmt::Display,
+{
     let tz_offset = now_local.offset().fix().local_minus_utc();
     if tz_offset != JST_OFFSET_SECS {
         // 半端な TZ（例 +05:30）も正しく出せるよう ±HH:MM 表記にする。
@@ -140,6 +154,11 @@ pub fn warn_if_not_today_jst<Tz: TimeZone>(
 /// ローカル現在時刻で [`warn_if_not_today_jst`] を呼ぶ薄いラッパ（実運用の入口）。
 pub fn warn_if_not_today_jst_now(date: chrono::NaiveDate, kind: &str) {
     warn_if_not_today_jst(date, Local::now(), kind);
+}
+
+/// ローカル現在時刻で [`warn_if_not_jst`] を呼ぶ薄いラッパ（実運用の入口）。
+pub fn warn_if_not_jst_now(kind: &str) {
+    warn_if_not_jst(&Local::now(), kind);
 }
 
 /// 「発走前（`now <= post`）なのに結果取込済み」のレース件数を数える純関数（#459・防御チェック）。
@@ -503,6 +522,26 @@ mod tests {
             chrono::NaiveDate::from_ymd_opt(2026, 7, 22).unwrap(),
             now2,
             "収集対象",
+        );
+    }
+
+    #[test]
+    fn warn_if_not_jst_does_not_look_at_the_date() {
+        // #587: TZ だけを見る版。当日以外でも panic せず、日付は判定に使わない
+        // （--overview の過去日見返しから呼べることが導入理由）。
+        let jst = FixedOffset::east_opt(9 * 3600).unwrap();
+        warn_if_not_jst(
+            &jst.with_ymd_and_hms(2026, 7, 22, 12, 0, 0).unwrap(),
+            "発走状態",
+        );
+        warn_if_not_jst(
+            &jst.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
+            "発走状態",
+        );
+        let ist = FixedOffset::east_opt(5 * 3600 + 30 * 60).unwrap();
+        warn_if_not_jst(
+            &ist.with_ymd_and_hms(2026, 7, 22, 12, 0, 0).unwrap(),
+            "発走状態",
         );
     }
 }

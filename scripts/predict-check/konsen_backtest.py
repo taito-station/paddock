@@ -26,6 +26,8 @@ import re
 from itertools import combinations
 from pathlib import Path
 
+from pred_header import HEADER_NUM_VENUE
+
 BUDGET = 5000
 
 
@@ -88,8 +90,7 @@ def parse_pred(path):
     """predict 出力から (venue_jp, race_num) -> {umaban: win_prob} を抽出。"""
     text = Path(path).read_text()
     # 2 つのキャプチャ群 (race_num, venue) を持つため split の stride は 3（num, venue, body）。
-    # 距離の後ろは緩く受ける（#587 の「（発走 09:40）」「[発走済]」を許容・旧形式も可）。
-    blocks = re.split(r"--- レース (\d+): (\S+) \S+ \d+m[^\n]*---", text)
+    blocks = re.split(HEADER_NUM_VENUE, text)
     out = {}
     i = 1
     while i + 2 < len(blocks):

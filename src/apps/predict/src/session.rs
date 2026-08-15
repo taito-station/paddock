@@ -2,7 +2,9 @@ use std::collections::{HashMap, HashSet};
 use std::io::{self, BufRead, Write};
 
 use chrono::{Local, NaiveDate, NaiveDateTime, NaiveTime, Utc};
-use monitor_loop::{RaceStatus, classify, has_result};
+use monitor_loop::{
+    RaceStatus, classify, count_started_before_post, has_result, warn_if_not_jst_now,
+};
 use paddock_domain::{
     BetCombination, HorseNum, HorseProbability, PairEvDiagnostic, PinnedSelection, Portfolio,
     PortfolioBet, PortfolioConfig, RECOMMENDED_MARKET_BLEND_ALPHA, Race, RaceId, TrackCondition,
@@ -114,10 +116,12 @@ pub async fn run_session(
         conditions: &recorded,
         post_times: &post_times,
     };
-    // [発走済] の基準を対話・--skip-all でも明示する（ADR 0085 決定 3。マークだけ配って
-    // 但し書きを配らない非対称にしない）。判定時刻はレースごとなので、--overview のように
-    // 一覧全体の基準時刻は書かない。
-    println!("※ [発走済] は表示時点で発走済み（結果確定の有無とは別）");
+    // 発走判定は post_time（JST 起算）と実行マシンの現在時刻の「時刻」を比べるだけなので、
+    // TZ がずれると黙って狂う。当日か否かは見ない版で点検する（#587）。
+    warn_if_not_jst_now("発走状態");
+    let now = Local::now().naive_local();
+    println!("{}", session_note(date, now.date()));
+    warn_if_result_before_post(&races, &post_times, date, now);
     let mut last_input: Option<TrackCondition> = None;
     let options = RaceRunOptions { explain, skip_all };
 
@@ -498,7 +502,9 @@ pub async fn run_overview(
     // ——除外すると #551 が意図した「完了済みセッションの見返し」が壊れるため（#587）。
     let post_times = app.interactor.post_times_by_date(date).await?;
     // 一覧の判定時刻は 1 回だけ取る（行ごとに時刻が動くと下の注記と食い違うため）。
+    warn_if_not_jst_now("発走状態");
     let now = Local::now().naive_local();
+    warn_if_result_before_post(&races, &post_times, date, now);
 
     println!(
         "=== {date_str} EV 一覧（再表示・読み取り専用） — {} レース ===",
@@ -758,6 +764,57 @@ fn read_choice<R: BufRead>(reader: &mut R) -> anyhow::Result<char> {
     }
 }
 
+/// 開催日と実行日の関係（#587）。日付軸の判定を 1 か所に集め、発走判定とヘッダ注記で共有する。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MeetingPhase {
+    /// 開催日が過ぎている＝全レース発走済み（時刻を見るまでもない）。
+    Over,
+    /// 当日。発走済みかは時刻で決まる。
+    Today,
+    /// 開催日が未来＝全レース未発走（前日プリフェッチ運用で実際に起こる）。
+    Ahead,
+}
+
+fn meeting_phase(date: NaiveDate, today: NaiveDate) -> MeetingPhase {
+    match date.cmp(&today) {
+        std::cmp::Ordering::Less => MeetingPhase::Over,
+        std::cmp::Ordering::Equal => MeetingPhase::Today,
+        std::cmp::Ordering::Greater => MeetingPhase::Ahead,
+    }
+}
+
+/// `has_result` が依存する不変条件の崩れを検知して警告する（#587）。
+///
+/// `monitor_loop::has_result` は「発走前のレースは race_cards 由来で track_condition=NULL」という
+/// `races_by_date` の不変条件に乗った早期シグナル。崩れると**発走前のレースに `[発走済]` が付く**
+/// ——#587 が消そうとした誤読の逆向き（張れるレースを見送る）になる。監視側は同じ崩れを
+/// `count_started_before_post` で警告しており（#459）、その防御を CLI にも置く。
+///
+/// 時刻比較は同日でしか意味を持たないので当日のみ点検する（過去日の見返しでは、結果取込済みかつ
+/// `now.time() <= post_time` のレースが大量に該当してしまい、警告が総鳴りする）。
+fn warn_if_result_before_post(
+    races: &[Race],
+    post_times: &HashMap<RaceId, NaiveTime>,
+    date: NaiveDate,
+    now: NaiveDateTime,
+) {
+    if meeting_phase(date, now.date()) != MeetingPhase::Today {
+        return;
+    }
+    let broken = count_started_before_post(
+        races,
+        now.time(),
+        |race: &Race| post_times.get(&race.race_id).copied(),
+        has_result,
+    );
+    if broken > 0 {
+        println!(
+            "⚠ 発走前なのに結果が取り込まれているレースが {broken} 件あります。\
+             これらは実際には未発走でも [発走済] と表示されます。"
+        );
+    }
+}
+
 /// 実行時刻 `now` の時点でそのレースが発走済みかを判定する純関数（#587）。
 ///
 /// 時刻軸の判定は監視側と同じ [`classify`]（`monitor-loop`）に委譲し、ここは classify が持たない
@@ -783,12 +840,12 @@ fn is_started_at(
     post_time: Option<NaiveTime>,
     result_present: bool,
 ) -> bool {
-    match target.cmp(&now.date()) {
-        std::cmp::Ordering::Less => true,
-        std::cmp::Ordering::Greater => false,
-        std::cmp::Ordering::Equal => {
-            result_present
-                || classify(now.time(), post_time, result_present, None) == RaceStatus::Started
+    match meeting_phase(target, now.date()) {
+        MeetingPhase::Over => true,
+        MeetingPhase::Ahead => false,
+        // 結果はここで見終わっているので、classify には時刻軸だけを判定させる（第 3 引数は false）。
+        MeetingPhase::Today => {
+            result_present || classify(now.time(), post_time, false, None) == RaceStatus::Started
         }
     }
 }
@@ -811,19 +868,36 @@ fn race_heading_with(
 
 /// EV 一覧のヘッダに出す注記を組み立てる純関数（#587）。
 ///
-/// 開催日が過ぎている見返しでは、`[発走済]` は日付で決まっており実行時刻とは無関係になる。
-/// そこで「HH:MM 時点の判定」とだけ書くと、実行時刻より後の発走時刻にも `[発走済]` が付く理由が
-/// 読めない（例: 8/15 10:02 に 8/9 を見返すと 12:25 発走にも `[発走済]` が付く）。過去日は
-/// 開催そのものが終わっている旨に切り替え、当日・未来日は判定時刻を**日付込み**で出す。
+/// 当日以外は `[発走済]` が日付だけで決まるので、時刻を書くと誤読になる。過去日に
+/// 「HH:MM 時点の判定」とだけ書くと、実行時刻より後の発走時刻にも `[発走済]` が付く理由が
+/// 読めない（例: 8/15 10:02 に 8/9 を見返すと 12:25 発走にも `[発走済]` が付く）。未来日は
+/// 逆に 1 件もマークが付かないので、判定時刻の説明そのものが空振りする。
+///
+/// 当日だけ判定時刻を**日付込み**で出す。これは一覧全体を貫く基準時刻＝作成開始時刻であって、
+/// 実行が終わった時刻ではない（オッズ再取得を伴うと数分かかり、その間に発走した分は反映されない）。
 fn overview_note(date: NaiveDate, now: NaiveDateTime) -> String {
-    if date < now.date() {
-        "※ この開催は終了しています（全レース発走済）".to_string()
-    } else {
-        format!(
-            "※ {} 時点の判定。[発走済] は実行時刻に発走済み（結果確定の有無とは別）",
+    match meeting_phase(date, now.date()) {
+        MeetingPhase::Over => "※ この開催は終了しています（全レース発走済）".to_string(),
+        MeetingPhase::Ahead => "※ この開催はまだ実施されていません（全レース未発走）".to_string(),
+        MeetingPhase::Today => format!(
+            "※ 一覧作成開始 {} 時点の判定。[発走済] はその時刻に発走済み（結果確定の有無とは別）",
             now.format("%Y-%m-%d %H:%M")
-        )
+        ),
     }
+}
+
+/// 対話セッション（対話 / `--skip-all`）のヘッダに出す注記（#587）。
+///
+/// `[発走済]` の基準を `--overview` だけでなくこちらでも明示する（マークだけ配って但し書きを
+/// 配らない非対称にしない・ADR 0085 決定 3）。判定時刻はレースごとに取り直すので、
+/// 当日は一覧のような基準時刻を書かない。
+fn session_note(date: NaiveDate, today: NaiveDate) -> String {
+    match meeting_phase(date, today) {
+        MeetingPhase::Over => "※ この開催は終了しています（全レース発走済）",
+        MeetingPhase::Ahead => "※ この開催はまだ実施されていません（全レース未発走）",
+        MeetingPhase::Today => "※ [発走済] は表示時点で発走済み（結果確定の有無とは別）",
+    }
+    .to_string()
 }
 
 /// レース見出しの 1 行を組み立てる純関数（#587）。`run_race`（対話 / `--skip-all`）と
@@ -918,7 +992,7 @@ mod tests {
     use super::{
         is_started_at, make_bet_record, overview_note, race_heading, race_heading_with,
         read_choice, read_edited_amounts, read_track_condition, read_u64,
-        resolve_track_condition_default,
+        resolve_track_condition_default, session_note,
     };
     use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
     use paddock_domain::horse_result::HorseNum;
@@ -1035,16 +1109,38 @@ mod tests {
     }
 
     #[test]
-    fn overview_note_shows_full_timestamp_for_today_and_future() {
-        // 当日・未来日は判定時刻を日付込みで出す（開催日との一致が読めるように）。
+    fn overview_note_shows_full_timestamp_only_for_today() {
+        // 当日は判定時刻を日付込みで出す（開催日との一致が読めるように）。
         assert_eq!(
             overview_note(race_date(), today_at(10, 5)),
-            "※ 2026-08-09 10:05 時点の判定。[発走済] は実行時刻に発走済み（結果確定の有無とは別）"
+            "※ 一覧作成開始 2026-08-09 10:05 時点の判定。[発走済] はその時刻に発走済み（結果確定の有無とは別）"
         );
+    }
+
+    #[test]
+    fn overview_note_states_the_meeting_is_ahead_for_future_dates() {
+        // 未来日（前日プリフェッチ）は 1 件もマークが付かないので、判定時刻の説明は空振りする。
         let day_before = race_date().pred_opt().unwrap().and_time(t(22, 0));
         assert_eq!(
             overview_note(race_date(), day_before),
-            "※ 2026-08-08 22:00 時点の判定。[発走済] は実行時刻に発走済み（結果確定の有無とは別）"
+            "※ この開催はまだ実施されていません（全レース未発走）"
+        );
+    }
+
+    #[test]
+    fn session_note_switches_by_meeting_phase() {
+        // 対話 / --skip-all 側。当日は基準時刻を書かない（判定はレースごとに取り直すため）。
+        assert_eq!(
+            session_note(race_date(), race_date()),
+            "※ [発走済] は表示時点で発走済み（結果確定の有無とは別）"
+        );
+        assert_eq!(
+            session_note(race_date(), race_date().succ_opt().unwrap()),
+            "※ この開催は終了しています（全レース発走済）"
+        );
+        assert_eq!(
+            session_note(race_date(), race_date().pred_opt().unwrap()),
+            "※ この開催はまだ実施されていません（全レース未発走）"
         );
     }
 

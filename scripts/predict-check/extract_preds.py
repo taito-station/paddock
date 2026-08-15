@@ -11,6 +11,8 @@ import sys
 import re
 import json
 
+from pred_header import HEADER
+
 if len(sys.argv) < 2:
     print(__doc__, file=sys.stderr)
     sys.exit(1)
@@ -19,9 +21,7 @@ with open(sys.argv[1], encoding="utf-8") as f:
     lines = f.read().splitlines()
 races = []
 cur = None
-# 距離の後ろは緩く受ける。#587 で見出し末尾に「（発走 09:40）」「[発走済]」が付くようになり、
-# `(\d+)m ---` 決め打ちだと**例外を出さず 0 件**になる（無言死）。旧形式も引き続きマッチする。
-hdr = re.compile(r"^--- レース (\d+): (\S+) (\S+) (\d+)m[^\n]*---")
+hdr = re.compile("^" + HEADER)
 row = re.compile(r"^\s*(\d+)\s+(\S+)\s+([\d.]+)%\s+([\d.]+)%\s+([\d.]+)%\s*$")
 for ln in lines:
     m = hdr.match(ln)
