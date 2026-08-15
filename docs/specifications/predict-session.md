@@ -232,6 +232,8 @@ src/apps/predict/
 │   ├── cli.rs       # clap 引数定義
 │   ├── session.rs   # 対話セッションループ
 │   └── setup.rs     # DI 構築（analyze と同パターン）
+├── testdata/
+│   └── pred_header_samples.txt  # 見出しの golden（Rust ↔ Python の契約・#587）
 └── tests/
     └── overview.rs  # --overview の予想セッション非干渉（#555）
 ```
