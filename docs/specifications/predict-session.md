@@ -14,8 +14,9 @@ sources:
   - docs/original-docs/0048-retire-jra-odds-scraper-for-netkeiba.md
   - docs/original-docs/0054-kelly-staking-rejected.md
   - docs/original-docs/0085-cli-started-race-marking.md
+  - docs/original-docs/0086-started-race-record-confirmation.md
 distilled_from_sha: "4020e25"
-updated: "2026-08-15"
+updated: "2026-08-16"
 ---
 
 # predict バイナリ: 対話型レーシングセッション
@@ -179,6 +180,45 @@ $ paddock-predict --date 2026-06-01 --budget 10000
 `src/apps/predict/testdata/pred_header_samples.txt` で結ぶ**——生成側（Rust が `include_str!` で
 読む）と解析側が同じファイルを見るので、片方だけ変えれば必ずどちらかのテストが落ちる。
 診断メッセージは stdout（パーサのデータチャネル）を汚さないよう stderr へ出す。
+
+### 発走済みレースへの記録確認
+
+> **追加（#623・[ADR 0086](../original-docs/0086-started-race-record-confirmation.md)）**。
+> **対話セッションのみ**（`--skip-all` / `--overview` は買い目を記録しないので対象外）。
+
+上の `[発走済]` は**見出しに出るだけ**で、購入方法プロンプトにも記録にも効かない（ADR 0085 決定 2
+「除外ではなく区別」）。見落とすと「実際には買えなかったレースの買い目」が `predict_bets` に残り、
+`--summary` や回収率の集計を汚す。そこで**記録の手前にゲートを 1 枚置く**。
+
+```
+購入方法を選んでください [y=推奨通り / e=編集 / s=スキップ] > y
+
+⚠ このレースは発走済みです（発走 10:40）。
+買い目を記録しますか？ [y=記録する / それ以外=記録しない] >
+```
+
+- **既定は記録しない側**。`y` 以外（空入力・`n`・EOF を含む）はすべて「記録しない」に畳み、
+  `記録せず次のレースへ` で当該レースを抜ける。**不正入力の再プロンプトは置かない**
+  （既定が安全側なので入力待ちループが要らない。EOF → 記録しない は `read_choice` の `s` /
+  `read_u64` の 0 と同じ #179 の規律）。
+- **記録自体は禁止しない**。発走後に「実際に買った分」を遡って入力する運用（`--resume`・
+  夕方のまとめ入力）は正当なので、確認を経れば通す。
+- **確認の位置は `y`/`e` 選択後・賭け金合計 > 0 の確認後・払戻入力の直前**。`s` と賭けなしは
+  記録に至らないので確認しない（`s` で流す運用に余計な入力を足さない）。`--skip-all` は
+  `read_choice` の手前で早期 return するため、**構造的に**この分岐へ到達しない（フラグでの
+  出し分けは書かない）。`--overview` は `run_race` を通らない。
+- **発走判定の時刻は確認の直前に取り直す**（見出し表示時の判定を再利用しない）。見出し →
+  オッズ read-through → 馬場条件入力 → 金額編集の間に発走を跨いだレースこそ、防ぎたい対象。
+  そのため**見出しに `[発走済]` が無いのに確認が出ることがある**——プロンプトが発走時刻を出すので
+  理由は読める。
+- **判定の second source は作らない**。post_time の引き当てと `is_started_at` の呼び出しは
+  `is_started_for_day` に集約し、見出し（`race_heading_for_day`）と確認の両方がそこを通る。
+  両者が同じ答えを返すことは unit テストが張る。
+
+**却下した案**（詳細は [ADR 0086](../original-docs/0086-started-race-record-confirmation.md)）:
+記録の全面禁止（遡り入力を潰す）/ `read_choice` の直前に挟む（`s` 運用で毎レース 2 回入力）/
+払戻入力の後に挟む（脚数分の作業を捨てさせる）/ 見出し表示時の判定を再利用（発走を跨いだ分を取り逃す）/
+不正入力での再プロンプト（既定が決まっている確認では不要・EOF 挙動を壊しやすい）。
 
 ### e（編集）モード
 
