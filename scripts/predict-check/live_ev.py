@@ -21,6 +21,7 @@ import sys
 from itertools import combinations, permutations
 from pathlib import Path
 
+from odds_guard import is_payout_odds
 from pred_header import HEADER, NoHeaderFound, split_by_header
 
 CJ = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱"
@@ -146,7 +147,18 @@ def parse_wide(path):
             continue
         pid, pair, o = line.split("\t")
         a, b = sorted(int(x) for x in pair.split("-"))
-        d.setdefault(pid, {})[(a, b)] = float(o)
+        # ここに来る値は fetch_wide が中点化済みで low/high を分離できない。**二次防御**として
+        # 中点そのものが番兵に一致する場合（両端とも同じ番兵だったケース）だけ拾う——
+        # `[9999.9, 12.0]` の中点 5005.95 のような部分汚染はここでは検知できない。
+        # 端ごとの判定は fetch_wide（中点化の前）が担う（#621）。
+        try:
+            ov = float(o)
+        except ValueError:
+            print(f"[warn] 数値でないワイドオッズ {o!r}（pid={pid} {pair}）をスキップ", file=sys.stderr)
+            continue
+        if not is_payout_odds(ov):
+            continue
+        d.setdefault(pid, {})[(a, b)] = ov
     return d
 
 
@@ -164,8 +176,13 @@ def parse_exotic(path):
             continue
         # combination_key は "1-2"(馬連) / "1-2-3"(3連複) の '-' 区切り前提。区切り変更等で
         # 桁数が想定外になると的中判定が無言で 0 に縮退するため、警告して捨てる。
+        # **番兵チェックより前**に置く——後ろだと番兵行の分だけ区切り仕様変更の検知が鈍る。
         if len(nums) != arity.get(kind, len(nums)):
             print(f"[warn] 想定外の組番形式 {kind}={combo}（pid={pid}）をスキップ", file=sys.stderr)
+            continue
+        # netkeiba の未発売番兵（99999.9 等）は払戻倍率ではない。落とさないと 1 点で EV が
+        # 3 桁になり ROI が跳ねる（#621）。落とした組は「オッズ不明」＝買い目から外れる。
+        if not is_payout_odds(ov):
             continue
         if kind == "quinella":
             qn.setdefault(pid, {})[nums] = ov

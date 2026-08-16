@@ -108,6 +108,7 @@ paddock-analyze predict <race_id> --blend-alpha 0.2
 
 - 本番モデル: 市場単勝 α=0.2 ブレンド・m=10 縮約。
 - race_odds の `odds=0.0` 等の値域違反は #114 で恒久対処済み（手動 DELETE は不要）。保存側 `save_race_odds` が `OddsValue::try_from`（有限かつ ≥1.0）委譲ガードで無効行の INSERT を弾き、読み側 `find_race_odds` は値域違反のスカラー行を warn+skip して継続する（predict は全停止しない）。band 券種（ワイド等）の構造不正〈`odds_high` NULL / low>high〉のみ意図的に stop する（残骸ではなくバグ検知）。golden DB に残骸は無く、旧 SQLite 由来のダンプを取り込む等で残骸を抱えた DB に限り `DELETE FROM race_odds WHERE odds < 1.0` で掃除する。
+- **netkeiba の未発売番兵**（ワイド `9999.9` / 馬連・馬単・三連複 `99999.9` / 三連単 `999999.9`）も同じ `OddsValue::try_from` が弾く（#621/ADR 0086）。払戻倍率ではないので EV に入れない——入ると 1 点で EV が 3 桁になり参考 ROI が跳ねる。**既に DB にある番兵行は読み出しで無害化されるので DELETE 不要**（`race_odds_snapshots` は再取得不能資産なので消さない）。番兵は「未発売」という正常な状態なのでログは `debug`（値域違反の warn とは別扱い）。**ただし実地のワイド未発売行は保存時 `warn` のまま**——netkeiba が `["9999.9", "0.0", "--"]` の形で返し、相方 `0.0` が値域違反として warn 側に優先されるため（読み出し時は成分ごとの判定なので `debug`）。**分岐は券種でなく行の成分の内訳**で決まる。分析スクリプト側は `scripts/predict-check/odds_guard.py` が同じ番兵リストで除外する（psql/TSV 直読みは Rust のガードを通らないため）。
 
 ### 3. EV 判定 → 買い目決定
 

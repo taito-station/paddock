@@ -38,8 +38,9 @@ sources:
   - docs/original-docs/0076-roi-gate-uncalibrated-under-ev-layer-separation.md
   - docs/original-docs/0078-pin-bet-selection-across-sweeps.md
   - docs/original-docs/0079-roi-gate-display-kept-with-unreachable-note.md
-distilled_from_sha: "75c8e79"
-updated: "2026-08-12"
+  - docs/original-docs/0086-netkeiba-unpriced-sentinel-is-not-odds.md
+distilled_from_sha: "b26e5cd"
+updated: "2026-08-16"
 ---
 
 # プロダクト目標・成功条件・非目標（D01）
@@ -71,7 +72,7 @@ paddock が何を目指し、何を達成したら成功で、**何をやらな�
 <!-- REQ:begin D01 -->
 | REQ-ID | 要件 | 検証手段 | 出典 | status |
 |---|---|---|---|---|
-| REQ-D01-001 | 張るレースは ROI ≥ 100% のものだけに限る。閾値は引き下げない。**ただし現行の参考ROIはこのゲートの判定指標として機能していない**（下記「ゲートの現況」）——ゲートを緩める根拠にはならないので、閾値の引き下げは引き続き行わない | ADR 0040 の再現方法（保存済み `race_odds` に `analyze predict --blend-alpha 0.2` と `scripts/predict-check/live_ev.py` を当てて全 3 券種の ROI 分布を出す。**`analyze predict` は集計統計に `as_of=None` を使うので過去レース再評価ではリークする**——ただし +EV を多く見せる向きなので「+EV 帯が薄い」という結論には保守的）を再実行し、**閾値を下げると −EV を買うことになる**ことを確認する。あわせて `scripts/predict-check/gate_calibration.py`（ADR 0076 の再現方法）で判定ROIと実現ROIの較正を測り直す。ADR 0040 時点の実測は 69R で平均 ROI 73.1% / 最高 97% / +EV 0 本、ADR 0076 の実測は 182R で判定ROI 平均 23.2% / 最高 76.8% / ゲート通過 0 本 | [ADR 0040](../original-docs/0040-ev-gate-threshold-lowering-rejected.md) / [ADR 0076](../original-docs/0076-roi-gate-uncalibrated-under-ev-layer-separation.md) / [ADR 0079](../original-docs/0079-roi-gate-display-kept-with-unreachable-note.md)（表示と運用記述） | Confirmed |
+| REQ-D01-001 | 張るレースは ROI ≥ 100% のものだけに限る。閾値は引き下げない。**ただし現行の参考ROIはこのゲートの判定指標として機能していない**（下記「ゲートの現況」）——ゲートを緩める根拠にはならないので、閾値の引き下げは引き続き行わない | ADR 0040 の再現方法（保存済み `race_odds` に `analyze predict --blend-alpha 0.2` と `scripts/predict-check/live_ev.py` を当てて全 3 券種の ROI 分布を出す。**`analyze predict` は集計統計に `as_of=None` を使うので過去レース再評価ではリークする**——ただし +EV を多く見せる向きなので「+EV 帯が薄い」という結論には保守的）を再実行し、**閾値を下げると −EV を買うことになる**ことを確認する。あわせて `scripts/predict-check/gate_calibration.py`（ADR 0076 の再現方法）で判定ROIと実現ROIの較正を測り直す。ADR 0040 時点の実測は 69R で平均 ROI 73.1% / 最高 97% / +EV 0 本、ADR 0076 の実測は 182R で判定ROI 平均 23.2% / 最高 76.8% / ゲート通過 0 本（**この測定は #621 の番兵除去前**。判定ROI の出所は `live_ev_snapshots.roi` ＝ predict-watch が保存済みの計算結果で、netkeiba の未発売番兵が EV を 3 桁にする経路はここ。**#621 の修正では直らない**ので、取り直しには番兵除去後の記録が要る（#625）。なお市場整合ROI 側は式の上で `o` が約分されるためほぼ無影響） | [ADR 0040](../original-docs/0040-ev-gate-threshold-lowering-rejected.md) / [ADR 0076](../original-docs/0076-roi-gate-uncalibrated-under-ev-layer-separation.md) / [ADR 0079](../original-docs/0079-roi-gate-display-kept-with-unreachable-note.md)（表示と運用記述） | Confirmed |
 | REQ-D01-002 | 順位付けは blended 確率、EV は純モデル確率 × 市場オッズで計算する（確率と買い方の層分離） | `cargo test -p paddock-domain` の EV 層テスト（純モデル確率が EV 経路に渡ることを固定） | [ADR 0055](../original-docs/0055-ev-layer-separation-circular-break.md) | Confirmed |
 | REQ-D01-003 | 軸は事前データで確定し、直前オッズでは動かさない（用途はズレ増額のみ・軸フリップ禁止）。**軸だけでなく相手・混戦判定も固定する**（実装は REQ-D23-007） | `scripts/predict-check/gate_calibration.py` の「軸（◎）の安定性」節が **`0/N`**（発走前に 2 スイープ以上あったレースで軸が入れ替わらない）。目視のログ突き合わせでは取りこぼす——ADR 0078 以前は 154R 中 軸 28R・相手 62R が黙って入れ替わっていた。機械検査は `cargo test -p paddock-domain` の `pinned_selection_survives_market_movement_while_roi_moves`（選定は不変・ROI は動く）が張る | [ADR 0060](../original-docs/0060-betting-axis-lock-preclose-topup.md) / [ADR 0078](../original-docs/0078-pin-bet-selection-across-sweeps.md) | Confirmed |
 | REQ-D01-004 | ADR 0052 と同一条件（α=0.2・縮約 / 冪較正フラグなし）のトップ選好馬の単勝的中率が 28% を下回らない（890R 実測 29.9%） | `paddock-analyze backtest --from 2026-03-15 --to 2026-06-21 --blend-alpha 0.2` の `win_hit_rate`（ADR 0052 の再現方法と同じコマンド。`backtest` は m / 冪較正を既定適用しないので、本番構成で測るならフラグを明示したうえで閾値ごと測り直す） | [ADR 0052](../original-docs/0052-alpha-blend-removal-rejected.md) | Confirmed |

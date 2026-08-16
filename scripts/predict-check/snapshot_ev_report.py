@@ -41,6 +41,7 @@ from collections import defaultdict
 from pathlib import Path
 
 import live_ev as L
+from odds_guard import is_payout_odds, is_sentinel
 
 # snapshots から集計に使う券種（live_ev の全3券種 ROI に必要な分）。単勝は出走馬の確定に使う。
 WANT_BET_TYPES = ("win", "quinella", "trio", "wide")
@@ -78,13 +79,24 @@ def group_snapshots(rows):
             # 先に全数値化を済ませてから race/time へ書く。これで破損行（非数値）が
             # defaultdict 経由で空の phantom snapshot 時点を生成し、最終時点を上書きするのを防ぐ。
             odds = float(r["odds"])
+            # 番兵（99999.9 等）は払戻倍率ではない（#621）。band は中点化の前に見る。
+            # **単勝は番兵だけを見る**——win は「出走馬の確定」にも使う（下の races 構築）ので、
+            # 下限違反まで落とすと出走馬集合が縮んで ROI の分母が変わる。従来の挙動を保つ。
+            unusable = is_sentinel(odds) if bt == "win" else not is_payout_odds(odds)
+            if unusable:
+                continue
             if bt == "win":
                 book, key, val = "win", int(r["combination_key"]), odds
             elif bt == "wide":
                 hi = r["odds_high"]
                 if hi in (None, "", "\\N"):
                     continue  # mid を出せない異常行は捨てる
-                book, key, val = "wide", _combo(r["combination_key"]), (odds + float(hi)) / 2.0
+                # 先に float 化する。is_payout_odds は非数値を False に畳むので、これを先に
+                # 通すと破損行が warn 経路（下の except）へ行かず無言で消える。
+                hi = float(hi)
+                if not is_payout_odds(hi):
+                    continue
+                book, key, val = "wide", _combo(r["combination_key"]), (odds + hi) / 2.0
             else:  # quinella / trio
                 book, key, val = bt, _combo(r["combination_key"]), odds
             race = races.get(rid)

@@ -68,6 +68,7 @@ import unicodedata
 from itertools import combinations, permutations
 from pathlib import Path
 
+from odds_guard import is_payout_odds
 from pred_header import HEADER_NUM_VENUE, NoHeaderFound, split_by_header
 
 
@@ -218,6 +219,16 @@ def parse_exotic(path):
             continue
         pid, bt, key, odds = line.split("\t")
         if bt not in ("quinella", "trio", "exacta"):  # 想定外 bet_type を無視（TSV 手編集への防御）
+            continue
+        # netkeiba の未発売番兵（99999.9 等）は払戻倍率ではないので採用しない（#621）。
+        # 数値でない行は別扱いで警告する（従来は float() が ValueError で落としていた。
+        # 番兵と同じく黙って捨てると、TSV 生成側の破損に気づけなくなる）。
+        try:
+            float(odds)
+        except ValueError:
+            print(f"[warn] 数値でないオッズ {odds!r}（pid={pid} {bt} {key}）をスキップ", file=sys.stderr)
+            continue
+        if not is_payout_odds(odds):
             continue
         slot = out.setdefault(pid, {"quinella": {}, "trio": {}, "exacta": {}})
         if bt == "exacta":
