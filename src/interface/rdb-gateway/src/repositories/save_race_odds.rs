@@ -11,6 +11,15 @@ fn is_invalid_odds(v: f64) -> bool {
     OddsValue::try_from(v).is_err()
 }
 
+/// 未発売の番兵（#621）か。保存を弾く点は値域違反と同じだが、こちらは**異常ではない**ので
+/// ログレベルを下げる（1 レースに数百件出るため、warn だと本来の値域違反が埋もれる）。
+fn is_unpriced_sentinel(v: f64) -> bool {
+    matches!(
+        OddsValue::try_from(v),
+        Err(paddock_domain::Error::UnpricedSentinel(_))
+    )
+}
+
 /// 1 レース分のオッズを 1 トランザクションで upsert する。
 /// 主キー `(race_id, bet_type, combination_key)` で衝突した行は最新値で上書きする。
 ///
@@ -33,14 +42,25 @@ pub async fn save_race_odds(pool: &PgPool, record: &RaceOddsRecord) -> Result<()
     let fetched_at = record.fetched_at.to_rfc3339();
     for row in &record.rows {
         if is_invalid_odds(row.odds) || row.odds_high.is_some_and(is_invalid_odds) {
-            tracing::warn!(
-                race_id = record.race_id.value(),
-                bet_type = row.bet_type,
-                key = row.combination_key,
-                odds = row.odds,
-                odds_high = row.odds_high,
-                "race_odds の不正オッズ行を保存せずスキップした"
-            );
+            if is_unpriced_sentinel(row.odds) || row.odds_high.is_some_and(is_unpriced_sentinel) {
+                tracing::debug!(
+                    race_id = record.race_id.value(),
+                    bet_type = row.bet_type,
+                    key = row.combination_key,
+                    odds = row.odds,
+                    odds_high = row.odds_high,
+                    "未発売の組み合わせを保存せずスキップした"
+                );
+            } else {
+                tracing::warn!(
+                    race_id = record.race_id.value(),
+                    bet_type = row.bet_type,
+                    key = row.combination_key,
+                    odds = row.odds,
+                    odds_high = row.odds_high,
+                    "race_odds の不正オッズ行を保存せずスキップした"
+                );
+            }
             continue;
         }
         sqlx::query(

@@ -21,6 +21,7 @@ import sys
 from itertools import combinations, permutations
 from pathlib import Path
 
+from odds_guard import is_payout_odds
 from pred_header import HEADER, NoHeaderFound, split_by_header
 
 CJ = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱"
@@ -161,6 +162,10 @@ def parse_exotic(path):
         try:
             ov = float(o)
         except ValueError:
+            continue
+        # netkeiba の未発売番兵（99999.9 等）は払戻倍率ではない。落とさないと 1 点で EV が
+        # 3 桁になり ROI が跳ねる（#621）。落とした組は「オッズ不明」＝買い目から外れる。
+        if not is_payout_odds(ov):
             continue
         # combination_key は "1-2"(馬連) / "1-2-3"(3連複) の '-' 区切り前提。区切り変更等で
         # 桁数が想定外になると的中判定が無言で 0 に縮退するため、警告して捨てる。

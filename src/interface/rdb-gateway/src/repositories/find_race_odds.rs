@@ -224,6 +224,19 @@ fn rows_to_race_odds(race_id: &RaceId, rows: Vec<OddsRow>) -> Result<Option<Race
 fn parse_odds_value(race_id: &RaceId, row: &OddsRow, value: f64) -> Option<OddsValue> {
     match OddsValue::try_from(value) {
         Ok(v) => Some(v),
+        // 未発売の番兵（#621）は**異常ではない**——「まだ売れていない」という正常な状態で、
+        // 1 レースに数百件出る（実測: 三連複 560 点中 190 点）。warn で出すと本来の値域違反が
+        // 埋もれ、`--overview` の出力も 2 万行のログで埋まる。debug に落として黙って読み飛ばす。
+        Err(paddock_domain::Error::UnpricedSentinel(_)) => {
+            tracing::debug!(
+                race_id = race_id.value(),
+                bet_type = row.bet_type,
+                key = row.combination_key,
+                odds = value,
+                "未発売の組み合わせを読み飛ばした"
+            );
+            None
+        }
         Err(e) => {
             tracing::warn!(
                 race_id = race_id.value(),

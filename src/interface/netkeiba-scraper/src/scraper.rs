@@ -522,6 +522,59 @@ mod tests {
     }
 
     #[test]
+    fn skips_netkeiba_unpriced_sentinels() {
+        // netkeiba は未発売の組み合わせに 99999.9 等の番兵を入れる。払戻倍率ではないので
+        // ドメインに載せない（#621）。従来ワイドだけが落ちていたのは相方 odds_high=0.0 が
+        // 下限違反だったからで、スカラー券種（馬連・三連複・三連単）は素通りしていた。
+        let race_id = RaceId::try_from("2026-1-hakodate-6-5R").unwrap();
+        let exotic = FetchedExoticOdds {
+            quinella: vec![
+                FetchedComboOdds {
+                    combination: Pair::try_from((h(1), h(2))).unwrap(),
+                    odds: 99_999.9, // 未発売 → skip
+                    popularity: None,
+                },
+                FetchedComboOdds {
+                    combination: Pair::try_from((h(3), h(4))).unwrap(),
+                    odds: 12.4, // 妥当 → 残す
+                    popularity: None,
+                },
+            ],
+            trio: vec![FetchedComboOdds {
+                combination: Triple::try_from((h(3), h(7), h(15))).unwrap(),
+                odds: 99_999.9, // #621 の実害そのもの（EV=138.44 を作っていた脚）
+                popularity: None,
+            }],
+            trifecta: vec![
+                FetchedComboOdds {
+                    combination: OrderedTriple::try_from((h(3), h(1), h(2))).unwrap(),
+                    odds: 999_999.9, // 三連単の番兵 → skip
+                    popularity: None,
+                },
+                FetchedComboOdds {
+                    combination: OrderedTriple::try_from((h(1), h(2), h(3))).unwrap(),
+                    odds: 111_971.9, // 正当な高配当 → 残す（上限方式を採らない理由）
+                    popularity: None,
+                },
+            ],
+            ..FetchedExoticOdds::default()
+        };
+
+        let got = assemble_netkeiba(&FetchedOdds::default(), &exotic, race_id);
+        assert_eq!(got.quinella.len(), 1, "番兵の馬連だけ落ちる");
+        assert!(
+            got.quinella
+                .contains_key(&Pair::try_from((h(3), h(4))).unwrap())
+        );
+        assert!(got.trio.is_empty(), "番兵の三連複は載せない");
+        assert_eq!(got.trifecta.len(), 1, "正当な高配当は残す");
+        assert!(
+            got.trifecta
+                .contains_key(&OrderedTriple::try_from((h(1), h(2), h(3))).unwrap())
+        );
+    }
+
+    #[test]
     fn empty_inputs_yield_empty_race_odds() {
         let race_id = RaceId::try_from("2026-1-hakodate-6-5R").unwrap();
         let got = assemble_netkeiba(

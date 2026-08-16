@@ -41,6 +41,7 @@ from collections import defaultdict
 from pathlib import Path
 
 import live_ev as L
+from odds_guard import is_payout_odds
 
 # snapshots から集計に使う券種（live_ev の全3券種 ROI に必要な分）。単勝は出走馬の確定に使う。
 WANT_BET_TYPES = ("win", "quinella", "trio", "wide")
@@ -78,12 +79,17 @@ def group_snapshots(rows):
             # 先に全数値化を済ませてから race/time へ書く。これで破損行（非数値）が
             # defaultdict 経由で空の phantom snapshot 時点を生成し、最終時点を上書きするのを防ぐ。
             odds = float(r["odds"])
+            # 番兵（99999.9 等）は払戻倍率ではない（#621）。band は中点化の前に見る。
+            if not is_payout_odds(odds):
+                continue
             if bt == "win":
                 book, key, val = "win", int(r["combination_key"]), odds
             elif bt == "wide":
                 hi = r["odds_high"]
                 if hi in (None, "", "\\N"):
                     continue  # mid を出せない異常行は捨てる
+                if not is_payout_odds(hi):
+                    continue
                 book, key, val = "wide", _combo(r["combination_key"]), (odds + float(hi)) / 2.0
             else:  # quinella / trio
                 book, key, val = bt, _combo(r["combination_key"]), odds

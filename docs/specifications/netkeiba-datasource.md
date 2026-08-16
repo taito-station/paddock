@@ -12,6 +12,7 @@ sources:
   - docs/original-docs/0048-retire-jra-odds-scraper-for-netkeiba.md
   - docs/original-docs/0049-netkeiba-odds-transient-retry-and-degraded-exit.md
   - docs/original-docs/0075-unsupported-race-skip-exit-zero.md
+  - docs/original-docs/0086-netkeiba-unpriced-sentinel-is-not-odds.md
 distilled_from_sha: "4e9f50e"
 updated: "2026-08-12"
 ---
@@ -156,6 +157,29 @@ paddock 内部の `RaceId` も同じ 12 桁構成要素から導出する（既�
 - オッズは時々刻々変動するため、**取得のたびに最新値で upsert(上書き)** する。履歴保持はスコープ外。
 - ドメイン `RaceOdds.win`(`HashMap<HorseNum, OddsValue>`)は人気を持たないため、人気は本テーブルのカラムとして
   scrape 結果から直接保存する（ドメイン型は変更しない）。
+
+### 未発売の番兵値（#621・[ADR 0086](../original-docs/0086-netkeiba-unpriced-sentinel-is-not-odds.md)）
+
+netkeiba は**未発売・該当なしの組み合わせ**に固定の番兵値を入れる。**払戻倍率ではない**ので
+オッズとして採用しない。
+
+| 券種 | 番兵値 |
+|---|---|
+| ワイド | `9999.9`（相方が `odds_high=0.0` になる） |
+| 馬連 / 馬単 / 三連複 | `99999.9` |
+| 三連単 | `999999.9` |
+
+- **判定は特定値の除外**（epsilon `1e-6` 比較）。**上限方式は採らない**——三連単には `111971.9` /
+  `200886.6` のような正当な高配当が実在し、上限は大穴を殺す。
+- 判定は `OddsValue::try_from`（`src/domain/src/odds/odds_value.rs`）の 1 か所。`save_race_odds` と
+  `find_race_odds` が委譲しているので**保存・読み出しの双方に効き、既に DB にある番兵行も
+  読み出し時に無害化**される（既存行の DELETE は不要）。
+- 番兵は `Error::UnpricedSentinel` として値域違反（`OutOfRange`）と区別し、**ログは `debug`**。
+  「まだ売れていない」という正常な状態で 1 レースに数百件出るため、warn にすると本来の値域違反が
+  埋もれる。
+- 番兵リストの正本は `src/domain/src/odds/testdata/netkeiba_sentinels.txt`。**Python の分析経路**
+  （`scripts/predict-check/odds_guard.py`）も同じファイルを読む——`scripts/` は psql / TSV で DB を
+  直読みするため、Rust の値オブジェクトを一切通らない。
 
 ### 保存したオッズの読み出しと read-through（ADR 0010）
 

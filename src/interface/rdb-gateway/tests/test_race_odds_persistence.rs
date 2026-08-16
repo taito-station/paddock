@@ -418,6 +418,75 @@ async fn save_skips_invalid_odds_row(pool: sqlx::PgPool) {
 }
 
 #[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn save_skips_netkeiba_sentinel_row(pool: sqlx::PgPool) {
+    let repo = PostgresRepository::new(pool);
+    // netkeiba が未発売の組み合わせに入れる番兵値（三連複 99999.9）。**下限違反ではないので
+    // 従来のガードも DB の CHECK も通ってしまい**、払戻倍率として EV に食われていた(#621)。
+    let triple = Triple::try_from((horse(3), horse(7), horse(15))).unwrap();
+    repo.save_race_odds(&RaceOddsRecord {
+        race_id: race_id(),
+        fetched_at: fetched_at(),
+        rows: vec![
+            OddsRow {
+                bet_type: "win".to_string(),
+                combination_key: "1".to_string(),
+                odds: 3.5,
+                odds_high: None,
+                popularity: None,
+            },
+            OddsRow::trio(triple, 99_999.9),
+        ],
+    })
+    .await
+    .unwrap();
+
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM race_odds WHERE race_id = $1")
+        .bind(race_id().value())
+        .fetch_one(&repo.pool)
+        .await
+        .unwrap();
+    assert_eq!(count, 1, "番兵行を除いた有効 1 行のみ保存される");
+    // snapshots にも積まれない（save のガードは両 INSERT の手前にある）。
+    let snap: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM race_odds_snapshots WHERE race_id = $1")
+            .bind(race_id().value())
+            .fetch_one(&repo.pool)
+            .await
+            .unwrap();
+    assert_eq!(snap, 1, "snapshots 側も番兵行は積まれない");
+}
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn sentinel_odds_row_is_skipped_on_read(pool: sqlx::PgPool) {
+    let repo = PostgresRepository::new(pool);
+    save_sample(&repo).await; // win/place を投入
+    // **既に DB に入っている番兵行**（#621 の修正前に保存された 1,599 行相当）を再現する。
+    // 下限違反ではないので CHECK 制約を外す必要が無い点が `invalid_odds_row_is_skipped_not_errored`
+    // との違い——現行の制約下でも入る値であり、だからこそ読み出し側で無害化する必要がある。
+    sqlx::query(
+        "INSERT INTO race_odds (race_id, bet_type, combination_key, odds, odds_high, popularity, fetched_at) \
+         VALUES ($1, 'trio', '3-7-15', 99999.9, NULL, NULL, $2)",
+    )
+    .bind(race_id().value())
+    .bind(fetched_at().to_rfc3339())
+    .execute(&repo.pool)
+    .await
+    .unwrap();
+
+    let odds = repo
+        .find_race_odds(&race_id(), None)
+        .await
+        .unwrap()
+        .expect("有効な win/place があるので Some");
+    assert_eq!(odds.win.len(), 2);
+    assert_eq!(odds.place.len(), 2);
+    assert!(
+        odds.trio.is_empty(),
+        "番兵行は読み飛ばされる（既存行を DELETE せずに無害化する経路）"
+    );
+}
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
 async fn save_skips_row_with_invalid_odds_high(pool: sqlx::PgPool) {
     let repo = PostgresRepository::new(pool);
     // 下限は有効だが上限が値域違反（odds_high=0.0）の複勝行。保存ガードの

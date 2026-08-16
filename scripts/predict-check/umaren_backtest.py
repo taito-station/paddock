@@ -68,6 +68,7 @@ import unicodedata
 from itertools import combinations, permutations
 from pathlib import Path
 
+from odds_guard import is_payout_odds
 from pred_header import HEADER_NUM_VENUE, NoHeaderFound, split_by_header
 
 
@@ -218,6 +219,9 @@ def parse_exotic(path):
             continue
         pid, bt, key, odds = line.split("\t")
         if bt not in ("quinella", "trio", "exacta"):  # 想定外 bet_type を無視（TSV 手編集への防御）
+            continue
+        # netkeiba の未発売番兵（99999.9 等）は払戻倍率ではないので採用しない（#621）。
+        if not is_payout_odds(odds):
             continue
         slot = out.setdefault(pid, {"quinella": {}, "trio": {}, "exacta": {}})
         if bt == "exacta":

@@ -37,6 +37,8 @@ import subprocess
 import sys
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
+
+from odds_guard import is_payout_odds
 from pathlib import Path
 
 from umaren_backtest import spearman
@@ -381,9 +383,17 @@ def load_odds(tsv_text):
             continue
         rid, bt, key, odds, odds_high, fetched = cells
         try:
-            o = float(odds)
+            low = float(odds)
+            # 番兵（99999.9 等）は払戻倍率ではないので採用しない（#621）。band は**中点化の前**に
+            # 見る——中点にすると番兵と実値の平均になって検知できなくなる。
+            if not is_payout_odds(low):
+                continue
+            o = low
             if odds_high:
-                o = (o + float(odds_high)) / 2.0
+                high = float(odds_high)
+                if not is_payout_odds(high):
+                    continue
+                o = (low + high) / 2.0
         except ValueError:
             continue
         if o <= 0:
