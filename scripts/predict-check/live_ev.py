@@ -6,7 +6,8 @@
 model 勝率→着順確率に変換し、実オッズを掛けて ROI を出す。
 
 入力はすべて中間 TSV/テキスト（`refresh_ev.sh` が生成。konsen_backtest と同じ流儀）:
-  --pred     predict 確率テーブル（`--- レース N: 場 馬場 距離m ---` + `馬番 名前 勝率% ...`）
+  --pred     predict 確率テーブル（`--- レース N: 場 馬場 距離m ---` + `馬番 名前 勝率% ...`。
+             見出し末尾には `（発走 09:40）` `[発走済]` が付きうる・#587）
   --horses   `pid<TAB>馬番<TAB>馬名<TAB>騎手<TAB>人気<TAB>単勝` （DB race_odds.win）
   --exotic   `pid<TAB>quinella|trio<TAB>組(a-b[-c])<TAB>オッズ` （DB race_odds）
   --wide     `pid<TAB>a-b<TAB>mid` （fetch_wide.py / netkeiba type=5）
@@ -19,6 +20,8 @@ import re
 import sys
 from itertools import combinations, permutations
 from pathlib import Path
+
+from pred_header import HEADER, NoHeaderFound, split_by_header
 
 CJ = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱"
 BET_LABEL: dict[str, str] = {"wide": "ワイド", "quinella": "馬連", "trio": "3連複"}
@@ -99,7 +102,7 @@ def p_pair_top3(probs, a, b):
 # --- 入力パース ---
 def parse_pred(path):
     text = Path(path).read_text()
-    blocks = re.split(r"--- レース (\d+): (\S+) (\S+) (\d+)m ---", text)
+    blocks = split_by_header(text, HEADER, path)
     out = {}
     i = 1
     while i + 4 < len(blocks):
@@ -368,4 +371,9 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    # 見出しが取れない異常は案内文だけを出して非 0 終了する（#587）。traceback だと
+    # せっかく 1 本化した案内が埋もれる。
+    try:
+        main()
+    except NoHeaderFound as e:
+        sys.exit(str(e))

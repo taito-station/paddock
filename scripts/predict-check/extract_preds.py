@@ -11,6 +11,8 @@ import sys
 import re
 import json
 
+from pred_header import HEADER, NoHeaderFound, ensure_header_found
+
 if len(sys.argv) < 2:
     print(__doc__, file=sys.stderr)
     sys.exit(1)
@@ -19,7 +21,7 @@ with open(sys.argv[1], encoding="utf-8") as f:
     lines = f.read().splitlines()
 races = []
 cur = None
-hdr = re.compile(r"^--- レース (\d+): (\S+) (\S+) (\d+)m ---")
+hdr = re.compile("^" + HEADER)
 row = re.compile(r"^\s*(\d+)\s+(\S+)\s+([\d.]+)%\s+([\d.]+)%\s+([\d.]+)%\s*$")
 for ln in lines:
     m = hdr.match(ln)
@@ -34,6 +36,15 @@ for ln in lines:
             cur["horses"].append({
                 "num": int(r.group(1)), "name": r.group(2),
                 "win": float(r.group(3)), "place": float(r.group(4)), "show": float(r.group(5))})
+
+# 確率テーブルらしい入力なのに 1 レースも取れないのは、入力違いか見出し形式の変化（#587）。
+# ここで落とさないと空配列を吐いて exit 0 し、下流の回収率検証が「0 件で成功」として静かに回る。
+# 開催の無い日（「この日の開催はありません: …」の 1 行）は馬行が無いので通常どおり [] を返す。
+# 判定は split_by_header と同じ ensure_header_found（このスクリプトは行走査なので split は使わない）。
+try:
+    ensure_header_found("\n".join(lines), len(races), sys.argv[1])
+except NoHeaderFound as e:
+    sys.exit(str(e))
 
 json.dump(races, sys.stdout, ensure_ascii=False)
 print(f"# {len(races)} races", file=sys.stderr)

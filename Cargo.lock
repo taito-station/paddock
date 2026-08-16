@@ -1990,6 +1990,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "clap",
+ "monitor-loop",
  "netkeiba-scraper",
  "paddock-config",
  "paddock-domain",

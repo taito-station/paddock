@@ -68,6 +68,8 @@ import unicodedata
 from itertools import combinations, permutations
 from pathlib import Path
 
+from pred_header import HEADER_NUM_VENUE, NoHeaderFound, split_by_header
+
 
 def largest_remainder(weights, units, minu=1):
     """重み比で units 口を整数配分（各目に最低 minu 口）。formation/konsen_backtest と同一実装。"""
@@ -148,7 +150,7 @@ def parse_races(path):
 def parse_pred(path):
     """predict 出力から (venue_jp, race_num) -> {umaban: win_prob(%)} を抽出。"""
     text = Path(path).read_text()
-    blocks = re.split(r"--- レース (\d+): (\S+) \S+ \d+m ---", text)
+    blocks = split_by_header(text, HEADER_NUM_VENUE, path)
     out = {}
     i = 1
     while i + 2 < len(blocks):
@@ -1168,4 +1170,9 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    # 見出しが取れない異常は案内文だけを出して非 0 終了する（#587）。traceback だと
+    # せっかく 1 本化した案内が埋もれる。
+    try:
+        main()
+    except NoHeaderFound as e:
+        sys.exit(str(e))

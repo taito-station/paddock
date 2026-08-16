@@ -26,6 +26,8 @@ import sys
 from itertools import combinations
 from pathlib import Path
 
+from pred_header import HEADER_NUM_VENUE, NoHeaderFound, split_by_header
+
 BUDGET = 5000
 WIN_BUDGET = 500  # 条件付き単勝の 1 発動あたり予算（発動馬が複数なら均等分配）
 
@@ -96,8 +98,10 @@ def parse_pred(path):
     # 期待フォーマット（gen_win_backtest_data.sh が生成）:
     #   --- レース N: 場名 芝|ダート 距離m ---
     #      馬番 馬名 勝率% ...
+    # paddock-predict の stdout を直接渡す場合、見出し末尾に `（発走 09:40）` `[発走済]` が
+    # 付きうる（#587）。契約は pred_header.HEADER_NUM_VENUE が持つ。
     text = Path(path).read_text()
-    blocks = re.split(r"--- レース (\d+): (\S+) \S+ \d+m ---", text)
+    blocks = split_by_header(text, HEADER_NUM_VENUE, path)
     out = {}
     i = 1
     while i + 2 < len(blocks):
@@ -325,4 +329,9 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    # 見出しが取れない異常は案内文だけを出して非 0 終了する（#587）。traceback だと
+    # せっかく 1 本化した案内が埋もれる。
+    try:
+        main()
+    except NoHeaderFound as e:
+        sys.exit(str(e))

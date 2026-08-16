@@ -13,8 +13,9 @@ sources:
   - docs/original-docs/0046-allocation-prob-weight-no-floor-rejected.md
   - docs/original-docs/0048-retire-jra-odds-scraper-for-netkeiba.md
   - docs/original-docs/0054-kelly-staking-rejected.md
-distilled_from_sha: "d8cc0e4"
-updated: "2026-07-27"
+  - docs/original-docs/0085-cli-started-race-marking.md
+distilled_from_sha: "4020e25"
+updated: "2026-08-15"
 ---
 
 # predict バイナリ: 対話型レーシングセッション
@@ -80,7 +81,7 @@ $ paddock-predict --date 2026-06-01 --budget 10000
 ### レース単位の対話ループ
 
 ```
---- レース 1: 東京 芝 1600m ---
+--- レース 1: 東京 芝 1600m（発走 10:10）---
 残高: ¥10,000
 
 馬番  馬名              勝率    連対率  複勝率
@@ -109,6 +110,75 @@ $ paddock-predict --date 2026-06-01 --budget 10000
 | `y` | 推奨通り購入 | Kelly 配分で算出した推奨額をそのまま確定する |
 | `e` | 金額を編集 | 各買い目の金額を対話入力する（`0` 入力でその買い目をスキップ） |
 | `s` | スキップ | このレースは購入せず賭け金 ¥0 で次へ進む |
+
+### レース見出し（発走時刻・発走済み表示）
+
+> **追加（#587・[ADR 0085](../original-docs/0085-cli-started-race-marking.md)）**。
+> 見出しは対話 / `--skip-all` / `--overview` の 3 経路で共通（`race_heading_for_day` が発走時刻の
+> 引き当てと発走判定を含み、文字列組み立ては `race_heading`）。
+
+```
+--- レース 1: 新潟 芝 2000m（発走 09:40）[発走済] ---
+--- レース 5: 新潟 芝 1400m（発走 12:25）---
+--- レース 8: 新潟 ダート 1200m（発走 --:--）---
+```
+
+- **発走時刻の一次ソースは `race_cards.post_time`**（#391 と同じ）。不明は `（発走 --:--）`。
+  `Race`（domain）には持たせず、日単位一括の `Interactor::post_times_by_date` で引き当てる。
+- **実行時刻に発走済みのレースだけ `[発走済]` を付ける**（未発走側にマークは付けない）。
+  `post_time` 不明は **当日に限り** 発走済みと断定しない。**開催日が過ぎていれば発走時刻が
+  不明でも `[発走済]`**（日付が過ぎた事実で言い切れる）。
+- **判定は `post_time` 経過であって結果確定ではない。** SPA の ⚫終（`result_confirmed` 判定・#381・
+  [web-spa.md](web-spa.md)）とは基準が違う——走行中〜結果待ちも CLI では「発走済」。
+- **発走済みレースを除外しない**（`--overview` は完了済みセッションの見返しを含むため・#551）。
+- 判定の時刻軸は `monitor_loop::classify` に委譲し、日付軸だけ `is_started_at` が畳む
+  （過去日 → 発走済 / 未来日 → 未発走 / 当日 → 結果取込済みなら発走済み、でなければ classify）。
+  当日に結果取込（`monitor_loop::has_result`）を classify より先に見るのは、classify が
+  `post_time` が `None` の時点で `has_result` を見ずに `Unknown` を返すため。
+- **判定ホストは JST 前提。** 起動時に `monitor_loop::warn_if_not_jst_now` で TZ だけを点検する
+  （`warn_if_not_today_jst` は「当日か」も見るので、過去日の `--overview` では毎回鳴ってしまう）。
+- **`has_result` の不変条件の崩れを警告する。** 崩れると発走前レースに `[発走済]` が付き、
+  張れるレースを見送る誤読になる。`monitor_loop::count_started_before_post` で件数を数え、
+  1 件以上なら警告する（時刻比較が意味を持つ**当日のみ**点検）。
+
+`--overview` は一覧の一貫性のため実行時刻を 1 回だけ取り、ヘッダに注記を出す。
+
+```
+=== 2026-08-15 EV 一覧（再表示・読み取り専用） — 35 レース ===
+※ 一覧作成開始 2026-08-15 10:05 時点の判定。[発走済] はその時刻に発走済み（結果確定の有無とは別）
+```
+
+**注記は開催日で出し分ける**（`overview_note` / `session_note`。日付軸は `MeetingPhase` として
+発走判定と共有）。当日以外は `[発走済]` が日付だけで決まるので時刻を書くと誤読になる——過去日は
+「10:02 実行なのに 12:25 発走が発走済」と読め、未来日（前日プリフェッチ）は 1 件もマークが付かない。
+
+| 開催日 | `--overview` | 対話 / `--skip-all` |
+|---|---|---|
+| 過去 | `※ この開催は終了しています（全レース発走済）` | 同左 |
+| 当日 | `※ 一覧作成開始 <日時> 時点の判定。…` | `※ [発走済] は表示時点で発走済み（結果確定の有無とは別）` |
+| 未来 | `※ この開催はまだ実施されていません（全レース未発走）` | 同左 |
+
+対話 / `--skip-all` は 1 日を跨いで動き続けるため、判定時刻はレースごとに取り直す（当日の注記に
+基準時刻を書かないのはこのため）。`--overview` の「一覧作成開始」は一覧全体を貫く基準時刻であって
+実行完了時刻ではない（オッズ再取得を伴うと数分かかり、その間に発走した分は反映されない）。
+
+**却下した案**（詳細は [ADR 0085](../original-docs/0085-cli-started-race-marking.md)）:
+発走済みレースの一覧からの除外（#551 の見返しが壊れる）/ `[発走済]`・`[未発走]` の両側マーク
+（賑やかになる割に情報が増えない）/ 発走時刻のみでマーク無し（#587 の要件を満たさない）/
+`result_confirmed` を判定に使い SPA と揃える（走行中〜結果待ちが未発走に見える）/
+`Race`（domain）への `post_time` 追加（構築箇所すべてに波及する）。
+
+**影響**: `predict` → `monitor-loop` の依存が増える（apps → interface で正方向）。発走時刻の
+引き当ては日単位 1 クエリでレースごとの追加クエリは出ない。**見出し末尾の変化は CLI 標準出力を
+機械パースする下流に効く**——`scripts/predict-check/` のヘッダ正規表現は `(\d+)m ---` 決め打ちで、
+壊れても例外を出さず 0 件になる（無言死）。末尾を緩く受ける形へ直したうえで、**同じ regex の
+6 コピーが再発経路そのもの**なので解析契約を `scripts/predict-check/pred_header.py` に 1 本化した
+（`test_pred_header.py` が旧形式 / 発走時刻付き / `--:--`＋`[発走済]` の 3 形式を張る）。さらに
+**確率テーブルらしい入力なのに見出しが 0 件なら非 0 終了**させ（判定は馬行の有無。開催の無い日の
+「この日の開催はありません」は正当な 0 件なので落とさない）、**言語をまたぐ契約は golden
+`src/apps/predict/testdata/pred_header_samples.txt` で結ぶ**——生成側（Rust が `include_str!` で
+読む）と解析側が同じファイルを見るので、片方だけ変えれば必ずどちらかのテストが落ちる。
+診断メッセージは stdout（パーサのデータチャネル）を汚さないよう stderr へ出す。
 
 ### e（編集）モード
 
@@ -162,6 +232,8 @@ src/apps/predict/
 │   ├── cli.rs       # clap 引数定義
 │   ├── session.rs   # 対話セッションループ
 │   └── setup.rs     # DI 構築（analyze と同パターン）
+├── testdata/
+│   └── pred_header_samples.txt  # 見出しの golden（Rust ↔ Python の契約・#587）
 └── tests/
     └── overview.rs  # --overview の予想セッション非干渉（#555）
 ```

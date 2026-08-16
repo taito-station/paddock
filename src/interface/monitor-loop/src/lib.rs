@@ -113,9 +113,7 @@ pub fn warn_if_not_today_jst<Tz: TimeZone>(
     date: chrono::NaiveDate,
     now_local: DateTime<Tz>,
     kind: &str,
-) where
-    Tz::Offset: std::fmt::Display,
-{
+) {
     let today = now_local.date_naive();
     if date != today {
         println!(
@@ -123,23 +121,52 @@ pub fn warn_if_not_today_jst<Tz: TimeZone>(
              判定するため、当日以外の指定では{kind}判定が正しく機能しません。",
         );
     }
-    let tz_offset = now_local.offset().fix().local_minus_utc();
-    if tz_offset != JST_OFFSET_SECS {
-        // 半端な TZ（例 +05:30）も正しく出せるよう ±HH:MM 表記にする。
-        let sign = if tz_offset < 0 { '-' } else { '+' };
-        let abs = tz_offset.abs();
-        println!(
-            "⚠ 実行マシンのタイムゾーンが JST(+09:00) ではありません（現在 UTC{sign}{:02}:{:02}）。\
-             post_time は JST 起算のため、{kind}判定がオフセットぶんずれます。JST マシンで実行してください。",
-            abs / 3600,
-            (abs % 3600) / 60,
-        );
+    warn_if_not_jst(&now_local, kind);
+}
+
+/// 実行環境の TZ が JST(+09:00) か**だけ**を点検して警告する（#587 で [`warn_if_not_today_jst`]
+/// から分離）。
+///
+/// 「当日か」の点検を伴わないので、**当日以外の指定が正常な用途**からも呼べる
+/// （例: `predict --overview` の過去日見返し。ここで `warn_if_not_today_jst` を使うと
+/// 日付警告が毎回鳴って無意味になる）。TZ 前提そのものは同じ——post_time は JST 起算で、
+/// 発走状態は実行マシンの現在時刻の「時刻」とだけ比較するため、オフセットがずれると判定も狂う。
+pub fn warn_if_not_jst<Tz: TimeZone>(now_local: &DateTime<Tz>, kind: &str) {
+    if let Some(msg) = jst_offset_warning(now_local.offset().fix().local_minus_utc(), kind) {
+        // 診断は stderr へ（#587）。predict の stdout は scripts/predict-check が機械パースする
+        // データチャネルなので混ぜない。日付警告（warn_if_not_today_jst）は predict-watch /
+        // odds-collect の既存ログ運用を変えないため stdout のまま据え置く。
+        eprintln!("{msg}");
     }
+}
+
+/// TZ オフセット（秒）が JST でなければ警告文を返す純関数（#587・単体テスト対象）。
+///
+/// 表示は呼び出し側に任せる。`println!` を直接持つと「点検を消しても panic しない＝テストが
+/// 永久に緑」になり、点検の有無を検証できないため分離した。
+pub fn jst_offset_warning(tz_offset_secs: i32, kind: &str) -> Option<String> {
+    if tz_offset_secs == JST_OFFSET_SECS {
+        return None;
+    }
+    // 半端な TZ（例 +05:30）も正しく出せるよう ±HH:MM 表記にする。
+    let sign = if tz_offset_secs < 0 { '-' } else { '+' };
+    let abs = tz_offset_secs.abs();
+    Some(format!(
+        "⚠ 実行マシンのタイムゾーンが JST(+09:00) ではありません（現在 UTC{sign}{:02}:{:02}）。\
+         post_time は JST 起算のため、{kind}判定がオフセットぶんずれます。JST マシンで実行してください。",
+        abs / 3600,
+        (abs % 3600) / 60,
+    ))
 }
 
 /// ローカル現在時刻で [`warn_if_not_today_jst`] を呼ぶ薄いラッパ（実運用の入口）。
 pub fn warn_if_not_today_jst_now(date: chrono::NaiveDate, kind: &str) {
     warn_if_not_today_jst(date, Local::now(), kind);
+}
+
+/// ローカル現在時刻で [`warn_if_not_jst`] を呼ぶ薄いラッパ（実運用の入口）。
+pub fn warn_if_not_jst_now(kind: &str) {
+    warn_if_not_jst(&Local::now(), kind);
 }
 
 /// 「発走前（`now <= post`）なのに結果取込済み」のレース件数を数える純関数（#459・防御チェック）。
@@ -504,5 +531,18 @@ mod tests {
             now2,
             "収集対象",
         );
+    }
+
+    #[test]
+    fn jst_offset_warning_fires_only_off_jst() {
+        // #587: 点検そのものを検証する。ここが assert 無しだと「TZ 点検を消した実装」でも
+        // 緑になり、テストが何も守らなくなる。
+        assert_eq!(jst_offset_warning(9 * 3600, "発走状態"), None);
+        let ist = jst_offset_warning(5 * 3600 + 30 * 60, "発走状態").expect("非 JST は警告する");
+        assert!(ist.contains("UTC+05:30"), "{ist}");
+        assert!(ist.contains("発走状態"), "{ist}");
+        let west = jst_offset_warning(-5 * 3600, "収集対象").expect("非 JST は警告する");
+        assert!(west.contains("UTC-05:00"), "{west}");
+        assert!(west.contains("収集対象"), "{west}");
     }
 }
