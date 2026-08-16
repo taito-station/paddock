@@ -15,7 +15,7 @@ sources:
   - docs/original-docs/0054-kelly-staking-rejected.md
   - docs/original-docs/0085-cli-started-race-marking.md
   - docs/original-docs/0087-started-race-record-confirmation.md
-distilled_from_sha: "87b85d2"
+distilled_from_sha: "191d370"
 updated: "2026-08-16"
 ---
 
