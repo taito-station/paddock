@@ -32,8 +32,8 @@ sources:
   - docs/original-docs/0077-glossary-index-and-sources-scope.md
   - docs/original-docs/0079-roi-gate-display-kept-with-unreachable-note.md
   - docs/original-docs/0080-default-allocation-yen-denominated.md
-distilled_from_sha: "77c5471"
-updated: "2026-08-12"
+distilled_from_sha: "8d87218"
+updated: "2026-08-16"
 ---
 
 # 用語集（ユビキタス言語）
