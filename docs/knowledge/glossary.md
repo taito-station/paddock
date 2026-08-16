@@ -33,7 +33,7 @@ sources:
   - docs/original-docs/0079-roi-gate-display-kept-with-unreachable-note.md
   - docs/original-docs/0080-default-allocation-yen-denominated.md
   - docs/original-docs/0086-netkeiba-unpriced-sentinel-is-not-odds.md
-distilled_from_sha: "7056c0e"
+distilled_from_sha: "b26e5cd"
 updated: "2026-08-16"
 ---
 
