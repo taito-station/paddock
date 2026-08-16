@@ -16,10 +16,9 @@ enum RowVerdict {
     UnpricedOnly,
     /// 値域違反を含む。**番兵と混在していても warn**——本来見るべき残骸を埋もれさせない。
     ///
-    /// **実地のワイド未発売行 `(9999.9, Some(0.0))` はここに落ちる**（相方 `0.0` が値域違反のため）。
-    /// つまり保存経路のワイドは番兵であっても warn で、debug に落ちるのは band でない券種
-    /// （馬連・馬単・三連複・三連単）に限られる。読み出し経路（`find_race_odds`）は成分ごとに
-    /// 判定するので番兵側は debug になる。
+    /// 判定は**成分の内訳**であって券種ではない（`classify_row` は bet_type を知らない）。
+    /// **実地のワイド未発売行 `(9999.9, Some(0.0))` がここに落ちる**のは、相方 `0.0` が値域違反
+    /// だから。弾かれた成分が全部番兵なら band でも [`RowVerdict::UnpricedOnly`]（debug）になる。
     Invalid,
 }
 
@@ -57,8 +56,9 @@ fn classify_row(odds: f64, odds_high: Option<f64>) -> RowVerdict {
 /// 1 行に混在した場合は warn 側を優先する（[`classify_row`]）。
 ///
 /// **ワイドの未発売行は debug にならない**。netkeiba は `["9999.9", "0.0", "--"]` の形で返すため
-/// 相方 `0.0` が値域違反になり、混在扱いで warn 側へ落ちる（[`RowVerdict::Invalid`]）。番兵単独で
-/// debug になるのは band でない券種のみ。読み出し経路は成分ごとに判定するので番兵側は debug。
+/// （`docs/qa/QA-odds-sentinel-621.md` Q2）相方 `0.0` が値域違反になり、混在扱いで warn 側へ落ちる
+/// （[`RowVerdict::Invalid`]）。**券種で分かれるのではなく成分の内訳で分かれる**ので、弾かれた成分が
+/// 全部番兵なら band でも debug。読み出し経路は成分ごとに判定するので番兵側は debug になる。
 ///
 /// ここで弾くのは値域違反と番兵のみ。band（複勝・ワイド）の構造的不整合（odds_high NULL・low>high）は
 /// 保存側バグの早期検知のため意図的にガードせず、読み取り側で `Error` として顕在化させる
@@ -162,12 +162,16 @@ mod tests {
         // 値域違反が 1 成分でもあれば warn 側。**評価順に依らない**ことを両向きで固定する。
         assert_eq!(classify_row(0.0, Some(99_999.9)), RowVerdict::Invalid);
         assert_eq!(classify_row(99_999.9, Some(0.0)), RowVerdict::Invalid);
-        // 実地のワイド未発売行はこの形（ADR 0086 Q2）。番兵だが相方 0.0 のため warn 側に落ちる。
+        // 実地のワイド未発売行はこの形（QA-odds-sentinel-621.md Q2）。番兵だが相方 0.0 で warn 側。
         assert_eq!(classify_row(9_999.9, Some(0.0)), RowVerdict::Invalid);
-        // 番兵だけが 2 成分に揃えば debug 側（現行 netkeiba では出ないが契約として固定）。
+        // 分岐は券種でなく成分の内訳。番兵だけが 2 成分に揃えば band でも debug 側
+        // （現行 netkeiba では出ないが契約として固定）。
         assert_eq!(
             classify_row(9_999.9, Some(9_999.9)),
             RowVerdict::UnpricedOnly
         );
+        // 非有限は #114 の枝。番兵と取り違えず warn 側へ（ここを張らないと skip 変異が生き残る）。
+        assert_eq!(classify_row(f64::NAN, None), RowVerdict::Invalid);
+        assert_eq!(classify_row(3.5, Some(f64::INFINITY)), RowVerdict::Invalid);
     }
 }

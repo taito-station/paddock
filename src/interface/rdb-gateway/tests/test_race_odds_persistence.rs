@@ -488,7 +488,8 @@ async fn band_sentinel_row_is_skipped_not_errored(pool: sqlx::PgPool) {
 #[sqlx::test(migrations = "../../../deployments/db/migrations")]
 async fn save_skips_real_wide_unpriced_row(pool: sqlx::PgPool) {
     let repo = PostgresRepository::new(pool);
-    // **実地のワイド未発売行**（netkeiba は `["9999.9", "0.0", "--"]` を返す・ADR 0086 Q2）。
+    // **実地のワイド未発売行**（netkeiba は `["9999.9", "0.0", "--"]` を返す・
+    // docs/qa/QA-odds-sentinel-621.md Q2）。
     // 番兵と値域違反が 1 行に混在するため分類は warn 側が優先され、debug には落ちない
     // （番兵側に引っ張って debug にすると本来見るべき値域違反が埋もれるため）。
     // ここで固定するのは「保存されないこと」だけ。分類そのものは classify_row の単体テストが持つ。
