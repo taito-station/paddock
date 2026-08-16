@@ -28,8 +28,15 @@ impl OddsValue {
 /// **上限方式を採らない**のは、三連単に `111971.9` / `200886.6` のような正当な高配当が実在するため
 /// （安易な上限は大穴を殺す）。番兵は固定値なので特定値の除外の方が誤爆しない。
 ///
-/// リストの正本は `netkeiba_sentinels.txt`。Python の分析スクリプト
-/// （`scripts/predict-check/odds_guard.py`）も同じファイルを読む。
+/// **リストの正本は `netkeiba_sentinels.txt`**（1 行 1 値）。Python の分析スクリプト
+/// （`scripts/predict-check/odds_guard.py`）が **import 時に**同じファイルを読むため、これは
+/// テスト専用資産ではなく**本番依存**——`testdata/` に移さないこと。こちらは下の
+/// `sentinel_list_matches_the_shared_golden` が `include_str!` で突き合わせる。
+///
+/// 値を足すときは 3 か所を同じ PR で更新する: 正本ファイル / この定数 /
+/// `scripts/predict-check/test_odds_guard.py` の期待タプル。1 つでも忘れれば
+/// Rust か Python のテストが落ちる。運用上の位置づけは
+/// `docs/specifications/netkeiba-datasource.md` の番兵の節が正。
 const NETKEIBA_SENTINELS: [f64; 3] = [9999.9, 99999.9, 999999.9];
 
 /// 番兵値との比較許容差。DB の `double precision` を往復しても取りこぼさないよう幅を持たせる。

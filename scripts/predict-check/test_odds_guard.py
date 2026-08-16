@@ -149,6 +149,91 @@ def test_parse_wide_drops_sentinel_midpoint():
         os.unlink(path)
 
 
+def _load_from(tmpdir, content, encoding="utf-8"):
+    """正本ファイルを差し替えて _load_sentinels を呼ぶ（本物のファイルは触らない）。"""
+    path = os.path.join(tmpdir, "netkeiba_sentinels.txt")
+    if content is not None:
+        with open(path, "w", encoding=encoding) as f:
+            f.write(content)
+    saved = G.SENTINELS_PATH
+    try:
+        G.SENTINELS_PATH = path
+        return G._load_sentinels()
+    finally:
+        G.SENTINELS_PATH = saved
+
+
+def test_broken_sentinel_file_fails_loudly_with_the_cause():
+    # #635: import 時に読むため、壊れていれば解析スクリプト全部が起動できない。
+    # そのとき「どのファイルの何行目が何だったか」が読めることを固定する。
+    # **空タプルへのフォールバックはしない**——番兵が素通りして EV が静かに汚染されるため。
+    import tempfile
+
+    def own_text(e):
+        """RuntimeError の**自作部分**だけを取り出す（原因例外の str() を混ぜない）。
+
+        メッセージは `... {SENTINELS_PATH} ({e})。...` の形なので、素朴に
+        `str(d) in str(e)` を見ると **原因例外の str() に載ったパス**で常に真になり、
+        「自作文言からパスを落とす」変異が素通りする（1 巡目で実際に踏んだ）。
+
+        取り出しに `split(" (")` を使わないのは、パスや文言に半角スペース + `(` が
+        入ると自作文言を途中で切り、**本番コードが正しくてもテストが落ちる**ため
+        （2 巡目で踏んだ。`TMPDIR` に括弧が入るだけで再現する）。原因例外の str() を
+        差し引く形なら文言にも パスにも依存しない。
+        """
+        cause = str(e.__cause__) if e.__cause__ is not None else ""
+        return str(e).replace(cause, "") if cause else str(e)
+
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "netkeiba_sentinels.txt")
+
+        # 1) ファイルが無い。**自作メッセージがパスと復旧手順を出すこと**を固定する。
+        try:
+            _load_from(d, None)
+            raise AssertionError("欠落しても落ちなかった")
+        except RuntimeError as e:
+            assert path in own_text(e), own_text(e)
+            assert "本番依存" in str(e), e
+            assert isinstance(e.__cause__, OSError), e.__cause__
+
+        # 2) 数値でない行（コメント行を書いた等）— パス・行番号・中身が出る
+        try:
+            _load_from(d, "9999.9\n# ワイド\n99999.9\n")
+            raise AssertionError("非数値行があっても落ちなかった")
+        except RuntimeError as e:
+            assert f"{path}:2" in str(e) and "# ワイド" in str(e), e
+            assert isinstance(e.__cause__, ValueError), e.__cause__
+
+        # 3) 空ファイル（番兵ゼロ）— 正常として受理しない
+        try:
+            _load_from(d, "\n\n")
+            raise AssertionError("空でも落ちなかった")
+        except RuntimeError as e:
+            assert "空" in str(e) and path in str(e), e
+
+        # 4) UTF-8 以外で保存し直された（UnicodeDecodeError は ValueError のサブクラスで
+        #    OSError ではないので、捕捉範囲を間違えると素の例外が漏れる）
+        try:
+            _load_from(d, "9999.9\n# ワイドの番兵\n", encoding="cp932")
+            raise AssertionError("非 UTF-8 でも落ちなかった")
+        except RuntimeError as e:
+            assert path in own_text(e), own_text(e)
+            assert "UTF-8" in str(e), e
+            assert isinstance(e.__cause__, UnicodeDecodeError), e.__cause__
+
+        # 5) 非有限値。番兵として登録しても比較が常に偽で**その値だけ黙って無効化**される。
+        for bad, shown in (("nan", "'nan'"), ("inf", "'inf'"), ("1e400", "'1e400'")):
+            try:
+                _load_from(d, f"9999.9\n{bad}\n")
+                raise AssertionError(f"非有限値でも落ちなかった: {bad}")
+            except RuntimeError as e:
+                assert "非有限" in str(e) and f"{path}:2" in str(e), e
+                assert shown in str(e), e
+
+        # 6) 正常系: 空行・前後空白・末尾改行なしは従来どおり読める
+        assert _load_from(d, "  9999.9  \n\n99999.9") == (9999.9, 99999.9)
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for t in tests:
