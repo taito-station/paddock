@@ -149,11 +149,11 @@ def test_parse_wide_drops_sentinel_midpoint():
         os.unlink(path)
 
 
-def _load_from(tmpdir, content):
+def _load_from(tmpdir, content, encoding="utf-8"):
     """正本ファイルを差し替えて _load_sentinels を呼ぶ（本物のファイルは触らない）。"""
     path = os.path.join(tmpdir, "netkeiba_sentinels.txt")
     if content is not None:
-        with open(path, "w", encoding="utf-8") as f:
+        with open(path, "w", encoding=encoding) as f:
             f.write(content)
     saved = G.SENTINELS_PATH
     try:
@@ -170,12 +170,15 @@ def test_broken_sentinel_file_fails_loudly_with_the_cause():
     import tempfile
 
     with tempfile.TemporaryDirectory() as d:
-        # 1) ファイルが無い
+        # 1) ファイルが無い。**自作メッセージがパスと復旧手順を出すこと**を固定する。
+        #    ここを `"netkeiba_sentinels.txt" in str(e)` だけで見ると、OSError 自身の
+        #    str() がファイル名を含むため「自作文言からパスを落とす」変異が素通りする。
         try:
             _load_from(d, None)
             raise AssertionError("欠落しても落ちなかった")
         except RuntimeError as e:
-            assert "netkeiba_sentinels.txt" in str(e), e
+            assert "本番依存" in str(e) and str(d) in str(e), e
+            assert isinstance(e.__cause__, OSError), e.__cause__
 
         # 2) 数値でない行（コメント行を書いた等）— 行番号と中身が出る
         try:
@@ -183,6 +186,7 @@ def test_broken_sentinel_file_fails_loudly_with_the_cause():
             raise AssertionError("非数値行があっても落ちなかった")
         except RuntimeError as e:
             assert ":2" in str(e) and "# ワイド" in str(e), e
+            assert isinstance(e.__cause__, ValueError), e.__cause__
 
         # 3) 空ファイル（番兵ゼロ）— 正常として受理しない
         try:
@@ -191,7 +195,24 @@ def test_broken_sentinel_file_fails_loudly_with_the_cause():
         except RuntimeError as e:
             assert "空" in str(e), e
 
-        # 4) 正常系: 空行・前後空白・末尾改行なしは従来どおり読める
+        # 4) UTF-8 以外で保存し直された（UnicodeDecodeError は ValueError のサブクラスで
+        #    OSError ではないので、捕捉範囲を間違えると素の例外が漏れる）
+        try:
+            _load_from(d, "9999.9\n# ワイドの番兵\n", encoding="cp932")
+            raise AssertionError("非 UTF-8 でも落ちなかった")
+        except RuntimeError as e:
+            assert "UTF-8" in str(e) and str(d) in str(e), e
+            assert isinstance(e.__cause__, UnicodeDecodeError), e.__cause__
+
+        # 5) 非有限値。番兵として登録しても比較が常に偽で**その値だけ黙って無効化**される。
+        for bad in ("9999.9\nnan\n", "9999.9\ninf\n", "9999.9\n1e400\n"):
+            try:
+                _load_from(d, bad)
+                raise AssertionError(f"非有限値でも落ちなかった: {bad!r}")
+            except RuntimeError as e:
+                assert "非有限" in str(e) and ":2" in str(e), e
+
+        # 6) 正常系: 空行・前後空白・末尾改行なしは従来どおり読める
         assert _load_from(d, "  9999.9  \n\n99999.9") == (9999.9, 99999.9)
 
 

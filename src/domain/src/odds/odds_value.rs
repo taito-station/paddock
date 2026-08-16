@@ -36,7 +36,7 @@ impl OddsValue {
 /// 値を足すときは 3 か所を同じ PR で更新する: 正本ファイル / この定数 /
 /// `scripts/predict-check/test_odds_guard.py` の期待タプル。1 つでも忘れれば
 /// Rust か Python のテストが落ちる。運用上の位置づけは
-/// `docs/specifications/netkeiba-datasource.md`「未発売の番兵値」節が正。
+/// `docs/specifications/netkeiba-datasource.md` の番兵の節が正。
 const NETKEIBA_SENTINELS: [f64; 3] = [9999.9, 99999.9, 999999.9];
 
 /// 番兵値との比較許容差。DB の `double precision` を往復しても取りこぼさないよう幅を持たせる。

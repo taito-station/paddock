@@ -41,14 +41,17 @@ def _load_sentinels():
     `is_payout_odds` が番兵を素通しし、汚染された EV / 参考 ROI を「正常な出力」として
     出してしまう（#621 の実害そのものが黙って戻る）。読めないなら**原因を示して止める**。
     """
+    # UnicodeDecodeError は ValueError のサブクラスで OSError ではない。別文字コードで
+    # 保存し直された正本を OSError だけで受けると、例外の str() にパスが載らず
+    # 「原因不明で解析スクリプトが全部起動不能」がそのまま残る。
     try:
         with open(SENTINELS_PATH, encoding="utf-8") as f:
             lines = f.readlines()
-    except OSError as e:
+    except (OSError, UnicodeDecodeError) as e:
         raise RuntimeError(
             f"番兵リストの正本を読めない: {SENTINELS_PATH} ({e})。"
-            "Rust と共有する本番依存ファイルなので、消さずに復元すること"
-            "（docs/specifications/netkeiba-datasource.md「番兵リストの正本ファイル」）"
+            "Rust と共有する本番依存ファイルなので、消さずに UTF-8 で復元すること"
+            "（docs/specifications/netkeiba-datasource.md の番兵の節）"
         ) from e
 
     sentinels = []
@@ -57,12 +60,21 @@ def _load_sentinels():
         if not line:
             continue
         try:
-            sentinels.append(float(line))
+            value = float(line)
         except ValueError as e:
             raise RuntimeError(
                 f"番兵リストは 1 行 1 値の数値のみ: {SENTINELS_PATH}:{lineno} が {line!r}。"
                 "コメント行・区切り・ヘッダは書けない（Rust 側の golden も同じ書式を要求する）"
             ) from e
+        # float() は nan / inf / 1e400 を通す。非有限値は番兵として登録しても
+        # abs(o - nan) < eps が常に偽で**その番兵だけが無言で無効化**される
+        # ——空リストを拒否するのと同じ理由でここも受理しない。
+        if not math.isfinite(value):
+            raise RuntimeError(
+                f"番兵リストに非有限値: {SENTINELS_PATH}:{lineno} が {line!r}。"
+                "非有限の番兵は比較が常に偽になり、その値だけが黙って無効化される"
+            )
+        sentinels.append(value)
 
     if not sentinels:
         raise RuntimeError(
