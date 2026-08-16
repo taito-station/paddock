@@ -7,18 +7,15 @@
 """
 
 import os
-import sys
 
 import odds_guard as G
-
-HERE = os.path.dirname(os.path.abspath(__file__))
 
 
 def test_sentinels_are_loaded_from_the_shared_golden():
     # 正本は Rust と共有のファイル。Rust 側は同じファイルを include_str! して
     # NETKEIBA_SENTINELS と突き合わせている（片方だけ変えればどちらかが落ちる）。
     assert G.SENTINELS_PATH.endswith(
-        os.path.join("src", "domain", "src", "odds", "testdata", "netkeiba_sentinels.txt")
+        os.path.join("src", "domain", "src", "odds", "netkeiba_sentinels.txt")
     ), G.SENTINELS_PATH
     assert os.path.exists(G.SENTINELS_PATH), G.SENTINELS_PATH
     assert G.NETKEIBA_SENTINELS == (9999.9, 99999.9, 999999.9), G.NETKEIBA_SENTINELS
@@ -69,6 +66,45 @@ def test_parse_exotic_drops_sentinel_rows():
         assert qn["p1"] == {(3, 4): 12.3}, qn
     finally:
         os.unlink(path)
+
+
+def test_gate_calibration_drops_band_sentinels():
+    # band（wide）は**中点化の前**に見ないと、番兵と実値の平均になって検知できない。
+    # PR 自身がコメントで難所と明言している箇所なので固定する。
+    import gate_calibration as GC
+
+    # 列は rid, bet_type, key, odds, odds_high, fetched の 6 つ（タブ区切り）。
+    rows = "\n".join([
+        "r1\twide\t1-2\t9999.9\t0.0\t2026-08-15T10:00:00Z",     # 番兵 low → 落ちる
+        "r1\twide\t1-3\t9999.9\t9999.9\t2026-08-15T10:00:00Z",  # 両端番兵 → 落ちる（中点でも 9999.9）
+        "r1\twide\t2-3\t3.1\t99999.9\t2026-08-15T10:00:00Z",    # high だけ番兵 → 落ちる
+        "r1\twide\t3-4\t3.1\t4.9\t2026-08-15T10:00:00Z",        # 正常 → 残る
+        "r1\ttrio\t1-2-3\t99999.9\t\t2026-08-15T10:00:00Z",     # scalar 番兵 → 落ちる
+        "r1\ttrio\t2-3-4\t42.5\t\t2026-08-15T10:00:00Z",        # 正常 → 残る
+    ])
+    got = GC.load_odds(rows)
+    at = got["r1"]["2026-08-15T10:00:00Z"]
+    assert set(at["wide"]) == {"3-4"}, at["wide"]
+    assert set(at["trio"]) == {"2-3-4"}, at["trio"]
+    assert abs(at["wide"]["3-4"] - 4.0) < 1e-9, at["wide"]  # (3.1+4.9)/2
+
+
+def test_snapshot_report_keeps_win_rows_below_one():
+    # 単勝は「出走馬の確定」に使うので、番兵以外（下限違反）は従来どおり残す。
+    # ここを is_payout_odds で塞ぐと出走馬集合が縮んで ROI の分母が変わる。
+    import snapshot_ev_report as SR
+
+    rows = [
+        dict(race_id="r1", date="2026-08-15", venue="新潟", race_num="1",
+             bet_type="win", combination_key="1", odds="0.5", odds_high="", fetched_at="t1"),
+        dict(race_id="r1", date="2026-08-15", venue="新潟", race_num="1",
+             bet_type="win", combination_key="2", odds="99999.9", odds_high="", fetched_at="t1"),
+        dict(race_id="r1", date="2026-08-15", venue="新潟", race_num="1",
+             bet_type="win", combination_key="3", odds="4.2", odds_high="", fetched_at="t1"),
+    ]
+    got = SR.group_snapshots(rows)
+    win = got["r1"]["times"]["t1"]["win"]
+    assert set(win) == {1, 3}, win  # 番兵の 2 番だけ落ちる（0.5 の 1 番は残る）
 
 
 def main():

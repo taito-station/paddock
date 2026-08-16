@@ -147,6 +147,12 @@ def parse_wide(path):
             continue
         pid, pair, o = line.split("\t")
         a, b = sorted(int(x) for x in pair.split("-"))
+        # ここに来る値は fetch_wide が中点化済み（low/high は見られない）。番兵 9999.9 が
+        # 現状 fetch_wide の `hi < lo` に**偶然**引っかかって落ちているだけなので、
+        # netkeiba が [9999.9, 9999.9] を返せば素通りする——#621 が「ワイドが守られていたのは
+        # 偶然」と指摘したのと同じ構造なので、中点値そのものも番兵として弾く。
+        if not is_payout_odds(o):
+            continue
         d.setdefault(pid, {})[(a, b)] = float(o)
     return d
 
@@ -163,14 +169,15 @@ def parse_exotic(path):
             ov = float(o)
         except ValueError:
             continue
+        # combination_key は "1-2"(馬連) / "1-2-3"(3連複) の '-' 区切り前提。区切り変更等で
+        # 桁数が想定外になると的中判定が無言で 0 に縮退するため、警告して捨てる。
+        # **番兵チェックより前**に置く——後ろだと番兵行の分だけ区切り仕様変更の検知が鈍る。
+        if len(nums) != arity.get(kind, len(nums)):
+            print(f"[warn] 想定外の組番形式 {kind}={combo}（pid={pid}）をスキップ", file=sys.stderr)
+            continue
         # netkeiba の未発売番兵（99999.9 等）は払戻倍率ではない。落とさないと 1 点で EV が
         # 3 桁になり ROI が跳ねる（#621）。落とした組は「オッズ不明」＝買い目から外れる。
         if not is_payout_odds(ov):
-            continue
-        # combination_key は "1-2"(馬連) / "1-2-3"(3連複) の '-' 区切り前提。区切り変更等で
-        # 桁数が想定外になると的中判定が無言で 0 に縮退するため、警告して捨てる。
-        if len(nums) != arity.get(kind, len(nums)):
-            print(f"[warn] 想定外の組番形式 {kind}={combo}（pid={pid}）をスキップ", file=sys.stderr)
             continue
         if kind == "quinella":
             qn.setdefault(pid, {})[nums] = ov

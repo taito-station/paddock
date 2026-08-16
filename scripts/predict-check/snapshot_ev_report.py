@@ -41,7 +41,7 @@ from collections import defaultdict
 from pathlib import Path
 
 import live_ev as L
-from odds_guard import is_payout_odds
+from odds_guard import is_payout_odds, is_sentinel
 
 # snapshots から集計に使う券種（live_ev の全3券種 ROI に必要な分）。単勝は出走馬の確定に使う。
 WANT_BET_TYPES = ("win", "quinella", "trio", "wide")
@@ -80,7 +80,10 @@ def group_snapshots(rows):
             # defaultdict 経由で空の phantom snapshot 時点を生成し、最終時点を上書きするのを防ぐ。
             odds = float(r["odds"])
             # 番兵（99999.9 等）は払戻倍率ではない（#621）。band は中点化の前に見る。
-            if not is_payout_odds(odds):
+            # **単勝は番兵だけを見る**——win は「出走馬の確定」にも使う（下の races 構築）ので、
+            # 下限違反まで落とすと出走馬集合が縮んで ROI の分母が変わる。従来の挙動を保つ。
+            unusable = is_sentinel(odds) if bt == "win" else not is_payout_odds(odds)
+            if unusable:
                 continue
             if bt == "win":
                 book, key, val = "win", int(r["combination_key"]), odds

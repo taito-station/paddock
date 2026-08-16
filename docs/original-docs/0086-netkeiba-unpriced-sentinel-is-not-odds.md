@@ -22,7 +22,7 @@ EV は `的中確率 × オッズ`（`leg_metrics`）なので、**1 点で EV �
 
 | 項目 | 実測 |
 |---|---|
-| 番兵は **2 種類** | `99999.9`（馬連 / 馬単 / 三連複）と `999999.9`（三連単・32,973 行）。issue は前者のみ挙げていた |
+| DB に残っていた番兵は **2 種** | `99999.9`（馬連 / 馬単 / 三連複）と `999999.9`（三連単・32,973 行）。issue は前者のみ挙げていた。**番兵そのものは 3 種**で、ワイドの `9999.9` は保存前に落ちていたため DB に無い |
 | 買い目に効く汚染 | `race_odds` に trio 1,599 行 / 70 レース、quinella 156 行 / 14 レース |
 | ワイドは 0 行 | **偶然守られていた**（下記） |
 | 正当な高配当 | 三連単に `111971.9` / `200886.6` が実在 ＝ 安易な上限は大穴を殺す |
@@ -63,11 +63,20 @@ EV は `的中確率 × オッズ`（`leg_metrics`）なので、**1 点で EV �
 
 6. **Python の分析経路にも同じ除外を入れる**（`scripts/predict-check/odds_guard.py`）。
    `scripts/` は psql / TSV で DB を直読みするため Rust の値オブジェクトを一切通らない。
-   オッズを `float()` 化する 4 つの入口（`live_ev.parse_exotic` / `umaren_backtest.parse_exotic` /
-   `gate_calibration.load_odds` / `snapshot_ev_report.group_snapshots`）で塞ぐ。この 4 点で
+   オッズを `float()` 化する入口——`live_ev.parse_exotic` / `live_ev.parse_wide` /
+   `umaren_backtest.parse_exotic` / `gate_calibration.load_odds` /
+   `snapshot_ev_report.group_snapshots` / `fetch_wide.fetch_wide`——で塞ぐ。これで
    下流（`exotic_mispricing` / `kelly_compare` / `alloc_compare`）も自動的に保護される。
 
-7. **番兵リストは言語をまたぐ golden で結ぶ**（`src/domain/src/odds/testdata/netkeiba_sentinels.txt`）。
+   **ワイド経路を落とさないこと**。`fetch_wide` の `hi < lo` チェックが現状の番兵
+   `["9999.9","0.0"]` を弾いているが、それは**相方が 0.0 だから**であって番兵を見ているのではない
+   ——本 ADR が「ワイドが守られていたのは偶然」と断じたのと同じ構造なので、`[9999.9, 9999.9]` が
+   返れば素通りする。band は**中点化の前**に low / high を個別に見る。
+
+   単勝だけは例外で、`snapshot_ev_report` では**番兵のみ**を落とす。win は「出走馬の確定」にも
+   使われるため、下限違反まで落とすと出走馬集合が縮んで ROI の分母が変わる。
+
+7. **番兵リストは言語をまたぐ golden で結ぶ**（`src/domain/src/odds/netkeiba_sentinels.txt`）。
    Rust は `include_str!` してテストで const と突き合わせ、Python は同じファイルを読む。
    同じ値を両言語が別々に持つと片方だけ更新して静かにズレる（ADR 0085 の見出し契約と同型）。
 
@@ -106,6 +115,20 @@ EV は `的中確率 × オッズ`（`leg_metrics`）なので、**1 点で EV �
   issue が観測した 612.6% のレースは `race_odds` が PK 上書きのため既に実オッズへ置き換わっており、
   **現在の DB では買い目に乗るケースを再現できない**。その経路は統合テスト
   （`sentinel_odds_row_is_skipped_on_read`）で固定した。
+- **誤爆は許容する。** `OddsValue` は券種を知らないので、判定は全券種に一律で効く。したがって
+  ワイドの番兵 `9999.9` は三連単の正当な `9999.9` としても拒否されるし、`99999.9` も同様。
+  券種別スコープにするには `OddsValue` に bet_type を持ち込む API 変更が要るが、その値ちょうどの
+  正当オッズが出る確率と、番兵を通す害（EV が 3 桁）を比べて**誤爆を受け入れる**。
+  棄却は `debug` ログなので**誤爆は観測しにくい**点も含めて承知の上の判断。
+- **read-through の挙動が両方向に変わる。** `RaceOdds::is_complete()` は券種がそろうことを見るので:
+  - （好転）**前日 prefetch の番兵行で complete と誤判定し、当日ずっと番兵を返し続ける**経路が消える
+  - （負荷）券種がまるごと未発売の時間帯は `trio` 等が空になり complete に届かず、
+    read-through が呼ばれるたびに再スクレイプする。netkeiba へのペーシング規律に触れるので、
+    前日プリフェッチを多用する運用では取得回数を見ておく
+- **`live_ev_snapshots` の派生 ROI は直らない。** `predict-watch` が**計算済みの ROI と買い目伝票**を
+  保存するテーブルで、修正前に書かれた行は番兵起因の ROI をそのまま保持する。`race_odds` と違って
+  読み出し時のガードが効かないので、board API 経由では従来の値が見え続ける。
+  再計算・掃除の要否は #625（測定の取り直し）と併せて扱う。
 - **ADR 0076 / 0079 の測定母集団は汚染されていた**。`race_odds_snapshots` の番兵は trio 7,259 行 /
   111 レース（snapshots を持つ全 486 レースの約 23%）。ただし `gate_calibration.py` の ROI 式は
   `q = (1/o)*W/inv_sum` → `exp += amount * q * o` で `q*o` が打ち消すため、**巨大 odds は ROI を

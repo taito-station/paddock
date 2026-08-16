@@ -28,7 +28,7 @@ impl OddsValue {
 /// **上限方式を採らない**のは、三連単に `111971.9` / `200886.6` のような正当な高配当が実在するため
 /// （安易な上限は大穴を殺す）。番兵は固定値なので特定値の除外の方が誤爆しない。
 ///
-/// リストの正本は `testdata/netkeiba_sentinels.txt`。Python の分析スクリプト
+/// リストの正本は `netkeiba_sentinels.txt`。Python の分析スクリプト
 /// （`scripts/predict-check/odds_guard.py`）も同じファイルを読む。
 const NETKEIBA_SENTINELS: [f64; 3] = [9999.9, 99999.9, 999999.9];
 
@@ -94,8 +94,8 @@ mod tests {
     use super::{NETKEIBA_SENTINELS, OddsValue};
 
     /// 番兵リストの正本。Python（`scripts/predict-check/odds_guard.py`）も同じファイルを読む。
-    /// `include_str!` なのでファイルが消えればコンパイルが通らない。
-    const SENTINEL_GOLDEN: &str = include_str!("testdata/netkeiba_sentinels.txt");
+    /// `include_str!` なのでファイルが消えれば**テストビルド**が通らない（本体ビルドは通る）。
+    const SENTINEL_GOLDEN: &str = include_str!("netkeiba_sentinels.txt");
 
     #[test]
     fn sentinel_list_matches_the_shared_golden() {

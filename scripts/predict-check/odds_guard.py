@@ -9,7 +9,7 @@ Rust 側は `OddsValue::try_from`（`src/domain/src/odds/odds_value.rs`）が同
 分析（`live_ev` / `gate_calibration` / `snapshot_ev_report` / `umaren_backtest`）が汚染された
 ROI を出さないよう、オッズを float 化する入口でここを通す。
 
-**番兵リストの正本は Rust 側と共有**（`src/domain/src/odds/testdata/netkeiba_sentinels.txt`）。
+**番兵リストの正本は Rust 側と共有**（`src/domain/src/odds/netkeiba_sentinels.txt`）。
 同じ値を両言語が別々に持つと片方だけ更新して静かにズレるため、このモジュールはそのファイルを
 読む。Rust 側は同じファイルを `include_str!` してテストで突き合わせている。
 
@@ -17,6 +17,7 @@ ROI を出さないよう、オッズを float 化する入口でここを通す
 （DB 実測）。上限は大穴を殺すが、番兵は固定値なので特定値の除外なら誤爆しない。
 """
 
+import math
 import os
 
 # 番兵リストの正本（Rust の NETKEIBA_SENTINELS と同一ファイル）。
@@ -25,7 +26,7 @@ SENTINELS_PATH = os.path.normpath(
         os.path.dirname(os.path.abspath(__file__)),
         "..",
         "..",
-        "src/domain/src/odds/testdata/netkeiba_sentinels.txt",
+        "src/domain/src/odds/netkeiba_sentinels.txt",
     )
 )
 
@@ -41,13 +42,17 @@ def _load_sentinels():
 NETKEIBA_SENTINELS = _load_sentinels()
 
 
+def _is_sentinel_float(o):
+    """float 化済みの値が番兵か。二重変換を避けるための内部関数。"""
+    return any(abs(o - s) < SENTINEL_EPSILON for s in NETKEIBA_SENTINELS)
+
+
 def is_sentinel(odds):
     """netkeiba の未発売番兵値か（払戻倍率として使ってはいけない値か）。"""
     try:
-        o = float(odds)
+        return _is_sentinel_float(float(odds))
     except (TypeError, ValueError):
         return False
-    return any(abs(o - s) < SENTINEL_EPSILON for s in NETKEIBA_SENTINELS)
 
 
 def is_payout_odds(odds):
@@ -61,6 +66,6 @@ def is_payout_odds(odds):
         o = float(odds)
     except (TypeError, ValueError):
         return False
-    if not (o == o) or o in (float("inf"), float("-inf")):  # NaN / ±inf
+    if not math.isfinite(o):
         return False
-    return o >= 1.0 and not is_sentinel(o)
+    return o >= 1.0 and not _is_sentinel_float(o)

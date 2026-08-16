@@ -14,7 +14,7 @@ sources:
   - docs/original-docs/0075-unsupported-race-skip-exit-zero.md
   - docs/original-docs/0086-netkeiba-unpriced-sentinel-is-not-odds.md
 distilled_from_sha: "8d87218"
-updated: "2026-08-12"
+updated: "2026-08-16"
 ---
 
 # netkeiba 当日データソース取り込み 仕様書
@@ -177,7 +177,7 @@ netkeiba は**未発売・該当なしの組み合わせ**に固定の番兵値�
 - 番兵は `Error::UnpricedSentinel` として値域違反（`OutOfRange`）と区別し、**ログは `debug`**。
   「まだ売れていない」という正常な状態で 1 レースに数百件出るため、warn にすると本来の値域違反が
   埋もれる。
-- 番兵リストの正本は `src/domain/src/odds/testdata/netkeiba_sentinels.txt`。**Python の分析経路**
+- 番兵リストの正本は `src/domain/src/odds/netkeiba_sentinels.txt`。**Python の分析経路**
   （`scripts/predict-check/odds_guard.py`）も同じファイルを読む——`scripts/` は psql / TSV で DB を
   直読みするため、Rust の値オブジェクトを一切通らない。
 

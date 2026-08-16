@@ -18,6 +18,7 @@ import json
 import sys
 
 import nk
+from odds_guard import is_payout_odds
 
 ODDS_API = "https://race.netkeiba.com/api/api_get_jra_odds.html?race_id={rid}&type=5&action=update"
 
@@ -47,6 +48,11 @@ def fetch_wide(rid: str):
         # ワイドは「下限 <= 上限」の正のレンジで返る。崩れていれば構造変化/異常値として捨てる
         # （lo>hi のまま mid を取ると誤った中央値になるため）。
         if lo <= 0 or hi < lo:
+            continue
+        # 未発売の番兵（ワイドは 9999.9）は払戻倍率ではない（#621）。**中点化の前**に見る——
+        # 中点にすると番兵と実値の平均になって検知できない。現状の netkeiba は相方に 0.0 を返す
+        # ので上の `hi < lo` でも落ちるが、それは偶然であって契約ではない。
+        if not is_payout_odds(lo) or not is_payout_odds(hi):
             continue
         out[tuple(sorted((a, b)))] = (lo + hi) / 2
     if not out:

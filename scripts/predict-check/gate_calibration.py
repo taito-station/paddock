@@ -37,10 +37,9 @@ import subprocess
 import sys
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
-
-from odds_guard import is_payout_odds
 from pathlib import Path
 
+from odds_guard import is_payout_odds
 from umaren_backtest import spearman
 
 JST = timezone(timedelta(hours=9))
