@@ -175,8 +175,14 @@ def test_broken_sentinel_file_fails_loudly_with_the_cause():
         メッセージは `... {SENTINELS_PATH} ({e})。...` の形なので、素朴に
         `str(d) in str(e)` を見ると **原因例外の str() に載ったパス**で常に真になり、
         「自作文言からパスを落とす」変異が素通りする（1 巡目で実際に踏んだ）。
+
+        取り出しに `split(" (")` を使わないのは、パスや文言に半角スペース + `(` が
+        入ると自作文言を途中で切り、**本番コードが正しくてもテストが落ちる**ため
+        （2 巡目で踏んだ。`TMPDIR` に括弧が入るだけで再現する）。原因例外の str() を
+        差し引く形なら文言にも パスにも依存しない。
         """
-        return str(e).split(" (", 1)[0]
+        cause = str(e.__cause__) if e.__cause__ is not None else ""
+        return str(e).replace(cause, "") if cause else str(e)
 
     with tempfile.TemporaryDirectory() as d:
         path = os.path.join(d, "netkeiba_sentinels.txt")
@@ -186,7 +192,7 @@ def test_broken_sentinel_file_fails_loudly_with_the_cause():
             _load_from(d, None)
             raise AssertionError("欠落しても落ちなかった")
         except RuntimeError as e:
-            assert own_text(e).endswith(path), own_text(e)
+            assert path in own_text(e), own_text(e)
             assert "本番依存" in str(e), e
             assert isinstance(e.__cause__, OSError), e.__cause__
 
@@ -211,7 +217,7 @@ def test_broken_sentinel_file_fails_loudly_with_the_cause():
             _load_from(d, "9999.9\n# ワイドの番兵\n", encoding="cp932")
             raise AssertionError("非 UTF-8 でも落ちなかった")
         except RuntimeError as e:
-            assert own_text(e).endswith(path), own_text(e)
+            assert path in own_text(e), own_text(e)
             assert "UTF-8" in str(e), e
             assert isinstance(e.__cause__, UnicodeDecodeError), e.__cause__
 
