@@ -257,16 +257,17 @@ async fn run_race(
     // `record_race_outcome` へ進む手前に置くので、スキップ運用に余計なプロンプトは出ず、
     // 長い払戻入力に入る前に止まれる。
     //
-    // 判定時刻は見出し表示時ではなく **ここで取り直す**。見出し → オッズ再取得 → 馬場入力 →
-    // 金額編集の間に発走を跨ぐことがあり、その分こそ「買えなかったのに記録される」からである。
-    // 見出しに `[発走済]` が無いのに確認が出る場合があるが、プロンプトに発走時刻を出すので
-    // 理由は読める。判定そのものは見出しと同じ `is_started_for_day`（second source を作らない）。
-    if is_started_for_day(race, lookups.post_times, Local::now().naive_local())
-        && !confirm_started_race_record(
-            &mut io::stdin().lock(),
-            lookups.post_times.get(&race.race_id).copied(),
-        )?
-    {
+    // 取り直すのは **実行時刻だけ**（`post_times` は日単位・`race` はセッション開始時の
+    // スナップショット）。見出し → オッズ再取得 → 馬場入力 → 金額編集の間に発走を跨ぐことがあり、
+    // その分こそ「買えなかったのに記録される」からである。見出しに `[発走済]` が無いのに確認が
+    // 出る場合があるが、プロンプトが発走時刻と判定時刻を併記するので理由は読める。判定そのものは
+    // 見出しと同じ `started_state_for_day`（second source を作らない）。
+    if !confirm_record_if_started(
+        &mut io::stdin().lock(),
+        race,
+        lookups.post_times,
+        Local::now().naive_local(),
+    )? {
         println!("記録せず次のレースへ");
         return Ok(());
     }
@@ -791,6 +792,29 @@ fn read_choice<R: BufRead>(reader: &mut R) -> anyhow::Result<char> {
     }
 }
 
+/// 発走済みレースの確認に添える警告文を組み立てる純関数（#623・テスト対象）。
+///
+/// 表示は呼び出し側に置く——`result_before_post_warning` と同じ規律で、`println!` を抱えると
+/// 文面を assert できない。この文面は ADR 0086 決定 4 の拠り所（見出しと確認が食い違っても
+/// 理由が読める）なので、テストで固定する価値がある。
+///
+/// **判定時刻を併記する**のは、この確認が見出しの `[発走済]` と一致しない場合があるため。
+/// (1) 判定時刻は確認の直前に取り直すので見出しより後になる（その間に発走を跨いだ分を拾う）。
+/// (2) `has_result` の不変条件が崩れたレースは**発走時刻が未来でも発走済みと判定される**
+/// （`result_before_post_count` が別途 stderr で警告する既知の崩れ）。両方の時刻が見えれば
+/// 「見出しでは未発走だったのになぜ聞かれたか」を人が判断できる。日付を出すのは、過去日の
+/// 遡り入力では判定時刻（今日）と発走時刻（開催日）が別の日になるため。
+fn started_race_record_notice(post_time: Option<NaiveTime>, now: NaiveDateTime) -> String {
+    let post = match post_time {
+        Some(t) => format!("発走 {}", t.format("%H:%M")),
+        None => "発走時刻不明".to_string(),
+    };
+    format!(
+        "⚠ このレースは発走済みです（{post} / 判定時刻 {}）。",
+        now.format("%m-%d %H:%M")
+    )
+}
+
 /// 発走済みレースへ買い目を記録してよいかを確認する（#623）。`true` なら記録に進む。
 ///
 /// #587 の `[発走済]` は**見出しに出るだけ**で、購入方法プロンプトにも `record_race_outcome` にも
@@ -804,20 +828,32 @@ fn read_choice<R: BufRead>(reader: &mut R) -> anyhow::Result<char> {
 /// 畳む）。EOF も同じく `false`——`read_choice` の `s` / `read_u64` の 0 と同じ安全側への畳み方（#179）。
 /// 出力先は stdout。診断ではなく対話の一部であり、この経路は対話セッション専用で
 /// `scripts/predict-check` が読む `--skip-all` / `--overview` の stdout には現れない。
-fn confirm_started_race_record<R: BufRead>(
-    reader: &mut R,
-    post_time: Option<NaiveTime>,
-) -> anyhow::Result<bool> {
-    let post = match post_time {
-        Some(t) => format!("発走 {}", t.format("%H:%M")),
-        None => "発走時刻不明".to_string(),
-    };
-    println!("⚠ このレースは発走済みです（{post}）。");
+fn confirm_started_race_record<R: BufRead>(reader: &mut R, notice: &str) -> anyhow::Result<bool> {
+    println!();
+    println!("{notice}");
     let answer = read_line(
         reader,
         "買い目を記録しますか？ [y=記録する / それ以外=記録しない] > ",
     )?;
-    Ok(matches!(answer.as_deref(), Some("y") | Some("Y")))
+    Ok(matches!(answer.as_deref(), Some("y" | "Y")))
+}
+
+/// 発走済みなら記録の可否を確認する（#623）。`false` なら記録せずレースを抜ける。
+///
+/// `run_race` から切り出したのは、**このゲートの配線こそ #623 の本体**だから。`run_race` 自体は
+/// `App`（スクレイパが具象型）をモックできず単体テストが書けないので、判定 → 確認 → 記録可否の
+/// 連結だけをここに閉じて `Cursor` で張る（未発走なら stdin を 1 バイトも読まないことも含む）。
+fn confirm_record_if_started<R: BufRead>(
+    reader: &mut R,
+    race: &Race,
+    post_times: &HashMap<RaceId, NaiveTime>,
+    now: NaiveDateTime,
+) -> anyhow::Result<bool> {
+    let (post_time, started) = started_state_for_day(race, post_times, now);
+    if !started {
+        return Ok(true);
+    }
+    confirm_started_race_record(reader, &started_race_record_notice(post_time, now))
 }
 
 /// 開催日と実行日の関係（#587）。日付軸の判定を 1 か所に集め、発走判定とヘッダ注記で共有する。
@@ -941,21 +977,22 @@ fn is_started_at(
     }
 }
 
-/// 日単位の発走時刻マップから、そのレースの発走済み判定を引く（#587 / #623）。
+/// 日単位の発走時刻マップから、そのレースの `(発走時刻, 発走済みか)` を 1 回で引く（#587 / #623）。
 ///
 /// post_time の引き当てと [`is_started_at`] の呼び出しをここ 1 箇所に閉じ、見出しの `[発走済]`
-/// （`race_heading_for_day`）と記録確認（`run_race`）が**同じ判定**を通るようにする。#623 の要件
-/// 「判定の second source を作らない」はこの共有点で担保する。
-fn is_started_for_day(
+/// （`race_heading_for_day`）と記録確認（`confirm_record_if_started`）が**同じ判定**を通るように
+/// する。#623 の要件「判定の second source を作らない」はこの共有点で担保する。
+/// **引き当ての結果も返す**のは、呼び出し側が表示用に `post_times.get` をもう一度書けば
+/// 発走時刻の持ち方を変えたとき片方だけ直る形が残るため。
+fn started_state_for_day(
     race: &Race,
     post_times: &HashMap<RaceId, NaiveTime>,
     now: NaiveDateTime,
-) -> bool {
-    is_started_at(
-        race.date,
-        now,
-        post_times.get(&race.race_id).copied(),
-        has_result(race),
+) -> (Option<NaiveTime>, bool) {
+    let post_time = post_times.get(&race.race_id).copied();
+    (
+        post_time,
+        is_started_at(race.date, now, post_time, has_result(race)),
     )
 }
 
@@ -967,11 +1004,8 @@ fn race_heading_for_day(
     post_times: &HashMap<RaceId, NaiveTime>,
     now: NaiveDateTime,
 ) -> String {
-    race_heading(
-        race,
-        post_times.get(&race.race_id).copied(),
-        is_started_for_day(race, post_times, now),
-    )
+    let (post_time, started) = started_state_for_day(race, post_times, now);
+    race_heading(race, post_time, started)
 }
 
 /// EV 一覧のヘッダに出す注記を組み立てる純関数（#587）。
@@ -1180,11 +1214,11 @@ fn read_u64<R: BufRead>(
 #[cfg(test)]
 mod tests {
     use super::{
-        confirm_started_race_record, is_started_at, is_started_for_day, make_bet_record,
+        confirm_record_if_started, confirm_started_race_record, is_started_at, make_bet_record,
         overview_footer, overview_header_lines, overview_note, race_heading, race_heading_for_day,
         read_choice, read_edited_amounts, read_track_condition, read_u64,
         resolve_track_condition_default, result_before_post_count, result_before_post_warning,
-        session_note,
+        session_note, started_race_record_notice, started_state_for_day,
     };
     use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
     use paddock_domain::horse_result::HorseNum;
@@ -1228,6 +1262,13 @@ mod tests {
     /// 開催日当日の実行時刻。
     fn today_at(h: u32, m: u32) -> NaiveDateTime {
         race_date().and_time(t(h, m))
+    }
+
+    /// 開催月（2026-08）の任意日の実行時刻。開催日 (9 日) との前後で日付軸の枝を選ぶ。
+    fn day_at(day: u32, h: u32, m: u32) -> NaiveDateTime {
+        NaiveDate::from_ymd_opt(2026, 8, day)
+            .unwrap()
+            .and_time(t(h, m))
     }
 
     #[test]
@@ -1540,37 +1581,33 @@ mod tests {
     }
 
     #[test]
-    fn is_started_for_day_agrees_with_the_heading_marker() {
+    fn started_state_for_day_agrees_with_the_heading_marker() {
         // #623 の記録確認は見出しの [発走済] と同じ判定を通らねばならない（second source 禁止）。
-        // 判定が分岐すると「見出しは未発走なのに毎レース確認が出る」等の齟齬が静かに生まれるので、
-        // 日付軸・時刻軸・post_time 不明・結果取込のすべての枝で一致することを機械で張る。
+        // 判定が分岐すると「見出しは未発走なのに毎レース確認が出る」等の齟齬が静かに生まれる。
+        // **期待値そのものも各ケースに書く**——一致だけを見ると `started_state_for_day` を
+        // 「常に false」に変異させても見出し側が道連れで false になり、テストが素通りするため。
         let mut with_result = race(2);
         with_result.track_condition = Some(TrackCondition::Good);
         let post_times = HashMap::from([(race(1).race_id, t(9, 40))]);
         let cases = [
-            (race(1), &post_times, today_at(9, 0)),     // 当日・発走前
-            (race(1), &post_times, today_at(9, 41)),    // 当日・発走後
-            (race(2), &post_times, today_at(23, 0)),    // 当日・post_time 不明
-            (with_result, &post_times, today_at(9, 0)), // 当日・post_time 不明だが結果あり
-            (
-                race(1),
-                &post_times,
-                NaiveDate::from_ymd_opt(2026, 8, 10)
-                    .unwrap()
-                    .and_time(t(9, 0)), // 過去開催
-            ),
-            (
-                race(1),
-                &post_times,
-                NaiveDate::from_ymd_opt(2026, 8, 8)
-                    .unwrap()
-                    .and_time(t(23, 0)), // 未来開催
-            ),
+            (race(1), today_at(9, 0), false),    // 当日・発走前
+            (race(1), today_at(9, 41), true),    // 当日・発走後
+            (race(2), today_at(23, 0), false),   // 当日・post_time 不明
+            (with_result, today_at(9, 0), true), // 当日・post_time 不明だが結果あり
+            (race(1), day_at(10, 9, 0), true),   // 過去開催（時刻を見ずに発走済み）
+            (race(1), day_at(8, 23, 0), false),  // 未来開催（時刻を見ずに未発走）
         ];
-        for (race, post_times, now) in cases {
+        for (race, now, expected) in cases {
+            let (_, started) = started_state_for_day(&race, &post_times, now);
             assert_eq!(
-                race_heading_for_day(&race, post_times, now).contains("[発走済]"),
-                is_started_for_day(&race, post_times, now),
+                started,
+                expected,
+                "発走判定が期待と違う: {} / {now}",
+                race.race_id.value()
+            );
+            assert_eq!(
+                race_heading_for_day(&race, &post_times, now).contains("[発走済]"),
+                expected,
                 "見出しの [発走済] と記録確認の判定がずれた: {} / {now}",
                 race.race_id.value()
             );
@@ -1578,26 +1615,70 @@ mod tests {
     }
 
     #[test]
+    fn started_race_record_notice_shows_both_post_time_and_decision_time() {
+        // 見出しの [発走済] と確認が食い違いうる（判定時刻を取り直す・has_result の不変条件崩れ）
+        // ことの唯一の手掛かりが文面なので、両方の時刻が出ることを固定する（ADR 0086 決定 4）。
+        assert_eq!(
+            started_race_record_notice(Some(t(10, 40)), today_at(14, 22)),
+            "⚠ このレースは発走済みです（発走 10:40 / 判定時刻 08-09 14:22）。"
+        );
+    }
+
+    #[test]
+    fn started_race_record_notice_states_unknown_post_time() {
+        // post_time 不明でも結果取込済みなら発走済みと判定される。時刻を伏せずに不明と書く。
+        assert_eq!(
+            started_race_record_notice(None, today_at(14, 22)),
+            "⚠ このレースは発走済みです（発走時刻不明 / 判定時刻 08-09 14:22）。"
+        );
+    }
+
+    #[test]
+    fn confirm_record_if_started_passes_upcoming_races_without_reading_stdin() {
+        // 未発走レースにゲートを効かせない（#623 は記録の手前の 1 枚であって全レースの確認ではない）。
+        // 空 Cursor で true を返す＝プロンプトを出さず stdin を 1 バイトも読んでいないこと。
+        let post_times = HashMap::from([(race(1).race_id, t(9, 40))]);
+        let mut input = Cursor::new(Vec::new());
+        assert!(
+            confirm_record_if_started(&mut input, &race(1), &post_times, today_at(9, 0)).unwrap()
+        );
+    }
+
+    #[test]
+    fn confirm_record_if_started_blocks_started_races_by_default() {
+        // 発走済みなら確認に入り、既定（EOF）は記録しない。ゲートの配線そのものを張る。
+        let post_times = HashMap::from([(race(1).race_id, t(9, 40))]);
+        let mut eof = Cursor::new(Vec::new());
+        assert!(
+            !confirm_record_if_started(&mut eof, &race(1), &post_times, today_at(9, 41)).unwrap()
+        );
+        let mut yes = Cursor::new(b"y\n".to_vec());
+        assert!(
+            confirm_record_if_started(&mut yes, &race(1), &post_times, today_at(9, 41)).unwrap()
+        );
+    }
+
+    #[test]
     fn confirm_started_race_record_defaults_to_not_recording_on_eof() {
         // EOF は「記録しない」へ畳む（#179 の安全側規律。read_choice の s / read_u64 の 0 と同じ）。
         let mut input = Cursor::new(Vec::new());
-        assert!(!confirm_started_race_record(&mut input, Some(t(10, 40))).unwrap());
+        assert!(!confirm_started_race_record(&mut input, "⚠").unwrap());
     }
 
     #[test]
     fn confirm_started_race_record_treats_blank_as_not_recording() {
         // 既定は記録しない側。Enter 空打ちで記録に進んでしまうと確認の意味が無い。
         let mut input = Cursor::new(b"\n".to_vec());
-        assert!(!confirm_started_race_record(&mut input, Some(t(10, 40))).unwrap());
+        assert!(!confirm_started_race_record(&mut input, "⚠").unwrap());
     }
 
     #[test]
     fn confirm_started_race_record_accepts_y() {
         // 記録自体は禁止しない（発走後に実際に買った分を遡って入力する運用は正当・#623）。
         let mut input = Cursor::new(b"y\n".to_vec());
-        assert!(confirm_started_race_record(&mut input, Some(t(10, 40))).unwrap());
+        assert!(confirm_started_race_record(&mut input, "⚠").unwrap());
         let mut upper = Cursor::new(b"Y\n".to_vec());
-        assert!(confirm_started_race_record(&mut upper, None).unwrap());
+        assert!(confirm_started_race_record(&mut upper, "⚠").unwrap());
     }
 
     #[test]
@@ -1605,8 +1686,8 @@ mod tests {
         // y 以外はすべて 1 回で「記録しない」に落とす（既定が安全側なので再プロンプトを置かない）。
         // 2 行目を消費していないことまで見て、再プロンプトのループが無いことを固定する。
         let mut input = Cursor::new(b"yes\ny\n".to_vec());
-        assert!(!confirm_started_race_record(&mut input, Some(t(10, 40))).unwrap());
-        assert!(confirm_started_race_record(&mut input, Some(t(10, 40))).unwrap());
+        assert!(!confirm_started_race_record(&mut input, "⚠").unwrap());
+        assert!(confirm_started_race_record(&mut input, "⚠").unwrap());
     }
 
     #[test]
