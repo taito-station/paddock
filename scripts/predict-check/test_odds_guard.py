@@ -149,6 +149,52 @@ def test_parse_wide_drops_sentinel_midpoint():
         os.unlink(path)
 
 
+def _load_from(tmpdir, content):
+    """正本ファイルを差し替えて _load_sentinels を呼ぶ（本物のファイルは触らない）。"""
+    path = os.path.join(tmpdir, "netkeiba_sentinels.txt")
+    if content is not None:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(content)
+    saved = G.SENTINELS_PATH
+    try:
+        G.SENTINELS_PATH = path
+        return G._load_sentinels()
+    finally:
+        G.SENTINELS_PATH = saved
+
+
+def test_broken_sentinel_file_fails_loudly_with_the_cause():
+    # #635: import 時に読むため、壊れていれば解析スクリプト全部が起動できない。
+    # そのとき「どのファイルの何行目が何だったか」が読めることを固定する。
+    # **空タプルへのフォールバックはしない**——番兵が素通りして EV が静かに汚染されるため。
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as d:
+        # 1) ファイルが無い
+        try:
+            _load_from(d, None)
+            raise AssertionError("欠落しても落ちなかった")
+        except RuntimeError as e:
+            assert "netkeiba_sentinels.txt" in str(e), e
+
+        # 2) 数値でない行（コメント行を書いた等）— 行番号と中身が出る
+        try:
+            _load_from(d, "9999.9\n# ワイド\n99999.9\n")
+            raise AssertionError("非数値行があっても落ちなかった")
+        except RuntimeError as e:
+            assert ":2" in str(e) and "# ワイド" in str(e), e
+
+        # 3) 空ファイル（番兵ゼロ）— 正常として受理しない
+        try:
+            _load_from(d, "\n\n")
+            raise AssertionError("空でも落ちなかった")
+        except RuntimeError as e:
+            assert "空" in str(e), e
+
+        # 4) 正常系: 空行・前後空白・末尾改行なしは従来どおり読める
+        assert _load_from(d, "  9999.9  \n\n99999.9") == (9999.9, 99999.9)
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for t in tests:

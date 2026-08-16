@@ -35,8 +35,41 @@ SENTINEL_EPSILON = 1e-6
 
 
 def _load_sentinels():
-    with open(SENTINELS_PATH, encoding="utf-8") as f:
-        return tuple(float(line) for line in f if line.strip())
+    """正本ファイルを読んで番兵値のタプルを返す。
+
+    **失敗しても空タプルにフォールバックしない。** 番兵リストが空になると
+    `is_payout_odds` が番兵を素通しし、汚染された EV / 参考 ROI を「正常な出力」として
+    出してしまう（#621 の実害そのものが黙って戻る）。読めないなら**原因を示して止める**。
+    """
+    try:
+        with open(SENTINELS_PATH, encoding="utf-8") as f:
+            lines = f.readlines()
+    except OSError as e:
+        raise RuntimeError(
+            f"番兵リストの正本を読めない: {SENTINELS_PATH} ({e})。"
+            "Rust と共有する本番依存ファイルなので、消さずに復元すること"
+            "（docs/specifications/netkeiba-datasource.md「番兵リストの正本ファイル」）"
+        ) from e
+
+    sentinels = []
+    for lineno, raw in enumerate(lines, start=1):
+        line = raw.strip()
+        if not line:
+            continue
+        try:
+            sentinels.append(float(line))
+        except ValueError as e:
+            raise RuntimeError(
+                f"番兵リストは 1 行 1 値の数値のみ: {SENTINELS_PATH}:{lineno} が {line!r}。"
+                "コメント行・区切り・ヘッダは書けない（Rust 側の golden も同じ書式を要求する）"
+            ) from e
+
+    if not sentinels:
+        raise RuntimeError(
+            f"番兵リストが空: {SENTINELS_PATH}。"
+            "空だと番兵が素通りして EV が汚染されるため、空を正常として受理しない"
+        )
+    return tuple(sentinels)
 
 
 NETKEIBA_SENTINELS = _load_sentinels()
