@@ -13,7 +13,7 @@ sources:
   - docs/original-docs/0049-netkeiba-odds-transient-retry-and-degraded-exit.md
   - docs/original-docs/0075-unsupported-race-skip-exit-zero.md
   - docs/original-docs/0086-netkeiba-unpriced-sentinel-is-not-odds.md
-distilled_from_sha: "8d87218"
+distilled_from_sha: "7056c0e"
 updated: "2026-08-16"
 ---
 
