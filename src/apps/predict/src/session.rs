@@ -795,7 +795,7 @@ fn read_choice<R: BufRead>(reader: &mut R) -> anyhow::Result<char> {
 /// 発走済みなら確認に添える警告文を返す純関数（#623・テスト対象）。未発走なら `None`。
 ///
 /// 表示を持たない——`result_before_post_warning` と同じ規律で、`println!` を抱えると文面を
-/// assert できない。この文面は ADR 0086 決定 4 の拠り所（見出しと確認が食い違っても理由が
+/// assert できない。この文面は ADR 0087 決定 4 の拠り所（見出しと確認が食い違っても理由が
 /// 読める）なので、テストで固定する価値がある。**発走判定と post_time の引き当てから文面までを
 /// 1 本にする**のは、`started_state_for_day` の返り値をここで取りこぼしても bool しか見ない
 /// テストでは気づけないため（発走時刻が常に不明と出る回帰が素通りする）。
@@ -814,13 +814,10 @@ fn started_race_record_notice(
 ) -> Option<String> {
     let (post_time, started) = started_state_for_day(race, post_times, now);
     started.then(|| {
-        let post = match post_time {
-            Some(t) => t.format("%H:%M").to_string(),
-            None => "--:--".to_string(),
-        };
         format!(
-            "⚠ このレースは発走済みです（発走 {} {post} / 判定時刻 {}）。",
+            "⚠ このレースは発走済みです（発走 {} {} / 判定時刻 {}）。",
             race.date.format("%m-%d"),
+            format_post_time(post_time),
             now.format("%m-%d %H:%M")
         )
     })
@@ -993,8 +990,9 @@ fn is_started_at(
 /// 日単位の発走時刻マップから、そのレースの `(発走時刻, 発走済みか)` を 1 回で引く（#587 / #623）。
 ///
 /// post_time の引き当てと [`is_started_at`] の呼び出しをここ 1 箇所に閉じ、見出しの `[発走済]`
-/// （`race_heading_for_day`）と記録確認（`confirm_record_if_started`）が**同じ判定**を通るように
-/// する。#623 の要件「判定の second source を作らない」はこの共有点で担保する。
+/// （`race_heading_for_day`）と記録確認の文面（`started_race_record_notice`。ゲートは
+/// `may_record_race`）が**同じ判定**を通るようにする。#623 の要件「判定の second source を
+/// 作らない」はこの共有点で担保する。
 /// **引き当ての結果も返す**のは、呼び出し側が表示用に `post_times.get` をもう一度書けば
 /// 発走時刻の持ち方を変えたとき片方だけ直る形が残るため。返り値の順は
 /// `(引き当てた発走時刻, 発走済みか)` で固定（位置分解で受ける契約なので、要素を足すときは
@@ -1139,12 +1137,20 @@ fn print_session_header(
     warn_if_result_before_post(races, post_times, date, now);
 }
 
+/// 発走時刻の表示整形（#587 / #623）。不明は見出しと同じ `--:--` に落とす。
+/// 見出し（[`race_heading`]）と発走済み確認の文面（[`started_race_record_notice`]）が
+/// **同じ表記**を使うための共有点——プレースホルダを変えたときに片方だけ直る形にしない。
+fn format_post_time(post_time: Option<NaiveTime>) -> String {
+    post_time.map_or_else(|| "--:--".to_string(), |t| t.format("%H:%M").to_string())
+}
+
 /// レース見出しの 1 行を組み立てる純関数（#587）。`run_race`（対話 / `--skip-all`）と
 /// `run_overview` で共有し、同一フォーマットの重複による drift を防ぐ。
 ///
-/// 発走時刻は常に出し（不明は `--:--`）、発走済みのときだけ `[発走済]` を付ける。
+/// 発走時刻は常に出し（不明は `--:--`・整形は [`format_post_time`]）、発走済みのときだけ
+/// `[発走済]` を付ける。
 fn race_heading(race: &Race, post_time: Option<NaiveTime>, started: bool) -> String {
-    let post = post_time.map_or_else(|| "--:--".to_string(), |t| t.format("%H:%M").to_string());
+    let post = format_post_time(post_time);
     let started_mark = if started { "[発走済] " } else { "" };
     format!(
         "--- レース {}: {} {} {}m（発走 {post}）{started_mark}---",
@@ -1632,7 +1638,7 @@ mod tests {
     #[test]
     fn started_race_record_notice_shows_both_post_time_and_decision_time() {
         // 見出しの [発走済] と確認が食い違いうる（判定時刻を取り直す・has_result の不変条件崩れ）
-        // ことの唯一の手掛かりが文面なので、両方の時刻が日付付きで出ることを固定する（ADR 0086
+        // ことの唯一の手掛かりが文面なので、両方の時刻が日付付きで出ることを固定する（ADR 0087
         // 決定 4）。発走時刻の引き当てが文面まで届いていること（--:-- に落ちないこと）も兼ねる。
         let post_times = HashMap::from([(race(1).race_id, t(9, 40))]);
         assert_eq!(

@@ -14,7 +14,7 @@ sources:
   - docs/original-docs/0048-retire-jra-odds-scraper-for-netkeiba.md
   - docs/original-docs/0054-kelly-staking-rejected.md
   - docs/original-docs/0085-cli-started-race-marking.md
-  - docs/original-docs/0086-started-race-record-confirmation.md
+  - docs/original-docs/0087-started-race-record-confirmation.md
 distilled_from_sha: "87b85d2"
 updated: "2026-08-16"
 ---
@@ -186,7 +186,7 @@ $ paddock-predict --date 2026-06-01 --budget 10000
 
 ### 発走済みレースへの記録確認
 
-> **追加（#623・[ADR 0086](../original-docs/0086-started-race-record-confirmation.md)）**。
+> **追加（#623・[ADR 0087](../original-docs/0087-started-race-record-confirmation.md)）**。
 > **対話セッションのみ**（`--skip-all` / `--overview` は買い目を記録しないので対象外）。
 
 上の `[発走済]` は**見出しに出るだけ**で、購入方法プロンプトにも記録にも効かない（ADR 0085 決定 2
@@ -239,7 +239,7 @@ $ paddock-predict --date 2026-06-01 --budget 10000
 - **対話 stdin のプロトコルが 1 行増える**。stdin をパイプ / heredoc で流す半自動運用は入力位置が
   ずれる。ずれた場合は記録しない側に落ちるので誤記録にはならないが、**静かに 0 件記録**になる。
 
-**却下した案**（詳細は [ADR 0086](../original-docs/0086-started-race-record-confirmation.md)）:
+**却下した案**（詳細は [ADR 0087](../original-docs/0087-started-race-record-confirmation.md)）:
 記録の全面禁止（遡り入力を潰す）/ `read_choice` の直前に挟む（`s` 運用で毎レース 2 回入力）/
 払戻入力の後に挟む（脚数分の作業を捨てさせる）/ 見出し表示時の判定を再利用（発走を跨いだ分を取り逃す）/
 不正入力での再プロンプト（既定が決まっている確認では不要・EOF 挙動を壊しやすい）。
@@ -519,6 +519,6 @@ fn save_predict_race_condition(
 - [ADR-0004](../original-docs/0004-predict-session-binary.md) — 予想セッションバイナリ
 - [ADR-0013](../original-docs/0013-persist-track-condition.md) — 馬場入力の永続化（Issue #80）
 - [ADR-0085](../original-docs/0085-cli-started-race-marking.md) — 見出しの発走時刻・`[発走済]`（Issue #587）
-- [ADR-0086](../original-docs/0086-started-race-record-confirmation.md) — 発走済みレースへの記録確認（Issue #623）
+- [ADR-0087](../original-docs/0087-started-race-record-confirmation.md) — 発走済みレースへの記録確認（Issue #623）
 
 > この索引は読み手向けの抜粋。**正本は frontmatter の `sources`**（機械検査の対象）。

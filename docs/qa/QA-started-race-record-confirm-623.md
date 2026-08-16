@@ -13,7 +13,7 @@
   (b) の払戻入力は買い目の脚数だけ繰り返す長い作業で、その後に確認するのは遅い。
 - 回答: **確定。(b) `y`/`e` 選択後・払戻入力の直前**（ユーザー確認済み）。
   issue の「記録**しようとしたら**確認を挟む」の字義にも一致する（`s` と賭けなしは記録に至らない）。
-- 反映先: ADR 0086 / docs/specifications/predict-session.md
+- 反映先: ADR 0087 / docs/specifications/predict-session.md
 
 ## Q2: 発走判定の時刻をいつ取るか
 
@@ -25,7 +25,7 @@
   `[発走済]` が無いのに確認が出る）は、プロンプトに発走時刻を出すことで理由が読めるようにする。
   ADR 0085 影響節の「対話 / `--skip-all` は 1 日を跨いで動き続けるため判定時刻はレースごとに
   取り直す」の延長線上にある。
-- 反映先: ADR 0086 / docs/specifications/predict-session.md
+- 反映先: ADR 0087 / docs/specifications/predict-session.md
 
 ## Q3: 発走判定の second source を作らないか
 
@@ -35,7 +35,7 @@
 - 回答: **確定。post_time の引き当てと `is_started_at` の呼び出しを `started_state_for_day` に切り出し、
   見出しと確認の両方がそこを通る**。判定の分岐を許すと「見出しは未発走なのに毎レース確認が出る」
   類の齟齬が静かに生まれるため、両者の一致を unit テストで機械的に張る。
-- 反映先: ADR 0086
+- 反映先: ADR 0087
 
 ## Q4: 不正入力で再プロンプトするか / EOF をどちらへ畳むか
 
@@ -44,7 +44,7 @@
   ただしそれらは「入力が無いと処理が進まない」プロンプトで、今回は既定が決まっている。
 - 回答: **確定。再プロンプトしない。`y` 以外はすべて「記録しない」に畳む**（EOF・空入力を含む）。
   既定が安全側なので不正入力ループを作る必要がない。EOF → 記録しない は #179 の規律と同じ向き。
-- 反映先: ADR 0086
+- 反映先: ADR 0087
 
 ## Q5: `--skip-all` / `--overview` をどう扱うか
 
@@ -52,7 +52,7 @@
   `--overview` は `run_race` を通らない読み取り専用経路（#551・`tests/overview.rs` が固定）。
 - 回答: **確定。対象外**。確認を `read_choice` より後ろに置けば、両経路は構造的に到達しない
   （フラグでの出し分けを書かない）。
-- 反映先: ADR 0086 / docs/specifications/predict-session.md
+- 反映先: ADR 0087 / docs/specifications/predict-session.md
 
 ## Q6: 記録を禁止しないか
 
@@ -60,12 +60,12 @@
   ADR 0085 決定 2 は「除外ではなく区別」。
 - 回答: **確定。禁止しない。確認を経れば通す**。ADR 0085 決定 2 は維持し、記録の手前にゲートを
   1 枚足すだけに留める。
-- 反映先: ADR 0086
+- 反映先: ADR 0087
 
 ## Q7: ドキュメントはどこまで回すか
 
 - 観測/根拠: 「表示だけ」だった #587 に対し、本件は記録の可否に効くゲートを足す＝決定を伴う。
   CLAUDE.md は「決定を伴う変更は ADR を起票する」。
-- 回答: **確定。ADR 0086 起票 + `docs/specifications/predict-session.md` への写し**。
+- 回答: **確定。ADR 0087 起票 + `docs/specifications/predict-session.md` への写し**。
   knowledge / specifications の増減も `doc_class` 変更も無いので `doc-classes.md` は触らない。
-- 反映先: ADR 0086 / docs/specifications/predict-session.md
+- 反映先: ADR 0087 / docs/specifications/predict-session.md
