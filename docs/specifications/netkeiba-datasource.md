@@ -177,6 +177,12 @@ netkeiba は**未発売・該当なしの組み合わせ**に固定の番兵値�
 - 番兵は `Error::UnpricedSentinel` として値域違反（`OutOfRange`）と区別し、**ログは `debug`**。
   「まだ売れていない」という正常な状態で 1 レースに数百件出るため、warn にすると本来の値域違反が
   埋もれる。
+- **例外: ワイドの未発売行は保存時 `warn` のまま**。上表のとおり相方が `odds_high=0.0` になり、
+  `save_race_odds::classify_row` は 1 行に値域違反が混ざれば warn 側を優先する（番兵に引っ張られて
+  debug に落とすと本来見るべき残骸が埋もれるため）。**debug になるのは band でない券種の番兵単独行**
+  （馬連 / 馬単 / 三連複 / 三連単）。読み出し側は成分ごとに判定するのでワイドの番兵も `debug`。
+  「番兵起因の WARN は 0 行」という #621 の実測は `--overview`＝**読み出し経路**での計測であり、
+  保存経路のワイドを含意しない。
 - 番兵リストの正本は `src/domain/src/odds/netkeiba_sentinels.txt`。**Python の分析経路**
   （`scripts/predict-check/odds_guard.py`）も同じファイルを読む——`scripts/` は psql / TSV で DB を
   直読みするため、Rust の値オブジェクトを一切通らない。

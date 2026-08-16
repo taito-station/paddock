@@ -486,16 +486,17 @@ async fn band_sentinel_row_is_skipped_not_errored(pool: sqlx::PgPool) {
 }
 
 #[sqlx::test(migrations = "../../../deployments/db/migrations")]
-async fn save_warns_when_sentinel_mixes_with_out_of_range(pool: sqlx::PgPool) {
+async fn save_skips_real_wide_unpriced_row(pool: sqlx::PgPool) {
     let repo = PostgresRepository::new(pool);
-    // odds=0.0（本物の値域違反）と odds_high=99999.9（番兵）が 1 行に混在するケース。
-    // どちらも保存しない点は同じだが、**番兵側に引っ張られて debug に落とすと本来見るべき
-    // 値域違反が埋もれる**ので、分類は warn 側が優先される（classify_row）。
-    // ここでは「保存されないこと」を固定する（ログレベルの出し分けは classify_row の責務）。
+    // **実地のワイド未発売行**（netkeiba は `["9999.9", "0.0", "--"]` を返す・ADR 0086 Q2）。
+    // 番兵と値域違反が 1 行に混在するため分類は warn 側が優先され、debug には落ちない
+    // （番兵側に引っ張って debug にすると本来見るべき値域違反が埋もれるため）。
+    // ここで固定するのは「保存されないこと」だけ。分類そのものは classify_row の単体テストが持つ。
+    let pair = Pair::try_from((horse(1), horse(2))).unwrap();
     repo.save_race_odds(&RaceOddsRecord {
         race_id: race_id(),
         fetched_at: fetched_at(),
-        rows: vec![OddsRow::place(7, 0.0, 99_999.9, None)],
+        rows: vec![OddsRow::wide(pair, 9_999.9, 0.0)],
     })
     .await
     .unwrap();
@@ -505,7 +506,10 @@ async fn save_warns_when_sentinel_mixes_with_out_of_range(pool: sqlx::PgPool) {
         .fetch_one(&repo.pool)
         .await
         .unwrap();
-    assert_eq!(count, 0, "値域違反と番兵が混在した行は保存されない");
+    assert_eq!(
+        count, 0,
+        "ワイドの未発売行（番兵 + 相方 0.0）は保存されない"
+    );
 }
 
 #[sqlx::test(migrations = "../../../deployments/db/migrations")]
@@ -541,8 +545,8 @@ async fn sentinel_odds_row_is_skipped_on_read(pool: sqlx::PgPool) {
 #[sqlx::test(migrations = "../../../deployments/db/migrations")]
 async fn save_skips_row_with_invalid_odds_high(pool: sqlx::PgPool) {
     let repo = PostgresRepository::new(pool);
-    // 下限は有効だが上限が値域違反（odds_high=0.0）の複勝行。保存ガードの
-    // `odds_high.is_some_and(is_invalid_odds)` 分岐が弾くことを担保する(#114)。
+    // 下限は有効だが上限が値域違反（odds_high=0.0）の複勝行。保存ガード `classify_row` が
+    // odds_high 側も評価して弾くことを担保する(#114)。
     repo.save_race_odds(&RaceOddsRecord {
         race_id: race_id(),
         fetched_at: fetched_at(),

@@ -45,7 +45,7 @@ impl TryFrom<f64> for OddsValue {
     type Error = Error;
     /// Reject non-odds figures: out-of-range values and netkeiba's unpriced sentinels.
     ///
-    /// この 1 か所が値域判定の単一ソース。`save_race_odds::is_invalid_odds` と
+    /// この 1 か所が値域判定の単一ソース。`save_race_odds::classify_row` と
     /// `find_race_odds::parse_odds_value` が委譲しているので、保存・読み出しの双方に同時に効く
     /// ——**既に DB に入っている番兵行も読み出し時に無害化される**（#621）。
     fn try_from(value: f64) -> Result<Self> {

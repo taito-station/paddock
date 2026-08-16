@@ -8,13 +8,18 @@ use crate::error::Result;
 /// （finite・>= 1.0・番兵でない）に委譲するので、読み取り側 `find_race_odds` の skip 判定と
 /// 境界が必ず一致する。`odds` と `odds_high` を **1 回ずつだけ**評価して
 /// 分類に使う（判定のたびに `try_from` を呼び直すと 1 行で最大 4 回・毎回 `format!` が走る）。
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 enum RowVerdict {
     /// 全成分が有効。
     Ok,
     /// 弾くが**異常ではない**——未発売の番兵だけが理由。1 レースに数百件出るのでログは debug。
     UnpricedOnly,
     /// 値域違反を含む。**番兵と混在していても warn**——本来見るべき残骸を埋もれさせない。
+    ///
+    /// **実地のワイド未発売行 `(9999.9, Some(0.0))` はここに落ちる**（相方 `0.0` が値域違反のため）。
+    /// つまり保存経路のワイドは番兵であっても warn で、debug に落ちるのは band でない券種
+    /// （馬連・馬単・三連複・三連単）に限られる。読み出し経路（`find_race_odds`）は成分ごとに
+    /// 判定するので番兵側は debug になる。
     Invalid,
 }
 
@@ -50,6 +55,10 @@ fn classify_row(odds: f64, odds_high: Option<f64>) -> RowVerdict {
 /// **未発売の番兵（#621）も同じく INSERT しないが、ログは debug**。「まだ売れていない」という
 /// 正常な状態で 1 レースに数百件出るため、warn だと本来の値域違反が埋もれる。値域違反と番兵が
 /// 1 行に混在した場合は warn 側を優先する（[`classify_row`]）。
+///
+/// **ワイドの未発売行は debug にならない**。netkeiba は `["9999.9", "0.0", "--"]` の形で返すため
+/// 相方 `0.0` が値域違反になり、混在扱いで warn 側へ落ちる（[`RowVerdict::Invalid`]）。番兵単独で
+/// debug になるのは band でない券種のみ。読み出し経路は成分ごとに判定するので番兵側は debug。
 ///
 /// ここで弾くのは値域違反と番兵のみ。band（複勝・ワイド）の構造的不整合（odds_high NULL・low>high）は
 /// 保存側バグの早期検知のため意図的にガードせず、読み取り側で `Error` として顕在化させる
@@ -134,4 +143,31 @@ pub async fn save_race_odds(pool: &PgPool, record: &RaceOddsRecord) -> Result<()
 
     tx.commit().await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{RowVerdict, classify_row};
+
+    /// warn / debug の出し分けは `classify_row` の戻り値がすべてなので、ここで固定する。
+    /// 統合テスト（`tests/test_race_odds_persistence.rs`）は「保存されないこと」しか見ておらず、
+    /// 分類を取り違えても緑のままだった（#621 3 巡目）。DB 不要の純関数なのでここが正しい置き場。
+    #[test]
+    fn classify_row_separates_unpriced_sentinel_from_out_of_range() {
+        assert_eq!(classify_row(3.5, None), RowVerdict::Ok);
+        assert_eq!(classify_row(1.5, Some(2.0)), RowVerdict::Ok);
+        // 番兵単独（馬連・三連複など band でない券種）は debug 側。
+        assert_eq!(classify_row(99_999.9, None), RowVerdict::UnpricedOnly);
+        assert_eq!(classify_row(999_999.9, None), RowVerdict::UnpricedOnly);
+        // 値域違反が 1 成分でもあれば warn 側。**評価順に依らない**ことを両向きで固定する。
+        assert_eq!(classify_row(0.0, Some(99_999.9)), RowVerdict::Invalid);
+        assert_eq!(classify_row(99_999.9, Some(0.0)), RowVerdict::Invalid);
+        // 実地のワイド未発売行はこの形（ADR 0086 Q2）。番兵だが相方 0.0 のため warn 側に落ちる。
+        assert_eq!(classify_row(9_999.9, Some(0.0)), RowVerdict::Invalid);
+        // 番兵だけが 2 成分に揃えば debug 側（現行 netkeiba では出ないが契約として固定）。
+        assert_eq!(
+            classify_row(9_999.9, Some(9_999.9)),
+            RowVerdict::UnpricedOnly
+        );
+    }
 }
