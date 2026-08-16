@@ -32,7 +32,7 @@
 - 観測/根拠: issue の要件は「発走判定は #587 と同じ `is_started_at` を使う」。改修前は
   `is_started_at` の呼び出し元が `race_heading_for_day` 1 箇所だけで、判定結果は見出し文字列にしか
   流れていなかった（値として取り出せない）。
-- 回答: **確定。post_time の引き当てと `is_started_at` の呼び出しを `is_started_for_day` に切り出し、
+- 回答: **確定。post_time の引き当てと `is_started_at` の呼び出しを `started_state_for_day` に切り出し、
   見出しと確認の両方がそこを通る**。判定の分岐を許すと「見出しは未発走なのに毎レース確認が出る」
   類の齟齬が静かに生まれるため、両者の一致を unit テストで機械的に張る。
 - 反映先: ADR 0086
