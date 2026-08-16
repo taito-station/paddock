@@ -457,6 +457,58 @@ async fn save_skips_netkeiba_sentinel_row(pool: sqlx::PgPool) {
 }
 
 #[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn band_sentinel_row_is_skipped_not_errored(pool: sqlx::PgPool) {
+    let repo = PostgresRepository::new(pool);
+    save_sample(&repo).await; // win/place(有効) を投入
+    // band（ワイド）の両端が番兵、というケース。隣に「odds_high NULL は Error::Data で stop」の
+    // 分岐があるので、番兵は **stop ではなく skip**（Ok(None)）に落ちることを固定する(#621)。
+    // 現行の netkeiba は相方に 0.0 を返すので DB には残っていないが、それは偶然であって契約ではない。
+    sqlx::query(
+        "INSERT INTO race_odds (race_id, bet_type, combination_key, odds, odds_high, popularity, fetched_at) \
+         VALUES ($1, 'wide', '1-2', 9999.9, 9999.9, NULL, $2)",
+    )
+    .bind(race_id().value())
+    .bind(fetched_at().to_rfc3339())
+    .execute(&repo.pool)
+    .await
+    .unwrap();
+
+    let odds = repo
+        .find_race_odds(&race_id(), None)
+        .await
+        .unwrap()
+        .expect("有効な win/place があるので Some");
+    assert_eq!(odds.place.len(), 2, "既存の複勝は残る");
+    assert!(
+        odds.wide.is_empty(),
+        "番兵の band 行は読み飛ばされる（stop しない）"
+    );
+}
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn save_warns_when_sentinel_mixes_with_out_of_range(pool: sqlx::PgPool) {
+    let repo = PostgresRepository::new(pool);
+    // odds=0.0（本物の値域違反）と odds_high=99999.9（番兵）が 1 行に混在するケース。
+    // どちらも保存しない点は同じだが、**番兵側に引っ張られて debug に落とすと本来見るべき
+    // 値域違反が埋もれる**ので、分類は warn 側が優先される（classify_row）。
+    // ここでは「保存されないこと」を固定する（ログレベルの出し分けは classify_row の責務）。
+    repo.save_race_odds(&RaceOddsRecord {
+        race_id: race_id(),
+        fetched_at: fetched_at(),
+        rows: vec![OddsRow::place(7, 0.0, 99_999.9, None)],
+    })
+    .await
+    .unwrap();
+
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM race_odds WHERE race_id = $1")
+        .bind(race_id().value())
+        .fetch_one(&repo.pool)
+        .await
+        .unwrap();
+    assert_eq!(count, 0, "値域違反と番兵が混在した行は保存されない");
+}
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
 async fn sentinel_odds_row_is_skipped_on_read(pool: sqlx::PgPool) {
     let repo = PostgresRepository::new(pool);
     save_sample(&repo).await; // win/place を投入

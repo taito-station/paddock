@@ -91,9 +91,12 @@ def group_snapshots(rows):
                 hi = r["odds_high"]
                 if hi in (None, "", "\\N"):
                     continue  # mid を出せない異常行は捨てる
+                # 先に float 化する。is_payout_odds は非数値を False に畳むので、これを先に
+                # 通すと破損行が warn 経路（下の except）へ行かず無言で消える。
+                hi = float(hi)
                 if not is_payout_odds(hi):
                     continue
-                book, key, val = "wide", _combo(r["combination_key"]), (odds + float(hi)) / 2.0
+                book, key, val = "wide", _combo(r["combination_key"]), (odds + hi) / 2.0
             else:  # quinella / trio
                 book, key, val = bt, _combo(r["combination_key"]), odds
             race = races.get(rid)

@@ -107,6 +107,48 @@ def test_snapshot_report_keeps_win_rows_below_one():
     assert set(win) == {1, 3}, win  # 番兵の 2 番だけ落ちる（0.5 の 1 番は残る）
 
 
+def test_fetch_wide_drops_both_end_sentinels():
+    # 番兵を止めているのが `hi < lo` という**偶然**でないことを固定する（#621 の核心）。
+    # netkeiba が両端に同じ番兵を返しても落ちること。
+    import json
+
+    import fetch_wide as FW
+
+    payload = {"data": {"odds": {"5": {
+        "0102": ["9999.9", "9999.9", "1"],   # 両端番兵 → 落ちる（hi < lo では捕まらない）
+        "0103": ["9999.9", "0.0", "2"],      # 従来の形 → 落ちる
+        "0203": ["3.1", "4.9", "3"],         # 正常 → 残る
+    }}}}
+
+    def fake_curl(_url):
+        return json.dumps(payload).encode("utf-8")
+
+    orig = FW.nk.curl
+    FW.nk.curl = fake_curl
+    try:
+        got = FW.fetch_wide("dummy")
+    finally:
+        FW.nk.curl = orig
+    assert set(got) == {(2, 3)}, got
+    assert abs(got[(2, 3)] - 4.0) < 1e-9, got
+
+
+def test_parse_wide_drops_sentinel_midpoint():
+    # 二次防御。中点が番兵に一致するケース（両端とも同じ番兵だった行）だけ拾える。
+    import tempfile
+
+    import live_ev as L
+
+    fd, path = tempfile.mkstemp(suffix=".tsv")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write("p1\t1-2\t9999.9\np1\t3-4\t21.6\n")
+        got = L.parse_wide(path)
+        assert got["p1"] == {(3, 4): 21.6}, got
+    finally:
+        os.unlink(path)
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for t in tests:

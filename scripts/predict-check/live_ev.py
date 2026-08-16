@@ -147,13 +147,18 @@ def parse_wide(path):
             continue
         pid, pair, o = line.split("\t")
         a, b = sorted(int(x) for x in pair.split("-"))
-        # ここに来る値は fetch_wide が中点化済み（low/high は見られない）。番兵 9999.9 が
-        # 現状 fetch_wide の `hi < lo` に**偶然**引っかかって落ちているだけなので、
-        # netkeiba が [9999.9, 9999.9] を返せば素通りする——#621 が「ワイドが守られていたのは
-        # 偶然」と指摘したのと同じ構造なので、中点値そのものも番兵として弾く。
-        if not is_payout_odds(o):
+        # ここに来る値は fetch_wide が中点化済みで low/high を分離できない。**二次防御**として
+        # 中点そのものが番兵に一致する場合（両端とも同じ番兵だったケース）だけ拾う——
+        # `[9999.9, 12.0]` の中点 5005.95 のような部分汚染はここでは検知できない。
+        # 端ごとの判定は fetch_wide（中点化の前）が担う（#621）。
+        try:
+            ov = float(o)
+        except ValueError:
+            print(f"[warn] 数値でないワイドオッズ {o!r}（pid={pid} {pair}）をスキップ", file=sys.stderr)
             continue
-        d.setdefault(pid, {})[(a, b)] = float(o)
+        if not is_payout_odds(ov):
+            continue
+        d.setdefault(pid, {})[(a, b)] = ov
     return d
 
 

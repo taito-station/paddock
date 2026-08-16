@@ -71,11 +71,20 @@
 
 - 観測/根拠: `race_odds_snapshots` の番兵行は **trio 7,259 行 / 111 レース**、
   quinella 654 行 / 47 レース。snapshots を持つ全レースは 486 なので、**約 23% のレースが該当**。
-  測定に使う `gate_calibration.py` は snapshots を直読みしており、フィルタは `o <= 0` のみ。
-  ただしその ROI 式は `q = (1/o)*W/inv_sum` → `exp += amount * q * o` で **`q*o` が打ち消す**構造。
-  巨大 odds の脚は「実質ゼロ寄与」になり、`inv_sums` の分母を汚して**他の脚を過大評価する方向**に効く。
-- 回答: **確定（影響あり・方向は ROI を跳ね上げる側ではない）**。ADR 0076 が「ROI ≥ 100% は 0 件」と
-  結論したこと自体は、この構造と整合する（predict の EV 経路とは別の式なので 3 桁にはならない）。
-  **再測定はこの PR のスコープ外**——`odds_guard` を入れた状態で測り直す価値はあるので、
-  別 issue として起票する。
-- 反映先: ADR / follow-up issue
+  `gate_calibration.py` が出す 2 つの ROI を追うと、汚染の効き方が別々だった:
+
+  - **判定 ROI（`judged_roi`）**: `races.append({... "judged_roi": row["roi"] ...})` の `row` は
+    `live_ev_snapshots` の行で、`roi` 列は **predict-watch が Rust で計算して保存した値**
+    （`snapshot.rs:81` の `ev.roi * 100.0`）。番兵が `EV = 的中確率 × オッズ` を 3 桁にする経路は
+    **ここだけ**で、保存済みの数値なので本 PR の修正でも `odds_guard` でも直らない。
+  - **市場整合 ROI（`market_fair_roi`）**: `q = (1/o)·W/inv_sum` に `exp += amount·q·o` なので
+    **`o` が約分され `amount·W/inv_sum`** になる。番兵脚は「ゼロ寄与」ではなく他脚と同額寄与し、
+    影響は `inv_sum` に `1/999999.9 ≈ 1e-6` が乗るぶんだけ（しかも全脚の `q` を下げる過小評価方向）。
+
+- 回答: **確定。汚染は判定 ROI 側にあり、市場整合 ROI はほぼ無影響**。
+  したがって**再測定は「`odds_guard` を入れて計算し直す」では済まない**——判定 ROI は番兵除去後の
+  predict-watch が新しく記録し直す必要があり、既存の `live_ev_snapshots` 行は使えない。
+  ADR 0076 が「ROI ≥ 100% は 0 件」と結論したこと自体は、その期間の買い目の脚に番兵がほぼ
+  乗らなかったことを示唆する（買い目は model top5 ＝人気上位、番兵は売れていない人気薄に出る。
+  本 PR の実地確認でも買い目に乗った番兵は 0 点）。ただし断定はできないので取り直す。
+- 反映先: ADR / #625

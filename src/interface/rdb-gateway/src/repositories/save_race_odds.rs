@@ -4,20 +4,34 @@ use sqlx::PgPool;
 
 use crate::error::Result;
 
-/// オッズ値として不正か。値域条件を手書きで複製せず `OddsValue` の不変条件（finite かつ >= 1.0）
-/// を単一の真実源として委譲する。読み取り側 `find_race_odds` の skip 判定（`OddsValue::try_from`）
-/// と境界が必ず一致する。
-fn is_invalid_odds(v: f64) -> bool {
-    OddsValue::try_from(v).is_err()
+/// 1 行のオッズ値がなぜ弾かれたか（#621）。値域条件を手書きで複製せず `OddsValue` の不変条件
+/// （finite・>= 1.0・番兵でない）に委譲するので、読み取り側 `find_race_odds` の skip 判定と
+/// 境界が必ず一致する。`odds` と `odds_high` を **1 回ずつだけ**評価して
+/// 分類に使う（判定のたびに `try_from` を呼び直すと 1 行で最大 4 回・毎回 `format!` が走る）。
+#[derive(PartialEq)]
+enum RowVerdict {
+    /// 全成分が有効。
+    Ok,
+    /// 弾くが**異常ではない**——未発売の番兵だけが理由。1 レースに数百件出るのでログは debug。
+    UnpricedOnly,
+    /// 値域違反を含む。**番兵と混在していても warn**——本来見るべき残骸を埋もれさせない。
+    Invalid,
 }
 
-/// 未発売の番兵（#621）か。保存を弾く点は値域違反と同じだが、こちらは**異常ではない**ので
-/// ログレベルを下げる（1 レースに数百件出るため、warn だと本来の値域違反が埋もれる）。
-fn is_unpriced_sentinel(v: f64) -> bool {
-    matches!(
-        OddsValue::try_from(v),
-        Err(paddock_domain::Error::UnpricedSentinel(_))
-    )
+fn classify_row(odds: f64, odds_high: Option<f64>) -> RowVerdict {
+    let mut sentinel_seen = false;
+    for v in std::iter::once(odds).chain(odds_high) {
+        match OddsValue::try_from(v) {
+            Ok(_) => {}
+            Err(paddock_domain::Error::UnpricedSentinel(_)) => sentinel_seen = true,
+            Err(_) => return RowVerdict::Invalid,
+        }
+    }
+    if sentinel_seen {
+        RowVerdict::UnpricedOnly
+    } else {
+        RowVerdict::Ok
+    }
 }
 
 /// 1 レース分のオッズを 1 トランザクションで upsert する。
@@ -33,7 +47,11 @@ fn is_unpriced_sentinel(v: f64) -> bool {
 /// 二重で predict セッションの全停止を防ぐ(#114)。netkeiba 経路は生 f64 を渡すためここで一元的に弾く。
 /// ガードの内側で両テーブルへ書くため、無効行は snapshots にも入らない。
 ///
-/// ここで弾くのは値域違反のみ。band（複勝・ワイド）の構造的不整合（odds_high NULL・low>high）は
+/// **未発売の番兵（#621）も同じく INSERT しないが、ログは debug**。「まだ売れていない」という
+/// 正常な状態で 1 レースに数百件出るため、warn だと本来の値域違反が埋もれる。値域違反と番兵が
+/// 1 行に混在した場合は warn 側を優先する（[`classify_row`]）。
+///
+/// ここで弾くのは値域違反と番兵のみ。band（複勝・ワイド）の構造的不整合（odds_high NULL・low>high）は
 /// 保存側バグの早期検知のため意図的にガードせず、読み取り側で `Error` として顕在化させる
 /// （find_race_odds::parse_band 参照。「保存できるが読めない」のは検知すべき不正状態のため許容）。
 pub async fn save_race_odds(pool: &PgPool, record: &RaceOddsRecord) -> Result<()> {
@@ -41,8 +59,9 @@ pub async fn save_race_odds(pool: &PgPool, record: &RaceOddsRecord) -> Result<()
 
     let fetched_at = record.fetched_at.to_rfc3339();
     for row in &record.rows {
-        if is_invalid_odds(row.odds) || row.odds_high.is_some_and(is_invalid_odds) {
-            if is_unpriced_sentinel(row.odds) || row.odds_high.is_some_and(is_unpriced_sentinel) {
+        match classify_row(row.odds, row.odds_high) {
+            RowVerdict::Ok => {}
+            RowVerdict::UnpricedOnly => {
                 tracing::debug!(
                     race_id = record.race_id.value(),
                     bet_type = row.bet_type,
@@ -51,7 +70,9 @@ pub async fn save_race_odds(pool: &PgPool, record: &RaceOddsRecord) -> Result<()
                     odds_high = row.odds_high,
                     "未発売の組み合わせを保存せずスキップした"
                 );
-            } else {
+                continue;
+            }
+            RowVerdict::Invalid => {
                 tracing::warn!(
                     race_id = record.race_id.value(),
                     bet_type = row.bet_type,
@@ -60,8 +81,8 @@ pub async fn save_race_odds(pool: &PgPool, record: &RaceOddsRecord) -> Result<()
                     odds_high = row.odds_high,
                     "race_odds の不正オッズ行を保存せずスキップした"
                 );
+                continue;
             }
-            continue;
         }
         sqlx::query(
             r#"
