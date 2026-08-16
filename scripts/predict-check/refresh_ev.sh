@@ -179,11 +179,11 @@ echo "[4/5] wide TSV（netkeiba type=5）"
 for pid in "${PIDS[@]}"; do
   # 取得失敗は無言で捨てず、stderr をログに残しつつ FAIL を可視化する（ワイド欠落は EV を歪めるため）。
   python3 "$SCRIPT_DIR/fetch_wide.py" "$(nk_id "$pid")" "$pid" >> "$WORKDIR/wide.tsv" \
-    2>>"$WORKDIR/wide_errors.log" || echo "  wide FAIL $pid（詳細: $WORKDIR/wide_errors.log）" >&2
+    2>>"$WORKDIR/wide_errors.log" || echo "  wide FAIL ${pid}（詳細: $WORKDIR/wide_errors.log）" >&2
   sleep 1  # netkeiba への pacing
 done
 
-echo "[5/5] meta + 予想（analyze predict --blend-alpha $LIVE_BLEND_ALPHA）"
+echo "[5/5] meta + 予想（analyze predict --blend-alpha ${LIVE_BLEND_ALPHA}）"
 : > "$WORKDIR/meta.tsv"
 : > "$WORKDIR/pred.txt"
 "${PSQL[@]}" -F$'\t' -c \

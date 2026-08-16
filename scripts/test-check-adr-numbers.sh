@@ -101,6 +101,8 @@ expect_exit() {
     if [[ "$last_status" -eq "$expected" ]]; then
         # 変数の直後に全角文字が続く箇所は必ずブレースで閉じる。$label（ と書くと bash が
         # 全角括弧の UTF-8 バイトまで識別子の一部として読み、unbound variable で落ちる。
+        # これはリポジトリ全体で scripts/check-shell-var-brace.sh が機械検査している（#636）。
+        # 上の悪い例が検査に引っかからないのは、行頭コメントを除外しているため。
         echo "  ✓ ${label}（exit ${last_status}）"
     else
         echo "  ✗ ${label}: 期待 exit ${expected} / 実際 exit ${last_status}" >&2

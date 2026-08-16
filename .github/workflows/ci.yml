@@ -251,6 +251,13 @@ jobs:
         run: |
           git ls-files '*.sh' scripts/mdq scripts/git-hooks/pre-push \
             | xargs -r shellcheck --severity=warning
+      # 変数直後の非 ASCII（`$var（`）は UTF-8 ロケールの bash が変数名に取り込み set -u で落ちる（#636）。
+      # shellcheck は検出しないので専用検査を置く。対象ファイル集合は上の shellcheck と同一。
+      # 検査自身の回帰を先に走らせる（`adr` ジョブと同じ順序。検査が壊れたのか本体が壊れたのかを分ける）。
+      - name: Regression test for check-shell-var-brace.sh
+        run: bash scripts/test-check-shell-var-brace.sh
+      - name: Check unbraced variables before non-ASCII (#636)
+        run: bash scripts/check-shell-var-brace.sh
 
   # reset-db.sh / seed-db.sh の golden DB 保護ガードの回帰テスト（scripts/test-db-guards.sh・#406/#465）。
   # ガードが退行すると「golden DB を DROP しうる」最悪級の事故に直結するため、テストが存在するのに

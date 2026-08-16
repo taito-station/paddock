@@ -33,6 +33,6 @@ LOCK_DIR="/tmp/paddock-keep-awake.lock.d"
 pid="$(cat "$LOCK_DIR/pid" 2>/dev/null || echo '')"
 if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null \
    && ps -p "$pid" -o comm= 2>/dev/null | grep -q 'caffeinate'; then
-  kill "$pid" 2>/dev/null && echo "keep-awake の caffeinate を停止しました（pid $pid）"
+  kill "$pid" 2>/dev/null && echo "keep-awake の caffeinate を停止しました（pid ${pid}）"
 fi
 rm -rf "$LOCK_DIR" 2>/dev/null || true

@@ -70,7 +70,7 @@ check() {
         echo "  ✓ $name"
         pass=$((pass + 1))
     else
-        echo "  ✗ $name（期待 $expect / exit $code）" >&2
+        echo "  ✗ ${name}（期待 $expect / exit ${code}）" >&2
         fail=$((fail + 1))
     fi
 }
