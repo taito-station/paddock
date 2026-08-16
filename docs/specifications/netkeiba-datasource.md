@@ -194,7 +194,12 @@ netkeiba は**未発売・該当なしの組み合わせ**に固定の番兵値�
 | 読む側 | 読み方 | ファイルが壊れると |
 |---|---|---|
 | Rust `src/domain/src/odds/odds_value.rs` | `const NETKEIBA_SENTINELS` を持ち、テスト `sentinel_list_matches_the_shared_golden` が `include_str!` で突き合わせる（`#[cfg(test)]` 内） | **テストビルド**が落ちる（本番ビルドは通る） |
-| Python `scripts/predict-check/odds_guard.py` | **import 時**に読んで集合を作る | import した解析スクリプトが**起動時に**落ちる（原因を明示して停止する。空リストへのフォールバックはしない——番兵が素通りするため） |
+| Python `scripts/predict-check/odds_guard.py` | **import 時**に読んで集合を作る | import した解析スクリプトが**起動時に**落ちる（パス・行番号・該当行を示して停止する。空リストへのフォールバックはしない——番兵が素通りするため） |
+
+Python 側は**欠落 / 非数値行 / 非 UTF-8 保存 / 非有限値（`nan`・`inf`）/ 空**をすべて拒否する。非有限を
+受理しないのは、番兵として登録しても `abs(o - nan) < ε` が常に偽になり**その値だけが黙って無効化**される
+ため（空を拒否するのと同じ理由）。Rust 側は golden を const と完全一致で突き合わせるので、同じ壊れ方は
+`sentinel_list_matches_the_shared_golden` が落とす。
 
 **`testdata/` に置かない。** Python が import 時に読む**本番依存**であり、テスト専用資産ではない。
 
