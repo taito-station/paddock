@@ -13,7 +13,7 @@ sources:
   - docs/original-docs/636-fullwidth-after-var.md
   - docs/qa/QA-evil-merge-615.md
   - .github/workflows/ci.yml
-distilled_from_sha: "0ea19f9"
+distilled_from_sha: "6444f48"
 updated: "2026-08-16"
 ---
 
