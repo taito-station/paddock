@@ -9,10 +9,12 @@
 # （スクリプトは `git rev-parse --show-toplevel` で基準を取るので git init も行う）。
 set -euo pipefail
 
-# git hook から呼ばれると GIT_DIR / GIT_WORK_TREE が環境に入り、下で作る一時リポジトリ内の
-# git が**本物のリポジトリを指す**（#645）。本テストは現状 `git -C` 併用で通っているが、
-# `git rev-parse --show-toplevel` を使う検査対象を temp repo で走らせる構造は同じ罠を抱えるので、
-# 予防的に落とす。
+# git hook から呼ばれると GIT_DIR が環境に入り（linked worktree からの push で発生・#645）、
+# 下で作る一時リポジトリ内の git が**別のリポジトリを指す**。
+# **本テストは現状 4 条件すべてで通っており不具合ではない**（`git -C` 併用のため）。
+# ただし `git rev-parse --show-toplevel` を使う検査対象を temp repo で走らせる構造は
+# 同じ罠を抱えるので、予防的に落とす。実際に落ちるのは
+# `test-check-shell-var-nonascii.sh` と `test-check-adr-numbers.sh` の 2 本。
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
 
 TARGET=$(cd "$(dirname "$0")" && pwd)/check-vendored-swagger.sh

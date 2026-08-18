@@ -17,13 +17,17 @@
 # 内部エラーによる非 0 を見逃す（どちらも fail 期待ケースが緑のまま通ってしまう）。
 set -euo pipefail
 
-# **git の環境変数を必ず捨てる**（#645）。git hook は GIT_DIR / GIT_WORK_TREE を設定して
-# 子プロセスを起動するので、これを残したまま pre-push から呼ばれると、下で `git init` した
-# 一時リポジトリの中で走る git が**環境変数側を優先して本物のリポジトリを指す**。
+# **git の環境変数を必ず捨てる**（#645）。これを残したまま git hook から呼ばれると、下で
+# `git init` した一時リポジトリの中で走る git が**環境変数側を優先して別のリポジトリを指す**。
 # 結果 (a) `git ls-files` が本物のファイルを返し「対象 0 件」系のケースが落ちる、
 # (b) 一時リポジトリのつもりの `git add` が**本物の index を汚染する**（フィクスチャが
 # ステージされ、未コミットの変更を持つ人の push を巻き込む）。
-# GIT_INDEX_FILE も同じ理由で落とす。
+#
+# **どの変数が来るかは実測済み**（git 2.53.0）: 通常リポジトリからの push では GIT_* は渡らず、
+# **linked worktree から push したときだけ `GIT_DIR` が入る**（`GIT_WORK_TREE` は入らない）。
+# このプロジェクトが issue ごとに worktree を切る運用（`.claude/worktrees/`）なので全員が踏む。
+# `GIT_INDEX_FILE` は commit 系フックが渡す変数で pre-push では来ないが、単体で与えるだけで
+# 上記 (b) の汚染が再現するため同時に落とす。
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
 
 TARGET=$(cd "$(dirname "$0")" && pwd)/check-shell-var-nonascii.sh
@@ -214,24 +218,70 @@ for literal in scripts/mdq scripts/git-hooks/pre-push; do
     fi
 done
 
-# **自己回帰（#645）**: git hook 相当の環境（GIT_DIR / GIT_WORK_TREE あり）で自分をもう 1 回
-# 走らせ、同じ結果になることを確かめる。冒頭の unset を外すと、このケースだけが落ちる。
+# **自己回帰（#645）**: git hook 相当の環境で自分をもう 1 回走らせ、同じ結果になることを確かめる。
 #
-# 単発のケースでは守れない: 壊れ方が「一時リポジトリ内の git が本物を指す」なので、
-# 一時リポジトリを作る**全ケースが同時に**影響を受ける。まるごと再実行するのが唯一の忠実な再現。
-# ネスト無限ループは環境変数で止める。実行コストは約 6 秒で、pre-push 全体（clippy 十数分）に対して無視できる。
-if [ -z "${SHELL_VAR_NONASCII_SELFTEST_NESTED:-}" ]; then
-    if SHELL_VAR_NONASCII_SELFTEST_NESTED=1 \
-        GIT_DIR="$(git -C "${repo_root}" rev-parse --absolute-git-dir)" \
-        GIT_WORK_TREE="$(git -C "${repo_root}" rev-parse --show-toplevel)" \
-        bash "$0" >/dev/null 2>&1; then
-        echo "  ✓ git hook 相当の環境（GIT_DIR/GIT_WORK_TREE あり）でも通る"
-        pass=$((pass + 1))
-    else
-        echo "  ✗ git hook 相当の環境（GIT_DIR/GIT_WORK_TREE あり）で失敗した" >&2
-        echo "    冒頭の unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE が外れていないか（#645）" >&2
-        fail=$((fail + 1))
-    fi
+# 単発のケースでは守れない: 壊れ方が「一時リポジトリ内の git が環境変数側を優先する」なので、
+# 一時リポジトリを作る**全ケースが同時に**影響を受ける。まるごと再実行が唯一の忠実な再現。
+#
+# **子プロセスに渡す GIT_* は使い捨ての scratch repo に向ける。** 実リポジトリに向けると、
+# 退行が入ったときに**検出行為そのものが本物の index を汚す**（#645 の実害を自分で再現して
+# しまう）。scratch なら「実行後に scratch の index が空か」まで assert でき、exit code だけで
+# なく汚染の有無を回帰に含められる。
+#
+# 2 条件を張る:
+#   - `git_dir_only`: **実際の pre-push が渡す形**（linked worktree からの push でだけ GIT_DIR が入る。
+#     通常リポジトリからの push では GIT_* は渡らない）
+#   - `full_env`: unset リストの全要素（GIT_WORK_TREE / GIT_INDEX_FILE も落としていることを固定）
+#
+# ネストは**環境変数ではなく引数**で止める。env で切れる作りだと `export` 一発で回帰が無言で
+# 消える（実行時間を惜しむ人が必ずやる）。実行コストは約 7 秒 ×2 で、pre-push 全体（clippy
+# 十数分）に対して無視できる。
+if [ "${1:-}" != "--nested" ]; then
+    for cond in git_dir_only full_env; do
+        scratch=$(mktemp -d)
+        git -C "${scratch}" init -q
+        case "${cond}" in
+        git_dir_only) env_args=(GIT_DIR="${scratch}/.git") ;;
+        *) env_args=(
+            GIT_DIR="${scratch}/.git"
+            GIT_WORK_TREE="${scratch}"
+            GIT_INDEX_FILE="${scratch}/.git/index"
+        ) ;;
+        esac
+        if out=$(env "${env_args[@]}" bash "$0" --nested 2>&1); then
+            staged=$(git -C "${scratch}" diff --cached --name-only | wc -l | tr -d ' ')
+            if [ "${staged}" -eq 0 ]; then
+                echo "  ✓ git hook 相当の環境でも通り外部リポジトリを汚さない（${cond}）"
+                pass=$((pass + 1))
+            else
+                echo "  ✗ git hook 相当の環境で外部リポジトリの index を汚した（${cond}: ${staged} 件）" >&2
+                echo "    冒頭の unset が外れていないか（#645 の実害 2）" >&2
+                fail=$((fail + 1))
+            fi
+        else
+            echo "  ✗ git hook 相当の環境で失敗した（${cond}）" >&2
+            echo "    冒頭の unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE が外れていないか（#645）" >&2
+            printf '%s\n' "${out}" | sed 's/^/    | /' >&2
+            fail=$((fail + 1))
+        fi
+        rm -rf "${scratch}"
+    done
+fi
+
+# **ケース数の下限**（#645）。ケースが無言で消えても「全 N ケース通過」で緑になるのを防ぐ。
+# ケースを増やしたらこの数も上げる（fail-closed。ADR 0073 と同じ方針）。
+#
+# **自己回帰の if の外に置く。** 中に入れると、上のガードを 1 か所いじるだけで自己回帰と下限
+# チェックが同時に消え、`✓ 全 26 ケース通過` で緑になる（実際にその変異が生存した）。
+# 外に出して nested / 非 nested で期待値を分けると、ガードだけを壊しても件数不足で落ちる。
+if [ "${1:-}" = "--nested" ]; then
+    MIN_CASES=26
+else
+    MIN_CASES=28
+fi
+if [ "$((pass + fail))" -lt "${MIN_CASES}" ]; then
+    echo "✗ ケース数が ${MIN_CASES} 未満（$((pass + fail)) 件）。ケースが無言で消えていないか" >&2
+    exit 1
 fi
 
 echo

@@ -15,6 +15,12 @@
 #   scripts/test-check-adr-numbers.sh
 set -euo pipefail
 
+# 一時リポジトリを本物として扱わせる（#645）。**この unset が無いと実際に落ちる**——
+# `GIT_DIR` だけで 1 ケース（「git リポジトリ外」）、`GIT_WORK_TREE` も付くと 22 ケースが失敗する。
+# linked worktree から push すると git が `GIT_DIR` を子プロセスへ渡すため、pre-push が本テストを
+# 呼ぶようになった瞬間に再発する（現状は CI の `adr` ジョブ専用なので露見していないだけ）。
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
+
 usage() {
     cat <<'EOF'
 test-check-adr-numbers.sh - check-adr-numbers.sh の回帰テスト（ADR 0073）
