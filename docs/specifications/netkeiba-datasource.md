@@ -13,8 +13,9 @@ sources:
   - docs/original-docs/0049-netkeiba-odds-transient-retry-and-degraded-exit.md
   - docs/original-docs/0075-unsupported-race-skip-exit-zero.md
   - docs/original-docs/0086-netkeiba-unpriced-sentinel-is-not-odds.md
+  - docs/original-docs/0088-bet-type-scoped-unpriced-sentinels.md
 distilled_from_sha: "b26e5cd"
-updated: "2026-08-16"
+updated: "2026-08-18"
 ---
 
 # netkeiba 当日データソース取り込み 仕様書
@@ -158,57 +159,70 @@ paddock 内部の `RaceId` も同じ 12 桁構成要素から導出する（既�
 - ドメイン `RaceOdds.win`(`HashMap<HorseNum, OddsValue>`)は人気を持たないため、人気は本テーブルのカラムとして
   scrape 結果から直接保存する（ドメイン型は変更しない）。
 
-### 未発売の番兵値（#621・[ADR 0086](../original-docs/0086-netkeiba-unpriced-sentinel-is-not-odds.md)）
+### 未発売の番兵値（#621・[ADR 0086](../original-docs/0086-netkeiba-unpriced-sentinel-is-not-odds.md)、券種スコープ化 #630/#634・[ADR 0088](../original-docs/0088-bet-type-scoped-unpriced-sentinels.md)）
 
 netkeiba は**未発売・該当なしの組み合わせ**に固定の番兵値を入れる。**払戻倍率ではない**ので
-オッズとして採用しない。
+オッズとして採用しない。**判定は券種スコープ**（ADR 0088。番兵は「その券種に netkeiba が入れる
+固定値」であり、同じ値でも券種が違えば正当な配当——ワイドの `9999.9` は番兵、三連複の `9999.9` は
+正当。9000〜11000 帯に trio 6,244 行・trifecta 56,230 行の正当配当が実在=2026-08-18 実測）。
 
-| 券種 | 番兵値 | 備考（2026-08 時点の DB 実測） |
+| 券種 | 番兵値 | 備考（DB 実測） |
 |---|---|---|
+| 単勝 / 複勝 | **（番兵なし）** | 番兵値の行は 0 行（#634・2026-08-18）。未発売の馬は行ごと欠ける形で観測される |
 | ワイド | `9999.9` | 相方が `odds_high=0.0` になるため、従来は**下限違反として偶然弾かれていた**（DB には 0 行） |
 | 馬連 / 馬単 / 三連複 | `99999.9` | **ここが素通りして EV を壊していた**（#621 の実害。`race_odds` に trio 1,599 行 / quinella 156 行） |
-| 三連単 | `999999.9` | 32,973 行。**DB に残っていた番兵値 2 種のうち、issue が挙げていなかった方** |
+| 三連単 | `999999.9` | 33,176 行（2026-08-18）。**DB に残っていた番兵値 2 種のうち、issue が挙げていなかった方** |
 
-- **判定は特定値の除外**（epsilon `1e-6` 比較）。**上限方式は採らない**——三連単には `111971.9` /
-  `200886.6` のような正当な高配当が実在し、上限は大穴を殺す。
-- 判定は `OddsValue::try_from`（`src/domain/src/odds/odds_value.rs`）の 1 か所。`save_race_odds` と
-  `find_race_odds` が委譲しているので**保存・読み出しの双方に効き、既に DB にある番兵行も
-  読み出し時に無害化**される（既存行の DELETE は不要）。
+- **判定は券種ごとの特定値の除外**（epsilon `1e-6` 比較）。**上限方式は採らない**——三連単には
+  `111971.9` / `200886.6` のような正当な高配当が実在し、上限は大穴を殺す。ADR 0086 が許容していた
+  誤爆（他券種の番兵値と同値の正当配当を落とす）は ADR 0088 で撤回した。
+- 判定は `OddsValue::try_from((BetType, f64))`（`src/domain/src/odds/odds_value.rs`）の 1 か所。
+  **券種は必須入力**で、`TryFrom<f64>` は存在しない——券種を渡し忘れた新しい呼び出し口は
+  コンパイルエラーになる（ADR 0088）。`save_race_odds` と `find_race_odds` が委譲しているので
+  **保存・読み出しの双方に効き、既に DB にある番兵行も読み出し時に券種別に無害化**される
+  （既存行の DELETE は不要）。保存側は未知 `bet_type` ラベルの行を warn+skip する
+  （券種を解決できない行は番兵ガードを通せないため書かない）。
 - 番兵は `Error::UnpricedSentinel` として値域違反（`OutOfRange`）と区別し、**ログは `debug`**。
   「まだ売れていない」という正常な状態で 1 レースに数百件出るため、warn にすると本来の値域違反が
   埋もれる。
 - **例外: ワイドの未発売行は保存時 `warn` のまま**。上表のとおり相方が `odds_high=0.0` になり、
   `save_race_odds::classify_row` は 1 行に値域違反が混ざれば warn 側を優先する（番兵に引っ張られて
-  debug に落とすと本来見るべき残骸が埋もれるため）。**分岐の基準は券種ではなく成分の内訳**——
-  `classify_row` は bet_type を見ない。弾かれた成分が全部番兵なら band でも `debug` になる
+  debug に落とすと本来見るべき残骸が埋もれるため）。ある値が番兵か否かは券種別（ADR 0088）だが、
+  **warn / debug の分岐そのものは券種ではなく成分の内訳**で決まる。弾かれた成分が全部番兵なら band でも `debug` になる
   （`[9999.9, 9999.9]` の形。現行 netkeiba は返さないが契約として単体テストで固定）。読み出し側は
   成分ごとに判定するのでワイドの番兵も `debug`。「番兵起因の WARN は 0 行」という #621 の実測は
   `--overview`＝**読み出し経路**での計測であり、保存経路のワイドを含意しない。
 
 #### 番兵リストの正本ファイル
 
-正本は **`src/domain/src/odds/netkeiba_sentinels.txt`**（1 行 1 値）。Rust と Python が**同じファイルを
-読む**。同じ値を両言語が別々に持つと片方だけ更新して静かにズレるため（#587 の見出し契約と同型の事故）、
-言語をまたぐ golden で結ぶ（ADR 0085 の前例）。
+正本は **`src/domain/src/odds/netkeiba_sentinels.txt`**（TAB 区切り `券種<TAB>値` の 2 列。
+券種ラベルは Rust `BetType` の snake_case。**番兵を持たない券種＝win / place は行そのものを
+置かない**。コメント行は書けない——両言語のパーサ規則を「空行スキップ + split」に保つ・ADR 0088）。
+Rust と Python が**同じファイルを読む**。同じ値を両言語が別々に持つと片方だけ更新して静かに
+ズレるため（#587 の見出し契約と同型の事故）、言語をまたぐ golden で結ぶ（ADR 0085 の前例）。
 
 | 読む側 | 読み方 | ファイルが壊れると |
 |---|---|---|
 | Rust `src/domain/src/odds/odds_value.rs` | `const NETKEIBA_SENTINELS` を持ち、テスト `sentinel_list_matches_the_shared_golden` が `include_str!` で突き合わせる（`#[cfg(test)]` 内） | **テストビルド**が落ちる（本番ビルドは通る） |
 | Python `scripts/predict-check/odds_guard.py` | **import 時**に読んで集合を作る | import した解析スクリプトが**起動時に**落ちる（**必ずパスを示し**、行に起因するものは行番号と該当行も出して停止する。空リストへのフォールバックはしない——番兵が素通りするため） |
 
-Python 側は**欠落 / 非数値行 / 非 UTF-8 保存 / 非有限値（`nan`・`inf`）/ 空**をすべて拒否する。非有限を
-受理しないのは、番兵として登録しても `abs(o - nan) < ε` が常に偽になり**その値だけが黙って無効化**される
-ため（空を拒否するのと同じ理由）。Rust 側は golden を const と完全一致で突き合わせるので、同じ壊れ方は
+Python 側は**欠落 / 列数不正（2 列でない行）/ 未知の券種ラベル / 非数値の値 / 非 UTF-8 保存 /
+非有限値（`nan`・`inf`）/ 空**をすべて拒否する。非有限を受理しないのは、番兵として登録しても
+`abs(o - nan) < ε` が常に偽になり**その値だけが黙って無効化**されるため（空を拒否するのと同じ理由）。
+Rust 側は golden を const と完全一致（券種・値・順序）で突き合わせるので、同じ壊れ方は
 `sentinel_list_matches_the_shared_golden` が落とす。
 
 **`testdata/` に置かない。** Python が import 時に読む**本番依存**であり、テスト専用資産ではない。
 
 **番兵値を足すときは 3 か所を同じ PR で更新する**: この正本ファイル / Rust の `NETKEIBA_SENTINELS` /
-`scripts/predict-check/test_odds_guard.py` の期待タプル。どれか 1 つを忘れれば Rust か Python の
-テストが落ちる。
+`scripts/predict-check/test_odds_guard.py` の期待 dict。どれか 1 つを忘れれば Rust か Python の
+テストが落ちる。win / place に番兵を足す（＝行を置く）ときは、Rust の
+`win_and_place_have_no_sentinels` が落ちるので #634 の実測を覆す根拠を PR に示す。
 
 `scripts/` が Rust のガードを通らないのは、psql / TSV で DB を直読みするため（値オブジェクトを
-一切経由しない）。
+一切経由しない）。Python の公開 API も券種必須（`is_sentinel(bet_type, odds)` /
+`is_payout_odds(bet_type, odds)`・未知ラベルは `ValueError`）で、既定値による更新漏れの素通りを
+塞ぐ（ADR 0088）。
 
 ### 保存したオッズの読み出しと read-through（ADR 0010）
 
