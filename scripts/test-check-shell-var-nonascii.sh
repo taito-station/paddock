@@ -175,6 +175,29 @@ path_case "FILE... で違反の無いファイルを渡す" 0 \
 path_case "作業ツリーに無い追跡ファイルはスキップ" 0 \
     "rm -f sub/bad.sh && bash '${TARGET}'"
 
+# 明示引数の欠損・未知フラグは fail-open にしない（列挙経路の warn+skip とは分ける）
+path_case "FILE... に存在しないパスは exit 2" 2 \
+    "bash '${TARGET}' nosuch.sh"
+path_case "未知のオプションは exit 2" 2 \
+    "bash '${TARGET}' --help"
+path_case "--list に余計な引数は exit 2" 2 \
+    "bash '${TARGET}' --list good.sh"
+# **実リポジトリ**に対する縮退ガード。`git ls-files` はリテラルパスが一致しなくても rc=0 で
+# 黙って無視するので、`scripts/mdq` などを改名すると検査と shellcheck が無言で対象を失う。
+# フィクスチャではなく本物のリポジトリで固定する（フィクスチャ側に置くと全ケースが
+# この 2 本の配置を強要される）。
+repo_root=$(cd "$(dirname "$0")/.." && pwd)
+for literal in scripts/mdq scripts/git-hooks/pre-push; do
+    if git -C "${repo_root}" ls-files --error-unmatch -- "${literal}" >/dev/null 2>&1; then
+        echo "  ✓ リテラル対象が追跡されている（${literal}）"
+        pass=$((pass + 1))
+    else
+        echo "  ✗ リテラル対象が追跡されていない: ${literal}" >&2
+        echo "    改名・移動したなら check-shell-var-nonascii.sh の LITERAL_TARGETS も直すこと" >&2
+        fail=$((fail + 1))
+    fi
+done
+
 echo
 if [ "${fail}" -ne 0 ]; then
     echo "✗ ${fail} / $((pass + fail)) 件が失敗した" >&2
