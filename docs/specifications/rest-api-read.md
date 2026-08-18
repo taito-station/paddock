@@ -217,7 +217,7 @@ GET /api/races/{race_id}/board[?budget=&track_condition=&blend_alpha=]
 | `live_axis` | int\|null | ライブ再計算の軸（市場ブレンド首位）。`recorded_axis` と乖離時に UI 警告 |
 | `roi` / `hit_prob` | number\|null | 現時点オッズ基準のポートフォリオ ROI / 的中確率 |
 | `unpriced_legs` | int | 賭金が乗っているのにオッズ未取得の脚数（#631）。**`roi` は priced 脚のみ・`total_stake` は全脚**なので、0 より大きいとき 2 つの数字は別の母集団を指す。`roi` と `total_stake` を並べて読むときはこれを併せて見る |
-| `morning_unpriced_legs` | int\|null | 同上の**朝時点**の値（`morning_at` が `null` なら `null`）。朝 snapshot の complete 保証は「各券種が空でない」だけで全組合せが priced とは限らない。UI は朝ROI→現ROI を並べるので、朝と現で被覆率が違えば別母集団同士の比較になる |
+| `morning_unpriced_legs` | int\|null | `morning_roi` の被覆率＝**現時点の買い目を朝オッズで値付けした**ときの値（`morning_roi` と同じく確率・軸・budget は現時点と同一で、差し替わるのは払戻本だけ）。`morning_at` が `null` なら `null`。朝 snapshot の complete 保証は「各券種が空でない」だけで全組合せが priced とは限らない。UI は朝ROI→現ROI を並べるので、朝と現で被覆率が違えば別母集団同士の比較になる |
 | `result_confirmed` | bool | 結果確定フラグ（#381）。web の「⚫終」判定に使う |
 | `horses` | array | `BoardHorseSchema[]`（後述） |
 | `bets` | array | 買い目（券種・組合せ・EV・推奨額） |

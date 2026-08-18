@@ -74,9 +74,13 @@ pub struct RaceBoard {
     pub morning_roi: Option<f64>,
     /// 朝時点オッズで再計算したポートフォリオ的中確率（#448）。`morning_roi` と対。
     pub morning_hit_prob: Option<f64>,
-    /// 朝時点の買い目のうち**賭金が乗っているのにオッズ未取得**の脚数（#631）。`morning_at` が
-    /// `Some` のときだけ `Some`。`morning_roi` の被覆率で、現時点の被覆率とは別物——UI は
-    /// 朝ROI→現ROI を並べるので、両者が違えば別母集団同士の比較になる。
+    /// `morning_roi` の被覆率（#631）＝**現時点の買い目を朝オッズで値付けした**ときの
+    /// 「賭金が乗っているのにオッズ未取得」の脚数。`morning_roi` と同じく確率・軸・budget は
+    /// 現時点と同一で、差し替わるのは払戻本だけ（`compose_portfolio` は軸・相手を `views.blended`
+    /// ＝現時点由来の確率で選ぶ）。`morning_at` が `Some` のときだけ `Some`。
+    ///
+    /// 現時点の被覆率（`Portfolio::unpriced_staked_legs`）とは別物——UI は朝ROI→現ROI を
+    /// 並べるので、両者が違えば別母集団同士の比較になる。
     pub morning_unpriced_legs: Option<usize>,
     /// 全出走馬（truncate しない）。盤面順（`blended` と同順）。
     pub horses: Vec<BoardHorse>,
@@ -204,6 +208,8 @@ impl<
         // 朝側の被覆率も併せて返す（#631）。朝 snapshot の complete 保証は `is_complete()`＝各券種が
         // 空でないことだけで、全組合せが priced であることは保証しない。UI は朝ROI→現ROI を矢印で
         // 並べるので、被覆率が朝と現で違えば別母集団同士の比較になる。
+        // 数えるのは morning_roi と同じ母集団＝**現時点の買い目を朝オッズで値付けした**もの
+        // （compose_portfolio が差し替えるのは払戻本だけで、軸・相手は現時点の確率で選ばれる）。
         let (morning_at, current_at, morning_roi, morning_hit_prob, morning_unpriced_legs) =
             match morning.as_ref() {
                 Some(m) => {

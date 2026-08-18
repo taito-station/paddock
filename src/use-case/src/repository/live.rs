@@ -36,7 +36,9 @@ pub struct LiveEvSnapshot {
     pub axis_place_odds_low: Option<f64>,
     /// ◎の複勝オッズ上限（帯 high。欠落時 None）。#346
     pub axis_place_odds_high: Option<f64>,
-    /// 一部買い目のオッズ欠落（ROI 過小評価の可能性）。
+    /// 賭金が乗っているのにオッズ未取得の脚があるか（#631）。**「ROI が過小評価される」ではない**
+    /// ——`roi` は priced 脚だけで分子・分母とも算出される（式は対称）。true のとき、`roi` と
+    /// 賭け計が**別の母集団**を指すという意味。
     pub odds_missing: bool,
     /// 買い目伝票 JSONB（`slip` 列）の JSON テキスト。
     pub slip_json: String,
@@ -74,7 +76,9 @@ pub struct LiveEvSnapshotRecord {
     /// ◎の複勝オッズ帯 low / high（欠落時 None。#346）。
     pub axis_place_odds_low: Option<f64>,
     pub axis_place_odds_high: Option<f64>,
-    /// 一部買い目のオッズ欠落（ROI 過小評価の可能性）。
+    /// 賭金が乗っているのにオッズ未取得の脚があるか（#631）。**「ROI が過小評価される」ではない**
+    /// ——`roi` は priced 脚だけで分子・分母とも算出される（式は対称）。true のとき、`roi` と
+    /// 賭け計が**別の母集団**を指すという意味。
     pub odds_missing: bool,
     /// このレースに配分した予算（円）。
     pub race_budget: u64,

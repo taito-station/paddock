@@ -513,6 +513,9 @@ async fn board_without_odds_returns_all_horses(pool: sqlx::PgPool) {
     // オッズ未 seed → 買い目なし・市場implied/人気は null だが確率と model_rank は出る。
     assert_eq!(json["odds_available"], false);
     assert_eq!(json["bets"].as_array().unwrap().len(), 0);
+    // 買い目が無いので被覆率は 0（#631）。朝 snapshot も無いので朝側は null。
+    assert_eq!(json["unpriced_legs"], 0);
+    assert!(json["morning_unpriced_legs"].is_null());
     for h in horses {
         assert!(h["market_implied"].is_null());
         assert!(h["popularity"].is_null());

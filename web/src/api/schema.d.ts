@@ -976,9 +976,12 @@ export interface components {
             morning_roi?: number | null;
             /**
              * Format: int32
-             * @description 朝時点の買い目のうち**賭金が乗っているのにオッズ未取得**の脚数（#631）。`morning_at` が
-             *     `null` なら `null`。`morning_roi` の被覆率で、`unpriced_legs`（現時点）とは別物——
-             *     UI は朝ROI→現ROI を並べるので、両者が違えば**別の母集団同士の比較**になる。
+             * @description `morning_roi` の被覆率（#631）＝**現時点の買い目を朝オッズで値付けした**ときの
+             *     「賭金が乗っているのにオッズ未取得」の脚数。`morning_roi` と同じく確率・軸・budget は
+             *     現時点と同一で、差し替わるのは払戻本だけ。`morning_at` が `null` なら `null`。
+             *
+             *     `unpriced_legs`（現時点）とは別物——UI は朝ROI→現ROI を並べるので、両者が違えば
+             *     **別の母集団同士の比較**になる。
              */
             morning_unpriced_legs?: number | null;
             /** @description 保存オッズ（#51）の有無。false のとき `bets` は必ず空。 */
