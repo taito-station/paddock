@@ -290,6 +290,22 @@ pub struct PortfolioFormat {
     pub ev_on_unpriced: bool,
 }
 
+/// 参考 ROI と賭け計の**基準のズレ**を説明する注記を返す（#631）。ズレが無ければ空文字。
+///
+/// ROI は priced な脚だけで算出される（式としては分子・分母とも priced 基準で対称）一方、
+/// 賭け計は全脚の合計。未 priced な脚に賭金が乗っていると、同じ行に並ぶ 2 つの数字が
+/// **別の母集団**を指すことになる。未 priced の割合はレースごとに違うので、注記が無いと
+/// 被覆率の差がそのままレース間の優劣に見えてしまう。
+///
+/// predict（対話・`--overview`）/ predict-watch（ライブ監視）/ REST の 3 経路で同じ基準を使う。
+/// 判定そのものは domain の [`Portfolio::unpriced_staked_legs`] が単一ソース（ADR 0064）。
+pub fn coverage_note(p: &Portfolio) -> String {
+    match p.unpriced_staked_legs() {
+        0 => String::new(),
+        n => format!("（回収率・的中率はオッズ取得済の脚基準、賭け計は未取得 {n} 点を含む全脚）"),
+    }
+}
+
 /// ポートフォリオを「そのまま買える形」（CLAUDE.md 表記規約: 方式/軸/相手/各点=式別×金額）に整形し、
 /// 行の羅列（`Vec<String>`）で返す（#452）。predict と predict-watch のほぼ同一だったインライン整形を
 /// 一本化したもの。ヘッダ（券種予算行）・フッタ（賭け計 / 期待回収率）や軸なし・買い目なしの注記は
@@ -364,8 +380,8 @@ pub fn format_portfolio(p: &Portfolio, fmt: &PortfolioFormat) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        factor_phrase, format_explanations, format_probs, format_recent_runs_warning,
-        gate_label_jp, prev_run_phrase, recent_form_phrase, surface_jp,
+        coverage_note, factor_phrase, format_explanations, format_probs,
+        format_recent_runs_warning, gate_label_jp, prev_run_phrase, recent_form_phrase, surface_jp,
     };
     use paddock_domain::horse_result::HorseNum;
     use paddock_domain::{
@@ -671,6 +687,49 @@ mod tests {
             skip_zero_stake: true,
             ev_on_unpriced: false,
         }
+    }
+
+    #[test]
+    fn coverage_note_fires_only_when_staked_legs_are_unpriced() {
+        // #631: 参考 ROI（priced 脚のみ）と賭け計（全脚）の基準のズレを説明する注記。
+        // ズレが無ければ**空文字**でなければならない——常に注記が出ると、注記そのものが
+        // 「未取得がある」というシグナルとして読めなくなる。
+        let quinella = BetCombination::Quinella(Pair::try_from((horse(1), horse(5))).unwrap());
+        let pf = |bets: Vec<PortfolioBet>| Portfolio {
+            axis: Some(horse(1)),
+            partners: vec![horse(5)],
+            konsen: false,
+            bets,
+            total_stake: 0,
+            ev: None,
+        };
+
+        // 全脚 priced → ズレ無し → 注記を出さない。
+        let priced = pf(vec![pf_bet(
+            quinella.clone(),
+            BetMethod::Nagashi,
+            300,
+            Some(4.2),
+        )]);
+        assert_eq!(coverage_note(&priced), "");
+
+        // 賭金が乗った未 priced 脚がある → 点数付きで注記。
+        let unpriced = pf(vec![
+            pf_bet(quinella.clone(), BetMethod::Nagashi, 300, Some(4.2)),
+            pf_bet(quinella.clone(), BetMethod::Nagashi, 200, None),
+        ]);
+        assert_eq!(
+            coverage_note(&unpriced),
+            "（回収率・的中率はオッズ取得済の脚基準、賭け計は未取得 1 点を含む全脚）"
+        );
+
+        // stake=0 の未 priced 脚は total_stake を動かさない → 注記を出さない
+        // （predict は 0 円脚も表示するので、ここを数えると注記が実際より大きく出る）。
+        let zero_stake = pf(vec![
+            pf_bet(quinella.clone(), BetMethod::Nagashi, 300, Some(4.2)),
+            pf_bet(quinella, BetMethod::Nagashi, 0, None),
+        ]);
+        assert_eq!(coverage_note(&zero_stake), "");
     }
 
     #[test]

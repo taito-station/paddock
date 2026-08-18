@@ -12,8 +12,8 @@ use paddock_domain::{
 };
 use paddock_use_case::{PredictBetRecord, PredictSessionRecord, compose_portfolio};
 use predict_format::{
-    PortfolioFormat, format_explanations, format_portfolio, format_probs, format_probs_with_market,
-    format_recent_runs_warning, surface_jp,
+    PortfolioFormat, coverage_note, format_explanations, format_portfolio, format_probs,
+    format_probs_with_market, format_recent_runs_warning, surface_jp,
 };
 
 use crate::setup::App;
@@ -456,16 +456,8 @@ async fn render_race_prediction(
     }
     if let Some(ev) = &portfolio.ev {
         // 期待回収率・的中率はオッズ取得済みの脚についての値（未取得脚は払戻を見積もれず除外）。
-        let unpriced = portfolio.bets.iter().filter(|b| b.odds.is_none()).count();
-        // 回収率・的中率はオッズ取得済の脚のみで算出する一方、賭け計は未取得脚も含む全脚の合計
-        // （基準が異なる）。未取得脚があるときはその非対称を明示する。
-        let note = if unpriced > 0 {
-            format!(
-                "（回収率・的中率はオッズ取得済の脚基準、賭け計は未取得 {unpriced} 点を含む全脚）"
-            )
-        } else {
-            String::new()
-        };
+        // 賭け計は全脚の合計なので基準がズレる。注記は predict-watch / REST と共有する（#631）。
+        let note = coverage_note(&portfolio);
         println!(
             "  ポートフォリオ期待回収率 {:.1}% / 的中率 {:.1}% / 賭け計 ¥{}（モデル単独視点）{}",
             ev.roi * 100.0,

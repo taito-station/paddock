@@ -3255,7 +3255,8 @@
           "odds_available",
           "partners",
           "bets",
-          "total_stake"
+          "total_stake",
+          "unpriced_legs"
         ],
         "properties": {
           "axis": {
@@ -3308,6 +3309,12 @@
           "total_stake": {
             "type": "integer",
             "format": "int64",
+            "description": "**全脚**の賭金合計（円）。`roi` / `hit_prob` とは母集団が異なる（`unpriced_legs` 参照）。",
+            "minimum": 0
+          },
+          "unpriced_legs": {
+            "type": "integer",
+            "description": "**賭金が乗っているのにオッズ未取得**の脚数（#631）。\n\n`roi` / `hit_prob` は priced な脚だけで算出される一方 `total_stake` は全脚の合計なので、\nこの値が 0 より大きいとき 2 つの数字は**別の母集団**を指す。未 priced の割合はレースごとに\n違うため、これを見ずに `roi` をレース間で比較すると被覆率の差を優劣と取り違える。\nCLI（predict / predict-watch）の注記・`live_ev_snapshots.odds_missing` と同一基準。",
             "minimum": 0
           }
         }

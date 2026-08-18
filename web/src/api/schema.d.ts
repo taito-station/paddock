@@ -1120,8 +1120,20 @@ export interface components {
              * @description オッズ取得済みの脚に基づく期待回収率（倍率）。買い目が空なら `null`。
              */
             roi?: number | null;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description **全脚**の賭金合計（円）。`roi` / `hit_prob` とは母集団が異なる（`unpriced_legs` 参照）。
+             */
             total_stake: number;
+            /**
+             * @description **賭金が乗っているのにオッズ未取得**の脚数（#631）。
+             *
+             *     `roi` / `hit_prob` は priced な脚だけで算出される一方 `total_stake` は全脚の合計なので、
+             *     この値が 0 より大きいとき 2 つの数字は**別の母集団**を指す。未 priced の割合はレースごとに
+             *     違うため、これを見ずに `roi` をレース間で比較すると被覆率の差を優劣と取り違える。
+             *     CLI（predict / predict-watch）の注記・`live_ev_snapshots.odds_missing` と同一基準。
+             */
+            unpriced_legs: number;
         };
         /** @description `POST /api/sessions/{date}/races/{race_id}/outcome` のリクエスト。 */
         RecordOutcomeRequest: {

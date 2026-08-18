@@ -219,11 +219,19 @@ pub struct RecommendationResponse {
     /// 相手（流す先）の馬番。
     pub partners: Vec<u32>,
     pub bets: Vec<RecommendationBet>,
+    /// **全脚**の賭金合計（円）。`roi` / `hit_prob` とは母集団が異なる（`unpriced_legs` 参照）。
     pub total_stake: u64,
     /// オッズ取得済みの脚に基づく期待回収率（倍率）。買い目が空なら `null`。
     pub roi: Option<f64>,
     /// 同上の的中確率 [0,1]。
     pub hit_prob: Option<f64>,
+    /// **賭金が乗っているのにオッズ未取得**の脚数（#631）。
+    ///
+    /// `roi` / `hit_prob` は priced な脚だけで算出される一方 `total_stake` は全脚の合計なので、
+    /// この値が 0 より大きいとき 2 つの数字は**別の母集団**を指す。未 priced の割合はレースごとに
+    /// 違うため、これを見ずに `roi` をレース間で比較すると被覆率の差を優劣と取り違える。
+    /// CLI（predict / predict-watch）の注記・`live_ev_snapshots.odds_missing` と同一基準。
+    pub unpriced_legs: usize,
 }
 
 impl RecommendationResponse {
@@ -238,14 +246,18 @@ impl RecommendationResponse {
             total_stake: 0,
             roi: None,
             hit_prob: None,
+            unpriced_legs: 0,
         }
     }
 
     /// 生成済みポートフォリオから応答を組む。
     pub fn from_portfolio(race_id: String, p: Portfolio) -> Self {
+        // `p` を move する前に採る（判定は domain の単一ソース・#631）。
+        let unpriced_legs = p.unpriced_staked_legs();
         Self {
             race_id,
             odds_available: true,
+            unpriced_legs,
             axis: p.axis.map(|h| h.value()),
             partners: p.partners.iter().map(|h| h.value()).collect(),
             bets: p
