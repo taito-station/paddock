@@ -10,10 +10,12 @@ sources:
   - docs/original-docs/0082-swagger-ui-vendored.md
   - docs/original-docs/0084-evil-merge-is-visible-to-stale-check.md
   - docs/original-docs/616-docs-serving-checks.md
+  - docs/original-docs/636-fullwidth-after-var.md
   - docs/qa/QA-evil-merge-615.md
+  - docs/qa/QA-fullwidth-after-var-636.md
   - .github/workflows/ci.yml
-distilled_from_sha: "0ea19f9"
-updated: "2026-08-14"
+distilled_from_sha: "98dc450"
+updated: "2026-08-18"
 ---
 
 # CI パイプラインの構成と設計意図（D21）
@@ -32,7 +34,7 @@ D21（CI/CD・ビルド・リリース・供給網管理）の充足ギャップ
 | `web` | ubuntu-latest | typecheck / eslint / vitest / **生成 API 型のドリフト検証** / vite build |
 | `adr` | ubuntu-latest | ADR 番号重複と文書クラス・sources の検査（**回帰テスト → 本番検査**の順） |
 | `predict-check` | ubuntu-latest | stdlib のみの Python テスト（自走式 + ハーネス忠実性） |
-| `shellcheck` | ubuntu-latest | `shellcheck --severity=warning` |
+| `shellcheck` | ubuntu-latest | `shellcheck --severity=warning` ＋ **変数直後の非 ASCII 検査**（回帰テスト → 本番検査） |
 | `db-guards` | ubuntu-latest（**postgres サービス無し**・`postgresql-client` のみ） | golden DB ガードの回帰テスト（#406/#465）。到達不能ポートを使い実 DB を一切触らない設計なので DB サービスが要らない |
 | `ocr-pdf` | ubuntu-latest ＋ **`debian:trixie-slim` コンテナ** | mupdf 依存の `pdf-ocr` / `pdf-parser` 統合テスト |
 | `docker-build` | ubuntu-latest（matrix 3） | api / importer / web の Dockerfile の builder ステージをビルド |
@@ -71,6 +73,31 @@ D21（CI/CD・ビルド・リリース・供給網管理）の充足ギャップ
 
 検査が落ちたとき、**ADR が本当に重複しているのか判定器が壊れているのか**を切り分けられるようにする
 （ADR 0073）。fail-closed を謳う検査ほど、壊れても本番データが正常なら気づけない。
+**同じ順序を `shellcheck` ジョブと pre-push の各検査にも適用している。**
+
+### 変数直後の非 ASCII を静的に禁じる（#636）
+
+`$var` の直後に全角括弧などを置くと、**UTF-8 ロケールの bash がそのバイトまで変数名に取り込み**、
+`set -u` で `unbound variable` になって落ちる（識別子の終端判定が `isalnum()` ＝ロケール依存のため）。
+**`shellcheck 0.11.0` は検出しない**ので `scripts/check-shell-var-nonascii.sh` を置く。対象ファイル集合は
+同ジョブの `shellcheck` と同一にして二重管理を避ける。
+
+**実行時テストではなく静的検査にしたのが要点。** 挙動は `LC_ALL=C` なら正常・UTF-8 なら失敗という
+ロケール依存で、Linux/glibc での再現有無も未確認。実挙動をアサートすると環境ごとに結果が割れる。
+字面で禁じれば、**仮に CI（ubuntu）で再現しなくても macOS 側の事故を止められる**。
+
+**なぜ CI 任せにせず pre-push にも置くか**: launchd の plist は `PATH` しか設定しない＝C ロケールなので
+常駐ジョブは壊れず、**壊れるのは人が UTF-8 の端末から叩いたとき**。開催日の運用スクリプトがそれに当たる
+（2026-08-16 に `deployments/launchd/uninstall.sh` が実際に途中で止まった）。
+
+行頭コメントは除外する——**この罠を説明するコメントで悪い例を書けるようにする**ため
+（`scripts/test-check-adr-numbers.sh`）。行末コメントは字句解析が要るので検出側に倒す。
+
+**既知の非カバー範囲**（「検査済み」と誤解しないための記録）: 行頭コメント除外は「その行が本当に
+コメントか」を見ていないので、**展開される複数行文脈**（クォート無しヒアドキュメント本文・複数行
+ダブルクォート文字列の継続行・`$(...)` の中）の `#` 始まり行は素通りする。`.github/workflows/*.yml`
+の `run:` と Dockerfile の `RUN`、Markdown 内の実行用フェンスも対象外。
+**「現時点で該当 0 件」は点検時点の観測であって保証ではない。** 詳細は検査スクリプトのヘッダ。
 
 ### dependabot の Actions ピン更新は stale 検査の例外にする（ADR 0081）
 

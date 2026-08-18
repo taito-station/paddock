@@ -166,7 +166,7 @@ if [[ ${#expected_rows[@]} -eq 0 ]]; then
     notify "restore 検証: サイドカー空でスキップ（$(basename "$DUMP_FILE")）"
     exit 0
 fi
-log "サイドカー読込: ${#expected_rows[@]} テーブル（$ROWCOUNTS_FILE）"
+log "サイドカー読込: ${#expected_rows[@]} テーブル（${ROWCOUNTS_FILE}）"
 
 # --- scratch DB 作成 ---
 ts="$(date +%Y%m%d_%H%M%S)"

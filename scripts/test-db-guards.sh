@@ -40,10 +40,10 @@ run_case() {
         fi
     else # ALLOW: ガードを通過し、golden 系メッセージを出さず後段（psql/pg_dump 接続）で失敗する
         if grep -qE "$GUARD_RE" <<<"$out"; then
-            echo "NG  [ALLOW] $desc（誤爆でブロックされた）"; echo "    out: $out"; fail=$((fail + 1))
+            echo "NG  [ALLOW] ${desc}（誤爆でブロックされた）"; echo "    out: $out"; fail=$((fail + 1))
         elif [[ "$rc" -eq 0 ]]; then
             # 配置先は到達不能ポート :1 なので後段は必ず失敗するはず。rc=0 はテスト前提の破綻。
-            echo "NG  [ALLOW] $desc（想定外に成功 rc=0・ガード未到達の疑い）"; echo "    out: $out"; fail=$((fail + 1))
+            echo "NG  [ALLOW] ${desc}（想定外に成功 rc=0・ガード未到達の疑い）"; echo "    out: $out"; fail=$((fail + 1))
         else
             echo "OK  [ALLOW] $desc"; pass=$((pass + 1))
         fi
