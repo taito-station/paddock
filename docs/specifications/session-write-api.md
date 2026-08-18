@@ -8,7 +8,7 @@ tags: [D10, D06]
 sources:
   - docs/original-docs/0023-session-write-api.md
   - docs/api/openapi.json
-distilled_from_sha: "eee08f2"
+distilled_from_sha: "f65aab1"
 updated: "2026-07-21"
 ---
 
