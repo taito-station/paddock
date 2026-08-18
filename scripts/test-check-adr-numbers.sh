@@ -69,8 +69,10 @@ reset_fixture() {
 # **行頭に** 同時存在するかで行うため、テスト側もその構造を再現する。
 write_adr() {
     local path="$1" title="$2"
+    # ヒアドキュメント本文は展開されるので、行頭 `#` でも変数はブレースで閉じる。
+    # check-shell-var-nonascii.sh は行頭コメント除外の副作用でここを検出できない（既知の穴・#636）。
     cat >"$path" <<EOF
-# $title
+# ${title}
 
 ## ステータス
 
@@ -101,7 +103,7 @@ expect_exit() {
     if [[ "$last_status" -eq "$expected" ]]; then
         # 変数の直後に全角文字が続く箇所は必ずブレースで閉じる。$label（ と書くと bash が
         # 全角括弧の UTF-8 バイトまで識別子の一部として読み、unbound variable で落ちる。
-        # これはリポジトリ全体で scripts/check-shell-var-brace.sh が機械検査している（#636）。
+        # これはリポジトリ全体で scripts/check-shell-var-nonascii.sh が機械検査している（#636）。
         # 上の悪い例が検査に引っかからないのは、行頭コメントを除外しているため。
         echo "  ✓ ${label}（exit ${last_status}）"
     else

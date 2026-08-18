@@ -12,6 +12,7 @@ sources:
   - docs/original-docs/616-docs-serving-checks.md
   - docs/original-docs/636-fullwidth-after-var.md
   - docs/qa/QA-evil-merge-615.md
+  - docs/qa/QA-fullwidth-after-var-636.md
   - .github/workflows/ci.yml
 distilled_from_sha: "6444f48"
 updated: "2026-08-16"
@@ -78,7 +79,7 @@ D21（CI/CD・ビルド・リリース・供給網管理）の充足ギャップ
 
 `$var` の直後に全角括弧などを置くと、**UTF-8 ロケールの bash がそのバイトまで変数名に取り込み**、
 `set -u` で `unbound variable` になって落ちる（識別子の終端判定が `isalnum()` ＝ロケール依存のため）。
-**`shellcheck 0.11.0` は検出しない**ので `scripts/check-shell-var-brace.sh` を置く。対象ファイル集合は
+**`shellcheck 0.11.0` は検出しない**ので `scripts/check-shell-var-nonascii.sh` を置く。対象ファイル集合は
 同ジョブの `shellcheck` と同一にして二重管理を避ける。
 
 **実行時テストではなく静的検査にしたのが要点。** 挙動は `LC_ALL=C` なら正常・UTF-8 なら失敗という

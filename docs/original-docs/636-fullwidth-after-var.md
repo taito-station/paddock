@@ -4,7 +4,7 @@
 issue 本文は [gh issue view 636](https://github.com/taito-station/paddock/issues/636)。
 
 質問票: [QA-fullwidth-after-var-636.md](../qa/QA-fullwidth-after-var-636.md)
-蒸留先: [ci-pipeline.md](../knowledge/ci-pipeline.md) / `scripts/check-shell-var-brace.sh` のヘッダ。
+蒸留先: [ci-pipeline.md](../knowledge/ci-pipeline.md) / `scripts/check-shell-var-nonascii.sh` のヘッダ。
 
 ## 起きたこと
 
@@ -50,7 +50,9 @@ launchd の plist は `EnvironmentVariables` に **`PATH` しか設定してい�
 ## 実害の出方（部分実行で止まる）
 
 `uninstall.sh:36` は `kill "$pid" && echo "..."` の形なので、**`kill` は成功してから `echo` の展開で落ちる**。
-`set -e` により以降が実行されず、次行の `rm -rf "$LOCK_DIR"` に到達しない。
+**`set -u` の未定義変数展開は非対話シェルを即座に終了させる**（`set -e` の話ではない。`set -e` は
+AND リストの最終コマンド以外の失敗では中断しないので、仮に `kill` が失敗しても中断はしない）。
+その致命的終了により、次行の `rm -rf "$LOCK_DIR"` に到達しない。
 
 2026-08-16 の実行結果:
 
@@ -109,6 +111,26 @@ ADR 0073 の「人手の規律に委ねない」対象そのもの。
 
 ## 対策の形
 
-**静的検査**にした（`scripts/check-shell-var-brace.sh`）。実行時の挙動はロケールとプラットフォームに
+**静的検査**にした（`scripts/check-shell-var-nonascii.sh`）。実行時の挙動はロケールとプラットフォームに
 依存して確かめにくく、回帰テストを実挙動に依存させると環境ごとに結果が変わるため、
 **字面で禁じて回帰テストも字面判定だけで完結させる**。
+
+## 既知の非カバー範囲（レビューで判明）
+
+**クォート無しヒアドキュメント本文の `#` 始まり行は素通りする。** 行頭コメント除外に巻き込まれるため。
+本文は展開されるので実際には落ちる:
+
+```
+$ LC_ALL=ja_JP.UTF-8 bash -c 'set -u; title=x; cat <<EOF
+# $title（説明）
+EOF'
+bash: title?: unbound variable        # LC_ALL=C なら正常
+```
+
+`scripts/test-check-adr-numbers.sh` の `write_adr()` が `cat >"$path" <<EOF` の直下に `# $title` を
+持っており、**現状は `$title` の直後が改行なので無害なだけ**。一字足せば検査を素通りして落ちる。
+本 PR ではこの箇所をブレース化して地雷を除いたうえで、穴自体は検査スクリプトのヘッダに明記した
+（ヒアドキュメントの追跡には状態機械が要り、検査の単純さと引き換えになるため見送り）。
+
+**`.github/workflows/*.yml` の `run:` と `deployments/*.Dockerfile` の `RUN`** も UTF-8 ロケールの
+bash で走るが対象外（走査したところ現時点で違反 0 件）。

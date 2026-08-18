@@ -1,0 +1,131 @@
+#!/usr/bin/env bash
+# シェルスクリプトで `$var` の直後に非 ASCII 文字（全角括弧・読点など）を置いていないか検査する（#636）。
+#
+# **UTF-8 ロケールの bash は、その非 ASCII のバイトまで変数名に取り込む。** 識別子の終端判定に
+# `isalnum()` を使っており、これがロケールのテーブルを見るため。結果 `$pid）` は `pid）` という
+# 別名になり、`set -u` 下で `unbound variable` になって落ちる。
+#
+#   $ LC_ALL=ja_JP.UTF-8 bash -c 'set -u; v=abc; echo "x $v）y"'
+#   bash: v?: unbound variable        # LC_ALL=C なら正常に出力される
+#
+# **バージョンではなくロケールで挙動が変わるのが厄介。** launchd の plist は PATH しか設定しない
+# ＝ C ロケールなので常駐ジョブは壊れず、**人が UTF-8 の端末から叩いたときだけ落ちる**。
+# 2026-08-16 に deployments/launchd/uninstall.sh がこれで異常終了し、set -u の展開エラーで
+# 途中終了したため後続の lock 削除に到達しないという「最後まで走ったように見えて走っていない」
+# 状態になった。
+#
+# **さらに悪いことに、この地雷は失敗報告の行に集中しやすい**（`✗ $name（…）` のような書き方）。
+# 何が失敗したかを伝えるはずのメッセージが、まさにその場面で消える。
+#
+# `shellcheck 0.11.0` はこれを検出しない（--severity=style でも exit 0）ので専用の検査を置く。
+# 実行時の挙動はロケールとプラットフォームに依存して確かめにくいため、**静的に字面で禁じる**。
+#
+# **既知の非カバー範囲**（いずれも現時点で該当 0 件。「検査済み」と誤解しないための記録）:
+#   - **クォート無しヒアドキュメント本文の `#` 始まり行**。行頭コメント除外に巻き込まれて素通りする
+#     （本文は展開されるので実際には落ちる）。追跡には状態機械が要り、検査の単純さと引き換えになる
+#     ため見送った。ヒアドキュメント内で変数を書くときは行頭コメントでもブレースを付けること
+#   - `.github/workflows/*.yml` の `run:` と `deployments/*.Dockerfile` の `RUN`。これらも
+#     UTF-8 ロケールの bash で走るが対象外
+#
+# **過検出は許容する**（検出側に倒す）: 行末コメント・シングルクォート内・エスケープ済み `\$var` も
+# 拾う。いずれも展開されないので無害だが、ブレースを付けて損は無い。
+# **ただしシェル以外の言語を埋め込んでいる箇所は例外**——`awk '{print $x（}'` のような埋め込みでは
+# `${x}` が別の意味になる。その場合はブレース化ではなくコードの組み替えで回避する。
+#
+# **この検査自体の回帰テストは scripts/test-check-shell-var-nonascii.sh**（リポジトリは常に合格側
+# なので、検査が壊れても本番データが正常だと無言で緑になる。ADR 0073 と同じ理由でテストを持つ）。
+#
+# 使い方:
+#   check-shell-var-nonascii.sh            # 追跡対象の全シェルスクリプトを検査
+#   check-shell-var-nonascii.sh --list     # 対象ファイルを NUL 区切りで出力するだけ（CI が消費する）
+#   check-shell-var-nonascii.sh FILE...    # 指定ファイルだけ検査
+#
+# 終了コード: 0=違反なし / 1=違反あり / 2=検査を実行できなかった（内部エラー）
+set -euo pipefail
+
+if ! root="$(git rev-parse --show-toplevel 2>/dev/null)"; then
+    echo "git リポジトリ外では実行できない（対象ファイルの列挙に git ls-files を使う）" >&2
+    exit 2
+fi
+cd "${root}"
+
+# 対象ファイルの定義はこの 1 箇所だけに置く。CI の shellcheck ジョブは --list を消費するので、
+# pathspec を二重管理しない（ADR 0073「人手の規律に委ねない」）。
+list_targets() {
+    # -z にするのは core.quotePath（既定 true）が非 ASCII パスを "\346\227\245.sh" 形式へ
+    # クォートするのを避けるため。改行を含むパスにも耐える。
+    git ls-files -z '*.sh' scripts/mdq scripts/git-hooks/pre-push
+}
+
+if [ "${1:-}" = "--list" ]; then
+    list_targets
+    exit 0
+fi
+
+targets=()
+if [ "$#" -gt 0 ]; then
+    targets=("$@")
+else
+    # mapfile は bash 4+ の組み込みで **macOS の bash 3.2 には無い**（本検査が守ろうとしている
+    # 環境そのもの）。読み込みループで代替する。
+    while IFS= read -r -d '' target; do
+        targets+=("${target}")
+    done < <(list_targets)
+fi
+
+if [ "${#targets[@]}" -eq 0 ]; then
+    echo "✗ 対象ファイルが 0 件（列挙が壊れている＝検査が素通りする）" >&2
+    exit 2
+fi
+
+# 判定は python3 に寄せる。sed / grep のロケール依存を避けたいのと、
+# 「$var の直後の 1 文字が非 ASCII か」を文字単位で見たいため。
+if ! command -v python3 >/dev/null 2>&1; then
+    echo "✗ python3 が無いため検査できない" >&2
+    exit 2
+fi
+
+set +e
+python3 - "${targets[@]}" <<'PY'
+import re, sys
+
+# ブレース無しの $name のみを対象にする。`${name}` は直後の文字が変数名に混ざらないので安全で、
+# 後続の [A-Za-z_] が `{` に一致しないため自然に除外される。
+# 位置パラメータ（$1）や特殊変数（$?）は 1 文字で終端するのでこの正規表現に一致せず、
+# bash 側もそこで変数名を打ち切るため実害が無い。
+VAR = re.compile(r'\$[A-Za-z_][A-Za-z0-9_]*')
+
+hits = []
+for path in sys.argv[1:]:
+    try:
+        with open(path, encoding='utf-8') as fh:
+            lines = fh.read().splitlines()
+    except (OSError, UnicodeDecodeError) as exc:
+        print(f'✗ {path}: 読めない（{exc}）', file=sys.stderr)
+        sys.exit(2)
+    for lineno, line in enumerate(lines, 1):
+        # 行頭コメントは展開されないので除外する。これにより「この罠を説明するコメント」で
+        # 悪い例（$label（ のような形）をそのまま書ける（scripts/test-check-adr-numbers.sh）。
+        # **クォート無しヒアドキュメント本文の # 行もここで巻き込まれる**（ヘッダの既知の穴を参照）。
+        if line.lstrip().startswith('#'):
+            continue
+        for m in VAR.finditer(line):
+            end = m.end()
+            if end < len(line) and ord(line[end]) > 127:
+                hits.append((path, lineno, m.group(0), line[end], line.strip()))
+
+for path, lineno, var, ch, text in hits:
+    print(f'✗ {path}:{lineno}: {var} の直後に非 ASCII「{ch}」がある → ${{{var[1:]}}} と書く', file=sys.stderr)
+    print(f'    {text}', file=sys.stderr)
+
+sys.exit(1 if hits else 0)
+PY
+code=$?
+set -e
+
+if [ "${code}" -eq 1 ]; then
+    echo "  UTF-8 ロケールの bash が非 ASCII を変数名に取り込み、set -u で落ちる（#636）。" >&2
+    echo "  シェルの文脈なら変数をブレースで閉じる（\$var → \${var}）と解消する。" >&2
+    echo "  awk / jq / perl などを埋め込んでいる箇所は意味が変わるので、コードの組み替えで回避する。" >&2
+fi
+exit "${code}"

@@ -37,10 +37,16 @@ bash scripts/check-vendored-swagger.sh
 # なお shellcheck 側はこれを検出しない（`# shellcheck` で始まるコメントは
 # ディレクティブ扱いになるので、この行の書き出しにも使えない）。
 # ここでも「回帰テスト → 本番検査」の順に走らせる。
-echo "[pre-push] scripts/test-check-shell-var-brace.sh（検査自身の回帰）"
-bash scripts/test-check-shell-var-brace.sh
-echo "[pre-push] scripts/check-shell-var-brace.sh（変数直後の非 ASCII #636）"
-bash scripts/check-shell-var-brace.sh
+# この検査は python3 に依存するので、下の check-doc-classes.py と同じく
+# **未セットアップで push を止めない**（CI の shellcheck ジョブが同じ検査で担保する）。
+if command -v python3 >/dev/null 2>&1; then
+    echo "[pre-push] scripts/test-check-shell-var-nonascii.sh（検査自身の回帰）"
+    bash scripts/test-check-shell-var-nonascii.sh
+    echo "[pre-push] scripts/check-shell-var-nonascii.sh（変数直後の非 ASCII #636）"
+    bash scripts/check-shell-var-nonascii.sh
+else
+    echo "[pre-push] python3 が無いので変数直後の非 ASCII 検査はスキップ（CI の shellcheck ジョブで検出されます）"
+fi
 
 # 文書クラスと sources 追従の検査（ADR 0073）。差分ではなくリポジトリ全体の状態を見るので
 # stdin は読まない（下の web 判定が stdin を消費するため、ここで読むと web 検査が壊れる）。
