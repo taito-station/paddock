@@ -2878,6 +2878,7 @@
           "partners",
           "bets",
           "total_stake",
+          "unpriced_legs",
           "confusion",
           "result_confirmed",
           "horses"
@@ -3041,6 +3042,12 @@
           "total_stake": {
             "type": "integer",
             "format": "int64",
+            "description": "**全脚**の賭金合計（円）。`roi` / `hit_prob` とは母集団が異なる（`unpriced_legs` 参照）。",
+            "minimum": 0
+          },
+          "unpriced_legs": {
+            "type": "integer",
+            "description": "**賭金が乗っているのにオッズ未取得**の脚数（#631）。\n\n`roi` / `hit_prob` は priced な脚だけで算出される一方 `total_stake` は全脚の合計なので、\nこの値が 0 より大きいとき 2 つの数字は**別の母集団**を指す。盤で ROI をレース間比較する\nときに被覆率の差を優劣と取り違えないための注記材料。`morning_roi` 側の被覆率ではない\n（こちらは `current_at` 時点の買い目に対する値）。",
             "minimum": 0
           },
           "venue": {

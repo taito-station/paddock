@@ -370,9 +370,17 @@ pub struct RaceBoardResponse {
     pub live_axis: Option<u32>,
     pub partners: Vec<u32>,
     pub bets: Vec<RecommendationBet>,
+    /// **全脚**の賭金合計（円）。`roi` / `hit_prob` とは母集団が異なる（`unpriced_legs` 参照）。
     pub total_stake: u64,
     pub roi: Option<f64>,
     pub hit_prob: Option<f64>,
+    /// **賭金が乗っているのにオッズ未取得**の脚数（#631）。
+    ///
+    /// `roi` / `hit_prob` は priced な脚だけで算出される一方 `total_stake` は全脚の合計なので、
+    /// この値が 0 より大きいとき 2 つの数字は**別の母集団**を指す。盤で ROI をレース間比較する
+    /// ときに被覆率の差を優劣と取り違えないための注記材料。`morning_roi` 側の被覆率ではない
+    /// （こちらは `current_at` 時点の買い目に対する値）。
+    pub unpriced_legs: usize,
     pub confusion: ConfusionSchema,
     /// レース書評（混戦度・◎の狙いどころ・妙味）。人手優先・無ければルールベース生成（#348）。`null` 可。
     pub race_comment: Option<String>,
@@ -393,30 +401,32 @@ pub struct RaceBoardResponse {
 
 impl From<RaceBoard> for RaceBoardResponse {
     fn from(b: RaceBoard) -> Self {
-        let (odds_available, axis, partners, bets, total_stake, roi, hit_prob) = match b.portfolio {
-            Some(p) => (
-                true,
-                p.axis.map(|h| h.value()),
-                p.partners.iter().map(|h| h.value()).collect(),
-                p.bets
-                    .iter()
-                    .map(|bet| {
-                        let (bet_type, combination) = combination_parts(&bet.combination);
-                        RecommendationBet {
-                            bet_type: bet_type.to_string(),
-                            combination,
-                            stake: bet.stake,
-                            odds: bet.odds,
-                            ev: bet.ev,
-                        }
-                    })
-                    .collect(),
-                p.total_stake,
-                p.ev.as_ref().map(|e| e.roi),
-                p.ev.as_ref().map(|e| e.hit_prob),
-            ),
-            None => (false, None, Vec::new(), Vec::new(), 0, None, None),
-        };
+        let (odds_available, axis, partners, bets, total_stake, roi, hit_prob, unpriced_legs) =
+            match b.portfolio {
+                Some(p) => (
+                    true,
+                    p.axis.map(|h| h.value()),
+                    p.partners.iter().map(|h| h.value()).collect(),
+                    p.bets
+                        .iter()
+                        .map(|bet| {
+                            let (bet_type, combination) = combination_parts(&bet.combination);
+                            RecommendationBet {
+                                bet_type: bet_type.to_string(),
+                                combination,
+                                stake: bet.stake,
+                                odds: bet.odds,
+                                ev: bet.ev,
+                            }
+                        })
+                        .collect(),
+                    p.total_stake,
+                    p.ev.as_ref().map(|e| e.roi),
+                    p.ev.as_ref().map(|e| e.hit_prob),
+                    p.unpriced_staked_legs(),
+                ),
+                None => (false, None, Vec::new(), Vec::new(), 0, None, None, 0),
+            };
         Self {
             race_id: b.race_id.value().to_string(),
             date: b.date,
@@ -437,6 +447,7 @@ impl From<RaceBoard> for RaceBoardResponse {
             total_stake,
             roi,
             hit_prob,
+            unpriced_legs,
             confusion: ConfusionSchema {
                 is_confused: b.confusion.is_confused,
                 axis_win_prob: b.confusion.axis_win_prob,

@@ -995,8 +995,20 @@ export interface components {
             /** Format: double */
             roi?: number | null;
             surface: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description **全脚**の賭金合計（円）。`roi` / `hit_prob` とは母集団が異なる（`unpriced_legs` 参照）。
+             */
             total_stake: number;
+            /**
+             * @description **賭金が乗っているのにオッズ未取得**の脚数（#631）。
+             *
+             *     `roi` / `hit_prob` は priced な脚だけで算出される一方 `total_stake` は全脚の合計なので、
+             *     この値が 0 より大きいとき 2 つの数字は**別の母集団**を指す。盤で ROI をレース間比較する
+             *     ときに被覆率の差を優劣と取り違えないための注記材料。`morning_roi` 側の被覆率ではない
+             *     （こちらは `current_at` 時点の買い目に対する値）。
+             */
+            unpriced_legs: number;
             venue: string;
         };
         /** @description `GET /api/races/{race_id}` のレスポンス（出馬表）。 */

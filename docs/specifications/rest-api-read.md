@@ -14,7 +14,7 @@ sources:
   - docs/original-docs/0060-betting-axis-lock-preclose-topup.md
   - docs/api/openapi.json
 distilled_from_sha: "b0c270b"
-updated: "2026-08-14"
+updated: "2026-08-18"
 ---
 
 # REST API（read 基盤）: 設計仕様
@@ -216,6 +216,7 @@ GET /api/races/{race_id}/board[?budget=&track_condition=&blend_alpha=]
 | `recorded_axis` | int\|null | predict 記録済みの本命◎（#388）。未 predict・取消時は `null` |
 | `live_axis` | int\|null | ライブ再計算の軸（市場ブレンド首位）。`recorded_axis` と乖離時に UI 警告 |
 | `roi` / `hit_prob` | number\|null | 現時点オッズ基準のポートフォリオ ROI / 的中確率 |
+| `unpriced_legs` | int | 賭金が乗っているのにオッズ未取得の脚数（#631）。**`roi` は priced 脚のみ・`total_stake` は全脚**なので、0 より大きいとき 2 つの数字は別の母集団を指す。これを見ずに ROI をレース間比較すると被覆率の差を優劣と取り違える |
 | `result_confirmed` | bool | 結果確定フラグ（#381）。web の「⚫終」判定に使う |
 | `horses` | array | `BoardHorseSchema[]`（後述） |
 | `bets` | array | 買い目（券種・組合せ・EV・推奨額） |
