@@ -8,7 +8,7 @@
 use std::io::Read;
 use std::time::Duration;
 
-use paddock_domain::{HorseId, OddsValue, PlaceOdds, RaceId, RaceOdds};
+use paddock_domain::{BetType, HorseId, OddsValue, PlaceOdds, RaceId, RaceOdds};
 use paddock_use_case::Result as UcResult;
 use paddock_use_case::netkeiba_race_id_from_paddock;
 use paddock_use_case::netkeiba_scraper::{
@@ -283,6 +283,9 @@ impl NetkeibaScraper for UreqNetkeibaScraper {
 /// low<=high）へ変換する。API は妥当値を返すが、変換に失敗する行（想定外の `< 1.0` 等）は
 /// **その行だけ skip** し、レース全体を落とさない（取りこぼし耐性）。組合せ券種は DTO 段階で
 /// 既にドメイン型キー（`Pair`/`OrderedPair`/`Triple`/`OrderedTriple`）を持つのでキー変換は不要。
+///
+/// 番兵判定は券種別（#630）なので、7 つの独立ループがそれぞれ自分の [`BetType`] を静的に渡す
+/// （このループ構造が券種の正）。
 pub(crate) fn assemble_netkeiba(
     odds: &FetchedOdds,
     exotic: &FetchedExoticOdds,
@@ -290,45 +293,45 @@ pub(crate) fn assemble_netkeiba(
 ) -> RaceOdds {
     let mut out = RaceOdds::empty(race_id);
     for w in &odds.win {
-        if let Ok(v) = OddsValue::try_from(w.odds) {
+        if let Ok(v) = OddsValue::try_from((BetType::Win, w.odds)) {
             out.win.insert(w.horse_num, v);
         }
     }
     for p in &odds.place {
         if let (Ok(low), Ok(high)) = (
-            OddsValue::try_from(p.odds_low),
-            OddsValue::try_from(p.odds_high),
+            OddsValue::try_from((BetType::Place, p.odds_low)),
+            OddsValue::try_from((BetType::Place, p.odds_high)),
         ) && let Ok(band) = PlaceOdds::try_from((low, high))
         {
             out.place.insert(p.horse_num, band);
         }
     }
     for q in &exotic.quinella {
-        if let Ok(v) = OddsValue::try_from(q.odds) {
+        if let Ok(v) = OddsValue::try_from((BetType::Quinella, q.odds)) {
             out.quinella.insert(q.combination, v);
         }
     }
     for w in &exotic.wide {
         if let (Ok(low), Ok(high)) = (
-            OddsValue::try_from(w.odds_low),
-            OddsValue::try_from(w.odds_high),
+            OddsValue::try_from((BetType::Wide, w.odds_low)),
+            OddsValue::try_from((BetType::Wide, w.odds_high)),
         ) && let Ok(band) = PlaceOdds::try_from((low, high))
         {
             out.wide.insert(w.combination, band);
         }
     }
     for e in &exotic.exacta {
-        if let Ok(v) = OddsValue::try_from(e.odds) {
+        if let Ok(v) = OddsValue::try_from((BetType::Exacta, e.odds)) {
             out.exacta.insert(e.combination, v);
         }
     }
     for t in &exotic.trio {
-        if let Ok(v) = OddsValue::try_from(t.odds) {
+        if let Ok(v) = OddsValue::try_from((BetType::Trio, t.odds)) {
             out.trio.insert(t.combination, v);
         }
     }
     for t in &exotic.trifecta {
-        if let Ok(v) = OddsValue::try_from(t.odds) {
+        if let Ok(v) = OddsValue::try_from((BetType::Trifecta, t.odds)) {
             out.trifecta.insert(t.combination, v);
         }
     }
@@ -540,11 +543,32 @@ mod tests {
                     popularity: None,
                 },
             ],
-            trio: vec![FetchedComboOdds {
-                combination: Triple::try_from((h(3), h(7), h(15))).unwrap(),
-                odds: 99_999.9, // #621 の実害そのもの（EV=138.44 を作っていた脚）
-                popularity: None,
-            }],
+            trio: vec![
+                FetchedComboOdds {
+                    combination: Triple::try_from((h(3), h(7), h(15))).unwrap(),
+                    odds: 99_999.9, // #621 の実害そのもの（EV=138.44 を作っていた脚）
+                    popularity: None,
+                },
+                FetchedComboOdds {
+                    combination: Triple::try_from((h(2), h(4), h(9))).unwrap(),
+                    odds: 9_999.9, // 三連複の 9999.9 は正当な配当（#630）→ 残す
+                    popularity: None,
+                },
+            ],
+            wide: vec![
+                FetchedWideOdds {
+                    combination: Pair::try_from((h(1), h(3))).unwrap(),
+                    odds_low: 9_999.9, // ワイドの番兵（#630。両端が番兵でも落ちる）→ skip
+                    odds_high: 9_999.9,
+                    popularity: None,
+                },
+                FetchedWideOdds {
+                    combination: Pair::try_from((h(2), h(4))).unwrap(),
+                    odds_low: 3.1, // 妥当 → 残す
+                    odds_high: 4.9,
+                    popularity: None,
+                },
+            ],
             trifecta: vec![
                 FetchedComboOdds {
                     combination: OrderedTriple::try_from((h(3), h(1), h(2))).unwrap(),
@@ -566,7 +590,24 @@ mod tests {
             got.quinella
                 .contains_key(&Pair::try_from((h(3), h(4))).unwrap())
         );
-        assert!(got.trio.is_empty(), "番兵の三連複は載せない");
+        assert_eq!(
+            got.trio.len(),
+            1,
+            "番兵の三連複だけ落ちる（9999.9 は正当・#630）"
+        );
+        assert!(
+            got.trio
+                .contains_key(&Triple::try_from((h(2), h(4), h(9))).unwrap())
+        );
+        assert_eq!(
+            got.wide.len(),
+            1,
+            "ワイドの 9999.9 は番兵として落ちる（#630）"
+        );
+        assert!(
+            got.wide
+                .contains_key(&Pair::try_from((h(2), h(4))).unwrap())
+        );
         assert_eq!(got.trifecta.len(), 1, "正当な高配当は残す");
         assert!(
             got.trifecta

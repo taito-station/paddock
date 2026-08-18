@@ -156,7 +156,7 @@ def parse_wide(path):
         except ValueError:
             print(f"[warn] 数値でないワイドオッズ {o!r}（pid={pid} {pair}）をスキップ", file=sys.stderr)
             continue
-        if not is_payout_odds(ov):
+        if not is_payout_odds("wide", ov):
             continue
         d.setdefault(pid, {})[(a, b)] = ov
     return d
@@ -169,6 +169,11 @@ def parse_exotic(path):
         if not line.strip():
             continue
         pid, kind, combo, o = line.split("\t")
+        # 保存対象は quinella / trio のみ。想定外 kind は従来どおり黙って捨てる（末尾の分岐でも
+        # 保存されないが、券種必須の番兵判定（#630）に未知ラベルを渡すと ValueError で全体が
+        # 止まるため、ここで先に落とす）。
+        if kind not in arity:
+            continue
         nums = tuple(sorted(int(x) for x in combo.split("-")))
         try:
             ov = float(o)
@@ -182,7 +187,8 @@ def parse_exotic(path):
             continue
         # netkeiba の未発売番兵（99999.9 等）は払戻倍率ではない。落とさないと 1 点で EV が
         # 3 桁になり ROI が跳ねる（#621）。落とした組は「オッズ不明」＝買い目から外れる。
-        if not is_payout_odds(ov):
+        # 判定は券種別（#630）: trio の 9999.9 は正当な配当なので落とさない。
+        if not is_payout_odds(kind, ov):
             continue
         if kind == "quinella":
             qn.setdefault(pid, {})[nums] = ov

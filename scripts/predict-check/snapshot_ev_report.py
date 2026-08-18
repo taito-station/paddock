@@ -82,7 +82,9 @@ def group_snapshots(rows):
             # 番兵（99999.9 等）は払戻倍率ではない（#621）。band は中点化の前に見る。
             # **単勝は番兵だけを見る**——win は「出走馬の確定」にも使う（下の races 構築）ので、
             # 下限違反まで落とすと出走馬集合が縮んで ROI の分母が変わる。従来の挙動を保つ。
-            unusable = is_sentinel(odds) if bt == "win" else not is_payout_odds(odds)
+            # 判定は券種別（#630）。win に番兵は無い（#634）ので、この分岐の意図
+            # 「win の行を番兵以外で落とさない」はより強く満たされる。
+            unusable = is_sentinel(bt, odds) if bt == "win" else not is_payout_odds(bt, odds)
             if unusable:
                 continue
             if bt == "win":
@@ -94,7 +96,7 @@ def group_snapshots(rows):
                 # 先に float 化する。is_payout_odds は非数値を False に畳むので、これを先に
                 # 通すと破損行が warn 経路（下の except）へ行かず無言で消える。
                 hi = float(hi)
-                if not is_payout_odds(hi):
+                if not is_payout_odds(bt, hi):
                     continue
                 book, key, val = "wide", _combo(r["combination_key"]), (odds + hi) / 2.0
             else:  # quinella / trio

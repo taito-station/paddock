@@ -384,13 +384,15 @@ def load_odds(tsv_text):
         try:
             low = float(odds)
             # 番兵（99999.9 等）は払戻倍率ではないので採用しない（#621）。band は**中点化の前**に
-            # 見る——中点にすると番兵と実値の平均になって検知できなくなる。
-            if not is_payout_odds(low):
+            # 見る——中点にすると番兵と実値の平均になって検知できなくなる。判定は券種別（#630）。
+            # bt が未知ラベルなら is_payout_odds の ValueError がこの except に落ち、行ごと skip
+            # される（TSV の bet_type は DB の CHECK 制約下なので実データでは起きない）。
+            if not is_payout_odds(bt, low):
                 continue
             o = low
             if odds_high:
                 high = float(odds_high)
-                if not is_payout_odds(high):
+                if not is_payout_odds(bt, high):
                     continue
                 o = (low + high) / 2.0
         except ValueError:

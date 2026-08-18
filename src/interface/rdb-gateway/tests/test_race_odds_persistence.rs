@@ -544,6 +544,42 @@ async fn sentinel_odds_row_is_skipped_on_read(pool: sqlx::PgPool) {
 }
 
 #[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn trio_9999_9_round_trips_as_legitimate_odds(pool: sqlx::PgPool) {
+    let repo = PostgresRepository::new(pool);
+    // #630: 番兵は券種スコープ。9999.9 はワイドの番兵だが、三連複では正当な配当
+    // （9000〜11000 帯に trio 6,244 行が実在=2026-08-18 実測）。フラット判定に退行すると保存側・読み出し側の
+    // どちらでも黙って消えるので、保存 → 読み出しの往復を統合で固定する。
+    let triple = Triple::try_from((horse(2), horse(4), horse(9))).unwrap();
+    repo.save_race_odds(&RaceOddsRecord {
+        race_id: race_id(),
+        fetched_at: fetched_at(),
+        rows: vec![
+            OddsRow {
+                bet_type: "win".to_string(),
+                combination_key: "1".to_string(),
+                odds: 3.5,
+                odds_high: None,
+                popularity: None,
+            },
+            OddsRow::trio(triple, 9_999.9),
+        ],
+    })
+    .await
+    .unwrap();
+
+    let odds = repo
+        .find_race_odds(&race_id(), None)
+        .await
+        .unwrap()
+        .expect("有効行があるので Some");
+    let got = odds
+        .trio
+        .get(&triple)
+        .expect("三連複の 9999.9 は番兵ではないので往復できる");
+    assert!((got.value() - 9_999.9).abs() < 1e-9);
+}
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
 async fn save_skips_row_with_invalid_odds_high(pool: sqlx::PgPool) {
     let repo = PostgresRepository::new(pool);
     // 下限は有効だが上限が値域違反（odds_high=0.0）の複勝行。保存ガード `classify_row` が

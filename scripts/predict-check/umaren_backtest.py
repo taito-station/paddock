@@ -228,7 +228,7 @@ def parse_exotic(path):
         except ValueError:
             print(f"[warn] 数値でないオッズ {odds!r}（pid={pid} {bt} {key}）をスキップ", file=sys.stderr)
             continue
-        if not is_payout_odds(odds):
+        if not is_payout_odds(bt, odds):
             continue
         slot = out.setdefault(pid, {"quinella": {}, "trio": {}, "exacta": {}})
         if bt == "exacta":

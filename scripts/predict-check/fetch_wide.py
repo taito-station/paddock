@@ -51,8 +51,8 @@ def fetch_wide(rid: str):
             continue
         # 未発売の番兵（ワイドは 9999.9）は払戻倍率ではない（#621）。**中点化の前**に見る——
         # 中点にすると番兵と実値の平均になって検知できない。現状の netkeiba は相方に 0.0 を返す
-        # ので上の `hi < lo` でも落ちるが、それは偶然であって契約ではない。
-        if not is_payout_odds(lo) or not is_payout_odds(hi):
+        # ので上の `hi < lo` でも落ちるが、それは偶然であって契約ではない。判定は券種別（#630）。
+        if not is_payout_odds("wide", lo) or not is_payout_odds("wide", hi):
             continue
         out[tuple(sorted((a, b)))] = (lo + hi) / 2
     if not out:

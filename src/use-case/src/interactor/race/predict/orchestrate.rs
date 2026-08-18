@@ -406,7 +406,7 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository> Interactor<R> {
 #[cfg(test)]
 mod compose_portfolio_tests {
     use super::*;
-    use paddock_domain::{HorseNum, OddsValue, Pair, PlaceOdds, Triple, build_portfolio};
+    use paddock_domain::{BetType, HorseNum, OddsValue, Pair, PlaceOdds, Triple, build_portfolio};
 
     fn horse(n: u32) -> HorseNum {
         HorseNum::try_from(n).unwrap()
@@ -423,7 +423,9 @@ mod compose_portfolio_tests {
     }
 
     fn odds(v: f64) -> OddsValue {
-        OddsValue::try_from(v).unwrap()
+        // テスト値はどの券種の番兵とも重ならない正当オッズ。非番兵値のガード結果は券種に
+        // 依らないため、ヘルパは Win 固定で包む（#630）。
+        OddsValue::try_from((BetType::Win, v)).unwrap()
     }
 
     /// blended と pure を別々の win_prob 列にして「rank=blended / ev=pure」対応づけを弁別可能にする。

@@ -334,7 +334,7 @@ fn win_only_odds(race_id: &str, horse_num: u32, odds: f64) -> RaceOdds {
     let mut o = RaceOdds::empty(RaceId::try_from(race_id).unwrap());
     o.win.insert(
         HorseNum::try_from(horse_num).unwrap(),
-        OddsValue::try_from(odds).unwrap(),
+        OddsValue::try_from((paddock_domain::BetType::Win, odds)).unwrap(),
     );
     o
 }
@@ -659,11 +659,11 @@ async fn backtest_blend_flips_top_pick_to_market_favorite() {
     let mut o = RaceOdds::empty(RaceId::try_from(race.race_id.value()).unwrap());
     o.win.insert(
         HorseNum::try_from(1u32).unwrap(),
-        OddsValue::try_from(9.0).unwrap(),
+        OddsValue::try_from((paddock_domain::BetType::Win, 9.0)).unwrap(),
     );
     o.win.insert(
         HorseNum::try_from(2u32).unwrap(),
-        OddsValue::try_from(1.2).unwrap(),
+        OddsValue::try_from((paddock_domain::BetType::Win, 1.2)).unwrap(),
     );
     odds.insert(race.race_id.value().to_string(), o);
 
@@ -694,7 +694,7 @@ async fn backtest_blend_uses_partial_race_odds_as_is() {
     let mut o = RaceOdds::empty(RaceId::try_from(race.race_id.value()).unwrap());
     o.win.insert(
         HorseNum::try_from(2u32).unwrap(),
-        OddsValue::try_from(1.2).unwrap(),
+        OddsValue::try_from((paddock_domain::BetType::Win, 1.2)).unwrap(),
     );
     odds.insert(race.race_id.value().to_string(), o);
 

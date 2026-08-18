@@ -4,7 +4,9 @@ use super::kelly::kelly_fraction;
 use super::model::{BetCombination, BettingConfig, Podium};
 use super::select::select_bets;
 use crate::horse_result::HorseNum;
-use crate::odds::{OddsValue, OrderedPair, OrderedTriple, Pair, PlaceOdds, RaceOdds, Triple};
+use crate::odds::{
+    BetType, OddsValue, OrderedPair, OrderedTriple, Pair, PlaceOdds, RaceOdds, Triple,
+};
 use crate::prediction::HorseProbability;
 use crate::race::RaceId;
 
@@ -17,7 +19,9 @@ fn horse(n: u32) -> HorseNum {
 }
 
 fn odds(v: f64) -> OddsValue {
-    OddsValue::try_from(v).unwrap()
+    // テスト値はどの券種の番兵とも重ならない正当オッズ。非番兵値のガード結果は券種に
+    // 依らないため、ヘルパは Win 固定で包む（#630）。
+    OddsValue::try_from((BetType::Win, v)).unwrap()
 }
 
 fn place_odds(lo: f64, hi: f64) -> PlaceOdds {
