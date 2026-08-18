@@ -30,16 +30,37 @@ set -euo pipefail
 # 上記 (b) の汚染が再現するため同時に落とす。
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
 
+# **再帰ブレーキ**（#645）。下の自己回帰は自分を `--nested` 付きで 1 回だけ呼ぶが、その判定を
+# 壊すと**赤いテストではなく無限再帰**になる（実測: 90 秒でプロセス 24 個、自力終了せず
+# `mktemp -d` を撒き続ける）。pre-push 上では「CPU を焼き続けるハングした push」になり、
+# 落ちてくれた方がまだ良い。深さを第 2 引数で受けて 1 段を超えたら即座に落とす。
+if [ "${2:-0}" -ge 2 ]; then
+    echo "✗ 自己回帰が再帰した（深さ ${2}）。--nested の判定が壊れていないか（#645）" >&2
+    exit 1
+fi
+# 深さ 1（＝自己回帰の子）は自己回帰を回さない。`--nested` の判定だけに頼ると、そこを壊した
+# ときに落ちずに無限再帰するので、深さでも二重に止める。
+if [ "${2:-0}" -ge 1 ]; then
+    set -- --nested "${2:-0}"
+fi
+
 TARGET=$(cd "$(dirname "$0")" && pwd)/check-shell-var-nonascii.sh
 DOLLAR='$'
 pass=0
 fail=0
 WORK=""
+# 自己回帰が作る使い捨てリポジトリ（#645）。`set -e` で途中中断すると本体側の `rm -rf` に
+# 到達せず /tmp に残るので、こちらも trap で消す（実測: init や staged 計測を失敗させると
+# 1 件残っていた）。
+SCRATCH=""
 # trap の最終コマンドの戻り値がスクリプトの終了コードを上書きするので、必ず 0 で返す
 # （`[ -n "" ] && rm` の形だと WORK が空のとき 1 を返し、全ケース通過でも exit 1 になる）。
 cleanup() {
     if [ -n "${WORK}" ]; then
         rm -rf "${WORK}"
+    fi
+    if [ -n "${SCRATCH}" ]; then
+        rm -rf "${SCRATCH}"
     fi
     return 0
 }
@@ -225,62 +246,88 @@ done
 #
 # **子プロセスに渡す GIT_* は使い捨ての scratch repo に向ける。** 実リポジトリに向けると、
 # 退行が入ったときに**検出行為そのものが本物の index を汚す**（#645 の実害を自分で再現して
-# しまう）。scratch なら「実行後に scratch の index が空か」まで assert でき、exit code だけで
-# なく汚染の有無を回帰に含められる。
+# しまう）。これが scratch を使う第一の理由。
+#
+# ついでに「実行後に scratch の index が空か」も見るが、**これは多重防御であって単独では
+# load-bearing ではない**——現行の退行（unset の要素落ち）では子が先に非 0 で落ちるため、
+# 汚染判定に到達する前に exit code 側が捕まえる。`staged` の判定を潰す変異は緑のまま生存する。
+# 「子が成功したのに汚す」経路が将来生まれたときの保険として残す。
 #
 # 2 条件を張る:
 #   - `git_dir_only`: **実際の pre-push が渡す形**（linked worktree からの push でだけ GIT_DIR が入る。
 #     通常リポジトリからの push では GIT_* は渡らない）
 #   - `full_env`: unset リストの全要素（GIT_WORK_TREE / GIT_INDEX_FILE も落としていることを固定）
 #
+# **この 2 条件が別物であることを機械は見ていない。** 件数チェックは「何件走ったか」しか数えない
+# ので、両方を `git_dir_only` に複製したうえで `unset` から GIT_INDEX_FILE を外す、という
+# 2 箇所同時の改変は緑のまま通る（実測）。条件を減らす／`unset` を単独で崩す変異は捕まる。
+#
 # ネストは**環境変数ではなく引数**で止める。env で切れる作りだと `export` 一発で回帰が無言で
 # 消える（実行時間を惜しむ人が必ずやる）。実行コストは約 7 秒 ×2 で、pre-push 全体（clippy
 # 十数分）に対して無視できる。
 if [ "${1:-}" != "--nested" ]; then
     for cond in git_dir_only full_env; do
-        scratch=$(mktemp -d)
-        git -C "${scratch}" init -q
+        SCRATCH=$(mktemp -d)
+        git -C "${SCRATCH}" init -q
         case "${cond}" in
-        git_dir_only) env_args=(GIT_DIR="${scratch}/.git") ;;
+        git_dir_only) env_args=(GIT_DIR="${SCRATCH}/.git") ;;
         *) env_args=(
-            GIT_DIR="${scratch}/.git"
-            GIT_WORK_TREE="${scratch}"
-            GIT_INDEX_FILE="${scratch}/.git/index"
+            GIT_DIR="${SCRATCH}/.git"
+            GIT_WORK_TREE="${SCRATCH}"
+            GIT_INDEX_FILE="${SCRATCH}/.git/index"
         ) ;;
         esac
-        if out=$(env "${env_args[@]}" bash "$0" --nested 2>&1); then
-            staged=$(git -C "${scratch}" diff --cached --name-only | wc -l | tr -d ' ')
-            if [ "${staged}" -eq 0 ]; then
-                echo "  ✓ git hook 相当の環境でも通り外部リポジトリを汚さない（${cond}）"
-                pass=$((pass + 1))
-            else
-                echo "  ✗ git hook 相当の環境で外部リポジトリの index を汚した（${cond}: ${staged} 件）" >&2
-                echo "    冒頭の unset が外れていないか（#645 の実害 2）" >&2
-                fail=$((fail + 1))
-            fi
-        else
+        # bash 3.2 は `set -u` 下で空配列の展開が unbound エラーになる。今は case の
+        # 両腕が必ず 1 要素以上を入れるので安全だが、env 無しの条件（plain）を足すと
+        # **テストが赤くなるのではなくスクリプトごと落ちる**ので、そのときは
+        # `${env_args[@]+"${env_args[@]}"}` に変えること。
+        code=0
+        # 深さは**受け取った値 +1**で渡す。ここを定数にすると深さが増えず再帰ブレーキが効かない
+        # （実際に定数 1 で書いて M5 の無限再帰を止められなかった）。
+        out=$(env "${env_args[@]}" bash "$0" --nested "$((${2:-0} + 1))" 2>&1) || code=$?
+        # **汚染は exit code と独立に測る。** 成功した経路には汚染が起こり得ないので、
+        # ここを `if` の成功側だけに置くと「起こり得ない場所だけを見張る」assert になる
+        # （実際、unset から GIT_INDEX_FILE を外す退行では失敗側で staged=8 になっていた）。
+        staged=$(git -C "${SCRATCH}" diff --cached --name-only | wc -l | tr -d ' ')
+        rm -rf "${SCRATCH}"
+        SCRATCH=""
+
+        if [ "${code}" -ne 0 ]; then
             echo "  ✗ git hook 相当の環境で失敗した（${cond}）" >&2
             echo "    冒頭の unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE が外れていないか（#645）" >&2
             printf '%s\n' "${out}" | sed 's/^/    | /' >&2
             fail=$((fail + 1))
+        elif [ "${staged}" -ne 0 ]; then
+            echo "  ✗ git hook 相当の環境で外部リポジトリの index を汚した（${cond}: ${staged} 件）" >&2
+            echo "    冒頭の unset が外れていないか（#645 の実害 2）" >&2
+            fail=$((fail + 1))
+        else
+            echo "  ✓ git hook 相当の環境でも通り外部リポジトリを汚さない（${cond}）"
+            pass=$((pass + 1))
         fi
-        rm -rf "${scratch}"
     done
 fi
 
-# **ケース数の下限**（#645）。ケースが無言で消えても「全 N ケース通過」で緑になるのを防ぐ。
-# ケースを増やしたらこの数も上げる（fail-closed。ADR 0073 と同じ方針）。
+# **ケース数の完全一致**（#645）。ケースが無言で消えても「全 N ケース通過」で緑になるのを防ぐ。
+# ケースを増減したら `BASE_CASES` を直す（fail-closed。ADR 0073 と同じ方針）。
 #
-# **自己回帰の if の外に置く。** 中に入れると、上のガードを 1 か所いじるだけで自己回帰と下限
+# **`-lt` ではなく `-ne`。** 下限だけだと「ケースを足して下限を上げ忘れる」が無警告で通り、
+# その状態で別のケースが消えると**現行と 1 文字も違わない出力**で緑になる（実測）。
+# 完全一致ならケース追加が即座に赤くなり、同期が強制される。
+#
+# **数値は 1 つだけ持つ。** nested / 非 nested で別々の定数を置くと「片方だけ直す」事故が起きる。
+#
+# **自己回帰の if の外に置く。** 中に入れると、上のガードを 1 か所いじるだけで自己回帰と件数
 # チェックが同時に消え、`✓ 全 26 ケース通過` で緑になる（実際にその変異が生存した）。
-# 外に出して nested / 非 nested で期待値を分けると、ガードだけを壊しても件数不足で落ちる。
+BASE_CASES=26
 if [ "${1:-}" = "--nested" ]; then
-    MIN_CASES=26
+    want_cases=${BASE_CASES}
 else
-    MIN_CASES=28
+    want_cases=$((BASE_CASES + 2)) # 自己回帰の 2 条件ぶん
 fi
-if [ "$((pass + fail))" -lt "${MIN_CASES}" ]; then
-    echo "✗ ケース数が ${MIN_CASES} 未満（$((pass + fail)) 件）。ケースが無言で消えていないか" >&2
+if [ "$((pass + fail))" -ne "${want_cases}" ]; then
+    echo "✗ ケース数が ${want_cases} と一致しない（$((pass + fail)) 件）" >&2
+    echo "  ケースを増減したなら BASE_CASES を直すこと。無言で消えていないかも疑う" >&2
     exit 1
 fi
 
