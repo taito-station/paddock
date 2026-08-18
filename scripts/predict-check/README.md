@@ -32,9 +32,9 @@ for rid in $(python3 scripts/predict-check/list_races.py $DATE $VENUES | cut -f1
   # 先行しうるため／「出馬表: 取得済みのためスキップ」と紛れないため。
   out=$(target/release/paddock-fetch-card "$rid"); rc=$?
   printf '%s\n' "$out"
-  printf '%s\n' "$out" | grep -q '^スキップ: ' && echo "  skip $rid（対象外・失敗ではない）"
+  printf '%s\n' "$out" | grep -q '^スキップ: ' && echo "  skip ${rid}（対象外・失敗ではない）"
   [ "$rc" -eq 1 ] && echo "  FAIL $rid"
-  [ "$rc" -eq 3 ] && echo "  DEGRADED $rid（card は保存済み・オッズのみ要再取得）"
+  [ "$rc" -eq 3 ] && echo "  DEGRADED ${rid}（card は保存済み・オッズのみ要再取得）"
 done
 
 # 1.5. 古い無効オッズ行で predict が落ちるのを回避（#114）

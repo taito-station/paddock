@@ -17,9 +17,9 @@ usage() {
 seed-db.sh - 並走 worktree の DB に golden DB を複製する（Postgres）
 
 使い方:
-  scripts/seed-db.sh                          # golden(paddock) → $PADDOCK_DB_URL へ複製
+  scripts/seed-db.sh                          # golden(paddock) → ${PADDOCK_DB_URL} へ複製
   scripts/seed-db.sh --from <golden_url>      # golden を明示
-  scripts/seed-db.sh --to <target_url>        # 配置先を明示（既定: $PADDOCK_DB_URL）
+  scripts/seed-db.sh --to <target_url>        # 配置先を明示（既定: ${PADDOCK_DB_URL}）
   PADDOCK_GOLDEN_DB_URL=<url> scripts/seed-db.sh
 
 オプション:
@@ -103,7 +103,7 @@ dump="$(mktemp "${TMPDIR:-/tmp}/paddock-seed.XXXXXX")"
 trap 'rm -f "$dump"' EXIT
 # --no-owner / --no-privileges で owner・権限文を落とし、ロール差のある環境でも流し込めるようにする。
 if ! pg_dump --no-owner --no-privileges "$FROM_URL" >"$dump"; then
-    echo "pg_dump に失敗: $FROM_URL（pg_dump のメジャー版がサーバ未満の可能性）" >&2
+    echo "pg_dump に失敗: ${FROM_URL}（pg_dump のメジャー版がサーバ未満の可能性）" >&2
     exit 1
 fi
 
