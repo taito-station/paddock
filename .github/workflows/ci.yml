@@ -251,6 +251,9 @@ jobs:
         # pathspec を二重に書いていたが、同期を人手の規律に委ねる形になっていた・#636）。
         # NUL 区切りで受けて xargs -0 に渡す（$(...) 展開は SC2046 の警告になるため避ける）。
         run: |
+          # pipefail が無いと --list の失敗（例: 対象 0 件で exit 2）を xargs -r が飲み、
+          # **1 ファイルも検査せずに緑**になる。GitHub の既定シェルは `bash -e` で pipefail 無し。
+          set -o pipefail
           bash scripts/check-shell-var-nonascii.sh --list \
             | xargs -0 -r shellcheck --severity=warning
       # 変数直後の非 ASCII（`$var（`）は UTF-8 ロケールの bash が変数名に取り込み set -u で落ちる（#636）。

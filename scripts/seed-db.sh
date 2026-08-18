@@ -17,7 +17,7 @@ usage() {
 seed-db.sh - 並走 worktree の DB に golden DB を複製する（Postgres）
 
 使い方:
-  scripts/seed-db.sh                          # golden(paddock) → $PADDOCK_DB_URL へ複製
+  scripts/seed-db.sh                          # golden(paddock) → ${PADDOCK_DB_URL} へ複製
   scripts/seed-db.sh --from <golden_url>      # golden を明示
   scripts/seed-db.sh --to <target_url>        # 配置先を明示（既定: ${PADDOCK_DB_URL}）
   PADDOCK_GOLDEN_DB_URL=<url> scripts/seed-db.sh

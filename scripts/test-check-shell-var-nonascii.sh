@@ -133,6 +133,48 @@ echo \"${DOLLAR}v（x）\""
 # **fail-closed の安全網**: 対象 0 件は「素通り」ではなく内部エラー（exit 2）にする。
 check "対象ファイル 0 件は exit 2" 2 - "README.md:not a shell script"
 
+# --- ここから経路別のケース（本体モード以外） ---
+# CI の shellcheck ステップは --list の出力を単一ソースとして消費するので、契約（NUL 区切り・
+# 件数・fail-closed）を固定する。FILE... モードは cwd がリポジトリルート以外でも動くこと。
+
+path_case() {
+    # $1 = ケース名 / $2 = 期待 exit / $3 = 実行する関数名（WORK 内で評価される）
+    local name="$1" want_code="$2" body="$3" code
+    WORK=$(mktemp -d)
+    git -C "${WORK}" init -q
+    mkdir -p "${WORK}/sub"
+    printf 'v=1\necho "%sv（x）"\n' "${DOLLAR}" > "${WORK}/sub/bad.sh"
+    printf 'echo ok\n' > "${WORK}/good.sh"
+    git -C "${WORK}" add -- sub/bad.sh good.sh
+    set +e
+    ( cd "${WORK}" && eval "${body}" ) >/dev/null 2>&1
+    code=$?
+    set -e
+    rm -rf "${WORK}"; WORK=""
+    if [ "${code}" -eq "${want_code}" ]; then
+        echo "  ✓ ${name}"
+        pass=$((pass + 1))
+    else
+        echo "  ✗ ${name}（期待 exit ${want_code} / 実際 ${code}）" >&2
+        fail=$((fail + 1))
+    fi
+}
+
+# --list: 対象があるときは 0 で NUL 区切り 2 件を返す
+path_case "--list は NUL 区切りで列挙する" 0 \
+    "test \"\$(bash '${TARGET}' --list | tr -dc '\\0' | wc -c | tr -d ' ')\" -eq 2"
+# --list: 対象 0 件は fail-closed（CI が無言で 0 ファイル検査になるのを防ぐ）
+path_case "--list も 0 件なら exit 2" 2 \
+    "git rm -qf sub/bad.sh good.sh && bash '${TARGET}' --list"
+# FILE... モード: **リポジトリルート以外の cwd** から相対パスで呼んでも動く
+path_case "FILE... を sub/ から相対パスで渡す" 1 \
+    "cd sub && bash '${TARGET}' bad.sh"
+path_case "FILE... で違反の無いファイルを渡す" 0 \
+    "cd sub && bash '${TARGET}' ../good.sh"
+# 追跡済みだが作業ツリーに無いファイルは内部エラーにせずスキップする
+path_case "作業ツリーに無い追跡ファイルはスキップ" 0 \
+    "rm -f sub/bad.sh && bash '${TARGET}'"
+
 echo
 if [ "${fail}" -ne 0 ]; then
     echo "✗ ${fail} / $((pass + fail)) 件が失敗した" >&2

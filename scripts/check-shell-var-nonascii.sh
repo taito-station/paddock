@@ -21,9 +21,11 @@
 # 実行時の挙動はロケールとプラットフォームに依存して確かめにくいため、**静的に字面で禁じる**。
 #
 # **既知の非カバー範囲**（いずれも現時点で該当 0 件。「検査済み」と誤解しないための記録）:
-#   - **クォート無しヒアドキュメント本文の `#` 始まり行**。行頭コメント除外に巻き込まれて素通りする
-#     （本文は展開されるので実際には落ちる）。追跡には状態機械が要り、検査の単純さと引き換えになる
-#     ため見送った。ヒアドキュメント内で変数を書くときは行頭コメントでもブレースを付けること
+#   - **展開される複数行文脈の `#` 始まり行**。行頭コメント除外は「その行が本当にコメントか」を
+#     見ていないので、**クォート無しヒアドキュメント本文・複数行ダブルクォート文字列の継続行・
+#     `$(...)` の中**などが素通りする（いずれも展開されるので実際には落ちる）。追跡には状態機械が
+#     要り、検査の単純さと引き換えになるため見送った。**これらの文脈では行頭コメントでも
+#     ブレースを付けること**
 #   - `.github/workflows/*.yml` の `run:` と `deployments/*.Dockerfile` の `RUN`。これらも
 #     UTF-8 ロケールの bash で走るが対象外
 #
@@ -47,6 +49,16 @@ if ! root="$(git rev-parse --show-toplevel 2>/dev/null)"; then
     echo "git リポジトリ外では実行できない（対象ファイルの列挙に git ls-files を使う）" >&2
     exit 2
 fi
+# FILE... モードの引数は **cd する前に**絶対パス化する。後で解決すると cwd がリポジトリルート以外の
+# ときに「読めない」で内部エラーになる（ドキュメント済みの用法が壊れる）。
+args=()
+for arg in "$@"; do
+    case "${arg}" in
+        /*) args+=("${arg}") ;;
+        *) args+=("${PWD}/${arg}") ;;
+    esac
+done
+
 cd "${root}"
 
 # 対象ファイルの定義はこの 1 箇所だけに置く。CI の shellcheck ジョブは --list を消費するので、
@@ -58,13 +70,20 @@ list_targets() {
 }
 
 if [ "${1:-}" = "--list" ]; then
+    # 本体側と同じく fail-closed にする。CI は `--list | xargs -0 -r` で消費するので、
+    # ここが空を返すと **無言で 0 ファイル検査**になる（xargs -r が no-op になるため）。
+    listed=$(list_targets | tr -dc '\0' | wc -c | tr -d ' ')
+    if [ "${listed}" -eq 0 ]; then
+        echo "✗ 対象ファイルが 0 件（列挙が壊れている＝検査が素通りする）" >&2
+        exit 2
+    fi
     list_targets
     exit 0
 fi
 
 targets=()
-if [ "$#" -gt 0 ]; then
-    targets=("$@")
+if [ "${#args[@]}" -gt 0 ]; then
+    targets=("${args[@]}")
 else
     # mapfile は bash 4+ の組み込みで **macOS の bash 3.2 には無い**（本検査が守ろうとしている
     # 環境そのもの）。読み込みループで代替する。
@@ -99,14 +118,21 @@ hits = []
 for path in sys.argv[1:]:
     try:
         with open(path, encoding='utf-8') as fh:
-            lines = fh.read().splitlines()
+            # splitlines() は U+2028 / U+0085 / \x0b / \x0c でも割るため bash の行概念とズレる。
+            lines = fh.read().split('\n')
+    except FileNotFoundError:
+        # 追跡済みだが作業ツリーに無い（未ステージの削除など）。検査の内部エラーではないので
+        # 警告に留める——ここで exit 2 にすると pre-push が「検査が壊れた」形で止まる。
+        print(f'⚠ {path}: 作業ツリーに無いのでスキップ', file=sys.stderr)
+        continue
     except (OSError, UnicodeDecodeError) as exc:
         print(f'✗ {path}: 読めない（{exc}）', file=sys.stderr)
         sys.exit(2)
     for lineno, line in enumerate(lines, 1):
         # 行頭コメントは展開されないので除外する。これにより「この罠を説明するコメント」で
         # 悪い例（$label（ のような形）をそのまま書ける（scripts/test-check-adr-numbers.sh）。
-        # **クォート無しヒアドキュメント本文の # 行もここで巻き込まれる**（ヘッダの既知の穴を参照）。
+        # **展開される複数行文脈（ヒアドキュメント本文・複数行文字列の継続行など）の # 行も
+        # ここで巻き込まれる**（ヘッダの「既知の非カバー範囲」を参照）。
         if line.lstrip().startswith('#'):
             continue
         for m in VAR.finditer(line):

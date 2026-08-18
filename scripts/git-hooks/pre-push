@@ -103,4 +103,4 @@ else
   echo "[pre-push] web/ 差分なし: typecheck/lint スキップ"
 fi
 
-echo "[pre-push] OK（fmt / clippy / ADR 番号 / Swagger UI vendored / 変数ブレース / 文書クラス / web 通過）"
+echo "[pre-push] OK（fmt / clippy / ADR 番号 / Swagger UI vendored / 変数直後の非 ASCII / 文書クラス / web 通過）"
