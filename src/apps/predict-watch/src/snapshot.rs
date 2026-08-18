@@ -62,11 +62,9 @@ pub fn build_snapshot_record(
         })
         .collect();
 
-    // 一部の買い目でオッズ未取得＝ROI を過小評価しうる（read/SPA が注記に使う）。
-    let odds_missing = portfolio
-        .bets
-        .iter()
-        .any(|b| b.stake > 0 && b.odds.is_none());
+    // 一部の買い目でオッズ未取得＝ROI と賭け計の基準がズレる（read/SPA が注記に使う）。
+    // 判定は domain の単一ソースへ委譲する（CLI の注記・REST の odds_missing と同一基準・#631）。
+    let odds_missing = portfolio.unpriced_staked_legs() > 0;
 
     Some(LiveEvSnapshotRecord {
         date: ctx.date,

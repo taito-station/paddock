@@ -153,6 +153,30 @@ pub struct Portfolio {
     pub ev: Option<EvReport>,
 }
 
+impl Portfolio {
+    /// **賭金が乗っているのにオッズ未取得**の脚数（#631）。
+    ///
+    /// `ev.roi` は priced な脚だけで算出される（[`build_portfolio`] が `odds` を持つ脚のみを
+    /// `simulate` に渡すので、分子・分母とも priced 基準で**式としては対称**）。一方
+    /// [`Portfolio::total_stake`] は全脚の合計なので、両者を並べて表示すると基準がズレる。
+    /// ズレの大きさを表示側が注記するための値。
+    ///
+    /// **`stake == 0` の脚は数えない。** 賭金 0 の脚は `total_stake` に 1 円も寄与せず
+    /// ズレを生まないため、数えれば「未取得 N 点を含む」が実際より大きく出る。
+    ///
+    /// ただし現状これは**防御的インバリアント**で、実際には発火しない——[`push_legs`] が
+    /// `stake == 0` の脚を捨てるので `bets` に賭金 0 の脚は入らない（本番の構築点は
+    /// [`build_portfolio`] のみ）。`push_legs` 側が変わっても注記が過大にならないよう、
+    /// 定義の側に条件を持たせている。
+    /// `live_ev_snapshots.odds_missing`（predict-watch）も同じ基準で立てる。
+    pub fn unpriced_staked_legs(&self) -> usize {
+        self.bets
+            .iter()
+            .filter(|b| b.stake > 0 && b.odds.is_none())
+            .count()
+    }
+}
+
 /// 馬連/馬単の組合せに対応する確定オッズ（払戻倍率）を引く。対象外券種・未取得は `None`。
 fn combo_odds(odds: &RaceOdds, combination: &BetCombination) -> Option<f64> {
     match combination {
@@ -1490,6 +1514,43 @@ mod tests {
             "roi {} should match priced-only {}",
             ev.roi,
             reference.roi
+        );
+    }
+
+    #[test]
+    fn unpriced_staked_legs_counts_only_legs_that_shift_total_stake() {
+        // #631: ROI は priced 脚のみ・total_stake は全脚なので、両者を並べて表示すると基準がズレる。
+        // ズレを生むのは **賭金が乗った未 priced 脚だけ**。stake=0 の未 priced 脚は total_stake に
+        // 1 円も寄与しないので数えない。**現行の build_portfolio では stake=0 の脚が bets に
+        // 入らない**（push_legs が捨てる）ので、この分岐は防御的インバリアントとして固定する。
+        let bet = |stake: u64, odds: Option<f64>| PortfolioBet {
+            combination: BetCombination::Quinella(Pair::try_from((horse(1), horse(2))).unwrap()),
+            method: BetMethod::Nagashi,
+            stake,
+            odds,
+            ev: 0.0,
+            hit_prob: 0.0,
+        };
+        let pf = |bets: Vec<PortfolioBet>| Portfolio {
+            axis: None,
+            partners: Vec::new(),
+            konsen: false,
+            bets,
+            total_stake: 0,
+            ev: None,
+        };
+
+        assert_eq!(pf(Vec::new()).unpriced_staked_legs(), 0);
+        // priced な脚は賭金があっても数えない。
+        assert_eq!(pf(vec![bet(100, Some(3.5))]).unpriced_staked_legs(), 0);
+        // 賭金が乗った未 priced 脚だけを数える。
+        assert_eq!(pf(vec![bet(100, None)]).unpriced_staked_legs(), 1);
+        // **stake=0 の未 priced 脚は数えない**（ここが本メソッドの肝）。
+        assert_eq!(pf(vec![bet(0, None)]).unpriced_staked_legs(), 0);
+        // 混在: 数えるのは (100, None) の 1 本だけ。
+        assert_eq!(
+            pf(vec![bet(100, None), bet(0, None), bet(200, Some(9.9))]).unpriced_staked_legs(),
+            1
         );
     }
 

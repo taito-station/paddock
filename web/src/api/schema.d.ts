@@ -714,7 +714,11 @@ export interface components {
             captured_at: string;
             flip: components["schemas"]["LiveFlip"];
             konsen: boolean;
-            /** @description 一部買い目のオッズ欠落（ROI 過小評価の可能性）。 */
+            /**
+             * @description 賭金が乗っているのにオッズ未取得の脚があるか（#631）。**「ROI が過小評価される」ではない**
+             *     ——`roi` は priced 脚だけで分子・分母とも算出される（式は対称）。true のとき、`roi` と
+             *     賭け計が**別の母集団**を指すという意味。
+             */
             odds_missing: boolean;
             /** @description 発走時刻（netkeiba 由来文字列。欠落時 null）。 */
             post_time?: string | null;
@@ -970,6 +974,16 @@ export interface components {
              * @description 朝時点オッズで再計算したポートフォリオ ROI（#448。確率・軸・budget は現時点と同一）。
              */
             morning_roi?: number | null;
+            /**
+             * Format: int32
+             * @description `morning_roi` の被覆率（#631）＝**現時点の買い目を朝オッズで値付けした**ときの
+             *     「賭金が乗っているのにオッズ未取得」の脚数。`morning_roi` と同じく確率・軸・budget は
+             *     現時点と同一で、差し替わるのは払戻本だけ。`morning_at` が `null` なら `null`。
+             *
+             *     `unpriced_legs`（現時点）とは別物——UI は朝ROI→現ROI を並べるので、両者が違えば
+             *     **別の母集団同士の比較**になる。
+             */
+            morning_unpriced_legs?: number | null;
             /** @description 保存オッズ（#51）の有無。false のとき `bets` は必ず空。 */
             odds_available: boolean;
             partners: number[];
@@ -995,8 +1009,21 @@ export interface components {
             /** Format: double */
             roi?: number | null;
             surface: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description **全脚**の賭金合計（円）。`roi` / `hit_prob` とは母集団が異なる（`unpriced_legs` 参照）。
+             */
             total_stake: number;
+            /**
+             * Format: int32
+             * @description **賭金が乗っているのにオッズ未取得**の脚数（#631）。
+             *
+             *     `roi` / `hit_prob` は priced な脚だけで算出される一方 `total_stake` は全脚の合計なので、
+             *     この値が 0 より大きいとき 2 つの数字は**別の母集団**を指す。`roi` と `total_stake` を
+             *     並べて読むときはこの値を併せて見ること。**現時点の買い目に対する値**であって
+             *     `morning_roi` の被覆率ではない（そちらは `morning_unpriced_legs`）。
+             */
+            unpriced_legs: number;
             venue: string;
         };
         /** @description `GET /api/races/{race_id}` のレスポンス（出馬表）。 */
@@ -1120,8 +1147,21 @@ export interface components {
              * @description オッズ取得済みの脚に基づく期待回収率（倍率）。買い目が空なら `null`。
              */
             roi?: number | null;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description **全脚**の賭金合計（円）。`roi` / `hit_prob` とは母集団が異なる（`unpriced_legs` 参照）。
+             */
             total_stake: number;
+            /**
+             * Format: int32
+             * @description **賭金が乗っているのにオッズ未取得**の脚数（#631）。
+             *
+             *     `roi` / `hit_prob` は priced な脚だけで算出される一方 `total_stake` は全脚の合計なので、
+             *     この値が 0 より大きいとき 2 つの数字は**別の母集団**を指す。`roi` と `total_stake` を
+             *     並べて読むときはこの値を併せて見ること。
+             *     CLI（predict / predict-watch）の注記・`live_ev_snapshots.odds_missing` と同一基準。
+             */
+            unpriced_legs: number;
         };
         /** @description `POST /api/sessions/{date}/races/{race_id}/outcome` のリクエスト。 */
         RecordOutcomeRequest: {

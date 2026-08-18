@@ -10,8 +10,8 @@ use paddock_use_case::compose_portfolio;
 use paddock_use_case::recorded_axis_of;
 use paddock_use_case::repository::{LiveEvPin, LiveEvRepository, PadPredictionRepository};
 use predict_format::{
-    PortfolioFormat, format_explanations, format_portfolio, format_probs, format_probs_with_market,
-    format_recent_runs_warning,
+    PortfolioFormat, coverage_note, format_explanations, format_portfolio, format_probs,
+    format_probs_with_market, format_recent_runs_warning,
 };
 
 use crate::cli::Cli;
@@ -614,6 +614,9 @@ async fn evaluate_race(app: &App, slot: &Slot, is_ura: bool, captured_at: &str, 
 /// 張り候補の買い目を「そのまま買える形」で出力する（軸/相手＋各点）。整形は predict と共有する
 /// `predict_format::format_portfolio` に委譲し（#452）、賭け計フッタだけ predict-watch 固有で付す。
 /// predict-watch は 5 スペースインデント・0 円脚を落とす・未取得脚に EV を付けない設定。
+///
+/// 賭け計には**参考 ROI との基準のズレ**を注記する（#631）。上の行に出す参考 ROI は priced な脚
+/// だけの値で、賭け計は全脚の合計。両者は行が離れているので、ズレの説明は賭け計側に付ける。
 fn print_buy_targets(p: &Portfolio) {
     for line in format_portfolio(
         p,
@@ -625,7 +628,7 @@ fn print_buy_targets(p: &Portfolio) {
     ) {
         println!("{line}");
     }
-    println!("     賭け計 ¥{}", p.total_stake);
+    println!("     賭け計 ¥{}{}", p.total_stake, coverage_note(p));
 }
 
 /// 監視ループを駆動する [`Sweeper`]（#459）。共通の骨格（[`run_monitor_loop`]）へ predict-watch 固有の

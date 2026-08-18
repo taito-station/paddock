@@ -513,6 +513,9 @@ async fn board_without_odds_returns_all_horses(pool: sqlx::PgPool) {
     // オッズ未 seed → 買い目なし・市場implied/人気は null だが確率と model_rank は出る。
     assert_eq!(json["odds_available"], false);
     assert_eq!(json["bets"].as_array().unwrap().len(), 0);
+    // 買い目が無いので被覆率は 0（#631）。朝 snapshot も無いので朝側は null。
+    assert_eq!(json["unpriced_legs"], 0);
+    assert!(json["morning_unpriced_legs"].is_null());
     for h in horses {
         assert!(h["market_implied"].is_null());
         assert!(h["popularity"].is_null());
@@ -603,6 +606,139 @@ async fn board_bets_match_recommendations(pool: sqlx::PgPool) {
         top["horse_num"].as_u64().unwrap(),
         axis,
         "盤の ◎(model_rank 1) と買い目軸は同一馬でなければならない"
+    );
+
+    // 全券種 priced なフィクスチャなので被覆率のズレは無い（下の欠落テストと対で意味を持つ）。
+    assert_eq!(board["unpriced_legs"], 0, "全 priced なら 0");
+    assert_eq!(reco["unpriced_legs"], 0, "全 priced なら 0");
+}
+
+/// ワイドのオッズだけ欠いた `sample_odds`。買い目にはワイド脚が残る（賭金は乗る）が
+/// 払戻倍率が引けないので `unpriced_legs` が立つ（#631）。
+fn sample_odds_without_wide() -> RaceOddsRecord {
+    let mut r = sample_odds();
+    r.rows.retain(|row| row.bet_type != "wide");
+    r
+}
+
+/// REST の `unpriced_legs`（#631）が **値として**配線されていること。
+///
+/// `roi` は priced 脚のみ・`total_stake` は全脚なので、両者を並べて読むには被覆率が要る。
+/// **全 priced のフィクスチャだけで等値アサートしても意味が無い**（両方 0 で一致してしまい、
+/// 実装を 0 決め打ちに変えても緑のまま通る）ので、欠落ありのフィクスチャで値を固定する。
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn board_and_recommendations_report_unpriced_legs(pool: sqlx::PgPool) {
+    let repo = PostgresRepository::new(pool.clone());
+    repo.save_race_card(&sample_card()).await.unwrap();
+    repo.save_race_odds(&sample_win_odds()).await.unwrap();
+    repo.save_race_odds(&sample_odds_without_wide())
+        .await
+        .unwrap();
+    let app = build_service!(pool);
+
+    let get = |uri: String| {
+        let app = &app;
+        async move {
+            body_json(
+                test::call_service(app, test::TestRequest::get().uri(&uri).to_request()).await,
+            )
+            .await
+        }
+    };
+    let board = get(format!("/api/races/{RACE_ID}/board?budget=10000")).await;
+    let reco = get(format!("/api/races/{RACE_ID}/recommendations?budget=10000")).await;
+
+    // 相手 2 頭ぶんのワイド脚が未 priced。板と推奨は同経路なので同値。
+    assert_eq!(board["unpriced_legs"], 2, "board: {board}");
+    assert_eq!(reco["unpriced_legs"], 2, "reco: {reco}");
+    assert_eq!(
+        board["unpriced_legs"], reco["unpriced_legs"],
+        "board と一致"
+    );
+
+    // 未 priced 脚にも賭金は乗る＝ROI（priced 基準）と賭け計（全脚）の母集団が食い違う。
+    assert!(board["roi"].is_number(), "ROI は priced 脚で算出され続ける");
+    assert!(
+        board["total_stake"].as_u64().unwrap() > 0,
+        "賭け計は未 priced 脚を含む全脚の合計"
+    );
+
+    // 朝 snapshot が無いレースでは朝側の被覆率は null（現時点の値を流用しない）。
+    assert!(
+        board["morning_unpriced_legs"].is_null(),
+        "朝 snapshot 無し: {board}"
+    );
+}
+
+/// 朝側の被覆率（`morning_unpriced_legs`）が**現時点とは別に**算出されること（#631）。
+///
+/// 朝 snapshot の complete 保証は `is_complete()`＝各券種が空でないことだけで、全組合せが
+/// priced であることは保証しない。UI は朝ROI→現ROI を矢印で並べるので、被覆率が朝と現で
+/// 違えば別母集団同士の比較になる。ここでは**朝 1 点・現 0 点**に分かれる状態を作って固定する。
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn board_reports_morning_unpriced_legs_separately(pool: sqlx::PgPool) {
+    let repo = PostgresRepository::new(pool.clone());
+    repo.save_race_card(&sample_card()).await.unwrap();
+
+    let row = |bet_type: &str, key: &str, odds: f64, odds_high: Option<f64>| OddsRow {
+        bet_type: bet_type.to_string(),
+        combination_key: key.to_string(),
+        odds,
+        odds_high,
+        popularity: None,
+    };
+    let at = |h: u32| Utc::now() - chrono::Duration::hours(h as i64);
+
+    // 朝(t1): 全 6 券種が非空＝is_complete を満たす。ただし**ワイドは 1-2 のみ**なので、
+    // 相手 3 とのワイド脚は賭金が乗るのにオッズが引けない＝朝の被覆率 1 点。
+    repo.save_race_odds(&RaceOddsRecord {
+        race_id: RaceId::try_from(RACE_ID).unwrap(),
+        fetched_at: at(6),
+        rows: vec![
+            row("win", "1", 2.5, None),
+            row("win", "2", 4.0, None),
+            row("win", "3", 6.0, None),
+            row("quinella", "1-2", 5.0, None),
+            row("quinella", "1-3", 8.0, None),
+            row("wide", "1-2", 2.0, Some(3.0)),
+            row("exacta", "1>2", 9.0, None),
+            row("trio", "1-2-3", 25.0, None),
+            row("trifecta", "1>2>3", 90.0, None),
+        ],
+    })
+    .await
+    .unwrap();
+
+    // 現在(t2): 欠けていたワイド 1-3 が売れた。race_odds は key 単位 UPSERT の和集合なので
+    // 現時点は全 priced になり、**朝と現で被覆率が分かれる**。latest_at も進む。
+    repo.save_race_odds(&RaceOddsRecord {
+        race_id: RaceId::try_from(RACE_ID).unwrap(),
+        fetched_at: at(1),
+        rows: vec![row("wide", "1-3", 3.0, Some(4.5))],
+    })
+    .await
+    .unwrap();
+
+    let app = build_service!(pool);
+    let board = body_json(
+        test::call_service(
+            &app,
+            test::TestRequest::get()
+                .uri(&format!("/api/races/{RACE_ID}/board?budget=10000"))
+                .to_request(),
+        )
+        .await,
+    )
+    .await;
+
+    assert!(
+        !board["morning_at"].is_null(),
+        "朝 snapshot が成立していること（前提）: {board}"
+    );
+    assert_eq!(board["unpriced_legs"], 0, "現時点は全 priced: {board}");
+    assert_eq!(
+        board["morning_unpriced_legs"], 1,
+        "朝はワイド 1-3 が未 priced: {board}"
     );
 }
 

@@ -194,7 +194,9 @@ function DashboardRowViewImpl({
               </span>
             )}
           {showEv && live?.odds_missing && (
-            <span className="muted">※ オッズ欠落・ROI 過小評価の可能性</span>
+            // #631: ROI は priced 脚のみで分子・分母とも算出される（過小評価ではない）。
+            // 問題は ROI と賭け計が別の母集団を指すこと。
+            <span className="muted">※ オッズ欠落・ROI と賭け計は別基準</span>
           )}
         </td>
       </tr>
