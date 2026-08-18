@@ -9,6 +9,12 @@
 # （スクリプトは `git rev-parse --show-toplevel` で基準を取るので git init も行う）。
 set -euo pipefail
 
+# git hook から呼ばれると GIT_DIR / GIT_WORK_TREE が環境に入り、下で作る一時リポジトリ内の
+# git が**本物のリポジトリを指す**（#645）。本テストは現状 `git -C` 併用で通っているが、
+# `git rev-parse --show-toplevel` を使う検査対象を temp repo で走らせる構造は同じ罠を抱えるので、
+# 予防的に落とす。
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
+
 TARGET=$(cd "$(dirname "$0")" && pwd)/check-vendored-swagger.sh
 pass=0
 fail=0

@@ -17,6 +17,15 @@
 # 内部エラーによる非 0 を見逃す（どちらも fail 期待ケースが緑のまま通ってしまう）。
 set -euo pipefail
 
+# **git の環境変数を必ず捨てる**（#645）。git hook は GIT_DIR / GIT_WORK_TREE を設定して
+# 子プロセスを起動するので、これを残したまま pre-push から呼ばれると、下で `git init` した
+# 一時リポジトリの中で走る git が**環境変数側を優先して本物のリポジトリを指す**。
+# 結果 (a) `git ls-files` が本物のファイルを返し「対象 0 件」系のケースが落ちる、
+# (b) 一時リポジトリのつもりの `git add` が**本物の index を汚染する**（フィクスチャが
+# ステージされ、未コミットの変更を持つ人の push を巻き込む）。
+# GIT_INDEX_FILE も同じ理由で落とす。
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
+
 TARGET=$(cd "$(dirname "$0")" && pwd)/check-shell-var-nonascii.sh
 DOLLAR='$'
 pass=0
@@ -204,6 +213,26 @@ for literal in scripts/mdq scripts/git-hooks/pre-push; do
         fail=$((fail + 1))
     fi
 done
+
+# **自己回帰（#645）**: git hook 相当の環境（GIT_DIR / GIT_WORK_TREE あり）で自分をもう 1 回
+# 走らせ、同じ結果になることを確かめる。冒頭の unset を外すと、このケースだけが落ちる。
+#
+# 単発のケースでは守れない: 壊れ方が「一時リポジトリ内の git が本物を指す」なので、
+# 一時リポジトリを作る**全ケースが同時に**影響を受ける。まるごと再実行するのが唯一の忠実な再現。
+# ネスト無限ループは環境変数で止める。実行コストは約 6 秒で、pre-push 全体（clippy 十数分）に対して無視できる。
+if [ -z "${SHELL_VAR_NONASCII_SELFTEST_NESTED:-}" ]; then
+    if SHELL_VAR_NONASCII_SELFTEST_NESTED=1 \
+        GIT_DIR="$(git -C "${repo_root}" rev-parse --absolute-git-dir)" \
+        GIT_WORK_TREE="$(git -C "${repo_root}" rev-parse --show-toplevel)" \
+        bash "$0" >/dev/null 2>&1; then
+        echo "  ✓ git hook 相当の環境（GIT_DIR/GIT_WORK_TREE あり）でも通る"
+        pass=$((pass + 1))
+    else
+        echo "  ✗ git hook 相当の環境（GIT_DIR/GIT_WORK_TREE あり）で失敗した" >&2
+        echo "    冒頭の unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE が外れていないか（#645）" >&2
+        fail=$((fail + 1))
+    fi
+fi
 
 echo
 if [ "${fail}" -ne 0 ]; then
