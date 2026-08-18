@@ -14,7 +14,7 @@ sources:
   - docs/qa/QA-evil-merge-615.md
   - docs/qa/QA-fullwidth-after-var-636.md
   - .github/workflows/ci.yml
-distilled_from_sha: "a265128"
+distilled_from_sha: "98dc450"
 updated: "2026-08-18"
 ---
 
