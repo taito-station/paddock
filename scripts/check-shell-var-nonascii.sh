@@ -59,7 +59,14 @@ fi
 args=()
 for arg in "$@"; do
     case "${arg}" in
-        --list) ;; # 下でモード分岐する
+        --list)
+            # 位置を問わず「単独引数のときだけ」有効にする。第 1 引数のときだけ見る作りだと
+            # `... FILE --list` が黙って FILE モードで走る（fail-open）。
+            if [ "$#" -ne 1 ]; then
+                echo "✗ --list は単独で指定する（他の引数と併用できない）: $*" >&2
+                exit 2
+            fi
+            ;;
         -*)
             echo "✗ 不明なオプション: ${arg}" >&2
             echo "  使い方: check-shell-var-nonascii.sh [--list | FILE...]" >&2
@@ -88,10 +95,6 @@ list_targets() {
 }
 
 if [ "${1:-}" = "--list" ]; then
-    if [ "$#" -gt 1 ]; then
-        echo "✗ --list に余計な引数がある（列挙モードは対象を絞れない）: $*" >&2
-        exit 2
-    fi
     # 本体側と同じく fail-closed にする。CI は `--list | xargs -0 -r` で消費するので、
     # ここが空を返すと **無言で 0 ファイル検査**になる（xargs -r が no-op になるため）。
     if ! listed=$(list_targets | tr -dc '\0' | wc -c | tr -d ' '); then
@@ -149,7 +152,9 @@ hits = []
 internal_error = False
 for path in sys.argv[1:]:
     try:
-        with open(path, encoding='utf-8') as fh:
+        # デコード不能バイトは surrogateescape で保持する。定義上どれも非 ASCII なので
+        # 「読めないから検査不能」ではなく検出側に倒れる（exit 2 で全体を止めない）。
+        with open(path, encoding='utf-8', errors='surrogateescape') as fh:
             # splitlines() は U+2028 / U+0085 / \x0b / \x0c でも割るため bash の行概念とズレる。
             lines = fh.read().split('\n')
     except FileNotFoundError:
@@ -162,7 +167,7 @@ for path in sys.argv[1:]:
         # 警告に留める——ここで exit 2 にすると pre-push が「検査が壊れた」形で止まる。
         print(f'⚠ {path}: 作業ツリーに無いのでスキップ', file=sys.stderr)
         continue
-    except (OSError, UnicodeDecodeError) as exc:
+    except OSError as exc:
         # **ここで即 exit しない**——収集済みの hits を捨てると、読めないファイルが 1 本あるだけで
         # 他の全違反が報告されなくなる。フラグに溜めて最後にまとめて落とす。
         print(f'✗ {path}: 読めない（{exc}）', file=sys.stderr)
@@ -184,6 +189,13 @@ for path, lineno, var, ch, text in hits:
     print(f'✗ {path}:{lineno}: {var} の直後に非 ASCII「{ch}」がある → ${{{var[1:]}}} と書く', file=sys.stderr)
     print(f'    {text}', file=sys.stderr)
 
+if hits:
+    # 是正ヒントは **hits があるときに必ず出す**。ラッパー側で exit code 1 のときだけ出す作りだと、
+    # 読めないファイルが 1 本混ざって exit 2 になった瞬間にヒントごと消える。
+    print('  UTF-8 ロケールの bash が非 ASCII を変数名に取り込み、set -u で落ちる（#636）。', file=sys.stderr)
+    print('  シェルの文脈なら変数をブレースで閉じる（$var → ${var}）と解消する。', file=sys.stderr)
+    print('  awk / jq / perl などを埋め込んでいる箇所は意味が変わるので、コードの組み替えで回避する。', file=sys.stderr)
+
 if internal_error:
     sys.exit(2)
 sys.exit(1 if hits else 0)
@@ -191,9 +203,4 @@ PY
 code=$?
 set -e
 
-if [ "${code}" -eq 1 ]; then
-    echo "  UTF-8 ロケールの bash が非 ASCII を変数名に取り込み、set -u で落ちる（#636）。" >&2
-    echo "  シェルの文脈なら変数をブレースで閉じる（\$var → \${var}）と解消する。" >&2
-    echo "  awk / jq / perl などを埋め込んでいる箇所は意味が変わるので、コードの組み替えで回避する。" >&2
-fi
 exit "${code}"

@@ -182,6 +182,13 @@ path_case "未知のオプションは exit 2" 2 \
     "bash '${TARGET}' --help"
 path_case "--list に余計な引数は exit 2" 2 \
     "bash '${TARGET}' --list good.sh"
+# --list は位置を問わず単独指定のときだけ有効（`FILE --list` が黙って FILE モードで走らない）
+path_case "--list を後置しても exit 2" 2 \
+    "bash '${TARGET}' good.sh --list"
+# デコード不能バイトは surrogateescape で読むので「検査不能」ではなく検出側に倒れる
+path_case "非 UTF-8 バイトでも落ちずに検出する" 1 \
+    "printf 'v=1\\necho \"%sv\\xff\"\\n' '${DOLLAR}' > sub/bin.sh && git add sub/bin.sh && bash '${TARGET}'"
+
 # **実リポジトリ**に対する縮退ガード。`git ls-files` はリテラルパスが一致しなくても rc=0 で
 # 黙って無視するので、`scripts/mdq` などを改名すると検査と shellcheck が無言で対象を失う。
 # フィクスチャではなく本物のリポジトリで固定する（フィクスチャ側に置くと全ケースが

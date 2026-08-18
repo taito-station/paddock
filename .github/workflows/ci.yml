@@ -245,6 +245,15 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
+      # 変数直後の非 ASCII（`$var（`）は UTF-8 ロケールの bash が変数名に取り込み set -u で落ちる（#636）。
+      # shellcheck は検出しないので専用検査を置く。
+      # **回帰テストをジョブの先頭に置く**（`adr` ジョブと同じ順序）。下の shellcheck ステップも
+      # この検査の --list を消費するので、検査が壊れると最初に落ちるのが shellcheck になり
+      # 「検査が壊れたのか本体が壊れたのか」の切り分けが効かなくなる。
+      - name: Regression test for check-shell-var-nonascii.sh
+        run: bash scripts/test-check-shell-var-nonascii.sh
+      - name: Check variables followed by non-ASCII (#636)
+        run: bash scripts/check-shell-var-nonascii.sh
       - name: Run shellcheck (--severity=warning)
         # 対象ファイルの定義は scripts/check-shell-var-nonascii.sh --list を単一ソースにする
         # （拡張子で拾えない shebang スクリプトを含む。以前はここと検査スクリプトに同じ
@@ -256,13 +265,6 @@ jobs:
           set -o pipefail
           bash scripts/check-shell-var-nonascii.sh --list \
             | xargs -0 -r shellcheck --severity=warning
-      # 変数直後の非 ASCII（`$var（`）は UTF-8 ロケールの bash が変数名に取り込み set -u で落ちる（#636）。
-      # shellcheck は検出しないので専用検査を置く。
-      # 検査自身の回帰を先に走らせる（`adr` ジョブと同じ順序。検査が壊れたのか本体が壊れたのかを分ける）。
-      - name: Regression test for check-shell-var-nonascii.sh
-        run: bash scripts/test-check-shell-var-nonascii.sh
-      - name: Check variables followed by non-ASCII (#636)
-        run: bash scripts/check-shell-var-nonascii.sh
 
   # reset-db.sh / seed-db.sh の golden DB 保護ガードの回帰テスト（scripts/test-db-guards.sh・#406/#465）。
   # ガードが退行すると「golden DB を DROP しうる」最悪級の事故に直結するため、テストが存在するのに

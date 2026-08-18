@@ -15,7 +15,7 @@ sources:
   - docs/qa/QA-fullwidth-after-var-636.md
   - .github/workflows/ci.yml
 distilled_from_sha: "394ff55"
-updated: "2026-08-16"
+updated: "2026-08-18"
 ---
 
 # CI パイプラインの構成と設計意図（D21）
