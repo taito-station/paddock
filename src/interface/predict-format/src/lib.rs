@@ -299,10 +299,12 @@ pub struct PortfolioFormat {
 ///
 /// predict（対話・`--overview`）/ predict-watch（ライブ監視）/ REST の 3 経路で同じ基準を使う。
 /// 判定そのものは domain の [`Portfolio::unpriced_staked_legs`] が単一ソース（ADR 0064）。
+/// 文言が「ROI・的中率」で始まるのは、predict が「期待回収率」・predict-watch が「参考ROI」と
+/// **別のラベルで印字する**ため。どちらの画面でも指す先が分かる語を選ぶ（用語集で ROI＝回収率）。
 pub fn coverage_note(p: &Portfolio) -> String {
     match p.unpriced_staked_legs() {
         0 => String::new(),
-        n => format!("（回収率・的中率はオッズ取得済の脚基準、賭け計は未取得 {n} 点を含む全脚）"),
+        n => format!("（ROI・的中率はオッズ取得済の脚基準、賭け計は未取得 {n} 点を含む全脚）"),
     }
 }
 
@@ -720,11 +722,12 @@ mod tests {
         ]);
         assert_eq!(
             coverage_note(&unpriced),
-            "（回収率・的中率はオッズ取得済の脚基準、賭け計は未取得 1 点を含む全脚）"
+            "（ROI・的中率はオッズ取得済の脚基準、賭け計は未取得 1 点を含む全脚）"
         );
 
-        // stake=0 の未 priced 脚は total_stake を動かさない → 注記を出さない
-        // （predict は 0 円脚も表示するので、ここを数えると注記が実際より大きく出る）。
+        // stake=0 の未 priced 脚は total_stake を動かさない → 注記を出さない。
+        // 現行の build_portfolio では stake=0 の脚が bets に入らないので到達しないが、
+        // 定義の防御的インバリアント（domain 側 doc 参照）をここでも固定する。
         let zero_stake = pf(vec![
             pf_bet(quinella.clone(), BetMethod::Nagashi, 300, Some(4.2)),
             pf_bet(quinella, BetMethod::Nagashi, 0, None),

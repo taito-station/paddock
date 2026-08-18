@@ -14,7 +14,7 @@ sources:
   - docs/original-docs/0060-betting-axis-lock-preclose-topup.md
   - docs/original-docs/0066-live-ev-per-race-budget.md
 distilled_from_sha: "f765be7"
-updated: "2026-07-17"
+updated: "2026-08-18"
 ---
 
 # ライブ EV 買い目ビュー（今これを買え）: 機能仕様
@@ -72,7 +72,7 @@ updated: "2026-07-17"
 | `axis` | int | ◎馬番（model 勝率最上位） |
 | `axis_prob` | numeric | ◎の model 勝率[%] |
 | `axis_win_odds` | numeric | ◎の単勝オッズ |
-| `odds_missing` | boolean | 一部買い目のオッズ欠落（ROI 過小評価の可能性） |
+| `odds_missing` | boolean | 賭金が乗っているのにオッズ未取得の脚があるか（#631）。**ROI の過小評価ではない**——`roi` は priced 脚だけで分子・分母とも算出される（式は対称）。true は「`roi` と賭け計が別の母集団を指す」の意 |
 | `slip` | jsonb | 買い目伝票（下記スキーマ）。`verdict='skip'` でも参考として保存 |
 | `raw` | jsonb | `live_ev.py --emit-json` の **`races[]` 要素 1 件ぶん**（トップレベルの `default_budget` は `slip.race_budget` フィールドに保持される）。**将来の再集計・スキーマ進化時の後方互換のために保持**。`slip`・各スカラー列と内容は重複するが、列は描画/検索用の正規化ビュー、`raw` は原本という位置づけ。時系列蓄積で肥大するため、保持期間の TTL は運用で別途定める（当面は無制限・`race_odds_snapshots` に倣う） |
 
@@ -217,7 +217,7 @@ updated: "2026-07-17"
 3. **🟢張るレース＝そのまま買える形**: 各 `verdict='bet'` レースに `式別 / 方式（ながし・ボックス・フォーメーションを正しく区別）/ 軸 / 相手 / 点数 / 金額` を表示（100 円単位）。`slip.legs` を券種ごとに束ねて描画し、`live_ev.py --slip` の伝票と同一内容にする。
 4. **⚪見送りは理由付きで明示**: `verdict='skip'` レースを理由（roi・prev_roi・◎断然人気崩れ等）付きで表示。曖昧な据え置きをしない。
 5. **🔶フリップ強調**: `flip.axis_changed` / `flip.ev_reversed` が真のレースを視覚強調（例:「小倉5R: 朝+EV→直前−EVに反転、◎⑥→⑨」）。
-6. **オッズ欠落の注記**: `odds_missing=true` のレースに「一部買い目にオッズ欠落あり・ROI は過小評価の可能性」を注記する（張る/見送りいずれでも。ROI 判定の信頼度を明示）。
+6. **オッズ欠落の注記**: `odds_missing=true` のレースに「オッズ欠落・ROI と賭け計は別基準」を注記する（張る/見送りいずれでも。ROI 判定の信頼度を明示）。**ROI が過小評価されるという意味ではない**——`roi` は priced 脚だけで分子・分母とも算出されるので式は対称で、ズレるのは「ROI の母集団（priced 脚）」と「賭け計の母集団（全脚）」の方（#631）。
 7. **鮮度**: web-spa.md「SPA は自動ポーリングしない」に従い、**手動更新ボタン**＋最終更新時刻を主表示にする（`GET /api/live/{date}` の再取得）。軽量な client-side polling は follow-up（スコープ外）。
 8. 手作業の買い目シート md を書かなくても、この画面だけで「いま張るレースと買い目」が完結すること。
 

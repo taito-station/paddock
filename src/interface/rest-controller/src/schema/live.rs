@@ -61,7 +61,9 @@ pub struct LiveRaceViewSchema {
     pub axis_place_odds_low: Option<f64>,
     /// ◎の複勝オッズ上限（帯 high。欠落時 null）。
     pub axis_place_odds_high: Option<f64>,
-    /// 一部買い目のオッズ欠落（ROI 過小評価の可能性）。
+    /// 賭金が乗っているのにオッズ未取得の脚があるか（#631）。**「ROI が過小評価される」ではない**
+    /// ——`roi` は priced 脚だけで分子・分母とも算出される（式は対称）。true のとき、`roi` と
+    /// 賭け計が**別の母集団**を指すという意味。
     pub odds_missing: bool,
     /// 結果確定フラグ（#381。`results` に着順ありの行が 1 件以上）。web の「⚫終」判定を post_time
     /// 推定でなく着順確定で行う。未確定は false。

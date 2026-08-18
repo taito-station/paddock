@@ -162,7 +162,12 @@ impl Portfolio {
     /// ズレの大きさを表示側が注記するための値。
     ///
     /// **`stake == 0` の脚は数えない。** 賭金 0 の脚は `total_stake` に 1 円も寄与せず
-    /// ズレを生まないため、数えると「未取得 N 点を含む」が実際より大きく出る。
+    /// ズレを生まないため、数えれば「未取得 N 点を含む」が実際より大きく出る。
+    ///
+    /// ただし現状これは**防御的インバリアント**で、実際には発火しない——[`push_legs`] が
+    /// `stake == 0` の脚を捨てるので `bets` に賭金 0 の脚は入らない（本番の構築点は
+    /// [`build_portfolio`] のみ）。`push_legs` 側が変わっても注記が過大にならないよう、
+    /// 定義の側に条件を持たせている。
     /// `live_ev_snapshots.odds_missing`（predict-watch）も同じ基準で立てる。
     pub fn unpriced_staked_legs(&self) -> usize {
         self.bets
@@ -1516,7 +1521,8 @@ mod tests {
     fn unpriced_staked_legs_counts_only_legs_that_shift_total_stake() {
         // #631: ROI は priced 脚のみ・total_stake は全脚なので、両者を並べて表示すると基準がズレる。
         // ズレを生むのは **賭金が乗った未 priced 脚だけ**。stake=0 の未 priced 脚は total_stake に
-        // 1 円も寄与しないので数えない（数えると注記が実際より大きく出る）。
+        // 1 円も寄与しないので数えない。**現行の build_portfolio では stake=0 の脚が bets に
+        // 入らない**（push_legs が捨てる）ので、この分岐は防御的インバリアントとして固定する。
         let bet = |stake: u64, odds: Option<f64>| PortfolioBet {
             combination: BetCombination::Quinella(Pair::try_from((horse(1), horse(2))).unwrap()),
             method: BetMethod::Nagashi,

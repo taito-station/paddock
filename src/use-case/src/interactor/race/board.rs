@@ -74,6 +74,10 @@ pub struct RaceBoard {
     pub morning_roi: Option<f64>,
     /// 朝時点オッズで再計算したポートフォリオ的中確率（#448）。`morning_roi` と対。
     pub morning_hit_prob: Option<f64>,
+    /// 朝時点の買い目のうち**賭金が乗っているのにオッズ未取得**の脚数（#631）。`morning_at` が
+    /// `Some` のときだけ `Some`。`morning_roi` の被覆率で、現時点の被覆率とは別物——UI は
+    /// 朝ROI→現ROI を並べるので、両者が違えば別母集団同士の比較になる。
+    pub morning_unpriced_legs: Option<usize>,
     /// 全出走馬（truncate しない）。盤面順（`blended` と同順）。
     pub horses: Vec<BoardHorse>,
 }
@@ -197,23 +201,28 @@ impl<
         // 朝 snapshot は complete 保証（find_race_odds_morning）なので通常 morning_roi/hit_prob は Some。
         // 万一 ev が組めなくても両値 None に縮退するだけ（朝単勝列は残る。フロントは朝ROI行を別途
         // morning_roi!=null で守る）。
-        let (morning_at, current_at, morning_roi, morning_hit_prob) = match morning.as_ref() {
-            Some(m) => {
-                let morning_portfolio = compose_portfolio(&views, &m.odds, budget, &pinned);
-                for h in horses.iter_mut() {
-                    if let Ok(num) = HorseNum::try_from(h.horse_num) {
-                        h.morning_win_odds = m.odds.win.get(&num).map(|v| v.value());
+        // 朝側の被覆率も併せて返す（#631）。朝 snapshot の complete 保証は `is_complete()`＝各券種が
+        // 空でないことだけで、全組合せが priced であることは保証しない。UI は朝ROI→現ROI を矢印で
+        // 並べるので、被覆率が朝と現で違えば別母集団同士の比較になる。
+        let (morning_at, current_at, morning_roi, morning_hit_prob, morning_unpriced_legs) =
+            match morning.as_ref() {
+                Some(m) => {
+                    let morning_portfolio = compose_portfolio(&views, &m.odds, budget, &pinned);
+                    for h in horses.iter_mut() {
+                        if let Ok(num) = HorseNum::try_from(h.horse_num) {
+                            h.morning_win_odds = m.odds.win.get(&num).map(|v| v.value());
+                        }
                     }
+                    (
+                        Some(m.morning_at.clone()),
+                        Some(m.latest_at.clone()),
+                        morning_portfolio.ev.as_ref().map(|e| e.roi),
+                        morning_portfolio.ev.as_ref().map(|e| e.hit_prob),
+                        Some(morning_portfolio.unpriced_staked_legs()),
+                    )
                 }
-                (
-                    Some(m.morning_at.clone()),
-                    Some(m.latest_at.clone()),
-                    morning_portfolio.ev.as_ref().map(|e| e.roi),
-                    morning_portfolio.ev.as_ref().map(|e| e.hit_prob),
-                )
-            }
-            None => (None, None, None, None),
-        };
+                None => (None, None, None, None, None),
+            };
 
         // 確定着順（#381）を results から後付けする。着順ありの行が 1 件でもあれば結果確定。
         let finishing = self.repository.find_finishing_positions(race_id).await?;
@@ -277,6 +286,7 @@ impl<
             current_at,
             morning_roi,
             morning_hit_prob,
+            morning_unpriced_legs,
             horses,
         })
     }

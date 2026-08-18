@@ -228,10 +228,10 @@ pub struct RecommendationResponse {
     /// **賭金が乗っているのにオッズ未取得**の脚数（#631）。
     ///
     /// `roi` / `hit_prob` は priced な脚だけで算出される一方 `total_stake` は全脚の合計なので、
-    /// この値が 0 より大きいとき 2 つの数字は**別の母集団**を指す。未 priced の割合はレースごとに
-    /// 違うため、これを見ずに `roi` をレース間で比較すると被覆率の差を優劣と取り違える。
+    /// この値が 0 より大きいとき 2 つの数字は**別の母集団**を指す。`roi` と `total_stake` を
+    /// 並べて読むときはこの値を併せて見ること。
     /// CLI（predict / predict-watch）の注記・`live_ev_snapshots.odds_missing` と同一基準。
-    pub unpriced_legs: usize,
+    pub unpriced_legs: u32,
 }
 
 impl RecommendationResponse {
@@ -252,8 +252,9 @@ impl RecommendationResponse {
 
     /// 生成済みポートフォリオから応答を組む。
     pub fn from_portfolio(race_id: String, p: Portfolio) -> Self {
-        // `p` を move する前に採る（判定は domain の単一ソース・#631）。
-        let unpriced_legs = p.unpriced_staked_legs();
+        // `p` を move する前に採る（判定は domain の単一ソース・#631）。API 境界は幅が
+        // ターゲット依存の usize を出さない（他の件数系フィールドと同じ u32 に揃える）。
+        let unpriced_legs = p.unpriced_staked_legs() as u32;
         Self {
             race_id,
             odds_available: true,
@@ -377,10 +378,10 @@ pub struct RaceBoardResponse {
     /// **賭金が乗っているのにオッズ未取得**の脚数（#631）。
     ///
     /// `roi` / `hit_prob` は priced な脚だけで算出される一方 `total_stake` は全脚の合計なので、
-    /// この値が 0 より大きいとき 2 つの数字は**別の母集団**を指す。盤で ROI をレース間比較する
-    /// ときに被覆率の差を優劣と取り違えないための注記材料。`morning_roi` 側の被覆率ではない
-    /// （こちらは `current_at` 時点の買い目に対する値）。
-    pub unpriced_legs: usize,
+    /// この値が 0 より大きいとき 2 つの数字は**別の母集団**を指す。`roi` と `total_stake` を
+    /// 並べて読むときはこの値を併せて見ること。**現時点の買い目に対する値**であって
+    /// `morning_roi` の被覆率ではない（そちらは `morning_unpriced_legs`）。
+    pub unpriced_legs: u32,
     pub confusion: ConfusionSchema,
     /// レース書評（混戦度・◎の狙いどころ・妙味）。人手優先・無ければルールベース生成（#348）。`null` 可。
     pub race_comment: Option<String>,
@@ -396,6 +397,10 @@ pub struct RaceBoardResponse {
     pub morning_roi: Option<f64>,
     /// 朝時点オッズで再計算したポートフォリオ的中確率（#448）。
     pub morning_hit_prob: Option<f64>,
+    /// 朝時点の買い目のうち**賭金が乗っているのにオッズ未取得**の脚数（#631）。`morning_at` が
+    /// `null` なら `null`。`morning_roi` の被覆率で、`unpriced_legs`（現時点）とは別物——
+    /// UI は朝ROI→現ROI を並べるので、両者が違えば**別の母集団同士の比較**になる。
+    pub morning_unpriced_legs: Option<u32>,
     pub horses: Vec<BoardHorseSchema>,
 }
 
@@ -423,7 +428,7 @@ impl From<RaceBoard> for RaceBoardResponse {
                     p.total_stake,
                     p.ev.as_ref().map(|e| e.roi),
                     p.ev.as_ref().map(|e| e.hit_prob),
-                    p.unpriced_staked_legs(),
+                    p.unpriced_staked_legs() as u32,
                 ),
                 None => (false, None, Vec::new(), Vec::new(), 0, None, None, 0),
             };
@@ -460,6 +465,7 @@ impl From<RaceBoard> for RaceBoardResponse {
             current_at: b.current_at,
             morning_roi: b.morning_roi,
             morning_hit_prob: b.morning_hit_prob,
+            morning_unpriced_legs: b.morning_unpriced_legs.map(|n| n as u32),
             horses: b
                 .horses
                 .into_iter()

@@ -714,7 +714,11 @@ export interface components {
             captured_at: string;
             flip: components["schemas"]["LiveFlip"];
             konsen: boolean;
-            /** @description 一部買い目のオッズ欠落（ROI 過小評価の可能性）。 */
+            /**
+             * @description 賭金が乗っているのにオッズ未取得の脚があるか（#631）。**「ROI が過小評価される」ではない**
+             *     ——`roi` は priced 脚だけで分子・分母とも算出される（式は対称）。true のとき、`roi` と
+             *     賭け計が**別の母集団**を指すという意味。
+             */
             odds_missing: boolean;
             /** @description 発走時刻（netkeiba 由来文字列。欠落時 null）。 */
             post_time?: string | null;
@@ -970,6 +974,13 @@ export interface components {
              * @description 朝時点オッズで再計算したポートフォリオ ROI（#448。確率・軸・budget は現時点と同一）。
              */
             morning_roi?: number | null;
+            /**
+             * Format: int32
+             * @description 朝時点の買い目のうち**賭金が乗っているのにオッズ未取得**の脚数（#631）。`morning_at` が
+             *     `null` なら `null`。`morning_roi` の被覆率で、`unpriced_legs`（現時点）とは別物——
+             *     UI は朝ROI→現ROI を並べるので、両者が違えば**別の母集団同士の比較**になる。
+             */
+            morning_unpriced_legs?: number | null;
             /** @description 保存オッズ（#51）の有無。false のとき `bets` は必ず空。 */
             odds_available: boolean;
             partners: number[];
@@ -1001,12 +1012,13 @@ export interface components {
              */
             total_stake: number;
             /**
+             * Format: int32
              * @description **賭金が乗っているのにオッズ未取得**の脚数（#631）。
              *
              *     `roi` / `hit_prob` は priced な脚だけで算出される一方 `total_stake` は全脚の合計なので、
-             *     この値が 0 より大きいとき 2 つの数字は**別の母集団**を指す。盤で ROI をレース間比較する
-             *     ときに被覆率の差を優劣と取り違えないための注記材料。`morning_roi` 側の被覆率ではない
-             *     （こちらは `current_at` 時点の買い目に対する値）。
+             *     この値が 0 より大きいとき 2 つの数字は**別の母集団**を指す。`roi` と `total_stake` を
+             *     並べて読むときはこの値を併せて見ること。**現時点の買い目に対する値**であって
+             *     `morning_roi` の被覆率ではない（そちらは `morning_unpriced_legs`）。
              */
             unpriced_legs: number;
             venue: string;
@@ -1138,11 +1150,12 @@ export interface components {
              */
             total_stake: number;
             /**
+             * Format: int32
              * @description **賭金が乗っているのにオッズ未取得**の脚数（#631）。
              *
              *     `roi` / `hit_prob` は priced な脚だけで算出される一方 `total_stake` は全脚の合計なので、
-             *     この値が 0 より大きいとき 2 つの数字は**別の母集団**を指す。未 priced の割合はレースごとに
-             *     違うため、これを見ずに `roi` をレース間で比較すると被覆率の差を優劣と取り違える。
+             *     この値が 0 より大きいとき 2 つの数字は**別の母集団**を指す。`roi` と `total_stake` を
+             *     並べて読むときはこの値を併せて見ること。
              *     CLI（predict / predict-watch）の注記・`live_ev_snapshots.odds_missing` と同一基準。
              */
             unpriced_legs: number;

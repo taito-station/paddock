@@ -2300,7 +2300,7 @@
           },
           "odds_missing": {
             "type": "boolean",
-            "description": "一部買い目のオッズ欠落（ROI 過小評価の可能性）。"
+            "description": "賭金が乗っているのにオッズ未取得の脚があるか（#631）。**「ROI が過小評価される」ではない**\n——`roi` は priced 脚だけで分子・分母とも算出される（式は対称）。true のとき、`roi` と\n賭け計が**別の母集団**を指すという意味。"
           },
           "post_time": {
             "type": [
@@ -2968,6 +2968,15 @@
             "format": "double",
             "description": "朝時点オッズで再計算したポートフォリオ ROI（#448。確率・軸・budget は現時点と同一）。"
           },
+          "morning_unpriced_legs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "朝時点の買い目のうち**賭金が乗っているのにオッズ未取得**の脚数（#631）。`morning_at` が\n`null` なら `null`。`morning_roi` の被覆率で、`unpriced_legs`（現時点）とは別物——\nUI は朝ROI→現ROI を並べるので、両者が違えば**別の母集団同士の比較**になる。",
+            "minimum": 0
+          },
           "odds_available": {
             "type": "boolean",
             "description": "保存オッズ（#51）の有無。false のとき `bets` は必ず空。"
@@ -3047,7 +3056,8 @@
           },
           "unpriced_legs": {
             "type": "integer",
-            "description": "**賭金が乗っているのにオッズ未取得**の脚数（#631）。\n\n`roi` / `hit_prob` は priced な脚だけで算出される一方 `total_stake` は全脚の合計なので、\nこの値が 0 より大きいとき 2 つの数字は**別の母集団**を指す。盤で ROI をレース間比較する\nときに被覆率の差を優劣と取り違えないための注記材料。`morning_roi` 側の被覆率ではない\n（こちらは `current_at` 時点の買い目に対する値）。",
+            "format": "int32",
+            "description": "**賭金が乗っているのにオッズ未取得**の脚数（#631）。\n\n`roi` / `hit_prob` は priced な脚だけで算出される一方 `total_stake` は全脚の合計なので、\nこの値が 0 より大きいとき 2 つの数字は**別の母集団**を指す。`roi` と `total_stake` を\n並べて読むときはこの値を併せて見ること。**現時点の買い目に対する値**であって\n`morning_roi` の被覆率ではない（そちらは `morning_unpriced_legs`）。",
             "minimum": 0
           },
           "venue": {
@@ -3321,7 +3331,8 @@
           },
           "unpriced_legs": {
             "type": "integer",
-            "description": "**賭金が乗っているのにオッズ未取得**の脚数（#631）。\n\n`roi` / `hit_prob` は priced な脚だけで算出される一方 `total_stake` は全脚の合計なので、\nこの値が 0 より大きいとき 2 つの数字は**別の母集団**を指す。未 priced の割合はレースごとに\n違うため、これを見ずに `roi` をレース間で比較すると被覆率の差を優劣と取り違える。\nCLI（predict / predict-watch）の注記・`live_ev_snapshots.odds_missing` と同一基準。",
+            "format": "int32",
+            "description": "**賭金が乗っているのにオッズ未取得**の脚数（#631）。\n\n`roi` / `hit_prob` は priced な脚だけで算出される一方 `total_stake` は全脚の合計なので、\nこの値が 0 より大きいとき 2 つの数字は**別の母集団**を指す。`roi` と `total_stake` を\n並べて読むときはこの値を併せて見ること。\nCLI（predict / predict-watch）の注記・`live_ev_snapshots.odds_missing` と同一基準。",
             "minimum": 0
           }
         }
