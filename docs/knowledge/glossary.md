@@ -34,7 +34,7 @@ sources:
   - docs/original-docs/0080-default-allocation-yen-denominated.md
   - docs/original-docs/0086-netkeiba-unpriced-sentinel-is-not-odds.md
   - docs/original-docs/0088-bet-type-scoped-unpriced-sentinels.md
-distilled_from_sha: "4417209"
+distilled_from_sha: "6865531"
 updated: "2026-08-18"
 ---
 

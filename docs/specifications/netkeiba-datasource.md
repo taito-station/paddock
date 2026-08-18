@@ -14,7 +14,7 @@ sources:
   - docs/original-docs/0075-unsupported-race-skip-exit-zero.md
   - docs/original-docs/0086-netkeiba-unpriced-sentinel-is-not-odds.md
   - docs/original-docs/0088-bet-type-scoped-unpriced-sentinels.md
-distilled_from_sha: "b26e5cd"
+distilled_from_sha: "6865531"
 updated: "2026-08-18"
 ---
 
