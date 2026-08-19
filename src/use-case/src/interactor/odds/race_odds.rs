@@ -171,7 +171,8 @@ mod tests {
 
     use chrono::NaiveDate;
     use paddock_domain::{
-        HorseNum, OddsValue, OrderedPair, OrderedTriple, Pair, PlaceOdds, RaceId, RaceOdds, Triple,
+        BetType, HorseNum, OddsValue, OrderedPair, OrderedTriple, Pair, PlaceOdds, RaceId,
+        RaceOdds, Triple,
     };
 
     use crate::error::{Error, Result};
@@ -242,7 +243,7 @@ mod tests {
         let mut odds = RaceOdds::empty(race_id);
         odds.win.insert(
             HorseNum::try_from(1).unwrap(),
-            OddsValue::try_from(3.5).unwrap(),
+            OddsValue::try_from((BetType::Win, 3.5)).unwrap(),
         );
         odds
     }
@@ -252,8 +253,8 @@ mod tests {
         odds.place.insert(
             HorseNum::try_from(1).unwrap(),
             PlaceOdds::try_from((
-                OddsValue::try_from(1.5).unwrap(),
-                OddsValue::try_from(2.0).unwrap(),
+                OddsValue::try_from((BetType::Place, 1.5)).unwrap(),
+                OddsValue::try_from((BetType::Place, 2.0)).unwrap(),
             ))
             .unwrap(),
         );
@@ -328,7 +329,8 @@ mod tests {
     fn odds_all_types(race_id: RaceId) -> RaceOdds {
         let mut odds = odds_win_place(race_id);
         let h = |n: u32| HorseNum::try_from(n).unwrap();
-        let ov = |v: f64| OddsValue::try_from(v).unwrap();
+        // テスト値はどの券種の番兵とも重ならない正当オッズなので、ヘルパは Win 固定で包む（#630）。
+        let ov = |v: f64| OddsValue::try_from((BetType::Win, v)).unwrap();
         odds.quinella
             .insert(Pair::try_from((h(1), h(2))).unwrap(), ov(12.4));
         odds.wide.insert(

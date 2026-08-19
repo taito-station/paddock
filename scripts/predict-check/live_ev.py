@@ -156,7 +156,7 @@ def parse_wide(path):
         except ValueError:
             print(f"[warn] 数値でないワイドオッズ {o!r}（pid={pid} {pair}）をスキップ", file=sys.stderr)
             continue
-        if not is_payout_odds(ov):
+        if not is_payout_odds("wide", ov):
             continue
         d.setdefault(pid, {})[(a, b)] = ov
     return d
@@ -169,6 +169,14 @@ def parse_exotic(path):
         if not line.strip():
             continue
         pid, kind, combo, o = line.split("\t")
+        # 保存対象は quinella / trio のみ。正規の生成元（refresh_ev.sh）は SQL で
+        # bet_type IN ('quinella','trio') に絞るため、ここに来る想定外 kind は TSV の破損・
+        # 手編集・生成側の変更だけ——黙って捨てると typo が観測不能になる（#630 の未知ラベル
+        # 方針）ので warn を残して skip する。券種必須の番兵判定に未知ラベルを渡すと
+        # ValueError で全体が止まるため、判定より先に落とす。
+        if kind not in arity:
+            print(f"[warn] 想定外の kind {kind!r}（pid={pid}）をスキップ", file=sys.stderr)
+            continue
         nums = tuple(sorted(int(x) for x in combo.split("-")))
         try:
             ov = float(o)
@@ -177,12 +185,13 @@ def parse_exotic(path):
         # combination_key は "1-2"(馬連) / "1-2-3"(3連複) の '-' 区切り前提。区切り変更等で
         # 桁数が想定外になると的中判定が無言で 0 に縮退するため、警告して捨てる。
         # **番兵チェックより前**に置く——後ろだと番兵行の分だけ区切り仕様変更の検知が鈍る。
-        if len(nums) != arity.get(kind, len(nums)):
+        if len(nums) != arity[kind]:
             print(f"[warn] 想定外の組番形式 {kind}={combo}（pid={pid}）をスキップ", file=sys.stderr)
             continue
         # netkeiba の未発売番兵（99999.9 等）は払戻倍率ではない。落とさないと 1 点で EV が
         # 3 桁になり ROI が跳ねる（#621）。落とした組は「オッズ不明」＝買い目から外れる。
-        if not is_payout_odds(ov):
+        # 判定は券種別（#630）: trio の 9999.9 は正当な配当なので落とさない。
+        if not is_payout_odds(kind, ov):
             continue
         if kind == "quinella":
             qn.setdefault(pid, {})[nums] = ov

@@ -451,7 +451,7 @@ async fn predict_race_views_with_odds_returns_odds_and_diagnostics() {
             HorseNum::try_from(2u32).unwrap(),
         ))
         .unwrap(),
-        paddock_domain::OddsValue::try_from(5.0).unwrap(),
+        paddock_domain::OddsValue::try_from((paddock_domain::BetType::Quinella, 5.0)).unwrap(),
     );
     let app = interactor_with_odds(Some(card), odds);
     let race_id = RaceId::try_from(race_id_str).unwrap();
@@ -566,11 +566,11 @@ async fn predict_race_blends_market_odds_when_alpha_given() {
     let mut odds = paddock_domain::RaceOdds::empty(RaceId::try_from(race_id_str).unwrap());
     odds.win.insert(
         HorseNum::try_from(1u32).unwrap(),
-        paddock_domain::OddsValue::try_from(8.0).unwrap(), // ウマA: 人気薄
+        paddock_domain::OddsValue::try_from((paddock_domain::BetType::Win, 8.0)).unwrap(), // ウマA: 人気薄
     );
     odds.win.insert(
         HorseNum::try_from(2u32).unwrap(),
-        paddock_domain::OddsValue::try_from(1.3).unwrap(), // ウマB: 圧倒的人気
+        paddock_domain::OddsValue::try_from((paddock_domain::BetType::Win, 1.3)).unwrap(), // ウマB: 圧倒的人気
     );
     let race_id = RaceId::try_from(race_id_str).unwrap();
 
@@ -617,11 +617,11 @@ async fn predict_race_views_separates_blended_and_pure() {
     let mut odds = paddock_domain::RaceOdds::empty(RaceId::try_from(race_id_str).unwrap());
     odds.win.insert(
         HorseNum::try_from(1u32).unwrap(),
-        paddock_domain::OddsValue::try_from(8.0).unwrap(), // ウマA: 人気薄
+        paddock_domain::OddsValue::try_from((paddock_domain::BetType::Win, 8.0)).unwrap(), // ウマA: 人気薄
     );
     odds.win.insert(
         HorseNum::try_from(2u32).unwrap(),
-        paddock_domain::OddsValue::try_from(1.3).unwrap(), // ウマB: 圧倒的人気
+        paddock_domain::OddsValue::try_from((paddock_domain::BetType::Win, 1.3)).unwrap(), // ウマB: 圧倒的人気
     );
     let rid = RaceId::try_from(race_id_str).unwrap();
 

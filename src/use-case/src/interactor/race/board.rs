@@ -539,12 +539,12 @@ mod tests {
     }
 
     fn odds_with_win(pairs: &[(u32, f64)]) -> RaceOdds {
-        use paddock_domain::OddsValue;
+        use paddock_domain::{BetType, OddsValue};
         let mut o = RaceOdds::empty(RaceId::try_from("2026-1-hakodate-8-11R").unwrap());
         for (num, v) in pairs {
             o.win.insert(
                 HorseNum::try_from(*num).unwrap(),
-                OddsValue::try_from(*v).unwrap(),
+                OddsValue::try_from((BetType::Win, *v)).unwrap(),
             );
         }
         o

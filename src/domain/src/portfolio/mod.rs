@@ -661,7 +661,7 @@ fn leg_ev(
 mod tests {
     use super::*;
     use crate::horse_result::HorseName;
-    use crate::odds::{OddsValue, PlaceOdds};
+    use crate::odds::{BetType, OddsValue, PlaceOdds};
     use crate::race::RaceId;
 
     fn horse(n: u32) -> HorseNum {
@@ -679,7 +679,9 @@ mod tests {
     }
 
     fn odds(v: f64) -> OddsValue {
-        OddsValue::try_from(v).unwrap()
+        // テスト値はどの券種の番兵とも重ならない正当オッズ。非番兵値のガード結果は券種に
+        // 依らないため、ヘルパは Win 固定で包む（#630）。
+        OddsValue::try_from((BetType::Win, v)).unwrap()
     }
 
     /// 軸 = 馬1（最高 win_prob）、相手 = 馬2,3,4。全券種オッズあり。

@@ -544,6 +544,98 @@ async fn sentinel_odds_row_is_skipped_on_read(pool: sqlx::PgPool) {
 }
 
 #[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn trio_9999_9_round_trips_as_legitimate_odds(pool: sqlx::PgPool) {
+    let repo = PostgresRepository::new(pool);
+    // #630: 番兵は券種スコープ。9999.9 はワイドの番兵だが、三連複では正当な配当
+    // （9000〜11000 帯に trio 6,244 行が実在=2026-08-18 実測）。フラット判定に退行すると保存側・読み出し側の
+    // どちらでも黙って消えるので、保存 → 読み出しの往復を統合で固定する。
+    let triple = Triple::try_from((horse(2), horse(4), horse(9))).unwrap();
+    repo.save_race_odds(&RaceOddsRecord {
+        race_id: race_id(),
+        fetched_at: fetched_at(),
+        rows: vec![
+            // win は他券種の番兵値と同値でも正当なオッズとして往復する（#634: win に番兵は無い）。
+            OddsRow {
+                bet_type: "win".to_string(),
+                combination_key: "1".to_string(),
+                odds: 9_999.9,
+                odds_high: None,
+                popularity: None,
+            },
+            OddsRow::trio(triple, 9_999.9),
+        ],
+    })
+    .await
+    .unwrap();
+
+    let odds = repo
+        .find_race_odds(&race_id(), None)
+        .await
+        .unwrap()
+        .expect("有効行があるので Some");
+    let got = odds
+        .trio
+        .get(&triple)
+        .expect("三連複の 9999.9 は番兵ではないので往復できる");
+    assert!((got.value() - 9_999.9).abs() < 1e-9);
+    let win = odds
+        .win
+        .get(&horse(1))
+        .expect("win の 9999.9 は番兵ではないので往復できる（#634）");
+    assert!((win.value() - 9_999.9).abs() < 1e-9);
+}
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn save_skips_unknown_bet_type_row(pool: sqlx::PgPool) {
+    let repo = PostgresRepository::new(pool);
+    // #630: 番兵判定が券種別になったため、保存側は bet_type ラベルを解決できない行を
+    // 番兵ガードに通せず、warn+skip で書かない（読み出し側の「未知は読み飛ばす」と対）。
+    // ガードが退行して未知行が INSERT に届くと DB の bet_type CHECK 制約で save 全体が
+    // Err になるので、このテストは「他の正常行を巻き添えにしない」ことまで固定している。
+    repo.save_race_odds(&RaceOddsRecord {
+        race_id: race_id(),
+        fetched_at: fetched_at(),
+        rows: vec![
+            OddsRow {
+                bet_type: "win".to_string(),
+                combination_key: "1".to_string(),
+                odds: 3.5,
+                odds_high: None,
+                popularity: None,
+            },
+            OddsRow {
+                bet_type: "tansho".to_string(),
+                combination_key: "2".to_string(),
+                odds: 4.2,
+                odds_high: None,
+                popularity: None,
+            },
+        ],
+    })
+    .await
+    .unwrap();
+
+    let kinds: Vec<String> =
+        sqlx::query_scalar("SELECT bet_type FROM race_odds WHERE race_id = $1")
+            .bind(race_id().value())
+            .fetch_all(&repo.pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        kinds,
+        vec!["win".to_string()],
+        "未知 bet_type 行だけが落ち、正常行は保存される"
+    );
+    let snap: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM race_odds_snapshots WHERE race_id = $1")
+            .bind(race_id().value())
+            .fetch_one(&repo.pool)
+            .await
+            .unwrap();
+    assert_eq!(snap, 1, "snapshots 側にも未知 bet_type 行は積まれない");
+}
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
 async fn save_skips_row_with_invalid_odds_high(pool: sqlx::PgPool) {
     let repo = PostgresRepository::new(pool);
     // 下限は有効だが上限が値域違反（odds_high=0.0）の複勝行。保存ガード `classify_row` が

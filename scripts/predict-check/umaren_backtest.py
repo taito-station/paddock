@@ -223,12 +223,14 @@ def parse_exotic(path):
         # netkeiba の未発売番兵（99999.9 等）は払戻倍率ではないので採用しない（#621）。
         # 数値でない行は別扱いで警告する（従来は float() が ValueError で落としていた。
         # 番兵と同じく黙って捨てると、TSV 生成側の破損に気づけなくなる）。
+        # bt は上の既知 3 券種フィルタを通過済みなので、券種必須の is_payout_odds（未知
+        # ラベルは ValueError・#630）にここから未知ラベルが到達することはない。
         try:
             float(odds)
         except ValueError:
             print(f"[warn] 数値でないオッズ {odds!r}（pid={pid} {bt} {key}）をスキップ", file=sys.stderr)
             continue
-        if not is_payout_odds(odds):
+        if not is_payout_odds(bt, odds):
             continue
         slot = out.setdefault(pid, {"quinella": {}, "trio": {}, "exacta": {}})
         if bt == "exacta":

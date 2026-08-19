@@ -165,49 +165,49 @@ fn rows_to_race_odds(race_id: &RaceId, rows: Vec<OddsRow>) -> Result<Option<Race
         match bet_type {
             BetType::Win => {
                 let horse_num = parse_horse_num(race_id, &row.combination_key)?;
-                let Some(v) = parse_odds_value(race_id, &row, row.odds) else {
+                let Some(v) = parse_odds_value(race_id, &row, bet_type, row.odds) else {
                     continue;
                 };
                 odds.win.insert(horse_num, v);
             }
             BetType::Place => {
                 let horse_num = parse_horse_num(race_id, &row.combination_key)?;
-                let Some(band) = parse_band(race_id, &row)? else {
+                let Some(band) = parse_band(race_id, &row, bet_type)? else {
                     continue;
                 };
                 odds.place.insert(horse_num, band);
             }
             BetType::Quinella => {
                 let pair = parse_key(race_id, &row, Pair::from_key)?;
-                let Some(v) = parse_odds_value(race_id, &row, row.odds) else {
+                let Some(v) = parse_odds_value(race_id, &row, bet_type, row.odds) else {
                     continue;
                 };
                 odds.quinella.insert(pair, v);
             }
             BetType::Wide => {
                 let pair = parse_key(race_id, &row, Pair::from_key)?;
-                let Some(band) = parse_band(race_id, &row)? else {
+                let Some(band) = parse_band(race_id, &row, bet_type)? else {
                     continue;
                 };
                 odds.wide.insert(pair, band);
             }
             BetType::Exacta => {
                 let pair = parse_key(race_id, &row, OrderedPair::from_key)?;
-                let Some(v) = parse_odds_value(race_id, &row, row.odds) else {
+                let Some(v) = parse_odds_value(race_id, &row, bet_type, row.odds) else {
                     continue;
                 };
                 odds.exacta.insert(pair, v);
             }
             BetType::Trio => {
                 let triple = parse_key(race_id, &row, Triple::from_key)?;
-                let Some(v) = parse_odds_value(race_id, &row, row.odds) else {
+                let Some(v) = parse_odds_value(race_id, &row, bet_type, row.odds) else {
                     continue;
                 };
                 odds.trio.insert(triple, v);
             }
             BetType::Trifecta => {
                 let triple = parse_key(race_id, &row, OrderedTriple::from_key)?;
-                let Some(v) = parse_odds_value(race_id, &row, row.odds) else {
+                let Some(v) = parse_odds_value(race_id, &row, bet_type, row.odds) else {
                     continue;
                 };
                 odds.trifecta.insert(triple, v);
@@ -221,8 +221,17 @@ fn rows_to_race_odds(race_id: &RaceId, rows: Vec<OddsRow>) -> Result<Option<Race
 /// 未公開組合せ 0 埋め残骸など）はレース・セッション全体を止めず、race_id/券種/キー付きの warn を
 /// 残して `None`（=その行を読み飛ばす）を返す(#114)。combination_key の不正（[`parse_key`]）とは
 /// 切り分け、こちらは保存側に残った無効値への耐性。
-fn parse_odds_value(race_id: &RaceId, row: &OddsRow, value: f64) -> Option<OddsValue> {
-    match OddsValue::try_from(value) {
+///
+/// 番兵判定は券種スコープ（#630）: `bet_type` は呼び出し元 `rows_to_race_odds` が行ラベルから
+/// 解決済みのものを受け取る。**既に DB にある番兵行の無害化も券種別になる**——三連複の正当な
+/// `9999.9` は読めるようになり、ワイドの `9999.9` は引き続き落ちる。
+fn parse_odds_value(
+    race_id: &RaceId,
+    row: &OddsRow,
+    bet_type: BetType,
+    value: f64,
+) -> Option<OddsValue> {
+    match OddsValue::try_from((bet_type, value)) {
         Ok(v) => Some(v),
         // 未発売の番兵（#621）は**異常ではない**——「まだ売れていない」という正常な状態で、
         // 1 レースに数百件出る（実測: 三連複 560 点中 190 点）。warn で出すと本来の値域違反が
@@ -289,7 +298,7 @@ fn parse_key<T>(
 /// 見るため、`odds` が値域違反かつ `odds_high` も NULL の行は skip ではなく stop になる（構造不正の
 /// 早期検知を優先）。実害は無い: 実在する 0 埋め残骸は scalar の三連単で band 券種ではないため、
 /// band でこの組合せが起きるのは想定しない異常データであり、その場合は黙って消すより stop が安全。
-fn parse_band(race_id: &RaceId, row: &OddsRow) -> Result<Option<PlaceOdds>> {
+fn parse_band(race_id: &RaceId, row: &OddsRow, bet_type: BetType) -> Result<Option<PlaceOdds>> {
     let high = row.odds_high.ok_or_else(|| {
         Error::Data(format!(
             "race_odds {} 行 (race_id={}, key={}) の odds_high が NULL です",
@@ -299,10 +308,10 @@ fn parse_band(race_id: &RaceId, row: &OddsRow) -> Result<Option<PlaceOdds>> {
         ))
     })?;
     // low を先に評価して早期 return することで、下限・上限の両方が値域違反でも warn は 1 行に抑える。
-    let Some(low) = parse_odds_value(race_id, row, row.odds) else {
+    let Some(low) = parse_odds_value(race_id, row, bet_type, row.odds) else {
         return Ok(None);
     };
-    let Some(high) = parse_odds_value(race_id, row, high) else {
+    let Some(high) = parse_odds_value(race_id, row, bet_type, high) else {
         return Ok(None);
     };
     PlaceOdds::try_from((low, high)).map(Some).map_err(|e| {

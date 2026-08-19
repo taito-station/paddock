@@ -381,22 +381,24 @@ def load_odds(tsv_text):
             print(f"[warn] odds の想定外の列数 {len(cells)} をスキップ: {line[:80]}", file=sys.stderr)
             continue
         rid, bt, key, odds, odds_high, fetched = cells
+        # try は float 変換だけに絞る。券種必須の番兵判定（#630）を try に入れると、未知ラベルの
+        # ValueError が数値破損と同じ「無警告 skip」に畳まれ、odds_guard の設計（未知ラベル=バグ
+        # →止める）がこの経路だけ静かに崩れる。TSV の bet_type は DB の CHECK 制約下なので、
+        # クラッシュで顕在化するのはプログラム誤りだけ。
         try:
             low = float(odds)
-            # 番兵（99999.9 等）は払戻倍率ではないので採用しない（#621）。band は**中点化の前**に
-            # 見る——中点にすると番兵と実値の平均になって検知できなくなる。
-            if not is_payout_odds(low):
-                continue
-            o = low
-            if odds_high:
-                high = float(odds_high)
-                if not is_payout_odds(high):
-                    continue
-                o = (low + high) / 2.0
+            high = float(odds_high) if odds_high else None
         except ValueError:
             continue
-        if o <= 0:
+        # 番兵（99999.9 等）は払戻倍率ではないので採用しない（#621）。band は**中点化の前**に
+        # 見る——中点にすると番兵と実値の平均になって検知できなくなる。判定は券種別（#630）。
+        if not is_payout_odds(bt, low):
             continue
+        o = low
+        if high is not None:
+            if not is_payout_odds(bt, high):
+                continue
+            o = (low + high) / 2.0
         out[rid][fetched][bt][key] = o
     return out
 

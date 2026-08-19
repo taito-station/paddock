@@ -92,7 +92,9 @@ mod tests {
         HorseNum::try_from(n).unwrap()
     }
     fn ov(v: f64) -> OddsValue {
-        OddsValue::try_from(v).unwrap()
+        // テスト値はどの券種の番兵とも重ならない正当オッズ。非番兵値のガード結果は券種に
+        // 依らないため、ヘルパは Win 固定で包む（#630）。
+        OddsValue::try_from((BetType::Win, v)).unwrap()
     }
     fn rid() -> RaceId {
         RaceId::try_from("2026-3-nakayama-8-1R").unwrap()
