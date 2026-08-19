@@ -25,11 +25,13 @@ const UNPRICED_OBSERVATION_TTL: Duration = Duration::minutes(15);
 /// 従来どおり次回すぐ取り直される（#294 の自己修復を鈍らせない）。
 ///
 /// 安全側の絞り込みが 2 つある。どちらも「判断に迷ったら取り直す」向きに倒してある:
-/// - **単勝・複勝の観測は無視する**。本番の書き込み経路は組合せ 5 券種しか記録しないが、
+/// - **単勝の観測は無視する**。本番の書き込み経路は組合せ 5 券種しか記録しないが、
 ///   仮に `win` の観測行が入ると単勝の欠落を免除してしまい、`race_odds()` が win 空の
 ///   スナップショットを cache-hit で返す（fetch-card が degraded 分岐で明示的に避けている
 ///   「オッズ有り・win 無し」の再現）。DB の CHECK は語彙統一のため 7 値を許しているので、
-///   ここで読み側の防御を効かせる。
+///   ここで読み側の防御を効かせる。**複勝は除外しない**——`missing_bet_types()` が `Place` を
+///   返さないため（`is_complete()` と同じ券種集合）、`fresh` 側に混ざっても
+///   `missing.is_subset(&fresh)` の結果を変えず、除外しても実効が無いから。
 /// - **未来時刻の観測は stale 扱いにする**。時計のズレやダンプ復元で `observed_at` が未来に
 ///   なると、単純な差分比較では無条件に fresh と判定されて再取得が止まる。gateway 側が
 ///   「壊れた `observed_at` は読み飛ばす＝取り直すほうが安全」としているのと向きを揃える。
@@ -43,7 +45,7 @@ fn is_cache_fresh(
     }
     let fresh: BTreeSet<BetType> = unpriced
         .iter()
-        .filter(|o| !matches!(o.bet_type, BetType::Win | BetType::Place))
+        .filter(|o| o.bet_type != BetType::Win)
         .filter(|o| {
             let age = now.signed_duration_since(o.observed_at);
             age >= Duration::zero() && age < UNPRICED_OBSERVATION_TTL
@@ -57,8 +59,11 @@ impl<O: OddsScraper, R: OddsRepository> OddsInteractor<O, R> {
     /// race_id のオッズを read-through で取得する（#51, ADR 0010 / #294）。
     ///
     /// 1. `race_odds` に保存済みが complete（win + 組合せ 5 券種）なら、再スクレイプせずそれを返す。
-    /// 2. complete でなければライブスクレイプし、取得した全券種(#38)を保存してフルのオッズを返す。
+    ///    **欠けている券種が TTL 15 分以内の「未発売と確認できた」観測にすべて収まる場合も
+    ///    cache-hit にする**（#632。券種まるごと未発売の時間帯で毎回フルスクレイプが走るのを止める）。
+    /// 2. どちらでもなければライブスクレイプし、取得した全券種(#38)を保存してフルのオッズを返す。
     ///    保存はその回の買い目には影響させない（exotic も含めて返す）。
+    ///    スクレイプできた回は未発売の観測も更新する（#632）。
     ///
     /// 取得できれば `Some(odds)`、未取得なら `None`。「未取得」は次の 2 つを束ねる:
     /// - スクレイプ失敗（サイト改変・開催日外・ネットワーク等）→ warn ログを出して `None`
@@ -119,8 +124,11 @@ impl<O: OddsScraper, R: OddsRepository> OddsInteractor<O, R> {
             }
             Ok(scraped) => {
                 // 取得できた全券種を永続化（#38）。保存失敗は予想を止めず warn のみ。
-                self.persist_all(race_id, &scraped.odds).await;
-                self.record_unpriced(race_id, &scraped).await;
+                // 保存できた回だけ観測を更新する（保存に失敗した回にマークだけ立てると、
+                // 古いスナップショットを TTL のあいだ cache-hit で返し続ける）。
+                if self.persist_all(race_id, &scraped.odds).await {
+                    self.record_unpriced(race_id, &scraped).await;
+                }
                 // フルのオッズはその回の買い目にそのまま使う。
                 Ok(Some(scraped.odds))
             }
@@ -147,11 +155,13 @@ impl<O: OddsScraper, R: OddsRepository> OddsInteractor<O, R> {
                 Ok(None)
             }
             Ok(scraped) => {
-                self.persist_all(race_id, &scraped.odds).await;
                 // 監視経路は cache を見ないが、観測は同じように記録する（#632）。発売開始を
                 // 最初に観測するのは 5 分毎に回る predict-watch であることが多く、ここで
                 // マークを消しておくと read-through 側も次回すぐ取り直せる。
-                self.record_unpriced(race_id, &scraped).await;
+                // 保存できた回だけ更新するのは read-through 経路と同じ理由。
+                if self.persist_all(race_id, &scraped.odds).await {
+                    self.record_unpriced(race_id, &scraped).await;
+                }
                 Ok(Some(scraped.odds))
             }
             Err(e) => {
@@ -175,7 +185,8 @@ impl<O: OddsScraper, R: OddsRepository> OddsInteractor<O, R> {
                 Ok(None)
             }
             Ok(odds) => {
-                self.persist_all(race_id, &odds).await;
+                // 単複のみの経路は組合せ券種を観測しないので、保存の成否で分岐する必要は無い。
+                let _ = self.persist_all(race_id, &odds).await;
                 Ok(Some(odds))
             }
             Err(e) => {
@@ -188,7 +199,12 @@ impl<O: OddsScraper, R: OddsRepository> OddsInteractor<O, R> {
     /// スクレイプで得た全券種のオッズを `race_odds` に保存する。複勝・ワイドは幅 odds
     /// （下限=odds, 上限=odds_high）。スクレイプ由来は人気を持たないため popularity は None。
     /// 保存失敗は予想フローを止めず warn ログのみ（次回参照時に取り直せる）。
-    async fn persist_all(&self, race_id: &RaceId, odds: &RaceOdds) {
+    ///
+    /// **保存できたかどうかを返す**（#632）。失敗した回に未発売の観測だけを記録すると、
+    /// 「古いスナップショット ＋ 新しいマーク」で TTL のあいだ古い値を cache-hit で返し続ける
+    /// ——本 PR 自身の「迷ったら取り直す」原則に反するので、呼び出し側で観測記録を見送る。
+    /// 保存する行が 1 つも無い場合も `false`（保存していないので観測も残さない）。
+    async fn persist_all(&self, race_id: &RaceId, odds: &RaceOdds) -> bool {
         let capacity = odds.win.len()
             + odds.place.len()
             + odds.quinella.len()
@@ -224,7 +240,7 @@ impl<O: OddsScraper, R: OddsRepository> OddsInteractor<O, R> {
             rows.push(OddsRow::trifecta(*triple, ov.value()));
         }
         if rows.is_empty() {
-            return;
+            return false;
         }
         let record = RaceOddsRecord {
             race_id: race_id.clone(),
@@ -233,7 +249,9 @@ impl<O: OddsScraper, R: OddsRepository> OddsInteractor<O, R> {
         };
         if let Err(e) = self.repository.save_race_odds(&record).await {
             tracing::warn!(race_id = %race_id, error = %e, "race_odds の保存に失敗（予想は継続）");
+            return false;
         }
+        true
     }
 
     /// 1 回のスクレイプ観測から「未発売と確認できた券種」を記録する（#632）。
@@ -270,8 +288,9 @@ impl<O: OddsScraper, R: OddsRepository> OddsInteractor<O, R> {
             return;
         }
         // 何を未発売と判断したかを残す。判定が「priced が 0 件か」である以上、netkeiba の
-        // JSON 形式変更でパースが全滅しても「未発売」に見える——その場合ここに**毎回全券種**が
-        // 並ぶので、真の未発売（発売開始後に消える）と区別できる。
+        // JSON 形式変更でパースが全滅しても「未発売」に見える——その場合ここに毎回全券種が
+        // 並ぶので、真の未発売（発売開始後に消える）と切り分けられる。ただし既定のログ
+        // フィルタは info なので、切り分けには `PADDOCK_LOG=debug` が要る。
         if !scraped.unpriced.is_empty() {
             tracing::debug!(
                 race_id = %race_id,
@@ -346,6 +365,8 @@ mod tests {
         preset: Option<RaceOdds>,
         saved: Mutex<Vec<RaceOddsRecord>>,
         unpriced: Mutex<Vec<UnpricedObservation>>,
+        /// true なら `save_race_odds` が失敗する（保存失敗時に観測を残さないことの検証用）。
+        save_fails: bool,
     }
 
     impl FakeRepo {
@@ -377,6 +398,9 @@ mod tests {
             Ok(self.preset.clone())
         }
         async fn save_race_odds(&self, record: &RaceOddsRecord) -> Result<()> {
+            if self.save_fails {
+                return Err(Error::Internal("save failed".into()));
+            }
             self.saved.lock().unwrap().push(record.clone());
             Ok(())
         }
@@ -545,6 +569,65 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn all_empty_scrape_records_no_observation() {
+        // ADR 0089「影響」の残存ケース。単勝すら未公開のレースは「まだ何も公開されていない」で
+        // あって券種ごとの発売有無を確認できたわけではないので、観測を残してはいけない。
+        // ここで捨てないと、全 5 券種に未発売マークが立つ＝決定 4 が「最も危険」と名指しした解釈。
+        // 分岐を通るテストが無いと、将来 record_unpriced をこの分岐の前へ動かす整理で静かに壊れる。
+        let scraper = FakeScraper::with_unpriced(
+            |rid| Ok(RaceOdds::empty(rid.clone())),
+            &[
+                BetType::Quinella,
+                BetType::Wide,
+                BetType::Exacta,
+                BetType::Trio,
+                BetType::Trifecta,
+            ],
+        );
+        let interactor = OddsInteractor::new(scraper, FakeRepo::default());
+
+        assert!(interactor.race_odds(&race_id()).await.unwrap().is_none());
+        assert!(
+            interactor.repository.unpriced.lock().unwrap().is_empty(),
+            "全券種が空のスクレイプでは観測を残さない"
+        );
+
+        assert!(
+            interactor
+                .refresh_race_odds(&race_id())
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            interactor.repository.unpriced.lock().unwrap().is_empty(),
+            "監視経路でも同じ"
+        );
+    }
+
+    #[tokio::test]
+    async fn failed_persist_skips_observation_recording() {
+        // 保存に失敗した回にマークだけ立てると、「古いスナップショット ＋ 新しいマーク」で
+        // TTL のあいだ古い値を cache-hit で返し続ける。「迷ったら取り直す」に倒す。
+        let scraper = FakeScraper::with_unpriced(
+            |rid| Ok(odds_without_trio_trifecta(rid.clone())),
+            &[BetType::Trio, BetType::Trifecta],
+        );
+        let repo = FakeRepo {
+            save_fails: true,
+            ..Default::default()
+        };
+        let interactor = OddsInteractor::new(scraper, repo);
+
+        interactor.race_odds(&race_id()).await.unwrap();
+
+        assert!(
+            interactor.repository.unpriced.lock().unwrap().is_empty(),
+            "保存に失敗した回は観測を記録しない"
+        );
+    }
+
+    #[tokio::test]
     async fn refresh_records_unpriced_observations() {
         // ADR 0089 決定 9: 監視経路（predict-watch）でも観測を記録する。発売開始を最初に
         // 観測するのは 5 分毎に回る監視であることが多く、ここでマークを更新しないと
@@ -591,8 +674,8 @@ mod tests {
     }
 
     #[test]
-    fn is_cache_fresh_ignores_win_and_place_observations() {
-        // 単勝・複勝の観測は本番経路では書かれないが、DB の CHECK は語彙統一のため 7 値を
+    fn is_cache_fresh_ignores_win_observations() {
+        // 単勝の観測は本番経路では書かれないが、DB の CHECK は語彙統一のため 7 値を
         // 許している。仮に win の観測行が入っても単勝の欠落を免除しないことの防御テスト
         // （免除すると win 空のスナップショットを cache-hit で返してしまう）。
         let mut saved = odds_all_types(race_id());

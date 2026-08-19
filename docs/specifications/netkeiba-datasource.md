@@ -264,7 +264,12 @@ Rust 側は golden を const と完全一致（券種・値・順序）で突き
     `fetch-card` 自身は観測を残さないので、そこは従来どおり取り直す（ADR 0089「影響」）。
   - 観測は専用表 `race_odds_unpriced_observations(race_id, bet_type, observed_at)` に置く
     （番兵はオッズではないので `race_odds` に入れない・ADR 0086 決定 1/3）。priced が取れた券種の
-    マークは同一トランザクションで削除する。
+    マークは同一トランザクションで削除する。**保存（`save_race_odds`）に失敗した回は観測を
+    記録しない**——古いスナップショットに新しいマークが付くと TTL のあいだ古い値を返し続ける。
+  - **記録するのは read-through（`race_odds`）と `predict-watch`（`refresh_race_odds`）の 2 経路**。
+    監視側は cache を見ないが同じ観測を残す。5 分毎に回る監視が**発売開始を最初に観測して
+    マークを消す**のが通常で、これにより read-through 側も次回すぐ取り直せる。
+    `fetch-card` は `assemble_netkeiba` を通らないので記録しない。
   - **TTL 15 分＝発売開始に気づくまでの最大遅れ**。発走直前の鮮度は `predict-watch`
     （read-through を通らず毎回再取得・#257）が担保するので判断には影響しない。
   - **`is_complete()` の意味は変えていない**（priced が全券種そろっているか）。したがって
@@ -361,7 +366,7 @@ JRA 版スクレイパーは ADR 0048 で退役したが、そこで確立した
 | **単複オッズ**の取得失敗（transient・リトライ後も残る） | **degraded**。オッズ保存をまるごとスキップし exit 3（出馬表・近走は保存済み）。ADR 0049 |
 | **単複オッズ**の取得失敗（4xx 等の非 transient） | 同じく degraded 分岐（オッズ未保存・exit 3）。netkeiba に 403/404=absent の概念が無いため 4xx も「取れなかった」として扱う |
 | **組合せ券種オッズ**の取得失敗 | warn して単複のみ保存・**exit 0**。`is_complete()` が false なので次回再取得で埋まる（失敗券種に未発売マークは付かないので TTL で遅れない・ADR 0089） |
-| **組合せ券種オッズ**が未発売（番兵のみ / 0 行） | 当該券種を「未発売と確認」として `race_odds_unpriced_observations` に記録。read-through は TTL 15 分のあいだ取り直さない。ADR 0089 |
+| **組合せ券種オッズ**が未発売（番兵のみ / 0 行） | fetch-card は通常どおり単複のみ保存して **exit 0**（未発売は best-effort）。**未発売の観測記録は fetch-card では行わない**——`assemble_netkeiba` を通らないため。記録するのは read-through / `predict-watch` 経路（下記 read-through 節・ADR 0089） |
 | **出馬表**ページの取得失敗（card 取得段） | `call_with_retry` のリトライ後も残ればハード失敗（exit 1）。degraded にはしない |
 | **近走取り込み段**の取得失敗（出馬表・馬ページとも） | warn + skip して `shutuba_failed` / `horses_failed` に計上。**exit 0 のまま**（best-effort）。前走フォーム特徴量が欠けるので、ログの失敗件数を見る |
 | EUC-JP 不正バイト | `encoding_rs` の置換に委ね、可能な範囲で parse を継続 |
