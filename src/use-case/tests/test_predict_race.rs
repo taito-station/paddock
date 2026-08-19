@@ -272,6 +272,23 @@ impl OddsRepository for MockRepo {
     async fn count_race_odds_snapshots_before(&self, _: chrono::NaiveDate) -> Result<u64> {
         Ok(0)
     }
+    async fn find_unpriced_bet_types(
+        &self,
+        _: &RaceId,
+    ) -> Result<Vec<paddock_use_case::repository::UnpricedObservation>> {
+        Ok(Vec::new())
+    }
+    async fn record_unpriced_bet_types(
+        &self,
+        _: &RaceId,
+        _: &std::collections::BTreeSet<paddock_domain::BetType>,
+        _: &std::collections::BTreeSet<paddock_domain::BetType>,
+        _: chrono::DateTime<chrono::Utc>,
+    ) -> Result<()> {
+        // 記録内容を検証しないダブルなので no-op（unimplemented!() だと将来この経路を
+        // 踏んだ瞬間に無関係な panic でテストが落ちる）。
+        Ok(())
+    }
 }
 
 fn interactor(card: Option<RaceCard>) -> Interactor<MockRepo> {

@@ -6,7 +6,7 @@ pub use bet_type::BetType;
 pub use combination::{OrderedPair, OrderedTriple, Pair, Triple};
 pub use odds_value::{OddsValue, PlaceOdds};
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 use crate::horse_result::HorseNum;
 use crate::race::RaceId;
@@ -71,16 +71,43 @@ impl RaceOdds {
     ///
     /// 組合せ 5 券種すべてを要求するのは「健全なスクレイプが返すフルの形」を完全性の基準にするため
     /// （買い目に使わない馬単・三連単も api-server 配信や将来用途のため欠落を検知して取り直す）。
-    /// 副作用として、JRA が一部の組合せ券種を発売しない極小頭数レースでは常に false になり
-    /// read-through で毎回再スクレイプするが、`race_odds` は UPSERT で行が肥大せず呼び出しも
-    /// 1 レース 1 回程度のため許容する（#294 影響: 低。詳細は OddsInteractor::race_odds のコメント）。
+    ///
+    /// 本判定は**券種が実際に発売されているかを知らない**。JRA が売らない券種や発売開始前の
+    /// 時間帯では永久に false になるため、read-through の cache-hit をこれ単体で決めてはいけない
+    /// （毎回再スクレイプになる・#632）。「欠けているが未発売と確認済み」を差し引く責務は
+    /// use-case 層（`OddsInteractor::race_odds`）が持つ。本メソッドの意味は
+    /// 「priced な行が全券種そろっているか」のまま据え置き、`find_race_odds_morning` の
+    /// 「朝時点＝最初にフル盤が成立した snapshot」判定はこの意味に依存している（ADR 0088）。
     pub fn is_complete(&self) -> bool {
-        !self.win.is_empty()
-            && !self.quinella.is_empty()
-            && !self.wide.is_empty()
-            && !self.exacta.is_empty()
-            && !self.trio.is_empty()
-            && !self.trifecta.is_empty()
+        self.missing_bet_types().is_empty()
+    }
+
+    /// `is_complete()` が要求する券種のうち、priced な行を 1 つも持たないものを返す（#632）。
+    ///
+    /// read-through の cache-hit 判定で「欠けている券種が未発売と確認済みの集合に収まるか」を
+    /// 突き合わせるために使う。`is_complete()` と同じ券種集合を見る（`place` は含めない）ので、
+    /// 両者の判定基準がズレない（second source を作らない）。
+    pub fn missing_bet_types(&self) -> BTreeSet<BetType> {
+        let mut missing = BTreeSet::new();
+        if self.win.is_empty() {
+            missing.insert(BetType::Win);
+        }
+        if self.quinella.is_empty() {
+            missing.insert(BetType::Quinella);
+        }
+        if self.wide.is_empty() {
+            missing.insert(BetType::Wide);
+        }
+        if self.exacta.is_empty() {
+            missing.insert(BetType::Exacta);
+        }
+        if self.trio.is_empty() {
+            missing.insert(BetType::Trio);
+        }
+        if self.trifecta.is_empty() {
+            missing.insert(BetType::Trifecta);
+        }
+        missing
     }
 }
 
@@ -146,5 +173,62 @@ mod tests {
     #[test]
     fn is_complete_false_for_empty() {
         assert!(!RaceOdds::empty(rid()).is_complete());
+    }
+
+    #[test]
+    fn missing_bet_types_never_includes_place() {
+        // **use-case 側の安全性がこの不変条件に乗っている**（#632）。`is_cache_fresh` は
+        // 未発売観測から `Win` だけを除外し `Place` は素通しにしているが、それが安全なのは
+        // 「`missing` に `Place` が入らないので `fresh` 側に混ざっても is_subset を変えない」
+        // から。ここが崩れると、複勝の観測が欠落を免除して cache-hit を通してしまう。
+        // 複勝が空でも埋まっていても `Place` は出ない、を両方向で固定する。
+        // （`complete_odds()` は place を入れないヘルパなので、空側はそのまま使える。）
+        let empty_place = complete_odds();
+        assert!(
+            empty_place.place.is_empty(),
+            "前提: ヘルパは place を入れない"
+        );
+        assert!(!empty_place.missing_bet_types().contains(&BetType::Place));
+        assert!(
+            empty_place.is_complete(),
+            "place は is_complete の判定対象外（ADR 0010）"
+        );
+
+        let mut filled_place = complete_odds();
+        filled_place
+            .place
+            .insert(h(1), PlaceOdds::try_from((ov(1.5), ov(2.1))).unwrap());
+        assert!(!filled_place.missing_bet_types().contains(&BetType::Place));
+
+        assert!(
+            !RaceOdds::empty(rid())
+                .missing_bet_types()
+                .contains(&BetType::Place),
+            "全券種が空でも Place は欠落として挙げない"
+        );
+    }
+
+    #[test]
+    fn missing_bet_types_lists_exactly_the_empty_cache_bet_types() {
+        let mut o = complete_odds();
+        o.trio.clear();
+        o.trifecta.clear();
+        assert_eq!(
+            o.missing_bet_types(),
+            BTreeSet::from([BetType::Trio, BetType::Trifecta])
+        );
+
+        // 空のオッズは win + 組合せ 5 券種＝6 券種すべてが欠落（place は含まない）。
+        assert_eq!(
+            RaceOdds::empty(rid()).missing_bet_types(),
+            BTreeSet::from([
+                BetType::Win,
+                BetType::Quinella,
+                BetType::Wide,
+                BetType::Exacta,
+                BetType::Trio,
+                BetType::Trifecta,
+            ])
+        );
     }
 }

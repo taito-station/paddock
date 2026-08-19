@@ -1,6 +1,8 @@
+use std::collections::BTreeSet;
+
 use chrono::{NaiveDate, NaiveTime};
 use paddock_domain::{
-    FinishingPosition, GateNum, HorseId, HorseName, HorseNum, JockeyName, OrderedPair,
+    BetType, FinishingPosition, GateNum, HorseId, HorseName, HorseNum, JockeyName, OrderedPair,
     OrderedTriple, Pair, RaceClass, ResultStatus, Surface, TimeSeconds, TrackCondition,
     TrainerName, Triple, Venue,
 };
@@ -177,6 +179,17 @@ pub struct FetchedExoticOdds {
     pub trio: Vec<FetchedComboOdds<Triple>>,
     /// 三連単（順序付きトリプル）
     pub trifecta: Vec<FetchedComboOdds<OrderedTriple>>,
+    /// **取得に成功して中身を観測できた**券種（#632）。上の各 Vec は「取得失敗」と
+    /// 「発売されていない」のどちらでも空になるため、空 Vec だけでは両者を区別できない。
+    /// 券種単位のベストエフォート（#102）を保ったまま、どの券種を実際に見たのかを
+    /// 呼び出し側へ伝える。
+    ///
+    /// **ここに載っていない券種は「未発売と確認できた」とは扱わない**（次回そのまま
+    /// 再取得する＝#294 の自己修復を保つ）。「失敗した券種」ではなく「観測できた券種」を
+    /// 持つのは、`Default`（空集合）が**最も安全な解釈＝「何も観測していない」**に
+    /// なるようにするため。逆向き（失敗集合）だと既定値が「全券種を観測して全部空だった」＝
+    /// 全券種未発売、という最も危険な解釈になる。
+    pub observed: BTreeSet<BetType>,
 }
 
 /// Port for fetching netkeiba pages used to fill in same-day runners' recent form.

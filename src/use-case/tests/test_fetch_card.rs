@@ -296,6 +296,24 @@ impl OddsRepository for RecordingRepo {
     async fn count_race_odds_snapshots_before(&self, _before: NaiveDate) -> Result<u64> {
         Ok(0)
     }
+    async fn find_unpriced_bet_types(
+        &self,
+        _race_id: &RaceId,
+    ) -> Result<Vec<paddock_use_case::repository::UnpricedObservation>> {
+        Ok(Vec::new())
+    }
+    async fn record_unpriced_bet_types(
+        &self,
+        _race_id: &RaceId,
+        _unpriced: &std::collections::BTreeSet<paddock_domain::BetType>,
+        _priced: &std::collections::BTreeSet<paddock_domain::BetType>,
+        _observed_at: chrono::DateTime<chrono::Utc>,
+    ) -> Result<()> {
+        // 記録内容を検証しないダブルなので no-op。read-through / refresh は成功スクレイプの
+        // たびに必ず呼ぶため、unimplemented!() だと将来この経路を踏んだ瞬間に無関係な
+        // panic でテストが落ちる。
+        Ok(())
+    }
 }
 
 fn race_id() -> RaceId {
@@ -373,6 +391,15 @@ async fn saves_exotic_odds_with_combination_keys() {
             OrderedTriple::try_from((h(7), h(4), h(13))).unwrap(),
             154.6,
         )],
+        observed: [
+            paddock_domain::BetType::Quinella,
+            paddock_domain::BetType::Wide,
+            paddock_domain::BetType::Exacta,
+            paddock_domain::BetType::Trio,
+            paddock_domain::BetType::Trifecta,
+        ]
+        .into_iter()
+        .collect(),
     };
     let scraper = FakeScraper::new(vec![win_odds(7, 2.6, 1)]).with_exotic(exotic);
     let interactor = CardInteractor::new(RecordingRepo::with_already(false), scraper);

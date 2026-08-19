@@ -3,7 +3,9 @@ use strum_macros::Display;
 use crate::error::Error;
 
 /// The JRA bet types covered by the odds scraper and the bet simulator.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Display)]
+// `Ord` は `BTreeSet<BetType>`（未発売と確認できた券種の集合・#632）で必要。順序は宣言順＝
+// JRA の券種並びで、意味的な優劣ではなく集合の決定的な列挙のために使う。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Display)]
 #[strum(serialize_all = "snake_case")]
 pub enum BetType {
     /// 単勝

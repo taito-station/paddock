@@ -31,7 +31,7 @@ pub use netkeiba_race_id::{
 pub use netkeiba_scraper::{
     FetchedCard, FetchedEntry, FetchedWinOdds, HorsePastRun, NetkeibaScraper, RunnerRef,
 };
-pub use odds_scraper::OddsScraper;
+pub use odds_scraper::{OddsScraper, ScrapedOdds};
 pub use paddock_domain::{HorseFactors, HorseProbability, RateTriple};
 pub use payout_fetcher::PayoutFetcher;
 pub use pdf_fetcher::{FetchProbe, PdfFetcher};
@@ -40,7 +40,7 @@ pub use repository::{
     CourseStatsRow, FetchDownload, FetchFailure, FetchRecord, FetchStatus, FinishEntry, GroupStat,
     HorseStatsRow, JockeyStatsRow, MarkStatRow, MarkStatsFilter, OddsRow, PredictBetRecord,
     PredictRaceConditionRecord, PredictSessionRecord, PredictionFilter, PredictionSearchResult,
-    PredictionSummaryRow, RaceOddsRecord, RaceResultRepository, Repository,
+    PredictionSummaryRow, RaceOddsRecord, RaceResultRepository, Repository, UnpricedObservation,
 };
 pub use result_page_fetcher::ResultPageFetcher;
 

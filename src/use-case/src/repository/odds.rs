@@ -1,4 +1,5 @@
 use core::future::Future;
+use std::collections::BTreeSet;
 
 use chrono::{DateTime, NaiveDate, Utc};
 use paddock_domain::{BetType, OrderedPair, OrderedTriple, Pair, RaceId, RaceOdds, Triple};
@@ -126,6 +127,18 @@ pub struct MorningRaceOdds {
     pub latest_at: String,
 }
 
+/// 「この券種は netkeiba 上で未発売だと確認できた」という観測 1 件（#632）。
+///
+/// `race_odds` には**入れない**（番兵は払戻倍率ではない・ADR 0086 決定 1/3）。オッズではない
+/// 観測を別テーブル `race_odds_unpriced_observations` に置くことでその決定を守りつつ、
+/// read-through が未発売の券種を取り直し続けるのを止める。
+#[derive(Debug, Clone, PartialEq)]
+pub struct UnpricedObservation {
+    pub bet_type: BetType,
+    /// 観測時刻（UTC）。use-case 層が注入する（gateway を時計から独立に保つ）。
+    pub observed_at: DateTime<Utc>,
+}
+
 /// レースオッズ（`race_odds`）の保存・取得。
 pub trait OddsRepository: Send + Sync {
     /// 1 レース分のオッズ（行単位）を upsert する。`race_odds` の主キー
@@ -164,4 +177,27 @@ pub trait OddsRepository: Send + Sync {
         &self,
         before: NaiveDate,
     ) -> impl Future<Output = Result<u64>> + Send;
+
+    /// 「未発売と確認できた券種」の観測を読み出す（#632）。read-through の cache-hit 判定で
+    /// [`RaceOdds::missing_bet_types`] の欠落を差し引くために使う。観測が無ければ空 Vec。
+    fn find_unpriced_bet_types(
+        &self,
+        race_id: &RaceId,
+    ) -> impl Future<Output = Result<Vec<UnpricedObservation>>> + Send;
+
+    /// 1 回のスクレイプ観測を記録する（#632）。
+    ///
+    /// - `unpriced`: 未発売と確認できた券種。`(race_id, bet_type)` で UPSERT し `observed_at` を更新する。
+    /// - `priced`: 今回 priced な行が取れた券種。**過去の未発売マークを DELETE する**——発売が
+    ///   始まったのに「未発売」の観測が残り続けると、次に一過性失敗でその券種が欠けたとき
+    ///   誤って cache-hit してしまうため。
+    ///
+    /// 2 つの集合は同一トランザクションで適用する（片方だけ反映された中間状態を残さない）。
+    fn record_unpriced_bet_types(
+        &self,
+        race_id: &RaceId,
+        unpriced: &BTreeSet<BetType>,
+        priced: &BTreeSet<BetType>,
+        observed_at: DateTime<Utc>,
+    ) -> impl Future<Output = Result<()>> + Send;
 }
