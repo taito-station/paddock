@@ -169,10 +169,13 @@ def parse_exotic(path):
         if not line.strip():
             continue
         pid, kind, combo, o = line.split("\t")
-        # 保存対象は quinella / trio のみ。想定外 kind は従来どおり黙って捨てる（末尾の分岐でも
-        # 保存されないが、券種必須の番兵判定（#630）に未知ラベルを渡すと ValueError で全体が
-        # 止まるため、ここで先に落とす）。
+        # 保存対象は quinella / trio のみ。正規の生成元（refresh_ev.sh）は SQL で
+        # bet_type IN ('quinella','trio') に絞るため、ここに来る想定外 kind は TSV の破損・
+        # 手編集・生成側の変更だけ——黙って捨てると typo が観測不能になる（#630 の未知ラベル
+        # 方針）ので warn を残して skip する。券種必須の番兵判定に未知ラベルを渡すと
+        # ValueError で全体が止まるため、判定より先に落とす。
         if kind not in arity:
+            print(f"[warn] 想定外の kind {kind!r}（pid={pid}）をスキップ", file=sys.stderr)
             continue
         nums = tuple(sorted(int(x) for x in combo.split("-")))
         try:

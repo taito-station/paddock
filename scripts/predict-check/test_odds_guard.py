@@ -294,6 +294,13 @@ def test_broken_sentinel_file_fails_loudly_with_the_cause():
                 assert "非有限" in str(e) and f"{path}:2" in str(e), e
                 assert shown in str(e), e
 
+        # 5b) 同一 (券種, 値) の重複行 — コピペ事故として拒否（別値の複数行は 6 で許容を確認）
+        try:
+            _load_from(d, "wide\t9999.9\nwide\t9999.9\n")
+            raise AssertionError("重複行でも落ちなかった")
+        except RuntimeError as e:
+            assert "重複" in str(e) and f"{path}:2" in str(e), e
+
         # 6) 正常系: 空行・前後空白・末尾改行なし・同一券種の複数行は従来どおり読める
         assert _load_from(d, "  wide\t 9999.9  \n\nquinella\t99999.9") == {
             "wide": (9999.9,),

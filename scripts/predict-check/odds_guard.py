@@ -101,6 +101,13 @@ def _load_sentinels():
                 f"番兵リストに非有限値: {SENTINELS_PATH}:{lineno} が {text!r}。"
                 "非有限の番兵は比較が常に偽になり、その値だけが黙って無効化される"
             )
+        # 同一 (券種, 値) の重複はコピペ事故のサイン。他の書式違反と同様に受理しない
+        # （Rust 側は const との順序込み完全一致で赤くなるが、Python 単体でも検出する）。
+        if value in sentinels.get(label, ()):
+            raise RuntimeError(
+                f"番兵リストに重複行: {SENTINELS_PATH}:{lineno} が {label} {text!r}。"
+                "同じ (券種, 値) は 1 行だけ書く"
+            )
         sentinels.setdefault(label, []).append(value)
 
     if not sentinels:
