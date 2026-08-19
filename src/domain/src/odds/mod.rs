@@ -181,14 +181,24 @@ mod tests {
         // 未発売観測から `Win` だけを除外し `Place` は素通しにしているが、それが安全なのは
         // 「`missing` に `Place` が入らないので `fresh` 側に混ざっても is_subset を変えない」
         // から。ここが崩れると、複勝の観測が欠落を免除して cache-hit を通してしまう。
-        // 複勝が空でも満杯でも `Place` は出ない、を両方向で固定する。
-        let mut empty_place = complete_odds();
-        empty_place.place.clear();
+        // 複勝が空でも埋まっていても `Place` は出ない、を両方向で固定する。
+        // （`complete_odds()` は place を入れないヘルパなので、空側はそのまま使える。）
+        let empty_place = complete_odds();
+        assert!(
+            empty_place.place.is_empty(),
+            "前提: ヘルパは place を入れない"
+        );
         assert!(!empty_place.missing_bet_types().contains(&BetType::Place));
         assert!(
             empty_place.is_complete(),
             "place は is_complete の判定対象外（ADR 0010）"
         );
+
+        let mut filled_place = complete_odds();
+        filled_place
+            .place
+            .insert(h(1), PlaceOdds::try_from((ov(1.5), ov(2.1))).unwrap());
+        assert!(!filled_place.missing_bet_types().contains(&BetType::Place));
 
         assert!(
             !RaceOdds::empty(rid())

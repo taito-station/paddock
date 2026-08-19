@@ -124,11 +124,8 @@ impl<O: OddsScraper, R: OddsRepository> OddsInteractor<O, R> {
             }
             Ok(scraped) => {
                 // 取得できた全券種を永続化（#38）。保存失敗は予想を止めず warn のみ。
-                // 保存できた回だけ観測を更新する（保存に失敗した回にマークだけ立てると、
-                // 古いスナップショットを TTL のあいだ cache-hit で返し続ける）。
-                if self.persist_all(race_id, &scraped.odds).await {
-                    self.record_unpriced(race_id, &scraped).await;
-                }
+                let saved = self.persist_all(race_id, &scraped.odds).await;
+                self.record_unpriced(race_id, &scraped, saved).await;
                 // フルのオッズはその回の買い目にそのまま使う。
                 Ok(Some(scraped.odds))
             }
@@ -158,10 +155,8 @@ impl<O: OddsScraper, R: OddsRepository> OddsInteractor<O, R> {
                 // 監視経路は cache を見ないが、観測は同じように記録する（#632）。発売開始を
                 // 最初に観測するのは 5 分毎に回る predict-watch であることが多く、ここで
                 // マークを消しておくと read-through 側も次回すぐ取り直せる。
-                // 保存できた回だけ更新するのは read-through 経路と同じ理由。
-                if self.persist_all(race_id, &scraped.odds).await {
-                    self.record_unpriced(race_id, &scraped).await;
-                }
+                let saved = self.persist_all(race_id, &scraped.odds).await;
+                self.record_unpriced(race_id, &scraped, saved).await;
                 Ok(Some(scraped.odds))
             }
             Err(e) => {
@@ -259,7 +254,13 @@ impl<O: OddsScraper, R: OddsRepository> OddsInteractor<O, R> {
     /// priced が取れた券種は同時にマークを消す（発売開始の反映）。`persist_all` と同じく
     /// **保存失敗は予想フローを止めず warn のみ**——マークが無い状態は「毎回取り直す」という
     /// 修正前の挙動に戻るだけで、判断を誤らせる方向には倒れない。
-    async fn record_unpriced(&self, race_id: &RaceId, scraped: &ScrapedOdds) {
+    ///
+    /// `odds_saved` はオッズの保存に成功したか。**false のときは未発売マークを新しく立てない**
+    /// ——古いスナップショットに新しいマークが付くと TTL のあいだ古い値を cache-hit で返し続ける。
+    /// 一方 **priced 券種のマーク削除は保存の成否によらず行う**: 削除は「次回取り直す」方向に
+    /// しか働かないので、見送ると発売開始を検知できないまま古い判断が TTL 分残る（どちらの
+    /// 分岐も「迷ったら取り直す」に倒す）。
+    async fn record_unpriced(&self, race_id: &RaceId, scraped: &ScrapedOdds, odds_saved: bool) {
         // priced 側は「今回オッズが取れた券種」。unpriced と重ならないことは assemble 側の
         // 判定（priced 0 件のときだけ unpriced）が保証する。
         let priced: BTreeSet<BetType> = [
@@ -272,12 +273,18 @@ impl<O: OddsScraper, R: OddsRepository> OddsInteractor<O, R> {
         .into_iter()
         .filter_map(|(bet_type, has_rows)| has_rows.then_some(bet_type))
         .collect();
-        if scraped.unpriced.is_empty() && priced.is_empty() {
+        // 保存できなかった回は新しいマークを立てない（削除だけ通す）。
+        let unpriced = if odds_saved {
+            scraped.unpriced.clone()
+        } else {
+            BTreeSet::new()
+        };
+        if unpriced.is_empty() && priced.is_empty() {
             return;
         }
         if let Err(e) = self
             .repository
-            .record_unpriced_bet_types(race_id, &scraped.unpriced, &priced, Utc::now())
+            .record_unpriced_bet_types(race_id, &unpriced, &priced, Utc::now())
             .await
         {
             tracing::warn!(
@@ -291,10 +298,10 @@ impl<O: OddsScraper, R: OddsRepository> OddsInteractor<O, R> {
         // JSON 形式変更でパースが全滅しても「未発売」に見える——その場合ここに毎回全券種が
         // 並ぶので、真の未発売（発売開始後に消える）と切り分けられる。ただし既定のログ
         // フィルタは info なので、切り分けには `PADDOCK_LOG=debug` が要る。
-        if !scraped.unpriced.is_empty() {
+        if !unpriced.is_empty() {
             tracing::debug!(
                 race_id = %race_id,
-                unpriced = ?scraped.unpriced,
+                unpriced = ?unpriced,
                 priced = ?priced,
                 "未発売と確認できた券種を記録（TTL 内は再スクレイプしない）"
             );
@@ -623,7 +630,37 @@ mod tests {
 
         assert!(
             interactor.repository.unpriced.lock().unwrap().is_empty(),
-            "保存に失敗した回は観測を記録しない"
+            "保存に失敗した回は未発売マークを新しく立てない"
+        );
+    }
+
+    #[tokio::test]
+    async fn failed_persist_still_clears_marks_for_priced_bet_types() {
+        // マーク削除は「次回取り直す」方向にしか働かないので、保存の成否によらず通す。
+        // 見送ると、発売開始したのに古いマークが残って TTL のあいだ古い判断を引きずる。
+        let scraper = FakeScraper::new(|rid| Ok(odds_all_types(rid.clone())));
+        let repo = FakeRepo {
+            save_fails: true,
+            // マークが fresh だと cache-hit してスクレイプに到達しないので、TTL 切れにして
+            // 「取り直したら発売開始していた」状況を作る。
+            ..FakeRepo::with_marks(
+                odds_without_trio_trifecta(race_id()),
+                &[BetType::Trio, BetType::Trifecta],
+                UNPRICED_OBSERVATION_TTL + Duration::minutes(1),
+            )
+        };
+        let interactor = OddsInteractor::new(scraper, repo);
+
+        interactor.race_odds(&race_id()).await.unwrap();
+
+        assert_eq!(
+            *interactor.scraper.calls.lock().unwrap(),
+            1,
+            "前提: TTL 切れなので取り直している"
+        );
+        assert!(
+            interactor.repository.unpriced.lock().unwrap().is_empty(),
+            "保存に失敗しても priced になった券種のマークは消す"
         );
     }
 

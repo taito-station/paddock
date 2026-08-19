@@ -81,6 +81,25 @@ pub async fn record_unpriced_bet_types(
     let mut tx = pool.begin().await?;
     let observed_at = observed_at.to_rfc3339();
 
+    // **DELETE を先に打つ**。同一レースを 2 プロセスが同時に観測し、片方が trio を unpriced・
+    // もう片方が trio を priced と判断すると、「INSERT で自分の行をロック → DELETE で相手の行を
+    // 待つ」交差でデッドロックしうる。全トランザクションで DELETE → INSERT の順に揃えると
+    // ロック取得順が一致して交差が起きない（unpriced と priced は排他なので順序を変えても結果は同じ）。
+    if !priced.is_empty() {
+        let labels: Vec<String> = priced.iter().map(|b| b.to_string()).collect();
+        sqlx::query(
+            r#"
+            DELETE FROM race_odds_unpriced_observations
+            WHERE race_id = $1
+              AND bet_type = ANY($2)
+            "#,
+        )
+        .bind(race_id.value())
+        .bind(&labels)
+        .execute(&mut *tx)
+        .await?;
+    }
+
     for bet_type in unpriced {
         sqlx::query(
             r#"
@@ -94,21 +113,6 @@ pub async fn record_unpriced_bet_types(
         .bind(race_id.value())
         .bind(bet_type.to_string())
         .bind(&observed_at)
-        .execute(&mut *tx)
-        .await?;
-    }
-
-    if !priced.is_empty() {
-        let labels: Vec<String> = priced.iter().map(|b| b.to_string()).collect();
-        sqlx::query(
-            r#"
-            DELETE FROM race_odds_unpriced_observations
-            WHERE race_id = $1
-              AND bet_type = ANY($2)
-            "#,
-        )
-        .bind(race_id.value())
-        .bind(&labels)
         .execute(&mut *tx)
         .await?;
     }
