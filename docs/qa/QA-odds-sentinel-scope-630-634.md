@@ -43,8 +43,9 @@
 - 観測/根拠: 本番 3 か所を実査——`assemble_netkeiba`（7 つの独立ループ＝静的に確定）/
   `save_race_odds::classify_row`（呼び出し元が `row.bet_type: String` を保持）/
   `find_race_odds::parse_odds_value・parse_band`（`rows_to_race_odds` の `match bet_type` の中）。
-  Python の差し込み 6 か所（`fetch_wide.py` / `live_ev.py`×2 / `umaren_backtest.py` /
-  `snapshot_ev_report.py`×2 / `gate_calibration.py`×2）もすべて呼び出し文脈に券種がある。
+  Python の差し込みは 5 スクリプト・8 か所（`fetch_wide.py`×1 / `live_ev.py`×2 /
+  `umaren_backtest.py`×1 / `snapshot_ev_report.py`×2 / `gate_calibration.py`×2）で、
+  すべて呼び出し文脈に券種がある。
 - 回答: **確定。全箇所で追加取得なしに券種を渡せる**。`ingest.rs` の生 f64 経路は保存境界の
   `classify_row` が券種付きになることで自動的に券種別になるため変更不要。スクレイパ側
   `parse/odds.rs` には足さない（ADR 0086 決定 2 の維持）。

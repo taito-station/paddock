@@ -43,6 +43,9 @@ SENTINEL_EPSILON = 1e-6
 # Rust の BetType（Display=snake_case）と同じ 7 ラベル。正本ファイルの検証と、公開 API の
 # 未知ラベル検出（ValueError）の両方に使う。win / place は番兵を持たないが**ラベルとしては
 # 有効**——「win に番兵は無い」と「win という券種は無い」を混同しないこと。
+# 注意: golden（netkeiba_sentinels.txt）が運ぶのは番兵を持つ券種の行だけなので、番兵の無い
+# ラベル（win / place）の綴りは機械検査で Rust と結ばれていない。Rust の BetType に券種を
+# 足したら（または綴りを変えたら）ここも同じ PR で更新する。
 VALID_BET_TYPES = ("win", "place", "quinella", "wide", "exacta", "trio", "trifecta")
 
 
@@ -125,6 +128,11 @@ def _sentinels_for(bet_type):
     return NETKEIBA_SENTINELS.get(bet_type, ())
 
 
+def _matches_sentinel(sentinels, o):
+    """float 化済みの値が番兵タプルのどれかに一致するか（epsilon 比較の単一実装）。"""
+    return any(abs(o - s) < SENTINEL_EPSILON for s in sentinels)
+
+
 def is_sentinel(bet_type, odds):
     """その券種における netkeiba の未発売番兵値か（払戻倍率として使ってはいけない値か）。
 
@@ -135,7 +143,7 @@ def is_sentinel(bet_type, odds):
         o = float(odds)
     except (TypeError, ValueError):
         return False
-    return any(abs(o - s) < SENTINEL_EPSILON for s in sentinels)
+    return _matches_sentinel(sentinels, o)
 
 
 def is_payout_odds(bet_type, odds):
@@ -152,4 +160,4 @@ def is_payout_odds(bet_type, odds):
         return False
     if not math.isfinite(o):
         return False
-    return o >= 1.0 and not any(abs(o - s) < SENTINEL_EPSILON for s in sentinels)
+    return o >= 1.0 and not _matches_sentinel(sentinels, o)

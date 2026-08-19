@@ -131,7 +131,10 @@ mod tests {
                     .split_once('\t')
                     .expect("golden は `券種<TAB>値` の 2 列");
                 (
-                    BetType::try_from(label).expect("golden の券種ラベルは snake_case の既知の値"),
+                    // label も trim する——Python 側は label/value を個別に strip しており、
+                    // `wide␣<TAB>` のような行で両言語の受理が非対称にならないよう揃える。
+                    BetType::try_from(label.trim())
+                        .expect("golden の券種ラベルは snake_case の既知の値"),
                     value.trim().parse().expect("golden の値は f64"),
                 )
             })
@@ -162,7 +165,7 @@ mod tests {
         // ——定数の書き換え事故がこの表とぶつかって赤くなるようにする。
         // 核は (Trio, 9999.9) == Ok（正当な三連複オッズ）と (Wide, 9999.9) == Err（ワイドの番兵）。
         use BetType::*;
-        let rejected: [(BetType, f64, bool); 21] = [
+        let cases: [(BetType, f64, bool); 21] = [
             (Win, 9999.9, false),
             (Win, 99999.9, false),
             (Win, 999999.9, false),
@@ -185,7 +188,7 @@ mod tests {
             (Trifecta, 99999.9, false),
             (Trifecta, 999999.9, true),
         ];
-        for (bet_type, value, expect_rejected) in rejected {
+        for (bet_type, value, expect_rejected) in cases {
             let got = OddsValue::try_from((bet_type, value));
             if expect_rejected {
                 let err =

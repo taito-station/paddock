@@ -182,7 +182,7 @@ def parse_exotic(path):
         # combination_key は "1-2"(馬連) / "1-2-3"(3連複) の '-' 区切り前提。区切り変更等で
         # 桁数が想定外になると的中判定が無言で 0 に縮退するため、警告して捨てる。
         # **番兵チェックより前**に置く——後ろだと番兵行の分だけ区切り仕様変更の検知が鈍る。
-        if len(nums) != arity.get(kind, len(nums)):
+        if len(nums) != arity[kind]:
             print(f"[warn] 想定外の組番形式 {kind}={combo}（pid={pid}）をスキップ", file=sys.stderr)
             continue
         # netkeiba の未発売番兵（99999.9 等）は払戻倍率ではない。落とさないと 1 点で EV が
