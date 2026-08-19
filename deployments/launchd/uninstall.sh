@@ -29,7 +29,11 @@ done
 # unload だけでは背景 caffeinate が最終 post_time まで残りスリープ抑止が居座る。lock に記録した
 # 自分の pid を comm 確認のうえ kill して即停止する（無差別 pkill はユーザー自身の caffeinate を
 # 巻き込むため使わない）。
-LOCK_DIR="/tmp/paddock-keep-awake.lock.d"
+# lock は UID スコープの固定パス（#643）。**scripts/predict-check/keep_awake.sh と同じ式**で、
+# 片方だけ変えると uninstall が caffeinate を止められなくなる（＝抑止が居座る）ので必ず同時に直す。
+# `$TMPDIR` を使わないのは、launchd が TMPDIR を設定せず端末と別パスに解決されるため
+# （2026-08-19 実測）。理由の詳細は keep_awake.sh 側のコメントが正。
+LOCK_DIR="${PADDOCK_KEEP_AWAKE_LOCK_DIR:-/tmp/paddock-keep-awake-$(id -u).lock.d}"
 
 # lock の片付けは **trap で到達性から切り離す**。直列に置くと、どこかで set -euo pipefail に
 # 引っかかった時点で削除されず「最後まで走ったように見えて走っていない」状態になる
