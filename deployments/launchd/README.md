@@ -69,6 +69,16 @@
 - **keep-awake は best-effort**: `caffeinate -i` は**アイドルスリープのみ**抑止する。
   クラムシェル（蓋閉じ）スリープや `pmset` のスケジュールスリープは止められず（要 sudo/pmset）、
   **既にスリープ中の Mac を起こすこともできない**（朝に keep-awake が発火する時点で起きている必要）。
+- **抑止窓は毎サイクル追従する（#585）**: 窓は「当日の最終 `post_time` + buffer」で、`caffeinate -t` に
+  焼き込まれる。**朝の install 時点で `fetch-card` が途中までしか終わっていないと窓が短いまま固定される**
+  ——2026-08-08 は 3 鞍ぶんの post_time しか無く 10:40 までの窓で張られ、10:26 に全 33 鞍（最終 18:30）が
+  入っても伸びなかった。現在は毎サイクル DB を引き直し、**必要な窓が現行より後なら張り直す**
+  （新しい `caffeinate` を起動してから旧を落とすので抑止の空白は生まれない）。延長したか据え置いたかは
+  ログに残る。それでも **`install.sh` は `fetch-card` の後に叩くほうが良い**（初回から正しい窓になる）。
+- **lock は UID スコープの固定パス**（`/tmp/paddock-keep-awake-$(id -u).lock.d`・#643）。`$TMPDIR` は使わない
+  ——launchd は `TMPDIR` を設定せず `/tmp` に落ちるため、端末（`/var/folders/.../T/`）と別の lock を見て
+  互いを見失う（2026-08-19 実測）。**このパスは `keep_awake.sh` と `uninstall.sh` の両方が持つので、
+  変えるときは必ず同時に直す**（`scripts/test-keep-awake.sh` が一致を検査する）。
 - **完全な堅牢化**は常時稼働ホスト（RasPi / 小型クラウド VM 等）へ prefetch を移設して
   ローカル Mac の電源・スリープ状態に依存させないこと（構成変更が大きいため別途）。
 - **この keep-awake は predict-watch / odds-collect の抑止も兼ねる**。監視バイナリ側は抑止を持たない
