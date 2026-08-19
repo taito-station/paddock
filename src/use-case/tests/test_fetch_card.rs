@@ -388,7 +388,15 @@ async fn saves_exotic_odds_with_combination_keys() {
             OrderedTriple::try_from((h(7), h(4), h(13))).unwrap(),
             154.6,
         )],
-        failed: Default::default(),
+        observed: [
+            paddock_domain::BetType::Quinella,
+            paddock_domain::BetType::Wide,
+            paddock_domain::BetType::Exacta,
+            paddock_domain::BetType::Trio,
+            paddock_domain::BetType::Trifecta,
+        ]
+        .into_iter()
+        .collect(),
     };
     let scraper = FakeScraper::new(vec![win_odds(7, 2.6, 1)]).with_exotic(exotic);
     let interactor = CardInteractor::new(RecordingRepo::with_already(false), scraper);

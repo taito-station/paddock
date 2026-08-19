@@ -5,7 +5,7 @@ use paddock_domain::{BetType, RaceId, RaceOdds};
 
 use crate::error::Result;
 use crate::interactor::odds::OddsInteractor;
-use crate::odds_scraper::OddsScraper;
+use crate::odds_scraper::{OddsScraper, ScrapedOdds};
 use crate::repository::{OddsRepository, OddsRow, RaceOddsRecord, UnpricedObservation};
 
 /// 「未発売と確認できた」観測を信用する期間（#632）。
@@ -18,19 +18,36 @@ use crate::repository::{OddsRepository, OddsRow, RaceOddsRecord, UnpricedObserva
 /// 毎回再スクレイプする（#257）ため、判断に使うオッズは常にフレッシュ。
 const UNPRICED_OBSERVATION_TTL: Duration = Duration::minutes(15);
 
-/// 保存済みオッズを再スクレイプなしで使ってよいかを判定する純関数（#632）。
+/// 欠落券種が「未発売と確認できた（かつ観測がまだ新しい）」券種にすべて収まるかを判定する
+/// 純関数（#632）。true なら再スクレイプせず保存済みを使ってよい。
 ///
-/// 欠けている券種が「未発売と確認できた（かつ観測がまだ新しい）」券種にすべて収まるなら
-/// cache-hit。**観測が無い欠落は cache-miss のまま**にするのが要点で、exotic の一過性取得失敗は
+/// **観測が無い欠落は cache-miss のまま**にするのが要点で、exotic の一過性取得失敗は
 /// 従来どおり次回すぐ取り直される（#294 の自己修復を鈍らせない）。
-fn is_cache_fresh(saved: &RaceOdds, unpriced: &[UnpricedObservation], now: DateTime<Utc>) -> bool {
-    let missing = saved.missing_bet_types();
+///
+/// 安全側の絞り込みが 2 つある。どちらも「判断に迷ったら取り直す」向きに倒してある:
+/// - **単勝・複勝の観測は無視する**。本番の書き込み経路は組合せ 5 券種しか記録しないが、
+///   仮に `win` の観測行が入ると単勝の欠落を免除してしまい、`race_odds()` が win 空の
+///   スナップショットを cache-hit で返す（fetch-card が degraded 分岐で明示的に避けている
+///   「オッズ有り・win 無し」の再現）。DB の CHECK は語彙統一のため 7 値を許しているので、
+///   ここで読み側の防御を効かせる。
+/// - **未来時刻の観測は stale 扱いにする**。時計のズレやダンプ復元で `observed_at` が未来に
+///   なると、単純な差分比較では無条件に fresh と判定されて再取得が止まる。gateway 側が
+///   「壊れた `observed_at` は読み飛ばす＝取り直すほうが安全」としているのと向きを揃える。
+fn is_cache_fresh(
+    missing: &BTreeSet<BetType>,
+    unpriced: &[UnpricedObservation],
+    now: DateTime<Utc>,
+) -> bool {
     if missing.is_empty() {
         return true;
     }
     let fresh: BTreeSet<BetType> = unpriced
         .iter()
-        .filter(|o| now.signed_duration_since(o.observed_at) < UNPRICED_OBSERVATION_TTL)
+        .filter(|o| !matches!(o.bet_type, BetType::Win | BetType::Place))
+        .filter(|o| {
+            let age = now.signed_duration_since(o.observed_at);
+            age >= Duration::zero() && age < UNPRICED_OBSERVATION_TTL
+        })
         .map(|o| o.bet_type)
         .collect();
     missing.is_subset(&fresh)
@@ -66,13 +83,21 @@ impl<O: OddsScraper, R: OddsRepository> OddsInteractor<O, R> {
         //    番兵、または取得成功で 0 行）を差し引いて判定する。観測の無い欠落＝一過性の取得失敗は
         //    従来どおり cache-miss にして即取り直す（#294 の自己修復を保つ）。
         if let Some(saved) = self.repository.find_race_odds(race_id, None).await? {
-            let unpriced = self.repository.find_unpriced_bet_types(race_id).await?;
-            if is_cache_fresh(&saved, &unpriced, Utc::now()) {
+            // 欠落集合は 1 回だけ計算して使い回す。欠落が無ければ従来どおりの complete
+            // cache-hit なので、**観測表を引かずに返す**（開催日の大半のレースがこの経路を
+            // 通るため、無駄な SELECT を 1 本増やさない）。
+            let missing = saved.missing_bet_types();
+            let unpriced = if missing.is_empty() {
+                Vec::new()
+            } else {
+                self.repository.find_unpriced_bet_types(race_id).await?
+            };
+            if is_cache_fresh(&missing, &unpriced, Utc::now()) {
                 // 欠落が空なら従来どおりの complete cache-hit、非空なら「欠落はすべて未発売と
                 // 確認済み」で通した場合。どちらだったかがログから読めるようにしておく。
                 tracing::debug!(
                     race_id = %race_id,
-                    missing = ?saved.missing_bet_types(),
+                    missing = ?missing,
                     "保存済み race_odds を参照（再スクレイプなし）"
                 );
                 return Ok(Some(saved));
@@ -216,7 +241,7 @@ impl<O: OddsScraper, R: OddsRepository> OddsInteractor<O, R> {
     /// priced が取れた券種は同時にマークを消す（発売開始の反映）。`persist_all` と同じく
     /// **保存失敗は予想フローを止めず warn のみ**——マークが無い状態は「毎回取り直す」という
     /// 修正前の挙動に戻るだけで、判断を誤らせる方向には倒れない。
-    async fn record_unpriced(&self, race_id: &RaceId, scraped: &crate::odds_scraper::ScrapedOdds) {
+    async fn record_unpriced(&self, race_id: &RaceId, scraped: &ScrapedOdds) {
         // priced 側は「今回オッズが取れた券種」。unpriced と重ならないことは assemble 側の
         // 判定（priced 0 件のときだけ unpriced）が保証する。
         let priced: BTreeSet<BetType> = [
@@ -241,6 +266,18 @@ impl<O: OddsScraper, R: OddsRepository> OddsInteractor<O, R> {
                 race_id = %race_id,
                 error = %e,
                 "未発売券種の観測記録に失敗（予想は継続・次回は再スクレイプになる）"
+            );
+            return;
+        }
+        // 何を未発売と判断したかを残す。判定が「priced が 0 件か」である以上、netkeiba の
+        // JSON 形式変更でパースが全滅しても「未発売」に見える——その場合ここに**毎回全券種**が
+        // 並ぶので、真の未発売（発売開始後に消える）と区別できる。
+        if !scraped.unpriced.is_empty() {
+            tracing::debug!(
+                race_id = %race_id,
+                unpriced = ?scraped.unpriced,
+                priced = ?priced,
+                "未発売と確認できた券種を記録（TTL 内は再スクレイプしない）"
             );
         }
     }
@@ -507,6 +544,89 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn refresh_records_unpriced_observations() {
+        // ADR 0089 決定 8: 監視経路（predict-watch）でも観測を記録する。発売開始を最初に
+        // 観測するのは 5 分毎に回る監視であることが多く、ここでマークを更新しないと
+        // read-through 側が TTL いっぱい古い判断を引きずる。
+        let scraper = FakeScraper::with_unpriced(
+            |rid| Ok(odds_without_trio_trifecta(rid.clone())),
+            &[BetType::Trio, BetType::Trifecta],
+        );
+        let interactor = OddsInteractor::new(scraper, FakeRepo::default());
+
+        interactor.refresh_race_odds(&race_id()).await.unwrap();
+
+        assert_eq!(
+            interactor
+                .repository
+                .unpriced
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|m| m.bet_type)
+                .collect::<BTreeSet<_>>(),
+            BTreeSet::from([BetType::Trio, BetType::Trifecta]),
+            "監視経路でも未発売の観測が記録される"
+        );
+    }
+
+    #[tokio::test]
+    async fn refresh_clears_marks_when_bet_type_goes_on_sale() {
+        // 監視が発売開始を観測したらマークが消える（＝read-through も次回すぐ取り直せる）。
+        let scraper = FakeScraper::new(|rid| Ok(odds_all_types(rid.clone())));
+        let repo = FakeRepo::with_marks(
+            odds_without_trio_trifecta(race_id()),
+            &[BetType::Trio, BetType::Trifecta],
+            Duration::minutes(1),
+        );
+        let interactor = OddsInteractor::new(scraper, repo);
+
+        interactor.refresh_race_odds(&race_id()).await.unwrap();
+
+        assert!(
+            interactor.repository.unpriced.lock().unwrap().is_empty(),
+            "priced が取れた券種のマークは監視経路でも消える"
+        );
+    }
+
+    #[test]
+    fn is_cache_fresh_ignores_win_and_place_observations() {
+        // 単勝・複勝の観測は本番経路では書かれないが、DB の CHECK は語彙統一のため 7 値を
+        // 許している。仮に win の観測行が入っても単勝の欠落を免除しないことの防御テスト
+        // （免除すると win 空のスナップショットを cache-hit で返してしまう）。
+        let mut saved = odds_all_types(race_id());
+        saved.win.clear();
+        let now = Utc::now();
+
+        assert!(!is_cache_fresh(
+            &saved.missing_bet_types(),
+            &[UnpricedObservation {
+                bet_type: BetType::Win,
+                observed_at: now,
+            }],
+            now
+        ));
+    }
+
+    #[test]
+    fn is_cache_fresh_treats_future_observations_as_stale() {
+        // 時計のズレやダンプ復元で observed_at が未来になったとき、単純な差分比較では
+        // 無条件に fresh と判定されて再取得が止まる。安全側（取り直す）に倒す。
+        let saved = odds_without_trio_trifecta(race_id());
+        let now = Utc::now();
+        let future = |bet_type| UnpricedObservation {
+            bet_type,
+            observed_at: now + Duration::hours(1),
+        };
+
+        assert!(!is_cache_fresh(
+            &saved.missing_bet_types(),
+            &[future(BetType::Trio), future(BetType::Trifecta)],
+            now
+        ));
+    }
+
     #[test]
     fn is_cache_fresh_requires_every_missing_bet_type_to_be_observed() {
         // 欠落の一部しか観測が無いなら cache-miss。部分的な観測で取り直しを止めると、
@@ -518,17 +638,24 @@ mod tests {
             observed_at: now,
         };
 
-        assert!(!is_cache_fresh(&saved, &[], now), "観測なし → 再スクレイプ");
         assert!(
-            !is_cache_fresh(&saved, &[mark(BetType::Trio)], now),
+            !is_cache_fresh(&saved.missing_bet_types(), &[], now),
+            "観測なし → 再スクレイプ"
+        );
+        assert!(
+            !is_cache_fresh(&saved.missing_bet_types(), &[mark(BetType::Trio)], now),
             "三連単の観測が無いので再スクレイプ"
         );
         assert!(
-            is_cache_fresh(&saved, &[mark(BetType::Trio), mark(BetType::Trifecta)], now),
+            is_cache_fresh(
+                &saved.missing_bet_types(),
+                &[mark(BetType::Trio), mark(BetType::Trifecta)],
+                now
+            ),
             "欠落がすべて未発売と確認済みなら cache-hit"
         );
         assert!(
-            is_cache_fresh(&odds_all_types(race_id()), &[], now),
+            is_cache_fresh(&odds_all_types(race_id()).missing_bet_types(), &[], now),
             "そもそも欠落が無ければ観測は不要"
         );
     }
@@ -545,7 +672,7 @@ mod tests {
         let just_outside = UNPRICED_OBSERVATION_TTL + Duration::seconds(1);
 
         assert!(is_cache_fresh(
-            &saved,
+            &saved.missing_bet_types(),
             &[
                 aged(BetType::Trio, just_inside),
                 aged(BetType::Trifecta, just_inside)
@@ -553,7 +680,7 @@ mod tests {
             now
         ));
         assert!(!is_cache_fresh(
-            &saved,
+            &saved.missing_bet_types(),
             &[
                 aged(BetType::Trio, just_inside),
                 aged(BetType::Trifecta, just_outside)

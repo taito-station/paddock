@@ -132,10 +132,10 @@ impl UreqNetkeibaScraper {
     /// 組合せ券種 1 種を取得・パースする。失敗（HTTP/想定外 status 等）は warn ログを残して
     /// 空 Vec に倒し、他券種の取得を継続させる（券種単位のベストエフォート、#102）。
     ///
-    /// **失敗したかどうかは戻り値の `bool` で呼び出し側へ伝える**（#632）。従来は失敗も
-    /// 「発売されていない」もどちらも空 Vec になり区別できなかったため、read-through が
-    /// 未発売の券種を永久に取り直していた。空 Vec に倒す挙動自体（＝1 券種の失敗で他を
-    /// 巻き添えにしない）は変えない。
+    /// **取得できたかどうかは戻り値の `bool`（true = 取得成功）で呼び出し側へ伝える**（#632）。
+    /// 従来は失敗も「発売されていない」もどちらも空 Vec になり区別できなかったため、
+    /// read-through が未発売の券種を永久に取り直していた。空 Vec に倒す挙動自体
+    /// （＝1 券種の失敗で他を巻き添えにしない）は変えない。
     fn fetch_one_exotic<T>(
         &self,
         netkeiba_race_id: &str,
@@ -272,26 +272,29 @@ impl NetkeibaScraper for UreqNetkeibaScraper {
         // 馬連・ワイド・馬単・三連複・三連単は券種ごとに別 API（type=4/5/6/7/8）。取得間に delay が
         // 挟まるため 1 レースあたり 5 回の待ちが加わる。**券種ごとにベストエフォート**: 1 本の API が
         // 失敗しても他券種や手前の取得分を巻き添えにせず、取れた券種だけ返す（#102 レビュー反映, #187）。
-        // 失敗した券種は `failed` に控え、「未発売と確認できた」と読み違えないようにする（#632）。
-        let mut failed = BTreeSet::new();
-        let (quinella, q_failed) =
-            self.fetch_one_exotic(netkeiba_race_id, 4, parse::parse_quinella_odds);
-        let (wide, w_failed) = self.fetch_one_exotic(netkeiba_race_id, 5, parse::parse_wide_odds);
-        let (exacta, e_failed) =
-            self.fetch_one_exotic(netkeiba_race_id, 6, parse::parse_exacta_odds);
-        let (trio, t_failed) = self.fetch_one_exotic(netkeiba_race_id, 7, parse::parse_trio_odds);
-        let (trifecta, tf_failed) =
-            self.fetch_one_exotic(netkeiba_race_id, 8, parse::parse_trifecta_odds);
-        for (bet_type, did_fail) in [
-            (BetType::Quinella, q_failed),
-            (BetType::Wide, w_failed),
-            (BetType::Exacta, e_failed),
-            (BetType::Trio, t_failed),
-            (BetType::Trifecta, tf_failed),
-        ] {
-            if did_fail {
-                failed.insert(bet_type);
-            }
+        // 取得できた券種を `observed` に控え、「未発売と確認できた」と読み違えないようにする（#632）。
+        // 券種と odds_type の対応を取り違えないよう、記録は各取得の**直後**に置く
+        // （離れた対応表にすると入れ替わってもコンパイルが通ってしまう）。
+        let mut observed = BTreeSet::new();
+        let (quinella, ok) = self.fetch_one_exotic(netkeiba_race_id, 4, parse::parse_quinella_odds);
+        if ok {
+            observed.insert(BetType::Quinella);
+        }
+        let (wide, ok) = self.fetch_one_exotic(netkeiba_race_id, 5, parse::parse_wide_odds);
+        if ok {
+            observed.insert(BetType::Wide);
+        }
+        let (exacta, ok) = self.fetch_one_exotic(netkeiba_race_id, 6, parse::parse_exacta_odds);
+        if ok {
+            observed.insert(BetType::Exacta);
+        }
+        let (trio, ok) = self.fetch_one_exotic(netkeiba_race_id, 7, parse::parse_trio_odds);
+        if ok {
+            observed.insert(BetType::Trio);
+        }
+        let (trifecta, ok) = self.fetch_one_exotic(netkeiba_race_id, 8, parse::parse_trifecta_odds);
+        if ok {
+            observed.insert(BetType::Trifecta);
         }
         Ok(FetchedExoticOdds {
             quinella,
@@ -299,7 +302,7 @@ impl NetkeibaScraper for UreqNetkeibaScraper {
             exacta,
             trio,
             trifecta,
-            failed,
+            observed,
         })
     }
 }
@@ -321,24 +324,6 @@ impl NetkeibaScraper for UreqNetkeibaScraper {
 /// 返り、相方の `0.0` が番兵ではなく**値域違反**として弾かれるため（番兵の有無だけを見ると
 /// ワイドの未発売を取りこぼす）。JRA がそもそも売らない極小頭数レースの券種も同じ経路で
 /// unpriced になり、ADR 0010 が「許容する」としていた毎回再スクレイプもここで閉じる。
-/// 「組合せ 5 券種を 1 つも観測していない」ことを表す入力（#632）。
-///
-/// `FetchedExoticOdds::default()` は `failed` が空なので、そのまま `assemble_netkeiba` に渡すと
-/// **全券種が「未発売と確認できた」と誤判定される**。観測していない経路（単複のみ取得・
-/// 組合せ取得の丸ごと失敗）はこちらを使う。
-fn all_exotic_failed() -> FetchedExoticOdds {
-    FetchedExoticOdds {
-        failed: BTreeSet::from([
-            BetType::Quinella,
-            BetType::Wide,
-            BetType::Exacta,
-            BetType::Trio,
-            BetType::Trifecta,
-        ]),
-        ..FetchedExoticOdds::default()
-    }
-}
-
 pub(crate) fn assemble_netkeiba(
     odds: &FetchedOdds,
     exotic: &FetchedExoticOdds,
@@ -390,7 +375,8 @@ pub(crate) fn assemble_netkeiba(
     }
 
     // 取得に成功したのに priced が 0 件だった組合せ券種を「未発売と確認できた」として載せる。
-    // 取得失敗（`exotic.failed`）は「分からない」なので載せない＝次回そのまま再取得させる。
+    // 観測できていない券種（取得失敗・そもそも取りに行っていない）は「分からない」なので
+    // 載せない＝次回そのまま再取得させる。
     let mut unpriced = BTreeSet::new();
     for (bet_type, priced_count) in [
         (BetType::Quinella, out.quinella.len()),
@@ -399,7 +385,7 @@ pub(crate) fn assemble_netkeiba(
         (BetType::Trio, out.trio.len()),
         (BetType::Trifecta, out.trifecta.len()),
     ] {
-        if priced_count == 0 && !exotic.failed.contains(&bet_type) {
+        if priced_count == 0 && exotic.observed.contains(&bet_type) {
             unpriced.insert(bet_type);
         }
     }
@@ -438,23 +424,21 @@ impl UreqNetkeibaScraper {
         let odds = self.fetch_win_place_odds(&netkeiba_id)?;
         // 現状 `fetch_exotic_odds` は券種ごとに Err を空 Vec へ畳むため常に Ok だが、将来エラー伝播へ
         // 変わっても win ベース判定を巻き添えにしないよう、ここはベストエフォート（空で継続）に倒す。
-        // その fallback では **全券種を failed 扱い**にする（#632）——「1 件も取れなかった」を
-        // 「全券種が未発売と確認できた」と読み違えると、再取得が 15 分止まってしまう。
-        let exotic = self
-            .fetch_exotic_odds(&netkeiba_id)
-            .unwrap_or_else(|_| all_exotic_failed());
+        // その fallback（`default()`）は `observed` が空＝「何も観測していない」なので、
+        // 「1 件も取れなかった」を「全券種が未発売と確認できた」と読み違えることはない（#632）。
+        let exotic = self.fetch_exotic_odds(&netkeiba_id).unwrap_or_default();
         Ok(assemble_netkeiba(&odds, &exotic, race_id.clone()))
     }
 
     /// blocking 版の単複のみ（type=1・1 GET）取得。オッズ時系列コレクタが全レースを終日高頻度で
     /// スナップするため、組合せ券種を打たず netkeiba への負荷を最小化する。
     ///
-    /// 組合せ券種は**一度も見ていない**ので、未発売の観測は返さない（#632）。`assemble_netkeiba`
-    /// には全券種 failed の入力を渡し、この経路が未発売マークを作らないことを型ではなく値で保証する。
+    /// 組合せ券種は**一度も見ていない**ので、未発売の観測は返さない（#632）。`observed` が空の
+    /// `FetchedExoticOdds::default()` を渡すことでそれが保証される（既定値が「何も観測していない」）。
     fn scrape_win_place_blocking(&self, race_id: &RaceId) -> UcResult<RaceOdds> {
         let netkeiba_id = netkeiba_race_id_from_paddock(race_id)?;
         let odds = self.fetch_win_place_odds(&netkeiba_id)?;
-        let scraped = assemble_netkeiba(&odds, &all_exotic_failed(), race_id.clone());
+        let scraped = assemble_netkeiba(&odds, &FetchedExoticOdds::default(), race_id.clone());
         debug_assert!(scraped.unpriced.is_empty());
         Ok(scraped.odds)
     }
@@ -517,6 +501,18 @@ mod tests {
         HorseNum::try_from(n).unwrap()
     }
 
+    /// 組合せ 5 券種すべてを「取得できた」とする観測（#632）。テストで
+    /// `FetchedExoticOdds` を手組みするときの既定。
+    fn all_exotic() -> BTreeSet<BetType> {
+        BTreeSet::from([
+            BetType::Quinella,
+            BetType::Wide,
+            BetType::Exacta,
+            BetType::Trio,
+            BetType::Trifecta,
+        ])
+    }
+
     #[test]
     fn assembles_all_bet_types_into_race_odds() {
         let race_id = RaceId::try_from("2026-1-hakodate-6-5R").unwrap();
@@ -560,7 +556,7 @@ mod tests {
                 odds: 410.0,
                 popularity: None,
             }],
-            failed: BTreeSet::new(),
+            observed: all_exotic(),
         };
 
         let scraped = assemble_netkeiba(&odds, &exotic, race_id);
@@ -662,6 +658,7 @@ mod tests {
                     popularity: None,
                 },
             ],
+            observed: all_exotic(),
             ..FetchedExoticOdds::default()
         };
 
@@ -730,6 +727,7 @@ mod tests {
                     popularity: None,
                 },
             ],
+            observed: all_exotic(),
             ..FetchedExoticOdds::default()
         };
 
@@ -751,6 +749,7 @@ mod tests {
                 odds_high: 0.0,
                 popularity: None,
             }],
+            observed: all_exotic(),
             ..FetchedExoticOdds::default()
         };
 
@@ -760,28 +759,35 @@ mod tests {
     }
 
     #[test]
-    fn failed_bet_type_is_not_observed_as_unpriced() {
-        // 取得失敗は「分からない」であって「売っていない」ではない。マークすると一過性の
-        // 取得失敗が TTL のあいだ取り直されなくなり、#294 の自己修復が鈍る。
+    fn unobserved_bet_type_is_not_reported_as_unpriced() {
+        // 取得失敗（＝観測できなかった）は「分からない」であって「売っていない」ではない。
+        // マークすると一過性の取得失敗が TTL のあいだ取り直されなくなり、#294 の自己修復が鈍る。
         let race_id = RaceId::try_from("2026-1-hakodate-6-5R").unwrap();
+        let mut observed = all_exotic();
+        observed.remove(&BetType::Trio); // 三連複だけ取得に失敗した状況
         let exotic = FetchedExoticOdds {
-            failed: BTreeSet::from([BetType::Trio]),
+            observed,
             ..FetchedExoticOdds::default()
         };
 
         let scraped = assemble_netkeiba(&FetchedOdds::default(), &exotic, race_id);
         assert!(!scraped.unpriced.contains(&BetType::Trio));
-        // 失敗していない他券種は「取得成功して 0 行」なので未発売と確認できている。
+        // 観測できた他券種は「取得成功して 0 行」なので未発売と確認できている。
         assert!(scraped.unpriced.contains(&BetType::Quinella));
     }
 
     #[test]
-    fn win_place_only_scrape_observes_no_unpriced_bet_type() {
-        // 単複のみの取得（odds-collect）は組合せ券種を一度も見ていないので、未発売の観測を
-        // 作ってはいけない。`FetchedExoticOdds::default()` をそのまま渡すと全券種が
-        // 未発売扱いになるため、専用の入力を使っていることの回帰ガード。
+    fn default_exotic_input_observes_no_unpriced_bet_type() {
+        // 単複のみの取得（odds-collect）や組合せ取得の丸ごと失敗は組合せ券種を一度も見ていない。
+        // `FetchedExoticOdds::default()` は observed が空＝「何も観測していない」なので、
+        // 未発売マークを作らない。**既定値が最も安全な解釈になっている**ことの回帰ガード
+        // （failed 集合を持つ設計だと既定値が「全券種未発売」という最も危険な解釈になる）。
         let race_id = RaceId::try_from("2026-1-hakodate-6-5R").unwrap();
-        let scraped = assemble_netkeiba(&FetchedOdds::default(), &all_exotic_failed(), race_id);
+        let scraped = assemble_netkeiba(
+            &FetchedOdds::default(),
+            &FetchedExoticOdds::default(),
+            race_id,
+        );
         assert!(scraped.unpriced.is_empty());
     }
 

@@ -1410,6 +1410,39 @@ async fn unpriced_observations_are_scoped_per_race(pool: sqlx::PgPool) {
 }
 
 #[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn unparsable_observed_at_row_is_skipped_on_read(pool: sqlx::PgPool) {
+    // observed_at には CHECK が無いので、壊れた値の行は実際に入りうる（手投入・移行等）。
+    // 読み飛ばして「観測なし」に倒すのが要点——壊れた観測を「新しい観測」と誤読して
+    // 再取得を止めるより、取り直すほうが安全側。
+    let repo = PostgresRepository::new(pool.clone());
+    sqlx::query(
+        "INSERT INTO race_odds_unpriced_observations (race_id, bet_type, observed_at) \
+         VALUES ($1, 'trio', 'not-a-timestamp')",
+    )
+    .bind(race_id().value())
+    .execute(&pool)
+    .await
+    .expect("observed_at に CHECK は無いので INSERT 自体は通る");
+
+    // 正常な行も 1 つ入れて、壊れた行だけが落ちることを見る。
+    repo.record_unpriced_bet_types(
+        &race_id(),
+        &BTreeSet::from([BetType::Trifecta]),
+        &BTreeSet::new(),
+        fetched_at(),
+    )
+    .await
+    .unwrap();
+
+    let got = repo.find_unpriced_bet_types(&race_id()).await.unwrap();
+    assert_eq!(
+        got.iter().map(|o| o.bet_type).collect::<BTreeSet<_>>(),
+        BTreeSet::from([BetType::Trifecta]),
+        "壊れた observed_at の行だけが読み飛ばされる"
+    );
+}
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
 async fn db_check_rejects_unknown_unpriced_bet_type(pool: sqlx::PgPool) {
     // 語彙は race_odds / race_odds_snapshots と同じ 7 値。CHECK が最終防衛線になっていることを
     // 生 SQL で確かめる（repository 経由は BetType 型なので未知ラベルを作れない）。
