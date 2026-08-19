@@ -109,7 +109,7 @@ impl<O: OddsScraper, R: OddsRepository> OddsInteractor<O, R> {
             }
         }
 
-        // 2. complete でなければ（未保存 or 部分スナップショット）ライブスクレイプ。
+        // 2. cache-fresh でなければ（未保存 / 部分スナップショット / 観測が無いか古い）ライブスクレイプ。
         //    部分スナップショットの取り直しが #294 の中核ケース。空/失敗は従来どおりスキップ(None)。
         //    scrape は async（#458）。api-server 経路では実装が spawn_blocking へ逃がすため
         //    ここで await しても actix worker を同期ブロッキングで塞がない。

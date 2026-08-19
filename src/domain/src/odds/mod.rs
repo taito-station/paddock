@@ -174,4 +174,51 @@ mod tests {
     fn is_complete_false_for_empty() {
         assert!(!RaceOdds::empty(rid()).is_complete());
     }
+
+    #[test]
+    fn missing_bet_types_never_includes_place() {
+        // **use-case 側の安全性がこの不変条件に乗っている**（#632）。`is_cache_fresh` は
+        // 未発売観測から `Win` だけを除外し `Place` は素通しにしているが、それが安全なのは
+        // 「`missing` に `Place` が入らないので `fresh` 側に混ざっても is_subset を変えない」
+        // から。ここが崩れると、複勝の観測が欠落を免除して cache-hit を通してしまう。
+        // 複勝が空でも満杯でも `Place` は出ない、を両方向で固定する。
+        let mut empty_place = complete_odds();
+        empty_place.place.clear();
+        assert!(!empty_place.missing_bet_types().contains(&BetType::Place));
+        assert!(
+            empty_place.is_complete(),
+            "place は is_complete の判定対象外（ADR 0010）"
+        );
+
+        assert!(
+            !RaceOdds::empty(rid())
+                .missing_bet_types()
+                .contains(&BetType::Place),
+            "全券種が空でも Place は欠落として挙げない"
+        );
+    }
+
+    #[test]
+    fn missing_bet_types_lists_exactly_the_empty_cache_bet_types() {
+        let mut o = complete_odds();
+        o.trio.clear();
+        o.trifecta.clear();
+        assert_eq!(
+            o.missing_bet_types(),
+            BTreeSet::from([BetType::Trio, BetType::Trifecta])
+        );
+
+        // 空のオッズは win + 組合せ 5 券種＝6 券種すべてが欠落（place は含まない）。
+        assert_eq!(
+            RaceOdds::empty(rid()).missing_bet_types(),
+            BTreeSet::from([
+                BetType::Win,
+                BetType::Quinella,
+                BetType::Wide,
+                BetType::Exacta,
+                BetType::Trio,
+                BetType::Trifecta,
+            ])
+        );
+    }
 }
