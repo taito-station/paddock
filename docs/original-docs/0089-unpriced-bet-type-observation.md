@@ -169,7 +169,7 @@ IP ブロックは本 PJ の最重要運用リスク（ADR 0068）なので、�
   `default_exotic_input_observes_no_unpriced_bet_type` で固定した。
 - **新テーブルの migration が要る。** 共有 DB へ `paddock-analyze migrate` で明示適用する
   （起動時 auto-migrate されない・ADR 0070）。
-- `find_race_odds_morning` / `rest-api-read.md` の「朝時点」定義は**挙動不変**（決定 6）。
+- `find_race_odds_morning` / `rest-api-read.md` の「朝時点」定義は**挙動不変**（決定 7）。
   既存テスト `morning_returns_earliest_complete_snapshot_with_bounds` /
   `incomplete_snapshot_converges_to_complete_via_upsert` が緑のままであることで担保する。
 

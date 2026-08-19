@@ -87,7 +87,7 @@ ADR 0010 が「許容する」としていた毎回再スクレイプも閉じ�
 欠落券種の列挙は `RaceOdds::missing_bet_types()` に集約し、`is_complete()` はそれを使って実装する
 （判定基準を 2 箇所に持たない・ADR 0064 の second source 回避）。
 
-反映先: ADR 0089 決定 6。
+反映先: ADR 0089 決定 7。
 担保: 既存の `morning_returns_earliest_complete_snapshot_with_bounds` /
 `incomplete_snapshot_converges_to_complete_via_upsert` が緑のまま。
 
@@ -136,3 +136,29 @@ read-through が返す単勝オッズは常にライブだった。修正後は�
 `predict-watch`（read-through を通らない・#257）が担保するので実害は無い。
 
 反映先: ADR 0089「影響」。
+
+---
+
+## Q9. `observed` の極性をどう守るか（2 巡目レビューで発覚した実バグ）
+
+Q6 で `failed` → `observed` へ反転したとき、`fetch_one_exotic` が返すタプルの `bool` は
+**旧「失敗したか」の意味のまま残り**、呼び出し側は「成功したか」として読んでいた。結果:
+
+- 取得に**失敗した券種だけ**が `observed` に入る
+- → 真の未発売は `unpriced` に入らず、**#632 の修正が本番経路で一切効かない**
+- → 逆に一過性の取得失敗が「未発売」として記録され、TTL 15 分のあいだ再取得が止まる
+  ＝**ADR 0089 決定 4 が「最も危険」と名指しした挙動そのもの**（#294 の自己修復が壊れる）
+
+テスト 923 本すべて green のまま素通りした。`assemble_netkeiba` のテストが `observed` を
+**手組み**していて、`fetch_one_exotic` → `observed` の**配線を通るテストが 1 本も無かった**ため。
+
+**回答: `bool` をやめて `Option<Vec<T>>` にする**（`Some` = 観測できた / `None` = 取得失敗）。
+極性を型で守り、取り違えをコンパイル可能な状態にしない。あわせて配線を
+ネットワーク非依存の純関数 `observed_or_skipped` / `record_observed` に切り出し、
+`Ok` / `Ok(空)` / `Err` の 3 ケースと「失敗券種は観測済みに入れない」を単体テストで固定した。
+
+**教訓**: 「集合の意味を反転する」変更は、集合を作る側と使う側の両方を同時に直さないと
+静かに壊れる。かつ**中間層を手組みするテストは配線を守らない**。
+
+反映先: `observed_or_skipped_maps_success_to_some_and_failure_to_none` /
+`record_observed_marks_only_successful_fetches`。

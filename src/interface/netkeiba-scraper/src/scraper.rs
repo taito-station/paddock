@@ -132,31 +132,27 @@ impl UreqNetkeibaScraper {
     /// 組合せ券種 1 種を取得・パースする。失敗（HTTP/想定外 status 等）は warn ログを残して
     /// 空 Vec に倒し、他券種の取得を継続させる（券種単位のベストエフォート、#102）。
     ///
-    /// **取得できたかどうかは戻り値の `bool`（true = 取得成功）で呼び出し側へ伝える**（#632）。
+    /// **観測できたかどうかは `Option` で表す**（#632）: `Some(rows)` = 取得できた
+    /// （0 行なら「発売されていない」と確認できた）／`None` = 取得に失敗して分からない。
     /// 従来は失敗も「発売されていない」もどちらも空 Vec になり区別できなかったため、
     /// read-through が未発売の券種を永久に取り直していた。空 Vec に倒す挙動自体
-    /// （＝1 券種の失敗で他を巻き添えにしない）は変えない。
+    /// （＝1 券種の失敗で他を巻き添えにしない）は呼び出し側で維持する。
+    ///
+    /// **`bool` を使わないのは極性を型で守るため**。実際 `bool` 版では「失敗したか」と
+    /// 「成功したか」の取り違えが起き、**取得失敗だけが観測済みとして記録される**状態を作った
+    /// （＝本 issue の修正が効かず、かつ一過性失敗が未発売として TTL のあいだ固定される）。
     fn fetch_one_exotic<T>(
         &self,
         netkeiba_race_id: &str,
         odds_type: u8,
         parse: impl Fn(&str) -> Result<Vec<T>>,
-    ) -> (Vec<T>, bool) {
-        match self
-            .fetch_odds_json(netkeiba_race_id, odds_type)
-            .and_then(|json| parse(&json))
-        {
-            Ok(rows) => (rows, false),
-            Err(e) => {
-                tracing::warn!(
-                    race_id = %netkeiba_race_id,
-                    odds_type,
-                    error = %e,
-                    "組合せ券種オッズの取得に失敗、当該券種をスキップして継続"
-                );
-                (Vec::new(), true)
-            }
-        }
+    ) -> Option<Vec<T>> {
+        observed_or_skipped(
+            self.fetch_odds_json(netkeiba_race_id, odds_type)
+                .and_then(|json| parse(&json)),
+            netkeiba_race_id,
+            odds_type,
+        )
     }
 }
 
@@ -276,26 +272,31 @@ impl NetkeibaScraper for UreqNetkeibaScraper {
         // 券種と odds_type の対応を取り違えないよう、記録は各取得の**直後**に置く
         // （離れた対応表にすると入れ替わってもコンパイルが通ってしまう）。
         let mut observed = BTreeSet::new();
-        let (quinella, ok) = self.fetch_one_exotic(netkeiba_race_id, 4, parse::parse_quinella_odds);
-        if ok {
-            observed.insert(BetType::Quinella);
-        }
-        let (wide, ok) = self.fetch_one_exotic(netkeiba_race_id, 5, parse::parse_wide_odds);
-        if ok {
-            observed.insert(BetType::Wide);
-        }
-        let (exacta, ok) = self.fetch_one_exotic(netkeiba_race_id, 6, parse::parse_exacta_odds);
-        if ok {
-            observed.insert(BetType::Exacta);
-        }
-        let (trio, ok) = self.fetch_one_exotic(netkeiba_race_id, 7, parse::parse_trio_odds);
-        if ok {
-            observed.insert(BetType::Trio);
-        }
-        let (trifecta, ok) = self.fetch_one_exotic(netkeiba_race_id, 8, parse::parse_trifecta_odds);
-        if ok {
-            observed.insert(BetType::Trifecta);
-        }
+        let quinella = record_observed(
+            self.fetch_one_exotic(netkeiba_race_id, 4, parse::parse_quinella_odds),
+            BetType::Quinella,
+            &mut observed,
+        );
+        let wide = record_observed(
+            self.fetch_one_exotic(netkeiba_race_id, 5, parse::parse_wide_odds),
+            BetType::Wide,
+            &mut observed,
+        );
+        let exacta = record_observed(
+            self.fetch_one_exotic(netkeiba_race_id, 6, parse::parse_exacta_odds),
+            BetType::Exacta,
+            &mut observed,
+        );
+        let trio = record_observed(
+            self.fetch_one_exotic(netkeiba_race_id, 7, parse::parse_trio_odds),
+            BetType::Trio,
+            &mut observed,
+        );
+        let trifecta = record_observed(
+            self.fetch_one_exotic(netkeiba_race_id, 8, parse::parse_trifecta_odds),
+            BetType::Trifecta,
+            &mut observed,
+        );
         Ok(FetchedExoticOdds {
             quinella,
             wide,
@@ -324,6 +325,49 @@ impl NetkeibaScraper for UreqNetkeibaScraper {
 /// 返り、相方の `0.0` が番兵ではなく**値域違反**として弾かれるため（番兵の有無だけを見ると
 /// ワイドの未発売を取りこぼす）。JRA がそもそも売らない極小頭数レースの券種も同じ経路で
 /// unpriced になり、ADR 0010 が「許容する」としていた毎回再スクレイプもここで閉じる。
+/// 組合せ券種 1 種の取得結果を「観測できた（`Some`）/ できなかった（`None`）」へ写す純関数（#632）。
+///
+/// ネットワークに触らないので、`Ok` / `Err` の写し分けを単体テストで固定できる
+/// （[`UreqNetkeibaScraper::fetch_one_exotic`] は HTTP を打つため直接は叩けない）。
+/// 失敗は warn を残してから `None` にする——「取れなかった」を握り潰さないのは #287 以来の方針。
+fn observed_or_skipped<T>(
+    result: Result<Vec<T>>,
+    netkeiba_race_id: &str,
+    odds_type: u8,
+) -> Option<Vec<T>> {
+    match result {
+        Ok(rows) => Some(rows),
+        Err(e) => {
+            tracing::warn!(
+                race_id = %netkeiba_race_id,
+                odds_type,
+                error = %e,
+                "組合せ券種オッズの取得に失敗、当該券種をスキップして継続"
+            );
+            None
+        }
+    }
+}
+
+/// 観測できた券種を `observed` に記録しつつ行を取り出す（#632）。
+///
+/// `None`（取得失敗）は**記録せず**空 Vec に倒す——1 券種の失敗で他券種を巻き添えにしない
+/// （#102 のベストエフォート）一方、「未発売と確認できた」とは扱わないため次回そのまま
+/// 取り直される（#294 の自己修復）。
+fn record_observed<T>(
+    rows: Option<Vec<T>>,
+    bet_type: BetType,
+    observed: &mut BTreeSet<BetType>,
+) -> Vec<T> {
+    match rows {
+        Some(rows) => {
+            observed.insert(bet_type);
+            rows
+        }
+        None => Vec::new(),
+    }
+}
+
 pub(crate) fn assemble_netkeiba(
     odds: &FetchedOdds,
     exotic: &FetchedExoticOdds,
@@ -774,6 +818,50 @@ mod tests {
         assert!(!scraped.unpriced.contains(&BetType::Trio));
         // 観測できた他券種は「取得成功して 0 行」なので未発売と確認できている。
         assert!(scraped.unpriced.contains(&BetType::Quinella));
+    }
+
+    #[test]
+    fn observed_or_skipped_maps_success_to_some_and_failure_to_none() {
+        // **極性の回帰ガード**。ここが反転すると「取得に失敗した券種だけが観測済み」になり、
+        // (a) 未発売のマークが 1 件も作られず #632 の修正が本番経路で効かない
+        // (b) 一過性の取得失敗が「未発売」として TTL のあいだ固定され #294 の自己修復が壊れる
+        // という、本 PR の主張を両方向に裏返す状態になる（実際に 1 巡目でこれを作り込んだ）。
+        assert_eq!(
+            observed_or_skipped(Ok(vec![1, 2, 3]), "202601020605", 7),
+            Some(vec![1, 2, 3]),
+            "取得成功は観測できた"
+        );
+        assert_eq!(
+            observed_or_skipped(Ok(Vec::<i32>::new()), "202601020605", 7),
+            Some(Vec::new()),
+            "取得成功で 0 行は「未発売と確認できた」＝観測できた"
+        );
+        assert_eq!(
+            observed_or_skipped(Err(Error::Fetch("boom".into())), "202601020605", 7),
+            None::<Vec<i32>>,
+            "取得失敗は観測できていない"
+        );
+    }
+
+    #[test]
+    fn record_observed_marks_only_successful_fetches() {
+        // `fetch_one_exotic` の結果 → `observed` の配線。1 巡目のバグはここを通るテストが
+        // 無かったために素通りした（assemble_netkeiba のテストは observed を手組みしていた）。
+        let mut observed = BTreeSet::new();
+        let rows = record_observed(Some(vec![10]), BetType::Trio, &mut observed);
+        assert_eq!(rows, vec![10]);
+        assert_eq!(observed, BTreeSet::from([BetType::Trio]));
+
+        let rows = record_observed(None::<Vec<i32>>, BetType::Wide, &mut observed);
+        assert!(
+            rows.is_empty(),
+            "取得失敗は空 Vec に倒す（他券種を巻き添えにしない）"
+        );
+        assert_eq!(
+            observed,
+            BTreeSet::from([BetType::Trio]),
+            "取得失敗した券種は観測済みに入れない"
+        );
     }
 
     #[test]

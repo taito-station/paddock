@@ -309,7 +309,10 @@ impl OddsRepository for RecordingRepo {
         _priced: &std::collections::BTreeSet<paddock_domain::BetType>,
         _observed_at: chrono::DateTime<chrono::Utc>,
     ) -> Result<()> {
-        unimplemented!()
+        // 記録内容を検証しないダブルなので no-op。read-through / refresh は成功スクレイプの
+        // たびに必ず呼ぶため、unimplemented!() だと将来この経路を踏んだ瞬間に無関係な
+        // panic でテストが落ちる。
+        Ok(())
     }
 }
 

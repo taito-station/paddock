@@ -285,7 +285,9 @@ impl OddsRepository for MockRepo {
         _: &std::collections::BTreeSet<paddock_domain::BetType>,
         _: chrono::DateTime<chrono::Utc>,
     ) -> Result<()> {
-        unimplemented!()
+        // 記録内容を検証しないダブルなので no-op（unimplemented!() だと将来この経路を
+        // 踏んだ瞬間に無関係な panic でテストが落ちる）。
+        Ok(())
     }
 }
 

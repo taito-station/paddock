@@ -546,7 +546,7 @@ mod tests {
 
     #[tokio::test]
     async fn refresh_records_unpriced_observations() {
-        // ADR 0089 決定 8: 監視経路（predict-watch）でも観測を記録する。発売開始を最初に
+        // ADR 0089 決定 9: 監視経路（predict-watch）でも観測を記録する。発売開始を最初に
         // 観測するのは 5 分毎に回る監視であることが多く、ここでマークを更新しないと
         // read-through 側が TTL いっぱい古い判断を引きずる。
         let scraper = FakeScraper::with_unpriced(
