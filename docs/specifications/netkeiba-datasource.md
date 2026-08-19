@@ -15,7 +15,7 @@ sources:
   - docs/original-docs/0086-netkeiba-unpriced-sentinel-is-not-odds.md
   - docs/original-docs/0088-bet-type-scoped-unpriced-sentinels.md
   - docs/original-docs/0089-unpriced-bet-type-observation.md
-distilled_from_sha: "d0b3834"
+distilled_from_sha: "de42b8c"
 updated: "2026-08-19"
 ---
 
