@@ -1,6 +1,8 @@
+use std::collections::BTreeSet;
+
 use chrono::{NaiveDate, NaiveTime};
 use paddock_domain::{
-    FinishingPosition, GateNum, HorseId, HorseName, HorseNum, JockeyName, OrderedPair,
+    BetType, FinishingPosition, GateNum, HorseId, HorseName, HorseNum, JockeyName, OrderedPair,
     OrderedTriple, Pair, RaceClass, ResultStatus, Surface, TimeSeconds, TrackCondition,
     TrainerName, Triple, Venue,
 };
@@ -177,6 +179,11 @@ pub struct FetchedExoticOdds {
     pub trio: Vec<FetchedComboOdds<Triple>>,
     /// 三連単（順序付きトリプル）
     pub trifecta: Vec<FetchedComboOdds<OrderedTriple>>,
+    /// **取得そのものが失敗した**券種（#632）。上の各 Vec は「失敗」と「発売されていない」の
+    /// どちらでも空になるため、空 Vec だけでは両者を区別できない。券種単位のベストエフォート
+    /// （#102）を保ったまま失敗を呼び出し側へ伝えるための併記で、ここに載る券種は
+    /// 「未発売と確認できた」とは扱わない（次回そのまま再取得する＝#294 の自己修復を保つ）。
+    pub failed: BTreeSet<BetType>,
 }
 
 /// Port for fetching netkeiba pages used to fill in same-day runners' recent form.

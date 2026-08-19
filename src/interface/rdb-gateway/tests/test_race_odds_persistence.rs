@@ -1,8 +1,10 @@
 //! `race_odds` の保存(save_race_odds)→読み出し(find_race_odds)を Postgres で往復検証する。
 //! 単勝・複勝・組合せ券種(#38)の復元と、backtest 用の `as_of`（`substr(fetched_at,1,10) <= d`）境界を担保する。
 
+use std::collections::BTreeSet;
+
 use chrono::{DateTime, NaiveDate, TimeZone, Utc};
-use paddock_domain::{HorseNum, OrderedPair, OrderedTriple, Pair, RaceId, Triple};
+use paddock_domain::{BetType, HorseNum, OrderedPair, OrderedTriple, Pair, RaceId, Triple};
 use paddock_use_case::repository::{OddsRepository, OddsRow, RaceOddsRecord};
 use rdb_gateway::PostgresRepository;
 
@@ -1300,5 +1302,128 @@ async fn db_check_rejects_out_of_range_race_odds_snapshots(pool: sqlx::PgPool) {
         err.to_string()
             .contains("ck_race_odds_snapshots_odds_high_range"),
         "snapshots の odds_high 上限違反は ck_race_odds_snapshots_odds_high_range で弾かれる: {err}"
+    );
+}
+
+// ---- 未発売券種の観測記録（#632） -------------------------------------------
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn unpriced_observations_round_trip(pool: sqlx::PgPool) {
+    let repo = PostgresRepository::new(pool);
+    let observed_at = fetched_at();
+
+    repo.record_unpriced_bet_types(
+        &race_id(),
+        &BTreeSet::from([BetType::Trio, BetType::Trifecta]),
+        &BTreeSet::new(),
+        observed_at,
+    )
+    .await
+    .unwrap();
+
+    let got = repo.find_unpriced_bet_types(&race_id()).await.unwrap();
+    assert_eq!(
+        got.iter().map(|o| o.bet_type).collect::<BTreeSet<_>>(),
+        BTreeSet::from([BetType::Trio, BetType::Trifecta])
+    );
+    assert!(
+        got.iter().all(|o| o.observed_at == observed_at),
+        "observed_at が rfc3339 で往復する"
+    );
+}
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn unpriced_observation_upserts_observed_at(pool: sqlx::PgPool) {
+    // 同じ券種を再観測したら時刻だけ進む（行は増えない）。増えると PK 違反か、TTL 判定が
+    // 古い行を拾って発売開始に気づけなくなる。
+    let repo = PostgresRepository::new(pool);
+    let later = fetched_at() + chrono::Duration::minutes(20);
+
+    for at in [fetched_at(), later] {
+        repo.record_unpriced_bet_types(
+            &race_id(),
+            &BTreeSet::from([BetType::Trio]),
+            &BTreeSet::new(),
+            at,
+        )
+        .await
+        .unwrap();
+    }
+
+    let got = repo.find_unpriced_bet_types(&race_id()).await.unwrap();
+    assert_eq!(got.len(), 1, "同一券種の観測は 1 行に畳まれる");
+    assert_eq!(got[0].observed_at, later, "最新の観測時刻で上書きされる");
+}
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn priced_bet_type_clears_its_unpriced_observation(pool: sqlx::PgPool) {
+    // 発売開始（priced が取れた）券種のマークは消える。残ると、次に一過性失敗でその券種が
+    // 欠けたとき誤って cache-hit してしまう。
+    let repo = PostgresRepository::new(pool);
+    repo.record_unpriced_bet_types(
+        &race_id(),
+        &BTreeSet::from([BetType::Trio, BetType::Trifecta]),
+        &BTreeSet::new(),
+        fetched_at(),
+    )
+    .await
+    .unwrap();
+
+    repo.record_unpriced_bet_types(
+        &race_id(),
+        &BTreeSet::from([BetType::Trifecta]),
+        &BTreeSet::from([BetType::Trio]),
+        fetched_at() + chrono::Duration::minutes(20),
+    )
+    .await
+    .unwrap();
+
+    let got = repo.find_unpriced_bet_types(&race_id()).await.unwrap();
+    assert_eq!(
+        got.iter().map(|o| o.bet_type).collect::<BTreeSet<_>>(),
+        BTreeSet::from([BetType::Trifecta]),
+        "priced になった三連複のマークだけ消える"
+    );
+}
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn unpriced_observations_are_scoped_per_race(pool: sqlx::PgPool) {
+    // 別レースの観測を巻き込まない（PK の第 1 要素が race_id であることの担保）。
+    let repo = PostgresRepository::new(pool);
+    let other = RaceId::try_from("2026-3-nakayama-8-2R").unwrap();
+
+    repo.record_unpriced_bet_types(
+        &race_id(),
+        &BTreeSet::from([BetType::Trio]),
+        &BTreeSet::new(),
+        fetched_at(),
+    )
+    .await
+    .unwrap();
+
+    assert!(
+        repo.find_unpriced_bet_types(&other)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn db_check_rejects_unknown_unpriced_bet_type(pool: sqlx::PgPool) {
+    // 語彙は race_odds / race_odds_snapshots と同じ 7 値。CHECK が最終防衛線になっていることを
+    // 生 SQL で確かめる（repository 経由は BetType 型なので未知ラベルを作れない）。
+    let err = sqlx::query(
+        "INSERT INTO race_odds_unpriced_observations (race_id, bet_type, observed_at) \
+         VALUES ($1, 'sanrentan', '2026-04-19T10:00:00+00:00')",
+    )
+    .bind(race_id().value())
+    .execute(&pool)
+    .await
+    .expect_err("未知の bet_type は拒否される");
+    assert!(
+        err.to_string()
+            .contains("ck_race_odds_unpriced_observations_bet_type"),
+        "未知 bet_type は CHECK 制約で弾かれる: {err}"
     );
 }

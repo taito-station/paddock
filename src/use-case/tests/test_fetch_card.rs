@@ -296,6 +296,21 @@ impl OddsRepository for RecordingRepo {
     async fn count_race_odds_snapshots_before(&self, _before: NaiveDate) -> Result<u64> {
         Ok(0)
     }
+    async fn find_unpriced_bet_types(
+        &self,
+        _race_id: &RaceId,
+    ) -> Result<Vec<paddock_use_case::repository::UnpricedObservation>> {
+        Ok(Vec::new())
+    }
+    async fn record_unpriced_bet_types(
+        &self,
+        _race_id: &RaceId,
+        _unpriced: &std::collections::BTreeSet<paddock_domain::BetType>,
+        _priced: &std::collections::BTreeSet<paddock_domain::BetType>,
+        _observed_at: chrono::DateTime<chrono::Utc>,
+    ) -> Result<()> {
+        unimplemented!()
+    }
 }
 
 fn race_id() -> RaceId {
@@ -373,6 +388,7 @@ async fn saves_exotic_odds_with_combination_keys() {
             OrderedTriple::try_from((h(7), h(4), h(13))).unwrap(),
             154.6,
         )],
+        failed: Default::default(),
     };
     let scraper = FakeScraper::new(vec![win_odds(7, 2.6, 1)]).with_exotic(exotic);
     let interactor = CardInteractor::new(RecordingRepo::with_already(false), scraper);

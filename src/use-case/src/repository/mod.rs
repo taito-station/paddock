@@ -13,7 +13,7 @@ pub mod stats;
 pub use fetch::HorseHistoryRepository;
 pub use fetch::{FetchDownload, FetchFailure, FetchRecord, FetchRepository, FetchStatus};
 pub use live::{LiveEvPin, LiveEvRepository, LiveEvSnapshot, LiveEvSnapshotRecord, SlipLegRecord};
-pub use odds::{MorningRaceOdds, OddsRepository, OddsRow, RaceOddsRecord};
+pub use odds::{MorningRaceOdds, OddsRepository, OddsRow, RaceOddsRecord, UnpricedObservation};
 pub use race::{FinishEntry, RaceCardRepository, RaceRepository, RaceResultRepository};
 pub use session::{
     PadPredictionRepository, PredictBetRecord, PredictRaceConditionRecord, PredictSessionRecord,

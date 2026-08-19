@@ -27,15 +27,16 @@ mod save_race_odds;
 mod sql;
 mod standard_times;
 mod trainer_stats;
+mod unpriced_bet_types;
 mod update_results;
 mod upsert_results;
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 use chrono::{DateTime, NaiveDate, NaiveTime, Utc};
 use paddock_domain::{
-    HorseId, HorseName, JockeyFormRun, JockeyName, PadPrediction, Race, RaceCard, RaceClass,
-    RaceId, RaceOdds, RecentRun, StandardTimes, Surface, TrainerName, Venue,
+    BetType, HorseId, HorseName, JockeyFormRun, JockeyName, PadPrediction, Race, RaceCard,
+    RaceClass, RaceId, RaceOdds, RecentRun, StandardTimes, Surface, TrainerName, Venue,
 };
 use paddock_use_case::FinishEntry;
 use paddock_use_case::Result as UcResult;
@@ -46,7 +47,7 @@ use paddock_use_case::repository::{
     MarkStatsFilter, MorningRaceOdds, NameMatchRepository, OddsRepository, PadPredictionRepository,
     PredictBetRecord, PredictRaceConditionRecord, PredictSessionRecord, PredictSessionRepository,
     PredictionFilter, PredictionSearchResult, RaceCardRepository, RaceOddsRecord, RaceRepository,
-    RaceResultRepository, StatsRepository, TrainerStatsRow,
+    RaceResultRepository, StatsRepository, TrainerStatsRow, UnpricedObservation,
 };
 
 use crate::pool::PgPool;
@@ -391,6 +392,33 @@ impl OddsRepository for PostgresRepository {
         purge_race_odds_snapshots::purge_race_odds_snapshots(&self.pool, before)
             .await
             .map_err(Into::into)
+    }
+
+    async fn find_unpriced_bet_types(
+        &self,
+        race_id: &RaceId,
+    ) -> UcResult<Vec<UnpricedObservation>> {
+        unpriced_bet_types::find_unpriced_bet_types(&self.pool, race_id)
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn record_unpriced_bet_types(
+        &self,
+        race_id: &RaceId,
+        unpriced: &BTreeSet<BetType>,
+        priced: &BTreeSet<BetType>,
+        observed_at: DateTime<Utc>,
+    ) -> UcResult<()> {
+        unpriced_bet_types::record_unpriced_bet_types(
+            &self.pool,
+            race_id,
+            unpriced,
+            priced,
+            observed_at,
+        )
+        .await
+        .map_err(Into::into)
     }
 
     async fn count_race_odds_snapshots_before(&self, before: NaiveDate) -> UcResult<u64> {

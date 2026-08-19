@@ -6,7 +6,7 @@ pub use bet_type::BetType;
 pub use combination::{OrderedPair, OrderedTriple, Pair, Triple};
 pub use odds_value::{OddsValue, PlaceOdds};
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 use crate::horse_result::HorseNum;
 use crate::race::RaceId;
@@ -71,16 +71,43 @@ impl RaceOdds {
     ///
     /// 組合せ 5 券種すべてを要求するのは「健全なスクレイプが返すフルの形」を完全性の基準にするため
     /// （買い目に使わない馬単・三連単も api-server 配信や将来用途のため欠落を検知して取り直す）。
-    /// 副作用として、JRA が一部の組合せ券種を発売しない極小頭数レースでは常に false になり
-    /// read-through で毎回再スクレイプするが、`race_odds` は UPSERT で行が肥大せず呼び出しも
-    /// 1 レース 1 回程度のため許容する（#294 影響: 低。詳細は OddsInteractor::race_odds のコメント）。
+    ///
+    /// 本判定は**券種が実際に発売されているかを知らない**。JRA が売らない券種や発売開始前の
+    /// 時間帯では永久に false になるため、read-through の cache-hit をこれ単体で決めてはいけない
+    /// （毎回再スクレイプになる・#632）。「欠けているが未発売と確認済み」を差し引く責務は
+    /// use-case 層（`OddsInteractor::race_odds`）が持つ。本メソッドの意味は
+    /// 「priced な行が全券種そろっているか」のまま据え置き、`find_race_odds_morning` の
+    /// 「朝時点＝最初にフル盤が成立した snapshot」判定はこの意味に依存している（ADR 0088）。
     pub fn is_complete(&self) -> bool {
-        !self.win.is_empty()
-            && !self.quinella.is_empty()
-            && !self.wide.is_empty()
-            && !self.exacta.is_empty()
-            && !self.trio.is_empty()
-            && !self.trifecta.is_empty()
+        self.missing_bet_types().is_empty()
+    }
+
+    /// `is_complete()` が要求する券種のうち、priced な行を 1 つも持たないものを返す（#632）。
+    ///
+    /// read-through の cache-hit 判定で「欠けている券種が未発売と確認済みの集合に収まるか」を
+    /// 突き合わせるために使う。`is_complete()` と同じ券種集合を見る（`place` は含めない）ので、
+    /// 両者の判定基準がズレない（second source を作らない）。
+    pub fn missing_bet_types(&self) -> BTreeSet<BetType> {
+        let mut missing = BTreeSet::new();
+        if self.win.is_empty() {
+            missing.insert(BetType::Win);
+        }
+        if self.quinella.is_empty() {
+            missing.insert(BetType::Quinella);
+        }
+        if self.wide.is_empty() {
+            missing.insert(BetType::Wide);
+        }
+        if self.exacta.is_empty() {
+            missing.insert(BetType::Exacta);
+        }
+        if self.trio.is_empty() {
+            missing.insert(BetType::Trio);
+        }
+        if self.trifecta.is_empty() {
+            missing.insert(BetType::Trifecta);
+        }
+        missing
     }
 }
 
