@@ -6,8 +6,8 @@ netkeiba は「未発売・該当なしの組み合わせ」に `99999.9` のよ
 
 Rust 側は `OddsValue::try_from`（`src/domain/src/odds/odds_value.rs`）が同じ番兵を弾くが、
 **この scripts/ 配下は psql / TSV で DB を直読みするので、そのガードを一切通らない**。
-分析（`live_ev` / `gate_calibration` / `snapshot_ev_report` / `umaren_backtest`）が汚染された
-ROI を出さないよう、オッズを float 化する入口でここを通す。
+分析（`live_ev` / `gate_calibration` / `snapshot_ev_report` / `umaren_backtest`）とワイド取得
+（`fetch_wide`）が汚染された ROI を出さないよう、オッズを float 化する入口でここを通す。
 
 **番兵は券種別**（#630/#634）。ワイドの番兵は `9999.9` だが、三連複・三連単には**正当な**
 `9999.9` の配当が実在する（9000〜11000 帯に trio 6,244 行・trifecta 56,230 行=2026-08-18 実測）。単勝・複勝に
@@ -39,6 +39,15 @@ SENTINELS_PATH = os.path.normpath(
 
 # DB の double precision を往復しても取りこぼさない幅（Rust の SENTINEL_EPSILON と同値）。
 SENTINEL_EPSILON = 1e-6
+
+
+def _matches_sentinel(sentinels, o):
+    """float 化済みの値が番兵タプルのどれかに一致するか（epsilon 比較の単一実装）。
+
+    モジュールトップレベルの `_load_sentinels()` 実行（重複行の検出）でも使うため、
+    その代入より前に定義しておくこと。
+    """
+    return any(abs(o - s) < SENTINEL_EPSILON for s in sentinels)
 
 # Rust の BetType（Display=snake_case）と同じ 7 ラベル。正本ファイルの検証と、公開 API の
 # 未知ラベル検出（ValueError）の両方に使う。win / place は番兵を持たないが**ラベルとしては
@@ -103,7 +112,9 @@ def _load_sentinels():
             )
         # 同一 (券種, 値) の重複はコピペ事故のサイン。他の書式違反と同様に受理しない
         # （Rust 側は const との順序込み完全一致で赤くなるが、Python 単体でも検出する）。
-        if value in sentinels.get(label, ()):
+        # 判定は実行時の番兵一致と同じ epsilon 比較——`9999.9000001` のような近接値の
+        # コピペ事故も、実行時には同じ番兵として振る舞うので同一扱いで弾く。
+        if _matches_sentinel(sentinels.get(label, ()), value):
             raise RuntimeError(
                 f"番兵リストに重複行: {SENTINELS_PATH}:{lineno} が {label} {text!r}。"
                 "同じ (券種, 値) は 1 行だけ書く"
@@ -133,11 +144,6 @@ def _sentinels_for(bet_type):
             f"未知の券種ラベル: {bet_type!r}（有効: {', '.join(VALID_BET_TYPES)}）"
         )
     return NETKEIBA_SENTINELS.get(bet_type, ())
-
-
-def _matches_sentinel(sentinels, o):
-    """float 化済みの値が番兵タプルのどれかに一致するか（epsilon 比較の単一実装）。"""
-    return any(abs(o - s) < SENTINEL_EPSILON for s in sentinels)
 
 
 def is_sentinel(bet_type, odds):

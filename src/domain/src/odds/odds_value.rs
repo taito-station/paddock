@@ -131,12 +131,17 @@ mod tests {
                 // 非対称を作らないよう厳格さを揃える。
                 let cols: Vec<&str> = l.trim().split('\t').collect();
                 assert_eq!(cols.len(), 2, "golden は `券種<TAB>値` の 2 列: {l:?}");
+                let value: f64 = cols[1].trim().parse().expect("golden の値は f64");
+                // Python 側は非有限を拒否する。Rust の parse は "inf" を受理するため、ここで
+                // 弾かないと「Rust テスト緑・Python は import 時全停止」の非対称になる
+                // （nan は NaN != NaN で自然に赤くなるが inf は素通りする）。
+                assert!(value.is_finite(), "golden の値は有限のみ: {l:?}");
                 (
                     // label も trim する——Python 側は label/value を個別に strip しており、
                     // `wide␣<TAB>` のような行で両言語の受理が非対称にならないよう揃える。
                     BetType::try_from(cols[0].trim())
                         .expect("golden の券種ラベルは snake_case の既知の値"),
-                    cols[1].trim().parse().expect("golden の値は f64"),
+                    value,
                 )
             })
             .collect();
