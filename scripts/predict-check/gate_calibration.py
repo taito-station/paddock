@@ -399,8 +399,6 @@ def load_odds(tsv_text):
             if not is_payout_odds(bt, high):
                 continue
             o = (low + high) / 2.0
-        if o <= 0:
-            continue
         out[rid][fetched][bt][key] = o
     return out
 

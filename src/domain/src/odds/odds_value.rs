@@ -126,16 +126,17 @@ mod tests {
             .lines()
             .filter(|l| !l.trim().is_empty())
             .map(|l| {
-                let (label, value) = l
-                    .trim()
-                    .split_once('\t')
-                    .expect("golden は `券種<TAB>値` の 2 列");
+                // 列数はちょうど 2 を要求する——Python 側は `split("\t")` の要素数 2 以外を
+                // 拒否するので、`wide<TAB><TAB>9999.9` のような行で「Rust 緑・Python 全停止」の
+                // 非対称を作らないよう厳格さを揃える。
+                let cols: Vec<&str> = l.trim().split('\t').collect();
+                assert_eq!(cols.len(), 2, "golden は `券種<TAB>値` の 2 列: {l:?}");
                 (
                     // label も trim する——Python 側は label/value を個別に strip しており、
                     // `wide␣<TAB>` のような行で両言語の受理が非対称にならないよう揃える。
-                    BetType::try_from(label.trim())
+                    BetType::try_from(cols[0].trim())
                         .expect("golden の券種ラベルは snake_case の既知の値"),
-                    value.trim().parse().expect("golden の値は f64"),
+                    cols[1].trim().parse().expect("golden の値は f64"),
                 )
             })
             .collect();
