@@ -34,8 +34,9 @@ sources:
   - docs/original-docs/0080-default-allocation-yen-denominated.md
   - docs/original-docs/0086-netkeiba-unpriced-sentinel-is-not-odds.md
   - docs/original-docs/0088-bet-type-scoped-unpriced-sentinels.md
+  - docs/original-docs/0089-unpriced-bet-type-observation.md
 distilled_from_sha: "a7b55c4"
-updated: "2026-08-18"
+updated: "2026-08-19"
 ---
 
 # 用語集（ユビキタス言語）
@@ -158,6 +159,7 @@ paddock 横断の用語索引。**この文書は定義の正本ではなく、�
 | ⚠ 対象外スキップ | 障害レース等の取り込み対象外。DB 無変更で理由を stdout に出し **exit 0**。degraded（3）ともハード失敗（1）とも別 | [netkeiba-datasource.md](../specifications/netkeiba-datasource.md)（終了コード）/ [ADR 0075](../original-docs/0075-unsupported-race-skip-exit-zero.md)（経緯） |
 | best-effort | 失敗しても全体を巻き添えにしない経路（オッズ**未発売**・近走取り込み・組合せ券種オッズ）。**exit 0 のまま**なので件数はログで見る | [netkeiba-datasource.md](../specifications/netkeiba-datasource.md) |
 | 未発売番兵 | netkeiba が未発売・該当なしの組み合わせに入れる**券種ごとの**固定値（ワイド `9999.9` / 馬連・馬単・三連複 `99999.9` / 三連単 `999999.9`。単勝・複勝には無い）。**払戻倍率ではない**ので EV に入れない——入ると 1 点で EV が 3 桁になり参考 ROI が跳ねる。判定は**券種スコープの特定値除外**（上限方式は正当な高配当を殺すので採らない。同じ値でも券種が違えば正当——三連複の `9999.9` は配当として実在し得る） | [netkeiba-datasource.md](../specifications/netkeiba-datasource.md)「未発売の番兵値」/ [ADR 0086](../original-docs/0086-netkeiba-unpriced-sentinel-is-not-odds.md) / [ADR 0088](../original-docs/0088-bet-type-scoped-unpriced-sentinels.md) |
+| 未発売観測 | 「この券種は netkeiba 上で未発売だと**確認できた**」という記録（`race_odds_unpriced_observations`）。read-through の cache-hit 判定で欠落券種から差し引き、券種まるごと未発売の時間帯に再スクレイプが止まらなくなるのを防ぐ。判定は「取得成功なのに priced が 0 件か」（番兵の有無では見ない）。**取得失敗は観測しない**——「分からない」を「売っていない」にすると #294 の自己修復が鈍る。TTL 15 分＝発売開始に気づくまでの最大遅れ | [netkeiba-datasource.md](../specifications/netkeiba-datasource.md)「保存したオッズの読み出しと read-through」/ [ADR 0089](../original-docs/0089-unpriced-bet-type-observation.md) |
 | transient | リトライ対象の一過性障害（`Timeout` / `Io` / `ConnectionFailed` / `HostNotFound` / `Protocol` / 5xx）。回数とバックオフは正本 | [netkeiba-datasource.md](../specifications/netkeiba-datasource.md)「transient リトライと degraded」/ [ADR 0049](../original-docs/0049-netkeiba-odds-transient-retry-and-degraded-exit.md)（経緯） |
 | decision-support | ツールは判断材料を出すだけで、**張る / 見送り / 増額の最終判断は人間**という位置づけ。`predict-watch` の設計原則 | [ADR 0055](../original-docs/0055-ev-layer-separation-circular-break.md) / [ADR 0060](../original-docs/0060-betting-axis-lock-preclose-topup.md) / [CLAUDE.md](../../CLAUDE.md)「ライブ監視時のコミュニケーション規律」 |
 
