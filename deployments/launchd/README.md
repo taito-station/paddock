@@ -75,6 +75,8 @@
   入っても伸びなかった。現在は毎サイクル DB を引き直し、**必要な窓が現行より後なら張り直す**
   （新しい `caffeinate` を起動してから旧を落とすので抑止の空白は生まれない）。延長したか据え置いたかは
   ログに残る。それでも **`install.sh` は `fetch-card` の後に叩くほうが良い**（初回から正しい窓になる）。
+  実 launchd での動作確認済み（2026-08-20・手順と測定値は
+  [一次資料 5 節](../../docs/original-docs/585-keep-awake-window-gap.md)）。
 - **lock は UID スコープの固定パス**（`/tmp/paddock-keep-awake-$(id -u).lock.d`・#643）。`$TMPDIR` は使わない
   ——launchd は `TMPDIR` を設定せず `/tmp` に落ちるため、端末（`/var/folders/.../T/`）と別の lock を見て
   互いを見失う（2026-08-19 実測）。**このパスは `keep_awake.sh` と `uninstall.sh` の両方が持つので、
