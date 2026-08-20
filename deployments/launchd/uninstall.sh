@@ -39,6 +39,9 @@ LOCK_DIR="${PADDOCK_KEEP_AWAKE_LOCK_DIR:-/tmp/paddock-keep-awake-$(id -u).lock.d
 # caffeinate を止められず、最終 post_time まで抑止が居座る——QA Q1 が `$TMPDIR` を却下した理由
 # （「uninstall が caffeinate を止められない」）と同じ壊れ方を、移行経路で自ら作ることになる。
 LEGACY_LOCK_DIR="${PADDOCK_KEEP_AWAKE_LEGACY_LOCK_DIR:-/tmp/paddock-keep-awake.lock.d}"
+# **上の 2 つの env は回帰テスト専用。本番では設定しないこと。** 片方の経路（端末 or launchd）だけで
+# export されると、作成側と削除側が別 lock を見て caffeinate を止め損なう——`keep_awake.sh` が
+# `$TMPDIR` を却下したのとまったく同じ壊れ方を env で再現できてしまう。
 
 # lock の片付けは **trap で到達性から切り離す**。直列に置くと、どこかで set -euo pipefail に
 # 引っかかった時点で削除されず「最後まで走ったように見えて走っていない」状態になる
@@ -64,8 +67,9 @@ lock_is_trustworthy() {
 stop_recorded_caffeinate() {
   local dir="$1" label="$2" pid
   pid="$(cat "$dir/pid" 2>/dev/null || echo '')"
-  # 数値でなければ「記録が無い」に倒す（kill に非数値を渡さない）。
-  case "$pid" in (*[!0-9]*|'') pid="" ;; esac
+  # 正の整数でなければ「記録が無い」に倒す。`kill` に `-1`（signal を送れる全プロセス）や
+  # `0`（呼び出し元のプロセスグループ全体）を渡さないため。
+  case "$pid" in (*[!0-9]*|''|0*) pid="" ;; esac
   if [ -z "$pid" ]; then
     # 記録が無い＝止めるべき caffeinate を見失っていないので、残骸を片付けてよい。
     return 0
@@ -87,7 +91,7 @@ stop_recorded_caffeinate() {
 
 # 存在するのに信用できない（symlink / 他ユーザー所有）lock は読まないし消さない。
 if { [ -e "$LOCK_DIR" ] || [ -L "$LOCK_DIR" ]; } && ! lock_is_trustworthy "$LOCK_DIR"; then
-  echo "⚠ lock パス ${LOCK_DIR} が信用できない（symlink か他ユーザー所有）。触りません" >&2
+  echo "⚠ lock パス ${LOCK_DIR} が信用できない（ディレクトリでない / symlink / 他ユーザー所有）。触りません" >&2
 elif stop_recorded_caffeinate "$LOCK_DIR" ""; then
   remove_lock=1
 fi
@@ -95,7 +99,7 @@ fi
 if [ "$LOCK_DIR" != "$LEGACY_LOCK_DIR" ] \
    && { [ -e "$LEGACY_LOCK_DIR" ] || [ -L "$LEGACY_LOCK_DIR" ]; }; then
   if ! lock_is_trustworthy "$LEGACY_LOCK_DIR"; then
-    echo "⚠ 旧 lock パス ${LEGACY_LOCK_DIR} が信用できない（symlink か他ユーザー所有）。触りません" >&2
+    echo "⚠ 旧 lock パス ${LEGACY_LOCK_DIR} が信用できない（ディレクトリでない / symlink / 他ユーザー所有）。触りません" >&2
   elif stop_recorded_caffeinate "$LEGACY_LOCK_DIR" "・旧 lock パス"; then
     remove_legacy_lock=1
   fi

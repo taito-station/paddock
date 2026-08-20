@@ -195,7 +195,8 @@ lock_is_trustworthy() {
 read_lock_pid() {
   local v
   v="$(cat "$1/pid" 2>/dev/null || echo '')"
-  [[ "$v" =~ ^[0-9]+$ ]] || v=""
+  # `0` も弾く——`kill 0` は「呼び出し元のプロセスグループ全体」が対象になる（`-1` と同じ理由）。
+  [[ "$v" =~ ^[1-9][0-9]*$ ]] || v=""
   printf '%s' "$v"
 }
 
@@ -216,7 +217,7 @@ inherited_stopped=0
 if [ "$LOCK_DIR" != "$LEGACY_LOCK_DIR" ] && { [ -e "$LEGACY_LOCK_DIR" ] || [ -L "$LEGACY_LOCK_DIR" ]; } \
    && ! lock_is_trustworthy "$LEGACY_LOCK_DIR"; then
   # 黙って飛ばすと、そこに記録された caffeinate が永久に回収されないのに理由が残らない。
-  log "⚠ 旧 lock パス ${LEGACY_LOCK_DIR} が信用できない（symlink か他ユーザー所有）。移行をスキップする"
+  log "⚠ 旧 lock パス ${LEGACY_LOCK_DIR} が信用できない（ディレクトリでない / symlink / 他ユーザー所有）。移行をスキップする"
 elif [ "$LOCK_DIR" != "$LEGACY_LOCK_DIR" ] && [ -d "$LEGACY_LOCK_DIR" ]; then
   legacy_pid="$(read_lock_pid "$LEGACY_LOCK_DIR")"
   if [ -n "$legacy_pid" ] && kill -0 "$legacy_pid" 2>/dev/null \
@@ -239,24 +240,27 @@ fi
 # 単一変数に代入すると片方を黙って取りこぼし、落とせなかった方が孤児になる。
 superseded_pids=()
 
-# `${arr[@]+...}` は bash 3.2 の `set -u` で空配列の展開が unbound になるのを避ける定型。
-stop_superseded_all() {
-  local p
-  for p in ${superseded_pids[@]+"${superseded_pids[@]}"}; do
-    stop_caffeinate "$p" "旧 caffeinate" || true
-  done
-}
 
 # **中身を読む前に lock 自体を検査する**。`/tmp` は誰でも名前を作れるので、先回り者が
 # symlink を張ったり pid / end を仕込んだりできる。mkdir 失敗時だけ所有者を見る作りだと、
 # 「生きた caffeinate の pid ＋ 遠い未来の end」を置かれたときに据え置き経路へ入り、
 # ログには「延長不要・据え置き」という無害な行しか出ない（抑止はゼロなのに正常に見える）。
 if { [ -e "$LOCK_DIR" ] || [ -L "$LOCK_DIR" ]; } && ! lock_is_trustworthy "$LOCK_DIR"; then
-  log "⚠ lock パス ${LOCK_DIR} が信用できない（symlink か他ユーザー所有）。抑止を掛けられない——放置すると開催日を通してスリープ抑止が効かない"
-  exit 0
+  log "⚠ lock パス ${LOCK_DIR} が信用できない（ディレクトリでない / symlink / 他ユーザー所有）。抑止を掛けられない——放置すると開催日を通してスリープ抑止が効かない"
+  # **非ゼロで終わる**。exit 0 だと launchd から見て成功なので、ログを開かない限り
+  # 「抑止が掛かっていない日」に気づけない。
+  exit 1
 fi
 
-if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+if ! mkdir -m 700 "$LOCK_DIR" 2>/dev/null; then
+  # 取得できなかった＝既に存在する。**上の検査から mkdir までの隙に作られた可能性がある**ので、
+  # 中身を読む前にもう一度検査する（検査をクリティカルセクションから離さない）。
+  if ! lock_is_trustworthy "$LOCK_DIR"; then
+    log "⚠ lock パス ${LOCK_DIR} が信用できない（ディレクトリでない / symlink / 他ユーザー所有）。抑止を掛けられない——放置すると開催日を通してスリープ抑止が効かない"
+    exit 1
+  fi
+  # 既存 lock の mode は作られた時の umask 次第（緩いと他ユーザーに pid を差し替えられる）。
+  chmod 700 "$LOCK_DIR" 2>/dev/null || true
   # lock 既存。中身で「稼働中／起動中／stale」を見分ける。
   pid="$(read_lock_pid "$LOCK_DIR")"
   # 稼働中: pid 生存かつプロセス名が caffeinate（PID 再利用の誤判定を comm で排除）。
@@ -302,19 +306,11 @@ if ! mkdir "$LOCK_DIR" 2>/dev/null; then
     # 残るは stale（caffeinate 死亡/PID 再利用、または起動途中で死んだ古い空 lock）。
     log "stale lock を回収して取り直す（pid=${pid:-未記入}）"
   fi
-  # 延長・stale とも lock を取り直す。この rm→mkdir は厳密にはアトミックでないが、同時到達で
-  # caffeinate が二重起動しても -t で自動終了する無害事象（launchd はジョブを直列化するため
-  # 実発生も稀）。門の単純さを優先する。
-  rm -rf "$LOCK_DIR" 2>/dev/null || true
-  mkdir "$LOCK_DIR" 2>/dev/null || {
-    # ここに来る＝rm と mkdir の隙に別プロセスが lock を取った（launchd はジョブを直列化するので稀）。
-    # **この時点で旧 pid の記録は既に消えている**ので、そのまま抜けると誰も止められない孤児が残る
-    # （Q11 の不変条件違反）。lock を取った側が自分の窓で caffeinate を張り直すので、
-    # ここで旧を落としても抑止は途切れない。
-    log "lock 競合で取得失敗（別プロセスが先に取得）。記録済みの旧 caffeinate を始末して終了"
-    stop_superseded_all
-    exit 0
-  }
+  # **lock は取り直さない**（延長・stale とも）。ここまで来た時点でディレクトリは自分の所有だと
+  # 確認済みなので、下で `pid` / `end` をその場で上書きすれば足りる。
+  # `rm -rf` → `mkdir` にすると、**その隙にスクリプトが落ちたときに「生きた caffeinate の記録だけが
+  # 消える」孤児窓**ができる（Q11 の不変条件を作成側で破る形）。取り直しをやめると
+  # 「取り直しに失敗したときの競合分岐」も不要になり、そこにあった抑止空白ごと消える。
 fi
 
 # 旧パスから引き継いだ caffeinate も「置き換える対象」に**足す**（上書きしない）。
@@ -325,8 +321,6 @@ if [ -n "$inherited_pid" ] \
   superseded_pids+=("$inherited_pid")
 fi
 
-# 引き継いだ pid を止め切ったか（既定は「止めていない」＝旧 lock を消さない安全側）。
-inherited_stopped=1
 
 # アイドルスリープを END まで抑止。-t で自動終了するので開放忘れが無い。launchd 経由では plist の
 # AbandonProcessGroup=true により、ジョブ主プロセス（本スクリプト）終了後も caffeinate が存続する
@@ -351,20 +345,20 @@ log "caffeinate -i -t ${SECS}s 起動（pid ${CAF_PID}）。${DATE} 最終post $
 # 5 分なので、この待ちのコストは無視できる。
 sleep 0.3
 if kill -0 "$CAF_PID" 2>/dev/null; then
+  # `${arr[@]+...}` は bash 3.2 の `set -u` で空配列の展開が unbound になるのを避ける定型。
   for superseded_pid in ${superseded_pids[@]+"${superseded_pids[@]}"}; do
-    if stop_caffeinate "$superseded_pid" "旧 caffeinate"; then
-      continue
-    fi
-    # 止め切れなかった。それが引き継ぎ元の pid なら旧ディレクトリを消してはいけない。
-    if [ -n "$inherited_pid" ] && [ "$superseded_pid" = "$inherited_pid" ]; then
-      inherited_stopped=0
+    # **止め切れたときだけ**フラグを立てる（既定 0 の fail-safe）。ここを楽観的に 1 で初期化して
+    # 失敗時に降格させる形にすると、この区間に early exit を 1 本足した瞬間に
+    # 「生きている引き継ぎ caffeinate の記録を消す」孤児バグになる。
+    if stop_caffeinate "$superseded_pid" "旧 caffeinate" \
+       && [ -n "$inherited_pid" ] && [ "$superseded_pid" = "$inherited_pid" ]; then
+      inherited_stopped=1
     fi
   done
 else
   # 新が居ない。旧をそのまま残すのが唯一の安全側（旧は -t で自然終了する）。
   # lock には死んだ pid が入るので、次サイクルが stale として取り直す。
   log "⚠ 新しい caffeinate (pid ${CAF_PID}) が起動直後に居ない。旧は落とさず残す（抑止を切らさない）"
-  inherited_stopped=0
 fi
 
 # 引き継ぎ元の旧ディレクトリは、その pid を**止め切った**ここで消す。早く消すと early exit した

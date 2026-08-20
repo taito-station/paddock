@@ -19,8 +19,10 @@ set -uo pipefail
 
 cd "$(dirname "$0")/.." || exit 1
 REPO_ROOT="$PWD"
-# ロケール非依存で全角混じりメッセージを扱う。呼び出し元の PADDOCK_* 汚染を避ける。
-export LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
+# 全角混じりメッセージを UTF-8 として扱う（#636 の罠を実行時に踏ませる意図）。
+# `en_US.UTF-8` は runner で生成されているとは限らず、無いと**黙って C にフォールバックして**
+# UTF-8 前提が崩れる。`C.UTF-8` は glibc / macOS 双方で確実に存在する。
+export LANG=C.UTF-8 LC_ALL=C.UTF-8
 unset PADDOCK_DB_URL PADDOCK_KEEP_AWAKE_LOCK_DIR PADDOCK_KEEP_AWAKE_LEGACY_LOCK_DIR WORKDIR
 # worktree から叩くと GIT_DIR 等が継承されて本物の index を汚す（#645 の実害）。
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
@@ -29,10 +31,22 @@ pass=0
 fail=0
 ok()  { echo "OK  $1"; pass=$((pass + 1)); }
 ng()  { echo "NG  $1"; shift; [ $# -gt 0 ] && echo "    $*"; fail=$((fail + 1)); }
-# caffeinate を起動したか。**スタブが書くログではなく keep_awake.sh 自身の出力で判定する**
-# ——スタブは nohup された背景プロセスなので、書き込みが親の終了に間に合わず競合する。
+# caffeinate の**起動を試みたか**。生存までは見ない（起動直後に死ぬケースでも真になる）。
+# **スタブが書くログではなく keep_awake.sh 自身の出力で判定する**——スタブは nohup された
+# 背景プロセスなので、書き込みが親の終了に間に合わず競合する。
 # 親が同期的に出す「起動（pid ...）」行なら取りこぼさない。
-started() { grep -q '起動（pid' <<<"$1"; }
+tried_start() { grep -q '起動（pid' <<<"$1"; }
+
+# プロセスが死ぬのを有界で待つ。SIGTERM の配送は非同期なので、`kill` 直後に `! kill -0` を
+# アサートすると負荷の高い環境で偽 FAIL する。
+wait_gone() {
+  local p="$1" i=0
+  while [ "$i" -lt 100 ]; do
+    kill -0 "$p" 2>/dev/null || return 0
+    i=$((i + 1)); sleep 0.05
+  done
+  return 1
+}
 # スタブが書くログを読むときの待ち合わせ。スタブは nohup された背景プロセスなので、
 # 書き込みが親の `$( )` の終了に間に合わない（1 巡目でこの競合を踏んだ）。有界で待つ。
 wait_for_line() {
@@ -47,8 +61,15 @@ wait_for_line() {
 TESTROOT="$(mktemp -d "${TMPDIR:-/tmp}/paddock-keep-awake-test.XXXXXX")"
 cleanup() {
   # 取り残した偽 caffeinate（sleep）を確実に始末する。テストが実機に sleep を残さない。
+  # **identity を確かめてから kill する**——記録した pid が既に死んで再利用されていると
+  # 無関係なプロセスを落とす（本体側で comm 照合を入れて潰したのと同じ穴）。
   if [ -f "$TESTROOT/spawned" ]; then
-    while read -r p; do [ -n "$p" ] && kill "$p" 2>/dev/null; done < "$TESTROOT/spawned"
+    while read -r p; do
+      [ -n "$p" ] || continue
+      case "$(ps -p "$p" -o comm= 2>/dev/null)" in
+        *sleep|*caffeinate) kill "$p" 2>/dev/null ;;
+      esac
+    done < "$TESTROOT/spawned"
   fi
   rm -rf "$TESTROOT"
   return 0
@@ -143,6 +164,9 @@ run_keep_awake() {
 run_uninstall() {
   local lockdir="$1" legacydir="$2"
   mkdir -p "$TESTROOT/home/Library/LaunchAgents"
+  # **ダミー plist を置く**。置かないと `launchctl unload` の経路自体が実行されず、
+  # スタブは呼ばれないまま「二重防御が効いている」と言うことになる（死んだ計装）。
+  : > "$TESTROOT/home/Library/LaunchAgents/com.paddock.keep-awake.plist"
   PATH="$STUB:$PATH" \
   HOME="$TESTROOT/home" \
   PADDOCK_KEEP_AWAKE_LOCK_DIR="$lockdir" \
@@ -179,7 +203,7 @@ caf="$(spawn_fake_caffeinate)"
 echo "$caf" > "$L/pid"
 echo "$(($(date +%s) + 86400))" > "$L/end"   # 十分先＝延長不要
 out="$(run_keep_awake "$L" --date 2026-08-22 --at 10:00)"
-if ! started "$out" && grep -q '延長不要' <<<"$out"; then
+if ! tried_start "$out" && grep -q '延長不要' <<<"$out"; then
   ok "end が必要窓を満たすなら caffeinate を起動しない（据え置き）"
 else
   ng "end が必要窓を満たすなら据え置き" "out=$out"
@@ -192,11 +216,14 @@ fi
 
 # --- 2. 記録が必要窓に足りない → 延長（新を起動してから旧を落とす） ---
 L="$(case_dir extend)"; mkdir -p "$L"
+# 引数ログは全ケース共有の追記ファイルなので、このケースの分だけを見るために切る
+# （切らないと、前にケースを 1 つ足しただけで別ケースの行に一致する偽陽性になる）。
+: > "$FAKE_CAFFEINATE_LOG"
 caf="$(spawn_fake_caffeinate)"
 echo "$caf" > "$L/pid"
 echo "$(($(date +%s) + 60))" > "$L/end"      # 1 分後まで＝18:30 まで足りない
 out="$(run_keep_awake "$L" --date 2026-08-22 --at 10:00)"
-if started "$out" && grep -q '抑止窓を延長する' <<<"$out"; then
+if tried_start "$out" && grep -q '抑止窓を延長する' <<<"$out"; then
   ok "end が足りなければ延長する（新しい caffeinate を起動）"
 else
   ng "end が足りなければ延長する" "out=$out"
@@ -257,7 +284,7 @@ while :; do
   out2="$(run_keep_awake "$L" --date 2026-08-22 --at 10:00)"
   [ "$m0" -eq "$(( $(date +%s) / 60 ))" ] && break
 done
-if started "$out1" && ! started "$out2" && grep -q '延長不要' <<<"$out2"; then
+if tried_start "$out1" && ! tried_start "$out2" && grep -q '延長不要' <<<"$out2"; then
   ok "同じ post_time なら 2 回目は据え置き（判定が秒針で揺れない・cold start 経由）"
 else
   ng "同じ post_time なら 2 回目は据え置き" "out1=$out1 / out2=$out2"
@@ -273,7 +300,7 @@ L="$(case_dir legacy_format)"; mkdir -p "$L"
 caf="$(spawn_fake_caffeinate)"
 echo "$caf" > "$L/pid"                        # end は書かない
 out="$(run_keep_awake "$L" --date 2026-08-22 --at 10:00)"
-if started "$out" && grep -q '旧形式' <<<"$out"; then
+if tried_start "$out" && grep -q '旧形式' <<<"$out"; then
   ok "end 未記入の lock は安全側に倒して張り直す"
 else
   ng "end 未記入の lock は張り直す" "out=$out"
@@ -282,7 +309,7 @@ fi
 # --- 4. pid 未記入かつ新しい lock → 「起動中」で据え置き（既存 self-heal を壊していない） ---
 L="$(case_dir starting)"; mkdir -p "$L"
 out="$(run_keep_awake "$L" --date 2026-08-22 --at 10:00)"
-if ! started "$out" && grep -q '別プロセスが起動中' <<<"$out"; then
+if ! tried_start "$out" && grep -q '別プロセスが起動中' <<<"$out"; then
   ok "pid 未記入かつ新しい lock は起動中とみなす（STARTUP_GRACE_MIN の self-heal 不変）"
 else
   ng "pid 未記入かつ新しい lock は起動中とみなす" "out=$out"
@@ -304,7 +331,7 @@ fi
 echo "$dead" > "$L/pid"
 echo "$(($(date +%s) + 86400))" > "$L/end"   # end は十分先でも pid が死んでいれば取り直す
 out="$(run_keep_awake "$L" --date 2026-08-22 --at 10:00)"
-if started "$out" && grep -q 'stale lock' <<<"$out"; then
+if tried_start "$out" && grep -q 'stale lock' <<<"$out"; then
   ok "pid が死んだ lock は end が新しくても取り直す"
 else
   ng "pid が死んだ lock は取り直す" "out=$out"
@@ -316,7 +343,7 @@ alien="$(spawn_fake_caffeinate)"
 echo "$alien" > "$L/pid"
 echo "$(($(date +%s) + 86400))" > "$L/end"
 out="$(FAKE_PS_ALIEN_PID="$alien" run_keep_awake "$L" --date 2026-08-22 --at 10:00)"
-if started "$out" && grep -q 'stale lock' <<<"$out"; then
+if tried_start "$out" && grep -q 'stale lock' <<<"$out"; then
   ok "pid が caffeinate でなければ stale 扱い（comm 照合が効いている）"
 else
   ng "pid が caffeinate でなければ stale 扱い" "out=$out"
@@ -372,7 +399,7 @@ caf="$(spawn_fake_caffeinate)"
 echo "$caf" > "$L/pid"
 printf 'not-a-number\n' > "$L/end"
 out="$(run_keep_awake "$L" --date 2026-08-22 --at 10:00)"
-if started "$out" && grep -q '旧形式か破損' <<<"$out"; then
+if tried_start "$out" && grep -q '旧形式か破損' <<<"$out"; then
   ok "end が非数値の lock は安全側に倒して張り直す"
 else
   ng "end が非数値の lock は張り直す" "out=$out"
@@ -386,7 +413,7 @@ L="$TESTROOT/case-symlink-lock.d"
 mkdir -p "$(dirname "$L")"
 ln -s "$TESTROOT/decoy" "$L"
 out="$(run_keep_awake "$L" --date 2026-08-22 --at 10:00)"
-if ! started "$out" && grep -q '信用できない' <<<"$out"; then
+if ! tried_start "$out" && grep -q '信用できない' <<<"$out"; then
   ok "lock が symlink なら中身を読まず警告して抜ける（無言停止させない）"
 else
   ng "lock が symlink なら警告して抜ける" "out=$out"
@@ -417,7 +444,7 @@ mkdir -p "$LEGACY"
 caf="$(spawn_fake_caffeinate)"
 echo "$caf" > "$LEGACY/pid"
 out="$(TEST_LEGACY_DIR="$LEGACY" run_keep_awake "$L" --date 2026-08-22 --at 10:00)"
-if grep -q '旧 lock パスの caffeinate を引き継ぐ' <<<"$out" && started "$out"; then
+if grep -q '旧 lock パスの caffeinate を引き継ぐ' <<<"$out" && tried_start "$out"; then
   ok "旧 lock パスの caffeinate を引き継いで張り直す"
 else
   ng "旧 lock パスの caffeinate を引き継ぐ" "out=$out"
@@ -433,6 +460,35 @@ else
   ng "旧 lock ディレクトリは移行後に消える" "${LEGACY} が残っている"
 fi
 
+# --- 7a2. 旧パスが symlink → 中身を読まず警告してスキップ（移行を諦める） ---
+# 旧パスも `/tmp` 直下なので先回りされうる。pid の中身がそのまま kill の引数になるため、
+# 信用できないディレクトリは読まない。
+L="$(case_dir legacy_symlink)"
+mkdir -p "$TESTROOT/decoy3"
+LEGACY_SL="$TESTROOT/case-legacy_symlink/legacy.lock.d"
+ln -s "$TESTROOT/decoy3" "$LEGACY_SL"
+out="$(TEST_LEGACY_DIR="$LEGACY_SL" run_keep_awake "$L" --date 2026-08-22 --at 10:00)"
+if grep -q '旧 lock パス.*信用できない' <<<"$out" && [ -L "$LEGACY_SL" ]; then
+  ok "旧 lock パスが symlink なら読まず消さず警告する"
+else
+  ng "旧 lock パスが symlink なら触らない" "残存=$([ -L "$LEGACY_SL" ] && echo yes || echo no) out=$out"
+fi
+rm -f "$LEGACY_SL"
+
+# --- 7a3. 旧パスに死んだ pid → 残骸として掃除する ---
+L="$(case_dir legacy_stale)"
+LEGACY_ST="$TESTROOT/case-legacy_stale/legacy.lock.d"
+mkdir -p "$LEGACY_ST"
+deadl="$(spawn_fake_caffeinate)"; kill "$deadl" 2>/dev/null
+wait_gone "$deadl" || { echo "ABORT legacy stale の前提が崩れた" >&2; exit 1; }
+echo "$deadl" > "$LEGACY_ST/pid"
+out="$(TEST_LEGACY_DIR="$LEGACY_ST" run_keep_awake "$L" --date 2026-08-22 --at 10:00)"
+if grep -q '生存せず' <<<"$out" && [ ! -d "$LEGACY_ST" ]; then
+  ok "旧 lock パスの死んだ pid は残骸として掃除する"
+else
+  ng "旧 lock パスの残骸を掃除する" "残存=$([ -d "$LEGACY_ST" ] && echo yes || echo no) out=$out"
+fi
+
 # --- 7b. 据え置き経路でも旧パスの caffeinate を孤児にしない ---
 # 旧 lock の削除を early exit より前に置くと、生きた caffeinate の pid 記録だけが消えて
 # uninstall からも次サイクルからも止められなくなる。据え置き（＝現行が窓を満たす）でも
@@ -446,12 +502,12 @@ mkdir -p "$LEGACY2"
 old="$(spawn_fake_caffeinate)"
 echo "$old" > "$LEGACY2/pid"
 out="$(TEST_LEGACY_DIR="$LEGACY2" run_keep_awake "$L" --date 2026-08-22 --at 10:00)"
-if ! started "$out" && grep -q '延長不要' <<<"$out" && [ ! -d "$LEGACY2" ]; then
+if ! tried_start "$out" && grep -q '延長不要' <<<"$out" && [ ! -d "$LEGACY2" ]; then
   ok "据え置きでも旧パスの caffeinate を停止し旧 lock を消す（孤児を作らない）"
 else
   ng "据え置きでも旧パスの caffeinate を始末する" "legacy残=$([ -d "$LEGACY2" ] && echo yes || echo no) out=$out"
 fi
-if kill -0 "$cur" 2>/dev/null && ! kill -0 "$old" 2>/dev/null; then
+if kill -0 "$cur" 2>/dev/null && wait_gone "$old"; then
   ok "据え置き時に落とすのは旧パス側だけ（現行 caffeinate は生存）"
 else
   ng "据え置き時に落とすのは旧パス側だけ" "cur=$(kill -0 "$cur" 2>/dev/null && echo alive || echo dead) old=$(kill -0 "$old" 2>/dev/null && echo alive || echo dead)"
@@ -483,7 +539,7 @@ mkdir -p "$LEGACY4"
 old4="$(spawn_fake_caffeinate)"
 echo "$old4" > "$LEGACY4/pid"
 out="$(TEST_LEGACY_DIR="$LEGACY4" run_keep_awake "$L" --date 2026-08-22 --at 10:00)"
-if started "$out" && ! kill -0 "$cur4" 2>/dev/null && ! kill -0 "$old4" 2>/dev/null; then
+if tried_start "$out" && wait_gone "$cur4" && wait_gone "$old4"; then
   ok "現行 lock と旧パスの両方が生きていれば両方停止する（取りこぼさない）"
 else
   ng "現行 lock と旧パスの両方を停止する" "cur=$(kill -0 "$cur4" 2>/dev/null && echo alive || echo dead) old=$(kill -0 "$old4" 2>/dev/null && echo alive || echo dead) out=$out"
@@ -497,7 +553,7 @@ mkdir -p "$LEGACY5"
 old5="$(spawn_fake_caffeinate)"
 echo "$old5" > "$LEGACY5/pid"
 out="$(run_uninstall "$L" "$LEGACY5")"
-if grep -q '旧 lock パス' <<<"$out" && ! kill -0 "$old5" 2>/dev/null && [ ! -d "$LEGACY5" ]; then
+if grep -q '旧 lock パス' <<<"$out" && wait_gone "$old5" && [ ! -d "$LEGACY5" ]; then
   ok "uninstall.sh は旧 lock パスの caffeinate も停止して片付ける"
 else
   ng "uninstall.sh が旧 lock パスの caffeinate を停止する" "old=$(kill -0 "$old5" 2>/dev/null && echo alive || echo dead) legacy残=$([ -d "$LEGACY5" ] && echo yes || echo no) out=$out"
@@ -505,10 +561,19 @@ fi
 # **uninstall.sh は $HOME の plist を消しに行く**。テストが実機の稼働中エージェントを外さないよう、
 # HOME がサンドボックスへ差し替わっていることを実際の出力で固定する（CI(ubuntu) は plist が
 # 無いので素通りし、この危険は CI では可視化されない）。
-if grep -q "未インストール: ${TESTROOT}/home/Library/LaunchAgents/com.paddock.keep-awake.plist" <<<"$out"; then
+# ダミー plist を置いてあるので「除去しました」が出る＝**サンドボックス内の plist を実際に処理した**
+# ことまで言える（「未インストール」だと差し替えの証明にならない）。
+if grep -q "除去しました: ${TESTROOT}/home/Library/LaunchAgents/com.paddock.keep-awake.plist" <<<"$out" \
+   && [ ! -e "$TESTROOT/home/Library/LaunchAgents/com.paddock.keep-awake.plist" ]; then
   ok "uninstall.sh の HOME はテスト用サンドボックスに閉じている（実機の plist を触らない）"
 else
   ng "uninstall.sh の HOME がサンドボックスに閉じている" "out=$out"
+fi
+# launchctl スタブが実際に呼ばれたこと＝実 launchd へ行っていないことを固定する。
+if grep -q "launchctl unload ${TESTROOT}/home/Library/LaunchAgents/com.paddock.keep-awake.plist" "$FAKE_LAUNCHCTL_LOG"; then
+  ok "launchctl はスタブに向いている（実 launchd を触らない）"
+else
+  ng "launchctl がスタブに向いている" "log=$(cat "$FAKE_LAUNCHCTL_LOG")"
 fi
 
 # --- 7f. uninstall.sh の主経路（新パス側）も停止して片付ける ---
@@ -518,7 +583,7 @@ cur7="$(spawn_fake_caffeinate)"
 echo "$cur7" > "$L/pid"
 out="$(run_uninstall "$L" "$TESTROOT/absent-legacy.lock.d")"
 if grep -q "caffeinate を停止しました（pid ${cur7}）" <<<"$out" \
-   && ! kill -0 "$cur7" 2>/dev/null && [ ! -d "$L" ]; then
+   && wait_gone "$cur7" && [ ! -d "$L" ]; then
   ok "uninstall.sh は新パスの caffeinate を停止して lock を片付ける"
 else
   ng "uninstall.sh が新パスの caffeinate を停止する" "alive=$(kill -0 "$cur7" 2>/dev/null && echo yes || echo no) lock残=$([ -d "$L" ] && echo yes || echo no) out=$out"
@@ -535,6 +600,20 @@ else
   ng "uninstall.sh は symlink の lock を触らない" "残存=$([ -L "$L2" ] && echo yes || echo no) out=$out"
 fi
 rm -f "$L2"
+
+# --- 7h. uninstall.sh は symlink の旧 lock も触らない ---
+# 7g は新パスだけを踏むので、旧パス側の信用検査が無検査だった（変異検査で発覚）。
+L="$(case_dir uninstall_legacy_symlink)"
+LEG_SL2="$TESTROOT/case-uninstall_legacy_symlink/legacy.lock.d"
+mkdir -p "$TESTROOT/decoy4"
+ln -s "$TESTROOT/decoy4" "$LEG_SL2"
+out="$(run_uninstall "$L" "$LEG_SL2")"
+if grep -q '旧 lock パス.*信用できない' <<<"$out" && [ -L "$LEG_SL2" ]; then
+  ok "uninstall.sh は symlink の旧 lock を読まず消さない"
+else
+  ng "uninstall.sh は symlink の旧 lock を触らない" "残存=$([ -L "$LEG_SL2" ] && echo yes || echo no) out=$out"
+fi
+rm -f "$LEG_SL2"
 
 # --- 8. 既定 lock パスが uid スコープで、作成側と削除側が同じ式を持つ ---
 # #643 の要件「作成側と削除側の両方を同時に直す」の機械的な担保。片方だけ変えると
@@ -573,7 +652,7 @@ echo
 echo "=== 合計: PASS=${pass} FAIL=${fail} ==="
 # **期待ケース数を固定する**。FAIL=0 だけを見ると、条件分岐でケースが丸ごと実行されなかったとき
 # （旧実装の skip 分岐がこの形だった）に「全部通った」と読めてしまう＝偽陰性。
-EXPECTED=34
+EXPECTED=38
 if [ "$((pass + fail))" -ne "$EXPECTED" ]; then
   echo "NG  実行ケース数が期待と違う: $((pass + fail)) != ${EXPECTED}（ケースが飛ばされている）"
   exit 1
