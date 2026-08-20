@@ -456,7 +456,9 @@ fi
 # --- 6i. pid 未記入で古い lock → stale として取り直す（時効判定が生きている） ---
 # ケース 4 は「新しい空 lock → 起動中」の片側しか見ておらず、時効の項を消す変異が素通りしていた。
 L="$(case_dir stale_empty)"; mkdir -p "$L"
-touch -t "$(date -v-5M '+%Y%m%d%H%M')" "$L"
+# **`date -v` は BSD 固有**（GNU date には無い）。CI は ubuntu なので使えない。
+# 時効判定に必要なのは「STARTUP_GRACE_MIN(2 分) より古い」ことだけなので、固定の過去日で足りる。
+touch -t 202001010000 "$L"
 out="$(run_keep_awake "$L" --date 2026-08-22 --at 10:00)"
 if tried_start "$out" && grep -q 'stale lock' <<<"$out"; then
   ok "pid 未記入でも古い lock は stale として取り直す（恒久無言停止しない）"
@@ -483,7 +485,11 @@ rmdir "${L}.renew" 2>/dev/null || true
 # --- 6k. 新規に作る lock は 0700 ---
 L="$(case_dir mode)"
 out="$(run_keep_awake "$L" --date 2026-08-22 --at 10:00)"
-mode="$(stat -f '%Lp' "$L" 2>/dev/null || stat -c '%a' "$L" 2>/dev/null)"
+# **GNU(-c) を先に試す**。逆順にすると Linux で壊れる——GNU の `stat -f` は「ファイルシステム状態」の
+# 意味なので、`'%Lp'` でエラーになりつつ `"$L"` の情報を stdout に出したうえで非ゼロ終了し、
+# フォールバックの出力と `$( )` の中で連結されてしまう（CI で実際に踏んだ）。
+# macOS の `stat -c` は単に不正オプションで stdout を出さずに失敗するので、この順序なら両方で正しい。
+mode="$(stat -c '%a' "$L" 2>/dev/null || stat -f '%Lp' "$L" 2>/dev/null)"
 if tried_start "$out" && [ "$mode" = "700" ]; then
   ok "新規 lock は 0700 で作る（umask が緩くても pid を差し替えられない）"
 else
