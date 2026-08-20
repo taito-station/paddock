@@ -252,7 +252,7 @@ fi
 # **窓の長さそのものを固定する**。「起動した / しない」しか見ないと、END_MIN / SECS の計算が
 # 壊れても全ケース通る（スタブは引数を記録しているのに誰も読んでいない＝死んだ計装だった）。
 # --at 10:00（=600 分）/ 最終 post 18:30（=1110 分）+ buffer 10 分 → (1120-600)*60 = 31200 秒。
-if grep -q 'caffeinate -i -t 31200s 起動' <<<"$out" && wait_for_line "$FAKE_CAFFEINATE_LOG" '-i -t 31200'; then
+if grep -q 'caffeinate -i -t 31200 起動' <<<"$out" && wait_for_line "$FAKE_CAFFEINATE_LOG" '-i -t 31200'; then
   ok "caffeinate に渡す抑止秒数が最終 post + buffer から正しく出ている（-i -t 31200）"
 else
   ng "caffeinate の抑止秒数" "記録された引数: $(tr '\n' '/' < "$FAKE_CAFFEINATE_LOG") / out=$out"
@@ -356,11 +356,18 @@ L="$(case_dir new_dies)"; mkdir -p "$L"
 old6="$(spawn_fake_caffeinate)"
 echo "$old6" > "$L/pid"
 echo "$(( ($(date +%s) + 60) / 60 * 60 ))" > "$L/end"   # 窓が足りない＝延長しようとする
-out="$(FAKE_CAFFEINATE_DIE=1 run_keep_awake "$L" --date 2026-08-22 --at 10:00)"
+out="$(FAKE_CAFFEINATE_DIE=1 run_keep_awake "$L" --date 2026-08-22 --at 10:00)"; rc=$?
 if grep -q '起動直後に居ない' <<<"$out" && kill -0 "$old6" 2>/dev/null; then
   ok "新しい caffeinate が起動直後に死んだら旧を落とさず残す（抑止を切らさない）"
 else
   ng "新が死んだら旧を残す" "old=$(kill -0 "$old6" 2>/dev/null && echo alive || echo dead) out=$out"
+fi
+# **lock を書き換えていないこと**。先に pid を書いてから生存確認すると、新が死んだ経路で
+# 生きた旧の記録が消えて誰も止められない孤児になる。
+if [ "$(cat "$L/pid")" = "$old6" ] && [ "$rc" -ne 0 ]; then
+  ok "新が死んだら lock を書き換えず非ゼロで終わる（旧の記録を失わない）"
+else
+  ng "新が死んだら lock を書き換えない" "pid=$(cat "$L/pid") 期待=${old6} rc=${rc}"
 fi
 
 # --- 6e. comm が「caffeinate を含むだけ」のパス → stale 扱い（部分一致で通さない） ---
@@ -412,13 +419,76 @@ mkdir -p "$TESTROOT/decoy"
 L="$TESTROOT/case-symlink-lock.d"
 mkdir -p "$(dirname "$L")"
 ln -s "$TESTROOT/decoy" "$L"
-out="$(run_keep_awake "$L" --date 2026-08-22 --at 10:00)"
+out="$(run_keep_awake "$L" --date 2026-08-22 --at 10:00)"; rc=$?
 if ! tried_start "$out" && grep -q '信用できない' <<<"$out"; then
   ok "lock が symlink なら中身を読まず警告して抜ける（無言停止させない）"
 else
   ng "lock が symlink なら警告して抜ける" "out=$out"
 fi
+# README が「この経路は非ゼロ終了なので launchd 側のエラーにも残る」と運用契約にしているので固定する。
+if [ "$rc" -ne 0 ]; then
+  ok "信用できない lock の経路は非ゼロで終わる（launchd から成功に見えない）"
+else
+  ng "信用できない lock は非ゼロ終了" "rc=${rc}"
+fi
 rm -f "$L"
+
+# --- 6h. stale 経路で古い end を持ち越さない ---
+# lock を取り直さなくなったので、前回の end が残ったまま新しい pid と組みうる。
+# 前の caffeinate が -t 満了でなく外から kill されていると前回値は遠い未来なので、
+# その組み合わせだと次サイクルが「延長不要」と判定しつつ実窓は短い＝#585 の再現になる。
+L="$(case_dir stale_end)"; mkdir -p "$L"
+deadp="$(spawn_fake_caffeinate)"; kill "$deadp" 2>/dev/null
+wait_gone "$deadp" || { echo "ABORT stale_end の前提が崩れた" >&2; exit 1; }
+echo "$deadp" > "$L/pid"
+FAR=$(( ($(date +%s) + 999999) / 60 * 60 ))
+echo "$FAR" > "$L/end"
+out="$(run_keep_awake "$L" --date 2026-08-22 --at 10:00)"
+new_end2="$(cat "$L/end" 2>/dev/null || echo '')"
+if tried_start "$out" && [ -n "$new_end2" ] && [ "$new_end2" != "$FAR" ]; then
+  ok "stale 経路の end は新しい窓で上書きされる（前回値が残らない）"
+else
+  ng "stale 経路の end が上書きされる" "end=${new_end2} 旧=${FAR} out=$out"
+fi
+# 注: 書き込み前の `rm -f end` そのものはここでは検査できない。効くのは「pid を書いた直後に
+# プロセスが落ちる」中間状態だけで、通常実行では後段の書き込みが上書きしてしまう（QA Q17 参照）。
+
+# --- 6i. pid 未記入で古い lock → stale として取り直す（時効判定が生きている） ---
+# ケース 4 は「新しい空 lock → 起動中」の片側しか見ておらず、時効の項を消す変異が素通りしていた。
+L="$(case_dir stale_empty)"; mkdir -p "$L"
+touch -t "$(date -v-5M '+%Y%m%d%H%M')" "$L"
+out="$(run_keep_awake "$L" --date 2026-08-22 --at 10:00)"
+if tried_start "$out" && grep -q 'stale lock' <<<"$out"; then
+  ok "pid 未記入でも古い lock は stale として取り直す（恒久無言停止しない）"
+else
+  ng "古い空 lock は stale 扱い" "out=$out"
+fi
+
+# --- 6j. 張り直しは排他される（同時実行で二重起動しない） ---
+# lock を取り直さなくなった代わりの排他トークン。これが無いと 2 プロセスが同時に caffeinate を
+# 起動し、後書き勝ちの pid 記録で先発が孤児になる。
+L="$(case_dir renew_busy)"; mkdir -p "$L"
+busy="$(spawn_fake_caffeinate)"
+echo "$busy" > "$L/pid"
+echo "$(( ($(date +%s) + 60) / 60 * 60 ))" > "$L/end"   # 窓が足りない＝張り直そうとする
+mkdir -p "${L}.renew"                                    # 先発が張り直し中
+out="$(run_keep_awake "$L" --date 2026-08-22 --at 10:00)"
+if ! tried_start "$out" && grep -q '別プロセスが張り直し中' <<<"$out" && kill -0 "$busy" 2>/dev/null; then
+  ok "張り直しは排他される（先発が居れば起動せず降りる）"
+else
+  ng "張り直しの排他" "out=$out"
+fi
+rmdir "${L}.renew" 2>/dev/null || true
+
+# --- 6k. 新規に作る lock は 0700 ---
+L="$(case_dir mode)"
+out="$(run_keep_awake "$L" --date 2026-08-22 --at 10:00)"
+mode="$(stat -f '%Lp' "$L" 2>/dev/null || stat -c '%a' "$L" 2>/dev/null)"
+if tried_start "$out" && [ "$mode" = "700" ]; then
+  ok "新規 lock は 0700 で作る（umask が緩くても pid を差し替えられない）"
+else
+  ng "新規 lock は 0700" "mode=${mode} out=$out"
+fi
 
 # --- 6d. --help がコード行を漏らさない ---
 # 行番号固定の `sed` はヘッダ長とズレるとコードを吐く（#585 以前から 10 行漏れていた）。
@@ -652,7 +722,7 @@ echo
 echo "=== 合計: PASS=${pass} FAIL=${fail} ==="
 # **期待ケース数を固定する**。FAIL=0 だけを見ると、条件分岐でケースが丸ごと実行されなかったとき
 # （旧実装の skip 分岐がこの形だった）に「全部通った」と読めてしまう＝偽陰性。
-EXPECTED=38
+EXPECTED=44
 if [ "$((pass + fail))" -ne "$EXPECTED" ]; then
   echo "NG  実行ケース数が期待と違う: $((pass + fail)) != ${EXPECTED}（ケースが飛ばされている）"
   exit 1

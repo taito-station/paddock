@@ -52,6 +52,10 @@ LEGACY_LOCK_DIR="${PADDOCK_KEEP_AWAKE_LEGACY_LOCK_DIR:-/tmp/paddock-keep-awake.l
 # 避けたい状態）。そこで trap は先に張り、**削除してよいと確定したときだけ**フラグを立てる。
 remove_lock=0
 remove_legacy_lock=0
+# 信用できない lock を見つけたら最後に非ゼロで終わる（`keep_awake.sh` と同じ扱い）。
+# 途中で抜けずに plist の除去は必ず走らせる——止められない caffeinate が残ることと、
+# エージェントを外し損ねることは別問題なので、片方の失敗でもう片方を諦めない。
+untrusted=0
 trap '[ "${remove_lock}" -eq 1 ] && rm -rf "${LOCK_DIR}" 2>/dev/null;
       [ "${remove_legacy_lock}" -eq 1 ] && rm -rf "${LEGACY_LOCK_DIR}" 2>/dev/null; true' EXIT
 
@@ -92,6 +96,7 @@ stop_recorded_caffeinate() {
 # 存在するのに信用できない（symlink / 他ユーザー所有）lock は読まないし消さない。
 if { [ -e "$LOCK_DIR" ] || [ -L "$LOCK_DIR" ]; } && ! lock_is_trustworthy "$LOCK_DIR"; then
   echo "⚠ lock パス ${LOCK_DIR} が信用できない（ディレクトリでない / symlink / 他ユーザー所有）。触りません" >&2
+  untrusted=1
 elif stop_recorded_caffeinate "$LOCK_DIR" ""; then
   remove_lock=1
 fi
@@ -100,7 +105,11 @@ if [ "$LOCK_DIR" != "$LEGACY_LOCK_DIR" ] \
    && { [ -e "$LEGACY_LOCK_DIR" ] || [ -L "$LEGACY_LOCK_DIR" ]; }; then
   if ! lock_is_trustworthy "$LEGACY_LOCK_DIR"; then
     echo "⚠ 旧 lock パス ${LEGACY_LOCK_DIR} が信用できない（ディレクトリでない / symlink / 他ユーザー所有）。触りません" >&2
+    untrusted=1
   elif stop_recorded_caffeinate "$LEGACY_LOCK_DIR" "・旧 lock パス"; then
     remove_legacy_lock=1
   fi
 fi
+
+# 信用できない lock があった＝止められない caffeinate が残っているかもしれない。黙って成功にしない。
+[ "$untrusted" -eq 0 ]

@@ -83,9 +83,14 @@ fmt_epoch() {
 # 戻り値: 0 = もう生きていない（記録を消してよい）/ 1 = 生きているのに止められなかった。
 stop_caffeinate() {
   local pid="$1" what="$2"
-  if ! kill -0 "$pid" 2>/dev/null \
-     || ! ps -p "$pid" -o comm= 2>/dev/null | grep -qE '(^|/)caffeinate$'; then
+  if ! kill -0 "$pid" 2>/dev/null; then
     log "${what} (pid ${pid}) は既に終了していた"
+    return 0
+  fi
+  # 生きてはいるが caffeinate でない＝PID が再利用された。これは「終了していた」とは別の事象なので
+  # 分けて記録する（同じ文言にすると障害調査で PID 再利用が起きた事実が消える）。
+  if ! ps -p "$pid" -o comm= 2>/dev/null | grep -qE '(^|/)caffeinate$'; then
+    log "${what} (pid ${pid}) は既に別プロセスに置き換わっていた（PID 再利用）。kill しない"
     return 0
   fi
   if kill "$pid" 2>/dev/null; then
@@ -144,7 +149,7 @@ SECS=$(((END_MIN - NOW_MIN) * 60))
 END_EPOCH=$((NOW_EPOCH / 60 * 60 + SECS))
 
 if [ "$DRY_RUN" -eq 1 ]; then
-  log "[dry-run] $DATE 最終post=$LAST_POST end=$END_MIN(now=$NOW_MIN) → caffeinate -i -t ${SECS}s"
+  log "[dry-run] $DATE 最終post=$LAST_POST end=$END_MIN(now=$NOW_MIN) → caffeinate -i -t ${SECS}"
   exit 0
 fi
 
@@ -181,6 +186,9 @@ LOCK_DIR="${PADDOCK_KEEP_AWAKE_LOCK_DIR:-/tmp/paddock-keep-awake-$(id -u).lock.d
 # 旧パス（uid 無し）。移行期に見て、生きた caffeinate を取りこぼさない（#643）。
 # テストが実運用の旧 lock を掴んで本物の caffeinate を殺さないよう、env で注入可能にする。
 LEGACY_LOCK_DIR="${PADDOCK_KEEP_AWAKE_LEGACY_LOCK_DIR:-/tmp/paddock-keep-awake.lock.d}"
+# 張り直し（延長 / stale 回収）専用の排他トークン。lock ディレクトリを取り直さなくなった代わりに
+# ここで同時実行を弾く。`LOCK_DIR` の中ではなく隣に置く（中だと lock の mtime を動かしてしまう）。
+RENEW_DIR="${LOCK_DIR}.renew"
 
 # lock ディレクトリの中身を信用してよいか。`/tmp` は誰でも名前を作れるので、
 # **symlink / 他ユーザー所有は敵対的とみなして中身を読まない**——`pid` の中身がそのまま
@@ -309,8 +317,27 @@ if ! mkdir -m 700 "$LOCK_DIR" 2>/dev/null; then
   # **lock は取り直さない**（延長・stale とも）。ここまで来た時点でディレクトリは自分の所有だと
   # 確認済みなので、下で `pid` / `end` をその場で上書きすれば足りる。
   # `rm -rf` → `mkdir` にすると、**その隙にスクリプトが落ちたときに「生きた caffeinate の記録だけが
-  # 消える」孤児窓**ができる（Q11 の不変条件を作成側で破る形）。取り直しをやめると
-  # 「取り直しに失敗したときの競合分岐」も不要になり、そこにあった抑止空白ごと消える。
+  # 消える」孤児窓**ができる（Q11 の不変条件を作成側で破る形）。
+  #
+  # **ただし取り直しをやめると排他ゲートも消える**。`mkdir` の原子性に頼れなくなるので、
+  # 張り直し専用のトークンを別に取る。これが無いと 2 プロセスが同時に「延長が必要」と判定して
+  # 両方 caffeinate を起動し、後書き勝ちの `pid` 記録で先発が孤児になる（launchd は同一 label を
+  # 直列化するが、手動実行と tick が重なると起きる）。
+  # トークンは `LOCK_DIR` の**外**に置く——中に作ると `LOCK_DIR` の mtime が変わり、
+  # 上の `STARTUP_GRACE_MIN` 判定（pid 未記入の空 lock の時効）を狂わせる。
+  if ! mkdir -m 700 "$RENEW_DIR" 2>/dev/null; then
+    # 起動途中で死んだ残骸なら時効で回収する。生きているなら先発に任せて降りる
+    # （抑止は現行 caffeinate が握っているので、降りても空白は生まれない）。
+    if [ -n "$(find "$RENEW_DIR" -prune -mmin +"$STARTUP_GRACE_MIN" 2>/dev/null)" ]; then
+      rmdir "$RENEW_DIR" 2>/dev/null || true
+    fi
+    mkdir -m 700 "$RENEW_DIR" 2>/dev/null || {
+      log "別プロセスが張り直し中（${RENEW_DIR}）。終了"
+      exit 0
+    }
+  fi
+  # 以降どの経路で抜けてもトークンを返す。
+  trap 'rmdir "$RENEW_DIR" 2>/dev/null || true' EXIT
 fi
 
 # 旧パスから引き継いだ caffeinate も「置き換える対象」に**足す**（上書きしない）。
@@ -328,38 +355,44 @@ fi
 # 端末/cron 経路での SIGHUP 巻き添え回避。先に lock を取ってから起動し、起動直後に pid を書く。
 nohup caffeinate -i -t "$SECS" >/dev/null 2>&1 &
 CAF_PID=$!
-echo "$CAF_PID" > "$LOCK_DIR/pid"
-# 抑止終了の絶対時刻を併記する（#585）。次サイクルはこれと必要窓を比べて延長要否を決める。
-# pid の**後**に書くことで、pid だけある中間状態＝「end 不明」に倒れる（安全側＝張り直す）。
-echo "$END_EPOCH" > "$LOCK_DIR/end"
 disown 2>/dev/null || true
-log "caffeinate -i -t ${SECS}s 起動（pid ${CAF_PID}）。${DATE} 最終post ${LAST_POST} まで抑止（終了 $(fmt_epoch "$END_EPOCH")）"
 
-# **新を起動してから旧を落とす**（#585）。ただし旧を落としてよいのは
-# **新が実際に生きていると確かめられたときだけ**——`nohup ... &` は exec に失敗しても即座に pid を
-# 返すので、起動できていないのに旧を kill すると抑止がゼロになる＝本 PR が潰そうとしている空白そのもの。
+# **記録より先に生存を確かめる**（#585）。`nohup ... &` は exec に失敗しても即座に pid を返すので、
+# 先に `pid` を書いてしまうと、新が死んだ経路で**生きている旧 caffeinate の記録が消える**
+# ＝誰も止められない孤児になる（Q11 の不変条件を作成側で破る形）。
 #
 # 確認は `kill -0` だけで行い、**comm 照合はしない**——たった今自分が fork した pid なので
 # PID 再利用の心配が無く、`nohup` の exec 完了と競走して偽陰性を作るだけになる（実際に踏んだ）。
 # 起動失敗は即座に死ぬので、`sleep` で少しだけ落ち着かせてから見る。launchd の起動間隔は
 # 5 分なので、この待ちのコストは無視できる。
 sleep 0.3
-if kill -0 "$CAF_PID" 2>/dev/null; then
-  # `${arr[@]+...}` は bash 3.2 の `set -u` で空配列の展開が unbound になるのを避ける定型。
-  for superseded_pid in ${superseded_pids[@]+"${superseded_pids[@]}"}; do
-    # **止め切れたときだけ**フラグを立てる（既定 0 の fail-safe）。ここを楽観的に 1 で初期化して
-    # 失敗時に降格させる形にすると、この区間に early exit を 1 本足した瞬間に
-    # 「生きている引き継ぎ caffeinate の記録を消す」孤児バグになる。
-    if stop_caffeinate "$superseded_pid" "旧 caffeinate" \
-       && [ -n "$inherited_pid" ] && [ "$superseded_pid" = "$inherited_pid" ]; then
-      inherited_stopped=1
-    fi
-  done
-else
-  # 新が居ない。旧をそのまま残すのが唯一の安全側（旧は -t で自然終了する）。
-  # lock には死んだ pid が入るので、次サイクルが stale として取り直す。
-  log "⚠ 新しい caffeinate (pid ${CAF_PID}) が起動直後に居ない。旧は落とさず残す（抑止を切らさない）"
+if ! kill -0 "$CAF_PID" 2>/dev/null; then
+  # lock は一切触らない＝旧の記録がそのまま残り、次サイクルが同じ判断をやり直す。
+  log "⚠ 新しい caffeinate (pid ${CAF_PID}) が起動直後に居ない。lock は触らず旧を残す（抑止を切らさない）"
+  exit 1
 fi
+
+# **`end` を先に消してから `pid` → `end` の順で書く**。lock を取り直さなくなったので、消さないと
+# stale 経路で**前回の `end` が残ったまま新しい `pid` と組む**（前の caffeinate が -t 満了でなく
+# 外から kill された場合、前回値は遠い未来でありうる）。その中間状態で落ちると次サイクルが
+# 「延長不要」と判定しつつ実際の窓は短い＝**#585 の欠陥そのものの再現**になる。
+# 消しておけば中間状態は「pid はあるが end 無し」＝安全側（張り直す）に倒れる。
+rm -f "$LOCK_DIR/end" 2>/dev/null || true
+echo "$CAF_PID" > "$LOCK_DIR/pid"
+echo "$END_EPOCH" > "$LOCK_DIR/end"
+log "caffeinate -i -t ${SECS} 起動（pid ${CAF_PID}）。${DATE} 最終post ${LAST_POST} まで抑止（終了 $(fmt_epoch "$END_EPOCH")）"
+
+# **新を起動してから旧を落とす**（#585）。ここまで来た時点で新が抑止を握っているので空白は生まれない。
+# `${arr[@]+...}` は bash 3.2 の `set -u` で空配列の展開が unbound になるのを避ける定型。
+for superseded_pid in ${superseded_pids[@]+"${superseded_pids[@]}"}; do
+  # **止め切れたときだけ**フラグを立てる（既定 0 の fail-safe）。ここを楽観的に 1 で初期化して
+  # 失敗時に降格させる形にすると、この区間に early exit を 1 本足した瞬間に
+  # 「生きている引き継ぎ caffeinate の記録を消す」孤児バグになる。
+  if stop_caffeinate "$superseded_pid" "旧 caffeinate" \
+     && [ -n "$inherited_pid" ] && [ "$superseded_pid" = "$inherited_pid" ]; then
+    inherited_stopped=1
+  fi
+done
 
 # 引き継ぎ元の旧ディレクトリは、その pid を**止め切った**ここで消す。早く消すと early exit した
 # 経路で生きた caffeinate の記録が失われ、止められなかったのに消すと孤児が残る（Q11）。
