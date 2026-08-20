@@ -34,6 +34,11 @@ done
 # `$TMPDIR` を使わないのは、launchd が TMPDIR を設定せず端末と別パスに解決されるため
 # （2026-08-19 実測）。理由の詳細は keep_awake.sh 側のコメントが正。
 LOCK_DIR="${PADDOCK_KEEP_AWAKE_LOCK_DIR:-/tmp/paddock-keep-awake-$(id -u).lock.d}"
+# 移行期は**旧パス（uid 無し）**にも caffeinate が記録されていることがある。回収を keep_awake.sh
+# 側だけに入れると、新コードの tick が 1 度も走らないうちに夜の uninstall を叩いたときに旧
+# caffeinate を止められず、最終 post_time まで抑止が居座る——QA Q1 が `$TMPDIR` を却下した理由
+# （「uninstall が caffeinate を止められない」）と同じ壊れ方を、移行経路で自ら作ることになる。
+LEGACY_LOCK_DIR="${PADDOCK_KEEP_AWAKE_LEGACY_LOCK_DIR:-/tmp/paddock-keep-awake.lock.d}"
 
 # lock の片付けは **trap で到達性から切り離す**。直列に置くと、どこかで set -euo pipefail に
 # 引っかかった時点で削除されず「最後まで走ったように見えて走っていない」状態になる
@@ -43,21 +48,40 @@ LOCK_DIR="${PADDOCK_KEEP_AWAKE_LOCK_DIR:-/tmp/paddock-keep-awake-$(id -u).lock.d
 # caffeinate の pid 記録が失われて以後どの実行からも止められなくなる（keep-awake #264 が
 # 避けたい状態）。そこで trap は先に張り、**削除してよいと確定したときだけ**フラグを立てる。
 remove_lock=0
-trap '[ "${remove_lock}" -eq 1 ] && rm -rf "${LOCK_DIR}" 2>/dev/null; true' EXIT
+remove_legacy_lock=0
+trap '[ "${remove_lock}" -eq 1 ] && rm -rf "${LOCK_DIR}" 2>/dev/null;
+      [ "${remove_legacy_lock}" -eq 1 ] && rm -rf "${LEGACY_LOCK_DIR}" 2>/dev/null; true' EXIT
 
-pid="$(cat "$LOCK_DIR/pid" 2>/dev/null || echo '')"
-if [ -z "$pid" ]; then
-  # 記録が無い＝止めるべき caffeinate を見失っていないので、残骸を片付けてよい。
-  remove_lock=1
-elif kill -0 "$pid" 2>/dev/null \
-   && ps -p "$pid" -o comm= 2>/dev/null | grep -q 'caffeinate'; then
-  if kill "$pid" 2>/dev/null; then
-    echo "keep-awake の caffeinate を停止しました（pid ${pid}）"
-    remove_lock=1
-  else
-    echo "⚠ caffeinate (pid ${pid}) を停止できませんでした。lock は残します" >&2
+# lock に記録された caffeinate を comm 確認のうえ停止する。
+# 戻り値 0 = lock を消してよい / 1 = 消してはいけない（生きているのに止められなかった）。
+stop_recorded_caffeinate() {
+  local dir="$1" label="$2" pid
+  pid="$(cat "$dir/pid" 2>/dev/null || echo '')"
+  if [ -z "$pid" ]; then
+    # 記録が無い＝止めるべき caffeinate を見失っていないので、残骸を片付けてよい。
+    return 0
   fi
-else
+  if kill -0 "$pid" 2>/dev/null \
+     && ps -p "$pid" -o comm= 2>/dev/null | grep -q 'caffeinate'; then
+    if kill "$pid" 2>/dev/null; then
+      echo "keep-awake の caffeinate を停止しました（pid ${pid}${label}）"
+      return 0
+    fi
+    echo "⚠ caffeinate (pid ${pid}${label}) を停止できませんでした。lock は残します" >&2
+    return 1
+  fi
   # pid はあるが生きていない / caffeinate ではない＝stale lock。片付けてよい。
+  return 0
+}
+
+if stop_recorded_caffeinate "$LOCK_DIR" ""; then
   remove_lock=1
+fi
+
+# 旧パスは symlink / 他ユーザー所有なら触らない（pid の中身がそのまま kill の引数になるため）。
+if [ "$LOCK_DIR" != "$LEGACY_LOCK_DIR" ] && [ -d "$LEGACY_LOCK_DIR" ] \
+   && [ ! -L "$LEGACY_LOCK_DIR" ] && [ -O "$LEGACY_LOCK_DIR" ]; then
+  if stop_recorded_caffeinate "$LEGACY_LOCK_DIR" "・旧 lock パス"; then
+    remove_legacy_lock=1
+  fi
 fi
