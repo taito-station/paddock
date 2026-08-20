@@ -10,7 +10,7 @@ sources:
   - docs/original-docs/568-monitor-sleep-gap.md
   - docs/original-docs/585-keep-awake-window-gap.md
   - docs/qa/QA-keep-awake-window-643-585.md
-distilled_from_sha: "83d95d9"
+distilled_from_sha: "0a56759"
 updated: "2026-08-20"
 ---
 
@@ -114,6 +114,8 @@ DarkWake だけの Standby なら DarkWake 1 回ぶん待つ。発走直前 EV �
   入っても伸びず、`StartInterval`(5 分) ぶんの抑止空白が空いた。現在は毎サイクル DB を引き直して
   必要窓が現行より後なら張り直す（**新しい `caffeinate` を起動してから旧を落とす**ので空白は生まれない）。
   それでも `install.sh` は `fetch-card` の後に叩くほうが良い（初回から正しい窓になる）。
+  **実 launchd で確認済み**（2026-08-20）——`AbandonProcessGroup` 下で caffeinate がジョブ終了後も存続し、
+  tick を跨いで lock が読まれ、張り直しの前後で `pmset` の抑止が途切れない（633 サンプル中 0 件）。
 - **抑止窓の記録は分粒度**（#585）。lock に書く終了時刻はエポックを分境界へ丸めた値で、
   秒針を混ぜると「必要窓は変わっていないのに毎回延長する」という判定の揺れを生む。
 - **lock は UID スコープの固定パス**（`/tmp/paddock-keep-awake-$(id -u).lock.d`・#643）。`$TMPDIR` は
