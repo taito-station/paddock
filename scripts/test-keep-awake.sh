@@ -70,6 +70,9 @@ cat > "$STUB/caffeinate" <<'EOS'
 #!/usr/bin/env bash
 # 引数を記録してから sleep に化ける。実 pid が生きるので kill -0 / kill は本物が効く。
 printf '%s\n' "$*" >> "${FAKE_CAFFEINATE_LOG:?}"
+# FAKE_CAFFEINATE_DIE=1 なら起動直後に死ぬ（exec 失敗・即死のシミュレート）。
+# spawned に載せないので ps スタブも caffeinate と認めない。
+if [ -n "${FAKE_CAFFEINATE_DIE-}" ]; then exit 1; fi
 printf '%s\n' "$$" >> "${FAKE_SPAWNED_LOG:?}"
 exec sleep 300
 EOS
@@ -319,6 +322,20 @@ else
   ng "pid が caffeinate でなければ stale 扱い" "out=$out"
 fi
 
+# --- 6g. 新しい caffeinate が起動直後に死んだ → 旧を落とさず残す ---
+# `nohup ... &` は exec に失敗しても即座に pid を返す。新の生存を確かめずに旧を kill すると
+# 抑止がゼロになり、本 PR が潰そうとしている空白そのものを作る。
+L="$(case_dir new_dies)"; mkdir -p "$L"
+old6="$(spawn_fake_caffeinate)"
+echo "$old6" > "$L/pid"
+echo "$(( ($(date +%s) + 60) / 60 * 60 ))" > "$L/end"   # 窓が足りない＝延長しようとする
+out="$(FAKE_CAFFEINATE_DIE=1 run_keep_awake "$L" --date 2026-08-22 --at 10:00)"
+if grep -q '起動直後に居ない' <<<"$out" && kill -0 "$old6" 2>/dev/null; then
+  ok "新しい caffeinate が起動直後に死んだら旧を落とさず残す（抑止を切らさない）"
+else
+  ng "新が死んだら旧を残す" "old=$(kill -0 "$old6" 2>/dev/null && echo alive || echo dead) out=$out"
+fi
+
 # --- 6e. comm が「caffeinate を含むだけ」のパス → stale 扱い（部分一致で通さない） ---
 # macOS の comm はフルパスで返りうるので末尾要素でアンカーする必要がある。
 # 部分一致だと /tmp/caffeinate-decoy/foo のような他人のプロセスまで「稼働中」と誤認し、
@@ -494,6 +511,31 @@ else
   ng "uninstall.sh の HOME がサンドボックスに閉じている" "out=$out"
 fi
 
+# --- 7f. uninstall.sh の主経路（新パス側）も停止して片付ける ---
+# 7e は旧パスだけを踏むので、本来の経路が無検査だった。
+L="$(case_dir uninstall_main)"; mkdir -p "$L"
+cur7="$(spawn_fake_caffeinate)"
+echo "$cur7" > "$L/pid"
+out="$(run_uninstall "$L" "$TESTROOT/absent-legacy.lock.d")"
+if grep -q "caffeinate を停止しました（pid ${cur7}）" <<<"$out" \
+   && ! kill -0 "$cur7" 2>/dev/null && [ ! -d "$L" ]; then
+  ok "uninstall.sh は新パスの caffeinate を停止して lock を片付ける"
+else
+  ng "uninstall.sh が新パスの caffeinate を停止する" "alive=$(kill -0 "$cur7" 2>/dev/null && echo yes || echo no) lock残=$([ -d "$L" ] && echo yes || echo no) out=$out"
+fi
+
+# --- 7g. uninstall.sh は symlink の lock を触らない ---
+L2="$TESTROOT/case-uninstall-symlink.d"
+mkdir -p "$TESTROOT/decoy2"
+ln -s "$TESTROOT/decoy2" "$L2"
+out="$(run_uninstall "$L2" "$TESTROOT/absent-legacy.lock.d")"
+if grep -q '信用できない' <<<"$out" && [ -L "$L2" ]; then
+  ok "uninstall.sh は symlink の lock を読まず消さない"
+else
+  ng "uninstall.sh は symlink の lock を触らない" "残存=$([ -L "$L2" ] && echo yes || echo no) out=$out"
+fi
+rm -f "$L2"
+
 # --- 8. 既定 lock パスが uid スコープで、作成側と削除側が同じ式を持つ ---
 # #643 の要件「作成側と削除側の両方を同時に直す」の機械的な担保。片方だけ変えると
 # uninstall が caffeinate を止められなくなる（＝抑止が居座る）。
@@ -531,7 +573,7 @@ echo
 echo "=== 合計: PASS=${pass} FAIL=${fail} ==="
 # **期待ケース数を固定する**。FAIL=0 だけを見ると、条件分岐でケースが丸ごと実行されなかったとき
 # （旧実装の skip 分岐がこの形だった）に「全部通った」と読めてしまう＝偽陰性。
-EXPECTED=31
+EXPECTED=34
 if [ "$((pass + fail))" -ne "$EXPECTED" ]; then
   echo "NG  実行ケース数が期待と違う: $((pass + fail)) != ${EXPECTED}（ケースが飛ばされている）"
   exit 1

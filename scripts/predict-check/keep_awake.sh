@@ -319,9 +319,14 @@ fi
 
 # 旧パスから引き継いだ caffeinate も「置き換える対象」に**足す**（上書きしない）。
 # 現行 lock 側と旧パス側の両方が生きている移行期に、片方を取りこぼして孤児にしないため。
-if [ -n "$inherited_pid" ]; then
+# ただし両者が同じ pid を指していることもある（移行途中で lock を書き換えた場合）ので重複は足さない。
+if [ -n "$inherited_pid" ] \
+   && ! grep -qx "$inherited_pid" <<<"${superseded_pids[*]+$(printf '%s\n' "${superseded_pids[@]}")}"; then
   superseded_pids+=("$inherited_pid")
 fi
+
+# 引き継いだ pid を止め切ったか（既定は「止めていない」＝旧 lock を消さない安全側）。
+inherited_stopped=1
 
 # アイドルスリープを END まで抑止。-t で自動終了するので開放忘れが無い。launchd 経由では plist の
 # AbandonProcessGroup=true により、ジョブ主プロセス（本スクリプト）終了後も caffeinate が存続する
@@ -336,18 +341,31 @@ echo "$END_EPOCH" > "$LOCK_DIR/end"
 disown 2>/dev/null || true
 log "caffeinate -i -t ${SECS}s 起動（pid ${CAF_PID}）。${DATE} 最終post ${LAST_POST} まで抑止（終了 $(fmt_epoch "$END_EPOCH")）"
 
-# **新を起動してから旧を落とす**（#585）。ここまで来た時点で新しい caffeinate が抑止を握って
-# いるので、旧を止めても空白が生まれない。
-inherited_stopped=1
-for superseded_pid in ${superseded_pids[@]+"${superseded_pids[@]}"}; do
-  if stop_caffeinate "$superseded_pid" "旧 caffeinate"; then
-    continue
-  fi
-  # 止め切れなかった。それが引き継ぎ元の pid なら旧ディレクトリを消してはいけない。
-  if [ -n "$inherited_pid" ] && [ "$superseded_pid" = "$inherited_pid" ]; then
-    inherited_stopped=0
-  fi
-done
+# **新を起動してから旧を落とす**（#585）。ただし旧を落としてよいのは
+# **新が実際に生きていると確かめられたときだけ**——`nohup ... &` は exec に失敗しても即座に pid を
+# 返すので、起動できていないのに旧を kill すると抑止がゼロになる＝本 PR が潰そうとしている空白そのもの。
+#
+# 確認は `kill -0` だけで行い、**comm 照合はしない**——たった今自分が fork した pid なので
+# PID 再利用の心配が無く、`nohup` の exec 完了と競走して偽陰性を作るだけになる（実際に踏んだ）。
+# 起動失敗は即座に死ぬので、`sleep` で少しだけ落ち着かせてから見る。launchd の起動間隔は
+# 5 分なので、この待ちのコストは無視できる。
+sleep 0.3
+if kill -0 "$CAF_PID" 2>/dev/null; then
+  for superseded_pid in ${superseded_pids[@]+"${superseded_pids[@]}"}; do
+    if stop_caffeinate "$superseded_pid" "旧 caffeinate"; then
+      continue
+    fi
+    # 止め切れなかった。それが引き継ぎ元の pid なら旧ディレクトリを消してはいけない。
+    if [ -n "$inherited_pid" ] && [ "$superseded_pid" = "$inherited_pid" ]; then
+      inherited_stopped=0
+    fi
+  done
+else
+  # 新が居ない。旧をそのまま残すのが唯一の安全側（旧は -t で自然終了する）。
+  # lock には死んだ pid が入るので、次サイクルが stale として取り直す。
+  log "⚠ 新しい caffeinate (pid ${CAF_PID}) が起動直後に居ない。旧は落とさず残す（抑止を切らさない）"
+  inherited_stopped=0
+fi
 
 # 引き継ぎ元の旧ディレクトリは、その pid を**止め切った**ここで消す。早く消すと early exit した
 # 経路で生きた caffeinate の記録が失われ、止められなかったのに消すと孤児が残る（Q11）。
