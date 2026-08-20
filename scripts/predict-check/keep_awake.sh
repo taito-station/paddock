@@ -23,10 +23,14 @@
 # 環境変数:
 #   PADDOCK_DB_URL              Postgres 接続 URL（既定 postgres://paddock:paddock@127.0.0.1:5432/paddock）
 #   WORKDIR                     ログ出力先（既定 $TMPDIR/paddock-keep-awake）
-#   PADDOCK_KEEP_AWAKE_LOCK_DIR        lock の置き場所（既定 /tmp/paddock-keep-awake-$(id -u).lock.d）。テスト注入用
-#   PADDOCK_KEEP_AWAKE_LEGACY_LOCK_DIR 移行元の旧 lock（既定 /tmp/paddock-keep-awake.lock.d）。テスト注入用
-#                                      ——これを注入可能にしておかないと、テストが実運用の旧 lock を
-#                                      掴んで本物の caffeinate を殺しうる
+#   PADDOCK_KEEP_AWAKE_LOCK_DIR        lock の置き場所（既定 /tmp/paddock-keep-awake-$(id -u).lock.d）
+#   PADDOCK_KEEP_AWAKE_LEGACY_LOCK_DIR 移行元の旧 lock（既定 /tmp/paddock-keep-awake.lock.d）
+#
+# **上の 2 つは回帰テスト専用。本番（launchd / 端末）では設定しないこと。** 片方の経路だけで
+# export すると launchd と端末が別 lock を見て互いを見失う——本スクリプトが `$TMPDIR` を却下したのと
+# まったく同じ壊れ方を、env で再現できてしまう。注入可能にしているのは、これが無いとテストが
+# 実運用の lock を掴んで本物の caffeinate を殺すため。
+# ---- help-end ----
 set -euo pipefail
 
 DATE=""
@@ -40,8 +44,9 @@ while [ $# -gt 0 ]; do
     --at) AT="${2:?--at には HH:MM}"; shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
     # 行番号の固定（旧: `2,30p`）はヘッダ長とズレるとコード行まで吐く。実際 #585 以前から
-    # `set -euo pipefail` 以降が 10 行漏れていた。アンカーで終端を取り、アンカー自身を落とす。
-    -h|--help) sed -n '2,/^set -euo/p' "$0" | sed '$d'; exit 0 ;;
+    # `set -euo pipefail` 以降が 10 行漏れていた。**専用の番兵**で終端を取り、番兵自身を落とす
+    # （`set -euo` をアンカーにすると `set -Eeuo` 等に変えた瞬間に範囲が EOF まで伸びて全文を吐く）。
+    -h|--help) sed -n '2,/^# ---- help-end ----$/p' "$0" | sed '$d'; exit 0 ;;
     *) echo "不明な引数: $1" >&2; exit 2 ;;
   esac
 done
@@ -63,8 +68,34 @@ LOG="$WORKDIR/logs/keep-awake.log"
 log() { echo "[$(date '+%Y-%m-%dT%H:%M:%S%z')] $*" | tee -a "$LOG"; }
 # エポック秒をログ用の HH:MM へ。BSD date（macOS）と GNU date で -r/-d が異なるため両方試し、
 # どちらも駄目なら生の数値を返す（ログ整形のためにスクリプトを止めない）。
+# **TZ は明示する**——他の時刻計算は全て JST 基準なので、非 JST 環境で動いたときにここだけ
+# ローカル TZ で整形されると、ログの「抑止終了 HH:MM」が post_time と食い違って調査を誤らせる。
 fmt_epoch() {
-  date -r "$1" '+%H:%M' 2>/dev/null || date -d "@$1" '+%H:%M' 2>/dev/null || echo "$1"
+  TZ=Asia/Tokyo date -r "$1" '+%H:%M' 2>/dev/null \
+    || TZ=Asia/Tokyo date -d "@$1" '+%H:%M' 2>/dev/null \
+    || echo "$1"
+}
+
+# lock に記録された pid を「生きた caffeinate か」まで確かめて停止する。判定から kill までに
+# PID が再利用されると無関係なプロセスを殺すので、**kill の直前に comm を照合し直す**。
+# comm はフルパスで返りうる（macOS）ので末尾要素でアンカーする——部分一致だと
+# `/tmp/caffeinate-x/foo` のようなパスも通ってしまう。
+# 戻り値: 0 = もう生きていない（記録を消してよい）/ 1 = 生きているのに止められなかった。
+stop_caffeinate() {
+  local pid="$1" what="$2"
+  if ! kill -0 "$pid" 2>/dev/null \
+     || ! ps -p "$pid" -o comm= 2>/dev/null | grep -qE '(^|/)caffeinate$'; then
+    log "${what} (pid ${pid}) は既に終了していた"
+    return 0
+  fi
+  if kill "$pid" 2>/dev/null; then
+    log "${what} を停止（pid ${pid}）"
+    return 0
+  fi
+  # 落とせなくても抑止としては実害が小さい（旧は -t で自然終了する）。二重に掛かるだけ。
+  # ただし**記録は消してはいけない**——消すと誰も止められない孤児になる。
+  log "⚠ ${what} (pid ${pid}) を停止できず。-t で自然終了するまで二重に抑止が掛かる"
+  return 1
 }
 
 # 当日の最終 post_time（HH:MM）を DB から取得。post_time は TEXT 'HH:MM'（ゼロ埋め）なので
@@ -84,7 +115,16 @@ fi
 to_min() { local h="${1%%:*}" m="${1##*:}"; echo $((10#$h * 60 + 10#$m)); }
 LAST_MIN="$(to_min "$LAST_POST")"
 END_MIN=$((LAST_MIN + BUFFER_MIN))
-if [ -n "$AT" ]; then NOW_MIN="$(to_min "$AT")"; else NOW_MIN="$(TZ=Asia/Tokyo date +'%H %M' | awk '{print $1*60+$2}')"; fi
+# **現在時刻は 1 回だけ読む**。分と秒を別々に採取すると、その間に分が変わったとき END_EPOCH が
+# 実際の caffeinate 満了より 60 秒後になる（倒れ方は安全側だが、丸めで決定性を得た趣旨が濁る）。
+NOW_EPOCH="$(date +%s)"
+if [ -n "$AT" ]; then
+  NOW_MIN="$(to_min "$AT")"
+else
+  NOW_MIN="$(TZ=Asia/Tokyo date -r "$NOW_EPOCH" +'%H %M' 2>/dev/null \
+             || TZ=Asia/Tokyo date -d "@$NOW_EPOCH" +'%H %M')"
+  NOW_MIN="$(awk '{print $1*60+$2}' <<<"$NOW_MIN")"
+fi
 
 if [ "$NOW_MIN" -ge "$END_MIN" ]; then
   log "発走ウィンドウ終了済み: now=${NOW_MIN} >= end=${END_MIN}（最終 post ${LAST_POST} + buffer ${BUFFER_MIN}分）。no-op"
@@ -101,7 +141,7 @@ SECS=$(((END_MIN - NOW_MIN) * 60))
 # （抑止は切れないが、延長要否の判定そのものが機能しなくなる）。
 # エポックを 60 で丸めた値は「現在の分の開始」——JST のオフセットは分単位なので TZ に依らず
 # 一致する。これで END_EPOCH は post_time が同じ限り毎サイクル同じ値になり、比較が決定的になる。
-END_EPOCH=$(($(date +%s) / 60 * 60 + SECS))
+END_EPOCH=$((NOW_EPOCH / 60 * 60 + SECS))
 
 if [ "$DRY_RUN" -eq 1 ]; then
   log "[dry-run] $DATE 最終post=$LAST_POST end=$END_MIN(now=$NOW_MIN) → caffeinate -i -t ${SECS}s"
@@ -132,7 +172,9 @@ STARTUP_GRACE_MIN=2
 #   **悪意ある先回りは防げない**——`/tmp` は world-writable で、sticky bit が禁じるのは他人の
 #   エントリの削除・改名だけであり、新しい名前の作成は誰でもできる。他ユーザーが
 #   `/tmp/paddock-keep-awake-<uid>.lock.d` を先に作れば mkdir も rm も失敗し続ける。
-#   その場合は下の取得失敗ハンドラが所有者を見て**大きく警告する**（無言停止させない）。
+#   そこで **中身を読む前に信用できる lock かを検査し**、駄目なら大きく警告して抜ける
+#   （無言停止させない）。所有者検査を mkdir 失敗時だけに置くと、先回り者が pid と遠い未来の
+#   end を仕込んだ場合に「延長不要・据え置き」という無害な行だけ出して素通りする。
 # **相方の deployments/launchd/uninstall.sh も同じ式を持つ。片方だけ変えると uninstall が
 # caffeinate を止められなくなるので、変えるときは必ず両方を同時に直すこと。**
 LOCK_DIR="${PADDOCK_KEEP_AWAKE_LOCK_DIR:-/tmp/paddock-keep-awake-$(id -u).lock.d}"
@@ -140,8 +182,28 @@ LOCK_DIR="${PADDOCK_KEEP_AWAKE_LOCK_DIR:-/tmp/paddock-keep-awake-$(id -u).lock.d
 # テストが実運用の旧 lock を掴んで本物の caffeinate を殺さないよう、env で注入可能にする。
 LEGACY_LOCK_DIR="${PADDOCK_KEEP_AWAKE_LEGACY_LOCK_DIR:-/tmp/paddock-keep-awake.lock.d}"
 
+# lock ディレクトリの中身を信用してよいか。`/tmp` は誰でも名前を作れるので、
+# **symlink / 他ユーザー所有は敵対的とみなして中身を読まない**——`pid` の中身がそのまま
+# `kill` の引数になるため、書き換え可能なディレクトリを信用してはいけない。
+# `[ -L ]` はリンクを辿らないので先に見る（`-d` / `-O` は辿るため、自分所有のディレクトリを
+# 指す symlink を置かれると単独では素通りする）。
+lock_is_trustworthy() {
+  [ ! -L "$1" ] && [ -d "$1" ] && [ -O "$1" ]
+}
+
+# lock に記録された pid を読む。数値でなければ「記録が無い」に倒す（`kill` に非数値を渡さない）。
+read_lock_pid() {
+  local v
+  v="$(cat "$1/pid" 2>/dev/null || echo '')"
+  [[ "$v" =~ ^[0-9]+$ ]] || v=""
+  printf '%s' "$v"
+}
+
 # 稼働中 caffeinate の pid を引き継ぐ先。空なら「引き継ぐものは無い」。
 inherited_pid=""
+# 引き継いだ pid を停止し切ったか。旧ディレクトリを消してよいかの判定に使う
+# （止められていないのに消すと、生きた caffeinate が誰からも止められない孤児になる）。
+inherited_stopped=0
 
 # 旧パスに生きた caffeinate が居れば pid を引き継ぐ。修正前の launchd が起動した caffeinate が
 # 残ったまま新コードへ切り替わると、新 lock からは見えず二重起動になるため。
@@ -151,12 +213,14 @@ inherited_pid=""
 # 止められない孤児になる。削除するのは「引き継いだ pid を確実に停止した後」か「そもそも
 # 生存していなかったとき」だけ。
 #
-# symlink / 他ユーザー所有は触らない——`cat` の中身がそのまま kill の引数になるため。
-if [ "$LOCK_DIR" != "$LEGACY_LOCK_DIR" ] && [ -d "$LEGACY_LOCK_DIR" ] \
-   && [ ! -L "$LEGACY_LOCK_DIR" ] && [ -O "$LEGACY_LOCK_DIR" ]; then
-  legacy_pid="$(cat "$LEGACY_LOCK_DIR/pid" 2>/dev/null || echo '')"
+if [ "$LOCK_DIR" != "$LEGACY_LOCK_DIR" ] && { [ -e "$LEGACY_LOCK_DIR" ] || [ -L "$LEGACY_LOCK_DIR" ]; } \
+   && ! lock_is_trustworthy "$LEGACY_LOCK_DIR"; then
+  # 黙って飛ばすと、そこに記録された caffeinate が永久に回収されないのに理由が残らない。
+  log "⚠ 旧 lock パス ${LEGACY_LOCK_DIR} が信用できない（symlink か他ユーザー所有）。移行をスキップする"
+elif [ "$LOCK_DIR" != "$LEGACY_LOCK_DIR" ] && [ -d "$LEGACY_LOCK_DIR" ]; then
+  legacy_pid="$(read_lock_pid "$LEGACY_LOCK_DIR")"
   if [ -n "$legacy_pid" ] && kill -0 "$legacy_pid" 2>/dev/null \
-     && ps -p "$legacy_pid" -o comm= 2>/dev/null | grep -q 'caffeinate'; then
+     && ps -p "$legacy_pid" -o comm= 2>/dev/null | grep -qE '(^|/)caffeinate$'; then
     inherited_pid="$legacy_pid"
     log "旧 lock パスの caffeinate を引き継ぐ（pid ${legacy_pid}）: ${LEGACY_LOCK_DIR} → ${LOCK_DIR}"
   else
@@ -175,12 +239,29 @@ fi
 # 単一変数に代入すると片方を黙って取りこぼし、落とせなかった方が孤児になる。
 superseded_pids=()
 
+# `${arr[@]+...}` は bash 3.2 の `set -u` で空配列の展開が unbound になるのを避ける定型。
+stop_superseded_all() {
+  local p
+  for p in ${superseded_pids[@]+"${superseded_pids[@]}"}; do
+    stop_caffeinate "$p" "旧 caffeinate" || true
+  done
+}
+
+# **中身を読む前に lock 自体を検査する**。`/tmp` は誰でも名前を作れるので、先回り者が
+# symlink を張ったり pid / end を仕込んだりできる。mkdir 失敗時だけ所有者を見る作りだと、
+# 「生きた caffeinate の pid ＋ 遠い未来の end」を置かれたときに据え置き経路へ入り、
+# ログには「延長不要・据え置き」という無害な行しか出ない（抑止はゼロなのに正常に見える）。
+if { [ -e "$LOCK_DIR" ] || [ -L "$LOCK_DIR" ]; } && ! lock_is_trustworthy "$LOCK_DIR"; then
+  log "⚠ lock パス ${LOCK_DIR} が信用できない（symlink か他ユーザー所有）。抑止を掛けられない——放置すると開催日を通してスリープ抑止が効かない"
+  exit 0
+fi
+
 if ! mkdir "$LOCK_DIR" 2>/dev/null; then
   # lock 既存。中身で「稼働中／起動中／stale」を見分ける。
-  pid="$(cat "$LOCK_DIR/pid" 2>/dev/null || echo '')"
+  pid="$(read_lock_pid "$LOCK_DIR")"
   # 稼働中: pid 生存かつプロセス名が caffeinate（PID 再利用の誤判定を comm で排除）。
   if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null \
-     && ps -p "$pid" -o comm= 2>/dev/null | grep -q 'caffeinate'; then
+     && ps -p "$pid" -o comm= 2>/dev/null | grep -qE '(^|/)caffeinate$'; then
     # **窓が足りているかを見る（#585）**。記録された終了時刻が新しい END より後なら据え置き。
     # 手前なら張り直す——朝の install 時点でカードが途中までしか入っていないと窓が短いまま
     # 固定され、caffeinate の自然終了から次の tick まで抑止空白が空く。
@@ -193,11 +274,12 @@ if ! mkdir "$LOCK_DIR" 2>/dev/null; then
       # 据え置いて終わる場合でも、旧パスから引き継いだ caffeinate は始末してから抜ける。
       # 現行 lock の caffeinate が既に窓を握っているので、ここで落としても空白は生まれない。
       # 放置すると旧ディレクトリごと残り、次サイクルも同じ引き継ぎを繰り返す。
+      # **止め切れたときだけ**旧ディレクトリを消す。止められていないのに記録を消すと、
+      # 生きた caffeinate が誰からも止められない孤児になる（Q11 の不変条件）。
       if [ -n "$inherited_pid" ]; then
-        kill "$inherited_pid" 2>/dev/null \
-          && log "旧パスから引き継いだ余分な caffeinate を停止（pid ${inherited_pid}）" \
-          || log "⚠ 旧パスの caffeinate (pid ${inherited_pid}) を停止できず。-t で自然終了するまで二重に抑止が掛かる"
-        rm -rf "$LEGACY_LOCK_DIR" 2>/dev/null || true
+        if stop_caffeinate "$inherited_pid" "旧パスから引き継いだ余分な caffeinate"; then
+          rm -rf "$LEGACY_LOCK_DIR" 2>/dev/null || true
+        fi
       fi
       exit 0
     fi
@@ -224,22 +306,22 @@ if ! mkdir "$LOCK_DIR" 2>/dev/null; then
   # caffeinate が二重起動しても -t で自動終了する無害事象（launchd はジョブを直列化するため
   # 実発生も稀）。門の単純さを優先する。
   rm -rf "$LOCK_DIR" 2>/dev/null || true
-  # 取得できない原因を分けて出す。他ユーザーが先回りして同名ディレクトリを作った場合、
-  # mkdir も rm も永久に失敗し続けて keep-awake が**無言で停止**する（#264 が最も避けたい状態）。
-  # 「競合」と同じ一行で流すと気づけないので、所有者を見て警告を上げる。
   mkdir "$LOCK_DIR" 2>/dev/null || {
-    if [ -e "$LOCK_DIR" ] && [ ! -O "$LOCK_DIR" ]; then
-      log "⚠ lock パス ${LOCK_DIR} が自分の所有でない（他ユーザーが先回りして作成？）。抑止を掛けられない——放置すると開催日を通してスリープ抑止が効かない"
-    else
-      log "lock 競合で取得失敗。終了"
-    fi
+    # ここに来る＝rm と mkdir の隙に別プロセスが lock を取った（launchd はジョブを直列化するので稀）。
+    # **この時点で旧 pid の記録は既に消えている**ので、そのまま抜けると誰も止められない孤児が残る
+    # （Q11 の不変条件違反）。lock を取った側が自分の窓で caffeinate を張り直すので、
+    # ここで旧を落としても抑止は途切れない。
+    log "lock 競合で取得失敗（別プロセスが先に取得）。記録済みの旧 caffeinate を始末して終了"
+    stop_superseded_all
     exit 0
   }
 fi
 
 # 旧パスから引き継いだ caffeinate も「置き換える対象」に**足す**（上書きしない）。
 # 現行 lock 側と旧パス側の両方が生きている移行期に、片方を取りこぼして孤児にしないため。
-[ -n "$inherited_pid" ] && superseded_pids+=("$inherited_pid")
+if [ -n "$inherited_pid" ]; then
+  superseded_pids+=("$inherited_pid")
+fi
 
 # アイドルスリープを END まで抑止。-t で自動終了するので開放忘れが無い。launchd 経由では plist の
 # AbandonProcessGroup=true により、ジョブ主プロセス（本スクリプト）終了後も caffeinate が存続する
@@ -255,25 +337,22 @@ disown 2>/dev/null || true
 log "caffeinate -i -t ${SECS}s 起動（pid ${CAF_PID}）。${DATE} 最終post ${LAST_POST} まで抑止（終了 $(fmt_epoch "$END_EPOCH")）"
 
 # **新を起動してから旧を落とす**（#585）。ここまで来た時点で新しい caffeinate が抑止を握って
-# いるので、旧を止めても空白が生まれない。ps の comm 照合は「その pid がまだ caffeinate か」の
-# 再確認（起動〜ここまでの間に終了して PID が再利用される可能性を潰す）。
-# `${arr[@]+...}` は bash 3.2 の `set -u` で空配列の展開が unbound になるのを避ける定型。
+# いるので、旧を止めても空白が生まれない。
+inherited_stopped=1
 for superseded_pid in ${superseded_pids[@]+"${superseded_pids[@]}"}; do
-  if kill -0 "$superseded_pid" 2>/dev/null \
-     && ps -p "$superseded_pid" -o comm= 2>/dev/null | grep -q 'caffeinate'; then
-    if kill "$superseded_pid" 2>/dev/null; then
-      log "旧 caffeinate を停止（pid ${superseded_pid}）。窓の張り直し完了"
-    else
-      # 落とせなくても実害は小さい（旧は -t で自然終了する）。二重に抑止が掛かるだけ。
-      log "⚠ 旧 caffeinate (pid ${superseded_pid}) を停止できず。-t で自然終了するまで二重に抑止が掛かる"
-    fi
-  else
-    log "旧 caffeinate (pid ${superseded_pid}) は既に終了していた"
+  if stop_caffeinate "$superseded_pid" "旧 caffeinate"; then
+    continue
+  fi
+  # 止め切れなかった。それが引き継ぎ元の pid なら旧ディレクトリを消してはいけない。
+  if [ -n "$inherited_pid" ] && [ "$superseded_pid" = "$inherited_pid" ]; then
+    inherited_stopped=0
   fi
 done
 
-# 引き継ぎ元の旧ディレクトリは、その pid を始末し切った**ここで**消す。早く消すと early exit した
-# 経路で生きた caffeinate の記録が失われる（誰も止められない孤児になる）。
-if [ -n "$inherited_pid" ]; then
+# 引き継ぎ元の旧ディレクトリは、その pid を**止め切った**ここで消す。早く消すと early exit した
+# 経路で生きた caffeinate の記録が失われ、止められなかったのに消すと孤児が残る（Q11）。
+if [ -n "$inherited_pid" ] && [ "$inherited_stopped" -eq 1 ]; then
   rm -rf "$LEGACY_LOCK_DIR" 2>/dev/null || true
+elif [ -n "$inherited_pid" ]; then
+  log "⚠ 旧 lock ${LEGACY_LOCK_DIR} は残す（pid ${inherited_pid} を止め切れていないため。消すと回収不能になる）"
 fi

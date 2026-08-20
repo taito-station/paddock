@@ -33,6 +33,16 @@ ng()  { echo "NG  $1"; shift; [ $# -gt 0 ] && echo "    $*"; fail=$((fail + 1));
 # ——スタブは nohup された背景プロセスなので、書き込みが親の終了に間に合わず競合する。
 # 親が同期的に出す「起動（pid ...）」行なら取りこぼさない。
 started() { grep -q '起動（pid' <<<"$1"; }
+# スタブが書くログを読むときの待ち合わせ。スタブは nohup された背景プロセスなので、
+# 書き込みが親の `$( )` の終了に間に合わない（1 巡目でこの競合を踏んだ）。有界で待つ。
+wait_for_line() {
+  local file="$1" line="$2" i=0
+  while [ "$i" -lt 100 ]; do
+    grep -qxF -- "$line" "$file" 2>/dev/null && return 0
+    i=$((i + 1)); sleep 0.05
+  done
+  return 1
+}
 
 TESTROOT="$(mktemp -d "${TMPDIR:-/tmp}/paddock-keep-awake-test.XXXXXX")"
 cleanup() {
@@ -66,8 +76,11 @@ EOS
 
 cat > "$STUB/ps" <<'EOS'
 #!/usr/bin/env bash
-# `ps -p PID -o comm=` だけを模す。生きている pid には "caffeinate" を返す。
-# FAKE_PS_ALIEN_PID に指定した pid だけは別プロセス名を返す（PID 再利用の誤判定を潰す分岐用）。
+# `ps -p PID -o comm=` だけを模す。
+# **既定は「caffeinate ではない」**——生きている pid に一律 caffeinate を返すと、comm 照合を
+# 省いた実装でも全ケース通ってしまう（偽陰性）。偽 caffeinate として起こした pid は
+# FAKE_SPAWNED_LOG に載るので、それを唯一の真とする。
+# FAKE_PS_ALIEN_PID は明示的に別プロセス名を返す上書き（PID 再利用の誤判定を潰す分岐用）。
 pid=""
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -76,14 +89,34 @@ while [ $# -gt 0 ]; do
     *)  shift ;;
   esac
 done
+[ -n "$pid" ] || exit 0
 if [ -n "${FAKE_PS_ALIEN_PID-}" ] && [ "$pid" = "${FAKE_PS_ALIEN_PID}" ]; then
   echo "Dock"; exit 0
 fi
-kill -0 "$pid" 2>/dev/null && echo "caffeinate"
+# 「caffeinate」を名前に含むが caffeinate ではないプロセス。アンカー無しの部分一致で
+# 照合している実装を通さないための餌。
+if [ -n "${FAKE_PS_PATHY_PID-}" ] && [ "$pid" = "${FAKE_PS_PATHY_PID}" ]; then
+  echo "/tmp/caffeinate-decoy/foo"; exit 0
+fi
+kill -0 "$pid" 2>/dev/null || exit 0
+if grep -qx "$pid" "${FAKE_SPAWNED_LOG:?}" 2>/dev/null; then
+  # 実運用の macOS は comm をフルパスで返しうる。アンカー無しの部分一致に頼った実装を
+  # 通さないよう、テストでもフルパス形で返す。
+  echo "/usr/bin/caffeinate"
+else
+  echo "some-other-process"
+fi
 exit 0
 EOS
 
-chmod +x "$STUB/psql" "$STUB/caffeinate" "$STUB/ps"
+cat > "$STUB/launchctl" <<'EOS'
+#!/usr/bin/env bash
+# 実 launchd に触らせないための番兵。uninstall.sh の unload はここで空振りする。
+printf 'launchctl %s\n' "$*" >> "${FAKE_LAUNCHCTL_LOG:?}"
+exit 0
+EOS
+
+chmod +x "$STUB/psql" "$STUB/caffeinate" "$STUB/ps" "$STUB/launchctl"
 
 # ---- ヘルパ -----------------------------------------------------------------
 # run_keep_awake <lockdir> <--at HH:MM ...> : スタブ PATH で keep_awake.sh を走らせ、
@@ -98,11 +131,17 @@ run_keep_awake() {
     bash "$REPO_ROOT/scripts/predict-check/keep_awake.sh" "$@" 2>&1
 }
 
-# uninstall.sh を同じスタブ PATH で走らせる。plist は存在しないので「未インストール」を出して
-# lock の片付けだけ行う経路になる。
+# uninstall.sh を同じスタブ PATH で走らせる。
+#
+# **`HOME` を必ず差し替える**。uninstall.sh は `$HOME/Library/LaunchAgents/com.paddock.*.plist` を
+# `launchctl unload` して `rm -f` するので、素で叩くと**実機の稼働中エージェント 3 本が消える**。
+# CI（ubuntu）は plist が無いので常に緑になり、この危険は CI では可視化されない。
+# `launchctl` もスタブして、万一 plist を拾っても実 launchd に触れないようにする（二重防御）。
 run_uninstall() {
   local lockdir="$1" legacydir="$2"
+  mkdir -p "$TESTROOT/home/Library/LaunchAgents"
   PATH="$STUB:$PATH" \
+  HOME="$TESTROOT/home" \
   PADDOCK_KEEP_AWAKE_LOCK_DIR="$lockdir" \
   PADDOCK_KEEP_AWAKE_LEGACY_LOCK_DIR="$legacydir" \
     bash "$REPO_ROOT/deployments/launchd/uninstall.sh" 2>&1
@@ -120,8 +159,10 @@ spawn_fake_caffeinate() {
 
 export FAKE_CAFFEINATE_LOG="$TESTROOT/caffeinate.args"
 export FAKE_SPAWNED_LOG="$TESTROOT/spawned"
+export FAKE_LAUNCHCTL_LOG="$TESTROOT/launchctl.args"
 : > "$FAKE_CAFFEINATE_LOG"
 : > "$FAKE_SPAWNED_LOG"
+: > "$FAKE_LAUNCHCTL_LOG"
 export FAKE_LAST_POST="18:30"
 
 # 各ケースは専用 lockdir を使う（相互汚染を避ける）。
@@ -178,26 +219,41 @@ if [ -n "$new_pid" ] && [ "$new_pid" != "$caf" ] && [ -n "$new_end" ]; then
 else
   ng "延長後の lock に新しい pid と end" "pid=${new_pid}（旧=${caf}） end=${new_end}"
 fi
+# **窓の長さそのものを固定する**。「起動した / しない」しか見ないと、END_MIN / SECS の計算が
+# 壊れても全ケース通る（スタブは引数を記録しているのに誰も読んでいない＝死んだ計装だった）。
+# --at 10:00（=600 分）/ 最終 post 18:30（=1110 分）+ buffer 10 分 → (1120-600)*60 = 31200 秒。
+if grep -q 'caffeinate -i -t 31200s 起動' <<<"$out" && wait_for_line "$FAKE_CAFFEINATE_LOG" '-i -t 31200'; then
+  ok "caffeinate に渡す抑止秒数が最終 post + buffer から正しく出ている（-i -t 31200）"
+else
+  ng "caffeinate の抑止秒数" "記録された引数: $(tr '\n' '/' < "$FAKE_CAFFEINATE_LOG") / out=$out"
+fi
 
 # --- 2b. 同じ post_time なら 2 回目は必ず据え置き（判定が実行時刻の秒針で揺れないこと） ---
 # END_EPOCH を分境界へ丸めないと、end に実行時刻の秒針が乗る（SECS は分粒度なので
 # end = 真の終了時刻 + 秒針）。すると次サイクルの `cur_end >= END_EPOCH` が
 # 「前回の秒針 >= 今回の秒針」に退化し、**post_time が変わらなくても延長し続ける**。
 # 秒針は必ず進むので、丸めを外すとこのケースは決定的に落ちる（＝R-1 の回帰ガード）。
-# 分境界をまたぐと 2 回目の必要窓が正しく 1 分先になり揺れるため、分の頭から離れて走らせる。
-while :; do
-  s=$(( $(date +%s) % 60 ))
-  [ "$s" -ge 1 ] && [ "$s" -lt 45 ] && break
-  sleep 1
-done
-L="$(case_dir idempotent)"   # lock 未作成＝cold start も併せて踏む
-out1="$(run_keep_awake "$L" --date 2026-08-22 --at 10:00)"
-end1="$(cat "$L/end" 2>/dev/null || echo '')"
 # **秒針を必ず進めてから 2 回目を走らせる**。連続実行だと `date +%s` が同値になり、丸めを
 # 外した実装でも cur_end == END_EPOCH で通ってしまう（変異検査でこの穴を踏んだ）。
 # 実運用の launchd は StartInterval=300 秒なので秒針は必ず変わる——その条件を再現する。
-sleep 1
-out2="$(run_keep_awake "$L" --date 2026-08-22 --at 10:00)"
+#
+# 逆に**分をまたぐと 2 回目の必要窓が正しく 1 分先になる**ので延長が正解になり、判定できない。
+# 壁時計の待ち合わせで避けると遅い runner で崩れるため、**またいだらやり直す**（決定的）。
+idem_attempt=0
+while :; do
+  idem_attempt=$((idem_attempt + 1))
+  if [ "$idem_attempt" -gt 5 ]; then
+    echo "ABORT 冪等ケースが 5 回とも分境界をまたいだ（実行が異常に遅い）" >&2
+    exit 1
+  fi
+  L="$(case_dir "idempotent-${idem_attempt}")"   # lock 未作成＝cold start も併せて踏む
+  m0=$(( $(date +%s) / 60 ))
+  out1="$(run_keep_awake "$L" --date 2026-08-22 --at 10:00)"
+  end1="$(cat "$L/end" 2>/dev/null || echo '')"
+  sleep 1
+  out2="$(run_keep_awake "$L" --date 2026-08-22 --at 10:00)"
+  [ "$m0" -eq "$(( $(date +%s) / 60 ))" ] && break
+done
 if started "$out1" && ! started "$out2" && grep -q '延長不要' <<<"$out2"; then
   ok "同じ post_time なら 2 回目は据え置き（判定が秒針で揺れない・cold start 経由）"
 else
@@ -236,8 +292,11 @@ L="$(case_dir stale)"; mkdir -p "$L"
 # 必ず caffeinate を返すので「稼働中・据え置き」に落ちて flaky に失敗する。死を有界ポーリングで待つ。
 dead="$(spawn_fake_caffeinate)"; kill "$dead" 2>/dev/null
 for _ in $(seq 1 100); do kill -0 "$dead" 2>/dev/null || break; sleep 0.05; done
+# 前提が崩れたら**即座に落とす**。`ng` で数えると総数がずれ、最後の集計が
+# 「ケースが飛ばされている」という実際とは逆の診断を出す。
 if kill -0 "$dead" 2>/dev/null; then
-  ng "stale ケースの前提（偽 caffeinate の停止）" "pid ${dead} が 5 秒で死ななかった"
+  echo "ABORT stale ケースの前提が崩れた: pid ${dead} が 5 秒で死ななかった" >&2
+  exit 1
 fi
 echo "$dead" > "$L/pid"
 echo "$(($(date +%s) + 86400))" > "$L/end"   # end は十分先でも pid が死んでいれば取り直す
@@ -258,6 +317,75 @@ if started "$out" && grep -q 'stale lock' <<<"$out"; then
   ok "pid が caffeinate でなければ stale 扱い（comm 照合が効いている）"
 else
   ng "pid が caffeinate でなければ stale 扱い" "out=$out"
+fi
+
+# --- 6e. comm が「caffeinate を含むだけ」のパス → stale 扱い（部分一致で通さない） ---
+# macOS の comm はフルパスで返りうるので末尾要素でアンカーする必要がある。
+# 部分一致だと /tmp/caffeinate-decoy/foo のような他人のプロセスまで「稼働中」と誤認し、
+# 延長経路に入って kill してしまう。
+L="$(case_dir pathy_comm)"; mkdir -p "$L"
+pathy="$(spawn_fake_caffeinate)"
+echo "$pathy" > "$L/pid"
+echo "$(( ($(date +%s) + 86400) / 60 * 60 ))" > "$L/end"
+out="$(FAKE_PS_PATHY_PID="$pathy" run_keep_awake "$L" --date 2026-08-22 --at 10:00)"
+if grep -q 'stale lock' <<<"$out" && kill -0 "$pathy" 2>/dev/null; then
+  ok "comm が caffeinate を含むだけのパスなら stale 扱い（末尾アンカーが効いている）"
+else
+  ng "comm の末尾アンカー" "alive=$(kill -0 "$pathy" 2>/dev/null && echo yes || echo no) out=$out"
+fi
+
+# --- 6f. pid が数値でない → 記録なし扱い（kill に渡さない） ---
+# **`-1` を使うのが要点**。`kill -1` は「プロセスグループ全体へ signal」を意味するので、
+# 先回りで仕込まれると自分のプロセスを一掃されうる。数値検証を外すと `pid=-1` として
+# stale 経路（＝ログに pid が出る＝kill 対象として扱われた）へ落ちるので、そこで見分ける。
+L="$(case_dir corrupt_pid)"; mkdir -p "$L"
+printf -- '-1\n' > "$L/pid"
+echo "$(( ($(date +%s) + 86400) / 60 * 60 ))" > "$L/end"
+out="$(run_keep_awake "$L" --date 2026-08-22 --at 10:00)"
+if grep -q '別プロセスが起動中' <<<"$out" && ! grep -q 'pid=-1' <<<"$out"; then
+  ok "pid が数値でなければ記録なし扱いにする（kill に -1 等を渡さない）"
+else
+  ng "pid が数値でなければ記録なし扱い" "out=$out"
+fi
+
+# --- 6b. end が非数値（破損）→ 安全側に倒して張り直す ---
+# `[ x -ge y ]` に非数値を渡すと exit 2 になるので、比較の前に弾く必要がある。
+L="$(case_dir corrupt_end)"; mkdir -p "$L"
+caf="$(spawn_fake_caffeinate)"
+echo "$caf" > "$L/pid"
+printf 'not-a-number\n' > "$L/end"
+out="$(run_keep_awake "$L" --date 2026-08-22 --at 10:00)"
+if started "$out" && grep -q '旧形式か破損' <<<"$out"; then
+  ok "end が非数値の lock は安全側に倒して張り直す"
+else
+  ng "end が非数値の lock は張り直す" "out=$out"
+fi
+
+# --- 6c. lock が symlink → 中身を信用せず大きく警告して抜ける ---
+# /tmp は誰でも名前を作れる。先回りで symlink を張られると `-O` はリンク先を見て真になるため、
+# 所有者だけを見る実装では素通りする。中身（pid・end）を読む前に弾くこと。
+mkdir -p "$TESTROOT/decoy"
+L="$TESTROOT/case-symlink-lock.d"
+mkdir -p "$(dirname "$L")"
+ln -s "$TESTROOT/decoy" "$L"
+out="$(run_keep_awake "$L" --date 2026-08-22 --at 10:00)"
+if ! started "$out" && grep -q '信用できない' <<<"$out"; then
+  ok "lock が symlink なら中身を読まず警告して抜ける（無言停止させない）"
+else
+  ng "lock が symlink なら警告して抜ける" "out=$out"
+fi
+rm -f "$L"
+
+# --- 6d. --help がコード行を漏らさない ---
+# 行番号固定の `sed` はヘッダ長とズレるとコードを吐く（#585 以前から 10 行漏れていた）。
+help_out="$(PATH="$STUB:$PATH" bash "$REPO_ROOT/scripts/predict-check/keep_awake.sh" --help 2>&1)"
+if grep -q '環境変数:' <<<"$help_out" \
+   && ! grep -q '^set -' <<<"$help_out" \
+   && ! grep -q 'help-end' <<<"$help_out" \
+   && ! grep -q '^DATE=' <<<"$help_out"; then
+  ok "--help はヘッダだけを出しコード行を漏らさない"
+else
+  ng "--help がコード行を漏らさない" "out=$help_out"
 fi
 
 echo "=== #643 lock パス ==="
@@ -357,6 +485,14 @@ if grep -q '旧 lock パス' <<<"$out" && ! kill -0 "$old5" 2>/dev/null && [ ! -
 else
   ng "uninstall.sh が旧 lock パスの caffeinate を停止する" "old=$(kill -0 "$old5" 2>/dev/null && echo alive || echo dead) legacy残=$([ -d "$LEGACY5" ] && echo yes || echo no) out=$out"
 fi
+# **uninstall.sh は $HOME の plist を消しに行く**。テストが実機の稼働中エージェントを外さないよう、
+# HOME がサンドボックスへ差し替わっていることを実際の出力で固定する（CI(ubuntu) は plist が
+# 無いので素通りし、この危険は CI では可視化されない）。
+if grep -q "未インストール: ${TESTROOT}/home/Library/LaunchAgents/com.paddock.keep-awake.plist" <<<"$out"; then
+  ok "uninstall.sh の HOME はテスト用サンドボックスに閉じている（実機の plist を触らない）"
+else
+  ng "uninstall.sh の HOME がサンドボックスに閉じている" "out=$out"
+fi
 
 # --- 8. 既定 lock パスが uid スコープで、作成側と削除側が同じ式を持つ ---
 # #643 の要件「作成側と削除側の両方を同時に直す」の機械的な担保。片方だけ変えると
@@ -395,7 +531,7 @@ echo
 echo "=== 合計: PASS=${pass} FAIL=${fail} ==="
 # **期待ケース数を固定する**。FAIL=0 だけを見ると、条件分岐でケースが丸ごと実行されなかったとき
 # （旧実装の skip 分岐がこの形だった）に「全部通った」と読めてしまう＝偽陰性。
-EXPECTED=24
+EXPECTED=31
 if [ "$((pass + fail))" -ne "$EXPECTED" ]; then
   echo "NG  実行ケース数が期待と違う: $((pass + fail)) != ${EXPECTED}（ケースが飛ばされている）"
   exit 1

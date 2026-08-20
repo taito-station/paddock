@@ -54,15 +54,26 @@ trap '[ "${remove_lock}" -eq 1 ] && rm -rf "${LOCK_DIR}" 2>/dev/null;
 
 # lock に記録された caffeinate を comm 確認のうえ停止する。
 # 戻り値 0 = lock を消してよい / 1 = 消してはいけない（生きているのに止められなかった）。
+# lock ディレクトリの中身を信用してよいか。`/tmp` は誰でも名前を作れるので、symlink や
+# 他ユーザー所有なら中身を読まない——`pid` の中身がそのまま `kill` の引数になる。
+# `[ -L ]` はリンクを辿らないので先に見る（`-d` / `-O` は辿る）。
+lock_is_trustworthy() {
+  [ ! -L "$1" ] && [ -d "$1" ] && [ -O "$1" ]
+}
+
 stop_recorded_caffeinate() {
   local dir="$1" label="$2" pid
   pid="$(cat "$dir/pid" 2>/dev/null || echo '')"
+  # 数値でなければ「記録が無い」に倒す（kill に非数値を渡さない）。
+  case "$pid" in (*[!0-9]*|'') pid="" ;; esac
   if [ -z "$pid" ]; then
     # 記録が無い＝止めるべき caffeinate を見失っていないので、残骸を片付けてよい。
     return 0
   fi
+  # comm はフルパスで返りうる（macOS）ので末尾要素でアンカーする。部分一致だと
+  # `/tmp/caffeinate-x/foo` のようなパスも通ってしまう。
   if kill -0 "$pid" 2>/dev/null \
-     && ps -p "$pid" -o comm= 2>/dev/null | grep -q 'caffeinate'; then
+     && ps -p "$pid" -o comm= 2>/dev/null | grep -qE '(^|/)caffeinate$'; then
     if kill "$pid" 2>/dev/null; then
       echo "keep-awake の caffeinate を停止しました（pid ${pid}${label}）"
       return 0
@@ -74,14 +85,18 @@ stop_recorded_caffeinate() {
   return 0
 }
 
-if stop_recorded_caffeinate "$LOCK_DIR" ""; then
+# 存在するのに信用できない（symlink / 他ユーザー所有）lock は読まないし消さない。
+if { [ -e "$LOCK_DIR" ] || [ -L "$LOCK_DIR" ]; } && ! lock_is_trustworthy "$LOCK_DIR"; then
+  echo "⚠ lock パス ${LOCK_DIR} が信用できない（symlink か他ユーザー所有）。触りません" >&2
+elif stop_recorded_caffeinate "$LOCK_DIR" ""; then
   remove_lock=1
 fi
 
-# 旧パスは symlink / 他ユーザー所有なら触らない（pid の中身がそのまま kill の引数になるため）。
-if [ "$LOCK_DIR" != "$LEGACY_LOCK_DIR" ] && [ -d "$LEGACY_LOCK_DIR" ] \
-   && [ ! -L "$LEGACY_LOCK_DIR" ] && [ -O "$LEGACY_LOCK_DIR" ]; then
-  if stop_recorded_caffeinate "$LEGACY_LOCK_DIR" "・旧 lock パス"; then
+if [ "$LOCK_DIR" != "$LEGACY_LOCK_DIR" ] \
+   && { [ -e "$LEGACY_LOCK_DIR" ] || [ -L "$LEGACY_LOCK_DIR" ]; }; then
+  if ! lock_is_trustworthy "$LEGACY_LOCK_DIR"; then
+    echo "⚠ 旧 lock パス ${LEGACY_LOCK_DIR} が信用できない（symlink か他ユーザー所有）。触りません" >&2
+  elif stop_recorded_caffeinate "$LEGACY_LOCK_DIR" "・旧 lock パス"; then
     remove_legacy_lock=1
   fi
 fi
