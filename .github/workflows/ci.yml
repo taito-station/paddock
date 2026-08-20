@@ -254,6 +254,12 @@ jobs:
         run: bash scripts/test-check-shell-var-nonascii.sh
       - name: Check variables followed by non-ASCII (#636)
         run: bash scripts/check-shell-var-nonascii.sh
+      # keep-awake の抑止窓の追従（#585）と lock パス（#643）の回帰テスト。
+      # **このコードは開催日にしか本番を踏まない**（keep-awake は開催日の朝に install する運用）
+      # ので、壊れても次の開催まで気づけない。psql / caffeinate / ps をスタブに差し替えて
+      # 判断分岐だけを検証するため、DB も macOS も要らず ubuntu で走る。
+      - name: Regression test for keep_awake.sh (#585 / #643)
+        run: bash scripts/test-keep-awake.sh
       - name: Run shellcheck (--severity=warning)
         # 対象ファイルの定義は scripts/check-shell-var-nonascii.sh --list を単一ソースにする
         # （拡張子で拾えない shebang スクリプトを含む。以前はここと検査スクリプトに同じ

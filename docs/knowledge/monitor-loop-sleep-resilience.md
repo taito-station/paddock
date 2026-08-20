@@ -8,8 +8,10 @@ sources:
   - docs/original-docs/0060-betting-axis-lock-preclose-topup.md
   - docs/qa/QA-monitor-sleep-568.md
   - docs/original-docs/568-monitor-sleep-gap.md
-distilled_from_sha: "90afa7e"
-updated: "2026-08-07"
+  - docs/original-docs/585-keep-awake-window-gap.md
+  - docs/qa/QA-keep-awake-window-643-585.md
+distilled_from_sha: "83d95d9"
+updated: "2026-08-20"
 ---
 
 # 監視ループのスリープ耐性（predict-watch / odds-collect）
@@ -106,6 +108,20 @@ DarkWake だけの Standby なら DarkWake 1 回ぶん待つ。発走直前 EV �
   **install を忘れると抑止はゼロ**——ただし監視自体はスリープを跨いでも復帰し、空いた分を警告する。
 - **外出中に監視を当てにするなら、蓋を閉じない**（または常時稼働ホストへ移設する。
   [deployments/launchd/README.md](../../deployments/launchd/README.md) の既知課題）。
+- **抑止窓は毎サイクル追従する（#585）**。窓は「当日の最終 `post_time` + buffer」で `caffeinate -t` に
+  焼き込まれるので、**朝の install 時点で `fetch-card` が途中までしか終わっていないと短いまま固定される**
+  ——2026-08-08 は 3 鞍ぶんの post_time しか無く 10:40 までの窓で張られ、10:26 に全 33 鞍（最終 18:30）が
+  入っても伸びず、`StartInterval`(5 分) ぶんの抑止空白が空いた。現在は毎サイクル DB を引き直して
+  必要窓が現行より後なら張り直す（**新しい `caffeinate` を起動してから旧を落とす**ので空白は生まれない）。
+  それでも `install.sh` は `fetch-card` の後に叩くほうが良い（初回から正しい窓になる）。
+- **抑止窓の記録は分粒度**（#585）。lock に書く終了時刻はエポックを分境界へ丸めた値で、
+  秒針を混ぜると「必要窓は変わっていないのに毎回延長する」という判定の揺れを生む。
+- **lock は UID スコープの固定パス**（`/tmp/paddock-keep-awake-$(id -u).lock.d`・#643）。`$TMPDIR` は
+  使えない——launchd は `TMPDIR` を設定せず `/tmp` に落ちるため、端末（`/var/folders/.../T/`）と別の
+  lock を見て互いを見失う（2026-08-19 実測）。**このパスは `keep_awake.sh`（作成側）と
+  `uninstall.sh`（削除側）の両方が持つので、変えるときは必ず同時に直す**。
+  uid を挟むのは同一ホストの別ユーザーとの**事故**衝突を避けるためで、**悪意ある先回りは防げない**
+  （`/tmp` の sticky bit が禁じるのは他人のエントリの削除だけで、新しい名前の作成は誰でもできる）。
 
 ## 検証のしかた
 
