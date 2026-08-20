@@ -10,7 +10,7 @@ sources:
   - docs/original-docs/568-monitor-sleep-gap.md
   - docs/original-docs/585-keep-awake-window-gap.md
   - docs/qa/QA-keep-awake-window-643-585.md
-distilled_from_sha: "83d95d9"
+distilled_from_sha: "0a56759"
 updated: "2026-08-20"
 ---
 
