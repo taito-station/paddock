@@ -14,9 +14,10 @@ sources:
   - docs/original-docs/0075-unsupported-race-skip-exit-zero.md
   - docs/original-docs/0086-netkeiba-unpriced-sentinel-is-not-odds.md
   - docs/original-docs/0088-bet-type-scoped-unpriced-sentinels.md
+  - docs/original-docs/0090-unpriced-record-policy-two-layers.md
   - docs/original-docs/0089-unpriced-bet-type-observation.md
 distilled_from_sha: "88f3220"
-updated: "2026-08-19"
+updated: "2026-08-22"
 ---
 
 # netkeiba 当日データソース取り込み 仕様書
@@ -193,6 +194,13 @@ netkeiba は**未発売・該当なしの組み合わせ**に固定の番兵値�
   （`[9999.9, 9999.9]` の形。現行 netkeiba は返さないが契約として単体テストで固定）。読み出し側は
   成分ごとに判定するのでワイドの番兵も `debug`。「番兵起因の WARN は 0 行」という #621 の実測は
   `--overview`＝**読み出し経路**での計測であり、保存経路のワイドを含意しない。
+- **記録方針は「未発売は記録に値する」で一貫・表現は 2 層**（#633・[ADR 0090](../original-docs/0090-unpriced-record-policy-two-layers.md)）。
+  **過去分**＝`race_odds_snapshots` に残る番兵の生値は「その時点で未発売だった」歴史的事実として
+  **保持する**（DELETE しない・ADR 0086 決定 3。読み出しは券種スコープ判定で無害化済み）。
+  **今後分**＝未発売は番兵でなく観測表 `race_odds_unpriced_observations`（ADR 0089・現在状態の
+  マーカー）が持ち、**snapshots へ番兵や未発売フラグ行を積み直すことはしない**（オッズ=EV 用
+  データと運用観測を同じ表に混ぜない）。「いつ発売されたか」の時系列が要件になったら観測表の
+  append-only 化を別 ADR で判断する（#649 の実測が材料）。
 
 #### 番兵リストの正本ファイル
 

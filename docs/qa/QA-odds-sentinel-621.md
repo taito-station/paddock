@@ -57,6 +57,9 @@
   事実の記録でもある。読み出し側で無害化し、**Python の分析経路にも同じ除外を入れる**
   （`scripts/predict-check/odds_guard.py`）。
 - 反映先: ADR
+- 追補（#633 → ADR 0090）: この回答が生む「過去は残すのに今後は積まない」非対称は、
+  「記録に値する立場は一貫・表現が 2 層（過去=snapshots の生値 / 今後=ADR 0089 の観測表）」
+  として確定した。詳細は [QA-odds-record-policy-633.md](QA-odds-record-policy-633.md)。
 
 ## Q5: EV 側にフィルタを足す必要はあるか
 
