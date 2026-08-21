@@ -14,8 +14,8 @@ sources:
   - docs/qa/QA-evil-merge-615.md
   - docs/qa/QA-fullwidth-after-var-636.md
   - .github/workflows/ci.yml
-distilled_from_sha: "d40b173"
-updated: "2026-08-19"
+distilled_from_sha: "b888362"
+updated: "2026-08-22"
 ---
 
 # CI パイプラインの構成と設計意図（D21）
