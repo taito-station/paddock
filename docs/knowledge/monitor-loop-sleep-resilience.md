@@ -138,6 +138,9 @@ DarkWake だけの Standby なら DarkWake 1 回ぶん待つ。発走直前 EV �
   **prefetch は何も書かない短命ロック**（`mkdir` ＋ `trap rmdir`）なので **mtime の時効（30 分）だけ**で
   判定する。prefetch の lock に pid を持ち込む案は、長命ロックでないのに「pid 未記入の窓」
   「PID 再利用」の分岐を輸入することになるため採らない。
+  **prefetch は実機の既定パスで確認済み**（2026-08-22）——時効切れの旧 lock は回収されて
+  `prefetch 開始:` まで到達し、`/tmp/paddock-prefetch-$(id -u).lock.d` を塞ぐとスキップし、
+  終了後に lock は残らない。
 - **`flock` の有無で lock 機構が変わる**（prefetch）。素の macOS に `flock`(1) は無いので**本番は
   `mkdir` 経路**、ubuntu の CI は `flock` 経路に入る。つまり **CI が緑でも本番経路が検査されたとは
   限らない**——回帰テストは PATH を絞って `flock` を隠し、両経路を踏ませる。
