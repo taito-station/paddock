@@ -65,6 +65,13 @@ mkdir -p "$STUB"
 # bash / env はスクリプト本体とスタブの shebang を解決するために要る。
 for c in bash env date tee mkdir find rmdir id dirname sleep; do
   p="$(command -v "$c")" || { echo "前提コマンドが無い: $c" >&2; exit 2; }
+  # **絶対パスであることを確かめる**。`command -v` は関数・エイリアス・ビルトインでは名前だけを
+  # 返すので、そのまま `ln -s` すると自分自身を指す壊れた symlink になり、スタブは exit 127 を
+  # 返しながらテストは「判定が偽だった」ように緑～偽 NG を出す（実際に踏んだ）。
+  case "$p" in
+    /*) ;;
+    *)  echo "外部コマンドとして解決できない: ${c}（command -v の結果: ${p}）" >&2; exit 2 ;;
+  esac
   ln -s "$p" "$STUB/$c"
 done
 
