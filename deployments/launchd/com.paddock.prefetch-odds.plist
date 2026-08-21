@@ -21,8 +21,9 @@
 
     <!-- launchd は最小 PATH なので psql / python3 / cargo 産物を探せるよう補う。
          Homebrew は Intel(/usr/local) と Apple Silicon(/opt/homebrew) の両方を入れておく。
-         WORKDIR を固定し scratch（lock 等）の場所を launchd と対話シェルで揃える
-         （$TMPDIR は launchd と対話シェルでズレうる）。本体ログは prefetch_odds.sh 側が
+         WORKDIR を固定するのは scratch を launchd と対話シェルで揃えるため（$TMPDIR は両者で
+         ズレうる）。**lock は WORKDIR とは無関係**で、prefetch_odds.sh が UID スコープの固定パス
+         /tmp/paddock-prefetch-$(id -u).lock{,.d} を持つ（#651）。本体ログは prefetch_odds.sh 側が
          永続パス ~/Library/Logs/paddock-prefetch.log へ出す（/tmp は再起動で消えるため #493）。 -->
     <key>EnvironmentVariables</key>
     <dict>
