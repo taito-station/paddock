@@ -12,7 +12,7 @@ sources:
   - docs/qa/QA-keep-awake-window-643-585.md
   - docs/original-docs/651-prefetch-lock-uid-scope.md
   - docs/qa/QA-prefetch-lock-651.md
-distilled_from_sha: "b888362"
+distilled_from_sha: "6935ef8"
 updated: "2026-08-22"
 ---
 
