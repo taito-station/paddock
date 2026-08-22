@@ -16,7 +16,7 @@ sources:
   - docs/original-docs/0088-bet-type-scoped-unpriced-sentinels.md
   - docs/original-docs/0089-unpriced-bet-type-observation.md
   - docs/original-docs/0090-unpriced-record-policy-two-layers.md
-distilled_from_sha: "cbc948e"
+distilled_from_sha: "ae6d05f"
 updated: "2026-08-22"
 ---
 
