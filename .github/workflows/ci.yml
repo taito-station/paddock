@@ -260,6 +260,12 @@ jobs:
       # 判断分岐だけを検証するため、DB も macOS も要らず ubuntu で走る。
       - name: Regression test for keep_awake.sh (#585 / #643)
         run: bash scripts/test-keep-awake.sh
+      # prefetch の lock パス（#651）の回帰テスト。keep-awake と同じ理由（開催日にしか本番を
+      # 踏まないので壊れても次の開催まで気づけない）。lock を奪えないまま沈黙すると再取得不能な
+      # 発走直前 snapshot を落とすため、判断分岐を機械で固定する。python3 スタブで netkeiba にも
+      # DB にも触らず、PATH を絞って **flock 不在（本番 macOS）の mkdir 分岐も ubuntu で踏ませる**。
+      - name: Regression test for prefetch_odds.sh (#651)
+        run: bash scripts/test-prefetch-odds.sh
       - name: Run shellcheck (--severity=warning)
         # 対象ファイルの定義は scripts/check-shell-var-nonascii.sh --list を単一ソースにする
         # （拡張子で拾えない shebang スクリプトを含む。以前はここと検査スクリプトに同じ

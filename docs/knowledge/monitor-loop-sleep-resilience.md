@@ -10,8 +10,10 @@ sources:
   - docs/original-docs/568-monitor-sleep-gap.md
   - docs/original-docs/585-keep-awake-window-gap.md
   - docs/qa/QA-keep-awake-window-643-585.md
-distilled_from_sha: "0a56759"
-updated: "2026-08-20"
+  - docs/original-docs/651-prefetch-lock-uid-scope.md
+  - docs/qa/QA-prefetch-lock-651.md
+distilled_from_sha: "6935ef8"
+updated: "2026-08-22"
 ---
 
 # 監視ループのスリープ耐性（predict-watch / odds-collect）
@@ -118,12 +120,30 @@ DarkWake だけの Standby なら DarkWake 1 回ぶん待つ。発走直前 EV �
   tick を跨いで lock が読まれ、張り直しの前後で `pmset` の抑止が途切れない（633 サンプル中 0 件）。
 - **抑止窓の記録は分粒度**（#585）。lock に書く終了時刻はエポックを分境界へ丸めた値で、
   秒針を混ぜると「必要窓は変わっていないのに毎回延長する」という判定の揺れを生む。
-- **lock は UID スコープの固定パス**（`/tmp/paddock-keep-awake-$(id -u).lock.d`・#643）。`$TMPDIR` は
+- **lock は UID スコープの固定パス**（keep-awake は `/tmp/paddock-keep-awake-$(id -u).lock.d`・#643、
+  prefetch は `/tmp/paddock-prefetch-$(id -u).lock{,.d}`・#651）。`$TMPDIR` は
   使えない——launchd は `TMPDIR` を設定せず `/tmp` に落ちるため、端末（`/var/folders/.../T/`）と別の
-  lock を見て互いを見失う（2026-08-19 実測）。**このパスは `keep_awake.sh`（作成側）と
-  `uninstall.sh`（削除側）の両方が持つので、変えるときは必ず同時に直す**。
+  lock を見て互いを見失う（2026-08-19 実測）。**keep-awake のパスは `keep_awake.sh`（作成側）と
+  `uninstall.sh`（削除側）の両方が持つので、変えるときは必ず同時に直す**（prefetch は
+  `prefetch_odds.sh` 1 本だけが持つ。`uninstall.sh` は prefetch の lock に触らない）。
   uid を挟むのは同一ホストの別ユーザーとの**事故**衝突を避けるためで、**悪意ある先回りは防げない**
   （`/tmp` の sticky bit が禁じるのは他人のエントリの削除だけで、新しい名前の作成は誰でもできる）。
+  防げないので **「沈黙しない」に倒す**——lock が symlink / 他ユーザー所有なら大きく警告して
+  **非 0 で終える**（`exit 0` のスキップに倒すと、時効による自己回復も `rmdir` 失敗で効かないまま
+  外形正常に見え、次の開催まで気づけない）。
+- **旧パスからの移行は「譲るか片付けるか」を実行中判定で分ける**（#643 / #651）。旧 lock を掴んだまま
+  走っているインスタンスを取りこぼすと、新旧が互いを見失って**二重起動**する（prefetch では
+  netkeiba への取得回数が倍になり ADR 0068 の IP ブロックに直結する）。実行中かどうかの材料は
+  **lock が何を記録しているかで変わる**: keep-awake は pid を書くので生存＋`comm` 照合で判定し、
+  **prefetch は何も書かない短命ロック**（`mkdir` ＋ `trap rmdir`）なので **mtime の時効（30 分）だけ**で
+  判定する。prefetch の lock に pid を持ち込む案は、長命ロックでないのに「pid 未記入の窓」
+  「PID 再利用」の分岐を輸入することになるため採らない。
+  **prefetch は実機の既定パスで確認済み**（2026-08-22）——時効切れの旧 lock は回収されて
+  `prefetch 開始:` まで到達し、`/tmp/paddock-prefetch-$(id -u).lock.d` を塞ぐとスキップし、
+  終了後に lock は残らない。
+- **`flock` の有無で lock 機構が変わる**（prefetch）。素の macOS に `flock`(1) は無いので**本番は
+  `mkdir` 経路**、ubuntu の CI は `flock` 経路に入る。つまり **CI が緑でも本番経路が検査されたとは
+  限らない**——回帰テストは PATH を絞って `flock` を隠し、両経路を踏ませる。
 
 ## 検証のしかた
 
