@@ -157,3 +157,11 @@ read 系（#33 スコープ）に加え、セッション操作の write 系が�
 - #40 確定結果の自動取得（払戻自動補完）
 - #51 単複オッズ永続化（推奨計算の基盤）
 - #50 名前あいまい検索（分析ビュー）
+
+---
+
+## 決定ログ
+
+<!-- この節は append-only です。既存エントリの変更・削除は CI が検出します。 -->
+
+<!-- 関連する決定は race-result-ingestion.md / learned-model-harness.md / live-ev-buy-view.md / betting-rule-history.md の決定ログに記録されている -->
