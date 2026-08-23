@@ -144,7 +144,13 @@ impl<O: OddsScraper, R: OddsRepository> OddsInteractor<O, R> {
     /// （read-through による再スクレイプ）は使われなくなるため、一過性の取得失敗で保存された
     /// 不完全なスナップショットはそのまま固定表示される——この片道性は意図的な割り切り。
     pub async fn race_odds_cached(&self, race_id: &RaceId) -> Result<Option<RaceOdds>> {
-        self.repository.find_race_odds(race_id, None).await
+        let result = self.repository.find_race_odds(race_id, None).await?;
+        tracing::debug!(
+            race_id = %race_id,
+            found = result.is_some(),
+            "race_odds_cached: キャッシュのみ参照（再スクレイプなし）"
+        );
+        Ok(result)
     }
 
     /// race_id のオッズを**必ず再スクレイプ**して新スナップショットを保存し、フルのオッズを返す（#257）。

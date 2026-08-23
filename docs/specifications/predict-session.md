@@ -5,7 +5,7 @@ status: Confirmed
 kind: knowledge
 doc_class: [D11, D19, D08]
 tags: [D11, D19, D08]
-updated: "2026-08-16"
+updated: "2026-08-23"
 ---
 
 # predict バイナリ: 対話型レーシングセッション
@@ -324,7 +324,7 @@ struct SessionState {
 ```
 src/apps/predict
     → paddock-use-case  (Interactor 経由: predict_race / races_by_date)
-    → paddock-use-case  (OddsInteractor 経由: race_odds — 都度ライブスクレイプ)
+    → paddock-use-case  (OddsInteractor 経由: race_odds / race_odds_cached)
     → paddock-domain    (App 層が直接呼ぶ純粋関数: select_bets)
     → netkeiba-scraper  (OddsScraper 実装 UreqNetkeibaScraper を OddsInteractor に注入, ADR 0048)
     → rdb-gateway       (Repository 実装を Interactor に注入)
@@ -334,7 +334,7 @@ src/apps/predict
 呼び出し責務を明確化する:
 
 - **確率推定・レース一覧**（IO を伴う）は **Use-Case の Interactor 経由**で呼ぶ
-- **オッズ取得**（IO を伴う）は **Use-Case の `OddsInteractor` 経由**で呼ぶ（都度スクレイプ・キャッシュなし）
+- **オッズ取得**（IO を伴う）は **Use-Case の `OddsInteractor` 経由**で呼ぶ。`race_odds`（read-through: キャッシュが不完全なら再スクレイプ）と `race_odds_cached`（DB キャッシュのみ・再スクレイプしない）の 2 メソッドがあり、`--overview` は過去日（`MeetingPhase::Over`）で後者を使う（#624）
 - **`select_bets`**（IO なしの純粋関数）は **App 層（`session.rs`）が `paddock-domain` から直接呼ぶ**。Use-Case にラッパーを置かない（薄い委譲を増やさないため）
   - 実シグネチャは全引数が参照: `select_bets(probabilities: &[HorseProbability], race_odds: &RaceOdds, config: &BettingConfig) -> Vec<BettingRecommendation>`。呼び出しは `select_bets(&probs, &odds, &BettingConfig::default())`
 
