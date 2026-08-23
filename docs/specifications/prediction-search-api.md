@@ -6,7 +6,6 @@ kind: knowledge
 doc_class: [D10, D08, D19]
 tags: [D10, D08, D19]
 sources:
-  - docs/original-docs/0025-prediction-search-api.md
   - docs/api/openapi.json
 distilled_from_sha: "f65aab1"
 updated: "2026-08-12"

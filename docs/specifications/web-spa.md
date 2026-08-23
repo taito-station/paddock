@@ -5,14 +5,6 @@ status: Confirmed
 kind: knowledge
 doc_class: [D11, D02, D10]
 tags: [D11, D02, D10]
-sources:
-  - docs/original-docs/0068-race-result-ingestion-ui-reflection.md
-  - docs/original-docs/0019-portfolio-generator.md
-  - docs/original-docs/0046-allocation-prob-weight-no-floor-rejected.md
-  - docs/original-docs/0054-kelly-staking-rejected.md
-  - docs/original-docs/0055-ev-layer-separation-circular-break.md
-  - docs/original-docs/0060-betting-axis-lock-preclose-topup.md
-distilled_from_sha: "f0ee7a3"
 updated: "2026-07-21"
 ---
 
@@ -65,7 +57,7 @@ REST API (#33) を消費する **Web SPA** を追加し、CLI `predict` の対�
 CLI `run_race` の対話ループを画面化する。
 
 1. **確率表**: 馬番・馬名・勝率・連対率・複勝率（`predict_race` の出力）。
-2. **買い目推奨**: 各買い目を券種・組合せ・EV・推奨額で表示。本番配分は `build_portfolio`（ワイド・馬連・三連複の◎軸ながし、券種予算を 100 円単位で均等配分。[ADR 0019](../original-docs/0019-portfolio-generator.md)。券種内の均等配分は [ADR 0046](../original-docs/0046-allocation-prob-weight-no-floor-rejected.md) で確率重み化を棄却し維持）。Kelly 配分は [ADR 0054](../original-docs/0054-kelly-staking-rejected.md) で棄却済みで、`select_bets`/Kelly は backtest 評価専用。
+2. **買い目推奨**: 各買い目を券種・組合せ・EV・推奨額で表示。本番配分は `build_portfolio`（ワイド・馬連・三連複の◎軸ながし、券種予算を 100 円単位で均等配分。ADR 0019。券種内の均等配分は ADR 0046 で確率重み化を棄却し維持）。Kelly 配分は ADR 0054 で棄却済みで、`select_bets`/Kelly は backtest 評価専用。
    - 閾値超えの買い目が無い場合は「該当なし」を明示。
    - オッズ未取得（#51 未保存）の場合は推奨を出さず、**「最新取得」ボタン**でライブ取得 → 保存 → 再計算を促す。
 
