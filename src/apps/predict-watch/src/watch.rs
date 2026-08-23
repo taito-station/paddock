@@ -17,7 +17,7 @@ use predict_format::{
 use crate::cli::Cli;
 use crate::notify::{
     ADR0076_MEASURED_GATE, NOTIFY_ROI_RESEND_DELTA, NotifySettings, PLATFORM_SUPPORTED,
-    RaceEvaluation, deliver_all, notify_status_lines, pick_notifications, resolve_notify_roi,
+    RaceEvaluation, deliver_all, notify_status_lines, pct, pick_notifications, resolve_notify_roi,
     send_with_deadline,
 };
 use crate::setup::App;
@@ -86,20 +86,20 @@ fn gate_caveat_lines(roi_gate: f64, notify_gate: f64) -> Vec<String> {
     // ここにも通す。一次資料は 2026-08-09 に ≥70% の通過を 7 回観測している）。
     let mut out = vec![if roi_gate >= ADR0076_MEASURED_GATE {
         format!(
-            "── 参考ROI の読み方: 🔶（≥{:.0}%）は 182R / 839 スイープの実測で到達 0 件。判定ROI に実現ROI の選別力は無い（ADR 0076）。",
-            roi_gate * 100.0
+            "── 参考ROI の読み方: 🔶（≥{}%）は 182R / 839 スイープの実測で到達 0 件。判定ROI に実現ROI の選別力は無い（ADR 0076）。",
+            pct(roi_gate)
         )
     } else {
         format!(
-            "── 参考ROI の読み方: 🔶（≥{:.0}%）は買う閾値の表示マーク。判定ROI に実現ROI の選別力は無い（ADR 0076。到達 0 件と実測したのは ≥{:.0}% で、この設定はそれより低い）。",
-            roi_gate * 100.0,
-            ADR0076_MEASURED_GATE * 100.0
+            "── 参考ROI の読み方: 🔶（≥{}%）は買う閾値の表示マーク。判定ROI に実現ROI の選別力は無い（ADR 0076。到達 0 件と実測したのは ≥{}% で、この設定はそれより低い）。",
+            pct(roi_gate),
+            pct(ADR0076_MEASURED_GATE)
         )
     }];
     if notify_gate < roi_gate {
         out.push(format!(
-            "   🔍（≥{:.0}%）は結果照合のための目印で、張り推奨ではない。",
-            notify_gate * 100.0
+            "   🔍（≥{}%）は結果照合のための目印で、張り推奨ではない。",
+            pct(notify_gate)
         ));
     }
     out.push(
@@ -432,16 +432,16 @@ async fn sweep(
     // notify_gate == roi_gate（🔍 帯が構造的に空）のときはヘッダから 🔍 表記を落とし、
     // 出ないマークを案内しない（表示と実挙動を一致させる）。
     let notify_part = if notify_gate < cli.roi_gate {
-        format!(" ・ 🔍検証候補≥{:.0}%", notify_gate * 100.0)
+        format!(" ・ 🔍検証候補≥{}%", pct(notify_gate))
     } else {
         String::new()
     };
     println!(
-        "── {} スイープ: 対象 {} レース（窓 {}分 / 🔶買い妙味≥{:.0}%{}・判定は手動精査）",
+        "── {} スイープ: 対象 {} レース（窓 {}分 / 🔶買い妙味≥{}%{}・判定は手動精査）",
         now.format("%H:%M"),
         due.len(),
         cli.window,
-        cli.roi_gate * 100.0,
+        pct(cli.roi_gate),
         notify_part,
     );
     if unknown > 0 {
@@ -1015,8 +1015,6 @@ mod tests {
         assert!(joined.contains("軸ロック"), "{joined}");
     }
 
-    /// `notify_gate == roi_gate` のとき 🔍 帯は構造的に空なので、その行は出さない
-    /// （出ないマークを案内しない＝スイープヘッダの既存規約と揃える）。
     #[test]
     fn gate_caveat_does_not_claim_zero_hits_below_the_measured_gate() {
         // #584: ADR 0076 が「到達 0 件」と実測したのは ≥100%。--roi-gate を下げた探索運用でも
@@ -1037,6 +1035,8 @@ mod tests {
         );
     }
 
+    /// `notify_gate == roi_gate` のとき 🔍 帯は構造的に空なので、その行は出さない
+    /// （出ないマークを案内しない＝スイープヘッダの既存規約と揃える）。
     #[test]
     fn gate_caveat_omits_notify_line_when_band_is_empty() {
         let joined = gate_caveat_lines(1.0, 1.0).join("\n");

@@ -324,7 +324,7 @@ where
 ///
 /// `{:.0}%` の四捨五入だと `--notify-roi 0.755` を「≥76%」と宣言しながら実際は 75.5% で鳴る
 /// ——起動注記が嘘をつかないための規律は、桁の丸めにも同じく効かせる。整数のときは小数を出さない。
-fn pct(value: f64) -> String {
+pub(crate) fn pct(value: f64) -> String {
     let p = value * 100.0;
     if (p - p.round()).abs() < 1e-9 {
         format!("{p:.0}")
@@ -359,11 +359,16 @@ pub fn notify_status_lines(s: &NotifySettings) -> Vec<String> {
     };
     // 3 つの閾値を 1 行に並べる。取り違え（表示ゲートを下げても鳴らない / 発火ゲートを
     // 下げても 🔍 は増えない）が実害を生むので、**実際に鳴る閾値がどれか**をここで確定させる。
+    // 🔍 は `notify_gate < roi_gate` のときしか出ない（`mark_for` の帯が構造的に空になる）。
+    // スイープヘッダ・`gate_caveat_lines` と同じく、**出ないマークは案内しない**。
+    let display_gates = if s.notify_gate < s.roi_gate {
+        format!("🔶 ≥{}% / 🔍 ≥{}%", pct(s.roi_gate), pct(s.notify_gate))
+    } else {
+        format!("🔶 ≥{}%", pct(s.roi_gate))
+    };
     let mut out = vec![format!(
-        "── macOS 通知: 有効・発火は参考ROI ≥ {}%（{origin}）。表示ゲートは別物で 🔶 ≥{}% / 🔍 ≥{}%（どちらもベルは鳴らさない）。",
-        pct(s.notify_roi),
-        pct(s.roi_gate),
-        pct(s.notify_gate)
+        "── macOS 通知: 有効・発火は参考ROI ≥ {}%（{origin}）。表示ゲートは別物で {display_gates}（ベルは鳴らさない）。",
+        pct(s.notify_roi)
     )];
     if s.notify_roi >= ADR0076_MEASURED_GATE {
         out.push(format!(
@@ -738,6 +743,18 @@ mod tests {
         assert_eq!(pct(1.0), "100");
         assert_eq!(pct(0.7), "70");
         assert_eq!(pct(0.755), "75.5");
+    }
+
+    #[test]
+    fn notify_status_omits_the_search_mark_when_its_band_is_empty() {
+        // `notify_gate == roi_gate` では `mark_for` が 🔍 を返しえない。スイープヘッダ・
+        // `gate_caveat_lines` と同じく、**出ないマークは案内しない**。
+        let lines = notify_status_lines(&settings(0.7, false, 0.7, 0.7));
+        assert!(!lines[0].contains("🔍"), "{}", lines[0]);
+        assert!(lines[0].contains("🔶 ≥70%"), "{}", lines[0]);
+        // 帯があるときは従来どおり両方出す。
+        let with_band = notify_status_lines(&settings(1.0, false, 1.0, 0.7));
+        assert!(with_band[0].contains("🔍 ≥70%"), "{}", with_band[0]);
     }
 
     #[test]
