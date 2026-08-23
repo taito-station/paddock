@@ -211,7 +211,7 @@ async fn run_race(
     // 委譲する（--overview の read-only 再表示と共有・#551）。返り値の portfolio を買い目入力に使う。
     let race_cap = race_budget.min(session.balance);
     let (portfolio, suggested) =
-        match render_race_prediction(app, race, track_condition, race_cap, explain).await? {
+        match render_race_prediction(app, race, track_condition, race_cap, explain, false).await? {
             // 出馬表未登録（NotFound）はそのレースのみスキップ（Enter 待ちなし・現行挙動を踏襲）。
             RaceView::NoEntries => return Ok(()),
             // オッズ未取得はスキップのみ受付。--skip-all は Enter 待ちを省いて即次レースへ（#479）。
@@ -358,6 +358,7 @@ async fn render_race_prediction(
     track_condition: Option<TrackCondition>,
     race_cap: u64,
     explain: bool,
+    cache_only: bool,
 ) -> anyhow::Result<RaceView> {
     // 確率は 2 視点で取る（#272 確率分離）。順位付け（軸/相手）は blended（市場ブレンド・解像度が
     // 高い）、EV は pure（純モデル α=1.0・市場非依存）で計算し EV=P_blended×odds の循環を断つ。
@@ -405,7 +406,13 @@ async fn render_race_prediction(
     }
 
     // オッズ未取得（None）はスキップのみ受付。OddsInteractor が都度ライブスクレイプし、未公開は None に畳む。
-    let Some(odds) = app.odds.race_odds(&race.race_id).await? else {
+    // 過去日の --overview（cache_only）は再スクレイプせずキャッシュのみを見る（#624）。
+    let odds_result = if cache_only {
+        app.odds.race_odds_cached(&race.race_id).await?
+    } else {
+        app.odds.race_odds(&race.race_id).await?
+    };
+    let Some(odds) = odds_result else {
         println!();
         println!("オッズ未取得 — このレースはスキップします");
         return Ok(RaceView::NoOdds);
@@ -518,8 +525,14 @@ pub async fn run_overview(
     // 一覧の判定時刻は 1 回だけ取る（行ごとに時刻が動くと下の注記と食い違うため）。
     warn_if_not_jst_now("発走状態");
     let now = Local::now().naive_local();
+    // 開催日が過ぎていれば全レース発走済み＝市場は締まっている。read-through の再スクレイプは
+    // 無意味な netkeiba アクセスになるため、過去日はキャッシュのみで表示する（#624）。
+    let cache_only = matches!(meeting_phase(date, now.date()), MeetingPhase::Over);
 
     print_overview_header(&date_str, &races, &post_times, date, now);
+    if cache_only {
+        println!("（過去日のため、オッズは保存済みキャッシュのみを表示します）");
+    }
     for race in &races {
         println!();
         // 発走判定は race.date、注記と不変条件チェックは --date が基準。races_by_date が
@@ -542,7 +555,9 @@ pub async fn run_overview(
             None => println!("馬場状態: 不明"),
         }
         // race_cap は残高で絞らない（セッション非依存の再表示のため）。表示結果は破棄する。
-        let _ = render_race_prediction(app, race, track_condition, race_budget, explain).await?;
+        let _ =
+            render_race_prediction(app, race, track_condition, race_budget, explain, cache_only)
+                .await?;
     }
     if let Some(footer) = overview_footer(date, now, Local::now().naive_local()) {
         println!();

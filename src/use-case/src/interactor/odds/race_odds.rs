@@ -136,6 +136,13 @@ impl<O: OddsScraper, R: OddsRepository> OddsInteractor<O, R> {
         }
     }
 
+    /// race_id のオッズを**キャッシュのみ**で返す（再スクレイプしない）。
+    ///
+    /// 過去日の --overview で read-through を抑制するために使う（#624）。
+    pub async fn race_odds_cached(&self, race_id: &RaceId) -> Result<Option<RaceOdds>> {
+        self.repository.find_race_odds(race_id, None).await
+    }
+
     /// race_id のオッズを**必ず再スクレイプ**して新スナップショットを保存し、フルのオッズを返す（#257）。
     ///
     /// `race_odds()` の read-through はキャッシュ優先で再取得しないため、発走直前の
