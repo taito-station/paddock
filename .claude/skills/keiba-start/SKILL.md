@@ -364,7 +364,19 @@ nohup paddock-predict-watch --date "$D" >> ~/Library/Logs/paddock-predict-watch-
 paddock-predict-watch --date YYYY-MM-DD --once   # 1スイープのみ（cron 等）
 ```
 
-**バックグラウンド起動にすると通知本文が端末に出ない。定期的にログ本文まで読む**——生存確認だけでは 🔶 買い妙味の通知を取りこぼす（「静かな失敗」を潰すつもりで別の取りこぼしを作らない）。
+**バックグラウンド起動にすると判定行が端末に出ない。定期的にログ本文まで読む**——生存確認だけでは 🔶 買い妙味を取りこぼす（「静かな失敗」を潰すつもりで別の取りこぼしを作らない）。
+
+ゲート通過は **macOS 通知**でも届く（#584・既定で有効）。ただし**既定閾値（=`--roi-gate` の 100%）では構造的に鳴らない**——ADR 0076 の実測で通過 0 件なので、これを当てにしてログを読まないのは誤り。起動時にその旨が 1 行で宣言されるので必ず読む。#571 のゲート較正までは閾値を下げて実地検証する:
+
+```sh
+D=$(date +%F)
+nohup paddock-predict-watch --date "$D" --notify-roi 0.5 --notify-gate 0.5 >> ~/Library/Logs/paddock-predict-watch-${D//-/}.log 2>&1 &
+grep -c '^  🔔 ' ~/Library/Logs/paddock-predict-watch-${D//-/}.log   # 配送できた件数（未配送は 🔔(未配送)。行頭で絞らないと注記や警告の文中の 🔔 も拾う）
+```
+
+- 同一レースは前回通知時から **+10pt 上振れするまで再通知しない**（連投抑止）。監視を再起動すると抑制はリセットされる。
+- 鳴らしたくない検証では `--no-notify` を明示する（`--once` / cron でも既定は有効のまま）。
+- **鳴っても go シグナルではない**（発火は参考ROI 由来・ADR 0079）。判断は手動精査と軸ロックのまま。
 
 ```sh
 D=$(date +%F); LOG=~/Library/Logs/paddock-predict-watch-${D//-/}.log
