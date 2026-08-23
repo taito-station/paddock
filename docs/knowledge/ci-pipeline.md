@@ -9,7 +9,7 @@ sources:
   - docs/qa/QA-evil-merge-615.md
   - docs/qa/QA-fullwidth-after-var-636.md
   - .github/workflows/ci.yml
-distilled_from_sha: "3605743"
+distilled_from_sha: "bf3e4fe"
 updated: "2026-08-22"
 ---
 
