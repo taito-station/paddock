@@ -452,13 +452,12 @@ ADR 0072 でスリープ耐性を得た結果、監視は「動いているの�
   側に倒れる。抑制は 1 プロセスの連投抑止であって永続契約ではない。
 - **`--once` / cron で通知を自動無効にする**。「cron だけ沈黙する」という新しい静かな失敗を作る。
   鳴らしたくない検証では `--no-notify` を明示する。
-- **1 スイープあたりの通知件数に上限を設ける**。抑制が定常状態を既にカバーし、初回バーストは
-  窓 40 分の Due 件数（通常 10 未満）で頭打ちなので、要件外の複雑さになる。
 
 #### 影響
 
-- **追加**: `src/apps/predict-watch/src/notify.rs`（`GatePass` / `resolve_notify_roi` /
-  `should_notify` / `select_notifications` / `gate_pass_message` / `notify_status_lines` / `send`）。
+- **追加**: `src/apps/predict-watch/src/notify.rs`（`RaceEvaluation` / `resolve_notify_roi` /
+  `should_notify` / `pick_notifications` / `record_notified` / `notification_message` /
+  `delivery_report` / `notify_status_lines` / `send` / `send_with_deadline`）。
   CLI に `--notify-roi` / `--no-notify`。`Slot` に `race_name`。`WatchSweeper` に抑制状態。
   **依存クレートの追加は無い**（`std::process::Command` のみ）。
 - **不変**: `mark_for` / `resolve_notify_gate` / 判定行の表示・`live_ev_snapshots` の verdict・

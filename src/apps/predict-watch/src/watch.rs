@@ -16,8 +16,9 @@ use predict_format::{
 
 use crate::cli::Cli;
 use crate::notify::{
-    NOTIFY_ROI_RESEND_DELTA, NotifySettings, RaceEvaluation, delivery_report, notification_message,
-    notify_status_lines, resolve_notify_roi, select_notifications, send_with_deadline,
+    NOTIFY_ROI_RESEND_DELTA, NotifySettings, PLATFORM_SUPPORTED, RaceEvaluation,
+    SWEEP_DELIVERY_ABORTED, delivery_report, notification_message, notify_status_lines,
+    pick_notifications, record_notified, resolve_notify_roi, send_with_deadline,
 };
 use crate::setup::App;
 use crate::snapshot::{SnapshotContext, build_snapshot_record};
@@ -451,14 +452,14 @@ async fn sweep(
         );
     }
 
-    let mut passes = Vec::with_capacity(due.len());
+    let mut evaluations = Vec::with_capacity(due.len());
     for slot in due {
         let is_ura = is_g1_ura(slot.race.venue, slot.race_class, &day_classes);
-        if let Some(pass) = evaluate_race(app, slot, is_ura, captured_at, ctx).await {
-            passes.push(pass);
+        if let Some(evaluation) = evaluate_race(app, slot, is_ura, captured_at, ctx).await {
+            evaluations.push(evaluation);
         }
     }
-    passes
+    evaluations
 }
 
 /// 1 レースを評価: フレッシュなオッズ再取得 → 確率推定 → 買い目/EV → ROI 判定。
@@ -696,25 +697,40 @@ struct WatchSweeper<'a> {
 }
 
 impl WatchSweeper<'_> {
-    /// 閾値を通過した評価を macOS 通知で人に届ける（#584）。発火判定は `select_notifications`、
+    /// 閾値を通過した評価を macOS 通知で人に届ける（#584）。発火判定は `pick_notifications`、
     /// ログ出力と失敗報告の要否は `delivery_report`、配送は `send_with_deadline` に委譲し、
     /// ここは状態を渡して結果を印字するだけの薄い糊にする（判断はすべて純関数側でテスト済み）。
     ///
-    /// 配送を**デッドライン付きでブロッキングプールへ逃がす**のは、osascript が返らないときに
-    /// 監視ループごと止めないため（止まってもプロセスは生存するので #568 の途切れ警告も出ない）。
-    async fn notify_passing_races(&mut self, evaluations: Vec<RaceEvaluation>) {
+    /// 抑制状態を進めるのは**配送に成功したときだけ**（`record_notified`）。失敗したまま
+    /// 「通知済み」にすると、そのレースは +10pt 上振れするまで二度と鳴らない——一過性の失敗 1 回で
+    /// レースごと落ちるのは「失敗するなら鳴りすぎる側へ倒す」の逆になる。
+    ///
+    /// **1 件でもデッドラインに掛かったら、そのスイープの残りは配送を試みない**。1 件あたり 5 秒の
+    /// 上限はあってもレース数ぶん直列に積み上がるので、配送が壊れている日はスイープ末尾が
+    /// 分オーダーで伸びる。試さなかったぶんは記録もしないので次スイープでそのまま拾い直す。
+    async fn deliver_notifications(&mut self, evaluations: Vec<RaceEvaluation>) {
         if self.cli.no_notify {
             return;
         }
-        let selected = select_notifications(
-            &mut self.last_notified_roi,
+        let selected = pick_notifications(
+            &self.last_notified_roi,
             evaluations,
             self.notify_roi,
             NOTIFY_ROI_RESEND_DELTA,
         );
+        let mut deadline_hit = false;
         for e in selected {
             let message = notification_message(&e);
-            let failure = send_with_deadline(&message).await;
+            let failure = if deadline_hit {
+                Some(SWEEP_DELIVERY_ABORTED.to_string())
+            } else {
+                let f = send_with_deadline(&message).await;
+                deadline_hit = f.as_ref().is_some_and(|f| f.deadline);
+                f.map(|f| f.reason)
+            };
+            if failure.is_none() {
+                record_notified(&mut self.last_notified_roi, &e);
+            }
             let report = delivery_report(
                 &message,
                 failure.as_deref(),
@@ -821,7 +837,7 @@ impl Sweeper for WatchSweeper<'_> {
         let evaluations = sweep(self.app, slots, statuses, now, &captured_at, ctx).await;
         // 判定をログに埋もれさせず人に届ける（#584）。スイープの最後にまとめて出すことで、
         // 通知行が各レースの買い目出力に挟まれて流れるのを防ぐ。
-        self.notify_passing_races(evaluations).await;
+        self.deliver_notifications(evaluations).await;
     }
 }
 
@@ -842,6 +858,14 @@ pub async fn run(app: &App, cli: &Cli) -> anyhow::Result<()> {
     {
         anyhow::bail!(
             "--blend-alpha は 0.0〜1.0 で指定してください（市場とモデルのブレンド重み）。"
+        );
+    }
+    // 買う閾値そのものの健全性を先に見る（#584 レビュー）。非有限だと `resolve_notify_roi` の
+    // 追従経路（未指定＝roi_gate）がそのまま NaN を受け取り、表示・通知の判定が丸ごと壊れる。
+    if !cli.roi_gate.is_finite() || cli.roi_gate < 0.0 {
+        anyhow::bail!(
+            "--roi-gate（{}）は 0 以上の有限値で指定してください（NaN/∞ は表示マークと通知の判定を無言で壊します）。",
+            cli.roi_gate
         );
     }
     // 表示（検証候補 🔍）閾値を解決する。未指定は min(roi_gate, 0.7)、明示指定の逆転（buy 超）は弾く（#345）。
@@ -888,6 +912,7 @@ pub async fn run(app: &App, cli: &Cli) -> anyhow::Result<()> {
         roi_gate: cli.roi_gate,
         notify_gate,
         delta: NOTIFY_ROI_RESEND_DELTA,
+        platform_supported: PLATFORM_SUPPORTED,
     }) {
         println!("{line}");
     }

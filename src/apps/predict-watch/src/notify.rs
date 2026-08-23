@@ -16,8 +16,12 @@
 //! （`watch::gate_caveat_lines` / `watch::print_gate_caveat` と同じ分離）。文言と判定が
 //! 単体テストで固定できることが、通知が「鳴るはずなのに鳴らない」に劣化しないための担保。
 
-use std::process::{Command, ExitStatus, Stdio};
-use std::time::Duration;
+use std::process::{Child, Command, Stdio};
+use std::time::{Duration, Instant};
+
+/// このプラットフォームで osascript 通知を配送できるか。macOS 以外では「有効」と宣言してから
+/// 全件が未配送になるだけなので、起動注記の時点で配送できないことを言う。
+pub const PLATFORM_SUPPORTED: bool = cfg!(target_os = "macos");
 
 /// osascript の**絶対パス**。PATH 解決に頼らないのは (a) PATH 汚染で別バイナリを踏まない、
 /// (b) launchd の最小 PATH（既存 plist が `EnvironmentVariables.PATH` で補っているもの）でも
@@ -54,10 +58,13 @@ const ADR0076_MEASURED_GATE: f64 = 1.0;
 /// 間隔 5 分のスイープに対して十分小さく、正常系で誤って打ち切ることはない。
 const SEND_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// 子プロセスの終了を見に行く間隔（ブロッキングスレッド上なのでポーリングでよい）。
+const SEND_POLL_INTERVAL: Duration = Duration::from_millis(50);
+
 /// 1 スイープで評価できたレース 1 件（#584）。
 ///
 /// **閾値判定はまだ通っていない**——`evaluate_race` は ROI を見ずに評価できた全レースを返し、
-/// 通知するかどうかは [`should_notify`] / [`select_notifications`] が決める。ここを「通過済み」と
+/// 通知するかどうかは [`should_notify`] / [`pick_notifications`] が決める。ここを「通過済み」と
 /// 誤読して判定を素通しする改修を招かないよう、型名も `GatePass` にしていない。
 ///
 /// 通知本文の材料だけを持つ。domain 型を持ち込まず `u32` / `String` まで剥がしてあるのは、
@@ -92,6 +99,9 @@ pub struct NotifySettings {
     pub notify_gate: f64,
     /// 再通知に要する上振れ幅。
     pub delta: f64,
+    /// このプラットフォームで配送できるか（[`PLATFORM_SUPPORTED`]）。テストで両方を駆動するため
+    /// `cfg!` を関数内に埋めずフィールドで受ける。
+    pub platform_supported: bool,
 }
 
 /// macOS 通知の発火閾値を解決する純関数（#584・単体テスト対象）。
@@ -126,7 +136,13 @@ pub fn should_notify(prev: Option<f64>, roi: f64, notify_roi: f64, delta: f64) -
     if !roi.is_finite() {
         return false;
     }
-    if roi < notify_roi {
+    // `roi < notify_roi` ではなく否定形で書く。`notify_roi` が NaN のとき前者は false になり
+    // **全レースが素通りして一斉発火する**（比較は常に false）。否定形なら NaN は不成立側へ倒れ、
+    // 誤設定は起動時の検証（`run` の roi_gate 検証 / `resolve_notify_roi`）が声を上げる。
+    if matches!(
+        roi.partial_cmp(&notify_roi),
+        None | Some(std::cmp::Ordering::Less)
+    ) {
         return false;
     }
     match prev {
@@ -135,27 +151,30 @@ pub fn should_notify(prev: Option<f64>, roi: f64, notify_roi: f64, delta: f64) -
     }
 }
 
-/// 1 スイープぶんの評価結果から**実際に通知するもの**を選び、抑制状態を更新する（#584・単体テスト対象）。
+/// 1 スイープぶんの評価結果から**通知を試みるもの**を選ぶ純関数（#584・単体テスト対象）。
 ///
-/// 副作用は `state` の更新だけで I/O を持たないため、スイープを跨いだ抑制の挙動
-/// （連続通過での連投抑止・上振れでの再通知）をそのままテストできる。記録するのは
-/// 「**通知した**ときの ROI」で、見送った評価は state を汚さない——汚すと閾値未満で
-/// 素通りした ROI が基準になり、次に本当に通過したとき鳴らなくなる。
-pub fn select_notifications(
-    state: &mut std::collections::HashMap<String, f64>,
+/// `state` は読むだけで**更新しない**。抑制状態を進めるのは配送に成功したときだけで
+/// （[`record_notified`]）、失敗したまま「通知済み」にすると、そのレースは +10pt 上振れするまで
+/// 二度と鳴らない——一過性の配送失敗 1 回でレースごと落ちるのは、決定ログが掲げる
+/// 「失敗するなら鳴りすぎる側へ倒す」と逆になる。
+pub fn pick_notifications(
+    state: &std::collections::HashMap<String, f64>,
     evaluations: Vec<RaceEvaluation>,
     notify_roi: f64,
     delta: f64,
 ) -> Vec<RaceEvaluation> {
-    let mut out = Vec::new();
-    for e in evaluations {
-        if !should_notify(state.get(&e.race_id).copied(), e.roi, notify_roi, delta) {
-            continue;
-        }
-        state.insert(e.race_id.clone(), e.roi);
-        out.push(e);
-    }
-    out
+    evaluations
+        .into_iter()
+        .filter(|e| should_notify(state.get(&e.race_id).copied(), e.roi, notify_roi, delta))
+        .collect()
+}
+
+/// 抑制状態に「**通知できた**ときの ROI」を記録する（#584・単体テスト対象）。
+///
+/// 記録するのは配送に成功したものだけ。閾値未満で見送った評価や配送に失敗したものを記録すると、
+/// その ROI が次回判定の基準になり、本当に届けるべきときに鳴らなくなる。
+pub fn record_notified(state: &mut std::collections::HashMap<String, f64>, e: &RaceEvaluation) {
+    state.insert(e.race_id.clone(), e.roi);
 }
 
 /// 通知本文を組む純関数（#584・単体テスト対象）。
@@ -174,13 +193,37 @@ pub fn notification_message(e: &RaceEvaluation) -> String {
         .map(|a| a.to_string())
         .unwrap_or_else(|| "-".to_string());
     format!(
-        "{}{} ・ 参考ROI {:.0}% ・ 軸{}",
+        "{}{} ・ 参考ROI {:.1}% ・ 軸{}",
         e.label,
         name,
         e.roi * 100.0,
         axis
     )
 }
+
+/// 配送の失敗（#584）。理由文字列に加えて **デッドライン切れかどうか**を型で持つ。
+///
+/// 呼び出し側は「1 件でもデッドラインに掛かったらそのスイープの残りは試さない」を判断するために
+/// この区別が要る。理由文字列の部分一致で判定すると、文言を直した瞬間に無言で壊れる。
+#[derive(Debug, Clone, PartialEq)]
+pub struct DeliveryFailure {
+    pub reason: String,
+    /// [`SEND_TIMEOUT`] を超えて打ち切ったか（＝配送系が詰まっている兆候）。
+    pub deadline: bool,
+}
+
+impl DeliveryFailure {
+    fn other(reason: impl Into<String>) -> Self {
+        Self {
+            reason: reason.into(),
+            deadline: false,
+        }
+    }
+}
+
+/// 同一スイープ内で配送を見送ったときの理由（#584）。
+pub const SWEEP_DELIVERY_ABORTED: &str =
+    "同スイープで配送がデッドラインに掛かったため試行を見送りました";
 
 /// 通知 1 件ぶんのログ出力（#584・単体テスト対象）。
 #[derive(Debug, Clone, PartialEq)]
@@ -219,7 +262,7 @@ pub fn delivery_report(
                 None
             } else {
                 Some(format!(
-                    "⚠ macOS 通知を出せませんでした（同じ失敗が続く間は再掲しません。ログの 🔔 行が一次情報）: {reason}"
+                    "⚠ macOS 通知を出せませんでした（失敗が続く間は再掲しません。ログの 🔔 行が一次情報）: {reason}"
                 ))
             };
             *failure_reported = true;
@@ -240,7 +283,13 @@ pub fn delivery_report(
 pub fn notify_status_lines(s: &NotifySettings) -> Vec<String> {
     if !s.enabled {
         return vec![
-            "── macOS 通知: 無効（--no-notify）。ゲート通過はログの 🔔 行にも出ません。"
+            "── macOS 通知: 無効（--no-notify）。ゲート通過はログの 🔔 行にも出ず、--notify-roi は使われません（値の検証だけは行います）。"
+                .to_string(),
+        ];
+    }
+    if !s.platform_supported {
+        return vec![
+            "── macOS 通知: このプラットフォームでは配送できません（osascript が無い）。ゲート通過は 🔔(未配送) 行で確認してください。"
                 .to_string(),
         ];
     }
@@ -265,18 +314,17 @@ pub fn notify_status_lines(s: &NotifySettings) -> Vec<String> {
     }
     if s.notify_roi < s.notify_gate {
         out.push(format!(
+            // 提案値は**切り捨て**る。四捨五入だと 0.555 → 0.56 のように発火閾値を上回る値を
+            // 案内してしまい、言われたとおりに指定してもこの警告が消えない。
             "   ⚠ 表示ゲート --notify-gate（≥{:.0}%）より低いので、ログ上 ・（低シグナル）と出るレースでもベルが鳴ります。揃えるなら --notify-gate {:.2} も指定してください。",
             s.notify_gate * 100.0,
-            s.notify_roi
+            (s.notify_roi * 100.0).floor() / 100.0
         ));
     }
     out.push(format!(
-        "   同一レースは前回通知時から +{:.0}pt 上振れしたときだけ再通知。通知は表示セッション依存のベストエフォートで、一次情報はログの 🔔 行です。",
+        "   同一レースは前回通知時から +{:.0}pt 上振れしたときだけ再通知。配送はベストエフォート（表示セッション依存）で、一次情報はログの 🔔 行。鳴っても go シグナルではありません（ADR 0079）。",
         s.delta * 100.0
     ));
-    out.push(
-        "   通知は表示ゲート --notify-gate（🔍 マーク）とは別物で、鳴っても go シグナルではありません（ADR 0079）。".to_string(),
-    );
     out
 }
 
@@ -290,7 +338,7 @@ pub fn notify_status_lines(s: &NotifySettings) -> Vec<String> {
 /// 失敗は呼び出し側が握る。既存 shell の `|| true` 相当の握り潰しは呼び出し側で行い、
 /// ここでは事実だけ返す——「通知が出せていない」ことを人に言えるようにするため
 /// （黙って鳴らないのが #584 の障害そのもの）。
-pub fn send(message: &str) -> std::io::Result<ExitStatus> {
+pub fn send(message: &str) -> std::io::Result<Child> {
     let mut cmd = Command::new(OSASCRIPT);
     for line in NOTIFY_SCRIPT {
         cmd.arg("-e").arg(line);
@@ -300,29 +348,73 @@ pub fn send(message: &str) -> std::io::Result<ExitStatus> {
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .status()
+        .spawn()
 }
 
-/// [`send`] をブロッキングプールへ逃がし、デッドラインを付けて呼ぶ（#584）。
+/// [`send`] した子プロセスを [`SEND_TIMEOUT`] まで待ち、超えたら **kill して**失敗理由を返す。
 ///
-/// 同期の `Command::status()` を async のスイープから直接呼ぶと、osascript が返らない限り
-/// **監視ループごと止まる**。しかもプロセスは生存しているので #568 の途切れ警告も出ない
-/// （警告は次のスイープが始まって初めて測れる）——潰したい沈黙そのものを配送側に作ることになる。
-/// 通知 1 件の配送失敗で監視を止めないため、[`SEND_TIMEOUT`] を超えたら失敗扱いで先へ進む。
+/// `status()`（返るまで待つ）ではなく `spawn()` ＋ ポーリングにしてあるのは、**タイムアウトが
+/// 実効でなければ意味が無い**ため。`tokio::time::timeout` で `spawn_blocking` を包んでも
+/// blocking タスクはキャンセルできず、内側の待ちも子プロセスも残る——ブロッキングスレッドが
+/// 滞留し、`#[tokio::main]` のランタイム drop が開始済み blocking タスクを join するので
+/// **監視の正常終了後にプロセスが終われなくなる**（keiba-start の二重起動ガードにも波及する）。
+/// ここで刈っておけば、この関数は必ず [`SEND_TIMEOUT`] 内に返る。
 ///
 /// 戻り値は失敗理由（成功なら `None`）。そのまま [`delivery_report`] へ渡せる形にしてある。
-pub async fn send_with_deadline(message: &str) -> Option<String> {
+fn send_and_wait(message: &str) -> Option<DeliveryFailure> {
+    let mut child = match send(message) {
+        Ok(c) => c,
+        Err(e) => return Some(DeliveryFailure::other(e.to_string())),
+    };
+    let deadline = Instant::now() + SEND_TIMEOUT;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) if status.success() => return None,
+            Ok(Some(status)) => {
+                return Some(DeliveryFailure::other(format!(
+                    "osascript が異常終了しました（{status}）"
+                )));
+            }
+            Ok(None) => {
+                if Instant::now() >= deadline {
+                    // kill → wait で確実に刈る（wait を省くとゾンビが残る）。
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Some(DeliveryFailure {
+                        reason: format!(
+                            "osascript が {} 秒以内に応答しなかったため打ち切りました",
+                            SEND_TIMEOUT.as_secs()
+                        ),
+                        deadline: true,
+                    });
+                }
+                std::thread::sleep(SEND_POLL_INTERVAL);
+            }
+            Err(e) => return Some(DeliveryFailure::other(e.to_string())),
+        }
+    }
+}
+
+/// 配送をブロッキングプールへ逃がす（#584）。
+///
+/// 同期の待ちを async のスイープから直接行うと、osascript が返らない限り**監視ループごと止まる**。
+/// しかもプロセスは生存しているので規律 2 の途切れ警告も出ない（警告は次のスイープが始まって
+/// 初めて測れる）——潰したい沈黙そのものを配送側に作ることになる。デッドラインは
+/// [`send_and_wait`] が内側で持つので、この関数は必ず有限時間で返る。
+///
+/// このプラットフォームで配送手段が無い（macOS 以外）場合は叩かずに理由を返す。
+pub async fn send_with_deadline(message: &str) -> Option<DeliveryFailure> {
+    if !PLATFORM_SUPPORTED {
+        return Some(DeliveryFailure::other(
+            "macOS 以外では osascript による通知を配送できません",
+        ));
+    }
     let msg = message.to_string();
-    let task = tokio::task::spawn_blocking(move || send(&msg));
-    match tokio::time::timeout(SEND_TIMEOUT, task).await {
-        Ok(Ok(Ok(status))) if status.success() => None,
-        Ok(Ok(Ok(status))) => Some(format!("osascript が異常終了しました（{status}）")),
-        Ok(Ok(Err(e))) => Some(e.to_string()),
-        Ok(Err(e)) => Some(format!("通知タスクが異常終了しました（{e}）")),
-        Err(_) => Some(format!(
-            "osascript が {} 秒以内に応答しませんでした",
-            SEND_TIMEOUT.as_secs()
-        )),
+    match tokio::task::spawn_blocking(move || send_and_wait(&msg)).await {
+        Ok(result) => result,
+        Err(e) => Some(DeliveryFailure::other(format!(
+            "通知タスクが異常終了しました（{e}）"
+        ))),
     }
 }
 
@@ -368,7 +460,23 @@ mod tests {
             roi_gate,
             notify_gate,
             delta: 0.10,
+            platform_supported: true,
         }
+    }
+
+    /// `pick_notifications` + `record_notified` を「配送は必ず成功する」前提で回すヘルパ。
+    /// 従来の `select_notifications`（選定と記録が一体だった頃）と同じ挙動になる。
+    fn sweep_all_delivered(
+        state: &mut std::collections::HashMap<String, f64>,
+        evaluations: Vec<RaceEvaluation>,
+        notify_roi: f64,
+        delta: f64,
+    ) -> Vec<RaceEvaluation> {
+        let picked = pick_notifications(state, evaluations, notify_roi, delta);
+        for e in &picked {
+            record_notified(state, e);
+        }
+        picked
     }
 
     #[test]
@@ -438,17 +546,17 @@ mod tests {
     fn select_notifications_suppresses_across_consecutive_sweeps() {
         // #584 の要件そのもの: 同一レースが 8 スイープ連続で通過しても鳴るのは初回だけ。
         let mut state = std::collections::HashMap::new();
-        let first = select_notifications(&mut state, vec![eval_of("A", 1.02)], 1.0, 0.10);
+        let first = sweep_all_delivered(&mut state, vec![eval_of("A", 1.02)], 1.0, 0.10);
         assert_eq!(ids(&first), ["A"]);
         for roi in [1.02, 1.05, 1.09, 1.00] {
-            let again = select_notifications(&mut state, vec![eval_of("A", roi)], 1.0, 0.10);
+            let again = sweep_all_delivered(&mut state, vec![eval_of("A", roi)], 1.0, 0.10);
             assert!(again.is_empty(), "roi={roi} で再通知してしまった");
         }
         // +10pt 上振れ（1.02 → 1.12）で初めて再通知する。
-        let risen = select_notifications(&mut state, vec![eval_of("A", 1.12)], 1.0, 0.10);
+        let risen = sweep_all_delivered(&mut state, vec![eval_of("A", 1.12)], 1.0, 0.10);
         assert_eq!(ids(&risen), ["A"]);
         // 再通知後の基準は 1.12 に更新される（1.12 + 0.10 = 1.22 未満は鳴らない）。
-        let after = select_notifications(&mut state, vec![eval_of("A", 1.21)], 1.0, 0.10);
+        let after = sweep_all_delivered(&mut state, vec![eval_of("A", 1.21)], 1.0, 0.10);
         assert!(after.is_empty());
     }
 
@@ -463,7 +571,7 @@ mod tests {
         let fired: Vec<f64> = observed
             .iter()
             .flat_map(|pct| {
-                select_notifications(
+                sweep_all_delivered(
                     &mut state,
                     vec![eval_of("niigata10R", pct / 100.0)],
                     0.7,
@@ -479,8 +587,8 @@ mod tests {
     fn select_notifications_tracks_races_independently() {
         // 抑制はレース単位。A を通知済みでも B の初回は鳴る。
         let mut state = std::collections::HashMap::new();
-        select_notifications(&mut state, vec![eval_of("A", 1.0)], 1.0, 0.10);
-        let out = select_notifications(
+        sweep_all_delivered(&mut state, vec![eval_of("A", 1.0)], 1.0, 0.10);
+        let out = sweep_all_delivered(
             &mut state,
             vec![eval_of("A", 1.0), eval_of("B", 1.0)],
             1.0,
@@ -493,18 +601,85 @@ mod tests {
     fn select_notifications_does_not_record_skipped_evaluations() {
         // 閾値未満で素通りした ROI を基準にすると、次に本当に通過したとき鳴らなくなる。
         let mut state = std::collections::HashMap::new();
-        let skipped = select_notifications(&mut state, vec![eval_of("A", 0.30)], 1.0, 0.10);
+        let skipped = sweep_all_delivered(&mut state, vec![eval_of("A", 0.30)], 1.0, 0.10);
         assert!(skipped.is_empty());
         assert!(state.is_empty(), "見送った評価が抑制状態を汚している");
-        let fired = select_notifications(&mut state, vec![eval_of("A", 1.00)], 1.0, 0.10);
+        let fired = sweep_all_delivered(&mut state, vec![eval_of("A", 1.00)], 1.0, 0.10);
         assert_eq!(ids(&fired), ["A"]);
+    }
+
+    #[test]
+    fn failed_delivery_is_retried_next_sweep() {
+        // 配送に失敗した回は `record_notified` を呼ばない＝抑制状態が進まないので、
+        // 次スイープで同じ ROI のまま再送される。抑制状態を先に進めていた頃は、
+        // 一過性の失敗 1 回でそのレースが +10pt 上振れするまで二度と鳴らなかった。
+        let mut state = std::collections::HashMap::new();
+        let picked = pick_notifications(&state, vec![eval_of("A", 1.0)], 1.0, 0.10);
+        assert_eq!(ids(&picked), ["A"]); // 1 スイープ目: 選ばれる → 配送失敗したので記録しない
+        assert!(state.is_empty());
+
+        let retried = pick_notifications(&state, vec![eval_of("A", 1.0)], 1.0, 0.10);
+        assert_eq!(ids(&retried), ["A"], "配送失敗ぶんが次スイープで拾われない");
+        record_notified(&mut state, &retried[0]); // 2 スイープ目: 配送成功
+
+        let after = pick_notifications(&state, vec![eval_of("A", 1.0)], 1.0, 0.10);
+        assert!(after.is_empty(), "成功後は通常どおり抑制される");
+    }
+
+    #[test]
+    fn pick_notifications_does_not_mutate_state() {
+        // 選定は読むだけ。記録は配送成功後の `record_notified` だけが行う。
+        let mut state = std::collections::HashMap::new();
+        state.insert("A".to_string(), 1.0);
+        let before = state.clone();
+        pick_notifications(
+            &state,
+            vec![eval_of("A", 1.5), eval_of("B", 1.0)],
+            1.0,
+            0.10,
+        );
+        assert_eq!(state, before);
+    }
+
+    #[test]
+    fn should_notify_does_not_fire_on_nan_threshold() {
+        // `--roi-gate nan` 経由で notify_roi が NaN になっても全レース一斉発火しない
+        // （`roi < NaN` は常に false なので、素直に書くと素通りする）。誤設定は run が弾く。
+        assert!(!should_notify(None, 1.5, f64::NAN, 0.10));
+        assert!(!should_notify(Some(1.0), 1.5, f64::NAN, 0.10));
+    }
+
+    #[test]
+    fn notify_status_reports_unsupported_platform() {
+        // macOS 以外で「有効」と宣言してから全件未配送になる、という誤解を生むログを出さない。
+        let mut s = settings(0.5, true, 1.0, 0.5);
+        s.platform_supported = false;
+        let lines = notify_status_lines(&s);
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].contains("配送できません"));
+        assert!(lines[0].contains("🔔(未配送)"));
+    }
+
+    #[test]
+    fn notify_status_suggests_a_gate_that_actually_silences_the_warning() {
+        // 提案値は切り捨て。四捨五入だと 0.555 → 0.56 と案内してしまい、その通りに指定しても
+        // notify_roi < notify_gate のまま同じ警告が出続ける。
+        let lines = notify_status_lines(&settings(0.555, true, 1.0, 0.7));
+        let suggestion = lines
+            .iter()
+            .find(|l| l.contains("揃えるなら"))
+            .expect("表示ゲート未満の警告が出ていない");
+        assert!(suggestion.contains("--notify-gate 0.55"), "{suggestion}");
+        // 提案どおりに指定すれば警告が消えることまで確かめる。
+        let aligned = notify_status_lines(&settings(0.555, true, 1.0, 0.55));
+        assert!(!aligned.iter().any(|l| l.contains("揃えるなら")));
     }
 
     #[test]
     fn notification_message_contains_all_required_fields() {
         // issue #584 の要件: レース名 / 発走時刻 / 参考ROI / 軸。
         let m = notification_message(&eval(Some("巴賞"), 1.123, Some(6)));
-        assert_eq!(m, "函館10R 15:35 巴賞 ・ 参考ROI 112% ・ 軸6");
+        assert_eq!(m, "函館10R 15:35 巴賞 ・ 参考ROI 112.3% ・ 軸6");
     }
 
     #[test]
@@ -512,7 +687,7 @@ mod tests {
         // race_name 未保存（平場）・axis 不明でも本文が壊れない。
         assert_eq!(
             notification_message(&eval(None, 1.0, None)),
-            "函館10R 15:35 ・ 参考ROI 100% ・ 軸-"
+            "函館10R 15:35 ・ 参考ROI 100.0% ・ 軸-"
         );
     }
 

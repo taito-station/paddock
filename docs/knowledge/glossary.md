@@ -5,6 +5,7 @@ doc_class: [D07]
 tags: [D07]
 sources:
   - docs/knowledge/product-goals.md
+  - docs/knowledge/monitor-loop-sleep-resilience.md
   - docs/specifications/probability-estimation.md
   - docs/specifications/backtest.md
   - docs/specifications/ev-kelly-bet-selection.md
