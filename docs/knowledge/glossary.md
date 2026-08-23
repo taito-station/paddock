@@ -14,7 +14,7 @@ sources:
   - docs/specifications/feature-resolution-diagnosis.md
   - docs/specifications/netkeiba-datasource.md
 distilled_from_sha: "3605743"
-updated: "2026-08-19"
+updated: "2026-08-23"
 ---
 
 # 用語集（ユビキタス言語）
@@ -140,6 +140,7 @@ ADR 0077）:
 | 未発売観測 | 「この券種は netkeiba 上で未発売だと**確認できた**」という記録（`race_odds_unpriced_observations`）。read-through の cache-hit 判定で欠落券種から差し引き、券種まるごと未発売の時間帯に再スクレイプが止まらなくなるのを防ぐ。判定は「取得成功なのに priced が 0 件か」（番兵の有無では見ない）。**取得失敗は観測しない**——「分からない」を「売っていない」にすると #294 の自己修復が鈍る。TTL 15 分＝発売開始に気づくまでの最大遅れ | [netkeiba-datasource.md](../specifications/netkeiba-datasource.md)「保存したオッズの読み出しと read-through」/ ADR 0089 |
 | transient | リトライ対象の一過性障害（`Timeout` / `Io` / `ConnectionFailed` / `HostNotFound` / `Protocol` / 5xx）。回数とバックオフは正本 | [netkeiba-datasource.md](../specifications/netkeiba-datasource.md)「transient リトライと degraded」/ ADR 0049（経緯） |
 | decision-support | ツールは判断材料を出すだけで、**張る / 見送り / 増額の最終判断は人間**という位置づけ。`predict-watch` の設計原則 | ADR 0055 / ADR 0060 / [CLAUDE.md](../../CLAUDE.md)「ライブ監視時のコミュニケーション規律」 |
+| ⚠ predict-watch の 3 つの閾値 | `--roi-gate`（🔶 の**表示**・買う閾値）/ `--notify-gate`（🔍 の**表示**・検証候補帯の下端）/ `--notify-roi`（**macOS 通知の発火**・既定＝roi-gate）。**前 2 つは表示だけでベルは鳴らない**——名前に反して通知を鳴らすのは `--notify-roi` だけ。鳴っても go シグナルではない（ADR 0079） | [README.md](../../README.md)「発走直前の EV/ROI 監視」/ [monitor-loop-sleep-resilience.md](monitor-loop-sleep-resilience.md) 規律 4（#584 / #345） |
 
 ## 文書運用の用語
 
