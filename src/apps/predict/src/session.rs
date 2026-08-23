@@ -539,7 +539,7 @@ pub async fn run_overview(
 
     print_overview_header(&date_str, &races, &post_times, date, now);
     if cache_only {
-        println!("（過去日のため、オッズは保存済みキャッシュのみを表示します）");
+        println!("{}", cache_only_notice());
     }
     for race in &races {
         println!();
@@ -1049,6 +1049,11 @@ fn overview_note(date: NaiveDate, now: NaiveDateTime) -> String {
     phase_note(meeting_phase(date, now.date()), Some(now))
 }
 
+/// 過去日の --overview でオッズがキャッシュのみであることを示す注記（#624・テスト対象）。
+fn cache_only_notice() -> &'static str {
+    "（過去日のため、オッズは保存済みキャッシュのみを表示します）"
+}
+
 /// EV 一覧のヘッダ（見出し行＋注記）の行並び（#587・テスト対象）。
 fn overview_header_lines(
     date_str: &str,
@@ -1250,11 +1255,11 @@ fn read_u64<R: BufRead>(
 #[cfg(test)]
 mod tests {
     use super::{
-        is_started_at, make_bet_record, may_record_race, overview_footer, overview_header_lines,
-        overview_note, prompt_record_started_race, race_heading, race_heading_for_day, read_choice,
-        read_edited_amounts, read_track_condition, read_u64, resolve_track_condition_default,
-        result_before_post_count, result_before_post_warning, session_note,
-        started_race_record_notice, started_state_for_day,
+        cache_only_notice, is_started_at, make_bet_record, may_record_race, overview_footer,
+        overview_header_lines, overview_note, prompt_record_started_race, race_heading,
+        race_heading_for_day, read_choice, read_edited_amounts, read_track_condition, read_u64,
+        resolve_track_condition_default, result_before_post_count, result_before_post_warning,
+        session_note, started_race_record_notice, started_state_for_day,
     };
     use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
     use paddock_domain::horse_result::HorseNum;
@@ -1422,6 +1427,12 @@ mod tests {
             overview_note(race_date(), day_before),
             "※ この開催はまだ実施されていません（全レース未発走）"
         );
+    }
+
+    #[test]
+    fn cache_only_notice_is_non_empty() {
+        assert!(!cache_only_notice().is_empty());
+        assert!(cache_only_notice().contains("過去日"));
     }
 
     #[test]
