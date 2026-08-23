@@ -1098,10 +1098,7 @@ def main(argv: list[str]) -> int:
         if p.is_file()
     )
     for s in stray_md:
-        errors.append(
-            f"{s}: src/ 配下の Markdown は検査対象外。"
-            "説明はコードコメントか docs/ に置く（#635/#638）"
-        )
+        errors.append(f"{s}: src/ 配下の Markdown は検査対象外。説明はコードコメントか docs/ に置く（#635/#638）")
 
     for extra in EXTRA_LINK_TARGETS:
         path = root / extra
