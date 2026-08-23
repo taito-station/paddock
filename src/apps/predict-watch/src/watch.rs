@@ -15,7 +15,10 @@ use predict_format::{
 };
 
 use crate::cli::Cli;
-use crate::notify::{GatePass, NOTIFY_ROI_RESEND_DELTA, gate_pass_message, select_notifications};
+use crate::notify::{
+    NOTIFY_ROI_RESEND_DELTA, NotifySettings, RaceEvaluation, delivery_report, notification_message,
+    notify_status_lines, resolve_notify_roi, select_notifications, send_with_deadline,
+};
 use crate::setup::App;
 use crate::snapshot::{SnapshotContext, build_snapshot_record};
 
@@ -347,6 +350,10 @@ struct Slot {
 /// #459 で per-race `race_card`（N+1）を日付一括クエリに置き換えた。#584 で race_name を足して 3 本。
 /// races_by_date の各レースに対し、一括マップから引く（マップに無い＝未保存 NULL は None＝旧 per-card
 /// 経路で `card.post_time`/`card.race_class` が None だったのと同一集合になる）。
+///
+/// `race_name` は通知本文にしか使わないが、**`--no-notify` でも引く**。分岐を持ち込むより
+/// 「slots の形はフラグに依らない」ほうが単純で、日付一括の 1 クエリ／スイープは
+/// スクレイプ（`scrape_delay` × 対象レース）に対して無視できるため。
 async fn load_slots(app: &App, date: chrono::NaiveDate) -> anyhow::Result<Vec<Slot>> {
     let races = app.interactor.races_by_date(date).await?;
     let post_times = app.interactor.post_times_by_date(date).await?;
@@ -384,7 +391,7 @@ fn race_label(slot: &Slot) -> String {
 /// 1 スイープ: Due レースのオッズを再取得し EV/ROI を再計算、結果を 1 行ずつ出力する。
 /// `statuses` は `slots` と同順の発走状態（呼び出し側で 1 度だけ算出して使い回す）。
 ///
-/// 戻り値は**評価できた全レース**の [`GatePass`]（#584）。ここでは通知閾値の判定をしない——
+/// 戻り値は**評価できた全レース**の [`RaceEvaluation`]（#584）。ここでは通知閾値の判定をしない——
 /// 判定は `should_notify` 1 箇所に集約し、副作用（osascript）は `&mut self` を持つ
 /// [`WatchSweeper::sweep`] 側に置く（`SweepCtx` は `Copy` で状態を持てず、`Sweeper::sweep` の
 /// 戻りは `Send` 制約があるので内部可変性も使えない）。
@@ -395,7 +402,7 @@ async fn sweep(
     now: NaiveTime,
     captured_at: &str,
     ctx: SweepCtx<'_>,
-) -> Vec<GatePass> {
+) -> Vec<RaceEvaluation> {
     let SweepCtx {
         cli, notify_gate, ..
     } = ctx;
@@ -456,7 +463,7 @@ async fn sweep(
 
 /// 1 レースを評価: フレッシュなオッズ再取得 → 確率推定 → 買い目/EV → ROI 判定。
 ///
-/// 評価できたら通知の材料（[`GatePass`]）を返す（#584）。閾値判定はここではしない（`sweep` の doc 参照）。
+/// 評価できたら通知の材料（[`RaceEvaluation`]）を返す（#584）。閾値判定はここではしない（`sweep` の doc 参照）。
 /// オッズ不足等で評価に至らなかったレースは `None`。
 async fn evaluate_race(
     app: &App,
@@ -464,7 +471,7 @@ async fn evaluate_race(
     is_ura: bool,
     captured_at: &str,
     ctx: SweepCtx<'_>,
-) -> Option<GatePass> {
+) -> Option<RaceEvaluation> {
     let SweepCtx {
         cli,
         notify_gate,
@@ -636,7 +643,7 @@ async fn evaluate_race(
 
     // 6) 通知の材料を返す（#584）。ここでは閾値を見ない——発火判定と副作用は `WatchSweeper::sweep`
     //    側（`&mut self` を持つ唯一の場所）に集約する。
-    Some(GatePass {
+    Some(RaceEvaluation {
         race_id: rid.value().to_string(),
         label,
         race_name: slot.race_name.clone(),
@@ -676,50 +683,46 @@ struct WatchSweeper<'a> {
     race_budget_overrides: HashMap<String, u64>,
     /// per-race override の pid が当日レースに 1 件も一致しないケースを 1 度だけ警告するためのフラグ。
     overrides_checked: bool,
-    /// macOS 通知の有効/無効（`--no-notify` の反転。#584）。
-    notify_enabled: bool,
     /// macOS 通知の発火閾値（run で 1 度だけ解決した参考ROI。#584）。表示ゲート `notify_gate` とは別物。
+    /// 有効/無効は `cli.no_notify` が正で、ここには複製しない（二重管理を作らない）。
     notify_roi: f64,
     /// race_id → 前回**通知した**ときの参考ROI（#584 の重複抑制）。プロセス内メモリのみで永続化しない
     /// ——抑制は「1 プロセスの連投抑止」であって永続契約ではなく、永続化すると監視の再起動後に
     /// 本当に必要な初回通知を落とす（＝届かない）側に倒れる。
     last_notified_roi: HashMap<String, f64>,
-    /// osascript の失敗を 1 度だけ報告するためのフラグ（`overrides_checked` と同じ one-shot 規約）。
+    /// 配送失敗を報告済みか（#584）。**成功したら `delivery_report` が false へ戻す**ので、
+    /// 一過性の失敗（画面ロック等）でその日いっぱい沈黙することはない。
     notify_failure_reported: bool,
 }
 
 impl WatchSweeper<'_> {
-    /// ゲート通過を macOS 通知で人に届ける（#584）。閾値判定は純関数 `should_notify` に、配送は
-    /// `notify::send`（osascript）に委譲し、ここは状態の更新と報告だけを持つ。
+    /// 閾値を通過した評価を macOS 通知で人に届ける（#584）。発火判定は `select_notifications`、
+    /// ログ出力と失敗報告の要否は `delivery_report`、配送は `send_with_deadline` に委譲し、
+    /// ここは状態を渡して結果を印字するだけの薄い糊にする（判断はすべて純関数側でテスト済み）。
     ///
-    /// **🔔 行は osascript の成否に関わらず出す**——通知は表示セッション依存のベストエフォートで、
-    /// 一次情報はログという既存の運用注記（`deployments/launchd/README.md`）に揃える。これにより
-    /// 「通知条件を満たしたか」と「通知が表示されたか」をログ側で切り分けられる。
-    fn notify_gate_passes(&mut self, passes: Vec<GatePass>) {
-        if !self.notify_enabled {
+    /// 配送を**デッドライン付きでブロッキングプールへ逃がす**のは、osascript が返らないときに
+    /// 監視ループごと止めないため（止まってもプロセスは生存するので #568 の途切れ警告も出ない）。
+    async fn notify_passing_races(&mut self, evaluations: Vec<RaceEvaluation>) {
+        if self.cli.no_notify {
             return;
         }
         let selected = select_notifications(
             &mut self.last_notified_roi,
-            passes,
+            evaluations,
             self.notify_roi,
             NOTIFY_ROI_RESEND_DELTA,
         );
-        for p in selected {
-            let message = gate_pass_message(&p);
-            println!("  🔔 {message}");
-            let failed = match crate::notify::send(&message) {
-                Ok(status) if status.success() => None,
-                Ok(status) => Some(format!("osascript が異常終了しました（{status}）")),
-                Err(e) => Some(e.to_string()),
-            };
-            if let Some(reason) = failed
-                && !self.notify_failure_reported
-            {
-                println!(
-                    "⚠ macOS 通知を出せませんでした（以降は報告しません。ログの 🔔 行が一次情報）: {reason}"
-                );
-                self.notify_failure_reported = true;
+        for e in selected {
+            let message = notification_message(&e);
+            let failure = send_with_deadline(&message).await;
+            let report = delivery_report(
+                &message,
+                failure.as_deref(),
+                &mut self.notify_failure_reported,
+            );
+            println!("{}", report.line);
+            if let Some(warning) = report.warning {
+                println!("{warning}");
             }
         }
     }
@@ -815,10 +818,10 @@ impl Sweeper for WatchSweeper<'_> {
             race_budget_overrides: &self.race_budget_overrides,
             pins: &pins,
         };
-        let passes = sweep(self.app, slots, statuses, now, &captured_at, ctx).await;
+        let evaluations = sweep(self.app, slots, statuses, now, &captured_at, ctx).await;
         // 判定をログに埋もれさせず人に届ける（#584）。スイープの最後にまとめて出すことで、
         // 通知行が各レースの買い目出力に挟まれて流れるのを防ぐ。
-        self.notify_gate_passes(passes);
+        self.notify_passing_races(evaluations).await;
     }
 }
 
@@ -844,7 +847,7 @@ pub async fn run(app: &App, cli: &Cli) -> anyhow::Result<()> {
     // 表示（検証候補 🔍）閾値を解決する。未指定は min(roi_gate, 0.7)、明示指定の逆転（buy 超）は弾く（#345）。
     let notify_gate = resolve_notify_gate(cli.notify_gate, cli.roi_gate)?;
     // macOS 通知の発火閾値を解決する（#584）。上の表示閾値とは別物で、未指定は roi_gate と同値。
-    let notify_roi = crate::notify::resolve_notify_roi(cli.notify_roi, cli.roi_gate)?;
+    let notify_roi = resolve_notify_roi(cli.notify_roi, cli.roi_gate)?;
 
     // α 未指定なら本番既定（market α=0.2）を使う。predict と同一値で判定を揃える。
     let blend_alpha = cli.blend_alpha.or(RECOMMENDED_MARKET_BLEND_ALPHA);
@@ -878,12 +881,14 @@ pub async fn run(app: &App, cli: &Cli) -> anyhow::Result<()> {
     // 通知設定も起動時 1 回だけ宣言する（#584）。**これが無いと「鳴らない＝妙味なし」と
     // 「そもそも既定閾値では鳴らない」が区別できず**、監視の失敗が沈黙として現れる
     // （docs/knowledge/monitor-loop-sleep-resilience.md）状態を通知側にも作ってしまう。
-    for line in crate::notify::notify_status_lines(
-        !cli.no_notify,
+    for line in notify_status_lines(&NotifySettings {
+        enabled: !cli.no_notify,
         notify_roi,
-        cli.roi_gate,
-        NOTIFY_ROI_RESEND_DELTA,
-    ) {
+        explicit: cli.notify_roi.is_some(),
+        roi_gate: cli.roi_gate,
+        notify_gate,
+        delta: NOTIFY_ROI_RESEND_DELTA,
+    }) {
         println!("{line}");
     }
 
@@ -895,7 +900,6 @@ pub async fn run(app: &App, cli: &Cli) -> anyhow::Result<()> {
         blend_alpha,
         race_budget_overrides,
         overrides_checked: false,
-        notify_enabled: !cli.no_notify,
         notify_roi,
         last_notified_roi: HashMap::new(),
         notify_failure_reported: false,

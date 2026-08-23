@@ -94,9 +94,23 @@ notify() {
   終了ステータス 0 で通る（argv 渡しの検査を兼ねた `sends_real_notification` 手動テスト）。
 - `--once` の起動注記 3 パターンを実バイナリ + 実 DB で確認（20:05・全レース発走済みのため対象 0 レース）:
 
+セルフレビューで「`--roi-gate` を下げると、測っていない閾値について ADR 0076 の『通過 0 件』を
+宣言してしまう」ことが判明し、分岐を組み直した後の実測（同日 21:5x・実バイナリ + 実 DB）:
+
 ```
-── macOS 通知: 有効・参考ROI ≥ 100%（--roi-gate と同値）。この閾値は 182R / 839 スイープで通過 0 件（ADR 0076）＝既定では鳴りません。実地検証は --notify-roi を下げてください（例 --notify-roi 0.5）。
-── macOS 通知: 有効・参考ROI ≥ 20%（--notify-roi 指定・--roi-gate 100% より下げた実地検証設定）。
+$ paddock-predict-watch --date 2026-08-23 --once
+── macOS 通知: 有効・発火は参考ROI ≥ 100%（--notify-roi 未指定＝--roi-gate 追従）。表示ゲートは別物で 🔶 ≥100% / 🔍 ≥70%（どちらもベルは鳴らさない）。
+   ADR 0076 が 182R / 839 スイープで通過 0 件と測ったのは ≥100% で、この設定はその水準以上＝**実質鳴りません**。実地検証は --notify-roi を下げてください（例 --notify-roi 0.5 --notify-gate 0.5）。
+
+$ paddock-predict-watch --date 2026-08-23 --once --roi-gate 0.7
+── macOS 通知: 有効・発火は参考ROI ≥ 70%（--notify-roi 未指定＝--roi-gate 追従）。表示ゲートは別物で 🔶 ≥70% / 🔍 ≥70%（どちらもベルは鳴らさない）。
+   （ADR 0076 の注記は出ない＝測っていない閾値について「鳴らない」と宣言しない）
+
+$ paddock-predict-watch --date 2026-08-23 --once --notify-roi 0.5
+── macOS 通知: 有効・発火は参考ROI ≥ 50%（--notify-roi 指定）。表示ゲートは別物で 🔶 ≥100% / 🔍 ≥70%（どちらもベルは鳴らさない）。
+   ⚠ 表示ゲート --notify-gate（≥70%）より低いので、ログ上 ・（低シグナル）と出るレースでもベルが鳴ります。揃えるなら --notify-gate 0.50 も指定してください。
+
+$ paddock-predict-watch --date 2026-08-23 --once --no-notify
 ── macOS 通知: 無効（--no-notify）。ゲート通過はログの 🔔 行にも出ません。
 ```
 

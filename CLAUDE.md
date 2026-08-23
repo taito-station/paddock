@@ -118,7 +118,7 @@ paddock-analyze predict <race_id> --blend-alpha 0.2
 # decision-support（判断は人間・軸は不変。下記「軸ロック」「ライブ監視」参照）。セッション記録には触れない（オッズ snapshot は再取得・保存）。全レース発走で自動終了。
 paddock-predict-watch --date YYYY-MM-DD          # 既定: 窓40分 / 間隔5分 / ROIゲート100% / α=本番0.2
 paddock-predict-watch --date YYYY-MM-DD --once   # 1スイープのみ（cron 等）
-paddock-predict-watch --date YYYY-MM-DD --notify-roi 0.5   # macOS 通知の閾値を下げる（#571 の較正まではこれで実地検証）
+paddock-predict-watch --date YYYY-MM-DD --notify-roi 0.5 --notify-gate 0.5   # macOS 通知の閾値を下げる（#571 の較正まではこれで実地検証）
 ```
 
 - **ゲート通過は macOS 通知でも届く**（#584）。ただし**既定閾値（=100%）では構造的に鳴らない**——ADR 0076 の実測で通過 0 件のため。鳴らす条件は `--notify-roi` で決まり、その設定は起動時にログ先頭で 1 行宣言される。**鳴っても go シグナルではない**（発火は参考ROI 由来なので 🔶/🔍 と同じ制約下・ADR 0079）。一次情報はログの `🔔` 行（`grep '🔔'` で件数を数えられる）。同一レースは前回通知時から +10pt 上振れするまで再通知しない。`--no-notify` で無効化。

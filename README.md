@@ -380,7 +380,7 @@ cargo run -p predict-watch -- --date 2026-06-01           # 既定: 窓 40 分 /
 cargo run -p predict-watch -- --date 2026-06-01 --once    # 1 スイープのみ（テスト・cron 用）
 cargo run -p predict-watch -- --date 2026-06-01 \
   --race-budget-override 2026-3-hakodate-2-6R=7000        # 特定レースだけ予算を上書き（増額の執行入力）
-cargo run -p predict-watch -- --date 2026-06-01 --notify-roi 0.5   # macOS 通知の閾値を下げて実地検証（#571 の較正まで）
+cargo run -p predict-watch -- --date 2026-06-01 --notify-roi 0.5 --notify-gate 0.5   # macOS 通知の閾値を下げて実地検証（#571 の較正まで）
 ```
 
 ゲートを通過したレースは **macOS 通知**でも届く（#584）。既定閾値では構造的に鳴らない（下記）ので、

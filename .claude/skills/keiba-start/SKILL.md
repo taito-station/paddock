@@ -370,7 +370,7 @@ paddock-predict-watch --date YYYY-MM-DD --once   # 1スイープのみ（cron �
 
 ```sh
 D=$(date +%F)
-nohup paddock-predict-watch --date "$D" --notify-roi 0.5 >> ~/Library/Logs/paddock-predict-watch-${D//-/}.log 2>&1 &
+nohup paddock-predict-watch --date "$D" --notify-roi 0.5 --notify-gate 0.5 >> ~/Library/Logs/paddock-predict-watch-${D//-/}.log 2>&1 &
 grep '🔔' ~/Library/Logs/paddock-predict-watch-${D//-/}.log   # 通知条件を満たした件数（一次情報はこの行）
 ```
 
