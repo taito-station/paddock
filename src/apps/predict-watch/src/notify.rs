@@ -73,8 +73,9 @@ const SEND_POLL_INTERVAL: Duration = Duration::from_millis(50);
 pub struct RaceEvaluation {
     /// 重複抑制のキー（`race_id`）。
     pub race_id: String,
-    /// `watch::race_label` と同一の表示ラベル（例: `函館10R 15:35`）。**ログ行と同じ文字列**に
-    /// することで、通知を見てそのままログを grep して買い目に戻れる。
+    /// `watch::race_label` と同一の表示ラベル（例: `函館10R 15:35`）。**判定行の先頭と同じ文字列**に
+    /// することで、通知を見てそのままログを grep して買い目に戻れる（判定行はこの後ろに
+    /// G1 裏タグ `🎯裏` が付くことがあるので、完全一致ではなく前方一致で追う）。
     pub label: String,
     /// 競走名（`race_cards.race_name` 由来。未保存・平場は None）。
     pub race_name: Option<String>,
@@ -262,7 +263,7 @@ pub fn delivery_report(
                 None
             } else {
                 Some(format!(
-                    "⚠ macOS 通知を出せませんでした（失敗が続く間は再掲しません。ログの 🔔 行が一次情報）: {reason}"
+                    "⚠ macOS 通知を出せませんでした（失敗が続く間は再掲しません。ログの 🔔行が一次情報）: {reason}"
                 ))
             };
             *failure_reported = true;
@@ -319,6 +320,19 @@ where
     out
 }
 
+/// 閾値を人が読む % 表記にする（#584・単体テスト対象）。
+///
+/// `{:.0}%` の四捨五入だと `--notify-roi 0.755` を「≥76%」と宣言しながら実際は 75.5% で鳴る
+/// ——起動注記が嘘をつかないための規律は、桁の丸めにも同じく効かせる。整数のときは小数を出さない。
+fn pct(value: f64) -> String {
+    let p = value * 100.0;
+    if (p - p.round()).abs() < 1e-9 {
+        format!("{p:.0}")
+    } else {
+        format!("{p:.1}")
+    }
+}
+
 /// 通知設定を起動時に 1 回だけ宣言する行を組む純関数（#584・単体テスト対象）。
 ///
 /// **これは機能要件と同格**。無いと「鳴らない＝妙味が無かった」と「そもそも既定閾値では鳴らない」が
@@ -328,13 +342,13 @@ where
 pub fn notify_status_lines(s: &NotifySettings) -> Vec<String> {
     if !s.enabled {
         return vec![
-            "── macOS 通知: 無効（--no-notify）。ゲート通過はログの 🔔 行にも出ず、--notify-roi は使われません（値の検証だけは行います）。"
+            "── macOS 通知: 無効（--no-notify）。ゲート通過はログの 🔔行にも出ず、--notify-roi は使われません（値の検証だけは行います）。"
                 .to_string(),
         ];
     }
     if !s.platform_supported {
         return vec![
-            "── macOS 通知: このプラットフォームでは配送できません（osascript が無い）。ゲート通過は 🔔(未配送) 行で確認してください。"
+            "── macOS 通知: このプラットフォームでは配送できません（osascript が無い）。通知経路ごと無効なので 🔔行も出ません——ゲート通過は判定行（🔶 / 🔍 / ・）で確認してください。"
                 .to_string(),
         ];
     }
@@ -346,28 +360,28 @@ pub fn notify_status_lines(s: &NotifySettings) -> Vec<String> {
     // 3 つの閾値を 1 行に並べる。取り違え（表示ゲートを下げても鳴らない / 発火ゲートを
     // 下げても 🔍 は増えない）が実害を生むので、**実際に鳴る閾値がどれか**をここで確定させる。
     let mut out = vec![format!(
-        "── macOS 通知: 有効・発火は参考ROI ≥ {:.0}%（{origin}）。表示ゲートは別物で 🔶 ≥{:.0}% / 🔍 ≥{:.0}%（どちらもベルは鳴らさない）。",
-        s.notify_roi * 100.0,
-        s.roi_gate * 100.0,
-        s.notify_gate * 100.0
+        "── macOS 通知: 有効・発火は参考ROI ≥ {}%（{origin}）。表示ゲートは別物で 🔶 ≥{}% / 🔍 ≥{}%（どちらもベルは鳴らさない）。",
+        pct(s.notify_roi),
+        pct(s.roi_gate),
+        pct(s.notify_gate)
     )];
     if s.notify_roi >= ADR0076_MEASURED_GATE {
         out.push(format!(
-            "   ADR 0076 が 182R / 839 スイープで通過 0 件と測ったのは ≥{:.0}% で、この設定はその水準以上＝**実質鳴りません**。実地検証は --notify-roi を下げてください（例 --notify-roi 0.5 --notify-gate 0.5）。",
-            ADR0076_MEASURED_GATE * 100.0
+            "   ADR 0076 が 182R / 839 スイープで通過 0 件と測ったのは ≥{}% で、この設定はその水準以上＝実質鳴りません。実地検証は --notify-roi を下げてください（例 --notify-roi 0.5 --notify-gate 0.5）。",
+            pct(ADR0076_MEASURED_GATE)
         ));
     }
     if s.notify_roi < s.notify_gate {
         out.push(format!(
             // 提案値は**切り捨て**る。四捨五入だと 0.555 → 0.56 のように発火閾値を上回る値を
             // 案内してしまい、言われたとおりに指定してもこの警告が消えない。
-            "   ⚠ 表示ゲート --notify-gate（≥{:.0}%）より低いので、ログ上 ・（低シグナル）と出るレースでもベルが鳴ります。揃えるなら --notify-gate {:.2} も指定してください。",
-            s.notify_gate * 100.0,
+            "   ⚠ 表示ゲート --notify-gate（≥{}%）より低いので、ログ上 ・（低シグナル）と出るレースでもベルが鳴ります。揃えるなら --notify-gate {:.2} も指定してください。",
+            pct(s.notify_gate),
             (s.notify_roi * 100.0).floor() / 100.0
         ));
     }
     out.push(format!(
-        "   同一レースは前回通知時から +{:.0}pt 上振れしたときだけ再通知。配送はベストエフォート（表示セッション依存）で、一次情報はログの 🔔 行。鳴っても go シグナルではありません（ADR 0079）。",
+        "   同一レースは前回通知時から +{:.0}pt 上振れしたときだけ再通知。配送はベストエフォート（表示セッション依存）で、一次情報はログの 🔔行。鳴っても go シグナルではありません（ADR 0079）。",
         s.delta * 100.0
     ));
     out
@@ -457,6 +471,9 @@ fn wait_with_deadline(mut child: Child, timeout: Duration) -> Option<DeliveryFai
 ///
 /// このプラットフォームで配送手段が無い（macOS 以外）場合は叩かずに理由を返す。
 pub async fn send_with_deadline(message: &str) -> Option<DeliveryFailure> {
+    // 呼び出し側（`WatchSweeper::deliver_notifications`）も同じ条件で経路ごと落とすので、
+    // 本番では到達しない。それでも残すのは、この関数単体の契約を「配送できない環境では
+    // 失敗を返す」で閉じておくため（将来別の呼び出し口が増えても黙って叩きに行かない）。
     if !PLATFORM_SUPPORTED {
         return Some(DeliveryFailure::other(
             "macOS 以外では osascript による通知を配送できません",
@@ -710,7 +727,49 @@ mod tests {
         let lines = notify_status_lines(&s);
         assert_eq!(lines.len(), 1);
         assert!(lines[0].contains("配送できません"));
-        assert!(lines[0].contains("🔔(未配送)"));
+        // 3 巡目で経路ごと落としたので 🔔 行は 1 行も出ない。出ない行を案内しない。
+        assert!(!lines[0].contains("🔔(未配送)"));
+        assert!(lines[0].contains("判定行"));
+    }
+
+    #[test]
+    fn pct_does_not_round_a_threshold_into_a_lie() {
+        // 整数はそのまま、端数は 1 桁。0.755 を「76%」と宣言して 75.5% で鳴る、を起こさない。
+        assert_eq!(pct(1.0), "100");
+        assert_eq!(pct(0.7), "70");
+        assert_eq!(pct(0.755), "75.5");
+    }
+
+    #[test]
+    fn notify_status_states_the_threshold_that_actually_fires() {
+        let lines = notify_status_lines(&settings(0.755, true, 1.0, 0.755));
+        assert!(lines[0].contains("≥ 75.5%"), "{}", lines[0]);
+        assert!(!lines[0].contains("76%"));
+    }
+
+    #[test]
+    fn notify_status_emits_no_bell_with_trailing_space_outside_the_report_line() {
+        // 配送できた件数は `grep -c '^  🔔 '` で数える運用なので、注記・警告の側に
+        // 「🔔 」（後ろに半角スペース）を残さない。残すとカウントが常に水増しされる。
+        let mut disabled = settings(1.0, false, 1.0, 0.7);
+        disabled.enabled = false;
+        let mut reported = false;
+        let warned = delivery_report("本文", Some("理由"), &mut reported);
+        let texts: Vec<String> = notify_status_lines(&settings(0.5, true, 1.0, 0.5))
+            .into_iter()
+            .chain(notify_status_lines(&disabled))
+            .chain(warned.warning)
+            .collect();
+        for t in &texts {
+            assert!(!t.contains("🔔 "), "「🔔 」が残っている: {t}");
+        }
+        // 成功行だけがカウント対象の形になっている。
+        let mut ok_reported = false;
+        assert!(
+            delivery_report("本文", None, &mut ok_reported)
+                .line
+                .starts_with("  🔔 ")
+        );
     }
 
     #[test]

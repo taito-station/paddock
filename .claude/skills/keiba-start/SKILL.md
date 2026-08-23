@@ -371,7 +371,7 @@ paddock-predict-watch --date YYYY-MM-DD --once   # 1スイープのみ（cron �
 ```sh
 D=$(date +%F)
 nohup paddock-predict-watch --date "$D" --notify-roi 0.5 --notify-gate 0.5 >> ~/Library/Logs/paddock-predict-watch-${D//-/}.log 2>&1 &
-grep '🔔' ~/Library/Logs/paddock-predict-watch-${D//-/}.log   # 一次情報はこの行。配送できた件数だけ数えるなら grep '🔔 '（未配送は 🔔(未配送) と付く）
+grep -c '^  🔔 ' ~/Library/Logs/paddock-predict-watch-${D//-/}.log   # 配送できた件数（未配送は 🔔(未配送)。行頭で絞らないと注記や警告の文中の 🔔 も拾う）
 ```
 
 - 同一レースは前回通知時から **+10pt 上振れするまで再通知しない**（連投抑止）。監視を再起動すると抑制はリセットされる。

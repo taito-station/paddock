@@ -1018,6 +1018,26 @@ mod tests {
     /// `notify_gate == roi_gate` のとき 🔍 帯は構造的に空なので、その行は出さない
     /// （出ないマークを案内しない＝スイープヘッダの既存規約と揃える）。
     #[test]
+    fn gate_caveat_does_not_claim_zero_hits_below_the_measured_gate() {
+        // #584: ADR 0076 が「到達 0 件」と実測したのは ≥100%。--roi-gate を下げた探索運用でも
+        // 同じ断言を出すと、測っていない閾値について到達不能を主張することになる
+        // （一次資料は 2026-08-09 に ≥70% の通過を 7 回観測）。通知側の
+        // `notify_status_does_not_cite_adr0076_below_the_measured_gate` と対になる検査。
+        let lines = gate_caveat_lines(0.7, 0.7);
+        assert!(lines[0].contains("ADR 0076"));
+        assert!(
+            !lines[0].contains("実測で到達 0 件"),
+            "測っていない閾値について到達 0 件と断言している: {}",
+            lines[0]
+        );
+        assert!(
+            lines[0].contains("≥70%") && lines[0].contains("≥100%"),
+            "{}",
+            lines[0]
+        );
+    }
+
+    #[test]
     fn gate_caveat_omits_notify_line_when_band_is_empty() {
         let joined = gate_caveat_lines(1.0, 1.0).join("\n");
         assert!(!joined.contains("🔍"), "{joined}");
