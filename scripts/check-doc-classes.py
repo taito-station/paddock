@@ -1092,9 +1092,10 @@ def main(argv: list[str]) -> int:
 
     # src/ 配下に .md を置くと check-doc-classes の全検査をすり抜ける（#635/#638）。
     # golden 等のデータファイルは .txt で置き、説明はコードコメントか docs/ に書く。
+    src_dir = root / "src"
     stray_md = sorted(
         p.relative_to(root).as_posix()
-        for p in root.joinpath("src").rglob("*.md")
+        for p in (src_dir.rglob("*.md") if src_dir.is_dir() else ())
         if p.is_file()
     )
     for s in stray_md:
