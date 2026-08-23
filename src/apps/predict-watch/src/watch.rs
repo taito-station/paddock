@@ -16,9 +16,9 @@ use predict_format::{
 
 use crate::cli::Cli;
 use crate::notify::{
-    NOTIFY_ROI_RESEND_DELTA, NotifySettings, PLATFORM_SUPPORTED, RaceEvaluation,
-    SWEEP_DELIVERY_ABORTED, delivery_report, notification_message, notify_status_lines,
-    pick_notifications, record_notified, resolve_notify_roi, send_with_deadline,
+    ADR0076_MEASURED_GATE, NOTIFY_ROI_RESEND_DELTA, NotifySettings, PLATFORM_SUPPORTED,
+    RaceEvaluation, deliver_all, notify_status_lines, pick_notifications, resolve_notify_roi,
+    send_with_deadline,
 };
 use crate::setup::App;
 use crate::snapshot::{SnapshotContext, build_snapshot_record};
@@ -81,10 +81,21 @@ pub fn mark_for(roi: f64, notify_gate: f64, buy_gate: f64) -> &'static str {
 /// 文字列を返す純関数にしてあるのは、文言が実測（182R・0 件）と結びついているため
 /// テストで固定するのが目的。表示は呼び出し側の `println!`。
 fn gate_caveat_lines(roi_gate: f64, notify_gate: f64) -> Vec<String> {
-    let mut out = vec![format!(
-        "── 参考ROI の読み方: 🔶（≥{:.0}%）は 182R / 839 スイープの実測で到達 0 件。判定ROI に実現ROI の選別力は無い（ADR 0076）。",
-        roi_gate * 100.0
-    )];
+    // ADR 0076 が「通過 0 件」と**実測した**のは ≥100%。`--roi-gate` を下げた探索運用でも同じ文言を
+    // 出すと、測っていない閾値について到達不能を断言することになる（#584 で通知側に入れた規律を
+    // ここにも通す。一次資料は 2026-08-09 に ≥70% の通過を 7 回観測している）。
+    let mut out = vec![if roi_gate >= ADR0076_MEASURED_GATE {
+        format!(
+            "── 参考ROI の読み方: 🔶（≥{:.0}%）は 182R / 839 スイープの実測で到達 0 件。判定ROI に実現ROI の選別力は無い（ADR 0076）。",
+            roi_gate * 100.0
+        )
+    } else {
+        format!(
+            "── 参考ROI の読み方: 🔶（≥{:.0}%）は買う閾値の表示マーク。判定ROI に実現ROI の選別力は無い（ADR 0076。到達 0 件と実測したのは ≥{:.0}% で、この設定はそれより低い）。",
+            roi_gate * 100.0,
+            ADR0076_MEASURED_GATE * 100.0
+        )
+    }];
     if notify_gate < roi_gate {
         out.push(format!(
             "   🔍（≥{:.0}%）は結果照合のための目印で、張り推奨ではない。",
@@ -698,18 +709,16 @@ struct WatchSweeper<'a> {
 
 impl WatchSweeper<'_> {
     /// 閾値を通過した評価を macOS 通知で人に届ける（#584）。発火判定は `pick_notifications`、
-    /// ログ出力と失敗報告の要否は `delivery_report`、配送は `send_with_deadline` に委譲し、
-    /// ここは状態を渡して結果を印字するだけの薄い糊にする（判断はすべて純関数側でテスト済み）。
+    /// 配送ループと状態遷移は `deliver_all`、配送そのものは `send_with_deadline` に委譲する。
     ///
-    /// 抑制状態を進めるのは**配送に成功したときだけ**（`record_notified`）。失敗したまま
-    /// 「通知済み」にすると、そのレースは +10pt 上振れするまで二度と鳴らない——一過性の失敗 1 回で
-    /// レースごと落ちるのは「失敗するなら鳴りすぎる側へ倒す」の逆になる。
-    ///
-    /// **1 件でもデッドラインに掛かったら、そのスイープの残りは配送を試みない**。1 件あたり 5 秒の
-    /// 上限はあってもレース数ぶん直列に積み上がるので、配送が壊れている日はスイープ末尾が
-    /// 分オーダーで伸びる。試さなかったぶんは記録もしないので次スイープでそのまま拾い直す。
+    /// **このメソッドには判断を置かない**。`&App` / `&Cli` を抱えた構造体のメソッドはテストが
+    /// 書けず、置いた判断は「消しても緑のまま」になる（2 巡目までの `record_notified` 呼び出しが
+    /// まさにそうだった）。ここに残るのは有効/無効の分岐と印字だけ。
     async fn deliver_notifications(&mut self, evaluations: Vec<RaceEvaluation>) {
-        if self.cli.no_notify {
+        // 配送手段が無いプラットフォームでは経路ごと落とす。試しても必ず失敗し、抑制状態も
+        // 進まないので、同じレースが毎スイープ `🔔(未配送)` を積み上げる——#584 が減らそうと
+        // した埋没を通知行側で再生産する。起動注記も同じ条件で「配送できません」を宣言している。
+        if self.cli.no_notify || !PLATFORM_SUPPORTED {
             return;
         }
         let selected = pick_notifications(
@@ -718,24 +727,14 @@ impl WatchSweeper<'_> {
             self.notify_roi,
             NOTIFY_ROI_RESEND_DELTA,
         );
-        let mut deadline_hit = false;
-        for e in selected {
-            let message = notification_message(&e);
-            let failure = if deadline_hit {
-                Some(SWEEP_DELIVERY_ABORTED.to_string())
-            } else {
-                let f = send_with_deadline(&message).await;
-                deadline_hit = f.as_ref().is_some_and(|f| f.deadline);
-                f.map(|f| f.reason)
-            };
-            if failure.is_none() {
-                record_notified(&mut self.last_notified_roi, &e);
-            }
-            let report = delivery_report(
-                &message,
-                failure.as_deref(),
-                &mut self.notify_failure_reported,
-            );
+        let reports = deliver_all(
+            &mut self.last_notified_roi,
+            &mut self.notify_failure_reported,
+            selected,
+            |message| async move { send_with_deadline(&message).await },
+        )
+        .await;
+        for report in reports {
             println!("{}", report.line);
             if let Some(warning) = report.warning {
                 println!("{warning}");

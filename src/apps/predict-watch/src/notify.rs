@@ -50,7 +50,7 @@ pub const NOTIFY_ROI_RESEND_DELTA: f64 = 0.10;
 /// 下げた探索運用（例 0.7）でも同じ文言を出すと、**測っていない閾値について「鳴りません」と
 /// 宣言する**ことになる——一次資料自身が 2026-08-09 に ≥70% の通過を 7 回観測しており、
 /// 起動注記が嘘をつくと「鳴らない＝妙味なし」の誤読を潰すという本来の目的が反転する。
-const ADR0076_MEASURED_GATE: f64 = 1.0;
+pub const ADR0076_MEASURED_GATE: f64 = 1.0;
 
 /// osascript の応答を待つ上限。超えたら失敗扱いにして監視ループを先へ進める。
 ///
@@ -274,6 +274,51 @@ pub fn delivery_report(
     }
 }
 
+/// 選ばれた評価を 1 件ずつ配送し、ログ行と抑制状態の更新まで行う（#584・単体テスト対象）。
+///
+/// 配送そのものは `deliver` に注入する。**このループが持つ 2 つの保証をテストで固定する**のが目的:
+///
+/// 1. **抑制状態を進めるのは配送に成功したときだけ**。失敗したまま「通知済み」にすると、
+///    そのレースは +10pt 上振れするまで二度と鳴らない。
+/// 2. **1 件でもデッドラインに掛かったら、そのスイープの残りは配送を試みない**。1 件あたりの
+///    上限はあってもレース数ぶん直列に積み上がるので、配送が詰まっている日はスイープ末尾が
+///    分オーダーで伸びる。試さなかったぶんは記録もしないので次スイープでそのまま拾い直す。
+///
+/// 呼び出し側（`WatchSweeper`）に置くと `&App` / `&Cli` を抱えた構造体のメソッドになってテストが
+/// 書けず、**保証を消しても緑のまま**になる（実際 2 巡目まではそうなっていた）。
+pub async fn deliver_all<F, Fut>(
+    state: &mut std::collections::HashMap<String, f64>,
+    failure_reported: &mut bool,
+    selected: Vec<RaceEvaluation>,
+    deliver: F,
+) -> Vec<DeliveryReport>
+where
+    F: Fn(String) -> Fut,
+    Fut: std::future::Future<Output = Option<DeliveryFailure>>,
+{
+    let mut out = Vec::with_capacity(selected.len());
+    let mut deadline_hit = false;
+    for e in selected {
+        let message = notification_message(&e);
+        let failure = if deadline_hit {
+            Some(SWEEP_DELIVERY_ABORTED.to_string())
+        } else {
+            let f = deliver(message.clone()).await;
+            deadline_hit |= f.as_ref().is_some_and(|f| f.deadline);
+            f.map(|f| f.reason)
+        };
+        if failure.is_none() {
+            record_notified(state, &e);
+        }
+        out.push(delivery_report(
+            &message,
+            failure.as_deref(),
+            failure_reported,
+        ));
+    }
+    out
+}
+
 /// 通知設定を起動時に 1 回だけ宣言する行を組む純関数（#584・単体テスト対象）。
 ///
 /// **これは機能要件と同格**。無いと「鳴らない＝妙味が無かった」と「そもそも既定閾値では鳴らない」が
@@ -328,7 +373,7 @@ pub fn notify_status_lines(s: &NotifySettings) -> Vec<String> {
     out
 }
 
-/// macOS 通知を 1 件発火する（ブロッキング。副作用はこの関数と [`send_with_deadline`] だけ）。
+/// osascript を起動して通知を 1 件出す（副作用はこの関数と [`send_with_deadline`] だけ）。
 ///
 /// 既存 shell の `notify()` と同一の呼び出し形にする:
 /// - `on run {msg}` で **本文を argv 経由**で渡す（AppleScript の文字列補間をしない）。競走名に
@@ -338,7 +383,7 @@ pub fn notify_status_lines(s: &NotifySettings) -> Vec<String> {
 /// 失敗は呼び出し側が握る。既存 shell の `|| true` 相当の握り潰しは呼び出し側で行い、
 /// ここでは事実だけ返す——「通知が出せていない」ことを人に言えるようにするため
 /// （黙って鳴らないのが #584 の障害そのもの）。
-pub fn send(message: &str) -> std::io::Result<Child> {
+fn send(message: &str) -> std::io::Result<Child> {
     let mut cmd = Command::new(OSASCRIPT);
     for line in NOTIFY_SCRIPT {
         cmd.arg("-e").arg(line);
@@ -362,11 +407,19 @@ pub fn send(message: &str) -> std::io::Result<Child> {
 ///
 /// 戻り値は失敗理由（成功なら `None`）。そのまま [`delivery_report`] へ渡せる形にしてある。
 fn send_and_wait(message: &str) -> Option<DeliveryFailure> {
-    let mut child = match send(message) {
-        Ok(c) => c,
-        Err(e) => return Some(DeliveryFailure::other(e.to_string())),
-    };
-    let deadline = Instant::now() + SEND_TIMEOUT;
+    match send(message) {
+        Ok(child) => wait_with_deadline(child, SEND_TIMEOUT),
+        Err(e) => Some(DeliveryFailure::other(e.to_string())),
+    }
+}
+
+/// 子プロセスを期限まで待ち、超えたら kill して失敗を返す（#584・単体テスト対象）。
+///
+/// [`send_and_wait`] から osascript 固有の部分を剥がしてあるのは、**kill 経路をテストするため**。
+/// 実際に返らないコマンド（`/bin/sleep`）を食わせて「必ず期限内に返る」「子を残さない」を
+/// 検査できる。ここが壊れると監視ループが止まり、プロセスも終われなくなる。
+fn wait_with_deadline(mut child: Child, timeout: Duration) -> Option<DeliveryFailure> {
+    let deadline = Instant::now() + timeout;
     loop {
         match child.try_wait() {
             Ok(Some(status)) if status.success() => return None,
@@ -383,7 +436,7 @@ fn send_and_wait(message: &str) -> Option<DeliveryFailure> {
                     return Some(DeliveryFailure {
                         reason: format!(
                             "osascript が {} 秒以内に応答しなかったため打ち切りました",
-                            SEND_TIMEOUT.as_secs()
+                            timeout.as_secs()
                         ),
                         deadline: true,
                     });
@@ -465,7 +518,7 @@ mod tests {
     }
 
     /// `pick_notifications` + `record_notified` を「配送は必ず成功する」前提で回すヘルパ。
-    /// 従来の `select_notifications`（選定と記録が一体だった頃）と同じ挙動になる。
+    /// `pick_notifications` の結果を全件 `record_notified` する＝配送が常に成功する世界を再現する。
     fn sweep_all_delivered(
         state: &mut std::collections::HashMap<String, f64>,
         evaluations: Vec<RaceEvaluation>,
@@ -543,7 +596,7 @@ mod tests {
     }
 
     #[test]
-    fn select_notifications_suppresses_across_consecutive_sweeps() {
+    fn suppression_holds_across_consecutive_sweeps() {
         // #584 の要件そのもの: 同一レースが 8 スイープ連続で通過しても鳴るのは初回だけ。
         let mut state = std::collections::HashMap::new();
         let first = sweep_all_delivered(&mut state, vec![eval_of("A", 1.02)], 1.0, 0.10);
@@ -561,7 +614,7 @@ mod tests {
     }
 
     #[test]
-    fn select_notifications_replays_real_20260809_sweeps() {
+    fn suppression_replays_real_20260809_sweeps() {
         // 実ログ（~/Library/Logs/paddock-predict-watch-20260809.log）の新潟10R 17:20 は
         // 7 スイープ連続で通過帯に入り、参考ROI は 73.9 → 80.3 → … → 76.1 と推移した。
         // --notify-roi 0.7 で監視していたらこの 1 レースだけで 7 連投になる。+10pt 抑制なら
@@ -584,7 +637,7 @@ mod tests {
     }
 
     #[test]
-    fn select_notifications_tracks_races_independently() {
+    fn suppression_tracks_races_independently() {
         // 抑制はレース単位。A を通知済みでも B の初回は鳴る。
         let mut state = std::collections::HashMap::new();
         sweep_all_delivered(&mut state, vec![eval_of("A", 1.0)], 1.0, 0.10);
@@ -598,7 +651,7 @@ mod tests {
     }
 
     #[test]
-    fn select_notifications_does_not_record_skipped_evaluations() {
+    fn suppression_does_not_record_skipped_evaluations() {
         // 閾値未満で素通りした ROI を基準にすると、次に本当に通過したとき鳴らなくなる。
         let mut state = std::collections::HashMap::new();
         let skipped = sweep_all_delivered(&mut state, vec![eval_of("A", 0.30)], 1.0, 0.10);
@@ -673,6 +726,170 @@ mod tests {
         // 提案どおりに指定すれば警告が消えることまで確かめる。
         let aligned = notify_status_lines(&settings(0.555, true, 1.0, 0.55));
         assert!(!aligned.iter().any(|l| l.contains("揃えるなら")));
+    }
+
+    /// 配送結果を台本で与えるスタブ。**実際に配送を試みた本文だけ**を記録するので、
+    /// 「デッドライン後は残りを試さない」保証をコール数で検査できる。
+    struct ScriptedDelivery {
+        outcomes: std::cell::RefCell<std::vec::IntoIter<Option<DeliveryFailure>>>,
+        calls: std::cell::RefCell<Vec<String>>,
+    }
+
+    impl ScriptedDelivery {
+        fn new(outcomes: Vec<Option<DeliveryFailure>>) -> Self {
+            Self {
+                outcomes: std::cell::RefCell::new(outcomes.into_iter()),
+                calls: std::cell::RefCell::new(Vec::new()),
+            }
+        }
+
+        fn deliver(&self, message: String) -> std::future::Ready<Option<DeliveryFailure>> {
+            self.calls.borrow_mut().push(message);
+            std::future::ready(self.outcomes.borrow_mut().next().flatten())
+        }
+
+        fn call_count(&self) -> usize {
+            self.calls.borrow().len()
+        }
+    }
+
+    fn deadline_failure() -> DeliveryFailure {
+        DeliveryFailure {
+            reason: "打ち切り".to_string(),
+            deadline: true,
+        }
+    }
+
+    #[tokio::test]
+    async fn deliver_all_records_only_successful_deliveries() {
+        // 本番経路の保証 1: 配送に成功したものだけ抑制状態を進める。
+        // ここが壊れると、一過性の失敗 1 回でそのレースが +10pt まで二度と鳴らなくなる。
+        let mut state = std::collections::HashMap::new();
+        let mut reported = false;
+        let stub = ScriptedDelivery::new(vec![None, Some(DeliveryFailure::other("失敗"))]);
+        let reports = deliver_all(
+            &mut state,
+            &mut reported,
+            vec![eval_of("A", 1.0), eval_of("B", 1.0)],
+            |m| stub.deliver(m),
+        )
+        .await;
+        assert_eq!(reports.len(), 2);
+        assert!(reports[0].line.starts_with("  🔔 A"));
+        assert!(reports[1].line.starts_with("  🔔(未配送) B"));
+        assert_eq!(state.keys().collect::<Vec<_>>(), ["A"], "state={state:?}");
+    }
+
+    #[tokio::test]
+    async fn deliver_all_retries_failed_race_on_the_next_sweep() {
+        // 保証 1 の帰結: 未配送のレースは次スイープでもう一度選ばれ、成功すれば記録される。
+        let mut state = std::collections::HashMap::new();
+        let mut reported = false;
+        let stub = ScriptedDelivery::new(vec![Some(DeliveryFailure::other("失敗"))]);
+        deliver_all(&mut state, &mut reported, vec![eval_of("A", 1.0)], |m| {
+            stub.deliver(m)
+        })
+        .await;
+
+        let picked = pick_notifications(&state, vec![eval_of("A", 1.0)], 1.0, 0.10);
+        assert_eq!(ids(&picked), ["A"], "未配送ぶんが次スイープで拾われない");
+        let stub2 = ScriptedDelivery::new(vec![None]);
+        deliver_all(&mut state, &mut reported, picked, |m| stub2.deliver(m)).await;
+        assert!(pick_notifications(&state, vec![eval_of("A", 1.0)], 1.0, 0.10).is_empty());
+    }
+
+    #[tokio::test]
+    async fn deliver_all_stops_trying_after_a_deadline() {
+        // 本番経路の保証 2: 1 件でもデッドラインに掛かったら残りは配送を試みない。
+        // 試さなかったぶんは記録もしないので、次スイープでそのまま拾い直せる。
+        let mut state = std::collections::HashMap::new();
+        let mut reported = false;
+        let stub = ScriptedDelivery::new(vec![Some(deadline_failure()), None, None]);
+        let reports = deliver_all(
+            &mut state,
+            &mut reported,
+            vec![eval_of("A", 1.0), eval_of("B", 1.0), eval_of("C", 1.0)],
+            |m| stub.deliver(m),
+        )
+        .await;
+        assert_eq!(stub.call_count(), 1, "デッドライン後も配送を試している");
+        assert!(reports.iter().all(|r| r.line.contains("🔔(未配送)")));
+        assert!(reports[1].line.contains("B") && reports[2].line.contains("C"));
+        assert!(state.is_empty(), "試していないものを記録している");
+    }
+
+    #[tokio::test]
+    async fn deliver_all_warns_once_then_rearms_after_success() {
+        // 失敗警告は連続する間だけ黙り、成功したら再アームする（本番経路でも同じ）。
+        let mut state = std::collections::HashMap::new();
+        let mut reported = false;
+        let stub = ScriptedDelivery::new(vec![
+            Some(DeliveryFailure::other("失敗")),
+            Some(DeliveryFailure::other("失敗")),
+            None,
+            Some(DeliveryFailure::other("失敗")),
+        ]);
+        let reports = deliver_all(
+            &mut state,
+            &mut reported,
+            vec![
+                eval_of("A", 1.0),
+                eval_of("B", 1.0),
+                eval_of("C", 1.0),
+                eval_of("D", 1.0),
+            ],
+            |m| stub.deliver(m),
+        )
+        .await;
+        let warned: Vec<bool> = reports.iter().map(|r| r.warning.is_some()).collect();
+        assert_eq!(warned, [true, false, false, true]);
+    }
+
+    #[test]
+    fn wait_with_deadline_kills_a_hanging_child() {
+        // 期限を超えた子は kill され、**必ず期限内に返る**。ここが効いていないと
+        // 監視ループが止まり、ランタイム drop の join でプロセスも終われなくなる。
+        let child = Command::new("/bin/sleep")
+            .arg("30")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("/bin/sleep の起動に失敗");
+        let started = Instant::now();
+        let failure = wait_with_deadline(child, Duration::from_millis(300))
+            .expect("ハングした子が失敗として返っていない");
+        assert!(failure.deadline, "デッドライン切れとして型付けされていない");
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "期限を大きく超えて待っている: {:?}",
+            started.elapsed()
+        );
+    }
+
+    #[test]
+    fn wait_with_deadline_returns_success_for_a_quick_child() {
+        let child = Command::new("/usr/bin/true")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("/usr/bin/true の起動に失敗");
+        assert_eq!(wait_with_deadline(child, Duration::from_secs(5)), None);
+    }
+
+    #[test]
+    fn wait_with_deadline_reports_nonzero_exit_as_failure() {
+        let child = Command::new("/usr/bin/false")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("/usr/bin/false の起動に失敗");
+        let failure =
+            wait_with_deadline(child, Duration::from_secs(5)).expect("失敗として返らない");
+        assert!(!failure.deadline);
+        assert!(failure.reason.contains("異常終了"));
     }
 
     #[test]

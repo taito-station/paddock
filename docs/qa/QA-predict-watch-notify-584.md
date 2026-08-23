@@ -47,7 +47,7 @@
   +10pt 上振れしたときだけ再通知する**。上の実測列に当てると 7 通知が 1 通知に落ちる
   （初回 73.9 の次に鳴るには 83.9 以上が要る）。記録するのは「**通知した**ときの ROI」で、
   閾値未満で見送った pass は状態を汚さない——汚すと次に本当に通過したとき鳴らなくなる。
-- 反映先: src/apps/predict-watch/src/notify.rs（`select_notifications` / `should_notify`）
+- 反映先: src/apps/predict-watch/src/notify.rs（`should_notify` / `pick_notifications` / `record_notified` / `deliver_all`）
 
 ## Q5: 抑制状態を永続化するか
 
