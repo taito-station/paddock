@@ -262,6 +262,31 @@ def test_decision_log_heading_in_code_fence_is_ignored() -> None:
         shutil.rmtree(repo)
 
 
+def test_empty_decision_log_with_comment_only_passes() -> None:
+    """決定ログ節があるがエントリは無くコメントだけ（web-spa.md パターン）。
+
+    エントリ無し＝base の行数 0 なので prefix 比較は自明に通る。本文を書き換えても
+    決定ログ自体は不変のまま。
+    """
+    comment_only_log = (
+        "\n---\n\n## 決定ログ\n\n"
+        "<!-- この節は append-only です。既存エントリの変更・削除は CI が検出します。 -->\n\n"
+        "<!-- 関連する決定は別ファイルの決定ログに記録されている -->\n"
+    )
+    repo = new_repo()
+    try:
+        write_doc(repo, "docs/specifications/empty-log.md", "仕様本文。\n" + comment_only_log)
+        commit_all(repo, "コメントのみの決定ログを追加")
+        land_on_main(repo)
+        text = read_doc(repo, "docs/specifications/empty-log.md")
+        overwrite(repo, "docs/specifications/empty-log.md", text.replace("仕様本文。", "仕様を全面改稿。"))
+        commit_all(repo, "本文だけ改稿")
+        code, out = check(repo)
+        assert code == 0, f"コメントのみの決定ログで落ちている:\n{out}"
+    finally:
+        shutil.rmtree(repo)
+
+
 # --- 落ちるケース -----------------------------------------------------------
 
 

@@ -1154,6 +1154,7 @@ def main(argv: list[str]) -> int:
         # (4) sources の実在
         # ADR 廃止（#652）で sources が ADR のみだったファイルは sources/distilled_from_sha
         # が消える。決定ログを持つファイルは自己完結しているため空 sources を許容する。
+        # フェンス内の偽ヒットは「許容方向」なので意図的に簡略化（厳密版は immutability checker 側）
         has_decision_log = "\n## 決定ログ" in text
         if not sources:
             if not has_decision_log:
@@ -1175,6 +1176,14 @@ def main(argv: list[str]) -> int:
         if not distilled:
             if not has_decision_log:
                 errors.append(f"{rel}: distilled_from_sha が無い")
+            # 決定ログ有り + distilled_from_sha 無し = sources も空が前提
+            # （clean_sources が ADR 除去で空になった場合のみ両方を消す設計保証）。
+            # sources が非空なのにここに来た場合は手動操作の誤り → stale 検査が消える。
+            elif sources:
+                warnings.append(
+                    f"{rel}: 決定ログ有りだが sources 非空で distilled_from_sha が無い"
+                    "（stale 検査が無効化されている）"
+                )
             continue
         resolved = git("rev-parse", "--verify", "--quiet", f"{distilled}^{{commit}}")
         if resolved.returncode != 0:

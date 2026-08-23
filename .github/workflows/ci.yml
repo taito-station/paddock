@@ -197,10 +197,10 @@ jobs:
       # 前提（shallow だと `distilled_from_sha` を解決できず、全文書の stale 判定が warning に
       # 退化して丸ごと飛ぶ）。
       # stale は **error**（移設以前から累積していた未解消 6 件を #580 で消化し warning から昇格）。
-      - name: Check document classes / sources (ADR 0073)
-        run: python3 scripts/check-doc-classes.py
       - name: Regression test for check-decision-log-immutability.py (#652)
         run: python3 scripts/test-check-decision-log-immutability.py
+      - name: Check document classes / sources (ADR 0073)
+        run: python3 scripts/check-doc-classes.py
       - name: Check decision log immutability (#652)
         run: python3 scripts/check-decision-log-immutability.py
 

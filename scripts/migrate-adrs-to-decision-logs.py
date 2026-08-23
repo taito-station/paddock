@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """ADR 本文を knowledge / specifications の「決定ログ」節へ移設する片道移行スクリプト（#652）。
 
+このスクリプトは #652 の一括移行で使用済み。再実行の必要はない。
+
 --dry-run（既定）: ADR → 移設先のマッピングを JSON で stdout に出して終了（ファイルは触らない）
 --execute        : 実際に移設する（決定ログ追記 / sources 掃除 / 本文リンク書き換え / ADR 削除）
 """

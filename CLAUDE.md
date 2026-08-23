@@ -29,6 +29,7 @@ paddock の文書は HVE（dahatake/HypervelocityEngineering, MIT）の蒸留モ
   索引で、定義そのものは各仕様書・本ファイルが持つ。
 - **`docs/original-docs/` の命名は issue 番号・0 埋めしない**（`382-...`）。置くのは転記できないもの
   ——実測ログ・調査時点のコード所見・外部サイトの挙動観察。GitHub Issue 本文は転記しない（ADR 0074）。
+  旧 ADR（0 埋め 4 桁: `0001-...` 〜 `0090-...`）は #652 で各 knowledge/specifications の決定ログへ移行済み・削除済み。
 - **status**: `Confirmed`（運用の前提にしてよい）/ `Tentative`（暫定）/ `Conflict`（矛盾・放置せず解消）。
 - **文書クラス**: knowledge/specifications は frontmatter に `doc_class`（+ mdq 用ミラーの `tags`）を持つ。
   定義の正本は [docs/knowledge/doc-classes.md](docs/knowledge/doc-classes.md)（HVE の D01〜D21 ＋ paddock 固有の

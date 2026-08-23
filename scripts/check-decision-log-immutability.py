@@ -19,6 +19,9 @@ ADR は「一度置いたら改変しない」という人手の規律で不変�
     そのとき決定ログは別ファイルへ移る。移動先の追跡は本スクリプトのスコープ外。
   - 節の見出し（`## 決定ログ`）そのものを別文言へ書き換えると「節が無い」に見える。
     これは節ごと消したのと同じ扱いで error になる（下の check_file を参照）。
+  - **HEAD が main 上にあるとき** merge-base は HEAD 自身になるため、main への直 push で
+    入った改変は次の作業ブランチまで検出されない。ワークフロー上 main への直 push は
+    禁止されているので実害はない。
 
 依存は標準ライブラリのみ。
 
@@ -124,7 +127,10 @@ def blob_at(sha: str, rel: str) -> "str | None":
 
 
 def check_file(rel: str, base_sha: str, path: Path, errors: list[str]) -> bool:
-    """1 文書ぶんを検査する。比較を実施したら True（成功行の件数に数える）。"""
+    """1 文書ぶんを検査する。比較を実施したら True（成功行の件数に数える）。
+
+    違反は先頭 1 件だけ報告する（prefix 比較なので後続は連鎖的な偽陽性になるため）。
+    """
     base_text = blob_at(base_sha, rel)
     if base_text is None:
         return False  # base に無い＝新規ファイル。全エントリが新規なので比較対象が無い
