@@ -810,7 +810,7 @@ $ echo $?
 
 なお近走取り込み（`parse/horse_history.rs`）では、障害・地方・海外を Error にせず行スキップしている。
 **同じ「障害」が card 経路だけ Error になっている非対称**が本件の実体であり、
-[ADR 0049](0049-netkeiba-odds-transient-retry-and-degraded-exit.md) が transient/未発売を variant で
+ADR 0049 が transient/未発売を variant で
 分けたのと同じ構造をもう一段広げる話になる。
 
 #### 決定
@@ -1059,9 +1059,9 @@ EV は `的中確率 × オッズ`（`leg_metrics`）なので、**1 点で EV �
 #### 関連
 
 - [#114](https://github.com/taito-station/paddock/issues/114)（値域ガードの導入。下限のみだった）
-- [ADR 0076](0076-roi-gate-uncalibrated-under-ev-layer-separation.md) /
-  [ADR 0079](0079-roi-gate-display-kept-with-unreachable-note.md)（参考 ROI の読み方）
-- [ADR 0085](0085-cli-started-race-marking.md)（言語をまたぐ契約を golden で結ぶ前例）
+- ADR 0076 /
+  ADR 0079（参考 ROI の読み方）
+- ADR 0085（言語をまたぐ契約を golden で結ぶ前例）
 - [docs/qa/QA-odds-sentinel-621.md](../qa/QA-odds-sentinel-621.md)
 
 ### ADR 0088: netkeiba の未発売番兵は券種別に判定する (2026-08-18) — 承認済み
@@ -1071,7 +1071,7 @@ EV は `的中確率 × オッズ`（`leg_metrics`）なので、**1 点で EV �
 承認済み（[#630](https://github.com/taito-station/paddock/issues/630)・
 [#634](https://github.com/taito-station/paddock/issues/634)）。
 
-**[ADR 0086](0086-netkeiba-unpriced-sentinel-is-not-odds.md) の決定 1 を部分 supersede する**:
+**ADR 0086 の決定 1 を部分 supersede する**:
 「特定値の除外」は維持したまま、判定を**全券種一律**から**券種スコープ**に絞る。決定 2（`OddsValue`
 一点判定）・3（既存行は DELETE しない）・4（EV 側にフィルタを足さない）・5（`debug` ログ）・
 6（Python 経路の同一ガード）・7（言語をまたぐ golden）は**そのまま維持**する。ADR 0086 自体は
@@ -1163,9 +1163,9 @@ ADR 0086 は「`OddsValue` は券種を知らない」ため判定を全券種�
 
 #### 関連
 
-- [ADR 0086](0086-netkeiba-unpriced-sentinel-is-not-odds.md)（決定 1 を本 ADR が券種スコープに絞る。他の決定は維持）
-- [ADR 0064](0064-live-ev-buy-view.md)（second source を作らない——判定一点主義の根拠）
-- [ADR 0085](0085-cli-started-race-marking.md)（言語をまたぐ契約を golden で結ぶ前例）
+- ADR 0086（決定 1 を本 ADR が券種スコープに絞る。他の決定は維持）
+- ADR 0064（second source を作らない——判定一点主義の根拠）
+- ADR 0085（言語をまたぐ契約を golden で結ぶ前例）
 - [#632](https://github.com/taito-station/paddock/issues/632) /
   [#633](https://github.com/taito-station/paddock/issues/633)（未発売の観測記録。本 ADR の券種付き判定 API の上に乗る）
 - [docs/qa/QA-odds-sentinel-scope-630-634.md](../qa/QA-odds-sentinel-scope-630-634.md)
@@ -1176,14 +1176,14 @@ ADR 0086 は「`OddsValue` は券種を知らない」ため判定を全券種�
 
 承認済み（[#632](https://github.com/taito-station/paddock/issues/632)）。
 
-**[ADR 0010](0010-persist-and-reference-odds.md) の「後日談（#294）」で定めた cache-hit 規則を
+**ADR 0010 の「後日談（#294）」で定めた cache-hit 規則を
 部分 supersede する**: 「不完全なスナップショットは cache-miss として再スクレイプする」という
 原則は維持したまま、**「未発売と確認できた券種の欠落」を不完全さから除外する**。
 `RaceOdds::is_complete()` の意味（priced な行が全券種そろっているか）は変えない。ADR 0010 自体は
 書き換えない。
 
-[ADR 0086](0086-netkeiba-unpriced-sentinel-is-not-odds.md) の決定 1/3（番兵はオッズではない・
-`race_odds` に入れない）と [ADR 0088](0088-bet-type-scoped-unpriced-sentinels.md) の券種スコープ
+ADR 0086 の決定 1/3（番兵はオッズではない・
+`race_odds` に入れない）と ADR 0088 の券種スコープ
 判定はそのまま維持し、本 ADR はその上に乗る。
 
 #### コンテキスト
@@ -1357,12 +1357,12 @@ IP ブロックは本 PJ の最重要運用リスク（ADR 0068）なので、�
 
 #### 関連
 
-- [ADR 0010](0010-persist-and-reference-odds.md)（read-through / #294 の cache-hit 規則。本 ADR が部分 supersede）
-- [ADR 0086](0086-netkeiba-unpriced-sentinel-is-not-odds.md)（番兵はオッズではない。本 ADR の起点となる副作用を予告）
-- [ADR 0088](0088-bet-type-scoped-unpriced-sentinels.md)（券種スコープ判定。本 ADR はその API の上に乗る）
-- [ADR 0049](0049-netkeiba-odds-transient-retry-and-degraded-exit.md)（netkeiba オッズ経路にレート制御が無いことの裏書き）
-- [ADR 0068](0068-race-result-ingestion-ui-reflection.md)（netkeiba への無駄打ちを構造的に止める規律・IP ブロック）
-- [ADR 0070](0070-explicit-migration-no-auto-on-startup.md)（migration の明示適用）
+- ADR 0010（read-through / #294 の cache-hit 規則。本 ADR が部分 supersede）
+- ADR 0086（番兵はオッズではない。本 ADR の起点となる副作用を予告）
+- ADR 0088（券種スコープ判定。本 ADR はその API の上に乗る）
+- ADR 0049（netkeiba オッズ経路にレート制御が無いことの裏書き）
+- ADR 0068（netkeiba への無駄打ちを構造的に止める規律・IP ブロック）
+- ADR 0070（migration の明示適用）
 - #633（未発売の記録方針の一貫性）
 
 ### ADR 0090: 未発売の記録は「過去の番兵行の保持」と「現在状態の観測」の 2 層で一貫させる (2026-08-22) — 承認済み
@@ -1371,8 +1371,8 @@ IP ブロックは本 PJ の最重要運用リスク（ADR 0068）なので、�
 
 承認済み（[#633](https://github.com/taito-station/paddock/issues/633)）。
 
-**[ADR 0086](0086-netkeiba-unpriced-sentinel-is-not-odds.md) 決定 3 と
-[ADR 0089](0089-unpriced-bet-type-observation.md) への follow-up**（supersede ではない）。
+**ADR 0086 決定 3 と
+ADR 0089 への follow-up**（supersede ではない）。
 **実装変更は無い**——両 ADR が既に作った状態を「一貫した立場」として言語化し、混在に見える
 非対称の説明を確定知層に固定する決定。
 
@@ -1449,8 +1449,8 @@ DELETE・ADR 0089 決定 8）であり、「いつ未発売で、いつ発売さ
 
 #### 関連
 
-- [ADR 0086](0086-netkeiba-unpriced-sentinel-is-not-odds.md)（決定 1/3。本 ADR が立場を言語化）
-- [ADR 0088](0088-bet-type-scoped-unpriced-sentinels.md)（読み出し無害化の券種スコープ）
-- [ADR 0089](0089-unpriced-bet-type-observation.md)（観測表。本 ADR の「今後分」の実体）
+- ADR 0086（決定 1/3。本 ADR が立場を言語化）
+- ADR 0088（読み出し無害化の券種スコープ）
+- ADR 0089（観測表。本 ADR の「今後分」の実体）
 - [#649](https://github.com/taito-station/paddock/issues/649)（実地計測。時系列化の要否の判断材料）
 - [docs/qa/QA-odds-record-policy-633.md](../qa/QA-odds-record-policy-633.md)

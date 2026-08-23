@@ -494,7 +494,7 @@ Python 行の件数は `.py` のみの数（tracked 総数は順に 43 / 20 / 10
    こちらは api-server を廃止する側）。`src/interface/rest-controller`
    （.rs 2,730 LOC。この LOC には同 crate の `src/openapi.rs` も含む）と、`src/apps/api-server/tests/openapi.rs` /
    `openapi_route_parity.rs` の契約テスト 2 本は、utoipa コードファーストで API 契約を担保するための投資
-   （方針の出典は ADR [0022](0022-rest-api-read-server.md)）。**SSR コンポーネントが DB を直読みする構成では
+   （方針の出典は ADR 0022）。**SSR コンポーネントが DB を直読みする構成では
    この契約自体が消える**。SPA を捨てるだけでなく actix-web + utoipa の資産を捨てる判断になる。
    （Topcoat のロードマップには `OpenAPI` endpoints があるため、実装されればこの理由は弱まる。現状は未実装。）
 4. **推奨形のルーティングがレイヤ構成と当たり、HTTP スタックが 2 本になる**。paddock は
@@ -579,18 +579,18 @@ Python 行の件数は `.py` のみの数（tracked 総数は順に 43 / 20 / 10
   **crates.io 由来の数値（0.5.0 / 2026-07-27・累計 DL 2,466・13 版）と HN スレッドはピンできないため、
   評価基準日 2026-07-30 のスナップショットであり後から厳密には再現できない**（版一覧は crates.io API で再取得可）。
 - 置き換え対象の仕様: [docs/specifications/web-spa.md](../specifications/web-spa.md)（`status: Confirmed`）、
-  ADR [0069](0069-drop-icloud-writes-browser-only-viewing.md)（iCloud 書き出しを全廃し閲覧を REST API + SPA に一本化）。
+  ADR 0069（iCloud 書き出しを全廃し閲覧を REST API + SPA に一本化）。
   **なお web-spa.md の鮮度方針は「既定は自動ポーリングしない／恒常的な全画面ポーリングはやらない。例外は
-  `results:refresh`（#381・ADR [0068](0068-race-result-ingestion-ui-reflection.md)）だけ」となっており、実装済みの RaceBoard（#475）・RaceList（#372）の
+  `results:refresh`（#381・ADR 0068）だけ」となっており、実装済みの RaceBoard（#475）・RaceList（#372）の
   オッズ追従ポーリングを反映していない（spec が stale ＝ CLAUDE.md の `Conflict` 相当）**。本 ADR の
   見送り理由 2 は実装側を事実として採っている。この spec 更新は本 ADR のスコープ外なので
   **追跡 Issue [#567](https://github.com/taito-station/paddock/issues/567) で解消する**。
-- API 契約の方針: ADR [0022](0022-rest-api-read-server.md)（OpenAPI を一級成果物とし、utoipa コードファースト＋
+- API 契約の方針: ADR 0022（OpenAPI を一級成果物とし、utoipa コードファースト＋
   `docs/api/openapi.json` のスナップショット検証で担保する決定）。実装は `src/interface/rest-controller/`。
-- 買い方ロジックの二重実装: ADR [0064](0064-live-ev-buy-view.md) は**当時の正本を `live_ev.py` に一本化**し、
+- 買い方ロジックの二重実装: ADR 0064 は**当時の正本を `live_ev.py` に一本化**し、
   「Rust domain や TS に再実装すると second source が生まれる」と警告した。その後 #346 で writer が
   Rust `predict-watch` / `build_portfolio` に一本化され、**正本が Rust 側へ移って `live_ev.py` が
   second source として残った**（現行の CLAUDE.md「予算・配分」の記述がこれ）。本 ADR は、`web/src/lib/bets.ts` が
   この二重実装に**当たらない**（配分・混戦判定・組み合わせ生成を持たず、`RecommendationBet` への
   UI 編集と 100 円単位ガードのみ）ことを確認した記録も兼ねる。
-- 同型のステータス運用の先例: ADR [0067](0067-late-money-odds-drift-signal-rejected.md)（棄却（reject-for-now）＋再検証の条件）。
+- 同型のステータス運用の先例: ADR 0067（棄却（reject-for-now）＋再検証の条件）。

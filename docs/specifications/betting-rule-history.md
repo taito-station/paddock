@@ -1565,7 +1565,7 @@ ADR 0055（EV 層分離・循環断ち）以降、`predict-watch` / `predict --o
 - **判定基準**: ADR 0045 の定義を踏襲。逆予測性の解消 = `Spearman(判定, 実現) ≥ 0` かつ
   上位帯の実現ROI ≥ 全体平均。
 
-#### 測定結果（182R・生データは [571-roi-gate-calibration.md](571-roi-gate-calibration.md)）
+#### 測定結果（182R・生データは [571-roi-gate-calibration.md](../original-docs/571-roi-gate-calibration.md)）
 
 | 指標 | 値 |
 |---|---|
@@ -1699,7 +1699,7 @@ python3 scripts/predict-check/test_gate_calibration.py
 
 #### ステータス
 
-採用（`PortfolioConfig::default().alloc` を変更する。**[ADR 0019](0019-portfolio-generator.md) の
+採用（`PortfolioConfig::default().alloc` を変更する。**ADR 0019 の
 「既定値（相手 5 頭・配分 1:1:1）」のうち配分だけを supersede する**。相手 5 頭は変えない）
 
 #### コンテキスト
@@ -1824,8 +1824,8 @@ python3 scripts/predict-check/test_gate_calibration.py
 #### 関連
 
 - 出自: #600（予算の 20% が不執行）。発見は ADR 0076（#571）の較正測定の副産物
-- supersede: [ADR 0019](0019-portfolio-generator.md) の「既定値 配分 1:1:1」（相手 5 頭は据え置き）
-- 関連: [ADR 0046](0046-allocation-prob-weight-no-floor-rejected.md)（確率重み化の棄却＝均等割り維持）/
-  [ADR 0065](0065-wide-partners-top5-alignment.md)（doc↔実装の乖離を測って寄せた先例）/
-  [ADR 0064](0064-live-ev-buy-view.md)（second source を作らない）/
-  [ADR 0076](0076-roi-gate-uncalibrated-under-ev-layer-separation.md)（この窓にエッジは無い）
+- supersede: ADR 0019 の「既定値 配分 1:1:1」（相手 5 頭は据え置き）
+- 関連: ADR 0046（確率重み化の棄却＝均等割り維持）/
+  ADR 0065（doc↔実装の乖離を測って寄せた先例）/
+  ADR 0064（second source を作らない）/
+  ADR 0076（この窓にエッジは無い）

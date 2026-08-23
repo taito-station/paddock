@@ -1152,8 +1152,12 @@ def main(argv: list[str]) -> int:
         )
 
         # (4) sources の実在
+        # ADR 廃止（#652）で sources が ADR のみだったファイルは sources/distilled_from_sha
+        # が消える。決定ログを持つファイルは自己完結しているため空 sources を許容する。
+        has_decision_log = "\n## 決定ログ" in text
         if not sources:
-            errors.append(f"{rel}: sources が空（由来を辿れない）")
+            if not has_decision_log:
+                errors.append(f"{rel}: sources が空（由来を辿れない）")
         for src in sources:
             path_error = repo_relative_path_error(src)
             if path_error:
@@ -1169,7 +1173,8 @@ def main(argv: list[str]) -> int:
         # (6) stale
         distilled = fm.get("distilled_from_sha", "")
         if not distilled:
-            errors.append(f"{rel}: distilled_from_sha が無い")
+            if not has_decision_log:
+                errors.append(f"{rel}: distilled_from_sha が無い")
             continue
         resolved = git("rev-parse", "--verify", "--quiet", f"{distilled}^{{commit}}")
         if resolved.returncode != 0:

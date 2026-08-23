@@ -851,7 +851,7 @@ Issue #12 の実装（PR #19、main にマージ済み）で Domain 層の EV �
 - [#551](https://github.com/taito-station/paddock/issues/551)（`--overview` 追加）/
   [#391](https://github.com/taito-station/paddock/issues/391)（`post_time` を一次ソースにする方針）/
   [#381](https://github.com/taito-station/paddock/issues/381)（SPA の ⚫終＝結果確定判定）
-- [ADR 0072](0072-monitor-loop-wall-clock-sleep-resilience.md)（`classify` が日付を持たない件の出所）
+- ADR 0072（`classify` が日付を持たない件の出所）
 - [docs/qa/QA-overview-post-time-587.md](../qa/QA-overview-post-time-587.md)
 
 ### ADR 0087: 発走済みレースへの買い目記録は確認を挟む（禁止はしない） (2026-08-16) — 承認済み
@@ -859,7 +859,7 @@ Issue #12 の実装（PR #19、main にマージ済み）で Domain 層の EV �
 #### ステータス
 
 承認済み（[#623](https://github.com/taito-station/paddock/issues/623)）。
-[ADR 0085](0085-cli-started-race-marking.md) の決定 2「除外ではなく区別」を**維持したまま**、
+ADR 0085 の決定 2「除外ではなく区別」を**維持したまま**、
 記録の手前にゲートを 1 枚足す（supersede ではない）。
 
 #### コンテキスト
@@ -1011,8 +1011,8 @@ Issue #12 の実装（PR #19、main にマージ済み）で Domain 層の EV �
 
 #### 関連
 
-- [#587](https://github.com/taito-station/paddock/issues/587) / [ADR 0085](0085-cli-started-race-marking.md)（発走済み表示・「除外ではなく区別」）
+- [#587](https://github.com/taito-station/paddock/issues/587) / ADR 0085（発走済み表示・「除外ではなく区別」）
 - [#551](https://github.com/taito-station/paddock/issues/551)（`--overview`）/ [#479](https://github.com/taito-station/paddock/issues/479)（`--skip-all`）/
   [#179](https://github.com/taito-station/paddock/issues/179)（EOF を安全側へ畳む）
-- [ADR 0064](0064-live-ev-buy-view.md)（判定ロジックの second source を作らない）
+- ADR 0064（判定ロジックの second source を作らない）
 - [docs/qa/QA-started-race-record-confirm-623.md](../qa/QA-started-race-record-confirm-623.md)

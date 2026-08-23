@@ -157,7 +157,7 @@ ADR 0077）:
 #### ステータス
 
 承認済み（本 PR で実装）。対象 Issue: [#598](https://github.com/taito-station/paddock/issues/598)。
-関連: [ADR 0073](0073-adr-into-original-docs-and-doc-classes.md)（文書クラス体系と ADR の一次資料層統合）。
+関連: ADR 0073（文書クラス体系と ADR の一次資料層統合）。
 
 #### コンテキスト
 

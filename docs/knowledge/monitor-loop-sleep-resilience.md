@@ -172,7 +172,7 @@ cargo test -p monitor-loop -- --ignored --nocapture crosses_real_host_sleep
 #### コンテキスト
 
 `paddock-predict-watch`（発走直前 EV 監視）と `paddock-odds-collect`（単複オッズ時系列収集）は、
-[ADR 0060](0060-betting-axis-lock-preclose-topup.md) の「軸ロック＋ズレ増額」を実行するための
+ADR 0060 の「軸ロック＋ズレ増額」を実行するための
 decision-support であり、**終日バックグラウンドで回り続けること**が前提の運用（keiba-start Step 5）。
 両者はループ骨格 `monitor-loop`（#459 で共通化）を共有する。
 

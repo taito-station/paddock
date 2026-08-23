@@ -602,8 +602,8 @@ scripts/mdq search --q "EV 層分離" --paths "docs/original-docs/0*" --top-k 3
 
 承認済み（[#612](https://github.com/taito-station/paddock/pull/612) で実装）。
 対象 Issue: [#606](https://github.com/taito-station/paddock/issues/606)。
-関連: [ADR 0073](0073-adr-into-original-docs-and-doc-classes.md)（機械検査の導入）/
-[ADR 0077](0077-glossary-index-and-sources-scope.md)（`sources` の範囲。frontmatter を持たない
+関連: ADR 0073（機械検査の導入）/
+ADR 0077（`sources` の範囲。frontmatter を持たない
 ファイルでは `is_metadata_only_change` が構造的に効かないことを記録済み）。
 
 #### コンテキスト
@@ -789,7 +789,7 @@ setup-node の v4 → v7 で、`ci-pipeline.md` のジョブ構成の記述に�
 
 承認済み（[#614](https://github.com/taito-station/paddock/pull/614) で実装）。
 対象 Issue: [#606](https://github.com/taito-station/paddock/issues/606)（論点 B）。
-関連: [ADR 0026](0026-ocr-pdf-ci-mupdf-pin.md)（外部依存の版を固定する判断の先例）。
+関連: ADR 0026（外部依存の版を固定する判断の先例）。
 
 **採番の注記**: ADR 0081（#612・論点 A）と同じ issue の別 PR で、0081 が未マージのため
 `scripts/check-adr-numbers.sh next` はこの時点で 0081 を空きと報告する。衝突を避けるため
