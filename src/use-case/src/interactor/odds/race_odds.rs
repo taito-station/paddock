@@ -138,7 +138,9 @@ impl<O: OddsScraper, R: OddsRepository> OddsInteractor<O, R> {
 
     /// race_id のオッズを**キャッシュのみ**で返す（再スクレイプしない）。
     ///
-    /// 過去日の --overview で read-through を抑制するために使う（#624）。
+    /// `race_odds()` と異なり completeness チェックを行わないため、保存済みが一部券種のみの
+    /// 部分スナップショットでもそのまま返す。過去日の --overview で read-through を抑制する
+    /// ために使う（#624）。
     pub async fn race_odds_cached(&self, race_id: &RaceId) -> Result<Option<RaceOdds>> {
         self.repository.find_race_odds(race_id, None).await
     }
@@ -1043,5 +1045,48 @@ mod tests {
                 .is_none()
         );
         assert!(errored.repository.saved.lock().unwrap().is_empty());
+    }
+
+    // --- #624: race_odds_cached（キャッシュのみ・スクレイプなし）-----------------
+
+    #[tokio::test]
+    async fn cached_returns_preset_without_scraping() {
+        let scraper = FakeScraper::new(|_| panic!("scrape は呼ばれてはならない"));
+        let repo = FakeRepo {
+            preset: Some(odds_win_place(race_id())),
+            ..Default::default()
+        };
+        let interactor = OddsInteractor::new(scraper, repo);
+
+        let got = interactor.race_odds_cached(&race_id()).await.unwrap();
+        assert!(got.is_some_and(|o| !o.is_empty()));
+        assert_eq!(*interactor.scraper.calls.lock().unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn cached_returns_none_when_not_saved() {
+        let scraper = FakeScraper::new(|_| panic!("scrape は呼ばれてはならない"));
+        let interactor = OddsInteractor::new(scraper, FakeRepo::default());
+
+        let got = interactor.race_odds_cached(&race_id()).await.unwrap();
+        assert!(got.is_none());
+        assert_eq!(*interactor.scraper.calls.lock().unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn cached_returns_partial_snapshot_as_is() {
+        let scraper = FakeScraper::new(|_| panic!("scrape は呼ばれてはならない"));
+        let repo = FakeRepo {
+            preset: Some(odds_win_place(race_id())),
+            ..Default::default()
+        };
+        let interactor = OddsInteractor::new(scraper, repo);
+
+        let got = interactor.race_odds_cached(&race_id()).await.unwrap();
+        assert!(
+            got.is_some_and(|o| !o.is_complete()),
+            "部分スナップショットでも再スクレイプせずそのまま返す"
+        );
+        assert_eq!(*interactor.scraper.calls.lock().unwrap(), 0);
     }
 }

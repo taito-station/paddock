@@ -210,22 +210,30 @@ async fn run_race(
     // 確率テーブル・市場比較・買い目推奨・EV 診断の表示は副作用のない `render_race_prediction` に
     // 委譲する（--overview の read-only 再表示と共有・#551）。返り値の portfolio を買い目入力に使う。
     let race_cap = race_budget.min(session.balance);
-    let (portfolio, suggested) =
-        match render_race_prediction(app, race, track_condition, race_cap, explain, false).await? {
-            // 出馬表未登録（NotFound）はそのレースのみスキップ（Enter 待ちなし・現行挙動を踏襲）。
-            RaceView::NoEntries => return Ok(()),
-            // オッズ未取得はスキップのみ受付。--skip-all は Enter 待ちを省いて即次レースへ（#479）。
-            RaceView::NoOdds => {
-                if !skip_all {
-                    let _ = read_line(&mut io::stdin().lock(), "Enter で次のレースへ > ")?;
-                }
-                return Ok(());
+    let (portfolio, suggested) = match render_race_prediction(
+        app,
+        race,
+        track_condition,
+        race_cap,
+        explain,
+        /* cache_only */ false,
+    )
+    .await?
+    {
+        // 出馬表未登録（NotFound）はそのレースのみスキップ（Enter 待ちなし・現行挙動を踏襲）。
+        RaceView::NoEntries => return Ok(()),
+        // オッズ未取得はスキップのみ受付。--skip-all は Enter 待ちを省いて即次レースへ（#479）。
+        RaceView::NoOdds => {
+            if !skip_all {
+                let _ = read_line(&mut io::stdin().lock(), "Enter で次のレースへ > ")?;
             }
-            RaceView::Shown(portfolio) => {
-                let suggested: Vec<u64> = portfolio.bets.iter().map(|b| b.stake).collect();
-                (portfolio, suggested)
-            }
-        };
+            return Ok(());
+        }
+        RaceView::Shown(portfolio) => {
+            let suggested: Vec<u64> = portfolio.bets.iter().map(|b| b.stake).collect();
+            (portfolio, suggested)
+        }
+    };
 
     println!();
     // --skip-all（#479）は購入方法プロンプトを読まず s（スキップ）相当で即次レースへ。
@@ -347,8 +355,8 @@ enum RaceView {
 
 /// 1 レースの予想ビュー（過去データ視点の確率テーブル・市場implied比較・買い目推奨・期待回収率・
 /// 馬連vs馬単EV診断）を stdout に描画する。予想セッション状態（馬場保存・買い目記録・セッション更新）は
-/// 書き込まない（ただしオッズは `app.odds.race_odds` の read-through 経由で、保存済みが不完全な
-/// レースのみ再スクレイプして `race_odds` を更新しうる＝skip-all/対話と同じ副作用）。
+/// 書き込まない。オッズ取得は `cache_only` で分岐する: `false` なら `race_odds` の read-through
+/// （不完全キャッシュのみ再スクレイプ）、`true` なら `race_odds_cached`（DB キャッシュのみ・#624）。
 /// run_race（対話/--skip-all）と run_overview（--overview 再表示・#551）で表示ロジックを共有し、
 /// 重複と drift を防ぐ。`race_cap` は買い目推奨の予算上限、`track_condition` は予想に用いる馬場前提
 /// （呼び出し側が解決済み）。
@@ -490,8 +498,8 @@ async fn render_race_prediction(
 /// EV 一覧を再表示する（--overview、#551）。予想セッション状態（セッション・買い目・馬場条件）は
 /// 書き込まず、各レースの確率テーブル・買い目推奨・期待回収率を当日オッズで再計算して表示する。
 /// --skip-all の一過性 stdout を `predict_sessions` の手動 DELETE なしで見返せるようにするのが狙い。
-/// オッズは run_race と同じ read-through（`app.odds.race_odds`）で取得するため、保存済みが不完全な
-/// レースは再スクレイプして `race_odds` を更新しうる（skip-all と同じ副作用・予想セッションには非干渉）。
+/// オッズ取得は開催日で分岐する: 当日/未来日は run_race と同じ read-through（不完全キャッシュの
+/// レースのみ再スクレイプ）、過去日は `race_odds_cached`（DB キャッシュのみ・#624）。
 ///
 /// 予算上限は各レース `race_budget`（残高で絞らない）。残高がレース予算以上のセッションでは
 /// race_cap=race_budget が一致し朝の --skip-all 出力を再現するが、--budget を race_budget 未満で
