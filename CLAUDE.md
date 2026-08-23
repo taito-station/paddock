@@ -5,49 +5,42 @@
 paddock の文書は HVE（dahatake/HypervelocityEngineering, MIT）の蒸留モデルを取り入れている。
 規約の全体は [docs/knowledge/README.md](docs/knowledge/README.md)。
 
-- **3 層**: `docs/original-docs/`（RO 一次資料・生素材 ＋ **ADR**）→ `docs/qa/`（質問票+回答）→
-  `docs/knowledge/` ＋ `docs/specifications/`（status 付き確定知）。蒸留は Claude が回す。
+- **2 層**: `docs/original-docs/`（RO 一次資料・実測ログ・調査所見）＋ `docs/qa/`（質問票+回答）→
+  `docs/knowledge/` ＋ `docs/specifications/`（status 付き確定知・**決定ログ付き**）。蒸留は Claude が回す。
 - **specifications はその場で knowledge**（frontmatter: `status`/`kind`/`sources`/`distilled_from_sha`/`updated`）。
   frontmatter を付けた時点で確定知層として機能するので、移動する実利が無い。新規の横断的蒸留知は
   `docs/knowledge/` へ。
-- **ADR は一次資料層（`docs/original-docs/`）の不変の決定記録**（ADR 0073 で旧 `docs/adr/` から統合）。
-  決定を伴う変更は ADR を起票する（採番は `scripts/check-adr-numbers.sh next`）。**一度置いた ADR は
-  改変しない**——決定を変えるときは新しい ADR で supersede する。**新設した ADR は同じ PR で
-  どこかの knowledge / specifications の `sources` に載せる**（載っていない ADR は
-  orphan 検査が error にする・ADR 0083）。**載せた時点で必ず STALE が出る**ので本文コミットの後に
-  `scripts/bump-distilled-sha.py --all-stale` で追従コミットを積む。写す先が無い ADR（規約そのものを
-  定めた ADR / supersede されて下流が後継だけを見るようになった ADR）は `doc-classes.md` の
-  `adr-orphan-exceptions` 表に理由付きで登録する。**knowledge / specifications を消す・統合する
-  ときは、その文書の `sources` にある ADR を別文書へ移すか例外表に登録する**（同じ PR で）。
-- **読む入口は knowledge**。ADR の決定・理由・却下案・影響は knowledge に**全部写す**。重複を許す
-  代わりに、`sources` の更新に蒸留が追従しているかは機械検査で担保する（人手の規律に委ねない）。
-  **写しは一巡済み（#588・例外は `doc-classes.md` の `adr-orphan-exceptions` 表が正）**: 棄却された ADR は
-  [docs/knowledge/product-goals.md](docs/knowledge/product-goals.md) が索引し、採用側はいずれかの
-  knowledge / specifications が `sources` で参照している。**「全 ADR がどこかの `sources` に居る」は
-  機械検査になった**（ADR 0083。例外は `doc-classes.md` の `adr-orphan-exceptions` 表が正）ので、
-  本数を手で数えて書かない。**ただし機械が見ているのは `sources` への登録までで、本文へ写したか
-  ではない**。**粒度も一様でない**
-  ので、決定の細部（却下案・数値の前提）が要るときは **ADR 原本（`docs/original-docs/0NNN-*.md`）も読む**。
-  stale の機械検査は **error**（未解消 6 件を #580 で消化して warning から昇格）。`sources` に挙げた
-  ファイルを内容ごと変更したら、参照元の **`distilled_from_sha` を同じ PR で追従させる**（`scripts/bump-distilled-sha.py --all-stale` で一括。`updated` は触らないので実質更新の有無は自分で判断する。追従漏れは
-  CI が落とす）。`updated` は**下流の本文が実質変わったときだけ**進める（機械検査の対象外）。
+- **決定は「決定ログ」に書く**（#652。独立した ADR ファイルはもう作らない）。各 knowledge /
+  specifications の末尾に `## 決定ログ` 節があり、**新規の決定（ルール変更・実験の採用/棄却・
+  設計判断）は、その決定が効く文書の決定ログへ直接 append する**。書式は
+  `### ADR NNNN: 要約 (YYYY-MM-DD) — ステータス`（旧 ADR 由来）または `### #NNN: 要約 (YYYY-MM-DD) — ステータス`
+  （issue 番号採番の新規決定）の見出し ＋ `#### コンテキスト` / `#### 決定` / `#### 理由` /
+  `#### 却下した代替案` / `#### 影響`。**決定ログは append-only**——既存エントリは書き換えず、
+  覆すときは新エントリを積んで supersede した旨を書く（改変・削除は CI が検出する）。
+  **同じ PR で本文側も直す**（決定ログ＝いつ・なぜ決めたか、本文＝今どうなっているか）。
+- **読む入口は knowledge**。決定を辿るのも同じファイルの末尾で完結する。旧 ADR 番号（`ADR 0055` 等）の
+  参照は `git grep 'ADR 0055'` で決定ログ見出しに当たる。
+  `sources` に挙げたファイルを内容ごと変更したら、参照元の **`distilled_from_sha` を同じ PR で
+  追従させる**（`scripts/bump-distilled-sha.py --all-stale` で一括。`updated` は触らないので実質更新の
+  有無は自分で判断する。追従漏れは CI が落とす）。stale の機械検査は **error**。
+  `updated` は**下流の本文が実質変わったときだけ**進める（機械検査の対象外）。
 - **用語で迷ったら [docs/knowledge/glossary.md](docs/knowledge/glossary.md)（D07）**。`win_prob` の
   スケール・`blended` の α・`軸ロック` / `混戦` / `ながし` などの**定義の正本がどこにあるか**を引ける
-  索引で、定義そのものは各仕様書・ADR・本ファイルが持つ。
-- **`docs/original-docs/` の命名は 2 系統**: ADR = **0 埋め 4 桁**（`0055-...`）/ issue 由来の一次資料 =
-  **issue 番号・0 埋めしない**（`382-...`）。これが ADR 番号重複検出の判定根拠なので破らない。
+  索引で、定義そのものは各仕様書・本ファイルが持つ。
+- **`docs/original-docs/` の命名は issue 番号・0 埋めしない**（`382-...`）。置くのは転記できないもの
+  ——実測ログ・調査時点のコード所見・外部サイトの挙動観察。GitHub Issue 本文は転記しない（ADR 0074）。
 - **status**: `Confirmed`（運用の前提にしてよい）/ `Tentative`（暫定）/ `Conflict`（矛盾・放置せず解消）。
 - **文書クラス**: knowledge/specifications は frontmatter に `doc_class`（+ mdq 用ミラーの `tags`）を持つ。
   定義の正本は [docs/knowledge/doc-classes.md](docs/knowledge/doc-classes.md)（HVE の D01〜D21 ＋ paddock 固有の
   D22 予測モデル / D23 買い方 / D24 実験・棄却証跡）。`scripts/mdq search --tags D23` でクラス絞り込みができる。
-  整合は `scripts/check-doc-classes.py` が CI と pre-push で検査する（本文の相対リンクの実在、`doc-classes.md` の割当索引との 1 対 1 突合、**REQ 表の `出典` が `sources` にも載っているか**、**どの `sources` からも参照されない ADR の検出**——いずれも error）。**knowledge / specifications を 1 本足す・消す・`doc_class` を変えるときは、同じ PR で `doc-classes.md` のクラス一覧の「現行」列と割当索引も直す**。
+  整合は `scripts/check-doc-classes.py` が CI と pre-push で検査する（本文の相対リンクの実在、`doc-classes.md` の割当索引との 1 対 1 突合、**REQ 表の `出典` が `sources` にも載っているか**——いずれも error）。**決定ログの append-only 性は `scripts/check-decision-log-immutability.py`** が同じ経路で検査する（既存エントリの改変・削除は error）。**knowledge / specifications を 1 本足す・消す・`doc_class` を変えるときは、同じ PR で `doc-classes.md` のクラス一覧の「現行」列と割当索引も直す**。
 - **探索規律 — 生読み前に mdq 検索**: docs 内の答えを探すときは、まず
   `scripts/mdq search --q "..."`（BM25・ローカル・[.claude/skills/markdown-query/SKILL.md](.claude/skills/markdown-query/SKILL.md)）
   でヒットチャンクだけ取り、必要時のみ生ファイルへ。コード探索は従来通り serena（`mcp__serena__*`）。
   索引 `.mdq/` は gitignore・セッション毎に `scripts/mdq index` で再ビルド（初回は
   `python3 -m venv tools/mdq/.venv && tools/mdq/.venv/bin/pip install -r tools/mdq/requirements.txt`）。
-  **ADR 統合（ADR 0073）より前の索引を持つ環境は一度だけ `rm -rf .mdq && scripts/mdq index`**
-  で作り直す。増分の prune は roots 配下しか消さないため、旧 `docs/adr/*` のチャンクが居残って
+  **ADR 廃止（#652）より前の索引を持つ環境は一度だけ `rm -rf .mdq && scripts/mdq index`**
+  で作り直す。増分の prune は roots 配下しか消さないため、削除済み ADR のチャンクが居残って
   存在しないパスが検索結果に出続ける。
 
 ## DB 運用
