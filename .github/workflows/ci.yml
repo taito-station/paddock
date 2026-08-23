@@ -170,9 +170,8 @@ jobs:
       - name: Build (vite)
         run: npm run build
 
-  # ADR 番号（docs/original-docs/0NNN-*.md）の重複検出（#254）。並行クローン/worktree 運用で番号が
-  # 二重取得される事故（#251 と #253 が同時に 0040 採番）の再発防止。Rust/Postgres 不要の
-  # 軽量チェックなので独立ジョブにして並列で即終わらせる（ci / ocr-pdf には影響させない）。
+  # 文書クラスと sources 追従の検査（ADR 0073）。Rust/Postgres 不要の軽量チェックなので
+  # 独立ジョブにして並列で即終わらせる（ci / ocr-pdf には影響させない）。
   # ジョブ ID `adr` は ruleset #461 の必須チェック名なので改名しない（下の docker-build の
   # コメント参照。改名すると status 未報告で全 PR がブロックされる）。
   adr:
@@ -185,28 +184,25 @@ jobs:
           # shallow だと distilled_from_sha の解決が全件失敗し、その文書の stale 判定が丸ごと
           # スキップされる（実測。shallow は warning に落とす作りなので exit 0 のまま通る）。
           fetch-depth: 0
-      # 判定器の健全性を先に確認する。本番検査が落ちたときに「ADR が本当に重複しているのか、
+      # 判定器の健全性を先に確認する。本番検査が落ちたときに「文書が本当に不整合なのか、
       # 判定器が壊れているのか」を切り分けられるようにするため（本番検査を先に置くと、それが
       # 落ちた時点でジョブが止まり判定器のシグナルを同時に失う）。
-      # ADR 0073 で fail-closed 化した分岐（0 埋め忘れ / ADR 0 件 / 旧 docs/adr の復活 /
-      # サブディレクトリ配置）は壊れると「黙って緑」に退化し、本番の docs/original-docs は
-      # 正常なので気づけない。使い捨て fixture で各分岐の終了コードと文言を固定する。
-      - name: Regression test for check-adr-numbers.sh (ADR 0073)
-        run: bash scripts/test-check-adr-numbers.sh
       - name: Regression test for check-doc-classes.py (ADR 0073)
         run: python3 scripts/test-check-doc-classes.py
       # frontmatter を書き換える道具なので、fail-open（checker の失敗を「STALE 無し」と誤報）と
       # 誤書き換え（frontmatter 外・途中 abort）の経路を fixture で固定する（#604）。
       - name: Regression test for bump-distilled-sha.py (#604)
         run: python3 scripts/test-bump-distilled-sha.py
-      - name: Check ADR number duplicates (#254)
-        run: bash scripts/check-adr-numbers.sh
       # 文書クラスと sources 追従の検査（ADR 0073 決定 2・3）。上の checkout の fetch-depth: 0 が
       # 前提（shallow だと `distilled_from_sha` を解決できず、全文書の stale 判定が warning に
       # 退化して丸ごと飛ぶ）。
       # stale は **error**（移設以前から累積していた未解消 6 件を #580 で消化し warning から昇格）。
+      - name: Regression test for check-decision-log-immutability.py (#652)
+        run: python3 scripts/test-check-decision-log-immutability.py
       - name: Check document classes / sources (ADR 0073)
         run: python3 scripts/check-doc-classes.py
+      - name: Check decision log immutability (#652)
+        run: python3 scripts/check-decision-log-immutability.py
 
   # stdlib のみの Python テストを ubuntu-latest 同梱の python3 で走らせる軽量ジョブ（#416 / #464）。
   # 対象は 2 群:

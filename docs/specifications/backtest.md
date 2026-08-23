@@ -5,11 +5,6 @@ status: Confirmed
 kind: knowledge
 doc_class: [D24, D17, D19]
 tags: [D24, D17, D19]
-sources:
-  - docs/original-docs/0006-backtest-evaluation.md
-  - docs/original-docs/0002-probability-estimation.md
-  - docs/original-docs/0003-ev-kelly-bet-selection.md
-distilled_from_sha: "f765be7"
 updated: "2026-08-12"
 ---
 
@@ -312,3 +307,200 @@ LogLoss (win)       : 0.2841
 - as-of カットオフは `races.date`（開催日）に依存する。同一開催日内のレース順序（R 番号）までは
   考慮せず、同日レースは相互に統計へ寄与しない（D 当日を一律除外）。これはリーク回避を優先した意図的な
   割り切りで、本番 predict（`as_of=None`・全期間）とはこの点だけ条件が非対称になる。
+
+---
+
+## 決定ログ
+
+<!-- この節は append-only です。既存エントリの変更・削除は CI が検出します。 -->
+
+### ADR 0002: 着順確率推定モデルの実装 (Issue #11) (2026-06-04) — 承認済み
+
+#### コンテキスト
+Issue #11 で、DB に蓄積された過去成績をもとに出走馬ごとの 1 着・2 着・3 着確率を
+推定するモデルが求められた。
+
+既存のスタッツ基盤（`horse_stats` / `course_stats` / `jockey_stats`）はすでに実装済みで、
+枠順・芝ダ・距離帯・騎手別の勝率・連対率は取得可能である。ただし複勝率（3 着以内）は
+保持していない。
+
+Issue 本文に「精密さより動くことを優先」とあり、機械学習ではなくルールベーススコアリングで十分。
+
+#### 決定
+
+1. **ルールベーススコアリングを Domain 層に実装する。**  
+   `paddock_domain::prediction` モジュールを新設し、`HorseProbability` 型と
+   `estimate_probabilities` 純粋関数を置く。IO なし・テスト容易な設計にする。
+
+2. **`GroupStat` に `shows: u32`（複勝カウント）を追加する。**  
+   既存の `places`（連対カウント、top-2）に加え `shows`（複勝カウント、top-3）を追加する。
+   スキーマ変更ではなく既存クエリへの集計カラム追加で対応する。
+
+3. **スコアリング重みは固定値とする。**  
+   `course_gate_rate(×2) + horse_surface_rate(×1) + horse_distance_rate(×1) + jockey_surface_rate(×1)`  
+   `course_gate_rate` を 2 倍にする理由: 会場・距離・馬場・枠順の組み合わせは個別レースへの適合度が最も直接的で信頼度が高いため。  
+   チューニングより動くことを優先し、パラメータ化は行わない。
+
+4. **`find_race_card(race_id)` を Repository に追加する。**  
+   `predict_race` ユースケースは race_id を受け取り DB からエントリを取得する。
+   CLI 引数でエントリを逐一渡す方式は操作性が低いため採用しない。
+
+5. **`analyze` アプリに `predict <race_id>` サブコマンドを追加する。**  
+   既存の `horse` / `course` / `jockey` サブコマンドと同列に配置する。
+
+#### 理由
+
+- 純粋関数として Domain 層に置くことで、ユニットテストが外部依存なしで書ける
+- `GroupStat` への `shows` 追加は破壊的変更だが、変更箇所が repository 実装に局所化しており、
+  コンパイラが変更漏れを全て検出する
+- `find_race_card` は既存の `save_race_card` と対をなす自然な拡張であり、
+  リポジトリトレイトのセマンティクスを壊さない
+
+#### 影響
+
+- `GroupStat` の全コンストラクタと SQL クエリを更新する必要がある
+  （horse_stats × 6 パターン、course_stats × 1 パターン、jockey_stats × 3 パターン）
+- `shows` フィールドは `predict` ユースケース以外では即座には参照されない。将来 `print_section` で複勝率を表示する際に自然に解消する
+- 複勝率カラムは既存の `print_section` 出力には含めない（stats 表示の変更はスコープ外）
+- 確率値はあくまで参考値であり、オッズ等他の情報と組み合わせて使うことを想定する
+
+### ADR 0003: 期待値計算・買い目選択・Kelly 配分の実装 (Issue #12) (2026-06-04) — 提案中
+
+#### コンテキスト
+Issue #12 で、推定確率とオッズから期待値（EV）を計算し、馬連重視で買い目を選択、
+Kelly 基準で賭け額を決定するロジックが求められた。
+
+Issue #11 で `estimate_probabilities` が Domain 層に実装済みであり、`RaceOdds` 型も存在する。
+これらを組み合わせて、CLIから呼び出せる形で EV・Kelly 計算を提供する必要がある。
+
+#### 決定
+
+1. **Domain 層に `betting` モジュールを新設する。**  
+   `src/domain/src/betting/mod.rs` に `BettingConfig`、`BetCombination`、`BettingRecommendation` 型と
+   `select_bets` 純粋関数を置く。IO なし・状態なし・テスト容易な設計。
+
+2. **組み合わせ確率は Harville 公式で近似する。**  
+   単一馬の `win_prob` から多頭組み合わせ確率を導出する。精度より実装の単純さを優先する。
+   複雑な統計モデル（Plackett-Luce 等）は将来の改善余地として残す。
+
+3. **EV 閾値は馬券種ごとに設定可能にする。**  
+   三連単は還元率が低く分散が大きいため、デフォルト 2.0 とより高い閾値を設ける。
+   他の馬券種はデフォルト 1.0（理論的プラス期待値）。
+
+4. **Kelly 計算は「簡易版 + キャップ」を採用する。**  
+   `f = (p × b − q) / b` を計算し `[0.0, kelly_cap]` にクランプする。
+   フルケリーは過剰リスクになるため、デフォルト上限 0.25（資金の 25%）を設ける。
+
+5. **馬連優先ソートを固定する。**  
+   馬連 > 馬単 > 三連複 > 単勝 > 複勝 > 三連単（最後尾・優先度 5）の順。  
+   三連単は EV > trifecta_ev_threshold を満たした場合のみ候補に追加し、常に最後尾に表示する。  
+   この優先順位は Issue #12 本文に明記されており、パラメータ化しない。
+
+#### 理由
+
+- Domain 層の純粋関数として実装することで、use-case/apps 側が依存関係なく呼び出せる
+- Harville 公式は単純だが、ルールベーススコアリング（Issue #11）と同程度の精度水準に合致する
+- Kelly キャップを設けることで、確率推定誤差が大きい場合でも過大な賭け額を防ぐ
+- `BetCombination` enum で馬券種と組み合わせを一体管理し、型安全性を高める
+
+#### 影響
+
+- `src/domain/src/lib.rs` に `betting` モジュールの re-export を追加する
+- 将来の `predict` バイナリ（Issue #13）は `select_bets` を呼び出す主要なコンシューマとなる
+- Harville 公式の精度限界により、EV > 1.0 が実際のプラス期待値を保証しないことをドキュメントに明記する
+
+### ADR 0006: 予想精度のバックテスト/評価基盤 (Issue #30) (2026-06-08) — 提案中
+
+#### コンテキスト
+確率推定 (`paddock_domain::prediction`) や買い目選択 (EV/Kelly, ADR 0003/0005) を変更しても、
+その良し悪しを定量比較する手段が無い。過去の `races`/`results` に対して予想ロジックを再現し、
+予測と実着順を突合して的中率・回収率・キャリブレーション指標を算出する**バックテスト基盤**を
+追加する。これは特徴量拡充 (#31)・品質改善 (#32) の before/after 比較の土台であり、予想ロジック
+強化トラックの最優先と位置づける。
+
+##### 核心的な課題: データリーク
+
+現状の `horse_stats` / `course_stats` / `jockey_stats` (rdb-gateway) は**日付フィルタ無しで全
+`results` を集計**する。レース日 D のレースを評価する際、D 当日・D 以降の結果まで統計に混入すると、
+「未来の情報で過去を予測する」データリークになり、評価が過大になる。
+
+評価のために検討した選択肢:
+
+- **案A（as-of 日付カットオフ・walk-forward）**: 各評価レースについて「レース日 D より厳密に前
+  (`races.date < D`) の成績のみ」で統計を再計算する。レート集計モデルは非パラメトリックで別途の
+  学習フェーズを持たないため、リーク防止 = 統計の as-of カットオフで成立する。
+- **案B（固定の train/test 期間分割）**: 期間を train/test に二分し、train 期間の統計で test 期間を
+  予測する。実装は単純だが、test 期間の後半レースは古い統計しか使えず、本番の予想 (常に直近まで
+  の統計を使う) と条件が乖離する。
+
+オッズ再現について: ADR 0005 で `race_odds` の DB 永続化は撤去済みのため、過去のオッズはスクレイパー
+では再現できない。一方 `results.odds`（成績取り込み時に記録された確定オッズ）はテーブルに存在する。
+
+#### 決定
+**案A（as-of 日付カットオフ・walk-forward）を採用する。**
+
+1. **既存 stats メソッドに `as_of: Option<NaiveDate>` を通す単一コードパス方式**を取る。
+   `Repository::horse_stats` / `course_stats` / `jockey_stats` に `as_of` 引数を追加し、
+   - `Some(d)` のとき各集計 SQL に `races.date < $d` を付与する（D 当日も除外し未来リークを断つ）。
+     `races` を JOIN していない `FROM results` 単独のクエリ（horse の overall / popularity / 枠順、
+     jockey の overall / 枠順）は `INNER JOIN races` を足して日付で絞る。`by_surface` / `by_distance_band` /
+     course 枠順は既に `races` を JOIN 済み。`as_of` を 1 メソッドに通す単一コードパスを保つため、その
+     メソッドが返す全サブ統計に一貫してカットオフを掛ける。
+   - 本番 predict (`predict_race`) と analyze の horse/course/jockey コマンドは `None` を渡し、
+     従来どおり全期間集計のまま（後方互換・コードパス重複なし）。
+2. **過去レース取得用に `Repository::find_finished_races_between(from, to)` を新設**する。
+   `source='pdf'` かつ `finishing_position` を持つ確定済みレースを results 付きで返す。
+   出馬表 (`find_race_card`) ではなく `results` から `HorseEntry` を復元するため、出馬表が
+   無い過去レースもバックテストできる。
+3. **指標計算は domain の純粋ロジック `paddock_domain::backtest` に置く**。IO を持たず、
+   予測 (`HorseProbability`) と実着順から指標を計算する純粋関数として単体テスト可能にする。
+4. **オーケストレーションは `interactor::race::backtest`** に置く。期間内レースを取得し、
+   各レースで `as_of=Some(race.date)` の factors を組んで `estimate_probabilities` を再現し、
+   実着順と突合する。factors 構築 (`build_factors`) は `predict.rs` と共有する。
+5. **CLI は `analyze backtest --from YYYY-MM-DD --to YYYY-MM-DD`** で実行する。
+6. **回収率は `results.odds`** を用いる。オッズ欠落レースは回収率の母数から除外し、その他の指標
+   （的中率・Brier・LogLoss）は算出する。
+
+##### 指標
+
+| 指標 | 定義 |
+|-----|-----|
+| 単勝的中率 | (win_prob 最大の馬が 1 着のレース数) / 評価レース数 |
+| 連対的中率 | 同馬が 2 着以内のレース数 / 評価レース数 |
+| 複勝的中率 | 同馬が 3 着以内のレース数 / 評価レース数 |
+| 想定回収率 | Σ payout / Σ stake。各レース 100 円を win_prob 最大馬の単勝に賭け、1 着なら `payout = odds×100`、他は 0。`results.odds` が取れるレースのみ母数 |
+| Brier (win) | mean((win_prob − y)²)、y=1 if 1 着。全馬エントリ単位 |
+| LogLoss (win) | −mean(y·ln p + (1−y)·ln(1−p))。p は `[ε, 1−ε]`（ε=1e-15）にクランプして ln(0) を回避 |
+
+> Brier/LogLoss は、レース内 Σ=1.0 に正規化された `win_prob`（各馬が 1 着になる周辺確率）の較正を、
+> 各馬の単勝的中を独立な二値事象とみなして全馬エントリ単位で測る。レース全体の同時分布に対する
+> 多クラス LogLoss（`−ln p_winner`）ではない。#31/#32 の before/after を同一定義で一貫比較できれば
+> 足りるため、解釈の容易な二値較正を採る。詳細・限界は設計書「指標」「既知の制約」を参照。
+
+#### 理由
+- 案A は本番予想（常に直近までの統計を使う）と評価条件が一致し、各レースで「その時点で得られた
+  情報のみ」を使う walk-forward により評価のリアリズムが高い。案B の固定分割は実装こそ単純だが、
+  本番と乖離した条件で測ってしまう。
+- `as_of: Option` を既存メソッドに通す方式は、`*_as_of` を別実装するより SQL 重複が無く、本番側は
+  `None` で完全後方互換。リーク防止という横断関心を 1 箇所（日付述語）に閉じ込められる。
+- 指標を domain の純粋関数に置くことで、DB を伴わず既知入力で期待値を単体テストでき、#31/#32 の
+  before/after 比較に安定して使える。
+- オッズは `results.odds` を使うことで、撤去済みの `race_odds` 永続化（ADR 0005 案B）を蒸し返さずに
+  回収率を概算できる。
+
+#### 影響
+- `Repository` トレイトの stats 3 メソッドのシグネチャが変わり、全 impl（rdb-gateway）と全呼び出し側
+  （predict / horse / course / jockey interactor）に `as_of` 引数の追加・`None` 受け渡しが波及する。
+- `results.odds` が未取り込みのレースが多い場合、回収率の母数が小さくなる（的中率・キャリブレーション
+  指標は全評価レースで算出可能）。設計書「既知の制約」に明記する。
+- バックテストは「statsは全 `results` を横断集計する」前提に乗るため、netkeiba 由来の近走
+  (`source='netkeiba'`、過去日付の合成レース) も as-of 統計に含まれる。評価対象レース自体は
+  `find_finished_races_between` が `source='pdf'` で絞る。
+- 単調性 (`win ≤ place ≤ show`) 非保証や騎手なしペナルティ等、確率推定側の既知制約 (ADR 0002) は
+  バックテストの結果にもそのまま現れる。バックテストはそれらの改善 (#32) の効果測定に使う。
+
+#### 関連
+- ADR 0002（着順確率推定モデル, #11）— 評価対象のロジック
+- ADR 0003（EV/Kelly 買い目選択, #12）/ ADR 0005（オッズ結線, #25）— 将来の回収率評価対象
+- 設計書 `docs/specifications/backtest.md`
+- 設計書 `docs/specifications/probability-estimation.md`
