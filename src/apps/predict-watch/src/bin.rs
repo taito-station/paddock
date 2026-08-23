@@ -1,4 +1,5 @@
 mod cli;
+mod notify;
 mod setup;
 mod snapshot;
 mod watch;
