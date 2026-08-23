@@ -210,22 +210,30 @@ async fn run_race(
     // 確率テーブル・市場比較・買い目推奨・EV 診断の表示は副作用のない `render_race_prediction` に
     // 委譲する（--overview の read-only 再表示と共有・#551）。返り値の portfolio を買い目入力に使う。
     let race_cap = race_budget.min(session.balance);
-    let (portfolio, suggested) =
-        match render_race_prediction(app, race, track_condition, race_cap, explain).await? {
-            // 出馬表未登録（NotFound）はそのレースのみスキップ（Enter 待ちなし・現行挙動を踏襲）。
-            RaceView::NoEntries => return Ok(()),
-            // オッズ未取得はスキップのみ受付。--skip-all は Enter 待ちを省いて即次レースへ（#479）。
-            RaceView::NoOdds => {
-                if !skip_all {
-                    let _ = read_line(&mut io::stdin().lock(), "Enter で次のレースへ > ")?;
-                }
-                return Ok(());
+    let (portfolio, suggested) = match render_race_prediction(
+        app,
+        race,
+        track_condition,
+        race_cap,
+        explain,
+        /* cache_only */ false,
+    )
+    .await?
+    {
+        // 出馬表未登録（NotFound）はそのレースのみスキップ（Enter 待ちなし・現行挙動を踏襲）。
+        RaceView::NoEntries => return Ok(()),
+        // オッズ未取得はスキップのみ受付。--skip-all は Enter 待ちを省いて即次レースへ（#479）。
+        RaceView::NoOdds => {
+            if !skip_all {
+                let _ = read_line(&mut io::stdin().lock(), "Enter で次のレースへ > ")?;
             }
-            RaceView::Shown(portfolio) => {
-                let suggested: Vec<u64> = portfolio.bets.iter().map(|b| b.stake).collect();
-                (portfolio, suggested)
-            }
-        };
+            return Ok(());
+        }
+        RaceView::Shown(portfolio) => {
+            let suggested: Vec<u64> = portfolio.bets.iter().map(|b| b.stake).collect();
+            (portfolio, suggested)
+        }
+    };
 
     println!();
     // --skip-all（#479）は購入方法プロンプトを読まず s（スキップ）相当で即次レースへ。
@@ -347,8 +355,8 @@ enum RaceView {
 
 /// 1 レースの予想ビュー（過去データ視点の確率テーブル・市場implied比較・買い目推奨・期待回収率・
 /// 馬連vs馬単EV診断）を stdout に描画する。予想セッション状態（馬場保存・買い目記録・セッション更新）は
-/// 書き込まない（ただしオッズは `app.odds.race_odds` の read-through 経由で、保存済みが不完全な
-/// レースのみ再スクレイプして `race_odds` を更新しうる＝skip-all/対話と同じ副作用）。
+/// 書き込まない。オッズ取得は `cache_only` で分岐する: `false` なら `race_odds` の read-through
+/// （不完全キャッシュのみ再スクレイプ）、`true` なら `race_odds_cached`（DB キャッシュのみ・#624）。
 /// run_race（対話/--skip-all）と run_overview（--overview 再表示・#551）で表示ロジックを共有し、
 /// 重複と drift を防ぐ。`race_cap` は買い目推奨の予算上限、`track_condition` は予想に用いる馬場前提
 /// （呼び出し側が解決済み）。
@@ -358,6 +366,7 @@ async fn render_race_prediction(
     track_condition: Option<TrackCondition>,
     race_cap: u64,
     explain: bool,
+    cache_only: bool,
 ) -> anyhow::Result<RaceView> {
     // 確率は 2 視点で取る（#272 確率分離）。順位付け（軸/相手）は blended（市場ブレンド・解像度が
     // 高い）、EV は pure（純モデル α=1.0・市場非依存）で計算し EV=P_blended×odds の循環を断つ。
@@ -405,7 +414,13 @@ async fn render_race_prediction(
     }
 
     // オッズ未取得（None）はスキップのみ受付。OddsInteractor が都度ライブスクレイプし、未公開は None に畳む。
-    let Some(odds) = app.odds.race_odds(&race.race_id).await? else {
+    // 過去日の --overview（cache_only）は再スクレイプせずキャッシュのみを見る（#624）。
+    let odds_result = if cache_only {
+        app.odds.race_odds_cached(&race.race_id).await?
+    } else {
+        app.odds.race_odds(&race.race_id).await?
+    };
+    let Some(odds) = odds_result else {
         println!();
         println!("オッズ未取得 — このレースはスキップします");
         return Ok(RaceView::NoOdds);
@@ -483,8 +498,8 @@ async fn render_race_prediction(
 /// EV 一覧を再表示する（--overview、#551）。予想セッション状態（セッション・買い目・馬場条件）は
 /// 書き込まず、各レースの確率テーブル・買い目推奨・期待回収率を当日オッズで再計算して表示する。
 /// --skip-all の一過性 stdout を `predict_sessions` の手動 DELETE なしで見返せるようにするのが狙い。
-/// オッズは run_race と同じ read-through（`app.odds.race_odds`）で取得するため、保存済みが不完全な
-/// レースは再スクレイプして `race_odds` を更新しうる（skip-all と同じ副作用・予想セッションには非干渉）。
+/// オッズ取得は開催日で分岐する: 当日/未来日は run_race と同じ read-through（不完全キャッシュの
+/// レースのみ再スクレイプ）、過去日は `race_odds_cached`（DB キャッシュのみ・#624）。
 ///
 /// 予算上限は各レース `race_budget`（残高で絞らない）。残高がレース予算以上のセッションでは
 /// race_cap=race_budget が一致し朝の --skip-all 出力を再現するが、--budget を race_budget 未満で
@@ -518,8 +533,14 @@ pub async fn run_overview(
     // 一覧の判定時刻は 1 回だけ取る（行ごとに時刻が動くと下の注記と食い違うため）。
     warn_if_not_jst_now("発走状態");
     let now = Local::now().naive_local();
+    // 開催日が過ぎていれば全レース発走済み＝市場は締まっている。read-through の再スクレイプは
+    // 無意味な netkeiba アクセスになるため、過去日はキャッシュのみで表示する（#624）。
+    let cache_only = matches!(meeting_phase(date, now.date()), MeetingPhase::Over);
 
     print_overview_header(&date_str, &races, &post_times, date, now);
+    if cache_only {
+        println!("{}", cache_only_notice());
+    }
     for race in &races {
         println!();
         // 発走判定は race.date、注記と不変条件チェックは --date が基準。races_by_date が
@@ -542,7 +563,9 @@ pub async fn run_overview(
             None => println!("馬場状態: 不明"),
         }
         // race_cap は残高で絞らない（セッション非依存の再表示のため）。表示結果は破棄する。
-        let _ = render_race_prediction(app, race, track_condition, race_budget, explain).await?;
+        let _ =
+            render_race_prediction(app, race, track_condition, race_budget, explain, cache_only)
+                .await?;
     }
     if let Some(footer) = overview_footer(date, now, Local::now().naive_local()) {
         println!();
@@ -1026,6 +1049,11 @@ fn overview_note(date: NaiveDate, now: NaiveDateTime) -> String {
     phase_note(meeting_phase(date, now.date()), Some(now))
 }
 
+/// 過去日の --overview でオッズがキャッシュのみであることを示す注記（#624・テスト対象）。
+fn cache_only_notice() -> &'static str {
+    "（過去日のため、オッズは保存済みキャッシュのみを表示します）"
+}
+
 /// EV 一覧のヘッダ（見出し行＋注記）の行並び（#587・テスト対象）。
 fn overview_header_lines(
     date_str: &str,
@@ -1227,11 +1255,11 @@ fn read_u64<R: BufRead>(
 #[cfg(test)]
 mod tests {
     use super::{
-        is_started_at, make_bet_record, may_record_race, overview_footer, overview_header_lines,
-        overview_note, prompt_record_started_race, race_heading, race_heading_for_day, read_choice,
-        read_edited_amounts, read_track_condition, read_u64, resolve_track_condition_default,
-        result_before_post_count, result_before_post_warning, session_note,
-        started_race_record_notice, started_state_for_day,
+        cache_only_notice, is_started_at, make_bet_record, may_record_race, overview_footer,
+        overview_header_lines, overview_note, prompt_record_started_race, race_heading,
+        race_heading_for_day, read_choice, read_edited_amounts, read_track_condition, read_u64,
+        resolve_track_condition_default, result_before_post_count, result_before_post_warning,
+        session_note, started_race_record_notice, started_state_for_day,
     };
     use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
     use paddock_domain::horse_result::HorseNum;
@@ -1399,6 +1427,12 @@ mod tests {
             overview_note(race_date(), day_before),
             "※ この開催はまだ実施されていません（全レース未発走）"
         );
+    }
+
+    #[test]
+    fn cache_only_notice_is_non_empty() {
+        assert!(!cache_only_notice().is_empty());
+        assert!(cache_only_notice().contains("過去日"));
     }
 
     #[test]

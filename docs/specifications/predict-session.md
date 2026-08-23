@@ -5,7 +5,7 @@ status: Confirmed
 kind: knowledge
 doc_class: [D11, D19, D08]
 tags: [D11, D19, D08]
-updated: "2026-08-16"
+updated: "2026-08-23"
 ---
 
 # predict バイナリ: 対話型レーシングセッション
@@ -324,7 +324,7 @@ struct SessionState {
 ```
 src/apps/predict
     → paddock-use-case  (Interactor 経由: predict_race / races_by_date)
-    → paddock-use-case  (OddsInteractor 経由: race_odds — 都度ライブスクレイプ)
+    → paddock-use-case  (OddsInteractor 経由: race_odds / race_odds_cached)
     → paddock-domain    (App 層が直接呼ぶ純粋関数: select_bets)
     → netkeiba-scraper  (OddsScraper 実装 UreqNetkeibaScraper を OddsInteractor に注入, ADR 0048)
     → rdb-gateway       (Repository 実装を Interactor に注入)
@@ -334,7 +334,7 @@ src/apps/predict
 呼び出し責務を明確化する:
 
 - **確率推定・レース一覧**（IO を伴う）は **Use-Case の Interactor 経由**で呼ぶ
-- **オッズ取得**（IO を伴う）は **Use-Case の `OddsInteractor` 経由**で呼ぶ（都度スクレイプ・キャッシュなし）
+- **オッズ取得**（IO を伴う）は **Use-Case の `OddsInteractor` 経由**で呼ぶ。`race_odds`（read-through: キャッシュが不完全なら再スクレイプ）と `race_odds_cached`（DB キャッシュのみ・再スクレイプしない）の 2 メソッドがあり、`--overview` は過去日（`MeetingPhase::Over`）で後者を使う（#624）
 - **`select_bets`**（IO なしの純粋関数）は **App 層（`session.rs`）が `paddock-domain` から直接呼ぶ**。Use-Case にラッパーを置かない（薄い委譲を増やさないため）
   - 実シグネチャは全引数が参照: `select_bets(probabilities: &[HorseProbability], race_odds: &RaceOdds, config: &BettingConfig) -> Vec<BettingRecommendation>`。呼び出しは `select_bets(&probs, &odds, &BettingConfig::default())`
 
@@ -1016,3 +1016,41 @@ ADR 0085 の決定 2「除外ではなく区別」を**維持したまま**、
   [#179](https://github.com/taito-station/paddock/issues/179)（EOF を安全側へ畳む）
 - ADR 0064（判定ロジックの second source を作らない）
 - [docs/qa/QA-started-race-record-confirm-623.md](../qa/QA-started-race-record-confirm-623.md)
+
+### #624: --overview の過去日で read-through を抑制する (2026-08-23) — 承認済み
+
+#### ステータス
+
+承認済み（[#624](https://github.com/taito-station/paddock/issues/624)）。
+
+#### コンテキスト
+
+`paddock-predict --overview` は全レースで `OddsInteractor::race_odds`（read-through）を呼ぶ。
+キャッシュが不完全な券種があると netkeiba を再スクレイプするが、過去日の再スクレイプは
+無意味な外部アクセスであり、35 鞍のような大量の見返しでは IP ブロックのリスクもある。
+
+一方、当日の発走直後レースは最終オッズを取り込む価値があるため、一律に止めてはいけない。
+
+#### 決定
+
+1. `OddsInteractor` に `race_odds_cached`（DB キャッシュのみ返す・再スクレイプしない）を追加。
+2. `render_race_prediction` に `cache_only: bool` パラメータを追加。
+3. `run_overview` で `MeetingPhase::Over`（開催日が過去）のときだけ `cache_only = true` を渡す。
+4. 当日（`MeetingPhase::Today`）・未来日（`MeetingPhase::Ahead`）は従来どおり read-through。
+
+#### 理由
+
+- 日付軸の判定は既存の `MeetingPhase` enum を再利用し、second source を作らない（ADR 0064）。
+- 当日の発走直後レースも read-through を維持することで、確定オッズの取り込みを妨げない。
+
+#### 却下した代替案
+
+- **レース単位で発走済みかどうかを見て抑制する案**: 当日発走直後の確定オッズ取り込みを
+  止めてしまうため不採用。
+- **全日一律でキャッシュのみにする案**: 当日の read-through まで止まるため不採用。
+
+#### 影響
+
+- 過去日に一過性のスクレイプ失敗で保存された不完全なスナップショットは、`--overview` で
+  自己修復されなくなる（read-through パスが使われなくなるため）。意図的な割り切り。
+- `run_race`（対話/--skip-all）は常に read-through のため影響なし。
