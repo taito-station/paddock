@@ -12,7 +12,7 @@ sources:
   - docs/qa/QA-prefetch-lock-651.md
   - docs/original-docs/584-predict-watch-notification.md
   - docs/qa/QA-predict-watch-notify-584.md
-distilled_from_sha: "6935ef8"
+distilled_from_sha: "4357b41"
 updated: "2026-08-23"
 ---
 
