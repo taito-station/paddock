@@ -1090,6 +1090,17 @@ def main(argv: list[str]) -> int:
                     report_unclosed=True,
                 )
 
+    # src/ 配下に .md を置くと check-doc-classes の全検査をすり抜ける（#635/#638）。
+    # golden 等のデータファイルは .txt で置き、説明はコードコメントか docs/ に書く。
+    src_dir = root / "src"
+    stray_md = sorted(
+        p.relative_to(root).as_posix()
+        for p in (src_dir.rglob("*.md") if src_dir.is_dir() else ())
+        if p.is_file()
+    )
+    for s in stray_md:
+        errors.append(f"{s}: src/ 配下の Markdown は検査対象外。説明はコードコメントか docs/ に置く（#635/#638）")
+
     for extra in EXTRA_LINK_TARGETS:
         path = root / extra
         if path.is_file():

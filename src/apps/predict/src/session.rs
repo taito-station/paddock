@@ -1320,9 +1320,13 @@ mod tests {
         );
     }
 
-    /// 生成側（Rust）と解析側（Python）が同じ見出しを見ていることを固定する golden（#587）。
-    /// `include_str!` なのでファイルが消えればコンパイルが通らない。詳細は
-    /// `src/apps/predict/testdata/README.md`。
+    /// 生成側（Rust `race_heading`）と解析側（Python `pred_header.py`）が同じ見出しを
+    /// 見ていることを固定する golden（#587）。`include_str!` は crate 外を参照できない
+    /// ため golden は crate 内（`testdata/`）に置く（ADR 0085）。見出しパースの失敗は
+    /// サイレント（0 件を返すだけ）なので、regex の一致だけでは Rust↔Python のズレを
+    /// 捕まえられない——この golden が唯一の言語横断契約。
+    /// 変更時は `race_heading` / `pred_header_samples.txt` / `test_pred_header.py` を
+    /// 同じ PR で触ること（行セマンティクスは `docs/specifications/predict-session.md`）。
     const HEADER_GOLDEN: &str = include_str!("../testdata/pred_header_samples.txt");
 
     #[test]

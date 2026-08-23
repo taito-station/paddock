@@ -27,8 +27,11 @@ HEADER_NUM_VENUE = r"--- レース (\d+): (\S+) \S+ \d+m[^\n]*---"
 # 各スクリプトが持つ厳密な行 regex を置き換えるものではない。
 RACE_ROW = re.compile(r"^\s*\d+\s+\S+\s+[\d.]+%", re.MULTILINE)
 
-# 生成側（Rust の `race_heading`）と解析側が同じ見出しを見ていることを固定する golden。
-# 生成側は `src/apps/predict/src/session.rs` が `include_str!` で読む。
+# 生成側（Rust `race_heading` / session.rs）と解析側（Python）が同じ見出しを見て
+# いることを固定する golden（#587）。`include_str!` は crate 外を参照できないため
+# ファイルは predict crate 内に置く（ADR 0085）。変更時は `race_heading` /
+# `pred_header_samples.txt` / `test_pred_header.py` を同じ PR で触ること。
+# 行セマンティクスは docs/specifications/predict-session.md。
 GOLDEN_DISPLAY = "src/apps/predict/testdata/pred_header_samples.txt"
 GOLDEN_PATH = os.path.normpath(
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", GOLDEN_DISPLAY)
