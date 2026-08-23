@@ -52,8 +52,10 @@ fi
 if command -v python3 >/dev/null 2>&1; then
     echo "[pre-push] scripts/check-doc-classes.py（文書クラス / sources 追従 ADR 0073）"
     python3 scripts/check-doc-classes.py
+    echo "[pre-push] scripts/check-decision-log-immutability.py（決定ログ append-only #652）"
+    python3 scripts/check-decision-log-immutability.py
 else
-    echo "[pre-push] python3 が無いので check-doc-classes.py はスキップ（CI の adr ジョブで検出されます）"
+    echo "[pre-push] python3 が無いので check-doc-classes.py / check-decision-log-immutability.py はスキップ（CI の adr ジョブで検出されます）"
 fi
 
 # web/ 差分がある push のときだけ typecheck / lint を走らせる（#463）。
@@ -100,4 +102,4 @@ else
   echo "[pre-push] web/ 差分なし: typecheck/lint スキップ"
 fi
 
-echo "[pre-push] OK（fmt / clippy / Swagger UI vendored / 変数直後の非 ASCII / 文書クラス / web 通過）"
+echo "[pre-push] OK（fmt / clippy / Swagger UI vendored / 変数直後の非 ASCII / 文書クラス / 決定ログ不変性 / web 通過）"

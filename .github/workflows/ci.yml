@@ -199,6 +199,10 @@ jobs:
       # stale は **error**（移設以前から累積していた未解消 6 件を #580 で消化し warning から昇格）。
       - name: Check document classes / sources (ADR 0073)
         run: python3 scripts/check-doc-classes.py
+      - name: Regression test for check-decision-log-immutability.py (#652)
+        run: python3 scripts/test-check-decision-log-immutability.py
+      - name: Check decision log immutability (#652)
+        run: python3 scripts/check-decision-log-immutability.py
 
   # stdlib のみの Python テストを ubuntu-latest 同梱の python3 で走らせる軽量ジョブ（#416 / #464）。
   # 対象は 2 群:
