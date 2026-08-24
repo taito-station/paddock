@@ -429,7 +429,7 @@ jobs:
       # 外部 action はサプライチェーン対策で commit SHA にピン（コメントは対応タグ）。
       - name: Set up Docker Buildx
         if: steps.changes.outputs.run == 'true'
-        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
 
       # builder ステージまでビルド（runtime は作らない）。push/load せず、成否だけを見る。
       # GHA キャッシュで cargo/npm レイヤを run 間で再利用する。scope を Dockerfile ごとに分け、
