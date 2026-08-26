@@ -20,10 +20,11 @@ pub use session::{
     PredictSessionRepository, PredictionFilter, PredictionSearchResult, PredictionSummaryRow,
 };
 pub use stats::{
-    ConditionalGateStatsRow, CourseStatsRow, GATE_FIELD_BANDS, GATE_TRACK_FIRM, GATE_TRACK_OTHER,
-    GateBiasCell, GroupStat, HorseRecencyStats, HorseStatsRow, JockeyStatsRow, MarkStatRow,
-    MarkStatsFilter, NameMatchRepository, RecencySeries, StatsRepository, TrainerStatsRow,
-    gate_field_band_label, gate_track_cond2_label,
+    ConditionRun, ConditionalGateStatsRow, CourseStatsRow, DISTANCE_EXPERIENCE_TOLERANCE_M,
+    GATE_FIELD_BANDS, GATE_TRACK_FIRM, GATE_TRACK_OTHER, GateBiasCell, GroupStat, HandicapNoteRow,
+    HorseRecencyStats, HorseStatsRow, JockeyStatsRow, MarkStatRow, MarkStatsFilter,
+    NameMatchRepository, RecencySeries, StatsRepository, TrainerStatsRow, gate_field_band_label,
+    gate_track_cond2_label,
 };
 
 /// 後方互換のための集約スーパートレイト。全 sub-trait を満たす型に blanket 実装される。

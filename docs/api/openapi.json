@@ -1677,7 +1677,8 @@
           "model_rank",
           "is_overlay",
           "is_value",
-          "detail_lines"
+          "detail_lines",
+          "handicap"
         ],
         "properties": {
           "comment": {
@@ -1711,6 +1712,10 @@
             "format": "int32",
             "description": "枠番（出馬表に無ければ `null`）。",
             "minimum": 0
+          },
+          "handicap": {
+            "$ref": "#/components/schemas/HandicapNoteSchema",
+            "description": "手動ハンデ精査の材料（#628・提示専用）。買い目の選択ロジックには入らない。"
           },
           "horse_name": {
             "type": "string"
@@ -1819,6 +1824,33 @@
             "type": "number",
             "format": "double",
             "description": "表示用（市場ブレンド α）の勝率/連対率/複勝率 [0,1]。"
+          }
+        }
+      },
+      "ConditionRunSchema": {
+        "type": "object",
+        "description": "条件別実績の過去走 1 走（#628）。着順が付いた走りだけを載せる（取消・除外・中止は母集団外）。",
+        "required": [
+          "date",
+          "finishing_position"
+        ],
+        "properties": {
+          "date": {
+            "type": "string",
+            "format": "date",
+            "description": "施行日 `YYYY-MM-DD`。"
+          },
+          "finishing_position": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "race_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "レース名（netkeiba 近走のみが持つ。PDF 確定成績経路は `null`）。"
           }
         }
       },
@@ -2000,6 +2032,54 @@
             "type": "integer",
             "format": "int32",
             "minimum": 0
+          }
+        }
+      },
+      "HandicapNoteSchema": {
+        "type": "object",
+        "description": "盤の手動ハンデ精査材料 1 頭分（#628・**decision-support**）。\n\n現時点で実在が確認できているエッジは「手動のハンデ精査」と「執行の規律（軸ロック＋ズレ増額）」の\n2 つだけ（ADR 0055 / 0060 / 0076）。ここで返すのは前者が使う**事実**であって推定ではない。\n**確率にも買い目にも入らない**——条件別実績を特徴量へ入れるのは ADR 0058 / 0059 が閉じた路線の再訪。\n閾値で go/no-go は出さない（ADR 0079 と同じく、バッジが go シグナルとして誤読される事故を防ぐ）。",
+        "required": [
+          "course_runs",
+          "group_runs",
+          "distance_untried",
+          "surface_untried",
+          "no_past_runs"
+        ],
+        "properties": {
+          "course_runs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ConditionRunSchema"
+            },
+            "description": "今回条件（場 × 芝ダ × 距離の完全一致）での過去走。date 降順。空配列＝該当なし。"
+          },
+          "distance_untried": {
+            "type": "boolean",
+            "description": "今回距離が未経験（近走に今回距離 ±100m が 1 走も無い）。"
+          },
+          "group_runs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ConditionRunSchema"
+            },
+            "description": "場グループ（`RaceBoardResponse.group_venues`）まで広げた過去走。date 降順。\n**`course_runs` を包含する上位集合**。件数が `course_runs` と同じなら情報が増えていない。"
+          },
+          "layoff_days": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "前走からの間隔[日]（当日 − 前走日）。過去走なしは `null`。\n**日数を出すだけで閾値判定はしない**——同じ休養明けでも 10ヶ月半と 4ヶ月半では質が違い、\nその読み分けは人間がやる。",
+            "minimum": 0
+          },
+          "no_past_runs": {
+            "type": "boolean",
+            "description": "近走データが 0 件。モデルはデータ欠損馬をベースライン近くに置くため\n「純モデル高 vs 市場低」の**偽の妙味**として出る。差pt と並べて読むための印。"
+          },
+          "surface_untried": {
+            "type": "boolean",
+            "description": "今回の芝ダが未経験。"
           }
         }
       },
@@ -2881,6 +2961,7 @@
           "unpriced_legs",
           "confusion",
           "result_confirmed",
+          "group_venues",
           "horses"
         ],
         "properties": {
@@ -2922,6 +3003,13 @@
             "type": "integer",
             "format": "int32",
             "minimum": 0
+          },
+          "group_venues": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "条件別実績（#628）で `horses[].handicap.group_runs` の母集団になった**場スラッグの一覧**。\n洋芝場（札幌・函館は同じ洋芝で適性が通じる）でのみ 2 場が入り、それ以外の場は空配列\n＝グループが自身 1 場で完全一致と同じ集合になるため、UI は 2 行目を出さない。\n日本語ラベルの組み立ては web が持つ（表記の正本を 1 か所に保つ）。"
           },
           "hit_prob": {
             "type": [

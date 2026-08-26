@@ -46,6 +46,30 @@ impl Venue {
         ]
     }
 
+    /// 洋芝（北海道開催＝札幌・函館）の場か。両場は同じ洋芝でコース適性が通じるため、
+    /// 条件別実績（#628・提示専用）では `turf_group` で 1 グループとして集計できる。
+    /// **確率推定には入れない**——純モデルの resolution 天井は ADR 0058/0059 で決着済み。
+    pub fn is_yoshiba(&self) -> bool {
+        matches!(self, Venue::Sapporo | Venue::Hakodate)
+    }
+
+    /// 芝の適性が通じる場グループ（自身を必ず含む）。洋芝場は札幌・函館の 2 場、
+    /// それ以外の場は自身 1 場のみ（＝グループ化しても完全一致と同じ集合になる）。
+    pub fn turf_group(&self) -> &'static [Venue] {
+        const YOSHIBA: &[Venue] = &[Venue::Sapporo, Venue::Hakodate];
+        match self {
+            Venue::Sapporo | Venue::Hakodate => YOSHIBA,
+            Venue::Fukushima => &[Venue::Fukushima],
+            Venue::Niigata => &[Venue::Niigata],
+            Venue::Tokyo => &[Venue::Tokyo],
+            Venue::Nakayama => &[Venue::Nakayama],
+            Venue::Chukyo => &[Venue::Chukyo],
+            Venue::Kyoto => &[Venue::Kyoto],
+            Venue::Hanshin => &[Venue::Hanshin],
+            Venue::Kokura => &[Venue::Kokura],
+        }
+    }
+
     pub fn as_jp(&self) -> &'static str {
         match self {
             Venue::Sapporo => "札幌",
@@ -128,6 +152,49 @@ impl TryFrom<&str> for Venue {
             "阪神" | "hanshin" => Ok(Venue::Hanshin),
             "小倉" | "kokura" => Ok(Venue::Kokura),
             other => Err(Error::InvalidFormat(format!("unknown venue: {other}"))),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn yoshiba_venues_are_sapporo_and_hakodate() {
+        for v in Venue::all() {
+            assert_eq!(
+                v.is_yoshiba(),
+                matches!(v, Venue::Sapporo | Venue::Hakodate),
+                "{v:?} の洋芝判定が想定と違う"
+            );
+        }
+    }
+
+    #[test]
+    fn turf_group_pairs_yoshiba_and_isolates_the_rest() {
+        // 洋芝場は互いを含む 2 場グループ。
+        assert_eq!(
+            Venue::Sapporo.turf_group(),
+            &[Venue::Sapporo, Venue::Hakodate]
+        );
+        assert_eq!(
+            Venue::Hakodate.turf_group(),
+            &[Venue::Sapporo, Venue::Hakodate]
+        );
+        // 洋芝以外は自身のみ＝グループ化しても完全一致と同じ集合になる。
+        for v in Venue::all().into_iter().filter(|v| !v.is_yoshiba()) {
+            assert_eq!(v.turf_group(), &[v], "{v:?} が単独グループになっていない");
+        }
+    }
+
+    #[test]
+    fn turf_group_always_contains_self() {
+        for v in Venue::all() {
+            assert!(
+                v.turf_group().contains(&v),
+                "{v:?} の turf_group が自身を含んでいない"
+            );
         }
     }
 }

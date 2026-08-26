@@ -11,8 +11,8 @@ use paddock_domain::{
     RecentRun, ResultStatus, StandardTimes, Surface, TrackCondition, TrainerName, Venue,
 };
 use paddock_use_case::repository::{
-    CourseStatsRow, GroupStat, HorseStatsRow, JockeyStatsRow, OddsRepository, RaceCardRepository,
-    StatsRepository, TrainerStatsRow,
+    CourseStatsRow, GroupStat, HandicapNoteRow, HorseStatsRow, JockeyStatsRow, OddsRepository,
+    RaceCardRepository, StatsRepository, TrainerStatsRow,
 };
 use paddock_use_case::{Error, Interactor, Result};
 
@@ -151,6 +151,21 @@ impl StatsRepository for MockRepo {
         _as_of: Option<chrono::NaiveDate>,
     ) -> Result<CourseStatsRow> {
         Ok(course_stats_with_gate(4, 2))
+    }
+    /// 手動ハンデ精査材料（#628）は盤の提示専用で predict 経路は使わないため、
+    /// 全馬「材料なし」で応答する。確率推定には入らないので predict の期待値は変わらない。
+    async fn horse_handicap_notes(
+        &self,
+        names: &[HorseName],
+        _: Venue,
+        _: Surface,
+        _: u32,
+        _as_of: Option<chrono::NaiveDate>,
+    ) -> Result<HashMap<HorseName, HandicapNoteRow>> {
+        Ok(names
+            .iter()
+            .map(|n| (n.clone(), HandicapNoteRow::default()))
+            .collect())
     }
     async fn jockey_stats(
         &self,

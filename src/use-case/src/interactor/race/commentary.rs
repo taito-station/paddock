@@ -220,6 +220,7 @@ mod tests {
             finishing_position: None,
             comment: None,
             detail_lines: Vec::new(),
+            handicap: Default::default(),
         }
     }
 

@@ -16,8 +16,8 @@ use paddock_domain::{
     RecencyConfig, RecentRun, StandardTimes, Surface, TrackCondition, TrainerName, Venue,
 };
 use paddock_use_case::repository::{
-    CourseStatsRow, GroupStat, HorseRecencyStats, HorseStatsRow, JockeyStatsRow, OddsRepository,
-    RecencySeries, StatsRepository, TrainerStatsRow,
+    CourseStatsRow, GroupStat, HandicapNoteRow, HorseRecencyStats, HorseStatsRow, JockeyStatsRow,
+    OddsRepository, RecencySeries, StatsRepository, TrainerStatsRow,
 };
 use paddock_use_case::{Interactor, Result};
 
@@ -174,6 +174,22 @@ impl StatsRepository for MockRepo {
         _limit: u32,
     ) -> Result<Vec<JockeyFormRun>> {
         Ok(Vec::new())
+    }
+
+    /// 手動ハンデ精査材料（#628）は盤の提示専用で backtest 経路は使わないため、
+    /// 全馬「材料なし」で応答する（確率推定に入らないので backtest の期待値は変わらない）。
+    async fn horse_handicap_notes(
+        &self,
+        names: &[HorseName],
+        _venue: Venue,
+        _surface: Surface,
+        _distance: u32,
+        _as_of: Option<NaiveDate>,
+    ) -> Result<HashMap<HorseName, HandicapNoteRow>> {
+        Ok(names
+            .iter()
+            .map(|n| (n.clone(), HandicapNoteRow::default()))
+            .collect())
     }
 
     async fn standard_times(&self, _before: NaiveDate) -> Result<StandardTimes> {
