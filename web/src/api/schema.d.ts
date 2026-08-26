@@ -620,9 +620,9 @@ export interface components {
             distance_untried: boolean;
             /**
              * @description 場グループ（`RaceBoardResponse.group_venues`）まで広げた過去走。date 降順。
-             *     **`course_runs` を包含する上位集合**。
+             *     **非空のときは `course_runs` を包含する上位集合**。
              *
-             *     広がるのは**洋芝場（札幌・函館）の芝レース**だけで、それ以外（ダート戦を含む）は
+             *     非空になるのは**洋芝場（札幌・函館）の芝レース**だけで、それ以外（ダート戦を含む）は
              *     **空配列**を返す（同じ集合を 2 度運んでも情報が増えないため）。`group_venues` も同時に空。
              */
             group_runs: components["schemas"]["ConditionRunSchema"][];

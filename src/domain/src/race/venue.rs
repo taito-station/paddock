@@ -1,6 +1,7 @@
 use strum_macros::Display;
 
 use crate::error::Error;
+use crate::race::Surface;
 
 // Hash は backtest の course_stats キャッシュキー (Venue, u32, Surface) に必要（#223）。
 // Surface も元から Hash を derive 済み。
@@ -58,6 +59,23 @@ impl Venue {
         match self {
             Venue::Sapporo | Venue::Hakodate => YOSHIBA,
             other => other.self_group(),
+        }
+    }
+
+    /// 条件別実績（#628・提示専用）の母集団になる場グループ。**芝のときだけ**
+    /// [`Venue::turf_group`] で広げ、それ以外（ダート）は当場 1 場に閉じる。
+    ///
+    /// 洋芝グループの根拠は「**芝の**適性が通じる」なので、同じ 2 場でもダートは別物。
+    /// gate しないと「洋芝(札幌/函館)ダ1700m」という成立しないラベルになる。
+    ///
+    /// **この規則の正本はここ 1 か所**。集計（rdb-gateway）と提示（use-case の
+    /// `group_venue_slugs`）が別々に同じ判定を書くと、片方だけ変わったときに
+    /// 「グループ見出しは出るのに中身が空」のような乖離が起きる（ADR 0064 の second source）。
+    pub fn condition_group(&self, surface: Surface) -> &'static [Venue] {
+        match surface {
+            Surface::Turf => self.turf_group(),
+            // `Surface` が増えたらコンパイルエラーで気づけるよう `_` で受けない。
+            Surface::Dirt => self.self_group(),
         }
     }
 
@@ -206,6 +224,40 @@ mod tests {
                 v.turf_group().contains(&v),
                 "{v:?} の turf_group が自身を含んでいない"
             );
+        }
+    }
+
+    #[test]
+    fn condition_group_widens_only_for_yoshiba_turf() {
+        // 芝の洋芝場だけが 2 場グループ。
+        for v in [Venue::Sapporo, Venue::Hakodate] {
+            assert_eq!(
+                v.condition_group(Surface::Turf),
+                &[Venue::Sapporo, Venue::Hakodate],
+                "{v:?} の芝グループが広がっていない"
+            );
+            // 洋芝の根拠は「芝の適性が通じる」なので、同じ 2 場でもダートは当場のみ。
+            assert_eq!(
+                v.condition_group(Surface::Dirt),
+                &[v],
+                "{v:?} のダートでグループが広がっている"
+            );
+        }
+    }
+
+    #[test]
+    fn condition_group_is_always_self_only_elsewhere() {
+        for v in Venue::all()
+            .into_iter()
+            .filter(|v| !matches!(v, Venue::Sapporo | Venue::Hakodate))
+        {
+            for s in [Surface::Turf, Surface::Dirt] {
+                assert_eq!(
+                    v.condition_group(s),
+                    &[v],
+                    "{v:?} / {s:?} が単独グループになっていない"
+                );
+            }
         }
     }
 }

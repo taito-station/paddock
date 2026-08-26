@@ -163,8 +163,8 @@ pub struct HandicapNote {
     /// 今回条件（場 × 芝ダ × 距離の完全一致）での過去走。date 降順。空＝該当なし。
     pub course_runs: Vec<ConditionRun>,
     /// 場グループ（**芝のときだけ**洋芝＝札幌⇄函館へ広げる）まで含めた過去走。date 降順。
-    /// **`course_runs` を包含する上位集合**。広くならない条件（洋芝以外の場・ダート戦）では
-    /// **空**になる＝UI はグループ行を出さない。
+    /// **非空のときは `course_runs` を包含する上位集合**。広くならない条件（洋芝以外の場・
+    /// ダート戦）では**空**になる＝UI はグループ行を出さない。
     pub group_runs: Vec<ConditionRun>,
     /// 前走からの間隔[日]（当日 − 前走日）。過去走なしは `None`。
     /// **閾値で機械判定せず日数を出すだけ**——「10ヶ月半の休養明け」と「4ヶ月半の王道ローテ」は
@@ -289,11 +289,22 @@ impl<
                     .iter()
                     .filter_map(|h| HorseName::try_from(h.horse_name.clone()).ok())
                     .collect();
-                let notes = self
+                // **失敗しても盤を落とさない**。これは提示専用の材料で、確率・買い目・軸ロックは
+                // これに一切依存しない。`LIMIT` 無しのクエリが未発走中 60 秒ごとに走る経路なので、
+                // 共有 Postgres が詰まったときに live 盤ごと 500 にするのは割に合わない
+                // （web 側も `EMPTY_HANDICAP_NOTE` で材料なし表示へ縮退できる）。
+                match self
                     .repository
                     .horse_handicap_notes(&names, c.venue, c.surface, c.distance, Some(c.date))
-                    .await?;
-                enrich_handicap(&mut horses, &notes, c.date);
+                    .await
+                {
+                    Ok(notes) => enrich_handicap(&mut horses, notes, c.date),
+                    Err(e) => tracing::warn!(
+                        race_id = %race_id.value(),
+                        error = %e,
+                        "手動ハンデ精査の材料を取得できなかった（盤は材料なしで続行する）"
+                    ),
+                }
                 group_venue_slugs(c.venue, c.surface)
             }
             // 出馬表が無ければ `predict_race_views` が先に NotFound を返すのでここには到達しない
@@ -367,14 +378,12 @@ impl<
 /// **空**を返す——完全一致と同じ集合なので、UI に 2 行目を出す意味がないことを型ではなく
 /// 値で表す（`vec![自分]` を返すと UI 側が毎回 len==1 を判定する羽目になる）。
 ///
-/// **芝のときだけ広げる**。`turf_group` の根拠は「洋芝（札幌・函館）は**芝の**適性が通じる」で
-/// あって、同じ 2 場でもダートは別物。surface で gate しないとダート戦で
-/// 「洋芝(札幌/函館)ダ1700m」という成立しないラベルが出る（rdb-gateway 側の集計と同じ規則）。
+/// グループの規則そのものは domain（[`Venue::condition_group`]）が持つ——集計（rdb-gateway）と
+/// ここで別々に「芝のときだけ広げる」を書くと、片方だけ変わったときに
+/// 「グループ見出しは出るのに中身が空」という乖離が起きる（ADR 0064 の second source）。
+/// ここがやるのは「広がらなかったら空にする」という**提示上の畳み込み**だけ。
 fn group_venue_slugs(venue: Venue, surface: Surface) -> Vec<String> {
-    if surface != Surface::Turf {
-        return Vec::new();
-    }
-    let group = venue.turf_group();
+    let group = venue.condition_group(surface);
     if group.len() <= 1 {
         return Vec::new();
     }
@@ -389,19 +398,21 @@ fn group_venue_slugs(venue: Venue, surface: Surface) -> Vec<String> {
 /// 「該当なし」ではなく「材料なし」として UI に何も出ない。
 fn enrich_handicap(
     horses: &mut [BoardHorse],
-    notes: &HashMap<HorseName, HandicapNoteRow>,
+    mut notes: HashMap<HorseName, HandicapNoteRow>,
     race_date: NaiveDate,
 ) {
     for h in horses.iter_mut() {
         let Ok(name) = HorseName::try_from(h.horse_name.clone()) else {
             continue;
         };
-        let Some(row) = notes.get(&name) else {
+        // `remove` で所有権ごと取り出す（各馬 1 回しか引かないので、2 本の `Vec<ConditionRun>` を
+        // clone せずに move できる）。
+        let Some(row) = notes.remove(&name) else {
             continue;
         };
         h.handicap = HandicapNote {
-            course_runs: row.course_runs.clone(),
-            group_runs: row.group_runs.clone(),
+            course_runs: row.course_runs,
+            group_runs: row.group_runs,
             // 過去走が未来日付（データ不整合）なら負の間隔になるので 0 に丸めず None に倒す
             // ——「休養 0 日」と誤読させるより、材料が無い扱いのほうが安全側。
             layoff_days: row
@@ -1057,7 +1068,7 @@ mod tests {
                 same_distance_starts: 3,
             },
         )]);
-        enrich_handicap(&mut horses, &notes, ymd(2026, 8, 16));
+        enrich_handicap(&mut horses, notes, ymd(2026, 8, 16));
 
         let h = &horses[0].handicap;
         assert_eq!(h.course_runs.len(), 2);
@@ -1086,7 +1097,7 @@ mod tests {
             ),
             (2, HandicapNoteRow::default()),
         ]);
-        enrich_handicap(&mut horses, &notes, ymd(2026, 8, 16));
+        enrich_handicap(&mut horses, notes, ymd(2026, 8, 16));
 
         // 完全一致 0 走＝「該当なし」。距離未経験は立つが、近走そのものはある。
         let h1 = &horses[0].handicap;
@@ -1120,7 +1131,7 @@ mod tests {
                 same_distance_starts: 4,
             },
         )]);
-        enrich_handicap(&mut horses, &notes, ymd(2026, 8, 16));
+        enrich_handicap(&mut horses, notes, ymd(2026, 8, 16));
 
         let h = &horses[0].handicap;
         assert!(h.course_runs.is_empty(), "完全一致は該当なしのまま");
@@ -1142,7 +1153,7 @@ mod tests {
                 ..Default::default()
             },
         )]);
-        enrich_handicap(&mut horses, &notes, ymd(2026, 8, 16));
+        enrich_handicap(&mut horses, notes, ymd(2026, 8, 16));
         assert_eq!(horses[0].handicap.layoff_days, None);
     }
 
@@ -1152,7 +1163,7 @@ mod tests {
         // 「該当なし（走っていない）」と「材料なし（引けていない）」を取り違えないための境界。
         let b = vec![hp(1, 0.3)];
         let mut horses = build_board_horses(&b, &b, None, None);
-        enrich_handicap(&mut horses, &HashMap::new(), ymd(2026, 8, 16));
+        enrich_handicap(&mut horses, HashMap::new(), ymd(2026, 8, 16));
         assert_eq!(horses[0].handicap, HandicapNote::default());
         assert!(!horses[0].handicap.no_past_runs, "材料なしを欠損印にしない");
     }

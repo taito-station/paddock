@@ -14,8 +14,24 @@ export type ConditionRun = components["schemas"]["ConditionRunSchema"];
 // 完全一致が 0 走のときの明示表記。**空欄と区別する**——空欄は「まだ引いていない」に見える。
 export const NO_RECORD = "該当なし";
 
-// `handicap` がレスポンスに含まれないときの縮退値（#570: 古い api-server が配信し続ける事故）。
-// 盤全体が落ちるより、材料だけ空で描くほうが被害が小さい。
+// 「今回距離を経験済み」の許容幅[m]。サーバの `DISTANCE_EXPERIENCE_TOLERANCE_M` と同じ値で、
+// 判定はサーバが持つ（ここは**表示に使うだけ**）。
+//
+// 条件別実績（`course_runs`）は**完全一致**、距離の未経験判定は**±この幅**という定義差があるので、
+// 画面にも幅を出す——出さないと「新潟芝1000m → 該当なし」かつ「今回距離の経験あり」が
+// 矛盾に見える（1100m だけ走っている馬で実際に起きる）。
+export const DISTANCE_TOLERANCE_M = 100;
+
+// 材料そのものが取れていないときの表記。**「該当なし」とは別物**——
+// 「該当なし」は走っていないという事実、こちらは引けていないという状態。
+export const NO_MATERIAL = "—";
+
+// `handicap` がレスポンスに含まれないときの縮退値（#570: 古い api-server が配信し続ける事故、
+// またはサーバ側で材料取得に失敗したとき）。盤全体が落ちるより材料だけ空で描くほうが被害が小さい。
+//
+// **この値を `conditionRecordSummary` に通さないこと。** 通すと全頭「該当なし」になり、
+// 「引けていない」を「走っていない」と断定してしまう（本 issue が塞ごうとしている取り違え）。
+// 判定には `hasHandicapMaterial` を使う。
 export const EMPTY_HANDICAP_NOTE: HandicapNote = {
   course_runs: [],
   group_runs: [],
@@ -24,6 +40,24 @@ export const EMPTY_HANDICAP_NOTE: HandicapNote = {
   surface_untried: false,
   no_past_runs: false,
 };
+
+// 材料が引けているか。過去走 0 件の馬でもサーバは `no_past_runs=true` を返すので、
+// **全フラグが既定のまま＝そもそも引けていない**と判断できる（縮退値と同型）。
+//
+// 詳細パネルを開く価値があるかの判定も兼ねる。書評（comment / detail_lines）が無くても
+// 材料があれば内訳を読む意味があり、これを見ないと**材料が乏しい馬ほどパネルに到達できない**
+// という逆転が起きる（`detail_lines` は factor が薄い馬ほど空になりやすい）。
+export function hasHandicapMaterial(
+  note: HandicapNote | null | undefined,
+): boolean {
+  if (note == null) return false;
+  return (
+    note.course_runs.length > 0 ||
+    note.group_runs.length > 0 ||
+    note.layoff_days != null ||
+    note.no_past_runs
+  );
+}
 
 // 「人気馬の前提が壊れているサイン」(2) を出す市場人気の上限。全頭に出すとノイズになるため
 // 上位人気だけに絞る（issue #628 の要件）。詳細パネルは全頭で出す（絞るのはカードの密度のため）。
@@ -120,19 +154,6 @@ export function premiseBadges(
   if (note.distance_untried) out.push("距離初");
   if (note.surface_untried) out.push("芝ダ初");
   return out;
-}
-
-// 詳細パネルを開く価値があるか（#628）。書評（comment / detail_lines）が無くても、
-// 条件別実績・洋芝グループ・間隔が入っていれば内訳を読む意味がある。
-// これを見ないと、**材料が乏しい馬ほどパネルに到達できない**という逆転が起きる
-// （`detail_lines` は factor が薄い馬ほど空になりやすい）。
-export function hasHandicapDetail(note: HandicapNote): boolean {
-  return (
-    note.course_runs.length > 0 ||
-    note.group_runs.length > 0 ||
-    note.layoff_days != null ||
-    note.no_past_runs
-  );
 }
 
 // 過去走 1 走の詳細行（例 `2026-08-02 3着 テストS`）。レース名は netkeiba 近走のみが持つ。

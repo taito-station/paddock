@@ -2062,7 +2062,7 @@
             "items": {
               "$ref": "#/components/schemas/ConditionRunSchema"
             },
-            "description": "場グループ（`RaceBoardResponse.group_venues`）まで広げた過去走。date 降順。\n**`course_runs` を包含する上位集合**。\n\n広がるのは**洋芝場（札幌・函館）の芝レース**だけで、それ以外（ダート戦を含む）は\n**空配列**を返す（同じ集合を 2 度運んでも情報が増えないため）。`group_venues` も同時に空。"
+            "description": "場グループ（`RaceBoardResponse.group_venues`）まで広げた過去走。date 降順。\n**非空のときは `course_runs` を包含する上位集合**。\n\n非空になるのは**洋芝場（札幌・函館）の芝レース**だけで、それ以外（ダート戦を含む）は\n**空配列**を返す（同じ集合を 2 度運んでも情報が増えないため）。`group_venues` も同時に空。"
           },
           "layoff_days": {
             "type": [

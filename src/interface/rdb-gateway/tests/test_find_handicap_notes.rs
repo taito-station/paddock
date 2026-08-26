@@ -10,7 +10,9 @@ use paddock_domain::{
     ResultStatus, Surface, Venue,
 };
 use paddock_use_case::HorsePastRun;
-use paddock_use_case::repository::{HorseHistoryRepository, RaceRepository, StatsRepository};
+use paddock_use_case::repository::{
+    DISTANCE_EXPERIENCE_TOLERANCE_M, HorseHistoryRepository, RaceRepository, StatsRepository,
+};
 use rdb_gateway::PostgresRepository;
 
 fn ymd(y: i32, m: u32, d: u32) -> NaiveDate {
@@ -278,6 +280,62 @@ async fn yoshiba_group_widens_only_group_runs(pool: sqlx::PgPool) {
     assert!(
         n.group_runs.contains(&n.course_runs[0]),
         "group は exact を包含する"
+    );
+}
+
+/// 距離の「経験あり」は `DISTANCE_EXPERIENCE_TOLERANCE_M` の帯で決まる。境界を両側から張って
+/// 定数をピン留めする（帯だけ広げてもテストが落ちないと、定数変更が黙って通ってしまう）。
+/// `distance_untried` は use-case 側の派生値（`same_distance_starts == 0`）なので、ここでは母数で張る。
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn distance_experience_respects_tolerance_band(pool: sqlx::PgPool) {
+    let repo = PostgresRepository::new(pool);
+    let base = 1600u32;
+    let inside = base + DISTANCE_EXPERIENCE_TOLERANCE_M; // 帯の上端（含む）
+    let outside = inside + 1; // 帯のすぐ外
+
+    for (idx, (horse, distance)) in [("ウマI", inside), ("ウマJ", outside)]
+        .into_iter()
+        .enumerate()
+    {
+        // netkeiba race_id は末尾 2 桁が R 番号なので 01 始まりにする（00 は不正）。
+        repo.upsert_horse_history(
+            &horse_id(&format!("202010001{idx}")),
+            &[nk_run(
+                &format!("2026040204{:02}", idx + 1),
+                horse,
+                ymd(2026, 7, 1),
+                (idx + 1) as u32,
+                Venue::Niigata,
+                Surface::Turf,
+                distance,
+                Some(3),
+            )],
+        )
+        .await
+        .unwrap();
+    }
+
+    let notes = repo
+        .horse_handicap_notes(
+            &[name("ウマI"), name("ウマJ")],
+            Venue::Niigata,
+            Surface::Turf,
+            base,
+            Some(ymd(2026, 8, 16)),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        notes[&name("ウマI")].same_distance_starts,
+        1,
+        "帯の上端（+{DISTANCE_EXPERIENCE_TOLERANCE_M}m）は経験ありに数える"
+    );
+    assert_eq!(
+        notes[&name("ウマJ")].same_distance_starts,
+        0,
+        "帯のすぐ外（+{}m）は数えない",
+        DISTANCE_EXPERIENCE_TOLERANCE_M + 1
     );
 }
 

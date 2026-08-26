@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  CARD_MAX_POSITIONS,
   EMPTY_HANDICAP_NOTE,
   NO_RECORD,
   PREMISE_POPULARITY_MAX,
@@ -10,7 +11,7 @@ import {
   conditionRunLine,
   edgePtLabel,
   groupConditionLabel,
-  hasHandicapDetail,
+  hasHandicapMaterial,
   layoffLabel,
   modelEdgePt,
   premiseBadges,
@@ -77,18 +78,22 @@ describe("conditionRecordSummary", () => {
   it("着順は上限まで・走数は常に全件を出す", () => {
     // 2026-08-16 新潟6R ⑩クールベイビー相当（千直 9 走）。狭幅カラムで折り返して
     // カード高さが揃わなくなるため着順だけ省略し、「9走」という母数は落とさない。
-    const runs = [9, 8, 7, 6, 5, 4, 3, 2, 1].map((p, i) =>
-      run(`2026-0${(i % 9) + 1}-01`, p),
+    // 期待値は定数から組む（リテラルで書くと上限を変えたとき原因の分かりにくい失敗になる）。
+    const runs = Array.from({ length: CARD_MAX_POSITIONS + 4 }, (_, i) =>
+      run(`2026-01-${String(i + 1).padStart(2, "0")}`, i + 1),
     );
-    const summary = conditionRecordSummary(runs);
-    expect(summary).toBe(`${runs.length}走 9,8,7,6,5着…`);
-    expect(summary.startsWith(`${runs.length}走`)).toBe(true);
+    const shown = runs
+      .slice(0, CARD_MAX_POSITIONS)
+      .map((r) => r.finishing_position)
+      .join(",");
+    expect(conditionRecordSummary(runs)).toBe(`${runs.length}走 ${shown}着…`);
   });
 
   it("上限ちょうどなら省略記号を付けない", () => {
-    const runs = [1, 2, 3, 4, 5].map((p, i) => run(`2026-0${i + 1}-01`, p));
+    const runs = Array.from({ length: CARD_MAX_POSITIONS }, (_, i) =>
+      run(`2026-01-${String(i + 1).padStart(2, "0")}`, i + 1),
+    );
     expect(conditionRecordSummary(runs).endsWith("…")).toBe(false);
-    expect(conditionRecordSummary(runs)).toBe("5走 1,2,3,4,5着");
   });
 });
 
@@ -202,23 +207,23 @@ describe("premiseBadges", () => {
   });
 });
 
-describe("hasHandicapDetail", () => {
+describe("hasHandicapMaterial", () => {
   it("書評が無くても材料があればパネルを開ける", () => {
     // detail_lines は factor が薄い馬ほど空になりやすいので、これを見ないと
     // **材料が乏しい馬ほど内訳に到達できない**という逆転が起きる。
-    expect(hasHandicapDetail(note({ course_runs: [run("2026-08-02", 3)] }))).toBe(
-      true,
-    );
-    expect(hasHandicapDetail(note({ group_runs: [run("2026-08-02", 3)] }))).toBe(
-      true,
-    );
-    expect(hasHandicapDetail(note({ layoff_days: 30 }))).toBe(true);
+    expect(
+      hasHandicapMaterial(note({ course_runs: [run("2026-08-02", 3)] })),
+    ).toBe(true);
+    expect(
+      hasHandicapMaterial(note({ group_runs: [run("2026-08-02", 3)] })),
+    ).toBe(true);
+    expect(hasHandicapMaterial(note({ layoff_days: 30 }))).toBe(true);
     // 過去走 0 件そのものが読む価値のある材料（偽の妙味の印）。
-    expect(hasHandicapDetail(note({ no_past_runs: true }))).toBe(true);
+    expect(hasHandicapMaterial(note({ no_past_runs: true }))).toBe(true);
   });
 
   it("材料が何も無ければ false", () => {
-    expect(hasHandicapDetail(note())).toBe(false);
+    expect(hasHandicapMaterial(note())).toBe(false);
   });
 });
 
@@ -228,7 +233,7 @@ describe("EMPTY_HANDICAP_NOTE", () => {
     // 「材料なし」であって「該当なし（走っていない）」の断定ではないので、
     // 欠損フラグ（no_past_runs）を立てない。
     expect(EMPTY_HANDICAP_NOTE.no_past_runs).toBe(false);
-    expect(hasHandicapDetail(EMPTY_HANDICAP_NOTE)).toBe(false);
+    expect(hasHandicapMaterial(EMPTY_HANDICAP_NOTE)).toBe(false);
     expect(premiseBadges(EMPTY_HANDICAP_NOTE, 1)).toEqual([]);
   });
 });

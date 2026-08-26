@@ -362,9 +362,9 @@ pub struct HandicapNoteSchema {
     /// 今回条件（場 × 芝ダ × 距離の完全一致）での過去走。date 降順。空配列＝該当なし。
     pub course_runs: Vec<ConditionRunSchema>,
     /// 場グループ（`RaceBoardResponse.group_venues`）まで広げた過去走。date 降順。
-    /// **`course_runs` を包含する上位集合**。
+    /// **非空のときは `course_runs` を包含する上位集合**。
     ///
-    /// 広がるのは**洋芝場（札幌・函館）の芝レース**だけで、それ以外（ダート戦を含む）は
+    /// 非空になるのは**洋芝場（札幌・函館）の芝レース**だけで、それ以外（ダート戦を含む）は
     /// **空配列**を返す（同じ集合を 2 度運んでも情報が増えないため）。`group_venues` も同時に空。
     pub group_runs: Vec<ConditionRunSchema>,
     /// 前走からの間隔[日]（当日 − 前走日）。過去走なしは `null`。

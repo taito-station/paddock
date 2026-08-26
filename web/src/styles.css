@@ -889,26 +889,27 @@ button:disabled {
   font-size: 0.63rem;
   padding: 0.05rem 0.3rem;
 }
+/* 書評チップ（.chip-note）と隣接するので、地色を敷かず枠線だけにして区別する
+   ——同じ配色だと「間隔315日」と「書評」が同種のラベルに見える。 */
 .chip-premise {
-  background: var(--note-bg);
-  color: var(--note-text);
-  border-color: var(--note-border);
+  background: transparent;
+  color: var(--muted-2);
+  border-color: var(--border-2);
 }
 
-/* 差pt 行に並ぶ近走欠損フラグ。差pt が「偽の妙味」であることの印なので、
-   妙味チップ（--warn-dim / --value-text）とは別系統の色にして取り違えを防ぐ。 */
+/* 戦績欠損フラグ。差pt が「偽の妙味」であることの印なので、
+   妙味チップ（--warn-dim / --value-text）とは別系統の色にして取り違えを防ぐ。
+   モデル列のトグルと直交する事実なので、差pt 行ではなくバッジ行に常時出す。 */
 .chip-missing {
   background: var(--danger-bg);
   color: var(--danger-text);
   border-color: var(--danger-border);
 }
-.horse-col .stats .chip-missing {
-  margin-left: 0.25rem;
-  font-size: 0.6rem;
-  padding: 0 0.25rem;
-  border-radius: 999px;
-  border-width: 1px;
-  border-style: solid;
+
+/* 差pt 行（純モデル − 市場）。.stats の他の行と同じ体裁で、群の区切りは付けない
+   （直前の「市勝」と同じ市場比較の群に属するため）。 */
+.horse-col .stats .edge-row dd {
+  font-weight: 600;
 }
 
 /* 書評パネル側の内訳（どのレースか・洋芝グループ・経験の有無）。 */

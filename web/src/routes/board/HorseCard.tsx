@@ -9,10 +9,11 @@ import {
 import { placeBand } from "../../lib/live";
 import {
   EMPTY_HANDICAP_NOTE,
+  NO_MATERIAL,
   type HandicapNote,
   conditionRecordSummary,
   edgePtLabel,
-  hasHandicapDetail,
+  hasHandicapMaterial,
   modelEdgePt,
   premiseBadges,
 } from "../../lib/handicap";
@@ -46,9 +47,14 @@ function HorseCardImpl({
   // api-server が古い成果物を配信し続ける事故（#570）ではこのフィールドが欠けうるので、
   // 盤全体を落とさないよう既定値へ縮退させる（型は必須のまま＝正常系は素通り）。
   const handicap: HandicapNote = h.handicap ?? EMPTY_HANDICAP_NOTE;
+  // 材料が引けているか。**引けていないとき「該当なし」と書かない**——それは
+  // 「走っていない」という断定になり、本 issue が塞ごうとしている取り違えそのもの。
+  const hasMaterial = hasHandicapMaterial(h.handicap);
   // detail_lines はスキーマ上必須（string[]）。comment・根拠行・ハンデ材料のいずれかがあれば展開可。
-  const hasDetail =
-    !!h.comment || h.detail_lines.length > 0 || hasHandicapDetail(handicap);
+  const hasDetail = !!h.comment || h.detail_lines.length > 0 || hasMaterial;
+  // 「書評」チップは書評があることの信号として残す（hasDetail に材料を足したことで
+  // ほぼ全頭が展開可になったため、チップまで全頭に出すと信号の意味が消える）。
+  const hasCommentary = !!h.comment || h.detail_lines.length > 0;
   // 朝↔現の単勝変動（#448）。朝 snapshot が無い馬は null（矢印を出さない）。
   const oddsMove = winOddsMove(h.morning_win_odds, h.win_odds);
   const edgePt = modelEdgePt(h.pure_win_prob, h.market_implied);
@@ -65,13 +71,13 @@ function HorseCardImpl({
       role={hasDetail ? "button" : undefined}
       tabIndex={hasDetail ? 0 : undefined}
       aria-label={
-        hasDetail ? `${h.horse_num} ${h.horse_name} の書評を開く` : undefined
+        hasDetail
+          ? `${h.horse_num} ${h.horse_name} の詳細（条件別実績・書評）を開く`
+          : undefined
       }
       aria-expanded={hasDetail ? isSelected : undefined}
-      aria-controls={
-        hasDetail && isSelected ? "horse-detail-panel" : undefined
-      }
-      title={hasDetail ? "クリック / Enter / Space で書評を表示" : undefined}
+      aria-controls={hasDetail && isSelected ? "horse-detail-panel" : undefined}
+      title={hasDetail ? "クリック / Enter / Space で詳細を表示" : undefined}
       onClick={
         hasDetail ? (e) => onSelect(h.horse_num, e.currentTarget) : undefined
       }
@@ -98,7 +104,10 @@ function HorseCardImpl({
         <span className="mark">{markSymbol(h.mark)}</span>
         {/* 確定着順（#381。results 由来。除外/中止・未確定は null で非表示）。 */}
         {h.finishing_position != null && (
-          <span className="finish-pos" title={`確定 ${h.finishing_position} 着`}>
+          <span
+            className="finish-pos"
+            title={`確定 ${h.finishing_position} 着`}
+          >
             {h.finishing_position}着
           </span>
         )}
@@ -159,17 +168,7 @@ function HorseCardImpl({
             title="モデル勝率（純 α=1.0）− 市場implied勝率[pt]。過去走データが無い馬はモデルがベースライン近くに置かれるため、この差は妙味ではなく欠損の影"
           >
             <dt>差</dt>
-            <dd>
-              {edgePtLabel(edgePt)}
-              {handicap.no_past_runs && (
-                <span
-                  className="chip chip-missing"
-                  title="過去走データ 0 件。モデル確率はベースライン近くの推定なので、差pt は妙味の根拠にならない"
-                >
-                  近走なし
-                </span>
-              )}
-            </dd>
+            <dd>{edgePtLabel(edgePt)}</dd>
           </div>
         )}
         <div className="group-sep">
@@ -205,13 +204,35 @@ function HorseCardImpl({
       </dl>
       {/* 条件別実績（#628・最優先）。今回と同じ 場×芝ダ×距離 の「N走 着順列」を全頭に常時出す
           ——2・3番人気が当該条件で大敗している、のような事実は横並びで比べて初めて意味を持つ。
-          0 走は空欄でなく「該当なし」（空欄は「まだ引いていない」に見える）。 */}
+          0 走は空欄でなく「該当なし」（空欄は「まだ引いていない」に見える）。
+          材料そのものが引けていないときは「該当なし」と断定せず `—` に落とす。 */}
       <div
         className="cond-record"
-        title={`${conditionLabel} での過去成績（着順は新しい順）`}
+        title={
+          hasMaterial
+            ? `${conditionLabel} での過去成績（着順は新しい順）`
+            : "条件別実績を取得できていません（走っていないという意味ではありません）"
+        }
       >
-        {conditionRecordSummary(handicap.course_runs)}
+        {hasMaterial ? (
+          conditionRecordSummary(handicap.course_runs)
+        ) : (
+          <span className="muted">{NO_MATERIAL}</span>
+        )}
       </div>
+      {/* 過去走データ 0 件の印（#628）。**モデル列のトグルと直交する事実**なので
+          差pt 行（showModel 配下）ではなくここに常時出す——モデル列を畳んだだけで
+          「この馬の確率は欠損由来」という警告が消えてはいけない。 */}
+      {handicap.no_past_runs && (
+        <div className="premise-flags">
+          <span
+            className="chip chip-missing"
+            title="過去走データ 0 件。モデル確率はベースライン近くの推定なので、差pt（モ勝 − 市勝）は妙味の根拠にならない"
+          >
+            戦績なし
+          </span>
+        </div>
+      )}
       {/* 人気馬の前提が壊れているサイン（#628）。上位人気に限って出す（全頭だとノイズ）。
           休養日数・距離初・芝ダ初の**事実だけ**で、閾値判定はしない（読み分けは人間がやる）。 */}
       {badges.length > 0 && (
@@ -240,7 +261,9 @@ function HorseCardImpl({
             妙味
           </span>
         )}
-        {hasDetail && <span className="chip chip-note">書評</span>}
+        {/* 「書評」は書評（人手短評・根拠 bullet）がある馬の信号として残す。
+            hasDetail は条件別実績でもほぼ全頭 true になるので、そちらを使うと信号が消える。 */}
+        {hasCommentary && <span className="chip chip-note">書評</span>}
       </div>
     </div>
   );

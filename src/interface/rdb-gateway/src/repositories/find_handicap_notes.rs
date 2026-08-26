@@ -106,6 +106,7 @@ const PAST_RUNS_SQL: &str = r#"
             u.horse_name,
             u.date,
             u.venue,
+            u.race_num,
             u.surface,
             u.distance,
             u.finishing_position,
@@ -129,7 +130,9 @@ const PAST_RUNS_SQL: &str = r#"
         d.finishing_position,
         d.race_name
     FROM deduped AS d
-    ORDER BY d.horse_name, d.date DESC
+    -- 同日 2 走（別場・別 R）の順序を決定的にする。タイブレークが無いとポーリングのたびに
+    -- 着順列の並びが入れ替わって見える。
+    ORDER BY d.horse_name, d.date DESC, d.venue, d.race_num
 "#;
 
 /// 全出走馬の手動ハンデ精査材料を 1 クエリで取る（#628）。
@@ -169,12 +172,12 @@ pub async fn find_handicap_notes(
         .fetch_all(pool)
         .await?;
 
-    // 場グループは**芝のときだけ**広げる。`turf_group` は「洋芝で**芝の**適性が通じる」という
-    // 根拠で札幌⇄函館を束ねるので、ダートに当てると「洋芝(札幌/函館)ダ1700m」という
-    // 成立しないラベルになる（札幌ダ1700・函館ダ1700 は実在するので毎開催で発火する）。
+    // 場グループの規則は domain（`Venue::condition_group`）が単一の正本を持つ——
+    // 集計（ここ）と提示（use-case の `group_venue_slugs`）で別々に書くと second source になる。
     // 日本語場名で突き合わせる（`races.venue` / `horse_past_runs.venue` はどちらも
     // `Venue::as_jp()` と同じ表記で保存される）。
-    let group_jp: Vec<&str> = group_venues(venue, surface)
+    let group_jp: Vec<&str> = venue
+        .condition_group(surface)
         .iter()
         .map(|v| v.as_jp())
         .collect();
@@ -197,6 +200,8 @@ pub async fn find_handicap_notes(
             );
             continue;
         };
+        // `names` に無い馬は来ない（クエリが `horse_name = ANY($1)` で絞っており、
+        // 突き合わせも同じ `HorseName` 正規化を通す）。到達しない分岐なので警告は出さない。
         let Some(note) = out.get_mut(&name) else {
             continue;
         };
@@ -241,18 +246,4 @@ pub async fn find_handicap_notes(
         }
     }
     Ok(out)
-}
-
-/// 条件別実績の母集団になる場グループ（#628）。**芝のときだけ** [`Venue::turf_group`] で広げ、
-/// ダートでは当場 1 場に閉じる。
-///
-/// `turf_group` の根拠は「洋芝（札幌・函館）は**芝の**適性が通じる」であって、同じ 2 場でも
-/// ダートは別物。surface で gate しないと「洋芝(札幌/函館)ダ1700m」という成立しないラベルになる。
-fn group_venues(venue: Venue, surface: Surface) -> &'static [Venue] {
-    match surface {
-        Surface::Turf => venue.turf_group(),
-        // ダートは当場のみ。`is_yoshiba` を使わず match で網羅し、Surface が増えたら
-        // コンパイルエラーで気づけるようにする。
-        Surface::Dirt => venue.self_group(),
-    }
 }
