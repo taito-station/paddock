@@ -10,7 +10,6 @@ import {
   conditionRunLine,
   edgePtLabel,
   groupConditionLabel,
-  hasHandicapMaterial,
   layoffLabel,
   modelEdgePt,
   premiseBadges,
@@ -171,7 +170,7 @@ describe("premiseBadges", () => {
 
   it("過去走 0 件の馬には未経験バッジを出さない", () => {
     // サーバ側で same_*_starts == 0 由来なのでデータ欠損馬では必ず真になる。
-    // 「未経験」として出すと「データが無い」と取り違える（カードは 戦績なし に一本化）。
+    // 「未経験」として出すと「データが無い」と取り違える（カードは 戦績データなし に一本化）。
     const badges = premiseBadges(
       note({
         no_past_runs: true,
@@ -183,7 +182,9 @@ describe("premiseBadges", () => {
     expect(badges).toEqual([]);
   });
 
-  it("過去走 0 件でも間隔が分かっていれば間隔だけは出す", () => {
+  it("過去走 0 件でも間隔が分かっていれば間隔だけは出す（防御的分岐）", () => {
+    // サーバは `total_starts == 0 ⟺ last_run_date == None` なのでこの組み合わせを生成しない。
+    // 「no_past_runs なら間隔も落とす」という実装にしないための境界固定。
     const badges = premiseBadges(
       note({ no_past_runs: true, distance_untried: true, layoff_days: 30 }),
       1,
@@ -203,21 +204,6 @@ describe("premiseBadges", () => {
 
   it("材料が無ければ空（空のバッジ行を作らない）", () => {
     expect(premiseBadges(note(), 1)).toEqual([]);
-  });
-});
-
-describe("hasHandicapMaterial の境界", () => {
-  it("null / undefined だけを未取得とみなす", () => {
-    // サーバが `handicap: null` で未取得を明示するので、判定はその有無だけ。
-    expect(hasHandicapMaterial(null)).toBe(false);
-    expect(hasHandicapMaterial(undefined)).toBe(false);
-  });
-
-  it("材料が空でも「取得済み」と扱う（フラグから未取得を推測しない）", () => {
-    // 過去走はあるが今回条件では 0 走、かつ前走日が未来（データ不整合）で layoff も null——
-    // という馬を「未取得」に倒すと、`該当なし` と書くべき場面で `—` が出る。
-    const fetchedButEmpty = note();
-    expect(hasHandicapMaterial(fetchedButEmpty)).toBe(true);
   });
 });
 

@@ -264,7 +264,7 @@ GET /api/races/{race_id}/board[?budget=&track_condition=&blend_alpha=]
 | `course_runs` | array | **今回と同じ 場 × 芝ダ × 距離**（完全一致・距離の許容幅なし）の過去走。date 降順。空配列＝該当なし |
 | `group_runs` | array | 場グループ（`group_venues`）まで広げた過去走。**非空のときは `course_runs` を包含する上位集合**。非空になるのは**洋芝場の芝レース**だけで、それ以外（ダート戦を含む）は**空配列** |
 | `layoff_days` | int\|null | 前走からの間隔[日]。過去走なしは `null` |
-| `distance_untried` | bool | 今回距離が未経験（**過去走すべて**に今回距離 ±100m が 1 走も無い）。距離の経験は場・芝ダを問わず数える |
+| `distance_untried` | bool | 今回距離が未経験（**過去走すべて**に今回距離 ± `distance_tolerance_m` が 1 走も無い）。距離の経験は場・芝ダを問わず数える |
 | `surface_untried` | bool | 今回の芝ダが未経験（**過去走すべて**で当該芝ダを走っていない） |
 | `no_past_runs` | bool | 過去走（着順ありの走）が 0 件。モデルは欠損馬をベースライン近くに置くため「純モデル高 vs 市場低」の**偽の妙味**として出る。UI は差pt と同じ行にこのフラグを並べる。**これが `true` のとき `distance_untried` / `surface_untried` も必ず `true` になるが、意味は「未経験」ではなく「データが無い」**——UI は未経験バッジを出さず欠損フラグに一本化する |
 

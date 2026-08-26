@@ -615,7 +615,10 @@ export interface components {
         HandicapNoteSchema: {
             /** @description 今回条件（場 × 芝ダ × 距離の完全一致）での過去走。date 降順。空配列＝該当なし。 */
             course_runs: components["schemas"]["ConditionRunSchema"][];
-            /** @description 今回距離が未経験（**過去走すべて**に今回距離 ±100m が 1 走も無い。場・芝ダは問わない）。 */
+            /**
+             * @description 今回距離が未経験（**過去走すべて**に今回距離 ± `RaceBoardResponse.distance_tolerance_m`
+             *     が 1 走も無い。場・芝ダは問わない）。幅の正本は定数 1 か所で、ここには数値を書かない。
+             */
             distance_untried: boolean;
             /**
              * @description 場グループ（`RaceBoardResponse.group_venues`）まで広げた過去走。date 降順。

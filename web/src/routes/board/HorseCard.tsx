@@ -224,7 +224,7 @@ function HorseCardImpl({
             className="chip chip-missing"
             title="過去走データ 0 件。モデル確率はベースライン近くの推定なので、差pt（モ勝 − 市勝）は妙味の根拠にならない"
           >
-            戦績なし
+            戦績データなし
           </span>
         </div>
       )}

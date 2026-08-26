@@ -376,7 +376,8 @@ pub struct HandicapNoteSchema {
     /// **日数を出すだけで閾値判定はしない**——同じ休養明けでも 10ヶ月半と 4ヶ月半では質が違い、
     /// その読み分けは人間がやる。
     pub layoff_days: Option<u32>,
-    /// 今回距離が未経験（**過去走すべて**に今回距離 ±100m が 1 走も無い。場・芝ダは問わない）。
+    /// 今回距離が未経験（**過去走すべて**に今回距離 ± `RaceBoardResponse.distance_tolerance_m`
+    /// が 1 走も無い。場・芝ダは問わない）。幅の正本は定数 1 か所で、ここには数値を書かない。
     pub distance_untried: bool,
     /// 今回の芝ダが未経験（**過去走すべて**で当該芝ダを走っていない）。
     pub surface_untried: bool,

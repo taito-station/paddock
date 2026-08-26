@@ -18,19 +18,6 @@ export const NO_RECORD = "該当なし";
 // 「該当なし」は走っていないという事実、こちらは引けていないという状態。
 export const NO_MATERIAL = "—";
 
-// 材料が引けているか。サーバが `handicap: null` で「未取得」を明示するので、**その有無だけで判定する**。
-// フラグの中身から推測しない——`layoff_days` が null（前走日が未来のデータ不整合）で
-// 条件別実績も 0 走の馬を、誤って「未取得」に倒してしまうため。
-//
-// 詳細パネルを開く価値があるかの判定も兼ねる。書評（comment / detail_lines）が無くても
-// 材料があれば内訳を読む意味があり、これを見ないと**材料が乏しい馬ほどパネルに到達できない**
-// という逆転が起きる（`detail_lines` は factor が薄い馬ほど空になりやすい）。
-export function hasHandicapMaterial(
-  note: HandicapNote | null | undefined,
-): boolean {
-  return note != null;
-}
-
 // 「人気馬の前提が壊れているサイン」(2) を出す市場人気の上限。全頭に出すとノイズになるため
 // 上位人気だけに絞る（issue #628 の要件）。詳細パネルは全頭で出す（絞るのはカードの密度のため）。
 export const PREMISE_POPULARITY_MAX = 3;
@@ -48,7 +35,7 @@ export function conditionLabel(
 
 // 場グループのラベル（例 `洋芝(札幌/函館)芝2000m`）。`groupVenues` が空＝グループが当場のみで
 // 完全一致と同じ集合なので `null`（2 行目を出さない）。多場グループは洋芝（札幌・函館）だけで、
-// これはサーバ側 `Venue::turf_group` が決める（web は表記だけを持つ）。
+// これはサーバ側 `Venue::condition_group(surface)` が決める（web は表記だけを持つ）。
 export function groupConditionLabel(
   groupVenues: readonly string[],
   surface: string,
@@ -93,8 +80,11 @@ export function modelEdgePt(
 }
 
 // 差pt の表記（例 `+9.4pt`）。`null` は `-`。
+// 表示桁（小数 1 桁）で 0 に丸まる差は符号を付けない——`-0.0pt` は「わずかに負」なのか
+// 「ゼロ」なのか読めず、符号付きゼロとして誤読を招く。
 export function edgePtLabel(pt: number | null): string {
   if (pt == null) return "-";
+  if (Math.abs(pt) < 0.05) return "0.0pt";
   return `${pt >= 0 ? "+" : ""}${pt.toFixed(1)}pt`;
 }
 
@@ -113,7 +103,7 @@ export function layoffLabel(days: number | null | undefined): string | null {
 // **過去走 0 件の馬には未経験バッジを出さない。** `distance_untried` / `surface_untried` は
 // サーバ側で `same_*_starts == 0` から立つので、戦績データが無い馬では必ず真になる。
 // それを「未経験という事実」として出すと「データが無い」と取り違える（書評パネルは同じ状況を
-// `no_past_runs` で明示的に分岐している）。カードは `戦績なし` チップに一本化する。
+// `no_past_runs` で明示的に分岐している）。カードは `戦績データなし` チップに一本化する。
 export function premiseBadges(
   note: HandicapNote,
   popularity: number | null | undefined,

@@ -2061,7 +2061,7 @@
           },
           "distance_untried": {
             "type": "boolean",
-            "description": "今回距離が未経験（**過去走すべて**に今回距離 ±100m が 1 走も無い。場・芝ダは問わない）。"
+            "description": "今回距離が未経験（**過去走すべて**に今回距離 ± `RaceBoardResponse.distance_tolerance_m`\nが 1 走も無い。場・芝ダは問わない）。幅の正本は定数 1 か所で、ここには数値を書かない。"
           },
           "group_runs": {
             "type": "array",

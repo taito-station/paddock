@@ -213,6 +213,26 @@ pub async fn find_handicap_notes(
             );
             continue;
         };
+        // 着順は 1 以上が定義。0 以下は不正データなので **カウンタ加算より前に** 落とす
+        // ——馬名・日付のパース失敗と同じ扱いに揃える。後ろに置くと `total_starts` にだけ
+        // 数えられて `course_runs` から漏れ、UI が「該当なし（走っていない）」と断定する。
+        // なお `FinishingPosition` が 0 以下を通さないので通常のデータ投入経路では到達せず、
+        // 到達するのは旧ダンプ取り込み等で DB に直接入った行だけ（それゆえ回帰テストは無い）。
+        let Ok(finishing_position) = u32::try_from(row.finishing_position) else {
+            tracing::warn!(
+                horse_name = %row.horse_name,
+                finishing_position = row.finishing_position,
+                "条件別実績: 着順が不正な 1 走を母集団から除外した"
+            );
+            continue;
+        };
+        if finishing_position == 0 {
+            tracing::warn!(
+                horse_name = %row.horse_name,
+                "条件別実績: 着順 0 の 1 走を母集団から除外した"
+            );
+            continue;
+        }
         let row_distance = row.distance.max(0) as u32;
         let same_surface = row.surface == surface_key;
 
@@ -233,33 +253,23 @@ pub async fn find_handicap_notes(
         if !same_surface || row_distance != distance {
             continue;
         }
-        // 着順は 1 以上が定義。0 以下は不正データなので、`0着` として画面に出さず
-        // 日付・馬名のパース失敗と同じく warn+skip に揃える（母数の目減りはログに残す）。
-        let Ok(finishing_position) = u32::try_from(row.finishing_position) else {
-            tracing::warn!(
-                horse_name = %row.horse_name,
-                finishing_position = row.finishing_position,
-                "条件別実績: 着順が不正な 1 走を母集団から除外した"
-            );
-            continue;
-        };
-        if finishing_position == 0 {
-            tracing::warn!(
-                horse_name = %row.horse_name,
-                "条件別実績: 着順 0 の 1 走を母集団から除外した"
-            );
-            continue;
-        }
         let run = ConditionRun {
             date,
             finishing_position,
             race_name: row.race_name,
         };
-        if row.venue == venue.as_jp() {
-            note.course_runs.push(run.clone());
-        }
-        if group_is_wider && group_jp.contains(&row.venue.as_str()) {
-            note.group_runs.push(run);
+        let is_course = row.venue == venue.as_jp();
+        let is_group = group_is_wider && group_jp.contains(&row.venue.as_str());
+        // 大半のレース（洋芝以外の場・全ダート戦）では `group_is_wider == false` なので、
+        // その場合に `run` を clone しないよう分岐を分ける（`race_name: String` の無駄コピー回避）。
+        match (is_course, is_group) {
+            (true, true) => {
+                note.course_runs.push(run.clone());
+                note.group_runs.push(run);
+            }
+            (true, false) => note.course_runs.push(run),
+            (false, true) => note.group_runs.push(run),
+            (false, false) => {}
         }
     }
     Ok(out)

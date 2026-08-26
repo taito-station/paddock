@@ -198,8 +198,9 @@ pub struct ConditionRun {
 /// 「今回距離を経験済み」とみなす許容幅[m]（#628）。**過去走**（着順ありの走・キャリア全体）に
 /// `今回距離 ± この値` が 1 走も無ければ**距離未経験**として盤に事実を出す
 /// （閾値で go/no-go は出さない・読み分けは人間がやる）。
-/// 集計側（rdb-gateway の `find_handicap_notes`。SQL ではなく Rust の集計ループで適用する）と
-/// 提示側が共有する単一の真実源。web にも同値の `DISTANCE_TOLERANCE_M` があり、そちらは**表示専用**。
+/// **この値が唯一の正本**。適用は rdb-gateway の `find_handicap_notes`（SQL ではなく Rust の
+/// 集計ループ）で、web へはレスポンスの `distance_tolerance_m` として配る
+/// ——web 側に同値を持たせるとサーバだけ変えたとき画面が定義を偽る。
 pub const DISTANCE_EXPERIENCE_TOLERANCE_M: u32 = 100;
 
 /// 盤の手動ハンデ精査材料 1 頭分（#628・**提示専用 / decision-support**）。

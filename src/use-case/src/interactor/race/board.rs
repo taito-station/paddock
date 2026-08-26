@@ -162,7 +162,10 @@ pub struct BoardHorse {
 ///
 /// 出すのは**事実だけ**で、閾値で go/no-go を出さない（ADR 0079 と同じ理由——盤面のバッジが
 /// go シグナルとして誤読される事故を作らない）。読み分けは人間がやる。
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+/// `Default` は**意図的に derive しない**。既定値を作れると「材料なし」を
+/// `Some(HandicapNote::default())` で表す道が残り、`distance_untried: false` 等が
+/// 「計算していない事実」の断言になる。材料なしは `Option` の `None` だけで表す。
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HandicapNote {
     /// 今回条件（場 × 芝ダ × 距離の完全一致）での過去走。date 降順。空＝該当なし。
     pub course_runs: Vec<ConditionRun>,
@@ -300,9 +303,8 @@ impl<
                 apply_handicap(&mut horses, fetched, c.date, c.venue, c.surface)
             }
             // 出馬表が無ければ `predict_race_views` が先に NotFound を返すのでここには到達しない
-            // （防御的な分岐）。仮に来ても全馬 `HandicapNote::default()` のままで、
-            // UI は「該当なし」を出す——materials が引けていないだけなので、到達する経路が
-            // できたときは UI 側に「材料なし」の表現を足すこと。
+            // （防御的な分岐）。仮に来ても全馬 `handicap: None`＝材料なしのままで、
+            // UI は「該当なし」ではなく `—` を出す（型で「引けていない」を表している）。
             None => Vec::new(),
         };
 
