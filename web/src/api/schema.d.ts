@@ -616,11 +616,14 @@ export interface components {
         HandicapNoteSchema: {
             /** @description 今回条件（場 × 芝ダ × 距離の完全一致）での過去走。date 降順。空配列＝該当なし。 */
             course_runs: components["schemas"]["ConditionRunSchema"][];
-            /** @description 今回距離が未経験（近走に今回距離 ±100m が 1 走も無い）。 */
+            /** @description 今回距離が未経験（**過去走すべて**に今回距離 ±100m が 1 走も無い。場・芝ダは問わない）。 */
             distance_untried: boolean;
             /**
              * @description 場グループ（`RaceBoardResponse.group_venues`）まで広げた過去走。date 降順。
-             *     **`course_runs` を包含する上位集合**。件数が `course_runs` と同じなら情報が増えていない。
+             *     **`course_runs` を包含する上位集合**。
+             *
+             *     広がるのは**洋芝場（札幌・函館）の芝レース**だけで、それ以外（ダート戦を含む）は
+             *     **空配列**を返す（同じ集合を 2 度運んでも情報が増えないため）。`group_venues` も同時に空。
              */
             group_runs: components["schemas"]["ConditionRunSchema"][];
             /**
@@ -631,11 +634,14 @@ export interface components {
              */
             layoff_days?: number | null;
             /**
-             * @description 近走データが 0 件。モデルはデータ欠損馬をベースライン近くに置くため
+             * @description 過去走（着順ありの走）が 0 件。モデルはデータ欠損馬をベースライン近くに置くため
              *     「純モデル高 vs 市場低」の**偽の妙味**として出る。差pt と並べて読むための印。
+             *
+             *     これが `true` のとき `distance_untried` / `surface_untried` も必ず `true` になるが、
+             *     意味は「未経験」ではなく**「データが無い」**。クライアントは両者を取り違えないこと。
              */
             no_past_runs: boolean;
-            /** @description 今回の芝ダが未経験。 */
+            /** @description 今回の芝ダが未経験（**過去走すべて**で当該芝ダを走っていない）。 */
             surface_untried: boolean;
         };
         /**
@@ -999,8 +1005,10 @@ export interface components {
             field_size: number;
             /**
              * @description 条件別実績（#628）で `horses[].handicap.group_runs` の母集団になった**場スラッグの一覧**。
-             *     洋芝場（札幌・函館は同じ洋芝で適性が通じる）でのみ 2 場が入り、それ以外の場は空配列
-             *     ＝グループが自身 1 場で完全一致と同じ集合になるため、UI は 2 行目を出さない。
+             *     **洋芝場（札幌・函館）の芝レースでのみ** 2 場が入り、それ以外は空配列
+             *     ＝グループが当場 1 場で完全一致と同じ集合になるため、UI は 2 行目を出さない。
+             *
+             *     洋芝の根拠は「**芝の**適性が通じる」なので、同じ 2 場でも**ダート戦は空配列**になる。
              *     日本語ラベルの組み立ては web が持つ（表記の正本を 1 か所に保つ）。
              */
             group_venues: string[];

@@ -362,18 +362,24 @@ pub struct HandicapNoteSchema {
     /// 今回条件（場 × 芝ダ × 距離の完全一致）での過去走。date 降順。空配列＝該当なし。
     pub course_runs: Vec<ConditionRunSchema>,
     /// 場グループ（`RaceBoardResponse.group_venues`）まで広げた過去走。date 降順。
-    /// **`course_runs` を包含する上位集合**。件数が `course_runs` と同じなら情報が増えていない。
+    /// **`course_runs` を包含する上位集合**。
+    ///
+    /// 広がるのは**洋芝場（札幌・函館）の芝レース**だけで、それ以外（ダート戦を含む）は
+    /// **空配列**を返す（同じ集合を 2 度運んでも情報が増えないため）。`group_venues` も同時に空。
     pub group_runs: Vec<ConditionRunSchema>,
     /// 前走からの間隔[日]（当日 − 前走日）。過去走なしは `null`。
     /// **日数を出すだけで閾値判定はしない**——同じ休養明けでも 10ヶ月半と 4ヶ月半では質が違い、
     /// その読み分けは人間がやる。
     pub layoff_days: Option<u32>,
-    /// 今回距離が未経験（近走に今回距離 ±100m が 1 走も無い）。
+    /// 今回距離が未経験（**過去走すべて**に今回距離 ±100m が 1 走も無い。場・芝ダは問わない）。
     pub distance_untried: bool,
-    /// 今回の芝ダが未経験。
+    /// 今回の芝ダが未経験（**過去走すべて**で当該芝ダを走っていない）。
     pub surface_untried: bool,
-    /// 近走データが 0 件。モデルはデータ欠損馬をベースライン近くに置くため
+    /// 過去走（着順ありの走）が 0 件。モデルはデータ欠損馬をベースライン近くに置くため
     /// 「純モデル高 vs 市場低」の**偽の妙味**として出る。差pt と並べて読むための印。
+    ///
+    /// これが `true` のとき `distance_untried` / `surface_untried` も必ず `true` になるが、
+    /// 意味は「未経験」ではなく**「データが無い」**。クライアントは両者を取り違えないこと。
     pub no_past_runs: bool,
 }
 
@@ -444,8 +450,10 @@ pub struct RaceBoardResponse {
     /// **別の母集団同士の比較**になる。
     pub morning_unpriced_legs: Option<u32>,
     /// 条件別実績（#628）で `horses[].handicap.group_runs` の母集団になった**場スラッグの一覧**。
-    /// 洋芝場（札幌・函館は同じ洋芝で適性が通じる）でのみ 2 場が入り、それ以外の場は空配列
-    /// ＝グループが自身 1 場で完全一致と同じ集合になるため、UI は 2 行目を出さない。
+    /// **洋芝場（札幌・函館）の芝レースでのみ** 2 場が入り、それ以外は空配列
+    /// ＝グループが当場 1 場で完全一致と同じ集合になるため、UI は 2 行目を出さない。
+    ///
+    /// 洋芝の根拠は「**芝の**適性が通じる」なので、同じ 2 場でも**ダート戦は空配列**になる。
     /// 日本語ラベルの組み立ては web が持つ（表記の正本を 1 か所に保つ）。
     pub group_venues: Vec<String>,
     pub horses: Vec<BoardHorseSchema>,
@@ -542,8 +550,21 @@ impl From<RaceBoard> for RaceBoardResponse {
                     comment: h.comment,
                     detail_lines: h.detail_lines,
                     handicap: HandicapNoteSchema {
-                        course_runs: h.handicap.course_runs.iter().map(condition_run).collect(),
-                        group_runs: h.handicap.group_runs.iter().map(condition_run).collect(),
+                        // `b` を所有しているので move で写す（`race_name: String` の
+                        // 二重 clone を避ける——`group_runs` は `course_runs` の上位集合なので
+                        // 借用で回すと同じレース名を 2 度コピーすることになる）。
+                        course_runs: h
+                            .handicap
+                            .course_runs
+                            .into_iter()
+                            .map(condition_run)
+                            .collect(),
+                        group_runs: h
+                            .handicap
+                            .group_runs
+                            .into_iter()
+                            .map(condition_run)
+                            .collect(),
                         layoff_days: h.handicap.layoff_days,
                         distance_untried: h.handicap.distance_untried,
                         surface_untried: h.handicap.surface_untried,
@@ -556,11 +577,11 @@ impl From<RaceBoard> for RaceBoardResponse {
 }
 
 /// use-case の条件別実績 1 走を API スキーマへ写す（#628）。値の写像だけで判断は入れない。
-fn condition_run(r: &ConditionRun) -> ConditionRunSchema {
+fn condition_run(r: ConditionRun) -> ConditionRunSchema {
     ConditionRunSchema {
         date: r.date,
         finishing_position: r.finishing_position,
-        race_name: r.race_name.clone(),
+        race_name: r.race_name,
     }
 }
 

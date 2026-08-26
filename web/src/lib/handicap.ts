@@ -14,6 +14,17 @@ export type ConditionRun = components["schemas"]["ConditionRunSchema"];
 // 完全一致が 0 走のときの明示表記。**空欄と区別する**——空欄は「まだ引いていない」に見える。
 export const NO_RECORD = "該当なし";
 
+// `handicap` がレスポンスに含まれないときの縮退値（#570: 古い api-server が配信し続ける事故）。
+// 盤全体が落ちるより、材料だけ空で描くほうが被害が小さい。
+export const EMPTY_HANDICAP_NOTE: HandicapNote = {
+  course_runs: [],
+  group_runs: [],
+  layoff_days: null,
+  distance_untried: false,
+  surface_untried: false,
+  no_past_runs: false,
+};
+
 // 「人気馬の前提が壊れているサイン」(2) を出す市場人気の上限。全頭に出すとノイズになるため
 // 上位人気だけに絞る（issue #628 の要件）。詳細パネルは全頭で出す（絞るのはカードの密度のため）。
 export const PREMISE_POPULARITY_MAX = 3;
@@ -81,15 +92,22 @@ export function edgePtLabel(pt: number | null): string {
   return `${pt >= 0 ? "+" : ""}${pt.toFixed(1)}pt`;
 }
 
-// 休養明けの表記（例 `休養43日`）。**日数を出すだけで「久々」等の判定はしない**
+// 前走からの間隔の表記（例 `間隔43日`）。**日数を出すだけで「久々」等の判定はしない**
 // ——10ヶ月半の休養明けと 4ヶ月半の王道ローテは質が違い、その読み分けは人間がやる。
+// 「休養」と書くと通常ローテ（中1週）にも休養明けのラベルが付いて語感が壊れるため、
+// 書評パネルの見出し（`前走からの間隔`）と用語を揃える。
 export function layoffLabel(days: number | null | undefined): string | null {
   if (days == null) return null;
-  return `休養${days}日`;
+  return `間隔${days}日`;
 }
 
 // カードに出す「前提が壊れているサイン」(2) のバッジ群。上位人気に限って出す。
 // 事実だけを並べ、go/no-go は出さない。
+//
+// **過去走 0 件の馬には未経験バッジを出さない。** `distance_untried` / `surface_untried` は
+// サーバ側で `same_*_starts == 0` から立つので、戦績データが無い馬では必ず真になる。
+// それを「未経験という事実」として出すと「データが無い」と取り違える（書評パネルは同じ状況を
+// `no_past_runs` で明示的に分岐している）。カードは `近走なし` チップに一本化する。
 export function premiseBadges(
   note: HandicapNote,
   popularity: number | null | undefined,
@@ -98,9 +116,23 @@ export function premiseBadges(
   const out: string[] = [];
   const layoff = layoffLabel(note.layoff_days);
   if (layoff) out.push(layoff);
+  if (note.no_past_runs) return out;
   if (note.distance_untried) out.push("距離初");
   if (note.surface_untried) out.push("芝ダ初");
   return out;
+}
+
+// 詳細パネルを開く価値があるか（#628）。書評（comment / detail_lines）が無くても、
+// 条件別実績・洋芝グループ・間隔が入っていれば内訳を読む意味がある。
+// これを見ないと、**材料が乏しい馬ほどパネルに到達できない**という逆転が起きる
+// （`detail_lines` は factor が薄い馬ほど空になりやすい）。
+export function hasHandicapDetail(note: HandicapNote): boolean {
+  return (
+    note.course_runs.length > 0 ||
+    note.group_runs.length > 0 ||
+    note.layoff_days != null ||
+    note.no_past_runs
+  );
 }
 
 // 過去走 1 走の詳細行（例 `2026-08-02 3着 テストS`）。レース名は netkeiba 近走のみが持つ。

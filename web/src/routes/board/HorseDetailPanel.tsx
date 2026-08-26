@@ -1,9 +1,9 @@
 import { type RefObject } from "react";
 import { type BoardHorse, markSymbol } from "../../lib/board";
 import {
+  EMPTY_HANDICAP_NOTE,
   NO_RECORD,
   conditionRunLine,
-  layoffLabel,
   showsGroupRecord,
 } from "../../lib/handicap";
 
@@ -12,7 +12,7 @@ import {
 // undefined のときは何も描画しない（元の IIFE の早期 return 相当を props 側で表現）。
 //
 // #628 で手動ハンデ精査の材料を追加した。カードが出すのは要点（N走 着順列・上位人気のバッジ）で、
-// ここは内訳（どのレースか・洋芝グループ・全頭ぶんの休養日数）を持つ。
+// ここは内訳（どのレースか・洋芝グループ・全頭ぶんの間隔）を持つ。
 export function HorseDetailPanel({
   horse: h,
   conditionLabel,
@@ -29,8 +29,8 @@ export function HorseDetailPanel({
   closeBtnRef: RefObject<HTMLButtonElement | null>;
 }) {
   if (!h) return null;
-  const hc = h.handicap;
-  const layoff = layoffLabel(hc.layoff_days);
+  // 古い api-server が配信し続ける事故（#570）でフィールドが欠けてもパネルを落とさない。
+  const hc = h.handicap ?? EMPTY_HANDICAP_NOTE;
   return (
     <div
       className="horse-detail"
@@ -57,8 +57,8 @@ export function HorseDetailPanel({
         </button>
       </div>
       {h.comment && <p className="horse-detail-lead">{h.comment}</p>}
-      {/* パネルは hasDetail(=comment もしくは detail_lines あり)でのみ開くため、
-          detail_lines 空のとき comment は必ず存在する（lead 表示済み・追加表示は不要）。 */}
+      {/* comment / detail_lines は無いことがある（#628 でハンデ材料だけでも開けるようにした）。
+          その場合は下の handicap-detail が本体になる。 */}
       {h.detail_lines.length > 0 && (
         <ul className="horse-detail-lines">
           {h.detail_lines.map((line, i) => (
@@ -76,8 +76,10 @@ export function HorseDetailPanel({
               <span className="muted">{NO_RECORD}</span>
             ) : (
               <ul>
-                {hc.course_runs.map((r) => (
-                  <li key={`${r.date}-${r.finishing_position}`}>
+                {/* key に index を含める。dedup キーは (馬名, 日付, 場, R) なので
+                    (日付, 着順) の一意性は保証されない（同日・同着順の 2 走がありうる）。 */}
+                {hc.course_runs.map((r, i) => (
+                  <li key={`c-${i}-${r.date}-${r.finishing_position}`}>
                     {conditionRunLine(r)}
                   </li>
                 ))}
@@ -90,11 +92,18 @@ export function HorseDetailPanel({
             件数が増えていないときは同じ集合の再掲になるので出さない。 */}
         {groupConditionLabel && showsGroupRecord(hc) && (
           <div>
-            <dt>{groupConditionLabel}</dt>
+            {/* 上位集合なので当場の走も再掲される。件数だけ見て「別に N 走ある」と
+                誤読されないよう、内訳を見出しに明示する。 */}
+            <dt>
+              {groupConditionLabel}
+              <span className="muted">
+                （{hc.group_runs.length}走・うち当場{hc.course_runs.length}走）
+              </span>
+            </dt>
             <dd>
               <ul>
-                {hc.group_runs.map((r) => (
-                  <li key={`g-${r.date}-${r.finishing_position}`}>
+                {hc.group_runs.map((r, i) => (
+                  <li key={`g-${i}-${r.date}-${r.finishing_position}`}>
                     {conditionRunLine(r)}
                   </li>
                 ))}
@@ -103,17 +112,25 @@ export function HorseDetailPanel({
           </div>
         )}
         <div>
+          {/* 見出しが「前走からの間隔」なので値は日数だけ（カードの `間隔◯日` は
+              見出しが無いぶんラベルを付ける）。 */}
           <dt>前走からの間隔</dt>
-          <dd>{layoff ?? <span className="muted">近走なし</span>}</dd>
+          <dd>
+            {hc.layoff_days == null ? (
+              <span className="muted">過去走なし</span>
+            ) : (
+              `${hc.layoff_days}日`
+            )}
+          </dd>
         </div>
         <div>
           <dt>今回条件の経験</dt>
           <dd>
             {hc.no_past_runs ? (
-              // 近走 0 件は「未経験」ではなく「データが無い」。モデル確率がベースライン近くに
+              // 過去走 0 件は「未経験」ではなく「データが無い」。モデル確率がベースライン近くに
               // 置かれる＝差pt が偽の妙味として出る、という読み方を明示する。
               <span className="warn">
-                近走データ 0 件（モデル確率はベースライン近く＝差ptは妙味の根拠にならない）
+                過去走データ 0 件（モデル確率はベースライン近く＝差ptは妙味の根拠にならない）
               </span>
             ) : (
               [

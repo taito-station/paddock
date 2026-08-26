@@ -13,8 +13,8 @@ use chrono::NaiveDate;
 
 use paddock_domain::{
     HorseExplanation, HorseName, HorseNum, HorseProbability, KONSEN_BAND_RATIO, KONSEN_MIN_HORSES,
-    Mark, PadPrediction, PinnedSelection, Portfolio, RaceId, RaceOdds, TrackCondition, Venue,
-    konsen_band,
+    Mark, PadPrediction, PinnedSelection, Portfolio, RaceId, RaceOdds, Surface, TrackCondition,
+    Venue, konsen_band,
 };
 
 use crate::compose_portfolio;
@@ -86,8 +86,10 @@ pub struct RaceBoard {
     /// 並べるので、両者が違えば別母集団同士の比較になる。
     pub morning_unpriced_legs: Option<usize>,
     /// 条件別実績（#628）で `handicap.group_runs` の母集団になった場スラッグの一覧。
-    /// 洋芝場（札幌・函館は同じ洋芝で適性が通じる）でのみ 2 場が入り、それ以外の場は**空**
-    /// ＝グループが自身 1 場で完全一致と同じ集合になるため、UI は 2 行目を出さない。
+    /// **洋芝場（札幌・函館）の芝レースでのみ** 2 場が入り、それ以外は**空**
+    /// ＝グループが当場 1 場で完全一致と同じ集合になるため、UI は 2 行目を出さない。
+    ///
+    /// 洋芝の根拠は「**芝の**適性が通じる」なので、同じ 2 場でも**ダート戦は空**になる。
     /// 日本語ラベルの組み立ては web 側（`VENUE_JP` / `SURFACE_JP`）が持つ（表記の正本を 1 か所に保つ）。
     pub group_venues: Vec<String>,
     /// 全出走馬（truncate しない）。盤面順（`blended` と同順）。
@@ -160,20 +162,23 @@ pub struct BoardHorse {
 pub struct HandicapNote {
     /// 今回条件（場 × 芝ダ × 距離の完全一致）での過去走。date 降順。空＝該当なし。
     pub course_runs: Vec<ConditionRun>,
-    /// 場グループ（洋芝＝札幌⇄函館）まで広げた過去走。date 降順。
-    /// **`course_runs` を包含する上位集合**で、洋芝場でのみ広くなる。
-    /// 件数が `course_runs` と同じなら情報が増えていないので UI は出さない。
+    /// 場グループ（**芝のときだけ**洋芝＝札幌⇄函館へ広げる）まで含めた過去走。date 降順。
+    /// **`course_runs` を包含する上位集合**。広くならない条件（洋芝以外の場・ダート戦）では
+    /// **空**になる＝UI はグループ行を出さない。
     pub group_runs: Vec<ConditionRun>,
     /// 前走からの間隔[日]（当日 − 前走日）。過去走なしは `None`。
     /// **閾値で機械判定せず日数を出すだけ**——「10ヶ月半の休養明け」と「4ヶ月半の王道ローテ」は
     /// 同じ休養明けでも質が違い、その読み分けは人間がやる。
     pub layoff_days: Option<u32>,
-    /// 今回距離が未経験（近走に今回距離 ± 許容幅が 1 走も無い）。
+    /// 今回距離が未経験（**過去走すべて**に今回距離 ± 許容幅が 1 走も無い。場・芝ダは問わない）。
     pub distance_untried: bool,
-    /// 今回の芝ダが未経験。
+    /// 今回の芝ダが未経験（**過去走すべて**で当該芝ダを走っていない）。
     pub surface_untried: bool,
-    /// 近走データが 0 件。モデルはデータ欠損馬をベースライン近くに置くため、
+    /// 過去走（着順ありの走）が 0 件。モデルはデータ欠損馬をベースライン近くに置くため、
     /// **「純モデル高 vs 市場低」という偽の妙味**として盤に出る。差pt と並べて読むための印。
+    ///
+    /// これが真のとき `distance_untried` / `surface_untried` も必ず真になるが、意味は
+    /// 「未経験」ではなく**「データが無い」**。UI は両者を取り違えないこと。
     pub no_past_runs: bool,
 }
 
@@ -289,8 +294,12 @@ impl<
                     .horse_handicap_notes(&names, c.venue, c.surface, c.distance, Some(c.date))
                     .await?;
                 enrich_handicap(&mut horses, &notes, c.date);
-                group_venue_slugs(c.venue)
+                group_venue_slugs(c.venue, c.surface)
             }
+            // 出馬表が無ければ `predict_race_views` が先に NotFound を返すのでここには到達しない
+            // （防御的な分岐）。仮に来ても全馬 `HandicapNote::default()` のままで、
+            // UI は「該当なし」を出す——materials が引けていないだけなので、到達する経路が
+            // できたときは UI 側に「材料なし」の表現を足すこと。
             None => Vec::new(),
         };
 
@@ -357,7 +366,14 @@ impl<
 /// 条件別実績（#628）の場グループをスラッグ配列にする純関数。グループが自身 1 場のときは
 /// **空**を返す——完全一致と同じ集合なので、UI に 2 行目を出す意味がないことを型ではなく
 /// 値で表す（`vec![自分]` を返すと UI 側が毎回 len==1 を判定する羽目になる）。
-fn group_venue_slugs(venue: Venue) -> Vec<String> {
+///
+/// **芝のときだけ広げる**。`turf_group` の根拠は「洋芝（札幌・函館）は**芝の**適性が通じる」で
+/// あって、同じ 2 場でもダートは別物。surface で gate しないとダート戦で
+/// 「洋芝(札幌/函館)ダ1700m」という成立しないラベルが出る（rdb-gateway 側の集計と同じ規則）。
+fn group_venue_slugs(venue: Venue, surface: Surface) -> Vec<String> {
+    if surface != Surface::Turf {
+        return Vec::new();
+    }
     let group = venue.turf_group();
     if group.len() <= 1 {
         return Vec::new();
@@ -384,7 +400,7 @@ fn enrich_handicap(
             continue;
         };
         h.handicap = HandicapNote {
-            course_runs: row.exact_runs.clone(),
+            course_runs: row.course_runs.clone(),
             group_runs: row.group_runs.clone(),
             // 過去走が未来日付（データ不整合）なら負の間隔になるので 0 に丸めず None に倒す
             // ——「休養 0 日」と誤読させるより、材料が無い扱いのほうが安全側。
@@ -997,19 +1013,32 @@ mod tests {
     }
 
     #[test]
-    fn group_venue_slugs_only_widens_for_yoshiba() {
-        // 洋芝場は札幌⇄函館の 2 場グループ。
+    fn group_venue_slugs_only_widens_for_yoshiba_turf() {
+        // 洋芝場の**芝**は札幌⇄函館の 2 場グループ。
         assert_eq!(
-            group_venue_slugs(Venue::Sapporo),
+            group_venue_slugs(Venue::Sapporo, Surface::Turf),
             vec!["sapporo".to_string(), "hakodate".to_string()]
         );
         assert_eq!(
-            group_venue_slugs(Venue::Hakodate),
+            group_venue_slugs(Venue::Hakodate, Surface::Turf),
             vec!["sapporo".to_string(), "hakodate".to_string()]
         );
-        // それ以外は完全一致と同じ集合なので**空**（UI に 2 行目を出す意味がない）。
-        assert!(group_venue_slugs(Venue::Niigata).is_empty());
-        assert!(group_venue_slugs(Venue::Tokyo).is_empty());
+        // それ以外の場は完全一致と同じ集合なので**空**（UI に 2 行目を出す意味がない）。
+        assert!(group_venue_slugs(Venue::Niigata, Surface::Turf).is_empty());
+        assert!(group_venue_slugs(Venue::Tokyo, Surface::Turf).is_empty());
+    }
+
+    #[test]
+    fn group_venue_slugs_never_widens_for_dirt() {
+        // 洋芝の根拠は「**芝の**適性が通じる」であって、同じ 2 場でもダートは別物。
+        // gate しないと「洋芝(札幌/函館)ダ1700m」という成立しないラベルが出る
+        //（札幌ダ1700・函館ダ1700 は実在するので毎開催で発火する）。
+        for v in [Venue::Sapporo, Venue::Hakodate] {
+            assert!(
+                group_venue_slugs(v, Surface::Dirt).is_empty(),
+                "{v:?} のダートでグループが広がっている"
+            );
+        }
     }
 
     #[test]
@@ -1020,7 +1049,7 @@ mod tests {
         let notes = notes_of(vec![(
             1,
             HandicapNoteRow {
-                exact_runs: vec![run(2026, 8, 2, 3), run(2026, 5, 10, 3)],
+                course_runs: vec![run(2026, 8, 2, 3), run(2026, 5, 10, 3)],
                 group_runs: vec![run(2026, 8, 2, 3), run(2026, 5, 10, 3)],
                 total_starts: 12,
                 last_run_date: Some(ymd(2026, 8, 2)),
@@ -1083,7 +1112,7 @@ mod tests {
         let notes = notes_of(vec![(
             1,
             HandicapNoteRow {
-                exact_runs: Vec::new(),
+                course_runs: Vec::new(),
                 group_runs: vec![run(2026, 7, 5, 1), run(2026, 6, 14, 5)],
                 total_starts: 8,
                 last_run_date: Some(ymd(2026, 7, 5)),

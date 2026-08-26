@@ -195,8 +195,9 @@ pub struct ConditionRun {
     pub race_name: Option<String>,
 }
 
-/// 「今回距離を経験済み」とみなす許容幅[m]（#628）。近走に `今回距離 ± この値` が 1 走も無ければ
-/// **距離未経験**として盤に事実を出す（閾値で go/no-go は出さない・読み分けは人間がやる）。
+/// 「今回距離を経験済み」とみなす許容幅[m]（#628）。**過去走**（着順ありの走・キャリア全体）に
+/// `今回距離 ± この値` が 1 走も無ければ**距離未経験**として盤に事実を出す
+/// （閾値で go/no-go は出さない・読み分けは人間がやる）。
 /// 集計（rdb-gateway の SQL）と提示側が共有する単一の真実源。
 pub const DISTANCE_EXPERIENCE_TOLERANCE_M: u32 = 100;
 
@@ -209,19 +210,23 @@ pub const DISTANCE_EXPERIENCE_TOLERANCE_M: u32 = 100;
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct HandicapNoteRow {
     /// 完全一致（今回と同じ 場 × 芝ダ × 距離）の過去走。date 降順。
-    pub exact_runs: Vec<ConditionRun>,
-    /// 場グループ（[`Venue::turf_group`] × 同芝ダ × 同距離）の過去走。date 降順。
-    /// **`exact_runs` を包含する上位集合**で、洋芝場（札幌・函館）でのみ完全一致より広くなる。
-    /// それ以外の場ではグループが自身 1 場なので `exact_runs` と同一内容になる。
+    pub course_runs: Vec<ConditionRun>,
+    /// 場グループ（**芝のときだけ** [`Venue::turf_group`] で広げる × 同芝ダ × 同距離）の過去走。
+    /// date 降順で **`course_runs` を包含する上位集合**。
+    ///
+    /// 広くなるのは**洋芝場（札幌・函館）の芝レース**だけで、それ以外（ダート戦を含む）は
+    /// グループが当場 1 場になるため**空**を返す（同じ集合を 2 度運んでも情報が増えないため）。
+    /// 呼び出し側は「空 = グループ行を出さない」と読む。
     pub group_runs: Vec<ConditionRun>,
-    /// 全過去走数（`results` ∪ `horse_past_runs`）。`0` = 近走データ欠損＝モデル確率が
-    /// ベースライン近くに置かれるため「純モデル高 vs 市場低」の偽の妙味が出る印。
+    /// 過去走の総数（`results` ∪ `horse_past_runs`・着順ありの走のみ）。`0` = 戦績データ欠損＝
+    /// モデル確率がベースライン近くに置かれるため「純モデル高 vs 市場低」の偽の妙味が出る印。
     pub total_starts: u32,
     /// 直近の出走日（前走）。過去走なしは `None`。休養明けの長さは呼び出し側が当日との差で出す。
     pub last_run_date: Option<NaiveDate>,
-    /// 今回の芝ダでの出走数。`0` = 今回の芝ダが未経験。
+    /// 今回の芝ダでの出走数（**キャリア全体**）。`0` = 今回の芝ダが未経験。
     pub same_surface_starts: u32,
-    /// 今回距離帯（± [`DISTANCE_EXPERIENCE_TOLERANCE_M`]）での出走数。`0` = 今回距離が未経験。
+    /// 今回距離帯（± [`DISTANCE_EXPERIENCE_TOLERANCE_M`]）での出走数（**キャリア全体**・
+    /// 場と芝ダは問わない）。`0` = 今回距離が未経験。
     pub same_distance_starts: u32,
 }
 

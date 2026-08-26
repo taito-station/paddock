@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  EMPTY_HANDICAP_NOTE,
   NO_RECORD,
   PREMISE_POPULARITY_MAX,
   type ConditionRun,
@@ -9,6 +10,7 @@ import {
   conditionRunLine,
   edgePtLabel,
   groupConditionLabel,
+  hasHandicapDetail,
   layoffLabel,
   modelEdgePt,
   premiseBadges,
@@ -130,13 +132,18 @@ describe("modelEdgePt / edgePtLabel", () => {
 
 describe("layoffLabel", () => {
   it("日数をそのまま出す（久々かどうかの判定はしない）", () => {
-    expect(layoffLabel(14)).toBe("休養14日");
+    expect(layoffLabel(14)).toBe("間隔14日");
     // 10ヶ月半も 4ヶ月半も同じ書式で出し、質の読み分けは人に残す（#628）。
-    expect(layoffLabel(315)).toBe("休養315日");
-    expect(layoffLabel(136)).toBe("休養136日");
+    expect(layoffLabel(315)).toBe("間隔315日");
+    expect(layoffLabel(136)).toBe("間隔136日");
   });
 
-  it("近走なしは null", () => {
+  it("パネル側の見出し（前走からの間隔）と用語を揃える", () => {
+    // 「休養」だと中1週の通常ローテにも休養明けのラベルが付いて語感が壊れる。
+    expect(layoffLabel(7)).not.toContain("休養");
+  });
+
+  it("過去走なしは null", () => {
     expect(layoffLabel(null)).toBeNull();
     expect(layoffLabel(undefined)).toBeNull();
   });
@@ -148,7 +155,7 @@ describe("premiseBadges", () => {
       note({ layoff_days: 315, distance_untried: true }),
       1,
     );
-    expect(badges).toEqual(["休養315日", "距離初"]);
+    expect(badges).toEqual(["間隔315日", "距離初"]);
   });
 
   it("芝ダ未経験も出す", () => {
@@ -156,6 +163,28 @@ describe("premiseBadges", () => {
     expect(premiseBadges(note({ surface_untried: true }), 2)).toEqual([
       "芝ダ初",
     ]);
+  });
+
+  it("過去走 0 件の馬には未経験バッジを出さない", () => {
+    // サーバ側で same_*_starts == 0 由来なのでデータ欠損馬では必ず真になる。
+    // 「未経験」として出すと「データが無い」と取り違える（カードは 近走なし に一本化）。
+    const badges = premiseBadges(
+      note({
+        no_past_runs: true,
+        distance_untried: true,
+        surface_untried: true,
+      }),
+      1,
+    );
+    expect(badges).toEqual([]);
+  });
+
+  it("過去走 0 件でも間隔が分かっていれば間隔だけは出す", () => {
+    const badges = premiseBadges(
+      note({ no_past_runs: true, distance_untried: true, layoff_days: 30 }),
+      1,
+    );
+    expect(badges).toEqual(["間隔30日"]);
   });
 
   it("上位人気の外は出さない（全頭に出すとノイズになる）", () => {
@@ -170,6 +199,37 @@ describe("premiseBadges", () => {
 
   it("材料が無ければ空（空のバッジ行を作らない）", () => {
     expect(premiseBadges(note(), 1)).toEqual([]);
+  });
+});
+
+describe("hasHandicapDetail", () => {
+  it("書評が無くても材料があればパネルを開ける", () => {
+    // detail_lines は factor が薄い馬ほど空になりやすいので、これを見ないと
+    // **材料が乏しい馬ほど内訳に到達できない**という逆転が起きる。
+    expect(hasHandicapDetail(note({ course_runs: [run("2026-08-02", 3)] }))).toBe(
+      true,
+    );
+    expect(hasHandicapDetail(note({ group_runs: [run("2026-08-02", 3)] }))).toBe(
+      true,
+    );
+    expect(hasHandicapDetail(note({ layoff_days: 30 }))).toBe(true);
+    // 過去走 0 件そのものが読む価値のある材料（偽の妙味の印）。
+    expect(hasHandicapDetail(note({ no_past_runs: true }))).toBe(true);
+  });
+
+  it("材料が何も無ければ false", () => {
+    expect(hasHandicapDetail(note())).toBe(false);
+  });
+});
+
+describe("EMPTY_HANDICAP_NOTE", () => {
+  it("縮退値はフラグが立たず材料なし扱いになる", () => {
+    // 古い api-server が handicap を返さない事故（#570）で盤全体を落とさないための縮退値。
+    // 「材料なし」であって「該当なし（走っていない）」の断定ではないので、
+    // 欠損フラグ（no_past_runs）を立てない。
+    expect(EMPTY_HANDICAP_NOTE.no_past_runs).toBe(false);
+    expect(hasHandicapDetail(EMPTY_HANDICAP_NOTE)).toBe(false);
+    expect(premiseBadges(EMPTY_HANDICAP_NOTE, 1)).toEqual([]);
   });
 });
 

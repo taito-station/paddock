@@ -46,19 +46,27 @@ impl Venue {
         ]
     }
 
-    /// 洋芝（北海道開催＝札幌・函館）の場か。両場は同じ洋芝でコース適性が通じるため、
-    /// 条件別実績（#628・提示専用）では `turf_group` で 1 グループとして集計できる。
+    /// **芝の**適性が通じる場グループ（自身を必ず含む）。洋芝（北海道開催＝札幌・函館）は
+    /// 同じ洋芝でコース適性が通じるため 2 場、それ以外の場は自身 1 場のみ
+    /// （＝グループ化しても完全一致と同じ集合になる）。
+    ///
+    /// **芝限定**である点に注意。同じ 2 場でもダートは別物なので、条件別実績（#628・提示専用）
+    /// の集計側は芝のときだけこれを使い、ダートでは [`Venue::self_group`] に落とす。
     /// **確率推定には入れない**——純モデルの resolution 天井は ADR 0058/0059 で決着済み。
-    pub fn is_yoshiba(&self) -> bool {
-        matches!(self, Venue::Sapporo | Venue::Hakodate)
-    }
-
-    /// 芝の適性が通じる場グループ（自身を必ず含む）。洋芝場は札幌・函館の 2 場、
-    /// それ以外の場は自身 1 場のみ（＝グループ化しても完全一致と同じ集合になる）。
     pub fn turf_group(&self) -> &'static [Venue] {
         const YOSHIBA: &[Venue] = &[Venue::Sapporo, Venue::Hakodate];
         match self {
             Venue::Sapporo | Venue::Hakodate => YOSHIBA,
+            other => other.self_group(),
+        }
+    }
+
+    /// 自身 1 場だけのグループ。グループ化しない条件（ダート等）で [`Venue::turf_group`] と
+    /// 同じ型を返すために使う。
+    pub fn self_group(&self) -> &'static [Venue] {
+        match self {
+            Venue::Sapporo => &[Venue::Sapporo],
+            Venue::Hakodate => &[Venue::Hakodate],
             Venue::Fukushima => &[Venue::Fukushima],
             Venue::Niigata => &[Venue::Niigata],
             Venue::Tokyo => &[Venue::Tokyo],
@@ -161,12 +169,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn yoshiba_venues_are_sapporo_and_hakodate() {
+    fn self_group_is_always_exactly_self() {
         for v in Venue::all() {
             assert_eq!(
-                v.is_yoshiba(),
-                matches!(v, Venue::Sapporo | Venue::Hakodate),
-                "{v:?} の洋芝判定が想定と違う"
+                v.self_group(),
+                &[v],
+                "{v:?} の self_group が自身 1 場でない"
             );
         }
     }
@@ -183,7 +191,10 @@ mod tests {
             &[Venue::Sapporo, Venue::Hakodate]
         );
         // 洋芝以外は自身のみ＝グループ化しても完全一致と同じ集合になる。
-        for v in Venue::all().into_iter().filter(|v| !v.is_yoshiba()) {
+        for v in Venue::all()
+            .into_iter()
+            .filter(|v| !matches!(v, Venue::Sapporo | Venue::Hakodate))
+        {
             assert_eq!(v.turf_group(), &[v], "{v:?} が単独グループになっていない");
         }
     }

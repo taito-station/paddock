@@ -223,9 +223,11 @@ export function RaceBoard() {
   // 条件別実績（#628）のラベル。完全一致（`新潟芝1000m`）と、洋芝場だけ広がる場グループ
   //（`洋芝(札幌/函館)芝2000m`）。どの場をグループにするかはサーバ（`Venue::turf_group`）が決め、
   // web は表記だけを持つ（日本語ラベルの正本を VENUE_JP / SURFACE_JP に一本化）。
+  // `group_venues` は必須フィールドだが、古い api-server が配信し続ける事故（#570）では
+  // 欠けうる。盤全体を落とさないよう空配列へ縮退させる（＝グループ行を出さないだけ）。
   const condLabel = d ? conditionLabel(d.venue, d.surface, d.distance) : "";
   const groupCondLabel = d
-    ? groupConditionLabel(d.group_venues, d.surface, d.distance)
+    ? groupConditionLabel(d.group_venues ?? [], d.surface, d.distance)
     : null;
 
   // オッズ鮮度（#475）。current_at（最新スイープ取得時刻）と now の差で判定。未発走のときだけ
@@ -556,9 +558,11 @@ export function RaceBoard() {
               <div>
                 <dt>差 / 近走なし</dt>
                 <dd>
-                  差＝モデル勝率 − 市勝[pt]（正＝モデルが市場より高評価）。
+                  差＝<strong>モ勝（純モデル α=1.0）</strong> −
+                  市勝[pt]。モデル値の表示と連動するので、モデル列を畳むと差も畳まれる。
                   <strong>近走なし</strong>
-                  が付く馬はモデル確率がベースライン近くの推定なので、差ptは妙味の根拠にならない（偽の妙味）。
+                  が付く馬は過去走データが 0
+                  件でモデル確率がベースライン近くの推定なので、差ptは妙味の根拠にならない（偽の妙味）。
                 </dd>
               </div>
               <div>
@@ -568,17 +572,20 @@ export function RaceBoard() {
                   （千直・ダート短距離など）で、一般的な近走との乖離を横並びで読むための事実。
                   0走は<strong>該当なし</strong>と明示する（空欄＝未取得と区別）。
                   {groupCondLabel &&
-                    `洋芝（札幌・函館）は場が違っても適性が通じるため、書評パネルで「${groupCondLabel}」を別行に併記する。`}
+                    `洋芝（札幌・函館）は場が違っても芝の適性が通じるため、書評パネルで「${groupCondLabel}」を別行に併記する（ダート戦では併記しない）。`}
                 </dd>
               </div>
               <div>
-                <dt>休養◯日 / 距離初 / 芝ダ初</dt>
+                <dt>間隔◯日 / 距離初 / 芝ダ初</dt>
                 <dd>
                   上位{" "}
                   {PREMISE_POPULARITY_MAX}
                   番人気までに出す「前提が壊れているサイン」。
                   <strong>事実だけを出し、閾値で良し悪しを判定しない</strong>
                   （同じ休養明けでも 10ヶ月半と 4ヶ月半では質が違う。読み分けは人が行う）。
+                  過去走データが 0 件の馬には
+                  <strong>距離初 / 芝ダ初を出さない</strong>
+                  ——「未経験」ではなく「データが無い」ため（代わりに 近走なし が付く）。
                 </dd>
               </div>
             </dl>

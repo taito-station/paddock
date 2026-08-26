@@ -8,8 +8,11 @@ import {
 } from "../../lib/board";
 import { placeBand } from "../../lib/live";
 import {
+  EMPTY_HANDICAP_NOTE,
+  type HandicapNote,
   conditionRecordSummary,
   edgePtLabel,
+  hasHandicapDetail,
   modelEdgePt,
   premiseBadges,
 } from "../../lib/handicap";
@@ -39,13 +42,17 @@ function HorseCardImpl({
   isSelected: boolean;
   onSelect: (horseNum: number, trigger: HTMLElement) => void;
 }) {
-  // detail_lines はスキーマ上必須（string[]）。comment または根拠行があれば展開可。
-  const hasDetail = !!h.comment || h.detail_lines.length > 0;
+  // 手動ハンデ精査の材料（#628）。いずれも事実の表示であって go/no-go 判定ではない。
+  // api-server が古い成果物を配信し続ける事故（#570）ではこのフィールドが欠けうるので、
+  // 盤全体を落とさないよう既定値へ縮退させる（型は必須のまま＝正常系は素通り）。
+  const handicap: HandicapNote = h.handicap ?? EMPTY_HANDICAP_NOTE;
+  // detail_lines はスキーマ上必須（string[]）。comment・根拠行・ハンデ材料のいずれかがあれば展開可。
+  const hasDetail =
+    !!h.comment || h.detail_lines.length > 0 || hasHandicapDetail(handicap);
   // 朝↔現の単勝変動（#448）。朝 snapshot が無い馬は null（矢印を出さない）。
   const oddsMove = winOddsMove(h.morning_win_odds, h.win_odds);
-  // 手動ハンデ精査の材料（#628）。いずれも事実の表示であって go/no-go 判定ではない。
   const edgePt = modelEdgePt(h.pure_win_prob, h.market_implied);
-  const badges = premiseBadges(h.handicap, h.popularity);
+  const badges = premiseBadges(handicap, h.popularity);
   return (
     <div
       className={
@@ -142,26 +149,29 @@ function HorseCardImpl({
           <dt>市勝</dt>
           <dd>{h.market_implied == null ? "-" : pct(h.market_implied)}</dd>
         </div>
-        {/* 純モデル−市場の差[pt]（#628）。正＝モデルが市場より高く見ている＝妙味候補。
-            ただし近走 0 件の馬はモデルがベースライン近くに置かれるだけの**偽の妙味**なので、
-            欠損フラグを必ず同じ行に並べる（差pt だけ見て買い材料と誤読しないため）。 */}
-        <div
-          className="edge-row"
-          title="純モデル勝率 − 市場implied勝率[pt]。正＝モデルが市場より高く評価。近走データが無い馬はモデルがベースライン近くに置かれるため、この差は妙味ではなく欠損の影"
-        >
-          <dt>差</dt>
-          <dd>
-            {edgePtLabel(edgePt)}
-            {h.handicap.no_past_runs && (
-              <span
-                className="chip chip-missing"
-                title="近走データ 0 件。モデル確率はベースライン近くの推定なので、差pt は妙味の根拠にならない"
-              >
-                近走なし
-              </span>
-            )}
-          </dd>
-        </div>
+        {/* 純モデル−市場の差[pt]（#628）。被減数の「モ勝」と同じ showModel トグル配下に置く
+            ——モデル列を畳んだ状態で差だけ残ると、値の出所が画面から消える。
+            過去走 0 件の馬はモデルがベースライン近くに置かれるだけなので、欠損フラグを
+            必ず同じ行に並べる（差pt だけ見て買い材料と誤読しないため）。 */}
+        {showModel && (
+          <div
+            className="edge-row"
+            title="モデル勝率（純 α=1.0）− 市場implied勝率[pt]。過去走データが無い馬はモデルがベースライン近くに置かれるため、この差は妙味ではなく欠損の影"
+          >
+            <dt>差</dt>
+            <dd>
+              {edgePtLabel(edgePt)}
+              {handicap.no_past_runs && (
+                <span
+                  className="chip chip-missing"
+                  title="過去走データ 0 件。モデル確率はベースライン近くの推定なので、差pt は妙味の根拠にならない"
+                >
+                  近走なし
+                </span>
+              )}
+            </dd>
+          </div>
+        )}
         <div className="group-sep">
           <dt>単勝</dt>
           <dd>{h.win_odds == null ? "-" : h.win_odds.toFixed(1)}</dd>
@@ -200,7 +210,7 @@ function HorseCardImpl({
         className="cond-record"
         title={`${conditionLabel} での過去成績（着順は新しい順）`}
       >
-        {conditionRecordSummary(h.handicap.course_runs)}
+        {conditionRecordSummary(handicap.course_runs)}
       </div>
       {/* 人気馬の前提が壊れているサイン（#628）。上位人気に限って出す（全頭だとノイズ）。
           休養日数・距離初・芝ダ初の**事実だけ**で、閾値判定はしない（読み分けは人間がやる）。 */}

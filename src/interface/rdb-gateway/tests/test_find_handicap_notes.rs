@@ -113,10 +113,10 @@ fn horse_id(s: &str) -> HorseId {
     HorseId::try_from(s.to_string()).unwrap()
 }
 
-/// 交差条件（場 × 芝ダ × 距離）だけが `exact_runs` に入る。周辺分布では区別できない
+/// 交差条件（場 × 芝ダ × 距離）だけが `course_runs` に入る。周辺分布では区別できない
 /// 「同場だが別距離」「同距離だが別場」「同場同距離だが芝ダ違い」を個別に排除する。
 #[sqlx::test(migrations = "../../../deployments/db/migrations")]
-async fn exact_runs_require_all_three_conditions(pool: sqlx::PgPool) {
+async fn course_runs_require_all_three_conditions(pool: sqlx::PgPool) {
     let repo = PostgresRepository::new(pool);
     repo.upsert_horse_history(
         &horse_id("2020100001"),
@@ -192,15 +192,15 @@ async fn exact_runs_require_all_three_conditions(pool: sqlx::PgPool) {
         .unwrap();
     let n = &notes[&name("ウマA")];
 
-    assert_eq!(n.exact_runs.len(), 2, "千直 2 走だけが完全一致");
+    assert_eq!(n.course_runs.len(), 2, "千直 2 走だけが完全一致");
     // date 降順。着順・レース名も運ぶ。
-    assert_eq!(n.exact_runs[0].date, ymd(2026, 7, 1));
-    assert_eq!(n.exact_runs[0].finishing_position, 3);
-    assert_eq!(n.exact_runs[0].race_name.as_deref(), Some("テストS"));
-    assert_eq!(n.exact_runs[1].finishing_position, 8);
+    assert_eq!(n.course_runs[0].date, ymd(2026, 7, 1));
+    assert_eq!(n.course_runs[0].finishing_position, 3);
+    assert_eq!(n.course_runs[0].race_name.as_deref(), Some("テストS"));
+    assert_eq!(n.course_runs[1].finishing_position, 8);
 
-    // 新潟は洋芝でないのでグループ＝自身 1 場＝完全一致と同じ集合。
-    assert_eq!(n.group_runs, n.exact_runs);
+    // 新潟は洋芝でないのでグループは広がらない＝空（同じ集合を 2 度運ばない）。
+    assert!(n.group_runs.is_empty());
 
     // 周辺分布の値は交差条件とは別に数える。
     assert_eq!(n.total_starts, 5);
@@ -211,7 +211,7 @@ async fn exact_runs_require_all_three_conditions(pool: sqlx::PgPool) {
     assert_eq!(n.last_run_date, Some(ymd(2026, 7, 1)));
 }
 
-/// 洋芝（札幌⇄函館）は `group_runs` で 1 グループに束ねるが、`exact_runs` は当場のみ。
+/// 洋芝（札幌⇄函館）は `group_runs` で 1 グループに束ねるが、`course_runs` は当場のみ。
 /// 「完全一致は該当なしだが洋芝では走っている」を別行で出せることが要件（#628）。
 #[sqlx::test(migrations = "../../../deployments/db/migrations")]
 async fn yoshiba_group_widens_only_group_runs(pool: sqlx::PgPool) {
@@ -269,16 +269,115 @@ async fn yoshiba_group_widens_only_group_runs(pool: sqlx::PgPool) {
         .unwrap();
     let n = &notes[&name("ウマB")];
 
-    assert_eq!(n.exact_runs.len(), 1, "当場（札幌）のみが完全一致");
-    assert_eq!(n.exact_runs[0].finishing_position, 1);
+    assert_eq!(n.course_runs.len(), 1, "当場（札幌）のみが完全一致");
+    assert_eq!(n.course_runs[0].finishing_position, 1);
     assert_eq!(n.group_runs.len(), 2, "洋芝グループは札幌＋函館の同条件");
-    // group_runs は exact_runs の上位集合で date 降順。
+    // group_runs は course_runs の上位集合で date 降順。
     assert_eq!(n.group_runs[0].date, ymd(2026, 7, 5));
     assert_eq!(n.group_runs[1].date, ymd(2026, 6, 14));
     assert!(
-        n.group_runs.contains(&n.exact_runs[0]),
+        n.group_runs.contains(&n.course_runs[0]),
         "group は exact を包含する"
     );
+}
+
+/// 洋芝グループは**芝限定**。札幌/函館の**ダート**戦でグループを広げると
+/// 「洋芝(札幌/函館)ダ1700m」という成立しないラベルになる（札幌ダ1700・函館ダ1700 は実在し、
+/// 実測では 2026-08-16 札幌のダート戦 23 頭中 11 頭でこの偽グループ行が出ていた）。
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn yoshiba_group_does_not_widen_for_dirt(pool: sqlx::PgPool) {
+    let repo = PostgresRepository::new(pool);
+    repo.upsert_horse_history(
+        &horse_id("2020100005"),
+        &[
+            // 函館・ダート・1700（今回は札幌ダ1700。芝なら洋芝グループに入る組み合わせ）。
+            nk_run(
+                "202602010301",
+                "ウマG",
+                ymd(2026, 6, 14),
+                1,
+                Venue::Hakodate,
+                Surface::Dirt,
+                1700,
+                Some(5),
+            ),
+            // 札幌・ダート・1700（完全一致）。
+            nk_run(
+                "202601010302",
+                "ウマG",
+                ymd(2026, 7, 5),
+                2,
+                Venue::Sapporo,
+                Surface::Dirt,
+                1700,
+                Some(2),
+            ),
+        ],
+    )
+    .await
+    .unwrap();
+
+    let notes = repo
+        .horse_handicap_notes(
+            &[name("ウマG")],
+            Venue::Sapporo,
+            Surface::Dirt,
+            1700,
+            Some(ymd(2026, 8, 16)),
+        )
+        .await
+        .unwrap();
+    let n = &notes[&name("ウマG")];
+
+    assert_eq!(n.course_runs.len(), 1, "当場（札幌ダ）のみが完全一致");
+    assert_eq!(n.course_runs[0].finishing_position, 2);
+    assert!(
+        n.group_runs.is_empty(),
+        "ダートでは洋芝グループを広げない（函館ダの走を束ねない）"
+    );
+}
+
+/// pdf 確定成績にしか存在しない過去走も条件別実績に載る（netkeiba 近走の射程外＝古い走りは
+/// すべてこの経路になるので、実運用の主経路のひとつ）。pdf 側は `race_name` を持たない。
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn counts_pdf_only_past_runs(pool: sqlx::PgPool) {
+    let repo = PostgresRepository::new(pool);
+    // netkeiba 側には 1 走も入れない（pdf 単独経路）。
+    repo.save_race(&pdf_race(
+        "2026-1-niigata-1-3R",
+        ymd(2026, 5, 3),
+        3,
+        Venue::Niigata,
+        Surface::Turf,
+        1000,
+        "ウマH",
+        4,
+    ))
+    .await
+    .unwrap();
+
+    let notes = repo
+        .horse_handicap_notes(
+            &[name("ウマH")],
+            Venue::Niigata,
+            Surface::Turf,
+            1000,
+            Some(ymd(2026, 8, 16)),
+        )
+        .await
+        .unwrap();
+    let n = &notes[&name("ウマH")];
+
+    assert_eq!(n.course_runs.len(), 1, "pdf 単独の走も完全一致に載る");
+    assert_eq!(n.course_runs[0].finishing_position, 4);
+    assert_eq!(
+        n.course_runs[0].race_name, None,
+        "pdf 経路はレース名を持たない（races に race_name が無い）"
+    );
+    assert_eq!(n.total_starts, 1);
+    assert_eq!(n.same_surface_starts, 1);
+    assert_eq!(n.same_distance_starts, 1);
+    assert_eq!(n.last_run_date, Some(ymd(2026, 5, 3)));
 }
 
 /// 着順の無い行（取消・除外）は「走っていない」ので母集団に入れない。
@@ -338,8 +437,8 @@ async fn excludes_scratched_and_future_runs(pool: sqlx::PgPool) {
         .unwrap();
     let n = &notes[&name("ウマC")];
 
-    assert_eq!(n.exact_runs.len(), 1, "取消と当日走は数えない");
-    assert_eq!(n.exact_runs[0].date, ymd(2026, 7, 1));
+    assert_eq!(n.course_runs.len(), 1, "取消と当日走は数えない");
+    assert_eq!(n.course_runs[0].date, ymd(2026, 7, 1));
     assert_eq!(n.total_starts, 1);
     assert_eq!(n.last_run_date, Some(ymd(2026, 7, 1)));
 }
@@ -407,14 +506,14 @@ async fn dedups_same_race_and_prefers_netkeiba_position(pool: sqlx::PgPool) {
         .unwrap();
     let n = &notes[&name("ウマD")];
 
-    assert_eq!(n.exact_runs.len(), 2, "同一実レースは 1 走に dedup");
+    assert_eq!(n.course_runs.len(), 2, "同一実レースは 1 走に dedup");
     assert_eq!(n.total_starts, 2);
     assert_eq!(
-        n.exact_runs[0].finishing_position, 9,
+        n.course_runs[0].finishing_position, 9,
         "着順は netkeiba を採る（pdf の 2 着ではない＝着順ズレを持ち込まない）"
     );
     assert_eq!(
-        n.exact_runs[0].race_name.as_deref(),
+        n.course_runs[0].race_name.as_deref(),
         Some("テストS"),
         "netkeiba 側の行が残るのでレース名も残る（pdf 経路は race_name を持たない）"
     );
@@ -440,7 +539,7 @@ async fn includes_horses_without_any_past_run(pool: sqlx::PgPool) {
     for horse in ["ウマE", "ウマF"] {
         let n = &notes[&name(horse)];
         assert_eq!(n.total_starts, 0);
-        assert!(n.exact_runs.is_empty());
+        assert!(n.course_runs.is_empty());
         assert!(n.group_runs.is_empty());
         assert_eq!(n.last_run_date, None);
         assert_eq!(n.same_surface_starts, 0);

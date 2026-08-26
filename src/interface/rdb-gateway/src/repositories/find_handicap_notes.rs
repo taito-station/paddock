@@ -33,13 +33,16 @@ struct PastRunRow {
 /// pdf 確定成績(`results`) と netkeiba 近走(`horse_past_runs`) を UNION し、同一実レースを
 /// `(horse_name, date, venue, race_num)` 単位で 1 件に dedup して全過去走を返す。
 ///
-/// `find_recent_runs` との違いは 3 点:
+/// `find_recent_runs` との違いは 4 点:
 /// 1. **`LIMIT` を持たない**。条件別実績は「今回条件で何走したか」を数えるので、直近 N 走に
 ///    切ると答えが変わる（キャリア全体が母集団）。
 /// 2. **着順ありの行だけ**を UNION に入れる（`finishing_position IS NOT NULL`）。取消・除外は
 ///    走っていないので「N 走」に数えない——他の stats クエリ（`horse_stats` 等）と同じ規約。
 ///    片方のソースだけが着順を持つ実レースは、着順を持つ側が dedup を生き残る。
 /// 3. **dedup は netkeiba を優先する**（`find_recent_runs` は pdf 優先＝逆）。
+/// 4. **dedup を `DISTINCT ON` で書く**（`find_recent_runs` は `NOT EXISTS` の自己結合）。
+///    同キー・同 src_rank・同 race_id の完全重複でも必ず 1 行に畳まれる。ここは表示の母数
+///    そのもの（`N走`）なので、取りこぼしを構造的に許さない書き方を選ぶ。
 ///
 /// ## なぜここだけ netkeiba 優先なのか（#628 の実測）
 ///
@@ -65,6 +68,7 @@ const PAST_RUNS_SQL: &str = r#"
             1 AS src_rank,
             results.race_id AS race_id,
             results.horse_name AS horse_name,
+            COALESCE(results.horse_id, '') AS horse_id,
             results.finishing_position AS finishing_position,
             -- races は race_name を持たない（PDF 経路にレース名が無い）ので NULL を埋める。
             NULL::text AS race_name
@@ -85,33 +89,47 @@ const PAST_RUNS_SQL: &str = r#"
             0 AS src_rank,
             race_id,
             horse_name,
+            horse_id,
             finishing_position,
             race_name
         FROM horse_past_runs
         WHERE horse_name = ANY($1)
           AND finishing_position IS NOT NULL
           AND ($2::text IS NULL OR date < $2)
+    ),
+    -- 同一実レースを 1 行に畳む。`DISTINCT ON` は同着（同キー・同 src_rank・同 race_id）でも
+    -- 必ず 1 行しか返さないので、`NOT EXISTS` の自己結合と違って**取りこぼしなく決定的**。
+    -- `horse_past_runs` の PK は (horse_id, race_id) なので、同じ馬名が別 horse_id で
+    -- 保持されると同一 race_id が 2 行になりうる——そこを塞ぐために horse_id も並びに含める。
+    deduped AS (
+        SELECT DISTINCT ON (u.horse_name, u.date, u.venue, u.race_num)
+            u.horse_name,
+            u.date,
+            u.venue,
+            u.surface,
+            u.distance,
+            u.finishing_position,
+            u.race_name
+        FROM unioned AS u
+        ORDER BY
+            u.horse_name,
+            u.date,
+            u.venue,
+            u.race_num,
+            u.src_rank,
+            u.race_id DESC,
+            u.horse_id DESC
     )
     SELECT
-        u.horse_name,
-        u.date,
-        u.venue,
-        u.surface,
-        u.distance,
-        u.finishing_position,
-        u.race_name
-    FROM unioned AS u
-    WHERE NOT EXISTS (
-        SELECT 1
-        FROM unioned AS u2
-        WHERE u2.horse_name = u.horse_name
-          AND u2.date = u.date
-          AND u2.venue = u.venue
-          AND u2.race_num = u.race_num
-          AND (u2.src_rank < u.src_rank
-               OR (u2.src_rank = u.src_rank AND u2.race_id > u.race_id))
-    )
-    ORDER BY u.horse_name, u.date DESC, u.race_id DESC
+        d.horse_name,
+        d.date,
+        d.venue,
+        d.surface,
+        d.distance,
+        d.finishing_position,
+        d.race_name
+    FROM deduped AS d
+    ORDER BY d.horse_name, d.date DESC
 "#;
 
 /// 全出走馬の手動ハンデ精査材料を 1 クエリで取る（#628）。
@@ -151,9 +169,18 @@ pub async fn find_handicap_notes(
         .fetch_all(pool)
         .await?;
 
-    // 場グループ（洋芝は札幌⇄函館、それ以外は自身のみ）は日本語場名で突き合わせる
-    // （`races.venue` / `horse_past_runs.venue` はどちらも `Venue::as_jp()` と同じ表記）。
-    let group_jp: Vec<&str> = venue.turf_group().iter().map(|v| v.as_jp()).collect();
+    // 場グループは**芝のときだけ**広げる。`turf_group` は「洋芝で**芝の**適性が通じる」という
+    // 根拠で札幌⇄函館を束ねるので、ダートに当てると「洋芝(札幌/函館)ダ1700m」という
+    // 成立しないラベルになる（札幌ダ1700・函館ダ1700 は実在するので毎開催で発火する）。
+    // 日本語場名で突き合わせる（`races.venue` / `horse_past_runs.venue` はどちらも
+    // `Venue::as_jp()` と同じ表記で保存される）。
+    let group_jp: Vec<&str> = group_venues(venue, surface)
+        .iter()
+        .map(|v| v.as_jp())
+        .collect();
+    // グループが当場のみなら完全一致と同じ集合になるので `group_runs` を積まない
+    // （レスポンスが全頭ぶん二重化するだけで情報が増えない。UI も `group_venues` が空なら読まない）。
+    let group_is_wider = group_jp.len() > 1;
     let surface_key = surface.as_str();
     let distance_lo = distance.saturating_sub(DISTANCE_EXPERIENCE_TOLERANCE_M);
     let distance_hi = distance.saturating_add(DISTANCE_EXPERIENCE_TOLERANCE_M);
@@ -161,13 +188,24 @@ pub async fn find_handicap_notes(
     for row in rows {
         // 馬名は DB の生値。`HorseName` へ正規化して map のキーと突き合わせる
         // （`names` 側も同じ正規化を通っているので一致する）。
+        // 落とした行は「走数の目減り」として黙って効くので、必ず warn を残す
+        // ——`N走 着順列` は母数を売りにする表示で、無言の欠損は「該当なし」に化ける。
         let Ok(name) = HorseName::try_from(row.horse_name.clone()) else {
+            tracing::warn!(
+                horse_name = %row.horse_name,
+                "条件別実績: 馬名を正規化できず 1 走を母集団から除外した"
+            );
             continue;
         };
         let Some(note) = out.get_mut(&name) else {
             continue;
         };
         let Ok(date) = NaiveDate::parse_from_str(&row.date, "%Y-%m-%d") else {
+            tracing::warn!(
+                horse_name = %row.horse_name,
+                date = %row.date,
+                "条件別実績: 日付を解釈できず 1 走を母集団から除外した"
+            );
             continue;
         };
         let row_distance = row.distance.max(0) as u32;
@@ -195,12 +233,26 @@ pub async fn find_handicap_notes(
             finishing_position: row.finishing_position.max(0) as u32,
             race_name: row.race_name,
         };
-        if group_jp.contains(&row.venue.as_str()) {
-            note.group_runs.push(run.clone());
-            if row.venue == venue.as_jp() {
-                note.exact_runs.push(run);
-            }
+        if row.venue == venue.as_jp() {
+            note.course_runs.push(run.clone());
+        }
+        if group_is_wider && group_jp.contains(&row.venue.as_str()) {
+            note.group_runs.push(run);
         }
     }
     Ok(out)
+}
+
+/// 条件別実績の母集団になる場グループ（#628）。**芝のときだけ** [`Venue::turf_group`] で広げ、
+/// ダートでは当場 1 場に閉じる。
+///
+/// `turf_group` の根拠は「洋芝（札幌・函館）は**芝の**適性が通じる」であって、同じ 2 場でも
+/// ダートは別物。surface で gate しないと「洋芝(札幌/函館)ダ1700m」という成立しないラベルになる。
+fn group_venues(venue: Venue, surface: Surface) -> &'static [Venue] {
+    match surface {
+        Surface::Turf => venue.turf_group(),
+        // ダートは当場のみ。`is_yoshiba` を使わず match で網羅し、Surface が増えたら
+        // コンパイルエラーで気づけるようにする。
+        Surface::Dirt => venue.self_group(),
+    }
 }
