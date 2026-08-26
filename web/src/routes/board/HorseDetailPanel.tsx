@@ -134,7 +134,10 @@ export function HorseDetailPanel({
             </dd>
           </div>
           <div>
-            <dt>今回条件の経験</dt>
+            {/* 条件別実績（上のブロック）は**完全一致**、この行は**±許容幅**で判定が違う。
+              「新潟芝1000m → 該当なし」と「今回距離の経験あり」が並ぶと矛盾に見えるので、
+              ラベルを「近い距離（±Nm）」にして定義差を文言で示す。 */}
+          <dt>今回条件の経験</dt>
             <dd>
               {hc.no_past_runs ? (
                 // 過去走 0 件は「未経験」ではなく「データが無い」。モデル確率がベースライン近くに
@@ -146,8 +149,8 @@ export function HorseDetailPanel({
               ) : (
                 [
                   hc.distance_untried
-                    ? `今回距離（±${distanceToleranceM}m）は未経験`
-                    : `今回距離（±${distanceToleranceM}m）の経験あり`,
+                    ? `近い距離（±${distanceToleranceM}m）は未経験`
+                    : `近い距離（±${distanceToleranceM}m）の経験あり`,
                   hc.surface_untried
                     ? "今回の芝ダは未経験"
                     : "今回の芝ダの経験あり",

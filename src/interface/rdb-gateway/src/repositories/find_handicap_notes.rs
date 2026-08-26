@@ -213,12 +213,17 @@ pub async fn find_handicap_notes(
             );
             continue;
         };
-        // 着順は 1 以上が定義。0 以下は不正データなので **カウンタ加算より前に** 落とす
+        // 着順は 1 以上・距離は正が定義。外れた行は **カウンタ加算より前に** 落とす
         // ——馬名・日付のパース失敗と同じ扱いに揃える。後ろに置くと `total_starts` にだけ
         // 数えられて `course_runs` から漏れ、UI が「該当なし（走っていない）」と断定する。
-        // なお `FinishingPosition` が 0 以下を通さないので通常のデータ投入経路では到達せず、
-        // 到達するのは旧ダンプ取り込み等で DB に直接入った行だけ（それゆえ回帰テストは無い）。
-        let Ok(finishing_position) = u32::try_from(row.finishing_position) else {
+        // なお `FinishingPosition` / 取り込み経路が不正値を通さないので通常は到達せず、
+        // 到達するのは旧ダンプ取り込み等で DB へ直接入った行だけ（それゆえ回帰テストは無い）。
+        // 0 以下は**丸めずに落とす**（`0着` や距離 0 を画面に出さない。丸めると
+        // 「不正データ」が「1 着」「短距離」として静かに紛れ込む）。
+        let Some(finishing_position) = u32::try_from(row.finishing_position)
+            .ok()
+            .filter(|&p| p >= 1)
+        else {
             tracing::warn!(
                 horse_name = %row.horse_name,
                 finishing_position = row.finishing_position,
@@ -226,14 +231,14 @@ pub async fn find_handicap_notes(
             );
             continue;
         };
-        if finishing_position == 0 {
+        let Some(row_distance) = u32::try_from(row.distance).ok().filter(|&d| d >= 1) else {
             tracing::warn!(
                 horse_name = %row.horse_name,
-                "条件別実績: 着順 0 の 1 走を母集団から除外した"
+                distance = row.distance,
+                "条件別実績: 距離が不正な 1 走を母集団から除外した"
             );
             continue;
-        }
-        let row_distance = row.distance.max(0) as u32;
+        };
         let same_surface = row.surface == surface_key;
 
         note.total_starts += 1;

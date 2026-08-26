@@ -153,7 +153,7 @@ impl StatsRepository for MockRepo {
         Ok(course_stats_with_gate(4, 2))
     }
     /// 手動ハンデ精査材料（#628）は盤の提示専用で predict 経路は使わないため、
-    /// 全馬「材料なし」で応答する。確率推定には入らないので predict の期待値は変わらない。
+    /// 全馬「過去走 0 件」で応答する（`HandicapNoteRow::default()`＝該当なし。材料未取得ではない）。確率推定には入らないので predict の期待値は変わらない。
     async fn horse_handicap_notes(
         &self,
         names: &[HorseName],

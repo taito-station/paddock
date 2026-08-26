@@ -796,7 +796,7 @@ button:disabled {
   line-height: 1.6;
 }
 
-/* 馬書評クリック展開 */
+/* 馬詳細（条件別実績・書評）クリック展開 */
 .horse-col.has-detail {
   cursor: pointer;
 }

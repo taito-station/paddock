@@ -24,8 +24,6 @@ pub use interactor::pdf::PdfInteractor;
 pub use interactor::race::board::{
     BoardHorse, Confusion, HandicapNote, RaceBoard, recorded_axis_of,
 };
-// 盤の出力型が内包する過去走 1 走（#628）。定義は repository ポート側だが、`RaceBoard` を
-// 消費する層（rest-controller）が `repository::` を辿らずに済むよう root から再輸出する。
 pub use interactor::race::predict::{PredictionViews, RecentRunsCoverage, compose_portfolio};
 pub use interactor::results::{RefreshReport, ResultsInteractor};
 pub use interactor::settle::{SettleInteractor, SettleReport};
@@ -40,12 +38,15 @@ pub use paddock_domain::{HorseFactors, HorseProbability, RateTriple};
 pub use payout_fetcher::PayoutFetcher;
 pub use pdf_fetcher::{FetchProbe, PdfFetcher};
 pub use pdf_parser::PdfParser;
-pub use repository::ConditionRun;
+// `ConditionRun` / `DISTANCE_EXPERIENCE_TOLERANCE_M` は盤の出力型（`HandicapNote`）が内包する
+// 過去走 1 走と、その距離判定の許容幅（#628）。定義は repository ポート側だが、`RaceBoard` を
+// 消費する層（rest-controller）が `repository::` を辿らずに済むよう root から再輸出する。
 pub use repository::{
-    CourseStatsRow, FetchDownload, FetchFailure, FetchRecord, FetchStatus, FinishEntry, GroupStat,
-    HorseStatsRow, JockeyStatsRow, MarkStatRow, MarkStatsFilter, OddsRow, PredictBetRecord,
-    PredictRaceConditionRecord, PredictSessionRecord, PredictionFilter, PredictionSearchResult,
-    PredictionSummaryRow, RaceOddsRecord, RaceResultRepository, Repository, UnpricedObservation,
+    ConditionRun, CourseStatsRow, DISTANCE_EXPERIENCE_TOLERANCE_M, FetchDownload, FetchFailure,
+    FetchRecord, FetchStatus, FinishEntry, GroupStat, HorseStatsRow, JockeyStatsRow, MarkStatRow,
+    MarkStatsFilter, OddsRow, PredictBetRecord, PredictRaceConditionRecord, PredictSessionRecord,
+    PredictionFilter, PredictionSearchResult, PredictionSummaryRow, RaceOddsRecord,
+    RaceResultRepository, Repository, UnpricedObservation,
 };
 pub use result_page_fetcher::ResultPageFetcher;
 

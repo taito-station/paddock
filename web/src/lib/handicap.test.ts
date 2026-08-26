@@ -1,18 +1,22 @@
 import { describe, expect, it } from "vitest";
 import {
   CARD_MAX_POSITIONS,
+  NO_MATERIAL,
   NO_RECORD,
   PREMISE_POPULARITY_MAX,
   type ConditionRun,
   type HandicapNote,
   conditionLabel,
   conditionRecordSummary,
+  canOpenDetail,
+  conditionRecordText,
   conditionRunLine,
   edgePtLabel,
   groupConditionLabel,
   layoffLabel,
   modelEdgePt,
   premiseBadges,
+  showsCommentaryChip,
   showsGroupRecord,
 } from "./handicap";
 
@@ -115,6 +119,48 @@ describe("showsGroupRecord", () => {
   });
 });
 
+describe("カードの表示判定", () => {
+  // 1〜4 巡目のレビューでこの 3 つはいずれも一度ずつ壊れており、そのとき純関数テストは
+  // 緑のままだった。判定を JSX から出してここで押さえる。
+  it("書評が無くても材料があれば詳細を開ける", () => {
+    expect(canOpenDetail(null, [], note())).toBe(true);
+    expect(canOpenDetail("寸評", [], null)).toBe(true);
+    expect(canOpenDetail(null, ["根拠"], null)).toBe(true);
+  });
+
+  it("書評も材料も無ければ開けない", () => {
+    expect(canOpenDetail(null, [], null)).toBe(false);
+    expect(canOpenDetail("", [], null)).toBe(false);
+  });
+
+  it("「書評」チップは書評の有無だけで決まる（材料では出さない）", () => {
+    // 材料まで含めるとほぼ全頭に出て「書評がある」という信号が消える。
+    expect(showsCommentaryChip(null, [])).toBe(false);
+    expect(showsCommentaryChip("寸評", [])).toBe(true);
+    expect(showsCommentaryChip(null, ["根拠"])).toBe(true);
+  });
+
+  it("開けること と チップが出ること は別条件", () => {
+    // 材料だけある馬: 開けるがチップは出ない。
+    expect(canOpenDetail(null, [], note())).toBe(true);
+    expect(showsCommentaryChip(null, [])).toBe(false);
+  });
+
+  it("未取得は「該当なし」と書かず `—` を出す", () => {
+    // 「該当なし」は走っていないという断定。未取得をそう書くのが本 issue の塞ぐ取り違え。
+    expect(conditionRecordText(null)).toBe(NO_MATERIAL);
+    expect(conditionRecordText(undefined)).toBe(NO_MATERIAL);
+    expect(conditionRecordText(null)).not.toBe(NO_RECORD);
+  });
+
+  it("取得済みで 0 走なら「該当なし」", () => {
+    expect(conditionRecordText(note())).toBe(NO_RECORD);
+    expect(
+      conditionRecordText(note({ course_runs: [run("2026-08-02", 3)] })),
+    ).toBe("1走 3着");
+  });
+});
+
 describe("modelEdgePt / edgePtLabel", () => {
   it("純モデル − 市場を pt で返す", () => {
     // 2026-08-15 札幌9R ④キャトルブランシュ相当（純 10.4% vs 市場 1.1%）。
@@ -124,6 +170,15 @@ describe("modelEdgePt / edgePtLabel", () => {
 
   it("負の差は符号付きで出す", () => {
     expect(edgePtLabel(modelEdgePt(0.05, 0.12))).toBe("-7.0pt");
+  });
+
+  it("表示桁で 0 に丸まる差は符号を付けない", () => {
+    // `-0.0pt` は「わずかに負」なのか「ゼロ」なのか読めない（符号付きゼロの誤読）。
+    expect(edgePtLabel(modelEdgePt(0.1004, 0.1))).toBe("0.0pt");
+    expect(edgePtLabel(modelEdgePt(0.1, 0.1004))).toBe("0.0pt");
+    expect(edgePtLabel(0)).toBe("0.0pt");
+    // 丸めても 0 にならない差は従来どおり符号付き。
+    expect(edgePtLabel(modelEdgePt(0.1, 0.1006))).toBe("-0.1pt");
   });
 
   it("市場 implied 未取得（単勝未発売）は null → 表記は -", () => {

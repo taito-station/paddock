@@ -7,8 +7,7 @@ use utoipa::ToSchema;
 use paddock_domain::{
     BetCombination, HorseEntry, HorseProbability, Portfolio, Race, RaceCard, RaceId,
 };
-use paddock_use_case::repository::DISTANCE_EXPERIENCE_TOLERANCE_M;
-use paddock_use_case::{ConditionRun, FinishEntry, RaceBoard};
+use paddock_use_case::{ConditionRun, DISTANCE_EXPERIENCE_TOLERANCE_M, FinishEntry, RaceBoard};
 
 /// レース一覧の 1 要素（出走前の諸元のみ。results は含まない）。
 #[derive(Debug, Serialize, ToSchema)]
@@ -560,9 +559,8 @@ impl From<RaceBoard> for RaceBoardResponse {
                     finishing_position: h.finishing_position,
                     comment: h.comment,
                     detail_lines: h.detail_lines,
-                    // `b` を所有しているので move で写す（`race_name: String` の二重 clone を
-                    // 避ける——`group_runs` は `course_runs` の上位集合なので、借用で回すと
-                    // 同じレース名を 2 度コピーすることになる）。
+                    // `b` を所有しているので move で写す（借用で回すと `race_name: String` を
+                    // 1 件ずつ clone することになる）。
                     handicap: h.handicap.map(|hc| HandicapNoteSchema {
                         course_runs: hc.course_runs.into_iter().map(condition_run).collect(),
                         group_runs: hc.group_runs.into_iter().map(condition_run).collect(),

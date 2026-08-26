@@ -8,11 +8,12 @@ import {
 } from "../../lib/board";
 import { placeBand } from "../../lib/live";
 import {
-  NO_MATERIAL,
-  conditionRecordSummary,
+  canOpenDetail,
+  conditionRecordText,
   edgePtLabel,
   modelEdgePt,
   premiseBadges,
+  showsCommentaryChip,
 } from "../../lib/handicap";
 
 // 全頭横並び盤の 1 馬カラム（#411 で RaceBoard から抽出）。数値密度を保ちつつ、書評のある馬は
@@ -44,12 +45,9 @@ function HorseCardImpl({
   // **`null` = 未取得**（サーバが明示する。出馬表なし・取得失敗・古い api-server #570）。
   // 「該当なし（走っていない）」とは別物なので、既定値で埋めず null のまま扱う。
   const handicap = h.handicap ?? null;
-  // detail_lines はスキーマ上必須（string[]）。comment・根拠行・ハンデ材料のいずれかがあれば展開可。
-  const hasDetail =
-    !!h.comment || h.detail_lines.length > 0 || handicap != null;
-  // 「書評」チップは書評があることの信号として残す（hasDetail に材料を足したことで
-  // ほぼ全頭が展開可になったため、チップまで全頭に出すと信号の意味が消える）。
-  const hasCommentary = !!h.comment || h.detail_lines.length > 0;
+  // 展開可否とチップの有無は**別条件**（lib/handicap.ts にテスト付きで切り出してある）。
+  const hasDetail = canOpenDetail(h.comment, h.detail_lines, handicap);
+  const hasCommentary = showsCommentaryChip(h.comment, h.detail_lines);
   // 朝↔現の単勝変動（#448）。朝 snapshot が無い馬は null（矢印を出さない）。
   const oddsMove = winOddsMove(h.morning_win_odds, h.win_odds);
   const edgePt = modelEdgePt(h.pure_win_prob, h.market_implied);
@@ -210,9 +208,9 @@ function HorseCardImpl({
         }
       >
         {handicap ? (
-          conditionRecordSummary(handicap.course_runs)
+          conditionRecordText(handicap)
         ) : (
-          <span className="muted">{NO_MATERIAL}</span>
+          <span className="muted">{conditionRecordText(null)}</span>
         )}
       </div>
       {/* 過去走データ 0 件の印（#628）。**モデル列のトグルと直交する事実**なので

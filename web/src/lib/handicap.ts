@@ -118,6 +118,40 @@ export function premiseBadges(
   return out;
 }
 
+// --- カードの表示判定（#628） -------------------------------------------------
+// 1〜4 巡目のレビューで**この 3 つはいずれも一度ずつ壊れた**（`hasDetail` 拡張で書評チップが
+// 全頭に出た／`差` が showModel 非連動だった／縮退値を要約関数に通して全頭「該当なし」になった）。
+// いずれも純関数テストは緑のまま通ったので、判定を JSX から出してここでテストする
+// （レンダリングテストの導入より軽く、壊れた箇所そのものを押さえられる）。
+
+// 詳細パネルを開けるか。書評が無くてもハンデ材料があれば内訳を読む意味がある
+// ——見ないと**材料が乏しい馬ほどパネルに到達できない**という逆転が起きる。
+export function canOpenDetail(
+  comment: string | null | undefined,
+  detailLines: readonly string[],
+  handicap: HandicapNote | null | undefined,
+): boolean {
+  return !!comment || detailLines.length > 0 || handicap != null;
+}
+
+// 「書評」チップを出すか。**開けるか（`canOpenDetail`）とは別物**——チップは書評（人手短評・
+// 根拠 bullet）がある馬の信号で、材料まで含めるとほぼ全頭に出て信号の意味が消える。
+export function showsCommentaryChip(
+  comment: string | null | undefined,
+  detailLines: readonly string[],
+): boolean {
+  return !!comment || detailLines.length > 0;
+}
+
+// 条件別実績行の文言。**未取得（`null`）を `該当なし` と書かない**——それは
+// 「走っていない」という断定になり、本 issue が塞ごうとしている取り違えそのもの。
+export function conditionRecordText(
+  handicap: HandicapNote | null | undefined,
+): string {
+  if (handicap == null) return NO_MATERIAL;
+  return conditionRecordSummary(handicap.course_runs);
+}
+
 // 過去走 1 走の詳細行（例 `2026-08-02 3着 テストS`）。レース名は netkeiba 近走のみが持つ。
 export function conditionRunLine(run: ConditionRun): string {
   const name = run.race_name ? ` ${run.race_name}` : "";

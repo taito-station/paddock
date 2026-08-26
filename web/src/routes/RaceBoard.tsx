@@ -227,7 +227,10 @@ export function RaceBoard() {
   //（`洋芝(札幌/函館)芝2000m`）。どの場をグループにするかはサーバ（`Venue::condition_group`）が決め、
   // web は表記だけを持つ（日本語ラベルの正本を VENUE_JP / SURFACE_JP に一本化）。
   // `group_venues` は必須フィールドだが、古い api-server が配信し続ける事故（#570）では
-  // 欠けうる。盤全体を落とさないよう空配列へ縮退させる（＝グループ行を出さないだけ）。
+  // 欠けうる。ここは `handicap` の有無に関係なく評価されるので、欠けると TypeError で
+  // 盤ごと落ちる——空配列へ縮退させる（＝グループ行を出さないだけ）。
+  // 一方 `distance_tolerance_m` に fallback を置かないのは、`handicap` が非 null のときしか
+  // 読まれない（両方欠ける古いサーバではブロックごと描画されない）ため。
   const condLabel = d ? conditionLabel(d.venue, d.surface, d.distance) : "";
   const groupCondLabel = d
     ? groupConditionLabel(d.group_venues ?? [], d.surface, d.distance)

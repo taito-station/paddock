@@ -54,7 +54,7 @@ impl Venue {
     /// **芝限定**である点に注意。同じ 2 場でもダートは別物なので、条件別実績（#628・提示専用）
     /// の集計側は芝のときだけこれを使い、ダートでは [`Venue::self_group`] に落とす。
     /// **確率推定には入れない**——純モデルの resolution 天井は ADR 0058/0059 で決着済み。
-    pub fn turf_group(&self) -> &'static [Venue] {
+    pub(crate) fn turf_group(&self) -> &'static [Venue] {
         const YOSHIBA: &[Venue] = &[Venue::Sapporo, Venue::Hakodate];
         match self {
             Venue::Sapporo | Venue::Hakodate => YOSHIBA,
@@ -68,7 +68,8 @@ impl Venue {
     /// 洋芝グループの根拠は「**芝の**適性が通じる」なので、同じ 2 場でもダートは別物。
     /// gate しないと「洋芝(札幌/函館)ダ1700m」という成立しないラベルになる。
     ///
-    /// **この規則の正本はここ 1 か所**。集計（rdb-gateway）と提示（use-case の
+    /// **この規則の正本はここ 1 か所**で、外部へ公開する入口もこれだけ（`turf_group` /
+    /// `self_group` は `pub(crate)` の内部ヘルパ）。集計（rdb-gateway）と提示（use-case の
     /// `group_venue_slugs`）が別々に同じ判定を書くと、片方だけ変わったときに
     /// 「グループ見出しは出るのに中身が空」のような乖離が起きる（ADR 0064 の second source）。
     pub fn condition_group(&self, surface: Surface) -> &'static [Venue] {
@@ -81,7 +82,7 @@ impl Venue {
 
     /// 自身 1 場だけのグループ。グループ化しない条件（ダート等）で [`Venue::turf_group`] と
     /// 同じ型を返すために使う。
-    pub fn self_group(&self) -> &'static [Venue] {
+    pub(crate) fn self_group(&self) -> &'static [Venue] {
         match self {
             Venue::Sapporo => &[Venue::Sapporo],
             Venue::Hakodate => &[Venue::Hakodate],
