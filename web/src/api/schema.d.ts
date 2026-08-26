@@ -457,6 +457,8 @@ export interface components {
              * @description 枠番（出馬表に無ければ `null`）。
              */
             gate_num?: number | null;
+            /** @description 手動ハンデ精査の材料（#628・提示専用）。買い目の選択ロジックには入らない。 */
+            handicap: components["schemas"]["HandicapNoteSchema"];
             horse_name: string;
             /** Format: int32 */
             horse_num: number;
@@ -515,6 +517,18 @@ export interface components {
              * @description 表示用（市場ブレンド α）の勝率/連対率/複勝率 [0,1]。
              */
             win_prob: number;
+        };
+        /** @description 条件別実績の過去走 1 走（#628）。着順が付いた走りだけを載せる（取消・除外・中止は母集団外）。 */
+        ConditionRunSchema: {
+            /**
+             * Format: date
+             * @description 施行日 `YYYY-MM-DD`。
+             */
+            date: string;
+            /** Format: int32 */
+            finishing_position: number;
+            /** @description レース名（netkeiba 近走のみが持つ。PDF 確定成績経路は `null`）。 */
+            race_name?: string | null;
         };
         /** @description 混戦サマリ（CLAUDE.md の混戦判定を機械化した結果）。 */
         ConfusionSchema: {
@@ -590,6 +604,39 @@ export interface components {
             win_rate: number;
             /** Format: int32 */
             wins: number;
+        };
+        /**
+         * @description 盤の手動ハンデ精査材料 1 頭分（#628・**decision-support**）。
+         *
+         *     現時点で実在が確認できているエッジは「手動のハンデ精査」と「執行の規律（軸ロック＋ズレ増額）」の
+         *     2 つだけ（ADR 0055 / 0060 / 0076）。ここで返すのは前者が使う**事実**であって推定ではない。
+         *     **確率にも買い目にも入らない**——条件別実績を特徴量へ入れるのは ADR 0058 / 0059 が閉じた路線の再訪。
+         *     閾値で go/no-go は出さない（ADR 0079 と同じく、バッジが go シグナルとして誤読される事故を防ぐ）。
+         */
+        HandicapNoteSchema: {
+            /** @description 今回条件（場 × 芝ダ × 距離の完全一致）での過去走。date 降順。空配列＝該当なし。 */
+            course_runs: components["schemas"]["ConditionRunSchema"][];
+            /** @description 今回距離が未経験（近走に今回距離 ±100m が 1 走も無い）。 */
+            distance_untried: boolean;
+            /**
+             * @description 場グループ（`RaceBoardResponse.group_venues`）まで広げた過去走。date 降順。
+             *     **`course_runs` を包含する上位集合**。件数が `course_runs` と同じなら情報が増えていない。
+             */
+            group_runs: components["schemas"]["ConditionRunSchema"][];
+            /**
+             * Format: int32
+             * @description 前走からの間隔[日]（当日 − 前走日）。過去走なしは `null`。
+             *     **日数を出すだけで閾値判定はしない**——同じ休養明けでも 10ヶ月半と 4ヶ月半では質が違い、
+             *     その読み分けは人間がやる。
+             */
+            layoff_days?: number | null;
+            /**
+             * @description 近走データが 0 件。モデルはデータ欠損馬をベースライン近くに置くため
+             *     「純モデル高 vs 市場低」の**偽の妙味**として出る。差pt と並べて読むための印。
+             */
+            no_past_runs: boolean;
+            /** @description 今回の芝ダが未経験。 */
+            surface_untried: boolean;
         };
         /**
          * @description `GET /api/health` のレスポンス（#570）。稼働中プロセスの世代を自己申告する。
@@ -950,6 +997,13 @@ export interface components {
             distance: number;
             /** Format: int32 */
             field_size: number;
+            /**
+             * @description 条件別実績（#628）で `horses[].handicap.group_runs` の母集団になった**場スラッグの一覧**。
+             *     洋芝場（札幌・函館は同じ洋芝で適性が通じる）でのみ 2 場が入り、それ以外の場は空配列
+             *     ＝グループが自身 1 場で完全一致と同じ集合になるため、UI は 2 行目を出さない。
+             *     日本語ラベルの組み立ては web が持つ（表記の正本を 1 か所に保つ）。
+             */
+            group_venues: string[];
             /** Format: double */
             hit_prob?: number | null;
             horses: components["schemas"]["BoardHorseSchema"][];

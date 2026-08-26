@@ -21,6 +21,11 @@ import {
   raceStarted,
 } from "../lib/live";
 import { backToDashboardHref } from "../lib/dashboard";
+import {
+  PREMISE_POPULARITY_MAX,
+  conditionLabel,
+  groupConditionLabel,
+} from "../lib/handicap";
 import { useSessionQuery, useRacesQuery } from "../lib/queries";
 import { BOARD_POLL_INTERVAL_MS, CLOCK_TICK_INTERVAL_MS } from "../lib/constants";
 import { ExecutionPanel } from "./board/ExecutionPanel";
@@ -214,6 +219,14 @@ export function RaceBoard() {
 
   // レース名(グレード)。raceTitle は名前が無ければ "" を返すので、前置スペースだけ条件付きにする。
   const headTitle = d ? raceTitle(d.race_name, d.race_class) : "";
+
+  // 条件別実績（#628）のラベル。完全一致（`新潟芝1000m`）と、洋芝場だけ広がる場グループ
+  //（`洋芝(札幌/函館)芝2000m`）。どの場をグループにするかはサーバ（`Venue::turf_group`）が決め、
+  // web は表記だけを持つ（日本語ラベルの正本を VENUE_JP / SURFACE_JP に一本化）。
+  const condLabel = d ? conditionLabel(d.venue, d.surface, d.distance) : "";
+  const groupCondLabel = d
+    ? groupConditionLabel(d.group_venues, d.surface, d.distance)
+    : null;
 
   // オッズ鮮度（#475）。current_at（最新スイープ取得時刻）と now の差で判定。未発走のときだけ
   // stale 警告を出す（発走済みは done で無警告）。ポーリングと同じ「未発走ゲート」で不整合を作らない。
@@ -439,6 +452,7 @@ export function RaceBoard() {
                   maxWin={maxWin}
                   showModel={showModel}
                   showMorning={showMorning && d.morning_at != null}
+                  conditionLabel={condLabel}
                   isSelected={selectedHorse === h.horse_num}
                   onSelect={handleSelect}
                 />
@@ -451,6 +465,8 @@ export function RaceBoard() {
               board/HorseDetailPanel へ分離（#411）。未選択・未解決は panel 側で null 返し。 */}
           <HorseDetailPanel
             horse={selectedHorseData}
+            conditionLabel={condLabel}
+            groupConditionLabel={groupCondLabel}
             onClose={closePanel}
             closeBtnRef={closeBtnRef}
           />
@@ -534,6 +550,35 @@ export function RaceBoard() {
                 <dt>複勝圏 / 妙味 / 書評</dt>
                 <dd>
                   複勝圏＝ブレンド1位×人気1位／妙味＝ブレンド上位×市場人気低／書評＝クリックで根拠を展開。
+                </dd>
+              </div>
+              {/* 手動ハンデ精査の材料（#628）。判断材料であって go/no-go サインではない。 */}
+              <div>
+                <dt>差 / 近走なし</dt>
+                <dd>
+                  差＝モデル勝率 − 市勝[pt]（正＝モデルが市場より高評価）。
+                  <strong>近走なし</strong>
+                  が付く馬はモデル確率がベースライン近くの推定なので、差ptは妙味の根拠にならない（偽の妙味）。
+                </dd>
+              </div>
+              <div>
+                <dt>{condLabel} の行</dt>
+                <dd>
+                  今回と同じ 場×芝ダ×距離 での「N走 着順（新しい順）」。適性が支配的な条件
+                  （千直・ダート短距離など）で、一般的な近走との乖離を横並びで読むための事実。
+                  0走は<strong>該当なし</strong>と明示する（空欄＝未取得と区別）。
+                  {groupCondLabel &&
+                    `洋芝（札幌・函館）は場が違っても適性が通じるため、書評パネルで「${groupCondLabel}」を別行に併記する。`}
+                </dd>
+              </div>
+              <div>
+                <dt>休養◯日 / 距離初 / 芝ダ初</dt>
+                <dd>
+                  上位{" "}
+                  {PREMISE_POPULARITY_MAX}
+                  番人気までに出す「前提が壊れているサイン」。
+                  <strong>事実だけを出し、閾値で良し悪しを判定しない</strong>
+                  （同じ休養明けでも 10ヶ月半と 4ヶ月半では質が違う。読み分けは人が行う）。
                 </dd>
               </div>
             </dl>

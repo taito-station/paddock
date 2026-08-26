@@ -7,6 +7,12 @@ import {
   winOddsMove,
 } from "../../lib/board";
 import { placeBand } from "../../lib/live";
+import {
+  conditionRecordSummary,
+  edgePtLabel,
+  modelEdgePt,
+  premiseBadges,
+} from "../../lib/handicap";
 
 // 全頭横並び盤の 1 馬カラム（#411 で RaceBoard から抽出）。数値密度を保ちつつ、書評のある馬は
 // クリック / Enter / Space で詳細パネルを開閉できる。開閉状態（selectedHorse）と trigger 要素の
@@ -20,6 +26,7 @@ function HorseCardImpl({
   maxWin,
   showModel,
   showMorning,
+  conditionLabel,
   isSelected,
   onSelect,
 }: {
@@ -27,6 +34,8 @@ function HorseCardImpl({
   maxWin: number;
   showModel: boolean;
   showMorning: boolean;
+  /** 今回条件の短縮ラベル（例 `新潟芝1000m`）。条件別実績行の title に使う（#628）。 */
+  conditionLabel: string;
   isSelected: boolean;
   onSelect: (horseNum: number, trigger: HTMLElement) => void;
 }) {
@@ -34,6 +43,9 @@ function HorseCardImpl({
   const hasDetail = !!h.comment || h.detail_lines.length > 0;
   // 朝↔現の単勝変動（#448）。朝 snapshot が無い馬は null（矢印を出さない）。
   const oddsMove = winOddsMove(h.morning_win_odds, h.win_odds);
+  // 手動ハンデ精査の材料（#628）。いずれも事実の表示であって go/no-go 判定ではない。
+  const edgePt = modelEdgePt(h.pure_win_prob, h.market_implied);
+  const badges = premiseBadges(h.handicap, h.popularity);
   return (
     <div
       className={
@@ -130,6 +142,26 @@ function HorseCardImpl({
           <dt>市勝</dt>
           <dd>{h.market_implied == null ? "-" : pct(h.market_implied)}</dd>
         </div>
+        {/* 純モデル−市場の差[pt]（#628）。正＝モデルが市場より高く見ている＝妙味候補。
+            ただし近走 0 件の馬はモデルがベースライン近くに置かれるだけの**偽の妙味**なので、
+            欠損フラグを必ず同じ行に並べる（差pt だけ見て買い材料と誤読しないため）。 */}
+        <div
+          className="edge-row"
+          title="純モデル勝率 − 市場implied勝率[pt]。正＝モデルが市場より高く評価。近走データが無い馬はモデルがベースライン近くに置かれるため、この差は妙味ではなく欠損の影"
+        >
+          <dt>差</dt>
+          <dd>
+            {edgePtLabel(edgePt)}
+            {h.handicap.no_past_runs && (
+              <span
+                className="chip chip-missing"
+                title="近走データ 0 件。モデル確率はベースライン近くの推定なので、差pt は妙味の根拠にならない"
+              >
+                近走なし
+              </span>
+            )}
+          </dd>
+        </div>
         <div className="group-sep">
           <dt>単勝</dt>
           <dd>{h.win_odds == null ? "-" : h.win_odds.toFixed(1)}</dd>
@@ -161,6 +193,26 @@ function HorseCardImpl({
           <dd>{h.popularity ?? "-"}</dd>
         </div>
       </dl>
+      {/* 条件別実績（#628・最優先）。今回と同じ 場×芝ダ×距離 の「N走 着順列」を全頭に常時出す
+          ——2・3番人気が当該条件で大敗している、のような事実は横並びで比べて初めて意味を持つ。
+          0 走は空欄でなく「該当なし」（空欄は「まだ引いていない」に見える）。 */}
+      <div
+        className="cond-record"
+        title={`${conditionLabel} での過去成績（着順は新しい順）`}
+      >
+        {conditionRecordSummary(h.handicap.course_runs)}
+      </div>
+      {/* 人気馬の前提が壊れているサイン（#628）。上位人気に限って出す（全頭だとノイズ）。
+          休養日数・距離初・芝ダ初の**事実だけ**で、閾値判定はしない（読み分けは人間がやる）。 */}
+      {badges.length > 0 && (
+        <div className="premise-flags">
+          {badges.map((b) => (
+            <span key={b} className="chip chip-premise">
+              {b}
+            </span>
+          ))}
+        </div>
+      )}
       <div className="flags">
         {h.is_overlay && (
           <span
