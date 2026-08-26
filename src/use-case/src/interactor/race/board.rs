@@ -151,7 +151,11 @@ pub struct BoardHorse {
     /// 展開パネル用の根拠 bullet（条件別 factor・枠 lift・近走・前走・斤量）。空なら根拠情報なし。
     pub detail_lines: Vec<String>,
     /// 手動ハンデ精査の材料（#628・提示専用）。買い目の選択ロジックには一切入らない。
-    pub handicap: HandicapNote,
+    ///
+    /// **`None` = 材料を引けていない**（出馬表なし・取得失敗・馬名の突き合わせ失敗）。
+    /// 「該当なし（走っていない）」とは別物なので、既定値で埋めずに型で区別する
+    /// ——既定値を返すと `distance_untried: false` 等が「計算していない事実」を断言してしまう。
+    pub handicap: Option<HandicapNote>,
 }
 
 /// 盤に出す手動ハンデ精査の材料 1 頭分（#628・**提示専用 / decision-support**）。
@@ -162,7 +166,7 @@ pub struct BoardHorse {
 pub struct HandicapNote {
     /// 今回条件（場 × 芝ダ × 距離の完全一致）での過去走。date 降順。空＝該当なし。
     pub course_runs: Vec<ConditionRun>,
-    /// 場グループ（**芝のときだけ**洋芝＝札幌⇄函館へ広げる）まで含めた過去走。date 降順。
+    /// 場グループ（[`Venue::condition_group`]＝芝のときだけ洋芝＝札幌⇄函館へ広げる）まで含めた過去走。date 降順。
     /// **非空のときは `course_runs` を包含する上位集合**。広くならない条件（洋芝以外の場・
     /// ダート戦）では**空**になる＝UI はグループ行を出さない。
     pub group_runs: Vec<ConditionRun>,
@@ -289,23 +293,11 @@ impl<
                     .iter()
                     .filter_map(|h| HorseName::try_from(h.horse_name.clone()).ok())
                     .collect();
-                // **失敗しても盤を落とさない**。これは提示専用の材料で、確率・買い目・軸ロックは
-                // これに一切依存しない。`LIMIT` 無しのクエリが未発走中 60 秒ごとに走る経路なので、
-                // 共有 Postgres が詰まったときに live 盤ごと 500 にするのは割に合わない
-                // （web 側も `EMPTY_HANDICAP_NOTE` で材料なし表示へ縮退できる）。
-                match self
+                let fetched = self
                     .repository
                     .horse_handicap_notes(&names, c.venue, c.surface, c.distance, Some(c.date))
-                    .await
-                {
-                    Ok(notes) => enrich_handicap(&mut horses, notes, c.date),
-                    Err(e) => tracing::warn!(
-                        race_id = %race_id.value(),
-                        error = %e,
-                        "手動ハンデ精査の材料を取得できなかった（盤は材料なしで続行する）"
-                    ),
-                }
-                group_venue_slugs(c.venue, c.surface)
+                    .await;
+                apply_handicap(&mut horses, fetched, c.date, c.venue, c.surface)
             }
             // 出馬表が無ければ `predict_race_views` が先に NotFound を返すのでここには到達しない
             // （防御的な分岐）。仮に来ても全馬 `HandicapNote::default()` のままで、
@@ -390,6 +382,39 @@ fn group_venue_slugs(venue: Venue, surface: Surface) -> Vec<String> {
     group.iter().map(|v| v.as_slug().to_string()).collect()
 }
 
+/// 取得結果を盤へ反映し、`group_venues` を決める（#628）。**失敗しても盤を落とさない**。
+///
+/// これは提示専用の材料で、確率・買い目・軸ロックは一切依存しない。`LIMIT` 無しのクエリが
+/// 未発走中 60 秒ごとに走る経路なので、共有 Postgres が詰まったときに live 盤ごと 500 にするのは
+/// 割に合わない。失敗時は全馬 `handicap = None`（＝材料なし。既定値では埋めない）で続行する。
+///
+/// `group_venues` も失敗時は空に倒す——「`group_runs` の母集団になった場」という定義なので、
+/// 1 走も引けていないのに非空を返すと UI が決して出ないグループ行の説明を出してしまう。
+///
+/// IO を呼び出し側に残して `Result` を受け取る形にしてあるのは、この縮退判断を
+/// リポジトリ mock 無しで単体テストできるようにするため。
+fn apply_handicap(
+    horses: &mut [BoardHorse],
+    fetched: Result<HashMap<HorseName, HandicapNoteRow>>,
+    race_date: NaiveDate,
+    venue: Venue,
+    surface: Surface,
+) -> Vec<String> {
+    match fetched {
+        Ok(notes) => {
+            enrich_handicap(horses, notes, race_date);
+            group_venue_slugs(venue, surface)
+        }
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                "手動ハンデ精査の材料を取得できなかった（盤は材料なしで続行する）"
+            );
+            Vec::new()
+        }
+    }
+}
+
 /// 盤行に手動ハンデ精査の材料を後付けする（#628）。`notes` は `horse_handicap_notes` 由来
 /// （馬名で突き合わせ）。`race_date` は当日で、休養明け日数の基準になる。
 ///
@@ -403,14 +428,24 @@ fn enrich_handicap(
 ) {
     for h in horses.iter_mut() {
         let Ok(name) = HorseName::try_from(h.horse_name.clone()) else {
+            tracing::warn!(
+                horse_name = %h.horse_name,
+                "条件別実績: 馬名を正規化できず材料を付けられなかった"
+            );
             continue;
         };
         // `remove` で所有権ごと取り出す（各馬 1 回しか引かないので、2 本の `Vec<ConditionRun>` を
         // clone せずに move できる）。
+        // `notes` は同じ馬名リストで引いているので通常は必ずヒットする。
+        // 欠けたら材料なし（`None` のまま）として扱う。
         let Some(row) = notes.remove(&name) else {
+            tracing::warn!(
+                horse_name = %h.horse_name,
+                "条件別実績: 材料が返って来なかった（材料なしとして扱う）"
+            );
             continue;
         };
-        h.handicap = HandicapNote {
+        h.handicap = Some(HandicapNote {
             course_runs: row.course_runs,
             group_runs: row.group_runs,
             // 過去走が未来日付（データ不整合）なら負の間隔になるので 0 に丸めず None に倒す
@@ -423,7 +458,7 @@ fn enrich_handicap(
             distance_untried: row.same_distance_starts == 0,
             surface_untried: row.same_surface_starts == 0,
             no_past_runs: row.total_starts == 0,
-        };
+        });
     }
 }
 
@@ -494,8 +529,8 @@ fn build_board_horses(
                 // 書評は enrich_commentary で後付けする（build_board_horses は IO 非依存の純関数に保つ）。
                 comment: None,
                 detail_lines: Vec::new(),
-                // ハンデ精査材料は enrich_handicap で後付けする（同上）。
-                handicap: HandicapNote::default(),
+                // ハンデ精査材料は enrich_handicap で後付けする（同上）。`None` = 材料なし。
+                handicap: None,
             }
         })
         .collect()
@@ -1070,7 +1105,7 @@ mod tests {
         )]);
         enrich_handicap(&mut horses, notes, ymd(2026, 8, 16));
 
-        let h = &horses[0].handicap;
+        let h = horses[0].handicap.as_ref().expect("材料が付いているはず");
         assert_eq!(h.course_runs.len(), 2);
         assert_eq!(h.course_runs[0].finishing_position, 3);
         assert_eq!(h.layoff_days, Some(14));
@@ -1100,7 +1135,7 @@ mod tests {
         enrich_handicap(&mut horses, notes, ymd(2026, 8, 16));
 
         // 完全一致 0 走＝「該当なし」。距離未経験は立つが、近走そのものはある。
-        let h1 = &horses[0].handicap;
+        let h1 = horses[0].handicap.as_ref().expect("材料が付いているはず");
         assert!(h1.course_runs.is_empty());
         assert!(h1.distance_untried);
         assert!(!h1.surface_untried);
@@ -1108,7 +1143,7 @@ mod tests {
         assert_eq!(h1.layoff_days, Some(36));
 
         // 近走 0 件＝モデル確率がベースライン近く＝「純モデル高 vs 市場低」の偽の妙味の印。
-        let h2 = &horses[1].handicap;
+        let h2 = horses[1].handicap.as_ref().expect("材料が付いているはず");
         assert!(h2.no_past_runs);
         assert!(h2.distance_untried);
         assert!(h2.surface_untried);
@@ -1133,7 +1168,7 @@ mod tests {
         )]);
         enrich_handicap(&mut horses, notes, ymd(2026, 8, 16));
 
-        let h = &horses[0].handicap;
+        let h = horses[0].handicap.as_ref().expect("材料が付いているはず");
         assert!(h.course_runs.is_empty(), "完全一致は該当なしのまま");
         assert_eq!(h.group_runs.len(), 2, "洋芝グループ側には残る");
     }
@@ -1154,7 +1189,65 @@ mod tests {
             },
         )]);
         enrich_handicap(&mut horses, notes, ymd(2026, 8, 16));
-        assert_eq!(horses[0].handicap.layoff_days, None);
+        assert_eq!(
+            horses[0]
+                .handicap
+                .as_ref()
+                .expect("材料が付いているはず")
+                .layoff_days,
+            None
+        );
+    }
+
+    #[test]
+    fn apply_handicap_degrades_without_failing_the_board() {
+        // 材料取得が失敗しても盤は組み上がる（提示専用で確率・買い目・軸ロックは依存しない）。
+        // **既定値で埋めない**——埋めると `distance_untried: false` 等が「計算していない事実」の
+        // 断言になる。`group_venues` も空に倒す（1 走も引けていないのに母集団だけ非空にしない）。
+        let b = vec![hp(1, 0.3), hp(2, 0.2)];
+        let mut horses = build_board_horses(&b, &b, None, None);
+        let group = apply_handicap(
+            &mut horses,
+            Err(crate::error::Error::Internal("DB 詰まり".into())),
+            ymd(2026, 8, 16),
+            // 洋芝の芝＝成功していれば group_venues が 2 場になる条件をわざと選ぶ。
+            Venue::Sapporo,
+            Surface::Turf,
+        );
+        assert!(group.is_empty(), "失敗時に group_venues を非空で返さない");
+        for h in &horses {
+            assert_eq!(h.handicap, None, "失敗時は材料なし（既定値で埋めない）");
+        }
+    }
+
+    #[test]
+    fn apply_handicap_fills_material_and_group_on_success() {
+        // 成功時は材料が付き、洋芝の芝なら group_venues も 2 場になる（上の縮退テストの対、
+        // 「常に空を返す」実装が通ってしまわないようにする）。
+        let b = vec![hp(1, 0.3)];
+        let mut horses = build_board_horses(&b, &b, None, None);
+        let notes = notes_of(vec![(
+            1,
+            HandicapNoteRow {
+                course_runs: vec![run(2026, 7, 5, 1)],
+                group_runs: vec![run(2026, 7, 5, 1), run(2026, 6, 14, 5)],
+                total_starts: 8,
+                last_run_date: Some(ymd(2026, 7, 5)),
+                same_surface_starts: 8,
+                same_distance_starts: 4,
+            },
+        )]);
+        let group = apply_handicap(
+            &mut horses,
+            Ok(notes),
+            ymd(2026, 8, 16),
+            Venue::Sapporo,
+            Surface::Turf,
+        );
+        assert_eq!(group, vec!["sapporo".to_string(), "hakodate".to_string()]);
+        let h = horses[0].handicap.as_ref().expect("材料が付いているはず");
+        assert_eq!(h.course_runs.len(), 1);
+        assert_eq!(h.group_runs.len(), 2);
     }
 
     #[test]
@@ -1164,7 +1257,8 @@ mod tests {
         let b = vec![hp(1, 0.3)];
         let mut horses = build_board_horses(&b, &b, None, None);
         enrich_handicap(&mut horses, HashMap::new(), ymd(2026, 8, 16));
-        assert_eq!(horses[0].handicap, HandicapNote::default());
-        assert!(!horses[0].handicap.no_past_runs, "材料なしを欠損印にしない");
+        // `None` = 材料なし。既定値（`Some(HandicapNote::default())`）で埋めてはいけない
+        // ——埋めると `no_past_runs: false` 等が「計算していない事実」の断言になる。
+        assert_eq!(horses[0].handicap, None, "材料なしを既定値で埋めない");
     }
 }

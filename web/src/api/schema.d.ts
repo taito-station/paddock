@@ -457,8 +457,7 @@ export interface components {
              * @description 枠番（出馬表に無ければ `null`）。
              */
             gate_num?: number | null;
-            /** @description 手動ハンデ精査の材料（#628・提示専用）。買い目の選択ロジックには入らない。 */
-            handicap: components["schemas"]["HandicapNoteSchema"];
+            handicap?: null | components["schemas"]["HandicapNoteSchema"];
             horse_name: string;
             /** Format: int32 */
             horse_num: number;
@@ -1001,6 +1000,13 @@ export interface components {
             date: string;
             /** Format: int32 */
             distance: number;
+            /**
+             * Format: int32
+             * @description 「今回距離を経験済み」とみなす許容幅[m]（#628）。`handicap.distance_untried` の判定に
+             *     サーバが使った値そのもので、UI はこれを表示に使う（web 側に同値を持たせると
+             *     サーバだけ変えたとき画面が定義を偽る）。
+             */
+            distance_tolerance_m: number;
             /** Format: int32 */
             field_size: number;
             /**

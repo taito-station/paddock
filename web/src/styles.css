@@ -874,8 +874,10 @@ button:disabled {
   font-variant-numeric: tabular-nums;
   text-align: center;
   /* 2 桁着順が並ぶと狭幅カラムで 2 行に折り返す。全カードで 2 行ぶんを先に確保し、
-     折り返しの有無で下のバッジ行がガタつかないようにする（横並び比較のため）。 */
-  min-height: 3em;
+     折り返しの有無で下のバッジ行がガタつかないようにする（横並び比較のため）。
+     box-sizing: border-box なので padding(0.2rem×2)＋border(1px) を込みで見積もる
+     ——2 行 = 2.5em に対し 3em では約 0.2em 足りず、折り返した馬だけわずかに背が高くなる。 */
+  min-height: calc(2.5em + 0.4rem + 1px);
 }
 
 /* 上位人気に限って出す「前提が壊れているサイン」（休養日数・距離初・芝ダ初）。 */

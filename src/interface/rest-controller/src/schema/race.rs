@@ -7,8 +7,8 @@ use utoipa::ToSchema;
 use paddock_domain::{
     BetCombination, HorseEntry, HorseProbability, Portfolio, Race, RaceCard, RaceId,
 };
-use paddock_use_case::repository::ConditionRun;
-use paddock_use_case::{FinishEntry, RaceBoard};
+use paddock_use_case::repository::DISTANCE_EXPERIENCE_TOLERANCE_M;
+use paddock_use_case::{ConditionRun, FinishEntry, RaceBoard};
 
 /// レース一覧の 1 要素（出走前の諸元のみ。results は含まない）。
 #[derive(Debug, Serialize, ToSchema)]
@@ -338,7 +338,12 @@ pub struct BoardHorseSchema {
     /// 展開パネル用の根拠 bullet（条件別 factor・枠 lift・近走・前走・斤量）。空配列＝根拠情報なし。
     pub detail_lines: Vec<String>,
     /// 手動ハンデ精査の材料（#628・提示専用）。買い目の選択ロジックには入らない。
-    pub handicap: HandicapNoteSchema,
+    ///
+    /// **`null` = 材料を引けていない**（出馬表なし・取得失敗）。「該当なし（走っていない）」
+    /// とは別物なので既定値で埋めない——埋めると `distance_untried: false` 等が
+    /// 「計算していない事実」を断言することになる。クライアントは `null` を
+    /// 「未取得」として表示し、`該当なし` と書かないこと。
+    pub handicap: Option<HandicapNoteSchema>,
 }
 
 /// 条件別実績の過去走 1 走（#628）。着順が付いた走りだけを載せる（取消・除外・中止は母集団外）。
@@ -456,6 +461,10 @@ pub struct RaceBoardResponse {
     /// 洋芝の根拠は「**芝の**適性が通じる」なので、同じ 2 場でも**ダート戦は空配列**になる。
     /// 日本語ラベルの組み立ては web が持つ（表記の正本を 1 か所に保つ）。
     pub group_venues: Vec<String>,
+    /// 「今回距離を経験済み」とみなす許容幅[m]（#628）。`handicap.distance_untried` の判定に
+    /// サーバが使った値そのもので、UI はこれを表示に使う（web 側に同値を持たせると
+    /// サーバだけ変えたとき画面が定義を偽る）。
+    pub distance_tolerance_m: u32,
     pub horses: Vec<BoardHorseSchema>,
 }
 
@@ -522,6 +531,7 @@ impl From<RaceBoard> for RaceBoardResponse {
             morning_hit_prob: b.morning_hit_prob,
             morning_unpriced_legs: b.morning_unpriced_legs.map(|n| n as u32),
             group_venues: b.group_venues,
+            distance_tolerance_m: DISTANCE_EXPERIENCE_TOLERANCE_M,
             horses: b
                 .horses
                 .into_iter()
@@ -549,27 +559,17 @@ impl From<RaceBoard> for RaceBoardResponse {
                     finishing_position: h.finishing_position,
                     comment: h.comment,
                     detail_lines: h.detail_lines,
-                    handicap: HandicapNoteSchema {
-                        // `b` を所有しているので move で写す（`race_name: String` の
-                        // 二重 clone を避ける——`group_runs` は `course_runs` の上位集合なので
-                        // 借用で回すと同じレース名を 2 度コピーすることになる）。
-                        course_runs: h
-                            .handicap
-                            .course_runs
-                            .into_iter()
-                            .map(condition_run)
-                            .collect(),
-                        group_runs: h
-                            .handicap
-                            .group_runs
-                            .into_iter()
-                            .map(condition_run)
-                            .collect(),
-                        layoff_days: h.handicap.layoff_days,
-                        distance_untried: h.handicap.distance_untried,
-                        surface_untried: h.handicap.surface_untried,
-                        no_past_runs: h.handicap.no_past_runs,
-                    },
+                    // `b` を所有しているので move で写す（`race_name: String` の二重 clone を
+                    // 避ける——`group_runs` は `course_runs` の上位集合なので、借用で回すと
+                    // 同じレース名を 2 度コピーすることになる）。
+                    handicap: h.handicap.map(|hc| HandicapNoteSchema {
+                        course_runs: hc.course_runs.into_iter().map(condition_run).collect(),
+                        group_runs: hc.group_runs.into_iter().map(condition_run).collect(),
+                        layoff_days: hc.layoff_days,
+                        distance_untried: hc.distance_untried,
+                        surface_untried: hc.surface_untried,
+                        no_past_runs: hc.no_past_runs,
+                    }),
                 })
                 .collect(),
         }

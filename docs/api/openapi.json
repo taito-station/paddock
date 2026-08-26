@@ -1677,8 +1677,7 @@
           "model_rank",
           "is_overlay",
           "is_value",
-          "detail_lines",
-          "handicap"
+          "detail_lines"
         ],
         "properties": {
           "comment": {
@@ -1714,8 +1713,15 @@
             "minimum": 0
           },
           "handicap": {
-            "$ref": "#/components/schemas/HandicapNoteSchema",
-            "description": "手動ハンデ精査の材料（#628・提示専用）。買い目の選択ロジックには入らない。"
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/HandicapNoteSchema",
+                "description": "手動ハンデ精査の材料（#628・提示専用）。買い目の選択ロジックには入らない。\n\n**`null` = 材料を引けていない**（出馬表なし・取得失敗）。「該当なし（走っていない）」\nとは別物なので既定値で埋めない——埋めると `distance_untried: false` 等が\n「計算していない事実」を断言することになる。クライアントは `null` を\n「未取得」として表示し、`該当なし` と書かないこと。"
+              }
+            ]
           },
           "horse_name": {
             "type": "string"
@@ -2962,6 +2968,7 @@
           "confusion",
           "result_confirmed",
           "group_venues",
+          "distance_tolerance_m",
           "horses"
         ],
         "properties": {
@@ -2997,6 +3004,12 @@
           "distance": {
             "type": "integer",
             "format": "int32",
+            "minimum": 0
+          },
+          "distance_tolerance_m": {
+            "type": "integer",
+            "format": "int32",
+            "description": "「今回距離を経験済み」とみなす許容幅[m]（#628）。`handicap.distance_untried` の判定に\nサーバが使った値そのもので、UI はこれを表示に使う（web 側に同値を持たせると\nサーバだけ変えたとき画面が定義を偽る）。",
             "minimum": 0
           },
           "field_size": {

@@ -233,9 +233,26 @@ pub async fn find_handicap_notes(
         if !same_surface || row_distance != distance {
             continue;
         }
+        // 着順は 1 以上が定義。0 以下は不正データなので、`0着` として画面に出さず
+        // 日付・馬名のパース失敗と同じく warn+skip に揃える（母数の目減りはログに残す）。
+        let Ok(finishing_position) = u32::try_from(row.finishing_position) else {
+            tracing::warn!(
+                horse_name = %row.horse_name,
+                finishing_position = row.finishing_position,
+                "条件別実績: 着順が不正な 1 走を母集団から除外した"
+            );
+            continue;
+        };
+        if finishing_position == 0 {
+            tracing::warn!(
+                horse_name = %row.horse_name,
+                "条件別実績: 着順 0 の 1 走を母集団から除外した"
+            );
+            continue;
+        }
         let run = ConditionRun {
             date,
-            finishing_position: row.finishing_position.max(0) as u32,
+            finishing_position,
             race_name: row.race_name,
         };
         if row.venue == venue.as_jp() {

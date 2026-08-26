@@ -1,11 +1,8 @@
 import { type RefObject } from "react";
 import { type BoardHorse, markSymbol } from "../../lib/board";
 import {
-  DISTANCE_TOLERANCE_M,
-  EMPTY_HANDICAP_NOTE,
   NO_RECORD,
   conditionRunLine,
-  hasHandicapMaterial,
   showsGroupRecord,
 } from "../../lib/handicap";
 
@@ -19,6 +16,7 @@ export function HorseDetailPanel({
   horse: h,
   conditionLabel,
   groupConditionLabel,
+  distanceToleranceM,
   onClose,
   closeBtnRef,
 }: {
@@ -27,15 +25,16 @@ export function HorseDetailPanel({
   conditionLabel: string;
   /** 場グループのラベル（例 `洋芝(札幌/函館)芝2000m`）。洋芝場でのみ非 null。 */
   groupConditionLabel: string | null;
+  /** 「今回距離を経験済み」の許容幅[m]。判定に使った値をサーバから受け取り表示するだけ
+   *  （web に同値を持つとサーバだけ変えたとき画面が定義を偽る）。 */
+  distanceToleranceM: number;
   onClose: () => void;
   closeBtnRef: RefObject<HTMLButtonElement | null>;
 }) {
   if (!h) return null;
-  // 古い api-server が配信し続ける事故（#570）でフィールドが欠けてもパネルを落とさない。
-  const hc = h.handicap ?? EMPTY_HANDICAP_NOTE;
-  // 材料が引けていないときはブロックごと出さない（「該当なし」「過去走なし」と書くと
-  // 「走っていない」という断定になる。#628 が塞ごうとしている取り違えそのもの）。
-  const hasMaterial = hasHandicapMaterial(h.handicap);
+  // **`null` = 未取得**（サーバが明示）。材料が無いときはブロックごと出さない
+  // ——「該当なし」「過去走なし」と書くと「走っていない」という断定になる。
+  const hc = h.handicap ?? null;
   return (
     <div
       className="horse-detail"
@@ -73,7 +72,7 @@ export function HorseDetailPanel({
       )}
 
       {/* 手動ハンデ精査の材料（#628）。事実だけを並べ、良し悪しの判定は書かない。 */}
-      {hasMaterial && (
+      {hc && (
         <dl className="handicap-detail">
           <div>
             <dt>{conditionLabel}</dt>
@@ -147,8 +146,8 @@ export function HorseDetailPanel({
               ) : (
                 [
                   hc.distance_untried
-                    ? `今回距離（±${DISTANCE_TOLERANCE_M}m）は未経験`
-                    : `今回距離（±${DISTANCE_TOLERANCE_M}m）の経験あり`,
+                    ? `今回距離（±${distanceToleranceM}m）は未経験`
+                    : `今回距離（±${distanceToleranceM}m）の経験あり`,
                   hc.surface_untried
                     ? "今回の芝ダは未経験"
                     : "今回の芝ダの経験あり",

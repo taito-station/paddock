@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   CARD_MAX_POSITIONS,
-  EMPTY_HANDICAP_NOTE,
   NO_RECORD,
   PREMISE_POPULARITY_MAX,
   type ConditionRun,
@@ -172,7 +171,7 @@ describe("premiseBadges", () => {
 
   it("過去走 0 件の馬には未経験バッジを出さない", () => {
     // サーバ側で same_*_starts == 0 由来なのでデータ欠損馬では必ず真になる。
-    // 「未経験」として出すと「データが無い」と取り違える（カードは 近走なし に一本化）。
+    // 「未経験」として出すと「データが無い」と取り違える（カードは 戦績なし に一本化）。
     const badges = premiseBadges(
       note({
         no_past_runs: true,
@@ -207,34 +206,18 @@ describe("premiseBadges", () => {
   });
 });
 
-describe("hasHandicapMaterial", () => {
-  it("書評が無くても材料があればパネルを開ける", () => {
-    // detail_lines は factor が薄い馬ほど空になりやすいので、これを見ないと
-    // **材料が乏しい馬ほど内訳に到達できない**という逆転が起きる。
-    expect(
-      hasHandicapMaterial(note({ course_runs: [run("2026-08-02", 3)] })),
-    ).toBe(true);
-    expect(
-      hasHandicapMaterial(note({ group_runs: [run("2026-08-02", 3)] })),
-    ).toBe(true);
-    expect(hasHandicapMaterial(note({ layoff_days: 30 }))).toBe(true);
-    // 過去走 0 件そのものが読む価値のある材料（偽の妙味の印）。
-    expect(hasHandicapMaterial(note({ no_past_runs: true }))).toBe(true);
+describe("hasHandicapMaterial の境界", () => {
+  it("null / undefined だけを未取得とみなす", () => {
+    // サーバが `handicap: null` で未取得を明示するので、判定はその有無だけ。
+    expect(hasHandicapMaterial(null)).toBe(false);
+    expect(hasHandicapMaterial(undefined)).toBe(false);
   });
 
-  it("材料が何も無ければ false", () => {
-    expect(hasHandicapMaterial(note())).toBe(false);
-  });
-});
-
-describe("EMPTY_HANDICAP_NOTE", () => {
-  it("縮退値はフラグが立たず材料なし扱いになる", () => {
-    // 古い api-server が handicap を返さない事故（#570）で盤全体を落とさないための縮退値。
-    // 「材料なし」であって「該当なし（走っていない）」の断定ではないので、
-    // 欠損フラグ（no_past_runs）を立てない。
-    expect(EMPTY_HANDICAP_NOTE.no_past_runs).toBe(false);
-    expect(hasHandicapMaterial(EMPTY_HANDICAP_NOTE)).toBe(false);
-    expect(premiseBadges(EMPTY_HANDICAP_NOTE, 1)).toEqual([]);
+  it("材料が空でも「取得済み」と扱う（フラグから未取得を推測しない）", () => {
+    // 過去走はあるが今回条件では 0 走、かつ前走日が未来（データ不整合）で layoff も null——
+    // という馬を「未取得」に倒すと、`該当なし` と書くべき場面で `—` が出る。
+    const fetchedButEmpty = note();
+    expect(hasHandicapMaterial(fetchedButEmpty)).toBe(true);
   });
 });
 

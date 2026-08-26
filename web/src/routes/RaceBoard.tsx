@@ -27,7 +27,10 @@ import {
   groupConditionLabel,
 } from "../lib/handicap";
 import { useSessionQuery, useRacesQuery } from "../lib/queries";
-import { BOARD_POLL_INTERVAL_MS, CLOCK_TICK_INTERVAL_MS } from "../lib/constants";
+import {
+  BOARD_POLL_INTERVAL_MS,
+  CLOCK_TICK_INTERVAL_MS,
+} from "../lib/constants";
 import { ExecutionPanel } from "./board/ExecutionPanel";
 import { HorseCard } from "./board/HorseCard";
 import { HorseDetailPanel } from "./board/HorseDetailPanel";
@@ -249,9 +252,7 @@ export function RaceBoard() {
         {/* 戻り先は盤の date と back=（ライブの絞り込み状態）を合成して復元する（#380）。
             date/back とも whitelist 再検証・エンコード込みで backToDashboardHref が組む。 */}
         <Link to={backToDashboardHref(back, date)}>← レース一覧</Link>
-        {date && (
-          <Link to={`/sessions/${encodeURIComponent(date)}`}>収支</Link>
-        )}
+        {date && <Link to={`/sessions/${encodeURIComponent(date)}`}>収支</Link>}
         {session.data && (
           <span className="session-balance">
             残高 {yen(session.data.balance)}
@@ -264,10 +265,7 @@ export function RaceBoard() {
             未発走中は refetchInterval で自動更新も走るが、直前判断で即時更新したい局面のため手動導線も置く。 */}
         {d && (
           <>
-            <button
-              onClick={() => board.refetch()}
-              disabled={board.isFetching}
-            >
+            <button onClick={() => board.refetch()} disabled={board.isFetching}>
               {board.isFetching ? "再読込中…" : "再読込"}
             </button>
             {/* current_at が present のときだけ鮮度を出す。null（単一 snapshot＝#448 比較材料なし。
@@ -282,8 +280,8 @@ export function RaceBoard() {
                 停止。RaceList と同じ remedy 文言（稼働確認）に寄せる（A-Should）。 */}
             {fresh?.state === "stale" && (
               <span className="live-stale">
-                ⚠ オッズ更新から{STALE_MINUTES}分以上経過 —
-                predict-watch の稼働を確認
+                ⚠ オッズ更新から{STALE_MINUTES}分以上経過 — predict-watch
+                の稼働を確認
               </span>
             )}
           </>
@@ -395,13 +393,13 @@ export function RaceBoard() {
                   {/* morning_roi / roi はいずれも比率（domain Ev.roi）。boardRoiPct で %化する。
                       title は summary へ付け PC hover 補助。展開 <p> と文言を morningRoiReason で共有する。 */}
                   <summary title={morningRoiReason(d.morning_at, d.current_at)}>
-                    <span className="caret" aria-hidden="true" />朝ROI{" "}
-                    {boardRoiPct(d.morning_roi)} → 現ROI {boardRoiPct(d.roi)}
+                    <span className="caret" aria-hidden="true" />
+                    朝ROI {boardRoiPct(d.morning_roi)} → 現ROI{" "}
+                    {boardRoiPct(d.roi)}
                     {d.morning_hit_prob != null && d.hit_prob != null && (
                       <>
                         {" "}
-                        / 的中 {pct(d.morning_hit_prob)} →{" "}
-                        {pct(d.hit_prob)}
+                        / 的中 {pct(d.morning_hit_prob)} → {pct(d.hit_prob)}
                       </>
                     )}
                   </summary>
@@ -416,9 +414,7 @@ export function RaceBoard() {
           </div>
 
           {/* レース書評（混戦度・◎の狙いどころ・妙味。人手優先・無ければルールベース生成） */}
-          {d.race_comment && (
-            <p className="race-comment">{d.race_comment}</p>
-          )}
+          {d.race_comment && <p className="race-comment">{d.race_comment}</p>}
 
           {/* 確率表示の切替（#373）: 既定 ON でモデル＋市場＋ブレンドを併記。OFF でモデル列を畳みブレンド＋市場のみに絞る。 */}
           <div className="board-controls">
@@ -469,6 +465,7 @@ export function RaceBoard() {
             horse={selectedHorseData}
             conditionLabel={condLabel}
             groupConditionLabel={groupCondLabel}
+            distanceToleranceM={d.distance_tolerance_m}
             onClose={closePanel}
             closeBtnRef={closeBtnRef}
           />
@@ -517,7 +514,8 @@ export function RaceBoard() {
             cap={cap}
           />
           <p className="muted mt-sm">
-            {d.field_size}頭立て。買い目の相手は top5 固定（相手は広げない）。全頭盤で妙味馬・複勝圏馬を手動で拾う。
+            {d.field_size}頭立て。買い目の相手は top5
+            固定（相手は広げない）。全頭盤で妙味馬・複勝圏馬を手動で拾う。
           </p>
 
           {/* 記号凡例（#477）。盤の記号・略号の意味は従来 title（hover）依存でタッチ端末から読めなかった。
@@ -525,16 +523,21 @@ export function RaceBoard() {
               （title は PC の hover 補助として各所に残す）。 */}
           <details className="board-legend mt-sm">
             <summary>
-              <span className="caret" aria-hidden="true" />記号の凡例
+              <span className="caret" aria-hidden="true" />
+              記号の凡例
             </summary>
             <dl className="board-legend-body">
               <div>
                 <dt>ブ勝 / ブ連 / ブ複</dt>
-                <dd>ブレンド勝率・連対率・複勝率＝本番 α=0.2（市場ブレンド）。</dd>
+                <dd>
+                  ブレンド勝率・連対率・複勝率＝本番 α=0.2（市場ブレンド）。
+                </dd>
               </div>
               <div>
                 <dt>モ勝 / モ連 / モ複</dt>
-                <dd>モデル勝率・連対率・複勝率＝純モデル α=1.0（市場非依存）。</dd>
+                <dd>
+                  モデル勝率・連対率・複勝率＝純モデル α=1.0（市場非依存）。
+                </dd>
               </div>
               <div>
                 <dt>市勝</dt>
@@ -556,11 +559,11 @@ export function RaceBoard() {
               </div>
               {/* 手動ハンデ精査の材料（#628）。判断材料であって go/no-go サインではない。 */}
               <div>
-                <dt>差 / 近走なし</dt>
+                <dt>差 / 戦績なし</dt>
                 <dd>
                   差＝<strong>モ勝（純モデル α=1.0）</strong> −
                   市勝[pt]。モデル値の表示と連動するので、モデル列を畳むと差も畳まれる。
-                  <strong>近走なし</strong>
+                  <strong>戦績なし</strong>
                   が付く馬は過去走データが 0
                   件でモデル確率がベースライン近くの推定なので、差ptは妙味の根拠にならない（偽の妙味）。
                 </dd>
@@ -568,9 +571,11 @@ export function RaceBoard() {
               <div>
                 <dt>{condLabel} の行</dt>
                 <dd>
-                  今回と同じ 場×芝ダ×距離 での「N走 着順（新しい順）」。適性が支配的な条件
+                  今回と同じ 場×芝ダ×距離 での「N走
+                  着順（新しい順）」。適性が支配的な条件
                   （千直・ダート短距離など）で、一般的な近走との乖離を横並びで読むための事実。
-                  0走は<strong>該当なし</strong>と明示する（空欄＝未取得と区別）。
+                  0走は<strong>該当なし</strong>
+                  と明示する（空欄＝未取得と区別）。
                   {groupCondLabel &&
                     `洋芝（札幌・函館）は場が違っても芝の適性が通じるため、書評パネルで「${groupCondLabel}」を別行に併記する（ダート戦では併記しない）。`}
                 </dd>
@@ -578,14 +583,15 @@ export function RaceBoard() {
               <div>
                 <dt>間隔◯日 / 距離初 / 芝ダ初</dt>
                 <dd>
-                  上位{" "}
-                  {PREMISE_POPULARITY_MAX}
+                  上位 {PREMISE_POPULARITY_MAX}
                   番人気までに出す「前提が壊れているサイン」。
                   <strong>事実だけを出し、閾値で良し悪しを判定しない</strong>
-                  （同じ休養明けでも 10ヶ月半と 4ヶ月半では質が違う。読み分けは人が行う）。
-                  過去走データが 0 件の馬には
+                  （同じ休養明けでも 10ヶ月半と
+                  4ヶ月半では質が違う。読み分けは人が行う）。 過去走データが 0
+                  件の馬には
                   <strong>距離初 / 芝ダ初を出さない</strong>
-                  ——「未経験」ではなく「データが無い」ため（代わりに 近走なし が付く）。
+                  ——「未経験」ではなく「データが無い」ため（代わりに 戦績なし
+                  が付く）。
                 </dd>
               </div>
             </dl>

@@ -202,7 +202,8 @@ GET /api/races/{race_id}/board[?budget=&track_condition=&blend_alpha=]
 | フィールド | 型 | 説明 |
 |---|---|---|
 | `race_id` / `venue` / `race_num` / `date` | string/int | レース識別子 |
-| `group_venues` | array | 条件別実績の場グループ（#628。洋芝場のみ 2 場・他は空配列） |
+| `group_venues` | array | 条件別実績の場グループ（#628。洋芝場の芝のみ 2 場・他は空配列） |
+| `distance_tolerance_m` | int | 距離「経験あり」の許容幅[m]（#628）。判定に使った値そのもので、UI はこれを表示に使う |
 | `race_name` / `race_class` | string\|null | 重賞名・格付けスラッグ（未保存は `null`、#389/#345） |
 | `surface` / `distance` / `field_size` | string/int | 馬場・距離・出走頭数 |
 | `post_time` | string\|null | 発走時刻 `HH:MM`（未取得は `null`） |
@@ -237,7 +238,7 @@ GET /api/races/{race_id}/board[?budget=&track_condition=&blend_alpha=]
 | `detail_lines` | array | 展開パネル用の根拠 bullet（条件別 factor・枠 lift・近走・前走・斤量） |
 | `finishing_position` | int\|null | 確定着順（#381。未確定・除外/中止は `null`） |
 | `morning_win_odds` | number\|null | **朝時点の単勝オッズ**（後述「朝比較」参照）。朝 snapshot 無し・当該馬未取得は `null` |
-| `handicap` | object | **手動ハンデ精査の材料**（#628・後述） |
+| `handicap` | object\|null | **手動ハンデ精査の材料**（#628・後述）。**`null` = 材料未取得**（「該当なし」ではない） |
 
 #### 手動ハンデ精査の材料（#628）
 
@@ -269,6 +270,12 @@ GET /api/races/{race_id}/board[?budget=&track_condition=&blend_alpha=]
 
 `ConditionRunSchema` は `date` / `finishing_position` / `race_name`（netkeiba 近走のみが持つ。PDF 経路は `null`）。
 **着順が付いた走りだけ**を載せる（取消・除外・中止は「走っていない」ので母集団外＝他の stats 集計と同じ規約）。
+
+**`handicap` は `null` を取りうる。`null` は「材料を引けていない」であって「該当なし（走っていない）」ではない。**
+既定値で埋めると `distance_untried: false` 等が**計算していない事実を断言**することになるため、型で区別する。
+材料取得は提示専用なので、失敗しても盤全体は 200 で返す（確率・買い目・軸ロックはこれに依存しない）。
+このとき `group_venues` も空配列に倒す——「`group_runs` の母集団になった場」という定義と食い違わせないため。
+クライアントは `null` を「未取得」として表示し、**`該当なし` と書かないこと**。
 
 **着順のソース優先は他経路と逆で netkeiba を優先する。** 両ソースに存在する 31,585 走の実測で
 **3,503 走（11.1%）が食い違い**、うち 76% が `pdf = netkeiba + 1` の系統的な 1 つズレだった（既知の PDF パーサ制約：
@@ -481,7 +488,13 @@ blended はほぼ市場の人気順をなぞる。つまり**盤面は「市場�
    web が持つ。**グループを広げるのは芝のときだけ**——洋芝の根拠は「**芝の**適性が通じる」なので、
    同じ 2 場でもダートには当てない。
 5. **この経路の着順は netkeiba（`horse_past_runs`）を優先する**（`find_recent_runs` の pdf 優先とは逆）。
-6. 近走 0 件フラグは「純モデル vs 市場」の差pt と**同じ行**に出す。
+6. 戦績欠損フラグは「純モデル vs 市場」の差pt と**並べて**読めるようにカードへ出す
+   （モデル列のトグルと直交する事実なので、差pt を畳んでも欠損印は残す）。
+7. **`handicap` は `null` を取りうる契約にする**（`null` = 材料未取得）。既定値で埋めると
+   「計算していない事実」を断言することになるため、型で区別する。材料取得の失敗では
+   盤を 500 にせず 200 + `null` で返す（提示専用なので確率・買い目には影響しない）。
+8. **距離の許容幅はレスポンスに載せる**（`distance_tolerance_m`）。UI は判定に使われた値を
+   表示するだけにし、web 側に同値を持たない（サーバだけ変えたとき画面が定義を偽るのを防ぐ）。
 
 #### 理由
 

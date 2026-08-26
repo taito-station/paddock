@@ -212,7 +212,7 @@ pub const DISTANCE_EXPERIENCE_TOLERANCE_M: u32 = 100;
 pub struct HandicapNoteRow {
     /// 完全一致（今回と同じ 場 × 芝ダ × 距離）の過去走。date 降順。
     pub course_runs: Vec<ConditionRun>,
-    /// 場グループ（**芝のときだけ** [`Venue::turf_group`] で広げる × 同芝ダ × 同距離）の過去走。
+    /// 場グループ（[`Venue::condition_group`]＝**芝のときだけ**広げる × 同芝ダ × 同距離）の過去走。
     /// date 降順で、**非空のときは `course_runs` を包含する上位集合**。
     ///
     /// 広くなるのは**洋芝場（札幌・函館）の芝レース**だけで、それ以外（ダート戦を含む）は
