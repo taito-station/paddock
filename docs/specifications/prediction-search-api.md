@@ -270,3 +270,36 @@ API なのでブラウザ UI は無い。`tests/browser-test-cases/` は追加�
 - #34 Web SPA（一覧 → 個別の画面遷移・分析ビュー） / #33 REST API(read, 完了) / #50 名前あいまい検索（完了, 正規化流用）
 - `~/.claude/rules/rust/architecture.md`・`conventions.md` / `~/.claude/rules/sql/{queries,schema,migrations}.md`
 - ADR: `docs/docs-original/0025-prediction-search-api.md`
+
+## 決定ログ
+
+### #620: テスト共通ヘルパーの範囲を seed 限定に明確化 (2026-08-28) — Accepted
+
+#### コンテキスト
+
+テスト方針で「共通の helper/mod.rs は置かない」と定めていたが、`build_service!` マクロが
+4 ファイル、`body_json` が 3 ファイルに重複しており保守コストが高かった。一方 seed は
+テストケースごとに異なるデータを用意する必要があり共通化の利点が薄い。
+
+#### 決定
+
+「共通 helper は置かない」の対象を **seed** に限定し、App 構築（`build_service!` マクロ）
+と汎用ヘルパー（`body_json`）は `tests/common/mod.rs` に集約する。
+
+#### 理由
+
+- `build_service!` は全テストファイルで同一の App 配線を行う定型コード。変更が入ると
+  全ファイルを同期する必要があり、重複がバグの温床になる
+- seed はテストケース固有のデータ投入であり、共通化すると各テストの独立性が損なわれる
+- Rust の統合テストは 1 ファイル 1 クレートのため、`#[macro_use] mod common;` パターン
+  でマクロを共有する標準的な手法を採用
+
+#### 却下した代替案
+
+- **全 helper を共通化**: seed まで共通化するとテストケース間の依存が生まれ、独立性が損なわれる
+- **現状維持（重複のまま）**: 4 ファイルの同期コストが高く、実際に arm 構造の不統一が発生していた
+
+#### 影響
+
+- `tests/common/mod.rs` が新設され、各テストファイルは `#[macro_use] mod common;` で取り込む
+- seed 関数は引き続き各テストファイルに配置する
