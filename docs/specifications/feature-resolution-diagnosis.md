@@ -753,3 +753,48 @@ python3 scripts/predict-check/market_calibration.py --tsv /tmp/pa/pure.tsv
 ```
 
 ※ `--win-power` / `--place-show-power` / `--shrinkage-m` / `--blend-alpha` はモデル確率列に作用するフラグで、本測定（`win_odds` と着順列のみ参照）の出力には影響しない（ADR 0058 の pure dump をそのまま流用しているだけ）。
+
+### ADR 0091: PDF 着順ズレ（EdiF フォント）のスコア経路影響検証 → netkeiba 優先 dedup を採用 (2026-08-27) — 採用
+
+#### コンテキスト
+
+PR #662 の実装中に、PDF 確定成績と netkeiba 近走で**着順が 11.1% 不一致**であることを発見した（#663）。31,585 件の重複走のうち 3,503 件が不一致で、**全件が pdf > netkeiba（pdf 側が大きい = 順位が悪い方にズレている）**。シフト分布: +1（2,666 件・76%）、+2（578）、+3（172）、+4（67）、+5（20）。原因は JRA PDF の EdiF フォントで着順カラムが欠落し、以降の着順が繰り上がる既知制約。
+
+スコア経路（`find_recent_runs` / `recent_runs_batch` / `find_jockey_recent_runs` / `jockey_recent_runs_batch`）は pdf 優先 dedup（`src_rank`: pdf=0, netkeiba=1）のため、直近 3 走の前走フォーム特徴量（`recent_form_score` の popularity_gap・margin 等）がズレた着順で計算されていた。全 36,419 件の直近 3 走のうち 1,159 件（3.2%）が影響。
+
+#### 決定
+
+`find_recent_runs`・`find_jockey_recent_runs` の src_rank を反転し、**netkeiba 優先 dedup を採用**する。
+
+変更箇所:
+- `find_recent_runs.rs`: 単体・バッチ両方の UNION で pdf=1, netkeiba=0 に反転
+- `find_jockey_recent_runs.rs`: 同上
+- テスト: `test_horse_history_separation.rs`・`test_find_jockey_recent_runs.rs` のアサーションを netkeiba 優先に変更
+
+#### 理由
+
+- **netkeiba が正**: 不一致 3,503 件すべてが pdf > netkeiba の一方向ズレ。逆方向（pdf < netkeiba）は 0 件。EdiF フォント欠落による系統的な +1〜+5 シフトと整合。
+- **backtest 中立**: production フラグ（`--shrinkage-m 10 --win-power 1.25 --place-show-power 2.0 --impute-missing-factors --blend-alpha 0.2`、2025-06-01〜2026-08-01、5,052R）で before/after 比較:
+
+  | 指標 | Before (pdf優先) | After (netkeiba優先) | 差 |
+  |------|-----------------|---------------------|-----|
+  | Brier(win) | 0.0545 | 0.0545 | 0 |
+  | LogLoss(win) | 0.1960 | 0.1960 | 0 |
+  | Brier(place) | 0.1043 | 0.1043 | 0 |
+  | Brier(show) | 0.1449 | 0.1449 | 0 |
+  | Hit(win) | 31.5% | 31.4% | -0.1pp |
+  | ROI | 82.2% | 82.1% | -0.1pp |
+
+  Brier/LogLoss が完全一致で Hit/ROI の差は 0.1pp（統計的に無意味）。影響走 3.2% が blended 確率（α=0.2 = 市場 80%）の中で希釈されるため。
+- **データ正確性の原則**: 精度が同等なら正しいデータソースを使うべき。表示経路（`find_handicap_notes`）は PR #662 で先行して netkeiba 優先に倒しており、スコア経路も揃えることで一貫性を確保。
+
+#### 却下した代替案
+
+- **現状維持（pdf 優先のまま）**: backtest が中立なので精度面では問題ないが、誤った着順データを意図的に使い続ける理由がない。
+- **PDF パーサの根治修正**: MutoolParser は着順カラムを PDF テキストから読まず、finisher の出現順に 1..N を振るだけ。EdiF フォントでチャンクが欠落/並び替えされると系統的にズレる。OCR（HybridParser）で部分補完しているが `is_position_set_sane` が落ちるケースが残る。根治は別 issue で扱う（本 issue のスコープ外）。
+
+#### 影響
+
+- ADR 0058/0059 の backtest は pdf 優先時代のデータで測定されているが、before/after が同一なので**測定結果は有効**（再実行不要）。
+- `find_handicap_notes`（表示経路）は PR #662 で netkeiba 優先済み。本変更でスコア経路・騎手フォーム経路も統一。
+- 関連: #662（表示経路 netkeiba 優先）、#663（本 issue）、ADR 0058/0059（resolution 測定）。
