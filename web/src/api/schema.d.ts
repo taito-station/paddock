@@ -910,15 +910,24 @@ export interface components {
             jockey?: string | null;
             /** @description 印スラッグ（`honmei`/`taikou`/`tanana`/`renge`/`hoshi`/`chui`）。無印は `null`。 */
             mark?: string | null;
-            /** Format: double */
+            /**
+             * Format: double
+             * @description 連対率（百分率の表示値）。確率推定の `HorseProbabilitySchema` は `[0,1]` で別スケール。
+             */
             place_prob?: number | null;
             /** Format: int32 */
             popularity?: number | null;
-            /** Format: double */
+            /**
+             * Format: double
+             * @description 複勝率（百分率の表示値）。確率推定の `HorseProbabilitySchema` は `[0,1]` で別スケール。
+             */
             show_prob?: number | null;
             /** Format: double */
             win_odds?: number | null;
-            /** Format: double */
+            /**
+             * Format: double
+             * @description 勝率（百分率の表示値。例 `25.4` = 25.4%）。確率推定の `HorseProbabilitySchema` は `[0,1]` で別スケール。
+             */
             win_prob?: number | null;
         };
         /** @description `GET /api/races/{race_id}/prediction` のレスポンス。 */

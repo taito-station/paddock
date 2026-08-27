@@ -2721,7 +2721,8 @@
               "number",
               "null"
             ],
-            "format": "double"
+            "format": "double",
+            "description": "連対率（百分率の表示値）。確率推定の `HorseProbabilitySchema` は `[0,1]` で別スケール。"
           },
           "popularity": {
             "type": [
@@ -2736,7 +2737,8 @@
               "number",
               "null"
             ],
-            "format": "double"
+            "format": "double",
+            "description": "複勝率（百分率の表示値）。確率推定の `HorseProbabilitySchema` は `[0,1]` で別スケール。"
           },
           "win_odds": {
             "type": [
@@ -2750,7 +2752,8 @@
               "number",
               "null"
             ],
-            "format": "double"
+            "format": "double",
+            "description": "勝率（百分率の表示値。例 `25.4` = 25.4%）。確率推定の `HorseProbabilitySchema` は `[0,1]` で別スケール。"
           }
         }
       },
