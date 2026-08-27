@@ -1,6 +1,6 @@
 # QA: #401 分析統計 API/web への部分一致・カナ正規化の露出
 
-> 質問票+回答（[docs/qa/README.md](README.md)）。一次資料は [docs/original-docs/401-analyze-partial-match.md](../original-docs/401-analyze-partial-match.md)。
+> 質問票+回答（[docs/qa/README.md](README.md)）。一次資料は [docs/docs-original/401-analyze-partial-match.md](../docs-original/401-analyze-partial-match.md)。
 > 回答済みの本票は実装後 [docs/knowledge/analyze-search-and-state.md](../knowledge/analyze-search-and-state.md) に蒸留する。
 
 ## Q1: 部分一致・複数ヒットを REST でどう露出するか（API 契約）

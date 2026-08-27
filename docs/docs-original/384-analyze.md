@@ -1,6 +1,6 @@
 # 一次資料: #384 Analyze の検索状態保持と会場セレクト化
 
-> RO 生素材（[docs/original-docs/README.md](README.md)）。書き換えず、ここから qa→knowledge を蒸留する。
+> RO 生素材（[docs/docs-original/README.md](README.md)）。書き換えず、ここから qa→knowledge を蒸留する。
 
 ## 発端の Issue
 

@@ -342,7 +342,7 @@ ADR 0076（#571）で参考ROIがレース選別のゲート指標として使�
 `board.rs` は #388（`4e84f87`）で記録◎に軸を固定済みだが、同コミットは
 「既存呼び出し（predict/watch/recommend）は default() 経由で不変」と明記しており、
 `predict-watch` は `forced_axis=None` のままだった。生資料:
-[601-axis-flip-in-predict-watch.md](../original-docs/601-axis-flip-in-predict-watch.md)。
+[601-axis-flip-in-predict-watch.md](../docs-original/601-axis-flip-in-predict-watch.md)。
 
 #### 決定
 
@@ -420,7 +420,7 @@ ADR 0076（#571）で参考ROIがレース選別のゲート指標として使�
 
 ```sh
 # フリップの実測（修正前の値を出す）
-# → docs/original-docs/601-axis-flip-in-predict-watch.md「再現方法」の SQL
+# → docs/docs-original/601-axis-flip-in-predict-watch.md「再現方法」の SQL
 
 # テスト
 cargo test -p paddock-domain                     # 固定の振る舞い（補充しない・ROI は動く 等）

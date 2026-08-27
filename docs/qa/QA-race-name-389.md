@@ -1,6 +1,6 @@
 # QA: #389 レース名（重賞・特別戦名）の取得・保存・表示
 
-> 質問票+回答（[docs/qa/README.md](README.md)）。一次資料は [docs/original-docs/389-race-name.md](../original-docs/389-race-name.md)。
+> 質問票+回答（[docs/qa/README.md](README.md)）。一次資料は [docs/docs-original/389-race-name.md](../docs-original/389-race-name.md)。
 > 回答済みの本票は [docs/knowledge/race-card-display-metadata.md](../knowledge/race-card-display-metadata.md) に蒸留した。
 
 ## Q1: レース名の抽出元とグレードの扱い

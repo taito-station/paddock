@@ -54,7 +54,7 @@ def distilled_of(repo: Path, rel: str) -> str:
 
 def make_stale(repo: Path) -> str:
     """a.md の source（0001-first.md）を本文ごと更新して STALE を作る。"""
-    (repo / "docs/original-docs/0001-first.md").write_text(
+    (repo / "docs/docs-original/0001-first.md").write_text(
         "# 0001. 最初の決定\n\n## 決定\n\n本文を変えた。\n", encoding="utf-8"
     )
     return commit_all(repo, "source の本文を変更")
@@ -256,7 +256,7 @@ def test_other_errors_are_not_reported_as_resolved() -> None:
         baseline(repo)
         make_stale(repo)
         write_doc(repo, "docs/knowledge/a.md", ["D19"],
-                  ["docs/original-docs/9999-nope.md", "docs/original-docs/0001-first.md"],
+                  ["docs/docs-original/9999-nope.md", "docs/docs-original/0001-first.md"],
                   distilled_of(repo, "docs/knowledge/a.md"))
         commit_all(repo, "存在しない source を足す（別の error）")
         code, out = run(repo, "--all-stale")

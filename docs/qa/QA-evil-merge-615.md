@@ -1,6 +1,6 @@
 # QA — マージコミットに対する stale 判定（#615 (a)）
 
-一次資料: [docs/original-docs/0084-evil-merge-is-visible-to-stale-check.md](../original-docs/0084-evil-merge-is-visible-to-stale-check.md)
+一次資料: [docs/docs-original/0084-evil-merge-is-visible-to-stale-check.md](../docs-original/0084-evil-merge-is-visible-to-stale-check.md)
 
 親 issue: [#615](https://github.com/taito-station/paddock/issues/615)（転記しない・ADR 0074）。
 本文は `gh issue view 615` で取得する。

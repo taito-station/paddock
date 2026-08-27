@@ -5,7 +5,7 @@ doc_class: [D08, D10, D11]
 tags: [D08, D10, D11]
 sources:
   - docs/qa/QA-race-name-389.md
-  - docs/original-docs/389-race-name.md
+  - docs/docs-original/389-race-name.md
   - docs/specifications/netkeiba-datasource.md
   - docs/specifications/rest-api-read.md
 distilled_from_sha: "051f348"

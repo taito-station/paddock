@@ -1,6 +1,6 @@
 # QA — `/docs` の配信経路に機械検査を入れる（#616）
 
-一次資料: [docs/original-docs/616-docs-serving-checks.md](../original-docs/616-docs-serving-checks.md)
+一次資料: [docs/docs-original/616-docs-serving-checks.md](../docs-original/616-docs-serving-checks.md)
 
 ## Q1: issue 本文が指定した `#[sqlx::test]` に従うべきか
 

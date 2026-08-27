@@ -5,12 +5,12 @@ doc_class: [D15, D19]
 tags: [D15, D19]
 sources:
   - docs/qa/QA-monitor-sleep-568.md
-  - docs/original-docs/568-monitor-sleep-gap.md
-  - docs/original-docs/585-keep-awake-window-gap.md
+  - docs/docs-original/568-monitor-sleep-gap.md
+  - docs/docs-original/585-keep-awake-window-gap.md
   - docs/qa/QA-keep-awake-window-643-585.md
-  - docs/original-docs/651-prefetch-lock-uid-scope.md
+  - docs/docs-original/651-prefetch-lock-uid-scope.md
   - docs/qa/QA-prefetch-lock-651.md
-  - docs/original-docs/584-predict-watch-notification.md
+  - docs/docs-original/584-predict-watch-notification.md
   - docs/qa/QA-predict-watch-notify-584.md
 distilled_from_sha: "e7b51d0"
 updated: "2026-08-23"
@@ -243,7 +243,7 @@ decision-support であり、**終日バックグラウンドで回り続ける�
 
 2026-08-01、この前提が壊れた。監視は 14:32 のスイープを最後に沈黙し、
 **14:50〜18:30 発走の約 12 レースが一度も評価されないまま**、翌朝までプロセスが生存し続けた
-（生ログ: [docs/original-docs/568-monitor-sleep-gap.md](../original-docs/568-monitor-sleep-gap.md)）。
+（生ログ: [docs/docs-original/568-monitor-sleep-gap.md](../docs-original/568-monitor-sleep-gap.md)）。
 
 コードを読むと、独立した 2 つの欠陥があった。
 
@@ -385,7 +385,7 @@ decision-support であり、**終日バックグラウンドで回り続ける�
 `paddock-predict-watch` はゲート判定を stdout に出すだけで、**人に届ける経路を持たない**。
 ADR 0072 でスリープ耐性を得た結果、監視は「動いているのに届かない」状態になった。
 
-実測（[docs/original-docs/584-predict-watch-notification.md](../original-docs/584-predict-watch-notification.md)）:
+実測（[docs/docs-original/584-predict-watch-notification.md](../docs-original/584-predict-watch-notification.md)）:
 2026-08-09 は 09:43〜18:33 に **82 スイープを途切れ警告 0 件で完走**しながら、判定行は
 20,744 行中 192 行（0.93%）に埋もれ、人間は開催終了後にログを掘って初めて内容を知った。
 4 開催日 246 スイープでゲート通過（🔶）は 0 件。監視は decision-support（ADR 0055 / 0060）であり、

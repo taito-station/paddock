@@ -567,11 +567,12 @@ cargo clippy --all-targets
 HVE（dahatake/HypervelocityEngineering, MIT）由来の 2 層蒸留モデルで運用する。規約は
 [`docs/knowledge/README.md`](docs/knowledge/README.md) が正。
 
-- `docs/original-docs/` … **一次資料層（RO・書き換えない）**。issue 由来の生素材・実測ログ・
+- `docs/docs-original/` … **一次資料層（RO・書き換えない）**。issue 由来の生素材・実測ログ・
   調査ノート（`382-*.md` 等）
 - `docs/qa/` … 質問票 + 回答。knowledge への入力となる中間層
 - `docs/knowledge/` … qa および一次資料由来の新規・横断的な確定知（**読む入口**）
 - `docs/specifications/` … 確率推定・backtest・買い目選定・予想 JSON などの仕様書（その場で knowledge に昇格）
+- `docs/docs-generated/` … `cargo doc` / OpenAPI 等の自動生成文書の置き場（手書き文書は置かない・コミットは任意）
 - `docs/api/openapi.json` … REST API の OpenAPI スナップショット（utoipa コードファースト。web の型生成の入力）
 
 **決定記録（アーキテクチャ・ルール変更の決定。棄却した案も同じ厚みで残す）は、

@@ -1,6 +1,6 @@
 # QA — predict-watch の買い目選定の固定（#601）
 
-一次資料: [docs/original-docs/601-axis-flip-in-predict-watch.md](../original-docs/601-axis-flip-in-predict-watch.md)
+一次資料: [docs/docs-original/601-axis-flip-in-predict-watch.md](../docs-original/601-axis-flip-in-predict-watch.md)
 
 ## Q1: 固定する軸はどこから取るか
 

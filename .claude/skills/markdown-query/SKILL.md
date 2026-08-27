@@ -1,7 +1,7 @@
 ---
 name: markdown-query
 description: >
-  ローカルの Markdown ドキュメント（docs/ 配下: original-docs〈ADR 含む〉/ specifications /
+  ローカルの Markdown ドキュメント（docs/ 配下: docs-original〈ADR 含む〉/ specifications /
   knowledge / qa）から、ファイル全体を読まずに関連チャンクだけを取り出して答える。完全ローカル
   （外部 API なし・BM25 語彙検索）。USE FOR: プロジェクト文書からの回答、仕様・ADR・knowledge の
   検索、要件やバックテスト履歴の探索、対象ファイルパスが未知の横断検索。PREFER OVER: 対象が
@@ -41,13 +41,13 @@ tools/mdq/.venv/bin/pip install -r tools/mdq/requirements.txt   # rank_bm25 / Py
 ## 使い方の要点
 
 1. **索引**: `scripts/mdq index`。`mdq.toml` の `[index].roots`（docs/specifications, docs/knowledge,
-   docs/qa, docs/original-docs）を走査。存在しない dir は自動スキップ。増分更新。
+   docs/qa, docs/docs-original）を走査。存在しない dir は自動スキップ。増分更新。
    **ADR 統合（ADR 0073）より前の索引を持つ環境は一度だけ `rm -rf .mdq && scripts/mdq index`**。
    増分の prune は roots 配下しか消さないため、旧 `docs/adr/*` のチャンクが居残り、存在しない
    パスが検索結果に出続ける。
 2. **検索**: `scripts/mdq search --q "クエリ" --top-k 5 --max-tokens 800`。出力は JSONL（1 行 1 ヒット、
    `path` / `heading_path` / `lines` / `score` / `snippet`）。`--paths` で絞ると精度向上——
-   **ADR だけに絞るなら `--paths "docs/original-docs/0*"`**（同ディレクトリの issue 由来一次資料は
+   **ADR だけに絞るなら `--paths "docs/docs-original/0*"`**（同ディレクトリの issue 由来一次資料は
    0 埋めしない命名なので除外される）。`--mode grep` で完全一致に切替。
 3. **本文取得**: `scripts/mdq get --chunk-id <ID>`（必要時のみ）。
 4. 結果は**そのまま使う**（生 Markdown を読み直さない）。

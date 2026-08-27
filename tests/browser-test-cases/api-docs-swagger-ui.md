@@ -1,7 +1,7 @@
 # ブラウザテストケース: `/docs` の Swagger UI（vendored 化・#606 論点 B）
 
 対象: `src/apps/api-server/src/app.rs` の `SwaggerUi::new("/docs/{_:.*}")`。
-ADR [0082](../../docs/original-docs/0082-swagger-ui-vendored.md) / knowledge
+ADR [0082](../../docs/docs-original/0082-swagger-ui-vendored.md) / knowledge
 [ci-pipeline.md](../../docs/knowledge/ci-pipeline.md)。
 
 **HTTP 層は機械検査が見る**（`src/apps/api-server/tests/docs_ui.rs`・#616）。`index.html` /

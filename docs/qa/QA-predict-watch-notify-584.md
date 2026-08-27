@@ -1,6 +1,6 @@
 # QA — predict-watch のゲート通過通知（#584）
 
-一次資料: [docs/original-docs/584-predict-watch-notification.md](../original-docs/584-predict-watch-notification.md)
+一次資料: [docs/docs-original/584-predict-watch-notification.md](../docs-original/584-predict-watch-notification.md)
 
 ## Q1: macOS 通知を鳴らす閾値は何にするか。既存の `--notify-gate` を流用できるか
 

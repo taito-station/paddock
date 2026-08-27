@@ -1,7 +1,7 @@
 # QA: keep-awake の抑止窓の追従（#585）と lock パス（#643）
 
 対象: `scripts/predict-check/keep_awake.sh` / `deployments/launchd/uninstall.sh` の設計判断。
-実測は [585-keep-awake-window-gap.md](../original-docs/585-keep-awake-window-gap.md)、
+実測は [585-keep-awake-window-gap.md](../docs-original/585-keep-awake-window-gap.md)、
 運用上の限界の記述は `deployments/launchd/README.md` が正。
 
 ---

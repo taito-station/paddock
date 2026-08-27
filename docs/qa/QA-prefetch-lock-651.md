@@ -1,7 +1,7 @@
 # QA: prefetch の lock を UID スコープへ移す（#651）
 
 対象: `scripts/predict-check/prefetch_odds.sh` の lock 設計。実測は
-[651-prefetch-lock-uid-scope.md](../original-docs/651-prefetch-lock-uid-scope.md)、
+[651-prefetch-lock-uid-scope.md](../docs-original/651-prefetch-lock-uid-scope.md)、
 確定知は `docs/knowledge/monitor-loop-sleep-resilience.md` が正。
 
 `TMPDIR` を却下して UID スコープの固定パスにする判断そのものは #643 で決着済み

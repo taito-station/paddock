@@ -6,8 +6,8 @@ tags: [D11, D10]
 sources:
   - docs/qa/QA-analyze-384.md
   - docs/qa/QA-analyze-401.md
-  - docs/original-docs/384-analyze.md
-  - docs/original-docs/401-analyze-partial-match.md
+  - docs/docs-original/384-analyze.md
+  - docs/docs-original/401-analyze-partial-match.md
   - docs/specifications/web-spa.md
   - docs/specifications/rest-api-read.md
   - docs/specifications/prediction-search-api.md

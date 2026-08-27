@@ -25,7 +25,7 @@ kind: knowledge
 doc_class: [D19]
 tags: [D19]
 sources:
-  - docs/original-docs/652-abolish-adr.md
+  - docs/docs-original/652-abolish-adr.md
 distilled_from_sha: "0000000"
 updated: "2026-08-23"
 ---
@@ -79,8 +79,8 @@ def new_repo() -> Path:
     run_git(repo, "config", "commit.gpgsign", "false")
     (repo / "docs/knowledge").mkdir(parents=True)
     (repo / "docs/specifications").mkdir(parents=True)
-    (repo / "docs/original-docs").mkdir(parents=True)
-    (repo / "docs/original-docs/652-abolish-adr.md").write_text("# 652\n", encoding="utf-8")
+    (repo / "docs/docs-original").mkdir(parents=True)
+    (repo / "docs/docs-original/652-abolish-adr.md").write_text("# 652\n", encoding="utf-8")
     write_doc(repo, "docs/knowledge/a.md", "本文の段落。\n" + LOG_HEADER + ENTRY_A)
     commit_all(repo, "baseline")
     # `git init -b main` は git 2.28 未満で使えないので、コミット後に改名する。

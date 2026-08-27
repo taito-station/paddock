@@ -1,6 +1,6 @@
 # QA: #384 Analyze の検索状態保持と会場セレクト化
 
-> 質問票+回答（[docs/qa/README.md](README.md)）。一次資料は [docs/original-docs/384-analyze.md](../original-docs/384-analyze.md)。
+> 質問票+回答（[docs/qa/README.md](README.md)）。一次資料は [docs/docs-original/384-analyze.md](../docs-original/384-analyze.md)。
 > 回答済みの本票を [docs/knowledge/analyze-search-and-state.md](../knowledge/analyze-search-and-state.md) に蒸留した。
 
 ## Q1: 馬/騎手/調教師の名前検索を部分一致・サジェスト化できるか（API 側の対応要否）

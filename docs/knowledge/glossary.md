@@ -182,7 +182,7 @@ ADR 0073 が置いた文書クラス D01〜D24 のうち、**D07（用語集・�
 検出できない（ADR 0064 が警告した二重実装と同型）。
 
 もう 1 つ、`sources` の扱いに未定義の領域があった。[docs/knowledge/README.md](../knowledge/README.md)
-の frontmatter 規約は `sources` を「由来（ADR / qa / original-docs のパス）」と定義していたが、実際には
+の frontmatter 規約は `sources` を「由来（ADR / qa / docs-original のパス）」と定義していたが、実際には
 確定知層の仕様書を `sources` に取る文書が既に 3 本ある（`live-freshness-calibration.md` /
 `analyze-search-and-state.md` / `race-card-display-metadata.md`）。用語集は性質上、**定義の所在＝確定知層**
 を由来に取らざるを得ず、規約と実態の乖離を埋める必要があった。

@@ -5,8 +5,9 @@
 paddock の文書は HVE（dahatake/HypervelocityEngineering, MIT）の蒸留モデルを取り入れている。
 規約の全体は [docs/knowledge/README.md](docs/knowledge/README.md)。
 
-- **2 層**: `docs/original-docs/`（RO 一次資料・実測ログ・調査所見）＋ `docs/qa/`（質問票+回答）→
+- **2 層**: `docs/docs-original/`（RO 一次資料・実測ログ・調査所見）＋ `docs/qa/`（質問票+回答）→
   `docs/knowledge/` ＋ `docs/specifications/`（status 付き確定知・**決定ログ付き**）。蒸留は Claude が回す。
+  別枠で `docs/docs-generated/`（HVE 由来。`cargo doc` / OpenAPI 等の自動生成文書の置き場。蒸留対象外）がある。
 - **specifications はその場で knowledge**（frontmatter: `status`/`kind`/`sources`/`distilled_from_sha`/`updated`）。
   frontmatter を付けた時点で確定知層として機能するので、移動する実利が無い。新規の横断的蒸留知は
   `docs/knowledge/` へ。
@@ -27,7 +28,7 @@ paddock の文書は HVE（dahatake/HypervelocityEngineering, MIT）の蒸留モ
 - **用語で迷ったら [docs/knowledge/glossary.md](docs/knowledge/glossary.md)（D07）**。`win_prob` の
   スケール・`blended` の α・`軸ロック` / `混戦` / `ながし` などの**定義の正本がどこにあるか**を引ける
   索引で、定義そのものは各仕様書・本ファイルが持つ。
-- **`docs/original-docs/` の命名は issue 番号・0 埋めしない**（`382-...`）。置くのは転記できないもの
+- **`docs/docs-original/` の命名は issue 番号・0 埋めしない**（`382-...`）。置くのは転記できないもの
   ——実測ログ・調査時点のコード所見・外部サイトの挙動観察。GitHub Issue 本文は転記しない（ADR 0074）。
   旧 ADR（0 埋め 4 桁: `0001-...` 〜 `0090-...`）は #652 で各 knowledge/specifications の決定ログへ移行済み・削除済み。
 - **status**: `Confirmed`（運用の前提にしてよい）/ `Tentative`（暫定）/ `Conflict`（矛盾・放置せず解消）。

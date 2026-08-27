@@ -76,7 +76,7 @@
   （新しい `caffeinate` を起動してから旧を落とすので抑止の空白は生まれない）。延長したか据え置いたかは
   ログに残る。それでも **`install.sh` は `fetch-card` の後に叩くほうが良い**（初回から正しい窓になる）。
   実 launchd での動作確認済み（2026-08-20・手順と測定値は
-  [一次資料 5 節](../../docs/original-docs/585-keep-awake-window-gap.md)）。
+  [一次資料 5 節](../../docs/docs-original/585-keep-awake-window-gap.md)）。
 - **lock は UID スコープの固定パス**（`/tmp/paddock-keep-awake-$(id -u).lock.d`・#643）。`$TMPDIR` は使わない
   ——launchd は `TMPDIR` を設定せず `/tmp` に落ちるため、端末（`/var/folders/.../T/`）と別の lock を見て
   互いを見失う（2026-08-19 実測）。**このパスは `keep_awake.sh` と `uninstall.sh` の両方が持つので、
@@ -99,7 +99,7 @@
 - **完全な堅牢化**は常時稼働ホスト（RasPi / 小型クラウド VM 等）へ prefetch を移設して
   ローカル Mac の電源・スリープ状態に依存させないこと（構成変更が大きいため別途）。
 - **この keep-awake は predict-watch / odds-collect の抑止も兼ねる**。監視バイナリ側は抑止を持たない
-  （#568 / [ADR 0072](../../docs/original-docs/0072-monitor-loop-wall-clock-sleep-resilience.md) で
+  （#568 / [ADR 0072](../../docs/docs-original/0072-monitor-loop-wall-clock-sleep-resilience.md) で
   「抑止は #264 に一本化」と決めた）。ただし監視ループ自体は wall-clock 基準なので、**スリープを
   跨いでも復帰後に自動再開し、空いた区間を警告する**
   （[監視ループのスリープ耐性](../../docs/knowledge/monitor-loop-sleep-resilience.md)）。

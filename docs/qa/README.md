@@ -1,6 +1,6 @@
 # qa — 質問票 + 回答（knowledge の入力）
 
-`docs/original-docs/` の一次資料や調査中に生じた**確認すべき質問**と、その**回答**を蓄える中間層。
+`docs/docs-original/` の一次資料や調査中に生じた**確認すべき質問**と、その**回答**を蓄える中間層。
 回答済みの qa が `docs/knowledge/`（と `docs/specifications/`）への差分マージの入力になる。
 全体像は [docs/knowledge/README.md](../knowledge/README.md)。
 
@@ -23,4 +23,4 @@
   `distilled_from_sha` を更新する。
 - 矛盾が出たら反映先 knowledge を `status: Conflict` にして解消する。
 - **qa 自体は生ファイル**。運用ルールや確定知を qa に書き残さない（確定知は knowledge、決定は
-  ADR＝`docs/original-docs/0NNN-*.md` の役割。ADR 0073 以降、ADR は一次資料層に属する）。
+  ADR＝`docs/docs-original/0NNN-*.md` の役割。ADR 0073 以降、ADR は一次資料層に属する）。

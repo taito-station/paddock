@@ -1,6 +1,6 @@
 # QA — 変数直後の全角文字を機械検査で禁じる（#636）
 
-一次資料: [docs/original-docs/636-fullwidth-after-var.md](../original-docs/636-fullwidth-after-var.md)
+一次資料: [docs/docs-original/636-fullwidth-after-var.md](../docs-original/636-fullwidth-after-var.md)
 
 ## Q1: 実行時の挙動を見るテストにするか、字面の静的検査にするか
 
