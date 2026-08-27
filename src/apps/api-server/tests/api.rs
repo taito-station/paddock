@@ -8,8 +8,8 @@
 mod common;
 
 use actix_web::{App, test, web};
-use chrono::{DateTime, NaiveDate, Utc};
 use api_server::app::configure_routes;
+use chrono::{DateTime, NaiveDate, Utc};
 use netkeiba_scraper::UreqNetkeibaScraper;
 use paddock_domain::{
     FinishingPosition, GateNum, HorseEntry, HorseName, HorseNum, HorseResult, JockeyName, Race,
