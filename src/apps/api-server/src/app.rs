@@ -69,8 +69,8 @@ fn bad_request<E: std::fmt::Display>(err: E, _req: &HttpRequest) -> actix_web::E
 /// API の全ルートを登録する（bin・統合テスト共通）。
 ///
 /// - `/api` 配下に read 系（races / analyze）と session write 系をマウントする。
-/// - `/docs/` に Swagger UI、`/api-docs/openapi.json` に OpenAPI ドキュメントを配信する
-///   （**末尾スラッシュが要る**。テイルマッチなので `/docs` は 404。扱いは #619）。
+/// - `/docs/` に Swagger UI、`/api-docs/openapi.json` に OpenAPI ドキュメントを配信する。
+///   `/docs`（末尾スラッシュ無し）は `/docs/` へ 308 リダイレクトする（#619）。
 /// - `/api` スコープに **認証ミドルウェアの差し込み口（現状 no-op）** を 1 箇所だけ用意する。
 ///   マルチユーザー化の際はこの wrap を JWT 検証に差し替える（`rules/rust/architecture.md` の auth パターン）。
 ///   Swagger UI / openapi.json は `/api` の外に置いており、現状この認証フックの対象外
@@ -102,4 +102,5 @@ where
     );
 
     cfg.service(SwaggerUi::new("/docs/{_:.*}").url("/api-docs/openapi.json", ApiDoc::openapi()));
+    cfg.service(web::redirect("/docs", "/docs/"));
 }

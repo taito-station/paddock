@@ -321,7 +321,7 @@ API の仕様乖離を防ぐため、OpenAPI はコードから生成する（sp
 - **スキーマ注釈**: `schema/` の request/response 型に `#[derive(ToSchema)]`、handler に `#[utoipa::path(...)]` を付け、`#[derive(OpenApi)]` の `ApiDoc` に paths/components を集約する。
 - **配信**: api-server が
   - `GET /api-docs/openapi.json` … OpenAPI ドキュメント（JSON）
-  - `GET /docs/` … Swagger UI（末尾スラッシュが要る。`/docs` は 404）
+  - `GET /docs/` … Swagger UI（`/docs` は `/docs/` へリダイレクト）
   をマウントする。
 - **リポジトリへのコミットと同期チェック**: `ApiDoc::openapi()` をシリアライズした `docs/api/openapi.json`（配置先は新設。`docs/` 直下ではなくサブディレクトリ）をコミットする。`api-server` の統合テスト（または `cargo test`）に「生成結果が `docs/api/openapi.json` と一致する」スナップショットテストを置き、差分があれば失敗させる（仕様の更新漏れを CI で検出）。
   - **生成 JSON の安定化**: 偽陽性 fail を避けるため、serde の構造体定義順を正本とし `serde_json::to_string_pretty` の整形のみで安定化する（`preserve_order` 等のフィールド順入れ替えには依存しない）。utoipa のバージョン更新で生成差が出た場合は再生成して差分をレビューする。
@@ -546,3 +546,28 @@ blended はほぼ市場の人気順をなぞる。つまり**盤面は「市場�
 - `StatsRepository` に既定実装のない必須メソッドが 1 つ増える。集計を持たない実装が黙って空を返すと
   盤が「該当なし」と「まだ引いていない」を区別できないまま出荷されるため、あえて既定を置かなかった。
 - 残課題: スコア経路が pdf 由来の着順ズレを取り込んでいる可能性（上記「却下した代替案」）は未検証のまま。
+
+### #619: /docs（末尾スラッシュ無し）を /docs/ へリダイレクトする (2026-08-27) — 承認済み
+
+#### コンテキスト
+
+`SwaggerUi::new("/docs/{_:.*}")` のテイルマッチは `/docs/` プレフィックスを要求するため、`/docs` はどのリソースにもマッチせず 404 になる。README を読んで手打ちする開発者が確実に踏む papercut。
+
+#### 決定
+
+`app.rs` に `web::redirect("/docs", "/docs/")` を追加し、308 Permanent Redirect で `/docs/` へ転送する。
+
+#### 理由
+
+- `/docs` と `/docs/` が同じ UI を返すのは開発者の自然な期待。404 で突き放す理由がない。
+- 308（メソッド保持リダイレクト）は GET のみの UI なので 307 でも 301 でも実質同等だが、actix の `web::redirect` の既定が 308 でありカスタマイズの必要がない。
+- 影響範囲は開発者向け UI のみ（`/api` スコープ外）。
+
+#### 却下した代替案
+
+- **404 のままにする**: ドキュメントで末尾スラッシュを案内する運用を続ける。手打ちの papercut が残り続ける。
+- **`/docs` を直接 UI にマウントする**: utoipa-swagger-ui の `SwaggerUi::new` の引数を変える。テイルマッチの構造上、`/docs` と `/docs/` の両方をカバーするには結局リダイレクトか二重マウントが要る。
+
+#### 影響
+
+- `README.md`、`rest-api-read.md`、`ci-pipeline.md`、`app.rs`、`docs_ui.rs` から「末尾スラッシュが要る / #619 で見直す」の注記を除去。
