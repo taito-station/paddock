@@ -400,7 +400,7 @@ async fn unknown_docs_asset_is_not_found() {
     );
 }
 
-/// `/docs`（末尾スラッシュ無し）は `/docs/` へリダイレクトする（#619）。
+/// `/docs`（末尾スラッシュ無し）は `/docs/` へ 308 リダイレクトする（#619）。
 #[actix_web::test]
 async fn docs_without_trailing_slash_redirects() {
     let app = build_service!();
@@ -408,9 +408,10 @@ async fn docs_without_trailing_slash_redirects() {
     let req = actix_test::TestRequest::get().uri("/docs").to_request();
     let resp = actix_test::call_service(&app, req).await;
     let status = resp.status();
-    assert!(
-        status.is_redirection(),
-        "/docs が 3xx を返さない（{status}）: web::redirect の配線を疑う"
+    assert_eq!(
+        status,
+        actix_web::http::StatusCode::PERMANENT_REDIRECT,
+        "/docs が 308 を返さない（{status}）: web::redirect(..).permanent() の配線を疑う"
     );
     let location = resp
         .headers()

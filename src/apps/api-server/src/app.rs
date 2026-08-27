@@ -102,5 +102,5 @@ where
     );
 
     cfg.service(SwaggerUi::new("/docs/{_:.*}").url("/api-docs/openapi.json", ApiDoc::openapi()));
-    cfg.service(web::redirect("/docs", "/docs/"));
+    cfg.service(web::redirect("/docs", "/docs/").permanent());
 }
