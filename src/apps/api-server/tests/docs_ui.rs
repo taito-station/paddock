@@ -21,8 +21,7 @@
 //! プール URL に**到達不能なアドレスを意図的に置く**ことで、「DB を触らない」を偶然でなく
 //! テストが強制する性質にしている（DB 依存が紛れ込んだ瞬間に落ちる）。
 //!
-//! `/docs`（末尾スラッシュ無し）が 404 である現状は**意図的に固定していない**——リダイレクトを足すか
-//! 404 のままにするかは #619 で決める。ここで pin すると将来の変更を阻む側に回る。
+//! `/docs`（末尾スラッシュ無し）は `/docs/` へ 308 リダイレクトする（#619）。
 //!
 //! 前提: `/docs` と `/api-docs/openapi.json` は `/api` スコープの**外**にあり、現状は認証対象外
 //! （`app::configure_routes` の doc を参照）。ここでの 200 は「無認証で配信されるべき」という要件では
@@ -398,5 +397,29 @@ async fn unknown_docs_asset_is_not_found() {
     assert_eq!(
         status, 404,
         "存在しない資産が 404 以外を返した: 配信判定が常に成功する壊れ方をしている"
+    );
+}
+
+/// `/docs`（末尾スラッシュ無し）は `/docs/` へ 308 リダイレクトする（#619）。
+#[actix_web::test]
+async fn docs_without_trailing_slash_redirects() {
+    let app = build_service!();
+
+    let req = actix_test::TestRequest::get().uri("/docs").to_request();
+    let resp = actix_test::call_service(&app, req).await;
+    let status = resp.status();
+    assert_eq!(
+        status,
+        actix_web::http::StatusCode::PERMANENT_REDIRECT,
+        "/docs が 308 を返さない（{status}）: web::redirect(..).permanent() の配線を疑う"
+    );
+    let location = resp
+        .headers()
+        .get("location")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default();
+    assert_eq!(
+        location, "/docs/",
+        "/docs のリダイレクト先が /docs/ でない: {location}"
     );
 }
