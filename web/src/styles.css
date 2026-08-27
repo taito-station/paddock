@@ -733,6 +733,15 @@ button:disabled {
   color: var(--text-soft);
   cursor: auto;
 }
+.coverage-diff {
+  color: var(--warn);
+}
+.coverage-diff-detail {
+  margin: 0.25rem 0 0;
+  font-size: 0.8rem;
+  line-height: 1.6;
+  color: var(--warn);
+}
 
 /* 記号凡例（#477）。盤下部に折りたたみで常設し、タッチ端末でも記号・略号の定義を参照できるようにする。 */
 .board-legend {
