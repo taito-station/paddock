@@ -7,7 +7,7 @@ sources:
   - docs/qa/QA-live-freshness-382.md
   - docs/docs-original/382-live-server-now.md
   - docs/specifications/live-ev-buy-view.md
-distilled_from_sha: "3605743"
+distilled_from_sha: "daf3beb"
 updated: "2026-07-22"
 ---
 

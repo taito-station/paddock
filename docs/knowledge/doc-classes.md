@@ -3,7 +3,7 @@ status: Confirmed
 kind: knowledge
 sources:
   - docs/qa/QA-sources-coverage-checks-596.md
-distilled_from_sha: "b1aea90"
+distilled_from_sha: "daf3beb"
 updated: "2026-08-13"
 ---
 
