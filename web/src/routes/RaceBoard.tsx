@@ -405,10 +405,22 @@ export function RaceBoard() {
                         / 的中 {pct(d.morning_hit_prob)} → {pct(d.hit_prob)}
                       </>
                     )}
+                    {d.morning_unpriced_legs != null &&
+                      d.morning_unpriced_legs !== d.unpriced_legs && (
+                        <span className="coverage-diff"> ※被覆率差</span>
+                      )}
                   </summary>
                   <p className="morning-roi-reason">
                     {morningRoiReason(d.morning_at, d.current_at)}
                   </p>
+                  {d.morning_unpriced_legs != null &&
+                    d.morning_unpriced_legs !== d.unpriced_legs && (
+                      <p className="coverage-diff-detail muted">
+                        ⚠ 未値付脚数が異なる（朝 {d.morning_unpriced_legs} 脚
+                        → 現 {d.unpriced_legs} 脚）。母集団が違うため ROI
+                        の単純比較に注意。
+                      </p>
+                    )}
                 </details>
               )}
             {!d.odds_available && (
