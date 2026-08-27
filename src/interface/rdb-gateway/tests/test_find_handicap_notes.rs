@@ -506,7 +506,7 @@ async fn excludes_scratched_and_future_runs(pool: sqlx::PgPool) {
 /// 二重計上すると「千直 2 走」が「4 走」に見えて判断材料が壊れる。加えて、pdf は既知のパーサ
 /// 制約（EdiF フォントで着順カラムが欠落）で着順が 1 つズレることがあり、実測で両ソースの
 /// 11.1%（3,503/31,585 走）が食い違う——うち 76% が `pdf = netkeiba + 1`。人が読む着順を
-/// 出す経路なのでここでは netkeiba を優先する（スコア経路 `find_recent_runs` は pdf 優先のまま）。
+/// 出す経路なのでここでは netkeiba を優先する（スコア経路も #663 で netkeiba 優先に統一済み）。
 #[sqlx::test(migrations = "../../../deployments/db/migrations")]
 async fn dedups_same_race_and_prefers_netkeiba_position(pool: sqlx::PgPool) {
     let repo = PostgresRepository::new(pool);

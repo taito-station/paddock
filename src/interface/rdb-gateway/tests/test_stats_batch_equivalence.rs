@@ -160,7 +160,7 @@ async fn seed(repo: &PostgresRepository) {
     // netkeiba 近走（ウマA）。horse_past_runs は集計（horse_stats/horse_recency）には効かず、
     // recent_runs の UNION 第2ブランチにのみ現れる。
     // (a) r2 と同一実レース(2025-8-20, 中山, race_num=1)に重複する netkeiba 走。dedup で
-    //     pdf(src_rank 0) が優先され、netkeiba(src_rank 1) は recent_runs に出ないはず。
+    //     netkeiba(src_rank 0) が優先され、pdf(src_rank 1) の着順は使われない（#663）。
     //     canonical race_id は別物（202506020801 → 2025-2-nakayama-8-1R ≠ "r2"）。
     // (b) pdf に無い netkeiba 単独走(2024-12-01, 中山, race_num=1)。recent_runs に現れるはず。
     let horse_id = HorseId::try_from("2019104567".to_string()).unwrap();
