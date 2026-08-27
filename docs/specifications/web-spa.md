@@ -114,7 +114,7 @@ CLI `run_race` の対話ループを画面化する。
   発走済み（`raceStarted` が `true`）で停止。CLAUDE.md「EV/ROI 判定は発走直前のフレッシュなオッズで」の体現。
 - **例外③（#372）: ライブ一覧のスナップショット追従**。レース一覧は `GET /api/live/{date}` を
   60 秒間隔（`RACE_LIST_POLL_INTERVAL_MS`）で `refetchInterval` ポーリングし、predict-watch スイープの最新 snapshot を追従する。
-  未発走レースが残る間（`hasUpcomingRaces`）のみ継続し、全レース発走・非開催日確定・エラー時に停止。過去日はポーリングしない。
+  未発走レースが残る間（`hasUpcomingRaces`）のみ継続し、全レース発走・非開催日確定・races 取得エラー時に停止。過去日はポーリングしない。
 - セッションの賭け金・払戻記録は常に DB を正とし、楽観的 UI 更新後にサーバ確定値で整合させる。
 
 ---
