@@ -45,9 +45,6 @@ RE_FENCE = re.compile(r"^(`{3,}|~{3,})")
 # git を回すディレクトリ。main() で確定させる。
 _ROOT = Path(".")
 
-# パスリネーム検出結果のキャッシュ。main() で一度だけ計算する。
-_RENAMES: "list[tuple[str, str]]" = []
-
 
 def git(*args: str) -> "subprocess.CompletedProcess[str]":
     return subprocess.run(["git", *args], cwd=_ROOT, capture_output=True, text=True)
