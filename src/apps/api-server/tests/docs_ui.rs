@@ -27,20 +27,15 @@
 //! （`app::configure_routes` の doc を参照）。ここでの 200 は「無認証で配信されるべき」という要件では
 //! なく現状の追認なので、docs を保護する変更を入れるときはこのテストも併せて更新する。
 
-use std::collections::BTreeSet;
-use std::time::Duration;
+#[macro_use]
+mod common;
 
-use actix_web::{App, http::header::CONTENT_TYPE, test as actix_test, web};
-use sqlx::postgres::PgPoolOptions;
+use std::collections::BTreeSet;
+
+use actix_web::{http::header::CONTENT_TYPE, test as actix_test};
 use utoipa::OpenApi;
 
-use api_server::app::configure_routes;
-use netkeiba_scraper::UreqNetkeibaScraper;
-use paddock_use_case::Interactor;
-use rdb_gateway::PostgresRepository;
 use rest_controller::openapi::ApiDoc;
-
-type Repo = PostgresRepository;
 
 /// **本文まで見る**資産の表。ここに無い参照も `index.html` から抽出して 200 だけは確認するので
 /// （`refs` 参照）、この表は「深く見る対象」であって参照の網羅リストではない。
@@ -134,32 +129,6 @@ fn refs(html: &str) -> (BTreeSet<String>, BTreeSet<String>) {
         }
     }
     (local, external)
-}
-
-/// テスト用 actix App を組み立てる。`init_service` の戻り値は名前で書けない型なのでマクロにする
-/// （`tests/api.rs` の `build_service!` と同じ理由）。
-///
-/// 同名マクロは `api.rs` / `session.rs` / `prediction.rs` にもあり、これが 4 つ目の写しになる。
-/// `tests/common/` への集約は #620 で扱う（5 つ目を足す前に返す）。**この版だけ「到達不能プール
-/// ＋1 秒 timeout」という別契約**なので、共通化するときはプールを引数化すること——素朴に実 DB
-/// プールへ寄せると「DB を触らないことの強制」が静かに失われる。
-macro_rules! build_service {
-    () => {{
-        // 到達不能なアドレスへの遅延接続プール（上のモジュール doc を参照）。
-        // `acquire_timeout` を縮めるのは、DB 依存が紛れ込んだときに既定の 30 秒待たされて
-        // 「CI でハングした」に見えるのを避けるため（fail-fast にして原因を読みやすくする）。
-        let pool = PgPoolOptions::new()
-            .acquire_timeout(Duration::from_secs(1))
-            .connect_lazy("postgres://unused@127.0.0.1:1/unused")
-            .expect("build lazy pool");
-        let interactor = web::Data::new(Interactor::new(PostgresRepository::new(pool)));
-        actix_test::init_service(
-            App::new()
-                .app_data(interactor)
-                .configure(configure_routes::<Repo, UreqNetkeibaScraper, UreqNetkeibaScraper>),
-        )
-        .await
-    }};
 }
 
 /// `GET <uri>` を投げて `(status, content-type, body)` を返す。

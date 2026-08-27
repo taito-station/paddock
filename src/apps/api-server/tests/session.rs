@@ -3,35 +3,16 @@
 //! 実行には Postgres が必要。Postgres 非接続環境ではコンパイルのみ確認できる（`cargo test --no-run`）。
 //! odds:refresh / results:refresh は外部スクレイプを伴うためここでは検証しない（ネットワーク必須）。
 
-use actix_web::{App, test, web};
+#[macro_use]
+mod common;
+
+use actix_web::test;
 use serde_json::{Value, json};
-
-use api_server::app::configure_routes;
-use netkeiba_scraper::UreqNetkeibaScraper;
-use paddock_use_case::Interactor;
-use rdb_gateway::PostgresRepository;
-
-type Repo = PostgresRepository;
 
 const DATE: &str = "2026-03-28";
 const RACE_ID: &str = "2026-1-nakayama-1-R1";
 
-macro_rules! build_service {
-    ($pool:expr) => {{
-        let interactor = Interactor::new(PostgresRepository::new($pool));
-        test::init_service(
-            App::new()
-                .app_data(web::Data::new(interactor))
-                .configure(configure_routes::<Repo, UreqNetkeibaScraper, UreqNetkeibaScraper>),
-        )
-        .await
-    }};
-}
-
-async fn body_json(resp: actix_web::dev::ServiceResponse) -> Value {
-    let bytes = test::read_body(resp).await;
-    serde_json::from_slice(&bytes).expect("response body is JSON")
-}
+use common::body_json;
 
 #[sqlx::test(migrations = "../../../deployments/db/migrations")]
 async fn create_then_summary(pool: sqlx::PgPool) {
