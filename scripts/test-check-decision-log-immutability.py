@@ -287,6 +287,40 @@ def test_empty_decision_log_with_comment_only_passes() -> None:
         shutil.rmtree(repo)
 
 
+def test_path_rename_in_decision_log_passes() -> None:
+    """ディレクトリリネームに伴う決定ログ内のパス変更は許容する。
+
+    git diff --diff-filter=R で検出されるリネームと一致するパス更新だけなら
+    append-only 違反にならない。
+    """
+    repo = new_repo()
+    try:
+        (repo / "docs/old-data").mkdir(parents=True)
+        (repo / "docs/old-data/note.md").write_text("# note\n", encoding="utf-8")
+        entry_with_link = (
+            "### パスリネームのテスト\n\n"
+            "- 決定: [資料](../old-data/note.md) を参照\n"
+            "- 理由: `docs/old-data/` に一次資料を置いた\n"
+        )
+        overwrite(
+            repo,
+            "docs/knowledge/a.md",
+            read_doc(repo, "docs/knowledge/a.md") + "\n" + entry_with_link,
+        )
+        commit_all(repo, "リンク付きエントリを追加")
+        land_on_main(repo)
+
+        run_git(repo, "mv", "docs/old-data", "docs/new-data")
+        text = read_doc(repo, "docs/knowledge/a.md")
+        overwrite(repo, "docs/knowledge/a.md", text.replace("old-data", "new-data"))
+        commit_all(repo, "old-data → new-data にリネーム")
+
+        code, out = check(repo)
+        assert code == 0, f"パスリネームのみの変更で落ちている:\n{out}"
+    finally:
+        shutil.rmtree(repo)
+
+
 # --- 落ちるケース -----------------------------------------------------------
 
 
@@ -378,6 +412,38 @@ def test_inserted_entry_at_head_is_error() -> None:
         commit_all(repo, "先頭へ挿入")
         code, out = check(repo)
         assert code == 1, f"先頭への挿入を検出できていない:\n{out}"
+        assert "既存エントリが変更されている" in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_content_change_with_path_rename_is_error() -> None:
+    """パスリネームに加えて決定の内容も変更されていたら落とす。"""
+    repo = new_repo()
+    try:
+        (repo / "docs/old-data").mkdir(parents=True)
+        (repo / "docs/old-data/note.md").write_text("# note\n", encoding="utf-8")
+        entry_with_link = (
+            "### パスリネームのテスト\n\n"
+            "- 決定: [資料](../old-data/note.md) を参照\n"
+            "- 理由: テスト用の理由\n"
+        )
+        overwrite(
+            repo,
+            "docs/knowledge/a.md",
+            read_doc(repo, "docs/knowledge/a.md") + "\n" + entry_with_link,
+        )
+        commit_all(repo, "リンク付きエントリを追加")
+        land_on_main(repo)
+
+        run_git(repo, "mv", "docs/old-data", "docs/new-data")
+        text = read_doc(repo, "docs/knowledge/a.md")
+        text = text.replace("old-data", "new-data").replace("テスト用の理由", "書き換えた理由")
+        overwrite(repo, "docs/knowledge/a.md", text)
+        commit_all(repo, "リネーム＋内容変更")
+
+        code, out = check(repo)
+        assert code == 1, f"パスリネーム以外の変更を見逃している:\n{out}"
         assert "既存エントリが変更されている" in out, out
     finally:
         shutil.rmtree(repo)

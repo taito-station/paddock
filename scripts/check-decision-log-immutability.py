@@ -45,6 +45,9 @@ RE_FENCE = re.compile(r"^(`{3,}|~{3,})")
 # git を回すディレクトリ。main() で確定させる。
 _ROOT = Path(".")
 
+# パスリネーム検出結果のキャッシュ。main() で一度だけ計算する。
+_RENAMES: "list[tuple[str, str]]" = []
+
 
 def git(*args: str) -> "subprocess.CompletedProcess[str]":
     return subprocess.run(["git", *args], cwd=_ROOT, capture_output=True, text=True)
@@ -117,6 +120,61 @@ def extract_decision_log(text: str) -> "list[tuple[int, str]] | None":
     return collected
 
 
+def detect_path_renames(base_sha: str) -> "list[tuple[str, str]]":
+    """base..HEAD 間のファイルリネームからディレクトリリネームを検出する。
+
+    返り値は (旧文字列, 新文字列) のリスト（長い順）。base の行に適用して
+    current と一致すれば「パスリネームのみの変更」と判定できる。相対リンク
+    （``../old-dir/``）にも対応するため、共通プレフィックスを除いた末尾
+    コンポーネントも置換ペアに含める。
+    """
+    proc = git("diff", "--diff-filter=R", "--name-status", "-M", base_sha, "HEAD")
+    if proc.returncode != 0:
+        return []
+
+    dir_renames: "set[tuple[str, str]]" = set()
+    for line in proc.stdout.splitlines():
+        parts = line.split("\t")
+        if len(parts) < 3:
+            continue
+        old_dir = str(Path(parts[1]).parent)
+        new_dir = str(Path(parts[2]).parent)
+        if old_dir != new_dir:
+            dir_renames.add((old_dir, new_dir))
+
+    subs: "list[tuple[str, str]]" = []
+    seen: "set[tuple[str, str]]" = set()
+    for old_dir, new_dir in sorted(dir_renames):
+        if (old_dir, new_dir) not in seen:
+            subs.append((old_dir, new_dir))
+            seen.add((old_dir, new_dir))
+        old_parts = old_dir.split("/")
+        new_parts = new_dir.split("/")
+        common = 0
+        for o, n in zip(old_parts, new_parts):
+            if o == n:
+                common += 1
+            else:
+                break
+        if common < len(old_parts) and common < len(new_parts):
+            old_suffix = "/".join(old_parts[common:])
+            new_suffix = "/".join(new_parts[common:])
+            if old_suffix != new_suffix and (old_suffix, new_suffix) not in seen:
+                subs.append((old_suffix, new_suffix))
+                seen.add((old_suffix, new_suffix))
+
+    subs.sort(key=lambda p: len(p[0]), reverse=True)
+    return subs
+
+
+def apply_renames(line: str, renames: "list[tuple[str, str]]") -> str:
+    """既知のパスリネームを行に適用する。"""
+    result = line
+    for old, new in renames:
+        result = result.replace(old, new)
+    return result
+
+
 def blob_at(sha: str, rel: str) -> "str | None":
     proc = subprocess.run(
         ["git", "show", f"{sha}:{rel}"], cwd=_ROOT, capture_output=True
@@ -126,7 +184,8 @@ def blob_at(sha: str, rel: str) -> "str | None":
     return proc.stdout.decode("utf-8", "surrogateescape")
 
 
-def check_file(rel: str, base_sha: str, path: Path, errors: list[str]) -> bool:
+def check_file(rel: str, base_sha: str, path: Path, errors: list[str],
+               renames: "list[tuple[str, str]] | None" = None) -> bool:
     """1 文書ぶんを検査する。比較を実施したら True（成功行の件数に数える）。
 
     違反は先頭 1 件だけ報告する（prefix 比較なので後続は連鎖的な偽陽性になるため）。
@@ -156,6 +215,8 @@ def check_file(rel: str, base_sha: str, path: Path, errors: list[str]) -> bool:
             return True
         current_lineno, current_line = current_log[i]
         if base_line != current_line:
+            if renames and apply_renames(base_line, renames) == current_line:
+                continue
             errors.append(
                 f"{rel}: 決定ログの既存エントリが変更されている（{current_lineno} 行目）。"
                 "決定ログは append-only で、既存の決定は書き換えず新しいエントリで覆す\n"
@@ -181,12 +242,14 @@ def main(argv: list[str]) -> int:
         print("比較対象のコミットが無いため決定ログの不変性検査をスキップした")
         return 0
 
+    renames = detect_path_renames(base_sha)
+
     errors: list[str] = []
     checked = 0
     for directory in TARGET_DIRS:
         for path in sorted((_ROOT / directory).glob("*.md")):
             rel = path.relative_to(_ROOT).as_posix()
-            if check_file(rel, base_sha, path, errors):
+            if check_file(rel, base_sha, path, errors, renames):
                 checked += 1
 
     if errors:

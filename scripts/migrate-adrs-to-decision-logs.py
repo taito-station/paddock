@@ -192,7 +192,7 @@ def pick_cross_cutting(path: Path) -> str:
     )
 
 
-ADR_HISTORY_PATH_RE = re.compile(r"^docs/(?:adr|docs-original)/(0\d{3})-.*\.md$")
+ADR_HISTORY_PATH_RE = re.compile(r"^docs/(?:adr|original-docs|docs-original)/(0\d{3})-.*\.md$")
 
 
 def _git(*args: str) -> str:
@@ -204,8 +204,9 @@ def _git(*args: str) -> str:
 def git_dates(adrs: dict[str, Path]) -> dict[str, str]:
     """ADR 番号 → 最初に履歴へ現れた日 (YYYY-MM-DD)。
 
-    素朴な `--diff-filter=A` は使えない。ADR 0073 で `docs/adr/` → `docs/docs-original/` へ
-    一括 rename しており、追跡しないと全 ADR が rename 日 (2026-08-09) に潰れる。さらに
+    素朴な `--diff-filter=A` は使えない。ADR 0073 で `docs/adr/` → `docs/original-docs/` へ、
+    さらに `docs/original-docs/` → `docs/docs-original/` へ 2 段階 rename しており、
+    追跡しないと全 ADR が rename 日に潰れる。さらに
     採番のやり直しで slug が変わったものがあるので、パスでなく **ADR 番号**で履歴を舐める。
     それでも拾えない数本（merge commit 経由で tree に現れたもの）はパス指定で最古を取る。
     """

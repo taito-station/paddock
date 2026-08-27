@@ -18,4 +18,4 @@ HVE（dahatake/HypervelocityEngineering）の `docs-generated/` と同じ概念�
 ## 運用
 
 - このディレクトリの中身は再生成可能なので、コミットは任意
-- mdq の索引対象に含める場合は `mdq.toml` の `roots` に追加する
+- 現時点では mdq の索引対象外。成果物が追加された時点で `mdq.toml` の `roots` に追加する
