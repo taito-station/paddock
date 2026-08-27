@@ -1,6 +1,6 @@
 # ブラウザテストケース: ライブ EV 買い目ビュー（LiveBets）
 
-対象: SPA `web/src/routes/LiveBets.tsx`（ルート `/live/:date`）。設計書 [live-ev-buy-view.md](../../docs/specifications/live-ev-buy-view.md) / ADR [0064](../../docs/original-docs/0064-live-ev-buy-view.md)。
+対象: SPA `web/src/routes/LiveBets.tsx`（ルート `/live/:date`）。設計書 [live-ev-buy-view.md](../../docs/specifications/live-ev-buy-view.md) / ADR [0064](../../docs/docs-original/0064-live-ev-buy-view.md)。
 
 実施は **実装 PR#2（SPA）** で行う（本 PR は設計書のみ）。検証環境は Playwright MCP 不在のため **headless Chrome + puppeteer-core** で代替する（`reference_browser_test_fallback`）。テストデータは `live_ev_snapshots` に隔離 DB へ投入し、テスト後クリーンアップする（`isolated_db_for_write_tests`）。
 

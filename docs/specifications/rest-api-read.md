@@ -367,7 +367,7 @@ API の仕様乖離を防ぐため、OpenAPI はコードから生成する（sp
 - #53 セッション write API / #34 SPA / #35 docker-compose
 - #51 単複オッズ永続化（recommendations の前提）/ #40 確定結果自動取得 / #50 名前あいまい検索（REST 露出は #401 で完了）
 - `~/.claude/rules/rust/architecture.md`・`conventions.md`（クリーンアーキテクチャ／コーディング規約）
-- ADR: `docs/original-docs/0022-rest-api-read-server.md`
+- ADR: `docs/docs-original/0022-rest-api-read-server.md`
 
 ---
 

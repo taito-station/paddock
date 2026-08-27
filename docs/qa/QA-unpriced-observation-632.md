@@ -1,6 +1,6 @@
 # QA: 券種まるごと未発売時の再スクレイプ抑止（#632）
 
-対象: [ADR 0089](../original-docs/0089-unpriced-bet-type-observation.md) の設計判断。
+対象: [ADR 0089](../docs-original/0089-unpriced-bet-type-observation.md) の設計判断。
 着手前にユーザーへ提示し、回答を得てから実装した論点を記録する。
 
 ---

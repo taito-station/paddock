@@ -1,6 +1,6 @@
 # ブラウザテストケース: レース結果の同日取り込みと UI 自動反映（#381）
 
-対象: SPA `web/src/routes/RaceList.tsx`（`/races?date=YYYY-MM-DD`）・`SessionSummary.tsx`・`RaceBoard.tsx`。設計書 [race-result-ingestion.md](../../docs/specifications/race-result-ingestion.md) / ADR [0068](../../docs/original-docs/0068-race-result-ingestion-ui-reflection.md)。
+対象: SPA `web/src/routes/RaceList.tsx`（`/races?date=YYYY-MM-DD`）・`SessionSummary.tsx`・`RaceBoard.tsx`。設計書 [race-result-ingestion.md](../../docs/specifications/race-result-ingestion.md) / ADR [0068](../../docs/docs-original/0068-race-result-ingestion-ui-reflection.md)。
 
 検証環境は Playwright MCP 不在のため **headless Chrome + puppeteer-core** で代替する（`reference_browser_test_fallback`）。web 検証スタックは `reference_web_verify_stack`（colima → api-server をソースから起動 → vite `PADDOCK_API_TARGET`）。DB を汚さない再現は CDP レスポンス差し替えを用いる。
 

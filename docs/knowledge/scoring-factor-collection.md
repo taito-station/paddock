@@ -5,7 +5,7 @@ doc_class: [D22, D19]
 tags: [D22, D19]
 sources:
   - docs/qa/QA-factors-explanation-unify-409.md
-distilled_from_sha: "9538782"
+distilled_from_sha: "daf3beb"
 updated: "2026-07-21"
 ---
 

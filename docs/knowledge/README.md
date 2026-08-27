@@ -1,12 +1,12 @@
 # knowledge — 蒸留済み確定知の規約
 
-dahatake/HypervelocityEngineering（HVE, MIT）の original-docs → qa → knowledge 蒸留モデルを
+dahatake/HypervelocityEngineering（HVE, MIT）の docs-original → qa → knowledge 蒸留モデルを
 paddock に導入したもの。**蒸留は Claude Code が担う**（HVE 本体の LLM オーケストレータは持ち込まない）。
 
 ## 2 層モデル
 
 ```
-docs/original-docs/  読み取り専用の一次資料（実測ログ・調査所見・issue 由来の生素材）
+docs/docs-original/  読み取り専用の一次資料（実測ログ・調査所見・issue 由来の生素材）
         │
         │ [Claude が読取・欠落/不整合を検出]
         ▼
@@ -17,9 +17,12 @@ docs/knowledge/ ＋ docs/specifications/   status 付き確定知（＝この層
                                           末尾に **決定ログ**（append-only の決定記録）を持つ
 ```
 
+蒸留フローとは別枠で `docs/docs-generated/` がある（HVE 由来。`cargo doc` / OpenAPI 等の自動生成文書の
+置き場で、手書きの蒸留対象ではない）。
+
 - **横断検索**は mdq（Markdown Query, BM25・ローカル）で全 docs を索引する。生ファイルを読む前に
   `scripts/mdq search` を使う（[.claude/skills/markdown-query/SKILL.md](../../.claude/skills/markdown-query/SKILL.md)）。
-- **決定の記録は各文書の「決定ログ」節**（#652）。かつて `docs/original-docs/` に独立ファイルとして
+- **決定の記録は各文書の「決定ログ」節**（#652）。かつて `docs/docs-original/` に独立ファイルとして
   置いていた ADR は廃止し、決定・理由・却下案・影響は**その決定が効く knowledge / specifications の
   末尾**にある `## 決定ログ` 節へ集約した。**独立した ADR ファイルはもう作らない**——新しい決定は
   対応する確定知の決定ログに追記する。
@@ -27,7 +30,7 @@ docs/knowledge/ ＋ docs/specifications/   status 付き確定知（＝この層
   原本を突き合わせる必要が無い）。
 - **一次資料層に残るのは転記できないもの**——実測ログ・調査時点のコード所見・外部サイトの挙動観察。
   ファイル名は **GitHub issue 番号（0 埋めしない）**（`382-`, `401-` …）。詳細は
-  [docs/original-docs/README.md](../original-docs/README.md)。
+  [docs/docs-original/README.md](../docs-original/README.md)。
 
 ## 決定ログの書き方
 
@@ -82,10 +85,10 @@ status: Confirmed        # Confirmed（確定）/ Tentative（暫定）/ Conflic
 kind: knowledge
 doc_class: [D22, D24]    # 文書クラス。第 1 要素が主クラス。定義は docs/knowledge/doc-classes.md
 tags: [D22, D24]         # doc_class の mdq 用ミラー（完全一致。checker が強制）
-sources:                 # 由来。qa / original-docs のほか、確定知層（specifications /
+sources:                 # 由来。qa / docs-original のほか、確定知層（specifications /
                          # knowledge）や主題そのものであるファイル（ci.yml・openapi.json）も可。
                          # 判定は「その文書の本文が動いたら、この知の見直しが要るか」
-  - docs/original-docs/NNN-....md    # issue 番号（0 埋めしない）
+  - docs/docs-original/NNN-....md    # issue 番号（0 埋めしない）
   - docs/qa/QA-....md
 distilled_from_sha: "<short-sha>"  # この知が反映するリポジトリ状態の git SHA（トレーサビリティ）
 updated: "YYYY-MM-DD"    # 内容を実質更新した日（YAML の date 型を避けるため必ずクォート。詳細な履歴は git log を正とする）
@@ -207,7 +210,7 @@ updated: "YYYY-MM-DD"    # 内容を実質更新した日（YAML の date 型を
 - ブロックのクラスが定義済みで、かつその文書の `doc_class` に含まれること
 - 番号の重複、`status` の値域、`要件` / `出典` の非空、Confirmed の検証手段、リンク先の実在
   （リンクの実在検査は #604 で**本文にも**広げた。REQ 表の内外を問わず、相対リンクは実在必須）
-- **`出典` 列が名指しした `docs/original-docs/` 配下のファイルが `sources` にも載っていること**
+- **`出典` 列が名指しした `docs/docs-original/` 配下のファイルが `sources` にも載っていること**
   （#597 / ADR 0083）。外部 URL・兄弟 knowledge へのリンク・リンク切れは対象外
 
 加えて `scripts/check-decision-log-immutability.py` が **決定ログの append-only 性**を error で
@@ -218,7 +221,7 @@ updated: "YYYY-MM-DD"    # 内容を実質更新した日（YAML の date 型を
 - **番号の再利用禁止**。検査が見るのは現時点のスナップショットだけなので、`Retired` 行ごと削除して
   同じ番号を別の要件に振り直しても検出されない。
 - **`docs/knowledge/` と `docs/specifications/` の直下以外にある REQ 表**。検査対象はこの 2 ディレクトリの
-  直下のみ（`README.md` を除く）で、`docs/original-docs/` や `CLAUDE.md` に REQ 表を置いても一意性の
+  直下のみ（`README.md` を除く）で、`docs/docs-original/` や `CLAUDE.md` に REQ 表を置いても一意性の
   台帳には載らない。**REQ 表はこの 2 ディレクトリの中に置く**こと。
 - **コードフェンスで囲んだ REQ ブロック**。フェンス内は「規約の見本」として全面的に無視する
   （この節の例がまさにそれ）。囲まれた表は GitHub でも表として描画されないので、実データを
@@ -248,7 +251,7 @@ updated: "YYYY-MM-DD"    # 内容を実質更新した日（YAML の date 型を
   連結して走査するので、**閉じ忘れた `[` が離れた行の `]` と対になる**と、error の行番号が
   実際の記述とずれることがある（実在判定自体は誤らない）。
 - **リンク検査の適用範囲**。見るのは `docs/knowledge/` と `docs/specifications/` の**直下**
-  （＋ 各ディレクトリの `README.md` と、リポジトリルートの `CLAUDE.md`）だけ。**`docs/original-docs/` と `docs/qa/` は無検査**、
+  （＋ 各ディレクトリの `README.md` と、リポジトリルートの `CLAUDE.md`）だけ。**`docs/docs-original/` と `docs/qa/` は無検査**、
   サブディレクトリの `.md` も走査対象外（**置くこと自体が error**＝上記「機械検査」の項が正。
   severity をここに二重に書かない）。実在判定はファイルシステムを見るので、
   **git 管理外のパス**（生成物・gitignore 対象）へのリンクは手元で通り CI（fresh clone）で落ちる。
@@ -258,9 +261,9 @@ updated: "YYYY-MM-DD"    # 内容を実質更新した日（YAML の date 型を
 
 ## 昇格・更新の運用（Claude が回す蒸留）
 
-1. 一次資料は `docs/original-docs/` に置く（RO・書き換えない）。
+1. 一次資料は `docs/docs-original/` に置く（RO・書き換えない）。
 2. 調査で判明した Q&A は `docs/qa/` に質問票として起票し、回答を書き込む。
-3. 回答済み qa と original-docs を突き合わせ、差分を knowledge に**差分マージ**（全書き換えしない・冪等）。
+3. 回答済み qa と docs-original を突き合わせ、差分を knowledge に**差分マージ**（全書き換えしない・冪等）。
 4. 矛盾は `status: Conflict` で明示し、解消してから `Confirmed` に上げる。
 5. **決定を伴うものは、その決定が効く knowledge / specifications の `## 決定ログ` に 1 エントリ追記する**
    （書式は上記「決定ログの書き方」）。**独立した ADR ファイルは作らない**（#652）。
@@ -334,7 +337,7 @@ updated: "YYYY-MM-DD"    # 内容を実質更新した日（YAML の date 型を
 
 #### コンテキスト
 
-`docs/original-docs/` は「読み取り専用の一次資料（RO）」の層で、蒸留の出発点を固定するために置いている。
+`docs/docs-original/` は「読み取り専用の一次資料（RO）」の層で、蒸留の出発点を固定するために置いている。
 ところが issue 由来の一次資料 4 本は、いずれも **GitHub Issue 本文を逐語転記した章**を先頭に持っていた。
 
 ADR 0073 のために全文照合したところ、実測は次のとおりだった。
@@ -351,7 +354,7 @@ GitHub 上で issue 本文が編集されても git には何も現れないた�
 
 #### 決定
 
-**`docs/original-docs/` に GitHub Issue 本文を転記しない。** 原本は GitHub Issue とし、リポジトリ側は
+**`docs/docs-original/` に GitHub Issue 本文を転記しない。** 原本は GitHub Issue とし、リポジトリ側は
 **リンクと取得コマンドの数行だけ**を置く。
 
 ```markdown
@@ -401,7 +404,7 @@ GitHub 上で issue 本文が編集されても git には何も現れないた�
   `401-analyze-partial-match.md` の issue 本文章を削除しリンクに置換。**調査所見・実測・mdq 探索ログは無変更**。
 - **不変**: `568-monitor-sleep-gap.md`（`pmset -g log` 抜粋などの生ログのみで、転記章を持たない）。
   ADR 73 本も対象外（ADR は issue のコピーではない）。
-- **変更**: `docs/original-docs/README.md` の「何を置かないか」に「GitHub Issue 本文の転記」を追加し、
+- **変更**: `docs/docs-original/README.md` の「何を置かないか」に「GitHub Issue 本文の転記」を追加し、
   RO の例外リストに本 ADR を加える。
 - **追従**: 4 本を `sources` に持つ knowledge / specifications は stale になる。本文の削除は蒸留済み内容に
   影響しない（転記章は knowledge へ写していない）ため、`distilled_from_sha` の再ベースラインで足りる
@@ -413,7 +416,7 @@ GitHub 上で issue 本文が編集されても git には何も現れないた�
 
 ```sh
 # 転記章が残っていないこと（issue 本文の見出しが 0 件）
-git grep -nE '^#+ (Issue #[0-9]+ 概要|[0-9]+\. issue #[0-9]+ 本文)' -- docs/original-docs   # → 0 行
+git grep -nE '^#+ (Issue #[0-9]+ 概要|[0-9]+\. issue #[0-9]+ 本文)' -- docs/docs-original   # → 0 行
 
 # 原本はいつでも取れる
 gh issue view 382 --repo taito-station/paddock
@@ -437,7 +440,7 @@ ADR を独立した文書種別として廃止し、決定・理由・却下案�
 
 #### 影響
 
-- docs/original-docs/ には非 ADR の一次資料（実測ログ・issue 由来）11 本のみ残る
+- docs/docs-original/ には非 ADR の一次資料（実測ログ・issue 由来）11 本のみ残る
 - 旧 ADR 番号（ADR 0001〜0090）は各ファイルの決定ログ見出しから検索可能
 - check-adr-numbers.sh / check-doc-classes.py の orphan 検査は撤去
 - 新規の決定は知識文書の決定ログ節に直接 append する（ADR ファイルは作らない）

@@ -150,5 +150,5 @@ launchd 経由の挙動**なので、`psql` をスタブにすれば共有 DB �
 | `deployments/launchd/uninstall.sh` | 削除側（pid 読み出し・kill・片付け） |
 
 ドキュメント側に lock パスの記載は無かった（`README.md` / keiba-start SKILL とも WORKDIR/ログの
-パスにしか触れていない）。`docs/original-docs/636-fullwidth-after-var.md` に観察記録として
+パスにしか触れていない）。`docs/docs-original/636-fullwidth-after-var.md` に観察記録として
 1 度だけ現れるが、これは #636 の一次資料（不変）。

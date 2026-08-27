@@ -4,12 +4,12 @@ kind: knowledge
 doc_class: [D21, D19, D17]
 tags: [D21, D19, D17]
 sources:
-  - docs/original-docs/616-docs-serving-checks.md
-  - docs/original-docs/636-fullwidth-after-var.md
+  - docs/docs-original/616-docs-serving-checks.md
+  - docs/docs-original/636-fullwidth-after-var.md
   - docs/qa/QA-evil-merge-615.md
   - docs/qa/QA-fullwidth-after-var-636.md
   - .github/workflows/ci.yml
-distilled_from_sha: "bf3e4fe"
+distilled_from_sha: "daf3beb"
 updated: "2026-08-22"
 ---
 
@@ -460,16 +460,16 @@ ADR 0026 のスコープ外として記録されたまま**未確認**。将来 
 
 #### コンテキスト
 
-paddock は HVE（dahatake/HypervelocityEngineering, MIT）の 3 層蒸留モデル（original-docs → qa → knowledge）と mdq 検索を既に取り込んでいる。しかし実測すると、層の切り方と運用の両方に構造的な問題があった。
+paddock は HVE（dahatake/HypervelocityEngineering, MIT）の 3 層蒸留モデル（docs-original → qa → knowledge）と mdq 検索を既に取り込んでいる。しかし実測すると、層の切り方と運用の両方に構造的な問題があった。
 
 ##### 層の重複が実害を出している
 
-#568 の 4 点セット（original-docs / qa / knowledge / ADR、合計 515 行）を全文照合した結果（測定は #576 のマージ前に同 PR のブランチ上で実施。#576 マージ後は `docs/knowledge/monitor-loop-sleep-resilience.md` と ADR 0072 として本リポジトリで参照できる）:
+#568 の 4 点セット（docs-original / qa / knowledge / ADR、合計 515 行）を全文照合した結果（測定は #576 のマージ前に同 PR のブランチ上で実施。#576 マージ後は `docs/knowledge/monitor-loop-sleep-resilience.md` と ADR 0072 として本リポジトリで参照できる）:
 
 - `docs/knowledge/monitor-loop-sleep-resilience.md` の本文 103 行のうち **88 行（85%）が ADR 0072 と 1:1 対応**し、knowledge が追加した決定は **0 件**。固有の価値は運用者向けの読み方 6 行に集約されていた。
 - 「5 秒刻みの根拠（DarkWake 累計 28 秒）」「単調時計で所要を測る理由」「JST 変換を持ち込まない理由」は、いずれも **qa / knowledge / ADR の 3 箇所に語順までほぼ同一**で存在した。
 - `docs/qa/QA-analyze-384.md` の Q2/Q3 は回答文が **約 90% 逐語**で knowledge へ移送され、knowledge が足した固有情報は 1 行だった。
-- `docs/original-docs/` 4 本はすべて **GitHub Issue 本文の 25〜38% を逐語コピー**していた。しかも #384 は「別 issue」→「#379・実装済」に改変、#389 は「現状」章を削除、#401 は「要件」章 4 項目を削除しており、**原本として機能していない**。
+- `docs/docs-original/` 4 本はすべて **GitHub Issue 本文の 25〜38% を逐語コピー**していた。しかも #384 は「別 issue」→「#379・実装済」に改変、#389 は「現状」章を削除、#401 は「要件」章 4 項目を削除しており、**原本として機能していない**。
 - 同一の実測（`name=カップ` → starts=0）が **5 ファイル**に重複して存在した。
 
 ##### 蒸留層の権威が逆転している
@@ -488,9 +488,9 @@ knowledge / specifications 22 本の `updated` は全件 2026-07-16〜07-30 に�
 
 #### 決定
 
-##### 1. ADR を `docs/original-docs/` へ物理移動し、一次資料層に統合する
+##### 1. ADR を `docs/docs-original/` へ物理移動し、一次資料層に統合する
 
-ADR 71 本（0001〜0071）を `docs/adr/` から `docs/original-docs/` へ移す。ディレクトリ `docs/adr/` は廃止する。
+ADR 71 本（0001〜0071）を `docs/adr/` から `docs/docs-original/` へ移す。ディレクトリ `docs/adr/` は廃止する。
 
 命名で 2 系統を分離する。**この規約が ADR 番号重複検出の判定根拠**になる。
 
@@ -499,14 +499,14 @@ ADR 71 本（0001〜0071）を `docs/adr/` から `docs/original-docs/` へ移�
 | ADR | **0 埋め 4 桁**（`0001`〜`0999`。上限は 0999 で、超えるときは判定と規約を併せて見直す） | `0055-ev-layer-separation-circular-break.md` |
 | issue 由来の一次資料 | **issue 番号・0 埋めしない** | `382-live-server-now.md` |
 
-`scripts/check-adr-numbers.sh` は走査先を `docs/original-docs` に変え、ファイル名が `0` + 3 桁（`^0[0-9]{3}`）で始まるかで ADR を分離する。非 ADR は**黙ってスキップ**する（警告に載せると本来見るべき重複検出が埋もれる）。
+`scripts/check-adr-numbers.sh` は走査先を `docs/docs-original` に変え、ファイル名が `0` + 3 桁（`^0[0-9]{3}`）で始まるかで ADR を分離する。非 ADR は**黙ってスキップ**する（警告に載せると本来見るべき重複検出が埋もれる）。
 
 そのうえで、**「黙って緑になる」経路を 4 つ塞ぐ**。fail-closed の判定は壊れても本番データが正常なら気づけないため、使い捨て fixture による回帰テスト（`scripts/test-check-adr-numbers.sh`）で各分岐の終了コードと文言を固定し、CI で本番検査より先に走らせる。
 
-1. **0 埋めを忘れた ADR**（`74-foo.md`）— 主判定の網から漏れて重複検出を無効化する。判定は H1 の書式ではなく**本文構造**（`## ステータス` と `## 決定` が、コードフェンスの外の行頭に同時存在）で行う。H1 は `# ADR 0001: …` と `# 0071. …` の 2 系統に割れているうえ、番号の桁数でマッチさせると 2 桁 ADR を取りこぼし、逆に一次資料の H1 が `# 401: …` 形式になると誤検知して CI を全停止させる。フェンスと行頭を絞るのは、original-docs が issue 本文や外部資料を逐語転記する層で、引用やコードフェンスの中に ADR 雛形が現れうるため。実測で ADR 72/72 がこの構造を満たし、一次資料 4/4 が満たさない。
+1. **0 埋めを忘れた ADR**（`74-foo.md`）— 主判定の網から漏れて重複検出を無効化する。判定は H1 の書式ではなく**本文構造**（`## ステータス` と `## 決定` が、コードフェンスの外の行頭に同時存在）で行う。H1 は `# ADR 0001: …` と `# 0071. …` の 2 系統に割れているうえ、番号の桁数でマッチさせると 2 桁 ADR を取りこぼし、逆に一次資料の H1 が `# 401: …` 形式になると誤検知して CI を全停止させる。フェンスと行頭を絞るのは、docs-original が issue 本文や外部資料を逐語転記する層で、引用やコードフェンスの中に ADR 雛形が現れうるため。実測で ADR 72/72 がこの構造を満たし、一次資料 4/4 が満たさない。
 2. **ADR 0 件** — 従来の `exit 0`（fail-open）から `exit 1` へ。
 3. **旧 `docs/adr/` に ADR が置かれている** — 決定 1 の「統合前に分岐した PR」対策（下記「影響」参照）。判定はディレクトリ存在ではなく中の `*.md` の有無で行う（git は空ディレクトリを追跡しないので、空の `docs/adr` はローカル残骸でしか現れず、そこで落とすと pre-push が恒久的に詰まるだけ）。
-4. **サブディレクトリへの配置** — 走査は直下限定なので、`docs/original-docs/adr/0001-x.md` のような階層を切られると重複検出・採番の両方から不可視になる。
+4. **サブディレクトリへの配置** — 走査は直下限定なので、`docs/docs-original/adr/0001-x.md` のような階層を切られると重複検出・採番の両方から不可視になる。
 
 いずれの致命チェックも **`check` だけでなく `next`（採番を配る経路）にも効かせる**。走査が壊れた状態で `next` が番号を返すと、既存 ADR と衝突する採番をそのまま配ってしまうため。番号の重複判定には「先頭の連続数字」をそのままキーに使い、規約外の桁数（`00401-*.md`）でも重複が漏れないようにする。
 
@@ -544,7 +544,7 @@ D01〜D21 は番号・名称を変えず採用する（HVE との語彙互換を
 #### 理由
 
 - **ADR と一次資料は「一度置いたら書き換えない（RO）」という性質が同じ**。同じ層に置くことで、`ADR → knowledge` の写しが例外的な重複ではなく規約どおりの蒸留になる。層の数を減らさずに、責務の説明を一本化できる。
-- **移動コストが小さいことを実測で確認した**。`docs/adr` と `docs/original-docs` は同じ階層深さ（`docs/` 直下）なので、相対リンクはどの参照元からも「`adr` → `original-docs`」の 1 語置換で閉じる。ADR 本文が持つ兄弟相対リンク 8 件・`../specifications/` 6 件・`../images/` 1 件・`../../deployments/` 2 件は**無変更で解決する**。ファイル名衝突も 0 件だった。
+- **移動コストが小さいことを実測で確認した**。`docs/adr` と `docs/docs-original` は同じ階層深さ（`docs/` 直下）なので、相対リンクはどの参照元からも「`adr` → `docs-original`」の 1 語置換で閉じる。ADR 本文が持つ兄弟相対リンク 8 件・`../specifications/` 6 件・`../images/` 1 件・`../../deployments/` 2 件は**無変更で解決する**。ファイル名衝突も 0 件だった。
 - **「全部写す」を選ぶ以上、機械検査は必須**。写した量に比例して stale 面積が増える。`app-bootstrap.md` の `NoopParser` 事故は 1 件で済んだが、71 ADR ぶんに広げれば人手の規律では守れない。ADR 番号の重複検出（#254）と同じ判断——人手で再発が防げないものは機械で弾く。
 - **D01〜D21 をそのまま採るのは HVE 互換のため**。番号を変えると将来 HVE の資産（skill・prompt）を追加移植するときに読み替えが要る。空クラスが 12 個出るが、うち 5 個は N/A 宣言で閉じ、残り 4 個（D01 成功条件・D07 用語集・D15 SLO/Runbook・D21 CI/CD の文書化）は**真の欠落**で、埋めること自体が D 体系採用の実利になる。
 - **企業分析・業界分析が無くても上流は書ける**。HVE の ARD ワークフローは `target_business` 指定時に Step 1（事業分野候補列挙）を skip する設計を持っており、対象が決まっている個人プロダクトは正規ルートでその経路に乗る。paddock の「業界分析」に相当する市場（オッズ）の性質分析は、ADR 0027 / 0055 / 0058 / 0059 / 0067 として**既に蓄積済み**で、足りないのは上位のゴール文書 1 枚だった。
@@ -552,20 +552,20 @@ D01〜D21 は番号・名称を変えず採用する（HVE との語彙互換を
 #### 却下した代替案
 
 - **ADR を `docs/adr/` に残し、位置づけの宣言だけ変える**。リンク破壊もツール改修もゼロで済み、mdq は `docs/adr` を索引済みなので検索体験も変わらない。実利/コスト比では最も良いが、ディレクトリ構成が 3 層モデルと一致しないままになる。**利用者の判断で物理移動を採用した**。
-- **`docs/original-docs/adr/` へサブディレクトリとして移動**。生ログと ADR の混在を避けられるが、パス一斉改修のコストは同じで、階層深さが変わるぶん ADR 本文の相対リンク 17 件も書き換えが要る（フラット移動なら不要）。
+- **`docs/docs-original/adr/` へサブディレクトリとして移動**。生ログと ADR の混在を避けられるが、パス一斉改修のコストは同じで、階層深さが変わるぶん ADR 本文の相対リンク 17 件も書き換えが要る（フラット移動なら不要）。
 - **knowledge を「複数 ADR を横断するときだけ作る」に限定する**（＝ ADR 1 本に knowledge を作らない）。#568 の 85% 重複は消えるが、「今どうなっているか」を知るのに ADR と knowledge を往復することになる。読む入口の一本化を優先して却下した。
 - **D22〜D24 を作らず D06（業務ルール・判定表）/ D17（UAT）へ押し込む**。HVE と完全同一の 21 クラスを維持できるが、D06 の必須項目「判定表・override 承認者・発効/失効日・根拠規程」が予測モデル 31 本すべてで UNKNOWN になる。統計モデルに承認者も規程根拠も存在しない。
 - **D クラスをファイル名プレフィックス（`D08-*.md`）で表現する**（HVE 流）。`mdq --paths` で絞れる利点があるが、22 本のリネームで `sources` 参照が再度壊れる。`doc_class` + `tags` ミラーで同等の絞り込みが得られるため却下。
 
 #### 影響
 
-- **移動**: ADR 71 本が `docs/adr/` → `docs/original-docs/`。`docs/adr/` は消滅。
+- **移動**: ADR 71 本が `docs/adr/` → `docs/docs-original/`。`docs/adr/` は消滅。
 - **変更（機械置換 187 箇所 / 33 ファイル）**: frontmatter `sources` のパス、本文の相対リンク、規約文。`git grep` / `git ls-files` に限定して実施した（`.claude/worktrees/` の並走 worktree 3 本がそれぞれ完全な `docs/adr/` を持つため、`grep -r` では別ブランチの作業コピーを破壊する）。
 - **変更**: `scripts/check-adr-numbers.sh`（走査先・ADR 分離・fail-closed 化）、`mdq.toml`（`docs/adr` root を削除。実体が消えているので `iter_markdown` の `base.exists()` で skip され残しても無害だが、死んだ設定は残さない）。
 - **追加**: `scripts/test-check-adr-numbers.sh`（fail-closed 分岐の回帰テスト）と CI `adr` ジョブへの配線。本番検査より**前**に走らせる（本番検査が落ちたとき、ADR が本当に重複しているのか判定器が壊れているのかを切り分けられるようにするため）。
 - **不変**: ADR の採番方式、CI ジョブ ID `adr`（ruleset #461 の必須チェックなので改名しない）。ADR 本文は 71 本中 **70 本がバイト同一**で移動した。唯一の例外は `0062-workout-cyokyo-feature-rejected.md` で、本文のコードブロック内に自ディレクトリの絶対パス表記（`docs/adr/0061`）があったため 1 行だけ機械置換の対象になっている。「ADR は改変しない」規約に対する意図的な例外——旧パスのまま残すとリンクではないにせよ存在しないディレクトリを指し続けるため、パス表記の正確性を優先した。
-- **運用**: 新しい ADR は `docs/original-docs/0NNN-*.md` に置く（採番は `scripts/check-adr-numbers.sh next`）。issue 由来の一次資料は 0 埋めしない。mdq で ADR だけに絞るなら `--paths "docs/original-docs/0*"`。既存の索引を持つ環境は一度だけ `rm -rf .mdq && scripts/mdq index` で作り直す（prune は roots 配下しか消さないため、旧 `docs/adr/*` のチャンクが居残る）。
-- **統合前に分岐した PR への影響**: 本統合より前に分岐した PR が `docs/adr/` に新しい ADR を足していると、パスが異なるため git は競合を報告せず**どちらの順でマージしても無言で通る**。結果 `docs/adr/` が復活し、その ADR は `check-adr-numbers.sh` の走査先（`docs/original-docs`）から見えず番号重複検出が穴あきになる。これを防ぐため、**`docs/adr/` 配下に `*.md` が置かれていることを致命扱いにするガード**を同スクリプトに入れた（該当 PR がマージされた時点で CI が落ち、対処手順を出力する）。ディレクトリの存在ではなく中身で判定するのは、git が空ディレクトリを追跡しないため——空の `docs/adr` は `.DS_Store` 等が居るローカル環境でしか現れず、そこで落としても防ぎたい事故は何も防げずに pre-push が詰まるだけになる。
+- **運用**: 新しい ADR は `docs/docs-original/0NNN-*.md` に置く（採番は `scripts/check-adr-numbers.sh next`）。issue 由来の一次資料は 0 埋めしない。mdq で ADR だけに絞るなら `--paths "docs/docs-original/0*"`。既存の索引を持つ環境は一度だけ `rm -rf .mdq && scripts/mdq index` で作り直す（prune は roots 配下しか消さないため、旧 `docs/adr/*` のチャンクが居残る）。
+- **統合前に分岐した PR への影響**: 本統合より前に分岐した PR が `docs/adr/` に新しい ADR を足していると、パスが異なるため git は競合を報告せず**どちらの順でマージしても無言で通る**。結果 `docs/adr/` が復活し、その ADR は `check-adr-numbers.sh` の走査先（`docs/docs-original`）から見えず番号重複検出が穴あきになる。これを防ぐため、**`docs/adr/` 配下に `*.md` が置かれていることを致命扱いにするガード**を同スクリプトに入れた（該当 PR がマージされた時点で CI が落ち、対処手順を出力する）。ディレクトリの存在ではなく中身で判定するのは、git が空ディレクトリを追跡しないため——空の `docs/adr` は `.DS_Store` 等が居るローカル環境でしか現れず、そこで落としても防ぎたい事故は何も防げずに pre-push が詰まるだけになる。
 
 実例: #576 が `docs/adr/0072-monitor-loop-wall-clock-sleep-resilience.md` を旧パスに追加した状態で先にマージされた。本統合を rebase したところ git が `file location` conflict として検出し（「rename されたディレクトリ内に追加された」）、0072 も本統合の移動対象に含めて解決した。あわせて `docs/knowledge/monitor-loop-sleep-resilience.md` の `sources` と `deployments/launchd/README.md` のリンクを新パスへ追従させている。**git が conflict として拾えたのは rename を含むコミットを rebase したからで、マージ順序によっては無言で通る**——ガードはその場合の保険として残す。
 - **後続（追跡: [#579](https://github.com/taito-station/paddock/issues/579)）**: stale 機械検査と D クラス体系（PR2）、プロダクト目標と REQ-ID 規約（PR3）、質問票 skill の汎用改修（PR4・dotclaude 側）。既存 ADR の REQ-ID 遡及紐付けと knowledge への全写しの実施は段階的に進める。**写しは機械検査の配線後**（順序は決定 2 参照）。
@@ -593,7 +593,7 @@ git grep -nE '^  - docs/adr/' -- docs         # frontmatter sources     → 0 �
 
 # mdq 再索引と ADR 絞り込み
 scripts/mdq index
-scripts/mdq search --q "EV 層分離" --paths "docs/original-docs/0*" --top-k 3
+scripts/mdq search --q "EV 層分離" --paths "docs/docs-original/0*" --top-k 3
 ```
 
 ### ADR 0081: `uses:` のピン留め SHA 更新だけの差分は「内容変更」と見なさない (2026-08-13) — 承認済み

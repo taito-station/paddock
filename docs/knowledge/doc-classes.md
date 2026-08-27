@@ -3,7 +3,7 @@ status: Confirmed
 kind: knowledge
 sources:
   - docs/qa/QA-sources-coverage-checks-596.md
-distilled_from_sha: "b1aea90"
+distilled_from_sha: "daf3beb"
 updated: "2026-08-13"
 ---
 
@@ -200,14 +200,14 @@ stale 検査（`sources` に挙げた一次資料への追従）の**前提**を
 ### REQ 表の出典も `sources` に載せる
 
 stale 検査が見るのは `sources` に**挙がっている**行だけなので、**`sources` から行を消せば
-stale も消える**。その穴を塞ぐため、**REQ 表の `出典` 列が名指しした `docs/original-docs/`
+stale も消える**。その穴を塞ぐため、**REQ 表の `出典` 列が名指しした `docs/docs-original/`
 配下のファイルは、その文書の `sources` にも載っている**ことを checker が error で保証する
 （ADR 0083 決定 2）。`出典` 列は「その要件の根拠」と定義された唯一の機械可読な場所なので、
 ここが指した一次資料だけは必ず watch 対象に入る。
 
 - **基準パスはリポジトリルート相対に正規化してから比較する。** `出典` 列は文書からの相対
-  （`../original-docs/571-....md`）、`sources` はルート相対で、揃えないと必ず食い違う。
-- **対象は `docs/original-docs/` 配下全体**。
+  （`../docs-original/571-....md`）、`sources` はルート相対で、揃えないと必ず食い違う。
+- **対象は `docs/docs-original/` 配下全体**。
 - **対象外**: 外部 URL（GitHub issue 等。一次資料ファイルではないので `sources` に載せられない）/
   兄弟の knowledge・specifications へのリンク（蒸留元ではなく相互リンク）/ リンク切れ
   （本文リンク検査が別に報告する担当。ここで拾うと 1 本の切れリンクに 2 件の error が出るうえ、
@@ -285,13 +285,13 @@ ADR 0073 は「ADR の内容は knowledge へ全部写す。重複を許す代�
 
 `scripts/check-doc-classes.py` に検査を 2 つ足し、例外は文書側で宣言する。
 
-1. **orphan ADR 検査 [error]**（#596）。`docs/original-docs/` の **0 埋め 4 桁の ADR**（判定の
+1. **orphan ADR 検査 [error]**（#596）。`docs/docs-original/` の **0 埋め 4 桁の ADR**（判定の
    述語は決定 4）を列挙し、
    全 knowledge / specifications の `sources` の和集合に含まれないものを error にする。
    issue 由来の一次資料（`382-...` のように 0 埋めしない番号）は蒸留先を持つとは限らないので対象外。
 
 2. **REQ 出典 ⊆ sources 検査 [error]**（#597）。REQ 表の `出典` セルが名指しした
-   **`docs/original-docs/` 配下のファイル**が、その文書の frontmatter の `sources` に無ければ error。
+   **`docs/docs-original/` 配下のファイル**が、その文書の frontmatter の `sources` に無ければ error。
    GitHub issue の絶対 URL など**リポジトリ外の参照は対象外**（一次資料ファイルではないので
    `sources` に載せられない）。knowledge / specifications 同士の相互参照も対象外
    （蒸留元ではなく相互リンクなので、`sources` に載せる筋合いが無い）。
@@ -350,7 +350,7 @@ REQ `出典` に載っていなければ検査 11 も鳴らない。**塞げた�
 「REQ が根拠として名指しした出典」だけ**で、中間——本文が根拠にしているが REQ 表の外にある参照——は
 人手の規律に残る。
 
-**検査 11 と 12 でスコープが非対称**なのも意図的。11 は `docs/original-docs/` 配下**全体**
+**検査 11 と 12 でスコープが非対称**なのも意図的。11 は `docs/docs-original/` 配下**全体**
 （issue 由来の一次資料も蒸留元なので）、12 は **0 埋め 4 桁 ADR だけ**（issue 由来の一次資料は
 調査所見の置き場で、蒸留先を持つとは限らない）。この結果、導入時点で非 ADR 一次資料 1 本
 （`601-axis-flip-in-predict-watch.md`）と `docs/qa/` の 2 本（`QA-axis-lock-601.md` /

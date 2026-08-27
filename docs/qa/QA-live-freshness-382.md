@@ -1,6 +1,6 @@
 # QA: #382 ライブ鮮度判定のサーバ時刻較正
 
-> 質問票+回答（[docs/qa/README.md](README.md)）。一次資料は [docs/original-docs/382-live-server-now.md](../original-docs/382-live-server-now.md)。
+> 質問票+回答（[docs/qa/README.md](README.md)）。一次資料は [docs/docs-original/382-live-server-now.md](../docs-original/382-live-server-now.md)。
 > 回答済みの本票は [docs/knowledge/live-freshness-calibration.md](../knowledge/live-freshness-calibration.md) に蒸留した。
 
 ## Q1: 経過時間の較正モデルは

@@ -1,6 +1,6 @@
 # QA — 監視プロセスのスリープ耐性（#568）
 
-一次資料: [docs/original-docs/568-monitor-sleep-gap.md](../original-docs/568-monitor-sleep-gap.md)
+一次資料: [docs/docs-original/568-monitor-sleep-gap.md](../docs-original/568-monitor-sleep-gap.md)
 
 ## Q1: 監視が止まったのは「タイマーが飛んだ」のか「ループが終わった」のか
 
@@ -46,7 +46,7 @@
 
 ## Q5: 修正が実機のスリープを跨げることをどう証明したか
 
-- 観測/根拠: [一次資料 §3](../original-docs/568-monitor-sleep-gap.md) の 2026-08-04 実測ログ。
+- 観測/根拠: [一次資料 §3](../docs-original/568-monitor-sleep-gap.md) の 2026-08-04 実測ログ。
   本番と同じ `run_monitor_loop` を DB / netkeiba 非依存の fake Sweeper で 1 分間隔に回し、
   途中で `pmset sleepnow`。
 - 回答: **確定**。15:49 就寝 → 16:20 復帰で
@@ -150,7 +150,7 @@
 
 ## Q14: 一次資料に「その後の実装変更」の注記を書いてよいか
 
-- 観測/根拠: 3 巡目レビューで 2 名が指摘。`docs/original-docs/568-monitor-sleep-gap.md` は冒頭で
+- 観測/根拠: 3 巡目レビューで 2 名が指摘。`docs/docs-original/568-monitor-sleep-gap.md` は冒頭で
   「**書き換えない**」と宣言する RO 一次資料なのに、末尾にレビュー後の実装差分を説明する注記を足していた。
 - 回答: **確定。書かない**。一次資料は観測ログのみに保ち、解釈・訂正・その後の変更は qa / knowledge
   の責務（CLAUDE.md の 3 層規約）。注記は本ファイル（Q8 / Q9）へ移した。一次資料に残る
@@ -158,7 +158,7 @@
   現行実装では前者が `⚠ 前回スイープから N 分空きました`、後者は出力されない（判定がループ先頭のため）。
   同じログの `── アイドルスリープ抑止を確保しました（caffeinate -i -w 10419）` も出力されない
   （抑止の確保を日付判定の**後**へ移したため、過去日指定では確保に到達しない）。
-- 反映先: docs/original-docs/568-monitor-sleep-gap.md（注記を除去）
+- 反映先: docs/docs-original/568-monitor-sleep-gap.md（注記を除去）
 
 ## Q15: スリープ抑止と JST 日付判定は骨格に持つべきか
 

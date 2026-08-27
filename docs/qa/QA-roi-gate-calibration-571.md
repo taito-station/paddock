@@ -1,6 +1,6 @@
 # QA — ROI ゲート較正の測定（#571 / #249 統合）
 
-一次資料: [docs/original-docs/571-roi-gate-calibration.md](../original-docs/571-roi-gate-calibration.md)
+一次資料: [docs/docs-original/571-roi-gate-calibration.md](../docs-original/571-roi-gate-calibration.md)
 
 ## Q1: 測定の母集団をどこまで広げるか
 

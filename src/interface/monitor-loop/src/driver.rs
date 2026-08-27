@@ -14,7 +14,7 @@ type Clock = fn() -> DateTime<Local>;
 /// wall-clock 期限を待つときの刻み幅。単発の長い sleep はホストのスリープを跨げないため、この
 /// 間隔で現在時刻と期限を比べ直す（#568）。
 ///
-/// **5 秒に置く根拠は 8/1 の実事象**（`docs/original-docs/568-monitor-sleep-gap.md`）。`tokio::time::sleep`
+/// **5 秒に置く根拠は 8/1 の実事象**（`docs/docs-original/568-monitor-sleep-gap.md`）。`tokio::time::sleep`
 /// は単調時計基準で、ホストのスリープ中は進まない＝ティックは「起きている時間」でしか消化されない。
 /// あの日の Standby は **7 秒の DarkWake が 4 回（累計 28 秒）** だったので、30 秒刻みでは 1 ティックも
 /// 満了せず再スイープに到達しない。5 秒なら DarkWake 1 回ごとに満了し、期限超過を検知できる。

@@ -32,7 +32,7 @@ from . import indexer, search as searcher, store
 from . import usage_log as _usage_log
 
 # Generic minimal defaults. Repositories with richer documentation layouts
-# (e.g. ``knowledge/``, ``qa/``, ``original-docs/``) should declare their
+# (e.g. ``knowledge/``, ``qa/``, ``docs-original/``) should declare their
 # roots via ``mdq.toml`` or ``.mdq/config.toml``; see ``mdq.config``.
 # Missing directories are silently skipped by the indexer, so listing
 # non-existent folders is safe.

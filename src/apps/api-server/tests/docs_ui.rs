@@ -2,7 +2,7 @@
 //!
 //! `tests/openapi.rs` と `tests/openapi_route_parity.rs` が見ているのは**仕様の生成側**で、
 //! `scripts/check-vendored-swagger.sh` が見ているのは **`vendored` feature の在否**だけ。
-//! ADR 0082（`docs/original-docs/0082-swagger-ui-vendored.md`）で Swagger UI を
+//! ADR 0082（`docs/docs-original/0082-swagger-ui-vendored.md`）で Swagger UI を
 //! `utoipa-swagger-ui-vendored` の埋め込み資産へ載せ替えたので、ここが**配信側の唯一の検査**になる。
 //!
 //! **何を捕まえるか**: 資産そのものの取り込み失敗（zip の展開失敗）は上流の build script が panic して

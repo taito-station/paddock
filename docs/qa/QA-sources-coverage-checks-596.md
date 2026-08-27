@@ -1,6 +1,6 @@
 # QA — `sources` の網羅性検査（#596 / #597）
 
-一次資料: [docs/original-docs/0083-sources-coverage-checks.md](../original-docs/0083-sources-coverage-checks.md)
+一次資料: [docs/docs-original/0083-sources-coverage-checks.md](../docs-original/0083-sources-coverage-checks.md)
 
 親 issue: [#579](https://github.com/taito-station/paddock/issues/579)（転記しない・ADR 0074）。
 本文は `gh issue view 596` / `gh issue view 597` で取得する。
@@ -15,7 +15,7 @@
   | ADR の被参照（どこかの `sources` にあるか） | ADR 80 本 | **1 本** — `0074-no-issue-body-transcription.md` |
   | REQ 表 `出典` ⊆ 同文書の `sources` | REQ 行 26 / 出典のリポ内リンク 37（ユニーク 29） | **0 件** |
 
-  出典セルのリポ内リンクは **37 本すべてが `docs/original-docs/` の 4 桁 ADR**（非 ADR は 0 本）。
+  出典セルのリポ内リンクは **37 本すべてが `docs/docs-original/` の 4 桁 ADR**（非 ADR は 0 本）。
   外部 URL は 1 本（REQ-D22-008 の GitHub issue）。
 - 回答: **確定。`sources` を補う作業は発生しない。** 唯一の違反は issue が事前に予告していた
   ADR 0074 で、これは例外として扱うべきもの。両検査とも導入コストを払わずに error 化できる。
@@ -34,7 +34,7 @@
 ## Q2: 例外表のパス形式は割当索引に合わせるか、`sources` に合わせるか
 
 - 観測/根拠: 割当索引は `docs/` を剥がした形式（`knowledge/glossary.md`）、`sources` は
-  リポジトリルート相対（`docs/original-docs/0073-....md`）。#597 の issue も
+  リポジトリルート相対（`docs/docs-original/0073-....md`）。#597 の issue も
   「唯一の罠は基準パスの違い」と指摘している。
 - 回答: **確定。`sources` と同一形式（ルート相対）。** 例外表の比較相手は `sources` の和集合なので、
   正規化を 1 段挟むほど「どちらの形式か」の事故が増える。比較相手に合わせるのが最も読み違えにくい。
@@ -54,12 +54,12 @@
   数えない（CI では使わない）。
 - 反映先: ADR 0083 決定 1・2 / `scripts/check-doc-classes.py`
 
-## Q4: #597 の突合対象を「ADR」に限るか、`docs/original-docs/` 配下に広げるか
+## Q4: #597 の突合対象を「ADR」に限るか、`docs/docs-original/` 配下に広げるか
 
 - 観測/根拠: issue #597 は「対象は ADR に限る」と書きつつ、その根拠として挙げているのは
   「GitHub issue の絶対 URL は一次資料ファイルではないのでスキップ」＝**ファイル/URL の区別**。
   実測では出典リンク 37 本すべてが 4 桁 ADR なので、どちらを採っても現状の判定は変わらない。
-- 回答: **確定。`docs/original-docs/` 配下に広げる（4 桁 ADR に限定しない）。** issue の字面は
+- 回答: **確定。`docs/docs-original/` 配下に広げる（4 桁 ADR に限定しない）。** issue の字面は
   「外部 URL を弾く」意図で書かれており、`sources` が watch すべきは一次資料層そのもの。
   issue 由来の一次資料（`382-...`）を対象外にすると、そこだけ穴が残る。一方で
   knowledge / specifications 同士の相互参照は**対象外**にする——蒸留元ではなく相互リンクなので、

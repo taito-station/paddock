@@ -69,7 +69,7 @@ REGISTRY = Path("docs/knowledge/doc-classes.md")
 TARGET_DIRS = ("docs/knowledge", "docs/specifications")
 
 # 一次資料層。`sources` が watch すべき蒸留元はここに限る（ADR 0083）。
-ORIGINAL_DOCS = "docs/original-docs"
+ORIGINAL_DOCS = "docs/docs-original"
 
 # 走査から外すファイル。
 #   README.md    : 規約そのもの。frontmatter のテンプレート例（0NNN-....md 等の
@@ -747,7 +747,7 @@ def repo_relative_path_error(raw: str) -> "str | None":
 
     正規形の判定は **`Path(...).as_posix()` の語彙的正規化だけ**で行う——`os.path.normpath`
     や `Path.resolve()` を使うと `..` まで畳んでしまい、直前の「`..` を拒否する」判定が
-    静かに効かなくなる（`docs/original-docs/../../etc/hosts` が通る）。
+    静かに効かなくなる（`docs/docs-original/../../etc/hosts` が通る）。
     """
     if raw.startswith("/") or ".." in Path(raw).parts:
         # 絶対パスや .. を許すと Path(root) / "/etc/hosts" が root を捨てて外を指し、

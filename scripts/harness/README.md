@@ -34,7 +34,7 @@ scripts/harness/.venv/bin/python scripts/harness/train_gbm.py scripts/harness/da
 **結果（OOS 3277R・棄却）**: 線形 PL・非線形 GBM のいずれも α=0.2 baseline / 市場を out-of-sample で
 上回らず、市場を入れると学習モデルは市場をほぼ再現し fundamental の寄与が崩壊した（市場が過去走
 fundamental を包含）。`raw_score` の学習モデル置換は見送り。詳細は
-[`docs/original-docs/0053-learned-fundamental-model-rejected.md`](../../docs/original-docs/0053-learned-fundamental-model-rejected.md)。
+[`docs/docs-original/0053-learned-fundamental-model-rejected.md`](../../docs/docs-original/0053-learned-fundamental-model-rejected.md)。
 `.venv` / `data/` は `.gitignore` 対象（再生成可能）。
 
 ## 忠実性サニティ（最重要・#309 Phase B の前提ゲート）

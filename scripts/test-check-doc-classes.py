@@ -108,8 +108,8 @@ def new_repo() -> Path:
     (repo / ".gitattributes").write_text("* -text\n", encoding="utf-8")
     (repo / "docs/knowledge").mkdir(parents=True)
     (repo / "docs/specifications").mkdir(parents=True)
-    (repo / "docs/original-docs").mkdir(parents=True)
-    (repo / "docs/original-docs/0001-first.md").write_text(
+    (repo / "docs/docs-original").mkdir(parents=True)
+    (repo / "docs/docs-original/0001-first.md").write_text(
         "# 0001. 最初の決定\n\n## ステータス\n\n承認済み。\n\n## 決定\n\nこうする。\n",
         encoding="utf-8",
     )
@@ -132,7 +132,7 @@ def write_registry(
     """
     rows = docs if docs is not None else [("knowledge/a.md", ["D19"])]
     index = "\n".join(f"| {rel} | [{', '.join(classes)}] |" for rel, classes in rows)
-    src_lines = "\n".join(f"  - {s}" for s in (sources or ["docs/original-docs/0001-first.md"]))
+    src_lines = "\n".join(f"  - {s}" for s in (sources or ["docs/docs-original/0001-first.md"]))
     (repo / "docs/knowledge/doc-classes.md").write_text(
         REGISTRY_TEMPLATE.format(
             sha=sha, d08=d08, d19=d19, d22=d22, index=index, sources=src_lines
@@ -163,11 +163,11 @@ def check(repo: Path, *args: str) -> "tuple[int, str]":
 def baseline(repo: Path) -> str:
     """1 文書 + レジストリだけの、error 0 で通る状態を作って SHA を返す。"""
     write_registry(repo, "HEAD")
-    write_doc(repo, "docs/knowledge/a.md", ["D19"], ["docs/original-docs/0001-first.md"], "HEAD")
+    write_doc(repo, "docs/knowledge/a.md", ["D19"], ["docs/docs-original/0001-first.md"], "HEAD")
     sha = commit_all(repo, "baseline")
     # frontmatter の sha を実 SHA へ差し替えて確定させる。
     write_registry(repo, sha)
-    write_doc(repo, "docs/knowledge/a.md", ["D19"], ["docs/original-docs/0001-first.md"], sha)
+    write_doc(repo, "docs/knowledge/a.md", ["D19"], ["docs/docs-original/0001-first.md"], sha)
     return commit_all(repo, "pin sha")
 
 
@@ -186,7 +186,7 @@ def test_undefined_class_is_error() -> None:
     repo = new_repo()
     try:
         sha = baseline(repo)
-        write_doc(repo, "docs/knowledge/a.md", ["D99"], ["docs/original-docs/0001-first.md"], sha)
+        write_doc(repo, "docs/knowledge/a.md", ["D99"], ["docs/docs-original/0001-first.md"], sha)
         write_registry(repo, sha, d19=0, docs=[("knowledge/a.md", ["D99"])])
         code, out = check(repo)
         assert code == 1, out
@@ -199,7 +199,7 @@ def test_na_class_is_error() -> None:
     repo = new_repo()
     try:
         sha = baseline(repo)
-        write_doc(repo, "docs/knowledge/a.md", ["D12"], ["docs/original-docs/0001-first.md"], sha)
+        write_doc(repo, "docs/knowledge/a.md", ["D12"], ["docs/docs-original/0001-first.md"], sha)
         write_registry(repo, sha, d19=0, docs=[("knowledge/a.md", ["D12"])])
         code, out = check(repo)
         assert code == 1, out
@@ -212,7 +212,7 @@ def test_tags_mismatch_is_error() -> None:
     repo = new_repo()
     try:
         sha = baseline(repo)
-        write_doc(repo, "docs/knowledge/a.md", ["D19"], ["docs/original-docs/0001-first.md"],
+        write_doc(repo, "docs/knowledge/a.md", ["D19"], ["docs/docs-original/0001-first.md"],
                   sha, tags=["D22"])
         code, out = check(repo)
         assert code == 1, out
@@ -228,7 +228,7 @@ def test_tags_order_matters() -> None:
         sha = baseline(repo)
         write_registry(repo, sha, d19=1, d22=1, docs=[("knowledge/a.md", ["D19", "D22"])])
         write_doc(repo, "docs/knowledge/a.md", ["D19", "D22"],
-                  ["docs/original-docs/0001-first.md"], sha, tags=["D22", "D19"])
+                  ["docs/docs-original/0001-first.md"], sha, tags=["D22", "D19"])
         code, out = check(repo)
         assert code == 1, out
         assert "tags が doc_class と一致しない" in out, out
@@ -240,7 +240,7 @@ def test_missing_source_is_error() -> None:
     repo = new_repo()
     try:
         sha = baseline(repo)
-        write_doc(repo, "docs/knowledge/a.md", ["D19"], ["docs/original-docs/9999-nope.md"], sha)
+        write_doc(repo, "docs/knowledge/a.md", ["D19"], ["docs/docs-original/9999-nope.md"], sha)
         code, out = check(repo)
         assert code == 1, out
         assert "sources のパスが実在しない" in out, out
@@ -254,7 +254,7 @@ def test_missing_doc_class_is_error() -> None:
         sha = baseline(repo)
         (repo / "docs/knowledge/a.md").write_text(
             f'---\nstatus: Confirmed\nkind: knowledge\nsources:\n'
-            f'  - docs/original-docs/0001-first.md\n'
+            f'  - docs/docs-original/0001-first.md\n'
             f'distilled_from_sha: "{sha}"\nupdated: "2026-08-09"\n---\n\n# a\n',
             encoding="utf-8",
         )
@@ -296,7 +296,7 @@ def test_warn_only_exits_zero() -> None:
     repo = new_repo()
     try:
         sha = baseline(repo)
-        write_doc(repo, "docs/knowledge/a.md", ["D99"], ["docs/original-docs/0001-first.md"], sha)
+        write_doc(repo, "docs/knowledge/a.md", ["D99"], ["docs/docs-original/0001-first.md"], sha)
         code, out = check(repo, "--warn-only")
         assert code == 0, out
         assert "未定義のクラス D99" in out, out
@@ -314,7 +314,7 @@ def test_stale_source_is_error() -> None:
     repo = new_repo()
     try:
         baseline(repo)
-        p = repo / "docs/original-docs/0001-first.md"
+        p = repo / "docs/docs-original/0001-first.md"
         p.write_text(p.read_text(encoding="utf-8") + "\n追記。\n", encoding="utf-8")
         commit_all(repo, "source を実質更新")
         code, out = check(repo)
@@ -329,7 +329,7 @@ def test_stale_is_suppressed_by_warn_only() -> None:
     repo = new_repo()
     try:
         baseline(repo)
-        p = repo / "docs/original-docs/0001-first.md"
+        p = repo / "docs/docs-original/0001-first.md"
         p.write_text(p.read_text(encoding="utf-8") + "\n追記。\n", encoding="utf-8")
         commit_all(repo, "source を実質更新")
         code, out = check(repo, "--warn-only")
@@ -349,9 +349,9 @@ def test_untracked_source_is_warning_not_silent() -> None:
     try:
         sha = baseline(repo)
         # コミットしない source を sources に足す（git log が空 → last_content_change が None）
-        (repo / "docs/original-docs/9999-untracked.md").write_text("# 未コミット\n", encoding="utf-8")
+        (repo / "docs/docs-original/9999-untracked.md").write_text("# 未コミット\n", encoding="utf-8")
         write_doc(repo, "docs/knowledge/a.md", ["D19"],
-                  ["docs/original-docs/0001-first.md", "docs/original-docs/9999-untracked.md"], sha)
+                  ["docs/docs-original/0001-first.md", "docs/docs-original/9999-untracked.md"], sha)
         code, out = check(repo)
         assert code == 0, f"判定不能は error にしない: {out}"
         assert "履歴が無く" in out, out
@@ -369,7 +369,7 @@ def test_shallow_clone_downgrades_unresolvable_sha_to_warning() -> None:
     try:
         baseline(repo)
         # 追加コミットを重ねてから深さ 1 で clone すると、pin した sha が clone 側に存在しない
-        p = repo / "docs/original-docs/0001-first.md"
+        p = repo / "docs/docs-original/0001-first.md"
         p.write_text(p.read_text(encoding="utf-8") + "\n追記。\n", encoding="utf-8")
         commit_all(repo, "2 つ目のコミット")
         dest = shallow / "clone"
@@ -413,7 +413,7 @@ def test_rename_only_is_not_stale() -> None:
     repo = new_repo()
     try:
         baseline(repo)
-        run_git(repo, "mv", "docs/original-docs/0001-first.md", "docs/original-docs/0001-moved.md")
+        run_git(repo, "mv", "docs/docs-original/0001-first.md", "docs/docs-original/0001-moved.md")
         commit_all(repo, "パス移動のみ（内容不変）")
         # sources を新パスへ追従させる（distilled_from_sha は据え置き＝規約の例外 1）。
         sha_before = None
@@ -422,7 +422,7 @@ def test_rename_only_is_not_stale() -> None:
                 sha_before = line.split('"')[1]
         assert sha_before, "fixture の distilled_from_sha を読めない"
         write_doc(repo, "docs/knowledge/a.md", ["D19"],
-                  ["docs/original-docs/0001-moved.md"], sha_before)
+                  ["docs/docs-original/0001-moved.md"], sha_before)
         # レジストリ側の sources も同じファイルを指しているので併せて追従させる。
         reg = repo / "docs/knowledge/doc-classes.md"
         reg.write_text(
@@ -456,7 +456,7 @@ def test_readme_is_excluded() -> None:
         baseline(repo)
         (repo / "docs/knowledge/README.md").write_text(
             '---\nstatus: Confirmed\nkind: knowledge\nsources:\n'
-            '  - docs/original-docs/0NNN-....md\ndistilled_from_sha: "deadbee"\n'
+            '  - docs/docs-original/0NNN-....md\ndistilled_from_sha: "deadbee"\n'
             'updated: "2026-08-09"\n---\n\n# README\n',
             encoding="utf-8",
         )
@@ -495,14 +495,14 @@ def test_rename_chain_is_not_stale() -> None:
     try:
         baseline(repo)
         for old, new in [("0001-first.md", "0001-r1.md"), ("0001-r1.md", "0001-r2.md")]:
-            run_git(repo, "mv", f"docs/original-docs/{old}", f"docs/original-docs/{new}")
+            run_git(repo, "mv", f"docs/docs-original/{old}", f"docs/docs-original/{new}")
             commit_all(repo, f"パス移動のみ {old} → {new}")
         sha_before = None
         for line in (repo / "docs/knowledge/a.md").read_text(encoding="utf-8").splitlines():
             if line.startswith("distilled_from_sha:"):
                 sha_before = line.split('"')[1]
         write_doc(repo, "docs/knowledge/a.md", ["D19"],
-                  ["docs/original-docs/0001-r2.md"], sha_before)
+                  ["docs/docs-original/0001-r2.md"], sha_before)
         reg = repo / "docs/knowledge/doc-classes.md"
         reg.write_text(reg.read_text(encoding="utf-8").replace("0001-first.md", "0001-r2.md"),
                        encoding="utf-8")
@@ -525,20 +525,20 @@ def test_frontmatter_only_change_is_not_stale() -> None:
     try:
         sha = baseline(repo)
         write_doc(repo, "docs/specifications/s.md", ["D19"],
-                  ["docs/original-docs/0001-first.md"], sha)
+                  ["docs/docs-original/0001-first.md"], sha)
         write_registry(repo, sha, d19=2,
                        docs=[("knowledge/a.md", ["D19"]), ("specifications/s.md", ["D19"])])
         write_doc(repo, "docs/knowledge/a.md", ["D19"],
-                  ["docs/specifications/s.md", "docs/original-docs/0001-first.md"], sha)
+                  ["docs/specifications/s.md", "docs/docs-original/0001-first.md"], sha)
         added = commit_all(repo, "s.md を追加して a.md の source にする")
         # s.md の作成コミット自体は a.md の distill より後になるので、まず追従させる
         # （そうしないと「source が新しい」という正しい stale を拾ってしまう）。
         write_doc(repo, "docs/knowledge/a.md", ["D19"],
-                  ["docs/specifications/s.md", "docs/original-docs/0001-first.md"], added)
+                  ["docs/specifications/s.md", "docs/docs-original/0001-first.md"], added)
         commit_all(repo, "a.md を s.md の追加時点まで追従")
         # s.md の frontmatter だけを変える（doc_class 追加相当）。本文は不変。
         write_doc(repo, "docs/specifications/s.md", ["D19", "D22"],
-                  ["docs/original-docs/0001-first.md"], sha)
+                  ["docs/docs-original/0001-first.md"], sha)
         write_registry(repo, sha, d19=2, d22=1,
                        docs=[("knowledge/a.md", ["D19"]),
                              ("specifications/s.md", ["D19", "D22"])])
@@ -561,7 +561,7 @@ def test_invalid_utf8_body_change_with_metadata_is_stale() -> None:
     repo = new_repo()
     try:
         baseline(repo)
-        src = repo / "docs/original-docs/0001-first.md"
+        src = repo / "docs/docs-original/0001-first.md"
         body = src.read_text(encoding="utf-8")
         src.write_bytes(
             ("---\nstatus: Confirmed\ntags: [D19]\n---\n\n" + body).encode("utf-8")
@@ -569,7 +569,7 @@ def test_invalid_utf8_body_change_with_metadata_is_stale() -> None:
         )
         sha = commit_all(repo, "source に frontmatter と不正バイトを置く")
         write_registry(repo, sha)
-        write_doc(repo, "docs/knowledge/a.md", ["D19"], ["docs/original-docs/0001-first.md"], sha)
+        write_doc(repo, "docs/knowledge/a.md", ["D19"], ["docs/docs-original/0001-first.md"], sha)
         commit_all(repo, "pin sha")
         assert check(repo)[0] == 0, "前提: ここでは stale でない"
 
@@ -596,14 +596,14 @@ def test_status_change_in_source_is_stale() -> None:
     repo = new_repo()
     try:
         baseline(repo)
-        src = repo / "docs/original-docs/0001-first.md"
+        src = repo / "docs/docs-original/0001-first.md"
         body = src.read_text(encoding="utf-8")
         # source 側に frontmatter がある状態を作り、そこまでを蒸留済みとして pin する
         # （frontmatter の新規追加そのものは「本文以外の差分」ではなく追加なので内容変更になる）。
         src.write_text("---\nstatus: Confirmed\nkind: original\n---\n\n" + body, encoding="utf-8")
         sha = commit_all(repo, "source に frontmatter を付ける")
         write_registry(repo, sha)
-        write_doc(repo, "docs/knowledge/a.md", ["D19"], ["docs/original-docs/0001-first.md"], sha)
+        write_doc(repo, "docs/knowledge/a.md", ["D19"], ["docs/docs-original/0001-first.md"], sha)
         commit_all(repo, "pin sha")
         assert check(repo)[0] == 0, "前提: ここでは stale でない"
 
@@ -624,7 +624,7 @@ def test_body_change_is_stale() -> None:
     repo = new_repo()
     try:
         baseline(repo)
-        p = repo / "docs/original-docs/0001-first.md"
+        p = repo / "docs/docs-original/0001-first.md"
         p.write_text(p.read_text(encoding="utf-8") + "\n本文の追記。\n", encoding="utf-8")
         commit_all(repo, "本文を変更")
         code, out = check(repo)
@@ -681,7 +681,7 @@ def write_workflow(repo: Path, toolchain: str = PIN_TOOLCHAIN_OLD, cache: str = 
 def workflow_baseline(repo: Path) -> None:
     """a.md が sources にワークフローを持ち、error 0 で通る状態を作る。"""
     sha = baseline(repo)
-    sources = [WORKFLOW_REL, "docs/original-docs/0001-first.md"]
+    sources = [WORKFLOW_REL, "docs/docs-original/0001-first.md"]
     write_workflow(repo)
     write_doc(repo, "docs/knowledge/a.md", ["D19"], sources, sha)
     added = commit_all(repo, "ワークフローを a.md の source にする")
@@ -764,7 +764,7 @@ def test_pin_note_without_space_is_stale() -> None:
     try:
         sha = baseline(repo)
         rel = WORKFLOW_REL
-        sources = [rel, "docs/original-docs/0001-first.md"]
+        sources = [rel, "docs/docs-original/0001-first.md"]
         (repo / rel).parent.mkdir(parents=True, exist_ok=True)
         (repo / rel).write_text(
             f"name: CI\non: [push]\njobs:\n  a:\n    steps:\n"
@@ -806,7 +806,7 @@ def test_invalid_utf8_change_with_pin_bump_is_stale() -> None:
         path.write_bytes(base.replace(PIN_COMMENT.encode("utf-8"), b"\xff\xfe note"))
         pinned = commit_all(repo, "非 pin 行に不正バイトを置く")
         write_doc(repo, "docs/knowledge/a.md", ["D19"],
-                  [WORKFLOW_REL, "docs/original-docs/0001-first.md"], pinned)
+                  [WORKFLOW_REL, "docs/docs-original/0001-first.md"], pinned)
         commit_all(repo, "追従")
         assert check(repo)[0] == 0, "前提: ここでは stale でない"
 
@@ -832,7 +832,7 @@ def test_invalid_utf8_in_owner_repo_is_stale() -> None:
     try:
         sha = baseline(repo)
         rel = WORKFLOW_REL
-        sources = [rel, "docs/original-docs/0001-first.md"]
+        sources = [rel, "docs/docs-original/0001-first.md"]
         (repo / rel).parent.mkdir(parents=True, exist_ok=True)
         head = b"name: CI\non: [push]\njobs:\n  a:\n    steps:\n      - uses: a"
         (repo / rel).write_bytes(head + b"\xff/b@" + PIN_CHECKOUT.encode() + b"\n")
@@ -976,12 +976,12 @@ def test_pin_form_in_markdown_source_is_stale() -> None:
     repo = new_repo()
     try:
         baseline(repo)
-        src = repo / "docs/original-docs/0001-first.md"
+        src = repo / "docs/docs-original/0001-first.md"
         fence = f"\n```yaml\n      - uses: actions/checkout@{PIN_CHECKOUT}\n```\n"
         src.write_text(src.read_text(encoding="utf-8") + fence, encoding="utf-8")
         sha = commit_all(repo, "source にワークフローの見本を足す")
         write_registry(repo, sha)
-        write_doc(repo, "docs/knowledge/a.md", ["D19"], ["docs/original-docs/0001-first.md"], sha)
+        write_doc(repo, "docs/knowledge/a.md", ["D19"], ["docs/docs-original/0001-first.md"], sha)
         commit_all(repo, "pin sha")
         assert check(repo)[0] == 0, "前提: ここでは stale でない"
 
@@ -1160,7 +1160,7 @@ def test_pin_change_in_yaml_extension_workflow_is_not_stale() -> None:
     try:
         sha = baseline(repo)
         rel = ".github/workflows/audit.yaml"
-        sources = [rel, "docs/original-docs/0001-first.md"]
+        sources = [rel, "docs/docs-original/0001-first.md"]
         (repo / rel).parent.mkdir(parents=True, exist_ok=True)
         (repo / rel).write_text(
             f"name: audit\non: [push]\njobs:\n  a:\n    steps:\n"
@@ -1192,7 +1192,7 @@ def test_pin_change_in_non_workflow_yml_is_stale() -> None:
     try:
         sha = baseline(repo)
         rel = "deployments/compose.yml"
-        sources = [rel, "docs/original-docs/0001-first.md"]
+        sources = [rel, "docs/docs-original/0001-first.md"]
         (repo / rel).parent.mkdir(parents=True, exist_ok=True)
         (repo / rel).write_text(
             f"services:\n  a:\n    steps:\n      - uses: actions/checkout@{PIN_CHECKOUT}\n",
@@ -1284,7 +1284,7 @@ def test_metadata_only_commits_beyond_window_do_not_hide_stale() -> None:
     try:
         m = load_checker(repo)
         rel = "docs/specifications/s.md"
-        write_doc(repo, rel, ["D19"], ["docs/original-docs/0001-first.md"], "HEAD")
+        write_doc(repo, rel, ["D19"], ["docs/docs-original/0001-first.md"], "HEAD")
         commit_all(repo, "s.md を追加")
         p = repo / rel
         p.write_text(p.read_text(encoding="utf-8") + "\n本文の追記。\n", encoding="utf-8")
@@ -1509,7 +1509,7 @@ def test_runs_from_subdirectory() -> None:
     repo = new_repo()
     try:
         baseline(repo)
-        p = repo / "docs/original-docs/0001-first.md"
+        p = repo / "docs/docs-original/0001-first.md"
         p.write_text(p.read_text(encoding="utf-8") + "\n本文の追記。\n", encoding="utf-8")
         commit_all(repo, "本文を変更")
         proc = subprocess.run(
@@ -1527,7 +1527,7 @@ def test_unresolvable_sha_is_error() -> None:
     try:
         baseline(repo)
         write_doc(repo, "docs/knowledge/a.md", ["D19"],
-                  ["docs/original-docs/0001-first.md"], "deadbee")
+                  ["docs/docs-original/0001-first.md"], "deadbee")
         code, out = check(repo)
         assert code == 1, f"解決不能な sha を素通りさせている:\n{out}"
         assert "を解決できない" in out, out
@@ -1554,7 +1554,7 @@ def test_duplicate_class_is_error() -> None:
     try:
         sha = baseline(repo)
         write_doc(repo, "docs/knowledge/a.md", ["D19", "D19"],
-                  ["docs/original-docs/0001-first.md"], sha)
+                  ["docs/docs-original/0001-first.md"], sha)
         code, out = check(repo)
         assert code == 1, out
         assert "doc_class に重複がある" in out, out
@@ -1570,7 +1570,7 @@ def test_inline_comment_in_flow_list_is_accepted() -> None:
         (repo / "docs/knowledge/a.md").write_text(
             f'---\nstatus: Confirmed\nkind: knowledge\n'
             f'doc_class: [D19]   # 第 1 要素が主クラス\ntags: [D19]        # mdq 用ミラー\n'
-            f'sources:\n  - docs/original-docs/0001-first.md\n'
+            f'sources:\n  - docs/docs-original/0001-first.md\n'
             f'distilled_from_sha: "{sha}"\nupdated: "2026-08-09"\n---\n\n# a\n',
             encoding="utf-8",
         )
@@ -1649,7 +1649,7 @@ def test_req_duplicate_id_is_error() -> None:
     repo = new_repo()
     try:
         sha = baseline(repo)
-        write_doc(repo, "docs/knowledge/b.md", ["D19"], ["docs/original-docs/0001-first.md"], sha)
+        write_doc(repo, "docs/knowledge/b.md", ["D19"], ["docs/docs-original/0001-first.md"], sha)
         write_registry(repo, sha, d19=2,
                        docs=[("knowledge/a.md", ["D19"]), ("knowledge/b.md", ["D19"])])
         append_req_block(repo, "docs/knowledge/a.md", "D19", [VALID_ROW])
@@ -1796,7 +1796,7 @@ def test_req_broken_link_is_error() -> None:
         append_req_block(
             repo, "docs/knowledge/a.md", "D19",
             ["| REQ-D19-001 | 何か | `cargo test` "
-             "| [ADR 0099](../original-docs/0099-nope.md) | Confirmed |"],
+             "| [ADR 0099](../docs-original/0099-nope.md) | Confirmed |"],
         )
         code, out = check(repo)
         assert code == 1, out
@@ -1812,7 +1812,7 @@ def test_req_link_to_existing_file_passes() -> None:
         append_req_block(
             repo, "docs/knowledge/a.md", "D19",
             ["| REQ-D19-001 | 何か | `cargo test` "
-             "| [ADR 0001](../original-docs/0001-first.md) | Confirmed |"],
+             "| [ADR 0001](../docs-original/0001-first.md) | Confirmed |"],
         )
         code, out = check(repo)
         assert code == 0, out
@@ -2090,7 +2090,7 @@ def test_req_link_to_directory_is_accepted() -> None:
         baseline(repo)
         append_req_block(repo, "docs/knowledge/a.md", "D19",
                          ["| REQ-D19-001 | 何か | `cargo test` "
-                          "| [一次資料](../original-docs/) | Confirmed |"])
+                          "| [一次資料](../docs-original/) | Confirmed |"])
         code, out = check(repo)
         assert code == 0, f"ディレクトリリンクで落ちた: {out}"
     finally:
@@ -2117,7 +2117,7 @@ def test_req_link_with_title_is_checked() -> None:
         baseline(repo)
         append_req_block(repo, "docs/knowledge/a.md", "D19",
                          ['| REQ-D19-001 | 何か | `cargo test` '
-                          '| [ADR 0099](../original-docs/0099-nope.md "題") | Confirmed |'])
+                          '| [ADR 0099](../docs-original/0099-nope.md "題") | Confirmed |'])
         code, out = check(repo)
         assert code == 1, out
         assert "リンク先が実在しない" in out, out
@@ -2226,7 +2226,7 @@ def test_body_broken_link_is_error() -> None:
     repo = new_repo()
     try:
         baseline(repo)
-        append_raw(repo, "docs/knowledge/a.md", "\n[出典](../original-docs/9999-nope.md)\n")
+        append_raw(repo, "docs/knowledge/a.md", "\n[出典](../docs-original/9999-nope.md)\n")
         code, out = check(repo)
         assert code == 1, out
         assert "本文（" in out and "リンク先が実在しない" in out, out
@@ -2238,7 +2238,7 @@ def test_body_link_to_existing_file_passes() -> None:
     repo = new_repo()
     try:
         baseline(repo)
-        append_raw(repo, "docs/knowledge/a.md", "\n[出典](../original-docs/0001-first.md)\n")
+        append_raw(repo, "docs/knowledge/a.md", "\n[出典](../docs-original/0001-first.md)\n")
         code, out = check(repo)
         assert code == 0, out
     finally:
@@ -2250,7 +2250,7 @@ def test_body_link_to_directory_is_accepted() -> None:
     repo = new_repo()
     try:
         baseline(repo)
-        append_raw(repo, "docs/knowledge/a.md", "\n[一次資料](../original-docs/)\n")
+        append_raw(repo, "docs/knowledge/a.md", "\n[一次資料](../docs-original/)\n")
         code, out = check(repo)
         assert code == 0, out
     finally:
@@ -2288,7 +2288,7 @@ def test_body_link_in_code_fence_is_ignored() -> None:
         baseline(repo)
         append_raw(
             repo, "docs/knowledge/a.md",
-            "\n```md\n[見本](../original-docs/0NNN-....md)\n```\n",
+            "\n```md\n[見本](../docs-original/0NNN-....md)\n```\n",
         )
         code, out = check(repo)
         assert code == 0, out
@@ -2325,7 +2325,7 @@ def test_broken_link_in_req_table_is_reported_once() -> None:
         baseline(repo)
         append_req_block(
             repo, "docs/knowledge/a.md", "D19",
-            ["| REQ-D19-001 | 要件 | `cargo test` | [ADR](../original-docs/9999-nope.md) |"
+            ["| REQ-D19-001 | 要件 | `cargo test` | [ADR](../docs-original/9999-nope.md) |"
              " Confirmed |"],
         )
         code, out = check(repo)
@@ -2381,7 +2381,7 @@ def test_index_class_order_mismatch_is_error() -> None:
     try:
         sha = baseline(repo)
         write_doc(repo, "docs/knowledge/a.md", ["D19", "D22"],
-                  ["docs/original-docs/0001-first.md"], sha)
+                  ["docs/docs-original/0001-first.md"], sha)
         write_registry(repo, sha, d19=1, d22=1, docs=[("knowledge/a.md", ["D22", "D19"])])
         code, out = check(repo)
         assert code == 1, out
@@ -2396,7 +2396,7 @@ def test_index_swap_between_docs_is_error() -> None:
     try:
         sha = baseline(repo)
         write_doc(repo, "docs/knowledge/b.md", ["D22"],
-                  ["docs/original-docs/0001-first.md"], sha)
+                  ["docs/docs-original/0001-first.md"], sha)
         write_registry(repo, sha, d19=1, d22=1,
                        docs=[("knowledge/a.md", ["D22"]), ("knowledge/b.md", ["D19"])])
         code, out = check(repo)
@@ -2449,7 +2449,7 @@ def test_body_link_after_stray_backtick_is_still_checked() -> None:
         baseline(repo)
         append_raw(
             repo, "docs/knowledge/a.md",
-            "\n散文に ` が 1 つある。\n\n[壊れ](../original-docs/9999-nope.md)\n\n"
+            "\n散文に ` が 1 つある。\n\n[壊れ](../docs-original/9999-nope.md)\n\n"
             "そして `cargo test` を実行。\n",
         )
         code, out = check(repo)
@@ -2464,7 +2464,7 @@ def test_body_link_in_tilde_fence_is_ignored() -> None:
     try:
         baseline(repo)
         append_raw(repo, "docs/knowledge/a.md",
-                   "\n~~~md\n[見本](../original-docs/0NNN-....md)\n~~~\n")
+                   "\n~~~md\n[見本](../docs-original/0NNN-....md)\n~~~\n")
         code, out = check(repo)
         assert code == 0, out
     finally:
@@ -2477,7 +2477,7 @@ def test_body_link_in_quoted_fence_is_ignored() -> None:
     try:
         baseline(repo)
         append_raw(repo, "docs/knowledge/a.md",
-                   "\n> ```\n> [見本](../original-docs/0NNN-....md)\n> ```\n")
+                   "\n> ```\n> [見本](../docs-original/0NNN-....md)\n> ```\n")
         code, out = check(repo)
         assert code == 0, out
     finally:
@@ -2490,7 +2490,7 @@ def test_body_same_broken_link_twice_is_reported_once() -> None:
         baseline(repo)
         append_raw(
             repo, "docs/knowledge/a.md",
-            "\n[1](../original-docs/9999-nope.md) と [2](../original-docs/9999-nope.md#節)\n",
+            "\n[1](../docs-original/9999-nope.md) と [2](../docs-original/9999-nope.md#節)\n",
         )
         code, out = check(repo)
         assert code == 1, out
@@ -2527,7 +2527,7 @@ def test_body_image_link_is_checked() -> None:
 
 def _case_insensitive_fs(repo: Path) -> bool:
     """fixture を置いた FS が大文字小文字を区別しないか（macOS か Linux か）。"""
-    return (repo / "docs/original-docs/0001-FIRST.md").exists()
+    return (repo / "docs/docs-original/0001-FIRST.md").exists()
 
 
 def test_body_link_case_mismatch_is_error() -> None:
@@ -2535,7 +2535,7 @@ def test_body_link_case_mismatch_is_error() -> None:
     repo = new_repo()
     try:
         baseline(repo)
-        append_raw(repo, "docs/knowledge/a.md", "\n[大小](../original-docs/0001-FIRST.md)\n")
+        append_raw(repo, "docs/knowledge/a.md", "\n[大小](../docs-original/0001-FIRST.md)\n")
         code, out = check(repo)
         assert code == 1, out
         if _case_insensitive_fs(repo):
@@ -2604,7 +2604,7 @@ def test_index_row_for_doc_without_doc_class_says_why() -> None:
         sha = baseline(repo)
         (repo / "docs/knowledge/a.md").write_text(
             f'---\nstatus: Confirmed\nkind: knowledge\nsources:\n'
-            f'  - docs/original-docs/0001-first.md\n'
+            f'  - docs/docs-original/0001-first.md\n'
             f'distilled_from_sha: "{sha}"\nupdated: "2026-08-09"\n---\n\n# a\n',
             encoding="utf-8",
         )
@@ -2622,7 +2622,7 @@ def test_readme_body_link_is_checked() -> None:
         baseline(repo)
         (repo / "docs/knowledge/README.md").write_text(
             "# 規約\n\n```yaml\ndistilled_from_sha: \"<short-sha>\"\n```\n"
-            "\n[壊れ](../original-docs/9999-nope.md)\n",
+            "\n[壊れ](../docs-original/9999-nope.md)\n",
             encoding="utf-8",
         )
         code, out = check(repo)
@@ -2637,7 +2637,7 @@ def test_readme_template_in_fence_is_ignored() -> None:
     try:
         baseline(repo)
         (repo / "docs/knowledge/README.md").write_text(
-            "# 規約\n\n```md\n[見本](../original-docs/0NNN-....md)\n```\n",
+            "# 規約\n\n```md\n[見本](../docs-original/0NNN-....md)\n```\n",
             encoding="utf-8",
         )
         code, out = check(repo)
@@ -2658,7 +2658,7 @@ def test_body_link_line_number_matches_file() -> None:
     try:
         baseline(repo)
         append_raw(repo, "docs/knowledge/a.md",
-                   "\n埋草。\n\n[壊れ](../original-docs/9999-nope.md)\n")
+                   "\n埋草。\n\n[壊れ](../docs-original/9999-nope.md)\n")
         code, out = check(repo)
         assert code == 1, out
         lineno = _reported_line(out)
@@ -2674,7 +2674,7 @@ def test_readme_link_line_number_matches_file() -> None:
     try:
         baseline(repo)
         (repo / "docs/knowledge/README.md").write_text(
-            "# 規約\n\n埋草。\n\n[壊れ](../original-docs/9999-nope.md)\n", encoding="utf-8"
+            "# 規約\n\n埋草。\n\n[壊れ](../docs-original/9999-nope.md)\n", encoding="utf-8"
         )
         code, out = check(repo)
         assert code == 1, out
@@ -2691,7 +2691,7 @@ def test_body_link_with_label_across_lines_is_checked() -> None:
     try:
         baseline(repo)
         append_raw(repo, "docs/knowledge/a.md",
-                   "\n[長いラベルの\n続き](../original-docs/9999-nope.md)\n")
+                   "\n[長いラベルの\n続き](../docs-original/9999-nope.md)\n")
         code, out = check(repo)
         assert code == 1, out
         assert "9999-nope.md" in out, out
@@ -2722,7 +2722,7 @@ def test_line_number_is_correct_after_inline_code() -> None:
         append_raw(
             repo, "docs/knowledge/a.md",
             "\n`とても長いインラインコードの行`\n\n`もう一つ長いインラインコード`\n\n"
-            "[壊れ](../original-docs/9999-nope.md)\n",
+            "[壊れ](../docs-original/9999-nope.md)\n",
         )
         code, out = check(repo)
         assert code == 1, out
@@ -2739,7 +2739,7 @@ def test_unclosed_fence_in_readme_is_error() -> None:
     try:
         baseline(repo)
         (repo / "docs/knowledge/README.md").write_text(
-            "# 規約\n\n```md\n[見本](../original-docs/0NNN-....md)\n", encoding="utf-8"
+            "# 規約\n\n```md\n[見本](../docs-original/0NNN-....md)\n", encoding="utf-8"
         )
         code, out = check(repo)
         assert code == 1, out
@@ -2754,7 +2754,7 @@ def test_document_without_frontmatter_still_gets_link_check() -> None:
     try:
         baseline(repo)
         (repo / "docs/knowledge/b.md").write_text(
-            "# b\n\n[壊れ](../original-docs/9999-nope.md)\n", encoding="utf-8"
+            "# b\n\n[壊れ](../docs-original/9999-nope.md)\n", encoding="utf-8"
         )
         code, out = check(repo)
         assert code == 1, out
@@ -2776,7 +2776,7 @@ def test_req_cell_link_is_backstop_for_body_scan() -> None:
         baseline(repo)
         append_req_block(
             repo, "docs/knowledge/a.md", "D19",
-            ["| REQ-D19-001 | 要件 | `cmd | [ADR](../original-docs/9999-nope.md)` | Confirmed |"],
+            ["| REQ-D19-001 | 要件 | `cmd | [ADR](../docs-original/9999-nope.md)` | Confirmed |"],
         )
         code, out = check(repo)
         assert code == 1, out
@@ -2787,13 +2787,13 @@ def test_req_cell_link_is_backstop_for_body_scan() -> None:
 
 # --- 検査 11: REQ 表の出典 ⊆ frontmatter の sources（#597 / ADR 0083） ---
 
-FIRST_ADR = "docs/original-docs/0001-first.md"
-SECOND_ADR = "docs/original-docs/0002-second.md"
+FIRST_ADR = "docs/docs-original/0001-first.md"
+SECOND_ADR = "docs/docs-original/0002-second.md"
 
 
 def add_adr(repo: Path, name: str) -> str:
     """一次資料を 1 本足す。返り値はリポジトリ相対パス（sources に書く形式）。"""
-    rel = f"docs/original-docs/{name}"
+    rel = f"docs/docs-original/{name}"
     (repo / rel).write_text(
         f"# {name.split('-')[0]}. テスト用の決定\n\n## 決定\n\nこうする。\n", encoding="utf-8"
     )
@@ -2832,7 +2832,7 @@ def test_req_origin_in_sources_passes() -> None:
         add_adr(repo, "0002-second.md")
         repin(repo, [("docs/knowledge/a.md", ["D19"], [FIRST_ADR, SECOND_ADR])])
         append_req_block(repo, "docs/knowledge/a.md", "D19",
-                         [origin_row("[ADR 0002](../original-docs/0002-second.md)")])
+                         [origin_row("[ADR 0002](../docs-original/0002-second.md)")])
         code, out = check(repo)
         assert code == 0, f"出典が sources にあるのに落ちた: {out}"
     finally:
@@ -2856,7 +2856,7 @@ def test_req_origin_missing_from_sources_is_error() -> None:
             docs=[("knowledge/a.md", ["D19"]), ("knowledge/b.md", ["D19"])],
         )
         append_req_block(repo, "docs/knowledge/a.md", "D19",
-                         [origin_row("[ADR 0002](../original-docs/0002-second.md)")])
+                         [origin_row("[ADR 0002](../docs-original/0002-second.md)")])
         code, out = check(repo)
         assert code == 1, out
         assert "sources に無い" in out and SECOND_ADR in out, out
@@ -2880,7 +2880,7 @@ def test_req_origin_external_url_is_skipped() -> None:
 
 
 def test_req_origin_issue_derived_primary_doc_is_checked() -> None:
-    """検査 11 の対象は `docs/original-docs/` 配下**全体**（4 桁 ADR に限らない）。
+    """検査 11 の対象は `docs/docs-original/` 配下**全体**（4 桁 ADR に限らない）。
 
     QA Q4 の意図的なスコープ判断を pin する。実装が ADR 限定へ退行しても、
     このテストが無いと 4 桁 ADR しか使わない他の 3 本は全部通ってしまう。
@@ -2900,7 +2900,7 @@ def test_req_origin_issue_derived_primary_doc_is_checked() -> None:
             docs=[("knowledge/a.md", ["D19"]), ("knowledge/b.md", ["D19"])],
         )
         append_req_block(repo, "docs/knowledge/a.md", "D19",
-                         [origin_row("[#382](../original-docs/382-live-server-now.md)")])
+                         [origin_row("[#382](../docs-original/382-live-server-now.md)")])
         code, out = check(repo)
         assert code == 1, out
         assert "sources に無い" in out and primary in out, out
@@ -2944,7 +2944,7 @@ def test_req_origin_same_missing_source_reported_once() -> None:
             d19=2,
             docs=[("knowledge/a.md", ["D19"]), ("knowledge/b.md", ["D19"])],
         )
-        link = "[ADR 0002](../original-docs/0002-second.md)"
+        link = "[ADR 0002](../docs-original/0002-second.md)"
         append_req_block(repo, "docs/knowledge/a.md", "D19",
                          [origin_row(link, "REQ-D19-001"), origin_row(link, "REQ-D19-002")])
         code, out = check(repo)
@@ -2973,7 +2973,7 @@ def test_req_verification_link_is_not_checked_against_sources() -> None:
         append_req_block(
             repo, "docs/knowledge/a.md", "D19",
             ["| REQ-D19-001 | 何かを満たす | "
-             "[ADR 0002](../original-docs/0002-second.md) の手順で再実行 | ADR 0001 | Confirmed |"],
+             "[ADR 0002](../docs-original/0002-second.md) の手順で再実行 | ADR 0001 | Confirmed |"],
         )
         code, out = check(repo)
         assert code == 0, f"検証手段の列を sources と突合した: {out}"
@@ -3009,10 +3009,10 @@ def test_source_case_mismatch_is_error() -> None:
     try:
         sha = baseline(repo)
         write_doc(repo, "docs/knowledge/a.md", ["D19"],
-                  ["docs/original-docs/0001-FIRST.md"], sha)
+                  ["docs/docs-original/0001-FIRST.md"], sha)
         code, out = check(repo)
         assert code == 1, out
-        if (repo / "docs/original-docs/0001-FIRST.md").exists():
+        if (repo / "docs/docs-original/0001-FIRST.md").exists():
             # 大文字小文字を区別しない FS（macOS）。区別する FS では実在しない側に落ちる。
             assert "sources の大文字小文字が実ファイルと違う" in out, out
         else:
@@ -3169,8 +3169,8 @@ def test_rename_source_commit_is_skipped_not_attributed() -> None:
     try:
         pre = baseline(repo)  # c1 の 1 つ前。ここに distill を固定して「答えが c1」を正で見る
         base = run_git(repo, "rev-parse", "--abbrev-ref", "HEAD")
-        src = "docs/original-docs/0005-with-frontmatter.md"
-        moved = "docs/original-docs/0009-moved.md"
+        src = "docs/docs-original/0005-with-frontmatter.md"
+        moved = "docs/docs-original/0009-moved.md"
 
         def write_src(updated: str) -> None:
             (repo / src).parent.mkdir(parents=True, exist_ok=True)
@@ -3234,7 +3234,7 @@ def test_rename_inside_merge_is_treated_as_content_change() -> None:
     repo = new_repo()
     try:
         baseline(repo)
-        renamed = "docs/original-docs/0003-renamed.md"
+        renamed = "docs/docs-original/0003-renamed.md"
         base = run_git(repo, "rev-parse", "--abbrev-ref", "HEAD")
         run_git(repo, "checkout", "-q", "-b", "side")
         (repo / "unrelated.md").write_text("s\n", encoding="utf-8")

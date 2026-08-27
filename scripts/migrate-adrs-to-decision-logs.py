@@ -17,11 +17,11 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-ORIGINAL_DOCS = REPO_ROOT / "docs" / "original-docs"
+ORIGINAL_DOCS = REPO_ROOT / "docs" / "docs-original"
 TARGET_DIRS = [REPO_ROOT / "docs" / "knowledge", REPO_ROOT / "docs" / "specifications"]
 
 ADR_FILENAME_RE = re.compile(r"^(0\d{3})-.*\.md$")
-ADR_SOURCE_RE = re.compile(r"^docs/original-docs/0\d{3}-.*\.md$")
+ADR_SOURCE_RE = re.compile(r"^docs/docs-original/0\d{3}-.*\.md$")
 
 # 横断索引であって「話題の家」ではないので、複数参照時の第一候補から外す
 CROSS_CUTTING = {"docs/knowledge/glossary.md", "docs/knowledge/product-goals.md"}
@@ -44,7 +44,7 @@ DECISION_LOG_HEADER = (
 # `# 0055. タイトル` と `# ADR 0001: タイトル` の 2 系統が実在する
 ADR_TITLE_RE = re.compile(r"^#\s+(?:ADR\s+)?(0\d{3})\s*[.:]\s*(.+?)\s*$")
 
-ADR_LINK_RE = re.compile(r"\[([^\]]*)\]\(([^)]*original-docs/0[^)]*)\)")
+ADR_LINK_RE = re.compile(r"\[([^\]]*)\]\(([^)]*docs-original/0[^)]*)\)")
 
 FENCE_RE = re.compile(r"^\s*(```|~~~)")
 
@@ -192,7 +192,7 @@ def pick_cross_cutting(path: Path) -> str:
     )
 
 
-ADR_HISTORY_PATH_RE = re.compile(r"^docs/(?:adr|original-docs)/(0\d{3})-.*\.md$")
+ADR_HISTORY_PATH_RE = re.compile(r"^docs/(?:adr|original-docs|docs-original)/(0\d{3})-.*\.md$")
 
 
 def _git(*args: str) -> str:
@@ -204,8 +204,9 @@ def _git(*args: str) -> str:
 def git_dates(adrs: dict[str, Path]) -> dict[str, str]:
     """ADR 番号 → 最初に履歴へ現れた日 (YYYY-MM-DD)。
 
-    素朴な `--diff-filter=A` は使えない。ADR 0073 で `docs/adr/` → `docs/original-docs/` へ
-    一括 rename しており、追跡しないと全 ADR が rename 日 (2026-08-09) に潰れる。さらに
+    素朴な `--diff-filter=A` は使えない。ADR 0073 で `docs/adr/` → `docs/original-docs/` へ、
+    さらに `docs/original-docs/` → `docs/docs-original/` へ 2 段階 rename しており、
+    追跡しないと全 ADR が rename 日に潰れる。さらに
     採番のやり直しで slug が変わったものがあるので、パスでなく **ADR 番号**で履歴を舐める。
     それでも拾えない数本（merge commit 経由で tree に現れたもの）はパス指定で最古を取る。
     """
