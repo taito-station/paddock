@@ -8,7 +8,8 @@ use crate::error::Result;
 
 /// `find_recent_runs` の騎手版（#221）。`JockeyFormRun` は着順・人気のみ運ぶ。
 /// pdf 確定成績(`results`)と netkeiba 近走(`horse_past_runs`)を UNION し、`date < before` で
-/// バックテスト時のリークを防ぐ。同一実レース重複は `(date, venue, race_num)` 単位で pdf 優先 dedup。
+/// バックテスト時のリークを防ぐ。同一実レース重複は `(date, venue, race_num)` 単位で netkeiba 優先 dedup
+/// （pdf の着順は EdiF フォント欠落で 11% がズレている・#663）。
 #[derive(sqlx::FromRow)]
 struct JockeyFormRow {
     // results / horse_past_runs の着順・人気は bigint(INT8) カラムなので i64 で受ける。
@@ -38,7 +39,7 @@ pub async fn find_jockey_recent_runs(
                 races.date AS date, races.venue AS venue, races.race_num AS race_num,
                 results.finishing_position AS finishing_position,
                 results.popularity AS popularity,
-                0 AS src_rank,
+                1 AS src_rank,
                 results.race_id AS race_id
             FROM results
             INNER JOIN races ON races.race_id = results.race_id
@@ -48,7 +49,7 @@ pub async fn find_jockey_recent_runs(
             SELECT
                 date, venue, race_num,
                 finishing_position, popularity,
-                1 AS src_rank,
+                0 AS src_rank,
                 race_id
             FROM horse_past_runs
             -- $3=$1, $4=$2: sqlx は UNION の各アームで同一 $N を再利用できないため
@@ -119,7 +120,7 @@ pub async fn jockey_recent_runs_batch(
                 races.date AS date, races.venue AS venue, races.race_num AS race_num,
                 results.finishing_position AS finishing_position,
                 results.popularity AS popularity,
-                0 AS src_rank,
+                1 AS src_rank,
                 results.race_id AS race_id,
                 results.jockey AS jockey
             FROM results
@@ -130,7 +131,7 @@ pub async fn jockey_recent_runs_batch(
             SELECT
                 date, venue, race_num,
                 finishing_position, popularity,
-                1 AS src_rank,
+                0 AS src_rank,
                 race_id,
                 jockey
             FROM horse_past_runs
@@ -149,7 +150,7 @@ pub async fn jockey_recent_runs_batch(
                 SELECT 1 FROM unioned u2
                 WHERE u2.jockey = u.jockey
                   AND u2.date = u.date AND u2.venue = u.venue AND u2.race_num = u.race_num
-                  -- 同一 (date,venue,race_num) で pdf(src_rank=0) が netkeiba(1) より優先。
+                  -- 同一 (date,venue,race_num) で netkeiba(src_rank=0) が pdf(1) より優先（#663）。
                   -- 同ソース内で複数行がある場合は race_id 降順タイブレーク（find_recent_runs と同パターン）。
                   AND (u2.src_rank < u.src_rank
                        OR (u2.src_rank = u.src_rank AND u2.race_id > u.race_id))

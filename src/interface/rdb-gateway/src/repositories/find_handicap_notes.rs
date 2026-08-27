@@ -39,12 +39,12 @@ struct PastRunRow {
 /// 2. **着順ありの行だけ**を UNION に入れる（`finishing_position IS NOT NULL`）。取消・除外は
 ///    走っていないので「N 走」に数えない——他の stats クエリ（`horse_stats` 等）と同じ規約。
 ///    片方のソースだけが着順を持つ実レースは、着順を持つ側が dedup を生き残る。
-/// 3. **dedup は netkeiba を優先する**（`find_recent_runs` は pdf 優先＝逆）。
+/// 3. **dedup は netkeiba を優先する**（`find_recent_runs` / `find_jockey_recent_runs` も同様・#663）。
 /// 4. **dedup を `DISTINCT ON` で書く**（`find_recent_runs` は `NOT EXISTS` の自己結合）。
 ///    同キー・同 src_rank・同 race_id の完全重複でも必ず 1 行に畳まれる。ここは表示の母数
 ///    そのもの（`N走`）なので、取りこぼしを構造的に許さない書き方を選ぶ。
 ///
-/// ## なぜここだけ netkeiba 優先なのか（#628 の実測）
+/// ## なぜ netkeiba 優先なのか（#628 の実測・#663 でスコア経路にも展開）
 ///
 /// 両ソースに存在する 31,585 走を突き合わせたところ **3,503 走（11.1%）で着順が食い違い**、
 /// うち 2,666 走（76%）が `pdf = netkeiba + 1` の**系統的な 1 つズレ**だった。原因は既知の
@@ -54,8 +54,8 @@ struct PastRunRow {
 ///
 /// この経路が出すのは**人が読む着順そのもの**なので、9 走に 1 走ズレる列を出すと
 /// 手動精査の判断材料として機能しない。よってここでは着順の直接ソース（netkeiba の馬別成績）を
-/// 優先する。**スコア経路（`find_recent_runs` の pdf 優先）は変えていない**ので、確率・
-/// バックテストの挙動には影響しない。
+/// 優先する。**スコア経路（`find_recent_runs` / `find_jockey_recent_runs`）も #663 で
+/// netkeiba 優先に統一済み**（backtest 中立を確認・ADR 0091）。
 const PAST_RUNS_SQL: &str = r#"
     WITH unioned AS (
         SELECT

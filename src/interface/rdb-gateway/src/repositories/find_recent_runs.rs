@@ -25,9 +25,10 @@ struct RecentRow {
 ///
 /// pdf 確定成績(`results`)と netkeiba 近走(`horse_past_runs`)を UNION し、`date < before` で
 /// バックテスト時のリークを防ぐ。同一実レースが両ソースに存在する場合は `(date, venue, race_num)`
-/// 単位で **pdf を優先**して 1 件に dedup する（pdf=src_rank 0, netkeiba=1）。同点（同ソース・
-/// 同一実レースの別 race_id）は `race_id` 降順で決定的に 1 件を選ぶ（前走フォームが run ごとに
-/// ブレないようにするため）。
+/// 単位で **netkeiba を優先**して 1 件に dedup する（netkeiba=src_rank 0, pdf=1）。
+/// pdf の着順は EdiF フォント欠落で 11% がズレている（#663）ため netkeiba を正とする。
+/// 同点（同ソース・同一実レースの別 race_id）は `race_id` 降順で決定的に 1 件を選ぶ
+/// （前走フォームが run ごとにブレないようにするため）。
 pub async fn find_recent_runs(
     pool: &PgPool,
     name: &HorseName,
@@ -43,7 +44,7 @@ pub async fn find_recent_runs(
                 races.date AS date, races.venue AS venue, races.race_num AS race_num,
                 races.surface AS surface, races.distance AS distance,
                 NULL::text AS corner_positions, NULL::bigint AS field_size,
-                0 AS src_rank,
+                1 AS src_rank,
                 results.race_id AS race_id, results.finishing_position AS finishing_position,
                 results.status AS status, results.gate_num AS gate_num,
                 results.horse_num AS horse_num, results.horse_name AS horse_name,
@@ -61,7 +62,7 @@ pub async fn find_recent_runs(
                 date, venue, race_num,
                 surface, distance,
                 corner_positions, field_size,
-                1 AS src_rank,
+                0 AS src_rank,
                 race_id, finishing_position, status, gate_num, horse_num, horse_name,
                 horse_id, jockey, NULL AS trainer, time_seconds, margin, odds,
                 horse_weight, weight_change, weight_carried, popularity
@@ -140,7 +141,7 @@ pub async fn recent_runs_batch(
                 races.date AS date, races.venue AS venue, races.race_num AS race_num,
                 races.surface AS surface, races.distance AS distance,
                 NULL::text AS corner_positions, NULL::bigint AS field_size,
-                0 AS src_rank,
+                1 AS src_rank,
                 results.race_id AS race_id, results.finishing_position AS finishing_position,
                 results.status AS status, results.gate_num AS gate_num,
                 results.horse_num AS horse_num, results.horse_name AS horse_name,
@@ -158,7 +159,7 @@ pub async fn recent_runs_batch(
                 date, venue, race_num,
                 surface, distance,
                 corner_positions, field_size,
-                1 AS src_rank,
+                0 AS src_rank,
                 race_id, finishing_position, status, gate_num, horse_num, horse_name,
                 horse_id, jockey, NULL AS trainer, time_seconds, margin, odds,
                 horse_weight, weight_change, weight_carried, popularity

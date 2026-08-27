@@ -175,8 +175,8 @@ async fn jockey_recent_runs_batch_covers_all_jockeys(pool: sqlx::PgPool) {
 }
 
 /// 同一実レース（東京 3 回 2 日 11R）が pdf(`results`) と netkeiba(`horse_past_runs`) の双方に
-/// 存在する場合に、`(date, venue, race_num)` 単位で pdf 優先 dedup されて 1 件になることを検証する
-/// （find_recent_runs.rs の `find_recent_runs_unions_and_dedups_preferring_pdf` の騎手版）。
+/// 存在する場合に、`(date, venue, race_num)` 単位で netkeiba 優先 dedup されて 1 件になることを検証する
+/// （find_recent_runs.rs の `find_recent_runs_unions_and_dedups_preferring_netkeiba` の騎手版・#663）。
 fn pdf_race_with_jockey(
     race_id: &str,
     date: NaiveDate,
@@ -252,7 +252,7 @@ fn past_run_with_jockey(
 }
 
 #[sqlx::test(migrations = "../../../deployments/db/migrations")]
-async fn find_jockey_recent_runs_unions_and_dedups_preferring_pdf(pool: sqlx::PgPool) {
+async fn find_jockey_recent_runs_unions_and_dedups_preferring_netkeiba(pool: sqlx::PgPool) {
     let repo = PostgresRepository::new(pool);
     let jockey_name = "山田 騎手";
     // 11R は pdf(1着) と netkeiba(7着) の両方＝同一実レース。12R は netkeiba のみ（3着）。
@@ -283,11 +283,11 @@ async fn find_jockey_recent_runs_unions_and_dedups_preferring_pdf(pool: sqlx::Pg
         .unwrap();
 
     assert_eq!(runs.len(), 2, "11R は 1 件に dedup、12R は単独 → 計 2");
-    // date 降順: 先頭は 4/1 の 11R。pdf 優先なので着順は 1（netkeiba の 7 ではない）。
+    // date 降順: 先頭は 4/1 の 11R。netkeiba 優先なので着順は 7（pdf の 1 ではない・#663）。
     assert_eq!(
         runs[0].finishing_position,
-        Some(1),
-        "同一実レースは pdf を優先（netkeiba の 7 着で上書きされない）"
+        Some(7),
+        "同一実レースは netkeiba を優先（pdf の着順は EdiF ズレのため・#663）"
     );
     // 2 件目は netkeiba のみの 3/1 12R（3着）。
     assert_eq!(runs[1].finishing_position, Some(3));
@@ -301,7 +301,7 @@ async fn find_jockey_recent_runs_unions_and_dedups_preferring_pdf(pool: sqlx::Pg
     assert_eq!(batch_runs.len(), 2, "batch も dedup して計 2");
     assert_eq!(
         batch_runs[0].finishing_position,
-        Some(1),
-        "batch も pdf 優先"
+        Some(7),
+        "batch も netkeiba 優先（#663）"
     );
 }

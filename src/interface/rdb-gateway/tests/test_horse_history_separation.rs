@@ -209,7 +209,7 @@ async fn horse_stats_counts_pdf_only_not_netkeiba(pool: sqlx::PgPool) {
 }
 
 #[sqlx::test(migrations = "../../../deployments/db/migrations")]
-async fn find_recent_runs_unions_and_dedups_preferring_pdf(pool: sqlx::PgPool) {
+async fn find_recent_runs_unions_and_dedups_preferring_netkeiba(pool: sqlx::PgPool) {
     let repo = PostgresRepository::new(pool);
     // 11R は pdf(1着) と netkeiba(7着) の両方＝同一実レース。12R は netkeiba のみ。
     repo.save_race(&pdf_race(
@@ -238,12 +238,12 @@ async fn find_recent_runs_unions_and_dedups_preferring_pdf(pool: sqlx::PgPool) {
         .unwrap();
 
     assert_eq!(runs.len(), 2, "11R は 1 件に dedup、12R は単独 → 計 2");
-    // date 降順: 先頭は 4/1 の 11R。pdf 優先なので着順は 1（netkeiba の 7 ではない）。
+    // date 降順: 先頭は 4/1 の 11R。netkeiba 優先なので着順は 7（pdf の 1 ではない。#663）。
     assert_eq!(runs[0].date, ymd(2026, 4, 1));
     assert_eq!(
         runs[0].result.finishing_position.map(|p| p.value()),
-        Some(1),
-        "同一実レースは pdf を優先（netkeiba の 7 着で上書きされない）"
+        Some(7),
+        "同一実レースは netkeiba を優先（pdf の着順は EdiF ズレのため・#663）"
     );
     // 2 件目は netkeiba のみの 3/1 12R。
     assert_eq!(runs[1].date, ymd(2026, 3, 1));
