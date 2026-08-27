@@ -4,10 +4,11 @@
 //! 実行には Postgres が必要（`#[sqlx::test]` が一時 DB を作る）。`cargo test -p api-server`。
 //! Postgres 非接続環境ではコンパイルのみ確認できる（`cargo test --no-run`）。
 
+#[macro_use]
+mod common;
+
 use actix_web::{App, test, web};
 use chrono::{DateTime, NaiveDate, Utc};
-use serde_json::Value;
-
 use api_server::app::configure_routes;
 use netkeiba_scraper::UreqNetkeibaScraper;
 use paddock_domain::{
@@ -130,25 +131,7 @@ fn sample_win_odds() -> RaceOddsRecord {
     }
 }
 
-/// テスト用 actix App を組み立てる。
-macro_rules! build_service {
-    ($pool:expr) => {{
-        let repo = PostgresRepository::new($pool);
-        let interactor = Interactor::new(repo);
-        let data = web::Data::new(interactor);
-        test::init_service(
-            App::new()
-                .app_data(data)
-                .configure(configure_routes::<Repo, UreqNetkeibaScraper, UreqNetkeibaScraper>),
-        )
-        .await
-    }};
-}
-
-async fn body_json(resp: actix_web::dev::ServiceResponse) -> Value {
-    let bytes = test::read_body(resp).await;
-    serde_json::from_slice(&bytes).expect("response body is JSON")
-}
+use common::body_json;
 
 #[sqlx::test(migrations = "../../../deployments/db/migrations")]
 async fn list_races_returns_seeded_race(pool: sqlx::PgPool) {

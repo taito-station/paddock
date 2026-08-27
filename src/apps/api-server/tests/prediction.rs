@@ -4,40 +4,19 @@
 //! 実行には Postgres が必要。`DATABASE_URL=postgres://paddock:paddock@localhost:5432/paddock \
 //! cargo test -p api-server --test prediction -- --test-threads=1`。
 
-use actix_web::{App, test, web};
-use chrono::{NaiveDate, Utc};
-use serde_json::Value;
+#[macro_use]
+mod common;
 
-use api_server::app::configure_routes;
-use netkeiba_scraper::UreqNetkeibaScraper;
+use actix_web::test;
+use chrono::{NaiveDate, Utc};
 use paddock_domain::{
     Mark, PadPrediction, PredictionBet, PredictionHorse, PredictionResult, Race, RaceId, Surface,
     Venue,
 };
-use paddock_use_case::Interactor;
 use paddock_use_case::repository::{PadPredictionRepository, RaceRepository};
 use rdb_gateway::PostgresRepository;
 
-type Repo = PostgresRepository;
-
-macro_rules! build_service {
-    ($pool:expr) => {{
-        let repo = PostgresRepository::new($pool);
-        let interactor = Interactor::new(repo);
-        let data = web::Data::new(interactor);
-        test::init_service(
-            App::new()
-                .app_data(data)
-                .configure(configure_routes::<Repo, UreqNetkeibaScraper, UreqNetkeibaScraper>),
-        )
-        .await
-    }};
-}
-
-async fn body_json(resp: actix_web::dev::ServiceResponse) -> Value {
-    let bytes = test::read_body(resp).await;
-    serde_json::from_slice(&bytes).expect("response body is JSON")
-}
+use common::body_json;
 
 fn date(y: i32, m: u32, d: u32) -> NaiveDate {
     NaiveDate::from_ymd_opt(y, m, d).unwrap()

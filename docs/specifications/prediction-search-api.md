@@ -246,7 +246,7 @@ GET /api/predictions/stats/by-mark
 
 ## テスト方針
 
-API なのでブラウザ UI は無い。`tests/browser-test-cases/` は追加せず、**統合テスト**（`src/apps/api-server/tests/`、`#[sqlx::test]` の一時 Postgres）で各エンドポイントを検証する。予想 seed（結果あり/なし・複数開催場・距離芝ダ違い・各印）は各テストファイル内のローカル `fn`（例: `prediction.rs` の `async fn seed`）に用意する（共通の `helper/mod.rs` は置かない）。
+API なのでブラウザ UI は無い。`tests/browser-test-cases/` は追加せず、**統合テスト**（`src/apps/api-server/tests/`、`#[sqlx::test]` の一時 Postgres）で各エンドポイントを検証する。予想 seed（結果あり/なし・複数開催場・距離芝ダ違い・各印）は各テストファイル内のローカル `fn`（例: `prediction.rs` の `async fn seed`）に用意する（seed の共通 helper は置かない）。App 構築（`build_service!` マクロ）と汎用ヘルパー（`body_json`）だけは `tests/common/mod.rs` に集約する（#620）。
 
 | ケース | 観点 | 期待 |
 |---|---|---|
