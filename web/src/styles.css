@@ -796,7 +796,7 @@ button:disabled {
   line-height: 1.6;
 }
 
-/* 馬書評クリック展開 */
+/* 馬詳細（条件別実績・書評）クリック展開 */
 .horse-col.has-detail {
   cursor: pointer;
 }
@@ -857,6 +857,88 @@ button:disabled {
   color: var(--text-3);
   font-size: 0.82rem;
   line-height: 1.7;
+}
+
+/* --- 手動ハンデ精査の材料（#628・decision-support） ------------------------
+   盤が出すのは事実だけで、閾値による go/no-go は出さない（ADR 0079）。よって
+   「良い / 悪い」を意味する強い配色は当てず、既存トークンの範囲で密度だけを整える。 */
+
+/* 条件別実績（今回と同じ 場×芝ダ×距離 の「N走 着順列」）。全頭カードに常時出す
+   ——横並びで比べて初めて「2・3番人気が当該条件で大敗している」が読める。 */
+.horse-col .cond-record {
+  padding: 0.2rem 0.3rem;
+  border-top: 1px dashed var(--border);
+  font-size: 0.66rem;
+  line-height: 1.25;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  /* 2 桁着順が並ぶと狭幅カラムで 2 行に折り返す。全カードで 2 行ぶんを先に確保し、
+     折り返しの有無で下のバッジ行がガタつかないようにする（横並び比較のため）。
+     box-sizing: border-box なので padding(0.2rem×2)＋border(1px) を込みで見積もる
+     ——2 行 = 2.5em に対し 3em では約 0.2em 足りず、折り返した馬だけわずかに背が高くなる。 */
+  min-height: calc(2.5em + 0.4rem + 1px);
+}
+
+/* 上位人気に限って出す「前提が壊れているサイン」（休養日数・距離初・芝ダ初）。 */
+.premise-flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  padding: 0 0.3rem 0.25rem;
+}
+.premise-flags .chip {
+  font-size: 0.63rem;
+  padding: 0.05rem 0.3rem;
+}
+/* 書評チップ（.chip-note）と隣接するので、地色を敷かず枠線だけにして区別する
+   ——同じ配色だと「間隔315日」と「書評」が同種のラベルに見える。 */
+.chip-premise {
+  background: transparent;
+  color: var(--muted-2);
+  border-color: var(--border-2);
+}
+
+/* 戦績欠損フラグ。差pt が「偽の妙味」であることの印なので、
+   妙味チップ（--warn-dim / --value-text）とは別系統の色にして取り違えを防ぐ。
+   モデル列のトグルと直交する事実なので、差pt 行ではなくバッジ行に常時出す。 */
+.chip-missing {
+  background: var(--danger-bg);
+  color: var(--danger-text);
+  border-color: var(--danger-border);
+}
+
+/* 差pt 行（純モデル − 市場）。.stats の他の行と同じ体裁で、群の区切りは付けない
+   （直前の「市勝」と同じ市場比較の群に属するため）。 */
+.horse-col .stats .edge-row dd {
+  font-weight: 600;
+}
+
+/* 書評パネル側の内訳（どのレースか・洋芝グループ・経験の有無）。 */
+.handicap-detail {
+  margin: 0.6rem 0 0;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.82rem;
+  line-height: 1.6;
+}
+.handicap-detail > div {
+  margin-bottom: 0.4rem;
+}
+.handicap-detail dt {
+  color: var(--muted-2);
+  font-size: 0.75rem;
+}
+.handicap-detail dd {
+  margin: 0.1rem 0 0;
+  color: var(--text-3);
+}
+.handicap-detail dd ul {
+  margin: 0;
+  padding-left: 1.1rem;
+}
+.handicap-detail .warn {
+  color: var(--warn);
 }
 .board-view .grid {
   background: var(--surface);

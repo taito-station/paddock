@@ -1,6 +1,7 @@
 use strum_macros::Display;
 
 use crate::error::Error;
+use crate::race::Surface;
 
 // Hash は backtest の course_stats キャッシュキー (Venue, u32, Surface) に必要（#223）。
 // Surface も元から Hash を derive 済み。
@@ -44,6 +45,56 @@ impl Venue {
             Venue::Hanshin,
             Venue::Kokura,
         ]
+    }
+
+    /// **芝の**適性が通じる場グループ（自身を必ず含む）。洋芝（北海道開催＝札幌・函館）は
+    /// 同じ洋芝でコース適性が通じるため 2 場、それ以外の場は自身 1 場のみ
+    /// （＝グループ化しても完全一致と同じ集合になる）。
+    ///
+    /// **芝限定**である点に注意。同じ 2 場でもダートは別物なので、条件別実績（#628・提示専用）
+    /// の集計側は芝のときだけこれを使い、ダートでは [`Venue::self_group`] に落とす。
+    /// **確率推定には入れない**——純モデルの resolution 天井は ADR 0058/0059 で決着済み。
+    pub(crate) fn turf_group(&self) -> &'static [Venue] {
+        const YOSHIBA: &[Venue] = &[Venue::Sapporo, Venue::Hakodate];
+        match self {
+            Venue::Sapporo | Venue::Hakodate => YOSHIBA,
+            other => other.self_group(),
+        }
+    }
+
+    /// 条件別実績（#628・提示専用）の母集団になる場グループ。**芝のときだけ**
+    /// [`Venue::turf_group`] で広げ、それ以外（ダート）は当場 1 場に閉じる。
+    ///
+    /// 洋芝グループの根拠は「**芝の**適性が通じる」なので、同じ 2 場でもダートは別物。
+    /// gate しないと「洋芝(札幌/函館)ダ1700m」という成立しないラベルになる。
+    ///
+    /// **この規則の正本はここ 1 か所**で、外部へ公開する入口もこれだけ（`turf_group` /
+    /// `self_group` は `pub(crate)` の内部ヘルパ）。集計（rdb-gateway）と提示（use-case の
+    /// `group_venue_slugs`）が別々に同じ判定を書くと、片方だけ変わったときに
+    /// 「グループ見出しは出るのに中身が空」のような乖離が起きる（ADR 0064 の second source）。
+    pub fn condition_group(&self, surface: Surface) -> &'static [Venue] {
+        match surface {
+            Surface::Turf => self.turf_group(),
+            // `Surface` が増えたらコンパイルエラーで気づけるよう `_` で受けない。
+            Surface::Dirt => self.self_group(),
+        }
+    }
+
+    /// 自身 1 場だけのグループ。グループ化しない条件（ダート等）で [`Venue::turf_group`] と
+    /// 同じ型を返すために使う。
+    pub(crate) fn self_group(&self) -> &'static [Venue] {
+        match self {
+            Venue::Sapporo => &[Venue::Sapporo],
+            Venue::Hakodate => &[Venue::Hakodate],
+            Venue::Fukushima => &[Venue::Fukushima],
+            Venue::Niigata => &[Venue::Niigata],
+            Venue::Tokyo => &[Venue::Tokyo],
+            Venue::Nakayama => &[Venue::Nakayama],
+            Venue::Chukyo => &[Venue::Chukyo],
+            Venue::Kyoto => &[Venue::Kyoto],
+            Venue::Hanshin => &[Venue::Hanshin],
+            Venue::Kokura => &[Venue::Kokura],
+        }
     }
 
     pub fn as_jp(&self) -> &'static str {
@@ -128,6 +179,86 @@ impl TryFrom<&str> for Venue {
             "阪神" | "hanshin" => Ok(Venue::Hanshin),
             "小倉" | "kokura" => Ok(Venue::Kokura),
             other => Err(Error::InvalidFormat(format!("unknown venue: {other}"))),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn self_group_is_always_exactly_self() {
+        for v in Venue::all() {
+            assert_eq!(
+                v.self_group(),
+                &[v],
+                "{v:?} の self_group が自身 1 場でない"
+            );
+        }
+    }
+
+    #[test]
+    fn turf_group_pairs_yoshiba_and_isolates_the_rest() {
+        // 洋芝場は互いを含む 2 場グループ。
+        assert_eq!(
+            Venue::Sapporo.turf_group(),
+            &[Venue::Sapporo, Venue::Hakodate]
+        );
+        assert_eq!(
+            Venue::Hakodate.turf_group(),
+            &[Venue::Sapporo, Venue::Hakodate]
+        );
+        // 洋芝以外は自身のみ＝グループ化しても完全一致と同じ集合になる。
+        for v in Venue::all()
+            .into_iter()
+            .filter(|v| !matches!(v, Venue::Sapporo | Venue::Hakodate))
+        {
+            assert_eq!(v.turf_group(), &[v], "{v:?} が単独グループになっていない");
+        }
+    }
+
+    #[test]
+    fn turf_group_always_contains_self() {
+        for v in Venue::all() {
+            assert!(
+                v.turf_group().contains(&v),
+                "{v:?} の turf_group が自身を含んでいない"
+            );
+        }
+    }
+
+    #[test]
+    fn condition_group_widens_only_for_yoshiba_turf() {
+        // 芝の洋芝場だけが 2 場グループ。
+        for v in [Venue::Sapporo, Venue::Hakodate] {
+            assert_eq!(
+                v.condition_group(Surface::Turf),
+                &[Venue::Sapporo, Venue::Hakodate],
+                "{v:?} の芝グループが広がっていない"
+            );
+            // 洋芝の根拠は「芝の適性が通じる」なので、同じ 2 場でもダートは当場のみ。
+            assert_eq!(
+                v.condition_group(Surface::Dirt),
+                &[v],
+                "{v:?} のダートでグループが広がっている"
+            );
+        }
+    }
+
+    #[test]
+    fn condition_group_is_always_self_only_elsewhere() {
+        for v in Venue::all()
+            .into_iter()
+            .filter(|v| !matches!(v, Venue::Sapporo | Venue::Hakodate))
+        {
+            for s in [Surface::Turf, Surface::Dirt] {
+                assert_eq!(
+                    v.condition_group(s),
+                    &[v],
+                    "{v:?} / {s:?} が単独グループになっていない"
+                );
+            }
         }
     }
 }

@@ -182,6 +182,59 @@ pub struct HorseRecencyStats {
     pub by_track_condition: Vec<RecencySeries>,
 }
 
+/// 手動ハンデ精査の材料になる過去走 1 走（#628・提示専用）。
+///
+/// **着順が付いた走りだけ**を表す（取消・除外・中止は「走っていない / 着順なし」なので
+/// [`HandicapNoteRow`] の母集団から落ちる＝他の stats 集計と同じ規約）。だから着順は非 Option。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConditionRun {
+    pub date: NaiveDate,
+    pub finishing_position: u32,
+    /// レース名（netkeiba 近走のみが持つ。PDF 確定成績経路は `None`）。
+    /// 詳細パネルで「どのレースか」を示すのに使う。
+    pub race_name: Option<String>,
+}
+
+/// 「今回距離を経験済み」とみなす許容幅[m]（#628）。**過去走**（着順ありの走・キャリア全体）に
+/// `今回距離 ± この値` が 1 走も無ければ**距離未経験**として盤に事実を出す
+/// （閾値で go/no-go は出さない・読み分けは人間がやる）。
+/// **この値が唯一の正本**。適用は rdb-gateway の `find_handicap_notes`（SQL ではなく Rust の
+/// 集計ループ）で、web へはレスポンスの `distance_tolerance_m` として配る
+/// ——web 側に同値を持たせるとサーバだけ変えたとき画面が定義を偽る。
+pub const DISTANCE_EXPERIENCE_TOLERANCE_M: u32 = 100;
+
+/// 盤の手動ハンデ精査材料 1 頭分（#628・**提示専用 / decision-support**）。
+///
+/// 現時点で実在が確認できているエッジは「手動のハンデ精査」と「執行の規律（軸ロック＋ズレ増額）」の
+/// 2 つだけ（ADR 0055 / 0060 / 0076）。ここで運ぶのは前者が実際に使っている**事実**であって推定ではない。
+/// **確率推定には一切入れない**——純モデルの resolution 天井は ADR 0058 / 0059 で決着済みで、
+/// 条件別実績を特徴量として投入するのは閉じた路線の再訪になる。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct HandicapNoteRow {
+    /// 完全一致（今回と同じ 場 × 芝ダ × 距離）の過去走。date 降順。
+    pub course_runs: Vec<ConditionRun>,
+    /// 場グループ（[`Venue::condition_group`]＝**芝のときだけ**広げる × 同芝ダ × 同距離）の過去走。
+    /// date 降順で、**非空のときは `course_runs` を包含する上位集合**。
+    ///
+    /// 広くなるのは**洋芝場（札幌・函館）の芝レース**だけで、それ以外（ダート戦を含む）は
+    /// グループが当場 1 場になるため**空**を返す（同じ集合を 2 度運んでも情報が増えないため）。
+    /// 呼び出し側は「空 = グループ行を出さない」と読む。
+    pub group_runs: Vec<ConditionRun>,
+    /// 過去走の総数（`results` ∪ `horse_past_runs`・着順ありの走のみ）。`0` = 戦績データ欠損＝
+    /// モデル確率がベースライン近くに置かれるため「純モデル高 vs 市場低」の偽の妙味が出る印。
+    pub total_starts: u32,
+    /// 直近の出走日（前走）。過去走なしは `None`。休養明けの長さは呼び出し側が当日との差で出す。
+    ///
+    /// 母集団は**着順ありの走**なので、直前のレースが取消・除外だった馬はその 1 走前が基準になる
+    /// （「実際に走った最後の日からの間隔」という意味で一貫している）。
+    pub last_run_date: Option<NaiveDate>,
+    /// 今回の芝ダでの出走数（**キャリア全体**）。`0` = 今回の芝ダが未経験。
+    pub same_surface_starts: u32,
+    /// 今回距離帯（± [`DISTANCE_EXPERIENCE_TOLERANCE_M`]）での出走数（**キャリア全体**・
+    /// 場と芝ダは問わない）。`0` = 今回距離が未経験。
+    pub same_distance_starts: u32,
+}
+
 #[derive(Debug, Clone)]
 pub struct JockeyStatsRow {
     pub jockey_name: String,
@@ -305,6 +358,29 @@ pub trait StatsRepository: Send + Sync {
             Ok(out)
         }
     }
+
+    /// 盤の手動ハンデ精査材料（#628・提示専用）を全出走馬ぶんまとめて返す。
+    ///
+    /// 既存の `by_surface` / `by_distance_band` / `by_venue`（[`HorseStatsRow`]）は**周辺分布**で、
+    /// 「新潟芝1000（千直）」のような**交差条件**を表せない。ここが埋める穴はそこ——市場は
+    /// 「一般的な近走の good/bad」で人気を作るので、適性が支配的な条件では交差条件の実績が
+    /// 手動精査と市場の割れ目になる（2026-08-16 新潟6R 稲妻S）。
+    ///
+    /// `venue` / `surface` / `distance` は**今回のレース条件**。`as_of` の意味は
+    /// [`StatsRepository::horse_stats`] と同じ（`date < as_of`）＝盤では当日を渡し、
+    /// 確定後に自レースが自分の過去走として混ざるのを防ぐ。
+    /// 返却 map は `names` の全馬を含む（過去走が 1 走も無い馬も既定値のエントリで入る）。
+    ///
+    /// 既定実装は無い（＝全実装が明示的に応答する）。集計を持たない実装が黙って空を返すと、
+    /// 盤は「該当なし」と「まだ引いていない」を区別できないまま出荷される。
+    fn horse_handicap_notes(
+        &self,
+        names: &[HorseName],
+        venue: Venue,
+        surface: Surface,
+        distance: u32,
+        as_of: Option<NaiveDate>,
+    ) -> impl Future<Output = Result<HashMap<HorseName, HandicapNoteRow>>> + Send;
 
     /// コース（場×距離×馬場）の枠順別統計を返す。`as_of` の意味は [`StatsRepository::horse_stats`] と同じ。
     fn course_stats(

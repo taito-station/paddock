@@ -7,11 +7,14 @@
 //! 広げない」・105R backtest 知見を尊重）。全頭は truncate せず返し、top5 から漏れる市場人気馬も
 //! 盤で見えるようにする（人間が手動で拾う運用を支える）。
 
+use std::collections::HashMap;
+
 use chrono::NaiveDate;
 
 use paddock_domain::{
-    HorseExplanation, HorseNum, HorseProbability, KONSEN_BAND_RATIO, KONSEN_MIN_HORSES, Mark,
-    PadPrediction, PinnedSelection, Portfolio, RaceId, RaceOdds, TrackCondition, konsen_band,
+    HorseExplanation, HorseName, HorseNum, HorseProbability, KONSEN_BAND_RATIO, KONSEN_MIN_HORSES,
+    Mark, PadPrediction, PinnedSelection, Portfolio, RaceId, RaceOdds, Surface, TrackCondition,
+    Venue, konsen_band,
 };
 
 use crate::compose_portfolio;
@@ -19,8 +22,8 @@ use crate::error::Result;
 use crate::interactor::Interactor;
 use crate::interactor::race::commentary::{horse_detail_lines, horse_headline, race_commentary};
 use crate::repository::{
-    OddsRepository, PadPredictionRepository, RaceCardRepository, RaceResultRepository,
-    StatsRepository,
+    ConditionRun, HandicapNoteRow, OddsRepository, PadPredictionRepository, RaceCardRepository,
+    RaceResultRepository, StatsRepository,
 };
 
 /// 乖離馬（妙味・ワイドボックス候補）の判定に使う「人気順 − モデル順」の下限。
@@ -82,6 +85,13 @@ pub struct RaceBoard {
     /// 現時点の被覆率（`Portfolio::unpriced_staked_legs`）とは別物——UI は朝ROI→現ROI を
     /// 並べるので、両者が違えば別母集団同士の比較になる。
     pub morning_unpriced_legs: Option<usize>,
+    /// 条件別実績（#628）で `handicap.group_runs` の母集団になった場スラッグの一覧。
+    /// **洋芝場（札幌・函館）の芝レースでのみ** 2 場が入り、それ以外は**空**
+    /// ＝グループが当場 1 場で完全一致と同じ集合になるため、UI は 2 行目を出さない。
+    ///
+    /// 洋芝の根拠は「**芝の**適性が通じる」なので、同じ 2 場でも**ダート戦は空**になる。
+    /// 日本語ラベルの組み立ては web 側（`VENUE_JP` / `SURFACE_JP`）が持つ（表記の正本を 1 か所に保つ）。
+    pub group_venues: Vec<String>,
     /// 全出走馬（truncate しない）。盤面順（`blended` と同順）。
     pub horses: Vec<BoardHorse>,
 }
@@ -140,6 +150,43 @@ pub struct BoardHorse {
     pub comment: Option<String>,
     /// 展開パネル用の根拠 bullet（条件別 factor・枠 lift・近走・前走・斤量）。空なら根拠情報なし。
     pub detail_lines: Vec<String>,
+    /// 手動ハンデ精査の材料（#628・提示専用）。買い目の選択ロジックには一切入らない。
+    ///
+    /// **`None` = 材料を引けていない**（出馬表なし・取得失敗・馬名の突き合わせ失敗）。
+    /// 「該当なし（走っていない）」とは別物なので、既定値で埋めずに型で区別する
+    /// ——既定値を返すと `distance_untried: false` 等が「計算していない事実」を断言してしまう。
+    pub handicap: Option<HandicapNote>,
+}
+
+/// 盤に出す手動ハンデ精査の材料 1 頭分（#628・**提示専用 / decision-support**）。
+///
+/// 出すのは**事実だけ**で、閾値で go/no-go を出さない（ADR 0079 と同じ理由——盤面のバッジが
+/// go シグナルとして誤読される事故を作らない）。読み分けは人間がやる。
+/// `Default` は**意図的に derive しない**。既定値を作れると「材料なし」を
+/// `Some(HandicapNote::default())` で表す道が残り、`distance_untried: false` 等が
+/// 「計算していない事実」の断言になる。材料なしは `Option` の `None` だけで表す。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HandicapNote {
+    /// 今回条件（場 × 芝ダ × 距離の完全一致）での過去走。date 降順。空＝該当なし。
+    pub course_runs: Vec<ConditionRun>,
+    /// 場グループ（[`Venue::condition_group`]＝芝のときだけ洋芝＝札幌⇄函館へ広げる）まで含めた過去走。date 降順。
+    /// **非空のときは `course_runs` を包含する上位集合**。広くならない条件（洋芝以外の場・
+    /// ダート戦）では**空**になる＝UI はグループ行を出さない。
+    pub group_runs: Vec<ConditionRun>,
+    /// 前走からの間隔[日]（当日 − 前走日）。過去走なしは `None`。
+    /// **閾値で機械判定せず日数を出すだけ**——「10ヶ月半の休養明け」と「4ヶ月半の王道ローテ」は
+    /// 同じ休養明けでも質が違い、その読み分けは人間がやる。
+    pub layoff_days: Option<u32>,
+    /// 今回距離が未経験（**過去走すべて**に今回距離 ± 許容幅が 1 走も無い。場・芝ダは問わない）。
+    pub distance_untried: bool,
+    /// 今回の芝ダが未経験（**過去走すべて**で当該芝ダを走っていない）。
+    pub surface_untried: bool,
+    /// 過去走（着順ありの走）が 0 件。モデルはデータ欠損馬をベースライン近くに置くため、
+    /// **「純モデル高 vs 市場低」という偽の妙味**として盤に出る。差pt と並べて読むための印。
+    ///
+    /// これが真のとき `distance_untried` / `surface_untried` も必ず真になるが、意味は
+    /// 「未経験」ではなく**「データが無い」**。UI は両者を取り違えないこと。
+    pub no_past_runs: bool,
 }
 
 impl<
@@ -239,6 +286,28 @@ impl<
         let confusion = compute_confusion(&views.blended);
         enrich_commentary(&mut horses, &views.explanations, pad.as_ref());
 
+        // 手動ハンデ精査の材料（#628・提示専用）。出馬表があるときだけ引く（今回条件が要るため）。
+        // `as_of` に当日を渡す＝確定後の盤で自レースが自分の過去走として混ざるのを防ぐ。
+        // 買い目（軸・相手）はこの後も一切触らない——ADR 0055 の「確率と買い方の分離」を守り、
+        // 表示材料が選択ロジックへ回り込む second source を作らない。
+        let group_venues = match card.as_ref() {
+            Some(c) => {
+                let names: Vec<_> = horses
+                    .iter()
+                    .filter_map(|h| HorseName::try_from(h.horse_name.clone()).ok())
+                    .collect();
+                let fetched = self
+                    .repository
+                    .horse_handicap_notes(&names, c.venue, c.surface, c.distance, Some(c.date))
+                    .await;
+                apply_handicap(&mut horses, fetched, c.date, c.venue, c.surface)
+            }
+            // 出馬表が無ければ `predict_race_views` が先に NotFound を返すのでここには到達しない
+            // （防御的な分岐）。仮に来ても全馬 `handicap: None`＝材料なしのままで、
+            // UI は「該当なし」ではなく `—` を出す（型で「引けていない」を表している）。
+            None => Vec::new(),
+        };
+
         // レース書評: 人手 commentary 優先、無ければルールベース生成（◎不在なら None）。
         let race_comment = resolve_race_comment(
             pad.as_ref().and_then(|p| p.commentary.as_deref()),
@@ -293,8 +362,105 @@ impl<
             morning_roi,
             morning_hit_prob,
             morning_unpriced_legs,
+            group_venues,
             horses,
         })
+    }
+}
+
+/// 条件別実績（#628）の場グループをスラッグ配列にする純関数。グループが自身 1 場のときは
+/// **空**を返す——完全一致と同じ集合なので、UI に 2 行目を出す意味がないことを型ではなく
+/// 値で表す（`vec![自分]` を返すと UI 側が毎回 len==1 を判定する羽目になる）。
+///
+/// グループの規則そのものは domain（[`Venue::condition_group`]）が持つ——集計（rdb-gateway）と
+/// ここで別々に「芝のときだけ広げる」を書くと、片方だけ変わったときに
+/// 「グループ見出しは出るのに中身が空」という乖離が起きる（ADR 0064 の second source）。
+/// ここがやるのは「広がらなかったら空にする」という**提示上の畳み込み**だけ。
+fn group_venue_slugs(venue: Venue, surface: Surface) -> Vec<String> {
+    let group = venue.condition_group(surface);
+    if group.len() <= 1 {
+        return Vec::new();
+    }
+    group.iter().map(|v| v.as_slug().to_string()).collect()
+}
+
+/// 取得結果を盤へ反映し、`group_venues` を決める（#628）。**失敗しても盤を落とさない**。
+///
+/// これは提示専用の材料で、確率・買い目・軸ロックは一切依存しない。`LIMIT` 無しのクエリが
+/// 未発走中 60 秒ごとに走る経路なので、共有 Postgres が詰まったときに live 盤ごと 500 にするのは
+/// 割に合わない。失敗時は全馬 `handicap = None`（＝材料なし。既定値では埋めない）で続行する。
+///
+/// `group_venues` も失敗時は空に倒す——「`group_runs` の母集団になった場」という定義なので、
+/// 1 走も引けていないのに非空を返すと UI が決して出ないグループ行の説明を出してしまう。
+///
+/// IO を呼び出し側に残して `Result` を受け取る形にしてあるのは、この縮退判断を
+/// リポジトリ mock 無しで単体テストできるようにするため。
+fn apply_handicap(
+    horses: &mut [BoardHorse],
+    fetched: Result<HashMap<HorseName, HandicapNoteRow>>,
+    race_date: NaiveDate,
+    venue: Venue,
+    surface: Surface,
+) -> Vec<String> {
+    match fetched {
+        Ok(notes) => {
+            enrich_handicap(horses, notes, race_date);
+            group_venue_slugs(venue, surface)
+        }
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                "手動ハンデ精査の材料を取得できなかった（盤は材料なしで続行する）"
+            );
+            Vec::new()
+        }
+    }
+}
+
+/// 盤行に手動ハンデ精査の材料を後付けする（#628）。`notes` は `horse_handicap_notes` 由来
+/// （馬名で突き合わせ）。`race_date` は当日で、休養明け日数の基準になる。
+///
+/// **事実の写像だけを行う**——ここで閾値判定や go/no-go は出さない（ADR 0079）。
+/// `notes` に無い馬（馬名の正規化に失敗した等）は既定値のまま＝フラグが立たず、
+/// 「該当なし」ではなく「材料なし」として UI に何も出ない。
+fn enrich_handicap(
+    horses: &mut [BoardHorse],
+    mut notes: HashMap<HorseName, HandicapNoteRow>,
+    race_date: NaiveDate,
+) {
+    for h in horses.iter_mut() {
+        let Ok(name) = HorseName::try_from(h.horse_name.clone()) else {
+            tracing::warn!(
+                horse_name = %h.horse_name,
+                "条件別実績: 馬名を正規化できず材料を付けられなかった"
+            );
+            continue;
+        };
+        // `remove` で所有権ごと取り出す（各馬 1 回しか引かないので、2 本の `Vec<ConditionRun>` を
+        // clone せずに move できる）。
+        // `notes` は同じ馬名リストで引いているので通常は必ずヒットする。
+        // 欠けたら材料なし（`None` のまま）として扱う。
+        let Some(row) = notes.remove(&name) else {
+            tracing::warn!(
+                horse_name = %h.horse_name,
+                "条件別実績: 材料が返って来なかった（材料なしとして扱う）"
+            );
+            continue;
+        };
+        h.handicap = Some(HandicapNote {
+            course_runs: row.course_runs,
+            group_runs: row.group_runs,
+            // 過去走が未来日付（データ不整合）なら負の間隔になるので 0 に丸めず None に倒す
+            // ——「休養 0 日」と誤読させるより、材料が無い扱いのほうが安全側。
+            layoff_days: row
+                .last_run_date
+                .map(|d| (race_date - d).num_days())
+                .filter(|&n| n >= 0)
+                .map(|n| n as u32),
+            distance_untried: row.same_distance_starts == 0,
+            surface_untried: row.same_surface_starts == 0,
+            no_past_runs: row.total_starts == 0,
+        });
     }
 }
 
@@ -365,6 +531,8 @@ fn build_board_horses(
                 // 書評は enrich_commentary で後付けする（build_board_horses は IO 非依存の純関数に保つ）。
                 comment: None,
                 detail_lines: Vec::new(),
+                // ハンデ精査材料は enrich_handicap で後付けする（同上）。`None` = 材料なし。
+                handicap: None,
             }
         })
         .collect()
@@ -869,5 +1037,230 @@ mod tests {
         // ◎（model_rank==1）不在＝全頭空ならルールベースも空 → None。
         let c = compute_confusion(&[]);
         assert_eq!(resolve_race_comment(None, &c, &[]), None);
+    }
+
+    // --- 手動ハンデ精査の材料（#628） -------------------------------------
+
+    fn ymd(y: i32, m: u32, d: u32) -> NaiveDate {
+        NaiveDate::from_ymd_opt(y, m, d).unwrap()
+    }
+
+    fn run(y: i32, m: u32, d: u32, pos: u32) -> ConditionRun {
+        ConditionRun {
+            date: ymd(y, m, d),
+            finishing_position: pos,
+            race_name: None,
+        }
+    }
+
+    fn notes_of(pairs: Vec<(u32, HandicapNoteRow)>) -> HashMap<HorseName, HandicapNoteRow> {
+        pairs
+            .into_iter()
+            .map(|(num, row)| (HorseName::try_from(format!("馬{num}")).unwrap(), row))
+            .collect()
+    }
+
+    #[test]
+    fn group_venue_slugs_only_widens_for_yoshiba_turf() {
+        // 洋芝場の**芝**は札幌⇄函館の 2 場グループ。
+        assert_eq!(
+            group_venue_slugs(Venue::Sapporo, Surface::Turf),
+            vec!["sapporo".to_string(), "hakodate".to_string()]
+        );
+        assert_eq!(
+            group_venue_slugs(Venue::Hakodate, Surface::Turf),
+            vec!["sapporo".to_string(), "hakodate".to_string()]
+        );
+        // それ以外の場は完全一致と同じ集合なので**空**（UI に 2 行目を出す意味がない）。
+        assert!(group_venue_slugs(Venue::Niigata, Surface::Turf).is_empty());
+        assert!(group_venue_slugs(Venue::Tokyo, Surface::Turf).is_empty());
+    }
+
+    #[test]
+    fn group_venue_slugs_never_widens_for_dirt() {
+        // 洋芝の根拠は「**芝の**適性が通じる」であって、同じ 2 場でもダートは別物。
+        // gate しないと「洋芝(札幌/函館)ダ1700m」という成立しないラベルが出る
+        //（札幌ダ1700・函館ダ1700 は実在するので毎開催で発火する）。
+        for v in [Venue::Sapporo, Venue::Hakodate] {
+            assert!(
+                group_venue_slugs(v, Surface::Dirt).is_empty(),
+                "{v:?} のダートでグループが広がっている"
+            );
+        }
+    }
+
+    #[test]
+    fn enrich_handicap_maps_runs_and_layoff() {
+        // 2026-08-16 新潟6R 稲妻S の ⑧カウスリップ相当（千直 2 走・3着/3着、前走 14 日前）。
+        let b = vec![hp(1, 0.3)];
+        let mut horses = build_board_horses(&b, &b, None, None);
+        let notes = notes_of(vec![(
+            1,
+            HandicapNoteRow {
+                course_runs: vec![run(2026, 8, 2, 3), run(2026, 5, 10, 3)],
+                group_runs: vec![run(2026, 8, 2, 3), run(2026, 5, 10, 3)],
+                total_starts: 12,
+                last_run_date: Some(ymd(2026, 8, 2)),
+                same_surface_starts: 5,
+                same_distance_starts: 3,
+            },
+        )]);
+        enrich_handicap(&mut horses, notes, ymd(2026, 8, 16));
+
+        let h = horses[0].handicap.as_ref().expect("材料が付いているはず");
+        assert_eq!(h.course_runs.len(), 2);
+        assert_eq!(h.course_runs[0].finishing_position, 3);
+        assert_eq!(h.layoff_days, Some(14));
+        assert!(!h.distance_untried);
+        assert!(!h.surface_untried);
+        assert!(!h.no_past_runs);
+    }
+
+    #[test]
+    fn enrich_handicap_flags_untried_and_missing_history() {
+        // ⑪モーデン相当（千直 0 走＝該当なし）と、近走 0 件の地方馬（偽の妙味の印）。
+        let b = vec![hp(1, 0.2), hp(2, 0.1)];
+        let mut horses = build_board_horses(&b, &b, None, None);
+        let notes = notes_of(vec![
+            (
+                1,
+                HandicapNoteRow {
+                    total_starts: 29,
+                    last_run_date: Some(ymd(2026, 7, 11)),
+                    same_surface_starts: 10,
+                    same_distance_starts: 0,
+                    ..Default::default()
+                },
+            ),
+            (2, HandicapNoteRow::default()),
+        ]);
+        enrich_handicap(&mut horses, notes, ymd(2026, 8, 16));
+
+        // 完全一致 0 走＝「該当なし」。距離未経験は立つが、近走そのものはある。
+        let h1 = horses[0].handicap.as_ref().expect("材料が付いているはず");
+        assert!(h1.course_runs.is_empty());
+        assert!(h1.distance_untried);
+        assert!(!h1.surface_untried);
+        assert!(!h1.no_past_runs);
+        assert_eq!(h1.layoff_days, Some(36));
+
+        // 近走 0 件＝モデル確率がベースライン近く＝「純モデル高 vs 市場低」の偽の妙味の印。
+        let h2 = horses[1].handicap.as_ref().expect("材料が付いているはず");
+        assert!(h2.no_past_runs);
+        assert!(h2.distance_untried);
+        assert!(h2.surface_untried);
+        assert_eq!(h2.layoff_days, None);
+    }
+
+    #[test]
+    fn enrich_handicap_keeps_group_superset_for_yoshiba() {
+        // 洋芝: 完全一致 0 走でも、函館の同条件があれば group_runs には出る（別行で併記する材料）。
+        let b = vec![hp(1, 0.3)];
+        let mut horses = build_board_horses(&b, &b, None, None);
+        let notes = notes_of(vec![(
+            1,
+            HandicapNoteRow {
+                course_runs: Vec::new(),
+                group_runs: vec![run(2026, 7, 5, 1), run(2026, 6, 14, 5)],
+                total_starts: 8,
+                last_run_date: Some(ymd(2026, 7, 5)),
+                same_surface_starts: 8,
+                same_distance_starts: 4,
+            },
+        )]);
+        enrich_handicap(&mut horses, notes, ymd(2026, 8, 16));
+
+        let h = horses[0].handicap.as_ref().expect("材料が付いているはず");
+        assert!(h.course_runs.is_empty(), "完全一致は該当なしのまま");
+        assert_eq!(h.group_runs.len(), 2, "洋芝グループ側には残る");
+    }
+
+    #[test]
+    fn enrich_handicap_ignores_future_last_run() {
+        // 前走日が当日より後（データ不整合）なら「休養 0 日」と誤読させず材料なしに倒す。
+        let b = vec![hp(1, 0.3)];
+        let mut horses = build_board_horses(&b, &b, None, None);
+        let notes = notes_of(vec![(
+            1,
+            HandicapNoteRow {
+                total_starts: 3,
+                last_run_date: Some(ymd(2026, 8, 23)),
+                same_surface_starts: 3,
+                same_distance_starts: 3,
+                ..Default::default()
+            },
+        )]);
+        enrich_handicap(&mut horses, notes, ymd(2026, 8, 16));
+        assert_eq!(
+            horses[0]
+                .handicap
+                .as_ref()
+                .expect("材料が付いているはず")
+                .layoff_days,
+            None
+        );
+    }
+
+    #[test]
+    fn apply_handicap_degrades_without_failing_the_board() {
+        // 材料取得が失敗しても盤は組み上がる（提示専用で確率・買い目・軸ロックは依存しない）。
+        // **既定値で埋めない**——埋めると `distance_untried: false` 等が「計算していない事実」の
+        // 断言になる。`group_venues` も空に倒す（1 走も引けていないのに母集団だけ非空にしない）。
+        let b = vec![hp(1, 0.3), hp(2, 0.2)];
+        let mut horses = build_board_horses(&b, &b, None, None);
+        let group = apply_handicap(
+            &mut horses,
+            Err(crate::error::Error::Internal("DB 詰まり".into())),
+            ymd(2026, 8, 16),
+            // 洋芝の芝＝成功していれば group_venues が 2 場になる条件をわざと選ぶ。
+            Venue::Sapporo,
+            Surface::Turf,
+        );
+        assert!(group.is_empty(), "失敗時に group_venues を非空で返さない");
+        for h in &horses {
+            assert_eq!(h.handicap, None, "失敗時は材料なし（既定値で埋めない）");
+        }
+    }
+
+    #[test]
+    fn apply_handicap_fills_material_and_group_on_success() {
+        // 成功時は材料が付き、洋芝の芝なら group_venues も 2 場になる（上の縮退テストの対、
+        // 「常に空を返す」実装が通ってしまわないようにする）。
+        let b = vec![hp(1, 0.3)];
+        let mut horses = build_board_horses(&b, &b, None, None);
+        let notes = notes_of(vec![(
+            1,
+            HandicapNoteRow {
+                course_runs: vec![run(2026, 7, 5, 1)],
+                group_runs: vec![run(2026, 7, 5, 1), run(2026, 6, 14, 5)],
+                total_starts: 8,
+                last_run_date: Some(ymd(2026, 7, 5)),
+                same_surface_starts: 8,
+                same_distance_starts: 4,
+            },
+        )]);
+        let group = apply_handicap(
+            &mut horses,
+            Ok(notes),
+            ymd(2026, 8, 16),
+            Venue::Sapporo,
+            Surface::Turf,
+        );
+        assert_eq!(group, vec!["sapporo".to_string(), "hakodate".to_string()]);
+        let h = horses[0].handicap.as_ref().expect("材料が付いているはず");
+        assert_eq!(h.course_runs.len(), 1);
+        assert_eq!(h.group_runs.len(), 2);
+    }
+
+    #[test]
+    fn enrich_handicap_leaves_unknown_horses_untouched() {
+        // notes に居ない馬（馬名の正規化失敗・取得漏れ）は既定値のまま＝フラグが立たない。
+        // 「該当なし（走っていない）」と「材料なし（引けていない）」を取り違えないための境界。
+        let b = vec![hp(1, 0.3)];
+        let mut horses = build_board_horses(&b, &b, None, None);
+        enrich_handicap(&mut horses, HashMap::new(), ymd(2026, 8, 16));
+        // `None` = 材料なし。既定値（`Some(HandicapNote::default())`）で埋めてはいけない
+        // ——埋めると `no_past_runs: false` 等が「計算していない事実」の断言になる。
+        assert_eq!(horses[0].handicap, None, "材料なしを既定値で埋めない");
     }
 }

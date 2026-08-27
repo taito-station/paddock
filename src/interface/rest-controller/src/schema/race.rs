@@ -7,7 +7,7 @@ use utoipa::ToSchema;
 use paddock_domain::{
     BetCombination, HorseEntry, HorseProbability, Portfolio, Race, RaceCard, RaceId,
 };
-use paddock_use_case::{FinishEntry, RaceBoard};
+use paddock_use_case::{ConditionRun, DISTANCE_EXPERIENCE_TOLERANCE_M, FinishEntry, RaceBoard};
 
 /// レース一覧の 1 要素（出走前の諸元のみ。results は含まない）。
 #[derive(Debug, Serialize, ToSchema)]
@@ -336,6 +336,56 @@ pub struct BoardHorseSchema {
     pub comment: Option<String>,
     /// 展開パネル用の根拠 bullet（条件別 factor・枠 lift・近走・前走・斤量）。空配列＝根拠情報なし。
     pub detail_lines: Vec<String>,
+    /// 手動ハンデ精査の材料（#628・提示専用）。買い目の選択ロジックには入らない。
+    ///
+    /// **`null` = 材料を引けていない**（出馬表なし・取得失敗）。「該当なし（走っていない）」
+    /// とは別物なので既定値で埋めない——埋めると `distance_untried: false` 等が
+    /// 「計算していない事実」を断言することになる。クライアントは `null` を
+    /// 「未取得」として表示し、`該当なし` と書かないこと。
+    pub handicap: Option<HandicapNoteSchema>,
+}
+
+/// 条件別実績の過去走 1 走（#628）。着順が付いた走りだけを載せる（取消・除外・中止は母集団外）。
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ConditionRunSchema {
+    /// 施行日 `YYYY-MM-DD`。
+    pub date: NaiveDate,
+    pub finishing_position: u32,
+    /// レース名（netkeiba 近走のみが持つ。PDF 確定成績経路は `null`）。
+    pub race_name: Option<String>,
+}
+
+/// 盤の手動ハンデ精査材料 1 頭分（#628・**decision-support**）。
+///
+/// 現時点で実在が確認できているエッジは「手動のハンデ精査」と「執行の規律（軸ロック＋ズレ増額）」の
+/// 2 つだけ（ADR 0055 / 0060 / 0076）。ここで返すのは前者が使う**事実**であって推定ではない。
+/// **確率にも買い目にも入らない**——条件別実績を特徴量へ入れるのは ADR 0058 / 0059 が閉じた路線の再訪。
+/// 閾値で go/no-go は出さない（ADR 0079 と同じく、バッジが go シグナルとして誤読される事故を防ぐ）。
+#[derive(Debug, Serialize, ToSchema)]
+pub struct HandicapNoteSchema {
+    /// 今回条件（場 × 芝ダ × 距離の完全一致）での過去走。date 降順。空配列＝該当なし。
+    pub course_runs: Vec<ConditionRunSchema>,
+    /// 場グループ（`RaceBoardResponse.group_venues`）まで広げた過去走。date 降順。
+    /// **非空のときは `course_runs` を包含する上位集合**。
+    ///
+    /// 非空になるのは**洋芝場（札幌・函館）の芝レース**だけで、それ以外（ダート戦を含む）は
+    /// **空配列**を返す（同じ集合を 2 度運んでも情報が増えないため）。`group_venues` も同時に空。
+    pub group_runs: Vec<ConditionRunSchema>,
+    /// 前走からの間隔[日]（当日 − 前走日）。過去走なしは `null`。
+    /// **日数を出すだけで閾値判定はしない**——同じ休養明けでも 10ヶ月半と 4ヶ月半では質が違い、
+    /// その読み分けは人間がやる。
+    pub layoff_days: Option<u32>,
+    /// 今回距離が未経験（**過去走すべて**に今回距離 ± `RaceBoardResponse.distance_tolerance_m`
+    /// が 1 走も無い。場・芝ダは問わない）。幅の正本は定数 1 か所で、ここには数値を書かない。
+    pub distance_untried: bool,
+    /// 今回の芝ダが未経験（**過去走すべて**で当該芝ダを走っていない）。
+    pub surface_untried: bool,
+    /// 過去走（着順ありの走）が 0 件。モデルはデータ欠損馬をベースライン近くに置くため
+    /// 「純モデル高 vs 市場低」の**偽の妙味**として出る。差pt と並べて読むための印。
+    ///
+    /// これが `true` のとき `distance_untried` / `surface_untried` も必ず `true` になるが、
+    /// 意味は「未経験」ではなく**「データが無い」**。クライアントは両者を取り違えないこと。
+    pub no_past_runs: bool,
 }
 
 /// `GET /api/races/{race_id}/board` のレスポンス（1レース盤）。
@@ -404,6 +454,17 @@ pub struct RaceBoardResponse {
     /// `unpriced_legs`（現時点）とは別物——UI は朝ROI→現ROI を並べるので、両者が違えば
     /// **別の母集団同士の比較**になる。
     pub morning_unpriced_legs: Option<u32>,
+    /// 条件別実績（#628）で `horses[].handicap.group_runs` の母集団になった**場スラッグの一覧**。
+    /// **洋芝場（札幌・函館）の芝レースでのみ** 2 場が入り、それ以外は空配列
+    /// ＝グループが当場 1 場で完全一致と同じ集合になるため、UI は 2 行目を出さない。
+    ///
+    /// 洋芝の根拠は「**芝の**適性が通じる」なので、同じ 2 場でも**ダート戦は空配列**になる。
+    /// 日本語ラベルの組み立ては web が持つ（表記の正本を 1 か所に保つ）。
+    pub group_venues: Vec<String>,
+    /// 「今回距離を経験済み」とみなす許容幅[m]（#628）。`handicap.distance_untried` の判定に
+    /// サーバが使った値そのもので、UI はこれを表示に使う（web 側に同値を持たせると
+    /// サーバだけ変えたとき画面が定義を偽る）。
+    pub distance_tolerance_m: u32,
     pub horses: Vec<BoardHorseSchema>,
 }
 
@@ -469,6 +530,8 @@ impl From<RaceBoard> for RaceBoardResponse {
             morning_roi: b.morning_roi,
             morning_hit_prob: b.morning_hit_prob,
             morning_unpriced_legs: b.morning_unpriced_legs.map(|n| n as u32),
+            group_venues: b.group_venues,
+            distance_tolerance_m: DISTANCE_EXPERIENCE_TOLERANCE_M,
             horses: b
                 .horses
                 .into_iter()
@@ -496,9 +559,28 @@ impl From<RaceBoard> for RaceBoardResponse {
                     finishing_position: h.finishing_position,
                     comment: h.comment,
                     detail_lines: h.detail_lines,
+                    // `b` を所有しているので move で写す（借用で回すと `race_name: String` を
+                    // 1 件ずつ clone することになる）。
+                    handicap: h.handicap.map(|hc| HandicapNoteSchema {
+                        course_runs: hc.course_runs.into_iter().map(condition_run).collect(),
+                        group_runs: hc.group_runs.into_iter().map(condition_run).collect(),
+                        layoff_days: hc.layoff_days,
+                        distance_untried: hc.distance_untried,
+                        surface_untried: hc.surface_untried,
+                        no_past_runs: hc.no_past_runs,
+                    }),
                 })
                 .collect(),
         }
+    }
+}
+
+/// use-case の条件別実績 1 走を API スキーマへ写す（#628）。値の写像だけで判断は入れない。
+fn condition_run(r: ConditionRun) -> ConditionRunSchema {
+    ConditionRunSchema {
+        date: r.date,
+        finishing_position: r.finishing_position,
+        race_name: r.race_name,
     }
 }
 

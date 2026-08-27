@@ -2,6 +2,7 @@ mod backfill_horse_ids;
 mod course_stats;
 mod fetch_history;
 mod find_finished_races_between;
+mod find_handicap_notes;
 mod find_jockey_recent_runs;
 mod find_live_ev_by_date;
 mod find_live_ev_pins_by_date;
@@ -42,12 +43,13 @@ use paddock_use_case::FinishEntry;
 use paddock_use_case::Result as UcResult;
 use paddock_use_case::repository::{
     ConditionalGateStatsRow, CourseStatsRow, FetchDownload, FetchFailure, FetchRecord,
-    FetchRepository, FetchStatus, HorseHistoryRepository, HorseRecencyStats, HorseStatsRow,
-    JockeyStatsRow, LiveEvPin, LiveEvRepository, LiveEvSnapshot, LiveEvSnapshotRecord, MarkStatRow,
-    MarkStatsFilter, MorningRaceOdds, NameMatchRepository, OddsRepository, PadPredictionRepository,
-    PredictBetRecord, PredictRaceConditionRecord, PredictSessionRecord, PredictSessionRepository,
-    PredictionFilter, PredictionSearchResult, RaceCardRepository, RaceOddsRecord, RaceRepository,
-    RaceResultRepository, StatsRepository, TrainerStatsRow, UnpricedObservation,
+    FetchRepository, FetchStatus, HandicapNoteRow, HorseHistoryRepository, HorseRecencyStats,
+    HorseStatsRow, JockeyStatsRow, LiveEvPin, LiveEvRepository, LiveEvSnapshot,
+    LiveEvSnapshotRecord, MarkStatRow, MarkStatsFilter, MorningRaceOdds, NameMatchRepository,
+    OddsRepository, PadPredictionRepository, PredictBetRecord, PredictRaceConditionRecord,
+    PredictSessionRecord, PredictSessionRepository, PredictionFilter, PredictionSearchResult,
+    RaceCardRepository, RaceOddsRecord, RaceRepository, RaceResultRepository, StatsRepository,
+    TrainerStatsRow, UnpricedObservation,
 };
 
 use crate::pool::PgPool;
@@ -111,6 +113,19 @@ impl StatsRepository for PostgresRepository {
         as_of: Option<NaiveDate>,
     ) -> UcResult<HashMap<HorseName, HorseRecencyStats>> {
         horse_stats::horse_recency_batch(&self.pool, names, as_of)
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn horse_handicap_notes(
+        &self,
+        names: &[HorseName],
+        venue: Venue,
+        surface: Surface,
+        distance: u32,
+        as_of: Option<NaiveDate>,
+    ) -> UcResult<HashMap<HorseName, HandicapNoteRow>> {
+        find_handicap_notes::find_handicap_notes(&self.pool, names, venue, surface, distance, as_of)
             .await
             .map_err(Into::into)
     }
