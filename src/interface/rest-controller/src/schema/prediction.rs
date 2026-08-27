@@ -72,9 +72,9 @@ pub struct PredictionHorseSchema {
     pub popularity: Option<u32>,
     /// 勝率（百分率の表示値。例 `25.4` = 25.4%）。確率推定の `HorseProbabilitySchema` は `[0,1]` で別スケール。
     pub win_prob: Option<f64>,
-    /// 連対率（百分率の表示値）。
+    /// 連対率（百分率の表示値）。確率推定の `HorseProbabilitySchema` は `[0,1]` で別スケール。
     pub place_prob: Option<f64>,
-    /// 複勝率（百分率の表示値）。
+    /// 複勝率（百分率の表示値）。確率推定の `HorseProbabilitySchema` は `[0,1]` で別スケール。
     pub show_prob: Option<f64>,
     pub comment: Option<String>,
 }

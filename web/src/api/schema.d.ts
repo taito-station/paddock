@@ -912,14 +912,14 @@ export interface components {
             mark?: string | null;
             /**
              * Format: double
-             * @description 連対率（百分率の表示値）。
+             * @description 連対率（百分率の表示値）。確率推定の `HorseProbabilitySchema` は `[0,1]` で別スケール。
              */
             place_prob?: number | null;
             /** Format: int32 */
             popularity?: number | null;
             /**
              * Format: double
-             * @description 複勝率（百分率の表示値）。
+             * @description 複勝率（百分率の表示値）。確率推定の `HorseProbabilitySchema` は `[0,1]` で別スケール。
              */
             show_prob?: number | null;
             /** Format: double */

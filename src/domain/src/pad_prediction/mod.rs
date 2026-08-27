@@ -88,8 +88,11 @@ pub struct PredictionHorse {
     pub mark: Option<Mark>,
     pub win_odds: Option<f64>,
     pub popularity: Option<u32>,
+    /// 勝率（百分率の表示値。例 `25.4` = 25.4%）。
     pub win_prob: Option<f64>,
+    /// 連対率（百分率の表示値）。
     pub place_prob: Option<f64>,
+    /// 複勝率（百分率の表示値）。
     pub show_prob: Option<f64>,
     pub comment: Option<String>,
 }
