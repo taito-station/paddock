@@ -17,19 +17,16 @@
 ///   「DB を触らないこと」をテストが強制する契約（`docs_ui.rs` 参照）。
 macro_rules! build_service {
     ($pool:expr) => {{
-        let interactor =
-            paddock_use_case::Interactor::new(rdb_gateway::PostgresRepository::new($pool));
-        actix_web::test::init_service(
-            actix_web::App::new()
-                .app_data(actix_web::web::Data::new(interactor))
-                .configure(
-                    api_server::app::configure_routes::<
-                        rdb_gateway::PostgresRepository,
-                        netkeiba_scraper::UreqNetkeibaScraper,
-                        netkeiba_scraper::UreqNetkeibaScraper,
-                    >,
-                ),
-        )
+        let interactor = actix_web::web::Data::new(paddock_use_case::Interactor::new(
+            rdb_gateway::PostgresRepository::new($pool),
+        ));
+        actix_web::test::init_service(actix_web::App::new().app_data(interactor).configure(
+            api_server::app::configure_routes::<
+                rdb_gateway::PostgresRepository,
+                netkeiba_scraper::UreqNetkeibaScraper,
+                netkeiba_scraper::UreqNetkeibaScraper,
+            >,
+        ))
         .await
     }};
     () => {{
