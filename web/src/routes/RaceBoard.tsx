@@ -199,6 +199,10 @@ export function RaceBoard() {
   const races = useRacesQuery(date);
 
   const d = board.data;
+  const hasCoverageDiff =
+    d != null &&
+    d.morning_unpriced_legs != null &&
+    d.morning_unpriced_legs !== d.unpriced_legs;
   const maxWin = d ? Math.max(0, ...d.horses.map((h) => h.win_prob)) : 0;
   const horses = d ? sortByModelRank(d.horses) : [];
   // 詳細パネル対象の馬を selectedHorse から解決（IIFE を解消し props で受け渡す・#411）。
@@ -390,46 +394,40 @@ export function RaceBoard() {
             {showMorning &&
               d.morning_at != null &&
               d.morning_roi != null &&
-              d.roi != null &&
-              (() => {
-                const hasCoverageDiff =
-                  d.morning_unpriced_legs != null &&
-                  d.morning_unpriced_legs !== d.unpriced_legs;
-                return (
-                  // 意味説明（判断は現時点の値で）を title だけでなくクリック/タップで展開できる注記にする（#477）。
-                  <details className="morning-roi-note muted morning-roi">
-                    {/* morning_roi / roi はいずれも比率（domain Ev.roi）。boardRoiPct で %化する。
-                        title は summary へ付け PC hover 補助。展開 <p> と文言を morningRoiReason で共有する。 */}
-                    <summary
-                      title={morningRoiReason(d.morning_at, d.current_at)}
-                    >
-                      <span className="caret" aria-hidden="true" />
-                      朝ROI {boardRoiPct(d.morning_roi)} → 現ROI{" "}
-                      {boardRoiPct(d.roi)}
-                      {d.morning_hit_prob != null && d.hit_prob != null && (
-                        <>
-                          {" "}
-                          / 的中 {pct(d.morning_hit_prob)} → {pct(d.hit_prob)}
-                        </>
-                      )}
-                      {hasCoverageDiff && (
-                        <span className="coverage-diff"> ※被覆率差</span>
-                      )}
-                    </summary>
-                    <p className="morning-roi-reason">
-                      {morningRoiReason(d.morning_at, d.current_at)}
-                    </p>
-                    {hasCoverageDiff && (
-                      <p className="coverage-diff-detail">
-                        ⚠ 未値付脚数が異なる（朝{" "}
-                        {d.morning_unpriced_legs} 脚 → 現{" "}
-                        {d.unpriced_legs} 脚）。母集団が違うため ROI
-                        の単純比較に注意。
-                      </p>
+              d.roi != null && (
+                // 意味説明（判断は現時点の値で）を title だけでなくクリック/タップで展開できる注記にする（#477）。
+                <details className="morning-roi-note muted morning-roi">
+                  {/* morning_roi / roi はいずれも比率（domain Ev.roi）。boardRoiPct で %化する。
+                      title は summary へ付け PC hover 補助。展開 <p> と文言を morningRoiReason で共有する。 */}
+                  <summary
+                    title={morningRoiReason(d.morning_at, d.current_at)}
+                  >
+                    <span className="caret" aria-hidden="true" />
+                    朝ROI {boardRoiPct(d.morning_roi)} → 現ROI{" "}
+                    {boardRoiPct(d.roi)}
+                    {d.morning_hit_prob != null && d.hit_prob != null && (
+                      <>
+                        {" "}
+                        / 的中 {pct(d.morning_hit_prob)} → {pct(d.hit_prob)}
+                      </>
                     )}
-                  </details>
-                );
-              })()}
+                    {hasCoverageDiff && (
+                      <span className="coverage-diff"> ※被覆率差</span>
+                    )}
+                  </summary>
+                  <p className="morning-roi-reason">
+                    {morningRoiReason(d.morning_at, d.current_at)}
+                  </p>
+                  {hasCoverageDiff && (
+                    <p className="coverage-diff-detail">
+                      ⚠ 未値付脚数が異なる（朝{" "}
+                      {d.morning_unpriced_legs} 脚 → 現{" "}
+                      {d.unpriced_legs} 脚）。母集団が違うため ROI
+                      の単純比較に注意。
+                    </p>
+                  )}
+                </details>
+              )}
             {!d.odds_available && (
               <span className="chip chip-danger">オッズ未取得</span>
             )}
