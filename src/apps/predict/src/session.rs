@@ -10,7 +10,9 @@ use paddock_domain::{
     PortfolioBet, PortfolioConfig, RECOMMENDED_MARKET_BLEND_ALPHA, Race, RaceId, TrackCondition,
     pair_ev_diagnostics,
 };
-use paddock_use_case::{PredictBetRecord, PredictSessionRecord, compose_portfolio};
+use paddock_use_case::{
+    OddsScraper, PayoutFetcher, PredictBetRecord, PredictSessionRecord, compose_portfolio,
+};
 use predict_format::{
     PortfolioFormat, coverage_note, format_explanations, format_portfolio, format_probs,
     format_probs_with_market, format_recent_runs_warning, surface_jp,
@@ -39,8 +41,8 @@ struct DayLookups<'a> {
 ///
 /// 新規開始時は `budget` 必須でセッションを作成し、レース確定ごとに DB へ保存する。
 /// `resume` が true なら保存済みセッションの残高から再開し、処理済みレースをスキップする。
-pub async fn run_session(
-    app: &App,
+pub async fn run_session<S: OddsScraper + PayoutFetcher>(
+    app: &App<S>,
     date: NaiveDate,
     budget: Option<u64>,
     race_budget: u64,
@@ -149,8 +151,8 @@ pub async fn run_session(
     Ok(())
 }
 
-async fn run_race(
-    app: &App,
+async fn run_race<S: OddsScraper + PayoutFetcher>(
+    app: &App<S>,
     race: &Race,
     session: &mut PredictSessionRecord,
     race_budget: u64,
@@ -360,8 +362,8 @@ enum RaceView {
 /// run_race（対話/--skip-all）と run_overview（--overview 再表示・#551）で表示ロジックを共有し、
 /// 重複と drift を防ぐ。`race_cap` は買い目推奨の予算上限、`track_condition` は予想に用いる馬場前提
 /// （呼び出し側が解決済み）。
-async fn render_race_prediction(
-    app: &App,
+async fn render_race_prediction<S: OddsScraper + PayoutFetcher>(
+    app: &App<S>,
     race: &Race,
     track_condition: Option<TrackCondition>,
     race_cap: u64,
@@ -505,8 +507,8 @@ async fn render_race_prediction(
 /// race_cap=race_budget が一致し朝の --skip-all 出力を再現するが、--budget を race_budget 未満で
 /// 開始したセッションは skip-all 側が残高でクランプされるため買い目金額に差異が出うる。
 /// 馬場前提は記録済み（--skip-all/対話が保存した値）→ races の確定値の順で解決するのみ（書かない）。
-pub async fn run_overview(
-    app: &App,
+pub async fn run_overview<S: OddsScraper + PayoutFetcher>(
+    app: &App<S>,
     date: NaiveDate,
     race_budget: u64,
     explain: bool,
@@ -575,7 +577,10 @@ pub async fn run_overview(
 }
 
 /// 同日セッションの収支サマリと買い目明細を表示する（--summary、読み取り専用）。
-pub async fn print_session_summary(app: &App, date: NaiveDate) -> anyhow::Result<()> {
+pub async fn print_session_summary<S: OddsScraper + PayoutFetcher>(
+    app: &App<S>,
+    date: NaiveDate,
+) -> anyhow::Result<()> {
     let date_str = date.format("%Y-%m-%d").to_string();
     let Some(session) = app.interactor.find_predict_session(date).await? else {
         println!("{date_str} のセッションはありません。");
@@ -619,7 +624,10 @@ pub async fn print_session_summary(app: &App, date: NaiveDate) -> anyhow::Result
 
 /// 確定払戻でセッションを事後精算する（--settle、#40）。netkeiba の確定払戻で購入済み
 /// 買い目の payout を自動セットし、収支・回収率を更新する（冪等。未確定はスキップ）。
-pub async fn run_settle(app: &App, date: NaiveDate) -> anyhow::Result<()> {
+pub async fn run_settle<S: OddsScraper + PayoutFetcher>(
+    app: &App<S>,
+    date: NaiveDate,
+) -> anyhow::Result<()> {
     let date_str = date.format("%Y-%m-%d").to_string();
     println!("=== {date_str} 自動精算 ===");
     let report = match app.settle.settle_session(date).await {
