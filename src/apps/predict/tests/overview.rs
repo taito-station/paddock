@@ -527,7 +527,7 @@ fn race_num_from_id(id: &str) -> u32 {
     id.rsplit('-')
         .next()
         .and_then(|s| s.trim_end_matches('R').parse().ok())
-        .unwrap_or(1)
+        .expect("race_num_from_id: invalid race_id format")
 }
 
 async fn seed_race_card(repo: &PostgresRepository, id: &str) {
@@ -618,12 +618,14 @@ async fn overview_no_odds_path_does_not_touch_predict_session_tables(pool: PgPoo
     let before = snapshot(&pool).await;
     assert_seeded_session(&before);
 
-    run_overview(&app, date(), RACE_BUDGET, false)
-        .await
-        .unwrap();
-    assert_eq!(
-        before,
-        snapshot(&pool).await,
-        "NoOdds 経路でも予想セッション 4 テーブルは不変（#561）"
-    );
+    for explain in [false, true] {
+        run_overview(&app, date(), RACE_BUDGET, explain)
+            .await
+            .unwrap();
+        assert_eq!(
+            before,
+            snapshot(&pool).await,
+            "NoOdds 経路でも予想セッション 4 テーブルは不変（explain={explain}, #561）"
+        );
+    }
 }
