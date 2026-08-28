@@ -10,20 +10,20 @@
 //!
 //! ## ネットワークに出ない設計（変更するときは必ず読むこと）
 //!
-//! seed するのは `races` のみで、`race_cards` は **絶対に入れない**。
-//! `find_races_by_date` は `races`（`source='pdf'` に限る）∪ `race_cards` なので
-//! レースは列挙されるが、`render_race_prediction` が最初に呼ぶ `predict_race_views` は
-//! `find_race_card`（`race_cards` のみ参照）が `None` を返すため `NotFound` になり、
-//! `RaceView::NoEntries` で即 return する。オッズ read-through
-//! （`app.odds.race_odds` → `UreqNetkeibaScraper`）はその return より後ろなので到達しない。
-//! `race_cards` を seed すると CI が netkeiba へ実通信するテストになる。
+//! `App<S>` のスクレイパ型パラメータに [`NeverScraper`] を注入する（#561）。
+//! `NeverScraper` は `OddsScraper` / `PayoutFetcher` を実装するが、呼ばれると即 panic する。
+//! これにより CI から netkeiba への実通信を **コンパイル時（型で排除）+ ランタイム（panic）**
+//! の 2 段で防止する。
 //!
-//! この前提は 2 段で見張るが、守備範囲が違うので混同しないこと。
-//! [`assert_no_race_cards`] は `run_overview` の **実行前** に `race_cards` 0 件を確認し、
-//! 「seed に `race_cards` を足した」タイプのドリフトを通信が起きる前に止める。
-//! [`assert_no_odds_read_through`] は実行後に `race_odds` 0 件を確認するカナリアで、
-//! `render_race_prediction` の呼び出し順が壊れた場合を捕まえる狙いだが、
-//! **スクレイプが失敗すると行が増えないため素通りする**。完全な網ではない。
+//! NoEntries 経路のテスト（既存）は `race_cards` を seed しないことでスクレイパ到達前に
+//! return させる。Shown / NoOdds 経路のテスト（#561 追加）は `race_cards` を seed して
+//! `predict_race_views` を通すが、テスト日が過去日のため `cache_only = true` になり
+//! `race_odds_cached` がオッズ read-through を迂回する。NeverScraper が呼ばれることはない。
+//!
+//! NoEntries 経路の追加ガード:
+//! - [`assert_no_race_cards`] は実行前に `race_cards` 0 件を確認し、seed ドリフトを止める。
+//! - [`assert_no_odds_read_through`] は実行後に `race_odds` 0 件を確認するカナリア
+//!   （スクレイプ失敗時は素通りするため完全ではないが、NeverScraper の panic と二重で守る）。
 //!
 //! ## テストが空回りしないための前提 assert
 //!
@@ -31,25 +31,19 @@
 //! 列 DEFAULT に頼っている。既定が変わるとレースが 0 件になり、非干渉 assert は
 //! 「何も起きていないので一致」で緑のまま空回りする。それを防ぐため各テストは
 //! `run_overview` の前に [`assert_race_count`] で期待件数を固定する。
-//!
-//! ## このテストがカバーしないこと
-//!
-//! `RaceView::NoOdds` / `Shown` 経路（出馬表とオッズが揃ったレースの EV 表示）。
-//! そこへ後から書き込みが足された場合は検知できない。`--explain` の固有分岐
-//! （`conditional_gate_stats`）も NoEntries 経路では到達しないので同様。
-//! これらを張るには `App` のスクレイパ（`UreqNetkeibaScraper` 具象固定）を
-//! ジェネリック化してフェイクを注入する必要があり、本 issue のスコープ外。
-//! EV 表示経路そのものの回帰は、全 repository を mock した
-//! `src/use-case/tests/test_predict_race.rs` が DB・ネットワーク非依存で担う。
 
-use chrono::{DateTime, NaiveDate, TimeZone, Utc};
-use netkeiba_scraper::UreqNetkeibaScraper;
-use paddock_domain::{Race, RaceId, Surface, TrackCondition, Venue};
-use paddock_use_case::repository::{
-    PredictBetRecord, PredictRaceConditionRecord, PredictSessionRecord, PredictSessionRepository,
-    RaceRepository,
+use chrono::{DateTime, NaiveDate, NaiveTime, TimeZone, Utc};
+use paddock_domain::{
+    GateNum, HorseEntry, HorseName, HorseNum, Race, RaceCard, RaceId, RacePayouts, Surface,
+    TrackCondition, Venue,
 };
-use paddock_use_case::{Interactor, OddsInteractor, SettleInteractor};
+use paddock_use_case::repository::{
+    OddsRepository, OddsRow, PredictBetRecord, PredictRaceConditionRecord, PredictSessionRecord,
+    PredictSessionRepository, RaceCardRepository, RaceOddsRecord, RaceRepository,
+};
+use paddock_use_case::{
+    Interactor, OddsInteractor, OddsScraper, PayoutFetcher, ScrapedOdds, SettleInteractor,
+};
 use predict::session::run_overview;
 use predict::setup::App;
 use rdb_gateway::PostgresRepository;
@@ -120,22 +114,34 @@ fn race(on: NaiveDate, id: &str, day: u32, race_num: u32) -> Race {
     }
 }
 
+/// netkeiba への実通信を型レベル + ランタイムで遮断するフェイクスクレイパ（#561）。
+///
+/// `OddsScraper` / `PayoutFetcher` を実装するが、呼ばれると即 panic する。
+/// NoEntries 経路ではスクレイパ到達前に return し、Shown / NoOdds 経路では
+/// `cache_only = true`（過去日）のため `race_odds_cached` が迂回する。
+struct NeverScraper;
+
+impl OddsScraper for NeverScraper {
+    async fn scrape(&self, _race_id: &RaceId) -> paddock_use_case::Result<ScrapedOdds> {
+        panic!("NeverScraper: scrape must not be called in tests")
+    }
+}
+
+impl PayoutFetcher for NeverScraper {
+    fn fetch_race_payouts(&self, _netkeiba_race_id: &str) -> paddock_use_case::Result<RacePayouts> {
+        panic!("NeverScraper: fetch_race_payouts must not be called in tests")
+    }
+}
+
 /// テスト用の [`App`]。`build_app` は env（`PADDOCK_DB_URL`）と実 DB を読むので使わず、
 /// `#[sqlx::test]` が用意した一時DBのプールを直接挿す。
 ///
-/// スクレイパは本番と同じ具象型（`App` のフィールドが具象型固定でダブルに差し替えられない）だが、
-/// 本テストは NoEntries 経路しか通らないため呼ばれない。
-fn test_app(pool: &PgPool) -> App {
+/// スクレイパは [`NeverScraper`] を注入し、ネットワーク通信を型レベルで遮断する（#561）。
+fn test_app(pool: &PgPool) -> App<NeverScraper> {
     App {
         interactor: Interactor::new(PostgresRepository::new(pool.clone())),
-        odds: OddsInteractor::new(
-            UreqNetkeibaScraper::new(),
-            PostgresRepository::new(pool.clone()),
-        ),
-        settle: SettleInteractor::new(
-            UreqNetkeibaScraper::new(),
-            PostgresRepository::new(pool.clone()),
-        ),
+        odds: OddsInteractor::new(NeverScraper, PostgresRepository::new(pool.clone())),
+        settle: SettleInteractor::new(NeverScraper, PostgresRepository::new(pool.clone())),
     }
 }
 
@@ -328,8 +334,7 @@ async fn assert_no_race_cards(pool: &PgPool) {
         .unwrap();
     assert_eq!(
         cards, 0,
-        "race_cards を seed してはならない。入れると predict_race_views が成功し、\
-         オッズ read-through 経由で CI が netkeiba へ実通信する（冒頭の設計注記参照）"
+        "NoEntries 経路テストでは race_cards を seed してはならない（冒頭の設計注記参照）"
     );
 }
 
@@ -341,7 +346,11 @@ async fn assert_no_race_cards(pool: &PgPool) {
 ///
 /// `run_overview` と同じ入口（`Interactor::races_by_date`）を通す。repository を直接叩くと、
 /// interactor 側にフィルタが入ったときに前提と実経路が乖離する。
-async fn assert_race_count(app: &App, on: NaiveDate, expected_races: usize) {
+async fn assert_race_count(
+    app: &App<impl OddsScraper + PayoutFetcher>,
+    on: NaiveDate,
+    expected_races: usize,
+) {
     let found = app.interactor.races_by_date(on).await.unwrap();
     assert_eq!(
         found.len(),
@@ -475,4 +484,148 @@ async fn overview_returns_ok_and_writes_nothing_when_no_races_on_date(pool: PgPo
         "開催なし日の早期 return でも予想セッション 4 テーブルを書き換えない（#555）"
     );
     assert_no_odds_read_through(&pool).await;
+}
+
+// ---------------------------------------------------------------------------
+// Shown / NoOdds 経路テスト用ヘルパー（#561）
+// ---------------------------------------------------------------------------
+
+fn entry(num: u32, name: &str) -> HorseEntry {
+    HorseEntry {
+        gate_num: GateNum::try_from(num).unwrap(),
+        horse_num: HorseNum::try_from(num).unwrap(),
+        horse_name: HorseName::try_from(name.to_string()).unwrap(),
+        jockey: None,
+        trainer: None,
+        weight_carried: None,
+    }
+}
+
+fn card(id: &str) -> RaceCard {
+    let rid = race_id(id);
+    RaceCard {
+        race_id: rid,
+        date: date(),
+        post_time: Some(NaiveTime::from_hms_opt(10, 0, 0).unwrap()),
+        venue: Venue::Nakayama,
+        round: 3,
+        day: 8,
+        race_num: race_num_from_id(id),
+        surface: Surface::Turf,
+        distance: 2000,
+        race_class: None,
+        race_name: None,
+        entries: vec![
+            entry(1, "テストウマA"),
+            entry(2, "テストウマB"),
+            entry(3, "テストウマC"),
+        ],
+    }
+}
+
+fn race_num_from_id(id: &str) -> u32 {
+    id.rsplit('-')
+        .next()
+        .and_then(|s| s.trim_end_matches('R').parse().ok())
+        .expect("race_num_from_id: invalid race_id format")
+}
+
+async fn seed_race_card(repo: &PostgresRepository, id: &str) {
+    repo.save_race_card(&card(id)).await.unwrap();
+}
+
+async fn seed_race_odds(repo: &PostgresRepository, id: &str) {
+    let record = RaceOddsRecord {
+        race_id: race_id(id),
+        fetched_at: fixed_at(0),
+        rows: vec![
+            OddsRow {
+                bet_type: "win".into(),
+                combination_key: "1".into(),
+                odds: 3.5,
+                odds_high: None,
+                popularity: Some(2),
+            },
+            OddsRow {
+                bet_type: "win".into(),
+                combination_key: "2".into(),
+                odds: 2.1,
+                odds_high: None,
+                popularity: Some(1),
+            },
+            OddsRow {
+                bet_type: "win".into(),
+                combination_key: "3".into(),
+                odds: 8.0,
+                odds_high: None,
+                popularity: Some(3),
+            },
+        ],
+    };
+    repo.save_race_odds(&record).await.unwrap();
+}
+
+/// Shown 経路（出馬表＋オッズあり）でも `--overview` は予想セッション 4 テーブルを書き換えない。
+///
+/// `race_cards` と `race_odds` を seed して `predict_race_views` → `RaceView::Shown` まで
+/// 到達させる。テスト日が過去日なので `cache_only = true` → `race_odds_cached` で
+/// DB キャッシュのみ参照し、[`NeverScraper`] は呼ばれない。
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn overview_shown_path_does_not_touch_predict_session_tables(pool: PgPool) {
+    let repo = PostgresRepository::new(pool.clone());
+    let app = test_app(&pool);
+
+    seed_races_on_date(&repo).await;
+    seed_recorded_session(&repo).await;
+    for id in [RACE_RECORDED, RACE_RECORDED_UNKNOWN, RACE_UNRECORDED] {
+        seed_race_card(&repo, id).await;
+        seed_race_odds(&repo, id).await;
+    }
+    assert_race_count(&app, date(), 3).await;
+
+    let before = snapshot(&pool).await;
+    assert_seeded_session(&before);
+
+    for explain in [false, true] {
+        run_overview(&app, date(), RACE_BUDGET, explain)
+            .await
+            .unwrap();
+        assert_eq!(
+            before,
+            snapshot(&pool).await,
+            "Shown 経路でも予想セッション 4 テーブルは不変（explain={explain}, #561）"
+        );
+    }
+}
+
+/// NoOdds 経路（出馬表ありだがオッズなし）でも `--overview` は予想セッション 4 テーブルを
+/// 書き換えない。
+///
+/// `race_cards` を seed し `race_odds` は seed しない。`cache_only = true` なので
+/// スクレイパには到達せず、`find_race_odds` が空を返して `RaceView::NoOdds` になる。
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn overview_no_odds_path_does_not_touch_predict_session_tables(pool: PgPool) {
+    let repo = PostgresRepository::new(pool.clone());
+    let app = test_app(&pool);
+
+    seed_races_on_date(&repo).await;
+    seed_recorded_session(&repo).await;
+    for id in [RACE_RECORDED, RACE_RECORDED_UNKNOWN, RACE_UNRECORDED] {
+        seed_race_card(&repo, id).await;
+    }
+    assert_race_count(&app, date(), 3).await;
+
+    let before = snapshot(&pool).await;
+    assert_seeded_session(&before);
+
+    for explain in [false, true] {
+        run_overview(&app, date(), RACE_BUDGET, explain)
+            .await
+            .unwrap();
+        assert_eq!(
+            before,
+            snapshot(&pool).await,
+            "NoOdds 経路でも予想セッション 4 テーブルは不変（explain={explain}, #561）"
+        );
+    }
 }
