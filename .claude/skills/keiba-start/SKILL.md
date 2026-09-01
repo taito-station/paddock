@@ -178,6 +178,8 @@ else
   running_sha=${running_sha%-dirty}
   if [ "$running_sha" = "PARSE_ERROR" ]; then
     echo "⚠ /api/health のレスポンスをパースできない（レスポンス: $health）"
+  elif [ "$running_sha" = "MISSING" ]; then
+    echo "⚠ /api/health が git_sha を返していない（#570 以前のバイナリの可能性）"
   elif [ "$running_sha" = "$expected_sha" ]; then
     echo "OK: api-server の世代が一致（$running_sha）"
   else
