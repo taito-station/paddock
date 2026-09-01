@@ -173,7 +173,8 @@ done
 if [ -z "$health" ]; then
   echo "⚠ api-server が応答しない（起動失敗を疑う）"
 else
-  running_sha=$(echo "$health" | python3 -c "import json,sys;print(json.load(sys.stdin)['git_sha'])")
+  running_sha=$(echo "$health" | python3 -c "import json,sys;print(json.load(sys.stdin).get('git_sha','MISSING'))")
+  running_sha=${running_sha%-dirty}
   if [ "$running_sha" = "$expected_sha" ]; then
     echo "OK: api-server の世代が一致（$running_sha）"
   else
