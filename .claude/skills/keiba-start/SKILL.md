@@ -161,12 +161,33 @@ nohup paddock-api >> ~/Library/Logs/paddock-api-$(date +%Y%m%d).log 2>&1 &   # �
   nohup npm run dev -- --port 5173 --strictPort >> ~/Library/Logs/paddock-vite-$(date +%Y%m%d).log 2>&1 &)
 ```
 
-**立ち上がりを確認する。**「HTTP 200」は疎通確認にしかならない（#570 のとおり**古いプロセスでも 200 を返す**）。世代の確認は起動時刻で行う:
+**立ち上がりを確認する。** `/api/health` が返す `git_sha` と現在の HEAD を比較し、世代が一致しているかを機械的に判定する:
 
 ```sh
+expected_sha=$(git -C "$ROOT" rev-parse --short HEAD)
+health=""
+for i in $(seq 30); do
+  health=$(curl -sf "http://127.0.0.1:8080/api/health") && break
+  sleep 1
+done
+if [ -z "$health" ]; then
+  echo "⚠ api-server が応答しない（起動失敗を疑う）"
+else
+  running_sha=$(echo "$health" | python3 -c "import json,sys;print(json.load(sys.stdin)['git_sha'])")
+  if [ "$running_sha" = "$expected_sha" ]; then
+    echo "OK: api-server の世代が一致（$running_sha）"
+  else
+    echo "⚠ api-server の世代が不一致: 期待=$expected_sha 実行中=$running_sha（古いプロセスが残存）"
+  fi
+fi
+```
+
+```sh
+# Vite は build info を持たないので proxy 疎通で確認する
 ok=0
 for i in $(seq 30); do curl -sf -o /dev/null "http://127.0.0.1:5173/api/live/$(date +%F)" && { ok=1; break; }; sleep 1; done
 [ "$ok" = 1 ] || echo '⚠ Vite→api の proxy が応答しない（PADDOCK_API_TARGET / 旧 Vite 残存を疑う）'
+# ポート LISTEN 確認
 for port in 8080 5173; do
   pid=$(lsof -ti tcp:$port -sTCP:LISTEN | head -1)
   if [ -n "$pid" ]; then ps -o pid,lstart,command -p "$pid"; else echo "⚠ :$port が LISTEN していない"; fi
@@ -177,9 +198,7 @@ done
 - `--strictPort` は旧 Vite が生きていると新 Vite が即死する。**必ず先に 5173 を落としてから**起動する（落とさないと旧 Vite が 200 を返して合格に見える）
 - api/Vite のログは**実行日**で切る（常駐の寿命がセッション単位のため）。監視系（Step 1.5 / Step 5）は**対象開催日**で切る（前夜に仕込む場合があるため）。前夜起動時は両者の日付がずれる
 
-**理由**: 2026-08-02 に api-server と Vite が **15 日前起動のまま**残存し、リビルド済みの成果物が反映されていなかった（#570）。DB 側の migration が進まない限り stale binary 警告は出ないため、この種の陳腐化は起動時ガードでは検知できない。
-
-> #570 の恒久対策（`/api/health` にビルド情報を載せる等）が入ったら、この節の手動確認は差し替える。
+**理由**: 2026-08-02 に api-server と Vite が **15 日前起動のまま**残存し、リビルド済みの成果物が反映されていなかった（#570）。DB 側の migration が進まない限り stale binary 警告は出ないため、この種の陳腐化は起動時ガードでは検知できない。`/api/health` のビルド情報で機械的に検知する（#570 恒久対策）。
 
 ---
 
