@@ -11,8 +11,8 @@ if echo "$output" | grep -q "STALE な文書は無い"; then
   exit 0
 fi
 
-stale_count=$(echo "$output" | grep -c "^STALE:" || true)
+stale_count=$(echo "$output" | grep -c "^（dry-run）" || true)
 if [ "$stale_count" -gt 0 ]; then
   echo "⚠ 蒸留が必要な knowledge: ${stale_count} 件（/akm で解消）"
-  echo "$output" | grep "^STALE:" | sed 's/^STALE: /  - /'
+  echo "$output" | grep "^（dry-run）" | sed 's/^（dry-run）/  - /'
 fi

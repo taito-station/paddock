@@ -273,13 +273,6 @@ updated: "YYYY-MM-DD"    # 内容を実質更新した日（YAML の date 型を
    読む人が最初に見るのは本文のほう。決定ログだけ積んで本文を古いまま残さない。
    **エントリは書いた本人がその場で書き切る**（コンテキスト・決定・理由・却下した代替案・影響）。
    ここは機械検査が届かない範囲で、後から補完する機会は実質来ない。
-
-**自動化と強制**（#678）: 上記ステップ 1〜5 の蒸留サイクルは `/akm` スキルで一括実行できる。
-加えて、SessionStart hook がセッション開始時に stale を報告し、PostToolUse hook が
-`docs/docs-original/` や `docs/qa/` の編集時に影響する knowledge を警告する。
-実装時の規律（確認義務・同期義務・決定ログ即時記録・stale ゼロ PR）は
-`CLAUDE.md`「knowledge 参照・更新の規律（HVE AKM 準拠）」節に定める。
-
 6. **sources 追従**: knowledge の `sources` に列挙されたファイルを**内容ごと**変更する PR は、参照元
    knowledge の `distilled_from_sha` を現 HEAD に更新する（**機械検査の対象はこちらだけ**）。本文が変わる場合は差分マージを
    行って `updated` も進め、**本文が変わらない場合は `distilled_from_sha` の bump のみ**（`updated` は
@@ -331,6 +324,12 @@ updated: "YYYY-MM-DD"    # 内容を実質更新した日（YAML の date 型を
      していないため。sha を進めると「その SHA の状態を反映している」ことになり、
      まさに乖離しているという事実と矛盾する。`Confirmed` に戻すとき（＝実際に差分マージした
      とき）に sha を現 HEAD へ進める。実例は [`app-bootstrap.md`](app-bootstrap.md)（解消は #578）。
+
+**自動化と強制**（#678）: 上記ステップ 1〜5 の蒸留サイクルは `/akm` スキルで一括実行できる。
+加えて、SessionStart hook がセッション開始時に stale を報告し、PostToolUse hook が
+`docs/docs-original/` や `docs/qa/` の編集時に影響する knowledge を警告する。
+実装時の規律（確認義務・同期義務・決定ログ即時記録・stale ゼロ PR）は
+`CLAUDE.md`「knowledge 参照・更新の規律（HVE AKM 準拠）」節に定める。
 
 ---
 

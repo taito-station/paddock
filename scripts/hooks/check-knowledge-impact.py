@@ -8,16 +8,19 @@ stdout に JSON（decision）を返す。
 import json
 import os
 import re
+import subprocess
 import sys
 
 
 def find_repo_root():
-    d = os.path.dirname(os.path.abspath(__file__))
-    while d != os.path.dirname(d):
-        if os.path.isdir(os.path.join(d, ".git")):
-            return d
-        d = os.path.dirname(d)
-    return None
+    try:
+        return subprocess.check_output(
+            ["git", "rev-parse", "--show-toplevel"],
+            stderr=subprocess.DEVNULL,
+            text=True,
+        ).strip()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return None
 
 
 def extract_file_path(hook_input):
@@ -47,15 +50,15 @@ def find_affected_knowledge(file_path, repo_root):
             fpath = os.path.join(dirpath, fname)
             try:
                 with open(fpath, encoding="utf-8") as f:
-                    content = f.read(4096)
+                    content = f.read()
             except OSError:
                 continue
 
             m = re.match(r"^---\n(.*?\n)---", content, re.DOTALL)
             if not m:
                 continue
-            frontmatter = m.group(1)
-            if rel_path in frontmatter:
+            frontmatter_lines = m.group(1).splitlines()
+            if any(line.strip().startswith("- ") and rel_path in line for line in frontmatter_lines):
                 affected.append(os.path.join(subdir, fname))
 
     return affected
