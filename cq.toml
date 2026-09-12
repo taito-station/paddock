@@ -1,0 +1,13 @@
+# cq configuration for paddock.
+#
+# `cq` indexes source code only. Markdown stays with `mdq` (see mdq.toml)
+# so that neither corpus pollutes the other's IDF.
+
+[index]
+max_file_bytes = 2097152
+
+[profiles.paddock]
+roots = ["src", "scripts", "web/src"]
+exclude = [
+    "web/src/generated/**",
+]
