@@ -1,7 +1,9 @@
 # knowledge — 蒸留済み確定知の規約
 
 dahatake/HypervelocityEngineering（HVE, MIT）の docs-original → qa → knowledge 蒸留モデルを
-paddock に導入したもの。**蒸留は Claude Code が担う**（HVE 本体の LLM オーケストレータは持ち込まない）。
+paddock に導入したもの。**蒸留は Claude Code が担う**——`/akm` スキル
+（[.claude/skills/akm/SKILL.md](../../.claude/skills/akm/SKILL.md)）で自動化し、
+hook で強制する（#678）。HVE 本体の LLM オーケストレータは持ち込まない。
 
 ## 2 層モデル
 
@@ -323,6 +325,12 @@ updated: "YYYY-MM-DD"    # 内容を実質更新した日（YAML の date 型を
      まさに乖離しているという事実と矛盾する。`Confirmed` に戻すとき（＝実際に差分マージした
      とき）に sha を現 HEAD へ進める。実例は [`app-bootstrap.md`](app-bootstrap.md)（解消は #578）。
 
+**自動化と強制**（#678）: 上記ステップ 1〜5 の蒸留サイクルは `/akm` スキルで一括実行できる。
+加えて、SessionStart hook がセッション開始時に stale を報告し、PostToolUse hook が
+`docs/docs-original/` や `docs/qa/` の編集時に影響する knowledge を警告する。
+実装時の規律（確認義務・同期義務・決定ログ即時記録・stale ゼロ PR）は
+`CLAUDE.md`「knowledge 参照・更新の規律（HVE AKM 準拠）」節に定める。
+
 ---
 
 ## 決定ログ
@@ -444,3 +452,57 @@ ADR を独立した文書種別として廃止し、決定・理由・却下案�
 - 旧 ADR 番号（ADR 0001〜0090）は各ファイルの決定ログ見出しから検索可能
 - check-adr-numbers.sh / check-doc-classes.py の orphan 検査は撤去
 - 新規の決定は知識文書の決定ログ節に直接 append する（ADR ファイルは作らない）
+
+### #678: HVE AKM（Autonomous Knowledge Management）の完全導入 (2026-09-13) — 採用
+
+#### コンテキスト
+
+paddock は HVE の蒸留モデル（docs-original → qa → knowledge）を導入済みで、frontmatter 規約・
+機械検査（`check-doc-classes.py`、`check-decision-log-immutability.py`）・REQ-ID 体系も整備されている。
+しかし**蒸留サイクルの実行は場当たり的**で、「knowledge を確認してから実装する」「実装後に
+knowledge を同期する」「決定ログを即時記録する」といった規律が形骸化していた。
+HVE の AKM（Autonomous Knowledge Management）は LLM オーケストレータが自律的に knowledge の
+鮮度・整合性を維持する仕組みだが、paddock は Claude Code ベースで HVE 本体の
+オーケストレータを持たない。
+
+#### 決定
+
+HVE AKM の原則を Claude Code のエコシステム（CLAUDE.md ルール + skill + hook）で再現する。
+
+1. **CLAUDE.md に強制ルール 5 項目を追加**: 実装前 knowledge 確認義務、実装後 knowledge 同期義務、
+   決定ログ即時記録、stale ゼロ PR、蒸留サイクル完走義務。
+2. **`/akm` スキルを新設**: Stale 検出 → 蒸留（差分マージ）→ 横断整合性レビュー → カバレッジ分析の
+   4 ステップを 1 コマンドで実行。蒸留対象 3 本以上はサブエージェント委譲。
+3. **SessionStart hook**: セッション開始時に `bump-distilled-sha.py --all-stale --dry-run` を実行し、
+   stale があれば件数とファイルを報告する。
+4. **PostToolUse hook**: `docs/docs-original/` または `docs/qa/` の Write/Edit 時に、影響する
+   knowledge を警告する。
+
+#### 理由
+
+- **「知ってるけど守らない」を「仕組みが守らせる」に変える**のが目的。人手の規律は
+  「知っているのに忘れる」で失敗する。CLAUDE.md ルール（毎セッション読み込み）+ hook（自動発火）で
+  忘却を防ぐ。
+- HVE の io-contracts（Agent 間の入出力契約）は paddock が単一開発者プロジェクトのため不要。
+  ChangeLog per D-class も git log が変更履歴の正本なので二重管理になる。
+- `/akm` スキルに統合することで、蒸留・整合性・カバレッジを個別に呼ぶオーバーヘッドを減らす。
+  分離が必要になったら Step 3/4 を独立スキルに切り出す。
+
+#### 却下した代替案
+
+- **HVE のオーケストレータをそのまま持ち込む**: HVE は GitHub Copilot + VS Code 前提で、
+  Claude Code の skill/hook/agent 体系と合わない。翻訳コストが移植コストを大幅に下回る。
+- **hook なしでルールだけ追加する**: CLAUDE.md は毎セッション読み込まれるが、読むだけでは
+  「docs-original を編集した後に蒸留を忘れる」を防げない。PostToolUse hook が編集時に警告する
+  ことで忘却を自動検出する。
+- **QA 生成を全自動化する**: QA の回答はドメイン専門家の判断が必要。自動生成→自動回答は
+  精度リスクが高いため、Step 4 の「提案」に留めた。
+
+#### 影響
+
+- **新規ファイル**: `.claude/settings.json`（hooks）、`.claude/skills/akm/`（SKILL.md + references/）、
+  `scripts/hooks/`（session-stale-check.sh + check-knowledge-impact.py）
+- **変更ファイル**: `CLAUDE.md`（「knowledge 参照・更新の規律」節追加）、`docs/knowledge/README.md`
+  （本文に AKM 参照追加 + 本決定ログ）
+- **運用**: 全セッションで stale 報告が自動化される。source 編集時に蒸留漏れが警告される。
+  `/akm` で定期メンテナンスを一括実行できる

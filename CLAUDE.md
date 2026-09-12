@@ -45,6 +45,30 @@ paddock の文書は HVE（dahatake/HypervelocityEngineering, MIT）の蒸留モ
   で作り直す。増分の prune は roots 配下しか消さないため、削除済み ADR のチャンクが居残って
   存在しないパスが検索結果に出続ける。
 
+### knowledge 参照・更新の規律（HVE AKM 準拠）
+
+HVE の Autonomous Knowledge Management（AKM）の原則を paddock に適用する。
+「知ってるけど守らない」を防ぐための強制ルール。蒸留サイクルの詳細は
+[.claude/skills/akm/SKILL.md](.claude/skills/akm/SKILL.md)（`/akm` で起動）。
+
+1. **実装前 knowledge 確認義務**: コードを書き始める前に、関連する D クラスの確定知を読む。
+   特に D22（予測モデル）/ D23（買い方）/ D24（実験記録）は実装判断に直結する。
+   `scripts/mdq search --q "<テーマ>"` で横断検索してから着手する。
+   読まずに実装を始めない——knowledge が持つ棄却済み代替案を再提案する無駄を防ぐ。
+2. **実装後 knowledge 同期義務**: 実装で確定知の前提が変わったら（新しい定数・閾値・ルール・
+   棄却）、**同じ PR で knowledge を差分マージする**。「あとで更新」はしない——
+   `app-bootstrap.md` の `NoopParser` 事故と同型で、古い knowledge が次のセッションを誤導する。
+3. **決定ログ即時記録**: 設計判断・ルール変更・実験の採用/棄却を伴う実装は、その決定が効く
+   knowledge/specifications の決定ログに**同じ PR で append** する。コンテキスト・決定・理由・
+   却下案・影響を書き切る（機械検査が届かない範囲なので、書き忘れは誰も検出しない）。
+4. **stale ゼロ PR**: PR を出す前に `scripts/bump-distilled-sha.py --all-stale --dry-run` で
+   stale が 0 件であることを確認する。stale があれば差分マージまたは sha bump で解消する
+   （pre-push で `check-doc-classes.py` が走るので push 前に落ちる）。
+5. **蒸留サイクル完走義務**: `docs/docs-original/` に一次資料を書いたら、`docs/qa/` の質問票
+   → `docs/knowledge/` or `docs/specifications/` の差分マージまで**同じ PR で回し切る**。
+   途中で止めない。一次資料だけ置いて蒸留しないと、読む側が生ファイルを直接読む癖がつき、
+   蒸留層が形骸化する。
+
 ## DB 運用
 
 - **migration 追加後は共有 DB へ `paddock-analyze migrate` で明示適用する**（起動時は自動適用されない・#470/ADR 0070）。`--dry-run` で未適用一覧のみ確認できる。
