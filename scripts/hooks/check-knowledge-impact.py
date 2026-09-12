@@ -25,7 +25,7 @@ def find_repo_root():
 
 def extract_file_path(hook_input):
     """tool_input からファイルパスを抽出する。"""
-    tool_input = hook_input.get("tool_input", {})
+    tool_input = hook_input.get("tool_input") or {}
     return tool_input.get("file_path", "")
 
 
