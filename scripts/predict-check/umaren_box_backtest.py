@@ -40,8 +40,6 @@ from pathlib import Path
 
 from pred_header import HEADER_NUM_VENUE, NoHeaderFound, split_by_header
 
-BUDGET = 5000
-
 
 # --- 入力パース（konsen_backtest.py と同一実装のコピー） ----------------------------
 def parse_races(path):
@@ -403,6 +401,7 @@ def main():
             axis_top3 += 1
         else:
             axis_off += 1
+            # axis-off なので first/second != axis → marked[1:] でも結果同一（hit5 == hit6）
             if is_box_opportunity(axis, marked, first, second, top3):
                 hit6 += 1
 
