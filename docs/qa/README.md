@@ -23,4 +23,4 @@
   `distilled_from_sha` を更新する。
 - 矛盾が出たら反映先 knowledge を `status: Conflict` にして解消する。
 - **qa 自体は生ファイル**。運用ルールや確定知を qa に書き残さない（確定知は knowledge、決定は
-  ADR＝`docs/docs-original/0NNN-*.md` の役割。ADR 0073 以降、ADR は一次資料層に属する）。
+  各 knowledge/specifications の決定ログに直接 append する。ADR は #652 で廃止）。

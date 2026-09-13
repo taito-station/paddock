@@ -269,7 +269,7 @@ API なのでブラウザ UI は無い。`tests/browser-test-cases/` は追加�
 - #145 本 Issue（横断検索） / 依存: #144（予想 DB 永続化, 完了）
 - #34 Web SPA（一覧 → 個別の画面遷移・分析ビュー） / #33 REST API(read, 完了) / #50 名前あいまい検索（完了, 正規化流用）
 - `~/.claude/rules/rust/architecture.md`・`conventions.md` / `~/.claude/rules/sql/{queries,schema,migrations}.md`
-- ADR: `docs/docs-original/0025-prediction-search-api.md`
+- ADR: 決定ログ ADR 0025（[prediction-json.md](prediction-json.md)）
 
 ## 決定ログ
 

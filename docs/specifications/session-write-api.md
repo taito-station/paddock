@@ -140,7 +140,7 @@ read API（#33）は `InvalidArgument`/`NotFound`/`Internal`（+ `Fetch`/`Timeou
 ## 関連
 
 - 正本: [`predict-session.md`](predict-session.md)（CLI セッションの不変条件）・[`web-spa.md`](web-spa.md)（API 一覧）・[`rest-api-read.md`](rest-api-read.md)（read 基盤）
-- ADR: `docs/docs-original/0023-session-write-api.md`
+- ADR: 決定ログ ADR 0023（本ファイル）
 - 依存 Issue: #33（基盤）/ #51（odds:refresh）/ #40（results:refresh）
 
 ---
