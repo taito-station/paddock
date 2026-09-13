@@ -1,8 +1,8 @@
 """predict の確率テーブル見出し行を読む正規表現と、その解析ヘルパ（#587）。
 
-`paddock-predict` の stdout を機械パースする 6 スクリプト（extract_preds / live_ev /
-win_backtest / umaren_backtest / konsen_backtest / formation_backtest）が同じ見出し契約を
-持つので、regex をここに 1 本化する。
+`paddock-predict` の stdout を機械パースする 7 スクリプト（extract_preds / live_ev /
+win_backtest / umaren_backtest / konsen_backtest / formation_backtest /
+umaren_box_backtest）が同じ見出し契約を持つので、regex をここに 1 本化する。
 
 **なぜ共有するか**: 元は 6 か所に同じ regex が複製されており、#587 で見出し末尾に
 「（発走 HH:MM）」「[発走済]」が付いた際に 6 本が同時に壊れた。しかも**壊れ方が例外ではなく
