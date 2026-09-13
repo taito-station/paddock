@@ -335,7 +335,7 @@ def test_empty_value_gets_a_space_after_colon() -> None:
 
 
 def test_body_after_frontmatter_basic() -> None:
-    """frontmatter を剥がした本文だけを返す（#682）。"""
+    """frontmatter の閉じ区切り以降を返す（#682）。"""
     with_fm = '---\nstatus: Confirmed\nupdated: "2026-01-01"\n---\n\n# Title\n\n本文。\n'
     assert _bump.body_after_frontmatter(with_fm) == '---\n\n# Title\n\n本文。\n'
     without_fm = "# Title\n\n本文のみ。\n"
@@ -373,6 +373,19 @@ def test_stale_bump_with_body_change_does_not_warn() -> None:
         # doc-classes.md（レジストリ自身）も同じ source を持つため別途 stale になるが、
         # その本文は更新していないので警告が出て正しい。ここで見るのは a.md への影響だけ。
         assert "⚠ docs/knowledge/a.md" not in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_dryrun_does_not_warn_atrophy() -> None:
+    """--dry-run では形骸化警告を出さない（#682）。"""
+    repo = new_repo()
+    try:
+        baseline(repo)
+        make_stale(repo)
+        code, out = run(repo, "--all-stale", "--dry-run")
+        assert code == 0, out
+        assert "⚠" not in out, out
     finally:
         shutil.rmtree(repo)
 
