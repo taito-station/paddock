@@ -49,6 +49,7 @@ def _rows(repo: Path, sql: str, *params) -> list[tuple]:
         return [tuple(r) for r in conn.execute(sql, params)]
 
 
+@pytest.mark.skipif(not GENERATOR.exists(), reason="HVE-only: generator excluded from vendoring")
 class TestPatternsAreSingleSourced:
     def test_generator_does_not_redeclare_the_feature_id_pattern(self) -> None:
         """規範 ID の抽出パターンを二重定義しない（FR-CQ-07 / FR-MAINT-06）。"""
@@ -89,7 +90,10 @@ class TestExtraction:
         found = traces.extract(line)
         assert (found[0].trace_id, found[0].doc_path, found[0].anchor) == expected
 
-    @pytest.mark.parametrize("text", ["FR-MAINT-07", "NFR-CTX-01", "APP-009", "SVC-02", "UC-12"])
+    @pytest.mark.parametrize("text", [
+        "FR-MAINT-07", "NFR-CTX-01", "APP-009", "SVC-02", "UC-12",
+        "REQ-D23-001", "C-12", "IT-AUTH-01", "E2E-FLOW-01",
+    ])
     def test_bare_identifiers_are_extracted(self, text: str) -> None:
         assert [t.trace_id for t in traces.extract(f"see {text} for details")] == [text]
 
@@ -103,6 +107,10 @@ class TestExtraction:
     def test_extraction_is_deterministic(self) -> None:
         text = "# FR-MAINT-07\n# 出典: docs/a.md#TEST-A-001\n"
         assert traces.extract(text) == traces.extract(text)
+
+    @pytest.mark.parametrize("text", ["REQ-D23-002", "ADR 0055", "C-42"])
+    def test_paddock_trace_ids_route_correctly(self, text: str) -> None:
+        assert search.choose_route(text, None) == "trace"
 
 
 class TestIndexedGraph:
