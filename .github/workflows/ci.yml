@@ -203,6 +203,10 @@ jobs:
         run: python3 scripts/check-doc-classes.py
       - name: Check decision log immutability (#652)
         run: python3 scripts/check-decision-log-immutability.py
+      - name: Hook unit tests (#680)
+        run: |
+          bash scripts/test-hooks-session-stale-check.sh
+          python3 scripts/test-hooks-check-knowledge-impact.py
 
   # stdlib のみの Python テストを ubuntu-latest 同梱の python3 で走らせる軽量ジョブ（#416 / #464）。
   # 対象は 2 群:
