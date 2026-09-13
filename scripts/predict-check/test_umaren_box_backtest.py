@@ -174,6 +174,17 @@ def test_get_marked_horses():
     assert 8 not in marked
 
 
+def test_summarize():
+    """_summarize: ROI / 的中率 / stdev / 損益を正しく計算"""
+    import umaren_box_backtest as U
+    rows = [(5000, 5000), (0, 5000), (10000, 5000)]
+    roi, hit, sd, pnl = U._summarize(rows)
+    assert abs(roi - 100.0) < 0.01  # 15000/15000 = 100%
+    assert abs(hit - 66.67) < 0.1  # 2/3 hits
+    assert sd > 0
+    assert pnl == 0  # 15000 - 15000
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     passed = failed = 0

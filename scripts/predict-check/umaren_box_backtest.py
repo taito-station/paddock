@@ -215,11 +215,15 @@ def _leg_trio_box(probs, pay, budget_yen):
 
 
 def settle_baseline(probs, top3, pay, konsen):
-    """現行ルール（konsen_backtest.py settle_race と同一構造）で1レースを清算。
+    """現行ルール（production build_portfolio 準拠）で1レースを清算。
+
+    konsen_backtest.py settle_race と同種だが 2 点異なる:
+    - ワイド相手は top5（ADR 0065 準拠。konsen_backtest は top3）
+    - 配分は uniform_alloc（production 忠実。konsen_backtest は largest_remainder）
 
     konsen=True: 3連複ボックス¥1500 追加 + wide/umaren ¥1000 / sanrenpuku ¥1500
     konsen=False: wide/umaren ¥1500 / sanrenpuku ¥2000（全て ◎軸ながし）
-    top3 は現行実装では未使用（settle_race 同様、呼び出しインタフェースの対称性のために残す）。
+    top3 は現行実装では未使用（呼び出しインタフェースの対称性のために残す）。
     """
     axis = max(probs, key=lambda n: probs[n])
     parts = sorted([n for n in probs if n != axis], key=lambda n: -probs[n])[:5]
@@ -268,6 +272,8 @@ def settle_variant(probs, marked, top3, pay, konsen, replace_leg, n_heads):
     挙動にフォールバックする——同じレース集合で比較するため、混戦レースを box variant から
     除外するのではなく baseline 値をそのまま返す。
     """
+    assert replace_leg in ("wide", "umaren", "sanrenpuku"), replace_leg
+
     if konsen:
         return settle_baseline(probs, top3, pay, konsen=True)
 
