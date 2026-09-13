@@ -33,5 +33,9 @@ logs/
 .mdq/
 tools/mdq/.venv/
 
+# cq (Code Query) の索引 DB と venv（セッション毎に再ビルド前提・共有しない）
+.cq/
+tools/cq/.venv/
+
 # late_money_probe.py の netkeiba 結果ページローカルキャッシュ（#315）
 scripts/predict-check/.cache_nk_results/

@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# cq (Code Query) ラッパ。リポジトリ内のソースコードを BM25 + symbol で横断検索する（完全ローカル）。
+# 実体は tools/cq/cq（HVE 由来・MIT。tools/cq/NOTICE 参照）。
+#
+# cq は標準ライブラリのみで動作する。venv は任意（tree-sitter を入れる場合のみ必要）:
+#   python3 -m venv tools/cq/.venv
+#   tools/cq/.venv/bin/pip install tree-sitter tree-sitter-rust
+#
+# 使い方:
+#   scripts/cq index                                    # 索引を作成/更新（増分）
+#   scripts/cq search --q "キーワード" --top-k 5        # 検索
+#   scripts/cq def --symbol "function_name"             # シンボル定義の場所
+#   scripts/cq get --chunk-id <ID>                      # チャンク本文を取得
+#   scripts/cq stats                                    # 索引統計
+#   scripts/cq map                                      # トークン予算付きリポジトリマップ
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# venv があればそちらを使う（tree-sitter 等の任意依存向け）。
+# 無ければシステムの python3 で動く（stdlib のみで動作する設計）。
+VENV_PY="$ROOT/tools/cq/.venv/bin/python"
+if [ -x "$VENV_PY" ]; then
+  PY="$VENV_PY"
+else
+  PY="python3"
+fi
+
+# Python 3.11 以上か検査（config.py が tomllib を使うため）。
+if ! "$PY" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)'; then
+  ver="$("$PY" -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null || echo '不明')"
+  echo "cq の Python が $ver で、要求下限 3.11 を満たしません（tomllib 不在）。" >&2
+  exit 1
+fi
+
+cd "$ROOT"
+exec env PYTHONPATH="$ROOT/tools/cq" "$PY" -m cq "$@"

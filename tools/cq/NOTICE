@@ -1,0 +1,19 @@
+cq (Code Query) — vendored into paddock
+
+このディレクトリ配下の `cq/` パッケージは以下のプロジェクトから取り込んだもの（vendoring）です。
+
+  Source : dahatake/HypervelocityEngineering (HVE)
+           https://github.com/dahatake/HypervelocityEngineering
+  License: MIT License (see ./LICENSE)
+  Copyright (c) 2026 Daiyu Hatakeyama
+
+改変点:
+- GUI (`gui/`)、ベンチマーク (`benchmark.py`, `golden_eval.py`)、
+  HVE 固有面横断索引 (`surface_export.py`) は取り込んでいない。
+- `cli.py` の既定 profile を `paddock` に変更。
+- `traces.py` に paddock の trace ID パターン（REQ-D\d{2}-\d{3}, ADR \d{4}）を追加。
+- `usage_log.py` の環境変数プレフィクスを HVE_* から CQ_* に変更。
+- tree-sitter 等の任意依存のファイルは同梱するが、既定ではインストールしない。
+  標準ライブラリのみで BM25 + regex ベースの検索が動作する。
+
+MIT ライセンスの条件に従い、上記著作権表示と LICENSE 全文を本ディレクトリに保持しています。

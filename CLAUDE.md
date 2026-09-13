@@ -36,9 +36,12 @@ paddock の文書は HVE（dahatake/HypervelocityEngineering, MIT）の蒸留モ
   定義の正本は [docs/knowledge/doc-classes.md](docs/knowledge/doc-classes.md)（HVE の D01〜D21 ＋ paddock 固有の
   D22 予測モデル / D23 買い方 / D24 実験・棄却証跡）。`scripts/mdq search --tags D23` でクラス絞り込みができる。
   整合は `scripts/check-doc-classes.py` が CI と pre-push で検査する（本文の相対リンクの実在、`doc-classes.md` の割当索引との 1 対 1 突合、**REQ 表の `出典` が `sources` にも載っているか**——いずれも error）。**決定ログの append-only 性は `scripts/check-decision-log-immutability.py`** が同じ経路で検査する（既存エントリの改変・削除は error）。**knowledge / specifications を 1 本足す・消す・`doc_class` を変えるときは、同じ PR で `doc-classes.md` のクラス一覧の「現行」列と割当索引も直す**。
-- **探索規律 — 生読み前に mdq 検索**: docs 内の答えを探すときは、まず
-  `scripts/mdq search --q "..."`（BM25・ローカル・[.claude/skills/markdown-query/SKILL.md](.claude/skills/markdown-query/SKILL.md)）
-  でヒットチャンクだけ取り、必要時のみ生ファイルへ。コード探索は従来通り serena（`mcp__serena__*`）。
+- **探索規律 — 生読み前に mdq / cq 検索**: docs やソースコード内の答えを探すときは、まず
+  `scripts/mdq search --q "..."`（Markdown 用 BM25・[.claude/skills/markdown-query/SKILL.md](.claude/skills/markdown-query/SKILL.md)）
+  または `scripts/cq search --q "..."`（ソースコード用 BM25 + symbol・[.claude/skills/code-query/SKILL.md](.claude/skills/code-query/SKILL.md)）
+  でヒットチャンクだけ取り、必要時のみ生ファイルへ。
+  精密な定義・参照の追跡は serena（`mcp__serena__*`）。
+  索引 `.cq/` は gitignore・セッション毎に `scripts/cq index` で再ビルド（Python >= 3.11 必須。venv は任意）。
   索引 `.mdq/` は gitignore・セッション毎に `scripts/mdq index` で再ビルド（初回は
   `python3 -m venv tools/mdq/.venv && tools/mdq/.venv/bin/pip install -r tools/mdq/requirements.txt`）。
   **ADR 廃止（#652）より前の索引を持つ環境は一度だけ `rm -rf .mdq && scripts/mdq index`**

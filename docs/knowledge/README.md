@@ -506,3 +506,39 @@ HVE AKM の原則を Claude Code のエコシステム（CLAUDE.md ルール + s
   （本文に AKM 参照追加 + 本決定ログ）
 - **運用**: 全セッションで stale 報告が自動化される。source 編集時に蒸留漏れが警告される。
   `/akm` で定期メンテナンスを一括実行できる
+
+### #686: cq（Code Query）ツールの導入 (2026-09-13) — 採用
+
+#### コンテキスト
+
+HVE の mdq（Markdown Query）は既に `tools/mdq/` として導入済みで、docs 配下の Markdown 横断検索に
+使われている。対になるソースコード検索ツール cq は未導入で、コード探索は serena MCP や grep/find に
+依存していた。
+
+#### 決定
+
+HVE の `cq/` を `tools/cq/` に vendoring する。GUI・ベンチマーク・HVE 固有モジュールは除外し、
+paddock 向けに profile（`paddock`）、trace ID パターン（`REQ-D\d{2}-\d{3}`, `ADR \d{4}`）、
+環境変数プレフィクス（`CQ_*`）を調整。`scripts/cq` ランチャーと `.claude/skills/code-query/`
+スキルを新設。
+
+#### 理由
+
+- mdq と cq で「Markdown は mdq、ソースコードは cq」の分担が完成し、IDF の汚染が起きない
+- cq は標準ライブラリのみで動作し、tree-sitter は任意依存。導入コストが低い
+- symbol/trace/refs サブコマンドで REQ-ID からコード実装への逆引きが可能になり、
+  AKM の「実装前 knowledge 確認」と対になる「knowledge から実装の追跡」ができる
+
+#### 却下した代替案
+
+- **serena のみで運用を続ける**: serena は LSP ベースで精度は高いが、BM25 による自然言語クエリや
+  REQ-ID トレースはできない。用途が異なる（serena = 精密な定義/参照、cq = 横断検索/発見）
+- **cq を Rust で再実装する**: ツール層は Python/Bash の規約（feedback_tooling_vs_domain）。
+  mdq が Python なのに cq だけ Rust にすると一貫性が崩れる
+
+#### 影響
+
+- **新規ファイル**: `tools/cq/`（cq パッケージ + LICENSE + NOTICE）、`cq.toml`、`scripts/cq`、
+  `.claude/skills/code-query/SKILL.md`
+- **変更ファイル**: `.gitignore`（`.cq/` と `tools/cq/.venv/` を追加）
+- **運用**: `scripts/cq index` で索引構築、`scripts/cq search` で検索。serena と併用

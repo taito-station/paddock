@@ -1,0 +1,3 @@
+# cq (Code Query) は標準ライブラリのみで動作する。
+# tree-sitter を導入するとシンボル抽出の精度が上がる（任意）:
+#   pip install tree-sitter tree-sitter-rust tree-sitter-python tree-sitter-javascript tree-sitter-typescript
