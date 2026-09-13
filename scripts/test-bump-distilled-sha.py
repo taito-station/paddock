@@ -37,6 +37,14 @@ write_doc = _dc.write_doc
 write_registry = _dc.write_registry
 commit_all = _dc.commit_all
 
+# body_after_frontmatter() を直接テストするため、対象スクリプトをモジュールとして読み込む
+# （__name__ が "__main__" でないので末尾の sys.exit(main(...)) は実行されない）。
+_bump_spec = importlib.util.spec_from_file_location("bump_module_under_test", TARGET)
+if _bump_spec is None or _bump_spec.loader is None:  # pragma: no cover
+    sys.exit("bump-distilled-sha.py を読み込めない")
+_bump = importlib.util.module_from_spec(_bump_spec)
+_bump_spec.loader.exec_module(_bump)
+
 
 def run(repo: Path, *args: str) -> "tuple[int, str]":
     proc = subprocess.run(
@@ -322,6 +330,69 @@ def test_empty_value_gets_a_space_after_colon() -> None:
         after = path.read_text(encoding="utf-8")
         assert 'distilled_from_sha: "' in after, after[:200]
         assert 'distilled_from_sha:"' not in after, "コロン直後に空白が無い"
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_body_after_frontmatter_basic() -> None:
+    """frontmatter を剥がした本文だけを返す（#682）。"""
+    with_fm = '---\nstatus: Confirmed\nupdated: "2026-01-01"\n---\n\n# Title\n\n本文。\n'
+    assert _bump.body_after_frontmatter(with_fm) == '---\n\n# Title\n\n本文。\n'
+    without_fm = "# Title\n\n本文のみ。\n"
+    assert _bump.body_after_frontmatter(without_fm) == without_fm
+
+
+def test_stale_bump_without_body_change_warns_of_atrophy() -> None:
+    """本文が前回の distilled_from_sha 時点と同じまま bump すると形骸化警告が出る（#682）。"""
+    repo = new_repo()
+    try:
+        baseline(repo)
+        make_stale(repo)
+        code, out = run(repo, "--all-stale")
+        assert code == 0, out
+        assert "⚠ docs/knowledge/a.md" in out, out
+        assert "形骸化" in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_stale_bump_with_body_change_does_not_warn() -> None:
+    """本文も更新した上での bump は形骸化警告を出さない（#682）。"""
+    repo = new_repo()
+    try:
+        baseline(repo)
+        make_stale(repo)
+        path = repo / "docs/knowledge/a.md"
+        path.write_text(
+            path.read_text(encoding="utf-8").replace("本文。", "本文を人手で更新した。"),
+            encoding="utf-8",
+        )
+        commit_all(repo, "本文も更新")
+        code, out = run(repo, "--all-stale")
+        assert code == 0, out
+        # doc-classes.md（レジストリ自身）も同じ source を持つため別途 stale になるが、
+        # その本文は更新していないので警告が出て正しい。ここで見るのは a.md への影響だけ。
+        assert "⚠ docs/knowledge/a.md" not in out, out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_unresolvable_old_sha_skips_atrophy_check() -> None:
+    """旧 distilled_from_sha が git で解決できない場合は警告もエラーも出ない（#682）。"""
+    repo = new_repo()
+    try:
+        baseline(repo)
+        path = repo / "docs/knowledge/a.md"
+        text = path.read_text(encoding="utf-8")
+        path.write_text(
+            re.sub(r'distilled_from_sha: ".*"', 'distilled_from_sha: "deadbee"', text, count=1),
+            encoding="utf-8",
+        )
+        commit_all(repo, "distilled_from_sha を壊れた値に")
+        code, out = run(repo, "docs/knowledge/a.md")
+        assert code == 0, out
+        assert "⚠" not in out, out
+        assert distilled_of(repo, "docs/knowledge/a.md") not in ("", "deadbee"), out
     finally:
         shutil.rmtree(repo)
 

@@ -109,6 +109,15 @@ def frontmatter_span(text: str) -> "tuple[int, int] | None":
     return None
 
 
+def body_after_frontmatter(text: str) -> str:
+    """frontmatter を除いた本文部分を返す。"""
+    span = frontmatter_span(text)
+    if span is None:
+        return text
+    _, end = span
+    return text[end:]
+
+
 def find_distilled(text: str) -> "list[re.Match[str]]":
     """frontmatter 内の `distilled_from_sha` 行を全部返す（重複の検出用）。"""
     span = frontmatter_span(text)
@@ -249,11 +258,33 @@ def main(argv: list[str]) -> int:
         if dry_run:
             print(f"（dry-run）{rel} → {target_sha}{why}")
             continue
+        # 形骸化検出（#682）: 「今回の bump で本文が変わったか」ではなく「前回の
+        # distilled_from_sha 時点の本文と、今から書き込む本文（bump 前の現在値）が
+        # 一致するか」を見る。bump() は frontmatter しか書き換えないので、前者は
+        # 常に一致してしまい判定にならない。
+        old_body = body_after_frontmatter(text)
+        old_sha = matched.group(2)
+        old_body_at_sha = None
+        if old_sha:
+            root_rel = path.resolve().relative_to(root.resolve()).as_posix()
+            proc = subprocess.run(
+                ["git", "-C", str(root), "show", f"{old_sha}:{root_rel}"],
+                capture_output=True,
+                text=True,
+            )
+            if proc.returncode == 0:
+                old_body_at_sha = body_after_frontmatter(proc.stdout)
         result = bump(path, text, matched, target_sha)
         if result is None:
             print(f"= {rel}: 既に {target_sha}（変更なし）")
         else:
             print(f"✓ {rel}: {result[0]} → {result[1]}{why}")
+            if old_body_at_sha is not None and old_body == old_body_at_sha:
+                print(
+                    f"⚠ {rel}: distilled_from_sha を更新しましたが本文に変更がありません。"
+                    f"形骸化していませんか？",
+                    file=sys.stderr,
+                )
 
     if not dry_run:
         print("")
