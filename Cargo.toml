@@ -13,6 +13,7 @@ members = [
     "src/apps/simulate",
     "src/apps/ingest-predictions",
     "src/apps/api-server",
+    "src/apps/desktop",
 ]
 
 # バージョンは caret 指定（bare version = 暗黙の caret）に統一する。1.x 系は major のみ
@@ -41,6 +42,7 @@ tracing            = { version = "0.1" }
 tracing-log        = { version = "0.2" }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 ureq               = { version = "3", default-features = false, features = ["rustls"] }
+dioxus             = { version = "0.7", features = ["desktop", "router"] }
 utoipa             = { version = "5", features = ["actix_extras", "chrono"] }
 # vendored: Swagger UI 資産を crate に埋め込んだものを使い、**ビルド時の外部取得をやめる**
 # （ADR 0082）。既定の build script は zip を curl で落とすためネットワーク障害でビルドが落ちる。
