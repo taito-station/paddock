@@ -1,4 +1,4 @@
-"""cq — local source-code search for HVE (FR-CQ-01).
+"""cq — local source-code search.
 
 Kept import-light on purpose: `python -m cq search` must not pay for optional
 dependencies at import time (NFR-CQ-01).

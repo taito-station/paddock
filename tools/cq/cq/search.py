@@ -27,7 +27,13 @@ DEFAULT_REGEX_MAX_CANDIDATES = 500
 # 索引済みファイルの stat 突合だけなら 1 クエリあたり数 ms で済む（FR-CQ-08）。
 DEFAULT_AUTO_REINDEX_LIMIT = 50
 
-_TRACE_RE = re.compile(r"^(?:(?:FR|NFR|UT|TEST)-[A-Z0-9]+(?:-[A-Z0-9]+)*|APP-\d{3}|SVC-\d{2}|UC-\d+)$")
+_TRACE_RE = re.compile(
+    r"^(?:(?:FR|NFR|UT|TEST|IT|E2E)-[A-Z0-9]+(?:-[A-Z0-9]+)*"
+    r"|APP-\d{3}|SVC-\d{2}|UC-\d+"
+    r"|REQ-D\d{2}-\d{3}"
+    r"|C-\d+"
+    r"|ADR\s+\d{4})$"
+)
 _SYMBOL_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*$")
 _BAREWORD_RE = re.compile(r"[^\W_]+[\w$]*|[\w$]+")
 _PLAIN_RE = re.compile(r"^[A-Za-z0-9_ ]+$")
@@ -384,7 +390,6 @@ def _guard_freshness(
     Deliberately imported here so that a plain search never pays for the
     discovery / config modules when freshness checking is switched off.
     """
-    global _LAST_STALENESS
     if limit is None or limit < 0:
         return
     from cq import config, freshness
