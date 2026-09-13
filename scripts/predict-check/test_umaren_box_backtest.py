@@ -106,12 +106,10 @@ def test_frequency_a_negative_12_outside():
 
 # --- settle variant tests ---
 
-def test_settle_baseline_with_konsen():
-    """混戦時の baseline settle は konsen_backtest.py と同じ構造"""
+def test_settle_baseline_nonkonsen():
+    """非混戦時の baseline: wide/umaren/sanrenpuku 全てながし"""
     import umaren_box_backtest as U
     probs = {1: 25, 2: 20, 3: 18, 4: 17, 5: 10, 6: 5, 7: 3, 8: 2}
-    # band_of で 0.70*25=17.5 以上 → {1,2,3} = 3頭 → 4頭未満 → non-konsen
-    # → konsen=False のとき baseline はながしのみ
     pay = {"umaren": {}, "wide": {}, "trio": {}}
     top3 = [2, 3, 5]
     ret, stake = U.settle_baseline(probs, top3, pay, konsen=False)
@@ -120,27 +118,66 @@ def test_settle_baseline_with_konsen():
     assert ret == 0  # 払戻なし（pay が空）
 
 
+def test_settle_baseline_konsen():
+    """混戦時の baseline: 3連複ボックス追加 + 券種予算が減額"""
+    import umaren_box_backtest as U
+    probs = {1: 25, 2: 24, 3: 23, 4: 18, 5: 5, 6: 3, 7: 1, 8: 1}
+    # band_of: 0.70*25=17.5 以上 → {1,2,3,4} = 4頭 → konsen
+    pay = {"umaren": {}, "wide": {}, "trio": {}}
+    top3 = [2, 3, 5]
+    ret, stake = U.settle_baseline(probs, top3, pay, konsen=True)
+    assert stake <= 5000
+    assert stake > 0
+    assert ret == 0
+
+
 def test_settle_box_variant_payout():
     """馬連ボックスの的中ケース"""
     import umaren_box_backtest as U
     probs = {1: 30, 2: 20, 3: 15, 4: 10, 5: 8, 6: 7}
     marked = U.get_marked_horses(probs, n_partners=5)
     pay_umaren = {frozenset({3, 6}): 9900}
-    top3 = [3, 6, 5]  # ◎=1 は圏外
     ret, stake = U.settle_umaren_box(marked, pay_umaren, budget_yen=1500, n_heads=6)
     assert stake > 0
     assert ret > 0  # frozenset({3,6}) に命中
 
 
+def test_settle_variant_konsen_fallback():
+    """混戦時の variant は baseline と同じ挙動にフォールバック"""
+    import umaren_box_backtest as U
+    probs = {1: 25, 2: 24, 3: 23, 4: 18, 5: 5, 6: 3, 7: 1, 8: 1}
+    marked = U.get_marked_horses(probs, n_partners=5)
+    pay = {"umaren": {}, "wide": {}, "trio": {}}
+    top3 = [2, 3, 5]
+    ret_bl, stake_bl = U.settle_baseline(probs, top3, pay, konsen=True)
+    ret_v, stake_v = U.settle_variant(probs, marked, top3, pay, True, "wide", 6)
+    assert ret_v == ret_bl
+    assert stake_v == stake_bl
+
+
+def test_settle_variant_replaces_correct_leg():
+    """非混戦で replace_leg="umaren" のとき umaren だけ box に置換される"""
+    import umaren_box_backtest as U
+    probs = {1: 30, 2: 20, 3: 15, 4: 10, 5: 8, 6: 7, 7: 5, 8: 3}
+    marked = U.get_marked_horses(probs, n_partners=5)
+    pay = {"umaren": {frozenset({3, 6}): 5000}, "wide": {}, "trio": {}}
+    top3 = [3, 6, 5]
+    ret_bl, _ = U.settle_baseline(probs, top3, pay, konsen=False)
+    ret_v, _ = U.settle_variant(probs, marked, top3, pay, False, "umaren", 6)
+    # variant は box で frozenset({3,6}) を拾えるので baseline と異なる
+    assert ret_v != ret_bl
+    assert ret_v > 0
+
+
 def test_get_marked_horses():
-    """印馬 = ◎(axis) + top5 partners"""
+    """印馬 = ◎(axis) + top5 partners。先頭が axis、以降は勝率降順"""
     import umaren_box_backtest as U
     probs = {1: 30, 2: 20, 3: 15, 4: 10, 5: 8, 6: 7, 7: 5, 8: 3}
     marked = U.get_marked_horses(probs, n_partners=5)
     assert len(marked) == 6
-    assert 1 in marked  # axis
-    assert 2 in marked  # top2
-    assert 8 not in marked  # 8th
+    assert marked[0] == 1  # axis
+    assert marked[1:] == [2, 3, 4, 5, 6]  # 勝率降順
+    assert 8 not in marked
 
 
 if __name__ == "__main__":

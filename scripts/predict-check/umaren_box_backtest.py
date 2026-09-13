@@ -127,32 +127,6 @@ def is_konsen(probs):
     return len(band_of(probs)) >= 4
 
 
-def largest_remainder(weights, units, minu=1):
-    n = len(weights)
-    if n == 0:
-        return []
-    s = sum(weights)
-    if s <= 0:
-        weights = [1] * n
-        s = n
-    base = [minu] * n
-    rem = units - minu * n
-    if rem < 0:
-        order = sorted(range(n), key=lambda i: weights[i], reverse=True)
-        out = [0] * n
-        for i in range(units):
-            out[order[i]] = 1
-        return out
-    ideal = [rem * w / s for w in weights]
-    fl = [int(x) for x in ideal]
-    alloc = [base[i] + fl[i] for i in range(n)]
-    left = rem - sum(fl)
-    order = sorted(range(n), key=lambda i: ideal[i] - fl[i], reverse=True)
-    for i in range(left):
-        alloc[order[i % n]] += 1
-    return alloc
-
-
 # --- 印馬・ボックス組合せ -----------------------------------------------------------
 def get_marked_horses(probs, n_partners=5):
     """印馬 = ◎(axis) + 勝率降順の相手 top n_partners。返り値は [axis, 相手1, 相手2, ...]。
@@ -201,9 +175,9 @@ def is_box_opportunity(axis, marked, first, second, top3):
 
 # --- settle: baseline（現行ルール） -------------------------------------------------
 def _leg_wide(axis, parts, probs, pay, budget_yen):
-    wp = parts[:3]
     ret = stake = 0
-    for n, u in zip(wp, largest_remainder([probs[n] for n in wp], budget_yen // 100)):
+    alloc = uniform_alloc(budget_yen, len(parts))
+    for n, u in zip(parts, alloc):
         stake += u * 100
         ret += u * 100 * pay["wide"].get(frozenset({axis, n}), 0) // 100
     return ret, stake
@@ -211,7 +185,8 @@ def _leg_wide(axis, parts, probs, pay, budget_yen):
 
 def _leg_umaren(axis, parts, probs, pay, budget_yen):
     ret = stake = 0
-    for n, u in zip(parts, largest_remainder([probs[n] for n in parts], budget_yen // 100)):
+    alloc = uniform_alloc(budget_yen, len(parts))
+    for n, u in zip(parts, alloc):
         stake += u * 100
         ret += u * 100 * pay["umaren"].get(frozenset({axis, n}), 0) // 100
     return ret, stake
@@ -219,9 +194,9 @@ def _leg_umaren(axis, parts, probs, pay, budget_yen):
 
 def _leg_sanrenpuku(axis, parts, probs, pay, budget_yen):
     pairs = list(combinations(parts, 2))
-    weights = [probs[a] * probs[b] for a, b in pairs]
     ret = stake = 0
-    for (a, b), u in zip(pairs, largest_remainder(weights, budget_yen // 100)):
+    alloc = uniform_alloc(budget_yen, len(pairs))
+    for (a, b), u in zip(pairs, alloc):
         stake += u * 100
         ret += u * 100 * pay["trio"].get(frozenset({axis, a, b}), 0) // 100
     return ret, stake
@@ -231,9 +206,9 @@ def _leg_trio_box(probs, pay, budget_yen):
     """混戦時の3連複ボックス（band 最大5頭）。"""
     box = band_of(probs)[:5]
     combos = list(combinations(box, 3))
-    weights = [probs[a] * probs[b] * probs[c] for a, b, c in combos]
     ret = stake = 0
-    for (a, b, c), u in zip(combos, largest_remainder(weights, budget_yen // 100)):
+    alloc = uniform_alloc(budget_yen, len(combos))
+    for (a, b, c), u in zip(combos, alloc):
         stake += u * 100
         ret += u * 100 * pay["trio"].get(frozenset({a, b, c}), 0) // 100
     return ret, stake
@@ -332,6 +307,7 @@ BOX_VARIANTS = [
     ("sanrenpuku→box6", "sanrenpuku", 6),
     ("umaren→box6", "umaren", 6),
     ("wide→box5", "wide", 5),
+    ("sanrenpuku→box5", "sanrenpuku", 5),
     ("umaren→box5", "umaren", 5),
 ]
 
@@ -367,6 +343,10 @@ def main():
                      help="#629 の循環回避方針により未使用（払戻は result.html の実配当のみ使う）。"
                           "将来の拡張用に引数だけ受ける")
     args = ap.parse_args()
+
+    if args.exotic_odds:
+        print("注: --exotic-odds は循環回避方針により未使用。払戻は result.html の実配当のみ使用\n",
+              file=sys.stderr)
 
     races = parse_races(args.races)
     winodds = parse_winodds(args.winodds)
