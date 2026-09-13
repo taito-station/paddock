@@ -101,7 +101,7 @@ updated: "YYYY-MM-DD"    # 内容を実質更新した日（YAML の date 型を
 > 索引化（frontmatter を JSON 化）が `Object of type date is not JSON serializable` で失敗する。
 
 - **`doc_class` / `tags`**: 文書クラス（D01〜D24）の宣言。**定義とクラス一覧の正本は
-  [doc-classes.md](doc-classes.md)**（書式・N/A 宣言・充足ギャップもそこ）。`tags` へのミラーは
+  [doc-classes.md](doc-classes.md)**（書式・N/A 宣言もそこ。active かつ 0 本のクラスは checker が警告）。`tags` へのミラーは
   mdq が frontmatter を検索に使わず `tags` しか見ないため（`scripts/mdq search --tags D23`）。
   二重管理の drift は `scripts/check-doc-classes.py` が防ぐ。
 - **機械検査**: 上記スクリプトが CI（`adr` ジョブ）と pre-push で走る。クラスの整合・`tags` の一致・
@@ -244,7 +244,7 @@ updated: "YYYY-MM-DD"    # 内容を実質更新した日（YAML の date 型を
   散文で書いた節名（「〜」節・「ステップ 4: 指標集計」等）は未検査**。`foo.md#存在しない節` は通る。
   節名は表記ゆれと部分一致で誤検知が出やすいため、意図して人手に残している（#604）。
 - **索引の網羅性（`doc-classes.md` の割当索引を除く）**。上記「REQ 表のある文書（索引）」と
-  `doc-classes.md` の「充足ギャップ」表は手書きで、実態との突合は無い。
+  `doc-classes.md` の N/A 宣言表は手書きで、実態との突合は N/A クラスを `doc_class` に指定した文書の検出のみ。
 - **インライン形式以外のリンク**。`[label]: path` の参照形式定義と HTML の `<a href>` は
   検査対象外（現状 docs に 0 件）。**4 スペースインデントのコードブロック**も除外していないので、
   その中の見本リンクは実データとして検査される（フェンスで囲めば除外される）。
