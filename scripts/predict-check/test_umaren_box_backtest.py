@@ -9,10 +9,6 @@ import sys
 sys.path.insert(0, os.path.dirname(__file__))
 
 
-def approx(a, b, eps=1e-9):
-    return abs(a - b) < eps
-
-
 # --- box combination tests ---
 
 def test_box_pairs_6heads():
@@ -113,8 +109,7 @@ def test_settle_baseline_nonkonsen():
     pay = {"umaren": {}, "wide": {}, "trio": {}}
     top3 = [2, 3, 5]
     ret, stake = U.settle_baseline(probs, top3, pay, konsen=False)
-    assert stake <= 5000
-    assert stake > 0
+    assert stake == 5000
     assert ret == 0  # 払戻なし（pay が空）
 
 
@@ -126,8 +121,7 @@ def test_settle_baseline_konsen():
     pay = {"umaren": {}, "wide": {}, "trio": {}}
     top3 = [2, 3, 5]
     ret, stake = U.settle_baseline(probs, top3, pay, konsen=True)
-    assert stake <= 5000
-    assert stake > 0
+    assert stake == 5000
     assert ret == 0
 
 

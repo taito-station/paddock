@@ -174,7 +174,7 @@ def is_box_opportunity(axis, marked, first, second, top3):
 
 
 # --- settle: baseline（現行ルール） -------------------------------------------------
-def _leg_wide(axis, parts, probs, pay, budget_yen):
+def _leg_wide(axis, parts, pay, budget_yen):
     ret = stake = 0
     alloc = uniform_alloc(budget_yen, len(parts))
     for n, u in zip(parts, alloc):
@@ -183,7 +183,7 @@ def _leg_wide(axis, parts, probs, pay, budget_yen):
     return ret, stake
 
 
-def _leg_umaren(axis, parts, probs, pay, budget_yen):
+def _leg_umaren(axis, parts, pay, budget_yen):
     ret = stake = 0
     alloc = uniform_alloc(budget_yen, len(parts))
     for n, u in zip(parts, alloc):
@@ -192,7 +192,7 @@ def _leg_umaren(axis, parts, probs, pay, budget_yen):
     return ret, stake
 
 
-def _leg_sanrenpuku(axis, parts, probs, pay, budget_yen):
+def _leg_sanrenpuku(axis, parts, pay, budget_yen):
     pairs = list(combinations(parts, 2))
     ret = stake = 0
     alloc = uniform_alloc(budget_yen, len(pairs))
@@ -231,13 +231,13 @@ def settle_baseline(probs, top3, pay, konsen):
         bw, bm, bf = 1000, 1000, 1500
     else:
         bw, bm, bf = 1500, 1500, 2000
-    r, s = _leg_wide(axis, parts, probs, pay, bw)
+    r, s = _leg_wide(axis, parts, pay, bw)
     ret += r
     stake += s
-    r, s = _leg_umaren(axis, parts, probs, pay, bm)
+    r, s = _leg_umaren(axis, parts, pay, bm)
     ret += r
     stake += s
-    r, s = _leg_sanrenpuku(axis, parts, probs, pay, bf)
+    r, s = _leg_sanrenpuku(axis, parts, pay, bf)
     ret += r
     stake += s
     return ret, stake
@@ -280,21 +280,21 @@ def settle_variant(probs, marked, top3, pay, konsen, replace_leg, n_heads):
     if replace_leg == "wide":
         r, s = settle_umaren_box(marked, pay_umaren, bw, n_heads)
     else:
-        r, s = _leg_wide(axis, parts, probs, pay, bw)
+        r, s = _leg_wide(axis, parts, pay, bw)
     ret += r
     stake += s
 
     if replace_leg == "umaren":
         r, s = settle_umaren_box(marked, pay_umaren, bm, n_heads)
     else:
-        r, s = _leg_umaren(axis, parts, probs, pay, bm)
+        r, s = _leg_umaren(axis, parts, pay, bm)
     ret += r
     stake += s
 
     if replace_leg == "sanrenpuku":
         r, s = settle_umaren_box(marked, pay_umaren, bf, n_heads)
     else:
-        r, s = _leg_sanrenpuku(axis, parts, probs, pay, bf)
+        r, s = _leg_sanrenpuku(axis, parts, pay, bf)
     ret += r
     stake += s
 
@@ -321,7 +321,7 @@ def _summarize(rows):
     roi = tot_ret / tot_stake * 100 if tot_stake else 0.0
     hit = sum(1 for r, _ in rows if r > 0) / len(rows) * 100
     per = [r / s * 100 if s else 0.0 for r, s in rows]
-    sd = statistics.pstdev(per) if len(per) > 1 else 0.0
+    sd = statistics.stdev(per) if len(per) > 1 else 0.0
     pnl = tot_ret - tot_stake
     return roi, hit, sd, pnl
 
@@ -361,7 +361,7 @@ def main():
     rows_konsen = {name: [] for name in variant_order}
     rows_nonkonsen = {name: [] for name in variant_order}
 
-    total = axis_top3 = axis_off = hit6 = hit5 = 0
+    total = axis_top3 = axis_off = hit6 = 0
     n_konsen = n_nonkonsen = 0
 
     skips = dict(probs=0, odds=0, result=0)
@@ -399,8 +399,6 @@ def main():
             axis_off += 1
             if is_box_opportunity(axis, marked, first, second, top3):
                 hit6 += 1
-            if is_box_opportunity(axis, marked[1:], first, second, top3):
-                hit5 += 1
 
         ret, stake = settle_baseline(probs, top3, pay, konsen)
         rows_all["baseline"].append((ret, stake))
@@ -424,9 +422,7 @@ def main():
     print(f"  ◎ top3 入り: {axis_top3} ({top3_pct:.1f}%)")
     print(f"  ◎ 飛び: {axis_off} ({off_pct:.1f}%)")
     hit6_pct = hit6 / axis_off * 100 if axis_off else 0.0
-    hit5_pct = hit5 / axis_off * 100 if axis_off else 0.0
     print(f"    うち 1-2着が印6頭内: {hit6} (◎飛びの {hit6_pct:.1f}%)")
-    print(f"    うち 1-2着が印5頭内: {hit5} (◎飛びの {hit5_pct:.1f}%)")
     print()
 
     print("=== (B) ROI 比較（全レース） ===")
