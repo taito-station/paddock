@@ -110,7 +110,7 @@ def frontmatter_span(text: str) -> "tuple[int, int] | None":
 
 
 def body_after_frontmatter(text: str) -> str:
-    """frontmatter を除いた本文部分を返す。"""
+    """frontmatter の閉じ区切り（---）以降を返す。"""
     span = frontmatter_span(text)
     if span is None:
         return text
