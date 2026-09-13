@@ -35,6 +35,39 @@ def is_docs_source(file_path, repo_root):
     return rel.startswith("docs/docs-original/") or rel.startswith("docs/qa/")
 
 
+def is_distilled_knowledge(file_path, repo_root):
+    """docs/knowledge/ または docs/specifications/ 配下かどうか。README.md は除外しない。"""
+    rel = os.path.relpath(file_path, repo_root) if os.path.isabs(file_path) else file_path
+    return rel.startswith("docs/knowledge/") or rel.startswith("docs/specifications/")
+
+
+def read_sources_from_frontmatter(file_path, repo_root):
+    """frontmatter の sources: リストを読み取って返す。sources が無ければ空リスト。"""
+    abs_path = os.path.join(repo_root, file_path) if not os.path.isabs(file_path) else file_path
+    try:
+        with open(abs_path, encoding="utf-8") as f:
+            content = f.read()
+    except OSError:
+        return []
+
+    m = re.match(r"^---\n(.*?\n)---", content, re.DOTALL)
+    if not m:
+        return []
+
+    sources = []
+    in_sources = False
+    for line in m.group(1).splitlines():
+        if line.strip().startswith("sources:"):
+            in_sources = True
+            continue
+        if in_sources:
+            if line.strip().startswith("- "):
+                sources.append(line.strip()[2:].strip())
+            else:
+                break
+    return sources
+
+
 def find_affected_knowledge(file_path, repo_root):
     """file_path を sources に持つ knowledge/specifications を探す。"""
     rel_path = os.path.relpath(file_path, repo_root) if os.path.isabs(file_path) else file_path
@@ -87,6 +120,17 @@ def main():
         return
 
     if not is_docs_source(file_path, repo_root):
+        if is_distilled_knowledge(file_path, repo_root):
+            rel_path = os.path.relpath(file_path, repo_root) if os.path.isabs(file_path) else file_path
+            sources = read_sources_from_frontmatter(file_path, repo_root)
+            if sources:
+                sources_list = ", ".join(sources)
+                message = (
+                    f"⚠ SoT 逆転の可能性: {rel_path} は蒸留済み文書です（sources: {sources_list}）。"
+                    f"決定ログの追記は対象外ですが、本文の変更は上流 sources を先に更新し蒸留で反映してください"
+                )
+                print(json.dumps({"decision": "warn", "message": message}))
+                return
         print("{}")
         return
 
