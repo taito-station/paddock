@@ -1,6 +1,6 @@
 # QA — `sources` の網羅性検査（#596 / #597）
 
-一次資料: [docs/docs-original/0083-sources-coverage-checks.md](../docs-original/0083-sources-coverage-checks.md)
+一次資料: 決定ログ ADR 0083（[doc-classes.md](../knowledge/doc-classes.md)）
 
 親 issue: [#579](https://github.com/taito-station/paddock/issues/579)（転記しない・ADR 0074）。
 本文は `gh issue view 596` / `gh issue view 597` で取得する。

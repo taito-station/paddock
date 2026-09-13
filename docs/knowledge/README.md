@@ -542,3 +542,44 @@ paddock 向けに profile（`paddock`）、trace ID パターン（`REQ-D\d{2}-\
   `.claude/skills/code-query/SKILL.md`
 - **変更ファイル**: `.gitignore`（`.cq/` と `tools/cq/.venv/` を追加）
 - **運用**: `scripts/cq index` で索引構築、`scripts/cq search` で検索。serena と併用
+
+### #683: SoT 逆転警告 hook の追加 (2026-09-13) — 採用
+
+#### コンテキスト
+
+AKM の「実装後 knowledge 同期義務」を支えるために、docs-original/qa の編集時に影響する
+knowledge を警告する PostToolUse hook（check-knowledge-impact.py）が #678 で導入された。
+しかし逆方向——蒸留済みの knowledge/specifications を直接編集してしまう SoT 逆転——を
+検出する仕組みがなかった。
+
+#### 決定
+
+check-knowledge-impact.py に SoT 逆転検出を追加する。docs/knowledge/ または
+docs/specifications/ への Write/Edit を検知し、そのファイルの frontmatter に `sources` が
+あれば「上流 sources を先に更新し蒸留で反映してください」と警告する。決定ログの追記は
+対象外（決定ログは knowledge 側に直接書く正当な操作）。あわせて本 hook と
+session-stale-check.sh のユニットテストを新設し CI に組み込んだ（#680）。
+
+#### 理由
+
+- SoT 逆転（蒸留済み文書を直接書き換え、sources と乖離する）は蒸留モデルの最大の
+  脆弱点。hook で検出しないと次セッションが stale 検査を通り抜けた古い knowledge を
+  正として読み、誤った実装判断をする
+- 警告であってブロックではない。sources を持たない独立 knowledge（glossary.md 等）への
+  直接編集は正当な操作なので、sources の有無で分岐する
+
+#### 却下した代替案
+
+- **直接編集を hook でブロックする**: sources がない独立 knowledge（glossary.md、
+  README.md 等）への直接編集は正当。ブロックすると正当な操作まで止まる
+- **hook なしで CLAUDE.md ルールだけで運用する**: 上流方向の警告（source 編集→
+  knowledge 影響）は既に hook 化されている。逆方向だけルール頼みでは非対称
+
+#### 影響
+
+- **変更ファイル**: `scripts/hooks/check-knowledge-impact.py`（SoT 逆転検出を追加）
+- **新規ファイル**: `scripts/test-hooks-check-knowledge-impact.py`、
+  `scripts/test-hooks-session-stale-check.sh`（回帰テスト）
+- **CI**: `.github/workflows/ci.yml` の adr ジョブに hook テストを追加
+- **運用**: knowledge/specifications の直接編集時に自動警告が出る。sources があるファイルは
+  上流を先に更新するよう促される
