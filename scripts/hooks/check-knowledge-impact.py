@@ -127,7 +127,7 @@ def main():
                 sources_list = ", ".join(sources)
                 message = (
                     f"⚠ SoT 逆転の可能性: {rel_path} は蒸留済み文書です（sources: {sources_list}）。"
-                    f"上流（docs-original/qa）を先に更新し、蒸留で反映してください"
+                    f"決定ログの追記は対象外ですが、本文の変更は上流 sources を先に更新し蒸留で反映してください"
                 )
                 print(json.dumps({"decision": "warn", "message": message}))
                 return

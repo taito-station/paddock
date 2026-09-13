@@ -69,6 +69,11 @@ def new_repo() -> Path:
         KNOWLEDGE_WITH_SOURCE.format(source="docs/qa/QA-foo.md"), encoding="utf-8"
     )
     (repo / "docs/knowledge/no-sources.md").write_text(KNOWLEDGE_NO_SOURCES, encoding="utf-8")
+    (repo / "docs/specifications").mkdir(parents=True)
+    (repo / "docs/specifications/spec-a.md").write_text(
+        KNOWLEDGE_WITH_SOURCE.format(source="docs/docs-original/foo.md"), encoding="utf-8"
+    )
+    (repo / "docs/docs-original/orphan.md").write_text("# 孤立一次資料\n\n本文。\n", encoding="utf-8")
     (repo / "unrelated.md").write_text("# 無関係\n\n本文。\n", encoding="utf-8")
     return repo
 
@@ -161,6 +166,27 @@ def test_docs_qa_edit_with_downstream_warns() -> None:
         decision = json.loads(out)
         assert decision.get("decision") == "warn", out
         assert "docs/knowledge/b.md" in decision["message"], out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_direct_specifications_edit_with_sources_warns_sot_reversal() -> None:
+    repo = new_repo()
+    try:
+        out = run_hook(repo, write_payload("docs/specifications/spec-a.md"))
+        decision = json.loads(out)
+        assert decision.get("decision") == "warn", out
+        assert "SoT 逆転" in decision["message"], out
+        assert "docs/docs-original/foo.md" in decision["message"], out
+    finally:
+        shutil.rmtree(repo)
+
+
+def test_docs_original_edit_without_downstream_is_noop() -> None:
+    repo = new_repo()
+    try:
+        out = run_hook(repo, write_payload("docs/docs-original/orphan.md"))
+        assert out == "{}", out
     finally:
         shutil.rmtree(repo)
 
