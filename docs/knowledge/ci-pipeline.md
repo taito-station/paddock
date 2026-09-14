@@ -9,8 +9,8 @@ sources:
   - docs/qa/QA-evil-merge-615.md
   - docs/qa/QA-fullwidth-after-var-636.md
   - .github/workflows/ci.yml
-distilled_from_sha: "7152b9c"
-updated: "2026-09-13"
+distilled_from_sha: "5f83bc6"
+updated: "2026-09-14"
 ---
 
 # CI パイプラインの構成と設計意図（D21）
@@ -25,7 +25,7 @@ D21（CI/CD・ビルド・リリース・供給網管理）の充足ギャップ
 
 | ジョブ | 実行環境 | 内容 |
 |---|---|---|
-| `ci` | ubuntu-latest ＋ postgres サービス | toolchain 一致 assert / **Swagger UI vendored 検査**（回帰テスト → 本番検査）/ fmt / clippy / `cargo test`（**直列**・OCR・PDF crate を除く） |
+| `ci` | ubuntu-latest ＋ postgres サービス | toolchain 一致 assert / **Swagger UI vendored 検査**（回帰テスト → 本番検査）/ fmt / clippy / `cargo test`（**直列**・OCR・PDF・**Desktop** crate を除く） |
 | `web` | ubuntu-latest | typecheck / eslint / vitest / **生成 API 型のドリフト検証** / vite build |
 | `adr` | ubuntu-latest | ADR 番号重複と文書クラス・sources の検査（**回帰テスト → 本番検査**の順）/ **hook ユニットテスト**（session-stale-check + check-knowledge-impact） |
 | `predict-check` | ubuntu-latest | stdlib のみの Python テスト（自走式 + ハーネス忠実性） |
@@ -361,6 +361,14 @@ OpenAPI 仕様を描画する開発者向け UI なので、埋め込み版の�
   `start download to`（ダウンロード経路）のどちらが出るかで見る。
 - builder から `curl` が消えたので、将来ビルド時に curl が必要な依存を足すときは戻す。
 - `docker-build` が非必須である事実は変えない——required にするかは別の判断。
+
+### `paddock-desktop` は CI から除外する
+
+Dioxus Desktop は wry（WebView）経由で、Linux では `libgtk-3-dev` / `libwebkit2gtk-4.1-dev` /
+`libglib2.0-dev` 等のシステムライブラリが必要。CI（ubuntu-latest）にこれらを追加するより、
+**macOS ローカル専用クレートとして clippy / test の両方から `--exclude` で除外する**方がシンプル。
+OCR クレートを `ocr-pdf` ジョブに分離したのと同じ判断——本体ジョブをシステム依存で重くしない。
+Desktop の品質担保はローカルの pre-push（全 workspace をチェック）で行う。
 
 ### `test_extract.rs`（tesseract OCR）は `#[ignore]` のまま
 
