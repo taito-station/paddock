@@ -59,11 +59,11 @@ pub fn RaceList() -> Element {
     });
 
     let _auto_poll = use_coroutine(move |_rx: UnboundedReceiver<()>| async move {
-        if *date.read() != today {
-            return;
-        }
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(RESULT_POLL_SECS)).await;
+            if *date.read() != today {
+                continue;
+            }
             refresh_tick += 1;
         }
     });
@@ -74,7 +74,9 @@ pub fn RaceList() -> Element {
         let d = *date.read();
         spawn(async move {
             results_refreshing.set(true);
-            let _ = setup.results.refresh(d, false).await;
+            if let Err(e) = setup.results.refresh(d, false).await {
+                tracing::warn!("結果取り込み失敗: {e}");
+            }
             results_refreshing.set(false);
             refresh_tick += 1;
         });
@@ -145,7 +147,9 @@ fn render_date_picker(
 
     let mut year_months: Vec<(i32, u32)> =
         all_dates.iter().map(|d| (d.year(), d.month())).collect();
+    year_months.sort_unstable();
     year_months.dedup();
+    year_months.reverse();
 
     let mut date = *date;
     let mut open = *open;

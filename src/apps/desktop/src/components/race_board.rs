@@ -7,10 +7,9 @@ use paddock_domain::race::RaceId;
 use crate::components::exec_panel::ExecPanel;
 use crate::components::horse_card::HorseCard;
 use crate::setup::Setup;
+use crate::viewmodel::DEFAULT_BUDGET;
 use crate::viewmodel::exec::BetView;
 use crate::viewmodel::race::BoardView;
-
-const DEFAULT_BUDGET: u64 = 5000;
 const DEFAULT_ALPHA: f64 = 0.2;
 const POLL_SECS: u64 = 60;
 
@@ -40,6 +39,11 @@ pub fn RaceBoard(race_id: String) -> Element {
     let _auto_poll = use_coroutine(move |_rx: UnboundedReceiver<()>| async move {
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(POLL_SECS)).await;
+            if let Some(Ok(view)) = &*board.read_unchecked()
+                && (view.result_confirmed || post_time_passed(view))
+            {
+                break;
+            }
             refresh_tick += 1;
         }
     });
@@ -51,8 +55,10 @@ pub fn RaceBoard(race_id: String) -> Element {
         let rid = rid_odds.clone();
         spawn(async move {
             odds_refreshing.set(true);
-            if let Ok(race_id) = RaceId::try_from(rid) {
-                let _ = setup.odds.refresh_race_odds(&race_id).await;
+            if let Ok(race_id) = RaceId::try_from(rid)
+                && let Err(e) = setup.odds.refresh_race_odds(&race_id).await
+            {
+                tracing::warn!("オッズ更新失敗: {e}");
             }
             odds_refreshing.set(false);
             refresh_tick += 1;
@@ -125,7 +131,8 @@ fn post_time_passed(view: &BoardView) -> bool {
     let Some(pt) = view.post_time_raw else {
         return false;
     };
-    Local::now().time() > pt
+    let race_dt = chrono::NaiveDateTime::new(view.date, pt);
+    Local::now().naive_local() > race_dt
 }
 
 fn bet_table(bets: &[BetView]) -> Element {

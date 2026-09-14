@@ -321,7 +321,13 @@ impl RaceRepository for PostgresRepository {
         .map_err(crate::Error::from)?;
         Ok(strings
             .into_iter()
-            .filter_map(|s| NaiveDate::parse_from_str(&s, "%Y-%m-%d").ok())
+            .filter_map(|s| {
+                NaiveDate::parse_from_str(&s, "%Y-%m-%d")
+                    .inspect_err(|e| {
+                        tracing::warn!("find_race_dates: unparseable date '{s}': {e}");
+                    })
+                    .ok()
+            })
             .collect())
     }
 }

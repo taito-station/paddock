@@ -4,9 +4,11 @@ use paddock_use_case::repository::session::PredictSessionRecord;
 #[derive(Debug, Clone, PartialEq)]
 pub struct BetView {
     pub bet_type: String,
+    pub type_slug: String,
     pub combination: String,
     pub stake: u64,
     pub ev: String,
+    pub ev_raw: f64,
     pub hit_prob: String,
 }
 
@@ -22,9 +24,11 @@ impl From<&PortfolioBet> for BetView {
     fn from(b: &PortfolioBet) -> Self {
         Self {
             bet_type: bet_type_jp(b.combination.type_label()),
+            type_slug: b.combination.type_label().to_string(),
             combination: b.combination.combination_code(),
             stake: b.stake,
             ev: format!("{:.2}", b.ev),
+            ev_raw: b.ev,
             hit_prob: format!("{:.1}%", b.hit_prob * 100.0),
         }
     }

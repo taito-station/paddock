@@ -6,9 +6,8 @@ use paddock_domain::race::RaceId;
 use paddock_use_case::repository::session::PredictBetRecord;
 
 use crate::setup::Setup;
+use crate::viewmodel::DEFAULT_BUDGET;
 use crate::viewmodel::exec::{BetView, SessionView};
-
-const DEFAULT_BUDGET: u64 = 5000;
 
 #[derive(Debug, Clone, PartialEq)]
 enum PanelState {
@@ -114,11 +113,11 @@ pub fn ExecPanel(race_id: String, date: NaiveDate, bets: Vec<BetView>) -> Elemen
                 .iter()
                 .map(|b| PredictBetRecord {
                     race_id: race_id.clone(),
-                    bet_type: b.bet_type.clone(),
+                    bet_type: b.type_slug.clone(),
                     combination: b.combination.clone(),
                     stake: b.stake,
                     payout: 0,
-                    ev: b.ev.parse::<f64>().unwrap_or(0.0),
+                    ev: b.ev_raw,
                 })
                 .collect();
             match setup
