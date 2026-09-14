@@ -80,11 +80,7 @@ pub fn RaceList() -> Element {
         });
     };
 
-    let all_dates = available_dates
-        .read()
-        .as_ref()
-        .cloned()
-        .unwrap_or_default();
+    let all_dates = available_dates.read().as_ref().cloned().unwrap_or_default();
     let current_date = *date.read();
 
     match &*races.read() {
@@ -147,10 +143,8 @@ fn render_date_picker(
         return rsx! { p { class: "empty", "データがありません" } };
     }
 
-    let mut year_months: Vec<(i32, u32)> = all_dates
-        .iter()
-        .map(|d| (d.year(), d.month()))
-        .collect();
+    let mut year_months: Vec<(i32, u32)> =
+        all_dates.iter().map(|d| (d.year(), d.month())).collect();
     year_months.dedup();
 
     let mut date = *date;
