@@ -1,0 +1,276 @@
+/* paddock desktop — web/src/styles.css の :root トークンを移植 */
+:root {
+  --bg: #14171c;
+  --surface: #1c2129;
+  --surface-2: #232a33;
+  --border: #2a2f37;
+  --border-2: #39414c;
+  --text: #e6e8eb;
+  --heading: #f2f4f7;
+  --muted: #97a0ab;
+  --link: #6fb1ff;
+  --accent: #7ee2a8;
+  --accent-dim: #0d3a1e;
+  --warn: #ffcc80;
+  --warn-dim: #402a00;
+
+  --text-strong: #eef1f4;
+  --text-soft: #dce3ea;
+  --text-2: #cbd2da;
+  --text-3: #c3cbd4;
+  --muted-2: #8a93a0;
+
+  --overlay-bg: #10324f;
+  --overlay-text: #8fd0ff;
+  --overlay-border: #1f5c8a;
+
+  --danger: #ff6b6b;
+  --danger-bg: #3a1414;
+
+  --konsen-bg: #4a2c00;
+  --konsen-border: #7a4a00;
+  --value-text: #ffd27a;
+  --value-border: #6b4a00;
+
+  --note-bg: #24303a;
+  --note-text: #9fd8c4;
+  --note-border: #2f5a4c;
+
+  --panel-bg: #171c24;
+  --panel-border: #2a3340;
+
+  --gutter: 1.25rem;
+
+  font-family: system-ui, -apple-system, "Hiragino Sans", sans-serif;
+  color: var(--text);
+  background: var(--bg);
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); }
+
+/* ===== Header ===== */
+.app-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem var(--gutter);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.header-title {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--heading);
+  text-decoration: none;
+}
+.date-picker {
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.875rem;
+}
+
+/* ===== Main ===== */
+.app-main {
+  padding: var(--gutter);
+  max-width: 100%;
+}
+
+/* ===== Race List ===== */
+.section-title {
+  color: var(--heading);
+  font-size: 1.1rem;
+  margin: 0 0 1rem;
+}
+.race-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.race-table th {
+  text-align: left;
+  padding: 0.5rem 0.75rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 500;
+  border-bottom: 1px solid var(--border);
+}
+.race-table td {
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+.race-row {
+  cursor: pointer;
+}
+.race-row:hover {
+  background: var(--surface);
+}
+.empty {
+  color: var(--muted);
+  text-align: center;
+  padding: 2rem;
+}
+
+/* ===== Board ===== */
+.board-view {
+  max-width: 100%;
+}
+.board-header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.75rem;
+}
+.board-title {
+  color: var(--heading);
+  font-size: 1.2rem;
+  margin: 0;
+}
+.race-name-badge {
+  color: var(--text-soft);
+  font-size: 0.9rem;
+}
+.race-class-badge {
+  color: var(--accent);
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+.post-time {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+.board-summary {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+  font-size: 0.85rem;
+}
+.chip {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+.chip.konsen {
+  background: var(--konsen-bg);
+  color: var(--warn);
+  border: 1px solid var(--konsen-border);
+}
+.chip.result-done {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+.axis-prob { color: var(--text-soft); }
+.qualifying { color: var(--muted); }
+
+/* ===== Board Grid ===== */
+.board-grid {
+  display: flex;
+  gap: 0.5rem;
+  overflow-x: auto;
+  padding-bottom: 0.5rem;
+}
+
+/* ===== Horse Card ===== */
+.horse-card {
+  min-width: 140px;
+  max-width: 160px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.5rem;
+  flex-shrink: 0;
+}
+.horse-card.overlay {
+  border-color: var(--overlay-border);
+  background: var(--overlay-bg);
+}
+.horse-card.value {
+  border-color: var(--value-border);
+}
+.horse-header {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-bottom: 0.25rem;
+}
+.horse-mark {
+  color: var(--value-text);
+  font-weight: 700;
+  font-size: 1rem;
+  min-width: 1.1em;
+}
+.horse-num {
+  color: var(--muted);
+  font-size: 0.8rem;
+  min-width: 1.5em;
+}
+.horse-name {
+  color: var(--text-strong);
+  font-weight: 600;
+  font-size: 0.85rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.horse-jockey {
+  color: var(--muted-2);
+  font-size: 0.75rem;
+  margin-bottom: 0.4rem;
+}
+.horse-probs {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  margin-bottom: 0.4rem;
+}
+.prob-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.75rem;
+}
+.prob-label { color: var(--muted); }
+.prob-value { color: var(--text); font-weight: 500; }
+.horse-odds {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.8rem;
+  padding-top: 0.25rem;
+  border-top: 1px solid var(--border);
+}
+.odds-label { color: var(--muted); }
+.odds-value { color: var(--text); font-weight: 600; }
+.horse-result {
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 0.85rem;
+  text-align: center;
+  margin-top: 0.25rem;
+}
+.horse-comment {
+  color: var(--note-text);
+  font-size: 0.7rem;
+  margin-top: 0.25rem;
+  padding: 0.2rem 0.3rem;
+  background: var(--note-bg);
+  border-radius: 3px;
+  border: 1px solid var(--note-border);
+}
+
+/* ===== Utilities ===== */
+.loading {
+  color: var(--muted);
+  text-align: center;
+  padding: 3rem;
+}
+.error {
+  color: var(--danger);
+  padding: 1rem;
+}
