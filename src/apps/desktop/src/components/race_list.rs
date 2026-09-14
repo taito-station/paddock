@@ -13,8 +13,7 @@ const RESULT_POLL_SECS: u64 = 45;
 #[component]
 pub fn RaceList() -> Element {
     let setup = use_context::<Arc<Setup>>();
-    let today = Local::now().date_naive();
-    let mut date = use_context::<Signal<NaiveDate>>();
+    let date = use_context::<Signal<NaiveDate>>();
     let mut refresh_tick = use_signal(|| 0u64);
     let mut results_refreshing = use_signal(|| false);
     let mut date_picker_open = use_signal(|| false);
@@ -61,7 +60,7 @@ pub fn RaceList() -> Element {
     let _auto_poll = use_coroutine(move |_rx: UnboundedReceiver<()>| async move {
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(RESULT_POLL_SECS)).await;
-            if *date.read() != today {
+            if *date.read() != Local::now().date_naive() {
                 continue;
             }
             refresh_tick += 1;
@@ -105,7 +104,7 @@ pub fn RaceList() -> Element {
                         }
                     }
                     if *date_picker_open.read() {
-                        {render_date_picker(&all_dates, current_date, &mut date, &mut date_picker_open)}
+                        {render_date_picker(&all_dates, current_date, date, date_picker_open)}
                     }
                     if rows.is_empty() {
                         p { class: "empty", "この日のレースはありません" }
@@ -138,8 +137,8 @@ pub fn RaceList() -> Element {
 fn render_date_picker(
     all_dates: &[NaiveDate],
     current: NaiveDate,
-    date: &mut Signal<NaiveDate>,
-    open: &mut Signal<bool>,
+    mut date: Signal<NaiveDate>,
+    mut open: Signal<bool>,
 ) -> Element {
     if all_dates.is_empty() {
         return rsx! { p { class: "empty", "データがありません" } };
@@ -150,9 +149,6 @@ fn render_date_picker(
     year_months.sort_unstable();
     year_months.dedup();
     year_months.reverse();
-
-    let mut date = *date;
-    let mut open = *open;
 
     let mut prev_year: Option<i32> = None;
 
