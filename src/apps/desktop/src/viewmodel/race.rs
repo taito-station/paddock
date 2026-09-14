@@ -1,8 +1,12 @@
+use chrono::{NaiveDate, NaiveTime};
 use paddock_use_case::interactor::race::board::{BoardHorse, RaceBoard};
+
+use crate::viewmodel::exec::{BetView, portfolio_to_bets};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct BoardView {
     pub race_id: String,
+    pub date: NaiveDate,
     pub venue: String,
     pub race_num: u32,
     pub surface: String,
@@ -14,6 +18,8 @@ pub struct BoardView {
     pub axis_win_prob: f64,
     pub qualifying_count: u32,
     pub result_confirmed: bool,
+    pub bets: Vec<BetView>,
+    pub post_time_raw: Option<NaiveTime>,
     pub horses: Vec<HorseView>,
 }
 
@@ -38,6 +44,7 @@ impl From<&RaceBoard> for BoardView {
     fn from(b: &RaceBoard) -> Self {
         Self {
             race_id: b.race_id.value().to_string(),
+            date: b.date,
             venue: b.venue.clone(),
             race_num: b.race_num,
             surface: b.surface.clone(),
@@ -49,6 +56,15 @@ impl From<&RaceBoard> for BoardView {
             axis_win_prob: b.confusion.axis_win_prob,
             qualifying_count: b.confusion.qualifying_count,
             result_confirmed: b.result_confirmed,
+            bets: b
+                .portfolio
+                .as_ref()
+                .map(portfolio_to_bets)
+                .unwrap_or_default(),
+            post_time_raw: b
+                .post_time
+                .as_deref()
+                .and_then(|s| NaiveTime::parse_from_str(s, "%H:%M").ok()),
             horses: b.horses.iter().map(HorseView::from).collect(),
         }
     }

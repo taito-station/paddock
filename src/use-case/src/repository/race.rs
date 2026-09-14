@@ -18,6 +18,9 @@ pub trait RaceRepository: Send + Sync {
     /// 予想用途のため `results` は読み込まず空 Vec で返す。
     fn find_races_by_date(&self, date: NaiveDate)
     -> impl Future<Output = Result<Vec<Race>>> + Send;
+
+    /// レースデータが存在する日付の一覧を降順で返す（races ∪ race_cards）。
+    fn find_race_dates(&self) -> impl Future<Output = Result<Vec<NaiveDate>>> + Send;
 }
 
 /// 出馬表（race card）の保存・取得。

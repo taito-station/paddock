@@ -1,12 +1,21 @@
 use paddock_domain::race::{Race, Surface, Venue};
 
 #[derive(Debug, Clone, PartialEq)]
+pub enum RaceStatus {
+    Upcoming,
+    Recorded,
+    Skipped,
+    Confirmed,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct RaceRow {
     pub race_id: String,
     pub race_num: u32,
     pub venue: String,
     pub surface: String,
     pub distance: u32,
+    pub status: RaceStatus,
 }
 
 impl From<&Race> for RaceRow {
@@ -17,6 +26,27 @@ impl From<&Race> for RaceRow {
             venue: venue_jp(&r.venue),
             surface: surface_jp(&r.surface).to_string(),
             distance: r.distance,
+            status: RaceStatus::Upcoming,
+        }
+    }
+}
+
+impl RaceStatus {
+    pub fn label(&self) -> &'static str {
+        match self {
+            RaceStatus::Upcoming => "—",
+            RaceStatus::Recorded => "購入済",
+            RaceStatus::Skipped => "見送り",
+            RaceStatus::Confirmed => "確定",
+        }
+    }
+
+    pub fn css_class(&self) -> &'static str {
+        match self {
+            RaceStatus::Upcoming => "",
+            RaceStatus::Recorded => "recorded",
+            RaceStatus::Skipped => "skipped",
+            RaceStatus::Confirmed => "confirmed",
         }
     }
 }
