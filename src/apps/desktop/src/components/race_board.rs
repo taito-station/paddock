@@ -65,7 +65,7 @@ pub fn RaceBoard(race_id: String) -> Element {
         });
     };
 
-    match &*board.read_unchecked() {
+    match &*board.read() {
         Some(Ok(view)) => {
             let should_poll = !view.result_confirmed && !post_time_passed(view);
             rsx! {
