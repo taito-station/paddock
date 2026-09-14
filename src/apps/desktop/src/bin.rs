@@ -5,6 +5,7 @@ mod viewmodel;
 
 use std::sync::Arc;
 
+use chrono::Local;
 use dioxus::prelude::*;
 
 use crate::router::Route;
@@ -31,7 +32,23 @@ fn App() -> Element {
         });
         Arc::new(s.expect("DB connection failed"))
     });
+
+    let initial_date = use_hook(|| {
+        let s = setup.clone();
+        tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async {
+                s.interactor
+                    .race_dates()
+                    .await
+                    .ok()
+                    .and_then(|v| v.into_iter().next())
+                    .unwrap_or_else(|| Local::now().date_naive())
+            })
+        })
+    });
+
     use_context_provider(|| setup.clone());
+    use_context_provider(|| Signal::new(initial_date));
 
     rsx! {
         document::Stylesheet { href: STYLES }

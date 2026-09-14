@@ -10,9 +10,7 @@ pub type DesktopResultsInteractor = ResultsInteractor<UreqNetkeibaScraper, Postg
 
 pub struct Setup {
     pub interactor: DesktopInteractor,
-    #[allow(dead_code)]
     pub odds: DesktopOddsInteractor,
-    #[allow(dead_code)]
     pub results: DesktopResultsInteractor,
 }
 

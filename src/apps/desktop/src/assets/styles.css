@@ -65,14 +65,74 @@ body { margin: 0; background: var(--bg); }
   color: var(--heading);
   text-decoration: none;
 }
-.date-picker {
+.date-heading-btn {
+  background: transparent;
+  color: var(--heading);
+  border: none;
+  font-size: 1.25rem;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0.1rem 0.25rem;
+}
+.date-heading-btn:hover {
+  color: var(--link);
+}
+.date-picker-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+.date-year-label {
+  color: var(--muted);
+  font-size: 0.75rem;
+  margin: 0.75rem 0 0.25rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.date-year-label:first-child {
+  margin-top: 0;
+}
+.date-month-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.2rem 0;
+}
+.date-month-label {
+  color: var(--muted-2);
+  font-size: 0.8rem;
+  min-width: 2.5em;
+  text-align: right;
+}
+.date-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+.date-chip {
   background: var(--surface-2);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 4px;
-  padding: 0.25rem 0.5rem;
-  font-size: 0.875rem;
+  padding: 0.2rem 0.5rem;
+  font-size: 0.8rem;
+  cursor: pointer;
 }
+.date-chip:hover {
+  background: var(--border-2);
+  border-color: var(--link);
+  color: var(--link);
+}
+.date-chip.active {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 
 /* ===== Main ===== */
 .app-main {
@@ -262,6 +322,146 @@ body { margin: 0; background: var(--bg); }
   background: var(--note-bg);
   border-radius: 3px;
   border: 1px solid var(--note-border);
+}
+
+/* ===== Race List Header ===== */
+.race-list-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+.race-list-header .section-title {
+  margin: 0;
+}
+
+/* ===== Status Badges ===== */
+.chip.recorded {
+  background: rgba(110, 177, 255, 0.15);
+  color: var(--link);
+  border: 1px solid rgba(110, 177, 255, 0.3);
+}
+.chip.skipped {
+  background: rgba(151, 160, 171, 0.1);
+  color: var(--muted);
+  border: 1px solid var(--border);
+}
+.chip.confirmed {
+  background: var(--accent-dim);
+  color: var(--accent);
+  border: 1px solid rgba(126, 226, 168, 0.3);
+}
+.status-empty {
+  color: var(--muted-2);
+  font-size: 0.8rem;
+}
+
+/* ===== Refresh Button ===== */
+.refresh-btn {
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.25rem 0.75rem;
+  font-size: 0.8rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.refresh-btn:hover {
+  background: var(--border);
+}
+.refresh-btn.refreshing {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+/* ===== Bet Section ===== */
+.bet-section {
+  margin: 1rem 0;
+  padding: 0.75rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.bet-section-title {
+  color: var(--heading);
+  font-size: 0.9rem;
+  margin: 0 0 0.5rem;
+}
+.bet-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+}
+.bet-table th {
+  text-align: left;
+  padding: 0.3rem 0.5rem;
+  color: var(--muted);
+  font-weight: 500;
+  border-bottom: 1px solid var(--border);
+}
+.bet-table td {
+  padding: 0.3rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+.bet-table .mono {
+  font-family: "SF Mono", "Menlo", monospace;
+}
+.bet-table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ===== Exec Panel ===== */
+.exec-panel {
+  margin-top: 1rem;
+  padding: 0.75rem;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+}
+.exec-title {
+  color: var(--heading);
+  font-size: 0.9rem;
+  margin: 0 0 0.5rem;
+}
+.session-info {
+  display: flex;
+  gap: 1rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin-bottom: 0.5rem;
+}
+.exec-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+.btn {
+  border: none;
+  border-radius: 4px;
+  padding: 0.4rem 1rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.btn:disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+.btn-primary {
+  background: var(--accent);
+  color: var(--bg);
+  font-weight: 600;
+}
+.btn-primary:hover {
+  filter: brightness(1.1);
+}
+.btn-secondary {
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+.btn-secondary:hover {
+  background: var(--border);
 }
 
 /* ===== Utilities ===== */

@@ -1,3 +1,4 @@
+mod exec_panel;
 mod header;
 mod horse_card;
 mod race_board;
