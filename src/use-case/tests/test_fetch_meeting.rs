@@ -96,6 +96,9 @@ impl RaceRepository for MockRepo {
     async fn find_races_by_date(&self, _date: chrono::NaiveDate) -> Result<Vec<Race>> {
         Ok(Vec::new())
     }
+    async fn find_race_dates(&self) -> Result<Vec<chrono::NaiveDate>> {
+        Ok(Vec::new())
+    }
 }
 
 impl FetchRepository for MockRepo {
@@ -524,6 +527,9 @@ impl RaceRepository for HistoryRepo {
         Ok(false)
     }
     async fn find_races_by_date(&self, _date: chrono::NaiveDate) -> Result<Vec<Race>> {
+        Ok(Vec::new())
+    }
+    async fn find_race_dates(&self) -> Result<Vec<chrono::NaiveDate>> {
         Ok(Vec::new())
     }
 }

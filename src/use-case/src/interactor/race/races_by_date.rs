@@ -12,6 +12,11 @@ impl<R: RaceRepository> Interactor<R> {
     pub async fn races_by_date(&self, date: NaiveDate) -> Result<Vec<Race>> {
         self.repository.find_races_by_date(date).await
     }
+
+    /// レースデータが存在する日付の一覧を降順で返す。
+    pub async fn race_dates(&self) -> Result<Vec<NaiveDate>> {
+        self.repository.find_race_dates().await
+    }
 }
 
 impl<R: RaceCardRepository> Interactor<R> {

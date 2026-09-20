@@ -304,6 +304,32 @@ impl RaceRepository for PostgresRepository {
             .await
             .map_err(Into::into)
     }
+
+    async fn find_race_dates(&self) -> UcResult<Vec<NaiveDate>> {
+        let strings: Vec<String> = sqlx::query_scalar(
+            r#"
+            SELECT date FROM (
+                SELECT DISTINCT date FROM races WHERE source = 'pdf'
+                UNION
+                SELECT DISTINCT date FROM race_cards WHERE date IS NOT NULL
+            ) AS d
+            ORDER BY date DESC
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(crate::Error::from)?;
+        Ok(strings
+            .into_iter()
+            .filter_map(|s| {
+                NaiveDate::parse_from_str(&s, "%Y-%m-%d")
+                    .inspect_err(|e| {
+                        tracing::warn!("find_race_dates: unparseable date '{s}': {e}");
+                    })
+                    .ok()
+            })
+            .collect())
+    }
 }
 
 impl RaceResultRepository for PostgresRepository {
