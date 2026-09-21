@@ -57,23 +57,22 @@ def run_git(repo: Path, *args: str) -> None:
 def new_repo() -> Path:
     repo = Path(tempfile.mkdtemp(prefix="hook-knowledge-test-"))
     run_git(repo, "init", "-q")
-    (repo / "docs/docs-original").mkdir(parents=True)
-    (repo / "docs/qa").mkdir(parents=True)
-    (repo / "docs/knowledge").mkdir(parents=True)
-    (repo / "docs/docs-original/foo.md").write_text("# 一次資料\n\n本文。\n", encoding="utf-8")
-    (repo / "docs/qa/QA-foo.md").write_text("# 質問票\n\n本文。\n", encoding="utf-8")
-    (repo / "docs/knowledge/a.md").write_text(
-        KNOWLEDGE_WITH_SOURCE.format(source="docs/docs-original/foo.md"), encoding="utf-8"
+    (repo / "docs-original").mkdir(parents=True)
+    (repo / "qa").mkdir(parents=True)
+    (repo / "knowledge").mkdir(parents=True)
+    (repo / "docs-original/foo.md").write_text("# 一次資料\n\n本文。\n", encoding="utf-8")
+    (repo / "qa/QA-foo.md").write_text("# 質問票\n\n本文。\n", encoding="utf-8")
+    (repo / "knowledge/a.md").write_text(
+        KNOWLEDGE_WITH_SOURCE.format(source="docs-original/foo.md"), encoding="utf-8"
     )
-    (repo / "docs/knowledge/b.md").write_text(
-        KNOWLEDGE_WITH_SOURCE.format(source="docs/qa/QA-foo.md"), encoding="utf-8"
+    (repo / "knowledge/b.md").write_text(
+        KNOWLEDGE_WITH_SOURCE.format(source="qa/QA-foo.md"), encoding="utf-8"
     )
-    (repo / "docs/knowledge/no-sources.md").write_text(KNOWLEDGE_NO_SOURCES, encoding="utf-8")
-    (repo / "docs/specifications").mkdir(parents=True)
-    (repo / "docs/specifications/spec-a.md").write_text(
-        KNOWLEDGE_WITH_SOURCE.format(source="docs/docs-original/foo.md"), encoding="utf-8"
+    (repo / "knowledge/no-sources.md").write_text(KNOWLEDGE_NO_SOURCES, encoding="utf-8")
+    (repo / "knowledge/spec-a.md").write_text(
+        KNOWLEDGE_WITH_SOURCE.format(source="docs-original/foo.md"), encoding="utf-8"
     )
-    (repo / "docs/docs-original/orphan.md").write_text("# 孤立一次資料\n\n本文。\n", encoding="utf-8")
+    (repo / "docs-original/orphan.md").write_text("# 孤立一次資料\n\n本文。\n", encoding="utf-8")
     (repo / "unrelated.md").write_text("# 無関係\n\n本文。\n", encoding="utf-8")
     return repo
 
@@ -103,10 +102,10 @@ def write_payload(file_path: str, tool_name: str = "Edit") -> dict:
 def test_docs_original_edit_with_downstream_warns() -> None:
     repo = new_repo()
     try:
-        out = run_hook(repo, write_payload("docs/docs-original/foo.md"))
+        out = run_hook(repo, write_payload("docs-original/foo.md"))
         decision = json.loads(out)
         assert decision.get("decision") == "warn", out
-        assert "docs/knowledge/a.md" in decision["message"], out
+        assert "knowledge/a.md" in decision["message"], out
     finally:
         shutil.rmtree(repo)
 
@@ -132,7 +131,7 @@ def test_null_tool_input_is_noop() -> None:
 def test_non_write_edit_tool_is_noop() -> None:
     repo = new_repo()
     try:
-        out = run_hook(repo, write_payload("docs/docs-original/foo.md", tool_name="Bash"))
+        out = run_hook(repo, write_payload("docs-original/foo.md", tool_name="Bash"))
         assert out == "{}", out
     finally:
         shutil.rmtree(repo)
@@ -141,11 +140,11 @@ def test_non_write_edit_tool_is_noop() -> None:
 def test_direct_knowledge_edit_with_sources_warns_sot_reversal() -> None:
     repo = new_repo()
     try:
-        out = run_hook(repo, write_payload("docs/knowledge/a.md"))
+        out = run_hook(repo, write_payload("knowledge/a.md"))
         decision = json.loads(out)
         assert decision.get("decision") == "warn", out
         assert "SoT 逆転" in decision["message"], out
-        assert "docs/docs-original/foo.md" in decision["message"], out
+        assert "docs-original/foo.md" in decision["message"], out
     finally:
         shutil.rmtree(repo)
 
@@ -153,7 +152,7 @@ def test_direct_knowledge_edit_with_sources_warns_sot_reversal() -> None:
 def test_direct_knowledge_edit_without_sources_is_noop() -> None:
     repo = new_repo()
     try:
-        out = run_hook(repo, write_payload("docs/knowledge/no-sources.md"))
+        out = run_hook(repo, write_payload("knowledge/no-sources.md"))
         assert out == "{}", out
     finally:
         shutil.rmtree(repo)
@@ -162,10 +161,10 @@ def test_direct_knowledge_edit_without_sources_is_noop() -> None:
 def test_docs_qa_edit_with_downstream_warns() -> None:
     repo = new_repo()
     try:
-        out = run_hook(repo, write_payload("docs/qa/QA-foo.md"))
+        out = run_hook(repo, write_payload("qa/QA-foo.md"))
         decision = json.loads(out)
         assert decision.get("decision") == "warn", out
-        assert "docs/knowledge/b.md" in decision["message"], out
+        assert "knowledge/b.md" in decision["message"], out
     finally:
         shutil.rmtree(repo)
 
@@ -173,11 +172,11 @@ def test_docs_qa_edit_with_downstream_warns() -> None:
 def test_direct_specifications_edit_with_sources_warns_sot_reversal() -> None:
     repo = new_repo()
     try:
-        out = run_hook(repo, write_payload("docs/specifications/spec-a.md"))
+        out = run_hook(repo, write_payload("knowledge/spec-a.md"))
         decision = json.loads(out)
         assert decision.get("decision") == "warn", out
         assert "SoT 逆転" in decision["message"], out
-        assert "docs/docs-original/foo.md" in decision["message"], out
+        assert "docs-original/foo.md" in decision["message"], out
     finally:
         shutil.rmtree(repo)
 
@@ -185,7 +184,7 @@ def test_direct_specifications_edit_with_sources_warns_sot_reversal() -> None:
 def test_docs_original_edit_without_downstream_is_noop() -> None:
     repo = new_repo()
     try:
-        out = run_hook(repo, write_payload("docs/docs-original/orphan.md"))
+        out = run_hook(repo, write_payload("docs-original/orphan.md"))
         assert out == "{}", out
     finally:
         shutil.rmtree(repo)

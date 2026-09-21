@@ -3,14 +3,14 @@
 ## ドキュメント/ナレッジ運用
 
 paddock の文書は HVE（dahatake/HypervelocityEngineering, MIT）の蒸留モデルを取り入れている。
-規約の全体は [docs/knowledge/README.md](docs/knowledge/README.md)。
+規約の全体は [knowledge/README.md](knowledge/README.md)。
 
-- **2 層**: `docs/docs-original/`（RO 一次資料・実測ログ・調査所見）＋ `docs/qa/`（質問票+回答）→
-  `docs/knowledge/` ＋ `docs/specifications/`（status 付き確定知・**決定ログ付き**）。蒸留は Claude が回す。
+- **2 層**: `docs-original/`（RO 一次資料・実測ログ・調査所見）＋ `qa/`（質問票+回答）→
+  `knowledge/` ＋ `knowledge/`（status 付き確定知・**決定ログ付き**）。蒸留は Claude が回す。
   別枠で `docs/docs-generated/`（HVE 由来。`cargo doc` / OpenAPI 等の自動生成文書の置き場。蒸留対象外）がある。
 - **specifications はその場で knowledge**（frontmatter: `status`/`kind`/`sources`/`distilled_from_sha`/`updated`）。
   frontmatter を付けた時点で確定知層として機能するので、移動する実利が無い。新規の横断的蒸留知は
-  `docs/knowledge/` へ。
+  `knowledge/` へ。
 - **決定は「決定ログ」に書く**（#652。独立した ADR ファイルはもう作らない）。各 knowledge /
   specifications の末尾に `## 決定ログ` 節があり、**新規の決定（ルール変更・実験の採用/棄却・
   設計判断）は、その決定が効く文書の決定ログへ直接 append する**。書式は
@@ -25,15 +25,15 @@ paddock の文書は HVE（dahatake/HypervelocityEngineering, MIT）の蒸留モ
   追従させる**（`scripts/bump-distilled-sha.py --all-stale` で一括。`updated` は触らないので実質更新の
   有無は自分で判断する。追従漏れは CI が落とす）。stale の機械検査は **error**。
   `updated` は**下流の本文が実質変わったときだけ**進める（機械検査の対象外）。
-- **用語で迷ったら [docs/knowledge/glossary.md](docs/knowledge/glossary.md)（D07）**。`win_prob` の
+- **用語で迷ったら [knowledge/glossary.md](knowledge/glossary.md)（D07）**。`win_prob` の
   スケール・`blended` の α・`軸ロック` / `混戦` / `ながし` などの**定義の正本がどこにあるか**を引ける
   索引で、定義そのものは各仕様書・本ファイルが持つ。
-- **`docs/docs-original/` の命名は issue 番号・0 埋めしない**（`382-...`）。置くのは転記できないもの
+- **`docs-original/` の命名は issue 番号・0 埋めしない**（`382-...`）。置くのは転記できないもの
   ——実測ログ・調査時点のコード所見・外部サイトの挙動観察。GitHub Issue 本文は転記しない（ADR 0074）。
   旧 ADR（0 埋め 4 桁: `0001-...` 〜 `0090-...`）は #652 で各 knowledge/specifications の決定ログへ移行済み・削除済み。
 - **status**: `Confirmed`（運用の前提にしてよい）/ `Tentative`（暫定）/ `Conflict`（矛盾・放置せず解消）。
 - **文書クラス**: knowledge/specifications は frontmatter に `doc_class`（+ mdq 用ミラーの `tags`）を持つ。
-  定義の正本は [docs/knowledge/doc-classes.md](docs/knowledge/doc-classes.md)（HVE の D01〜D21 ＋ paddock 固有の
+  定義の正本は [knowledge/doc-classes.md](knowledge/doc-classes.md)（HVE の D01〜D21 ＋ paddock 固有の
   D22 予測モデル / D23 買い方 / D24 実験・棄却証跡）。`scripts/mdq search --tags D23` でクラス絞り込みができる。
   整合は `scripts/check-doc-classes.py` が CI と pre-push で検査する（本文の相対リンクの実在、`doc-classes.md` の割当索引との 1 対 1 突合、**REQ 表の `出典` が `sources` にも載っているか**——いずれも error）。**決定ログの append-only 性は `scripts/check-decision-log-immutability.py`** が同じ経路で検査する（既存エントリの改変・削除は error）。**knowledge / specifications を 1 本足す・消す・`doc_class` を変えるときは、同じ PR で `doc-classes.md` のクラス一覧の「現行」列と割当索引も直す**。
 - **探索規律 — 生読み前に mdq / cq 検索**: docs やソースコード内の答えを探すときは、まず
@@ -67,8 +67,8 @@ HVE の Autonomous Knowledge Management（AKM）の原則を paddock に適用�
 4. **stale ゼロ PR**: PR を出す前に `scripts/bump-distilled-sha.py --all-stale --dry-run` で
    stale が 0 件であることを確認する。stale があれば差分マージまたは sha bump で解消する
    （pre-push で `check-doc-classes.py` が走るので push 前に落ちる）。
-5. **蒸留サイクル完走義務**: `docs/docs-original/` に一次資料を書いたら、`docs/qa/` の質問票
-   → `docs/knowledge/` or `docs/specifications/` の差分マージまで**同じ PR で回し切る**。
+5. **蒸留サイクル完走義務**: `docs-original/` に一次資料を書いたら、`qa/` の質問票
+   → `knowledge/` or `knowledge/` の差分マージまで**同じ PR で回し切る**。
    途中で止めない。一次資料だけ置いて蒸留しないと、読む側が生ファイルを直接読む癖がつき、
    蒸留層が形骸化する。
 
@@ -134,7 +134,7 @@ paddock-analyze predict <race_id> --blend-alpha 0.2
 
 ### 3. EV 判定 → 買い目決定
 
-> ROI の定義は用語集（[docs/knowledge/glossary.md](docs/knowledge/glossary.md)）が本節から写している。
+> ROI の定義は用語集（[knowledge/glossary.md](knowledge/glossary.md)）が本節から写している。
 > 変えたら同ファイルの ROI 行も見直すこと（機械検査は鳴らない・ADR 0077）。
 
 各レースの ROI = Σ_i(賭金_i × 的中確率_i × 払戻倍率_i) / 総賭金 を算出する。**ただしこの参考ROIをレース選別のゲートとして当てにしない**（182R の実測で ROI ≥ 100% の通過 0 件・実現ROIへの選別力なし・ADR 0076）。判定基準は下記「レース選択基準」参照。
@@ -150,7 +150,7 @@ paddock-predict-watch --date YYYY-MM-DD --notify-roi 0.5 --notify-gate 0.5   # m
 ```
 
 - **ゲート通過は macOS 通知でも届く**（#584）。ただし**既定閾値（=100%）では構造的に鳴らない**——ADR 0076 の実測で通過 0 件のため。鳴らす条件は `--notify-roi` で決まり、その設定は起動時にログ先頭で 1 行宣言される。**鳴っても go シグナルではない**（発火は参考ROI 由来なので 🔶/🔍 と同じ制約下・ADR 0079）。一次情報はログの `🔔` 行（配送できなかったものは `🔔(未配送)` と付く。配送できた件数は `grep -c '^  🔔 '` で数える——行頭で絞らないと注記や警告の文中の 🔔 も拾う）。**抑制はプロセス内メモリのみ**なので、`--once` を cron で回す運用では毎回すべてのレースが初回扱いになる。同一レースは前回通知時から +10pt 上振れするまで再通知しない。`--no-notify` で無効化。
-- **通知ゼロを「妙味なし」と読む前にログの `⚠ 前回スイープから N 分空きました` を確認する**（#568/ADR 0072）。監視は wall-clock 基準でスリープから自動再開し、飛んだ区間を警告する（例外: プロセスがハング/死亡したまま・時計が後退した場合は警告が出ない。詳細は下記 knowledge）。この行がある日は、その間に発走したレースが未評価なので判断材料が欠けている。スリープ抑止は launchd の keep-awake（#264・開催日ごとに install が要る）に一本化されており、**蓋閉じスリープはどちらにせよ止められない**——外出中に監視を当てにするなら蓋を閉じない。詳細は [docs/knowledge/monitor-loop-sleep-resilience.md](docs/knowledge/monitor-loop-sleep-resilience.md)
+- **通知ゼロを「妙味なし」と読む前にログの `⚠ 前回スイープから N 分空きました` を確認する**（#568/ADR 0072）。監視は wall-clock 基準でスリープから自動再開し、飛んだ区間を警告する（例外: プロセスがハング/死亡したまま・時計が後退した場合は警告が出ない。詳細は下記 knowledge）。この行がある日は、その間に発走したレースが未評価なので判断材料が欠けている。スリープ抑止は launchd の keep-awake（#264・開催日ごとに install が要る）に一本化されており、**蓋閉じスリープはどちらにせよ止められない**——外出中に監視を当てにするなら蓋を閉じない。詳細は [knowledge/monitor-loop-sleep-resilience.md](knowledge/monitor-loop-sleep-resilience.md)
 
 ### 4. 結果取得
 
@@ -169,16 +169,16 @@ https://race.netkeiba.com/race/result.html?race_id=<12桁>
 
 ## 買い方ルール
 
-> **この節を変えたら [docs/knowledge/glossary.md](docs/knowledge/glossary.md)（D07）の買い方まわりの
+> **この節を変えたら [knowledge/glossary.md](knowledge/glossary.md)（D07）の買い方まわりの
 > 行も見直すこと。** 用語集は 印 / 軸 / 混戦の配分 / ながし / ボックス / フォーメーション /
 > second source / decision-support の 8 語の要約を本節から写しているが、`CLAUDE.md` は `sources` に
 > 入らない設計（ADR 0077）なので**機械検査は鳴らない**。
 
-> 現行ルールの決定根拠・棄却記録・バックテスト履歴: [docs/specifications/betting-rule-history.md](docs/specifications/betting-rule-history.md)（ルール変更を検討する時だけ参照。予想実行時は読まなくてよい）
+> 現行ルールの決定根拠・棄却記録・バックテスト履歴: [knowledge/betting-rule-history.md](knowledge/betting-rule-history.md)（ルール変更を検討する時だけ参照。予想実行時は読まなくてよい）
 >
 > **要件 ID と検証手段**: 下記各項の「なぜそう決めたか / どう測り直すか」は REQ 表が持つ。
-> 買い方の具体は [ev-kelly-bet-selection.md](docs/specifications/ev-kelly-bet-selection.md) の **REQ-D23-001〜006**、
-> 目標側（ROI ゲート・軸ロック・提示形式）は [product-goals.md](docs/knowledge/product-goals.md) の
+> 買い方の具体は [ev-kelly-bet-selection.md](knowledge/ev-kelly-bet-selection.md) の **REQ-D23-001〜006**、
+> 目標側（ROI ゲート・軸ロック・提示形式）は [product-goals.md](knowledge/product-goals.md) の
 > **REQ-D01-001 / 003 / 007**。ルールを変えるときは対応 REQ の検証手段を再実行してから。
 
 ### 予算・配分（既定）
@@ -210,7 +210,7 @@ https://race.netkeiba.com/race/result.html?race_id=<12桁>
 - **−EV は見送る**という原則は変えない（REQ-D01-001）。ただし **+EV かどうかを参考ROIで判定しない**。
   張る/見送りは**手動のハンデ精査**（近走フォーム・コース/枠バイアス・距離/騎手）と
   **執行の規律**（軸ロック＋ズレ増額）で決める＝現時点で実在が確認できているエッジはこの 2 つだけ
-  （[product-goals.md](docs/knowledge/product-goals.md)「エッジの所在」）。
+  （[product-goals.md](knowledge/product-goals.md)「エッジの所在」）。
 - 参考ROI は **decision-support の材料**として読む（レース間の優劣づけには使わない）。
 - 的中率ではなく **期待値で選ぶ**という考え方自体は維持する。変わったのは
   「その期待値を現行の参考ROIで測れると思わない」という点。

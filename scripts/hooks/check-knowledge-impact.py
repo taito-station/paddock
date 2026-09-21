@@ -30,15 +30,15 @@ def extract_file_path(hook_input):
 
 
 def is_docs_source(file_path, repo_root):
-    """docs-original/ または docs/qa/ 配下かどうか。"""
+    """docs-original/ または qa/ 配下かどうか。"""
     rel = os.path.relpath(file_path, repo_root) if os.path.isabs(file_path) else file_path
-    return rel.startswith("docs/docs-original/") or rel.startswith("docs/qa/")
+    return rel.startswith("docs-original/") or rel.startswith("qa/")
 
 
 def is_distilled_knowledge(file_path, repo_root):
-    """docs/knowledge/ または docs/specifications/ 配下かどうか。README.md は除外しない。"""
+    """knowledge/ または knowledge/ 配下かどうか。README.md は除外しない。"""
     rel = os.path.relpath(file_path, repo_root) if os.path.isabs(file_path) else file_path
-    return rel.startswith("docs/knowledge/") or rel.startswith("docs/specifications/")
+    return rel.startswith("knowledge/") or rel.startswith("knowledge/")
 
 
 def read_sources_from_frontmatter(file_path, repo_root):
@@ -73,7 +73,7 @@ def find_affected_knowledge(file_path, repo_root):
     rel_path = os.path.relpath(file_path, repo_root) if os.path.isabs(file_path) else file_path
     affected = []
 
-    for subdir in ("docs/knowledge", "docs/specifications"):
+    for subdir in ("knowledge",):
         dirpath = os.path.join(repo_root, subdir)
         if not os.path.isdir(dirpath):
             continue

@@ -430,7 +430,7 @@ cargo run -p analyze -- backtest --from 2026-01-01 --to 2026-03-31 --shrinkage-m
 ### 予想を DB に保存する（ingest-predictions）
 
 予想（印・短評・買い目・結果）を構造化レコードとして DB に永続化する。**DB が正**。予想を作るときは
-JSON（仕様: `docs/specifications/prediction-json.md`）を吐いて取り込み、閲覧は下記の REST API + SPA で行う。
+JSON（仕様: `knowledge/prediction-json.md`）を吐いて取り込み、閲覧は下記の REST API + SPA で行う。
 
 ```bash
 # 取り込み（stdin もしくは --input <file>）
@@ -564,13 +564,13 @@ cargo clippy --all-targets
 ドキュメント:
 
 HVE（dahatake/HypervelocityEngineering, MIT）由来の 2 層蒸留モデルで運用する。規約は
-[`docs/knowledge/README.md`](docs/knowledge/README.md) が正。
+[`knowledge/README.md`](knowledge/README.md) が正。
 
-- `docs/docs-original/` … **一次資料層（RO・書き換えない）**。issue 由来の生素材・実測ログ・
+- `docs-original/` … **一次資料層（RO・書き換えない）**。issue 由来の生素材・実測ログ・
   調査ノート（`382-*.md` 等）
-- `docs/qa/` … 質問票 + 回答。knowledge への入力となる中間層
-- `docs/knowledge/` … qa および一次資料由来の新規・横断的な確定知（**読む入口**）
-- `docs/specifications/` … 確率推定・backtest・買い目選定・予想 JSON などの仕様書（その場で knowledge に昇格）
+- `qa/` … 質問票 + 回答。knowledge への入力となる中間層
+- `knowledge/` … qa および一次資料由来の新規・横断的な確定知（**読む入口**）
+- `knowledge/` … 確率推定・backtest・買い目選定・予想 JSON などの仕様書（その場で knowledge に昇格）
 - `docs/docs-generated/` … `cargo doc` / OpenAPI 等の自動生成文書の置き場（手書き文書は置かない・コミットは任意）
 - `docs/api/openapi.json` … REST API の OpenAPI スナップショット（utoipa コードファースト。web の型生成の入力）
 

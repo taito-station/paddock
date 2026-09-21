@@ -25,7 +25,7 @@ kind: knowledge
 doc_class: [D19]
 tags: [D19]
 sources:
-  - docs/docs-original/652-abolish-adr.md
+  - docs-original/652-abolish-adr.md
 distilled_from_sha: "0000000"
 updated: "2026-08-23"
 ---
@@ -77,11 +77,10 @@ def new_repo() -> Path:
     run_git(repo, "config", "user.email", "test@example.invalid")
     run_git(repo, "config", "user.name", "test")
     run_git(repo, "config", "commit.gpgsign", "false")
-    (repo / "docs/knowledge").mkdir(parents=True)
-    (repo / "docs/specifications").mkdir(parents=True)
-    (repo / "docs/docs-original").mkdir(parents=True)
-    (repo / "docs/docs-original/652-abolish-adr.md").write_text("# 652\n", encoding="utf-8")
-    write_doc(repo, "docs/knowledge/a.md", "本文の段落。\n" + LOG_HEADER + ENTRY_A)
+    (repo / "knowledge").mkdir(parents=True)
+    (repo / "docs-original").mkdir(parents=True)
+    (repo / "docs-original/652-abolish-adr.md").write_text("# 652\n", encoding="utf-8")
+    write_doc(repo, "knowledge/a.md", "本文の段落。\n" + LOG_HEADER + ENTRY_A)
     commit_all(repo, "baseline")
     # `git init -b main` は git 2.28 未満で使えないので、コミット後に改名する。
     run_git(repo, "branch", "-M", "main")
@@ -129,7 +128,7 @@ def test_new_file_with_decision_log_passes() -> None:
     """base に無い新規ファイルは、決定ログを持っていても全件が新規なので通る。"""
     repo = new_repo()
     try:
-        write_doc(repo, "docs/specifications/new.md", "本文。\n" + LOG_HEADER + ENTRY_B)
+        write_doc(repo, "knowledge/new.md", "本文。\n" + LOG_HEADER + ENTRY_B)
         commit_all(repo, "新規文書を追加")
         code, out = check(repo)
         assert code == 0, out
@@ -143,7 +142,7 @@ def test_appended_entry_passes() -> None:
     """末尾へのエントリ追記は通る（これが append-only の許可された唯一の操作）。"""
     repo = new_repo()
     try:
-        overwrite(repo, "docs/knowledge/a.md", read_doc(repo, "docs/knowledge/a.md") + "\n" + ENTRY_B)
+        overwrite(repo, "knowledge/a.md", read_doc(repo, "knowledge/a.md") + "\n" + ENTRY_B)
         commit_all(repo, "決定ログを追記")
         code, out = check(repo)
         assert code == 0, out
@@ -155,8 +154,8 @@ def test_body_change_outside_decision_log_passes() -> None:
     """決定ログの外（本文）はいくら書き換えても通る。"""
     repo = new_repo()
     try:
-        text = read_doc(repo, "docs/knowledge/a.md")
-        overwrite(repo, "docs/knowledge/a.md", text.replace("本文の段落。", "本文を全面的に書き直した。"))
+        text = read_doc(repo, "knowledge/a.md")
+        overwrite(repo, "knowledge/a.md", text.replace("本文の段落。", "本文を全面的に書き直した。"))
         commit_all(repo, "本文を改稿")
         code, out = check(repo)
         assert code == 0, out
@@ -168,12 +167,12 @@ def test_document_without_decision_log_passes() -> None:
     """決定ログ節を持たない文書は検査対象外（base にも無いので比較しない）。"""
     repo = new_repo()
     try:
-        write_doc(repo, "docs/knowledge/plain.md", "決定ログの無い文書。\n")
+        write_doc(repo, "knowledge/plain.md", "決定ログの無い文書。\n")
         commit_all(repo, "決定ログ無しの文書を追加")
         overwrite(
             repo,
-            "docs/knowledge/plain.md",
-            read_doc(repo, "docs/knowledge/plain.md") + "\n追記。\n",
+            "knowledge/plain.md",
+            read_doc(repo, "knowledge/plain.md") + "\n追記。\n",
         )
         commit_all(repo, "その文書を書き換える")
         code, out = check(repo)
@@ -187,8 +186,8 @@ def test_trailing_whitespace_only_change_passes() -> None:
     """行末空白の増減だけでは落とさない（エディタ由来の差分）。"""
     repo = new_repo()
     try:
-        text = read_doc(repo, "docs/knowledge/a.md")
-        overwrite(repo, "docs/knowledge/a.md", text.replace("- 決定: α=0.2 で市場単勝とブレンドする", "- 決定: α=0.2 で市場単勝とブレンドする   "))
+        text = read_doc(repo, "knowledge/a.md")
+        overwrite(repo, "knowledge/a.md", text.replace("- 決定: α=0.2 で市場単勝とブレンドする", "- 決定: α=0.2 で市場単勝とブレンドする   "))
         commit_all(repo, "行末に空白が入った")
         code, out = check(repo)
         assert code == 0, out
@@ -204,10 +203,10 @@ def test_trailing_blank_lines_removed_passes() -> None:
     """
     repo = new_repo()
     try:
-        overwrite(repo, "docs/knowledge/a.md", read_doc(repo, "docs/knowledge/a.md") + "\n\n\n")
+        overwrite(repo, "knowledge/a.md", read_doc(repo, "knowledge/a.md") + "\n\n\n")
         commit_all(repo, "末尾に空行を積む")
         land_on_main(repo)
-        overwrite(repo, "docs/knowledge/a.md", read_doc(repo, "docs/knowledge/a.md").rstrip() + "\n")
+        overwrite(repo, "knowledge/a.md", read_doc(repo, "knowledge/a.md").rstrip() + "\n")
         commit_all(repo, "末尾の空行を消す")
         code, out = check(repo)
         assert code == 0, f"末尾空行の削除で落ちている:\n{out}"
@@ -225,13 +224,13 @@ def test_section_after_decision_log_can_be_edited() -> None:
     try:
         overwrite(
             repo,
-            "docs/knowledge/a.md",
-            read_doc(repo, "docs/knowledge/a.md") + "\n## 参考\n\n- リンク集\n",
+            "knowledge/a.md",
+            read_doc(repo, "knowledge/a.md") + "\n## 参考\n\n- リンク集\n",
         )
         commit_all(repo, "参考節を追加")
         land_on_main(repo)
-        text = read_doc(repo, "docs/knowledge/a.md")
-        overwrite(repo, "docs/knowledge/a.md", text.replace("- リンク集", "- 全面的に書き直したリンク集"))
+        text = read_doc(repo, "knowledge/a.md")
+        overwrite(repo, "knowledge/a.md", text.replace("- リンク集", "- 全面的に書き直したリンク集"))
         commit_all(repo, "参考節を改稿")
         code, out = check(repo)
         assert code == 0, f"決定ログの外の節の編集で落ちている:\n{out}"
@@ -245,15 +244,15 @@ def test_decision_log_heading_in_code_fence_is_ignored() -> None:
     try:
         write_doc(
             repo,
-            "docs/knowledge/guide.md",
+            "knowledge/guide.md",
             "書き方の見本:\n\n```markdown\n## 決定ログ\n\n### 見本のエントリ\n```\n",
         )
         commit_all(repo, "規約文書を追加")
         # main へ載せてから触る。新規ファイルのままだと base に無く、比較まで到達しない
         # ＝フェンス判定を壊しても素通りするテストになる。
         land_on_main(repo)
-        text = read_doc(repo, "docs/knowledge/guide.md")
-        overwrite(repo, "docs/knowledge/guide.md", text.replace("### 見本のエントリ", "### 見本を差し替えた"))
+        text = read_doc(repo, "knowledge/guide.md")
+        overwrite(repo, "knowledge/guide.md", text.replace("### 見本のエントリ", "### 見本を差し替えた"))
         commit_all(repo, "見本を差し替える")
         code, out = check(repo)
         assert code == 0, out
@@ -275,11 +274,11 @@ def test_empty_decision_log_with_comment_only_passes() -> None:
     )
     repo = new_repo()
     try:
-        write_doc(repo, "docs/specifications/empty-log.md", "仕様本文。\n" + comment_only_log)
+        write_doc(repo, "knowledge/empty-log.md", "仕様本文。\n" + comment_only_log)
         commit_all(repo, "コメントのみの決定ログを追加")
         land_on_main(repo)
-        text = read_doc(repo, "docs/specifications/empty-log.md")
-        overwrite(repo, "docs/specifications/empty-log.md", text.replace("仕様本文。", "仕様を全面改稿。"))
+        text = read_doc(repo, "knowledge/empty-log.md")
+        overwrite(repo, "knowledge/empty-log.md", text.replace("仕様本文。", "仕様を全面改稿。"))
         commit_all(repo, "本文だけ改稿")
         code, out = check(repo)
         assert code == 0, f"コメントのみの決定ログで落ちている:\n{out}"
@@ -304,15 +303,15 @@ def test_path_rename_in_decision_log_passes() -> None:
         )
         overwrite(
             repo,
-            "docs/knowledge/a.md",
-            read_doc(repo, "docs/knowledge/a.md") + "\n" + entry_with_link,
+            "knowledge/a.md",
+            read_doc(repo, "knowledge/a.md") + "\n" + entry_with_link,
         )
         commit_all(repo, "リンク付きエントリを追加")
         land_on_main(repo)
 
         run_git(repo, "mv", "docs/old-data", "docs/new-data")
-        text = read_doc(repo, "docs/knowledge/a.md")
-        overwrite(repo, "docs/knowledge/a.md", text.replace("old-data", "new-data"))
+        text = read_doc(repo, "knowledge/a.md")
+        overwrite(repo, "knowledge/a.md", text.replace("old-data", "new-data"))
         commit_all(repo, "old-data → new-data にリネーム")
 
         code, out = check(repo)
@@ -328,13 +327,13 @@ def test_modified_entry_is_error() -> None:
     """既存エントリの本文を書き換えたら落とす。"""
     repo = new_repo()
     try:
-        text = read_doc(repo, "docs/knowledge/a.md")
-        overwrite(repo, "docs/knowledge/a.md", text.replace("α=0.2", "α=0.5"))
+        text = read_doc(repo, "knowledge/a.md")
+        overwrite(repo, "knowledge/a.md", text.replace("α=0.2", "α=0.5"))
         commit_all(repo, "既存の決定を書き換える")
         code, out = check(repo)
         assert code == 1, f"既存エントリの改変を検出できていない:\n{out}"
         assert "既存エントリが変更されている" in out, out
-        assert "docs/knowledge/a.md" in out, out
+        assert "knowledge/a.md" in out, out
     finally:
         shutil.rmtree(repo)
 
@@ -343,10 +342,10 @@ def test_modified_entry_heading_is_error() -> None:
     """見出しは同じで本文だけ変えても落とす（見出し一致で素通りさせない）。"""
     repo = new_repo()
     try:
-        text = read_doc(repo, "docs/knowledge/a.md")
+        text = read_doc(repo, "knowledge/a.md")
         overwrite(
             repo,
-            "docs/knowledge/a.md",
+            "knowledge/a.md",
             text.replace("- 理由: 純モデルの resolution が天井", "- 理由: あとから書き換えた理由"),
         )
         commit_all(repo, "理由だけ差し替える")
@@ -365,10 +364,10 @@ def test_deleted_entry_is_error() -> None:
     """
     repo = new_repo()
     try:
-        write_doc(repo, "docs/knowledge/a.md", "本文の段落。\n" + LOG_HEADER + ENTRY_A + "\n" + ENTRY_B)
+        write_doc(repo, "knowledge/a.md", "本文の段落。\n" + LOG_HEADER + ENTRY_A + "\n" + ENTRY_B)
         commit_all(repo, "2 件目を追記")
         land_on_main(repo)
-        write_doc(repo, "docs/knowledge/a.md", "本文の段落。\n" + LOG_HEADER + ENTRY_A)
+        write_doc(repo, "knowledge/a.md", "本文の段落。\n" + LOG_HEADER + ENTRY_A)
         commit_all(repo, "2 件目を削除")
         code, out = check(repo)
         assert code == 1, f"エントリ削除を検出できていない:\n{out}"
@@ -381,7 +380,7 @@ def test_deleted_section_is_error() -> None:
     """決定ログ節ごと消したら落とす。"""
     repo = new_repo()
     try:
-        write_doc(repo, "docs/knowledge/a.md", "本文の段落。\n")
+        write_doc(repo, "knowledge/a.md", "本文の段落。\n")
         commit_all(repo, "決定ログ節を削除")
         code, out = check(repo)
         assert code == 1, f"節の削除を検出できていない:\n{out}"
@@ -394,8 +393,8 @@ def test_renamed_heading_is_error() -> None:
     """見出しを別文言へ改名したら「節ごと消えた」として落とす。"""
     repo = new_repo()
     try:
-        text = read_doc(repo, "docs/knowledge/a.md")
-        overwrite(repo, "docs/knowledge/a.md", text.replace("## 決定ログ", "## 決定の記録"))
+        text = read_doc(repo, "knowledge/a.md")
+        overwrite(repo, "knowledge/a.md", text.replace("## 決定ログ", "## 決定の記録"))
         commit_all(repo, "見出しを改名")
         code, out = check(repo)
         assert code == 1, f"見出しの改名を検出できていない:\n{out}"
@@ -408,7 +407,7 @@ def test_inserted_entry_at_head_is_error() -> None:
     """既存エントリの**前**への挿入は追記ではないので落とす。"""
     repo = new_repo()
     try:
-        write_doc(repo, "docs/knowledge/a.md", "本文の段落。\n" + LOG_HEADER + ENTRY_B + "\n" + ENTRY_A)
+        write_doc(repo, "knowledge/a.md", "本文の段落。\n" + LOG_HEADER + ENTRY_B + "\n" + ENTRY_A)
         commit_all(repo, "先頭へ挿入")
         code, out = check(repo)
         assert code == 1, f"先頭への挿入を検出できていない:\n{out}"
@@ -430,16 +429,16 @@ def test_content_change_with_path_rename_is_error() -> None:
         )
         overwrite(
             repo,
-            "docs/knowledge/a.md",
-            read_doc(repo, "docs/knowledge/a.md") + "\n" + entry_with_link,
+            "knowledge/a.md",
+            read_doc(repo, "knowledge/a.md") + "\n" + entry_with_link,
         )
         commit_all(repo, "リンク付きエントリを追加")
         land_on_main(repo)
 
         run_git(repo, "mv", "docs/old-data", "docs/new-data")
-        text = read_doc(repo, "docs/knowledge/a.md")
+        text = read_doc(repo, "knowledge/a.md")
         text = text.replace("old-data", "new-data").replace("テスト用の理由", "書き換えた理由")
-        overwrite(repo, "docs/knowledge/a.md", text)
+        overwrite(repo, "knowledge/a.md", text)
         commit_all(repo, "リネーム＋内容変更")
 
         code, out = check(repo)
@@ -450,18 +449,18 @@ def test_content_change_with_path_rename_is_error() -> None:
 
 
 def test_specifications_dir_is_also_checked() -> None:
-    """docs/specifications 側も同じ規律で見る（対象ディレクトリの取りこぼし防止）。"""
+    """旧 specifications 側（knowledge/ に統合）も同じ規律で見る。"""
     repo = new_repo()
     try:
-        write_doc(repo, "docs/specifications/s.md", "仕様。\n" + LOG_HEADER + ENTRY_A)
+        write_doc(repo, "knowledge/s.md", "仕様。\n" + LOG_HEADER + ENTRY_A)
         commit_all(repo, "仕様書を追加")
         land_on_main(repo)
-        text = read_doc(repo, "docs/specifications/s.md")
-        overwrite(repo, "docs/specifications/s.md", text.replace("α=0.2", "α=0.9"))
+        text = read_doc(repo, "knowledge/s.md")
+        overwrite(repo, "knowledge/s.md", text.replace("α=0.2", "α=0.9"))
         commit_all(repo, "仕様書の決定ログを改変")
         code, out = check(repo)
         assert code == 1, f"specifications 側を見ていない:\n{out}"
-        assert "docs/specifications/s.md" in out, out
+        assert "knowledge/s.md" in out, out
     finally:
         shutil.rmtree(repo)
 
@@ -470,8 +469,8 @@ def test_violation_reports_both_sides() -> None:
     """error 行に base と現在の両方が出る（何が変わったか読める）。"""
     repo = new_repo()
     try:
-        text = read_doc(repo, "docs/knowledge/a.md")
-        overwrite(repo, "docs/knowledge/a.md", text.replace("α=0.2", "α=0.5"))
+        text = read_doc(repo, "knowledge/a.md")
+        overwrite(repo, "knowledge/a.md", text.replace("α=0.2", "α=0.5"))
         commit_all(repo, "既存の決定を書き換える")
         code, out = check(repo)
         assert code == 1, out
