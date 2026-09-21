@@ -526,7 +526,7 @@ def test_frontmatter_only_change_is_not_stale() -> None:
         write_doc(repo, "knowledge/s.md", ["D19"],
                   ["docs-original/0001-first.md"], sha)
         write_registry(repo, sha, d19=2,
-                       docs=[("knowledge/a.md", ["D19"]), ("specifications/s.md", ["D19"])])
+                       docs=[("knowledge/a.md", ["D19"]), ("knowledge/s.md", ["D19"])])
         write_doc(repo, "knowledge/a.md", ["D19"],
                   ["knowledge/s.md", "docs-original/0001-first.md"], sha)
         added = commit_all(repo, "s.md を追加して a.md の source にする")
@@ -540,7 +540,7 @@ def test_frontmatter_only_change_is_not_stale() -> None:
                   ["docs-original/0001-first.md"], sha)
         write_registry(repo, sha, d19=2, d22=1,
                        docs=[("knowledge/a.md", ["D19"]),
-                             ("specifications/s.md", ["D19", "D22"])])
+                             ("knowledge/s.md", ["D19", "D22"])])
         commit_all(repo, "s.md の frontmatter だけ変更")
         code, out = check(repo)
         assert code == 0, out
@@ -1512,7 +1512,7 @@ def test_runs_from_subdirectory() -> None:
         p.write_text(p.read_text(encoding="utf-8") + "\n本文の追記。\n", encoding="utf-8")
         commit_all(repo, "本文を変更")
         proc = subprocess.run(
-            [sys.executable, str(TARGET)], cwd=repo / "docs", capture_output=True, text=True
+            [sys.executable, str(TARGET)], cwd=repo / "knowledge", capture_output=True, text=True
         )
         out = proc.stdout + proc.stderr
         assert "STALE" in out, f"サブディレクトリから実行すると stale 判定が消える:\n{out}"
@@ -2552,7 +2552,7 @@ def test_body_link_directory_case_mismatch_is_error() -> None:
     repo = new_repo()
     try:
         baseline(repo)
-        append_raw(repo, "knowledge/a.md", "\n[大小](../Original-docs/0001-first.md)\n")
+        append_raw(repo, "knowledge/a.md", "\n[大小](../Docs-original/0001-first.md)\n")
         code, out = check(repo)
         assert code == 1, out
         if _case_insensitive_fs(repo):

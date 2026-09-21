@@ -1258,7 +1258,7 @@ def main(argv: list[str]) -> int:
                 # doc_class を持たない設計の文書（規約・クラス定義そのもの）。
                 # 索引は doc_class の一覧なので、そもそも行を置かない。
                 reason = "doc_class を持たない文書なので索引に載せない"
-            elif f"docs/{key}" not in scanned_rels:
+            elif key not in scanned_rels:
                 reason = "対応する検査対象の文書が無い"
             else:
                 reason = "対応する文書の doc_class を読めない（上の error を先に直す）"
