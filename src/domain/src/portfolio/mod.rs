@@ -543,7 +543,7 @@ pub fn build_portfolio(
 /// 各脚に `method`（ながし / ボックス）を付ける。各脚の ev 倍率・的中確率は `simulate` 単体評価で求める。
 ///
 /// 配分を確率重み＋脚ごと最低¥100 撤廃へ変える案は 71R 検証で実 ROI を悪化させたため不採用
-/// （均等割りを維持）。根拠は ADR 0046 / docs/specifications/betting-rule-history.md ⑨。
+/// （均等割りを維持）。根拠は ADR 0046 / knowledge/betting-rule-history.md ⑨。
 fn push_legs(
     out: &mut Vec<PortfolioBet>,
     legs: Vec<(BetCombination, Option<f64>)>,

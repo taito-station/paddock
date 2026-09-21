@@ -34,9 +34,9 @@ print("STALE な文書は無い")
 '
 
 STUB_THREE_STALE='#!/usr/bin/env python3
-print("（dry-run）docs/knowledge/a.md")
-print("（dry-run）docs/knowledge/b.md")
-print("（dry-run）docs/knowledge/c.md")
+print("（dry-run）knowledge/a.md")
+print("（dry-run）knowledge/b.md")
+print("（dry-run）knowledge/c.md")
 '
 
 check() {

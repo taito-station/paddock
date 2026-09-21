@@ -4,7 +4,7 @@
 //! 的中率（単勝・連対・複勝）・想定回収率・確率校正指標（Brier / LogLoss / reliability 曲線）を
 //! [`BacktestReport`] に集計する。校正は単勝・連対・複勝の各確率について算出し、人気帯・頭数帯の
 //! セグメント別にも出す。確率推定の再現やデータ取得は use-case 層が担い、本モジュールは集計のみを
-//! 行う（設計書 `docs/specifications/backtest.md` 参照）。
+//! 行う（設計書 `knowledge/backtest.md` 参照）。
 //!
 //! 関心事ごとにサブモジュールへ分割している。公開 API は本モジュールから re-export し、
 //! `backtest::Foo` のパスを保つ（呼び出し側・`crate` ルートの re-export は不変）。

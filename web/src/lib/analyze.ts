@@ -1,6 +1,6 @@
 // Analyze の URL クエリ ⇔ タブ状態の相互変換（純関数・単一生成源）。
 // URL 正の既存流儀（header-date.ts / live.ts の parseLiveQuery）に倣い whitelist 検証する。
-// 設計知: docs/knowledge/analyze-search-and-state.md
+// 設計知: knowledge/analyze-search-and-state.md
 
 import { VENUE_JP } from "./format";
 

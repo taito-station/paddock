@@ -14,8 +14,7 @@ category: workflow
 # /implement — 構造化実装ワークフロー
 
 ゲートベースの実装フローを実行するスキル。
-規約の正本は `.claude/rules/workflow/implement-flow.md`（プロジェクトルール）。
-`~/.claude/rules/workflow/implement-flow.md` に汎用版を配置し、他プロジェクトにも適用。
+規約の正本は `.claude/rules/hve/implement-flow.md`（HVE ルール）。
 
 ---
 

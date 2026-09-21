@@ -117,7 +117,7 @@ pub const RECOMMENDED_PLACE_SHOW_POWER: f64 = 2.0;
 /// 本番 predict が採用する市場オッズ(単勝)ブレンドのモデル重み α（#72）。`None` はモデルのみ。
 /// backtest（2025-01〜2026-06 / 4891R）の α スイープで Brier/LogLoss が α=0.2 で最良（ADR 0034）。
 /// 市場オッズが無いレースは自動でモデルのみにフォールバックする。
-/// 詳細は docs/specifications/probability-estimation.md。
+/// 詳細は knowledge/probability-estimation.md。
 pub const RECOMMENDED_MARKET_BLEND_ALPHA: Option<f64> = Some(0.2);
 
 impl EstimationConfig {
