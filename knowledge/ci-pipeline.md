@@ -1139,3 +1139,41 @@ python3 scripts/test-check-doc-classes.py
 # 本リポジトリでの実測（マージ × sources パスのうち不可視が 0 件であること）
 # … git log -- <path> が列挙したマージに path_status を当てて数える
 ```
+
+### ADR 0092: 蒸留層ディレクトリを hve-playbook 標準に統一する (2026-09-21) — 承認済み
+
+#### コンテキスト
+
+paddock は蒸留層を `docs/knowledge/`, `docs/specifications/`, `docs/qa/`, `docs/docs-original/`
+に配置していたが、上流の hve-playbook はプロジェクトルート直下の `knowledge/`, `qa/`, `docs-original/`
+を標準とする。paddock 固有の `specifications/` は hve 標準にない——frontmatter `kind: specification`
+で区別すれば `knowledge/` に統合できる。ADR 0073（ADR の一次資料層統合）で同種の大規模パス移動を
+実施した前例がある。
+
+#### 決定
+
+1. `docs/knowledge/*` → `knowledge/`（プロジェクトルート直下）に git mv
+2. `docs/specifications/*` → `knowledge/` に統合（`kind: specification` で区別）
+3. `docs/qa/*` → `qa/` に git mv
+4. `docs/docs-original/*` → `docs-original/` に git mv
+5. `docs/docs-generated/`, `docs/catalog/` は hve 蒸留対象外のため移動しない
+6. 全参照（Python スクリプト・テスト・CLAUDE.md・frontmatter sources・本文内リンク・Rust doc comments・mdq.toml）を新パスへ一括更新
+7. `.claude/rules/hve/*` を hve-playbook 最新版に同期（knowledge-maturity.md 新規追加含む）
+8. `.claude/skills/hve-akm/` を hve-playbook から新規導入（汎用 AKM パイプライン）
+
+#### 理由
+
+- hve-playbook を上流 SoT として追従する方針。paddock 固有のパス差異はメンテ負荷（hve ルール更新時にパスの再調整が必要）を生む
+- `specifications/` と `knowledge/` の区別は物理ディレクトリではなく frontmatter `kind` で十分——ADR 0073 と同じ「物理移動＋全参照置換」パターンで実績がある
+- rename-only コミットは `distilled_from_sha` を stale にするが、`bump-distilled-sha.py` で機械的に解消できる（ADR 0073 の教訓）
+
+#### 却下した代替案
+
+- **パスを変えずに hve ルール側を paddock パスに書き換える**: hve-playbook 更新のたびにパス調整が必要。上流追従コストが継続的に発生するため却下
+- **specifications/ を独立ディレクトリとして残す**: hve 標準にない独自構造を維持する実利がない。frontmatter `kind` で十分に区別できる
+
+#### 影響
+
+- `mdq.toml` の roots が `knowledge/`, `qa/`, `docs-original/` に変更——セッション開始時に `rm -rf .mdq && scripts/mdq index` で索引再構築が必要
+- `check-doc-classes.py`, `check-decision-log-immutability.py`, `bump-distilled-sha.py` の TARGET_DIRS が `("knowledge",)` に統一
+- `knowledge/README.md` の「knowledge はどこにあるか」節を新構成に合わせて更新

@@ -14,7 +14,7 @@ sources:
   - knowledge/prediction-search-api.md
   - knowledge/feature-resolution-diagnosis.md
   - knowledge/netkeiba-datasource.md
-distilled_from_sha: "6b51b81"
+distilled_from_sha: "d85071b"
 updated: "2026-08-23"
 ---
 
@@ -194,9 +194,8 @@ ADR 0073 が置いた文書クラス D01〜D24 のうち、**D07（用語集・�
    正本が正**とし、用語集を直す。値（本番の α・m・γ、混戦の閾値など）は書いてよいが、
    **その値を所有する正本（要件として固定されたものは REQ-ID、既定値は仕様書の節）を必ず併記する**。
 
-2. **`sources` に確定知層（`knowledge/` / `knowledge/`）を取ってよい。**
+2. **`sources` に確定知層（`knowledge/`）を取ってよい。**
    判定基準は「**その文書の本文が動いたら、こちらの要約の見直しが要る関係にあるか**」。
-   `knowledge/*.md` を `sources` に取るのは本 ADR が初例（`knowledge/*.md` は先例あり）。
    README の frontmatter 規約もこれに合わせて明文化する。
 
 3. **`CLAUDE.md` は `sources` に入れない。** 正本列で指すに留める。理由は 2 つ:
