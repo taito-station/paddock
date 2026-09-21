@@ -85,7 +85,7 @@ jobs:
         # 切らないため master の特定コミットを固定する）。更新は dependabot の PR で行い、
         # 固定した日付はここに書かない（SHA を上げるたびに腐るため。日付は git 履歴が正）。
         # toolchain は env.RUST_TOOLCHAIN を参照（単一ソース化 #466）。
-        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
           components: rustfmt, clippy
@@ -342,7 +342,7 @@ jobs:
       - name: Install Rust toolchain
         # 本体 ci ジョブと同じ SHA ピン（両ジョブで同じ値を使う。片方だけ上げない）。
         # toolchain は env.RUST_TOOLCHAIN を参照（単一ソース化 #466）。
-        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
 
