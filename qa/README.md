@@ -1,7 +1,7 @@
 # qa — 質問票 + 回答（knowledge の入力）
 
 `docs-original/` の一次資料や調査中に生じた**確認すべき質問**と、その**回答**を蓄える中間層。
-回答済みの qa が `knowledge/`（と `knowledge/`）への差分マージの入力になる。
+回答済みの qa が `knowledge/` への差分マージの入力になる。
 全体像は [knowledge/README.md](../knowledge/README.md)。
 
 ## ファイル命名
@@ -16,7 +16,7 @@
 ## Q1: <問い>
 - 観測/根拠: <コード・データ・ADR 等の裏付け>
 - 回答: <確定した答え。未確定なら「保留（理由）」>
-- 反映先: knowledge/<file>.md / knowledge/<file>.md / ADR 起票
+- 反映先: knowledge/<file>.md / ADR 起票
 ```
 
 - 回答が確定したら、対応する knowledge に差分反映し、その knowledge の `updated`/`変更履歴`/

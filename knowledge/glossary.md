@@ -196,6 +196,7 @@ ADR 0073 が置いた文書クラス D01〜D24 のうち、**D07（用語集・�
 
 2. **`sources` に確定知層（`knowledge/`）を取ってよい。**
    判定基準は「**その文書の本文が動いたら、こちらの要約の見直しが要る関係にあるか**」。
+   `knowledge/*.md` を `sources` に取るのは本 ADR が初例（ディレクトリ統合前は `docs/specifications/*.md` に先例があった）。
    README の frontmatter 規約もこれに合わせて明文化する。
 
 3. **`CLAUDE.md` は `sources` に入れない。** 正本列で指すに留める。理由は 2 つ:

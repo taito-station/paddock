@@ -67,7 +67,7 @@ stale な各ファイルについて、source の変更を knowledge 本文に�
 2. 変更内容を knowledge 本文に差分マージする
    - **全書き換え禁止**。変更箇所のみ更新する
    - source にない情報（既存の蒸留結果）は維持する
-3. 決定を伴う変更がある場合は、決定ログ（`knowledge/adr/`）に新エントリを追加する
+3. 決定を伴う変更がある場合は、該当する knowledge ファイルの `## 決定ログ` 節に新エントリを append する
 4. frontmatter の `distilled_from_sha` を新しい sha に更新する
 5. frontmatter の `updated` を当日日付に更新する
 

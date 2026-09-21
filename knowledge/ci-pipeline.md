@@ -484,7 +484,7 @@ paddock は HVE（dahatake/HypervelocityEngineering, MIT）の 3 層蒸留モデ
 
 `qa/QA-setup-boilerplate-410.md` には「【追記・#453 で覆る】`NoopParser` / `NoopFetcher` スタブは削除された」とある。ところが蒸留先の `knowledge/app-bootstrap.md` は `status: Confirmed` のまま `NoopParser` の注入を推奨し続けている。コードを実測すると `NoopParser` はソースツリーに **1 件も存在しない**。
 
-「qa は生ファイル、knowledge が確定知」という規約（[qa/README.md](../README.md)）と実態が逆転しており、**knowledge を信じると存在しない API を書く**。`knowledge/README.md` の第 6 ステップ「sources 追従」は規約として存在するが、機械検査が無いため守られていない。
+「qa は生ファイル、knowledge が確定知」という規約（[qa/README.md](../qa/README.md)）と実態が逆転しており、**knowledge を信じると存在しない API を書く**。`knowledge/README.md` の第 6 ステップ「sources 追従」は規約として存在するが、機械検査が無いため守られていない。
 
 ##### 蒸留が日常開発に乗っていない
 
