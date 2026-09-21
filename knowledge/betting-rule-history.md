@@ -7,7 +7,7 @@ doc_class: [D24, D23]
 tags: [D24, D23]
 sources:
   - docs-original/571-roi-gate-calibration.md
-distilled_from_sha: "e89d727"
+distilled_from_sha: "6b51b81"
 updated: "2026-08-12"
 ---
 

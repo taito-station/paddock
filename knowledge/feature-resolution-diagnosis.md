@@ -407,7 +407,7 @@ Issue #195 では、以下の 2 点を 4891 レース（2025-01-05〜2026-06-14�
 
 API デフォルトの変更（α=0.3→0.2）は SPA 側で `blend_alpha` 省略時に自動反映される。
 
-![blend_alpha を省略してレース予想 API を呼び出した際に α=0.2 ブレンド済みの確率値が返ることをブラウザで確認したスクリーンショット](../images/blend-alpha-default-browser-test.png)
+![blend_alpha を省略してレース予想 API を呼び出した際に α=0.2 ブレンド済みの確率値が返ることをブラウザで確認したスクリーンショット](../docs/images/blend-alpha-default-browser-test.png)
 
 ### ADR 0056: 素性重み再調整（course_gate 2.0→1.0・jockey_surface 1.0→2.0）で純モデルの resolution を改善（採用） (2026-07-01) — 採用
 

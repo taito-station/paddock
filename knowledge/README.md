@@ -2,7 +2,7 @@
 
 dahatake/HypervelocityEngineering（HVE, MIT）の docs-original → qa → knowledge 蒸留モデルを
 paddock に導入したもの。**蒸留は Claude Code が担う**——`/akm` スキル
-（[.claude/skills/akm/SKILL.md](../../.claude/skills/akm/SKILL.md)）で自動化し、
+（[.claude/skills/akm/SKILL.md](../.claude/skills/akm/SKILL.md)）で自動化し、
 hook で強制する（#678）。HVE 本体の LLM オーケストレータは持ち込まない。
 
 ## 2 層モデル
@@ -23,7 +23,7 @@ knowledge/ ＋ knowledge/   status 付き確定知（＝この層。読むのは
 置き場で、手書きの蒸留対象ではない）。
 
 - **横断検索**は mdq（Markdown Query, BM25・ローカル）で全 docs を索引する。生ファイルを読む前に
-  `scripts/mdq search` を使う（[.claude/skills/markdown-query/SKILL.md](../../.claude/skills/markdown-query/SKILL.md)）。
+  `scripts/mdq search` を使う（[.claude/skills/markdown-query/SKILL.md](../.claude/skills/markdown-query/SKILL.md)）。
 - **決定の記録は各文書の「決定ログ」節**（#652）。かつて `docs-original/` に独立ファイルとして
   置いていた ADR は廃止し、決定・理由・却下案・影響は**その決定が効く knowledge / specifications の
   末尾**にある `## 決定ログ` 節へ集約した。**独立した ADR ファイルはもう作らない**——新しい決定は
@@ -69,15 +69,13 @@ knowledge/ ＋ knowledge/   status 付き確定知（＝この層。読むのは
 
 ## knowledge はどこにあるか
 
-- **`knowledge/`**: 既存のドメイン/機能知。**その場で knowledge に昇格**する（frontmatter を
-  付与）。物理移動はしない——frontmatter を付けた時点で確定知層として機能し、`knowledge/` へ
-  移しても得られるものが無いため。
-- **`knowledge/`**: qa および一次資料由来の**新規・横断的な蒸留知**の置き場。既存 spec に属さない
-  ものはここに置く。
+- **`knowledge/`**: プロジェクトルート直下に統合。旧 `docs/knowledge/`（蒸留知）と旧
+  `docs/specifications/`（ドメイン/機能知）を 1 ディレクトリに集約した（hve-playbook 標準準拠）。
+  旧 specifications は `kind: specification` で区別する。
 - **語の定義を探すなら [glossary.md](glossary.md)（D07）から引く**。定義の正本がどの文書のどの節に
   あるかだけを持つ索引で、定義そのものは各仕様書・`CLAUDE.md` にある。
 
-どちらも下記 frontmatter 規約に従い、mdq の索引対象（`mdq.toml`）に含める。
+下記 frontmatter 規約に従い、mdq の索引対象（`mdq.toml`）に含める。
 
 ## frontmatter 規約
 
@@ -424,7 +422,7 @@ GitHub 上で issue 本文が編集されても git には何も現れないた�
 
 ```sh
 # 転記章が残っていないこと（issue 本文の見出しが 0 件）
-git grep -nE '^#+ (Issue #[0-9]+ 概要|[0-9]+\. issue #[0-9]+ 本文)' -- docs/docs-original   # → 0 行
+git grep -nE '^#+ (Issue #[0-9]+ 概要|[0-9]+\. issue #[0-9]+ 本文)' -- docs-original   # → 0 行
 
 # 原本はいつでも取れる
 gh issue view 382 --repo taito-station/paddock

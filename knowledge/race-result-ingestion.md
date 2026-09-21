@@ -131,7 +131,7 @@ SELECT EXISTS (
 
 ## 受け入れ観点（ブラウザテスト）
 
-実装 PR 用のブラウザテストケースを [tests/browser-test-cases/race-result-ingestion.md](../../tests/browser-test-cases/race-result-ingestion.md) に設計する（TC-01〜）。要点:
+実装 PR 用のブラウザテストケースを [tests/browser-test-cases/race-result-ingestion.md](../tests/browser-test-cases/race-result-ingestion.md) に設計する（TC-01〜）。要点:
 
 - 発走後レースが `result_confirmed` で「⚫終」確定に変わる（`post_time` 推定でなく着順取り込みが根拠）。
 - 賭けたレースに的中○/✗・払戻額、全レースに着順が出る。

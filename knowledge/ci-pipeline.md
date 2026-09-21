@@ -9,7 +9,7 @@ sources:
   - qa/QA-evil-merge-615.md
   - qa/QA-fullwidth-after-var-636.md
   - .github/workflows/ci.yml
-distilled_from_sha: "5f83bc6"
+distilled_from_sha: "6b51b81"
 updated: "2026-09-14"
 ---
 
@@ -355,7 +355,7 @@ OpenAPI 仕様を描画する開発者向け UI なので、埋め込み版の�
   **案内する URL は `/docs/`**（`/docs` は `/docs/` へリダイレクトされる。#619）。
   本文中の他の `/docs` 表記は配信経路を指す一般参照で、叩く URL ではない。
   **手動のブラウザテストに残るのは JS 実行後の描画結果とコンソールエラーだけ**
-  （[api-docs-swagger-ui.md](../../tests/browser-test-cases/api-docs-swagger-ui.md) の TC-01）。
+  （[api-docs-swagger-ui.md](../tests/browser-test-cases/api-docs-swagger-ui.md) の TC-01）。
 - **`-vv` のログの読み方**: `SWAGGER_UI_DOWNLOAD_URL: <url>` は **vendored でも印字される**ので
   ダウンロードの証拠にならない。実際に取得したかは `using vendored Swagger UI`（vendored 経路）と
   `start download to`（ダウンロード経路）のどちらが出るかで見る。
@@ -484,7 +484,7 @@ paddock は HVE（dahatake/HypervelocityEngineering, MIT）の 3 層蒸留モデ
 
 `qa/QA-setup-boilerplate-410.md` には「【追記・#453 で覆る】`NoopParser` / `NoopFetcher` スタブは削除された」とある。ところが蒸留先の `knowledge/app-bootstrap.md` は `status: Confirmed` のまま `NoopParser` の注入を推奨し続けている。コードを実測すると `NoopParser` はソースツリーに **1 件も存在しない**。
 
-「qa は生ファイル、knowledge が確定知」という規約（[qa/README.md](../qa/README.md)）と実態が逆転しており、**knowledge を信じると存在しない API を書く**。`knowledge/README.md` の第 6 ステップ「sources 追従」は規約として存在するが、機械検査が無いため守られていない。
+「qa は生ファイル、knowledge が確定知」という規約（[qa/README.md](../README.md)）と実態が逆転しており、**knowledge を信じると存在しない API を書く**。`knowledge/README.md` の第 6 ステップ「sources 追従」は規約として存在するが、機械検査が無いため守られていない。
 
 ##### 蒸留が日常開発に乗っていない
 

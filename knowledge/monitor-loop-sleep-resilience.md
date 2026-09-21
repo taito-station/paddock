@@ -12,7 +12,7 @@ sources:
   - qa/QA-prefetch-lock-651.md
   - docs-original/584-predict-watch-notification.md
   - qa/QA-predict-watch-notify-584.md
-distilled_from_sha: "daf3beb"
+distilled_from_sha: "6b51b81"
 updated: "2026-08-23"
 ---
 
@@ -159,7 +159,7 @@ stdout に出すだけだったため、2026-08-09 は 82 スイープを途切�
 - 開催日は `deployments/launchd/install.sh`（keiba-start Step 1.6）で keep-awake を有効にする。
   **install を忘れると抑止はゼロ**——ただし監視自体はスリープを跨いでも復帰し、空いた分を警告する。
 - **外出中に監視を当てにするなら、蓋を閉じない**（または常時稼働ホストへ移設する。
-  [deployments/launchd/README.md](../../deployments/launchd/README.md) の既知課題）。
+  [deployments/launchd/README.md](../deployments/launchd/README.md) の既知課題）。
 - **抑止窓は毎サイクル追従する（#585）**。窓は「当日の最終 `post_time` + buffer」で `caffeinate -t` に
   焼き込まれるので、**朝の install 時点で `fetch-card` が途中までしか終わっていないと短いまま固定される**
   ——2026-08-08 は 3 鞍ぶんの post_time しか無く 10:40 までの窓で張られ、10:26 に全 33 鞍（最終 18:30）が

@@ -5,7 +5,7 @@ doc_class: [D19, D15]
 tags: [D19, D15]
 sources:
   - qa/QA-setup-boilerplate-410.md
-distilled_from_sha: "3a7e875"
+distilled_from_sha: "6b51b81"
 updated: "2026-08-09"
 ---
 
@@ -102,7 +102,7 @@ paddock の全 app（predict / api-server / predict-watch / fetch-card / odds-co
 
 この設計は単一 DB を 1 バイナリが占有する前提なら素直だが、paddock は開発運用が異なる。
 
-- **単一 golden DB を複数 worktree/バイナリが共有する**（[compose.yaml](../../deployments/compose.yaml) は worktree ごとに別 database 名で分ける運用を建前として記すが、実運用では seed/回収/バックテストが同一 golden `paddock` DB を叩くため事実上共有される）。同じ golden DB を見るある worktree の新しいバイナリが起動時に自動で DDL を適用すると、別 worktree の古いバイナリから見て DB が先行し、`sqlx` の `VersionMissing`（DB にあるがバイナリが知らない version）で**起動拒否**に至る。
+- **単一 golden DB を複数 worktree/バイナリが共有する**（[compose.yaml](../deployments/compose.yaml) は worktree ごとに別 database 名で分ける運用を建前として記すが、実運用では seed/回収/バックテストが同一 golden `paddock` DB を叩くため事実上共有される）。同じ golden DB を見るある worktree の新しいバイナリが起動時に自動で DDL を適用すると、別 worktree の古いバイナリから見て DB が先行し、`sqlx` の `VersionMissing`（DB にあるがバイナリが知らない version）で**起動拒否**に至る。
 - 起動のたびに無条件で migrate が走ると、「いつ・どの版で DB が進んだか」が起動タイミング依存になり、共有 DB の状態が非決定的になる。
 
 つまり「起動時に全バイナリが無条件で migrate する」ことが、共有 DB モデルと衝突して起動拒否・非決定性を生んでいた。
@@ -119,7 +119,7 @@ paddock の全 app（predict / api-server / predict-watch / fetch-card / odds-co
    - `Uninitialized`（`_sqlx_migrations` 不在）→ warn して **`Err` で停止**。初回セットアップ未実施。
    - **pending と stale が同時**（別 worktree が別々に migration を足して交差した状態）→ `Pending` を**優先して停止**する。自バイナリの未適用 migration があるうちは（stale であっても）そのバイナリのクエリが壊れうるため動かさず、`paddock-analyze migrate` で自分の分を適用させる。適用済み判定は `_sqlx_migrations.success = true` の行のみ（dirty＝前回失敗した行は未適用扱い）。
 3. **明示入口 `paddock-analyze migrate`** を新設する。共有 DB へ未適用マイグレーションを適用する唯一の入口。`--dry-run` で未適用一覧のみ表示する。未初期化 DB でも動く必要があるため、この経路だけは `connect_checked`（Uninitialized で停止する）を経由せず素の `pool::connect` で pool を得る（migrate が自家中毒しない）。
-4. **prod は従来どおり起動時 auto-migrate を有効化する**。[compose.yaml](../../deployments/compose.yaml) の `api` / `importer` サービスに `PADDOCK_AUTO_MIGRATE=true` を設定し、コンテナは起動時に自身が `pool::migrate` を適用する（`depends_on` で postgres 健全化を待つ）。Config に `PADDOCK_AUTO_MIGRATE`（既定 `false`）を追加した。
+4. **prod は従来どおり起動時 auto-migrate を有効化する**。[compose.yaml](../deployments/compose.yaml) の `api` / `importer` サービスに `PADDOCK_AUTO_MIGRATE=true` を設定し、コンテナは起動時に自身が `pool::migrate` を適用する（`depends_on` で postgres 健全化を待つ）。Config に `PADDOCK_AUTO_MIGRATE`（既定 `false`）を追加した。
 
 #### 理由
 
