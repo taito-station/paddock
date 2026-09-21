@@ -19,10 +19,11 @@ const CANDIDATE_LIMIT: u32 = 20;
 
 /// 特徴量ダンプ（#272 Phase A / #309）TSV の列数。[`FEATURE_DUMP_HEADER`] と [`feature_row_cells`] の
 /// 双方をこの不変条件で縛り、列ズレ（＝学習データの静かな汚染）を防ぐ（ユニットテストで担保）。
-/// 内訳: id3(race_id/date/horse_num) + 10 factor × (win,place,show,starts)=40 + signal4 + model3 + ラベル3。
+/// 内訳: id3(race_id/date/horse_num) + 10 factor × (win,place,show,starts)=40 + signal4 + model3 +
+/// ラベル3 + pure3（純モデル確率。末尾追加＝ヘッダ名参照の既存読み手を壊さない）。
 /// signal4 = recent_form/weight_carried/jockey_recent_form/running_style（#329 Phase1 で running_style 追加）。
 /// 10 factor = 既存 6 + #350 相性 4（jockey_venue/jockey_distance/jockey_horse_combo/horse_venue）。
-const FEATURE_DUMP_COLUMNS: usize = 53;
+const FEATURE_DUMP_COLUMNS: usize = 56;
 
 /// 特徴量ダンプ（#272 Phase A / #309）TSV のヘッダ行。列順は [`feature_row_cells`] の行生成と一致させ、
 /// 列数は [`FEATURE_DUMP_COLUMNS`] と一致させる（いずれもユニットテストで担保）。`model_*` は内蔵モデルの
@@ -40,7 +41,8 @@ jockey_horse_combo_win\tjockey_horse_combo_place\tjockey_horse_combo_show\tjocke
 horse_venue_win\thorse_venue_place\thorse_venue_show\thorse_venue_starts\t\
 recent_form\tweight_carried\tjockey_recent_form\trunning_style\t\
 model_win\tmodel_place\tmodel_show\t\
-finishing_position\twin_odds\tpopularity";
+finishing_position\twin_odds\tpopularity\t\
+model_win_pure\tmodel_place_pure\tmodel_show_pure";
 
 /// 1 行分の特徴量を [`FEATURE_DUMP_HEADER`] と同じ列順の文字列セル列に展開する。欠落（`None`）は
 /// 空セルで 0 埋めしない（欠落項とレート 0 を区別する）。数値は `f64`/`u32` の既定 Display
@@ -91,6 +93,10 @@ fn feature_row_cells(row: &FeatureRow) -> Vec<String> {
     cells.push(cell_u32(row.finishing_position));
     cells.push(cell_f64(row.win_odds));
     cells.push(cell_u32(row.popularity));
+    // 純モデル確率（末尾追加）。ヘッダ名で引く読み手（exotic_mispricing.py 等）は列追加に不変。
+    cells.push(row.model_win_pure.to_string());
+    cells.push(row.model_place_pure.to_string());
+    cells.push(row.model_show_pure.to_string());
     // ヘッダと行の列数ズレを開発時に即検知する（出力契約の保険。本数値はテストでも担保）。
     debug_assert_eq!(
         cells.len(),
@@ -621,6 +627,9 @@ mod feature_dump_tests {
             model_win: 0.2,
             model_place: 0.3,
             model_show: 0.4,
+            model_win_pure: 0.15,
+            model_place_pure: 0.25,
+            model_show_pure: 0.35,
             finishing_position: Some(1),
             win_odds: Some(4.0),
             popularity: Some(3),
@@ -642,6 +651,8 @@ mod feature_dump_tests {
         assert_eq!(cells[50], "1");
         assert_eq!(cells[51], "4");
         assert_eq!(cells[52], "3");
+        // 純モデル確率 3 列（cells[53..56]・末尾追加）は必ず実値。
+        assert_eq!(&cells[53..56], ["0.15", "0.25", "0.35"]);
     }
 
     /// 実値を持つ factor は (win,place,show,starts) の 4 セルに展開され、欠落ラベルは空になること。
@@ -667,6 +678,9 @@ mod feature_dump_tests {
             model_win: 0.1,
             model_place: 0.2,
             model_show: 0.3,
+            model_win_pure: 0.1,
+            model_place_pure: 0.2,
+            model_show_pure: 0.3,
             finishing_position: None,
             win_odds: None,
             popularity: None,
@@ -696,6 +710,9 @@ mod feature_dump_tests {
             model_win: 0.2,
             model_place: 0.3,
             model_show: 0.4,
+            model_win_pure: 0.15,
+            model_place_pure: 0.25,
+            model_show_pure: 0.35,
             finishing_position: Some(1),
             win_odds: Some(4.0),
             popularity: Some(3),

@@ -79,6 +79,14 @@ ADR 0052（α blend 廃止＝純モデル化の棄却）の通り、純 P_model 
 - 欠落項（`Option=None`）は**空セルのまま**出す（木はネイティブ対応、logit は欠損指標で対応）。0 埋めしない。
 - count 列名は `starts`（ドメインのフィールド名 `FactorStat.starts` に合わせる）。
 - 出力 TSV（将来 Parquet 可）。`--dump-features` 未指定なら既存挙動・出力は完全に不変。
+- **現行の列構成は 56 列**（上表は #272 起票時の設計）: キー 3 列（`race_id/date/horse_num`）、
+  factor は #350 の相性 4 項を加えた 10 項×4 列、シグナルは #329 の `running_style` を加えた 4 列、
+  `model_win/place/show`（blended・忠実性サニティ用）3 列、ラベル 3 列
+  （`finishing_position/win_odds/popularity`）に加え、**#703 で
+  `model_win_pure/place_pure/show_pure`（純モデル＝α=1.0 相当・冪変換適用後）を末尾に追加**した
+  （3+40+4+3+3+3=56）。列順の正本は `analyze/src/bin.rs` の `FEATURE_DUMP_HEADER`。読み手は必ず
+  ヘッダ名参照で列を引く（位置参照は列追加で壊れる。`feature_resolution_diag.py` の位置参照は
+  #350 以前のスキーマ前提で現行 dump には使えない）。
 
 実装方針（clean-arch 準拠）: interactor は file IO せず、ダンプ要求時のみ per-horse 行を `BacktestReport`
 の新規 optional フィールドに収集し、`src/apps/analyze/src/bin.rs` が TSV を書く。未要求時は収集自体を行わない。

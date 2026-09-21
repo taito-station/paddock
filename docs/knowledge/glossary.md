@@ -14,8 +14,8 @@ sources:
   - docs/specifications/prediction-search-api.md
   - docs/specifications/feature-resolution-diagnosis.md
   - docs/specifications/netkeiba-datasource.md
-distilled_from_sha: "5a91701"
-updated: "2026-08-23"
+distilled_from_sha: "e0cde18"
+updated: "2026-09-22"
 ---
 
 # 用語集（ユビキタス言語）
@@ -106,6 +106,10 @@ ADR 0077）:
 | Brier (win) | `mean((win_prob − y)²)`、y=1 if 1 着。全馬エントリ単位。**小さいほど良い** | [backtest.md](../specifications/backtest.md) ステップ 4: 指標集計 |
 | LogLoss (win) | `−mean(y·ln p + (1−y)·ln(1−p))`。`p` はクランプして `ln(0)` を回避する | 同上 |
 | reliability 曲線 | `win_prob` を等幅 10 ビンに分け、ビンごとの「平均予測確率 vs 実測勝率」を並べたもの。平均予測 > 実測なら過大評価 | 同上 |
+| CORP reliability | PAV（isotonic 回帰）でビン境界をデータから最適決定した reliability + 校正仮説下の consistency band（90% pointwise）。H0 下でも 10 点グリッドで約 1 点は帯外に出るため、**1〜2/10 の帯外は有意と読まず、系統的なズレは「大半の点が同方向に帯外」で判定**する | [backtest.md](../specifications/backtest.md) 評価プロトコル |
+| CORP 分解 | `Brier = MCB − DSC + UNC`（miscalibration / discrimination / uncertainty）。変更が校正と識別力のどちらを動かしたかを切り分ける | 同上 |
+| 擬似 R² / ΔR² | `R² = 1 − Σ ln p(勝者) / Σ ln(1/頭数)`（Bolton-Chapman）。**ΔR² = R²(系統) − R²(market)** が確率ロジック変更の主 KPI（「市場に足せている増分」だけを測る） | 同上 |
+| fit 窓 / eval 窓 | パラメータ推定専用（2025 年）/ 採否判断専用（2026-01〜08）に凍結した期間。推定と採否を同一窓で行う in-sample 掃引を構造的に防ぐ | 同上 |
 | 想定回収率 | `Σ payout / Σ stake`。各レース 100 円をトップ選好馬の単勝に賭けた仮定値。**実際の買い方（3 券種）とは別物** | 同上 |
 | `ev`（期待値） | `probability × odds`。1.0 を超えると理論的にプラス期待値 | [ev-kelly-bet-selection.md](../specifications/ev-kelly-bet-selection.md) 用語定義 |
 | ROI（レース単位） | `Σ_i(賭金_i × 的中確率_i × 払戻倍率_i) / 総賭金`。買い目全体で見た期待回収率 | [CLAUDE.md](../../CLAUDE.md)「3. EV 判定 → 買い目決定」 |
