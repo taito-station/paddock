@@ -8,10 +8,20 @@ PAV(isotonic・tie プール) / CORP 分解（独立導出の期待値）/ Bolto
 
 import math
 import os
+import sys
 import tempfile
 
-import numpy as np
-import pytest
+# CI の predict-check ジョブ（stdlib-only・`python3 <file>` 直接実行）では numpy/pytest が
+# 無いため自己スキップする（scripts/harness の numpy 依存テストを CI 対象外とする既存方針と
+# 同じ扱い。ローカルでは `python3 -m pytest` または直接実行で全テストが走る）。
+try:
+    import numpy as np
+    import pytest
+except ImportError:
+    if __name__ == "__main__":
+        print("skip: numpy/pytest 不在（stdlib-only CI では対象外。ローカルは pytest で実行）")
+        sys.exit(0)
+    raise
 
 import prob_eval as pe
 
@@ -312,3 +322,9 @@ def test_winner_prob_extraction_per_system():
     assert pure == [(pytest.approx(0.3), 2)]
     # market: implied [.5, 1/3] → q_winner = .5/(5/6) = 0.6
     assert market == [(pytest.approx(0.6), 2)]
+
+
+if __name__ == "__main__":
+    # 自走式（CI の predict-check ジョブと同じ `python3 <file>` 実行）。
+    # 依存が揃っていれば pytest ランナーに委譲する（不在時は冒頭の import ガードで skip 済み）。
+    sys.exit(pytest.main([__file__, "-q"]))
