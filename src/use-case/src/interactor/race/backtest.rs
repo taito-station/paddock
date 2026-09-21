@@ -295,6 +295,13 @@ impl<R: StatsRepository + OddsRepository> Interactor<R> {
                     &entry_factors,
                     &config,
                 );
+                // 純モデル系統（ブレンドなし＝α=1.0 相当・win_power は適用後）。dump 要求時のみ複製し、
+                // predict 経路の PredictionViews::pure と同じ定義で FeatureRow に併載する（prob_eval.py の
+                // 対市場 ΔR²・pure/blended 別校正の入力）。評価本流（校正・的中集計）には一切使わない。
+                let probs_pure = dump_features.then(|| match config.win_power {
+                    Some(gamma) => paddock_domain::prediction::apply_win_power(&probs, gamma),
+                    None => probs.clone(),
+                });
                 // 市場オッズ（単勝）ブレンド（#72）。α 指定時のみ適用し、以降のトップ選好馬・校正集計は
                 // すべてブレンド後の win で行う。市場 win は当時 race_odds を優先し、無ければ PDF 確定
                 // 成績の単勝（results.odds, 確定＝クローズ前後のオッズで結果はリークしない）で代替する。
@@ -366,6 +373,13 @@ impl<R: StatsRepository + OddsRepository> Interactor<R> {
                         .iter()
                         .map(|p| (p.horse_num.value(), (p.win_prob, p.place_prob, p.show_prob)))
                         .collect();
+                    // probs_pure は dump_features=true のとき必ず Some（上の then で生成）。
+                    let pure_by_num: HashMap<u32, (f64, f64, f64)> = probs_pure
+                        .as_deref()
+                        .expect("probs_pure is Some when dump_features")
+                        .iter()
+                        .map(|p| (p.horse_num.value(), (p.win_prob, p.place_prob, p.show_prob)))
+                        .collect();
                     for (entry, factors) in &entry_factors {
                         let (finishing_position, pdf_odds, popularity) = by_num
                             .get(&entry.horse_num.value())
@@ -380,6 +394,10 @@ impl<R: StatsRepository + OddsRepository> Interactor<R> {
                             .get(&entry.horse_num.value())
                             .copied()
                             .expect("probs covers every starter (1:1 with entry_factors)");
+                        let (model_win_pure, model_place_pure, model_show_pure) = pure_by_num
+                            .get(&entry.horse_num.value())
+                            .copied()
+                            .expect("probs_pure covers every starter (1:1 with entry_factors)");
                         feature_rows.push(FeatureRow {
                             race_id: race.race_id.to_string(),
                             date: race.date,
@@ -388,6 +406,9 @@ impl<R: StatsRepository + OddsRepository> Interactor<R> {
                             model_win,
                             model_place,
                             model_show,
+                            model_win_pure,
+                            model_place_pure,
+                            model_show_pure,
                             finishing_position,
                             win_odds: market_win.or(pdf_odds),
                             popularity,

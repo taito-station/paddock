@@ -310,6 +310,62 @@ LogLoss (win)       : 0.2841
 
 ---
 
+## 評価プロトコル（fit/eval 窓と対市場計測器・#703）
+
+確率ロジックの変更（ブレンド形・順位確率補正・冪較正等）の採否判断に使う共通プロトコル。
+過去 ADR（0034/0042/0045/0047 等）はハイパラの選択と評価を同一窓で行っており、in-sample
+掃引が構造的な弱点だった（ADR 0045 自身が「71R で同時チューニングは過学習が確実」と留保）。
+本プロトコルはこれを窓の凍結で解消する。
+
+### fit/eval 窓の凍結
+
+| 窓 | 期間 | 用途 |
+|---|---|---|
+| **fit 窓** | 2025-01-01〜2025-12-31（約 3,330R） | パラメータ推定（λ・(a,b)・α 等の MLE / 掃引）**のみ** |
+| **eval 窓** | 2026-01-01〜2026-08-31（約 1,722R） | 採否判断**のみ**。fit 窓の数値を採否根拠に引用しない |
+
+- 窓境界は年で固定する。**2026-06 以降は部分取得**（開催日ベースの fetch のみ・月 70〜120R）で、
+  eval 窓の後半は全開催の悉皆ではない点に注意（母集合はその時点の DB にあるレース）。
+- パラメータを fit 窓で推定し直すたびに、採否判断は必ず eval 窓の指標で行う。eval 窓でのチューニング
+  （eval を見てから fit をやり直す反復）は in-sample 掃引の再発なので行わない。
+
+### 定型 dump コマンド（production 等価）
+
+backtest CLI の既定は production と不一致（m/γ が既定 off）なので、**必ず全フラグ明示**で dump を
+生成する。binary stale を防ぐためビルド → SHA 付きファイル名を定型とする:
+
+```sh
+cargo build --release
+./target/release/paddock-analyze backtest --from 2025-01-01 --to 2026-08-31 \
+  --blend-alpha 0.2 --shrinkage-m 10 --win-power 1.25 --place-show-power 2.0 \
+  --impute-missing-factors --dump-features bt_dump_$(git rev-parse --short HEAD).tsv
+```
+
+dump TSV は 56 列（ヘッダ名参照で読む。`model_*` = blended 系統 / `model_*_pure` = 純モデル系統
+（α=1.0 相当・冪変換適用後）が末尾 3 列）。列の正本は `analyze/src/bin.rs` の
+`FEATURE_DUMP_HEADER`、行の意味は `learned-model-harness.md` ①。
+
+### 計測器: `scripts/predict-check/prob_eval.py`
+
+```sh
+python3 scripts/predict-check/prob_eval.py bt_dump_<sha>.tsv \
+  --fit-until 2025-12-31 --eval-from 2026-01-01
+```
+
+| 指標 | 定義 | 用途 |
+|---|---|---|
+| **擬似 R²**（Bolton-Chapman） | `1 − Σ ln p(勝者) / Σ ln(1/頭数)`（レース単位） | 系統（market/pure/blended）の絶対水準 |
+| **ΔR²（対市場）** | `R²(系統) − R²(market)`。レース単位ブートストラップ 95% CI 付き | **主 KPI**。「市場に足せている増分」だけを測る（Benter 1994。実運用モデルで +0.018、無価値モデルで +0.0002） |
+| **CORP reliability** | PAV（isotonic）でビン境界をデータから決めた reliability + 校正仮説下の consistency band（**90% pointwise**・帯の再標本は独立 Bernoulli） | ズレの判定。H0 下でも 10 点グリッドで約 1 点は帯外に出る（多重性未調整）ため、1〜2/10 の帯外は有意と読まない。レース内従属（1 レース 1 勝者）を無視するぶん帯は広め（保守側）に出ると考えられる |
+| **CORP 分解** | `Brier = MCB − DSC + UNC`（miscalibration / discrimination / uncertainty） | 変更が「校正」と「識別力」のどちらを動かしたかの切り分け |
+| **忠実性サニティ** | Python 集計の blended win Brier・レース数 = `analyze backtest` 出力 | dump と評価器の乖離検知（#309 のパターン） |
+
+市場系統の含意確率は `q_i = (1/odds_i)/Σ(1/odds)`（オーバーラウンド除去・estimate.rs の blend と
+同じ正規化）。R² の 3 系統比較は「勝者が一意 かつ 全馬にオッズがある」レースに母集合を揃える
+（同着・勝者なし・オッズ不完全の除外件数はレポートに出る）。
+
+---
+
 ## 決定ログ
 
 <!-- この節は append-only です。既存エントリの変更・削除は CI が検出します。 -->
@@ -504,3 +560,85 @@ Issue #11 で `estimate_probabilities` が Domain 層に実装済みであり、
 - ADR 0003（EV/Kelly 買い目選択, #12）/ ADR 0005（オッズ結線, #25）— 将来の回収率評価対象
 - 設計書 `docs/specifications/backtest.md`
 - 設計書 `docs/specifications/probability-estimation.md`
+
+### #703: fit/eval 窓の凍結と対市場計測器（CORP/ΔR²）の導入 (2026-09-22) — 承認済み
+
+#### コンテキスト
+
+確率ロジックの改修候補（Harville λ 補正・対数プール化）の効果を測る計測器が無かった。既存指標
+（Brier/LogLoss/等幅ビン reliability）は (a) 数千 R 規模で「ズレが有意か」を判定できず、(b) 市場に
+価値を足せているかの増分を測れず、(c) ハイパラの選択と評価が同一窓（in-sample 掃引・ADR 0045 が
+71R で「過学習が確実」と留保した構造）だった。文献根拠は
+`docs-original/703-probability-logic-literature-survey.md`（CORP: Dimitriadis et al. 2021 PNAS /
+ΔR²: Benter 1994 / ECE のバイアス: Roelofs et al. 2022）。
+
+#### 決定
+
+1. **fit 窓 2025-01-01〜2025-12-31 / eval 窓 2026-01-01〜2026-08-31 を凍結**する。パラメータ推定は
+   fit 窓のみ・採否判断は eval 窓のみ（本文「評価プロトコル」節が正）。
+2. dump TSV に純モデル系統 3 列（`model_*_pure`・α=1.0 相当・冪変換適用後）を末尾追加し（56 列）、
+   `scripts/predict-check/prob_eval.py` で ΔR²（対市場・bootstrap 95% CI）/ CORP reliability +
+   consistency band / CORP 分解 / 忠実性サニティを算出する。
+3. Brier 分解は計画時想定の Ferro-Fricker (2012) 補正 3 分解ではなく **CORP 分解**
+   （S̄ = MCB − DSC + UNC）を正とする。PAV を共有しビン選択の恣意性ごと消えるため。
+
+#### 理由
+
+- ΔR² は「市場を上回る増分」だけを測る（Benter の実運用モデルで +0.0178、無価値モデルで +0.0002）。
+  resolution 天井（ADR 0058/0059）の結論と矛盾せず、結合形・順位確率補正の採否ゲートに使える。
+- consistency band により、等幅ビン reliability では判定できなかった「有意なズレか」が判定できる。
+- 窓の凍結は in-sample 掃引（ADR 0034/0042/0045/0047 共通の弱点）の構造的な再発防止。
+
+#### 却下した代替案
+
+- **Ferro-Fricker 補正 3 分解**: ビン選択の恣意性が残る。PAV ベースの CORP 分解で同じ意図
+  （小標本での分解バイアス回避）をビンごと解消できるため不採用。
+- **Rust（evaluate.rs）への指標実装**: 指標追加のたびに再ビルドが要り、BacktestReport が肥大化する。
+  評価指標は dump TSV + Python が既存パターン（#309 忠実性サニティ・ADR 0064 の二重実装禁止は
+  買い方ロジックが対象で評価指標は対象外）。
+- **eval 窓を 2026-05 以降に取る案**: 611R と薄く、かつ 2026-06 以降は部分取得。年境界で 3,330/1,722R
+  に分けるほうが検出力と解釈のバランスが良い。
+
+#### 影響（ベースライン・dump d828b0d / 2026-09-21 計測）
+
+R² 母集団 = 勝者一意かつ全馬オッズありのレース（fit 2,721R / eval 1,473R。勝者の着順が PDF から
+取れないレース（EdiF フォント制約・全体 297R）と オッズ不完全レースは除外され、件数はレポートに出る）。
+
+| 窓 | R²(market) | R²(pure) | R²(blended) | ΔR²(pure−market) [95% CI] | ΔR²(blended−market) [95% CI] |
+|---|---|---|---|---|---|
+| fit  | 0.2556 | 0.0406 | 0.2498 | −0.2150 [−0.2263, −0.2032] | **−0.0058** [−0.0074, −0.0042] |
+| eval | 0.2514 | 0.0496 | 0.2469 | −0.2018 [−0.2184, −0.1835] | **−0.0045** [−0.0070, −0.0021] |
+
+CORP 分解（Brier = MCB − DSC + UNC。帯外点は 90% pointwise consistency band・10 点グリッド。
+market は win のみ——place/show の市場確率は複勝オッズ非依存では再構成できない）:
+
+| 窓 | target | system | n | Brier | MCB | DSC | UNC | 帯外点 |
+|---|---|---|---|---|---|---|---|---|
+| fit  | win   | market  | 36,792 | 0.05861 | 0.00029 | 0.01016 | 0.06849 | 2/10 |
+| fit  | win   | pure    | 36,792 | 0.06683 | 0.00051 | 0.00216 | 0.06849 | 7/10 |
+| fit  | win   | blended | 36,792 | 0.05871 | 0.00032 | 0.01010 | 0.06849 | 5/10 |
+| fit  | place | pure    | 36,792 | 0.11679 | 0.00161 | 0.01085 | 0.12603 | 9/10 |
+| fit  | place | blended | 36,792 | 0.11083 | 0.00274 | 0.01794 | 0.12603 | 9/10 |
+| fit  | show  | pure    | 36,792 | 0.15612 | 0.00243 | 0.01896 | 0.17264 | 8/10 |
+| fit  | show  | blended | 36,792 | 0.15300 | 0.00320 | 0.02284 | 0.17264 | 7/10 |
+| eval | win   | market  | 20,069 | 0.05798 | 0.00032 | 0.01035 | 0.06801 | 0/10 |
+| eval | win   | pure    | 20,069 | 0.06567 | 0.00079 | 0.00313 | 0.06801 | 8/10 |
+| eval | win   | blended | 20,069 | 0.05808 | 0.00046 | 0.01039 | 0.06801 | 6/10 |
+| eval | place | pure    | 20,069 | 0.11384 | 0.00225 | 0.01320 | 0.12479 | 10/10 |
+| eval | place | blended | 20,069 | 0.10839 | 0.00309 | 0.01949 | 0.12479 | 10/10 |
+| eval | show  | pure    | 20,069 | 0.15099 | 0.00409 | 0.02405 | 0.17095 | 9/10 |
+| eval | show  | blended | 20,069 | 0.14828 | 0.00462 | 0.02729 | 0.17095 | 8/10 |
+
+- **現行 α=0.2 線形ブレンドは市場単体より有意に悪い**（CI が 0 を跨がない）。ADR 0034 の
+  「Brier で α=0.2 が最良」は α∈{0.2,0.3,0.4} 内の比較であり、市場単体（α=0）との増分は
+  測っていなかった。Phase 3（対数プール #703）の採用ゲートはこの ΔR² を基準にする。
+- win の校正自体は blended MCB 0.00032/0.00046（fit/eval）と小さい。**place/show は帯外点 9〜10/10
+  で系統的非校正**（1 番人気複勝 −22pt 過小の既知問題と整合）——Phase 2（Harville λ）の対象。
+- 忠実性サニティ: prob_eval の blended win Brier = analyze backtest の単勝 Brier（小窓 70R で
+  0.062842 vs 0.0628、全期間窓でも一致）・レース数一致。
+
+#### 関連
+
+- #703（親 issue）/ ADR 0045（in-sample 掃引の留保）/ ADR 0034（α=0.2）/ ADR 0058/0059（resolution 天井）
+- 本文「評価プロトコル（fit/eval 窓と対市場計測器・#703）」節
+- `docs-original/703-probability-logic-literature-survey.md` / `docs/qa/QA-probability-logic-703.md`

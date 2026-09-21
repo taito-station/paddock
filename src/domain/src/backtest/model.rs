@@ -228,6 +228,14 @@ pub struct FeatureRow {
     pub model_place: f64,
     /// 内蔵モデルの複勝（3 着以内）確率。`model_win` と同じく backtest 評価値と同一。
     pub model_show: f64,
+    /// 純モデル（市場ブレンドなし＝α=1.0 相当・win_power 等の冪変換は適用後）の単勝確率。
+    /// predict 経路の `PredictionViews::pure` と同じ定義で、対市場 ΔR² や pure/blended 別の
+    /// 校正診断（prob_eval.py）に使う。ブレンド未指定の backtest では `model_win` と一致する。
+    pub model_win_pure: f64,
+    /// 純モデルの連対（2 着以内）確率。`model_win_pure` と同じ定義。
+    pub model_place_pure: f64,
+    /// 純モデルの複勝（3 着以内）確率。`model_win_pure` と同じ定義。
+    pub model_show_pure: f64,
     /// 確定着順（ラベル）。着順なし（除外・失格・競走中止等）は `None`。
     pub finishing_position: Option<u32>,
     /// 当時市場の単勝オッズ。当時 race_odds スナップショット（as-of）を優先し、無ければ PDF 確定単勝で
