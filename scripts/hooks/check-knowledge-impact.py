@@ -36,9 +36,9 @@ def is_docs_source(file_path, repo_root):
 
 
 def is_distilled_knowledge(file_path, repo_root):
-    """knowledge/ または knowledge/ 配下かどうか。README.md は除外しない。"""
+    """knowledge/ 配下かどうか。README.md は除外しない。"""
     rel = os.path.relpath(file_path, repo_root) if os.path.isabs(file_path) else file_path
-    return rel.startswith("knowledge/") or rel.startswith("knowledge/")
+    return rel.startswith("knowledge/")
 
 
 def read_sources_from_frontmatter(file_path, repo_root):

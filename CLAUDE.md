@@ -6,7 +6,7 @@ paddock の文書は HVE（dahatake/HypervelocityEngineering, MIT）の蒸留モ
 規約の全体は [knowledge/README.md](knowledge/README.md)。
 
 - **2 層**: `docs-original/`（RO 一次資料・実測ログ・調査所見）＋ `qa/`（質問票+回答）→
-  `knowledge/` ＋ `knowledge/`（status 付き確定知・**決定ログ付き**）。蒸留は Claude が回す。
+  `knowledge/`（status 付き確定知・**決定ログ付き**。旧 specifications は `kind: specification` で区別）。蒸留は Claude が回す。
   別枠で `docs/docs-generated/`（HVE 由来。`cargo doc` / OpenAPI 等の自動生成文書の置き場。蒸留対象外）がある。
 - **specifications はその場で knowledge**（frontmatter: `status`/`kind`/`sources`/`distilled_from_sha`/`updated`）。
   frontmatter を付けた時点で確定知層として機能するので、移動する実利が無い。新規の横断的蒸留知は
@@ -68,7 +68,7 @@ HVE の Autonomous Knowledge Management（AKM）の原則を paddock に適用�
    stale が 0 件であることを確認する。stale があれば差分マージまたは sha bump で解消する
    （pre-push で `check-doc-classes.py` が走るので push 前に落ちる）。
 5. **蒸留サイクル完走義務**: `docs-original/` に一次資料を書いたら、`qa/` の質問票
-   → `knowledge/` or `knowledge/` の差分マージまで**同じ PR で回し切る**。
+   → `knowledge/` の差分マージまで**同じ PR で回し切る**。
    途中で止めない。一次資料だけ置いて蒸留しないと、読む側が生ファイルを直接読む癖がつき、
    蒸留層が形骸化する。
 

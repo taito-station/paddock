@@ -147,6 +147,7 @@ Step 8: PR 作成
 
 - 実装で確定知の前提が変わったら同じ PR で Knowledge（`knowledge/` および `docs/`）を更新する
 - 設計判断を伴う変更は決定ログに同じ PR で追記する
+- プロジェクト固有の検証ツール: `scripts/bump-distilled-sha.py --all-stale --dry-run`（stale 0 件確認）、`scripts/check-doc-classes.py`、`scripts/check-decision-log-immutability.py`
 - Knowledge 更新で矛盾が生じた場合 → STOP（Conflict 宣言、人間判断）
 
 | 結果 | 次のステップ |

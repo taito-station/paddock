@@ -36,7 +36,7 @@ description: 成果物管理規律 — ファイル配置・更新ポリシー�
 
 ## 決定ログの不変性
 
-決定ログ（`knowledge/adr/`）は **append-only** で運用する。
+決定ログは **append-only** で運用する。
 
 ### 原則
 
@@ -46,26 +46,16 @@ description: 成果物管理規律 — ファイル配置・更新ポリシー�
 
 ### 配置
 
-独立ファイル方式を採用する。`knowledge/adr/` に 1 決定 1 ファイルで配置する。
+各 `knowledge/` 文書の末尾に `## 決定ログ` 節としてインライン化する。
 
-- `ls knowledge/adr/` で全決定を一覧できる
-- 必要な ADR だけ読めばよく、トークン効率が良い
+- 決定はその決定が効く文書の決定ログへ直接 append する
+- 独立した ADR ファイルは作らない
 - 更新漏れは implement-flow Step 7（Knowledge 同期）で防ぐ
-
-### 書式
-
-documentation-standards スキルの MADR テンプレートに従う（`skills/global/documentation-standards/SKILL.md` の「ADR」セクション参照）。
 
 ### 機械検査
 
-git diff で既存エントリの改変を検出する:
-
-```bash
-# 決定ログの既存行が削除・変更されていないか確認（PR スコープ）
-git diff origin/main..HEAD -- knowledge/adr/ | grep '^-' | grep -v '^---'
-```
-
-pre-push hook や CI で実行することを推奨する。
+`scripts/check-decision-log-immutability.py` が既存エントリの改変・削除を検出する。
+pre-push hook で自動実行される。
 
 ## fan-out ステップの制約
 

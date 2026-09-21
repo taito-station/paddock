@@ -15,7 +15,7 @@ docs-original/  読み取り専用の一次資料（実測ログ・調査所見�
 qa/             質問票 + 回答
         │  [Claude が差分マージ]
         ▼
-knowledge/ ＋ knowledge/   status 付き確定知（＝この層。読むのはここ）
+knowledge/                status 付き確定知（＝この層。読むのはここ）
                                           末尾に **決定ログ**（append-only の決定記録）を持つ
 ```
 
@@ -36,7 +36,7 @@ knowledge/ ＋ knowledge/   status 付き確定知（＝この層。読むのは
 
 ## 決定ログの書き方
 
-`knowledge/` と `knowledge/` の各文書は、本文の末尾に `## 決定ログ` 節を持てる。
+`knowledge/` の各文書は、本文の末尾に `## 決定ログ` 節を持てる。
 
 ```markdown
 ---
@@ -220,9 +220,9 @@ updated: "YYYY-MM-DD"    # 内容を実質更新した日（YAML の date 型を
 
 - **番号の再利用禁止**。検査が見るのは現時点のスナップショットだけなので、`Retired` 行ごと削除して
   同じ番号を別の要件に振り直しても検出されない。
-- **`knowledge/` と `knowledge/` の直下以外にある REQ 表**。検査対象はこの 2 ディレクトリの
+- **`knowledge/` の直下以外にある REQ 表**。検査対象はこのディレクトリの
   直下のみ（`README.md` を除く）で、`docs-original/` や `CLAUDE.md` に REQ 表を置いても一意性の
-  台帳には載らない。**REQ 表はこの 2 ディレクトリの中に置く**こと。
+  台帳には載らない。**REQ 表は `knowledge/` の中に置く**こと。
 - **コードフェンスで囲んだ REQ ブロック**。フェンス内は「規約の見本」として全面的に無視する
   （この節の例がまさにそれ）。囲まれた表は GitHub でも表として描画されないので、実データを
   そこに置くことは無い前提。
@@ -250,7 +250,7 @@ updated: "YYYY-MM-DD"    # 内容を実質更新した日（YAML の date 型を
   見なさないので、その中のリンク様文字列は実データとして検査される。本文はフェンス外を
   連結して走査するので、**閉じ忘れた `[` が離れた行の `]` と対になる**と、error の行番号が
   実際の記述とずれることがある（実在判定自体は誤らない）。
-- **リンク検査の適用範囲**。見るのは `knowledge/` と `knowledge/` の**直下**
+- **リンク検査の適用範囲**。見るのは `knowledge/` の**直下**
   （＋ 各ディレクトリの `README.md` と、リポジトリルートの `CLAUDE.md`）だけ。**`docs-original/` と `qa/` は無検査**、
   サブディレクトリの `.md` も走査対象外（**置くこと自体が error**＝上記「機械検査」の項が正。
   severity をここに二重に書かない）。実在判定はファイルシステムを見るので、
@@ -552,8 +552,8 @@ knowledge を警告する PostToolUse hook（check-knowledge-impact.py）が #67
 
 #### 決定
 
-check-knowledge-impact.py に SoT 逆転検出を追加する。knowledge/ または
-knowledge/ への Write/Edit を検知し、そのファイルの frontmatter に `sources` が
+check-knowledge-impact.py に SoT 逆転検出を追加する。knowledge/
+への Write/Edit を検知し、そのファイルの frontmatter に `sources` が
 あれば「上流 sources を先に更新し蒸留で反映してください」と警告する。決定ログの追記は
 対象外（決定ログは knowledge 側に直接書く正当な操作）。あわせて本 hook と
 session-stale-check.sh のユニットテストを新設し CI に組み込んだ（#680）。

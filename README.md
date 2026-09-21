@@ -569,8 +569,7 @@ HVE（dahatake/HypervelocityEngineering, MIT）由来の 2 層蒸留モデルで
 - `docs-original/` … **一次資料層（RO・書き換えない）**。issue 由来の生素材・実測ログ・
   調査ノート（`382-*.md` 等）
 - `qa/` … 質問票 + 回答。knowledge への入力となる中間層
-- `knowledge/` … qa および一次資料由来の新規・横断的な確定知（**読む入口**）
-- `knowledge/` … 確率推定・backtest・買い目選定・予想 JSON などの仕様書（その場で knowledge に昇格）
+- `knowledge/` … 確定知 + 仕様書（frontmatter `kind: specification` で区別。**読む入口**）
 - `docs/docs-generated/` … `cargo doc` / OpenAPI 等の自動生成文書の置き場（手書き文書は置かない・コミットは任意）
 - `docs/api/openapi.json` … REST API の OpenAPI スナップショット（utoipa コードファースト。web の型生成の入力）
 
