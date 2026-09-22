@@ -14,7 +14,7 @@ sources:
   - docs/specifications/prediction-search-api.md
   - docs/specifications/feature-resolution-diagnosis.md
   - docs/specifications/netkeiba-datasource.md
-distilled_from_sha: "e0cde18"
+distilled_from_sha: "2cbb913"
 updated: "2026-09-22"
 ---
 
@@ -112,6 +112,7 @@ ADR 0077）:
 | fit 窓 / eval 窓 | パラメータ推定専用（2025 年）/ 採否判断専用（2026-01〜08）に凍結した期間。推定と採否を同一窓で行う in-sample 掃引を構造的に防ぐ | 同上 |
 | 想定回収率 | `Σ payout / Σ stake`。各レース 100 円をトップ選好馬の単勝に賭けた仮定値。**実際の買い方（3 券種）とは別物** | 同上 |
 | `ev`（期待値） | `probability × odds`。1.0 を超えると理論的にプラス期待値 | [ev-kelly-bet-selection.md](../specifications/ev-kelly-bet-selection.md) 用語定義 |
+| discounted Harville / λ2・λ3 | 連系券種の確率合成で 2 着段 σ_i ∝ win^λ2・3 着段 τ_i ∝ win^λ3 と割引く補正（λ=1 が素の Harville）。**blended 確率に λ2=0.90/λ3=0.77・pure 確率は無割引**（系統で最適値が異なるため適用は確率系統を知る呼び出し側の責務。`analyze backtest --blend-alpha`（α<1.0）指定時のみ既定で効く）＝本番買い目 EV 表示・blend なし/α≥1.0 の backtest は不変 | [ev-kelly-bet-selection.md](../specifications/ev-kelly-bet-selection.md) §1.1（採用の経緯は [betting-rule-history.md](../specifications/betting-rule-history.md) 決定ログ #703） |
 | ROI（レース単位） | `Σ_i(賭金_i × 的中確率_i × 払戻倍率_i) / 総賭金`。買い目全体で見た期待回収率 | [CLAUDE.md](../../CLAUDE.md)「3. EV 判定 → 買い目決定」 |
 | ⚠ ROI ゲート | 元は「**ROI ≥ 100% のレースだけ張る**」という判定基準（100% が損益分岐）。**現在は参考 ROI をこの判定に使わない**——182R 実測でゲート通過 0 件・判定 ROI と実現 ROI は無情報だったため（張る/見送りは手動のハンデ精査と執行の規律で決める）。**それでも閾値は下げない**（下げる＝−EV を承知で買う。θ を下げても実現 ROI は 100% に届かない）。`predict-watch` は 🔶 / 🔍 のマークを残したまま、起動時に到達不能である旨を注記する | [product-goals.md](product-goals.md) REQ-D01-001・「ゲートの現況」/ ADR 0040（閾値）/ ADR 0076（現況）/ ADR 0079（表示と運用記述） |
 | フェア ROI | JRA 控除率（ワイド・馬連 22.5% / 3 連複 25%）由来の期待値上限 ≈ 75〜77.5%。エッジが無ければ ROI はこの近辺に落ちる | [betting-rule-history.md](../specifications/betting-rule-history.md) ⑤ |

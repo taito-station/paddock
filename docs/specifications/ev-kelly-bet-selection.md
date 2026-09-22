@@ -5,7 +5,7 @@ status: Confirmed
 kind: knowledge
 doc_class: [D23, D22]
 tags: [D23, D22]
-updated: "2026-08-12"
+updated: "2026-09-22"
 ---
 
 # 期待値計算・買い目選択・Kelly 配分ロジック仕様書
@@ -135,6 +135,41 @@ Harville 公式の前提: 1 着馬が抜けた後のフィールドで各馬が�
 精度は限定的だが、EV 計算に十分な近似値を提供する。
 
 **除算ゼロ対策**: `1 − win[i]` が極端に小さい（win_prob ≒ 1.0）場合は分母を最小値 `1e-6` でクランプする（`f64::EPSILON` ≈ 2.2e-16 では除算結果が天文学的な値になるため実用的な下限を使用）。
+
+#### 1.1 discounted Harville（λ 割引・#703 Phase 2）
+
+素の Harville は**強い馬の 2・3 着確率を系統的に過大評価する**（Benter 1994 Table 9/10。
+自前実測でも blended 系統の fit 窓で最上位帯 Z=−6.0（2 着段）/−10.8（3 着段）を確認）。
+Lo & Bacon-Shone の割引形で補正する:
+
+```
+σ_i = win_i^λ2 / Σ_j win_j^λ2      （2 着段・場内正規化）
+τ_i = win_i^λ3 / Σ_j win_j^λ3      （3 着段・場内正規化）
+P(a→b→c) = win_a · σ_b/(1−σ_a) · τ_c/(1−τ_a−τ_b)
+```
+
+- 実装は `betting::HarvilleModel`（`HarvilleParams { lambda2, lambda3 }`）。
+  **λ2=λ3=1.0（`IDENTITY`）は素の Harville と bit-exact に一致**する（自由関数へ委譲）。
+- **λ は確率系統ごとに別**（市場の favorite-longshot バイアスが Harville バイアスを部分相殺する
+  ため・Benter Note 3）。推奨定数は `harville.rs`:
+  - `RECOMMENDED_HARVILLE_LAMBDA_BLENDED = { λ2: 0.90, λ3: 0.77 }` —
+    **blended 確率**に対する採用値。`BettingConfig::default()` は IDENTITY のままで、
+    適用は blended 確率を渡す呼び出し側の責務（`analyze backtest --blend-alpha`（α<1.0）
+    指定時に bin が既定として選ぶ。α≥1.0 は no-op ブレンド＝pure なので IDENTITY のまま。
+    pure 確率に blended-fit λ を当てる系統ミスマッチを防ぐため）。**α を掃引して比較する
+    ときは λ を明示固定する**（α<1.0 の境界で λ 既定も切り替わり効果が混線するため）。
+    fit 窓（2025 年・2,971R）MLE: λ2=0.90 [0.87,0.93] /
+    λ3=0.77 [0.74,0.80]（伊藤 2010 の JRA 44,774R: 0.81/0.70 と同方向・同水準）。
+  - `RECOMMENDED_HARVILLE_LAMBDA_PURE = IDENTITY` — portfolio 経路（本番買い目の
+    EV・的中確率表示。ev_probs = 純モデル）の既定（`PortfolioConfig::default()`）。
+    純モデルの λ̂ は 2.29/1.80 と**逆方向**（縮約で平坦化した純モデルは条件付き段も
+    平坦すぎる）で、文献整合ゲートを満たさないため割引しない。
+    **つまり本番 predict の買い目 EV 表示は本変更で不変**。
+- λ の再推定は `scripts/predict-check/harville_lambda_fit.py`（fit 窓 MLE → eval 窓検証。
+  窓は backtest.md 評価プロトコル）。backtest の掃引は
+  `analyze backtest --harville-lambda2 X --harville-lambda3 Y`（対指定必須・未指定は既定値）。
+- 採用の経緯・eval 窓の数表・pure 棄却の理由は
+  [betting-rule-history.md](betting-rule-history.md) 決定ログ #703 が正。
 
 ### 2. EV 計算
 

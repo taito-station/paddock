@@ -104,6 +104,10 @@ pub struct PortfolioConfig {
     /// 混戦判定が直前オッズで反転すると券種配分ごと（3 レイヤー ↔ 4 レイヤー）変わってしまうため、
     /// 買い目構造を固定するには軸・相手に加えてこれも要る。`None`（既定）は毎回ライブ確率から作る。
     pub forced_konsen_band: Option<Vec<HorseNum>>,
+    /// discounted Harville の割引指数（#703 Phase 2）。EV・的中確率の simulate に伝わる。
+    /// この経路の確率は ev_probs（純モデル α=1.0）なので既定は pure 系統の推奨値
+    /// （現状 IDENTITY = 素の Harville と bit-exact 一致。採用ゲート通過後にのみ変わる）。
+    pub harville: crate::betting::HarvilleParams,
 }
 
 impl Default for PortfolioConfig {
@@ -117,6 +121,7 @@ impl Default for PortfolioConfig {
             forced_axis: None,
             forced_partners: None,
             forced_konsen_band: None,
+            harville: crate::betting::RECOMMENDED_HARVILLE_LAMBDA_PURE,
         }
     }
 }
@@ -293,7 +298,17 @@ pub fn pair_ev_diagnostics(
     // （odds 取得と EV 計算で try_from を二度呼ばないようヘルパに束ねる）。
     let leg = |combo: BetCombination| {
         let cell_odds = combo_odds(odds, &combo);
-        let ev = leg_ev(&field, &win, &combo, cell_odds);
+        // 診断の EV 経路は ev_probs（純モデル）なので pure 系統の推奨割引を使う（#703 Phase 2）。
+        // 注意: 本関数は config を受けないため PURE 定数を直接参照する。`PortfolioConfig.harville`
+        // を既定から変える呼び出しでは買い目 EV とこの診断が乖離する（既定同士の一致は
+        // betting/tests.rs の harville_recommended_params_match_adopted_values が固定）。
+        let ev = leg_ev(
+            &field,
+            &win,
+            &combo,
+            cell_odds,
+            crate::betting::RECOMMENDED_HARVILLE_LAMBDA_PURE,
+        );
         (ev, cell_odds)
     };
     let rows = partner_nums
@@ -496,7 +511,15 @@ pub fn build_portfolio(
         for (legs, w, method) in layers {
             // 重み w の券種予算を 100 円単位に floor する（`/100*100`）。
             let type_budget = (race_budget as u128 * w as u128 / total_w.get() / 100 * 100) as u64;
-            push_legs(&mut bets, legs, type_budget, &field, &win, method);
+            push_legs(
+                &mut bets,
+                legs,
+                type_budget,
+                &field,
+                &win,
+                method,
+                config.harville,
+            );
         }
     }
 
@@ -523,6 +546,7 @@ pub fn build_portfolio(
             bets: priced,
             main: None,
             win_probs: Some(win.clone()),
+            harville: config.harville,
         })
         .ok()
         .and_then(|r| r.ev)
@@ -551,6 +575,7 @@ fn push_legs(
     field: &[HorseNum],
     win: &HashMap<HorseNum, f64>,
     method: BetMethod,
+    harville: crate::betting::HarvilleParams,
 ) {
     let stakes = distribute(type_budget, legs.len());
     for ((combination, odds), stake) in legs.into_iter().zip(stakes) {
@@ -558,7 +583,7 @@ fn push_legs(
             continue;
         }
         // ev 倍率と的中確率（判断材料として表示）を 1 度の simulate で求める。
-        let (ev, hit_prob) = leg_metrics(field, win, &combination, odds);
+        let (ev, hit_prob) = leg_metrics(field, win, &combination, odds, harville);
         out.push(PortfolioBet {
             combination,
             method,
@@ -601,6 +626,7 @@ fn leg_metrics(
     win: &HashMap<HorseNum, f64>,
     combination: &BetCombination,
     odds: Option<f64>,
+    harville: crate::betting::HarvilleParams,
 ) -> (f64, f64) {
     if field.len() < 3 {
         return (0.0, 0.0);
@@ -614,6 +640,7 @@ fn leg_metrics(
         }],
         main: None,
         win_probs: Some(win.clone()),
+        harville,
     })
     .ok()
     .and_then(|r| r.ev)
@@ -634,6 +661,7 @@ fn leg_ev(
     win: &HashMap<HorseNum, f64>,
     combination: &BetCombination,
     odds: Option<f64>,
+    harville: crate::betting::HarvilleParams,
 ) -> f64 {
     let Some(o) = odds else {
         return 0.0;
@@ -650,6 +678,7 @@ fn leg_ev(
         }],
         main: None,
         win_probs: Some(win.clone()),
+        harville,
     })
     .ok()
     .and_then(|r| r.ev)
@@ -939,6 +968,7 @@ mod tests {
         }
 
         let pinned = PortfolioConfig {
+            harville: crate::betting::HarvilleParams::IDENTITY,
             partners: 3,
             alloc: (1, 1, 1),
             forced_axis: Some(horse(1)),
@@ -1071,14 +1101,26 @@ mod tests {
         let priced: Vec<_> = pf.bets.iter().filter(|b| b.odds.is_some()).collect();
         assert!(!priced.is_empty(), "オッズ取得済みの脚があるはず");
         for b in priced {
-            let (exp_ev, exp_hit) = leg_metrics(&field, &ev_win, &b.combination, b.odds);
+            let (exp_ev, exp_hit) = leg_metrics(
+                &field,
+                &ev_win,
+                &b.combination,
+                b.odds,
+                crate::betting::HarvilleParams::IDENTITY,
+            );
             assert!((b.ev - exp_ev).abs() < 1e-9, "EV は ev_probs 由来: {b:?}");
             assert!(
                 (b.hit_prob - exp_hit).abs() < 1e-9,
                 "的中確率は ev_probs 由来: {b:?}"
             );
             // rank_probs で計算すると別値（恒真でないことの担保）。
-            let (rank_ev, _) = leg_metrics(&field, &rank_win, &b.combination, b.odds);
+            let (rank_ev, _) = leg_metrics(
+                &field,
+                &rank_win,
+                &b.combination,
+                b.odds,
+                crate::betting::HarvilleParams::IDENTITY,
+            );
             assert!(
                 (b.ev - rank_ev).abs() > 1e-9,
                 "EV は rank_probs では再現しない（循環断ちの実証）: {b:?}"
@@ -1503,6 +1545,7 @@ mod tests {
         // ワイド 3 点は未取得、馬連 3＋三連複 3 が priced。
         assert_eq!(priced.len(), 6);
         let reference = simulate(&SimInput {
+            harville: crate::betting::HarvilleParams::IDENTITY,
             field,
             bets: priced,
             main: None,
@@ -1720,7 +1763,13 @@ mod tests {
         let win: HashMap<HorseNum, f64> = probs.iter().map(|p| (p.horse_num, p.win_prob)).collect();
         let field: Vec<HorseNum> = probs.iter().map(|p| p.horse_num).collect();
         for b in pf.bets.iter().filter(|b| b.odds.is_some()) {
-            let expected = leg_ev(&field, &win, &b.combination, b.odds);
+            let expected = leg_ev(
+                &field,
+                &win,
+                &b.combination,
+                b.odds,
+                crate::betting::HarvilleParams::IDENTITY,
+            );
             assert!(
                 (b.ev - expected).abs() < 1e-9,
                 "ev {} == leg_ev {}: {:?}",

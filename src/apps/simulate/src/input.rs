@@ -188,6 +188,9 @@ pub fn to_sim_input(json: InputJson, main_override: Option<&str>) -> Result<SimI
         bets,
         main,
         win_probs,
+        // JSON 入力の収支シミュレータは素の Harville 固定。入力確率の系統（pure/blended）を
+        // 判別できないため、系統別の割引（#703 Phase 2 で採用済み）はどちらも当てない。
+        harville: paddock_domain::betting::HarvilleParams::IDENTITY,
     })
 }
 
