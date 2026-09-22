@@ -1,4 +1,7 @@
-use super::harville::{harville_exacta, harville_quinella, harville_trifecta, harville_trio};
+use super::harville::{
+    HarvilleModel, HarvilleParams, harville_exacta, harville_quinella, harville_trifecta,
+    harville_trio,
+};
 use super::hit::bet_hit;
 use super::kelly::kelly_fraction;
 use super::model::{BetCombination, BettingConfig, Podium};
@@ -118,6 +121,7 @@ fn kelly_fraction_is_capped() {
     race_odds.win.insert(horse(1), odds(2.0));
 
     let config = BettingConfig {
+        harville: HarvilleParams::IDENTITY,
         ev_threshold: 1.0,
         trifecta_ev_threshold: 2.0,
         kelly_cap: 0.25,
@@ -174,6 +178,7 @@ fn min_kelly_filters_thin_positive_ev_bets() {
 
     // uncurated（min_kelly=0）なら EV>1 で採用される。
     let uncurated = BettingConfig {
+        harville: HarvilleParams::IDENTITY,
         ev_threshold: 1.0,
         trifecta_ev_threshold: 2.0,
         kelly_cap: 0.25,
@@ -199,6 +204,7 @@ fn max_bets_per_type_caps_to_top_n_by_ev() {
         race_odds.win.insert(horse(h), odds(3.0)); // EV = win_prob * 3.0
     }
     let config = BettingConfig {
+        harville: HarvilleParams::IDENTITY,
         ev_threshold: 1.0,
         trifecta_ev_threshold: 2.0,
         kelly_cap: 0.25,
@@ -233,6 +239,7 @@ fn min_kelly_and_max_bets_per_type_compose() {
     race_odds.win.insert(horse(5), odds(21.0)); // EV=1.05
 
     let config = BettingConfig {
+        harville: HarvilleParams::IDENTITY,
         ev_threshold: 1.0,
         trifecta_ev_threshold: 2.0,
         kelly_cap: 0.25,
@@ -383,6 +390,214 @@ fn harville_trio_is_sum_of_six_trifectas() {
         + harville_trifecta(wc, wa, wb)
         + harville_trifecta(wc, wb, wa);
     assert!((trio - expected).abs() < 1e-10);
+}
+
+// ---------- discounted Harville（HarvilleModel・#703 Phase 2） ----------
+
+/// λ=1（IDENTITY）は素の Harville 自由関数と bit-exact に一致する（後方互換の要）。
+/// 正規化されていない入力（Σw ≠ 1）でも一致すること＝「λ=1 でも正規化パスを通すとズレる」
+/// 罠を委譲で回避していることの担保。
+#[test]
+fn harville_model_identity_matches_free_functions_exactly() {
+    let probs = [
+        (horse(1), 0.4),
+        (horse(2), 0.3),
+        (horse(3), 0.2),
+        (horse(4), 0.05),
+    ]; // Σ=0.95（非正規）
+    let m = HarvilleModel::new(probs, HarvilleParams::IDENTITY);
+    for (a, wa) in probs {
+        for (b, wb) in probs {
+            if a == b {
+                continue;
+            }
+            assert_eq!(m.exacta(a, b), harville_exacta(wa, wb));
+            assert_eq!(m.quinella(a, b), harville_quinella(wa, wb));
+            for (c, wc) in probs {
+                if c == a || c == b {
+                    continue;
+                }
+                assert_eq!(m.trifecta(a, b, c), harville_trifecta(wa, wb, wc));
+                assert_eq!(m.trio(a, b, c), harville_trio(wa, wb, wc));
+            }
+        }
+    }
+}
+
+/// 任意 λ で分解恒等式が保たれる: quinella = exacta 両方向の和、trio = 6 順列 trifecta の和。
+#[test]
+fn harville_model_decomposition_identities_hold_under_lambda() {
+    let probs = [
+        (horse(1), 0.5),
+        (horse(2), 0.25),
+        (horse(3), 0.15),
+        (horse(4), 0.1),
+    ];
+    let m = HarvilleModel::new(probs, HarvilleParams::new(0.81, 0.7).unwrap());
+    let (a, b, c) = (horse(1), horse(2), horse(3));
+    assert!((m.quinella(a, b) - (m.exacta(a, b) + m.exacta(b, a))).abs() < 1e-12);
+    let six = m.trifecta(a, b, c)
+        + m.trifecta(a, c, b)
+        + m.trifecta(b, a, c)
+        + m.trifecta(b, c, a)
+        + m.trifecta(c, a, b)
+        + m.trifecta(c, b, a);
+    assert!((m.trio(a, b, c) - six).abs() < 1e-12);
+}
+
+/// 伊藤 2010（JRA・λ2=0.81/λ3=0.70）の方向性スモーク: λ<1 の割引で、強い馬が絡む
+/// 組合せの確率は下がり、弱い馬が絡む組合せは上がる（Benter Table 9/10 のバイアス補正方向）。
+/// あわせて代表 1 点を σ の陽計算値と突合する（**同式の陽計算**であり配線・回帰は検知するが
+/// 式そのものの読み違いは検知しない。式の妥当性は Python 側の合成データ回収テストが担保）。
+#[test]
+fn harville_model_ito2010_lambda_discounts_favorites() {
+    let probs = [
+        (horse(1), 0.5),
+        (horse(2), 0.3),
+        (horse(3), 0.15),
+        (horse(4), 0.05),
+    ];
+    let id = HarvilleModel::new(probs, HarvilleParams::IDENTITY);
+    let disc = HarvilleModel::new(probs, HarvilleParams::new(0.81, 0.70).unwrap());
+    // 本命 2 頭の馬連確率は割引で下がる。
+    assert!(disc.quinella(horse(1), horse(2)) < id.quinella(horse(1), horse(2)));
+    // 本命 1 頭 + 大穴の組では、2 着段の大穴確率が押し上げられ確率が上がる。
+    assert!(disc.exacta(horse(1), horse(4)) > id.exacta(horse(1), horse(4)));
+    // ゴールデン 1 点（σ を陽に計算した独立導出値と一致）。
+    let s = |w: f64| w.powf(0.81);
+    let sum2 = s(0.5) + s(0.3) + s(0.15) + s(0.05);
+    let expected = 0.5 * (s(0.3) / sum2) / (1.0 - s(0.5) / sum2);
+    assert!((disc.exacta(horse(1), horse(2)) - expected).abs() < 1e-12);
+}
+
+/// 任意 λ で確率の基本性質が壊れない: 全順序ペアの exacta 和 ≤ 1 + ε・各値は [0,1]。
+#[test]
+fn harville_model_exacta_sum_stays_probabilistic_under_lambda() {
+    let probs = [
+        (horse(1), 0.35),
+        (horse(2), 0.25),
+        (horse(3), 0.2),
+        (horse(4), 0.12),
+        (horse(5), 0.08),
+    ];
+    for params in [
+        HarvilleParams::IDENTITY,
+        HarvilleParams::new(0.81, 0.70).unwrap(),
+        HarvilleParams::new(0.6, 0.4).unwrap(),
+    ] {
+        let m = HarvilleModel::new(probs, params);
+        let mut sum = 0.0;
+        for (a, _) in probs {
+            for (b, _) in probs {
+                if a == b {
+                    continue;
+                }
+                let p = m.exacta(a, b);
+                assert!((0.0..=1.0).contains(&p), "exacta out of range: {p}");
+                sum += p;
+            }
+        }
+        assert!(sum <= 1.0 + 1e-9, "exacta sum {sum} > 1 for {params:?}");
+    }
+}
+
+/// モデルに無い馬番は確率 0（simulate の win_of と同じ規約）。
+#[test]
+fn harville_model_missing_horse_yields_zero() {
+    let m = HarvilleModel::new(
+        [(horse(1), 0.6), (horse(2), 0.4)],
+        HarvilleParams::new(0.8, 0.7).unwrap(),
+    );
+    assert_eq!(m.exacta(horse(1), horse(9)), 0.0);
+    assert_eq!(m.trio(horse(1), horse(2), horse(9)), 0.0);
+}
+
+/// 既定値の回帰ガード（#703 Phase 2 採用後）: 推奨定数は blended = 0.90/0.77（eval 窓ゲート
+/// 通過・決定ログ #703）・pure = IDENTITY（文献と逆方向のためゲート棄却）。
+/// **`BettingConfig::default()` と `PortfolioConfig::default()` は IDENTITY/PURE**——
+/// select_bets に渡る確率系統は呼び出し側依存のため、blended 採用値の適用は blended 確率を
+/// 渡す呼び出し側（analyze backtest の --blend-alpha 指定時）の責務（系統ミスマッチ防止）。
+/// 値を変えるのは新たな fit/eval 測定を伴う決定ログ追記時のみ。
+#[test]
+fn harville_recommended_params_match_adopted_values() {
+    use super::harville::{RECOMMENDED_HARVILLE_LAMBDA_BLENDED, RECOMMENDED_HARVILLE_LAMBDA_PURE};
+    assert_eq!(RECOMMENDED_HARVILLE_LAMBDA_PURE, HarvilleParams::IDENTITY);
+    assert_eq!(
+        RECOMMENDED_HARVILLE_LAMBDA_BLENDED,
+        HarvilleParams {
+            lambda2: 0.90,
+            lambda3: 0.77
+        }
+    );
+    assert_eq!(BettingConfig::default().harville, HarvilleParams::IDENTITY);
+    // 診断経路（pair_ev_diagnostics）が直接参照する PURE 定数と PortfolioConfig の既定が
+    // 一致すること（乖離すると買い目 EV と馬連/馬単診断の EV が同一画面で食い違う）。
+    assert_eq!(
+        crate::portfolio::PortfolioConfig::default().harville,
+        RECOMMENDED_HARVILLE_LAMBDA_PURE
+    );
+}
+
+/// 検証コンストラクタ: 非有限・0 以下・MAX_LAMBDA 超の λ は None（黙って IDENTITY に倒さない）。
+#[test]
+fn harville_params_new_rejects_invalid_lambda() {
+    assert!(HarvilleParams::new(0.81, 0.70).is_some());
+    assert!(HarvilleParams::new(0.0, 0.7).is_none());
+    assert!(HarvilleParams::new(-0.5, 0.7).is_none());
+    assert!(HarvilleParams::new(f64::NAN, 0.7).is_none());
+    assert!(HarvilleParams::new(0.8, f64::INFINITY).is_none());
+    assert!(HarvilleParams::new(HarvilleParams::MAX_LAMBDA + 0.1, 0.7).is_none());
+    assert!(HarvilleParams::new(0.8, 1e300).is_none());
+}
+
+/// 値域外の w（>1・負・非有限）は [0,1] にクランプされ、NaN が確率として流出しない。
+#[test]
+fn harville_model_clamps_out_of_range_win_probs() {
+    let m = HarvilleModel::new(
+        [(horse(1), 5.0), (horse(2), 0.3), (horse(3), f64::NAN)],
+        HarvilleParams::new(0.9, 0.77).unwrap(),
+    );
+    for a in [1, 2, 3] {
+        for b in [1, 2, 3] {
+            if a == b {
+                continue;
+            }
+            let p = m.exacta(horse(a), horse(b));
+            assert!(p.is_finite(), "exacta({a},{b}) が非有限: {p}");
+        }
+    }
+}
+
+/// 配線の end-to-end 検証（変異ガード・#703）: select_bets が config.harville を実際に
+/// 確率合成へ通していること。非 IDENTITY 設定で連系券種の probability が変わり、かつ
+/// HarvilleModel の直計算と一致する（config を無視して IDENTITY 固定にする変異はここで落ちる）。
+#[test]
+fn select_bets_threads_harville_params_from_config() {
+    let probs = vec![prob(1, 0.5, 0.7), prob(2, 0.3, 0.5), prob(3, 0.2, 0.4)];
+    let mut race_odds = RaceOdds::empty(make_race_id());
+    let pair = Pair::try_from((horse(1), horse(2))).unwrap();
+    race_odds.quinella.insert(pair, odds(20.0)); // EV が両設定で閾値を跨がない高オッズ
+    let base = BettingConfig {
+        harville: HarvilleParams::IDENTITY,
+        min_kelly: 0.0,
+        ..Default::default()
+    };
+    let disc = BettingConfig {
+        harville: HarvilleParams::new(0.9, 0.77).unwrap(),
+        min_kelly: 0.0,
+        ..Default::default()
+    };
+    let p_base = select_bets(&probs, &race_odds, &base)[0].probability;
+    let p_disc = select_bets(&probs, &race_odds, &disc)[0].probability;
+    assert_ne!(
+        p_base, p_disc,
+        "config.harville が確率合成に配線されていない"
+    );
+    let hv = HarvilleModel::new(
+        probs.iter().map(|p| (p.horse_num, p.win_prob)),
+        HarvilleParams::new(0.9, 0.77).unwrap(),
+    );
+    assert!((p_disc - hv.quinella(horse(1), horse(2))).abs() < 1e-12);
 }
 
 #[test]

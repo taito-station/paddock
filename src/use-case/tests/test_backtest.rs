@@ -386,6 +386,7 @@ async fn backtest_aggregates_top_pick_and_payout() {
             d(2026, 1, 31),
             None,
             EstimationConfig::default(),
+            paddock_domain::betting::BettingConfig::default(),
             false,
         )
         .await
@@ -420,6 +421,7 @@ async fn backtest_prefers_market_odds_over_pdf() {
             d(2026, 1, 31),
             None,
             EstimationConfig::default(),
+            paddock_domain::betting::BettingConfig::default(),
             false,
         )
         .await
@@ -452,6 +454,7 @@ async fn backtest_populates_by_exotic_from_curated_bets() {
             d(2026, 1, 31),
             None,
             EstimationConfig::default(),
+            paddock_domain::betting::BettingConfig::default(),
             false,
         )
         .await
@@ -525,6 +528,7 @@ async fn backtest_wires_race_track_condition_into_factors() {
             d(2026, 1, 31),
             None,
             EstimationConfig::default(),
+            paddock_domain::betting::BettingConfig::default(),
             false,
         )
         .await
@@ -543,6 +547,7 @@ async fn backtest_wires_race_track_condition_into_factors() {
             d(2026, 1, 31),
             None,
             EstimationConfig::default(),
+            paddock_domain::betting::BettingConfig::default(),
             false,
         )
         .await
@@ -563,6 +568,7 @@ async fn backtest_wires_recency_into_horse_factors() {
             d(2026, 1, 31),
             None,
             EstimationConfig::default(),
+            paddock_domain::betting::BettingConfig::default(),
             false,
         )
         .await
@@ -594,7 +600,14 @@ async fn backtest_wires_recency_into_horse_factors() {
         impute_missing_factors: false,
     };
     let on = interactor(vec![soft_track_race(None)])
-        .backtest(d(2026, 1, 1), d(2026, 1, 31), None, cfg, false)
+        .backtest(
+            d(2026, 1, 1),
+            d(2026, 1, 31),
+            None,
+            cfg,
+            paddock_domain::betting::BettingConfig::default(),
+            false,
+        )
         .await
         .unwrap();
     assert!(
@@ -639,6 +652,7 @@ async fn backtest_wires_result_trainer_into_factors() {
             d(2026, 1, 31),
             None,
             EstimationConfig::default(),
+            paddock_domain::betting::BettingConfig::default(),
             false,
         )
         .await
@@ -657,6 +671,7 @@ async fn backtest_wires_result_trainer_into_factors() {
             d(2026, 1, 31),
             None,
             EstimationConfig::default(),
+            paddock_domain::betting::BettingConfig::default(),
             false,
         )
         .await
@@ -677,6 +692,7 @@ async fn backtest_blend_flips_top_pick_to_market_favorite() {
             d(2026, 1, 31),
             None,
             EstimationConfig::default(),
+            paddock_domain::betting::BettingConfig::default(),
             false,
         )
         .await
@@ -707,6 +723,7 @@ async fn backtest_blend_flips_top_pick_to_market_favorite() {
             d(2026, 1, 31),
             Some(0.2),
             EstimationConfig::default(),
+            paddock_domain::betting::BettingConfig::default(),
             false,
         )
         .await
@@ -738,6 +755,7 @@ async fn backtest_blend_uses_partial_race_odds_as_is() {
             d(2026, 1, 31),
             Some(0.2),
             EstimationConfig::default(),
+            paddock_domain::betting::BettingConfig::default(),
             false,
         )
         .await
@@ -759,6 +777,7 @@ async fn backtest_blend_falls_back_to_results_odds_when_no_snapshot() {
             d(2026, 1, 31),
             Some(0.0),
             EstimationConfig::default(),
+            paddock_domain::betting::BettingConfig::default(),
             false,
         )
         .await
@@ -808,6 +827,7 @@ async fn backtest_same_day_multi_race_evaluates_independently() {
             d(2026, 1, 31),
             None,
             EstimationConfig::default(),
+            paddock_domain::betting::BettingConfig::default(),
             false,
         )
         .await
@@ -857,6 +877,7 @@ async fn backtest_date_batch_calls_horse_stats_batch_once_per_day() {
         d(2026, 1, 31),
         None,
         EstimationConfig::default(),
+        paddock_domain::betting::BettingConfig::default(),
         false,
     )
     .await
@@ -878,6 +899,7 @@ async fn backtest_empty_when_no_races() {
             d(2026, 1, 31),
             None,
             EstimationConfig::default(),
+            paddock_domain::betting::BettingConfig::default(),
             false,
         )
         .await
@@ -916,6 +938,7 @@ async fn backtest_excludes_scratched_and_cancelled_horses() {
             d(2026, 1, 31),
             None,
             EstimationConfig::default(),
+            paddock_domain::betting::BettingConfig::default(),
             false,
         )
         .await
@@ -939,6 +962,7 @@ async fn backtest_dump_features_none_when_not_requested() {
             d(2026, 1, 31),
             None,
             EstimationConfig::default(),
+            paddock_domain::betting::BettingConfig::default(),
             false,
         )
         .await
@@ -963,6 +987,7 @@ async fn backtest_dump_features_collects_starters_with_labels_and_market_odds() 
             d(2026, 1, 31),
             None,
             EstimationConfig::default(),
+            paddock_domain::betting::BettingConfig::default(),
             true,
         )
         .await

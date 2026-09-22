@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use ordered_float::OrderedFloat;
 
-use super::harville::{harville_exacta, harville_quinella, harville_trifecta, harville_trio};
+use super::harville::HarvilleModel;
 use super::kelly::kelly_fraction;
 use super::model::{BetCombination, BettingConfig, BettingRecommendation};
 use crate::horse_result::HorseNum;
@@ -28,6 +28,14 @@ pub fn select_bets(
 ) -> Vec<BettingRecommendation> {
     let prob_map: HashMap<HorseNum, &HorseProbability> =
         probabilities.iter().map(|p| (p.horse_num, p)).collect();
+    // 連系・順序系券種の確率合成器（discounted Harville・#703 Phase 2）。
+    // config.harville == IDENTITY（BettingConfig::default() の既定）のとき素の Harville と
+    // bit-exact に一致する。blended 確率を渡す呼び出し側は採用値
+    // RECOMMENDED_HARVILLE_LAMBDA_BLENDED を設定する（系統整合・決定ログ #703）。
+    let hv = HarvilleModel::new(
+        probabilities.iter().map(|p| (p.horse_num, p.win_prob)),
+        config.harville,
+    );
 
     let mut recs: Vec<BettingRecommendation> = Vec::new();
 
@@ -64,8 +72,8 @@ pub fn select_bets(
 
     for (&pair, &ov) in &race_odds.quinella {
         let (a, b) = pair.as_tuple();
-        if let (Some(ha), Some(hb)) = (prob_map.get(&a), prob_map.get(&b)) {
-            let p = harville_quinella(ha.win_prob, hb.win_prob);
+        if prob_map.contains_key(&a) && prob_map.contains_key(&b) {
+            let p = hv.quinella(a, b);
             let o = ov.value();
             push_if_positive(
                 &mut recs,
@@ -80,8 +88,8 @@ pub fn select_bets(
 
     for (&pair, &ov) in &race_odds.exacta {
         let (a, b) = pair.as_tuple();
-        if let (Some(ha), Some(hb)) = (prob_map.get(&a), prob_map.get(&b)) {
-            let p = harville_exacta(ha.win_prob, hb.win_prob);
+        if prob_map.contains_key(&a) && prob_map.contains_key(&b) {
+            let p = hv.exacta(a, b);
             let o = ov.value();
             push_if_positive(
                 &mut recs,
@@ -96,10 +104,8 @@ pub fn select_bets(
 
     for (&triple, &ov) in &race_odds.trio {
         let (a, b, c) = triple.as_tuple();
-        if let (Some(ha), Some(hb), Some(hc)) =
-            (prob_map.get(&a), prob_map.get(&b), prob_map.get(&c))
-        {
-            let p = harville_trio(ha.win_prob, hb.win_prob, hc.win_prob);
+        if prob_map.contains_key(&a) && prob_map.contains_key(&b) && prob_map.contains_key(&c) {
+            let p = hv.trio(a, b, c);
             let o = ov.value();
             push_if_positive(
                 &mut recs,
@@ -114,10 +120,8 @@ pub fn select_bets(
 
     for (&triple, &ov) in &race_odds.trifecta {
         let (a, b, c) = triple.as_tuple();
-        if let (Some(ha), Some(hb), Some(hc)) =
-            (prob_map.get(&a), prob_map.get(&b), prob_map.get(&c))
-        {
-            let p = harville_trifecta(ha.win_prob, hb.win_prob, hc.win_prob);
+        if prob_map.contains_key(&a) && prob_map.contains_key(&b) && prob_map.contains_key(&c) {
+            let p = hv.trifecta(a, b, c);
             let o = ov.value();
             push_if_positive(
                 &mut recs,

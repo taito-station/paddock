@@ -12,6 +12,10 @@ pub struct Cli {
     pub command: Command,
 }
 
+// CLI サブコマンドは起動時に 1 個だけ構築される一過性の値で、variant 間のサイズ差
+// （Backtest がスイープ用フラグ群で大きい）は実行効率に影響しない。Box 化は
+// パターンマッチ側の可読性を落とすだけなので明示 allow とする。
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Subcommand)]
 pub enum Command {
     /// Stats for a single horse (overall, by surface, distance band, gate group, track condition).
@@ -78,6 +82,9 @@ pub enum Command {
         to: String,
         /// 市場オッズ(単勝)ブレンドのモデル重み α [0,1]。未指定でモデルのみ、
         /// 指定すると当時オッズの implied 確率と (1-α) でブレンドする（#72）。
+        /// 注意: α<1.0 の指定は harville λ の既定も採用値（0.90/0.77）へ連動して切り替える
+        /// （#703。採用 λ は production 等価 blend での fit 値）。**α を掃引して比較するときは
+        /// `--harville-lambda2/-lambda3` を明示固定**しないと α と λ の効果が混線する。
         #[arg(long)]
         blend_alpha: Option<f64>,
         /// ベイズ縮約の擬似カウント m（#75）。指定すると各 factor のレートを母集団 prior へ
@@ -132,6 +139,21 @@ pub enum Command {
         /// フラグ。predict 本番（`EstimationConfig::production()`）は既定で有効。
         #[arg(long)]
         impute_missing_factors: bool,
+        /// discounted Harville の 2 着段割引指数 λ2（#703 Phase 2）。`--harville-lambda3` と対で
+        /// 指定する（片方のみはエラー）。値域は 0 < λ <= 10（fit 探索域 0.2〜6.0 を包む上限）。
+        /// 未指定の既定は確率系統に連動: `--blend-alpha`（<1.0）
+        /// 指定時は採用値 0.90/0.77、それ以外（pure 確率）は素の Harville（従来と bit-exact 不変）。
+        /// λ=1.0 を両フラグで明示すればどの経路でも素の Harville を強制できる。
+        /// 買い目評価（by_exotic の校正・回収率）にのみ効き、単勝校正（Brier 等）は不変。
+        /// 注意: λ=1.0 ちょうどのみ素の Harville へ委譲するため、非正規化確率入力では λ→1 の
+        /// 掃引が 1.0 近傍で不連続になりうる（実運用の確率は正規化済みで実害なし）。
+        #[arg(long)]
+        harville_lambda2: Option<f64>,
+        /// discounted Harville の 3 着段割引指数 λ3（#703 Phase 2）。`--harville-lambda2` と対で
+        /// 指定する（既定の選ばれ方は λ2 側の説明を参照）。事前値の目安: 伊藤 2010 λ3=0.70、
+        /// Benter 0.65（採用値は blended 系統 0.77）。
+        #[arg(long)]
+        harville_lambda3: Option<f64>,
         /// 学習型モデル評価ハーネス用の特徴量ダンプ出力先 TSV パス（#272 Phase A）。指定すると各
         /// 出走馬の素性（ブレンド・冪変換前）＋ラベル（確定着順・人気）＋当時市場単勝をリーク無しの
         /// walk-forward で書き出す。未指定は集計レポートのみ（既存挙動）。

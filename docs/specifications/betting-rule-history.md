@@ -8,7 +8,7 @@ tags: [D24, D23]
 sources:
   - docs/docs-original/571-roi-gate-calibration.md
 distilled_from_sha: "e89d727"
-updated: "2026-08-12"
+updated: "2026-09-22"
 ---
 
 # 買い方ルールの決定根拠・棄却記録・バックテスト履歴
@@ -1829,3 +1829,84 @@ python3 scripts/predict-check/test_gate_calibration.py
   ADR 0065（doc↔実装の乖離を測って寄せた先例）/
   ADR 0064（second source を作らない）/
   ADR 0076（この窓にエッジは無い）
+
+### #703: discounted Harville λ の採用（blended λ2=0.90/λ3=0.77・pure は IDENTITY 維持）(2026-09-22) — 承認済み
+
+#### コンテキスト
+
+素の Harville は強い馬の 2・3 着確率を系統的に過大評価する（Benter 1994 Table 9/10:
+Z=−4.3〜−8.3。JRA 44,774R の伊藤 2010 で Lo & Bacon-Shone の λ 割引が対数尤度 1,500 差で優る。
+一次資料: `docs-original/703-probability-logic-literature-survey.md` §2）。paddock の
+`harville.rs` は 2・3 着段が無補正で、ワイド・馬連・3連複・3連単の確率合成＝EV がこの
+系統誤差を被っていた。#703 Phase 2 として `HarvilleModel`（λ=1 は素の Harville と bit-exact）
+を実装し、fit/eval 窓プロトコル（backtest.md・決定ログ #703〔OOS プロトコル〕）で λ を測った。
+
+#### 決定
+
+1. **blended 系統（`select_bets` に blended 確率が渡る経路）: λ2=0.90 / λ3=0.77 を採用**。
+   `RECOMMENDED_HARVILLE_LAMBDA_BLENDED` に反映し、`analyze backtest --blend-alpha`（α<1.0）
+   指定時（= select_bets の入力が blended になる唯一の経路。α≥1.0 は no-op ブレンド＝pure）の
+   既定として bin が選ぶ。
+   **`BettingConfig::default()` は IDENTITY のまま**——blend なし・α≥1.0 の backtest は
+   pure 確率が渡るため、blended-fit λ を当てると系統ミスマッチ（pure の λ̂ は逆方向）になる。
+   これにより #703 Phase 2 成功条件「λ 未指定で全数値 bit-exact 不変」も字義どおり成立する
+   （既定が変わるのは --blend-alpha 指定時のみ）。
+2. **pure 系統（portfolio 経路＝本番買い目の EV・的中確率表示）: IDENTITY（無割引）を維持**。
+   `RECOMMENDED_HARVILLE_LAMBDA_PURE` は変更しない＝**本番 predict の買い目 EV 表示は不変**。
+
+#### 理由
+
+採用ゲート（3 条件・事前コミット）に対する実測:
+
+- **(a) バケット Z の系統的偏りの縮小（eval 窓）**: blended λ=1 の 2 着段は最上位帯 Z=−6.0 /
+  最下位帯 Z=+3.8 級の系統偏り。λ̂ 適用で全帯 |Z| が縮小（fit 窓の同表も同方向）。✓
+- **(b) by_exotic 校正の非悪化以上（eval 窓 2026-01-01〜08-31・production 等価フラグ）**:
+
+  | 券種 | λ=1: 平均予測/実的中 (Brier) | λ̂: 平均予測/実的中 (Brier) |
+  |---|---|---|
+  | quinella | 8.8% / 7.9% (0.0684) | **6.8% / 6.8% (0.0585)** |
+  | exacta | 6.7% / 6.0% (0.0556) | **5.5% / 5.6% (0.0512)** |
+  | trio | 7.5% / 5.1% (0.0488) | 5.6% / 3.4% (**0.0337**) |
+  | trifecta | 3.0% / 4.2% (0.0417) | **2.6% / 2.6% (0.0265)** |
+
+  win/place は不変（勝率・複勝率には触れない設計どおり）。単勝 Brier 0.0546 も両者同値。✓
+- **(c) λ̂ CI と文献事前値の整合**: blended λ2=0.90 [0.87,0.93] / λ3=0.77 [0.74,0.80] は
+  伊藤 2010（0.81/0.70）・Benter 香港（0.81/0.65）と同方向・同水準。✓
+  eval 窓 logL 改善は +3.7（2 着段）/+5.7（3 着段）。
+
+pure 系統は (c) を満たさない: λ̂2=2.29 [2.13,2.42] / λ̂3=1.80 [1.65,1.94] と**文献と逆方向**
+（λ>1 = 条件付き段を鋭くする）。機序は「縮約 m=10・α=1.0 の純モデルは勝率自体が平坦で、
+条件付き 2・3 着確率はさらに平坦になる」ためで、市場の favorite-longshot バイアスとの相殺
+（Benter Note 3）以前の問題。eval logL 改善（+88.8/+52.7）自体は頑健だが、事前コミットした
+ゲートに従い今回は棄却する。
+
+#### 却下した代替案
+
+- **pure 系統にも λ̂（2.29/1.80）を採用**: ゲート (c) 不適合。pure の平坦さは Harville 段の
+  問題ではなく純モデル確率そのものの underconfidence（Phase 3 の対数プールが本丸）であり、
+  Harville 段で二重補正すると Phase 3 の (a,b) 推定と役割が混線する。Phase 3 決着後に
+  pure 側 λ を測り直すのが筋（再検討条件: Phase 3 の採否確定後）。
+- **単一の λ を両系統に共用**: 実測で最適 λ の方向が逆（0.90/0.77 vs 2.29/1.80）。共用は
+  どちらかを確実に悪化させる。
+- **Henery/Stern の直接実装**: 数値積分が重く、伊藤 2010 で r=40（λ 近似）が Henery（r=∞）を
+  わずかに上回る＝正規モデルは上限ですらない。λ 1 パラメータ×2 で足りる。
+
+#### 影響
+
+- `--blend-alpha` 指定の backtest で by_exotic（買い目の券種別校正・回収率）が λ 込みになり、
+  上表のとおり校正が全面改善。EV 閾値通過の点数は減る（quinella 278→263 / trio 369→203 /
+  trifecta 48→38）＝過大評価されていた薄い脚が落ちる。blend なしの backtest は従来と
+  bit-exact 不変。
+- 本番 predict / predict-watch の買い目 EV（pure 経路）は**不変**。買い方ルール
+  （top5・均等割り・軸ロック）にも変更なし。
+- λ の再推定手順: `scripts/predict-check/harville_lambda_fit.py`（fit 窓 MLE → eval 窓検証）。
+  定数変更は本決定ログへの追記とセットでのみ行う。
+- 計測ログ全文はセッション成果物（fit 窓バケット表・eval 窓バケット表）を本エントリの
+  数表に要約済み。dump は非コミット（Phase 1 と同じ扱い）。
+
+#### 関連
+
+- #703（親 issue・Phase 2）/ backtest.md 決定ログ #703（fit/eval 窓プロトコル）
+- ev-kelly-bet-selection.md §1.1（機構の正本）
+- ADR 0042（win_power γ=1.25 = 1 着段の較正。λ は 2・3 着段でこれと直交）
+- `docs-original/703-probability-logic-literature-survey.md` §2（文献根拠）

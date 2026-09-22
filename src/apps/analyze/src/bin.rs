@@ -296,9 +296,47 @@ async fn main() -> anyhow::Result<()> {
             win_power,
             place_show_power,
             impute_missing_factors,
+            harville_lambda2,
+            harville_lambda3,
             dump_features,
         } => {
             let blend_alpha = validate_blend_alpha(blend_alpha)?;
+            // discounted Harville（#703 Phase 2）。λ 未指定の既定は確率系統に連動させる:
+            // --blend-alpha 指定（α<1.0）時のみ select_bets に blended 確率が渡るので採用値
+            // RECOMMENDED_HARVILLE_LAMBDA_BLENDED（0.90/0.77）を既定にし、それ以外
+            // （blend なし・α>=1.0 の no-op ブレンド = pure 確率）は素の Harville のまま
+            // = 従来と bit-exact 不変。pure に blended-fit λ を当てるのは系統ミスマッチ
+            // （pure の λ̂ は 2.29/1.80 と逆方向・決定ログ #703）。
+            // 片方のみの指定は黙って既定 1.0 と組ませず入力エラーにする（λ の対推定が前提のため）。
+            let betting = match (harville_lambda2, harville_lambda3) {
+                (None, None) => {
+                    let blended_probs = blend_alpha.map(|a| a < 1.0).unwrap_or(false);
+                    if blended_probs {
+                        paddock_domain::betting::BettingConfig {
+                            harville: paddock_domain::betting::RECOMMENDED_HARVILLE_LAMBDA_BLENDED,
+                            ..Default::default()
+                        }
+                    } else {
+                        paddock_domain::betting::BettingConfig::default()
+                    }
+                }
+                (Some(l2), Some(l3)) => {
+                    let params = paddock_domain::betting::HarvilleParams::new(l2, l3)
+                        .ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "--harville-lambda2/--harville-lambda3 は有限かつ 0 < λ <= {} で指定してください: ({l2}, {l3})",
+                                paddock_domain::betting::HarvilleParams::MAX_LAMBDA
+                            )
+                        })?;
+                    paddock_domain::betting::BettingConfig {
+                        harville: params,
+                        ..Default::default()
+                    }
+                }
+                _ => anyhow::bail!(
+                    "--harville-lambda2 と --harville-lambda3 は両方指定するか両方省略してください"
+                ),
+            };
             let config = build_estimation_config(
                 shrinkage_m,
                 recency_half_life,
@@ -319,7 +357,14 @@ async fn main() -> anyhow::Result<()> {
             let to = parse_date(&to)?;
             let report = app
                 .interactor
-                .backtest(from, to, blend_alpha, config, dump_features.is_some())
+                .backtest(
+                    from,
+                    to,
+                    blend_alpha,
+                    config,
+                    betting,
+                    dump_features.is_some(),
+                )
                 .await?;
             printer::print_backtest(from, to, &report);
             // --dump-features 指定時は特徴量ダンプを TSV に書く（#272 Phase A）。clean-arch のため

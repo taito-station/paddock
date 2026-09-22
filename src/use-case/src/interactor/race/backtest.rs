@@ -41,12 +41,19 @@ impl<R: StatsRepository + OddsRepository> Interactor<R> {
     /// （確定着順・人気）＋当時市場の単勝オッズを [`FeatureRow`] として収集し `report.feature_dump`
     /// に載せる（学習型モデル評価ハーネス #272 Phase A）。リーク無しの walk-forward 経路をそのまま
     /// 再利用するため、ダンプ特徴量は本番 predict と同一。`false` のときは収集せず既存挙動と不変。
+    ///
+    /// `betting` は買い目評価（select_bets）の設定。`harville` の λ を掃引すると券種別
+    /// 校正・回収率（by_exotic）に discounted Harville（#703 Phase 2）の効果が反映される。
+    /// `BettingConfig::default()` は IDENTITY（素の Harville）。select_bets に渡る確率が
+    /// blended になる `blend_alpha` 指定時は、呼び出し側（analyze bin）が採用値
+    /// `RECOMMENDED_HARVILLE_LAMBDA_BLENDED` を既定として選ぶ（系統整合・決定ログ #703）。
     pub async fn backtest(
         &self,
         from: NaiveDate,
         to: NaiveDate,
         blend_alpha: Option<f64>,
         config: EstimationConfig,
+        betting: BettingConfig,
         dump_features: bool,
     ) -> Result<BacktestReport> {
         let races = self
@@ -481,7 +488,9 @@ impl<R: StatsRepository + OddsRepository> Interactor<R> {
 
                 // 買い目（curated）の校正・回収率（#121）。当時 race_odds スナップショットがある
                 // レースのみ対象（券種は部分的でも可。例: win のみのスナップショットなら単勝のみ評価）。
-                // 本番と同じ BettingConfig::default()（curation 有）で推奨を作り、確定着順で的中判定。
+                // 引数 `betting`（curation は BettingConfig::default() と同じ既定・harville λ は
+                // 呼び出し側が確率系統に合わせて選ぶ）で推奨を作り、確定着順で的中判定。
+                // harville λ の掃引はここに効く（#703 Phase 2）。
                 // 注意: ここに渡す probs は blend_alpha 指定時には市場 win でブレンド済みで、しかも
                 // exotic の payout は同じ market のオッズで計算するため、ブレンド有効時の exotic 校正・
                 // 回収率は top_pick_odds と同様に構造的に楽観側へ寄る（上の probs ブレンド注記と同根）。
@@ -492,7 +501,7 @@ impl<R: StatsRepository + OddsRepository> Interactor<R> {
                     // まず既定 curation の校正・回収率を定点観測するのが目的で、min_kelly /
                     // max_bets_per_type を振って比較する感度分析は CLI 引数化を伴う follow-up（#122 の
                     // 買い方チューニング、measurement-ordering: 既定を測ってから振る）。
-                    for rec in select_bets(&probs, market, &BettingConfig::default()) {
+                    for rec in select_bets(&probs, market, &betting) {
                         exotic_bets.push(ExoticBet {
                             bet_type: rec.combination.type_label(),
                             predicted_prob: rec.probability,

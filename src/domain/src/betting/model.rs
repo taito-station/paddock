@@ -16,6 +16,12 @@ pub struct BettingConfig {
     /// curation（#121）: 券種ごとに EV 上位 N 点に制限する。`None` で無制限＝従来挙動。
     /// 全組合せ羅列（1R 数千点）を実用的な点数に抑える。
     pub max_bets_per_type: Option<usize>,
+    /// discounted Harville の割引指数（#703 Phase 2）。**既定は IDENTITY**（素の Harville と
+    /// bit-exact 一致）。`select_bets` に渡る確率は経路により pure/blended が異なるため、
+    /// **blended 確率を渡す呼び出し側だけ**が `RECOMMENDED_HARVILLE_LAMBDA_BLENDED` を設定する
+    /// （analyze backtest の `--blend-alpha` 指定時が該当。pure 確率に blended-fit λ を当てるのは
+    /// 系統ミスマッチ・決定ログ #703）。
+    pub harville: super::harville::HarvilleParams,
 }
 
 impl Default for BettingConfig {
@@ -28,6 +34,7 @@ impl Default for BettingConfig {
             kelly_cap: 0.25,
             min_kelly: 0.01,
             max_bets_per_type: Some(8),
+            harville: super::harville::HarvilleParams::IDENTITY,
         }
     }
 }
