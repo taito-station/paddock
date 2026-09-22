@@ -5,7 +5,7 @@ status: Confirmed
 kind: knowledge
 doc_class: [D22, D19]
 tags: [D22, D19]
-updated: "2026-08-12"
+updated: "2026-09-22"
 ---
 
 # 着順確率推定モデル仕様書
@@ -283,6 +283,20 @@ place/show_i = 累積 max で win ≤ place ≤ show を再是正
   EV までそのまま伝播する（#246(B) の馬単選択と連動）。
 - 採用値は backtest 検証で決める（ADR 0042）。CLI: `analyze backtest --win-power <γ>`
   （未指定で no-op）。`analyze predict` は `production()` 固定。
+
+### 結合形の代替: BlendForm（#703 Phase 3・研究用）
+
+ステップ 4 の線形ブレンドに加え、`prediction::BlendForm` で結合形を選べる:
+
+- `Linear { alpha }` — 現行の線形ブレンド（`blend_with_market_win` へ委譲・bit-exact 同一）。
+- `LogPool { a, b }` — 対数プール `p̃_i ∝ model_i^a · market_i^b`（レース内正規化）。
+  win_power γ との合成は冪の再パラメータ化で厳密に可換（LogPool(a,b)→γ 冪 = LogPool(aγ,bγ)）。
+  既知挙動: model=0 ∧ a>0 の馬は 0 に潰れる。オッズ無し馬はモデル値保持（Linear と同じ）。
+
+CLI は `analyze backtest --log-pool-a A --log-pool-b B`（対指定・`--blend-alpha` と相互排他）。
+(a,b) の推定は `scripts/predict-check/blend_fit.py`（fit/eval 窓プロトコル・win_power 換算値も
+出力）。**本番は Linear α=0.2 のまま**——対数プールへの置換は eval 窓ゲート不通過で棄却済み
+（最適モデル指数 ≈ 0。決定ログ #703〔対数プール棄却〕参照）。
 
 ---
 
@@ -695,3 +709,67 @@ ADR 0002 で実装した着順確率推定 (`paddock_domain::prediction`) に 2 
 #    忠実性アンカー max|Δ|=8.3e-17・上表を出力
 python3 /tmp/pa/rs_sweep.py /tmp/pa/pure_long.tsv
 ```
+
+### #703: 対数プール結合形（Benter 型）の棄却 — 最適モデル指数 ≈ 0 (2026-09-22) — 棄却
+
+#### コンテキスト
+
+線形ブレンドは校正済み予測同士の加重平均が必然的に underconfident になる（Ranjan & Gneiting
+2010 の定理）ため、Benter (1994) が実運用した対数プール `p̃ ∝ p_model^a · q_market^b`
+（レース内正規化・α/縮約/冪較正を 2 パラメータに統合）への置換を #703 Phase 3 として検証した。
+ADR 0053 の PL 実験（log_market を生特徴量と並置 → β_market≈1.04・fundamental 係数崩壊）とは
+測定条件を変え、**合成済み p_model（縮約 m=10・冪較正込み）を 1 入力とするレース単位の
+条件付きロジット尤度**・fit/eval 窓分離（backtest.md 評価プロトコル）で測った
+（product-goals.md の再提案規律に基づく差分設計）。
+
+#### 決定
+
+対数プールへの結合形変更を**棄却**する。本番は線形 α=0.2（REQ-D22-001）のまま。
+実装した機構（`BlendForm::LogPool`・`analyze backtest --log-pool-a/-b`・
+`scripts/predict-check/blend_fit.py`）は研究用 CLI として残す（本番経路は不変）。
+
+#### 理由
+
+fit 窓（2025 年・2,721R）の MLE（合成スケール `P ∝ u^A · q^B`、u = 純モデル win_power 適用後）:
+
+- **Â = −0.19 ± 0.20（95% CI が 0 を跨ぐ＝純モデルの最適指数はゼロと区別不能）**、
+  B̂ = 1.03 ± 0.05 ≈ 1（市場含意確率はほぼ完全校正。日本市場の FLB 消失実証と整合）。
+- fit logL 改善は対市場 +2.1（2 パラメータの χ² としても非有意）。
+
+eval 窓（2026-01〜08・1,473R）の採用ゲート:
+
+| 系統 | R² | ΔR²(− market) [95% CI] |
+|---|---|---|
+| market | 0.2514 | — |
+| **logpool (Â,B̂)** | 0.2510 | **−0.0004 [−0.0011, +0.0004]** ← ゲート不通過 |
+| linear α=0.2（現行） | 0.2469 | −0.0045 [−0.0070, −0.0021] |
+
+主判定「ΔR² の CI が 0 を上回る」を満たさないため、事前コミットしたゲートに従い棄却する。
+
+#### 却下した代替案
+
+- **採用（結合形の置換）**: ゲート不通過。最適解が「市場そのまま」に収束する以上、結合形を
+  変えても市場に足せる情報が純モデル側に無い（ADR 0053 の観測を、合成確率入力・レース単位
+  尤度・OOS 分離という上位の測定条件で追認＝resolution 天井路線の最終確認）。
+- **(a,b) を本番へ「市場のみ」相当（a≈0）で採用**: それは結合形の問題ではなく α の値の問題。
+  α の再検討は #284（m×α×γ 確定チューニング）/ #218（live オッズでの α 再校正）の管轄で、
+  本 Phase のスコープ外として接続する。
+
+#### 影響
+
+- **副産物（重要）**: 対数プール MLE は「現行 α=0.2 線形が市場単体より有意に悪い
+  （eval ΔR² −0.0045 [−0.0070, −0.0021]・backtest.md 決定ログ #703 のベースライン）」の
+  **機序**を与えた——純モデルの最適重みがゼロなので、正の α はどの結合形でも有害。
+  α の見直し材料として #284 へ接続する（本決定ログを引用）。
+- 本番 predict / predict-watch は不変。`--log-pool-a/-b` は `--blend-alpha` と相互排他の
+  研究用フラグとして利用可能（blended 系統判定は `BlendForm::produces_blended`、
+  harville λ の既定選択と連動）。
+- #703（確率ロジック刷新）は Phase 1（計測器）・Phase 2（Harville λ）採用、
+  Phase 3（対数プール）棄却で完了。
+
+#### 関連
+
+- #703 / #284 / #218 / ADR 0053（棄却時の検証条件）/ ADR 0058-0059（resolution 天井）
+- backtest.md 決定ログ #703（fit/eval 窓・ベースライン ΔR²）
+- betting-rule-history.md 決定ログ #703（Harville λ 採用）
+- `docs-original/703-probability-logic-literature-survey.md` §1（文献根拠）

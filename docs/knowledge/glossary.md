@@ -14,7 +14,7 @@ sources:
   - docs/specifications/prediction-search-api.md
   - docs/specifications/feature-resolution-diagnosis.md
   - docs/specifications/netkeiba-datasource.md
-distilled_from_sha: "fd866e3"
+distilled_from_sha: "00112e7"
 updated: "2026-09-22"
 ---
 
@@ -92,6 +92,7 @@ ADR 0077）:
 | overround（控除率分の超過） | `Σ implied > 1.0` の超過分。合計 1.0 へ正規化して除いたものが市場確率 | 同上 |
 | `blended` | `blended = α·model + (1−α)·market`。**α はモデル重み**で、α=1.0 が純モデル・α=0.0 が市場のみ。**本番既定 α=0.2**（`RECOMMENDED_MARKET_BLEND_ALPHA`。オッズが無いレースはモデルのみへ自動フォールバック） | [probability-estimation.md](../specifications/probability-estimation.md) REQ-D22-001（採用の経緯は ADR 0034） |
 | ⚠ 純モデル確率（pure） | ブレンド前のモデル確率。**順位付けは `blended`、EV 計算は pure** という層分離を守る | ADR 0055 / [product-goals.md](product-goals.md) REQ-D01-002 |
+| 対数プール（`BlendForm::LogPool`） | ブレンドの代替結合形 `p̃ ∝ model^a · market^b`（レース内正規化）。**本番への採用は棄却済み**——fit 窓 MLE で最適モデル指数 Â=−0.19±0.20（ゼロと区別不能）・eval ΔR² ゲート不通過。研究用 CLI（`--log-pool-a/-b`）として残る | [probability-estimation.md](../specifications/probability-estimation.md) 結合形の代替（棄却の経緯は同決定ログ #703） |
 | resolution（判別力） | 「どの馬が勝つか」を見分けるランクの強さ。AUC・top1 で測る。純モデルは市場に劣ることが確定済み | [feature-resolution-diagnosis.md](../specifications/feature-resolution-diagnosis.md) |
 | calibration（較正） | 予測確率と実測頻度の一致度。Brier・LogLoss・reliability 曲線で測る。**resolution とは別軸**（較正しても判別力は生まれない） | 同上 / [backtest.md](../specifications/backtest.md) |
 

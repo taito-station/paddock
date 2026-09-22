@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use chrono::NaiveDate;
 use paddock_domain::{
-    BacktestReport, BettingConfig, EstimationConfig, ExoticBet, FeatureRow, HorseEntry,
+    BacktestReport, BettingConfig, BlendForm, EstimationConfig, ExoticBet, FeatureRow, HorseEntry,
     HorseFactors, HorseOutcome, HorseResult, Podium, RaceEvaluation, ResultStatus, Surface, Venue,
     bet_hit, evaluate, exotic_segments, select_bets,
 };
@@ -30,9 +30,10 @@ impl<R: StatsRepository + OddsRepository> Interactor<R> {
     /// `course_stats` は同日同コース設定ごとにキャッシュし重複取得を避ける。
     /// `find_race_odds` は race_id ごとなので引き続きレース単位で取得する。
     ///
-    /// `blend_alpha = Some(α)` のとき、確率推定の出力を当時の市場オッズ（単勝, `as_of` 制約付き）の
-    /// implied 確率と α（モデル重み）でブレンドする（#72）。`None` はモデルのみ。ブレンドは
-    /// トップ選好馬・校正集計の前に適用するため、評価はブレンド後の win で行われる。
+    /// `blend = Some(form)` のとき、確率推定の出力を当時の市場オッズ（単勝, `as_of` 制約付き）の
+    /// implied 確率とブレンドする（#72。結合形は [`BlendForm`]: 線形 or 対数プール・#703 Phase 3）。
+    /// `None` はモデルのみ。ブレンドはトップ選好馬・校正集計の前に適用するため、評価は
+    /// ブレンド後の win で行われる。
     ///
     /// `config` でベイズ縮約・リーセンシー（#75）の有効化を切り替える。`EstimationConfig::default()`
     /// は現行挙動（縮約・減衰なし）。パラメータスイープによる before/after 比較に使う。
@@ -45,13 +46,13 @@ impl<R: StatsRepository + OddsRepository> Interactor<R> {
     /// `betting` は買い目評価（select_bets）の設定。`harville` の λ を掃引すると券種別
     /// 校正・回収率（by_exotic）に discounted Harville（#703 Phase 2）の効果が反映される。
     /// `BettingConfig::default()` は IDENTITY（素の Harville）。select_bets に渡る確率が
-    /// blended になる `blend_alpha` 指定時は、呼び出し側（analyze bin）が採用値
+    /// blended になる `blend` 指定時（Linear α<1.0 / LogPool b>0）は、呼び出し側（analyze bin）が採用値
     /// `RECOMMENDED_HARVILLE_LAMBDA_BLENDED` を既定として選ぶ（系統整合・決定ログ #703）。
     pub async fn backtest(
         &self,
         from: NaiveDate,
         to: NaiveDate,
-        blend_alpha: Option<f64>,
+        blend: Option<BlendForm>,
         config: EstimationConfig,
         betting: BettingConfig,
         dump_features: bool,
@@ -309,15 +310,16 @@ impl<R: StatsRepository + OddsRepository> Interactor<R> {
                     Some(gamma) => paddock_domain::prediction::apply_win_power(&probs, gamma),
                     None => probs.clone(),
                 });
-                // 市場オッズ（単勝）ブレンド（#72）。α 指定時のみ適用し、以降のトップ選好馬・校正集計は
-                // すべてブレンド後の win で行う。市場 win は当時 race_odds を優先し、無ければ PDF 確定
-                // 成績の単勝（results.odds, 確定＝クローズ前後のオッズで結果はリークしない）で代替する。
-                // 過去レースは race_odds スナップショットが無いことが多いため、この代替で評価可能になる。
+                // 市場オッズ（単勝）ブレンド（#72 / 結合形は #703 Phase 3 で選択可）。指定時のみ適用し、
+                // 以降のトップ選好馬・校正集計はすべてブレンド後の win で行う。市場 win は当時 race_odds を
+                // 優先し、無ければ PDF 確定成績の単勝（results.odds, 確定＝クローズ前後のオッズで結果は
+                // リークしない）で代替する。過去レースは race_odds スナップショットが無いことが多いため、
+                // この代替で評価可能になる。
                 // 注意: ここで使う市場 win は回収率評価の top_pick_odds と同一ソースのため、ブレンド有効時
-                // の回収率は構造的に楽観側へ寄る（probability-estimation.md 注 2）。α>=1.0 は domain 側で
-                // no-op になる（predict 経路のような取得短絡は不要、market は既に取得済み）。
-                let probs = match blend_alpha {
-                    Some(alpha) => {
+                // の回収率は構造的に楽観側へ寄る（probability-estimation.md 注 2）。Linear の α>=1.0 は
+                // domain 側で no-op になる（predict 経路のような取得短絡は不要、market は既に取得済み）。
+                let probs = match &blend {
+                    Some(form) => {
                         // race_odds.win が非空ならそれを使い、完全に空のときのみ results.odds へ代替する。
                         // race_odds の win は scraper が全頭分まとめて書くため部分カバレッジは想定しないが、
                         // 仮に部分的でも results.odds へは切り替えない（blend は full coverage 前提、
@@ -332,10 +334,10 @@ impl<R: StatsRepository + OddsRepository> Interactor<R> {
                                 .filter_map(|r| r.odds.map(|o| (r.horse_num, o)))
                                 .collect(),
                         };
-                        paddock_domain::prediction::blend_with_market_win(
+                        paddock_domain::prediction::blend_with_market_win_form(
                             &probs,
                             &market_win,
-                            alpha,
+                            form,
                         )
                     }
                     None => probs,
@@ -491,10 +493,10 @@ impl<R: StatsRepository + OddsRepository> Interactor<R> {
                 // 引数 `betting`（curation は BettingConfig::default() と同じ既定・harville λ は
                 // 呼び出し側が確率系統に合わせて選ぶ）で推奨を作り、確定着順で的中判定。
                 // harville λ の掃引はここに効く（#703 Phase 2）。
-                // 注意: ここに渡す probs は blend_alpha 指定時には市場 win でブレンド済みで、しかも
+                // 注意: ここに渡す probs は blend 指定時には市場 win でブレンド済みで、しかも
                 // exotic の payout は同じ market のオッズで計算するため、ブレンド有効時の exotic 校正・
                 // 回収率は top_pick_odds と同様に構造的に楽観側へ寄る（上の probs ブレンド注記と同根）。
-                // 本番 backtest の既定は blend 無効（blend_alpha=None）でこの偏りは出ない。
+                // 本番 backtest の既定は blend 無効（blend=None）でこの偏りは出ない。
                 if let Some(market) = &market {
                     let podium = build_podium(&starters);
                     // curation は本番 predict と同じ既定値（BettingConfig::default()）固定で測る。

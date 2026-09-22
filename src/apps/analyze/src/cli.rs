@@ -85,8 +85,23 @@ pub enum Command {
         /// 注意: α<1.0 の指定は harville λ の既定も採用値（0.90/0.77）へ連動して切り替える
         /// （#703。採用 λ は production 等価 blend での fit 値）。**α を掃引して比較するときは
         /// `--harville-lambda2/-lambda3` を明示固定**しないと α と λ の効果が混線する。
+        /// `--log-pool-a/-b` とは相互排他。
         #[arg(long)]
         blend_alpha: Option<f64>,
+        /// 対数プールのモデル指数 a（#703 Phase 3・研究用）。`--log-pool-b` と対で指定し（片方
+        /// のみはエラー）、ブレンドを `p̃ ∝ model^a · market^b`（レース内正規化）に切り替える。
+        /// `--blend-alpha` と相互排他。(a,b)=(1,0) はモデル再正規化・(0,1) は市場。値域は
+        /// 有限かつ 0 <= v <= 10（両方 0 はエラー）。fit は scripts/predict-check/blend_fit.py
+        /// （--win-power 併用時の換算値も同スクリプトが出力する）。
+        /// 注意: b>0 の指定は harville λ の既定も採用値（0.90/0.77）へ連動して切り替える
+        /// （#703。この λ は linear α=0.2 系統で fit した値で、logpool 出力への適用は未計測の
+        /// 仮定）。**(a,b) を掃引して比較するときは `--harville-lambda2/-lambda3` を明示固定**
+        /// しないと (a,b) と λ の効果が混線する。
+        #[arg(long)]
+        log_pool_a: Option<f64>,
+        /// 対数プールの市場指数 b（#703 Phase 3）。`--log-pool-a` と対で指定する。
+        #[arg(long)]
+        log_pool_b: Option<f64>,
         /// ベイズ縮約の擬似カウント m（#75）。指定すると各 factor のレートを母集団 prior へ
         /// `(k·rate + m·prior)/(k + m)` で縮約する。未指定は縮約なし（現行挙動）。
         /// パラメータスイープ（5/10/20/50 等）で校正改善を比較するために使う。
