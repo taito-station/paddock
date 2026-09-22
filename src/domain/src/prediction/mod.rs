@@ -29,8 +29,8 @@ pub use config::{
     RECOMMENDED_SHRINKAGE_M, RECOMMENDED_WIN_POWER, RecencyConfig, ShrinkageConfig,
 };
 pub use estimate::{
-    apply_win_power, blend_with_market_win, estimate_probabilities,
-    estimate_probabilities_with_config,
+    BlendForm, apply_win_power, blend_with_market_win, blend_with_market_win_form,
+    estimate_probabilities, estimate_probabilities_with_config,
 };
 pub use explain::{ExplainCategory, FactorExplanation, HorseExplanation, PrevRunSummary, Verdict};
 pub use model::{

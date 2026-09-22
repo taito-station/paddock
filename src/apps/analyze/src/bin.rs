@@ -284,6 +284,8 @@ async fn main() -> anyhow::Result<()> {
             from,
             to,
             blend_alpha,
+            log_pool_a,
+            log_pool_b,
             shrinkage_m,
             recency_half_life,
             recent_form_weight,
@@ -301,16 +303,47 @@ async fn main() -> anyhow::Result<()> {
             dump_features,
         } => {
             let blend_alpha = validate_blend_alpha(blend_alpha)?;
+            // ブレンド結合形（#703 Phase 3）: --blend-alpha（線形）と --log-pool-a/-b（対数プール）
+            // は相互排他。log-pool は対指定必須・有限かつ >=0・両方 0 はエラー。
+            let blend: Option<paddock_domain::BlendForm> = match (
+                blend_alpha,
+                log_pool_a,
+                log_pool_b,
+            ) {
+                (Some(_), Some(_), _) | (Some(_), _, Some(_)) => anyhow::bail!(
+                    "--blend-alpha と --log-pool-a/--log-pool-b は同時指定できません（結合形は択一）"
+                ),
+                (Some(alpha), None, None) => Some(paddock_domain::BlendForm::Linear { alpha }),
+                (None, Some(a), Some(b)) => {
+                    // 上限 10 は fit の実測（|Â| < 1）を大きく包む実用域。極端な指数は全馬重みの
+                    // アンダーフローで silent no-op（pure フォールバック）となり、harville λ の
+                    // blended 既定と組んで系統ミスラベルの結果を生むため入力段で弾く。
+                    let ok = |v: f64| v.is_finite() && (0.0..=10.0).contains(&v);
+                    if !(ok(a) && ok(b)) || (a == 0.0 && b == 0.0) {
+                        anyhow::bail!(
+                            "--log-pool-a/--log-pool-b は有限かつ 0 <= v <= 10（両方 0 は不可）で指定してください: ({a}, {b})"
+                        );
+                    }
+                    Some(paddock_domain::BlendForm::LogPool { a, b })
+                }
+                (None, None, None) => None,
+                _ => anyhow::bail!(
+                    "--log-pool-a と --log-pool-b は両方指定するか両方省略してください"
+                ),
+            };
             // discounted Harville（#703 Phase 2）。λ 未指定の既定は確率系統に連動させる:
-            // --blend-alpha 指定（α<1.0）時のみ select_bets に blended 確率が渡るので採用値
-            // RECOMMENDED_HARVILLE_LAMBDA_BLENDED（0.90/0.77）を既定にし、それ以外
+            // blended 確率が select_bets に渡る結合形（Linear α<1.0 / LogPool b>0）のときのみ
+            // 採用値 RECOMMENDED_HARVILLE_LAMBDA_BLENDED（0.90/0.77）を既定にし、それ以外
             // （blend なし・α>=1.0 の no-op ブレンド = pure 確率）は素の Harville のまま
             // = 従来と bit-exact 不変。pure に blended-fit λ を当てるのは系統ミスマッチ
             // （pure の λ̂ は 2.29/1.80 と逆方向・決定ログ #703）。
             // 片方のみの指定は黙って既定 1.0 と組ませず入力エラーにする（λ の対推定が前提のため）。
             let betting = match (harville_lambda2, harville_lambda3) {
                 (None, None) => {
-                    let blended_probs = blend_alpha.map(|a| a < 1.0).unwrap_or(false);
+                    let blended_probs = blend
+                        .as_ref()
+                        .map(|f| f.produces_blended())
+                        .unwrap_or(false);
                     if blended_probs {
                         paddock_domain::betting::BettingConfig {
                             harville: paddock_domain::betting::RECOMMENDED_HARVILLE_LAMBDA_BLENDED,
@@ -357,14 +390,7 @@ async fn main() -> anyhow::Result<()> {
             let to = parse_date(&to)?;
             let report = app
                 .interactor
-                .backtest(
-                    from,
-                    to,
-                    blend_alpha,
-                    config,
-                    betting,
-                    dump_features.is_some(),
-                )
+                .backtest(from, to, blend, config, betting, dump_features.is_some())
                 .await?;
             printer::print_backtest(from, to, &report);
             // --dump-features 指定時は特徴量ダンプを TSV に書く（#272 Phase A）。clean-arch のため

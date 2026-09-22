@@ -721,7 +721,7 @@ async fn backtest_blend_flips_top_pick_to_market_favorite() {
         .backtest(
             d(2026, 1, 1),
             d(2026, 1, 31),
-            Some(0.2),
+            Some(paddock_domain::BlendForm::Linear { alpha: 0.2 }),
             EstimationConfig::default(),
             paddock_domain::betting::BettingConfig::default(),
             false,
@@ -753,7 +753,7 @@ async fn backtest_blend_uses_partial_race_odds_as_is() {
         .backtest(
             d(2026, 1, 1),
             d(2026, 1, 31),
-            Some(0.2),
+            Some(paddock_domain::BlendForm::Linear { alpha: 0.2 }),
             EstimationConfig::default(),
             paddock_domain::betting::BettingConfig::default(),
             false,
@@ -775,7 +775,7 @@ async fn backtest_blend_falls_back_to_results_odds_when_no_snapshot() {
         .backtest(
             d(2026, 1, 1),
             d(2026, 1, 31),
-            Some(0.0),
+            Some(paddock_domain::BlendForm::Linear { alpha: 0.0 }),
             EstimationConfig::default(),
             paddock_domain::betting::BettingConfig::default(),
             false,

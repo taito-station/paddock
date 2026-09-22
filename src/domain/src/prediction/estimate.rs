@@ -103,6 +103,118 @@ fn apply_score_power(scores: Vec<f64>, gamma: Option<f64>) -> Vec<f64> {
     }
 }
 
+/// ブレンドの結合形（#703 Phase 3）。
+///
+/// - [`BlendForm::Linear`]: 現行の線形ブレンド `α·model + (1−α)·market`（[`blend_with_market_win`]
+///   と同一実装・bit-exact）。
+/// - [`BlendForm::LogPool`]: 対数プール `p̃_i ∝ model_i^a · market_i^b`（レース内正規化）。
+///   校正済み予測同士の線形プールは必然的に underconfident になる（Ranjan & Gneiting 2010）
+///   のに対し、対数プールは Benter (1994) が実運用した結合形で、α・縮約・冪較正が (a,b) の
+///   2 パラメータに統合される。**win_power γ との合成は冪の再パラメータ化で厳密に可換**
+///   （LogPool(a,b) → γ 冪 ＝ LogPool(aγ, bγ)）。
+///   既知挙動: `model_i = 0` かつ `a > 0` の馬は 0 に潰れる（市場がどう評価していても）。
+///   オッズ無しの馬は市場値の代用に自身のモデル値を使い重み `m^(a+b)` とする（生の m 保持
+///   では a+b≠1 でスケールがズレ、冪可換性もオッズ無し馬で破れるため）。
+///   非有限・負の (a,b)・a=b=0 は no-op（既存の防御パターン踏襲）。
+///
+/// 本番 predict 経路は Linear α=0.2 のまま（採用ゲート通過後にのみ変更・決定ログ #703 参照）。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum BlendForm {
+    /// 線形ブレンド。`alpha` はモデル重み（α>=1.0 は no-op = pure）。
+    Linear { alpha: f64 },
+    /// 対数プール。`a` はモデル指数・`b` は市場指数。(1,0)=モデル再正規化・(0,1)=市場。
+    LogPool { a: f64, b: f64 },
+}
+
+impl BlendForm {
+    /// この形で市場情報が実際に混ざる（= 出力が blended 系統になる）か。
+    /// Linear は α<1.0、LogPool は b>0 のとき true。harville λ の既定選択（#703 Phase 2 の
+    /// 系統整合）に使う。
+    pub fn produces_blended(&self) -> bool {
+        match self {
+            BlendForm::Linear { alpha } => alpha.is_finite() && *alpha < 1.0,
+            BlendForm::LogPool { a, b } => a.is_finite() && b.is_finite() && *a >= 0.0 && *b > 0.0,
+        }
+    }
+}
+
+/// [`blend_with_market_win`] の結合形指定版（#703 Phase 3）。`Linear` は既存関数へ委譲し
+/// bit-exact に一致する。数値・防御条件の詳細は各 variant の doc（[`BlendForm`]）参照。
+pub fn blend_with_market_win_form(
+    probs: &[HorseProbability],
+    market_win_odds: &HashMap<HorseNum, f64>,
+    form: &BlendForm,
+) -> Vec<HorseProbability> {
+    match *form {
+        BlendForm::Linear { alpha } => blend_with_market_win(probs, market_win_odds, alpha),
+        BlendForm::LogPool { a, b } => {
+            // 防御: 非有限・負・全ゼロ指数は no-op（Linear の非有限 α no-op と同じ流儀）。
+            if !(a.is_finite() && b.is_finite()) || a < 0.0 || b < 0.0 || (a == 0.0 && b == 0.0) {
+                return probs.to_vec();
+            }
+            if probs.is_empty() || market_win_odds.is_empty() {
+                return probs.to_vec();
+            }
+            // 市場 implied の正規化は Linear と同じ（オーバーラウンド除去・オッズ >=1.0 のみ）。
+            let implied: HashMap<HorseNum, f64> = market_win_odds
+                .iter()
+                .filter(|&(_, &odds)| odds.is_finite() && odds >= 1.0)
+                .map(|(&num, &odds)| (num, 1.0 / odds))
+                .collect();
+            let overround: f64 = implied.values().sum();
+            if overround <= 0.0 {
+                return probs.to_vec();
+            }
+            // 対数プール重み。model=0 ∧ a>0 → 0（powf(0,a>0)=0）。a=0 は model 無視
+            // （powf(x,0)=1）。オッズ無しの馬は市場値の代用に自身のモデル値を使う
+            // = 重み m^(a+b)（q≈m の代用解釈）。生の m 保持だと a+b≠1 で他馬とスケールが
+            // ズレ、win_power γ との冪可換性（LogPool(a,b)→γ冪 = LogPool(aγ,bγ)）も
+            // オッズ無し馬で破れるため、この形でのみ可換性が厳密に保たれる。
+            let blended: Vec<f64> = probs
+                .iter()
+                .map(|p| {
+                    let m = p.win_prob.max(0.0);
+                    match implied.get(&p.horse_num) {
+                        Some(&imp) => {
+                            let q = imp / overround;
+                            m.powf(a) * q.powf(b)
+                        }
+                        None => m.powf(a + b),
+                    }
+                })
+                .collect();
+            let total: f64 = blended.iter().sum();
+            if !(total.is_finite() && total > 0.0) {
+                // 全馬 model=0 × a>0 等の縮退。黙って壊れた確率を流さず no-op。
+                return probs.to_vec();
+            }
+            let win_probs: Vec<f64> = blended.iter().map(|w| (w / total).min(1.0)).collect();
+            rebuild_with_win(probs, &win_probs)
+        }
+    }
+}
+
+/// win ベクトルを差し替えて place/show を累積 max で単調再是正する共通末尾処理。
+/// [`blend_with_market_win`]（Linear）と LogPool で同一の後処理を共有する。
+fn rebuild_with_win(probs: &[HorseProbability], win_probs: &[f64]) -> Vec<HorseProbability> {
+    probs
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            let win = win_probs[i];
+            let place = p.place_prob.max(win).min(1.0);
+            let show = p.show_prob.max(place).min(1.0);
+            HorseProbability {
+                horse_num: p.horse_num,
+                horse_name: p.horse_name.clone(),
+                win_prob: win,
+                place_prob: place,
+                show_prob: show,
+            }
+        })
+        .collect()
+}
+
 /// 単勝確率を市場オッズ（単勝）の implied 確率とブレンドする（#72）。
 ///
 /// `market_win_odds` は馬番→単勝確定オッズ（払戻倍率, ≥1.0）。各馬の implied 確率
@@ -167,22 +279,7 @@ pub fn blend_with_market_win(
         blended
     };
 
-    probs
-        .iter()
-        .enumerate()
-        .map(|(i, p)| {
-            let win = win_probs[i];
-            let place = p.place_prob.max(win).min(1.0);
-            let show = p.show_prob.max(place).min(1.0);
-            HorseProbability {
-                horse_num: p.horse_num,
-                horse_name: p.horse_name.clone(),
-                win_prob: win,
-                place_prob: place,
-                show_prob: show,
-            }
-        })
-        .collect()
+    rebuild_with_win(probs, &win_probs)
 }
 
 /// win_prob を冪変換 `win'_i ∝ win_i^gamma` して場内合計 1.0 へ再正規化する（#246 / ADR 0042）。
