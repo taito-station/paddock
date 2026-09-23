@@ -14,7 +14,7 @@ sources:
   - docs/specifications/prediction-search-api.md
   - docs/specifications/feature-resolution-diagnosis.md
   - docs/specifications/netkeiba-datasource.md
-distilled_from_sha: "104e992"
+distilled_from_sha: "7b9337a"
 updated: "2026-09-22"
 ---
 
