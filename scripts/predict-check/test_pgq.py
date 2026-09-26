@@ -25,7 +25,8 @@ with open(os.environ["FAKE_PSQL_LOG"], "w") as f:
     json.dump({"argv": sys.argv[1:], "stdin": sys.stdin.read(),
                "PGPASSWORD": os.environ.get("PGPASSWORD"),
                "PGCONNECT_TIMEOUT": os.environ.get("PGCONNECT_TIMEOUT")}, f)
-sys.stdout.write(os.environ.get("FAKE_PSQL_STDOUT", ""))
+with open(os.environ["FAKE_PSQL_STDOUT_FILE"], encoding="utf-8") as f:
+    sys.stdout.write(f.read())
 sys.stderr.write(os.environ.get("FAKE_PSQL_STDERR", ""))
 sys.exit(int(os.environ.get("FAKE_PSQL_EXIT", "0")))
 """
@@ -40,8 +41,12 @@ def _with_fake_psql(fn, stdout="", stderr="", exit_code=0, env_extra=None):
             f.write(FAKE_PSQL)
         os.chmod(path, os.stat(path).st_mode | stat.S_IEXEC)
         log = os.path.join(d, "log.json")
+        # stdout はファイルで渡す（Linux は環境変数 1 個あたり 128KiB 上限で、長大セルのテストが起動できない）
+        out_file = os.path.join(d, "stdout.txt")
+        with open(out_file, "w", encoding="utf-8") as f:
+            f.write(stdout)
         os.environ.update({"PATH": d + os.pathsep + saved.get("PATH", ""), "FAKE_PSQL_LOG": log,
-                           "FAKE_PSQL_STDOUT": stdout, "FAKE_PSQL_STDERR": stderr,
+                           "FAKE_PSQL_STDOUT_FILE": out_file, "FAKE_PSQL_STDERR": stderr,
                            "FAKE_PSQL_EXIT": str(exit_code)})
         os.environ.pop("PGPASSWORD", None)
         os.environ.pop("PGCONNECT_TIMEOUT", None)
