@@ -20,12 +20,11 @@
 --rows-tsv 形式（タブ区切り）: race_id  venue  race_num  post_time(HH:MM)  last_fetched_at(rfc3339 or 空)  n_snaps
 """
 import argparse
-import os
 import re
-import subprocess
 import sys
 
-DEFAULT_DB_URL = "postgres://paddock:paddock@127.0.0.1:5432/paddock"
+import pgq
+
 JST_OFFSET_MIN = 9 * 60  # fetched_at は UTC rfc3339。JST 日中レースは UTC でも同日 00:00-07:59。
 
 
@@ -107,10 +106,10 @@ def build_coverage(rows, max_lag_min):
 
 # --- 入力ロード（DB or 外部 TSV） ---
 def _psql_dump(db_url, date):
-    """race_cards × race_odds_snapshots を集計して 1 レース 1 行の TSV で返す。
+    """race_cards × race_odds_snapshots を集計して 1 レース 1 行の行（セル list）の list で返す。
 
-    date は SQL リテラルへ補間するため、呼び出し側検証に依存せず関数内でも YYYY-MM-DD を
-    再検証する（多層防御。psql -c はプレースホルダを取れないので形式を厳格に固定した値だけ通す）。
+    date は pgq の変数束縛（`:'date'`）で渡す。加えて呼び出し側検証に依存せず関数内でも
+    YYYY-MM-DD を再検証する（多層防御・不正値は psql を起動する前に弾く）。
     """
     if not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", date):
         raise ValueError(f"date は YYYY-MM-DD のみ許可: {date!r}")
@@ -121,26 +120,21 @@ def _psql_dump(db_url, date):
         "       COALESCE(MAX(s.fetched_at)::text, ''), COUNT(DISTINCT s.fetched_at) "
         "FROM race_cards c "
         "LEFT JOIN race_odds_snapshots s ON s.race_id = c.race_id "
-        f"WHERE c.date = '{date}' "
+        "WHERE c.date = :'date' "
         "GROUP BY c.race_id, c.venue, c.race_num, c.post_time "
         "ORDER BY c.venue, c.race_num;"
     )
-    # DB 到達不能時の無言ハングを避ける接続タイムアウト（keep_awake.sh と対称、URL を弄らず効く）。
-    env = {**os.environ, "PGCONNECT_TIMEOUT": os.environ.get("PGCONNECT_TIMEOUT", "5")}
-    out = subprocess.run(
-        ["psql", db_url, "-tA", "-F", "\t", "-c", sql],
-        capture_output=True, text=True, check=True, env=env,
-    )
-    return out.stdout
+    # DB 到達不能時の無言ハング対策の接続タイムアウトは pgq が掛ける（PGCONNECT_TIMEOUT 未設定時 5 秒）。
+    return pgq.query(sql, url=db_url, variables={"date": date})
 
 
-def parse_rows(tsv_text):
-    """TSV を (race_id, venue, race_num, post_time, last_fetched_at, n_snaps) の list へ。"""
+def parse_rows(cells_rows):
+    """行（セル list）を (race_id, venue, race_num, post_time, last_fetched_at, n_snaps) の list へ。"""
     rows = []
-    for line in tsv_text.splitlines():
+    for cells in cells_rows:
+        line = "\t".join(cells)  # warn 表示用
         if not line.strip():
             continue
-        cells = line.split("\t")
         if len(cells) != 6:
             print(f"[warn] 想定外の列数 {len(cells)} をスキップ: {line[:80]}", file=sys.stderr)
             continue
@@ -194,7 +188,7 @@ def main(argv=None):
     ap.add_argument("--date", help="開催日 YYYY-MM-DD（既定: JST 今日）")
     ap.add_argument("--max-lag-min", type=int, default=10,
                     help="最終 snapshot が発走の何分前までを ok とするか（既定 10）")
-    ap.add_argument("--db-url", default=os.environ.get("PADDOCK_DB_URL", DEFAULT_DB_URL))
+    ap.add_argument("--db-url", default=pgq.db_url())
     ap.add_argument("--rows-tsv", help="集計済み TSV を外部供給（指定時 DB を引かない）")
     ap.add_argument("--fail-on-gap", action="store_true",
                     help="gap/none/bad_ts が 1 件でもあれば exit 1（CI/監視用）")
@@ -202,7 +196,7 @@ def main(argv=None):
 
     if args.rows_tsv:
         from pathlib import Path
-        tsv = Path(args.rows_tsv).read_text()
+        rows = pgq.tsv_rows(Path(args.rows_tsv).read_text())
         date = args.date or "(tsv)"
     else:
         from datetime import datetime
@@ -211,12 +205,12 @@ def main(argv=None):
         if not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", date):
             ap.error(f"--date は YYYY-MM-DD: {date}")
         try:
-            tsv = _psql_dump(args.db_url, date)
-        except (subprocess.CalledProcessError, FileNotFoundError) as e:
+            rows = _psql_dump(args.db_url, date)
+        except pgq.PsqlError as e:
             print(f"DB 取得に失敗（psql/接続）: {e}", file=sys.stderr)
             sys.exit(1)
 
-    cov = build_coverage(parse_rows(tsv), args.max_lag_min)
+    cov = build_coverage(parse_rows(rows), args.max_lag_min)
     bad = print_report(cov, date, args.max_lag_min)
     if args.fail_on_gap and bad:
         sys.exit(1)

@@ -7,7 +7,11 @@ post_time NULL 除外 → 窓判定」の DB 経路固有部分を検証する�
 実行: `python3 -m pytest test_upcoming_races_db.py` もしくは `python3 test_upcoming_races_db.py`。
 """
 import argparse
+import contextlib
+import io
 
+import pgq
+import upcoming_races_db
 from upcoming_races import to_minutes
 from upcoming_races_db import select_from_rows, valid_date
 
@@ -73,6 +77,56 @@ def test_valid_date_rejects_malformed():
         except argparse.ArgumentTypeError:
             continue
         raise AssertionError(f"不正値が弾かれていない: {bad!r}")
+
+
+def test_fetch_rows_failure_forwards_stderr_and_exits_nonzero():
+    # prefetch_odds.sh との契約（#714）: 失敗時は psql の stderr を転記して非 0 終了し、stdout には
+    # 何も出さない（stdout は race_id 列として読まれる）。pgq.query を失敗させて再現する。
+    def failing_query(sql, url=None, variables=None):
+        raise pgq.PsqlError("psql 失敗 (exit 2, postgres://u@h/db): refused",
+                            stderr="psql: error: connection refused\n")
+
+    orig = pgq.query
+    pgq.query = failing_query
+    out, err = io.StringIO(), io.StringIO()
+    try:
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            upcoming_races_db.fetch_rows("2026-09-26", "postgres://u:pw@h/db")
+        raise AssertionError("SystemExit が出るはず")
+    except SystemExit as e:
+        assert e.code not in (0, None)
+        assert "pw" not in str(e.code)
+    finally:
+        pgq.query = orig
+    assert out.getvalue() == ""
+    assert "connection refused" in err.getvalue()
+
+
+def test_fetch_rows_failure_before_psql_keeps_reason():
+    # psql を起動する前の失敗（psql 不在・URL 形式不正）は stderr が空。理由が終了文言に残ること。
+    def failing_query(sql, url=None, variables=None):
+        raise pgq.PsqlError("psql が見つかりません（PATH を確認）")
+
+    orig = pgq.query
+    pgq.query = failing_query
+    try:
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            upcoming_races_db.fetch_rows("2026-09-26", "postgres://h/db")
+        raise AssertionError("SystemExit が出るはず")
+    except SystemExit as e:
+        assert "psql が見つかりません" in str(e.code), e.code
+    finally:
+        pgq.query = orig
+
+
+def test_fetch_rows_maps_cells_to_pairs():
+    orig = pgq.query
+    pgq.query = lambda sql, url=None, variables=None: [["2026-3-tokyo-5-1R", "9:50"]]
+    try:
+        assert upcoming_races_db.fetch_rows("2026-09-26", "postgres://h/db") == [
+            ("2026-3-tokyo-5-1R", "9:50")]
+    finally:
+        pgq.query = orig
 
 
 if __name__ == "__main__":

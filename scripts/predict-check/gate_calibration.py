@@ -33,12 +33,12 @@ import json
 import os
 import random
 import re
-import subprocess
 import sys
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pgq
 from odds_guard import is_payout_odds
 from umaren_backtest import spearman
 
@@ -308,28 +308,26 @@ def _check_date(d):
 
 
 def psql_dump_live_ev(db_url, date_from, date_to):
-    """期間内の live_ev_snapshots を TSV 文字列で返す（slip は 1 行 JSON）。"""
+    """期間内の live_ev_snapshots を行（セル list）の list で返す（slip は JSON 文字列）。"""
     _check_date(date_from)
     _check_date(date_to)
     sql = (
         "SELECT race_id, date, venue, race_no, COALESCE(post_time,''), captured_at, "
         "       roi, axis, konsen, odds_missing, slip::text "
         "FROM live_ev_snapshots "
-        f"WHERE date BETWEEN '{date_from}' AND '{date_to}' "
+        "WHERE date BETWEEN :'date_from' AND :'date_to' "
         "ORDER BY race_id, captured_at;"
     )
-    out = subprocess.run(["psql", db_url, "-tA", "-F", "\t", "-c", sql],
-                         capture_output=True, text=True, check=True)
-    return out.stdout
+    return pgq.query(sql, url=db_url, variables={"date_from": date_from, "date_to": date_to})
 
 
-def load_live_ev(tsv_text):
-    """live_ev TSV → race_id ごとのスイープ行 list。"""
+def load_live_ev(rows):
+    """live_ev の行（セル list）→ race_id ごとのスイープ行 list。"""
     by_race = defaultdict(list)
-    for line in tsv_text.splitlines():
+    for cells in rows:
+        line = "\t".join(cells)  # warn 表示用
         if not line.strip():
             continue
-        cells = line.split("\t")
         if len(cells) != len(_LIVE_COLS):
             print(f"[warn] live_ev の想定外の列数 {len(cells)} をスキップ: {line[:80]}",
                   file=sys.stderr)
@@ -350,7 +348,11 @@ def load_live_ev(tsv_text):
 
 
 def psql_dump_odds(db_url, date_from, date_to):
-    """期間内の race_odds_snapshots（連系 3 券種）を TSV で返す（市場整合ROI 診断用）。"""
+    """期間内の race_odds_snapshots（連系 3 券種）を行（セル list）のイテレータで返す（市場整合ROI 診断用）。
+
+    全期間で 100 万行を超えるので、load_odds が 1 行ずつ float 化して捨てられるよう pgq.query_iter で読む
+    （list で抱えるとセル文字列の分だけ数百 MB 増える）。psql の失敗は反復時に PsqlError で出る。
+    """
     _check_date(date_from)
     _check_date(date_to)
     bet_in = ",".join(f"'{t}'" for t in sorted(WIN_COMBOS))
@@ -358,25 +360,23 @@ def psql_dump_odds(db_url, date_from, date_to):
         "SELECT s.race_id, s.bet_type, s.combination_key, s.odds, "
         "       COALESCE(s.odds_high::text,''), s.fetched_at "
         "FROM race_odds_snapshots s JOIN race_cards c ON c.race_id = s.race_id "
-        f"WHERE c.date BETWEEN '{date_from}' AND '{date_to}' "
-        f"  AND s.bet_type IN ({bet_in}) "
+        "WHERE c.date BETWEEN :'date_from' AND :'date_to' "
+        f"  AND s.bet_type IN ({bet_in}) "  # 内部定数（WIN_COMBOS）の展開のみ
         "ORDER BY s.race_id, s.fetched_at;"
     )
-    out = subprocess.run(["psql", db_url, "-tA", "-F", "\t", "-c", sql],
-                         capture_output=True, text=True, check=True)
-    return out.stdout
+    return pgq.query_iter(sql, url=db_url, variables={"date_from": date_from, "date_to": date_to})
 
 
-def load_odds(tsv_text):
-    """オッズ TSV → {race_id: {fetched_at: {bet_type: {combo_key: odds}}}}。
+def load_odds(rows):
+    """オッズの行（セル list）→ {race_id: {fetched_at: {bet_type: {combo_key: odds}}}}。
 
     ワイドは low/high の帯で保存されるので mid=(low+high)/2 を採る（`live_ev.py` のワイド意味論）。
     """
     out = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
-    for line in tsv_text.splitlines():
+    for cells in rows:
+        line = "\t".join(cells)  # warn 表示用
         if not line.strip():
             continue
-        cells = line.split("\t")
         if len(cells) != 6:
             print(f"[warn] odds の想定外の列数 {len(cells)} をスキップ: {line[:80]}", file=sys.stderr)
             continue
@@ -656,8 +656,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--payouts-dir", required=True, help="payouts_YYYYMMDD.json を置いたディレクトリ")
-    ap.add_argument("--db-url", default=os.environ.get(
-        "PADDOCK_DB_URL", "postgres://paddock:paddock@127.0.0.1:5432/paddock"))
+    ap.add_argument("--db-url", default=pgq.db_url())
     ap.add_argument("--from", dest="date_from", default="2026-01-01")
     ap.add_argument("--to", dest="date_to", default="2026-12-31")
     ap.add_argument("--buckets", default="20,40,60,80", help="較正バケットの境界（%%・カンマ区切り）")
@@ -670,8 +669,12 @@ def main():
     args = ap.parse_args()
 
     payouts = load_payouts_dir(args.payouts_dir)
-    by_race = load_live_ev(psql_dump_live_ev(args.db_url, args.date_from, args.date_to))
-    odds = load_odds(psql_dump_odds(args.db_url, args.date_from, args.date_to))
+    try:
+        by_race = load_live_ev(psql_dump_live_ev(args.db_url, args.date_from, args.date_to))
+        odds = load_odds(psql_dump_odds(args.db_url, args.date_from, args.date_to))
+    except pgq.PsqlError as e:
+        print(f"DB 取得に失敗（psql/接続）: {e}", file=sys.stderr)
+        return 1
     races, skipped = build_races(by_race, payouts, odds, use_ever=args.ever)
 
     print(f"live_ev_snapshots: {len(by_race)} レース / 評価できた {len(races)} レース"

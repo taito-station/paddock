@@ -20,29 +20,27 @@ Hanyu et al. (2025, arXiv:2509.14645) は同一最終オッズ条件付きで「
     → 改訂案提示（採否は PO）。それ以外は現行維持（inconclusive は現行維持側）。
 
 依存: psql (PADDOCK_DB_URL)・標準ライブラリ・同ディレクトリ nk.py / late_money_probe.py /
-odds_guard.py。netkeiba キャッシュは late_money_probe の .cache_nk_results を共有。
+odds_guard.py / pgq.py。netkeiba 結果ページは nk.result_page の HTML キャッシュを late_money_probe と共有
+（着順・確定オッズ・単勝払戻を 1 回の取得で読む）。
 """
 
 from __future__ import annotations
 
 import argparse
-import json
 import math
 import os
 import random
 import re
-import subprocess
 import sys
 import time
 from collections import defaultdict
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import late_money_probe as lmp  # noqa: E402  parse_ts / slug_to_netkeiba_id / CACHE を共有
+import late_money_probe as lmp  # noqa: E402  parse_ts / slug_to_netkeiba_id / fetch_finish を共有
 import nk  # noqa: E402
 import odds_guard  # noqa: E402
+import pgq  # noqa: E402
 
-DB = os.environ.get("PADDOCK_DB_URL", "postgres://paddock:paddock@127.0.0.1:5432/paddock")
-CACHE = lmp.CACHE  # .cache_nk_results（着順キャッシュと同居・二重取得を避ける）
 
 JST_OFFSET_SEC = 9 * 3600
 MIN_GAP_MIN = 10.0  # t_prev は t_last の 10 分以上前（実質 15 分粒度の下限側）
@@ -277,18 +275,9 @@ def judge(ci_lo: float, ci_hi: float, weighted_diff: float, low_weighted_diff: f
 
 # ---------- データ取得 ----------
 
-def _psql(sql: str) -> list[list[str]]:
-    out = subprocess.run(
-        ["psql", DB, "-At", "-F", "\t", "-c", sql],
-        capture_output=True, text=True, check=True,
-        env={**os.environ, "PGCONNECT_TIMEOUT": "5"},
-    ).stdout
-    return [line.split("\t") for line in out.splitlines()]
-
-
 def fetch_snapshots_with_cards():
     """(race_id, 馬番, odds, epoch, race_date, post_min) の行と、card 欠落レース数を返す。"""
-    rows = _psql(
+    rows = pgq.query(
         "SELECT s.race_id, s.combination_key, s.odds, s.fetched_at, c.date, c.post_time "
         "FROM race_odds_snapshots s LEFT JOIN race_cards c ON c.race_id = s.race_id "
         "WHERE s.bet_type='win' ORDER BY s.race_id, s.fetched_at"
@@ -305,7 +294,7 @@ def fetch_snapshots_with_cards():
 
 def fetch_results_db() -> dict[str, dict[int, tuple[int | None, float | None]]]:
     """results から {race_id: {馬番: (着順, 確定単勝オッズ)}}（NULL は None）。"""
-    rows = _psql(
+    rows = pgq.query(
         "SELECT race_id, horse_num, COALESCE(finishing_position::text,''), "
         "COALESCE(odds::text,'') FROM results"
     )
@@ -316,31 +305,15 @@ def fetch_results_db() -> dict[str, dict[int, tuple[int | None, float | None]]]:
 
 
 def fetch_final_odds_nk(nk_id: str) -> dict[int, float]:
-    """netkeiba 結果ページの確定単勝オッズ（キャッシュ付き・late_money_probe と同じ礼儀）。"""
-    path = os.path.join(CACHE, f"{nk_id}_odds.json")
-    if os.path.exists(path):
-        return {int(k): v for k, v in json.load(open(path, encoding="utf-8")).items()}
-    html = nk.decode(nk.curl(f"https://race.netkeiba.com/race/result.html?race_id={nk_id}"))
-    odds = parse_result_odds(html)
-    if odds:  # 空（未生成・構造変化）はキャッシュしない（lmp.fetch_finish と同方針）
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(odds, f)
-    time.sleep(1.5)
-    return odds
+    """netkeiba 結果ページの確定単勝オッズ（nk.result_page 経由・着順と同じページを共有）。"""
+    return parse_result_odds(nk.result_page(nk_id))
 
 
 def fetch_win_payout_nk(nk_id: str) -> dict[int, int]:
-    """netkeiba 払戻ブロックの単勝 {馬番: 100 円あたり払戻}（整合検査用・キャッシュ付き）。"""
-    path = os.path.join(CACHE, f"{nk_id}_win_payout.json")
-    if os.path.exists(path):
-        return {int(k): v for k, v in json.load(open(path, encoding="utf-8")).items()}
-    payouts = nk.fetch_payouts(nk_id).get("win", {})
-    out = {int(k): v for k, v in payouts.items()}
-    if out:
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(out, f)
-    time.sleep(1.5)
-    return out
+    """netkeiba 払戻ブロックの単勝 {馬番: 100 円あたり払戻}（整合検査用・nk.result_page 経由）。"""
+    # 未完ページ（払戻なし）は result_page が保存見送りの理由を warn するので、ここでは重ねない
+    payouts = nk.parse_payouts(nk.result_page(nk_id), nk_id, warn=False).get("win", {})
+    return {int(k): v for k, v in payouts.items()}
 
 
 # ---------- main ----------

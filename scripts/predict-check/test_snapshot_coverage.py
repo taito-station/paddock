@@ -4,6 +4,7 @@ DB に触れない hhmm_to_min / fetched_at_to_jst_min / classify / build_covera
 不変量を固定する。
 """
 import snapshot_coverage as C
+import pgq
 
 
 def test_hhmm_to_min():
@@ -82,7 +83,7 @@ def test_parse_rows_column_guard():
     bad_cols = "R1\t函館\t1"            # 列数不足
     bad_n = "\t".join(["R2", "函館", "2", "10:20", "", "x"])      # n_snaps 非数値
     bad_rnum = "\t".join(["R3", "函館", "x", "10:20", "", "2"])   # race_num 非数値
-    rows = C.parse_rows("\n".join([good, bad_cols, bad_n, bad_rnum]) + "\n")
+    rows = C.parse_rows(pgq.tsv_rows("\n".join([good, bad_cols, bad_n, bad_rnum]) + "\n"))
     assert len(rows) == 1 and rows[0][0] == "R1" and rows[0][5] == 6, rows
 
 
