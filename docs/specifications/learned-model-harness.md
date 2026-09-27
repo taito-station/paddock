@@ -1061,5 +1061,7 @@ EV_blended = α·EV_pure + (1-α)·(1/overround)
   - 参考: 市場（単勝オッズ → 素の Harville・別母集合 1,541R）は馬連 NLL 3.270、連対 0.319 で、純モデルとの差は大きい。
     #720 はまずこの baseline からの改善を dev で追う。
   - 忠実性: 同じ dump に `prob_eval.py` を流すと、#703 のベースライン（R²・Brier）を全桁再現した。
-    prob_ledger の pure win Brier（market_ok 母集合）0.065672 も prob_eval の win×pure 0.06567 と一致した。
+    (a) prob_eval の blended win Brier は fit 窓 0.054540・eval 窓 0.054557 で、`analyze backtest` の単勝 Brier
+    （全 5,052R）0.0545 と一致。(b) prob_ledger の pure win Brier（market_ok 母集合）0.065672 も
+    prob_eval の win×pure 0.06567 と一致した。
   - 全数値は `docs/docs-original/719-prob-ledger.md`。

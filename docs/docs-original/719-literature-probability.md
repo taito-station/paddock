@@ -6,7 +6,8 @@
 それ以外は抄録・書誌・二次情報に基づく。#703 の調査（`703-probability-logic-literature-survey.md`）と
 重なる所見（Harville の偏り・割引 λ・Benter の対数プール）は同ファイルを正とし、ここには新しい所見だけを残す。
 
-蒸留先: `docs/specifications/learned-model-harness.md`（決定ログ #719）・`docs/specifications/backtest.md`（評価プロトコル）。
+蒸留先: `docs/specifications/learned-model-harness.md`（決定ログ #719）・`docs/specifications/backtest.md`（評価プロトコル）・
+`docs/specifications/probability-estimation.md`（独立確率の評価）。
 
 ## 1. 独立モデルと市場のズレ（エピック #723 の中心の問い）
 
