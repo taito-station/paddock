@@ -1,0 +1,11 @@
+# CI の predict-check ジョブで numpy 依存テストを走らせるための依存（#719）。
+# 必須チェックが上流の新版で黙って揺れないよう、推移依存まで == で固定する。
+# ハッシュ検証（--require-hashes）と dependabot での更新監視は別 issue で扱う。
+# 更新手順: 新しい venv に `pip install numpy pytest` → `pip freeze` の結果でこのファイルを置き換え、
+# `python -m pytest scripts/predict-check` が通ることを確かめる。
+numpy==2.5.3
+pytest==9.1.1
+iniconfig==2.3.0
+packaging==26.3
+pluggy==1.6.0
+Pygments==2.21.0

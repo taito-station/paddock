@@ -5,7 +5,7 @@ status: Confirmed
 kind: knowledge
 doc_class: [D22, D19]
 tags: [D22, D19]
-updated: "2026-09-23"
+updated: "2026-09-27"
 ---
 
 # 着順確率推定モデル仕様書
@@ -298,6 +298,15 @@ CLI は `analyze backtest --log-pool-a A --log-pool-b B`（対指定・`--blend-
 出力）。**本番は Linear α=0.2 のまま**——対数プールへの置換は eval 窓ゲート不通過で棄却済み
 （最適モデル指数 ≈ 0。決定ログ #703〔対数プール棄却〕参照）。
 
+### 独立確率の評価（#719・研究用）
+
+本書の純モデル確率（`model_win_pure` = ステップ 4 のブレンド前）は、市場非依存の**独立確率**の baseline
+として、`scripts/predict-check/prob_ledger.py` で版ごとに評価する。win から割引 Harville で馬連・連対・
+ワイド・3連複の確率を作り、**馬連 NLL と連対 log-loss** を主指標に、dev/test 窓で ledger
+（`docs/docs-original/719-prob-ledger.md`）に記録する。v0 baseline（test 窓）は馬連 NLL 4.206・連対 0.390。
+本番の確率（ステップ 4 の α=0.2 ブレンド）は #722 の判定まで変えない。定義・窓・経緯は
+`backtest.md`「評価プロトコル」と `learned-model-harness.md` の決定ログ「#719」。
+
 ---
 
 ## 統計データ拡張: GroupStat への `shows` 追加
@@ -474,6 +483,7 @@ knowledge 側に置く**（規約は [docs/knowledge/README.md](../knowledge/REA
 
 ## 変更履歴
 
+- 2026-09-27: 「独立確率の評価（#719・研究用）」節を追加（純モデル確率を独立確率の baseline として版ごとに評価する旨）。
 - 2026-07-14: knowledge 規約（status/sources/参照SHA）に基づき frontmatter を付与し knowledge へ昇格（内容変更なし・pilot 移行）。物理移動はせず ADR 履歴/相互リンクを維持。詳細は [docs/knowledge/README.md](../knowledge/README.md)。
 
 ---

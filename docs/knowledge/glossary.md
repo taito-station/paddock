@@ -14,7 +14,7 @@ sources:
   - docs/specifications/prediction-search-api.md
   - docs/specifications/feature-resolution-diagnosis.md
   - docs/specifications/netkeiba-datasource.md
-distilled_from_sha: "004446c"
+distilled_from_sha: "72c18e0"
 updated: "2026-09-27"
 ---
 
@@ -111,6 +111,7 @@ ADR 0077）:
 | CORP 分解 | `Brier = MCB − DSC + UNC`（miscalibration / discrimination / uncertainty）。変更が校正と識別力のどちらを動かしたかを切り分ける | 同上 |
 | 擬似 R² / ΔR² | `R² = 1 − Σ ln p(勝者) / Σ ln(1/頭数)`（Bolton-Chapman）。**ΔR² = R²(系統) − R²(market)** が確率ロジック変更の主 KPI（「市場に足せている増分」だけを測る） | 同上 |
 | fit 窓 / eval 窓 | パラメータ推定専用（2025 年）/ 採否判断専用（2026-01〜08）に凍結した期間。推定と採否を同一窓で行う in-sample 掃引を構造的に防ぐ | 同上 |
+| dev 窓 / test 窓・馬連 NLL | 独立確率の版ごと評価（`prob_ledger.py`・#719）の窓。dev = 2025-07〜12（fit 窓内・反復用・採否根拠にしない）/ test = eval 窓と同一（採否はここだけ）。主指標の**馬連 NLL** = `−ln P(実際の 1-2 着ペア)`、連対 log-loss と並べて**小さいほど良い** | [backtest.md](../specifications/backtest.md) 評価プロトコル |
 | 想定回収率 | `Σ payout / Σ stake`。各レース 100 円をトップ選好馬の単勝に賭けた仮定値。**実際の買い方（3 券種）とは別物** | 同上 |
 | `ev`（期待値） | `probability × odds`。1.0 を超えると理論的にプラス期待値 | [ev-kelly-bet-selection.md](../specifications/ev-kelly-bet-selection.md) 用語定義 |
 | discounted Harville / λ2・λ3 | 連系券種の確率合成で 2 着段 σ_i ∝ win^λ2・3 着段 τ_i ∝ win^λ3 と割引く補正（λ=1 が素の Harville）。**blended 確率に λ2=0.90/λ3=0.77・pure 確率は無割引**（系統で最適値が異なるため適用は確率系統を知る呼び出し側の責務。`analyze backtest --blend-alpha`（α<1.0）指定時のみ既定で効く）＝本番買い目 EV 表示・blend なし/α≥1.0 の backtest は不変 | [ev-kelly-bet-selection.md](../specifications/ev-kelly-bet-selection.md) §1.1（採用の経緯は [betting-rule-history.md](../specifications/betting-rule-history.md) 決定ログ #703） |
