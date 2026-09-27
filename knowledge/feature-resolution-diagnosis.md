@@ -233,7 +233,7 @@ JRA から結果データを再取得して測定 DB に **trainer 母数を充�
 - ADR 0007（欠落項の母数除外）/ ADR 0011（実績なし≠全敗の区別, #73）/ ADR 0009（Optional 項追加の前例）
 - 別 Issue: (b) 出馬表 PDF パーサ（entry-parser）の trainer 抽出
 - #219（trainer 略名正規化・本番有効化）
-- 設計書 `knowledge/probability-estimation.md`
+- 設計書 `docs/specifications/probability-estimation.md`
 
 ### ADR 0027: 予想精度のレバーは市場オッズブレンドであり近走データ拡充ではない (Issue #178 関連) (2026-06-19) — 承認済み
 
@@ -417,7 +417,7 @@ API デフォルトの変更（α=0.3→0.2）は SPA 側で `blend_alpha` 省�
 
 #### コンテキスト
 
-Phase A 診断（ADR 0055 の follow-up・PR #319・`knowledge/feature-resolution-diagnosis.md`）で純モデルは **resolution 限定**（本命を見分けるランクが弱い。top1 0.162/市場0.333・AUC 0.649/市場0.833・全6四半期で安定）と確定。isotonic は市場との Brier gap を 1.0% しか詰めず棄却。診断の素性別所見:
+Phase A 診断（ADR 0055 の follow-up・PR #319・`docs/specifications/feature-resolution-diagnosis.md`）で純モデルは **resolution 限定**（本命を見分けるランクが弱い。top1 0.162/市場0.333・AUC 0.649/市場0.833・全6四半期で安定）と確定。isotonic は市場との Brier gap を 1.0% しか詰めず棄却。診断の素性別所見:
 
 - **最大重み 2.0 の `course_gate` が最も識別力ゼロ**（レース内分散最小・複勝相関0.031≒無相関）。場×枠のベース率で同一レースの全馬がほぼ同値＝順位を作らないのに、最大重みで識別素性を希釈していた。
 - **主シグナルは `jockey_surface`**（leave-one-out で top1 を最も落とす素性, −0.040）・`trainer_surface`。
@@ -468,7 +468,7 @@ Phase A 診断（ADR 0055 の follow-up・PR #319・`knowledge/feature-resolutio
 
 - `weights.rs` の 2 定数変更。predict/backtest/EV 層すべてに純モデル重みとして反映。
 - Python ミラー（`feature_resolution_diag.py` の `STAT_FACTORS`）も production 重みに同期（忠実性 1.1e-16 で再確認）。
-- `knowledge/probability-estimation.md` の重み式を更新。
+- `docs/specifications/probability-estimation.md` の重み式を更新。
 - 関連: 0055（EV 層分離・純モデル化）/0027（精度の主レバー＝市場ブレンド）/0042（win-power）/0047（place/show 脱圧縮）/0012・#87（旧重みの根拠）。
 
 #### 再現
@@ -557,7 +557,7 @@ python3 scripts/predict-check/weight_sweep.py --tsv /tmp/pa/pure_new.tsv        
   - **scalar も無い馬（新馬等）**: 従来の `weight==0` → score 0.0 → 均等フォールバック（ADR 0014）が非到達になり、prior 相当のスコアで参加する。テスト `all_factors_missing_horse_imputes_to_weight_nonzero` で担保。
   - **scalar（recent_form 等）は present だが全 stat 欠落の馬**: drop 時は scalar 単独スコアだったが、補完後は中立 stat（field mean/prior）との加重平均になり scalar signal がやや希釈される。
 - 測定ツール `scripts/predict-check/impute_prototype.py`（掃引＋ `--verify-dump` 忠実性）。診断ツール `feature_resolution_diag.py`/`weight_sweep.py` は BEFORE 分解を記録する #319/#320 の成果物として不変（drop 母数の分解を保つ）。
-- `knowledge/probability-estimation.md` の欠落処理を更新。
+- `docs/specifications/probability-estimation.md` の欠落処理を更新。
 - 関連: 0055（EV 層分離・純モデル化）/0056（改善①重み再調整）/0027（精度の主レバー＝市場ブレンド）/0007・0014（欠落項の母数除外方針）/0053（学習モデル棄却）。
 
 #### 再現

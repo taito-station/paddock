@@ -671,7 +671,7 @@ python3 scripts/predict-check/live_ev.py \
 #### 関連
 
 - 現行ルール本体: CLAUDE.md「買い方ルール／レース選択基準」
-- [knowledge/betting-rule-history.md](betting-rule-history.md)
+- [docs/specifications/betting-rule-history.md](betting-rule-history.md)
 - #248（全開催の最終オッズ snapshot 保存）/ #249（EV ゲート較正検証）
 - ADR 0028（混戦オッズ条件の棄却・realized ROI baseline 83.9%）/ 0030 / 0033 / 0039（買い方の棄却記録群）
 
@@ -962,7 +962,7 @@ backtest の人気帯別校正（baseline）でも、この偏りが定量的に
   `RECOMMENDED_WIN_POWER = 1.25`。predict / backtest 両経路がブレンド後に `apply_win_power` を適用。
 - `analyze backtest --win-power <γ>` を追加（未指定 no-op、再 sweep 用）。`analyze predict` は production 固定。
 - 回帰ガード `production_config_is_shrinkage_m10_and_recency_off` に win_power=1.25 の固定を追加。
-- 仕様書 `knowledge/probability-estimation.md` にステップ 5 を追記。
+- 仕様書 `docs/specifications/probability-estimation.md` にステップ 5 を追記。
 
 #### 再現方法
 
@@ -1296,7 +1296,7 @@ python3 scripts/predict-check/umaren_backtest.py \
 - コード: `src/domain/src/portfolio/mod.rs` の券種内配分は均等割り（`distribute`）を維持。本 #272 では
   各買い目の**的中確率 `hit_prob` を算出・表示**する（判断材料）のみ追加し、配分は不変。
 - CLAUDE.md: 配分ルールは変更しない。
-- `knowledge/betting-rule-history.md` に棄却記録として追記。
+- `docs/specifications/betting-rule-history.md` に棄却記録として追記。
 
 #### 検証上の留保（結論の向きには影響しない）
 
@@ -1424,7 +1424,7 @@ python3 scripts/predict-check/kelly_compare.py --bt-dir /tmp/bt252
   #315（オッズの動き）/ #246（win 較正）/ #305（純モデル value 検証）
 - ADR 0003（EV・Kelly 配分の Rust 実装）/ ADR 0052・0053（α blend・学習モデルの棄却＝確率レバー枯渇）/
   ADR 0047・0050（favorite-longshot 較正不良）
-- `knowledge/betting-rule-history.md`（配分棄却履歴）/ memory `feedback_betting_staking`・
+- `docs/specifications/betting-rule-history.md`（配分棄却履歴）/ memory `feedback_betting_staking`・
   `project_alloc_floor_finding`
 
 ### ADR 0065: ワイド相手頭数を top5 に統一（doc↔実装の乖離解消 — top3/top5 は有意差なし） (2026-07-06) — 採用
@@ -1510,11 +1510,11 @@ top3 が僅かに上に見えたが、この窓は単勝 ROI 594% の**幸運な
 top5 へ統一しないと #347 が潰す乖離が別エンジンに残るため、これも top5 に揃える。
 
 - `CLAUDE.md`: 買い方ルール「相手の広さ」と「軸ロックとズレ増額」の 2 箇所を top5 統一に修正。
-- `knowledge/betting-rule-history.md`: 本計測を履歴（⑩）に追記（top3 の再提案防止）。
+- `docs/specifications/betting-rule-history.md`: 本計測を履歴（⑩）に追記（top3 の再提案防止）。
 - `scripts/predict-check/strategy_eval.py`: 券種別相手頭数フラグ `--wide-partners`（既定=`--partners` 追従＝
   後方互換）と多日集計用 `--json` 出力を追加。既存挙動（`--wide-partners` 未指定）は不変。
 - `scripts/predict-check/live_ev.py`: ライブ買い目のワイドを `wp = parts[:3]`（top3）→ `wp = parts`（top5）
-  に変更。ライブ伝票のワイドが軸込み 4 頭→6 頭になる。`knowledge/live-ev-buy-view.md` の
+  に変更。ライブ伝票のワイドが軸込み 4 頭→6 頭になる。`docs/specifications/live-ev-buy-view.md` の
   「wide top3」注記も top5 に更新。
 - テスト: `test_live_ev.py` に `test_wide_partners_top5`（ワイド nagashi=5 脚を固定＝top3 化の回帰を防ぐ）を追加。
   `test_strategy_eval.py` を新規追加し、`build_bets` の券種別相手頭数（ワイドだけ絞る／未指定は従来出力に帰着）

@@ -488,19 +488,19 @@ paddock は HVE（dahatake/HypervelocityEngineering, MIT）の 3 層蒸留モデ
 
 ##### 層の重複が実害を出している
 
-#568 の 4 点セット（docs-original / qa / knowledge / ADR、合計 515 行）を全文照合した結果（測定は #576 のマージ前に同 PR のブランチ上で実施。#576 マージ後は `knowledge/monitor-loop-sleep-resilience.md` と ADR 0072 として本リポジトリで参照できる）:
+#568 の 4 点セット（docs-original / qa / knowledge / ADR、合計 515 行）を全文照合した結果（測定は #576 のマージ前に同 PR のブランチ上で実施。#576 マージ後は `docs/knowledge/monitor-loop-sleep-resilience.md` と ADR 0072 として本リポジトリで参照できる）:
 
-- `knowledge/monitor-loop-sleep-resilience.md` の本文 103 行のうち **88 行（85%）が ADR 0072 と 1:1 対応**し、knowledge が追加した決定は **0 件**。固有の価値は運用者向けの読み方 6 行に集約されていた。
+- `docs/knowledge/monitor-loop-sleep-resilience.md` の本文 103 行のうち **88 行（85%）が ADR 0072 と 1:1 対応**し、knowledge が追加した決定は **0 件**。固有の価値は運用者向けの読み方 6 行に集約されていた。
 - 「5 秒刻みの根拠（DarkWake 累計 28 秒）」「単調時計で所要を測る理由」「JST 変換を持ち込まない理由」は、いずれも **qa / knowledge / ADR の 3 箇所に語順までほぼ同一**で存在した。
-- `qa/QA-analyze-384.md` の Q2/Q3 は回答文が **約 90% 逐語**で knowledge へ移送され、knowledge が足した固有情報は 1 行だった。
-- `docs-original/` 4 本はすべて **GitHub Issue 本文の 25〜38% を逐語コピー**していた。しかも #384 は「別 issue」→「#379・実装済」に改変、#389 は「現状」章を削除、#401 は「要件」章 4 項目を削除しており、**原本として機能していない**。
+- `docs/qa/QA-analyze-384.md` の Q2/Q3 は回答文が **約 90% 逐語**で knowledge へ移送され、knowledge が足した固有情報は 1 行だった。
+- `docs/docs-original/` 4 本はすべて **GitHub Issue 本文の 25〜38% を逐語コピー**していた。しかも #384 は「別 issue」→「#379・実装済」に改変、#389 は「現状」章を削除、#401 は「要件」章 4 項目を削除しており、**原本として機能していない**。
 - 同一の実測（`name=カップ` → starts=0）が **5 ファイル**に重複して存在した。
 
 ##### 蒸留層の権威が逆転している
 
-`qa/QA-setup-boilerplate-410.md` には「【追記・#453 で覆る】`NoopParser` / `NoopFetcher` スタブは削除された」とある。ところが蒸留先の `knowledge/app-bootstrap.md` は `status: Confirmed` のまま `NoopParser` の注入を推奨し続けている。コードを実測すると `NoopParser` はソースツリーに **1 件も存在しない**。
+`docs/qa/QA-setup-boilerplate-410.md` には「【追記・#453 で覆る】`NoopParser` / `NoopFetcher` スタブは削除された」とある。ところが蒸留先の `docs/knowledge/app-bootstrap.md` は `status: Confirmed` のまま `NoopParser` の注入を推奨し続けている。コードを実測すると `NoopParser` はソースツリーに **1 件も存在しない**。
 
-「qa は生ファイル、knowledge が確定知」という規約（[qa/README.md](../qa/README.md)）と実態が逆転しており、**knowledge を信じると存在しない API を書く**。`knowledge/README.md` の第 6 ステップ「sources 追従」は規約として存在するが、機械検査が無いため守られていない。
+「qa は生ファイル、knowledge が確定知」という規約（[docs/qa/README.md](../qa/README.md)）と実態が逆転しており、**knowledge を信じると存在しない API を書く**。`docs/knowledge/README.md` の第 6 ステップ「sources 追従」は規約として存在するが、機械検査が無いため守られていない。
 
 ##### 蒸留が日常開発に乗っていない
 
@@ -512,9 +512,9 @@ knowledge / specifications 22 本の `updated` は全件 2026-07-16〜07-30 に�
 
 #### 決定
 
-##### 1. ADR を `docs-original/` へ物理移動し、一次資料層に統合する
+##### 1. ADR を `docs/docs-original/` へ物理移動し、一次資料層に統合する
 
-ADR 71 本（0001〜0071）を `docs/adr/` から `docs-original/` へ移す。ディレクトリ `docs/adr/` は廃止する。
+ADR 71 本（0001〜0071）を `docs/adr/` から `docs/docs-original/` へ移す。ディレクトリ `docs/adr/` は廃止する。
 
 命名で 2 系統を分離する。**この規約が ADR 番号重複検出の判定根拠**になる。
 
@@ -530,7 +530,7 @@ ADR 71 本（0001〜0071）を `docs/adr/` から `docs-original/` へ移す。�
 1. **0 埋めを忘れた ADR**（`74-foo.md`）— 主判定の網から漏れて重複検出を無効化する。判定は H1 の書式ではなく**本文構造**（`## ステータス` と `## 決定` が、コードフェンスの外の行頭に同時存在）で行う。H1 は `# ADR 0001: …` と `# 0071. …` の 2 系統に割れているうえ、番号の桁数でマッチさせると 2 桁 ADR を取りこぼし、逆に一次資料の H1 が `# 401: …` 形式になると誤検知して CI を全停止させる。フェンスと行頭を絞るのは、docs-original が issue 本文や外部資料を逐語転記する層で、引用やコードフェンスの中に ADR 雛形が現れうるため。実測で ADR 72/72 がこの構造を満たし、一次資料 4/4 が満たさない。
 2. **ADR 0 件** — 従来の `exit 0`（fail-open）から `exit 1` へ。
 3. **旧 `docs/adr/` に ADR が置かれている** — 決定 1 の「統合前に分岐した PR」対策（下記「影響」参照）。判定はディレクトリ存在ではなく中の `*.md` の有無で行う（git は空ディレクトリを追跡しないので、空の `docs/adr` はローカル残骸でしか現れず、そこで落とすと pre-push が恒久的に詰まるだけ）。
-4. **サブディレクトリへの配置** — 走査は直下限定なので、`docs-original/adr/0001-x.md` のような階層を切られると重複検出・採番の両方から不可視になる。
+4. **サブディレクトリへの配置** — 走査は直下限定なので、`docs/docs-original/adr/0001-x.md` のような階層を切られると重複検出・採番の両方から不可視になる。
 
 いずれの致命チェックも **`check` だけでなく `next`（採番を配る経路）にも効かせる**。走査が壊れた状態で `next` が番号を返すと、既存 ADR と衝突する採番をそのまま配ってしまうため。番号の重複判定には「先頭の連続数字」をそのままキーに使い、規約外の桁数（`00401-*.md`）でも重複が漏れないようにする。
 
@@ -540,12 +540,12 @@ ADR 71 本（0001〜0071）を `docs/adr/` から `docs-original/` へ移す。�
 
 重複を許す代わりに、`sources` に列挙されたファイルの最終コミットが `distilled_from_sha` の子孫かを機械検査する（`git merge-base --is-ancestor`）。CI と pre-push の両方に配線する。
 
-検査には**例外を 2 つ**設ける（詳細と理由は [knowledge/README.md](README.md) の「sources 追従」）。素朴に実装すると本 ADR の移動自体で全件が誤検知するので、実装時に必ず織り込む。
+検査には**例外を 2 つ**設ける（詳細と理由は [docs/knowledge/README.md](README.md) の「sources 追従」）。素朴に実装すると本 ADR の移動自体で全件が誤検知するので、実装時に必ず織り込む。
 
 1. **rename-only のコミット（内容差分ゼロ）は比較対象から除外する**。`git log --follow` では吸収できない——`--follow` はリネームより前へ履歴を遡らせるだけで、「最終コミット」がリネームコミットになる事実は変わらないため、そのままだと本 ADR で `sources` パスを書き換えた 20 本すべてが stale 判定になる。
 2. **`status: Conflict` の宣言だけを足したときは `distilled_from_sha` を据え置く**（`updated` のみ bump）。乖離に気づいた記録であって再蒸留ではないため。`Confirmed` に戻すとき（＝実際に差分マージしたとき）に現 HEAD へ進める。
 
-**順序は「機械検査の配線が先、写しは後」**。写した量に比例して stale 面積が増えるのが本 ADR の出発点（`app-bootstrap.md` の事故）なので、担保のないまま 72 本ぶんの写しを始めると、解こうとしている問題を自分で拡大することになる。移行が完了するまでは knowledge だけでなく ADR 原本も読む運用とし、その旨を `CLAUDE.md` と `knowledge/README.md` に移行中ブロックとして明示する。
+**順序は「機械検査の配線が先、写しは後」**。写した量に比例して stale 面積が増えるのが本 ADR の出発点（`app-bootstrap.md` の事故）なので、担保のないまま 72 本ぶんの写しを始めると、解こうとしている問題を自分で拡大することになる。移行が完了するまでは knowledge だけでなく ADR 原本も読む運用とし、その旨を `CLAUDE.md` と `docs/knowledge/README.md` に移行中ブロックとして明示する。
 
 ##### 3. HVE の D01〜D21 文書クラスを採用し、D22〜D24 を追加する
 
@@ -576,24 +576,24 @@ D01〜D21 は番号・名称を変えず採用する（HVE との語彙互換を
 #### 却下した代替案
 
 - **ADR を `docs/adr/` に残し、位置づけの宣言だけ変える**。リンク破壊もツール改修もゼロで済み、mdq は `docs/adr` を索引済みなので検索体験も変わらない。実利/コスト比では最も良いが、ディレクトリ構成が 3 層モデルと一致しないままになる。**利用者の判断で物理移動を採用した**。
-- **`docs-original/adr/` へサブディレクトリとして移動**。生ログと ADR の混在を避けられるが、パス一斉改修のコストは同じで、階層深さが変わるぶん ADR 本文の相対リンク 17 件も書き換えが要る（フラット移動なら不要）。
+- **`docs/docs-original/adr/` へサブディレクトリとして移動**。生ログと ADR の混在を避けられるが、パス一斉改修のコストは同じで、階層深さが変わるぶん ADR 本文の相対リンク 17 件も書き換えが要る（フラット移動なら不要）。
 - **knowledge を「複数 ADR を横断するときだけ作る」に限定する**（＝ ADR 1 本に knowledge を作らない）。#568 の 85% 重複は消えるが、「今どうなっているか」を知るのに ADR と knowledge を往復することになる。読む入口の一本化を優先して却下した。
 - **D22〜D24 を作らず D06（業務ルール・判定表）/ D17（UAT）へ押し込む**。HVE と完全同一の 21 クラスを維持できるが、D06 の必須項目「判定表・override 承認者・発効/失効日・根拠規程」が予測モデル 31 本すべてで UNKNOWN になる。統計モデルに承認者も規程根拠も存在しない。
 - **D クラスをファイル名プレフィックス（`D08-*.md`）で表現する**（HVE 流）。`mdq --paths` で絞れる利点があるが、22 本のリネームで `sources` 参照が再度壊れる。`doc_class` + `tags` ミラーで同等の絞り込みが得られるため却下。
 
 #### 影響
 
-- **移動**: ADR 71 本が `docs/adr/` → `docs-original/`。`docs/adr/` は消滅。
+- **移動**: ADR 71 本が `docs/adr/` → `docs/docs-original/`。`docs/adr/` は消滅。
 - **変更（機械置換 187 箇所 / 33 ファイル）**: frontmatter `sources` のパス、本文の相対リンク、規約文。`git grep` / `git ls-files` に限定して実施した（`.claude/worktrees/` の並走 worktree 3 本がそれぞれ完全な `docs/adr/` を持つため、`grep -r` では別ブランチの作業コピーを破壊する）。
 - **変更**: `scripts/check-adr-numbers.sh`（走査先・ADR 分離・fail-closed 化）、`mdq.toml`（`docs/adr` root を削除。実体が消えているので `iter_markdown` の `base.exists()` で skip され残しても無害だが、死んだ設定は残さない）。
 - **追加**: `scripts/test-check-adr-numbers.sh`（fail-closed 分岐の回帰テスト）と CI `adr` ジョブへの配線。本番検査より**前**に走らせる（本番検査が落ちたとき、ADR が本当に重複しているのか判定器が壊れているのかを切り分けられるようにするため）。
 - **不変**: ADR の採番方式、CI ジョブ ID `adr`（ruleset #461 の必須チェックなので改名しない）。ADR 本文は 71 本中 **70 本がバイト同一**で移動した。唯一の例外は `0062-workout-cyokyo-feature-rejected.md` で、本文のコードブロック内に自ディレクトリの絶対パス表記（`docs/adr/0061`）があったため 1 行だけ機械置換の対象になっている。「ADR は改変しない」規約に対する意図的な例外——旧パスのまま残すとリンクではないにせよ存在しないディレクトリを指し続けるため、パス表記の正確性を優先した。
-- **運用**: 新しい ADR は `docs-original/0NNN-*.md` に置く（採番は `scripts/check-adr-numbers.sh next`）。issue 由来の一次資料は 0 埋めしない。mdq で ADR だけに絞るなら `--paths "docs-original/0*"`。既存の索引を持つ環境は一度だけ `rm -rf .mdq && scripts/mdq index` で作り直す（prune は roots 配下しか消さないため、旧 `docs/adr/*` のチャンクが居残る）。
+- **運用**: 新しい ADR は `docs/docs-original/0NNN-*.md` に置く（採番は `scripts/check-adr-numbers.sh next`）。issue 由来の一次資料は 0 埋めしない。mdq で ADR だけに絞るなら `--paths "docs/docs-original/0*"`。既存の索引を持つ環境は一度だけ `rm -rf .mdq && scripts/mdq index` で作り直す（prune は roots 配下しか消さないため、旧 `docs/adr/*` のチャンクが居残る）。
 - **統合前に分岐した PR への影響**: 本統合より前に分岐した PR が `docs/adr/` に新しい ADR を足していると、パスが異なるため git は競合を報告せず**どちらの順でマージしても無言で通る**。結果 `docs/adr/` が復活し、その ADR は `check-adr-numbers.sh` の走査先（`docs/docs-original`）から見えず番号重複検出が穴あきになる。これを防ぐため、**`docs/adr/` 配下に `*.md` が置かれていることを致命扱いにするガード**を同スクリプトに入れた（該当 PR がマージされた時点で CI が落ち、対処手順を出力する）。ディレクトリの存在ではなく中身で判定するのは、git が空ディレクトリを追跡しないため——空の `docs/adr` は `.DS_Store` 等が居るローカル環境でしか現れず、そこで落としても防ぎたい事故は何も防げずに pre-push が詰まるだけになる。
 
-実例: #576 が `docs/adr/0072-monitor-loop-wall-clock-sleep-resilience.md` を旧パスに追加した状態で先にマージされた。本統合を rebase したところ git が `file location` conflict として検出し（「rename されたディレクトリ内に追加された」）、0072 も本統合の移動対象に含めて解決した。あわせて `knowledge/monitor-loop-sleep-resilience.md` の `sources` と `deployments/launchd/README.md` のリンクを新パスへ追従させている。**git が conflict として拾えたのは rename を含むコミットを rebase したからで、マージ順序によっては無言で通る**——ガードはその場合の保険として残す。
+実例: #576 が `docs/adr/0072-monitor-loop-wall-clock-sleep-resilience.md` を旧パスに追加した状態で先にマージされた。本統合を rebase したところ git が `file location` conflict として検出し（「rename されたディレクトリ内に追加された」）、0072 も本統合の移動対象に含めて解決した。あわせて `docs/knowledge/monitor-loop-sleep-resilience.md` の `sources` と `deployments/launchd/README.md` のリンクを新パスへ追従させている。**git が conflict として拾えたのは rename を含むコミットを rebase したからで、マージ順序によっては無言で通る**——ガードはその場合の保険として残す。
 - **後続（追跡: [#579](https://github.com/taito-station/paddock/issues/579)）**: stale 機械検査と D クラス体系（PR2）、プロダクト目標と REQ-ID 規約（PR3）、質問票 skill の汎用改修（PR4・dotclaude 側）。既存 ADR の REQ-ID 遡及紐付けと knowledge への全写しの実施は段階的に進める。**写しは機械検査の配線後**（順序は決定 2 参照）。
-- 関連: #254（ADR 番号重複検出）／ADR 0064（second source を戒める）／[knowledge/README.md](README.md)（蒸留規約の正）。
+- 関連: #254（ADR 番号重複検出）／ADR 0064（second source を戒める）／[docs/knowledge/README.md](README.md)（蒸留規約の正）。
 
 #### 再現方法
 
@@ -617,7 +617,7 @@ git grep -nE '^  - docs/adr/' -- docs         # frontmatter sources     → 0 �
 
 # mdq 再索引と ADR 絞り込み
 scripts/mdq index
-scripts/mdq search --q "EV 層分離" --paths "docs-original/0*" --top-k 3
+scripts/mdq search --q "EV 層分離" --paths "docs/docs-original/0*" --top-k 3
 ```
 
 ### ADR 0081: `uses:` のピン留め SHA 更新だけの差分は「内容変更」と見なさない (2026-08-13) — 承認済み
@@ -632,7 +632,7 @@ ADR 0077（`sources` の範囲。frontmatter を持たない
 
 #### コンテキスト
 
-`.github/workflows/ci.yml` は [knowledge/ci-pipeline.md](ci-pipeline.md) の
+`.github/workflows/ci.yml` は [docs/knowledge/ci-pipeline.md](ci-pipeline.md) の
 `sources` に入っている。ジョブ分割の設計意図を書いた文書なので、ワークフローが変わったら追従を
 促すのは正しい。問題は**追従が必要な変更とそうでない変更を区別できていない**ことだった。
 
@@ -664,7 +664,7 @@ ADR 0077（`sources` の範囲。frontmatter を持たない
 #### 決定
 
 **`uses:` 行のピン留め SHA 更新だけの差分を、stale 検査の「内容変更」から外す**
-（[knowledge/README.md](README.md) の**例外 1d**）。
+（[docs/knowledge/README.md](README.md) の**例外 1d**）。
 
 判定は `scripts/check-doc-classes.py` の `is_pin_only_change(sha, path)` が行い、
 `last_content_change` が例外 1 / 1b と同じ位置で呼ぶ（該当コミットを飛ばして実質の変更点まで遡る）。
@@ -1018,7 +1018,7 @@ stale 検査が永久に気づかない）なので、まず実際に起こり�
 検出した（`MM` / `MA` / `AA`）。**不可視は 0 組**。
 
 evil merge は現に起きている——例えば `8ec61a18`（#613 の main 取り込み）は、コンフリクトを
-手で解決して**どちらの親にも無い内容**を作っており、`qa/QA-sources-coverage-checks-596.md`
+手で解決して**どちらの親にも無い内容**を作っており、`docs/qa/QA-sources-coverage-checks-596.md`
 が `MA` で検出されて `last_content_change` はそのマージを返した。PR ブランチが main を
 取り込んでコンフリクトを解消する運用がある以上、evil merge は日常的に発生する。
 
@@ -1093,7 +1093,7 @@ evil merge は現に起きている——例えば `8ec61a18`（#613 の main �
    `RR` として出す（`R100` ではない）ので免除分岐に当たらず、リネーム元も取れない。
    `test_rename_inside_merge_is_treated_as_content_change` で**現状の挙動として** pin する。
 4. **ADR 0081 の「既知の限界 (1)」は誤りとして訂正する。** ADR は不変なので 0081 の本文は
-   書き換えず、本 ADR と `knowledge/ci-pipeline.md` の写しが正になる。
+   書き換えず、本 ADR と `docs/knowledge/ci-pipeline.md` の写しが正になる。
    0081 の「既知の限界 (2)」（CRLF で例外 1d が効かない）は**有効なまま**。
 
 #### 理由
@@ -1155,7 +1155,6 @@ python3 scripts/test-check-doc-classes.py
 # 本リポジトリでの実測（マージ × sources パスのうち不可視が 0 件であること）
 # … git log -- <path> が列挙したマージに path_status を当てて数える
 ```
-
 ### ADR 0092: 蒸留層ディレクトリを hve-playbook 標準に統一する (2026-09-21) — 承認済み
 
 #### コンテキスト
@@ -1176,6 +1175,11 @@ paddock は蒸留層を `docs/knowledge/`, `docs/specifications/`, `docs/qa/`, `
 6. 全参照（Python スクリプト・テスト・CLAUDE.md・frontmatter sources・本文内リンク・Rust doc comments・mdq.toml）を新パスへ一括更新
 7. `.claude/rules/hve/*` を hve-playbook 最新版に同期（knowledge-maturity.md 新規追加含む）
 8. `.claude/skills/hve-akm/` を hve-playbook から新規導入（汎用 AKM パイプライン）
+9. **既存の決定ログは書き換えない。** 移動前からあるエントリの本文は旧パス表記（`docs/knowledge/…` 等）の
+   まま歴史として残し、リンク切れを防ぐために**相対リンクのリンク先だけ**を新レイアウトへ追従させる。
+   本文（決定ログ以外）の記述とパスは新レイアウトに合わせる
+10. 本 ADR は [README.md](README.md) 決定ログ「ADR 0055」の「`docs/specifications/` は物理移動しない」を
+    supersede する（同エントリは append-only のため書き換えない）
 
 #### 理由
 
@@ -1193,3 +1197,7 @@ paddock は蒸留層を `docs/knowledge/`, `docs/specifications/`, `docs/qa/`, `
 - `mdq.toml` の roots が `knowledge/`, `qa/`, `docs-original/` に変更——セッション開始時に `rm -rf .mdq && scripts/mdq index` で索引再構築が必要
 - `check-doc-classes.py`, `check-decision-log-immutability.py`, `bump-distilled-sha.py` の TARGET_DIRS が `("knowledge",)` に統一
 - `knowledge/README.md` の「knowledge はどこにあるか」節を新構成に合わせて更新
+- **この PR では `check-decision-log-immutability.py` が既存エントリを検査できない**（比較先の旧パスが
+  rename で消えるため「0 本検査」になる）。代わりに、main の `docs/knowledge/`・`docs/specifications/` 配下の
+  全決定ログエントリと移動後の同名エントリを突き合わせ、差分が相対リンクのリンク先だけであることを確認した
+  （2026-09-27・main 取り込み時）。以後の PR は新パス同士の比較になるので通常どおり検査される

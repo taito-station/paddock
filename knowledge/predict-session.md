@@ -617,7 +617,7 @@ Issue #12 の実装（PR #19、main にマージ済み）で Domain 層の EV �
 
 #### 関連
 - ADR 0001（JRA オッズスクレイパー実装, #10）
-- 設計書 `knowledge/predict-session.md`
+- 設計書 `docs/specifications/predict-session.md`
 
 ### ADR 0013: 予想セッションの馬場入力を永続化し再現可能にする (Issue #80) (2026-06-12) — 承認済み
 
@@ -693,7 +693,7 @@ Issue #12 の実装（PR #19、main にマージ済み）で Domain 層の EV �
 #### 関連
 - ADR 0011（馬場状態を確率推定に接続 / 対話入力の導入）— 本 ADR が永続化を補完
 - #73 / PR #79（レビュー対応履歴の 2 巡目・5 巡目）
-- 設計書 `knowledge/predict-session.md`
+- 設計書 `docs/specifications/predict-session.md`
 
 ### ADR 0085: predict CLI の発走済み表示は `post_time` 経過で判定し、除外せず区別する (2026-08-15) — 承認済み
 
@@ -852,7 +852,7 @@ Issue #12 の実装（PR #19、main にマージ済み）で Domain 層の EV �
   [#391](https://github.com/taito-station/paddock/issues/391)（`post_time` を一次ソースにする方針）/
   [#381](https://github.com/taito-station/paddock/issues/381)（SPA の ⚫終＝結果確定判定）
 - ADR 0072（`classify` が日付を持たない件の出所）
-- [qa/QA-overview-post-time-587.md](../qa/QA-overview-post-time-587.md)
+- [docs/qa/QA-overview-post-time-587.md](../qa/QA-overview-post-time-587.md)
 
 ### ADR 0087: 発走済みレースへの買い目記録は確認を挟む（禁止はしない） (2026-08-16) — 承認済み
 
@@ -1015,7 +1015,7 @@ ADR 0085 の決定 2「除外ではなく区別」を**維持したまま**、
 - [#551](https://github.com/taito-station/paddock/issues/551)（`--overview`）/ [#479](https://github.com/taito-station/paddock/issues/479)（`--skip-all`）/
   [#179](https://github.com/taito-station/paddock/issues/179)（EOF を安全側へ畳む）
 - ADR 0064（判定ロジックの second source を作らない）
-- [qa/QA-started-race-record-confirm-623.md](../qa/QA-started-race-record-confirm-623.md)
+- [docs/qa/QA-started-race-record-confirm-623.md](../qa/QA-started-race-record-confirm-623.md)
 
 ### #624: --overview の過去日で read-through を抑制する (2026-08-23) — 承認済み
 

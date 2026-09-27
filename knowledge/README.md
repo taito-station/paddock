@@ -343,7 +343,7 @@ updated: "YYYY-MM-DD"    # 内容を実質更新した日（YAML の date 型を
 
 #### コンテキスト
 
-`docs-original/` は「読み取り専用の一次資料（RO）」の層で、蒸留の出発点を固定するために置いている。
+`docs/docs-original/` は「読み取り専用の一次資料（RO）」の層で、蒸留の出発点を固定するために置いている。
 ところが issue 由来の一次資料 4 本は、いずれも **GitHub Issue 本文を逐語転記した章**を先頭に持っていた。
 
 ADR 0073 のために全文照合したところ、実測は次のとおりだった。
@@ -360,7 +360,7 @@ GitHub 上で issue 本文が編集されても git には何も現れないた�
 
 #### 決定
 
-**`docs-original/` に GitHub Issue 本文を転記しない。** 原本は GitHub Issue とし、リポジトリ側は
+**`docs/docs-original/` に GitHub Issue 本文を転記しない。** 原本は GitHub Issue とし、リポジトリ側は
 **リンクと取得コマンドの数行だけ**を置く。
 
 ```markdown
@@ -446,7 +446,7 @@ ADR を独立した文書種別として廃止し、決定・理由・却下案�
 
 #### 影響
 
-- docs-original/ には非 ADR の一次資料（実測ログ・issue 由来）11 本のみ残る
+- docs/docs-original/ には非 ADR の一次資料（実測ログ・issue 由来）11 本のみ残る
 - 旧 ADR 番号（ADR 0001〜0090）は各ファイルの決定ログ見出しから検索可能
 - check-adr-numbers.sh / check-doc-classes.py の orphan 検査は撤去
 - 新規の決定は知識文書の決定ログ節に直接 append する（ADR ファイルは作らない）
@@ -473,7 +473,7 @@ HVE AKM の原則を Claude Code のエコシステム（CLAUDE.md ルール + s
    4 ステップを 1 コマンドで実行。蒸留対象 3 本以上はサブエージェント委譲。
 3. **SessionStart hook**: セッション開始時に `bump-distilled-sha.py --all-stale --dry-run` を実行し、
    stale があれば件数とファイルを報告する。
-4. **PostToolUse hook**: `docs-original/` または `qa/` の Write/Edit 時に、影響する
+4. **PostToolUse hook**: `docs/docs-original/` または `docs/qa/` の Write/Edit 時に、影響する
    knowledge を警告する。
 
 #### 理由
@@ -500,7 +500,7 @@ HVE AKM の原則を Claude Code のエコシステム（CLAUDE.md ルール + s
 
 - **新規ファイル**: `.claude/settings.json`（hooks）、`.claude/skills/akm/`（SKILL.md + references/）、
   `scripts/hooks/`（session-stale-check.sh + check-knowledge-impact.py）
-- **変更ファイル**: `CLAUDE.md`（「knowledge 参照・更新の規律」節追加）、`knowledge/README.md`
+- **変更ファイル**: `CLAUDE.md`（「knowledge 参照・更新の規律」節追加）、`docs/knowledge/README.md`
   （本文に AKM 参照追加 + 本決定ログ）
 - **運用**: 全セッションで stale 報告が自動化される。source 編集時に蒸留漏れが警告される。
   `/akm` で定期メンテナンスを一括実行できる
@@ -552,8 +552,8 @@ knowledge を警告する PostToolUse hook（check-knowledge-impact.py）が #67
 
 #### 決定
 
-check-knowledge-impact.py に SoT 逆転検出を追加する。knowledge/
-への Write/Edit を検知し、そのファイルの frontmatter に `sources` が
+check-knowledge-impact.py に SoT 逆転検出を追加する。docs/knowledge/ または
+docs/specifications/ への Write/Edit を検知し、そのファイルの frontmatter に `sources` が
 あれば「上流 sources を先に更新し蒸留で反映してください」と警告する。決定ログの追記は
 対象外（決定ログは knowledge 側に直接書く正当な操作）。あわせて本 hook と
 session-stale-check.sh のユニットテストを新設し CI に組み込んだ（#680）。

@@ -182,4 +182,4 @@ model-only の的中率は単勝 -0.7・連対 -1.4・複勝 -3.0 ポイント�
 #### 関連
 - ADR 0007（単調性・欠落項の母数除外）/ ADR 0011（実績なし ≠ 全敗の区別）— 本 ADR が全 factor へ拡張
 - ADR 0006（バックテスト評価基盤）/ #52（校正指標）/ #72（市場オッズブレンド）
-- #73(PR #79)（検出元）/ 設計書 `knowledge/probability-estimation.md`
+- #73(PR #79)（検出元）/ 設計書 `docs/specifications/probability-estimation.md`

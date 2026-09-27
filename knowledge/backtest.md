@@ -587,8 +587,8 @@ Issue #11 で `estimate_probabilities` が Domain 層に実装済みであり、
 #### 関連
 - ADR 0002（着順確率推定モデル, #11）— 評価対象のロジック
 - ADR 0003（EV/Kelly 買い目選択, #12）/ ADR 0005（オッズ結線, #25）— 将来の回収率評価対象
-- 設計書 `knowledge/backtest.md`
-- 設計書 `knowledge/probability-estimation.md`
+- 設計書 `docs/specifications/backtest.md`
+- 設計書 `docs/specifications/probability-estimation.md`
 
 ### #703: fit/eval 窓の凍結と対市場計測器（CORP/ΔR²）の導入 (2026-09-22) — 承認済み
 

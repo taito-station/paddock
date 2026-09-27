@@ -342,7 +342,7 @@ CLAUDE.md「買い方ルール」（混戦判定・相手幅・配分）の一�
 - **新規**: Postgres テーブル `live_ev_snapshots`（マイグレーション）／`live_ev.py --emit-json`（＋テスト）／`refresh_ev.sh` に永続化ステップ（**→ 追補（#346）で退役。writer は Rust `predict-watch`**）／read API `GET /api/live/{date}`（rest-controller・use-case・rdb-gateway・api-server の 4 層）＋ **OpenAPI を一級成果物とする**（utoipa コードファースト＋`openapi.json` スナップショット更新・検証を DoD 化）／SPA `LiveBets` ビュー 1 画面。
 - **不変**: `live_ev.py` の計算ロジック（買い方ルール・ROI・混戦判定）／既存 `/api/races/{race_id}/recommendations`（`recommend_bets()`→`build_portfolio()`）／確率モデル・EV 層（ADR 0055）／予算・配分（ADR 0046）。
 - ライブ監視の運用が「ターミナル＋手写し md」から「UI 一望」へ移行し、最新サイクル散逸・前サイクル混入のヒューマンエラーが消える。あくまで decision-support（ADR 0055/0060）で、張る/見送り/増額の最終判断・軸ロックは人間側に残る。
-- 関連: 0028・0030（混戦判定・相手幅）／0046（配分・floor）／0055（EV 層分離・decision-support）／0060（軸ロック＝ズレ増額のみ）。設計詳細は [knowledge/live-ev-buy-view.md](live-ev-buy-view.md)。
+- 関連: 0028・0030（混戦判定・相手幅）／0046（配分・floor）／0055（EV 層分離・decision-support）／0060（軸ロック＝ズレ増額のみ）。設計詳細は [docs/specifications/live-ev-buy-view.md](live-ev-buy-view.md)。
 
 #### 追補（#346・2026-07 / ライブ writer を Rust に一本化）
 

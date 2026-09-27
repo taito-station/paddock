@@ -511,7 +511,7 @@ margin と同じ制約。netkeiba 近走の取り込みが進めば寄与は拡�
 #### 関連
 - ADR 0002（着順確率推定モデル, #11）/ ADR 0007（単調性・騎手是正, #32）— 本 ADR が拡張
 - ADR 0006（バックテスト評価基盤, #30）— 重み検証に使用
-- 設計書 `knowledge/probability-estimation.md`
+- 設計書 `docs/specifications/probability-estimation.md`
 
 ### ADR 0016: 少データ馬のベイズ縮約と直近成績のリーセンシー重み付け (Issue #75) (2026-06-13) — 承認済み
 
@@ -609,7 +609,7 @@ predict の追加コストはゼロ）、機構と CLI フラグのみ残す。
 #### 関連
 - ADR 0002（スタッツ希薄→`win_prob=0`）/ ADR 0014（None 母数除外）/ ADR 0007（単調性・欠落項除外）
 - ADR 0006（バックテスト評価基盤）/ #52（校正指標）/ #31・ADR 0009（前走フォーム）/ #72（市場ブレンド）
-- 設計書 `knowledge/probability-estimation.md`
+- 設計書 `docs/specifications/probability-estimation.md`
 
 ### ADR 0017: 騎手 factor 専用ベイズ縮約の評価と見送り (Issue #105) (2026-06-14) — 承認済み
 
@@ -672,7 +672,7 @@ predict の追加コストはゼロ）、機構と CLI フラグのみ残す。
 #### 関連
 - ADR 0016（ベイズ縮約 m=10 / recency 見送り）/ ADR 0006（バックテスト評価基盤）/ #52（校正指標）
 - #103（馬個体の過去走データ経路）/ #113（馬場別セグメント backtest）
-- 設計書 `knowledge/probability-estimation.md`
+- 設計書 `docs/specifications/probability-estimation.md`
 
 ### ADR 0035: recent_form_weight 再チューニング — 棄却 (2026-06-24) — 棄却
 

@@ -188,7 +188,7 @@ ADR 0073 が置いた文書クラス D01〜D24 のうち、**D07（用語集・�
 索引にする**か。前者は読みやすいが、同じ定義が 2 箇所に生まれ、片方だけ更新されても機械検査は
 検出できない（ADR 0064 が警告した二重実装と同型）。
 
-もう 1 つ、`sources` の扱いに未定義の領域があった。[knowledge/README.md](README.md)
+もう 1 つ、`sources` の扱いに未定義の領域があった。[docs/knowledge/README.md](README.md)
 の frontmatter 規約は `sources` を「由来（ADR / qa / docs-original のパス）」と定義していたが、実際には
 確定知層の仕様書を `sources` に取る文書が既に 3 本ある（`live-freshness-calibration.md` /
 `analyze-search-and-state.md` / `race-card-display-metadata.md`）。用語集は性質上、**定義の所在＝確定知層**
@@ -196,14 +196,14 @@ ADR 0073 が置いた文書クラス D01〜D24 のうち、**D07（用語集・�
 
 #### 決定
 
-1. **用語集（[knowledge/glossary.md](glossary.md)）は「定義の正本を指す索引」に徹する。**
+1. **用語集（[docs/knowledge/glossary.md](glossary.md)）は「定義の正本を指す索引」に徹する。**
    各語に置くのは 1 行の要約と正本へのリンクだけで、定義を書き下ろさない。**要約と正本が食い違ったら
    正本が正**とし、用語集を直す。値（本番の α・m・γ、混戦の閾値など）は書いてよいが、
    **その値を所有する正本（要件として固定されたものは REQ-ID、既定値は仕様書の節）を必ず併記する**。
 
-2. **`sources` に確定知層（`knowledge/`）を取ってよい。**
+2. **`sources` に確定知層（`docs/specifications/` / `docs/knowledge/`）を取ってよい。**
    判定基準は「**その文書の本文が動いたら、こちらの要約の見直しが要る関係にあるか**」。
-   `knowledge/*.md` を `sources` に取るのは本 ADR が初例（ディレクトリ統合前は `docs/specifications/*.md` に先例があった）。
+   `docs/knowledge/*.md` を `sources` に取るのは本 ADR が初例（`docs/specifications/*.md` は先例あり）。
    README の frontmatter 規約もこれに合わせて明文化する。
 
 3. **`CLAUDE.md` は `sources` に入れない。** 正本列で指すに留める。理由は 2 つ:

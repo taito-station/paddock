@@ -556,7 +556,7 @@ ADR 0002 で実装した着順確率推定 (`paddock_domain::prediction`) に 2 
 - ADR 0002（着順確率推定モデル, #11）— 本 ADR が決定 #3 と既知制約を supersede
 - ADR 0003（EV/Kelly 買い目選択, #12）/ ADR 0005（オッズ結線, #25）— 複勝 EV の改善対象
 - ADR 0006（バックテスト評価基盤, #30）— 効果測定に使用
-- 設計書 `knowledge/probability-estimation.md`
+- 設計書 `docs/specifications/probability-estimation.md`
 
 ### ADR 0011: 確率推定に馬場状態(track_condition)別の馬成績を接続 (Issue #73) (2026-06-10) — 承認済み
 
@@ -649,7 +649,7 @@ ADR 0002 で実装した着順確率推定 (`paddock_domain::prediction`) に 2 
 - ADR 0002（着順確率推定モデル）/ ADR 0007（単調性・欠落項の扱い）— 本 ADR が拡張
 - ADR 0009（前走フォーム特徴量）— Optional 項追加・backtest 重み決定の前例
 - ADR 0006（バックテスト評価基盤）— 重み検証に使用 / ADR 0010・#72（市場オッズブレンド）
-- 設計書 `knowledge/probability-estimation.md`
+- 設計書 `docs/specifications/probability-estimation.md`
 
 ### ADR 0061: 脚質（先行度）factor は winner-picking に効かず（棄却） (2026-07-02) — 棄却
 

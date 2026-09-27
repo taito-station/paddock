@@ -637,7 +637,7 @@ api-server のみ（predict-watch は `refresh_race_odds` で毎回再スクレ�
 - ADR 0005（predict にオッズを結線, #25）— 本 ADR が案B を限定的に復活させる
 - Issue #28（race_odds テーブル・単勝永続化, PR #56）
 - Issue #38（組合せ券種の combination_key 規約・取得）
-- 設計書 `knowledge/netkeiba-datasource.md` / `predict-session.md` / `backtest.md`
+- 設計書 `docs/specifications/netkeiba-datasource.md` / `predict-session.md` / `backtest.md`
 
 ### ADR 0048: ライブオッズ取得を JRA から netkeiba へ統一し odds-scraper を撤去 (Issue #287) (2026-06-28) — 承認済み
 
@@ -1062,7 +1062,7 @@ EV は `的中確率 × オッズ`（`leg_metrics`）なので、**1 点で EV �
 - ADR 0076 /
   ADR 0079（参考 ROI の読み方）
 - ADR 0085（言語をまたぐ契約を golden で結ぶ前例）
-- [qa/QA-odds-sentinel-621.md](../qa/QA-odds-sentinel-621.md)
+- [docs/qa/QA-odds-sentinel-621.md](../qa/QA-odds-sentinel-621.md)
 
 ### ADR 0088: netkeiba の未発売番兵は券種別に判定する (2026-08-18) — 承認済み
 
@@ -1168,7 +1168,7 @@ ADR 0086 は「`OddsValue` は券種を知らない」ため判定を全券種�
 - ADR 0085（言語をまたぐ契約を golden で結ぶ前例）
 - [#632](https://github.com/taito-station/paddock/issues/632) /
   [#633](https://github.com/taito-station/paddock/issues/633)（未発売の観測記録。本 ADR の券種付き判定 API の上に乗る）
-- [qa/QA-odds-sentinel-scope-630-634.md](../qa/QA-odds-sentinel-scope-630-634.md)
+- [docs/qa/QA-odds-sentinel-scope-630-634.md](../qa/QA-odds-sentinel-scope-630-634.md)
 
 ### ADR 0089: 未発売と確認できた券種を観測として記録し、read-through の cache-hit に織り込む (2026-08-19) — 承認済み
 
@@ -1443,7 +1443,7 @@ DELETE・ADR 0089 決定 8）であり、「いつ未発売で、いつ発売さ
 #### 影響
 
 - **コード・スキーマの変更は無い。** 本 ADR は文書の確定のみ
-  （`knowledge/netkeiba-datasource.md` の番兵の節と QA へ写す）。
+  （`docs/specifications/netkeiba-datasource.md` の番兵の節と QA へ写す）。
 - ADR 0086 決定 3・ADR 0089 の各決定はそのまま有効。
 - 将来、観測表を時系列化する場合はこの ADR の決定 3 を起点に別 ADR を切る。
 
@@ -1453,4 +1453,4 @@ DELETE・ADR 0089 決定 8）であり、「いつ未発売で、いつ発売さ
 - ADR 0088（読み出し無害化の券種スコープ）
 - ADR 0089（観測表。本 ADR の「今後分」の実体）
 - [#649](https://github.com/taito-station/paddock/issues/649)（実地計測。時系列化の要否の判断材料）
-- [qa/QA-odds-record-policy-633.md](../qa/QA-odds-record-policy-633.md)
+- [docs/qa/QA-odds-record-policy-633.md](../qa/QA-odds-record-policy-633.md)

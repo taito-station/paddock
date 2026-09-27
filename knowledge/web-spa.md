@@ -213,7 +213,7 @@ spec が `Confirmed` のまま実装と矛盾していると、spec を「運用
 
 - 実装側を revert して spec に合わせる: CLAUDE.md の予想ワークフロー規律に反するため却下。
 - ADR 0071（Topcoat 棄却）を `sources` に追加する（issue 原文の要件）: ADR 0071 は #652 で
-  `knowledge/product-goals.md` の決定ログに移行済みで旧パス `docs/adr/0071-...` は存在しない。
+  `docs/knowledge/product-goals.md` の決定ログに移行済みで旧パス `docs/adr/0071-...` は存在しない。
   本 spec は一次仕様書であり `sources` / `distilled_from_sha` を持たない設計のため、ADR 0071 は
   本決定ログから番号参照するに留める。
 

@@ -278,20 +278,20 @@ ADR 0073 は「ADR の内容は knowledge へ全部写す。重複を許す代�
 
 `scripts/check-doc-classes.py` に検査を 2 つ足し、例外は文書側で宣言する。
 
-1. **orphan ADR 検査 [error]**（#596）。`docs-original/` の **0 埋め 4 桁の ADR**（判定の
+1. **orphan ADR 検査 [error]**（#596）。`docs/docs-original/` の **0 埋め 4 桁の ADR**（判定の
    述語は決定 4）を列挙し、
    全 knowledge / specifications の `sources` の和集合に含まれないものを error にする。
    issue 由来の一次資料（`382-...` のように 0 埋めしない番号）は蒸留先を持つとは限らないので対象外。
 
 2. **REQ 出典 ⊆ sources 検査 [error]**（#597）。REQ 表の `出典` セルが名指しした
-   **`docs-original/` 配下のファイル**が、その文書の frontmatter の `sources` に無ければ error。
+   **`docs/docs-original/` 配下のファイル**が、その文書の frontmatter の `sources` に無ければ error。
    GitHub issue の絶対 URL など**リポジトリ外の参照は対象外**（一次資料ファイルではないので
    `sources` に載せられない）。knowledge / specifications 同士の相互参照も対象外
    （蒸留元ではなく相互リンクなので、`sources` に載せる筋合いが無い）。
    基準パスは**リポジトリルート相対に正規化**して比較する（`出典` 列は文書からの相対、
    `sources` はルート相対で、片方に寄せないと必ず食い違う）。
 
-3. **例外は `knowledge/doc-classes.md` のマーカー付き宣言表で持つ。**
+3. **例外は `docs/knowledge/doc-classes.md` のマーカー付き宣言表で持つ。**
    `<!-- adr-orphan-exceptions:begin -->` … `:end` の 2 列表（`| ADR | 例外の理由 |`）に、
    **理由を必須**で書く。パスは `sources` と同一形式（リポジトリルート相対）にする。
    現時点の登録は **ADR 0074 の 1 本のみ**——文書運用の規約そのものを定めた ADR で、
@@ -330,7 +330,7 @@ ADR 0073 は「ADR の内容は knowledge へ全部写す。重複を許す代�
 
 **機械化できたのは「`sources` への登録」までで、「knowledge へ写したか」ではない。**
 ADR を任意の文書の `sources` に 1 行足せば検査 12 は通る（実際
-`knowledge/product-goals.md` は 34 本の ADR を索引目的で `sources` に並べている）。
+`docs/knowledge/product-goals.md` は 34 本の ADR を索引目的で `sources` に並べている）。
 **写しの中身——決定・理由・却下案・影響を実際に書いたか——は人手の規律に残る。**
 ADR 0073 決定 2 の担保としては部分的で、ここを誇張して書くと
 「機械が見ているから大丈夫」という誤った安心を生む。
@@ -343,10 +343,10 @@ REQ `出典` に載っていなければ検査 11 も鳴らない。**塞げた�
 「REQ が根拠として名指しした出典」だけ**で、中間——本文が根拠にしているが REQ 表の外にある参照——は
 人手の規律に残る。
 
-**検査 11 と 12 でスコープが非対称**なのも意図的。11 は `docs-original/` 配下**全体**
+**検査 11 と 12 でスコープが非対称**なのも意図的。11 は `docs/docs-original/` 配下**全体**
 （issue 由来の一次資料も蒸留元なので）、12 は **0 埋め 4 桁 ADR だけ**（issue 由来の一次資料は
 調査所見の置き場で、蒸留先を持つとは限らない）。この結果、導入時点で非 ADR 一次資料 1 本
-（`601-axis-flip-in-predict-watch.md`）と `qa/` の 2 本（`QA-axis-lock-601.md` /
+（`601-axis-flip-in-predict-watch.md`）と `docs/qa/` の 2 本（`QA-axis-lock-601.md` /
 `QA-roi-gate-calibration-571.md`。各層の `README.md` は数えない）がどの `sources` からも
 参照されていないが、これらは検査対象外なので鳴らない。
 
@@ -355,7 +355,7 @@ REQ `出典` に載っていなければ検査 11 も鳴らない。**塞げた�
 なった（塞いだ「`sources` から行を消す」より安い）。ここを error にしなかったのは、
 既存の出典に `ADR 0001` のような素のテキスト表記と外部 URL のみの行が実在し、
 一律必須にすると本題と無関係な修正を大量に強いるため。**残る穴として
-`knowledge/README.md` の「機械検査できない」リストに明記する**。
+`docs/knowledge/README.md` の「機械検査できない」リストに明記する**。
 
 #### 理由
 
@@ -400,7 +400,7 @@ REQ `出典` に載っていなければ検査 11 も鳴らない。**塞げた�
 
 - **変更**: `scripts/check-doc-classes.py` に検査 11（REQ 出典 ⊆ sources）と 12（orphan ADR）を追加。
   docstring 冒頭の検査項目リストも更新する。
-- **変更**: `knowledge/doc-classes.md` に `adr-orphan-exceptions` マーカーブロックと
+- **変更**: `docs/knowledge/doc-classes.md` に `adr-orphan-exceptions` マーカーブロックと
   本 ADR の写しを追加する。`scripts/test-check-doc-classes.py` の `REGISTRY_TEMPLATE` にも
   同じマーカーが要る（`extract_block()` はマーカー欠落で `sys.exit` する fail-closed のため）。
 - **運用の変更**: **ADR を新設したら、同じ PR でどこかの knowledge / specifications の `sources` に
@@ -464,7 +464,7 @@ paddock の規模・運用形態では独立文書にする実利がない。che
 
 - D05: ユースケースは CLAUDE.md の予想ワークフローと README.md が最も近いが、UC カタログの形では独立していない。個人プロジェクトの規模では不要
 - D16: 個人プロジェクトで移行・ロールアウト計画を独立文書にする規模ではない。DB マイグレーション運用は ADR 0070 に記載
-- D18: LLM への入力統制は knowledge/README.md（2 層モデル・SoT 優先順位）と CLAUDE.md が担っており、独立したガバナンス文書にする規模ではない
+- D18: LLM への入力統制は docs/knowledge/README.md（2 層モデル・SoT 優先順位）と CLAUDE.md が担っており、独立したガバナンス文書にする規模ではない
 
 #### 却下した代替案
 

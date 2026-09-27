@@ -930,7 +930,7 @@ scripts/harness/.venv/bin/python scripts/harness/train_gbm.py scripts/harness/da
 - Issue: #309（学習型 fundamental モデル・本検証）/ #272（予測フロー再設計・親）/ #305（純モデル value 検証, close 済み）
 - ADR: 0027（精度のレバーは市場ブレンド）/ 0052（α blend 廃止＝純モデル化の棄却）/ 0042（win_power）/
   0047・0050・0051（place/show の中央圧縮＝raw_score 構造由来の校正課題）
-- 設計: `knowledge/learned-model-harness.md`（3層＋サービングのハーネス設計、Phase A=③忠実性サニティ）
+- 設計: `docs/specifications/learned-model-harness.md`（3層＋サービングのハーネス設計、Phase A=③忠実性サニティ）
 
 ### ADR 0055: EV 層分離（循環断ち）— 順位付けは blended・EV は純モデル×市場odds・predict-watch を decision-support 化（採用） (2026-06-30) — 採用
 

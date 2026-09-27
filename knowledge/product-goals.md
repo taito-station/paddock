@@ -203,7 +203,7 @@ EV 層分離（ADR 0055）後の参考ROIは、**レースを選別するゲー�
 #### 再現
 
 ```sh
-# 1. 純 dump（18ヶ月・production 相当）: docs-original/0061 と同じ
+# 1. 純 dump（18ヶ月・production 相当）: docs/docs-original/0061 と同じ
 ./target/release/paddock-analyze backtest --from 2025-01-01 --to 2026-06-30 \
   --blend-alpha 1.0 --shrinkage-m 10 --win-power 1.25 --place-show-power 2.0 \
   --dump-features /tmp/pa/pure_long.tsv
@@ -581,7 +581,7 @@ Python 行の件数は `.py` のみの数（tracked 総数は順に 43 / 20 / 10
   [crates.io: topcoat](https://crates.io/crates/topcoat)、[HN 議論](https://news.ycombinator.com/item?id=48952067)。
   **crates.io 由来の数値（0.5.0 / 2026-07-27・累計 DL 2,466・13 版）と HN スレッドはピンできないため、
   評価基準日 2026-07-30 のスナップショットであり後から厳密には再現できない**（版一覧は crates.io API で再取得可）。
-- 置き換え対象の仕様: [knowledge/web-spa.md](web-spa.md)（`status: Confirmed`）、
+- 置き換え対象の仕様: [docs/specifications/web-spa.md](web-spa.md)（`status: Confirmed`）、
   ADR 0069（iCloud 書き出しを全廃し閲覧を REST API + SPA に一本化）。
   **なお web-spa.md の鮮度方針は「既定は自動ポーリングしない／恒常的な全画面ポーリングはやらない。例外は
   `results:refresh`（#381・ADR 0068）だけ」となっており、実装済みの RaceBoard（#475）・RaceList（#372）の

@@ -507,7 +507,7 @@ DB 保存」を**同期実行**し、PDF はディスクに書かずメモリ内
 取得（ネットワーク律速）と解析（CPU 律速）を分離すれば、DL を数分で終えて JRA 接続を即解放し、重い
 OCR をネットワーク非依存で `-j <コア数>` 並列実行できる（壁時計 ≒ 総OCR ÷ コア数）。
 
-詳細設計は `knowledge/fetch-stage-split.md`。
+詳細設計は `docs/specifications/fetch-stage-split.md`。
 
 #### 決定
 

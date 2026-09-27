@@ -455,7 +455,7 @@ ADR 0076（#571）で参考ROIがレース選別のゲート指標として使�
 
 ```sh
 # フリップの実測（修正前の値を出す）
-# → docs-original/601-axis-flip-in-predict-watch.md「再現方法」の SQL
+# → docs/docs-original/601-axis-flip-in-predict-watch.md「再現方法」の SQL
 
 # テスト
 cargo test -p paddock-domain                     # 固定の振る舞い（補充しない・ROI は動く 等）
@@ -513,7 +513,7 @@ ADR 0078 は「検証上の留保」で、実地確認（開催日に `gate_cali
 
 #### 影響
 
-- コード変更なし。本文は REQ-D23-007（本ファイル）・REQ-D01-003（[product-goals.md](../knowledge/product-goals.md)）・
+- コード変更なし。本文は REQ-D23-007（本ファイル）・REQ-D01-003（[product-goals.md](product-goals.md)）・
   用語集「軸ロック」を追従した。
 - 計測 issue #724（朝 vs 窓突入時の固定の複数開催日比較）を起票した。
 - 同日の #584（macOS 通知）は `🔔` 行 1 件の配送までは確認したが、バナー表示は未確認のまま（本エントリの対象外）。

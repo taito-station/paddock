@@ -269,4 +269,4 @@ netkeiba レース結果ページを `results` の取得源として追加し、
 - **不変**: `settle_bet`／`parse_race_payouts`／`SettleInteractor` の精算ロジック（冪等・返還優先・#131 全額返還）／確率モデル・EV 層（ADR 0055）・軸ロック（ADR 0060）／`paddock-fetch-results`（過去レース UPDATE・ADR 0015）／`results` スキーマ（列追加なし）。
 - **後方互換**: `POST /api/sessions/{date}/results:refresh` は本フローへ委譲するエイリアスとして維持。手動「精算」ボタンはフォールバックとして残す。
 - レース結果照合の手作業（netkeiba 直接確認・手動精算）が消え、UI が「発走済み → 着順・的中/払戻・収支」まで自動で追従する。あくまで結果照合の自動化であり、買い方判断（decision-support）は人間側に残る。
-- 関連: #40（自動精算エンジン）／#131（全額返還）／#370・#391（終了判定・post_time 一次ソース）／ADR 0015（netkeiba 結果ソース・UPDATE 専用）／0021（HTTP タイムアウト＋リトライ）・0029（fetcher 集約）／0055・0060（EV 層分離・軸ロック）／0064・0066（ライブ EV ビュー）。設計詳細は [knowledge/race-result-ingestion.md](race-result-ingestion.md)。
+- 関連: #40（自動精算エンジン）／#131（全額返還）／#370・#391（終了判定・post_time 一次ソース）／ADR 0015（netkeiba 結果ソース・UPDATE 専用）／0021（HTTP タイムアウト＋リトライ）・0029（fetcher 集約）／0055・0060（EV 層分離・軸ロック）／0064・0066（ライブ EV ビュー）。設計詳細は [docs/specifications/race-result-ingestion.md](race-result-ingestion.md)。
