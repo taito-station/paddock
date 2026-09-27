@@ -5,7 +5,7 @@ status: Confirmed
 kind: knowledge
 doc_class: [D23, D22]
 tags: [D23, D22]
-updated: "2026-09-22"
+updated: "2026-09-27"
 ---
 
 # 期待値計算・買い目選択・Kelly 配分ロジック仕様書
@@ -263,7 +263,7 @@ Domain 層に純粋関数として実装し、IO・状態なし。`PlaceOdds` �
 | REQ-D23-004 | fractional Kelly は賭け額配分に使わない。`betting/kelly.rs` は EV 候補選抜（`min_kelly` の curation）に留める | ADR 0054 の同一土俵比較（定額 vs Kelly・71R walk-forward）を再実行し、**定額土俵で Kelly 重みが ADR 0054 当時の対照（Python `live_ev.py` のヒューリスティック＝確率重み＋最低 ¥100 の最大剰余法・ROI 75.5%・σ 92.5）を上回らないこと**（**production の配分は均等割り**＝REQ-D23-003。0054 の「現行」は当時の Python 土俵を指す）、および **bankroll 土俵で full Kelly が破産すること** | ADR 0054 | Confirmed |
 | REQ-D23-005 | 混戦判定は「◎の model 勝率の 0.70 倍以上が ◎含め 4 頭以上」。**オッズ条件を併用しない** | ADR 0028 のオッズ閾値スイープを再実行（baseline を上回る閾値が無いこと） | ADR 0028 | Confirmed |
 | REQ-D23-006 | `scripts/predict-check/` の Python（`live_ev.py`）を**張る買い目の配分に使わない**。オフライン EV レポート専用（配分方式の正が `build_portfolio` であることは REQ-D01-007。ここはその裏返しの禁止事項） | `build_portfolio` の単体テストと、`predict` / `predict-watch` が同一関数を通ること | ADR 0064 の追補（#346）——**0064 本体の決定は逆**（当時はライブ writer を Python `live_ev.py` に一本化するとしていた）。Rust に一本化したのは追補側 | Confirmed |
-| REQ-D23-007 | `predict-watch` の買い目選定（軸・相手・混戦判定）は**当日の初回スイープで確定し、以後オッズで動かさない**。固定した相手が取消なら落とすが**ライブ順位で補充しない**（点数が減る）。固定の優先順は 記録◎ → その日の初回スイープ → 固定なし | `cargo test -p paddock-domain` の `pinned_selection_survives_market_movement_while_roi_moves`（オッズを差し替えた 2 スイープで選定が一致し ROI は動く／固定しなければ動く）・`forced_partners_drops_scratched_without_backfill`、`cargo test -p rdb-gateway --test test_live_ev_persistence` の `pins_return_the_earliest_sweep_not_the_latest`（**最古**を返すこと）、および開催日に `scripts/predict-check/gate_calibration.py` の「軸（◎）の安定性」節が `0/N` になること | ADR 0078 | Confirmed |
+| REQ-D23-007 | `predict-watch` の買い目選定（軸・相手・混戦判定）は**当日の初回スイープで確定し、以後オッズで動かさない**（初回スイープ＝そのレースが監視窓〈既定 40 分〉に入った最初のスイープ。起動時点で既に窓内なら起動直後のスイープ）。固定した相手が取消なら落とすが**ライブ順位で補充しない**（点数が減る）。固定の優先順は 記録◎ → その日の初回スイープ → 固定なし | `cargo test -p paddock-domain` の `pinned_selection_survives_market_movement_while_roi_moves`（オッズを差し替えた 2 スイープで選定が一致し ROI は動く／固定しなければ動く）・`forced_partners_drops_scratched_without_backfill`、`cargo test -p rdb-gateway --test test_live_ev_persistence` の `pins_return_the_earliest_sweep_not_the_latest`（**最古**を返すこと）、および開催日に `scripts/predict-check/gate_calibration.py` の「軸（◎）の安定性」節が `0/N` になること | ADR 0078 | Confirmed |
 <!-- REQ:end D23 -->
 
 **D01 と重複させない。** 「ROI ≥ 100% のレースだけ張る」「軸ロック＋ズレ増額」「買い目の提示形式と
@@ -474,3 +474,46 @@ python3 scripts/predict-check/gate_calibration.py --payouts-dir <dir> --from <�
 - 前提: ADR 0060（軸ロックとズレ増額）/ ADR 0076（参考ROIはゲート指標として使えない＝残るエッジは執行の規律）
 - 関連: #388（盤面側の無言フリップ修正）/ ADR 0055（EV 層分離）/ ADR 0064（買い目伝票）/
   #568・ADR 0072（監視のスリープ耐性＝プロセス跨ぎで固定が要る理由）
+
+### #601: ADR 0078 の実地確認——固定経路は実地で発火、固定時点は窓突入時 (2026-09-27) — 知見
+
+#### コンテキスト
+
+ADR 0078 は「検証上の留保」で、実地確認（開催日に `gate_calibration.py` の「軸（◎）の安定性」節が
+`0/N` になること）を次の開催日に回していた。2026-09-27（4回中山9日・4回阪神9日）に `predict-watch` を
+終日回し、確定払戻で精算した。当日は記録◎が無く、固定は優先順 2（その日の初回スイープ）の経路で動いた。
+生資料: [601-axis-lock-field-check.md](../docs-original/601-axis-lock-field-check.md)、
+蒸留: [QA-axis-lock-601.md](../qa/QA-axis-lock-601.md) Q8。
+
+#### 決定
+
+- **優先順 2（初回スイープ）の固定経路は実地で発火し、スイープ間の入れ替わりは 0（知見）。**
+  発走前に 2 スイープ以上あった 17 レースで、軸の入れ替わりは `gate_calibration.py` で **0/17**。
+  同節が測らない相手・混戦もログの `🔒` 行で 17R とも不変（slip 自体の突き合わせは未実施）。
+  ADR 0078 の「実地確認は次の開催日待ち」の留保は、**優先順 2 の経路に限って**このエントリで解消する
+  （ADR 0078 本文は append-only のため書き換えない）。優先順 1（記録◎）の経路は未確認のまま。
+- **固定時点は「そのレースが監視窓（既定 40 分）に入った最初のスイープ」であることを明記する**
+  （起動時点で既に窓内のレースは起動直後のスイープ）。本文 REQ-D23-007 と用語集「軸ロック」に反映した。
+  同日 11:15 の朝の選定とは軸 2/17・相手 4/17 が異なった。
+- **この固定時点が REQ-D01-003 の「軸は事前データで確定」を満たすかは未決とし、#724 の計測で判断する。**
+  それまで実装は変えない。
+
+#### 理由
+
+- REQ-D01-003 の検証手段（軸安定性 `0/N`）が実データで一度も実行されていなかった。固定後の入れ替わり 0 は
+  構造上の期待どおりで、これは統計的な効果測定ではなく「固定経路が実地で発火した」という機能確認である。
+- 安定性節は発走前スイープどうしの比較なので、初回スイープより前（朝〜窓突入）の変化は測れない。
+  その区間で軸が 2/17 変わった以上、固定時点の妥当性は別途測る必要がある。
+- 朝の選定と固定伝票の精算差（固定伝票 61.6% / 朝の選定 104.4%）は 1 日・3 レースの差で、方向を論じる母数ではない。
+
+#### 却下した代替案
+
+- **固定時点を朝へ前倒しする**——1 日・3 レースの差を根拠に仕様を変えることになる。#724 の複数開催日の計測を待つ。
+- **ADR 0078 の「検証上の留保」本文を書き換える**——決定ログは append-only（CI が検出する）。本エントリで部分的に解消する。
+
+#### 影響
+
+- コード変更なし。本文は REQ-D23-007（本ファイル）・REQ-D01-003（[product-goals.md](../knowledge/product-goals.md)）・
+  用語集「軸ロック」を追従した。
+- 計測 issue #724（朝 vs 窓突入時の固定の複数開催日比較）を起票した。
+- 同日の #584（macOS 通知）は `🔔` 行 1 件の配送までは確認したが、バナー表示は未確認のまま（本エントリの対象外）。
