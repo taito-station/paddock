@@ -1064,4 +1064,4 @@ EV_blended = α·EV_pure + (1-α)·(1/overround)
     (a) prob_eval の blended win Brier は fit 窓 0.054540・eval 窓 0.054557 で、`analyze backtest` の単勝 Brier
     （全 5,052R）0.0545 と一致。(b) prob_ledger の pure win Brier（market_ok 母集合）0.065672 も
     prob_eval の win×pure 0.06567 と一致した。
-  - 全数値は `docs/docs-original/719-prob-ledger.md`。
+  - prob_ledger の全数値は `docs/docs-original/719-prob-ledger.md`（(a) の突合値は ledger の出力外なので上に記録した）。

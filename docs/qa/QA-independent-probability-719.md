@@ -3,6 +3,8 @@
 「結局予想が改善したのかよく分からない。確率を出すことに振り切った方がいいのでは」という問いかけに対し、
 実測状況（#703 のベースライン・ADR 0052/0053/0076）と文献調査（`docs-original/719-literature-probability.md`）を
 提示したうえでの方針確認の記録。
+蒸留先: `docs/specifications/learned-model-harness.md`（決定ログ #719）・`backtest.md`（評価プロトコル）・
+`probability-estimation.md`（独立確率の評価）。
 
 ## Q1: 確率は市場を土台にするか、市場とは独立に出すか
 
