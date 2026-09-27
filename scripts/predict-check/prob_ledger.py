@@ -42,6 +42,7 @@ import csv
 import hashlib
 import math
 import os
+import re
 import subprocess
 import sys
 from collections import Counter, OrderedDict
@@ -54,6 +55,7 @@ import numpy as np
 import prob_eval as pe
 
 FLOOR = pe._PROB_FLOOR
+_ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 BET_TYPES = ("quinella", "top2", "wide", "trio", "win")  # 券種の優先度順（表示順）
 
 
@@ -304,9 +306,12 @@ def validate_windows4(dev_from: str, dev_to: str, test_from: str, test_to: str) 
     names = ("--dev-from", "--dev-to", "--test-from", "--test-to")
     vals = (dev_from, dev_to, test_from, test_to)
     for name, v in zip(names, vals):
+        # fromisoformat は 3.11+ で basic 形式（20250701）も通すが、窓は文字列比較なので拡張形式に限る
         try:
-            _date.fromisoformat(v)
+            ok = bool(_ISO_DATE.match(v)) and _date.fromisoformat(v) is not None
         except ValueError:
+            ok = False
+        if not ok:
             return f"{name} は YYYY-MM-DD 形式で指定してください: {v!r}"
     if dev_from > dev_to or test_from > test_to:
         return "窓の開始日が終了日より後です"

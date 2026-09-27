@@ -257,6 +257,9 @@ def test_validate_windows4():
     assert pl.validate_windows4("2025-07-01", "2026-01-01", "2026-01-01", "2026-08-31")  # 境界日の共有
     assert pl.validate_windows4("2025-12-31", "2025-07-01", "2026-01-01", "2026-08-31")  # 逆転
     assert pl.validate_windows4("2025/07/01", "2025-12-31", "2026-01-01", "2026-08-31")  # 形式
+    # basic 形式は fromisoformat（3.11+）を通るが、文字列比較で窓が黙って空になるので拒否する
+    # （test-to を basic 形式にすると大小比較の検査はすり抜けるので、形式検査だけが頼り）
+    assert pl.validate_windows4("2025-07-01", "2025-12-31", "2026-01-01", "20260831")
 
 
 def test_in_window():
