@@ -56,7 +56,6 @@ import prob_eval as pe
 
 FLOOR = pe._PROB_FLOOR
 _ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-BET_TYPES = ("quinella", "top2", "wide", "trio", "win")  # 券種の優先度順（表示順）
 
 
 # ---------- 組合せ確率 ----------
@@ -150,8 +149,10 @@ def race_scores(combo: Combo, fins: list, p_top2: np.ndarray | None = None) -> d
         y = np.array([1.0 if f is not None and f <= 2 else 0.0 for f in fins])
         fl.count += int(np.sum((q <= FLOOR) & (y == 1)) + np.sum((q >= 1 - FLOOR) & (y == 0)))
         qc = np.clip(q, FLOOR, 1 - FLOOR)
+        u = min(max(2.0 / n, FLOOR), 1 - FLOOR)  # 一様予測: 各馬の連対確率 2/n
         s["top2"] = {
             "ll_sum": float(-np.sum(y * np.log(qc) + (1 - y) * np.log(1 - qc))),
+            "uni_sum": float(-np.sum(y * math.log(u) + (1 - y) * math.log(1 - u))),
             "brier_sum": float(np.sum((q - y) ** 2)),
             "n": n,
             "p": q,
@@ -176,6 +177,28 @@ def race_scores(combo: Combo, fins: list, p_top2: np.ndarray | None = None) -> d
     return s
 
 
+# 券種グループごとに一意でなければならない着順（単勝 / 馬連・連対 / ワイド・3連複）
+_NEEDED_POSITIONS = {"win": (1,), "quinella": (1, 2), "wide": (1, 2, 3)}
+BET_GROUP_LABELS = {"win": "単勝", "quinella": "馬連・連対", "wide": "ワイド・3連複"}
+
+
+def exclusion_reasons(fins: list) -> dict:
+    """券種グループごとの除外理由。母集合に入るなら None、同着なら "dead_heat"、着順欠落なら "missing"。
+
+    必要な着順のどれかが 2 頭以上なら同着、0 頭なら欠落（結果未取込・中止等）。両方あれば同着を優先する。
+    """
+    counts = Counter(f for f in fins if f is not None)
+    out = {}
+    for group, positions in _NEEDED_POSITIONS.items():
+        if any(counts[p] > 1 for p in positions):
+            out[group] = "dead_heat"
+        elif any(counts[p] == 0 for p in positions):
+            out[group] = "missing"
+        else:
+            out[group] = None
+    return out
+
+
 # ---------- 集計・CI ----------
 
 # 成分行列の列: 券種 NLL（和・一様の和・件数）→ 連対 → ペア Brier
@@ -184,18 +207,27 @@ _COLS = [
     "quinella_nll", "quinella_uni", "quinella_ok",
     "wide_nll", "wide_uni", "wide_ok",
     "trio_nll", "trio_uni", "trio_ok",
-    "top2_ll", "top2_brier", "top2_n",
+    "top2_ll", "top2_uni", "top2_brier", "top2_n",
     "qp_brier", "qp_n", "wp_brier", "wp_n",
 ]
 _C = {c: i for i, c in enumerate(_COLS)}
 
 METRICS = [
     "quinella_nll", "top2_nll", "wide_nll", "trio_nll", "win_nll",
-    "quinella_r2", "wide_r2", "trio_r2", "win_r2",
+    "quinella_r2", "top2_r2", "wide_r2", "trio_r2", "win_r2",
     "top2_brier", "quinella_brier", "wide_brier",
 ]
 # 小さいほど良い指標（R² だけ大きいほど良い）
 LOWER_IS_BETTER = {m: not m.endswith("_r2") for m in METRICS}
+
+
+def judge_delta(metric: str, lo: float, hi: float) -> str:
+    """系統 − baseline の差の CI から判定タグを返す。✅ = 改善側で 0 を跨がない、❌ = 悪化側で跨がない。"""
+    if LOWER_IS_BETTER[metric]:
+        better, worse = hi < 0, lo > 0
+    else:
+        better, worse = lo > 0, hi < 0
+    return " ✅" if better else (" ❌" if worse else "")
 
 
 def _components(scores: list[dict]) -> np.ndarray:
@@ -207,6 +239,7 @@ def _components(scores: list[dict]) -> np.ndarray:
                 m[r, _C[f"{k}_ok"]] = 1.0
         if s["top2"] is not None:
             m[r, _C["top2_ll"]] = s["top2"]["ll_sum"]
+            m[r, _C["top2_uni"]] = s["top2"]["uni_sum"]
             m[r, _C["top2_brier"]] = s["top2"]["brier_sum"]
             m[r, _C["top2_n"]] = s["top2"]["n"]
         if s["quinella_pairs"] is not None:
@@ -228,6 +261,7 @@ def _metrics_from_sums(t: np.ndarray) -> dict:
         out[f"{k}_r2"] = 1.0 - ratio(t[_C[f"{k}_nll"]], t[_C[f"{k}_uni"]])
         out[f"{k}_n"] = int(round(t[_C[f"{k}_ok"]]))
     out["top2_nll"] = ratio(t[_C["top2_ll"]], t[_C["top2_n"]])
+    out["top2_r2"] = 1.0 - ratio(t[_C["top2_ll"]], t[_C["top2_uni"]])
     out["top2_brier"] = ratio(t[_C["top2_brier"]], t[_C["top2_n"]])
     out["quinella_brier"] = ratio(t[_C["qp_brier"]], t[_C["qp_n"]])
     out["wide_brier"] = ratio(t[_C["wp_brier"]], t[_C["wp_n"]])
@@ -288,16 +322,28 @@ def load_probs(path: str) -> dict:
         missing = [c for c in ("race_id", "horse_num", "p_win") if c not in idx]
         if missing:
             raise ValueError(f"{path}: 必須列がありません: {missing}")
+        need = max(idx[c] for c in ("race_id", "horse_num", "p_win")) + 1
         for lineno, cells in enumerate(reader, start=2):
             if not cells or all(not c.strip() for c in cells):
                 continue
-            key = (cells[idx["race_id"]].strip(), int(cells[idx["horse_num"]]))
+            if len(cells) < need:
+                raise ValueError(f"{path}:{lineno} 列が足りません（{len(cells)} 列・必要 {need} 列）")
+            try:
+                horse_num = int(cells[idx["horse_num"]])
+            except ValueError as e:
+                raise ValueError(f"{path}:{lineno} horse_num が整数ではありません: {cells[idx['horse_num']]!r}") from e
+            key = (cells[idx["race_id"]].strip(), horse_num)
             if key in out:
                 raise ValueError(f"{path}:{lineno} 重複行 {key}")
             top2 = None
             if "p_top2" in idx and idx["p_top2"] < len(cells) and cells[idx["p_top2"]].strip():
                 top2 = _prob_cell(cells[idx["p_top2"]], "p_top2", path, lineno)
             out[key] = {"p_win": _prob_cell(cells[idx["p_win"]], "p_win", path, lineno), "p_top2": top2}
+    # 連対を直接出す系統は全行で持つこと。一部だけだと、レースごとに連対の定義（直接 / Harville 由来）が
+    # 黙って混ざり、主指標を系統の性能として解釈できなくなる。
+    n_top2 = sum(1 for v in out.values() if v["p_top2"] is not None)
+    if 0 < n_top2 < len(out):
+        raise ValueError(f"{path}: p_top2 が一部の行（{n_top2}/{len(out)}）にしかありません。全行に入れるか列ごと空にしてください")
     return out
 
 
@@ -335,6 +381,7 @@ class System:
     probs: dict | None
     lam2: float = 1.0
     lam3: float = 1.0
+    source: str = ""  # ledger に残す入力の来歴（外部 TSV のファイル名と sha256）
 
 
 def system_probs(rows: list[dict], probs: dict | None) -> tuple[np.ndarray, np.ndarray | None] | None:
@@ -349,29 +396,51 @@ def system_probs(rows: list[dict], probs: dict | None) -> tuple[np.ndarray, np.n
         return None
     p = np.array([g["p_win"] for g in got])
     t2 = [g["p_top2"] for g in got]
-    return p, (np.array(t2) if all(v is not None for v in t2) else None)
+    # load_probs が「全行あり / 全行なし」を保証しているので、レース内で混在はしない
+    return p, (np.array(t2) if t2[0] is not None else None)
+
+
+# 外部系統の p_win のレース内和がこれより外れたら警告に数える（正規化はする）
+P_WIN_SUM_TOL = 0.01
 
 
 def evaluate(races: "OrderedDict[str, list[dict]]", systems: "OrderedDict[str, System]") -> dict:
-    """全系統が確率を持つレースに揃えて、系統ごとのレース単位スコアを作る。"""
+    """全系統が確率を持つレースに揃えて、系統ごとのレース単位スコアを作る。
+
+    excluded: 系統の欠落でレースごと外した件数（系統ごとに数える・1 レースで複数系統が欠ければ各々に計上）。
+    bet_excluded: 評価対象レースのうち券種グループごとに母集合外とした件数（同着 / 着順欠落の理由別）。
+    warnings: 正規化はしたが p_win の和が 1 から P_WIN_SUM_TOL 以上外れたレース数（系統別）。
+    """
     excluded: Counter = Counter()
+    bet_excluded: Counter = Counter()
+    warnings: Counter = Counter()
     scores: dict = {name: [] for name in systems}
     race_ids = []
     for rid, rows in races.items():
-        got = {}
-        for name, sysm in systems.items():
-            sp = system_probs(rows, sysm.probs)
-            if sp is None:
-                excluded[f"system_missing:{name}"] += 1
-                break
-            got[name] = sp
-        else:
-            fins = [r.get("finishing_position") for r in rows]
-            for name, (p, t2) in got.items():
-                sysm = systems[name]
-                scores[name].append(race_scores(combo_probs(p, sysm.lam2, sysm.lam3), fins, t2))
-            race_ids.append(rid)
-    return {"n_races": len(race_ids), "excluded": excluded, "scores": scores, "race_ids": race_ids}
+        got = {name: system_probs(rows, sysm.probs) for name, sysm in systems.items()}
+        missing = [name for name, sp in got.items() if sp is None]
+        for name in missing:
+            excluded[f"system_missing:{name}"] += 1
+        if missing:
+            continue
+        fins = [r.get("finishing_position") for r in rows]
+        for group, reason in exclusion_reasons(fins).items():
+            if reason is not None:
+                bet_excluded[(group, reason)] += 1
+        for name, (p, t2) in got.items():
+            sysm = systems[name]
+            if sysm.probs is not None and abs(float(p.sum()) - 1.0) > P_WIN_SUM_TOL:
+                warnings[f"p_win_sum_off:{name}"] += 1
+            scores[name].append(race_scores(combo_probs(p, sysm.lam2, sysm.lam3), fins, t2))
+        race_ids.append(rid)
+    return {
+        "n_races": len(race_ids),
+        "excluded": excluded,
+        "bet_excluded": bet_excluded,
+        "warnings": warnings,
+        "scores": scores,
+        "race_ids": race_ids,
+    }
 
 
 def evaluate_market(races: "OrderedDict[str, list[dict]]", lam2: float, lam3: float) -> list[dict]:
@@ -392,6 +461,8 @@ def fidelity_pure_win_brier(races: "OrderedDict[str, list[dict]]") -> tuple[floa
     for rows in races.values():
         if sum(1 for r in rows if r.get("finishing_position") == 1) != 1 or pe.market_probs(rows) is None:
             continue
+        if any(r.get("model_win_pure") is None for r in rows):
+            continue  # system_probs と同じく純モデル確率の欠けたレースは外す
         n += 1
         for r in rows:
             ps.append(float(r["model_win_pure"]))
@@ -443,15 +514,25 @@ def report_window(
     base = names[0]
     lines = [f"### {title}", ""]
     ex = ", ".join(f"{k} {v}" for k, v in sorted(res["excluded"].items())) or "なし"
-    lines.append(f"- 対象レース {res['n_races']}（窓内 {len(races)}・除外: {ex}）")
+    lines.append(f"- 対象レース {res['n_races']}（窓内 {len(races)}・系統の欠落による除外: {ex}）")
     if res["n_races"] == 0:
         return lines + ["- 評価対象レースなし", ""]
     agg = {n: aggregate(res["scores"][n]) for n in names}
     ns = agg[base]
     lines.append(
         "- 券種別 N: " + " / ".join(f"{k} {ns[f'{k}_n']}" for k in ("quinella", "wide", "trio", "win"))
-        + f"（連対は馬連と同じレース集合）"
+        + "（連対は馬連と同じレース集合）"
     )
+    reasons = []
+    for group, label in BET_GROUP_LABELS.items():
+        dh, ms = res["bet_excluded"][(group, "dead_heat")], res["bet_excluded"][(group, "missing")]
+        reasons.append(f"{label} 同着 {dh}・着順欠落 {ms}")
+    lines.append("- 券種別の除外（対象レースのうち母集合外）: " + " / ".join(reasons))
+    if res["warnings"]:
+        lines.append(
+            f"- 警告: p_win のレース内和が 1 から {P_WIN_SUM_TOL} 以上外れたレース（正規化して評価）: "
+            + ", ".join(f"{k} {v}" for k, v in sorted(res["warnings"].items()))
+        )
     floored = {n: agg[n]["floored"] for n in names if agg[n]["floored"]}
     if floored:
         lines.append(f"- 警告: 確率 ≤ {FLOOR} を floor（系統別件数 {floored}）")
@@ -466,12 +547,9 @@ def report_window(
             cells.append(f"{_fmt(agg[n][m])} [{_fmt(lo)}, {_fmt(hi)}]")
         for n in names[1:]:
             lo, hi = boot_ci(res["scores"][n], res["scores"][base], m, n_boot=n_boot, seed=seed)
-            better = (hi < 0) if LOWER_IS_BETTER[m] else (lo > 0)
-            worse = (lo > 0) if LOWER_IS_BETTER[m] else (hi < 0)
-            tag = " ✅" if better else (" ❌" if worse else "")
-            cells.append(f"{agg[n][m] - agg[base][m]:+.5f} [{lo:+.5f}, {hi:+.5f}]{tag}")
+            cells.append(f"{agg[n][m] - agg[base][m]:+.5f} [{lo:+.5f}, {hi:+.5f}]{judge_delta(m, lo, hi)}")
         lines.append(f"| {m} | " + " | ".join(cells) + " |")
-    lines += ["", "CORP 分解（Brier = MCB − DSC + UNC・帯外点は 90% pointwise）:", ""]
+    lines += ["", "CORP 分解（Brier = MCB − DSC + UNC・点推定。帯外点は 90% pointwise の consistency band）:", ""]
     lines += ["| 対象 | 系統 | n | Brier | MCB | DSC | UNC | 帯外点 |", "|---|---|---|---|---|---|---|---|"]
     for key, label in (("top2", "連対"), ("wide_pairs", "ワイドペア")):
         for n in names:
@@ -487,32 +565,62 @@ def report_window(
         ma = aggregate(mk)
         lines += [
             "",
-            f"市場参考列（単勝オッズ → Harville λ={market_lam[0]},{market_lam[1]}・別母集合 {len(mk)}R・ゲートにしない。"
-            "`win_odds` はスナップショットと確定オッズが混在）: "
-            + " / ".join(f"{m} {_fmt(ma[m])}" for m in ("quinella_nll", "top2_nll", "wide_nll", "trio_nll", "win_nll")),
+            f"市場参考列（単勝オッズ → Harville λ={market_lam[0]},{market_lam[1]}・オッズ完全な {len(mk)}R の別母集合・"
+            "点推定のみ・ゲートにしない。`win_odds` はスナップショットと確定オッズが混在）: "
+            + " / ".join(
+                f"{m} {_fmt(ma[m])}（N {ma[m.split('_')[0] + '_n'] if not m.startswith('top2') else ma['quinella_n']}）"
+                for m in ("quinella_nll", "top2_nll", "wide_nll", "trio_nll", "win_nll")
+            ),
         ]
     return lines + [""]
 
 
+# 系統名は markdown の表見出しに入るので、表や見出しを壊さない文字に限る
+_SYSTEM_NAME = re.compile(r"^[A-Za-z0-9_.-]+$")
+
+
 def _parse_kv(items: list[str], what: str) -> dict:
+    """NAME=VALUE の繰り返し引数を dict にする。同じ NAME の重複は黙って後勝ちにせずエラーにする。"""
     out = {}
     for it in items:
         if "=" not in it:
             raise SystemExit(f"{what} は NAME=VALUE で指定してください: {it!r}")
         k, v = it.split("=", 1)
-        out[k.strip()] = v.strip()
+        k = k.strip()
+        if k in out:
+            raise SystemExit(f"{what} の {k!r} が重複しています")
+        out[k] = v.strip()
     return out
 
 
-def _git_sha() -> str:
+def parse_lambda(value: str) -> tuple[float, float]:
+    """`L2,L3` を検証して返す。λ は有限かつ正（0 は 0**0=1、負は 0 に無限大を与えるため不可）。"""
+    parts = value.split(",")
+    if len(parts) != 2:
+        raise ValueError(f"L2,L3 の形式で指定してください: {value!r}")
+    lam = tuple(float(x) for x in parts)
+    if not all(math.isfinite(v) and v > 0 for v in lam):
+        raise ValueError(f"λ は有限の正の数にしてください: {value!r}")
+    return lam  # type: ignore[return-value]
+
+
+def _git_run(*args: str) -> str:
+    # cwd でなくスクリプトの置き場所で引く（別 worktree から実行しても計測したコードの版を記録する）
+    return subprocess.run(
+        ["git", *args], capture_output=True, text=True, check=True,
+        cwd=os.path.dirname(os.path.abspath(__file__)),
+    ).stdout.strip()
+
+
+def code_version() -> tuple[str, bool]:
+    """(短縮 sha, 評価コードに未コミットの変更があるか)。scripts/ の追跡ファイルだけを見る。"""
     try:
-        # cwd でなくスクリプトの置き場所で引く（別 worktree から実行しても計測したコードの版を記録する）
-        return subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"],
-            capture_output=True, text=True, check=True, cwd=os.path.dirname(os.path.abspath(__file__)),
-        ).stdout.strip()
+        sha = _git_run("rev-parse", "--short", "HEAD")
+        top = _git_run("rev-parse", "--show-toplevel")
+        dirty = bool(_git_run("-C", top, "status", "--porcelain", "--untracked-files=no", "--", "scripts"))
+        return sha, dirty
     except (OSError, subprocess.CalledProcessError):
-        return "unknown"
+        return "unknown", False
 
 
 def _file_sha(path: str) -> str:
@@ -523,43 +631,69 @@ def _file_sha(path: str) -> str:
     return h.hexdigest()[:12]
 
 
+def validate_label(label: str) -> str | None:
+    """ledger の節見出し。1 行で、見出し記号から始めない（ledger に節を注入しない）。"""
+    if "\n" in label or "\r" in label or not label.strip():
+        return "--label は空でない 1 行にしてください"
+    if label.lstrip().startswith("#"):
+        return "--label を # で始めないでください"
+    return None
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("dump", help="analyze backtest --dump-features の TSV（56 列版）")
     ap.add_argument("--system", action="append", default=[], help="NAME=PATH（外部確率 TSV・複数可）")
     ap.add_argument("--lambda", dest="lambdas", action="append", default=[],
-                    help="NAME=L2,L3（系統の割引 λ。pure / market も指定可。既定 1,1）")
+                    help="NAME=L2,L3（系統の割引 λ。pure / market / --system の名前に指定可。既定 1,1）")
     ap.add_argument("--dev-from", default="2025-07-01")
     ap.add_argument("--dev-to", default="2025-12-31")
     ap.add_argument("--test-from", default="2026-01-01")
     ap.add_argument("--test-to", default="2026-08-31")
     ap.add_argument("--windows", choices=["dev", "test", "both"], default="dev",
-                    help="test 窓は版の節目にだけ測る（既定 dev のみ）")
+                    help="test 窓は版の節目にだけ測り、必ず --ledger に記録する（既定 dev のみ）")
     ap.add_argument("--bootstrap", type=int, default=1000)
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--ledger", help="追記先の ledger（markdown）")
-    ap.add_argument("--label", help="ledger の節見出し（--ledger 指定時は必須）")
+    ap.add_argument("--label", help="ledger の節見出し（--ledger 指定時は必須・1 行）")
     args = ap.parse_args(argv)
 
     err = validate_windows4(args.dev_from, args.dev_to, args.test_from, args.test_to)
     if err:
         ap.error(err)
-    if args.ledger and not args.label:
-        ap.error("--ledger には --label が必要です")
+    if args.windows != "dev" and not args.ledger:
+        # test 窓を見たことが必ず記録に残るようにする（記録の無い覗き見 → 調整の反復を防ぐ）
+        ap.error("--windows test / both は --ledger と --label を付けて実行してください（test 窓の計測は必ず記録する）")
+    if args.ledger:
+        if not args.label:
+            ap.error("--ledger には --label が必要です")
+        err = validate_label(args.label)
+        if err:
+            ap.error(err)
+    sha, dirty = code_version()
+    if args.ledger and dirty:
+        ap.error("scripts/ に未コミットの変更があります。ledger に載る git 版と計測コードがずれるので、コミットしてから記録してください")
 
-    lams = {}
-    for k, v in _parse_kv(args.lambdas, "--lambda").items():
-        try:
-            l2, l3 = (float(x) for x in v.split(","))
-        except ValueError:
-            ap.error(f"--lambda {k}={v} は L2,L3 の形式で指定してください")
-        lams[k] = (l2, l3)
+    try:
+        lams = {k: parse_lambda(v) for k, v in _parse_kv(args.lambdas, "--lambda").items()}
+    except ValueError as e:
+        ap.error(f"--lambda: {e}")
+    sys_paths = _parse_kv(args.system, "--system")
+    for name in sys_paths:
+        if name in ("pure", "market"):
+            ap.error(f"系統名 {name!r} は予約済みです")
+        if not _SYSTEM_NAME.match(name):
+            ap.error(f"系統名 {name!r} は英数字と _ . - だけにしてください")
+    unknown = sorted(set(lams) - {"pure", "market", *sys_paths})
+    if unknown:
+        ap.error(f"--lambda に存在しない系統名があります: {unknown}")
     systems: "OrderedDict[str, System]" = OrderedDict()
     systems["pure"] = System("pure", None, *lams.get("pure", (1.0, 1.0)))
-    for name, path in _parse_kv(args.system, "--system").items():
-        if name in systems or name == "market":
-            ap.error(f"系統名 {name!r} は予約済みか重複しています")
-        systems[name] = System(name, load_probs(path), *lams.get(name, (1.0, 1.0)))
+    for name, path in sys_paths.items():
+        systems[name] = System(
+            name, load_probs(path), *lams.get(name, (1.0, 1.0)),
+            source=f"`{os.path.basename(path)}` sha256 {_file_sha(path)}",
+        )
 
     rows = pe.load_dump(args.dump)
     table = pe.build_race_table(rows)
@@ -570,10 +704,13 @@ def main(argv: list[str] | None = None) -> int:
         windows.append(("test", args.test_from, args.test_to))
 
     lines = [
-        f"- 計測日: {_date.today().isoformat()} / git {_git_sha()}",
-        f"- dump: `{args.dump.split('/')[-1]}`（sha256 {_file_sha(args.dump)}）",
-        "- 系統: " + ", ".join(f"{s.name}（λ={s.lam2},{s.lam3}）" for s in systems.values()),
-        f"- bootstrap {args.bootstrap} / seed {args.seed}",
+        f"- 計測日: {_date.today().isoformat()} / git {sha}{'-dirty' if dirty else ''}",
+        f"- dump: `{os.path.basename(args.dump)}`（sha256 {_file_sha(args.dump)}）",
+        "- 系統: " + ", ".join(
+            f"{s.name}（λ={s.lam2},{s.lam3}{'・' + s.source if s.source else ''}）" for s in systems.values()
+        ),
+        f"- 市場参考列 λ={lams.get('market', (1.0, 1.0))[0]},{lams.get('market', (1.0, 1.0))[1]}"
+        f" / bootstrap {args.bootstrap} / seed {args.seed}",
         "",
     ]
     for wname, lo, hi in windows:

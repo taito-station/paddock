@@ -123,6 +123,17 @@ def test_ordered_log_matches_stage_loglik():
     assert math.log(c.ordered3(2, 0, 4)) == pytest.approx(expected)
 
 
+def test_combo_regression_literals_discounted():
+    # 総当たりの参照実装（_ref）と独立に、代表値をリテラルで固定する（参照実装側の同時誤りも検出する）。
+    # 馬連(0,1) は手計算でも 0.4·0.25^0.8/(Σp^0.8 − 0.4^0.8) + 0.25·0.4^0.8/(Σp^0.8 − 0.25^0.8) ≈ 0.1525 + 0.1183。
+    c = pl.combo_probs(np.array(P5), L2, L3)
+    assert c.quinella[0, 1] == pytest.approx(0.2708006828711557)
+    assert c.quinella[3, 4] == pytest.approx(0.02578486057063056)
+    assert c.top2[0] == pytest.approx(0.6635518109465817)
+    assert c.wide[0, 1] == pytest.approx(0.5668363476149145)
+    assert c.trio[0, 1, 2] == pytest.approx(0.23517446108051054)
+
+
 def test_small_race_literal_value():
     # 3 頭 p=[.5,.3,.2]・λ=1: 馬連(0,1) = .5*.3/.5 + .3*.5/.7
     c = pl.combo_probs(np.array([0.5, 0.3, 0.2]), 1.0, 1.0)
@@ -215,6 +226,39 @@ def test_uniform_probs_give_zero_pseudo_r2():
     for k in ("win", "quinella", "wide", "trio"):
         nll, uni = s[k]
         assert nll == pytest.approx(uni)
+    assert s["top2"]["ll_sum"] == pytest.approx(s["top2"]["uni_sum"])
+
+
+def test_exclusion_reasons_by_bet_group():
+    assert pl.exclusion_reasons([1, 2, 3, 4]) == {"win": None, "quinella": None, "wide": None}
+    # 3 着同着: ワイド・3連複だけ外れる
+    assert pl.exclusion_reasons([1, 2, 3, 3]) == {"win": None, "quinella": None, "wide": "dead_heat"}
+    # 1 着同着 → 2 着が存在しない: 同着を優先して数える
+    assert pl.exclusion_reasons([1, 1, 3, 4]) == {"win": "dead_heat", "quinella": "dead_heat", "wide": "dead_heat"}
+    # 着順が取れていない（結果未取込）
+    assert pl.exclusion_reasons([None, None, None]) == {"win": "missing", "quinella": "missing", "wide": "missing"}
+    # 3 着だけ欠落（3 着馬の中止など）
+    assert pl.exclusion_reasons([1, 2, None, 4]) == {"win": None, "quinella": None, "wide": "missing"}
+
+
+def test_wide_pairs_labels_and_brier_literal():
+    # 4 頭・一様・λ=1: ワイド各ペアは 3/C(4,2)=0.5。的中は 3 ペア → Brier 和 = 6 × 0.25 = 1.5
+    c = pl.combo_probs(np.full(4, 0.25), 1.0, 1.0)
+    s = pl.race_scores(c, [1, 2, 3, 4])
+    assert s["wide_pairs"]["y"].sum() == 3
+    assert s["wide_pairs"]["brier_sum"] == pytest.approx(1.5)
+    assert s["wide_pairs"]["n"] == 6
+    # 連対の一様予測: 各馬 2/4 → 二値 log-loss 和 = 4·ln 2
+    assert s["top2"]["uni_sum"] == pytest.approx(4 * math.log(2))
+    assert s["top2"]["ll_sum"] == pytest.approx(4 * math.log(2))
+
+
+def test_top2_floor_is_counted():
+    c = pl.combo_probs(np.array(P5), L2, L3)
+    override = np.array([0.0, 0.5, 0.3, 0.3, 0.2])  # 1 着馬（idx0）に連対確率 0
+    s = pl.race_scores(c, [1, 2, 3, 4, 5], p_top2=override)
+    assert s["floored"] >= 1
+    assert math.isfinite(s["top2"]["ll_sum"])
 
 
 # ---------- 外部確率 TSV ----------
@@ -229,10 +273,28 @@ def _write(text):
 
 
 def test_load_probs_ok_with_optional_top2():
-    path = _write("race_id\thorse_num\tp_win\tp_top2\nR1\t1\t0.6\t0.8\nR1\t2\t0.4\t\n")
+    path = _write("race_id\thorse_num\tp_win\tp_top2\nR1\t1\t0.6\t0.8\nR1\t2\t0.4\t0.9\n")
     m = pl.load_probs(path)
     assert m[("R1", 1)] == {"p_win": pytest.approx(0.6), "p_top2": pytest.approx(0.8)}
-    assert m[("R1", 2)]["p_top2"] is None
+    assert m[("R1", 2)]["p_top2"] == pytest.approx(0.9)
+    # p_top2 列が全行空なら「連対は Harville 由来」の系統として読める
+    m = pl.load_probs(_write("race_id\thorse_num\tp_win\tp_top2\nR1\t1\t0.6\t\nR1\t2\t0.4\t\n"))
+    assert m[("R1", 1)]["p_top2"] is None and m[("R1", 2)]["p_top2"] is None
+
+
+def test_load_probs_rejects_partial_top2():
+    # 一部の行だけ p_top2 があると連対の定義がレースごとに混ざるので拒否する
+    with pytest.raises(ValueError, match="一部の行"):
+        pl.load_probs(_write("race_id\thorse_num\tp_win\tp_top2\nR1\t1\t0.6\t0.8\nR1\t2\t0.4\t\n"))
+
+
+def test_load_probs_errors_carry_path_and_line():
+    path = _write("race_id\thorse_num\tp_win\nR1\tx\t0.5\n")
+    with pytest.raises(ValueError, match=r"probs\.tsv:2 horse_num"):
+        pl.load_probs(path)
+    path = _write("race_id\thorse_num\tp_win\nR1\t1\n")
+    with pytest.raises(ValueError, match=r"probs\.tsv:2 列が足りません"):
+        pl.load_probs(path)
 
 
 def test_load_probs_rejects_bad_input():
@@ -290,6 +352,85 @@ def test_system_probs_requires_full_coverage():
     assert pl.system_probs(rows, partial) is None
 
 
+def test_evaluate_counts_every_missing_system_and_bet_exclusions():
+    races = OrderedDict([
+        ("R1", _rows("R1", [1, 2, 3, 4], [0.4, 0.3, 0.2, 0.1])),
+        ("R2", _rows("R2", [1, 2, 3, 3], [0.1, 0.2, 0.3, 0.4])),  # 3 着同着
+        ("R3", _rows("R3", [None, None, None, None], [0.25] * 4)),  # 結果未取込
+        ("R4", _rows("R4", [1, 2, 3, 4], [0.25] * 4)),
+    ])
+    a = {(r, h): {"p_win": 0.25, "p_top2": None} for r in ("R1", "R2", "R3") for h in range(1, 5)}
+    b = {(r, h): {"p_win": 0.5, "p_top2": None} for r in ("R1", "R2", "R3") for h in range(1, 5)}  # 和 2.0
+    systems = OrderedDict([
+        ("pure", pl.System("pure", None)),
+        ("a", pl.System("a", a)),
+        ("b", pl.System("b", b)),
+    ])
+    res = pl.evaluate(races, systems)
+    # R4 は a・b の両方が欠くので、両方に計上する（最初の系統で打ち切らない）
+    assert res["excluded"]["system_missing:a"] == 1 and res["excluded"]["system_missing:b"] == 1
+    assert res["n_races"] == 3
+    assert res["bet_excluded"][("wide", "dead_heat")] == 1
+    assert res["bet_excluded"][("win", "missing")] == 1
+    assert res["bet_excluded"][("quinella", "missing")] == 1
+    assert res["bet_excluded"][("wide", "missing")] == 1
+    assert res["bet_excluded"][("win", "dead_heat")] == 0
+    # p_win の和が 1 から外れた外部系統は（正規化して評価しつつ）警告に数える
+    assert res["warnings"]["p_win_sum_off:b"] == 3 and res["warnings"]["p_win_sum_off:a"] == 0
+
+
+def test_evaluate_applies_system_lambda_and_direct_top2():
+    fins = [2, 1, 3, 4, 5]
+    races = OrderedDict([("R1", _rows("R1", fins, P5))])
+    top2 = [0.7, 0.6, 0.3, 0.2, 0.2]
+    ext = {("R1", h + 1): {"p_win": P5[h], "p_top2": top2[h]} for h in range(5)}
+    systems = OrderedDict([
+        ("pure", pl.System("pure", None, 1.0, 1.0)),
+        ("ext", pl.System("ext", ext, L2, L3)),
+    ])
+    res = pl.evaluate(races, systems)
+    ext_s = res["scores"]["ext"][0]
+    pure_s = res["scores"]["pure"][0]
+    # 系統ごとの λ が組合せ確率に届いている（同じ p_win でも λ が違えば馬連 NLL が違う）
+    assert ext_s["quinella"][0] == pytest.approx(-math.log(pl.combo_probs(np.array(P5), L2, L3).quinella[0, 1]))
+    assert pure_s["quinella"][0] == pytest.approx(-math.log(pl.combo_probs(np.array(P5), 1.0, 1.0).quinella[0, 1]))
+    assert ext_s["quinella"][0] != pytest.approx(pure_s["quinella"][0])
+    # 直接出力の連対確率が使われている
+    assert np.allclose(ext_s["top2"]["p"], top2)
+
+
+def test_evaluate_market_applies_lambda():
+    rows = _rows("R1", [2, 1, 3, 4, 5], P5)
+    for r, o in zip(rows, [2.0, 3.5, 6.0, 8.0, 12.0]):
+        r["win_odds"] = o
+    races = OrderedDict([("R1", rows)])
+    m1 = pl.evaluate_market(races, 1.0, 1.0)[0]
+    m2 = pl.evaluate_market(races, L2, L3)[0]
+    assert m1["quinella"][0] != pytest.approx(m2["quinella"][0])
+
+
+def test_fidelity_population_matches_prob_eval_rule():
+    ok = _rows("R1", [1, 2, 3], [0.5, 0.3, 0.2])
+    for r, o in zip(ok, [2.0, 3.0, 6.0]):
+        r["win_odds"] = o
+    no_odds = _rows("R2", [1, 2, 3], [0.9, 0.05, 0.05])  # 市場オッズなし → 母集合外
+    no_pure = _rows("R3", [1, 2, 3], [0.4, None, 0.2])
+    for r, o in zip(no_pure, [2.0, 3.0, 6.0]):
+        r["win_odds"] = o
+    brier, n = pl.fidelity_pure_win_brier(OrderedDict([("R1", ok), ("R2", no_odds), ("R3", no_pure)]))
+    assert n == 1
+    assert brier == pytest.approx(((0.5 - 1) ** 2 + 0.3 ** 2 + 0.2 ** 2) / 3)
+
+
+def test_corp_summary_flags_miscalibration():
+    # 連対確率 0.9 と言い続けて実際は 2/10 → 帯外点が出る
+    c = pl.combo_probs(np.full(10, 0.1), 1.0, 1.0)
+    scores = [pl.race_scores(c, list(range(1, 11)), p_top2=np.full(10, 0.9)) for _ in range(30)]
+    d = pl.corp_summary(scores, "top2", n_boot=50, seed=1)
+    assert d["outside"] > 0
+    assert d["n"] == 300
+
+
 def test_evaluate_aligns_races_and_counts_exclusions():
     races = OrderedDict([
         ("R1", _rows("R1", [1, 2, 3, 4], [0.4, 0.3, 0.2, 0.1])),
@@ -308,6 +449,54 @@ def test_evaluate_aligns_races_and_counts_exclusions():
 
 
 # ---------- 集計・CI ----------
+
+
+def test_judge_delta_direction():
+    # NLL・Brier は小さいほど良い、R² は大きいほど良い
+    assert pl.judge_delta("quinella_nll", -0.2, -0.1) == " ✅"
+    assert pl.judge_delta("quinella_nll", 0.1, 0.2) == " ❌"
+    assert pl.judge_delta("quinella_nll", -0.1, 0.1) == ""
+    assert pl.judge_delta("quinella_r2", 0.01, 0.02) == " ✅"
+    assert pl.judge_delta("quinella_r2", -0.02, -0.01) == " ❌"
+    assert pl.judge_delta("top2_brier", -0.02, -0.01) == " ✅"
+
+
+def _varied_scores():
+    c = pl.combo_probs(np.array(P5), L2, L3)
+    orders = [[1, 2, 3, 4, 5], [5, 4, 3, 2, 1], [2, 5, 1, 3, 4], [3, 1, 4, 5, 2], [4, 3, 5, 1, 2]]
+    return [pl.race_scores(c, o) for o in orders]
+
+
+def test_paired_ci_uses_the_same_resample():
+    # B の馬連 NLL を全レース一律 +0.3 にすると、対応あり（同じ再標本）なら差の CI はちょうど −0.3。
+    # 別々に再標本すると幅が出るので、この性質は A/B に同じ重みを掛けていることの検出になる。
+    a = _varied_scores()
+    assert len({round(s["quinella"][0], 6) for s in a}) > 1  # レース間でばらついていること
+    b = []
+    for s in a:
+        t = dict(s)
+        t["quinella"] = (s["quinella"][0] + 0.3, s["quinella"][1])
+        b.append(t)
+    lo, hi = pl.boot_ci(a, b, "quinella_nll", n_boot=200, seed=3)
+    assert lo == pytest.approx(-0.3) and hi == pytest.approx(-0.3)
+    lo1, hi1 = pl.boot_ci(a, None, "quinella_nll", n_boot=200, seed=3)
+    assert hi1 - lo1 > 0.01
+
+
+def test_aggregate_denominators_per_bet_type():
+    c = pl.combo_probs(np.array(P5), L2, L3)
+    full = pl.race_scores(c, [1, 2, 3, 4, 5])
+    dh3 = pl.race_scores(c, [1, 2, 3, 3, 5])  # 3 着同着: 馬連・連対はあり、ワイドは無し
+    agg = pl.aggregate([full, dh3])
+    assert agg["quinella_n"] == 2 and agg["wide_n"] == 1
+    assert agg["wide_brier"] == pytest.approx(full["wide_pairs"]["brier_sum"] / 10)
+    assert agg["quinella_brier"] == pytest.approx(
+        (full["quinella_pairs"]["brier_sum"] + dh3["quinella_pairs"]["brier_sum"]) / 20
+    )
+    assert agg["top2_brier"] == pytest.approx((full["top2"]["brier_sum"] + dh3["top2"]["brier_sum"]) / 10)
+    assert agg["top2_r2"] == pytest.approx(
+        1 - (full["top2"]["ll_sum"] + dh3["top2"]["ll_sum"]) / (full["top2"]["uni_sum"] + dh3["top2"]["uni_sum"])
+    )
 
 
 def test_aggregate_and_paired_ci():
@@ -354,6 +543,100 @@ def test_report_tables_are_well_formed():
         widths = _table_widths(metric_table)
         assert len(set(widths)) == 1, widths
         assert widths[0] == 2 + len(systems) + (len(systems) - 1)
+
+
+# ---------- prob_eval との契約（import して使う前提を固定） ----------
+
+
+def test_prob_eval_contract():
+    import prob_eval as pe
+
+    assert 0 < pe._PROB_FLOOR <= 1e-6
+    # 着順なしは不的中（0）として扱う
+    assert pe._label({"finishing_position": None}, 2) == 0.0
+    assert pe._label({"finishing_position": 2}, 2) == 1.0
+    # オッズ欠落・1.0 未満のレースは市場確率なし
+    assert pe.market_probs([{"win_odds": 2.0}, {"win_odds": None}]) is None
+    assert pe.market_probs([{"win_odds": 2.0}, {"win_odds": 0.9}]) is None
+    q = pe.market_probs([{"win_odds": 2.0}, {"win_odds": 4.0}])
+    assert q == [pytest.approx(2 / 3), pytest.approx(1 / 3)]
+
+
+# ---------- CLI（main） ----------
+
+DUMP_HEADER = [
+    "race_id", "date", "horse_num", "model_win", "model_place", "model_show",
+    "model_win_pure", "model_place_pure", "model_show_pure", "finishing_position", "win_odds", "popularity",
+]
+
+
+def _write_dump(races):
+    """races: [(race_id, date, [(horse_num, pure, fin, odds)])] を 12 列の dump にする。"""
+    lines = ["\t".join(DUMP_HEADER)]
+    for rid, d, horses in races:
+        for h, p, f, o in horses:
+            lines.append("\t".join(map(str, [rid, d, h, p, p, p, p, p, p, f, o, h])))
+    return _write("\n".join(lines) + "\n")
+
+
+def _cli_fixture():
+    horses = [(1, 0.4, 1, 2.0), (2, 0.3, 2, 3.0), (3, 0.2, 3, 5.0), (4, 0.1, 4, 9.0)]
+    dump = _write_dump([
+        ("R0", "2025-06-30", horses),  # dev 窓の外
+        ("R1", "2025-08-01", horses),
+        ("R2", "2025-09-01", horses),
+        ("R3", "2026-02-01", horses),  # test 窓
+    ])
+    ext = _write("race_id\thorse_num\tp_win\n" + "".join(
+        f"{r}\t{h}\t0.25\n" for r in ("R0", "R1", "R2", "R3") for h in range(1, 5)
+    ))
+    return dump, ext
+
+
+def _run(monkeypatch, capsys, argv, dirty=False):
+    monkeypatch.setattr(pl, "code_version", lambda: ("abc1234", dirty))
+    rc = pl.main(argv)
+    return rc, capsys.readouterr().out
+
+
+def test_main_dev_window_lambda_and_sources(monkeypatch, capsys):
+    dump, ext = _cli_fixture()
+    rc, out = _run(monkeypatch, capsys, [dump, "--system", f"ext={ext}", "--lambda", "ext=0.5,0.7", "--bootstrap", "20"])
+    assert rc == 0
+    assert "対象レース 2（窓内 2" in out  # 窓外の R0・test 窓の R3 は入らない
+    assert "ext（λ=0.5,0.7・`probs.tsv` sha256 " in out
+    assert "pure（λ=1.0,1.0）" in out
+    assert "### test" not in out
+    assert "券種別の除外" in out
+
+
+def test_main_rejects_bad_arguments(monkeypatch, capsys):
+    dump, ext = _cli_fixture()
+    bad = [
+        [dump, "--windows", "test"],  # test 窓は記録必須
+        [dump, "--system", f"a={ext}", "--system", f"a={ext}"],  # 系統名の重複
+        [dump, "--system", f"a={ext}", "--lambda", "b=0.9,0.8"],  # 存在しない系統への λ
+        [dump, "--lambda", "pure=nan,0.8"],
+        [dump, "--lambda", "pure=0,0.8"],
+        [dump, "--system", f"a|b={ext}"],  # 表を壊す系統名
+        [dump, "--ledger", _write(""), "--label", "x\n## 偽の節"],  # 改行入りの見出し
+    ]
+    for argv in bad:
+        with pytest.raises(SystemExit):
+            _run(monkeypatch, capsys, argv)
+
+
+def test_main_ledger_requires_clean_code_and_appends(monkeypatch, capsys):
+    dump, ext = _cli_fixture()
+    ledger = _write("# ledger\n")
+    with pytest.raises(SystemExit):
+        _run(monkeypatch, capsys, [dump, "--windows", "both", "--ledger", ledger, "--label", "v"], dirty=True)
+    rc, _ = _run(monkeypatch, capsys, [dump, "--windows", "both", "--ledger", ledger, "--label", "v1", "--bootstrap", "20"])
+    assert rc == 0
+    text = open(ledger, encoding="utf-8").read()
+    assert text.startswith("# ledger\n") and "## v1" in text
+    assert "git abc1234" in text and "-dirty" not in text
+    assert "### dev" in text and "### test" in text
 
 
 # ---------- ledger ----------
