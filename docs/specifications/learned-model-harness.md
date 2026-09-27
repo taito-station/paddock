@@ -1072,3 +1072,7 @@ EV_blended = α·EV_pure + (1-α)·(1/overround)
     （全 5,052R）0.0545 と一致。(b) prob_ledger の pure win Brier（market_ok 母集合）0.065672 も
     prob_eval の win×pure 0.06567 と一致した。
   - prob_ledger の全数値は `docs/docs-original/719-prob-ledger.md`（(a) の突合値は ledger の出力外なので上に記録した）。
+  - v0.1 再計測（同じ dump）で券種別の除外理由を出したところ、**同着 0 件・すべて着順欠落**だった（dev: 単勝 99 /
+    馬連・連対 135 / ワイド・3連複 174R、test: 89 / 134 / 169R）。PDF 由来の着順が一部取れない既知の制約と整合する。
+    評価母集合は着順の取れたレースに限られる点に注意（欠落が特定の条件に偏っていれば母集合の偏りになる。未検証）。
+    連対の擬似 R²（一様 2/n 比）は test で 0.045。
