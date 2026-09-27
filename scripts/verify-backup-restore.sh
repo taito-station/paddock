@@ -47,6 +47,10 @@
 # 週次スケジュール: deployments/launchd/com.paddock.verify-backup-restore.plist（日曜 04:00）
 set -euo pipefail
 
+# コンテナ実行環境（lima/nerdctl・colima/docker）の判定と exec はここへ集約する（#731）。
+# shellcheck source=scripts/lib/pg-container.sh
+source "$(dirname "$0")/lib/pg-container.sh"
+
 log() { echo "[$(date '+%Y-%m-%dT%H:%M:%S%z')] $*"; }
 
 notify() {
@@ -60,7 +64,7 @@ SCRATCH_DB=""
 _cleanup() {
     local rc=$?
     if [[ -n "$SCRATCH_DB" ]]; then
-        docker exec "$CONTAINER" dropdb -U "$PG_USER" --if-exists "$SCRATCH_DB" 2>/dev/null || true
+        pg_container_exec "$CONTAINER" dropdb -U "$PG_USER" --if-exists "$SCRATCH_DB" 2>/dev/null || true
         log "scratch DB を削除しました: $SCRATCH_DB"
     fi
     if [[ $rc -ne 0 ]]; then
@@ -83,6 +87,9 @@ verify-backup-restore.sh - paddock dump の restore 検証（scratch DB で行�
   PADDOCK_VERIFY_DUMP     使用する dump ファイルを直接指定（指定時は BACKUP_DIR を無視）
   PADDOCK_PG_CONTAINER    Postgres コンテナ名（既定: paddock-postgres）
   PADDOCK_PG_USER         DB ユーザ（既定: paddock）
+  PADDOCK_PG_RUNTIME      コンテナ実行環境 auto|lima|docker（既定: auto。詳細は
+                          scripts/lib/pg-container.sh）
+  PADDOCK_LIMA_VM         lima 実行環境時の VM 名（既定: paddock）
 
 突合対象テーブルは dump 生成時のサイドカー(<dump>.rowcounts)に従う（backup-db.sh 側の
 PADDOCK_VERIFY_TABLES で決まる。既定 race_odds_snapshots,races,horses）。
@@ -102,11 +109,8 @@ PG_USER="${PADDOCK_PG_USER:-paddock}"
 # 突合対象テーブルと期待行数は dump 生成時のサイドカー(<dump>.rowcounts)から読む（後述）。
 # live golden とは突合しない（時刻ズレによる偽 FAIL を避けるため・#474 レビュー S1）。
 
-# --- docker 疎通確認 ---
-command -v docker >/dev/null || { echo "docker が見つからない（PATH を確認）" >&2; exit 1; }
-running_containers="$(docker ps --format '{{.Names}}')"
-if ! grep -qxF "$CONTAINER" <<<"$running_containers"; then
-    echo "コンテナ $CONTAINER が起動していない（docker compose -f deployments/compose.yaml up -d postgres）" >&2
+# --- 実行環境の判定＋起動確認（lima/nerdctl・colima/docker のどちらでも動く） ---
+if ! pg_container_require_running "$CONTAINER"; then
     exit 1
 fi
 
@@ -172,7 +176,7 @@ log "サイドカー読込: ${#expected_rows[@]} テーブル（${ROWCOUNTS_FILE
 ts="$(date +%Y%m%d_%H%M%S)"
 SCRATCH_DB="paddock_restore_verify_${ts}"
 log "scratch DB を作成: $SCRATCH_DB"
-docker exec "$CONTAINER" createdb -U "$PG_USER" "$SCRATCH_DB"
+pg_container_exec "$CONTAINER" createdb -U "$PG_USER" "$SCRATCH_DB"
 
 # --- restore ---
 # set -e 下で実 exit code を捕捉するため `|| restore_rc=$?` で握る（`if ! ...` だと $? が常に 0 で
@@ -180,7 +184,7 @@ docker exec "$CONTAINER" createdb -U "$PG_USER" "$SCRATCH_DB"
 # 致命的失敗として扱う（scratch は空 DB で権限警告は出ない前提）。
 log "pg_restore 開始 → $SCRATCH_DB"
 restore_rc=0
-docker exec -i "$CONTAINER" pg_restore -U "$PG_USER" -d "$SCRATCH_DB" < "$DUMP_FILE" || restore_rc=$?
+pg_container_exec -i "$CONTAINER" pg_restore -U "$PG_USER" -d "$SCRATCH_DB" < "$DUMP_FILE" || restore_rc=$?
 if [[ $restore_rc -ne 0 ]]; then
     echo "pg_restore が異常終了（壊れた dump か restore 失敗）: rc=$restore_rc" >&2
     exit 1
@@ -194,7 +198,7 @@ for row in "${expected_rows[@]}"; do
     expected="${row##*$'\t'}"  # TAB より後 = 期待行数
     # scratch の実行数を COUNT(*) で取得（golden には一切触れない）。
     scratch_rc=0
-    scratch_count="$(docker exec "$CONTAINER" psql -U "$PG_USER" -d "$SCRATCH_DB" -t -A \
+    scratch_count="$(pg_container_exec "$CONTAINER" psql -U "$PG_USER" -d "$SCRATCH_DB" -t -A \
         -c "SELECT COUNT(*) FROM $table;" 2>/dev/null)" || scratch_rc=$?
     if [[ $scratch_rc -ne 0 || -z "$scratch_count" || ! "$scratch_count" =~ ^[0-9]+$ ]]; then
         log "WARN: テーブル $table の scratch 行数取得に失敗（テーブル欠落か復元不備）: '$scratch_count'"
