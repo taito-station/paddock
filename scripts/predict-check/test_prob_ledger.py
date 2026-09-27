@@ -8,6 +8,7 @@
 
 import math
 import os
+import subprocess
 import sys
 import tempfile
 from collections import OrderedDict
@@ -236,7 +237,20 @@ def test_exclusion_reasons_by_bet_group():
     # 1 着同着 → 2 着が存在しない: 同着を優先して数える
     assert pl.exclusion_reasons([1, 1, 3, 4]) == {"win": "dead_heat", "quinella": "dead_heat", "wide": "dead_heat"}
     # 着順が取れていない（結果未取込）
-    assert pl.exclusion_reasons([None, None, None]) == {"win": "missing", "quinella": "missing", "wide": "missing"}
+    assert pl.exclusion_reasons([None] * 4) == {"win": "missing", "quinella": "missing", "wide": "missing"}
+    # 頭数不足（dump の行が 1 頭分しかない等）は同着・欠落より優先して別理由にする
+    assert pl.exclusion_reasons([1]) == {"win": "field_too_small", "quinella": "field_too_small", "wide": "field_too_small"}
+    assert pl.exclusion_reasons([1, 2]) == {"win": None, "quinella": "field_too_small", "wide": "field_too_small"}
+    assert pl.exclusion_reasons([1, 2, 3]) == {"win": None, "quinella": None, "wide": "field_too_small"}
+
+
+def test_race_scores_skips_too_small_fields():
+    # 1 頭分しか行の無いレースは NLL=0・一様=0 で単勝の平均を押し下げるので、全券種で母集合外にする
+    s = pl.race_scores(pl.combo_probs(np.array([1.0]), 1.0, 1.0), [1])
+    assert all(s[k] is None for k in ("win", "quinella", "top2", "wide", "trio"))
+    # 3 頭立てのワイド・3連複は的中確率が自明に 1 なので評価しない
+    s = pl.race_scores(pl.combo_probs(np.array([0.5, 0.3, 0.2]), 1.0, 1.0), [1, 2, 3])
+    assert s["win"] is not None and s["quinella"] is not None and s["wide"] is None and s["trio"] is None
     # 3 着だけ欠落（3 着馬の中止など）
     assert pl.exclusion_reasons([1, 2, None, 4]) == {"win": None, "quinella": None, "wide": "missing"}
 
@@ -319,6 +333,10 @@ def test_validate_windows4():
     assert pl.validate_windows4("2025-07-01", "2026-01-01", "2026-01-01", "2026-08-31")  # 境界日の共有
     assert pl.validate_windows4("2025-12-31", "2025-07-01", "2026-01-01", "2026-08-31")  # 逆転
     assert pl.validate_windows4("2025/07/01", "2025-12-31", "2026-01-01", "2026-08-31")  # 形式
+    # dev が test より後にあるだけ（重なりなし）は「前に置く」旨のメッセージ
+    assert "より前に" in pl.validate_windows4("2026-09-01", "2026-12-31", "2026-01-01", "2026-08-31")
+    # dev を凍結 eval 窓に重ねると記録なしで eval 窓を覗けるので拒否する
+    assert "凍結" in pl.validate_windows4("2026-01-01", "2026-08-31", "2026-09-01", "2026-12-31")
     # basic 形式は fromisoformat（3.11+）を通るが、文字列比較で窓が黙って空になるので拒否する
     # （test-to を basic 形式にすると大小比較の検査はすり抜けるので、形式検査だけが頼り）
     assert pl.validate_windows4("2025-07-01", "2025-12-31", "2026-01-01", "20260831")
@@ -349,7 +367,10 @@ def test_system_probs_requires_full_coverage():
     p, t2 = pl.system_probs(rows, full)
     assert np.allclose(p, [0.5, 0.3, 0.2]) and t2 is None
     partial = {k: v for k, v in full.items() if k != ("R1", 3)}
-    assert pl.system_probs(rows, partial) is None
+    assert pl.system_probs(rows, partial) == "horse_partial"
+    assert pl.system_probs(rows, {}) == "race_absent"
+    rows[1]["model_win_pure"] = None
+    assert pl.system_probs(rows, None) == "horse_partial"
 
 
 def test_evaluate_counts_every_missing_system_and_bet_exclusions():
@@ -368,7 +389,7 @@ def test_evaluate_counts_every_missing_system_and_bet_exclusions():
     ])
     res = pl.evaluate(races, systems)
     # R4 は a・b の両方が欠くので、両方に計上する（最初の系統で打ち切らない）
-    assert res["excluded"]["system_missing:a"] == 1 and res["excluded"]["system_missing:b"] == 1
+    assert res["excluded"]["race_absent:a"] == 1 and res["excluded"]["race_absent:b"] == 1
     assert res["n_races"] == 3
     assert res["bet_excluded"][("wide", "dead_heat")] == 1
     assert res["bet_excluded"][("win", "missing")] == 1
@@ -377,6 +398,20 @@ def test_evaluate_counts_every_missing_system_and_bet_exclusions():
     assert res["bet_excluded"][("win", "dead_heat")] == 0
     # p_win の和が 1 から外れた外部系統は（正規化して評価しつつ）警告に数える
     assert res["warnings"]["p_win_sum_off:b"] == 3 and res["warnings"]["p_win_sum_off:a"] == 0
+
+
+def test_evaluate_warns_on_suspicious_inputs():
+    rows = _rows("R1", [1, 2, 3, 4], [0.4, 0.3, 0.2, 0.1])
+    rows[3]["horse_num"] = 6  # 行数 4 < 馬番の最大 6（取消・除外か行の欠け）
+    races = OrderedDict([("R1", rows)])
+    ext = {("R1", h): {"p_win": 0.25, "p_top2": 0.25} for h in (1, 2, 3, 6)}  # 連対の和 1.0（定義違い）
+    ext[("R1", 9)] = {"p_win": 0.1, "p_top2": 0.1}  # dump に無い馬
+    systems = OrderedDict([("pure", pl.System("pure", None)), ("ext", pl.System("ext", ext))])
+    res = pl.evaluate(races, systems)
+    assert res["warnings"]["tsv_extra_horse:ext"] == 1
+    assert res["warnings"]["rows_lt_max_horse_num"] == 1
+    assert res["warnings"]["p_top2_sum_off:ext"] == 1
+    assert res["n_races"] == 1
 
 
 def test_evaluate_applies_system_lambda_and_direct_top2():
@@ -443,7 +478,7 @@ def test_evaluate_aligns_races_and_counts_exclusions():
     ])
     res = pl.evaluate(races, systems)
     assert res["n_races"] == 1
-    assert res["excluded"]["system_missing:ext"] == 1
+    assert res["excluded"]["race_absent:ext"] == 1
     assert set(res["scores"]) == {"pure", "ext"}
     assert len(res["scores"]["pure"]) == 1
 
@@ -538,7 +573,8 @@ def test_report_tables_are_well_formed():
         OrderedDict([("pure", pl.System("pure", None))]),
         OrderedDict([("pure", pl.System("pure", None)), ("ext", pl.System("ext", ext))]),
     ):
-        lines = pl.report_window("dev", races, systems, (1.0, 1.0), n_boot=20, seed=1)
+        lines, res = pl.report_window("dev", races, systems, (1.0, 1.0), n_boot=20, seed=1)
+        assert res["n_races"] == 4
         metric_table = [ln for ln in lines if ln.startswith("|")][: 2 + len(pl.METRICS)]
         widths = _table_widths(metric_table)
         assert len(set(widths)) == 1, widths
@@ -612,18 +648,70 @@ def test_main_dev_window_lambda_and_sources(monkeypatch, capsys):
 
 def test_main_rejects_bad_arguments(monkeypatch, capsys):
     dump, ext = _cli_fixture()
+    weird_dir = tempfile.mkdtemp()
+    weird = os.path.join(weird_dir, "a|b.tsv")
+    with open(weird, "w", encoding="utf-8") as f:
+        f.write(open(ext, encoding="utf-8").read())
     bad = [
-        [dump, "--windows", "test"],  # test 窓は記録必須
-        [dump, "--system", f"a={ext}", "--system", f"a={ext}"],  # 系統名の重複
-        [dump, "--system", f"a={ext}", "--lambda", "b=0.9,0.8"],  # 存在しない系統への λ
-        [dump, "--lambda", "pure=nan,0.8"],
-        [dump, "--lambda", "pure=0,0.8"],
-        [dump, "--system", f"a|b={ext}"],  # 表を壊す系統名
-        [dump, "--ledger", _write(""), "--label", "x\n## 偽の節"],  # 改行入りの見出し
+        ([dump, "--windows", "test"], "必ず記録"),  # test 窓は記録必須
+        ([dump, "--system", f"a={ext}", "--system", f"a={ext}"], "重複"),  # 系統名の重複
+        ([dump, "--system", f"a={ext}", "--lambda", "b=0.9,0.8"], "存在しない系統名"),
+        ([dump, "--lambda", "pure=nan,0.8"], "有限の正の数"),
+        ([dump, "--lambda", "pure=0,0.8"], "有限の正の数"),
+        ([dump, "--system", f"a|b={ext}"], "英数字"),  # 表を壊す系統名
+        ([dump, "--ledger", _write(""), "--label", "x\n## 偽の節"], "1 行"),  # 改行入りの見出し
+        ([dump, "--system", f"w={weird}"], "ファイル名"),  # 表を壊すファイル名
+        ([dump, "--dev-from", "2026-01-01", "--dev-to", "2026-08-31", "--test-from", "2026-09-01",
+          "--test-to", "2026-12-31"], "凍結"),  # dev で eval 窓を覗く
     ]
-    for argv in bad:
+    for argv, msg in bad:
         with pytest.raises(SystemExit):
             _run(monkeypatch, capsys, argv)
+        assert msg in capsys.readouterr().err, (argv, msg)
+
+
+def test_main_fidelity_note_per_window(monkeypatch, capsys):
+    dump, _ = _cli_fixture()
+    ledger = _write("# ledger\n")
+    _run(monkeypatch, capsys, [dump, "--windows", "both", "--ledger", ledger, "--label", "v", "--bootstrap", "20"])
+    text = open(ledger, encoding="utf-8").read()
+    dev, test = text.split("### test")
+    assert "参考値。prob_eval に同じ窓は無い" in dev
+    assert "prob_eval の eval 窓の win×pure と一致すること" in test
+
+
+def test_main_ledger_refuses_empty_window(monkeypatch, capsys):
+    dump, _ = _cli_fixture()
+    ledger = _write("# ledger\n")
+    with pytest.raises(SystemExit):
+        _run(monkeypatch, capsys, [dump, "--windows", "both", "--test-from", "2026-01-01", "--test-to", "2026-01-31",
+                                   "--ledger", ledger, "--label", "v", "--bootstrap", "20"])
+    assert "0 件" in capsys.readouterr().err
+    assert open(ledger, encoding="utf-8").read() == "# ledger\n"
+
+
+def test_code_version_fails_closed_and_sees_untracked_py(monkeypatch):
+    def boom(*a):
+        raise subprocess.CalledProcessError(1, "git")
+
+    monkeypatch.setattr(pl, "_git_run", boom)
+    assert pl.code_version() == ("unknown", True)
+
+    def fake(status):
+        def run(*args):
+            if args[0] == "rev-parse":
+                return "abc1234" if args[1] == "--short" else "/repo"
+            return status
+        return run
+
+    monkeypatch.setattr(pl, "_git_run", fake(""))
+    assert pl.code_version() == ("abc1234", False)
+    monkeypatch.setattr(pl, "_git_run", fake("?? scripts/predict-check/new_model.py"))
+    assert pl.code_version()[1] is True
+    monkeypatch.setattr(pl, "_git_run", fake("?? scripts/predict-check/notes.txt"))
+    assert pl.code_version()[1] is False
+    monkeypatch.setattr(pl, "_git_run", fake(" M scripts/predict-check/prob_eval.py"))
+    assert pl.code_version()[1] is True
 
 
 def test_main_ledger_requires_clean_code_and_appends(monkeypatch, capsys):
