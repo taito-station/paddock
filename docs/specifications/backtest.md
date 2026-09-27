@@ -389,7 +389,7 @@ python3 scripts/predict-check/prob_eval.py bt_dump_<sha>.tsv \
   帯外点、市場参考列は点推定のみ。
 - baseline は `model_win_pure` → 素の Harville。市場（単勝オッズ）は別母集合の参考列でゲートにしない。
 - 母集合は券種別（単勝 = 1 着一意 / 馬連・連対 = 1・2 着一意 / ワイド・3連複 = 1〜3 着一意）。外れたレースは
-  券種グループごとに「同着 / 着順欠落」の理由別件数をレポートに出す。
+  券種グループごとに「頭数不足 / 同着 / 着順欠落」の理由別件数をレポートに出す。
 - 結果は `docs/docs-original/719-prob-ledger.md` に `--ledger --label` で append する。使い方は
   `learned-model-harness.md` ③。
 

@@ -1012,8 +1012,8 @@ EV_blended = α·EV_pure + (1-α)·(1/overround)
    - 任意の確率系統（外部 TSV `race_id, horse_num, p_win[, p_top2]`）を割引 Harville（系統ごとに λ 指定）で
      組合せ確率にし、馬連・連対・ワイド・3連複・単勝の NLL・擬似 R²（一様比）、Brier（連対・馬連ペア・
      ワイドペア）、CORP（連対・ワイドペア）を出す。指標表の値にはレース単位ブートストラップの 95% CI を付ける
-     （CORP は点推定と帯外点、市場参考列は点推定のみ）。券種ごとに母集合から外したレースは、同着 / 着順欠落の
-     理由別に件数を出す。
+     （CORP は点推定と帯外点、市場参考列は点推定のみ）。券種ごとに母集合から外したレースは、頭数不足 / 同着 /
+     着順欠落の理由別に件数を出す。
    - 主指標は馬連 NLL と連対 log-loss。baseline は現行純モデル（`model_win_pure` → 素の Harville）。
    - 市場（単勝オッズ → Harville）は別の母集合の参考列で、ゲートにしない。
 3. **版ごとの ledger**: 計測結果は `docs/docs-original/719-prob-ledger.md` に append-only で追記し、改善の推移を追う。
