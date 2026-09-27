@@ -11,6 +11,7 @@
 - Δ 列は baseline（`pure` = `model_win_pure` → 素の Harville）との差。✅ は CI が改善側で 0 を跨がない、❌ は悪化側で跨がない。
 - **採否は test 窓だけで判断する**。dev 窓は反復用（`docs/specifications/backtest.md`「評価プロトコル」）。
 - 市場参考列は別母集合で、ゲートにしない。
+- 追記は main 最新の上で行う（並行ブランチで末尾に追記すると、マージ時に末尾で競合する）。
 
 定義・経緯は `docs/specifications/learned-model-harness.md` の決定ログ「#719」。
 
