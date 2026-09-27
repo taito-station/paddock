@@ -5,7 +5,7 @@ status: Confirmed
 kind: knowledge
 doc_class: [D24, D17, D19]
 tags: [D24, D17, D19]
-updated: "2026-08-12"
+updated: "2026-09-27"
 ---
 
 # 予想精度バックテスト/評価基盤 仕様書
@@ -363,6 +363,24 @@ python3 scripts/predict-check/prob_eval.py bt_dump_<sha>.tsv \
 市場系統の含意確率は `q_i = (1/odds_i)/Σ(1/odds)`（オーバーラウンド除去・estimate.rs の blend と
 同じ正規化）。R² の 3 系統比較は「勝者が一意 かつ 全馬にオッズがある」レースに母集合を揃える
 （同着・勝者なし・オッズ不完全の除外件数はレポートに出る）。
+
+### 独立確率の版ごと評価: `scripts/predict-check/prob_ledger.py`（#719）
+
+市場非依存の確率系統（#720 など）を、馬連・連対を主指標に版ごとに比べる評価器。`prob_eval.py`（上記・
+単勝中心の採否ゲート）とは別物で、系統を外部 TSV で差し込める。
+
+| 窓 | 期間 | 位置づけ |
+|---|---|---|
+| **dev** | 2025-07-01〜2025-12-31（fit 窓の内側） | 反復・調整用。**採否根拠にしない**（既定で測るのはこちらだけ） |
+| **test** | 2026-01-01〜2026-08-31（= eval 窓） | 版の節目にだけ `--windows test` で測る。採否はここだけ |
+
+- 本プロトコルの範囲内の運用（fit 窓で調整・eval 窓で採否）であって、窓の上書きではない。
+- 主指標は馬連 NLL（`−ln P(実際の 1-2 着ペア)`）と連対 log-loss。副指標はワイド NLL（的中 3 ペアの平均）・
+  3連複 NLL・単勝 NLL・一様比の擬似 R²・Brier・CORP（連対・ワイドペア）。すべてレース単位 CI 付き。
+- baseline は `model_win_pure` → 素の Harville。市場（単勝オッズ）は別母集合の参考列でゲートにしない。
+- 母集合は券種別（単勝 = 1 着一意 / 馬連・連対 = 1・2 着一意 / ワイド・3連複 = 1〜3 着一意）。
+- 結果は `docs/docs-original/719-prob-ledger.md` に `--ledger --label` で append する。使い方は
+  `learned-model-harness.md` ③。
 
 ---
 
