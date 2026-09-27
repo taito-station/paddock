@@ -28,6 +28,7 @@ cd "$(dirname "$0")/.." || exit 1
 REPO_ROOT="$PWD"
 LIB="$REPO_ROOT/scripts/lib/pg-container.sh"
 BACKUP_SCRIPT="$REPO_ROOT/scripts/backup-db.sh"
+VERIFY_SCRIPT="$REPO_ROOT/scripts/verify-backup-restore.sh"
 
 export LANG=C.UTF-8 LC_ALL=C.UTF-8
 unset PADDOCK_PG_RUNTIME PADDOCK_LIMA_VM PADDOCK_PG_CONTAINER PADDOCK_PG_USER PADDOCK_PG_DB
@@ -59,6 +60,9 @@ done
 # BSD 互換の `stat -f '%m %N' file...` だけに応答する偽 stat（GNU/BSD の差異を CI から隠す）。
 cat > "$BASE_STUB/stat" <<'EOS'
 #!/usr/bin/env bash
+# 実 mtime は不要（各ケースの dump は 1 個か、順序を問わない構成にしている）ので、外部
+# コマンド（python3 等。pyenv 経由だと更に tr/sed が要るなど環境依存が強い）に頼らず、
+# 固定の epoch 値を返す純 bash 実装にする。
 set -u
 if [ "${1-}" != "-f" ] || [ "${2-}" != "%m %N" ]; then
     echo "stat stub: 未対応の呼び方: $*" >&2
@@ -66,7 +70,7 @@ if [ "${1-}" != "-f" ] || [ "${2-}" != "%m %N" ]; then
 fi
 shift 2
 for f in "$@"; do
-    python3 -c 'import os,sys; st = os.stat(sys.argv[1]); print(int(st.st_mtime), sys.argv[1])' "$f"
+    printf '%s %s\n' "${FAKE_STAT_MTIME:-1700000000}" "$f"
 done
 EOS
 chmod +x "$BASE_STUB/stat"
@@ -392,6 +396,46 @@ if [ "$rc" -eq 1 ] && [ "${dump_count:-0}" -eq 0 ] && grep -q '見つからな�
     ok "backup-db.sh: 実行環境が見つからない → rc=1・dump 未生成"
 else
     ng "backup-db.sh: 実行環境が見つからない → rc=1・dump 未生成" "rc=$rc dump_count=$dump_count / $out"
+fi
+
+echo "=== verify-backup-restore.sh 本体（lima 経路の end-to-end） ==="
+
+# dump 選択（find -exec stat ...）とサイドカー突合の両方を実際に踏ませる。dump の中身は
+# pg_restore --list/pg_restore がどちらも fake で中身を読まないため任意のバイト列でよい。
+mk_dump_fixture() {
+    local dir="$1" rows="$2"
+    mkdir -p "$dir"
+    local dump="$dir/paddock-20260101-000000.dump"
+    printf 'FAKE-DUMP-BYTES' > "$dump"
+    printf '%s\n' "$rows" > "$dump.rowcounts"
+    printf '%s' "$dump"
+}
+
+# --- 18. lima 経路: サイドカー記録値と scratch 復元行数が一致 → SUCCESS で rc=0 ---
+d="$(case_dir verify-lima-ok)"; stub="$(new_stub "$d/bin" bash env dirname date mkdir rm du cut sort find basename grep cat stat osascript limactl)"
+backup_dir="$d/backups"
+mk_dump_fixture "$backup_dir" $'race_odds_snapshots\t3' >/dev/null
+out="$(env -i PATH="$stub" HOME="$d/home" PADDOCK_BACKUP_DIR="$backup_dir" \
+    FAKE_LIMA_STATUS="Running" FAKE_PSQL_OUTPUT="3" \
+    bash "$VERIFY_SCRIPT" 2>&1)"; rc=$?
+if [ "$rc" -eq 0 ] && grep -q 'SUCCESS:' <<<"$out"; then
+    ok "verify-backup-restore.sh: lima 経路・行数一致 → SUCCESS・rc=0"
+else
+    ng "verify-backup-restore.sh: lima 経路・行数一致 → SUCCESS・rc=0" "rc=$rc / $out"
+fi
+
+# --- 19. lima 経路: サイドカー記録値と scratch 復元行数が不一致 → FAIL で rc=1（scratch は削除する） ---
+d="$(case_dir verify-lima-mismatch)"; stub="$(new_stub "$d/bin" bash env dirname date mkdir rm du cut sort find basename grep cat stat osascript limactl)"
+backup_dir="$d/backups"
+mk_dump_fixture "$backup_dir" $'race_odds_snapshots\t3' >/dev/null
+log="$d/call.log"
+out="$(env -i PATH="$stub" HOME="$d/home" PADDOCK_BACKUP_DIR="$backup_dir" CALL_LOG="$log" \
+    FAKE_LIMA_STATUS="Running" FAKE_PSQL_OUTPUT="5" \
+    bash "$VERIFY_SCRIPT" 2>&1)"; rc=$?
+if [ "$rc" -eq 1 ] && grep -q 'MISMATCH' <<<"$out" && grep -q 'dropdb' "$log" 2>/dev/null; then
+    ok "verify-backup-restore.sh: lima 経路・行数不一致 → FAIL・rc=1・scratch DB は削除される"
+else
+    ng "verify-backup-restore.sh: lima 経路・行数不一致 → FAIL・rc=1・scratch DB は削除される" "rc=$rc / $out"
 fi
 
 echo
