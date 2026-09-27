@@ -208,18 +208,18 @@ jobs:
           bash scripts/test-hooks-session-stale-check.sh
           python3 scripts/test-hooks-check-knowledge-impact.py
 
-  # stdlib のみの Python テストを ubuntu-latest 同梱の python3 で走らせる軽量ジョブ（#416 / #464）。
-  # 対象は 2 群:
+  # Python テストを走らせる軽量ジョブ（#416 / #464 / #719）。対象は 3 群:
   #   1. scripts/predict-check/test_*.py — unittest ではなく `def test_*()` + assert を末尾の
   #      main() が集めて実行する「自走式」。
   #   2. scripts/harness/test_faithfulness.py — 忠実性ゲート（check_faithfulness.sh の集計ロジック）の
   #      unittest 単体テスト。faithfulness.py もこのテストも stdlib のみ（README・requirements.txt に明記）。
-  # いずれも `python3 <file>` 実行で assert / unittest 失敗時に非 0 終了する。
-  # setup-python/pip を挟まない（Rust/Postgres 不要なので独立させ並列で即終わる）。
-  # 3. numpy 依存の predict-check テスト（確率評価系: prob_eval / prob_ledger / harville_lambda_fit /
-  #    blend_fit / mag_sweep）。上の stdlib 実行では numpy 不在で自己スキップするため、別ステップで
-  #    venv に numpy・pytest だけを入れて pytest で走らせる（#719。独立確率の評価器は以後の版の採否を
-  #    決める物差しなので、CI で無検査にしない）。依存は scripts/harness/requirements.txt の numpy ピンに揃える。
+  # 1・2 はいずれも `python3 <file>` 実行で assert / unittest 失敗時に非 0 終了する。この 2 群は
+  # ubuntu-latest 同梱の python3 だけで走り、setup-python/pip を挟まない。
+  # 3. scripts/predict-check の全テストを pytest で走らせる（#719）。numpy に依存するテスト（確率評価系）は
+  #    1 の stdlib 実行では自己スキップして無検査になるため、venv に numpy・pytest を入れた別ステップで
+  #    ディレクトリごと実行する（ファイルを列挙しないので、今後増える numpy テストも自動で対象になる）。
+  #    依存は scripts/predict-check/requirements-ci.txt で推移依存まで == 固定し、--only-binary で wheel だけを
+  #    入れる（上流の新版やビルドスクリプトで必須チェックが揺れないように）。ハッシュ検証は別 issue。
   # スコープ外（このジョブで走らせない）: scripts/harness/test_train_pl.py / test_train_gbm.py。
   #   これらは numpy/scipy/scikit-learn 依存（requirements.txt の venv 必須）で、pip インストールが
   #   重い。学習モデル路線は #309 Phase B で棄却（ADR 0053）済みのため、依存を要するこの 2 本を
@@ -238,14 +238,12 @@ jobs:
             echo "== $f"
             python3 "$f"
           done
-      - name: Run numpy-dependent predict-check tests (確率評価系・#719)
+      - name: Run predict-check tests with numpy (pytest・#719)
         # ubuntu のシステム python は PEP 668 で pip を拒むので venv に入れる。
         run: |
           python3 -m venv "$RUNNER_TEMP/pc-venv"
-          "$RUNNER_TEMP/pc-venv/bin/pip" install --quiet 'numpy>=2,<3' 'pytest>=8,<10'
-          cd scripts/predict-check
-          "$RUNNER_TEMP/pc-venv/bin/python" -m pytest -q -p no:cacheprovider \
-            test_prob_eval.py test_prob_ledger.py test_harville_lambda_fit.py test_blend_fit.py test_mag_sweep.py
+          "$RUNNER_TEMP/pc-venv/bin/pip" install --quiet --only-binary=:all: -r scripts/predict-check/requirements-ci.txt
+          "$RUNNER_TEMP/pc-venv/bin/python" -m pytest -q -p no:cacheprovider scripts/predict-check
 
   # scripts/ のシェルスクリプトを shellcheck で機械検査する（#416）。従来は人力レビューのみで
   # 機械検査ゼロだった。ubuntu-latest 同梱の shellcheck で、拡張子 .sh に加え shebang スクリプト
