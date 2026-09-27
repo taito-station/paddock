@@ -1054,3 +1054,12 @@ EV_blended = α·EV_pure + (1-α)·(1/overround)
     α 判定で行い、ADR 0063 自身の再検証条件（リーク無しのオッズと結果が数百 R）を満たす形にする。
 - 関連 issue: エピック #723、#720（独立 PL top-k）、#721（確定オッズと着順）、#722（α 判定）。#709 は #720 に吸収、
   #705 は保留。
+- **ledger 初版（v0 baseline・dump dac050e・git 483cb04）**: 現行純モデル → 素の Harville の test 窓（2026-01〜08）は
+  馬連 NLL 4.206 [4.177, 4.236]（1,588R）、連対 log-loss 0.3896 [0.3873, 0.3919]、ワイド NLL 3.144、3連複 NLL 5.454、
+  馬連の擬似 R²（一様比）0.053。
+  - 連対は CORP 帯外 9/10 で、系統的に較正がずれている（#703 の place 非校正と整合）。
+  - 参考: 市場（単勝オッズ → 素の Harville・別母集合 1,541R）は馬連 NLL 3.270、連対 0.319 で、純モデルとの差は大きい。
+    #720 はまずこの baseline からの改善を dev で追う。
+  - 忠実性: 同じ dump に `prob_eval.py` を流すと、#703 のベースライン（R²・Brier）を全桁再現した。
+    prob_ledger の pure win Brier（market_ok 母集合）0.065672 も prob_eval の win×pure 0.06567 と一致した。
+  - 全数値は `docs/docs-original/719-prob-ledger.md`。
