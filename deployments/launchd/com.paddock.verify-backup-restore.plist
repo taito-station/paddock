@@ -9,8 +9,10 @@
   インストール: deployments/launchd/install.sh がまとめて配置・load する（プレースホルダ
   __REPO_ROOT__=リポの絶対パス / __HOME__=$HOME を実値へ置換）。
   __HOME__ はログ出力先用（backup-db / backup-staleness と同一ログファイルに集約）。
-  PATH は launchd の最小環境で docker を解決するため明示する（Intel の /usr/local/bin と
-  Apple Silicon の /opt/homebrew/bin の両方を含める）。
+  PATH は launchd の最小環境で docker/limactl を解決するため明示する（Intel の /usr/local/bin と
+  Apple Silicon の /opt/homebrew/bin の両方を含める。docker/colima/lima の brew prefix が環境で
+  異なる）。実行環境（lima/nerdctl または colima/docker）の判定は scripts/verify-backup-restore.sh
+  が source する scripts/lib/pg-container.sh が行う（PADDOCK_PG_RUNTIME=auto 既定・#731）。
 
   アンインストール（backup-db・backup-staleness と同様に常駐。uninstall.sh では外さない）:
     launchctl bootout gui/$UID/com.paddock.verify-backup-restore

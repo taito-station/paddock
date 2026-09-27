@@ -1,13 +1,33 @@
 # paddock DB バックアップ / 復元運用（#265）
 
-`race_odds_snapshots`（発走直前オッズの時系列アーカイブ）は Colima の named volume
-`paddock-pgdata` 1 か所にしか無く、過去オッズは**再取得不能**。volume 喪失（Colima reset /
-`docker volume rm` / ディスク障害）に備え、full DB を定期退避する。
+`race_odds_snapshots`（発走直前オッズの時系列アーカイブ）は Postgres コンテナの named volume
+`paddock-pgdata` 1 か所にしか無く、過去オッズは**再取得不能**。volume 喪失（VM 削除 /
+`nerdctl volume rm` or `docker volume rm` / ディスク障害）に備え、full DB を定期退避する。
+
+## 実行環境（lima/nerdctl or colima/docker）の自動判定（#731）
+
+Postgres コンテナは開発機によって **Lima VM 内の rootless nerdctl** または **colima（docker）**
+のいずれかで動く。`scripts/backup-db.sh` / `scripts/verify-backup-restore.sh` は
+[`scripts/lib/pg-container.sh`](../../scripts/lib/pg-container.sh) を source し、`PADDOCK_PG_RUNTIME`
+（既定 `auto`）で実行環境を決める:
+
+- `auto`（既定）: `limactl` があり VM（`PADDOCK_LIMA_VM`・既定 `paddock`）が `Running` なら **lima**。
+  そうでなく `docker` があり対象コンテナが `docker ps` に見えれば **docker**。どちらにも当たらなければ
+  判定に使った事実（limactl の有無・VM の状態・docker の応答）を列挙して失敗する（黙って進めない）。
+- `lima` / `docker`: 判定を固定したい場合に明示指定する。
+- exec は環境に応じて `limactl shell "$PADDOCK_LIMA_VM" -- nerdctl exec ...`（lima）または
+  `docker exec ...`（docker）を使う。
+
+```sh
+PADDOCK_PG_RUNTIME=lima scripts/backup-db.sh            # lima を強制
+PADDOCK_PG_RUNTIME=docker scripts/backup-db.sh           # docker を強制
+PADDOCK_LIMA_VM=paddock-dev scripts/backup-db.sh         # 別名 VM を使う場合
+```
 
 - **退避スクリプト**: [`scripts/backup-db.sh`](../../scripts/backup-db.sh)
 - **日次スケジュール**: [`deployments/launchd/com.paddock.backup-db.plist`](../launchd/com.paddock.backup-db.plist)
 - **退避先**:
-  - **ローカル権威**（`PADDOCK_BACKUP_DIR`・既定 `~/paddock-backups`）: dump 本体。**世代管理（列挙→剪定）はここで行う**。launchd 下でも確実に列挙・削除でき、常に KEEP 世代に bounded。主脅威の Colima volume 喪失（reset / `docker volume rm`）はこのローカル退避だけで外れる。
+  - **ローカル権威**（`PADDOCK_BACKUP_DIR`・既定 `~/paddock-backups`）: dump 本体。**世代管理（列挙→剪定）はここで行う**。launchd 下でも確実に列挙・削除でき、常に KEEP 世代に bounded。主脅威のコンテナ volume 喪失（Lima VM 削除・`nerdctl volume rm` / colima reset・`docker volume rm`）はこのローカル退避だけで外れる。
   - **off-machine ミラー**（`PADDOCK_BACKUP_MIRROR_DIR`・**既定は空=無効**・オプトイン）: 指定すると各 dump をそこへコピーしディスク障害にも備える。**実ファイルシステム（外付け/NAS 等）を指定する**。iCloud Drive は使わない（下記）。
 - **ミラー未設定時の警告（#507）**: 既定（ミラー無効）ではディスク障害でローカル権威も失うと復元不能になる。これに気づけるよう、`backup-db.sh` は未設定時に **ログへ毎回警告を残し**（`~/Library/Logs/paddock-backup.log`）、**macOS 通知は 7 日に 1 回**へ間引いて出す（間引き状態は `~/paddock-backups/.mirror-unset-warned` の mtime で管理。ミラー有効化で自動解除）。
 - **形式 / 世代**: `paddock-YYYYMMDD-HHMMSS.dump`（`pg_dump -Fc` custom-format・圧縮込み）。既定で直近 14 世代を保持（`PADDOCK_BACKUP_KEEP`）。
@@ -18,8 +38,9 @@
 > が無制限に溜まる穴があった。ミラーは既定 off にし、必要なら剪定が確実に効く実ファイルシステムを指定する。
 
 > **重要**: host の `pg_dump` が PG17 サーバより古い（v14 等）とダンプを拒否する。退避も復元も
-> **必ず container 内（`paddock-postgres`・pg17）の pg_dump/pg_restore を `docker exec` で使う**
-> （host に pg17 client を入れる必要はない）。
+> **必ず container 内（`paddock-postgres`・pg17）の pg_dump/pg_restore を、実行環境に応じた exec
+> （`limactl shell ... -- nerdctl exec` または `docker exec`）で使う**（host に pg17 client を
+> 入れる必要はない。実行環境の判定は上記「実行環境の自動判定」節を参照）。
 
 ## 手動バックアップ
 
@@ -52,9 +73,10 @@ tail -f ~/Library/Logs/paddock-backup.log                           # ログ確�
 | `com.paddock.backup-staleness` | 毎時 + 起動時 |
 | `com.paddock.verify-backup-restore` | 毎週日曜 04:00（#474） |
 
-> `kickstart` の 1 回実行で launchd の最小環境から docker まで到達できるか（PATH / docker context）を
-> 必ず確認する。docker を `DOCKER_HOST` 環境変数で指している場合は launchd に引き継がれないため、
-> plist の `EnvironmentVariables` に `DOCKER_HOST` を追記する（docker context 経由なら不要）。
+> `kickstart` の 1 回実行で launchd の最小環境からコンテナ実行環境（limactl または docker）まで
+> 到達できるか（PATH / docker context）を必ず確認する。docker を `DOCKER_HOST` 環境変数で指している
+> 場合は launchd に引き継がれないため、plist の `EnvironmentVariables` に `DOCKER_HOST` を追記する
+> （docker context 経由なら不要）。
 
 アンインストール（backup-db / backup-staleness / verify-backup-restore は常駐のため `uninstall.sh`
 では外れない。手動で bootout する）:
@@ -69,9 +91,15 @@ rm ~/Library/LaunchAgents/com.paddock.verify-backup-restore.plist
 
 ## 復元
 
-> **前提**: 復元コマンドはすべて docker を使う。実行前に **colima（docker ランタイム）が起動していること**を
-> 確認する。起動していない場合は `colima start`（または `brew services start colima`）を先に実行する。
-> 詳細は [README「必要環境」の docker ランタイム項](../../README.md#必要環境) を参照。
+> **前提**: 以下の手動復元コマンドは docker（colima 等）想定で書いている。**Lima VM 内 nerdctl**
+> 実行環境の場合は `docker exec` を `limactl shell paddock -- nerdctl exec`、
+> `docker compose` を `limactl shell paddock -- nerdctl compose` に読み替える（VM 名は
+> `PADDOCK_LIMA_VM` の既定 `paddock`）。実行前に対象の runtime が起動していることを確認する
+> （docker: `colima start` または `brew services start colima`。lima:
+> `limactl start paddock` または `limactl list` で `Running` を確認）。どちらの runtime かは
+> `scripts/backup-db.sh` / `scripts/verify-backup-restore.sh` 自体は上記「実行環境の自動判定」で
+> 吸収するが、**手動復元は自動判定の対象外**なので実行者が判断する。docker 側の詳細は
+> [README「必要環境」の docker ランタイム項](../../README.md#必要環境) を参照。
 
 ### 全体復元（災害時・volume 喪失後）
 
@@ -81,11 +109,14 @@ rm ~/Library/LaunchAgents/com.paddock.verify-backup-restore.plist
 ```sh
 DUMP=~/paddock-backups/paddock-YYYYMMDD-HHMMSS.dump   # ミラーを有効化しているならミラー側のパスでも可
 docker exec -i paddock-postgres pg_restore -U paddock -d paddock --clean --if-exists < "$DUMP"
+# lima の場合:
+# limactl shell paddock -- nerdctl exec -i paddock-postgres pg_restore -U paddock -d paddock --clean --if-exists < "$DUMP"
 ```
 
-> volume ごと失った場合は先に `docker compose -f deployments/compose.yaml up -d postgres` で空の
-> paddock DB を作ってから上記を実行する（`-Fc` dump は全テーブル＋`_sqlx_migrations` を含むため、
-> 復元後にアプリ起動しても再マイグレーションは走らない＝チェックサム一致）。
+> volume ごと失った場合は先に `docker compose -f deployments/compose.yaml up -d postgres`
+> （lima: `limactl shell paddock -- nerdctl compose -f deployments/compose.yaml up -d postgres`）
+> で空の paddock DB を作ってから上記を実行する（`-Fc` dump は全テーブル＋`_sqlx_migrations` を
+> 含むため、復元後にアプリ起動しても再マイグレーションは走らない＝チェックサム一致）。
 
 ### snapshots だけ戻す（部分復元）
 
@@ -93,6 +124,7 @@ docker exec -i paddock-postgres pg_restore -U paddock -d paddock --clean --if-ex
 DUMP=~/paddock-backups/paddock-YYYYMMDD-HHMMSS.dump   # ミラーを有効化しているならミラー側のパスでも可
 docker exec -i paddock-postgres pg_restore -U paddock -d paddock \
     --clean --if-exists -t race_odds_snapshots < "$DUMP"
+# lima の場合は上記と同様に docker exec → limactl shell paddock -- nerdctl exec に読み替える
 ```
 
 > 部分復元は「スキーマ互換な live DB が既にある」前提。単表 `--clean` は FK/依存順の都合で
@@ -143,6 +175,8 @@ docker exec paddock-postgres psql -U paddock -d paddock_restore_test \
 docker exec paddock-postgres psql -U paddock -d paddock \
     -c "SELECT COUNT(*) FROM race_odds_snapshots;"
 docker exec paddock-postgres dropdb -U paddock paddock_restore_test
+# lima の場合は上記すべての `docker exec` を
+# `limactl shell paddock -- nerdctl exec` に読み替える
 ```
 
 ## スコープ外
