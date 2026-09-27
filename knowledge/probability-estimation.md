@@ -1,8 +1,8 @@
 ---
-# knowledge 規約に基づくメタデータ（knowledge/README.md）。specifications はその場で
-# knowledge に昇格（ADR 履歴・相互リンクを壊さないため物理移動しない）。
+# knowledge 規約に基づくメタデータ（knowledge/README.md）。旧 docs/specifications/ 由来で、
+# ADR 0092 で knowledge/ に統合した（`kind: specification` で区別）。
 status: Confirmed
-kind: knowledge
+kind: specification
 doc_class: [D22, D19]
 tags: [D22, D19]
 updated: "2026-09-27"

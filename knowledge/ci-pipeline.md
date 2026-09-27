@@ -1178,8 +1178,10 @@ paddock は蒸留層を `docs/knowledge/`, `docs/specifications/`, `docs/qa/`, `
 9. **既存の決定ログは書き換えない。** 移動前からあるエントリの本文は旧パス表記（`docs/knowledge/…` 等）の
    まま歴史として残し、リンク切れを防ぐために**相対リンクのリンク先だけ**を新レイアウトへ追従させる。
    本文（決定ログ以外）の記述とパスは新レイアウトに合わせる
-10. 本 ADR は [README.md](README.md) 決定ログ「ADR 0055」の「`docs/specifications/` は物理移動しない」を
-    supersede する（同エントリは append-only のため書き換えない）
+10. 本 ADR は、これまで README 本文・CLAUDE.md・各仕様書の frontmatter コメントに書かれていた
+    「`docs/specifications/` はその場で knowledge に昇格し、物理移動しない」という方針を覆す
+    （決定ログのエントリとしては記録されていなかったため、本文側を新方針に書き換える）。
+    旧 specifications 由来の 17 本は frontmatter `kind: specification` で区別する
 
 #### 理由
 
