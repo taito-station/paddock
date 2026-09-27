@@ -17,19 +17,19 @@ api-server の確率推定（market α=0.3 ブレンド）を本命の源とし�
 import json
 import os
 import re
-import subprocess
 import sys
 import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
+import pgq  # noqa: E402
 from live_ev import BET_LABEL, build_bets  # noqa: E402
 
 API = os.environ.get("PADDOCK_API_URL", "http://127.0.0.1:8080")
 # host は localhost ではなく 127.0.0.1 に固定する（#212）。Colima は IPv4(127.0.0.1) のみ
 # 公開しており、localhost が ::1 に先解決されると psql が別の postgres に当たって間欠失敗する。
 # PADDOCK_DB_URL で上書きする場合も host は localhost を避け 127.0.0.1 を使うこと（同じ間欠失敗が再発する）。
-DB_URL = os.environ.get("PADDOCK_DB_URL", "postgres://paddock:paddock@127.0.0.1:5432/paddock")
+# 既定値と読み出しは pgq.db_url() に一元化。
 BLEND = "0.3"
 BUDGET = 5000
 MARKS = ["◎", "○", "▲", "△", "☆"]  # 勝率上位 5 頭へ
@@ -49,20 +49,13 @@ def fetch_all_odds(date):
 
     race_id をループ内で補間せず、`psql -v date=...` の変数束縛（`:'date'` は安全にクォート展開）
     で 1 回だけ引く。SQL 文字列補間の禁止（rules/sql/queries.md）と N+1 回避を両立する。
-    変数展開は `-c` では効かないため、SQL は stdin 経由で psql に渡す。
+    変数束縛・stdin 渡し・ON_ERROR_STOP は pgq.query が担う。
     """
     sql = ("SELECT o.race_id, o.combination_key, o.odds, o.popularity "
            "FROM race_odds o JOIN race_cards c ON c.race_id = o.race_id "
            "WHERE c.date = :'date' AND o.bet_type = 'win';")
-    out = subprocess.run(
-        ["psql", DB_URL, "-tA", "-F", "\t", "-v", f"date={date}"],
-        input=sql, capture_output=True, text=True, check=True,
-    ).stdout
     d = {}
-    for line in out.splitlines():
-        if not line.strip():
-            continue
-        rid, num, odds, pop = line.split("\t")
+    for rid, num, odds, pop in pgq.query(sql, variables={"date": date}):
         d.setdefault(rid, {})[int(num)] = (float(odds), int(pop) if pop else None)
     return d
 
@@ -73,7 +66,10 @@ try:
     races = get(f"{API}/api/races?date={DATE}")["races"]
 except Exception as exc:
     sys.exit(f"races 一覧の取得に失敗（api-server 未起動? {API}）: {exc}")
-all_odds = fetch_all_odds(DATE)
+try:
+    all_odds = fetch_all_odds(DATE)
+except pgq.PsqlError as exc:
+    sys.exit(f"単勝オッズの取得に失敗（DB 未起動?）: {exc}")
 
 preds = []
 for r in races:

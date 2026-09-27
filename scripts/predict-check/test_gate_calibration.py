@@ -5,6 +5,7 @@
 1−控除率 に一致すること／バケット・閾値表の境界。DB にも netkeiba にも触らない。
 """
 import gate_calibration as G
+import pgq
 
 
 def approx(a, b, eps=1e-9):
@@ -171,7 +172,7 @@ def test_nearest_odds_picks_latest_at_or_before_capture():
 def test_load_live_ev_skips_broken_rows():
     good = "\t".join(["r1", "2026-08-09", "chukyo", "12", "18:30", "2026-08-09T09:00:00Z",
                       "16.25", "13", "f", "f", '{"legs": [], "race_budget": 5000}'])
-    rows = G.load_live_ev(good + "\n" + "too\tfew\tcols\n" + "\n")
+    rows = G.load_live_ev(pgq.tsv_rows(good + "\n" + "too\tfew\tcols\n" + "\n"))
     assert list(rows) == ["r1"] and len(rows["r1"]) == 1
     assert rows["r1"][0]["roi"] == 16.25 and rows["r1"][0]["race_no"] == 12
     assert rows["r1"][0]["axis"] == 13
@@ -210,7 +211,7 @@ def test_axis_stability_keeps_round_trip_visible():
 def test_load_odds_uses_wide_band_midpoint():
     tsv = ("r1\twide\t1-2\t40.8\t43.7\t2026-08-09T09:00:00+00:00\n"
            "r1\tquinella\t1-2\t200.9\t\t2026-08-09T09:00:00+00:00\n")
-    odds = G.load_odds(tsv)
+    odds = G.load_odds(pgq.tsv_rows(tsv))
     tbl = odds["r1"]["2026-08-09T09:00:00+00:00"]
     assert approx(tbl["wide"]["1-2"], (40.8 + 43.7) / 2)
     assert approx(tbl["quinella"]["1-2"], 200.9)

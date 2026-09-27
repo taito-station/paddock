@@ -2,9 +2,12 @@
 
 外部依存なし（curl サブプロセスのみ）。netkeiba は既に本体スクレイパが使う唯一のデータ源。
 """
+import os
 import re
 import subprocess
 import sys
+import tempfile
+import time
 
 # JRA 場コード → (slug, 日本語)
 VENUES = {
@@ -112,13 +115,19 @@ def parse_race_id(rid: str):
     }
 
 
+RESULT_URL = "https://race.netkeiba.com/race/result.html?race_id={rid}"
+
+
 def fetch_result(rid: str):
-    """race/result.html をパースし finishing rows を返す。
+    """race/result.html を取得してパースし finishing rows を返す（キャッシュ無し・当日運用向け）。"""
+    return parse_result(decode(curl(RESULT_URL.format(rid=rid))), rid)
+
+
+def parse_result(html: str, rid: str, warn: bool = True):
+    """race/result.html の finishing rows を返す。
 
     各 HorseList 行: Rank=着順 / 2列目 Num=枠 / 3列目 Num=馬番 / HorseNameSpan=馬名。
     """
-    url = f"https://race.netkeiba.com/race/result.html?race_id={rid}"
-    html = decode(curl(url))
     rows = []
     for r in re.findall(r'class="HorseList">(.*?)</tr>', html, re.S):
         rank = re.search(r'class="Rank">\s*(\d+)\s*<', r)
@@ -139,7 +148,7 @@ def fetch_result(rid: str):
             "name": name.group(1).strip() if name else "",
         })
     # HTML 取得は成功したのに 1 行も取れない＝サイト構造変化の疑い。集計を黙って汚さないよう警告。
-    if not rows:
+    if not rows and warn:
         print(f"[warn] 結果行を抽出できませんでした（HTML 構造変化の疑い）: {rid}", file=sys.stderr)
     return rows
 
@@ -156,6 +165,11 @@ _UNORDERED = {"quinella", "wide", "trio"}
 
 
 def fetch_payouts(rid: str):
+    """race/result.html を取得して確定配当を返す（キャッシュ無し・当日運用向け）。"""
+    return parse_payouts(decode(curl(RESULT_URL.format(rid=rid))), rid)
+
+
+def parse_payouts(html: str, rid: str, warn: bool = True):
     """race/result.html の払戻ブロックから確定配当を抽出する（答え合わせ・戦略評価用）.
 
     返り値: {type_label: {combination_code: payout_per_100}}（100 円あたり払戻[円]）。
@@ -165,8 +179,6 @@ def fetch_payouts(rid: str):
     本体 Rust parse_race_payouts(parse/payout.rs) の規則をミラー:
     table.Payout_Detail_Table（ワイド以降は別テーブルなので複数並ぶ）の各 <tr class>。
     """
-    url = f"https://race.netkeiba.com/race/result.html?race_id={rid}"
-    html = decode(curl(url))
     out = {}
     n_rows = 0
     # 払戻テーブルは複数並ぶ。各テーブル内の <tr ...class="..."> を順に処理する。
@@ -209,8 +221,9 @@ def fetch_payouts(rid: str):
             # 組合せ数と配当数が食い違う行は対応がズレ誤った組番に配当を貼るおそれ。
             # 当該券種を skip して warn（払戻金額に直結するため沈黙させない）。
             if len(combos) != len(amounts):
-                print(f"[warn] {rid} {label}: 組合せ {len(combos)} 件 / 配当 {len(amounts)} 件 "
-                      f"が不一致のためスキップ", file=sys.stderr)
+                if warn:
+                    print(f"[warn] {rid} {label}: 組合せ {len(combos)} 件 / 配当 {len(amounts)} 件 "
+                          f"が不一致のためスキップ", file=sys.stderr)
                 continue
             bucket = out.setdefault(label, {})
             for code, pay in zip(combos, amounts):
@@ -218,7 +231,123 @@ def fetch_payouts(rid: str):
     # 有効な払戻が 1 件も取れない＝中止/全馬取消、または構造変化。空 dict を返し警告。
     # 対象行を検出したのに out が空（セル欠落や件数不一致で全 skip）のケースも拾えるよう
     # n_rows ではなく out で判定する（検出行数を併記して構造変化に気づけるようにする）。
-    if not out:
+    if not out and warn:
         print(f"[warn] 有効な払戻を抽出できませんでした"
               f"（中止/全馬取消 or 構造変化の疑い, 検出行数={n_rows}）: {rid}", file=sys.stderr)
     return out
+
+
+# ---------- result.html の HTML 単位キャッシュ（#714） ----------
+# 着順（parse_result）・確定単勝オッズ（zure_sign_probe.parse_result_odds）・払戻（parse_payouts）は
+# 同じ result.html を読むので、ページを 1 回だけ取得して共有する（分析スクリプト用。当日運用の
+# fetch_result / fetch_payouts はレース確定前にも呼ばれるのでキャッシュしない）。
+RESULT_CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".cache_nk_result_html")
+FETCH_PAUSE_SEC = 1.5  # netkeiba への礼儀（ネットワーク取得したときだけ待つ）
+
+
+def is_truncated(raw: bytes) -> bool:
+    """キャッシュ読み出し時の破損検査（空・`</html>` 欠落＝書き込み途中の切断）。
+
+    パーサに依存させない: パーサ退行や DOM 変化で有効なキャッシュを全消去→一斉再取得に
+    しないため。パーサ依存の完全性検査は保存判定（unsaved_reason）でだけ行う。
+    """
+    return not raw or b"</html>" not in raw[-4096:].lower()
+
+
+def unsaved_reason(raw: bytes, html: str, rid: str):
+    """取得したページを恒久キャッシュしない理由（確定済みページなら None）。
+
+    確定済み＝切断なし かつ 着順 1 行以上 かつ 単勝払戻あり。未生成・中止・全馬取消・払戻未掲載の
+    ページは保存しない（後日の再走で取り直せるように）。
+    """
+    if is_truncated(raw):
+        return "切断（</html> 欠落）"
+    has_rank = any(r["rank"] is not None for r in parse_result(html, rid, warn=False))
+    has_win = bool(parse_payouts(html, rid, warn=False).get("win"))
+    if has_rank and has_win:
+        return None
+    if has_rank:
+        # 着順が出ているのに単勝払戻だけ取れない＝払戻未掲載か払戻 DOM の変化。後者だと毎回全件
+        # 再取得になるので、黙らせずに気づけるようにする。
+        return "着順はあるが単勝払戻なし（払戻未掲載 or 払戻表の構造変化）"
+    return "着順なし（結果未確定・中止 or 構造変化）"
+
+
+def _atomic_write(path: str, data: bytes) -> None:
+    d = os.path.dirname(path)
+    os.makedirs(d, exist_ok=True)
+    # 同じディレクトリに一意名の tmp を作り os.replace（並走プロセス同士でも tmp が衝突しない）
+    fd, tmp = tempfile.mkstemp(dir=d, prefix=f".{os.path.basename(path)}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except FileNotFoundError:
+            pass
+        raise
+
+
+class ResultPages:
+    """result.html を race_id ごとに 1 回だけ取得して返す。
+
+    - ディスク: 確定済みページ（unsaved_reason が None）だけを raw bytes で保存。読み出しで
+      is_truncated なら削除して取り直す。
+    - プロセス内メモ: 保存しなかった未完ページだけを保持し、同一プロセス内では再取得しない
+      （保存済みページはディスクから読み直す。全件をメモリに抱えない）。
+    - 検査に落ちても HTML は返す（着順だけ出ているページで着順を取れるよう、判定は各パーサに任せる）。
+    - 取得に失敗（例外）しても待ってから送出する（失敗が続いてもペーシングを崩さない）。
+    fetch / sleep はテスト用の注入口（既定は呼び出し時に nk.curl / time.sleep を引く）。
+    """
+
+    def __init__(self, cache_dir=RESULT_CACHE_DIR, fetch=None, sleep=None):
+        self.cache_dir = cache_dir
+        self._fetch = fetch
+        self._sleep = sleep
+        self._memo = {}
+
+    def html(self, rid: str) -> str:
+        # race_id はファイル名と URL に入るので 12 桁の ASCII 数字に限る（パス外への書き込み・削除を防ぐ）
+        if not re.fullmatch(r"[0-9]{12}", rid):
+            raise ValueError(f"race_id は 12 桁の数字のみ: {rid!r}")
+        if rid in self._memo:
+            return self._memo[rid]
+        path = os.path.join(self.cache_dir, f"{rid}.html")
+        try:
+            with open(path, "rb") as f:
+                raw = f.read()
+        except FileNotFoundError:
+            raw = None
+        if raw is not None and not is_truncated(raw):
+            return decode(raw)
+        if raw is not None:
+            print(f"[warn] 破損した結果ページキャッシュを破棄して再取得: {path}", file=sys.stderr)
+            try:
+                os.remove(path)
+            except FileNotFoundError:
+                pass  # 並走プロセスが先に消した
+        try:
+            raw = (self._fetch or curl)(RESULT_URL.format(rid=rid))
+        finally:
+            (self._sleep or time.sleep)(FETCH_PAUSE_SEC)
+        html = decode(raw)
+        reason = unsaved_reason(raw, html, rid)
+        if reason is None:
+            _atomic_write(path, raw)
+        else:
+            print(f"[warn] 結果ページを保存しません（{reason}）: {rid}", file=sys.stderr)
+            self._memo[rid] = html
+        return html
+
+
+_default_pages = None
+
+
+def result_page(rid: str) -> str:
+    """既定キャッシュ（RESULT_CACHE_DIR）経由で result.html を返す。"""
+    global _default_pages
+    if _default_pages is None:
+        _default_pages = ResultPages()
+    return _default_pages.html(rid)

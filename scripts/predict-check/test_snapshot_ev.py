@@ -5,6 +5,7 @@ ROI ロジック自体は live_ev 側（test_live_ev.py）で担保済みなの�
 「snapshot 構造 → 時系列走査 → ever/final 判定」と「ワイド mid 変換」の正しさに絞る。
 """
 import snapshot_ev_report as S
+import pgq
 
 
 def approx(a, b, eps=1e-9):
@@ -63,7 +64,7 @@ def test_load_snapshot_rows_column_guard():
     good = "\t".join(["R1", "2026-06-27", "hakodate", "1",
                       "win", "1", "3.5", "", "2026-06-27T00:00:00+00:00"])
     bad = "R1\twin\t3.5"  # 列数不足は捨てる
-    rows = S.load_snapshot_rows(good + "\n" + bad + "\n")
+    rows = S.load_snapshot_rows(pgq.tsv_rows(good + "\n" + bad + "\n"))
     assert len(rows) == 1 and rows[0]["bet_type"] == "win", rows
 
 

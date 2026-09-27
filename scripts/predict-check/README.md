@@ -134,7 +134,8 @@ python3 scripts/predict-check/snapshot_ev_report.py --snapshots-tsv snaps.tsv --
 
 | ファイル | 役割 |
 |---|---|
-| `nk.py` | netkeiba 共通ヘルパ（場コード表・race_id 列挙・結果/確定配当パース） |
+| `nk.py` | netkeiba 共通ヘルパ（場コード表・race_id 列挙・結果/確定配当パース・結果ページの HTML キャッシュ `result_page`, #714） |
+| `pgq.py` | psql 共通ヘルパ（接続パスワードを argv/例外に出さない・`--csv` で行を返す, #714） |
 | `list_races.py` | `YYYYMMDD [場コード...]` の race_id を列挙 |
 | `upcoming_races.py` | 発走時刻で「これから発走する直近レース」だけを列挙（発走済み除外＋発走 N 分以内, #197） |
 | `fetch_results.py` | 結果を取得して `results.json` 出力（答え合わせ用） |
@@ -172,6 +173,41 @@ paddock-analyze backtest --from <YYYY-MM-DD> --to <YYYY-MM-DD> --blend-alpha 1.0
 > なお退役ツールにあった一部の細かい診断（モデル幅＝フラットさ分布・市場 implied 対照の reliability・
 > 大穴過大評価＝モデル win≥5%×市場20倍以上）は backtest に直接の代替が無いが、いずれもリークした純予測上の
 > 値で無効だったため復元しない（必要なら backtest の reliability 帯・人気帯セグメントで近い観察ができる）。
+
+## DB / netkeiba 取得の共通層（#714）
+
+分析スクリプトは DB と netkeiba 結果ページを各自で取らず、共通層を使う。
+
+- **DB は `pgq.query(sql, url=None, variables=None)`**。`psql <URL> -c` を直接呼ばない。
+  URL のパスワード（userinfo・クエリの `password=`）は抜いて libpq の環境変数 `PGPASSWORD` で渡すので、
+  **psql の argv（`ps` の既定表示）と例外メッセージ（`PsqlError`）には出ない**（`PsqlError` に載るのは
+  接続先のホスト・ポート・DB 名だけ。`subprocess.CalledProcessError` は argv＝URL を文字列化するので使わない）。
+  - 環境変数は同一ユーザーなら `ps eww` で見える。また各 CLI の `--db-url` にパスワード入り URL を
+    渡すと Python 自身の argv に出るので、パスワードは環境変数 `PADDOCK_DB_URL` で渡す。
+  - 接続先は URI 形式（`postgres://` / `postgresql://`）のみ。パスワードを確実に抜けない URL は値を載せずに
+    `PsqlError` で拒否する: key/value 形式（`host=... password=...`）・userinfo 以外（クエリ含む）に残る未エンコードの
+    `@`（パスワード中の `@` / `/` / `?` は `%40` / `%2F` / `%3F` にエンコードする）・`sslpassword=`（libpq に対応する
+    環境変数が無い）。
+  - **SQL はコード内の定数に限り、値は必ず `variables` で束縛する**（`variables={"date": d}` と SQL 側の
+    `:'date'`）。SQL は stdin で渡すので psql のメタコマンド（`\!` 等）も解釈される——値を SQL 文字列に
+    補間しないことが前提。
+  - 出力は `--csv` を `csv.reader` で読むので、TEXT にタブ・改行が入っても列がずれない（CR は LF に正規化）。
+    NULL と空文字はどちらも `''`。外部供給 TSV（`--rows-tsv` 等）は `pgq.tsv_rows` で同じ「行＝セル list」に
+    揃えてローダへ渡す。100 万行級を 1 行ずつ捨てながら読むローダは `pgq.query_iter`（イテレータ）を使う。
+- **netkeiba 結果ページは `nk.result_page(race_id)`**（着順 `nk.parse_result`・払戻 `nk.parse_payouts`・
+  確定単勝オッズ `zure_sign_probe.parse_result_odds` は同じ HTML を読む）。1 レース 1 取得で、
+  ネットワーク取得時だけ 1.5 秒待つ。キャッシュは `.cache_nk_result_html/<race_id>.html`（raw bytes）。
+  - 保存するのは確定済みページ（着順 1 行以上 かつ 単勝払戻あり）だけ。未生成・中止・全馬取消・払戻未掲載は
+    保存しない（プロセス内では 1 回に抑えるが、次の実行では取り直す）。検査に落ちても HTML は返し、
+    保存しなかった理由を `[warn] 結果ページを保存しません（…）` で出す（払戻表の構造変化で毎回全件
+    再取得になっていても気づけるように）。
+  - 取得に失敗しても 1.5 秒待ってから例外を送出する（失敗が続いてもペーシングを崩さない）。
+  - 書き込みは同ディレクトリの一意名 tmp → `os.replace`。読み出しで空・`</html>` 欠落（切断）なら削除して
+    取り直す。パーサ依存の検査は読み出しでは行わない（パーサ退行で全キャッシュが消えないように）。
+  - 旧 `.cache_nk_results/`（抽出済み JSON）は読まない。不要なら手で消してよい。初回は全ページを取り直す
+    （389 ページで約 17 分）。別の checkout で作った `.cache_nk_result_html/` があればコピーすれば取り直し不要。
+- 当日運用の `fetch_results.py` / `fetch_payouts.py`（`nk.fetch_result` / `nk.fetch_payouts`）は
+  レース確定前にも呼ばれるのでキャッシュしない。
 
 ## 注意
 

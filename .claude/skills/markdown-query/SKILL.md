@@ -40,8 +40,8 @@ tools/mdq/.venv/bin/pip install -r tools/mdq/requirements.txt   # rank_bm25 / Py
 
 ## 使い方の要点
 
-1. **索引**: `scripts/mdq index`。`mdq.toml` の `[index].roots`（docs/specifications, docs/knowledge,
-   docs/qa, docs/docs-original）を走査。存在しない dir は自動スキップ。増分更新。
+1. **索引**: `scripts/mdq index`。`mdq.toml` の `[index].roots`（knowledge,
+   qa, docs-original）を走査。存在しない dir は自動スキップ。増分更新。
    **ADR 統合（ADR 0073）より前の索引を持つ環境は一度だけ `rm -rf .mdq && scripts/mdq index`**。
    増分の prune は roots 配下しか消さないため、旧 `docs/adr/*` のチャンクが居残り、存在しない
    パスが検索結果に出続ける。

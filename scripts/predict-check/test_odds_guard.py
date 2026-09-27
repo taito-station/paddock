@@ -9,6 +9,7 @@
 import os
 
 import odds_guard as G
+import pgq
 
 
 def test_sentinels_are_loaded_from_the_shared_golden():
@@ -129,7 +130,7 @@ def test_gate_calibration_drops_band_sentinels():
         "r1\ttrio\t2-3-4\t42.5\t\t2026-08-15T10:00:00Z",        # 正常 → 残る
         "r1\ttrio\t3-4-5\t9999.9\t\t2026-08-15T10:00:00Z",      # trio の 9999.9 は正当（#630）→ 残る
     ])
-    got = GC.load_odds(rows)
+    got = GC.load_odds(pgq.tsv_rows(rows))
     at = got["r1"]["2026-08-15T10:00:00Z"]
     assert set(at["wide"]) == {"3-4"}, at["wide"]
     assert set(at["trio"]) == {"2-3-4", "3-4-5"}, at["trio"]

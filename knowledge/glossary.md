@@ -14,8 +14,8 @@ sources:
   - knowledge/prediction-search-api.md
   - knowledge/feature-resolution-diagnosis.md
   - knowledge/netkeiba-datasource.md
-distilled_from_sha: "d85071b"
-updated: "2026-08-23"
+distilled_from_sha: "72c18e0"
+updated: "2026-09-27"
 ---
 
 # 用語集（ユビキタス言語）
@@ -92,6 +92,7 @@ ADR 0077）:
 | overround（控除率分の超過） | `Σ implied > 1.0` の超過分。合計 1.0 へ正規化して除いたものが市場確率 | 同上 |
 | `blended` | `blended = α·model + (1−α)·market`。**α はモデル重み**で、α=1.0 が純モデル・α=0.0 が市場のみ。**本番既定 α=0.2**（`RECOMMENDED_MARKET_BLEND_ALPHA`。オッズが無いレースはモデルのみへ自動フォールバック） | [probability-estimation.md](probability-estimation.md) REQ-D22-001（採用の経緯は ADR 0034） |
 | ⚠ 純モデル確率（pure） | ブレンド前のモデル確率。**順位付けは `blended`、EV 計算は pure** という層分離を守る | ADR 0055 / [product-goals.md](product-goals.md) REQ-D01-002 |
+| 対数プール（`BlendForm::LogPool`） | ブレンドの代替結合形 `p̃ ∝ model^a · market^b`（レース内正規化）。**本番への採用は棄却済み**——fit 窓 MLE で最適モデル指数 Â=−0.19±0.20（ゼロと区別不能）・eval ΔR² ゲート不通過。研究用 CLI（`--log-pool-a/-b`）として残る | [probability-estimation.md](probability-estimation.md) 結合形の代替（棄却の経緯は同決定ログ #703） |
 | resolution（判別力） | 「どの馬が勝つか」を見分けるランクの強さ。AUC・top1 で測る。純モデルは市場に劣ることが確定済み | [feature-resolution-diagnosis.md](feature-resolution-diagnosis.md) |
 | calibration（較正） | 予測確率と実測頻度の一致度。Brier・LogLoss・reliability 曲線で測る。**resolution とは別軸**（較正しても判別力は生まれない） | 同上 / [backtest.md](backtest.md) |
 
@@ -106,8 +107,14 @@ ADR 0077）:
 | Brier (win) | `mean((win_prob − y)²)`、y=1 if 1 着。全馬エントリ単位。**小さいほど良い** | [backtest.md](backtest.md) ステップ 4: 指標集計 |
 | LogLoss (win) | `−mean(y·ln p + (1−y)·ln(1−p))`。`p` はクランプして `ln(0)` を回避する | 同上 |
 | reliability 曲線 | `win_prob` を等幅 10 ビンに分け、ビンごとの「平均予測確率 vs 実測勝率」を並べたもの。平均予測 > 実測なら過大評価 | 同上 |
+| CORP reliability | PAV（isotonic 回帰）でビン境界をデータから最適決定した reliability + 校正仮説下の consistency band（90% pointwise）。H0 下でも 10 点グリッドで約 1 点は帯外に出るため、**1〜2/10 の帯外は有意と読まず、系統的なズレは「大半の点が同方向に帯外」で判定**する | [backtest.md](backtest.md) 評価プロトコル |
+| CORP 分解 | `Brier = MCB − DSC + UNC`（miscalibration / discrimination / uncertainty）。変更が校正と識別力のどちらを動かしたかを切り分ける | 同上 |
+| 擬似 R² / ΔR² | `R² = 1 − Σ ln p(勝者) / Σ ln(1/頭数)`（Bolton-Chapman）。**ΔR² = R²(系統) − R²(market)** が確率ロジック変更の主 KPI（「市場に足せている増分」だけを測る） | 同上 |
+| fit 窓 / eval 窓 | パラメータ推定専用（2025 年）/ 採否判断専用（2026-01〜08）に凍結した期間。推定と採否を同一窓で行う in-sample 掃引を構造的に防ぐ | 同上 |
+| dev 窓 / test 窓・馬連 NLL | 独立確率の版ごと評価（`prob_ledger.py`・#719）の窓。dev = 2025-07〜12（fit 窓内・反復用・採否根拠にしない）/ test = eval 窓と同一（採否はここだけ）。主指標の**馬連 NLL** = `−ln P(実際の 1-2 着ペア)`、連対 log-loss と並べて**小さいほど良い** | [backtest.md](../specifications/backtest.md) 評価プロトコル |
 | 想定回収率 | `Σ payout / Σ stake`。各レース 100 円をトップ選好馬の単勝に賭けた仮定値。**実際の買い方（3 券種）とは別物** | 同上 |
 | `ev`（期待値） | `probability × odds`。1.0 を超えると理論的にプラス期待値 | [ev-kelly-bet-selection.md](ev-kelly-bet-selection.md) 用語定義 |
+| discounted Harville / λ2・λ3 | 連系券種の確率合成で 2 着段 σ_i ∝ win^λ2・3 着段 τ_i ∝ win^λ3 と割引く補正（λ=1 が素の Harville）。**blended 確率に λ2=0.90/λ3=0.77・pure 確率は無割引**（系統で最適値が異なるため適用は確率系統を知る呼び出し側の責務。`analyze backtest --blend-alpha`（α<1.0）指定時のみ既定で効く）＝本番買い目 EV 表示・blend なし/α≥1.0 の backtest は不変 | [ev-kelly-bet-selection.md](ev-kelly-bet-selection.md) §1.1（採用の経緯は [betting-rule-history.md](betting-rule-history.md) 決定ログ #703） |
 | ROI（レース単位） | `Σ_i(賭金_i × 的中確率_i × 払戻倍率_i) / 総賭金`。買い目全体で見た期待回収率 | [CLAUDE.md](../CLAUDE.md)「3. EV 判定 → 買い目決定」 |
 | ⚠ ROI ゲート | 元は「**ROI ≥ 100% のレースだけ張る**」という判定基準（100% が損益分岐）。**現在は参考 ROI をこの判定に使わない**——182R 実測でゲート通過 0 件・判定 ROI と実現 ROI は無情報だったため（張る/見送りは手動のハンデ精査と執行の規律で決める）。**それでも閾値は下げない**（下げる＝−EV を承知で買う。θ を下げても実現 ROI は 100% に届かない）。`predict-watch` は 🔶 / 🔍 のマークを残したまま、起動時に到達不能である旨を注記する | [product-goals.md](product-goals.md) REQ-D01-001・「ゲートの現況」/ ADR 0040（閾値）/ ADR 0076（現況）/ ADR 0079（表示と運用記述） |
 | フェア ROI | JRA 控除率（ワイド・馬連 22.5% / 3 連複 25%）由来の期待値上限 ≈ 75〜77.5%。エッジが無ければ ROI はこの近辺に落ちる | [betting-rule-history.md](betting-rule-history.md) ⑤ |
@@ -120,7 +127,7 @@ ADR 0077）:
 |---|---|---|
 | 印 | 予想の格付け記号。**運用で打つのは ◎○▲☆**（◎が本命＝軸。印を打った馬は必ず買い目に絡める＝相手を top5 まで広げる主因）だが、**データモデルは △・注 を含む 6 種**（`honmei`/`taikou`/`tanana`/`renge`/`hoshi`/`chui`） | [CLAUDE.md](../CLAUDE.md)「予算・配分（既定）」「混戦判定と配分」 / [prediction-json.md](prediction-json.md)（6 種） |
 | 軸 | ◎に据えて買い目の中心に固定する馬 | [CLAUDE.md](../CLAUDE.md)「軸ロックとズレ増額（確率と買い方の分離）」「軸の選び方」 |
-| 軸ロック | **軸と基本の買い目構造（軸・相手・混戦判定）を事前データで確定し、直前のオッズ変動でひっくり返さない**規律。見直すのは取消・馬場激変などの新情報が出たときだけ。`predict-watch` の実装では**その日の初回スイープ**で確定する | ADR 0060（規律）/ ADR 0078（実装）/ [product-goals.md](product-goals.md) REQ-D01-003 / [ev-kelly-bet-selection.md](ev-kelly-bet-selection.md) REQ-D23-007 |
+| 軸ロック | **軸と基本の買い目構造（軸・相手・混戦判定）を事前データで確定し、直前のオッズ変動でひっくり返さない**規律。見直すのは取消・馬場激変などの新情報が出たときだけ。`predict-watch` の実装では**その日の初回スイープ**（＝そのレースが監視窓〈既定 40 分〉に入った最初のスイープ。起動時点で既に窓内なら起動直後のスイープ）で確定する | ADR 0060（規律）/ ADR 0078（実装）/ [product-goals.md](product-goals.md) REQ-D01-003 / [ev-kelly-bet-selection.md](ev-kelly-bet-selection.md) REQ-D23-007 |
 | ズレ増額 | 軸が自モデル確率より過小人気にズレたとき、**既存の買い目の金額だけを上げる**こと。点数（相手）は増やさない | 同上 |
 | 混戦 | ◎の model 勝率の **0.70 倍以上の馬が ◎含め 4 頭以上**いる状態（判定条件）。この状態で 3 連複ボックスを含む別配分に切り替える | [ev-kelly-bet-selection.md](ev-kelly-bet-selection.md) REQ-D23-005（判定）/ [CLAUDE.md](../CLAUDE.md)「混戦判定と配分」（配分） |
 | 相手 top5 | 3 券種とも model 確率上位 5 頭を相手に取る既定幅。**広げない**（上限側を直接測ったのは 3 連複のみ＝ADR 0030。既定の 5 頭自体は ADR 0019 が置いた設計値） | [ev-kelly-bet-selection.md](ev-kelly-bet-selection.md) REQ-D23-002（status: Tentative） |

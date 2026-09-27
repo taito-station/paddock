@@ -18,10 +18,13 @@ mod select;
 #[cfg(test)]
 mod tests;
 
+pub use harville::{
+    HarvilleParams, RECOMMENDED_HARVILLE_LAMBDA_BLENDED, RECOMMENDED_HARVILLE_LAMBDA_PURE,
+};
 pub use hit::bet_hit;
 pub use model::{BetCombination, BettingConfig, BettingRecommendation, Podium};
 pub use select::select_bets;
 
-// 収支シミュレータ（simulation）が `betting::harville_trifecta` の crate 内パスで参照するため、
-// 公開はせず crate 内部 re-export でパスを保つ。
-pub(crate) use harville::harville_trifecta;
+// 収支シミュレータ（simulation）が crate 内パスで参照するため、公開はせず crate 内部
+// re-export でパスを保つ（HarvilleModel は discounted Harville の評価器・#703 Phase 2）。
+pub(crate) use harville::HarvilleModel;

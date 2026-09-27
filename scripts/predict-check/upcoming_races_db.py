@@ -20,17 +20,15 @@ DB 接続は環境変数 PADDOCK_DB_URL（既定 postgres://paddock:paddock@127.
 host は localhost ではなく 127.0.0.1 を使う（#212, ::1 先解決で別 postgres に当たる事故回避）。
 """
 import argparse
-import os
 import re
-import subprocess
 import sys
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+import pgq
 from upcoming_races import select_upcoming, to_minutes, valid_hhmm
 
 JST = ZoneInfo("Asia/Tokyo")
-DEFAULT_DB_URL = "postgres://paddock:paddock@127.0.0.1:5432/paddock"
 
 
 def valid_date(s: str) -> str:
@@ -64,30 +62,23 @@ def fetch_rows(date: str, db_url: str):
     """race_cards から `(race_id, post_time)` を取得する。post_time NULL 行は SQL 側で除外。"""
     sql = (
         "SELECT race_id, post_time FROM race_cards "
-        f"WHERE date = '{date}' AND post_time IS NOT NULL"
+        "WHERE date = :'date' AND post_time IS NOT NULL"
     )
-    # date は valid_date で厳格検証済みなので文字列展開でも注入されない。
-    # 接続タイムアウトを付ける（無人 launchd ジョブで DB が TCP は受けるが無応答＝ハング時に、
-    # 選択段階で無言ハングして 5 分毎に別プロセスが積み上がるのを防ぐ。fast-fail だけでなく
-    # ハングも救う）。PGCONNECT_TIMEOUT は URL を弄らず psql に効かせられる。
-    env = {**os.environ, "PGCONNECT_TIMEOUT": os.environ.get("PGCONNECT_TIMEOUT", "5")}
-    proc = subprocess.run(
-        ["psql", db_url, "-t", "-A", "-F", "\t", "-c", sql],
-        capture_output=True, text=True, env=env,
-    )
-    if proc.returncode != 0:
+    # date は pgq の変数束縛で渡す（valid_date でも厳格検証済み）。
+    # 接続タイムアウトは pgq が掛ける（無人 launchd ジョブで DB が TCP は受けるが無応答＝ハング時に、
+    # 選択段階で無言ハングして 5 分毎に別プロセスが積み上がるのを防ぐ。PGCONNECT_TIMEOUT 未設定時 5 秒）。
+    try:
+        rows = pgq.query(sql, url=db_url, variables={"date": date})
+    except pgq.PsqlError as e:
         # 無人運用（launchd/cron）での停止時に根因（connection refused 等）が消えないよう、
         # psql の stderr を呼び出し側の stderr（launchd.err.log）へ転記してから非0終了する。
-        sys.stderr.write(proc.stderr)
-        raise SystemExit(f"psql 失敗 (exit {proc.returncode})")
-    out = proc.stdout
-    rows = []
-    for line in out.splitlines():
-        if not line.strip():
-            continue
-        rid, _, pt = line.partition("\t")
-        rows.append((rid, pt))
-    return rows
+        # stdout には何も出さない（prefetch_odds.sh は stdout を race_id 列として読む）。
+        # psql を起動する前の失敗（psql 不在・URL 形式不正など）は stderr が空なので、理由を終了文言に載せる
+        # （PsqlError の文言はパスワードを含まない）。
+        sys.stderr.write(e.stderr)
+        detail = "詳細は直前の stderr" if e.stderr else str(e)
+        raise SystemExit(f"DB から発走時刻を取得できません（{detail}）")
+    return [(cells[0], cells[1]) for cells in rows]
 
 
 def main(argv=None):
@@ -99,7 +90,7 @@ def main(argv=None):
                     help="現在時刻の上書き（テスト/検証用。既定はシステム JST 時刻）")
     args = ap.parse_args(argv)
 
-    db_url = os.environ.get("PADDOCK_DB_URL", DEFAULT_DB_URL)
+    db_url = pgq.db_url()
     rows = fetch_rows(args.date, db_url)
 
     if args.at:

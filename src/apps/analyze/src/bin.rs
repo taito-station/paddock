@@ -19,10 +19,11 @@ const CANDIDATE_LIMIT: u32 = 20;
 
 /// 特徴量ダンプ（#272 Phase A / #309）TSV の列数。[`FEATURE_DUMP_HEADER`] と [`feature_row_cells`] の
 /// 双方をこの不変条件で縛り、列ズレ（＝学習データの静かな汚染）を防ぐ（ユニットテストで担保）。
-/// 内訳: id3(race_id/date/horse_num) + 10 factor × (win,place,show,starts)=40 + signal4 + model3 + ラベル3。
+/// 内訳: id3(race_id/date/horse_num) + 10 factor × (win,place,show,starts)=40 + signal4 + model3 +
+/// ラベル3 + pure3（純モデル確率。末尾追加＝ヘッダ名参照の既存読み手を壊さない）。
 /// signal4 = recent_form/weight_carried/jockey_recent_form/running_style（#329 Phase1 で running_style 追加）。
 /// 10 factor = 既存 6 + #350 相性 4（jockey_venue/jockey_distance/jockey_horse_combo/horse_venue）。
-const FEATURE_DUMP_COLUMNS: usize = 53;
+const FEATURE_DUMP_COLUMNS: usize = 56;
 
 /// 特徴量ダンプ（#272 Phase A / #309）TSV のヘッダ行。列順は [`feature_row_cells`] の行生成と一致させ、
 /// 列数は [`FEATURE_DUMP_COLUMNS`] と一致させる（いずれもユニットテストで担保）。`model_*` は内蔵モデルの
@@ -40,7 +41,8 @@ jockey_horse_combo_win\tjockey_horse_combo_place\tjockey_horse_combo_show\tjocke
 horse_venue_win\thorse_venue_place\thorse_venue_show\thorse_venue_starts\t\
 recent_form\tweight_carried\tjockey_recent_form\trunning_style\t\
 model_win\tmodel_place\tmodel_show\t\
-finishing_position\twin_odds\tpopularity";
+finishing_position\twin_odds\tpopularity\t\
+model_win_pure\tmodel_place_pure\tmodel_show_pure";
 
 /// 1 行分の特徴量を [`FEATURE_DUMP_HEADER`] と同じ列順の文字列セル列に展開する。欠落（`None`）は
 /// 空セルで 0 埋めしない（欠落項とレート 0 を区別する）。数値は `f64`/`u32` の既定 Display
@@ -91,6 +93,10 @@ fn feature_row_cells(row: &FeatureRow) -> Vec<String> {
     cells.push(cell_u32(row.finishing_position));
     cells.push(cell_f64(row.win_odds));
     cells.push(cell_u32(row.popularity));
+    // 純モデル確率（末尾追加）。ヘッダ名で引く読み手（exotic_mispricing.py 等）は列追加に不変。
+    cells.push(row.model_win_pure.to_string());
+    cells.push(row.model_place_pure.to_string());
+    cells.push(row.model_show_pure.to_string());
     // ヘッダと行の列数ズレを開発時に即検知する（出力契約の保険。本数値はテストでも担保）。
     debug_assert_eq!(
         cells.len(),
@@ -278,6 +284,8 @@ async fn main() -> anyhow::Result<()> {
             from,
             to,
             blend_alpha,
+            log_pool_a,
+            log_pool_b,
             shrinkage_m,
             recency_half_life,
             recent_form_weight,
@@ -290,9 +298,78 @@ async fn main() -> anyhow::Result<()> {
             win_power,
             place_show_power,
             impute_missing_factors,
+            harville_lambda2,
+            harville_lambda3,
             dump_features,
         } => {
             let blend_alpha = validate_blend_alpha(blend_alpha)?;
+            // ブレンド結合形（#703 Phase 3）: --blend-alpha（線形）と --log-pool-a/-b（対数プール）
+            // は相互排他。log-pool は対指定必須・有限かつ >=0・両方 0 はエラー。
+            let blend: Option<paddock_domain::BlendForm> = match (
+                blend_alpha,
+                log_pool_a,
+                log_pool_b,
+            ) {
+                (Some(_), Some(_), _) | (Some(_), _, Some(_)) => anyhow::bail!(
+                    "--blend-alpha と --log-pool-a/--log-pool-b は同時指定できません（結合形は択一）"
+                ),
+                (Some(alpha), None, None) => Some(paddock_domain::BlendForm::Linear { alpha }),
+                (None, Some(a), Some(b)) => {
+                    // 上限 10 は fit の実測（|Â| < 1）を大きく包む実用域。極端な指数は全馬重みの
+                    // アンダーフローで silent no-op（pure フォールバック）となり、harville λ の
+                    // blended 既定と組んで系統ミスラベルの結果を生むため入力段で弾く。
+                    let ok = |v: f64| v.is_finite() && (0.0..=10.0).contains(&v);
+                    if !(ok(a) && ok(b)) || (a == 0.0 && b == 0.0) {
+                        anyhow::bail!(
+                            "--log-pool-a/--log-pool-b は有限かつ 0 <= v <= 10（両方 0 は不可）で指定してください: ({a}, {b})"
+                        );
+                    }
+                    Some(paddock_domain::BlendForm::LogPool { a, b })
+                }
+                (None, None, None) => None,
+                _ => anyhow::bail!(
+                    "--log-pool-a と --log-pool-b は両方指定するか両方省略してください"
+                ),
+            };
+            // discounted Harville（#703 Phase 2）。λ 未指定の既定は確率系統に連動させる:
+            // blended 確率が select_bets に渡る結合形（Linear α<1.0 / LogPool b>0）のときのみ
+            // 採用値 RECOMMENDED_HARVILLE_LAMBDA_BLENDED（0.90/0.77）を既定にし、それ以外
+            // （blend なし・α>=1.0 の no-op ブレンド = pure 確率）は素の Harville のまま
+            // = 従来と bit-exact 不変。pure に blended-fit λ を当てるのは系統ミスマッチ
+            // （pure の λ̂ は 2.29/1.80 と逆方向・決定ログ #703）。
+            // 片方のみの指定は黙って既定 1.0 と組ませず入力エラーにする（λ の対推定が前提のため）。
+            let betting = match (harville_lambda2, harville_lambda3) {
+                (None, None) => {
+                    let blended_probs = blend
+                        .as_ref()
+                        .map(|f| f.produces_blended())
+                        .unwrap_or(false);
+                    if blended_probs {
+                        paddock_domain::betting::BettingConfig {
+                            harville: paddock_domain::betting::RECOMMENDED_HARVILLE_LAMBDA_BLENDED,
+                            ..Default::default()
+                        }
+                    } else {
+                        paddock_domain::betting::BettingConfig::default()
+                    }
+                }
+                (Some(l2), Some(l3)) => {
+                    let params = paddock_domain::betting::HarvilleParams::new(l2, l3)
+                        .ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "--harville-lambda2/--harville-lambda3 は有限かつ 0 < λ <= {} で指定してください: ({l2}, {l3})",
+                                paddock_domain::betting::HarvilleParams::MAX_LAMBDA
+                            )
+                        })?;
+                    paddock_domain::betting::BettingConfig {
+                        harville: params,
+                        ..Default::default()
+                    }
+                }
+                _ => anyhow::bail!(
+                    "--harville-lambda2 と --harville-lambda3 は両方指定するか両方省略してください"
+                ),
+            };
             let config = build_estimation_config(
                 shrinkage_m,
                 recency_half_life,
@@ -313,7 +390,7 @@ async fn main() -> anyhow::Result<()> {
             let to = parse_date(&to)?;
             let report = app
                 .interactor
-                .backtest(from, to, blend_alpha, config, dump_features.is_some())
+                .backtest(from, to, blend, config, betting, dump_features.is_some())
                 .await?;
             printer::print_backtest(from, to, &report);
             // --dump-features 指定時は特徴量ダンプを TSV に書く（#272 Phase A）。clean-arch のため
@@ -621,6 +698,9 @@ mod feature_dump_tests {
             model_win: 0.2,
             model_place: 0.3,
             model_show: 0.4,
+            model_win_pure: 0.15,
+            model_place_pure: 0.25,
+            model_show_pure: 0.35,
             finishing_position: Some(1),
             win_odds: Some(4.0),
             popularity: Some(3),
@@ -642,6 +722,8 @@ mod feature_dump_tests {
         assert_eq!(cells[50], "1");
         assert_eq!(cells[51], "4");
         assert_eq!(cells[52], "3");
+        // 純モデル確率 3 列（cells[53..56]・末尾追加）は必ず実値。
+        assert_eq!(&cells[53..56], ["0.15", "0.25", "0.35"]);
     }
 
     /// 実値を持つ factor は (win,place,show,starts) の 4 セルに展開され、欠落ラベルは空になること。
@@ -667,6 +749,9 @@ mod feature_dump_tests {
             model_win: 0.1,
             model_place: 0.2,
             model_show: 0.3,
+            model_win_pure: 0.1,
+            model_place_pure: 0.2,
+            model_show_pure: 0.3,
             finishing_position: None,
             win_odds: None,
             popularity: None,
@@ -696,6 +781,9 @@ mod feature_dump_tests {
             model_win: 0.2,
             model_place: 0.3,
             model_show: 0.4,
+            model_win_pure: 0.15,
+            model_place_pure: 0.25,
+            model_show_pure: 0.35,
             finishing_position: Some(1),
             win_odds: Some(4.0),
             popularity: Some(3),

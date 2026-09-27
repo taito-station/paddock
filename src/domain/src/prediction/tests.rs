@@ -2235,3 +2235,170 @@ fn running_style_weight_override_moves_score() {
         raw_score(&zero_factors(), |r| r.win, &EstimationConfig::default()),
     );
 }
+
+// ---------- BlendForm（対数プール・#703 Phase 3） ----------
+
+/// Linear variant は既存 `blend_with_market_win` へ委譲し bit-exact に一致する。
+#[test]
+fn blend_form_linear_delegates_exactly() {
+    let probs = vec![
+        prob(1, 0.5, 0.6, 0.7),
+        prob(2, 0.3, 0.5, 0.6),
+        prob(3, 0.2, 0.4, 0.5),
+    ];
+    let odds = odds_map(&[(1, 2.0), (2, 4.0), (3, 5.0)]);
+    let direct = blend_with_market_win(&probs, &odds, 0.2);
+    let via_form = blend_with_market_win_form(&probs, &odds, &BlendForm::Linear { alpha: 0.2 });
+    for (d, v) in direct.iter().zip(&via_form) {
+        assert_eq!(d.win_prob, v.win_prob);
+        assert_eq!(d.place_prob, v.place_prob);
+        assert_eq!(d.show_prob, v.show_prob);
+    }
+}
+
+/// (a,b)=(1,0) はモデルの再正規化恒等（入力が正規化済みなら値も不変）。
+#[test]
+fn blend_form_log_pool_model_only_is_identity_on_normalized_input() {
+    let probs = vec![
+        prob(1, 0.5, 0.6, 0.7),
+        prob(2, 0.3, 0.5, 0.6),
+        prob(3, 0.2, 0.4, 0.5),
+    ];
+    let odds = odds_map(&[(1, 2.0), (2, 4.0), (3, 5.0)]);
+    let out = blend_with_market_win_form(&probs, &odds, &BlendForm::LogPool { a: 1.0, b: 0.0 });
+    for (p, o) in probs.iter().zip(&out) {
+        assert!((p.win_prob - o.win_prob).abs() < 1e-12);
+    }
+}
+
+/// (a,b)=(0,1) は市場含意確率（オーバーラウンド除去後）に一致する。
+#[test]
+fn blend_form_log_pool_market_only_matches_normalized_implied() {
+    let probs = vec![prob(1, 0.5, 0.6, 0.7), prob(2, 0.5, 0.6, 0.7)];
+    // implied [1/2, 1/4] → 正規化 [2/3, 1/3]。
+    let odds = odds_map(&[(1, 2.0), (2, 4.0)]);
+    let out = blend_with_market_win_form(&probs, &odds, &BlendForm::LogPool { a: 0.0, b: 1.0 });
+    assert!((out[0].win_prob - 2.0 / 3.0).abs() < 1e-12);
+    assert!((out[1].win_prob - 1.0 / 3.0).abs() < 1e-12);
+}
+
+/// 数値ゴールデン 1 点（手計算値）: model [0.5, 0.5]・odds [1.5, 3.0]（q=[2/3, 1/3]）・
+/// a=b=0.5 → w=[√(1/3), √(1/6)] → p1 = 0.585786437627（独立に電卓で導出した値）。
+#[test]
+fn blend_form_log_pool_golden_point() {
+    let probs = vec![prob(1, 0.5, 0.6, 0.7), prob(2, 0.5, 0.6, 0.7)];
+    let odds = odds_map(&[(1, 1.5), (2, 3.0)]);
+    let out = blend_with_market_win_form(&probs, &odds, &BlendForm::LogPool { a: 0.5, b: 0.5 });
+    assert!((out[0].win_prob - 0.585_786_437_627).abs() < 1e-9);
+    assert!((out[0].win_prob + out[1].win_prob - 1.0).abs() < 1e-12);
+}
+
+/// オッズ無しの馬は市場値の代用に自身のモデル値を使い重み m^(a+b) となる
+/// （a+b=1 では生の m と一致・a+b≠1 でもスケール整合と win_power との冪可換性が保たれる）。
+#[test]
+fn blend_form_log_pool_oddsless_horse_uses_model_as_market_proxy() {
+    let probs = vec![prob(1, 0.6, 0.7, 0.8), prob(2, 0.4, 0.5, 0.6)];
+    let odds = odds_map(&[(1, 2.0)]); // h(2) はオッズなし
+    // a+b=1: h(1) は w = 0.6^0.5 · 1.0^0.5 = √0.6、h(2) は w = 0.4^(0.5+0.5) = 0.4。
+    let out = blend_with_market_win_form(&probs, &odds, &BlendForm::LogPool { a: 0.5, b: 0.5 });
+    let w1 = 0.6_f64.powf(0.5);
+    let expected = w1 / (w1 + 0.4);
+    assert!((out[0].win_prob - expected).abs() < 1e-12);
+    // a+b≠1: h(2) の重みは m^(a+b) = 0.4^0.7（生の m ではない）。
+    let out2 = blend_with_market_win_form(&probs, &odds, &BlendForm::LogPool { a: 0.2, b: 0.5 });
+    let w1b = 0.6_f64.powf(0.2); // q=1.0 なので市場項は 1
+    let w2b = 0.4_f64.powf(0.7);
+    assert!((out2[1].win_prob - w2b / (w1b + w2b)).abs() < 1e-12);
+}
+
+/// win_power γ との冪可換性がオッズ無し馬込みで厳密に成立する:
+/// apply_win_power(LogPool(a,b), γ) == LogPool(aγ, bγ)。
+#[test]
+fn blend_form_log_pool_commutes_with_win_power_even_with_oddsless_horse() {
+    let probs = vec![
+        prob(1, 0.5, 0.6, 0.7),
+        prob(2, 0.3, 0.4, 0.5),
+        prob(3, 0.2, 0.3, 0.4),
+    ];
+    let odds = odds_map(&[(1, 2.0), (2, 4.0)]); // h(3) はオッズなし
+    let gamma = 1.25;
+    let path_a = apply_win_power(
+        &blend_with_market_win_form(&probs, &odds, &BlendForm::LogPool { a: 0.4, b: 0.8 }),
+        gamma,
+    );
+    let path_b = blend_with_market_win_form(
+        &probs,
+        &odds,
+        &BlendForm::LogPool {
+            a: 0.4 * gamma,
+            b: 0.8 * gamma,
+        },
+    );
+    for (x, y) in path_a.iter().zip(&path_b) {
+        assert!(
+            (x.win_prob - y.win_prob).abs() < 1e-12,
+            "{} vs {}",
+            x.win_prob,
+            y.win_prob
+        );
+    }
+}
+
+/// model=0 かつ a>0 の馬は 0 に潰れる（doc 化した既知挙動）。
+#[test]
+fn blend_form_log_pool_zero_model_with_positive_a_yields_zero() {
+    let probs = vec![prob(1, 0.0, 0.2, 0.3), prob(2, 1.0, 1.0, 1.0)];
+    let odds = odds_map(&[(1, 2.0), (2, 2.0)]);
+    let out = blend_with_market_win_form(&probs, &odds, &BlendForm::LogPool { a: 0.5, b: 0.5 });
+    assert_eq!(out[0].win_prob, 0.0);
+    assert!((out[1].win_prob - 1.0).abs() < 1e-12);
+}
+
+/// 不正パラメータ（非有限・負・両方 0）は no-op（入力をそのまま返す）。
+#[test]
+fn blend_form_log_pool_invalid_params_are_noop() {
+    let probs = vec![prob(1, 0.6, 0.7, 0.8), prob(2, 0.4, 0.5, 0.6)];
+    let odds = odds_map(&[(1, 2.0), (2, 3.0)]);
+    for form in [
+        BlendForm::LogPool {
+            a: f64::NAN,
+            b: 1.0,
+        },
+        BlendForm::LogPool { a: -0.5, b: 1.0 },
+        BlendForm::LogPool {
+            a: 1.0,
+            b: f64::INFINITY,
+        },
+        BlendForm::LogPool { a: 0.0, b: 0.0 },
+    ] {
+        let out = blend_with_market_win_form(&probs, &odds, &form);
+        assert_eq!(
+            out[0].win_prob, probs[0].win_prob,
+            "{form:?} は no-op のはず"
+        );
+    }
+}
+
+/// LogPool 後も win ≤ place ≤ show の単調性が保たれる（累積 max 再是正の共有）。
+#[test]
+fn blend_form_log_pool_preserves_monotonicity() {
+    let probs = vec![prob(1, 0.1, 0.15, 0.2), prob(2, 0.9, 0.92, 0.95)];
+    // 市場は h(1) を高評価 → h(1) の win が place を追い越しうる状況を作る。
+    let odds = odds_map(&[(1, 1.1), (2, 20.0)]);
+    let out = blend_with_market_win_form(&probs, &odds, &BlendForm::LogPool { a: 0.2, b: 0.8 });
+    for o in &out {
+        assert!(o.win_prob <= o.place_prob + 1e-12);
+        assert!(o.place_prob <= o.show_prob + 1e-12);
+    }
+}
+
+/// produces_blended: Linear は α<1.0、LogPool は b>0 のとき blended 系統。
+#[test]
+fn blend_form_produces_blended_classification() {
+    assert!(BlendForm::Linear { alpha: 0.2 }.produces_blended());
+    assert!(!BlendForm::Linear { alpha: 1.0 }.produces_blended());
+    assert!(!BlendForm::Linear { alpha: f64::NAN }.produces_blended());
+    assert!(BlendForm::LogPool { a: 0.3, b: 1.0 }.produces_blended());
+    assert!(!BlendForm::LogPool { a: 1.0, b: 0.0 }.produces_blended());
+    assert!(!BlendForm::LogPool { a: -1.0, b: 1.0 }.produces_blended());
+}

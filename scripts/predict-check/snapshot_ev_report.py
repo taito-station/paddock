@@ -41,12 +41,12 @@ from collections import defaultdict
 from pathlib import Path
 
 import live_ev as L
+import pgq
 from odds_guard import is_payout_odds, is_sentinel
 
 # snapshots から集計に使う券種（live_ev の全3券種 ROI に必要な分）。単勝は出走馬の確定に使う。
 WANT_BET_TYPES = ("win", "quinella", "trio", "wide")
 
-DEFAULT_DB_URL = "postgres://paddock:paddock@127.0.0.1:5432/paddock"
 # analyze predict の確率行: 「馬番 馬名 勝率%」。live_ev.parse_pred と同じ規約。
 # 勝率は厳格に「整数 or 小数1個」に絞る（`[\d.]+` だと `1.2.3` 等の多重ドットも拾い float() で落ちる）。
 PRED_LINE_RE = re.compile(r"\s*(\d+)\s+\S+\s+(\d+(?:\.\d+)?)%")
@@ -160,11 +160,10 @@ def eval_race(probs, times, budget):
 
 # --- 入力ロード（DB or 外部 TSV） ---
 def _psql_dump_snapshots(db_url, date_from, date_to):
-    """期間内の snapshot を race_cards と join して TSV 文字列で返す。
+    """期間内の snapshot を race_cards と join して行（セル list）の list で返す。
 
-    date_* は SQL リテラルへ補間するため、呼び出し側検証に依存せず関数内でも YYYY-MM-DD を
-    再検証する（多層防御）。psql -c の単発クエリはプレースホルダを取れないので、形式を厳格に
-    固定した値だけを通す。
+    date_* は pgq の変数束縛（`:'date_from'` / `:'date_to'`）で渡す。加えて呼び出し側検証に
+    依存せず関数内でも YYYY-MM-DD を再検証する（多層防御・不正値は psql を起動する前に弾く）。
     """
     # [0-9] に固定（\d は Unicode 数字も通すため、ASCII 桁のみ許可して曖昧な値を早期に弾く）。
     for d in (date_from, date_to):
@@ -177,28 +176,24 @@ def _psql_dump_snapshots(db_url, date_from, date_to):
         "       s.bet_type, s.combination_key, s.odds, COALESCE(s.odds_high::text,''), s.fetched_at "
         "FROM race_odds_snapshots s "
         "JOIN race_cards c ON c.race_id = s.race_id "
-        f"WHERE c.date BETWEEN '{date_from}' AND '{date_to}' "
+        "WHERE c.date BETWEEN :'date_from' AND :'date_to' "
         f"  AND s.bet_type IN ({bet_in}) "
         "ORDER BY s.race_id, s.fetched_at;"
     )
-    out = subprocess.run(
-        ["psql", db_url, "-tA", "-F", "\t", "-c", sql],
-        capture_output=True, text=True, check=True,
-    )
-    return out.stdout
+    return pgq.query(sql, url=db_url, variables={"date_from": date_from, "date_to": date_to})
 
 
 _SNAP_COLS = ["race_id", "date", "venue", "race_num",
               "bet_type", "combination_key", "odds", "odds_high", "fetched_at"]
 
 
-def load_snapshot_rows(tsv_text):
-    """snapshot TSV 文字列を dict 行の list へ。"""
+def load_snapshot_rows(cells_rows):
+    """snapshot の行（セル list）を dict 行の list へ。"""
     rows = []
-    for line in tsv_text.splitlines():
+    for cells in cells_rows:
+        line = "\t".join(cells)  # warn 表示用
         if not line.strip():
             continue
-        cells = line.split("\t")
         if len(cells) != len(_SNAP_COLS):
             print(f"[warn] 想定外の列数 {len(cells)} をスキップ: {line[:80]}", file=sys.stderr)
             continue
@@ -338,7 +333,7 @@ def main():
     ap.add_argument("--to", dest="date_to", help="終了日 YYYY-MM-DD（既定: --from と同じ＝単日）")
     ap.add_argument("--budget", type=int, default=5000, help="1レース予算（円, 既定5000）")
     ap.add_argument("--blend-alpha", type=float, default=0.2, help="analyze predict の α（既定0.2）")
-    ap.add_argument("--db-url", default=os.environ.get("PADDOCK_DB_URL", DEFAULT_DB_URL))
+    ap.add_argument("--db-url", default=pgq.db_url())
     ap.add_argument("--analyze-bin", default=None,
                     help="paddock-analyze バイナリ（既定: target/release/paddock-analyze）")
     ap.add_argument("--snapshots-tsv", help="snapshot TSV を外部供給（指定時 DB を引かない）")
@@ -347,7 +342,7 @@ def main():
 
     # --- snapshot ロード ---
     if args.snapshots_tsv:
-        tsv = Path(args.snapshots_tsv).read_text()
+        snap_rows = pgq.tsv_rows(Path(args.snapshots_tsv).read_text())
     else:
         if not args.date_from:
             ap.error("--from が必要（または --snapshots-tsv を指定）")
@@ -360,11 +355,11 @@ def main():
         if date_to < args.date_from:
             ap.error(f"--to は --from 以降にしてください: {args.date_from}..{date_to}")
         try:
-            tsv = _psql_dump_snapshots(args.db_url, args.date_from, date_to)
-        except (subprocess.CalledProcessError, FileNotFoundError) as e:
+            snap_rows = _psql_dump_snapshots(args.db_url, args.date_from, date_to)
+        except pgq.PsqlError as e:
             print(f"snapshot の取得に失敗（psql/DB 接続）: {e}", file=sys.stderr)
             sys.exit(1)
-    races = group_snapshots(load_snapshot_rows(tsv))
+    races = group_snapshots(load_snapshot_rows(snap_rows))
     if not races:
         print("対象 snapshot なし", file=sys.stderr)
         sys.exit(0 if args.snapshots_tsv else 1)

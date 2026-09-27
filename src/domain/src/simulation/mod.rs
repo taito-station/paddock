@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 
-use crate::betting::{BetCombination, harville_trifecta};
+use crate::betting::{BetCombination, HarvilleModel, HarvilleParams};
 use crate::error::{Error, Result};
 use crate::horse_result::HorseNum;
 
@@ -38,6 +38,9 @@ pub struct SimInput {
     /// みなし、列挙着順の確率を正規化しないため、部分指定や総和≠1 のときは
     /// EV・的中確率・期待回収率が過小評価される。
     pub win_probs: Option<HashMap<HorseNum, f64>>,
+    /// discounted Harville の割引指数（#703 Phase 2）。`IDENTITY`（既定）で素の Harville と
+    /// bit-exact 一致。`win_probs` の系統（pure/blended）に合った値を呼び出し側が渡す。
+    pub harville: HarvilleParams,
 }
 
 /// ある着順における収支。
@@ -156,15 +159,14 @@ pub fn simulate(input: &SimInput) -> Result<SimReport> {
 
     let total_stake: u64 = input.bets.iter().map(|b| b.stake).sum();
 
-    // EV 用の単勝確率ルックアップ（指定時のみ）。
+    // EV 用の確率合成器（指定時のみ・discounted Harville #703 Phase 2）。
+    // input.harville == IDENTITY（既定）のとき素の Harville と bit-exact に一致し、
+    // win_probs に無い馬は確率 0 として扱う（従来の win_of と同じ規約）。
     let has_probs = input.win_probs.is_some();
-    let win_of = |h: HorseNum| -> f64 {
-        input
-            .win_probs
-            .as_ref()
-            .and_then(|m| m.get(&h).copied())
-            .unwrap_or(0.0)
-    };
+    let hv = input
+        .win_probs
+        .as_ref()
+        .map(|m| HarvilleModel::new(m.iter().map(|(h, w)| (*h, *w)), input.harville));
 
     let mut total_count: u64 = 0;
     let mut hit_count: u64 = 0;
@@ -211,7 +213,10 @@ pub fn simulate(input: &SimInput) -> Result<SimReport> {
                     // 確定する。よって harville による各順列確率は 4 着以降を周辺化済みの確率として
                     // そのまま EV・的中確率に積算できる。なお harville は上位 2 頭の単勝確率和が
                     // 1 以上の順列を 0 とするため、確率総和は（全頭・総和 1 入力でも）1 以下になりうる。
-                    let prob = harville_trifecta(win_of(first), win_of(second), win_of(third));
+                    let prob = hv
+                        .as_ref()
+                        .map(|m| m.trifecta(first, second, third))
+                        .unwrap_or(0.0);
                     ev_sum += prob * payout as f64;
                     if payout > 0 {
                         hit_prob += prob;
@@ -338,6 +343,7 @@ mod tests {
     fn best_worst_and_hit_count() {
         // 6 頭立て。ワイド 1-5 (odds 3.0, 500円) と 三連単 1>5>8 (odds 50.0, 100円)。
         let input = SimInput {
+            harville: HarvilleParams::IDENTITY,
             field: field(6),
             bets: vec![
                 bet(
@@ -378,6 +384,7 @@ mod tests {
         // 加えて当たらない単勝 9（6 頭立てに居ない）に 5000 円。総賭け金 6000。
         // 的中してもワイドのみ 1200 < 6000 → 当たっても赤字。
         let input = SimInput {
+            harville: HarvilleParams::IDENTITY,
             field: field(6),
             bets: vec![
                 bet(
@@ -403,6 +410,7 @@ mod tests {
         // 単勝 1 が的中するのは 1 着が 1 の 2 通り。各 payout=2000。
         // harville_trifecta の確率和で EV を算出。1 着が 1 の確率 = win_prob(1) = 0.5。
         let input = SimInput {
+            harville: HarvilleParams::IDENTITY,
             field: field(3),
             bets: vec![bet(BetCombination::Win(h(1)), 1000, 2.0)],
             main: None,
@@ -417,9 +425,42 @@ mod tests {
         assert!((ev.roi - 1.0).abs() < 1e-9, "roi={}", ev.roi);
     }
 
+    /// 配線の end-to-end 検証（変異ガード・#703）: input.harville が確率合成へ実際に通ること。
+    /// 2 着以降が効く券種（ワイド）で非 IDENTITY の λ にすると EV が変わる
+    /// （input.harville を無視して IDENTITY 固定にする変異はここで落ちる）。
+    #[test]
+    fn ev_threads_harville_params_from_input() {
+        let mk = |params: HarvilleParams| SimInput {
+            harville: params,
+            field: field(4),
+            bets: vec![bet(
+                BetCombination::Wide(Pair::try_from((h(1), h(2))).unwrap()),
+                1000,
+                3.0,
+            )],
+            main: None,
+            win_probs: Some(HashMap::from([
+                (h(1), 0.4),
+                (h(2), 0.3),
+                (h(3), 0.2),
+                (h(4), 0.1),
+            ])),
+        };
+        let base = simulate(&mk(HarvilleParams::IDENTITY)).unwrap().ev.unwrap();
+        let disc = simulate(&mk(HarvilleParams::new(0.9, 0.77).unwrap()))
+            .unwrap()
+            .ev
+            .unwrap();
+        assert_ne!(
+            base.hit_prob, disc.hit_prob,
+            "input.harville が確率合成に配線されていない"
+        );
+    }
+
     #[test]
     fn too_few_horses_errors() {
         let input = SimInput {
+            harville: HarvilleParams::IDENTITY,
             field: field(2),
             bets: vec![],
             main: None,
@@ -431,6 +472,7 @@ mod tests {
     #[test]
     fn duplicate_field_errors() {
         let input = SimInput {
+            harville: HarvilleParams::IDENTITY,
             field: vec![h(1), h(2), h(2)],
             bets: vec![],
             main: None,
@@ -442,6 +484,7 @@ mod tests {
     #[test]
     fn main_with_duplicate_horses_errors() {
         let input = SimInput {
+            harville: HarvilleParams::IDENTITY,
             field: field(6),
             bets: vec![],
             main: Some((h(1), h(1), h(2))),
@@ -453,6 +496,7 @@ mod tests {
     #[test]
     fn main_horse_outside_field_errors() {
         let input = SimInput {
+            harville: HarvilleParams::IDENTITY,
             field: field(6),
             bets: vec![],
             main: Some((h(1), h(2), h(9))), // 9 番は 6 頭立てに居ない

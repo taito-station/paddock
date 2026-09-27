@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use chrono::NaiveDate;
 use paddock_domain::{
-    BacktestReport, BettingConfig, EstimationConfig, ExoticBet, FeatureRow, HorseEntry,
+    BacktestReport, BettingConfig, BlendForm, EstimationConfig, ExoticBet, FeatureRow, HorseEntry,
     HorseFactors, HorseOutcome, HorseResult, Podium, RaceEvaluation, ResultStatus, Surface, Venue,
     bet_hit, evaluate, exotic_segments, select_bets,
 };
@@ -30,9 +30,10 @@ impl<R: StatsRepository + OddsRepository> Interactor<R> {
     /// `course_stats` は同日同コース設定ごとにキャッシュし重複取得を避ける。
     /// `find_race_odds` は race_id ごとなので引き続きレース単位で取得する。
     ///
-    /// `blend_alpha = Some(α)` のとき、確率推定の出力を当時の市場オッズ（単勝, `as_of` 制約付き）の
-    /// implied 確率と α（モデル重み）でブレンドする（#72）。`None` はモデルのみ。ブレンドは
-    /// トップ選好馬・校正集計の前に適用するため、評価はブレンド後の win で行われる。
+    /// `blend = Some(form)` のとき、確率推定の出力を当時の市場オッズ（単勝, `as_of` 制約付き）の
+    /// implied 確率とブレンドする（#72。結合形は [`BlendForm`]: 線形 or 対数プール・#703 Phase 3）。
+    /// `None` はモデルのみ。ブレンドはトップ選好馬・校正集計の前に適用するため、評価は
+    /// ブレンド後の win で行われる。
     ///
     /// `config` でベイズ縮約・リーセンシー（#75）の有効化を切り替える。`EstimationConfig::default()`
     /// は現行挙動（縮約・減衰なし）。パラメータスイープによる before/after 比較に使う。
@@ -41,12 +42,19 @@ impl<R: StatsRepository + OddsRepository> Interactor<R> {
     /// （確定着順・人気）＋当時市場の単勝オッズを [`FeatureRow`] として収集し `report.feature_dump`
     /// に載せる（学習型モデル評価ハーネス #272 Phase A）。リーク無しの walk-forward 経路をそのまま
     /// 再利用するため、ダンプ特徴量は本番 predict と同一。`false` のときは収集せず既存挙動と不変。
+    ///
+    /// `betting` は買い目評価（select_bets）の設定。`harville` の λ を掃引すると券種別
+    /// 校正・回収率（by_exotic）に discounted Harville（#703 Phase 2）の効果が反映される。
+    /// `BettingConfig::default()` は IDENTITY（素の Harville）。select_bets に渡る確率が
+    /// blended になる `blend` 指定時（Linear α<1.0 / LogPool b>0）は、呼び出し側（analyze bin）が採用値
+    /// `RECOMMENDED_HARVILLE_LAMBDA_BLENDED` を既定として選ぶ（系統整合・決定ログ #703）。
     pub async fn backtest(
         &self,
         from: NaiveDate,
         to: NaiveDate,
-        blend_alpha: Option<f64>,
+        blend: Option<BlendForm>,
         config: EstimationConfig,
+        betting: BettingConfig,
         dump_features: bool,
     ) -> Result<BacktestReport> {
         let races = self
@@ -295,15 +303,23 @@ impl<R: StatsRepository + OddsRepository> Interactor<R> {
                     &entry_factors,
                     &config,
                 );
-                // 市場オッズ（単勝）ブレンド（#72）。α 指定時のみ適用し、以降のトップ選好馬・校正集計は
-                // すべてブレンド後の win で行う。市場 win は当時 race_odds を優先し、無ければ PDF 確定
-                // 成績の単勝（results.odds, 確定＝クローズ前後のオッズで結果はリークしない）で代替する。
-                // 過去レースは race_odds スナップショットが無いことが多いため、この代替で評価可能になる。
+                // 純モデル系統（ブレンドなし＝α=1.0 相当・win_power は適用後）。dump 要求時のみ複製し、
+                // predict 経路の PredictionViews::pure と同じ定義で FeatureRow に併載する（prob_eval.py の
+                // 対市場 ΔR²・pure/blended 別校正の入力）。評価本流（校正・的中集計）には一切使わない。
+                let probs_pure = dump_features.then(|| match config.win_power {
+                    Some(gamma) => paddock_domain::prediction::apply_win_power(&probs, gamma),
+                    None => probs.clone(),
+                });
+                // 市場オッズ（単勝）ブレンド（#72 / 結合形は #703 Phase 3 で選択可）。指定時のみ適用し、
+                // 以降のトップ選好馬・校正集計はすべてブレンド後の win で行う。市場 win は当時 race_odds を
+                // 優先し、無ければ PDF 確定成績の単勝（results.odds, 確定＝クローズ前後のオッズで結果は
+                // リークしない）で代替する。過去レースは race_odds スナップショットが無いことが多いため、
+                // この代替で評価可能になる。
                 // 注意: ここで使う市場 win は回収率評価の top_pick_odds と同一ソースのため、ブレンド有効時
-                // の回収率は構造的に楽観側へ寄る（probability-estimation.md 注 2）。α>=1.0 は domain 側で
-                // no-op になる（predict 経路のような取得短絡は不要、market は既に取得済み）。
-                let probs = match blend_alpha {
-                    Some(alpha) => {
+                // の回収率は構造的に楽観側へ寄る（probability-estimation.md 注 2）。Linear の α>=1.0 は
+                // domain 側で no-op になる（predict 経路のような取得短絡は不要、market は既に取得済み）。
+                let probs = match &blend {
+                    Some(form) => {
                         // race_odds.win が非空ならそれを使い、完全に空のときのみ results.odds へ代替する。
                         // race_odds の win は scraper が全頭分まとめて書くため部分カバレッジは想定しないが、
                         // 仮に部分的でも results.odds へは切り替えない（blend は full coverage 前提、
@@ -318,10 +334,10 @@ impl<R: StatsRepository + OddsRepository> Interactor<R> {
                                 .filter_map(|r| r.odds.map(|o| (r.horse_num, o)))
                                 .collect(),
                         };
-                        paddock_domain::prediction::blend_with_market_win(
+                        paddock_domain::prediction::blend_with_market_win_form(
                             &probs,
                             &market_win,
-                            alpha,
+                            form,
                         )
                     }
                     None => probs,
@@ -366,6 +382,13 @@ impl<R: StatsRepository + OddsRepository> Interactor<R> {
                         .iter()
                         .map(|p| (p.horse_num.value(), (p.win_prob, p.place_prob, p.show_prob)))
                         .collect();
+                    // probs_pure は dump_features=true のとき必ず Some（上の then で生成）。
+                    let pure_by_num: HashMap<u32, (f64, f64, f64)> = probs_pure
+                        .as_deref()
+                        .expect("probs_pure is Some when dump_features")
+                        .iter()
+                        .map(|p| (p.horse_num.value(), (p.win_prob, p.place_prob, p.show_prob)))
+                        .collect();
                     for (entry, factors) in &entry_factors {
                         let (finishing_position, pdf_odds, popularity) = by_num
                             .get(&entry.horse_num.value())
@@ -380,6 +403,10 @@ impl<R: StatsRepository + OddsRepository> Interactor<R> {
                             .get(&entry.horse_num.value())
                             .copied()
                             .expect("probs covers every starter (1:1 with entry_factors)");
+                        let (model_win_pure, model_place_pure, model_show_pure) = pure_by_num
+                            .get(&entry.horse_num.value())
+                            .copied()
+                            .expect("probs_pure covers every starter (1:1 with entry_factors)");
                         feature_rows.push(FeatureRow {
                             race_id: race.race_id.to_string(),
                             date: race.date,
@@ -388,6 +415,9 @@ impl<R: StatsRepository + OddsRepository> Interactor<R> {
                             model_win,
                             model_place,
                             model_show,
+                            model_win_pure,
+                            model_place_pure,
+                            model_show_pure,
                             finishing_position,
                             win_odds: market_win.or(pdf_odds),
                             popularity,
@@ -460,18 +490,20 @@ impl<R: StatsRepository + OddsRepository> Interactor<R> {
 
                 // 買い目（curated）の校正・回収率（#121）。当時 race_odds スナップショットがある
                 // レースのみ対象（券種は部分的でも可。例: win のみのスナップショットなら単勝のみ評価）。
-                // 本番と同じ BettingConfig::default()（curation 有）で推奨を作り、確定着順で的中判定。
-                // 注意: ここに渡す probs は blend_alpha 指定時には市場 win でブレンド済みで、しかも
+                // 引数 `betting`（curation は BettingConfig::default() と同じ既定・harville λ は
+                // 呼び出し側が確率系統に合わせて選ぶ）で推奨を作り、確定着順で的中判定。
+                // harville λ の掃引はここに効く（#703 Phase 2）。
+                // 注意: ここに渡す probs は blend 指定時には市場 win でブレンド済みで、しかも
                 // exotic の payout は同じ market のオッズで計算するため、ブレンド有効時の exotic 校正・
                 // 回収率は top_pick_odds と同様に構造的に楽観側へ寄る（上の probs ブレンド注記と同根）。
-                // 本番 backtest の既定は blend 無効（blend_alpha=None）でこの偏りは出ない。
+                // 本番 backtest の既定は blend 無効（blend=None）でこの偏りは出ない。
                 if let Some(market) = &market {
                     let podium = build_podium(&starters);
                     // curation は本番 predict と同じ既定値（BettingConfig::default()）固定で測る。
                     // まず既定 curation の校正・回収率を定点観測するのが目的で、min_kelly /
                     // max_bets_per_type を振って比較する感度分析は CLI 引数化を伴う follow-up（#122 の
                     // 買い方チューニング、measurement-ordering: 既定を測ってから振る）。
-                    for rec in select_bets(&probs, market, &BettingConfig::default()) {
+                    for rec in select_bets(&probs, market, &betting) {
                         exotic_bets.push(ExoticBet {
                             bet_type: rec.combination.type_label(),
                             predicted_prob: rec.probability,

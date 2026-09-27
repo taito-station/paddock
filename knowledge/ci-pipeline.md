@@ -9,8 +9,8 @@ sources:
   - qa/QA-evil-merge-615.md
   - qa/QA-fullwidth-after-var-636.md
   - .github/workflows/ci.yml
-distilled_from_sha: "6b51b81"
-updated: "2026-09-14"
+distilled_from_sha: "4f0b713"
+updated: "2026-09-27"
 ---
 
 # CI パイプラインの構成と設計意図（D21）
@@ -28,7 +28,7 @@ D21（CI/CD・ビルド・リリース・供給網管理）の充足ギャップ
 | `ci` | ubuntu-latest ＋ postgres サービス | toolchain 一致 assert / **Swagger UI vendored 検査**（回帰テスト → 本番検査）/ fmt / clippy / `cargo test`（**直列**・OCR・PDF・**Desktop** crate を除く） |
 | `web` | ubuntu-latest | typecheck / eslint / vitest / **生成 API 型のドリフト検証** / vite build |
 | `adr` | ubuntu-latest | ADR 番号重複と文書クラス・sources の検査（**回帰テスト → 本番検査**の順）/ **hook ユニットテスト**（session-stale-check + check-knowledge-impact） |
-| `predict-check` | ubuntu-latest | stdlib のみの Python テスト（自走式 + ハーネス忠実性） |
+| `predict-check` | ubuntu-latest | stdlib のみの Python テスト（自走式 + ハーネス忠実性）＋ **numpy 依存を含む `scripts/predict-check` 全テストを venv の pytest で**（#719） |
 | `shellcheck` | ubuntu-latest | `shellcheck --severity=warning` ＋ **変数直後の非 ASCII 検査**（回帰テスト → 本番検査）＋ `keep_awake.sh` の回帰テスト（#585/#643）＋ `prefetch_odds.sh` の lock 回帰テスト（#651・PATH を絞って本番の mkdir 経路も ubuntu で踏ませる） |
 | `db-guards` | ubuntu-latest（**postgres サービス無し**・`postgresql-client` のみ） | golden DB ガードの回帰テスト（#406/#465）。到達不能ポートを使い実 DB を一切触らない設計なので DB サービスが要らない |
 | `ocr-pdf` | ubuntu-latest ＋ **`debian:trixie-slim` コンテナ** | mupdf 依存の `pdf-ocr` / `pdf-parser` 統合テスト |
@@ -63,6 +63,22 @@ D21（CI/CD・ビルド・リリース・供給網管理）の充足ギャップ
 （`setup-python` を使っていないので版はイメージ任せ）。手元の macOS の方が新しいと、新しい版で
 入った API（例: `Path.read_text(newline=...)` は 3.13 以降）を使ってもローカルは緑のまま CI だけが
 落ちる。**新しい stdlib API を使うときは追加バージョンを確認する**（#604 で実際に踏んだ）。
+
+### numpy 依存テストは venv に固定ピンで入れ、ディレクトリごと pytest にかける（#719）
+
+`scripts/predict-check` の確率評価系テスト（prob_eval / prob_ledger / harville_lambda_fit など）は numpy に
+依存し、stdlib ステップでは numpy 不在で**自己スキップして exit 0** になる。独立確率の評価器（#719）は
+以後の版の採否を決める物差しなので、無検査のまま必須チェックを緑にしないために別ステップを置いた。
+
+- **venv に入れる**: ubuntu のシステム python は PEP 668 で pip を拒む。stdlib ステップ（上節）は
+  従来どおり pip を挟まない。
+- **ファイルを列挙せずディレクトリごと実行**: 列挙だと、今後増える numpy テストが stdlib では skip・
+  pytest ステップにも載らず、同じ無検査に戻る。stdlib の自走式テストも pytest で収集できる（両方で走る）。
+- **推移依存まで `==` で固定＋ `--only-binary=:all:`**（`scripts/predict-check/requirements-ci.txt`）:
+  必須チェックが上流の新版（numpy の乱数列の変化など）やビルドスクリプトで揺れないようにする。
+  ADR 0082 の「必須チェックを lock/checksum 外の取得に依存させない」と同じ動機だが、**ハッシュ検証
+  （`--require-hashes`）と dependabot での更新監視はまだ無い**（別 issue）。PyPI 障害時にこのステップは
+  落ちうる。
 
 ### `adr` ジョブは回帰テストを本番検査より先に走らせる
 

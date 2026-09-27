@@ -8,27 +8,19 @@ netkeiba 結果ページの着順と突合して、drift が着順/勝敗を予�
     drift が「その水準を超えて」着順を説明するか(=残差予測力)を測る。
     これがゼロなら「動いた後には妙味なし」で late money は執行エッジにならない。
 
-依存: psql (PADDOCK_DB_URL), 標準ライブラリ + 同ディレクトリの nk.py（実証済み netkeiba ヘルパ）。
-結果着順はローカル JSON キャッシュ。再実行可能。snapshot が増えたら母数が自動で増える。
+依存: psql (PADDOCK_DB_URL), 標準ライブラリ + 同ディレクトリの pgq.py / nk.py（実証済み netkeiba ヘルパ）。
+結果ページは nk.result_page の HTML キャッシュ。再実行可能。snapshot が増えたら母数が自動で増える。
 """
 import os
 import re
 import sys
-import json
 import math
-import time
 import calendar
-import subprocess
 from collections import defaultdict
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # nk.py を同ディレクトリから import
-import nk  # noqa: E402  実証済み netkeiba ヘルパ（curl/decode/fetch_result/VENUES）を再利用
-
-# 他ハーネス（gen_predictions.py 等）と同じく host は localhost を避け 127.0.0.1 を使う
-# （localhost だと psql 接続が間欠失敗する既知事象）。
-DB = os.environ.get("PADDOCK_DB_URL", "postgres://paddock:paddock@127.0.0.1:5432/paddock")
-CACHE = os.path.join(os.path.dirname(__file__), ".cache_nk_results")
-os.makedirs(CACHE, exist_ok=True)
+import nk  # noqa: E402  実証済み netkeiba ヘルパ（result_page/parse_result/VENUES）を再利用
+import pgq  # noqa: E402  psql 共通ヘルパ（接続文字列を argv/例外に出さない・CSV）
 
 # slug → JRA 場コード（nk.VENUES: code→(slug,jp) の逆写像。場コード表を nk.py に一元化）
 SLUG2CODE = {slug: code for code, (slug, _jp) in nk.VENUES.items()}
@@ -54,13 +46,8 @@ def fetch_snapshots():
         "SELECT race_id, combination_key, odds, fetched_at "
         "FROM race_odds_snapshots WHERE bet_type='win' ORDER BY race_id, combination_key, fetched_at"
     )
-    out = subprocess.run(
-        ["psql", DB, "-At", "-F", "\t", "-c", sql],
-        capture_output=True, text=True, check=True,
-    ).stdout
     rows = []
-    for line in out.splitlines():
-        rid, num, odds, fetched = line.split("\t")
+    for rid, num, odds, fetched in pgq.query(sql):
         rows.append((rid, int(num), float(odds), fetched))
     return rows
 
@@ -77,20 +64,12 @@ def parse_ts(s):
 def fetch_finish(nk_id):
     """{umaban: finishing_position} を返す。除外/中止(着順 None)は除く。
 
-    パースは nk.fetch_result（実証済み・枠番/馬番の誤検出対策と空警告つき）に委譲し、
-    抽出済み着順を JSON でローカルキャッシュ（再走で refetch しない・netkeiba への礼儀）。"""
-    path = os.path.join(CACHE, f"{nk_id}.json")
-    if os.path.exists(path):
-        return {int(k): v for k, v in json.load(open(path, encoding="utf-8")).items()}
-    rows = nk.fetch_result(nk_id)  # curl+parse。取得成功だが 0 行なら nk 側が warn
-    finish = {r["horse_num"]: r["rank"] for r in rows if r["rank"] is not None}
-    # 空（結果ページ未生成・構造変化）はキャッシュしない。永続化すると再走で
-    # 空を読み続け no_result に固定され、後日レース確定後も取りこぼす。
-    if finish:
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(finish, f)
-    time.sleep(1.5)  # netkeiba への礼儀 (未キャッシュ取得時のみ)
-    return finish
+    パースは nk.parse_result（実証済み・枠番/馬番の誤検出対策と空警告つき）に委譲する。
+    ページ取得・キャッシュ・ペーシングは nk.result_page（確定済みページだけ保存・同一ページは
+    確定オッズ/払戻の読み取りと共有）。"""
+    # 未完ページ（着順なし）は result_page が保存見送りの理由を warn するので、ここでは重ねない
+    rows = nk.parse_result(nk.result_page(nk_id), nk_id, warn=False)
+    return {r["horse_num"]: r["rank"] for r in rows if r["rank"] is not None}
 
 
 # ---------- 統計ヘルパ (stdlib のみ) ----------
