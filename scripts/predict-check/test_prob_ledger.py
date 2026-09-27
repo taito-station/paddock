@@ -320,6 +320,39 @@ def test_aggregate_and_paired_ci():
     assert lo <= agg["quinella_nll"] <= hi
 
 
+# ---------- レポート ----------
+
+
+def _race_rows(race_id, date, fins, pure):
+    return [
+        {"race_id": race_id, "date": date, "horse_num": i + 1, "finishing_position": f,
+         "model_win_pure": p, "win_odds": 2.0 + i}
+        for i, (f, p) in enumerate(zip(fins, pure))
+    ]
+
+
+def _table_widths(lines):
+    return [ln.count("|") for ln in lines if ln.startswith("|")]
+
+
+def test_report_tables_are_well_formed():
+    # 系統 1 本でも 2 本でも、表の各行の列数が見出し・区切りと一致する（markdown が崩れない）。
+    races = OrderedDict(
+        (f"R{k}", _race_rows(f"R{k}", "2025-08-01", [1, 2, 3, 4, 5], [0.4, 0.25, 0.15, 0.12, 0.08]))
+        for k in range(4)
+    )
+    ext = {(f"R{k}", h): {"p_win": 0.2, "p_top2": None} for k in range(4) for h in range(1, 6)}
+    for systems in (
+        OrderedDict([("pure", pl.System("pure", None))]),
+        OrderedDict([("pure", pl.System("pure", None)), ("ext", pl.System("ext", ext))]),
+    ):
+        lines = pl.report_window("dev", races, systems, (1.0, 1.0), n_boot=20, seed=1)
+        metric_table = [ln for ln in lines if ln.startswith("|")][: 2 + len(pl.METRICS)]
+        widths = _table_widths(metric_table)
+        assert len(set(widths)) == 1, widths
+        assert widths[0] == 2 + len(systems) + (len(systems) - 1)
+
+
 # ---------- ledger ----------
 
 

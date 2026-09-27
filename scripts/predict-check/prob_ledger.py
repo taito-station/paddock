@@ -41,6 +41,7 @@ import argparse
 import csv
 import hashlib
 import math
+import os
 import subprocess
 import sys
 from collections import Counter, OrderedDict
@@ -451,8 +452,8 @@ def report_window(
         lines.append(f"- 警告: 確率 ≤ {FLOOR} を floor（系統別件数 {floored}）")
     fb, fn = fidelity_pure_win_brier(races)
     lines.append(f"- 忠実性サニティ: pure win Brier（勝者一意かつ市場オッズ完全の {fn}R）= {fb:.6f}（prob_eval の win×pure と一致すること）")
-    lines += ["", f"| 指標 | " + " | ".join(names) + " | " + " | ".join(f"Δ({n}−{base})" for n in names[1:]) + " |"]
-    lines.append("|---|" + "---|" * (len(names) + len(names) - 1))
+    header = ["指標", *names, *(f"Δ({n}−{base})" for n in names[1:])]
+    lines += ["", "| " + " | ".join(header) + " |", "|" + "---|" * len(header)]
     for m in METRICS:
         cells = []
         for n in names:
@@ -500,8 +501,10 @@ def _parse_kv(items: list[str], what: str) -> dict:
 
 def _git_sha() -> str:
     try:
+        # cwd でなくスクリプトの置き場所で引く（別 worktree から実行しても計測したコードの版を記録する）
         return subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, check=True
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True, check=True, cwd=os.path.dirname(os.path.abspath(__file__)),
         ).stdout.strip()
     except (OSError, subprocess.CalledProcessError):
         return "unknown"
