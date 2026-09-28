@@ -47,9 +47,6 @@
 # 週次スケジュール: deployments/launchd/com.paddock.verify-backup-restore.plist（日曜 04:00）
 set -euo pipefail
 
-# コンテナ実行環境（lima/nerdctl・colima/docker）の判定と exec はここへ集約する（#731）。
-# shellcheck source=scripts/lib/pg-container.sh
-source "$(dirname "$0")/lib/pg-container.sh"
 
 log() { echo "[$(date '+%Y-%m-%dT%H:%M:%S%z')] $*"; }
 
@@ -73,6 +70,11 @@ _cleanup() {
     fi
 }
 trap '_cleanup' EXIT
+
+# コンテナ実行環境の判定と exec（#731）。EXIT トラップの後で読み込む（読み込みに失敗しても
+# FAIL 通知が出るように）。
+# shellcheck source=scripts/lib/pg-container.sh
+source "$(dirname "$0")/lib/pg-container.sh"
 
 usage() {
     cat <<'EOF'
@@ -112,6 +114,13 @@ PG_USER="${PADDOCK_PG_USER:-paddock}"
 # --- 実行環境の判定＋起動確認（lima/nerdctl・colima/docker のどちらでも動く） ---
 if ! pg_container_require_running "$CONTAINER"; then
     exit 1
+fi
+log "コンテナ実行環境: $(pg_container_describe "$CONTAINER")"
+# auto 判定が lima VM 停止のため docker 側へ切り替えた場合は、別インスタンス（移行前の旧 DB）で
+# 検証している可能性がある。黙って進めず、ログと通知で知らせる（#731）。
+if [[ -n "$PG_RUNTIME_FALLBACK" ]]; then
+    log "警告: $PG_RUNTIME_FALLBACK"
+    notify "restore 検証 警告: $PG_RUNTIME_FALLBACK"
 fi
 
 # --- dump ファイル特定 ---

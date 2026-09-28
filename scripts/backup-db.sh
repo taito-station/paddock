@@ -29,10 +29,6 @@
 #   PADDOCK_BACKUP_MIRROR_DIR=/Volumes/ext/paddock-backups scripts/backup-db.sh  # off-machine ミラー有効
 set -euo pipefail
 
-# コンテナ実行環境（lima/nerdctl・colima/docker）の判定と exec はここへ集約する（#731）。
-# shellcheck source=scripts/lib/pg-container.sh
-source "$(dirname "$0")/lib/pg-container.sh"
-
 log() { echo "[$(date '+%Y-%m-%dT%H:%M:%S%z')] $*"; }
 
 notify() {
@@ -52,6 +48,11 @@ _validated=0
 # rc=1（コンテナ実行環境/pg_dump/空 dump 等の実失敗）は常に通知。rc=2 は _validated=0 のとき（使い方
 # エラー）のみ通知対象外。
 trap '_rc=$?; [ -n "$_tmp" ] && rm -f "$_tmp"; if [ "$_rc" -ne 0 ] && { [ "$_rc" -ne 2 ] || [ "$_validated" -eq 1 ]; }; then log "FAIL: backup-db exited rc=$_rc"; notify "backup FAILED (rc=$_rc)"; fi' EXIT
+
+# コンテナ実行環境（lima/nerdctl・colima/docker）の判定と exec はここへ集約する（#731）。
+# EXIT トラップの後で読み込む（ライブラリが欠けて読み込みに失敗しても FAIL 通知が出るように）。
+# shellcheck source=scripts/lib/pg-container.sh
+source "$(dirname "$0")/lib/pg-container.sh"
 
 usage() {
     cat <<'EOF'
@@ -108,6 +109,14 @@ _validated=1
 if ! pg_container_require_running "$CONTAINER"; then
     exit 1
 fi
+runtime_desc="$(pg_container_describe "$CONTAINER")"
+log "コンテナ実行環境: $runtime_desc"
+# auto 判定が lima VM 停止のため docker 側へ切り替えた場合は、移行前の旧 DB を退避している
+# 可能性がある。黙って進めず、ログと通知で知らせる（#731）。
+if [[ -n "$PG_RUNTIME_FALLBACK" ]]; then
+    log "警告: $PG_RUNTIME_FALLBACK"
+    notify "backup 警告: $PG_RUNTIME_FALLBACK"
+fi
 
 mkdir -p "$BACKUP_DIR"
 ts="$(date +%Y%m%d-%H%M%S)"
@@ -128,6 +137,9 @@ fi
 mv "$_tmp" "$final"
 # mv 成功後は一時ファイルが存在しないので _tmp をリセット（EXIT ハンドラで rm しない）。
 _tmp=""
+# どの実行環境（どの DB インスタンス）から退避したかを dump と対のサイドカーに残す（#731）。
+# 後から「この世代は旧 DB から取ったものではないか」を確かめられるようにする。
+printf '%s\n' "$runtime_desc" > "$final.runtime"
 
 # dump 構造チェック（-Fc custom-format の整合検証）。
 # pg_restore --list はアーカイブヘッダ（TOC）のみ読むため数秒で完了する安価な検証。
@@ -221,7 +233,7 @@ prune_dir() {
     if (( ${#files[@]} > KEEP )); then
         for f in "${files[@]}"; do
             if (( i >= KEEP )); then
-                rm -f "$f"
+                rm -f "$f" "$f.rowcounts" "$f.runtime"
                 log "古い世代を削除($label): $(basename "$f")"
             fi
             i=$((i + 1))

@@ -31,6 +31,22 @@
 # 設定するグローバル変数（呼び出し元スクリプトからは読み取り専用として扱うこと）:
 #   PG_RUNTIME     lima|docker（解決成功時のみ設定）
 #   PG_RUNTIME_VM  lima のときの VM 名（docker のときは空）
+#   PG_RUNTIME_FALLBACK  auto 判定で「limactl はあるが VM が Running でない」ため docker を
+#                  選んだとき、その理由（1 行）。それ以外は空。呼び出し側は警告・通知に使う
+#                  （移行前の旧 DB を黙って退避・検証しないため。#731）
+#   PG_PS_ERROR    pg_container_running が ps コマンド自体の失敗で return 2 したときの stderr 要約
+
+# source 時点で初期化する（呼び出し元の環境に同名変数が export されていても、resolve 前の
+# exec が暗黙にその値で動かないようにする）。
+PG_RUNTIME=""
+PG_RUNTIME_VM=""
+PG_RUNTIME_FALLBACK=""
+PG_PS_ERROR=""
+
+# lima VM の状態（Running / Stopped / 空=未作成・取得失敗）を返す。
+_pg_lima_status() {
+    limactl list --format '{{.Status}}' "$1" 2>/dev/null || true
+}
 
 # 実行環境を判定し、成功時は PG_RUNTIME（+ lima なら PG_RUNTIME_VM）を設定する。
 # 失敗時は判定に使った事実（limactl の有無・VM の状態・docker の応答）を列挙して stderr へ出し、
@@ -44,11 +60,19 @@ pg_container_resolve_runtime() {
 
     PG_RUNTIME=""
     PG_RUNTIME_VM=""
+    PG_RUNTIME_FALLBACK=""
 
     case "$requested" in
         lima)
             if ! command -v limactl >/dev/null 2>&1; then
                 echo "PADDOCK_PG_RUNTIME=lima だが limactl が見つからない（PATH を確認）" >&2
+                return 1
+            fi
+            # 明示指定でも VM の状態は確認する（停止中に「コンテナが起動していない」と誤診断しない）。
+            local explicit_status
+            explicit_status="$(_pg_lima_status "$vm")"
+            if [[ "$explicit_status" != "Running" ]]; then
+                echo "PADDOCK_PG_RUNTIME=lima だが VM ${vm} が ${explicit_status:-未作成または状態取得失敗}（limactl start ${vm} で起動）" >&2
                 return 1
             fi
             PG_RUNTIME="lima"
@@ -74,11 +98,15 @@ pg_container_resolve_runtime() {
     # --- auto 判定: limactl の VM が Running なら lima を優先し、そうでなければ docker に
     # フォールバックする。docker 側は対象コンテナが `docker ps` に見えることまで確認する
     # （docker デーモンが上がっているだけでは判定しない）。
+    #
+    # lima 側は「VM が Running」で確定し、コンテナが見えなくても docker へは流さない（非対称は意図的）。
+    # docker 側（colima 等）には移行前の旧 DB が残っていることがあり、見えた方へ黙って流れると
+    # 別インスタンスの DB を退避・検証してしまうため、fail-closed にしている（#731）。
     local limactl_present=0 lima_status="" docker_present=0
 
     if command -v limactl >/dev/null 2>&1; then
         limactl_present=1
-        lima_status="$(limactl list --format '{{.Status}}' "$vm" 2>/dev/null)" || lima_status=""
+        lima_status="$(_pg_lima_status "$vm")"
         if [[ "$lima_status" == "Running" ]]; then
             PG_RUNTIME="lima"
             PG_RUNTIME_VM="$vm"
@@ -94,6 +122,10 @@ pg_container_resolve_runtime() {
         if docker_names="$(docker ps --format '{{.Names}}' 2>/dev/null)" \
             && grep -qxF "$container" <<<"$docker_names"; then
             PG_RUNTIME="docker"
+            if [[ "$limactl_present" -eq 1 ]]; then
+                # shellcheck disable=SC2034  # 呼び出し元（backup-db.sh / verify-backup-restore.sh）が読む
+                PG_RUNTIME_FALLBACK="lima VM ${vm} が ${lima_status:-未作成または状態取得失敗} のため docker 側のコンテナ ${container} を使った（移行前の旧 DB の可能性がある）"
+            fi
             return 0
         fi
     fi
@@ -116,23 +148,38 @@ pg_container_resolve_runtime() {
 
 # 対象コンテナが起動しているか（PG_RUNTIME が解決済みであること・呼び出し前に
 # pg_container_resolve_runtime を実行しておく）。
+# 戻り値: 0 = 起動中 / 1 = 起動中一覧に無い / 2 = ps コマンド自体が失敗（PG_PS_ERROR に stderr の要約）
 pg_container_running() {
     local container="$1"
-    local names
+    local names rc=0
 
+    PG_PS_ERROR=""
+    # stderr も同じ変数に受ける（一時ファイルや外部コマンドを増やさない）。成功時に警告行が
+    # 混ざっても、下の完全一致(-x)照合なので誤判定しない。
     case "$PG_RUNTIME" in
         lima)
-            names="$(limactl shell "$PG_RUNTIME_VM" -- nerdctl ps --format '{{.Names}}' 2>/dev/null)" || return 1
+            names="$(limactl shell "$PG_RUNTIME_VM" -- nerdctl ps --format '{{.Names}}' 2>&1)" || rc=$?
             ;;
         docker)
-            names="$(docker ps --format '{{.Names}}' 2>/dev/null)" || return 1
+            names="$(docker ps --format '{{.Names}}' 2>&1)" || rc=$?
             ;;
         *)
             echo "pg_container_running: PG_RUNTIME が未解決（先に pg_container_resolve_runtime を呼ぶこと）" >&2
-            return 1
+            return 2
             ;;
     esac
-    grep -qxF "$container" <<<"$names"
+    if [[ "$rc" -ne 0 ]]; then
+        names="${names//$'\n'/ }"
+        PG_PS_ERROR="rc=${rc}: ${names:0:300}"
+        return 2
+    fi
+    grep -qxF "$container" <<<"$names" || return 1
+    return 0
+}
+
+# ログ・サイドカー用に、解決済みの実行環境を 1 行で返す。
+pg_container_describe() {
+    printf 'runtime=%s vm=%s container=%s\n' "${PG_RUNTIME:--}" "${PG_RUNTIME_VM:--}" "$1"
 }
 
 # 実行環境の解決＋起動確認をまとめた便利関数。両スクリプトで同じ「コンテナが起動していない」の
@@ -142,13 +189,19 @@ pg_container_require_running() {
 
     pg_container_resolve_runtime "$container" || return 1
 
-    if ! pg_container_running "$container"; then
+    local rc=0
+    pg_container_running "$container" || rc=$?
+    if [[ "$rc" -eq 2 ]]; then
+        echo "コンテナ一覧の取得に失敗（$(pg_container_describe "$container")・${PG_PS_ERROR}）" >&2
+        return 1
+    fi
+    if [[ "$rc" -ne 0 ]]; then
         local hint=""
         case "$PG_RUNTIME" in
             lima) hint="limactl shell $PG_RUNTIME_VM -- nerdctl compose -f deployments/compose.yaml up -d postgres" ;;
             docker) hint="docker compose -f deployments/compose.yaml up -d postgres" ;;
         esac
-        echo "コンテナ ${container} が起動していない（${hint}）" >&2
+        echo "コンテナ ${container} が起動していない（$(pg_container_describe "$container")・${hint}）" >&2
         return 1
     fi
     return 0
