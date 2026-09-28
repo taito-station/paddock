@@ -7,8 +7,10 @@
   __REPO_ROOT__=リポの絶対パス / __HOME__=$HOME を実値へ置換）。手動手順は deployments/db/BACKUP.md 参照。
   __REPO_ROOT__ は prefetch/keep-awake plist と共通のプレースホルダ名（install.sh が一括置換）。
   __HOME__ はログ出力先用で backup-db 固有（launchd は StandardOutPath で $HOME を展開しないため実値へ置換する）。
-  PATH は launchd の最小環境で docker を解決するため明示する（Intel の /usr/local/bin と
-  Apple Silicon の /opt/homebrew/bin の両方を含める。docker/colima の brew prefix が環境で異なる）。
+  PATH は launchd の最小環境で docker/limactl を解決するため明示する（Intel の /usr/local/bin と
+  Apple Silicon の /opt/homebrew/bin の両方を含める。docker/colima/lima の brew prefix が環境で
+  異なる）。実行環境（lima/nerdctl または colima/docker）の判定は scripts/backup-db.sh が source
+  する scripts/lib/pg-container.sh が行う（PADDOCK_PG_RUNTIME=auto 既定・#731）。
 -->
 <plist version="1.0">
 <dict>

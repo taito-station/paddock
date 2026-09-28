@@ -3,7 +3,7 @@
   paddock race_odds_snapshots retention LaunchAgent（#492）。
   scripts/purge-snapshots.sh を毎日 04:30 に実行し、保持月数（既定 6）より古い snapshot を
   paddock-analyze purge-snapshots で削除する。race_odds_snapshots は ≈30MB/日・年 ≈11GB で
-  単調増加するため、放置すると Colima VM ディスクと dump サイズ（backup 時間・off-machine
+  単調増加するため、放置するとコンテナランタイム（Lima/Colima）の VM ディスクと dump サイズ（backup 時間・off-machine
   転送量に直結）が黙って肥大する。それを日次の retention で bounded に保つ。
 
   実行時刻 04:30 は backup-db（毎日 23:30）より後に置く。これにより当夜の dump は purge 前の

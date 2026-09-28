@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 # paddock DB（race_odds_snapshots 等の蓄積資産）を durable な場所へ退避する（#265）。
 #
-# race_odds_snapshots は Colima の named volume paddock-pgdata 1 か所にしか無く、過去オッズは
-# 再取得不能。volume 喪失（Colima reset / docker volume rm / ディスク障害）に備え、full DB を
-# custom-format（-Fc・圧縮込み）で dump しタイムスタンプ付きで退避＋世代管理する。
+# race_odds_snapshots は Postgres コンテナ（Lima VM 内 nerdctl または colima/docker）の named
+# volume paddock-pgdata 1 か所にしか無く、過去オッズは再取得不能。volume 喪失（VM 削除・
+# nerdctl/docker volume rm・ディスク障害）に備え、full DB を custom-format（-Fc・圧縮込み）で
+# dump しタイムスタンプ付きで退避＋世代管理する。
 # 復元手順は deployments/db/BACKUP.md。日次実行は deployments/launchd/com.paddock.backup-db.plist。
 #
 # 退避先: BACKUP_DIR（ローカル・権威）に dump 本体を置き、世代管理（列挙→剪定）を行う。launchd から
 # でもローカル dir は確実に列挙・削除できるため、権威側は常に KEEP 世代に bounded。主脅威である
-# Colima volume 喪失（reset / docker volume rm）はこのローカル退避だけで自動的に外せる。
+# コンテナ volume 喪失（VM 削除・nerdctl/docker volume rm）はこのローカル退避だけで自動的に外せる。
 #
 # off-machine ミラー（既定 off・オプトイン）: PADDOCK_BACKUP_MIRROR_DIR を指定すると各 dump をそこへ
 # cp してディスク障害にも備える。ミラー先には **実ファイルシステム（外付け/NAS 等）** を使うこと。
@@ -19,7 +20,8 @@
 # 気づかせる（#507。ディスク障害でローカル権威も失うと復元不能なため）。
 #
 # 重要: host の pg_dump が PG17 サーバより古い（v14 等）とダンプを拒否するため、**dump は
-# container 内の pg_dump（バージョン一致）を docker exec で実行**する（host に pg17 client 不要）。
+# container 内の pg_dump（バージョン一致）を実行環境の exec（nerdctl/docker）経由で実行**する
+# （host に pg17 client 不要。実行環境の選択は scripts/lib/pg-container.sh・PADDOCK_PG_RUNTIME）。
 #
 # 使い方:
 #   scripts/backup-db.sh                                        # ローカル権威のみへ退避（既定）
@@ -43,9 +45,14 @@ _rc=0
 # に起きる（_validated=0）ので、それだけを FAIL 通知から除外する。検証通過後（_validated=1）に
 # 何らかの理由で rc=2 が出た場合は実失敗として通知する（偶発 rc=2 の握りつぶし防止）。
 _validated=0
-# rc=1（docker/pg_dump/空 dump 等の実失敗）は常に通知。rc=2 は _validated=0 のとき（使い方
+# rc=1（コンテナ実行環境/pg_dump/空 dump 等の実失敗）は常に通知。rc=2 は _validated=0 のとき（使い方
 # エラー）のみ通知対象外。
 trap '_rc=$?; [ -n "$_tmp" ] && rm -f "$_tmp"; if [ "$_rc" -ne 0 ] && { [ "$_rc" -ne 2 ] || [ "$_validated" -eq 1 ]; }; then log "FAIL: backup-db exited rc=$_rc"; notify "backup FAILED (rc=$_rc)"; fi' EXIT
+
+# コンテナ実行環境（lima/nerdctl・colima/docker）の判定と exec はここへ集約する（#731）。
+# EXIT トラップの後で読み込む（ライブラリが欠けて読み込みに失敗しても FAIL 通知が出るように）。
+# shellcheck source=scripts/lib/pg-container.sh
+source "$(dirname "$0")/lib/pg-container.sh"
 
 usage() {
     cat <<'EOF'
@@ -65,6 +72,9 @@ backup-db.sh - paddock DB を durable な場所へ退避する（#265）
   PADDOCK_PG_CONTAINER       Postgres コンテナ名（既定: paddock-postgres）
   PADDOCK_PG_USER            DB ユーザ（既定: paddock）
   PADDOCK_PG_DB              DB 名（既定: paddock）
+  PADDOCK_PG_RUNTIME         コンテナ実行環境 auto|lima|docker（既定: auto。詳細は
+                             scripts/lib/pg-container.sh）
+  PADDOCK_LIMA_VM            lima 実行環境時の VM 名（既定: paddock）
 EOF
 }
 
@@ -95,13 +105,17 @@ fi
 # ここまでで入力検証は完了。以降の非ゼロ終了は実失敗として FAIL 通知の対象にする。
 _validated=1
 
-command -v docker >/dev/null || { echo "docker が見つからない（PATH を確認）" >&2; exit 1; }
-# 起動確認。パイプ+grep -q は pipefail 下で SIGPIPE により誤判定しうるため、一旦変数へ受けてから
-# 固定文字列(-F)・完全一致(-x)で照合する。
-running_containers="$(docker ps --format '{{.Names}}')"
-if ! grep -qxF "$CONTAINER" <<<"$running_containers"; then
-    echo "コンテナ $CONTAINER が起動していない（docker compose -f deployments/compose.yaml up -d postgres）" >&2
+# 実行環境の判定＋起動確認（lima/nerdctl・colima/docker のどちらでも動く。scripts/lib/pg-container.sh）。
+if ! pg_container_require_running "$CONTAINER"; then
     exit 1
+fi
+runtime_desc="$(pg_container_describe "$CONTAINER")"
+log "コンテナ実行環境: $runtime_desc"
+# auto 判定が lima VM 停止のため docker 側へ切り替えた場合は、移行前の旧 DB を退避している
+# 可能性がある。黙って進めず、ログと通知で知らせる（#731）。
+if [[ -n "$PG_RUNTIME_FALLBACK" ]]; then
+    log "警告: $PG_RUNTIME_FALLBACK"
+    notify "backup 警告: $PG_RUNTIME_FALLBACK"
 fi
 
 mkdir -p "$BACKUP_DIR"
@@ -112,7 +126,7 @@ _tmp="$final.part"
 
 # container 内 pg_dump（バージョン一致）で full DB を custom-format 退避。stdout をホストファイルへ。
 # 一時ファイル(.part)に書き、成功＋非空を確認してから最終名へ mv（中断で壊れた dump を残さない）。
-if ! docker exec "$CONTAINER" pg_dump -U "$PG_USER" -d "$PG_DB" -Fc --no-owner --no-privileges > "$_tmp"; then
+if ! pg_container_exec "$CONTAINER" pg_dump -U "$PG_USER" -d "$PG_DB" -Fc --no-owner --no-privileges > "$_tmp"; then
     echo "pg_dump に失敗（container=${CONTAINER}）" >&2
     exit 1
 fi
@@ -123,14 +137,17 @@ fi
 mv "$_tmp" "$final"
 # mv 成功後は一時ファイルが存在しないので _tmp をリセット（EXIT ハンドラで rm しない）。
 _tmp=""
+# どの実行環境（どの DB インスタンス）から退避したかを dump と対のサイドカーに残す（#731）。
+# 後から「この世代は旧 DB から取ったものではないか」を確かめられるようにする。
+printf '%s\n' "$runtime_desc" > "$final.runtime"
 
 # dump 構造チェック（-Fc custom-format の整合検証）。
 # pg_restore --list はアーカイブヘッダ（TOC）のみ読むため数秒で完了する安価な検証。
 # host の pg_restore が PG17 サーバより古い（v14 等）と拒否されるため、退避と同じく
-# container 内（PG17・バージョン一致）の pg_restore を docker exec で実行する（dump 生成の
+# container 内（PG17・バージョン一致）の pg_restore を実行環境の exec で実行する（dump 生成の
 # pg_dump と対称。host に pg17 client 不要）。dump は stdin から流し込む（-i で TTY を切る）。
 # 壊れた dump（書き込み中断・転送破損等）はここで即検知して失敗させる。
-if ! docker exec -i "$CONTAINER" pg_restore --list < "$final" > /dev/null; then
+if ! pg_container_exec -i "$CONTAINER" pg_restore --list < "$final" > /dev/null; then
     echo "dump 構造チェック失敗（pg_restore --list が異常終了。dump が壊れている可能性あり）: $final" >&2
     exit 1
 fi
@@ -149,7 +166,7 @@ log "dump 構造チェック OK: $final"
 # 突合テーブルは検証側の既定と一致させる（PADDOCK_VERIFY_TABLES で上書き可・カンマ区切り）。
 rowcounts_file="$final.rowcounts"
 verify_tables="${PADDOCK_VERIFY_TABLES:-race_odds_snapshots,races,horses}"
-# 各テーブルの COUNT(*) を UNION ALL で 1 クエリにまとめて取得する（テーブルごとに docker exec を
+# 各テーブルの COUNT(*) を UNION ALL で 1 クエリにまとめて取得する（テーブルごとに exec を
 # 起こさない）。テーブル名は識別子として直挿しするが、値は運用者制御の env（PADDOCK_VERIFY_TABLES）
 # 由来で外部入力ではないため注入面のリスクは無い。書式は psql -t -A -F'\t' で "table<TAB>count"。
 # カンマ区切りを配列へ（read -ra で明示的に分割。無クォート展開の単語分割に頼らない）。
@@ -161,7 +178,7 @@ for t in "${_verify_table_arr[@]}"; do
     count_selects+="SELECT '$t' AS t, COUNT(*) AS c FROM $t"
 done
 if [[ -n "$count_selects" ]] \
-    && rc_out="$(docker exec "$CONTAINER" psql -U "$PG_USER" -d "$PG_DB" -t -A -F $'\t' \
+    && rc_out="$(pg_container_exec "$CONTAINER" psql -U "$PG_USER" -d "$PG_DB" -t -A -F $'\t' \
         -c "$count_selects" 2>/dev/null)"; then
     printf '%s\n' "$rc_out" > "$rowcounts_file"
     log "行数サイドカー記録: $rowcounts_file"
@@ -216,7 +233,7 @@ prune_dir() {
     if (( ${#files[@]} > KEEP )); then
         for f in "${files[@]}"; do
             if (( i >= KEEP )); then
-                rm -f "$f"
+                rm -f "$f" "$f.rowcounts" "$f.runtime"
                 log "古い世代を削除($label): $(basename "$f")"
             fi
             i=$((i + 1))

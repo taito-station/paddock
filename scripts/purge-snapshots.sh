@@ -2,8 +2,8 @@
 # race_odds_snapshots の retention を日次で適用する launchd ラッパ（#492）。
 #
 # race_odds_snapshots は締切前 live オッズを 15 分毎に append する再取得不能資産だが、
-# ≈30MB/日・年 ≈11GB ペースで単調増加する。放置すると Colima VM ディスクと dump サイズ
-# （backup 時間・off-machine 転送量に直結）が黙って肥大し、気づくのは VM ディスク枯渇か
+# ≈30MB/日・年 ≈11GB ペースで単調増加する。放置するとコンテナランタイム（Lima/Colima）の
+# VM ディスクと dump サイズ（backup 時間・off-machine 転送量に直結）が黙って肥大し、気づくのは VM ディスク枯渇か
 # backup 遅延時になる。これを防ぐため保持月数 (PADDOCK_PURGE_MONTHS) より古い snapshot を
 # 日次で削除する。日次実行は deployments/launchd/com.paddock.purge-snapshots.plist。
 #

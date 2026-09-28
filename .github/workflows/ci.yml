@@ -276,6 +276,12 @@ jobs:
       # DB にも触らず、PATH を絞って **flock 不在（本番 macOS）の mkdir 分岐も ubuntu で踏ませる**。
       - name: Regression test for prefetch_odds.sh (#651)
         run: bash scripts/test-prefetch-odds.sh
+      # scripts/lib/pg-container.sh の実行環境判定（lima/nerdctl・colima/docker）と、それを使う
+      # backup-db.sh の回帰テスト（#731）。開発機の docker ランタイムが colima から Lima VM 内の
+      # nerdctl へ移っても日次バックアップが誤診断で落ちないことを、偽 limactl/docker で固定する。
+      # 本物の limactl/docker/postgres には触れないため DB も macOS も要らず ubuntu で走る。
+      - name: Regression test for pg-container.sh runtime detection (#731)
+        run: bash scripts/test-backup-runtime.sh
       - name: Run shellcheck (--severity=warning)
         # 対象ファイルの定義は scripts/check-shell-var-nonascii.sh --list を単一ソースにする
         # （拡張子で拾えない shebang スクリプトを含む。以前はここと検査スクリプトに同じ

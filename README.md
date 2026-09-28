@@ -57,8 +57,10 @@ JRA 公式のレース成績 PDF をパースして Postgres に蓄積し、そ�
   ```
   斤量・人気・調教師・騎手は OCR ではなく mutool のテキスト／座標／単勝オッズ順位から決定的に取得する。
   OCR はこれらに対しては冗長だが、着順は OCR 由来の値で上書きする余地があるため tesseract は必須。
-- **docker ランタイム（colima 推奨）**: compose の `postgres` / `api` / `web` / `importer` サービスと
-  launchd の `backup-db` はすべて docker に依存する。macOS では **colima**（軽量・OSS）を推奨する。
+- **docker ランタイム（colima 推奨）**: compose の `postgres` / `api` / `web` / `importer` サービスは
+  docker に依存する。macOS では **colima**（軽量・OSS）を推奨する。launchd の `backup-db` /
+  `verify-backup-restore` は、Lima VM 内の nerdctl と docker のどちらで DB が動いていても自動で判定して
+  動く（[deployments/db/BACKUP.md](deployments/db/BACKUP.md)「実行環境の自動判定」・#731）。
   ```bash
   brew install colima docker docker-compose
   colima start                      # 初回起動（以降は自動）
