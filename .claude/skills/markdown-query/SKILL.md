@@ -1,8 +1,8 @@
 ---
 name: markdown-query
 description: >
-  ローカルの Markdown ドキュメント（docs/ 配下: docs-original〈ADR 含む〉/ specifications /
-  knowledge / qa）から、ファイル全体を読まずに関連チャンクだけを取り出して答える。完全ローカル
+  ローカルの Markdown ドキュメント（knowledge / qa / docs-original）から、ファイル全体を
+  読まずに関連チャンクだけを取り出して答える。完全ローカル
   （外部 API なし・BM25 語彙検索）。USE FOR: プロジェクト文書からの回答、仕様・ADR・knowledge の
   検索、要件やバックテスト履歴の探索、対象ファイルパスが未知の横断検索。PREFER OVER: 対象が
   Markdown で複数ファイル横断・関連度順ヒットが欲しいときは Read/cat/grep より先にこれを試す。
@@ -16,7 +16,7 @@ category: research
 
 # markdown-query（mdq）
 
-`docs/` 配下の Markdown を BM25 で横断検索し、ヒットした**小さな snippet だけ**を返す。生ファイルを
+`knowledge/` / `qa/` / `docs-original/` の Markdown（索引対象は `mdq.toml` の roots）を BM25 で横断検索し、ヒットした**小さな snippet だけ**を返す。生ファイルを
 読み込む前にこれを使い、Context 消費を抑える（HVE 実測で全 .md 直読み比 ~99.8% トークン削減）。
 実体は `tools/mdq/`（HVE 由来・MIT）、索引対象は `mdq.toml`。索引は `.mdq/*.sqlite`（gitignore・
 セッション毎に再ビルド前提）。
@@ -42,13 +42,13 @@ tools/mdq/.venv/bin/pip install -r tools/mdq/requirements.txt   # rank_bm25 / Py
 
 1. **索引**: `scripts/mdq index`。`mdq.toml` の `[index].roots`（knowledge,
    qa, docs-original）を走査。存在しない dir は自動スキップ。増分更新。
-   **ADR 統合（ADR 0073）より前の索引を持つ環境は一度だけ `rm -rf .mdq && scripts/mdq index`**。
-   増分の prune は roots 配下しか消さないため、旧 `docs/adr/*` のチャンクが居残り、存在しない
-   パスが検索結果に出続ける。
+   **roots 変更（ADR 0073 の ADR 統合・ADR 0092〈#702〉のルート直下への統合）より前の索引を持つ環境は
+   一度だけ `rm -rf .mdq && scripts/mdq index`**。増分の prune は roots 配下しか消さないため、旧
+   `docs/adr/*`・`docs/knowledge/*` 等のチャンクが居残り、存在しないパスが検索結果に出続ける。
 2. **検索**: `scripts/mdq search --q "クエリ" --top-k 5 --max-tokens 800`。出力は JSONL（1 行 1 ヒット、
    `path` / `heading_path` / `lines` / `score` / `snippet`）。`--paths` で絞ると精度向上——
-   **ADR だけに絞るなら `--paths "docs-original/0*"`**（同ディレクトリの issue 由来一次資料は
-   0 埋めしない命名なので除外される）。`--mode grep` で完全一致に切替。
+   **決定ログ（旧 ADR を含む）を引くなら `--paths "knowledge/*"`** や `--q "ADR 0055"`
+   （独立した ADR ファイルは #652 で廃止済み。決定は各 knowledge 末尾の `### ADR NNNN:` / `### #NNN:` 見出し）。`--mode grep` で完全一致に切替。
 3. **本文取得**: `scripts/mdq get --chunk-id <ID>`（必要時のみ）。
 4. 結果は**そのまま使う**（生 Markdown を読み直さない）。
 

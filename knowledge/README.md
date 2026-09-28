@@ -25,7 +25,7 @@ knowledge/                status 付き確定知（＝この層。読むのは�
 - **横断検索**は mdq（Markdown Query, BM25・ローカル）で全 docs を索引する。生ファイルを読む前に
   `scripts/mdq search` を使う（[.claude/skills/markdown-query/SKILL.md](../.claude/skills/markdown-query/SKILL.md)）。
 - **決定の記録は各文書の「決定ログ」節**（#652）。かつて `docs-original/` に独立ファイルとして
-  置いていた ADR は廃止し、決定・理由・却下案・影響は**その決定が効く knowledge / specifications の
+  置いていた ADR は廃止し、決定・理由・却下案・影響は**その決定が効く knowledge の
   末尾**にある `## 決定ログ` 節へ集約した。**独立した ADR ファイルはもう作らない**——新しい決定は
   対応する確定知の決定ログに追記する。
 - **確定知を読む入口は knowledge**。決定を辿るのも同じファイルの末尾で完結する（別ディレクトリの
@@ -82,11 +82,11 @@ knowledge/                status 付き確定知（＝この層。読むのは�
 ```yaml
 ---
 status: Confirmed        # Confirmed（確定）/ Tentative（暫定）/ Conflict（矛盾・要解消）
-kind: knowledge
+kind: knowledge          # knowledge（横断的な蒸留知）/ specification（旧 docs/specifications 由来のドメイン/機能知）
 doc_class: [D22, D24]    # 文書クラス。第 1 要素が主クラス。定義は knowledge/doc-classes.md
 tags: [D22, D24]         # doc_class の mdq 用ミラー（完全一致。checker が強制）
-sources:                 # 由来。qa / docs-original のほか、確定知層（specifications /
-                         # knowledge）や主題そのものであるファイル（ci.yml・openapi.json）も可。
+sources:                 # 由来。qa / docs-original のほか、確定知層（knowledge/ の
+                         # 他文書）や主題そのものであるファイル（ci.yml・openapi.json）も可。
                          # 判定は「その文書の本文が動いたら、この知の見直しが要るか」
   - docs-original/NNN-....md    # issue 番号（0 埋めしない）
   - qa/QA-....md
@@ -265,7 +265,7 @@ updated: "YYYY-MM-DD"    # 内容を実質更新した日（YAML の date 型を
 2. 調査で判明した Q&A は `qa/` に質問票として起票し、回答を書き込む。
 3. 回答済み qa と docs-original を突き合わせ、差分を knowledge に**差分マージ**（全書き換えしない・冪等）。
 4. 矛盾は `status: Conflict` で明示し、解消してから `Confirmed` に上げる。
-5. **決定を伴うものは、その決定が効く knowledge / specifications の `## 決定ログ` に 1 エントリ追記する**
+5. **決定を伴うものは、その決定が効く knowledge の `## 決定ログ` に 1 エントリ追記する**
    （書式は上記「決定ログの書き方」）。**独立した ADR ファイルは作らない**（#652）。
    同じ PR で**本文側も直す**——決定ログは「いつ・なぜ決めたか」、本文は「今どうなっているか」で、
    読む人が最初に見るのは本文のほう。決定ログだけ積んで本文を古いまま残さない。

@@ -536,7 +536,7 @@ scripts/reset-db.sh --to <target_url>    # 対象 DB を明示
 - `scripts/backup-db.sh`: DB 全体を custom-format dump でタイムスタンプ付き退避＋世代管理する
   （`race_odds_snapshots` 等の再取得不能な蓄積資産を volume 喪失から守る）。復元手順は
   `deployments/db/BACKUP.md`、日次実行などの launchd ジョブは `deployments/launchd/` を参照。
-- `scripts/check-doc-classes.py`: knowledge / specifications の文書クラス・`sources` 追従（stale）・
+- `scripts/check-doc-classes.py`: knowledge の文書クラス・`sources` 追従（stale）・
   REQ 表を機械検査する（CI の `adr` ジョブ / pre-push 用）。
 - `scripts/check-decision-log-immutability.py`: 各文書末尾の `## 決定ログ` が append-only であること
   （既存エントリが改変・削除されていないこと）を機械検査する。
@@ -576,7 +576,7 @@ HVE（dahatake/HypervelocityEngineering, MIT）由来の 2 層蒸留モデルで
 - `docs/api/openapi.json` … REST API の OpenAPI スナップショット（utoipa コードファースト。web の型生成の入力）
 
 **決定記録（アーキテクチャ・ルール変更の決定。棄却した案も同じ厚みで残す）は、
-knowledge / specifications 各文書の末尾にある `## 決定ログ` 節に置く**（append-only。#652 で
+knowledge 各文書の末尾にある `## 決定ログ` 節に置く**（append-only。#652 で
 独立した ADR ファイルを廃止した）。旧 ADR 番号は決定ログの見出しに残っているので
 `git grep 'ADR 0055'` で辿れる。
 

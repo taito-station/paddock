@@ -2,7 +2,7 @@
 # 存在しないディレクトリは自動スキップされる。
 [index]
 roots = [
-  # ADR 0073 で docs/adr → docs/docs-original、さらに本 PR で docs/* → ルート直下へ移動
+  # ADR 0073 で docs/adr → docs/docs-original、さらに ADR 0092（#702）で docs/* → ルート直下へ移動
   # （hve-playbook 標準に統一）。旧 roots の索引を持つ環境は `rm -rf .mdq && scripts/mdq index`
   # で作り直す。
   # specifications は knowledge/ に統合した（kind: specification で区別）。

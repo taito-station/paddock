@@ -6,13 +6,13 @@ paddock の文書は HVE（dahatake/HypervelocityEngineering, MIT）の蒸留モ
 規約の全体は [knowledge/README.md](knowledge/README.md)。
 
 - **2 層**: `docs-original/`（RO 一次資料・実測ログ・調査所見）＋ `qa/`（質問票+回答）→
-  `knowledge/`（status 付き確定知・**決定ログ付き**。旧 specifications は `kind: specification` で区別）。蒸留は Claude が回す。
+  `knowledge/`（status 付き確定知・**決定ログ付き**）。蒸留は Claude が回す。
   別枠で `docs/docs-generated/`（HVE 由来。`cargo doc` / OpenAPI 等の自動生成文書の置き場。蒸留対象外）がある。
-- **specifications はその場で knowledge**（frontmatter: `status`/`kind`/`sources`/`distilled_from_sha`/`updated`）。
-  frontmatter を付けた時点で確定知層として機能するので、移動する実利が無い。新規の横断的蒸留知は
-  `knowledge/` へ。
-- **決定は「決定ログ」に書く**（#652。独立した ADR ファイルはもう作らない）。各 knowledge /
-  specifications の末尾に `## 決定ログ` 節があり、**新規の決定（ルール変更・実験の採用/棄却・
+- **knowledge は `knowledge/` に一本化**（ADR 0092）。frontmatter: `status`/`kind`/`sources`/`distilled_from_sha`/`updated`。
+  `kind` は `knowledge`（横断的な蒸留知）/ `specification`（旧 `docs/specifications/` 由来のドメイン/機能知
+  17 本）で区別する。新規の横断的蒸留知は `kind: knowledge` で `knowledge/` へ。
+- **決定は「決定ログ」に書く**（#652。独立した ADR ファイルはもう作らない）。各 knowledge の
+  末尾に `## 決定ログ` 節があり、**新規の決定（ルール変更・実験の採用/棄却・
   設計判断）は、その決定が効く文書の決定ログへ直接 append する**。書式は
   `### ADR NNNN: 要約 (YYYY-MM-DD) — ステータス`（旧 ADR 由来）または `### #NNN: 要約 (YYYY-MM-DD) — ステータス`
   （issue 番号採番の新規決定）の見出し ＋ `#### コンテキスト` / `#### 決定` / `#### 理由` /
@@ -30,12 +30,12 @@ paddock の文書は HVE（dahatake/HypervelocityEngineering, MIT）の蒸留モ
   索引で、定義そのものは各仕様書・本ファイルが持つ。
 - **`docs-original/` の命名は issue 番号・0 埋めしない**（`382-...`）。置くのは転記できないもの
   ——実測ログ・調査時点のコード所見・外部サイトの挙動観察。GitHub Issue 本文は転記しない（ADR 0074）。
-  旧 ADR（0 埋め 4 桁: `0001-...` 〜 `0090-...`）は #652 で各 knowledge/specifications の決定ログへ移行済み・削除済み。
+  旧 ADR（0 埋め 4 桁: `0001-...` 〜 `0090-...`）は #652 で各 knowledge の決定ログへ移行済み・削除済み。
 - **status**: `Confirmed`（運用の前提にしてよい）/ `Tentative`（暫定）/ `Conflict`（矛盾・放置せず解消）。
-- **文書クラス**: knowledge/specifications は frontmatter に `doc_class`（+ mdq 用ミラーの `tags`）を持つ。
+- **文書クラス**: knowledge は frontmatter に `doc_class`（+ mdq 用ミラーの `tags`）を持つ。
   定義の正本は [knowledge/doc-classes.md](knowledge/doc-classes.md)（HVE の D01〜D21 ＋ paddock 固有の
   D22 予測モデル / D23 買い方 / D24 実験・棄却証跡）。`scripts/mdq search --tags D23` でクラス絞り込みができる。
-  整合は `scripts/check-doc-classes.py` が CI と pre-push で検査する（本文の相対リンクの実在、`doc-classes.md` の割当索引との 1 対 1 突合、**REQ 表の `出典` が `sources` にも載っているか**——いずれも error）。**決定ログの append-only 性は `scripts/check-decision-log-immutability.py`** が同じ経路で検査する（既存エントリの改変・削除は error）。**knowledge / specifications を 1 本足す・消す・`doc_class` を変えるときは、同じ PR で `doc-classes.md` のクラス一覧の「現行」列と割当索引も直す**。
+  整合は `scripts/check-doc-classes.py` が CI と pre-push で検査する（本文の相対リンクの実在、`doc-classes.md` の割当索引との 1 対 1 突合、**REQ 表の `出典` が `sources` にも載っているか**——いずれも error）。**決定ログの append-only 性は `scripts/check-decision-log-immutability.py`** が同じ経路で検査する（既存エントリの改変・削除は error）。**knowledge を 1 本足す・消す・`doc_class` を変えるときは、同じ PR で `doc-classes.md` のクラス一覧の「現行」列と割当索引も直す**。
 - **探索規律 — 生読み前に mdq / cq 検索**: docs やソースコード内の答えを探すときは、まず
   `scripts/mdq search --q "..."`（Markdown 用 BM25・[.claude/skills/markdown-query/SKILL.md](.claude/skills/markdown-query/SKILL.md)）
   または `scripts/cq search --q "..."`（ソースコード用 BM25 + symbol・[.claude/skills/code-query/SKILL.md](.claude/skills/code-query/SKILL.md)）
@@ -44,9 +44,9 @@ paddock の文書は HVE（dahatake/HypervelocityEngineering, MIT）の蒸留モ
   索引 `.cq/` は gitignore・セッション毎に `scripts/cq index` で再ビルド（Python >= 3.11 必須。venv は任意）。
   索引 `.mdq/` は gitignore・セッション毎に `scripts/mdq index` で再ビルド（初回は
   `python3 -m venv tools/mdq/.venv && tools/mdq/.venv/bin/pip install -r tools/mdq/requirements.txt`）。
-  **ADR 廃止（#652）より前の索引を持つ環境は一度だけ `rm -rf .mdq && scripts/mdq index`**
-  で作り直す。増分の prune は roots 配下しか消さないため、削除済み ADR のチャンクが居残って
-  存在しないパスが検索結果に出続ける。
+  **ADR 廃止（#652）またはディレクトリ統合（ADR 0092・#702）より前の索引を持つ環境は一度だけ
+  `rm -rf .mdq && scripts/mdq index`** で作り直す。増分の prune は roots 配下しか消さないため、
+  削除済み ADR や旧 `docs/knowledge/` 等のチャンクが居残って存在しないパスが検索結果に出続ける。
 
 ### knowledge 参照・更新の規律（HVE AKM 準拠）
 
@@ -62,7 +62,7 @@ HVE の Autonomous Knowledge Management（AKM）の原則を paddock に適用�
    棄却）、**同じ PR で knowledge を差分マージする**。「あとで更新」はしない——
    `app-bootstrap.md` の `NoopParser` 事故と同型で、古い knowledge が次のセッションを誤導する。
 3. **決定ログ即時記録**: 設計判断・ルール変更・実験の採用/棄却を伴う実装は、その決定が効く
-   knowledge/specifications の決定ログに**同じ PR で append** する。コンテキスト・決定・理由・
+   knowledge の決定ログに**同じ PR で append** する。コンテキスト・決定・理由・
    却下案・影響を書き切る（機械検査が届かない範囲なので、書き忘れは誰も検出しない）。
 4. **stale ゼロ PR**: PR を出す前に `scripts/bump-distilled-sha.py --all-stale --dry-run` で
    stale が 0 件であることを確認する。stale があれば差分マージまたは sha bump で解消する
