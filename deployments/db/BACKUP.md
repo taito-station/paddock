@@ -14,9 +14,17 @@ Postgres コンテナは開発機によって **Lima VM 内の rootless nerdctl*
 - `auto`（既定）: `limactl` があり VM（`PADDOCK_LIMA_VM`・既定 `paddock`）が `Running` なら **lima**。
   そうでなく `docker` があり対象コンテナが `docker ps` に見えれば **docker**。どちらにも当たらなければ
   判定に使った事実（limactl の有無・VM の状態・docker の応答）を列挙して失敗する（黙って進めない）。
-- `lima` / `docker`: 判定を固定したい場合に明示指定する。
+- `lima` / `docker`: 判定を固定したい場合に明示指定する。`lima` 明示でも VM の状態は確認し、
+  `Running` でなければ「`limactl start <VM>` で起動」と案内して失敗する。
 - exec は環境に応じて `limactl shell "$PADDOCK_LIMA_VM" -- nerdctl exec ...`（lima）または
   `docker exec ...`（docker）を使う。
+- **判定の非対称は意図的**: lima は「VM が `Running`」で確定し、そこでコンテナが見えなくても docker へは
+  流さない（失敗させる）。docker 側（colima 等）には移行前の旧 DB が残っていることがあり、見えた方へ
+  黙って流れると別インスタンスの DB を退避・検証してしまうため。
+- **どこから取ったかを必ず残す**: 両スクリプトは毎回 `コンテナ実行環境: runtime=... vm=... container=...`
+  をログに出す。`backup-db.sh` は dump と対の `<dump>.runtime` サイドカーにも同じ 1 行を書く。
+  auto 判定が「lima VM が停止しているため docker 側を使った」場合は、旧 DB を退避・検証している
+  可能性があるので **警告ログと macOS 通知**を出す（#731。移行前の旧 DB で世代が置き換わるのを防ぐ）。
 
 ```sh
 PADDOCK_PG_RUNTIME=lima scripts/backup-db.sh            # lima を強制
@@ -91,14 +99,13 @@ rm ~/Library/LaunchAgents/com.paddock.verify-backup-restore.plist
 
 ## 復元
 
-> **前提**: 以下の手動復元コマンドは docker（colima 等）想定で書いている。**Lima VM 内 nerdctl**
-> 実行環境の場合は `docker exec` を `limactl shell paddock -- nerdctl exec`、
-> `docker compose` を `limactl shell paddock -- nerdctl compose` に読み替える（VM 名は
-> `PADDOCK_LIMA_VM` の既定 `paddock`）。実行前に対象の runtime が起動していることを確認する
-> （docker: `colima start` または `brew services start colima`。lima:
-> `limactl start paddock` または `limactl list` で `Running` を確認）。どちらの runtime かは
-> `scripts/backup-db.sh` / `scripts/verify-backup-restore.sh` 自体は上記「実行環境の自動判定」で
-> 吸収するが、**手動復元は自動判定の対象外**なので実行者が判断する。docker 側の詳細は
+> **前提**: 以下の手動コマンドは、現行の実行環境である **Lima VM 内の nerdctl**（VM 名は
+> `PADDOCK_LIMA_VM` の既定 `paddock`）で書き、docker（colima 等）の場合をコメントで併記する。
+> スクリプト（`backup-db.sh` / `verify-backup-restore.sh`）は実行環境を自動で判定するが、
+> **手動コマンドは自動判定の対象外**なので、どちらで動いているかは実行者が確かめる
+> （lima: `limactl list` で `Running`、必要なら `limactl start paddock`。docker: `colima start`）。
+> 復元に使う dump がどの実行環境から取られたかは、dump と対の `<dump>.runtime` サイドカーで確認できる
+> （サイドカーの無い dump は #731 より前のもの）。docker 側の詳細は
 > [README「必要環境」の docker ランタイム項](../../README.md#必要環境) を参照。
 
 ### 全体復元（災害時・volume 喪失後）
@@ -108,13 +115,13 @@ rm ~/Library/LaunchAgents/com.paddock.verify-backup-restore.plist
 
 ```sh
 DUMP=~/paddock-backups/paddock-YYYYMMDD-HHMMSS.dump   # ミラーを有効化しているならミラー側のパスでも可
-docker exec -i paddock-postgres pg_restore -U paddock -d paddock --clean --if-exists < "$DUMP"
-# lima の場合:
-# limactl shell paddock -- nerdctl exec -i paddock-postgres pg_restore -U paddock -d paddock --clean --if-exists < "$DUMP"
+limactl shell paddock -- nerdctl exec -i paddock-postgres pg_restore -U paddock -d paddock --clean --if-exists < "$DUMP"
+# docker（colima 等）の場合:
+# docker exec -i paddock-postgres pg_restore -U paddock -d paddock --clean --if-exists < "$DUMP"
 ```
 
-> volume ごと失った場合は先に `docker compose -f deployments/compose.yaml up -d postgres`
-> （lima: `limactl shell paddock -- nerdctl compose -f deployments/compose.yaml up -d postgres`）
+> volume ごと失った場合は先に `limactl shell paddock -- nerdctl compose -f deployments/compose.yaml up -d postgres`
+> （docker: `docker compose -f deployments/compose.yaml up -d postgres`）
 > で空の paddock DB を作ってから上記を実行する（`-Fc` dump は全テーブル＋`_sqlx_migrations` を
 > 含むため、復元後にアプリ起動しても再マイグレーションは走らない＝チェックサム一致）。
 
@@ -122,9 +129,9 @@ docker exec -i paddock-postgres pg_restore -U paddock -d paddock --clean --if-ex
 
 ```sh
 DUMP=~/paddock-backups/paddock-YYYYMMDD-HHMMSS.dump   # ミラーを有効化しているならミラー側のパスでも可
-docker exec -i paddock-postgres pg_restore -U paddock -d paddock \
+limactl shell paddock -- nerdctl exec -i paddock-postgres pg_restore -U paddock -d paddock \
     --clean --if-exists -t race_odds_snapshots < "$DUMP"
-# lima の場合は上記と同様に docker exec → limactl shell paddock -- nerdctl exec に読み替える
+# docker の場合は `limactl shell paddock -- nerdctl exec` を `docker exec` に読み替える
 ```
 
 > 部分復元は「スキーマ互換な live DB が既にある」前提。単表 `--clean` は FK/依存順の都合で
@@ -167,16 +174,15 @@ tail -f ~/Library/Logs/paddock-backup.log
 
 ```sh
 DUMP=~/paddock-backups/paddock-YYYYMMDD-HHMMSS.dump   # ミラーを有効化しているならミラー側のパスでも可
-docker exec paddock-postgres createdb -U paddock paddock_restore_test
-docker exec -i paddock-postgres pg_restore -U paddock -d paddock_restore_test < "$DUMP"
+PG="limactl shell paddock -- nerdctl exec"   # docker の場合は PG="docker exec"
+$PG paddock-postgres createdb -U paddock paddock_restore_test
+$PG -i paddock-postgres pg_restore -U paddock -d paddock_restore_test < "$DUMP"
 # 行数突合（source と一致すれば OK）
-docker exec paddock-postgres psql -U paddock -d paddock_restore_test \
+$PG paddock-postgres psql -U paddock -d paddock_restore_test \
     -c "SELECT COUNT(*) FROM race_odds_snapshots;"
-docker exec paddock-postgres psql -U paddock -d paddock \
+$PG paddock-postgres psql -U paddock -d paddock \
     -c "SELECT COUNT(*) FROM race_odds_snapshots;"
-docker exec paddock-postgres dropdb -U paddock paddock_restore_test
-# lima の場合は上記すべての `docker exec` を
-# `limactl shell paddock -- nerdctl exec` に読み替える
+$PG paddock-postgres dropdb -U paddock paddock_restore_test
 ```
 
 ## スコープ外
