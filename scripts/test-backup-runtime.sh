@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# scripts/lib/pg-container.sh の実行環境判定（#731）と、それを使う backup-db.sh の回帰テスト。
+# scripts/lib/pg-container.sh の実行環境判定（#731）と、それを使う backup-db.sh /
+# verify-backup-restore.sh の回帰テスト。
 #
 # 背景: backup-db.sh / verify-backup-restore.sh は docker exec / docker ps を直に呼んでいたため、
 # 開発機の実行環境が colima（docker）から Lima VM 内の rootless nerdctl へ移ってからずっと
@@ -21,8 +22,15 @@
 #
 # osascript は無害化した偽物に差し替える（実通知を出さない・失敗時のブロックを防ぐ）。
 #
+# 対象: pg-container.sh の判定・起動確認・exec と、それを使う backup-db.sh / verify-backup-restore.sh。
+#
+# 注意: macOS 既定の /bin/bash 3.2（launchd の実行環境）固有の回帰（例: set -u 下の空配列展開）は、
+# CI（ubuntu・bash 5）では再現しない。ライブラリや両スクリプトを変えたら、macOS のローカルでも
+# 実行すること（冒頭に実行中の bash の版を表示する）。
+#
 # 使い方: bash scripts/test-backup-runtime.sh   （全ケース PASS で exit 0）
 set -uo pipefail
+echo "bash ${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]}（${BASH}）"
 
 cd "$(dirname "$0")/.." || exit 1
 REPO_ROOT="$PWD"
@@ -48,7 +56,7 @@ trap cleanup EXIT
 # ---- 共通スタブ（実 stat/limactl/docker は置かない。他は本物を symlink） -----------------------
 BASE_STUB="$TESTROOT/bin-base"
 mkdir -p "$BASE_STUB"
-for c in bash env dirname date mkdir mv rm du cut sort find basename grep cp cat; do
+for c in bash env dirname date mkdir mv rm du cut sort find basename grep cp cat mktemp head tr; do
     p="$(command -v "$c")" || { echo "前提コマンドが無い: $c" >&2; exit 2; }
     case "$p" in
         /*) ;;
@@ -90,6 +98,10 @@ fake_engine_body() {
 sub="${1:-}"
 case "$sub" in
     ps)
+        if [ -n "${FAKE_PS_FAIL:-}" ]; then
+            echo "$FAKE_PS_FAIL" >&2
+            exit 1
+        fi
         printf '%s\n' "${FAKE_PS_NAMES:-paddock-postgres}"
         ;;
     exec)
@@ -100,7 +112,14 @@ case "$sub" in
         inner="${1:-}"
         case "$inner" in
             pg_dump) printf '%s' "${FAKE_DUMP_BYTES:-FAKE-DUMP-BYTES}" ;;
-            pg_restore) cat >/dev/null ;;
+            # 本物の nerdctl/docker exec は -i が無いと stdin をコンテナへ渡さず、pg_restore は
+            # 空入力で失敗する。呼び出し側から -i が落ちた回帰を検出できるよう、それを模す。
+            pg_restore)
+                if [ "$stdin_flag" -ne 1 ]; then
+                    echo "fake exec: pg_restore に stdin が渡っていない（-i なし）" >&2
+                    exit 1
+                fi
+                cat >/dev/null ;;
             psql) printf '%s\n' "${FAKE_PSQL_OUTPUT:-race_odds_snapshots	3}" ;;
             createdb|dropdb) : ;;
             *) echo "fake exec: 未対応の inner コマンド: $inner" >&2; exit 1 ;;
@@ -122,7 +141,11 @@ set -u
 cmd="\${1:-}"
 case "\$cmd" in
     list)
-        printf '%s\n' "\${FAKE_LIMA_STATUS:-Running}"
+        # 期待する VM 名（FAKE_LIMA_VM・既定 paddock）を問い合わせたときだけ状態を返す。
+        # 別名の VM を問い合わせたら空（= 未作成）を返し、VM 名の取り違えを検出できるようにする。
+        if [ "\${@: -1}" = "\${FAKE_LIMA_VM:-paddock}" ]; then
+            printf '%s\n' "\${FAKE_LIMA_STATUS:-Running}"
+        fi
         exit 0
         ;;
     shell)
@@ -175,6 +198,7 @@ source "$LIB_PATH"
 pg_container_resolve_runtime "${DRIVER_CONTAINER:-paddock-postgres}"
 rc=$?
 echo "RC=$rc RUNTIME=${PG_RUNTIME:-<unset>} VM=${PG_RUNTIME_VM:-<unset>}"
+echo "FALLBACK=${PG_RUNTIME_FALLBACK:-<none>}"
 exit "$rc"
 EOS
 
@@ -228,8 +252,9 @@ fi
 d="$(case_dir auto-fallback)"; stub="$(new_stub "$d/bin" bash env grep limactl docker)"
 out="$(env -i PATH="$stub" LIB_PATH="$LIB" FAKE_LIMA_STATUS="Stopped" FAKE_PS_NAMES="paddock-postgres" \
     bash "$DRIVER" 2>&1)"; rc=$?
-if [ "$rc" -eq 0 ] && grep -q '^RC=0 RUNTIME=docker VM=<unset>$' <<<"$out"; then
-    ok "auto: VM Stopped → docker へフォールバック"
+if [ "$rc" -eq 0 ] && grep -q '^RC=0 RUNTIME=docker VM=<unset>$' <<<"$out" \
+    && grep -q '^FALLBACK=lima VM paddock が Stopped のため docker 側のコンテナ paddock-postgres を使った' <<<"$out"; then
+    ok "auto: VM Stopped → docker へフォールバック（理由を PG_RUNTIME_FALLBACK に残す）"
 else
     ng "auto: VM Stopped → docker へフォールバック" "rc=$rc / $out"
 fi
@@ -253,7 +278,7 @@ else
     ng "auto: limactl/docker どちらも無い → rc=1 で列挙" "rc=$rc / $out"
 fi
 
-# --- 6. auto: limactl はあるが VM 未作成・docker のコンテナも見えない → rc=1 で状態を列挙 ---
+# --- 6. auto: limactl はあるが VM が Stopped・docker のコンテナも見えない → rc=1 で状態を列挙 ---
 d="$(case_dir auto-unreachable)"; stub="$(new_stub "$d/bin" bash env grep limactl docker)"
 out="$(env -i PATH="$stub" LIB_PATH="$LIB" FAKE_LIMA_STATUS="Stopped" FAKE_PS_NAMES="other-container" \
     bash "$DRIVER" 2>&1)"; rc=$?
@@ -265,14 +290,47 @@ fi
 
 echo "=== PADDOCK_PG_RUNTIME 明示指定 ==="
 
-# --- 7. lima 明示: VM が Stopped でも判定は lima に固定する（起動確認は require_running 側の責務） ---
+# --- 7. lima 明示: VM が Running なら、docker が使えても lima に固定する ---
 d="$(case_dir explicit-lima)"; stub="$(new_stub "$d/bin" bash env limactl docker)"
 out="$(env -i PATH="$stub" LIB_PATH="$LIB" PADDOCK_PG_RUNTIME="lima" \
-    FAKE_LIMA_STATUS="Stopped" FAKE_PS_NAMES="paddock-postgres" bash "$DRIVER" 2>&1)"; rc=$?
-if [ "$rc" -eq 0 ] && grep -q '^RC=0 RUNTIME=lima VM=paddock$' <<<"$out"; then
+    FAKE_LIMA_STATUS="Running" FAKE_PS_NAMES="paddock-postgres" bash "$DRIVER" 2>&1)"; rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^RC=0 RUNTIME=lima VM=paddock$' <<<"$out" && grep -q '^FALLBACK=<none>$' <<<"$out"; then
     ok "明示 PADDOCK_PG_RUNTIME=lima → docker が使えても lima 固定"
 else
     ng "明示 PADDOCK_PG_RUNTIME=lima → docker が使えても lima 固定" "rc=$rc / $out"
+fi
+
+# --- 7a. ps コマンド自体の失敗は「起動していない」と区別し、エラー内容を表示して rc=1 ---
+d="$(case_dir ps-fail)"; stub="$(new_stub "$d/bin" bash env grep limactl)"
+out="$(env -i PATH="$stub" LIB_PATH="$LIB" FAKE_LIMA_STATUS="Running" \
+    FAKE_PS_FAIL="rootless containerd not running" bash "$REQUIRE_DRIVER" 2>&1)"; rc=$?
+if [ "$rc" -ne 0 ] && grep -q 'コンテナ一覧の取得に失敗' <<<"$out" \
+    && grep -q 'rootless containerd not running' <<<"$out" && ! grep -q '起動していない' <<<"$out"; then
+    ok "ps 自体の失敗 → 「一覧の取得に失敗」とエラー内容を表示して rc=1"
+else
+    ng "ps 自体の失敗 → 「一覧の取得に失敗」とエラー内容を表示して rc=1" "rc=$rc / $out"
+fi
+
+# --- 7b. lima 明示で VM が Stopped → 「コンテナが起動していない」ではなく VM 停止と limactl start を案内して rc=1 ---
+d="$(case_dir explicit-lima-stopped)"; stub="$(new_stub "$d/bin" bash env limactl docker)"
+out="$(env -i PATH="$stub" LIB_PATH="$LIB" PADDOCK_PG_RUNTIME="lima" \
+    FAKE_LIMA_STATUS="Stopped" FAKE_PS_NAMES="paddock-postgres" bash "$DRIVER" 2>&1)"; rc=$?
+if [ "$rc" -ne 0 ] && grep -q 'VM paddock が Stopped（limactl start paddock で起動）' <<<"$out"; then
+    ok "明示 lima で VM Stopped → limactl start を案内して rc=1"
+else
+    ng "明示 lima で VM Stopped → limactl start を案内して rc=1" "rc=$rc / $out"
+fi
+
+# --- 7c. VM 名の上書き: PADDOCK_LIMA_VM で指定した名前を問い合わせる ---
+d="$(case_dir custom-vm)"; stub="$(new_stub "$d/bin" bash env limactl)"
+out="$(env -i PATH="$stub" LIB_PATH="$LIB" PADDOCK_LIMA_VM="paddock-dev" FAKE_LIMA_VM="paddock-dev" \
+    FAKE_LIMA_STATUS="Running" bash "$DRIVER" 2>&1)"; rc=$?
+out2="$(env -i PATH="$stub" LIB_PATH="$LIB" FAKE_LIMA_VM="paddock-dev" \
+    FAKE_LIMA_STATUS="Running" bash "$DRIVER" 2>&1)"; rc2=$?
+if [ "$rc" -eq 0 ] && grep -q '^RC=0 RUNTIME=lima VM=paddock-dev$' <<<"$out" && [ "$rc2" -ne 0 ]; then
+    ok "PADDOCK_LIMA_VM の VM 名で状態を問い合わせる（既定名の VM が無ければ lima を選ばない）"
+else
+    ng "PADDOCK_LIMA_VM の VM 名で状態を問い合わせる" "rc=$rc / $out / rc2=$rc2 / $out2"
 fi
 
 # --- 8. docker 明示: lima が Running でも docker に固定する ---
@@ -364,8 +422,11 @@ out="$(env -i PATH="$stub" HOME="$d/home" \
     bash "$BACKUP_SCRIPT" 2>&1)"; rc=$?
 dump="$(find "$backup_dir" -maxdepth 1 -name 'paddock-*.dump' 2>/dev/null | head -1)"
 if [ "$rc" -eq 0 ] && [ -n "$dump" ] && [ -s "$dump" ] && [ -f "$dump.rowcounts" ] \
-    && grep -qxF $'race_odds_snapshots\t3' "$dump.rowcounts"; then
-    ok "backup-db.sh: auto・lima 経路 → dump + .rowcounts 生成・rc=0"
+    && grep -qxF $'race_odds_snapshots\t3' "$dump.rowcounts" \
+    && grep -qxF 'runtime=lima vm=paddock container=paddock-postgres' "$dump.runtime" \
+    && grep -q 'コンテナ実行環境: runtime=lima vm=paddock container=paddock-postgres' <<<"$out" \
+    && ! grep -q '警告: lima VM' <<<"$out"; then
+    ok "backup-db.sh: auto・lima 経路 → dump + .rowcounts + .runtime 生成・実行環境をログ・rc=0"
 else
     ng "backup-db.sh: auto・lima 経路 → dump + .rowcounts 生成・rc=0" "rc=$rc dump=$dump / $out"
 fi
@@ -384,6 +445,25 @@ if [ "$rc" -eq 0 ] && [ -n "$dump" ] && [ -s "$dump" ] && [ -f "$dump.rowcounts"
     ok "backup-db.sh: auto・docker 経路（limactl 無し） → dump + .rowcounts 生成・rc=0"
 else
     ng "backup-db.sh: auto・docker 経路（limactl 無し） → dump + .rowcounts 生成・rc=0" "rc=$rc dump=$dump / $out"
+fi
+
+# --- 16b. auto で lima VM 停止 → docker 側へフォールバック: 退避はするが警告ログと通知を出す ---
+d="$(case_dir e2e-fallback)"; stub="$(new_stub "$d/bin" bash env dirname date mkdir mv rm du cut sort find basename grep cat stat osascript limactl docker)"
+backup_dir="$d/backups"
+notify_log="$d/osascript.log"
+out="$(env -i PATH="$stub" HOME="$d/home" OSASCRIPT_CALL_LOG="$notify_log" \
+    PADDOCK_BACKUP_DIR="$backup_dir" PADDOCK_VERIFY_TABLES="race_odds_snapshots" \
+    FAKE_LIMA_STATUS="Stopped" FAKE_PS_NAMES="paddock-postgres" FAKE_DUMP_BYTES="FAKE-DUMP-BYTES" \
+    FAKE_PSQL_OUTPUT="$(printf 'race_odds_snapshots\t3')" \
+    bash "$BACKUP_SCRIPT" 2>&1)"; rc=$?
+dump="$(find "$backup_dir" -maxdepth 1 -name 'paddock-*.dump' 2>/dev/null | head -1)"
+if [ "$rc" -eq 0 ] && [ -n "$dump" ] \
+    && grep -qxF 'runtime=docker vm=- container=paddock-postgres' "$dump.runtime" \
+    && grep -q '警告: lima VM paddock が Stopped のため docker 側のコンテナ paddock-postgres を使った' <<<"$out" \
+    && grep -q '旧 DB' "$notify_log" 2>/dev/null; then
+    ok "backup-db.sh: lima VM 停止で docker へフォールバック → 警告ログ・通知・.runtime に docker を記録"
+else
+    ng "backup-db.sh: lima VM 停止で docker へフォールバック → 警告ログ・通知" "rc=$rc / $out / notify=$(cat "$notify_log" 2>/dev/null)"
 fi
 
 # --- 17. 実行環境が見つからない → rc=1・dump は作られない ---
