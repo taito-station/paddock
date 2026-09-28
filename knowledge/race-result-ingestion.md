@@ -8,7 +8,7 @@ tags: [D04, D10, D11]
 sources:
   - docs-original/730-results-label-correction.md
   - qa/QA-results-label-correction-730.md
-distilled_from_sha: "0000000"
+distilled_from_sha: "fea6eb3"
 updated: "2026-09-29"
 ---
 
