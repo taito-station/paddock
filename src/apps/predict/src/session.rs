@@ -1362,7 +1362,7 @@ mod tests {
     /// サイレント（0 件を返すだけ）なので、regex の一致だけでは Rust↔Python のズレを
     /// 捕まえられない——この golden が唯一の言語横断契約。
     /// 変更時は `race_heading` / `pred_header_samples.txt` / `test_pred_header.py` を
-    /// 同じ PR で触ること（行セマンティクスは `docs/specifications/predict-session.md`）。
+    /// 同じ PR で触ること（行セマンティクスは `knowledge/predict-session.md`）。
     const HEADER_GOLDEN: &str = include_str!("../testdata/pred_header_samples.txt");
 
     #[test]

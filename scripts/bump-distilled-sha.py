@@ -7,7 +7,7 @@
 削り、「本当に見直しが要るか」の判断は人に残す。
 
 そのため次の 2 つは**やらない**:
-  - `updated` は触らない。下流の本文が実質変わったときだけ人が進める（docs/knowledge/README.md）
+  - `updated` は触らない。下流の本文が実質変わったときだけ人が進める（knowledge/README.md）
   - 本文の差分マージはしない。STALE は「上流が変わった」の合図でしかなく、要約を直すかどうかは
     人が読んで決める
 
@@ -15,9 +15,9 @@
 2 コミットになる。
 
 使い方:
-  scripts/bump-distilled-sha.py docs/knowledge/glossary.md [...]   # 指定文書を HEAD へ
+  scripts/bump-distilled-sha.py knowledge/glossary.md [...]   # 指定文書を HEAD へ
   scripts/bump-distilled-sha.py --all-stale                        # checker が STALE と言う文書を全部
-  scripts/bump-distilled-sha.py --sha 1234abc docs/knowledge/a.md  # sha を明示
+  scripts/bump-distilled-sha.py --sha 1234abc knowledge/a.md  # sha を明示
   scripts/bump-distilled-sha.py --all-stale --dry-run              # 対象だけ見る
 """
 
@@ -37,7 +37,7 @@ RE_DISTILLED = re.compile(
     r'^(distilled_from_sha:[ \t]*)"?([^"\s#]*)"?([ \t]*(?:#.*)?\r?)$', re.MULTILINE
 )
 # checker の STALE 行から対象文書を拾う。書式は
-#   ✗ docs/knowledge/x.md: STALE ← docs/... が distilled_from_sha(abc1234) より後に更新されている
+#   ✗ knowledge/x.md: STALE ← docs/... が distilled_from_sha(abc1234) より後に更新されている
 RE_STALE_LINE = re.compile(r"^✗\s+(\S+?):\s+STALE\s+←\s+(\S+)")
 # 末尾の集計行（`✗ 3 件の不整合（警告 1 件）`）。個別の error と区別する。
 RE_SUMMARY_LINE = re.compile(r"^✗\s+\d+\s*件の不整合")
@@ -96,7 +96,7 @@ def frontmatter_span(text: str) -> "tuple[int, int] | None":
     """先頭 `---` … `---` の範囲（本文側のオフセット）を返す。無ければ None。
 
     **走査を frontmatter に限る**。全文を見ると、frontmatter を持たない規約文書
-    （`docs/knowledge/README.md`）のコードフェンス内テンプレートを書き換えてしまう。
+    （`knowledge/README.md`）のコードフェンス内テンプレートを書き換えてしまう。
     """
     lines = text.splitlines(keepends=True)
     if not lines or lines[0].strip() != "---":

@@ -1,7 +1,7 @@
 ---
 name: akm
 description: >
-  Autonomous Knowledge Management（HVE 準拠）。knowledge/specifications の stale 検出・
+  Autonomous Knowledge Management（HVE 準拠）。knowledge の stale 検出・
   蒸留・横断整合性レビュー・カバレッジ分析を 4 ステップで実行する。
   USE FOR: knowledge の定期メンテナンス、stale 解消、蒸留サイクルの完走確認。
   DO NOT USE FOR: 個別ファイルの編集（直接 Edit する）、実装作業（issue スキル等を使う）。
@@ -14,9 +14,11 @@ metadata:
 # akm — Autonomous Knowledge Management
 
 HVE（HypervelocityEngineering）の AKM ワークフローを Claude Code 向けに実装したスキル。
-`docs/knowledge/` と `docs/specifications/` の鮮度・整合性を維持する。
+`knowledge/` の鮮度・整合性を維持する。
 
-規約の正本は [docs/knowledge/README.md](../../../docs/knowledge/README.md)。
+汎用 AKM パイプラインは `rules/hve/knowledge-maturity.md` + `skills/hve-akm/SKILL.md`。
+本スキルは paddock 固有のスクリプト・CI 連携を含む具体手順。
+規約の正本は [knowledge/README.md](../../../knowledge/README.md)。
 蒸留ルールの詳細は [references/distillation-guide.md](references/distillation-guide.md)。
 
 ---
@@ -38,8 +40,8 @@ stale の出力をユーザーに報告する:
 
 ```
 📋 Stale 検出結果:
-- docs/knowledge/xxx.md ← source docs/docs-original/NNN-yyy.md が変更
-- docs/specifications/zzz.md ← source docs/qa/QA-www.md が変更
+- knowledge/xxx.md ← source docs-original/NNN-yyy.md が変更
+- knowledge/zzz.md ← source qa/QA-www.md が変更
 ```
 
 ---
@@ -131,7 +133,7 @@ python3 scripts/check-doc-classes.py --warn-only 2>&1 | grep '充足ギャップ
 
 4. **QA 生成を提案する**（実行はユーザー判断）:
    - カバレッジが低い D クラスに対して、生成すべき QA のテーマを提案する
-   - ユーザーが承認したら `docs/qa/QA-{topic}-{issue}.md` を生成する
+   - ユーザーが承認したら `qa/QA-{topic}-{issue}.md` を生成する
    - 生成した QA に回答を書き込み、Step 2 の蒸留に戻る（反復精緻化ループ）
 
 ---

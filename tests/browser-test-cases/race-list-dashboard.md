@@ -1,6 +1,6 @@
 # ブラウザテストケース: レース一覧（日次ダッシュボード）
 
-対象: SPA `web/src/routes/RaceList.tsx`（ルート `/races?date=YYYY-MM-DD`）。設計書 [web-spa.md](../../docs/specifications/web-spa.md) / [rest-api-read.md](../../docs/specifications/rest-api-read.md)。
+対象: SPA `web/src/routes/RaceList.tsx`（ルート `/races?date=YYYY-MM-DD`）。設計書 [web-spa.md](../../knowledge/web-spa.md) / [rest-api-read.md](../../knowledge/rest-api-read.md)。
 
 検証環境は Playwright MCP 不在のため **headless Chrome + puppeteer-core** で代替する（`reference_browser_test_fallback`）。
 

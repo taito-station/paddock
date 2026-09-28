@@ -1,7 +1,7 @@
 # 蒸留ガイド（paddock 固有）
 
 HVE の KnowledgeManager が担う蒸留を、paddock の Claude Code セッションで実行するためのルール。
-規約の正本は [docs/knowledge/README.md](../../../../docs/knowledge/README.md)。
+規約の正本は [knowledge/README.md](../../../../knowledge/README.md)。
 
 ## 蒸留の原則
 

@@ -32,7 +32,7 @@ test（既定 2026-01-01〜2026-08-31 = #703 eval 窓）は版の節目にだけ
 使い方:
   python3 scripts/predict-check/prob_ledger.py bt_dump_<sha>.tsv \\
       --system pl_topk=probs.tsv --lambda pl_topk=0.9,0.8 \\
-      --ledger docs/docs-original/719-prob-ledger.md --label "v1 pl_topk k=3"
+      --ledger docs-original/719-prob-ledger.md --label "v1 pl_topk k=3"
 """
 
 from __future__ import annotations

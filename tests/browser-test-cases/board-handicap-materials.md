@@ -1,7 +1,7 @@
 # ブラウザテストケース: 盤の手動ハンデ精査材料（#628）
 
 対象: SPA `web/src/routes/board/HorseCard.tsx` / `HorseDetailPanel.tsx`（ルート `/races/:raceId/board`）。
-API は `GET /api/races/{race_id}/board` の `group_venues` と `horses[].handicap`（[rest-api-read.md](../../docs/specifications/rest-api-read.md)）。
+API は `GET /api/races/{race_id}/board` の `group_venues` と `horses[].handicap`（[rest-api-read.md](../../knowledge/rest-api-read.md)）。
 
 検証環境は Playwright MCP 不在のため **headless Chrome + puppeteer-core** で代替する（`reference_browser_test_fallback`）。
 読み取り専用の検証なので隔離 DB は不要（共有 DB を read のみで参照する）。

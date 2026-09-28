@@ -57,7 +57,7 @@ fn classify_row(bet_type: BetType, odds: f64, odds_high: Option<f64>) -> RowVerd
 /// 1 行に混在した場合は warn 側を優先する（[`classify_row`]）。
 ///
 /// **ワイドの未発売行は debug にならない**。netkeiba は `["9999.9", "0.0", "--"]` の形で返すため
-/// （`docs/qa/QA-odds-sentinel-621.md` Q2）相方 `0.0` が値域違反になり、混在扱いで warn 側へ落ちる
+/// （`qa/QA-odds-sentinel-621.md` Q2）相方 `0.0` が値域違反になり、混在扱いで warn 側へ落ちる
 /// （[`RowVerdict::Invalid`]）。**券種で分かれるのではなく成分の内訳で分かれる**ので、弾かれた成分が
 /// 全部番兵なら band でも debug。読み出し経路は成分ごとに判定するので番兵側は debug になる。
 ///

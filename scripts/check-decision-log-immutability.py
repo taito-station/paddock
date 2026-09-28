@@ -34,8 +34,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-# 検査対象のディレクトリ。決定ログ節を持ちうるのはこの 2 つだけ。
-TARGET_DIRS = ("docs/knowledge", "docs/specifications")
+# 検査対象のディレクトリ。knowledge/ に統合済み（旧 docs/specifications/ を含む）。
+TARGET_DIRS = ("knowledge",)
 
 RE_DECISION_LOG_HEADING = re.compile(r"^##\s+決定ログ\s*$")
 # 節の終端。h1 / h2 が来たらそこまで（h3 以下は節の内側＝各決定のエントリ見出し）。

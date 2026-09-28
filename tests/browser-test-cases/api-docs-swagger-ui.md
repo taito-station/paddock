@@ -1,8 +1,8 @@
 # ブラウザテストケース: `/docs` の Swagger UI（vendored 化・#606 論点 B）
 
 対象: `src/apps/api-server/src/app.rs` の `SwaggerUi::new("/docs/{_:.*}")`。
-ADR [0082](../../docs/docs-original/0082-swagger-ui-vendored.md) / knowledge
-[ci-pipeline.md](../../docs/knowledge/ci-pipeline.md)。
+ADR [0082](../../docs-original/0082-swagger-ui-vendored.md) / knowledge
+[ci-pipeline.md](../../knowledge/ci-pipeline.md)。
 
 **HTTP 層は機械検査が見る**（`src/apps/api-server/tests/docs_ui.rs`・#616）。`index.html` /
 `swagger-initializer.js` / UI 本体 JS / `openapi.json` の配信と本文、および未知の資産が 404 になること

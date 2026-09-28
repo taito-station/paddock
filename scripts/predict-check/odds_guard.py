@@ -75,7 +75,7 @@ def _load_sentinels():
         raise RuntimeError(
             f"番兵リストの正本を読めない: {SENTINELS_PATH} ({e})。"
             "Rust と共有する本番依存ファイルなので、消さずに UTF-8 で復元すること"
-            "（docs/specifications/netkeiba-datasource.md の番兵の節）"
+            "（knowledge/netkeiba-datasource.md の番兵の節）"
         ) from e
 
     sentinels = {}

@@ -3,7 +3,7 @@
 //! 監視は decision-support（ADR 0055 / 0060）であり、**人間に届いて初めて機能する**。
 //! predict-watch は判定を stdout に流すだけだったため、2026-08-09 は 82 スイープを
 //! 完走しながら判定が 20,744 行のログに埋もれたまま開催が終わった。「監視が動いていること」と
-//! 「判断材料が人に届くこと」は別問題（`docs/knowledge/monitor-loop-sleep-resilience.md`）。
+//! 「判断材料が人に届くこと」は別問題（`knowledge/monitor-loop-sleep-resilience.md`）。
 //!
 //! 配送は **既存 shell の `notify()` と同一機構**（osascript の `display notification`）に揃える
 //! ——`scripts/predict-check/snapshot_coverage_check.sh` / `scripts/backup-db.sh` 等 4 本と同じ。

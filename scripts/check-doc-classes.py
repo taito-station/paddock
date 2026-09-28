@@ -3,11 +3,11 @@
 
 ADR 0073 で「ADR の内容は knowledge へ全部写す」を選んだ。重複を許す代わりに、同期切れを
 機械で検出するのが本スクリプト。人手の規律だけでは守れないことは実証済みで、
-docs/knowledge/app-bootstrap.md が status: Confirmed のまま存在しない NoopParser を推奨し
+knowledge/app-bootstrap.md が status: Confirmed のまま存在しない NoopParser を推奨し
 続けていた（qa 側には「#453 で覆る」と追記済みだった。#578 で解消）。
 
 検査項目:
-  1. doc_class が docs/knowledge/doc-classes.md の定義済みクラスか            [error]
+  1. doc_class が knowledge/doc-classes.md の定義済みクラスか            [error]
   2. doc_class に n/a 宣言済みクラスが含まれていないか                       [error]
   3. tags が doc_class と完全一致するか（値も順序も）                        [error]
   4. sources に列挙されたパスが実在するか                                     [error]
@@ -23,7 +23,7 @@ docs/knowledge/app-bootstrap.md が status: Confirmed のまま存在しない N
 見ないので、`sources` から行を消せば stale も消える。11 は「本文で根拠に挙げた一次資料」を
 watch 対象に入れることを保証する。
 
-6 は「内容が変わっていないコミット」を比較対象から除外する（規約は docs/knowledge/README.md
+6 は「内容が変わっていないコミット」を比較対象から除外する（規約は knowledge/README.md
 の例外 1 / 1b / 1d）。rename-only（内容差分ゼロ）を除外しないと ADR 0073 の ADR 移動だけで
 20 本が一斉に stale 判定になる。git log --follow では吸収できない——--follow はリネームより
 前へ履歴を遡らせるだけで、「最終コミット」がリネームコミットになる事実は変わらない。
@@ -63,13 +63,13 @@ USAGE = """check-doc-classes.py - 文書クラスと sources 追従の機械検�
 """
 
 # クラス定義の正本。この 1 ファイルだけが「どのクラスが存在するか」を決める。
-REGISTRY = Path("docs/knowledge/doc-classes.md")
+REGISTRY = Path("knowledge/doc-classes.md")
 
-# 検査対象のディレクトリ。両方とも「その場で knowledge」として frontmatter を持つ。
-TARGET_DIRS = ("docs/knowledge", "docs/specifications")
+# 検査対象のディレクトリ。knowledge/ に統合済み（旧 docs/specifications/ を含む）。
+TARGET_DIRS = ("knowledge",)
 
 # 一次資料層。`sources` が watch すべき蒸留元はここに限る（ADR 0083）。
-ORIGINAL_DOCS = "docs/docs-original"
+ORIGINAL_DOCS = "docs-original"
 
 # 走査から外すファイル。
 #   README.md    : 規約そのもの。frontmatter のテンプレート例（0NNN-....md 等の
@@ -273,7 +273,7 @@ RE_USES_PIN = re.compile(
 def is_pin_only_change(sha: str, path: str) -> bool:
     """そのコミットの変更が `uses:` のピン留め SHA 更新だけかを判定する（例外 1d）。
 
-    規約と背景は docs/knowledge/README.md の例外 1d と ADR 0081。要点は、ピンの hex が
+    規約と背景は knowledge/README.md の例外 1d と ADR 0081。要点は、ピンの hex が
     上がっても下流 knowledge が語るジョブ構成は変わらないので読み直す理由が無いこと。
     例外 1b では吸収できない——is_metadata_only_change は split_frontmatter に依存しており、
     先頭が `---` でない .yml は常に「内容変更」と判定される。
@@ -400,7 +400,7 @@ def scan_last_content_change(
 ) -> "str | ScanAborted | None":
     """path の**内容**が最後に変わったコミットの SHA。
 
-    次の 3 種類は「内容変更ではない」として遡る（規約は docs/knowledge/README.md の例外 1 / 1b / 1d）:
+    次の 3 種類は「内容変更ではない」として遡る（規約は knowledge/README.md の例外 1 / 1b / 1d）:
       - R100（内容差分ゼロのリネーム）。ディレクトリ移設で全件が stale になるのを防ぐ
       - frontmatter のメタデータだけの変更（sources のパス追従・doc_class 付与など）
       - `uses:` のピン留め SHA 更新だけの変更（dependabot の Actions 更新 PR）
@@ -501,7 +501,7 @@ def scan_last_content_change(
 
 
 # --- REQ（要件 ID）の検査 ---------------------------------------------------
-# 規約は docs/knowledge/README.md「REQ-ID（要件 ID）の規約」。表の位置を見出し構造に
+# 規約は knowledge/README.md「REQ-ID（要件 ID）の規約」。表の位置を見出し構造に
 # 依存させないため、範囲はマーカーで宣言する（doc-classes.md の表と同じ方式）。
 RE_REQ_BEGIN = re.compile(r"^<!--\s*REQ:begin\s+(D\d{2})\s*-->$")
 RE_REQ_END = re.compile(r"^<!--\s*REQ:end\s+(D\d{2})\s*-->$")
@@ -747,7 +747,7 @@ def repo_relative_path_error(raw: str) -> "str | None":
 
     正規形の判定は **`Path(...).as_posix()` の語彙的正規化だけ**で行う——`os.path.normpath`
     や `Path.resolve()` を使うと `..` まで畳んでしまい、直前の「`..` を拒否する」判定が
-    静かに効かなくなる（`docs/docs-original/../../etc/hosts` が通る）。
+    静かに効かなくなる（`docs-original/../../etc/hosts` が通る）。
     """
     if raw.startswith("/") or ".." in Path(raw).parts:
         # 絶対パスや .. を許すと Path(root) / "/etc/hosts" が root を捨てて外を指し、
@@ -1065,13 +1065,13 @@ def main(argv: list[str]) -> int:
     for d in TARGET_DIRS:
         targets.extend(sorted(p for p in (root / d).glob("*.md") if p.name not in EXCLUDED_ENTIRELY))
         # glob は非再帰。サブディレクトリに .md を置かれると無検査域になるので可視化する
-        # （現状 docs/specifications/diagrams/ に .md は無い）。
+        # （現状 knowledge/diagrams/ に .md は無い）。
         nested = sorted(p.relative_to(root).as_posix() for p in (root / d).glob("*/**/*.md"))
         for n in nested:
             # #580 で stale を warning → error に上げたのと同じ理由で error にする（ADR 0083）。
             # 文書を 1 階層下げるだけで frontmatter 系・stale・REQ の一意台帳が**丸ごと**外れ、
             # 警告 1 行のまま exit 0 になる（実測）。
-            # 導入時点で該当 0 件（docs/specifications/diagrams/ に .md は無い）。
+            # 導入時点で該当 0 件（knowledge/diagrams/ に .md は無い）。
             errors.append(
                 f"{n}: サブディレクトリの .md は検査対象外（直下に置く）。"
                 "この文書は doc_class も sources も stale も一切検査されない"
@@ -1258,7 +1258,7 @@ def main(argv: list[str]) -> int:
                 # doc_class を持たない設計の文書（規約・クラス定義そのもの）。
                 # 索引は doc_class の一覧なので、そもそも行を置かない。
                 reason = "doc_class を持たない文書なので索引に載せない"
-            elif f"docs/{key}" not in scanned_rels:
+            elif key not in scanned_rels:
                 reason = "対応する検査対象の文書が無い"
             else:
                 reason = "対応する文書の doc_class を読めない（上の error を先に直す）"

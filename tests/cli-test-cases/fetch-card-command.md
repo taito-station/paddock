@@ -1,6 +1,6 @@
 # CLI テストケース: fetch-card コマンド
 
-`paddock-fetch-card` の動作確認手順。Issue #28 / 仕様書 `docs/specifications/netkeiba-datasource.md` に対応する受入観点を事前設計したもの（実装後に実施）。
+`paddock-fetch-card` の動作確認手順。Issue #28 / 仕様書 `knowledge/netkeiba-datasource.md` に対応する受入観点を事前設計したもの（実装後に実施）。
 
 netkeiba への実アクセスを伴うケースは、保存 HTML フィクスチャ or 開催日の実データで確認する。
 

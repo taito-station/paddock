@@ -31,7 +31,7 @@ RACE_ROW = re.compile(r"^\s*\d+\s+\S+\s+[\d.]+%", re.MULTILINE)
 # いることを固定する golden（#587）。`include_str!` は crate 外を参照できないため
 # ファイルは predict crate 内に置く（ADR 0085）。変更時は `race_heading` /
 # `pred_header_samples.txt` / `test_pred_header.py` を同じ PR で触ること。
-# 行セマンティクスは docs/specifications/predict-session.md。
+# 行セマンティクスは knowledge/predict-session.md。
 GOLDEN_DISPLAY = "src/apps/predict/testdata/pred_header_samples.txt"
 GOLDEN_PATH = os.path.normpath(
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", GOLDEN_DISPLAY)

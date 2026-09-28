@@ -62,7 +62,7 @@ def distilled_of(repo: Path, rel: str) -> str:
 
 def make_stale(repo: Path) -> str:
     """a.md の source（0001-first.md）を本文ごと更新して STALE を作る。"""
-    (repo / "docs/docs-original/0001-first.md").write_text(
+    (repo / "docs-original/0001-first.md").write_text(
         "# 0001. 最初の決定\n\n## 決定\n\n本文を変えた。\n", encoding="utf-8"
     )
     return commit_all(repo, "source の本文を変更")
@@ -75,8 +75,8 @@ def test_all_stale_bumps_target() -> None:
         changed = make_stale(repo)
         code, out = run(repo, "--all-stale")
         assert code == 0, out
-        assert "docs/knowledge/a.md" in out, out
-        assert distilled_of(repo, "docs/knowledge/a.md") == changed, out
+        assert "knowledge/a.md" in out, out
+        assert distilled_of(repo, "knowledge/a.md") == changed, out
     finally:
         shutil.rmtree(repo)
 
@@ -85,12 +85,12 @@ def test_dry_run_does_not_write() -> None:
     repo = new_repo()
     try:
         baseline(repo)
-        before = distilled_of(repo, "docs/knowledge/a.md")
+        before = distilled_of(repo, "knowledge/a.md")
         make_stale(repo)
         code, out = run(repo, "--all-stale", "--dry-run")
         assert code == 0, out
         assert "（dry-run）" in out, out
-        assert distilled_of(repo, "docs/knowledge/a.md") == before, "dry-run で書き換わった"
+        assert distilled_of(repo, "knowledge/a.md") == before, "dry-run で書き換わった"
     finally:
         shutil.rmtree(repo)
 
@@ -111,8 +111,8 @@ def test_checker_failure_is_not_reported_as_no_stale() -> None:
     repo = new_repo()
     try:
         baseline(repo)
-        before = distilled_of(repo, "docs/knowledge/a.md")
-        registry = repo / "docs/knowledge/doc-classes.md"
+        before = distilled_of(repo, "knowledge/a.md")
+        registry = repo / "knowledge/doc-classes.md"
         registry.write_text(
             registry.read_text(encoding="utf-8").replace("<!-- doc-classes-index:begin -->", ""),
             encoding="utf-8",
@@ -120,7 +120,7 @@ def test_checker_failure_is_not_reported_as_no_stale() -> None:
         code, out = run(repo, "--all-stale")
         assert code != 0, out
         assert "STALE 以外の理由で落ちている" in out, out
-        assert distilled_of(repo, "docs/knowledge/a.md") == before, "落ちたのに書き換えた"
+        assert distilled_of(repo, "knowledge/a.md") == before, "落ちたのに書き換えた"
     finally:
         shutil.rmtree(repo)
 
@@ -130,16 +130,16 @@ def test_frontmatter_only_is_rewritten() -> None:
     repo = new_repo()
     try:
         baseline(repo)
-        path = repo / "docs/knowledge/a.md"
+        path = repo / "knowledge/a.md"
         path.write_text(
             path.read_text(encoding="utf-8")
             + '\n```yaml\ndistilled_from_sha: "<short-sha>"\n```\n',
             encoding="utf-8",
         )
         head = commit_all(repo, "テンプレ例を足す")
-        code, out = run(repo, "docs/knowledge/a.md")
+        code, out = run(repo, "knowledge/a.md")
         assert code == 0, out
-        assert distilled_of(repo, "docs/knowledge/a.md") == head, out
+        assert distilled_of(repo, "knowledge/a.md") == head, out
         assert '"<short-sha>"' in path.read_text(encoding="utf-8"), "本文のテンプレを書き換えた"
     finally:
         shutil.rmtree(repo)
@@ -149,13 +149,13 @@ def test_file_without_frontmatter_is_refused() -> None:
     repo = new_repo()
     try:
         baseline(repo)
-        (repo / "docs/knowledge/plain.md").write_text(
+        (repo / "knowledge/plain.md").write_text(
             '# 規約\n\n```yaml\ndistilled_from_sha: "<short-sha>"\n```\n', encoding="utf-8"
         )
-        code, out = run(repo, "docs/knowledge/plain.md")
+        code, out = run(repo, "knowledge/plain.md")
         assert code == 1, out
         assert "distilled_from_sha の行が無い" in out, out
-        assert '"<short-sha>"' in (repo / "docs/knowledge/plain.md").read_text(encoding="utf-8")
+        assert '"<short-sha>"' in (repo / "knowledge/plain.md").read_text(encoding="utf-8")
     finally:
         shutil.rmtree(repo)
 
@@ -165,11 +165,11 @@ def test_missing_file_aborts_before_writing() -> None:
     repo = new_repo()
     try:
         baseline(repo)
-        before = distilled_of(repo, "docs/knowledge/a.md")
-        code, out = run(repo, "docs/knowledge/a.md", "docs/knowledge/nope.md")
+        before = distilled_of(repo, "knowledge/a.md")
+        code, out = run(repo, "knowledge/a.md", "knowledge/nope.md")
         assert code == 1, out
         assert "ファイルが無い" in out, out
-        assert distilled_of(repo, "docs/knowledge/a.md") == before, "abort 前に書き換えた"
+        assert distilled_of(repo, "knowledge/a.md") == before, "abort 前に書き換えた"
     finally:
         shutil.rmtree(repo)
 
@@ -178,11 +178,11 @@ def test_sha_option_requires_a_value() -> None:
     repo = new_repo()
     try:
         baseline(repo)
-        before = distilled_of(repo, "docs/knowledge/a.md")
-        code, out = run(repo, "--sha", "--dry-run", "docs/knowledge/a.md")
+        before = distilled_of(repo, "knowledge/a.md")
+        code, out = run(repo, "--sha", "--dry-run", "knowledge/a.md")
         assert code == 2, out
         assert "--sha に値が無い" in out, out
-        assert distilled_of(repo, "docs/knowledge/a.md") == before, out
+        assert distilled_of(repo, "knowledge/a.md") == before, out
     finally:
         shutil.rmtree(repo)
 
@@ -191,11 +191,11 @@ def test_unresolvable_sha_is_rejected() -> None:
     repo = new_repo()
     try:
         baseline(repo)
-        before = distilled_of(repo, "docs/knowledge/a.md")
-        code, out = run(repo, "--sha", "zzzzzzz", "docs/knowledge/a.md")
+        before = distilled_of(repo, "knowledge/a.md")
+        code, out = run(repo, "--sha", "zzzzzzz", "knowledge/a.md")
         assert code == 2, out
         assert "解決できない" in out, out
-        assert distilled_of(repo, "docs/knowledge/a.md") == before, out
+        assert distilled_of(repo, "knowledge/a.md") == before, out
     finally:
         shutil.rmtree(repo)
 
@@ -205,11 +205,11 @@ def test_updated_is_not_touched() -> None:
     repo = new_repo()
     try:
         baseline(repo)
-        before = (repo / "docs/knowledge/a.md").read_text(encoding="utf-8")
+        before = (repo / "knowledge/a.md").read_text(encoding="utf-8")
         make_stale(repo)
         code, out = run(repo, "--all-stale")
         assert code == 0, out
-        after = (repo / "docs/knowledge/a.md").read_text(encoding="utf-8")
+        after = (repo / "knowledge/a.md").read_text(encoding="utf-8")
         assert 'updated: "2026-08-09"' in after, after
         assert before != after, "sha が変わっていない"
     finally:
@@ -221,9 +221,9 @@ def test_sha_option_writes_resolved_sha() -> None:
     repo = new_repo()
     try:
         baseline(repo)
-        code, out = run(repo, "--sha", "HEAD", "docs/knowledge/a.md")
+        code, out = run(repo, "--sha", "HEAD", "knowledge/a.md")
         assert code == 0, out
-        written = distilled_of(repo, "docs/knowledge/a.md")
+        written = distilled_of(repo, "knowledge/a.md")
         assert written != "HEAD", f"可変参照をそのまま書いた: {written}"
         assert len(written) >= 7, written
     finally:
@@ -235,11 +235,11 @@ def test_duplicate_distilled_lines_are_refused() -> None:
     repo = new_repo()
     try:
         baseline(repo)
-        path = repo / "docs/knowledge/a.md"
+        path = repo / "knowledge/a.md"
         text = path.read_text(encoding="utf-8")
         dup = 'distilled_from_sha: "deadbee"\nupdated:'
         path.write_text(text.replace("updated:", dup, 1), encoding="utf-8")
-        code, out = run(repo, "docs/knowledge/a.md")
+        code, out = run(repo, "knowledge/a.md")
         assert code == 1, out
         assert "distilled_from_sha が 2 行ある" in out, out
     finally:
@@ -263,9 +263,9 @@ def test_other_errors_are_not_reported_as_resolved() -> None:
     try:
         baseline(repo)
         make_stale(repo)
-        write_doc(repo, "docs/knowledge/a.md", ["D19"],
-                  ["docs/docs-original/9999-nope.md", "docs/docs-original/0001-first.md"],
-                  distilled_of(repo, "docs/knowledge/a.md"))
+        write_doc(repo, "knowledge/a.md", ["D19"],
+                  ["docs-original/9999-nope.md", "docs-original/0001-first.md"],
+                  distilled_of(repo, "knowledge/a.md"))
         commit_all(repo, "存在しない source を足す（別の error）")
         code, out = run(repo, "--all-stale")
         assert code == 1, out
@@ -279,15 +279,15 @@ def test_body_template_after_frontmatter_without_sha_is_refused() -> None:
     repo = new_repo()
     try:
         baseline(repo)
-        (repo / "docs/knowledge/tmpl.md").write_text(
+        (repo / "knowledge/tmpl.md").write_text(
             '---\nstatus: Confirmed\nkind: knowledge\n---\n\n'
             '# テンプレ\n\n```yaml\ndistilled_from_sha: "<short-sha>"\n```\n',
             encoding="utf-8",
         )
-        code, out = run(repo, "docs/knowledge/tmpl.md")
+        code, out = run(repo, "knowledge/tmpl.md")
         assert code == 1, out
         assert "distilled_from_sha の行が無い" in out, out
-        body = (repo / "docs/knowledge/tmpl.md").read_text(encoding="utf-8")
+        body = (repo / "knowledge/tmpl.md").read_text(encoding="utf-8")
         assert '"<short-sha>"' in body, "本文のテンプレを書き換えた"
     finally:
         shutil.rmtree(repo)
@@ -298,13 +298,13 @@ def test_crlf_document_is_bumped_in_place() -> None:
     repo = new_repo()
     try:
         baseline(repo)
-        path = repo / "docs/knowledge/a.md"
+        path = repo / "knowledge/a.md"
         with path.open(encoding="utf-8", newline="") as f:
             lf_text = f.read()
         with path.open("w", encoding="utf-8", newline="") as f:
             f.write(lf_text.replace("\n", "\r\n"))
         head = commit_all(repo, "CRLF へ変換")
-        code, out = run(repo, "docs/knowledge/a.md")
+        code, out = run(repo, "knowledge/a.md")
         assert code == 0, out
         with path.open(encoding="utf-8", newline="") as f:
             after = f.read()
@@ -319,13 +319,13 @@ def test_empty_value_gets_a_space_after_colon() -> None:
     repo = new_repo()
     try:
         baseline(repo)
-        path = repo / "docs/knowledge/a.md"
+        path = repo / "knowledge/a.md"
         text = path.read_text(encoding="utf-8")
         path.write_text(
             re.sub(r'^distilled_from_sha: ".*"$', "distilled_from_sha:", text, count=1, flags=re.M),
             encoding="utf-8",
         )
-        code, out = run(repo, "docs/knowledge/a.md")
+        code, out = run(repo, "knowledge/a.md")
         assert code == 0, out
         after = path.read_text(encoding="utf-8")
         assert 'distilled_from_sha: "' in after, after[:200]
@@ -350,7 +350,7 @@ def test_stale_bump_without_body_change_warns_of_atrophy() -> None:
         make_stale(repo)
         code, out = run(repo, "--all-stale")
         assert code == 0, out
-        assert "⚠ docs/knowledge/a.md" in out, out
+        assert "⚠ knowledge/a.md" in out, out
         assert "形骸化" in out, out
     finally:
         shutil.rmtree(repo)
@@ -362,7 +362,7 @@ def test_stale_bump_with_body_change_does_not_warn() -> None:
     try:
         baseline(repo)
         make_stale(repo)
-        path = repo / "docs/knowledge/a.md"
+        path = repo / "knowledge/a.md"
         path.write_text(
             path.read_text(encoding="utf-8").replace("本文。", "本文を人手で更新した。"),
             encoding="utf-8",
@@ -372,7 +372,7 @@ def test_stale_bump_with_body_change_does_not_warn() -> None:
         assert code == 0, out
         # doc-classes.md（レジストリ自身）も同じ source を持つため別途 stale になるが、
         # その本文は更新していないので警告が出て正しい。ここで見るのは a.md への影響だけ。
-        assert "⚠ docs/knowledge/a.md" not in out, out
+        assert "⚠ knowledge/a.md" not in out, out
     finally:
         shutil.rmtree(repo)
 
@@ -395,17 +395,17 @@ def test_unresolvable_old_sha_skips_atrophy_check() -> None:
     repo = new_repo()
     try:
         baseline(repo)
-        path = repo / "docs/knowledge/a.md"
+        path = repo / "knowledge/a.md"
         text = path.read_text(encoding="utf-8")
         path.write_text(
             re.sub(r'distilled_from_sha: ".*"', 'distilled_from_sha: "deadbee"', text, count=1),
             encoding="utf-8",
         )
         commit_all(repo, "distilled_from_sha を壊れた値に")
-        code, out = run(repo, "docs/knowledge/a.md")
+        code, out = run(repo, "knowledge/a.md")
         assert code == 0, out
         assert "⚠" not in out, out
-        assert distilled_of(repo, "docs/knowledge/a.md") not in ("", "deadbee"), out
+        assert distilled_of(repo, "knowledge/a.md") not in ("", "deadbee"), out
     finally:
         shutil.rmtree(repo)
 

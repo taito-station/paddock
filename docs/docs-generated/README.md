@@ -4,10 +4,10 @@
 HVE（dahatake/HypervelocityEngineering）の `docs-generated/` と同じ概念。
 
 手書きのドキュメントはここに置かない。
-- 確定知は `docs/knowledge/`
-- 仕様は `docs/specifications/`
-- 一次資料は `docs/docs-original/`
-- 質問票は `docs/qa/`
+- 確定知は `knowledge/`
+- 仕様は `knowledge/`
+- 一次資料は `docs-original/`
+- 質問票は `qa/`
 
 ## 想定される成果物
 

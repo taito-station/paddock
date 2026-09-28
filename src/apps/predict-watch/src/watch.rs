@@ -903,7 +903,7 @@ pub async fn run(app: &App, cli: &Cli) -> anyhow::Result<()> {
 
     // 通知設定も起動時 1 回だけ宣言する（#584）。**これが無いと「鳴らない＝妙味なし」と
     // 「そもそも既定閾値では鳴らない」が区別できず**、監視の失敗が沈黙として現れる
-    // （docs/knowledge/monitor-loop-sleep-resilience.md）状態を通知側にも作ってしまう。
+    // （knowledge/monitor-loop-sleep-resilience.md）状態を通知側にも作ってしまう。
     for line in notify_status_lines(&NotifySettings {
         enabled: !cli.no_notify,
         notify_roi,

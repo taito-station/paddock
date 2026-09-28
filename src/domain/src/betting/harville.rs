@@ -4,7 +4,7 @@
 //! （2 着段 λ2 / 3 着段 λ3 の冪割引・#703 Phase 2）を [`HarvilleModel`] が提供する。
 //! 素の Harville は強い馬の 2・3 着確率を系統的に過大評価する（Benter 1994 Table 9/10:
 //! Z=−4.3〜−8.3。JRA 44,774R の伊藤 2010 で λ2=0.81/λ3=0.70 が対数尤度 1,500 差で優る。
-//! 一次資料: docs/docs-original/703-probability-logic-literature-survey.md §2）。
+//! 一次資料: docs-original/703-probability-logic-literature-survey.md §2）。
 
 use std::collections::HashMap;
 

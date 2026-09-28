@@ -39,7 +39,7 @@ impl OddsValue {
 /// 値を足すときは 3 か所を同じ PR で更新する: 正本ファイル / この定数 /
 /// `scripts/predict-check/test_odds_guard.py` の期待 dict。1 つでも忘れれば
 /// Rust か Python のテストが落ちる。運用上の位置づけは
-/// `docs/specifications/netkeiba-datasource.md` の番兵の節が正。
+/// `knowledge/netkeiba-datasource.md` の番兵の節が正。
 const NETKEIBA_SENTINELS: [(BetType, f64); 5] = [
     (BetType::Wide, 9999.9),
     (BetType::Quinella, 99999.9),

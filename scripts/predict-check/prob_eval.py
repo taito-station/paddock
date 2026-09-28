@@ -17,7 +17,7 @@
 
 窓分割: --fit-until / --eval-from（例: fit 2025-01-01〜2025-12-31 / eval 2026-01-01〜）。
 λ / (a,b) 等のパラメータ推定は fit 窓のみ、採否判断は eval 窓のみ（in-sample 掃引の再発防止。
-窓定義の正本は docs/specifications/backtest.md）。
+窓定義の正本は knowledge/backtest.md）。
 
 使い方:
   python3 scripts/predict-check/prob_eval.py bt_dump.tsv \
