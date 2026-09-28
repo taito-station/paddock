@@ -5,7 +5,7 @@ status: Confirmed
 kind: specification
 doc_class: [D22, D19]
 tags: [D22, D19]
-updated: "2026-09-27"
+updated: "2026-09-29"
 ---
 
 # 着順確率推定モデル仕様書
@@ -303,7 +303,7 @@ CLI は `analyze backtest --log-pool-a A --log-pool-b B`（対指定・`--blend-
 本書の純モデル確率（`model_win_pure` = ステップ 4 のブレンド前）は、市場非依存の**独立確率**の baseline
 として、`scripts/predict-check/prob_ledger.py` で版ごとに評価する。win から割引 Harville で馬連・連対・
 ワイド・3連複の確率を作り、**馬連 NLL と連対 log-loss** を主指標に、dev/test 窓で ledger
-（`docs-original/719-prob-ledger.md`）に記録する。v0 baseline（test 窓）は馬連 NLL 4.206・連対 0.390。
+（`docs-original/719-prob-ledger.md`）に記録する。基準は着順補正後（#730）の v1 baseline で、test 窓の馬連 NLL 4.207・連対 0.386（v0〜v0.2 は補正前のラベルで測った値なので、版の比較には使わない）。
 本番の確率（ステップ 4 の α=0.2 ブレンド）は #722 の判定まで変えない。定義・窓・経緯は
 `backtest.md`「評価プロトコル」と `learned-model-harness.md` の決定ログ「#719」。
 
