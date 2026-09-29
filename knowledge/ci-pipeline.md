@@ -1203,3 +1203,36 @@ paddock は蒸留層を `docs/knowledge/`, `docs/specifications/`, `docs/qa/`, `
   rename で消えるため「0 本検査」になる）。代わりに、main の `docs/knowledge/`・`docs/specifications/` 配下の
   全決定ログエントリと移動後の同名エントリを突き合わせ、差分が相対リンクのリンク先だけであることを確認した
   （2026-09-27・main 取り込み時）。以後の PR は新パス同士の比較になるので通常どおり検査される
+
+### #702: 新規のドメイン/機能知にも `kind: specification` を付ける (2026-09-29) — 採用
+
+#### コンテキスト
+
+ADR 0092 は `docs/specifications/` を `knowledge/` に統合し、旧 specifications 由来の 17 本を
+frontmatter `kind: specification` で区別すると決めた。ただし**新しく作るドメイン/機能知**にどちらの `kind` を
+付けるかは定めておらず、「旧 docs/specifications 由来」という定義のままだと `specification` は閉じた
+集合（来歴ラベル）としか読めなかった（#702 のフォローアップ PR のレビューで判明）。
+
+#### 決定
+
+- `kind` は**来歴ではなく内容**で選ぶ。横断的な蒸留知は `kind: knowledge`、特定のドメイン/機能の仕様
+  （買い方・確率推定・API・画面などの機能仕様）は新規でも `kind: specification` を付ける。置き場所はどちらも `knowledge/`。
+- 本文（CLAUDE.md「ドキュメント/ナレッジ運用」・`knowledge/README.md` の frontmatter 規約）を同じ PR で更新した。
+
+#### 理由
+
+- ディレクトリを統合した後は、`kind` がドメイン/機能知を見分ける唯一の手がかりになる。来歴ラベルに留めると、
+  新しい機能仕様だけが `knowledge` 側に紛れ、区別の意味が時間とともに薄れる。
+- hve-playbook の `.claude/rules/hve/knowledge-maturity.md` は frontmatter の値として `kind: knowledge | specification` を
+  並べるだけで、`specification` を来歴に限る定めは無い（内容で選ぶ運用と矛盾しない）。
+
+#### 却下した代替案
+
+- **`specification` を旧 17 本の来歴ラベルに限定する**: 区別が統合時点のスナップショットに固定され、
+  新規文書では付けられない。見分ける目的に対して情報が減っていくため却下。
+- **`kind` を廃止して全部 `knowledge` にする**: ADR 0092 が区別の手段として `kind` を選んだ前提を崩す。
+
+#### 影響
+
+- 既存 27 本の `kind` は変更しない（旧 specifications 由来 17 本は `specification`、他は `knowledge` のまま実態と一致）。
+- `kind` を機械検査するスクリプトは無い（値の妥当性は人とレビューで担保）。
