@@ -208,7 +208,7 @@ jobs:
           bash scripts/test-hooks-session-stale-check.sh
           python3 scripts/test-hooks-check-knowledge-impact.py
 
-  # Python テストを走らせる軽量ジョブ（#416 / #464 / #719）。対象は 3 群:
+  # Python テストを走らせる軽量ジョブ（#416 / #464 / #719 / #720）。対象は 4 群:
   #   1. scripts/predict-check/test_*.py — unittest ではなく `def test_*()` + assert を末尾の
   #      main() が集めて実行する「自走式」。
   #   2. scripts/harness/test_faithfulness.py — 忠実性ゲート（check_faithfulness.sh の集計ロジック）の
@@ -220,10 +220,12 @@ jobs:
   #    ディレクトリごと実行する（ファイルを列挙しないので、今後増える numpy テストも自動で対象になる）。
   #    依存は scripts/predict-check/requirements-ci.txt で推移依存まで == 固定し、--only-binary で wheel だけを
   #    入れる（上流の新版やビルドスクリプトで必須チェックが揺れないように）。ハッシュ検証は別 issue。
+  # 4. scripts/harness/test_train_pl_topk.py・test_pl_features.py（#720）。学習モデルを独立確率モデルとして再開したので
+  #    CI に載せる。scipy までで足りるため、3 の一式に scipy だけを足した
+  #    scripts/harness/requirements-ci.txt（完全ピン）を別 venv に入れて走らせる。
   # スコープ外（このジョブで走らせない）: scripts/harness/test_train_pl.py / test_train_gbm.py。
-  #   これらは numpy/scipy/scikit-learn 依存（requirements.txt の venv 必須）で、pip インストールが
-  #   重い。学習モデル路線は #309 Phase B で棄却（ADR 0053）済みのため、依存を要するこの 2 本を
-  #   CI に載せる費用対効果は低く、意図的にスコープ外とする（再検討は学習モデル再開時）。
+  #   scikit-learn まで要り pip インストールが重いうえ、#309 Phase B の棄却済みモデル（ADR 0053）の
+  #   ハーネスで今は更新しないため、費用対効果が低い。
   predict-check:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -244,6 +246,12 @@ jobs:
           python3 -m venv "$RUNNER_TEMP/pc-venv"
           "$RUNNER_TEMP/pc-venv/bin/pip" install --quiet --only-binary=:all: -r scripts/predict-check/requirements-ci.txt
           "$RUNNER_TEMP/pc-venv/bin/python" -m pytest -q -p no:cacheprovider scripts/predict-check
+      - name: Run harness PL top-k tests (pytest・scipy・#720)
+        run: |
+          python3 -m venv "$RUNNER_TEMP/hv-venv"
+          "$RUNNER_TEMP/hv-venv/bin/pip" install --quiet --only-binary=:all: -r scripts/harness/requirements-ci.txt
+          "$RUNNER_TEMP/hv-venv/bin/python" -m pytest -q -p no:cacheprovider \
+            scripts/harness/test_train_pl_topk.py scripts/harness/test_pl_features.py
 
   # scripts/ のシェルスクリプトを shellcheck で機械検査する（#416）。従来は人力レビューのみで
   # 機械検査ゼロだった。ubuntu-latest 同梱の shellcheck で、拡張子 .sh に加え shebang スクリプト

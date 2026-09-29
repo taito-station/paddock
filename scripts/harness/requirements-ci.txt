@@ -1,0 +1,5 @@
+# CI 用の完全ピン（#720）。predict-check と同じ numpy/pytest 一式に scipy を足す。
+# 対象は scipy までで足りる test_train_pl_topk.py・test_pl_features.py（scikit-learn は入れない）。
+# ハッシュ検証（--require-hashes）は predict-check と同じく #728 で扱う。
+-r ../predict-check/requirements-ci.txt
+scipy==1.18.1

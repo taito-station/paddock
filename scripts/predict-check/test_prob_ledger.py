@@ -289,7 +289,7 @@ def _write(text):
 def test_load_probs_ok_with_optional_top2():
     path = _write("race_id\thorse_num\tp_win\tp_top2\nR1\t1\t0.6\t0.8\nR1\t2\t0.4\t0.9\n")
     m = pl.load_probs(path)
-    assert m[("R1", 1)] == {"p_win": pytest.approx(0.6), "p_top2": pytest.approx(0.8)}
+    assert m[("R1", 1)] == {"p_win": pytest.approx(0.6), "p_top2": pytest.approx(0.8), "lam": None}
     assert m[("R1", 2)]["p_top2"] == pytest.approx(0.9)
     # p_top2 列が全行空なら「連対は Harville 由来」の系統として読める
     m = pl.load_probs(_write("race_id\thorse_num\tp_win\tp_top2\nR1\t1\t0.6\t\nR1\t2\t0.4\t\n"))
@@ -321,6 +321,38 @@ def test_load_probs_rejects_bad_input():
     ]
     for text in bad:
         with pytest.raises(ValueError):
+            pl.load_probs(_write(text))
+
+
+def test_load_probs_reads_per_race_lambda():
+    # 学習した λ を持つ系統（#720）は lam2・lam3 列でレースごとの λ を渡す
+    text = "race_id\thorse_num\tp_win\tlam2\tlam3\nR1\t1\t0.6\t0.8\t0.6\nR1\t2\t0.4\t0.8\t0.6\n"
+    m = pl.load_probs(_write(text))
+    assert m[("R1", 1)]["lam"] == (pytest.approx(0.8), pytest.approx(0.6))
+    # 列が無ければ None（系統の λ は --lambda / 既定 1,1）
+    assert pl.load_probs(_write("race_id\thorse_num\tp_win\nR1\t1\t1.0\n"))[("R1", 1)]["lam"] is None
+
+
+def test_load_probs_lambda_range_bounds_are_inclusive():
+    lo, hi = pl.TSV_LAM_RANGE
+    text = f"race_id\thorse_num\tp_win\tlam2\tlam3\nR1\t1\t1.0\t{lo}\t{hi}\n"
+    assert pl.load_probs(_write(text))[("R1", 1)]["lam"] == (lo, hi)
+
+
+def test_load_probs_rejects_bad_lambda():
+    h = "race_id\thorse_num\tp_win\tlam2\tlam3\n"
+    bad = [
+        ("race_id\thorse_num\tp_win\tlam2\nR1\t1\t1.0\t0.8\n", "両方"),  # 片方の列だけ
+        (h + "R1\t1\t0.6\t0.8\t0.6\nR1\t2\t0.4\t\t\n", "一部の行"),  # 一部の行だけ
+        (h + "R1\t1\t0.6\t0.8\t0.6\nR1\t2\t0.4\t0.9\t0.6\n", "レース内"),  # レース内で不一致
+        (h + "R1\t1\t1.0\t0\t0.6\n", "有限の正の数"),  # 0 は 0**0=1 になる
+        (h + "R1\t1\t1.0\tinf\t0.6\n", "有限の正の数"),
+        (h + "R1\t1\t1.0\tx\t0.6\n", "数値"),
+        (h + "R1\t1\t1.0\t1e6\t0.6\n", "値域"),  # 確率が 0 に潰れる
+        (h + "R1\t1\t1.0\t0.8\t0.01\n", "値域"),
+    ]
+    for text, msg in bad:
+        with pytest.raises(ValueError, match=msg):
             pl.load_probs(_write(text))
 
 
@@ -364,8 +396,10 @@ def test_system_probs_requires_full_coverage():
     rows = _rows("R1", [1, 2, 3], [0.5, 0.3, 0.2])
     full = {("R1", 1): {"p_win": 0.5, "p_top2": None}, ("R1", 2): {"p_win": 0.3, "p_top2": None},
             ("R1", 3): {"p_win": 0.2, "p_top2": None}}
-    p, t2 = pl.system_probs(rows, full)
-    assert np.allclose(p, [0.5, 0.3, 0.2]) and t2 is None
+    p, t2, lam = pl.system_probs(rows, full)
+    assert np.allclose(p, [0.5, 0.3, 0.2]) and t2 is None and lam is None
+    with_lam = {k: {**v, "lam": (0.8, 0.6)} for k, v in full.items()}
+    assert pl.system_probs(rows, with_lam)[2] == (0.8, 0.6)
     partial = {k: v for k, v in full.items() if k != ("R1", 3)}
     assert pl.system_probs(rows, partial) == "horse_partial"
     assert pl.system_probs(rows, {}) == "race_absent"
@@ -432,6 +466,19 @@ def test_evaluate_applies_system_lambda_and_direct_top2():
     assert ext_s["quinella"][0] != pytest.approx(pure_s["quinella"][0])
     # 直接出力の連対確率が使われている
     assert np.allclose(ext_s["top2"]["p"], top2)
+
+
+def test_evaluate_uses_per_race_lambda_from_tsv():
+    # レースごとの λ（TSV）があれば系統の λ より優先し、レースごとに違う λ で組合せ確率を作る
+    races = OrderedDict([("R1", _rows("R1", [2, 1, 3, 4, 5], P5)), ("R2", _rows("R2", [2, 1, 3, 4, 5], P5))])
+    lam_of = {"R1": (0.6, 0.5), "R2": (1.4, 1.2)}
+    ext = {(r, h + 1): {"p_win": P5[h], "p_top2": None, "lam": lam_of[r]} for r in lam_of for h in range(5)}
+    systems = OrderedDict([("pure", pl.System("pure", None)), ("ext", pl.System("ext", ext))])
+    res = pl.evaluate(races, systems)
+    for s_, rid in zip(res["scores"]["ext"], res["race_ids"]):
+        q = pl.combo_probs(np.array(P5), *lam_of[rid]).quinella[0, 1]
+        assert s_["quinella"][0] == pytest.approx(-math.log(q))
+    assert res["scores"]["ext"][0]["wide"][0] != pytest.approx(res["scores"]["ext"][1]["wide"][0])
 
 
 def test_evaluate_market_applies_lambda():
@@ -644,6 +691,19 @@ def test_main_dev_window_lambda_and_sources(monkeypatch, capsys):
     assert "pure（λ=1.0,1.0）" in out
     assert "### test" not in out
     assert "券種別の除外" in out
+
+
+def test_main_per_race_lambda_system(monkeypatch, capsys):
+    dump, _ = _cli_fixture()
+    lam_tsv = _write("race_id\thorse_num\tp_win\tlam2\tlam3\n" + "".join(
+        f"{r}\t{h}\t0.25\t0.8\t0.6\n" for r in ("R0", "R1", "R2", "R3") for h in range(1, 5)
+    ))
+    rc, out = _run(monkeypatch, capsys, [dump, "--system", f"pl={lam_tsv}", "--bootstrap", "20"])
+    assert rc == 0 and "pl（λ=TSV のレース別・" in out
+    # TSV が λ を持つ系統に --lambda を重ねると、どちらが効いたか曖昧になるので拒否する
+    with pytest.raises(SystemExit):
+        _run(monkeypatch, capsys, [dump, "--system", f"pl={lam_tsv}", "--lambda", "pl=0.9,0.8"])
+    assert "TSV" in capsys.readouterr().err
 
 
 def test_main_rejects_bad_arguments(monkeypatch, capsys):
