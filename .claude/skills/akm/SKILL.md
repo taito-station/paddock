@@ -27,7 +27,7 @@ HVE（HypervelocityEngineering）の AKM ワークフローを Claude Code 向�
 
 ### Step 1: Stale 検出
 
-stale な knowledge/specifications を特定する。
+stale な knowledge を特定する。
 
 ```sh
 python3 scripts/bump-distilled-sha.py --all-stale --dry-run
@@ -48,7 +48,7 @@ stale の出力をユーザーに報告する:
 
 ### Step 2: 蒸留（差分マージ）
 
-stale な各 knowledge/specifications に対して差分マージを実行する。
+stale な各 knowledge に対して差分マージを実行する。
 
 **蒸留対象が 3 本以上の場合**: サブエージェント（`impl-sonnet`）に 1 ファイルずつ委譲する。
 **2 本以下の場合**: メインループで直接実行する。
@@ -56,7 +56,7 @@ stale な各 knowledge/specifications に対して差分マージを実行する
 各ファイルの蒸留手順:
 
 1. **変更された source を読む**（docs-original / qa）
-2. **現行の knowledge/specifications を読む**
+2. **現行の knowledge を読む**
 3. **差分を特定する**: source の変更のうち、knowledge の本文に反映すべき箇所を洗い出す
 4. **差分マージを実行する**: 全書き換えしない。変更箇所のみ更新する
    - 新しい事実 → 本文の該当セクションに追記
@@ -94,7 +94,7 @@ python3 scripts/check-decision-log-immutability.py
 2. **機械検査が届かない範囲を目視で確認する**:
    - glossary.md（D07）の定義と各文書の用語使用が一致しているか
    - Confirmed な knowledge が Tentative な source を根拠にしていないか
-   - CLAUDE.md の買い方ルール等と specifications の記述が矛盾していないか
+   - CLAUDE.md の買い方ルール等と knowledge（特に ev-kelly-bet-selection / product-goals / glossary）の記述が矛盾していないか
    - 決定ログで supersede されたエントリの本文側が更新されているか
 
 3. **矛盾を検出したら**:
@@ -140,7 +140,7 @@ python3 scripts/check-doc-classes.py --warn-only 2>&1 | grep '充足ギャップ
 
 ## 注意事項
 
-- **docs-original/ は読み取り専用**。このスキルで変更するのは knowledge/specifications/qa のみ
+- **docs-original/ は読み取り専用**。このスキルで変更するのは knowledge/qa のみ
 - **全書き換えしない**。差分マージが基本。既存の知識を壊さない
 - **SoT 優先順位**: docs-original > qa（Confirmed 回答）> knowledge。矛盾時は上位が勝つ
 - **決定ログは append-only**。既存エントリを書き換えない

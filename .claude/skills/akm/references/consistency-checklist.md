@@ -36,9 +36,9 @@ AKM Step 3 で使用する。HVE の QA-DocConsistency に相当する。
 
 ### CLAUDE.md との整合
 
-- [ ] CLAUDE.md の「買い方ルール」と specifications の記述が矛盾していないか
+- [ ] CLAUDE.md の「買い方ルール」と knowledge（特に ev-kelly-bet-selection / product-goals / glossary）の記述が矛盾していないか
   - 特に: 予算・配分・混戦判定の閾値・相手の広さ
-  - CLAUDE.md を変えたら specifications も、specifications を変えたら CLAUDE.md も直す
+  - CLAUDE.md を変えたら該当 knowledge も、knowledge を変えたら CLAUDE.md も直す
 - [ ] CLAUDE.md の「予想ワークフロー」と knowledge の記述が矛盾していないか
   - 特に: fetch-card の手順、predict のオプション、番兵値の扱い
 
