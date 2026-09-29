@@ -82,7 +82,7 @@ knowledge/                status 付き確定知（＝この層。読むのは�
 ```yaml
 ---
 status: Confirmed        # Confirmed（確定）/ Tentative（暫定）/ Conflict（矛盾・要解消）
-kind: knowledge          # knowledge（横断的な蒸留知）/ specification（旧 docs/specifications 由来のドメイン/機能知）
+kind: knowledge          # knowledge（横断的な蒸留知）/ specification（ドメイン/機能知。新規も内容で選ぶ）
 doc_class: [D22, D24]    # 文書クラス。第 1 要素が主クラス。定義は knowledge/doc-classes.md
 tags: [D22, D24]         # doc_class の mdq 用ミラー（完全一致。checker が強制）
 sources:                 # 由来。qa / docs-original のほか、確定知層（knowledge/ の

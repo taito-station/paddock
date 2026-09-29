@@ -9,8 +9,9 @@ paddock の文書は HVE（dahatake/HypervelocityEngineering, MIT）の蒸留モ
   `knowledge/`（status 付き確定知・**決定ログ付き**）。蒸留は Claude が回す。
   別枠で `docs/docs-generated/`（HVE 由来。`cargo doc` / OpenAPI 等の自動生成文書の置き場。蒸留対象外）がある。
 - **knowledge は `knowledge/` に一本化**（ADR 0092）。frontmatter: `status`/`kind`/`sources`/`distilled_from_sha`/`updated`。
-  `kind` は `knowledge`（横断的な蒸留知）/ `specification`（旧 `docs/specifications/` 由来のドメイン/機能知
-  17 本）で区別する。新規の横断的蒸留知は `kind: knowledge` で `knowledge/` へ。
+  `kind` は `knowledge`（横断的な蒸留知）/ `specification`（ドメイン/機能知。旧 `docs/specifications/` 由来の
+  17 本を含む）で区別する。新規も内容で選ぶ——横断的な蒸留知は `kind: knowledge`、特定のドメイン/機能の
+  仕様は `kind: specification` で、どちらも `knowledge/` へ。
 - **決定は「決定ログ」に書く**（#652。独立した ADR ファイルはもう作らない）。各 knowledge の
   末尾に `## 決定ログ` 節があり、**新規の決定（ルール変更・実験の採用/棄却・
   設計判断）は、その決定が効く文書の決定ログへ直接 append する**。書式は
