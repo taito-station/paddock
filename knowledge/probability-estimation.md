@@ -307,6 +307,11 @@ CLI は `analyze backtest --log-pool-a A --log-pool-b B`（対指定・`--blend-
 本番の確率（ステップ 4 の α=0.2 ブレンド）は #722 の判定まで変えない。定義・窓・経緯は
 `backtest.md`「評価プロトコル」と `learned-model-harness.md` の決定ログ「#719」。
 
+**独立確率の現行最良は #720 の割引 PL top-k**（`scripts/harness/train_pl_topk.py`・k=3・λ 学習、特徴量は `results` のみ）。
+ledger v2 test で馬連 NLL 3.662・連対 0.343（擬似 R² は馬連 0.179・連対 0.153）で、本書の純モデル（v1: 0.057・0.049）を
+大きく上回る。ただし市場の単勝の参考値（馬連 R² 約 0.265）には届かない。本書の本番経路（ステップ 1〜5）はまだこれに
+置き換えない（#722 の判定後に Rust へ移植）。経緯は `learned-model-harness.md` の決定ログ「#720」。
+
 ---
 
 ## 統計データ拡張: GroupStat への `shows` 追加
@@ -483,6 +488,7 @@ knowledge 側に置く**（規約は [knowledge/README.md](README.md) の「REQ-
 
 ## 変更履歴
 
+- 2026-09-29: 「独立確率の評価」節に、独立確率の現行最良が #720 の割引 PL top-k である旨を追記。
 - 2026-09-27: 「独立確率の評価（#719・研究用）」節を追加（純モデル確率を独立確率の baseline として版ごとに評価する旨）。
 - 2026-07-14: knowledge 規約（status/sources/参照SHA）に基づき frontmatter を付与し knowledge へ昇格（内容変更なし・pilot 移行）。物理移動はせず ADR 履歴/相互リンクを維持。詳細は [docs/knowledge/README.md](../knowledge/README.md)。
 

@@ -27,12 +27,15 @@
 窓: dev（既定 2025-07-01〜2025-12-31・#703 fit 窓の内側）は反復・調整用で採否根拠にしない。
 test（既定 2026-01-01〜2026-08-31 = #703 eval 窓）は版の節目にだけ測る（`--windows test`）。
 
-外部確率 TSV: ヘッダ `race_id  horse_num  p_win` ＋任意の `p_top2`（連対を直接出す系統はこれを優先）。
+外部確率 TSV: ヘッダ `race_id  horse_num  p_win` ＋任意の `p_top2`（連対を直接出す系統はこれを優先）
+＋任意の `lam2  lam3`（レースごとの割引 λ。学習した λ を持つ系統〈#720 の割引 PL〉が、その予測に使った
+モデルの λ をそのまま渡す。walk-forward で月ごとにモデルが変わるので系統単位の --lambda では表せない）。
 
 使い方:
   python3 scripts/predict-check/prob_ledger.py bt_dump_<sha>.tsv \\
-      --system pl_topk=probs.tsv --lambda pl_topk=0.9,0.8 \\
-      --ledger docs-original/719-prob-ledger.md --label "v1 pl_topk k=3"
+      --system pl_topk=probs.tsv --system flat=flat.tsv --lambda flat=0.9,0.8 \\
+      --ledger docs-original/719-prob-ledger.md --label "v2 pl_topk k=3"
+  （probs.tsv は lam2・lam3 列を持つので --lambda を付けない。λ 列の無い flat.tsv は --lambda で指定する）
 """
 
 from __future__ import annotations
@@ -323,9 +326,31 @@ def _prob_cell(cell: str, what: str, path: str, lineno: int) -> float:
     return v
 
 
+# TSV のレース別 λ の値域。学習側（train_pl_topk.LAM_BOUNDS）と同じ。範囲外は確率が 0 に潰れて
+# NLL が黙って壊れるので入口で拒否する
+TSV_LAM_RANGE = (0.05, 5.0)
+
+
+def _lam_cell(cell: str, what: str, path: str, lineno: int) -> float:
+    try:
+        v = float(cell)
+    except ValueError as e:
+        raise ValueError(f"{path}:{lineno} {what} が数値ではありません: {cell!r}") from e
+    if not math.isfinite(v) or v <= 0:
+        raise ValueError(f"{path}:{lineno} {what} は有限の正の数にしてください: {cell!r}")
+    lo, hi = TSV_LAM_RANGE
+    if not lo <= v <= hi:
+        raise ValueError(f"{path}:{lineno} {what} が値域 [{lo}, {hi}] の外です: {cell!r}")
+    return v
+
+
 def load_probs(path: str) -> dict:
-    """外部確率 TSV を {(race_id, horse_num): {"p_win", "p_top2"}} で読む。不正は即エラー。"""
+    """外部確率 TSV を {(race_id, horse_num): {"p_win", "p_top2", "lam"}} で読む。不正は即エラー。
+
+    lam は (lam2, lam3) か None。lam2・lam3 列は両方そろえ、全行あり / 全行なしで、レース内は同じ値にする。
+    """
     out: dict = {}
+    race_lam: dict = {}
     with open(path, encoding="utf-8", newline="") as f:
         reader = csv.reader(f, delimiter="\t")
         header = next(reader, None) or []
@@ -333,6 +358,8 @@ def load_probs(path: str) -> dict:
         missing = [c for c in ("race_id", "horse_num", "p_win") if c not in idx]
         if missing:
             raise ValueError(f"{path}: 必須列がありません: {missing}")
+        if ("lam2" in idx) != ("lam3" in idx):
+            raise ValueError(f"{path}: lam2・lam3 列は両方そろえてください")
         need = max(idx[c] for c in ("race_id", "horse_num", "p_win")) + 1
         for lineno, cells in enumerate(reader, start=2):
             if not cells or all(not c.strip() for c in cells):
@@ -349,12 +376,24 @@ def load_probs(path: str) -> dict:
             top2 = None
             if "p_top2" in idx and idx["p_top2"] < len(cells) and cells[idx["p_top2"]].strip():
                 top2 = _prob_cell(cells[idx["p_top2"]], "p_top2", path, lineno)
-            out[key] = {"p_win": _prob_cell(cells[idx["p_win"]], "p_win", path, lineno), "p_top2": top2}
+            lam = None
+            if "lam2" in idx:
+                raw = [cells[idx[c]].strip() if idx[c] < len(cells) else "" for c in ("lam2", "lam3")]
+                if any(raw):
+                    lam = (_lam_cell(raw[0], "lam2", path, lineno), _lam_cell(raw[1], "lam3", path, lineno))
+                    prev = race_lam.setdefault(key[0], lam)
+                    if prev != lam:
+                        raise ValueError(f"{path}:{lineno} lam2・lam3 がレース内で一致しません（{prev} と {lam}）")
+            out[key] = {"p_win": _prob_cell(cells[idx["p_win"]], "p_win", path, lineno), "p_top2": top2, "lam": lam}
     # 連対を直接出す系統は全行で持つこと。一部だけだと、レースごとに連対の定義（直接 / Harville 由来）が
     # 黙って混ざり、主指標を系統の性能として解釈できなくなる。
     n_top2 = sum(1 for v in out.values() if v["p_top2"] is not None)
     if 0 < n_top2 < len(out):
         raise ValueError(f"{path}: p_top2 が一部の行（{n_top2}/{len(out)}）にしかありません。全行に入れるか列ごと空にしてください")
+    # λ も同じ理由で全行あり / 全行なし（レースごとに系統の λ と TSV の λ が黙って混ざるのを防ぐ）
+    n_lam = sum(1 for v in out.values() if v["lam"] is not None)
+    if 0 < n_lam < len(out):
+        raise ValueError(f"{path}: lam2・lam3 が一部の行（{n_lam}/{len(out)}）にしかありません。全行に入れるか列ごと空にしてください")
     return out
 
 
@@ -402,6 +441,11 @@ class System:
     source: str = ""  # ledger に残す入力の来歴（外部 TSV のファイル名と sha256）
 
     @property
+    def per_race_lambda(self) -> bool:
+        """外部 TSV がレースごとの λ を持つか（load_probs が全行あり / 全行なしを保証している）。"""
+        return bool(self.probs) and next(iter(self.probs.values())).get("lam") is not None
+
+    @property
     def probs_index(self) -> dict:
         """race_id → その系統が確率を持つ (race_id, horse_num) の一覧（余剰行の検出用）。"""
         if self.probs is None:
@@ -414,8 +458,10 @@ class System:
         return self._index
 
 
-def system_probs(rows: list[dict], probs: dict | None) -> tuple[np.ndarray, np.ndarray | None] | str:
-    """レース内全馬の (p_win, p_top2 or None)。欠ければ理由文字列を返す（母集合から外す）。
+def system_probs(
+    rows: list[dict], probs: dict | None
+) -> tuple[np.ndarray, np.ndarray | None, tuple[float, float] | None] | str:
+    """レース内全馬の (p_win, p_top2 or None, レースの λ or None)。欠ければ理由文字列を返す（母集合から外す）。
 
     "race_absent" = レースの行が 1 つも無い（系統のカバレッジ外）、"horse_partial" = 一部の馬だけ無い
     （確率の出し漏れの疑い）。
@@ -426,7 +472,7 @@ def system_probs(rows: list[dict], probs: dict | None) -> tuple[np.ndarray, np.n
             return "race_absent"
         if any(v is None for v in vals):
             return "horse_partial"
-        return np.array(vals, dtype=float), None
+        return np.array(vals, dtype=float), None, None
     got = [probs.get((r["race_id"], r["horse_num"])) for r in rows]
     if all(g is None for g in got):
         return "race_absent"
@@ -434,8 +480,8 @@ def system_probs(rows: list[dict], probs: dict | None) -> tuple[np.ndarray, np.n
         return "horse_partial"
     p = np.array([g["p_win"] for g in got])
     t2 = [g["p_top2"] for g in got]
-    # load_probs が「全行あり / 全行なし」を保証しているので、レース内で混在はしない
-    return p, (np.array(t2) if t2[0] is not None else None)
+    # load_probs が「全行あり / 全行なし」「λ はレース内で一致」を保証しているので、先頭の馬で代表できる
+    return p, (np.array(t2) if t2[0] is not None else None), got[0].get("lam")
 
 
 # 外部系統の p_win のレース内和がこれより外れたら警告に数える（正規化はする）
@@ -477,13 +523,14 @@ def evaluate(races: "OrderedDict[str, list[dict]]", systems: "OrderedDict[str, S
         for group, reason in exclusion_reasons(fins).items():
             if reason is not None:
                 bet_excluded[(group, reason)] += 1
-        for name, (p, t2) in got.items():
+        for name, (p, t2, lam) in got.items():
             sysm = systems[name]
             if sysm.probs is not None and abs(float(p.sum()) - 1.0) > P_WIN_SUM_TOL:
                 warnings[f"p_win_sum_off:{name}"] += 1
             if t2 is not None and abs(float(t2.sum()) - 2.0) > P_TOP2_SUM_TOL * len(rows):
                 warnings[f"p_top2_sum_off:{name}"] += 1
-            scores[name].append(race_scores(combo_probs(p, sysm.lam2, sysm.lam3), fins, t2))
+            lam2, lam3 = lam if lam is not None else (sysm.lam2, sysm.lam3)
+            scores[name].append(race_scores(combo_probs(p, lam2, lam3), fins, t2))
         race_ids.append(rid)
     return {
         "n_races": len(race_ids),
@@ -783,6 +830,8 @@ def main(argv: list[str] | None = None) -> int:
             name, load_probs(path), *lams.get(name, (1.0, 1.0)),
             source=f"`{os.path.basename(path)}` sha256 先頭 12 桁 {_file_sha(path)}",
         )
+        if systems[name].per_race_lambda and name in lams:
+            ap.error(f"系統 {name!r} の TSV はレースごとの λ（lam2・lam3 列）を持つので --lambda は指定できません")
 
     rows = pe.load_dump(args.dump)
     table = pe.build_race_table(rows)
@@ -796,7 +845,9 @@ def main(argv: list[str] | None = None) -> int:
         f"- 計測日: {_date.today().isoformat()} / git {sha}{'-dirty' if dirty else ''}",
         f"- dump: `{os.path.basename(args.dump)}`（sha256 先頭 12 桁 {_file_sha(args.dump)}）",
         "- 系統: " + ", ".join(
-            f"{s.name}（λ={s.lam2},{s.lam3}{'・' + s.source if s.source else ''}）" for s in systems.values()
+            f"{s.name}（λ={'TSV のレース別' if s.per_race_lambda else f'{s.lam2},{s.lam3}'}"
+            f"{'・' + s.source if s.source else ''}）"
+            for s in systems.values()
         ),
         f"- 市場参考列 λ={lams.get('market', (1.0, 1.0))[0]},{lams.get('market', (1.0, 1.0))[1]}"
         f" / bootstrap {args.bootstrap} / seed {args.seed}",

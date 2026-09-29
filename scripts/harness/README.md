@@ -18,6 +18,10 @@ walk-forward で訓練して対市場評価する Python ハーネス。
 | `train_gbm.py` | 非線形 GBM 木（sklearn HGB）の walk-forward 訓練＋比較（同上）。 | scikit-learn |
 | `test_train_pl.py` | 学習・予測・評価ロジックの単体テスト（合成データ）。 | numpy/scipy |
 | `requirements.txt` | 学習・評価の依存ピン。`python3 -m venv .venv && .venv/bin/pip install -r requirements.txt`。 | — |
+| `pl_features_extract.sql` / `pl_features.py` | 市場非依存の特徴量（`results` のみ・as-of・列の許可リストで市場情報を拒否・#720）。 | stdlib |
+| `train_pl_topk.py` | 割引 PL top-k（上位 k 着の尤度・λ 学習）の walk-forward 学習と確率 TSV 出力（#720）。 | numpy/scipy |
+| `test_pl_features.py` / `test_train_pl_topk.py` | 上 2 本の単体テスト（CI で実行）。 | numpy/scipy |
+| `requirements-ci.txt` | CI 用の完全ピン（#720 のテストだけに必要な numpy/scipy/pytest）。 | — |
 
 ## 学習モデルの walk-forward 評価（#309 Phase B）
 
@@ -36,6 +40,23 @@ scripts/harness/.venv/bin/python scripts/harness/train_gbm.py scripts/harness/da
 fundamental を包含）。`raw_score` の学習モデル置換は見送り。詳細は
 [`docs-original/0053-learned-fundamental-model-rejected.md`](../../docs-original/0053-learned-fundamental-model-rejected.md)。
 `.venv` / `data/` は `.gitignore` 対象（再生成可能）。
+
+## 独立確率モデル（#720・割引 PL top-k）
+
+```sh
+# DB（読み取りのみ）→ 抽出 TSV → 特徴量 → walk-forward の確率 TSV → prob_ledger で評価
+D=scripts/harness/data   # gitignore 済み。DB 由来のデータ・確率 TSV・meta JSON は公開リポジトリに入れない
+mkdir -p "$D"
+Q=$(grep -v '^--' scripts/harness/pl_features_extract.sql | tr '\n' ' ')
+limactl shell paddock -- nerdctl exec -i -e PGOPTIONS='-c default_transaction_read_only=on' paddock-postgres psql -U paddock -d paddock -X -q \
+  -c "\copy ($Q) to stdout with (format csv, delimiter E'\t', header)" > $D/raw.tsv
+scripts/harness/.venv/bin/python scripts/harness/pl_features.py $D/raw.tsv -o $D/feats.tsv
+scripts/harness/.venv/bin/python scripts/harness/train_pl_topk.py $D/feats.tsv -o $D/k3.tsv --k 3 --meta $D/k3.json
+scripts/harness/.venv/bin/python scripts/predict-check/prob_ledger.py <dump>.tsv --system pl_k3=$D/k3.tsv
+```
+
+test 窓（`--pred-from 2026-01-01 --pred-to 2026-08-31` と `prob_ledger --windows test --ledger ...`）は版の節目に 1 回だけ測る。
+結果と凍結した入力の sha は `docs-original/720-independent-pl-topk.md`、採否は `knowledge/learned-model-harness.md` の決定ログ「#720」。
 
 ## 忠実性サニティ（最重要・#309 Phase B の前提ゲート）
 

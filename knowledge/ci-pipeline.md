@@ -9,8 +9,8 @@ sources:
   - qa/QA-evil-merge-615.md
   - qa/QA-fullwidth-after-var-636.md
   - .github/workflows/ci.yml
-distilled_from_sha: "39e3946"
-updated: "2026-09-27"
+distilled_from_sha: "f4016cf"
+updated: "2026-09-29"
 ---
 
 # CI パイプラインの構成と設計意図（D21）
@@ -79,6 +79,17 @@ D21（CI/CD・ビルド・リリース・供給網管理）の充足ギャップ
   ADR 0082 の「必須チェックを lock/checksum 外の取得に依存させない」と同じ動機だが、**ハッシュ検証
   （`--require-hashes`）と dependabot での更新監視はまだ無い**（別 issue）。PyPI 障害時にこのステップは
   落ちうる。
+
+### harness の独立確率モデルのテストも同じ方式で走らせる（#720）
+
+`scripts/harness/test_train_pl_topk.py`・`test_pl_features.py` は、上と同じ形の別ステップ（別 venv）で走る。
+依存は `scripts/harness/requirements-ci.txt`（`-r ../predict-check/requirements-ci.txt` に scipy を足した完全ピン）。
+
+- それまで harness の学習テストは「棄却済み路線（ADR 0053）で依存が重い」ので CI の対象外だった。#720 で学習モデルを
+  独立確率モデルとして再開したので、その理由がなくなった。
+- scikit-learn が要る旧ハーネスのテスト（`test_train_pl.py`・`test_train_gbm.py`）は、更新しない棄却済みモデルのものなので対象外のまま。
+- ファイルを列挙している（ディレクトリごとにすると scikit-learn 依存のテストまで集めて落ちる）。harness に独立確率モデルの
+  テストを足したら、このステップにも足す。
 
 ### `adr` ジョブは回帰テストを本番検査より先に走らせる
 
