@@ -262,5 +262,61 @@ def test_features_are_finite():
         assert all(np.isfinite(o[f]) for f in pf.FEATURES)
 
 
+# ---------- 馬場不明（#745: 空の馬場を良として数えない） ----------
+
+
+def _going_history(last_going):
+    """A は良で 1 着・重で最下位。最後の走の馬場を last_going にする。"""
+    return (_race("G1", "2025-03-01", ["A", "B", "C"], going="良")
+            + _race("G2", "2025-03-08", ["B", "C", "A"], going="重")
+            + _race("G3", "2025-03-15", ["B", "C", "A"], going=last_going))
+
+
+def test_unknown_going_today_gives_neutral_going_apt():
+    # 過去走にも馬場不明（G3）を置く: 不明どうしを同じ馬場として比べない
+    rows = _going_history("") + _race("X", "2025-04-05", ["A", "B", "C"], going="")
+    f = {(o["race_id"], o["horse_name"]): o for o in pf.build_features(rows)}
+    assert f[("X", "A")]["going_apt"] == 0.0  # 当日の馬場が分からないので適性は中立（データなしと同じ）
+
+
+def test_unknown_going_history_is_not_counted_as_good():
+    # G3（馬場不明・最下位）を良の走として数えると、良の適性が下がる
+    rows = _going_history("") + _race("X", "2025-04-05", ["A", "B", "C"], going="良")
+    f = {(o["race_id"], o["horse_name"]): o for o in pf.build_features(rows)}
+    m = pf.APT_M
+    overall = (0.0 + 1.0 + 1.0) / 3  # 全体成績には馬場不明の走も入る
+    assert f[("X", "A")]["going_apt"] == pytest.approx(overall - (0.0 + m * overall) / (1 + m))
+
+
+def test_unknown_going_times_are_not_in_good_par():
+    # 良の 30 走（96〜98 秒）と馬場不明の 30 走（110 秒）。良の基準に不明の 110 秒を混ぜない
+    good = [96.0 + (i % 5) * 0.5 for i in range(pf.PAR_MIN_N)]
+    rows = [_row(f"P{i}", "2025-02-01", f"H{i}", 1, time=t, going="良") for i, t in enumerate(good)]
+    # 同じ日に置く（馬場不明の走と良の走が同日に並んでも基準タイムの集計が落ちないこと）
+    rows += [_row(f"U{i}", "2025-02-01", f"K{i}", 1, time=110.0, going="") for i in range(pf.PAR_MIN_N)]
+    rows += [_row("R1", "2025-03-05", "A", 1, time=96.5, going="良"),  # A は良で 96.5 秒
+             _row("R1", "2025-03-05", "B", 2, time=97.5, going="良", num=2)]
+    rows += _race("R2", "2025-03-20", ["A", "B"])
+    f = {(o["race_id"], o["horse_name"]): o for o in pf.build_features(rows)}
+    ts = np.array(good)
+    assert f[("R2", "A")]["best_speed3"] == pytest.approx((ts.mean() - 96.5) / ts.std())
+
+
+def test_unknown_going_run_uses_course_par():
+    # 馬場不明の走は良・重どちらの基準でもなく、馬場を区別しないコースの基準で測る
+    good = [96.0 + (i % 5) * 0.5 for i in range(pf.PAR_MIN_N)]
+    rows = [_row(f"P{i}", "2025-02-01", f"H{i}", 1, time=t, going="良") for i, t in enumerate(good)]
+    rows += [_row(f"Q{i}", "2025-02-02", f"K{i}", 1, time=t + 3.0, going="重") for i, t in enumerate(good)]
+    # 別コースの馬場不明 30 走（120 秒）。馬場不明どうしを 1 つの基準にまとめない
+    rows += [_row(f"U{i}", "2025-02-03", f"M{i}", 1, time=120.0 + (i % 5) * 0.5, going="", venue="中山")
+             for i in range(pf.PAR_MIN_N)]
+    rows += [_row("R1", "2025-03-05", "A", 1, time=97.0, going=""),
+             _row("R1", "2025-03-05", "B", 2, time=98.0, going="", num=2)]
+    rows += _race("R2", "2025-03-20", ["A", "B"])
+    f = {(o["race_id"], o["horse_name"]): o for o in pf.build_features(rows)}
+    ts = np.array(good + [t + 3.0 for t in good])
+    assert f[("R2", "A")]["best_speed3"] == pytest.approx((ts.mean() - 97.0) / ts.std())
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-q"]))
