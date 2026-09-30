@@ -92,7 +92,7 @@ ADR 0077）:
 | overround（控除率分の超過） | `Σ implied > 1.0` の超過分。合計 1.0 へ正規化して除いたものが市場確率 | 同上 |
 | `blended` | `blended = α·model + (1−α)·market`。**α はモデル重み**で、α=1.0 が純モデル・α=0.0 が市場のみ。**本番既定 α=0.2**（`RECOMMENDED_MARKET_BLEND_ALPHA`。オッズが無いレースはモデルのみへ自動フォールバック） | [probability-estimation.md](probability-estimation.md) REQ-D22-001（採用の経緯は ADR 0034） |
 | ⚠ 純モデル確率（pure） | ブレンド前のモデル確率。**順位付けは `blended`、EV 計算は pure** という層分離を守る | ADR 0055 / [product-goals.md](product-goals.md) REQ-D01-002 |
-| 対数プール（`BlendForm::LogPool`） | ブレンドの代替結合形 `p̃ ∝ model^a · market^b`（レース内正規化）。**本番への採用は棄却済み**——fit 窓 MLE で最適モデル指数 Â=−0.19±0.20（ゼロと区別不能）・eval ΔR² ゲート不通過。研究用 CLI（`--log-pool-a/-b`）として残る | [probability-estimation.md](probability-estimation.md) 結合形の代替（棄却の経緯は同決定ログ #703） |
+| 対数プール（`BlendForm::LogPool`） | ブレンドの代替結合形 `p̃ ∝ model^a · market^b`（レース内正規化）。**本番への採用は棄却済み**——fit 窓 MLE で最適モデル指数 Â=−0.19±0.20（ゼロと区別不能）・eval ΔR² ゲート不通過。研究用 CLI（`--log-pool-a/-b`）として残る。**連系（馬連・ワイド・3連複）でも、市場非依存の独立確率の指数は正にならない**（#722・`scripts/predict-check/benter_alpha.py`） | [probability-estimation.md](probability-estimation.md) 結合形の代替（棄却の経緯は同決定ログ #703・#722） |
 | resolution（判別力） | 「どの馬が勝つか」を見分けるランクの強さ。AUC・top1 で測る。純モデルは市場に劣ることが確定済み | [feature-resolution-diagnosis.md](feature-resolution-diagnosis.md) |
 | calibration（較正） | 予測確率と実測頻度の一致度。Brier・LogLoss・reliability 曲線で測る。**resolution とは別軸**（較正しても判別力は生まれない） | 同上 / [backtest.md](backtest.md) |
 
@@ -144,7 +144,7 @@ ADR 0077）:
 | ⚠ degraded | **単複オッズの取得失敗だけ**が該当する状態。オッズ保存をまるごとスキップして **exit 3** を返す（出馬表・近走は保存済み） | ADR 0049 / [netkeiba-datasource.md](netkeiba-datasource.md) |
 | ⚠ 対象外スキップ | 障害レース等の取り込み対象外。DB 無変更で理由を stdout に出し **exit 0**。degraded（3）ともハード失敗（1）とも別 | [netkeiba-datasource.md](netkeiba-datasource.md)（終了コード）/ ADR 0075（経緯） |
 | best-effort | 失敗しても全体を巻き添えにしない経路（オッズ**未発売**・近走取り込み・組合せ券種オッズ）。**exit 0 のまま**なので件数はログで見る | [netkeiba-datasource.md](netkeiba-datasource.md) |
-| 未発売番兵 | netkeiba が未発売・該当なしの組み合わせに入れる**券種ごとの**固定値（ワイド `9999.9` / 馬連・馬単・三連複 `99999.9` / 三連単 `999999.9`。単勝・複勝には無い）。**確定後の応答でも、票の入らなかった組合せに同じ値が残る**（三連複・#721）。**払戻倍率ではない**ので EV に入れない——入ると 1 点で EV が 3 桁になり参考 ROI が跳ねる。判定は**券種スコープの特定値除外**（上限方式は正当な高配当を殺すので採らない。同じ値でも券種が違えば正当——三連複の `9999.9` は配当として実在し得る） | [netkeiba-datasource.md](netkeiba-datasource.md)「未発売の番兵値」/ ADR 0086 / ADR 0088 |
+| 未発売番兵 | netkeiba が未発売・該当なしの組み合わせに入れる**券種ごとの**固定値（ワイド `9999.9` / 馬連・馬単・三連複 `99999.9` / 三連単 `999999.9`。単勝・複勝には無い）。**確定後の応答でも、票の入らなかった組合せに同じ値が残る**（三連複・#721）。**払戻倍率ではない**ので EV に入れない——入ると 1 点で EV が 3 桁になり参考 ROI が跳ねる。判定は**券種スコープの特定値除外**（上限方式は正当な高配当を殺すので採らない。同じ値でも券種が違えば正当——三連複の `9999.9` は配当として実在し得る）。確定オッズから市場確率を作るとき（#722）は、無投票の組にレース内で売れた組の最小確率の半分を置く | [netkeiba-datasource.md](netkeiba-datasource.md)「未発売の番兵値」/ ADR 0086 / ADR 0088 |
 | 未発売観測 | 「この券種は netkeiba 上で未発売だと**確認できた**」という記録（`race_odds_unpriced_observations`）。read-through の cache-hit 判定で欠落券種から差し引き、券種まるごと未発売の時間帯に再スクレイプが止まらなくなるのを防ぐ。判定は「取得成功なのに priced が 0 件か」（番兵の有無では見ない）。**取得失敗は観測しない**——「分からない」を「売っていない」にすると #294 の自己修復が鈍る。TTL 15 分＝発売開始に気づくまでの最大遅れ | [netkeiba-datasource.md](netkeiba-datasource.md)「保存したオッズの読み出しと read-through」/ ADR 0089 |
 | transient | リトライ対象の一過性障害（`Timeout` / `Io` / `ConnectionFailed` / `HostNotFound` / `Protocol` / 5xx）。回数とバックオフは正本 | [netkeiba-datasource.md](netkeiba-datasource.md)「transient リトライと degraded」/ ADR 0049（経緯） |
 | decision-support | ツールは判断材料を出すだけで、**張る / 見送り / 増額の最終判断は人間**という位置づけ。`predict-watch` の設計原則 | ADR 0055 / ADR 0060 / [CLAUDE.md](../CLAUDE.md)「ライブ監視時のコミュニケーション規律」 |
