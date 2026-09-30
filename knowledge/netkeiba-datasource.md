@@ -10,7 +10,7 @@ sources:
   - qa/QA-final-odds-721.md
   - qa/QA-benter-alpha-722.md
   - docs-original/722-benter-alpha-exotics.md
-distilled_from_sha: "64a6332"
+distilled_from_sha: "fe9d60a"
 updated: "2026-09-30"
 ---
 
