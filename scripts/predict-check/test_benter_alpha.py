@@ -19,6 +19,8 @@ except ImportError:
 
 import benter_alpha as ba
 
+LEDGER = str(ba.REPO_ROOT / "docs-original" / "722-benter-alpha-exotics.md")  # 入口の検査で止まるので書き込まない
+
 
 # ---------- 市場確率 ----------
 
@@ -87,7 +89,7 @@ def test_build_race_exclusion_reasons():
     assert ba.build_race("quinella", horses, probs, (1, 1), tie, odds, floor=True).reason == "podium_not_unique"
     assert ba.build_race("quinella", horses, probs, (1, 1), fins, {}, floor=True).reason == "no_odds"
     odds_extra = odds | {(1, 5): 10.0}
-    assert ba.build_race("quinella", horses, probs, (1, 1), fins, odds_extra, floor=True).reason == "market_horse_not_in_probs"
+    assert ba.build_race("quinella", horses, probs, (1, 1), fins, odds_extra, floor=True).reason == "market_horse_not_in_starters"
     missing = {h: p for h, p in probs.items() if h != 4}
     assert ba.build_race("quinella", horses, missing, (1, 1), fins, odds, floor=True).reason == "probs_missing"
 
@@ -179,7 +181,36 @@ def test_paired_bootstrap_sign():
     assert lo == pytest.approx(1.0) and hi == pytest.approx(1.0)
 
 
+@pytest.mark.parametrize("n_winners", [1, 3])
+def test_fit_beta_only_recovers_market_sharpening(n_winners):
+    races = _synthetic(0.0, 1.3, 3000, 15, n_winners, seed=21)
+    beta, _ = ba.fit_beta(ba.pack(races))
+    assert beta == pytest.approx(1.3, abs=0.08)
+
+
+def test_roi_threshold_uses_expected_hits_per_combo():
+    # ワイド（的中 3 組）: p = 1/6 の 6 組、オッズ 2.5。的中数の期待は 3p = 0.5 → 期待値 1.25 > 1 なので全組買う
+    lz = np.log(np.full(6, 1 / 6))
+    race = ba.Race(combos=list(range(6)), log_f=lz, log_pi=lz, winners=[0, 1, 2], odds=np.full(6, 2.5))
+    roi, n_bet, _, _ = ba.roi_reference(ba.pack([race]), np.array([0.0, 1.0]), n_boot=20, seed=1)
+    assert n_bet == 6 and roi == pytest.approx(3 * 2.5 / 6)
+    # 馬連（的中 1 組）: 期待値 p·O = 2.5/6 < 1 なので買わない
+    q = ba.Race(combos=list(range(6)), log_f=lz, log_pi=lz, winners=[0], odds=np.full(6, 2.5))
+    assert ba.roi_reference(ba.pack([q]), np.array([0.0, 1.0]), n_boot=20, seed=1)[1] == 0
+
+
 # ---------- 窓と記録先 ----------
+
+
+def test_ledger_must_be_existing_primary_doc(tmp_path):
+    ok = ba.REPO_ROOT / "docs-original" / "722-benter-alpha-exotics.md"
+    assert ba.validate_ledger(str(ok)) is None
+    assert ba.validate_ledger("/dev/null") is not None
+    assert ba.validate_ledger(str(tmp_path / "x.md")) is not None
+    outside = tmp_path / "y.md"
+    outside.write_text("", encoding="utf-8")
+    assert ba.validate_ledger(str(outside)) is not None  # 実在しても docs-original/ の外は不可
+    assert ba.validate_ledger(str(ba.REPO_ROOT / "docs-original" / "no-such.md")) is not None
 
 
 def test_windows_follow_frozen_protocol():
@@ -189,20 +220,20 @@ def test_windows_follow_frozen_protocol():
     assert ba.validate_args("2025-07-01", "2025-12-31", "2026-01-01", "2026-08-31", "dev", None, None) is None
 
 
-
 def test_cli_rejects_test_window_without_ledger_and_sensitivity_on_test(tmp_path, monkeypatch):
     monkeypatch.setattr(ba.pl, "code_version", lambda: ("abc1234", False))  # 作業ツリーの状態に依らず入口の検査だけを見る
     base = ["--probs", "p", "--odds", "o", "--results", "r"]
     assert ba.main(base + ["--windows", "test"]) == 2
-    assert ba.main(base + ["--windows", "test", "--ledger", str(tmp_path / "l.md"), "--label", "x", "--trio-no-floor"]) == 2
-    assert ba.main(base + ["--windows", "test", "--ledger", str(tmp_path / "l.md"), "--label", "x", "--wide-low"]) == 2
+    assert ba.main(base + ["--windows", "test", "--ledger", LEDGER, "--label", "x", "--trio-no-floor"]) == 2
+    assert ba.main(base + ["--windows", "test", "--ledger", LEDGER, "--label", "x", "--wide-low"]) == 2
     assert ba.main(base + ["--bet-types", "exacta"]) == 2
+    assert ba.main(base + ["--windows", "test", "--ledger", "/dev/null", "--label", "x"]) == 2
 
 
 def test_cli_rejects_test_window_on_dirty_tree(tmp_path, monkeypatch):
     monkeypatch.setattr(ba.pl, "code_version", lambda: ("abc1234", True))
     args = ["--probs", "p", "--odds", "o", "--results", "r", "--windows", "test",
-            "--ledger", str(tmp_path / "l.md"), "--label", "x"]
+            "--ledger", LEDGER, "--label", "x"]
     assert ba.main(args) == 2
 
 

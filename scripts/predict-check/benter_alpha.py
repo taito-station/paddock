@@ -23,7 +23,7 @@
   1. fit 窓の α̂ の 95% CI（レース単位ブートストラップ）が 0 を跨がず正
   2. eval 窓で α を測り直しても 95% CI が 0 を跨がず正（確認のための再推定。調整には使わない）
   3. eval 窓で、fit 窓の (α̂, β̂) の合成が市場単独より良い: ΔR² の CI が 0 より上、かつ NLL 差の CI が 0 より下
-ROI は参考値（p·O > 1 の組を 1 単位ずつ買った実現回収率。ワイドの払戻はオッズ帯の下限で近似）だけを出す。
+ROI は参考値（期待値〈的中数の期待 × オッズ〉> 1 の組を 1 単位ずつ買った実現回収率。ワイドの払戻はオッズ帯の下限で近似）だけを出す。
 
 入力:
   --probs    確率 TSV（race_id・horse_num・p_win・lam2・lam3。`scripts/harness/train_pl_topk.py` の出力）
@@ -46,6 +46,7 @@ import os
 import sys
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import numpy as np
 
@@ -55,6 +56,7 @@ BET_TYPES = ("quinella", "wide", "trio")
 K = {"quinella": 2, "wide": 2, "trio": 3}
 STARTERS = {"finished", "did_not_finish"}
 FLOOR = pl.FLOOR
+REPO_ROOT = Path(__file__).resolve().parents[2]
 TAKEOUT = {"quinella": 0.225, "wide": 0.225, "trio": 0.25}  # 参考（ROI は実オッズで測るので控除は既に入っている）
 
 
@@ -119,7 +121,7 @@ def build_race(bet_type: str, horses: list, probs: dict, lam: tuple, fins: dict,
         return _excluded("probs_missing")
     hs = sorted(horses)
     if not {h for c in odds for h in c} <= set(hs):
-        return _excluded("market_horse_not_in_probs")
+        return _excluded("market_horse_not_in_starters")
     top = []
     for pos in range(1, (3 if bet_type != "quinella" else 2) + 1):
         hit = [h for h in hs if fins.get(h) == pos]
@@ -233,6 +235,22 @@ def fit(pk: Packed, w: np.ndarray | None = None, max_iter: int = 60) -> tuple[np
     return theta, se, float(-(w * race_nll(pk, theta)).sum())
 
 
+def fit_beta(pk: Packed, max_iter: int = 60) -> tuple[float, float]:
+    """α=0 に固定して β だけを推定する（市場の再校正）。返り値: (β̂, logL)。"""
+    beta = 1.0
+    for _ in range(max_iter):
+        p, _ = _softmax(pk, np.array([0.0, beta]))
+        mean = np.add.reduceat(pk.x[1] * p, pk.starts)
+        seg_w = pk.seg[pk.win_rows]
+        grad = (np.bincount(seg_w, weights=pk.x[1][pk.win_rows], minlength=len(pk.starts)) - pk.n_win * mean).sum()
+        hess = -((pk.n_win[pk.seg] * p) * (pk.x[1] - mean[pk.seg]) ** 2).sum()
+        step = grad / (hess - 1e-9)
+        beta -= step
+        if abs(step) < 1e-10:
+            return beta, float(-race_nll(pk, np.array([0.0, beta])).sum())
+    raise RuntimeError(f"Newton 法が {max_iter} 反復で収束しません")
+
+
 def _boot_counts(n: int, n_boot: int, seed: int) -> np.ndarray:
     rng = np.random.default_rng(seed)
     return rng.multinomial(n, np.full(n, 1.0 / n), size=n_boot).astype(float)
@@ -251,10 +269,13 @@ def paired_ci(x: np.ndarray, y: np.ndarray, d: np.ndarray, n_boot: int, seed: in
 
 
 def roi_reference(pk: Packed, theta: np.ndarray, n_boot: int, seed: int) -> tuple[float, int, float, float]:
-    """p·O > 1 の組を 1 単位ずつ買った実現回収率（参考値）と点数、95% CI。"""
+    """期待値（的中数の期待 × オッズ）> 1 の組を 1 単位ずつ買った実現回収率（参考値）と点数、95% CI。
+
+    ワイドは 1 レースに的中が 3 組あるので、組の的中確率は 3p（p はレース内で和 1 の合成確率）。
+    """
     p, _ = _softmax(pk, theta)
     odds = np.concatenate([r.odds if r.odds is not None else np.full(len(r.combos), np.nan) for r in pk.races])
-    buy = np.nan_to_num(p * odds, nan=0.0) > 1.0
+    buy = np.nan_to_num(pk.n_win[pk.seg] * p * odds, nan=0.0) > 1.0
     hit = np.zeros(len(p), dtype=bool)
     hit[pk.win_rows] = True
     stake = np.bincount(pk.seg, weights=buy.astype(float), minlength=len(pk.starts))
@@ -323,6 +344,14 @@ def collect(bet_type: str, lo: str, hi: str, date: dict, horses: dict, fins: dic
 # ---------- 報告 ----------
 
 
+def validate_ledger(path: str) -> str | None:
+    """test 窓の記録先は、repo の docs-original/ にある既存の Markdown に限る（捨てファイルで覗かない）。"""
+    p = Path(path).resolve()
+    if p.suffix != ".md" or p.parent != (REPO_ROOT / "docs-original").resolve() or not p.is_file():
+        return f"--ledger は docs-original/ にある既存の .md を指定してください: {path}"
+    return None
+
+
 def validate_args(dev_from: str, dev_to: str, test_from: str, test_to: str, windows: str,
                   ledger: str | None, label: str | None) -> str | None:
     err = pl.validate_windows4(dev_from, dev_to, test_from, test_to)
@@ -362,6 +391,9 @@ def report_bet(bet_type: str, fit_races: list, fit_why: Counter, eval_races: lis
         ek = pack(eval_races)
         eu = uniform_nll(ek)
         nm, nf, nb = (race_nll(ek, np.array(t)) for t in ([0.0, 1.0], [1.0, 0.0], theta))
+        beta_only, _ = fit_beta(pk)  # 参考: fit 窓で市場だけを再校正（α=0）したモデル
+        nr = race_nll(ek, np.array([0.0, beta_only]))
+        c_lo, c_hi = paired_ci(nr, nb, eu, n_boot, seed)
         d_lo, d_hi = paired_ci(nm, nb, eu, n_boot, seed)  # ΔR² = Σ(NLL_市場 − NLL_合成) / Σ NLL_一様
         l_lo, l_hi = paired_ci(nb, nm, ek.n_win.astype(float), n_boot, seed)  # 的中 1 組あたりの NLL 差
         et, _, _ = fit(ek)
@@ -375,8 +407,10 @@ def report_bet(bet_type: str, fit_races: list, fit_why: Counter, eval_races: lis
             f"{sum(r.n_floor for r in eval_races)}・的中が無投票の組 {sum(r.winner_unsold for r in eval_races)}R",
             f"- eval 窓の擬似 R²: 市場 {pseudo_r2(nm, eu):.4f} / 独立 {pseudo_r2(nf, eu):.4f} / 合成（fit の θ̂） {pseudo_r2(nb, eu):.4f}",
             f"- ΔR²（合成 − 市場） = {dr2:+.5f} {_ci(d_lo, d_hi)}・NLL 差（合成 − 市場・的中 1 組あたり） = {dnll:+.5f} {_ci(l_lo, l_hi)}",
+            f"- 参考: 市場だけを再校正したモデル（α=0・fit 窓の β = {beta_only:+.4f}）に対する ΔR²（合成 − 再校正市場） = "
+            f"{pseudo_r2(nb, eu) - pseudo_r2(nr, eu):+.5f} {_ci(c_lo, c_hi)}（ΔR² のうち独立確率の寄与の目安。判定には使わない）",
             f"- eval 窓で測り直した α = {et[0]:+.4f} {_ci(ea_lo, ea_hi)}・β = {et[1]:+.4f}（確認用。調整には使わない）",
-            f"- 参考 ROI（p·O > 1 を 1 単位ずつ・{n_bet} 点）: {roi:.3f} {_ci(r_lo, r_hi)}（控除率 {TAKEOUT[bet_type]:.1%}）",
+            f"- 参考 ROI（期待値 > 1 の組を 1 単位ずつ・{n_bet} 点）: {roi:.3f} {_ci(r_lo, r_hi)}（控除率 {TAKEOUT[bet_type]:.1%}）",
         ]
         edge = judge(a_lo, ea_lo, d_lo, l_hi)
         out.append(f"- 判定: **{'エッジあり' if edge else 'エッジなし'}**（fit α の CI > 0: {a_lo > 0} / eval α の CI > 0: {ea_lo > 0} / "
@@ -411,6 +445,8 @@ def main(argv: list[str] | None = None) -> int:
     bets = [b.strip() for b in args.bet_types.split(",") if b.strip()]
     if not err and any(b not in K for b in bets):
         err = f"--bet-types は {BET_TYPES} から選んでください"
+    if not err and args.ledger and (e := validate_ledger(args.ledger)):
+        err = e
     if not err and args.label and (e := pl.validate_label(args.label)):
         err = e
     version, dirty = pl.code_version()
