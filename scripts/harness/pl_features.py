@@ -10,6 +10,9 @@ as-of の規約（リーク防止）:
 - 走破タイムの基準（コース × 馬場の平均・SD）は、そのレースの月の月初より前の完走だけで作る。
   これで各レースの特徴量は一度だけ決まり、walk-forward の学習窓ごとに作り直さなくてよい。
 
+馬場（track_condition）が空のレースは「馬場不明」として扱う（#745）。良・道悪どちらの適性にも、馬場別の基準タイムにも
+入れず、基準タイムは馬場を区別しないコースのキーにだけ入れる。当日の馬場が不明なら going_apt は中立（0）。
+
 出走馬（status が finished / did_not_finish）だけを出力する。取消・除外は出走していないので出さない。
 中止（did_not_finish）は着順なしで出力し、学習側（train_pl_topk.stage_winners）が分母に残す。
 
@@ -38,6 +41,9 @@ _FLOAT_COLS = {"weight_carried", "time_seconds"}
 STARTERS = {"finished", "did_not_finish"}
 STATUSES = STARTERS | {"scratched", "cancelled"}  # ResultStatus と同じ値域
 HEAVY_GOING = {"稍重", "重", "不良"}
+GOOD_GOING = {"良"}
+# 馬場の値域。空（未取得）は良・道悪（稍重/重/不良）のどちらでもない「馬場不明」として扱う（#745）
+TRACK_CONDITIONS = GOOD_GOING | HEAVY_GOING | {""}
 
 FEATURES = [
     "n_runs", "no_hist", "days_since", "form3", "last_rel", "dnf_rate",
@@ -102,6 +108,9 @@ def load_raw(path: str) -> list[dict]:
                     raise ValueError(f"{path}:{lineno} {key} が空です")
             if r["status"] not in STATUSES:
                 raise ValueError(f"{path}:{lineno} status が未知の値です: {r['status']!r}")
+            # 表記の揺れや新しい値を黙って「馬場不明」にしない（空だけが不明）
+            if r["track_condition"] not in TRACK_CONDITIONS:
+                raise ValueError(f"{path}:{lineno} track_condition が未知の値です: {r['track_condition']!r}")
             # 完走なのに着順が無い行（ラベル欠落）は中止と区別できないので入口で止める
             if r["status"] == "finished" and r["finishing_position"] is None:
                 raise ValueError(f"{path}:{lineno} 完走（finished）なのに finishing_position が空です")
@@ -112,8 +121,11 @@ def load_raw(path: str) -> list[dict]:
 # ---------- 補助 ----------
 
 
-def _going_heavy(cond: str) -> bool:
-    return cond in HEAVY_GOING
+def _going_heavy(cond: str) -> bool | None:
+    """道悪（稍重/重/不良）なら True・良なら False・馬場不明（空）なら None（良として数えない・#745）。"""
+    if cond in HEAVY_GOING:
+        return True
+    return False if cond in GOOD_GOING else None
 
 
 def _month_start(d: str) -> str:
@@ -129,10 +141,15 @@ def _mean(xs: list[float], default: float) -> float:
 
 
 class _Par:
-    """月初時点の基準タイム（コース × 馬場）。月初より前の完走を順に足し込み、月ごとに写しを取る。"""
+    """月初時点の基準タイム（コース × 馬場）。月初より前の完走を順に足し込み、月ごとに写しを取る。
 
-    def __init__(self, finished: list[tuple[str, tuple, tuple, float]]) -> None:
-        self._recs = sorted(finished)  # (date, 細かいキー, 粗いキー, time)
+    馬場不明の走は細かいキー（馬場別）を None にし、馬場を区別しない粗いキーにだけ入れる。
+    """
+
+    def __init__(self, finished: list[tuple[str, tuple | None, tuple, float]]) -> None:
+        # (date, 細かいキー, 粗いキー, time)。細かいキーは None（馬場不明）を含むのでタプルのまま比べない。
+        # 馬場が既知の走だけの区分は、修正前（タプル全体の順）と同じ足し込み順になるように並べる
+        self._recs = sorted(finished, key=lambda rec: (rec[0], rec[2], rec[1] is not None, rec[1] or (), rec[3]))
         self._snap: dict[str, dict] = {}
 
     def at(self, cutoff: str) -> dict:
@@ -142,6 +159,8 @@ class _Par:
                 if d >= cutoff:
                     break
                 for k in (fine, coarse):
+                    if k is None:
+                        continue
                     a = acc[k]
                     a[0] += 1
                     a[1] += t
@@ -150,7 +169,7 @@ class _Par:
         return self._snap[cutoff]
 
     @staticmethod
-    def z(stats: dict, fine: tuple, coarse: tuple, t: float) -> float | None:
+    def z(stats: dict, fine: tuple | None, coarse: tuple, t: float) -> float | None:
         """基準より速いほど正。件数不足・分散 0 なら None。"""
         for k in (fine, coarse):
             s = stats.get(k)
@@ -187,8 +206,9 @@ def build_features(rows: list[dict]) -> list[dict]:
         for r in races[rid]:
             if r["status"] == "finished" and r["time_seconds"] is not None:
                 heavy = _going_heavy(r["track_condition"])
-                fine = (r["venue"], r["surface"], r["distance"], heavy)
-                finished.append((r["date"], fine, fine[:3], r["time_seconds"]))
+                coarse = (r["venue"], r["surface"], r["distance"])
+                fine = None if heavy is None else coarse + (heavy,)
+                finished.append((r["date"], fine, coarse, r["time_seconds"]))
     par = _Par(finished)
 
     hist: dict = defaultdict(list)  # 馬名 → 過去走の記録
@@ -231,11 +251,12 @@ def build_features(rows: list[dict]) -> list[dict]:
                 if wtime is not None and r["time_seconds"] is not None and r["distance"]:
                     behind = min(max((r["time_seconds"] - wtime) / (r["distance"] / 1000), 0.0), BEHIND_CAP)
                 heavy = _going_heavy(r["track_condition"])
-                fine = (r["venue"], r["surface"], r["distance"], heavy)
+                coarse = (r["venue"], r["surface"], r["distance"])
+                fine = None if heavy is None else coarse + (heavy,)
                 hist[r["horse_name"]].append({
                     "date": day, "venue": r["venue"], "surface": r["surface"], "distance": r["distance"],
                     "heavy": heavy, "rel": rel, "dnf": dnf, "behind": behind,
-                    "time": r["time_seconds"] if r["status"] == "finished" else None, "fine": fine,
+                    "time": r["time_seconds"] if r["status"] == "finished" else None, "fine": fine, "coarse": coarse,
                 })
                 for table, key in ((jockey, r["jockey"]), (trainer, r["trainer"])):
                     if key:
@@ -253,7 +274,7 @@ def _horse_features(r: dict, h: list[dict], stats: dict, max_gate: int, wc_mean:
     last3 = h[-3:]
     rels = [x["rel"] for x in h]
     overall = _mean(rels, NEUTRAL_REL)
-    speeds = [z for z in (_Par.z(stats, x["fine"], x["fine"][:3], x["time"]) for x in last3 if x["time"] is not None)
+    speeds = [z for z in (_Par.z(stats, x["fine"], x["coarse"], x["time"]) for x in last3 if x["time"] is not None)
               if z is not None]
     behinds = [x["behind"] for x in last3 if x["behind"] is not None]
     heavy = _going_heavy(r["track_condition"])
@@ -282,7 +303,8 @@ def _horse_features(r: dict, h: list[dict], stats: dict, max_gate: int, wc_mean:
         "dist_dir": (r["distance"] - mean_dist) / 1000,
         "dist_gap": abs(r["distance"] - mean_dist) / 1000,
         "venue_apt": apt(lambda x: x["venue"] == r["venue"]),
-        "going_apt": apt(lambda x: x["heavy"] == heavy),
+        # 当日の馬場が不明なら適性は中立（データなしと同じ）。過去走の馬場不明は良・道悪どちらにも入らない
+        "going_apt": apt(lambda x: x["heavy"] == heavy) if heavy is not None else 0.0,
         "weight_carried": r["weight_carried"] if r["weight_carried"] is not None else wc_mean,
         "horse_weight": (r["horse_weight"] if r["horse_weight"] is not None else 470) / 100,
         "weight_change": (r["weight_change"] if r["weight_change"] is not None else 0) / 10,
