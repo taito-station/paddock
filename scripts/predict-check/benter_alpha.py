@@ -41,7 +41,6 @@ from __future__ import annotations
 import argparse
 import csv
 import itertools
-import math
 import os
 import sys
 from collections import Counter, defaultdict
@@ -50,6 +49,7 @@ from pathlib import Path
 
 import numpy as np
 
+import odds_guard
 import prob_ledger as pl
 
 BET_TYPES = ("quinella", "wide", "trio")
@@ -306,21 +306,32 @@ def load_results(path: str) -> tuple[dict, dict, dict]:
     return date, horses, fins
 
 
-def load_odds(path: str, wide_low: bool) -> tuple[dict, dict]:
-    """確定オッズ TSV → ((race_id, bet_type) → {組合せ: 確率用オッズ}, 同 → {組合せ: ROI 用の払戻近似})。"""
+def load_odds(path: str, wide_low: bool) -> tuple[dict, dict, Counter]:
+    """確定オッズ TSV → ((race_id, bet_type) → {組合せ: 確率用オッズ}, 同 → {組合せ: ROI 用の払戻近似}, 落とした行の数)。
+
+    払戻倍率として採れない値（番兵・1.0 未満・非有限。`odds_guard.is_payout_odds`・Rust の `OddsValue` と同じ判定）の行は
+    「売れていない組」として落とす（3連複の無投票と同じ扱い）。同じ組合せの重複行はエラーにする。
+    """
     prob_odds: dict = defaultdict(dict)
     payout: dict = defaultdict(dict)
+    dropped: Counter = Counter()
     with open(path, encoding="utf-8", newline="") as f:
-        for r in csv.DictReader(f, delimiter="\t"):
+        for lineno, r in enumerate(csv.DictReader(f, delimiter="\t"), start=2):
             bt = r["bet_type"]
             if bt not in K:
                 continue
             c = tuple(int(x) for x in r["combination_key"].split("-"))
             if list(c) != sorted(c) or len(c) != K[bt]:
-                raise ValueError(f"組合せキーが不正です: {r['race_id']} {bt} {r['combination_key']}")
+                raise ValueError(f"{path}:{lineno} 組合せキーが不正です: {r['race_id']} {bt} {r['combination_key']}")
+            if c in prob_odds[(r["race_id"], bt)]:
+                raise ValueError(f"{path}:{lineno} 組合せが重複しています: {r['race_id']} {bt} {r['combination_key']}")
+            cells = [r["odds"]] + ([r["odds_high"]] if bt == "wide" else [])
+            if not all(odds_guard.is_payout_odds(bt, v) for v in cells):
+                dropped[bt] += 1
+                continue
             prob_odds[(r["race_id"], bt)][c] = odds_value(r, bt, wide_low)
             payout[(r["race_id"], bt)][c] = float(r["odds"])  # ワイドは下限（保守的な近似）
-    return prob_odds, payout
+    return prob_odds, payout, dropped
 
 
 def collect(bet_type: str, lo: str, hi: str, date: dict, horses: dict, fins: dict, probs: dict,
@@ -328,8 +339,11 @@ def collect(bet_type: str, lo: str, hi: str, date: dict, horses: dict, fins: dic
     by_race: dict = defaultdict(dict)
     lam: dict = {}
     for (rid, h), v in probs.items():
+        if v["lam"] is None:
+            # f の定義（#720 の割引 PL = 学習した λ）が黙って素の Harville に変わらないように止める
+            raise ValueError(f"確率 TSV に lam2・lam3 がありません: {rid} {h}")
         by_race[rid][h] = v["p_win"]
-        lam[rid] = v["lam"] or (1.0, 1.0)
+        lam[rid] = v["lam"]
     races, why = [], Counter()
     for rid in sorted(r for r in by_race if pl.in_window(date.get(r, ""), lo, hi)):
         r = build_race(bet_type, horses[rid], by_race[rid], lam[rid], fins[rid],
@@ -359,6 +373,8 @@ def validate_args(dev_from: str, dev_to: str, test_from: str, test_to: str, wind
         return err
     if windows == "test" and (not ledger or not label):
         return "test 窓は 1 回だけ測って記録する: --ledger と --label を指定してください"
+    if ledger and not label:
+        return "--ledger を指定するときは --label（節の見出し）も指定してください"
     return None
 
 
@@ -410,12 +426,13 @@ def report_bet(bet_type: str, fit_races: list, fit_why: Counter, eval_races: lis
             f"- 参考: 市場だけを再校正したモデル（α=0・fit 窓の β = {beta_only:+.4f}）に対する ΔR²（合成 − 再校正市場） = "
             f"{pseudo_r2(nb, eu) - pseudo_r2(nr, eu):+.5f} {_ci(c_lo, c_hi)}（ΔR² のうち独立確率の寄与の目安。判定には使わない）",
             f"- eval 窓で測り直した α = {et[0]:+.4f} {_ci(ea_lo, ea_hi)}・β = {et[1]:+.4f}（確認用。調整には使わない）",
-            f"- 参考 ROI（期待値 > 1 の組を 1 単位ずつ・{n_bet} 点）: {roi:.3f} {_ci(r_lo, r_hi)}（控除率 {TAKEOUT[bet_type]:.1%}）",
+            f"- 参考 ROI（期待値 > 1 の組を 1 単位ずつ・{n_bet} 点）: {roi:.3f} {_ci(r_lo, r_hi)}（実オッズで精算・控除率 {TAKEOUT[bet_type]:.1%} は込み）",
         ]
         edge = judge(a_lo, ea_lo, d_lo, l_hi)
         out.append(f"- 判定: **{'エッジあり' if edge else 'エッジなし'}**（fit α の CI > 0: {a_lo > 0} / eval α の CI > 0: {ea_lo > 0} / "
                    f"ΔR² の CI > 0: {d_lo > 0} / NLL 差の CI < 0: {l_hi < 0}）")
-        res.update(edge=edge)
+        res.update(edge=edge, eval_alpha=et[0], eval_alpha_ci=(ea_lo, ea_hi), dr2=dr2, dr2_ci=(d_lo, d_hi),
+                   recal_dr2=pseudo_r2(nb, eu) - pseudo_r2(nr, eu), recal_dr2_ci=(c_lo, c_hi))
     out.append("")
     return out, res
 
@@ -432,7 +449,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--test-to", default=pl.FROZEN_EVAL_TO)
     ap.add_argument("--windows", choices=("dev", "test"), default="dev",
                     help="dev = fit 窓だけで推定（反復用）/ test = fit で推定して eval 窓を 1 回測る（--ledger 必須）")
-    ap.add_argument("--trio-no-floor", action="store_true", help="感度分析（dev のみ）: 3連複の無投票の組を除外して正規化")
+    ap.add_argument("--trio-no-floor", action="store_true", help="感度分析（dev のみ）: 3連複の無投票の組を除外して正規化（他の券種は下限のまま）")
     ap.add_argument("--wide-low", action="store_true", help="感度分析（dev のみ）: ワイドの π をオッズ帯の下限で作る")
     ap.add_argument("--bootstrap", type=int, default=1000)
     ap.add_argument("--seed", type=int, default=42)
@@ -449,6 +466,9 @@ def main(argv: list[str] | None = None) -> int:
         err = e
     if not err and args.label and (e := pl.validate_label(args.label)):
         err = e
+    for path in (args.probs, args.odds, args.results):
+        if not err and (e := pl.validate_basename(path)):
+            err = e
     version, dirty = pl.code_version()
     if not err and args.windows == "test" and dirty:
         err = "scripts/predict-check に未コミットの変更があります。コミットしてから test 窓を測ってください"
@@ -458,7 +478,7 @@ def main(argv: list[str] | None = None) -> int:
 
     probs = pl.load_probs(args.probs)
     date, horses, fins = load_results(args.results)
-    prob_odds, payout = load_odds(args.odds, args.wide_low)
+    prob_odds, payout, dropped = load_odds(args.odds, args.wide_low)
     lines = [
         f"- 計測: git {version}{'（未コミットの変更あり）' if dirty else ''} / bootstrap {args.bootstrap} / seed {args.seed}",
         f"- 入力: 確率 `{os.path.basename(args.probs)}`（sha256 先頭 12 桁 {pl._file_sha(args.probs)}）・"
@@ -468,10 +488,12 @@ def main(argv: list[str] | None = None) -> int:
         + (f" / eval {args.test_from}〜{args.test_to}" if args.windows == "test" else "（eval は測らない）"),
         f"- 定義: 3連複の無投票 = {'除外して正規化' if args.trio_no_floor else '下限（売れた最小 π の半分）'}・"
         f"ワイドの π = {'下限オッズ' if args.wide_low else '中点オッズ'}・オッズは確定値のみ",
+        f"- 払戻倍率として採れず落とした行（番兵・値域違反）: {dict(dropped) or 'なし'}",
         "",
     ]
     for bt in bets:
-        fr, fw = collect(bt, args.dev_from, args.dev_to, date, horses, fins, probs, prob_odds, payout, not args.trio_no_floor)
+        floor = not (args.trio_no_floor and bt == "trio")
+        fr, fw = collect(bt, args.dev_from, args.dev_to, date, horses, fins, probs, prob_odds, payout, floor)
         er = ew = None
         if args.windows == "test":
             er, ew = collect(bt, args.test_from, args.test_to, date, horses, fins, probs, prob_odds, payout, True)

@@ -132,6 +132,30 @@ def test_fit_recovers_known_alpha_beta(n_winners):
         assert np.all(np.abs(theta - [0.3, 0.8]) < 3 * se)
 
 
+def test_fit_wide_from_podium_generation_recovers_true_model():
+    # 実際の生成過程: 馬ごとの勝率から Harville で 1〜3 着を引き、的中 3 ペアを作る。f が真のワイド確率なら α≈1・β≈0
+    import itertools
+    import prob_ledger as pl
+    rng = np.random.default_rng(3)
+    combos = list(itertools.combinations(range(8), 2))
+    races = []
+    for _ in range(2000):
+        p = rng.dirichlet(np.ones(8) * 0.8)
+        order, rem = [], list(range(8))
+        for _k in range(3):
+            w = p[rem] / p[rem].sum()
+            order.append(rem.pop(rng.choice(len(rem), p=w)))
+        cp = pl.combo_probs(p)
+        ft = np.array([cp.wide[i, j] for i, j in combos])
+        ft /= ft.sum()
+        lp = 0.5 * np.log(ft) + rng.normal(0, 0.8, len(combos))
+        lp -= np.log(np.exp(lp).sum())
+        win = [combos.index(tuple(sorted(x))) for x in itertools.combinations(order, 2)]
+        races.append(ba.Race(combos=combos, log_f=np.log(ft), log_pi=lp, winners=win))
+    theta, _, _ = ba.fit(ba.pack(races))
+    assert theta == pytest.approx([1.0, 0.0], abs=0.15)
+
+
 def test_fit_alpha_zero_when_model_has_no_information():
     races = _synthetic(0.0, 1.0, 3000, 15, 1, seed=3)
     theta, se, _ = ba.fit(ba.pack(races))
@@ -199,6 +223,71 @@ def test_roi_threshold_uses_expected_hits_per_combo():
     assert ba.roi_reference(ba.pack([q]), np.array([0.0, 1.0]), n_boot=20, seed=1)[1] == 0
 
 
+
+# ---------- 入力 ----------
+
+
+def _write(path, rows):
+    path.write_text("\n".join(rows) + "\n", encoding="utf-8")
+    return str(path)
+
+
+ODDS_HEADER = "race_id\tbet_type\tcombination_key\todds\todds_high\tpopularity"
+
+
+def test_load_odds_rejects_bad_keys_and_duplicates(tmp_path):
+    with pytest.raises(ValueError, match="組合せキーが不正"):
+        ba.load_odds(_write(tmp_path / "a.tsv", [ODDS_HEADER, "R\tquinella\t2-1\t5.0\t\t1"]), False)
+    with pytest.raises(ValueError, match="重複"):
+        ba.load_odds(_write(tmp_path / "b.tsv", [ODDS_HEADER, "R\tquinella\t1-2\t5.0\t\t1",
+                                                  "R\tquinella\t1-2\t6.0\t\t1"]), False)
+
+
+def test_load_odds_drops_sentinels_and_invalid_values(tmp_path):
+    rows = [ODDS_HEADER,
+            "R\ttrio\t1-2-3\t99999.9\t\t1",  # 3連複の番兵（無投票）
+            "R\ttrio\t1-2-4\t12.0\t\t2",
+            "R\tquinella\t1-2\t-3.0\t\t9999",  # 取消を含む組
+            "R\twide\t1-3\t1.5\t0.0\t1",  # 帯の上限が値域違反
+            "R\twide\t1-2\t1.5\t2.5\t1"]
+    prob_odds, payout, dropped = ba.load_odds(_write(tmp_path / "o.tsv", rows), False)
+    assert prob_odds[("R", "trio")] == {(1, 2, 4): 12.0}
+    assert ("R", "quinella") not in prob_odds or prob_odds[("R", "quinella")] == {}
+    assert prob_odds[("R", "wide")] == {(1, 2): 2.0} and payout[("R", "wide")] == {(1, 2): 1.5}
+    assert dropped == Counter({"trio": 1, "quinella": 1, "wide": 1})
+
+
+def test_load_results_rejects_inconsistent_dates(tmp_path):
+    rows = ["race_id\tdate\thorse_num\tstatus\tfinishing_position",
+            "R\t2025-08-01\t1\tfinished\t1", "R\t2025-08-02\t2\tfinished\t2"]
+    with pytest.raises(ValueError, match="日付が違います"):
+        ba.load_results(_write(tmp_path / "r.tsv", rows))
+
+
+def test_collect_filters_window_and_requires_lambda():
+    horses, probs, fins = _race()
+    odds = _all_odds(horses, 2)
+    p_in = {("A", h): {"p_win": p, "p_top2": None, "lam": (0.9, 0.8)} for h, p in probs.items()}
+    p_out = {("B", h): {"p_win": p, "p_top2": None, "lam": (0.9, 0.8)} for h, p in probs.items()}
+    date = {"A": "2025-08-01", "B": "2026-02-01"}
+    races, why = ba.collect("quinella", "2025-07-01", "2025-12-31", date, {"A": horses, "B": horses},
+                            {"A": fins, "B": fins}, p_in | p_out, {("A", "quinella"): odds, ("B", "quinella"): odds},
+                            {}, True)
+    assert len(races) == 1 and not why
+    no_lam = {k: dict(v, lam=None) for k, v in p_in.items()}
+    with pytest.raises(ValueError, match="lam2"):
+        ba.collect("quinella", "2025-07-01", "2025-12-31", date, {"A": horses}, {"A": fins}, no_lam,
+                   {("A", "quinella"): odds}, {}, True)
+
+
+def test_no_floor_drops_unsold_combos_and_renormalizes():
+    horses, probs, fins = _race()
+    odds = _all_odds(horses, 3)
+    del odds[(2, 3, 4)]  # 的中していない組に票が無い
+    r = ba.build_race("trio", horses, probs, (1, 1), fins, odds, floor=False)
+    assert (2, 3, 4) not in r.combos and len(r.combos) == 3
+    assert np.exp(r.log_f).sum() == pytest.approx(1.0) and np.exp(r.log_pi).sum() == pytest.approx(1.0)
+
 # ---------- 窓と記録先 ----------
 
 
@@ -220,21 +309,30 @@ def test_windows_follow_frozen_protocol():
     assert ba.validate_args("2025-07-01", "2025-12-31", "2026-01-01", "2026-08-31", "dev", None, None) is None
 
 
-def test_cli_rejects_test_window_without_ledger_and_sensitivity_on_test(tmp_path, monkeypatch):
+def test_cli_rejects_test_window_without_ledger_and_sensitivity_on_test(monkeypatch, capsys):
     monkeypatch.setattr(ba.pl, "code_version", lambda: ("abc1234", False))  # 作業ツリーの状態に依らず入口の検査だけを見る
     base = ["--probs", "p", "--odds", "o", "--results", "r"]
-    assert ba.main(base + ["--windows", "test"]) == 2
-    assert ba.main(base + ["--windows", "test", "--ledger", LEDGER, "--label", "x", "--trio-no-floor"]) == 2
-    assert ba.main(base + ["--windows", "test", "--ledger", LEDGER, "--label", "x", "--wide-low"]) == 2
-    assert ba.main(base + ["--bet-types", "exacta"]) == 2
-    assert ba.main(base + ["--windows", "test", "--ledger", "/dev/null", "--label", "x"]) == 2
+    cases = [
+        (["--windows", "test"], "--ledger と --label"),
+        (["--windows", "test", "--ledger", LEDGER, "--label", "x", "--trio-no-floor"], "感度分析"),
+        (["--windows", "test", "--ledger", LEDGER, "--label", "x", "--wide-low"], "感度分析"),
+        (["--bet-types", "exacta"], "--bet-types"),
+        (["--windows", "test", "--ledger", "/dev/null", "--label", "x"], "docs-original/"),
+        (["--ledger", LEDGER], "--label"),  # dev 窓でも記録するなら見出しが要る（「## None」を書かない）
+    ]
+    for extra, msg in cases:
+        assert ba.main(base + extra) == 2
+        assert msg in capsys.readouterr().err
+    assert ba.main(["--probs", "p`x", "--odds", "o", "--results", "r"]) == 2
+    assert capsys.readouterr().err
 
 
-def test_cli_rejects_test_window_on_dirty_tree(tmp_path, monkeypatch):
+def test_cli_rejects_test_window_on_dirty_tree(monkeypatch, capsys):
     monkeypatch.setattr(ba.pl, "code_version", lambda: ("abc1234", True))
     args = ["--probs", "p", "--odds", "o", "--results", "r", "--windows", "test",
             "--ledger", LEDGER, "--label", "x"]
     assert ba.main(args) == 2
+    assert "未コミット" in capsys.readouterr().err
 
 
 def test_judge_truth_table():
@@ -257,6 +355,54 @@ def test_judgement_requires_all_conditions():
     # fit では α>0 でも eval で情報が消えたら「なし」
     _, res = ba.report_bet("quinella", edge_fit, Counter(), none_eval, Counter(), n_boot=100, seed=1)
     assert res["edge"] is False
+
+
+def test_report_takes_eval_alpha_from_eval_window():
+    fit_r = _synthetic(0.5, 0.8, 1500, 15, 1, seed=11)
+    eval_r = _synthetic(0.0, 1.3, 1500, 15, 1, seed=32)
+    _, res = ba.report_bet("quinella", fit_r, Counter(), eval_r, Counter(), n_boot=100, seed=1)
+    ek = ba.pack(eval_r)
+    assert res["eval_alpha"] == pytest.approx(ba.fit(ek)[0][0])
+    assert res["eval_alpha_ci"] == pytest.approx(tuple(np.percentile(ba.boot_theta(ek, 100, 1)[:, 0], [2.5, 97.5])))
+    assert res["eval_alpha_ci"][0] < 0 < res["alpha_ci"][0]  # fit 窓では α>0 でも、eval 窓の α は測り直した値
+    assert res["edge"] is False
+
+
+def test_recalibrated_market_separates_model_information_from_market_sharpening():
+    # 独立確率に情報がある: 再校正した市場に対しても合成が上回る
+    _, res = ba.report_bet("quinella", _synthetic(0.5, 0.8, 1500, 15, 1, seed=11), Counter(),
+                           _synthetic(0.5, 0.8, 1500, 15, 1, seed=12), Counter(), n_boot=100, seed=1)
+    assert res["recal_dr2"] > 0.005 and res["recal_dr2_ci"][0] > 0
+    # 市場が平らすぎるだけ（真の α=0・β=1.3）: 市場単独に対する ΔR² は正だが、再校正市場に対しては上乗せが無い
+    _, res = ba.report_bet("quinella", _synthetic(0.0, 1.3, 1500, 15, 1, seed=31), Counter(),
+                           _synthetic(0.0, 1.3, 1500, 15, 1, seed=32), Counter(), n_boot=100, seed=1)
+    assert res["dr2_ci"][0] > 0
+    assert res["recal_dr2_ci"][1] < 0.001 and res["recal_dr2"] < res["dr2"] - 0.003
+
+
+def test_trio_no_floor_keeps_floor_for_other_bet_types(tmp_path, capsys):
+    import itertools
+    rng = np.random.default_rng(8)
+    probs = ["race_id\thorse_num\tp_win\tlam2\tlam3"]
+    odds = [ODDS_HEADER]
+    res = ["race_id\tdate\thorse_num\tstatus\tfinishing_position"]
+    for r in range(40):
+        p = rng.dirichlet(np.ones(5))
+        order = list(rng.permutation(5) + 1)
+        if {order.index(4), order.index(5)} == {0, 1}:
+            order[0], order[2] = order[2], order[0]  # 欠かす組（4-5）を的中にしない
+        for h in range(1, 6):
+            probs.append(f"R{r}\t{h}\t{p[h - 1]}\t1.0\t1.0")
+            res.append(f"R{r}\t2025-08-01\t{h}\tfinished\t{order.index(h) + 1}")
+        for bt, k in (("quinella", 2), ("trio", 3)):
+            for c in itertools.combinations(range(1, 6), k):
+                if bt == "quinella" and c == (4, 5):
+                    continue  # 馬連にも票の無い組がある（的中ではない）
+                odds.append(f"R{r}\t{bt}\t{'-'.join(map(str, c))}\t{5 + rng.random() * 20:.1f}\t\t1")
+    args = ["--probs", _write(tmp_path / "p.tsv", probs), "--odds", _write(tmp_path / "o.tsv", odds),
+            "--results", _write(tmp_path / "r.tsv", res), "--bet-types", "quinella", "--bootstrap", "5", "--trio-no-floor"]
+    assert ba.main(args) == 0
+    assert "下限を置いた組 40" in capsys.readouterr().out  # 馬連は下限のまま（40R × 1 組）
 
 
 def test_end_to_end_dev_run(tmp_path, capsys):

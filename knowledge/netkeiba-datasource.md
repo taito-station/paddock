@@ -9,6 +9,7 @@ sources:
   - docs-original/721-final-odds-backfill.md
   - qa/QA-final-odds-721.md
   - qa/QA-benter-alpha-722.md
+  - docs-original/722-benter-alpha-exotics.md
 distilled_from_sha: "64a6332"
 updated: "2026-09-30"
 ---
@@ -122,7 +123,7 @@ predict-watch / api-server の live scrape（`OddsInteractor` への `UreqNetkei
   - 3連複には確定後も票の入らなかった組合せが番兵 `99999.9`（応答の表記は `99,999.9`）で残る。払戻倍率ではない
     （下の「未発売の番兵値」と同じ値・同じ扱い。確定後の無投票の組合せにも出る）。
     市場確率に使うとき（#722）は、無投票の組にそのレースで売れた組の最小確率の半分を置いてレース内で正規化し直す
-    （`scripts/predict-check/benter_alpha.py`・`qa/QA-benter-alpha-722.md` Q2。除外して正規化しても判定は変わらなかった）。
+    （`scripts/predict-check/benter_alpha.py`・`qa/QA-benter-alpha-722.md` Q2。dev 窓の感度分析で、除外して正規化しても α̂ は変わらなかった）。
 - 揃うレース数（確定オッズ＋出走馬の着順行）は 3 券種とも 5,493R。3連複の組合せが全部あるのは 5,492R で、番兵（無投票）の組合せは TSV に無い（877R）。
 - 凍結データと件数の詳細は `docs-original/721-final-odds-backfill.md`。経緯は決定ログ「#721」。
 
