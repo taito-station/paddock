@@ -454,6 +454,9 @@ React SPA。盤面（`/races/{race_id}/board`）で確率・オッズ・印・�
 
 ```bash
 # API サーバ（既定 127.0.0.1:8080。PADDOCK_SERVER_ADDR で変更）
+# netkeiba 取得の間隔は PADDOCK_NETKEIBA_INTERVAL_MS（ミリ秒・未設定なら 1 秒・1000 未満はエラー）。過去日の着順をまとめて取り込む
+# 専用サーバでだけ 3334 以上にする（odds:refresh にも効くので .env には常設しない・数値でない値は全アプリの起動を止める。
+# refresh の経路は再送あり・失敗でも続行するので、warn が出たら止める。knowledge/race-result-ingestion.md）
 cargo run -p api-server
 
 # Web SPA（Vite dev server。http://127.0.0.1:5173 を開く。
@@ -635,6 +638,7 @@ src/
     ├── fetch-card/           CLI: netkeiba 出馬表＋オッズ＋近走を取得
     ├── fetch-history/        CLI: netkeiba 近走を results に取得
     ├── fetch-results/        CLI: netkeiba 確定結果で results を再取込
+    ├── fetch-final-odds/     CLI: 確定オッズ（馬連・ワイド・3連複）の遡及取得（研究用・DB に書かない。knowledge/netkeiba-datasource.md）
     ├── ingest-predictions/   CLI: 予想 JSON の DB 保存
     ├── simulate/             CLI: 買い目ポートフォリオの収支シミュレータ
     └── api-server/           REST API サーバ（actix-web + utoipa）

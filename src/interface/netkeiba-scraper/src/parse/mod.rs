@@ -10,8 +10,8 @@ mod shutuba;
 pub use card::parse_card;
 pub use horse_history::parse_horse_history;
 pub use odds::{
-    parse_exacta_odds, parse_quinella_odds, parse_trifecta_odds, parse_trio_odds, parse_wide_odds,
-    parse_win_place_odds,
+    OddsMeta, parse_exacta_odds, parse_odds_meta, parse_quinella_odds, parse_trifecta_odds,
+    parse_trio_odds, parse_wide_odds, parse_win_place_odds,
 };
 pub use payout::parse_race_payouts;
 pub use result::parse_race_result;

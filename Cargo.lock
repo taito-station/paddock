@@ -1999,6 +1999,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "fetch-final-odds"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "netkeiba-scraper",
+ "paddock-config",
+ "paddock-domain",
+ "paddock-use-case",
+ "serde_json",
+ "tempfile",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "fetch-history"
 version = "0.1.0"
 dependencies = [

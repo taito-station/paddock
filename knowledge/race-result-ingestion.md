@@ -8,8 +8,10 @@ tags: [D04, D10, D11]
 sources:
   - docs-original/730-results-label-correction.md
   - qa/QA-results-label-correction-730.md
-distilled_from_sha: "fea6eb3"
-updated: "2026-09-29"
+  - docs-original/721-final-odds-backfill.md
+  - qa/QA-final-odds-721.md
+distilled_from_sha: "0ac49b9"
+updated: "2026-09-30"
 ---
 
 # レース結果の同日取り込みと UI 自動反映: 設計仕様
@@ -113,6 +115,18 @@ SELECT EXISTS (
 
 - **新設** `POST /api/results/{date}:refresh` → `ResultsInteractor::refresh(date, force)` を起動し `RefreshReport` を返す。`force`（クエリ `?force=true`・既定 false）は **手動フォールバック専用の gating 緩和フラグ**。既定（自動ポーリング）は「`post_time` 経過 かつ 未確定」を対象とするが、`force=true` では **post_time gating を無効化**し、`post_time` 未取得（#391 で対象外にした欠損レース）を含む未確定レースも取得対象にする（確定済みは `force` でもスキップ）。
 - **エイリアス** `POST /api/sessions/{date}/results:refresh` は本フローへ委譲する（既存 web「精算」ボタン・CLI 経路のレスポンス互換は保つ）。ただし委譲後は着順 `results` upsert という**副作用が新たに加わる**点で純粋な後方互換ではない（旧経路は精算のみ・着順保存なしだった）。手動ボタンはこのエイリアス経由で `force=true` を渡す。
+
+**過去日をまとめて取り込むとき（#721）**: 出馬表（`race_cards`）だけあって結果の無い過去日のレースは、`force=true` の refresh で
+取り込める（`upsert_results` が `races` 行を作り、着順を INSERT する。`track_condition`・`weather` は書かない）。api-server の
+netkeiba 取得間隔は既定 1 秒なので、取り込み用のサーバは `PADDOCK_NETKEIBA_INTERVAL_MS=3500`（3,334ms 以上）で立てる
+（バルク取得で連打しない。既定の 1 秒より短い値は起動エラー）。この間隔は**プロセス内の scraper ごとの待ち**で共有のレート制限ではないので、
+取り込み用のサーバは**専用のインスタンス**にし（web や他のクライアントを繋がない）、refresh は日付ごとに**直列**で呼ぶ。odds:refresh にも
+効くので `.env` には常設しない（数値でない値を入れると `Config` を読む全アプリが起動エラーになる）。
+**この経路は max-rps 0.3 を保証しない**: 結果ページの取得は共有のリトライ（transient 失敗で 1 秒・2 秒の再送）を通り、refresh は取得に失敗しても
+warn を出して次のレースへ進む。warn（取得失敗）がログに出たら、その日の取り込みを止めて時間を空ける。再送なし・連続失敗で打ち切る取り込み口は未整備
+（確定オッズの取得コマンド `paddock-fetch-final-odds` は再送せず即停止する）。共有 DB に入れる前に、コンテナ内 PG17 で複製した隔離 DB で同じ手順を流して結果を突き合わせる。
+着順の行が 1 つでもあるレースは確定済みとしてスキップされる（`force` でも）ので、行が足りないレースの補完には使えない（#742）。
+2026-06-20〜09-27 の 457R をこの手順で取り込んだ（`docs-original/721-final-odds-backfill.md` §3）。
 
 エラー写像（use-case Error → HTTP）は既存規約どおり（`NotFound`→404 等）。セッション不在の日でも着順取り込みは走るため、`results:refresh`（新）はセッション不在を 404 にせず「精算 0・確定 N」を返す。
 
@@ -337,3 +351,33 @@ netkeiba レース結果ページを `results` の取得源として追加し、
   戻すときは `results` 表だけを戻す（全体復元は以後の `race_odds_snapshots` まで巻き戻すので使わない。手順は実測ログ）。実測ログは
   `docs-original/730-results-label-correction.md`、方針確認は `qa/QA-results-label-correction-730.md`。
 - 関連: #663 / ADR 0091（本決定の前段）、ADR 0015（`fetch-results` は既存行の UPDATE 専用）、#719・#720・#723、#731（バックアップの修正）。
+
+### #721: 過去日の着順を refresh でまとめて取り込む手順と、api-server の取得間隔の設定 (2026-09-30) — 採用
+
+#### コンテキスト
+
+- 予想日に出馬表だけ取り込み、結果の無いレースが 457R（2026-06-20〜09-27）あった。`paddock-fetch-results` は既存行の UPDATE 専用
+  （ADR 0015）で使えず、INSERT できるのは `ResultsInteractor::refresh` の `upsert_results` だけだった。api-server の netkeiba 取得間隔は 1 秒固定だった。
+
+#### 決定
+
+- 過去日の着順は、取り込み専用の api-server（`PADDOCK_NETKEIBA_INTERVAL_MS` で 3,334ms 以上）に日付ごとに直列で `force=true` の refresh を送って取り込む。
+  この経路は共有リトライの再送があり、取得失敗でも続行するので、warn が出たら人が止める（max-rps 0.3 の保証はない）。
+  共有 DB の前に隔離 DB で同じ手順を流し、結果を突き合わせる。
+- `PADDOCK_NETKEIBA_INTERVAL_MS` は既定（1 秒）より短い値を起動時に拒否する。
+
+#### 理由
+
+- 既存の INSERT 経路をそのまま使え、ADR 0015 の契約（fetch-results は UPDATE 専用）を変えずに済む。
+- 間隔の設定は広げる方向だけに使う。設定ひとつで礼儀ペーシングを外せないようにする。
+
+#### 却下した代替案
+
+- **`paddock-fetch-results` に INSERT のモードを足す**: ADR 0015 の契約変更になる。
+- **既定の 1 秒のまま refresh を回す**: 1 日 35 レースを 1 秒間隔で連続して取ることになる（バルク取得の規約に反する）。
+
+#### 影響
+
+- 457R を取り込んだ（`docs-original/721-final-odds-backfill.md` §3）。本番の成績集計と backtest の母集団が変わった（`netkeiba-datasource.md` の決定ログ #721）。
+- 着順の行が 1 つでもあるレースは refresh の対象外なので、行が足りないレースの補完は #742 で別の経路を用意する。
+

@@ -122,11 +122,24 @@ impl UreqNetkeibaScraper {
     /// 単勝・複勝(type=1) と組合せ券種(type=4/5/6/7/8) で URL 構成は共通。
     fn fetch_odds_json(&self, netkeiba_race_id: &str, odds_type: u8) -> Result<String> {
         std::thread::sleep(self.delay);
-        let url =
-            format!("{WIN_ODDS_URL}?race_id={netkeiba_race_id}&type={odds_type}&action=update");
+        let url = odds_url(netkeiba_race_id, odds_type);
         tracing::debug!(race_id = %netkeiba_race_id, odds_type, "fetching netkeiba odds");
         // オッズ API は UTF-8 JSON。EUC-JP デコードしない。
         fetch_utf8(&self.agent, &url)
+    }
+
+    /// オッズ API の生の応答（UTF-8 JSON）を券種 `type` 指定で返す（#721 の確定オッズ遡及取得用）。
+    /// パース前の応答をそのまま保存し、後からオフラインでパースし直せるようにするための公開口。
+    ///
+    /// 待ち（[`Self::delay`]）と URL は [`Self::fetch_odds_json`] と同じだが、**transient 失敗でも再送しない**
+    /// （[`fetch_utf8_once`]）。共有のリトライ（`scraper_util::call_with_retry`）は 1 秒・2 秒のバックオフで打ち直すため、
+    /// バルク取得の間隔の下限を再送のときだけ破ってしまう。バルク取得は失敗したら止めて、時間を空けて再開する。
+    /// **不変条件: ここで `fetch_utf8` / `call_with_retry` を使わないこと**（テスト `fetch_utf8_once_does_not_retry_5xx`）。
+    pub fn fetch_odds_raw(&self, netkeiba_race_id: &str, odds_type: u8) -> Result<String> {
+        std::thread::sleep(self.delay);
+        let url = odds_url(netkeiba_race_id, odds_type);
+        tracing::debug!(race_id = %netkeiba_race_id, odds_type, "fetching netkeiba odds (no retry)");
+        fetch_utf8_once(&self.agent, &url)
     }
 
     /// 組合せ券種 1 種を取得・パースする。失敗（HTTP/想定外 status 等）は warn ログを残して
@@ -196,10 +209,28 @@ fn fetch_decoded(agent: &ureq::Agent, url: &str) -> Result<String> {
     Ok(scraper_util::decode_html(&bytes, charset.as_deref(), url))
 }
 
-/// URL を GET し、レスポンスボディを UTF-8 として（lossy で）受け取る。
+/// オッズ API の URL（単勝・複勝 type=1、組合せ券種 type=4〜8 で共通）。
+fn odds_url(netkeiba_race_id: &str, odds_type: u8) -> String {
+    format!("{WIN_ODDS_URL}?race_id={netkeiba_race_id}&type={odds_type}&action=update")
+}
+
+/// URL を GET し、レスポンスボディを UTF-8 として（lossy で）受け取る（transient は再送する）。
 /// オッズ API は UTF-8 JSON を返すため、EUC-JP デコードする [`fetch_decoded`] とは分ける。
 fn fetch_utf8(agent: &ureq::Agent, url: &str) -> Result<String> {
-    let resp = call_with_retry(agent, url)?;
+    read_body_utf8(call_with_retry(agent, url)?, url)
+}
+
+/// [`fetch_utf8`] の再送しない版（#721 のバルク取得用）。失敗は 1 回で [`Error::Fetch`] にする。
+fn fetch_utf8_once(agent: &ureq::Agent, url: &str) -> Result<String> {
+    let resp = agent
+        .get(url)
+        .header("User-Agent", USER_AGENT)
+        .call()
+        .map_err(|err| Error::Fetch(format!("GET {url}: {err}")))?;
+    read_body_utf8(resp, url)
+}
+
+fn read_body_utf8(resp: ureq::http::Response<ureq::Body>, url: &str) -> Result<String> {
     let mut bytes = Vec::new();
     resp.into_body()
         .into_reader()
@@ -932,6 +963,33 @@ mod tests {
             .timeout_connect(Some(CONNECT_TIMEOUT))
             .build()
             .into()
+    }
+
+    // #721: バルク取得の取得口は 5xx でも再送しない（1 回だけ接続して Err）
+    #[test]
+    fn fetch_utf8_once_does_not_retry_5xx() {
+        // 2 本目に 200 を用意する: 再送すれば成功してしまうので、再送の有無を区別できる
+        // （サーバスレッドは 2 本目の接続を待ったままになるので join しない）
+        let (url, count, _handle) = serve(vec![R_503, R_200_OK]);
+        let err = fetch_utf8_once(&test_agent(), &url).expect_err("503 は失敗");
+        assert!(matches!(err, Error::Fetch(_)), "{err}");
+        assert_eq!(count.load(Ordering::SeqCst), 1, "再送してはいけない");
+    }
+
+    #[test]
+    fn fetch_utf8_once_returns_body_on_success() {
+        let (url, count, handle) = serve(vec![R_200_OK]);
+        assert_eq!(fetch_utf8_once(&test_agent(), &url).unwrap(), "ok");
+        handle.join().unwrap();
+        assert_eq!(count.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn odds_url_has_the_documented_shape() {
+        assert_eq!(
+            odds_url("202507010110", 7),
+            "https://race.netkeiba.com/api/api_get_jra_odds.html?race_id=202507010110&type=7&action=update"
+        );
     }
 
     #[test]

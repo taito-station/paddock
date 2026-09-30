@@ -177,3 +177,33 @@ fn rejects_when_status_key_absent() {
     assert!(parse_quinella_odds(json).is_err());
     assert!(parse_trio_odds(json).is_err());
 }
+
+// ---- #721: 応答の status と確定時刻（確定オッズの遡及取得で「確定後の応答か」を判定する） ----
+
+#[test]
+fn odds_meta_reads_status_and_official_datetime() {
+    use netkeiba_scraper::parse::parse_odds_meta;
+    let meta = parse_odds_meta(
+        r#"{"status":"result","data":{"official_datetime":"2025-01-05 15:02:03","odds":{}}}"#,
+    )
+    .expect("meta");
+    assert_eq!(meta.status, "result");
+    assert_eq!(
+        meta.official_datetime.as_deref(),
+        Some("2025-01-05 15:02:03")
+    );
+    // 受理判定はしない: NG もそのまま返し、data が無ければ時刻は None
+    let ng = parse_odds_meta(r#"{"status":"NG","data":""}"#).expect("meta");
+    assert_eq!(ng.status, "NG");
+    assert_eq!(ng.official_datetime, None);
+    // 既存 fixture（確定値）は result
+    assert_eq!(parse_odds_meta(QUINELLA).expect("meta").status, "result");
+}
+
+#[test]
+fn odds_meta_rejects_broken_json_and_missing_status() {
+    use netkeiba_scraper::parse::parse_odds_meta;
+    assert!(parse_odds_meta("<html>").is_err());
+    assert!(parse_odds_meta(r#"{"data":{}}"#).is_err());
+    assert!(parse_odds_meta(r#"{"status":1}"#).is_err());
+}
