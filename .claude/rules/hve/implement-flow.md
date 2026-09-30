@@ -51,7 +51,7 @@ Step 5: テスト設計
 
 Step 6: 実装
   ├─ テスト失敗 × 3 回 → STOP: アプローチ破綻を人間に報告
-  ├─ 影響範囲が想定超 → STOP: impl-sonnet → メインループ引き取り
+  ├─ 影響範囲が想定超 → STOP: 人間に報告
   └─ テスト通過 → Step 7
 
 Step 7: Knowledge 同期
@@ -66,7 +66,7 @@ Step 8: PR 作成
 
 ### Step 0: ブランチ作成
 
-- main（またはデフォルトブランチ）から作業ブランチを切る（詳細は `~/.claude/rules/git/branching.md` を参照）
+- main（またはデフォルトブランチ）から作業ブランチを切る（ブランチ運用規約があればそれに従い、無ければ `<type>/<short-kebab-description>` で切る）
 - ブランチ上でなければコードを書かない
 
 ### Step 1: Plan（スコープ特定）
@@ -83,9 +83,11 @@ Step 8: PR 作成
 ### Step 2: Knowledge 検索（Plan の各領域を網羅）
 
 - Step 1 で特定した各領域について知識ベースを検索する
-  - ドキュメント検索: `knowledge/`（ドメイン知識・ADR）、`docs/`（仕様・カタログ）、決定ログ
+  - ドキュメント検索: 確定知・仕様・決定ログ
+    - HVE の置き場所: `knowledge/`（ドメイン知識・ADR）、`docs/`（仕様・カタログ）
+    - paddock の置き場所（paddock 固有）: 確定知は `knowledge/` に一本化（ADR 0092）。決定は各 knowledge 末尾の `## 決定ログ` 節（独立した ADR ファイルは無い・#652）。`docs/docs-generated/` は蒸留対象外
   - コード検索: 関連するコード構造・依存関係
-- 検索はキーワードを変えて複数回行い、関連する知識を網羅する
+- 関連する知識を網羅する（見落としは Step 3 以降の手戻りになる）
 - 検索ツールはプロジェクトの探索規律に従う
 - 既存実装と矛盾する知識が見つかった場合 → STOP（人間に報告）
 
@@ -135,7 +137,6 @@ Step 8: PR 作成
 - テストを通すことで正しさを証明する
 - 同一テストが 3 回連続失敗した場合 → STOP（アプローチの破綻を報告）
 - 影響範囲が当初の想定を超えた場合 → STOP（人間に報告）
-- impl-sonnet 委譲中に影響範囲超過が判明した場合はメインループが引き取る（モデル使い分け規約に準ず）
 
 | 結果 | 次のステップ |
 |---|---|
@@ -145,8 +146,11 @@ Step 8: PR 作成
 
 ### Step 7: Knowledge 同期
 
-- 実装で確定知の前提が変わったら同じ PR で Knowledge（`knowledge/` および `docs/`）を更新する
+- 実装で確定知の前提が変わったら同じ PR で Knowledge を更新する
+  - HVE の Knowledge は `knowledge/` および `docs/`
+  - paddock の確定知の置き場所は `knowledge/` に一本化（ADR 0092・paddock 固有）。運用手順・買い方ルールを変えたらルート `CLAUDE.md`（買い方は `knowledge/glossary.md` も）と該当 skill も同じ PR で直す
 - 設計判断を伴う変更は決定ログに同じ PR で追記する
+  - paddock の決定ログは各 `knowledge/` 文書の末尾の `## 決定ログ` 節に append する（独立した ADR ファイルは作らない・#652）
 - プロジェクト固有の検証ツール: `scripts/bump-distilled-sha.py --all-stale --dry-run`（stale 0 件確認）、`scripts/check-doc-classes.py`、`scripts/check-decision-log-immutability.py`
 - Knowledge 更新で矛盾が生じた場合 → STOP（Conflict 宣言、人間判断）
 
@@ -182,7 +186,7 @@ Step 8: PR 作成
 
 ## STOP 時の報告
 
-STOP に到達した場合、以下を明示して停止する（黙って続行しない）:
+STOP に到達した場合、以下を明示して停止する:
 
 1. どのゲートで停止したか
 2. 停止理由（衝突内容・不明点・失敗内容等）

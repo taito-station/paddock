@@ -16,7 +16,7 @@
 
 - `docs/catalog/screen-catalog-{APP-ID}.md`（**APP-ID 単位で分割**。担当 APP の画面のみを書く）
 
-旧形式の単一ファイル `docs/catalog/screen-catalog.md` は作成しない。
+画面カタログは APP-ID 単位のファイルのみとし、単一の `docs/catalog/screen-catalog.md` は作成しない（Step 2.1 以降は `screen-catalog-APP-*.md` を読むため）。
 
 ## 実行手順（fan-out）
 
@@ -55,7 +55,7 @@ Markdown 表（列固定）:
 ### 注意事項（Assumptions / Open Questions）
 
 - 断定できない点、矛盾、要確認を箇条書きにする。
-- 質問が必要なら最大 3 点まで（同時に暫定案も書く）。
+- 質問は画面構成を左右するものに絞り、各質問に暫定案を併記する。
 
 ## 完了条件
 

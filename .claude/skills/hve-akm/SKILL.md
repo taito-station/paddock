@@ -11,6 +11,11 @@ description: |
 knowledge/ 配下の文書を source（docs-original/ および qa/）と同期し、
 整合性とカバレッジを維持するメンテナンスパイプライン。
 
+> **paddock では本 skill ではなく `/akm`（`.claude/skills/akm/SKILL.md`）を使う**（paddock 固有。本 skill は hve-playbook の写し）。
+> paddock の frontmatter は文書ごとに単一の短縮 `distilled_from_sha` で `title` は無く（`knowledge/README.md`）、stale 判定は
+> `scripts/check-doc-classes.py`（一括追従は `scripts/bump-distilled-sha.py --all-stale`）が「sources がその SHA より後に更新されたか」で行う。
+> 下の Step 1 の source ごとの SHA 一致比較と Step 3 の必須項目（`title`・source ごとの SHA）は paddock には当てはまらない。
+
 ## 前提条件
 
 - `rules/hve/knowledge-maturity.md` の frontmatter 標準に従った knowledge 文書が存在すること
@@ -67,9 +72,9 @@ stale な各ファイルについて、source の変更を knowledge 本文に�
 2. 変更内容を knowledge 本文に差分マージする
    - **全書き換え禁止**。変更箇所のみ更新する
    - source にない情報（既存の蒸留結果）は維持する
-3. 決定を伴う変更がある場合は、該当する knowledge ファイルの `## 決定ログ` 節に新エントリを append する
+3. 決定を伴う変更がある場合は、該当する knowledge ファイルの `## 決定ログ` 節に新エントリを append する（paddock 固有・#652）
 4. frontmatter の `distilled_from_sha` を新しい sha に更新する
-5. frontmatter の `updated` を当日日付に更新する
+5. frontmatter の `updated` は、下流の本文が実質変わった場合だけ当日日付に更新する（sha だけの bump では触らない・paddock 固有。sha の一括追従は `scripts/bump-distilled-sha.py --all-stale`）
 
 **蒸留対象が 3 本以上の場合**: サブエージェントに委譲する（1 エージェント 1 ファイル）
 
@@ -81,7 +86,7 @@ knowledge/ 配下の全文書を対象に、整合性を検査する。
 
 - [ ] frontmatter の必須フィールド（title / status / kind / sources / distilled_from_sha / updated）が全ファイルに存在する
 - [ ] `distilled_from_sha` で参照している source ファイルが実在する
-- [ ] 決定ログの既存エントリが改変されていない（append-only 原則）
+- [ ] 決定ログの既存エントリが改変されていない（append-only 原則。paddock では `scripts/check-decision-log-immutability.py`・文書クラスと sources の整合は `scripts/check-doc-classes.py`）
 - [ ] status が Conflict のまま放置されている文書がない
 
 #### 目視チェック項目
@@ -113,7 +118,7 @@ doc_class（文書分類）が定義されている場合、分類ごとの充�
 
 ## 完了報告
 
-各実行完了時に以下を報告する:
+各実行完了時に、output-quality ルールの 6 セクション報告（目的 / 変更点 / 影響範囲 / 検証結果 / 既知の制約 / 次のステップ）を行い、以下をその中に含める（1・2 は変更点、3・4 は検証結果と既知の制約、5 は次のステップ）:
 
 1. Stale 検出結果（件数）
 2. 蒸留したファイル一覧
