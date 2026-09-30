@@ -107,6 +107,35 @@ pub fn parse_trifecta_odds(json: &str) -> Result<Vec<FetchedComboOdds<OrderedTri
     })
 }
 
+/// オッズ API 応答の status と確定時刻（`data.official_datetime`）。確定オッズの遡及取得（#721）で、
+/// 応答が確定後（status=`result`）のものかを判定するために使う。status の受理判定はしない
+/// （`NG` 等もそのまま返す）——受理するかは呼び出し側が決める。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OddsMeta {
+    pub status: String,
+    pub official_datetime: Option<String>,
+}
+
+/// 応答 JSON から [`OddsMeta`] を読む。JSON として壊れている・status が無い／文字列でない場合だけ `Err`。
+pub fn parse_odds_meta(json: &str) -> Result<OddsMeta> {
+    let root: Value =
+        serde_json::from_str(json).map_err(|e| Error::Parse(format!("invalid odds JSON: {e}")))?;
+    let status = root
+        .get("status")
+        .and_then(|s| s.as_str())
+        .ok_or_else(|| Error::Parse("odds API レスポンスに status がありません".to_string()))?
+        .to_string();
+    let official_datetime = root
+        .get("data")
+        .and_then(|d| d.get("official_datetime"))
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+    Ok(OddsMeta {
+        status,
+        official_datetime,
+    })
+}
+
 /// JSON をパースし status を検証して root `Value` を返す。単勝・複勝・組合せ券種で共通。
 fn parse_validated_root(json: &str) -> Result<Value> {
     let root: Value =
