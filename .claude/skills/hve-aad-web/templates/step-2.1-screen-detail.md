@@ -23,11 +23,10 @@ Step 1 の画面一覧に基づき、実装に使える画面ごとの詳細定�
 
 ## fan-out 子の設計ルール
 
-- アクターごとに別の画面を作成する。
 - UX・A11y・セキュリティ・テスト可能な受け入れ基準を含める。
 - 参照元ドキュメントと整合させ、不明点は捏造せず TODO / Questions に落とす。
 - 共通画面参照ルール: 担当画面の `screen-catalog-APP-*.md` 行の `notes` 列に `common_ref: PSC-XXX` があれば、`docs/catalog/persona-screen-catalog.md` の該当 `persona_screen_id` から共通骨格（操作意味・主要状態・A11y 観点）を継承し、画面定義書「1. 目的と非目的」の冒頭に `共通画面参照: PSC-XXX` を明記する。APP 固有差分のみ各章に展開し、共通骨格と矛盾させない。
-  - `common_ref` が無い画面は従来通り単独で作成する。
+  - `common_ref` が無い画面は共通骨格を参照せず単独で作成する。
   - `common_ref: PSC-XXX` があるが `persona-screen-catalog.md` が存在しない、または該当 ID が見つからない場合は、共通骨格を捏造せず `共通画面参照: PSC-XXX（未解決）` と記載する。
 - `{screenNameSlug}` は画面名をスラッグ化する（小文字・空白は `-`・英数と `-` のみ）。
 

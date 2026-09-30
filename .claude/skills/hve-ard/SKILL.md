@@ -96,7 +96,7 @@ Step 1.2: 事業分析統合 ─────────────────
 - 手順:
   1. `docs/company-business-recommendation.md` を読み、`BIZ-NN` の一覧を取得する
   2. 各 `BIZ-NN` について、`templates/step-1.1-business-deepdive.md` の内容を指示として与えた Agent tool のサブエージェントを **並列起動** する（1 事業候補 = 1 サブエージェント）
-  3. 各サブエージェントには対象の `{key}`（`BIZ-NN`）のみを与え、他の候補には言及させない
+  3. 各サブエージェントには対象の `{key}`（`BIZ-NN`）のみを与え、他の候補の分析・評価はさせない
 - 出力: `docs/business/{BIZ-NN}-analysis.md`（候補ごとに 1 ファイル）
 
 ### Step 1.2: 事業分析統合（join）

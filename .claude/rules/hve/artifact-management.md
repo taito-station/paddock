@@ -7,7 +7,7 @@ description: 成果物管理規律 — ファイル配置・更新ポリシー�
 ## ディレクトリ構造
 
 - 恒久成果物: `docs/` および `knowledge/` 配下に配置
-- 一時作業ファイル: `work/` 配下に限定（プロジェクトルート直下に作成禁止）
+- 一時作業ファイル: `work/` 配下に限定（プロジェクトルート直下に作成禁止）。ただし skill が自身の揮発作業ファイルに使う `docs/temp/`（PR 本文・diff 等、skill 終了時に削除）は除く
 
 ### HVE 標準ディレクトリ（導入先プロジェクト）
 
@@ -40,13 +40,14 @@ description: 成果物管理規律 — ファイル配置・更新ポリシー�
 
 ### 原則
 
-- 既存エントリを書き換えない（誤字修正を除く）
+- 既存エントリを書き換えない（誤字修正を除く。paddock では誤字修正も含め既存行の変更を `scripts/check-decision-log-immutability.py` が error にする・paddock 固有）
 - 決定を覆すときは新エントリを追加し、旧エントリを supersede した旨を記載する
 - 削除は禁止
 
 ### 配置
 
-各 `knowledge/` 文書の末尾に `## 決定ログ` 節としてインライン化する。
+各 `knowledge/` 文書の末尾に `## 決定ログ` 節としてインライン化する（paddock 固有・#652。hve-playbook 標準の
+`knowledge/adr/` 独立ファイル方式は採らない）。
 
 - 決定はその決定が効く文書の決定ログへ直接 append する
 - 独立した ADR ファイルは作らない
@@ -55,7 +56,7 @@ description: 成果物管理規律 — ファイル配置・更新ポリシー�
 ### 機械検査
 
 `scripts/check-decision-log-immutability.py` が既存エントリの改変・削除を検出する。
-pre-push hook で自動実行される。
+pre-push hook と CI で自動実行される。
 
 ## fan-out ステップの制約
 

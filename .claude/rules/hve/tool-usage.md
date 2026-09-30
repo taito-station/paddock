@@ -12,7 +12,9 @@ HVE プロジェクトでのコード/ドキュメント探索ツールの利用
    - SQLite + BM25 ベースのローカル検索エンジン
 3. **serena MCP**: シンボル検索・参照検索に使用（利用可能な場合）
    - `mcp__serena__find_symbol`, `mcp__serena__find_referencing_symbols`
-4. **grep / find**: cq/mdq/serena が利用できない場合のフォールバック
+4. **grep / find**: cq/mdq/serena が利用できない場合のフォールバック。serena-enforcer hook が有効な環境では、コード対象の grep/find は末尾に `# via:bash-discovery: <理由>` を付けない限り block される
+
+paddock では同じ検索を `scripts/cq search --q "..."` / `scripts/mdq search --q "..."` で行う（ルート `CLAUDE.md` の探索規律が正・paddock 固有）。
 
 ## 利用判断
 

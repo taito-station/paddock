@@ -41,3 +41,7 @@ tools/cq/.venv/
 scripts/predict-check/.cache_nk_results/
 # nk.result_page の netkeiba 結果ページ HTML キャッシュ（#714。旧 .cache_nk_results は読まないが残骸の追跡防止に残す）
 scripts/predict-check/.cache_nk_result_html/
+
+# hve-playbook: HVE の一時作業ファイル（work/）と個人設定
+/work/
+**/.claude/settings.local.json

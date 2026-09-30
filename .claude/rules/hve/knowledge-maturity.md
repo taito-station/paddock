@@ -6,6 +6,10 @@ description: Knowledge 成熟度モデル — frontmatter 標準・status 管理
 
 knowledge/ 配下の文書の信頼度と鮮度を管理する仕組み。
 
+> **paddock の frontmatter と stale 判定は `knowledge/README.md` と `scripts/check-doc-classes.py` が正**（paddock 固有）。
+> `distilled_from_sha` は文書ごとに単一の短縮 SHA、`title` は持たない。下の標準（source ごとのフル SHA の対応表・SHA 一致で判定）は
+> hve-playbook の汎用形で、paddock の文書には当てはめない。
+
 ## frontmatter 標準
 
 knowledge/ 配下の各ファイルは以下の frontmatter を持つ:
