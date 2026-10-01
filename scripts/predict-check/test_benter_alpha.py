@@ -94,6 +94,15 @@ def test_build_race_exclusion_reasons():
     assert ba.build_race("quinella", horses, missing, (1, 1), fins, odds, floor=True).reason == "probs_missing"
 
 
+def test_build_race_excludes_unsold_quinella_combo_and_absent_starter():
+    horses, probs, fins = _race()
+    odds = _all_odds(horses, 2)
+    del odds[(3, 4)]  # 馬連で売れていない組（的中ではない）
+    assert ba.build_race("quinella", horses, probs, (1, 1), fins, odds, floor=True).reason == "combo_not_in_market"
+    trio = {c: o for c, o in _all_odds(horses, 3).items() if 4 not in c}  # 4 番が市場の組に 1 つも現れない
+    assert ba.build_race("trio", horses, probs, (1, 1), fins, trio, floor=True).reason == "starter_not_in_market"
+
+
 def test_build_race_counts_trio_winner_unsold():
     horses, probs, fins = _race()
     odds = _all_odds(horses, 3)
@@ -257,6 +266,18 @@ def test_load_odds_drops_sentinels_and_invalid_values(tmp_path):
     assert dropped == Counter({"trio": 1, "quinella": 1, "wide": 1})
 
 
+def test_load_results_rejects_duplicate_horse(tmp_path):
+    rows = ["race_id\tdate\thorse_num\tstatus\tfinishing_position",
+            "R\t2025-08-01\t1\tfinished\t1", "R\t2025-08-01\t1\tfinished\t2"]
+    with pytest.raises(ValueError, match="重複"):
+        ba.load_results(_write(tmp_path / "r.tsv", rows))
+
+
+def test_pack_rejects_empty_window():
+    with pytest.raises(ValueError, match="0 R"):
+        ba.pack([])
+
+
 def test_load_results_rejects_inconsistent_dates(tmp_path):
     rows = ["race_id\tdate\thorse_num\tstatus\tfinishing_position",
             "R\t2025-08-01\t1\tfinished\t1", "R\t2025-08-02\t2\tfinished\t2"]
@@ -274,6 +295,10 @@ def test_collect_filters_window_and_requires_lambda():
                             {"A": fins, "B": fins}, p_in | p_out, {("A", "quinella"): odds, ("B", "quinella"): odds},
                             {}, True)
     assert len(races) == 1 and not why
+    # 確率はあるが着順 TSV に無いレースは、黙って落とさず数える
+    _, why = ba.collect("quinella", "2025-07-01", "2025-12-31", {"A": "2025-08-01"}, {"A": horses}, {"A": fins},
+                        p_in | p_out, {("A", "quinella"): odds}, {}, True)
+    assert why == Counter({"no_results": 1})
     no_lam = {k: dict(v, lam=None) for k, v in p_in.items()}
     with pytest.raises(ValueError, match="lam2"):
         ba.collect("quinella", "2025-07-01", "2025-12-31", date, {"A": horses}, {"A": fins}, no_lam,
@@ -378,31 +403,6 @@ def test_recalibrated_market_separates_model_information_from_market_sharpening(
                            _synthetic(0.0, 1.3, 1500, 15, 1, seed=32), Counter(), n_boot=100, seed=1)
     assert res["dr2_ci"][0] > 0
     assert res["recal_dr2_ci"][1] < 0.001 and res["recal_dr2"] < res["dr2"] - 0.003
-
-
-def test_trio_no_floor_keeps_floor_for_other_bet_types(tmp_path, capsys):
-    import itertools
-    rng = np.random.default_rng(8)
-    probs = ["race_id\thorse_num\tp_win\tlam2\tlam3"]
-    odds = [ODDS_HEADER]
-    res = ["race_id\tdate\thorse_num\tstatus\tfinishing_position"]
-    for r in range(40):
-        p = rng.dirichlet(np.ones(5))
-        order = list(rng.permutation(5) + 1)
-        if {order.index(4), order.index(5)} == {0, 1}:
-            order[0], order[2] = order[2], order[0]  # 欠かす組（4-5）を的中にしない
-        for h in range(1, 6):
-            probs.append(f"R{r}\t{h}\t{p[h - 1]}\t1.0\t1.0")
-            res.append(f"R{r}\t2025-08-01\t{h}\tfinished\t{order.index(h) + 1}")
-        for bt, k in (("quinella", 2), ("trio", 3)):
-            for c in itertools.combinations(range(1, 6), k):
-                if bt == "quinella" and c == (4, 5):
-                    continue  # 馬連にも票の無い組がある（的中ではない）
-                odds.append(f"R{r}\t{bt}\t{'-'.join(map(str, c))}\t{5 + rng.random() * 20:.1f}\t\t1")
-    args = ["--probs", _write(tmp_path / "p.tsv", probs), "--odds", _write(tmp_path / "o.tsv", odds),
-            "--results", _write(tmp_path / "r.tsv", res), "--bet-types", "quinella", "--bootstrap", "5", "--trio-no-floor"]
-    assert ba.main(args) == 0
-    assert "下限を置いた組 40" in capsys.readouterr().out  # 馬連は下限のまま（40R × 1 組）
 
 
 def test_end_to_end_dev_run(tmp_path, capsys):

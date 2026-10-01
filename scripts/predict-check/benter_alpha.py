@@ -120,8 +120,12 @@ def build_race(bet_type: str, horses: list, probs: dict, lam: tuple, fins: dict,
     if any(h not in probs for h in horses):
         return _excluded("probs_missing")
     hs = sorted(horses)
-    if not {h for c in odds for h in c} <= set(hs):
+    market_horses = {h for c in odds for h in c}
+    if not market_horses <= set(hs):
         return _excluded("market_horse_not_in_starters")
+    if market_horses != set(hs):
+        # 出走馬が市場の組に 1 つも現れない（取消の反映ずれ等）。その馬の組を全部「無投票」で埋めない
+        return _excluded("starter_not_in_market")
     top = []
     for pos in range(1, (3 if bet_type != "quinella" else 2) + 1):
         hit = [h for h in hs if fins.get(h) == pos]
@@ -129,6 +133,9 @@ def build_race(bet_type: str, horses: list, probs: dict, lam: tuple, fins: dict,
             return _excluded("podium_not_unique")
         top.append(hit[0])
     combos = list(itertools.combinations(hs, k))
+    if bet_type != "trio" and any(c not in odds for c in combos):
+        # 下限を置くのは 3連複の無投票だけ（QA Q2）。馬連・ワイドで売れていない組があるレースは母集合から外す
+        return _excluded("combo_not_in_market")
     idx = {h: i for i, h in enumerate(hs)}
     cp = pl.combo_probs(np.array([probs[h] for h in hs]), lam[0], lam[1])
     mat = {"quinella": cp.quinella, "wide": cp.wide, "trio": cp.trio}[bet_type]
@@ -176,6 +183,8 @@ class Packed:
 
 
 def pack(races: list) -> Packed:
+    if not races:
+        raise ValueError("対象レースが 0 R です（窓・入力を確認してください）")
     sizes = np.array([len(r.combos) for r in races])
     starts = np.concatenate([[0], np.cumsum(sizes)[:-1]]).astype(int)
     x = np.stack([np.concatenate([r.log_f for r in races]), np.concatenate([r.log_pi for r in races])])
@@ -301,6 +310,8 @@ def load_results(path: str) -> tuple[dict, dict, dict]:
                 raise ValueError(f"{path}:{lineno} 同じレースで日付が違います: {rid}")
             if r["status"] in STARTERS:
                 h = int(r["horse_num"])
+                if h in fins[rid]:
+                    raise ValueError(f"{path}:{lineno} 同じレースの馬番が重複しています: {rid} {h}")
                 horses[rid].append(h)
                 fins[rid][h] = int(r["finishing_position"]) if r["finishing_position"] else None
     return date, horses, fins
@@ -345,6 +356,8 @@ def collect(bet_type: str, lo: str, hi: str, date: dict, horses: dict, fins: dic
         by_race[rid][h] = v["p_win"]
         lam[rid] = v["lam"]
     races, why = [], Counter()
+    why["no_results"] = sum(1 for r in by_race if r not in date)  # 確率はあるが着順 TSV に無い（窓が分からない）
+    why += Counter()  # 0 件の理由は消す
     for rid in sorted(r for r in by_race if pl.in_window(date.get(r, ""), lo, hi)):
         r = build_race(bet_type, horses[rid], by_race[rid], lam[rid], fins[rid],
                        prob_odds.get((rid, bet_type), {}), floor, payout.get((rid, bet_type), {}))
@@ -449,7 +462,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--test-to", default=pl.FROZEN_EVAL_TO)
     ap.add_argument("--windows", choices=("dev", "test"), default="dev",
                     help="dev = fit 窓だけで推定（反復用）/ test = fit で推定して eval 窓を 1 回測る（--ledger 必須）")
-    ap.add_argument("--trio-no-floor", action="store_true", help="感度分析（dev のみ）: 3連複の無投票の組を除外して正規化（他の券種は下限のまま）")
+    ap.add_argument("--trio-no-floor", action="store_true", help="感度分析（dev のみ）: 3連複の無投票の組を除外して正規化")
     ap.add_argument("--wide-low", action="store_true", help="感度分析（dev のみ）: ワイドの π をオッズ帯の下限で作る")
     ap.add_argument("--bootstrap", type=int, default=1000)
     ap.add_argument("--seed", type=int, default=42)
@@ -492,7 +505,7 @@ def main(argv: list[str] | None = None) -> int:
         "",
     ]
     for bt in bets:
-        floor = not (args.trio_no_floor and bt == "trio")
+        floor = not args.trio_no_floor  # 下限が効くのは 3連複だけ（馬連・ワイドの売れていない組は除外理由）
         fr, fw = collect(bt, args.dev_from, args.dev_to, date, horses, fins, probs, prob_odds, payout, floor)
         er = ew = None
         if args.windows == "test":
