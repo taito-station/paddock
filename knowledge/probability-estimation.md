@@ -490,6 +490,7 @@ knowledge 側に置く**（規約は [knowledge/README.md](README.md) の「REQ-
 
 ## 変更履歴
 
+- 2026-09-30: 「独立確率の評価」節に、#722 の判定（#720 の独立確率〈k3 版〉に連系市場に対する α>0 のエッジは無い・本番経路は置き換えない）を反映。
 - 2026-09-29: 「独立確率の評価」節に、独立確率の現行最良が #720 の割引 PL top-k である旨を追記。
 - 2026-09-27: 「独立確率の評価（#719・研究用）」節を追加（純モデル確率を独立確率の baseline として版ごとに評価する旨）。
 - 2026-07-14: knowledge 規約（status/sources/参照SHA）に基づき frontmatter を付与し knowledge へ昇格（内容変更なし・pilot 移行）。物理移動はせず ADR 履歴/相互リンクを維持。詳細は [docs/knowledge/README.md](../knowledge/README.md)。
