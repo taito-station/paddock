@@ -8,6 +8,9 @@
 //! - `targets`: 対象レース一覧（paddock race_id）を読み、netkeiba race_id に変換する。
 //! - `fetch`: 取得ループ。取得済みはスキップ（再開可能）、取得失敗・非確定の連続で即停止。
 //! - `emit`: 保存済みの生 JSON を既存パーサで読み、番兵を除いて TSV にする（ネットワーク不使用）。
+//!
+//! `targets` と `MIN_INTERVAL_MS`・`validate_interval`・`ensure_outside_repository` は `fill-results`（#742）も再利用している
+//! 公開 API。変えるときは `fill-results` のビルドとテストも通す。
 
 pub mod emit;
 pub mod fetch;

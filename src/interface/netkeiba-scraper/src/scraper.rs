@@ -142,6 +142,21 @@ impl UreqNetkeibaScraper {
         fetch_utf8_once(&self.agent, &url)
     }
 
+    /// レース結果ページ (`race/result.html`) の HTML をデコードして**そのまま**返す（#742 の結果行の補完用）。
+    /// 生の HTML を保存し、DB への書き込みはオフラインで行うための公開口。
+    ///
+    /// 待ちと URL は [`Self::fetch_race_result`] と同じだが、[`Self::fetch_odds_raw`] と同じ理由で
+    /// **transient 失敗でも再送しない**（[`fetch_decoded_once`]）。
+    /// **不変条件: ここで `fetch_decoded` / `call_with_retry` を使わないこと**。回帰テスト `fetch_decoded_once_does_not_retry_5xx`
+    /// が守るのは呼び出し先の `fetch_decoded_once` だけで（URL が固定でローカルサーバに向けられない）、このメソッドが
+    /// 何を呼ぶかはテストでは守れない。変えるときはレビューで確かめる。
+    pub fn fetch_race_result_html_once(&self, netkeiba_race_id: &str) -> Result<String> {
+        std::thread::sleep(self.delay);
+        let url = format!("{RACE_RESULT_URL}?race_id={netkeiba_race_id}");
+        tracing::debug!(race_id = %netkeiba_race_id, "fetching netkeiba race result html (no retry)");
+        fetch_decoded_once(&self.agent, &url)
+    }
+
     /// 組合せ券種 1 種を取得・パースする。失敗（HTTP/想定外 status 等）は warn ログを残して
     /// `None` を返し、他券種の取得を継続させる（券種単位のベストエフォート、#102。
     /// 空 Vec への畳み込みは呼び出し側の [`record_observed`] が行う）。
@@ -193,7 +208,20 @@ fn call_with_retry(agent: &ureq::Agent, url: &str) -> Result<ureq::http::Respons
 /// charset を尊重し、不明時は EUC-JP にフォールバックする（`scraper_util::decode_html`）。
 /// EUC-JP 固定デコードは race.netkeiba.com の UTF-8 化で文字化けする回帰を起こしていた。
 fn fetch_decoded(agent: &ureq::Agent, url: &str) -> Result<String> {
-    let resp = call_with_retry(agent, url)?;
+    decode_body(call_with_retry(agent, url)?, url)
+}
+
+/// [`fetch_decoded`] の再送しない版（#742 の結果ページのバルク取得用）。失敗は 1 回で [`Error::Fetch`] にする。
+fn fetch_decoded_once(agent: &ureq::Agent, url: &str) -> Result<String> {
+    let resp = agent
+        .get(url)
+        .header("User-Agent", USER_AGENT)
+        .call()
+        .map_err(|err| Error::Fetch(format!("GET {url}: {err}")))?;
+    decode_body(resp, url)
+}
+
+fn decode_body(resp: ureq::http::Response<ureq::Body>, url: &str) -> Result<String> {
     // ureq は 4xx/5xx を Err(StatusCode) にするためここに来るのは 2xx/3xx のみ。
     // ボディ受信前に Content-Type の charset を控える（受信後は resp が消費される）。
     let charset = resp
@@ -980,6 +1008,25 @@ mod tests {
     fn fetch_utf8_once_returns_body_on_success() {
         let (url, count, handle) = serve(vec![R_200_OK]);
         assert_eq!(fetch_utf8_once(&test_agent(), &url).unwrap(), "ok");
+        handle.join().unwrap();
+        assert_eq!(count.load(Ordering::SeqCst), 1);
+    }
+
+    // #742: 結果ページのバルク取得も 5xx で再送しない（1 回だけ接続して Err）
+    #[test]
+    fn fetch_decoded_once_does_not_retry_5xx() {
+        let (url, count, _handle) = serve(vec![R_503, R_200_OK]);
+        let err = fetch_decoded_once(&test_agent(), &url).expect_err("503 は失敗");
+        assert!(matches!(err, Error::Fetch(_)), "{err}");
+        assert_eq!(count.load(Ordering::SeqCst), 1, "再送してはいけない");
+    }
+
+    #[test]
+    fn fetch_decoded_once_decodes_by_charset() {
+        // race.netkeiba.com の結果ページは charset=UTF-8 を返す
+        const R_200_UTF8: &str = "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Length: 6\r\nConnection: close\r\n\r\n\u{7740}\u{9806}";
+        let (url, count, handle) = serve(vec![R_200_UTF8]);
+        assert_eq!(fetch_decoded_once(&test_agent(), &url).unwrap(), "着順");
         handle.join().unwrap();
         assert_eq!(count.load(Ordering::SeqCst), 1);
     }
