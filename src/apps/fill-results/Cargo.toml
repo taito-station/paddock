@@ -1,0 +1,28 @@
+[package]
+name = "fill-results"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "paddock-fill-results"
+path = "src/bin.rs"
+
+[dependencies]
+anyhow             = { workspace = true }
+clap               = { workspace = true }
+# 対象一覧の読み込み・取得間隔の下限・出力先の検査は #721 の取得 CLI と同じものを使う（ペーシングの正本を 1 つに保つ）
+fetch-final-odds   = { path = "../fetch-final-odds" }
+netkeiba-scraper   = { workspace = true }
+paddock-config     = { workspace = true }
+paddock-domain     = { workspace = true }
+paddock-use-case   = { workspace = true }
+rdb-gateway        = { workspace = true }
+tokio              = { workspace = true }
+tracing            = { workspace = true }
+
+[dev-dependencies]
+sqlx               = { workspace = true }
+tempfile           = { workspace = true }

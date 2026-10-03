@@ -10,8 +10,10 @@ sources:
   - qa/QA-results-label-correction-730.md
   - docs-original/721-final-odds-backfill.md
   - qa/QA-final-odds-721.md
-distilled_from_sha: "0ac49b9"
-updated: "2026-09-30"
+  - docs-original/742-fill-missing-results.md
+  - qa/QA-fill-results-742.md
+distilled_from_sha: "ce0a0b2"
+updated: "2026-10-03"
 ---
 
 # レース結果の同日取り込みと UI 自動反映: 設計仕様
@@ -127,6 +129,25 @@ warn を出して次のレースへ進む。warn（取得失敗）がログに�
 （確定オッズの取得コマンド `paddock-fetch-final-odds` は再送せず即停止する）。共有 DB に入れる前に、コンテナ内 PG17 で複製した隔離 DB で同じ手順を流して結果を突き合わせる。
 着順の行が 1 つでもあるレースは確定済みとしてスキップされる（`force` でも）ので、行が足りないレースの補完には使えない（#742）。
 2026-06-20〜09-27 の 457R をこの手順で取り込んだ（`docs-original/721-final-odds-backfill.md` §3）。
+
+**行が足りないレースを補うとき（#742）**: `paddock-fill-results`（`src/apps/fill-results/`）を使う。**既存行には一切触れず**
+（DELETE も UPDATE もしない）、出馬表にあって `results` に無い馬番の行だけを INSERT する（取消・除外の馬も status ごと）。
+- `fetch --targets <一覧> --out-dir <dir> [--interval-ms 3500]`: 結果ページの生の HTML を `<dir>/raw/<race_id>.html` に保存する
+  （リポジトリの外・3,334ms 以上・再送なし・失敗や読めないページで即停止・保存済みは飛ばす）。DB には触れない。
+- `apply --targets <一覧> --out-dir <dir> --db-name <名前> [--dry-run]`: 保存した HTML から書く（ネットワーク不使用）。接続先の
+  `current_database()` が `--db-name` と違えば何もしない（隔離 DB と共有 DB の取り違え防止。照合するのは DB 名だけでホストは見ない）。
+  マイグレーションは当てない（`PADDOCK_AUTO_MIGRATE` に従わない）。
+- 書き込みは `PostgresRepository::insert_missing_results`（inherent。`ON CONFLICT (race_id, horse_num) DO NOTHING`、1 レース 1 トランザクション）。
+  `races` 行は書かず、無ければエラーにする。`gate_num`・`horse_name` は出馬表から入れ、`source` は既定の `'pdf'`、`horse_id`・`margin` は NULL。
+- 照合に失敗したレースは書かずに非ゼロで終える（dry-run でも同じ判定）: races 行が無い／既存行の馬番が出馬表に無い・馬名が違う／
+  既存行が取消・除外なのに結果ページでは出走馬／既存行の着順・status が結果ページの同じ馬番の行と違う（別レースのページの混入もここで止まる）／
+  結果ページに同じ馬番の行が 2 つ以上ある／結果ページの出走馬が出馬表に無い／入れた後の出走馬の行数が結果ページと合わない。
+- この 16 本の日付で結果 PDF の取り込み（`save_race`）を流し直さない。`save_race` は既存行を上書きし、PDF に無い馬番の行を消す
+  （`delete_absent_horse_nums`）ので、#730 の補正と #742 で補った行が戻ったり消えたりしうる（refresh で取り込んだレースも同じ）。
+- 2026-10-03 に 16 本・203 行を補った（隔離 DB で照合 → バックアップ → 共有 DB。`docs-original/742-fill-missing-results.md`）。
+
+**`source` の値**: この節の upsert も #742 の INSERT も `source` を書かず、既定の `'pdf'` になる（上の「FK `races` の担保 と `source` 値」の通り）。
+決定ログ ADR 0068 §1 の 3. にある `source='netkeiba'` は、実装と食い違う古い記述（実装は `'pdf'`）。
 
 エラー写像（use-case Error → HTTP）は既存規約どおり（`NotFound`→404 等）。セッション不在の日でも着順取り込みは走るため、`results:refresh`（新）はセッション不在を 404 にせず「精算 0・確定 N」を返す。
 
@@ -381,3 +402,52 @@ netkeiba レース結果ページを `results` の取得源として追加し、
 - 457R を取り込んだ（`docs-original/721-final-odds-backfill.md` §3）。本番の成績集計と backtest の母集団が変わった（`netkeiba-datasource.md` の決定ログ #721）。
 - 着順の行が 1 つでもあるレースは refresh の対象外なので、行が足りないレースの補完は #742 で別の経路を用意する。
 
+### #742: results の行が足りないレースは、専用 CLI で足りない馬番の行だけを INSERT する (2026-10-03) — 採用
+
+#### コンテキスト
+
+- `results` に出馬表の頭数より少ない行（1 または 5 行）しか無いレースが 16 本あり（2026-07-18〜08-09）、評価（#719 の ledger・
+  #720 の学習・#722 の α 判定）で「頭数不足」として母集合から外れていた。#730 の補正で一部だけ更新されたレース。
+- 既存の書き込み口はどれも使えなかった: `paddock-fetch-results` は既存行の UPDATE 専用（ADR 0015）、`ResultsInteractor::refresh` は
+  着順の行が 1 つでもあるレースを飛ばす（`force` でも）、その書き込み口 `upsert_results` は `ON CONFLICT DO UPDATE` で既存行を上書きする。
+
+#### 決定
+
+- 専用の CLI `paddock-fill-results` を作る（`fetch` で結果ページの生の HTML を保存・`apply` で保存した HTML から書く）。
+- 書き込みは新しい inherent `PostgresRepository::insert_missing_results`（`ON CONFLICT DO NOTHING`・1 レース 1 トランザクション・
+  `races` 行は書かず、無ければエラー）。出馬表と結果ページの両方にある馬番は、取消・除外も status ごと入れる。
+- 照合に失敗したレース（races 行が無い・既存行と出馬表の食い違い・既存行が取消なのに出走・既存行の着順や status が結果ページと違う・
+  結果ページの馬番の重複・出走馬が出馬表に無い・入れた後の出走馬の数が合わない）は書かない。dry-run でも同じ判定にする。
+- `apply` は `--db-name` と `current_database()` が一致しなければ書かない。取得は再送しない（`fetch_race_result_html_once`）。
+
+#### 理由
+
+- 既存行には #730 で直した馬名・status が入っている。上書きも削除もしない経路でなければ、その補正を失う。
+- ADR 0015 の契約（`fetch-results` は UPDATE 専用）と、refresh の対象選定（確定済みは飛ばす）を変えずに済む。
+- 取得と書き込みを分けると、隔離 DB と共有 DB に**同じ入力**を流して結果を突き合わせられ、netkeiba への取得は 1 回で済む。
+
+#### 却下した代替案
+
+- **`paddock-fetch-results` に INSERT のモードを足す**: ADR 0015 の契約変更になる（#721 でも却下）。
+- **refresh に「行不足のレースを対象にする」モードを足して `upsert_results` を呼ぶ**: `ON CONFLICT DO UPDATE` が既存行を上書きする。
+- **既存行を消して取り込み直す**: #730 で直した馬名・status を失う（issue の制約）。
+- **取得と書き込みを 1 コマンドで行う**: 隔離 DB と共有 DB で 2 回取得することになり、入力が同じだと保証できない。
+- **対象一覧の読み込み・間隔の下限・出力先の検査を `fill-results` に複製する／共有 crate へ移す**: 複製はペーシングの下限が 2 か所になる。
+  共有 crate は一回きりの補完のためには大きい。`fetch-final-odds` の lib への依存（workspace で初めての app→app 依存）を許し、
+  依存される側の lib.rs に再利用されていることを明記した。
+
+#### 影響
+
+- 2026-10-03 に 16 本・203 行を補った（`finished` 200・`did_not_finish` 1・`scratched` 2）。16 本とも出走馬の行数が結果ページと一致し、
+  既存行と races 行は全列そのまま（`docs-original/742-fill-missing-results.md`）。
+- **本番の予想の入力と評価の結果が変わる**: 203 頭分の結果が近走・騎手成績・調教師成績に入り、評価（#719 の ledger・#720 の学習・
+  #722 の α 判定）と backtest の母集合に 16 本が戻る。16 本を除外して測った既存の値（#719 v0.2 系・#722）は、日付の範囲を指定しても
+  再現できない。再現するときは補完前の dump（`~/paddock-backups/pinned/pre742-results-20261003-201949.dump`）を使うか、
+  `result_id > 86932` の行（16 本・凍結した一覧 `targets.txt` の sha は一次資料 §1）を除いて数える。
+- 新しい行は `source='pdf'`・`horse_id` NULL なので、次に `backfill-horse-ids` を流すと horse_id が埋まる（NULL は一時的な状態）。
+  `margin` は NULL のままなので、これらのレースを前走に持つ馬では前走の着差のシグナルが欠ける（refresh で取り込んだ行と同じ扱い）。
+- 16 本の races 行の `track_condition`・`weather` は空のまま（#745 の「馬場不明」）。
+- 結果ページの生の HTML を再送なしで取る口ができた（`netkeiba-datasource.md`）。refresh の経路は従来どおり再送する。
+- `RaceRepository::race_exists` の Postgres 実装が `SELECT 1`（INT4）を i64 で受けていて、行があると必ず失敗していた
+  （本番の呼び出し元が無く潜んでいた）。`apply` が使うので i32 で受けるよう直した。
+- 方針確認は `qa/QA-fill-results-742.md`。関連: ADR 0015、#730、#721、#717（作業中に DB 接続の取り残しを観測）。

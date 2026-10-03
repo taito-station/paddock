@@ -1,6 +1,7 @@
 mod backfill_horse_ids;
 mod course_stats;
 mod fetch_history;
+mod fill_results;
 mod find_finished_races_between;
 mod find_handicap_notes;
 mod find_jockey_recent_runs;
@@ -54,6 +55,8 @@ use paddock_use_case::repository::{
 
 use crate::pool::PgPool;
 
+pub use fill_results::ExistingResultRow;
+
 pub struct PostgresRepository {
     pub pool: PgPool,
 }
@@ -71,6 +74,35 @@ impl PostgresRepository {
         rows: &[paddock_use_case::netkeiba_scraper::ResultRow],
     ) -> UcResult<u64> {
         update_results::update_results(&self.pool, race_id, rows)
+            .await
+            .map_err(Into::into)
+    }
+
+    /// 結果行の補完（#742・`fill-results` 用）で照合に使う既存行を読む。
+    pub async fn find_result_rows_for_fill(
+        &self,
+        race_id: &RaceId,
+    ) -> UcResult<Vec<ExistingResultRow>> {
+        fill_results::find_result_rows_for_fill(&self.pool, race_id)
+            .await
+            .map_err(Into::into)
+    }
+
+    /// 結果行の補完（#742・`fill-results` 用）: 既存行に触れず、無い馬番の行だけを INSERT する。
+    /// `update_results` と同じく `Repository` トレイトには載せない。
+    pub async fn insert_missing_results(
+        &self,
+        card: &RaceCard,
+        rows: &[paddock_use_case::netkeiba_scraper::ResultRow],
+    ) -> UcResult<Vec<u32>> {
+        fill_results::insert_missing_results(&self.pool, card, rows)
+            .await
+            .map_err(Into::into)
+    }
+
+    /// 接続先の DB 名（`current_database()`）。
+    pub async fn current_database(&self) -> UcResult<String> {
+        fill_results::current_database(&self.pool)
             .await
             .map_err(Into::into)
     }
@@ -291,7 +323,8 @@ impl RaceRepository for PostgresRepository {
     }
 
     async fn race_exists(&self, race_id: &RaceId) -> UcResult<bool> {
-        let row: Option<(i64,)> = sqlx::query_as("SELECT 1 FROM races WHERE race_id = $1 LIMIT 1")
+        // `SELECT 1` は INT4 なので i32 で受ける（i64 だと行があるときに型の不一致で失敗する・#742 で判明）
+        let row: Option<(i32,)> = sqlx::query_as("SELECT 1 FROM races WHERE race_id = $1 LIMIT 1")
             .bind(race_id.value())
             .fetch_optional(&self.pool)
             .await

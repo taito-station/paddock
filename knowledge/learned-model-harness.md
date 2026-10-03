@@ -5,7 +5,7 @@ status: Confirmed
 kind: specification
 doc_class: [D24, D22, D19]
 tags: [D24, D22, D19]
-updated: "2026-09-30"
+updated: "2026-10-03"
 ---
 
 # 学習型モデル評価ハーネス 設計（#272 土台 / #309 受け皿）
@@ -129,6 +129,8 @@ ADR 0052（α blend 廃止＝純モデル化の棄却）の通り、純 P_model 
   レース単位 CI 付きで出す。baseline は純モデル（`model_win_pure` → 素の Harville）、市場は参考列（別母集合・
   ゲートにしない）。窓は dev = 2025-07〜12（反復用・採否根拠にしない）、test = 2026-01〜08（`--windows test`・
   採否はここだけ）。結果は `docs-original/719-prob-ledger.md` に `--ledger` で追記する。
+  **母集合の変化（#742）**: 2026-10-03 に 2026-07-18〜08-09 の 16 本の results を補った（`race-result-ingestion.md` の決定ログ #742）。
+  それより前に計測した版（#719 の ledger・#722）とは評価の母集合が違う（issue #742 に 16 本が評価から外れていたと記録）。前の値を再現するときは補完前の dump を使うか、`result_id > 86932` の行を除く。
   ```sh
   python3 scripts/predict-check/prob_ledger.py bt_dump_<sha>.tsv \
       --system pl_topk=probs.tsv \

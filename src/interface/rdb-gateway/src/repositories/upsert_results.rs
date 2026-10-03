@@ -63,6 +63,7 @@ pub async fn upsert_results(pool: &PgPool, card: &RaceCard, rows: &[ResultRow]) 
             );
             continue;
         };
+        // 列と bind は fill_results::insert_missing_results（#742）と同じ。列を変えたら fill_results.rs も直す
         let res = sqlx::query(
             r#"
             INSERT INTO results

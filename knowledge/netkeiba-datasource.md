@@ -10,8 +10,9 @@ sources:
   - qa/QA-final-odds-721.md
   - qa/QA-benter-alpha-722.md
   - docs-original/722-benter-alpha-exotics.md
-distilled_from_sha: "d2948eb"
-updated: "2026-09-30"
+  - docs-original/742-fill-missing-results.md
+distilled_from_sha: "ce0a0b2"
+updated: "2026-10-03"
 ---
 
 # netkeiba 当日データソース取り込み 仕様書
@@ -125,7 +126,18 @@ predict-watch / api-server の live scrape（`OddsInteractor` への `UreqNetkei
     市場確率に使うとき（#722）は、無投票の組にそのレースで売れた組の最小確率の半分を置いてレース内で正規化し直す
     （`scripts/predict-check/benter_alpha.py`・`qa/QA-benter-alpha-722.md` Q2。dev 窓の感度分析で、除外して正規化しても α̂ は変わらなかった）。
 - 揃うレース数（確定オッズ＋出走馬の着順行）は 3 券種とも 5,493R。3連複の組合せが全部あるのは 5,492R で、番兵（無投票）の組合せは TSV に無い（877R）。
+  これは #742 より前の値（着順の行が足りない 16R を除いた数）。16R は #742 で行を補ったが、数え直してはいない。
 - 凍結データと件数の詳細は `docs-original/721-final-odds-backfill.md`。経緯は決定ログ「#721」。
+
+### 結果ページの生の HTML の取得（#742・結果行の補完用）
+
+- `UreqNetkeibaScraper::fetch_race_result_html_once` は結果ページ（`race/result.html`）をデコードした HTML をそのまま返す。
+  待ちと URL は `fetch_race_result` と同じだが、**再送しない**（`fetch_odds_raw` と同じ理由。共有のリトライは 1 秒・2 秒で打ち直す）。
+  同日の refresh・`paddock-fetch-results` の取得は、従来どおり共有のリトライを通る。
+- 使うのは `paddock-fill-results fetch`（`<dir>/raw/<race_id>.html` に保存・3,334ms 以上・取得失敗や結果の表を読めないページで即停止・
+  保存済みは飛ばす・出力先がリポジトリの中なら拒否）。対象一覧の読み込み・間隔の下限・出力先の検査は `paddock-fetch-final-odds` と同じ関数を使う。
+- 2026-10-03 に 16 本を 1 回だけ取得した（取得失敗 0）。保存した HTML の sha256 は `docs-original/742-fill-missing-results.md` §2 の置き場にある。
+  書き込み側の仕様と決定は `race-result-ingestion.md`（決定ログ #742）。
 
 ---
 

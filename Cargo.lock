@@ -2057,6 +2057,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "fill-results"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "fetch-final-odds",
+ "netkeiba-scraper",
+ "paddock-config",
+ "paddock-domain",
+ "paddock-use-case",
+ "rdb-gateway",
+ "sqlx",
+ "tempfile",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "find-msvc-tools"
 version = "0.1.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"

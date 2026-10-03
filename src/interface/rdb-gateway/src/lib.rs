@@ -4,4 +4,4 @@ pub mod repositories;
 
 pub use error::{Error, Result};
 pub use pool::PgPool;
-pub use repositories::PostgresRepository;
+pub use repositories::{ExistingResultRow, PostgresRepository};

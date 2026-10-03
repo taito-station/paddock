@@ -11,6 +11,7 @@ members = [
     "src/apps/fetch-card",
     "src/apps/fetch-results",
     "src/apps/fetch-final-odds",
+    "src/apps/fill-results",
     "src/apps/simulate",
     "src/apps/ingest-predictions",
     "src/apps/api-server",

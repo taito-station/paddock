@@ -639,6 +639,7 @@ src/
     ├── fetch-history/        CLI: netkeiba 近走を results に取得
     ├── fetch-results/        CLI: netkeiba 確定結果で results を再取込
     ├── fetch-final-odds/     CLI: 確定オッズ（馬連・ワイド・3連複）の遡及取得（研究用・DB に書かない。knowledge/netkeiba-datasource.md）
+    ├── fill-results/         CLI: results の行が足りないレースに、足りない馬番の行だけを結果ページから INSERT（既存行は触らない。knowledge/race-result-ingestion.md）
     ├── ingest-predictions/   CLI: 予想 JSON の DB 保存
     ├── simulate/             CLI: 買い目ポートフォリオの収支シミュレータ
     └── api-server/           REST API サーバ（actix-web + utoipa）
