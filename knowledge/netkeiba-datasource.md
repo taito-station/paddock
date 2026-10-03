@@ -11,7 +11,7 @@ sources:
   - qa/QA-benter-alpha-722.md
   - docs-original/722-benter-alpha-exotics.md
   - docs-original/742-fill-missing-results.md
-distilled_from_sha: "ce0a0b2"
+distilled_from_sha: "a48fb23"
 updated: "2026-10-03"
 ---
 
