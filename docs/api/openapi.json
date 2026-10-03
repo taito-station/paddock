@@ -1715,11 +1715,11 @@
           "handicap": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/HandicapNoteSchema",
                 "description": "手動ハンデ精査の材料（#628・提示専用）。買い目の選択ロジックには入らない。\n\n**`null` = 材料を引けていない**（出馬表なし・取得失敗）。「該当なし（走っていない）」\nとは別物なので既定値で埋めない——埋めると `distance_untried: false` 等が\n「計算していない事実」を断言することになる。クライアントは `null` を\n「未取得」として表示し、`該当なし` と書かないこと。"
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -2633,10 +2633,10 @@
           "result": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/PredictionResultSchema"
               },
               {
-                "$ref": "#/components/schemas/PredictionResultSchema"
+                "type": "null"
               }
             ]
           },
