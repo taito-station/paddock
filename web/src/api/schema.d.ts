@@ -457,7 +457,7 @@ export interface components {
              * @description 枠番（出馬表に無ければ `null`）。
              */
             gate_num?: number | null;
-            handicap?: null | components["schemas"]["HandicapNoteSchema"];
+            handicap?: components["schemas"]["HandicapNoteSchema"] | null;
             horse_name: string;
             /** Format: int32 */
             horse_num: number;
@@ -887,7 +887,7 @@ export interface components {
             prediction_id: number;
             /** Format: int32 */
             race_num: number;
-            result?: null | components["schemas"]["PredictionResultSchema"];
+            result?: components["schemas"]["PredictionResultSchema"] | null;
             strategy_note?: string | null;
             title?: string | null;
             venue: string;
