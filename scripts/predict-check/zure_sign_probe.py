@@ -106,7 +106,7 @@ def select_points(
 def parse_result_odds(html: str) -> dict[int, float]:
     """netkeiba 結果ページから {馬番: 確定単勝オッズ} を抽出する純粋関数。
 
-    行構造は nk.fetch_result と同じ HorseList 行。オッズは `td class="Odds Txt_R"` 内の
+    行構造は nk.parse_result と同じ HorseList 行。オッズは `td class="Odds Txt_R"` 内の
     span（1 着馬のみ class="Odds_Ninki" 付き）。取消/除外馬はセル自体が無いのでスキップ。
     """
     out: dict[int, float] = {}

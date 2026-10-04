@@ -12,7 +12,7 @@ sources:
   - docs-original/722-benter-alpha-exotics.md
   - docs-original/742-fill-missing-results.md
 distilled_from_sha: "a48fb23"
-updated: "2026-10-03"
+updated: "2026-10-04"
 ---
 
 # netkeiba 当日データソース取り込み 仕様書
@@ -138,6 +138,17 @@ predict-watch / api-server の live scrape（`OddsInteractor` への `UreqNetkei
   保存済みは飛ばす・出力先がリポジトリの中なら拒否）。対象一覧の読み込み・間隔の下限・出力先の検査は `paddock-fetch-final-odds` と同じ関数を使う。
 - 2026-10-03 に 16 本を 1 回だけ取得した（取得失敗 0）。保存した HTML の sha256 は `docs-original/742-fill-missing-results.md` §2 の置き場にある。
   書き込み側の仕様と決定は `race-result-ingestion.md`（決定ログ #742）。
+
+### 分析スクリプト（`scripts/predict-check/`）の結果ページ取得（#763）
+
+- Python の 4 本（`fetch_results.py`・`fetch_payouts.py`・`late_money_probe.py`・`zure_sign_probe.py`）は、結果ページ（`race/result.html`）を
+  `nk.result_page` で取り、確定済みのページだけを `.cache_nk_result_html/` に保存する（確定前のページは保存しないので、
+  レース当日に呼んでも後で取り直せる）。`gen_win_backtest_data.sh` は結果 HTML を自前の出力先に `curl` で取るが、待ちは同じ定数を読む。
+- 待ちは `nk.FETCH_PAUSE_SEC`（3.5 秒）。結果ページ（`ResultPages`）はネットワーク取得のたびに 1 回待ち（取得失敗時も待つ）、
+  キャッシュに当たれば待たない。開催日の一覧（`nk.list_race_ids`）は取得に成功したあと同じだけ待つ（失敗時はスクリプトが止まる）。
+  `nk.curl` は再送しないので、下限 3,334ms を再送で破ることはない。
+- 間隔はプロセス単位でしか守られない。netkeiba を取得するスクリプトは並走させない（プロセス間のロックは持たない）。
+- 経緯は決定ログ「#763」。
 
 ---
 
@@ -1551,3 +1562,42 @@ DELETE・ADR 0089 決定 8）であり、「いつ未発売で、いつ発売さ
   （`imported-457-race-ids.txt`・sha は一次資料 §6）で除外する。`track_condition IS NULL` では 457R を見分けられない（既存にも NULL がある）。
   この 457R は `track_condition`・`weather` が空（refresh の設計）で、馬場別の成績では「不明」として入る。
 
+### #763: 分析スクリプトの結果ページ取得を nk.result_page に寄せ、間隔を 3.5 秒にする (2026-10-04) — 採用
+
+#### コンテキスト
+
+- `scripts/predict-check/fetch_payouts.py` と `fetch_results.py` が、キャッシュを使わない `nk.fetch_payouts` / `nk.fetch_result` で結果ページを
+  0.8 秒間隔で取っていた。`nk.result_page`（#714）の間隔も 1.5 秒で、バルク取得の下限（3,334ms 以上・決定ログ「#721」）を下回っていた。
+- 2 本がキャッシュを使っていなかったのは「当日はレース確定前にも呼ぶので保存できない」という理由だったが、`nk.result_page` は
+  確定済みのページだけを保存し、確定前のページはプロセス内に持つだけなので、この理由はもう当てはまらない。
+
+#### 決定
+
+1. Python スクリプトの結果ページは `nk.result_page` で取る。`fetch_payouts.py` / `fetch_results.py` はその HTML を `parse_payouts` / `parse_result` で読み、
+   固定の `time.sleep(0.8)` を外す。使われなくなるキャッシュ無しの `nk.fetch_payouts` / `nk.fetch_result` は消す。
+2. 間隔の定数は `nk.FETCH_PAUSE_SEC = 3.5`（#721 の実運用値）。`nk.list_race_ids` も取得後に同じだけ待つ。
+   同じ違反（結果ページを 1 秒間隔でバルク取得）だった `gen_win_backtest_data.sh` も、この定数を読んで待つ。
+3. 並走の制御（プロセス間ロック）と、確定判定（着順＋単勝払戻）の強化は入れない。README に「並走させない」
+   「取り直すにはキャッシュファイルを消す」と書く。
+4. テスト（`test_nk_cache.py`）で、定数が 3,334ms 以上であること・2 本のスクリプトが `nk.curl` を直接叩かず取得ごとに 1 回だけ待つこと・
+   キャッシュに当たれば待たないことを固定する。
+
+#### 理由
+
+- 待ちを 1 か所（`ResultPages` の取得経路）に置けば、スクリプトごとの固定の待ちが規律からずれることがなくなる。
+- キャッシュに寄せると、確定済みのページは取り直さない（リクエスト数を減らす方向の高速化＝規律どおり）。
+
+#### 却下した代替案
+
+- **2 本のスクリプトの `sleep(0.8)` を 3.5 秒に上げるだけ**: 待ちの値が 3 か所に散ったままで、確定済みのページも毎回取り直す。
+- **間隔を 3,334ms ちょうどにする**: 下限そのものに置くと処理時間のゆらぎで余裕がない。#721 で実際に使った 3.5 秒にそろえた。
+- **プロセス間ロック（最終取得時刻の共有）**: 並走は運用で避けられ、実害の観測もない。注記で足りる（YAGNI）。
+- **確定判定に払戻表の券種そろいを加える**: 少頭数で発売の無い券種の扱いを決める必要があり、#763 の範囲を超える。実例もない。
+  判定は #714 から probe 系の 2 本でも使っているもので、取り直しはキャッシュファイルの削除でできる。
+
+#### 影響
+
+- `fetch_payouts.py` / `fetch_results.py` は 1 日 36R で待ちだけ約 2 分（以前は約 30 秒）。2 回目以降は確定済みのページを取り直さない。
+- `list_races.py` などの一覧取得は終了が 3.5 秒遅れる。
+- `scripts/predict-check/refresh_ev.sh` のワイド取得（`fetch_wide.py`・1 秒間隔）と `nk.race_post_times`（単発・待ちなし）は
+  レース当日のライブ取得で、この決定の対象外。

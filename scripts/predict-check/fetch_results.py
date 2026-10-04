@@ -11,8 +11,7 @@
 """
 import sys
 import json
-import time
-from nk import list_race_ids, parse_race_id, fetch_result
+from nk import list_race_ids, parse_race_id, parse_result, result_page
 
 if len(sys.argv) < 2:
     print(__doc__, file=sys.stderr)
@@ -25,13 +24,14 @@ ids = list_race_ids(date, venues)
 out = []
 for rid in ids:
     p = parse_race_id(rid)
-    rows = fetch_result(rid)
+    # 取得間隔・確定ページのキャッシュは nk.result_page が持つ（#763）。未完ページは result_page が
+    # 保存見送りの理由を warn するので、ここでは重ねない（late_money_probe と同じ）
+    rows = parse_result(result_page(rid), rid, warn=False)
     p["rows"] = rows
     out.append(p)
     fin = sorted([x for x in rows if x["rank"]], key=lambda x: x["rank"])[:3]
     top = " ".join(f"{x['rank']}着:{x['horse_num']}番{x['name']}" for x in fin)
     print(f"{p['venue_jp']}{p['race_num']:>2}R n={len(rows):>2} {top}", file=sys.stderr)
-    time.sleep(0.8)
 
 json.dump(out, sys.stdout, ensure_ascii=False)
 print(f"# saved {len(out)} races", file=sys.stderr)

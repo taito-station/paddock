@@ -196,18 +196,23 @@ paddock-analyze backtest --from <YYYY-MM-DD> --to <YYYY-MM-DD> --blend-alpha 1.0
     揃えてローダへ渡す。100 万行級を 1 行ずつ捨てながら読むローダは `pgq.query_iter`（イテレータ）を使う。
 - **netkeiba 結果ページは `nk.result_page(race_id)`**（着順 `nk.parse_result`・払戻 `nk.parse_payouts`・
   確定単勝オッズ `zure_sign_probe.parse_result_odds` は同じ HTML を読む）。1 レース 1 取得で、
-  ネットワーク取得時だけ 1.5 秒待つ。キャッシュは `.cache_nk_result_html/<race_id>.html`（raw bytes）。
+  ネットワーク取得時だけ `nk.FETCH_PAUSE_SEC`（3.5 秒・バルク取得の下限 3,334ms 以上・#763）待つ。キャッシュは `.cache_nk_result_html/<race_id>.html`（raw bytes）。
   - 保存するのは確定済みページ（着順 1 行以上 かつ 単勝払戻あり）だけ。未生成・中止・全馬取消・払戻未掲載は
     保存しない（プロセス内では 1 回に抑えるが、次の実行では取り直す）。検査に落ちても HTML は返し、
     保存しなかった理由を `[warn] 結果ページを保存しません（…）` で出す（払戻表の構造変化で毎回全件
     再取得になっていても気づけるように）。
-  - 取得に失敗しても 1.5 秒待ってから例外を送出する（失敗が続いてもペーシングを崩さない）。
+  - 取得に失敗しても同じだけ待ってから例外を送出する（失敗が続いてもペーシングを崩さない）。
   - 書き込みは同ディレクトリの一意名 tmp → `os.replace`。読み出しで空・`</html>` 欠落（切断）なら削除して
     取り直す。パーサ依存の検査は読み出しでは行わない（パーサ退行で全キャッシュが消えないように）。
   - 旧 `.cache_nk_results/`（抽出済み JSON）は読まない。不要なら手で消してよい。初回は全ページを取り直す
-    （389 ページで約 17 分）。別の checkout で作った `.cache_nk_result_html/` があればコピーすれば取り直し不要。
-- 当日運用の `fetch_results.py` / `fetch_payouts.py`（`nk.fetch_result` / `nk.fetch_payouts`）は
-  レース確定前にも呼ばれるのでキャッシュしない。
+    （389 ページで約 17 分＝当時の 1.5 秒間隔。3.5 秒では待ちだけで約 23 分）。別の checkout で作った `.cache_nk_result_html/` があればコピーすれば取り直し不要。
+- `fetch_results.py` / `fetch_payouts.py` も `nk.result_page` を通る（#763）。レース確定前に呼んでも未完ページは
+  保存されないので、確定後に流し直せば取り直す。確定済みのページは取り直さない。
+- 開催日の一覧 `nk.list_race_ids` も取得後に `nk.FETCH_PAUSE_SEC` 待つ（一覧→1 レース目の取得を連続させない）。
+  `gen_win_backtest_data.sh` の結果 HTML 取得も同じ定数を読んで待つ。
+- 間隔はプロセス単位でしか守られない。**netkeiba を取得するスクリプトは並走させない**（2 本同時に流すと合計の頻度が下限を割る）。
+- 保存済みのページは取り直さない。確定判定は「着順あり＋単勝払戻あり」だけなので、単勝以外の払戻が後から載った・
+  訂正されたページを取り直したいときは `.cache_nk_result_html/<race_id>.html` を消してから流し直す。
 
 ## 注意
 
