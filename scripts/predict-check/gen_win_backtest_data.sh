@@ -134,6 +134,8 @@ while IFS=$'\t' read -r date pid venue _ _ rnum _; do
 done < "$WORKDIR/bt_races.tsv"
 
 echo "[5/5] netkeiba 結果 HTML（res_NKID.html）"
+# 取得間隔は nk.FETCH_PAUSE_SEC（バルク取得の下限 3,334ms 以上・#763）を読んで揃える（値を 2 か所に持たない）
+FETCH_PAUSE_SEC="$(python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import nk; print(nk.FETCH_PAUSE_SEC)' "$REPO_ROOT/scripts/predict-check")"
 while IFS=$'\t' read -r _ _ _ _ _ _ nkid; do
   outf="$WORKDIR/res_${nkid}.html"
   [[ -f "$outf" ]] && continue
@@ -143,7 +145,7 @@ while IFS=$'\t' read -r _ _ _ _ _ _ nkid; do
     echo "  FAIL: $nkid" >&2
     rm -f "$outf"
   }
-  sleep 1  # netkeiba pacing
+  sleep "$FETCH_PAUSE_SEC"  # 取得失敗でも待つ（失敗が続いても間隔を崩さない）
 done < "$WORKDIR/bt_races.tsv"
 
 echo "done. 出力先: $WORKDIR"

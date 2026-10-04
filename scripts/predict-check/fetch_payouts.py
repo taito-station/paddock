@@ -11,8 +11,7 @@ extract_preds.py が出すので、本スクリプトは確定配当だけを担
 """
 import sys
 import json
-import time
-from nk import list_race_ids, parse_race_id, fetch_payouts
+from nk import list_race_ids, parse_race_id, parse_payouts, result_page
 
 if len(sys.argv) < 2:
     print(__doc__, file=sys.stderr)
@@ -25,12 +24,13 @@ ids = list_race_ids(date, venues)
 out = []
 for rid in ids:
     p = parse_race_id(rid)
-    p["payouts"] = fetch_payouts(rid)
+    # 取得間隔・確定ページのキャッシュは nk.result_page が持つ（#763）。parse_payouts の warn は残す
+    # （券種ごとの組合せ件数と配当件数の不一致は金額に直結するので、未完ページの warn と重なっても出す）
+    p["payouts"] = parse_payouts(result_page(rid), rid)
     out.append(p)
     win = p["payouts"].get("win", {})
     note = " ".join(f"{k}={v}" for k, v in win.items()) or "（払戻なし）"
     print(f"{p['venue_jp']}{p['race_num']:>2}R 単勝 {note}", file=sys.stderr)
-    time.sleep(0.8)
 
 json.dump(out, sys.stdout, ensure_ascii=False)
 print(f"# saved {len(out)} races", file=sys.stderr)

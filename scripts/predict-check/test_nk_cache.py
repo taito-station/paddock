@@ -6,6 +6,8 @@
 (2) 確定済みページだけを保存し、未完ページは保存しない（が HTML は返す）
 (3) 切断・空のキャッシュは削除して取り直す。パーサ依存の検査は読み出しでは行わない
 (4) 書き込みはアトミック（失敗時に最終パスへも tmp も残さない）
+(5) 取得間隔は 3,334ms 以上で、一覧取得の後にも待つ。fetch_results.py / fetch_payouts.py は結果ページを
+    nk.result_page 経由で取り（curl 直叩き・固定 sleep なし）、キャッシュに当たれば待たない（#763）
 """
 
 import contextlib
@@ -213,6 +215,89 @@ def test_is_truncated():
     assert nk.is_truncated(b"<html><body>")
     assert not nk.is_truncated(COMPLETE)
     assert not nk.is_truncated(b"<HTML></HTML>\n")
+
+
+LIST_HTML = f'<a href="../race/shutuba.html?race_id={RID}">1R</a>'.encode("utf-8")
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def test_fetch_pause_meets_bulk_floor():
+    # バルク取得は 0.3 rps 以下＝3,334ms 以上（knowledge/netkeiba-datasource.md 決定ログ #721・#763）
+    assert nk.FETCH_PAUSE_SEC * 1000 >= 3334, nk.FETCH_PAUSE_SEC
+
+
+@contextlib.contextmanager
+def _patched_network(list_raw, page_raw, cache_dir):
+    """nk.curl（一覧ページ）・time.sleep・既定の ResultPages を差し替える。ネットワークに出ない。"""
+    curl_urls, sleeps = [], []
+    page_fetch = FakeFetch(page_raw)
+    saved = (nk.curl, nk.time.sleep, nk._default_pages)
+
+    def fake_curl(url, timeout=25):
+        curl_urls.append(url)
+        return list_raw
+
+    nk.curl = fake_curl
+    # stdlib の time.sleep ごと差し替える（スクリプト側に固定の time.sleep が戻っても sleeps に出て落ちるように）
+    nk.time.sleep = sleeps.append
+    nk._default_pages = nk.ResultPages(cache_dir=cache_dir, fetch=page_fetch, sleep=sleeps.append)
+    try:
+        yield curl_urls, page_fetch, sleeps
+    finally:
+        nk.curl, nk.time.sleep, nk._default_pages = saved
+
+
+def test_list_race_ids_pauses_after_fetch():
+    with tempfile.TemporaryDirectory() as d, _patched_network(LIST_HTML, b"", d) as (curl_urls, _, sleeps):
+        assert nk.list_race_ids("20260701") == [RID]
+        assert len(curl_urls) == 1
+        assert sleeps == [nk.FETCH_PAUSE_SEC]  # 一覧→1 レース目の取得が連続しない
+
+
+def _run_script(name, argv):
+    import runpy
+
+    out, err = io.StringIO(), io.StringIO()
+    saved_argv = sys.argv
+    sys.argv = [name] + argv
+    try:
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            runpy.run_path(os.path.join(SCRIPT_DIR, name), run_name="__main__")
+    finally:
+        sys.argv = saved_argv
+    return out.getvalue()
+
+
+def _check_script_uses_result_page(name, check_out):
+    with tempfile.TemporaryDirectory() as d:
+        with _patched_network(LIST_HTML, COMPLETE, d) as (curl_urls, page_fetch, sleeps):
+            check_out(_run_script(name, ["20260701"]))
+            assert len(curl_urls) == 1 and "race_list_sub" in curl_urls[0]  # 結果ページは curl を直接叩かない
+            assert len(page_fetch.urls) == 1  # 結果ページは nk.result_page 経由で 1 回
+            assert sleeps == [nk.FETCH_PAUSE_SEC] * 2  # 一覧 1 回 + 結果ページ 1 回。固定 sleep は無い
+        # 2 回目（別プロセス相当）は確定済みキャッシュに当たり、結果ページの取得も待ちもしない
+        with _patched_network(LIST_HTML, b"", d) as (_, page_fetch, sleeps):
+            check_out(_run_script(name, ["20260701"]))
+            assert page_fetch.urls == []
+            assert sleeps == [nk.FETCH_PAUSE_SEC]  # 一覧の 1 回だけ
+
+
+def test_fetch_payouts_script_uses_result_page():
+    import json
+
+    def check(out):
+        assert json.loads(out)[0]["payouts"].get("win") == {"4": 860}
+
+    _check_script_uses_result_page("fetch_payouts.py", check)
+
+
+def test_fetch_results_script_uses_result_page():
+    import json
+
+    def check(out):
+        assert {r["horse_num"]: r["rank"] for r in json.loads(out)[0]["rows"]} == {4: 1, 7: 2}
+
+    _check_script_uses_result_page("fetch_results.py", check)
 
 
 def main() -> int:

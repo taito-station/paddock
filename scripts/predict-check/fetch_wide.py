@@ -4,7 +4,7 @@
 **ワイド(type=5)は未対応**（Issue #187）。ライブ EV 計算でワイドを反映するため、
 netkeiba のオッズ API (`api_get_jra_odds.html?type=5`) を直接叩く。
 
-確定後の払戻を取る `nk.fetch_payouts`（result.html パース）とは別ソース＝
+確定後の払戻を取る `nk.parse_payouts`（result.html パース）とは別ソース＝
 発走前の変動オッズである点に注意。
 
 使い方:

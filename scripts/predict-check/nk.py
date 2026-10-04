@@ -56,6 +56,7 @@ def list_race_ids(date_yyyymmdd: str, venue_codes=None):
         raise ValueError(f"venue コードは 2桁数字: {venue_codes!r}")
     url = f"https://race.netkeiba.com/top/race_list_sub.html?kaisai_date={date_yyyymmdd}"
     html = decode(curl(url))
+    time.sleep(FETCH_PAUSE_SEC)  # 一覧→1 レース目の取得を連続させない（#763）
     ids = sorted(set(re.findall(r"race_id=([0-9]{12})", html)))
     if venue_codes:
         vs = set(venue_codes)
@@ -96,8 +97,9 @@ def race_post_times(date_yyyymmdd: str, venue_codes=None):
         raise ValueError(f"venue コードは 2桁数字: {venue_codes!r}")
     url = f"https://race.netkeiba.com/top/race_list_sub.html?kaisai_date={date_yyyymmdd}"
     out = parse_post_times(decode(curl(url)), venue_codes)
-    # HTML 取得は成功したのに 1 件も取れない＝サイト構造変化の疑い。他の取得関数
-    # （fetch_result/fetch_payouts）と揃えて警告し、呼び出し側が「全レース終了」と誤認するのを防ぐ。
+    # 単発取得（upcoming_races.py が 1 回呼ぶだけ）なので list_race_ids と違い取得後に待たない。
+    # HTML 取得は成功したのに 1 件も取れない＝サイト構造変化の疑い。他のパーサ
+    # （parse_result/parse_payouts）と揃えて警告し、呼び出し側が「全レース終了」と誤認するのを防ぐ。
     if not out:
         print(f"[warn] 発走時刻を抽出できませんでした（HTML 構造変化の疑い）: {date_yyyymmdd}",
               file=sys.stderr)
@@ -116,11 +118,6 @@ def parse_race_id(rid: str):
 
 
 RESULT_URL = "https://race.netkeiba.com/race/result.html?race_id={rid}"
-
-
-def fetch_result(rid: str):
-    """race/result.html を取得してパースし finishing rows を返す（キャッシュ無し・当日運用向け）。"""
-    return parse_result(decode(curl(RESULT_URL.format(rid=rid))), rid)
 
 
 def parse_result(html: str, rid: str, warn: bool = True):
@@ -162,11 +159,6 @@ PAYOUT_TYPE = {
 }
 # 無順（quinella/wide/trio）は組番を昇順ソートして `-` 連結、順序付きは出現順 `>` 連結。
 _UNORDERED = {"quinella", "wide", "trio"}
-
-
-def fetch_payouts(rid: str):
-    """race/result.html を取得して確定配当を返す（キャッシュ無し・当日運用向け）。"""
-    return parse_payouts(decode(curl(RESULT_URL.format(rid=rid))), rid)
 
 
 def parse_payouts(html: str, rid: str, warn: bool = True):
@@ -239,10 +231,12 @@ def parse_payouts(html: str, rid: str, warn: bool = True):
 
 # ---------- result.html の HTML 単位キャッシュ（#714） ----------
 # 着順（parse_result）・確定単勝オッズ（zure_sign_probe.parse_result_odds）・払戻（parse_payouts）は
-# 同じ result.html を読むので、ページを 1 回だけ取得して共有する（分析スクリプト用。当日運用の
-# fetch_result / fetch_payouts はレース確定前にも呼ばれるのでキャッシュしない）。
+# 同じ result.html を読むので、ページを 1 回だけ取得して共有する。確定前のページは保存しないので、
+# レース当日に呼ぶ fetch_results.py / fetch_payouts.py もこの経路を通る（#763）。
 RESULT_CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".cache_nk_result_html")
-FETCH_PAUSE_SEC = 1.5  # netkeiba への礼儀（ネットワーク取得したときだけ待つ）
+# netkeiba への取得間隔（ネットワーク取得したときだけ待つ）。バルク取得は 0.3 rps 以下＝3,334ms 以上
+# （knowledge/netkeiba-datasource.md 決定ログ #721・#763）。結果ページ（ResultPages）と一覧（list_race_ids）の待ちはこの定数。
+FETCH_PAUSE_SEC = 3.5
 
 
 def is_truncated(raw: bytes) -> bool:

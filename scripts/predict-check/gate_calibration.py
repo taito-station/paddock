@@ -54,7 +54,7 @@ BET_LABEL = {"wide": "ワイド", "quinella": "馬連", "trio": "3連複"}
 def combo_key(combo):
     """馬番リスト → 払戻の combination_code（無順券種: 昇順ソートして `-` 連結）。
 
-    本体 Rust `BetCombination::combination_code` および `nk.fetch_payouts` の規則と一致させる。
+    本体 Rust `BetCombination::combination_code` および `nk.parse_payouts` の規則と一致させる。
     ソートは**数値順**（文字列順だと 10 < 5 になり 3 連複のキーが崩れる）。
     """
     return "-".join(str(n) for n in sorted(int(n) for n in combo))
