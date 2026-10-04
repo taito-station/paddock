@@ -53,9 +53,19 @@ async fn main() -> anyhow::Result<ExitCode> {
     let (netkeiba_id, race_id) = args.resolve_race_id()?;
 
     let app = setup::build_app(args.interval).await?;
+    // pool を閉じてから終える（#717）
+    rdb_gateway::pool::close_after(&app.pool, run(&app, &args, &netkeiba_id, race_id)).await
+}
+
+async fn run(
+    app: &setup::App,
+    args: &cli::Cli,
+    netkeiba_id: &str,
+    race_id: paddock_domain::RaceId,
+) -> anyhow::Result<ExitCode> {
     let resp = match app
         .card
-        .ingest(&netkeiba_id, race_id.clone(), args.force)
+        .ingest(netkeiba_id, race_id.clone(), args.force)
         .await
     {
         Ok(resp) => resp,
@@ -66,7 +76,7 @@ async fn main() -> anyhow::Result<ExitCode> {
             IngestFailure::Skip(reason) => {
                 println!(
                     "{}",
-                    skip_message(&reason, &race_id.to_string(), &netkeiba_id)
+                    skip_message(&reason, &race_id.to_string(), netkeiba_id)
                 );
                 return Ok(ExitCode::SUCCESS);
             }
@@ -101,7 +111,7 @@ async fn main() -> anyhow::Result<ExitCode> {
     if args.skip_history {
         println!("近走: --skip-history のため取り込みなし");
     } else {
-        run_history(&app, &netkeiba_id, &resp.horse_ids).await?;
+        run_history(app, netkeiba_id, &resp.horse_ids).await?;
     }
 
     // 近走取り込み（主目的）まで終えた後で degraded を非0 exit で surface する。

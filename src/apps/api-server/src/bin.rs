@@ -1,6 +1,6 @@
 use actix_web::{App, HttpServer, web};
 use netkeiba_scraper::UreqNetkeibaScraper;
-use rdb_gateway::PostgresRepository;
+use rdb_gateway::{PostgresRepository, pool};
 
 use api_server::app;
 use api_server::setup;
@@ -8,6 +8,12 @@ use api_server::setup;
 #[actix_web::main]
 async fn main() -> anyhow::Result<()> {
     let s = setup::build().await?;
+    let db_pool = s.pool.clone();
+    // pool を閉じてから終える（#717）
+    pool::close_after(&db_pool, run(s)).await
+}
+
+async fn run(s: setup::Setup) -> anyhow::Result<()> {
     let addr = s.server_addr.clone();
     let interactor = web::Data::new(s.interactor);
     let odds = web::Data::new(s.odds);

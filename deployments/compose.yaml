@@ -9,6 +9,18 @@ services:
   postgres:
     image: postgres:17-alpine
     container_name: paddock-postgres
+    # idle のまま残ったセッションをサーバ側で切る（#717）。Lima のポート転送はクライアントの切断を
+    # 伝えないため、Terminate を送らずに終わった接続（panic・kill・テストの失敗）が残り続ける。
+    # - idle_session_timeout=30min: sqlx の pool は idle 接続を最長でも約 20 分（reaper 周期 10 分 +
+    #   idle_timeout 10 分）で自分で閉じるので、正当な接続には当たらない。
+    # - idle_in_transaction_session_timeout=10min: トランザクション中に切れた接続は idle_session_timeout
+    #   の対象外で、行ロックを握ったまま残る。リポジトリのトランザクションは関数内で完結する。
+    command:
+      - postgres
+      - -c
+      - idle_session_timeout=30min
+      - -c
+      - idle_in_transaction_session_timeout=10min
     # 開発専用の固定資格情報（本番流用禁止）。
     environment:
       POSTGRES_USER: paddock

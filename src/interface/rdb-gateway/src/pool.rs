@@ -28,6 +28,20 @@ pub async fn connect(database_url: &str) -> Result<PgPool> {
     Ok(pool)
 }
 
+/// `fut` を最後まで実行し、結果が Ok でも Err でも `pool` を閉じてから結果を返す（#717）。
+///
+/// 単発の bin は `main` の本体をこれで包む。閉じずにプロセスを終えると、Terminate を送らずに
+/// ソケットだけが切れる。共有 DB への Lima のポート転送はその切断をサーバへ伝えないため、
+/// サーバ側に idle のバックエンドが残り続ける。`PgPool::close` は Terminate を送るので残らない。
+///
+/// `PgPool::close` は貸し出し中の接続がすべて返るまで待つ。`fut` の外で接続を握ったまま動き続ける
+/// タスク（`tokio::spawn` したバックグラウンド処理など）があると、ここから返らない。
+pub async fn close_after<T>(pool: &PgPool, fut: impl Future<Output = T>) -> T {
+    let out = fut.await;
+    pool.close().await;
+    out
+}
+
 pub async fn migrate(pool: &PgPool) -> Result<()> {
     sqlx::migrate!("../../../deployments/db/migrations")
         .run(pool)
@@ -98,14 +112,26 @@ pub async fn check_migration_status(pool: &PgPool) -> Result<MigrationStatus> {
 ///   - [`MigrationStatus::StaleBinary`] → warn して **継続**（DB が先行しているだけで、当該バイナリの動作は成立しうる）。
 ///   - [`MigrationStatus::Pending`] → warn して **`Err` で停止**（未適用のまま動くと不整合。明示適用を促す）。
 ///   - [`MigrationStatus::Uninitialized`] → warn して **`Err` で停止**（テーブルが無い＝初回セットアップ未実施）。
+///
+/// `Err` で返すときは、作った pool を閉じてから返す（#717。呼び出し側に pool が渡らず
+/// [`close_after`] で包めないため、ここで閉じる）。
 pub async fn connect_checked(database_url: &str, auto_migrate: bool) -> Result<PgPool> {
     let pool = connect(database_url).await?;
+    match verify(&pool, auto_migrate).await {
+        Ok(()) => Ok(pool),
+        Err(e) => {
+            pool.close().await;
+            Err(e)
+        }
+    }
+}
+
+async fn verify(pool: &PgPool, auto_migrate: bool) -> Result<()> {
     if auto_migrate {
-        migrate(&pool).await?;
-        return Ok(pool);
+        return migrate(pool).await;
     }
 
-    match check_migration_status(&pool).await? {
+    match check_migration_status(pool).await? {
         MigrationStatus::UpToDate => {}
         MigrationStatus::StaleBinary(v) => {
             tracing::warn!(
@@ -129,5 +155,5 @@ pub async fn connect_checked(database_url: &str, auto_migrate: bool) -> Result<P
             ));
         }
     }
-    Ok(pool)
+    Ok(())
 }

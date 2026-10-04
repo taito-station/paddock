@@ -105,6 +105,10 @@ scripts/install-git-hooks.sh
 - スキーマは各アプリ起動時に自動マイグレート（`deployments/db/migrations/`、sqlx）。接続プールは `max_connections=5`。
 - テスト（`rdb-gateway` の統合テスト等）は `#[sqlx::test]` がテストごとに一時 database を自動作成・破棄する。
   実行時に PG を指す `DATABASE_URL` が要る（例: `DATABASE_URL=postgres://paddock:paddock@localhost:5432/paddock cargo test`）。
+  ローカルの共有 DB（Lima 経由）に向けるときは、`?options=-c%20idle_session_timeout%3D60s` を付ける
+  （例: `DATABASE_URL='postgres://paddock:paddock@127.0.0.1:5432/paddock?options=-c%20idle_session_timeout%3D60s' cargo test`）。
+  `#[sqlx::test]` はテスト 1 本ごとに接続を 1 本、閉じずに残し、Lima のポート転送越しではそれがサーバ側に残り続ける。
+  付けないと、全テストで `max_connections` を使い切る（#717）。この設定では、テストの中で接続を 60 秒以上 idle のまま握ると切られる。
 
 ## データを取り込む
 

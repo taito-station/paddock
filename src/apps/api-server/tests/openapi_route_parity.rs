@@ -9,6 +9,7 @@
 //! 詳細な設計と限界は `app::REGISTERED_ROUTES` の doc を参照。
 
 use std::collections::BTreeSet;
+use std::time::Duration;
 
 use actix_web::{App, test as actix_test, web};
 use sqlx::postgres::PgPoolOptions;
@@ -147,10 +148,11 @@ macro_rules! route_is_wired {
 /// 判定ロジック（`route_is_wired!`）自体が常に true を返す壊れ方をしていないことを担保する。
 #[actix_web::test]
 async fn every_registered_route_is_wired() {
-    // 遅延接続プール（この時点では接続しない）。DB が無ければ handler が 500（Internal）に倒れるが、
-    // それも「ルートは解決された」証拠になる（`route_is_wired!` 参照）。
+    // つながらないアドレスへの遅延接続プール（共有 DB に接続を残さないため。#717）。handler は 500
+    // （Internal）に倒れるが、それも「ルートは解決された」証拠になる（`route_is_wired!` 参照）。
     let pool = PgPoolOptions::new()
-        .connect_lazy("postgres://paddock:paddock@127.0.0.1:5432/paddock")
+        .acquire_timeout(Duration::from_millis(100))
+        .connect_lazy("postgres://unused@127.0.0.1:1/unused")
         .expect("build lazy pool");
     let interactor = web::Data::new(Interactor::new(PostgresRepository::new(pool.clone())));
     let results = web::Data::new(ResultsInteractor::new(

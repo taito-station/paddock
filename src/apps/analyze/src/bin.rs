@@ -137,8 +137,12 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let app = setup::build_app().await?;
+    // pool を閉じてから終える（#717）
+    rdb_gateway::pool::close_after(&app.pool, run(&app, args.command)).await
+}
 
-    match args.command {
+async fn run(app: &setup::App, command: cli::Command) -> anyhow::Result<()> {
+    match command {
         cli::Command::Horse { name } => {
             // 入力を正規化（半角カナ→全角等）してから results を中間一致で検索する。
             let query = HorseName::try_from(name.as_str())?;
@@ -447,7 +451,7 @@ async fn main() -> anyhow::Result<()> {
 async fn run_migrate(dry_run: bool) -> anyhow::Result<()> {
     use anyhow::Context;
     use paddock_config::Config;
-    use rdb_gateway::pool::{self, MigrationStatus};
+    use rdb_gateway::pool;
 
     let config = Config::from_env().context("load config")?;
     config.init_tracing();
@@ -457,8 +461,16 @@ async fn run_migrate(dry_run: bool) -> anyhow::Result<()> {
         .await
         .context("connect Postgres")?;
 
+    // pool を閉じてから終える（#717）
+    pool::close_after(&pool, run_migrate_with_pool(&pool, dry_run)).await
+}
+
+async fn run_migrate_with_pool(pool: &rdb_gateway::PgPool, dry_run: bool) -> anyhow::Result<()> {
+    use anyhow::Context;
+    use rdb_gateway::pool::{self, MigrationStatus};
+
     if dry_run {
-        match pool::check_migration_status(&pool)
+        match pool::check_migration_status(pool)
             .await
             .context("check migration status")?
         {
@@ -490,7 +502,7 @@ async fn run_migrate(dry_run: bool) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    pool::migrate(&pool).await.context("apply migrations")?;
+    pool::migrate(pool).await.context("apply migrations")?;
     println!("マイグレーションを適用しました（DB は最新です）。");
     Ok(())
 }

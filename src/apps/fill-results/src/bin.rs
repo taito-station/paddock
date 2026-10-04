@@ -90,11 +90,13 @@ async fn main() -> anyhow::Result<()> {
             let pool = pool::connect_checked(&config.paddock_db_url, false)
                 .await
                 .context("connect Postgres")?;
-            let repo = PostgresRepository::new(pool);
-            apply::check_db_name(&repo.current_database().await?, &db_name)?;
-            let report = apply::run(&repo, &targets, &out_dir, dry_run).await;
-            // 接続を閉じてから終える（#717: 閉じずに終えた接続がサーバ側に残ることがある）
-            repo.pool.close().await;
+            // pool を閉じてから終える（#717: 閉じずに終えた接続がサーバ側に残ることがある）
+            let report = pool::close_after(&pool, async {
+                let repo = PostgresRepository::new(pool.clone());
+                apply::check_db_name(&repo.current_database().await?, &db_name)?;
+                anyhow::Ok(apply::run(&repo, &targets, &out_dir, dry_run).await)
+            })
+            .await?;
             let mut total = 0usize;
             for r in &report.races {
                 let nums = r.inserted.as_ref().unwrap_or(&r.planned);

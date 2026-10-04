@@ -31,11 +31,16 @@ async fn main() -> anyhow::Result<()> {
     let built = setup::build_app(fetch_min_interval).await?;
     let app = Arc::new(built.app);
     let pdfs_dir = built.pdfs_dir;
+    let pool = built.pool;
 
-    match cli.command.unwrap_or(Command::Ingest(cli.ingest)) {
-        Command::Ingest(args) => run_ingest(app, args).await,
-        Command::Fetch(args) => run_fetch(app, pdfs_dir, args).await,
-    }
+    // pool を閉じてから終える（#717）
+    rdb_gateway::pool::close_after(&pool, async move {
+        match cli.command.unwrap_or(Command::Ingest(cli.ingest)) {
+            Command::Ingest(args) => run_ingest(app, args).await,
+            Command::Fetch(args) => run_fetch(app, pdfs_dir, args).await,
+        }
+    })
+    .await
 }
 
 /// Convert a `--max-rps` requests/second cap into the minimum spacing between
