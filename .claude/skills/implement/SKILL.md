@@ -50,8 +50,9 @@ scripts/cq search --q "<関連する関数名・型名・概念>"
 ```
 
 3. **シンボル追跡**（精密な定義・参照の追跡が必要な場合）:
-   - `mcp__serena__find_symbol` で関連する型・関数を特定
-   - `mcp__serena__find_referencing_symbols` で依存関係を把握
+   - 組み込みの `LSP` ツールの `workspaceSymbol` / `goToDefinition` で関連する型・関数を特定
+   - `findReferences` / `incomingCalls` で依存関係を把握
+   - LSP が使えない場合は grep で絞ってから Read する
 
 #### ゲート判定
 
