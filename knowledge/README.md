@@ -625,3 +625,52 @@ cq の役割（横断検索/発見・REQ-ID トレース）は変わらない。
 - **運用**: シンボル探索は組み込み `LSP` を使う（deferred tool なら ToolSearch で読み込む）。LSP が使えない環境では、cq の `def` / `refs`（構文ベースで型解決なし）と grep→Read で補う
 - **worktree での注意**: LSP サーバーはセッションの作業ディレクトリで起動するため、worktree 内のファイルを渡しても primary の絶対パスが返ることがある。結果のパスを worktree 側に読み替えてから Read / Edit する（`CLAUDE.md` の探索規律にも同じ注記を置いた）
 - **残る差分**: hve-playbook の再適用で上書きされる paddock 固有の注記（#652 の決定ログ方式など）をどう扱うかは #754 で検討する
+
+### #754: knowledge 運用は paddock 方式を維持し、hve-playbook へ還元して差分を解消する (2026-10-04) — 採用
+
+#### コンテキスト
+
+hve-playbook の `setup.sh` は `.claude/rules/hve/`・`skills/hve-*` を毎回削除して置き直す。#753 の再適用では、paddock 固有の注記を手で戻す必要があった。注記の中身は、インライン決定ログ（#652）、単一の短縮 SHA と `title` を持たない frontmatter、検証スクリプトの案内など。そこで「paddock を hve-playbook の knowledge 標準へ移すか」を検討した。
+
+調べて分かったこと（2026-10-04 時点、hve-playbook `cf3a2c9`）は次のとおり。
+
+- hve-playbook の knowledge 標準は、もともと paddock から還元されたもの（hve-playbook `b0f660e`）。ただし還元時の汎用化の段階で、`title` 必須・source ごとの SHA マップ・SHA 一致による stale 判定になっていた。paddock の形式（単一の短縮 SHA・`title` なし・祖先判定）とは当初から違っていた。その後 `7f87d70` で、SHA の例示がフル表記になった。
+- 標準は文章だけで、stale 検出と決定ログの不変性検査のスクリプトは同梱されていない。hve-playbook 自身は `knowledge/adr/` に MADR 形式の ADR（10 本）を置いているが、frontmatter・stale 検出・不変性検査は使っていない（ADR は frontmatter を持たず、CI での検査も無い）。
+- 標準の中に矛盾がある。
+  - append-only の検査（`rules/hve/artifact-management.md` の `git diff origin/main..HEAD`）は、すべての `-` 行を違反として拾う。一方で MADR 規約は旧 ADR のステータス書き換えを義務にしている。
+  - 同じ検査は 2 ドット指定なので、分岐後に main へ入った ADR を誤って違反と判定する。
+- hve-playbook の ADR 様式規約（documentation-standards）は、既存の別配置を継続してよいと認めている。ただし様式は MADR に従うことを求める。
+- paddock を全面移行するコストは次のとおりで、得られるものに見合わない。
+  - 決定ログ 123 件（25 ファイル。本エントリを除く）を `knowledge/adr/` に分割し、MADR に変換する（節名の表記が揺れており、正規化が要る）。
+  - knowledge 27 本の frontmatter に `title` を足す。`distilled_from_sha` を持つ 15 本は、その SHA を source ごとの SHA マップに変える。残る 12 本は `sources`・`distilled_from_sha` を持たないので、標準の必須項目を満たすには新たに足す必要がある。
+  - 検査スクリプト 3 本（計 1,874 行）とそのテスト（計 4,240 行）を書き直す。stale 確認の hook 2 本（計 170 行、テスト 310 行）も追従が要る。
+  - 旧 ADR 番号を参照している 1,611 行（`git grep -E 'ADR[ -]?[0-9]{4}'`、2026-10-04 の main）の引き方が変わる。うち Rust は 196 行で、コメント 171 行のほか定数名・文字列リテラルを含む。
+
+#### 決定
+
+決定ログはインライン（#652）、frontmatter は単一 SHA と祖先判定（`scripts/check-doc-classes.py` の `merge-base --is-ancestor`）を**維持する**。hve-playbook 標準との差は、paddock を寄せるのではなく **hve-playbook 側へ還元して解消する**。還元は次の hve-playbook の issue で行う。
+
+- taito-station/hve-playbook#26: 決定ログの配置を選択肢（独立ファイル／インライン）にし、append-only 検査の矛盾（ステータス書き換え・2 ドット diff）を直す
+- taito-station/hve-playbook#27: stale 検出・決定ログ不変性検査・bump のスクリプトを同梱し、stale 判定を祖先判定方式にする
+- taito-station/hve-playbook#28: `updated` は本文が実質的に変わったときだけ進める規則と、クォート必須の理由を標準に入れる
+- taito-station/hve-playbook#29: `setup.sh` が上書きしない、プロジェクト固有の補足（override）の置き場所を作る
+
+還元が入ったら、paddock で再適用し、`.claude/rules/hve/` と `.claude/skills/hve-akm/` の写しに足した注記を外す。プロジェクト固有の事実は override（hve-playbook#29）へ移し、同梱スクリプト（hve-playbook#27）と paddock の `scripts/check-*.py` の関係もそこで決める（#756）。それまでは、#753 と同じく再適用のたびに注記を戻す。
+
+#### 理由
+
+- 標準のうち frontmatter・stale 検出・不変性検査には、実装も自リポでの運用実績も無い。paddock のほうが進んでいる（祖先判定、内容変更でないコミットの遡り、fail-closed、テスト付きの検査）ので、寄せる向きが逆になる。
+- 全面移行は、上のコストに対して運用上の利得がほとんど無い。#652 で独立 ADR ファイルを廃止した理由（二重正本の維持コスト）は今も成り立つ。
+- ADR 0092（[ci-pipeline.md](ci-pipeline.md)）の「hve-playbook を上流 SoT として追従する」方針と両立する。ADR 0092 は「パスを変えずに hve ルール側を paddock パスに書き換える」案を、上流追従のコストが続くとして却下した。再適用のたびに写しへ注記を戻す今の運用は、これと同じ種類のコストを払い続けている。今回は上流そのものを直してこのコストを消す。ただし還元（hve-playbook#26〜#29）が入るまでは、注記を戻す運用を暫定として続ける。
+
+#### 却下した代替案
+
+- **全面移行（hve-playbook 標準の独立 ADR ファイル方式へ移す）**: 決定を `knowledge/adr/` に 1 決定 1 ファイル・MADR 形式で置き、frontmatter を `title` 付き・source ごとの SHA マップに揃える。独立ファイルという点は #652 より前（`docs/original-docs/` の 0 埋め 4 桁 ADR）と同じだが、配置・様式・frontmatter は当時と違い、hve-playbook 標準に合わせる形になる。上のコストと、#652 の理由が今も成り立つことから却下。**#652 の issue 本文では「案 1（ADR を正本とし knowledge は索引）」と「現状維持」を不採用としていたが、決定ログのエントリには「却下した代替案」節が無かったので、その記録をここで補う。**
+- **折衷（新しい決定だけ `knowledge/adr/` に書き、既存はインラインのまま）**: 決定の正本が二か所に分かれ、`git grep` での引き方も二通りになる。
+- **注記の手戻しを続ける（何も変えない）**: #754 の発端である再適用のたびの手作業が残る。
+
+#### 影響
+
+- **変更ファイル**: 本エントリのみ（`knowledge/README.md`）。knowledge の規約本文と frontmatter の方式は変えない。
+- **issue**: hve-playbook#26〜#29（還元）、paddock #756（還元後の再適用と注記の撤去。hve-playbook の 4 本に依存）。
+- **#753 の「#754 で検討する」**: このエントリで決着した。
