@@ -7,7 +7,7 @@ sources:
   - qa/QA-setup-boilerplate-410.md
   - docs-original/717-db-connection-leak.md
   - qa/QA-db-connection-leak-717.md
-distilled_from_sha: "817b0fc"
+distilled_from_sha: "4f94be6"
 updated: "2026-10-04"
 ---
 
