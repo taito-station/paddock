@@ -337,6 +337,11 @@ paddock-analyze predict <race_id> --blend-alpha 0.2
 ```
 
 - **本番モデル**: 市場単勝 α=0.2 ブレンド・m=10 縮約（`RECOMMENDED_MARKET_BLEND_ALPHA`・CLAUDE.md と一致）
+- **`--help` すら返らない（CPU 0%）ときの切り分け**（#749。2026-10-03 に `paddock-predict` だけが `main` 前の `_dyld_start` で止まり、翌日の再ビルドでは再現せず原因未特定）。バイナリを消す・作り直す**前に**、当時のファイルのまま証拠を取る（作り直すと再現が消える）:
+  1. `sample <pid> 2` で止まっている段階を見る。`_dyld_start` のみ＝`main` 前（ロードか OS の起動時検査）、`main` 以降＝アプリ側（DB 接続待ちなら `pg_stat_activity` を見る）
+  2. `otool -L` を正常な `paddock-analyze` と比べ、`DYLD_PRINT_LIBRARIES=1 paddock-predict --help` でどの dylib まで進むかを見る
+  3. OS ログは **`/usr/bin/log show`** で引く（zsh では `log` がシェル組み込みに当たり、統合ログを読まずに空振りする）。例: `/usr/bin/log show --last 5m --predicate 'process IN {"syspolicyd","amfid","XprotectService"}' --style compact`
+  4. 予想を止めないための当座の回避は、別 worktree の独立した `target/` でビルドしたバイナリを絶対パスで使う（開催日の日中に primary の `target/release` を作り直さないため）
 
 ---
 
