@@ -5,8 +5,10 @@ doc_class: [D19, D15]
 tags: [D19, D15]
 sources:
   - qa/QA-setup-boilerplate-410.md
-distilled_from_sha: "6b51b81"
-updated: "2026-08-09"
+  - docs-original/717-db-connection-leak.md
+  - qa/QA-db-connection-leak-717.md
+distilled_from_sha: "817b0fc"
+updated: "2026-10-04"
 ---
 
 # app bootstrap（DI・起動シーケンス）の共通化
@@ -16,6 +18,11 @@ updated: "2026-08-09"
 ## 共通ヘルパ（重複を書かない）
 
 - **接続＋整合チェック**: `rdb_gateway::pool::connect_checked(&config.paddock_db_url, config.paddock_auto_migrate)` を使う（#470/ADR 0070）。起動時 auto-migrate は既定 OFF で、`connect_checked` は read-only 整合チェックのみ（未適用/未初期化なら停止・DB 先行の stale は warn 継続）。適用済み判定は `_sqlx_migrations.success = true` の行だけを見る（**dirty＝前回失敗した行は未適用扱い**）。**pending と stale が同時**（別 worktree が別々に migration を足して交差した状態）なら **Pending を優先して停止**する——自バイナリの未適用 migration があるうちはクエリが壊れうるため。prod（compose の `PADDOCK_AUTO_MIGRATE=true`）だけ従来どおり起動時 `migrate` を適用する。マイグレーションの明示適用は `paddock-analyze migrate`。`connect` / `migrate` / `connect_and_migrate` を各 app で個別に呼ばない（pool 責務として rdb-gateway に集約済み）。
+- **終了時に pool を閉じる**（#717）: `main` の `build_app` より後の本体を `rdb_gateway::pool::close_after(&app.pool, run(&app, ..)).await` で包む（App に `pub pool: PgPool` を持たせる。App が無い・Interactor そのものを返す bin は `repository.pool` の clone でよい）。Ok でも Err（`?` の早期 return を含む）でも `PgPool::close` が走り、Terminate を送ってから終わる。ただし api-server は、actix の worker ランタイムで作られた接続を graceful stop の後に main 側で閉じるので、Terminate が届くかは未検証（届かなければ下のサーバ側の回収に任せる）。閉じずに終えると、共有 DB への Lima のポート転送が切断をサーバへ伝えないため、idle のバックエンドが残り続けて `max_connections` を使い切る。`connect_checked` 自身も、Err で返すときは作った pool を閉じてから返す。テストで共有 DB へ pool や接続を張るときも、最後に閉じる。DB の要らないテストは、共有 DB に向けずにつながらないアドレスの lazy pool を使う（`api-server/tests/common/mod.rs`・`openapi_route_parity.rs`）。
+  - 閉じずに残った分（panic・kill・Ctrl-C で終わった bin〈シグナルを処理していないので、常駐の predict-watch / odds-collect も対話中の predict も `main` に戻らない〉・dioxus の desktop）は、サーバの `idle_session_timeout=30min`（[compose.yaml](../deployments/compose.yaml)）が回収する。sqlx の pool は idle 接続を最長でも約 20 分（reaper 周期 10 分 + idle_timeout 10 分）で自分で閉じるので、正当な接続には当たらない。人が開いたままの対話 psql も 30 分 idle で切られる。
+  - トランザクションの途中で切れた接続（`idle in transaction`）は `idle_session_timeout` の対象外で、行ロックを握ったまま残る。これは `idle_in_transaction_session_timeout=10min` が回収する（rdb-gateway のトランザクションは関数の中で完結し、stdin 待ちなどをまたがない）。人が psql で `BEGIN` したまま 10 分止まった手作業も、切られてロールバックされる。
+  - 既知の制約: `#[sqlx::test]` が panic すると、その一時 DB の接続が最長 30 分残り、その間は次の実行で一時 DB の作り直し（`dropdb`）が `55006` で失敗しうる。TCP keepalive では回収できない（応答するのは生きている `lima-guestagent`）。
+  - `#[sqlx::test]` は、成功してもテスト 1 本ごとに `DATABASE_URL` の DB への接続を 1 本、閉じずに残す（sqlx のテストハーネス側の挙動・実測）。ローカルの共有 DB で全テストを回すと 30 分を待たずに `max_connections` を使い切るので、`DATABASE_URL` に `?options=-c%20idle_session_timeout%3D60s` を付けて、テストの接続だけを 60 秒で切らせる（README の「テスト」）。この設定では、テストの中で接続を 60 秒以上 idle のまま握るとサーバに切られる（pool の接続は取得時の ping で張り直されるが、生の `PgConnection` は張り直されない）。
 - **tracing 初期化**: `config.init_tracing()` を使う（`paddock_config::Config` のメソッド）。`paddock_log` フィルタで `fmt().with_env_filter(...).try_init()` を実行し、不正フィルタは `info` にフォールバック（#238 の html5ever 抑止の回帰は `default_log_filter_is_valid_env_filter` で担保）。各 app で `tracing_subscriber::fmt()...` を直書きしない。tracing は DB 層の責務でないため rdb-gateway でなく paddock-config（ログ設定 `paddock_log` の持ち主）に置く。
 
 典型的な build_app:
@@ -139,3 +146,46 @@ paddock の全 app（predict / api-server / predict-watch / fetch-card / odds-co
 - **不変**: `pool::connect` / `pool::migrate` / `pool::connect_and_migrate`（温存）。prod の起動時マイグレーション挙動（`PADDOCK_AUTO_MIGRATE=true` で従来同等）。migration ファイル自体（`deployments/db/migrations/`・リバーシブル形式）。
 - **運用**: migration 追加後は共有 golden DB へ `paddock-analyze migrate` で明示適用する（起動時には適用されない）。適用は `sqlx` の advisory lock 下で並行安全。stale binary の warn が出たら最新ブランチで再ビルドする。
 - 関連: #410（connect/migrate 共通化）／ADR 0069（deployments 周辺運用）。
+
+### #717: 単発の bin は pool を閉じてから終え、取り残しはサーバの idle_session_timeout で回収する (2026-10-04) — 採用
+
+#### コンテキスト
+
+共有 DB（Lima VM 内の rootless nerdctl コンテナ）に、接続元の無い idle のバックエンドが積み上がり、`max_connections=100` を使い切って `too many clients already` になる事象が繰り返し起きた（analyze の多重起動・開催日の常駐運用・`#[sqlx::test]` の失敗・単発 CLI）。切り分け（`docs-original/717-db-connection-leak.md`）で次が分かった。
+
+- ホスト側のポート転送（`limactl` 2.1.1）は、クライアントが Terminate を送らずに切断したこと（ソケットの切断だけ）を VM 側へ伝えない。VM 内の `lima-guestagent` が接続を握り続け、サーバ側のバックエンドは idle のまま残る。rootlesskit / slirp4netns は無関係（VM 内から同じことをすると消える）。
+- Terminate はデータとして転送されるので、正常に close すれば残らない。sqlx 0.9 の `PgPool::close` と idle_timeout / max_lifetime の回収は Terminate を送る。
+- 全 app が `main` の終わりに pool を閉じていなかった（`fill-results apply` だけが閉じていたが、途中 return では閉じない）。`connect_checked` 自身も Err で返すときに閉じていなかった。
+
+#### 決定
+
+1. `rdb_gateway::pool::close_after(&pool, fut)` を足し、pool を使う bin（predict / predict-watch / odds-collect / fetch-card / fetch-history / fetch-results / analyze（`migrate` 経路を含む）/ ingest-predictions / parse-entries / parse-pdf / api-server / fill-results）の `main` 本体を包む。
+2. `connect_checked` は、Err で返すとき（auto_migrate の失敗・整合チェックの失敗・Pending・Uninitialized）に作った pool を閉じてから返す。
+3. DB の要らないテスト（`api-server/tests/openapi_route_parity.rs`。ルート解決の検査）は、共有 DB に向けていた lazy pool を、つながらないアドレスの lazy pool に替える（`tests/common/mod.rs` と同じ形）。
+4. compose の postgres に `idle_session_timeout=30min` と `idle_in_transaction_session_timeout=10min` を入れ、アプリで塞げない経路（panic・kill・テストの失敗・desktop、トランザクションの途中で切れた接続）の取り残しをサーバ側で回収する。
+5. ローカルの共有 DB でテストを流すときは、`DATABASE_URL` に `?options=-c%20idle_session_timeout%3D60s` を付ける（README）。`#[sqlx::test]` は成功してもテスト 1 本ごとに接続を 1 本残す（実測）ので、30 分の回収では全テストの途中で上限に達する。
+
+#### 理由
+
+- アプリ側の close は、短時間に何十回も起動する形（analyze の多重起動）を防ぐ。サーバ側の回収は、panic・kill など、アプリでは塞げない経路を拾う。片方だけだと、どちらかの経路が残る。
+- `close_after` で本体を 1 つの future として包むと、`?` の早期 return を含めて閉じる処理が 1 か所で必ず走り、ヘルパー単体でテストできる。
+- `idle_session_timeout` を 30 分にすれば、sqlx の pool が idle 接続を最長でも約 20 分（reaper 周期 10 分 + idle_timeout 10 分）で先に閉じるので、正当な接続には当たらない。
+- `idle_session_timeout` はトランザクション中の idle に効かず、そこで切れた接続は行ロックを握ったまま残る。rdb-gateway のトランザクションは関数の中で完結するので、`idle_in_transaction_session_timeout=10min` は正当な処理に当たらない（レビュー指摘を受けてユーザー判断で追加）。
+- api-server は actix の graceful stop で `main` に戻るので `close_after` を通るが、接続は worker のランタイムで作られている。Terminate が届くかは未検証で、届かなければサーバ側の回収に任せる。
+
+#### 却下した代替案
+
+- **TCP keepalive**: サーバから見た相手は生きている `lima-guestagent` で、probe に応答するので検出できない。
+- **Drop ガードで `block_in_place` ＋ `block_on`**: ランタイムの種類に依存し、current_thread のランタイムでは panic する。
+- **pool をグローバルに登録し、終了時にまとめて閉じる**: 暗黙の状態が増える。
+- **`ALTER ROLE ... SET idle_session_timeout`**: コンテナを作り直さずに済むが、設定が DB の中にだけあってリポジトリから見えない。compose を正とする。
+- **Lima のポート転送方式の切り替え**: 根本の対処になりうるが、VM の再起動が要るので今回は対象外にした（ユーザー判断）。
+- **`openapi_route_parity` は共有 DB に向けたまま最後に閉じる**: 途中の assert で panic すると閉じられず、README の `options` も効かない。DB の要らないテストなので、共有 DB に向けない。
+
+#### 影響
+
+- **追加**: `pool::close_after`。各 app の App に `pub pool: PgPool`。compose の postgres の `command` に `idle_session_timeout=30min` と `idle_in_transaction_session_timeout=10min`。README のテスト用 `DATABASE_URL` の例に `options` を足した。
+- **変更**: `connect_checked` は Err で返すときに pool を閉じる。`fill-results apply` の手書きの close を `close_after` に置き換えた。
+- **不変**: desktop（dioxus の GUI）は対象外。各 bin の出力と終了コード。
+- **運用**: 反映は 2 つ。(1) アプリ側: primary で `cargo build --release` し、常駐の predict-watch / odds-collect / api-server を起動し直す（`~/.local/bin/paddock-*` は `target/release` への symlink で、launchd の prefetch-odds も 5 分毎に `target/release/paddock-fetch-card` を起動する。再ビルドするまでは古いバイナリが閉じずに終わり続ける）。(2) サーバ側: compose の変更は、コンテナを作り直すまで反映されない（`limactl shell paddock -- nerdctl compose -f deployments/compose.yaml up -d postgres`。作り直しの直前に `scripts/backup-db.sh` で dump を取り、全プロセスを止めた開催外に行う）。両方を反映すれば開催日の手動の接続掃除は要らなくなる見込みで、#717 の G4（実地検証）で確かめる。
+- 関連: #470 / ADR 0070（`connect_checked` の導入）。

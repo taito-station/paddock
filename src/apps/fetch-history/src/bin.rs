@@ -11,6 +11,12 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let app = setup::build_app().await?;
+    let pool = app.repository.pool.clone();
+    // pool を閉じてから終える（#717）
+    rdb_gateway::pool::close_after(&pool, run(&app, &args)).await
+}
+
+async fn run(app: &setup::App, args: &cli::Cli) -> anyhow::Result<()> {
     let resp = app.fetch_and_store(&args.race_ids, &args.horse_ids).await?;
 
     println!(

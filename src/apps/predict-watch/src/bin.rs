@@ -10,5 +10,6 @@ use clap::Parser;
 async fn main() -> anyhow::Result<()> {
     let args = cli::Cli::parse();
     let app = setup::build_app(args.scrape_delay).await?;
-    watch::run(&app, &args).await
+    // pool を閉じてから終える（#717）
+    rdb_gateway::pool::close_after(&app.pool, watch::run(&app, &args)).await
 }

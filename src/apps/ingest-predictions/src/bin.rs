@@ -9,13 +9,14 @@ use anyhow::{Context, Result};
 use chrono::Utc;
 use clap::Parser;
 use paddock_use_case::Interactor;
-use rdb_gateway::PostgresRepository;
+use rdb_gateway::{PostgresRepository, pool};
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = cli::Cli::parse();
     let app = setup::build_app().await?;
-    ingest(&app.interactor, args.input, args.dry_run).await
+    // pool を閉じてから終える（#717）
+    pool::close_after(&app.pool, ingest(&app.interactor, args.input, args.dry_run)).await
 }
 
 async fn ingest(

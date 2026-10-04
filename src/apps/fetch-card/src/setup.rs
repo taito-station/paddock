@@ -4,13 +4,15 @@ use anyhow::Context;
 use netkeiba_scraper::UreqNetkeibaScraper;
 use paddock_config::Config;
 use paddock_use_case::{CardInteractor, HorseHistoryInteractor};
-use rdb_gateway::{PostgresRepository, pool};
+use rdb_gateway::{PgPool, PostgresRepository, pool};
 
 /// fetch-card が合成する 2 つの interactor。出馬表・オッズ（card）と、
 /// 出走各馬の過去走取り込み（history）を同じ DB プール／スクレイパ設定で束ねる。
 pub struct App {
     pub card: CardInteractor<PostgresRepository, UreqNetkeibaScraper>,
     pub history: HorseHistoryInteractor<PostgresRepository, UreqNetkeibaScraper>,
+    /// 終了時に close する DB プール（#717）。
+    pub pool: PgPool,
 }
 
 pub async fn build_app(interval_ms: Option<u64>) -> anyhow::Result<App> {
@@ -26,9 +28,15 @@ pub async fn build_app(interval_ms: Option<u64>) -> anyhow::Result<App> {
         PostgresRepository::new(pool.clone()),
         build_scraper(interval_ms),
     );
-    let history =
-        HorseHistoryInteractor::new(PostgresRepository::new(pool), build_scraper(interval_ms));
-    Ok(App { card, history })
+    let history = HorseHistoryInteractor::new(
+        PostgresRepository::new(pool.clone()),
+        build_scraper(interval_ms),
+    );
+    Ok(App {
+        card,
+        history,
+        pool,
+    })
 }
 
 /// card / history のスクレイパを同じ間隔設定で生成し、netkeiba への礼節を揃える。

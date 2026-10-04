@@ -6,7 +6,7 @@ use jra_fetcher::JraFetcher;
 use paddock_config::Config;
 use paddock_use_case::PdfInteractor;
 use pdf_parser::HybridParser;
-use rdb_gateway::{PostgresRepository, pool};
+use rdb_gateway::{PgPool, PostgresRepository, pool};
 
 pub type App = PdfInteractor<PostgresRepository, HybridParser, JraFetcher>;
 
@@ -15,6 +15,8 @@ pub type App = PdfInteractor<PostgresRepository, HybridParser, JraFetcher>;
 pub struct Built {
     pub app: App,
     pub pdfs_dir: PathBuf,
+    /// 終了時に close する DB プール（#717）。
+    pub pool: PgPool,
 }
 
 /// Build the app. `fetch_min_interval` sets a global minimum spacing between
@@ -28,7 +30,7 @@ pub async fn build_app(fetch_min_interval: Option<Duration>) -> anyhow::Result<B
     let pool = pool::connect_checked(&config.paddock_db_url, config.paddock_auto_migrate)
         .await
         .context("connect Postgres")?;
-    let repo = PostgresRepository::new(pool);
+    let repo = PostgresRepository::new(pool.clone());
     let app = PdfInteractor::new(
         repo,
         HybridParser::new(),
@@ -37,5 +39,6 @@ pub async fn build_app(fetch_min_interval: Option<Duration>) -> anyhow::Result<B
     Ok(Built {
         app,
         pdfs_dir: PathBuf::from(config.paddock_pdfs_dir),
+        pool,
     })
 }

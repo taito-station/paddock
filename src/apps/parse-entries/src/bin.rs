@@ -15,12 +15,18 @@ async fn main() -> anyhow::Result<()> {
     let args = cli::Cli::parse();
     let parallel = resolve_parallel(args.parallel);
     let app = Arc::new(setup::build_app().await?);
-    let total = args.sources.len();
+    let pool = app.repository.pool.clone();
+    // pool を閉じてから終える（#717）
+    rdb_gateway::pool::close_after(&pool, run(app, args.sources, parallel)).await
+}
+
+async fn run(app: Arc<setup::App>, sources: Vec<String>, parallel: usize) -> anyhow::Result<()> {
+    let total = sources.len();
     let semaphore = Arc::new(Semaphore::new(parallel));
     let mut joinset: JoinSet<(String, paddock_use_case::Result<IngestEntryResponse>)> =
         JoinSet::new();
 
-    for source in args.sources {
+    for source in sources {
         let app = Arc::clone(&app);
         let permit = Arc::clone(&semaphore)
             .acquire_owned()

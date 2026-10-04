@@ -18,6 +18,8 @@ pub struct Setup {
     pub results: ApiResultsInteractor,
     /// bind アドレス（`host:port`）。
     pub server_addr: String,
+    /// 終了時に close する DB プール（#717）。
+    pub pool: rdb_gateway::PgPool,
 }
 
 /// ロガー初期化 → Postgres プール → 各 Interactor を組み立てる。
@@ -46,11 +48,12 @@ pub async fn build() -> anyhow::Result<Setup> {
     };
     let odds = OddsInteractor::new(scraper(), PostgresRepository::new(pool.clone()));
     let results = ResultsInteractor::new(scraper(), PostgresRepository::new(pool.clone()));
-    let interactor = Interactor::new(PostgresRepository::new(pool));
+    let interactor = Interactor::new(PostgresRepository::new(pool.clone()));
     Ok(Setup {
         interactor,
         odds,
         results,
         server_addr: config.paddock_server_addr,
+        pool,
     })
 }

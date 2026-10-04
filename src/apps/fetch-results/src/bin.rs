@@ -10,7 +10,16 @@ use paddock_use_case::repository::StatsRepository;
 async fn main() -> anyhow::Result<()> {
     let args = cli::Cli::parse();
     let (repo, scraper) = setup::build(args.interval).await?;
+    let pool = repo.pool.clone();
+    // pool を閉じてから終える（#717）
+    rdb_gateway::pool::close_after(&pool, run(args, repo, scraper)).await
+}
 
+async fn run(
+    args: cli::Cli,
+    repo: rdb_gateway::PostgresRepository,
+    scraper: netkeiba_scraper::UreqNetkeibaScraper,
+) -> anyhow::Result<()> {
     // 既存の確定済み(pdf)レースを対象に、netkeiba 結果で results を差し替える。
     let races = repo.find_finished_races_between(args.from, args.to).await?;
     let total = races.len();

@@ -142,6 +142,7 @@ fn test_app(pool: &PgPool) -> App<NeverScraper> {
         interactor: Interactor::new(PostgresRepository::new(pool.clone())),
         odds: OddsInteractor::new(NeverScraper, PostgresRepository::new(pool.clone())),
         settle: SettleInteractor::new(NeverScraper, PostgresRepository::new(pool.clone())),
+        pool: pool.clone(),
     }
 }
 

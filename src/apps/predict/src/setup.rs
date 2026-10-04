@@ -2,7 +2,7 @@ use anyhow::Context;
 use netkeiba_scraper::UreqNetkeibaScraper;
 use paddock_config::Config;
 use paddock_use_case::{Interactor, OddsInteractor, OddsScraper, PayoutFetcher, SettleInteractor};
-use rdb_gateway::{PostgresRepository, pool};
+use rdb_gateway::{PgPool, PostgresRepository, pool};
 
 pub struct App<S: OddsScraper + PayoutFetcher = UreqNetkeibaScraper> {
     pub interactor: Interactor<PostgresRepository>,
@@ -10,6 +10,8 @@ pub struct App<S: OddsScraper + PayoutFetcher = UreqNetkeibaScraper> {
     pub odds: OddsInteractor<S, PostgresRepository>,
     /// 確定払戻の自動精算（#40、`--settle`）。netkeiba 結果ページから払戻を取得する。
     pub settle: SettleInteractor<S, PostgresRepository>,
+    /// 終了時に close する DB プール（#717）。
+    pub pool: PgPool,
 }
 
 pub async fn build_app() -> anyhow::Result<App> {
@@ -28,11 +30,12 @@ pub async fn build_app() -> anyhow::Result<App> {
         UreqNetkeibaScraper::new(),
         PostgresRepository::new(pool.clone()),
     );
-    let repo = PostgresRepository::new(pool);
+    let repo = PostgresRepository::new(pool.clone());
     let interactor = Interactor::new(repo);
     Ok(App {
         interactor,
         odds,
         settle,
+        pool,
     })
 }
