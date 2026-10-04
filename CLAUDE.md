@@ -41,7 +41,10 @@ paddock の文書は HVE（dahatake/HypervelocityEngineering, MIT）の蒸留モ
   `scripts/mdq search --q "..."`（Markdown 用 BM25・[.claude/skills/markdown-query/SKILL.md](.claude/skills/markdown-query/SKILL.md)）
   または `scripts/cq search --q "..."`（ソースコード用 BM25 + symbol・[.claude/skills/code-query/SKILL.md](.claude/skills/code-query/SKILL.md)）
   でヒットチャンクだけ取り、必要時のみ生ファイルへ。
-  精密な定義・参照の追跡は serena（`mcp__serena__*`）。
+  精密な定義・参照の追跡は組み込みの `LSP` ツール（`workspaceSymbol` / `goToDefinition` / `findReferences`。
+  Rust は rust-analyzer。LSP plugin `rust-analyzer-lsp` を user レベルで有効にしておく前提。deferred tool なら ToolSearch で読み込んでから使う）。
+  LSP サーバーはセッションの作業ディレクトリで起動するため、worktree 内のファイルを渡しても primary の絶対パスが返ることがある。
+  worktree で作業するときは、結果のパスを worktree 側に読み替えてから Read / Edit する。LSP が使えないときは cq の `def` / `refs` か grep で絞ってから Read する。
   索引 `.cq/` は gitignore・セッション毎に `scripts/cq index` で再ビルド（Python >= 3.11 必須。venv は任意）。
   索引 `.mdq/` は gitignore・セッション毎に `scripts/mdq index` で再ビルド（初回は
   `python3 -m venv tools/mdq/.venv && tools/mdq/.venv/bin/pip install -r tools/mdq/requirements.txt`）。

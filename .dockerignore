@@ -9,7 +9,6 @@ docs/
 .git/
 .github/
 .claude/
-.serena/
 *.bak-*
 *.db
 *.db-*
