@@ -7,7 +7,7 @@ sources:
   - qa/QA-setup-boilerplate-410.md
   - docs-original/717-db-connection-leak.md
   - qa/QA-db-connection-leak-717.md
-distilled_from_sha: "817b0fc"
+distilled_from_sha: "4f94be6"
 updated: "2026-10-04"
 ---
 
@@ -18,7 +18,7 @@ updated: "2026-10-04"
 ## 共通ヘルパ（重複を書かない）
 
 - **接続＋整合チェック**: `rdb_gateway::pool::connect_checked(&config.paddock_db_url, config.paddock_auto_migrate)` を使う（#470/ADR 0070）。起動時 auto-migrate は既定 OFF で、`connect_checked` は read-only 整合チェックのみ（未適用/未初期化なら停止・DB 先行の stale は warn 継続）。適用済み判定は `_sqlx_migrations.success = true` の行だけを見る（**dirty＝前回失敗した行は未適用扱い**）。**pending と stale が同時**（別 worktree が別々に migration を足して交差した状態）なら **Pending を優先して停止**する——自バイナリの未適用 migration があるうちはクエリが壊れうるため。prod（compose の `PADDOCK_AUTO_MIGRATE=true`）だけ従来どおり起動時 `migrate` を適用する。マイグレーションの明示適用は `paddock-analyze migrate`。`connect` / `migrate` / `connect_and_migrate` を各 app で個別に呼ばない（pool 責務として rdb-gateway に集約済み）。
-- **終了時に pool を閉じる**（#717）: `main` の `build_app` より後の本体を `rdb_gateway::pool::close_after(&app.pool, run(&app, ..)).await` で包む（App に `pub pool: PgPool` を持たせる。App が無い・Interactor そのものを返す bin は `repository.pool` の clone でよい）。Ok でも Err（`?` の早期 return を含む）でも `PgPool::close` が走り、Terminate を送ってから終わる。ただし api-server は、actix の worker ランタイムで作られた接続を graceful stop の後に main 側で閉じるので、Terminate が届くかは未検証（届かなければ下のサーバ側の回収に任せる）。閉じずに終えると、共有 DB への Lima のポート転送が切断をサーバへ伝えないため、idle のバックエンドが残り続けて `max_connections` を使い切る。`connect_checked` 自身も、Err で返すときは作った pool を閉じてから返す。テストで共有 DB へ pool や接続を張るときも、最後に閉じる。DB の要らないテストは、共有 DB に向けずにつながらないアドレスの lazy pool を使う（`api-server/tests/common/mod.rs`・`openapi_route_parity.rs`）。
+- **終了時に pool を閉じる**（#717）: `main` の `build_app` より後の本体を `rdb_gateway::pool::close_after(&app.pool, run(&app, ..)).await` で包む（App に `pub pool: PgPool` を持たせる。App が無い・Interactor そのものを返す bin は `repository.pool` の clone でよい）。Ok でも Err（`?` の早期 return を含む）でも `PgPool::close` が走り、Terminate を送ってから終わる。api-server も、actix の graceful stop の後に main 側で閉じて Terminate が届く（2026-10-04 実測: リクエストで 5 本開いた接続が SIGINT の後に 0 本）。閉じずに終えると、共有 DB への Lima のポート転送が切断をサーバへ伝えないため、idle のバックエンドが残り続けて `max_connections` を使い切る。`connect_checked` 自身も、Err で返すときは作った pool を閉じてから返す。テストで共有 DB へ pool や接続を張るときも、最後に閉じる。DB の要らないテストは、共有 DB に向けずにつながらないアドレスの lazy pool を使う（`api-server/tests/common/mod.rs`・`openapi_route_parity.rs`）。
   - 閉じずに残った分（panic・kill・Ctrl-C で終わった bin〈シグナルを処理していないので、常駐の predict-watch / odds-collect も対話中の predict も `main` に戻らない〉・dioxus の desktop）は、サーバの `idle_session_timeout=30min`（[compose.yaml](../deployments/compose.yaml)）が回収する。sqlx の pool は idle 接続を最長でも約 20 分（reaper 周期 10 分 + idle_timeout 10 分）で自分で閉じるので、正当な接続には当たらない。人が開いたままの対話 psql も 30 分 idle で切られる。
   - トランザクションの途中で切れた接続（`idle in transaction`）は `idle_session_timeout` の対象外で、行ロックを握ったまま残る。これは `idle_in_transaction_session_timeout=10min` が回収する（rdb-gateway のトランザクションは関数の中で完結し、stdin 待ちなどをまたがない）。人が psql で `BEGIN` したまま 10 分止まった手作業も、切られてロールバックされる。
   - 既知の制約: `#[sqlx::test]` が panic すると、その一時 DB の接続が最長 30 分残り、その間は次の実行で一時 DB の作り直し（`dropdb`）が `55006` で失敗しうる。TCP keepalive では回収できない（応答するのは生きている `lima-guestagent`）。
@@ -189,3 +189,31 @@ paddock の全 app（predict / api-server / predict-watch / fetch-card / odds-co
 - **不変**: desktop（dioxus の GUI）は対象外。各 bin の出力と終了コード。
 - **運用**: 反映は 2 つ。(1) アプリ側: primary で `cargo build --release` し、常駐の predict-watch / odds-collect / api-server を起動し直す（`~/.local/bin/paddock-*` は `target/release` への symlink で、launchd の prefetch-odds も 5 分毎に `target/release/paddock-fetch-card` を起動する。再ビルドするまでは古いバイナリが閉じずに終わり続ける）。(2) サーバ側: compose の変更は、コンテナを作り直すまで反映されない（`limactl shell paddock -- nerdctl compose -f deployments/compose.yaml up -d postgres`。作り直しの直前に `scripts/backup-db.sh` で dump を取り、全プロセスを止めた開催外に行う）。両方を反映すれば開催日の手動の接続掃除は要らなくなる見込みで、#717 の G4（実地検証）で確かめる。
 - 関連: #470 / ADR 0070（`connect_checked` の導入）。
+
+### #717: 実地検証で対策の効果を確かめた (2026-10-04) — 採用
+
+#### コンテキスト
+
+上の「#717: 単発の bin は pool を閉じてから終え、取り残しはサーバの idle_session_timeout で回収する」は、効果をマージ後の実地検証（G3/G4）で確かめるとしていた。api-server については「Terminate が届くかは未検証」としていた。
+
+#### 決定
+
+対策をそのまま確定とする。実測（`docs-original/717-db-connection-leak.md` の 8 節）:
+
+- 本文の再現手順（analyze を 35 回起動）で、接続数は +0 本（修正前は 100 本が埋まった）。
+- kill -9 で残した接続は、ちょうど 30 分で `idle_session_timeout` に切られた。
+- api-server は SIGINT の後に閉じて Terminate が届いた（6 本 → 1 本）。上のエントリの「未検証」は解消した。
+- `fill-results apply` の DB 名の不一致による拒否の後も、接続は残らない。
+
+#### 理由
+
+成功条件（再現手順で積み上がらない・取り残しが自己回復する）を、Lima 経由の共有 DB で直接確かめたため。
+
+#### 却下した代替案
+
+- なし（追加の対策は要らない）。
+
+#### 影響
+
+- 開催日の接続数の監視と、手動の接続の掃除は不要になった。
+- 反映には、primary の `cargo build --release` と常駐 bin の起動し直しが要る（上のエントリの「運用」のとおり）。今回は 2026-10-04 に反映済み。
