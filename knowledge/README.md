@@ -581,3 +581,47 @@ session-stale-check.sh のユニットテストを新設し CI に組み込ん�
 - **CI**: `.github/workflows/ci.yml` の adr ジョブに hook テストを追加
 - **運用**: knowledge/specifications の直接編集時に自動警告が出る。sources があるファイルは
   上流を先に更新するよう促される
+
+### #753: serena MCP の撤廃と組み込み LSP への移行 (2026-10-04) — 採用
+
+#### コンテキスト
+
+#686 で cq を導入したとき、コード探索は「cq = 横断検索/発見、serena = 精密な定義/参照」と分担し、
+serena MCP と併用する運用にした。その後 hve-playbook が ADR 0010（hve-playbook リポの `knowledge/adr/0010-drop-serena-for-builtin-lsp.md`）で
+serena MCP と serena-enforcer hook を撤廃し、Claude Code 組み込みの `LSP` ツールと grep / Read に寄せた。
+撤廃の理由は次の 3 点。
+
+- MCP ツール定義が毎セッションのコンテキストを使う
+- worktree が索引対象に入ると OOM を起こす
+- enforcer の block を回避する作法が必要になる
+
+paddock でも user レベルの serena MCP 登録は外れており、`CLAUDE.md`・skill に残る `mcp__serena__*` の手順は実行できない状態だった。
+組み込み `LSP` は paddock の Rust（rust-analyzer。LSP plugin `rust-analyzer-lsp` を user レベルで有効化）で、
+`documentSymbol`・`workspaceSymbol`・`goToDefinition`・`findReferences` が結果を返すことを確認した（例: `build_portfolio`）。
+
+#### 決定
+
+serena MCP を撤廃する。コード探索の順序は「cq/mdq → 組み込み `LSP`（`workspaceSymbol` / `goToDefinition` /
+`findReferences`）→ grep で絞って Read」とし、cq/mdq の優先順位は変えない。`.serena/` の ignore 行とローカルの `.serena/` も消す。
+
+**#686 の運用のうち「serena と併用」は失効した**。#686 の分担のうち「serena = 精密な定義/参照」は組み込み `LSP` が引き継ぎ、
+cq の役割（横断検索/発見・REQ-ID トレース）は変わらない。#686 の決定（cq の導入）自体は有効のまま。
+
+#### 理由
+
+- serena の主な用途（定義・参照の検索）は組み込み `LSP` で賄え、追加の MCP サーバーが要らない
+- 登録が外れた serena を前提にした手順を残すと、手順どおりに動けず誤誘導になる
+- hve-playbook の rules（`tool-usage.md`）と paddock 独自の記述を揃える
+
+#### 却下した代替案
+
+- **serena を維持する**: LSP plugin の有無に関係なく探索できるが、上記の常駐コストが続き、組み込み `LSP` と機能が重複する（hve-playbook ADR 0010 と同じ判断）
+- **CodeQL に置き換える**: 解析用 DB を前提にしたバッチ解析で、会話中の探索には向かない（hve-playbook ADR 0010 と同じ判断。paddock では実測していない）
+
+#### 影響
+
+- **変更ファイル**: `CLAUDE.md`（探索規律）、`.claude/skills/{code-query,markdown-query,implement}/SKILL.md`、
+  `.claude/rules/hve/tool-usage.md`（hve-playbook 再適用で LSP 版になった）、`.gitignore`、`.dockerignore`（`.serena/` 行の削除）
+- **運用**: シンボル探索は組み込み `LSP` を使う（deferred tool なら ToolSearch で読み込む）。LSP が使えない環境では、cq の `def` / `refs`（構文ベースで型解決なし）と grep→Read で補う
+- **worktree での注意**: LSP サーバーはセッションの作業ディレクトリで起動するため、worktree 内のファイルを渡しても primary の絶対パスが返ることがある。結果のパスを worktree 側に読み替えてから Read / Edit する（`CLAUDE.md` の探索規律にも同じ注記を置いた）
+- **残る差分**: hve-playbook の再適用で上書きされる paddock 固有の注記（#652 の決定ログ方式など）をどう扱うかは #754 で検討する

@@ -54,8 +54,8 @@ tools/mdq/.venv/bin/pip install -r tools/mdq/requirements.txt   # rank_bm25 / Py
 
 ## フォールバック
 - ヒット 0 件 → キーワードを変えて 1〜2 回再試行 → `scripts/mdq list` で見出し俯瞰 → それでも不明なら
-  serena（`mcp__serena__*`）やファイル読込へ。
-- 索引対象は `.md` のみ。コード検索は serena、非 Markdown は通常ツールを使う。
+  grep で絞ってからファイル読込へ。
+- 索引対象は `.md` のみ。コード検索は cq（code-query skill）、非 Markdown は通常ツールを使う。
 
 ## 補足
 - **Python >= 3.11 必須**（`tomllib` 依存）。semantic_paragraph / watch は追加依存

@@ -50,7 +50,7 @@ tools/cq/.venv/bin/pip install tree-sitter tree-sitter-rust tree-sitter-python
 6. **リポマップ**: `scripts/cq map` でトークン予算付きのリポジトリ概要を出力。
 
 ## フォールバック
-- ヒット 0 件 → キーワードを変えて再試行 → serena（`mcp__serena__*`）へ。
+- ヒット 0 件 → キーワードを変えて再試行 → 組み込みの `LSP` ツール（`workspaceSymbol` / `findReferences`）→ grep で絞って Read。
 - 索引対象はソースコードのみ。Markdown 検索は mdq を使う。
 
 ## 補足

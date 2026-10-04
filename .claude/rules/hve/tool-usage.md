@@ -10,9 +10,10 @@ HVE プロジェクトでのコード/ドキュメント探索ツールの利用
 2. **mdq (Markdown Query)**: Markdown/CSV ドキュメント検索に使用
    - `python3 -m mdq search --q "検索クエリ" --top-k 5`
    - SQLite + BM25 ベースのローカル検索エンジン
-3. **serena MCP**: シンボル検索・参照検索に使用（利用可能な場合）
-   - `mcp__serena__find_symbol`, `mcp__serena__find_referencing_symbols`
-4. **grep / find**: cq/mdq/serena が利用できない場合のフォールバック。serena-enforcer hook が有効な環境では、コード対象の grep/find は末尾に `# via:bash-discovery: <理由>` を付けない限り block される
+3. **LSP ツール**: シンボル検索・参照検索に使用（その言語の LSP plugin が有効な場合）
+   - Claude Code 組み込みの `LSP` ツール（`goToDefinition`, `findReferences`, `workspaceSymbol`）
+   - deferred tool なら ToolSearch で読み込んでから使う。`workspaceSymbol` も対象言語の任意のファイルを `filePath` に渡す
+4. **grep / find**: cq/mdq/LSP が利用できない場合のフォールバック。`grep` で対象を絞ってから `Read` する（無計画な全文検索・全読みはしない）
 
 paddock では同じ検索を `scripts/cq search --q "..."` / `scripts/mdq search --q "..."` で行う（ルート `CLAUDE.md` の探索規律が正・paddock 固有）。
 
@@ -20,7 +21,7 @@ paddock では同じ検索を `scripts/cq search --q "..."` / `scripts/mdq searc
 
 - cq/mdq がインストール済みかは `python3 -m cq --help` / `python3 -m mdq --help` で確認
 - 未インストール時は grep/find にフォールバックし、セッション中にインストールを推奨しない（中断を避ける）
-- serena MCP はシンボルの定義・参照検索に特化。テキスト全文検索には cq/mdq を使う
+- LSP ツールはシンボルの定義・参照検索に特化。テキスト全文検索には cq/mdq を使う
 
 ## cq/mdq のインストール
 
