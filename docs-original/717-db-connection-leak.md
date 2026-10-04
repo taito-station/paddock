@@ -87,3 +87,18 @@ VM 内のバックエンドは全 100 本が `paddock` DB の idle で、57 本�
 - `DATABASE_URL` に `?options=-c%20idle_session_timeout%3D20s` を付けて `test_migration_status` を流すと、テストは全部通った。
   実行直後に 8 本増えた分（26 → 34）は、28 秒後に消えた（34 → 26）。セッション単位の設定なので、テストの接続にしか効かない。
 - 上の表の `api-server --test session` は、DB が満杯だった初回の実行では 3 本失敗した。掃除した後は 9 本とも通った（失敗は接続の枯渇によるもので、今回の変更とは無関係）。
+
+## 8. 反映と実地検証（PR #760 のマージ後・2026-10-04 19:05〜19:40・開催の後）
+
+反映の手順: primary で `cargo build --release` → `paddock-api` を止める → `scripts/backup-db.sh` で dump（61MB）→
+`limactl shell paddock -- nerdctl compose -f deployments/compose.yaml up -d postgres`（nerdctl は「Re-creating container」と出して作り直した。
+volume `deployments_paddock-pgdata` はそのまま使われた）→ `paddock-api` を新しいバイナリで起動し直す。
+launchd の prefetch-odds は load されていなかった（計測に余計な接続は混ざっていない）。
+
+| 検証 | 手順 | 結果 |
+|---|---|---|
+| G3 設定の反映 | `SHOW idle_session_timeout` / `SHOW idle_in_transaction_session_timeout` | `30min` / `10min`（ホストの psql からも `30min`）。`race_odds_snapshots` は作り直しの前後とも 7,508,469 行 |
+| G4-1 本文の再現手順 | `snapshot_ev_report.py --from 2026-08-09`（35R 分の `paddock-analyze predict` を順に起動・31 秒） | client backend は実行前 2 本 → 直後 2 本 → 5 秒後 2 本（+0 本）。修正前はこの 1 回で 100 本が埋まった |
+| G4-2 取り残しの回収 | python の最小クライアントを kill -9（19:08:37 に接続） | 19:38:37 に `FATAL: terminating connection due to idle-session timeout` で切られた（ちょうど 30 分） |
+| G4-3 api-server の Ctrl-C | DB を使う API を 4 本叩いて接続を 6 本に増やし、SIGINT | 止めた後は 1 本（計測の問い合わせ自身）。actix の graceful stop の後に `close_after` で閉じても Terminate は届いた |
+| G4-4 fill-results の拒否経路 | `paddock-fill-results apply --db-name not_this_db` | 「接続先の DB は paddock です」で拒否された後、接続数は前後とも 2 本 |
