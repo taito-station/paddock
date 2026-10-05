@@ -210,6 +210,9 @@ paddock-analyze backtest --from <YYYY-MM-DD> --to <YYYY-MM-DD> --blend-alpha 1.0
   保存されないので、確定後に流し直せば取り直す。確定済みのページは取り直さない。
 - 開催日の一覧 `nk.list_race_ids` も取得後に `nk.FETCH_PAUSE_SEC` 待つ（一覧→1 レース目の取得を連続させない）。
   `gen_win_backtest_data.sh` の結果 HTML 取得も同じ定数を読んで待つ。
+- 着順 `nk.parse_result` は結果表 `table#All_Result_Table` の行だけを読む（本体 Rust と同じ。結果表は入れ子の表を持たない前提）。
+  結果ページには後ろにラップ表・走行距離表（`RapSummary_Table` / `LapSummary_Table`）があり、同じ `HorseList` 行
+  （`Rank` セルと `HorseNameSpan` が無い）を持つ（#766）。
 - 間隔はプロセス単位でしか守られない。**netkeiba を取得するスクリプトは並走させない**（2 本同時に流すと合計の頻度が下限を割る）。
 - 保存済みのページは取り直さない。確定判定は「着順あり＋単勝払戻あり」だけなので、単勝以外の払戻が後から載った・
   訂正されたページを取り直したいときは `.cache_nk_result_html/<race_id>.html` を消してから流し直す。

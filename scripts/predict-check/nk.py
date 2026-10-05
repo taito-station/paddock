@@ -120,13 +120,34 @@ def parse_race_id(rid: str):
 RESULT_URL = "https://race.netkeiba.com/race/result.html?race_id={rid}"
 
 
+def _result_table_body(html: str) -> str:
+    """結果表 `<table ... id="All_Result_Table">` の中身（開始タグの直後〜最初の `</table>`）。無ければ ""。
+
+    id を先に探し、そこから開始タグと終端を文字列検索で切り出す（正規表現の後戻りで長いページに二乗の時間を
+    かけないため）。`data-id=` などを id と取り違えないよう、直前が空白の `id=` だけを見る。
+    """
+    m = re.search(r'\sid="All_Result_Table"', html)
+    if not m:
+        return ""
+    start = html.rfind("<table", 0, m.start())
+    open_end = html.find(">", m.end())
+    if start == -1 or open_end == -1 or ">" in html[start:m.start()]:
+        return ""  # id が table の開始タグの中に無い
+    end = html.find("</table>", open_end)
+    return html[open_end + 1:end] if end != -1 else ""
+
+
 def parse_result(html: str, rid: str, warn: bool = True):
     """race/result.html の finishing rows を返す。
 
     各 HorseList 行: Rank=着順 / 2列目 Num=枠 / 3列目 Num=馬番 / HorseNameSpan=馬名。
+    行は結果表 `table#All_Result_Table` の中だけから取る（本体 Rust parse_race_result と同じ規則。
+    ただし結果表は入れ子の表を持たない前提で、最初の `</table>` までを読む——キャッシュ 985 本で入れ子は 0）。
+    後ろのラップ表・走行距離表（RapSummary_Table / LapSummary_Table）にも HorseList 行があり、
+    拾うと着順なし・馬名なしの行が混ざる（#766）。
     """
     rows = []
-    for r in re.findall(r'class="HorseList">(.*?)</tr>', html, re.S):
+    for r in re.findall(r'class="HorseList">(.*?)</tr>', _result_table_body(html), re.S):
         rank = re.search(r'class="Rank">\s*(\d+)\s*<', r)
         name = re.search(r'HorseNameSpan">\s*([^<]+?)\s*</span>', r)
         # 馬番は `class="Num Txt_C"` セル（枠 `Num WakuN` と区別する）。これを優先し、

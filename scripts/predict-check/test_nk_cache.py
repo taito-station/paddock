@@ -21,7 +21,8 @@ import zure_sign_probe as zp
 
 RID = "202607010210"
 
-ROWS = (
+ROWS = (  # 実ページと同じく結果表 table#All_Result_Table の中に置く（nk.parse_result はこの表だけを読む・#766）
+    '<table class="RaceTable01" id="All_Result_Table">'
     '<tr class="HorseList"><td class="Rank">1</td>'
     '<td class="Num Waku4"><div>4</div></td><td class="Num Txt_C"><div>4</div></td>'
     '<span class="HorseNameSpan">アルファ</span>'
@@ -30,6 +31,7 @@ ROWS = (
     '<td class="Num Waku5"><div>5</div></td><td class="Num Txt_C"><div>7</div></td>'
     '<span class="HorseNameSpan">ベータ</span>'
     '<td class="Odds Txt_R"><span>11.1</span></td></tr>'
+    "</table>"
 )
 PAYOUT = (
     '<table class="Payout_Detail_Table"><tr class="Tansho">'
