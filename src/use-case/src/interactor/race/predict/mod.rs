@@ -10,6 +10,7 @@
 pub mod explain;
 pub mod features;
 pub mod orchestrate;
+pub mod reconstruct;
 
 pub use orchestrate::{PredictionViews, RecentRunsCoverage, compose_portfolio};
 

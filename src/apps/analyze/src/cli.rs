@@ -193,6 +193,20 @@ pub enum Command {
         #[arg(long)]
         dry_run: bool,
     },
+    /// 過去の開催日の買い目を、朝と T-40 の 2 時点で再構成し、1 レース 1 行の JSON で出す（#724）。
+    /// 対象は predict-watch が初回スイープで固定したレース（`live_ev_snapshots`）。統計は開催日より前の
+    /// 結果だけで作る。本番の経路は変えない。
+    ReconstructSlips {
+        /// 開催日（YYYY-MM-DD）。
+        #[arg(long)]
+        date: String,
+        /// 市場ブレンドの α（モデル重み）。省略時は本番値（`RECOMMENDED_MARKET_BLEND_ALPHA`）。
+        #[arg(long)]
+        blend_alpha: Option<f64>,
+        /// 1 レースの予算（円）。
+        #[arg(long, default_value_t = 5000)]
+        race_budget: u64,
+    },
 }
 
 /// clap 用: 馬場状態のパース。引数解析時に検証し、不正値は usage エラーとして報告する。
@@ -206,6 +220,31 @@ mod tests {
 
     use super::{Cli, Command};
     use paddock_domain::TrackCondition;
+
+    /// `reconstruct-slips`（#724）: 日付は必須、α は省略可（本番値を使う）、予算は既定 5000。
+    #[test]
+    fn reconstruct_slips_parses_date_with_defaults() {
+        let cli = Cli::try_parse_from([
+            "paddock-analyze",
+            "reconstruct-slips",
+            "--date",
+            "2026-08-15",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::ReconstructSlips {
+                date,
+                blend_alpha,
+                race_budget,
+            } => {
+                assert_eq!(date, "2026-08-15");
+                assert_eq!(blend_alpha, None);
+                assert_eq!(race_budget, 5000);
+            }
+            _ => panic!("reconstruct-slips に解決されるべき"),
+        }
+        assert!(Cli::try_parse_from(["paddock-analyze", "reconstruct-slips"]).is_err());
+    }
 
     /// `--track-condition` が value_parser 経由で enum に解決されること（略記含む）。
     #[test]

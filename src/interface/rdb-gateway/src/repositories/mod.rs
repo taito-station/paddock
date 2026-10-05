@@ -49,8 +49,8 @@ use paddock_use_case::repository::{
     LiveEvSnapshotRecord, MarkStatRow, MarkStatsFilter, MorningRaceOdds, NameMatchRepository,
     OddsRepository, PadPredictionRepository, PredictBetRecord, PredictRaceConditionRecord,
     PredictSessionRecord, PredictSessionRepository, PredictionFilter, PredictionSearchResult,
-    RaceCardRepository, RaceOddsRecord, RaceRepository, RaceResultRepository, StatsRepository,
-    TrainerStatsRow, UnpricedObservation,
+    RaceCardRepository, RaceOddsRecord, RaceRepository, RaceResultRepository, SnapshotOdds,
+    SnapshotPoint, StatsRepository, TrainerStatsRow, UnpricedObservation,
 };
 
 use crate::pool::PgPool;
@@ -458,6 +458,16 @@ impl OddsRepository for PostgresRepository {
 
     async fn find_race_odds_morning(&self, race_id: &RaceId) -> UcResult<Option<MorningRaceOdds>> {
         find_race_odds::find_race_odds_morning(&self.pool, race_id)
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn find_race_odds_snapshot(
+        &self,
+        race_id: &RaceId,
+        point: SnapshotPoint,
+    ) -> UcResult<Option<SnapshotOdds>> {
+        find_race_odds::find_race_odds_snapshot(&self.pool, race_id, point)
             .await
             .map_err(Into::into)
     }

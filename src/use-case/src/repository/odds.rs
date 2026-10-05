@@ -127,6 +127,27 @@ pub struct MorningRaceOdds {
     pub latest_at: String,
 }
 
+/// `race_odds_snapshots` から 1 スナップショットを読む時点（#724 の再構成用）。
+///
+/// 比較は時刻（`timestamptz`）で行う。`fetched_at` は `...+00:00`、`live_ev_snapshots.captured_at` は
+/// `...Z` と書式が混在し、文字列の辞書順では同じ秒の付近で順序が崩れるため。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SnapshotPoint {
+    /// `since` 以降で最初に単勝を含むスナップショット（朝の選定。当日 JST 0 時を渡す）。
+    FirstWinSince(DateTime<Utc>),
+    /// `since` 以降で最初に [`RaceOdds::is_complete`] を満たすスナップショット（T-40 の固定。
+    /// predict-watch はスイープの開始時刻を先に採番してからスクレイプ・保存するので、初回スイープの
+    /// `captured_at` を渡すと、そのスイープが保存した全券種のスナップショットに当たる）。
+    FirstCompleteSince(DateTime<Utc>),
+}
+
+/// [`SnapshotPoint`] で選んだ 1 スナップショット分のオッズと、その取得時刻（UTC rfc3339）。
+#[derive(Debug, Clone)]
+pub struct SnapshotOdds {
+    pub odds: RaceOdds,
+    pub fetched_at: String,
+}
+
 /// 「この券種は netkeiba 上で未発売だと確認できた」という観測 1 件（#632）。
 ///
 /// `race_odds` には**入れない**（番兵は払戻倍率ではない・ADR 0086 決定 1/3）。オッズではない
@@ -163,6 +184,14 @@ pub trait OddsRepository: Send + Sync {
         &self,
         race_id: &RaceId,
     ) -> impl Future<Output = Result<Option<MorningRaceOdds>>> + Send;
+
+    /// `race_odds_snapshots` から [`SnapshotPoint`] の時点の 1 スナップショットを読む（#724）。
+    /// 該当するスナップショットが無ければ `None`。
+    fn find_race_odds_snapshot(
+        &self,
+        race_id: &RaceId,
+        point: SnapshotPoint,
+    ) -> impl Future<Output = Result<Option<SnapshotOdds>>> + Send;
 
     /// `race_odds_snapshots`（append-only 履歴, #232）のうち `fetched_at` の日付が `before`
     /// より前の行を削除し、削除行数を返す（retention/パージ, #234）。最新キャッシュ `race_odds` は

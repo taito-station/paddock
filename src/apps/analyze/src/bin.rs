@@ -413,6 +413,25 @@ async fn run(app: &setup::App, command: cli::Command) -> anyhow::Result<()> {
             // main 冒頭で run_migrate に委譲済み（build_app を経由しない）。ここには到達しない。
             unreachable!("Migrate は build_app 前に処理される");
         }
+        cli::Command::ReconstructSlips {
+            date,
+            blend_alpha,
+            race_budget,
+        } => {
+            let date = NaiveDate::parse_from_str(&date, "%Y-%m-%d")
+                .map_err(|e| anyhow::anyhow!("--date は YYYY-MM-DD: {e}"))?;
+            let races = app
+                .interactor
+                .reconstruct_race_slips(
+                    date,
+                    blend_alpha.or(paddock_domain::RECOMMENDED_MARKET_BLEND_ALPHA),
+                    race_budget,
+                )
+                .await?;
+            for r in &races {
+                println!("{}", reconstructed_json(r));
+            }
+        }
         cli::Command::PurgeSnapshots { months, dry_run } => {
             // 0 ヶ月は当日以降のみ保持＝ほぼ全削除で #218 の蓄積を壊すため弾く。
             if months == 0 {
@@ -810,5 +829,156 @@ mod feature_dump_tests {
         assert_eq!(lines.next().unwrap(), FEATURE_DUMP_HEADER);
         assert_eq!(lines.next().unwrap(), feature_row_cells(&row).join("\t"));
         assert!(lines.next().is_none(), "ヘッダ + 1 行のみのはず");
+    }
+}
+
+/// 再構成 1 レースを JSON 1 行にする（#724）。伝票は `live_ev_snapshots.slip` と同じ形
+/// （stake>0 の脚だけ・`method` は `nagashi` / `box`・組は昇順）にそろえ、記録との比較で書式の差が出ないようにする。
+fn reconstructed_json(
+    r: &paddock_use_case::interactor::race::predict::reconstruct::ReconstructedRace,
+) -> serde_json::Value {
+    use paddock_domain::{BetMethod, PinnedSelection, Portfolio};
+    let nums =
+        |v: &[paddock_domain::HorseNum]| -> Vec<u32> { v.iter().map(|h| h.value()).collect() };
+    let pin_json = |p: &PinnedSelection| {
+        serde_json::json!({
+            "axis": p.axis.map(|h| h.value()),
+            "partners": p.partners.as_deref().map(nums),
+            "konsen_band": p.konsen_band.as_deref().map(nums),
+        })
+    };
+    let slip_json = |p: &Portfolio| {
+        let legs: Vec<serde_json::Value> = p
+            .bets
+            .iter()
+            .filter(|b| b.stake > 0)
+            .map(|b| {
+                let mut combo = b.combination.horse_nums();
+                combo.sort_unstable();
+                serde_json::json!({
+                    "bet_type": b.combination.type_label(),
+                    "method": match b.method { BetMethod::Nagashi => "nagashi", BetMethod::Box => "box" },
+                    "combo": combo,
+                    "amount": b.stake,
+                })
+            })
+            .collect();
+        serde_json::json!({
+            "axis": p.axis.map(|h| h.value()),
+            "partners": nums(&p.partners),
+            "konsen": p.konsen,
+            "has_ev": p.ev.is_some(),
+            "legs": legs,
+        })
+    };
+    serde_json::json!({
+        "race_id": r.recorded.race_id,
+        "captured_at": r.recorded.captured_at,
+        "recorded": {
+            "axis": r.recorded.axis,
+            "partners": r.recorded.partners,
+            "konsen_band": r.recorded.konsen_band,
+        },
+        "morning_at": r.morning_at,
+        "t40_at": r.t40_at,
+        "skip": r.skip,
+        "t40": r.slips.as_ref().map(|s| slip_json(&s.t40)),
+        "morning_pick": r.slips.as_ref().map(|s| pin_json(&s.morning_pick)),
+        "morning_fixed": r.slips.as_ref().map(|s| slip_json(&s.morning_fixed)),
+        "t40_blended_win": r
+            .t40_blended
+            .iter()
+            .map(|p| (p.horse_num.value(), p.win_prob))
+            .collect::<Vec<_>>(),
+    })
+}
+
+#[cfg(test)]
+mod reconstructed_json_tests {
+    use paddock_domain::{
+        BetCombination, BetMethod, HorseNum, Pair, PinnedSelection, Portfolio, PortfolioBet, Triple,
+    };
+    use paddock_use_case::interactor::race::predict::reconstruct::{
+        AssembledSlips, ReconstructedRace,
+    };
+    use paddock_use_case::repository::LiveEvPin;
+
+    fn h(n: u32) -> HorseNum {
+        HorseNum::try_from(n).unwrap()
+    }
+
+    /// 伝票の JSON は記録側（`live_ev_snapshots.slip`）と同じ形: stake>0 の脚だけ・組は昇順・
+    /// method は nagashi / box（#724 の再構成の検査はこの形どうしで比べる）。
+    #[test]
+    fn slip_json_matches_recorded_slip_shape() {
+        let bet = |c: BetCombination, m: BetMethod, stake: u64| PortfolioBet {
+            combination: c,
+            method: m,
+            stake,
+            odds: None,
+            ev: 0.0,
+            hit_prob: 0.0,
+        };
+        // t40 / morning_fixed / morning_pick を別々の値にし、キーの取り違えを検出できるようにする
+        let slip = |axis: u32, partner: u32, box_extra: u32| Portfolio {
+            axis: Some(h(axis)),
+            partners: vec![h(partner)],
+            konsen: false,
+            bets: vec![
+                bet(
+                    BetCombination::Quinella(Pair::try_from((h(axis), h(partner))).unwrap()),
+                    BetMethod::Nagashi,
+                    500,
+                ),
+                bet(
+                    BetCombination::Wide(Pair::try_from((h(axis), h(1))).unwrap()),
+                    BetMethod::Nagashi,
+                    0,
+                ),
+                bet(
+                    BetCombination::Trio(
+                        Triple::try_from((h(axis), h(partner), h(box_extra))).unwrap(),
+                    ),
+                    BetMethod::Box,
+                    300,
+                ),
+            ],
+            total_stake: 800,
+            ev: None,
+        };
+        let r = ReconstructedRace {
+            recorded: LiveEvPin {
+                race_id: "2026-1-tokyo-1-R1".to_string(),
+                axis: 7,
+                partners: vec![1, 3],
+                konsen_band: vec![],
+                captured_at: "2026-01-01T03:00:00Z".to_string(),
+            },
+            morning_at: Some("m".to_string()),
+            t40_at: Some("t".to_string()),
+            slips: Some(AssembledSlips {
+                t40: slip(7, 3, 2),
+                morning_pick: PinnedSelection::from_staked_legs(&slip(9, 4, 5)),
+                morning_fixed: slip(8, 6, 2),
+            }),
+            t40_blended: Vec::new(),
+            skip: None,
+        };
+        let v = super::reconstructed_json(&r);
+        let legs = v["t40"]["legs"].as_array().unwrap();
+        assert_eq!(legs.len(), 2, "¥0 の脚は出さない");
+        assert_eq!(legs[0]["combo"], serde_json::json!([3, 7]), "組は昇順");
+        assert_eq!(legs[0]["method"], "nagashi");
+        assert_eq!(legs[1]["bet_type"], "trio");
+        assert_eq!(legs[1]["method"], "box");
+        assert_eq!(legs[1]["combo"], serde_json::json!([2, 3, 7]));
+        assert_eq!(v["t40"]["axis"], 7);
+        assert_eq!(v["morning_fixed"]["axis"], 8);
+        assert_eq!(v["morning_pick"]["axis"], 9);
+        assert_eq!(v["morning_pick"]["partners"], serde_json::json!([4]));
+        assert_eq!(v["morning_at"], "m");
+        assert_eq!(v["t40_at"], "t");
+        assert_eq!(v["recorded"]["axis"], 7);
+        assert_eq!(v["skip"], serde_json::Value::Null);
     }
 }

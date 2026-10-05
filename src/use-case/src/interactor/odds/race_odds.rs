@@ -434,6 +434,13 @@ mod tests {
         ) -> Result<Option<crate::repository::MorningRaceOdds>> {
             Ok(None)
         }
+        async fn find_race_odds_snapshot(
+            &self,
+            _: &RaceId,
+            _: crate::repository::SnapshotPoint,
+        ) -> Result<Option<crate::repository::SnapshotOdds>> {
+            Ok(None)
+        }
         async fn purge_race_odds_snapshots(&self, _before: NaiveDate) -> Result<u64> {
             Ok(0)
         }

@@ -1,9 +1,11 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+
+use chrono::NaiveDate;
 
 use paddock_domain::{
-    EstimationConfig, HorseEntry, HorseExplanation, HorseFactors, HorseName, HorseProbability,
-    JockeyName, PinnedSelection, Portfolio, PortfolioConfig, RaceId, RaceOdds, TrackCondition,
-    TrainerName, build_portfolio,
+    EstimationConfig, HorseEntry, HorseExplanation, HorseFactors, HorseName, HorseNum,
+    HorseProbability, JockeyName, PinnedSelection, Portfolio, PortfolioConfig, RaceId, RaceOdds,
+    TrackCondition, TrainerName, build_portfolio,
 };
 
 use crate::error::{Error, Result};
@@ -89,7 +91,7 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository> Interactor<R> {
         // config は本番設定を 1 度だけ生成し factor 収集と推定で共有する（単一情報源, #274 レビュー）。
         let config = EstimationConfig::production();
         let (entry_factors, _, _) = self
-            .collect_race_factors(race_id, track_condition, false, &config)
+            .collect_race_factors(race_id, track_condition, false, &config, None, None)
             .await?;
         self.estimate_and_blend(&entry_factors, race_id, blend_alpha, &config)
             .await
@@ -135,7 +137,14 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository> Interactor<R> {
         config: &EstimationConfig,
     ) -> Result<PredictionViews> {
         let (entry_factors, explanations, recent_runs_coverage) = self
-            .collect_race_factors(race_id, track_condition, with_explanation, config)
+            .collect_race_factors(
+                race_id,
+                track_condition,
+                with_explanation,
+                config,
+                None,
+                None,
+            )
             .await?;
         let blended = self
             .estimate_and_blend(&entry_factors, race_id, blend_alpha, config)
@@ -173,27 +182,37 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository> Interactor<R> {
     /// `with_explanation=false` のとき `explanations` は空 Vec を返す（通常経路で根拠を組まず
     /// 無駄な String 割当てを避ける。`predict_race` は確率しか使わないため）。
     /// `config` は呼び出し側が生成して渡す（推定と同じ設定を共有するため, #274 レビュー）。
+    ///
+    /// `as_of` / `roster` は過去の時点の再構成（#724）だけが使う。本番の経路は両方 `None`。
+    /// - `as_of = Some(d)`: 馬・騎手・調教師・コースの統計を `d` より前の結果に限る（当日以降のリーク防止）。
+    /// - `roster = Some(..)`: 出馬表の出走馬のうち、この馬番だけを母集合にする（その時点の単勝に載っていた馬。
+    ///   出馬表は最終版しか残らず、後から分かった取消を先に知ってしまうため）。
     async fn collect_race_factors(
         &self,
         race_id: &RaceId,
         track_condition: Option<TrackCondition>,
         with_explanation: bool,
         config: &EstimationConfig,
+        as_of: Option<NaiveDate>,
+        roster: Option<&HashSet<HorseNum>>,
     ) -> Result<(
         Vec<(HorseEntry, HorseFactors)>,
         Vec<HorseExplanation>,
         RecentRunsCoverage,
     )> {
-        let card = self
+        let mut card = self
             .repository
             .find_race_card(race_id)
             .await?
             .ok_or_else(|| Error::NotFound(format!("race card: {}", race_id.value())))?;
+        if let Some(roster) = roster {
+            card.entries.retain(|e| roster.contains(&e.horse_num));
+        }
 
         // コース統計は全馬共通なのでループ外で 1 回だけ取得する
         let course = self
             .repository
-            .course_stats(card.venue, card.distance, card.surface, None)
+            .course_stats(card.venue, card.distance, card.surface, as_of)
             .await?;
 
         // 斤量のレース内相対シグナル用の field 平均斤量（#135）。斤量を持つ出走馬のみで平均する。
@@ -238,13 +257,13 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository> Interactor<R> {
             .iter()
             .filter_map(|e| e.trainer.clone())
             .collect();
-        // as_of: None = 全期間統計（predict は出馬表日時点での履歴制限なし。
-        // リーク防止の as_of は backtest 経路のみ必要）。
+        // as_of: 本番は None = 全期間統計（predict は出馬表日時点での履歴制限なし）。
+        // リーク防止の as_of は backtest 経路と、過去の時点の再構成（#724）でだけ渡す。
         // try_join! の実際の並列度は接続プールのコネクション数に依存する。
         let (horse_map, jockey_map, trainer_map, runs_map, jockey_form_map) = tokio::try_join!(
-            self.repository.horse_stats_batch(&horse_names, None),
-            self.repository.jockey_stats_batch(&jockey_names, None),
-            self.repository.trainer_stats_batch(&trainer_names, None),
+            self.repository.horse_stats_batch(&horse_names, as_of),
+            self.repository.jockey_stats_batch(&jockey_names, as_of),
+            self.repository.trainer_stats_batch(&trainer_names, as_of),
             // limit: TREND_WEIGHTS の要素数まで取得し、trend_n で何走使うかを scoring 側で制御する（#220）。
             self.repository
                 .recent_runs_batch(&horse_names, card.date, TREND_WEIGHTS.len() as u32),
@@ -338,41 +357,45 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository> Interactor<R> {
         blend_alpha: Option<f64>,
         config: &EstimationConfig,
     ) -> Result<Vec<HorseProbability>> {
-        // estimate_probabilities が win→1.0 / place→2.0 / show→3.0 正規化 + 累積 max 単調化を行い、
-        // win_prob ≤ place_prob ≤ show_prob を保証する（ADR 0007）。本番経路は #75 で採用した
-        // ベイズ縮約（m=10）を有効にし、少データ馬の過信（win_prob=0 を含む）を緩和する。
-        let probs =
-            paddock_domain::prediction::estimate_probabilities_with_config(entry_factors, config);
-
         // 市場オッズ（単勝）ブレンド（#72）。α<1.0 のときのみ最新オッズスナップショットを取得する
         // （α>=1.0・非有限はブレンド無効なので DB クエリを省く）。
-        let probs = match blend_alpha.filter(|a| a.is_finite() && *a < 1.0) {
-            Some(alpha) => {
-                let market = self.repository.find_race_odds(race_id, None).await?;
-                match market {
-                    Some(odds) => {
-                        let market_win: HashMap<_, _> =
-                            odds.win.iter().map(|(num, o)| (*num, o.value())).collect();
-                        paddock_domain::prediction::blend_with_market_win(
-                            &probs,
-                            &market_win,
-                            alpha,
-                        )
-                    }
-                    None => probs,
-                }
-            }
-            None => probs,
+        let market = match blend_alpha.filter(|a| a.is_finite() && *a < 1.0) {
+            Some(_) => self.repository.find_race_odds(race_id, None).await?,
+            None => None,
         };
+        Ok(estimate_with_market(
+            entry_factors,
+            market.as_ref(),
+            blend_alpha,
+            config,
+        ))
+    }
 
-        // 穴馬の 1 着過大評価を縮約する win_prob 冪変換（#246）。config.win_power が None なら no-op。
-        // ブレンド後の最終 win に適用し、連系・着順 EV（Harville/simulate）まで校正後 win が伝わる。
-        let probs = match config.win_power {
-            Some(gamma) => paddock_domain::prediction::apply_win_power(&probs, gamma),
-            None => probs,
-        };
-
-        Ok(probs)
+    /// 過去の時点の買い目を再構成するための推定（#724）。本番の経路（`predict_race_views`）は使わない。
+    ///
+    /// - 市場オッズは保存済みの最新キャッシュではなく、渡された `market`（その時点のスナップショット）で
+    ///   ブレンドする。出走馬の母集合も `market` の単勝に載っている馬に限る（読み出しで値域違反として
+    ///   捨てた単勝行の馬も外れる。live は出馬表から母集合を取るので、その馬の分だけ live とずれうる）。
+    /// - 馬・騎手・調教師・コースの統計は `as_of`（開催日）より前の結果だけで作る。
+    /// - 馬場は渡さない（predict-watch も発走前は `None`）。根拠は組まない。
+    pub async fn predict_race_views_at(
+        &self,
+        race_id: &RaceId,
+        blend_alpha: Option<f64>,
+        market: &RaceOdds,
+        as_of: NaiveDate,
+        config: &EstimationConfig,
+    ) -> Result<PredictionViews> {
+        let roster: HashSet<HorseNum> = market.win.keys().copied().collect();
+        let (entry_factors, _, recent_runs_coverage) = self
+            .collect_race_factors(race_id, None, false, config, Some(as_of), Some(&roster))
+            .await?;
+        Ok(PredictionViews {
+            blended: estimate_with_market(&entry_factors, Some(market), blend_alpha, config),
+            pure: estimate_with_market(&entry_factors, None, Some(1.0), config),
+            explanations: Vec::new(),
+            recent_runs_coverage,
+        })
     }
 
     /// `predict_race_views` に加え、最新オッズスナップショット（`find_race_odds(.., None)`）も返す。
@@ -400,6 +423,39 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository> Interactor<R> {
             .await?;
         let odds = self.repository.find_race_odds(race_id, None).await?;
         Ok((views, odds))
+    }
+}
+
+/// `entry_factors` から確率を推定し、市場オッズ（単勝）とのブレンドと win 冪変換まで適用する（#72/#246）。
+///
+/// `market` が `Some` かつ `blend_alpha` が 1 未満の有限値のときだけブレンドする。オッズの取り方
+/// （保存済みの最新か、時点のスナップショットか, #724）は呼び出し側が決める。
+fn estimate_with_market(
+    entry_factors: &[(HorseEntry, HorseFactors)],
+    market: Option<&RaceOdds>,
+    blend_alpha: Option<f64>,
+    config: &EstimationConfig,
+) -> Vec<HorseProbability> {
+    // estimate_probabilities が win→1.0 / place→2.0 / show→3.0 正規化 + 累積 max 単調化を行い、
+    // win_prob ≤ place_prob ≤ show_prob を保証する（ADR 0007）。本番経路は #75 で採用した
+    // ベイズ縮約（m=10）を有効にし、少データ馬の過信（win_prob=0 を含む）を緩和する。
+    let probs =
+        paddock_domain::prediction::estimate_probabilities_with_config(entry_factors, config);
+
+    let probs = match (blend_alpha.filter(|a| a.is_finite() && *a < 1.0), market) {
+        (Some(alpha), Some(odds)) => {
+            let market_win: HashMap<_, _> =
+                odds.win.iter().map(|(num, o)| (*num, o.value())).collect();
+            paddock_domain::prediction::blend_with_market_win(&probs, &market_win, alpha)
+        }
+        _ => probs,
+    };
+
+    // 穴馬の 1 着過大評価を縮約する win_prob 冪変換（#246）。config.win_power が None なら no-op。
+    // ブレンド後の最終 win に適用し、連系・着順 EV（Harville/simulate）まで校正後 win が伝わる。
+    match config.win_power {
+        Some(gamma) => paddock_domain::prediction::apply_win_power(&probs, gamma),
+        None => probs,
     }
 }
 

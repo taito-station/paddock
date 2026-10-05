@@ -250,6 +250,7 @@ dependencies = [
  "paddock-use-case",
  "predict-format",
  "rdb-gateway",
+ "serde_json",
  "tokio",
  "tracing",
  "tracing-subscriber",
