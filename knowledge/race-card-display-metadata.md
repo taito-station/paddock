@@ -8,7 +8,7 @@ sources:
   - docs-original/389-race-name.md
   - knowledge/netkeiba-datasource.md
   - knowledge/rest-api-read.md
-distilled_from_sha: "eb4e8e3"
+distilled_from_sha: "8899ebc"
 updated: "2026-08-12"
 ---
 

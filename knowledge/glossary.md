@@ -14,7 +14,7 @@ sources:
   - knowledge/prediction-search-api.md
   - knowledge/feature-resolution-diagnosis.md
   - knowledge/netkeiba-datasource.md
-distilled_from_sha: "d54bb57"
+distilled_from_sha: "8899ebc"
 updated: "2026-10-05"
 ---
 
