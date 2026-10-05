@@ -12,7 +12,7 @@ sources:
   - docs-original/722-benter-alpha-exotics.md
   - docs-original/742-fill-missing-results.md
 distilled_from_sha: "a48fb23"
-updated: "2026-10-04"
+updated: "2026-10-05"
 ---
 
 # netkeiba 当日データソース取り込み 仕様書
@@ -148,6 +148,9 @@ predict-watch / api-server の live scrape（`OddsInteractor` への `UreqNetkei
   キャッシュに当たれば待たない。開催日の一覧（`nk.list_race_ids`）は取得に成功したあと同じだけ待つ（失敗時はスクリプトが止まる）。
   `nk.curl` は再送しないので、下限 3,334ms を再送で破ることはない。
 - 間隔はプロセス単位でしか守られない。netkeiba を取得するスクリプトは並走させない（プロセス間のロックは持たない）。
+- 着順の `nk.parse_result` は結果表 `table#All_Result_Table` の行だけを読む（Rust の `parse_race_result` と同じ規則。
+  ただし結果表は入れ子の表を持たない前提で、最初の `</table>` までを読む）。結果ページの後ろのラップ表・走行距離表
+  （`RapSummary_Table` / `LapSummary_Table`）にも `HorseList` 行があり、拾うと着順・馬名なしの行が混ざるため（#766。経緯は決定ログ「#766」）。
 - 経緯は決定ログ「#763」。
 
 ---
@@ -1601,3 +1604,41 @@ DELETE・ADR 0089 決定 8）であり、「いつ未発売で、いつ発売さ
 - `list_races.py` などの一覧取得は終了が 3.5 秒遅れる。
 - `scripts/predict-check/refresh_ev.sh` のワイド取得（`fetch_wide.py`・1 秒間隔）と `nk.race_post_times`（単発・待ちなし）は
   レース当日のライブ取得で、この決定の対象外。
+
+### #766: nk.parse_result は結果表 table#All_Result_Table の行だけを読む (2026-10-05) — 採用
+
+#### コンテキスト
+
+- `scripts/predict-check/nk.py` の `parse_result` はページ全体の `class="HorseList"` 行を拾っていた。結果ページには結果表の後ろに
+  ラップ表・走行距離表（`RapSummary_Table` の id=lap_summary / milage_summary、`LapSummary_Table` の id=LapSummary）があり、
+  そこにも `HorseList` 行（1 着馬など。`class="Rank"` のセルと `HorseNameSpan` が無い）がある。これが `(着順なし, 馬番, 馬名なし)` の
+  行として混ざり、後勝ちの辞書にすると 1 着馬の着順が潰れた（#724 の計測で軸の勝率が 33% のところ 4% と出た）。
+- キャッシュ済みの結果ページ 985 本のうち 966 本で余計な行があった（1 本あたり 3 行が 964 本、5 行が 2 本）。結果表
+  `table#All_Result_Table` が無いページ、結果表の中に入れ子の表があるページは 0 本。
+- 本体 Rust の `parse_race_result` は `table#All_Result_Table tr` に限定済みで、Python 側だけがずれていた（ADR 0064 の二重実装のずれ）。
+
+#### 決定
+
+- `nk.parse_result` の走査範囲を `table#All_Result_Table` に限定する。表が無ければ 0 行で、既存の「構造変化の疑い」の warn を出す。
+  結果表は入れ子の表を持たない前提で、開始タグから最初の `</table>` までを読む（入れ子への対応・検出は YAGNI として入れない）。
+  切り出しは正規表現の後戻りに頼らず文字列検索で行い、`data-id=` などは id と見なさない。
+- 結果表の中の取消・除外馬（着順なし・馬名あり）の行は従来どおり返す。
+
+#### 理由
+
+- Rust と同じ規則にそろえれば、二重実装の片方だけがずれることを避けられる。
+- 985 本で確かめて、馬名のある行は 1 本も変わらず、余計な行は 0 本になった。
+
+#### 却下した代替案
+
+- **馬名が空の行を捨てる**: 985 本で結果は同じだが、Rust の規則とずれたままの後付けの条件で、後ろの表の行に `HorseNameSpan` が
+  入るようになれば再発する。
+- **入れ子の表に対応する（深さを数えて対応する `</table>` を探す）・入れ子を検出して warn する**: 985 本で入れ子は 0 で、使われない分岐になる。
+
+#### 影響
+
+- `fetch_results.py` の出力から余計な行が消え、行数が結果表の行数（出馬表の頭数。取消・除外を含む）と一致する。
+  `late_money_probe.py` と `nk.unsaved_reason` は着順なしの行を
+  捨てていたので結果は変わらない。
+- `*_backtest.py` 5 本の同名の関数（着順セルと馬番セルの両方がある行だけ拾う）と `zure_sign_probe.parse_result_odds`
+  （余計な行にオッズのセルが無い）は影響を受けていなかったので変えない。
