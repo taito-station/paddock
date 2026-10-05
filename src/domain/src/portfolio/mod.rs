@@ -63,6 +63,54 @@ impl PinnedSelection {
     pub fn is_empty(&self) -> bool {
         self.axis.is_none() && self.partners.is_none() && self.konsen_band.is_none()
     }
+
+    /// 組み上がった買い目から「この選定を固定する」値を作る（#724）。
+    ///
+    /// predict-watch が初回スイープの記録（`slip`）から固定を読み戻す規則
+    /// （rdb-gateway `find_live_ev_pins_by_date`）と同じにする。記録に残るのは stake>0 の脚だけなので、
+    /// - 相手 = ながしの馬連・ワイドの脚の組から軸を除いた和集合（昇順）
+    /// - band = box の脚の組の和集合（昇順）。box の脚が無ければ空 = 「非混戦で固定」
+    pub fn from_staked_legs(portfolio: &Portfolio) -> Self {
+        let union = |keep: &dyn Fn(&PortfolioBet) -> bool| -> Vec<HorseNum> {
+            let mut nums: Vec<u32> = portfolio
+                .bets
+                .iter()
+                .filter(|b| b.stake > 0 && keep(b))
+                .flat_map(|b| b.combination.horse_nums())
+                .filter(|n| portfolio.axis.is_none_or(|a| a.value() != *n))
+                .collect();
+            nums.sort_unstable();
+            nums.dedup();
+            nums.into_iter()
+                .filter_map(|n| HorseNum::try_from(n).ok())
+                .collect()
+        };
+        let partners = union(&|b| {
+            b.method == BetMethod::Nagashi
+                && matches!(
+                    b.combination,
+                    BetCombination::Quinella(_) | BetCombination::Wide(_)
+                )
+        });
+        // band は軸も含む（box は軸なしの総当たり）ので、軸を除かずに集める
+        let mut band: Vec<u32> = portfolio
+            .bets
+            .iter()
+            .filter(|b| b.stake > 0 && b.method == BetMethod::Box)
+            .flat_map(|b| b.combination.horse_nums())
+            .collect();
+        band.sort_unstable();
+        band.dedup();
+        Self {
+            axis: portfolio.axis,
+            partners: Some(partners),
+            konsen_band: Some(
+                band.into_iter()
+                    .filter_map(|n| HorseNum::try_from(n).ok())
+                    .collect(),
+            ),
+        }
+    }
 }
 
 /// ポートフォリオ生成の方針。
@@ -1798,5 +1846,70 @@ mod tests {
             "オッズ欠落でも的中確率は出る（ev だけ 0）: {:?}",
             trio
         );
+    }
+
+    /// 固定は「stake>0 の脚」から作る（記録側 `find_live_ev_pins_by_date` の SQL と同じ規則, #724）。
+    /// 相手 = ながしの馬連・ワイドの脚の組から軸を除いた和集合（3連複ながしの脚は見ない）。
+    /// band = box の脚の組の和集合。¥0 の脚は記録に残らないので数えない。
+    #[test]
+    fn pinned_from_staked_legs_mirrors_recorded_pin_rule() {
+        let bet = |combination: BetCombination, method: BetMethod, stake: u64| PortfolioBet {
+            combination,
+            method,
+            stake,
+            odds: None,
+            ev: 0.0,
+            hit_prob: 0.0,
+        };
+        let pair = |a: u32, b: u32| Pair::try_from((horse(a), horse(b))).unwrap();
+        let triple =
+            |a: u32, b: u32, c: u32| Triple::try_from((horse(a), horse(b), horse(c))).unwrap();
+        let bets = vec![
+            bet(
+                BetCombination::Quinella(pair(1, 2)),
+                BetMethod::Nagashi,
+                300,
+            ),
+            bet(BetCombination::Wide(pair(1, 3)), BetMethod::Nagashi, 300),
+            // ¥0 のながし脚の相手は記録に残らない
+            bet(BetCombination::Wide(pair(1, 9)), BetMethod::Nagashi, 0),
+            // 3連複ながしの相手は相手集合に数えない
+            bet(
+                BetCombination::Trio(triple(1, 4, 6)),
+                BetMethod::Nagashi,
+                200,
+            ),
+            bet(BetCombination::Trio(triple(2, 3, 5)), BetMethod::Box, 500),
+            bet(BetCombination::Trio(triple(2, 5, 7)), BetMethod::Box, 500),
+            // ¥0 の box 脚の馬は band に入らない
+            bet(BetCombination::Trio(triple(6, 7, 8)), BetMethod::Box, 0),
+        ];
+        let portfolio = Portfolio {
+            axis: Some(horse(1)),
+            partners: vec![horse(2), horse(3), horse(9)],
+            konsen: true,
+            total_stake: bets.iter().map(|b| b.stake).sum(),
+            bets,
+            ev: None,
+        };
+        let pinned = PinnedSelection::from_staked_legs(&portfolio);
+        assert_eq!(pinned.axis, Some(horse(1)));
+        assert_eq!(pinned.partners, Some(vec![horse(2), horse(3)]));
+        assert_eq!(
+            pinned.konsen_band,
+            Some(vec![horse(2), horse(3), horse(5), horse(7)])
+        );
+    }
+
+    /// 非混戦（box の脚が無い）は band = 空で固定する（記録側の「空配列 = 非混戦で固定」と同じ）。
+    #[test]
+    fn pinned_from_staked_legs_pins_non_konsen_as_empty_band() {
+        let (probs, odds) = sample();
+        let portfolio = build_portfolio(&probs, &probs, &odds, 5000, &PortfolioConfig::default());
+        assert!(!portfolio.konsen);
+        let pinned = PinnedSelection::from_staked_legs(&portfolio);
+        assert_eq!(pinned.axis, portfolio.axis);
+        assert_eq!(pinned.konsen_band, Some(vec![]));
+        assert!(pinned.partners.is_some_and(|p| !p.is_empty()));
     }
 }

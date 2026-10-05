@@ -126,14 +126,35 @@ struct MockRepo {
     jockey_surface_stats: HashMap<String, Vec<GroupStat>>,
     /// 馬名 → 近走（#552 の近走被覆テスト用。未登録馬は空 = 近走なし）。
     recent_runs: HashMap<String, Vec<RecentRun>>,
+    /// 統計の取得に渡された as_of（#724: 再構成の推定が全統計に as_of を渡すかの検証用）。
+    as_of_seen: std::sync::Mutex<Vec<(&'static str, Option<chrono::NaiveDate>)>>,
+    /// #724: 初回スイープの固定（再構成の対象レース）。
+    pins: Vec<paddock_use_case::repository::LiveEvPin>,
+    /// #724: race_id → (朝のスナップショット, T-40 のスナップショット)。
+    snapshots: HashMap<
+        String,
+        (
+            Option<paddock_use_case::repository::SnapshotOdds>,
+            Option<paddock_use_case::repository::SnapshotOdds>,
+        ),
+    >,
+    /// #724: find_race_odds_snapshot に渡された時点。
+    points_seen: std::sync::Mutex<Vec<(String, paddock_use_case::repository::SnapshotPoint)>>,
+}
+
+impl MockRepo {
+    fn see(&self, what: &'static str, as_of: Option<chrono::NaiveDate>) {
+        self.as_of_seen.lock().unwrap().push((what, as_of));
+    }
 }
 
 impl StatsRepository for MockRepo {
     async fn horse_stats(
         &self,
         name: &HorseName,
-        _as_of: Option<chrono::NaiveDate>,
+        as_of: Option<chrono::NaiveDate>,
     ) -> Result<HorseStatsRow> {
+        self.see("horse", as_of);
         let win_rate = if name.value() == "ウマA" { 0.2 } else { 0.1 };
         let mut row = horse_stats_with_surface_win(win_rate);
         row.by_track_condition = self
@@ -148,8 +169,9 @@ impl StatsRepository for MockRepo {
         _: Venue,
         _: u32,
         _: Surface,
-        _as_of: Option<chrono::NaiveDate>,
+        as_of: Option<chrono::NaiveDate>,
     ) -> Result<CourseStatsRow> {
+        self.see("course", as_of);
         Ok(course_stats_with_gate(4, 2))
     }
     /// 手動ハンデ精査材料（#628）は盤の提示専用で predict 経路は使わないため、
@@ -170,8 +192,9 @@ impl StatsRepository for MockRepo {
     async fn jockey_stats(
         &self,
         name: &JockeyName,
-        _as_of: Option<chrono::NaiveDate>,
+        as_of: Option<chrono::NaiveDate>,
     ) -> Result<JockeyStatsRow> {
+        self.see("jockey", as_of);
         Ok(JockeyStatsRow {
             jockey_name: name.value().to_string(),
             overall: make_group("全体", 0, 0, 0, 0),
@@ -188,8 +211,9 @@ impl StatsRepository for MockRepo {
     async fn trainer_stats(
         &self,
         name: &TrainerName,
-        _as_of: Option<chrono::NaiveDate>,
+        as_of: Option<chrono::NaiveDate>,
     ) -> Result<TrainerStatsRow> {
+        self.see("trainer", as_of);
         Ok(TrainerStatsRow {
             trainer_name: name.value().to_string(),
             overall: make_group("全体", 0, 0, 0, 0),
@@ -281,6 +305,24 @@ impl OddsRepository for MockRepo {
     ) -> Result<Option<paddock_use_case::repository::MorningRaceOdds>> {
         Ok(None)
     }
+    async fn find_race_odds_snapshot(
+        &self,
+        race_id: &RaceId,
+        point: paddock_use_case::repository::SnapshotPoint,
+    ) -> Result<Option<paddock_use_case::repository::SnapshotOdds>> {
+        use paddock_use_case::repository::SnapshotPoint;
+        self.points_seen
+            .lock()
+            .unwrap()
+            .push((race_id.value().to_string(), point));
+        let Some((morning, t40)) = self.snapshots.get(race_id.value()) else {
+            return Ok(None);
+        };
+        Ok(match point {
+            SnapshotPoint::FirstWinSince(_) => morning.clone(),
+            SnapshotPoint::FirstCompleteSince(_) => t40.clone(),
+        })
+    }
     async fn purge_race_odds_snapshots(&self, _: chrono::NaiveDate) -> Result<u64> {
         Ok(0)
     }
@@ -306,6 +348,27 @@ impl OddsRepository for MockRepo {
     }
 }
 
+impl paddock_use_case::repository::LiveEvRepository for MockRepo {
+    async fn find_live_ev_by_date(
+        &self,
+        _: chrono::NaiveDate,
+    ) -> Result<Vec<paddock_use_case::repository::LiveEvSnapshot>> {
+        Ok(Vec::new())
+    }
+    async fn find_live_ev_pins_by_date(
+        &self,
+        _: chrono::NaiveDate,
+    ) -> Result<Vec<paddock_use_case::repository::LiveEvPin>> {
+        Ok(self.pins.clone())
+    }
+    async fn save_live_ev_snapshot(
+        &self,
+        _: &paddock_use_case::repository::LiveEvSnapshotRecord,
+    ) -> Result<()> {
+        Ok(())
+    }
+}
+
 fn interactor(card: Option<RaceCard>) -> Interactor<MockRepo> {
     Interactor::new(MockRepo {
         card,
@@ -314,6 +377,10 @@ fn interactor(card: Option<RaceCard>) -> Interactor<MockRepo> {
         trainer_surface_stats: HashMap::new(),
         jockey_surface_stats: HashMap::new(),
         recent_runs: HashMap::new(),
+        as_of_seen: Default::default(),
+        pins: Vec::new(),
+        snapshots: HashMap::new(),
+        points_seen: Default::default(),
     })
 }
 
@@ -328,6 +395,10 @@ fn interactor_with_odds(
         trainer_surface_stats: HashMap::new(),
         jockey_surface_stats: HashMap::new(),
         recent_runs: HashMap::new(),
+        as_of_seen: Default::default(),
+        pins: Vec::new(),
+        snapshots: HashMap::new(),
+        points_seen: Default::default(),
     })
 }
 
@@ -342,6 +413,10 @@ fn interactor_with_tc_stats(
         trainer_surface_stats: HashMap::new(),
         jockey_surface_stats: HashMap::new(),
         recent_runs: HashMap::new(),
+        as_of_seen: Default::default(),
+        pins: Vec::new(),
+        snapshots: HashMap::new(),
+        points_seen: Default::default(),
     })
 }
 
@@ -356,6 +431,10 @@ fn interactor_with_trainer_stats(
         trainer_surface_stats,
         jockey_surface_stats: HashMap::new(),
         recent_runs: HashMap::new(),
+        as_of_seen: Default::default(),
+        pins: Vec::new(),
+        snapshots: HashMap::new(),
+        points_seen: Default::default(),
     })
 }
 
@@ -370,6 +449,10 @@ fn interactor_with_jockey_stats(
         trainer_surface_stats: HashMap::new(),
         jockey_surface_stats,
         recent_runs: HashMap::new(),
+        as_of_seen: Default::default(),
+        pins: Vec::new(),
+        snapshots: HashMap::new(),
+        points_seen: Default::default(),
     })
 }
 
@@ -385,6 +468,10 @@ fn interactor_with_recent_runs(
         trainer_surface_stats: HashMap::new(),
         jockey_surface_stats: HashMap::new(),
         recent_runs,
+        as_of_seen: Default::default(),
+        pins: Vec::new(),
+        snapshots: HashMap::new(),
+        points_seen: Default::default(),
     })
 }
 
@@ -901,4 +988,211 @@ async fn predict_race_trainer_absent_not_penalized() {
     for (a, b) in baseline.iter().zip(&with_stats) {
         assert!((a.win_prob - b.win_prob).abs() < 1e-12, "{a:?} vs {b:?}");
     }
+}
+
+// --- #724: 過去の時点の買い目を再構成するための推定（predict_race_views_at） ---------------
+
+/// 3 頭立て・騎手と調教師つきのカード（統計の取得すべてに as_of が渡るかを見るため）。
+fn make_reconstruct_card(race_id: &str) -> RaceCard {
+    let mut card = make_race_card(race_id);
+    card.entries.push(HorseEntry {
+        gate_num: GateNum::try_from(8u32).unwrap(),
+        horse_num: HorseNum::try_from(3u32).unwrap(),
+        horse_name: HorseName::try_from("ウマC").unwrap(),
+        jockey: None,
+        trainer: None,
+        weight_carried: None,
+    });
+    for e in &mut card.entries {
+        e.jockey = Some(JockeyName::try_from("騎手A").unwrap());
+        e.trainer = Some(TrainerName::try_from("調教師A").unwrap());
+    }
+    card
+}
+
+fn win_odds(race_id: &str, pairs: &[(u32, f64)]) -> paddock_domain::RaceOdds {
+    let mut odds = paddock_domain::RaceOdds::empty(RaceId::try_from(race_id).unwrap());
+    for (n, v) in pairs {
+        odds.win.insert(
+            HorseNum::try_from(*n).unwrap(),
+            paddock_domain::OddsValue::try_from((paddock_domain::BetType::Win, *v)).unwrap(),
+        );
+    }
+    odds
+}
+
+#[tokio::test]
+async fn views_at_passes_as_of_to_every_stats_lookup() {
+    // 当日以降の結果が統計に混ざらないよう、馬・騎手・調教師・コースの統計すべてに as_of を渡す。
+    let rid = "2026-1-tokyo-1-R1";
+    let app = interactor(Some(make_reconstruct_card(rid)));
+    let as_of = chrono::NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
+    let market = win_odds(rid, &[(1, 3.0), (2, 4.0), (3, 6.0)]);
+    app.predict_race_views_at(
+        &RaceId::try_from(rid).unwrap(),
+        Some(0.2),
+        &market,
+        as_of,
+        &paddock_domain::EstimationConfig::production(),
+    )
+    .await
+    .unwrap();
+    let seen = app.repository.as_of_seen.lock().unwrap().clone();
+    for what in ["horse", "jockey", "trainer", "course"] {
+        assert!(
+            seen.iter().any(|(w, _)| *w == what),
+            "{what} の統計を引いていない: {seen:?}"
+        );
+    }
+    assert!(
+        seen.iter().all(|(_, a)| *a == Some(as_of)),
+        "すべての統計に as_of を渡す: {seen:?}"
+    );
+}
+
+#[tokio::test]
+async fn production_views_keep_full_period_stats() {
+    // 本番の経路（predict_race_views）は従来どおり as_of なし（全期間）のまま。
+    let rid = "2026-1-tokyo-1-R1";
+    let app = interactor(Some(make_reconstruct_card(rid)));
+    app.predict_race_views(&RaceId::try_from(rid).unwrap(), Some(0.2), None, false)
+        .await
+        .unwrap();
+    let seen = app.repository.as_of_seen.lock().unwrap().clone();
+    assert!(!seen.is_empty());
+    assert!(seen.iter().all(|(_, a)| a.is_none()), "{seen:?}");
+}
+
+#[tokio::test]
+async fn views_at_limits_field_to_horses_in_the_market_snapshot() {
+    // その時点の単勝に載っていない馬（後で出馬表に残っていても）は母集合に入れない。
+    let rid = "2026-1-tokyo-1-R1";
+    let app = interactor(Some(make_reconstruct_card(rid)));
+    let market = win_odds(rid, &[(1, 2.0), (3, 3.0)]);
+    let views = app
+        .predict_race_views_at(
+            &RaceId::try_from(rid).unwrap(),
+            Some(0.2),
+            &market,
+            chrono::NaiveDate::from_ymd_opt(2026, 1, 1).unwrap(),
+            &paddock_domain::EstimationConfig::production(),
+        )
+        .await
+        .unwrap();
+    let nums = |v: &[paddock_domain::HorseProbability]| -> Vec<u32> {
+        v.iter().map(|p| p.horse_num.value()).collect()
+    };
+    assert_eq!(nums(&views.blended), vec![1, 3]);
+    assert_eq!(nums(&views.pure), vec![1, 3]);
+}
+
+#[tokio::test]
+async fn views_at_blends_with_the_given_market_not_the_stored_odds() {
+    // リポジトリには保存オッズが無い（odds: None）。渡した市場オッズでブレンドされていれば、
+    // 圧倒的人気のウマB の勝率は純モデルより上がる。
+    let rid = "2026-1-tokyo-1-R1";
+    let app = interactor(Some(make_reconstruct_card(rid)));
+    let market = win_odds(rid, &[(1, 30.0), (2, 1.2), (3, 30.0)]);
+    let views = app
+        .predict_race_views_at(
+            &RaceId::try_from(rid).unwrap(),
+            Some(0.2),
+            &market,
+            chrono::NaiveDate::from_ymd_opt(2026, 1, 1).unwrap(),
+            &paddock_domain::EstimationConfig::production(),
+        )
+        .await
+        .unwrap();
+    let b = |v: &[paddock_domain::HorseProbability]| win_of(v, "ウマB");
+    assert!(
+        b(&views.blended) > b(&views.pure) + 0.2,
+        "blended={} pure={}",
+        b(&views.blended),
+        b(&views.pure)
+    );
+}
+
+#[tokio::test]
+async fn reconstruct_wires_time_points_as_of_and_skip_reasons() {
+    use paddock_use_case::repository::{LiveEvPin, SnapshotOdds, SnapshotPoint};
+    let rid = "2026-1-tokyo-1-R1";
+    let date = chrono::NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
+    let pin = |race_id: &str| LiveEvPin {
+        race_id: race_id.to_string(),
+        axis: 1,
+        partners: vec![2, 3],
+        konsen_band: vec![],
+        captured_at: "2026-01-01T03:00:00Z".to_string(),
+    };
+    // 朝は 1 番、T-40 は 2 番が圧倒的人気（どちらの盤で組んだかを軸で見分ける）
+    let snap = |pairs: &[(u32, f64)], at: &str| SnapshotOdds {
+        odds: win_odds(rid, pairs),
+        fetched_at: at.to_string(),
+    };
+    let mut repo = MockRepo {
+        card: Some(make_reconstruct_card(rid)),
+        odds: None,
+        track_condition_stats: HashMap::new(),
+        trainer_surface_stats: HashMap::new(),
+        jockey_surface_stats: HashMap::new(),
+        recent_runs: HashMap::new(),
+        as_of_seen: Default::default(),
+        pins: vec![pin(rid), pin("2026-1-tokyo-1-R2")],
+        snapshots: HashMap::new(),
+        points_seen: Default::default(),
+    };
+    repo.snapshots.insert(
+        rid.to_string(),
+        (
+            Some(snap(&[(1, 1.2), (2, 30.0), (3, 30.0)], "morning")),
+            Some(snap(&[(1, 30.0), (2, 1.2), (3, 30.0)], "t40")),
+        ),
+    );
+    let app = Interactor::new(repo);
+    let out = app
+        .reconstruct_race_slips(date, Some(0.2), 5000)
+        .await
+        .unwrap();
+
+    // スナップショットが無い R2 は理由付きで飛ばし、R1 は組める（1 レースの失敗で止めない）
+    assert_eq!(out.len(), 2);
+    let r1 = out.iter().find(|r| r.recorded.race_id == rid).unwrap();
+    let r2 = out.iter().find(|r| r.recorded.race_id != rid).unwrap();
+    assert!(r2.slips.is_none());
+    assert!(
+        r2.skip
+            .as_deref()
+            .is_some_and(|s| s.contains("朝のスナップショットが無い"))
+    );
+    assert!(r1.skip.is_none());
+    assert_eq!(r1.morning_at.as_deref(), Some("morning"));
+    assert_eq!(r1.t40_at.as_deref(), Some("t40"));
+    let slips = r1.slips.as_ref().unwrap();
+    assert_eq!(
+        slips.morning_pick.axis.map(|h| h.value()),
+        Some(1),
+        "朝の盤で選ぶ"
+    );
+    assert_eq!(
+        slips.t40.axis.map(|h| h.value()),
+        Some(2),
+        "T-40 の盤で選ぶ"
+    );
+
+    // 朝 = 当日 JST 0 時以降の最初の単勝、T-40 = 初回スイープ以降の最初の全券種
+    let seen = app.repository.points_seen.lock().unwrap().clone();
+    let jst_midnight = chrono::DateTime::parse_from_rfc3339("2025-12-31T15:00:00Z")
+        .unwrap()
+        .with_timezone(&chrono::Utc);
+    let captured = chrono::DateTime::parse_from_rfc3339("2026-01-01T03:00:00Z")
+        .unwrap()
+        .with_timezone(&chrono::Utc);
+    assert!(seen.contains(&(rid.to_string(), SnapshotPoint::FirstWinSince(jst_midnight))));
+    assert!(seen.contains(&(rid.to_string(), SnapshotPoint::FirstCompleteSince(captured))));
+    // 統計の as_of は開催日
+    let as_of = app.repository.as_of_seen.lock().unwrap().clone();
+    assert!(
+        !as_of.is_empty() && as_of.iter().all(|(_, a)| *a == Some(date)),
+        "{as_of:?}"
+    );
 }

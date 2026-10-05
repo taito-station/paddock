@@ -3,7 +3,7 @@ use paddock_domain::{
     BetType, HorseNum, OddsValue, OrderedPair, OrderedTriple, Pair, PlaceOdds, RaceId, RaceOdds,
     Triple,
 };
-use paddock_use_case::repository::MorningRaceOdds;
+use paddock_use_case::repository::{MorningRaceOdds, SnapshotOdds, SnapshotPoint};
 use sqlx::PgPool;
 
 use crate::error::{Error, Result};
@@ -130,6 +130,58 @@ pub async fn find_race_odds_morning(
             morning_at,
             latest_at,
         }));
+    }
+    Ok(None)
+}
+
+/// `race_odds_snapshots` から [`SnapshotPoint`] の時点の 1 スナップショットを読む（#724）。
+///
+/// 時点の比較・並べ替えは `fetched_at::timestamptz` で行う（`...+00:00` と `...Z` が混在し、文字列の
+/// 辞書順では同じ秒の付近で順序が崩れるため）。同じスナップショットの行は同じ `fetched_at` 文字列を持つ
+/// （保存側が 1 レコード分を同じ時刻で書く）ので、選んだ時刻の行はその文字列の一致で読む。
+pub async fn find_race_odds_snapshot(
+    pool: &PgPool,
+    race_id: &RaceId,
+    point: SnapshotPoint,
+) -> Result<Option<SnapshotOdds>> {
+    let (since, need_complete) = match point {
+        SnapshotPoint::FirstWinSince(t) => (t, false),
+        SnapshotPoint::FirstCompleteSince(t) => (t, true),
+    };
+    // 候補時刻: 単勝を含むスナップショット（complete はさらに下で検査する）を時刻順に。
+    let candidate_times: Vec<String> = sqlx::query_scalar(
+        r#"
+        SELECT fetched_at
+        FROM race_odds_snapshots
+        WHERE race_id = $1 AND bet_type = 'win' AND fetched_at::timestamptz >= $2
+        GROUP BY fetched_at
+        ORDER BY fetched_at::timestamptz ASC
+        "#,
+    )
+    .bind(race_id.value())
+    .bind(since)
+    .fetch_all(pool)
+    .await?;
+
+    for fetched_at in candidate_times {
+        let rows: Vec<OddsRow> = sqlx::query_as(
+            r#"
+            SELECT bet_type, combination_key, odds, odds_high
+            FROM race_odds_snapshots
+            WHERE race_id = $1 AND fetched_at = $2
+            "#,
+        )
+        .bind(race_id.value())
+        .bind(&fetched_at)
+        .fetch_all(pool)
+        .await?;
+        let Some(odds) = rows_to_race_odds(race_id, rows)? else {
+            continue;
+        };
+        if need_complete && !odds.is_complete() {
+            continue;
+        }
+        return Ok(Some(SnapshotOdds { odds, fetched_at }));
     }
     Ok(None)
 }
