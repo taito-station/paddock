@@ -189,3 +189,33 @@ cargo run -p ingest-predictions -- --input pred.json --dry-run
 - `ingest-predictions` は `bets` フィールドを配列として受け取る。空配列（障害レース等）は正常値
   として扱われ、ingest 側でエラーにはならない（フィールドが存在しない場合の動作は未規定のため、
   gen_predictions.py は常に `bets: []` を含めて出力する）。
+
+### #765: gen_predictions.py の役割分担から refresh_ev.sh を外す (2026-10-06) — 採用
+
+#### コンテキスト
+
+- ADR 0032 は「gen_predictions = 本命確認＋買い目案、refresh_ev = EV 判定」という役割分担を前提にし、`gen_predictions.py` の
+  `strategy_note` にも「+EV/−EV 判定は refresh_ev.sh で。」と書いていた。
+- `refresh_ev.sh` は #765 で退役した（`live-ev-buy-view.md` 決定ログ「#765」）。張る/見送りは参考 ROI でなく手動のハンデ精査と執行の規律で決める
+  （ADR 0076）。DB の `predictions` には `strategy_note` に refresh_ev を含む行は無く（35 行中 0 行・2026-10-05）、UI も表示していない。
+
+#### 決定
+
+- ADR 0032 の役割分担のうち「refresh_ev = EV 判定」を supersede する。`gen_predictions.py` の `strategy_note` とコメントは
+  「張る/見送りは手動精査と執行の規律で（参考ROIは predict-watch / predict --overview）」とする。買い目の生成方法（ADR 0032 の決定）は変えない。
+
+#### 理由
+
+- 消したスクリプトを案内する文言を出力に残さない。今のルール（ADR 0076）と案内先をそろえる。
+
+#### 却下した代替案
+
+- **文言を維持する**: 存在しないスクリプトを案内し続ける。
+- **一文を削るだけにする**: EV 判定の置き場所が書かれなくなり、ADR 0032 の役割分担の後継がわからない。
+
+#### 影響
+
+- これから生成する予想 JSON の `strategy_note` の文言が変わる。既存の行は変えない。`strategy_note` は SPA では描画していないが、
+  REST API（`GET` の予想レスポンス・`openapi.json`）では返す。
+- 案内先の参考 ROI（`predict-watch` / `predict --overview`）は `build_portfolio` の均等割りの伝票で計算する。`gen_predictions.py` の `bets`
+  （`live_ev.build_bets` の確率重み配分）とは配分方式が違うので、同じレースでも金額は一致しない。

@@ -15,6 +15,8 @@
 
 ## 手順（例: 2026-06-13 の東京[05]・阪神[09]）
 
+> 下の `sqlite3 data/paddock.db ...` は SQLite 時代（移行前）の記述。現行の DB アクセスは **Postgres**（`PADDOCK_DB_URL`）。
+
 ```bash
 cd /path/to/paddock
 DATE=20260613; DASH=2026-06-13; VENUES="05 09"
@@ -146,9 +148,8 @@ python3 scripts/predict-check/snapshot_ev_report.py --snapshots-tsv snaps.tsv --
 | `konsen_backtest.py` | 混戦判定の閾値バックテスト（¥5,000・確率重み配分・3連複ボックス, #180） |
 | `formation_backtest.py` | 上位近接時の2軸フォーメーション バックテスト（baseline vs union2/pair2・θ 掃引, #241） |
 | `umaren_backtest.py` | 馬連特化（馬連 EV≥θ）買い目のバックテスト（frequency 比較・cap/flat/weighted 掃引, #250）。`--gate-grid`/`--odds-floor-grid`/`--winodds` で baseline_pf の model-EV ROI≥100% ゲート精度を診断・掃引（#263）。`--p-model-dir` で確率→EV パイプライン（α×γ）を純 Python 再計算し較正バケット＋(α,γ)同時掃引（#270, ADR 0045） |
-| `fetch_wide.py` | netkeiba ライブ（発走前）ワイドオッズ取得（type=5, fetch-card 未対応の補完, #187） |
-| `live_ev.py` | 当日・発走前オッズの全3券種 ROI（期待回収率）評価＋ +EV レースの買い目伝票 |
-| `refresh_ev.sh` | ライブ EV のオーケストレータ（fetch-card→DB→ワイド→predict→`live_ev.py`） |
+| `fetch_wide.py` | netkeiba ライブ（発走前）ワイドオッズを 1 レース分取得する手動ツール（type=5。現在は fetch-card も取得・保存する, #187） |
+| `live_ev.py` | 全3券種 ROI（期待回収率）評価＋買い目伝票（手で用意した TSV 向け CLI。`build_bets` / `race_roi` はオフライン評価が import） |
 | `prefetch_odds.sh` | 締切前 live オッズの自動 prefetch（post_time 選択→`fetch-card --force`→snapshots 蓄積, #237） |
 | `keep_awake.sh` | 開催日の発走ウィンドウ中 `caffeinate -i` で Mac のアイドルスリープを抑止し prefetch 取りこぼしを防ぐ（#264） |
 | `snapshot_ev_report.py` | `race_odds_snapshots` を後追い集計し開催日×レースの ever/final +EV と年間発生率を出す（#248） |
@@ -209,7 +210,7 @@ paddock-analyze backtest --from <YYYY-MM-DD> --to <YYYY-MM-DD> --blend-alpha 1.0
 - `fetch_results.py` / `fetch_payouts.py` も `nk.result_page` を通る（#763）。レース確定前に呼んでも未完ページは
   保存されないので、確定後に流し直せば取り直す。確定済みのページは取り直さない。
 - 開催日の一覧 `nk.list_race_ids` も取得後に `nk.FETCH_PAUSE_SEC` 待つ（一覧→1 レース目の取得を連続させない）。
-  `gen_win_backtest_data.sh` の結果 HTML 取得も同じ定数を読んで待つ。
+  `gen_win_backtest_data.sh` の結果 HTML 取得と `prefetch_odds.sh` の `fetch-card --interval`（ミリ秒に直して下限を検査）も同じ定数を読んで待つ（#765）。
 - 着順 `nk.parse_result` は結果表 `table#All_Result_Table` の行だけを読む（本体 Rust と同じ。結果表は入れ子の表を持たない前提）。
   結果ページには後ろにラップ表・走行距離表（`RapSummary_Table` / `LapSummary_Table`）があり、同じ `HorseList` 行
   （`Rank` セルと `HorseNameSpan` が無い）を持つ（#766）。
@@ -312,9 +313,11 @@ python3 scripts/predict-check/exotic_mispricing.py \
 
 ## ライブ EV 監視（当日・発走前オッズ）
 
-ブラインド予想→事後答え合わせ（上記）とは別に、**開催当日に発走前の最新オッズで「いま張る価値が
-あるレース」を見つける**ための一連。「高的中・低配当」を避け、**全3券種 ROI（期待回収率）が
-+EV（≥100%）のレースだけ張る**方針（買い方は上記戦略評価と同一の確率重み配分・混戦ボックス）。
+開催当日の発走前オッズでの監視は Rust の `paddock-predict-watch` が担う（使い方はルート `CLAUDE.md`「EV 判定 → 買い目決定」）。
+張る/見送りは参考 ROI ではなく手動のハンデ精査と執行の規律で決める（ADR 0076）。
+
+> 旧 `refresh_ev.sh`（fetch-card→DB→ワイド→predict→`live_ev.py` のオーケストレータ）は #765 で退役した。
+> netkeiba の取得間隔が規律（3,334ms 以上）に合わず、呼び出し元も無かったため（経緯は `knowledge/live-ev-buy-view.md` 決定ログ #765）。
 
 > **市場と同じ本命を当てることにエッジは無い**（ADR 0052 / #275）。市場を完全に模倣すれば本命的中率は
 > 高くても EV は市場と同等（控除率ぶん不利）にしかならず勝てない。**儲けは「市場が間違っている所で市場と
@@ -326,41 +329,15 @@ python3 scripts/predict-check/exotic_mispricing.py \
 > （点推定のみで分散は未計測）かは未検証で、<100% の赤字。加えて純モデルの低的中の一部は校正の弱さ
 > （favorite-longshot ミスキャリブレーション）由来でもあり、value 検証と win 校正改善は #305（#272 配下）。
 
-> このフローの DB アクセスは **Postgres**（`PADDOCK_DB_URL`、本体が SQLite→Postgres 移行済み）。
-> 上のブラインド予想手順にある `sqlite3 data/paddock.db ...` は移行前の記述で、現行は Postgres。
-
-```bash
-# 当日 6-12R を最新オッズで再取得し ROI ランキング＋ +EV レースの買い目伝票を出す。
-# 15 分間隔等で回し、ROI>=100% かつ未走のレースが出たら張る。
-scripts/predict-check/refresh_ev.sh 2026-06-20 6 12 5000
-#                                    └日付      │ │ └1レース予算(円)
-#                                              └─┴ R 範囲（first last）
-
-# 発走時刻ウィンドウ絞り込み（#197）: LIVE_WINDOW_MIN を付けると、netkeiba 発走時刻で
-# 「これから発走する かつ 発走まで N 分以内」のレースだけに絞る。朝の早い時間帯に全レースを
-# 叩いてオッズが動かないのに netkeiba を過剰アクセスする無駄を防ぐ（feedback_jra_fetch_pacing）。
-# 15 分ループから回すときはこれを付け、第1R発走 1 時間前まで実質間引き・本格化後に本気稼働する。
-LIVE_WINDOW_MIN=60 scripts/predict-check/refresh_ev.sh 2026-06-20 1 12 5000
-```
-
-`refresh_ev.sh` の処理:
-
-1. `fetch-card --force`（netkeiba 最新オッズ → Postgres `race_odds`）
-2. Postgres から馬・単勝・馬連・3連複オッズを TSV 化（`$WORKDIR`、既定 `$TMPDIR/paddock-live-ev`）
-3. `fetch_wide.py`（netkeiba type=5）でワイドを取得（fetch-card 未対応の補完, #187）
-4. `analyze predict --blend-alpha 0.2`（最新オッズ込みの model 勝率）で確率テーブル生成
-   （α は本番モデルと同じ 0.2＝ADR 0034。実験時は `LIVE_BLEND_ALPHA` で上書き可）
-5. `live_ev.py` が Plackett-Luce（model 勝率→着順確率）× 実オッズで全3券種 ROI を算出
-
-`live_ev.py` は中間 TSV を直接渡しても単独実行できる（再計算のみ・取得をスキップ）:
+`live_ev.py` は手で用意した中間 TSV を渡せば単独で実行できる（ネットワークに出ない・入力形式は `live_ev.py` の docstring）:
 
 ```bash
 python3 scripts/predict-check/live_ev.py \
-    --pred $WORKDIR/pred.txt --meta $WORKDIR/meta.tsv --horses $WORKDIR/horses.tsv \
-    --exotic $WORKDIR/exotic.tsv --wide $WORKDIR/wide.tsv --budget 5000 --slip
+    --pred <dir>/pred.txt --meta <dir>/meta.tsv --horses <dir>/horses.tsv \
+    --exotic <dir>/exotic.tsv --wide <dir>/wide.tsv --budget 5000 --slip
 ```
 
-**実測（2026-06-20 / 21R）**: +EV は函館12R（◎④ 1.7倍 model35% ROI≈125%）のみ。¥10,000 に増額し
+**実測（2026-06-20 / 21R・旧 `refresh_ev.sh` 時代の記録）**: +EV は函館12R（◎④ 1.7倍 model35% ROI≈125%）のみ。¥10,000 に増額し
 ④→⑤→⑦ 本命決着で回収 222%。−EV で見送った断然人気（東京10R 1.7倍 ROI80% 等）は全て不的中 or
 薄配当で、ROI 基準の取捨が利益に直結した。
 

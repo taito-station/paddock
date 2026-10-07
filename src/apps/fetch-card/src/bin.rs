@@ -6,8 +6,8 @@ use std::process::ExitCode;
 use clap::Parser;
 
 /// degraded（単複だけ未取得・要再取得）を表す終了コード。ハード失敗(=1)・正常(=0)と区別し、
-/// 消費側（例: scripts/predict-check/refresh_ev.sh は exit≠0 を FAIL 扱いし「古いオッズ警告」を
-/// 出す）が win 欠落レースだけ再取得対象として識別できるようにする（#288, ADR 0049）。
+/// 消費側が win 欠落レースだけ再取得対象として識別できるようにする（#288, ADR 0049）。
+/// 現状の scripts/predict-check/prefetch_odds.sh は exit≠0 を一律 FAIL としてログに残し、3 を区別していない。
 const EXIT_WIN_ODDS_DEGRADED: u8 = 3;
 
 /// ingest のエラーの扱い。「取り込み対象外＝設計どおりのスキップ（exit 0）」と
@@ -115,9 +115,9 @@ async fn run(
     }
 
     // 近走取り込み（主目的）まで終えた後で degraded を非0 exit で surface する。
-    // 専用コード 3: ハード失敗(=1)と「単複だけ未取得・要再取得」を呼び出し側（例: scripts/
-    // predict-check/refresh_ev.sh は exit≠0 を FAIL 扱いし「古いオッズ警告」を出す）が区別でき、
-    // win 欠落レースだけ再取得を回せる（#288, ADR 0049）。`process::exit` ではなく `ExitCode` を
+    // 専用コード 3: ハード失敗(=1)と「単複だけ未取得・要再取得」を呼び出し側が区別でき、
+    // win 欠落レースだけ再取得を回せる（#288, ADR 0049）。現状の scripts/predict-check/prefetch_odds.sh は
+    // exit≠0 を一律 FAIL としてログに残し、3 を区別していない。`process::exit` ではなく `ExitCode` を
     // 返し、tokio ランタイム・DB プール等の Drop を走らせてから終了する。
     Ok(ExitCode::from(exit_code_for(resp.win_odds_degraded)))
 }

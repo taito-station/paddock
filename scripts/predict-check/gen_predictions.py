@@ -3,7 +3,8 @@
 
 api-server の確率推定（market α=0.3 ブレンド）を本命の源として、勝率上位 5 頭に
 ◎○▲△☆ を付与。jockey は card API、単勝オッズ/人気は DB から補う。bets はモデル確率
-重み配分（¥5,000/レース）で生成する（ADR-0032）。+EV/−EV 判定は refresh_ev.sh で。
+重み配分（¥5,000/レース）で生成する（ADR-0032）。張る/見送りは手動のハンデ精査と執行の規律で決める
+（参考 ROI は predict-watch / predict --overview・ADR 0076）。
 
 使い方:
     python3 gen_predictions.py <YYYY-MM-DD> | cargo run -p ingest-predictions
@@ -106,7 +107,7 @@ for r in races:
         if pop is not None:
             h["popularity"] = pop
         horses.append(h)
-    # モデル確率（[0,1]）から買い目を生成（ADR-0032）。+EV フィルタなし: 判定は refresh_ev.sh で。
+    # モデル確率（[0,1]）から買い目を生成（ADR-0032）。+EV フィルタなし（張る/見送りは人が決める・ADR 0076）。
     # build_bets はスケール非依存（max/比率のみ使用）のため [0,1] のまま渡してよい。
     prob_dict = {p["horse_num"]: p["win_prob"] for p in sorted_probs}
     # sorted_probs 空ガードより後なので prob_dict は必ず 1 件以上。
@@ -129,7 +130,7 @@ for r in races:
         "race_num": card["race_num"],
         "title": f"{card['surface']} {card['distance']}m",
         "budget": BUDGET,
-        "strategy_note": "モデル(市場α=0.3ブレンド)勝率上位に ◎○▲△☆。買い目はモデル確率重み配分(¥5,000)。+EV/−EV 判定は refresh_ev.sh で。",
+        "strategy_note": "モデル(市場α=0.3ブレンド)勝率上位に ◎○▲△☆。買い目はモデル確率重み配分(¥5,000)。張る/見送りは手動精査と執行の規律で（参考ROIは predict-watch / predict --overview）。",
         "horses": horses,
         "bets": bets_json,
     })

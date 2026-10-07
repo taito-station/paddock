@@ -75,12 +75,33 @@ for c in bash env date tee mkdir find rmdir id dirname sleep; do
   ln -s "$p" "$STUB/$c"
 done
 
+# 取得間隔の読み取り（`python3 -c ...`）は本物の python3 で nk.py を読ませる。PATH を絞るので絶対パスを控える。
+# `command -v` は pyenv 等の shim（PATH に依存するスクリプト）を返しうるので、インタプリタ実体を引く。
+REAL_PYTHON3="$(python3 -c 'import sys; print(sys.executable)')" || { echo "前提コマンドが無い: python3" >&2; exit 2; }
+case "$REAL_PYTHON3" in /*) ;; *) echo "外部コマンドとして解決できない: python3" >&2; exit 2 ;; esac
+export REAL_PYTHON3
+# prefetch_odds.sh が取得間隔を読むコード（スタブはこれと完全一致したときだけ本物の python3 に渡す）。
+# 本体を変えたらここも変える（一致しないと間隔のケースが全部落ちて気づける）。
+EXPECTED_PAUSE_CODE='import sys; sys.path.insert(0, sys.argv[1]); import nk; print(round(nk.FETCH_PAUSE_SEC * 1000))'
+export EXPECTED_PAUSE_CODE
+
 cat > "$STUB/python3" <<'EOS'
 #!/usr/bin/env bash
-# prefetch_odds.sh の python3 呼び出しは 2 種類ある。
+# prefetch_odds.sh の python3 呼び出しは 3 種類ある。
 #   1) upcoming_races_db.py <DATE> --window-min N [--at HH:MM]  … 対象レース選択
 #   2) - <race_id>（heredoc をスクリプトとして読む）             … nk_id 変換
-# 1 は固定の race_id を返し、2 は失敗させて実 fetch へ進ませない。
+#   3) -c <code> <dir>                                          … 取得間隔（nk.FETCH_PAUSE_SEC をミリ秒で）
+# 1 は固定の race_id を返し、2 は失敗させて実 fetch へ進ませない。3 は本物の python3 に渡す
+# （FAKE_PAUSE_OUT があればその文字列を返し、単位の取り違え・下限未満を再現する）。
+# 本物に渡すのは取得間隔を読むコード（prefetch_odds.sh と完全一致）だけ。別の `-c` 呼び出しが増えても
+# 素通しで実取得へ進まないよう、それ以外は失敗させる。
+if [ "${1-}" = "-c" ]; then
+  if [ "${2-}" != "$EXPECTED_PAUSE_CODE" ]; then
+    echo "python3 -c: テストスタブは想定外のコードを実行しない" >&2; exit 1
+  fi
+  if [ -n "${FAKE_PAUSE_OUT-}" ]; then printf '%s\n' "$FAKE_PAUSE_OUT"; exit 0; fi
+  exec "$REAL_PYTHON3" "$@"
+fi
 if [ "${1-}" = "-" ]; then
   echo "nk_id: テストスタブは変換しない" >&2
   exit 1
@@ -107,6 +128,7 @@ run_prefetch() {
     WORKDIR="$d/work" \
     PADDOCK_DB_URL="postgres://p:p@127.0.0.1:1/paddock" \
     FAKE_RACE_IDS="${FAKE_RACE_IDS:-2026-3-tokyo-5-6R}" \
+    REAL_PYTHON3="$REAL_PYTHON3" EXPECTED_PAUSE_CODE="$EXPECTED_PAUSE_CODE" FAKE_PAUSE_OUT="${FAKE_PAUSE_OUT-}" \
     bash "$SCRIPT" --date 2026-08-22 "$@" 2>&1)"
   rc=$?
   printf '%s' "$out"
@@ -228,6 +250,64 @@ if acquired "$out" && [ ! -e "$d/new.lock.d" ] && ! grep -q 'スキップ' <<<"$
   ok "素の状態 → lock を取得して続行し、終了時に残さない"
 else
   ng "素の状態 → lock を取得して続行し、終了時に残さない" "$out"
+fi
+
+echo "=== 取得間隔（#765・netkeiba への礼節） ==="
+
+# --- 間隔 1. nk.FETCH_PAUSE_SEC をミリ秒で読み、下限 3,334ms 以上でログに出す ---
+# 期待値 3500 は nk.py の定数（3.5 秒）と下限から独立に置いた値（定数を変えたらここも見直す）。
+out="$(run_prefetch pace-ok --dry-run)"; rc=$?
+if [ "$rc" -eq 0 ] && grep -q '\[dry-run\] 対象 .*取得間隔 3500ms・レース間 3.500 秒' <<<"$out"; then
+  ok "取得間隔を nk.FETCH_PAUSE_SEC からミリ秒で読み、dry-run も通る"
+else
+  ng "取得間隔を nk.FETCH_PAUSE_SEC からミリ秒で読み、dry-run も通る" "rc=$rc / $out"
+fi
+
+# --- 間隔 2. 秒のまま（3.5）を受け取ったら取得前に止まる ---
+# fetch-card の --interval はミリ秒の整数。3.5 を渡すと clap が全レースで落ち、再取得できない snapshot を失う。
+out="$(FAKE_PAUSE_OUT=3.5 run_prefetch pace-sec --dry-run)"; rc=$?
+if [ "$rc" -ne 0 ] && grep -q '取得間隔を読めません' <<<"$out" && ! grep -q '\[dry-run\] 対象' <<<"$out"; then
+  ok "取得間隔が整数ミリ秒でなければ（3.5）止まる"
+else
+  ng "取得間隔が整数ミリ秒でなければ（3.5）止まる" "rc=$rc / $out"
+fi
+
+# --- 間隔 3. 下限未満（1000ms）なら取得前に止まる ---
+out="$(FAKE_PAUSE_OUT=1000 run_prefetch pace-low --dry-run)"; rc=$?
+if [ "$rc" -ne 0 ] && grep -q '取得間隔が範囲外です' <<<"$out" && ! grep -q '\[dry-run\] 対象' <<<"$out"; then
+  ok "取得間隔が下限 3,334ms 未満（1000）なら止まる"
+else
+  ng "取得間隔が下限 3,334ms 未満（1000）なら止まる" "rc=$rc / $out"
+fi
+
+# --- 間隔 3a. 上限 10,000ms のすぐ上（10001）と 35000（定数を 35 と書き間違えた）で止まる ---
+# 桁数の検査（7 桁以上）に掛からない値で、上限の比較そのものを固定する。
+for v in 10001 35000; do
+  out="$(FAKE_PAUSE_OUT=$v run_prefetch "pace-$v" --dry-run)"; rc=$?
+  if [ "$rc" -ne 0 ] && grep -q '取得間隔が範囲外です' <<<"$out" && ! grep -q '\[dry-run\] 対象' <<<"$out"; then
+    ok "取得間隔が上限 10,000ms 超え（${v}）なら止まる"
+  else
+    ng "取得間隔が上限 10,000ms 超え（${v}）なら止まる" "rc=$rc / $out"
+  fi
+done
+
+# --- 間隔 3b. 桁あふれ相当（定数をミリ秒で書き間違えた 3500 秒＝7 桁）なら取得前に止まる ---
+out="$(FAKE_PAUSE_OUT=3500000 run_prefetch pace-high --dry-run)"; rc=$?
+if [ "$rc" -ne 0 ] && grep -q '取得間隔が範囲外です' <<<"$out" && ! grep -q '\[dry-run\] 対象' <<<"$out"; then
+  ok "取得間隔が上限 10,000ms 超え（3500000）なら止まる"
+else
+  ng "取得間隔が上限 10,000ms 超え（3500000）なら止まる" "rc=$rc / $out"
+fi
+
+# --- 間隔 4. fetch-card にはその値を渡し、直書きの短い間隔を残さない ---
+# コメント行を除いた全出現が読んだ値であること（否定形の列挙だと --interval=800 や sleep "1" がすり抜ける）。
+code_lines="$(grep -v '^[[:space:]]*#' "$SCRIPT")"
+intervals="$(grep -oE -- '--interval([= ][^ ]*)?' <<<"$code_lines" | sort -u)"
+sleeps="$(grep -oE '(^|[^[:alnum:]_])sleep[[:space:]]+[^ ;&|]+' <<<"$code_lines" | sed -E 's/^[^s]*sleep/sleep/' | sort -u)"
+if [ "$intervals" = '--interval "$FETCH_INTERVAL_MS"' ] && [ "$sleeps" = 'sleep "$FETCH_PAUSE_SEC_STR"' ]; then
+  ok "fetch-card --interval とレース間の sleep は読んだ値だけを使う"
+else
+  ng "fetch-card --interval とレース間の sleep は読んだ値だけを使う" "interval=[$intervals] sleep=[$sleeps]"
 fi
 
 echo "=== flock 分岐（ubuntu CI の経路） ==="

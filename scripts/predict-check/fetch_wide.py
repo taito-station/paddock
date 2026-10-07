@@ -1,8 +1,8 @@
 """netkeiba のライブ（発走前）ワイドオッズを取得する.
 
-本体 `fetch-card` は単複・馬連・馬単・三連複・三連単を取得・保存するが
-**ワイド(type=5)は未対応**（Issue #187）。ライブ EV 計算でワイドを反映するため、
-netkeiba のオッズ API (`api_get_jra_odds.html?type=5`) を直接叩く。
+当初は本体 `fetch-card` がワイド(type=5)を取らなかったための補完だった（Issue #187）。現在は fetch-card も
+type=5 を取得・保存する（`fetch_exotic_odds`）。本スクリプトは 1 レース分のワイドの発走前オッズを手で確かめる
+ための手動ツールとして残す（ライブ EV 計算に組み込んでいた旧 refresh_ev.sh は #765 で退役）。netkeiba のオッズ API (`api_get_jra_odds.html?type=5`) を直接叩く。
 
 確定後の払戻を取る `nk.parse_payouts`（result.html パース）とは別ソース＝
 発走前の変動オッズである点に注意。

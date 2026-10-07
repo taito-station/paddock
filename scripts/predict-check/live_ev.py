@@ -5,7 +5,8 @@
 3連複ボックス追加。strategy_eval.py と同系）と同一。的中確率は Plackett-Luce で
 model 勝率→着順確率に変換し、実オッズを掛けて ROI を出す。
 
-入力はすべて中間 TSV/テキスト（`refresh_ev.sh` が生成。konsen_backtest と同じ流儀）:
+入力はすべて中間 TSV/テキスト（konsen_backtest と同じ流儀。生成元だった `refresh_ev.sh` は #765 で
+退役したので、CLI は手で用意した TSV 向けに残す）:
   --pred     predict 確率テーブル（`--- レース N: 場 馬場 距離m ---` + `馬番 名前 勝率% ...`。
              見出し末尾には `（発走 09:40）` `[発走済]` が付きうる・#587）
   --horses   `pid<TAB>馬番<TAB>馬名<TAB>騎手<TAB>人気<TAB>単勝` （DB race_odds.win）
@@ -169,9 +170,8 @@ def parse_exotic(path):
         if not line.strip():
             continue
         pid, kind, combo, o = line.split("\t")
-        # 保存対象は quinella / trio のみ。正規の生成元（refresh_ev.sh）は SQL で
-        # bet_type IN ('quinella','trio') に絞るため、ここに来る想定外 kind は TSV の破損・
-        # 手編集・生成側の変更だけ——黙って捨てると typo が観測不能になる（#630 の未知ラベル
+        # 保存対象は quinella / trio のみ。入力は bet_type IN ('quinella','trio') に絞って作る前提なので、
+        # ここに来る想定外 kind は TSV の破損・手編集・生成側の誤りだけ——黙って捨てると typo が観測不能になる（#630 の未知ラベル
         # 方針）ので warn を残して skip する。券種必須の番兵判定に未知ラベルを渡すと
         # ValueError で全体が止まるため、判定より先に落とす。
         if kind not in arity:

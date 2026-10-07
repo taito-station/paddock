@@ -5,7 +5,7 @@ status: Confirmed
 kind: specification
 doc_class: [D11, D23, D10]
 tags: [D11, D23, D10]
-updated: "2026-08-18"
+updated: "2026-10-06"
 ---
 
 # ライブ EV 買い目ビュー（今これを買え）: 機能仕様
@@ -22,6 +22,8 @@ updated: "2026-08-18"
 > ADR 0064 の「追補（#346）」 を参照）。read API `GET /api/live/{date}`・
 > `live_ev_snapshots` スキーマ・SPA `LiveBets`・slip 契約は不変で、Rust writer が同一契約を満たす。
 > `live_ev.py` 本体はオフライン用途で温存。
+>
+> **更新（#765・2026-10）**: `refresh_ev.sh` 自体も退役した。本文と図の `refresh_ev.sh` の記述は全て歴史的記録（経緯は決定ログ「#765」）。
 
 ## 概要
 
@@ -398,3 +400,34 @@ per-race 予算を「どこに・どう持たせるか」は既存 ADR の思想
 - `slip.race_budget` が per-race 値を取りうるようになる（従来は `default_budget` と同値固定）。SPA は既存描画で per-race 金額を表示できる。
 - 運用フロー: 朝に軸決定 → ライブ監視で 🔶 増額候補を検出 → 人間が判断 → `--race-budget-override <pid>=<円>` を付けて再実行 → snapshot に増額伝票が記録され SPA に反映。
 - スコープ外: 混戦判定・配分ロジック（最大剰余法・3 券種・top5）は不変（ADR 0046/0065）。予算の 100 円単位への切り捨ては `build_portfolio` の既存挙動に委ねる。
+
+### #765: refresh_ev.sh を退役させる (2026-10-06) — 採用
+
+#### コンテキスト
+
+- ADR 0064 の追補（#346）は、永続化を Rust `predict-watch` に一本化したうえで「`refresh_ev.sh` は EV/伝票を stdout に出す CLI に徹する」とした。
+- その後 `refresh_ev.sh` を呼ぶもの（コード・skill・CLAUDE.md・launchd）は無くなり、当日のライブ監視は `predict-watch` で行っている。
+- 一方で `refresh_ev.sh` は対象レースごとに `fetch-card --interval 800`＋`sleep 1`、ワイド取得も `sleep 1` で netkeiba を回し、
+  取得間隔の規律（3,334ms 以上・`netkeiba-datasource.md` 決定ログ「#721」）に合わなかった（#765）。
+
+#### 決定
+
+- `scripts/predict-check/refresh_ev.sh` を削除する。#346 追補の「`refresh_ev.sh` は CLI に徹する」を supersede する。
+- `live_ev.py` は残す。`build_bets` / `race_roi` はオフライン評価（`snapshot_ev_report.py` / `gen_predictions.py`）が import しており、
+  CLI は手で用意した TSV 向けに残す（入力の生成元だった `refresh_ev.sh` が無くなったため）。
+
+#### 理由
+
+- 呼び出し元の無いスクリプトが、規律に合わない間隔で netkeiba を叩く経路として残っていた。消せば経路そのものが無くなり、本線の `predict-watch` には影響しない。
+
+#### 却下した代替案
+
+- **取得間隔を 1 秒に揃えて残す**: 本番スクレイパ既定の 1 秒は当日の少数リクエスト向けの値で、1 回 21 レース × 複数リクエストの根拠にならない。
+- **取得間隔を 3,334ms に揃えて残す**: 呼び出し元の無いスクリプトの手直しになる。1 回で 21 レース＋ワイド＋predict を回す規模では、
+  実行が延びて直前オッズという用途とぶつかる（2 場開催の実績で 1 回 1〜3 レース・所要の中央値が 5 分周期に収まる `prefetch_odds.sh` は 3,334ms を採用した・
+  `netkeiba-datasource.md` 決定ログ「#765」）。
+
+#### 影響
+
+- 本文と図の `refresh_ev.sh` の記述は、冒頭のバナーのとおり歴史的記録として読む。
+- 同じ形の取得をしていた `prefetch_odds.sh` の間隔は `netkeiba-datasource.md` 決定ログ「#765」で 3,334ms 以上にした。

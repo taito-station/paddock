@@ -39,7 +39,7 @@ for v in FROM TO; do
   [[ "${!v}" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || { echo "不正な日付 $v=${!v}（YYYY-MM-DD のみ可）" >&2; exit 1; }
 done
 
-# ALPHA はブレンド係数 [0,1]。形式と値域を検証する（refresh_ev.sh の LIVE_BLEND_ALPHA と対称）。
+# ALPHA はブレンド係数 [0,1]。形式と値域を検証する。
 [[ "$ALPHA" =~ ^[0-9]+(\.[0-9]+)?$ ]] \
   && LC_ALL=C awk -v a="$ALPHA" 'BEGIN{exit !(a>=0 && a<=1)}' \
   || { echo "PADDOCK_BT_ALPHA は 0〜1 の数値: $ALPHA" >&2; exit 1; }
@@ -97,8 +97,8 @@ echo "[2/5] 単勝オッズ (bt_winodds.tsv)"
    ORDER BY o.race_id, o.popularity;" > "$WORKDIR/bt_winodds.tsv"
 wc -l "$WORKDIR/bt_winodds.tsv"
 
-# エキゾ（馬連/3連複/馬単）オッズ（#314 ミスプライス検証の --exotic-odds 入力）。refresh_ev.sh の
-# exotic TSV と同じ列（race_id / bet_type / combination_key / odds）。ワイドは過去データ不足で除外。
+# エキゾ（馬連/3連複/馬単）オッズ（#314 ミスプライス検証の --exotic-odds 入力）。live_ev.py の
+# --exotic TSV と同じ列（race_id / bet_type / combination_key / odds）。ワイドは過去データ不足で除外。
 echo "[3/5] エキゾオッズ (bt_exotic_odds.tsv)"
 "${PSQL[@]}" -F$'\t' -c \
   "SELECT o.race_id, o.bet_type, o.combination_key, o.odds::text

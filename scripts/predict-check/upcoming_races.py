@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""発走時刻ベースで「これから発走する」レースを絞り込む（ライブ EV 更新の対象決定用, #197）.
+"""発走時刻ベースで「これから発走する」レースを絞り込む（当日の直近レースの確認用, #197。keiba-start スキルが使う）.
 
-ライブ EV 更新ループを朝の早い時間帯から全レース対象で回すと、オッズが動かない時間帯に
-netkeiba を無駄に叩くだけになる（IP ブロックのリスク, feedback_jra_fetch_pacing）。
+朝の早い時間帯から全レースを対象に取得すると、オッズが動かない時間帯に netkeiba を無駄に叩くだけになる
+（IP ブロックのリスク, feedback_jra_fetch_pacing）。もとは旧 refresh_ev.sh のライブ EV 更新ループ向けに作った（#765 で退役）。
 本スクリプトは netkeiba race_list の発走時刻を使い、
 
   - 発走済みのレース（post < now）を除外
@@ -20,7 +20,7 @@ netkeiba を無駄に叩くだけになる（IP ブロックのリスク, feedba
 出力は TAB 区切り 3 列（list_races.py と同形式）:
     1 列目: netkeiba 12桁 race_id
     2 列目: 発走時刻 HH:MM
-    3 列目: paddock 内部 race_id（refresh_ev の DB 突合用）
+    3 列目: paddock 内部 race_id（DB 突合用）
 """
 import argparse
 import re
