@@ -10,7 +10,7 @@ sources:
   - qa/QA-fullwidth-after-var-636.md
   - .github/workflows/ci.yml
 distilled_from_sha: "dd4c0fe"
-updated: "2026-09-29"
+updated: "2026-10-07"
 ---
 
 # CI パイプラインの構成と設計意図（D21）
@@ -29,7 +29,7 @@ D21（CI/CD・ビルド・リリース・供給網管理）の充足ギャップ
 | `web` | ubuntu-latest | typecheck / eslint / vitest / **生成 API 型のドリフト検証** / vite build |
 | `adr` | ubuntu-latest | ADR 番号重複と文書クラス・sources の検査（**回帰テスト → 本番検査**の順）/ **hook ユニットテスト**（session-stale-check + check-knowledge-impact） |
 | `predict-check` | ubuntu-latest | stdlib のみの Python テスト（自走式 + ハーネス忠実性）＋ **numpy 依存を含む `scripts/predict-check` 全テストを venv の pytest で**（#719） |
-| `shellcheck` | ubuntu-latest | `shellcheck --severity=warning` ＋ **変数直後の非 ASCII 検査**（回帰テスト → 本番検査）＋ `keep_awake.sh` の回帰テスト（#585/#643）＋ `prefetch_odds.sh` の lock 回帰テスト（#651・PATH を絞って本番の mkdir 経路も ubuntu で踏ませる）＋ `scripts/lib/pg-container.sh`（backup-db.sh 等が使う lima/nerdctl・colima/docker 実行環境判定）の回帰テスト（#731） |
+| `shellcheck` | ubuntu-latest | `shellcheck --severity=warning` ＋ **変数直後の非 ASCII 検査**（回帰テスト → 本番検査）＋ `keep_awake.sh` の回帰テスト（#585/#643）＋ `prefetch_odds.sh` の lock と取得間隔のガードの回帰テスト（#651・#765。PATH を絞って本番の mkdir 経路も ubuntu で踏ませる）＋ `scripts/lib/pg-container.sh`（backup-db.sh 等が使う lima/nerdctl・colima/docker 実行環境判定）の回帰テスト（#731） |
 | `db-guards` | ubuntu-latest（**postgres サービス無し**・`postgresql-client` のみ） | golden DB ガードの回帰テスト（#406/#465）。到達不能ポートを使い実 DB を一切触らない設計なので DB サービスが要らない |
 | `ocr-pdf` | ubuntu-latest ＋ **`debian:trixie-slim` コンテナ** | mupdf 依存の `pdf-ocr` / `pdf-parser` 統合テスト |
 | `docker-build` | ubuntu-latest（matrix 3） | api / importer / web の Dockerfile の builder ステージをビルド |

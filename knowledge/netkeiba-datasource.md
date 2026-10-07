@@ -12,7 +12,7 @@ sources:
   - docs-original/722-benter-alpha-exotics.md
   - docs-original/742-fill-missing-results.md
 distilled_from_sha: "a48fb23"
-updated: "2026-10-05"
+updated: "2026-10-06"
 ---
 
 # netkeiba 当日データソース取り込み 仕様書
@@ -380,9 +380,11 @@ Rust 側は golden を const と完全一致（券種・値・順序）で突き
 - 馬場・距離表記が読めない場合や `RaceData01` 欠落は従来どおり実障害（exit 1）。**「対応外」は広げない**。
 - **スキップの識別には stdout の読み取りが要る**（exit code だけでは正常取り込みと区別できない）。
   当該**行の行頭**が `スキップ: ` 固定（tracing のログ行が同じ stdout に混ざるため行単位で照合する）。
-  **stdout を捨てる消費側（`refresh_ev.sh` は `> /dev/null`）からは追えない**——
+  **stdout を捨てる消費側（当時の `refresh_ev.sh` は `> /dev/null`）からは追えない**——
   stderr には出さない（同スクリプトが「stderr あり」を異常として警告するため、正常な結果を警告に
   化けさせない）。tracing も既定 writer が stdout なので代替にならない。
+  根拠だった `refresh_ev.sh` は #765 で退役したが、挙動は据え置く（現役の消費側 `prefetch_odds.sh` は
+  stdout も stderr もログに残す）。
 - 却下案（ADR 0075 に詳細）: 専用 exit code の新設 / `IngestCardResponse` にフラグを足す（degraded と同型）/
   エラー文言の照合 / 障害レースを `Surface::Jump` として取り込む——いずれも採らない。
 
@@ -439,7 +441,7 @@ paddock-fetch-card --year 2026 --venue 東京 --round 3 --day 2 --race 11
 |-----------|------|
 | `--year / --venue / --round / --day / --race` | 構成要素から race_id を組み立てる |
 | `--force` | 出馬表が取得済みでも再取得する |
-| `--interval` | netkeiba への連続リクエスト間隔(秒、既定値あり) |
+| `--interval` | netkeiba への連続リクエスト間隔(ミリ秒、未指定ならスクレイパ既定 1,000ms) |
 
 スクレイピング対象は公開ページ。既定ウェイトを入れ netkeiba 側へ配慮する。
 
@@ -1642,3 +1644,51 @@ DELETE・ADR 0089 決定 8）であり、「いつ未発売で、いつ発売さ
   捨てていたので結果は変わらない。
 - `*_backtest.py` 5 本の同名の関数（着順セルと馬番セルの両方がある行だけ拾う）と `zure_sign_probe.parse_result_odds`
   （余計な行にオッズのセルが無い）は影響を受けていなかったので変えない。
+
+### #765: prefetch_odds.sh の取得間隔を 3,334ms 以上にし、refresh_ev.sh を退役させる (2026-10-06) — 採用
+
+#### コンテキスト
+
+- `scripts/predict-check/refresh_ev.sh` は当日の対象レース（既定 R6〜12×全場）ごとに `fetch-card --interval 800`＋レース間 `sleep 1`、
+  ワイド取得も `sleep 1` で回していた。バルク取得の下限（3,334ms・決定ログ「#721」）にも、1〜2 秒の連打はしないという明言にも合わない。
+  呼び出し元（コード・skill・CLAUDE.md・launchd）は無く、ライブ監視と `live_ev_snapshots` への書き込みの本線は Rust の `predict-watch`（#346）。
+- 同じ形（`--interval 800`＋`sleep 1`）が `scripts/predict-check/prefetch_odds.sh`（開催日に launchd で約 5 分おきに起動）にもあった。
+  実績は 2026-10-03 の 1 日分（2 場・1 回 1〜3 レース・1 レース 7 リクエスト・1 回の所要の中央値 41.5 秒・54 回）。2026-08-08〜10-03 は
+  計 6,063 回、レース選択に失敗していた（#774）。
+- 決定ログ「#763」の影響節は、`refresh_ev.sh` のワイド取得を「当日のライブ取得なので対象外」としていた。
+
+#### 決定
+
+1. `refresh_ev.sh` を削除する（`live_ev.py` / `fetch_wide.py` / `upcoming_races.py` は単独で使えるので残す）。経緯は `live-ev-buy-view.md` 決定ログ「#765」。
+2. `prefetch_odds.sh` のプロセス内の取得間隔を 3,334ms 以上にする。`nk.FETCH_PAUSE_SEC`（秒）を **整数ミリ秒** で読み、3334〜10000ms かを
+   検査して、外れたら取得の前に止まる（dry-run・対象なしの判定より前）。上限は、定数をミリ秒で書き間違えると 1 リクエスト約 58 分待つのを防ぐ。`fetch-card --interval` とレース間の `sleep` に同じ値を使う。
+   間隔の保証は fetch-card の `--interval`（最初のリクエストの前にも待つ）で、シェルの `sleep` は余裕分。
+3. 適用範囲は `prefetch_odds.sh` に限る。odds-collect（`--scrape-delay` 既定 2,000ms）・predict-watch（同 3,000ms）・
+   朝の fetch-card（`--interval` 無しで既定 1,000ms）・同じ IP からの合計レート（並走）・再送時の例外は対象外（#773）。
+
+#### 理由
+
+- 秒の値（3.5）をミリ秒の引数にそのまま渡すと、clap が全レースで引数エラーを返し、再取得できない締切前 snapshot を失う。
+  単位の取り違えと下限未満を取得前に止め、`scripts/test-prefetch-odds.sh`（CI 必須）で固定する。
+- 1 回の実行は 1 レースあたり約 +21 秒（7 リクエスト × 約 2.7 秒の増加＋レース間 sleep の約 2.5 秒）。2 場開催の実績（2026-10-03・54 回）は 1 回の所要の中央値が 41.5 秒
+  （1 レースあたり約 24 秒 → 約 45 秒の想定）で、約 5 分の起動周期に収まる。DB の遅いクエリ（`race_odds_snapshots` への INSERT）による
+  外れ値（736 秒）が以前から 1 回ある。
+
+#### 却下した代替案
+
+- **当日のライブ取得は本番スクレイパ既定の 1 秒に揃える**: 既定 1 秒は当日の少数リクエスト向けの値（決定ログ「#721」）で、
+  明言（1〜2 秒の連打はしない）とも合わない。
+- **当日の全取得（odds-collect・predict-watch・朝の fetch-card）を 3,334ms 以上にする**: 監視の本線の挙動と朝の取得時間が大きく変わる。
+  範囲が大きいので #773 で扱う。
+- **`refresh_ev.sh` を残して間隔だけ直す**: 呼び出し元が無いスクリプトの手直しになり、1 回の実行が延びて直前オッズという用途とぶつかる。
+
+#### 影響
+
+- 決定ログ「#763」の影響節の除外対象（`refresh_ev.sh` のワイド取得）は無くなった。`fetch_wide.py` は 1 レース 1 回の手動ツールとして残る。
+- fetch-card の取得は一時的な失敗のとき共有のリトライ（1 秒・2 秒で打ち直す）を通るので、そのときだけ下限を割る。fetch-card は朝の取得と
+  共有しているので本決定では直さない（既知の例外。#773 で扱う）。
+- 3 場開催で 1 回 4〜5 レースになると、1 回の所要が起動周期（`StartInterval=300`）を超えうる。マージ後の最初の開催日に、本体ログ
+  （`~/Library/Logs/paddock-prefetch.log`。fetch-card の stdout/stderr もここに入り、launchd の err ログには入らない）で次を確かめる:
+  `FAIL`・`error:`・「取得間隔を読めません」「取得間隔が範囲外です」の行が無いこと／「prefetch 開始 …（取得間隔 3500ms）」が出ること／
+  1 レースあたりの所要の中央値（約 45 秒の想定）。あわせて `launchctl list com.paddock.prefetch-odds` の終了状態と、snapshot-coverage の GAP 件数を見る。
+- `prefetch_odds.sh` は開催日ごとに launchd へ入れる運用で、当日に作業しない制約があるため、実際の取得での確認はその開催日になる。

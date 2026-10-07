@@ -257,6 +257,7 @@ def parse_payouts(html: str, rid: str, warn: bool = True):
 RESULT_CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".cache_nk_result_html")
 # netkeiba への取得間隔（ネットワーク取得したときだけ待つ）。バルク取得は 0.3 rps 以下＝3,334ms 以上
 # （knowledge/netkeiba-datasource.md 決定ログ #721・#763）。結果ページ（ResultPages）と一覧（list_race_ids）の待ちはこの定数。
+# prefetch_odds.sh もミリ秒に直して読み、3334〜10000ms の外なら取得前に止まる（#765）。10 秒を超える値にするときは同時に見直す。
 FETCH_PAUSE_SEC = 3.5
 
 

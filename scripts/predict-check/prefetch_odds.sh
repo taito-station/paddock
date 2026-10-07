@@ -2,7 +2,7 @@
 # 締切前 live オッズの自動 prefetch — 発走 N 分以内のレースの最新オッズを取得し、
 # race_odds_snapshots（#232）に締切前 live スナップショットを蓄積する（#237）。
 #
-# refresh_ev.sh（EV 算出まで行う当日監視ツール）とは別物で、本スクリプトは odds 取得だけに
+# EV 算出まで行っていた旧 refresh_ev.sh（#765 で退役）とは別物で、本スクリプトは odds 取得だけに
 # 特化する。レース選択は #235 の DB post_time（race_cards.post_time）で行い、netkeiba を
 # 都度スクレイプしない。launchd 等から数分間隔で起動される前提（deployments/launchd/）。
 #
@@ -26,6 +26,7 @@
 #   WINDOW_MIN      発走まで何分以内を対象にするか（既定 30。引数 --window-min が優先）
 #
 # 終了コード: 全レース成功 or 対象0件で 0。fetch/変換に 1 件でも失敗したら非 0（#493）。
+#   取得間隔（nk.FETCH_PAUSE_SEC）を読めない・3334〜10000ms の外なら、対象の有無によらず取得前に 1（#765）。
 #   発走直前オッズ snapshot は再取得不能資産のため、失敗を exit 0 に握り潰さず launchd 側へ伝える。
 #
 # 前提: その日の出馬表（post_time 入り）は朝の paddock-fetch-card 運用で投入済みであること。
@@ -164,7 +165,7 @@ acquire_lock() {
 }
 
 # paddock race_id（例 2026-3-tokyo-5-6R）→ netkeiba 12 桁。正本は
-# src/use-case/src/netkeiba_race_id.rs（CLI 露出が無いため refresh_ev.sh と同じ変換を持つ）。
+# src/use-case/src/netkeiba_race_id.rs（CLI 露出が無いため同じ変換をここに持つ）。
 nk_id() {
   python3 - "$1" <<'PY'
 import sys
@@ -180,6 +181,25 @@ if vc is None:
 print(f"{year}{vc}{int(kai):02d}{int(day):02d}{int(rr.rstrip('R')):02d}")
 PY
 }
+
+# netkeiba への取得間隔（ミリ秒）。正本は nk.FETCH_PAUSE_SEC（秒・バルク取得の下限 3,334ms 以上, #763/#765）。
+# fetch-card の --interval はミリ秒の整数なので、秒の 3.5 をそのまま渡すと全レースが引数エラーで落ち、
+# 再取得できない締切前 snapshot を失う。整数ミリ秒で読んで 3334〜10000ms を確かめ、外れたら取得前に止める
+# （上限は定数をミリ秒で書き間違えた 3500→3,500,000ms などで 1 リクエスト約 58 分待つのを防ぐ）。
+# dry-run・対象なしの判定より前に置き、読めない状態を毎回の実行で表に出す。
+# python の stderr（traceback）も本体ログに残す（launchd の err ログは /tmp で消えうる）。
+if ! FETCH_INTERVAL_MS="$(python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import nk; print(round(nk.FETCH_PAUSE_SEC * 1000))' "$SCRIPT_DIR" 2>>"$LOG")" \
+   || ! [[ "$FETCH_INTERVAL_MS" =~ ^[0-9]+$ ]]; then
+  log "取得間隔を読めません（nk.FETCH_PAUSE_SEC をミリ秒の整数として読めなかった: '$(printf '%s' "${FETCH_INTERVAL_MS-}" | tr -d '\n' | cut -c1-40)'）"
+  exit 1
+fi
+if (( ${#FETCH_INTERVAL_MS} > 6 || 10#$FETCH_INTERVAL_MS < 3334 || 10#$FETCH_INTERVAL_MS > 10000 )); then
+  log "取得間隔が範囲外です（${FETCH_INTERVAL_MS}ms。3334〜10000ms の外）"
+  exit 1
+fi
+FETCH_INTERVAL_MS=$((10#$FETCH_INTERVAL_MS))
+# レース間の sleep 用の秒（例 3500 → 3.500）。検査の直後に 1 回だけ作る。
+FETCH_PAUSE_SEC_STR="$((FETCH_INTERVAL_MS / 1000)).$(printf '%03d' $((FETCH_INTERVAL_MS % 1000)))"
 
 # 対象 paddock race_id を DB post_time で選択（#235）。--at はテスト/検証用に現在時刻を上書き。
 # command substitution で受けて選択の成否を明示判定する。process substitution（< <(...)）だと
@@ -205,14 +225,14 @@ if [ "${#PIDS[@]}" -eq 0 ]; then
 fi
 
 if [ "$DRY_RUN" -eq 1 ]; then
-  log "[dry-run] 対象 ${#PIDS[@]} レース: ${PIDS[*]}"
+  log "[dry-run] 対象 ${#PIDS[@]} レース（取得間隔 ${FETCH_INTERVAL_MS}ms・レース間 ${FETCH_PAUSE_SEC_STR} 秒）: ${PIDS[*]}"
   exit 0
 fi
 
 # ここから実 fetch。多重起動防止のロックを取得（read-only な選択・dry-run は阻まない）。
 acquire_lock
 
-# release バイナリ確認（debug ビルドでのライブ運用を防ぐ, refresh_ev.sh と同方針 #211）。
+# release バイナリ確認（debug ビルドでのライブ運用を防ぐ, #211）。
 # 実フェッチ時のみ必要なので dry-run の後に置く。
 FETCH_BIN="$REPO_ROOT/target/release/paddock-fetch-card"
 if [[ ! -x "$FETCH_BIN" ]]; then
@@ -221,7 +241,7 @@ if [[ ! -x "$FETCH_BIN" ]]; then
   exit 1
 fi
 
-log "prefetch 開始: $DATE 発走 ${WINDOW_MIN} 分以内 ${#PIDS[@]} レース"
+log "prefetch 開始: $DATE 発走 ${WINDOW_MIN} 分以内 ${#PIDS[@]} レース（取得間隔 ${FETCH_INTERVAL_MS}ms）"
 FAILED=()
 for pid in "${PIDS[@]}"; do
   # race_id 変換失敗（未知 slug 等の異常データ）は 1 件スキップに留め、残りの締切前 prefetch を
@@ -230,12 +250,13 @@ for pid in "${PIDS[@]}"; do
     log "  SKIP $pid (race_id 変換失敗)"; FAILED+=("$pid"); continue
   fi
   # --force で再取得（既存 race_odds を最新で上書き＋snapshots へ追記）、--skip-history で近走は省く。
-  if "$FETCH_BIN" "$nk" --force --skip-history --interval 800 >> "$LOG" 2>&1; then
+  # 間隔の保証は fetch-card の --interval（最初のリクエストの前にも待つ）。下のレース間 sleep は余裕分。
+  if "$FETCH_BIN" "$nk" --force --skip-history --interval "$FETCH_INTERVAL_MS" >> "$LOG" 2>&1; then
     log "  ok   $pid ($nk)"
   else
     log "  FAIL $pid ($nk)"; FAILED+=("$pid")
   fi
-  sleep 1  # netkeiba への pacing（feedback_jra_fetch_pacing）。fetch-card 内 --interval とは別。
+  sleep "$FETCH_PAUSE_SEC_STR"  # レース間も同じだけ空ける
 done
 
 if [ "${#FAILED[@]}" -gt 0 ]; then
