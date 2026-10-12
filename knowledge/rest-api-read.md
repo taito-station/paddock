@@ -7,8 +7,8 @@ doc_class: [D10, D19, D09]
 tags: [D10, D19, D09]
 sources:
   - docs/api/openapi.json
-distilled_from_sha: "3c50714"
-updated: "2026-08-26"
+distilled_from_sha: "47b12b7"
+updated: "2026-10-06"
 ---
 
 # REST API（read 基盤）: 設計仕様
@@ -190,7 +190,7 @@ GET /api/races/{race_id}/board[?budget=&track_condition=&blend_alpha=]
 ```
 
 - use-case: `race_board(race_id, budget, blend_alpha, track_condition)`
-- 全出走馬（truncate なし）＋ 買い目推奨（`/recommendations` と同経路・同値）＋ 混戦/乖離/重なり 判定を 1 レスポンスで返す（#373 盤の統合エンドポイント）。
+- 全出走馬（truncate なし）＋ 買い目推奨（`/recommendations` と同経路。固定〈記録◎・朝の選定 #767〉が無いレースに限り同値。`/recommendations` は固定しない）＋ 混戦/乖離/重なり 判定を 1 レスポンスで返す（#373 盤の統合エンドポイント）。
 - クエリパラメータ（すべて任意）:
   - `budget`: 予算（円、1 以上、既定 5000）。買い目組成の上限。
   - `track_condition`: 馬場状態（`良`/`稍重`/`重`/`不良` または略記）。未指定は馬場項なし。
@@ -208,9 +208,10 @@ GET /api/races/{race_id}/board[?budget=&track_condition=&blend_alpha=]
 | `surface` / `distance` / `field_size` | string/int | 馬場・距離・出走頭数 |
 | `post_time` | string\|null | 発走時刻 `HH:MM`（未取得は `null`） |
 | `odds_available` | bool | 保存オッズ（#51）の有無。`false` のとき `bets` は空 |
-| `axis` | int\|null | 買い目の軸。`recorded_axis` があればそれ、無ければ `live_axis` |
+| `axis` | int\|null | 買い目の軸。`fixed_selection`（朝の固定・#767）→ `recorded_axis` → `live_axis` の順。朝の選定を保存した後に入った記録◎ は使わない |
 | `recorded_axis` | int\|null | predict 記録済みの本命◎（#388）。未 predict・取消時は `null` |
-| `live_axis` | int\|null | ライブ再計算の軸（市場ブレンド首位）。`recorded_axis` と乖離時に UI 警告 |
+| `fixed_selection` | object\|null | 朝の選定で固定した買い目の構造（#767）。`axis` / `partners`（買い目〈`axis` / `partners`〉そのもの。朝の軸が取消ならライブの首位へ戻り、相手は取消の馬を除き補充しない。朝の選定は記録◎ を軸に強制して組み、保存した後に入った記録◎ は使わない）/ `konsen_band`（空なら非混戦。買い目と同じく取消で絞らない）/ `scratched`（朝の軸・相手のうち出走していない馬）/ `odds_fetched_at`（朝のスナップショットの時刻）。predict-watch が保存した朝の選定が無いレースは `null`。盤の買い目（`axis` / `partners` / `bets`）はこれで固定して組む。`morning_at`（#448 の朝↔現比較）とは別の「朝」 |
+| `live_axis` | int\|null | ライブ再計算の軸（市場ブレンド首位）。固定した軸（`fixed_selection.axis`、無ければ `recorded_axis`）と乖離時に UI 警告 |
 | `roi` / `hit_prob` | number\|null | 現時点オッズ基準のポートフォリオ ROI / 的中確率 |
 | `unpriced_legs` | int | 賭金が乗っているのにオッズ未取得の脚数（#631）。**`roi` は priced 脚のみ・`total_stake` は全脚**なので、0 より大きいとき 2 つの数字は別の母集団を指す。`roi` と `total_stake` を並べて読むときはこれを併せて見る |
 | `morning_unpriced_legs` | int\|null | `morning_roi` の被覆率＝**現時点の買い目を朝オッズで値付けした**ときの値（`morning_roi` と同じく確率・軸・budget は現時点と同一で、差し替わるのは払戻本だけ）。`morning_at` が `null` なら `null`。朝 snapshot の complete 保証は「各券種が空でない」だけで全組合せが priced とは限らない。UI は朝ROI→現ROI を並べるので、朝と現で被覆率が違えば別母集団同士の比較になる |

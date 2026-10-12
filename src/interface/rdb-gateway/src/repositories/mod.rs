@@ -19,6 +19,7 @@ mod find_result_reads;
 mod horse_history;
 mod horse_stats;
 mod jockey_stats;
+mod morning_selections;
 mod pad_prediction;
 mod predict_session;
 mod purge_race_odds_snapshots;
@@ -46,11 +47,12 @@ use paddock_use_case::repository::{
     ConditionalGateStatsRow, CourseStatsRow, FetchDownload, FetchFailure, FetchRecord,
     FetchRepository, FetchStatus, HandicapNoteRow, HorseHistoryRepository, HorseRecencyStats,
     HorseStatsRow, JockeyStatsRow, LiveEvPin, LiveEvRepository, LiveEvSnapshot,
-    LiveEvSnapshotRecord, MarkStatRow, MarkStatsFilter, MorningRaceOdds, NameMatchRepository,
-    OddsRepository, PadPredictionRepository, PredictBetRecord, PredictRaceConditionRecord,
-    PredictSessionRecord, PredictSessionRepository, PredictionFilter, PredictionSearchResult,
-    RaceCardRepository, RaceOddsRecord, RaceRepository, RaceResultRepository, SnapshotOdds,
-    SnapshotPoint, StatsRepository, TrainerStatsRow, UnpricedObservation,
+    LiveEvSnapshotRecord, MarkStatRow, MarkStatsFilter, MorningRaceOdds, MorningSelection,
+    MorningSelectionRepository, NameMatchRepository, OddsRepository, PadPredictionRepository,
+    PredictBetRecord, PredictRaceConditionRecord, PredictSessionRecord, PredictSessionRepository,
+    PredictionFilter, PredictionSearchResult, RaceCardRepository, RaceOddsRecord, RaceRepository,
+    RaceResultRepository, SnapshotOdds, SnapshotPoint, StatsRepository, TrainerStatsRow,
+    UnpricedObservation,
 };
 
 use crate::pool::PgPool;
@@ -657,6 +659,29 @@ impl LiveEvRepository for PostgresRepository {
 
     async fn save_live_ev_snapshot(&self, record: &LiveEvSnapshotRecord) -> UcResult<()> {
         save_live_ev::save_live_ev_snapshot(&self.pool, record)
+            .await
+            .map_err(Into::into)
+    }
+}
+
+impl MorningSelectionRepository for PostgresRepository {
+    async fn find_morning_selections_by_date(
+        &self,
+        date: NaiveDate,
+    ) -> UcResult<Vec<MorningSelection>> {
+        morning_selections::find_morning_selections_by_date(&self.pool, date)
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn find_morning_selection(&self, race_id: &str) -> UcResult<Option<MorningSelection>> {
+        morning_selections::find_morning_selection(&self.pool, race_id)
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn save_morning_selection(&self, selection: &MorningSelection) -> UcResult<()> {
+        morning_selections::save_morning_selection(&self.pool, selection)
             .await
             .map_err(Into::into)
     }

@@ -140,6 +140,10 @@ struct MockRepo {
     >,
     /// #724: find_race_odds_snapshot に渡された時点。
     points_seen: std::sync::Mutex<Vec<(String, paddock_use_case::repository::SnapshotPoint)>>,
+    /// #767: 朝の選定（race_id → 選定。先勝ち）。
+    morning: std::sync::Mutex<HashMap<String, paddock_use_case::repository::MorningSelection>>,
+    /// #767: 記録◎ の元（find_pad_prediction が返す予想）。
+    pad: std::sync::Mutex<Option<paddock_domain::PadPrediction>>,
 }
 
 impl MockRepo {
@@ -369,6 +373,77 @@ impl paddock_use_case::repository::LiveEvRepository for MockRepo {
     }
 }
 
+impl paddock_use_case::repository::PadPredictionRepository for MockRepo {
+    async fn save_pad_prediction(
+        &self,
+        _: &paddock_domain::PadPrediction,
+        _: chrono::DateTime<chrono::Utc>,
+    ) -> Result<()> {
+        unimplemented!()
+    }
+    async fn find_pad_prediction(
+        &self,
+        _: chrono::NaiveDate,
+        _: paddock_domain::Venue,
+        _: u32,
+    ) -> Result<Option<paddock_domain::PadPrediction>> {
+        Ok(self.pad.lock().unwrap().clone())
+    }
+    async fn search_predictions(
+        &self,
+        _: &paddock_use_case::repository::PredictionFilter,
+    ) -> Result<paddock_use_case::repository::PredictionSearchResult> {
+        unimplemented!()
+    }
+    async fn find_pad_prediction_by_id(
+        &self,
+        _: i64,
+    ) -> Result<Option<paddock_domain::PadPrediction>> {
+        unimplemented!()
+    }
+    async fn prediction_mark_stats(
+        &self,
+        _: &paddock_use_case::repository::MarkStatsFilter,
+    ) -> Result<Vec<paddock_use_case::repository::MarkStatRow>> {
+        unimplemented!()
+    }
+}
+
+impl paddock_use_case::repository::MorningSelectionRepository for MockRepo {
+    async fn find_morning_selections_by_date(
+        &self,
+        date: chrono::NaiveDate,
+    ) -> Result<Vec<paddock_use_case::repository::MorningSelection>> {
+        let mut v: Vec<_> = self
+            .morning
+            .lock()
+            .unwrap()
+            .values()
+            .filter(|m| m.date == date)
+            .cloned()
+            .collect();
+        v.sort_by(|a, b| a.race_id.cmp(&b.race_id));
+        Ok(v)
+    }
+    async fn find_morning_selection(
+        &self,
+        race_id: &str,
+    ) -> Result<Option<paddock_use_case::repository::MorningSelection>> {
+        Ok(self.morning.lock().unwrap().get(race_id).cloned())
+    }
+    async fn save_morning_selection(
+        &self,
+        selection: &paddock_use_case::repository::MorningSelection,
+    ) -> Result<()> {
+        self.morning
+            .lock()
+            .unwrap()
+            .entry(selection.race_id.clone())
+            .or_insert_with(|| selection.clone());
+        Ok(())
+    }
+}
+
 fn interactor(card: Option<RaceCard>) -> Interactor<MockRepo> {
     Interactor::new(MockRepo {
         card,
@@ -381,6 +456,8 @@ fn interactor(card: Option<RaceCard>) -> Interactor<MockRepo> {
         pins: Vec::new(),
         snapshots: HashMap::new(),
         points_seen: Default::default(),
+        morning: Default::default(),
+        pad: Default::default(),
     })
 }
 
@@ -399,6 +476,8 @@ fn interactor_with_odds(
         pins: Vec::new(),
         snapshots: HashMap::new(),
         points_seen: Default::default(),
+        morning: Default::default(),
+        pad: Default::default(),
     })
 }
 
@@ -417,6 +496,8 @@ fn interactor_with_tc_stats(
         pins: Vec::new(),
         snapshots: HashMap::new(),
         points_seen: Default::default(),
+        morning: Default::default(),
+        pad: Default::default(),
     })
 }
 
@@ -435,6 +516,8 @@ fn interactor_with_trainer_stats(
         pins: Vec::new(),
         snapshots: HashMap::new(),
         points_seen: Default::default(),
+        morning: Default::default(),
+        pad: Default::default(),
     })
 }
 
@@ -453,6 +536,8 @@ fn interactor_with_jockey_stats(
         pins: Vec::new(),
         snapshots: HashMap::new(),
         points_seen: Default::default(),
+        morning: Default::default(),
+        pad: Default::default(),
     })
 }
 
@@ -472,6 +557,8 @@ fn interactor_with_recent_runs(
         pins: Vec::new(),
         snapshots: HashMap::new(),
         points_seen: Default::default(),
+        morning: Default::default(),
+        pad: Default::default(),
     })
 }
 
@@ -1140,6 +1227,8 @@ async fn reconstruct_wires_time_points_as_of_and_skip_reasons() {
         pins: vec![pin(rid), pin("2026-1-tokyo-1-R2")],
         snapshots: HashMap::new(),
         points_seen: Default::default(),
+        morning: Default::default(),
+        pad: Default::default(),
     };
     repo.snapshots.insert(
         rid.to_string(),
@@ -1195,4 +1284,253 @@ async fn reconstruct_wires_time_points_as_of_and_skip_reasons() {
         !as_of.is_empty() && as_of.iter().all(|(_, a)| *a == Some(date)),
         "{as_of:?}"
     );
+}
+
+// --- #767: 朝の選定（ensure_morning_selection） -------------------------------------------
+
+fn morning_app(rid: &str, morning_at: Option<&str>) -> Interactor<MockRepo> {
+    let mut app = interactor(Some(make_reconstruct_card(rid)));
+    if let Some(at) = morning_at {
+        // 朝は 1 番が圧倒的人気（朝の盤で組んだことを軸で見分ける）
+        let snap = paddock_use_case::repository::SnapshotOdds {
+            odds: win_odds(rid, &[(1, 1.2), (2, 30.0), (3, 30.0)]),
+            fetched_at: at.to_string(),
+        };
+        app.repository
+            .snapshots
+            .insert(rid.to_string(), (Some(snap), None));
+    }
+    app
+}
+
+fn utc(s: &str) -> chrono::DateTime<chrono::Utc> {
+    chrono::DateTime::parse_from_rfc3339(s)
+        .unwrap()
+        .with_timezone(&chrono::Utc)
+}
+
+const MORNING_RID: &str = "2026-1-tokyo-1-R1";
+
+fn morning_date() -> chrono::NaiveDate {
+    chrono::NaiveDate::from_ymd_opt(2026, 1, 1).unwrap()
+}
+
+#[tokio::test]
+async fn morning_selection_is_computed_from_the_morning_board_and_saved() {
+    use paddock_use_case::interactor::race::predict::morning::MorningOutcome;
+    use paddock_use_case::repository::SnapshotPoint;
+    let app = morning_app(MORNING_RID, Some("2026-01-01T00:10:00+00:00"));
+    let rid = RaceId::try_from(MORNING_RID).unwrap();
+    let out = app
+        .ensure_morning_selection(
+            &rid,
+            morning_date(),
+            utc("2026-01-01T03:00:00Z"),
+            "2026-01-01T02:00:00Z",
+        )
+        .await
+        .unwrap();
+    let MorningOutcome::Ready(sel) = out else {
+        panic!("{out:?}");
+    };
+    assert_eq!(sel.axis, 1, "朝の盤の首位");
+    assert_eq!(sel.partners, vec![2, 3]);
+    assert_eq!(sel.odds_fetched_at, "2026-01-01T00:10:00+00:00");
+    assert_eq!(sel.computed_at, "2026-01-01T02:00:00Z");
+    assert_eq!(
+        app.repository.morning.lock().unwrap().get(MORNING_RID),
+        Some(&sel),
+        "保存した値を返す"
+    );
+    // 朝 = 当日 JST 0 時以降で最初の単勝。統計は開催日より前
+    let seen = app.repository.points_seen.lock().unwrap().clone();
+    assert_eq!(
+        seen,
+        vec![(
+            MORNING_RID.to_string(),
+            SnapshotPoint::FirstWinSince(utc("2025-12-31T15:00:00Z"))
+        )]
+    );
+    let as_of = app.repository.as_of_seen.lock().unwrap().clone();
+    assert!(!as_of.is_empty() && as_of.iter().all(|(_, a)| *a == Some(morning_date())));
+}
+
+#[tokio::test]
+async fn saved_morning_selection_is_returned_without_recomputing() {
+    use paddock_use_case::interactor::race::predict::morning::MorningOutcome;
+    let app = morning_app(MORNING_RID, Some("2026-01-01T00:10:00+00:00"));
+    let saved = paddock_use_case::repository::MorningSelection {
+        race_id: MORNING_RID.to_string(),
+        date: morning_date(),
+        axis: 3,
+        partners: vec![1, 2],
+        konsen_band: vec![],
+        odds_fetched_at: "2026-01-01T00:05:00+00:00".to_string(),
+        computed_at: "2026-01-01T01:00:00Z".to_string(),
+    };
+    app.repository
+        .morning
+        .lock()
+        .unwrap()
+        .insert(MORNING_RID.to_string(), saved.clone());
+    let rid = RaceId::try_from(MORNING_RID).unwrap();
+    let out = app
+        .ensure_morning_selection(
+            &rid,
+            morning_date(),
+            utc("2026-01-01T03:00:00Z"),
+            "2026-01-01T02:00:00Z",
+        )
+        .await
+        .unwrap();
+    assert_eq!(out, MorningOutcome::Ready(saved));
+    assert!(
+        app.repository.points_seen.lock().unwrap().is_empty(),
+        "計算し直さない"
+    );
+}
+
+#[tokio::test]
+async fn no_morning_snapshot_saves_nothing() {
+    use paddock_use_case::interactor::race::predict::morning::MorningOutcome;
+    let app = morning_app(MORNING_RID, None);
+    let rid = RaceId::try_from(MORNING_RID).unwrap();
+    let out = app
+        .ensure_morning_selection(
+            &rid,
+            morning_date(),
+            utc("2026-01-01T03:00:00Z"),
+            "2026-01-01T02:00:00Z",
+        )
+        .await
+        .unwrap();
+    assert_eq!(out, MorningOutcome::NoSnapshot);
+    assert!(app.repository.morning.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn snapshot_saved_after_window_entry_is_not_morning() {
+    use paddock_use_case::interactor::race::predict::morning::MorningOutcome;
+    // 最初の単勝が、窓に入る時刻ちょうど（predict-watch 自身の初回スイープの保存）
+    let app = morning_app(MORNING_RID, Some("2026-01-01T03:00:00+00:00"));
+    let rid = RaceId::try_from(MORNING_RID).unwrap();
+    let out = app
+        .ensure_morning_selection(
+            &rid,
+            morning_date(),
+            utc("2026-01-01T03:00:00Z"),
+            "2026-01-01T03:00:00Z",
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        out,
+        MorningOutcome::TooLate {
+            odds_fetched_at: "2026-01-01T03:00:00+00:00".to_string()
+        }
+    );
+    assert!(app.repository.morning.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn recorded_axis_is_forced_into_the_morning_selection() {
+    use paddock_domain::{Mark, PadPrediction, PredictionHorse, Venue};
+    use paddock_use_case::interactor::race::predict::morning::MorningOutcome;
+    let app = morning_app(MORNING_RID, Some("2026-01-01T00:10:00+00:00"));
+    let pad = PadPrediction {
+        date: morning_date(),
+        venue: Venue::Tokyo,
+        race_num: 1,
+        title: None,
+        budget: None,
+        strategy_note: None,
+        commentary: None,
+        horses: vec![PredictionHorse {
+            horse_num: 3,
+            horse_name: "ウマC".to_string(),
+            jockey: None,
+            mark: Some(Mark::Honmei),
+            win_odds: None,
+            popularity: None,
+            win_prob: None,
+            place_prob: None,
+            show_prob: None,
+            comment: None,
+        }],
+        bets: Vec::new(),
+        result: None,
+    };
+    *app.repository.pad.lock().unwrap() = Some(pad);
+    let rid = RaceId::try_from(MORNING_RID).unwrap();
+    let out = app
+        .ensure_morning_selection(
+            &rid,
+            morning_date(),
+            utc("2026-01-01T03:00:00Z"),
+            "2026-01-01T02:00:00Z",
+        )
+        .await
+        .unwrap();
+    let MorningOutcome::Ready(sel) = out else {
+        panic!("{out:?}");
+    };
+    assert_eq!(sel.axis, 3, "記録◎ を軸に強制する");
+    assert_eq!(sel.partners, vec![1, 2], "朝の首位も相手に残る");
+}
+
+#[tokio::test]
+async fn morning_board_without_runners_is_not_composable_and_saves_nothing() {
+    use paddock_use_case::interactor::race::predict::morning::MorningOutcome;
+    let mut app = interactor(Some(make_reconstruct_card(MORNING_RID)));
+    // 朝のスナップショットはあるが、単勝に出走馬が 1 頭も載っていない
+    app.repository.snapshots.insert(
+        MORNING_RID.to_string(),
+        (
+            Some(paddock_use_case::repository::SnapshotOdds {
+                odds: win_odds(MORNING_RID, &[]),
+                fetched_at: "2026-01-01T00:10:00+00:00".to_string(),
+            }),
+            None,
+        ),
+    );
+    let rid = RaceId::try_from(MORNING_RID).unwrap();
+    let out = app
+        .ensure_morning_selection(
+            &rid,
+            morning_date(),
+            utc("2026-01-01T03:00:00Z"),
+            "2026-01-01T02:00:00Z",
+        )
+        .await
+        .unwrap();
+    assert_eq!(out, MorningOutcome::NotComposable);
+    assert!(app.repository.morning.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn morning_selection_of_another_day_is_not_used() {
+    let app = morning_app(MORNING_RID, Some("2026-01-01T00:10:00+00:00"));
+    // 前の日に保存された同じ race_id の選定（延期・代替開催）
+    app.repository.morning.lock().unwrap().insert(
+        MORNING_RID.to_string(),
+        paddock_use_case::repository::MorningSelection {
+            race_id: MORNING_RID.to_string(),
+            date: chrono::NaiveDate::from_ymd_opt(2025, 12, 31).unwrap(),
+            axis: 3,
+            partners: vec![1, 2],
+            konsen_band: vec![],
+            odds_fetched_at: "2025-12-31T00:05:00+00:00".to_string(),
+            computed_at: "2025-12-31T01:00:00Z".to_string(),
+        },
+    );
+    let rid = RaceId::try_from(MORNING_RID).unwrap();
+    let out = app
+        .ensure_morning_selection(
+            &rid,
+            morning_date(),
+            utc("2026-01-01T03:00:00Z"),
+            "2026-01-01T02:00:00Z",
+        )
+        .await;
+    assert!(out.is_err(), "前の日の選定は使わない: {out:?}");
 }

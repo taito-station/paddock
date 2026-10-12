@@ -4,12 +4,16 @@
 //! （`live_ev_snapshots` の最古行の `captured_at`）の後に保存された全券種のスナップショット。
 //! どちらも本番と同じ [`compose_portfolio`]（＝`build_portfolio`）で組むので、買い方を二重に実装しない
 //! （ADR 0064）。本番の経路（predict / predict-watch / api）は触らない。
+//!
+//! **#767 より前の日付用**。#767 以降は predict-watch が朝の選定で固定するので、`live_ev_snapshots` の最古行は
+//! 「固定なしで組んだ T-40 の選定」ではなくなり、記録との照合（`fix_timing_probe.py --check-recorded`）に使えない。
 
 use chrono::{DateTime, NaiveDate, Utc};
 use paddock_domain::{
     EstimationConfig, HorseProbability, PinnedSelection, Portfolio, RaceId, RaceOdds,
 };
 
+use super::morning::{jst_midnight_utc, pick_selection};
 use super::orchestrate::{PredictionViews, compose_portfolio};
 use crate::error::Result;
 use crate::interactor::Interactor;
@@ -19,7 +23,7 @@ use crate::repository::{
 
 /// 1 レースの 2 時点の買い目（[`assemble_slips`] の戻り値）。
 pub struct AssembledSlips {
-    /// T-40 の盤で、固定なしに選んだ買い目（＝現行の T-40 固定と同じ選定）。
+    /// T-40 の盤で、固定なしに選んだ買い目（＝#767 より前の T-40 固定と同じ選定）。
     pub t40: Portfolio,
     /// 朝の盤で選んだ軸・相手・混戦（記録側の固定と同じ規則で伝票から読む）。
     pub morning_pick: PinnedSelection,
@@ -35,13 +39,8 @@ pub fn assemble_slips(
     t40: (&PredictionViews, &RaceOdds),
     race_budget: u64,
 ) -> AssembledSlips {
-    let morning_portfolio = compose_portfolio(
-        morning.0,
-        morning.1,
-        race_budget,
-        &PinnedSelection::default(),
-    );
-    let morning_pick = PinnedSelection::from_staked_legs(&morning_portfolio);
+    // 朝の選定は本番の朝の固定（#767）と同じ関数で読む（再構成は記録◎ を使わない）
+    let morning_pick = pick_selection(morning.0, morning.1, None, race_budget);
     AssembledSlips {
         t40: compose_portfolio(t40.0, t40.1, race_budget, &PinnedSelection::default()),
         morning_fixed: compose_portfolio(t40.0, t40.1, race_budget, &morning_pick),
@@ -163,12 +162,6 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository + LiveEvRepository
     }
 }
 
-/// 開催日 `date` の JST 0 時を UTC で表す。
-fn jst_midnight_utc(date: NaiveDate) -> DateTime<Utc> {
-    let midnight = date.and_hms_opt(0, 0, 0).expect("0 時は常に有効");
-    DateTime::<Utc>::from_naive_utc_and_offset(midnight, Utc) - chrono::Duration::hours(9)
-}
-
 #[cfg(test)]
 mod tests {
     use paddock_domain::{BetType, HorseName, HorseNum, HorseProbability, OddsValue, RaceId};
@@ -209,15 +202,6 @@ mod tests {
                 .insert(horse(*n), OddsValue::try_from((BetType::Win, 5.0)).unwrap());
         }
         o
-    }
-
-    #[test]
-    fn jst_midnight_is_previous_day_15_utc() {
-        let d = NaiveDate::from_ymd_opt(2026, 8, 15).unwrap();
-        assert_eq!(
-            jst_midnight_utc(d).to_rfc3339(),
-            "2026-08-14T15:00:00+00:00"
-        );
     }
 
     #[test]

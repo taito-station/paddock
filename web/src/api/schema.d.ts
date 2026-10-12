@@ -586,6 +586,29 @@ export interface components {
              */
             position: number;
         };
+        /**
+         * @description 盤の買い目を固定した朝の選定（#767・軸ロック REQ-D01-003）。
+         *
+         *     predict-watch が、監視窓に入る前の「朝」の単勝スナップショット（当日 JST 0 時以降で最初の単勝）から
+         *     組んで保存した選定。盤の買い目（`axis` / `partners` / `bets`）はこれで固定して組む。
+         *     `RaceBoardResponse.morning_at`（#448・最初に全券種がそろった時点の朝↔現比較）とは別の「朝」。
+         */
+        FixedSelectionSchema: {
+            /**
+             * Format: int32
+             * @description 固定した軸＝買い目の `axis`。朝の選定の軸（組むときに記録◎ を強制。保存した後に入った記録◎ は使わない）、
+             *     朝の軸が取消ならライブの首位。
+             */
+            axis: number;
+            /** @description 固定した混戦のボックスの馬番（昇順・軸を含む）。空配列なら混戦ではない。買い目と同じく取消の馬で絞らない。 */
+            konsen_band: number[];
+            /** @description 選定に使った朝のスナップショットの取得時刻 RFC3339。 */
+            odds_fetched_at: string;
+            /** @description 固定した相手（昇順）＝買い目の `partners`。取消の馬と軸を除く（補充しない）。 */
+            partners: number[];
+            /** @description 朝の選定（軸・相手）のうち出走していない馬（昇順）。空配列でなければ、取消で軸や相手が替わった。 */
+            scratched: number[];
+        };
         /** @description あるカテゴリ 1 区分の成績（出走数＋勝/連対/複勝の件数とレート）。 */
         GroupStatSchema: {
             label: string;
@@ -999,7 +1022,7 @@ export interface components {
         RaceBoardResponse: {
             /**
              * Format: int32
-             * @description 買い目の軸。記録軸（`recorded_axis`）があればそれに固定、無ければライブ再計算（`live_axis`）。
+             * @description 買い目の軸。朝の固定（`fixed_selection`）→ 記録軸（`recorded_axis`）→ ライブ再計算（`live_axis`）の順。
              *     ただし保存オッズが無い（`odds_available=false`）ときは買い目が組めず `axis=null`
              *     （`recorded_axis` は残る＝盤の軸ロック表示はオッズ無しでも出る）。
              */
@@ -1021,6 +1044,7 @@ export interface components {
             distance_tolerance_m: number;
             /** Format: int32 */
             field_size: number;
+            fixed_selection?: components["schemas"]["FixedSelectionSchema"] | null;
             /**
              * @description 条件別実績（#628）で `horses[].handicap.group_runs` の母集団になった**場スラッグの一覧**。
              *     **洋芝場（札幌・函館）の芝レースでのみ** 2 場が入り、それ以外は空配列
@@ -1035,7 +1059,8 @@ export interface components {
             horses: components["schemas"]["BoardHorseSchema"][];
             /**
              * Format: int32
-             * @description ライブ再計算の軸＝市場ブレンド首位（機械◎）。`recorded_axis` と異なるとき UI は乖離警告を出す（#388）。
+             * @description ライブ再計算の軸＝市場ブレンド首位（機械◎）。固定した軸（`fixed_selection.axis`、無ければ `recorded_axis`）と
+             *     異なるとき UI は乖離警告を出す（#388・#767）。
              */
             live_axis?: number | null;
             /**
@@ -1081,7 +1106,8 @@ export interface components {
             /**
              * Format: int32
              * @description predict 記録済みの本命◎（軸ロックの正, #388）。未 predict・取消時は `null`。
-             *     `axis` はこれがあればこれに一致する（買い目軸を記録軸に固定する）。
+             *     朝の固定（`fixed_selection`）が無いときに限り、`axis` はこれに一致する（買い目軸を記録軸に固定する）。
+             *     朝の固定があるレースでは、朝の選定を保存した後に入った記録◎ は使わないので `axis` と一致しないことがある（#767）。
              */
             recorded_axis?: number | null;
             /** @description 結果確定フラグ（#381。`results` に着順ありの行が 1 件以上）。web の「⚫終」判定に使う。 */

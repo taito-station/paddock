@@ -347,6 +347,106 @@ def load_live_ev(rows):
     return by_race
 
 
+def psql_dump_morning(db_url, date_from, date_to):
+    """期間内の朝の選定（morning_selections・#767）を行（セル list）の list で返す。"""
+    _check_date(date_from)
+    _check_date(date_to)
+    sql = (
+        "SELECT race_id, axis, array_to_string(partners, ','), "
+        "       array_to_string(konsen_band, ','), odds_fetched_at "
+        "FROM morning_selections "
+        "WHERE date BETWEEN :'date_from' AND :'date_to' "
+        "ORDER BY race_id;"
+    )
+    return pgq.query(sql, url=db_url, variables={"date_from": date_from, "date_to": date_to})
+
+
+def _num_set(text):
+    return {int(x) for x in text.split(",") if x.strip()}
+
+
+def load_morning(rows):
+    """朝の選定の行 → race_id → {axis, partners, band, at}。"""
+    out = {}
+    for cells in rows:
+        if len(cells) != 5:
+            continue
+        rid, axis, partners, band, at = cells
+        try:
+            out[rid] = {"axis": int(axis), "partners": _num_set(partners),
+                        "band": _num_set(band), "at": at}
+        except ValueError:
+            print(f"[warn] morning_selections の行を解釈できずスキップ: {cells!r}", file=sys.stderr)
+    return out
+
+
+def slip_selection(row):
+    """スイープ 1 行の伝票から選定（軸・相手・混戦の帯）を読む。記録側の固定
+    （find_live_ev_pins_by_date）と同じ規則: 相手＝賭金の乗った馬連・ワイドのながしの組番から軸を除いたもの、
+    帯＝ボックスの組番の和集合。"""
+    legs = [leg for leg in row["slip"].get("legs", []) if float(leg.get("amount") or 0) > 0]
+    partners = {int(h) for leg in legs
+                if leg.get("method") == "nagashi" and leg.get("bet_type") in ("quinella", "wide")
+                for h in leg.get("combo", [])} - {row["axis"]}
+    band = {int(h) for leg in legs if leg.get("method") == "box" for h in leg.get("combo", [])}
+    return row["axis"], partners, band
+
+
+KONSEN_MIN_HORSES = 4  # 混戦の帯の最小頭数（domain の KONSEN_MIN_HORSES と同値）
+
+
+def morning_fix_violations(by_race, morning):
+    """朝の選定（#767）があるレースのうち、発走前のスイープの選定が朝の選定から外れたものを返す。
+
+    REQ-D01-003 の検証手段（固定の時点＝朝）。外れの判定:
+    - 軸が朝の軸と違う（軸が取消でライブ首位へ戻ったときもここに出る。取消は新情報なので行を見て確かめる）
+    - 相手・混戦の帯が朝の選定の部分集合でない（取消で減るのは固定の規則どおりなので外れにしない）
+    - 混戦の反転: 朝は混戦（帯が 4 頭以上）なのにスイープは帯が無い（非混戦）。空の帯はどの帯の部分集合にも
+      なるので、部分集合の比較だけでは見逃す
+    戻り値は (朝の選定があり発走前のスイープがあったレース数, [(race_id, 最初に外れた行, 理由)])。
+    """
+    checked = 0
+    bad = []
+    for rid, sel in sorted(morning.items()):
+        rows = by_race.get(rid, [])
+        if not rows:
+            continue
+        post = post_dt(rows[0]["date"], rows[0]["post_time"])
+        pre = [r for r in rows if post is None or to_jst(r["captured_at"]) <= post]
+        if not pre:
+            continue
+        checked += 1
+        for r in sorted(pre, key=lambda r: to_jst(r["captured_at"])):
+            axis, partners, band = slip_selection(r)
+            if axis != sel["axis"]:
+                bad.append((rid, r, f"軸 {sel['axis']}→{axis}"))
+                break
+            if not partners <= sel["partners"]:
+                bad.append((rid, r, f"相手に朝の選定に無い馬 {sorted(partners - sel['partners'])}"))
+                break
+            if not band <= sel["band"]:
+                bad.append((rid, r, f"混戦の帯に朝の選定に無い馬 {sorted(band - sel['band'])}"))
+                break
+            if len(sel["band"]) >= KONSEN_MIN_HORSES and not band:
+                bad.append((rid, r, "混戦→非混戦"))
+                break
+    return checked, bad
+
+
+def report_morning_fix(by_race, morning, out=sys.stdout):
+    p = lambda *a: print(*a, file=out)
+    checked, bad = morning_fix_violations(by_race, morning)
+    p(f"\n=== 朝の固定（#767・REQ-D01-003）— 朝の選定と発走前スイープがあった {checked} レース ===")
+    if not checked:
+        p("  対象なし（朝の選定が無い期間か、監視していない）")
+        return
+    p(f"朝の選定から外れたスイープがあったレース: {len(bad)}/{checked}")
+    for rid, row, why in bad[:10]:
+        p(f"    {rid} {row['captured_at']}  {why}")
+    if len(bad) > 10:
+        p(f"    …ほか {len(bad) - 10} レース")
+
+
 def psql_dump_odds(db_url, date_from, date_to):
     """期間内の race_odds_snapshots（連系 3 券種）を行（セル list）のイテレータで返す（市場整合ROI 診断用）。
 
@@ -677,18 +777,32 @@ def main():
         return 1
     races, skipped = build_races(by_race, payouts, odds, use_ever=args.ever)
 
+    # 払戻に依らない節（軸の安定性・朝の固定）は先に出す。当日（払戻を取る前）でも
+    # REQ-D01-003 の 0/N を確かめられるように
+    report_axis_stability(by_race)
+    try:
+        morning = load_morning(psql_dump_morning(args.db_url, args.date_from, args.date_to))
+    except pgq.PsqlError as e:
+        # morning_selections は #767 の migration で入る。未適用の DB では節を飛ばす（他の節は出す）
+        print(f"\n（朝の固定の節は省略: morning_selections を読めない: {e}）")
+    else:
+        report_morning_fix(by_race, morning)
+
     print(f"live_ev_snapshots: {len(by_race)} レース / 評価できた {len(races)} レース"
           f"（{'ever' if args.ever else 'final'} 基準）")
     for reason, cnt in sorted(skipped.items()):
         print(f"  除外 {cnt}: {reason}")
     if not races:
+        if by_race:
+            # 当日（払戻を取る前）。払戻に依らない節（軸の安定性・朝の固定）は上で出したので失敗にしない
+            print("\n（払戻が無いので較正の節は省略。払戻を取った後に流し直すと出る）")
+            return 0
         print("評価対象がゼロ。払戻の取得範囲と期間指定を確認する。", file=sys.stderr)
         return 1
 
     report(races, [float(x) for x in args.buckets.split(",") if x.strip()])
     if args.compare_alloc:
         report_alloc_comparison(races, [parse_alloc(a) for a in args.compare_alloc])
-    report_axis_stability(by_race)
 
     if args.dump_races:
         with open(args.dump_races, "w") as f:

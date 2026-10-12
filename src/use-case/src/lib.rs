@@ -24,6 +24,9 @@ pub use interactor::pdf::PdfInteractor;
 pub use interactor::race::board::{
     BoardHorse, Confusion, HandicapNote, RaceBoard, recorded_axis_of,
 };
+pub use interactor::race::predict::morning::{
+    FixSource, MORNING_SELECTION_BUDGET, MorningOutcome, resolve_fixed_selection,
+};
 pub use interactor::race::predict::{PredictionViews, RecentRunsCoverage, compose_portfolio};
 pub use interactor::results::{RefreshReport, ResultsInteractor};
 pub use interactor::settle::{SettleInteractor, SettleReport};

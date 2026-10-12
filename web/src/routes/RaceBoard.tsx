@@ -40,6 +40,10 @@ import { HorseDetailPanel } from "./board/HorseDetailPanel";
 const AXIS_LOCK_REASON =
   "買い目の軸は predict 記録済みの◎に固定しています。ライブ再計算（市場ブレンド）の首位はこれと異なりますが、軸ロック運用により差し替えません（乖離は増額判断の材料）。";
 
+// 朝の固定（#767）の理由。summary の title と展開 <p> で共有する（AXIS_LOCK_REASON と同じ方式）。
+const MORNING_FIX_REASON =
+  "買い目の軸・相手・混戦は、朝（監視窓に入る前）の単勝で組んだ選定に固定しています。ライブ再計算（市場ブレンド）の首位はこれと異なりますが、軸ロック運用により差し替えません（乖離は増額判断の材料）。";
+
 // 朝ROI→現ROI 説明（#448/#477）。snapshotClock を挟むため関数で組み、title と展開 <p> で共有する。
 function morningRoiReason(
   morningAt: string | null | undefined,
@@ -363,7 +367,9 @@ export function RaceBoard() {
             {/* 軸ロック（#388）: predict 記録済みの◎があれば買い目軸はそれに固定済み。ライブ再計算軸
                 （live_axis＝市場ブレンド首位）と乖離したら警告し、直前オッズによる軸の無言フリップを可視化する
                 （CLAUDE.md 軸ロック運用・ADR 0055/0060）。 */}
+            {/* 朝の固定（#767）があるときは、記録軸もそのチップの中で示す（同じ軸の警告を 2 つ並べない）。 */}
             {d.recorded_axis != null &&
+              d.fixed_selection == null &&
               (d.live_axis != null && d.live_axis !== d.recorded_axis ? (
                 // 乖離時は理由をクリック/タップで展開できる注記にする（#477。title は summary へ付け PC hover 補助）。
                 <details className="axis-lock-note chip chip-danger">
@@ -381,6 +387,37 @@ export function RaceBoard() {
                   🔒 記録軸 {d.recorded_axis} 固定
                 </span>
               ))}
+            {/* 朝の固定（#767・REQ-D01-003）: predict-watch が朝の単勝で組んで保存した選定で、買い目の
+                軸・相手・混戦を固定している。#448 の朝↔現（morning_at）とは別の「朝」。 */}
+            {d.fixed_selection != null &&
+              (() => {
+                const f = d.fixed_selection;
+                const konsen =
+                  f.konsen_band.length > 0
+                    ? ` 混戦[${f.konsen_band.join(",")}]`
+                    : " 非混戦";
+                const recorded =
+                  d.recorded_axis != null && d.recorded_axis === f.axis
+                    ? "（記録◎）"
+                    : "";
+                // 取消で朝の軸・相手が替わったときは明示する（取消は新情報。黙って差し替えない）
+                const scratched =
+                  f.scratched.length > 0 ? `（取消: ${f.scratched.join(",")}）` : "";
+                const text = `朝 ${snapshotClock(f.odds_fetched_at)} の選定で固定: 軸 ${f.axis}${recorded} 相手 ${f.partners.join(",")}${konsen}${scratched}`;
+                return d.live_axis != null && d.live_axis !== f.axis ? (
+                  <details className="axis-lock-note chip chip-danger">
+                    <summary title={MORNING_FIX_REASON}>
+                      <span className="caret" aria-hidden="true" />⚠ {text}
+                      （ライブ再計算の首位は {d.live_axis}）
+                    </summary>
+                    <p className="axis-lock-reason">{MORNING_FIX_REASON}</p>
+                  </details>
+                ) : (
+                  <span className="chip" title={MORNING_FIX_REASON}>
+                    🔒 {text}
+                  </span>
+                );
+              })()}
             {d.roi != null && d.hit_prob != null && (
               <span className={d.roi >= 1 ? "chip chip-plus" : "muted"}>
                 {/* d.roi は比率（1.03=103%）。boardRoiPct が ×100→roiPct で %化する（比率→%
@@ -490,7 +527,8 @@ export function RaceBoard() {
             closeBtnRef={closeBtnRef}
           />
 
-          {/* 買い目＋執行（/recommendations と同経路・相手 top5 不変。#377 で RaceDetail を統合） */}
+          {/* 買い目＋執行（/recommendations と同経路・相手 top5 不変。#377 で RaceDetail を統合）。
+              記録◎・朝の選定（#767）の固定があるレースは /recommendations と値が違う（あちらは固定しない） */}
           <h3 className="mt-xl">買い目</h3>
           <div className="toolbar">
             <label>

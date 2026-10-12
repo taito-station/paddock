@@ -16,9 +16,10 @@ use crate::schema::prediction::{
     PredictionSummarySchema,
 };
 use crate::schema::race::{
-    BoardHorseSchema, ConditionRunSchema, ConfusionSchema, FinishEntrySchema, HandicapNoteSchema,
-    HorseEntrySchema, HorseProbabilitySchema, PredictionResponse, RaceBoardResponse,
-    RaceCardResponse, RaceListResponse, RaceSummary, RecommendationBet, RecommendationResponse,
+    BoardHorseSchema, ConditionRunSchema, ConfusionSchema, FinishEntrySchema, FixedSelectionSchema,
+    HandicapNoteSchema, HorseEntrySchema, HorseProbabilitySchema, PredictionResponse,
+    RaceBoardResponse, RaceCardResponse, RaceListResponse, RaceSummary, RecommendationBet,
+    RecommendationResponse,
 };
 use crate::schema::results::RefreshReportResponse;
 use crate::schema::session::{
@@ -73,6 +74,7 @@ use crate::schema::session::{
         ConfusionSchema,
         ConditionRunSchema,
         HandicapNoteSchema,
+        FixedSelectionSchema,
         BoardHorseSchema,
         RaceBoardResponse,
         FinishEntrySchema,

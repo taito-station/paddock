@@ -13,17 +13,17 @@ use chrono::NaiveDate;
 
 use paddock_domain::{
     HorseExplanation, HorseName, HorseNum, HorseProbability, KONSEN_BAND_RATIO, KONSEN_MIN_HORSES,
-    Mark, PadPrediction, PinnedSelection, Portfolio, RaceId, RaceOdds, Surface, TrackCondition,
-    Venue, konsen_band,
+    Mark, PadPrediction, Portfolio, RaceId, RaceOdds, Surface, TrackCondition, Venue, konsen_band,
 };
 
 use crate::compose_portfolio;
 use crate::error::Result;
 use crate::interactor::Interactor;
 use crate::interactor::race::commentary::{horse_detail_lines, horse_headline, race_commentary};
+use crate::interactor::race::predict::morning::resolve_fixed_selection;
 use crate::repository::{
-    ConditionRun, HandicapNoteRow, OddsRepository, PadPredictionRepository, RaceCardRepository,
-    RaceResultRepository, StatsRepository,
+    ConditionRun, HandicapNoteRow, MorningSelection, MorningSelectionRepository, OddsRepository,
+    PadPredictionRepository, RaceCardRepository, RaceResultRepository, StatsRepository,
 };
 
 /// 乖離馬（妙味・ワイドボックス候補）の判定に使う「人気順 − モデル順」の下限。
@@ -52,13 +52,17 @@ pub struct RaceBoard {
     /// 格付けスラッグ（#345。例 `g3` / `open`。無ければ `None`）。盤ヘッダのグレード表記に使う。
     pub race_class: Option<String>,
     /// 買い目ポートフォリオ（保存オッズが無ければ `None`＝買い目は組めない。盤は確率だけで描ける）。
-    /// 軸は記録軸（`recorded_axis`）があればそれに固定される（#388・軸ロック）。
+    /// 軸は朝の固定（`fixed_selection`・#767）があればそれ、無ければ記録軸（`recorded_axis`）に固定される（#388・軸ロック）。
     pub portfolio: Option<Portfolio>,
     /// predict 記録済みの本命◎（軸ロックの正）。pad の Honmei 印がその馬が出走している場合のみ。
-    /// 未 predict・取消時は `None`（＝買い目軸はライブ再計算 `live_axis` にフォールバック, #388）。
+    /// 未 predict・取消時は `None`。朝の固定が無いときだけ買い目の軸になる（朝の選定を保存した後に入った記録◎ は使わない・#767）。
     pub recorded_axis: Option<u32>,
+    /// 朝の選定で固定した買い目の構造（#767）。predict-watch が保存した朝の選定があるときだけ `Some`。
+    /// 買い目（`portfolio`）はこれで組む（保存した後に入った記録◎ では替えない）。#448 の `morning_at`
+    /// （最初に全券種がそろった時点）とは別の「朝」なので、名前を分けている。
+    pub fixed_selection: Option<FixedSelection>,
     /// ライブ再計算の軸＝blended（市場ブレンド α=0.2）首位（機械◎, `model_rank==1`）。
-    /// 記録軸との乖離警告に使う。直前オッズで動くのはこちら（#388）。
+    /// 固定した軸（朝の固定、無ければ記録軸）との乖離警告に使う。直前オッズで動くのはこちら（#388）。
     pub live_axis: Option<u32>,
     pub confusion: Confusion,
     /// レース書評（混戦度・◎の狙いどころ・妙味）。人手 `PadPrediction.commentary` があれば優先、
@@ -94,6 +98,21 @@ pub struct RaceBoard {
     pub group_venues: Vec<String>,
     /// 全出走馬（truncate しない）。盤面順（`blended` と同順）。
     pub horses: Vec<BoardHorse>,
+}
+
+/// 盤の買い目を固定した朝の選定（#767）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FixedSelection {
+    /// 固定した軸＝買い目の軸。朝の選定の軸（保存した後に入った記録◎ は使わない）、取消ならライブの首位。
+    pub axis: u32,
+    /// 固定した相手（昇順）。買い目と同じく、取消の馬と軸を除く（補充しない）。
+    pub partners: Vec<u32>,
+    /// 固定した混戦のボックスの馬番（昇順・軸を含む）。空なら混戦ではない。買い目と同じく取消の馬で絞らない。
+    pub konsen_band: Vec<u32>,
+    /// 朝の選定（軸・相手）のうち出走していない馬（昇順）。取消で軸や相手が替わったことを表示で示すため。
+    pub scratched: Vec<u32>,
+    /// 選定に使った朝のスナップショットの取得時刻（UTC rfc3339）。
+    pub odds_fetched_at: String,
 }
 
 /// 混戦サマリ（CLAUDE.md の混戦判定を機械化）。
@@ -194,6 +213,7 @@ impl<
         + RaceCardRepository
         + OddsRepository
         + PadPredictionRepository
+        + MorningSelectionRepository
         + RaceResultRepository,
 > Interactor<R>
 {
@@ -233,15 +253,29 @@ impl<
         let recorded_axis = recorded_axis_of(pad.as_ref(), &views.blended);
         let live_axis = live_axis_of(&views.blended);
 
-        // 軸は記録軸があればそれに固定する（#388）。オッズ無しなら組まない。
-        // **相手（top5）は固定しない**——盤面は on-demand の再計算ビューで、`predict-watch` のような
-        // 「その日の初回スイープ」に相当する基準を持たないため。したがって相手は blended（市場ブレンド）
-        // から毎回選び直され、オッズが動けば入れ替わりうる（#601 で predict-watch 側のみ固定した）。
-        let pinned =
-            PinnedSelection::axis_only(recorded_axis.and_then(|n| HorseNum::try_from(n).ok()));
+        // 買い目の固定（#767）: 朝の選定 → 記録軸（#388）→ なし。朝の選定は predict-watch が計算・保存した
+        // もので、盤は読むだけ。朝の選定は記録◎ を軸に強制して組み、保存した後に入った記録◎ は使わない
+        // （predict-watch と同じ規則＝`resolve_fixed_selection`）。これで盤と predict-watch の買い目の構造が
+        // そろう（朝の選定があるレースでは）。盤は初回スイープ（T-40）を持たないので、朝の選定が無いレースは
+        // 記録軸だけの固定（従来どおり）。オッズ無しなら組まない。
+        let morning_selection = same_day_morning(
+            self.repository
+                .find_morning_selection(race_id.value())
+                .await?,
+            card.as_ref().map(|c| c.date),
+        );
+        let recorded = recorded_axis.and_then(|n| HorseNum::try_from(n).ok());
+        let (pinned, _) = resolve_fixed_selection(recorded, morning_selection.as_ref(), None);
+        let field: Vec<u32> = views
+            .blended
+            .iter()
+            .map(|hp| hp.horse_num.value())
+            .collect();
         let portfolio = odds
             .as_ref()
             .map(|o| compose_portfolio(&views, o, budget, &pinned));
+        let fixed_selection =
+            fixed_selection_of(morning_selection, &field, live_axis, portfolio.as_ref());
 
         let mut horses =
             build_board_horses(&views.blended, &views.pure, odds.as_ref(), card.as_ref());
@@ -256,7 +290,8 @@ impl<
         // 空でないことだけで、全組合せが priced であることは保証しない。UI は朝ROI→現ROI を矢印で
         // 並べるので、被覆率が朝と現で違えば別母集団同士の比較になる。
         // 数えるのは morning_roi と同じ母集団＝**現時点の買い目を朝オッズで値付けした**もの
-        // （compose_portfolio が差し替えるのは払戻本だけで、軸・相手は現時点の確率で選ばれる）。
+        // （compose_portfolio が差し替えるのは払戻本だけで、軸・相手は固定〈朝の選定・記録軸〉があればその構造、
+        // 無ければ現時点の確率で選ばれる）。
         let (morning_at, current_at, morning_roi, morning_hit_prob, morning_unpriced_legs) =
             match morning.as_ref() {
                 Some(m) => {
@@ -353,6 +388,7 @@ impl<
             race_class,
             portfolio,
             recorded_axis,
+            fixed_selection,
             live_axis,
             confusion,
             race_comment,
@@ -665,6 +701,62 @@ pub fn recorded_axis_of(pad: Option<&PadPrediction>, blended: &[HorseProbability
     })
 }
 
+/// 開催日の朝の選定だけを使う（#767）。延期・代替開催で race_id が同じまま日付だけ変わったとき、
+/// 前の日の朝の選定で固定しない。出馬表が無ければ（盤は先に NotFound になるので実際は来ない）そのまま。
+fn same_day_morning(
+    morning: Option<MorningSelection>,
+    card_date: Option<NaiveDate>,
+) -> Option<MorningSelection> {
+    morning.filter(|m| card_date.is_none_or(|d| d == m.date))
+}
+
+/// 盤に出す朝の固定（#767）。**買い目（`portfolio`）が実際に使った軸・相手をそのまま出す**
+/// （規則を書き直さない。取消の扱い——軸が取消ならライブの首位へ戻す・相手は補充しない——は
+/// `compose_portfolio` が正）。オッズが無く買い目を組めないときだけ、朝の選定を出走馬で絞って出す。
+/// 混戦の帯は買い目（`build_portfolio`）と同じく取消で絞らない。朝の軸・相手のうち出走していない馬を
+/// `scratched` に出す（取消で差し替えたことを表示で示す）。
+///
+/// 朝の選定が無ければ `None`（盤は記録◎ だけの固定＝従来どおり）。`field` は出走馬（blended）の馬番。
+fn fixed_selection_of(
+    morning: Option<MorningSelection>,
+    field: &[u32],
+    live_axis: Option<u32>,
+    portfolio: Option<&Portfolio>,
+) -> Option<FixedSelection> {
+    let m = morning?;
+    let runs = |n: &u32| field.contains(n);
+    let (axis, partners) = match portfolio.and_then(|p| p.axis.map(|a| (a, &p.partners))) {
+        Some((axis, partners)) => {
+            let mut v: Vec<u32> = partners.iter().map(|n| n.value()).collect();
+            v.sort_unstable();
+            (axis.value(), v)
+        }
+        None => {
+            let axis = Some(m.axis).filter(runs).or(live_axis)?;
+            let partners = m
+                .partners
+                .iter()
+                .copied()
+                .filter(|n| *n != axis && runs(n))
+                .collect();
+            (axis, partners)
+        }
+    };
+    let mut scratched: Vec<u32> = std::iter::once(m.axis)
+        .chain(m.partners.iter().copied())
+        .filter(|n| !runs(n))
+        .collect();
+    scratched.sort_unstable();
+    scratched.dedup();
+    Some(FixedSelection {
+        axis,
+        partners,
+        konsen_band: m.konsen_band,
+        odds_fetched_at: m.odds_fetched_at,
+        scratched,
+    })
+}
+
 /// ライブ再計算軸（#388）: `blended`（市場ブレンド α=0.2）首位＝機械◎（`model_rank==1`）。
 /// 記録軸との乖離警告に使う（直前オッズで動くのはこちら）。空なら `None`。
 fn live_axis_of(blended: &[HorseProbability]) -> Option<u32> {
@@ -860,6 +952,107 @@ mod tests {
             bets: vec![],
             result: None,
         }
+    }
+
+    fn morning_sel(axis: u32) -> MorningSelection {
+        MorningSelection {
+            race_id: "2026-4-tokyo-4-11R".to_string(),
+            date: NaiveDate::from_ymd_opt(2026, 10, 10).unwrap(),
+            axis,
+            partners: vec![1, 2, 3, 4, 5],
+            konsen_band: vec![1, 2, 3, axis],
+            odds_fetched_at: "2026-10-10T00:31:05+00:00".to_string(),
+            computed_at: "2026-10-10T01:00:00Z".to_string(),
+        }
+    }
+
+    #[test]
+    fn morning_selection_of_another_day_is_not_used() {
+        let d = NaiveDate::from_ymd_opt(2026, 10, 10).unwrap();
+        assert!(same_day_morning(Some(morning_sel(11)), Some(d)).is_some());
+        let next = NaiveDate::from_ymd_opt(2026, 10, 11).unwrap();
+        assert_eq!(
+            same_day_morning(Some(morning_sel(11)), Some(next)),
+            None,
+            "延期で日付が変わった"
+        );
+    }
+
+    #[test]
+    fn fixed_selection_without_odds_shows_the_morning_selection() {
+        let field = [1, 2, 3, 4, 5, 6, 11];
+        assert_eq!(
+            fixed_selection_of(None, &field, Some(1), None),
+            None,
+            "朝の選定が無ければ出さない"
+        );
+        let got = fixed_selection_of(Some(morning_sel(11)), &field, Some(1), None).unwrap();
+        assert_eq!(got.axis, 11);
+        assert_eq!(got.partners, vec![1, 2, 3, 4, 5]);
+        assert_eq!(got.konsen_band, vec![1, 2, 3, 11]);
+        assert_eq!(got.odds_fetched_at, "2026-10-10T00:31:05+00:00");
+        assert!(got.scratched.is_empty());
+    }
+
+    #[test]
+    fn fixed_selection_without_odds_follows_scratches() {
+        // 朝の軸 11 と相手 3 が取消（出走馬に居ない）。買い目を組めないときも同じ規則で絞る
+        let field = [1, 2, 4, 5, 6];
+        let got = fixed_selection_of(Some(morning_sel(11)), &field, Some(2), None).unwrap();
+        assert_eq!(got.axis, 2, "軸が取消ならライブの首位へ戻る");
+        assert_eq!(
+            got.partners,
+            vec![1, 4, 5],
+            "取消の相手と軸を除き、補充しない"
+        );
+        assert_eq!(got.konsen_band, vec![1, 2, 3, 11], "混戦の帯は絞らない");
+        assert_eq!(got.scratched, vec![3, 11]);
+    }
+
+    #[test]
+    fn fixed_selection_matches_the_portfolio_built_with_the_scratched_morning_pin() {
+        use crate::interactor::race::predict::morning::resolve_fixed_selection;
+        use crate::interactor::race::predict::{PredictionViews, RecentRunsCoverage};
+        use paddock_domain::{BetType, OddsValue};
+        // 出走馬は 1,2,4,5,6,7（朝の軸 11 と相手 3 は取消）。ライブの首位は 2
+        let blended = vec![
+            hp(2, 0.30),
+            hp(1, 0.20),
+            hp(4, 0.15),
+            hp(5, 0.12),
+            hp(6, 0.10),
+            hp(7, 0.08),
+        ];
+        let views = PredictionViews {
+            blended: blended.clone(),
+            pure: blended.clone(),
+            explanations: Vec::new(),
+            recent_runs_coverage: RecentRunsCoverage {
+                field_size: 6,
+                horses_with_runs: 6,
+            },
+        };
+        let mut odds = RaceOdds::empty(RaceId::try_from("2026-4-tokyo-4-11R").unwrap());
+        for hpp in &blended {
+            odds.win.insert(
+                hpp.horse_num,
+                OddsValue::try_from((BetType::Win, 5.0)).unwrap(),
+            );
+        }
+        let morning = morning_sel(11);
+        let (pinned, _) = resolve_fixed_selection(None, Some(&morning), None);
+        let portfolio = compose_portfolio(&views, &odds, 5000, &pinned);
+        let field: Vec<u32> = blended.iter().map(|h| h.horse_num.value()).collect();
+        let got = fixed_selection_of(Some(morning), &field, Some(2), Some(&portfolio)).unwrap();
+        assert_eq!(
+            Some(got.axis),
+            portfolio.axis.map(|a| a.value()),
+            "軸は買い目と同じ"
+        );
+        let mut bought: Vec<u32> = portfolio.partners.iter().map(|n| n.value()).collect();
+        bought.sort_unstable();
+        assert_eq!(got.partners, bought, "相手は買い目と同じ");
+        assert_eq!(got.scratched, vec![3, 11]);
     }
 
     #[test]
