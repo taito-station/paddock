@@ -536,6 +536,145 @@ async fn board_with_odds_returns_market_and_bets(pool: sqlx::PgPool) {
     assert!(json["roi"].is_number());
 }
 
+/// 朝の選定（#767）があると、盤の買い目はそれで固定され `fixed_selection` に出る。朝の選定を保存した後に
+/// 入った記録◎ は使わない（predict-watch と同じ規則）。
+/// 朝の選定が無い盤は `fixed_selection=null`（従来どおり。上の 2 本が担保）。
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn board_is_fixed_by_the_morning_selection(pool: sqlx::PgPool) {
+    use paddock_domain::{Mark, PadPrediction, PredictionHorse};
+    use paddock_use_case::repository::{
+        MorningSelection, MorningSelectionRepository, PadPredictionRepository,
+    };
+    let repo = PostgresRepository::new(pool.clone());
+    repo.save_race_card(&sample_card()).await.unwrap();
+    repo.save_race_odds(&sample_win_odds()).await.unwrap();
+    repo.save_race_odds(&sample_odds()).await.unwrap();
+    let app = build_service!(pool);
+    let board = |app| async move {
+        body_json(
+            test::call_service(
+                app,
+                test::TestRequest::get()
+                    .uri(&format!("/api/races/{RACE_ID}/board"))
+                    .to_request(),
+            )
+            .await,
+        )
+        .await
+    };
+
+    let before = board(&app).await;
+    assert!(before["fixed_selection"].is_null());
+    let live_axis = before["live_axis"].as_u64().unwrap();
+    assert_eq!(before["axis"].as_u64(), Some(live_axis));
+
+    // 朝はライブの首位ではない馬を軸に選んでいた
+    let morning_axis = if live_axis == 3 { 2 } else { 3 };
+    let partners: Vec<u32> = [1u32, 2, 3]
+        .into_iter()
+        .filter(|&n| n != morning_axis)
+        .collect();
+    repo.save_morning_selection(&MorningSelection {
+        race_id: RACE_ID.to_string(),
+        date: date(),
+        axis: morning_axis,
+        partners: partners.clone(),
+        konsen_band: vec![],
+        odds_fetched_at: "2026-03-28T00:30:00+00:00".to_string(),
+        computed_at: "2026-03-28T01:00:00Z".to_string(),
+    })
+    .await
+    .unwrap();
+
+    let fixed = board(&app).await;
+    assert_eq!(
+        fixed["axis"].as_u64(),
+        Some(u64::from(morning_axis)),
+        "軸は朝の選定"
+    );
+    assert_eq!(
+        fixed["live_axis"].as_u64(),
+        Some(live_axis),
+        "ライブの首位は別に返る"
+    );
+    let mut got: Vec<u64> = fixed["partners"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_u64().unwrap())
+        .collect();
+    got.sort_unstable();
+    assert_eq!(
+        got,
+        partners.iter().map(|&n| u64::from(n)).collect::<Vec<_>>()
+    );
+    assert!(!fixed["bets"].as_array().unwrap().is_empty());
+    let f = &fixed["fixed_selection"];
+    assert_eq!(f["axis"].as_u64(), Some(u64::from(morning_axis)));
+    assert_eq!(f["konsen_band"].as_array().map(Vec::len), Some(0));
+    assert_eq!(f["odds_fetched_at"], "2026-03-28T00:30:00+00:00");
+
+    // 盤の固定（fixed_selection）は買い目そのもの（同じ軸・同じ相手）
+    let mut fixed_partners: Vec<u64> = fixed["fixed_selection"]["partners"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_u64().unwrap())
+        .collect();
+    fixed_partners.sort_unstable();
+    assert_eq!(
+        fixed_partners, got,
+        "fixed_selection の相手は買い目の相手と同じ"
+    );
+
+    // 朝の選定を保存した後に入った記録◎ は使わない（predict-watch と同じ規則・#767）
+    // ——軸も相手も朝の選定のまま。記録◎ そのものは recorded_axis として返る
+    let honmei = partners[0];
+    repo.save_pad_prediction(
+        &PadPrediction {
+            date: date(),
+            venue: Venue::Nakayama,
+            race_num: 1,
+            title: None,
+            budget: None,
+            strategy_note: None,
+            commentary: None,
+            horses: vec![PredictionHorse {
+                horse_num: honmei,
+                horse_name: "ウマ".to_string(),
+                jockey: None,
+                mark: Some(Mark::Honmei),
+                win_odds: None,
+                popularity: None,
+                win_prob: None,
+                place_prob: None,
+                show_prob: None,
+                comment: None,
+            }],
+            bets: Vec::new(),
+            result: None,
+        },
+        Utc::now(),
+    )
+    .await
+    .unwrap();
+    let with_pad = board(&app).await;
+    assert_eq!(with_pad["recorded_axis"].as_u64(), Some(u64::from(honmei)));
+    assert_eq!(
+        with_pad["axis"].as_u64(),
+        Some(u64::from(morning_axis)),
+        "買い目の軸は朝の選定のまま"
+    );
+    assert_eq!(
+        with_pad["fixed_selection"]["axis"].as_u64(),
+        Some(u64::from(morning_axis))
+    );
+    assert_eq!(
+        with_pad["partners"], fixed["partners"],
+        "相手も朝の選定のまま"
+    );
+}
+
 /// board の買い目（axis/partners/bets/roi）は /recommendations と完全一致する（同経路の担保）。
 #[sqlx::test(migrations = "../../../deployments/db/migrations")]
 async fn board_bets_match_recommendations(pool: sqlx::PgPool) {

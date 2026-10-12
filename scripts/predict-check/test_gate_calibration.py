@@ -208,6 +208,48 @@ def test_axis_stability_keeps_round_trip_visible():
     assert flipped[0][2] == [3, 9, 3]
 
 
+def _sweep(cap, axis, partners, band=()):
+    legs = [{"bet_type": "wide", "method": "nagashi", "combo": [axis, h], "amount": 300}
+            for h in partners]
+    legs += [{"bet_type": "quinella", "method": "nagashi", "combo": [axis, h], "amount": 0}
+             for h in (99,)]  # 賭金 ¥0 の脚は選定に数えない
+    if band:
+        legs.append({"bet_type": "trio", "method": "box", "combo": list(band), "amount": 100})
+    return {"date": "2026-10-10", "venue": "tokyo", "race_no": 11, "post_time": "15:40",
+            "captured_at": cap, "axis": axis, "roi": 50.0, "slip": {"legs": legs}}
+
+
+def test_morning_fix_violations():
+    morning = G.load_morning(pgq.tsv_rows(
+        "ok\t7\t1,2,3,4,5\t\t2026-10-10T00:31:05+00:00\n"
+        "scratch\t7\t1,2,3,4,5\t1,2,3,7\t2026-10-10T00:31:05+00:00\n"
+        "flip\t7\t1,2,3,4,5\t\t2026-10-10T00:31:05+00:00\n"
+        "newp\t7\t1,2,3,4,5\t\t2026-10-10T00:31:05+00:00\n"
+        "unwatched\t7\t1,2,3,4,5\t\t2026-10-10T00:31:05+00:00\n"
+        "post\t7\t1,2,3,4,5\t\t2026-10-10T00:31:05+00:00\n"
+        "konsen\t7\t1,2,3,4,5\t1,2,3,7\t2026-10-10T00:31:05+00:00\n"))
+    by_race = {
+        "ok": [_sweep("2026-10-10T06:00:00Z", 7, [1, 2, 3, 4, 5])],
+        # 取消で相手・帯が減るのは固定の規則どおり（外れにしない）
+        "scratch": [_sweep("2026-10-10T06:00:00Z", 7, [1, 2, 4, 5], band=(1, 2, 7))],
+        # 発走前に軸が替わった
+        "flip": [_sweep("2026-10-10T06:00:00Z", 7, [1, 2, 3, 4, 5]),
+                 _sweep("2026-10-10T06:05:00Z", 2, [1, 3, 4, 5, 7])],
+        # 朝の選定に無い馬が相手に入った
+        "newp": [_sweep("2026-10-10T06:00:00Z", 7, [1, 2, 3, 4, 9])],
+        # 発走前（15:40 JST＝06:40Z）は一致し、発走後のスイープだけ軸が替わる → 外れにしない
+        "post": [_sweep("2026-10-10T06:00:00Z", 7, [1, 2, 3, 4, 5]),
+                 _sweep("2026-10-10T07:00:00Z", 2, [1])],
+        # 朝は混戦なのにスイープは非混戦（空の帯は部分集合の比較をすり抜ける）
+        "konsen": [_sweep("2026-10-10T06:00:00Z", 7, [1, 2, 3, 4, 5])],
+    }
+    checked, bad = G.morning_fix_violations(by_race, morning)
+    assert checked == 6  # unwatched（スイープ無し）は母数に入れない
+    assert [b[0] for b in bad] == ["flip", "konsen", "newp"]
+    assert dict((b[0], b[2]) for b in bad)["konsen"] == "混戦→非混戦"
+    assert bad[0][2] == "軸 7→2"
+
+
 def test_load_odds_uses_wide_band_midpoint():
     tsv = ("r1\twide\t1-2\t40.8\t43.7\t2026-08-09T09:00:00+00:00\n"
            "r1\tquinella\t1-2\t200.9\t\t2026-08-09T09:00:00+00:00\n")

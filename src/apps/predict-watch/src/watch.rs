@@ -1,14 +1,18 @@
 use std::collections::HashMap;
 
-use chrono::{Duration, NaiveTime, Utc};
+use chrono::{DateTime, Duration, FixedOffset, NaiveDate, NaiveTime, TimeZone, Utc};
 use monitor_loop::{RaceStatus, Sweeper, has_result, run_monitor_loop, warn_if_not_today_jst_now};
 use paddock_domain::{
     HorseNum, PinnedSelection, Portfolio, RECOMMENDED_MARKET_BLEND_ALPHA, Race, RaceClass, RaceId,
     Venue, race_roughness,
 };
-use paddock_use_case::compose_portfolio;
-use paddock_use_case::recorded_axis_of;
-use paddock_use_case::repository::{LiveEvPin, LiveEvRepository, PadPredictionRepository};
+use paddock_use_case::repository::{
+    LiveEvPin, LiveEvRepository, MorningSelection, MorningSelectionRepository,
+    PadPredictionRepository,
+};
+use paddock_use_case::{
+    FixSource, MorningOutcome, compose_portfolio, recorded_axis_of, resolve_fixed_selection,
+};
 use predict_format::{
     PortfolioFormat, coverage_note, format_explanations, format_portfolio, format_probs,
     format_probs_with_market, format_recent_runs_warning,
@@ -215,32 +219,81 @@ struct SweepCtx<'a> {
     /// スイープ開始時に 1 回だけ引いて全レースで使い回す（レースごとに引くと N+1 になる）。
     /// 未評価のレースは不在＝このスイープで選定が確定する。
     pins: &'a HashMap<String, LiveEvPin>,
+    /// 朝の選定（#767）。`race_id` 引き。初回スイープより優先する固定の元。
+    morning: &'a HashMap<String, MorningSelection>,
 }
 
-/// レース 1 件について「何を固定するか」を決める（#601）。
+/// レースが監視窓に入る時刻（UTC）。開催日 `date` の JST `post` から `window` を引いたもの（#767）。
+/// これ以降に保存された単勝は predict-watch 自身の初回スイープの保存なので「朝」と見なさない。
+fn window_entry_utc(date: NaiveDate, post: NaiveTime, window: Duration) -> DateTime<Utc> {
+    let jst = FixedOffset::east_opt(9 * 3600).expect("+09:00 は有効");
+    let post = jst
+        .from_local_datetime(&date.and_time(post))
+        .single()
+        .expect("固定オフセットでは一意に決まる");
+    post.with_timezone(&Utc) - window
+}
+
+/// 評価のときに記録◎（pad）を読むか（#601・#767）。固定の元（初回スイープ・朝の選定）が無いときだけ読む。
+/// 朝の選定は組むときに記録◎ を軸へ強制済みで、保存した後に入った記録◎ は使わない（盤と同じ規則）。
+/// 初回スイープの固定がある間も読まない（その軸に反映済み・毎スイープ引くと N+1）。
+fn reads_recorded_axis(has_first_sweep: bool, has_morning: bool) -> bool {
+    !has_first_sweep && !has_morning
+}
+
+/// 朝の選定を計算するレース（#767）。`(窓に入ったレース, 窓の前のレース)` の添字を返す。
 ///
-/// 優先順:
-/// 1. **記録◎**（pad の Honmei）。CLAUDE.md「軸は事前データで確定」の本来の姿で、盤面 #388 と揃う。
-///    ただし相手・混戦の記録は pad に無いので、固定できるのは軸だけ。
-/// 2. **その日の初回スイープ**（`live_ev_snapshots` の最古行）。軸・相手・混戦をまとめて固定する。
-/// 3. どちらも無ければ固定なし＝このスイープで選定が決まり、次スイープ以降は 2 が効く。
+/// まだ固定の元（朝の選定・初回スイープ）が無いレースだけが対象。初回スイープで固定済みのレースに
+/// 後から朝の選定を作らない（窓に入った後に固定の元を入れ替えない＝軸フリップ禁止）。
+/// 発走済み・発走時刻不明は対象外。窓に入ったレースは評価の前に、窓の前のレースは評価の後に計算する
+/// （初回スイープの評価を遅らせない）。
 ///
-/// 1 と 2 が両方あるときは **軸だけ 1 で上書き**する。記録◎は人手のハンデ精査（＝ADR 0055 が
-/// エッジと位置づけるもの）の産物で、機械が初回スイープで選んだ軸より優先されるべきため。
-/// 相手・混戦は 2 のまま（pad は相手を持たない）。
-fn resolve_pinned(recorded_axis: Option<HorseNum>, pin: Option<&LiveEvPin>) -> PinnedSelection {
-    let Some(pin) = pin else {
-        return PinnedSelection::axis_only(recorded_axis);
-    };
-    let to_nums = |v: &[u32]| -> Vec<HorseNum> {
-        v.iter()
-            .filter_map(|n| HorseNum::try_from(*n).ok())
-            .collect()
-    };
-    PinnedSelection {
-        axis: recorded_axis.or_else(|| HorseNum::try_from(pin.axis).ok()),
-        partners: Some(to_nums(&pin.partners)),
-        konsen_band: Some(to_nums(&pin.konsen_band)),
+/// 初回スイープの固定を読めなかったスイープ（`pins_loaded == false`）では何も計算しない。固定済みかを
+/// 判断できず、T-40 で固定したレースに朝の選定を後から作ってしまうため（次のスイープでやり直す）。
+fn morning_targets(
+    race_ids: &[&str],
+    statuses: &[RaceStatus],
+    pins_loaded: bool,
+    is_fixed: impl Fn(&str) -> bool,
+) -> (Vec<usize>, Vec<usize>) {
+    let mut due = Vec::new();
+    if !pins_loaded {
+        return (due, Vec::new());
+    }
+    let mut later = Vec::new();
+    for (i, (id, st)) in race_ids.iter().zip(statuses).enumerate() {
+        if is_fixed(id) {
+            continue;
+        }
+        match st {
+            RaceStatus::Due => due.push(i),
+            RaceStatus::NotYet => later.push(i),
+            RaceStatus::Started | RaceStatus::Unknown => {}
+        }
+    }
+    (due, later)
+}
+
+/// 1 スイープで朝の選定を計算した結果の件数（ログ用・#767）。
+#[derive(Default)]
+struct MorningTally {
+    saved: usize,
+    no_snapshot: usize,
+    too_late: usize,
+    not_composable: usize,
+    failed: usize,
+}
+
+impl MorningTally {
+    fn line(&self) -> Option<String> {
+        let attempted =
+            self.saved + self.no_snapshot + self.too_late + self.not_composable + self.failed;
+        (attempted > 0).then(|| {
+            format!(
+                "   朝の選定（#767）: 確定 {} / 朝の単勝待ち {} / 窓に入った後の単勝しか無い {}（T-40 で固定）/ 組めず {} / 失敗 {}",
+                self.saved, self.no_snapshot, self.too_late, self.not_composable, self.failed
+            )
+        })
     }
 }
 
@@ -262,14 +315,9 @@ fn nums(v: &[HorseNum]) -> String {
         .join(",")
 }
 
-/// 固定の適用状況を 1 行で出す（#601）。**固定されていないことも読めるようにする**のが要点で、
-/// 従来のログは選定が毎回作り直されている事実がどこにも出ていなかった。
-fn print_pin_status(
-    label: &str,
-    pinned: &PinnedSelection,
-    pin: Option<&LiveEvPin>,
-    recorded_axis: Option<HorseNum>,
-) {
+/// 固定の適用状況を 1 行で出す（#601・#767 で出所に朝を追加）。**固定されていないことも読めるようにする**
+/// のが要点で、従来のログは選定が毎回作り直されている事実がどこにも出ていなかった。
+fn print_pin_status(label: &str, pinned: &PinnedSelection, source: &FixSource) {
     if pinned.is_empty() {
         println!("  🆕 {label}: このスイープで買い目を確定（以降のスイープでは固定）");
         return;
@@ -279,11 +327,24 @@ fn print_pin_status(
         .map(|a| a.value().to_string())
         .unwrap_or_else(|| "-".to_string());
     let partners = pinned.partners.as_deref().map(nums).unwrap_or_default();
-    let source = match (recorded_axis.is_some(), pin) {
-        (true, Some(p)) => format!("記録◎ ＋ 初回スイープ {}", jst_hhmm(&p.captured_at)),
-        (true, None) => "記録◎".to_string(),
-        (false, Some(p)) => format!("初回スイープ {}", jst_hhmm(&p.captured_at)),
-        (false, None) => "固定なし".to_string(),
+    let with_recorded = |recorded: bool, base: String| {
+        if recorded {
+            format!("記録◎ ＋ {base}")
+        } else {
+            base
+        }
+    };
+    let source = match source {
+        FixSource::None => "固定なし".to_string(),
+        FixSource::RecordedAxis => "記録◎".to_string(),
+        FixSource::Morning {
+            odds_fetched_at,
+            recorded,
+        } => with_recorded(*recorded, format!("朝 {}", jst_hhmm(odds_fetched_at))),
+        FixSource::FirstSweep {
+            captured_at,
+            recorded,
+        } => with_recorded(*recorded, format!("初回スイープ {}", jst_hhmm(captured_at))),
     };
     let konsen = match pinned.konsen_band.as_deref() {
         Some(b) if b.len() >= 4 => format!(" 混戦[{}]", nums(b)),
@@ -490,6 +551,7 @@ async fn evaluate_race(
         blend_alpha,
         race_budget_overrides,
         pins,
+        morning,
     } = ctx;
     let rid = &slot.race.race_id;
     let label = race_label(slot);
@@ -562,15 +624,15 @@ async fn evaluate_race(
         println!("    {line}");
     }
 
-    // 3) 買い目選定の固定（#601 軸ロック）。rank_probs（市場ブレンド α=0.2）は市場 odds を含むため、
-    //    固定しないとスイープごとに軸・相手・混戦判定が動く（実測 154R 中 60% しか終日一定でなかった）。
-    //    記録◎（pad）は pin がまだ無いときだけ引く——pin があるならその軸に既に反映済みで、
-    //    毎スイープ引くと Due レース数ぶんの N+1 になるため。
+    // 3) 買い目選定の固定（#601 軸ロック・#767 で朝の選定を優先）。rank_probs（市場ブレンド α=0.2）は
+    //    市場 odds を含むため、固定しないとスイープごとに軸・相手・混戦判定が動く（実測 154R 中 60% しか
+    //    終日一定でなかった）。記録◎（pad）は固定の元（朝の選定・初回スイープ）がまだ無いときだけ引く
+    //    ——あればその軸に既に反映済みで（朝の選定は記録◎ を軸に強制して組む）、毎スイープ引くと
+    //    Due レース数ぶんの N+1 になるため。
     let pin = pins.get(rid.value());
-    let recorded_axis = match pin {
-        Some(_) => None,
-        None => app
-            .interactor
+    let morning_sel = morning.get(rid.value());
+    let recorded_axis = if reads_recorded_axis(pin.is_some(), morning_sel.is_some()) {
+        app.interactor
             .repository
             .find_pad_prediction(cli.date, slot.race.venue, slot.race.race_num)
             .await
@@ -581,10 +643,12 @@ async fn evaluate_race(
             })
             .as_ref()
             .and_then(|pad| recorded_axis_of(Some(pad), &views.blended))
-            .and_then(|n| HorseNum::try_from(n).ok()),
+            .and_then(|n| HorseNum::try_from(n).ok())
+    } else {
+        None
     };
-    let pinned = resolve_pinned(recorded_axis, pin);
-    print_pin_status(&label, &pinned, pin, recorded_axis);
+    let (pinned, source) = resolve_fixed_selection(recorded_axis, morning_sel, pin);
+    print_pin_status(&label, &pinned, &source);
 
     // 4) 市場EV視点: 軸/相手は blended（固定があればそれを優先）、EV/的中は pure（循環断ち, #272）。
     let portfolio = compose_portfolio(&views, &odds, race_budget, &pinned);
@@ -708,6 +772,44 @@ struct WatchSweeper<'a> {
 }
 
 impl WatchSweeper<'_> {
+    /// `targets`（slots の添字）の朝の選定を計算・保存し、`morning` に足す（#767）。
+    /// 1 レースの失敗では止めない。判断は `ensure_morning_selection` と `morning_targets` にあり、
+    /// ここは呼び出しと集計だけ。
+    async fn compute_morning(
+        &self,
+        slots: &[Slot],
+        targets: &[usize],
+        captured_at: &str,
+        morning: &mut HashMap<String, MorningSelection>,
+        tally: &mut MorningTally,
+    ) {
+        for &i in targets {
+            let slot = &slots[i];
+            // Due / NotYet は post_time を持つ（無ければ Unknown）
+            let Some(post) = slot.post_time else { continue };
+            let label = race_label(slot);
+            let entry = window_entry_utc(self.cli.date, post, self.window);
+            match self
+                .app
+                .interactor
+                .ensure_morning_selection(&slot.race.race_id, self.cli.date, entry, captured_at)
+                .await
+            {
+                Ok(MorningOutcome::Ready(sel)) => {
+                    tally.saved += 1;
+                    morning.insert(sel.race_id.clone(), sel);
+                }
+                Ok(MorningOutcome::NoSnapshot) => tally.no_snapshot += 1,
+                Ok(MorningOutcome::TooLate { .. }) => tally.too_late += 1,
+                Ok(MorningOutcome::NotComposable) => tally.not_composable += 1,
+                Err(e) => {
+                    tally.failed += 1;
+                    println!("  {label}: 朝の選定の計算に失敗（初回スイープの固定で続ける）: {e}");
+                }
+            }
+        }
+    }
+
     /// 閾値を通過した評価を macOS 通知で人に届ける（#584）。発火判定は `pick_notifications`、
     /// 配送ループと状態遷移は `deliver_all`、配送そのものは `send_with_deadline` に委譲する。
     ///
@@ -811,6 +913,7 @@ impl Sweeper for WatchSweeper<'_> {
         // 買い目選定の固定（#601）: その日の初回スイープの選定を **1 スイープにつき 1 回**引く
         // （レースごとに引くと Due レース数ぶんの N+1 になる）。取得に失敗しても監視は止めず、
         // 固定なし＝従来どおりライブ選定へ縮退する（ただしその事実はログに残す）。
+        let mut pins_loaded = true;
         let pins: HashMap<String, LiveEvPin> = match self
             .app
             .interactor
@@ -821,22 +924,60 @@ impl Sweeper for WatchSweeper<'_> {
             Ok(v) => v.into_iter().map(|p| (p.race_id.clone(), p)).collect(),
             Err(e) => {
                 println!(
-                    "⚠ 買い目固定の読み出しに失敗しました（このスイープは固定なしで評価します）: {e}"
+                    "⚠ 買い目固定の読み出しに失敗しました（このスイープは固定なしで評価し、朝の選定も計算しません）: {e}"
+                );
+                pins_loaded = false;
+                HashMap::new()
+            }
+        };
+        // 朝の選定（#767）も 1 スイープにつき 1 回引く。失敗しても監視は止めず、初回スイープの固定へ縮退する。
+        let mut morning: HashMap<String, MorningSelection> = match self
+            .app
+            .interactor
+            .repository
+            .find_morning_selections_by_date(self.cli.date)
+            .await
+        {
+            Ok(v) => v.into_iter().map(|m| (m.race_id.clone(), m)).collect(),
+            Err(e) => {
+                println!(
+                    "⚠ 朝の選定の読み出しに失敗しました（このスイープは初回スイープの固定で評価します）: {e}"
                 );
                 HashMap::new()
             }
         };
+        let ids: Vec<&str> = slots.iter().map(|s| s.race.race_id.value()).collect();
+        let (due_targets, later_targets) = morning_targets(&ids, statuses, pins_loaded, |id| {
+            pins.contains_key(id) || morning.contains_key(id)
+        });
+        let mut tally = MorningTally::default();
+        // 窓に入ったレースは評価の前に計算する（このスイープの評価から朝の選定で固定する）
+        self.compute_morning(slots, &due_targets, &captured_at, &mut morning, &mut tally)
+            .await;
         let ctx = SweepCtx {
             cli: self.cli,
             notify_gate: self.notify_gate,
             blend_alpha: self.blend_alpha,
             race_budget_overrides: &self.race_budget_overrides,
             pins: &pins,
+            morning: &morning,
         };
         let evaluations = sweep(self.app, slots, statuses, now, &captured_at, ctx).await;
-        // 判定をログに埋もれさせず人に届ける（#584）。スイープの最後にまとめて出すことで、
-        // 通知行が各レースの買い目出力に挟まれて流れるのを防ぐ。
+        // 判定をログに埋もれさせず人に届ける（#584）。評価の直後に出し、窓の前のレースの朝の計算
+        // （起動直後は全レース分で数十秒かかりうる）で通知を遅らせない。
         self.deliver_notifications(evaluations).await;
+        // 窓の前のレースは評価と通知の後に計算する（初回スイープの評価と通知を遅らせない）
+        self.compute_morning(
+            slots,
+            &later_targets,
+            &captured_at,
+            &mut morning,
+            &mut tally,
+        )
+        .await;
+        if let Some(line) = tally.line() {
+            println!("{line}");
+        }
     }
 }
 
@@ -935,63 +1076,73 @@ pub async fn run(app: &App, cli: &Cli) -> anyhow::Result<()> {
 mod tests {
     use super::*;
 
-    fn pin(axis: u32, partners: &[u32], band: &[u32]) -> LiveEvPin {
-        LiveEvPin {
-            race_id: "202602020611".to_string(),
-            axis,
-            partners: partners.to_vec(),
-            konsen_band: band.to_vec(),
-            captured_at: "2026-08-09T00:15:03Z".to_string(),
-        }
-    }
+    // 固定の優先順（朝の選定 → 初回スイープ → 記録◎ の軸だけ → なし）は use-case の `resolve_fixed_selection` の
+    // テストが持つ（盤と共有するため）。ここは predict-watch に残る判断だけを見る。
 
-    fn hn(n: u32) -> HorseNum {
-        HorseNum::try_from(n).unwrap()
-    }
-
-    /// 固定が無い（その日の初回スイープ）ときは何も固定しない＝このスイープで選定が決まる。
     #[test]
-    fn resolve_pinned_is_empty_on_first_sweep() {
-        assert!(resolve_pinned(None, None).is_empty());
-    }
-
-    /// pin があれば軸・相手・混戦の 3 つとも固定する。
-    #[test]
-    fn resolve_pinned_takes_all_three_from_pin() {
-        let p = pin(6, &[3, 8, 11], &[3, 6, 8, 11]);
-        let got = resolve_pinned(None, Some(&p));
-        assert_eq!(got.axis, Some(hn(6)));
-        assert_eq!(got.partners, Some(vec![hn(3), hn(8), hn(11)]));
-        assert_eq!(got.konsen_band, Some(vec![hn(3), hn(6), hn(8), hn(11)]));
-    }
-
-    /// 記録◎（人手のハンデ精査の産物）は初回スイープの機械軸より優先する。
-    /// ただし相手・混戦は pin のまま——pad は相手を持たないため。
-    #[test]
-    fn resolve_pinned_prefers_recorded_axis_over_pin_axis() {
-        let p = pin(6, &[3, 8, 11], &[]);
-        let got = resolve_pinned(Some(hn(8)), Some(&p));
-        assert_eq!(got.axis, Some(hn(8)), "記録◎が優先される");
+    fn window_entry_is_post_time_minus_window_in_utc() {
+        let d = NaiveDate::from_ymd_opt(2026, 10, 10).unwrap();
+        let post = NaiveTime::from_hms_opt(15, 40, 0).unwrap();
+        // JST 15:40 − 40 分 = JST 15:00 = UTC 06:00
         assert_eq!(
-            got.partners,
-            Some(vec![hn(3), hn(8), hn(11)]),
-            "相手は pin のまま（pad は相手を持たない）"
+            window_entry_utc(d, post, Duration::minutes(40)).to_rfc3339(),
+            "2026-10-10T06:00:00+00:00"
+        );
+        // 午前 0 時台の発走は前日の UTC になる
+        let early = NaiveTime::from_hms_opt(0, 30, 0).unwrap();
+        assert_eq!(
+            window_entry_utc(d, early, Duration::minutes(40)).to_rfc3339(),
+            "2026-10-09T14:50:00+00:00"
         );
     }
 
-    /// pin が無く記録◎だけあるときは軸だけ固定する（盤面 #388 と同じ形）。
     #[test]
-    fn resolve_pinned_with_recorded_axis_only_pins_axis() {
-        let got = resolve_pinned(Some(hn(4)), None);
-        assert_eq!(got.axis, Some(hn(4)));
-        assert!(got.partners.is_none() && got.konsen_band.is_none());
+    fn morning_targets_skip_fixed_and_finished_races() {
+        let ids = ["r1", "r2", "r3", "r4", "r5", "r6"];
+        let statuses = [
+            RaceStatus::Due,     // r1: 窓内・未固定 → 評価の前に計算
+            RaceStatus::Due,     // r2: 窓内だが初回スイープで固定済み → 計算しない
+            RaceStatus::NotYet,  // r3: 窓の前・未固定 → 評価の後に計算
+            RaceStatus::NotYet,  // r4: 窓の前だが朝の選定がある → 計算しない
+            RaceStatus::Started, // r5: 発走済み
+            RaceStatus::Unknown, // r6: 発走時刻不明
+        ];
+        let (due, later) = morning_targets(&ids, &statuses, true, |id| id == "r2" || id == "r4");
+        assert_eq!(due, vec![0]);
+        assert_eq!(later, vec![2]);
+        // 初回スイープの固定を読めなかったスイープでは何も計算しない
+        let (due, later) = morning_targets(&ids, &statuses, false, |_| false);
+        assert!(due.is_empty() && later.is_empty());
     }
 
-    /// 非混戦だった初回スイープは空 band で固定される（＝混戦へ反転しない）。
     #[test]
-    fn resolve_pinned_keeps_non_konsen_as_empty_band() {
-        let got = resolve_pinned(None, Some(&pin(6, &[3, 8], &[])));
-        assert_eq!(got.konsen_band, Some(Vec::new()), "空 band＝非混戦で固定");
+    fn recorded_axis_is_read_only_without_any_fix() {
+        assert!(reads_recorded_axis(false, false));
+        assert!(
+            !reads_recorded_axis(true, false),
+            "初回スイープの軸に反映済み"
+        );
+        assert!(
+            !reads_recorded_axis(false, true),
+            "朝の選定の後の記録◎ は使わない"
+        );
+        assert!(!reads_recorded_axis(true, true));
+    }
+
+    #[test]
+    fn morning_tally_is_silent_when_nothing_was_attempted() {
+        assert_eq!(MorningTally::default().line(), None);
+        let t = MorningTally {
+            saved: 2,
+            too_late: 1,
+            ..MorningTally::default()
+        };
+        let line = t.line().unwrap();
+        assert!(line.contains("確定 2"), "{line}");
+        assert!(
+            line.contains("窓に入った後の単勝しか無い 1（T-40 で固定）"),
+            "{line}"
+        );
     }
 
     #[test]

@@ -1990,6 +1990,56 @@
           }
         }
       },
+      "FixedSelectionSchema": {
+        "type": "object",
+        "description": "盤の買い目を固定した朝の選定（#767・軸ロック REQ-D01-003）。\n\npredict-watch が、監視窓に入る前の「朝」の単勝スナップショット（当日 JST 0 時以降で最初の単勝）から\n組んで保存した選定。盤の買い目（`axis` / `partners` / `bets`）はこれで固定して組む。\n`RaceBoardResponse.morning_at`（#448・最初に全券種がそろった時点の朝↔現比較）とは別の「朝」。",
+        "required": [
+          "axis",
+          "partners",
+          "konsen_band",
+          "scratched",
+          "odds_fetched_at"
+        ],
+        "properties": {
+          "axis": {
+            "type": "integer",
+            "format": "int32",
+            "description": "固定した軸＝買い目の `axis`。朝の選定の軸（組むときに記録◎ を強制。保存した後に入った記録◎ は使わない）、\n朝の軸が取消ならライブの首位。",
+            "minimum": 0
+          },
+          "konsen_band": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            },
+            "description": "固定した混戦のボックスの馬番（昇順・軸を含む）。空配列なら混戦ではない。買い目と同じく取消の馬で絞らない。"
+          },
+          "odds_fetched_at": {
+            "type": "string",
+            "description": "選定に使った朝のスナップショットの取得時刻 RFC3339。"
+          },
+          "partners": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            },
+            "description": "固定した相手（昇順）＝買い目の `partners`。取消の馬と軸を除く（補充しない）。"
+          },
+          "scratched": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            },
+            "description": "朝の選定（軸・相手）のうち出走していない馬（昇順）。空配列でなければ、取消で軸や相手が替わった。"
+          }
+        }
+      },
       "GroupStatSchema": {
         "type": "object",
         "description": "あるカテゴリ 1 区分の成績（出走数＋勝/連対/複勝の件数とレート）。",
@@ -2981,7 +3031,7 @@
               "null"
             ],
             "format": "int32",
-            "description": "買い目の軸。記録軸（`recorded_axis`）があればそれに固定、無ければライブ再計算（`live_axis`）。\nただし保存オッズが無い（`odds_available=false`）ときは買い目が組めず `axis=null`\n（`recorded_axis` は残る＝盤の軸ロック表示はオッズ無しでも出る）。",
+            "description": "買い目の軸。朝の固定（`fixed_selection`）→ 記録軸（`recorded_axis`）→ ライブ再計算（`live_axis`）の順。\nただし保存オッズが無い（`odds_available=false`）ときは買い目が組めず `axis=null`\n（`recorded_axis` は残る＝盤の軸ロック表示はオッズ無しでも出る）。",
             "minimum": 0
           },
           "bets": {
@@ -3020,6 +3070,17 @@
             "format": "int32",
             "minimum": 0
           },
+          "fixed_selection": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FixedSelectionSchema",
+                "description": "朝の選定で固定した買い目の構造（#767）。predict-watch が保存した朝の選定が無いレースは `null`\n（そのときの買い目は記録軸だけを固定し、相手・混戦はライブ再計算）。"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "group_venues": {
             "type": "array",
             "items": {
@@ -3046,7 +3107,7 @@
               "null"
             ],
             "format": "int32",
-            "description": "ライブ再計算の軸＝市場ブレンド首位（機械◎）。`recorded_axis` と異なるとき UI は乖離警告を出す（#388）。",
+            "description": "ライブ再計算の軸＝市場ブレンド首位（機械◎）。固定した軸（`fixed_selection.axis`、無ければ `recorded_axis`）と\n異なるとき UI は乖離警告を出す（#388・#767）。",
             "minimum": 0
           },
           "morning_at": {
@@ -3135,7 +3196,7 @@
               "null"
             ],
             "format": "int32",
-            "description": "predict 記録済みの本命◎（軸ロックの正, #388）。未 predict・取消時は `null`。\n`axis` はこれがあればこれに一致する（買い目軸を記録軸に固定する）。",
+            "description": "predict 記録済みの本命◎（軸ロックの正, #388）。未 predict・取消時は `null`。\n朝の固定（`fixed_selection`）が無いときに限り、`axis` はこれに一致する（買い目軸を記録軸に固定する）。\n朝の固定があるレースでは、朝の選定を保存した後に入った記録◎ は使わないので `axis` と一致しないことがある（#767）。",
             "minimum": 0
           },
           "result_confirmed": {

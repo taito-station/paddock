@@ -295,6 +295,26 @@ pub struct ConfusionSchema {
     pub qualifying_count: u32,
 }
 
+/// 盤の買い目を固定した朝の選定（#767・軸ロック REQ-D01-003）。
+///
+/// predict-watch が、監視窓に入る前の「朝」の単勝スナップショット（当日 JST 0 時以降で最初の単勝）から
+/// 組んで保存した選定。盤の買い目（`axis` / `partners` / `bets`）はこれで固定して組む。
+/// `RaceBoardResponse.morning_at`（#448・最初に全券種がそろった時点の朝↔現比較）とは別の「朝」。
+#[derive(Debug, Serialize, ToSchema)]
+pub struct FixedSelectionSchema {
+    /// 固定した軸＝買い目の `axis`。朝の選定の軸（組むときに記録◎ を強制。保存した後に入った記録◎ は使わない）、
+    /// 朝の軸が取消ならライブの首位。
+    pub axis: u32,
+    /// 固定した相手（昇順）＝買い目の `partners`。取消の馬と軸を除く（補充しない）。
+    pub partners: Vec<u32>,
+    /// 固定した混戦のボックスの馬番（昇順・軸を含む）。空配列なら混戦ではない。買い目と同じく取消の馬で絞らない。
+    pub konsen_band: Vec<u32>,
+    /// 朝の選定（軸・相手）のうち出走していない馬（昇順）。空配列でなければ、取消で軸や相手が替わった。
+    pub scratched: Vec<u32>,
+    /// 選定に使った朝のスナップショットの取得時刻 RFC3339。
+    pub odds_fetched_at: String,
+}
+
 /// 盤の 1 頭分（全頭 truncate せず返す）。
 #[derive(Debug, Serialize, ToSchema)]
 pub struct BoardHorseSchema {
@@ -410,14 +430,19 @@ pub struct RaceBoardResponse {
     pub race_class: Option<String>,
     /// 保存オッズ（#51）の有無。false のとき `bets` は必ず空。
     pub odds_available: bool,
-    /// 買い目の軸。記録軸（`recorded_axis`）があればそれに固定、無ければライブ再計算（`live_axis`）。
+    /// 買い目の軸。朝の固定（`fixed_selection`）→ 記録軸（`recorded_axis`）→ ライブ再計算（`live_axis`）の順。
     /// ただし保存オッズが無い（`odds_available=false`）ときは買い目が組めず `axis=null`
     /// （`recorded_axis` は残る＝盤の軸ロック表示はオッズ無しでも出る）。
     pub axis: Option<u32>,
     /// predict 記録済みの本命◎（軸ロックの正, #388）。未 predict・取消時は `null`。
-    /// `axis` はこれがあればこれに一致する（買い目軸を記録軸に固定する）。
+    /// 朝の固定（`fixed_selection`）が無いときに限り、`axis` はこれに一致する（買い目軸を記録軸に固定する）。
+    /// 朝の固定があるレースでは、朝の選定を保存した後に入った記録◎ は使わないので `axis` と一致しないことがある（#767）。
     pub recorded_axis: Option<u32>,
-    /// ライブ再計算の軸＝市場ブレンド首位（機械◎）。`recorded_axis` と異なるとき UI は乖離警告を出す（#388）。
+    /// 朝の選定で固定した買い目の構造（#767）。predict-watch が保存した朝の選定が無いレースは `null`
+    /// （そのときの買い目は記録軸だけを固定し、相手・混戦はライブ再計算）。
+    pub fixed_selection: Option<FixedSelectionSchema>,
+    /// ライブ再計算の軸＝市場ブレンド首位（機械◎）。固定した軸（`fixed_selection.axis`、無ければ `recorded_axis`）と
+    /// 異なるとき UI は乖離警告を出す（#388・#767）。
     pub live_axis: Option<u32>,
     pub partners: Vec<u32>,
     pub bets: Vec<RecommendationBet>,
@@ -510,6 +535,13 @@ impl From<RaceBoard> for RaceBoardResponse {
             odds_available,
             axis,
             recorded_axis: b.recorded_axis,
+            fixed_selection: b.fixed_selection.map(|f| FixedSelectionSchema {
+                axis: f.axis,
+                partners: f.partners,
+                konsen_band: f.konsen_band,
+                odds_fetched_at: f.odds_fetched_at,
+                scratched: f.scratched,
+            }),
             live_axis: b.live_axis,
             partners,
             bets,

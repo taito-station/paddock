@@ -5,6 +5,7 @@
 
 pub mod fetch;
 pub mod live;
+pub mod morning;
 pub mod odds;
 pub mod race;
 pub mod session;
@@ -13,6 +14,7 @@ pub mod stats;
 pub use fetch::HorseHistoryRepository;
 pub use fetch::{FetchDownload, FetchFailure, FetchRecord, FetchRepository, FetchStatus};
 pub use live::{LiveEvPin, LiveEvRepository, LiveEvSnapshot, LiveEvSnapshotRecord, SlipLegRecord};
+pub use morning::{MorningSelection, MorningSelectionRepository};
 pub use odds::{
     MorningRaceOdds, OddsRepository, OddsRow, RaceOddsRecord, SnapshotOdds, SnapshotPoint,
     UnpricedObservation,
@@ -43,6 +45,7 @@ pub trait Repository:
     + PredictSessionRepository
     + PadPredictionRepository
     + LiveEvRepository
+    + MorningSelectionRepository
     + RaceResultRepository
 {
 }
@@ -58,6 +61,7 @@ impl<T> Repository for T where
         + PredictSessionRepository
         + PadPredictionRepository
         + LiveEvRepository
+        + MorningSelectionRepository
         + RaceResultRepository
 {
 }
