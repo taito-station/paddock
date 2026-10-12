@@ -11,7 +11,7 @@ sources:
   - knowledge/web-spa.md
   - knowledge/rest-api-read.md
   - knowledge/prediction-search-api.md
-distilled_from_sha: "1ac71c1"
+distilled_from_sha: "47b12b7"
 updated: "2026-07-22"
 ---
 
