@@ -207,13 +207,34 @@ FETCH_PAUSE_SEC_STR="$((FETCH_INTERVAL_MS / 1000)).$(printf '%03d' $((FETCH_INTE
 # 黙って機能停止してもログ上は正常に見えてしまう（Reviewer 指摘）。
 SELECT_ARGS=(--window-min "$WINDOW_MIN")
 [ -n "$AT" ] && SELECT_ARGS+=(--at "$AT")
-if ! SELECTED="$(PADDOCK_DB_URL="$DB_URL" PYTHONPATH="$SCRIPT_DIR" \
-      python3 "$SCRIPT_DIR/upcoming_races_db.py" "$DATE" "${SELECT_ARGS[@]}")"; then
-  # 失敗要因は DB 接続不可・クエリ失敗のほか、暦上不正な日付（python 側 valid_date が弾く）も
-  # ありうるため、原因を断定しない中立な文言にする（「対象0件」とは区別して必ず中断する）。
-  log "レース選択コマンドに失敗（DB 接続不可・日付不正・クエリ失敗等）。中断する。"
+# 選択の stderr は一度ファイルに受け、失敗のときだけ本体ログへ写す（成功時の件数行で 5 分毎にログを
+# 膨らませない）。launchd の err ログは /tmp で消え、2026-08〜09 の 6,063 回の失敗は原因が残らなかった（#774）。
+# ファイルは 1 実行ごとに mktemp（O_EXCL・0600）で作り、読んだらすぐ消す。WORKDIR（launchd では /tmp 直下の
+# 固定パス）に置くと、他ユーザーの先回り・symlink で別ファイルを上書きされうる（lock の #651 と同じ脅威）うえ、
+# 手動の dry-run と launchd の実行が同じファイルを取り合う（選択は lock より前に走る）。
+if ! SELECT_ERR="$(mktemp "${TMPDIR:-/tmp}/paddock-prefetch-select.XXXXXX")"; then
+  log "レース選択の stderr を受ける一時ファイルを作れません（${TMPDIR:-/tmp}）。中断する。"
   exit 1
 fi
+if ! SELECTED="$(PADDOCK_DB_URL="$DB_URL" PYTHONPATH="$SCRIPT_DIR" \
+      python3 "$SCRIPT_DIR/upcoming_races_db.py" "$DATE" "${SELECT_ARGS[@]}" 2>"$SELECT_ERR")"; then
+  cat "$SELECT_ERR" >&2 || true
+  # 日付で集計・grep できるよう、1 行ずつ log の時刻を付けて本体ログへ写す（端末側は上の cat で出した）。
+  while IFS= read -r line || [ -n "$line" ]; do
+    log "  選択の stderr: $line" > /dev/null
+  done < "$SELECT_ERR"
+  rm -f "$SELECT_ERR"
+  # 失敗要因は DB 接続不可・クエリ失敗のほか、暦上不正な日付（python 側 valid_date が弾く）も
+  # ありうるため、原因を断定しない中立な文言にする（「対象0件」とは区別して必ず中断する）。
+  # launchd の PATH で解決した python3 と、その実体・版も残す（2026-08 は zoneinfo の無い python3 で毎回
+  # 落ちていた #774）。command -v は pyenv の shim なども返すので、実体は sys.executable で取る。
+  # python3 自体が無い場合は、上の取得間隔の読み取りで先に止まっている。
+  PY_INFO="$(python3 -c 'import sys; print(sys.executable, sys.version.split()[0])' 2>&1 | head -n 1 || true)"
+  log "レース選択コマンドに失敗（DB 接続不可・日付不正・クエリ失敗等）。中断する。（python3: $(command -v python3) → ${PY_INFO}）"
+  exit 1
+fi
+cat "$SELECT_ERR" >&2 || true
+rm -f "$SELECT_ERR"
 PIDS=()
 while IFS= read -r line; do
   [ -n "$line" ] && PIDS+=("$line")

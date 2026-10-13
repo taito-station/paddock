@@ -71,7 +71,7 @@ def fetch_rows(date: str, db_url: str):
         rows = pgq.query(sql, url=db_url, variables={"date": date})
     except pgq.PsqlError as e:
         # 無人運用（launchd/cron）での停止時に根因（connection refused 等）が消えないよう、
-        # psql の stderr を呼び出し側の stderr（launchd.err.log）へ転記してから非0終了する。
+        # psql の stderr を呼び出し側の stderr へ転記してから非0終了する（prefetch_odds.sh が失敗時に本体ログへ写す #774）。
         # stdout には何も出さない（prefetch_odds.sh は stdout を race_id 列として読む）。
         # psql を起動する前の失敗（psql 不在・URL 形式不正など）は stderr が空なので、理由を終了文言に載せる
         # （PsqlError の文言はパスワードを含まない）。

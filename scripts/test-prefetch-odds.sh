@@ -63,7 +63,7 @@ mkdir -p "$STUB"
 
 # prefetch_odds.sh が PATH 経由で使う外部コマンドだけを張る（flock は**わざと張らない**）。
 # bash / env はスクリプト本体とスタブの shebang を解決するために要る。
-for c in bash env date tee mkdir find rmdir id dirname sleep; do
+for c in bash env date tee mkdir find rmdir id dirname sleep cat head mktemp rm; do
   p="$(command -v "$c")" || { echo "前提コマンドが無い: $c" >&2; exit 2; }
   # **絶対パスであることを確かめる**。`command -v` は関数・エイリアス・ビルトインでは名前だけを
   # 返すので、そのまま `ln -s` すると自分自身を指す壊れた symlink になり、スタブは exit 127 を
@@ -84,18 +84,23 @@ export REAL_PYTHON3
 # 本体を変えたらここも変える（一致しないと間隔のケースが全部落ちて気づける）。
 EXPECTED_PAUSE_CODE='import sys; sys.path.insert(0, sys.argv[1]); import nk; print(round(nk.FETCH_PAUSE_SEC * 1000))'
 export EXPECTED_PAUSE_CODE
+# 選択に失敗したとき、python3 の実体と版を記録するコード（#774）。スタブは固定の値を返す。
+EXPECTED_PYINFO_CODE='import sys; print(sys.executable, sys.version.split()[0])'
+export EXPECTED_PYINFO_CODE
 
 cat > "$STUB/python3" <<'EOS'
 #!/usr/bin/env bash
-# prefetch_odds.sh の python3 呼び出しは 3 種類ある。
+# prefetch_odds.sh の python3 呼び出しは 4 種類ある。
 #   1) upcoming_races_db.py <DATE> --window-min N [--at HH:MM]  … 対象レース選択
 #   2) - <race_id>（heredoc をスクリプトとして読む）             … nk_id 変換
 #   3) -c <code> <dir>                                          … 取得間隔（nk.FETCH_PAUSE_SEC をミリ秒で）
+#   4) -c <code>                                                … 選択に失敗したときの実体・版の記録（#774）
 # 1 は固定の race_id を返し、2 は失敗させて実 fetch へ進ませない。3 は本物の python3 に渡す
 # （FAKE_PAUSE_OUT があればその文字列を返し、単位の取り違え・下限未満を再現する）。
 # 本物に渡すのは取得間隔を読むコード（prefetch_odds.sh と完全一致）だけ。別の `-c` 呼び出しが増えても
-# 素通しで実取得へ進まないよう、それ以外は失敗させる。
+# 素通しで実取得へ進まないよう、それ以外は失敗させる。4 は固定の実体・版を返す。
 if [ "${1-}" = "-c" ]; then
+  if [ "${2-}" = "$EXPECTED_PYINFO_CODE" ]; then echo "/stub/real-python3 0.0.774"; exit 0; fi
   if [ "${2-}" != "$EXPECTED_PAUSE_CODE" ]; then
     echo "python3 -c: テストスタブは想定外のコードを実行しない" >&2; exit 1
   fi
@@ -106,6 +111,17 @@ if [ "${1-}" = "-" ]; then
   echo "nk_id: テストスタブは変換しない" >&2
   exit 1
 fi
+# 1 は upcoming_races_db.py の呼び出しに限る（python3 の呼び出しが増えたら素通しで選択扱いにしない）
+case "${1-}" in
+  */upcoming_races_db.py) ;;
+  *) echo "python3: テストスタブは想定外の呼び出しを実行しない: ${1-}" >&2; exit 1 ;;
+esac
+# 1 の失敗（FAKE_SELECT_FAIL=1）は 2026-08 の実例と同じ import エラーを stderr に出す（#774）
+if [ -n "${FAKE_SELECT_FAIL-}" ]; then
+  echo "ModuleNotFoundError: No module named 'zoneinfo'" >&2
+  exit 1
+fi
+echo "# stub races" >&2
 printf '%s\n' "${FAKE_RACE_IDS:-2026-3-tokyo-5-6R}"
 EOS
 chmod +x "$STUB/python3"
@@ -119,6 +135,7 @@ run_prefetch() {
   local name="$1"; shift
   local d="$TESTROOT/case-$name"
   local out rc
+  mkdir -p "$d/tmp"
   out="$(PATH="${RUN_PATH:-$STUB}" \
     PADDOCK_PREFETCH_LOCK="$d/new.lock" \
     PADDOCK_PREFETCH_LOCK_DIR="$d/new.lock.d" \
@@ -126,9 +143,12 @@ run_prefetch() {
     PADDOCK_PREFETCH_LEGACY_LOCK_DIR="$d/legacy.lock.d" \
     PADDOCK_PREFETCH_LOG="$d/prefetch.log" \
     WORKDIR="$d/work" \
+    TMPDIR="$d/tmp" \
     PADDOCK_DB_URL="postgres://p:p@127.0.0.1:1/paddock" \
     FAKE_RACE_IDS="${FAKE_RACE_IDS:-2026-3-tokyo-5-6R}" \
     REAL_PYTHON3="$REAL_PYTHON3" EXPECTED_PAUSE_CODE="$EXPECTED_PAUSE_CODE" FAKE_PAUSE_OUT="${FAKE_PAUSE_OUT-}" \
+    EXPECTED_PYINFO_CODE="$EXPECTED_PYINFO_CODE" \
+    FAKE_SELECT_FAIL="${FAKE_SELECT_FAIL-}" \
     bash "$SCRIPT" --date 2026-08-22 "$@" 2>&1)"
   rc=$?
   printf '%s' "$out"
@@ -308,6 +328,55 @@ if [ "$intervals" = '--interval "$FETCH_INTERVAL_MS"' ] && [ "$sleeps" = 'sleep 
   ok "fetch-card --interval とレース間の sleep は読んだ値だけを使う"
 else
   ng "fetch-card --interval とレース間の sleep は読んだ値だけを使う" "interval=[$intervals] sleep=[$sleeps]"
+fi
+
+echo "=== レース選択の失敗の記録（#774） ==="
+
+# --- 選択 1. 失敗したら python の stderr と使った python3 を本体ログに残して非 0 で止まる ---
+# launchd の err ログ（/tmp）は消えるので、本体ログだけで原因を追えることを確かめる。
+# stderr の行は時刻付きで、失敗の行より前に並ぶ（文書が「直前の行」を見るよう案内している）。
+d="$(case_dir select-fail)"
+out="$(FAKE_SELECT_FAIL=1 run_prefetch select-fail --dry-run)"; rc=$?
+logf="$d/prefetch.log"
+err_no="$(grep -n "^\[.*\]   選択の stderr: ModuleNotFoundError: No module named 'zoneinfo'" "$logf" | head -n 1 | cut -d: -f1)"
+fail_no="$(grep -n 'レース選択コマンドに失敗' "$logf" | head -n 1 | cut -d: -f1)"
+if [ "$rc" -ne 0 ] && [ -n "$err_no" ] && [ -n "$fail_no" ] && [ "$err_no" -lt "$fail_no" ] \
+   && grep -qF "python3: $STUB/python3 → /stub/real-python3 0.0.774" "$logf" \
+   && ! grep -q '\[dry-run\] 対象' <<<"$out"; then
+  ok "選択の失敗 → 時刻付きの stderr と python3 の実体・版を本体ログに残して止まる"
+else
+  ng "選択の失敗 → 時刻付きの stderr と python3 の実体・版を本体ログに残して止まる" "rc=$rc / log=$(cat "$logf" 2>/dev/null)"
+fi
+# 一時ファイルは 1 実行ごとに作って消す（共有の固定パスに残さない・先回りされない）。
+if [ -z "$(ls -A "$d/tmp")" ] && [ ! -e "$d/work/select.err" ]; then
+  ok "選択の失敗 → stderr の一時ファイルを残さない"
+else
+  ng "選択の失敗 → stderr の一時ファイルを残さない" "$(ls -A "$d/tmp" "$d/work" 2>&1)"
+fi
+
+# --- 選択 2. 成功したら stderr の件数行は本体ログに積まず、従来どおり stderr に出す ---
+# 5 分おきの起動で毎回 1 行ずつ本体ログが膨らまないように、本体ログへ写すのは失敗のときだけ。
+d="$(case_dir select-ok)"
+out="$(run_prefetch select-ok --dry-run)"; rc=$?
+logf="$d/prefetch.log"
+if [ "$rc" -eq 0 ] && grep -q '# stub races' <<<"$out" && ! grep -q '# stub races' "$logf" \
+   && [ -z "$(ls -A "$d/tmp")" ]; then
+  ok "選択の成功 → 件数行は stderr に出し、本体ログには積まず、一時ファイルも残さない"
+else
+  ng "選択の成功 → 件数行は stderr に出し、本体ログには積まず、一時ファイルも残さない" "rc=$rc / out=$out / log=$(cat "$logf" 2>/dev/null) / tmp=$(ls -A "$d/tmp")"
+fi
+
+# --- 選択 3. stderr の一時ファイルを作れなければ、理由を本体ログに残して止まる ---
+# 作れないまま進むと、python が起動しないのに「レース選択コマンドに失敗」と python3 の版が残り、誤った手がかりになる。
+d="$(case_dir select-notmp)"
+out="$(PATH="$STUB" TMPDIR="$d/no-such-dir" PADDOCK_PREFETCH_LOG="$d/prefetch.log" WORKDIR="$d/work" \
+  REAL_PYTHON3="$REAL_PYTHON3" EXPECTED_PAUSE_CODE="$EXPECTED_PAUSE_CODE" EXPECTED_PYINFO_CODE="$EXPECTED_PYINFO_CODE" \
+  bash "$SCRIPT" --date 2026-08-22 --dry-run 2>&1)"; rc=$?
+if [ "$rc" -ne 0 ] && grep -q 'stderr を受ける一時ファイルを作れません' "$d/prefetch.log" \
+   && ! grep -q 'レース選択コマンドに失敗' "$d/prefetch.log"; then
+  ok "一時ファイルを作れない → その旨を本体ログに残して止まる"
+else
+  ng "一時ファイルを作れない → その旨を本体ログに残して止まる" "rc=$rc / out=$out"
 fi
 
 echo "=== flock 分岐（ubuntu CI の経路） ==="
