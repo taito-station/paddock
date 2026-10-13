@@ -13,6 +13,8 @@
   - **終了コード**: fetch/race_id 変換に 1 件でも失敗したら非 0 で終了する（#493）。発走直前 snapshot は
     再取得不能資産のため、stale バイナリ・netkeiba 変化での失敗を `exit 0` に握り潰さず launchd の
     err ログ（`/tmp/paddock-prefetch.launchd.err.log`）へ伝える。全成功・対象 0 件は 0。
+  - **レース選択の失敗**: 選択の python の stderr（psql のエラー・traceback）と、使った `python3` の
+    パス・版を本体ログに残す（launchd の err ログは `/tmp` で消える。2026-08〜09 の失敗は理由が残らなかった #774）。
 - **keep-awake（#264）**: 開催日の発走ウィンドウ中、`caffeinate -i` で Mac のアイドルスリープを
   抑止し、上記 prefetch の 5 分タイマーが寝て止まる取りこぼしを防ぐ。
   - 本体: [`scripts/predict-check/keep_awake.sh`](../../scripts/predict-check/keep_awake.sh)

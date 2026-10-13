@@ -11,8 +11,10 @@ sources:
   - qa/QA-benter-alpha-722.md
   - docs-original/722-benter-alpha-exotics.md
   - docs-original/742-fill-missing-results.md
-distilled_from_sha: "a48fb23"
-updated: "2026-10-06"
+  - docs-original/774-prefetch-selection-failures.md
+  - qa/QA-prefetch-selection-774.md
+distilled_from_sha: "4294d0c6"
+updated: "2026-10-12"
 ---
 
 # netkeiba 当日データソース取り込み 仕様書
@@ -425,6 +427,7 @@ JRA 版スクレイパーは ADR 0048 で退役したが、そこで確立した
 | **出馬表**ページの取得失敗（card 取得段） | `call_with_retry` のリトライ後も残ればハード失敗（exit 1）。degraded にはしない |
 | **近走取り込み段**の取得失敗（出馬表・馬ページとも） | warn + skip して `shutuba_failed` / `horses_failed` に計上。**exit 0 のまま**（best-effort）。前走フォーム特徴量が欠けるので、ログの失敗件数を見る |
 | EUC-JP 不正バイト | `encoding_rs` の置換に委ね、可能な範囲で parse を継続 |
+| 締切前 prefetch（`prefetch_odds.sh`）の**レース選択**の失敗 | 取得へ進まず exit 1。選択の python の stderr（時刻付き）と、使った `python3` のパス・実体・版を本体ログ（`~/Library/Logs/paddock-prefetch.log`）に残す。成功時の件数行は stderr にだけ出す。stderr は 1 実行ごとの `mktemp` の一時ファイルで受けて消す（#774） |
 
 ---
 
@@ -1692,3 +1695,49 @@ DELETE・ADR 0089 決定 8）であり、「いつ未発売で、いつ発売さ
   `FAIL`・`error:`・「取得間隔を読めません」「取得間隔が範囲外です」の行が無いこと／「prefetch 開始 …（取得間隔 3500ms）」が出ること／
   1 レースあたりの所要の中央値（約 45 秒の想定）。あわせて `launchctl list com.paddock.prefetch-odds` の終了状態と、snapshot-coverage の GAP 件数を見る。
 - `prefetch_odds.sh` は開催日ごとに launchd へ入れる運用で、当日に作業しない制約があるため、実際の取得での確認はその開催日になる。
+
+### #774: prefetch のレース選択の失敗理由を本体ログに残す (2026-10-12) — 採用
+
+#### コンテキスト
+
+- `prefetch_odds.sh` は 2026-08-08〜10-03 に「レース選択コマンドに失敗」を計 6,063 回出していた。launchd に入れっぱなしだった
+  2026-09-27 16:38 までは、開催の無い平日も含めて 5 分おきに落ちていて、締切前 snapshot はほとんど取れていない。
+- 2026-08 は、同じ launchd の PATH で動く snapshot-coverage が `ModuleNotFoundError: No module named 'zoneinfo'` を残していた。
+  選択の `upcoming_races_db.py` も同じ import をするので、zoneinfo の無い python3 で毎回落ちていたとみられる。
+- 選択の stderr は本体ログに写さず、launchd の err ログ（`/tmp`）に出していた。これが消えていて、2026-09 の失敗の理由は確定できない。
+  2026-10-02 に Homebrew の python3 が入れ直され、調査時点（2026-10-12）では launchd と同じ条件で選択が通る（`docs-original/774-prefetch-selection-failures.md`）。
+
+#### 決定
+
+1. 選択の python の stderr は、1 実行ごとに `mktemp`（`${TMPDIR:-/tmp}/paddock-prefetch-select.XXXXXX`・O_EXCL・0600）で作った一時ファイルに
+   受け、読んだらすぐ消す。失敗したときだけ、1 行ずつ時刻を付けて（`選択の stderr: …`）本体ログ（`~/Library/Logs/paddock-prefetch.log`）に
+   写し、成功したときは従来どおり stderr にだけ出す。一時ファイルを作れなければ、その旨を本体ログに残して exit 1。
+2. 失敗の行に、launchd の PATH で解決した `python3` のパスと、その実体・版（`sys.executable` と `sys.version`）を添える。
+3. 根本原因（当時の python3）は環境ごと入れ替わっていて直せないので、コードでは直さない。2026-08 は zoneinfo の無い python3、
+   2026-09 は不明として記録する。
+4. `scripts/test-prefetch-odds.sh` に、失敗時に stderr と python3 が本体ログに残ること／成功時に件数行を本体ログに積まないことを足す。
+
+#### 理由
+
+- 失敗は exit 1 で launchd に伝わっていたが、理由が `/tmp` の err ログにしか無く、2 か月の失敗のあいだ誰も原因を追えなかった。
+  本体ログは永続パスなので（#493）、ここに理由があれば次は最初の 1 回で分かる。
+- 2026-08 の失敗はインタプリタの違いで起きていた。traceback だけではどの python3 か分からないので、パスと版を残す。
+  `command -v` は pyenv の shim なども返すので、実体は `sys.executable` で取る。
+- 一時ファイルを WORKDIR（launchd では `/tmp/paddock-prefetch` の固定パス）に置くと、他ユーザーの先回り・symlink で別のファイルを
+  上書きされうる（lock の #651 と同じ脅威）。選択は lock より前に走るので、手動の dry-run と launchd の実行が同じファイルを取り合うこともある。
+  1 実行ごとの `mktemp` ならどちらも起きない。
+- 成功時の件数行まで本体ログに写すと、5 分おきに 1 行ずつ積もる。理由が要るのは失敗のときだけ。
+
+#### 却下した代替案
+
+- **launchd の `StandardOutPath` / `StandardErrorPath` を `~/Library/Logs` へ移す**: 選択の理由は本体ログに残るようになるので、今回の失敗の追跡には要らない。
+  keep-awake・snapshot-coverage の plist とそろえる話も一緒に出てくるので、今回は入れない。
+- **launchd で使う python3 を固定する**（版を明示する・起動時に import を自己診断する）: brew の入れ替えには強くなるが、
+  固定した版の保守が増える。今回は「壊れたら気づけること」を優先した。
+
+#### 影響
+
+- 本体ログで失敗の理由を追えるようになる。確かめるのは次に開催日に install したとき。「レース選択コマンドに失敗」が出たら、
+  直前の `選択の stderr: …` の行（psql の stderr・traceback）と、末尾の `python3: <パス> → <実体> <版>` を見る。
+- `prefetch_odds.sh` が外部コマンド `mktemp`・`rm`・`cat`・`head` を使うようになった（テストのスタブ PATH にも張った）。
+- Issue #774 の成功条件のうち「開催日に失敗が続かないことをログで確かめる」は、次の開催日の確認で満たす。それまで Issue は開けておく。
