@@ -13,7 +13,7 @@ sources:
   - docs-original/742-fill-missing-results.md
   - docs-original/774-prefetch-selection-failures.md
   - qa/QA-prefetch-selection-774.md
-distilled_from_sha: "a0d73197"
+distilled_from_sha: "4294d0c6"
 updated: "2026-10-12"
 ---
 
