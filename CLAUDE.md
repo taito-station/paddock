@@ -128,6 +128,7 @@ paddock-predict --date YYYY-MM-DD --budget 5000 --skip-all
 paddock-predict --date YYYY-MM-DD --overview
 
 # 個別レースのモデル勝率確認（EV 算出・オッズ確認時）
+# race_id は fetch-card と同じ netkeiba 12 桁でも内部 ID（例: 2026-4-nakayama-9-6R）でもよい（#726）
 # ワイドオッズ（netkeiba type=5）はこのコマンドが自動取得して EV に反映するため手動取得不要
 paddock-analyze predict <race_id> --blend-alpha 0.2
 ```
