@@ -32,6 +32,7 @@ pub use interactor::results::{RefreshReport, ResultsInteractor};
 pub use interactor::settle::{SettleInteractor, SettleReport};
 pub use netkeiba_race_id::{
     build_race_ids, netkeiba_race_id_from_paddock, paddock_race_id_from_netkeiba,
+    race_id_from_cli_arg,
 };
 pub use netkeiba_scraper::{
     FetchedCard, FetchedEntry, FetchedWinOdds, HorsePastRun, NetkeibaScraper, RunnerRef,

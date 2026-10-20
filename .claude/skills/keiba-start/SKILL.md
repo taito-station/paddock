@@ -333,6 +333,7 @@ paddock-predict --date YYYY-MM-DD --budget 5000 --skip-all
 
 # 個別レース確認（ライブ EV 更新・オッズ変動追跡）
 # ワイドオッズ（type=5）はこのコマンドが自動取得して EV に反映するため手動取得不要
+# race_id は fetch-card と同じ netkeiba 12 桁でも内部 ID（例: 2026-4-nakayama-9-6R）でもよい（#726）
 paddock-analyze predict <race_id> --blend-alpha 0.2
 ```
 

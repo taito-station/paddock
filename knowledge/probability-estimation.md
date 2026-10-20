@@ -5,7 +5,7 @@ status: Confirmed
 kind: specification
 doc_class: [D22, D19]
 tags: [D22, D19]
-updated: "2026-09-30"
+updated: "2026-10-19"
 ---
 
 # 着順確率推定モデル仕様書
@@ -412,6 +412,9 @@ pub struct HorseFactors {
 ```
 paddock-analyze predict <race_id>
 ```
+
+`<race_id>` は netkeiba 12 桁（例: `202606040906`）か paddock 内部 ID（例: `2026-4-nakayama-9-6R`）。
+12 桁は `race_id_from_cli_arg` が内部 ID に変換する（#726）。
 
 出力例：
 ```

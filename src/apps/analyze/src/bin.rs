@@ -8,10 +8,10 @@ use chrono::{Months, NaiveDate, Utc};
 use clap::Parser;
 use paddock_domain::{
     EstimationConfig, FactorStat, FeatureRow, HorseName, HorseNum, JockeyName, PortfolioConfig,
-    RECOMMENDED_MARKET_BLEND_ALPHA, RaceId, RecencyConfig, ShrinkageConfig, Surface, TrainerName,
-    Venue, pair_ev_diagnostics,
+    RECOMMENDED_MARKET_BLEND_ALPHA, RecencyConfig, ShrinkageConfig, Surface, TrainerName, Venue,
+    pair_ev_diagnostics,
 };
-use paddock_use_case::{PredictionViews, TREND_N_MAX};
+use paddock_use_case::{PredictionViews, TREND_N_MAX, race_id_from_cli_arg};
 use predict_format::{format_probs, format_probs_with_market, format_recent_runs_warning};
 
 /// 部分一致候補の表示上限。これを超える場合も先頭から打ち切って提示する。
@@ -222,7 +222,7 @@ async fn run(app: &setup::App, command: cli::Command) -> anyhow::Result<()> {
             // #282: 本番既定（m=10/γ=1.25）を土台に、指定フラグだけ上書きした config を組む。
             // #270/ADR 0045 の m×α×γ 再検証で m/γ を振った bt_pred を生成するために使う。
             let config = production_config_with_overrides(shrinkage_m, win_power)?;
-            let rid = RaceId::try_from(race_id.as_str())?;
+            let rid = race_id_from_cli_arg(&race_id)?;
             // #272 ③④: session.rs と同じ二視点で出す。過去データ視点＝純モデル（α=1.0・市場非依存）、
             // 市場EV視点＝軸/相手 blended・EV pure（循環断ち）。--blend-alpha は市場EV視点の順位付け用。
             let (views, odds) = app

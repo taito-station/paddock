@@ -46,7 +46,8 @@ pub enum Command {
     /// win <= place <= show monotonicity is guaranteed; place/show are top-2 / top-3 probabilities
     /// (normalized to sum 2.0 / 3.0 across the field, then monotonized). See ADR 0007.
     Predict {
-        /// Race ID（paddock 形式 `{年}-{回}-{場slug}-{日}-{R}R`、例: 2026-3-nakayama-8-1R）。
+        /// Race ID。netkeiba 12 桁（例: 202606030801）か paddock 形式
+        /// `{年}-{回}-{場slug}-{日}-{R}R`（例: 2026-3-nakayama-8-1R）。12 桁は paddock 形式に変換する（#726）。
         race_id: String,
         /// 市場EV視点（軸/相手の順位付け）に使う市場ブレンドのモデル重み α [0,1]（#72・#272 ③④）。
         /// 過去データ視点は常に純モデル（α 非依存）で表示し、α はこの視点には効かない。

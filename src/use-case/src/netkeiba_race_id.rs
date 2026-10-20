@@ -118,6 +118,18 @@ pub fn paddock_race_id_from_netkeiba(netkeiba_race_id: &str) -> Result<RaceId> {
     ))?)
 }
 
+/// CLI 引数の race_id を paddock RaceId に解決する（#726）。
+///
+/// 12 桁の数字なら netkeiba race_id とみなして [`paddock_race_id_from_netkeiba`] で変換し、
+/// それ以外は paddock RaceId としてそのまま受ける。fetch-card に渡した 12 桁 ID を
+/// analyze predict にもそのまま流せるようにするため。
+pub fn race_id_from_cli_arg(arg: &str) -> Result<RaceId> {
+    if arg.len() == 12 && arg.chars().all(|c| c.is_ascii_digit()) {
+        return paddock_race_id_from_netkeiba(arg);
+    }
+    Ok(RaceId::try_from(arg)?)
+}
+
 /// netkeiba 12 桁 race_id を構成要素 `(year, venue, round, day, race_num)` に分解する。
 fn parse_netkeiba_race_id(id: &str) -> Result<(u32, Venue, u32, u32, u32)> {
     if id.len() != 12 || !id.chars().all(|c| c.is_ascii_digit()) {
@@ -234,6 +246,27 @@ mod tests {
         assert!(
             netkeiba_race_id_from_paddock(&RaceId::try_from("nk-202605030211").unwrap()).is_err()
         );
+    }
+
+    #[test]
+    fn cli_arg_accepts_netkeiba_12_digits() {
+        // fetch-card と同じ 12 桁 ID を渡しても内部 ID に解決する（#726）。
+        let race_id = race_id_from_cli_arg("202606040906").unwrap();
+        assert_eq!(race_id.value(), "2026-4-nakayama-9-6R");
+    }
+
+    #[test]
+    fn cli_arg_keeps_paddock_id_as_is() {
+        // 内部 ID はこれまでどおりそのまま受ける。
+        let race_id = race_id_from_cli_arg("2026-4-nakayama-9-6R").unwrap();
+        assert_eq!(race_id.value(), "2026-4-nakayama-9-6R");
+    }
+
+    #[test]
+    fn cli_arg_rejects_invalid_12_digits() {
+        // 12 桁の数字なのに JRA 外・物理外のものは、内部 ID として素通しせずエラーにする。
+        assert!(race_id_from_cli_arg("202644010101").is_err());
+        assert!(race_id_from_cli_arg("202605030213").is_err());
     }
 
     #[test]
