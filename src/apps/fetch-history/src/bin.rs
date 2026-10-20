@@ -20,8 +20,8 @@ async fn run(app: &setup::App, args: &cli::Cli) -> anyhow::Result<()> {
     let resp = app.fetch_and_store(&args.race_ids, &args.horse_ids).await?;
 
     println!(
-        "取得: {} 頭（失敗 {} 頭） / 保存: {} 近走",
-        resp.horses_fetched, resp.horses_failed, resp.runs_saved
+        "取得: {} 頭（うち近走なし {} 頭・失敗 {} 頭） / 保存: {} 近走",
+        resp.horses_fetched, resp.horses_no_runs, resp.horses_failed, resp.runs_saved
     );
 
     if resp.shutuba_failed > 0 {

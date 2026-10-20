@@ -49,6 +49,7 @@ impl<R: HorseHistoryRepository, S: NetkeibaScraper> HorseHistoryInteractor<R, S>
         // 2. 各馬の近走を取得し、netkeiba_race_id で重複排除して horse 単位に upsert する。
         //    DB エラーは系統的障害とみなし fail-fast で中断する（upsert は冪等なので再実行で回復）。
         let mut horses_fetched = 0;
+        let mut horses_no_runs = 0;
         let mut horses_failed = 0;
         let mut runs_saved = 0;
         for horse_id in &targets {
@@ -70,6 +71,7 @@ impl<R: HorseHistoryRepository, S: NetkeibaScraper> HorseHistoryInteractor<R, S>
                 .filter(|r| race_seen.insert(r.netkeiba_race_id.clone()))
                 .collect();
             if deduped.is_empty() {
+                horses_no_runs += 1;
                 continue;
             }
             // upsert した走数を積算する（canonical race_id へ変換できず skip された走は
@@ -83,6 +85,7 @@ impl<R: HorseHistoryRepository, S: NetkeibaScraper> HorseHistoryInteractor<R, S>
 
         Ok(FetchHorseHistoryResponse {
             horses_fetched,
+            horses_no_runs,
             horses_failed,
             shutuba_failed,
             runs_saved,

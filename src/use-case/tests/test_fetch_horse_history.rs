@@ -192,6 +192,33 @@ async fn skips_failing_horse_and_continues() {
 }
 
 #[tokio::test]
+async fn counts_horse_without_runs_separately_from_failures() {
+    // #725: 未出走馬は近走 0 走で取得成功。失敗には数えず「近走なし」として別に数える。
+    let scraper = FakeScraper {
+        shutuba: HashMap::new(),
+        histories: HashMap::from([
+            ("NEW".to_string(), vec![]),
+            ("OK".to_string(), vec![past_run("rX", "ウマ", 1, 1)]),
+        ]),
+        failing: HashSet::from(["BAD".to_string()]),
+    };
+    let interactor = HorseHistoryInteractor::new(RecordingRepo::default(), scraper);
+
+    let resp = interactor
+        .fetch_and_store(
+            &[],
+            &["NEW".to_string(), "OK".to_string(), "BAD".to_string()],
+        )
+        .await
+        .expect("fetch_and_store");
+
+    assert_eq!(resp.horses_fetched, 2);
+    assert_eq!(resp.horses_no_runs, 1);
+    assert_eq!(resp.horses_failed, 1);
+    assert_eq!(resp.runs_saved, 1);
+}
+
+#[tokio::test]
 async fn dedups_same_netkeiba_race() {
     // 異常 HTML 等で同一馬が同一過去レースの行を 2 つ返しても 1 走に集約する。
     let scraper = FakeScraper {
