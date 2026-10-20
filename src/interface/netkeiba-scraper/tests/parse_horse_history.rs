@@ -77,3 +77,34 @@ fn parses_nakayama_row_with_weight() {
     // #329 Phase1: 出走頭数(列6)。
     assert_eq!(r.field_size, Some(16));
 }
+
+// #725: 未出走馬のページには戦績表が無く「競走データがありません」と出る。失敗ではなく近走 0 走。
+#[test]
+fn unraced_horse_page_yields_no_runs() {
+    let html = include_str!("fixtures/horse_result_unraced.html");
+    let runs = parse_horse_history(html).expect("未出走は Ok");
+    assert!(runs.is_empty());
+}
+
+// 存在しない horse_id のページも同じ文言を出すが馬名が空。未出走とは区別して失敗のままにする。
+#[test]
+fn unknown_horse_page_is_still_an_error() {
+    let html = include_str!("fixtures/horse_result_unknown.html");
+    assert!(parse_horse_history(html).is_err());
+}
+
+// 戦績表も「競走データがありません」も無いページ（HTML 構造の変化など）は、従来どおり失敗にする。
+#[test]
+fn page_without_table_or_no_data_message_is_an_error() {
+    let html =
+        include_str!("fixtures/horse_result_unraced.html").replace("競走データがありません", "");
+    assert!(parse_horse_history(&html).is_err());
+}
+
+// 文言が競走成績ブロック（div.db_main_deta）の外にしか無いページは、未出走とみなさず失敗にする。
+#[test]
+fn no_data_message_outside_results_block_is_an_error() {
+    let html =
+        include_str!("fixtures/horse_result_unraced.html").replace("db_main_deta", "db_main_other");
+    assert!(parse_horse_history(&html).is_err());
+}

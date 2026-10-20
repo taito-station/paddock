@@ -13,8 +13,10 @@ sources:
   - docs-original/742-fill-missing-results.md
   - docs-original/774-prefetch-selection-failures.md
   - qa/QA-prefetch-selection-774.md
-distilled_from_sha: "4294d0c6"
-updated: "2026-10-12"
+  - docs-original/725-netkeiba-unraced-horse-page.md
+  - qa/QA-unraced-horse-history-725.md
+distilled_from_sha: "b357d15a"
+updated: "2026-10-20"
 ---
 
 # netkeiba 当日データソース取り込み 仕様書
@@ -426,6 +428,7 @@ JRA 版スクレイパーは ADR 0048 で退役したが、そこで確立した
 | **組合せ券種オッズ**が未発売（番兵のみ / 0 行） | fetch-card は通常どおり単複のみ保存して **exit 0**（未発売は best-effort）。**未発売の観測記録は fetch-card では行わない**——`assemble_netkeiba` を通らないため。記録するのは read-through / `predict-watch` 経路（下記 read-through 節・ADR 0089） |
 | **出馬表**ページの取得失敗（card 取得段） | `call_with_retry` のリトライ後も残ればハード失敗（exit 1）。degraded にはしない |
 | **近走取り込み段**の取得失敗（出馬表・馬ページとも） | warn + skip して `shutuba_failed` / `horses_failed` に計上。**exit 0 のまま**（best-effort）。前走フォーム特徴量が欠けるので、ログの失敗件数を見る |
+| **未出走馬**の馬ページ（戦績表が無い） | 失敗にしない。馬名の入った `div.horse_title h1` と、成績ブロック（`div.db_main_deta`）の「競走データがありません」の両方があるときだけ近走 0 走として扱い（ログは debug）、`horses_no_runs` に数える。サマリは fetch-card が `近走: N 頭（うち近走なし M 頭・失敗 K 頭）`、fetch-history が `取得: N 頭（…）`（括弧内は共通）。どちらかが欠けるページ（構造変化・存在しない ID）は従来どおり warn + `horses_failed`（#725） |
 | EUC-JP 不正バイト | `encoding_rs` の置換に委ね、可能な範囲で parse を継続 |
 | 締切前 prefetch（`prefetch_odds.sh`）の**レース選択**の失敗 | 取得へ進まず exit 1。選択の python の stderr（時刻付き）と、使った `python3` のパス・実体・版を本体ログ（`~/Library/Logs/paddock-prefetch.log`）に残す。成功時の件数行は stderr にだけ出す。stderr は 1 実行ごとの `mktemp` の一時ファイルで受けて消す（#774） |
 
@@ -1741,3 +1744,47 @@ DELETE・ADR 0089 決定 8）であり、「いつ未発売で、いつ発売さ
   直前の `選択の stderr: …` の行（psql の stderr・traceback）と、末尾の `python3: <パス> → <実体> <版>` を見る。
 - `prefetch_odds.sh` が外部コマンド `mktemp`・`rm`・`cat`・`head` を使うようになった（テストのスタブ PATH にも張った）。
 - Issue #774 の成功条件のうち「開催日に失敗が続かないことをログで確かめる」は、次の開催日の確認で満たす。それまで Issue は開けておく。
+
+### #725: 未出走馬の戦績表なしを失敗と区別する (2026-10-20) — 採用
+
+#### コンテキスト
+
+- `parse_horse_history` は戦績表（`table.db_h_race_results`）が無いページを一律にパース失敗にしていた。未出走馬のページには
+  表がそもそも無いので、新馬戦の fetch-card では全頭が WARN・失敗に数えられた（2026-09-27 は新馬 4 レースで全頭）。
+- WARN が大量に出ると、本物の取得失敗（IP ブロック・HTML 構造の変化）が埋もれる。
+- 観察（`docs-original/725-netkeiba-unraced-horse-page.md`）: 未出走のページは `h1` に馬名があり、本文に「競走データがありません」と出る。
+  存在しない ID でも同じ文言は出るが、`h1` が空。
+
+#### 決定
+
+1. 戦績表が無いとき、馬名の入った `div.horse_title h1` と、成績ブロック `div.db_main_deta` の中の `div.contents` が
+   「競走データがありません」だけ（完全一致）であることの両方がそろう場合だけ、
+   未出走として `Ok(空)` を返す（ログは debug）。それ以外は従来どおり `results table not found` の失敗にする。
+2. use-case は、取得できたのに JRA 平地の近走が 0 走だった馬を `horses_no_runs` として数える。
+   サマリは fetch-card が `近走: N 頭（うち近走なし M 頭・失敗 K 頭）`、fetch-history が `取得: N 頭（…）`（括弧内は共通）。
+3. 実ページから抜き出した fixture（未出走・存在しない ID）と、文言を消した構造変化のケースをパーサのテストで固定する。
+
+#### 理由
+
+- 文言と馬名の両方を条件にすると、構造の変化（表のクラス名が変わる等）を未出走として飲み込まない。文言が無ければ失敗のままなので、
+  構造変化の検知は残る。
+- 存在しない ID は出馬表から来る限り起きないはずの異常なので、失敗のままにして目立たせる。
+- 「近走なし」は、地方・海外・障害だけの馬（行はあるが JRA 平地は 0 走）も含む。予想で使える近走が無い点は同じなので、分けない。
+  戦績表はあるのに列レイアウトの変化で全行が落ちた馬も「近走なし」に入るが、そのときはパーサが別に warn
+  （`no rows extracted … 列レイアウト変更の可能性`）を出すので、検知は残る（修正前も失敗ではなく取得成功に数えていた）。
+- 文言は成績ブロックの中の完全一致に限る。実ページ（2026-10-20 に取得した 3 件）では、`div.contents` は未出走・存在しない ID の
+  ページに 1 つずつ、戦績のある馬のページには 0 個だった。
+
+#### 却下した代替案
+
+- **表が無ければ常に 0 走として扱う**: 構造が変わったときに全馬が黙って 0 走になり、検知が消える（Issue の制約に反する）。
+- **馬名（`h1`）だけで判定する**: 戦績表のクラス名だけが変わった場合も、馬名はあるので未出走と誤判定する。
+- **`NetkeibaScraper::fetch_horse_history` の戻り値に未出走の区別を足す**: trait と全実装・テストの変更が要る。
+  サマリで要るのは「近走 0 走」の件数だけで、`Ok(空)` から数えられる。
+
+#### 影響
+
+- 新馬戦の fetch-card で WARN が出なくなり、サマリの失敗件数が本物の失敗だけになる。
+- `FetchHorseHistoryResponse` に `horses_no_runs` が増えた（`horses_fetched` の内数）。
+- 未出走の判定は netkeiba の文言に依存する。文言が変わると未出走が失敗（WARN）に戻るが、黙って取りこぼす方向には倒れない。
+- 開催日の fetch-card で新馬レースの WARN が 0 件になることを確かめるまで、Issue #725 は開けておく（#774 と同じ運用）。

@@ -27,6 +27,8 @@ const COL_MARGIN: usize = 19;
 const COL_CORNER: usize = 25; // コーナー通過順位 "10-9-5-5"（#329 Phase0）
 const COL_HORSE_WEIGHT: usize = 28;
 const MIN_CELLS: usize = 29;
+/// 未出走馬のページの競走成績ブロックに出る文言（#725）。
+const NO_DATA_MESSAGE: &str = "競走データがありません";
 
 /// 馬個別成績ページ (`horse/result/<id>/`) のHTMLから JRA 平地の近走を抽出する。
 ///
@@ -36,12 +38,20 @@ const MIN_CELLS: usize = 29;
 ///
 /// 列レイアウト変更などで全データ行が落ちると無言で空 Vec になり原因が見えにくいため、
 /// データ行があったのに 1 件も抽出できなかった場合は warn を出す。
+///
+/// 戦績表が無いページは、未出走馬のもの（[`unraced_horse_name`] が馬名を返す）なら空 Vec、
+/// それ以外（構造変化・存在しない horse_id）は `Error::Parse` を返す（#725）。
 pub fn parse_horse_history(html: &str) -> Result<Vec<HorsePastRun>> {
     let doc = Html::parse_document(html);
-    let table = doc
-        .select(&sel("table.db_h_race_results")?)
-        .next()
-        .ok_or_else(|| Error::Parse("results table not found".to_string()))?;
+    let Some(table) = doc.select(&sel("table.db_h_race_results")?).next() else {
+        // 未出走馬（新馬戦の出走馬など）のページには戦績表が無い。馬名と「競走データがありません」の
+        // 両方が出ているときだけ近走 0 走とし、それ以外（構造変化・存在しない馬）は失敗のままにする（#725）。
+        if let Some(name) = unraced_horse_name(&doc)? {
+            tracing::debug!(horse = %name, "競走データなし（未出走）");
+            return Ok(Vec::new());
+        }
+        return Err(Error::Parse("results table not found".to_string()));
+    };
 
     let horse_name = table
         .value()
@@ -75,6 +85,25 @@ pub fn parse_horse_history(html: &str) -> Result<Vec<HorsePastRun>> {
         );
     }
     Ok(runs)
+}
+
+/// 戦績表の無いページが未出走馬のものなら、その馬名を返す。
+///
+/// 未出走馬のページは `div.horse_title h1` に馬名があり、競走成績ブロック（`div.db_main_deta`）の
+/// `div.contents` が「競走データがありません」だけになる。存在しない horse_id でも同じ文言が出るが
+/// 馬名が空なので、未出走とはみなさない。文言は成績ブロックの中の完全一致に限り、他の箇所の同じ文言で
+/// 構造変化を未出走として飲み込まないようにする。
+fn unraced_horse_name(doc: &Html) -> Result<Option<String>> {
+    let has_no_data_message = doc
+        .select(&sel("div.db_main_deta div.contents")?)
+        .any(|el| cell_text(&el.text().collect::<String>()).as_deref() == Some(NO_DATA_MESSAGE));
+    if !has_no_data_message {
+        return Ok(None);
+    }
+    Ok(doc
+        .select(&sel("div.horse_title h1")?)
+        .next()
+        .and_then(|h1| cell_text(&h1.text().collect::<String>())))
 }
 
 fn parse_row(
