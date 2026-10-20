@@ -15,7 +15,7 @@ sources:
   - qa/QA-prefetch-selection-774.md
   - docs-original/725-netkeiba-unraced-horse-page.md
   - qa/QA-unraced-horse-history-725.md
-distilled_from_sha: "312ce04c"
+distilled_from_sha: "b357d15a"
 updated: "2026-10-20"
 ---
 
