@@ -6,21 +6,47 @@ import type { BetInput, RecommendationBet } from "../api/client";
 export type Edit = { stake: number; payout: number };
 export type Edits = Record<string, Edit>;
 
-export const betKey = (b: RecommendationBet) => `${b.bet_type}-${b.combination}`;
+type BetLike = { bet_type: string; combination: string };
 
-// 編集があればその賭け金、無ければ推奨額。
-export function effStake(b: RecommendationBet, edits: Edits): number {
-  return edits[betKey(b)]?.stake ?? b.stake;
+export const betKey = (b: BetLike) => `${b.bet_type}-${b.combination}`;
+
+// 脚ごとの一意なキー（React の key と edits のキー）。混戦の配分は三連複ボックスと ◎軸ながしを
+// 両方買うので、同じ券種・組が 2 脚入る（#772）。2 本目以降は `#2` のように出現順を付けて区別する
+// （combination は数字と `-` だけなので `#` 付きのキーが実在の脚とぶつかることは無い）。
+// - 脚の並びは build_portfolio のレイヤー順（ながし → ボックス）で固定なので、並び替えでは付け替わらない。
+// - 朝の選定が無いレースでは、ライブ更新で相手が入れ替わり、同じ組のながし脚が増減することがある。
+//   そのときは `#n` がずれて、同じ組の編集がながし脚とボックス脚のあいだで付け替わる。記録される
+//   （券種・組・金額）は同じ組への編集のままで、修正前の「同じ組なら編集が持ち越される」性質と同じ。
+//   方式入りのキーにするには API に method を出す必要があり、今回はそこまで広げない（#772）。
+export function legKeys(bets: BetLike[]): string[] {
+  const seen = new Map<string, number>();
+  return bets.map((b) => {
+    const k = betKey(b);
+    const n = (seen.get(k) ?? 0) + 1;
+    seen.set(k, n);
+    return n === 1 ? k : `${k}#${n}`;
+  });
+}
+
+// 編集があればその賭け金、無ければ推奨額。key は legKeys の脚キー（同じ組の 2 本目を取り違えないよう必須）。
+export function effStake(b: RecommendationBet, edits: Edits, key: string): number {
+  return edits[key]?.stake ?? b.stake;
 }
 
 // 編集があればその払戻、無ければ 0（未確定）。
-export function effPayout(b: RecommendationBet, edits: Edits): number {
-  return edits[betKey(b)]?.payout ?? 0;
+export function effPayout(edits: Edits, key: string): number {
+  return edits[key]?.payout ?? 0;
+}
+
+// 全脚を 0 円にする編集（「スキップ」ボタン）。同じ組の 2 脚とも 0 にするため脚キーで作る。
+export function skipAllEdits(bets: BetLike[]): Edits {
+  return Object.fromEntries(legKeys(bets).map((k) => [k, { stake: 0, payout: 0 }]));
 }
 
 // 賭け金合計（残高超過判定に使う）。
 export function totalStake(bets: RecommendationBet[], edits: Edits): number {
-  return bets.reduce((s, b) => s + effStake(b, edits), 0);
+  const keys = legKeys(bets);
+  return bets.reduce((s, b, i) => s + effStake(b, edits, keys[i]), 0);
 }
 
 // このレースを記録済みか（セッション明細に痕跡があるか）。スキップ記録は痕跡が残らない。
@@ -47,13 +73,15 @@ export function buildOutcomeBets(
   bets: RecommendationBet[],
   edits: Edits,
 ): BetInput[] {
+  const keys = legKeys(bets);
   return bets
-    .filter((b) => effStake(b, edits) > 0)
-    .map((b) => ({
+    .map((b, i) => ({ b, key: keys[i] }))
+    .filter(({ b, key }) => effStake(b, edits, key) > 0)
+    .map(({ b, key }) => ({
       bet_type: b.bet_type,
       combination: b.combination,
-      stake: effStake(b, edits),
-      payout: effPayout(b, edits),
+      stake: effStake(b, edits, key),
+      payout: effPayout(edits, key),
       ev: b.ev,
     }));
 }
@@ -86,5 +114,6 @@ export function hasInvalidStakeUnit(
   bets: RecommendationBet[],
   edits: Edits,
 ): boolean {
-  return bets.some((b) => !isUnit100(effStake(b, edits)));
+  const keys = legKeys(bets);
+  return bets.some((b, i) => !isUnit100(effStake(b, edits, keys[i])));
 }

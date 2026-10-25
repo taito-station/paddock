@@ -11,6 +11,8 @@ import {
   isUnitOf,
   isUnit100,
   hasInvalidStakeUnit,
+  legKeys,
+  skipAllEdits,
 } from "./bets";
 import type { RecommendationBet } from "../api/client";
 
@@ -28,13 +30,13 @@ const BETS: RecommendationBet[] = [
 
 describe("effStake / effPayout", () => {
   it("falls back to recommended stake, payout 0", () => {
-    expect(effStake(BETS[0], {})).toBe(300);
-    expect(effPayout(BETS[0], {})).toBe(0);
+    expect(effStake(BETS[0], {}, betKey(BETS[0]))).toBe(300);
+    expect(effPayout({}, betKey(BETS[0]))).toBe(0);
   });
   it("uses edit when present", () => {
     const edits = { [betKey(BETS[0])]: { stake: 500, payout: 1200 } };
-    expect(effStake(BETS[0], edits)).toBe(500);
-    expect(effPayout(BETS[0], edits)).toBe(1200);
+    expect(effStake(BETS[0], edits, betKey(BETS[0]))).toBe(500);
+    expect(effPayout(edits, betKey(BETS[0]))).toBe(1200);
   });
 });
 
@@ -170,5 +172,51 @@ describe("hasInvalidStakeUnit", () => {
       [betKey(BETS[1])]: { stake: 200, payout: 240 },
     };
     expect(hasInvalidStakeUnit(BETS, edits)).toBe(false);
+  });
+});
+
+// #772: 混戦の配分は三連複ボックスと ◎軸ながしを両方買うため、同じ組が 2 脚入る。
+const KONSEN: RecommendationBet[] = [
+  bet("三連複", "3-4-10", 100),
+  bet("三連複", "3-4-8", 100),
+  bet("三連複", "3-4-10", 200),
+];
+
+describe("legKeys", () => {
+  it("同じ券種・組の 2 本目以降に出現順を付けて一意にする", () => {
+    expect(legKeys(KONSEN)).toEqual(["三連複-3-4-10", "三連複-3-4-8", "三連複-3-4-10#2"]);
+  });
+  it("重複が無ければ従来の betKey と同じ", () => {
+    expect(legKeys(BETS)).toEqual(BETS.map(betKey));
+  });
+  it("券種が違えば同じ組でも別の脚", () => {
+    expect(legKeys([bet("馬連", "1-2", 100), bet("ワイド", "1-2", 100)])).toEqual(["馬連-1-2", "ワイド-1-2"]);
+  });
+});
+
+describe("同じ組の 2 脚の編集（#772）", () => {
+  it("片方の脚の編集がもう片方に効かない", () => {
+    const keys = legKeys(KONSEN);
+    const edits = { [keys[2]]: { stake: 500, payout: 3000 } };
+    expect(effStake(KONSEN[0], edits, keys[0])).toBe(100);
+    expect(effStake(KONSEN[2], edits, keys[2])).toBe(500);
+    expect(effPayout(edits, keys[0])).toBe(0);
+    expect(effPayout(edits, keys[2])).toBe(3000);
+    expect(totalStake(KONSEN, edits)).toBe(100 + 100 + 500);
+  });
+  it("スキップは同じ組の 2 脚とも 0 円にし、記録の payload が空になる", () => {
+    expect(buildOutcomeBets(KONSEN, skipAllEdits(KONSEN))).toEqual([]);
+    expect(totalStake(KONSEN, skipAllEdits(KONSEN))).toBe(0);
+  });
+  it("記録の payload は脚ごとの金額で 2 行になる", () => {
+    const edits = { "三連複-3-4-10": { stake: 0, payout: 0 } };
+    expect(buildOutcomeBets(KONSEN, edits).map((b) => [b.combination, b.stake])).toEqual([
+      ["3-4-8", 100],
+      ["3-4-10", 200],
+    ]);
+  });
+  it("100 円単位の判定も脚ごと", () => {
+    expect(hasInvalidStakeUnit(KONSEN, { "三連複-3-4-10#2": { stake: 150, payout: 0 } })).toBe(true);
+    expect(hasInvalidStakeUnit(KONSEN, { "三連複-3-4-10": { stake: 300, payout: 0 } })).toBe(false);
   });
 });

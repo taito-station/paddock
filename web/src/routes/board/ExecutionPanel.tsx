@@ -10,13 +10,14 @@ import {
 import { yen } from "../../lib/format";
 import {
   type Edits,
-  betKey,
   buildOutcomeBets,
   canRecordOutcome,
   effPayout,
   effStake,
   hasInvalidStakeUnit,
   isRaceRecorded,
+  legKeys,
+  skipAllEdits,
   toAmount,
   totalStake as sumStake,
 } from "../../lib/bets";
@@ -92,6 +93,8 @@ export function ExecutionPanel({
   const skipped =
     !!session && (session.skipped_race_ids ?? []).includes(raceId);
   const total = sumStake(bets, edits);
+  // 脚ごとのキー（同じ組が 2 脚ある混戦でも一意・#772）。React の key と edits のキーに使う。
+  const keys = legKeys(bets);
   // 残高が実弾の制約。「予算/R」(appliedBudget) は推奨額の算出ヒントであって手編集の上限では
   // ないため、超過判定は残高基準にする（編集で残高内まで増やすのは許容）。
   const overBudget = total > balance;
@@ -106,23 +109,24 @@ export function ExecutionPanel({
     pending: record.isPending,
   });
 
-  const setEdit = (b: RecommendationBet, patch: Partial<Edits[string]>) =>
+  const setEdit = (
+    b: RecommendationBet,
+    legKey: string,
+    patch: Partial<Edits[string]>,
+  ) =>
     setEdits((prev) => {
-      const k = betKey(b);
-      const cur = prev[k] ?? { stake: b.stake, payout: 0 };
-      return { ...prev, [k]: { ...cur, ...patch } };
+      const cur = prev[legKey] ?? { stake: b.stake, payout: 0 };
+      return { ...prev, [legKey]: { ...cur, ...patch } };
     });
 
-  const skipAll = () =>
-    setEdits(
-      Object.fromEntries(bets.map((b) => [betKey(b), { stake: 0, payout: 0 }])),
-    );
+  const skipAll = () => setEdits(skipAllEdits(bets));
   const skipRace = () => record.mutate([]); // 空 = このレースを見送りとして記録。
 
   // --- 記録済み: session キャッシュの明細を読取専用で表示（board の bets は予算次第で
   //     変わるため出さない）。 ---
   if (bought) {
     const recorded = session!.bets.filter((b) => b.race_id === raceId);
+    const recordedKeys = legKeys(recorded);
     return (
       <>
         <div className="toolbar">
@@ -145,8 +149,8 @@ export function ExecutionPanel({
               </tr>
             </thead>
             <tbody>
-              {recorded.map((b) => (
-                <tr key={`${b.bet_type}-${b.combination}`}>
+              {recorded.map((b, i) => (
+                <tr key={recordedKeys[i]}>
                   <td>{b.bet_type}</td>
                   <td>{b.combination}</td>
                   <td>{yen(b.stake)}</td>
@@ -268,8 +272,8 @@ export function ExecutionPanel({
             </tr>
           </thead>
           <tbody>
-            {bets.map((b) => (
-              <tr key={betKey(b)}>
+            {bets.map((b, i) => (
+              <tr key={keys[i]}>
                 <td>{b.bet_type}</td>
                 <td>{b.combination}</td>
                 <td>{b.odds == null ? "-" : b.odds.toFixed(1)}</td>
@@ -280,9 +284,9 @@ export function ExecutionPanel({
                       type="number"
                       min={0}
                       step={100}
-                      value={effStake(b, edits)}
+                      value={effStake(b, edits, keys[i])}
                       onChange={(e) =>
-                        setEdit(b, { stake: toAmount(e.target.value) })
+                        setEdit(b, keys[i], { stake: toAmount(e.target.value) })
                       }
                       className="amount-input"
                     />
@@ -296,9 +300,9 @@ export function ExecutionPanel({
                       type="number"
                       min={0}
                       step={100}
-                      value={effPayout(b, edits)}
+                      value={effPayout(edits, keys[i])}
                       onChange={(e) =>
-                        setEdit(b, { payout: toAmount(e.target.value) })
+                        setEdit(b, keys[i], { payout: toAmount(e.target.value) })
                       }
                       className="amount-input"
                     />
