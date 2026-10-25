@@ -138,8 +138,8 @@ async fn run_history(
         app.history.fetch_and_store(&[], horse_ids).await?
     };
     println!(
-        "近走: {} 頭（失敗 {} 頭） / 保存: {} 近走",
-        hist.horses_fetched, hist.horses_failed, hist.runs_saved
+        "近走: {} 頭（うち近走なし {} 頭・失敗 {} 頭） / 保存: {} 近走",
+        hist.horses_fetched, hist.horses_no_runs, hist.horses_failed, hist.runs_saved
     );
     // 近走取り込みは card/オッズ（本コマンドの主目的）に対する best-effort の補完。
     // shutuba 取得が失敗しても警告のみで継続し、終了コードは 0 のままにする
