@@ -91,7 +91,7 @@ jobs:
           components: rustfmt, clippy
 
       - name: Cache cargo build
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
 
       # ビルド時の外部取得へ静かに戻るのを防ぐ（ADR 0082）。**この required ジョブに置くのが要点**
       # ——feature が落ちても GitHub ランナーには curl があるのでビルドは通ってしまい、落ちるのは
@@ -371,7 +371,7 @@ jobs:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
 
       - name: Cache cargo build
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
 
       # lib（OCR 非依存ユニット）+ 統合（test_render の PNG 化 / test_parse の解析値）をまとめて実走。
       # サンプル PDF は JRA 著作物で repo に含めない（gitignore）。フィクスチャが JRA から取得を試み、
