@@ -7,7 +7,7 @@ doc_class: [D23, D22]
 tags: [D23, D22]
 sources:
   - qa/QA-predict-fixed-selection-776.md
-distilled_from_sha: "9488aa2c"
+distilled_from_sha: "fd355c9d"
 updated: "2026-10-31"
 ---
 
