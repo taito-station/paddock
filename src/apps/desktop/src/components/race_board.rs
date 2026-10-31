@@ -9,7 +9,7 @@ use crate::components::horse_card::HorseCard;
 use crate::setup::Setup;
 use crate::viewmodel::DEFAULT_BUDGET;
 use crate::viewmodel::exec::BetView;
-use crate::viewmodel::race::BoardView;
+use crate::viewmodel::race::{AxisLockView, BoardView};
 const DEFAULT_ALPHA: f64 = 0.2;
 const POLL_SECS: u64 = 60;
 
@@ -102,6 +102,9 @@ pub fn RaceBoard(race_id: String) -> Element {
                         span { class: "qualifying",
                             "qualifying {view.qualifying_count}頭"
                         }
+                        if let Some(ref lock) = view.axis_lock {
+                            {axis_lock_chip(lock)}
+                        }
                         if view.result_confirmed {
                             span { class: "chip result-done", "確定" }
                         }
@@ -133,6 +136,26 @@ fn post_time_passed(view: &BoardView) -> bool {
     };
     let race_dt = chrono::NaiveDateTime::new(view.date, pt);
     Local::now().naive_local() > race_dt
+}
+
+/// 軸の固定のチップ（#767・#388）。ライブの首位と違えば理由をクリックで開ける赤の注記にする
+/// （web の盤の 🔒 / ⚠ チップと同じ形）。
+fn axis_lock_chip(lock: &AxisLockView) -> Element {
+    if lock.diverged {
+        rsx! {
+            details { class: "axis-lock-note chip",
+                summary { title: lock.reason,
+                    span { class: "caret", aria_hidden: "true" }
+                    "{lock.label}"
+                }
+                p { class: "axis-lock-reason", "{lock.reason}" }
+            }
+        }
+    } else {
+        rsx! {
+            span { class: "chip axis-lock", title: lock.reason, "{lock.label}" }
+        }
+    }
 }
 
 fn bet_table(bets: &[BetView]) -> Element {

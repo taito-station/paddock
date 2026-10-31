@@ -26,6 +26,8 @@
 
   --danger: #ff6b6b;
   --danger-bg: #3a1414;
+  --danger-text: #ff9a9a;
+  --danger-border: #6b1c1c;
 
   --konsen-bg: #4a2c00;
   --konsen-border: #7a4a00;
@@ -206,6 +208,7 @@ body { margin: 0; background: var(--bg); }
 .board-summary {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 0.75rem;
   margin-bottom: 1rem;
   font-size: 0.85rem;
@@ -225,6 +228,62 @@ body { margin: 0; background: var(--bg); }
 .chip.result-done {
   background: var(--accent-dim);
   color: var(--accent);
+}
+.chip.axis-lock {
+  background: var(--border);
+  color: var(--text-2);
+  border: 1px solid var(--border-2);
+}
+/* 軸の固定の乖離（⚠）。web の .chip-danger / .axis-lock-note と同じ形で、summary をチップにして
+   クリックで理由を開く（#767・#777）。ネイティブの marker は消して .caret で開閉を示す。 */
+.axis-lock-note {
+  padding: 0;
+  cursor: pointer;
+}
+.axis-lock-note > summary {
+  display: inline-block;
+  list-style: none;
+  cursor: pointer;
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+  background: var(--danger-bg);
+  color: var(--danger-text);
+  border: 1px solid var(--danger-border);
+}
+.axis-lock-note > summary::-webkit-details-marker {
+  display: none;
+}
+.axis-lock-note > summary .caret {
+  display: inline-block;
+  width: 0;
+  height: 0;
+  margin-right: 0.35rem;
+  vertical-align: middle;
+  border-top: 0.32em solid transparent;
+  border-bottom: 0.32em solid transparent;
+  border-left: 0.4em solid currentColor;
+  transition: transform 0.15s ease;
+}
+.axis-lock-note[open] > summary .caret {
+  transform: rotate(90deg);
+}
+/* 動きを抑えたいユーザーには回転アニメを無効化（状態自体は保つ）。 */
+@media (prefers-reduced-motion: reduce) {
+  .axis-lock-note > summary .caret {
+    transition: none;
+  }
+}
+/* 展開後の理由文はサマリ行の下に全幅で落とす。 */
+.board-summary .axis-lock-note[open] {
+  flex-basis: 100%;
+}
+.axis-lock-reason {
+  margin: 0.35rem 0 0;
+  font-size: 0.8rem;
+  font-weight: normal;
+  line-height: 1.6;
+  color: var(--text-soft);
+  cursor: auto;
 }
 .axis-prob { color: var(--text-soft); }
 .qualifying { color: var(--muted); }
