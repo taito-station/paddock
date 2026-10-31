@@ -34,17 +34,19 @@
 
 use chrono::{DateTime, NaiveDate, NaiveTime, TimeZone, Utc};
 use paddock_domain::{
-    GateNum, HorseEntry, HorseName, HorseNum, Race, RaceCard, RaceId, RacePayouts, Surface,
-    TrackCondition, Venue,
+    GateNum, HorseEntry, HorseName, HorseNum, Mark, PadPrediction, PredictionHorse, Race, RaceCard,
+    RaceId, RacePayouts, Surface, TrackCondition, Venue,
 };
 use paddock_use_case::repository::{
-    OddsRepository, OddsRow, PredictBetRecord, PredictRaceConditionRecord, PredictSessionRecord,
-    PredictSessionRepository, RaceCardRepository, RaceOddsRecord, RaceRepository,
+    MorningSelection, MorningSelectionRepository, OddsRepository, OddsRow, PadPredictionRepository,
+    PredictBetRecord, PredictRaceConditionRecord, PredictSessionRecord, PredictSessionRepository,
+    RaceCardRepository, RaceOddsRecord, RaceRepository,
 };
 use paddock_use_case::{
-    Interactor, OddsInteractor, OddsScraper, PayoutFetcher, ScrapedOdds, SettleInteractor,
+    FixSource, Interactor, OddsInteractor, OddsScraper, PayoutFetcher, ScrapedOdds,
+    SettleInteractor,
 };
-use predict::session::run_overview;
+use predict::session::{RaceView, fixed_portfolio, render_race_prediction, run_overview};
 use predict::setup::App;
 use rdb_gateway::PostgresRepository;
 use sqlx::PgPool;
@@ -629,4 +631,181 @@ async fn overview_no_odds_path_does_not_touch_predict_session_tables(pool: PgPoo
             "NoOdds 経路でも予想セッション 4 テーブルは不変（explain={explain}, #561）"
         );
     }
+}
+
+/// 対話の predict（対話・`--skip-all`・`--overview` で共有する組み方）が、盤と同じ固定で買い目を組む（#776）。
+///
+/// 朝の選定が無ければ固定なし（ライブの首位が軸）。同じ日の朝の選定を保存すると、軸・相手がその選定に
+/// なる。朝の軸はライブの首位ではない馬にして、固定が効いていることを区別できるようにする。
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn predict_portfolio_is_fixed_by_the_morning_selection(pool: PgPool) {
+    let repo = PostgresRepository::new(pool.clone());
+    let app = test_app(&pool);
+    seed_race_card(&repo, RACE_RECORDED).await;
+    seed_race_odds(&repo, RACE_RECORDED).await;
+    let r = race(date(), RACE_RECORDED, 8, 1);
+    let views = app
+        .interactor
+        .predict_race_views(&r.race_id, None, None, false)
+        .await
+        .unwrap();
+    let odds = app
+        .odds
+        .race_odds_cached(&r.race_id)
+        .await
+        .unwrap()
+        .unwrap();
+
+    let unfixed = fixed_portfolio(&app, &r, &views, &odds, RACE_BUDGET)
+        .await
+        .unwrap();
+    assert_eq!(
+        unfixed.source,
+        FixSource::None,
+        "朝の選定が無ければ固定なし"
+    );
+    let live_axis = unfixed.portfolio.axis.expect("ライブの首位").value();
+
+    let morning_axis = if live_axis == 3 { 1 } else { 3 };
+    let partners: Vec<u32> = [1u32, 2, 3]
+        .into_iter()
+        .filter(|&n| n != morning_axis)
+        .collect();
+    repo.save_morning_selection(&MorningSelection {
+        race_id: RACE_RECORDED.to_string(),
+        date: date(),
+        axis: morning_axis,
+        partners: partners.clone(),
+        konsen_band: vec![],
+        odds_fetched_at: "2026-03-28T00:30:00+00:00".to_string(),
+        computed_at: "2026-03-28T01:00:00Z".to_string(),
+    })
+    .await
+    .unwrap();
+
+    let fixed = fixed_portfolio(&app, &r, &views, &odds, RACE_BUDGET)
+        .await
+        .unwrap();
+    assert!(
+        matches!(fixed.source, FixSource::Morning { .. }),
+        "出所は朝の選定: {:?}",
+        fixed.source
+    );
+    assert_eq!(
+        fixed.portfolio.axis.map(|a| a.value()),
+        Some(morning_axis),
+        "軸は朝の選定（ライブの首位 {live_axis} ではない）"
+    );
+    let mut got: Vec<u32> = fixed.portfolio.partners.iter().map(|n| n.value()).collect();
+    got.sort_unstable();
+    assert_eq!(got, partners, "相手は朝の選定");
+
+    // 表示と記録（対話・--skip-all・--overview で共有する render）も固定済みの買い目を返す。
+    // render が fixed_portfolio を通らなくなるとここで落ちる。
+    let RaceView::Shown(shown, shown_source) =
+        render_race_prediction(&app, &r, None, RACE_BUDGET, false, true)
+            .await
+            .unwrap()
+    else {
+        panic!("出馬表とオッズがあるので Shown になる");
+    };
+    assert_eq!(
+        shown.axis.map(|a| a.value()),
+        Some(morning_axis),
+        "render の買い目（記録に使う）の軸も朝の選定"
+    );
+    assert!(
+        matches!(shown_source, FixSource::Morning { .. }),
+        "render は出所も返す（記録の手前の確認に使う）"
+    );
+}
+
+/// 朝の選定が別の日付のものしか無ければ固定しない。記録◎（pad の Honmei）があれば軸だけ固定する（#776）。
+/// predict が開催日と記録◎ を共通関数に渡していることを確かめる（渡し忘れるとこのテストが落ちる）。
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn predict_portfolio_uses_recorded_axis_and_ignores_other_day_morning(pool: PgPool) {
+    let repo = PostgresRepository::new(pool.clone());
+    let app = test_app(&pool);
+    seed_race_card(&repo, RACE_RECORDED).await;
+    seed_race_odds(&repo, RACE_RECORDED).await;
+    let r = race(date(), RACE_RECORDED, 8, 1);
+    let views = app
+        .interactor
+        .predict_race_views(&r.race_id, None, None, false)
+        .await
+        .unwrap();
+    let odds = app
+        .odds
+        .race_odds_cached(&r.race_id)
+        .await
+        .unwrap()
+        .unwrap();
+    let live_axis = fixed_portfolio(&app, &r, &views, &odds, RACE_BUDGET)
+        .await
+        .unwrap()
+        .portfolio
+        .axis
+        .expect("ライブの首位")
+        .value();
+    let other_axis = if live_axis == 3 { 1 } else { 3 };
+
+    // 別の日付（延期・代替開催で race_id が同じ）の朝の選定では固定しない
+    repo.save_morning_selection(&MorningSelection {
+        race_id: RACE_RECORDED.to_string(),
+        date: other_date(),
+        axis: other_axis,
+        partners: vec![],
+        konsen_band: vec![],
+        odds_fetched_at: "2026-03-28T00:30:00+00:00".to_string(),
+        computed_at: "2026-03-28T01:00:00Z".to_string(),
+    })
+    .await
+    .unwrap();
+    let other_day = fixed_portfolio(&app, &r, &views, &odds, RACE_BUDGET)
+        .await
+        .unwrap();
+    assert_eq!(
+        other_day.source,
+        FixSource::None,
+        "別の日付の朝の選定は使わない"
+    );
+
+    // 記録◎ があれば軸だけ固定する（ライブの首位ではない馬）
+    repo.save_pad_prediction(
+        &PadPrediction {
+            date: date(),
+            venue: Venue::Nakayama,
+            race_num: 1,
+            title: None,
+            budget: None,
+            strategy_note: None,
+            commentary: None,
+            horses: vec![PredictionHorse {
+                horse_num: other_axis,
+                horse_name: "テストウマ".to_string(),
+                jockey: None,
+                mark: Some(Mark::Honmei),
+                win_odds: None,
+                popularity: None,
+                win_prob: None,
+                place_prob: None,
+                show_prob: None,
+                comment: None,
+            }],
+            bets: Vec::new(),
+            result: None,
+        },
+        fixed_at(0),
+    )
+    .await
+    .unwrap();
+    let recorded = fixed_portfolio(&app, &r, &views, &odds, RACE_BUDGET)
+        .await
+        .unwrap();
+    assert_eq!(recorded.source, FixSource::RecordedAxis, "記録◎ の軸だけ");
+    assert_eq!(
+        recorded.portfolio.axis.map(|a| a.value()),
+        Some(other_axis),
+        "軸は記録◎（ライブの首位 {live_axis} ではない）"
+    );
 }

@@ -81,6 +81,41 @@ pub enum FixSource {
     FirstSweep { captured_at: String, recorded: bool },
 }
 
+/// 固定の出所を表示用の文言にする（predict-watch のログと対話の predict の 🔒 行で共有・#776）。
+/// 例: `朝 09:12` / `記録◎ ＋ 初回スイープ 15:00` / `記録◎` / `固定なし`。時刻は JST の `HH:MM`。
+pub fn fix_source_label(source: &FixSource) -> String {
+    let with_recorded = |recorded: bool, base: String| {
+        if recorded {
+            format!("記録◎ ＋ {base}")
+        } else {
+            base
+        }
+    };
+    match source {
+        FixSource::None => "固定なし".to_string(),
+        FixSource::RecordedAxis => "記録◎".to_string(),
+        FixSource::Morning {
+            odds_fetched_at,
+            recorded,
+        } => with_recorded(*recorded, format!("朝 {}", jst_hhmm(odds_fetched_at))),
+        FixSource::FirstSweep {
+            captured_at,
+            recorded,
+        } => with_recorded(*recorded, format!("初回スイープ {}", jst_hhmm(captured_at))),
+    }
+}
+
+/// UTC rfc3339 を JST `HH:MM` にする。解釈できなければそのまま返す（表示を止めず、人が気づけるように）。
+fn jst_hhmm(rfc3339: &str) -> String {
+    DateTime::parse_from_rfc3339(rfc3339)
+        .ok()
+        .and_then(|dt| {
+            chrono::FixedOffset::east_opt(9 * 3600)
+                .map(|jst| dt.with_timezone(&jst).format("%H:%M").to_string())
+        })
+        .unwrap_or_else(|| rfc3339.to_string())
+}
+
 fn parse_utc(s: &str) -> Option<DateTime<Utc>> {
     DateTime::parse_from_rfc3339(s)
         .ok()
@@ -274,6 +309,14 @@ mod tests {
 
     use super::*;
     use crate::interactor::race::predict::RecentRunsCoverage;
+
+    #[test]
+    fn jst_hhmm_converts_utc_and_passes_through_garbage() {
+        assert_eq!(jst_hhmm("2026-08-09T00:15:03Z"), "09:15");
+        assert_eq!(jst_hhmm("2026-08-09T09:27:37+00:00"), "18:27");
+        // 解釈できない値でも表示を止めず、そのまま出して人が気づけるようにする。
+        assert_eq!(jst_hhmm("not-a-time"), "not-a-time");
+    }
 
     fn hn(n: u32) -> HorseNum {
         HorseNum::try_from(n).unwrap()
