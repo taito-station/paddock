@@ -9,8 +9,32 @@ use std::collections::HashMap;
 
 use paddock_domain::{
     BetMethod, ExplainCategory, FactorExplanation, HorseExplanation, HorseNum, HorseProbability,
-    Portfolio, PrevRunSummary, Surface, Verdict,
+    PinnedSelection, Portfolio, PrevRunSummary, Surface, Verdict,
 };
+
+/// 買い目の固定（🔒）の中身を 1 行の本体にする: `軸{軸} 相手{相手}{混戦} 固定（{出所}）`（#601・#767・#776）。
+/// predict-watch のログと対話の predict で共有する。行頭の記号・レースのラベル・固定なしの扱いは
+/// 呼び出し側が決める（固定なしの意味は predict-watch と predict で違う）。出所の文言は
+/// use-case の `fix_source_label` で作って渡す（このクレートは domain にしか依存しない）。
+pub fn format_pin_body(pinned: &PinnedSelection, source_label: &str) -> String {
+    let nums = |v: &[HorseNum]| {
+        v.iter()
+            .map(|n| n.value().to_string())
+            .collect::<Vec<_>>()
+            .join(",")
+    };
+    let axis = pinned
+        .axis
+        .map(|a| a.value().to_string())
+        .unwrap_or_else(|| "-".to_string());
+    let partners = pinned.partners.as_deref().map(nums).unwrap_or_default();
+    let konsen = match pinned.konsen_band.as_deref() {
+        Some(b) if b.len() >= 4 => format!(" 混戦[{}]", nums(b)),
+        Some(_) => " 非混戦".to_string(),
+        None => String::new(),
+    };
+    format!("軸{axis} 相手{partners}{konsen} 固定（{source_label}）")
+}
 
 /// 確率テーブル（馬番/馬名/勝率/連対率/複勝率）を盤面順のまま行に整形する。先頭はヘッダ行。
 pub fn format_probs(probs: &[HorseProbability]) -> Vec<String> {

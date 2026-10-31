@@ -204,8 +204,9 @@ pub struct RecommendationBet {
 
 /// `GET /api/races/{race_id}/recommendations` のレスポンス。
 ///
-/// CLI `predict` と同じ軸流しポートフォリオ（馬連＋ワイド＋三連複, #122）を予算内・100 円単位で
-/// 返す。`bets` が空になる原因は 2 通りで、`odds_available` で区別する:
+/// CLI `predict` と同じ組み方の軸流しポートフォリオ（馬連＋ワイド＋三連複, #122）を予算内・100 円単位で
+/// 返す。ただし朝の選定・記録◎ による固定（#767・#776）は通さないので、固定があるレースでは
+/// `predict` と盤（`/board`）の買い目と値が違う。`bets` が空になる原因は 2 通りで、`odds_available` で区別する:
 /// - `odds_available=false`: 保存オッズ（#51）が無い → SPA は「最新取得」を促す。
 /// - `odds_available=true` かつ `bets` 空: オッズはあるが予算内で組める買い目が無い（または確率が
 ///   空）＝「該当なし」→ 「最新取得」は出さない。

@@ -13,14 +13,15 @@ use chrono::NaiveDate;
 
 use paddock_domain::{
     HorseExplanation, HorseName, HorseNum, HorseProbability, KONSEN_BAND_RATIO, KONSEN_MIN_HORSES,
-    Mark, PadPrediction, Portfolio, RaceId, RaceOdds, Surface, TrackCondition, Venue, konsen_band,
+    Mark, PadPrediction, PinnedSelection, Portfolio, RaceId, RaceOdds, Surface, TrackCondition,
+    Venue, konsen_band,
 };
 
 use crate::compose_portfolio;
 use crate::error::Result;
 use crate::interactor::Interactor;
 use crate::interactor::race::commentary::{horse_detail_lines, horse_headline, race_commentary};
-use crate::interactor::race::predict::morning::resolve_fixed_selection;
+use crate::interactor::race::predict::morning::{FixSource, resolve_fixed_selection};
 use crate::repository::{
     ConditionRun, HandicapNoteRow, MorningSelection, MorningSelectionRepository, OddsRepository,
     PadPredictionRepository, RaceCardRepository, RaceResultRepository, StatsRepository,
@@ -217,6 +218,29 @@ impl<
         + RaceResultRepository,
 > Interactor<R>
 {
+    /// 盤と対話の predict の買い目の固定を決める（#767・#776）: 同じ日の朝の選定 → 記録◎ の軸だけ → なし。
+    ///
+    /// 規則は [`resolve_fixed_selection`] のまま、初回スイープ（T-40）は渡さない（持つのは predict-watch
+    /// だけ）。web・desktop の盤と CLI の predict がこの関数で組むので、`predict_bets` に書く 3 経路の
+    /// 買い目の構造がそろう。記録◎（pad の Honmei）は呼び出し側が引いて渡す（盤は pad を overlay にも
+    /// 使うので、ここで引き直さない）。`race_date` は出馬表の開催日で、別の日付の朝の選定では固定しない。
+    /// 返り値の朝の選定は、盤が固定の表示（`fixed_selection`）を組むのに使う。
+    pub async fn board_fixed_selection(
+        &self,
+        race_id: &RaceId,
+        race_date: Option<NaiveDate>,
+        recorded_axis: Option<HorseNum>,
+    ) -> Result<(PinnedSelection, FixSource, Option<MorningSelection>)> {
+        let morning = same_day_morning(
+            self.repository
+                .find_morning_selection(race_id.value())
+                .await?,
+            race_date,
+        );
+        let (pinned, source) = resolve_fixed_selection(recorded_axis, morning.as_ref(), None);
+        Ok((pinned, source, morning))
+    }
+
     /// 1レース盤（全頭 ＋ 買い目 ＋ 混戦/乖離/重なり）を組んで返す。
     ///
     /// 確率は [`Self::recommend_bets`] と同経路（軸/相手=blended・EV=pure の #272 循環断ち）。
@@ -258,14 +282,10 @@ impl<
         // （predict-watch と同じ規則＝`resolve_fixed_selection`）。これで盤と predict-watch の買い目の構造が
         // そろう（朝の選定があるレースでは）。盤は初回スイープ（T-40）を持たないので、朝の選定が無いレースは
         // 記録軸だけの固定（従来どおり）。オッズ無しなら組まない。
-        let morning_selection = same_day_morning(
-            self.repository
-                .find_morning_selection(race_id.value())
-                .await?,
-            card.as_ref().map(|c| c.date),
-        );
         let recorded = recorded_axis.and_then(|n| HorseNum::try_from(n).ok());
-        let (pinned, _) = resolve_fixed_selection(recorded, morning_selection.as_ref(), None);
+        let (pinned, _, morning_selection) = self
+            .board_fixed_selection(race_id, card.as_ref().map(|c| c.date), recorded)
+            .await?;
         let field: Vec<u32> = views
             .blended
             .iter()

@@ -5,7 +5,10 @@ status: Confirmed
 kind: specification
 doc_class: [D23, D22]
 tags: [D23, D22]
-updated: "2026-10-05"
+sources:
+  - qa/QA-predict-fixed-selection-776.md
+distilled_from_sha: "fd355c9d"
+updated: "2026-10-31"
 ---
 
 # 期待値計算・買い目選択・Kelly 配分ロジック仕様書
@@ -263,7 +266,7 @@ Domain 層に純粋関数として実装し、IO・状態なし。`PlaceOdds` �
 | REQ-D23-004 | fractional Kelly は賭け額配分に使わない。`betting/kelly.rs` は EV 候補選抜（`min_kelly` の curation）に留める | ADR 0054 の同一土俵比較（定額 vs Kelly・71R walk-forward）を再実行し、**定額土俵で Kelly 重みが ADR 0054 当時の対照（Python `live_ev.py` のヒューリスティック＝確率重み＋最低 ¥100 の最大剰余法・ROI 75.5%・σ 92.5）を上回らないこと**（**production の配分は均等割り**＝REQ-D23-003。0054 の「現行」は当時の Python 土俵を指す）、および **bankroll 土俵で full Kelly が破産すること** | ADR 0054 | Confirmed |
 | REQ-D23-005 | 混戦判定は「◎の model 勝率の 0.70 倍以上が ◎含め 4 頭以上」。**オッズ条件を併用しない** | ADR 0028 のオッズ閾値スイープを再実行（baseline を上回る閾値が無いこと） | ADR 0028 | Confirmed |
 | REQ-D23-006 | `scripts/predict-check/` の Python（`live_ev.py`）を**張る買い目の配分に使わない**。オフライン EV レポート専用（配分方式の正が `build_portfolio` であることは REQ-D01-007。ここはその裏返しの禁止事項） | `build_portfolio` の単体テストと、`predict` / `predict-watch` が同一関数を通ること | ADR 0064 の追補（#346）——**0064 本体の決定は逆**（当時はライブ writer を Python `live_ev.py` に一本化するとしていた）。Rust に一本化したのは追補側 | Confirmed |
-| REQ-D23-007 | `predict-watch` の買い目選定（軸・相手・混戦判定）は**朝の選定で確定し、以後オッズで動かさない**（#767）。朝の選定＝監視窓に入る前に保存された朝の単勝スナップショット（当日 JST 0 時以降で最初の単勝）で、本番の設定（予算 ¥5,000・α=0.2）で組んだ選定。predict-watch が計算して `morning_selections` に 1 レース 1 行・先勝ちで保存する。朝の選定が無いレースは**当日の初回スイープ**（そのレースが監視窓〈既定 40 分〉に入った最初のスイープ。起動時点で既に窓内なら起動直後のスイープ）で確定する。初回スイープで固定した後に朝の選定ができても入れ替えない。固定した相手が取消なら落とすが**ライブ順位で補充しない**（点数が減る）。固定の優先順は 朝の選定（記録◎ は組むときに軸へ強制し、保存した後に入った記録◎ は使わない）→ その日の初回スイープ（そのスイープで読んだ記録◎ を軸に反映済み）→ 記録◎ の軸だけ → 固定なし。盤（`/races/{id}/board`）も 朝の選定 → 記録◎ の軸だけ → 固定なし で買い目を組む | `cargo test -p paddock-domain` の `pinned_selection_survives_market_movement_while_roi_moves`（オッズを差し替えた 2 スイープで選定が一致し ROI は動く／固定しなければ動く）・`forced_partners_drops_scratched_without_backfill`、`cargo test -p paddock-use-case --lib morning`（優先順・初回スイープの後に保存された朝の選定で入れ替えないこと）、`cargo test -p paddock-use-case --test test_predict_race` の `snapshot_saved_after_window_entry_is_not_morning`、`cargo test -p rdb-gateway --test test_morning_selections` の `first_save_wins`、`cargo test -p rdb-gateway --test test_live_ev_persistence` の `pins_return_the_earliest_sweep_not_the_latest`（**最古**を返すこと）、および開催日に `scripts/predict-check/gate_calibration.py` の「朝の固定」節と「軸（◎）の安定性」節が `0/N` になること（朝の軸の取消でライブの首位へ戻った外れは除き、該当行を確かめる） | ADR 0078 | Confirmed |
+| REQ-D23-007 | `predict-watch` の買い目選定（軸・相手・混戦判定）は**朝の選定で確定し、以後オッズで動かさない**（#767）。朝の選定＝監視窓に入る前に保存された朝の単勝スナップショット（当日 JST 0 時以降で最初の単勝）で、本番の設定（予算 ¥5,000・α=0.2）で組んだ選定。predict-watch が計算して `morning_selections` に 1 レース 1 行・先勝ちで保存する。朝の選定が無いレースは**当日の初回スイープ**（そのレースが監視窓〈既定 40 分〉に入った最初のスイープ。起動時点で既に窓内なら起動直後のスイープ）で確定する。初回スイープで固定した後に朝の選定ができても入れ替えない。固定した相手が取消なら落とすが**ライブ順位で補充しない**（点数が減る）。固定の優先順は 朝の選定（記録◎ は組むときに軸へ強制し、保存した後に入った記録◎ は使わない）→ その日の初回スイープ（そのスイープで読んだ記録◎ を軸に反映済み）→ 記録◎ の軸だけ → 固定なし。盤（`/races/{id}/board`）と対話の `predict`（対話・`--skip-all`・`--overview`。#776）も 朝の選定 → 記録◎ の軸だけ → 固定なし で買い目を組む（同じ関数 `board_fixed_selection`）。`/recommendations` は固定しない | `cargo test -p paddock-domain` の `pinned_selection_survives_market_movement_while_roi_moves`（オッズを差し替えた 2 スイープで選定が一致し ROI は動く／固定しなければ動く）・`forced_partners_drops_scratched_without_backfill`、`cargo test -p paddock-use-case --lib morning`（優先順・初回スイープの後に保存された朝の選定で入れ替えないこと）、`cargo test -p paddock-use-case --test test_predict_race` の `snapshot_saved_after_window_entry_is_not_morning`、`cargo test -p rdb-gateway --test test_morning_selections` の `first_save_wins`、`cargo test -p rdb-gateway --test test_live_ev_persistence` の `pins_return_the_earliest_sweep_not_the_latest`（**最古**を返すこと）、`cargo test -p predict --test overview` の `predict_portfolio_is_fixed_by_the_morning_selection`（predict の買い目の軸・相手が朝の選定になること）・`predict_portfolio_uses_recorded_axis_and_ignores_other_day_morning`（別の日付の朝の選定は使わず、記録◎ の軸だけ固定すること）、および開催日に `scripts/predict-check/gate_calibration.py` の「朝の固定」節と「軸（◎）の安定性」節が `0/N` になること（朝の軸の取消でライブの首位へ戻った外れは除き、該当行を確かめる） | ADR 0078 | Confirmed |
 <!-- REQ:end D23 -->
 
 **D01 と重複させない。** 「ROI ≥ 100% のレースだけ張る」「軸ロック＋ズレ増額」「買い目の提示形式と
@@ -587,3 +590,72 @@ ADR 0078 は「検証上の留保」で、実地確認（開催日に `gate_cali
 - 既知の制約（ユーザー判断で守りは足さず記録だけにした）: 朝の選定が初回スイープの後に保存・読み出される経路では、固定が一度入れ替わりうる。DB の部分障害で、あるスイープだけ朝の選定を一括でもレース単位でも読めず、初回スイープの保存だけ成功したレースは、次のスイープで朝の選定に切り替わる。`--window` の違う predict-watch を二重に起動したときも同じ形になる。盤は初回スイープを見ないので、このとき盤と predict-watch が食い違う。どちらも gate_calibration の「朝の固定」節で外れとして見える。
 - 延期・代替開催で race_id が同じまま日付が変わったときは、前の日の朝の選定を使わない（`morning_selections` の主キーが race_id なので新しい日の選定も保存できず、初回スイープの固定に戻る）。
 - 盤の買い目（`/board`）は固定（記録◎・朝の選定）を通すが、`/recommendations` と対話の `predict` は固定しない。固定があるレースでは値が違う（`predict` の記録との関係は別 issue）。
+
+### #776: 対話の predict の買い目を盤と同じ朝の固定で組む (2026-10-25) — 採用
+
+#### コンテキスト
+
+- #767 で predict-watch と盤の買い目（軸・相手・混戦）を朝の選定で固定したが、対話の `paddock-predict` は固定なし
+  （`PinnedSelection::default()`）で組んだ買い目を表示し、`y` でそのまま `predict_bets` に記録していた。#767 の影響の最終行で
+  「`predict` の記録との関係は別 issue」とした件。
+- `predict_bets` に書く経路は 3 つ（web の盤・desktop の盤・CLI の predict）で、固定を通っていないのは CLI の predict だけだった。
+  🔒 に従って買うと記録と実際の購入がずれ、REQ-D01-006 の実績集計（`bet_records` の ◎）の母集団に「固定なしの実行時点の首位」と
+  「朝の固定」の 2 つの定義が混ざっていた。
+- 朝の選定（`morning_selections`）を書くのは predict-watch だけで、keiba-start は predict（Step 2）を predict-watch の起動（Step 5）より
+  先に回す順番だった。
+
+#### 決定
+
+PO の回答（質問票・`qa/QA-predict-fixed-selection-776.md`）に従う。
+
+1. 盤の固定（同じ日の朝の選定 → 記録◎ の軸だけ → なし。初回スイープは使わない）を use-case の `board_fixed_selection` に切り出し、
+   盤と対話の predict が同じ関数で組む。predict は `fixed_portfolio` で固定済みの買い目を組み、表示と記録に使う。
+2. 対話・`--skip-all`・`--overview` のすべてで固定済みの買い目を出す。各レースの買い目の見出しの直下に、predict-watch のログと同じ形の
+   `🔒 軸… 相手… 固定（朝 HH:MM）` を出す。出所が朝の選定でない（記録◎ の軸だけ・固定なし）ときは、相手・混戦が実行時点の
+   オッズなので「predict では記録しない」を添える（`session::pin_source_lines`）。
+   🔒 行の本体（`predict_format::format_pin_body`）と出所の文言（use-case の `fix_source_label`）は predict-watch と共有する
+   （predict-watch の出力は golden テストでバイト単位に固定して変えていない）。
+3. `/recommendations` は固定しない（呼び出している画面が web にも desktop にも無い）。
+4. keiba-start に Step 1.7 を足し、predict-watch の起動を predict（Step 2）より前に移す（通知の閾値を下げた起動もここで行う）。
+   朝の選定ができたかは predict の各レースの出所の行で判定する（predict-watch のログの件数の行はレースを特定できない）。
+5. 朝の選定が無いレースが残っていても predict は回してよい。そのレースは predict では記録せず、朝の選定ができてから盤の執行パネルで
+   記録する（2026-10-31 追加の PO 判断・qa Q7）。これを運用だけに任せず、出所が朝の選定でないレースの記録の手前に確認を挟む
+   （`may_record_unfixed_race`。既定は記録しない、`y` のときだけ記録する）。完全には禁止しない——predict-watch を回していない日は
+   朝の選定がずっと作られず、盤から記録しても同じく固定なしになるため（#623 の「確認を経れば通す」と同じ形）。
+6. 記録◎（人手の ◎）を固定に効かせるなら、predict-watch の起動（Step 1.7）より前に取り込む。運用はこれを書くだけにする
+   （記録◎ の経路は #767 の時点で実地では動いていない。2026-10-31 追加の PO 判断・qa Q6）。
+
+#### 理由
+
+- 記録の 3 経路が同じ関数で組むので、`predict_bets` の買い目の構造の定義が 1 つになる。規則（`resolve_fixed_selection`）を二重に実装しない。
+- 朝の選定は「当日 JST 0 時以降で最初の単勝」から組むので、predict-watch を早く起動しても選定の中身は変わらない。起動の順番を
+  入れ替えるだけで、predict の時点で朝の選定がある状態にできる。
+
+#### 却下した代替案
+
+- **運用で吸収する**（コードは変えず「🔒 で買うときは盤から記録する」と書く）: CLI の `y` で記録すると母集団が混ざり続ける（PO 判断）。
+- **predict の側で `ensure_morning_selection` を呼んで朝の選定を作る**: #767 で「朝の選定は predict-watch が計算・保存する」と決めており、
+  書き手を増やすと先勝ちの競合が増える。
+- **opt-in のフラグにする**: #767 で切り替えフラグは YAGNI として却下済み。
+- **predict でも初回スイープを固定の元に渡す**: 盤と違う規則になり、web・desktop の記録とそろわない。
+- **`--overview` / `--skip-all` は実行時点のまま**: 表示の経路が 2 つに分かれる（PO 判断）。
+
+#### 影響
+
+- 朝の選定があるレースでは、predict の表示・記録の軸・相手・混戦が盤と同じになる。朝の選定ができる前（predict-watch の起動前・
+  odds-collect の初回スイープ前）に predict を回したレースは、従来どおり固定なし（記録◎ があれば軸だけ）で組まれる。
+- 出所が朝の選定でないレースは、確認で `y` を選んだときだけ記録される。その記録は固定なしの構造のまま `predict_bets` に入る。
+- `predict_bets` には固定の出所を残さない（盤の 2 経路も同じ。出所の記録は別 issue）。#776 のマージ日より前の CLI の記録は固定なしで、マージ後も朝の選定ができる前に記録した
+  レースは固定なし。REQ-D01-006 の集計で母集団を分けるときは、日付と predict-watch のログ（朝の選定の確定時刻）で判断する。
+- predict の 🔒 行は固定の値（取消を反映する前）を出す。盤は取消を反映した後の買い目の軸・相手を出すので、取消のあるレースでは
+  表示が食い違いうる（買い目そのものは同じ `compose_portfolio` の規則で組まれる）。
+- 馬連 vs 馬単の EV 診断は軸ロックの対象外のまま（常に勝率首位）。固定後の predict では、買い目の軸と診断の軸が違って並びうる。
+- 朝の選定の読み出しの DB エラーは、`predict_race_views` と同じく伝播する（セッションは止まる。黙って固定なしにはしない）。
+- predict-watch を先に起動すると、窓の前の全レースの朝の選定が最初のスイープで保存される。その後に取り込んだ記録◎ は固定に入らない
+  （#767 の規則）。改変前の手順（predict-watch の起動が Step 5）より、記録◎ が効く期間は短くなる。
+- 朝の選定が作られないレース（窓に入った後の単勝しか無い・その日に predict-watch を回していない過去日〈#767 より前など〉の `--overview`）は、
+  predict と盤ではずっと朝の選定の固定にならない。
+  predict-watch はこのレースを初回スイープで固定するが、盤と predict は初回スイープを持たないので、記録の経路では predict-watch の 🔒 と
+  同じ構造にならない（既知の制約）。
+- #767 の影響の最終行（「`/recommendations` と対話の `predict` は固定しない」）のうち、対話の `predict` の部分を本エントリで置き換える。
+

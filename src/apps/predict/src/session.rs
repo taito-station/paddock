@@ -7,15 +7,17 @@ use monitor_loop::{
 };
 use paddock_domain::{
     BetCombination, HorseNum, HorseProbability, PairEvDiagnostic, PinnedSelection, Portfolio,
-    PortfolioBet, PortfolioConfig, RECOMMENDED_MARKET_BLEND_ALPHA, Race, RaceId, TrackCondition,
-    pair_ev_diagnostics,
+    PortfolioBet, PortfolioConfig, RECOMMENDED_MARKET_BLEND_ALPHA, Race, RaceId, RaceOdds,
+    TrackCondition, pair_ev_diagnostics,
 };
+use paddock_use_case::repository::PadPredictionRepository;
 use paddock_use_case::{
-    OddsScraper, PayoutFetcher, PredictBetRecord, PredictSessionRecord, compose_portfolio,
+    FixSource, OddsScraper, PayoutFetcher, PredictBetRecord, PredictSessionRecord, PredictionViews,
+    compose_portfolio, fix_source_label, recorded_axis_of,
 };
 use predict_format::{
-    PortfolioFormat, coverage_note, format_explanations, format_portfolio, format_probs,
-    format_probs_with_market, format_recent_runs_warning, surface_jp,
+    PortfolioFormat, coverage_note, format_explanations, format_pin_body, format_portfolio,
+    format_probs, format_probs_with_market, format_recent_runs_warning, surface_jp,
 };
 
 use crate::setup::App;
@@ -212,7 +214,7 @@ async fn run_race<S: OddsScraper + PayoutFetcher>(
     // 確率テーブル・市場比較・買い目推奨・EV 診断の表示は副作用のない `render_race_prediction` に
     // 委譲する（--overview の read-only 再表示と共有・#551）。返り値の portfolio を買い目入力に使う。
     let race_cap = race_budget.min(session.balance);
-    let (portfolio, suggested) = match render_race_prediction(
+    let (portfolio, suggested, source) = match render_race_prediction(
         app,
         race,
         track_condition,
@@ -231,9 +233,9 @@ async fn run_race<S: OddsScraper + PayoutFetcher>(
             }
             return Ok(());
         }
-        RaceView::Shown(portfolio) => {
+        RaceView::Shown(portfolio, source) => {
             let suggested: Vec<u64> = portfolio.bets.iter().map(|b| b.stake).collect();
-            (portfolio, suggested)
+            (portfolio, suggested, source)
         }
     };
 
@@ -279,6 +281,12 @@ async fn run_race<S: OddsScraper + PayoutFetcher>(
         Local::now().naive_local(),
     )? {
         println!("記録せず次のレースへ");
+        return Ok(());
+    }
+    // 朝の選定で固定していないレースの記録も確認を挟む（#776）。相手・混戦が実行時点のオッズで組まれて
+    // いるので、そのまま記録すると盤・predict-watch の 🔒 とずれた構造が `predict_bets` に混ざる。
+    if !may_record_unfixed_race(&mut io::stdin().lock(), &source)? {
+        println!("記録せず次のレースへ（朝の選定ができてから盤の執行パネルで記録する）");
         return Ok(());
     }
 
@@ -346,13 +354,15 @@ async fn run_race<S: OddsScraper + PayoutFetcher>(
 }
 
 /// `render_race_prediction` の結果。表示の後に呼び出し側が取る分岐を伝える。
-enum RaceView {
+/// 表示と記録が固定済みの買い目を使うことを統合テストで確かめるため公開する（#776）。
+pub enum RaceView {
     /// 出馬表未登録（NotFound）。当該レースのみスキップ（Enter 待ちなし）。
     NoEntries,
     /// オッズ未取得。スキップのみ受付（対話時のみ Enter 待ち、--skip-all/--overview は即次へ）。
     NoOdds,
-    /// 通常表示完了。表示に用いた買い目推奨（軸流しポートフォリオ）を返す。
-    Shown(Portfolio),
+    /// 通常表示完了。表示に用いた買い目推奨（軸流しポートフォリオ）と、その固定の出所を返す
+    /// （出所が朝の選定でなければ、記録の手前で確認を挟む・#776）。
+    Shown(Portfolio, FixSource),
 }
 
 /// 1 レースの予想ビュー（過去データ視点の確率テーブル・市場implied比較・買い目推奨・期待回収率・
@@ -362,7 +372,7 @@ enum RaceView {
 /// run_race（対話/--skip-all）と run_overview（--overview 再表示・#551）で表示ロジックを共有し、
 /// 重複と drift を防ぐ。`race_cap` は買い目推奨の予算上限、`track_condition` は予想に用いる馬場前提
 /// （呼び出し側が解決済み）。
-async fn render_race_prediction<S: OddsScraper + PayoutFetcher>(
+pub async fn render_race_prediction<S: OddsScraper + PayoutFetcher>(
     app: &App<S>,
     race: &Race,
     track_condition: Option<TrackCondition>,
@@ -445,10 +455,19 @@ async fn render_race_prediction<S: OddsScraper + PayoutFetcher>(
 
     // 軸流しポートフォリオ（馬連＋ワイド＋三連複）を予算内・100 円単位で生成する。軸/相手は blended、
     // EV/的中は pure（循環断ち, #272）。上限は呼び出し側が決めた race_cap。配分・相手頭数は既定（#122）。
-    let portfolio = compose_portfolio(&views, &odds, race_cap, &PinnedSelection::default());
+    // 軸・相手・混戦は盤と同じ固定（朝の選定 → 記録◎ → なし）で組む（#776）。
+    let FixedPortfolio {
+        portfolio,
+        pinned,
+        source,
+    } = fixed_portfolio(app, race, &views, &odds, race_cap).await?;
 
     println!();
     println!("【市場EV視点：買い目推奨（軸流し, 予算¥{race_cap}/R・EV=純モデル×odds）】");
+    // 固定の出所（#776）。🔒 行は predict-watch のログと同じ形。
+    for line in pin_source_lines(&pinned, &source) {
+        println!("{line}");
+    }
     // 軸/相手・混戦注記・各点の「そのまま買える形」整形は predict-watch と共有する
     // `predict_format::format_portfolio` に委譲する（#452）。predict は 2 スペースインデント・
     // 0 円脚も出す・未取得脚にも EV を付ける設定（現行出力をバイト単位で保つ）。軸なし・買い目なしの
@@ -494,7 +513,69 @@ async fn render_race_prediction<S: OddsScraper + PayoutFetcher>(
     );
     print_pair_ev_diagnostics(diag.axis, &views.blended, &diag.rows);
 
-    Ok(RaceView::Shown(portfolio))
+    Ok(RaceView::Shown(portfolio, source))
+}
+
+/// 買い目推奨の見出しの直下に出す、固定の出所の行（#776）。
+///
+/// 朝の選定で固定したレースだけが、盤・predict-watch と同じ構造の買い目になる。それ以外（記録◎ の軸だけ・
+/// 固定なし）は相手・混戦が実行時点のオッズで決まるので、predict では記録しないことを行に添える
+/// （記録は朝の選定ができてから盤の執行パネルで行う。keiba-start Step 3）。朝の選定が作られないレース
+/// （窓に入った後の単勝しか無い・その日に predict-watch を回していない過去日）もこの扱いになる。
+pub fn pin_source_lines(pinned: &PinnedSelection, source: &FixSource) -> Vec<String> {
+    const NOT_MORNING: &str =
+        "朝の選定が無い。相手・混戦は実行時点のオッズなので、predict では記録しない";
+    if pinned.is_empty() {
+        return vec![format!("  固定なし（{NOT_MORNING}）")];
+    }
+    let mut lines = vec![format!(
+        "  🔒 {}",
+        format_pin_body(pinned, &fix_source_label(source))
+    )];
+    if !matches!(source, FixSource::Morning { .. }) {
+        lines.push(format!("  （{NOT_MORNING}）"));
+    }
+    lines
+}
+
+/// [`fixed_portfolio`] の結果。表示（🔒 行）と記録の両方に使う。
+pub struct FixedPortfolio {
+    pub portfolio: Portfolio,
+    /// 買い目を組むのに使った固定（取消を反映する前の値。🔒 行はこれを出す）。
+    pub pinned: PinnedSelection,
+    pub source: FixSource,
+}
+
+/// 1 レースの買い目を、盤と同じ固定（同じ日の朝の選定 → 記録◎ の軸だけ → なし）で組む（#776）。
+///
+/// 対話・`--skip-all`・`--overview` の表示と、対話の記録（`predict_bets`）はこの買い目を使う。これで
+/// web・desktop の盤から記録した買い目と構造（軸・相手・混戦）がそろう。朝の選定を書くのは predict-watch
+/// だけなので、まだ無いレースは記録◎ の軸だけ、それも無ければ固定なし（実行時点のオッズで組む）。
+/// 記録◎ は pad の Honmei（出走している馬だけ）。DB エラーは伝播する（黙って固定なしにしない）。
+pub async fn fixed_portfolio<S: OddsScraper + PayoutFetcher>(
+    app: &App<S>,
+    race: &Race,
+    views: &PredictionViews,
+    odds: &RaceOdds,
+    race_cap: u64,
+) -> anyhow::Result<FixedPortfolio> {
+    let pad = app
+        .interactor
+        .repository
+        .find_pad_prediction(race.date, race.venue, race.race_num)
+        .await?;
+    let recorded =
+        recorded_axis_of(pad.as_ref(), &views.blended).and_then(|n| HorseNum::try_from(n).ok());
+    let (pinned, source, _) = app
+        .interactor
+        .board_fixed_selection(&race.race_id, Some(race.date), recorded)
+        .await?;
+    let portfolio = compose_portfolio(views, odds, race_cap, &pinned);
+    Ok(FixedPortfolio {
+        portfolio,
+        pinned,
+        source,
+    })
 }
 
 /// EV 一覧を再表示する（--overview、#551）。予想セッション状態（セッション・買い目・馬場条件）は
@@ -869,6 +950,21 @@ fn prompt_record_started_race<R: BufRead>(reader: &mut R, notice: &str) -> anyho
         "買い目を記録しますか？ [y=記録する / それ以外=記録しない] > ",
     )?;
     Ok(matches!(answer.as_deref(), Some("y" | "Y")))
+}
+
+/// 朝の選定で固定していないレースの買い目を記録してよいか（#776）。`false` なら記録せずレースを抜ける。
+/// 出所が朝の選定なら確認せず `true`（stdin を読まない）。それ以外（記録◎ の軸だけ・固定なし）は
+/// 確認に入り、既定（EOF・`y` 以外）は記録しない。完全には禁止しない——predict-watch を回していない日は
+/// 朝の選定がずっと作られず、盤から記録しても同じく固定なしになるため（#623 の「確認を経れば通す」と同じ形）。
+fn may_record_unfixed_race<R: BufRead>(reader: &mut R, source: &FixSource) -> anyhow::Result<bool> {
+    if matches!(source, FixSource::Morning { .. }) {
+        return Ok(true);
+    }
+    let notice = format!(
+        "⚠ このレースは朝の選定で固定されていない（{}）。相手・混戦は実行時点のオッズで組んだ買い目で、\n  盤・predict-watch の 🔒 とずれうる。原則は、朝の選定ができてから盤の執行パネルで記録する（#776）。",
+        fix_source_label(source)
+    );
+    prompt_record_started_race(reader, &notice)
 }
 
 /// このレースの買い目を記録してよいか（#623）。`false` なら記録せずレースを抜ける。
@@ -1919,5 +2015,92 @@ mod tests {
         let mut r = Cursor::new(b"20000\n".to_vec());
         let amounts = read_edited_amounts(&mut r, &bets, &suggested, 10000).unwrap();
         assert_eq!(amounts, vec![0]);
+    }
+}
+
+// #776: 固定の出所の行。既存の `tests` は個別 import なので、別モジュールに置く。
+#[cfg(test)]
+mod pin_source_tests {
+    use paddock_domain::HorseNum;
+
+    use super::*;
+
+    fn n(v: u32) -> HorseNum {
+        HorseNum::try_from(v).unwrap()
+    }
+
+    // 朝の選定で固定したレースだけ 🔒 行のみ。それ以外は predict で記録しないことを添える。
+    #[test]
+    fn pin_source_lines_marks_non_morning_as_not_recordable() {
+        let morning = PinnedSelection {
+            axis: Some(n(3)),
+            partners: Some(vec![n(1), n(5)]),
+            konsen_band: Some(vec![]),
+        };
+        assert_eq!(
+            pin_source_lines(
+                &morning,
+                &FixSource::Morning {
+                    odds_fetched_at: "2026-10-25T00:12:00Z".to_string(),
+                    recorded: false,
+                },
+            ),
+            vec!["  🔒 軸3 相手1,5 非混戦 固定（朝 09:12）".to_string()]
+        );
+        assert_eq!(
+            pin_source_lines(
+                &PinnedSelection::axis_only(Some(n(2))),
+                &FixSource::RecordedAxis
+            ),
+            vec![
+                "  🔒 軸2 相手 固定（記録◎）".to_string(),
+                "  （朝の選定が無い。相手・混戦は実行時点のオッズなので、predict では記録しない）"
+                    .to_string(),
+            ]
+        );
+        assert_eq!(
+            pin_source_lines(&PinnedSelection::default(), &FixSource::None),
+            vec![
+                "  固定なし（朝の選定が無い。相手・混戦は実行時点のオッズなので、predict では記録しない）"
+                    .to_string()
+            ]
+        );
+    }
+}
+
+// #776: 朝の選定で固定していないレースの記録の確認。
+#[cfg(test)]
+mod unfixed_record_tests {
+    use std::io::Cursor;
+
+    use super::*;
+
+    #[test]
+    fn morning_fixed_race_records_without_reading_stdin() {
+        let mut input = Cursor::new(b"n\n".to_vec());
+        let source = FixSource::Morning {
+            odds_fetched_at: "2026-10-25T00:12:00Z".to_string(),
+            recorded: false,
+        };
+        assert!(may_record_unfixed_race(&mut input, &source).unwrap());
+        assert_eq!(input.position(), 0, "朝の選定のレースで stdin を消費した");
+    }
+
+    #[test]
+    fn unfixed_races_are_not_recorded_by_default() {
+        for source in [FixSource::None, FixSource::RecordedAxis] {
+            let mut eof = Cursor::new(Vec::new());
+            assert!(
+                !may_record_unfixed_race(&mut eof, &source).unwrap(),
+                "既定は記録しない: {source:?}"
+            );
+            let mut no = Cursor::new(b"\n".to_vec());
+            assert!(!may_record_unfixed_race(&mut no, &source).unwrap());
+            let mut yes = Cursor::new(b"y\n".to_vec());
+            assert!(
+                may_record_unfixed_race(&mut yes, &source).unwrap(),
+                "y なら記録する: {source:?}"
+            );
+        }
     }
 }

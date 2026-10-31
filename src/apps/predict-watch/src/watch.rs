@@ -11,11 +11,12 @@ use paddock_use_case::repository::{
     PadPredictionRepository,
 };
 use paddock_use_case::{
-    FixSource, MorningOutcome, compose_portfolio, recorded_axis_of, resolve_fixed_selection,
+    FixSource, MorningOutcome, compose_portfolio, fix_source_label, recorded_axis_of,
+    resolve_fixed_selection,
 };
 use predict_format::{
-    PortfolioFormat, coverage_note, format_explanations, format_portfolio, format_probs,
-    format_probs_with_market, format_recent_runs_warning,
+    PortfolioFormat, coverage_note, format_explanations, format_pin_body, format_portfolio,
+    format_probs, format_probs_with_market, format_recent_runs_warning,
 };
 
 use crate::cli::Cli;
@@ -297,61 +298,22 @@ impl MorningTally {
     }
 }
 
-/// UTC rfc3339（`live_ev_snapshots.captured_at`）を JST `HH:MM` にする。解釈できなければそのまま返す。
-fn jst_hhmm(rfc3339: &str) -> String {
-    chrono::DateTime::parse_from_rfc3339(rfc3339)
-        .ok()
-        .and_then(|dt| {
-            chrono::FixedOffset::east_opt(9 * 3600)
-                .map(|jst| dt.with_timezone(&jst).format("%H:%M").to_string())
-        })
-        .unwrap_or_else(|| rfc3339.to_string())
-}
-
-fn nums(v: &[HorseNum]) -> String {
-    v.iter()
-        .map(|n| n.value().to_string())
-        .collect::<Vec<_>>()
-        .join(",")
-}
-
 /// 固定の適用状況を 1 行で出す（#601・#767 で出所に朝を追加）。**固定されていないことも読めるようにする**
 /// のが要点で、従来のログは選定が毎回作り直されている事実がどこにも出ていなかった。
 fn print_pin_status(label: &str, pinned: &PinnedSelection, source: &FixSource) {
+    println!("{}", pin_status_line(label, pinned, source));
+}
+
+// 🔒 行の本体と出所の文言は対話の predict と共有する（#776）。固定なしの行だけは predict-watch 固有
+// （「このスイープで確定し、以降は固定する」は監視ループでしか正しくない）。
+fn pin_status_line(label: &str, pinned: &PinnedSelection, source: &FixSource) -> String {
     if pinned.is_empty() {
-        println!("  🆕 {label}: このスイープで買い目を確定（以降のスイープでは固定）");
-        return;
+        return format!("  🆕 {label}: このスイープで買い目を確定（以降のスイープでは固定）");
     }
-    let axis = pinned
-        .axis
-        .map(|a| a.value().to_string())
-        .unwrap_or_else(|| "-".to_string());
-    let partners = pinned.partners.as_deref().map(nums).unwrap_or_default();
-    let with_recorded = |recorded: bool, base: String| {
-        if recorded {
-            format!("記録◎ ＋ {base}")
-        } else {
-            base
-        }
-    };
-    let source = match source {
-        FixSource::None => "固定なし".to_string(),
-        FixSource::RecordedAxis => "記録◎".to_string(),
-        FixSource::Morning {
-            odds_fetched_at,
-            recorded,
-        } => with_recorded(*recorded, format!("朝 {}", jst_hhmm(odds_fetched_at))),
-        FixSource::FirstSweep {
-            captured_at,
-            recorded,
-        } => with_recorded(*recorded, format!("初回スイープ {}", jst_hhmm(captured_at))),
-    };
-    let konsen = match pinned.konsen_band.as_deref() {
-        Some(b) if b.len() >= 4 => format!(" 混戦[{}]", nums(b)),
-        Some(_) => " 非混戦".to_string(),
-        None => String::new(),
-    };
-    println!("  🔒 {label}: 軸{axis} 相手{partners}{konsen} 固定（{source}）");
+    format!(
+        "  🔒 {label}: {}",
+        format_pin_body(pinned, &fix_source_label(source))
+    )
 }
 
 /// 固定と現在のライブ再計算との乖離を出す（#601）。**軸は動かさず、乖離だけ知らせる**
@@ -1079,6 +1041,57 @@ mod tests {
     // 固定の優先順（朝の選定 → 初回スイープ → 記録◎ の軸だけ → なし）は use-case の `resolve_fixed_selection` の
     // テストが持つ（盤と共有するため）。ここは predict-watch に残る判断だけを見る。
 
+    // #776: 🔒 行の組み立てを predict と共有する前に、現行の出力を golden で固定する（バイト単位で不変）。
+    #[test]
+    fn pin_status_line_is_unchanged() {
+        let n = |v: u32| HorseNum::try_from(v).unwrap();
+        let ns = |v: &[u32]| v.iter().map(|&x| n(x)).collect::<Vec<_>>();
+        assert_eq!(
+            pin_status_line("1R", &PinnedSelection::default(), &FixSource::None),
+            "  🆕 1R: このスイープで買い目を確定（以降のスイープでは固定）"
+        );
+        let morning = PinnedSelection {
+            axis: Some(n(3)),
+            partners: Some(ns(&[1, 5, 7])),
+            konsen_band: Some(ns(&[3, 4, 5, 6])),
+        };
+        assert_eq!(
+            pin_status_line(
+                "1R",
+                &morning,
+                &FixSource::Morning {
+                    odds_fetched_at: "2026-10-25T00:30:00Z".to_string(),
+                    recorded: false,
+                },
+            ),
+            "  🔒 1R: 軸3 相手1,5,7 混戦[3,4,5,6] 固定（朝 09:30）"
+        );
+        let first = PinnedSelection {
+            axis: Some(n(2)),
+            partners: Some(ns(&[1, 3])),
+            konsen_band: Some(vec![]),
+        };
+        assert_eq!(
+            pin_status_line(
+                "1R",
+                &first,
+                &FixSource::FirstSweep {
+                    captured_at: "2026-10-25T06:00:00+00:00".to_string(),
+                    recorded: true,
+                },
+            ),
+            "  🔒 1R: 軸2 相手1,3 非混戦 固定（記録◎ ＋ 初回スイープ 15:00）"
+        );
+        assert_eq!(
+            pin_status_line(
+                "1R",
+                &PinnedSelection::axis_only(Some(n(2))),
+                &FixSource::RecordedAxis
+            ),
+            "  🔒 1R: 軸2 相手 固定（記録◎）"
+        );
+    }
+
     #[test]
     fn window_entry_is_post_time_minus_window_in_utc() {
         let d = NaiveDate::from_ymd_opt(2026, 10, 10).unwrap();
@@ -1143,14 +1156,6 @@ mod tests {
             line.contains("窓に入った後の単勝しか無い 1（T-40 で固定）"),
             "{line}"
         );
-    }
-
-    #[test]
-    fn jst_hhmm_converts_utc_and_passes_through_garbage() {
-        assert_eq!(jst_hhmm("2026-08-09T00:15:03Z"), "09:15");
-        assert_eq!(jst_hhmm("2026-08-09T09:27:37+00:00"), "18:27");
-        // 解釈できない値でも監視を止めず、そのまま出して人が気づけるようにする。
-        assert_eq!(jst_hhmm("not-a-time"), "not-a-time");
     }
 
     /// 起動注記は「到達 0 件」と ADR 0076 を必ず含む（実測に紐づく文言なので落とさない）。
