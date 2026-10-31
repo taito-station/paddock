@@ -10,7 +10,7 @@ sources:
   - qa/QA-fullwidth-after-var-636.md
   - .github/workflows/ci.yml
 distilled_from_sha: "dd4c0fe"
-updated: "2026-10-07"
+updated: "2026-10-31"
 ---
 
 # CI パイプラインの構成と設計意図（D21）
@@ -395,7 +395,10 @@ Dioxus Desktop は wry（WebView）経由で、Linux では `libgtk-3-dev` / `li
 `libglib2.0-dev` 等のシステムライブラリが必要。CI（ubuntu-latest）にこれらを追加するより、
 **macOS ローカル専用クレートとして clippy / test の両方から `--exclude` で除外する**方がシンプル。
 OCR クレートを `ocr-pdf` ジョブに分離したのと同じ判断——本体ジョブをシステム依存で重くしない。
-Desktop の品質担保はローカルの pre-push（全 workspace をチェック）で行う。
+Desktop の品質担保はローカルの pre-push（全 workspace をチェック）で行う。ただし pre-push の Rust の検査は
+fmt / clippy だけで（`--all-targets` なのでテストコードも型検査はされる）、テストは実行しない。desktop のテスト（#777 で `viewmodel/race.rs` に置いた盤の固定の
+表示のテストが最初）を自動で回す経路は無いので、desktop を変えたら手元で
+`cargo test -p paddock-desktop --bin paddock-desktop` を回す（desktop は bin だけのクレートで `--lib` は無い）。
 
 ### `test_extract.rs`（tesseract OCR）は `#[ignore]` のまま
 
