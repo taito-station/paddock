@@ -8,7 +8,7 @@ tags: [D23, D22]
 sources:
   - qa/QA-predict-fixed-selection-776.md
   - qa/QA-board-confusion-794.md
-distilled_from_sha: "5fd82f0e"
+distilled_from_sha: "a02d28fe"
 updated: "2026-10-31"
 ---
 
