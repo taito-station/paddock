@@ -350,14 +350,22 @@ export function RaceBoard() {
       {d && (
         <>
           <div className="board-summary">
+            {/* 混戦サマリは買い目と同じ構造（#794）: 朝の固定があれば朝の判定・固定の軸の勝率なので
+                「（朝）」を付ける。朝の固定があれば頭数は null（保存しているのはボックスの馬で、しきい値以上の頭数ではない）で出さない。
+                desktop の盤（viewmodel/race.rs の konsen_label）と同じ文言。 */}
             {d.confusion.is_confused ? (
-              <span className="chip chip-konsen">混戦</span>
+              <span className="chip chip-konsen">
+                混戦{d.fixed_selection ? "（朝）" : ""}
+              </span>
             ) : (
-              <span className="chip">平場</span>
+              <span className="chip">
+                平場{d.fixed_selection ? "（朝）" : ""}
+              </span>
             )}
             <span className="muted">
-              ◎勝率 {pct(d.confusion.axis_win_prob)} ×0.70 以上{" "}
-              {d.confusion.qualifying_count}頭
+              ◎勝率 {pct(d.confusion.axis_win_prob)}
+              {d.confusion.qualifying_count != null &&
+                ` ×0.70 以上 ${d.confusion.qualifying_count}頭`}
             </span>
             {d.axis != null && (
               <span className="muted">

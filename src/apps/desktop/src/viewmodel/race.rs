@@ -15,8 +15,11 @@ pub struct BoardView {
     pub race_name: Option<String>,
     pub race_class: Option<String>,
     pub is_confused: bool,
+    /// 混戦／平場のチップの文言（朝の固定があれば「（朝）」付き・#794）。
+    pub konsen_label: &'static str,
     pub axis_win_prob: f64,
-    pub qualifying_count: u32,
+    /// 朝の固定があれば `None`（しきい値以上の頭数は保存していない・#794）。
+    pub qualifying_count: Option<u32>,
     pub result_confirmed: bool,
     pub bets: Vec<BetView>,
     pub post_time_raw: Option<NaiveTime>,
@@ -66,6 +69,7 @@ impl From<&RaceBoard> for BoardView {
             race_name: b.race_name.clone(),
             race_class: b.race_class.clone(),
             is_confused: b.confusion.is_confused,
+            konsen_label: konsen_label(b.confusion.is_confused, b.fixed_selection.is_some()),
             axis_win_prob: b.confusion.axis_win_prob,
             qualifying_count: b.confusion.qualifying_count,
             result_confirmed: b.result_confirmed,
@@ -118,6 +122,17 @@ const MORNING_FIX_REASON: &str = "買い目の軸・相手・混戦は、朝（�
 /// 記録軸のチップの title（web の記録軸チップの `title`）。
 const RECORDED_AXIS_TITLE: &str =
     "買い目の軸は predict 記録済みの◎に固定しています（直前オッズで軸をフリップさせない）。";
+
+/// 盤の混戦／平場のチップの文言（web の盤の要約行と同じ・#794）。混戦の判定（`confusion`）は朝の固定が
+/// あれば朝の判定なので、そのときは「（朝）」を付けてライブの判定と読み違えないようにする。
+pub fn konsen_label(is_confused: bool, morning_fixed: bool) -> &'static str {
+    match (is_confused, morning_fixed) {
+        (true, false) => "混戦",
+        (false, false) => "平場",
+        (true, true) => "混戦（朝）",
+        (false, true) => "平場（朝）",
+    }
+}
 
 /// 盤の軸の固定の表示を組む（web の盤と同じ分岐）。朝の固定があればそのチップだけを出し
 /// （記録◎ はその中で示す）、無ければ記録軸のチップ。ライブの首位（`live`）と違えば ⚠ にする。
@@ -223,6 +238,14 @@ mod tests {
             scratched: scratched.to_vec(),
             odds_fetched_at: "2026-10-10T00:31:05+00:00".to_string(),
         }
+    }
+
+    #[test]
+    fn konsen_label_marks_morning_fix() {
+        assert_eq!(konsen_label(true, false), "混戦");
+        assert_eq!(konsen_label(false, false), "平場");
+        assert_eq!(konsen_label(true, true), "混戦（朝）");
+        assert_eq!(konsen_label(false, true), "平場（朝）");
     }
 
     #[test]

@@ -529,23 +529,28 @@ export interface components {
             /** @description レース名（netkeiba 近走のみが持つ。PDF 確定成績経路は `null`）。 */
             race_name?: string | null;
         };
-        /** @description 混戦サマリ（CLAUDE.md の混戦判定を機械化した結果）。 */
+        /**
+         * @description 混戦サマリ（CLAUDE.md の混戦判定を機械化した結果）。買い目と同じ構造を表す（#794）:
+         *     `fixed_selection` があれば朝の固定の混戦の帯と軸、無ければライブの判定。
+         */
         ConfusionSchema: {
             /**
              * Format: double
-             * @description ◎（モデル勝率1位）の勝率 [0,1]。
+             * @description ◎（朝の固定があればその軸、無ければモデル勝率1位）のライブの勝率 [0,1]。
              */
             axis_win_prob: number;
-            /** @description 混戦か（◎の勝率×0.70 以上が ◎含め 4 頭以上）。 */
+            /** @description 混戦か（◎の勝率×0.70 以上が ◎含め 4 頭以上）。朝の固定があれば朝の判定。 */
             is_confused: boolean;
             /**
              * Format: int32
-             * @description しきい値以上の頭数（◎含む）。
+             * @description しきい値以上の頭数（◎含む）。朝の固定があるときは `null`（保存しているのはボックスの馬で、
+             *     しきい値以上の頭数は保存していない）。
              */
-            qualifying_count: number;
+            qualifying_count?: number | null;
             /**
              * Format: double
-             * @description 判定しきい値（= `axis_win_prob * 0.70`）。
+             * @description `axis_win_prob * 0.70`。朝の固定が無ければ判定しきい値。朝の固定があるときは今の軸の勝率から
+             *     出した参考値で、判定（朝）には使っていない。
              */
             threshold: number;
         };
