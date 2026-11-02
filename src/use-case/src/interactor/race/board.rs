@@ -20,7 +20,9 @@ use paddock_domain::{
 use crate::compose_portfolio;
 use crate::error::Result;
 use crate::interactor::Interactor;
-use crate::interactor::race::commentary::{horse_detail_lines, horse_headline, race_commentary};
+use crate::interactor::race::commentary::{
+    FixedAxis, horse_detail_lines, horse_headline, race_commentary,
+};
 use crate::interactor::race::predict::morning::{FixSource, resolve_fixed_selection};
 use crate::repository::{
     ConditionRun, HandicapNoteRow, MorningSelection, MorningSelectionRepository, OddsRepository,
@@ -116,16 +118,20 @@ pub struct FixedSelection {
     pub odds_fetched_at: String,
 }
 
-/// 混戦サマリ（CLAUDE.md の混戦判定を機械化）。
+/// 混戦サマリ（CLAUDE.md の混戦判定を機械化）。買い目（`portfolio`）と同じ構造を表す（#794）:
+/// 朝の固定（`fixed_selection`）があれば固定の混戦の帯と軸、無ければライブの blended で判定する。
 #[derive(Debug, Clone)]
 pub struct Confusion {
     pub is_confused: bool,
-    /// ◎（モデル勝率1位）の勝率 [0,1]。全頭が空なら 0.0。
+    /// ◎（買い目の軸。朝の固定があればその軸、無ければモデル勝率1位）のライブの勝率 [0,1]。
+    /// 該当馬が居なければ 0.0。
     pub axis_win_prob: f64,
-    /// 判定しきい値 = `axis_win_prob * CONFUSION_RATIO`。
+    /// `axis_win_prob * KONSEN_BAND_RATIO`。朝の固定が無ければ判定しきい値。朝の固定があるときは
+    /// 今の軸の勝率から出した参考値で、判定（朝）には使っていない。
     pub threshold: f64,
-    /// しきい値以上の頭数（◎含む）。
-    pub qualifying_count: u32,
+    /// しきい値以上の頭数（◎含む）。朝の固定があるときは `None`——保存した帯はボックスの馬（上位 5 頭まで）
+    /// で「しきい値以上の頭数」ではなく、朝の頭数は保存していない（#794）。
+    pub qualifying_count: Option<u32>,
 }
 
 /// 盤の1頭分。
@@ -291,6 +297,10 @@ impl<
             .iter()
             .map(|hp| hp.horse_num.value())
             .collect();
+        // 朝の軸が取消か（書評で「朝の選定の軸」と書かないため・#794）。買い目の軸は取消ならライブの首位へ戻る。
+        let morning_axis_scratched = morning_selection
+            .as_ref()
+            .is_some_and(|m| !field.contains(&m.axis));
         let portfolio = odds
             .as_ref()
             .map(|o| compose_portfolio(&views, o, budget, &pinned));
@@ -338,7 +348,7 @@ impl<
         for h in horses.iter_mut() {
             h.finishing_position = finishing.get(&h.horse_num).copied();
         }
-        let confusion = compute_confusion(&views.blended);
+        let confusion = confusion_of(&views.blended, fixed_selection.as_ref());
         enrich_commentary(&mut horses, &views.explanations, pad.as_ref());
 
         // 手動ハンデ精査の材料（#628・提示専用）。出馬表があるときだけ引く（今回条件が要るため）。
@@ -368,6 +378,13 @@ impl<
             pad.as_ref().and_then(|p| p.commentary.as_deref()),
             &confusion,
             &horses,
+            fixed_selection.as_ref().map(|f| {
+                if morning_axis_scratched {
+                    FixedAxis::Scratched(f.axis)
+                } else {
+                    FixedAxis::Morning(f.axis)
+                }
+            }),
         );
 
         let (venue, surface, distance, race_num, date, post_time, race_name, race_class) =
@@ -623,15 +640,17 @@ fn enrich_commentary(
 
 /// レース書評を決める（#348）。人手 `human` が非空ならそれを優先、無ければルールベース生成を返す。
 /// ルールベースが空（◎不在）なら `None`。人手優先の分岐を純関数に切り出して単体テスト可能にする。
+/// `fixed_axis` は朝の固定の軸（#794。書評の ◎ を買い目の軸にそろえる）。
 fn resolve_race_comment(
     human: Option<&str>,
     confusion: &Confusion,
     horses: &[BoardHorse],
+    fixed_axis: Option<FixedAxis>,
 ) -> Option<String> {
     if let Some(h) = human.filter(|h| !h.trim().is_empty()) {
         return Some(h.to_string());
     }
-    let generated = race_commentary(confusion, horses);
+    let generated = race_commentary(confusion, horses, fixed_axis);
     (!generated.is_empty()).then_some(generated)
 }
 
@@ -797,7 +816,27 @@ fn compute_confusion(blended: &[HorseProbability]) -> Confusion {
         is_confused: axis_win_prob > 0.0 && band.len() >= KONSEN_MIN_HORSES,
         axis_win_prob,
         threshold,
-        qualifying_count: band.len() as u32,
+        qualifying_count: Some(band.len() as u32),
+    }
+}
+
+/// 盤の混戦サマリ（#794）。買い目と同じ構造にそろえる: 朝の固定があれば、混戦は固定の帯で
+/// 買い目（`build_portfolio`）と同じ `len() >= KONSEN_MIN_HORSES`、◎勝率は固定の軸のライブの勝率、
+/// 頭数は出さない（帯はボックスの馬で、しきい値以上の頭数ではない）。無ければライブの
+/// [`compute_confusion`]（このとき買い目もライブの帯で判定しているので一致する）。
+fn confusion_of(blended: &[HorseProbability], fixed: Option<&FixedSelection>) -> Confusion {
+    let Some(f) = fixed else {
+        return compute_confusion(blended);
+    };
+    let axis_win_prob = blended
+        .iter()
+        .find(|hp| hp.horse_num.value() == f.axis)
+        .map_or(0.0, |hp| hp.win_prob);
+    Confusion {
+        is_confused: f.konsen_band.len() >= KONSEN_MIN_HORSES,
+        axis_win_prob,
+        threshold: axis_win_prob * KONSEN_BAND_RATIO,
+        qualifying_count: None,
     }
 }
 
@@ -936,7 +975,7 @@ mod tests {
             hp(5, 0.05),
         ];
         let c = compute_confusion(&b);
-        assert_eq!(c.qualifying_count, 4);
+        assert_eq!(c.qualifying_count, Some(4));
         assert!(c.is_confused);
     }
 
@@ -945,6 +984,86 @@ mod tests {
         let b = vec![hp(1, 0.50), hp(2, 0.10), hp(3, 0.08), hp(4, 0.07)];
         let c = compute_confusion(&b);
         assert!(!c.is_confused);
+    }
+
+    // --- 盤の混戦サマリを朝の固定にそろえる（#794） ---------------------------
+
+    fn fixed(axis: u32, konsen_band: Vec<u32>) -> FixedSelection {
+        FixedSelection {
+            axis,
+            partners: vec![],
+            konsen_band,
+            scratched: vec![],
+            odds_fetched_at: "2026-10-31T00:00:00Z".to_string(),
+        }
+    }
+
+    /// ライブでは混戦（◎=0.20 で 4 頭が 0.14 以上）の blended。
+    fn live_konsen() -> Vec<HorseProbability> {
+        vec![
+            hp(1, 0.20),
+            hp(2, 0.16),
+            hp(3, 0.15),
+            hp(4, 0.14),
+            hp(5, 0.05),
+        ]
+    }
+
+    #[test]
+    fn confusion_of_without_fixed_is_live() {
+        let b = live_konsen();
+        let live = compute_confusion(&b);
+        let c = confusion_of(&b, None);
+        assert_eq!(c.is_confused, live.is_confused);
+        assert_eq!(c.axis_win_prob, live.axis_win_prob);
+        assert_eq!(c.threshold, live.threshold);
+        assert_eq!(c.qualifying_count, live.qualifying_count);
+    }
+
+    #[test]
+    fn confusion_of_fixed_konsen_uses_morning_band() {
+        // ライブは非混戦でも、朝の固定が混戦なら混戦。保存した帯はボックスの馬（上位 5 頭まで）で
+        // 「×0.70 以上の頭数」ではないので、頭数は出さない。
+        let b = vec![
+            hp(1, 0.50),
+            hp(2, 0.10),
+            hp(3, 0.08),
+            hp(4, 0.07),
+            hp(5, 0.06),
+        ];
+        let c = confusion_of(&b, Some(&fixed(1, vec![1, 2, 3, 4, 5])));
+        assert!(c.is_confused);
+        assert_eq!(c.qualifying_count, None);
+    }
+
+    #[test]
+    fn confusion_of_fixed_band_below_min_is_not_konsen() {
+        // 買い目（build_portfolio）と同じく、帯が KONSEN_MIN_HORSES 頭未満なら非混戦。
+        let c = confusion_of(&live_konsen(), Some(&fixed(1, vec![1, 2, 3])));
+        assert!(!c.is_confused);
+    }
+
+    #[test]
+    fn confusion_of_fixed_non_konsen_hides_count() {
+        // ライブは混戦でも、朝の固定が非混戦なら非混戦。朝の頭数は保存していないので出さない。
+        let c = confusion_of(&live_konsen(), Some(&fixed(1, vec![])));
+        assert!(!c.is_confused);
+        assert_eq!(c.qualifying_count, None);
+    }
+
+    #[test]
+    fn confusion_of_fixed_axis_win_prob_is_fixed_axis() {
+        // 朝の軸③がライブの首位①と違う → ◎勝率は③の勝率。しきい値も③基準。
+        let c = confusion_of(&live_konsen(), Some(&fixed(3, vec![])));
+        assert_eq!(c.axis_win_prob, 0.15);
+        assert!((c.threshold - 0.15 * KONSEN_BAND_RATIO).abs() < 1e-12);
+    }
+
+    #[test]
+    fn confusion_of_fixed_axis_absent_is_zero() {
+        let c = confusion_of(&live_konsen(), Some(&fixed(9, vec![])));
+        assert_eq!(c.axis_win_prob, 0.0);
+        assert_eq!(c.threshold, 0.0);
     }
 
     /// ◎(Honmei) を `honmei` に置いた pad（#388 テスト用）。
@@ -1222,7 +1341,7 @@ mod tests {
         let horses = build_board_horses(&b, &b, None, None);
         let c = compute_confusion(&b);
         assert_eq!(
-            resolve_race_comment(Some("人手レース評"), &c, &horses).as_deref(),
+            resolve_race_comment(Some("人手レース評"), &c, &horses, None).as_deref(),
             Some("人手レース評")
         );
     }
@@ -1234,12 +1353,12 @@ mod tests {
         let c = compute_confusion(&b);
         // 人手なし → ルールベース。空白のみの人手も同じくルールベースへ。
         assert!(
-            resolve_race_comment(None, &c, &horses)
+            resolve_race_comment(None, &c, &horses, None)
                 .unwrap()
                 .contains("◎馬1")
         );
         assert!(
-            resolve_race_comment(Some("  "), &c, &horses)
+            resolve_race_comment(Some("  "), &c, &horses, None)
                 .unwrap()
                 .contains("◎馬1")
         );
@@ -1249,7 +1368,7 @@ mod tests {
     fn resolve_race_comment_none_without_axis() {
         // ◎（model_rank==1）不在＝全頭空ならルールベースも空 → None。
         let c = compute_confusion(&[]);
-        assert_eq!(resolve_race_comment(None, &c, &[]), None);
+        assert_eq!(resolve_race_comment(None, &c, &[], None), None);
     }
 
     // --- 手動ハンデ精査の材料（#628） -------------------------------------

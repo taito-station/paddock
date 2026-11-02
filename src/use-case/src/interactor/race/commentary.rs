@@ -9,27 +9,86 @@ use paddock_domain::{ExplainCategory, HorseExplanation, PrevRunSummary, Surface,
 
 use super::board::{BoardHorse, Confusion};
 
-/// レース全体の書評（混戦度＋◎の狙いどころ＋妙味馬）。◎（model_rank==1）が無ければ空文字。
-pub(crate) fn race_commentary(confusion: &Confusion, horses: &[BoardHorse]) -> String {
-    let Some(axis) = horses.iter().find(|h| h.model_rank == 1) else {
+/// 朝の固定があるときの書評の軸（#794）。買い目の軸（`FixedSelection.axis`）と、それが朝の選定の軸か。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FixedAxis {
+    /// 朝の選定の軸。
+    Morning(u32),
+    /// 朝の軸が取消で、買い目の軸を差し替えた（ライブの首位へ戻した）。
+    Scratched(u32),
+}
+
+/// レース全体の書評（混戦度＋◎の狙いどころ＋妙味馬）。◎は `fixed_axis`（朝の固定の軸・#794）、
+/// 無ければ model_rank==1。◎が無ければ空文字。
+pub(crate) fn race_commentary(
+    confusion: &Confusion,
+    horses: &[BoardHorse],
+    fixed_axis: Option<FixedAxis>,
+) -> String {
+    let axis = match fixed_axis {
+        Some(FixedAxis::Morning(n) | FixedAxis::Scratched(n)) => {
+            horses.iter().find(|h| h.horse_num == n)
+        }
+        None => horses.iter().find(|h| h.model_rank == 1),
+    };
+    let Some(axis) = axis else {
         return String::new();
     };
     let axis_pct = pct(axis.win_prob);
-    let mut s = if confusion.is_confused {
-        // 相手は top5 より広げない（CLAUDE.md 買い方ルール）ので文言も規約準拠にする。
-        format!(
-            "混戦。勝率上位が {} 頭拮抗。◎{}（勝率{}%）を軸に相手 top5 まで手広く構えたい。",
-            confusion.qualifying_count, axis.horse_name, axis_pct
-        )
-    } else {
-        format!(
+    // 朝の固定があるとき（#794）は、混戦の判定は朝の時点のもの。「上位が抜けている／拮抗」のような
+    // 今の状態の断定はせず、朝の選定であることを明示する。軸が今の勝率首位でなければ首位も示す。
+    let top = horses
+        .iter()
+        .find(|h| h.model_rank == 1)
+        .filter(|top| fixed_axis.is_some() && top.horse_num != axis.horse_num);
+    // 相手は top5 より広げない（CLAUDE.md 買い方ルール）ので文言も規約準拠にする。
+    let scratched = matches!(fixed_axis, Some(FixedAxis::Scratched(_)));
+    let mut s = match (confusion.is_confused, fixed_axis.is_some()) {
+        (true, true) if scratched => format!(
+            "朝の選定は混戦。朝の軸が取消のため差し替えた◎{}（勝率{}%）を軸に相手 top5 まで手広く構えたい。",
+            axis.horse_name, axis_pct
+        ),
+        (true, true) => format!(
+            "朝の選定は混戦。◎{}（勝率{}%）を軸に相手 top5 まで手広く構えたい。",
+            axis.horse_name, axis_pct
+        ),
+        (true, false) => match confusion.qualifying_count {
+            Some(n) => format!(
+                "混戦。勝率上位が {} 頭拮抗。◎{}（勝率{}%）を軸に相手 top5 まで手広く構えたい。",
+                n, axis.horse_name, axis_pct
+            ),
+            None => format!(
+                "混戦。◎{}（勝率{}%）を軸に相手 top5 まで手広く構えたい。",
+                axis.horse_name, axis_pct
+            ),
+        },
+        (false, true) if scratched => format!(
+            "◎{}（勝率{}%）中心（朝の軸が取消のため差し替え）。",
+            axis.horse_name, axis_pct
+        ),
+        (false, true) => format!(
+            "◎{}（勝率{}%）中心（朝の選定の軸）。",
+            axis.horse_name, axis_pct
+        ),
+        (false, false) => format!(
             "◎{}（勝率{}%）中心。上位が抜けており軸の信頼度は高い。",
             axis.horse_name, axis_pct
-        )
+        ),
     };
-    // 乖離馬（モデル上位×市場人気低）があれば妙味として一言添える。◎（model_rank==1）自身は
-    // 除く（contrarian 本命が is_value のとき「◎馬X…妙味は馬X」の二重言及を防ぐ）。
-    if let Some(v) = horses.iter().find(|h| h.is_value && h.model_rank != 1) {
+    if let Some(top) = top {
+        s.push_str(&format!(
+            " 今の勝率首位は{}（勝率{}%）。",
+            top.horse_name,
+            pct(top.win_prob)
+        ));
+    }
+    // 乖離馬（モデル上位×市場人気低）があれば妙味として一言添える。◎自身と、今の首位として挙げた馬は
+    // 除く（「◎馬X…妙味は馬X」「首位は馬Y…妙味は馬Y」の二重言及を防ぐ）。
+    let mentioned = |n: u32| n == axis.horse_num || top.is_some_and(|t| t.horse_num == n);
+    if let Some(v) = horses
+        .iter()
+        .find(|h| h.is_value && !mentioned(h.horse_num))
+    {
         match v.popularity {
             Some(pop) => s.push_str(&format!(" 妙味は{}（{}番人気）。", v.horse_name, pop)),
             None => s.push_str(&format!(" 妙味は{}。", v.horse_name)),
@@ -229,14 +288,14 @@ mod tests {
             is_confused,
             axis_win_prob: 0.3,
             threshold: 0.21,
-            qualifying_count: qualifying,
+            qualifying_count: Some(qualifying),
         }
     }
 
     #[test]
     fn race_commentary_dominant_axis() {
         let horses = vec![board_horse(1, 0.42, false), board_horse(2, 0.1, false)];
-        let s = race_commentary(&confusion(false, 1), &horses);
+        let s = race_commentary(&confusion(false, 1), &horses, None);
         assert!(s.contains("◎馬1（勝率42%）中心"), "got: {s}");
         assert!(s.contains("信頼度は高い"));
         assert!(!s.contains("妙味"), "妙味馬なし: {s}");
@@ -245,14 +304,86 @@ mod tests {
     #[test]
     fn race_commentary_confused_with_value() {
         let horses = vec![board_horse(1, 0.2, false), board_horse(3, 0.15, true)];
-        let s = race_commentary(&confusion(true, 4), &horses);
+        let s = race_commentary(&confusion(true, 4), &horses, None);
         assert!(s.contains("混戦。勝率上位が 4 頭拮抗"), "got: {s}");
         assert!(s.contains("妙味は馬3（8番人気）"), "got: {s}");
     }
 
     #[test]
     fn race_commentary_empty_when_no_axis() {
-        assert_eq!(race_commentary(&confusion(false, 0), &[]), "");
+        assert_eq!(race_commentary(&confusion(false, 0), &[], None), "");
+    }
+
+    #[test]
+    fn race_commentary_uses_fixed_axis() {
+        // 朝の固定の軸②（ライブ首位は①）→ ◎は②。今の首位①を挙げたので、①が妙味でも二重には挙げない。
+        let mut h1 = board_horse(1, 0.4, true);
+        h1.popularity = Some(5);
+        let horses = vec![h1, board_horse(2, 0.2, false)];
+        let s = race_commentary(&confusion(false, 1), &horses, Some(FixedAxis::Morning(2)));
+        assert_eq!(
+            s,
+            "◎馬2（勝率20%）中心（朝の選定の軸）。 今の勝率首位は馬1（勝率40%）。"
+        );
+    }
+
+    #[test]
+    fn race_commentary_fixed_non_konsen_axis_top_makes_no_live_claim() {
+        // 朝の固定の軸①が今も首位 → 「上位が抜けており…信頼度は高い」（今の状態の断定）は出さない。
+        // 今の首位の文も要らない。
+        let horses = vec![board_horse(1, 0.4, false), board_horse(2, 0.2, false)];
+        let s = race_commentary(&confusion(false, 1), &horses, Some(FixedAxis::Morning(1)));
+        assert_eq!(s, "◎馬1（勝率40%）中心（朝の選定の軸）。");
+    }
+
+    #[test]
+    fn race_commentary_konsen_uses_fixed_axis() {
+        // 朝の固定が混戦・軸②が今の首位①でない → 「朝の選定は混戦」と時点を明示し、頭数・「拮抗」は書かない。
+        let horses = vec![board_horse(1, 0.3, false), board_horse(2, 0.2, false)];
+        let mut c = confusion(true, 5);
+        c.qualifying_count = None;
+        let s = race_commentary(&c, &horses, Some(FixedAxis::Morning(2)));
+        assert_eq!(
+            s,
+            "朝の選定は混戦。◎馬2（勝率20%）を軸に相手 top5 まで手広く構えたい。 今の勝率首位は馬1（勝率30%）。"
+        );
+    }
+
+    #[test]
+    fn race_commentary_live_konsen_without_count_omits_count() {
+        // 固定なしの混戦で頭数が無い（今は作られない組み合わせ）でも、非混戦の文に落ちない。
+        let horses = vec![board_horse(1, 0.3, false)];
+        let mut c = confusion(true, 4);
+        c.qualifying_count = None;
+        let s = race_commentary(&c, &horses, None);
+        assert_eq!(
+            s,
+            "混戦。◎馬1（勝率30%）を軸に相手 top5 まで手広く構えたい。"
+        );
+    }
+
+    #[test]
+    fn race_commentary_scratched_morning_axis_is_not_called_morning_axis() {
+        // 朝の軸が取消で、買い目の軸が今の首位①に差し替わった → 「朝の選定の軸」とは書かず、差し替えを示す。
+        let horses = vec![board_horse(1, 0.4, false), board_horse(2, 0.2, false)];
+        let s = race_commentary(&confusion(false, 1), &horses, Some(FixedAxis::Scratched(1)));
+        assert_eq!(s, "◎馬1（勝率40%）中心（朝の軸が取消のため差し替え）。");
+        let mut c = confusion(true, 4);
+        c.qualifying_count = None;
+        let s = race_commentary(&c, &horses, Some(FixedAxis::Scratched(1)));
+        assert_eq!(
+            s,
+            "朝の選定は混戦。朝の軸が取消のため差し替えた◎馬1（勝率40%）を軸に相手 top5 まで手広く構えたい。"
+        );
+    }
+
+    #[test]
+    fn race_commentary_fixed_axis_is_not_value_twice() {
+        // 固定の軸自身が妙味でも「妙味は」で二重に挙げない。
+        let horses = vec![board_horse(1, 0.4, false), board_horse(2, 0.2, true)];
+        let s = race_commentary(&confusion(false, 1), &horses, Some(FixedAxis::Morning(2)));
+        assert!(s.contains("◎馬2"), "got: {s}");
+        assert!(!s.contains("妙味"), "got: {s}");
     }
 
     #[test]
@@ -456,7 +587,7 @@ mod tests {
         let mut v = board_horse(2, 0.15, true);
         v.popularity = None;
         let horses = vec![board_horse(1, 0.4, false), v];
-        let s = race_commentary(&confusion(false, 1), &horses);
+        let s = race_commentary(&confusion(false, 1), &horses, None);
         assert!(s.contains("妙味は馬2。"), "got: {s}");
         assert!(!s.contains("番人気"), "人気表記は出ない: {s}");
     }

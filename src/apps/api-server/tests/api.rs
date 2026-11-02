@@ -614,6 +614,19 @@ async fn board_is_fixed_by_the_morning_selection(pool: sqlx::PgPool) {
     assert_eq!(f["konsen_band"].as_array().map(Vec::len), Some(0));
     assert_eq!(f["odds_fetched_at"], "2026-03-28T00:30:00+00:00");
 
+    // 混戦サマリも買い目と同じ朝の固定に従う（#794）: 非混戦で固定 → 非混戦・頭数は null、
+    // ◎勝率は固定の軸の勝率。
+    let c = &fixed["confusion"];
+    assert_eq!(c["is_confused"], false);
+    assert!(c["qualifying_count"].is_null());
+    let axis_win = fixed["horses"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|h| h["horse_num"].as_u64() == Some(u64::from(morning_axis)))
+        .map(|h| h["win_prob"].as_f64().unwrap());
+    assert_eq!(c["axis_win_prob"].as_f64(), axis_win);
+
     // 盤の固定（fixed_selection）は買い目そのもの（同じ軸・同じ相手）
     let mut fixed_partners: Vec<u64> = fixed["fixed_selection"]["partners"]
         .as_array()
@@ -673,6 +686,109 @@ async fn board_is_fixed_by_the_morning_selection(pool: sqlx::PgPool) {
         with_pad["partners"], fixed["partners"],
         "相手も朝の選定のまま"
     );
+}
+
+/// 朝の選定が混戦なら、盤の混戦サマリはライブの判定にかかわらず混戦で、買い目も混戦の配分（ボックスあり）。
+/// 頭数は出さない（保存した帯はボックスの馬で、しきい値以上の頭数ではない・#794）。
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn board_confusion_follows_the_morning_konsen(pool: sqlx::PgPool) {
+    use paddock_use_case::repository::{MorningSelection, MorningSelectionRepository};
+    let repo = PostgresRepository::new(pool.clone());
+    repo.save_race_card(&sample_card()).await.unwrap();
+    repo.save_race_odds(&sample_win_odds()).await.unwrap();
+    repo.save_race_odds(&sample_odds()).await.unwrap();
+    let app = build_service!(pool);
+    let board = |app| async move {
+        body_json(
+            test::call_service(
+                app,
+                test::TestRequest::get()
+                    .uri(&format!("/api/races/{RACE_ID}/board"))
+                    .to_request(),
+            )
+            .await,
+        )
+        .await
+    };
+    // 前提: ライブの判定は非混戦
+    let before = board(&app).await;
+    assert_eq!(before["confusion"]["is_confused"], false);
+    // 朝の固定が無ければ頭数はライブの判定から出る（null にならない）
+    assert!(before["confusion"]["qualifying_count"].is_u64());
+
+    let axis = 2u32;
+    repo.save_morning_selection(&MorningSelection {
+        race_id: RACE_ID.to_string(),
+        date: date(),
+        axis,
+        partners: vec![1, 3],
+        konsen_band: vec![1, 2, 3, 4],
+        odds_fetched_at: "2026-03-28T00:30:00+00:00".to_string(),
+        computed_at: "2026-03-28T01:00:00Z".to_string(),
+    })
+    .await
+    .unwrap();
+    let json = board(&app).await;
+    assert_eq!(
+        json["fixed_selection"]["konsen_band"]
+            .as_array()
+            .map(Vec::len),
+        Some(4)
+    );
+    let c = &json["confusion"];
+    assert_eq!(c["is_confused"], true);
+    assert!(c["qualifying_count"].is_null());
+    // 買い目も混戦の配分: 軸を含まない 3 連複（＝ボックスの脚）がある
+    let has_box = json["bets"].as_array().unwrap().iter().any(|b| {
+        b["bet_type"] == "三連複"
+            && !b["combination"]
+                .as_str()
+                .unwrap()
+                .split('-')
+                .any(|n| n == axis.to_string())
+    });
+    assert!(
+        has_box,
+        "混戦の買い目にボックスの脚がある: {}",
+        json["bets"]
+    );
+}
+
+/// 朝の軸が取消（出走していない）なら、書評は差し替えた軸を「朝の選定の軸」と書かない（#794）。
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn board_comment_marks_scratched_morning_axis(pool: sqlx::PgPool) {
+    use paddock_use_case::repository::{MorningSelection, MorningSelectionRepository};
+    let repo = PostgresRepository::new(pool.clone());
+    repo.save_race_card(&sample_card()).await.unwrap();
+    repo.save_race_odds(&sample_win_odds()).await.unwrap();
+    repo.save_race_odds(&sample_odds()).await.unwrap();
+    // 出馬表は 1〜3 番だけ＝朝の軸 4 番は出走していない
+    repo.save_morning_selection(&MorningSelection {
+        race_id: RACE_ID.to_string(),
+        date: date(),
+        axis: 4,
+        partners: vec![1, 2],
+        konsen_band: vec![],
+        odds_fetched_at: "2026-03-28T00:30:00+00:00".to_string(),
+        computed_at: "2026-03-28T01:00:00Z".to_string(),
+    })
+    .await
+    .unwrap();
+    let app = build_service!(pool);
+    let json = body_json(
+        test::call_service(
+            &app,
+            test::TestRequest::get()
+                .uri(&format!("/api/races/{RACE_ID}/board"))
+                .to_request(),
+        )
+        .await,
+    )
+    .await;
+    assert_ne!(json["fixed_selection"]["axis"].as_u64(), Some(4));
+    let comment = json["race_comment"].as_str().unwrap();
+    assert!(comment.contains("朝の軸が取消のため差し替え"), "{comment}");
+    assert!(!comment.contains("朝の選定の軸"), "{comment}");
 }
 
 /// board の買い目（axis/partners/bets/roi）は /recommendations と完全一致する（同経路の担保）。

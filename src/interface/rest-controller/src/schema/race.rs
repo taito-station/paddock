@@ -283,17 +283,20 @@ impl RecommendationResponse {
     }
 }
 
-/// 混戦サマリ（CLAUDE.md の混戦判定を機械化した結果）。
+/// 混戦サマリ（CLAUDE.md の混戦判定を機械化した結果）。買い目と同じ構造を表す（#794）:
+/// `fixed_selection` があれば朝の固定の混戦の帯と軸、無ければライブの判定。
 #[derive(Debug, Serialize, ToSchema)]
 pub struct ConfusionSchema {
-    /// 混戦か（◎の勝率×0.70 以上が ◎含め 4 頭以上）。
+    /// 混戦か（◎の勝率×0.70 以上が ◎含め 4 頭以上）。朝の固定があれば朝の判定。
     pub is_confused: bool,
-    /// ◎（モデル勝率1位）の勝率 [0,1]。
+    /// ◎（朝の固定があればその軸、無ければモデル勝率1位）のライブの勝率 [0,1]。
     pub axis_win_prob: f64,
-    /// 判定しきい値（= `axis_win_prob * 0.70`）。
+    /// `axis_win_prob * 0.70`。朝の固定が無ければ判定しきい値。朝の固定があるときは今の軸の勝率から
+    /// 出した参考値で、判定（朝）には使っていない。
     pub threshold: f64,
-    /// しきい値以上の頭数（◎含む）。
-    pub qualifying_count: u32,
+    /// しきい値以上の頭数（◎含む）。朝の固定があるときは `null`（保存しているのはボックスの馬で、
+    /// しきい値以上の頭数は保存していない）。
+    pub qualifying_count: Option<u32>,
 }
 
 /// 盤の買い目を固定した朝の選定（#767・軸ロック REQ-D01-003）。

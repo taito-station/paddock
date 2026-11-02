@@ -7,8 +7,8 @@ doc_class: [D10, D19, D09]
 tags: [D10, D19, D09]
 sources:
   - docs/api/openapi.json
-distilled_from_sha: "fd355c9d"
-updated: "2026-10-06"
+distilled_from_sha: "62a5f454"
+updated: "2026-10-31"
 ---
 
 # REST API（read 基盤）: 設計仕様
@@ -218,7 +218,7 @@ GET /api/races/{race_id}/board[?budget=&track_condition=&blend_alpha=]
 | `result_confirmed` | bool | 結果確定フラグ（#381）。web の「⚫終」判定に使う |
 | `horses` | array | `BoardHorseSchema[]`（後述） |
 | `bets` | array | 買い目（券種・組合せ・EV・推奨額） |
-| `confusion` | object\|null | 混戦判定オブジェクト |
+| `confusion` | object\|null | 混戦判定オブジェクト（`is_confused` / `axis_win_prob` / `threshold` / `qualifying_count`）。買い目と同じ構造を表す（#794）: `fixed_selection` があれば混戦は朝の判定（買い目と同じく `konsen_band` が 4 頭以上なら混戦）、`axis_win_prob` は固定の軸のライブの勝率、`threshold` は判定に使わない参考値、`qualifying_count` は `null`（保存しているのはボックスの馬で、しきい値以上の頭数ではない）。無ければライブの判定（市場ブレンドの首位基準） |
 
 **`BoardHorseSchema` の主要フィールド:**
 

@@ -93,14 +93,14 @@ pub fn RaceBoard(race_id: String) -> Element {
                         }
                     }
                     div { class: "board-summary",
-                        if view.is_confused {
-                            span { class: "chip konsen", "混戦" }
+                        span { class: if view.is_confused { "chip konsen" } else { "chip" },
+                            "{view.konsen_label}"
                         }
                         span { class: "axis-prob",
                             "◎勝率 {view.axis_win_prob * 100.0:.1}%"
                         }
-                        span { class: "qualifying",
-                            "qualifying {view.qualifying_count}頭"
+                        if let Some(n) = view.qualifying_count {
+                            span { class: "qualifying", "×0.70 以上 {n}頭" }
                         }
                         if let Some(ref lock) = view.axis_lock {
                             {axis_lock_chip(lock)}
