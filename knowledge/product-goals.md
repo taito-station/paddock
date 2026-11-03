@@ -6,7 +6,7 @@ tags: [D01]
 sources:
   - docs-original/802-model-eval-baseline.md
   - qa/QA-model-eval-ground-802.md
-distilled_from_sha: "850ad94a"
+distilled_from_sha: "54c78b8b"
 updated: "2026-11-02"
 ---
 
