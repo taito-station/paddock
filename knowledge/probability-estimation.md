@@ -8,7 +8,7 @@ tags: [D22, D19]
 sources:
   - docs-original/218-live-alpha.md
   - qa/QA-live-alpha-218.md
-distilled_from_sha: "7a546f67"
+distilled_from_sha: "b634b730"
 updated: "2026-11-03"
 ---
 
