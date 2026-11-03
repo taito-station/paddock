@@ -8,7 +8,7 @@ tags: [D10, D06]
 sources:
   - docs/api/openapi.json
   - qa/QA-predict-bets-fix-source-795.md
-distilled_from_sha: "68a78c2b"
+distilled_from_sha: "1b02dbd5"
 updated: "2026-11-03"
 ---
 

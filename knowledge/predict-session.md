@@ -8,7 +8,7 @@ tags: [D11, D19, D08]
 sources:
   - qa/QA-predict-fixed-selection-776.md
   - qa/QA-predict-bets-fix-source-795.md
-distilled_from_sha: "68a78c2b"
+distilled_from_sha: "1b02dbd5"
 updated: "2026-11-03"
 ---
 
