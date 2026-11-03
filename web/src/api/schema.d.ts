@@ -591,6 +591,27 @@ export interface components {
              */
             position: number;
         };
+        /** @description 記録する買い目の固定の出所（#795）。`predict_bets.fix_source` / `fix_odds_fetched_at` に入る。 */
+        FixSourceInput: {
+            /** @description `morning`（朝の選定）/ `recorded_axis`（記録◎ の軸だけ）/ `none`（固定なし）。それ以外は 400。 */
+            kind: string;
+            /**
+             * @description 朝の選定に使った朝のスナップショットの取得時刻 RFC3339（UTC: `Z` か `+00:00`、64 バイト以内）。
+             *     `morning` のときだけ必須。それ以外の kind で非 null の値を付けると 400（null・省略は可）。
+             *     文字列は正規化せずそのまま保存する（盤の `odds_fetched_at` と文字列で突き合わせるため）。
+             */
+            odds_fetched_at?: string | null;
+        };
+        /** @description 盤の買い目を組んだ固定の出所（#795）。記録（outcome）のときに買い目と一緒にそのまま送る。 */
+        FixSourceSchema: {
+            /** @description `morning`（朝の選定）/ `recorded_axis`（記録◎ の軸だけ）/ `none`（固定なし）。 */
+            kind: string;
+            /**
+             * @description 朝の選定に使った朝のスナップショットの取得時刻 RFC3339。`morning` のときだけ非 `null`
+             *     （`fixed_selection.odds_fetched_at` と同じ値）。
+             */
+            odds_fetched_at?: string | null;
+        };
         /**
          * @description 盤の買い目を固定した朝の選定（#767・軸ロック REQ-D01-003）。
          *
@@ -1049,6 +1070,7 @@ export interface components {
             distance_tolerance_m: number;
             /** Format: int32 */
             field_size: number;
+            fix_source?: components["schemas"]["FixSourceSchema"] | null;
             fixed_selection?: components["schemas"]["FixedSelectionSchema"] | null;
             /**
              * @description 条件別実績（#628）で `horses[].handicap.group_runs` の母集団になった**場スラッグの一覧**。
@@ -1279,6 +1301,7 @@ export interface components {
         RecordOutcomeRequest: {
             /** @description このレースで購入した買い目（空 = スキップ相当）。 */
             bets: components["schemas"]["BetInput"][];
+            fix_source?: components["schemas"]["FixSourceInput"] | null;
         };
         /**
          * @description `POST /api/results/{date}:refresh`（およびエイリアス `.../sessions/{date}/results:refresh`）の
@@ -2387,7 +2410,7 @@ export interface operations {
                     "application/json": components["schemas"]["SessionSummaryResponse"];
                 };
             };
-            /** @description 残高超過・日付/ID 不正 */
+            /** @description 残高超過・日付/ID 不正・買い目ありで fix_source なし・fix_source 不正 */
             400: {
                 headers: {
                     [name: string]: unknown;

@@ -21,8 +21,9 @@ pub use odds::{
 };
 pub use race::{FinishEntry, RaceCardRepository, RaceRepository, RaceResultRepository};
 pub use session::{
-    PadPredictionRepository, PredictBetRecord, PredictRaceConditionRecord, PredictSessionRecord,
-    PredictSessionRepository, PredictionFilter, PredictionSearchResult, PredictionSummaryRow,
+    BetFixSource, PadPredictionRepository, PredictBetRecord, PredictRaceConditionRecord,
+    PredictSessionRecord, PredictSessionRepository, PredictionFilter, PredictionSearchResult,
+    PredictionSummaryRow,
 };
 pub use stats::{
     ConditionRun, ConditionalGateStatsRow, CourseStatsRow, DISTANCE_EXPERIENCE_TOLERANCE_M,

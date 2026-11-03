@@ -8,8 +8,9 @@ tags: [D23, D22]
 sources:
   - qa/QA-predict-fixed-selection-776.md
   - qa/QA-board-confusion-794.md
-distilled_from_sha: "a02d28fe"
-updated: "2026-10-31"
+  - qa/QA-predict-bets-fix-source-795.md
+distilled_from_sha: "1b02dbd5"
+updated: "2026-11-03"
 ---
 
 # 期待値計算・買い目選択・Kelly 配分ロジック仕様書
@@ -714,3 +715,68 @@ PO の回答（質問票・`qa/QA-board-confusion-794.md`）に従う。
 - REST の `confusion.qualifying_count` が nullable になる（web の型は `docs/api/openapi.json` から再生成）。
 - 混戦の判定条件（REQ-D23-005）・買い目の選び方は変えない。
 
+### #795: 記録した買い目に固定の出所を残す (2026-11-02) — 採用
+
+#### コンテキスト
+
+- #776 で、`predict_bets` に書く 3 経路（web の盤・desktop の盤・CLI の predict）は、同じ固定（朝の選定 → 記録◎ の軸だけ →
+  固定なし）で買い目を組むようになった。ただし、どの固定で組んだか（出所）は行に残らず、#776 の影響に「出所の記録は別 issue」と
+  書いていた。
+- REQ-D01-006（実運用の記録から ◎ の単勝的中率を測る）の集計で、母集団を固定の定義ごとに分けられない。#776 より前の CLI の記録・
+  朝の選定ができる前に記録したレース・窓に入った後の単勝しか無いレースが混ざり、今は日付と predict-watch のログ（ローカルにしか
+  残らない）で見分けるしかなかった。
+- #799（手精査の推奨を別枠で記録）は、同じレースに朝の固定と別枠の 2 枠を記録する（両建て）予定で、行ごとに枠の区別が要る。
+
+#### 決定
+
+PO の回答（質問票・`qa/QA-predict-bets-fix-source-795.md`）に従う。
+
+1. `predict_bets` に `fix_source`（'morning' / 'recorded_axis' / 'none'）と `fix_odds_fetched_at`（朝の選定の朝のスナップショットの
+   取得時刻。'morning' のときだけ）を足す。CHECK で値と組み合わせを守り、DEFAULT は付けない。
+2. （PO 判断・2026-11-03）`fix_source` が NULL の行は、#795 に未対応のバイナリが書いた行＝出所が分からない、のままにする（推定で埋めない）。大半は #795
+   より前の行だが、migrate の後も、再起動していない古い api-server・desktop・predict は NULL を書く（StaleBinary は warn で起動を
+   続けるため）。区切りは `predict_bets.created_at` と `_sqlx_migrations.installed_on`（version 20261102000001）を比べて付ける
+   （`created_at` は TEXT〈UTC の RFC3339〉なので `created_at::timestamptz` にキャストして比べる）。
+3. 出所はレース単位の値として `record_race_outcome` / `save_race_outcome` の引数で受け取り、そのレースの全行に書く。買い目があるのに
+   出所が無ければ `InvalidArgument`（REST は 400）。見送り（買い目なし）は行を書かないので、出所を受け付けて捨てる（REST は見送りでも
+   形式は検証し、不正なら 400）。REST の時刻は UTC（`Z` / `+00:00`）・64 バイト以内に限り、正規化せずそのまま保存する（盤の
+   `morning_selections.odds_fetched_at` と文字列で突き合わせるため）。
+4. CLI は買い目を組んだ `FixSource` を変換して渡す。盤（use-case の `RaceBoard`）は出所（`fix_source`）を返し、web と desktop は
+   表示した買い目と同じ盤のデータから出所を取って記録に送る。REST の outcome のリクエストに `fix_source` を足す。
+5. 朝の選定の `recorded`（記録◎ を軸に強制したか）は残さない。predict-watch 専用の初回スイープ（`FirstSweep`）は記録の経路に来ないので、
+   来たら変換エラーにする（盤は `fix_source` を null にし、記録すると 400 で気づける。CLI は記録の前に止めて盤からの記録を案内する）。
+6. 記録済みの表示（web・desktop・CLI）には出所を出さない（集計用のデータだけ）。
+
+#### 理由
+
+- 出所を記録時点で行に残せば、REQ-D01-006 の母集団をローカルのログに頼らず SQL で分けられる。朝の選定は先勝ちで延期時は
+  引き直せないので、時刻も記録時点の値を写す。
+- 盤が出所を返して記録で送るので、表示した買い目と出所が必ず一致する。サーバで解決し直すと、盤を表示した後に朝の選定ができた
+  ときに、固定なしで組んだ脚に「朝」が付く。desktop の盤は 60 秒ごとに読み直すが、買い目と出所は同じ `BoardView` から取るので一致する。
+- `recorded` は記録時点の pad の ◎ と朝の軸を比べた値なので、後から `pad_predictions` と突き合わせれば作り直せる（pad を取り込み直すと
+  再現できない）。
+
+#### 却下した代替案
+
+- **レース単位の別テーブル**（ADR 0013 の `predict_race_conditions` と同じ形）: 値の重複は無いが、#799 の両建て（1 レースに 2 枠）で
+  PK（日付＋レース）が合わなくなる（PO 判断）。ADR 0013 が馬場条件を列にしなかった理由（組み合わせ単位で値が重複する）は
+  `fix_source` にも当てはまるが、枠の区別を行に持つ必要がこちらにはある。
+- **既存の行を 'unknown' で埋める**: backfill が要り、DEFAULT を付けると新しい行の書き漏れを隠す（PO 判断）。
+- **記録時にサーバで出所を解決し直す**: 盤の表示と記録の間に朝の選定ができると、買い目と出所が食い違う（PO 判断）。
+- **`PredictBetRecord` に出所のフィールドを足す**: 読み出し側で今は使わない（YAGNI）。
+- **切り替え後の NULL を CHECK で弾く**（migrate の後は `fix_source` を NOT NULL 相当にする・PO 判断・2026-11-03）: migrate の後も再起動していない古い
+  バイナリ（StaleBinary は warn で起動を続ける）の記録が失敗し、記録そのものが止まる。NULL を許し、集計側で `installed_on` で区切る。
+
+#### 影響
+
+- #776 の影響の「`predict_bets` には固定の出所を残さない（出所の記録は別 issue）」と「REQ-D01-006 の集計で母集団を分けるときは、
+  日付と predict-watch のログで判断する」は、本エントリで置き換える。#795 以降の行は `fix_source` で分け、NULL は #795 に未対応の
+  バイナリが書いた行（大半は #795 より前。migrate の後も再起動していない古いバイナリは NULL を書く）。区切りは `predict_bets.created_at`
+  と `_sqlx_migrations.installed_on`（version 20261102000001）を比べて付ける（`created_at` は TEXT〈UTC の RFC3339〉なので `created_at::timestamptz` にキャストして比べる）。
+- 見送ったレースは `predict_race_skips` にしか残らず出所を持たない。`fix_source` で分けた母集団は買い目を記録したレースだけ。
+- `morning` には、朝の軸が取消でライブの首位へ戻った買い目も含む。除くには `morning_selections.axis` の出走の有無で絞る。
+- REST の outcome は、買い目ありの記録で `fix_source` が実質必須になる（破壊的変更）。デプロイ前に開いていた web のタブ（古いバンドル）
+  からの記録は 400 になる。outcome を叩く他のクライアントは無い。
+- 共有 DB にはマージ後に `paddock-analyze migrate` で適用する。
+- #799 は同じ列の値（別枠）を増やすことになるが、それだけでは入らない: 二重記録ガード（同じレースに買い目ありで 2 回目は Conflict）と、
+  時刻の CHECK（朝の選定の時刻専用）の変更が別途要る。

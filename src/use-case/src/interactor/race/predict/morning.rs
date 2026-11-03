@@ -19,7 +19,7 @@ use crate::error::{Error, Result};
 use crate::interactor::Interactor;
 use crate::interactor::race::board::recorded_axis_of;
 use crate::repository::{
-    LiveEvPin, MorningSelection, MorningSelectionRepository, OddsRepository,
+    BetFixSource, LiveEvPin, MorningSelection, MorningSelectionRepository, OddsRepository,
     PadPredictionRepository, RaceCardRepository, SnapshotPoint, StatsRepository,
 };
 
@@ -79,6 +79,30 @@ pub enum FixSource {
     },
     /// その日の初回スイープ（T-40）。`recorded` は軸が記録◎ か。
     FirstSweep { captured_at: String, recorded: bool },
+}
+
+/// 盤・predict で組んだ買い目の出所を、記録用（`predict_bets.fix_source`・#795）にする。
+///
+/// `Morning { recorded }` の `recorded`（記録◎ を軸に強制したか）は落とす（後から `pad_predictions` と
+/// 突き合わせれば作り直せるため）。`FirstSweep` は predict-watch 専用で記録の経路には来ないので、
+/// 来たら `InvalidArgument` にする（別の出所として黙って記録しない）。
+impl TryFrom<&FixSource> for BetFixSource {
+    type Error = Error;
+
+    fn try_from(source: &FixSource) -> Result<Self> {
+        match source {
+            FixSource::Morning {
+                odds_fetched_at, ..
+            } => Ok(Self::Morning {
+                odds_fetched_at: odds_fetched_at.clone(),
+            }),
+            FixSource::RecordedAxis => Ok(Self::RecordedAxis),
+            FixSource::None => Ok(Self::None),
+            FixSource::FirstSweep { .. } => Err(Error::InvalidArgument(
+                "初回スイープの固定は記録の出所にできません".to_string(),
+            )),
+        }
+    }
 }
 
 /// 固定の出所を表示用の文言にする（predict-watch のログと対話の predict の 🔒 行で共有・#776）。
@@ -346,6 +370,46 @@ mod tests {
 
     const EARLY: &str = "2026-10-10T01:00:00Z";
     const LATE: &str = "2026-10-10T05:00:00Z";
+
+    #[test]
+    fn bet_fix_source_from_morning_drops_recorded() {
+        for recorded in [false, true] {
+            let src = FixSource::Morning {
+                odds_fetched_at: EARLY.to_string(),
+                recorded,
+            };
+            assert_eq!(
+                BetFixSource::try_from(&src).unwrap(),
+                BetFixSource::Morning {
+                    odds_fetched_at: EARLY.to_string()
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn bet_fix_source_from_recorded_axis_and_none() {
+        assert_eq!(
+            BetFixSource::try_from(&FixSource::RecordedAxis).unwrap(),
+            BetFixSource::RecordedAxis
+        );
+        assert_eq!(
+            BetFixSource::try_from(&FixSource::None).unwrap(),
+            BetFixSource::None
+        );
+    }
+
+    #[test]
+    fn bet_fix_source_rejects_first_sweep() {
+        let src = FixSource::FirstSweep {
+            captured_at: EARLY.to_string(),
+            recorded: false,
+        };
+        assert!(matches!(
+            BetFixSource::try_from(&src),
+            Err(Error::InvalidArgument(_))
+        ));
+    }
 
     #[test]
     fn nothing_to_fix_is_empty() {

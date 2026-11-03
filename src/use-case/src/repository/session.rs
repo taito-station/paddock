@@ -34,6 +34,38 @@ pub struct PredictBetRecord {
     pub ev: f64,
 }
 
+/// 記録した買い目の固定の出所（#795）。買い目は同じ固定（朝の選定 → 記録◎ の軸だけ → なし・#776）で
+/// 組むので、どれで組んだかをレースの全行に残す（REQ-D01-006 の集計で母集団を分けるため）。
+/// `predict_bets.fix_source` / `fix_odds_fetched_at` に入る。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BetFixSource {
+    /// 朝の選定。`odds_fetched_at` は朝のスナップショットの取得時刻（UTC rfc3339）。
+    Morning { odds_fetched_at: String },
+    /// 記録◎ の軸だけの固定（相手・混戦は実行時点のオッズ）。
+    RecordedAxis,
+    /// 固定なし（実行時点のオッズで組んだ）。
+    None,
+}
+
+impl BetFixSource {
+    /// `predict_bets.fix_source` に入れる値。
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::Morning { .. } => "morning",
+            Self::RecordedAxis => "recorded_axis",
+            Self::None => "none",
+        }
+    }
+
+    /// `predict_bets.fix_odds_fetched_at` に入れる値（朝の選定のときだけ）。
+    pub fn odds_fetched_at(&self) -> Option<&str> {
+        match self {
+            Self::Morning { odds_fetched_at } => Some(odds_fetched_at),
+            Self::RecordedAxis | Self::None => None,
+        }
+    }
+}
+
 /// 予想セッションで 1 レースの冒頭に対話入力した馬場状態（#80）。レース単位で記録し、
 /// 「どの馬場前提で予想したか」を再現・監査できるようにする。`track_condition` が `None` は
 /// 「不明として入力した」ことを表す（レコードの存在自体が「入力済み」を意味する）。
@@ -145,11 +177,13 @@ pub trait PredictSessionRepository: Send + Sync {
     /// - `Σstake > balance`: `InvalidArgument`（状態不変）
     ///
     /// 成功時は更新後のセッションレコードを返す。`updated_at` として `now` を注入する。
+    /// `fix_source` は買い目の全行に書く（#795）。`None` は出所なし（呼び出し側が買い目ありでは渡さない）。
     fn save_race_outcome(
         &self,
         date: NaiveDate,
         race_id: &RaceId,
         bets: &[PredictBetRecord],
+        fix_source: Option<&BetFixSource>,
         now: DateTime<Utc>,
     ) -> impl Future<Output = Result<PredictSessionRecord>> + Send;
 

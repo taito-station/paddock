@@ -7,8 +7,9 @@ doc_class: [D11, D19, D08]
 tags: [D11, D19, D08]
 sources:
   - qa/QA-predict-fixed-selection-776.md
-distilled_from_sha: "fd355c9d"
-updated: "2026-10-31"
+  - qa/QA-predict-bets-fix-source-795.md
+distilled_from_sha: "1b02dbd5"
+updated: "2026-11-03"
 ---
 
 # predict バイナリ: 対話型レーシングセッション
@@ -131,6 +132,8 @@ web・desktop の盤の執行パネルから記録した買い目と、構造（
   predict-watch の 🔒 と同じ構造にならない（既知の制約）。
 - 🔒 行は固定の値（取消を反映する前）を出す。盤は取消を反映した後の軸・相手を出すので、取消のあるレースでは表示が食い違いうる。
 - 馬連 vs 馬単の EV 診断は固定の対象外（常に勝率首位を軸にする）。
+- 記録した買い目には固定の出所（`morning` / `recorded_axis` / `none`。`morning` は朝のスナップショットの時刻つき）が
+  `predict_bets.fix_source` / `fix_odds_fetched_at` に残る（#795）。出所を記録用にできないとき（初回スイープ。predict の経路では来ない）は、そのレースを記録せず次へ進む。
 
 ### レース見出し（発走時刻・発走済み表示）
 

@@ -7,8 +7,9 @@ doc_class: [D10, D19, D09]
 tags: [D10, D19, D09]
 sources:
   - docs/api/openapi.json
-distilled_from_sha: "a02d28fe"
-updated: "2026-10-31"
+  - qa/QA-predict-bets-fix-source-795.md
+distilled_from_sha: "1b02dbd5"
+updated: "2026-11-02"
 ---
 
 # REST API（read 基盤）: 設計仕様
@@ -211,6 +212,7 @@ GET /api/races/{race_id}/board[?budget=&track_condition=&blend_alpha=]
 | `axis` | int\|null | 買い目の軸。`fixed_selection`（朝の固定・#767）→ `recorded_axis` → `live_axis` の順。朝の選定を保存した後に入った記録◎ は使わない |
 | `recorded_axis` | int\|null | predict 記録済みの本命◎（#388）。未 predict・取消時は `null` |
 | `fixed_selection` | object\|null | 朝の選定で固定した買い目の構造（#767）。`axis` / `partners`（買い目〈`axis` / `partners`〉そのもの。朝の軸が取消ならライブの首位へ戻り、相手は取消の馬を除き補充しない。朝の選定は記録◎ を軸に強制して組み、保存した後に入った記録◎ は使わない）/ `konsen_band`（空なら非混戦。買い目と同じく取消で絞らない）/ `scratched`（朝の軸・相手のうち出走していない馬）/ `odds_fetched_at`（朝のスナップショットの時刻）。predict-watch が保存した朝の選定が無いレースは `null`。盤の買い目（`axis` / `partners` / `bets`）はこれで固定して組む。`morning_at`（#448 の朝↔現比較）とは別の「朝」 |
+| `fix_source` | object\|null | 盤の買い目を組んだ固定の出所（#795）。`kind`（`morning` / `recorded_axis` / `none`）と `odds_fetched_at`（`morning` のときだけ・`fixed_selection.odds_fetched_at` と同じ値）。執行パネルは記録のときにこれをそのまま送り、`predict_bets.fix_source` に残る。記録の経路に来ない初回スイープの出所のときだけ `null` |
 | `live_axis` | int\|null | ライブ再計算の軸（市場ブレンド首位）。固定した軸（`fixed_selection.axis`、無ければ `recorded_axis`）と乖離時に UI 警告 |
 | `roi` / `hit_prob` | number\|null | 現時点オッズ基準のポートフォリオ ROI / 的中確率 |
 | `unpriced_legs` | int | 賭金が乗っているのにオッズ未取得の脚数（#631）。**`roi` は priced 脚のみ・`total_stake` は全脚**なので、0 より大きいとき 2 つの数字は別の母集団を指す。`roi` と `total_stake` を並べて読むときはこれを併せて見る |

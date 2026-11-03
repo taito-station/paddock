@@ -3,6 +3,7 @@ use std::sync::Arc;
 use chrono::NaiveDate;
 use dioxus::prelude::*;
 use paddock_domain::race::RaceId;
+use paddock_use_case::repository::BetFixSource;
 use paddock_use_case::repository::session::PredictBetRecord;
 
 use crate::setup::Setup;
@@ -20,7 +21,14 @@ enum PanelState {
 }
 
 #[component]
-pub fn ExecPanel(race_id: String, date: NaiveDate, bets: Vec<BetView>) -> Element {
+pub fn ExecPanel(
+    race_id: String,
+    date: NaiveDate,
+    bets: Vec<BetView>,
+    // 買い目を組んだ固定の出所（#795）。`bets` と同じ盤（`BoardView`）から渡す。`Option` の prop は既定で
+    // 省略可になるので、`!optional` で必須にして渡し忘れ（＝出所なしで記録して 400）をコンパイルで検出する。
+    #[props(!optional)] fix_source: Option<BetFixSource>,
+) -> Element {
     let setup = use_context::<Arc<Setup>>();
     let mut panel_state = use_signal(|| PanelState::Loading);
     let mut session = use_signal::<Option<SessionView>>(|| None);
@@ -95,10 +103,12 @@ pub fn ExecPanel(race_id: String, date: NaiveDate, bets: Vec<BetView>) -> Elemen
     let setup_record = setup.clone();
     let rid_record = race_id.clone();
     let bets_for_record = bets.clone();
+    let fix_source_for_record = fix_source.clone();
     let on_record = move |_: Event<MouseData>| {
         let setup = setup_record.clone();
         let rid = rid_record.clone();
         let bets = bets_for_record.clone();
+        let fix_source = fix_source_for_record.clone();
         spawn(async move {
             working.set(true);
             let race_id = match RaceId::try_from(rid) {
@@ -122,7 +132,7 @@ pub fn ExecPanel(race_id: String, date: NaiveDate, bets: Vec<BetView>) -> Elemen
                 .collect();
             match setup
                 .interactor
-                .record_race_outcome(date, &race_id, bet_records)
+                .record_race_outcome(date, &race_id, bet_records, fix_source)
                 .await
             {
                 Ok(s) => {
@@ -137,9 +147,12 @@ pub fn ExecPanel(race_id: String, date: NaiveDate, bets: Vec<BetView>) -> Elemen
 
     let setup_skip = setup.clone();
     let rid_skip = race_id.clone();
+    let fix_source_for_skip = fix_source.clone();
     let on_skip = move |_: Event<MouseData>| {
         let setup = setup_skip.clone();
         let rid = rid_skip.clone();
+        // 見送りは行を書かないので出所は捨てられる（web と同じく盤の出所を渡す）。
+        let fix_source = fix_source_for_skip.clone();
         spawn(async move {
             working.set(true);
             let race_id = match RaceId::try_from(rid) {
@@ -152,7 +165,7 @@ pub fn ExecPanel(race_id: String, date: NaiveDate, bets: Vec<BetView>) -> Elemen
             };
             match setup
                 .interactor
-                .record_race_outcome(date, &race_id, vec![])
+                .record_race_outcome(date, &race_id, vec![], fix_source)
                 .await
             {
                 Ok(s) => {

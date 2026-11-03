@@ -7,8 +7,9 @@ doc_class: [D10, D06]
 tags: [D10, D06]
 sources:
   - docs/api/openapi.json
-distilled_from_sha: "a02d28fe"
-updated: "2026-07-21"
+  - qa/QA-predict-bets-fix-source-795.md
+distilled_from_sha: "1b02dbd5"
+updated: "2026-11-03"
 ---
 
 # 予想セッション write 系 REST API: 設計仕様
@@ -71,7 +72,9 @@ prefix は #33 と同じ `/api`。パスは将来 `user_id` スコープを非�
 
 ### POST /api/sessions/{date}/races/{race_id}/outcome — 記録
 
-- リクエスト: `{ "bets": [ { "bet_type", "combination", "stake": <u64>, "payout": <u64>, "ev": <f64> } ] }`（空配列 = スキップ相当も許容）。
+- リクエスト: `{ "bets": [ { "bet_type", "combination", "stake": <u64>, "payout": <u64>, "ev": <f64> } ], "fix_source": { "kind", "odds_fetched_at" } }`（空配列 = スキップ相当も許容）。
+- `fix_source` は買い目の固定の出所（#795）。`kind` は `morning`（朝の選定。`odds_fetched_at` に朝のスナップショットの時刻〈RFC3339・UTC の `Z` か `+00:00`・64 バイト以内〉が必須。文字列は正規化せずそのまま保存する——盤が返す `morning_selections.odds_fetched_at` と文字列で突き合わせるため）/ `recorded_axis` / `none`（この 2 つは `odds_fetched_at` なし）。盤（`GET /api/races/{id}/board`）の `fix_source` をそのまま送る。値はそのレースの全行の `predict_bets.fix_source` / `fix_odds_fetched_at` に入る。
+- **買い目ありで `fix_source` が無ければ 400**（#795 の破壊的変更。デプロイ前に開いていた web のタブからの記録は 400 になる）。`kind` と時刻の組み合わせが不正・時刻が読めない・UTC でない・長すぎるときも 400。見送り（空配列）でも `fix_source` の形式は検証し（不正なら 400）、正しければ捨てる。
 - セッション未作成は 404。
 - **残高ガード**: `Σstake ≤ balance` を満たさなければ **400**（状態は一切変えない）。
 - 成功時、`balance -= Σstake; balance += Σpayout; total_bet += Σstake; total_payout += Σpayout` を計算し、**セッションヘッダ更新 + 当該レースの買い目追記を 1 トランザクション**（`save_race_outcome`）で保存。200 + 更新後サマリ。
@@ -97,7 +100,7 @@ prefix は #33 と同じ `/api`。パスは将来 `user_id` スコープを非�
 → **不変条件を use-case 層の新メソッドに集約**する:
 
 - `create_predict_session(date, budget)` — budget 検証 + 二重作成ガード（既存なら `Conflict`）→ `balance=budget` で保存。
-- `record_race_outcome(date, race_id, bets)` — セッション取得（無ければ `NotFound`）→ 残高ガード（`Σstake > balance` なら `InvalidArgument`）→ 残高/累計を計算 → `save_race_outcome` で 1 トランザクション保存 → 更新後レコードを返す。
+- `record_race_outcome(date, race_id, bets, fix_source: Option<BetFixSource>)` — 出所ガード（買い目ありで出所なしなら `InvalidArgument`。見送りは出所を捨てる・#795）→ セッション取得（無ければ `NotFound`）→ 残高ガード（`Σstake > balance` なら `InvalidArgument`）→ 残高/累計を計算 → `save_race_outcome` で 1 トランザクション保存 → 更新後レコードを返す。
 - サマリ取得 `session_summary(date)` — セッション + bets をまとめて返す。
 
 API（rest-controller）はこれらを呼ぶだけにする。**CLI も同メソッド経由に寄せる**ことで不変条件の単一実装を保つ（CLI の対話 UX 部分は残す）。CLI 移行を本 PR に含めるか別 PR とするかは実装時に判断するが、**不変条件の二重実装は作らない**方針を本設計の核とする。
@@ -106,7 +109,7 @@ API（rest-controller）はこれらを呼ぶだけにする。**CLI も同メ�
 
 read API（#33）は `InvalidArgument`/`NotFound`/`Internal`（+ `Fetch`/`Timeout`）のみ使った。write では二重作成の **409** を表現したいが、現状 enum に該当がない。
 
-→ `use_case::Error` に **`Conflict(String)`** を追加し、rest-controller 側で 409 に写像する。残高超過・budget 不正は `InvalidArgument`（400）。
+→ `use_case::Error` に **`Conflict(String)`** を追加し、rest-controller 側で 409 に写像する。残高超過・budget 不正・買い目ありで `fix_source` なし（#795）は `InvalidArgument`（400）。
 
 | use_case::Error | HTTP |
 |---|---|

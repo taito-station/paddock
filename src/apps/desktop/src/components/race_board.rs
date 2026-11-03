@@ -121,6 +121,7 @@ pub fn RaceBoard(race_id: String) -> Element {
                         race_id: view.race_id.clone(),
                         date: view.date,
                         bets: view.bets.clone(),
+                        fix_source: view.fix_source.clone(),
                     }
                 }
             }

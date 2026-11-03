@@ -7,6 +7,7 @@ use utoipa::ToSchema;
 use paddock_domain::{
     BetCombination, HorseEntry, HorseProbability, Portfolio, Race, RaceCard, RaceId,
 };
+use paddock_use_case::repository::BetFixSource;
 use paddock_use_case::{ConditionRun, DISTANCE_EXPERIENCE_TOLERANCE_M, FinishEntry, RaceBoard};
 
 /// レース一覧の 1 要素（出走前の諸元のみ。results は含まない）。
@@ -319,6 +320,16 @@ pub struct FixedSelectionSchema {
     pub odds_fetched_at: String,
 }
 
+/// 盤の買い目を組んだ固定の出所（#795）。記録（outcome）のときに買い目と一緒にそのまま送る。
+#[derive(Debug, Serialize, ToSchema)]
+pub struct FixSourceSchema {
+    /// `morning`（朝の選定）/ `recorded_axis`（記録◎ の軸だけ）/ `none`（固定なし）。
+    pub kind: String,
+    /// 朝の選定に使った朝のスナップショットの取得時刻 RFC3339。`morning` のときだけ非 `null`
+    /// （`fixed_selection.odds_fetched_at` と同じ値）。
+    pub odds_fetched_at: Option<String>,
+}
+
 /// 盤の 1 頭分（全頭 truncate せず返す）。
 #[derive(Debug, Serialize, ToSchema)]
 pub struct BoardHorseSchema {
@@ -445,6 +456,10 @@ pub struct RaceBoardResponse {
     /// 朝の選定で固定した買い目の構造（#767）。predict-watch が保存した朝の選定が無いレースは `null`
     /// （そのときの買い目は記録軸だけを固定し、相手・混戦はライブ再計算）。
     pub fixed_selection: Option<FixedSelectionSchema>,
+    /// 買い目（`axis` / `partners` / `bets`）を組んだ固定の出所（#795）。朝の選定 → 記録◎ の軸だけ → なし。
+    /// 記録（outcome）のときに `bets` と一緒に送る。盤は初回スイープを持たないので通常は常に非 `null`
+    /// （記録の出所にできない固定が来たときだけ `null`。そのまま記録すると 400 になる）。
+    pub fix_source: Option<FixSourceSchema>,
     /// ライブ再計算の軸＝市場ブレンド首位（機械◎）。固定した軸（`fixed_selection.axis`、無ければ `recorded_axis`）と
     /// 異なるとき UI は乖離警告を出す（#388・#767）。
     pub live_axis: Option<u32>,
@@ -546,6 +561,15 @@ impl From<RaceBoard> for RaceBoardResponse {
                 odds_fetched_at: f.odds_fetched_at,
                 scratched: f.scratched,
             }),
+            // 盤は初回スイープ（`FixSource::FirstSweep`）を持たないので変換は通常失敗しない。万一来ても
+            // 盤の GET は落とさず `null` にする（REST の読み出しを止めるより、記録時に 400 で気づける方が安全。
+            // 別の出所に読み替えて黙って記録させない）。変換規則は use-case の `TryFrom` に揃える。
+            fix_source: BetFixSource::try_from(&b.fix_source)
+                .ok()
+                .map(|s| FixSourceSchema {
+                    kind: s.kind().to_string(),
+                    odds_fetched_at: s.odds_fetched_at().map(str::to_string),
+                }),
             live_axis: b.live_axis,
             partners,
             bets,

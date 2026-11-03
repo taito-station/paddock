@@ -10,7 +10,7 @@ use paddock_domain::{
     PortfolioBet, PortfolioConfig, RECOMMENDED_MARKET_BLEND_ALPHA, Race, RaceId, RaceOdds,
     TrackCondition, pair_ev_diagnostics,
 };
-use paddock_use_case::repository::PadPredictionRepository;
+use paddock_use_case::repository::{BetFixSource, PadPredictionRepository};
 use paddock_use_case::{
     FixSource, OddsScraper, PayoutFetcher, PredictBetRecord, PredictSessionRecord, PredictionViews,
     compose_portfolio, fix_source_label, recorded_axis_of,
@@ -289,6 +289,15 @@ async fn run_race<S: OddsScraper + PayoutFetcher>(
         println!("記録せず次のレースへ（朝の選定ができてから盤の執行パネルで記録する）");
         return Ok(());
     }
+    // 記録する買い目の固定の出所（#795）。払戻の入力より前に作り、変換できなければこのレースだけ記録せず
+    // 次へ進む（上のゲートと同じ形。`?` で返すとセッション全体が止まる）。
+    let fix_source = match record_fix_source(&source) {
+        Ok(fix_source) => fix_source,
+        Err(e) => {
+            println!("記録せず次のレースへ: {e}");
+            return Ok(());
+        }
+    };
 
     println!();
     println!(">>> レース後 — 買い目ごとに払戻を入力 <<<");
@@ -326,7 +335,7 @@ async fn run_race<S: OddsScraper + PayoutFetcher>(
     // スキップ」挙動を踏襲）。成功時は DB 反映済みの更新後セッションで丸ごと置換し、残高表示に使う。
     *session = match app
         .interactor
-        .record_race_outcome(session.date, &race.race_id, bet_records)
+        .record_race_outcome(session.date, &race.race_id, bet_records, Some(fix_source))
         .await
     {
         Ok(updated) => updated,
@@ -950,6 +959,20 @@ fn prompt_record_started_race<R: BufRead>(reader: &mut R, notice: &str) -> anyho
         "買い目を記録しますか？ [y=記録する / それ以外=記録しない] > ",
     )?;
     Ok(matches!(answer.as_deref(), Some("y" | "Y")))
+}
+
+/// 買い目を組んだ固定の出所を、記録用の出所（`predict_bets.fix_source`・#795）にする。
+///
+/// 変換規則は use-case の `TryFrom` に揃える。変換できない（初回スイープ。predict は組まないので通常は来ない）
+/// ときは専用のメッセージを返し、呼び出し側がそれを表示してそのレースだけ記録せずに飛ばす——use-case の
+/// `InvalidArgument` に流すと `run_race` が「残高超過」と表示してしまうため、記録を呼ぶ前にここで弾く。
+fn record_fix_source(source: &FixSource) -> anyhow::Result<BetFixSource> {
+    BetFixSource::try_from(source).map_err(|_| {
+        anyhow::anyhow!(
+            "買い目の固定の出所（{}）を記録の出所にできません（#795）。このレースは盤の執行パネルで記録してください。",
+            fix_source_label(source)
+        )
+    })
 }
 
 /// 朝の選定で固定していないレースの買い目を記録してよいか（#776）。`false` なら記録せずレースを抜ける。
@@ -2102,5 +2125,51 @@ mod unfixed_record_tests {
                 "y なら記録する: {source:?}"
             );
         }
+    }
+}
+
+// #795: 記録する買い目の固定の出所。
+#[cfg(test)]
+mod record_fix_source_tests {
+    use super::*;
+
+    #[test]
+    fn morning_becomes_morning_with_time() {
+        for recorded in [false, true] {
+            let source = FixSource::Morning {
+                odds_fetched_at: "2026-10-25T00:12:00Z".to_string(),
+                recorded,
+            };
+            assert_eq!(
+                record_fix_source(&source).unwrap(),
+                BetFixSource::Morning {
+                    odds_fetched_at: "2026-10-25T00:12:00Z".to_string()
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn recorded_axis_and_none_pass_through() {
+        assert_eq!(
+            record_fix_source(&FixSource::RecordedAxis).unwrap(),
+            BetFixSource::RecordedAxis
+        );
+        assert_eq!(
+            record_fix_source(&FixSource::None).unwrap(),
+            BetFixSource::None
+        );
+    }
+
+    #[test]
+    fn first_sweep_is_a_dedicated_error_not_balance() {
+        let source = FixSource::FirstSweep {
+            captured_at: "2026-10-25T05:00:00Z".to_string(),
+            recorded: false,
+        };
+        let err = record_fix_source(&source).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("出所"), "専用のメッセージ: {msg}");
+        assert!(!msg.contains("残高"), "残高超過と取り違えない: {msg}");
     }
 }

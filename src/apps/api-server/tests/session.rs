@@ -86,7 +86,8 @@ async fn outcome_updates_balance_and_summary(pool: sqlx::PgPool) {
         .set_json(json!({
             "bets": [
                 { "bet_type": "単勝", "combination": "1", "stake": 3000, "payout": 5000, "ev": 1.2 }
-            ]
+            ],
+            "fix_source": { "kind": "none" }
         }))
         .to_request();
     let resp = test::call_service(&app, req).await;
@@ -117,7 +118,8 @@ async fn duplicate_outcome_for_same_race_conflicts(pool: sqlx::PgPool) {
         test::TestRequest::post()
             .uri(&format!("/api/sessions/{DATE}/races/{RACE_ID}/outcome"))
             .set_json(json!({
-                "bets": [ { "bet_type": "単勝", "combination": "1", "stake": 3000, "payout": 0, "ev": 1.0 } ]
+                "bets": [ { "bet_type": "単勝", "combination": "1", "stake": 3000, "payout": 0, "ev": 1.0 } ],
+                "fix_source": { "kind": "none" }
             }))
             .to_request()
     };
@@ -235,7 +237,8 @@ async fn recording_bets_clears_prior_skip(pool: sqlx::PgPool) {
         test::TestRequest::post()
             .uri(&format!("/api/sessions/{DATE}/races/{RACE_ID}/outcome"))
             .set_json(json!({
-                "bets": [ { "bet_type": "単勝", "combination": "1", "stake": 1000, "payout": 0, "ev": 1.0 } ]
+                "bets": [ { "bet_type": "単勝", "combination": "1", "stake": 1000, "payout": 0, "ev": 1.0 } ],
+                "fix_source": { "kind": "none" }
             }))
             .to_request(),
     )
@@ -262,7 +265,8 @@ async fn outcome_rejects_stake_over_balance_without_state_change(pool: sqlx::PgP
     let req = test::TestRequest::post()
         .uri(&format!("/api/sessions/{DATE}/races/{RACE_ID}/outcome"))
         .set_json(json!({
-            "bets": [ { "bet_type": "単勝", "combination": "1", "stake": 2000, "payout": 0, "ev": 0.0 } ]
+            "bets": [ { "bet_type": "単勝", "combination": "1", "stake": 2000, "payout": 0, "ev": 0.0 } ],
+            "fix_source": { "kind": "none" }
         }))
         .to_request();
     let resp = test::call_service(&app, req).await;
@@ -303,4 +307,208 @@ async fn outcome_and_summary_404_when_no_session(pool: sqlx::PgPool) {
     )
     .await;
     assert_eq!(outcome.status().as_u16(), 404);
+}
+
+// --- 買い目の固定の出所（#795） -----------------------------------------------
+
+fn create_req() -> test::TestRequest {
+    test::TestRequest::post()
+        .uri(&format!("/api/sessions/{DATE}"))
+        .set_json(json!({ "budget": 10000 }))
+}
+
+fn outcome_req(body: Value) -> test::TestRequest {
+    test::TestRequest::post()
+        .uri(&format!("/api/sessions/{DATE}/races/{RACE_ID}/outcome"))
+        .set_json(body)
+}
+
+fn one_bet() -> Value {
+    json!([ { "bet_type": "単勝", "combination": "1", "stake": 1000, "payout": 0, "ev": 1.0 } ])
+}
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn outcome_persists_fix_source(pool: sqlx::PgPool) {
+    let app = build_service!(pool.clone());
+    test::call_service(&app, create_req().to_request()).await;
+
+    let resp = test::call_service(
+        &app,
+        outcome_req(json!({
+            "bets": one_bet(),
+            "fix_source": { "kind": "morning", "odds_fetched_at": "2026-03-28T00:30:00+00:00" }
+        }))
+        .to_request(),
+    )
+    .await;
+    assert_eq!(resp.status().as_u16(), 200);
+
+    let rows: Vec<(Option<String>, Option<String>)> =
+        sqlx::query_as("SELECT fix_source, fix_odds_fetched_at FROM predict_bets")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        rows,
+        vec![(
+            Some("morning".to_string()),
+            Some("2026-03-28T00:30:00+00:00".to_string())
+        )]
+    );
+}
+
+/// web は盤の `fix_source` をそのまま送るので、`none` でも `"odds_fetched_at": null` が明示で付く（#795）。
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn outcome_accepts_explicit_null_time_for_none(pool: sqlx::PgPool) {
+    let app = build_service!(pool.clone());
+    test::call_service(&app, create_req().to_request()).await;
+
+    let resp = test::call_service(
+        &app,
+        outcome_req(json!({
+            "bets": one_bet(),
+            "fix_source": { "kind": "none", "odds_fetched_at": null }
+        }))
+        .to_request(),
+    )
+    .await;
+    assert_eq!(resp.status().as_u16(), 200);
+    let rows: Vec<(Option<String>, Option<String>)> =
+        sqlx::query_as("SELECT fix_source, fix_odds_fetched_at FROM predict_bets")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(rows, vec![(Some("none".to_string()), None)]);
+}
+
+/// `Z` 表記の UTC も通り、正規化せずそのまま保存する（盤の文字列と突き合わせるため・#795）。
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn outcome_stores_z_time_verbatim(pool: sqlx::PgPool) {
+    let app = build_service!(pool.clone());
+    test::call_service(&app, create_req().to_request()).await;
+
+    let resp = test::call_service(
+        &app,
+        outcome_req(json!({
+            "bets": one_bet(),
+            "fix_source": { "kind": "morning", "odds_fetched_at": "2026-03-28T00:30:00.123Z" }
+        }))
+        .to_request(),
+    )
+    .await;
+    assert_eq!(resp.status().as_u16(), 200);
+    let rows: Vec<(Option<String>,)> =
+        sqlx::query_as("SELECT fix_odds_fetched_at FROM predict_bets")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(rows, vec![(Some("2026-03-28T00:30:00.123Z".to_string()),)]);
+}
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn outcome_with_bets_requires_fix_source(pool: sqlx::PgPool) {
+    let app = build_service!(pool.clone());
+    test::call_service(&app, create_req().to_request()).await;
+
+    let resp =
+        test::call_service(&app, outcome_req(json!({ "bets": one_bet() })).to_request()).await;
+    assert_eq!(resp.status().as_u16(), 400);
+    let n: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM predict_bets")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(n.0, 0, "出所なしの買い目は書かない");
+}
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn outcome_rejects_invalid_fix_source(pool: sqlx::PgPool) {
+    let app = build_service!(pool.clone());
+    test::call_service(&app, create_req().to_request()).await;
+
+    for fix_source in [
+        json!({ "kind": "first_sweep" }),
+        json!({ "kind": "morning" }),
+        json!({ "kind": "morning", "odds_fetched_at": "09:30" }),
+        json!({ "kind": "none", "odds_fetched_at": "2026-03-28T00:30:00+00:00" }),
+        json!({ "kind": "recorded_axis", "odds_fetched_at": "2026-03-28T00:30:00+00:00" }),
+        // UTC 以外のオフセット（盤は UTC で返すので、JST の値は突き合わせできない）。
+        json!({ "kind": "morning", "odds_fetched_at": "2026-03-28T09:30:00+09:00" }),
+        // 長さの上限（64）超え。RFC3339 として読める形に小数秒を伸ばしたもの。
+        json!({ "kind": "morning", "odds_fetched_at": format!("2026-03-28T00:30:00.{}Z", "0".repeat(60)) }),
+        // chrono は読めるが盤の形と文字列で一致しない表記（区切り `t`・空白、末尾 `z`・`-00:00`）。
+        json!({ "kind": "morning", "odds_fetched_at": "2026-03-28t00:30:00Z" }),
+        json!({ "kind": "morning", "odds_fetched_at": "2026-03-28 00:30:00Z" }),
+        json!({ "kind": "morning", "odds_fetched_at": "2026-03-28T00:30:00z" }),
+        json!({ "kind": "morning", "odds_fetched_at": "2026-03-28T00:30:00-00:00" }),
+    ] {
+        let resp = test::call_service(
+            &app,
+            outcome_req(json!({ "bets": one_bet(), "fix_source": fix_source.clone() }))
+                .to_request(),
+        )
+        .await;
+        assert_eq!(resp.status().as_u16(), 400, "{fix_source}");
+        let json = body_json(resp).await;
+        assert_eq!(json["error"]["code"], "bad_request", "{fix_source}");
+    }
+    let n: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM predict_bets")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(n.0, 0);
+}
+
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn skip_accepts_fix_source(pool: sqlx::PgPool) {
+    let app = build_service!(pool);
+    test::call_service(&app, create_req().to_request()).await;
+
+    let resp = test::call_service(
+        &app,
+        outcome_req(json!({ "bets": [], "fix_source": { "kind": "recorded_axis" } })).to_request(),
+    )
+    .await;
+    assert_eq!(resp.status().as_u16(), 200);
+    let json = body_json(resp).await;
+    assert_eq!(json["skipped_race_ids"], json!([RACE_ID]));
+}
+
+/// 見送り（`bets: []`）でも出所の検証は通す。不正な kind なら 400 で、見送りも書かない（#795）。
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn skip_rejects_invalid_fix_source_without_writing(pool: sqlx::PgPool) {
+    let app = build_service!(pool.clone());
+    test::call_service(&app, create_req().to_request()).await;
+
+    let resp = test::call_service(
+        &app,
+        outcome_req(json!({ "bets": [], "fix_source": { "kind": "first_sweep" } })).to_request(),
+    )
+    .await;
+    assert_eq!(resp.status().as_u16(), 400);
+    let n: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM predict_race_skips")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(n.0, 0, "不正な出所の見送りは書かない");
+}
+
+/// エラー文に埋める入力値は切り詰める（巨大な値をそのまま返さない・#795）。
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn invalid_fix_source_error_truncates_echo(pool: sqlx::PgPool) {
+    let app = build_service!(pool);
+    test::call_service(&app, create_req().to_request()).await;
+
+    let kind = format!("bogus{}", "x".repeat(195));
+    assert_eq!(kind.len(), 200);
+    let resp = test::call_service(
+        &app,
+        outcome_req(json!({ "bets": one_bet(), "fix_source": { "kind": kind.clone() } }))
+            .to_request(),
+    )
+    .await;
+    assert_eq!(resp.status().as_u16(), 400);
+    let json = body_json(resp).await;
+    let message = json["error"]["message"].as_str().unwrap();
+    assert!(message.contains("bogus"), "{message}");
+    assert!(!message.contains(&kind), "入力の全体を返さない: {message}");
 }

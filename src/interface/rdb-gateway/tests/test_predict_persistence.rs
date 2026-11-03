@@ -5,7 +5,8 @@
 use chrono::{NaiveDate, Utc};
 use paddock_domain::{RaceId, TrackCondition};
 use paddock_use_case::repository::{
-    PredictBetRecord, PredictRaceConditionRecord, PredictSessionRecord, PredictSessionRepository,
+    BetFixSource, PredictBetRecord, PredictRaceConditionRecord, PredictSessionRecord,
+    PredictSessionRepository,
 };
 use rdb_gateway::PostgresRepository;
 
@@ -73,7 +74,13 @@ async fn save_race_outcome_updates_balance_and_persists_bets(pool: sqlx::PgPool)
         bet("quinella", "1-5", 500, 2_500, 1.8),
     ];
     let updated = repo
-        .save_race_outcome(date(), &race_id, &bets, Utc::now())
+        .save_race_outcome(
+            date(),
+            &race_id,
+            &bets,
+            Some(&BetFixSource::None),
+            Utc::now(),
+        )
         .await
         .unwrap();
     // 返り値の更新後セッションが残高計算済みであること。
@@ -117,7 +124,13 @@ async fn completed_flag_and_multi_race_append(pool: sqlx::PgPool) {
     // R1: 単勝3 ¥1000（外れ）→ 残高 9000 / total_bet 1000
     let r1 = RaceId::try_from("2026-3-nakayama-8-1R").unwrap();
     let after_r1 = repo
-        .save_race_outcome(date(), &r1, &[bet("win", "3", 1_000, 0, 1.5)], Utc::now())
+        .save_race_outcome(
+            date(),
+            &r1,
+            &[bet("win", "3", 1_000, 0, 1.5)],
+            Some(&BetFixSource::None),
+            Utc::now(),
+        )
         .await
         .unwrap();
     assert_eq!(after_r1.balance, 9_000);
@@ -128,7 +141,7 @@ async fn completed_flag_and_multi_race_append(pool: sqlx::PgPool) {
     let mut b2 = bet("place", "7", 800, 1_200, 1.3);
     b2.race_id = r2.clone();
     let after_r2 = repo
-        .save_race_outcome(date(), &r2, &[b2], Utc::now())
+        .save_race_outcome(date(), &r2, &[b2], Some(&BetFixSource::None), Utc::now())
         .await
         .unwrap();
     assert_eq!(after_r2.balance, 9_400);
@@ -161,7 +174,13 @@ async fn save_race_outcome_enforces_guards_atomically(pool: sqlx::PgPool) {
     // 未作成セッションへの記録は NotFound（HTTP 404）。
     let r1 = RaceId::try_from("2026-3-nakayama-8-1R").unwrap();
     let err = repo
-        .save_race_outcome(date(), &r1, &[bet("win", "3", 1_000, 0, 1.5)], Utc::now())
+        .save_race_outcome(
+            date(),
+            &r1,
+            &[bet("win", "3", 1_000, 0, 1.5)],
+            Some(&BetFixSource::None),
+            Utc::now(),
+        )
         .await
         .unwrap_err();
     assert!(matches!(err, UcError::NotFound(_)), "got {err:?}");
@@ -182,7 +201,13 @@ async fn save_race_outcome_enforces_guards_atomically(pool: sqlx::PgPool) {
 
     // 残高超過は InvalidArgument（HTTP 400）で状態不変。
     let err = repo
-        .save_race_outcome(date(), &r1, &[bet("win", "3", 15_000, 0, 1.5)], Utc::now())
+        .save_race_outcome(
+            date(),
+            &r1,
+            &[bet("win", "3", 15_000, 0, 1.5)],
+            Some(&BetFixSource::None),
+            Utc::now(),
+        )
         .await
         .unwrap_err();
     assert!(matches!(err, UcError::InvalidArgument(_)), "got {err:?}");
@@ -191,13 +216,25 @@ async fn save_race_outcome_enforces_guards_atomically(pool: sqlx::PgPool) {
     assert!(repo.find_predict_bets(date()).await.unwrap().is_empty());
 
     // 正常記録（残高 10000 - 1000 = 9000）。
-    repo.save_race_outcome(date(), &r1, &[bet("win", "3", 1_000, 0, 1.5)], Utc::now())
-        .await
-        .unwrap();
+    repo.save_race_outcome(
+        date(),
+        &r1,
+        &[bet("win", "3", 1_000, 0, 1.5)],
+        Some(&BetFixSource::None),
+        Utc::now(),
+    )
+    .await
+    .unwrap();
 
     // 同一レースへ買い目ありで再記録すると Conflict（HTTP 409・買い目重複＋残高二重適用を防ぐ）。
     let err = repo
-        .save_race_outcome(date(), &r1, &[bet("win", "3", 500, 0, 1.5)], Utc::now())
+        .save_race_outcome(
+            date(),
+            &r1,
+            &[bet("win", "3", 500, 0, 1.5)],
+            Some(&BetFixSource::None),
+            Utc::now(),
+        )
         .await
         .unwrap_err();
     assert!(matches!(err, UcError::Conflict(_)), "got {err:?}");
@@ -209,7 +246,7 @@ async fn save_race_outcome_enforces_guards_atomically(pool: sqlx::PgPool) {
     assert_eq!(repo.find_predict_bets(date()).await.unwrap().len(), 1);
 
     // 買い目なしの再送はスキップの冪等再送として許容（Conflict にしない）。
-    repo.save_race_outcome(date(), &r1, &[], Utc::now())
+    repo.save_race_outcome(date(), &r1, &[], None, Utc::now())
         .await
         .unwrap();
     // 購入済みレースに空 bets を送っても skip 痕跡は付かない（購入済みが正・見送りではない）。
@@ -238,7 +275,7 @@ async fn skip_round_trips_and_clears_on_purchase(pool: sqlx::PgPool) {
 
     // r1 を見送り。残高は不変・bets は増えない・skip 表に載る。
     let s = repo
-        .save_race_outcome(date(), &r1, &[], Utc::now())
+        .save_race_outcome(date(), &r1, &[], None, Utc::now())
         .await
         .unwrap();
     assert_eq!(s.balance, 10_000);
@@ -247,7 +284,7 @@ async fn skip_round_trips_and_clears_on_purchase(pool: sqlx::PgPool) {
     assert_eq!(skips, vec![r1.clone()]);
 
     // 空 bets の再送は冪等（重複しない）。
-    repo.save_race_outcome(date(), &r1, &[], Utc::now())
+    repo.save_race_outcome(date(), &r1, &[], None, Utc::now())
         .await
         .unwrap();
     assert_eq!(
@@ -256,9 +293,15 @@ async fn skip_round_trips_and_clears_on_purchase(pool: sqlx::PgPool) {
     );
 
     // r1 を後から買い目ありで記録すると skip 痕跡は消え、bets 側に現れる。
-    repo.save_race_outcome(date(), &r1, &[bet("win", "3", 1_000, 0, 1.5)], Utc::now())
-        .await
-        .unwrap();
+    repo.save_race_outcome(
+        date(),
+        &r1,
+        &[bet("win", "3", 1_000, 0, 1.5)],
+        Some(&BetFixSource::None),
+        Utc::now(),
+    )
+    .await
+    .unwrap();
     assert!(
         repo.find_predict_race_skips(date())
             .await
@@ -268,7 +311,7 @@ async fn skip_round_trips_and_clears_on_purchase(pool: sqlx::PgPool) {
     assert_eq!(repo.find_predict_bets(date()).await.unwrap().len(), 1);
 
     // 別レース r2 の見送りは独立して載る（race_id 昇順で返る）。
-    repo.save_race_outcome(date(), &r2, &[], Utc::now())
+    repo.save_race_outcome(date(), &r2, &[], None, Utc::now())
         .await
         .unwrap();
     assert_eq!(
@@ -306,12 +349,24 @@ async fn concurrent_record_same_race_serializes_and_rejects_duplicate(pool: sqlx
     let r_b = r1.clone();
     let t_a = tokio::spawn(async move {
         repo_a
-            .save_race_outcome(date(), &r_a, &[bet("win", "3", 1_000, 0, 1.5)], Utc::now())
+            .save_race_outcome(
+                date(),
+                &r_a,
+                &[bet("win", "3", 1_000, 0, 1.5)],
+                Some(&BetFixSource::None),
+                Utc::now(),
+            )
             .await
     });
     let t_b = tokio::spawn(async move {
         repo_b
-            .save_race_outcome(date(), &r_b, &[bet("win", "3", 1_000, 0, 1.5)], Utc::now())
+            .save_race_outcome(
+                date(),
+                &r_b,
+                &[bet("win", "3", 1_000, 0, 1.5)],
+                Some(&BetFixSource::None),
+                Utc::now(),
+            )
             .await
     });
     let res_a = t_a.await.unwrap();
@@ -474,4 +529,110 @@ async fn race_condition_upsert_preserves_created_at_and_advances_updated_at(pool
         t2.to_rfc3339(),
         "updated_at は最新の保存時刻に更新される"
     );
+}
+
+/// #795: 買い目の固定の出所をレースの全行に書く（morning は時刻あり・recorded_axis / none は時刻 NULL）。
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn save_race_outcome_writes_fix_source_to_every_row(pool: sqlx::PgPool) {
+    let repo = PostgresRepository::new(pool);
+    seed_session(&repo).await;
+
+    // 期待値（列の文字列）はリテラルで持つ。`source.kind()` 等で作ると、写像が誤っても両辺が同じに誤って緑になる。
+    let cases = [
+        (
+            "2026-3-nakayama-8-1R",
+            BetFixSource::Morning {
+                odds_fetched_at: "2026-04-19T00:31:05+00:00".to_string(),
+            },
+            ("morning", Some("2026-04-19T00:31:05+00:00")),
+        ),
+        (
+            "2026-3-nakayama-8-2R",
+            BetFixSource::RecordedAxis,
+            ("recorded_axis", None),
+        ),
+        ("2026-3-nakayama-8-3R", BetFixSource::None, ("none", None)),
+    ];
+    for (race, source, _) in &cases {
+        let race_id = RaceId::try_from(*race).unwrap();
+        let bets: Vec<_> = [("win", "3"), ("quinella", "1-5")]
+            .iter()
+            .map(|(t, c)| {
+                let mut b = bet(t, c, 100, 0, 1.0);
+                b.race_id = race_id.clone();
+                b
+            })
+            .collect();
+        repo.save_race_outcome(date(), &race_id, &bets, Some(source), Utc::now())
+            .await
+            .unwrap();
+    }
+
+    let rows: Vec<(String, Option<String>, Option<String>)> = sqlx::query_as(
+        "SELECT race_id, fix_source, fix_odds_fetched_at FROM predict_bets ORDER BY bet_id",
+    )
+    .fetch_all(&repo.pool)
+    .await
+    .unwrap();
+    assert_eq!(rows.len(), 6);
+    for (race, _, (kind, at)) in &cases {
+        let of_race: Vec<_> = rows.iter().filter(|r| r.0 == *race).collect();
+        assert_eq!(of_race.len(), 2, "{race}");
+        for row in of_race {
+            assert_eq!(row.1.as_deref(), Some(*kind), "{race}");
+            assert_eq!(row.2.as_deref(), *at, "{race}");
+        }
+    }
+}
+
+/// #795: 出所と時刻の組み合わせを CHECK が弾く（morning だけ時刻あり・出所 NULL は時刻も NULL）。
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn fix_source_check_rejects_inconsistent_rows(pool: sqlx::PgPool) {
+    let repo = PostgresRepository::new(pool);
+    seed_session(&repo).await;
+
+    async fn insert(
+        repo: &PostgresRepository,
+        source: Option<&str>,
+        at: Option<&str>,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "INSERT INTO predict_bets \
+             (session_date, race_id, bet_type, combination, stake, payout, ev, created_at, \
+              fix_source, fix_odds_fetched_at) \
+             VALUES ($1, '2026-3-nakayama-8-1R', 'win', '3', 100, 0, 1.0, $2, $3, $4)",
+        )
+        .bind(date().format("%Y-%m-%d").to_string())
+        .bind(Utc::now().to_rfc3339())
+        .bind(source)
+        .bind(at)
+        .execute(&repo.pool)
+        .await
+        .map(|_| ())
+    }
+
+    const AT: &str = "2026-04-19T00:31:05+00:00";
+    for (source, at) in [
+        (Some("morning"), None),
+        (Some("none"), Some(AT)),
+        (Some("recorded_axis"), Some(AT)),
+        (None, Some(AT)),
+        (Some("first_sweep"), None),
+    ] {
+        assert!(
+            insert(&repo, source, at).await.is_err(),
+            "弾くはず: fix_source={source:?} fix_odds_fetched_at={at:?}"
+        );
+    }
+    for (source, at) in [
+        (Some("morning"), Some(AT)),
+        (Some("recorded_axis"), None),
+        (Some("none"), None),
+        // #795 より前の行（出所が分からない）。
+        (None, None),
+    ] {
+        insert(&repo, source, at)
+            .await
+            .unwrap_or_else(|e| panic!("通るはず: {source:?} {at:?}: {e}"));
+    }
 }

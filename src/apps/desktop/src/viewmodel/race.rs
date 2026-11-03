@@ -1,5 +1,7 @@
 use chrono::{DateTime, FixedOffset, NaiveDate, NaiveTime};
+use paddock_use_case::FixSource;
 use paddock_use_case::interactor::race::board::{BoardHorse, FixedSelection, RaceBoard};
+use paddock_use_case::repository::BetFixSource;
 
 use crate::viewmodel::exec::{BetView, portfolio_to_bets};
 
@@ -25,6 +27,10 @@ pub struct BoardView {
     pub post_time_raw: Option<NaiveTime>,
     /// 買い目の軸の固定の表示（朝の固定 #767、無ければ記録◎ #388）。どちらも無ければ `None`。
     pub axis_lock: Option<AxisLockView>,
+    /// 買い目（`bets`）を組んだ固定の出所（#795）。記録のときに買い目と一緒に渡す。買い目と同じ盤から取るので、
+    /// 盤を読み直しても両者は必ず一致する。
+    /// 記録の出所にできない固定（初回スイープ。盤では来ない）なら `None`（記録は use-case が弾く）。
+    pub fix_source: Option<BetFixSource>,
     pub horses: Vec<HorseView>,
 }
 
@@ -83,9 +89,16 @@ impl From<&RaceBoard> for BoardView {
                 .as_deref()
                 .and_then(|s| NaiveTime::parse_from_str(s, "%H:%M").ok()),
             axis_lock: axis_lock(b.fixed_selection.as_ref(), b.recorded_axis, b.live_axis),
+            fix_source: bet_fix_source(&b.fix_source),
             horses: b.horses.iter().map(HorseView::from).collect(),
         }
     }
+}
+
+/// 盤の固定の出所を記録用の出所にする（#795）。変換規則は use-case の `TryFrom` に揃え、
+/// 変換できなければ `None`（盤の表示は止めない）。
+fn bet_fix_source(source: &FixSource) -> Option<BetFixSource> {
+    BetFixSource::try_from(source).ok()
 }
 
 impl From<&BoardHorse> for HorseView {
@@ -238,6 +251,30 @@ mod tests {
             scratched: scratched.to_vec(),
             odds_fetched_at: "2026-10-10T00:31:05+00:00".to_string(),
         }
+    }
+
+    #[test]
+    fn board_fix_source_becomes_record_fix_source() {
+        let morning = FixSource::Morning {
+            odds_fetched_at: "2026-10-10T00:31:05+00:00".to_string(),
+            recorded: true,
+        };
+        assert_eq!(
+            bet_fix_source(&morning),
+            Some(BetFixSource::Morning {
+                odds_fetched_at: "2026-10-10T00:31:05+00:00".to_string()
+            })
+        );
+        assert_eq!(
+            bet_fix_source(&FixSource::RecordedAxis),
+            Some(BetFixSource::RecordedAxis)
+        );
+        assert_eq!(bet_fix_source(&FixSource::None), Some(BetFixSource::None));
+        let first_sweep = FixSource::FirstSweep {
+            captured_at: "2026-10-10T05:00:00+00:00".to_string(),
+            recorded: false,
+        };
+        assert_eq!(bet_fix_source(&first_sweep), None);
     }
 
     #[test]

@@ -35,6 +35,22 @@ pub struct BetInput {
 pub struct RecordOutcomeRequest {
     /// このレースで購入した買い目（空 = スキップ相当）。
     pub bets: Vec<BetInput>,
+    /// 買い目を組んだ固定の出所（#795）。盤のレスポンスの `fix_source` をそのまま送る。
+    /// 買い目があるときは必須（無ければ 400）。見送り（`bets` が空）では省略してよく、付けても捨てる。
+    #[serde(default)]
+    pub fix_source: Option<FixSourceInput>,
+}
+
+/// 記録する買い目の固定の出所（#795）。`predict_bets.fix_source` / `fix_odds_fetched_at` に入る。
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct FixSourceInput {
+    /// `morning`（朝の選定）/ `recorded_axis`（記録◎ の軸だけ）/ `none`（固定なし）。それ以外は 400。
+    pub kind: String,
+    /// 朝の選定に使った朝のスナップショットの取得時刻 RFC3339（UTC: `Z` か `+00:00`、64 バイト以内）。
+    /// `morning` のときだけ必須。それ以外の kind で非 null の値を付けると 400（null・省略は可）。
+    /// 文字列は正規化せずそのまま保存する（盤の `odds_fetched_at` と文字列で突き合わせるため）。
+    #[serde(default)]
+    pub odds_fetched_at: Option<String>,
 }
 
 /// サマリの 1 買い目（レスポンス）。どのレースの買い目かを race_id で示す。

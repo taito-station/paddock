@@ -64,6 +64,10 @@ pub struct RaceBoard {
     /// 買い目（`portfolio`）はこれで組む（保存した後に入った記録◎ では替えない）。#448 の `morning_at`
     /// （最初に全券種がそろった時点）とは別の「朝」なので、名前を分けている。
     pub fixed_selection: Option<FixedSelection>,
+    /// 買い目（`portfolio`）を組んだ固定の出所（#795）。朝の選定 → 記録◎ の軸だけ → なし。盤は初回スイープを
+    /// 持たないので `FirstSweep` は来ない。記録のときに買い目と一緒に送り、`predict_bets.fix_source` に残す
+    /// （表示した買い目と出所を同じ盤から取るので必ず一致する）。
+    pub fix_source: FixSource,
     /// ライブ再計算の軸＝blended（市場ブレンド α=0.2）首位（機械◎, `model_rank==1`）。
     /// 固定した軸（朝の固定、無ければ記録軸）との乖離警告に使う。直前オッズで動くのはこちら（#388）。
     pub live_axis: Option<u32>,
@@ -289,7 +293,7 @@ impl<
         // そろう（朝の選定があるレースでは）。盤は初回スイープ（T-40）を持たないので、朝の選定が無いレースは
         // 記録軸だけの固定（従来どおり）。オッズ無しなら組まない。
         let recorded = recorded_axis.and_then(|n| HorseNum::try_from(n).ok());
-        let (pinned, _, morning_selection) = self
+        let (pinned, fix_source, morning_selection) = self
             .board_fixed_selection(race_id, card.as_ref().map(|c| c.date), recorded)
             .await?;
         let field: Vec<u32> = views
@@ -426,6 +430,7 @@ impl<
             portfolio,
             recorded_axis,
             fixed_selection,
+            fix_source,
             live_axis,
             confusion,
             race_comment,

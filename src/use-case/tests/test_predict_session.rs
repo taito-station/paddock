@@ -10,7 +10,8 @@ use std::sync::Mutex;
 use chrono::{DateTime, NaiveDate, Utc};
 use paddock_domain::RaceId;
 use paddock_use_case::repository::{
-    PredictBetRecord, PredictRaceConditionRecord, PredictSessionRecord, PredictSessionRepository,
+    BetFixSource, PredictBetRecord, PredictRaceConditionRecord, PredictSessionRecord,
+    PredictSessionRepository,
 };
 use paddock_use_case::{Error, Interactor, Result};
 
@@ -41,6 +42,8 @@ fn bet(race: &str, stake: u64, payout: u64) -> PredictBetRecord {
 struct MockRepo {
     session: Mutex<Option<PredictSessionRecord>>,
     bets: Mutex<Vec<PredictBetRecord>>,
+    /// `save_race_outcome` に渡った出所（#795）。呼ばれた順。
+    fix_sources: Mutex<Vec<Option<BetFixSource>>>,
 }
 
 impl PredictSessionRepository for MockRepo {
@@ -64,8 +67,10 @@ impl PredictSessionRepository for MockRepo {
         _date: NaiveDate,
         race_id: &RaceId,
         bets: &[PredictBetRecord],
+        fix_source: Option<&BetFixSource>,
         now: DateTime<Utc>,
     ) -> Result<PredictSessionRecord> {
+        self.fix_sources.lock().unwrap().push(fix_source.cloned());
         let mut session = self
             .session
             .lock()
@@ -192,6 +197,7 @@ async fn record_updates_balance_and_totals() {
             date(),
             &race_id("2026-4-tokyo-1-1R"),
             vec![bet("2026-4-tokyo-1-1R", 1000, 2500)],
+            Some(BetFixSource::None),
         )
         .await
         .unwrap();
@@ -215,6 +221,7 @@ async fn record_rejects_overstake_and_leaves_session_unchanged() {
             date(),
             &race_id("2026-4-tokyo-1-1R"),
             vec![bet("2026-4-tokyo-1-1R", 15000, 0)],
+            Some(BetFixSource::None),
         )
         .await
         .unwrap_err();
@@ -233,6 +240,7 @@ async fn record_rejects_duplicate_race() {
         date(),
         &race_id("2026-4-tokyo-1-1R"),
         vec![bet("2026-4-tokyo-1-1R", 1000, 0)],
+        Some(BetFixSource::None),
     )
     .await
     .unwrap();
@@ -243,6 +251,7 @@ async fn record_rejects_duplicate_race() {
             date(),
             &race_id("2026-4-tokyo-1-1R"),
             vec![bet("2026-4-tokyo-1-1R", 500, 0)],
+            Some(BetFixSource::None),
         )
         .await
         .unwrap_err();
@@ -258,8 +267,76 @@ async fn record_without_session_is_not_found() {
             date(),
             &race_id("2026-4-tokyo-1-1R"),
             vec![bet("2026-4-tokyo-1-1R", 1000, 0)],
+            Some(BetFixSource::None),
         )
         .await
         .unwrap_err();
     assert!(matches!(err, Error::NotFound(_)));
+}
+
+// --- 買い目の固定の出所（#795） -----------------------------------------------
+
+#[tokio::test]
+async fn record_with_bets_requires_fix_source() {
+    let app = interactor();
+    app.create_predict_session(date(), 10000).await.unwrap();
+
+    let err = app
+        .record_race_outcome(
+            date(),
+            &race_id("2026-4-tokyo-1-1R"),
+            vec![bet("2026-4-tokyo-1-1R", 1000, 0)],
+            None,
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(err, Error::InvalidArgument(_)), "got {err:?}");
+    // リポジトリまで届かず、セッションは不変。
+    assert!(app.repository.fix_sources.lock().unwrap().is_empty());
+    let stored = app.find_predict_session(date()).await.unwrap().unwrap();
+    assert_eq!(stored.balance, 10000);
+}
+
+#[tokio::test]
+async fn record_with_bets_passes_fix_source_to_repository() {
+    let app = interactor();
+    app.create_predict_session(date(), 10000).await.unwrap();
+    let morning = BetFixSource::Morning {
+        odds_fetched_at: "2026-06-14T00:31:05+00:00".to_string(),
+    };
+
+    app.record_race_outcome(
+        date(),
+        &race_id("2026-4-tokyo-1-1R"),
+        vec![bet("2026-4-tokyo-1-1R", 1000, 0)],
+        Some(morning.clone()),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        *app.repository.fix_sources.lock().unwrap(),
+        vec![Some(morning)]
+    );
+}
+
+#[tokio::test]
+async fn skip_accepts_fix_source_or_none_and_drops_it() {
+    let app = interactor();
+    app.create_predict_session(date(), 10000).await.unwrap();
+
+    for (race, source) in [
+        ("2026-4-tokyo-1-1R", None),
+        ("2026-4-tokyo-1-2R", Some(BetFixSource::RecordedAxis)),
+    ] {
+        let s = app
+            .record_race_outcome(date(), &race_id(race), vec![], source)
+            .await
+            .unwrap();
+        assert_eq!(s.balance, 10000);
+    }
+    // 見送りは行を書かないので、出所はリポジトリへ渡さない（捨てる）。
+    assert_eq!(
+        *app.repository.fix_sources.lock().unwrap(),
+        vec![None, None]
+    );
 }

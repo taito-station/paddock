@@ -4,7 +4,8 @@ use paddock_domain::{RaceId, TrackCondition};
 use crate::error::{Error, Result};
 use crate::interactor::Interactor;
 use crate::repository::{
-    PredictBetRecord, PredictRaceConditionRecord, PredictSessionRecord, PredictSessionRepository,
+    BetFixSource, PredictBetRecord, PredictRaceConditionRecord, PredictSessionRecord,
+    PredictSessionRepository,
 };
 
 impl<R: PredictSessionRepository> Interactor<R> {
@@ -70,12 +71,23 @@ impl<R: PredictSessionRepository> Interactor<R> {
     /// リポジトリが `SELECT ... FOR UPDATE` でロックした 1 トランザクション内でアトミックに行う（#469）。
     /// 更新後レコードを返す。セッション未作成は `NotFound`。`balance` は u64 で常に 0 以上に保たれる
     /// （ガードにより underflow しない）。時刻（`updated_at`）はこの層で注入する。
+    ///
+    /// `fix_source` は買い目の固定の出所（#795）で、買い目の全行に残す。買い目があるのに `None` なら
+    /// `InvalidArgument`（新しい行に出所の分からない NULL を書かない）。見送り（買い目なし）は行を書かないので、
+    /// `Some` でも `None` でも受け付けて捨てる（web・desktop は見送りでも盤の出所を送りうる）。
     pub async fn record_race_outcome(
         &self,
         date: NaiveDate,
         race_id: &RaceId,
         bets: Vec<PredictBetRecord>,
+        fix_source: Option<BetFixSource>,
     ) -> Result<PredictSessionRecord> {
+        if !bets.is_empty() && fix_source.is_none() {
+            return Err(Error::InvalidArgument(
+                "買い目の固定の出所（fix_source）がありません".to_string(),
+            ));
+        }
+        let fix_source = fix_source.filter(|_| !bets.is_empty());
         // 二重記録ガード（当該レースの記録済み買い目チェック）・残高ガード（`Σstake ≤ balance`）・
         // 残高/累計計算・セッション upsert・買い目追記を、リポジトリが `SELECT ... FOR UPDATE` で
         // 対象セッション行をロックした 1 トランザクション内でアトミックに行う（#469）。ここで read-then-write
@@ -83,7 +95,7 @@ impl<R: PredictSessionRepository> Interactor<R> {
         // 分離しない。ガード違反はリポジトリが `NotFound` / `Conflict` / `InvalidArgument` を返し、
         // これらはそのまま HTTP ステータスへマップされる。時刻（`updated_at`）はこの層で注入する。
         self.repository
-            .save_race_outcome(date, race_id, &bets, Utc::now())
+            .save_race_outcome(date, race_id, &bets, fix_source.as_ref(), Utc::now())
             .await
     }
 
