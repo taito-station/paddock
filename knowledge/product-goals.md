@@ -3,6 +3,10 @@ status: Confirmed
 kind: knowledge
 doc_class: [D01]
 tags: [D01]
+sources:
+  - docs-original/802-model-eval-baseline.md
+  - qa/QA-model-eval-ground-802.md
+distilled_from_sha: "850ad94a"
 updated: "2026-11-02"
 ---
 
@@ -33,8 +37,11 @@ paddock が何を目指し、何を達成したら成功で、**何をやらな�
 各要件は `REQ-D01-NNN` で参照する（規約は [README.md](README.md) の「REQ-ID（要件 ID）の規約」節）。
 **`status: Confirmed` の要件は検証手段が埋まっていることを機械検査で強制する**——「達成した」と
 言えるのは測り方が決まっているときだけ。
-目標 1（モデルは当たること）の成功条件は REQ-D01-004 / 005（トップ選好馬の単勝・複勝の的中率）。
-連対・包含・較正の要件は、検証手段を #802 で用意してから足す。
+目標 1（モデルは当たること）の成功条件は REQ-D01-004 / 005（トップ選好馬の単勝・複勝の的中率。検証手段は
+従来の `paddock-analyze backtest` のまま）と、#802 で検証手段（`scripts/predict-check/model_eval.py`）を用意して
+足した REQ-D01-009〜011（連対・上位 5 頭の包含・市場との LogLoss 差。Tentative）。004 / 005 と 009〜011 は
+窓・構成・母集合が違う別の土俵で測る（前者は 2026-03-15〜06-21・冪較正なし・全レース、後者は凍結 eval 窓・
+本番構成・オッズ完全レース）。
 
 <!-- REQ:begin D01 -->
 | REQ-ID | 要件 | 検証手段 | 出典 | status |
@@ -47,6 +54,9 @@ paddock が何を目指し、何を達成したら成功で、**何をやらな�
 | REQ-D01-006 | 手動ハンデ軸精査を伴う実運用セッションの単勝的中率が、REQ-D01-004 と同条件のバックテスト水準（29.9%）を上回る＝エッジが実在することを実測で示す | 実運用セッションの `bet_records` と結果照合を 200R 以上貯め、`◎` の単勝的中率をバックテストと同じ定義で集計する（現状の観測は 1 開催日規模で母数が足りず、確定知にできる水準にない） | ADR 0055（エッジ＝手動ハンデ軸精査という主張の出所） | Tentative |
 | REQ-D01-007 | 買い目は「そのまま買える形」で提示する（式別 / 方式 / 軸 / 相手 / 点数 / 金額・100 円単位） | `build_portfolio` の単体テスト（配分の正）と [live-ev-buy-view.md](live-ev-buy-view.md) の**表示形式（slip）**の契約（配分方式の正は `build_portfolio`。ライブ writer は #346 で Rust `predict-watch` に一本化済み） | ADR 0064 | Confirmed |
 | REQ-D01-008 | 予想と買い目はブラウザから閲覧できる（ローカル完結・外部ストレージに依存しない） | `docs/api/openapi.json` のスナップショット検証（`src/apps/api-server/tests/openapi.rs`）と `web/src/lib/board.test.ts`、および [race-list-dashboard.md](../tests/browser-test-cases/race-list-dashboard.md) の手動ブラウザ手順 | ADR 0069 | Confirmed |
+| REQ-D01-009 | 本番構成のトップ選好馬の連対的中率が、凍結 eval 窓（2026-01-01〜08-31）で 50% を下回らない（2026-11-02 実測 52.1%・95% CI 下限 50.3%） | 定型 dump（[backtest.md](backtest.md)「定型 dump コマンド」）に `python3 scripts/predict-check/model_eval.py base=<dump>` を当て、`blended` の `place_hit` の点推定で判定する。窓は既定の凍結 eval 窓 | #802（[backtest.md](backtest.md) 決定ログ・[docs-original/802-model-eval-baseline.md](../docs-original/802-model-eval-baseline.md)） | Tentative |
+| REQ-D01-010 | 本番構成で、3 着以内の 3 頭がすべて win 順位の上位 5 頭に入るレースの割合が 34% を下回らない（2026-11-02 実測 36.9%・95% CI 下限 34.8%） | 同上。`blended` の `top5_win_all3` | #802（[backtest.md](backtest.md) 決定ログ・[docs-original/802-model-eval-baseline.md](../docs-original/802-model-eval-baseline.md)） | Tentative |
+| REQ-D01-011 | 本番構成の win LogLoss が、市場（単勝オッズの含意確率）との差で +0.0015 を超えて悪化しない（2026-11-02 実測 Δ +0.0011・95% CI [+0.0007, +0.0015]。市場を上回るのが目標 1 の向きで、この行は退行の見張り） | 同上。`blended − market` の `win_logloss` の Δ の点推定 | #802（[backtest.md](backtest.md) 決定ログ・[docs-original/802-model-eval-baseline.md](../docs-original/802-model-eval-baseline.md)） | Tentative |
 <!-- REQ:end D01 -->
 
 ## エッジの所在
@@ -151,9 +161,10 @@ EV 層分離（ADR 0055）後の参考ROIは、**レースを選別するゲー�
   承認されたとき）に更新する。棄却の再提案そのものは ADR 側で行い、ここには結果だけを写す。
 - 成功条件の数値は、母数を更新したバックテストが出たら `検証手段` の再実行結果で置き換える
   （窓を変えたら閾値も併せて測り直す）。
-- **本文は棄却 ADR の索引であって写しではない**。`sources` が 31 本あるのは網羅の宣言で、
-  追従が要るのは**出典の決定が変わったとき**（supersede）だけ。ADR は不変なので、機械置換のような
-  内容を変えない変更で stale が出た場合は [README.md](README.md) の例外 1/1b/1c に従う。
+- **本文は棄却 ADR の索引であって写しではない**。棄却の詳細は各決定ログが正で、ここには結果だけを写す。
+- frontmatter の `sources`（docs-original/802・qa/802）は #802 由来の部分（REQ-D01-009〜011 と決定ログ #802）だけを
+  裏づける。実測が更新されて stale になったら、閾値の測り直しと差分マージで追従する。目標・非目標・他の決定ログの
+  編集は従来どおり本文書を直接直す（編集時の hook の「上流 sources を先に更新」の警告は、この部分に限り当たらない）。
 - 関連: [doc-classes.md](doc-classes.md)（クラス体系）/ [README.md](README.md)（蒸留規約・REQ-ID 規約）/
   [betting-rule-history.md](betting-rule-history.md)（買い方ルールの決定根拠と棄却履歴）
 
@@ -764,3 +775,38 @@ t_prev = 10 分以上前の最近傍。Δ = ln(odds_prev) − ln(odds_last)（>0
   「エッジの所在」は収支（買い方の層）のエッジの話だと明記し、モデルの評価軸とは切り離した。
 - #802 で、モデル精度を主指標にした評価の土俵を作る。#803（買い方の軸の構造）は買い方の層の話で、本決定の範囲外。
 - ルートの `CLAUDE.md` と買い方の文書は変えていない（買い方の議論は #799 / #803 で扱う）。
+
+### #802: 目標 1 の成功条件に連対・上位 5 頭の包含・市場との LogLoss 差を追加（Tentative） (2026-11-02) — 採用
+
+#### コンテキスト
+
+- #801 で目標 1（モデルは当たること）を置いたとき、成功条件は REQ-D01-004 / 005（◎ の単勝・複勝的中率）だけで、
+  連対・包含・較正は「検証手段を #802 で用意してから足す」としていた。
+- #802 で `scripts/predict-check/model_eval.py`（市場と並べた ◎ の的中・top5 包含・較正、日クラスタ bootstrap の CI、
+  候補 − 基準 の採否判定）ができ、本番構成の実測が `docs-original/802-model-eval-baseline.md` に残った。
+
+#### 決定
+
+- REQ-D01-009（◎ 連対的中率 ≥ 50%）、REQ-D01-010（top5 包含 3 頭率 ≥ 34%）、REQ-D01-011（win LogLoss の blended − market
+  が +0.0015 を超えて悪化しない）を **Tentative** で追加する。閾値は 2026-11-02 の凍結 eval 窓（2,159R）の 95% CI 下限
+  （011 は上限）。
+- 検証手段は model_eval.py の既定窓での実行に固定する。窓を変えたら閾値も測り直す（既存の更新条件と同じ）。
+
+#### 理由
+
+- 目標 1 の「当たる」を ◎ の単勝・複勝だけでなく、買い目に直結する連対と上位 5 頭の包含でも見張るため。
+- 011 は実測で blended が市場より有意に悪い（Δ +0.0011・CI が 0 を跨がない）という所見を、退行の見張りとして固定する。
+  市場を上回る向きが目標 1 で、この閾値は「これ以上悪くしない」線。
+
+#### 却下した代替案
+
+- **Confirmed で追加する**: 実測は 1 窓・1 回で、閾値は CI の端をそのまま使った暫定値。Confirmed は次の窓で再測してから。
+- **011 を「市場を上回る」で書く**: 現状は満たしておらず、成功条件としては未達の宣言になる。まず退行を止める線を引く。
+
+#### 影響
+
+- 成功条件の前文を直した。モデル層の変更は、009〜011 を model_eval.py で、004 / 005 を従来の検証手段
+  （`paddock-analyze backtest`・別窓・冪較正なし）で、それぞれ測ってから採否を決める（手順と採否基準は
+  `backtest.md` 決定ログ #802）。004 / 005 を model_eval の土俵に移すなら、閾値ごと測り直して新エントリで supersede する。
+- 閾値は 2026-11-02 時点の DB（凍結 eval 窓 2,159R）に依存する。母数が増えたら「この文書の更新条件」に従って
+  閾値も測り直す。

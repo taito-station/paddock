@@ -154,6 +154,7 @@ python3 scripts/predict-check/snapshot_ev_report.py --snapshots-tsv snaps.tsv --
 | `keep_awake.sh` | 開催日の発走ウィンドウ中 `caffeinate -i` で Mac のアイドルスリープを抑止し prefetch 取りこぼしを防ぐ（#264） |
 | `snapshot_ev_report.py` | `race_odds_snapshots` を後追い集計し開催日×レースの ever/final +EV と年間発生率を出す（#248） |
 | `snapshot_coverage.py` | snapshot 取りこぼし検知（最終 snapshot が発走の何分前か→gap/none を可視化, #264） |
+| `model_eval.py` | モデル精度の土俵（#802）。`analyze backtest --dump-features` の TSV を `label=path` で 1 つ以上受け、◎ の的中・上位 5 頭の包含・較正を市場 / 純 / ブレンドで並べて日クラスタ bootstrap の 95% CI を付け、候補 − 基準 の差で採否（採用候補 / 判定不能 / 悪化）を機械判定する。買い方は扱わない。`--json` で全指標を書き出す |
 
 ## 校正計測はリーク無しの `analyze backtest` を使う（#302）
 

@@ -14,8 +14,8 @@ sources:
   - knowledge/prediction-search-api.md
   - knowledge/feature-resolution-diagnosis.md
   - knowledge/netkeiba-datasource.md
-distilled_from_sha: "78cb1f46"
-updated: "2026-10-31"
+distilled_from_sha: "502e5c4b"
+updated: "2026-11-02"
 ---
 
 # 用語集（ユビキタス言語）
@@ -109,9 +109,12 @@ ADR 0077）:
 | reliability 曲線 | `win_prob` を等幅 10 ビンに分け、ビンごとの「平均予測確率 vs 実測勝率」を並べたもの。平均予測 > 実測なら過大評価 | 同上 |
 | CORP reliability | PAV（isotonic 回帰）でビン境界をデータから最適決定した reliability + 校正仮説下の consistency band（90% pointwise）。H0 下でも 10 点グリッドで約 1 点は帯外に出るため、**1〜2/10 の帯外は有意と読まず、系統的なズレは「大半の点が同方向に帯外」で判定**する | [backtest.md](backtest.md) 評価プロトコル |
 | CORP 分解 | `Brier = MCB − DSC + UNC`（miscalibration / discrimination / uncertainty）。変更が校正と識別力のどちらを動かしたかを切り分ける | 同上 |
-| 擬似 R² / ΔR² | `R² = 1 − Σ ln p(勝者) / Σ ln(1/頭数)`（Bolton-Chapman）。**ΔR² = R²(系統) − R²(market)** が確率ロジック変更の主 KPI（「市場に足せている増分」だけを測る） | 同上 |
+| 擬似 R² / ΔR² | `R² = 1 − Σ ln p(勝者) / Σ ln(1/頭数)`（Bolton-Chapman）。**ΔR² = R²(系統) − R²(market)** は確率の質（「市場に足せている増分」）の診断指標。モデル層の採否の最終判定は `model_eval.py`（#802）で、ΔR² はその副指標 | 同上 |
 | fit 窓 / eval 窓 | パラメータ推定専用（2025 年）/ 採否判断専用（2026-01〜08）に凍結した期間。推定と採否を同一窓で行う in-sample 掃引を構造的に防ぐ | 同上 |
-| dev 窓 / test 窓・馬連 NLL | 独立確率の版ごと評価（`prob_ledger.py`・#719）の窓。dev = 2025-07〜12（fit 窓内・反復用・採否根拠にしない）/ test = eval 窓と同一（採否はここだけ）。主指標の**馬連 NLL** = `−ln P(実際の 1-2 着ペア)`、連対 log-loss と並べて**小さいほど良い** | [backtest.md](backtest.md) 評価プロトコル |
+| dev 窓 / test 窓・馬連 NLL | 独立確率の版ごと評価（`prob_ledger.py`・#719）の窓。dev = 2025-07〜12（fit 窓内・反復用・採否根拠にしない）/ test = eval 窓と同一（独立確率の版の採否はここだけ。モデル層全体の最終判定は `model_eval.py`・#802）。主指標の**馬連 NLL** = `−ln P(実際の 1-2 着ペア)`、連対 log-loss と並べて**小さいほど良い** | [backtest.md](backtest.md) 評価プロトコル |
+| 日クラスタ bootstrap | 開催日を復元抽出し、その日の全レースを採る bootstrap。同日のレースが馬場・開催条件を共有して相関するため、レース単位より CI が広く出る。モデル精度の土俵（`model_eval.py`・#802）の CI はこれ | [backtest.md](backtest.md) 精度の土俵 |
+| top5 包含（3 頭すべて） | 3 着以内の馬が全員、系統の win 順位の上位 5 頭に入ったレースの割合。2・3 着の同着で 3 着以内が 4 頭以上なら全員が入って初めて成立 | 同上 |
+| 採用候補 / 判定不能 / 悪化 | `model_eval.py` の採否の機械判定。候補 dump − 基準 dump の主指標（◎ 複勝・◎ 単勝・top5 包含 3 頭・win LogLoss）の Δ の 95% CI で決める。市場との差には付けない | 同上（決定ログ #802） |
 | 想定回収率 | `Σ payout / Σ stake`。各レース 100 円をトップ選好馬の単勝に賭けた仮定値。**実際の買い方（3 券種）とは別物** | 同上 |
 | `ev`（期待値） | `probability × odds`。1.0 を超えると理論的にプラス期待値 | [ev-kelly-bet-selection.md](ev-kelly-bet-selection.md) 用語定義 |
 | discounted Harville / λ2・λ3 | 連系券種の確率合成で 2 着段 σ_i ∝ win^λ2・3 着段 τ_i ∝ win^λ3 と割引く補正（λ=1 が素の Harville）。**blended 確率に λ2=0.90/λ3=0.77・pure 確率は無割引**（系統で最適値が異なるため適用は確率系統を知る呼び出し側の責務。`analyze backtest --blend-alpha`（α<1.0）指定時のみ既定で効く）＝本番買い目 EV 表示・blend なし/α≥1.0 の backtest は不変 | [ev-kelly-bet-selection.md](ev-kelly-bet-selection.md) §1.1（採用の経緯は [betting-rule-history.md](betting-rule-history.md) 決定ログ #703） |
