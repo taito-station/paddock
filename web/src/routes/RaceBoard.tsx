@@ -573,6 +573,7 @@ export function RaceBoard() {
             raceId={raceId}
             date={date}
             bets={d.bets}
+            fixSource={d.fix_source}
             oddsAvailable={d.odds_available}
             session={session.data}
             sessionError={session.isError}

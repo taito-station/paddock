@@ -1,7 +1,12 @@
 // レース詳細の買い目編集ロジック（純粋関数・テスト対象）。
 // 推奨（RecommendationBet）に対するユーザー編集（賭け金/払戻）を重ね、
 // outcome 記録用の BetInput[] を組み立てる。
-import type { BetInput, RecommendationBet } from "../api/client";
+import type {
+  BetInput,
+  FixSource,
+  RecommendationBet,
+  RecordOutcomeRequest,
+} from "../api/client";
 
 export type Edit = { stake: number; payout: number };
 export type Edits = Record<string, Edit>;
@@ -84,6 +89,18 @@ export function buildOutcomeBets(
       payout: effPayout(edits, key),
       ev: b.ev,
     }));
+}
+
+// outcome 記録のリクエスト本文（#795）。盤の fix_source（買い目を組んだ固定の出所）をそのまま付ける。
+// 買い目と同じ盤のデータから渡すので、表示した買い目と出所は必ず一致する。見送り（空配列）にも付けてよい
+// （サーバが捨てる）。盤に出所が無い（null）ときは付けない——買い目ありならサーバが 400 で弾く。
+export function buildOutcomeRequest(
+  outcome: BetInput[],
+  fixSource: FixSource | null | undefined,
+): RecordOutcomeRequest {
+  return fixSource
+    ? { bets: outcome, fix_source: fixSource }
+    : { bets: outcome };
 }
 
 // 数値入力のサニタイズ。空文字・NaN・負値は 0 に倒し、整数（円）に丸める。

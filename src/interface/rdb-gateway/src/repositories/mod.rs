@@ -44,9 +44,9 @@ use paddock_domain::{
 use paddock_use_case::FinishEntry;
 use paddock_use_case::Result as UcResult;
 use paddock_use_case::repository::{
-    ConditionalGateStatsRow, CourseStatsRow, FetchDownload, FetchFailure, FetchRecord,
-    FetchRepository, FetchStatus, HandicapNoteRow, HorseHistoryRepository, HorseRecencyStats,
-    HorseStatsRow, JockeyStatsRow, LiveEvPin, LiveEvRepository, LiveEvSnapshot,
+    BetFixSource, ConditionalGateStatsRow, CourseStatsRow, FetchDownload, FetchFailure,
+    FetchRecord, FetchRepository, FetchStatus, HandicapNoteRow, HorseHistoryRepository,
+    HorseRecencyStats, HorseStatsRow, JockeyStatsRow, LiveEvPin, LiveEvRepository, LiveEvSnapshot,
     LiveEvSnapshotRecord, MarkStatRow, MarkStatsFilter, MorningRaceOdds, MorningSelection,
     MorningSelectionRepository, NameMatchRepository, OddsRepository, PadPredictionRepository,
     PredictBetRecord, PredictRaceConditionRecord, PredictSessionRecord, PredictSessionRepository,
@@ -610,9 +610,10 @@ impl PredictSessionRepository for PostgresRepository {
         date: NaiveDate,
         race_id: &RaceId,
         bets: &[PredictBetRecord],
+        fix_source: Option<&BetFixSource>,
         now: DateTime<Utc>,
     ) -> UcResult<PredictSessionRecord> {
-        predict_session::save_race_outcome(&self.pool, date, race_id, bets, now)
+        predict_session::save_race_outcome(&self.pool, date, race_id, bets, fix_source, now)
             .await
             .map_err(Into::into)
     }

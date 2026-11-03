@@ -1,7 +1,7 @@
 use chrono::{DateTime, NaiveDate, Utc};
 use paddock_domain::{RaceId, TrackCondition};
 use paddock_use_case::repository::{
-    PredictBetRecord, PredictRaceConditionRecord, PredictSessionRecord,
+    BetFixSource, PredictBetRecord, PredictRaceConditionRecord, PredictSessionRecord,
 };
 use sqlx::PgPool;
 
@@ -218,6 +218,7 @@ pub async fn save_race_outcome(
     date: NaiveDate,
     race_id: &RaceId,
     bets: &[PredictBetRecord],
+    fix_source: Option<&BetFixSource>,
     now: DateTime<Utc>,
 ) -> Result<PredictSessionRecord> {
     let date_str = date_key(date);
@@ -343,8 +344,9 @@ pub async fn save_race_outcome(
         sqlx::query(
             r#"
             INSERT INTO predict_bets
-                (session_date, race_id, bet_type, combination, stake, payout, ev, created_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                (session_date, race_id, bet_type, combination, stake, payout, ev, created_at,
+                 fix_source, fix_odds_fetched_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             "#,
         )
         .bind(&date_str)
@@ -355,6 +357,9 @@ pub async fn save_race_outcome(
         .bind(bet.payout as i64)
         .bind(bet.ev)
         .bind(&created_at)
+        // 買い目の固定の出所（#795）。レースの全行に同じ値を書く
+        .bind(fix_source.map(BetFixSource::kind))
+        .bind(fix_source.and_then(BetFixSource::odds_fetched_at))
         .execute(&mut *tx)
         .await?;
     }

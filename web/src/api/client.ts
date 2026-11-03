@@ -13,5 +13,7 @@ export type SummaryBet = Schemas["SummaryBet"];
 export type RecommendationResponse = Schemas["RecommendationResponse"];
 export type RecommendationBet = Schemas["RecommendationBet"];
 export type BetInput = Schemas["BetInput"];
+export type FixSource = Schemas["FixSourceSchema"];
+export type RecordOutcomeRequest = Schemas["RecordOutcomeRequest"];
 export type LiveResponse = Schemas["LiveResponse"];
 export type LiveRaceView = Schemas["LiveRaceViewSchema"];

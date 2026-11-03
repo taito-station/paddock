@@ -565,6 +565,9 @@ async fn board_is_fixed_by_the_morning_selection(pool: sqlx::PgPool) {
 
     let before = board(&app).await;
     assert!(before["fixed_selection"].is_null());
+    // 朝の選定も記録◎ も無い盤は、固定なしで組んだ買い目（#795）。
+    assert_eq!(before["fix_source"]["kind"], "none");
+    assert!(before["fix_source"]["odds_fetched_at"].is_null());
     let live_axis = before["live_axis"].as_u64().unwrap();
     assert_eq!(before["axis"].as_u64(), Some(live_axis));
 
@@ -613,6 +616,9 @@ async fn board_is_fixed_by_the_morning_selection(pool: sqlx::PgPool) {
     assert_eq!(f["axis"].as_u64(), Some(u64::from(morning_axis)));
     assert_eq!(f["konsen_band"].as_array().map(Vec::len), Some(0));
     assert_eq!(f["odds_fetched_at"], "2026-03-28T00:30:00+00:00");
+    // 買い目の出所は朝の選定で、時刻は fixed_selection と同じ（#795）。
+    assert_eq!(fixed["fix_source"]["kind"], "morning");
+    assert_eq!(fixed["fix_source"]["odds_fetched_at"], f["odds_fetched_at"]);
 
     // 混戦サマリも買い目と同じ朝の固定に従う（#794）: 非混戦で固定 → 非混戦・頭数は null、
     // ◎勝率は固定の軸の勝率。
@@ -1282,7 +1288,13 @@ async fn results_interactor_ingests_and_settles(pool: sqlx::PgPool) {
     }];
     // 記録後は balance=9000・total_bet=1000（賭け金を差し引いた状態）。
     let recorded = repo
-        .save_race_outcome(date(), &race_id, &bets, Utc::now())
+        .save_race_outcome(
+            date(),
+            &race_id,
+            &bets,
+            Some(&paddock_use_case::repository::BetFixSource::None),
+            Utc::now(),
+        )
         .await
         .unwrap();
     assert_eq!(recorded.balance, 9000);

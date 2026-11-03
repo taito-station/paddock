@@ -38,9 +38,9 @@ use paddock_domain::{
     RaceId, RacePayouts, Surface, TrackCondition, Venue,
 };
 use paddock_use_case::repository::{
-    MorningSelection, MorningSelectionRepository, OddsRepository, OddsRow, PadPredictionRepository,
-    PredictBetRecord, PredictRaceConditionRecord, PredictSessionRecord, PredictSessionRepository,
-    RaceCardRepository, RaceOddsRecord, RaceRepository,
+    BetFixSource, MorningSelection, MorningSelectionRepository, OddsRepository, OddsRow,
+    PadPredictionRepository, PredictBetRecord, PredictRaceConditionRecord, PredictSessionRecord,
+    PredictSessionRepository, RaceCardRepository, RaceOddsRecord, RaceRepository,
 };
 use paddock_use_case::{
     FixSource, Interactor, OddsInteractor, OddsScraper, PayoutFetcher, ScrapedOdds,
@@ -213,6 +213,7 @@ async fn seed_recorded_session(repo: &PostgresRepository) {
             payout: 0,
             ev: 1.25,
         }],
+        Some(&BetFixSource::None),
         fixed_at(2),
     )
     .await
@@ -220,7 +221,13 @@ async fn seed_recorded_session(repo: &PostgresRepository) {
 
     // 買い目なしのレース → predict_race_skips に 1 行。
     let session = repo
-        .save_race_outcome(date(), &race_id(RACE_RECORDED_UNKNOWN), &[], fixed_at(3))
+        .save_race_outcome(
+            date(),
+            &race_id(RACE_RECORDED_UNKNOWN),
+            &[],
+            None,
+            fixed_at(3),
+        )
         .await
         .unwrap();
 

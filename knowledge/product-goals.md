@@ -7,7 +7,7 @@ sources:
   - docs-original/802-model-eval-baseline.md
   - qa/QA-model-eval-ground-802.md
 distilled_from_sha: "54c78b8b"
-updated: "2026-11-02"
+updated: "2026-11-03"
 ---
 
 # プロダクト目標・成功条件・非目標（D01）
@@ -51,7 +51,7 @@ paddock が何を目指し、何を達成したら成功で、**何をやらな�
 | REQ-D01-003 | 軸は事前データで確定し、直前オッズでは動かさない（用途はズレ増額のみ・軸フリップ禁止）。**軸だけでなく相手・混戦判定も固定する**（実装は REQ-D23-007） | `scripts/predict-check/gate_calibration.py` の「軸（◎）の安定性」節が **`0/N`**（発走前に 2 スイープ以上あったレースで軸が入れ替わらない）。この節が測るのは発走前スイープ間の**軸**だけで、初回スイープ（監視窓突入時）より前の変化と相手・混戦は測らない——目視のログ突き合わせでは取りこぼす——ADR 0078 以前は 154R 中 軸 28R・相手 62R が黙って入れ替わっていた。機械検査は `cargo test -p paddock-domain` の `pinned_selection_survives_market_movement_while_roi_moves`（選定は不変・ROI は動く）が張る。固定の時点は朝（#724 で、監視窓突入時〈T-40〉の固定では「事前データで確定」を満たさないと解釈し、#767 で朝の選定へ前倒しした）。朝の固定は開催日に `gate_calibration.py` の「朝の固定」節が **`0/N`**（朝の選定があるレースで、発走前の全スイープの軸・相手・混戦が朝の選定から外れない。朝の軸の取消でライブの首位へ戻った外れは除き、該当行を確かめる）になることで確かめる（`ev-kelly-bet-selection.md` 決定ログ #724・#767） | ADR 0060 / ADR 0078 | Confirmed |
 | REQ-D01-004 | ADR 0052 と同一条件（α=0.2・縮約 / 冪較正フラグなし）のトップ選好馬の単勝的中率が 28% を下回らない（890R 実測 29.9%） | `paddock-analyze backtest --from 2026-03-15 --to 2026-06-21 --blend-alpha 0.2` の `win_hit_rate`（ADR 0052 の再現方法と同じコマンド。`backtest` は m / 冪較正を既定適用しないので、本番構成で測るならフラグを明示したうえで閾値ごと測り直す） | ADR 0052 | Confirmed |
 | REQ-D01-005 | 同条件のトップ選好馬の複勝的中率が 60% を下回らない（890R 実測 64.5%） | 同上（`show_hit_rate`） | ADR 0052 | Confirmed |
-| REQ-D01-006 | 手動ハンデ軸精査を伴う実運用セッションの単勝的中率が、REQ-D01-004 と同条件のバックテスト水準（29.9%）を上回る＝エッジが実在することを実測で示す | 実運用セッションの `bet_records` と結果照合を 200R 以上貯め、`◎` の単勝的中率をバックテストと同じ定義で集計する（現状の観測は 1 開催日規模で母数が足りず、確定知にできる水準にない） | ADR 0055（エッジ＝手動ハンデ軸精査という主張の出所） | Tentative |
+| REQ-D01-006 | 手動ハンデ軸精査を伴う実運用セッションの単勝的中率が、REQ-D01-004 と同条件のバックテスト水準（29.9%）を上回る＝エッジが実在することを実測で示す | 実運用セッションの `bet_records`（`predict_bets`）と結果照合を 200R 以上貯め、`◎` の単勝的中率をバックテストと同じ定義で集計する。母集団は `predict_bets.fix_source`（買い目の固定の出所・#795）で分け、NULL は #795 に未対応のバイナリが書いた行（大半は #795 より前。migrate の後も、再起動していない古い api-server・desktop・predict は NULL を書く——StaleBinary は warn で起動を続けるため）として扱い、区切りは `predict_bets.created_at` と `_sqlx_migrations.installed_on`（version 20261102000001）を比べて付ける（`created_at` は TEXT〈UTC の RFC3339〉なので `created_at::timestamptz` にキャストして比べる）。見送ったレースは `predict_race_skips` にしか残らず出所を持たない。`fix_source` で分けた母集団は買い目を記録したレースだけ。`morning` には、朝の軸が取消でライブの首位へ戻った買い目も含む。除くには `morning_selections.axis` の出走の有無で絞る。（現状の観測は 1 開催日規模で母数が足りず、確定知にできる水準にない） | ADR 0055（エッジ＝手動ハンデ軸精査という主張の出所） | Tentative |
 | REQ-D01-007 | 買い目は「そのまま買える形」で提示する（式別 / 方式 / 軸 / 相手 / 点数 / 金額・100 円単位） | `build_portfolio` の単体テスト（配分の正）と [live-ev-buy-view.md](live-ev-buy-view.md) の**表示形式（slip）**の契約（配分方式の正は `build_portfolio`。ライブ writer は #346 で Rust `predict-watch` に一本化済み） | ADR 0064 | Confirmed |
 | REQ-D01-008 | 予想と買い目はブラウザから閲覧できる（ローカル完結・外部ストレージに依存しない） | `docs/api/openapi.json` のスナップショット検証（`src/apps/api-server/tests/openapi.rs`）と `web/src/lib/board.test.ts`、および [race-list-dashboard.md](../tests/browser-test-cases/race-list-dashboard.md) の手動ブラウザ手順 | ADR 0069 | Confirmed |
 | REQ-D01-009 | 本番構成のトップ選好馬の連対的中率が、凍結 eval 窓（2026-01-01〜08-31）で 50% を下回らない（2026-11-02 実測 52.1%・95% CI 下限 50.3%） | 定型 dump（[backtest.md](backtest.md)「定型 dump コマンド」）に `python3 scripts/predict-check/model_eval.py base=<dump>` を当て、`blended` の `place_hit` の点推定で判定する。窓は既定の凍結 eval 窓 | #802（[backtest.md](backtest.md) 決定ログ・[docs-original/802-model-eval-baseline.md](../docs-original/802-model-eval-baseline.md)） | Tentative |

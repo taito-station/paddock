@@ -1507,7 +1507,7 @@
             }
           },
           "400": {
-            "description": "残高超過・日付/ID 不正",
+            "description": "残高超過・日付/ID 不正・買い目ありで fix_source なし・fix_source 不正",
             "content": {
               "application/json": {
                 "schema": {
@@ -1989,6 +1989,46 @@
             "format": "int32",
             "description": "着順（1..）。3 着同着なら同じ position が複数行。",
             "minimum": 0
+          }
+        }
+      },
+      "FixSourceInput": {
+        "type": "object",
+        "description": "記録する買い目の固定の出所（#795）。`predict_bets.fix_source` / `fix_odds_fetched_at` に入る。",
+        "required": [
+          "kind"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "description": "`morning`（朝の選定）/ `recorded_axis`（記録◎ の軸だけ）/ `none`（固定なし）。それ以外は 400。"
+          },
+          "odds_fetched_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "朝の選定に使った朝のスナップショットの取得時刻 RFC3339（UTC: `Z` か `+00:00`、64 バイト以内）。\n`morning` のときだけ必須。それ以外の kind で非 null の値を付けると 400（null・省略は可）。\n文字列は正規化せずそのまま保存する（盤の `odds_fetched_at` と文字列で突き合わせるため）。"
+          }
+        }
+      },
+      "FixSourceSchema": {
+        "type": "object",
+        "description": "盤の買い目を組んだ固定の出所（#795）。記録（outcome）のときに買い目と一緒にそのまま送る。",
+        "required": [
+          "kind"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "description": "`morning`（朝の選定）/ `recorded_axis`（記録◎ の軸だけ）/ `none`（固定なし）。"
+          },
+          "odds_fetched_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "朝の選定に使った朝のスナップショットの取得時刻 RFC3339。`morning` のときだけ非 `null`\n（`fixed_selection.odds_fetched_at` と同じ値）。"
           }
         }
       },
@@ -3072,6 +3112,17 @@
             "format": "int32",
             "minimum": 0
           },
+          "fix_source": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FixSourceSchema",
+                "description": "買い目（`axis` / `partners` / `bets`）を組んだ固定の出所（#795）。朝の選定 → 記録◎ の軸だけ → なし。\n記録（outcome）のときに `bets` と一緒に送る。盤は初回スイープを持たないので通常は常に非 `null`\n（記録の出所にできない固定が来たときだけ `null`。そのまま記録すると 400 になる）。"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "fixed_selection": {
             "oneOf": [
               {
@@ -3517,6 +3568,17 @@
               "$ref": "#/components/schemas/BetInput"
             },
             "description": "このレースで購入した買い目（空 = スキップ相当）。"
+          },
+          "fix_source": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FixSourceInput",
+                "description": "買い目を組んだ固定の出所（#795）。盤のレスポンスの `fix_source` をそのまま送る。\n買い目があるときは必須（無ければ 400）。見送り（`bets` が空）では省略してよく、付けても捨てる。"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         }
       },

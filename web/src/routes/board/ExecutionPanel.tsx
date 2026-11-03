@@ -4,6 +4,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   api,
   type BetInput,
+  type FixSource,
   type RecommendationBet,
   type SessionSummary,
 } from "../../api/client";
@@ -11,6 +12,7 @@ import { yen } from "../../lib/format";
 import {
   type Edits,
   buildOutcomeBets,
+  buildOutcomeRequest,
   canRecordOutcome,
   effPayout,
   effStake,
@@ -30,6 +32,7 @@ export function ExecutionPanel({
   raceId,
   date,
   bets,
+  fixSource,
   oddsAvailable,
   session,
   sessionError = false,
@@ -39,6 +42,8 @@ export function ExecutionPanel({
   raceId: string;
   date: string;
   bets: RecommendationBet[];
+  // 買い目を組んだ固定の出所（#795）。bets と同じ盤のデータから渡し、記録のときに一緒に送る。
+  fixSource: FixSource | null | undefined;
   oddsAvailable: boolean;
   // undefined=ロード中 / null=セッション未作成（404）/ 値あり=作成済み
   session: SessionSummary | null | undefined;
@@ -72,7 +77,10 @@ export function ExecutionPanel({
     mutationFn: async (outcome: BetInput[]) => {
       const { data, error } = await api.POST(
         "/api/sessions/{date}/races/{race_id}/outcome",
-        { params: { path: { date, race_id: raceId } }, body: { bets: outcome } },
+        {
+          params: { path: { date, race_id: raceId } },
+          body: buildOutcomeRequest(outcome, fixSource),
+        },
       );
       if (error)
         throw new Error("記録に失敗しました（残高超過・二重記録の可能性）");

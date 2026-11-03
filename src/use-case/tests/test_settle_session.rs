@@ -9,7 +9,8 @@ use std::sync::Mutex;
 use chrono::{DateTime, NaiveDate, Utc};
 use paddock_domain::{RaceId, RacePayouts};
 use paddock_use_case::repository::{
-    PredictBetRecord, PredictRaceConditionRecord, PredictSessionRecord, PredictSessionRepository,
+    BetFixSource, PredictBetRecord, PredictRaceConditionRecord, PredictSessionRecord,
+    PredictSessionRepository,
 };
 use paddock_use_case::{Error, PayoutFetcher, Result, SettleInteractor};
 
@@ -96,6 +97,7 @@ impl PredictSessionRepository for MockRepo {
         _: NaiveDate,
         _: &RaceId,
         _: &[PredictBetRecord],
+        _: Option<&BetFixSource>,
         _: DateTime<Utc>,
     ) -> Result<PredictSessionRecord> {
         unimplemented!()
@@ -463,6 +465,7 @@ async fn missing_session_returns_not_found() {
             _: NaiveDate,
             _: &RaceId,
             _: &[PredictBetRecord],
+            _: Option<&BetFixSource>,
             _: DateTime<Utc>,
         ) -> Result<PredictSessionRecord> {
             unimplemented!()

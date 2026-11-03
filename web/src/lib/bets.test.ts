@@ -7,6 +7,7 @@ import {
   isRaceRecorded,
   totalStake,
   buildOutcomeBets,
+  buildOutcomeRequest,
   toAmount,
   isUnitOf,
   isUnit100,
@@ -218,5 +219,38 @@ describe("同じ組の 2 脚の編集（#772）", () => {
   it("100 円単位の判定も脚ごと", () => {
     expect(hasInvalidStakeUnit(KONSEN, { "三連複-3-4-10#2": { stake: 150, payout: 0 } })).toBe(true);
     expect(hasInvalidStakeUnit(KONSEN, { "三連複-3-4-10": { stake: 300, payout: 0 } })).toBe(false);
+  });
+});
+
+// #795: 記録の本文に盤の固定の出所（fix_source）をそのまま付ける。
+describe("buildOutcomeRequest", () => {
+  const outcome = buildOutcomeBets(BETS, {});
+  it("attaches the board's morning fix_source as is", () => {
+    const fix = { kind: "morning", odds_fetched_at: "2026-03-28T00:30:00+00:00" };
+    expect(buildOutcomeRequest(outcome, fix)).toEqual({
+      bets: outcome,
+      fix_source: { kind: "morning", odds_fetched_at: "2026-03-28T00:30:00+00:00" },
+    });
+  });
+  it("attaches recorded_axis / none without a time", () => {
+    expect(buildOutcomeRequest(outcome, { kind: "none", odds_fetched_at: null })).toEqual({
+      bets: outcome,
+      fix_source: { kind: "none", odds_fetched_at: null },
+    });
+    expect(buildOutcomeRequest(outcome, { kind: "recorded_axis" })).toEqual({
+      bets: outcome,
+      fix_source: { kind: "recorded_axis" },
+    });
+  });
+  it("also attaches it to a skip (empty bets)", () => {
+    expect(buildOutcomeRequest([], { kind: "none", odds_fetched_at: null })).toEqual({
+      bets: [],
+      fix_source: { kind: "none", odds_fetched_at: null },
+    });
+  });
+  it("omits fix_source when the board has none (server rejects bets without it)", () => {
+    expect(buildOutcomeRequest(outcome, null)).toEqual({ bets: outcome });
+    expect(buildOutcomeRequest(outcome, undefined)).toEqual({ bets: outcome });
+    expect("fix_source" in buildOutcomeRequest(outcome, null)).toBe(false);
   });
 });
