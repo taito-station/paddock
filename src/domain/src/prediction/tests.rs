@@ -1596,6 +1596,31 @@ fn blend_partial_coverage_keeps_model_for_missing_and_renormalizes() {
     assert!(out[0].win_prob > out[1].win_prob);
 }
 
+/// 取消馬（`probs` に無い馬番）の単勝が `race_odds` に残っていても、市場確率は出走馬だけで
+/// 正規化する（#811）。取消馬の行が無いときと bit 一致する。
+#[test]
+fn blend_ignores_odds_of_scratched_horses() {
+    let probs = vec![
+        prob(1, 0.5, 0.6, 0.7),
+        prob(2, 0.3, 0.5, 0.6),
+        prob(3, 0.2, 0.4, 0.5),
+    ];
+    let field = odds_map(&[(1, 2.0), (2, 4.0), (3, 5.0)]);
+    // 9 番は取消（単勝 3.1 が残った実例の形）。
+    let with_scratched = odds_map(&[(1, 2.0), (2, 4.0), (3, 5.0), (9, 3.1)]);
+    let expected = blend_with_market_win(&probs, &field, 0.2);
+    let out = blend_with_market_win(&probs, &with_scratched, 0.2);
+    for (e, o) in expected.iter().zip(&out) {
+        assert_eq!(e.win_prob, o.win_prob);
+        assert_eq!(e.place_prob, o.place_prob);
+        assert_eq!(e.show_prob, o.show_prob);
+    }
+    // ブレンドが効いた上で一致していること（両方 no-op で一致したのではない）を手計算値で固定する。
+    // 出走馬の implied = [1/2, 1/4, 1/5]、合計 0.95 → 1 番の市場 = 0.5/0.95。
+    // blended = 0.2·0.5 + 0.8·(0.5/0.95) ≒ 0.521053（凸結合なので合計は 1.0 のまま）。
+    approx(out[0].win_prob, 0.2 * 0.5 + 0.8 * (0.5 / 0.95));
+}
+
 #[test]
 fn win_power_gamma_one_is_noop() {
     // γ=1.0 は実質恒等。win/place/show すべて不変。
@@ -2291,6 +2316,46 @@ fn blend_form_log_pool_golden_point() {
     let out = blend_with_market_win_form(&probs, &odds, &BlendForm::LogPool { a: 0.5, b: 0.5 });
     assert!((out[0].win_prob - 0.585_786_437_627).abs() < 1e-9);
     assert!((out[0].win_prob + out[1].win_prob - 1.0).abs() < 1e-12);
+}
+
+/// LogPool も取消馬（`probs` に無い馬番）の単勝を正規化の分母に入れない（#811）。
+/// 全馬にオッズがあると分母の定数倍は最後の再正規化で消えるので、オッズ無しの馬（3 番・重み
+/// m^(a+b)）を含めて、市場側の馬との比が崩れないことを確かめる。
+#[test]
+fn blend_form_log_pool_ignores_odds_of_scratched_horses() {
+    let probs = vec![
+        prob(1, 0.4, 0.6, 0.7),
+        prob(2, 0.4, 0.6, 0.7),
+        prob(3, 0.2, 0.4, 0.5),
+    ];
+    let form = BlendForm::LogPool { a: 0.5, b: 0.5 };
+    let expected = blend_with_market_win_form(&probs, &odds_map(&[(1, 1.5), (2, 3.0)]), &form);
+    let out = blend_with_market_win_form(&probs, &odds_map(&[(1, 1.5), (2, 3.0), (7, 4.7)]), &form);
+    for (e, o) in expected.iter().zip(&out) {
+        assert_eq!(e.win_prob, o.win_prob);
+    }
+    // ブレンドが効いた上で一致していること（両方 no-op で一致したのではない）を手計算値で固定する。
+    // q = [2/3, 1/3] → w = [√(0.4·2/3), √(0.4·1/3), 0.2] → 1 番 = w1 / Σw。
+    let w = [(0.4_f64 * 2.0 / 3.0).sqrt(), (0.4_f64 / 3.0).sqrt(), 0.2];
+    approx(out[0].win_prob, w[0] / w.iter().sum::<f64>());
+}
+
+/// 単勝が取消馬の行しか無いレースは、出走馬の市場 implied が空になるので no-op（#811）。
+/// 修正前の LogPool は全頭オッズ無しの分岐（m^(a+b)）で正規化し、a+b≠1 で実質冪変換になっていた。
+#[test]
+fn blend_noop_when_only_scratched_horses_have_odds() {
+    let probs = vec![prob(1, 0.6, 0.7, 0.8), prob(2, 0.4, 0.5, 0.6)];
+    let only_scratched = odds_map(&[(9, 3.1)]);
+    let linear = blend_with_market_win(&probs, &only_scratched, 0.2);
+    let log_pool = blend_with_market_win_form(
+        &probs,
+        &only_scratched,
+        &BlendForm::LogPool { a: 0.4, b: 0.8 },
+    );
+    for out in [&linear, &log_pool] {
+        assert_eq!(out[0].win_prob, 0.6);
+        assert_eq!(out[1].win_prob, 0.4);
+    }
 }
 
 /// オッズ無しの馬は市場値の代用に自身のモデル値を使い重み m^(a+b) となる

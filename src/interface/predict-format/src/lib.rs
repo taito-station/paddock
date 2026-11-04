@@ -96,8 +96,9 @@ pub fn format_recent_runs_warning(field_size: usize, horses_with_runs: usize) ->
 const GATE_BIAS_FLAG_LIFT: f64 = 0.05;
 
 /// 過去データ視点の比較テーブル（#272 ④）。純モデル勝率と市場 implied 勝率を並べ、差（pt）を見せる。
-/// `market_win` は馬番→単勝オッズ（払戻倍率 ≥1.0）。implied = `(1/odds)/Σ(1/odds)`（控除率＝オーバー
-/// ラウンドを除去）。オッズの無い馬は市場・差欄を `-` にする。盤面順（`pure` の順）で出力し先頭はヘッダ。
+/// `market_win` は馬番→単勝オッズ（払戻倍率 ≥1.0）。implied = `(1/odds)/Σ(1/odds)`（Σ は `pure` の馬・
+/// 控除率＝オーバーラウンドを除去）。オッズの無い馬は市場・差欄を `-` にする。盤面順（`pure` の順）で
+/// 出力し先頭はヘッダ。
 /// 差 = 純勝率 − 市場implied（正＝モデルが市場より強気）。EV の向き（割安/割高）を読む材料。
 ///
 /// `gate_lift` は馬番→条件依存枠バイアスの複勝 lift（#343）。**枠有利（lift≥[`GATE_BIAS_FLAG_LIFT`]）かつ
@@ -110,9 +111,11 @@ pub fn format_probs_with_market(
     market_win: &HashMap<HorseNum, f64>,
     gate_lift: &HashMap<HorseNum, f64>,
 ) -> Vec<String> {
-    // 控除率除去のため、有効オッズの 1/odds 合計で正規化する（blend_with_market_win と同じ implied 定義）。
-    let overround: f64 = market_win
-        .values()
+    // 控除率除去のため、出走馬（`pure` の馬番）の有効オッズの 1/odds 合計で正規化する
+    // （blend_with_market_win と同じ implied 定義。取消馬のオッズは分母に入れない・#811）。
+    let overround: f64 = pure
+        .iter()
+        .filter_map(|p| market_win.get(&p.horse_num))
         .filter(|&&o| o.is_finite() && o >= 1.0)
         .map(|&o| 1.0 / o)
         .sum();
@@ -888,6 +891,22 @@ mod tests {
         );
         // 馬2: 市場33.3%。
         assert!(lines[2].contains("ウマ2") && lines[2].contains("33.3%"));
+    }
+
+    #[test]
+    fn format_probs_with_market_ignores_odds_of_scratched_horses() {
+        use super::format_probs_with_market;
+        use std::collections::HashMap;
+        // 取消馬 9 番（pure に無い）の単勝が残っていても、市場は出走馬だけで正規化する（#811）。
+        // 取消馬を分母に入れると 馬1 = 0.5/(0.75+1/3.1) ≒ 46.6% になる。
+        let pure = vec![prob(1, "ウマ1", 0.30), prob(2, "ウマ2", 0.10)];
+        let mut market: HashMap<HorseNum, f64> = HashMap::new();
+        market.insert(horse(1), 2.0);
+        market.insert(horse(2), 4.0);
+        market.insert(horse(9), 3.1);
+        let lines = format_probs_with_market(&pure, &market, &HashMap::new());
+        assert!(lines[1].contains("66.7%"), "{}", lines[1]);
+        assert!(lines[2].contains("33.3%"), "{}", lines[2]);
     }
 
     #[test]
