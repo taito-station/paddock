@@ -9,7 +9,7 @@ sources:
   - docs-original/218-live-alpha.md
   - qa/QA-live-alpha-218.md
 distilled_from_sha: "b634b730"
-updated: "2026-11-03"
+updated: "2026-11-04"
 ---
 
 # 着順確率推定モデル仕様書
@@ -235,6 +235,9 @@ win_prob_i     = blended_win_i / Σ blended_win_j     // 合計 1.0 へ再正規
 place/show_i   = 累積 max で win ≤ place ≤ show を再是正（v1 は win のみブレンド）
 ```
 
+- Σ implied_j の j は**出走馬（確率を出す馬）のうちオッズのある馬だけ**。`race_odds` の単勝に残った
+  取消馬の行は分母に入れない（#811。入れると出走馬の市場確率の合計が 1 未満になり、モデルと市場の
+  混合比が崩れる）。対数プール（`BlendForm::LogPool`）と比較表の「市場」列（`format_probs_with_market`）も同じ。
 - `α = 1.0`（既定の CLI 未指定）または市場オッズ空のときはモデルのみ（no-op）。
 - 市場オッズの取得元:
   - **predict（本番・未来レース）**: 当日の `race_odds` 最新スナップショット（`as_of = None`）。

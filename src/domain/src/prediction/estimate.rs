@@ -155,12 +155,8 @@ pub fn blend_with_market_win_form(
             if probs.is_empty() || market_win_odds.is_empty() {
                 return probs.to_vec();
             }
-            // 市場 implied の正規化は Linear と同じ（オーバーラウンド除去・オッズ >=1.0 のみ）。
-            let implied: HashMap<HorseNum, f64> = market_win_odds
-                .iter()
-                .filter(|&(_, &odds)| odds.is_finite() && odds >= 1.0)
-                .map(|(&num, &odds)| (num, 1.0 / odds))
-                .collect();
+            // 市場 implied の正規化は Linear と同じ（オーバーラウンド除去・オッズ >=1.0・出走馬のみ）。
+            let implied = market_implied(probs, market_win_odds);
             let overround: f64 = implied.values().sum();
             if overround <= 0.0 {
                 return probs.to_vec();
@@ -215,10 +211,33 @@ fn rebuild_with_win(probs: &[HorseProbability], win_probs: &[f64]) -> Vec<HorseP
         .collect()
 }
 
+/// 出走馬（`probs` の馬番）の市場 implied `1/odds`（正規化前）。
+///
+/// `race_odds` の単勝には出走しない取消馬の行が残ることがあり、その implied を正規化の分母に
+/// 入れると出走馬の市場確率の合計が 1 未満になる（#811）。そのため `probs` に無い馬番は除く。
+/// 単勝オッズ（払戻倍率）は ≥1.0。型検証を経ていない生の f64（backtest が results.odds から渡す
+/// 経路）に異常値が混じっても弾けるよう doc 契約どおり `>= 1.0` でフィルタする。OddsValue 由来の
+/// 経路では常に満たすが、フォールバック経路のための防御。
+fn market_implied(
+    probs: &[HorseProbability],
+    market_win_odds: &HashMap<HorseNum, f64>,
+) -> HashMap<HorseNum, f64> {
+    probs
+        .iter()
+        .filter_map(|p| {
+            market_win_odds
+                .get(&p.horse_num)
+                .filter(|&&odds| odds.is_finite() && odds >= 1.0)
+                .map(|&odds| (p.horse_num, 1.0 / odds))
+        })
+        .collect()
+}
+
 /// 単勝確率を市場オッズ（単勝）の implied 確率とブレンドする（#72）。
 ///
-/// `market_win_odds` は馬番→単勝確定オッズ（払戻倍率, ≥1.0）。各馬の implied 確率
-/// `1/odds` をレース内で合計 1.0 に正規化（控除率＝オーバーラウンドを除去）し、モデルの
+/// `market_win_odds` は馬番→単勝確定オッズ（払戻倍率, ≥1.0）。出走馬（`probs` の馬番）の implied
+/// 確率 `1/odds` をレース内で合計 1.0 に正規化（控除率＝オーバーラウンドを除去。`probs` に無い
+/// 取消馬のオッズは分母に入れない・#811）し、モデルの
 /// `win_prob` と `alpha`（モデル重み, `1-alpha` が市場重み）で線形ブレンドする。`alpha >= 1.0`
 /// またはオッズが空のときはモデル確率をそのまま返す（no-op）。オッズの無い馬はブレンド時点では
 /// モデル値を保つ（最後の win 合計 1.0 再正規化で全体と同じ係数でスケールはされる）。
@@ -247,15 +266,8 @@ pub fn blend_with_market_win(
         return probs.to_vec();
     }
 
-    // 市場 implied 確率: 1/odds を合計 1.0 に正規化（オッズのある馬のみが母数）。
-    // 単勝オッズ（払戻倍率）は ≥1.0。型検証を経ていない生の f64（backtest が results.odds から渡す
-    // 経路）に異常値が混じっても弾けるよう doc 契約どおり `>= 1.0` でフィルタする。OddsValue 由来の
-    // 経路では常に満たすが、フォールバック経路のための防御。
-    let implied: HashMap<HorseNum, f64> = market_win_odds
-        .iter()
-        .filter(|&(_, &odds)| odds.is_finite() && odds >= 1.0)
-        .map(|(&num, &odds)| (num, 1.0 / odds))
-        .collect();
+    // 市場 implied 確率: 1/odds を合計 1.0 に正規化（出走馬のうちオッズのある馬のみが母数）。
+    let implied = market_implied(probs, market_win_odds);
     let overround: f64 = implied.values().sum();
     if overround <= 0.0 {
         return probs.to_vec();

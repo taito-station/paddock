@@ -90,7 +90,7 @@ def check_fidelity(n_unexplained: int, n_in_scope: int) -> None:
 
 
 def reconstruct_with_scratched(rows: list[dict], race_odds_win: dict[int, float]) -> np.ndarray:
-    """本番 blend の再現（取消馬込み）: `race_odds` の単勝のうち dump に出てこない馬（取消馬）の implied も
+    """#811 修正前の本番 blend の再現（取消馬込み）: `race_odds` の単勝のうち dump に出てこない馬（取消馬）の implied も
     市場確率の正規化の分母に入れる。dump の `model_win` と一致すれば、不一致の原因は取消馬だと説明できる。
     """
     field = {r["horse_num"] for r in rows}
