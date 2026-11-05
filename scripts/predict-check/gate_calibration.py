@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """ROI ゲート（参考ROI ≥ 100%）の較正測定（#571。#249 のバケット較正を統合）.
 
-`predict-watch` が出す参考ROIは ADR 0055（EV 層分離）以降、**軸/相手は blended（α=0.2）で選び
+`predict-watch` が出す参考ROIは ADR 0055（EV 層分離）以降、**軸/相手は blended（#810 より前は α=0.2、以降は α=0＝市場そのもの）で選び
 EV は pure（α=1.0）で評価する** 2 系統構成になった。この定義に対しゲートは 100% に置かれたままだが、
 現行定義での較正は一度も測られていない（ADR 0044 / 0045 の 71R 検証は**分離前**の EV 定義）。
 
@@ -545,7 +545,7 @@ def _fmt(v, suffix="%"):
 def axis_stability(by_race):
     """スイープ間で軸（◎）が入れ替わったレースを数える。
 
-    軸は `rank_probs`（市場ブレンド α=0.2）で選ばれるので、オッズが動くと軸も動きうる。
+    軸は `rank_probs`（市場ブレンド。#810 以降は α=0＝市場そのもの）で選ばれるので、オッズが動くと軸も動きうる。
     CLAUDE.md「軸ロックとズレ増額」（REQ-D01-003 / ADR 0060）は軸をブラさないと定めているため、
     フリップが起きているなら判定ROIは「同じ買い目の値付けの変化」を測っていないことになる。
     発走前スイープのみを見る（発走後の再計算は判断材料にならない）。
@@ -613,7 +613,7 @@ def report_axis_stability(by_race, out=sys.stdout):
     if not multi:
         return
     p(f"スイープ間で軸が入れ替わったレース: {len(flipped)}/{multi}（{len(flipped)/multi*100:.0f}%）")
-    p("  軸は rank_probs（市場ブレンド α=0.2）で選ぶためオッズと一緒に動く。")
+    p("  軸は rank_probs（市場ブレンド。#810 以降は α=0＝市場そのもの）で選ぶためオッズと一緒に動く。")
     p("  CLAUDE.md 軸ロック（REQ-D01-003 / ADR 0060）は軸を動かさないと定めている。")
     for first, last, path in flipped[:10]:
         venue = SLUG2JP.get(first["venue"], first["venue"])

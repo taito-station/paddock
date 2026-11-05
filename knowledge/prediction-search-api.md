@@ -7,7 +7,7 @@ doc_class: [D10, D08, D19]
 tags: [D10, D08, D19]
 sources:
   - docs/api/openapi.json
-distilled_from_sha: "1b02dbd5"
+distilled_from_sha: "2e2054e4"
 updated: "2026-08-12"
 ---
 

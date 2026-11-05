@@ -14,7 +14,7 @@
 # 環境変数で対象期間・predict 設定を上書きできる（FROM/TO の既定は #208 の win-backtest 窓）:
 #   PADDOCK_BT_FROM   対象開始日（既定 2026-05-30）
 #   PADDOCK_BT_TO     対象終了日（既定 2026-06-14）
-#   PADDOCK_BT_ALPHA  predict の --blend-alpha（既定 0.2 ＝本番モデル, ADR 0034。
+#   PADDOCK_BT_ALPHA  predict の --blend-alpha（既定 0.2 ＝#810 より前の本番モデル, ADR 0034。現行の本番は 0.0。
 #                     #208 当時の α=0.3 を再現するなら PADDOCK_BT_ALPHA=0.3 を渡す）
 #   PADDOCK_BT_SHRINKAGE_M  predict の --shrinkage-m（#282）。未設定なら本番既定 m=10。
 #                     #270/ADR 0045 の m×α×γ 再検証で m を振った α=1.0 bt_pred を作るとき、m 値ごとに

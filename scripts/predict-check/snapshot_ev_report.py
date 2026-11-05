@@ -12,7 +12,7 @@
   - オッズ: race_odds_snapshots（単勝・馬連・3連複・ワイド）。1 回の取得は単一 fetched_at で
             全券種が書かれる（save_race_odds）ため「1 snapshot 時点 = 1 fetched_at」で扱う。
             ワイドは low/high の幅で保存されるので mid=(low+high)/2 を採る（live_ev のワイド意味論）。
-  - model 勝率: `analyze predict --blend-alpha <α>`（既定 0.2＝本番）。
+  - model 勝率: `analyze predict --blend-alpha <α>`（既定 0.2＝#810 より前の本番。#810 以降の本番は 0.0）。
                 analyze predict は現行 race_odds の単勝を α ブレンドに読むため、**当日中に走らせれば
                 final snapshot と一致し忠実**。後日実行は α 由来の僅差が出うる（オッズ自体は
                 snapshots から忠実に取るため EV の支配項は忠実）。--pred-tsv で外部供給して固定可。
@@ -332,7 +332,7 @@ def main():
     ap.add_argument("--from", dest="date_from", help="開始日 YYYY-MM-DD（DB 直引き時に必須）")
     ap.add_argument("--to", dest="date_to", help="終了日 YYYY-MM-DD（既定: --from と同じ＝単日）")
     ap.add_argument("--budget", type=int, default=5000, help="1レース予算（円, 既定5000）")
-    ap.add_argument("--blend-alpha", type=float, default=0.2, help="analyze predict の α（既定0.2）")
+    ap.add_argument("--blend-alpha", type=float, default=0.2, help="analyze predict の α（既定0.2＝#810 より前の本番。現行の本番は 0.0）")
     ap.add_argument("--db-url", default=pgq.db_url())
     ap.add_argument("--analyze-bin", default=None,
                     help="paddock-analyze バイナリ（既定: target/release/paddock-analyze）")

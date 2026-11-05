@@ -9,7 +9,7 @@ sources:
   - docs-original/802-model-eval-baseline.md
   - qa/QA-model-eval-ground-802.md
 distilled_from_sha: "54c78b8b"
-updated: "2026-11-02"
+updated: "2026-11-05"
 ---
 
 # 予想精度バックテスト/評価基盤 仕様書
@@ -341,9 +341,14 @@ backtest CLI の既定は production と不一致（m/γ が既定 off）なの�
 ```sh
 cargo build --release
 ./target/release/paddock-analyze backtest --from 2025-01-01 --to 2026-08-31 \
-  --blend-alpha 0.2 --shrinkage-m 10 --win-power 1.25 --place-show-power 2.0 \
+  --blend-alpha 0.0 --shrinkage-m 10 --win-power 1.25 --place-show-power 2.0 \
   --impute-missing-factors --dump-features bt_dump_$(git rev-parse --short HEAD).tsv
 ```
+
+`--blend-alpha` は本番の `RECOMMENDED_MARKET_BLEND_ALPHA`（#810 で 0.2 → 0.0）。α=0 で市場があると
+win の冪変換は掛からず、`model_*` の win は市場の含意確率そのものになる（`--win-power 1.25` は純モデル系統と
+オッズの無いレースに効く）。**#284（`mag_sweep.py`）と #218（`live_alpha_eval.py`）の再現は α=0.2 の dump が前提**
+（両スクリプトは dump の `model_win` を (α=0.2, γ=1.25) で再構成して突き合わせる）なので、`--blend-alpha 0.2` で別に作る。
 
 dump TSV は 56 列（ヘッダ名参照で読む。`model_*` = blended 系統 / `model_*_pure` = 純モデル系統
 （α=1.0 相当・冪変換適用後）が末尾 3 列）。列の正本は `analyze/src/bin.rs` の

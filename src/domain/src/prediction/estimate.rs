@@ -117,7 +117,7 @@ fn apply_score_power(scores: Vec<f64>, gamma: Option<f64>) -> Vec<f64> {
 ///   では a+b≠1 でスケールがズレ、冪可換性もオッズ無し馬で破れるため）。
 ///   非有限・負の (a,b)・a=b=0 は no-op（既存の防御パターン踏襲）。
 ///
-/// 本番 predict 経路は Linear α=0.2 のまま（採用ゲート通過後にのみ変更・決定ログ #703 参照）。
+/// 本番 predict 経路は Linear（α=0＝市場そのもの・#810。LogPool は #703 で棄却）。
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum BlendForm {
     /// 線形ブレンド。`alpha` はモデル重み（α>=1.0 は no-op = pure）。
@@ -292,6 +292,31 @@ pub fn blend_with_market_win(
     };
 
     rebuild_with_win(probs, &win_probs)
+}
+
+/// ブレンド後の win に掛ける冪変換の γ を返す（#810）。
+///
+/// γ（[`apply_win_power`]）はモデル由来の win の校正（ADR 0042）なので、win が市場の含意確率そのもの
+/// になるとき——線形ブレンドの α ≤ 0 で、出走馬の 1 頭以上に有効な単勝オッズ（有限・≥1.0）がある
+/// （＝[`blend_with_market_win`] が no-op にならない）とき——は `None` を返して掛けない。市場が空・
+/// 出走馬と重ならない・値域外のオッズしか無い場合はブレンドが no-op でモデルのままなので、`win_power`
+/// をそのまま返す。LogPool は研究用なので対象外（常に `win_power`）。
+///
+/// 一部の出走馬にしか有効なオッズが無い（部分カバレッジ）ときも γ は掛けない。このとき win は市場の
+/// 含意確率とオッズの無い馬のモデル値（γ なし）の混合を再正規化したもので、市場そのものではない。
+pub fn win_power_after_blend(
+    probs: &[HorseProbability],
+    market_win_odds: &HashMap<HorseNum, f64>,
+    form: Option<&BlendForm>,
+    win_power: Option<f64>,
+) -> Option<f64> {
+    let market_only = matches!(form, Some(BlendForm::Linear { alpha }) if *alpha <= 0.0);
+    // ブレンドと同じ母数（出走馬のうち有効なオッズのある馬・#811）が空でなければ市場を使っている。
+    if market_only && !market_implied(probs, market_win_odds).is_empty() {
+        None
+    } else {
+        win_power
+    }
 }
 
 /// win_prob を冪変換 `win'_i ∝ win_i^gamma` して場内合計 1.0 へ再正規化する（#246 / ADR 0042）。

@@ -586,7 +586,7 @@ async fn evaluate_race(
         println!("    {line}");
     }
 
-    // 3) 買い目選定の固定（#601 軸ロック・#767 で朝の選定を優先）。rank_probs（市場ブレンド α=0.2）は
+    // 3) 買い目選定の固定（#601 軸ロック・#767 で朝の選定を優先）。rank_probs（市場ブレンド。本番は α=0＝市場そのもの・#810）は
     //    市場 odds を含むため、固定しないとスイープごとに軸・相手・混戦判定が動く（実測 154R 中 60% しか
     //    終日一定でなかった）。記録◎（pad）は固定の元（朝の選定・初回スイープ）がまだ無いときだけ引く
     //    ——あればその軸に既に反映済みで（朝の選定は記録◎ を軸に強制して組む）、毎スイープ引くと
@@ -975,7 +975,7 @@ pub async fn run(app: &App, cli: &Cli) -> anyhow::Result<()> {
     // macOS 通知の発火閾値を解決する（#584）。上の表示閾値とは別物で、未指定は roi_gate と同値。
     let notify_roi = resolve_notify_roi(cli.notify_roi, cli.roi_gate)?;
 
-    // α 未指定なら本番既定（market α=0.2）を使う。predict と同一値で判定を揃える。
+    // α 未指定なら本番既定（`RECOMMENDED_MARKET_BLEND_ALPHA`＝α=0）を使う。predict と同一値で判定を揃える。
     let blend_alpha = cli.blend_alpha.or(RECOMMENDED_MARKET_BLEND_ALPHA);
     let window = Duration::minutes(cli.window as i64);
 

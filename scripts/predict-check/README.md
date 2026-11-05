@@ -124,7 +124,7 @@ python3 scripts/predict-check/snapshot_ev_report.py --snapshots-tsv snaps.tsv --
 
 - **オッズ**は snapshots から忠実に取る（ワイドは low/high の幅から mid=(low+high)/2）。各レースの
   全 snapshot 時点を走査し、`ever`（best ROI）と `final`（最終 snapshot の ROI）の両方で +EV を判定。
-- **model 勝率**は `analyze predict --blend-alpha 0.2`。analyze は現行 `race_odds` の単勝を α ブレンドに
+- **model 勝率**は `analyze predict --blend-alpha 0.2`（#810 より前の本番。現行の本番は 0.0＝市場そのもの）。analyze は現行 `race_odds` の単勝を α ブレンドに
   読むため、**当日中に走らせれば final snapshot と一致し忠実**。後日実行は α 由来の僅差が出うる
   （オッズ自体は snapshots 由来で忠実なので EV の支配項は保たれる）。`--pred-tsv` で固定供給も可能。
 - **過去データの限界**: snapshot 機構は 2026-06-25 導入。それ以前の開催は snapshot が無く、過去
@@ -155,13 +155,13 @@ python3 scripts/predict-check/snapshot_ev_report.py --snapshots-tsv snaps.tsv --
 | `snapshot_ev_report.py` | `race_odds_snapshots` を後追い集計し開催日×レースの ever/final +EV と年間発生率を出す（#248） |
 | `snapshot_coverage.py` | snapshot 取りこぼし検知（最終 snapshot が発走の何分前か→gap/none を可視化, #264） |
 | `model_eval.py` | モデル精度の土俵（#802）。`analyze backtest --dump-features` の TSV を `label=path` で 1 つ以上受け、◎ の的中・上位 5 頭の包含・較正を市場 / 純 / ブレンドで並べて日クラスタ bootstrap の 95% CI を付け、候補 − 基準 の差で採否（採用候補 / 判定不能 / 悪化）を機械判定する。買い方は扱わない。`--json` で全指標を書き出す |
-| `live_alpha_eval.py` | 朝〜直前のスナップショットでの市場ブレンド α の判定（#218）。本番構成の dump の行の単勝を時点（朝 / T-40 / 直前）のオッズに差し替えて α=0.2 を厳密に再構成し、市場と model_eval の土俵で比べる。DB は SELECT のみ |
+| `live_alpha_eval.py` | 朝〜直前のスナップショットでの市場ブレンド α の判定（#218）。α=0.2 の本番構成（#810 より前）の dump の行の単勝を時点（朝 / T-40 / 直前）のオッズに差し替えて α=0.2 を厳密に再構成し、市場と model_eval の土俵で比べる。DB は SELECT のみ |
 
 ## 校正計測はリーク無しの `analyze backtest` を使う（#302）
 
 win/place/show の reliability（予測確率帯ごとの予測 vs 実測）・複勝圏過小評価診断・複勝順位分布は、
 本体 `paddock-analyze backtest`（**as-of 統計＝リーク無し**）が出力する。純モデル校正なら
-`--blend-alpha 1.0`、現行なら `0.2` を指定する。
+`--blend-alpha 1.0`、現行の本番なら `0.0`（#810 より前の本番は `0.2`）を指定する。
 
 ```sh
 paddock-analyze backtest --from <YYYY-MM-DD> --to <YYYY-MM-DD> --blend-alpha 1.0

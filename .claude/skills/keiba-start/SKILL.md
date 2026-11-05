@@ -376,10 +376,10 @@ paddock-predict --date YYYY-MM-DD --budget 5000 --skip-all
 # 個別レース確認（ライブ EV 更新・オッズ変動追跡）
 # ワイドオッズ（type=5）はこのコマンドが自動取得して EV に反映するため手動取得不要
 # race_id は fetch-card と同じ netkeiba 12 桁でも内部 ID（例: 2026-4-nakayama-9-6R）でもよい（#726）
-paddock-analyze predict <race_id> --blend-alpha 0.2
+paddock-analyze predict <race_id>   # α は本番既定（--blend-alpha 省略）
 ```
 
-- **本番モデル**: 市場単勝 α=0.2 ブレンド・m=10 縮約（`RECOMMENDED_MARKET_BLEND_ALPHA`・CLAUDE.md と一致）
+- **本番モデル**: 市場単勝 α=0（win は市場の含意確率そのもの・γ は掛けない）・m=10 縮約（`RECOMMENDED_MARKET_BLEND_ALPHA`・CLAUDE.md と一致・#810）
 - **`--help` すら返らない（CPU 0%）ときの切り分け**（#749。2026-10-03 に `paddock-predict` だけが `main` 前の `_dyld_start` で止まり、翌日の再ビルドでは再現せず原因未特定）。バイナリを消す・作り直す**前に**、当時のファイルのまま証拠を取る（作り直すと再現が消える）:
   1. `sample <pid> 2` で止まっている段階を見る。`_dyld_start` のみ＝`main` 前（ロードか OS の起動時検査）、`main` 以降＝アプリ側（DB 接続待ちなら `pg_stat_activity` を見る）
   2. `otool -L` を正常な `paddock-analyze` と比べ、`DYLD_PRINT_LIBRARIES=1 paddock-predict --help` でどの dylib まで進むかを見る

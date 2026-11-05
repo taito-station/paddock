@@ -318,7 +318,7 @@ impl<R: StatsRepository + OddsRepository> Interactor<R> {
                 // 注意: ここで使う市場 win は回収率評価の top_pick_odds と同一ソースのため、ブレンド有効時
                 // の回収率は構造的に楽観側へ寄る（probability-estimation.md 注 2）。Linear の α>=1.0 は
                 // domain 側で no-op になる（predict 経路のような取得短絡は不要、market は既に取得済み）。
-                let probs = match &blend {
+                let (probs, win_power) = match &blend {
                     Some(form) => {
                         // race_odds.win が非空ならそれを使い、完全に空のときのみ results.odds へ代替する。
                         // race_odds の win は scraper が全頭分まとめて書くため部分カバレッジは想定しないが、
@@ -334,18 +334,28 @@ impl<R: StatsRepository + OddsRepository> Interactor<R> {
                                 .filter_map(|r| r.odds.map(|o| (r.horse_num, o)))
                                 .collect(),
                         };
-                        paddock_domain::prediction::blend_with_market_win_form(
+                        // α=0 で市場を使ったブレンドは市場そのもの。γ は掛けない（#810・predict と同じ関数）。
+                        let win_power = paddock_domain::prediction::win_power_after_blend(
                             &probs,
                             &market_win,
-                            form,
+                            Some(form),
+                            config.win_power,
+                        );
+                        (
+                            paddock_domain::prediction::blend_with_market_win_form(
+                                &probs,
+                                &market_win,
+                                form,
+                            ),
+                            win_power,
                         )
                     }
-                    None => probs,
+                    None => (probs, config.win_power),
                 };
-                // 穴馬の 1 着過大評価を縮約する win_prob 冪変換（#246）。config.win_power が None なら
+                // 穴馬の 1 着過大評価を縮約する win_prob 冪変換（#246）。win_power が None なら
                 // no-op。ブレンド後に適用するため top_pick / select_bets まで校正後 win が伝わり、
                 // --win-power の sweep 効果が Brier/回収・券種別校正に反映される。
-                let probs = match config.win_power {
+                let probs = match win_power {
                     Some(gamma) => paddock_domain::prediction::apply_win_power(&probs, gamma),
                     None => probs,
                 };

@@ -216,7 +216,7 @@ async fn run(app: &setup::App, command: cli::Command) -> anyhow::Result<()> {
             shrinkage_m,
             win_power,
         } => {
-            // 未指定時は本番既定 α=0.2（session.rs / predict-watch と対称）。過去データ視点は常に
+            // 未指定時は本番既定 α=0（市場そのもの・#810。session.rs / predict-watch と対称）。過去データ視点は常に
             // 純モデルなので、この α は市場EV視点の軸/相手ランキングにのみ効く。
             let blend_alpha = validate_blend_alpha(blend_alpha)?.or(RECOMMENDED_MARKET_BLEND_ALPHA);
             // #282: 本番既定（m=10/γ=1.25）を土台に、指定フラグだけ上書きした config を組む。
@@ -552,7 +552,7 @@ fn validate_positive_finite(flag: &str, value: Option<f64>) -> anyhow::Result<Op
     Ok(value)
 }
 
-/// predict 用（#282）: 本番既定 `EstimationConfig::production()`（m=10/α=0.2/γ=1.25）を土台に、
+/// predict 用（#282）: 本番既定 `EstimationConfig::production()`（m=10/γ=1.25。α は `RECOMMENDED_MARKET_BLEND_ALPHA`）を土台に、
 /// 指定された `--shrinkage-m` / `--win-power` だけを上書きした config を組む。未指定フィールドは
 /// 本番既定のまま（backtest の `build_estimation_config` が空 config から積むのと対照的に、predict は
 /// 本番挙動の上に差分だけ載せる）。#270/ADR 0045 の m×α×γ 再検証 bt_pred 生成に使う。

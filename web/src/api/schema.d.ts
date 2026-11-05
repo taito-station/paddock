@@ -2021,7 +2021,7 @@ export interface operations {
                 budget?: number | null;
                 /** @description 馬場状態（`良` / `稍重` / `重` / `不良`。略記 `稍` / `不` も可）。未指定なら馬場項なし。 */
                 track_condition?: string | null;
-                /** @description 市場オッズ（単勝）とのブレンド係数 `[0,1]`。未指定は本番ブレンド α=0.2。素モデルは `1.0` を明示。 */
+                /** @description 市場オッズ（単勝）とのブレンド係数 `[0,1]`。未指定は本番 α=0（市場の単勝含意確率そのもの・オッズが無ければ素モデル）。素モデルは `1.0` を明示。 */
                 blend_alpha?: number | null;
             };
             header?: never;
@@ -2076,7 +2076,7 @@ export interface operations {
             query?: {
                 /** @description 馬場状態（`良` / `稍重` / `重` / `不良`。略記 `稍` / `不` も可）。未指定なら馬場項なし。 */
                 track_condition?: string | null;
-                /** @description 市場オッズ（単勝）とのブレンド係数 `[0,1]`。未指定は本番ブレンド α=0.2。素モデルは `1.0` を明示。 */
+                /** @description 市場オッズ（単勝）とのブレンド係数 `[0,1]`。未指定は本番 α=0（市場の単勝含意確率そのもの・オッズが無ければ素モデル）。素モデルは `1.0` を明示。 */
                 blend_alpha?: number | null;
             };
             header?: never;
@@ -2133,7 +2133,7 @@ export interface operations {
                 budget: number;
                 /** @description 馬場状態（`良` / `稍重` / `重` / `不良`。略記 `稍` / `不` も可）。未指定なら馬場項なし。 */
                 track_condition?: string | null;
-                /** @description 市場オッズ（単勝）とのブレンド係数 `[0,1]`。未指定は本番ブレンド α=0.2。素モデルは `1.0` を明示（`/prediction` と同義）。 */
+                /** @description 市場オッズ（単勝）とのブレンド係数 `[0,1]`。未指定は本番 α=0（市場の単勝含意確率そのもの・オッズが無ければ素モデル）。素モデルは `1.0` を明示（`/prediction` と同義）。 */
                 blend_alpha?: number | null;
             };
             header?: never;

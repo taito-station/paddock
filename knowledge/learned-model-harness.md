@@ -5,7 +5,7 @@ status: Confirmed
 kind: specification
 doc_class: [D24, D22, D19]
 tags: [D24, D22, D19]
-updated: "2026-10-04"
+updated: "2026-11-05"
 ---
 
 # 学習型モデル評価ハーネス 設計（#272 土台 / #309 受け皿）
@@ -152,7 +152,7 @@ ADR 0052（α blend 廃止＝純モデル化の棄却）の通り、純 P_model 
 - ③ の Python 評価は、**まず内蔵モデルの予測を①の出力から再評価し、`analyze backtest` の数値と一致することを
   サニティ**してから学習モデルに使う（ハーネス自体のバグ・設定差を検出する回帰）。
 - production 構成は常に明示（**5 フラグ**: m=10 / win_power=1.25 / place_show_power=2.0 /
-  impute_missing_factors=true / α=0.2）。`analyze backtest` の既定はどれも production と違う
+  impute_missing_factors=true / α=0〈#810。それ以前の測定は α=0.2〉）。`analyze backtest` の既定はどれも production と違う
   （`--impute-missing-factors` は ADR 0057 で production 側だけ true になった）。
   検証手段の書き方は [probability-estimation.md](probability-estimation.md) の「本番構成の要件（REQ）」を正とする。
 

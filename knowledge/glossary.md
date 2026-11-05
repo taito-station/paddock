@@ -14,8 +14,8 @@ sources:
   - knowledge/prediction-search-api.md
   - knowledge/feature-resolution-diagnosis.md
   - knowledge/netkeiba-datasource.md
-distilled_from_sha: "1a716be0"
-updated: "2026-11-02"
+distilled_from_sha: "bd31fe56"
+updated: "2026-11-05"
 ---
 
 # 用語集（ユビキタス言語）
@@ -87,10 +87,10 @@ ADR 0077）:
 | ベイズ縮約 / 擬似カウント `m` | `smoothed = (k·rate + m·prior) / (k + m)`。少データ馬の極端なレートを prior へ引き寄せる。**本番 predict は m=10**（`RECOMMENDED_SHRINKAGE_M`。backtest の既定は縮約 off） | [probability-estimation.md](probability-estimation.md) REQ-D22-002 |
 | prior（基準率） | 縮約の引き寄せ先。出走頭数 ~14 由来で win=1/14・place=2/14・show=3/14 | [probability-estimation.md](probability-estimation.md) ステップ 2.5 |
 | recency（リーセンシー重み） | 過去成績を `0.5^(days_ago/half_life)` で時間減衰させる集計。**既定は無効**（改善が確認できず、機構だけ残す） | [probability-estimation.md](probability-estimation.md) REQ-D22-006 / ADR 0016 |
-| ⚠ 冪変換 γ | 2 か所ある別物。`place_show_power` は**正規化前**の place/show に掛ける脱圧縮（本番 **2.0**）、`win_power` は**ブレンド後**の win に掛ける校正（本番 **1.25**） | [probability-estimation.md](probability-estimation.md) REQ-D22-004 / REQ-D22-003（経緯は ADR 0047 / ADR 0042） |
+| ⚠ 冪変換 γ | 2 か所ある別物。`place_show_power` は**正規化前**の place/show に掛ける脱圧縮（本番 **2.0**）、`win_power` は**ブレンド後**の win に掛ける校正（本番 **1.25**。α=0 で市場を使ったブレンドには掛けない・#810） | [probability-estimation.md](probability-estimation.md) REQ-D22-004 / REQ-D22-003（経緯は ADR 0047 / ADR 0042） |
 | implied 確率 | 単勝オッズの逆数 `1 / odds`。控除率を含んだままの生値 | [probability-estimation.md](probability-estimation.md) ステップ 4 |
 | overround（控除率分の超過） | `Σ implied > 1.0` の超過分。合計 1.0 へ正規化して除いたものが市場確率 | 同上 |
-| `blended` | `blended = α·model + (1−α)·market`。**α はモデル重み**で、α=1.0 が純モデル・α=0.0 が市場のみ。**本番既定 α=0.2**（`RECOMMENDED_MARKET_BLEND_ALPHA`。オッズが無いレースはモデルのみへ自動フォールバック） | [probability-estimation.md](probability-estimation.md) REQ-D22-001（採用の経緯は ADR 0034） |
+| `blended` | `blended = α·model + (1−α)·market`。**α はモデル重み**で、α=1.0 が純モデル・α=0.0 が市場のみ。**本番既定 α=0**（`RECOMMENDED_MARKET_BLEND_ALPHA`・#810。win は市場の単勝含意確率そのもので、win の冪変換 γ は掛けない。オッズが無いレースはモデルのみ〈γ 適用〉へ自動フォールバック。連対・複勝はモデル由来） | [probability-estimation.md](probability-estimation.md) REQ-D22-001（α=0.2 の採用は ADR 0034、α=0 への変更は決定ログ #218 / #810） |
 | ⚠ 純モデル確率（pure） | ブレンド前のモデル確率。**順位付けは `blended`、EV 計算は pure** という層分離を守る | ADR 0055 / [product-goals.md](product-goals.md) REQ-D01-002 |
 | 対数プール（`BlendForm::LogPool`） | ブレンドの代替結合形 `p̃ ∝ model^a · market^b`（レース内正規化）。**本番への採用は棄却済み**——fit 窓 MLE で最適モデル指数 Â=−0.19±0.20（ゼロと区別不能）・eval ΔR² ゲート不通過。研究用 CLI（`--log-pool-a/-b`）として残る。（Â は本番の純モデルの単勝での値）。**#720 の独立確率（k3 版）と連系（馬連・ワイド・3連複）の市場でも、指数は正にならない**（#722・`scripts/predict-check/benter_alpha.py`） | [probability-estimation.md](probability-estimation.md) 結合形の代替（棄却の経緯は同決定ログ #703・#722） |
 | resolution（判別力） | 「どの馬が勝つか」を見分けるランクの強さ。AUC・top1 で測る。純モデルは市場に劣ることが確定済み | [feature-resolution-diagnosis.md](feature-resolution-diagnosis.md) |
@@ -131,9 +131,9 @@ ADR 0077）:
 | 印 | 予想の格付け記号。**運用で打つのは ◎○▲☆**（◎が本命＝軸。印を打った馬は必ず買い目に絡める＝相手を top5 まで広げる主因）だが、**データモデルは △・注 を含む 6 種**（`honmei`/`taikou`/`tanana`/`renge`/`hoshi`/`chui`） | [CLAUDE.md](../CLAUDE.md)「予算・配分（既定）」「混戦判定と配分」 / [prediction-json.md](prediction-json.md)（6 種） |
 | 軸 | ◎に据えて買い目の中心に固定する馬 | [CLAUDE.md](../CLAUDE.md)「軸ロックとズレ増額（確率と買い方の分離）」「軸の選び方」 |
 | 軸ロック | **軸と基本の買い目構造（軸・相手・混戦判定）を事前データで確定し、直前のオッズ変動でひっくり返さない**規律。見直すのは取消・馬場激変などの新情報が出たときだけ。`predict-watch`・盤・対話の `predict` の実装では**朝の選定**（監視窓に入る前の、当日 JST 0 時以降で最初の単勝で組んだ選定。#448 の盤の「朝↔現」とは別の「朝」）で確定する（#767）。朝の選定が無いレースだけ、predict-watch は**その日の初回スイープ**（＝そのレースが監視窓〈既定 40 分〉に入った最初のスイープ）で確定する。#724 で、窓突入時の固定は REQ-D01-003 の「事前」（＝朝の予想の時点）を満たさないと解釈した（回収率の差は検出できなかった） | ADR 0060（規律）/ ADR 0078（実装）/ [ev-kelly-bet-selection.md](ev-kelly-bet-selection.md) 決定ログ #724・#767・#776 / [product-goals.md](product-goals.md) REQ-D01-003 / [ev-kelly-bet-selection.md](ev-kelly-bet-selection.md) REQ-D23-007 |
-| ズレ増額 | 軸が自モデル確率より過小人気にズレたとき、**既存の買い目の金額だけを上げる**こと。点数（相手）は増やさない | 同上 |
-| 混戦 | ◎の model 勝率の **0.70 倍以上の馬が ◎含め 4 頭以上**いる状態（判定条件）。この状態で 3 連複ボックスを含む別配分に切り替える | [ev-kelly-bet-selection.md](ev-kelly-bet-selection.md) REQ-D23-005（判定）/ [CLAUDE.md](../CLAUDE.md)「混戦判定と配分」（配分） |
-| 相手 top5 | 3 券種とも model 確率上位 5 頭を相手に取る既定幅。**広げない**（上限側を直接測ったのは 3 連複のみ＝ADR 0030。既定の 5 頭自体は ADR 0019 が置いた設計値） | [ev-kelly-bet-selection.md](ev-kelly-bet-selection.md) REQ-D23-002（status: Tentative） |
+| ズレ増額 | 軸が自モデル確率（α=0 では pure＝純モデル・#810）より過小人気にズレたとき、**既存の買い目の金額だけを上げる**こと。点数（相手）は増やさない | 同上 |
+| 混戦 | ◎の model 勝率の **0.70 倍以上の馬が ◎含め 4 頭以上**いる状態（判定条件）。勝率は blended で、本番 α=0（#810）ではオッズがあれば市場の確率（単勝オッズの比）。この状態で 3 連複ボックスを含む別配分に切り替える | [ev-kelly-bet-selection.md](ev-kelly-bet-selection.md) REQ-D23-005（判定）/ [CLAUDE.md](../CLAUDE.md)「混戦判定と配分」（配分） |
+| 相手 top5 | 3 券種とも model 確率上位 5 頭を相手に取る既定幅（確率は blended。本番 α=0〈#810〉ではオッズがあれば 2〜6 番人気）。**広げない**（上限側を直接測ったのは 3 連複のみ＝ADR 0030。既定の 5 頭自体は ADR 0019 が置いた設計値） | [ev-kelly-bet-selection.md](ev-kelly-bet-selection.md) REQ-D23-002（status: Tentative） |
 | ながし | 軸馬を固定し、相手すべてと組み合わせる方式（軸が必須） | [CLAUDE.md](../CLAUDE.md)「表記規約（最優先）」 |
 | ボックス | 選んだ全馬を総当たりする方式（軸は不要） | 同上 |
 | フォーメーション | 軸グループ×相手グループで組む方式。**このプロジェクトでは基本不使用** | 同上 |

@@ -6,8 +6,10 @@ tags: [D01]
 sources:
   - docs-original/802-model-eval-baseline.md
   - qa/QA-model-eval-ground-802.md
-distilled_from_sha: "54c78b8b"
-updated: "2026-11-03"
+  - docs-original/810-market-alpha-zero.md
+  - qa/QA-market-alpha-zero-810.md
+distilled_from_sha: "2e2054e4"
+updated: "2026-11-05"
 ---
 
 # プロダクト目標・成功条件・非目標（D01）
@@ -47,16 +49,16 @@ paddock が何を目指し、何を達成したら成功で、**何をやらな�
 | REQ-ID | 要件 | 検証手段 | 出典 | status |
 |---|---|---|---|---|
 | REQ-D01-001 | 張るレースは ROI ≥ 100% のものだけに限る。閾値は引き下げない。**ただし現行の参考ROIはこのゲートの判定指標として機能していない**（下記「ゲートの現況」）——ゲートを緩める根拠にはならないので、閾値の引き下げは引き続き行わない | ADR 0040 の再現方法（保存済み `race_odds` に `analyze predict --blend-alpha 0.2` と `scripts/predict-check/live_ev.py` を当てて全 3 券種の ROI 分布を出す。**`analyze predict` は集計統計に `as_of=None` を使うので過去レース再評価ではリークする**——ただし +EV を多く見せる向きなので「+EV 帯が薄い」という結論には保守的）を再実行し、**閾値を下げると −EV を買うことになる**ことを確認する。あわせて `scripts/predict-check/gate_calibration.py`（ADR 0076 の再現方法）で判定ROIと実現ROIの較正を測り直す。ADR 0040 時点の実測は 69R で平均 ROI 73.1% / 最高 97% / +EV 0 本、ADR 0076 の実測は 182R で判定ROI 平均 23.2% / 最高 76.8% / ゲート通過 0 本（**この測定は #621 の番兵除去前**。判定ROI の出所は `live_ev_snapshots.roi` ＝ predict-watch が保存済みの計算結果で、netkeiba の未発売番兵が EV を 3 桁にする経路はここ。**#621 の修正では直らない**ので、取り直しには番兵除去後の記録が要る（#625）。なお市場整合ROI 側は式の上で `o` が約分されるためほぼ無影響） | ADR 0040 / ADR 0076 / ADR 0079（表示と運用記述） | Confirmed |
-| REQ-D01-002 | 順位付けは blended 確率、EV は純モデル確率 × 市場オッズで計算する（確率と買い方の層分離） | `cargo test -p paddock-domain` の EV 層テスト（純モデル確率が EV 経路に渡ることを固定） | ADR 0055 | Confirmed |
+| REQ-D01-002 | 順位付けは blended 確率、EV は純モデル確率 × 市場オッズで計算する（確率と買い方の層分離）。本番 α=0（#810）では blended は市場そのものなので、順位付けは単勝人気順になる | `cargo test -p paddock-domain` の EV 層テスト（純モデル確率が EV 経路に渡ることを固定） | ADR 0055 | Confirmed |
 | REQ-D01-003 | 軸は事前データで確定し、直前オッズでは動かさない（用途はズレ増額のみ・軸フリップ禁止）。**軸だけでなく相手・混戦判定も固定する**（実装は REQ-D23-007） | `scripts/predict-check/gate_calibration.py` の「軸（◎）の安定性」節が **`0/N`**（発走前に 2 スイープ以上あったレースで軸が入れ替わらない）。この節が測るのは発走前スイープ間の**軸**だけで、初回スイープ（監視窓突入時）より前の変化と相手・混戦は測らない——目視のログ突き合わせでは取りこぼす——ADR 0078 以前は 154R 中 軸 28R・相手 62R が黙って入れ替わっていた。機械検査は `cargo test -p paddock-domain` の `pinned_selection_survives_market_movement_while_roi_moves`（選定は不変・ROI は動く）が張る。固定の時点は朝（#724 で、監視窓突入時〈T-40〉の固定では「事前データで確定」を満たさないと解釈し、#767 で朝の選定へ前倒しした）。朝の固定は開催日に `gate_calibration.py` の「朝の固定」節が **`0/N`**（朝の選定があるレースで、発走前の全スイープの軸・相手・混戦が朝の選定から外れない。朝の軸の取消でライブの首位へ戻った外れは除き、該当行を確かめる）になることで確かめる（`ev-kelly-bet-selection.md` 決定ログ #724・#767） | ADR 0060 / ADR 0078 | Confirmed |
 | REQ-D01-004 | ADR 0052 と同一条件（α=0.2・縮約 / 冪較正フラグなし）のトップ選好馬の単勝的中率が 28% を下回らない（890R 実測 29.9%） | `paddock-analyze backtest --from 2026-03-15 --to 2026-06-21 --blend-alpha 0.2` の `win_hit_rate`（ADR 0052 の再現方法と同じコマンド。`backtest` は m / 冪較正を既定適用しないので、本番構成で測るならフラグを明示したうえで閾値ごと測り直す） | ADR 0052 | Confirmed |
 | REQ-D01-005 | 同条件のトップ選好馬の複勝的中率が 60% を下回らない（890R 実測 64.5%） | 同上（`show_hit_rate`） | ADR 0052 | Confirmed |
 | REQ-D01-006 | 手動ハンデ軸精査を伴う実運用セッションの単勝的中率が、REQ-D01-004 と同条件のバックテスト水準（29.9%）を上回る＝エッジが実在することを実測で示す | 実運用セッションの `bet_records`（`predict_bets`）と結果照合を 200R 以上貯め、`◎` の単勝的中率をバックテストと同じ定義で集計する。母集団は `predict_bets.fix_source`（買い目の固定の出所・#795）で分け、NULL は #795 に未対応のバイナリが書いた行（大半は #795 より前。migrate の後も、再起動していない古い api-server・desktop・predict は NULL を書く——StaleBinary は warn で起動を続けるため）として扱い、区切りは `predict_bets.created_at` と `_sqlx_migrations.installed_on`（version 20261102000001）を比べて付ける（`created_at` は TEXT〈UTC の RFC3339〉なので `created_at::timestamptz` にキャストして比べる）。見送ったレースは `predict_race_skips` にしか残らず出所を持たない。`fix_source` で分けた母集団は買い目を記録したレースだけ。`morning` には、朝の軸が取消でライブの首位へ戻った買い目も含む。除くには `morning_selections.axis` の出走の有無で絞る。（現状の観測は 1 開催日規模で母数が足りず、確定知にできる水準にない） | ADR 0055（エッジ＝手動ハンデ軸精査という主張の出所） | Tentative |
 | REQ-D01-007 | 買い目は「そのまま買える形」で提示する（式別 / 方式 / 軸 / 相手 / 点数 / 金額・100 円単位） | `build_portfolio` の単体テスト（配分の正）と [live-ev-buy-view.md](live-ev-buy-view.md) の**表示形式（slip）**の契約（配分方式の正は `build_portfolio`。ライブ writer は #346 で Rust `predict-watch` に一本化済み） | ADR 0064 | Confirmed |
 | REQ-D01-008 | 予想と買い目はブラウザから閲覧できる（ローカル完結・外部ストレージに依存しない） | `docs/api/openapi.json` のスナップショット検証（`src/apps/api-server/tests/openapi.rs`）と `web/src/lib/board.test.ts`、および [race-list-dashboard.md](../tests/browser-test-cases/race-list-dashboard.md) の手動ブラウザ手順 | ADR 0069 | Confirmed |
-| REQ-D01-009 | 本番構成のトップ選好馬の連対的中率が、凍結 eval 窓（2026-01-01〜08-31）で 50% を下回らない（2026-11-02 実測 52.1%・95% CI 下限 50.3%） | 定型 dump（[backtest.md](backtest.md)「定型 dump コマンド」）に `python3 scripts/predict-check/model_eval.py base=<dump>` を当て、`blended` の `place_hit` の点推定で判定する。窓は既定の凍結 eval 窓 | #802（[backtest.md](backtest.md) 決定ログ・[docs-original/802-model-eval-baseline.md](../docs-original/802-model-eval-baseline.md)） | Tentative |
-| REQ-D01-010 | 本番構成で、3 着以内の 3 頭がすべて win 順位の上位 5 頭に入るレースの割合が 34% を下回らない（2026-11-02 実測 36.9%・95% CI 下限 34.8%） | 同上。`blended` の `top5_win_all3` | #802（[backtest.md](backtest.md) 決定ログ・[docs-original/802-model-eval-baseline.md](../docs-original/802-model-eval-baseline.md)） | Tentative |
-| REQ-D01-011 | 本番構成の win LogLoss が、市場（単勝オッズの含意確率）との差で +0.0015 を超えて悪化しない（2026-11-02 実測 Δ +0.0011・95% CI [+0.0007, +0.0015]。市場を上回るのが目標 1 の向きで、この行は退行の見張り） | 同上。`blended − market` の `win_logloss` の Δ の点推定 | #802（[backtest.md](backtest.md) 決定ログ・[docs-original/802-model-eval-baseline.md](../docs-original/802-model-eval-baseline.md)） | Tentative |
+| REQ-D01-009 | 本番構成のトップ選好馬の連対的中率が、凍結 eval 窓（2026-01-01〜08-31）で 50% を下回らない（2026-11-05 実測・本番 α=0: 52.2%・95% CI 下限 50.4%。α=0.2 だった 2026-11-02 は 52.1%・下限 50.3%）。backtest の市場は確定オッズなので、本番が使う朝〜直前のオッズより甘い値 | 定型 dump（[backtest.md](backtest.md)「定型 dump コマンド」）に `python3 scripts/predict-check/model_eval.py base=<dump>` を当て、`blended` の `place_hit` の点推定で判定する。窓は既定の凍結 eval 窓 | #802 / #810（[backtest.md](backtest.md) 決定ログ・[docs-original/802-model-eval-baseline.md](../docs-original/802-model-eval-baseline.md)・[docs-original/810-market-alpha-zero.md](../docs-original/810-market-alpha-zero.md)） | Tentative |
+| REQ-D01-010 | 本番構成で、3 着以内の 3 頭がすべて win 順位の上位 5 頭に入るレースの割合が 35% を下回らない（2026-11-05 実測・本番 α=0: 37.1%・95% CI 下限 35.0%。α=0.2 だった 2026-11-02 は 36.9%・下限 34.8% で閾値 34%） | 同上。`blended` の `top5_win_all3` | #802 / #810（[backtest.md](backtest.md) 決定ログ・[docs-original/802-model-eval-baseline.md](../docs-original/802-model-eval-baseline.md)・[docs-original/810-market-alpha-zero.md](../docs-original/810-market-alpha-zero.md)） | Tentative |
+| REQ-D01-011 | 本番構成の win LogLoss と市場（単勝オッズの含意確率）との差が −0.0002〜+0.0002 の範囲に収まる（2026-11-05 実測・本番 α=0: Δ +0.0001・95% CI [+0.0000, +0.0002]）。**α=0 では blended ≡ market のはずなので一致の見張り**——Δ がこの幅から外れたら（市場より悪い側にも良い側にも）、ブレンドの復活・取消馬の分母（#811 型）・オッズの出所のずれといった経路のずれを疑う（α=0.2 だった 2026-11-02 は Δ +0.0011 [+0.0007, +0.0015] で、退行の見張りとして閾値 +0.0015 だった） | 同上。`blended − market` の `win_logloss` の Δ の点推定（両側で判定） | #802 / #810（[backtest.md](backtest.md) 決定ログ・[docs-original/802-model-eval-baseline.md](../docs-original/802-model-eval-baseline.md)・[docs-original/810-market-alpha-zero.md](../docs-original/810-market-alpha-zero.md)） | Tentative |
 <!-- REQ:end D01 -->
 
 ## エッジの所在
@@ -810,3 +812,39 @@ t_prev = 10 分以上前の最近傍。Δ = ln(odds_prev) − ln(odds_last)（>0
   `backtest.md` 決定ログ #802）。004 / 005 を model_eval の土俵に移すなら、閾値ごと測り直して新エントリで supersede する。
 - 閾値は 2026-11-02 時点の DB（凍結 eval 窓 2,159R）に依存する。母数が増えたら「この文書の更新条件」に従って
   閾値も測り直す。
+
+### #810: 本番 α=0 で REQ-D01-009〜011 を測り直し、011 を一致の見張りに書き換える (2026-11-05) — 採用
+
+#### コンテキスト
+
+- probability-estimation.md 決定ログ #810 で本番の市場ブレンドを α=0（win は市場の含意確率そのもの・γ は掛けない）にした。
+  #810 の要件は、本番構成の dump を取り直して REQ-D01-009〜011 の閾値を測り直すこと。
+- α=0 では blended が構造上 market と同じになり、REQ-D01-011（blended − market の win LogLoss）は 0 近くしか出ない。
+
+#### 決定
+
+1. 本番構成（`--blend-alpha 0.0` の定型 dump）で model_eval を回し直し、閾値を #802 と同じ規則（凍結 eval 窓の 95% CI の端を
+   整数 % へ切り捨て。011 は上限）で更新する: 009 は 50%（下限 50.4%・据え置き）、010 は 34% → 35%（下限 35.0%）。
+2. REQ-D01-011 は廃止せず、**一致の見張り**に書き換える（PO 回答・`qa/QA-market-alpha-zero-810.md` Q2）。閾値は実測の CI（[+0.0000, +0.0002]）の上限の幅を両側に取った ±0.0002（見張りなので、市場より良く出る側のずれも経路のずれとして扱う）。PO の回答は「閾値は実測の CI 上限」で、下側を −0.0002 まで取ったのはセルフレビューでの判断（CI の下限 +0.0000 をそのまま使うと、点推定が 0 の近くで揺れるだけで外れる）。
+   Δ がこの幅から外れたら、ブレンドの復活・取消馬の分母（#811 型）・オッズの出所のずれを疑う。
+3. REQ-D01-002 に「α=0 では順位付けが単勝人気順になる」と注記する。REQ-D01-001 / 004 / 005 の検証手段にある `--blend-alpha 0.2` は
+   当時の測定条件（ADR 0040 / 0052 の再現）なので変えない（004 は要件文に「ADR 0052 と同一条件」とある）。
+
+#### 理由
+
+- 閾値の規則を #802 から変えると、α の変更と閾値の決め方の変更が混ざる。
+- 011 を廃止すると、α=0 で「市場と同じ確率を出している」ことを機械的に確かめる手段が無くなる。#811 の取消馬のずれのような経路のずれは、
+  まさにこの差に出る。
+
+#### 却下した代替案
+
+- **011 を廃止する**: 上記の理由（PO 回答）。
+- **011 を pure − market に置き換える**: 要件の中身が変わり、新しい閾値の根拠づけが要る（PO 回答）。
+- **009 / 010 を朝〜直前のオッズで測り直す**: model_eval の土俵（dump）は確定オッズで、朝〜直前の判定は #218 の
+  `live_alpha_eval.py` が担う。009 / 010 の注記に「本番より甘い値」と残すにとどめる。
+
+#### 影響
+
+- 実測（`docs-original/810-market-alpha-zero.md`）: ◎ 連対 52.2% [50.4, 54.0]・top5 包含 37.1% [35.0, 39.2]・Δ LogLoss +0.0001 [+0.0000, +0.0002]。
+  α=0.2 の #802 基準と比べた model_eval の採否は「採用候補」（win LogLoss −0.0010 [−0.0014, −0.0006]）だが、確定オッズなので #284 の追認にとどまる。
+- 3 本とも Tentative のまま（Confirmed は次の窓で再測してから・#802 と同じ）。

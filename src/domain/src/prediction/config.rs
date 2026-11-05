@@ -47,7 +47,8 @@ pub struct EstimationConfig {
     pub horse_venue_weight: Option<f64>,
     /// win_prob 冪変換 `win'_i ∝ win_i^gamma` のγ（#246）。`None` のとき no-op（後方互換）。
     /// `gamma > 1.0` で人気馬の win を相対強調し穴の 1 着過大評価を縮約する。ブレンド後の最終 win に
-    /// 適用する（[`super::estimate::apply_win_power`]）。backtest の `--win-power` スイープ専用で、
+    /// 適用する（[`super::estimate::apply_win_power`]）。ただし α=0 で市場を使ったブレンドには掛けない
+    /// （[`super::estimate::win_power_after_blend`]・#810）。backtest の `--win-power` スイープ専用で、
     /// 採用値は backtest 検証後に `production()` へ反映する（ADR 0042）。
     pub win_power: Option<f64>,
     /// place/show スコアの冪変換 γ（#283 / #258 Phase 2）。`None` のとき no-op（後方互換）。
@@ -115,10 +116,12 @@ pub const RECOMMENDED_WIN_POWER: f64 = 1.25;
 pub const RECOMMENDED_PLACE_SHOW_POWER: f64 = 2.0;
 
 /// 本番 predict が採用する市場オッズ(単勝)ブレンドのモデル重み α（#72）。`None` はモデルのみ。
-/// backtest（2025-01〜2026-06 / 4891R）の α スイープで Brier/LogLoss が α=0.2 で最良（ADR 0034）。
-/// 市場オッズが無いレースは自動でモデルのみにフォールバックする。
+/// α=0 は win を市場の含意確率そのものにする（#810）。確定オッズ（#284）でも朝〜直前のオッズ（#218）でも
+/// α=0.2 が市場を上回る証拠が無く、#218 の事前コミットに従って倒した（それまでの α=0.2 は ADR 0034）。
+/// 市場そのものには win の冪変換 γ を掛けない（[`super::estimate::win_power_after_blend`]）。
+/// 市場オッズが無いレースは自動でモデルのみ（γ 適用）にフォールバックする。
 /// 詳細は knowledge/probability-estimation.md。
-pub const RECOMMENDED_MARKET_BLEND_ALPHA: Option<f64> = Some(0.2);
+pub const RECOMMENDED_MARKET_BLEND_ALPHA: Option<f64> = Some(0.0);
 
 impl EstimationConfig {
     /// 本番 predict 経路のデフォルト設定（#75 で backtest 検証して採用した値）。

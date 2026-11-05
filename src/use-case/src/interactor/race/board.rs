@@ -68,7 +68,7 @@ pub struct RaceBoard {
     /// 持たないので `FirstSweep` は来ない。記録のときに買い目と一緒に送り、`predict_bets.fix_source` に残す
     /// （表示した買い目と出所を同じ盤から取るので必ず一致する）。
     pub fix_source: FixSource,
-    /// ライブ再計算の軸＝blended（市場ブレンド α=0.2）首位（機械◎, `model_rank==1`）。
+    /// ライブ再計算の軸＝blended（市場ブレンド。本番は α=0＝市場そのもの・#810）首位（機械◎, `model_rank==1`）。
     /// 固定した軸（朝の固定、無ければ記録軸）との乖離警告に使う。直前オッズで動くのはこちら（#388）。
     pub live_axis: Option<u32>,
     pub confusion: Confusion,
@@ -801,7 +801,7 @@ fn fixed_selection_of(
     })
 }
 
-/// ライブ再計算軸（#388）: `blended`（市場ブレンド α=0.2）首位＝機械◎（`model_rank==1`）。
+/// ライブ再計算軸（#388）: `blended`（市場ブレンド。本番は α=0＝市場そのもの・#810）首位＝機械◎（`model_rank==1`）。
 /// 記録軸との乖離警告に使う（直前オッズで動くのはこちら）。空なら `None`。
 fn live_axis_of(blended: &[HorseProbability]) -> Option<u32> {
     model_ranks(blended)

@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use chrono::Local;
 use dioxus::prelude::*;
+use paddock_domain::RECOMMENDED_MARKET_BLEND_ALPHA;
 use paddock_domain::race::RaceId;
 
 use crate::components::exec_panel::ExecPanel;
@@ -10,7 +11,6 @@ use crate::setup::Setup;
 use crate::viewmodel::DEFAULT_BUDGET;
 use crate::viewmodel::exec::BetView;
 use crate::viewmodel::race::{AxisLockView, BoardView};
-const DEFAULT_ALPHA: f64 = 0.2;
 const POLL_SECS: u64 = 60;
 
 #[component]
@@ -29,7 +29,12 @@ pub fn RaceBoard(race_id: String) -> Element {
             let race_id = RaceId::try_from(rid).map_err(|e| anyhow::anyhow!("{e}"))?;
             setup
                 .interactor
-                .race_board(&race_id, DEFAULT_BUDGET, Some(DEFAULT_ALPHA), None)
+                .race_board(
+                    &race_id,
+                    DEFAULT_BUDGET,
+                    RECOMMENDED_MARKET_BLEND_ALPHA,
+                    None,
+                )
                 .await
                 .map(|b| BoardView::from(&b))
                 .map_err(|e| anyhow::anyhow!("{e}"))
