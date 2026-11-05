@@ -11,7 +11,7 @@ sources:
   - qa/QA-predict-bets-fix-source-795.md
   - docs-original/810-market-alpha-zero.md
   - qa/QA-market-alpha-zero-810.md
-distilled_from_sha: "2e2054e4"
+distilled_from_sha: "e5e39860"
 updated: "2026-11-05"
 ---
 
