@@ -20,6 +20,10 @@ concurrency:
 # 一切行わないため読取だけで足りる（docker-build も push しない＝レジストリ書込なし）。
 permissions:
   contents: read
+# 全ジョブの actions/checkout に persist-credentials: false を付ける（#728）。既定ではトークンが .git/config から
+# 参照される資格情報ファイル（$RUNNER_TEMP）に残り、同じジョブで動く第三者コード（PyPI・npm・cargo の build script）が
+# git config 経由で読めるため。書き込みの git 操作はどのジョブもしない。docker-build の git fetch は公開リポジトリなので
+# 認証無しで通る。
 
 env:
   CARGO_TERM_COLOR: always
@@ -61,6 +65,8 @@ jobs:
     steps:
       # third-party / 外部 action はサプライチェーン対策で commit SHA にピンする（コメントは対応タグ）。
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
+        with:
+          persist-credentials: false
 
       # rust-toolchain.toml の channel と env.RUST_TOOLCHAIN の一致を確認する（#466）。
       # 不一致ならここで即 fail し、サイレントなバージョン乖離を防ぐ。
@@ -135,6 +141,8 @@ jobs:
         working-directory: web
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
+        with:
+          persist-credentials: false
 
       - name: Install Node.js
         # 外部 action はサプライチェーン対策で commit SHA にピン（コメントは対応タグ）。
@@ -180,6 +188,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
         with:
+          persist-credentials: false
           # check-doc-classes.py の stale 判定が git log / merge-base を使うため全履歴が要る。
           # shallow だと distilled_from_sha の解決が全件失敗し、その文書の stale 判定が丸ごと
           # スキップされる（実測。shallow は warning に落とす作りなので exit 0 のまま通る）。
@@ -219,7 +228,10 @@ jobs:
   #    1 の stdlib 実行では自己スキップして無検査になるため、venv に numpy・pytest を入れた別ステップで
   #    ディレクトリごと実行する（ファイルを列挙しないので、今後増える numpy テストも自動で対象になる）。
   #    依存は scripts/predict-check/requirements-ci.txt で推移依存まで == 固定し、--only-binary で wheel だけを
-  #    入れる（上流の新版やビルドスクリプトで必須チェックが揺れないように）。ハッシュ検証は別 issue。
+  #    入れる（上流の新版やビルドスクリプトで必須チェックが揺れないように）。--require-hashes で全行の sha256 を
+  #    照合し、ハッシュを取った時点と違うファイル（既存の版への配布物の追加・配布経路での改ざん）が選ばれたら
+  #    install で落とす（#728）。版とハッシュの更新は dependabot（pip）。
+  #    --only-binary は外さない: 外すと sdist のビルドに要る依存（setuptools 等）がハッシュの照合なしに入る。
   # 4. scripts/harness/test_train_pl_topk.py・test_pl_features.py（#720）。学習モデルを独立確率モデルとして再開したので
   #    CI に載せる。scipy までで足りるため、3 の一式に scipy だけを足した
   #    scripts/harness/requirements-ci.txt（完全ピン）を別 venv に入れて走らせる。
@@ -231,6 +243,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
+        with:
+          persist-credentials: false
       - name: Run stdlib-only python tests (predict-check 自走式 + harness 忠実性)
         # predict-check の各テストは自走式（__main__ で全 test_* を実行し assert 失敗で非 0 終了）、
         # harness/test_faithfulness.py は unittest.main() 実行（失敗で非 0 終了）。どちらも
@@ -244,12 +258,12 @@ jobs:
         # ubuntu のシステム python は PEP 668 で pip を拒むので venv に入れる。
         run: |
           python3 -m venv "$RUNNER_TEMP/pc-venv"
-          "$RUNNER_TEMP/pc-venv/bin/pip" install --quiet --only-binary=:all: -r scripts/predict-check/requirements-ci.txt
+          "$RUNNER_TEMP/pc-venv/bin/pip" install --quiet --require-hashes --only-binary=:all: -r scripts/predict-check/requirements-ci.txt
           "$RUNNER_TEMP/pc-venv/bin/python" -m pytest -q -p no:cacheprovider scripts/predict-check
       - name: Run harness PL top-k tests (pytest・scipy・#720)
         run: |
           python3 -m venv "$RUNNER_TEMP/hv-venv"
-          "$RUNNER_TEMP/hv-venv/bin/pip" install --quiet --only-binary=:all: -r scripts/harness/requirements-ci.txt
+          "$RUNNER_TEMP/hv-venv/bin/pip" install --quiet --require-hashes --only-binary=:all: -r scripts/harness/requirements-ci.txt
           "$RUNNER_TEMP/hv-venv/bin/python" -m pytest -q -p no:cacheprovider \
             scripts/harness/test_train_pl_topk.py scripts/harness/test_pl_features.py
 
@@ -263,6 +277,8 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
+        with:
+          persist-credentials: false
       # 変数直後の非 ASCII（`$var（`）は UTF-8 ロケールの bash が変数名に取り込み set -u で落ちる（#636）。
       # shellcheck は検出しないので専用検査を置く。
       # **回帰テストをジョブの先頭に置く**（`adr` ジョブと同じ順序）。下の shellcheck ステップも
@@ -314,6 +330,8 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
+        with:
+          persist-credentials: false
       - name: Install psql client (golden ガード手前の command -v psql を満たす)
         run: |
           sudo apt-get update
@@ -362,6 +380,8 @@ jobs:
           fi
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
+        with:
+          persist-credentials: false
 
       - name: Install Rust toolchain
         # 本体 ci ジョブと同じ SHA ピン（両ジョブで同じ値を使う。片方だけ上げない）。
@@ -411,6 +431,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
         with:
+          persist-credentials: false
           # 全履歴を取得する。既定の shallow（fetch-depth: 1）だと後段の 3-dot diff
           # （マージベース必須）や push の HEAD^ が解決できず git diff が失敗し、
           # 常時 fail-open（skip が効かない）に退化するため。

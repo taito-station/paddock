@@ -25,9 +25,12 @@ on:
     - cron: "15 0 * * 1"
   workflow_dispatch:
 
+# workflow 全体は読取だけ。checks: write は cargo-audit ジョブにだけ付ける（#728）。npm-audit は npm ci で
+# 第三者コード（lifecycle scripts）を動かすので、書き込み権限のトークンを渡さない。cargo-audit ジョブも
+# audit-check が版を固定せずに cargo install cargo-audit を実行するので第三者コードは動く（作り直しは別 Issue）。
 permissions:
   contents: read
-  checks: write # rustsec/audit-check が Check Runs API で結果を投稿するのに必須
+# actions/checkout は persist-credentials: false（ci.yml と同じ方針・#728）。audit-check はトークンを入力で受け取る。
 
 jobs:
   # ──────────────────────────────────────────────
@@ -37,8 +40,15 @@ jobs:
     name: cargo audit (RustSec)
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: read
+      # audit-check は workflow_dispatch のとき Check Runs API で結果を投稿する（checks: write）。schedule のときは
+      # Issues API で報告しようとし、issues: write が無いので落ちる（既存の不具合・別 Issue で扱う）。
+      checks: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
+        with:
+          persist-credentials: false
 
       # rustsec/audit-check は Cargo.lock を読み RustSec Advisory DB を照合する。
       # Rust toolchain のインストールは不要（audit-check が内部で処理）。
@@ -61,6 +71,8 @@ jobs:
         working-directory: web
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
+        with:
+          persist-credentials: false
 
       - name: Install Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
