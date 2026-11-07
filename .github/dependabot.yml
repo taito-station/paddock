@@ -1,9 +1,10 @@
 # dependabot.yml — 依存の鮮度・脆弱性監視（#462）
 #
-# 3 エコシステムを週次で監視する:
+# 4 エコシステムを週次で監視する:
 #   1. cargo   — Rust クレート（/ の Cargo.toml/Cargo.lock）
 #   2. npm     — フロント JS/TS（/web の package.json/package-lock.json）
 #   3. github-actions — ワークフロー中の action の SHA ピン追随
+#   4. pip     — CI の predict-check ジョブが入れる Python 依存（ハッシュ付きの完全ピン・#728）
 #
 # PR 洪水抑制のため groups（minor/patch をまとめる）と open-pull-requests-limit を設定。
 # major 更新は個別 PR にして破壊的変更を見落とさないようにする。
@@ -66,3 +67,33 @@ updates:
     labels:
       - dependencies
       - github-actions
+
+  # ──────────────────────────────────────────────
+  # 4. pip（CI の predict-check ジョブの requirements-ci.txt・#728）
+  # ──────────────────────────────────────────────
+  # CI は --require-hashes で入れるので、版と一緒にハッシュも書き換わる。harness 側は predict-check 側を -r で
+  # 取り込むので、同じ numpy の更新 PR が 2 本立ったら片方を閉じる。numpy の PR が scipy の上限とぶつかって harness の
+  # ステップで落ちたら、scipy を手で上げてハッシュを取り直すか閉じる。scripts/harness/requirements.txt（範囲指定・
+  # 棄却済み路線のハーネス用で更新しない）への PR が来たら閉じる。ハッシュは新しい版の悪性を防がないので、
+  # 新しい版の PR は版の変更を見てからマージする。
+  - package-ecosystem: pip
+    directories:
+      - /scripts/predict-check
+      - /scripts/harness
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Asia/Tokyo
+    groups:
+      pip-minor-patch:
+        update-types:
+          - minor
+          - patch
+    # scikit-learn は scripts/harness/requirements.txt（棄却済み路線・更新しない）にしか無く、更新 PR は必ず不要になる。
+    ignore:
+      - dependency-name: scikit-learn
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - python

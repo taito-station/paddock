@@ -8,9 +8,12 @@ sources:
   - docs-original/636-fullwidth-after-var.md
   - qa/QA-evil-merge-615.md
   - qa/QA-fullwidth-after-var-636.md
+  - qa/QA-pip-hash-pin-728.md
   - .github/workflows/ci.yml
-distilled_from_sha: "e5b506f2"
-updated: "2026-10-31"
+  - .github/workflows/audit.yml
+  - .github/dependabot.yml
+distilled_from_sha: "0b58104b"
+updated: "2026-11-07"
 ---
 
 # CI パイプラインの構成と設計意図（D21）
@@ -76,20 +79,48 @@ D21（CI/CD・ビルド・リリース・供給網管理）の充足ギャップ
   pytest ステップにも載らず、同じ無検査に戻る。stdlib の自走式テストも pytest で収集できる（両方で走る）。
 - **推移依存まで `==` で固定＋ `--only-binary=:all:`**（`scripts/predict-check/requirements-ci.txt`）:
   必須チェックが上流の新版（numpy の乱数列の変化など）やビルドスクリプトで揺れないようにする。
-  ADR 0082 の「必須チェックを lock/checksum 外の取得に依存させない」と同じ動機だが、**ハッシュ検証
-  （`--require-hashes`）と dependabot での更新監視はまだ無い**（別 issue）。PyPI 障害時にこのステップは
-  落ちうる。
+  ADR 0082 の「必須チェックを lock/checksum 外の取得に依存させない」と同じ動機。`--only-binary` は
+  ハッシュ検証の前提でもある（外すと sdist のビルドに要る依存がハッシュの照合なしに入る）ので外さない。
+- **全行にその版の全配布物の sha256 を並べ、`--require-hashes` で入れる**（#728）: 既存の版への配布物の追加（pip がより特定的なタグの wheel を選ぶ）・配布経路（CDN・ミラー）での改ざん・PyPI 側の改ざんで、
+  ハッシュを取った時点と違うファイルが選ばれたら install で落ちる（PyPI は同じファイル名の再アップロードを禁じるので、
+  同じファイルの中身の差し替えは起きない）。ハッシュの無い行があっても落ちる。版とハッシュの更新は dependabot（pip）が
+  担う。手で版を変えるときのハッシュの取り直し方は、requirements-ci.txt の先頭コメントにある。
+  ハッシュは乗っ取られたメンテナが出した新しい版は防がない。dependabot の PR は版の変更を見てからマージする。
+  正当な wheel の追加でも、ランナーの Python が上がって未登録のタグが選ばれると落ちる（requirements-ci.txt の
+  先頭コメントの手順で、PyPI の upload_time を見て正当な追加か確かめてから取り直す）。
+- **pip のキャッシュは入れない**（#728）: PyPI 障害時にこのステップは落ちうる。キャッシュは miss すれば
+  PyPI に行くので根治にならない（ADR 0082 で rust-cache を根治にしなかったのと同じ）。venv の作成・install・
+  pytest を含む 2 ステップで合計約 46 秒（main の CI 実行 42348153658: numpy 側 36 秒・scipy 側 10 秒）で、
+  速度の動機も無い。
+- **requirements-ci.txt は knowledge の `sources` に入れない**: 入れると、dependabot の更新 PR が
+  `distilled_from_sha` の stale 検査で毎回赤になる（ADR 0081 と同じ詰まり）。
 
 ### harness の独立確率モデルのテストも同じ方式で走らせる（#720）
 
 `scripts/harness/test_train_pl_topk.py`・`test_pl_features.py` は、上と同じ形の別ステップ（別 venv）で走る。
 依存は `scripts/harness/requirements-ci.txt`（`-r ../predict-check/requirements-ci.txt` に scipy を足した完全ピン）。
+predict-check 側と同じく、ハッシュ付きで `--require-hashes` で入れる（#728。`-r` で取り込んだ行にもハッシュ検証が効く）。
 
 - それまで harness の学習テストは「棄却済み路線（ADR 0053）で依存が重い」ので CI の対象外だった。#720 で学習モデルを
   独立確率モデルとして再開したので、その理由がなくなった。
 - scikit-learn が要る旧ハーネスのテスト（`test_train_pl.py`・`test_train_gbm.py`）は、更新しない棄却済みモデルのものなので対象外のまま。
 - ファイルを列挙している（ディレクトリごとにすると scikit-learn 依存のテストまで集めて落ちる）。harness に独立確率モデルの
   テストを足したら、このステップにも足す。
+
+### 全ジョブの checkout は `persist-credentials: false`（#728）
+
+`actions/checkout`（ピンしている `3d3c42e5…` は v7.0.1）は既定で GITHUB_TOKEN を `$RUNNER_TEMP` の資格情報ファイルに
+残し、`.git/config` から `includeIf` で参照させる。同じジョブで動く第三者コード（PyPI・npm・cargo の build script）は
+`git config` 経由でこれを読める。どのジョブも書き込みの git 操作をしないので、`ci.yml` と `audit.yml` の checkout
+すべてで残さない。ただし消えるのはこの git の設定経由の露出だけで、トークンはジョブの実行中ずっと runner のプロセスの
+メモリにあり、同じジョブの第三者コードは抜き出せる。だから権限は `permissions` で最小にするのが本筋。`audit.yml` は
+workflow 全体を `contents: read` だけにし、`checks: write` を `cargo-audit` ジョブにだけ付けた（`npm ci` で lifecycle
+scripts を動かす `npm-audit` には渡さない）。ただし `cargo-audit` ジョブも、`rustsec/audit-check` が版を固定せずに
+`cargo install cargo-audit` を実行して約 300 クレートをビルドするので、第三者コードを動かすことに変わりはない
+（書き込み権限を渡すジョブを 1 つに絞っただけ）。また `checks: write` が使われるのは `workflow_dispatch` のときだけで、
+schedule 起動では audit-check が Issues API で報告しようとして権限不足で落ちている（2026-08-31 以降毎週。既存の不具合で、
+audit-check の置き換えと合わせて別 Issue で扱う）。`docker-build` の「Detect relevant changes」の `git fetch` は、公開リポジトリなので
+認証無しで通る（リポジトリを private にするなら、この fetch に認証を足す）。
 
 ### `adr` ジョブは回帰テストを本番検査より先に走らせる
 
@@ -431,7 +462,8 @@ ADR 0026 のスコープ外として記録されたまま**未確認**。将来 
 - ADR: 0026 OCR/PDF 統合テストを CI で実走（mupdf 版固定） /
   0073 ADR 統合と文書クラス・機械検査 /
   0081 ピン更新だけの差分は内容変更と見なさない /
-  0082 Swagger UI を vendored にしてビルド時ダウンロードを消す
+  0082 Swagger UI を vendored にしてビルド時ダウンロードを消す /
+  #728 pip 依存のハッシュ検証・dependabot（pip）・persist-credentials
 - 必須チェックの ruleset は #461（ジョブ ID `adr` は必須チェック名なので改名しない）
 - pre-push は CI 相当の高速チェックを手元で再現する（`scripts/git-hooks/pre-push`。配線は
   `scripts/install-git-hooks.sh` で clone ごとに一度）
@@ -1250,3 +1282,68 @@ frontmatter `kind: specification` で区別すると決めた。ただし**新�
 
 - 既存 27 本の `kind` は変更しない（旧 specifications 由来 17 本は `specification`、他は `knowledge` のまま実態と一致）。
 - `kind` を機械検査するスクリプトは無い（値の妥当性は人とレビューで担保）。
+
+### #728: CI の pip 依存をハッシュで検証し、dependabot で更新を監視する (2026-11-07) — 採用
+
+#### コンテキスト
+
+#719・#720 で、必須チェック `predict-check` が PyPI から numpy・pytest・scipy と推移依存を pip install する
+ようになった。`==` の完全ピンと `--only-binary=:all:` は入れたが、取りに行くファイルが変わっても（既存の版への配布物の
+追加・配布経路での改ざん）検出できず、
+pip は dependabot の監視外だった（#719 のレビューで「ハッシュは別 issue」とした残り）。
+着手時に確定した点は [qa/QA-pip-hash-pin-728.md](../qa/QA-pip-hash-pin-728.md)。
+
+#### 決定
+
+- `scripts/predict-check/requirements-ci.txt` と `scripts/harness/requirements-ci.txt` の全行に、その版の全配布物の
+  sha256 を並べ、CI は `--require-hashes --only-binary=:all:` で入れる。版は上げない。
+- `.github/dependabot.yml` に pip（`/scripts/predict-check`・`/scripts/harness`）を足す。
+- `ci.yml` と `audit.yml` の全 checkout に `persist-credentials: false` を付ける。
+- `audit.yml` の `checks: write` を workflow 全体から `cargo-audit` ジョブに移す（`npm-audit` には読取だけ）。
+- dependabot の pip で scikit-learn を `ignore` にする（`scripts/harness/requirements.txt` にしか無く、更新しない）。
+- pip のキャッシュは入れない。requirements-ci.txt は knowledge の `sources` に入れない。
+- リポジトリの Dependabot alerts を有効にした（リポジトリ設定・PR の外。それまで pip・cargo・npm とも脆弱性の
+  通知が来ていなかった）。
+
+#### 理由
+
+- ハッシュは、必須チェックが取りに行く第三者コードをファイル単位で固定する唯一の手段。版の `==` だけでは、
+  既存の版への配布物の追加（pip がより特定的なタグの wheel を選ぶ）・配布経路（CDN・ミラー）での改ざん・PyPI 側の改ざんを防げない。
+- 全配布物のハッシュを並べるのは、dependabot がハッシュを書き換えるときと形をそろえるため。どのプラットフォームの wheel が
+  選ばれても照合できる。
+- harness 側も含めたのは、同じジョブの別ステップが numpy 一式を入れ直すので、片方だけでは穴が残るため。
+- `persist-credentials: false` は、`.git/config` から参照される資格情報ファイル経由でトークンを読める経路を消す。
+  メモリ上のトークンは消せないので、書き込み権限を渡すジョブを減らす（`audit.yml` の `checks: write` を `npm-audit` から
+  外す）ことと組で効く。書き込みの git 操作はどのジョブもしないので失うものが無い。
+
+#### 却下した代替案
+
+- **pip-compile / `uv pip compile` の `.in` から生成する**: 生成ツールと `.in`・`.txt` の 2 本立てが増える。版の更新は
+  dependabot が担うので、手で生成する場面が少ない。`uv` は Windows 用の colorama の行まで足し、今のファイルの形も変わる。
+- **pip のキャッシュ**: miss すれば PyPI に行くので上流障害の根治にならない。venv の作成・install・pytest を含む
+  2 ステップで合計約 46 秒（main の CI 実行 42348153658）で、速度の動機も無い。
+- **この PR で `audit.yml` を作り直す**（audit-check をやめて cargo-audit を版固定で入れる・`issues: write` を足す）:
+  #728 の範囲（pip のハッシュと checkout）を超え、直し方の選択がある。`checks: write` の移動だけにとどめ、別 Issue で扱う。
+- **この PR で dependabot に `cooldown` を入れる**: 公開直後の新しい版（乗っ取られたメンテナの版）を遅らせる対策だが、
+  既存の cargo・npm・github-actions にも無い。pip だけに入れると方針がずれるので、全エコシステムにそろえて #817 で扱う。
+- **`audit.yml` に pip-audit を足す**: Issue の要件外。脆弱性の通知は、有効にした Dependabot alerts が pip も拾う。
+- **`persist-credentials: false` を predict-check だけにする**: npm・cargo の build script も第三者コードで、方針を
+  1 つにした方が漏れが無い。
+
+#### 影響
+
+- ローカルで確認した: ハッシュ付きで 2 本とも入り、pytest は predict-check 416 件・harness 42 件が通る。numpy の全ハッシュを
+  書き換えると `THESE PACKAGES DO NOT MATCH THE HASHES` で、scipy のハッシュを外すと `Hashes are required` で install が落ちる。
+- ハッシュは新しい版の悪性を防がない。dependabot の PR は版の変更を見てからマージする（公開直後の版を遅らせる
+  `cooldown` は #817）。正当な wheel の追加でも、ランナーの Python が上がると `THESE PACKAGES DO NOT MATCH THE HASHES`
+  で落ちうる（可用性の残るリスク）。
+- `audit.yml` の `cargo-audit` ジョブは `checks: write` を持ったまま、版を固定しない `cargo install cargo-audit` で
+  第三者コードを動かす。schedule 起動は権限不足で毎週落ちている。どちらも既存の状態で、別 Issue で扱う。
+- 新しい版が推移依存を増やすと、その dependabot の PR は `Hashes are required in --require-hashes mode` で落ちる
+  （黙っては通らない）。落ちたログの名前と版で、先頭コメントのコマンドからハッシュ付きの行を足す。
+- dependabot が pip の更新 PR を実際に作れるか（ハッシュ付き＋`-r` の取り込み）は、マージ後の初回チェックまで未確認。
+  同じ numpy の PR が 2 本立ったら片方を閉じる。numpy の PR が scipy の上限とぶつかって harness のステップで落ちたら、
+  scipy を手で上げてハッシュを取り直すか、PR を閉じる。`scripts/harness/requirements.txt`（範囲指定・更新しない）への
+  PR は閉じる。
+- 既存の entry と同じく `labels` を書いたが、`dependencies` などのラベルはリポジトリに無く、既存の dependabot の PR にも
+  付いていない（既存からの状態）。
