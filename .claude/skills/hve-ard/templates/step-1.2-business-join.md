@@ -27,12 +27,12 @@ As-Is / To-Be / Gap / Strategic Recommendations を含む完全なレポート�
 
 `docs/company-business-requirement.md` を以下の章立てで作成する。
 
-1. **Executive Summary** — 分析目的と背景、主要示唆（3〜7 点、根拠付き表形式）、戦略方向性オプション概要（短期・中期・長期）
+1. **Executive Summary** — 分析目的と背景、主要示唆（根拠付き表形式）、戦略方向性オプション概要（短期・中期・長期）
 2. **Company Overview** — 企業基本情報（表）、事業領域と主要製品・サービス、経営理念・ビジョン、過去 `{survey_period_years}` 年間の事業変遷
-3. **As-Is Analysis** — 外部環境分析（PEST / Porter's 5 Forces）、内部環境分析（リソース・ケイパビリティ / 財務分析）、各 `BIZ-NN` を含む事業ポートフォリオ分析、競合分析、SWOT 分析、主要課題（3〜7 点、優先度付き表形式）
+3. **As-Is Analysis** — 外部環境分析（PEST / Porter's 5 Forces）、内部環境分析（リソース・ケイパビリティ / 財務分析）、各 `BIZ-NN` を含む事業ポートフォリオ分析、競合分析、SWOT 分析、主要課題（優先度付き表形式）
 4. **To-Be Vision** — 中長期的な成長ビジョン、戦略的方向性（表）、今後深掘りすべき有望事業領域
 5. **Gap Analysis** — As-Is と To-Be の差分（領域別テーブル）
-6. **Strategic Recommendations** — 推奨戦略（3〜5 個、根拠付き）、実行ロードマップ（短期/中期/長期）、KPI とモニタリング体制
+6. **Strategic Recommendations** — 推奨戦略（根拠付き）、実行ロードマップ（短期/中期/長期）、KPI とモニタリング体制
 7. **Appendix** — 使用データソース、分析上の制約、使用フレームワーク
 
 各 `BIZ-NN` のサマリーをレポート中に含め、根拠不足の場合は件数を水増ししない。

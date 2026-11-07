@@ -36,27 +36,97 @@ description: 成果物管理規律 — ファイル配置・更新ポリシー�
 
 ## 決定ログの不変性
 
-決定ログは **append-only** で運用する。
+決定ログは **append-only** で運用する。置き方は独立ファイル方式（既定）とインライン方式の 2 つ。
 
 ### 原則
 
-- 既存エントリを書き換えない（誤字修正を除く。paddock では誤字修正も含め既存行の変更を `scripts/check-decision-log-immutability.py` が error にする・paddock 固有）
-- 決定を覆すときは新エントリを追加し、旧エントリを supersede した旨を記載する
+- 既存エントリを書き換えない。例外は方式ごとに「書き換えてよい範囲」で定める
+- 決定を覆すときは新エントリを追加し、新エントリに旧エントリを supersede した旨を書く（独立ファイル方式は旧 ADR のステータス節も更新する）
 - 削除は禁止
+- 更新漏れは implement-flow Step 7（Knowledge 同期）で防ぐ
 
 ### 配置
 
-各 `knowledge/` 文書の末尾に `## 決定ログ` 節としてインライン化する（paddock 固有・#652。hve-playbook 標準の
-`knowledge/adr/` 独立ファイル方式は採らない）。
+| 方式 | 置き場所 | 採り方 |
+|---|---|---|
+| 独立ファイル（既定） | `knowledge/adr/` に 1 決定 1 ファイル | 宣言は要らない |
+| インライン | 決定が効く `knowledge/` 配下の文書の末尾の `## 決定ログ` 節 | `.claude/rules/hve-local/artifact-management.md` に「artifact-management の「配置」を補足」の節を設けて宣言する（書式は local-overrides.md） |
 
-- 決定はその決定が効く文書の決定ログへ直接 append する
-- 独立した ADR ファイルは作らない
-- 更新漏れは implement-flow Step 7（Knowledge 同期）で防ぐ
+- 独立ファイル方式は `ls knowledge/adr/` で全決定を一覧でき、必要な ADR だけ読めばよい
+- インライン方式は、決定とそれが効く文書を同じファイルで読める。すでにこの方式で運用している導入先が続けるための選択肢で、新しく始めるプロジェクトは独立ファイル方式を使う
+- 既存の別配置（documentation-standards の「配置先」参照）で ADR を運用しているリポジトリは、その配置先を独立ファイル方式の `knowledge/adr/` と読み替える（検査コマンドのパスも同じ）
+- 運用中の方式の切り替え（既存エントリの移行を含む）は本規則の範囲外。決定ログに記録して判断する
+- インライン方式を宣言したリポジトリに `knowledge/adr/` の ADR が残っている場合、それらには独立ファイル方式の「書き換えてよい範囲」と検査を適用する
+
+### 書き換えてよい範囲
+
+| 方式 | 書き換えてよいもの |
+|---|---|
+| 独立ファイル | 既存 ADR の `## ステータス` 節（ステータス値の更新（Proposed からの確定、supersede、非推奨）とその理由、有効な部分・失効した部分の記述）、一覧 `knowledge/adr/README.md` のステータス列、誤字修正 |
+| インライン | なし（誤字修正も不可）。supersede は新しいエントリで表し、旧エントリは書き換えない |
+
+誤字修正は、意味・判断・ID・日付・ステータスを変えない、同じ行の中の差し替えに限る（行の追加・削除は誤字修正ではない）。
+
+### 書式
+
+独立ファイル方式は documentation-standards スキルの MADR テンプレートに従う（`skills/global/documentation-standards/SKILL.md` の「ADR」セクション参照）。
+
+documentation-standards スキルが無い導入先では、この規則が同スキルを参照する箇所（配置先・テンプレート・採番・ステータス値）を次で読み替える。「既存の別配置」は、そのリポジトリが `knowledge/adr/` の外ですでに ADR を置いているディレクトリ（`docs/adr/` など）を指す。ファイル名は `NNNN-<kebab-case-title>.md`（`NNNN` は配置先の中の最大値 +1 の 4 桁連番、`<kebab-case-title>` は英語）。章は `## ステータス`・`## 背景と課題`・`## 意思決定の要因`・`## 検討した選択肢`・`## 決定内容`（その下に `### 結果（Consequences）`）・`## 選択肢の評価（Pros and Cons）`・`## 関連リンク` の順とし、既存の ADR があれば倣う。`## ステータス` 節は `<値> — YYYY-MM-DD` で書き、値は `Proposed`・`Accepted`・`Deprecated`・`Superseded by NNNN-<kebab-case-title>`・`Partially superseded by NNNN-<kebab-case-title>`（有効な部分と失効した部分を書く）から選ぶ（hve-local で独自のステータス語を定めていればその語）。配置先の一覧（`knowledge/adr/README.md` など）があれば行を足す。
+
+インライン方式は 1 エントリを見出し `### <ID>: 要約 (YYYY-MM-DD) — ステータス` と、その下の `####` の節で書き、`## 決定ログ` 節の末尾に追記する。節と MADR の章の対応:
+
+| インライン方式の節 | MADR の章 |
+|---|---|
+| 見出しのステータス、`#### ステータス`（任意） | ステータス |
+| `#### コンテキスト` | 背景と課題・意思決定の要因 |
+| `#### 決定` | 決定内容 |
+| `#### 理由` | 決定内容（採用理由） |
+| `#### 却下した代替案` | 検討した選択肢・選択肢の評価 |
+| `#### 影響` | 結果（Consequences） |
+
+- 新しいエントリはコンテキスト・決定・理由・影響を書き、代替案を検討したときは却下した代替案も書く（implement-flow Step 3 はこの節を読む）
+- 表にない節（関連・再現方法など）を足してよい
+- この規則より前に書かれたエントリには遡って適用しない（追記のみなので直せない）
+
+### ID とステータス語
+
+- ID: 独立ファイル方式は documentation-standards の採番（4 桁連番）に従う。インライン方式の既定は `ADR NNNN`（リポジトリ全体の 4 桁連番。次の番号は `git grep -h '^### ADR ' -- knowledge/` で既存の最大値を確かめて +1）で、導入先は hve-local で別の形式と採番（issue 番号など）を宣言してよい
+- ステータス語: 既定は documentation-standards のステータス値。導入先は方式を問わず、hve-local で独自の語を定めてよい。ステータス値に対応する語は、その対応も書く
 
 ### 機械検査
 
-`scripts/check-decision-log-immutability.py` が既存エントリの改変・削除を検出する。
-pre-push hook と CI で自動実行される。
+`check-decision-log.py`（setup.sh が `.claude/scripts/hve/` に配る。hve-playbook 自身では `hve-scripts/`）で検査する。方式は自動で判定し、両方式が混在していれば両方を検査する。
+
+```bash
+python3 .claude/scripts/hve/check-decision-log.py                       # merge-base と作業ツリーを比べる
+python3 .claude/scripts/hve/check-decision-log.py --head <commit>       # pre-push・CI ではコミットを渡す
+```
+
+- 独立ファイル方式: ADR の削除・改名、ステータス節の外での行の追加・削除（行の対応が取れない変更）、一覧 README の行の削除は error。ステータス節の外の同じ行の中の差し替え、ステータス節の中の値以外の追加・削除、README のステータス列以外の変更、README と ADR のステータスの食い違い、ステータス見出しの増減、`knowledge/adr/` 配下のサブディレクトリや `.md` 以外のファイルは警告（誤字修正かどうかは人が確かめる）
+- 独立ファイル方式の番号の重複: ファイル名の先頭の 4 桁連番が同じ ADR が複数あれば error。その番号のファイルがすべて base にあったときは警告。並行ブランチ間の重複は、PR の CI で main との merge commit を `--head` に渡したときだけ出る（ブランチ単体・pre-push では出ない）
+- インライン方式: `## 決定ログ` 節が base の節の末尾への追記になっていなければ error（改変・削除・途中への挿入・節や文書の削除）。`## 決定ログ` 節を複数持つ文書は、この PR で生じたものは error、base からあるものは警告
+- ディレクトリの改名に伴う決定ログ内のパスの書き換えは、パスとして書かれた部分だけ許す。`/` を含むパス（`docs/original-docs`）はそのまま、ディレクトリ名 1 つ（`docs`）は直後に `/` が続くとき（`docs/x.md`、`../docs/x.md`）だけ置き換えてよい。地の文に書いた旧いディレクトリ名（「docs に置く」など）は書き換えない。新しい名前で述べ直すときは新しいエントリを足す
+- merge-base が取れない（ref が無い・shallow clone）・git が失敗したときは exit 2。CI では全履歴を取得する
+- `--warn-only` で違反があっても exit 0 にできる
+- この検査の目的は誤操作の検出で、改ざんの防御ではない（knowledge-maturity の「検査スクリプト」参照）
+
+スクリプトが使えないときは、merge-base 基準（3 ドット）の diff で、変更のあった決定ログのファイルを並べ、1 ファイルずつ hunk を確かめる:
+
+```bash
+# 独立ファイル方式
+git -c core.quotePath=false diff --no-renames --text --name-only origin/main...HEAD -- knowledge/adr/
+# インライン方式
+git -c core.quotePath=false diff --no-renames --text --name-only origin/main...HEAD -- knowledge/
+
+# 出たファイルごとに hunk を開く
+git diff --text origin/main...HEAD -- "<file>"
+```
+
+- 削除・変更された行（`-` 行）が「書き換えてよい範囲」に収まるかを人が判定する。インライン方式は `## 決定ログ` 節の中の `-` 行が違反
+- 既存エントリへの行の挿入（インライン方式の既存エントリへの追記、エントリ間への挿入、独立ファイル方式の旧 ADR のステータス節以外への追記）は `+` 行にしか出ないので、hunk の位置も確かめる
+- 2 ドット（`origin/main..HEAD`）は使わない。作業ブランチを切ったあとに main へ入った決定が、削除行として出る
+- `--no-renames` はファイル名の付け替え（採番の付け替え）を削除と追加として出すため、`--text` は `.gitattributes` でバイナリ扱いにされても中身を出すため、`core.quotePath=false` は日本語などのファイル名を引用符・エスケープなしで出し、そのまま次のコマンドに渡せるようにするために付ける
+- これらの手のコマンドを pre-push hook や CI に組み込むときは、出力を表示して人が確かめる（出力の有無だけで fail にすると、正規の supersede でも落ちる）。コマンド自体の失敗（merge-base が取れないなど、終了コード 0 以外）は fail にする
 
 ## fan-out ステップの制約
 

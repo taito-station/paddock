@@ -15,8 +15,6 @@ HVE プロジェクトでのコード/ドキュメント探索ツールの利用
    - deferred tool なら ToolSearch で読み込んでから使う。`workspaceSymbol` も対象言語の任意のファイルを `filePath` に渡す
 4. **grep / find**: cq/mdq/LSP が利用できない場合のフォールバック。`grep` で対象を絞ってから `Read` する（無計画な全文検索・全読みはしない）
 
-paddock では同じ検索を `scripts/cq search --q "..."` / `scripts/mdq search --q "..."` で行う（ルート `CLAUDE.md` の探索規律が正・paddock 固有）。
-
 ## 利用判断
 
 - cq/mdq がインストール済みかは `python3 -m cq --help` / `python3 -m mdq --help` で確認

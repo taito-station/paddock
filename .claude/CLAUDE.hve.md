@@ -14,6 +14,13 @@ ARD (要件定義) → AAS (アーキテクチャ設計) → AAD-WEB (Web 詳細
 
 各ワークフローは `/hve-ard`, `/hve-aas`, `/hve-aad-web` スキルで順次実行する。
 
+補助スキル:
+
+- `/hve-akm` — knowledge/ のメンテナンス（stale 検出・蒸留・整合性レビュー・カバレッジ分析）
+- `/hve-implement` — implement-flow（`.claude/rules/hve/implement-flow.md`）に沿った実装
+- `/hve-qa` — 設計タスクの QA 質問票の生成
+- `/hve-review` — 成果物の敵対的レビュー
+
 ## 出力ディレクトリ構造
 
 ```
@@ -40,6 +47,9 @@ docs/
 ├── business/                   # 事業分析
 │   └── <BIZ-ID>-analysis.md
 └── business-requirement.md     # 事業要件書
+knowledge/                      # ドメイン知識・ADR（qa/ + docs-original/ から合成）
+qa/                             # 質問票・未回答・確認中
+docs-original/                  # ユーザー提供の原本
 work/                           # 一時作業ファイル（成果物に含めない）
 ```
 
