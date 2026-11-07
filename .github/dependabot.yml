@@ -8,6 +8,8 @@
 #
 # PR 洪水抑制のため groups（minor/patch をまとめる）と open-pull-requests-limit を設定。
 # major 更新は個別 PR にして破壊的変更を見落とさないようにする。
+# 全 entry に cooldown（公開から 7 日たった版だけを提案する・#817）を入れ、乗っ取られたメンテナが出した公開直後の版を
+# 取り下げられるまで遅らせる。守るのは version updates だけ（security updates と、dependabot の監視外で入るものは対象外）。
 version: 2
 
 updates:
@@ -27,6 +29,8 @@ updates:
         update-types:
           - minor
           - patch
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 5
     labels:
       - dependencies
@@ -47,6 +51,8 @@ updates:
         update-types:
           - minor
           - patch
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 5
     labels:
       - dependencies
@@ -63,6 +69,8 @@ updates:
       time: "09:00"
       timezone: Asia/Tokyo
     # actions は少数かつ major ごとに動作が変わりうるため個別 PR のまま。grouping は見送り。
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 5
     labels:
       - dependencies
@@ -93,6 +101,8 @@ updates:
     # scikit-learn は scripts/harness/requirements.txt（棄却済み路線・更新しない）にしか無く、更新 PR は必ず不要になる。
     ignore:
       - dependency-name: scikit-learn
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 5
     labels:
       - dependencies

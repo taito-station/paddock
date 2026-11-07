@@ -9,10 +9,11 @@ sources:
   - qa/QA-evil-merge-615.md
   - qa/QA-fullwidth-after-var-636.md
   - qa/QA-pip-hash-pin-728.md
+  - qa/QA-dependabot-cooldown-817.md
   - .github/workflows/ci.yml
   - .github/workflows/audit.yml
   - .github/dependabot.yml
-distilled_from_sha: "0b58104b"
+distilled_from_sha: "4bb4a8eb"
 updated: "2026-11-07"
 ---
 
@@ -85,7 +86,8 @@ D21（CI/CD・ビルド・リリース・供給網管理）の充足ギャップ
   ハッシュを取った時点と違うファイルが選ばれたら install で落ちる（PyPI は同じファイル名の再アップロードを禁じるので、
   同じファイルの中身の差し替えは起きない）。ハッシュの無い行があっても落ちる。版とハッシュの更新は dependabot（pip）が
   担う。手で版を変えるときのハッシュの取り直し方は、requirements-ci.txt の先頭コメントにある。
-  ハッシュは乗っ取られたメンテナが出した新しい版は防がない。dependabot の PR は版の変更を見てからマージする。
+  ハッシュは乗っ取られたメンテナが出した新しい版は防がない。dependabot の PR は版の変更を見てからマージする
+  （公開直後の版は cooldown で提案を遅らせる。下の「dependabot は公開から 7 日たった版だけを提案する」）。
   正当な wheel の追加でも、ランナーの Python が上がって未登録のタグが選ばれると落ちる（requirements-ci.txt の
   先頭コメントの手順で、PyPI の upload_time を見て正当な追加か確かめてから取り直す）。
 - **pip のキャッシュは入れない**（#728）: PyPI 障害時にこのステップは落ちうる。キャッシュは miss すれば
@@ -121,6 +123,21 @@ scripts を動かす `npm-audit` には渡さない）。ただし `cargo-audit`
 schedule 起動では audit-check が Issues API で報告しようとして権限不足で落ちている（2026-08-31 以降毎週。既存の不具合で、
 audit-check の置き換えと合わせて別 Issue で扱う）。`docker-build` の「Detect relevant changes」の `git fetch` は、公開リポジトリなので
 認証無しで通る（リポジトリを private にするなら、この fetch に認証を足す）。
+
+### dependabot は公開から 7 日たった版だけを提案する（#817）
+
+`.github/dependabot.yml` の 4 entry（cargo・npm・github-actions・pip）すべてに `cooldown: default-days: 7` を入れている。
+乗っ取られたメンテナが出した悪性の版は、ハッシュ（#728）でも SHA ピンでも防げず、dependabot は公開直後の版を
+正しいハッシュ・SHA 付きの更新 PR にしてくる。公開から 7 日待つことで、悪性の版が見つかって取り下げられるまでの時間を稼ぐ。
+
+- cooldown を書かなくても、version updates には既定で 3 日の cooldown がかかる。7 日はそれを延ばしたもの。
+- cooldown は公開日から数え、schedule は毎週月曜なので、更新が提案されるのはおおむね公開から 7 日以上 14 日未満になる。
+- security updates には効かない（GitHub Docs）。脆弱性の修正 PR は遅れない（security updates は現在は無効）。裏返すと、
+  security updates を有効にしたら、その PR は cooldown を通らず公開直後の版を含みうるので、版の変更を見てからマージする。
+- 守るのは dependabot.yml の 4 エコシステムの version updates だけ。dependabot の監視外で入るもの（`audit.yml` の
+  `cargo install cargo-audit`・toolchain など）と、人が手で上げる版は対象外。
+- github-actions は semver 別の日数（`semver-*-days`）に対応していないので、4 entry とも `default-days` だけで一律にした。
+- 元に戻すときは `cooldown` のブロックを消す（既定の 3 日に戻る）。
 
 ### `adr` ジョブは回帰テストを本番検査より先に走らせる
 
@@ -1347,3 +1364,51 @@ pip は dependabot の監視外だった（#719 のレビューで「ハッシ�
   PR は閉じる。
 - 既存の entry と同じく `labels` を書いたが、`dependencies` などのラベルはリポジトリに無く、既存の dependabot の PR にも
   付いていない（既存からの状態）。
+
+### #817: dependabot の全エコシステムに cooldown を入れ、公開から 7 日たった版だけを提案させる (2026-11-07) — 採用
+
+#### コンテキスト
+
+#728 で CI の pip 依存をハッシュ付きの完全ピンにしたが、ハッシュは乗っ取られたメンテナが出した新しい版を防がない。
+dependabot は公開直後の版も、そのときの正しいハッシュ付きで更新 PR にしてくる。minor/patch はグループで 1 本にまとまるので、
+人が差分を見ても気づきにくい。#728 は `cooldown` を pip だけに入れると既存の cargo・npm・github-actions と方針がずれるとして、
+全エコシステムにそろえる対応をこの Issue に回した（#728 の「却下した代替案」）。
+着手時に公式 Docs で確かめた点とユーザーの回答は [qa/QA-dependabot-cooldown-817.md](../qa/QA-dependabot-cooldown-817.md)。
+
+#### 決定
+
+- `.github/dependabot.yml` の 4 entry（cargo・npm・github-actions・pip）すべてに `cooldown: default-days: 7` を入れる。
+- semver 別の日数（`semver-*-days`）や `include`・`exclude` は使わない。
+
+#### 理由
+
+- cooldown を書かなくても version updates には既定で 3 日の cooldown がかかる（GitHub Docs）。悪性の版が見つかって
+  取り下げられるまでの時間を、3 日より長く稼ぐ。
+- github-actions は semver 別の日数に対応していないので、`default-days` だけにすれば 4 entry が同じ書き方になる。
+
+#### 却下した代替案
+
+- **7 日に加えて major だけ 14 日**: major はもともと個別 PR になり、人が破壊的変更を見る。上乗せしても効果が小さく、
+  github-actions だけ書き方が変わる。
+- **一律 14 日**: 正当なバグ修正の版の到着がさらに 1 週遅れる割に、7 日を超えて延ばす根拠が無い。
+- **既定の 3 日を明示するだけ**: 書き方はそろうが、攻撃に対して稼げる時間が増えない。
+
+#### 影響
+
+- cooldown は公開日から数え、schedule は毎週月曜なので、更新が提案されるのはおおむね公開から 7 日以上 14 日未満になる
+  （既定の 3 日では 3 日以上 10 日未満。週次の実行が指定の時刻ちょうどに走る保証は無い）。正当なバグ修正の版も同じだけ遅れる。
+- security updates には効かない（GitHub Docs）。#817 の起票時に「未確認」としていた点で、Docs で解消した。security updates は
+  今は無効なので、脆弱性の修正は Dependabot alerts で知って手で上げる。将来 security updates を有効にしても、cooldown で
+  脆弱性の修正 PR は遅れない。裏返すと、その PR は cooldown を通らず公開直後の版を含みうるので、有効にしたら版の変更を
+  見てからマージする。
+- #728 の「影響」に書いた残るリスク（ハッシュは新しい版の悪性を防がない）は、dependabot が上げる直接の依存については、
+  公開から 7 日以内に見つかって取り下げられる悪性の版が提案に乗らなくなる。7 日を過ぎても見つからない版、人が手で上げる版、
+  dependabot の監視外で入るもの（`audit.yml` の `cargo install cargo-audit`・toolchain など）は防げないので、dependabot の PR は
+  引き続き版の変更を見てからマージする。
+- Docs は「新しい版が cooldown 中の依存は更新をスキップする」と依存ごとの扱いを書くだけで、次の 3 点は明記していない（未確認）。
+  マージ後の初回の dependabot の PR で観測する。
+  - groups（minor/patch のグループ PR）の中での扱い（cooldown 中の依存だけがグループから外れるのか）
+  - cooldown を過ぎた旧い版を代わりに提案するか（7 日より短い間隔で版を出し続ける依存が提案され続けないことがあるか）
+  - cargo・npm で lockfile を作り直すときに一緒に動く推移的な依存に cooldown が効くか
+- 設定のキーの誤りはマージ後に dependabot の画面でしか分からない。マージ後に Insights → Dependency graph → Dependabot で
+  エラーが無いことを確かめる。元に戻すときは `cooldown` のブロックを消す（既定の 3 日に戻る）。
