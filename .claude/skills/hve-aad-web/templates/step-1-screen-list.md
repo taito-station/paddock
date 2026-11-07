@@ -22,7 +22,7 @@
 
 1. `docs/catalog/app-catalog.md` から APP-ID の一覧を列挙する。
 2. 各 APP-ID に対して Agent tool（`subagent_type: hve-architect`）でサブエージェントを並列起動する。このテンプレートの内容をプロンプトとして渡し、`{key}` を対象 APP-ID に置換する。
-3. 各 fan-out 子は **担当 APP-ID 1 つ分のみ** を扱い、他 APP の画面行を絶対に含めない（並列実行での衝突防止）。
+3. 各 fan-out 子は **担当 APP-ID 1 つ分のみ** を扱い、他 APP の画面行を含めない（並列実行での衝突防止）。
 
 ## fan-out 子の設計ルール
 

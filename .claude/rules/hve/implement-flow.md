@@ -6,6 +6,7 @@ description: 実装フロー規約 — Plan・Knowledge 検索・テスト設計
 
 実装タスク（feat / fix / refactor / 改修）に適用するゲートベースのフロー。
 コードを書く前に Plan・Knowledge 検索・棄却チェック・ギャップ分析・テスト設計を義務化し、実装後に Knowledge 同期を行う。
+このフローを順に実行する手順は hve-implement skill（`/hve-implement`。resolve-issue からも呼ばれる）にある。
 
 ## 適用条件
 
@@ -73,6 +74,7 @@ Step 8: PR 作成
 
 - Issue がある場合は `gh issue view <N>` で本文・コメントを確認する
 - Plan モードでタスクのスコープを把握する
+- Step 1〜4 は Plan モードのまま進め、Step 2〜4 の結果を計画の見出し「ゲートの確認結果」に書いてから承認を得る（ExitPlanMode は Step 4 の後に呼ぶ。resolve-issue 経由のときは、resolve-issue の Plan と承認に従う）。Plan モードで始めたときは、Step 0 のブランチ作成は承認の後に行う（コードを書く前に切ればよい）
 - 影響する領域・モジュール・データモデルを列挙する
 - Step 2 で検索すべきキーワード・領域を特定する
 
@@ -85,7 +87,6 @@ Step 8: PR 作成
 - Step 1 で特定した各領域について知識ベースを検索する
   - ドキュメント検索: 確定知・仕様・決定ログ
     - HVE の置き場所: `knowledge/`（ドメイン知識・ADR）、`docs/`（仕様・カタログ）
-    - paddock の置き場所（paddock 固有）: 確定知は `knowledge/` に一本化（ADR 0092）。決定は各 knowledge 末尾の `## 決定ログ` 節（独立した ADR ファイルは無い・#652）。`docs/docs-generated/` は蒸留対象外
   - コード検索: 関連するコード構造・依存関係
 - 関連する知識を網羅する（見落としは Step 3 以降の手戻りになる）
 - 検索ツールはプロジェクトの探索規律に従う
@@ -148,11 +149,10 @@ Step 8: PR 作成
 
 - 実装で確定知の前提が変わったら同じ PR で Knowledge を更新する
   - HVE の Knowledge は `knowledge/` および `docs/`
-  - paddock の確定知の置き場所は `knowledge/` に一本化（ADR 0092・paddock 固有）。運用手順・買い方ルールを変えたらルート `CLAUDE.md`（買い方は `knowledge/glossary.md` も）と該当 skill も同じ PR で直す
 - 設計判断を伴う変更は決定ログに同じ PR で追記する
-  - paddock の決定ログは各 `knowledge/` 文書の末尾の `## 決定ログ` 節に append する（独立した ADR ファイルは作らない・#652）
-- プロジェクト固有の検証ツール: `scripts/bump-distilled-sha.py --all-stale --dry-run`（stale 0 件確認）、`scripts/check-doc-classes.py`、`scripts/check-decision-log-immutability.py`
+  - HVE の決定ログは artifact-management の「決定ログの不変性」で定めた置き場所（既定は `knowledge/adr/`。インライン方式を宣言したプロジェクトは各 knowledge の `## 決定ログ` 節）
 - Knowledge 更新で矛盾が生じた場合 → STOP（Conflict 宣言、人間判断）
+- `.claude/rules/hve-local/implement-flow.md` にプロジェクト固有の検証コマンド（stale 検査など）が列挙されていれば、ここで実行する。失敗したら直してから Step 8 へ進む（直せなければ STOP）
 
 | 結果 | 次のステップ |
 |---|---|
@@ -162,6 +162,7 @@ Step 8: PR 作成
 ### Step 8: PR 作成
 
 - create-pr スキルを使って PR を作成する
+  - create-pr スキルが無ければ、変更をコミットし、作業ブランチを push して `gh pr create` で PR を作る（本文は導入先のブランチ運用規約の雛形があればそれに従う）
 
 | 結果 | 次のステップ |
 |---|---|

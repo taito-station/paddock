@@ -95,7 +95,7 @@ Step 1.2: 事業分析統合 ─────────────────
 - 目的: Step 1 で列挙した各事業候補について個別に深掘り分析を行う
 - 手順:
   1. `docs/company-business-recommendation.md` を読み、`BIZ-NN` の一覧を取得する
-  2. 各 `BIZ-NN` について、`templates/step-1.1-business-deepdive.md` の内容を指示として与えた Agent tool のサブエージェントを **並列起動** する（1 事業候補 = 1 サブエージェント）
+  2. 各 `BIZ-NN` について、`templates/step-1.1-business-deepdive.md` の内容を指示として与えた Agent tool（`subagent_type: hve-analyst`）のサブエージェントを **並列起動** する（1 事業候補 = 1 サブエージェント）
   3. 各サブエージェントには対象の `{key}`（`BIZ-NN`）のみを与え、他の候補の分析・評価はさせない
 - 出力: `docs/business/{BIZ-NN}-analysis.md`（候補ごとに 1 ファイル）
 
@@ -133,7 +133,7 @@ Step 1.2: 事業分析統合 ─────────────────
 - 目的: Step 3.1 の各ユースケースについて詳細仕様を生成する
 - 手順:
   1. `docs/catalog/use-case-skeleton.md` を読み、`UC-*` の一覧を取得する
-  2. 各 `UC-*` について、`templates/step-3.2-usecase-detail.md` の内容を指示として与えた Agent tool のサブエージェントを **並列起動** する（1 ユースケース = 1 サブエージェント）
+  2. 各 `UC-*` について、`templates/step-3.2-usecase-detail.md` の内容を指示として与えた Agent tool（`subagent_type: hve-analyst`）のサブエージェントを **並列起動** する（1 ユースケース = 1 サブエージェント）
   3. 各サブエージェントには対象の `{key}`（`UC-*`）のみを与え、他のユースケースには言及させない
 - 出力: `docs/usecase/{UC-ID}-detail.md`（ユースケースごとに 1 ファイル）
 

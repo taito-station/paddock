@@ -28,6 +28,9 @@ log('ARD（要件定義）を開始します')
 const ardParams = args || {}
 const companyName = ardParams.company_name || 'TBD'
 const targetBusiness = ardParams.target_business || ''
+const attachedDocs = Array.isArray(ardParams.attached_docs)
+  ? ardParams.attached_docs.join(', ')
+  : (ardParams.attached_docs || '')
 
 const ardResult = await agent(
   `HVE ARD ワークフローを実行してください。
@@ -40,9 +43,10 @@ const ardResult = await agent(
 - target_region: ${ardParams.target_region || 'TBD'}
 - analysis_purpose: ${ardParams.analysis_purpose || 'TBD'}
 - include_kpi_okr: ${ardParams.include_kpi_okr || false}
+- attached_docs: ${attachedDocs || '未指定'}
 
 スキルファイルを Read して手順に従ってください:
-1. Read skills/hve-ard/SKILL.md でワークフロー全体像を確認
+1. Read .claude/skills/hve-ard/SKILL.md でワークフロー全体像を確認
 2. 各ステップの templates/ を Read してプロンプトを確認
 3. DAG の依存関係に従って逐次実行（fan-out ステップは Agent tool で並列化）
 4. 全ステップ完了後、作成したファイル一覧を報告`,
@@ -58,7 +62,7 @@ const ardCheck = await agent(
 - docs/architectural-requirements-app-*.md（最低 1 ファイル）
 
 各ファイルの存在を ls で確認し、結果を報告してください。`,
-  { label: 'ARD:verify', phase: 'ARD', schema: ARTIFACT_CHECK_SCHEMA }
+  { label: 'ARD:verify', phase: 'ARD', schema: ARTIFACT_CHECK_SCHEMA, effort: 'low' }
 )
 
 if (!ardCheck.exists) {
@@ -79,7 +83,7 @@ const aasResult = await agent(
 - docs/architectural-requirements-app-*.md
 
 スキルファイルを Read して手順に従ってください:
-1. Read skills/hve-aas/SKILL.md でワークフロー全体像を確認
+1. Read .claude/skills/hve-aas/SKILL.md でワークフロー全体像を確認
 2. 各ステップの templates/ を Read してプロンプトを確認
 3. Step 1 → 2.1 → 2.2 → 3.1 → 3.2 → 4 → 5 → 6 → 7 → 8 の順で逐次実行
 4. 全ステップ完了後、作成したファイル一覧を報告`,
@@ -99,7 +103,7 @@ const aasCheck = await agent(
 - docs/catalog/persona-catalog.md
 
 各ファイルの存在を ls で確認し、結果を報告してください。`,
-  { label: 'AAS:verify', phase: 'AAS', schema: ARTIFACT_CHECK_SCHEMA }
+  { label: 'AAS:verify', phase: 'AAS', schema: ARTIFACT_CHECK_SCHEMA, effort: 'low' }
 )
 
 if (!aasCheck.exists) {
@@ -117,7 +121,7 @@ const aadResult = await agent(
 前提: AAS が完了済み。docs/catalog/ に各種カタログが存在します。
 
 スキルファイルを Read して手順に従ってください:
-1. Read skills/hve-aad-web/SKILL.md でワークフロー全体像を確認
+1. Read .claude/skills/hve-aad-web/SKILL.md でワークフロー全体像を確認
 2. 各ステップの templates/ を Read してプロンプトを確認
 3. DAG に従って実行（fan-out ステップは Agent tool で並列化）
 4. Step 3（一貫性レビュー）は全 Step 2.x 完了後に実行
@@ -136,7 +140,7 @@ const aadCheck = await agent(
 - docs/catalog/screen-service-consistency-report.md
 
 各ディレクトリの ls で確認し、結果を報告してください。`,
-  { label: 'AAD-WEB:verify', phase: 'AAD-WEB', schema: ARTIFACT_CHECK_SCHEMA }
+  { label: 'AAD-WEB:verify', phase: 'AAD-WEB', schema: ARTIFACT_CHECK_SCHEMA, effort: 'low' }
 )
 
 if (!aadCheck.exists) {
