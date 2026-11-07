@@ -51,7 +51,7 @@ pub enum Command {
         race_id: String,
         /// 市場EV視点（軸/相手の順位付け）に使う市場ブレンドのモデル重み α [0,1]（#72・#272 ③④）。
         /// 過去データ視点は常に純モデル（α 非依存）で表示し、α はこの視点には効かない。
-        /// 未指定時は本番既定 α=0.2（session/predict-watch と対称）。
+        /// 未指定時は本番既定（`RECOMMENDED_MARKET_BLEND_ALPHA`＝α=0・市場そのもの。session/predict-watch と対称）。
         #[arg(long)]
         blend_alpha: Option<f64>,
         /// 当日の馬場状態（良/稍重/重/不良。稍/不 の略記も可）。指定すると各馬の
@@ -67,7 +67,8 @@ pub enum Command {
         shrinkage_m: Option<f64>,
         /// win_prob 冪変換のγ（#282 / #246）。本番既定 γ=1.25（`EstimationConfig::production()`）を
         /// 上書きする。`win'_i ∝ win_i^γ` で再正規化する。未指定は本番既定 γ=1.25。
-        /// 有限正数のみ（γ<1 は逆方向）。
+        /// 有限正数のみ（γ<1 は逆方向）。α=0 で出走馬に有効な単勝があるときは市場視点（blended）に
+        /// 掛からず、過去データ視点（pure）とオッズの無いレースだけに効く（#810）。
         #[arg(long)]
         win_power: Option<f64>,
     },
@@ -84,7 +85,7 @@ pub enum Command {
         /// 市場オッズ(単勝)ブレンドのモデル重み α [0,1]。未指定でモデルのみ、
         /// 指定すると当時オッズの implied 確率と (1-α) でブレンドする（#72）。
         /// 注意: α<1.0 の指定は harville λ の既定も採用値（0.90/0.77）へ連動して切り替える
-        /// （#703。採用 λ は production 等価 blend での fit 値）。**α を掃引して比較するときは
+        /// （#703。採用 λ は α=0.2・γ=1.25 の blend での fit 値で、#810 以降の本番 α=0〈市場そのもの〉とは系統が違う）。**α を掃引して比較するときは
         /// `--harville-lambda2/-lambda3` を明示固定**しないと α と λ の効果が混線する。
         /// `--log-pool-a/-b` とは相互排他。
         #[arg(long)]
@@ -141,6 +142,8 @@ pub enum Command {
         /// win_prob 冪変換のγ（#246）。`win'_i ∝ win_i^γ` で再正規化し穴馬の 1 着過大評価を縮約する。
         /// 未指定は no-op（現行挙動）。スイープ（1.1/1.25/1.5/2.0 等。γ<1 は逆方向）で
         /// 単勝校正・人気帯校正・回収を比較する（ADR 0042）。
+        /// `--blend-alpha 0` で出走馬に有効な単勝があるレースでは blended（`model_*`）に掛からず、
+        /// 純モデル系統とオッズの無いレースだけに効く（#810）。blended への γ の効果を測るなら α>0 を指定する。
         #[arg(long)]
         win_power: Option<f64>,
         /// place/show スコア冪変換のγ（#283 / #258 Phase 2）。正規化前に `score^γ` でシャープ化し、
@@ -201,7 +204,8 @@ pub enum Command {
         /// 開催日（YYYY-MM-DD）。
         #[arg(long)]
         date: String,
-        /// 市場ブレンドの α（モデル重み）。省略時は本番値（`RECOMMENDED_MARKET_BLEND_ALPHA`）。
+        /// 市場ブレンドの α（モデル重み）。省略時は本番値（`RECOMMENDED_MARKET_BLEND_ALPHA`＝α=0）。
+        /// #810 より前の開催日（本番 α=0.2）を当時のとおりに再構成するときは `--blend-alpha 0.2` を明示する。
         #[arg(long)]
         blend_alpha: Option<f64>,
         /// 1 レースの予算（円）。

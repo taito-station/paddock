@@ -8,8 +8,10 @@ tags: [D22, D19]
 sources:
   - docs-original/218-live-alpha.md
   - qa/QA-live-alpha-218.md
-distilled_from_sha: "b634b730"
-updated: "2026-11-04"
+  - docs-original/810-market-alpha-zero.md
+  - qa/QA-market-alpha-zero-810.md
+distilled_from_sha: "e5e39860"
+updated: "2026-11-05"
 ---
 
 # 着順確率推定モデル仕様書
@@ -244,7 +246,10 @@ place/show_i   = 累積 max で win ≤ place ≤ show を再是正（v1 は win
   - **backtest**: 当時の `race_odds`（`as_of = レース日`, リーク防止）を優先し、無ければ PDF 確定成績の
     単勝 `results.odds`（クローズ前後の確定オッズ。結果はリークしない）で代替する。過去レースは
     `race_odds` スナップショットが無いことが多いため、この代替で評価可能になる。
-- **採用 α（本番既定）= 0.2**（ADR 0034 で 4891R 計測後に確定）。
+- **採用 α（本番既定）= 0**（#810。win は市場の含意確率そのもの）。確定オッズ（#284）でも朝〜直前の
+  オッズ（#218）でも α=0.2 が市場を上回る証拠が無く、#218 の事前コミットに従って倒した。α=0 で市場を使った
+  ときはステップ 5 の冪変換を掛けない（下記）。以下は α=0.2 時代（ADR 0034〜#810）の経緯。
+- **旧採用 α = 0.2**（ADR 0034 で 4891R 計測後に確定）。
   初期 backtest（2026-03-01〜05-31, 144R, 市場 = `results.odds`）では α=0.3 が最良だったが、
   拡張バックテスト（2025-01-05〜2026-06-14, 4891R）で α が Brier/LogLoss に単調に効くことを
   確認し 0.2 に更新。詳細は ADR 0034。初期スイープ参考値:
@@ -260,7 +265,7 @@ place/show_i   = 累積 max で win ≤ place ≤ show を再是正（v1 は win
   初期スイープ（144R）では α=0.3 が最良。ただし確定オッズ使用の楽観値。
   α=0.2 はこの初期スイープの対象外（範囲 0.0〜1.0 の粗い刻みで探索）であり、
   拡張バックテスト（ADR 0034）で独立に計測して採用を確定した。
-  拡張バックテスト（4891R / ADR 0034）で α が Brier/LogLoss に単調に効くことを確認し **現行採用値 α=0.2 に更新**（α=0.2 は 144R 初期スイープ対象外）。
+  拡張バックテスト（4891R / ADR 0034）で α が Brier/LogLoss に単調に効くことを確認し **α=0.2 に更新**（α=0.2 は 144R 初期スイープ対象外。#810 で α=0 に変更）。
 
   > 注 1: このスイープは市場に**確定（クローズ）オッズ**を使うため、live 予想（事前スナップショット
   > `race_odds` を使用）より楽観的な上限値。拡張バックテストでは live オッズで α を再評価し α=0.2 に
@@ -286,6 +291,10 @@ place/show_i = 累積 max で win ≤ place ≤ show を再是正
 ```
 
 - `γ` は `EstimationConfig.win_power: Option<f64>`。`None` / 非有限 / `≤0` / ちょうど `1.0`（厳密一致近傍）は no-op。
+- **α=0 で市場を使ったブレンドには掛けない**（#810・`win_power_after_blend`）。γ はモデル由来の win の校正なので、
+  win が市場の含意確率そのもの（線形ブレンドの α ≤ 0 で、出走馬の 1 頭以上に有効な単勝オッズがある）のときは
+  飛ばす。オッズが無い・出走馬と重ならない等でブレンドが no-op のときと、純モデル（pure）には従来どおり掛ける。
+  predict（`estimate_with_market`）と backtest が同じ関数で判定する。
 - 連系・着順 EV（Harville/simulate）は win_prob から導くため、ここでの校正が馬連・馬単・三連複の
   EV までそのまま伝播する（#246(B) の馬単選択と連動）。
 - 採用値は backtest 検証で決める（ADR 0042）。CLI: `analyze backtest --win-power <γ>`
@@ -302,7 +311,7 @@ place/show_i = 累積 max で win ≤ place ≤ show を再是正
 
 CLI は `analyze backtest --log-pool-a A --log-pool-b B`（対指定・`--blend-alpha` と相互排他）。
 (a,b) の推定は `scripts/predict-check/blend_fit.py`（fit/eval 窓プロトコル・win_power 換算値も
-出力）。**本番は Linear α=0.2 のまま**——対数プールへの置換は eval 窓ゲート不通過で棄却済み
+出力）。**本番は Linear のまま**（α は #810 で 0）——対数プールへの置換は eval 窓ゲート不通過で棄却済み
 （最適モデル指数 ≈ 0。決定ログ #703〔対数プール棄却〕参照）。
 
 ### 独立確率の評価（#719・研究用）
@@ -311,7 +320,7 @@ CLI は `analyze backtest --log-pool-a A --log-pool-b B`（対指定・`--blend-
 として、`scripts/predict-check/prob_ledger.py` で版ごとに評価する。win から割引 Harville で馬連・連対・
 ワイド・3連複の確率を作り、**馬連 NLL と連対 log-loss** を主指標に、dev/test 窓で ledger
 （`docs-original/719-prob-ledger.md`）に記録する。基準は着順補正後（#730）の v1 baseline で、test 窓の馬連 NLL 4.207・連対 0.386（v0〜v0.2 は補正前のラベルで測った値なので、版の比較には使わない）。
-本番の確率（ステップ 4 の α=0.2 ブレンド）は変えない（#722 で独立確率にエッジなしと判定）。定義・窓・経緯は
+本番の確率（ステップ 4 の線形ブレンド。#722 当時は α=0.2）は変えない（#722 で独立確率にエッジなしと判定）。定義・窓・経緯は
 `backtest.md`「評価プロトコル」と `learned-model-harness.md` の決定ログ「#719」。
 
 **独立確率の現行最良は #720 の割引 PL top-k**（`scripts/harness/train_pl_topk.py`・k=3・λ 学習、特徴量は `results` のみ）。
@@ -455,9 +464,9 @@ knowledge 側に置く**（規約は [knowledge/README.md](README.md) の「REQ-
 <!-- REQ:begin D22 -->
 | REQ-ID | 要件 | 検証手段 | 出典 | status |
 |---|---|---|---|---|
-| REQ-D22-001 | 市場オッズ（単勝）ブレンドのモデル重みは α=0.2（`RECOMMENDED_MARKET_BLEND_ALPHA`）。市場オッズが無いレースはモデルのみへ自動フォールバックする。**#218（2026-11-03）で α=0 に倒すと決定済み・定数の変更は #810 で行う**（それまでの現行値が α=0.2） | `for a in 0.2 0.3 0.4; do paddock-analyze backtest --from 2025-01-05 --to 2026-06-14 --shrinkage-m 10 --win-power 1.25 --place-show-power 2.0 --impute-missing-factors --blend-alpha "$a"; done`（4891R）で**単勝 Brier / LogLoss が α 方向に単調で 0.2 が最良**であること。ADR 0034 は冪較正・impute 以前の測定なので**絶対値は一致せず順序関係で見る**。α=0.0（純市場）は掃引対象外——純市場との比較は ADR 0052 が扱う | ADR 0034 | Confirmed |
+| REQ-D22-001 | 市場オッズ（単勝）ブレンドのモデル重みは α=0（`RECOMMENDED_MARKET_BLEND_ALPHA`・#810）。win は市場の含意確率そのもので、win の冪変換 γ は掛けない。市場オッズが無い（ブレンドが no-op になる）レースはモデルのみ（γ 適用）へ自動フォールバックする | α の判定は model_eval の土俵で行う: α=0.2 の dump（`paddock-analyze backtest --from 2025-01-01 --to 2026-08-31 --blend-alpha 0.2 --shrinkage-m 10 --win-power 1.25 --place-show-power 2.0 --impute-missing-factors --dump-features <dump>`）に `python3 scripts/predict-check/live_alpha_eval.py <dump>` を当て、**朝の時点で α=0.2 が市場の「採用候補」にならないこと**（#218 実測: 382R・17 開催日で判定不能）。γ を飛ばす条件は `cargo test -p paddock-domain win_power_after_blend` と `cargo test -p paddock-use-case --test test_predict_race --test test_backtest alpha_zero` | 決定ログ #218 / #810（[docs-original/218-live-alpha.md](../docs-original/218-live-alpha.md)・[docs-original/810-market-alpha-zero.md](../docs-original/810-market-alpha-zero.md)） | Confirmed |
 | REQ-D22-002 | ベイズ縮約の擬似カウントは m=10（`RECOMMENDED_SHRINKAGE_M`）。backtest の既定は縮約 off なので production 再現には `--shrinkage-m 10` を明示する | ADR 0016 の m 掃引は **α を指定しない純モデル測定**（backtest の既定がブレンド無し。本番は当時すでに α=0.3）なので、α・冪較正・impute をすべて外して回す。off は `paddock-analyze backtest --from 2026-03-28 --to 2026-05-31`（**`--shrinkage-m off` とは書けない・フラグ自体を省く**）、残りは `for m in 5 10 20 50; do paddock-analyze backtest --from 2026-03-28 --to 2026-05-31 --shrinkage-m "$m"; done`（計 5 通り・144R）。**off 比で単勝 Brier / LogLoss が改善し m=10 が最良・m=50 は過縮約で劣化**すること（0016 実測: LogLoss 0.2718 → 0.2506・単勝的中 9.7 → 13.2%）。**α=0.2 を掛けると m 方向の差は消える**（ADR 0034 の 4891R で m=5/10/20 が Brier 0.0544・LogLoss 0.1974 と同値）ので、production 構成では「m を変えても悪化しない」ことの追認にしかならない | ADR 0016 / 0034 | Confirmed |
-| REQ-D22-003 | win_prob の冪変換は γ=1.25（`RECOMMENDED_WIN_POWER`）。γ≥1.5 は LogLoss / Brier 悪化と人気馬の過剰補正で採らない | `for g in 1.0 1.25 1.5 2.0; do paddock-analyze backtest --from 2025-01-01 --to 2026-06-30 --blend-alpha 0.2 --shrinkage-m 10 --place-show-power 2.0 --impute-missing-factors --win-power "$g"; done`（4891R）で単勝 LogLoss が 1.25 で最良であること（ADR 0042 実測 0.1974 → 0.1954。当時は impute 無しなので**絶対値は一致せず順序関係で見る**） | ADR 0042 | Confirmed |
+| REQ-D22-003 | win_prob の冪変換は γ=1.25（`RECOMMENDED_WIN_POWER`。α=0 で市場を使ったブレンドには掛けない・#810）。γ≥1.5 は LogLoss / Brier 悪化と人気馬の過剰補正で採らない | `for g in 1.0 1.25 1.5 2.0; do paddock-analyze backtest --from 2025-01-01 --to 2026-06-30 --blend-alpha 0.2 --shrinkage-m 10 --place-show-power 2.0 --impute-missing-factors --win-power "$g"; done`（4891R）で単勝 LogLoss が 1.25 で最良であること（ADR 0042 実測 0.1974 → 0.1954。当時は impute 無しなので**絶対値は一致せず順序関係で見る**） | ADR 0042 | Confirmed |
 | REQ-D22-004 | place/show の冪変換は γ=2.0（`RECOMMENDED_PLACE_SHOW_POWER`）。純校正の knee は γ=3.0 だが複勝買い目 ROI が net 改善しないため 2.0 を維持する | knee の観測は ADR 0051 の窓・グリッドで行う: `for g in 1.5 2.0 2.5 3.0 3.5; do paddock-analyze backtest --from 2025-01-05 --to 2026-06-14 --blend-alpha 0.2 --shrinkage-m 10 --win-power 1.25 --impute-missing-factors --place-show-power "$g"; done`。**γ=3.0 で純校正（place/show Brier・LogLoss）は最良になるが複勝買い目 ROI が γ=2.0 を上回らないこと**。ADR 0047 / 0051 とも impute 以前の測定なので順序関係で見る | ADR 0047（採用）/ 0051（knee 確認・2.0 維持） | Confirmed |
 | REQ-D22-005 | 近走トレンドは前走のみ（`trend_n = 1`）。N=2/3 は全指標が悪化する | ADR 0036 も**純モデル測定**（単勝的中 13.5% 水準・α 指定なし）なので `for n in 1 2 3; do paddock-analyze backtest --from 2026-03-01 --to 2026-05-31 --shrinkage-m 10 --trend-n "$n"; done`（893R）で N=2/3 が N=1 を上回らないこと。α=0.2 を掛けるとモデル側の差が希釈されて判定が出ない | ADR 0036 | Confirmed |
 | REQ-D22-006 | 時間減衰（recency）は無効（`recency: None`）。Brier / LogLoss が変わらず ROI も誤差範囲で、複雑性だけが増える | `for h in 30 60 90; do paddock-analyze backtest --from 2025-01-05 --to 2026-06-14 --blend-alpha 0.2 --shrinkage-m 10 --win-power 1.25 --place-show-power 2.0 --impute-missing-factors --recency-half-life "$h"; done` を無効時と比較し、**差が出ないこと**。**ADR 0034 の recency 表は α=0.3 固定・冪較正 impute 以前**なので数値は一致しない | ADR 0034 | Confirmed |
@@ -946,3 +955,51 @@ PDF オッズが載る。実例 2026-2-kokura-8-7R。eval 窓 9R・0.6% / fit �
   382R のうち 40R は朝のスナップショットが発走 40 分前以降（本番なら朝の選定が無い）だった（開示のみ・感度分析はしない）。
 - 再現: `python3 scripts/predict-check/live_alpha_eval.py <本番 5 フラグの dump>`（DB は SELECT のみ）。実測は
   `docs-original/218-live-alpha.md`。スナップショットが貯まれば同じスクリプトで測り直せる。
+
+### #810: 本番の市場ブレンドを α=0 にし、市場そのものには win の冪変換を掛けない (2026-11-05) — 採用
+
+#### コンテキスト
+
+- #218（2026-11-03）で本番の α を 0 に倒すと決め、定数の変更と同期を #810 に送った。#284 の影響の節が同期対象を列挙している。
+- 本番の処理順は「モデル推定 → 線形ブレンド → win の冪変換 γ=1.25（ステップ 5）」で、α だけ 0 にすると win は normalize(市場^1.25)
+  になる。#284・#218 が比べた基準はどちらも γ=1.0 の市場恒等で、この形はどこでも測っていない。
+- 一方、`RECOMMENDED_WIN_POWER` を外すと、オッズが無いときのモデル単独経路と、EV の値付けに使う純モデル（ADR 0076）まで変わる。
+
+#### 決定
+
+1. `RECOMMENDED_MARKET_BLEND_ALPHA` を `Some(0.0)` にする。
+2. γ はモデル由来の win の校正なので、**α=0 で市場を使ったブレンドには掛けない**。判定は domain の `win_power_after_blend` 1 つで、
+   線形ブレンドの α ≤ 0 かつ出走馬の 1 頭以上に有効な単勝オッズ（有限・≥1.0）があるときだけ γ を飛ばす。predict
+   （`estimate_with_market`）と backtest が同じ関数を使う。前日などでオッズが無い・出走馬と重ならない・値域外のオッズしか無い
+   （＝ブレンドが no-op）ときと、純モデル（pure）には γ=1.25 を従来どおり掛ける（PO 回答・`qa/QA-market-alpha-zero-810.md` Q1）。
+3. 定型 dump（backtest.md）と忠実性ゲート（`scripts/harness/check_faithfulness.sh`）の本番構成を `--blend-alpha 0.0` にする。
+   REST の `blend_alpha` 既定（OpenAPI の `default`）と desktop の盤の固定値も定数にそろえる。
+
+#### 理由
+
+- #218 の決定（判定不能なら α=0）をそのまま実装するには、win が測った基準（市場恒等）と一致していなければならない。
+- γ を市場に掛ける形は未測定で、#284 の `is_market_identical` も「α=0 かつ γ=1.0」を市場恒等と定義している。
+- γ の定数ごと外すと、ADR 0042 の採用根拠（モデル単独経路の穴帯の過大評価の是正）から外れ、EV の純モデルの確率まで動く。
+
+#### 却下した代替案
+
+- **α だけ 0 にして γ=1.25 を市場にも掛ける**: 測っていない形を本番にすることになる（PO 回答）。
+- **`RECOMMENDED_WIN_POWER` を外す（γ=1.0）**: モデル単独経路と EV の純モデルまで変わる（PO 回答）。
+- **α=0 なら一律に γ を飛ばす**（ブレンドが実際に市場を使ったかを見ない）: 前日などオッズが無いレースでモデルの確率から γ が外れる
+  （計画の敵対的レビューで検出）。
+- **LogPool(a=0, b=1) も市場恒等として γ を飛ばす**: 研究用の経路で本番は使わない（YAGNI）。
+
+#### 影響
+
+- オッズがある本番の win・軸・相手・混戦は市場の確率（＝単勝人気順）で決まる。D23 側の波及は ev-kelly-bet-selection.md 決定ログ #810。
+- 連対・複勝はモデル由来のまま（ブレンドは win だけ）で、win を下回らないよう累積 max で補正される。
+- 出走馬のうちオッズの無い一部の馬は α=0 でもモデル値のまま残り、その馬にも γ が掛からなくなる（影響は小さい）。取消馬のオッズは #811 で
+  市場の分母から外れたので、取消馬だけが単勝に残るレースはブレンドが no-op になり、γ も従来どおり掛かる（判定は同じ `market_implied` を使う）。
+- backtest の `--blend-alpha 0 --win-power 1.25` も市場恒等になる（γ は純モデル系統とオッズの無いレースだけに効く）。
+- backtest の券種別校正の既定 λ（`RECOMMENDED_HARVILLE_LAMBDA_BLENDED`）は α=0.2・γ=1.25 の blended で fit した値のまま。
+  本番の EV（pure・λ=IDENTITY）には効かないので変えない。
+- **#284（`mag_sweep.py`）と #218（`live_alpha_eval.py`）の再現は α=0.2 の dump が要る**（両スクリプトは dump の `model_win` を
+  (α=0.2, γ=1.25) で再構成して突き合わせる）。#218 の影響の節の「本番 5 フラグの dump」は、#810 以降は `--blend-alpha 0.2` に
+  読み替える。
+- REQ-D22-001 を α=0 に書き換え、検証手段を model_eval の土俵（`live_alpha_eval.py`）と γ の判定テストにした。
+- 本番構成の再測定（REQ-D01-009〜011）は product-goals.md 決定ログ #810。実測は `docs-original/810-market-alpha-zero.md`。

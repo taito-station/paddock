@@ -2467,3 +2467,107 @@ fn blend_form_produces_blended_classification() {
     assert!(!BlendForm::LogPool { a: 1.0, b: 0.0 }.produces_blended());
     assert!(!BlendForm::LogPool { a: -1.0, b: 1.0 }.produces_blended());
 }
+
+// ---- #810: α=0（市場そのもの）には win の冪変換を掛けない ----
+
+#[test]
+fn production_market_blend_alpha_is_zero() {
+    // #218 の決定（α=0 に倒す）を #810 で反映した定数ガード。
+    assert_eq!(RECOMMENDED_MARKET_BLEND_ALPHA, Some(0.0));
+}
+
+#[test]
+fn win_power_after_blend_skips_gamma_when_alpha_zero_uses_market() {
+    let probs = vec![prob(1, 0.6, 0.7, 0.8), prob(2, 0.4, 0.5, 0.6)];
+    let market = odds_map(&[(1, 5.0), (2, 1.5)]);
+    let form = BlendForm::Linear { alpha: 0.0 };
+    assert_eq!(
+        win_power_after_blend(&probs, &market, Some(&form), Some(1.25)),
+        None
+    );
+}
+
+#[test]
+fn win_power_after_blend_keeps_gamma_when_blend_is_noop() {
+    let probs = vec![prob(1, 0.6, 0.7, 0.8), prob(2, 0.4, 0.5, 0.6)];
+    let form = BlendForm::Linear { alpha: 0.0 };
+    // 市場が空（前日など）。
+    assert_eq!(
+        win_power_after_blend(&probs, &HashMap::new(), Some(&form), Some(1.25)),
+        Some(1.25)
+    );
+    // 出走馬と 1 頭も重ならないオッズだけがある。
+    assert_eq!(
+        win_power_after_blend(&probs, &odds_map(&[(9, 3.0)]), Some(&form), Some(1.25)),
+        Some(1.25)
+    );
+    // 値域外（< 1.0・非有限）のオッズしか無い＝ブレンドが市場を使わない。
+    assert_eq!(
+        win_power_after_blend(
+            &probs,
+            &odds_map(&[(1, 0.0), (2, f64::NAN)]),
+            Some(&form),
+            Some(1.25)
+        ),
+        Some(1.25)
+    );
+    // 出走馬が空。
+    assert_eq!(
+        win_power_after_blend(&[], &odds_map(&[(1, 3.0)]), Some(&form), Some(1.25)),
+        Some(1.25)
+    );
+    // ブレンド指定なし。
+    assert_eq!(
+        win_power_after_blend(&probs, &odds_map(&[(1, 3.0)]), None, Some(1.25)),
+        Some(1.25)
+    );
+}
+
+#[test]
+fn win_power_after_blend_keeps_gamma_when_model_is_mixed_in() {
+    let probs = vec![prob(1, 0.6, 0.7, 0.8), prob(2, 0.4, 0.5, 0.6)];
+    let market = odds_map(&[(1, 5.0), (2, 1.5)]);
+    for form in [
+        BlendForm::Linear { alpha: 0.2 },
+        BlendForm::Linear { alpha: 1.0 },
+        BlendForm::LogPool { a: 0.0, b: 1.0 },
+    ] {
+        assert_eq!(
+            win_power_after_blend(&probs, &market, Some(&form), Some(1.25)),
+            Some(1.25),
+            "{form:?}"
+        );
+    }
+    // γ 未指定はそのまま None。
+    assert_eq!(
+        win_power_after_blend(
+            &probs,
+            &market,
+            Some(&BlendForm::Linear { alpha: 0.2 }),
+            None
+        ),
+        None
+    );
+}
+
+#[test]
+fn alpha_zero_partial_coverage_mixes_market_and_raw_model_without_gamma() {
+    // #810: 3 頭中 2 頭にしかオッズが無いと γ は掛けず、オッズの無い馬 3 はモデル値（γ なし）のまま
+    // 市場の含意確率と混ざって再正規化される（市場そのものではない）。
+    let probs = vec![
+        prob(1, 0.5, 0.6, 0.7),
+        prob(2, 0.3, 0.5, 0.6),
+        prob(3, 0.2, 0.4, 0.5),
+    ];
+    let market = odds_map(&[(1, 2.0), (2, 4.0)]);
+    let form = BlendForm::Linear { alpha: 0.0 };
+    assert_eq!(
+        win_power_after_blend(&probs, &market, Some(&form), Some(1.25)),
+        None
+    );
+    let out = blend_with_market_win(&probs, &market, 0.0);
+    // 市場: 1/2 と 1/4 を正規化して 2/3・1/3。馬 3 はモデルの 0.2。合計 1.2 で割り直す。
+    approx(out[0].win_prob, (2.0 / 3.0) / 1.2);
+    approx(out[1].win_prob, (1.0 / 3.0) / 1.2);
+    approx(out[2].win_prob, 0.2 / 1.2);
+}

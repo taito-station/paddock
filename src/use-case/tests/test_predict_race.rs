@@ -815,6 +815,85 @@ async fn predict_race_blends_market_odds_when_alpha_given() {
 }
 
 #[tokio::test]
+async fn predict_race_alpha_zero_is_the_market_without_win_power() {
+    // #810: α=0 でオッズがあれば、win は市場の含意確率そのもの（本番の γ=1.25 は掛けない）。
+    let race_id_str = "2026-1-tokyo-1-R1";
+    let card = make_race_card(race_id_str);
+    let mut odds = paddock_domain::RaceOdds::empty(RaceId::try_from(race_id_str).unwrap());
+    for (num, o) in [(1u32, 8.0), (2u32, 1.3)] {
+        odds.win.insert(
+            HorseNum::try_from(num).unwrap(),
+            paddock_domain::OddsValue::try_from((paddock_domain::BetType::Win, o)).unwrap(),
+        );
+    }
+    let race_id = RaceId::try_from(race_id_str).unwrap();
+
+    let probs = interactor_with_odds(Some(card), odds)
+        .predict_race(&race_id, Some(0.0), None)
+        .await
+        .unwrap();
+
+    let (ia, ib) = (1.0 / 8.0, 1.0 / 1.3);
+    let a = win_of(&probs, "ウマA");
+    let b = win_of(&probs, "ウマB");
+    assert!((a - ia / (ia + ib)).abs() < 1e-9, "ウマA win={a}");
+    assert!((b - ib / (ia + ib)).abs() < 1e-9, "ウマB win={b}");
+}
+
+#[tokio::test]
+async fn predict_race_alpha_zero_without_odds_keeps_win_power() {
+    // #810: オッズが無ければブレンドは no-op で、モデル単独経路の γ=1.25 は従来どおり掛かる
+    // （α=0 でも α 未指定と同じ確率になる）。
+    let race_id_str = "2026-1-tokyo-1-R1";
+    let race_id = RaceId::try_from(race_id_str).unwrap();
+    let model_only = interactor(Some(make_race_card(race_id_str)))
+        .predict_race(&race_id, None, None)
+        .await
+        .unwrap();
+    let alpha_zero = interactor(Some(make_race_card(race_id_str)))
+        .predict_race(&race_id, Some(0.0), None)
+        .await
+        .unwrap();
+    // 2 頭の win が同率だと γ を掛けても掛けなくても同じ値になり、検査にならない。
+    assert!((win_of(&model_only, "ウマA") - win_of(&model_only, "ウマB")).abs() > 1e-6);
+    for name in ["ウマA", "ウマB"] {
+        assert!(
+            (win_of(&model_only, name) - win_of(&alpha_zero, name)).abs() < 1e-12,
+            "{name}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn predict_race_alpha_zero_with_only_scratched_odds_keeps_win_power() {
+    // #810: race_odds はあるが単勝が出馬表に無い馬番（取消馬）だけのときは、出走馬の市場 implied が
+    // 空でブレンドは no-op（#811）。γ も従来どおり掛かり、α 未指定と同じ確率になる（orchestrate の
+    // market ありの分岐で `win_power_after_blend` を通ることの検査）。
+    let race_id_str = "2026-1-tokyo-1-R1";
+    let race_id = RaceId::try_from(race_id_str).unwrap();
+    let mut odds = paddock_domain::RaceOdds::empty(race_id.clone());
+    odds.win.insert(
+        HorseNum::try_from(9u32).unwrap(),
+        paddock_domain::OddsValue::try_from((paddock_domain::BetType::Win, 3.1)).unwrap(),
+    );
+    let model_only = interactor(Some(make_race_card(race_id_str)))
+        .predict_race(&race_id, None, None)
+        .await
+        .unwrap();
+    let alpha_zero = interactor_with_odds(Some(make_race_card(race_id_str)), odds)
+        .predict_race(&race_id, Some(0.0), None)
+        .await
+        .unwrap();
+    assert!((win_of(&model_only, "ウマA") - win_of(&model_only, "ウマB")).abs() > 1e-6);
+    for name in ["ウマA", "ウマB"] {
+        assert!(
+            (win_of(&model_only, name) - win_of(&alpha_zero, name)).abs() < 1e-12,
+            "{name}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn predict_race_views_separates_blended_and_pure() {
     // #272 確率分離: blended は市場ブレンド（α<1.0）、pure は α=1.0（市場非依存）。市場で ウマB を
     // 圧倒的人気にすると blended の ウマB win は pure より上がる（pure は市場で動かない）。

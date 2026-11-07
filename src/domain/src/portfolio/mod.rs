@@ -460,7 +460,7 @@ pub fn build_portfolio(
         same_field(rank_probs, ev_probs),
         "rank_probs と ev_probs は同一馬集合でなければならない"
     );
-    // 軸・相手は rank_probs（市場ブレンド α=0.2）で選ぶ＝解像度の高い本命選定（Phase A: 純モデルは
+    // 軸・相手は rank_probs（市場ブレンド。本番は α=0＝市場そのもの・#810）で選ぶ＝解像度の高い本命選定（Phase A: 純モデルは
     // 本命をフラットにしか出せない, #272）。win_prob 降順（同率は馬番昇順）。ただし軸ロック
     // （`config.forced_axis`, #388）／相手ロック（`config.forced_partners`, #601）指定時は
     // その固定を優先する。rank_probs は市場 odds を含むため、固定しないとスイープごとに

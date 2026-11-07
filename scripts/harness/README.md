@@ -26,7 +26,7 @@ walk-forward で訓練して対市場評価する Python ハーネス。
 ## 学習モデルの walk-forward 評価（#309 Phase B）
 
 ```sh
-# 全期間ダンプ生成（production 構成・as-of＝リーク無し）→ venv → 評価
+# 全期間ダンプ生成（#309 当時＝#810 より前の production 構成〈α=0.2〉・as-of＝リーク無し）→ venv → 評価
 ./target/debug/paddock-analyze backtest --from 2025-01-05 --to 2026-06-14 \
   --shrinkage-m 10 --win-power 1.25 --place-show-power 2.0 --blend-alpha 0.2 \
   --dump-features scripts/harness/data/dump_full.tsv

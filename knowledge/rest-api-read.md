@@ -8,8 +8,8 @@ tags: [D10, D19, D09]
 sources:
   - docs/api/openapi.json
   - qa/QA-predict-bets-fix-source-795.md
-distilled_from_sha: "1b02dbd5"
-updated: "2026-11-02"
+distilled_from_sha: "e5e39860"
+updated: "2026-11-05"
 ---
 
 # REST API（read 基盤）: 設計仕様
@@ -130,13 +130,13 @@ GET /api/races/{race_id}/prediction[?track_condition=&blend_alpha=]
 ```
 
 - use-case: `predict_race(race_id, blend_alpha, track_condition)`
-- 既定は **本番ブレンド**（`blend_alpha` 省略時は `RECOMMENDED_MARKET_BLEND_ALPHA` = α 0.2 にフォールバック。ADR 0031）・馬場未指定（`track_condition=None`）。本番 predict と同じ `EstimationConfig::production()` 経路。
+- 既定は **本番ブレンド**（`blend_alpha` 省略時は `RECOMMENDED_MARKET_BLEND_ALPHA` = α 0＝市場そのもの にフォールバック。ADR 0031・#810）・馬場未指定（`track_condition=None`）。本番 predict と同じ `EstimationConfig::production()` 経路。
 - `track_condition`（任意）: `good|good_to_firm|...`（`TrackCondition` の文字列表現）。不正値は `400`。
 - `blend_alpha`（任意）: `0.0..=1.0` の f64。市場オッズ（単勝）とのブレンド係数（#72）。範囲外・非有限は `400`。
   **省略時の既定はサーバが持つ**（ADR 0031）。クライアント側にハードコードしない——省略時の解釈が
   呼び出し元ごとに割れると本命が食い違う。素モデルが欲しいときは `blend_alpha=1.0` を明示する
   （省略を「素モデルを望む」とは解釈しない）。既定値の単一正本は domain の
-  `RECOMMENDED_MARKET_BLEND_ALPHA` で、ADR 0031 当時の 0.3 から **ADR 0034 で 0.2 に更新**されている
+  `RECOMMENDED_MARKET_BLEND_ALPHA` で、ADR 0031 当時の 0.3 から **ADR 0034 で 0.2、#810 で 0 に更新**されている
   （ハンドラは定数を参照するだけなので、本番 α の変更が API 既定へ自動追従する）。`alpha < 1.0` を指定しても**当該レースの保存オッズが無ければブレンドは行われずモデル確率をそのまま返す**（#51 未完環境での既定挙動。`predict_race` の実装どおり）。
 - 出馬表が無い `race_id` は内部で `NotFound` → `404`。
 - レスポンス: 馬ごとの win/place/show 確率（`win ≤ place ≤ show` 単調性は use-case が保証）
@@ -195,7 +195,7 @@ GET /api/races/{race_id}/board[?budget=&track_condition=&blend_alpha=]
 - クエリパラメータ（すべて任意）:
   - `budget`: 予算（円、1 以上、既定 5000）。買い目組成の上限。
   - `track_condition`: 馬場状態（`良`/`稍重`/`重`/`不良` または略記）。未指定は馬場項なし。
-  - `blend_alpha`: 市場ブレンド係数 `[0,1]`。未指定は本番ブレンド α=0.2。
+  - `blend_alpha`: 市場ブレンド係数 `[0,1]`。未指定は本番 α=0（市場そのもの・#810）。
 - レスポンス: `RaceBoardResponse`（スキーマは `docs/api/openapi.json` コンポーネント参照）
 
 レスポンスの主要フィールド:
@@ -246,7 +246,7 @@ GET /api/races/{race_id}/board[?budget=&track_condition=&blend_alpha=]
 #### 手動ハンデ精査の材料（#628）
 
 現時点で実在が確認できているエッジは「手動のハンデ精査」と「執行の規律（軸ロック＋ズレ増額）」の 2 つだけ
-（ADR 0055 / 0060 / 0076）。盤は買い目を blended（本番 α=0.2＝市場 8 割）で組むため、それだけでは
+（ADR 0055 / 0060 / 0076）。盤は買い目を blended（本番 α=0＝市場そのもの・#810）で組むため、それだけでは
 **「市場が何番人気に置いたか」の言い換え**にしかならない。そこで手動精査が実際に使う**事実**を併せて返す。
 
 - **確率にも買い目にも入らない**。条件別実績を特徴量へ投入するのは ADR 0058 / 0059 が閉じた路線の再訪になる。

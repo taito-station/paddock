@@ -3,7 +3,8 @@
 
 #284 は確定オッズで α=0（市場そのもの）が本番の α=0.2 を有意に上回ったが、本番が α を当てるのは
 朝〜直前のオッズなので定数は保留した。本スクリプトは `race_odds_snapshots` の単勝で時点ごとに市場を
-作り直し、本番構成の α=0.2 ブレンドを同じ時点のオッズで厳密に再構成して、市場と比べる。
+作り直し、#810 より前の本番構成の α=0.2 ブレンドを同じ時点のオッズで厳密に再構成して、市場と比べる。
+入力の dump は `--blend-alpha 0.2` で作る（#810 以降の定型 dump〈α=0〉では忠実性の検査で止まる）。
 
 判定規則（測る前に固定・issue #218 の 2026-11-03 コメント）:
   - 時点は **朝**（当日 JST 0 時以降・発走前で、全馬の単勝がそろう最初のスナップショット）。
@@ -147,7 +148,7 @@ def fetch_race_odds_win(race_ids: list[str]) -> dict[str, dict[int, float]]:
 
 
 def substitute(rows: list[dict], odds: dict[int, float]) -> list[dict]:
-    """dump の行の単勝を時点のオッズに差し替え、本番構成（α=0.2・γ=1.25）の win を再構成した新しい行を返す。"""
+    """dump の行の単勝を時点のオッズに差し替え、#810 より前の本番構成（α=0.2・γ=1.25）の win を再構成した新しい行を返す。"""
     new = [dict(r, win_odds=float(odds[r["horse_num"]])) for r in rows]
     recon = ms.reconstruct_win(new, DUMP_ALPHA, DUMP_GAMMA)
     for r, w in zip(new, recon):

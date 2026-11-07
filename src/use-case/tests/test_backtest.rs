@@ -796,6 +796,77 @@ async fn backtest_blend_falls_back_to_results_odds_when_no_snapshot() {
     );
 }
 
+/// #810 の検証用: 本番の γ=1.25 だけを立てた config（他は既定）。
+fn win_power_only_config() -> EstimationConfig {
+    EstimationConfig {
+        win_power: Some(1.25), // 本番の RECOMMENDED_WIN_POWER
+        ..EstimationConfig::default()
+    }
+}
+
+#[tokio::test]
+async fn backtest_alpha_zero_is_the_market_without_win_power() {
+    // #810: α=0 で市場（ここでは PDF 確定単勝 9.0 / 1.2）があれば、model_win は市場の含意確率そのもの
+    // （γ=1.25 は掛けない）。純モデル系統（model_win_pure）には従来どおり γ が掛かる。
+    let report = interactor(vec![blend_race()])
+        .backtest(
+            d(2026, 1, 1),
+            d(2026, 1, 31),
+            Some(paddock_domain::BlendForm::Linear { alpha: 0.0 }),
+            win_power_only_config(),
+            paddock_domain::betting::BettingConfig::default(),
+            true,
+        )
+        .await
+        .unwrap();
+    let rows = report.feature_dump.expect("dump 要求時は Some");
+    assert_eq!(rows.len(), 2, "blend_race は 2 頭");
+    let (ia, ib) = (1.0 / 9.0, 1.0 / 1.2);
+    for row in &rows {
+        let expected = if row.horse_num == 1 { ia } else { ib } / (ia + ib);
+        assert!(
+            (row.model_win - expected).abs() < 1e-9,
+            "horse {} model_win={} expected={expected}",
+            row.horse_num,
+            row.model_win
+        );
+    }
+}
+
+#[tokio::test]
+async fn backtest_alpha_zero_without_any_odds_keeps_win_power() {
+    // #810: race_odds も確定単勝も無ければブレンドは no-op。γ=1.25 は従来どおり掛かり、
+    // model_win は純モデル系統（ブレンドなし・γ 適用後）と一致する。
+    let mut race = blend_race();
+    for r in &mut race.results {
+        r.odds = None;
+    }
+    let report = interactor(vec![race])
+        .backtest(
+            d(2026, 1, 1),
+            d(2026, 1, 31),
+            Some(paddock_domain::BlendForm::Linear { alpha: 0.0 }),
+            win_power_only_config(),
+            paddock_domain::betting::BettingConfig::default(),
+            true,
+        )
+        .await
+        .unwrap();
+    let rows = report.feature_dump.expect("dump 要求時は Some");
+    assert!(!rows.is_empty());
+    // 2 頭の win が同率だと γ を掛けても掛けなくても同じ値になり、検査にならない。
+    assert!((rows[0].model_win_pure - rows[1].model_win_pure).abs() > 1e-6);
+    for row in &rows {
+        assert!(
+            (row.model_win - row.model_win_pure).abs() < 1e-12,
+            "horse {} model_win={} pure={}",
+            row.horse_num,
+            row.model_win,
+            row.model_win_pure
+        );
+    }
+}
+
 #[tokio::test]
 async fn backtest_same_day_multi_race_evaluates_independently() {
     // 同一日（2026-1-10）に 2 つのレースがある場合、日付単位バッチで統計を共有しながら

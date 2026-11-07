@@ -109,19 +109,19 @@ function HorseCardImpl({
         {h.horse_name}
       </div>
       <div className="jockey">{h.jockey ?? "-"}</div>
-      {/* 確率は出所ごとに 2 文字ラベルで明示（#373）: ブ=ブレンド(本番α=0.2)・
+      {/* 確率は出所ごとに 2 文字ラベルで明示（#373）: ブ=ブレンド(本番α=0＝勝率は市場)・
           モ=モデル(純α=1.0)・市=市場implied。狭幅カラムに合わせ full 名は title に退避。
           市場は単勝オッズ由来のため勝率のみ（連対/複勝の市場 implied は出さない）。 */}
       <dl className="stats">
-        <div title="ブレンド勝率＝本番 α=0.2（市場ブレンド）で 1 着になる確率">
+        <div title="ブレンド勝率＝本番 α=0（オッズがあれば市場の単勝含意確率そのもの・無ければモデル）で 1 着になる確率">
           <dt>ブ勝</dt>
           <dd>{pct(h.win_prob)}</dd>
         </div>
-        <div title="ブレンド連対率＝本番 α=0.2 で 2 着以内に入る確率">
+        <div title="ブレンド連対率＝本番 α=0 で 2 着以内に入る確率（モデル由来・勝率以上に補正）">
           <dt>ブ連</dt>
           <dd>{pct(h.place_prob)}</dd>
         </div>
-        <div title="ブレンド複勝率＝本番 α=0.2 で 3 着以内に入る確率">
+        <div title="ブレンド複勝率＝本番 α=0 で 3 着以内に入る確率（モデル由来・連対率以上に補正）">
           <dt>ブ複</dt>
           <dd>{pct(h.show_prob)}</dd>
         </div>
@@ -146,7 +146,7 @@ function HorseCardImpl({
         )}
         <div
           className="group-sep"
-          title="市場勝率＝単勝オッズから逆算した市場推定の勝率（胴元の控除を抜いた実力評価）。モデル/ブレンド勝率と比べて乖離＝妙味"
+          title="市場勝率＝単勝オッズから逆算した市場推定の勝率（胴元の控除を抜いた実力評価）。モデル（純）勝率と比べて乖離＝妙味の材料（本番 α=0 ではブレンド勝率は市場と同じ）"
         >
           <dt>市勝</dt>
           <dd>{h.market_implied == null ? "-" : pct(h.market_implied)}</dd>
@@ -249,7 +249,7 @@ function HorseCardImpl({
         {h.is_value && (
           <span
             className="chip chip-value"
-            title="ブレンド上位×市場人気低＝妙味・ワイドボックス候補"
+            title="ブレンド上位×市場人気低＝妙味・ワイドボックス候補（本番 α=0 ではオッズのある馬に付かない）"
           >
             妙味
           </span>

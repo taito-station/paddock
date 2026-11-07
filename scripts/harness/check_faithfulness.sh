@@ -31,14 +31,14 @@ REPORT="$(mktemp "$TMP/paddock_bt.XXXXXX")"
 CARGO_LOG="$(mktemp "$TMP/paddock_cargo.XXXXXX")"
 trap 'rm -f "$DUMP" "$REPORT" "$CARGO_LOG"' EXIT
 
-# production 構成: m=10 / win_power=1.25 / place_show_power=2.0 / α=0.2。
+# production 構成（5 フラグ）: m=10 / win_power=1.25 / place_show_power=2.0 / impute / α=0（#810。α=0 で市場があれば γ は掛からない）。
 # cargo の stderr（ビルド・html5ever WARN 等）は REPORT を汚さないよう別ログに退避する。
 # cargo/backtest 自体が失敗したときだけ診断として cat し、その後 trap で削除する（忠実性の
 # 不一致は python が自前で NG を表示するため cargo ログは出さない）。
 set +e
 cargo run -q --manifest-path "$REPO_ROOT/Cargo.toml" -p analyze -- backtest \
     --from "$FROM" --to "$TO" \
-    --shrinkage-m 10 --win-power 1.25 --place-show-power 2.0 --blend-alpha 0.2 \
+    --shrinkage-m 10 --win-power 1.25 --place-show-power 2.0 --blend-alpha 0.0 --impute-missing-factors \
     --dump-features "$DUMP" "$@" 2>"$CARGO_LOG" | tee "$REPORT"
 cargo_rc=${PIPESTATUS[0]}
 set -e

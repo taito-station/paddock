@@ -103,7 +103,7 @@ impl<R: StatsRepository + RaceCardRepository + OddsRepository> Interactor<R> {
     /// `rank=blended` / `ev=pure` を渡す。`with_explanation=true` のとき根拠も返す（`pure` と同じ盤面順）。
     ///
     /// `blended` は `estimate_and_blend(.., blend_alpha, ..)`（α<1.0 で市場 odds を 1 回 fetch）、
-    /// `pure` は同 `Some(1.0)`（ブレンド無効で odds fetch を省く・γ 冪は両者に適用）。`blend_alpha=Some(1.0)`
+    /// `pure` は同 `Some(1.0)`（ブレンド無効で odds fetch を省く・γ 冪は pure に常に、blended には α=0 で市場を使ったとき以外に適用・#810）。`blend_alpha=Some(1.0)`
     /// や `None` を渡すと両者が一致しうる（呼び出し側の選択に委ねる）。
     pub async fn predict_race_views(
         &self,
@@ -442,18 +442,28 @@ fn estimate_with_market(
     let probs =
         paddock_domain::prediction::estimate_probabilities_with_config(entry_factors, config);
 
-    let probs = match (blend_alpha.filter(|a| a.is_finite() && *a < 1.0), market) {
+    let (probs, win_power) = match (blend_alpha.filter(|a| a.is_finite() && *a < 1.0), market) {
         (Some(alpha), Some(odds)) => {
             let market_win: HashMap<_, _> =
                 odds.win.iter().map(|(num, o)| (*num, o.value())).collect();
-            paddock_domain::prediction::blend_with_market_win(&probs, &market_win, alpha)
+            // α=0 で市場を使ったブレンドは市場そのもの。γ はモデルの校正なので掛けない（#810）。
+            let win_power = paddock_domain::prediction::win_power_after_blend(
+                &probs,
+                &market_win,
+                Some(&paddock_domain::BlendForm::Linear { alpha }),
+                config.win_power,
+            );
+            (
+                paddock_domain::prediction::blend_with_market_win(&probs, &market_win, alpha),
+                win_power,
+            )
         }
-        _ => probs,
+        _ => (probs, config.win_power),
     };
 
-    // 穴馬の 1 着過大評価を縮約する win_prob 冪変換（#246）。config.win_power が None なら no-op。
+    // 穴馬の 1 着過大評価を縮約する win_prob 冪変換（#246）。win_power が None なら no-op。
     // ブレンド後の最終 win に適用し、連系・着順 EV（Harville/simulate）まで校正後 win が伝わる。
-    match config.win_power {
+    match win_power {
         Some(gamma) => paddock_domain::prediction::apply_win_power(&probs, gamma),
         None => probs,
     }

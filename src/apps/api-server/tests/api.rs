@@ -236,7 +236,7 @@ async fn prediction_returns_probabilities(pool: sqlx::PgPool) {
     let json = body_json(resp).await;
     let probs = json["probabilities"].as_array().unwrap();
     assert_eq!(probs.len(), 3);
-    // blend_alpha 省略時は PRODUCTION_BLEND_ALPHA=0.2 が渡るが、オッズ未 seed のため
+    // blend_alpha 省略時は RECOMMENDED_MARKET_BLEND_ALPHA=0.0 が渡るが、オッズ未 seed のため
     // ブレンドはスキップされ素モデルで動作する（predict.rs の no-odds フォールバック）。
     // 履歴ゼロでも均等フォールバックで確率が返り、単調性が保たれる。
     for p in probs {
@@ -262,7 +262,7 @@ async fn prediction_rejects_out_of_range_blend_alpha(pool: sqlx::PgPool) {
     assert_eq!(resp.status().as_u16(), 400);
 }
 
-/// blend_alpha 省略時は `PRODUCTION_BLEND_ALPHA`(0.2) が適用され、明示した 0.2 と同一結果を返す。
+/// blend_alpha 省略時は `RECOMMENDED_MARKET_BLEND_ALPHA`(0.0) が適用され、明示した 0.0 と同一結果を返す。
 /// 単勝オッズを seed してブレンドが実際に走る状態で比較する（no-odds 時は両者とも素モデルで差異なし）。
 /// 加えて素モデル(blend_alpha=1.0)と差が出ることも確認し、ブレンドが実際に作用していることを保証する。
 /// `sample_win_odds` は 3 頭に odds 2.5/4.0/6.0 を与え、均等 prior を崩すためブレンドで差異が生じる。
@@ -278,15 +278,15 @@ async fn prediction_omitted_blend_alpha_equals_production_default(pool: sqlx::Pg
         .to_request();
     let json_omit = body_json(test::call_service(&app, req_omit).await).await;
 
-    // 0.2 は PRODUCTION_BLEND_ALPHA と同値
+    // 0.0 は RECOMMENDED_MARKET_BLEND_ALPHA と同値
     let req_explicit = test::TestRequest::get()
-        .uri(&format!("/api/races/{RACE_ID}/prediction?blend_alpha=0.2"))
+        .uri(&format!("/api/races/{RACE_ID}/prediction?blend_alpha=0.0"))
         .to_request();
     let json_explicit = body_json(test::call_service(&app, req_explicit).await).await;
 
     assert_eq!(
         json_omit["probabilities"], json_explicit["probabilities"],
-        "省略時と明示 0.2 の確率は一致する"
+        "省略時と明示 0.0 の確率は一致する"
     );
 
     // blend_alpha=1.0 は素モデル（オッズ不使用）→ ブレンドが実際に作用していれば結果が異なる
@@ -300,10 +300,10 @@ async fn prediction_omitted_blend_alpha_equals_production_default(pool: sqlx::Pg
     );
 }
 
-/// recommendations も blend_alpha 省略時は `PRODUCTION_BLEND_ALPHA`(0.2) が適用され、明示した 0.2 と同一結果を返す。
+/// recommendations も blend_alpha 省略時は `RECOMMENDED_MARKET_BLEND_ALPHA`(0.0) が適用され、明示した 0.0 と同一結果を返す。
 /// #272 循環断ち以降、recommendations の EV/的中は純モデル(α=1.0)×市場odds で計算され blend_alpha に
 /// 依らない（blend_alpha は軸/相手の順位付けにのみ効く）。本フィクスチャでは順位も一致するため、
-/// 素モデル(1.0)と省略時(0.2)で買い目は完全一致する＝EV が blend 不変であることの回帰。
+/// 素モデル(1.0)と省略時(0.0)で買い目は完全一致する＝EV が blend 不変であることの回帰。
 /// （ブレンドが確率に作用すること自体は予測エンドポイントの
 /// `prediction_omitted_blend_alpha_equals_production_default` が担保する。）
 #[sqlx::test(migrations = "../../../deployments/db/migrations")]
@@ -321,20 +321,20 @@ async fn recommendations_omitted_blend_alpha_equals_production_default(pool: sql
         .to_request();
     let json_omit = body_json(test::call_service(&app, req_omit).await).await;
 
-    // 0.2 は PRODUCTION_BLEND_ALPHA と同値
+    // 0.0 は RECOMMENDED_MARKET_BLEND_ALPHA と同値
     let req_explicit = test::TestRequest::get()
         .uri(&format!(
-            "/api/races/{RACE_ID}/recommendations?budget=10000&blend_alpha=0.2"
+            "/api/races/{RACE_ID}/recommendations?budget=10000&blend_alpha=0.0"
         ))
         .to_request();
     let json_explicit = body_json(test::call_service(&app, req_explicit).await).await;
 
     assert_eq!(
         json_omit["bets"], json_explicit["bets"],
-        "省略時と明示 0.2 の買い目は一致する"
+        "省略時と明示 0.0 の買い目は一致する"
     );
 
-    // blend_alpha=1.0（素モデル）でも、EV/的中は純モデル固定なので省略時(0.2)と同じ EV になる。
+    // blend_alpha=1.0（素モデル）でも、EV/的中は純モデル固定なので省略時(0.0)と同じ EV になる。
     // このフィクスチャでは順位（軸/相手）も一致するため、買い目（組合せ・stake・EV）は完全一致する。
     // = recommendations の EV が blend_alpha に依存しない（循環断ち, #272）ことの回帰。
     let req_raw = test::TestRequest::get()

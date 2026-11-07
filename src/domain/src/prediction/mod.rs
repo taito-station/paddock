@@ -30,7 +30,7 @@ pub use config::{
 };
 pub use estimate::{
     BlendForm, apply_win_power, blend_with_market_win, blend_with_market_win_form,
-    estimate_probabilities, estimate_probabilities_with_config,
+    estimate_probabilities, estimate_probabilities_with_config, win_power_after_blend,
 };
 pub use explain::{ExplainCategory, FactorExplanation, HorseExplanation, PrevRunSummary, Verdict};
 pub use model::{

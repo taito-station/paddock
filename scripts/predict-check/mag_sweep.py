@@ -3,8 +3,9 @@
 
 再構成の数理（#703 Phase 3 で確立した手法の線形版）:
   dump の pure 列 u ∝ est^γ0（γ0 = dump 生成時の win_power = 1.25）なので est ∝ u^(1/γ0)。
-  任意の (α, γ) の最終 win は本番パイプライン（estimate → 線形 blend → win_power）を
-  そのまま写して
+  任意の (α, γ) の最終 win は #810 より前の本番パイプライン（estimate → 線形 blend → win_power）を
+  そのまま写して（#810 以降の本番は α=0 で市場を使うと win_power を掛けないが、本スクリプトは
+  α=0 にも γ を掛ける。市場恒等は γ=1.0 の格子点で表す）
     ê      = normalize(u^(1/γ0))
     mix_i  = α·ê_i + (1−α)·q_i   （オッズあり馬。q = implied/overround）
              ê_i                  （オッズ欠落馬 = model 値据置・blend_with_market_win と同じ）

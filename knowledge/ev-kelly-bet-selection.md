@@ -9,8 +9,10 @@ sources:
   - qa/QA-predict-fixed-selection-776.md
   - qa/QA-board-confusion-794.md
   - qa/QA-predict-bets-fix-source-795.md
-distilled_from_sha: "1b02dbd5"
-updated: "2026-11-03"
+  - docs-original/810-market-alpha-zero.md
+  - qa/QA-market-alpha-zero-810.md
+distilled_from_sha: "e5e39860"
+updated: "2026-11-05"
 ---
 
 # 期待値計算・買い目選択・Kelly 配分ロジック仕様書
@@ -268,7 +270,7 @@ Domain 層に純粋関数として実装し、IO・状態なし。`PlaceOdds` �
 | REQ-D23-004 | fractional Kelly は賭け額配分に使わない。`betting/kelly.rs` は EV 候補選抜（`min_kelly` の curation）に留める | ADR 0054 の同一土俵比較（定額 vs Kelly・71R walk-forward）を再実行し、**定額土俵で Kelly 重みが ADR 0054 当時の対照（Python `live_ev.py` のヒューリスティック＝確率重み＋最低 ¥100 の最大剰余法・ROI 75.5%・σ 92.5）を上回らないこと**（**production の配分は均等割り**＝REQ-D23-003。0054 の「現行」は当時の Python 土俵を指す）、および **bankroll 土俵で full Kelly が破産すること** | ADR 0054 | Confirmed |
 | REQ-D23-005 | 混戦判定は「◎の model 勝率の 0.70 倍以上が ◎含め 4 頭以上」。**オッズ条件を併用しない** | ADR 0028 のオッズ閾値スイープを再実行（baseline を上回る閾値が無いこと） | ADR 0028 | Confirmed |
 | REQ-D23-006 | `scripts/predict-check/` の Python（`live_ev.py`）を**張る買い目の配分に使わない**。オフライン EV レポート専用（配分方式の正が `build_portfolio` であることは REQ-D01-007。ここはその裏返しの禁止事項） | `build_portfolio` の単体テストと、`predict` / `predict-watch` が同一関数を通ること | ADR 0064 の追補（#346）——**0064 本体の決定は逆**（当時はライブ writer を Python `live_ev.py` に一本化するとしていた）。Rust に一本化したのは追補側 | Confirmed |
-| REQ-D23-007 | `predict-watch` の買い目選定（軸・相手・混戦判定）は**朝の選定で確定し、以後オッズで動かさない**（#767）。朝の選定＝監視窓に入る前に保存された朝の単勝スナップショット（当日 JST 0 時以降で最初の単勝）で、本番の設定（予算 ¥5,000・α=0.2）で組んだ選定。predict-watch が計算して `morning_selections` に 1 レース 1 行・先勝ちで保存する。朝の選定が無いレースは**当日の初回スイープ**（そのレースが監視窓〈既定 40 分〉に入った最初のスイープ。起動時点で既に窓内なら起動直後のスイープ）で確定する。初回スイープで固定した後に朝の選定ができても入れ替えない。固定した相手が取消なら落とすが**ライブ順位で補充しない**（点数が減る）。固定の優先順は 朝の選定（記録◎ は組むときに軸へ強制し、保存した後に入った記録◎ は使わない）→ その日の初回スイープ（そのスイープで読んだ記録◎ を軸に反映済み）→ 記録◎ の軸だけ → 固定なし。盤（`/races/{id}/board`）と対話の `predict`（対話・`--skip-all`・`--overview`。#776）も 朝の選定 → 記録◎ の軸だけ → 固定なし で買い目を組む（同じ関数 `board_fixed_selection`）。`/recommendations` は固定しない | `cargo test -p paddock-domain` の `pinned_selection_survives_market_movement_while_roi_moves`（オッズを差し替えた 2 スイープで選定が一致し ROI は動く／固定しなければ動く）・`forced_partners_drops_scratched_without_backfill`、`cargo test -p paddock-use-case --lib morning`（優先順・初回スイープの後に保存された朝の選定で入れ替えないこと）、`cargo test -p paddock-use-case --test test_predict_race` の `snapshot_saved_after_window_entry_is_not_morning`、`cargo test -p rdb-gateway --test test_morning_selections` の `first_save_wins`、`cargo test -p rdb-gateway --test test_live_ev_persistence` の `pins_return_the_earliest_sweep_not_the_latest`（**最古**を返すこと）、`cargo test -p predict --test overview` の `predict_portfolio_is_fixed_by_the_morning_selection`（predict の買い目の軸・相手が朝の選定になること）・`predict_portfolio_uses_recorded_axis_and_ignores_other_day_morning`（別の日付の朝の選定は使わず、記録◎ の軸だけ固定すること）、および開催日に `scripts/predict-check/gate_calibration.py` の「朝の固定」節と「軸（◎）の安定性」節が `0/N` になること（朝の軸の取消でライブの首位へ戻った外れは除き、該当行を確かめる） | ADR 0078 | Confirmed |
+| REQ-D23-007 | `predict-watch` の買い目選定（軸・相手・混戦判定）は**朝の選定で確定し、以後オッズで動かさない**（#767）。朝の選定＝監視窓に入る前に保存された朝の単勝スナップショット（当日 JST 0 時以降で最初の単勝）で、本番の設定（予算 ¥5,000・`RECOMMENDED_MARKET_BLEND_ALPHA`＝α=0〈#810。それまでは α=0.2〉）で組んだ選定。predict-watch が計算して `morning_selections` に 1 レース 1 行・先勝ちで保存する。朝の選定が無いレースは**当日の初回スイープ**（そのレースが監視窓〈既定 40 分〉に入った最初のスイープ。起動時点で既に窓内なら起動直後のスイープ）で確定する。初回スイープで固定した後に朝の選定ができても入れ替えない。固定した相手が取消なら落とすが**ライブ順位で補充しない**（点数が減る）。固定の優先順は 朝の選定（記録◎ は組むときに軸へ強制し、保存した後に入った記録◎ は使わない）→ その日の初回スイープ（そのスイープで読んだ記録◎ を軸に反映済み）→ 記録◎ の軸だけ → 固定なし。盤（`/races/{id}/board`）と対話の `predict`（対話・`--skip-all`・`--overview`。#776）も 朝の選定 → 記録◎ の軸だけ → 固定なし で買い目を組む（同じ関数 `board_fixed_selection`）。`/recommendations` は固定しない | `cargo test -p paddock-domain` の `pinned_selection_survives_market_movement_while_roi_moves`（オッズを差し替えた 2 スイープで選定が一致し ROI は動く／固定しなければ動く）・`forced_partners_drops_scratched_without_backfill`、`cargo test -p paddock-use-case --lib morning`（優先順・初回スイープの後に保存された朝の選定で入れ替えないこと）、`cargo test -p paddock-use-case --test test_predict_race` の `snapshot_saved_after_window_entry_is_not_morning`、`cargo test -p rdb-gateway --test test_morning_selections` の `first_save_wins`、`cargo test -p rdb-gateway --test test_live_ev_persistence` の `pins_return_the_earliest_sweep_not_the_latest`（**最古**を返すこと）、`cargo test -p predict --test overview` の `predict_portfolio_is_fixed_by_the_morning_selection`（predict の買い目の軸・相手が朝の選定になること）・`predict_portfolio_uses_recorded_axis_and_ignores_other_day_morning`（別の日付の朝の選定は使わず、記録◎ の軸だけ固定すること）、および開催日に `scripts/predict-check/gate_calibration.py` の「朝の固定」節と「軸（◎）の安定性」節が `0/N` になること（朝の軸の取消でライブの首位へ戻った外れは除き、該当行を確かめる） | ADR 0078 | Confirmed |
 <!-- REQ:end D23 -->
 
 **D01 と重複させない。** 「ROI ≥ 100% のレースだけ張る」「軸ロック＋ズレ増額」「買い目の提示形式と
@@ -780,3 +782,59 @@ PO の回答（質問票・`qa/QA-predict-bets-fix-source-795.md`）に従う。
 - 共有 DB にはマージ後に `paddock-analyze migrate` で適用する。
 - #799 は同じ列の値（別枠）を増やすことになるが、それだけでは入らない: 二重記録ガード（同じレースに買い目ありで 2 回目は Conflict）と、
   時刻の CHECK（朝の選定の時刻専用）の変更が別途要る。
+
+### #810: 本番 α=0 で買い目の構造は市場の確率（単勝人気順）で決まる (2026-11-05) — 採用
+
+#### コンテキスト
+
+- probability-estimation.md 決定ログ #810 で、本番の市場ブレンドを α=0（win は市場の単勝含意確率そのもの・γ は掛けない）にした。
+  #284 の影響の節は D23 側の波及（混戦判定・印・predict-watch の表示が市場確率ベースになる）を確認するよう求めている。
+- 買い方の層は確率の層と分けてある（REQ-D01-002）。軸・相手・混戦は `rank_probs`（blended）、EV・的中は `ev_probs`（pure）で決める。
+
+#### 決定
+
+買い方のルール（予算・配分・相手 top5・混戦の閾値・軸ロック・固定の優先順）は変えない。α=0 で次の挙動が変わることを確認し、
+そのまま受け入れる。
+
+- **軸・相手**: オッズがあれば blended は市場そのものなので、◎ は単勝 1 番人気、相手 top5 は 2〜6 番人気になる
+  （同じオッズは馬番昇順）。朝の選定（`morning_selections`）も朝の単勝の人気順で組まれる（定数を参照しているので追従する）。
+- **混戦判定（REQ-D23-005）**: band は市場の確率で作る。γ=1.25 で上位を強めなくなるので、混戦と判定されるレースは増える向き
+  （割合は `docs-original/810-market-alpha-zero.md`）。
+- **盤の印**: ◎○▲ は人気順になる。☆（blended の順位と人気の差 ≥3・`board.rs` の `is_value`）は、オッズのある馬では出なくなる。
+  重なり馬（blended 首位かつ 1 番人気・「複勝圏」）は ◎ で常に立つ。判定ロジックは変えない（`board.rs` は表示の勝率と同じ blended
+  の基準を意図して選んでいる）。純モデルとの乖離は盤の「差pt」（pure − 市場）と predict-watch の過去データ視点（pure）で読む。
+- **盤のブ連・ブ複**: ブレンドは win だけなので連対・複勝はモデル由来のまま。上位人気では市場の勝率がモデルの連対・複勝を上回り、
+  累積 max の補正でブ連・ブ複がブ勝と同じ値になる（表示だけで、EV は pure を使うので買い目には効かない）。
+- **ズレ増額**: 「軸の馬が自モデル確率より美味しくオッズがズレた」の比較対象は pure（純モデル）になる（blended は市場そのもの）。
+- **固定ずれの ⚠**: predict-watch の `print_pin_drift` と盤の「⚠ 朝 …」はライブの首位（＝1 番人気）と固定の軸を比べるので、
+  人気が入れ替わるたびに出る。軸ロックの規律は変えない（固定は動かさない）。
+
+#### 理由
+
+- #218 は「判定不能なら α=0」と事前に決めて α=0 に倒した。順位付けが市場順位になるのは、その決定の直接の帰結。
+- 買い方の規律を同時に変えると、どちらの変更が効いたか切り分けられない（ADR 0055 の層分離）。
+
+#### 却下した代替案
+
+- **☆ と重なり馬を pure の順位で判定し直す**: 要件外で、盤の表示の勝率（blended）と印の基準がずれる（`board.rs` のコメントが避けた形）。
+  必要になったら別 issue で決める。
+- **混戦の閾値（0.70 倍・4 頭）をこの PR で α=0 用に測り直す**: 本 issue の範囲外（PO 判断）。閾値の根拠の ADR 0028 は α=0.3 時代の
+  モデル確率の band で測ったもので、α=0 の band（単勝オッズの比）では検証していない。混戦の増加（eval 窓 45R → 67R）が回収率に
+  効くかは #814 で測る。なお REQ-D23-005 の「オッズ条件を併用しない」は判定に別のオッズ閾値を足さないという意味で、band の入力が
+  市場になること自体はこれに当たらない（オッズ条件を足す案は 71R で棄却済み・betting-rule-history.md）。
+
+#### 影響
+
+- REQ-D23-007 の「本番の設定」の α を `RECOMMENDED_MARKET_BLEND_ALPHA`（α=0）と書き換えた。
+- CLAUDE.md「保険構造」の「相手 top5 に中穴（7〜12番人気）を 2〜3 頭含める」は、α=0 では自動の相手が 2〜6 番人気になり構造上満たせない
+  （`build_portfolio` は元々実装していない）。CLAUDE.md に注記し、扱いは #814 で決める（PO 判断）。
+- `reconstruct-slips`（#724）の `--blend-alpha` 既定は定数に追従する。#810 より前の開催日を当時のとおりに再構成する（記録との一致を見る）
+  ときは `--blend-alpha 0.2` を明示する。
+- 参考ROI の実測（ADR 0076 の 182R / 839 スイープ・ADR 0079 の 🔶/🔍 の頻度・#571 の通知の較正）は α=0.2 の脚選びで測った数字で、
+  α=0 での分布は未測定。規律（参考ROI をゲートにしない・🔶/🔍 を go と読まない）は変えない（α=0 では脚を市場で選び EV を pure で
+  値付けするずれがむしろ強まるので、ADR 0076 の結論の向きは崩れない）。
+- `morning_selections`・`live_ev_snapshots`・`predict_bets` はどの α で組んだかを持たない。日付をまたいで集計するときは、マージ後に
+  最初に α=0 で動いた開催日で区切る（その日付は運用で決定ログに追記する）。
+- デプロイは開催日以外に行う。開催日の途中でバイナリを替えると、古いバイナリが α=0.2 で記録した朝の選定と、α=0 のライブの値が
+  同じ日に混ざる。
+- 関連: probability-estimation.md 決定ログ #218 / #810、product-goals.md 決定ログ #810、ルート CLAUDE.md「本番モデル」「軸ロックとズレ増額」。
