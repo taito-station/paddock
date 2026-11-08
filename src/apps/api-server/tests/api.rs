@@ -620,6 +620,13 @@ async fn board_is_fixed_by_the_morning_selection(pool: sqlx::PgPool) {
     assert_eq!(fixed["fix_source"]["kind"], "morning");
     assert_eq!(fixed["fix_source"]["odds_fetched_at"], f["odds_fetched_at"]);
 
+    // 盤の機械印 ◎ も買い目の軸（朝の軸）に付き、ライブの首位には付かない（#804）。
+    assert_eq!(
+        honmei_horses(&fixed),
+        vec![u64::from(morning_axis)],
+        "◎ は朝の軸の 1 頭だけ"
+    );
+
     // 混戦サマリも買い目と同じ朝の固定に従う（#794）: 非混戦で固定 → 非混戦・頭数は null、
     // ◎勝率は固定の軸の勝率。
     let c = &fixed["confusion"];
@@ -692,6 +699,73 @@ async fn board_is_fixed_by_the_morning_selection(pool: sqlx::PgPool) {
         with_pad["partners"], fixed["partners"],
         "相手も朝の選定のまま"
     );
+    // 後から入った記録◎ の馬には ◎ を付けない（◎ は買い目の軸・#804）。
+    assert_eq!(honmei_horses(&with_pad), vec![u64::from(morning_axis)]);
+}
+
+/// 盤の機械印 ◎ が付いた馬番（#804。1 頭のはず）。
+fn honmei_horses(board: &serde_json::Value) -> Vec<u64> {
+    board["horses"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|h| h["mark"] == "honmei")
+        .map(|h| h["horse_num"].as_u64().unwrap())
+        .collect()
+}
+
+/// 朝の選定が無く記録◎ だけで軸を固定した盤（#804）: ◎（機械印・◎勝率・書評）は記録◎ にそろう。
+/// 記録◎ がライブの首位でないので、混戦の頭数は出さない。
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn board_marks_the_recorded_axis_without_a_morning_selection(pool: sqlx::PgPool) {
+    let repo = PostgresRepository::new(pool.clone());
+    repo.save_race_card(&sample_card()).await.unwrap();
+    repo.save_race_odds(&sample_win_odds()).await.unwrap();
+    repo.save_race_odds(&sample_odds()).await.unwrap();
+    let app = build_service!(pool);
+    let board = |app| async move {
+        body_json(
+            test::call_service(
+                app,
+                test::TestRequest::get()
+                    .uri(&format!("/api/races/{RACE_ID}/board"))
+                    .to_request(),
+            )
+            .await,
+        )
+        .await
+    };
+    let before = board(&app).await;
+    let live_axis = before["live_axis"].as_u64().unwrap();
+    assert_eq!(
+        honmei_horses(&before),
+        vec![live_axis],
+        "固定なしはライブの首位"
+    );
+
+    let recorded = if live_axis == 3 { 2 } else { 3 };
+    save_honmei_pad(&repo, recorded).await;
+
+    let got = board(&app).await;
+    assert_eq!(got["fix_source"]["kind"], "recorded_axis");
+    assert_eq!(got["axis"].as_u64(), Some(u64::from(recorded)));
+    assert_eq!(got["live_axis"].as_u64(), Some(live_axis));
+    assert_eq!(honmei_horses(&got), vec![u64::from(recorded)], "◎ は記録◎");
+    let recorded_win = got["horses"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|h| h["horse_num"].as_u64() == Some(u64::from(recorded)))
+        .map(|h| h["win_prob"].as_f64().unwrap());
+    let c = &got["confusion"];
+    assert_eq!(
+        c["axis_win_prob"].as_f64(),
+        recorded_win,
+        "◎勝率は記録◎ の勝率"
+    );
+    assert!(c["qualifying_count"].is_null(), "首位基準の頭数は出さない");
+    let comment = got["race_comment"].as_str().unwrap();
+    assert!(comment.contains("記録◎の軸"), "got: {comment}");
 }
 
 /// 朝の選定が混戦なら、盤の混戦サマリはライブの判定にかかわらず混戦で、買い目も混戦の配分（ボックスあり）。
@@ -795,6 +869,102 @@ async fn board_comment_marks_scratched_morning_axis(pool: sqlx::PgPool) {
     let comment = json["race_comment"].as_str().unwrap();
     assert!(comment.contains("朝の軸が取消のため差し替え"), "{comment}");
     assert!(!comment.contains("朝の選定の軸"), "{comment}");
+    // 買い目の軸はライブの首位へ戻り、◎ もそこに付く（#804）。
+    let live_axis = json["live_axis"].as_u64().unwrap();
+    assert_eq!(json["axis"].as_u64(), Some(live_axis));
+    assert_eq!(honmei_horses(&json), vec![live_axis]);
+}
+
+/// オッズが無く買い目を組めないときも、盤の ◎ は固定の軸に付く（#804）: 記録◎ だけ → 記録◎、
+/// 朝の選定があれば朝の軸。
+#[sqlx::test(migrations = "../../../deployments/db/migrations")]
+async fn board_marks_the_fixed_axis_without_odds(pool: sqlx::PgPool) {
+    use paddock_use_case::repository::{MorningSelection, MorningSelectionRepository};
+    let repo = PostgresRepository::new(pool.clone());
+    repo.save_race_card(&sample_card()).await.unwrap();
+    let app = build_service!(pool);
+    let board = |app| async move {
+        body_json(
+            test::call_service(
+                app,
+                test::TestRequest::get()
+                    .uri(&format!("/api/races/{RACE_ID}/board"))
+                    .to_request(),
+            )
+            .await,
+        )
+        .await
+    };
+    let before = board(&app).await;
+    assert_eq!(before["odds_available"], false);
+    let live_axis = before["live_axis"].as_u64().unwrap() as u32;
+    assert_eq!(honmei_horses(&before), vec![u64::from(live_axis)]);
+
+    // 記録◎ だけ（朝の選定なし）→ ◎ は記録◎。
+    let others: Vec<u32> = [1u32, 2, 3]
+        .into_iter()
+        .filter(|&n| n != live_axis)
+        .collect();
+    let (recorded, morning_axis) = (others[0], others[1]);
+    save_honmei_pad(&repo, recorded).await;
+    let rec = board(&app).await;
+    assert_eq!(rec["odds_available"], false);
+    assert_eq!(rec["fix_source"]["kind"], "recorded_axis");
+    assert_eq!(honmei_horses(&rec), vec![u64::from(recorded)]);
+
+    // 朝の選定が入れば朝の軸（記録◎ より優先）。
+    repo.save_morning_selection(&MorningSelection {
+        race_id: RACE_ID.to_string(),
+        date: date(),
+        axis: morning_axis,
+        partners: vec![live_axis, recorded],
+        konsen_band: vec![],
+        odds_fetched_at: "2026-03-28T00:30:00+00:00".to_string(),
+        computed_at: "2026-03-28T01:00:00Z".to_string(),
+    })
+    .await
+    .unwrap();
+    let morning = board(&app).await;
+    assert_eq!(morning["odds_available"], false);
+    assert_eq!(
+        morning["fixed_selection"]["axis"].as_u64(),
+        Some(u64::from(morning_axis))
+    );
+    assert_eq!(honmei_horses(&morning), vec![u64::from(morning_axis)]);
+}
+
+/// 記録◎（pad の Honmei）を 1 頭だけ保存する。
+async fn save_honmei_pad(repo: &PostgresRepository, horse_num: u32) {
+    use paddock_domain::{Mark, PadPrediction, PredictionHorse};
+    use paddock_use_case::repository::PadPredictionRepository;
+    repo.save_pad_prediction(
+        &PadPrediction {
+            date: date(),
+            venue: Venue::Nakayama,
+            race_num: 1,
+            title: None,
+            budget: None,
+            strategy_note: None,
+            commentary: None,
+            horses: vec![PredictionHorse {
+                horse_num,
+                horse_name: "ウマ".to_string(),
+                jockey: None,
+                mark: Some(Mark::Honmei),
+                win_odds: None,
+                popularity: None,
+                win_prob: None,
+                place_prob: None,
+                show_prob: None,
+                comment: None,
+            }],
+            bets: Vec::new(),
+            result: None,
+        },
+        Utc::now(),
+    )
+    .await
+    .unwrap();
 }
 
 /// board の買い目（axis/partners/bets/roi）は /recommendations と完全一致する（同経路の担保）。
@@ -837,8 +1007,9 @@ async fn board_bets_match_recommendations(pool: sqlx::PgPool) {
     );
     assert_eq!(board["roi"], reco["roi"], "ROI が一致");
 
-    // 盤の ◎（model_rank==1 の馬）＝買い目軸（build_portfolio の axis）が一致することを固定する。
-    // 両者は blended 首位・同一 tie-break（win_prob 降順→馬番昇順）由来なのでズレない前提を回帰で担保。
+    // 固定が無いレースでは、ライブの首位（model_rank==1 の馬）＝買い目軸（build_portfolio の axis）が一致する
+    // ことを固定する。両者は blended 首位・同一 tie-break（win_prob 降順→馬番昇順）由来なのでズレない。
+    // 盤の ◎ は買い目の軸に付く（#804）ので、このとき ◎ もライブの首位になる。
     let axis = board["axis"].as_u64().unwrap();
     let top = board["horses"]
         .as_array()
@@ -849,8 +1020,9 @@ async fn board_bets_match_recommendations(pool: sqlx::PgPool) {
     assert_eq!(
         top["horse_num"].as_u64().unwrap(),
         axis,
-        "盤の ◎(model_rank 1) と買い目軸は同一馬でなければならない"
+        "固定なしではライブの首位(model_rank 1) と買い目軸は同一馬でなければならない"
     );
+    assert_eq!(honmei_horses(&board), vec![axis], "盤の ◎ は買い目軸");
 
     // 全券種 priced なフィクスチャなので被覆率のズレは無い（下の欠落テストと対で意味を持つ）。
     assert_eq!(board["unpriced_legs"], 0, "全 priced なら 0");

@@ -352,6 +352,7 @@ export function RaceBoard() {
           <div className="board-summary">
             {/* 混戦サマリは買い目と同じ構造（#794）: 朝の固定があれば朝の判定・固定の軸の勝率なので
                 「（朝）」を付ける。朝の固定があれば頭数は null（保存しているのはボックスの馬で、しきい値以上の頭数ではない）で出さない。
+                記録◎ だけの固定で記録◎ がライブの首位でないときも頭数は null（しきい値が首位の勝率基準のため・#804）。
                 desktop の盤（viewmodel/race.rs の konsen_label）と同じ文言。 */}
             {d.confusion.is_confused ? (
               <span className="chip chip-konsen">
