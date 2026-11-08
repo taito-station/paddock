@@ -6,11 +6,14 @@
 #
 # 【失敗許容方針】
 #   cargo audit / npm audit は「脆弱性が見つかると exit 1」が既定動作。
-#   ただし RUSTSEC の未修正 advisory（upstream 修正待ち等）で恒常 red になることがある。
-#   そのため:
-#     - continue-on-error: false（デフォルト=厳格 fail）で運用を始める。
-#     - 恒常 red になる advisory が出たら cargo audit の --ignore フラグで個別除外し、
+#   失敗はジョブの失敗とログで示す（書き込み権限は持たない・#820）。
+#     - continue-on-error: false（デフォルト=厳格 fail）。
+#     - 検出した脆弱性は既定では ignore せず、Issue を立てて依存を上げるまで red のままにする
+#       （修正版がある advisory まで隠さないため・#820）。
+#     - upstream に修正が無い等で ignore するときだけ、cargo-audit の --ignore で個別に除外し、
 #       コメントに除外理由と RUSTSEC ID を明記する（無音 ignore は禁止）。
+#     - cargo-audit は脆弱性があると非 0 で終わる。unmaintained・unsound の警告だけなら 0
+#       （--deny warnings は付けない）。
 #     - npm audit は --audit-level=moderate で中程度以上の脆弱性のみ fail にする
 #       （devDependencies の低危険度 advisory でのノイズを避ける）。
 #
@@ -25,12 +28,11 @@ on:
     - cron: "15 0 * * 1"
   workflow_dispatch:
 
-# workflow 全体は読取だけ。checks: write は cargo-audit ジョブにだけ付ける（#728）。npm-audit は npm ci で
-# 第三者コード（lifecycle scripts）を動かすので、書き込み権限のトークンを渡さない。cargo-audit ジョブも
-# audit-check が版を固定せずに cargo install cargo-audit を実行するので第三者コードは動く（作り直しは別 Issue）。
+# 全ジョブ読取だけ（#820）。どちらのジョブも第三者のコードを動かさない: cargo-audit は公式のリリースバイナリを sha256 で
+# 照合してから動かし、ソースをビルドしない。npm-audit は package-lock.json だけを読み、npm ci（lifecycle scripts）をしない。
 permissions:
   contents: read
-# actions/checkout は persist-credentials: false（ci.yml と同じ方針・#728）。audit-check はトークンを入力で受け取る。
+# actions/checkout は persist-credentials: false（ci.yml と同じ方針・#728）。
 
 jobs:
   # ──────────────────────────────────────────────
@@ -40,24 +42,37 @@ jobs:
     name: cargo audit (RustSec)
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    permissions:
-      contents: read
-      # audit-check は workflow_dispatch のとき Check Runs API で結果を投稿する（checks: write）。schedule のときは
-      # Issues API で報告しようとし、issues: write が無いので落ちる（既存の不具合・別 Issue で扱う）。
-      checks: write
+    # cargo-audit は rustsec/rustsec の公式リリースの musl 版（静的リンク・ランナーの glibc に依存しない）を使い、
+    # sha256 を照合してから動かす（#820）。rustsec/audit-check は schedule 起動で issues: write を要し、版を固定せずに
+    # cargo install cargo-audit で約 300 クレートをビルドしていたのでやめた。
+    # 版は dependabot の対象外なので手で上げる。上げるときは CARGO_AUDIT_VERSION を書き換え、次のどちらかで sha256 を取り直す:
+    #   gh api repos/rustsec/rustsec/releases/tags/cargo-audit%2Fv<版> -q '.assets[] | select(.name|test("x86_64-unknown-linux-musl")) | .digest | ltrimstr("sha256:")'
+    #   curl -fsSL <下の URL> | sha256sum
+    # advisory DB は実行時に github.com/RustSec/advisory-db から git で取る（データでコードは動かさない。取れなければ落ちる。
+    # 固定しないので、DB が改ざんされると検出が漏れうる）。yanked の検査のため crates.io の index も取る（失敗しても警告だけ）。
+    env:
+      CARGO_AUDIT_VERSION: "0.22.2"
+      CARGO_AUDIT_SHA256: "7fb9497f8594b389e5fce5ef9b92db08432996895b2e0c5a0167a69ed445c428"
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      # rustsec/audit-check は Cargo.lock を読み RustSec Advisory DB を照合する。
-      # Rust toolchain のインストールは不要（audit-check が内部で処理）。
+      - name: Install cargo-audit (official release, sha256 pinned)
+        run: |
+          set -euo pipefail
+          name="cargo-audit-x86_64-unknown-linux-musl-v${CARGO_AUDIT_VERSION}"
+          curl -fsSL --retry 3 --retry-all-errors -o "$RUNNER_TEMP/cargo-audit.tgz" \
+            "https://github.com/rustsec/rustsec/releases/download/cargo-audit%2Fv${CARGO_AUDIT_VERSION}/${name}.tgz"
+          echo "${CARGO_AUDIT_SHA256}  $RUNNER_TEMP/cargo-audit.tgz" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/cargo-audit"
+          tar xzf "$RUNNER_TEMP/cargo-audit.tgz" --strip-components=1 -C "$RUNNER_TEMP/cargo-audit"
+
+      # Cargo.lock を読み RustSec Advisory DB と照合する。Rust toolchain は使わない。
+      # upstream に修正が無い等で除外するときだけ、理由と RUSTSEC ID を明記して --ignore を足す:
+      #   "$RUNNER_TEMP/cargo-audit/cargo-audit" audit --ignore RUSTSEC-XXXX-YYYY  # 理由: ...
       - name: cargo audit
-        uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2.0.0
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          # 恒常 red になる advisory を除外する場合はここに追記（理由と RUSTSEC ID を必ず明記）:
-          # args: --ignore RUSTSEC-XXXX-YYYY  # 理由: ...
+        run: '"$RUNNER_TEMP/cargo-audit/cargo-audit" audit'
 
   # ──────────────────────────────────────────────
   # npm: npm audit (web/)
@@ -70,19 +85,15 @@ jobs:
       run:
         working-directory: web
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
+      # npm audit は package-lock.json だけを読む。npm ci は第三者の lifecycle scripts を動かすのでしない（#820）。
       - name: Install Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-
-      - name: Install dependencies
-        run: npm ci
 
       # --audit-level=moderate: critical/high/moderate を fail にし、low は許容する。
       # devDependencies の低危険度 advisory による恒常 red を避けるバランス設定。
