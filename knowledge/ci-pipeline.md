@@ -14,7 +14,7 @@ sources:
   - .github/workflows/ci.yml
   - .github/workflows/audit.yml
   - .github/dependabot.yml
-distilled_from_sha: "cdddd7d0"
+distilled_from_sha: "d774fac0"
 updated: "2026-11-08"
 ---
 
