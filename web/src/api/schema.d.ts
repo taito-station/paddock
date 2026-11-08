@@ -461,12 +461,19 @@ export interface components {
             horse_name: string;
             /** Format: int32 */
             horse_num: number;
-            /** @description 重なり馬（モデル勝率1位 かつ 単勝人気1位＝ほぼ複勝圏サイン）。 */
+            /**
+             * @description 重なり馬（モデル勝率1位 かつ 単勝人気1位＝ほぼ複勝圏サイン）。印とは独立で、買い目の軸が
+             *     モデル勝率1位でないレースでは ◎ ではない馬に立ちうる（モデル勝率1位が 1 番人気のとき・#804）。
+             */
             is_overlay: boolean;
             /** @description 乖離馬（モデル上位×市場人気低＝妙味・ワイドボックス候補）。 */
             is_value: boolean;
             jockey?: string | null;
-            /** @description 機械導出の印スラッグ（honmei/taikou/tanana/hoshi）。無印は `null`。 */
+            /**
+             * @description 機械導出の印スラッグ（honmei/taikou/tanana/hoshi）。無印は `null`。honmei（◎）は買い目の軸
+             *     （`axis`。オッズが無ければ固定の軸、それも無ければモデル勝率1位）、taikou/tanana（○▲）は ◎ を除いた
+             *     モデル勝率順の上位 2 頭、hoshi（☆）はそれ以外の乖離馬（#804）。
+             */
             mark?: string | null;
             /**
              * Format: double
@@ -531,26 +538,32 @@ export interface components {
         };
         /**
          * @description 混戦サマリ（CLAUDE.md の混戦判定を機械化した結果）。買い目と同じ構造を表す（#794）:
-         *     `fixed_selection` があれば朝の固定の混戦の帯と軸、無ければライブの判定。
+         *     `fixed_selection` があれば朝の固定の混戦の帯と軸、無ければライブの判定。記録◎ だけの固定
+         *     （`fix_source.kind == "recorded_axis"`）は、判定はライブで ◎ は記録◎（#804）。
          */
         ConfusionSchema: {
             /**
              * Format: double
-             * @description ◎（朝の固定があればその軸、無ければモデル勝率1位）のライブの勝率 [0,1]。
+             * @description ◎（買い目の軸。朝の固定・記録◎ の固定があればその軸、無ければモデル勝率1位）のライブの勝率 [0,1]。
              */
             axis_win_prob: number;
-            /** @description 混戦か（◎の勝率×0.70 以上が ◎含め 4 頭以上）。朝の固定があれば朝の判定。 */
+            /**
+             * @description 混戦か（◎の勝率×0.70 以上が ◎含め 4 頭以上）。朝の固定があれば朝の判定。記録◎ だけの固定で記録◎ が
+             *     モデル勝率1位でないときは、1 位の勝率 × 0.70 以上が 4 頭以上か（買い目と同じライブの判定・#804）。
+             */
             is_confused: boolean;
             /**
              * Format: int32
              * @description しきい値以上の頭数（◎含む）。朝の固定があるときは `null`（保存しているのはボックスの馬で、
-             *     しきい値以上の頭数は保存していない）。
+             *     しきい値以上の頭数は保存していない）。記録◎ だけの固定で記録◎ がモデル勝率1位でないときも `null`
+             *     （しきい値が ◎ ではなく 1 位の勝率基準のため・#804）。
              */
             qualifying_count?: number | null;
             /**
              * Format: double
-             * @description `axis_win_prob * 0.70`。朝の固定が無ければ判定しきい値。朝の固定があるときは今の軸の勝率から
-             *     出した参考値で、判定（朝）には使っていない。
+             * @description 固定が無ければ判定しきい値（`axis_win_prob * 0.70`）。朝の固定があるときは今の軸の勝率から
+             *     出した参考値で、判定（朝）には使っていない。記録◎ だけの固定で記録◎ がモデル勝率1位でないときは、
+             *     判定に使ったライブの値（1位の勝率 × 0.70・#804）。
              */
             threshold: number;
         };
@@ -1086,8 +1099,8 @@ export interface components {
             horses: components["schemas"]["BoardHorseSchema"][];
             /**
              * Format: int32
-             * @description ライブ再計算の軸＝市場ブレンド首位（機械◎）。固定した軸（`fixed_selection.axis`、無ければ `recorded_axis`）と
-             *     異なるとき UI は乖離警告を出す（#388・#767）。
+             * @description ライブ再計算の軸＝市場ブレンド首位（`model_rank == 1`）。#804 以降、盤の ◎ は買い目の軸で、これとは限らない。
+             *     固定した軸（`fixed_selection.axis`、無ければ `recorded_axis`）と異なるとき UI は乖離警告を出す（#388・#767）。
              */
             live_axis?: number | null;
             /**

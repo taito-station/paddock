@@ -68,7 +68,8 @@ pub struct RaceBoard {
     /// 持たないので `FirstSweep` は来ない。記録のときに買い目と一緒に送り、`predict_bets.fix_source` に残す
     /// （表示した買い目と出所を同じ盤から取るので必ず一致する）。
     pub fix_source: FixSource,
-    /// ライブ再計算の軸＝blended（市場ブレンド。本番は α=0＝市場そのもの・#810）首位（機械◎, `model_rank==1`）。
+    /// ライブ再計算の軸＝blended（市場ブレンド。本番は α=0＝市場そのもの・#810）首位（`model_rank==1`。
+    /// #804 以降、盤の ◎ は買い目の軸で、これとは限らない）。
     /// 固定した軸（朝の固定、無ければ記録軸）との乖離警告に使う。直前オッズで動くのはこちら（#388）。
     pub live_axis: Option<u32>,
     pub confusion: Confusion,
@@ -124,17 +125,21 @@ pub struct FixedSelection {
 
 /// 混戦サマリ（CLAUDE.md の混戦判定を機械化）。買い目（`portfolio`）と同じ構造を表す（#794）:
 /// 朝の固定（`fixed_selection`）があれば固定の混戦の帯と軸、無ければライブの blended で判定する。
-#[derive(Debug, Clone)]
+/// 記録◎ だけの固定（#804）は、判定はライブの帯（買い目と同じ）で、◎ は記録◎。
+#[derive(Debug, Clone, PartialEq)]
 pub struct Confusion {
     pub is_confused: bool,
-    /// ◎（買い目の軸。朝の固定があればその軸、無ければモデル勝率1位）のライブの勝率 [0,1]。
+    /// ◎（買い目の軸。朝の固定・記録◎ の固定があればその軸、無ければモデル勝率1位）のライブの勝率 [0,1]。
     /// 該当馬が居なければ 0.0。
     pub axis_win_prob: f64,
-    /// `axis_win_prob * KONSEN_BAND_RATIO`。朝の固定が無ければ判定しきい値。朝の固定があるときは
-    /// 今の軸の勝率から出した参考値で、判定（朝）には使っていない。
+    /// 固定が無ければ判定しきい値（`axis_win_prob * KONSEN_BAND_RATIO`）。朝の固定があるときは
+    /// 今の軸の勝率から出した参考値で、判定（朝）には使っていない。記録◎ だけの固定で記録◎ がライブの首位で
+    /// ないときは、判定に使ったライブの値（首位の勝率 × `KONSEN_BAND_RATIO`・#804）。
     pub threshold: f64,
     /// しきい値以上の頭数（◎含む）。朝の固定があるときは `None`——保存した帯はボックスの馬（上位 5 頭まで）
-    /// で「しきい値以上の頭数」ではなく、朝の頭数は保存していない（#794）。
+    /// で「しきい値以上の頭数」ではなく、朝の頭数は保存していない（#794）。記録◎ だけの固定で記録◎ が
+    /// ライブの首位でないときも `None`——しきい値が ◎ ではなく首位の勝率を基準にしていて、「◎勝率 × 0.70
+    /// 以上 N 頭」と読めてしまうため（#804）。
     pub qualifying_count: Option<u32>,
 }
 
@@ -310,9 +315,25 @@ impl<
             .map(|o| compose_portfolio(&views, o, budget, &pinned));
         let fixed_selection =
             fixed_selection_of(morning_selection, &field, live_axis, portfolio.as_ref());
+        // 記録◎ だけの固定（朝の選定なし・#804）。盤の ◎ を記録◎ にそろえる（#794 では対象外だった）。
+        let recorded_fix = matches!(fix_source, FixSource::RecordedAxis)
+            .then_some(recorded_axis)
+            .flatten();
+        // 盤の ◎（印・◎勝率・書評）が指す買い目の軸（#804）。
+        let axis = board_axis(
+            portfolio.as_ref().and_then(|p| p.axis.map(|a| a.value())),
+            fixed_selection.as_ref().map(|f| f.axis),
+            recorded_fix,
+            live_axis,
+        );
 
-        let mut horses =
-            build_board_horses(&views.blended, &views.pure, odds.as_ref(), card.as_ref());
+        let mut horses = build_board_horses(
+            &views.blended,
+            &views.pure,
+            odds.as_ref(),
+            card.as_ref(),
+            axis,
+        );
 
         // 朝↔現比較（#448）: 確率・軸・budget は現時点と同一のまま、参照オッズだけ朝 snapshot に
         // 差し替えてポートフォリオを再計算する（＝軸ロック思想の可視化: 軸は動かさずオッズのズレだけ見る）。
@@ -352,7 +373,7 @@ impl<
         for h in horses.iter_mut() {
             h.finishing_position = finishing.get(&h.horse_num).copied();
         }
-        let confusion = confusion_of(&views.blended, fixed_selection.as_ref());
+        let confusion = confusion_of(&views.blended, fixed_selection.as_ref(), recorded_fix);
         enrich_commentary(&mut horses, &views.explanations, pad.as_ref());
 
         // 手動ハンデ精査の材料（#628・提示専用）。出馬表があるときだけ引く（今回条件が要るため）。
@@ -382,13 +403,16 @@ impl<
             pad.as_ref().and_then(|p| p.commentary.as_deref()),
             &confusion,
             &horses,
-            fixed_selection.as_ref().map(|f| {
-                if morning_axis_scratched {
-                    FixedAxis::Scratched(f.axis)
-                } else {
-                    FixedAxis::Morning(f.axis)
-                }
-            }),
+            fixed_selection
+                .as_ref()
+                .map(|f| {
+                    if morning_axis_scratched {
+                        FixedAxis::Scratched(f.axis)
+                    } else {
+                        FixedAxis::Morning(f.axis)
+                    }
+                })
+                .or(recorded_fix.map(FixedAxis::Recorded)),
         );
 
         let (venue, surface, distance, race_num, date, post_time, race_name, race_class) =
@@ -548,11 +572,24 @@ fn build_board_horses(
     pure: &[HorseProbability],
     odds: Option<&RaceOdds>,
     card: Option<&paddock_domain::RaceCard>,
+    axis: Option<u32>,
 ) -> Vec<BoardHorse> {
     // 市場implied・人気（単勝オッズ由来）。
     let (implied, popularity) = compute_market(blended, odds);
     // モデル勝率順位（降順・1始まり）。
     let model_rank = model_ranks(blended);
+    // 乖離馬: model_rank は blended（表示用の勝率と同系統）で算出する。乖離判定を pure で行うと
+    // 盤に見える「勝率(blended)」と「妙味フラグ」の基準がズレて読み手が混乱するため、
+    // 表示と同じ blended 順位で市場人気(pop)との差を測る（純モデル差の増幅より整合性を優先）。
+    let is_value = |num: u32| {
+        let mr = *model_rank.get(&num).unwrap_or(&0);
+        mr <= VALUE_MODEL_RANK_MAX
+            && popularity
+                .get(&num)
+                .is_some_and(|&p| p as i32 - mr as i32 >= VALUE_RANK_GAP)
+    };
+    // 機械印（#804）: ◎ は買い目の軸、○▲ は軸を除いたライブの勝率順の上位 2 頭、☆ は残りの乖離馬。
+    let marks = derive_marks(&model_rank, axis, is_value);
 
     blended
         .iter()
@@ -570,17 +607,13 @@ fn build_board_horses(
                 .and_then(|o| o.win.get(&hp.horse_num))
                 .map(|v| v.value());
             let place = odds.and_then(|o| o.place.get(&hp.horse_num));
-            // model_rank は blended（表示用の勝率と同系統）で算出する。乖離判定を pure で行うと
-            // 盤に見える「勝率(blended)」と「妙味フラグ」の基準がズレて読み手が混乱するため、
-            // 表示と同じ blended 順位で市場人気(pop)との差を測る（純モデル差の増幅より整合性を優先）。
             let mr = *model_rank.get(&num).unwrap_or(&0);
             let pop = popularity.get(&num).copied();
-            // 重なり馬: blended 勝率1位 かつ 単勝人気1位。◎(model_rank==1)＝買い目軸(build_portfolio の
-            // rank_axis_partners も blended 首位・同一 tie-break)なので、盤の ◎ と「軸 N」は構造上一致する。
+            // 重なり馬: blended 勝率1位 かつ 単勝人気1位。印とは独立（#804 以降、買い目の軸がライブの
+            // 首位でないレースでは ◎ ではない馬に立つ）。
             let is_overlay = mr == 1 && pop == Some(1);
-            let is_value = mr <= VALUE_MODEL_RANK_MAX
-                && pop.is_some_and(|p| p as i32 - mr as i32 >= VALUE_RANK_GAP);
-            let mark = derive_mark(mr, is_value).map(|m| m.as_slug().to_string());
+            let is_value = is_value(num);
+            let mark = marks.get(&num).map(|m| m.as_slug().to_string());
 
             BoardHorse {
                 gate_num: entry.map(|e| e.gate_num.value()),
@@ -645,7 +678,7 @@ fn enrich_commentary(
 
 /// レース書評を決める（#348）。人手 `human` が非空ならそれを優先、無ければルールベース生成を返す。
 /// ルールベースが空（◎不在）なら `None`。人手優先の分岐を純関数に切り出して単体テスト可能にする。
-/// `fixed_axis` は朝の固定の軸（#794。書評の ◎ を買い目の軸にそろえる）。
+/// `fixed_axis` は朝の固定・記録◎ の固定の軸（#794・#804。書評の ◎ を買い目の軸にそろえる）。
 fn resolve_race_comment(
     human: Option<&str>,
     confusion: &Confusion,
@@ -719,15 +752,53 @@ fn model_ranks(blended: &[HorseProbability]) -> std::collections::HashMap<u32, u
         .collect()
 }
 
-/// 機械印: モデル勝率 1→◎ 2→○ 3→▲、それ以外で乖離馬なら ☆。無印は `None`。
-fn derive_mark(model_rank: u32, is_value: bool) -> Option<Mark> {
-    match model_rank {
-        1 => Some(Mark::Honmei),
-        2 => Some(Mark::Taikou),
-        3 => Some(Mark::Tanana),
-        _ if is_value => Some(Mark::Hoshi),
-        _ => None,
+/// 機械印（#804）: ◎ は買い目の軸 `axis`（出走していなければ・無ければライブの首位）、○▲ は ◎ を除いた
+/// ライブの勝率順（`model_rank`。同率は馬番昇順）の上位 2 頭、☆ はそれ以外の乖離馬。無印の馬はマップに無い。
+///
+/// 盤の ◎ を要約行の ◎勝率・書評・🔒 チップの軸と同じ馬にそろえる（#794 で要約行と書評は買い目の軸に
+/// なったが、印だけライブの首位のままで、同じ盤の ◎ が 2 頭を指していた）。
+fn derive_marks(
+    model_rank: &HashMap<u32, u32>,
+    axis: Option<u32>,
+    is_value: impl Fn(u32) -> bool,
+) -> HashMap<u32, Mark> {
+    let mut order: Vec<(u32, u32)> = model_rank.iter().map(|(&n, &r)| (r, n)).collect();
+    order.sort_unstable();
+    let ranked: Vec<u32> = order.into_iter().map(|(_, n)| n).collect();
+    let mut marks = HashMap::new();
+    let Some(honmei) = axis
+        .filter(|a| ranked.contains(a))
+        .or_else(|| ranked.first().copied())
+    else {
+        return marks;
+    };
+    marks.insert(honmei, Mark::Honmei);
+    let mut rest = ranked.iter().copied().filter(|&n| n != honmei);
+    if let Some(n) = rest.next() {
+        marks.insert(n, Mark::Taikou);
     }
+    if let Some(n) = rest.next() {
+        marks.insert(n, Mark::Tanana);
+    }
+    for n in rest.filter(|&n| is_value(n)) {
+        marks.insert(n, Mark::Hoshi);
+    }
+    marks
+}
+
+/// 盤の「買い目の軸」（#804）。印・◎勝率・書評がこの 1 頭を ◎ として指す。
+/// 買い目（`portfolio.axis`）→ 朝の固定の軸 → 記録◎ → ライブの首位の順（REST の `axis` の doc と同じ）。
+/// オッズが無く買い目を組めないときも、固定があればその軸に ◎ を付ける。
+fn board_axis(
+    portfolio_axis: Option<u32>,
+    fixed_axis: Option<u32>,
+    recorded_axis: Option<u32>,
+    live_axis: Option<u32>,
+) -> Option<u32> {
+    portfolio_axis
+        .or(fixed_axis)
+        .or(recorded_axis)
+        .or(live_axis)
 }
 
 /// 記録軸（#388 軸ロック）: `pad` の◎(Honmei) 馬番。ただし出走集合 `blended` に在るときだけ有効に
@@ -801,7 +872,7 @@ fn fixed_selection_of(
     })
 }
 
-/// ライブ再計算軸（#388）: `blended`（市場ブレンド。本番は α=0＝市場そのもの・#810）首位＝機械◎（`model_rank==1`）。
+/// ライブ再計算軸（#388）: `blended`（市場ブレンド。本番は α=0＝市場そのもの・#810）首位（`model_rank==1`）。
 /// 記録軸との乖離警告に使う（直前オッズで動くのはこちら）。空なら `None`。
 fn live_axis_of(blended: &[HorseProbability]) -> Option<u32> {
     model_ranks(blended)
@@ -829,9 +900,28 @@ fn compute_confusion(blended: &[HorseProbability]) -> Confusion {
 /// 買い目（`build_portfolio`）と同じ `len() >= KONSEN_MIN_HORSES`、◎勝率は固定の軸のライブの勝率、
 /// 頭数は出さない（帯はボックスの馬で、しきい値以上の頭数ではない）。無ければライブの
 /// [`compute_confusion`]（このとき買い目もライブの帯で判定しているので一致する）。
-fn confusion_of(blended: &[HorseProbability], fixed: Option<&FixedSelection>) -> Confusion {
+///
+/// 記録◎ だけの固定（`fixed` が無く `recorded_axis` がある・#804）は、混戦の判定と しきい値はライブ
+/// （買い目もライブの帯で判定している）、◎勝率は記録◎ の勝率。記録◎ がライブの首位でなければ頭数は出さない
+/// （しきい値が ◎ ではなく首位の勝率基準のため）。首位なら固定なしと同じ。
+fn confusion_of(
+    blended: &[HorseProbability],
+    fixed: Option<&FixedSelection>,
+    recorded_axis: Option<u32>,
+) -> Confusion {
     let Some(f) = fixed else {
-        return compute_confusion(blended);
+        let live = compute_confusion(blended);
+        let Some(axis) = recorded_axis.filter(|&a| Some(a) != live_axis_of(blended)) else {
+            return live;
+        };
+        return Confusion {
+            axis_win_prob: blended
+                .iter()
+                .find(|hp| hp.horse_num.value() == axis)
+                .map_or(0.0, |hp| hp.win_prob),
+            qualifying_count: None,
+            ..live
+        };
     };
     let axis_win_prob = blended
         .iter()
@@ -890,7 +980,7 @@ mod tests {
         // pure=0.20→place 0.40/show 0.60。表示系(ブ)と純系(モ)が別値になる組で弁別する。
         let blended = vec![hp(1, 0.40)];
         let pure = vec![hp(1, 0.20)];
-        let horses = build_board_horses(&blended, &pure, None, None);
+        let horses = build_board_horses(&blended, &pure, None, None, None);
         let h = &horses[0];
         assert!((h.win_prob - 0.40).abs() < 1e-9, "表示勝率はブレンド");
         assert!((h.place_prob - 0.80).abs() < 1e-9, "表示連対率はブレンド");
@@ -917,7 +1007,7 @@ mod tests {
         // 1番: モデル1位 かつ 単勝最低（人気1位）→ overlay。
         let b = vec![hp(1, 0.40), hp(2, 0.30), hp(3, 0.20)];
         let o = odds_with_win(&[(1, 2.0), (2, 3.0), (3, 5.0)]);
-        let horses = build_board_horses(&b, &b, Some(&o), None);
+        let horses = build_board_horses(&b, &b, Some(&o), None, None);
         let h1 = horses.iter().find(|h| h.horse_num == 1).unwrap();
         assert!(h1.is_overlay);
         assert_eq!(h1.mark.as_deref(), Some("honmei"));
@@ -928,7 +1018,7 @@ mod tests {
         // 1番: モデル1位だが単勝が一番高い（人気最下位）→ 乖離馬（is_value）。
         let b = vec![hp(1, 0.40), hp(2, 0.30), hp(3, 0.20), hp(4, 0.10)];
         let o = odds_with_win(&[(1, 20.0), (2, 2.0), (3, 3.0), (4, 4.0)]);
-        let horses = build_board_horses(&b, &b, Some(&o), None);
+        let horses = build_board_horses(&b, &b, Some(&o), None, None);
         let h1 = horses.iter().find(|h| h.horse_num == 1).unwrap();
         assert_eq!(h1.model_rank, 1);
         assert_eq!(h1.popularity, Some(4));
@@ -960,13 +1050,137 @@ mod tests {
             (8, 8.0),
             (4, 50.0), // ④ を最も高オッズ＝人気8 に
         ]);
-        let horses = build_board_horses(&b, &b, Some(&o), None);
+        let horses = build_board_horses(&b, &b, Some(&o), None, None);
         let h4 = horses.iter().find(|h| h.horse_num == 4).unwrap();
         assert_eq!(h4.model_rank, 4);
         assert_eq!(h4.popularity, Some(8));
         assert!(h4.is_value);
         assert!(!h4.is_overlay);
         assert_eq!(h4.mark.as_deref(), Some("hoshi"));
+    }
+
+    /// 馬番 → 印スラッグ（無印は None）。
+    fn mark_of(horses: &[BoardHorse], num: u32) -> Option<&str> {
+        horses
+            .iter()
+            .find(|h| h.horse_num == num)
+            .and_then(|h| h.mark.as_deref())
+    }
+
+    #[test]
+    fn honmei_follows_the_buying_axis_and_taikou_tanana_are_the_live_rest() {
+        // #804: ◎ は買い目の軸。○▲ は軸を除いたライブの勝率順の上位 2 頭。
+        let b = vec![hp(1, 0.40), hp(2, 0.30), hp(3, 0.20), hp(4, 0.10)];
+        // 軸がライブ 2 位。
+        let h = build_board_horses(&b, &b, None, None, Some(2));
+        assert_eq!(mark_of(&h, 2), Some("honmei"));
+        assert_eq!(mark_of(&h, 1), Some("taikou"));
+        assert_eq!(mark_of(&h, 3), Some("tanana"));
+        assert_eq!(mark_of(&h, 4), None);
+        // 軸がライブ 4 位（top3 の外）。ライブ 3 位は ○▲ から外れる。
+        let h = build_board_horses(&b, &b, None, None, Some(4));
+        assert_eq!(mark_of(&h, 4), Some("honmei"));
+        assert_eq!(mark_of(&h, 1), Some("taikou"));
+        assert_eq!(mark_of(&h, 2), Some("tanana"));
+        assert_eq!(mark_of(&h, 3), None);
+        // model_rank（ライブの順位）は印に合わせて変えない。
+        assert_eq!(h.iter().find(|x| x.horse_num == 4).unwrap().model_rank, 4);
+        // 軸がライブの首位なら今までと同じ。軸が無い（None）ときもライブの首位が ◎。
+        for axis in [Some(1), None] {
+            let h = build_board_horses(&b, &b, None, None, axis);
+            assert_eq!(mark_of(&h, 1), Some("honmei"));
+            assert_eq!(mark_of(&h, 2), Some("taikou"));
+            assert_eq!(mark_of(&h, 3), Some("tanana"));
+            assert_eq!(mark_of(&h, 4), None);
+        }
+    }
+
+    #[test]
+    fn hoshi_goes_to_an_unmarked_value_horse_and_the_axis_keeps_honmei() {
+        // ③: ライブ 3 位・人気 6（gap 3）＝ 妙味。軸⑤（ライブ 5 位）のとき ○▲ は①② なので ③ は ☆。
+        let b = vec![
+            hp(1, 0.30),
+            hp(2, 0.25),
+            hp(3, 0.20),
+            hp(4, 0.12),
+            hp(5, 0.08),
+            hp(6, 0.05),
+        ];
+        let o = odds_with_win(&[(1, 2.0), (2, 3.0), (4, 4.0), (5, 5.0), (6, 6.0), (3, 50.0)]);
+        let h = build_board_horses(&b, &b, Some(&o), None, Some(5));
+        assert_eq!(mark_of(&h, 5), Some("honmei"));
+        assert_eq!(mark_of(&h, 1), Some("taikou"));
+        assert_eq!(mark_of(&h, 2), Some("tanana"));
+        assert_eq!(mark_of(&h, 3), Some("hoshi"));
+        assert_eq!(mark_of(&h, 4), None);
+        // 軸自身が妙味なら ◎ を優先する（☆ にしない）。
+        let h = build_board_horses(&b, &b, Some(&o), None, Some(3));
+        assert_eq!(mark_of(&h, 3), Some("honmei"));
+        assert!(h.iter().all(|x| x.mark.as_deref() != Some("hoshi")));
+    }
+
+    #[test]
+    fn honmei_falls_back_to_live_top_when_the_axis_is_not_running() {
+        // 防御: 出走していない馬番が軸に来たら（今の呼び出し元は出走馬で絞るので来ない）、◎ はライブの首位。
+        let b = vec![hp(1, 0.40), hp(2, 0.30), hp(3, 0.20)];
+        let h = build_board_horses(&b, &b, None, None, Some(9));
+        assert_eq!(mark_of(&h, 1), Some("honmei"));
+        assert_eq!(mark_of(&h, 2), Some("taikou"));
+        assert_eq!(mark_of(&h, 3), Some("tanana"));
+    }
+
+    #[test]
+    fn marks_with_fewer_than_three_horses() {
+        let b = vec![hp(1, 0.60), hp(2, 0.40)];
+        let h = build_board_horses(&b, &b, None, None, Some(2));
+        assert_eq!(mark_of(&h, 2), Some("honmei"));
+        assert_eq!(mark_of(&h, 1), Some("taikou"));
+        assert!(h.iter().all(|x| x.mark.as_deref() != Some("tanana")));
+    }
+
+    #[test]
+    fn taikou_tanana_break_ties_by_horse_num() {
+        // ②③④ が同率。軸② を除くと ○① ▲③（同率は馬番昇順）。
+        let b = vec![hp(1, 0.40), hp(2, 0.20), hp(3, 0.20), hp(4, 0.20)];
+        let h = build_board_horses(&b, &b, None, None, Some(2));
+        assert_eq!(mark_of(&h, 2), Some("honmei"));
+        assert_eq!(mark_of(&h, 1), Some("taikou"));
+        assert_eq!(mark_of(&h, 3), Some("tanana"));
+        assert_eq!(mark_of(&h, 4), None);
+    }
+
+    #[test]
+    fn board_axis_prefers_portfolio_then_fixed_then_recorded_then_live() {
+        assert_eq!(board_axis(Some(5), Some(4), Some(3), Some(1)), Some(5));
+        assert_eq!(board_axis(None, Some(4), Some(3), Some(1)), Some(4));
+        // オッズが無く買い目を組めない・朝の選定も無い・記録◎ だけ → 記録◎。
+        assert_eq!(board_axis(None, None, Some(3), Some(1)), Some(3));
+        assert_eq!(board_axis(None, None, None, Some(1)), Some(1));
+        assert_eq!(board_axis(None, None, None, None), None);
+    }
+
+    #[test]
+    fn confusion_of_recorded_axis_not_live_top() {
+        // #804: 記録◎ だけの固定で記録◎ がライブの首位でない。混戦の判定は買い目と同じライブの帯、
+        // ◎勝率は記録◎ の勝率、しきい値は判定に使ったライブの値（首位 × 0.70）、頭数は出さない。
+        let b = live_konsen();
+        let live = compute_confusion(&b);
+        let axis = b
+            .iter()
+            .min_by(|x, y| x.win_prob.partial_cmp(&y.win_prob).unwrap())
+            .unwrap();
+        let c = confusion_of(&b, None, Some(axis.horse_num.value()));
+        assert_eq!(c.is_confused, live.is_confused);
+        assert_eq!(c.axis_win_prob, axis.win_prob);
+        assert_eq!(c.threshold, live.threshold);
+        assert_eq!(c.qualifying_count, None);
+    }
+
+    #[test]
+    fn confusion_of_recorded_axis_at_live_top_is_live() {
+        let b = live_konsen();
+        let top = live_axis_of(&b).unwrap();
+        assert_eq!(confusion_of(&b, None, Some(top)), compute_confusion(&b));
     }
 
     #[test]
@@ -1018,7 +1232,7 @@ mod tests {
     fn confusion_of_without_fixed_is_live() {
         let b = live_konsen();
         let live = compute_confusion(&b);
-        let c = confusion_of(&b, None);
+        let c = confusion_of(&b, None, None);
         assert_eq!(c.is_confused, live.is_confused);
         assert_eq!(c.axis_win_prob, live.axis_win_prob);
         assert_eq!(c.threshold, live.threshold);
@@ -1036,7 +1250,7 @@ mod tests {
             hp(4, 0.07),
             hp(5, 0.06),
         ];
-        let c = confusion_of(&b, Some(&fixed(1, vec![1, 2, 3, 4, 5])));
+        let c = confusion_of(&b, Some(&fixed(1, vec![1, 2, 3, 4, 5])), None);
         assert!(c.is_confused);
         assert_eq!(c.qualifying_count, None);
     }
@@ -1044,14 +1258,14 @@ mod tests {
     #[test]
     fn confusion_of_fixed_band_below_min_is_not_konsen() {
         // 買い目（build_portfolio）と同じく、帯が KONSEN_MIN_HORSES 頭未満なら非混戦。
-        let c = confusion_of(&live_konsen(), Some(&fixed(1, vec![1, 2, 3])));
+        let c = confusion_of(&live_konsen(), Some(&fixed(1, vec![1, 2, 3])), None);
         assert!(!c.is_confused);
     }
 
     #[test]
     fn confusion_of_fixed_non_konsen_hides_count() {
         // ライブは混戦でも、朝の固定が非混戦なら非混戦。朝の頭数は保存していないので出さない。
-        let c = confusion_of(&live_konsen(), Some(&fixed(1, vec![])));
+        let c = confusion_of(&live_konsen(), Some(&fixed(1, vec![])), None);
         assert!(!c.is_confused);
         assert_eq!(c.qualifying_count, None);
     }
@@ -1059,14 +1273,14 @@ mod tests {
     #[test]
     fn confusion_of_fixed_axis_win_prob_is_fixed_axis() {
         // 朝の軸③がライブの首位①と違う → ◎勝率は③の勝率。しきい値も③基準。
-        let c = confusion_of(&live_konsen(), Some(&fixed(3, vec![])));
+        let c = confusion_of(&live_konsen(), Some(&fixed(3, vec![])), None);
         assert_eq!(c.axis_win_prob, 0.15);
         assert!((c.threshold - 0.15 * KONSEN_BAND_RATIO).abs() < 1e-12);
     }
 
     #[test]
     fn confusion_of_fixed_axis_absent_is_zero() {
-        let c = confusion_of(&live_konsen(), Some(&fixed(9, vec![])));
+        let c = confusion_of(&live_konsen(), Some(&fixed(9, vec![])), None);
         assert_eq!(c.axis_win_prob, 0.0);
         assert_eq!(c.threshold, 0.0);
     }
@@ -1226,7 +1440,7 @@ mod tests {
 
     #[test]
     fn live_axis_is_blended_top() {
-        // 機械◎(model_rank==1)＝blended 首位。同率は馬番昇順。
+        // ライブの首位(model_rank==1)＝blended 首位。同率は馬番昇順（#804 以降、盤の ◎ は買い目の軸で、これとは限らない）。
         let blended = vec![hp(5, 0.30), hp(8, 0.25), hp(1, 0.10)];
         assert_eq!(live_axis_of(&blended), Some(5));
         assert_eq!(live_axis_of(&[]), None);
@@ -1235,7 +1449,7 @@ mod tests {
     #[test]
     fn market_fields_none_without_odds() {
         let b = vec![hp(1, 0.40), hp(2, 0.30)];
-        let horses = build_board_horses(&b, &b, None, None);
+        let horses = build_board_horses(&b, &b, None, None, None);
         assert!(horses.iter().all(|h| h.market_implied.is_none()));
         assert!(horses.iter().all(|h| h.popularity.is_none()));
         // オッズ無しでも確率と model_rank は出る。
@@ -1297,7 +1511,7 @@ mod tests {
     #[test]
     fn enrich_prefers_human_comment_over_rulebase() {
         let b = vec![hp(1, 0.4)];
-        let mut horses = build_board_horses(&b, &b, None, None);
+        let mut horses = build_board_horses(&b, &b, None, None, None);
         let expls = vec![expl_surface_strong(1)];
         let pad = pad_with(1, Some("人手の寸評"), None);
         enrich_commentary(&mut horses, &expls, Some(&pad));
@@ -1309,7 +1523,7 @@ mod tests {
     #[test]
     fn enrich_falls_back_to_rulebase_when_no_human() {
         let b = vec![hp(1, 0.4)];
-        let mut horses = build_board_horses(&b, &b, None, None);
+        let mut horses = build_board_horses(&b, &b, None, None, None);
         let expls = vec![expl_surface_strong(1)];
         enrich_commentary(&mut horses, &expls, None);
         assert_eq!(horses[0].comment.as_deref(), Some("芝が得意。"));
@@ -1318,7 +1532,7 @@ mod tests {
     #[test]
     fn enrich_ignores_blank_human_comment() {
         let b = vec![hp(1, 0.4)];
-        let mut horses = build_board_horses(&b, &b, None, None);
+        let mut horses = build_board_horses(&b, &b, None, None, None);
         let expls = vec![expl_surface_strong(1)];
         let pad = pad_with(1, Some("   "), None); // 空白のみ → 不採用
         enrich_commentary(&mut horses, &expls, Some(&pad));
@@ -1333,7 +1547,7 @@ mod tests {
     fn enrich_human_overlay_applies_without_explanation() {
         // explanations 空でも人手 comment の overlay は効く（detail_lines は空）。
         let b = vec![hp(1, 0.4)];
-        let mut horses = build_board_horses(&b, &b, None, None);
+        let mut horses = build_board_horses(&b, &b, None, None, None);
         let pad = pad_with(1, Some("人手のみ"), None);
         enrich_commentary(&mut horses, &[], Some(&pad));
         assert_eq!(horses[0].comment.as_deref(), Some("人手のみ"));
@@ -1343,7 +1557,7 @@ mod tests {
     #[test]
     fn resolve_race_comment_prefers_human() {
         let b = vec![hp(1, 0.4), hp(2, 0.1)];
-        let horses = build_board_horses(&b, &b, None, None);
+        let horses = build_board_horses(&b, &b, None, None, None);
         let c = compute_confusion(&b);
         assert_eq!(
             resolve_race_comment(Some("人手レース評"), &c, &horses, None).as_deref(),
@@ -1354,7 +1568,7 @@ mod tests {
     #[test]
     fn resolve_race_comment_generates_or_blank_falls_back() {
         let b = vec![hp(1, 0.4), hp(2, 0.1)];
-        let horses = build_board_horses(&b, &b, None, None);
+        let horses = build_board_horses(&b, &b, None, None, None);
         let c = compute_confusion(&b);
         // 人手なし → ルールベース。空白のみの人手も同じくルールベースへ。
         assert!(
@@ -1430,7 +1644,7 @@ mod tests {
     fn enrich_handicap_maps_runs_and_layoff() {
         // 2026-08-16 新潟6R 稲妻S の ⑧カウスリップ相当（千直 2 走・3着/3着、前走 14 日前）。
         let b = vec![hp(1, 0.3)];
-        let mut horses = build_board_horses(&b, &b, None, None);
+        let mut horses = build_board_horses(&b, &b, None, None, None);
         let notes = notes_of(vec![(
             1,
             HandicapNoteRow {
@@ -1457,7 +1671,7 @@ mod tests {
     fn enrich_handicap_flags_untried_and_missing_history() {
         // ⑪モーデン相当（千直 0 走＝該当なし）と、近走 0 件の地方馬（偽の妙味の印）。
         let b = vec![hp(1, 0.2), hp(2, 0.1)];
-        let mut horses = build_board_horses(&b, &b, None, None);
+        let mut horses = build_board_horses(&b, &b, None, None, None);
         let notes = notes_of(vec![
             (
                 1,
@@ -1493,7 +1707,7 @@ mod tests {
     fn enrich_handicap_keeps_group_superset_for_yoshiba() {
         // 洋芝: 完全一致 0 走でも、函館の同条件があれば group_runs には出る（別行で併記する材料）。
         let b = vec![hp(1, 0.3)];
-        let mut horses = build_board_horses(&b, &b, None, None);
+        let mut horses = build_board_horses(&b, &b, None, None, None);
         let notes = notes_of(vec![(
             1,
             HandicapNoteRow {
@@ -1516,7 +1730,7 @@ mod tests {
     fn enrich_handicap_ignores_future_last_run() {
         // 前走日が当日より後（データ不整合）なら「休養 0 日」と誤読させず材料なしに倒す。
         let b = vec![hp(1, 0.3)];
-        let mut horses = build_board_horses(&b, &b, None, None);
+        let mut horses = build_board_horses(&b, &b, None, None, None);
         let notes = notes_of(vec![(
             1,
             HandicapNoteRow {
@@ -1544,7 +1758,7 @@ mod tests {
         // **既定値で埋めない**——埋めると `distance_untried: false` 等が「計算していない事実」の
         // 断言になる。`group_venues` も空に倒す（1 走も引けていないのに母集団だけ非空にしない）。
         let b = vec![hp(1, 0.3), hp(2, 0.2)];
-        let mut horses = build_board_horses(&b, &b, None, None);
+        let mut horses = build_board_horses(&b, &b, None, None, None);
         let group = apply_handicap(
             &mut horses,
             Err(crate::error::Error::Internal("DB 詰まり".into())),
@@ -1564,7 +1778,7 @@ mod tests {
         // 成功時は材料が付き、洋芝の芝なら group_venues も 2 場になる（上の縮退テストの対、
         // 「常に空を返す」実装が通ってしまわないようにする）。
         let b = vec![hp(1, 0.3)];
-        let mut horses = build_board_horses(&b, &b, None, None);
+        let mut horses = build_board_horses(&b, &b, None, None, None);
         let notes = notes_of(vec![(
             1,
             HandicapNoteRow {
@@ -1594,7 +1808,7 @@ mod tests {
         // notes に居ない馬（馬名の正規化失敗・取得漏れ）は既定値のまま＝フラグが立たない。
         // 「該当なし（走っていない）」と「材料なし（引けていない）」を取り違えないための境界。
         let b = vec![hp(1, 0.3)];
-        let mut horses = build_board_horses(&b, &b, None, None);
+        let mut horses = build_board_horses(&b, &b, None, None, None);
         enrich_handicap(&mut horses, HashMap::new(), ymd(2026, 8, 16));
         // `None` = 材料なし。既定値（`Some(HandicapNote::default())`）で埋めてはいけない
         // ——埋めると `no_past_runs: false` 等が「計算していない事実」の断言になる。

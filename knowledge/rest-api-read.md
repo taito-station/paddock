@@ -8,8 +8,8 @@ tags: [D10, D19, D09]
 sources:
   - docs/api/openapi.json
   - qa/QA-predict-bets-fix-source-795.md
-distilled_from_sha: "e5e39860"
-updated: "2026-11-05"
+distilled_from_sha: "d8b394db"
+updated: "2026-11-07"
 ---
 
 # REST API（read 基盤）: 設計仕様
@@ -220,7 +220,7 @@ GET /api/races/{race_id}/board[?budget=&track_condition=&blend_alpha=]
 | `result_confirmed` | bool | 結果確定フラグ（#381）。web の「⚫終」判定に使う |
 | `horses` | array | `BoardHorseSchema[]`（後述） |
 | `bets` | array | 買い目（券種・組合せ・EV・推奨額） |
-| `confusion` | object\|null | 混戦判定オブジェクト（`is_confused` / `axis_win_prob` / `threshold` / `qualifying_count`）。買い目と同じ構造を表す（#794）: `fixed_selection` があれば混戦は朝の判定（買い目と同じく `konsen_band` が 4 頭以上なら混戦）、`axis_win_prob` は固定の軸のライブの勝率、`threshold` は判定に使わない参考値、`qualifying_count` は `null`（保存しているのはボックスの馬で、しきい値以上の頭数ではない）。無ければライブの判定（市場ブレンドの首位基準） |
+| `confusion` | object\|null | 混戦判定オブジェクト（`is_confused` / `axis_win_prob` / `threshold` / `qualifying_count`）。買い目と同じ構造を表す（#794）: `fixed_selection` があれば混戦は朝の判定（買い目と同じく `konsen_band` が 4 頭以上なら混戦）、`axis_win_prob` は固定の軸のライブの勝率、`threshold` は判定に使わない参考値、`qualifying_count` は `null`（保存しているのはボックスの馬で、しきい値以上の頭数ではない）。記録◎ だけの固定（`fix_source.kind == "recorded_axis"`・#804）は、判定と `threshold` はライブ、`axis_win_prob` は記録◎ の勝率で、記録◎ がライブの首位でなければ `qualifying_count` は `null`（しきい値が首位基準のため）。どちらも無ければライブの判定（市場ブレンドの首位基準） |
 
 **`BoardHorseSchema` の主要フィールド:**
 
@@ -234,9 +234,9 @@ GET /api/races/{race_id}/board[?budget=&track_condition=&blend_alpha=]
 | `market_implied` | number\|null | 市場 implied 勝率（`1/単勝` 正規化） |
 | `popularity` | int\|null | 単勝人気順（1=1番人気） |
 | `model_rank` | int | モデル勝率順位（1=最上位） |
-| `mark` | string\|null | 機械印スラッグ（honmei/taikou/tanana/hoshi）。無印は `null` |
+| `mark` | string\|null | 機械印スラッグ（honmei/taikou/tanana/hoshi）。無印は `null`。honmei（◎）は買い目の軸（`axis`。オッズが無ければ固定の軸、それも無ければライブの首位）、taikou/tanana（○▲）は ◎ を除いたモデル勝率順の上位 2 頭、hoshi（☆）は残りの乖離馬（#804） |
 | `is_value` | bool | 乖離馬（モデル上位×市場人気低＝妙味候補） |
-| `is_overlay` | bool | 重なり馬（モデル勝率 1 位 かつ 単勝人気 1 位） |
+| `is_overlay` | bool | 重なり馬（モデル勝率 1 位 かつ 単勝人気 1 位）。印とは独立で、買い目の軸がモデル勝率 1 位でないレースでは ◎ ではない馬に立ちうる（モデル勝率 1 位が 1 番人気のとき・#804） |
 | `comment` | string\|null | 馬書評の一行寸評（#348） |
 | `detail_lines` | array | 展開パネル用の根拠 bullet（条件別 factor・枠 lift・近走・前走・斤量） |
 | `finishing_position` | int\|null | 確定着順（#381。未確定・除外/中止は `null`） |

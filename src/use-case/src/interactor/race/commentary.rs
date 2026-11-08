@@ -9,16 +9,18 @@ use paddock_domain::{ExplainCategory, HorseExplanation, PrevRunSummary, Surface,
 
 use super::board::{BoardHorse, Confusion};
 
-/// 朝の固定があるときの書評の軸（#794）。買い目の軸（`FixedSelection.axis`）と、それが朝の選定の軸か。
+/// 固定があるときの書評の軸（#794・#804）。買い目の軸と、それがどの固定から来たか。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum FixedAxis {
     /// 朝の選定の軸。
     Morning(u32),
     /// 朝の軸が取消で、買い目の軸を差し替えた（ライブの首位へ戻した）。
     Scratched(u32),
+    /// 朝の選定が無く、記録◎ だけで軸を固定した（#804）。混戦の判定はライブの帯。
+    Recorded(u32),
 }
 
-/// レース全体の書評（混戦度＋◎の狙いどころ＋妙味馬）。◎は `fixed_axis`（朝の固定の軸・#794）、
+/// レース全体の書評（混戦度＋◎の狙いどころ＋妙味馬）。◎は `fixed_axis`（朝の固定・記録◎ の軸・#794・#804）、
 /// 無ければ model_rank==1。◎が無ければ空文字。
 pub(crate) fn race_commentary(
     confusion: &Confusion,
@@ -26,7 +28,7 @@ pub(crate) fn race_commentary(
     fixed_axis: Option<FixedAxis>,
 ) -> String {
     let axis = match fixed_axis {
-        Some(FixedAxis::Morning(n) | FixedAxis::Scratched(n)) => {
+        Some(FixedAxis::Morning(n) | FixedAxis::Scratched(n) | FixedAxis::Recorded(n)) => {
             horses.iter().find(|h| h.horse_num == n)
         }
         None => horses.iter().find(|h| h.model_rank == 1),
@@ -36,14 +38,32 @@ pub(crate) fn race_commentary(
     };
     let axis_pct = pct(axis.win_prob);
     // 朝の固定があるとき（#794）は、混戦の判定は朝の時点のもの。「上位が抜けている／拮抗」のような
-    // 今の状態の断定はせず、朝の選定であることを明示する。軸が今の勝率首位でなければ首位も示す。
+    // 今の状態の断定はせず、朝の選定であることを明示する。記録◎ だけの固定（#804）は判定がライブなので、
+    // 記録◎ が首位で頭数があれば「拮抗」は書く（「上位が抜けている」は書かない）。どちらも軸が今の勝率首位で
+    // なければ首位も示す。
     let top = horses
         .iter()
         .find(|h| h.model_rank == 1)
         .filter(|top| fixed_axis.is_some() && top.horse_num != axis.horse_num);
     // 相手は top5 より広げない（CLAUDE.md 買い方ルール）ので文言も規約準拠にする。
     let scratched = matches!(fixed_axis, Some(FixedAxis::Scratched(_)));
+    let recorded = matches!(fixed_axis, Some(FixedAxis::Recorded(_)));
     let mut s = match (confusion.is_confused, fixed_axis.is_some()) {
+        // 記録◎ だけの固定（#804）: 混戦の判定はライブの帯なので「朝の選定は」とは書かず、頭数があれば書く。
+        (true, true) if recorded => match confusion.qualifying_count {
+            Some(n) => format!(
+                "混戦。勝率上位が {} 頭拮抗。◎{}（勝率{}%・記録◎の軸）を軸に相手 top5 まで手広く構えたい。",
+                n, axis.horse_name, axis_pct
+            ),
+            None => format!(
+                "混戦。◎{}（勝率{}%・記録◎の軸）を軸に相手 top5 まで手広く構えたい。",
+                axis.horse_name, axis_pct
+            ),
+        },
+        (false, true) if recorded => format!(
+            "◎{}（勝率{}%）中心（記録◎の軸）。",
+            axis.horse_name, axis_pct
+        ),
         (true, true) if scratched => format!(
             "朝の選定は混戦。朝の軸が取消のため差し替えた◎{}（勝率{}%）を軸に相手 top5 まで手広く構えたい。",
             axis.horse_name, axis_pct
@@ -374,6 +394,38 @@ mod tests {
         assert_eq!(
             s,
             "朝の選定は混戦。朝の軸が取消のため差し替えた◎馬1（勝率40%）を軸に相手 top5 まで手広く構えたい。"
+        );
+    }
+
+    #[test]
+    fn race_commentary_recorded_axis() {
+        // #804: 記録◎ だけの固定。朝の選定とは書かず「記録◎の軸」と書く。首位でなければ首位も示す。
+        let horses = vec![board_horse(1, 0.4, false), board_horse(2, 0.2, false)];
+        let s = race_commentary(&confusion(false, 1), &horses, Some(FixedAxis::Recorded(2)));
+        assert_eq!(
+            s,
+            "◎馬2（勝率20%）中心（記録◎の軸）。 今の勝率首位は馬1（勝率40%）。"
+        );
+        // 記録◎ がライブの首位でも「上位が抜けており…」（固定なしの断定）は書かない。
+        let s = race_commentary(&confusion(false, 1), &horses, Some(FixedAxis::Recorded(1)));
+        assert_eq!(s, "◎馬1（勝率40%）中心（記録◎の軸）。");
+    }
+
+    #[test]
+    fn race_commentary_recorded_axis_konsen() {
+        // 記録◎ だけの固定の混戦はライブの帯。「朝の選定は」とは書かない。頭数があれば書く。
+        let horses = vec![board_horse(1, 0.3, false), board_horse(2, 0.2, false)];
+        let mut c = confusion(true, 4);
+        c.qualifying_count = None;
+        let s = race_commentary(&c, &horses, Some(FixedAxis::Recorded(2)));
+        assert_eq!(
+            s,
+            "混戦。◎馬2（勝率20%・記録◎の軸）を軸に相手 top5 まで手広く構えたい。 今の勝率首位は馬1（勝率30%）。"
+        );
+        let s = race_commentary(&confusion(true, 4), &horses, Some(FixedAxis::Recorded(1)));
+        assert_eq!(
+            s,
+            "混戦。勝率上位が 4 頭拮抗。◎馬1（勝率30%・記録◎の軸）を軸に相手 top5 まで手広く構えたい。"
         );
     }
 

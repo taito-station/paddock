@@ -12,10 +12,11 @@ sources:
   - knowledge/betting-rule-history.md
   - knowledge/prediction-json.md
   - knowledge/prediction-search-api.md
+  - knowledge/rest-api-read.md
   - knowledge/feature-resolution-diagnosis.md
   - knowledge/netkeiba-datasource.md
-distilled_from_sha: "e5e39860"
-updated: "2026-11-05"
+distilled_from_sha: "d8b394db"
+updated: "2026-11-07"
 ---
 
 # 用語集（ユビキタス言語）
@@ -128,7 +129,7 @@ ADR 0077）:
 
 | 用語 | 要約 | 正本 |
 |---|---|---|
-| 印 | 予想の格付け記号。**運用で打つのは ◎○▲☆**（◎が本命＝軸。印を打った馬は必ず買い目に絡める＝相手を top5 まで広げる主因）だが、**データモデルは △・注 を含む 6 種**（`honmei`/`taikou`/`tanana`/`renge`/`hoshi`/`chui`） | [CLAUDE.md](../CLAUDE.md)「予算・配分（既定）」「混戦判定と配分」 / [prediction-json.md](prediction-json.md)（6 種） |
+| 印 | 予想の格付け記号。**運用で打つのは ◎○▲☆**（◎が本命＝軸。印を打った馬は必ず買い目に絡める＝相手を top5 まで広げる主因）だが、**データモデルは △・注 を含む 6 種**（`honmei`/`taikou`/`tanana`/`renge`/`hoshi`/`chui`）。盤の**機械印**も ◎ は買い目の軸で、○▲ は軸を除いたライブの勝率順の上位 2 頭・☆ は残りの乖離馬（#804）。機械印の ○▲☆ は表示専用で、買い目の相手とは限らない | [CLAUDE.md](../CLAUDE.md)「予算・配分（既定）」「混戦判定と配分」 / [prediction-json.md](prediction-json.md)（6 種） / [rest-api-read.md](rest-api-read.md)「ライブ盤」の `mark`（機械印） / [ev-kelly-bet-selection.md](ev-kelly-bet-selection.md) 決定ログ #804（機械印の経緯） |
 | 軸 | ◎に据えて買い目の中心に固定する馬 | [CLAUDE.md](../CLAUDE.md)「軸ロックとズレ増額（確率と買い方の分離）」「軸の選び方」 |
 | 軸ロック | **軸と基本の買い目構造（軸・相手・混戦判定）を事前データで確定し、直前のオッズ変動でひっくり返さない**規律。見直すのは取消・馬場激変などの新情報が出たときだけ。`predict-watch`・盤・対話の `predict` の実装では**朝の選定**（監視窓に入る前の、当日 JST 0 時以降で最初の単勝で組んだ選定。#448 の盤の「朝↔現」とは別の「朝」）で確定する（#767）。朝の選定が無いレースだけ、predict-watch は**その日の初回スイープ**（＝そのレースが監視窓〈既定 40 分〉に入った最初のスイープ）で確定する。#724 で、窓突入時の固定は REQ-D01-003 の「事前」（＝朝の予想の時点）を満たさないと解釈した（回収率の差は検出できなかった） | ADR 0060（規律）/ ADR 0078（実装）/ [ev-kelly-bet-selection.md](ev-kelly-bet-selection.md) 決定ログ #724・#767・#776 / [product-goals.md](product-goals.md) REQ-D01-003 / [ev-kelly-bet-selection.md](ev-kelly-bet-selection.md) REQ-D23-007 |
 | ズレ増額 | 軸が自モデル確率（α=0 では pure＝純モデル・#810）より過小人気にズレたとき、**既存の買い目の金額だけを上げる**こと。点数（相手）は増やさない | 同上 |
