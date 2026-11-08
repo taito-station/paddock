@@ -12,7 +12,7 @@ sources:
   - docs-original/810-market-alpha-zero.md
   - qa/QA-market-alpha-zero-810.md
   - qa/QA-board-mark-axis-804.md
-distilled_from_sha: "017fb265"
+distilled_from_sha: "d8b394db"
 updated: "2026-11-07"
 ---
 
