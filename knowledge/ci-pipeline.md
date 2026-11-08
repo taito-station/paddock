@@ -9,12 +9,13 @@ sources:
   - qa/QA-evil-merge-615.md
   - qa/QA-fullwidth-after-var-636.md
   - qa/QA-pip-hash-pin-728.md
+  - qa/QA-security-audit-820.md
   - qa/QA-dependabot-cooldown-817.md
   - .github/workflows/ci.yml
   - .github/workflows/audit.yml
   - .github/dependabot.yml
-distilled_from_sha: "e0a68348"
-updated: "2026-11-07"
+distilled_from_sha: "d774fac0"
+updated: "2026-11-08"
 ---
 
 # CI パイプラインの構成と設計意図（D21）
@@ -116,12 +117,8 @@ predict-check 側と同じく、ハッシュ付きで `--require-hashes` で入�
 `git config` 経由でこれを読める。どのジョブも書き込みの git 操作をしないので、`ci.yml` と `audit.yml` の checkout
 すべてで残さない。ただし消えるのはこの git の設定経由の露出だけで、トークンはジョブの実行中ずっと runner のプロセスの
 メモリにあり、同じジョブの第三者コードは抜き出せる。だから権限は `permissions` で最小にするのが本筋。`audit.yml` は
-workflow 全体を `contents: read` だけにし、`checks: write` を `cargo-audit` ジョブにだけ付けた（`npm ci` で lifecycle
-scripts を動かす `npm-audit` には渡さない）。ただし `cargo-audit` ジョブも、`rustsec/audit-check` が版を固定せずに
-`cargo install cargo-audit` を実行して約 300 クレートをビルドするので、第三者コードを動かすことに変わりはない
-（書き込み権限を渡すジョブを 1 つに絞っただけ）。また `checks: write` が使われるのは `workflow_dispatch` のときだけで、
-schedule 起動では audit-check が Issues API で報告しようとして権限不足で落ちている（2026-08-31 以降毎週。既存の不具合で、
-audit-check の置き換えと合わせて別 Issue で扱う）。`docker-build` の「Detect relevant changes」の `git fetch` は、公開リポジトリなので
+全ジョブ `contents: read` だけで、GITHUB_TOKEN の書き込み権限を持つジョブが無い（#820。下の「週次監査の cargo-audit は
+公式バイナリを sha256 で固定する」）。Actions cache への書き込みは `permissions` の対象外で、どのジョブにも残る。`docker-build` の「Detect relevant changes」の `git fetch` は、公開リポジトリなので
 認証無しで通る（リポジトリを private にするなら、この fetch に認証を足す）。
 
 ### dependabot は公開から 7 日たった版だけを提案する（#817）
@@ -134,10 +131,33 @@ audit-check の置き換えと合わせて別 Issue で扱う）。`docker-build
 - cooldown は公開日から数え、schedule は毎週月曜なので、更新が提案されるのはおおむね公開から 7 日以上 14 日未満になる。
 - security updates には効かない（GitHub Docs）。脆弱性の修正 PR は遅れない（security updates は現在は無効）。裏返すと、
   security updates を有効にしたら、その PR は cooldown を通らず公開直後の版を含みうるので、版の変更を見てからマージする。
-- 守るのは dependabot.yml の 4 エコシステムの version updates だけ。dependabot の監視外で入るもの（`audit.yml` の
-  `cargo install cargo-audit`・toolchain など）と、人が手で上げる版は対象外。
+- 守るのは dependabot.yml の 4 エコシステムの version updates だけ。dependabot の監視外で入るもの（`audit.yml` が
+  手で版を上げる cargo-audit の公式バイナリ・toolchain など）と、人が手で上げる版は対象外。
 - github-actions は semver 別の日数（`semver-*-days`）に対応していないので、4 entry とも `default-days` だけで一律にした。
 - 元に戻すときは `cooldown` のブロックを消す（既定の 3 日に戻る）。
+
+### 週次監査の cargo-audit は公式バイナリを sha256 で固定する（#820）
+
+`audit.yml` の `cargo-audit` ジョブは、rustsec/rustsec の公式リリースの cargo-audit（x86_64-unknown-linux-musl の tgz）を
+curl で取り、workflow に書いた sha256 と `sha256sum -c` で照合してから展開して `cargo-audit audit` を実行する。
+
+- ソースをビルドしない。以前の `rustsec/audit-check` は版を固定せずに `cargo install cargo-audit` で約 300 クレートを
+  build script ごとビルドしていた。ADR 0082 の「lock・checksum の外の取得に依存させない」と同じ方向。
+- 書き込み権限を持たない（`contents: read` だけ）。結果はジョブの成否とログで示す。audit-check は schedule 起動のとき
+  Issues API で報告しようとし、`issues: write` が無くて 2026-08-31 から毎週落ちていた。
+- musl 版を使う。静的リンクでランナーの glibc に依存しない（gnu 版は GLIBC_2.39 を要求する）。
+- 版は dependabot の対象外なので手で上げる。上げるときは `CARGO_AUDIT_VERSION` を書き換え、sha256 を取り直す
+  （GitHub API の asset の `digest` から `sha256:` を除いた値、または取得した tgz の `sha256sum`。手順は audit.yml のコメント）。
+- 信頼するのは rustsec のリリース作業（リリース用 CI とメンテナのアカウント）。attestation は出ていない。sha256 は
+  最初に取った値を信じるもので、防ぐのは固定した後のアセットの差し替えだけ。
+- advisory DB は実行時に github.com/RustSec/advisory-db から git で取る。yanked の検査のため crates.io の index も取る
+  （失敗しても警告だけ）。どちらも固定しないデータだがコードは動かさない。DB が取れなければジョブは落ちる。DB が
+  改ざんされると検出が漏れうる。
+- `npm-audit` ジョブは `npm ci` をせず、`package-lock.json` だけで `npm audit` を実行する。lifecycle scripts（第三者の
+  コード）を動かさないため。`setup-node` の `cache: npm` も外した。
+- 脆弱性があると非 0 で終わる（unmaintained・unsound の警告だけなら 0。`--deny warnings` は付けない）。検出した
+  脆弱性は既定では ignore せず、Issue を立てて依存を上げるまで red のままにする。ignore は upstream に修正が無い等の例外に限り、
+  理由と RUSTSEC ID を audit.yml に書く。
 
 ### `adr` ジョブは回帰テストを本番検査より先に走らせる
 
@@ -480,7 +500,8 @@ ADR 0026 のスコープ外として記録されたまま**未確認**。将来 
   0073 ADR 統合と文書クラス・機械検査 /
   0081 ピン更新だけの差分は内容変更と見なさない /
   0082 Swagger UI を vendored にしてビルド時ダウンロードを消す /
-  #728 pip 依存のハッシュ検証・dependabot（pip）・persist-credentials
+  #728 pip 依存のハッシュ検証・dependabot（pip）・persist-credentials /
+  #820 週次監査の cargo-audit を公式バイナリと sha256 で固定
 - 必須チェックの ruleset は #461（ジョブ ID `adr` は必須チェック名なので改名しない）
 - pre-push は CI 相当の高速チェックを手元で再現する（`scripts/git-hooks/pre-push`。配線は
   `scripts/install-git-hooks.sh` で clone ごとに一度）
@@ -1412,3 +1433,61 @@ dependabot は公開直後の版も、そのときの正しいハッシュ付き
   - cargo・npm で lockfile を作り直すときに一緒に動く推移的な依存に cooldown が効くか
 - 設定のキーの誤りはマージ後に dependabot の画面でしか分からない。マージ後に Insights → Dependency graph → Dependabot で
   エラーが無いことを確かめる。元に戻すときは `cooldown` のブロックを消す（既定の 3 日に戻る）。
+
+### #820: 週次監査の cargo-audit を公式バイナリと sha256 で固定し、書き込み権限を外す (2026-11-08) — 採用
+
+#### コンテキスト
+
+`audit.yml` の週次監査が 2026-08-31 から毎回 failure で、検出した脆弱性が誰にも届いていなかった。`cargo-audit` ジョブは
+`rustsec/audit-check` が schedule 起動のとき Issues API で報告しようとし、`issues: write` が無いので落ちていた。あわせて
+audit-check は、ランナーに cargo-audit が無いと版も `--locked` も無しに `cargo install cargo-audit` を実行し、`checks: write`
+を持つジョブで約 300 クレートをビルドしていた。#728 はこの作り直しを範囲外として先送りした（#728 の「却下した代替案」）。
+着手時に確かめた事実と PO の回答は [qa/QA-security-audit-820.md](../qa/QA-security-audit-820.md)。
+
+#### 決定
+
+- `rustsec/audit-check` をやめ、rustsec/rustsec の公式リリースの cargo-audit 0.22.2（x86_64-unknown-linux-musl の tgz）を
+  curl で取り、sha256（`7fb9497f…c428`）で照合してから実行する。
+- `cargo-audit` ジョブの `checks: write` を外し、`audit.yml` の全ジョブを `contents: read` だけにする。結果はジョブの成否とログで示す。
+- 検出している脆弱性（cargo 20 件・npm 14 件。2026-11-08 時点）は、この PR では直さず、#825（cargo）・#826（npm）で直す。
+  それまで監査は脆弱性で red のままにする。既定では ignore しない。
+- `audit.yml` と `ci.yml` の checkout のピンのコメント `# v4` を、実際の版 `# v7.0.1` に直す。
+- `npm-audit` ジョブから `npm ci` と `setup-node` の `cache: npm` を外し、`package-lock.json` だけで `npm audit` を実行する
+  （PR のセルフレビューの指摘。ユーザーがこの PR で外すと判断した）。
+- cargo-audit の取得の curl に `--retry 3 --retry-all-errors` を付ける。
+
+#### 理由
+
+- 公式バイナリを sha256 で固定すれば、第三者のコードをビルドせず、固定した後のアセットの差し替えは照合で落ちる。
+  書き込み権限も要らなくなる（ADR 0082 と同じ方向）。
+- musl 版は静的リンクで、ランナーのイメージの glibc に左右されない（gnu 版は GLIBC_2.39 を要求する）。
+- 脆弱性を ignore で黙らせると、修正版があるものまで隠れる。依存の更新は 1 PR = 1 トピックで別に扱う。
+
+#### 却下した代替案
+
+- **`cargo install cargo-audit --locked --version <固定>`**: 版と lockfile は固定できるが、約 300 クレートを build script ごと
+  毎回ビルドする。
+- **audit-check を残して `issues: write` を足す**: 版を固定していない第三者のコードを動かすジョブの書き込み権限が広がる。
+- **監査は読取だけのジョブで行い、報告だけを別ジョブに分ける**: 構成が複雑になる割に、気づく経路はジョブの失敗と
+  Dependabot alerts（#728 で有効化）で足りる。
+- **検出した脆弱性を `--ignore` で除外して green にする**: 修正版があるものまで隠れる。
+- **この PR で依存も上げて green にする**: CI の修正と依存の更新（zip 9 系などの major を含む）が混ざり、1 PR = 1 トピックに反する。
+
+#### 影響
+
+- 監査は #825・#826 で依存を上げるまで毎週 red のままになる。red が常態だと新しい脆弱性に気づきにくいので、早めに直す。
+- cargo-audit の版は dependabot の対象外で、手で上げる（手順は audit.yml のコメント）。advisory DB は実行時に
+  github.com/RustSec/advisory-db から git で取るので、版が古くても検出は止まらない（固定しないデータだがコードは動かさない。
+  取れなければ落ちる）。
+- 公式バイナリは rustsec のリリース作業（リリース用 CI とメンテナのアカウント）を信頼する前提になる。attestation は出ておらず、
+  sha256 は最初に取った値を信じるもので、防ぐのは固定した後の差し替えだけ。advisory DB は固定しないので、改ざんされると
+  検出が漏れうる。
+- `npm-audit` ジョブから `npm ci` と `cache: npm` を外した（`npm audit` は `package-lock.json` だけで動く。node_modules が
+  無くても同じ 14 件を検出することを確かめた）。監査ジョブは cargo・npm とも第三者のコードを動かさない。`ci.yml` の
+  `npm ci`（ビルドに要る）は対象外。
+- cargo-audit の取得の curl に `--retry 3 --retry-all-errors` を付けた。一時的な障害による red が、脆弱性による red に
+  紛れないようにするため（取得物は毎回 sha256 で照合する）。
+- GitHub が schedule の失敗を誰に通知するかは確かめていない（未確認）。schedule 起動で権限エラーが出ないことは、
+  マージ後の最初の月曜（2026-11-09）の実行で確かめる。
+- #817 の cooldown の節に書いた「dependabot の監視外で入るもの」は、`cargo install cargo-audit` から、手で版を上げる
+  公式バイナリに変わった（本文を直した）。
