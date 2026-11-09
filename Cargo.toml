@@ -24,7 +24,9 @@ members = [
 # で担保）。ワイルドカード（x.y.*）は semver 互換の minor 更新を排除するため使わない（#416）。
 [workspace.dependencies]
 anyhow             = { version = "1" }
-actix-web          = { version = "4" }
+# http2 は外す（#825）: h2 0.3 系の RUSTSEC-2026-0258 に修正版が無く、actix-http 3.x は h2 0.3 に依存する。
+# 平文の bind はもともと HTTP/1.1 だけを受けるので挙動は変わらない。残りは actix-web 4.18.2 時点の既定と同じ。
+actix-web          = { version = "4", default-features = false, features = ["macros", "compress-brotli", "compress-gzip", "compress-zstd", "cookies", "unicode", "compat", "ws"] }
 ordered-float      = { version = "5" }
 chrono             = { version = "0.4", features = ["serde"] }
 clap               = { version = "4", features = ["derive"] }

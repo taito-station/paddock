@@ -8,8 +8,9 @@ tags: [D10, D19, D09]
 sources:
   - docs/api/openapi.json
   - qa/QA-predict-bets-fix-source-795.md
-distilled_from_sha: "d8b394db"
-updated: "2026-11-07"
+  - qa/QA-cargo-vulns-825.md
+distilled_from_sha: "f4a0fc28"
+updated: "2026-11-09"
 ---
 
 # REST API（read 基盤）: 設計仕様
@@ -351,6 +352,7 @@ API の仕様乖離を防ぐため、OpenAPI はコードから生成する（sp
 - `setup.rs`: ロガー初期化 → Postgres プール（`PgPool`, sqlx）→ `PostgresRepository`（Repository 実装）→ `Interactor<R,P,F>` 構築（predict/analyze と同じ具象 P/F）。
 - `app.rs`: `configure_routes<R,P,F>` で rest-controller の各 router を `/api` 配下にマウント。**認証ミドルウェアの差し込み口を 1 箇所**用意（現状 no-op：素通し。将来ここに JWT 検証を挿す）。OpenAPI（`/docs/`・`/api-docs/openapi.json`）もここでマウント。
 - `bin.rs`: エントリポイント（`HttpServer` 起動）。
+- HTTP/2 は使わない（#825）。ワークスペースの `actix-web` は `default-features = false` で、既定から `http2` だけを外した feature を指定する。`http2` を戻すと h2 0.3 系（RUSTSEC-2026-0258。修正版は 0.4 系だけで、actix-http 3.x は h2 0.3 に依存する）が依存に戻り、週次の `cargo audit` が落ちる。api-server は平文の `HttpServer::bind` で起動しており、これはもともと HTTP/1.1 だけを受ける（h2c は `bind_auto_h2c`、HTTP/2 は TLS の ALPN でしか受けない）ので、外しても挙動は変わらない。
 
 ## マルチユーザー化への布石（今は実装しない）
 
@@ -574,3 +576,41 @@ blended はほぼ市場の人気順をなぞる。つまり**盤面は「市場�
 #### 影響
 
 - `README.md`、`rest-api-read.md`、`ci-pipeline.md`、`app.rs`、`docs_ui.rs` から「末尾スラッシュが要る / #619 で見直す」の注記を除去。
+
+### #825: actix-web の http2 を外し、cargo の脆弱性を直す (2026-11-09) — 承認済み
+
+#### コンテキスト
+
+#820 で週次の Security Audit を直したところ、`cargo audit` が `Cargo.lock` の脆弱性 20 件を検出した（2026-11-08）。dependabot の
+#822（cargo-minor-patch）をマージした後も、ctutils・rustls-webpki・h2 の 3 件が残った。h2 0.3.27（RUSTSEC-2026-0258・Low。
+空の DATA フレームを無制限にため込む）は修正版が 0.4.16 以降にしか無く、actix-http の最新（3.20.5）も h2 0.3 に依存するので、
+版を上げても直らない。h2 は actix-web の既定の feature `http2` からだけ入っていた（utoipa-swagger-ui は `macros` だけを使う）。
+着手時に確かめた事実とユーザーの回答は [qa/QA-cargo-vulns-825.md](../qa/QA-cargo-vulns-825.md)。
+
+#### 決定
+
+- ワークスペースの `actix-web` を `default-features = false` にし、既定から `http2` だけを外した feature
+  （`macros`・`compress-brotli`・`compress-gzip`・`compress-zstd`・`cookies`・`unicode`・`compat`・`ws`）を指定する。
+- ctutils（0.4.2 → 0.4.8）と rustls-webpki（0.103.15 → 0.103.16）を `cargo update -p` で上げる（Cargo.lock だけの更新）。
+- dependabot の #822 を先にマージし、その上に積む（ユーザーの判断）。
+
+#### 理由
+
+- api-server は平文の `HttpServer::bind` で起動しており、これは `HttpService::tcp()` を通って HTTP/1.1 に固定される
+  （h2c は `bind_auto_h2c`、HTTP/2 は TLS の ALPN でしか受けない）。もともと HTTP/2 を受けていないので、`http2` を外しても
+  挙動は変わらない。h2 が依存から消え、ignore せずに監査を green にできる。
+- 外すのは `http2` だけにして、ほかの既定の feature（受信ボディの解凍など）の挙動は変えない。
+
+#### 却下した代替案
+
+- **RUSTSEC-2026-0258 を理由を付けて ignore する**: 監査は green になるが、使わない機能の脆弱な依存が残る。
+- **上流の修正を待って red のままにする**: actix-http が h2 0.4 に移る時期が分からず、その間ずっと監査が red になる。
+- **この PR で依存を一括更新する（`cargo update`）**: 約 100 クレートが動き、脆弱性と関係の無い変更が混ざる。
+
+#### 影響
+
+- `cargo audit` の脆弱性は 0 件（unmaintained・unsound の警告は残る。ジョブは落とさない）。
+- 外から見た挙動は変わらない（平文の `bind` はもともと HTTP/1.1 だけを受ける）。失うのは、将来 `bind_auto_h2c` や TLS で
+  HTTP/2 を受ける選択肢だけ。
+- `cargo update -p` の副作用で、Cargo.lock の windows-sys の解決が 6 か所動いた（0.52・0.60 → 0.59。Windows 専用で、新しい crate は無い）。
+- `http2` を戻すと h2 0.3 が戻り、監査が落ちる（本文の「Apps 層」に書いた）。actix-http が h2 0.4 に移ったら、戻すかどうかを見直す。
