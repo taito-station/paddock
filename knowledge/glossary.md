@@ -15,7 +15,7 @@ sources:
   - knowledge/rest-api-read.md
   - knowledge/feature-resolution-diagnosis.md
   - knowledge/netkeiba-datasource.md
-distilled_from_sha: "d8b394db"
+distilled_from_sha: "a0e24376"
 updated: "2026-11-07"
 ---
 
