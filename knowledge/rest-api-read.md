@@ -9,7 +9,7 @@ sources:
   - docs/api/openapi.json
   - qa/QA-predict-bets-fix-source-795.md
   - qa/QA-cargo-vulns-825.md
-distilled_from_sha: "f4a0fc28"
+distilled_from_sha: "912f8ab7"
 updated: "2026-11-09"
 ---
 
